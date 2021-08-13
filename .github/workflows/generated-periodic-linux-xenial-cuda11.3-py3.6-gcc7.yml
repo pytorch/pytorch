@@ -1,20 +1,18 @@
 # @generated DO NOT EDIT MANUALLY
 # Template is at:    .github/templates/linux_ci_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
-name: linux-xenial-cuda10.2-cudnn7-py3.6-gcc7
+name: periodic-linux-xenial-cuda11.3-py3.6-gcc7
 
 on:
   pull_request:
     types: [unassigned]
-  push:
-    branches:
-      - master
-      - release/*
+  schedule:
+    - cron: 45 0,4,8,12,16,20 * * *
   workflow_dispatch:
 
 env:
-  BUILD_ENVIRONMENT: linux-xenial-cuda10.2-cudnn7-py3.6-gcc7
-  DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7
+  BUILD_ENVIRONMENT: periodic-linux-xenial-cuda11.3-py3.6-gcc7
+  DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7
   SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
   TORCH_CUDA_ARCH_LIST: 5.2
   IN_CI: 1
@@ -25,13 +23,13 @@ env:
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
 
 concurrency:
-  group: linux-xenial-cuda10.2-cudnn7-py3.6-gcc7-${{ github.event.pull_request.number || github.sha }}
+  group: periodic-linux-xenial-cuda11.3-py3.6-gcc7-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 
 jobs:
   ciflow_should_run:
     runs-on: ubuntu-18.04
-    if: ${{ (github.event_name != 'pull_request') || (github.event.action !='unassigned') || (github.event.action == 'unassigned' && contains(github.event.pull_request.labels.*.name, 'ciflow/slow')) }}
+    if: ${{ (github.event_name != 'pull_request') || (github.event.action !='unassigned') || (github.event.action == 'unassigned' && contains(github.event.pull_request.labels.*.name, 'ciflow/scheduled')) }}
     steps:
       - name: noop
         run: echo running ciflow_should_run
@@ -115,7 +113,7 @@ jobs:
     needs: [calculate-docker-image, ciflow_should_run]
     env:
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
-      JOB_BASE_NAME: linux-xenial-cuda10.2-cudnn7-py3.6-gcc7-build
+      JOB_BASE_NAME: periodic-linux-xenial-cuda11.3-py3.6-gcc7-build
     steps:
       - name: Log in to ECR
         run: |
@@ -226,11 +224,11 @@ jobs:
     needs: [ciflow_should_run]
     env:
       TEST_RUNNER_TYPE: linux.8xlarge.nvidia.gpu
-      ENABLE_JIT_LEGACY_TEST: 1
-      ENABLE_MULTIGPU_TEST: 1
-      ENABLE_NOGPU_NO_AVX_TEST: 1
-      ENABLE_NOGPU_NO_AVX2_TEST: 1
-      ENABLE_SLOW_TEST: 1
+      ENABLE_JIT_LEGACY_TEST: ''
+      ENABLE_MULTIGPU_TEST: ''
+      ENABLE_NOGPU_NO_AVX_TEST: ''
+      ENABLE_NOGPU_NO_AVX2_TEST: ''
+      ENABLE_SLOW_TEST: ''
       NUM_TEST_SHARDS: 2
       MULTIGPU_RUNNER_TYPE: linux.16xlarge.nvidia.gpu
       NOGPU_RUNNER_TYPE: linux.2xlarge
@@ -258,7 +256,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     env:
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
-      JOB_BASE_NAME: linux-xenial-cuda10.2-cudnn7-py3.6-gcc7-test
+      JOB_BASE_NAME: periodic-linux-xenial-cuda11.3-py3.6-gcc7-test
       TEST_CONFIG: ${{ matrix.config }}
       SHARD_NUMBER: ${{ matrix.shard }}
       NUM_TEST_SHARDS: ${{ matrix.num_shards }}
@@ -320,7 +318,7 @@ jobs:
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Test PyTorch
         env:
-          BUILD_ENVIRONMENT: linux-xenial-cuda10.2-cudnn7-py3.6-gcc7-${{ matrix.config }}
+          BUILD_ENVIRONMENT: periodic-linux-xenial-cuda11.3-py3.6-gcc7-${{ matrix.config }}
         run: |
           if [[ $TEST_CONFIG == 'multigpu' ]]; then
             TEST_COMMAND=.jenkins/pytorch/multigpu-test.sh
@@ -409,8 +407,8 @@ jobs:
   # logs (like test); we can always move it back to the other one, but it
   # doesn't create the best experience
   render_test_results:
-    if: always()
     needs: [generate-test-matrix, test, ciflow_should_run]
+    if: ${{ needs.test.result != 'skipped' || failure() }}
     runs-on: linux.2xlarge
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.render-matrix) }}
@@ -459,7 +457,7 @@ jobs:
         env:
           AWS_DEFAULT_REGION: us-east-1
           CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          JOB_BASE_NAME: linux-xenial-cuda10.2-cudnn7-py3.6-gcc7-test
+          JOB_BASE_NAME: periodic-linux-xenial-cuda11.3-py3.6-gcc7-test
           CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
           CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           CIRCLE_TAG: ${{ steps.parse-ref.outputs.tag }}

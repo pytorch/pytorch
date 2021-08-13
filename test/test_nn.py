@@ -13270,6 +13270,12 @@ class TestNNDeviceType(NNTestCase):
 
             self.assertEqual(x.grad, ref_x.grad)
 
+    @onlyOnCPUAndCUDA
+    def test_LocalResponseNorm_empty(self, device):
+        mod = torch.nn.LocalResponseNorm(2).to(device)
+        inp = torch.ones(0, 5, 24, 24, device=device)
+        self._test_module_empty_input(mod, inp, check_size=False)
+
     @onlyCUDA   # Test if CPU and GPU results match
     def test_ReflectionPad3d_large(self, device):
         shapes = ([2, 1000, 7, 7, 7], [1000, 2, 7, 7, 7])
@@ -13319,6 +13325,21 @@ class TestNNDeviceType(NNTestCase):
                 mod(x, y)
 
     @onlyOnCPUAndCUDA
+    @dtypes(torch.float, torch.double)
+    def test_adaptive_pooling_zero_batch(self, dtype, device):
+        inp = torch.ones(0, 10, dtype=dtype, device=device)
+        mod = torch.nn.AdaptiveAvgPool1d(5).to(device)
+        self._test_module_empty_input(mod, inp, check_size=False)
+
+        inp = torch.ones(0, 10, 10, dtype=dtype, device=device)
+        mod = torch.nn.AdaptiveAvgPool2d((5, 5)).to(device)
+        self._test_module_empty_input(mod, inp, check_size=False)
+
+        inp = torch.ones(0, 10, 10, 10, dtype=dtype, device=device)
+        mod = torch.nn.AdaptiveAvgPool3d((5, 5, 5)).to(device)
+        self._test_module_empty_input(mod, inp, check_size=False)
+
+    @onlyOnCPUAndCUDA
     def test_FractionalMaxPool2d_zero_batch(self, device):
         mod = nn.FractionalMaxPool2d(3, output_ratio=(0.5, 0.5))
         inp = torch.ones(0, 16, 50, 32, device=device)
@@ -13348,6 +13369,57 @@ class TestNNDeviceType(NNTestCase):
             inp = torch.randn(3, 0, 3, 4, device=device)
             unfold = torch.nn.Unfold(kernel_size=(2, 3)).to(device)
             unfold(inp)
+
+    @onlyOnCPUAndCUDA
+    def test_MaxPool_zero_batch_dim(self, device):
+        inp = torch.randn(0, 16, 50, device=device)
+        mod = torch.nn.MaxPool1d(3, stride=2).to(device)
+        self._test_module_empty_input(mod, inp, check_size=False)
+
+        # 1D is supposed to be okay with 0 numel() inputs so dont test
+        # error raising for that case.
+
+        inp = torch.randn(0, 16, 50, 32, device=device)
+        mod = torch.nn.MaxPool2d(3, stride=2).to(device)
+        self._test_module_empty_input(mod, inp, check_size=False)
+
+        with self.assertRaisesRegex(RuntimeError, "Expected"):
+            inp = torch.randn(1, 0, 50, 32, device=device)
+            mod(inp)
+
+        inp = torch.ones(0, 16, 50, 44, 31, device=device)
+        mod = torch.nn.MaxPool3d(3, stride=2).to(device)
+        self._test_module_empty_input(mod, inp, check_size=False)
+
+        with self.assertRaisesRegex(RuntimeError, "Expected"):
+            inp = torch.ones(1, 0, 50, 44, 31, device=device)
+            mod(inp)
+
+    @onlyOnCPUAndCUDA
+    def test_AdaptiveMaxPool_zero_batch_dim(self, device):
+        inp = torch.randn(0, 16, 50, device=device)
+        mod = torch.nn.AdaptiveMaxPool1d(3).to(device)
+        self._test_module_empty_input(mod, inp, check_size=False)
+
+        with self.assertRaisesRegex(RuntimeError, "Expected"):
+            inp = torch.randn(1, 0, 50, device=device)
+            mod(inp)
+
+        inp = torch.randn(0, 16, 50, 32, device=device)
+        mod = torch.nn.AdaptiveMaxPool2d(3).to(device)
+        self._test_module_empty_input(mod, inp, check_size=False)
+
+        with self.assertRaisesRegex(RuntimeError, "Expected"):
+            inp = torch.randn(1, 0, 50, 32, device=device)
+            mod(inp)
+
+        inp = torch.ones(0, 16, 50, 44, 31, device=device)
+        mod = torch.nn.AdaptiveMaxPool3d(3).to(device)
+        self._test_module_empty_input(mod, inp, check_size=False)
+
+        with self.assertRaisesRegex(RuntimeError, "Expected"):
+            inp = torch.ones(1, 0, 50, 44, 31, device=device)
+            mod(inp)
 
     @onlyCUDA
     @dtypes(torch.float, torch.double)
@@ -13846,8 +13918,8 @@ class TestNNDeviceType(NNTestCase):
                 model(torch.tensor(x, device=device, dtype=dtype))
 
         # Pooling args: (kernel_size, stride, padding, dilation, return_indices, ceil_mode)
-        check(0, (1,), "input tensor must have 2 or 3 dimensions but got 0")
-        check([], (1,), "input tensor must have 2 or 3 dimensions but got 1")
+        check(0, (1,), "Expected 2D or 3D input tensor, but got")
+        check([], (1,), "Expected 2D or 3D input tensor, but got")
         check([[]], (1, 0), "stride must be greater than zero, but got 0")
         check([[]], (1, 1, -1), "padding must be non-negative, but got -1")
         check([[]], (1, 1, 2), "padding should be at most half of kernel size, but got padding=2 and kernel_size=1")
@@ -16670,6 +16742,24 @@ class TestNNDeviceType(NNTestCase):
                     output_ng = m(input)
                 output = m(input)
                 self.assertEqual(output, output_ng, rtol=1e-2, atol=1e-5)
+
+    @onlyCUDA
+    @skipCUDAIfRocm
+    @skipCUDAIfNoCudnn
+    @dtypes(torch.float, torch.double, torch.float16)
+    def test_cudnn_convolution_relu(self, device, dtype):
+        for batch, groups, kernel_size, memory_format in product((1, 2, 3),
+                                                                 (1, 2, 4),
+                                                                 ((1, 1), (3, 3)),
+                                                                 (torch.channels_last, torch.contiguous_format)):
+            inp = torch.rand(batch, groups, 8, 8, dtype=dtype, device=device)
+            w = torch.randn(8, groups, kernel_size[0], kernel_size[1], dtype=dtype, device=device)
+            conv2d_out = torch.conv2d(inp, w, None, (1, 1), (0, 0), (1, 1), 1)
+            inp = inp.to(memory_format=memory_format)
+            w = w.to(memory_format=memory_format)
+            cudnn_out = torch.cudnn_convolution_relu(inp, w, None, (1, 1), (0, 0), (1, 1), 1)
+            self.assertTrue(cudnn_out.is_contiguous(memory_format=memory_format))
+            self.assertEqual(conv2d_out.relu(), cudnn_out)
 
     @onlyCUDA
     @skipCUDAIfRocm

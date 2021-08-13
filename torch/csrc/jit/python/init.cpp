@@ -526,6 +526,24 @@ void initJITBindings(PyObject* module) {
           py::arg("graph"))
       .def("_jit_pass_erase_shape_information", EraseShapeInformation)
       .def(
+          "_jit_erase_non_input_shape_information",
+          [](std::shared_ptr<Graph>& g) {
+            std::vector<TypePtr> input_types;
+            for (Value* v : g->inputs()) {
+              if (auto tt = v->type()->cast<TensorType>()) {
+                input_types.push_back(tt);
+              } else {
+                input_types.push_back(nullptr);
+              }
+            }
+            EraseShapeInformation(g);
+            for (size_t i = 0; i < input_types.size(); ++i) {
+              if (input_types[i]) {
+                g->inputs().at(i)->setType(input_types[i]);
+              }
+            }
+          })
+      .def(
           "_jit_pass_create_autodiff_subgraphs",
           [](const std::shared_ptr<Graph>& graph) {
             CreateAutodiffSubgraphs(graph);

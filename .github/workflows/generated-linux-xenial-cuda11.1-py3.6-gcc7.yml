@@ -1,18 +1,19 @@
 # @generated DO NOT EDIT MANUALLY
 # Template is at:    .github/templates/linux_ci_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
-name: periodic-linux-xenial-cuda11.3-cudnn8-py3.6-gcc7
+name: linux-xenial-cuda11.1-py3.6-gcc7
 
 on:
-  pull_request:
-    types: [unassigned]
-  schedule:
-    - cron: 45 0,4,8,12,16,20 * * *
+  # TODO: Enable pull_request builds when we can verify capacity can be met by auto-scalers
+  push:
+    branches:
+      - master
+      - release/*
   workflow_dispatch:
 
 env:
-  BUILD_ENVIRONMENT: periodic-linux-xenial-cuda11.3-cudnn8-py3.6-gcc7
-  DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7
+  BUILD_ENVIRONMENT: linux-xenial-cuda11.1-py3.6-gcc7
+  DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7
   SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
   TORCH_CUDA_ARCH_LIST: 5.2
   IN_CI: 1
@@ -23,20 +24,13 @@ env:
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
 
 concurrency:
-  group: periodic-linux-xenial-cuda11.3-cudnn8-py3.6-gcc7-${{ github.event.pull_request.number || github.sha }}
+  group: linux-xenial-cuda11.1-py3.6-gcc7-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 
 jobs:
-  ciflow_should_run:
-    runs-on: ubuntu-18.04
-    if: ${{ (github.event_name != 'pull_request') || (github.event.action !='unassigned') || (github.event.action == 'unassigned' && contains(github.event.pull_request.labels.*.name, 'ciflow/scheduled')) }}
-    steps:
-      - name: noop
-        run: echo running ciflow_should_run
   calculate-docker-image:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.2xlarge
-    needs: [ciflow_should_run]
     env:
       DOCKER_BUILDKIT: 1
     timeout-minutes: 90
@@ -110,10 +104,10 @@ jobs:
 
   build:
     runs-on: linux.2xlarge
-    needs: [calculate-docker-image, ciflow_should_run]
+    needs: [calculate-docker-image, ]
     env:
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
-      JOB_BASE_NAME: periodic-linux-xenial-cuda11.3-cudnn8-py3.6-gcc7-build
+      JOB_BASE_NAME: linux-xenial-cuda11.1-py3.6-gcc7-build
     steps:
       - name: Log in to ECR
         run: |
@@ -221,7 +215,6 @@ jobs:
   generate-test-matrix:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: ubuntu-18.04
-    needs: [ciflow_should_run]
     env:
       TEST_RUNNER_TYPE: linux.8xlarge.nvidia.gpu
       ENABLE_JIT_LEGACY_TEST: ''
@@ -249,14 +242,14 @@ jobs:
         run: .github/scripts/generate_pytorch_test_matrix.py
 
   test:
-    needs: [calculate-docker-image, build, generate-test-matrix, ciflow_should_run]
+    needs: [calculate-docker-image, build, generate-test-matrix, ]
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
       fail-fast: false
     runs-on: ${{ matrix.runner }}
     env:
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
-      JOB_BASE_NAME: periodic-linux-xenial-cuda11.3-cudnn8-py3.6-gcc7-test
+      JOB_BASE_NAME: linux-xenial-cuda11.1-py3.6-gcc7-test
       TEST_CONFIG: ${{ matrix.config }}
       SHARD_NUMBER: ${{ matrix.shard }}
       NUM_TEST_SHARDS: ${{ matrix.num_shards }}
@@ -318,7 +311,7 @@ jobs:
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Test PyTorch
         env:
-          BUILD_ENVIRONMENT: periodic-linux-xenial-cuda11.3-cudnn8-py3.6-gcc7-${{ matrix.config }}
+          BUILD_ENVIRONMENT: linux-xenial-cuda11.1-py3.6-gcc7-${{ matrix.config }}
         run: |
           if [[ $TEST_CONFIG == 'multigpu' ]]; then
             TEST_COMMAND=.jenkins/pytorch/multigpu-test.sh
@@ -407,8 +400,8 @@ jobs:
   # logs (like test); we can always move it back to the other one, but it
   # doesn't create the best experience
   render_test_results:
-    if: always()
-    needs: [generate-test-matrix, test, ciflow_should_run]
+    needs: [generate-test-matrix, test, ]
+    if: ${{ needs.test.result != 'skipped' || failure() }}
     runs-on: linux.2xlarge
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.render-matrix) }}
@@ -457,7 +450,7 @@ jobs:
         env:
           AWS_DEFAULT_REGION: us-east-1
           CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          JOB_BASE_NAME: periodic-linux-xenial-cuda11.3-cudnn8-py3.6-gcc7-test
+          JOB_BASE_NAME: linux-xenial-cuda11.1-py3.6-gcc7-test
           CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
           CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           CIRCLE_TAG: ${{ steps.parse-ref.outputs.tag }}
