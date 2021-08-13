@@ -23,7 +23,7 @@ For example it can replace:
 
 {
   A[0] = 0;
-  for(auto x : c10::irange(10)) {
+  for(const auto x : c10::irange(10)) {
     A[0] = (A[0]) + x;
   }
 }
@@ -32,7 +32,7 @@ with:
 
 {
   int A_ = 0;
-  for(auto x : c10::irange(10)) {
+  for(const auto x : c10::irange(10)) {
     A_ = x + A_;
   }
   A[0] = A_;

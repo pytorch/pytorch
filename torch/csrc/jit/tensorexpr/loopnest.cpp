@@ -514,7 +514,7 @@ class FunctionInliner : public IRMutator {
   ExprPtr mutate_loads(BufPtr buf, std::vector<ExprPtr> dims) {
     std::vector<VarPtr> index_vars;
     TORCH_INTERNAL_ASSERT(buf->ndim() == producer_index_vars_.size());
-    for (auto i : c10::irange(buf->ndim())) {
+    for (const auto i : c10::irange(buf->ndim())) {
       VarPtr func_callee_arg = producer_index_vars_.at(i);
       ExprPtr func_caller_param = dims.at(i);
       if (func_callee_arg == nullptr) {
@@ -2482,7 +2482,7 @@ class LoopComputeAtRewriter : public IRMutator {
       return v;
     }
     std::vector<ExprPtr> new_indices(v->indices().size());
-    for (auto i : c10::irange(v->indices().size())) {
+    for (const auto i : c10::irange(v->indices().size())) {
       new_indices[i] =
           IRSimplifier::simplify(alloc<Sub>(v->indices()[i], offsets_[i]));
     }
@@ -2860,7 +2860,7 @@ void LoopNest::computeAt(StmtPtr s, ForPtr f) {
 
   // Generate index variables for 'temp'
   std::vector<ExprPtr> temp_indices(dims.size());
-  for (auto i : c10::irange(dims.size())) {
+  for (const auto i : c10::irange(dims.size())) {
     // TODO: Use name-hint of the producer indices instead of 'idx'
     temp_indices[i] = alloc<Var>(std::string("idx") + c10::to_string(i), kInt);
   }
@@ -2876,7 +2876,7 @@ void LoopNest::computeAt(StmtPtr s, ForPtr f) {
   std::vector<std::pair<VarPtr, ExprPtr>> rewrite_indices_map;
   std::vector<ExprPtr> offsets;
   for (const TensorAccessBoundsInfo& p : bounds_it->second) {
-    for (auto i : c10::irange(p.start.size())) {
+    for (const auto i : c10::irange(p.start.size())) {
       if (offsets.size() <= i) {
         offsets.push_back(p.start[i]);
       } else {
@@ -2886,7 +2886,7 @@ void LoopNest::computeAt(StmtPtr s, ForPtr f) {
     }
   }
 
-  for (auto i : c10::irange(prod_indices.size())) {
+  for (const auto i : c10::irange(prod_indices.size())) {
     rewrite_indices_map.push_back(
         {prod_indices[i], alloc<Add>(temp_indices[i], offsets[i])});
   }
@@ -2896,7 +2896,7 @@ void LoopNest::computeAt(StmtPtr s, ForPtr f) {
       temp_buf, temp_indices, Substitute(st->value(), rewrite_indices_map));
 
   // Construct the loop nest for the temp computation
-  for (auto i : c10::irange(dims.size())) {
+  for (const auto i : c10::irange(dims.size())) {
     // We're creating loops from innermost to outermost, so we need to access
     // dimensions in reversed order.
     size_t dim_idx = dims.size() - 1 - i;

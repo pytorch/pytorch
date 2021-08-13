@@ -99,7 +99,7 @@ ExprPtr flatten_index(
   }
 
   ExprPtr total_index = alloc<IntImm>(0);
-  for (auto i : c10::irange(ndim)) {
+  for (const auto i : c10::irange(ndim)) {
     total_index = alloc<Add>(total_index, alloc<Mul>(indices[i], strides[i]));
   }
   return total_index;
@@ -193,7 +193,7 @@ ExternalCallPtr ExternalCall::make(
 std::vector<ExprPtr> ExprHandleVectorToExprVector(
     const std::vector<ExprHandle>& v) {
   std::vector<ExprPtr> result(v.size());
-  for (auto i : c10::irange(v.size())) {
+  for (const auto i : c10::irange(v.size())) {
     result[i] = v[i].node();
   }
   return result;
@@ -202,7 +202,7 @@ std::vector<ExprPtr> ExprHandleVectorToExprVector(
 std::vector<ExprHandle> ExprVectorToExprHandleVector(
     const std::vector<ExprPtr>& v) {
   std::vector<ExprHandle> result(v.size());
-  for (auto i : c10::irange(v.size())) {
+  for (const auto i : c10::irange(v.size())) {
     result[i] = ExprHandle(v[i]);
   }
   return result;
@@ -211,7 +211,7 @@ std::vector<ExprHandle> ExprVectorToExprHandleVector(
 std::vector<VarPtr> VarHandleVectorToVarVector(
     const std::vector<VarHandle>& v) {
   std::vector<VarPtr> result(v.size());
-  for (auto i : c10::irange(v.size())) {
+  for (const auto i : c10::irange(v.size())) {
     result[i] = v[i].node();
   }
   return result;
@@ -220,7 +220,7 @@ std::vector<VarPtr> VarHandleVectorToVarVector(
 std::vector<VarHandle> VarVectorToVarHandleVector(
     const std::vector<VarPtr>& v) {
   std::vector<VarHandle> result(v.size());
-  for (auto i : c10::irange(v.size())) {
+  for (const auto i : c10::irange(v.size())) {
     result[i] = VarHandle(v[i]);
   }
   return result;
