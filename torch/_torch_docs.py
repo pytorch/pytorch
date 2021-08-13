@@ -11224,6 +11224,49 @@ Example::
             [100, 200]], dtype=torch.uint8)
 """)
 
+
+add_docstr(torch.quantized_batch_norm,
+           r"""
+quantized_batch_norm(input, weight=None, bias=None, mean, var, eps, output_scale, output_zero_point) -> Tensor
+
+Applies batch normalization on a 4D (NCHW) quantized tensor.
+
+.. math::
+
+        y = \frac{x - \mathrm{E}[x]}{\sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
+
+Arguments:
+    input (Tensor): quantized tensor
+    weight (Tensor): tensor that corresponds to the gamma, size C
+    bias (Tensor):  tensor that corresponds to the beta, size C
+    mean (Tensor): mean value in batch normalization, size C
+    var (Tensor): variance value, size C
+    eps (float): a value added to the denominator for numerical stability.
+    output_scale (float): output quantized tensor scale
+    output_zero_point (int): output quantized tensor zero_point
+
+Returns:
+    Tensor: A quantized tensor with batch normalization applied.
+
+Example::
+
+    >>> torch.quantized_batch_norm(qx, torch.ones(2), torch.zeros(2), torch.rand(2), torch.rand(2), 0.00001, 0.2, 2)
+    tensor([[[[-0.2000, -0.2000],
+          [ 1.6000, -0.2000]],
+
+         [[-0.4000, -0.4000],
+          [-0.4000,  0.6000]]],
+
+
+        [[[-0.2000, -0.2000],
+          [-0.2000, -0.2000]],
+
+         [[ 0.6000, -0.4000],
+          [ 0.6000, -0.4000]]]], size=(2, 2, 2, 2), dtype=torch.quint8,
+       quantization_scheme=torch.per_tensor_affine, scale=0.2, zero_point=2)
+""")
+
+
 add_docstr(torch.Generator,
            r"""
 Generator(device='cpu') -> Generator
