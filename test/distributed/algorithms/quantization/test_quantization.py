@@ -10,8 +10,9 @@ from torch.testing._internal.common_distributed import (
     requires_nccl,
 )
 from torch.testing._internal.distributed.distributed_test import (
-    DistributedTest, TestDistBackend
+    DistributedTest, TestDistBackend, BACKEND
 )
+from torch.testing._internal.common_utils import sandcastle_skip_if
 
 def _build_tensor(size, value=None, dtype=torch.float, device_id=None):
     if value is None:
@@ -20,18 +21,20 @@ def _build_tensor(size, value=None, dtype=torch.float, device_id=None):
         return torch.empty(size, size, size, dtype=dtype).fill_(value)
     else:
         return torch.empty(size, size, size, dtype=dtype).fill_(value).cuda(device_id)
+
 class DistQuantizationTests(TestDistBackend, DistributedTest._DistTestBase):
     def setUp(self):
         super().setUp()
         self._fork_processes()
-        torch.backends.cudnn.flags(allow_tf32=False).__enter__()
 
     @requires_gloo()
+    @sandcastle_skip_if(BACKEND != "gloo", "Only gloo backend supports all_gather_fp16")
     def test_all_gather_fp16(self):
         group, group_id, rank = self._init_global_test()
         self._test_all_gather(group, group_id, rank, dtype=torch.float32, qtype=DQuantType.FP16)
 
     @requires_nccl()
+    @sandcastle_skip_if(BACKEND != "nccl", "Only nccl backend supports all_to_all_fp16")
     @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
     def test_all_to_all_fp16(self):
         group, group_id, rank = self._init_global_test()
