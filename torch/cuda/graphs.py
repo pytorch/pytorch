@@ -26,12 +26,12 @@ class graph(object):
     Arguments:
         graph (torch.cuda.CUDAGraph): Graph object used for capture.
         pool: Opaque token (returned by a call to :func:`~torch.cuda.graph_pool_handle()` or :meth:`other_Graph_instance.pool()<torch.cuda.CUDAGraph.pool`) hinting this graph's capture may share memory from the specified pool.
-        stream (torch.cuda.Stream, optional): If supplied, will be set as the current ambient stream in the context.  If not supplied, ``Graph`` sets its own internal side stream as the ambient stream in the context. 
+        stream (torch.cuda.Stream, optional): If supplied, will be set as the current ambient stream in the context.  If not supplied, ``Graph`` sets its own internal side stream as the ambient stream in the context.
 
     .. note::
         For effective memory sharing, if you pass a ``pool`` used by a previous capture and the previous capture
         used an explicit ``stream`` argument, you should pass the same ``stream`` argument to this capture.
-       
+
     """
     # default_capture_stream = torch.cuda.Stream()
 
@@ -40,7 +40,7 @@ class graph(object):
                  pool=None,
                  stream=None):
         self.capture_stream = torch.cuda.Stream() if stream is None else stream
-        self.stream_ctx = torch.cuda.stream 
+        self.stream_ctx = torch.cuda.stream
         self.graph = graph
 
     def __enter__(self):
@@ -70,7 +70,7 @@ def make_graphed_callables(callables,
     Accepts callables (functions or :class:`nn.Module<torch.nn.Module>`\ s)
     and returns graphed versions.
 
-    Each graphed callable's forward pass runs its source callable's 
+    Each graphed callable's forward pass runs its source callable's
     forward CUDA work as a CUDA graph inside a single autograd node.
 
     If ``autograd_aware`` is True, the graphed callable's forward pass also appends
@@ -80,7 +80,7 @@ def make_graphed_callables(callables,
     Therefore, each graphed callable should be a drop-in replacement for its source callable
     in an autograd-enabled training loop.
 
-    See :ref:`Partial-network capture<partial-network-capture>` for detailed use.
+    See :ref:`Partial-network capture<partial-network-capture>` for detailed use and constraints.
 
     .. note::
         The ``requires_grad`` state of each Tensor in ``sample_inputs`` must match the state

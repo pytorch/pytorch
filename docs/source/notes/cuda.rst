@@ -519,13 +519,31 @@ If you use :class:`~torch.nn.parallel.DistributedDataParallel`, you could use
 CUDA Graphs
 -----------
 
-`Getting Started with CUDA Graphs`_
-and the `CUDA Graphs section`_ of the CUDA C Programming Guide.
+A graph is a frozen record of CUDA work (for the most part, kernels and their arguments).
+For details on the underlying CUDA API, see `Getting Started with CUDA Graphs`_
+and the `Graphs section`_ of the CUDA C Programming Guide.
+
+The Pytorch integration creates graphs using `stream capture`_, which puts a CUDA stream
+in *capture mode*. CUDA work issued to a capturing stream stream doesn't actually run on
+the GPU. Instead, the work is recorded in a graph.
+
+After capture, the graph can be *launched* to run the GPU work as many times as needed.
+Each replay of the work runs the same frozen ops on the same memory addresses.
+By filling input memory with new data (e.g., from a new batch) before each replay,
+you can rerun the same work on new data.
+
+Because the graph's work is fixed, replay sacrifices the dynamic flexibility of typical
+Pytorch eager execution.
+
+Python, C++, and CUDA CPU latency incurred by ordinary eager execution
+
 
 .. _Getting Started with CUDA Graphs:
     https://developer.nvidia.com/blog/cuda-graphs/
-.. _CUDA Graphs section:
-   https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#cuda-graphs
+.. _Graphs section:
+    https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#cuda-graphs
+.. _stream capture:
+    https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#creating-a-graph-using-stream-capture
 
 Pytorch API
 ^^^^^^^^^^^
@@ -533,26 +551,69 @@ Pytorch API
 .. warning::
     The API presented here is a prototype and may change in future releases.
 
+Pytorch exposes graphs via a primitive :class:`torch.cuda.CUDAGraph`,
+which offers :meth:`~torch.cuda.CUDAGraph.capture_begin`,
+:meth:`~torch.cuda.CUDAGraph.capture_end`, and
+:meth:`~torch.cuda.CUDAGraph.replay` methods.
+
+Typically, you shouldn't call :meth:`~torch.cuda.CUDAGraph.capture_begin` or
+:meth:`~torch.cuda.CUDAGraph.capture_begin` yourself. Instead, use one of the
+convenience wrappers (
+:class:`torch.cuda.graph` or
+:class:`torch.cuda.make_graphed_callable`).
+
+:class:`torch.cuda.graph` is a context manager that captures whatever CUDA work
+you run in its context (no more, no less). It's simple and versatile. See
+:ref:`Basic capture<basic-capture>` and
+:ref:`Full-iteration capture<full-iteration-capture>` for examples
+
+:class:`~torch.cuda.make_graphed_callable` is more sophisticated. It accepts
+Python functions and :class:`torch.nn.Modules`, creates graphs of their forward-pass
+work, and (if ``autograd_aware=True``) also automatically creates graphs of their
+backward-pass work. See
+:ref:`Partial-network capture<partial-network-capture>` for examples.
+
 Constraints
 ~~~~~~~~~~~
 
 * Within a process, only one capture may be underway at a time.
 * No non-captured CUDA work may run in this process (on any thread) while capture is underway.
-* CPU work is not captured. If the capture sequence contains CPU work, that work will be elided during replay.
-* The capture should not contain control flow that depends on computed values or tensor
-* CUDA RNG ops are permitted, but must use default generators. For example, explicitly constructing a new :class:`torch.Generator` instance and passing it as the ``generator`` argument to an RNG function is not permitted.
-* Within capture, the user may expose parallelism by issuing calls to different streams,
-  but the overall stream dependency structure must form a DAG that branches out from the single
-  initial ambient stream after capture begins and rejoins the single ambient stream
-  before capture ends.
+* CPU work is not captured. If the captured ops include CPU work, that work will be elided during replay.
+* Ops that sychronize the CPU with the GPU (e.g., ``.item()`` calls) are prohibited.
+* Every replay reads from and writes to the same (virtual) memory addresses.
+* Dynamic control flow (based on CPU or GPU data) is prohibited.
+* Dynamic shapes are prohihited. The graph assumes every tensor in the captured op sequence
+  has the same size and layout in every replay.
+* CUDA RNG ops are allowed, but must use default generators. For example, explicitly constructing a
+  new :class:`torch.Generator` instance and passing it as the ``generator`` argument to an RNG function
+  is prohibited.
+* Using multiple streams in a capture is allowed, but there are some restrictions. See
+  :ref:`Using multiple streams...<multistream-capture>`
 
 Non-constraints
 ~~~~~~~~~~~~~~~
 
 * Once captured, the graph may be replayed on any stream.
 
+.. _basic-capture:
+
 Basic capture and replay
 ^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. _multistream-capture:
+
+Using multiple streams
+~~~~~~~~~~~~~~~~~~~~~~
+
+Capture mode automatically branches to any streams that sync with a capturing stream,
+so you can record a work DAG with nontrivial dependencies.
+
+Within capture, the user may expose parallelism by issuing calls to different streams,
+but the overall stream dependency structure must form a DAG that branches out from the single
+initial ambient stream after capture begins and rejoins the single ambient stream
+before capture ends. See .
+
+.. _full-iteration-capture:
 
 Full-iteration capture
 ^^^^^^^^^^^^^^^^^^^^^^
@@ -585,5 +646,13 @@ optimizer step::
 Usage with DistributedDataParallel
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+You should
+
 Graph memory management, and sharing memory across graphs
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+A captured graph acts on the same virtual addresses every time it replays.
+The virtual addresses used by the graph must be reserved for the graph across
+replays. If we freed the memory, a later replay would hit an illegal memory access.
+If we reassigned the memory to some new tensors, the replay could corrupt the values
+seen by those tensors.
