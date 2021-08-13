@@ -63,6 +63,7 @@ class DistQuantizationTests(TestDistBackend, DistributedTest._DistTestBase):
             qtype=DQuantType.FP16)
 
     @requires_nccl()
+    @sandcastle_skip_if(BACKEND != "nccl", "Only nccl backend supports all_to_all_bfp16")
     @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
     def test_all_to_all_bfp16(self):
         group, group_id, rank = self._init_global_test()
