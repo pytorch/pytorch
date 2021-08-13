@@ -314,14 +314,6 @@ def _slice_helper(g, input, axes, starts, ends, steps=None, dynamic_slice=False)
         from torch.onnx.symbolic_opset10 import _slice as _slice10
         return _slice10(g, input, axes, starts, ends, steps, dynamic_slice)
 
-def _hardtanh_helper(g, input, min_val, max_val):
-    if _export_onnx_opset_version <= 10:
-        from torch.onnx.symbolic_opset9 import hardtanh
-        return hardtanh(g, input, min_val, max_val)
-    else:
-        from torch.onnx.symbolic_opset11 import hardtanh  # type: ignore[no-redef]
-        return hardtanh(g, input, min_val, max_val)
-
 def _is_fp(value):
     if value:
         if isinstance(value, torch.Tensor):
