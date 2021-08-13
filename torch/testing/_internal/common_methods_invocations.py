@@ -1071,7 +1071,7 @@ def sample_inputs_linalg_norm(op_info, device, dtype, requires_grad):
 
 def sample_inputs_batch_norm(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
-    make_arg_without_grad = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
+    make_arg_without_requires_grad = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
 
     # Ordered as: input shape, kwargs for training, momentum, eps
     cases: Tuple[Tuple[int], dict] = (  # type: ignore[assignment]
@@ -1081,6 +1081,7 @@ def sample_inputs_batch_norm(op_info, device, dtype, requires_grad, **kwargs):
         ((2, 1), {'training': False}),
         ((3, 2, 3, 4), {'training': True, 'momentum': -1.0, 'eps': 0.5}),
         ((3, 2, 3, 4), {'training': False, 'momentum': -1.0, 'eps': 0.5}),
+        ((2, 1), {})
     )
 
     def generator():
@@ -1090,16 +1091,17 @@ def sample_inputs_batch_norm(op_info, device, dtype, requires_grad, **kwargs):
             yield SampleInput(
                 make_arg(input_shape),
                 args=(
-                    make_arg_without_grad(channels, low=0),  # running mean
-                    make_arg_without_grad(channels, low=0),  # running var
+                    make_arg_without_requires_grad(channels, low=0),  # running mean
+                    make_arg_without_requires_grad(channels, low=0),  # running var
                     make_arg(channels),  # weight
                     make_arg(channels)   # bias
                 ),
                 kwargs=kwargs
             )
         # Test case for no optional kwargs
-        yield SampleInput(make_arg((1, 2, 3)), args=(make_arg_without_grad(2, low=0),
-                                                     make_arg_without_grad(2, low=0)))
+        # running_mean and running_var are required in evaluation mode (training: False) but not in training mode
+        yield SampleInput(make_arg((1, 2, 3)), args=(None, None), kwargs={'training': True})
+
     return list(generator())
 
 def sample_inputs_nn_activation_relu(op_info, device, dtype, requires_grad, **kwargs):
