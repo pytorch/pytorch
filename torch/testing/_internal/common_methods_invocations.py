@@ -1069,18 +1069,17 @@ def sample_inputs_linalg_norm(op_info, device, dtype, requires_grad):
         return inputs
 
 
-def sample_inputs_batch_norm(op_info, device, dtype, requires_grad, **kwargs):
+def sample_inputs_batch_norm(op_info, device, dtype, requires_grad, *, is_training=True):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_arg_without_grad = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
 
     # Ordered as: input shape, kwargs for training, momentum, eps
-    cases = (
-        ((S, S, S), {'training': False, 'momentum': 0.5, 'eps': 0.6}),
-        ((3, 2, 4), {'training': True, 'momentum': -1.2}),
-        ((3, 1), {'training': True, 'momentum': 0.0}),
-        ((2, 1), {'training': True, 'momentum': 0.2}),
-        ((1, 1, 2), {'training': False, 'momentum': 0.5}),
-        ((3, 2, 3, 4), {'training': True, 'momentum': -1.0, 'eps': 0.5}),
-        ((1, 2, 2), {})
+    cases: Tuple[Tuple[int], dict] = (  # type: ignore[assignment]
+        ((S, S, S), {'training': is_training, 'momentum': 0.5, 'eps': 0.6}),
+        ((3, 2, 4), {'training': is_training, 'momentum': -1.2}),
+        ((3, 1), {'training': is_training, 'momentum': 0.0}),
+        ((2, 1), {'training': is_training}),
+        ((3, 2, 3, 4), {'training': is_training, 'momentum': -1.0, 'eps': 0.5}),
     )
 
     def generator():
@@ -1089,12 +1088,16 @@ def sample_inputs_batch_norm(op_info, device, dtype, requires_grad, **kwargs):
             channels = input_shape[1]
             yield SampleInput(
                 make_arg(input_shape),
-                args = (
-                    make_arg(channels), make_arg(channels), make_arg(channels), make_arg(channels)
+                args=(
+                    make_arg_without_grad(channels), make_arg_without_grad(channels), make_arg(channels), make_arg(channels)
                 ),
-                kwargs = kwargs
+                kwargs=kwargs
             )
-
+        if not is_training:
+            # Test case for no kwargs
+            yield SampleInput(make_arg((1, 2, 3)), args=(make_arg_without_grad(2),
+                                                         make_arg_without_grad(2),
+                                                         make_arg(2), make_arg(2)))
     return list(generator())
 
 def sample_inputs_nn_activation_relu(op_info, device, dtype, requires_grad, **kwargs):
@@ -6809,20 +6812,32 @@ op_db: List[OpInfo] = [
                # Topk is not raising a warning when the out is resized
                SkipInfo('TestCommon', 'test_out'),
            )),
+    # Autograd isn't supported for training=False, hence 2 different OpInfos
+    # One with training=True, and other with training=False
     OpInfo('nn.functional.batch_norm',
            aten_name='batch_norm',
            dtypes=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            supports_out=False,
-           # RuntimeError: The function 'native_batch_norm' is not differentiable with respect to
-           # argument 'running_mean'. This input cannot have requires_grad True
-           supports_autograd=False,
            skips=(
-               # RuntimeError: deepEquals(input.iValue, deepCopiedInput)INTERNAL ASSERT FAILED at
+               # RuntimeError: deepEquals(input.iValue, deepCopiedInput) INTERNAL ASSERT FAILED at
                # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":142, please report a bug to PyTorch
                SkipInfo('TestJit', 'test_variant_consistency_jit'),
            ),
-           sample_inputs_func=sample_inputs_batch_norm),
+           sample_inputs_func=partial(sample_inputs_batch_norm, is_training=True)),
+    OpInfo('nn.functional.batch_norm',
+           aten_name='batch_norm',
+           variant_test_name='without_training',
+           dtypes=floating_types(),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           supports_out=False,
+           supports_autograd=False,
+           skips=(
+               # RuntimeError: deepEquals(input.iValue, deepCopiedInput) INTERNAL ASSERT FAILED at
+               # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":142, please report a bug to PyTorch
+               SkipInfo('TestJit', 'test_variant_consistency_jit'),
+           ),
+           sample_inputs_func=partial(sample_inputs_batch_norm, is_training=False)),
     OpInfo('nn.functional.hardshrink',
            aten_name="hardshrink",
            dtypes=floating_types(),
