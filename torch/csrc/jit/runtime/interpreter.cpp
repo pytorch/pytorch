@@ -786,6 +786,16 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   // At the moment overhead does not seem exhorbitantly large.
   // Another option would be return vector of (string, InlinedCallstackPtrs)
   // string would contain function name and typename of self
+  // Format of the returned vector of strings:
+  // For each frame, the corresponding module name, type and function name
+  // are in following format:
+  // <module-instance-name>(module type)::<function-name>
+  // Special keys for module-instance-name:
+  //   - TOP: for top level module
+  //   - SELF: When method/function of the frame is associated with
+  //           previous frame's module instance
+  //   - INSTANCE_NAME_UNKNOWN: instance name cannot be figured out
+  //   - CALL_FUNCTION: call to free function
   std::vector<std::string> moduleHierarchy() const {
     std::vector<std::string> module_function_list;
     std::string module_hierarchy("TOP");
