@@ -17,21 +17,39 @@ class UCXError : public c10::Error {
 
 namespace c10d {
 
-// Singleton object holding UCP objects
-class UCPContext {
-  static std::unique_ptr<UCPContext> instance;
-  UCPContext();
-public:
-  ucp_context_h context;
+class UCPEndpoint;
+
+class UCPWorker: public std::enable_shared_from_this<UCPWorker> {
   ucp_worker_h worker;
-  static UCPContext *get();
-  ~UCPContext();
+public:
+  UCPWorker();
+  ucp_worker_h get() const { return worker; }
+  ~UCPWorker();
+
+  // non-copyable
+  UCPWorker(const UCPWorker&) = delete;
+  UCPWorker& operator=(const UCPWorker &) = delete;
+
+  using Address = std::vector<uint8_t>;
+  Address address() const;
+  std::shared_ptr<UCPEndpoint> connect(const Address &address) const;
+  unsigned progress();
 };
 
-struct UCPEndpoint {
+class UCPEndpoint {
   ucp_ep_h endpoint;
-  UCPEndpoint(ucp_address_t *address);
+  std::shared_ptr<const UCPWorker> worker;
+
+  // UCPEndpoint should be created by UCPWorker::connect
+  UCPEndpoint(const std::shared_ptr<const UCPWorker> &worker, const UCPWorker::Address &address);
+  friend UCPWorker;
+public:
   ~UCPEndpoint();
+  ucp_ep_h get() const { return endpoint; }
+
+  // non-copyable
+  UCPEndpoint(const UCPEndpoint&) = delete;
+  UCPEndpoint& operator=(const UCPEndpoint &) = delete;
 };
 
 inline ucs_memory_type getUCSMemoryType(c10::DeviceType type) {

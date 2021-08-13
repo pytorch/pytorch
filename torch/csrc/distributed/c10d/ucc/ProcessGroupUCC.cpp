@@ -43,17 +43,19 @@ class ProcessGroupUCC final : public ProcessGroup {
 public:
   class WorkUCP : public ProcessGroup::Work {
     bool *finished;
+    std::shared_ptr<UCPWorker> worker;
   public:
-    WorkUCP(ucs_status_ptr_t ptr) : finished(reinterpret_cast<bool *>(ptr)) {}
+    WorkUCP(const std::shared_ptr<UCPWorker> &worker, ucs_status_ptr_t ptr)
+      : finished(reinterpret_cast<bool *>(ptr)), worker(worker) {}
     ~WorkUCP() { ucp_request_free(finished); }
     bool isCompleted() override {
       // TODO: progress worker in a side thread for true async
-      ucp_worker_progress(UCPContext::get()->worker);
+      worker->progress();
       return *finished;
     };
     bool isSuccess() const override {
       // TODO: progress worker in a side thread for true async
-      ucp_worker_progress(UCPContext::get()->worker);
+      worker->progress();
       return *finished;
     };
     bool wait(std::chrono::milliseconds timeout = kUnsetTimeout) override {
@@ -153,35 +155,18 @@ public:
 
 private:
   c10::intrusive_ptr<Store> store;
-  void initUCP();
+  std::shared_ptr<UCPWorker> worker;
   std::vector<std::shared_ptr<UCPEndpoint>> ucp_endpoints = {};
 };
 
 ProcessGroupUCC::ProcessGroupUCC(
     const c10::intrusive_ptr<Store>& store,
     int rank,
-    int size) : ProcessGroup(rank, size), store(store) {
-  initUCP();
-}
-
-void ProcessGroupUCC::initUCP() {
-  UCPContext *ucp_context = UCPContext::get();
-  ucs_status_t st;
-  ucp_address_t* local_addr;
-  size_t local_addr_len;
-
-  st = ucp_worker_get_address(ucp_context->worker, &local_addr, &local_addr_len);
-  TORCH_UCX_CHECK(st, "Failed to get worker address.");
-  std::vector<uint8_t> val = std::vector<uint8_t>(
-      reinterpret_cast<uint8_t*>(local_addr),
-      reinterpret_cast<uint8_t*>(local_addr) + local_addr_len);
-  store->set("ucp_address:" + std::to_string(rank_), val);
-  ucp_worker_release_address(ucp_context->worker, local_addr);
-
+    int size) : ProcessGroup(rank, size), store(store), worker(std::make_shared<UCPWorker>()) {
+  store->set("ucp_address:" + std::to_string(rank_), worker->address());
   for (int i = 0; i < size_; i++) {
-    std::vector<uint8_t> peer_addr = store->get("ucp_address:" + std::to_string(i));
-    ucp_address_t *address = reinterpret_cast<ucp_address_t*>(peer_addr.data());
-    ucp_endpoints.emplace_back(std::make_shared<UCPEndpoint>(address));
+    UCPWorker::Address peer_addr = store->get("ucp_address:" + std::to_string(i));
+    ucp_endpoints.emplace_back(worker->connect(peer_addr));
   }
 }
 
@@ -269,20 +254,22 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::send(
     *static_cast<bool *>(request) = true;
   };
   ucs_status_ptr_t request = ucp_tag_send_nbx(
-    ucp_endpoints[dstRank]->endpoint, tensor.data_ptr(), 1, tag, &params);
+    ucp_endpoints[dstRank]->get(), tensor.data_ptr(), 1, tag, &params);
   if (UCS_PTR_STATUS(request) == UCS_OK) {
     // If the operation is finished immediately, then the callback will
     // not be invoked.
     return c10::make_intrusive<ProcessGroupUCC::ImmediatelyCompletedWork>();
   }
-  ucp_worker_progress(UCPContext::get()->worker);
-  return c10::make_intrusive<ProcessGroupUCC::WorkUCP>(request);
+  worker->progress();
+  return c10::make_intrusive<ProcessGroupUCC::WorkUCP>(worker, request);
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::recv(
     std::vector<at::Tensor>& tensors,
     int srcRank,
     int tag) {
+  // TODO: srcRank is not used here!!! Is this corrrect?
+  // No, this is not. We need to use commid and rank to distinguish
   check_tensor(tensors);
   auto& tensor = tensors[0];
 
@@ -298,14 +285,14 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::recv(
     *static_cast<bool *>(request) = true;
   };
   ucs_status_ptr_t request = ucp_tag_recv_nbx(
-    UCPContext::get()->worker, tensor.data_ptr(), 1, tag, 0, &params);
+    worker->get(), tensor.data_ptr(), 1, tag, 0, &params);
   if (UCS_PTR_STATUS(request) == UCS_OK) {
     // If the operation is finished immediately, then the callback will
     // not be invoked.
     return c10::make_intrusive<ProcessGroupUCC::ImmediatelyCompletedWork>();
   }
-  ucp_worker_progress(UCPContext::get()->worker);
-  return c10::make_intrusive<ProcessGroupUCC::WorkUCP>(request);
+  worker->progress();
+  return c10::make_intrusive<ProcessGroupUCC::WorkUCP>(worker, request);
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::recvAnysource(
