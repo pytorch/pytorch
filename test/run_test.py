@@ -815,6 +815,7 @@ def exclude_tests(exclude_list, selected_tests, exclude_message=None):
 
 
 def get_selected_tests(options):
+    # First make sure run specific test cases options are processed.
     if options.run_specified_test_cases:
         if options.use_specified_test_cases_by == 'include':
             options.include = list(SPECIFIED_TEST_CASES_DICT.keys())
@@ -823,6 +824,16 @@ def get_selected_tests(options):
 
     selected_tests = options.include
 
+    # filter if there's JIT only and distributed only test options
+    if options.jit:
+        selected_tests = list(
+            filter(lambda test_name: "jit" in test_name, selected_tests))
+
+    if options.distributed_tests:
+        selected_tests = list(
+            filter(lambda test_name: test_name in DISTRIBUTED_TESTS, selected_tests))
+
+    # process reordering
     if options.bring_to_front:
         to_front = set(options.bring_to_front)
         selected_tests = options.bring_to_front + list(filter(lambda name: name not in to_front,
@@ -836,9 +847,10 @@ def get_selected_tests(options):
         last_index = find_test_index(options.last, selected_tests, find_last_index=True)
         selected_tests = selected_tests[:last_index + 1]
 
+    # process exclusion
     if options.exclude_jit_executor:
         options.exclude.extend(JIT_EXECUTOR_TESTS)
-    
+
     if options.exclude_distributed_tests:
         options.exclude.extend(DISTRIBUTED_TESTS)
 
@@ -858,6 +870,7 @@ def get_selected_tests(options):
     elif TEST_WITH_ROCM:
         selected_tests = exclude_tests(ROCM_BLOCKLIST, selected_tests, 'on ROCm')
 
+    # sharding
     if options.shard:
         assert len(options.shard) == 2, "Unexpected shard format"
         assert min(options.shard) > 0, "Shards must be positive numbers"
@@ -1047,12 +1060,6 @@ def main():
 
     if options.coverage and not PYTORCH_COLLECT_COVERAGE:
         shell(['coverage', 'erase'])
-
-    if options.jit:
-        selected_tests = filter(lambda test_name: "jit" in test_name, TESTS)
-
-    if options.distributed_tests:
-        selected_tests = filter(lambda test_name: test_name in DISTRIBUTED_TESTS, TESTS)
 
     if options.determine_from is not None and os.path.exists(options.determine_from):
         slow_tests = get_slow_tests_based_on_S3(TESTS, TARGET_DET_LIST, SLOW_TEST_THRESHOLD)
