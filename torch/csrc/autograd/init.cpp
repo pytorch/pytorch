@@ -272,10 +272,10 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   m.def("_clear_callbacks", []() {
     at::clearCallbacks();
   });
-  m.def("_register_default_hooks", [](py::function &pack_hook, py::function &unpack_hook) {
+  m.def("_register_saved_tensors_default_hooks", [](py::function &pack_hook, py::function &unpack_hook) {
     torch::autograd::PyDefaultSavedVariableHooks::set_hooks(pack_hook, unpack_hook);
   });
-  m.def("_reset_default_hooks", []() {
+  m.def("_reset_saved_tensors_default_hooks", []() {
     torch::autograd::PyDefaultSavedVariableHooks::reset_hooks();
   });
 
@@ -339,6 +339,18 @@ static PyObject * is_autocast_cpu_enabled(PyObject* _unused, PyObject *arg) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * set_autocast_gpu_dtype(PyObject* _unused, PyObject *arg) {
+  HANDLE_TH_ERRORS
+  if (!THPDtype_Check(arg)) {
+    throw TypeError(
+        "dtype must be a torch.dtype (got %s)", Py_TYPE(arg)->tp_name);
+  }
+  at::ScalarType targetType = reinterpret_cast<THPDtype*>(arg)->scalar_type;
+  at::autocast::set_autocast_gpu_dtype(targetType);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject * set_autocast_cpu_dtype(PyObject* _unused, PyObject *arg) {
   HANDLE_TH_ERRORS
   if (!THPDtype_Check(arg)) {
@@ -361,6 +373,13 @@ static const char* scalarTypeName(const at::ScalarType type) {
     default:
       throw std::runtime_error("unknown scalar type for autocast");
   }
+}
+
+static PyObject * get_autocast_gpu_dtype(PyObject* _unused, PyObject *arg){
+  HANDLE_TH_ERRORS
+  at::ScalarType current_dtype = at::autocast::get_autocast_gpu_dtype();
+  return THPDtype_New(current_dtype, scalarTypeName(current_dtype));
+  END_HANDLE_TH_ERRORS
 }
 
 static PyObject * get_autocast_cpu_dtype(PyObject* _unused, PyObject *arg){
@@ -476,6 +495,8 @@ static PyMethodDef methods[] = { // NOLINT
   {"is_autocast_cpu_enabled", is_autocast_cpu_enabled, METH_NOARGS, nullptr},
   {"set_autocast_cpu_dtype", set_autocast_cpu_dtype, METH_O, nullptr},
   {"get_autocast_cpu_dtype", get_autocast_cpu_dtype, METH_NOARGS, nullptr},
+  {"set_autocast_gpu_dtype", set_autocast_gpu_dtype, METH_O, nullptr},
+  {"get_autocast_gpu_dtype", get_autocast_gpu_dtype, METH_NOARGS, nullptr},
   {"autocast_increment_nesting", autocast_increment_nesting, METH_NOARGS, nullptr},
   {"autocast_decrement_nesting", autocast_decrement_nesting, METH_NOARGS, nullptr},
   {"set_anomaly_enabled", set_anomaly_mode_enabled, METH_O, nullptr},
