@@ -10249,6 +10249,14 @@
   dispatch:
     CPU, CUDA: linalg_lstsq_out
 
+# torch.linalg.matmul, alias for torch.matmul
+- func: linalg_matmul(Tensor self, Tensor other) -> Tensor
+  python_module: linalg
+  variants: function
+
+- func: linalg_matmul.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
+
 - func: linalg_slogdet(Tensor self) -> (Tensor sign, Tensor logabsdet)
   python_module: linalg
   variants: function

@@ -6516,6 +6516,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            ),
     OpInfo('matmul',
+           aliases=('linalg.matmul',),
            dtypes=floating_types(),
            dtypesIfCPU=all_types_and_complex(),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),

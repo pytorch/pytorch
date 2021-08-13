@@ -454,7 +454,6 @@ _(aten, margin_ranking_loss) \
 _(aten, masked_fill) \
 _(aten, masked_scatter) \
 _(aten, masked_select) \
-_(aten, matmul) \
 _(aten, matrix_rank) \
 _(aten, matrix_exp) \
 _(aten, max) \

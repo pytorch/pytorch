@@ -598,6 +598,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.masked_scatter: lambda input, mask, source: -1,
         torch.masked_select: lambda input, mask, out=None: -1,
         torch.matmul: lambda input, other, out=None: -1,
+        torch.linalg.matmul: lambda input, other, out=None: -1,  # alias for torch.matmul
         torch.matrix_power: lambda input, n: -1,
         torch.linalg.matrix_power: lambda input, n, out=None: -1,
         torch.matrix_rank: lambda input, tol=None, symmetric=False: -1,

@@ -1547,6 +1547,15 @@ Tensor& matmul_out(const Tensor & tensor1, const Tensor & tensor2, Tensor &resul
   return result;
 }
 
+// torch.linalg.matmul, alias for torch.matmul
+Tensor linalg_matmul(const Tensor & tensor1, const Tensor & tensor2) {
+  return at::native::matmul(tensor1, tensor2);
+}
+
+Tensor& linalg_matmul_out(const Tensor & tensor1, const Tensor & tensor2, Tensor &result) {
+  return at::native::matmul_out(tensor1, tensor2, result);
+}
+
 // helper methods for matrix_exp
 namespace {
 
