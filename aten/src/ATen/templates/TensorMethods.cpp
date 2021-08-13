@@ -1,6 +1,5 @@
 #include <c10/core/Scalar.h>
 #include <ATen/core/TensorBody.h>
-#include <ATen/FunctionalTensorImpl.h>
 
 namespace at {
 

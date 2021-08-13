@@ -67,6 +67,19 @@ static PyObject * THPVariable__is_view(PyObject *self, PyObject* args)
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPVariable_sync_(PyObject* self, PyObject* arg)
+{
+  HANDLE_TH_ERRORS
+  if (check_has_torch_function(self)) {
+    auto args = py::make_tuple(py::handle(arg));
+    return handle_torch_function(self, "sync_", args.ptr());
+  }
+  auto& self_ = THPVariable_Unpack(self);
+  const_cast<Tensor&>(self_).sync_();
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 // implemented on the python object bc no support for first-class functions in native_functions.yaml
 // See: ATen/native/README.md for more context
 static PyObject * THPVariable_apply_(PyObject* self, PyObject* arg)
@@ -1190,6 +1203,7 @@ PyMethodDef variable_methods[] = {
   {"__invert__", THPVariable_invert, METH_NOARGS, NULL},
   {"__matmul__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_matmul>), METH_VARARGS | METH_KEYWORDS, NULL},
   {"_is_view", THPVariable__is_view, METH_NOARGS, NULL},
+  {"sync_", THPVariable_sync_, METH_NOARGS, NULL},
   {"apply_", THPVariable_apply_, METH_O, NULL},
   {"bfloat16", castPyCFunctionWithKeywords(THPVariable_bfloat16), METH_VARARGS | METH_KEYWORDS, NULL},
   {"byte", castPyCFunctionWithKeywords(THPVariable_byte), METH_VARARGS | METH_KEYWORDS, NULL},

@@ -30,14 +30,13 @@ If this causes problems in your program, consider upstreaming the out-of-place o
       at::AutoDispatchBelowFunctionalize guard;
       ${maybe_sync_tensor_args}
       // Redispatch as normally otherwise, since XLA has its own lowerings for special inplace ops.
-      return at::redispatch::${cpp_api_name}(${unpacked_args});
+      return at::redispatch::${cpp_api_name}(${redispatch_original_args});
 """)
 
 INPLACE_OR_OUT_TEMPLATE = CodeTemplate("""\
-      ${maybe_unwrap_inputs}
       {
           at::AutoDispatchBelowFunctionalize guard;
-          auto tmp_output = at::redispatch::${cpp_api_name}(${unpacked_args});
+          auto tmp_output = at::redispatch::${cpp_api_name}(${redispatch_modified_args_remove_out});
           ${mutable_input_post_processing}
       }
       return ${returns};
@@ -46,27 +45,17 @@ INPLACE_OR_OUT_TEMPLATE = CodeTemplate("""\
 VIEW_TEMPLATE = CodeTemplate("""\
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(self.key_set().has(c10::DispatchKey::Functionalize));
       ${return_type} out;
-      // TODO: generalize this so we don't have to store it?
-      auto original_size = self.sizes().vec();
       {
         at::AutoDispatchBelowFunctionalize guard;
-        auto tmp_out = at::redispatch::${cpp_api_name}(${redispatch_original_args_unwrap_self});
-        // See Note [Wrapping return values in the functionalization pass]
-        bool is_modal_pass = c10::impl::tls_local_dispatch_key_set().included_.has(c10::DispatchKey::Functionalize);
-        if (is_modal_pass) {
-          auto self_impl = at::unsafeGetFunctionalImpl(self);
-          ${clone_functionalize_output}
-        } else {
-          // NOTE: I'm primarily doing this to avoid adding 50 new native_functions.yaml operators
-          // e.g. What we really want is a new view_copy() op (and similar for every other existing view)
-          // Eager mode would implement this under the hood
-          // XLA would just change their implementation of view to DO a copy.
-          // We'd end up with an unnecessary clone() in the XLA case, but clones are cheap since we're just copying IR.
-          ${clone_output}
-        }
+        auto tmp_output = at::redispatch::${cpp_api_name}(${redispatch_original_args});
+        out = tmp_output.clone();
       }
-      at::ViewMeta view_meta = ViewMeta(${view_meta_enum}, original_size, self.sizes().vec());
-      ${set_view_meta_output}
+      // See Note [Marking Alias Tensors]
+      if (!at::functionalization::impl::is_alias_tensor(out)) {
+        // TODO we'll probably want a separate function for each view op that gets creates the corresponding ViewMeta.
+        at::ViewMeta view_meta = at::functionalization::impl::get_meta_${cpp_api_name}(${original_args});
+        at::functionalization::impl::set_view_meta(out, self, view_meta);
+      }
       return out;
 """)
 
@@ -78,17 +67,6 @@ def post_process_mutable_input(a: Argument) -> Optional[str]:
         return f'{replace_str}\n{debug_str}\n{add_update_str}'
     return None
 
-def maybeUnwrapVarName(a: Argument) -> str:
-    if not a.type.is_tensor_like():
-        return a.name
-    return f'{a.name}_'
-
-def maybeUnwrapTensorInput(a: Argument) -> Optional[str]:
-    t = a.type
-    if not t.is_tensor_like():
-        return None
-    return f'auto {maybeUnwrapVarName(a)} = at::functionalization::impl::maybeUnwrapFunctional({a.name});'
-
 def return_names_str(f: NativeFunction) -> str:
     if len(f.func.arguments.out) > 0:
         return ', '.join(a.name for a in f.func.arguments.out)
@@ -96,37 +74,15 @@ def return_names_str(f: NativeFunction) -> str:
         return f.func.arguments.self_arg.argument.name
     raise AssertionError("Unable to handle functionalization for op={str(f.func.name)}")
 
-def gen_clone_output_str(func: FunctionSchema, functionalize: bool) -> str:
+def gen_clone_output_str(func: FunctionSchema) -> str:
     if len(func.returns) == 1 and func.returns[0].type == BaseType(BaseTy.Tensor):
-        if functionalize:
-            return 'out = at::functionalization::impl::makeFunctional(tmp_out.clone());'
-        else:
-            return 'out = tmp_out.clone();'
-    elif len(func.returns) == 1 \
-            and isinstance(func.returns[0].type, ListType) \
-            and func.returns[0].type.elem == BaseType(BaseTy.Tensor):
-        if functionalize:
-            return """\
-for (const auto& t : tmp_out) {{
-    out.push_back(at::functionalization::impl::makeFunctional(t.clone()));
-}}"""
-        else:
-            return """\
-for (const auto& t : tmp_out) {{
-    out.push_back(t.clone());
-}}"""
-    else:
-        raise AssertionError(f"unsupported return type for op={str(func.name)}. type={str(func.returns)}")
-
-def set_view_meta_output(func: FunctionSchema) -> str:
-    if len(func.returns) == 1 and func.returns[0].type == BaseType(BaseTy.Tensor):
-        return 'at::functionalization::impl::set_view_meta(out, self, view_meta);'
+        return 'out = tmp_out.clone();'
     elif len(func.returns) == 1 \
             and isinstance(func.returns[0].type, ListType) \
             and func.returns[0].type.elem == BaseType(BaseTy.Tensor):
         return """\
-for (auto& t : out) {{
-    at::functionalization::impl::set_view_meta(t, self, view_meta);'
+for (const auto& t : tmp_out) {{
+    out.push_back(t.clone());
 }}"""
     else:
         raise AssertionError(f"unsupported return type for op={str(func.name)}. type={str(func.returns)}")
@@ -136,7 +92,10 @@ def emit_functionalization_body(f: NativeFunction, g: Optional[NativeFunctionsGr
     dispatcher_exprs = dispatcher_sig.exprs()
 
     dispatch_key_set = 'ks & c10::after_func_keyset'
+    original_args = ', '.join(a.name for a in dispatcher_sig.arguments())
     redispatch_original_args = ', '.join([dispatch_key_set] + [a.name for a in dispatcher_sig.arguments()])
+    # The functionalization pass explicitly doesn't pass out= parameters to the redispatch
+    redispatch_modified_args_remove_out = ', '.join([dispatch_key_set] + [a.name for a in f.func.arguments.flat_non_out])
 
     # This is only used in view/inplace kernels that aren't implemented
     maybe_sync_tensor_args = '\n'.join(mapMaybe(
@@ -157,13 +116,7 @@ def emit_functionalization_body(f: NativeFunction, g: Optional[NativeFunctionsGr
         # The codegen enforces the naming schema for different view metas.
         view_meta_enum = f'at::ViewMeta::Type::{str(f.func.name).replace(".", "_")}'
 
-        clone_output = gen_clone_output_str(f.func, functionalize=False)
-        clone_functionalize_output = gen_clone_output_str(f.func, functionalize=True)
-
-        set_view_meta_output_str = set_view_meta_output(f.func)
-
-        redispatch_original_args_unwrap_self = ', '.join([dispatch_key_set] + [
-            a.name if not isinstance(a.argument, SelfArgument) else 'self_impl->value()' for a in dispatcher_sig.arguments()])
+        clone_output = gen_clone_output_str(f.func)
 
         if str(f.func.name) not in [
                 # TODO: add view operators to this list as we add functionalization support for them.
@@ -174,7 +127,7 @@ def emit_functionalization_body(f: NativeFunction, g: Optional[NativeFunctionsGr
                 op_name=str(f.func.name),
                 cpp_api_name=api_name,
                 maybe_sync_tensor_args=maybe_sync_tensor_args,
-                unpacked_args=redispatch_original_args
+                redispatch_original_args=redispatch_original_args
             )
 
         return VIEW_TEMPLATE.substitute(
@@ -182,10 +135,8 @@ def emit_functionalization_body(f: NativeFunction, g: Optional[NativeFunctionsGr
             cpp_api_name=api_name,
             view_meta_enum=view_meta_enum,
             redispatch_original_args=redispatch_original_args,
-            redispatch_original_args_unwrap_self=redispatch_original_args_unwrap_self,
             clone_output=clone_output,
-            clone_functionalize_output=clone_functionalize_output,
-            set_view_meta_output=set_view_meta_output_str,
+            original_args=original_args
         )
 
     # mutation case
@@ -197,15 +148,10 @@ def emit_functionalization_body(f: NativeFunction, g: Optional[NativeFunctionsGr
             op_name=str(f.func.name),
             cpp_api_name=cpp_sig.most_faithful_signature().name(),
             maybe_sync_tensor_args=maybe_sync_tensor_args,
-            unpacked_args=redispatch_original_args
+            redispatch_original_args=redispatch_original_args
         )
     # call the out-of-place variant of the op
     functional_cpp_sig = CppSignatureGroup.from_native_function(g.functional, method=False, fallback_binding=f.manual_cpp_binding)
-    # The functionalization pass explicitly doesn't pass out= parameters to the redispatch
-    redispatch_modified_args = ', '.join([dispatch_key_set] + [maybeUnwrapVarName(a) for a in f.func.arguments.flat_non_out])
-
-    maybe_unwrap_inputs = '\n'.join([
-        s for s in [maybeUnwrapTensorInput(a) for a in f.func.arguments.flat_non_out] if s is not None])
 
     mutable_input_post_processing = '\n'.join([
         s for s in [post_process_mutable_input(a) for a in f.func.arguments.flat_non_out] if s is not None])
@@ -214,9 +160,8 @@ def emit_functionalization_body(f: NativeFunction, g: Optional[NativeFunctionsGr
         returns_str = f'{dispatcher_sig.returns_type().cpp_type()}({returns_str});'
 
     return INPLACE_OR_OUT_TEMPLATE.substitute(
-        maybe_unwrap_inputs=maybe_unwrap_inputs,
         cpp_api_name=functional_cpp_sig.most_faithful_signature().name(),
-        unpacked_args=redispatch_modified_args,
+        redispatch_modified_args_remove_out=redispatch_modified_args_remove_out,
         mutable_input_post_processing=mutable_input_post_processing,
         returns=returns_str
     )

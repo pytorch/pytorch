@@ -1,6 +1,6 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/LegacyTypeDispatch.h>
-#include <ATen/FunctionalTensorImpl.h>
+#include <ATen/FunctionalTensorImplBase.h>
 #include <torch/library.h>
 
 
@@ -69,32 +69,14 @@ namespace {
     const auto arguments_begin = stack->size() - num_arguments;
     auto arguments = torch::jit::last(stack, num_arguments);
 
-	// Note [Wrapping return values in the functionalization pass]
-	// We need to read from TLS in order to distinguish between the functorch case and the XLA case.
-	// In functorch's functionalization pass, we (need to) add the key to the TLS include set.
-	// We need to do this in order to ensure that free variables created from factory functions
-	// inside of the program are properly wrapped.
-	// However, we DO NOT want to wrap outputs unconditionally.
-	// For example, when calling xla_tensor.to('cpu'), the output should not be wrapped.
-	// TLS is the only way to distinguish between these two cases.
-	bool is_modal_pass = c10::impl::tls_local_dispatch_key_set().included_.has(c10::DispatchKey::Functionalize);
-
     for (int64_t idx = 0; idx < num_arguments; ++idx) {
       const auto& ivalue = arguments[idx];
       if (ivalue.isTensor()) {
         at::Tensor t = ivalue.toTensor();
-
 		at::functionalization::impl::maybe_sync(t);
-		auto maybe_unwrapped = at::functionalization::impl::maybeUnwrapFunctional(t);
-		auto materialized_ivalue = c10::IValue(maybe_unwrapped);
-		(*stack)[arguments_begin + idx] = std::move(materialized_ivalue);
-
       } else if (ivalue.isTensorList()) {
         auto tensors = ivalue.toTensorList();
 		at::functionalization::impl::maybe_sync(tensors);
-		auto maybe_unwrapped = at::functionalization::impl::maybeUnwrapFunctional(tensors);
-		auto materialized_ivalue = c10::IValue(maybe_unwrapped);
-		(*stack)[arguments_begin + idx] = std::move(materialized_ivalue);
       }
     }
     {
@@ -102,30 +84,6 @@ namespace {
       // redispatchBoxed with specified dispatchKeySet cannot prevent composite kernels
       // called inside from going back up dispatcher. We still need the RAII guard here.
       op.redispatchBoxed(dispatchKeySet & c10::after_func_keyset, stack);
-    }
-
-    const auto num_returns = schema.returns().size();
-    const auto returns_begin = stack->size() - num_returns;
-    auto returns = torch::jit::last(stack, num_returns);
-    int ctr = 0;
-    for (int64_t idx = 0; idx < num_returns; ++idx) {
-      const auto& ivalue = returns[idx];
-      if (ivalue.isTensor()) {
-        at::Tensor t = ivalue.toTensor();
-        if (is_modal_pass) {
-          auto wrapped_t = at::functionalization::impl::makeFunctional(t);
-          auto wrapped_ivalue = c10::IValue(wrapped_t);
-          (*stack)[returns_begin + idx] = std::move(wrapped_ivalue);
-        }
-      } else if (ivalue.isTensorList()) {
-        auto tensors = ivalue.toTensorList();
-        if (is_modal_pass) {
-          auto tensors = ivalue.toTensorList();
-          auto wrapped_t = at::functionalization::impl::makeFunctional(tensors);
-          auto wrapped_ivalue = c10::IValue(wrapped_t);
-          (*stack)[returns_begin + idx] = std::move(wrapped_ivalue);
-        }
-      }
     }
   }
 }

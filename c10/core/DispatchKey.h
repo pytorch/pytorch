@@ -267,11 +267,11 @@ enum class DispatchKey : uint8_t {
   VmapMode,
 
   FuncTorchGradWrapper, // See Note [Out-of-tree vmap+grad prototype]
-  FuncTorchDynamicLayerFrontMode, // See Note [Out-of-tree vmap+grad prototype]
   // Alias and mutation removal.
   // If some backends want to opt into only alias removal or only mutation removal,
   // we can consider adding separate keys dedicated to those individual passes.
   Functionalize,
+  FuncTorchDynamicLayerFrontMode, // See Note [Out-of-tree vmap+grad prototype]
 
   // TESTING: This is intended to be a generic testing tensor type id.
   // Don't use it for anything real; its only acceptable use is within a single

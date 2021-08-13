@@ -1130,7 +1130,7 @@ def main() -> None:
             'func_definitions': Functionalize(Target.DEFINITION)(g),
             'func_registrations': Functionalize(Target.REGISTRATION)(g)},
         num_shards=4,
-        sharded_keys={'func_definitions'}
+        sharded_keys={'func_definitions', 'func_registrations'}
     )
 
     if options.output_dependencies:

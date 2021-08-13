@@ -1,12 +1,11 @@
 #include <ATen/AccumulateType.h>
 #include <ATen/ATen.h>
 #include <ATen/ExpandUtils.h>
-#include <ATen/FunctionalTensorImpl.h>
+#include <ATen/FunctionalTensorImplBase.h>
 #include <ATen/InferSize.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/core/DimVector.h>
-#include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/native/Copy.h>
 #include <ATen/native/cpu/CatKernel.h>
 #include <ATen/native/Resize.h>
@@ -23,7 +22,6 @@
 #include <c10/util/irange.h>
 #include <c10/util/Optional.h>
 #include <c10/util/SmallVector.h>
-#include <torch/library.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -2189,10 +2187,6 @@ Tensor view(const Tensor& self,
   return alias_with_sizes_and_strides(self, inferred_size, stride_value);
 }
 
-Tensor view_copy(const Tensor& self, IntArrayRef size) {
-  return self.view(size).clone();
-}
-
 Tensor alias(const Tensor& self) {
     return alias_with_sizes_and_strides(self, self.sizes(), self.strides());
 }
@@ -2462,14 +2456,12 @@ Tensor& replace_(Tensor& self, const Tensor& other) {
   auto self_impl = dynamic_cast<FunctionalTensorImplBase*>(self.unsafeGetTensorImpl());
   auto other_impl = dynamic_cast<FunctionalTensorImplBase*>(other.unsafeGetTensorImpl());
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(self_impl != nullptr);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(other_impl != nullptr);
   // INVARIANT: inputs to replace_() are always temporaries.
   // They should never have an alias, or be exposed to python.
   // This is important because we want to retain all of the
   // aliasing + python metadata from the original tensor
-  //
-  // In the functorch case, this corresponds to other not being wrapped.
-  // In the XLA case, this corresponds to the XLATensorImpl not having an alias.
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(other_impl == nullptr || !other_impl->is_view());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!other_impl->is_view());
   self_impl->replace_(other);
   return self;
 }

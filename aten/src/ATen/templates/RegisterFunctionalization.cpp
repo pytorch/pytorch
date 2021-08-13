@@ -1,5 +1,5 @@
 #include <ATen/core/LegacyTypeDispatch.h>
-#include <ATen/FunctionalTensorImpl.h>
+#include <ATen/FunctionalTensorImplBase.h>
 #include <ATen/RedispatchFunctions.h>
 #include <torch/library.h>
 

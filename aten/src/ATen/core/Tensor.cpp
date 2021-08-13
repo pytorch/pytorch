@@ -221,6 +221,20 @@ std::ostream& operator<<(std::ostream& str, ViewMeta::Type rhs) {
   return str << ViewMetaTypeToString(rhs);
 }
 
+Alias::Alias(const at::Tensor& base) : base_(base.clone()) {
+  auto impl = dynamic_cast<at::FunctionalTensorImplBase*>(base_.unsafeGetTensorImpl());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(impl != nullptr);
+  // Note [Marking Alias Tensors]
+  // In the functionalization pass, calling a view operation on a tensor forks it off an Alias object
+  // which is shared between the original tensor and the view.
+  // The Alias object contains a base tensor, which is used to sync operations across the view tensors.
+  // Throughout the Alias' life cylc,e we need to perform various views and reshapes on the base alias tensor.
+  // We don't want that process to recursively fork off another Alias object though, so we explicitly mark
+  // the base tensor as an alias.
+  // Another option would have been to implement separate {view}_copy() kernels for every corresponding view op,
+  // which have fallthrough kernels registered in the functionalization pass.
+  impl->mark_as_alias();
+}
 
 const at::Tensor& Alias::base() const {
   return base_;
@@ -246,8 +260,7 @@ void Alias::apply_update(const Update& update) {
           TORCH_CHECK(false, "Other types are not supported yet.");
     }
   }
-  t = t.clone();
-  base_.replace_(t);
+  base_ = t.clone();
 }
 
 void Alias::SyncUpdateOperations() {
@@ -269,6 +282,13 @@ bool Tensor::has_view_meta() const {
   // Only tensors that are opted into the functionalization pass can have a view meta.
   auto functional_impl = dynamic_cast<const at::FunctionalTensorImplBase*>(unsafeGetTensorImpl());
   return functional_impl != nullptr && functional_impl->is_view();
+}
+
+void Tensor::sync_() const {
+  // Only tensors that are opted into the functionalization pass can be synced
+  auto functional_impl = dynamic_cast<at::FunctionalTensorImplBase*>(unsafeGetTensorImpl());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(functional_impl != nullptr);
+  functional_impl->sync_();
 }
 
 const std::string& Tensor::name() const {

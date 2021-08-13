@@ -979,6 +979,10 @@ public:
   /// `Variable` is not a view, throw a `std::runtime_error`.
   const Tensor& _base() const;
 
+  /// If the tensor is part of the functionalization pass, syncs the tensor with any mutations
+  // that happened to its alias.
+  void sync_() const;
+
   /// Returns true if this tensor is opted into the functionalization pass, and has view metadata.
   bool has_view_meta() const;
 
@@ -1163,7 +1167,7 @@ inline c10::MaybeOwned<Tensor> Tensor::expect_contiguous(MemoryFormat memory_for
 }
 
 struct ViewMeta {
-  // The names of all existing non-composite view operators.
+  // The names of all existing view operators.
   enum class Type {
   // noOp and invalid are special.
     noOp,
@@ -1248,7 +1252,7 @@ class Alias {
         const at::Tensor new_val;
         std::vector<ViewMeta> view_metas;
     };
-    explicit Alias(at::Tensor& base) : base_(base) {}
+    explicit Alias(const at::Tensor& base);
     const at::Tensor& base() const;
     size_t generation() const { return generation_; }
     void add_update(const at::Tensor& updated_val, std::vector<ViewMeta> metas);
