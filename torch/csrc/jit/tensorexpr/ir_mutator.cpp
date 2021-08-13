@@ -198,7 +198,7 @@ ExprPtr IRMutator::mutate(BufPtr v) {
 
   std::vector<ExprPtr> dims_old = v->dims();
   std::vector<ExprPtr> dims_new(dims_old.size());
-  for (auto i : c10::irange(dims_old.size())) {
+  for (const auto i : c10::irange(dims_old.size())) {
     dims_new[i] = dims_old[i]->accept_mutator(this);
     any_change |= (dims_new[i] != dims_old[i]);
   }

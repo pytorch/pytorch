@@ -33,27 +33,6 @@ void index_put_with_sort_kernel_thrust_helper(Tensor &linearIndex, Tensor &orig_
 }
 
 template<typename index_t>
-int embedding_renorm_cuda_unique_copy(Tensor &indices_contig, Tensor &unique_indices) {
-  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-  auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
-  auto policy = thrust::cuda::par(allocator).on(stream);
-
-  using device_ptr = thrust::device_ptr<index_t>;
-
-  auto num_indices = indices_contig.numel();
-  auto indices_data = device_ptr(indices_contig.data_ptr<index_t>());
-  auto unique_data = device_ptr(unique_indices.data_ptr<index_t>());
-  auto end = thrust::unique_copy(policy, indices_data, indices_data + num_indices, unique_data);
-  auto num_unique_indices = static_cast<int>(end - unique_data);
-  return num_unique_indices;
-}
-
-template
-int embedding_renorm_cuda_unique_copy<int>(Tensor &indices_contig, Tensor &unique_indices);
-template
-int embedding_renorm_cuda_unique_copy<int64_t>(Tensor &indices_contig, Tensor &unique_indices);
-
-template<typename index_t>
 void embedding_dense_backward_cuda_scan(Tensor &sorted_indices, Tensor &count) {
   using device_ptr = thrust::device_ptr<index_t>;
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
