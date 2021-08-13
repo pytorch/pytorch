@@ -2360,6 +2360,10 @@ Constructs a complex tensor whose elements are Cartesian coordinates
 corresponding to the polar coordinates with absolute value :attr:`abs` and angle
 :attr:`angle`.
 
+.. note::
+    This implementation follows C++'s `std::polar <https://en.cppreference.com/w/cpp/numeric/complex/polar>`_
+    which is different from Python's `cmath.polar` and SciPy's `linalg.polar`.
+
 .. math::
     \text{out} = \text{abs} \cdot \cos(\text{angle}) + \text{abs} \cdot \sin(\text{angle}) \cdot j
 """ + r"""
