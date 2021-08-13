@@ -20,6 +20,8 @@ from torch.testing._internal.common_device_type import (instantiate_device_type_
                                                         deviceCountAtLeast, skipCUDAIfCudnnVersionLessThan,
                                                         skipCUDAIf, skipMeta)
 
+import test_autograd
+
 
 # Generic device type autograd tests.
 class TestAutogradDeviceType(TestCase):
@@ -283,7 +285,7 @@ class TestAutogradDeviceType(TestCase):
 
         # Parent graph cpu graph.
         t4 = t1 * t1
-        t5 = TestAutograd.SimulateBackwardError.apply(t4)
+        t5 = test_autograd.TestAutograd.SimulateBackwardError.apply(t4)
 
         # Child gpu graph (much longer than parent graph).
         prev = t2 * t2
