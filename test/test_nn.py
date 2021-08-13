@@ -13270,6 +13270,12 @@ class TestNNDeviceType(NNTestCase):
 
             self.assertEqual(x.grad, ref_x.grad)
 
+    @onlyOnCPUAndCUDA
+    def test_LocalResponseNorm_empty(self, device):
+        mod = torch.nn.LocalResponseNorm(2).to(device)
+        inp = torch.ones(0, 5, 24, 24, device=device)
+        self._test_module_empty_input(mod, inp, check_size=False)
+
     @onlyCUDA   # Test if CPU and GPU results match
     def test_ReflectionPad3d_large(self, device):
         shapes = ([2, 1000, 7, 7, 7], [1000, 2, 7, 7, 7])
@@ -16672,6 +16678,7 @@ class TestNNDeviceType(NNTestCase):
                 self.assertEqual(output, output_ng, rtol=1e-2, atol=1e-5)
 
     @onlyCUDA
+    @skipCUDAIfRocm
     @skipCUDAIfNoCudnn
     @dtypes(torch.float, torch.double, torch.float16)
     def test_cudnn_convolution_relu(self, device, dtype):

@@ -28,7 +28,7 @@ StmtPtr Tensor::constructStmt(
   ExprPtr init_expr = buf()->initializer();
 
   if (reduce_ndim > 0) {
-    for (auto i : c10::irange(reduce_ndim)) {
+    for (const auto i : c10::irange(reduce_ndim)) {
       // Going in reverse order: from innermost loop to the outermost
       size_t dim_index = reduce_ndim - i - 1;
       s = alloc<For>(
@@ -40,7 +40,7 @@ StmtPtr Tensor::constructStmt(
     }
   }
 
-  for (auto i : c10::irange(ndim)) {
+  for (const auto i : c10::irange(ndim)) {
     // Going in reverse order: from innermost loop to the outermost
     size_t dim_index = ndim - i - 1;
     s = alloc<For>(args[dim_index], alloc<IntImm>(0), buf()->dim(dim_index), s);
