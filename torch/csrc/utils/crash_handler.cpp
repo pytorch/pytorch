@@ -119,7 +119,7 @@ void enable_minidumps_on_exceptions() {
 // On unspported systems we can't do anything, so stub out everything.
 void enable_minidumps(const std::string& dir) {
   AT_ERROR(
-      "Minidump collection is currently only implemented for Linux platforms");
+      "Minidump collection is currently only implemented for Linux/MacOS");
 }
 
 void disable_minidumps() {
@@ -128,7 +128,7 @@ void disable_minidumps() {
 
 const std::string& get_minidump_directory() {
   AT_ERROR(
-      "Minidump collection is currently only implemented for Linux platforms");
+      "Minidump collection is currently only implemented for Linux/MacOS");
 }
 
 bool is_enabled_on_exceptions() {
@@ -137,12 +137,12 @@ bool is_enabled_on_exceptions() {
 
 void write_minidump() {
   AT_ERROR(
-      "Minidump collection is currently only implemented for Linux platforms");
+      "Minidump collection is currently only implemented for Linux/MacOS");
 }
 
 void enable_minidumps_on_exceptions() {
   AT_ERROR(
-      "Minidump collection is currently only implemented for Linux platforms");
+      "Minidump collection is currently only implemented for Linux/MacOS");
 }
 
 #endif
