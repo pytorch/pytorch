@@ -290,7 +290,7 @@ def check_compiler_ok_for_platform(compiler: str) -> bool:
     return False
 
 
-def get_compiler_abi_compatibility_and_version(compiler) -> Tuple[bool, Tuple[str, str, str]]:
+def get_compiler_abi_compatibility_and_version(compiler) -> Tuple[bool, Tuple[str, ...]]:
     r'''
     Determine if the given compiler is ABI-compatible with PyTorch alongside
     its version.
@@ -768,7 +768,7 @@ class BuildExtension(build_ext, object):
             ext_filename = '.'.join(without_abi)
         return ext_filename
 
-    def _check_abi(self) -> Tuple[str, Tuple[str, str, str]]:
+    def _check_abi(self) -> Tuple[str, Tuple[str, ...]]:
         # On some platforms, like Windows, compiler_cxx is not available.
         if hasattr(self.compiler, 'compiler_cxx'):
             compiler = self.compiler.compiler_cxx[0]
@@ -785,7 +785,7 @@ class BuildExtension(build_ext, object):
             raise UserWarning(msg)
         return compiler, version
 
-    def _check_cuda_version(self, compiler_name: str, compiler_version: Tuple[str, str, str]):
+    def _check_cuda_version(self, compiler_name: str, compiler_version: Tuple[str, ...]):
         if CUDA_HOME:
             nvcc = os.path.join(CUDA_HOME, 'bin', 'nvcc')
             cuda_version_str = subprocess.check_output([nvcc, '--version']).strip().decode()
