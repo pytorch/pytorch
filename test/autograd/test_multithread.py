@@ -7,14 +7,44 @@ from torch.testing._internal.common_utils import TestCase, run_tests
 
 class TestMultithreadAutograd(TestCase):
     def _run_py_multithread_fn(self, fn, args=(), num_threads=10, kwargs=None):
+
+        class PropagatingThread(threading.Thread):
+            '''Helper class to propagate exception from child
+            thread to main thread on join.
+
+            Reference: https://stackoverflow.com/a/31614591/5602957
+            '''
+
+            def run(self):
+                self.exception = None
+                try:
+                    self.ret = super(PropagatingThread, self).run()
+                except Exception as e:
+                    self.exception = e
+
+            def join(self, timeout=None):
+                super(PropagatingThread, self).join(timeout)
+                if self.exception:
+                    raise self.exception from self.exception
+                return self.ret
+
         threads = []
         for _ in range(num_threads):
-            p = threading.Thread(target=fn, args=(args))
+            p = PropagatingThread(target=fn, args=args)
             p.start()
             threads.append(p)
 
         for p in threads:
             p.join()
+
+    def test_multithreaded_exception_propagation(self):
+        # Test whether exception in child thread
+        # are propagated to main thread.
+        def fn():
+            self.assertTrue(False)
+
+        with self.assertRaises(AssertionError):
+            self._run_py_multithread_fn(fn)
 
     def test_simple_backward(self):
         # simple multithreaded backward that create threads in the beginning of training

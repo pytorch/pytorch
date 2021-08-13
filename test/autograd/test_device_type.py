@@ -4,8 +4,8 @@ import time
 from itertools import product, permutations
 from functools import partial
 import torch
+import torch.nn
 
-from torch import nn
 from torch._six import inf, nan
 from torch.autograd.profiler import emit_nvtx
 from torch.utils.checkpoint import checkpoint

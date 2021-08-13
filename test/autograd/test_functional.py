@@ -4,9 +4,8 @@ import torch
 
 import torch.autograd.functional as autogradF
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import (TestCase, run_tests,
-                                                  load_tests,
-                                                  gradcheck, gradgradcheck)
+from torch.testing._internal.common_utils import (TestCase, run_tests, gradcheck,
+                                                  gradgradcheck)
 
 class TestAutogradFunctional(TestCase):
     def _assert_same_struct(self, res, base):

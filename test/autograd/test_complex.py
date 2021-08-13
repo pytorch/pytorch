@@ -1,7 +1,6 @@
 import torch
 
-from torch.testing._internal.common_utils import (TestCase, run_tests,
-                                                  gradcheck, make_tensor)
+from torch.testing._internal.common_utils import TestCase, run_tests, gradcheck
 
 class TestAutogradComplex(TestCase):
     def test_view_func_for_complex_views(self):
