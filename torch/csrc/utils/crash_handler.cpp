@@ -2,9 +2,18 @@
 #include <cstring>
 #include <iostream>
 
+// #ifdef ADD_BREAKPAD_SIGNAL_HANDLER
+// #include <breakpad/client/linux/handler/exception_handler.h>
+
 #ifdef ADD_BREAKPAD_SIGNAL_HANDLER
+#ifdef __linux__
 #include <breakpad/client/linux/handler/exception_handler.h>
 #include <csignal>
+#elif __APPLE__
+#include <breakpad/src/client/mac/handler/exception_handler.h>
+#else
+#error unsupported platform
+#endif
 #endif
 
 #include <c10/util/Exception.h>
@@ -19,6 +28,7 @@ static std::unique_ptr<google_breakpad::ExceptionHandler> handler; // NOLINT
 static std::string minidump_directory; // NOLINT
 static bool enabled_for_exceptions = false; // NOLINT
 
+#if __linux__
 bool dump_callback(
     const google_breakpad::MinidumpDescriptor& descriptor,
     void* context,
@@ -28,10 +38,28 @@ bool dump_callback(
   }
   return succeeded;
 }
+#elif __APPLE__
+
+bool dump_callback(
+    const char* dump_dir,
+    const char* minidump_id,
+    void* context,
+    bool succeeded) {
+  if (succeeded) {
+    std::cerr << "Wrote minidump to " << dump_dir << "/" << minidump_id
+              << ".dmp" << std::endl;
+  }
+  return succeeded;
+}
+
+#else
+#error unsupported platform
+#endif
 
 void enable_minidumps(const std::string& dir) {
   minidump_directory = dir;
-  // The constructor here registers the actual signal handler
+// The constructor here registers the actual signal handler
+#ifdef __linux__
   handler = std::make_unique<google_breakpad::ExceptionHandler>(
       google_breakpad::MinidumpDescriptor(minidump_directory),
       nullptr,
@@ -39,6 +67,17 @@ void enable_minidumps(const std::string& dir) {
       nullptr,
       true,
       -1);
+#elif __APPLE__
+  handler = std::make_unique<google_breakpad::ExceptionHandler>(
+      /*dump_path=*/minidump_directory.c_str(),
+      /*filter=*/nullptr,
+      /*callback=*/dump_callback,
+      /*callback_context=*/nullptr,
+      /*install_handler=*/true,
+      /*port_name=*/nullptr);
+#else
+#error unsupported platform
+#endif
 }
 
 void disable_minidumps() {

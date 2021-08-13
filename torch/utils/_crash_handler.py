@@ -7,8 +7,8 @@ import torch
 DEFAULT_MINIDUMP_DIR = "/tmp/pytorch_crashes"
 
 def enable_minidumps(directory=DEFAULT_MINIDUMP_DIR):
-    if sys.platform != "linux":
-        raise RuntimeError("Minidump collection is currently only implemented for Linux platforms")
+    if sys.platform != "linux" and sys.platform != "darwin":
+        raise RuntimeError("Minidump collection is currently only implemented for Linux/MacOS platforms")
 
     if directory == DEFAULT_MINIDUMP_DIR:
         pathlib.Path(directory).mkdir(parents=True, exist_ok=True)
