@@ -3,7 +3,7 @@ from tools.codegen.api.types import DispatcherSignature, CppSignatureGroup
 from tools.codegen.code_template import CodeTemplate
 from tools.codegen.context import method_with_native_function
 from tools.codegen.model import (
-    SelfArgument, Argument, NativeFunction, NativeFunctionsGroup, BaseType, BaseTy,
+    Argument, NativeFunction, NativeFunctionsGroup, BaseType, BaseTy,
     ListType, FunctionSchema
 )
 from typing import List, Optional, Union
@@ -74,19 +74,6 @@ def return_names_str(f: NativeFunction) -> str:
         return f.func.arguments.self_arg.argument.name
     raise AssertionError("Unable to handle functionalization for op={str(f.func.name)}")
 
-def gen_clone_output_str(func: FunctionSchema) -> str:
-    if len(func.returns) == 1 and func.returns[0].type == BaseType(BaseTy.Tensor):
-        return 'out = tmp_out.clone();'
-    elif len(func.returns) == 1 \
-            and isinstance(func.returns[0].type, ListType) \
-            and func.returns[0].type.elem == BaseType(BaseTy.Tensor):
-        return """\
-for (const auto& t : tmp_out) {{
-    out.push_back(t.clone());
-}}"""
-    else:
-        raise AssertionError(f"unsupported return type for op={str(func.name)}. type={str(func.returns)}")
-
 def emit_functionalization_body(f: NativeFunction, g: Optional[NativeFunctionsGroup]) -> str:
     dispatcher_sig = DispatcherSignature.from_schema(f.func)
     dispatcher_exprs = dispatcher_sig.exprs()
@@ -116,8 +103,6 @@ def emit_functionalization_body(f: NativeFunction, g: Optional[NativeFunctionsGr
         # The codegen enforces the naming schema for different view metas.
         view_meta_enum = f'at::ViewMeta::Type::{str(f.func.name).replace(".", "_")}'
 
-        clone_output = gen_clone_output_str(f.func)
-
         if str(f.func.name) not in [
                 # TODO: add view operators to this list as we add functionalization support for them.
                 # More complex views might require changes to the codegen output (e.g. split())
@@ -135,7 +120,6 @@ def emit_functionalization_body(f: NativeFunction, g: Optional[NativeFunctionsGr
             cpp_api_name=api_name,
             view_meta_enum=view_meta_enum,
             redispatch_original_args=redispatch_original_args,
-            clone_output=clone_output,
             original_args=original_args
         )
 

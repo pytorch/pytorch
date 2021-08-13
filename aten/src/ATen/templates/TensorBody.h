@@ -38,6 +38,7 @@ struct Type;
 class DeprecatedTypeProperties;
 class Tensor;
 class Alias;
+struct ViewMeta;
 } // namespace at
 namespace at {
 namespace indexing {
@@ -55,7 +56,6 @@ namespace at {
 
 class Tensor;
 using TensorList = ArrayRef<Tensor>;
-class ViewMeta;
 
 using Stream = c10::Stream;
 
