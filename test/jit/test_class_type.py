@@ -1538,3 +1538,12 @@ class TestClassType(JitTestCase):
         for fn in (fn_a, fn_b, fn_c, fn_d, fn_e):
             with self.assertRaisesRegex(RuntimeError, error_message_regex):
                 torch.jit.script(fn)
+
+    def test_jit_script_not_as_decorator(self):
+        from jit._imported_class_test import MyObj, inner, Nada, simple_func, NoConstructor
+        # Assert that the below does not raise
+        torch.jit.script(MyObj)  # class that uses a symbol defined in another module
+        torch.jit.script(inner())  # class that uses a symbol in closure
+        torch.jit.script(Nada)  # empty class
+        torch.jit.script(simple_func)  # regular function
+        torch.jit.script(NoConstructor)  # class with no constructor

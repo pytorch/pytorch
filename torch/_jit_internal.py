@@ -160,15 +160,36 @@ def createResolutionCallbackFromFrame(frames_up: int = 0):
     return createResolutionCallbackFromEnv(env())
 
 
+def get_closure_class(clazz):
+    """
+    Get a dictionary of closed over variables from a class.
+
+    The closure of a class is defined as the union of closure of it's member functions.
+    """
+    captures = {}
+    captures[clazz.__name__] = clazz
+    functions = inspect.getmembers(clazz, predicate=inspect.isfunction)
+    for _, datadesc in inspect.getmembers(clazz, predicate=inspect.isdatadescriptor):
+        # Case of getter / setter marked with @property / @something.setter
+        # Fetch getter and setter
+        functions.extend(inspect.getmembers(datadesc, predicate=inspect.isfunction))
+    for _, member in functions:
+        captures.update(get_type_hint_captures(member))
+        captures.update(get_closure(member))
+    return captures
+
+
 def get_closure(fn):
     """
     Get a dictionary of closed over variables from a function
     """
     captures = {}
     captures.update(fn.__globals__)
-
     for index, captured_name in enumerate(fn.__code__.co_freevars):
-        captures[captured_name] = fn.__closure__[index].cell_contents
+        try:
+            captures[captured_name] = fn.__closure__[index].cell_contents
+        except ValueError:
+            pass
 
     return captures
 
@@ -220,10 +241,15 @@ def get_closure(fn):
 
 def createResolutionCallbackFromClosure(fn):
     """
-    Create a resolutionCallback by introspecting the function instead of
+    Create a resolutionCallback by introspecting the function or class instead of
     looking up the stack for the enclosing scope
+
+    A closure of a class is defined as the union of closure of it's member functions.
     """
-    closure = get_closure(fn)
+    if inspect.isclass(fn):
+        closure = get_closure_class(fn)
+    else:
+        closure = get_closure(fn)
 
     class closure_lookup(object):
         # This is a class since `closure` is a dict and it's easier in
@@ -388,7 +414,7 @@ def createResolutionCallbackForClassMethods(cls):
     # cls is a type here, so `ismethod` is false since the methods on the type
     # aren't bound to anything, so Python treats them as regular functions
     fns = [getattr(cls, name) for name in cls.__dict__ if inspect.isroutine(getattr(cls, name))]
-    captures = {}
+    captures = {cls.__name__: cls}
 
     for fn in fns:
         captures.update(get_closure(fn))

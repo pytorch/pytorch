@@ -333,6 +333,21 @@ class FooToPickle(torch.nn.Module):
         super(FooToPickle, self).__init__()
         self.bar = torch.jit.ScriptModule()
 
+
+class SomeClass(object):
+    def __init__(self):
+        self.num = 99
+
+    def __iadd__(self, x):
+        # type: (int)
+        self.num += x
+        return self
+
+    def __eq__(self, other):
+        # type: (SomeClass) -> bool
+        return self.num == other.num
+
+
 class TestJit(JitTestCase):
     @unittest.skip("Requires a lot of RAM")
     def test_big(self):
@@ -4115,19 +4130,7 @@ def foo(x):
                 a += SomeNonAddableClass()
                 return a
 
-        @torch.jit.script
-        class SomeClass(object):
-            def __init__(self):
-                self.num = 99
-
-            def __iadd__(self, x):
-                # type: (int)
-                self.num += x
-                return self
-
-            def __eq__(self, other):
-                # type: (SomeClass) -> bool
-                return self.num == other.num
+        torch.jit.script(SomeClass)
 
         @torch.jit.script
         class SomeOutOfPlaceClass(object):
