@@ -335,12 +335,12 @@ def get_compiler_abi_compatibility_and_version(compiler) -> Tuple[bool, Tuple[st
         return (False, ('0', '0', '0'))
 
     if tuple(map(int, version)) >= minimum_required_version:
-        return True
+        return (True, ('0', '0', '0'))
 
     compiler = f'{compiler} {".".join(version)}'
     warnings.warn(ABI_INCOMPATIBILITY_WARNING.format(compiler))
 
-    return (False, version)
+    return (False, tuple(version))
 
 
 # See below for why we inherit BuildExtension from object.
@@ -768,7 +768,7 @@ class BuildExtension(build_ext, object):
             ext_filename = '.'.join(without_abi)
         return ext_filename
 
-    def _check_abi(self) -> Tuple[str, Tuple[str]]:
+    def _check_abi(self) -> Tuple[str, Tuple[str, str, str]]:
         # On some platforms, like Windows, compiler_cxx is not available.
         if hasattr(self.compiler, 'compiler_cxx'):
             compiler = self.compiler.compiler_cxx[0]
@@ -803,7 +803,7 @@ class BuildExtension(build_ext, object):
                     cuda_compiler_bounds = CUDA_CLANG_VERSIONS if compiler_name.startswith('clang') else CUDA_GCC_VERSIONS
 
                     min_compiler_version, max_compiler_version = cuda_compiler_bounds[cuda_str_version]
-                    major_compiler_version = int(compiler_version[0])
+                    major_compiler_version = float(compiler_version[0])
                     if isinstance(min_compiler_version, float) or isinstance(max_compiler_version, float):
                         major_compiler_version = float('.'.join(compiler_version[:2]))
                     version_str = '.'.join(compiler_version)
