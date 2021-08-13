@@ -6719,6 +6719,7 @@ op_db: List[OpInfo] = [
     OpInfo('nn.functional.batch_norm',
            aten_name='batch_norm',
            dtypes=floating_types(),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            supports_out=False,
            supports_autograd=False,
            skips=(
