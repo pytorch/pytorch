@@ -43,7 +43,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
     run_tests,
     retry_on_connect_failures,
-    TEST_WITH_ASAN,
+    TEST_WITH_DEV_DBG_ASAN,
     TEST_WITH_TSAN,
     sandcastle_skip,
     sandcastle_skip_if,
@@ -52,6 +52,11 @@ from torch.utils.checkpoint import checkpoint
 
 if not IS_WINDOWS:
     from torch.distributed.optim.functional_sgd import _FunctionalSGD
+    from torch.distributed.optim.functional_adam import _FunctionalAdam
+    _SUPPORTED_OPTIM_MAPPING = {
+        _FunctionalSGD: torch.optim.SGD,
+        _FunctionalAdam: torch.optim.Adam
+    }
 
 if TEST_WITH_TSAN:
     print(
@@ -60,7 +65,7 @@ if TEST_WITH_TSAN:
     )
     sys.exit(0)
 
-if TEST_WITH_ASAN:
+if TEST_WITH_DEV_DBG_ASAN:
     print(
         "Skip ASAN as torch + multiprocessing spawn have known issues", file=sys.stderr
     )
@@ -293,20 +298,6 @@ class ProcessGroupNCCLTest(TestCase):
                 torch.tensor([float(self.num_gpus * (self.num_gpus + 1) / 2)]),
                 tensors[i],
             )
-
-        # Avg (only available for NCCL 2.10+)
-        if hasattr(c10d.ReduceOp, "AVG"):
-            tensors = [torch.tensor([i + 1]).cuda(i) for i in range(self.num_gpus)]
-
-            allreduce(tensors, c10d.ReduceOp.AVG)
-
-            for i in range(self.num_gpus):
-                # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                ndev = float(self.num_gpus)
-                self.assertEqualIgnoreType(
-                    torch.tensor([ndev * (ndev + 1.) / (2. * ndev)]),
-                    tensors[i],
-                )
 
         # Product
         tensors = []
@@ -1614,15 +1605,20 @@ class DistributedDataParallelTest(
             # check whether the grads are equal to what DDP without hook would return.
             self._run_and_verify_hook(gpu_model, 8, 0.25 * torch.ones(2, 2))
 
-    def _test_hook_then_optimizer(self, gradient_as_bucket_view=False):
+    def _test_hook_then_optimizer(
+        self,
+        functional_optim_cls,
+        *functional_optim_args,
+        gradient_as_bucket_view=False,
+        **functional_optim_kwargs
+    ):
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
         hook, hook_state = default.allreduce_hook, process_group
-        sgd_lr = 1e-2
-        sgd_momentum = 0.9
-        sgd_weight_decay = 0.01
         opt_hook_state = default._OptimizerHookState(
-            _FunctionalSGD, sgd_lr, momentum=sgd_momentum, weight_decay=sgd_weight_decay
+            functional_optim_cls,
+            *functional_optim_args,
+            **functional_optim_kwargs,
         )
         gpu_model = self._gpu_model_with_ddp_comm_hook(
             process_group,
@@ -1641,11 +1637,10 @@ class DistributedDataParallelTest(
         gpu_model_allreduce = self._gpu_model_with_ddp_comm_hook(
             process_group, default.allreduce_hook, gradient_as_bucket_view, hook_state
         )
-        sgd = torch.optim.SGD(
+        sgd = _SUPPORTED_OPTIM_MAPPING.get(functional_optim_cls)(
             gpu_model_allreduce.parameters(),
-            sgd_lr,
-            momentum=sgd_momentum,
-            weight_decay=sgd_weight_decay,
+            *functional_optim_args,
+            **functional_optim_kwargs,
         )
         for _ in range(8):
             gpu_model_allreduce.zero_grad()
@@ -1717,13 +1712,58 @@ class DistributedDataParallelTest(
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_hook_then_optimizer_nccl(self):
-        self._test_hook_then_optimizer()
+    def test_hook_then_sgd_nccl(self):
+        sgd_lr = 1e-2
+        sgd_momentum = 0.9
+        sgd_weight_decay = 0.01
+        self._test_hook_then_optimizer(
+            _FunctionalSGD,
+            sgd_lr,
+            momentum=sgd_momentum,
+            weight_decay=sgd_weight_decay,
+        )
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_hook_then_optimizer_nccl_grad_as_bucket_view(self):
-        self._test_hook_then_optimizer(gradient_as_bucket_view=True)
+    def test_hook_then_sgd_nccl_grad_as_bucket_view(self):
+        sgd_lr = 1e-2
+        sgd_momentum = 0.9
+        sgd_weight_decay = 0.01
+        self._test_hook_then_optimizer(
+            _FunctionalSGD,
+            sgd_lr,
+            momentum=sgd_momentum,
+            weight_decay=sgd_weight_decay,
+            gradient_as_bucket_view=True
+        )
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_hook_then_adam_nccl(self):
+        adam_lr = 1e-2
+        adam_betas = (0.9, 0.99)
+        adam_eps = 1e-6
+        self._test_hook_then_optimizer(
+            _FunctionalAdam,
+            adam_lr,
+            betas=adam_betas,
+            eps=adam_eps,
+            gradient_as_bucket_view=True
+        )
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_hook_then_adam_nccl_grad_as_bucket_view(self):
+        adam_lr = 1e-2
+        adam_betas = (0.9, 0.99)
+        adam_eps = 1e-6
+        self._test_hook_then_optimizer(
+            _FunctionalAdam,
+            adam_lr,
+            betas=adam_betas,
+            eps=adam_eps,
+            gradient_as_bucket_view=True
+        )
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
@@ -2067,7 +2107,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         pg.allreduce(torch.rand(10).cuda(self.rank))
 
     @requires_nccl()
-    @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
+    @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
     @skip_if_rocm
     def test_nccl_errors_nonblocking(self):
@@ -2130,7 +2170,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
 
     @with_nccl_blocking_wait
     @requires_nccl()
-    @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
+    @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
     @skip_if_rocm
     def test_nccl_errors_blocking_clean_exit(self):
@@ -2138,7 +2178,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
 
     @with_nccl_blocking_wait
     @requires_nccl()
-    @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
+    @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
     @skip_if_rocm
     def test_nccl_errors_blocking_nonzero_exit(self):
@@ -2146,7 +2186,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
 
     @with_nccl_blocking_wait
     @requires_nccl()
-    @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
+    @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
     @skip_if_rocm
     @sandcastle_skip(
@@ -2157,7 +2197,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
 
     @with_nccl_blocking_wait
     @requires_nccl()
-    @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
+    @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
     @skip_if_rocm
     def test_nccl_errors_blocking_sigkill(self):
@@ -2165,7 +2205,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
 
     @with_nccl_blocking_wait
     @requires_nccl()
-    @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
+    @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
     @skip_if_rocm
     def test_nccl_errors_blocking_sigterm(self):
@@ -2173,7 +2213,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
 
     @with_nccl_blocking_wait
     @requires_nccl()
-    @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
+    @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
     def test_nccl_blocking_wait_with_barrier(self):
         store = c10d.FileStore(self.file_name, self.world_size)

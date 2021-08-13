@@ -581,14 +581,41 @@ class TestQuantizeFx(QuantizationTestCase):
             node_occurrence = dict()
             if weight_prepack_node:
                 node_occurrence[weight_prepack_node] = 0
-            self.checkGraphModeFxOp(
+            result_dict = self.checkGraphModeFxOp(
                 ModuleClass(*module_constructor_inputs),
                 inputs, quant_type,
                 expected_node=quantized_node,
                 expected_node_occurrence=node_occurrence,
                 is_reference=True)
-            # TODO: extra checks to make sure weight_activation_post_process is attached
-            # to the float modules in reference patterns
+            qr = result_dict["quantized_reference"]
+
+            def checkWeightQParams(model):
+                for module_name in ("linear", "conv"):
+                    if hasattr(model, module_name):
+                        self.assertTrue(hasattr(qr.get_submodule(module_name), "_weight_qparams"))
+                        self.assertTrue("Reference" in qr.get_submodule(module_name)._get_name())
+
+            def checkSerDeser(model):
+                for module_name in ("linear", "conv"):
+                    if hasattr(model, module_name):
+                        # make sure seralization works
+                        state_dict = copy.deepcopy(model.state_dict())
+                        self.assertTrue(module_name + "._weight_qparams" in state_dict)
+
+                        # check load_state_dict restores states
+                        module = getattr(model, module_name)
+                        prev_scale = module._weight_qparams["scale"]
+                        module._weight_qparams["scale"] = None
+                        model.load_state_dict(state_dict)
+                        self.assertTrue(torch.equal(prev_scale, module._weight_qparams["scale"]))
+
+
+            checkWeightQParams(qr)
+            qr = copy.deepcopy(qr)
+            # make sure the qparams are preserved after copy
+            checkWeightQParams(qr)
+
+            checkSerDeser(qr)
 
     @skipIfNoFBGEMM
     def test_dynamic_quant_weight_observer(self):
@@ -1583,14 +1610,14 @@ class TestQuantizeFx(QuantizationTestCase):
         matches = ['.fake_quant_enabled', '.observer_enabled']
         for key, v in scripted.state_dict().items():
             if any(x in key for x in matches):
-                self.assertEqual(v, torch.tensor([0], dtype=torch.uint8))
+                self.assertEqual(v, torch.tensor([0], dtype=torch.int64))
 
         # enable them back
         scripted.apply(torch.quantization.enable_fake_quant)
         scripted.apply(torch.quantization.enable_observer)
         for key, v in scripted.state_dict().items():
             if any(x in key for x in matches):
-                self.assertEqual(v, torch.tensor([1], dtype=torch.uint8))
+                self.assertEqual(v, torch.tensor([1], dtype=torch.int64))
 
     @skipIfNoFBGEMM
     def test_save_observer_state_dict(self):
@@ -2545,7 +2572,7 @@ class TestQuantizeFx(QuantizationTestCase):
         self.checkGraphModeFxOp(
             m1, data, QuantType.QAT,
             prepare_expected_node_occurrence={
-                ns.call_module(torch.quantization.FakeQuantize): 1,
+                ns.call_module(torch.quantization.FusedMovingAvgObsFakeQuantize): 1,
             },
             expected_node_occurrence={
                 ns.call_function(torch.quantize_per_tensor): 1,
@@ -2567,7 +2594,7 @@ class TestQuantizeFx(QuantizationTestCase):
             m2, data, QuantType.QAT,
             prepare_expected_node_occurrence={
                 # one for weights, one for activations
-                ns.call_module(torch.quantization.FakeQuantize): 2,
+                ns.call_module(torch.quantization.FusedMovingAvgObsFakeQuantize): 2,
             },
             expected_node_occurrence={
                 ns.call_function(torch.quantize_per_tensor): 1,
@@ -2589,7 +2616,7 @@ class TestQuantizeFx(QuantizationTestCase):
             m3, data, QuantType.QAT,
             prepare_expected_node_occurrence={
                 # one for weights, one for activations
-                ns.call_module(torch.quantization.FakeQuantize): 2,
+                ns.call_module(torch.quantization.FusedMovingAvgObsFakeQuantize): 2,
             },
             expected_node_occurrence={
                 ns.call_function(torch.quantize_per_tensor): 1,
@@ -2879,7 +2906,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 },
                 # There should be 3 observers: after input, weight and activation.
                 QuantType.QAT: {
-                    ns.call_module(torch.quantization.FakeQuantize): 3,
+                    ns.call_module(torch.quantization.FusedMovingAvgObsFakeQuantize): 3,
                 },
             }
             model = FuncLinear(use_bias, has_relu, f_relu)
@@ -3117,7 +3144,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 },
                 # There should be 3 observers: after input, weight and activation.
                 QuantType.QAT: {
-                    ns.call_module(torch.quantization.FakeQuantize): 3,
+                    ns.call_module(torch.quantization.FusedMovingAvgObsFakeQuantize): 3,
                 },
             }
             data_dims = [2, 3] + [4] * dim
@@ -3396,7 +3423,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
 
         m = M()
         expected_node_occurrence = {
-            ns.call_module(torch.quantization.FakeQuantize): 6,
+            ns.call_module(torch.quantization.FusedMovingAvgObsFakeQuantize): 6,
         }
         self._test_quantized_add_mul_qat(m, expected_node_occurrence)
 
@@ -3419,7 +3446,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
 
         m = M()
         expected_node_occurrence = {
-            ns.call_module(torch.quantization.FakeQuantize): 6,
+            ns.call_module(torch.quantization.FusedMovingAvgObsFakeQuantize): 6,
         }
         self._test_quantized_add_mul_qat(m, expected_node_occurrence)
 
@@ -3443,7 +3470,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             m, {'': torch.quantization.get_default_qat_qconfig('fbgemm')},
             prepare_custom_config_dict={"input_quantized_idxs": [0]})
         expected_node_occurrence = {
-            ns.call_module(torch.quantization.FakeQuantize): 0,
+            ns.call_module(torch.quantization.FusedMovingAvgObsFakeQuantize): 0,
         }
         self.checkGraphModuleNodes(
             mp, expected_node_occurrence=expected_node_occurrence)
@@ -3600,17 +3627,24 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 else:
                     return self.op(input, self.inplace)
 
-        options = itertools.product([True, False], [True, False], self.static_quant_types)
+        options = itertools.product([True, False], [True, False], self.static_quant_types, [True, False])
         quantized_nodes = {
             # is_module
-            True: ns.call_module(quantized_module),
-            False: ns.call_function(quantized_op),
+            True: {
+                # is_reference
+                True: ns.call_module(float_module),
+                False: ns.call_module(quantized_module),
+            },
+            False: {
+                True: ns.call_function(float_op),
+                False: ns.call_function(quantized_op),
+            }
         }
 
-        for is_module, is_inplace, quant_type in options:
+        for is_module, is_inplace, quant_type, is_reference in options:
             self.checkGraphModeFxOp(
                 M(is_module, is_inplace), self.img_data_2d,
-                quant_type, quantized_nodes[is_module])
+                quant_type, quantized_nodes[is_module][is_reference], is_reference=is_reference)
 
     def test_hardswish(self):
         self._test_activation_impl(nn.Hardswish, F.hardswish, nnq.Hardswish, torch.ops.quantized.hardswish)
@@ -5092,6 +5126,8 @@ class TestQuantizeFxModels(QuantizationTestCase):
         prepared.to(device)
         prepared_ref.to(device)
 
+        prepared.apply(torch.quantization.disable_fake_quant)
+        prepared.apply(torch.quantization.disable_observer)
         prepared_ref.apply(torch.quantization.disable_fake_quant)
         prepared_ref.apply(torch.quantization.disable_observer)
 
