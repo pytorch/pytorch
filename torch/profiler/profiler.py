@@ -15,16 +15,13 @@ class ProfilerAction(Enum):
     """
     Profiler actions that can be taken at the specified intervals
     """
-
     NONE = 0
     WARMUP = 1
     RECORD = 2
     RECORD_AND_SAVE = 3
 
 
-def schedule(
-    *, wait: int, warmup: int, active: int, repeat: int = 0, skip_first: int = 0
-) -> Callable:
+def schedule(*, wait: int, warmup: int, active: int, repeat: int = 0, skip_first: int = 0) -> Callable:
     """
     Returns a callable that can be used as profiler ``schedule`` argument. The profiler will skip
     the first ``skip_first`` steps, then wait for ``wait`` steps, then do the warmup for the next ``warmup`` steps,
@@ -32,7 +29,6 @@ def schedule(
     The optional number of cycles is specified with the ``repeat`` parameter, the zero value means that
     the cycles will continue until the profiling is finished.
     """
-
     def schedule_fn(step: int) -> ProfilerAction:
         assert step >= 0
         if step < skip_first:
@@ -48,15 +44,10 @@ def schedule(
         elif mod_step < wait + warmup:
             return ProfilerAction.WARMUP
         else:
-            return (
-                ProfilerAction.RECORD
-                if mod_step < num_steps - 1
+            return ProfilerAction.RECORD if mod_step < num_steps - 1 \
                 else ProfilerAction.RECORD_AND_SAVE
-            )
-
-    assert (
-        wait >= 0 and warmup >= 0 and active > 0 and repeat >= 0 and skip_first >= 0
-    ), "Invalid profiler schedule arguments"
+    assert wait >= 0 and warmup >= 0 and active > 0 and \
+           repeat >= 0 and skip_first >= 0, "Invalid profiler schedule arguments"
     if warmup == 0:
         warn("Profiler won't be using warmup, this can skew profiler results")
     return schedule_fn
@@ -69,10 +60,7 @@ def _default_schedule_fn(_: int) -> ProfilerAction:
     """
     return ProfilerAction.RECORD
 
-
-def tensorboard_trace_handler(
-    dir_name: str, worker_name: Optional[str] = None, use_gzip: bool = False
-):
+def tensorboard_trace_handler(dir_name: str, worker_name: Optional[str] = None, use_gzip: bool = False):
     """
     Outputs tracing files to directory of ``dir_name``, then that directory can be
     directly delivered to tensorboard as logdir.
@@ -94,11 +82,9 @@ def tensorboard_trace_handler(
             worker_name = "{}_{}".format(socket.gethostname(), str(os.getpid()))
         file_name = "{}.{}.pt.trace.json".format(worker_name, int(time.time() * 1000))
         if use_gzip:
-            file_name = file_name + ".gz"
+            file_name = file_name + '.gz'
         prof.export_chrome_trace(os.path.join(dir_name, file_name))
-
     return handler_fn
-
 
 def supported_activities():
     """
@@ -214,20 +200,18 @@ class profile(object):
                     # send a signal to the profiler that the next iteration has started
                     p.step()
     """
-
     def __init__(
-        self,
-        *,
-        activities: Optional[Iterable[ProfilerActivity]] = None,
-        schedule: Optional[Callable[[int], ProfilerAction]] = None,
-        on_trace_ready: Optional[Callable[..., Any]] = None,
-        record_shapes: bool = False,
-        profile_memory: bool = False,
-        with_stack: bool = False,
-        with_flops: bool = False,
-        # deprecated:
-        use_cuda: Optional[bool] = None
-    ):
+            self,
+            *,
+            activities: Optional[Iterable[ProfilerActivity]] = None,
+            schedule: Optional[Callable[[int], ProfilerAction]] = None,
+            on_trace_ready: Optional[Callable[..., Any]] = None,
+            record_shapes: bool = False,
+            profile_memory: bool = False,
+            with_stack: bool = False,
+            with_flops: bool = False,
+            # deprecated:
+            use_cuda: Optional[bool] = None):
         if activities:
             self.activities = set(activities)
         else:
@@ -269,9 +253,7 @@ class profile(object):
     def start(self):
         self._enter_actions()
         if self.record_steps:
-            self.step_rec_fn = prof.record_function(
-                "ProfilerStep#" + str(self.step_num)
-            )
+            self.step_rec_fn = prof.record_function("ProfilerStep#" + str(self.step_num))
             self.step_rec_fn.__enter__()
 
     def stop(self):
@@ -318,10 +300,8 @@ class profile(object):
                 if self.on_trace_ready:
                     self.on_trace_ready(self)
                 self._start_warmup()
-        elif self.current_action in [
-            ProfilerAction.RECORD,
-            ProfilerAction.RECORD_AND_SAVE,
-        ]:
+        elif self.current_action in \
+                [ProfilerAction.RECORD, ProfilerAction.RECORD_AND_SAVE]:
             if prev_action == ProfilerAction.NONE:
                 self._start_warmup()
                 self._start_trace()
@@ -338,9 +318,7 @@ class profile(object):
                 self._start_trace()
 
         if self.record_steps:
-            self.step_rec_fn = prof.record_function(
-                "ProfilerStep#" + str(self.step_num)
-            )
+            self.step_rec_fn = prof.record_function("ProfilerStep#" + str(self.step_num))
             self.step_rec_fn.__enter__()
 
     def export_chrome_trace(self, path: str):
@@ -348,12 +326,12 @@ class profile(object):
         Exports the collected trace in Chrome JSON format.
         """
         assert self.profiler
-        if path.endswith(".gz"):
-            fp = tempfile.NamedTemporaryFile("w+t", suffix=".json", delete=False)
+        if path.endswith('.gz'):
+            fp = tempfile.NamedTemporaryFile('w+t', suffix='.json', delete=False)
             fp.close()
             retvalue = self.profiler.export_chrome_trace(fp.name)
             with open(fp.name) as fin:
-                with gzip.open(path, "wt") as fout:
+                with gzip.open(path, 'wt') as fout:
                     fout.writelines(fin)
             os.remove(fp.name)
             return retvalue
@@ -377,9 +355,7 @@ class profile(object):
         assert self.profiler
         return self.profiler.export_stacks(path, metric)
 
-    def key_averages(
-        self, group_by_input_shape: bool = False, group_by_stack_n: int = 0
-    ):
+    def key_averages(self, group_by_input_shape: bool = False, group_by_stack_n: int = 0):
         """Averages events, grouping them by operator name and (optionally) input shapes and
         stack.
 
@@ -403,7 +379,7 @@ class profile(object):
         Adds a user defined metadata with a string key and a string value
         into the trace file
         """
-        wrapped_value = '"' + value.replace('"', '\\"') + '"'
+        wrapped_value = "\"" + value.replace('"', '\\"') + "\""
         torch.autograd._add_metadata_json(key, wrapped_value)
 
     def add_metadata_json(self, key: str, value: str):
@@ -415,23 +391,20 @@ class profile(object):
 
     def _get_distributed_info(self):
         import torch.distributed as dist
-
         if not dist.is_available() or not dist.is_initialized():
             return None
 
         return {
             "backend": dist.get_backend(),
             "rank": dist.get_rank(),
-            "world_size": dist.get_world_size(),
+            "world_size": dist.get_world_size()
         }
 
     def _enter_actions(self):
         if self.current_action == ProfilerAction.WARMUP:
             self._start_warmup()
-        elif self.current_action in [
-            ProfilerAction.RECORD,
-            ProfilerAction.RECORD_AND_SAVE,
-        ]:
+        elif self.current_action in \
+                [ProfilerAction.RECORD, ProfilerAction.RECORD_AND_SAVE]:
             self._start_warmup()
             self._start_trace()
 
@@ -439,10 +412,8 @@ class profile(object):
         if self.current_action == ProfilerAction.WARMUP:
             self._start_trace()
             self._stop_trace()
-        elif self.current_action in [
-            ProfilerAction.RECORD,
-            ProfilerAction.RECORD_AND_SAVE,
-        ]:
+        elif self.current_action in \
+                [ProfilerAction.RECORD, ProfilerAction.RECORD_AND_SAVE]:
             self._stop_trace()
             if self.on_trace_ready:
                 self.on_trace_ready(self)

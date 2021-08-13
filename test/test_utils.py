@@ -1,33 +1,26 @@
+import sys
+import os
 import contextlib
 import io
-import os
-import random
 import re
 import shutil
+import random
 import subprocess
-import sys
 import tempfile
 import textwrap
 import unittest
-from urllib.error import URLError
-
 import torch
-import torch.cuda
-import torch.hub as hub
 import torch.nn as nn
-import torch.utils.cpp_extension
 import torch.utils.data
+from torch.utils.data import DataLoader
+import torch.cuda
+from torch.utils.checkpoint import checkpoint, checkpoint_sequential
+import torch.utils.cpp_extension
+import torch.hub as hub
 from torch.autograd._functions.utils import check_onnx_broadcast
 from torch.onnx.symbolic_opset9 import _prepare_onnx_paddings
-from torch.testing._internal.common_utils import (
-    load_tests,
-    retry,
-    IS_SANDCASTLE,
-    IS_WINDOWS,
-    has_breakpad,
-)
-from torch.utils.checkpoint import checkpoint, checkpoint_sequential
-from torch.utils.data import DataLoader
+from torch.testing._internal.common_utils import load_tests, retry, IS_SANDCASTLE, IS_WINDOWS, has_breakpad
+from urllib.error import URLError
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -40,6 +33,7 @@ from torch.testing._internal.common_utils import TestCase, run_tests
 
 
 class RandomDatasetMock(torch.utils.data.Dataset):
+
     def __getitem__(self, index):
         return torch.tensor([torch.rand(1).item(), random.uniform(0, 1)])
 
@@ -94,7 +88,9 @@ class TestCheckpoint(TestCase):
     # Test whether checkpoint is being triggered or not. For this, we check
     # the number of times forward pass happens
     def test_checkpoint_trigger(self):
+
         class Net(nn.Module):
+
             def __init__(self):
                 super(Net, self).__init__()
                 self.counter = 0
@@ -112,9 +108,9 @@ class TestCheckpoint(TestCase):
         for m in modules:
             self.assertEqual(m.counter, 1)
         out.sum().backward()
-        for m in modules[: (len(modules) // 2)]:
+        for m in modules[:(len(modules) // 2)]:
             self.assertEqual(m.counter, 2)
-        for m in modules[(len(modules) // 2) :]:
+        for m in modules[(len(modules) // 2):]:
             self.assertEqual(m.counter, 1)
 
     def test_checkpoint_valid(self):
@@ -124,7 +120,7 @@ class TestCheckpoint(TestCase):
             nn.Linear(50, 20),
             nn.ReLU(),
             nn.Linear(20, 5),
-            nn.ReLU(),
+            nn.ReLU()
         )
 
         input_var = torch.randn(1, 100, requires_grad=True)
@@ -135,10 +131,7 @@ class TestCheckpoint(TestCase):
         out = checkpoint_sequential(modules, chunks, input_var)
         with self.assertRaisesRegex(RuntimeError, "Checkpointing is not compatible"):
             torch.autograd.grad(
-                outputs=[out],
-                grad_outputs=[torch.ones(1, 5)],
-                inputs=[input_var],
-                create_graph=True,
+                outputs=[out], grad_outputs=[torch.ones(1, 5)], inputs=[input_var], create_graph=True
             )
 
     def test_checkpoint(self):
@@ -148,7 +141,7 @@ class TestCheckpoint(TestCase):
             nn.Linear(50, 20),
             nn.ReLU(),
             nn.Linear(20, 5),
-            nn.ReLU(),
+            nn.ReLU()
         )
 
         # Compare uncheckpointed model with its checkpointed counterparts
@@ -159,7 +152,7 @@ class TestCheckpoint(TestCase):
             model,
             [list(model.children()), model],
             2,
-            torch.randn(1, 100, requires_grad=True),
+            torch.randn(1, 100, requires_grad=True)
         )
 
     def test_checkpoint_module_list(self):
@@ -215,7 +208,7 @@ class TestCheckpoint(TestCase):
 
     def test_checkpoint_rng_cpu(self):
         for _ in range(5):
-            inp = torch.randn(20000, device="cpu").requires_grad_()
+            inp = torch.randn(20000, device='cpu').requires_grad_()
             phase1 = torch.nn.Dropout()
             phase2 = torch.nn.Dropout()
 
@@ -240,10 +233,10 @@ class TestCheckpoint(TestCase):
 
             self.assertEqual(grad_with_checkpointing, grad_no_checkpointing)
 
-    @unittest.skipIf(not HAS_CUDA, "No CUDA")
+    @unittest.skipIf(not HAS_CUDA, 'No CUDA')
     def test_checkpoint_rng_cuda(self):
         for _ in range(5):
-            inp = torch.randn(20000, device="cuda").requires_grad_()
+            inp = torch.randn(20000, device='cuda').requires_grad_()
             phase1 = torch.nn.Dropout()
             phase2 = torch.nn.Dropout()
 
@@ -269,6 +262,7 @@ class TestCheckpoint(TestCase):
             self.assertEqual(grad_with_checkpointing, grad_no_checkpointing)
 
     def test_checkpoint_non_tensor(self):
+
         def run_fn(tensor1, tensor2):
             if tensor2 is None:
                 return tensor1
@@ -303,9 +297,7 @@ class TestCheckpoint(TestCase):
         res[1].sum().backward(retain_graph=True)
         res[4].sum().backward(retain_graph=True)
         res[6].sum().backward()
-        with self.assertRaisesRegex(
-            RuntimeError, "Trying to backward through the graph a second time"
-        ):
+        with self.assertRaisesRegex(RuntimeError, "Trying to backward through the graph a second time"):
             res[6].sum().backward()
         t1_grad = t1.grad
         t2_grad = t2.grad
@@ -343,7 +335,6 @@ class TestCheckpoint(TestCase):
         def run_fn(tensor1, tensor2):
             # tensor 2 is used for other application logic
             return tensor1, tensor2
-
         input_var = torch.randn(1, 4, requires_grad=True)
         input_var2 = torch.randn(1, 4, requires_grad=False)
         out = checkpoint(run_fn, input_var, input_var2)
@@ -351,16 +342,14 @@ class TestCheckpoint(TestCase):
 
         def run_fn2(tensor1, tensor2):
             return tensor1
-
         input_var = torch.randn(1, 4, requires_grad=False)
         input_var2 = torch.randn(1, 4, requires_grad=True)
         with self.assertRaisesRegex(
             RuntimeError,
-            r"none of output has requires_grad=True, this checkpoint\(\) is not necessary",
+            r"none of output has requires_grad=True, this checkpoint\(\) is not necessary"
         ):
             out = checkpoint(run_fn2, input_var, input_var2)
             out.sum().backward()
-
 
 class TestDataLoaderUtils(TestCase):
     def setUp(self):
@@ -369,9 +358,10 @@ class TestDataLoaderUtils(TestCase):
 
     def test_random_seed(self):
         def run():
-            dataloader = torch.utils.data.DataLoader(
-                RandomDatasetMock(), batch_size=2, num_workers=4, shuffle=True
-            )
+            dataloader = torch.utils.data.DataLoader(RandomDatasetMock(),
+                                                     batch_size=2,
+                                                     num_workers=4,
+                                                     shuffle=True)
             return next(iter(dataloader))
 
         torch.manual_seed(2018)
@@ -384,45 +374,35 @@ class TestDataLoaderUtils(TestCase):
         # self.dataset is a Tensor here; technically not a valid input because
         # not a Dataset subclass, but needs to stay working so add ignore's
         # for type checking with mypy
-        dataloader: DataLoader = DataLoader(
-            self.dataset,  # type: ignore[arg-type]
-            batch_size=self.batch_size,
-            num_workers=0,
-            drop_last=False,
-        )
+        dataloader : DataLoader = DataLoader(self.dataset,  # type: ignore[arg-type]
+                                             batch_size=self.batch_size,
+                                             num_workers=0,
+                                             drop_last=False)
         dataiter = iter(dataloader)
         self.assertEqual(len(list(dataiter)), 2)
 
     def test_single_drop(self):
-        dataloader: DataLoader = DataLoader(
-            self.dataset,  # type: ignore[arg-type]
-            batch_size=self.batch_size,
-            num_workers=0,
-            drop_last=True,
-        )
+        dataloader : DataLoader = DataLoader(self.dataset,  # type: ignore[arg-type]
+                                             batch_size=self.batch_size,
+                                             num_workers=0,
+                                             drop_last=True)
         dataiter = iter(dataloader)
         self.assertEqual(len(list(dataiter)), 1)
 
-    @unittest.skip(
-        "FIXME: Intermittent CUDA out-of-memory error on Windows and time-out under ASAN"
-    )
+    @unittest.skip("FIXME: Intermittent CUDA out-of-memory error on Windows and time-out under ASAN")
     def test_multi_keep(self):
-        dataloader: DataLoader = DataLoader(
-            self.dataset,  # type: ignore[arg-type]
-            batch_size=self.batch_size,
-            num_workers=2,
-            drop_last=False,
-        )
+        dataloader : DataLoader = DataLoader(self.dataset,  # type: ignore[arg-type]
+                                             batch_size=self.batch_size,
+                                             num_workers=2,
+                                             drop_last=False)
         dataiter = iter(dataloader)
         self.assertEqual(len(list(dataiter)), 2)
 
     def test_multi_drop(self):
-        dataloader: DataLoader = DataLoader(
-            self.dataset,  # type: ignore[arg-type]
-            batch_size=self.batch_size,
-            num_workers=2,
-            drop_last=True,
-        )
+        dataloader : DataLoader = DataLoader(self.dataset,  # type: ignore[arg-type]
+                                             batch_size=self.batch_size,
+                                             num_workers=2,
+                                             drop_last=True)
         dataiter = iter(dataloader)
         self.assertEqual(len(list(dataiter)), 1)
 
@@ -432,27 +412,18 @@ test_dir = os.path.abspath(os.path.dirname(str(__file__)))
 
 class TestFFI(TestCase):
     def test_deprecated(self):
-        with self.assertRaisesRegex(
-            ImportError,
-            "torch.utils.ffi is deprecated. Please use cpp extensions instead.",
-        ):
+        with self.assertRaisesRegex(ImportError, "torch.utils.ffi is deprecated. Please use cpp extensions instead."):
             from torch.utils.ffi import create_extension  # type: ignore[attr-defined] # noqa: F401
 
 
-@unittest.skipIf(
-    "SKIP_TEST_BOTTLENECK" in os.environ.keys(), "SKIP_TEST_BOTTLENECK is set"
-)
+@unittest.skipIf('SKIP_TEST_BOTTLENECK' in os.environ.keys(), 'SKIP_TEST_BOTTLENECK is set')
 class TestBottleneck(TestCase):
     def _run(self, command, timeout=30):
         """Returns (return-code, stdout, stderr)"""
         import subprocess
 
-        p = subprocess.Popen(
-            command,
-            stdout=subprocess.PIPE,  # noqa: P204
-            stderr=subprocess.PIPE,
-            shell=True,
-        )
+        p = subprocess.Popen(command, stdout=subprocess.PIPE,  # noqa: P204
+                             stderr=subprocess.PIPE, shell=True)
         try:
             output, err = p.communicate(timeout=timeout)
         except subprocess.TimeoutExpired:
@@ -463,110 +434,67 @@ class TestBottleneck(TestCase):
         err_str = err.decode("ascii")
         return (rc, output_str, err_str)
 
-    def _run_bottleneck(self, test_file, scriptargs=""):
+    def _run_bottleneck(self, test_file, scriptargs=''):
         curdir = os.path.dirname(os.path.abspath(__file__))
-        filepath = "{}/{}".format(curdir, test_file)
-        if scriptargs != "":
-            scriptargs = " {}".format(scriptargs)
+        filepath = '{}/{}'.format(curdir, test_file)
+        if scriptargs != '':
+            scriptargs = ' {}'.format(scriptargs)
         rc, out, err = self._run(
-            "{} -m torch.utils.bottleneck {}{}".format(
-                sys.executable, filepath, scriptargs
-            )
-        )
+            '{} -m torch.utils.bottleneck {}{}'.format(sys.executable, filepath, scriptargs))
         return rc, out, err
 
     def _check_run_args(self):
         # Check that this fails due to missing args
-        rc, out, err = self._run_bottleneck("bottleneck_test/test_args.py")
-        self.assertEqual(
-            rc,
-            2,
-            atol=0,
-            rtol=0,
-            msg=self._fail_msg("Missing args should error", out + err),
-        )
+        rc, out, err = self._run_bottleneck('bottleneck_test/test_args.py')
+        self.assertEqual(rc, 2, atol=0, rtol=0, msg=self._fail_msg('Missing args should error', out + err))
 
         # This should succeed
-        rc, out, err = self._run_bottleneck(
-            "bottleneck_test/test_args.py", "--foo foo --bar bar"
-        )
-        self.assertEqual(
-            rc,
-            0,
-            atol=0,
-            rtol=0,
-            msg=self._fail_msg("Should pass args to script", out + err),
-        )
+        rc, out, err = self._run_bottleneck('bottleneck_test/test_args.py', '--foo foo --bar bar')
+        self.assertEqual(rc, 0, atol=0, rtol=0, msg=self._fail_msg('Should pass args to script', out + err))
 
     def _fail_msg(self, msg, output):
-        return "{}, output was:\n{}".format(msg, output)
+        return '{}, output was:\n{}'.format(msg, output)
 
     def _check_environment_summary(self, output):
-        results = re.search("Environment Summary", output)
-        self.assertIsNotNone(
-            results, self._fail_msg("Should have Environment Summary", output)
-        )
+        results = re.search('Environment Summary', output)
+        self.assertIsNotNone(results, self._fail_msg('Should have Environment Summary', output))
 
         # Up to five lines away from the heading, there should be the version number
-        results = re.search(
-            r"Environment Summary.*(\n.*){,5}\nPyTorch \d+\.\d+", output
-        )
-        self.assertIsNotNone(
-            results, self._fail_msg("Should have PyTorch version", output)
-        )
+        results = re.search(r'Environment Summary.*(\n.*){,5}\nPyTorch \d+\.\d+', output)
+        self.assertIsNotNone(results, self._fail_msg('Should have PyTorch version', output))
 
     def _check_cprof_summary(self, output):
-        results = re.search("cProfile output", output)
-        self.assertIsNotNone(
-            results, self._fail_msg("Should have cProfile output", output)
-        )
+        results = re.search('cProfile output', output)
+        self.assertIsNotNone(results, self._fail_msg('Should have cProfile output', output))
 
         # This assumes that after the cProfile output section we have
         # the autograd profiler output
-        results = re.search(
-            r"cProfile output.*(\n.*){6,50}\n.*autograd profiler output", output
-        )
-        self.assertIsNotNone(
-            results,
-            self._fail_msg(
-                "Distance between cProfile and autograd prof out not in [6, 50] lines",
-                output,
-            ),
-        )
+        results = re.search(r'cProfile output.*(\n.*){6,50}\n.*autograd profiler output', output)
+        self.assertIsNotNone(results, self._fail_msg(
+            'Distance between cProfile and autograd prof out not in [6, 50] lines', output))
 
     def _check_autograd_summary(self, output):
-        results = re.search("autograd profiler output", output)
-        self.assertIsNotNone(
-            results, self._fail_msg("Should have autograd profiler output", output)
-        )
+        results = re.search('autograd profiler output', output)
+        self.assertIsNotNone(results, self._fail_msg('Should have autograd profiler output', output))
 
         # This assumes that after the autograd profiler output is the end of the
         # output.
-        results = re.search(r"autograd profiler output.*(\n.*){6,100}", output)
-        self.assertIsNotNone(
-            results,
-            self._fail_msg(
-                "Distance between autograd prof output and end of output not in [6, 100] lines",
-                output,
-            ),
-        )
+        results = re.search(r'autograd profiler output.*(\n.*){6,100}', output)
+        self.assertIsNotNone(results, self._fail_msg(
+            'Distance between autograd prof output and end of output not in [6, 100] lines', output))
 
     def _check_cuda(self, output):
         if HAS_CUDA:
-            results = re.search("CUDA mode", output)
-            self.assertIsNotNone(
-                results, self._fail_msg("Should tell users CUDA", output)
-            )
+            results = re.search('CUDA mode', output)
+            self.assertIsNotNone(results, self._fail_msg('Should tell users CUDA', output))
         else:
-            results = re.search("CUDA mode", output)
-            self.assertIsNone(
-                results, self._fail_msg("Should not tell users about CUDA", output)
-            )
+            results = re.search('CUDA mode', output)
+            self.assertIsNone(results, self._fail_msg('Should not tell users about CUDA', output))
 
-    @unittest.skipIf(HAS_CUDA, "CPU-only test")
+    @unittest.skipIf(HAS_CUDA, 'CPU-only test')
     def test_bottleneck_cpu_only(self):
-        rc, out, err = self._run_bottleneck("bottleneck_test/test.py")
-        self.assertEqual(rc, 0, msg="Run failed with\n{}".format(err))
+        rc, out, err = self._run_bottleneck('bottleneck_test/test.py')
+        self.assertEqual(rc, 0, msg='Run failed with\n{}'.format(err))
 
         self._check_run_args()
         self._check_environment_summary(out)
@@ -574,10 +502,10 @@ class TestBottleneck(TestCase):
         self._check_cprof_summary(out)
         self._check_cuda(out)
 
-    @unittest.skipIf(not HAS_CUDA, "No CUDA")
+    @unittest.skipIf(not HAS_CUDA, 'No CUDA')
     def test_bottleneck_cuda(self):
-        rc, out, err = self._run_bottleneck("bottleneck_test/test_cuda.py")
-        self.assertEqual(rc, 0, msg="Run failed with\n{}".format(err))
+        rc, out, err = self._run_bottleneck('bottleneck_test/test_cuda.py')
+        self.assertEqual(rc, 0, msg='Run failed with\n{}'.format(err))
 
         self._check_run_args()
         self._check_environment_summary(out)
@@ -592,7 +520,7 @@ from torch.utils.collect_env import get_pretty_env_info
 class TestCollectEnv(TestCase):
     def test_smoke(self):
         info_output = get_pretty_env_info()
-        self.assertTrue(info_output.count("\n") >= 17)
+        self.assertTrue(info_output.count('\n') >= 17)
 
 
 class TestONNXUtils(TestCase):
@@ -603,6 +531,7 @@ class TestONNXUtils(TestCase):
         self.assertEqual(paddings, [0, 3, 1, 0, 4, 2])
 
     def test_check_onnx_broadcast(self):
+
         def try_check_onnx_broadcast(dims1, dims2, expect_broadcast, expect_fail):
             broadcast = True
             fail = False
@@ -660,116 +589,121 @@ def sum_of_state_dict(state_dict):
         s += v.sum()
     return s
 
-
 SUM_OF_HUB_EXAMPLE = 431080
-TORCHHUB_EXAMPLE_RELEASE_URL = (
-    "https://github.com/ailzhang/torchhub_example/releases/download/0.1/mnist_init_ones"
-)
+TORCHHUB_EXAMPLE_RELEASE_URL = 'https://github.com/ailzhang/torchhub_example/releases/download/0.1/mnist_init_ones'
 
-
-@unittest.skipIf(IS_SANDCASTLE, "Sandcastle cannot ping external")
+@unittest.skipIf(IS_SANDCASTLE, 'Sandcastle cannot ping external')
 class TestHub(TestCase):
     @retry(URLError, tries=3, skip_after_retries=True)
     def test_load_from_github(self):
         hub_model = hub.load(
-            "ailzhang/torchhub_example",
-            "mnist",
-            source="github",
+            'ailzhang/torchhub_example',
+            'mnist',
+            source='github',
             pretrained=True,
-            verbose=False,
-        )
-        self.assertEqual(sum_of_state_dict(hub_model.state_dict()), SUM_OF_HUB_EXAMPLE)
+            verbose=False)
+        self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
+                         SUM_OF_HUB_EXAMPLE)
 
     @retry(URLError, tries=3, skip_after_retries=True)
     def test_load_from_local_dir(self):
         local_dir = hub._get_cache_or_reload(
-            "ailzhang/torchhub_example", force_reload=False
-        )
+            'ailzhang/torchhub_example', force_reload=False)
         hub_model = hub.load(
-            local_dir, "mnist", source="local", pretrained=True, verbose=False
-        )
-        self.assertEqual(sum_of_state_dict(hub_model.state_dict()), SUM_OF_HUB_EXAMPLE)
+            local_dir,
+            'mnist',
+            source='local',
+            pretrained=True,
+            verbose=False)
+        self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
+                         SUM_OF_HUB_EXAMPLE)
 
     @retry(URLError, tries=3, skip_after_retries=True)
     def test_load_from_branch(self):
         hub_model = hub.load(
-            "ailzhang/torchhub_example:ci/test_slash",
-            "mnist",
+            'ailzhang/torchhub_example:ci/test_slash',
+            'mnist',
             pretrained=True,
-            verbose=False,
-        )
-        self.assertEqual(sum_of_state_dict(hub_model.state_dict()), SUM_OF_HUB_EXAMPLE)
+            verbose=False)
+        self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
+                         SUM_OF_HUB_EXAMPLE)
 
     @retry(URLError, tries=3, skip_after_retries=True)
     def test_set_dir(self):
         temp_dir = tempfile.gettempdir()
         hub.set_dir(temp_dir)
         hub_model = hub.load(
-            "ailzhang/torchhub_example", "mnist", pretrained=True, verbose=False
-        )
-        self.assertEqual(sum_of_state_dict(hub_model.state_dict()), SUM_OF_HUB_EXAMPLE)
-        assert os.path.exists(temp_dir + "/ailzhang_torchhub_example_master")
-        shutil.rmtree(temp_dir + "/ailzhang_torchhub_example_master")
+            'ailzhang/torchhub_example',
+            'mnist',
+            pretrained=True,
+            verbose=False)
+        self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
+                         SUM_OF_HUB_EXAMPLE)
+        assert os.path.exists(temp_dir + '/ailzhang_torchhub_example_master')
+        shutil.rmtree(temp_dir + '/ailzhang_torchhub_example_master')
 
     @retry(URLError, tries=3, skip_after_retries=True)
     def test_list_entrypoints(self):
-        entry_lists = hub.list("ailzhang/torchhub_example", force_reload=True)
-        self.assertObjectIn("mnist", entry_lists)
+        entry_lists = hub.list('ailzhang/torchhub_example', force_reload=True)
+        self.assertObjectIn('mnist', entry_lists)
 
     @retry(URLError, tries=3, skip_after_retries=True)
     def test_download_url_to_file(self):
-        temp_file = os.path.join(tempfile.gettempdir(), "temp")
-        hub.download_url_to_file(
-            TORCHHUB_EXAMPLE_RELEASE_URL, temp_file, progress=False
-        )
+        temp_file = os.path.join(tempfile.gettempdir(), 'temp')
+        hub.download_url_to_file(TORCHHUB_EXAMPLE_RELEASE_URL, temp_file, progress=False)
         loaded_state = torch.load(temp_file)
-        self.assertEqual(sum_of_state_dict(loaded_state), SUM_OF_HUB_EXAMPLE)
+        self.assertEqual(sum_of_state_dict(loaded_state),
+                         SUM_OF_HUB_EXAMPLE)
 
     @retry(URLError, tries=3, skip_after_retries=True)
     def test_load_state_dict_from_url(self):
         loaded_state = hub.load_state_dict_from_url(TORCHHUB_EXAMPLE_RELEASE_URL)
-        self.assertEqual(sum_of_state_dict(loaded_state), SUM_OF_HUB_EXAMPLE)
+        self.assertEqual(sum_of_state_dict(loaded_state),
+                         SUM_OF_HUB_EXAMPLE)
 
     @retry(URLError, tries=3, skip_after_retries=True)
     def test_load_zip_checkpoint(self):
         hub_model = hub.load(
-            "ailzhang/torchhub_example", "mnist_zip", pretrained=True, verbose=False
-        )
-        self.assertEqual(sum_of_state_dict(hub_model.state_dict()), SUM_OF_HUB_EXAMPLE)
+            'ailzhang/torchhub_example',
+            'mnist_zip',
+            pretrained=True,
+            verbose=False)
+        self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
+                         SUM_OF_HUB_EXAMPLE)
 
     # Test the default zipfile serialization format produced by >=1.6 release.
     @retry(URLError, tries=3, skip_after_retries=True)
     def test_load_zip_1_6_checkpoint(self):
         hub_model = hub.load(
-            "ailzhang/torchhub_example", "mnist_zip_1_6", pretrained=True, verbose=False
-        )
-        self.assertEqual(sum_of_state_dict(hub_model.state_dict()), SUM_OF_HUB_EXAMPLE)
+            'ailzhang/torchhub_example',
+            'mnist_zip_1_6',
+            pretrained=True,
+            verbose=False)
+        self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
+                         SUM_OF_HUB_EXAMPLE)
+
 
     def test_hub_dir(self):
-        with tempfile.TemporaryDirectory("hub_dir") as dirname:
+        with tempfile.TemporaryDirectory('hub_dir') as dirname:
             torch.hub.set_dir(dirname)
             self.assertEqual(torch.hub.get_dir(), dirname)
 
     @retry(URLError, tries=3, skip_after_retries=True)
     def test_load_state_dict_from_url_with_name(self):
-        with tempfile.TemporaryDirectory("hub_dir") as dirname:
+        with tempfile.TemporaryDirectory('hub_dir') as dirname:
             torch.hub.set_dir(dirname)
-            file_name = "test_file"
-            loaded_state = hub.load_state_dict_from_url(
-                TORCHHUB_EXAMPLE_RELEASE_URL, file_name=file_name
-            )
-            self.assertTrue(
-                os.path.exists(os.path.join(dirname, "checkpoints", file_name))
-            )
-            self.assertEqual(sum_of_state_dict(loaded_state), SUM_OF_HUB_EXAMPLE)
+            file_name = 'test_file'
+            loaded_state = hub.load_state_dict_from_url(TORCHHUB_EXAMPLE_RELEASE_URL, file_name=file_name)
+            self.assertTrue(os.path.exists(os.path.join(dirname, 'checkpoints', file_name)))
+            self.assertEqual(sum_of_state_dict(loaded_state),
+                             SUM_OF_HUB_EXAMPLE)
 
     @retry(URLError, tries=3, skip_after_retries=True)
     def test_load_commit_from_forked_repo(self):
-        with self.assertRaisesRegex(ValueError, "If it's a commit from a forked repo"):
-            model = torch.hub.load(
-                "pytorch/vision:4e2c216", "resnet18", force_reload=True
-            )
-
+        with self.assertRaisesRegex(
+                ValueError,
+                'If it\'s a commit from a forked repo'):
+            model = torch.hub.load('pytorch/vision:4e2c216', 'resnet18', force_reload=True)
 
 class TestHipify(TestCase):
     def test_import_hipify(self):
@@ -817,11 +751,9 @@ class TestCrashHandler(TestCase):
             f = io.StringIO()
             with contextlib.redirect_stderr(f):
                 try:
-
                     @torch.jit.script
                     def x(i: int):
                         return i + "2"  # type: ignore[operator]
-
                 except RuntimeError as e:
                     pass
 
@@ -837,16 +769,14 @@ class TestStandaloneCPPJIT(TestCase):
         build_dir = tempfile.mkdtemp()
         try:
             src_path = os.path.join(build_dir, "main.cpp")
-            src = textwrap.dedent(
-                """\
+            src = textwrap.dedent("""\
                 #include <iostream>
                 #include <torch/torch.h>
                 int main() {
                     auto x = torch::eye(3);
                     std::cout << x << std::endl;
                 }
-            """
-            )
+            """)
             with open(src_path, "wt") as f:
                 f.write(src)
 
@@ -860,7 +790,8 @@ class TestStandaloneCPPJIT(TestCase):
 
             ext = ".exe" if IS_WINDOWS else ""
             self.assertEqual(
-                exec_path, os.path.join(build_dir, f"standalone_load_test{ext}")
+                exec_path,
+                os.path.join(build_dir, f"standalone_load_test{ext}")
             )
 
             for shell in [True, False]:
@@ -873,14 +804,12 @@ class TestStandaloneCPPJIT(TestCase):
                 self.assertEqual(
                     # Windows prints "\r\n" for newlines.
                     textwrap.dedent(r.stdout.decode("utf-8")).replace("\r\n", "\n"),
-                    textwrap.dedent(
-                        """\
+                    textwrap.dedent("""\
                      1  0  0
                      0  1  0
                      0  0  1
                     [ CPUFloatType{3,3} ]
-                    """
-                    ),
+                    """)
                 )
 
         finally:
@@ -897,23 +826,23 @@ class TestExtensionUtils(TestCase):
     def test_external_module_register(self):
         # Built-in module
         with self.assertRaisesRegex(RuntimeError, "The runtime module of"):
-            torch._register_device_module("cuda", torch.cuda)
+            torch._register_device_module('cuda', torch.cuda)
 
         # Wrong device type
         with self.assertRaisesRegex(RuntimeError, "Expected one of cpu"):
-            torch._register_device_module("dummmy", DummyXPUModule)
+            torch._register_device_module('dummmy', DummyXPUModule)
 
         with self.assertRaises(AttributeError):
             torch.xpu.is_available()  # type: ignore[attr-defined]
 
-        torch._register_device_module("xpu", DummyXPUModule)
+        torch._register_device_module('xpu', DummyXPUModule)
 
         torch.xpu.is_available()  # type: ignore[attr-defined]
 
         # No supporting for override
         with self.assertRaisesRegex(RuntimeError, "The runtime module of"):
-            torch._register_device_module("xpu", DummyXPUModule)
+            torch._register_device_module('xpu', DummyXPUModule)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     run_tests()

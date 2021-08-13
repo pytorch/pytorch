@@ -1,8 +1,6 @@
+import torch
 import functools
 import warnings
-
-import torch
-
 
 class autocast(object):
     r"""
@@ -129,53 +127,37 @@ class autocast(object):
         enabled(bool, optional, default=True)":  Whether autocasting should be enabled in the region.
         fast_dtype(torch_dtype, optional):  Whether to use torch.float16 or torch.bfloat16
     """
-
     def __init__(self, device_type, enabled=True, **kwargs):
         self.device = device_type
-        if self.device == "cuda":
+        if self.device == 'cuda':
             self.fast_dtype = torch.get_autocast_gpu_dtype()
-        elif self.device == "cpu":
+        elif self.device == 'cpu':
             self.fast_dtype = torch.get_autocast_cpu_dtype()
         else:
-            raise RuntimeError(
-                "User specified autocast device_type must be 'cuda' or 'cpu'"
-            )
-        if not torch.cuda.is_available() and self.device == "cuda":
-            warnings.warn(
-                "User provided device_type of 'cuda', but CUDA is not available. Disabling"
-            )
+            raise RuntimeError('User specified autocast device_type must be \'cuda\' or \'cpu\'')
+        if not torch.cuda.is_available() and self.device == 'cuda':
+            warnings.warn('User provided device_type of \'cuda\', but CUDA is not available. Disabling')
             enabled = False
         for key, value in kwargs.items():
-            if key == "fast_dtype":
+            if key == 'fast_dtype':
                 self.fast_dtype = value
-            if not (key == "fast_dtype"):
-                raise RuntimeError(
-                    "Unrecognized optional argument supplied to autocast context manager: "
-                    + str(key)
-                )
+            if not (key == 'fast_dtype'):
+                raise RuntimeError('Unrecognized optional argument supplied to autocast context manager: ' + str(key))
 
-        if self.device == "cpu":
+        if self.device == 'cpu':
             supported_dtype = [torch.bfloat16]
             if self.fast_dtype not in supported_dtype:
-                error_message = "In CPU autocast, but the target dtype is not supported. Disabling autocast.\n"
-                error_message += (
-                    "CPU Autocast only supports dtype of torch.bfloat16 currently."
-                )
+                error_message = 'In CPU autocast, but the target dtype is not supported. Disabling autocast.\n'
+                error_message += 'CPU Autocast only supports dtype of torch.bfloat16 currently.'
                 warnings.warn(error_message)
                 enabled = False
-        if self.device == "cuda":
-            if (
-                self.fast_dtype == torch.bfloat16
-                and torch.cuda.get_device_properties(torch.cuda.current_device()).major
-                < 8
-            ):
-                raise RuntimeError(
-                    "Current CUDA Device does not support bfloat16. Switching fast_dtype to float16."
-                )
+        if self.device == 'cuda':
+            if self.fast_dtype == torch.bfloat16 and torch.cuda.get_device_properties(torch.cuda.current_device()).major < 8:
+                raise RuntimeError('Current CUDA Device does not support bfloat16. Switching fast_dtype to float16.')
         self._enabled = enabled
 
     def __enter__(self):
-        if self.device == "cpu":
+        if self.device == 'cpu':
             self.prev = torch.is_autocast_cpu_enabled()
             self.prev_fastdtype = torch.get_autocast_cpu_dtype()
             torch.set_autocast_cpu_enabled(self._enabled)
@@ -190,7 +172,7 @@ class autocast(object):
 
     def __exit__(self, *args):
         # Drop the cache when we exit to a nesting level that's outside any instance of autocast.
-        if self.device == "cpu":
+        if self.device == 'cpu':
             if torch.autocast_decrement_nesting() == 0:
                 torch.clear_autocast_cache()
             torch.set_autocast_cpu_enabled(self.prev)
@@ -207,5 +189,4 @@ class autocast(object):
         def decorate_autocast(*args, **kwargs):
             with self:
                 return func(*args, **kwargs)
-
         return decorate_autocast
