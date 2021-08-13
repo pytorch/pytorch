@@ -218,7 +218,11 @@ libtorch_cpp_generated_sources = [
 
 libtorch_python_generated_sources = [
         "torch/csrc/autograd/generated/python_functions.h",
-        "torch/csrc/autograd/generated/python_functions.cpp",
+        "torch/csrc/autograd/generated/python_functions_0.cpp",
+        "torch/csrc/autograd/generated/python_functions_1.cpp",
+        "torch/csrc/autograd/generated/python_functions_2.cpp",
+        "torch/csrc/autograd/generated/python_functions_3.cpp",
+        "torch/csrc/autograd/generated/python_functions_4.cpp",
         "torch/csrc/autograd/generated/python_variable_methods.cpp",
         "torch/csrc/autograd/generated/python_torch_functions.cpp",
         "torch/csrc/autograd/generated/python_nn_functions.cpp",
