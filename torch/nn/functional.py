@@ -389,7 +389,7 @@ size :math:`sT \times sH \times sW` steps. The number of output features is equa
 See :class:`~torch.nn.AvgPool3d` for details and output shape.
 
 Args:
-    input: input tensor :math:`(\text{minibatch} , \text{in\_channels} , iT \times iH , iW)`
+    input: input tensor :math:`(\text{minibatch} , \text{in\_channels} , iD, iH , iW)`
     kernel_size: size of the pooling region. Can be a single number or a
       tuple `(kT, kH, kW)`
     stride: stride of the pooling operation. Can be a single number or a
@@ -606,10 +606,26 @@ def max_pool1d_with_indices(
     ceil_mode: bool = False,
     return_indices: bool = False
 ) -> Tuple[Tensor, Tensor]:
-    r"""Applies a 1D max pooling over an input signal composed of several input
+    r"""
+    max_pool1d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=True) -> Tensor
+    
+    Applies a 1D max pooling over an input signal composed of several input
     planes.
 
     See :class:`~torch.nn.MaxPool1d` for details.
+
+    Args:
+        input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iW)`
+        kernel_size: the size of the window. Can be a single number or a
+            tuple `(kW,)`
+        stride: the stride of the window. Can be a single number or a tuple
+            `(sW,)`. Default: :attr:`kernel_size`
+        padding: Implicit negative infinity padding to be added on both sides, must be >= 0 and <= kernel_size / 2.
+        dilation: The stride between elements within a sliding window, must be > 0.
+        ceil_mode: If ``True``, will use `ceil` instead of `floor` to compute the output shape. This
+                   ensures that every element in the input tensor is covered by a sliding window.
+        return_indices: If ``True``, will return the argmax along with the max values.
+                        Useful for :class:`torch.nn.MaxUnpool1d` later
     """
     if has_torch_function_unary(input):
         return handle_torch_function(
@@ -672,10 +688,26 @@ def max_pool2d_with_indices(
     ceil_mode: bool = False,
     return_indices: bool = False
 ) -> Tuple[Tensor, Tensor]:
-    r"""Applies a 2D max pooling over an input signal composed of several input
+    r"""
+    max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=True) -> Tensor
+    
+    Applies a 2D max pooling over an input signal composed of several input
     planes.
 
     See :class:`~torch.nn.MaxPool2d` for details.
+
+    Args:
+        input: input tensor :math:`(\text{minibatch} , \text{in\_channels} , iH , iW)`
+        kernel_size: size of the pooling region. Can be a single number or a
+            tuple `(kH, kW)`
+        stride: stride of the pooling operation. Can be a single number or a
+            tuple `(sH, sW)`. Default: :attr:`kernel_size`
+        padding: Implicit negative infinity padding to be added on both sides, must be >= 0 and <= kernel_size / 2.
+        dilation: The stride between elements within a sliding window, must be > 0.
+        ceil_mode: If ``True``, will use `ceil` instead of `floor` to compute the output shape. This
+                   ensures that every element in the input tensor is covered by a sliding window.
+        return_indices: If ``True``, will return the argmax along with the max values.
+                        Useful for :class:`torch.nn.MaxUnpool1d` later
     """
     if has_torch_function_unary(input):
         return handle_torch_function(
@@ -738,10 +770,26 @@ def max_pool3d_with_indices(
     ceil_mode: bool = False,
     return_indices: bool = False
 ) -> Tuple[Tensor, Tensor]:
-    r"""Applies a 3D max pooling over an input signal composed of several input
+    r"""
+    max_pool3d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=True) -> Tensor
+    
+    Applies a 3D max pooling over an input signal composed of several input
     planes.
 
     See :class:`~torch.nn.MaxPool3d` for details.
+
+    Args:
+        input: input tensor :math:`(\text{minibatch} , \text{in\_channels} , iT \times iH , iW)`
+        kernel_size: size of the pooling region. Can be a single number or a
+        tuple `(kT, kH, kW)`
+        stride: stride of the pooling operation. Can be a single number or a
+        tuple `(sT, sH, sW)`. Default: :attr:`kernel_size`
+        padding: Implicit negative infinity padding to be added on both sides, must be >= 0 and <= kernel_size / 2.
+        dilation: The stride between elements within a sliding window, must be > 0.
+        ceil_mode: If ``True``, will use `ceil` instead of `floor` to compute the output shape. This
+                   ensures that every element in the input tensor is covered by a sliding window.
+        return_indices: If ``True``, will return the argmax along with the max values.
+                        Useful for :class:`torch.nn.MaxUnpool1d` later
     """
     if has_torch_function_unary(input):
         return handle_torch_function(
