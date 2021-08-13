@@ -43,6 +43,11 @@ using torch::distributed::autograd::DistAutogradContainer;
 #include <utility>
 #include <vector>
 
+C10_DEFINE_bool(
+    torch_jit_enable_rethrow_caught_exception,
+    false,
+    "enable rethrowing caught exception");
+
 namespace torch {
 namespace jit {
 
@@ -378,7 +383,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
               inst = INST_FETCH(1);
             } else {
               size_t n_loop_carried = inst.N - 2;
-              for (size_t i = 0; i < n_loop_carried; ++i) {
+              for (const auto i : c10::irange(n_loop_carried)) {
                 fr[i] = std::move(fr[i + 3]);
               }
               drop(stack, 3); // iteration_count, max_iter, cond
@@ -578,7 +583,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             size_t base_pointer = frame.base_pointer;
             TORCH_INTERNAL_ASSERT(stack.size() >= num_inputs);
             size_t inputs_start = stack.size() - num_inputs;
-            for (size_t i = 0; i < num_inputs; ++i) {
+            for (const auto i : c10::irange(num_inputs)) {
               stack.at(base_pointer + i) =
                   std::move(stack.at(inputs_start + i));
             }
@@ -708,12 +713,15 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
         push(stack, IValue());
         try {
           f.run(stack);
-        } catch (std::exception& e) {
-          std::ostringstream ss;
-          ss << "The following operation failed in the TorchScript interpreter.\n";
-          formatStackTrace(ss);
-          ss << "RuntimeError: " << ExceptionMessage(e) << "\n";
+        } catch (std::exception& _) {
+          // TODO(T98048876): Handle `_` correctly.
         }
+      }
+      if (FLAGS_torch_jit_enable_rethrow_caught_exception) {
+        if (future_) {
+          future_->setError(std::make_exception_ptr(e));
+        }
+        throw;
       }
       bool is_jit_exception = dynamic_cast<JITException*>(&e);
       // Janky af.  See https://github.com/pytorch/pytorch/issues/54612
@@ -778,7 +786,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
  public:
   std::vector<StackEntry> callstack() const {
     std::vector<StackEntry> entries;
-    for (size_t i = 0; i < frames.size(); ++i) {
+    for (const auto i : c10::irange(frames.size())) {
       const Frame& frame = frames[i];
       std::string previous_fn_name = frame.function->function_name_;
       size_t pc = frame.pc;
