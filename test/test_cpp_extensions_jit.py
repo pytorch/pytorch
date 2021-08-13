@@ -869,7 +869,7 @@ class TestCppExtensionJIT(common.TestCase):
 
         gradcheck(torch.ops.my.add, [a, b], eps=1e-2)
 
-    @unittest.skipIf(not has_breakpad(), "Breakpad library must be present on system for crash handler")
+    # @unittest.skipIf(not has_breakpad(), "Breakpad library must be present on system for crash handler")
     @unittest.skipIf(TEST_WITH_ASAN, "ASAN disables the crash handler's signal handler")
     def test_crash_handler(self):
         def run_test(stderr_file, destination):
