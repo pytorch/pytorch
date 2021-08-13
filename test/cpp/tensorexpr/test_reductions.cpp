@@ -744,8 +744,7 @@ TEST(Reductions, ReduceRfactor) {
   Tensor* c = Reduce("sum", {}, Sum(), b, {{m, "m"}, {n, "n"}});
   LoopNest loop({c});
   std::vector<ForPtr> loops = loop.getLoopStmtsFor(c);
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-  auto c_body = const_cast<StmtPtr>(loop.getAllWritesToBuf(c->buf())[1]);
+  auto c_body = loop.getAllWritesToBuf(c->buf())[1];
   ASSERT_TRUE(loop.rfactor(c_body, loops.at(0)));
   auto rc = NodeFinder<ReduceOp>::find(loop.root_stmt());
   ASSERT_EQ(rc.size(), 2);
@@ -780,8 +779,7 @@ TEST(Reductions, Reduce3DRfactorInner) {
   Tensor* c = Reduce("sum", {}, Sum(), b, {{m, "m"}, {n, "n"}, {k, "k"}});
   LoopNest loop({c});
   std::vector<ForPtr> loops = loop.getLoopStmtsFor(c);
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-  auto c_body = const_cast<StmtPtr>(loop.getAllWritesToBuf(c->buf())[1]);
+  auto c_body = loop.getAllWritesToBuf(c->buf())[1];
   ASSERT_FALSE(loop.rfactor(c_body, loops.at(2)));
   auto rc = NodeFinder<ReduceOp>::find(loop.root_stmt());
   ASSERT_EQ(rc.size(), 1);
@@ -816,8 +814,7 @@ TEST(Reductions, Reduce3DRfactorOuter) {
   Tensor* c = Reduce("sum", {}, Sum(), b, {{m, "m"}, {n, "n"}, {k, "k"}});
   LoopNest loop({c});
   std::vector<ForPtr> loops = loop.getLoopStmtsFor(c);
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-  auto c_body = const_cast<StmtPtr>(loop.getAllWritesToBuf(c->buf())[1]);
+  auto c_body = loop.getAllWritesToBuf(c->buf())[1];
   ASSERT_TRUE(loop.rfactor(c_body, loops.at(0)));
   auto rc = NodeFinder<ReduceOp>::find(loop.root_stmt());
   ASSERT_EQ(rc.size(), 2);
@@ -857,12 +854,10 @@ TEST(Reductions, ReduceRepeatedInternalRfactor) {
         IRSimplifier::simplify(refloop.root_stmt()), {in_, c});
     ref_cg.call({in, ref});
 
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-    BufPtr tmp_buf = const_cast<BufPtr>(c->buf());
+    BufPtr tmp_buf = c->buf();
 
     for (int idx = 0; idx < rfac_number; idx++) {
-      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-      auto reduce = const_cast<StmtPtr>(loop.getAllWritesToBuf(tmp_buf)[1]);
+      auto reduce = loop.getAllWritesToBuf(tmp_buf)[1];
       ASSERT_TRUE(loop.rfactor(
           reduce, loop.getLoopStmtsFor(tmp_buf).at(idx), &tmp_buf));
     }
@@ -1100,8 +1095,7 @@ TEST(Reductions, ReduceSplitRfactor) {
   std::vector<ForPtr> loops = loop.getLoopStmtsFor(c);
   LoopNest::splitWithTail(loops[2], SPLIT_FACTOR);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-  auto c_body = const_cast<StmtPtr>(loop.getAllWritesToBuf(c->buf())[2]);
+  auto c_body = loop.getAllWritesToBuf(c->buf())[2];
   auto all_loops = loop.getAllLoopNestsWritingToBuf(c->buf());
   ASSERT_TRUE(all_loops.size() == 3 && all_loops.at(2).size() == 3);
   LoopNest::reorderAxis(all_loops[2][1], all_loops[2][2]);
@@ -1147,8 +1141,7 @@ TEST(Reductions, ReduceOverSplitRfactor) {
 
   auto all_loops = loop.getAllLoopNestsWritingToBuf(c->buf());
   ASSERT_TRUE(all_loops.size() == 3 && all_loops.at(1).size() == 3);
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-  auto c_body = const_cast<StmtPtr>(loop.getAllWritesToBuf(c->buf())[1]);
+  auto c_body = loop.getAllWritesToBuf(c->buf())[1];
   ASSERT_TRUE(loop.rfactor(c_body, all_loops[1][0]));
   LoopNest::reorderAxis(all_loops[1][0], all_loops[1][2]);
 
@@ -1755,8 +1748,7 @@ TEST(Reductions, ReductionRfactorCacheTempOuter) {
   std::vector<ForPtr> loops = loop.getLoopStmtsFor(c);
   LoopNest::reorderAxis(loops.at(0), loops.at(1));
   loops = loop.getLoopStmtsFor(c);
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-  auto c_body = const_cast<StmtPtr>(loop.getAllWritesToBuf(c->buf())[1]);
+  auto c_body = loop.getAllWritesToBuf(c->buf())[1];
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   BufPtr rfac_buf;
   ASSERT_TRUE(loop.rfactor(c_body, loops.at(0), &rfac_buf));
@@ -1822,8 +1814,7 @@ TEST(Reductions, ReductionRfactorCacheTempInner) {
   Tensor* c = Reduce("sum", {}, Sum(), b, {{m, "a"}, {n, "b"}, {k, "c"}});
   LoopNest loop({c});
   std::vector<ForPtr> loops = loop.getLoopStmtsFor(c);
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-  auto c_body = const_cast<StmtPtr>(loop.getAllWritesToBuf(c->buf())[1]);
+  auto c_body = loop.getAllWritesToBuf(c->buf())[1];
 
   LoopNest::reorderAxis(loops.at(0), loops.at(1));
   loops = loop.getLoopStmtsFor(c);
@@ -1953,8 +1944,7 @@ TEST(Reductions, ReductionVectorizeRfactor) {
   std::vector<ForPtr> loops = l.getLoopStmtsFor(tensor);
   LoopNest::reorderAxis(loops[0], loops[1]);
   loops = l.getLoopStmtsFor(tensor);
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-  auto tensor_body = const_cast<StmtPtr>(l.getAllWritesToBuf(tensor->buf())[1]);
+  auto tensor_body = l.getAllWritesToBuf(tensor->buf())[1];
   BufPtr rfac_buf = nullptr;
   ASSERT_TRUE(LoopNest::rfactor(tensor_body, loops.at(0), &rfac_buf));
 

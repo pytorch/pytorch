@@ -188,9 +188,7 @@ ExprPtr IRMutator::mutate(LoadPtr v) {
 
 ExprPtr IRMutator::mutate(BufPtr v) {
   VarPtr var = v->base_handle();
-  VarPtr var_new =
-      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-      to<Var>(const_cast<ExprPtr>(var->accept_mutator(this)));
+  VarPtr var_new = to<Var>(var->accept_mutator(this));
   if (!var_new) {
     return nullptr;
   }
@@ -259,7 +257,7 @@ ExprPtr IRMutator::mutate(TermPtr v) {
   ExprPtr newScalar = v->scalar()->accept_mutator(this);
 
   std::vector<ExprPtr> variables;
-  for (auto* t : v->variables()) {
+  for (auto t : v->variables()) {
     variables.push_back(t->accept_mutator(this));
   }
   return alloc<Term>(v->hasher(), newScalar, variables);
@@ -269,7 +267,7 @@ ExprPtr IRMutator::mutate(PolynomialPtr v) {
   ExprPtr newScalar = v->scalar()->accept_mutator(this);
 
   std::vector<TermPtr> variables;
-  for (auto* t : v->variables()) {
+  for (auto t : v->variables()) {
     variables.push_back(static_to<Term>(t->accept_mutator(this)));
   }
   return alloc<Polynomial>(v->hasher(), newScalar, variables);
@@ -287,7 +285,7 @@ ExprPtr IRMutator::mutate(MaxTermPtr v) {
   }
 
   std::vector<ExprPtr> variables;
-  for (auto* t : v->variables()) {
+  for (auto t : v->variables()) {
     variables.push_back(t->accept_mutator(this));
   }
   return alloc<MaxTerm>(v->hasher(), newScalar, v->propagate_nans(), variables);
@@ -300,7 +298,7 @@ ExprPtr IRMutator::mutate(MinTermPtr v) {
   }
 
   std::vector<ExprPtr> variables;
-  for (auto* t : v->variables()) {
+  for (auto t : v->variables()) {
     variables.push_back(t->accept_mutator(this));
   }
   return alloc<MinTerm>(v->hasher(), newScalar, v->propagate_nans(), variables);
@@ -310,7 +308,7 @@ ExprPtr IRMutator::mutate(ReduceOpPtr v) {
   ExprPtr body_new = v->body()->accept_mutator(this);
 
   std::vector<VarPtr> new_reduce_args;
-  for (auto* r : v->reduce_args()) {
+  for (auto r : v->reduce_args()) {
     new_reduce_args.push_back(static_to<Var>(r->accept_mutator(this)));
   }
 
