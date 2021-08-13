@@ -145,13 +145,6 @@ def register_module_full_backward_hook(
         This adds global state to the `nn.module` module
         and it is only intended for debugging/profiling purposes.
 
-        The current implementation will not have the presented behavior
-        for complex :class:`Module` that perform many operations.
-        In some failure cases, :attr:`grad_input` and :attr:`grad_output` will only
-        contain the gradients for a subset of the inputs and outputs.
-        For such :class:`Module`, you should use :func:`torch.Tensor.register_hook`
-        directly on a specific input or output to get the required gradients.
-
     The hook will be called every time the gradients with respect to module
     inputs are computed. The hook should have the following signature::
 
@@ -164,6 +157,10 @@ def register_module_full_backward_hook(
     as positional arguments and all kwarg arguments will not appear in the hook. Entries
     in :attr:`grad_input` and :attr:`grad_output` will be ``None`` for all non-Tensor
     arguments.
+
+    Note that this hook need to apply a Function to the inputs and outputs of the Module
+    during the forward pass. This means that Tensors passed as argument to the Module and
+    the ones received by the forward function will not be the same, but views of each other.
 
     Global hooks are called before hooks registered with `register_backward_hook`
 
@@ -906,6 +903,10 @@ class Module:
         as positional arguments and all kwarg arguments are ignored. Entries
         in :attr:`grad_input` and :attr:`grad_output` will be ``None`` for all non-Tensor
         arguments.
+
+        Note that this hook need to apply a Function to the inputs and outputs of the Module
+        during the forward pass. This means that Tensors passed as argument to the Module and
+        the ones received by the forward function will not be the same, but views of each other.
 
         .. warning ::
             Modifying inputs or outputs inplace is not allowed when using backward hooks and
