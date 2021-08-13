@@ -1,5 +1,10 @@
+#include <torch/csrc/distributed/c10d/quantization/quantization.h>
+#include <torch/csrc/distributed/c10d/quantization/quantization_utils.h>
 
-#include <torch/csrc/distributed/c10d/quantization.h>
+namespace torch {
+namespace distributed {
+namespace c10d {
+namespace quantization {
 
 void FloatToBFloat16Quantized_ref(
     const float* const input,
@@ -39,6 +44,9 @@ void BFloat16QuantizedToFloat_ref(
 }
 
 at::Tensor _float_to_bfloat16_cpu(const at::Tensor& input) {
+  TENSOR_ON_CPU(input);
+  // Currently it supports 2D inputs
+  TENSOR_NDIM_EQUALS(input, 2);
 
   const auto input_sizes = input.sizes();
   const int32_t nrows = input_sizes[0];
@@ -58,6 +66,10 @@ at::Tensor _float_to_bfloat16_cpu(const at::Tensor& input) {
 }
 
 at::Tensor _bfloat16_to_float_cpu(const at::Tensor& input) {
+  TENSOR_ON_CPU(input);
+  // Currently it supports 2D inputs
+  TENSOR_NDIM_EQUALS(input, 2);
+
   const auto input_sizes = input.sizes();
   const int32_t nrows = input_sizes[0];
   const int32_t ncols = input_sizes[1];
@@ -74,3 +86,8 @@ at::Tensor _bfloat16_to_float_cpu(const at::Tensor& input) {
 
   return output;
 }
+
+} // namespace quantization
+} // namespace c10d
+} // namespace distributed
+} // namespace torch

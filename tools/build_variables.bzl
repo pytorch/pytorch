@@ -725,8 +725,8 @@ libtorch_python_distributed_core_sources = [
     "torch/csrc/distributed/c10d/frontend.cpp",
     "torch/csrc/distributed/c10d/init.cpp",
     "torch/csrc/distributed/c10d/python_comm_hook.cpp",
-    "torch/csrc/distributed/c10d/quantization.cpp",
-    "torch/csrc/distributed/c10d/quantization_gpu.cu",
+    "torch/csrc/distributed/c10d/quantization/quantization.cpp",
+    "torch/csrc/distributed/c10d/quantization/quantization_gpu.cu",
 ]
 
 libtorch_python_distributed_sources = libtorch_python_distributed_core_sources + [
