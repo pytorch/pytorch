@@ -73,7 +73,7 @@ except ImportError:
     HAS_DILL = False
 skipIfNoDill = skipIf(not HAS_DILL, "no dill")
 
-T_co = TypeVar('T_co', covariant=True)
+T_co = TypeVar("T_co", covariant=True)
 
 
 def create_temp_dir_and_files():
@@ -110,10 +110,9 @@ def create_temp_dir_and_files():
 
 
 class TestDataChunk(TestCase):
-
     def test_as_string(self):
         elements = list(range(10))
-        chunk : DataChunk[int] = DataChunk(elements)
+        chunk: DataChunk[int] = DataChunk(elements)
         self.assertEqual(str(chunk), str(elements))
 
         batch = [elements] * 3
@@ -122,7 +121,6 @@ class TestDataChunk(TestCase):
 
 
 class TestIterableDataPipeBasic(TestCase):
-
     def setUp(self):
         ret = create_temp_dir_and_files()
         self.temp_dir = ret[0][0]
