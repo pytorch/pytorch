@@ -42,33 +42,24 @@ constexpr const char* UCC_BACKEND_NAME = "_internal_ucc";
 class ProcessGroupUCC final : public ProcessGroup {
 public:
   class WorkUCP : public ProcessGroup::Work {
-    bool *finished;
+    std::shared_ptr<UCPRequest> request;
     std::shared_ptr<UCPWorker> worker;
   public:
-    WorkUCP(const std::shared_ptr<UCPWorker> &worker, ucs_status_ptr_t ptr)
-      : finished(reinterpret_cast<bool *>(ptr)), worker(worker) {}
-    ~WorkUCP() { ucp_request_free(finished); }
+    WorkUCP(const std::shared_ptr<UCPWorker> &worker, const std::shared_ptr<UCPRequest> &request)
+      : request(request), worker(worker) {}
     bool isCompleted() override {
       // TODO: progress worker in a side thread for true async
       worker->progress();
-      return *finished;
+      return request->is_completed();
     };
     bool isSuccess() const override {
       // TODO: progress worker in a side thread for true async
+      // TODO: what if fail?
       worker->progress();
-      return *finished;
+      return request->is_completed();
     };
     bool wait(std::chrono::milliseconds timeout = kUnsetTimeout) override {
       while(!isCompleted());
-      return true;
-    };
-  };
-
-  class ImmediatelyCompletedWork : public ProcessGroup::Work {
-  public:
-    bool isCompleted() override { return true; };
-    bool isSuccess() const override { return true; };
-    bool wait(std::chrono::milliseconds timeout = kUnsetTimeout) override {
       return true;
     };
   };
@@ -243,24 +234,11 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::send(
     int dstRank,
     int tag) {
   check_tensor(tensors);
+  TORCH_CHECK(dstRank < ucp_endpoints.size(), "Invalid dest rank");
   auto& tensor = tensors[0];
-
-  ucp_request_param_t params;
-  params.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK |
-      UCP_OP_ATTR_FIELD_DATATYPE | UCP_OP_ATTR_FIELD_MEMORY_TYPE;
-  params.datatype = ucp_dt_make_contig(tensor.numel() * tensor.element_size());  // TODO: support all contiguity types
-  params.memory_type = getUCSMemoryType(tensor.device().type());
-  params.cb.send = [](void* request, ucs_status_t status, void* user_data) {
-    *static_cast<bool *>(request) = true;
-  };
-  ucs_status_ptr_t request = ucp_tag_send_nbx(
-    ucp_endpoints[dstRank]->get(), tensor.data_ptr(), 1, tag, &params);
-  if (UCS_PTR_STATUS(request) == UCS_OK) {
-    // If the operation is finished immediately, then the callback will
-    // not be invoked.
-    return c10::make_intrusive<ProcessGroupUCC::ImmediatelyCompletedWork>();
-  }
-  worker->progress();
+  auto request = ucp_endpoints[dstRank]->send_with_tag(
+    tensor.data_ptr(), tensor.element_size() * tensor.numel(),
+    tag, tensor.device().type());
   return c10::make_intrusive<ProcessGroupUCC::WorkUCP>(worker, request);
 }
 
@@ -268,37 +246,24 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::recv(
     std::vector<at::Tensor>& tensors,
     int srcRank,
     int tag) {
-  // TODO: srcRank is not used here!!! Is this corrrect?
-  // No, this is not. We need to use commid and rank to distinguish
   check_tensor(tensors);
+  TORCH_CHECK(srcRank < ucp_endpoints.size(), "Invalid dest rank");
   auto& tensor = tensors[0];
-
-  ucp_request_param_t params;
-  params.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK |
-      UCP_OP_ATTR_FIELD_DATATYPE | UCP_OP_ATTR_FIELD_MEMORY_TYPE;
-  params.datatype = ucp_dt_make_contig(tensor.numel() * tensor.element_size());  // TODO: support all contiguity types
-  params.memory_type = getUCSMemoryType(tensor.device().type());
-  params.cb.recv = [](void* request,
-                      ucs_status_t status,
-                      const ucp_tag_recv_info_t* info,
-                      void* user_data) {
-    *static_cast<bool *>(request) = true;
-  };
-  ucs_status_ptr_t request = ucp_tag_recv_nbx(
-    worker->get(), tensor.data_ptr(), 1, tag, 0, &params);
-  if (UCS_PTR_STATUS(request) == UCS_OK) {
-    // If the operation is finished immediately, then the callback will
-    // not be invoked.
-    return c10::make_intrusive<ProcessGroupUCC::ImmediatelyCompletedWork>();
-  }
-  worker->progress();
+  auto request = ucp_endpoints[srcRank]->recv_with_tag(
+    tensor.data_ptr(), tensor.element_size() * tensor.numel(),
+    tag, tensor.device().type());
   return c10::make_intrusive<ProcessGroupUCC::WorkUCP>(worker, request);
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::recvAnysource(
-    std::vector<at::Tensor>& /* unused */,
-    int /* unused */) {
-  TORCH_CHECK(false, "ProcessGroupUCC does not support recvAnysource");
+    std::vector<at::Tensor>& tensors,
+    int tag) {
+  check_tensor(tensors);
+  auto& tensor = tensors[0];
+  auto request = worker->recv_with_tag(
+    tensor.data_ptr(), tensor.element_size() * tensor.numel(),
+    tag, tensor.device().type());
+  return c10::make_intrusive<ProcessGroupUCC::WorkUCP>(worker, request);
 };
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::barrier(
