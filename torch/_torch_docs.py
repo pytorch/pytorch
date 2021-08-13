@@ -11250,6 +11250,7 @@ Returns:
 
 Example::
 
+    >>> qx = torch.quantize_per_tensor(torch.rand(2, 2, 2, 2), 1.5, 3, torch.quint8)
     >>> torch.quantized_batch_norm(qx, torch.ones(2), torch.zeros(2), torch.rand(2), torch.rand(2), 0.00001, 0.2, 2)
     tensor([[[[-0.2000, -0.2000],
           [ 1.6000, -0.2000]],
