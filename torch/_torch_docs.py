@@ -10039,8 +10039,8 @@ Returns a new tensor with the data in :attr:`input` fake quantized using :attr:`
 
 Args:
     input (Tensor): the input value(s), in ``torch.float32``.
-    scale (double): quantization scale
-    zero_point (int64): quantization zero_point
+    scale (double or Tensor): quantization scale
+    zero_point (int64 or Tensor): quantization zero_point
     quant_min (int64): lower bound of the quantized domain
     quant_max (int64): upper bound of the quantized domain
 
@@ -10054,6 +10054,8 @@ Example::
     tensor([ 0.0552,  0.9730,  0.3973, -1.0780])
     >>> torch.fake_quantize_per_tensor_affine(x, 0.1, 0, 0, 255)
     tensor([0.1000, 1.0000, 0.4000, 0.0000])
+    >>> torch.fake_quantize_per_tensor_affine(x, torch.tensor(0.1), torch.tensor(0), 0, 255)
+    tensor([0.6000, 0.4000, 0.0000, 0.0000])
 """)
 
 add_docstr(torch.fake_quantize_per_channel_affine,
