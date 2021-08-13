@@ -14,7 +14,11 @@ GENERATED_CPP = [
     "autograd/generated/TraceType_4.cpp",
     "autograd/generated/ADInplaceOrViewType_0.cpp",
     "autograd/generated/ADInplaceOrViewType_1.cpp",
-    "autograd/generated/python_functions.cpp",
+    "autograd/generated/python_functions_0.cpp",
+    "autograd/generated/python_functions_1.cpp",
+    "autograd/generated/python_functions_2.cpp",
+    "autograd/generated/python_functions_3.cpp",
+    "autograd/generated/python_functions_4.cpp",
     "autograd/generated/python_nn_functions.cpp",
     "autograd/generated/python_fft_functions.cpp",
     "autograd/generated/python_linalg_functions.cpp",
@@ -738,7 +742,11 @@ libtorch_python_distributed_sources = libtorch_python_distributed_core_sources +
 
 def glob_libtorch_python_sources(gencode_pattern = ":generate-code[{}]"):
     _libtorch_python_sources = [gencode_pattern.format(name) for name in [
-        "autograd/generated/python_functions.cpp",
+        "autograd/generated/python_functions_0.cpp",
+        "autograd/generated/python_functions_1.cpp",
+        "autograd/generated/python_functions_2.cpp",
+        "autograd/generated/python_functions_3.cpp",
+        "autograd/generated/python_functions_4.cpp",
         "autograd/generated/python_nn_functions.cpp",
         "autograd/generated/python_fft_functions.cpp",
         "autograd/generated/python_linalg_functions.cpp",
@@ -840,6 +848,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/native/mkldnn/Utils.cpp",
     "aten/src/ATen/native/quantized/cpu/init_qnnpack.cpp",
     "aten/src/ATen/record_function.cpp",
+    "aten/src/ATen/SavedTensorHooks.cpp",
     "aten/src/ATen/vulkan/Context.cpp",
 ]
 

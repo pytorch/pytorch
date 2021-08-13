@@ -43,6 +43,11 @@ using torch::distributed::autograd::DistAutogradContainer;
 #include <utility>
 #include <vector>
 
+C10_DEFINE_bool(
+    torch_jit_enable_rethrow_caught_exception,
+    false,
+    "enable rethrowing caught exception");
+
 namespace torch {
 namespace jit {
 
@@ -708,12 +713,15 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
         push(stack, IValue());
         try {
           f.run(stack);
-        } catch (std::exception& e) {
-          std::ostringstream ss;
-          ss << "The following operation failed in the TorchScript interpreter.\n";
-          formatStackTrace(ss);
-          ss << "RuntimeError: " << ExceptionMessage(e) << "\n";
+        } catch (std::exception& _) {
+          // TODO(T98048876): Handle `_` correctly.
         }
+      }
+      if (FLAGS_torch_jit_enable_rethrow_caught_exception) {
+        if (future_) {
+          future_->setError(std::make_exception_ptr(e));
+        }
+        throw;
       }
       bool is_jit_exception = dynamic_cast<JITException*>(&e);
       // Janky af.  See https://github.com/pytorch/pytorch/issues/54612
