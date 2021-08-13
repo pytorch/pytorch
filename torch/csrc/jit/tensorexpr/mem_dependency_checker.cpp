@@ -728,7 +728,7 @@ void MemDependencyChecker::visit(ForPtr v) {
     loopIndicesStride.resize(indices.size());
 
     // index expr must depend on the loop var in some way to have a stride.
-    for (auto i : c10::irange(indices.size())) {
+    for (const auto i : c10::irange(indices.size())) {
       VarFinder vf;
       if (vf.find(indices[i]).count(var) == 0) {
         loopIndicesStride[i] = alloc<IntImm>(0);
