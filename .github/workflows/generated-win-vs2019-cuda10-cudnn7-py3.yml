@@ -1,9 +1,10 @@
 # @generated DO NOT EDIT MANUALLY
 # Template is at:    .github/templates/windows_ci_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
-name: win-vs2019-cuda11.1-py3
+name: win-vs2019-cuda10-cudnn7-py3
 
 on:
+  pull_request:
   push:
     branches:
       - master
@@ -11,9 +12,9 @@ on:
   workflow_dispatch:
 
 env:
-  BUILD_ENVIRONMENT: win-vs2019-cuda11.1-py3
+  BUILD_ENVIRONMENT: win-vs2019-cuda10-cudnn7-py3
   BUILD_WHEEL: 1
-  CUDA_VERSION: "11.1"
+  CUDA_VERSION: "10.1"
   IN_CI: 1
   INSTALL_WINDOWS_SDK: 1
   PYTHON_VERSION: "3.8"
@@ -28,7 +29,7 @@ env:
   USE_CUDA: 1
 
 concurrency:
-  group: win-vs2019-cuda11.1-py3-${{ github.event.pull_request.number || github.sha }}
+  group: win-vs2019-cuda10-cudnn7-py3-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 
 jobs:
@@ -39,7 +40,7 @@ jobs:
       run:
         working-directory: pytorch-${{ github.run_id }}
     env:
-      JOB_BASE_NAME: win-vs2019-cuda11.1-py3-build
+      JOB_BASE_NAME: win-vs2019-cuda10-cudnn7-py3-build
       http_proxy: "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128"
       https_proxy: "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128"
     steps:
@@ -103,7 +104,7 @@ jobs:
     env:
       TEST_RUNNER_TYPE: windows.8xlarge.nvidia.gpu
       NUM_TEST_SHARDS: 2
-      NUM_TEST_SHARDS_ON_PULL_REQUEST: 2
+      NUM_TEST_SHARDS_ON_PULL_REQUEST: 1
       PR_BODY: ${{ github.event.pull_request.body }}
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
@@ -122,13 +123,13 @@ jobs:
 
   test:
     env:
-      JOB_BASE_NAME: win-vs2019-cuda11.1-py3-test
+      JOB_BASE_NAME: win-vs2019-cuda10-cudnn7-py3-test
       SHARD_NUMBER: ${{ matrix.shard }}
       NUM_TEST_SHARDS: ${{ matrix.num_shards }}
       TEST_CONFIG: ${{ matrix.config }}
       http_proxy: "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128"
       https_proxy: "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128"
-      RUN_SMOKE_TESTS_ONLY_ON_PR: False
+      RUN_SMOKE_TESTS_ONLY_ON_PR: True
       PYTORCH_IGNORE_DISABLED_ISSUES: ${{ needs.generate-test-matrix.outputs.ignore-disabled-issues }}
     needs: [build, generate-test-matrix, ]
     strategy:
@@ -265,7 +266,7 @@ jobs:
         env:
           AWS_DEFAULT_REGION: us-east-1
           CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          JOB_BASE_NAME: win-vs2019-cuda11.1-py3-test
+          JOB_BASE_NAME: win-vs2019-cuda10-cudnn7-py3-test
           CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
           CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           CIRCLE_TAG: ${{ steps.parse-ref.outputs.tag }}

@@ -7889,7 +7889,7 @@ workflows:
               only:
                 - postnightly
       - pytorch_windows_build:
-          build_environment: pytorch-win-vs2019-cuda10.1-py3
+          build_environment: pytorch-win-vs2019-cuda10-cudnn7-py3
           cuda_version: "10.1"
           filters:
             branches:
@@ -7905,7 +7905,7 @@ workflows:
           vc_year: "2019"
           vs_version: "16.8.6"
       - pytorch_windows_test:
-          build_environment: pytorch-win-vs2019-cuda10.1-py3
+          build_environment: pytorch-win-vs2019-cuda10-cudnn7-py3
           cuda_version: "10.1"
           filters:
             branches:
@@ -9526,7 +9526,7 @@ workflows:
           requires:
             - binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_shared-with-deps_build
       - pytorch_windows_build:
-          build_environment: pytorch-win-vs2019-cuda10.1-py3
+          build_environment: pytorch-win-vs2019-cuda10-cudnn7-py3
           cuda_version: "10.1"
           name: pytorch_windows_vs2019_py38_cuda10.1_build
           python_version: "3.8"
@@ -9536,7 +9536,7 @@ workflows:
           vc_year: "2019"
           vs_version: "16.8.6"
       - pytorch_windows_test:
-          build_environment: pytorch-win-vs2019-cuda10.1-py3
+          build_environment: pytorch-win-vs2019-cuda10-cudnn7-py3
           cuda_version: "10.1"
           name: pytorch_windows_vs2019_py38_cuda10.1_on_cpu_test1
           python_version: "3.8"
