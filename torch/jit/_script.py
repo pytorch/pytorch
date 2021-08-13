@@ -987,6 +987,49 @@ def _script_pdt(obj, optimize=None, _frames_up=0, _rcb=None,
                 example_inputs: Union[List[Tuple], Dict[Callable, List[Tuple]], None] = None):
     # This is a private API, intended for internal use only. Usage of this API is only for experimental
     # purposes only and is highly discouraged.
+    r"""
+
+    The _script_pdt API is similar to script API, but it provides a way to infer the types
+    automatically for the arguments via example inputs. Below is a small tutorial on how
+    to use example inputs to infer the types for function arguments
+
+    ****Scripting a function using example_inputs****
+        Example inputs can be used to annotate a function arguments.
+        Example (annotating a function before scripting):
+        .. testcode::
+            import torch
+            def test_sum(a, b):
+                return a + b
+            # Annotate the arguments to be int
+            scripted_fn = torch.jit.script(test_sum, example_inputs=[(3, 4)])
+            print(type(scripted_fn))  # torch.jit.ScriptFunction
+            # See the compiled graph as Python code
+            print(scripted_fn.code)
+            # Call the function using the TorchScript interpreter
+            scripted_fn(20, 100)
+        .. testoutput::
+            :hide:
+            ...
+
+    Example ( Annotating forward of nn.Module using example_inputs)::
+
+            import torch
+            import torch.nn as nn
+            from typing import NamedTuple
+            class MyModule(NamedTuple):
+            result: List[int]
+            class TestNNModule(torch.nn.Module):
+                def forward(self, a) -> MyModule:
+                    result = MyModule(result=a)
+                    return result
+            pdt_model = TestNNModule()
+            # Runs the pdt_model in eager model with the inputs provided and annotates the arguments of forward
+            scripted_model = torch.jit.script(pdt_model, example_inputs={pdt_model: [([10, 20, ], ), ], })
+            # Run the scripted_model with actual inputs
+            print(scripted_model([20]))
+
+    """
+
     global type_trace_db
     if not _enabled:
         return obj
