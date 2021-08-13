@@ -83,7 +83,7 @@ class DistQuantizationTests(TestDistBackend, DistributedTest._DistTestBase):
     def test_all_to_all_single_fp16(self):
         group, group_id, rank = self._init_global_test()
         rank_to_GPU = self._init_multigpu_helper()
-        self._test_all_to_all_single_unequal_split_helper(
+        self._test_all_to_all_single(
             group,
             group_id,
             rank,
@@ -99,7 +99,7 @@ class DistQuantizationTests(TestDistBackend, DistributedTest._DistTestBase):
     def test_all_to_all_single_bfp16(self):
         group, group_id, rank = self._init_global_test()
         rank_to_GPU = self._init_multigpu_helper()
-        self._test_all_to_all_single_unequal_split_helper(
+        self._test_all_to_all_single(
             group,
             group_id,
             rank,
@@ -171,7 +171,7 @@ class DistQuantizationTests(TestDistBackend, DistributedTest._DistTestBase):
                 self.assertEqual(t1, t2)
         self._barrier()
 
-    def _test_all_to_all_single_unequal_split_helper(
+    def _test_all_to_all_single(
         self, group, group_id, rank, cuda=False, rank_to_GPU=None, dtype=torch.float, qtype=DQuantType.FP16
     ):
         if group_id is not None:
