@@ -13281,7 +13281,7 @@ class TestNNDeviceType(NNTestCase):
             transformer_model = nn.Transformer(nhead=16, num_encoder_layers=12).to(device)
             src = torch.rand(*src_shape, requires_grad=True, device=device)
             tgt = torch.rand(*tgt_shape, requires_grad=True, device=device)
-            self._test_module_empty_inputs(transformer_decoder, [src, tgt])
+            self._test_module_empty_inputs(transformer_model, [src, tgt])
 
     @onlyOnCPUAndCUDA
     @dtypes(torch.float32, torch.complex64)
