@@ -104,6 +104,10 @@ else()
       -fno-strict-aliasing
       -Wno-write-strings
       -Wno-strict-aliasing)
+    if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
+        list(APPEND TORCH_PYTHON_COMPILE_OPTIONS
+          -Wno-writable-strings)
+    endif()
 endif()
 
 if(USE_CUDA)
