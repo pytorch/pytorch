@@ -10,9 +10,13 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
-template <typename Op>
+template <
+    typename Op,
+    typename std::enable_if<std::is_same<
+        decltype(detail::bin_op_deducer(std::declval<Op>())),
+        void>::value>::type* = nullptr>
 static ExprPtr mutate_binary_op(
-    NodePtr<BinaryOpNode<Op>> v,
+    NodePtr<Op> v,
     IRCloner* cloner,
     bool option = false) {
   ExprPtr lhs_new = v->lhs()->accept_mutator(cloner);
@@ -252,7 +256,7 @@ StmtPtr IRCloner::mutate(ForPtr v) {
   auto stop_new = v->stop()->accept_mutator(this);
   auto body_new = v->body()->accept_mutator(this);
 
-  return alloc<For>(v->var(), start_new, stop_new, body_new, v->loop_options());
+  return For::make(v->var(), start_new, stop_new, body_new, v->loop_options());
 }
 
 StmtPtr IRCloner::mutate(BlockPtr v) {
@@ -261,7 +265,7 @@ StmtPtr IRCloner::mutate(BlockPtr v) {
   for (StmtPtr stmt : *v) {
     stmts_new.push_back(stmt->accept_mutator(this));
   }
-  return alloc<Block>(stmts_new);
+  return Block::make(stmts_new);
 }
 
 StmtPtr IRCloner::mutate(StorePtr v) {
@@ -328,13 +332,13 @@ StmtPtr IRCloner::mutate(CondPtr v) {
   StmtPtr false_old = v->false_stmt();
   StmtPtr true_new = true_old ? true_old->accept_mutator(this) : true_old;
   StmtPtr false_new = false_old ? false_old->accept_mutator(this) : false_old;
-  return alloc<Cond>(condition_new, true_new, false_new);
+  return Cond::make(condition_new, true_new, false_new);
 }
 
 StmtPtr Stmt::clone(StmtPtr s) {
   IRCloner cloner;
   StmtPtr cloned = s->accept_mutator(&cloner);
-  set_parent(cloned, nullptr);
+  set_parent(cloned, std::weak_ptr<Stmt>());
   return cloned;
 }
 

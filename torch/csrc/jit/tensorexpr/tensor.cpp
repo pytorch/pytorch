@@ -31,19 +31,19 @@ StmtPtr Tensor::constructStmt(
     for (const auto i : c10::irange(reduce_ndim)) {
       // Going in reverse order: from innermost loop to the outermost
       size_t dim_index = reduce_ndim - i - 1;
-      s = alloc<For>(
+      s = For::make(
           reduce_args[dim_index], alloc<IntImm>(0), reduce_dims[dim_index], s);
     }
     if (init_expr) {
       StorePtr init_stmt = alloc<Store>(buf(), indices, init_expr);
-      s = alloc<Block>(std::vector<StmtPtr>({init_stmt, s}));
+      s = Block::make({init_stmt, s});
     }
   }
 
   for (const auto i : c10::irange(ndim)) {
     // Going in reverse order: from innermost loop to the outermost
     size_t dim_index = ndim - i - 1;
-    s = alloc<For>(args[dim_index], alloc<IntImm>(0), buf()->dim(dim_index), s);
+    s = For::make(args[dim_index], alloc<IntImm>(0), buf()->dim(dim_index), s);
   }
   return s;
 }

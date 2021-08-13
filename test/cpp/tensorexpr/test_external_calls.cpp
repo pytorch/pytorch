@@ -680,8 +680,8 @@ TEST(ExternalCall, Inlining) {
         return MatmulResult->load(i, j) + FloatImm::make(3.0f);
       });
 
-  StmtPtr root_stmt = alloc<Block>(std::vector<StmtPtr>(
-      {A->stmt(), B->stmt(), MatmulResult->stmt(), Result->stmt()}));
+  StmtPtr root_stmt =
+      Block::make({A->stmt(), B->stmt(), MatmulResult->stmt(), Result->stmt()});
   LoopNest l(root_stmt, {Result->buf()});
 
   // Inlining should not inline anything here since all Bufs are either

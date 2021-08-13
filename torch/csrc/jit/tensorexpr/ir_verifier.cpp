@@ -9,8 +9,19 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
-template <typename Op>
-void verifyBitwiseOp(const BitwiseOpNode<Op>* v, IRVerifier* verifier) {
+namespace detail {
+template <typename T>
+void deducer(BinaryOpNode<T>);
+
+bool deducer(...);
+} // namespace detail
+
+template <
+    typename D,
+    typename std::enable_if<std::is_same<
+        decltype(detail::deducer(std::declval<D>())),
+        void>::value>::type* = nullptr>
+void verifyBitwiseOp(NodePtr<D> v, IRVerifier* verifier) {
   if (!v->lhs()->dtype().is_integral()) {
     throw unsupported_dtype();
   }
@@ -156,7 +167,13 @@ void IRVerifier::visit(ForPtr v) {
 
 void IRVerifier::visit(BlockPtr v) {
   for (StmtPtr s : v->stmts()) {
-    if (s->get_parent() != v) {
+    if (s->get_parent().get() != v.get()) {
+      std::cerr << "V: " << v.get() << "\n";
+      std::cerr << "*V: " << *v << "\n";
+      std::cerr << "S: " << s.get() << "\n";
+      std::cerr << "*S: " << *s << "\n";
+      std::cerr << "S->parent: " << s->get_parent().get() << "\n";
+      std::cerr << "*S->parent: " << *s->get_parent() << "\n";
       throw malformed_ir("Broken child-parent link inside a Block");
     }
   }

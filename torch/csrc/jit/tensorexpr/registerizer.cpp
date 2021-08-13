@@ -668,8 +668,8 @@ StmtPtr RegisterizerReplacer::mutate(StorePtr v) {
 
   ExprPtr new_val = v->value()->accept_mutator(this);
 
-  return alloc<Store>(
-      info->replacement().var_wrapper, std::vector<ExprPtr>({}), new_val);
+  std::vector<ExprPtr> indices;
+  return alloc<Store>(info->replacement().var_wrapper, indices, new_val);
 }
 
 StmtPtr RegisterizerReplacer::mutate(BlockPtr v) {
@@ -712,7 +712,7 @@ StmtPtr RegisterizerReplacer::mutate(BlockPtr v) {
     }
   }
 
-  return alloc<Block>(stmts);
+  return Block::make(stmts);
 }
 
 void RegisterizerReplacer::buildReplacements() {
@@ -727,8 +727,8 @@ void RegisterizerReplacer::buildReplacements() {
     info->replacement().var = v;
 
     // we need to wrap the Var in a Buf so we can Load or Store it.
-    info->replacement().var_wrapper =
-        alloc<Buf>(v, std::vector<ExprPtr>({}), info->buf()->dtype());
+    std::vector<ExprPtr> dims;
+    info->replacement().var_wrapper = alloc<Buf>(v, dims, info->buf()->dtype());
 
     bool first = true;
     for (auto s : info->stores()) {
@@ -772,7 +772,7 @@ StmtPtr registerize(StmtPtr s) {
   // The outermost node must be a Block so we have somewhere to put outer scope
   // scalars.
   if (!to<Block>(s)) {
-    s = alloc<Block>(std::vector<StmtPtr>({s}));
+    s = Block::make({s});
   }
   registerizer::RegisterizerAnalysis analysis;
   s->accept(&analysis);

@@ -1164,8 +1164,7 @@ Tensor* computeCatWoConditionals(
   auto output_buf =
       alloc<Buf>("aten_cat", output_sizes_expr, ToDtype(high_type));
   if (non_empty_inputs.size() == 0) {
-    return new Tensor(
-        output_buf, alloc<tensorexpr::Block>(std::vector<StmtPtr>({})));
+    return new Tensor(output_buf, tensorexpr::Block::make({}));
   }
 
   int64_t concat_dim = c10::get<int64_t>(arg_dim);
@@ -1194,14 +1193,13 @@ Tensor* computeCatWoConditionals(
     auto load_promoted = promoteToDtype(ExprHandle(load_expr), high_type);
     StmtPtr st = alloc<Store>(output_buf, store_indices, load_promoted.node());
     for (size_t i = dims.size(); i > 0; --i) {
-      st =
-          alloc<For>(for_vars[i - 1], alloc<IntImm>(0), dims[i - 1].node(), st);
+      st = For::make(for_vars[i - 1], alloc<IntImm>(0), dims[i - 1].node(), st);
     }
     return st;
   };
 
   ExprPtr concat_dim_size = nullptr;
-  auto block = alloc<tensorexpr::Block>(std::vector<StmtPtr>({}));
+  auto block = tensorexpr::Block::make({});
   for (size_t i = 0; i < non_empty_inputs.size(); ++i) {
     auto input_dims =
         ExprVectorToExprHandleVector(non_empty_inputs[i].node()->dims());
@@ -2916,7 +2914,7 @@ void TensorExprKernel::compile() {
   OptimizeCat(graph_);
 
   // Block to collect the Stmts corresponding to all tensors.
-  auto block = alloc<Block>(std::vector<StmtPtr>({}));
+  auto block = Block::make({});
 
   // Bind inputs to buffers.
   nInputs_ = graph_->inputs().size();

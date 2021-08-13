@@ -71,8 +71,13 @@ StorePtr Store::make(
     const BufHandle& buf,
     const std::vector<ExprHandle>& indices,
     const ExprHandle& value) {
-  return alloc<Store>(
-      buf.node(), ExprHandleVectorToExprVector(indices), value.node());
+  return make(buf.node(), ExprHandleVectorToExprVector(indices), value.node());
+}
+StorePtr Store::make(
+    BufPtr buf,
+    const std::vector<ExprPtr>& indices,
+    ExprPtr value) {
+  return alloc<Store>(buf, indices, value);
 }
 
 ExprPtr flatten_index(

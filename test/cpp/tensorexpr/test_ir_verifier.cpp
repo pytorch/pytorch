@@ -133,10 +133,10 @@ TEST(IRVerifier, For) {
   KernelScope kernel_scope;
   VarPtr I = alloc<Var>("i", kInt);
   VarPtr J = alloc<Var>("j", kInt);
-  StmtPtr body = alloc<Block>(std::vector<StmtPtr>({}));
+  StmtPtr body = Block::make({});
   {
     // Can't have nullptr as a Var
-    auto a = alloc<For>(nullptr, I, J, body);
+    auto a = For::make(nullptr, I, J, body);
     // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
     EXPECT_ANY_THROW(verify(a));
   }
@@ -149,9 +149,9 @@ TEST(IRVerifier, Block) {
   {
     StmtPtr store = alloc<Store>(B, std::vector<ExprPtr>({I}), I);
     // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
-    StmtPtr block1 = alloc<Block>(std::vector<StmtPtr>({store}));
+    StmtPtr block1 = Block::make({store});
     // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
-    StmtPtr block2 = alloc<Block>(std::vector<StmtPtr>({store}));
+    StmtPtr block2 = Block::make({store});
     // Stmt can't have multiple parrents, thus inserting it into several blocks
     // is illegal
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto,clang-analyzer-cplusplus.NewDeleteLeaks)

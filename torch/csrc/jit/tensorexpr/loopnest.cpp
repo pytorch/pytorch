@@ -98,10 +98,9 @@ class IndexFlattener : public IRMutator {
     if (v->indices().size() == 1) {
       return v;
     }
-    return alloc<Load>(
-        v->dtype(),
-        v->buf(),
-        std::vector<ExprPtr>({flatten_index(v->buf()->dims(), v->indices())}));
+    std::vector<ExprPtr> indices = {
+        flatten_index(v->buf()->dims(), v->indices())};
+    return alloc<Load>(v->dtype(), v->buf(), indices);
   }
 
   StmtPtr mutate(StorePtr v) override {
@@ -110,10 +109,9 @@ class IndexFlattener : public IRMutator {
     if (v->indices().size() == 1 && value == new_value) {
       return (StmtPtr)v;
     }
-    return alloc<Store>(
-        v->buf(),
-        std::vector<ExprPtr>({flatten_index(v->buf()->dims(), v->indices())}),
-        new_value);
+    std::vector<ExprPtr> indices = {
+        flatten_index(v->buf()->dims(), v->indices())};
+    return alloc<Store>(v->buf(), indices, new_value);
   }
 };
 
@@ -362,7 +360,7 @@ class Vectorizer : public IRMutator {
       return (ForPtr)v;
     }
 
-    return alloc<For>(var, new_start, new_stop, new_body, loop_options);
+    return For::make(var, new_start, new_stop, new_body, loop_options);
   }
 
   template <typename T>
@@ -485,7 +483,7 @@ void LoopNest::initialize(
     }
   }
 
-  root_stmt_ = alloc<Block>(loops);
+  root_stmt_ = Block::make(loops);
 }
 
 class FunctionInliner : public IRMutator {
@@ -596,7 +594,7 @@ class FunctionInliner : public IRMutator {
       return IRMutator::mutate(v);
     }
 
-    // Create a new Let Statment for the random variable, which we can refer
+    // Create a new Let Statement for the random variable, which we can refer
     // to multiple times and resolve the same value (ie. store it in a scalar
     // rather than the Tensor).
     const std::string& name = buf_->name_hint();
@@ -638,6 +636,9 @@ class FunctionInliner : public IRMutator {
       stmts.push_back(stmt_new);
     }
 
+    if (stmts.empty()) {
+      return nullptr;
+    }
     return Block::make(stmts);
   }
 
@@ -903,7 +904,7 @@ StmtPtr LoopNest::insertAllocFree(StmtPtr stmt) {
 
   BlockPtr b = to<Block>(stmt);
   if (!b) {
-    b = alloc<Block>(std::vector<StmtPtr>({stmt}));
+    b = Block::make({stmt});
   }
 
   std::unordered_map<BufPtr, std::vector<BufLoadOrStoreUse>> uses =
@@ -1172,7 +1173,7 @@ bool LoopNest::optimizeConditionals() {
       auto new_store = store->accept_mutator(&ifthenelseReplacer);
       auto new_for_body =
           for_to_split->body()->clone_and_replace(store, new_store);
-      auto new_for = alloc<For>(
+      auto new_for = For::make(
           for_to_split->var(),
           comp_values[i],
           comp_values[i + 1],
@@ -1181,7 +1182,7 @@ bool LoopNest::optimizeConditionals() {
       split_loops.push_back(new_for);
     }
     auto par = to<Block>(for_to_split->get_parent());
-    par->replace_stmt(for_to_split, alloc<Block>(split_loops));
+    par->replace_stmt(for_to_split, Block::make(split_loops));
   }
   root_stmt_ = IRSimplifier::simplify(root_stmt_);
   return true;
@@ -1277,8 +1278,8 @@ void LoopNest::sliceHead(ForPtr f, int factor, ForPtr* head, ForPtr* tail) {
 
   ExprPtr head_end = alloc<Min>(
       alloc<Add>(f->start(), alloc<IntImm>(factor)), f->stop(), true);
-  *head = alloc<For>(f->var(), f->start(), head_end, Stmt::clone(f->body()));
-  *tail = alloc<For>(
+  *head = For::make(f->var(), f->start(), head_end, Stmt::clone(f->body()));
+  *tail = For::make(
       f->var(), head_end, f->stop(), Stmt::clone(f->body()), f->loop_options());
 
   p->replace_stmt(f, *head);
@@ -1318,13 +1319,13 @@ void LoopNest::sliceTail(ForPtr f, int factor, ForPtr* head, ForPtr* tail) {
 
   ExprPtr tail_start = alloc<Max>(
       f->start(), alloc<Sub>(f->stop(), alloc<IntImm>(factor)), true);
-  *head = alloc<For>(
+  *head = For::make(
       f->var(),
       f->start(),
       tail_start,
       Stmt::clone(f->body()),
       f->loop_options());
-  *tail = alloc<For>(f->var(), tail_start, f->stop(), Stmt::clone(f->body()));
+  *tail = For::make(f->var(), tail_start, f->stop(), Stmt::clone(f->body()));
 
   p->replace_stmt(f, *head);
   p->insert_stmt_after(*tail, *head);
@@ -1394,7 +1395,7 @@ void LoopNest::splitWithTail(
 
     StmtPtr body_tail =
         Substitute(Stmt::clone(f->body()), {{f->var(), combined_index2}});
-    *tail = alloc<For>(i_tail, alloc<IntImm>(0), tail_size, body_tail);
+    *tail = For::make(i_tail, alloc<IntImm>(0), tail_size, body_tail);
 
     p->insert_stmt_after(*tail, f);
   } else {
@@ -1404,7 +1405,7 @@ void LoopNest::splitWithTail(
   StmtPtr body_inner =
       Substitute(f->removeBody(), {{f->var(), combined_index1}});
 
-  *inner = alloc<For>(i_inner, alloc<IntImm>(0), factor_expr, body_inner);
+  *inner = For::make(i_inner, alloc<IntImm>(0), factor_expr, body_inner);
   // The input loop `f` will be the outer loop after split.
   f->setVar(i_outer);
   f->setStart(alloc<IntImm>(0));
@@ -1470,7 +1471,7 @@ void LoopNest::splitWithMask(ForPtr f, int factor, ForPtr* inner) {
   }
   body_inner = Substitute(body_inner, {{f->var(), combined_index}});
 
-  *inner = alloc<For>(i_inner, alloc<IntImm>(0), factor_expr, body_inner);
+  *inner = For::make(i_inner, alloc<IntImm>(0), factor_expr, body_inner);
   // The input loop `f` will be the outer loop after split.
   f->setVar(i_outer);
   f->setStart(alloc<IntImm>(0));
@@ -1494,14 +1495,14 @@ std::vector<ForPtr> LoopNest::distributeLoop(
 
   // Extract bodies for all the loops after distribution.
   std::vector<BlockPtr> new_loop_bodies;
-  auto new_loop_body = alloc<Block>(std::vector<StmtPtr>({}));
+  auto new_loop_body = Block::make({});
   while (!loop->body()->empty()) {
     auto s = loop->body()->front();
     loop->body()->remove_stmt(s);
     new_loop_body->append_stmt(s);
     if (pivots.count(s)) {
       new_loop_bodies.push_back(new_loop_body);
-      new_loop_body = alloc<Block>(std::vector<StmtPtr>({}));
+      new_loop_body = Block::make({});
     }
   }
   if (!new_loop_body->empty()) {
@@ -1780,7 +1781,7 @@ bool LoopNest::fuseLoops(const std::vector<ForPtr>& loops, ForPtr* fused) {
   // So, we create a clone of all the loops, fuse them and check for this.
   std::vector<ForPtr> loops_copy;
   loops_copy.reserve(loops.size());
-  BlockPtr parent = alloc<Block>(std::vector<StmtPtr>({}));
+  BlockPtr parent = Block::make({});
   for (auto& l : loops) {
     auto l_copy = Stmt::clone(l);
     loops_copy.push_back(to<For>(l_copy));
@@ -1852,7 +1853,7 @@ void LoopNest::reorderAxis(ForPtr a, ForPtr b) {
   CHECK(root);
 
   // Do a shallow copy of the inner blocks.
-  BlockPtr body = alloc<Block>(std::vector<StmtPtr>({}));
+  BlockPtr body = Block::make({});
   body->splice(body->end(), inner->body());
 
   ForPtr before{outer};
@@ -1867,8 +1868,7 @@ void LoopNest::reorderAxis(ForPtr a, ForPtr b) {
         newInner = cond->cloneWithNewBody(newInner);
       } else {
         // s is the false branch of Cond
-        newInner = cond->cloneWithNewBodies(
-            alloc<Block>(std::vector<StmtPtr>({})), newInner);
+        newInner = cond->cloneWithNewBodies(Block::make({}), newInner);
       }
     }
     s = s->get_parent();
@@ -1996,7 +1996,7 @@ std::vector<ForPtr> LoopNest::reorder(
   // We use an empty block statement to replace the outermost loop
   // so that we know the position where the outermost reordered loop
   // is to be inserted.
-  auto empty_block = alloc<Block>(std::vector<StmtPtr>({}));
+  auto empty_block = Block::make({});
   parent->replace_stmt(loops.front(), empty_block);
   for (size_t i = 1; i < loops.size(); ++i) {
     auto block = to<Block>(loops[i]->get_parent());
@@ -2116,7 +2116,7 @@ void LoopNest::unroll(ForPtr f, StmtPtr* unrolled) {
           {{f->var(), getImmediateByType(f->var()->dtype(), current)}}));
     }
   }
-  *unrolled = alloc<Block>(unrolled_stmts);
+  *unrolled = Block::make(unrolled_stmts);
   *unrolled = IRSimplifier::simplify(*unrolled);
 
   p->replace_stmt(f, *unrolled);
@@ -2360,7 +2360,7 @@ void LoopNest::compressBuffer(BufPtr buf, StmtPtr stmt) {
 
 void LoopNest::compressAllBuffers(StmtPtr stmt) {
   for (auto buf : BufFinder::find(stmt)) {
-    compressBuffer(const_cast<BufPtr>(buf), stmt);
+    compressBuffer(buf, stmt);
   }
 }
 
@@ -2686,7 +2686,7 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
 
     for (int64_t i = new_loop_vars.size() - 1; i >= 0; --i) {
       tmp_init =
-          alloc<For>(new_loop_vars[i], alloc<IntImm>(0), tmp_dims[i], tmp_init);
+          For::make(new_loop_vars[i], alloc<IntImm>(0), tmp_dims[i], tmp_init);
     }
 
     consumer_block->insert_stmt_before(tmp_init, new_consumer);
@@ -2702,8 +2702,8 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
             {}));
 
     for (int64_t i = new_loop_vars.size() - 1; i >= 0; --i) {
-      tmp_store = alloc<For>(
-          new_loop_vars[i], alloc<IntImm>(0), tmp_dims[i], tmp_store);
+      tmp_store =
+          For::make(new_loop_vars[i], alloc<IntImm>(0), tmp_dims[i], tmp_store);
     }
 
     consumer_block->insert_stmt_after(tmp_store, new_consumer);
@@ -2717,8 +2717,8 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
         tmp_buf, new_loop_vars_expr, alloc<Load>(producer, tmp_params));
 
     for (int64_t i = new_loop_vars.size() - 1; i >= 0; --i) {
-      tmp_store = alloc<For>(
-          new_loop_vars[i], alloc<IntImm>(0), tmp_dims[i], tmp_store);
+      tmp_store =
+          For::make(new_loop_vars[i], alloc<IntImm>(0), tmp_dims[i], tmp_store);
     }
 
     consumer_block->insert_stmt_before(tmp_store, new_consumer);
@@ -2730,8 +2730,8 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
         producer, tmp_params, alloc<Load>(tmp_buf, new_loop_vars_expr));
 
     for (int64_t i = new_loop_vars.size() - 1; i >= 0; --i) {
-      tmp_store = alloc<For>(
-          new_loop_vars[i], alloc<IntImm>(0), tmp_dims[i], tmp_store);
+      tmp_store =
+          For::make(new_loop_vars[i], alloc<IntImm>(0), tmp_dims[i], tmp_store);
     }
 
     consumer_block->insert_stmt_after(tmp_store, new_consumer);
@@ -2913,7 +2913,7 @@ void LoopNest::computeAt(StmtPtr s, ForPtr f) {
     // We're creating loops from innermost to outermost, so we need to access
     // dimensions in reversed order.
     size_t dim_idx = dims.size() - 1 - i;
-    bd = alloc<For>(
+    bd = For::make(
         to<Var>(temp_indices[dim_idx]), alloc<IntImm>(0), dims[dim_idx], bd);
   }
 

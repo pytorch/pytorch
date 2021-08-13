@@ -6,6 +6,70 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
+// Creates a new Expr of the given type with the provided lhs and rhs.
+inline ExprPtr newBinaryOpOfType(
+    IRNodeType expr_type,
+    ExprPtr lhs,
+    ExprPtr rhs,
+    bool option) {
+  switch (expr_type) {
+    // NOLINTNEXTLINE(bugprone-branch-clone)
+    case IRNodeType::kAdd:
+      return alloc<Add>(lhs, rhs);
+    case IRNodeType::kSub:
+      return alloc<Sub>(lhs, rhs);
+    case IRNodeType::kMul:
+      return alloc<Mul>(lhs, rhs);
+    case IRNodeType::kDiv:
+      return alloc<Div>(lhs, rhs);
+    case IRNodeType::kMod:
+      return alloc<Mod>(lhs, rhs);
+    case IRNodeType::kMax:
+      return alloc<Max>(lhs, rhs, option);
+    case IRNodeType::kMin:
+      return alloc<Min>(lhs, rhs, option);
+    case IRNodeType::kAnd:
+      return alloc<And>(lhs, rhs);
+    case IRNodeType::kXor:
+      return alloc<Xor>(lhs, rhs);
+    case IRNodeType::kLshift:
+      return alloc<Lshift>(lhs, rhs);
+    case IRNodeType::kRshift:
+      return alloc<Rshift>(lhs, rhs);
+    default:
+      LOG(FATAL) << "unsupported expr_type: " << static_cast<int>(expr_type);
+      return nullptr;
+  }
+}
+
+template <
+    typename Op,
+    typename std::enable_if<std::is_same<
+        decltype(detail::bin_op_deducer(std::declval<Op>())),
+        void>::value>::type* = nullptr>
+static ExprPtr mutateBinaryOp(
+    NodePtr<Op> v,
+    IRMutator* mutator,
+    bool option = false) {
+  ExprPtr lhs = v->lhs();
+  ExprPtr rhs = v->rhs();
+  ExprPtr lhs_new = lhs->accept_mutator(mutator);
+  ExprPtr rhs_new = rhs->accept_mutator(mutator);
+
+  ExprPtr node = v;
+
+  if (lhs != lhs_new || rhs != rhs_new) {
+    node = newBinaryOpOfType(v->expr_type(), lhs_new, rhs_new, option);
+  }
+
+  // Can only fold if both sides are constant.
+  if (!lhs_new->isConstant() || !rhs_new->isConstant()) {
+    return node;
+  }
+
+  return evaluateOp(node);
+}
+
 // Simple recursive GCD.
 template <typename T>
 T gcd(T a, T b) {
@@ -1163,7 +1227,8 @@ ExprPtr combineMinMaxTerms(
     for (auto v : m2->variables()) {
       variables.push_back(v);
     }
-    return alloc<OpTerm>(hasher, scalar, propagate_nans, std::move(variables));
+    return alloc<OpTerm>(
+        hasher, scalar, propagate_nans, std::move(variables));
   };
 
   auto add_expr_to_opterm = [&](ExprPtr expr, NodePtr<OpTerm> opterm) {
@@ -1179,7 +1244,8 @@ ExprPtr combineMinMaxTerms(
     } else {
       variables.push_back(expr);
     }
-    return alloc<OpTerm>(hasher, scalar, propagate_nans, std::move(variables));
+    return alloc<OpTerm>(
+        hasher, scalar, propagate_nans, std::move(variables));
   };
 
   auto lhs_opterm = to<OpTerm>(lhs);
@@ -1499,6 +1565,22 @@ ExprPtr PolynomialTransformer::mutate(IfThenElsePtr v) {
   return alloc<IfThenElse>(condition_new, true_value_new, false_value_new);
 }
 
+ExprPtr PolynomialTransformer::mutate(AndPtr v) {
+  return mutateBinaryOp(v, this);
+}
+
+ExprPtr PolynomialTransformer::mutate(XorPtr v) {
+  return mutateBinaryOp(v, this);
+}
+
+ExprPtr PolynomialTransformer::mutate(LshiftPtr v) {
+  return mutateBinaryOp(v, this);
+}
+
+ExprPtr PolynomialTransformer::mutate(RshiftPtr v) {
+  return mutateBinaryOp(v, this);
+}
+
 StmtPtr PolynomialBase::mutate(CondPtr v) {
   ExprPtr cond_old = v->condition();
   StmtPtr true_old = v->true_stmt();
@@ -1531,7 +1613,7 @@ StmtPtr PolynomialBase::mutate(CondPtr v) {
   bool false_empty = !false_new || (false_block && false_block->nstmts() == 0);
 
   if (true_empty && false_empty) {
-    return alloc<Block>(std::vector<StmtPtr>({}));
+    return Block::make({});
   }
 
   if (cond_old == cond_new && true_old == true_new && false_old == false_new) {
@@ -1545,7 +1627,7 @@ StmtPtr PolynomialBase::mutate(CondPtr v) {
     false_new = Stmt::clone(false_old);
   }
 
-  return alloc<Cond>(cond_new, true_new, false_new);
+  return Cond::make(cond_new, true_new, false_new);
 }
 
 StmtPtr handleForCondReordering(ForPtr loop, CondPtr cond) {
@@ -1582,7 +1664,7 @@ StmtPtr PolynomialBase::mutate(ForPtr v) {
   loops = loops->accept_mutator(this);
   if (loop_options.isDefault() && loops->isConstant()) {
     if (immediateEquals(loops, 0)) {
-      return alloc<Block>(std::vector<StmtPtr>({}));
+      return Block::make({});
     } else if (immediateEquals(loops, 1)) {
       body_new = Substitute(body, {{var_new, start_new}});
       body_new = body_new->accept_mutator(this);
@@ -1592,12 +1674,12 @@ StmtPtr PolynomialBase::mutate(ForPtr v) {
 
   body_new = body_new->accept_mutator(this);
   if (!body_new) {
-    return alloc<Block>(std::vector<StmtPtr>({}));
+    return Block::make({});
   }
 
   if (auto block = to<Block>(body_new)) {
     if (block->nstmts() == 0) {
-      return alloc<Block>(std::vector<StmtPtr>({}));
+      return Block::make({});
     }
 
     if (block->nstmts() == 1) {
@@ -1617,7 +1699,7 @@ StmtPtr PolynomialBase::mutate(ForPtr v) {
   if (body_new == body) {
     body_new = Stmt::clone(body);
   }
-  return alloc<For>(var_new, start_new, stop_new, body_new, loop_options);
+  return For::make(var_new, start_new, stop_new, body_new, loop_options);
 }
 
 StmtPtr PolynomialBase::mutate(BlockPtr v) {
@@ -1642,7 +1724,7 @@ StmtPtr PolynomialBase::mutate(BlockPtr v) {
     }
   }
 
-  return alloc<Block>(stmts);
+  return Block::make(stmts);
 }
 
 // TermExpander
@@ -1897,6 +1979,7 @@ c10::optional<class ModRound*> isModRound(TermPtr e) {
     scalar = getImmediateByType(multiplier->dtype(), 1);
   }
 
+  // TODO: this leaks memory!
   return new ModRound(scalar, denom, divisor, mod_divisor);
 }
 
@@ -2336,8 +2419,8 @@ BlockPtr TermExpander::fuseConditions(BlockPtr v) {
 
     // Fuse the two Conds by appending the bodies of the second Cond to the
     // first.
-    BlockPtr true_block = alloc<Block>(std::vector<StmtPtr>({}));
-    BlockPtr false_block = alloc<Block>(std::vector<StmtPtr>({}));
+    BlockPtr true_block = Block::make({});
+    BlockPtr false_block = Block::make({});
 
     if (prev_cond->true_stmt()) {
       true_block->splice(true_block->end(), prev_cond->true_stmt());
@@ -2386,7 +2469,7 @@ BlockPtr TermExpander::fuseConditions(BlockPtr v) {
     }
   }
 
-  return alloc<Block>(stmts);
+  return Block::make(stmts);
 }
 
 StmtPtr TermExpander::fuseSyncThreads(BlockPtr block) {
@@ -2431,7 +2514,7 @@ StmtPtr TermExpander::fuseSyncThreads(BlockPtr block) {
     }
   }
 
-  return alloc<Block>(std::vector<StmtPtr>({stmts}));
+  return Block::make({stmts});
 }
 
 StmtPtr TermExpander::mutate(BlockPtr v) {
@@ -2496,7 +2579,7 @@ StmtPtr SimplifierUnderContext::mutate(ForPtr v) {
   iters = iters->accept_mutator(this);
   if (loop_options.isDefault() && iters->isConstant()) {
     if (immediateEquals(iters, 0)) {
-      return alloc<Block>(std::vector<StmtPtr>({}));
+      return Block::make({});
     } else if (immediateEquals(iters, 1)) {
       body_new = Substitute(body, {{var_new, start_new}});
       body_new = body_new->accept_mutator(this);
@@ -2522,12 +2605,12 @@ StmtPtr SimplifierUnderContext::mutate(ForPtr v) {
   }
 
   if (!body_new) {
-    return alloc<Block>(std::vector<StmtPtr>({}));
+    return Block::make({});
   }
 
   if (auto block = to<Block>(body_new)) {
     if (block->nstmts() == 0) {
-      return alloc<Block>(std::vector<StmtPtr>({}));
+      return Block::make({});
     }
 
     if (block->nstmts() == 1) {
@@ -2549,7 +2632,7 @@ StmtPtr SimplifierUnderContext::mutate(ForPtr v) {
   if (body_new == body) {
     body_new = Stmt::clone(body);
   }
-  return alloc<For>(var_new, start_new, stop_new, body_new, loop_options);
+  return For::make(var_new, start_new, stop_new, body_new, loop_options);
 }
 
 // Simplify division using distributive laws for the following cases:

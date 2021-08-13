@@ -36,7 +36,7 @@ enum IRNodeType {
 };
 
 // The common base between all expression node.
-class TORCH_API Expr : public KernelScopedObject {
+class TORCH_API Expr : public std::enable_shared_from_this<Expr> {
  public:
   explicit Expr(Dtype dtype, IRNodeType expr_type = kOther)
       : dtype_(dtype), expr_type_(expr_type) {}
@@ -54,6 +54,11 @@ class TORCH_API Expr : public KernelScopedObject {
     return false;
   }
 
+ protected:
+  std::shared_ptr<Expr> getptr() {
+    return shared_from_this();
+  }
+
  private:
   Dtype dtype_;
   IRNodeType expr_type_;
@@ -66,7 +71,7 @@ class ExprNode : public Base {
  public:
   using ExprNodeBase = ExprNode<Op>;
   void accept(IRVisitor* visitor) override {
-    visitor->visit(static_to<Op>(this));
+    visitor->visit(static_to<Op>(Base::getptr()));
   }
   ExprPtr accept_mutator(IRMutator* mutator) override;
   // pass the constructor to the base class
@@ -323,7 +328,7 @@ class TORCH_API VarHandle : public ExprHandle {
 
 template <class Op, class Base>
 ExprPtr ExprNode<Op, Base>::accept_mutator(IRMutator* mutator) {
-  return mutator->mutate(static_to<Op>(this));
+  return mutator->mutate(static_to<Op>(Base::getptr()));
 }
 
 inline bool same_node(const ExprHandle& expr1, const ExprHandle& expr2) {

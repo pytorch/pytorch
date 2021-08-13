@@ -40,9 +40,9 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
-#define CACHE_GUARD()  \
-  if (cachedHash(v)) { \
-    return;            \
+#define CACHE_GUARD()        \
+  if (cachedHash(v.get())) { \
+    return;                  \
   }
 
 class Term;
@@ -59,7 +59,7 @@ class TORCH_API HashProvider : public IRVisitor {
     return hashOf(e);
   }
 
-  bool cachedHash(const KernelScopedObject* e) {
+  bool cachedHash(void* e) {
     return exprToHash_.find(e) != exprToHash_.end();
   }
 
@@ -82,10 +82,10 @@ class TORCH_API HashProvider : public IRVisitor {
   void visit(CompareSelectPtr v) override;
 
 // NOLINTNEXTLINE
-#define IMM_VISIT(Type, Name)                    \
-  void visit(Name##ImmPtr v) override {          \
-    CACHE_GUARD();                               \
-    putHash(v, hash_combine(#Name, v->value())); \
+#define IMM_VISIT(Type, Name)                          \
+  void visit(Name##ImmPtr v) override {                \
+    CACHE_GUARD();                                     \
+    putHash(v.get(), hash_combine(#Name, v->value())); \
   }
   AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_VISIT);
 #undef IMM_VISIT
@@ -117,7 +117,7 @@ class TORCH_API HashProvider : public IRVisitor {
 
  private:
   SimplifierHashType hashOf(ExprPtr e) {
-    auto it = exprToHash_.find(e);
+    auto it = exprToHash_.find(e.get());
     if (it != exprToHash_.end()) {
       return it->second;
     }
@@ -127,13 +127,13 @@ class TORCH_API HashProvider : public IRVisitor {
     IRPrinter printer(ss);
     e->accept(&printer);
     SimplifierHashType hash = SimplifierHashType(te_hash(ss.str()));
-    putHash(e, hash);
+    putHash(e.get(), hash);
 
     return hash;
   }
 
   SimplifierHashType hashOf(StmtPtr s) {
-    auto it = exprToHash_.find(s);
+    auto it = exprToHash_.find(s.get());
     if (it != exprToHash_.end()) {
       return it->second;
     }
@@ -143,7 +143,7 @@ class TORCH_API HashProvider : public IRVisitor {
     IRPrinter printer(ss);
     s->accept(&printer);
     SimplifierHashType hash = SimplifierHashType(te_hash(ss.str()));
-    putHash(s, hash);
+    putHash(s.get(), hash);
 
     return hash;
   }
@@ -182,7 +182,7 @@ class TORCH_API HashProvider : public IRVisitor {
     _hash_combine(seed, args...);
   }
 
-  void putHash(const KernelScopedObject* e, SimplifierHashType h) {
+  void putHash(void* e, SimplifierHashType h) {
     auto res = exprToHash_.emplace(e, h);
     if (res.second == false) {
       // This is always a logic bug since we should check the cache first.
@@ -190,7 +190,7 @@ class TORCH_API HashProvider : public IRVisitor {
     }
   }
 
-  std::unordered_map<const KernelScopedObject*, SimplifierHashType> exprToHash_;
+  std::unordered_map<void*, SimplifierHashType> exprToHash_;
   UniqueNameManager name_manager_;
 
   size_t te_hash(SimplifierHashType val) {
