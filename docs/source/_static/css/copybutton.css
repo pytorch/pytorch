@@ -30,7 +30,7 @@ div.highlight  {
     position: relative;
 }
 
-.highlight:hover button.copybtn {
+.highlight button.copybtn {
     opacity: 1;
 }
 
