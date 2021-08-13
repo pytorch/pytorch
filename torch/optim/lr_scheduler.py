@@ -952,7 +952,7 @@ class CosineAnnealingWarmRestarts(_LRScheduler):
         https://arxiv.org/abs/1608.03983
     """
 
-    def __init__(self, optimizer, T_0, T_mult=1, eta_min=0, last_epoch=-1, gamma=1., verbose=False):
+    def __init__(self, optimizer, T_0, T_mult=1, eta_min=0, last_epoch=-1, gamma=None, verbose=False):
         if T_0 <= 0 or not isinstance(T_0, int):
             raise ValueError("Expected positive integer T_0, but got {}".format(T_0))
         if T_mult < 1 or not isinstance(T_mult, int):
@@ -962,19 +962,23 @@ class CosineAnnealingWarmRestarts(_LRScheduler):
         self.T_mult = T_mult
         self.eta_min = eta_min
 
-        super(CosineAnnealingWarmRestarts, self).__init__(optimizer, last_epoch, verbose)
-
-        self.T_cur = self.last_epoch
+        self.T_cur = last_epoch
         self.gamma = gamma
         self.cycle = 1
+
+        super(CosineAnnealingWarmRestarts, self).__init__(optimizer, last_epoch, verbose)
 
     def get_lr(self):
         if not self._get_lr_called_within_step:
             warnings.warn("To get the last learning rate computed by the scheduler, "
                           "please use `get_last_lr()`.", UserWarning)
 
-        return [self.eta_min + ((base_lr * (self.gamma**self.cycle)) - self.eta_min) * (1 + math.cos(math.pi * self.T_cur / self.T_i)) / 2
-                for base_lr in self.base_lrs]
+        if self.gamma is None:
+            return [self.eta_min + (base_lr - self.eta_min) * (1 + math.cos(math.pi * self.T_cur / self.T_i)) / 2
+                    for base_lr in self.base_lrs]
+        else:
+            return [self.eta_min + ((base_lr * (self.gamma**self.cycle)) - self.eta_min) * (1 + math.cos(math.pi * self.T_cur / self.T_i)) / 2
+                    for base_lr in self.base_lrs]
 
     def step(self, epoch=None):
         """Step could be called after every batch update
