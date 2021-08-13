@@ -9350,6 +9350,8 @@ Example::
     tensor([[ 0.4875,  0.3938],
             [ 0.9158, -0.6929],
             [-0.5872,  0.6932]])
+
+See also :func:`torch.transpose`.
 """.format(**common_args))
 
 add_docstr(torch.flip,
@@ -9709,6 +9711,8 @@ Example::
     tensor([[ 1.0028, -0.1669],
             [-0.9893,  0.7299],
             [ 0.5809,  0.4942]])
+
+See also :func:`torch.t`.
 """.format(**common_args))
 
 add_docstr(torch.triangular_solve,
