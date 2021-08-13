@@ -12,11 +12,29 @@ constexpr const char* BACKEND_NAME = "nccl";
 
 class TORCH_API ProcessGroupNCCLWithUCC : public ProcessGroup {
 public:
+
+  // Options is only used by NCCL
+  struct Options : ProcessGroup::Options {
+    // NOTE: timeout in ProcessGroupNCCL::Options denote the timeout for
+    // operations. This is only used when blockingWait_ is enabled.
+    explicit Options(
+        bool is_high_priority_stream = false);
+
+    // return intrusive_ptr of the object
+    static c10::intrusive_ptr<Options> create(
+        bool is_high_priority_stream = false) {
+      return c10::make_intrusive<Options>(is_high_priority_stream);
+    }
+
+    // Schedule NCCL operations on high priority CUDA streams
+    bool is_high_priority_stream;
+  };
+
   ProcessGroupNCCLWithUCC(
       const c10::intrusive_ptr<Store>& store,
       int rank,
       int size,
-      c10::intrusive_ptr<Options> options);
+      c10::intrusive_ptr<Options> options = Options::create());
 
   virtual ~ProcessGroupNCCLWithUCC();
 
@@ -112,6 +130,10 @@ public:
   void setSequenceNumberForGroup() override;
 
   uint64_t getSequenceNumberForGroup() override;
+
+  static void groupStart();
+
+  static void groupEnd();
 
 private:
   c10::intrusive_ptr<Options> options_;

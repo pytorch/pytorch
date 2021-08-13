@@ -1373,7 +1373,7 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               py::call_guard<py::gil_scoped_release>());
 #endif
 
-#ifdef USE_C10D_NCCL
+#if defined(USE_C10D_NCCL) || defined(USE_C10D_UCC)
   auto processGroupNCCL =
       intrusive_ptr_no_gil_destructor_class_<::c10d::ProcessGroupNCCLWithUCC>(
           module, "ProcessGroupNCCL", processGroup)
@@ -1382,14 +1382,14 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
                   const c10::intrusive_ptr<::c10d::Store>&,
                   int,
                   int,
-                  c10::intrusive_ptr<::c10d::ProcessGroupNCCL::Options>>(),
+                  c10::intrusive_ptr<::c10d::ProcessGroupNCCLWithUCC::Options>>(),
               py::call_guard<py::gil_scoped_release>())
           .def(
               py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
                           int rank,
                           int size,
                           const std::chrono::milliseconds& timeout) {
-                auto options = ::c10d::ProcessGroupNCCL::Options::create();
+                auto options = ::c10d::ProcessGroupNCCLWithUCC::Options::create();
                 options->is_high_priority_stream = false;
                 options->timeout = timeout;
                 return c10::make_intrusive<::c10d::ProcessGroupNCCLWithUCC>(
@@ -1403,7 +1403,7 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           .def_property_readonly(
               "options", &::c10d::ProcessGroupNCCLWithUCC::getOptions);
 
-  intrusive_ptr_class_<::c10d::ProcessGroupNCCL::Options>(
+  intrusive_ptr_class_<::c10d::ProcessGroupNCCLWithUCC::Options>(
       processGroupNCCL,
       "Options",
       processGroupOptions,
@@ -1426,11 +1426,11 @@ Example::
       .def(py::init<bool>(), py::arg("is_high_priority_stream") = false)
       .def_readwrite(
           "is_high_priority_stream",
-          &::c10d::ProcessGroupNCCL::Options::is_high_priority_stream);
+          &::c10d::ProcessGroupNCCLWithUCC::Options::is_high_priority_stream);
   processGroupNCCL.def_static(
-      "_group_start", []() { ::c10d::ProcessGroupNCCL::groupStart(); });
+      "_group_start", []() { ::c10d::ProcessGroupNCCLWithUCC::groupStart(); });
   processGroupNCCL.def_static(
-      "_group_end", []() { ::c10d::ProcessGroupNCCL::groupEnd(); });
+      "_group_end", []() { ::c10d::ProcessGroupNCCLWithUCC::groupEnd(); });
 #endif
 
 #ifdef USE_C10D_MPI

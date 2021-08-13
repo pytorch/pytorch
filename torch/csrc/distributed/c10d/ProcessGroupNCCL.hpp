@@ -12,6 +12,7 @@
 #include <c10d/NCCLUtils.hpp>
 #include <c10d/ProcessGroup.hpp>
 #include <c10d/Store.hpp>
+#include <c10d/ProcessGroupNCCLWithUCC.hpp>
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAEvent.h>
@@ -182,21 +183,7 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
     friend class ProcessGroupNCCL;
   };
 
-  struct Options : ProcessGroup::Options {
-    // NOTE: timeout in ProcessGroupNCCL::Options denote the timeout for
-    // operations. This is only used when blockingWait_ is enabled.
-    explicit Options(
-        bool is_high_priority_stream = false);
-
-    // return intrusive_ptr of the object
-    static c10::intrusive_ptr<Options> create(
-        bool is_high_priority_stream = false) {
-      return c10::make_intrusive<Options>(is_high_priority_stream);
-    }
-
-    // Schedule NCCL operations on high priority CUDA streams
-    bool is_high_priority_stream;
-  };
+  using Options = ProcessGroupNCCLWithUCC::Options;
 
   // If you wish to create multiple process groups, each with a potentially
   // different rank and size, you can do so by passing a new store instance

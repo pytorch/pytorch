@@ -16,16 +16,16 @@
 constexpr const char *TORCH_NCCL_ENABLED = "TORCH_NCCL_ENABLED";
 constexpr const char *TORCH_UCC_ENABLED = "TORCH_UCC_ENABLED";
 
-static bool string_is_true(std::string s) {
-  return (s == "1" || s == "true");
+inline bool string_is_true(char *s) {
+  return s == nullptr || (std::string(s) != "0" && std::string(s) != "false");
 }
 
-static bool nccl_enabled() {
+inline bool nccl_enabled() {
   static bool result = string_is_true(std::getenv(TORCH_NCCL_ENABLED));
   return result;
 }
 
-static bool ucc_enabled() {
+inline bool ucc_enabled() {
   static bool result = string_is_true(std::getenv(TORCH_UCC_ENABLED));
   return result;
 }
@@ -273,7 +273,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCLWithUCC::recvAnysource(
 
 void ProcessGroupNCCLWithUCC::setSequenceNumberForGroup() {
   if (nccl_enabled() && pg_nccl.get() != nullptr) {
-    return pg_nccl->setSequenceNumberForGroup();
+    pg_nccl->setSequenceNumberForGroup();
+    return;
   }
   TORCH_CHECK(false, "Can not find a backend to execute setSequenceNumberForGroup");
 }
@@ -283,6 +284,18 @@ uint64_t ProcessGroupNCCLWithUCC::getSequenceNumberForGroup() {
     return pg_nccl->getSequenceNumberForGroup();
   }
   TORCH_CHECK(false, "Can not find a backend to execute getSequenceNumberForGroup");
+}
+
+void ProcessGroupNCCLWithUCC::groupStart() {
+#ifdef USE_C10D_NCCL
+  ProcessGroupNCCL::groupStart();
+#endif
+}
+
+void ProcessGroupNCCLWithUCC::groupEnd() {
+#ifdef USE_C10D_NCCL
+  ProcessGroupNCCL::groupEnd();
+#endif
 }
 
 } // namespace c10d
