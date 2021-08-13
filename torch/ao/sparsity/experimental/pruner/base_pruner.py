@@ -8,7 +8,7 @@ from torch.nn.utils import parametrize
 
 from torch.nn.modules.container import ModuleDict, ModuleList
 
-from .parametrization import PruningParametrization, ActivationReconstruction
+from .parametrization import PruningParametrization, ActivationReconstruction, BiasHook
 
 SUPPORTED_MODULES = {
     nn.Linear,
@@ -43,11 +43,6 @@ class BasePruner(abc.ABC):
         `module_groups`.
 
     Args:
-        - model [nn.Module]: model to configure. The model itself is not saved
-            but used for the state_dict saving / loading.
-        - config [list]: configuration elements could either be instances of
-            nn.Module or dict maps. The dicts must have a key 'module' with the
-            value being an instance of a nn.Module.
         - defaults [dict]: default configurations will be attached to the
             configuration. Only the keys that don't exist in the `config` will
             be updated.
@@ -85,14 +80,6 @@ class BasePruner(abc.ABC):
         format_string += ')'
         return format_string
 
-    def bias_hook(self, module, input, output):
-        if getattr(module, '_bias', None) is not None:
-            idx = [1] * len(output.shape)
-            idx[1] = output.shape[1]
-            bias = module._bias.reshape(idx)
-            output += bias
-        return output
-
     def _prepare(self, use_path=False, *args, **kwargs):
         r"""Adds mask parametrization to the layer weight
         """
@@ -124,16 +111,26 @@ class BasePruner(abc.ABC):
             if module.bias is not None:
                 module.register_parameter('_bias', nn.Parameter(module.bias.detach()))
                 module.bias = None
-            self.bias_handles.append(module.register_forward_hook(self.bias_hook))
+            self.bias_handles.append(module.register_forward_hook(BiasHook(module.parametrizations.weight[0], self.prune_bias)))
 
-    def prepare(self, model, config):
-        r"""Prepares a model, by adding the parametrizations.
+    def prepare(self, model, config, also_prune_bias=True):
+        r"""Prepares a model, by adding the parametrizations and forward post-hooks.
         Note::
             The model is modified inplace. If you need to preserve the original
             model, use copy.deepcopy.
+
+        Args:
+        - model [nn.Module]: model to configure. The model itself is not saved
+            but used for the state_dict saving / loading.
+        - config [list]: configuration elements could either be instances of
+            nn.Module or dict maps. The dicts must have a key 'module' with the
+            value being an instance of a nn.Module.
+        - also_prune_bias [bool]: whether to prune bias in addition to weights (to prune full output channel)
+            or not; default=True.
         """
         self.model = model  # TODO: Need to figure out how to load without this.
         self.config = config
+        self.prune_bias = also_prune_bias
 
         # If no config -- try getting all the supported layers
         if self.config is None:

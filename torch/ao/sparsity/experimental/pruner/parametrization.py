@@ -36,3 +36,25 @@ class ActivationReconstruction:
         reconstructed_tensor = torch.zeros(sizes)
         reconstructed_tensor[indices] = output
         return reconstructed_tensor
+
+
+class BiasHook:
+    def __init__(self, parametrization, prune_bias):
+        self.param = parametrization
+        self.prune_bias = prune_bias
+
+    def __call__(self, module, input, output):
+        pruned_outputs = self.param.pruned_outputs
+
+        if getattr(module, '_bias', None) is not None:
+            bias = module._bias.data
+            if self.prune_bias:
+                bias[list(pruned_outputs)] = 0
+
+            # reshape bias to broadcast over output dimensions
+            idx = [1] * len(output.shape)
+            idx[1] = output.shape[1]
+            bias = bias.reshape(idx)
+
+            output += bias
+        return output
