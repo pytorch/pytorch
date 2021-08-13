@@ -923,8 +923,8 @@ Examples::
 """)
 
 matrix_rank = _add_docstr(_linalg.linalg_matrix_rank, r"""
-linalg.matrix_rank(A, *, atol=0.0, rtol=None, hermitian=False, out=None) -> Tensor
-linalg.matrix_rank(A, tol=None, hermitian=False, *, out=None) -> Tensor
+linalg.matrix_rank(A, *, atol=None, rtol=None, hermitian=False, out=None) -> Tensor
+linalg.matrix_rank(A, tol, hermitian=False, *, out=None) -> Tensor
 
 Computes the numerical rank of a matrix.
 
@@ -952,8 +952,6 @@ and :math:`\varepsilon` is the epsilon value for the dtype of :attr:`A` (see :cl
 If :attr:`A` is a batch of matrices, :attr:`rtol` is computed this way for every element of
 the batch.
 
-If both :attr:`atol` and :attr:`rtol` are specified then the value for :attr:`rtol` is ignored.
-
 """ + fr"""
 .. note:: The matrix rank is computed using singular value decomposition
           :func:`torch.linalg.svd` if :attr:`hermitian`\ `= False` (default) and the eigenvalue
@@ -964,13 +962,14 @@ If both :attr:`atol` and :attr:`rtol` are specified then the value for :attr:`rt
 Args:
     A (Tensor): tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.
     tol (float, Tensor, optional): the tolerance value.
-                                   If the value of `tol` is not specified then `rtol=tol` and  `atol=tol` otherwise.
-                                   Default: `None`.
+                                   If the value of :attr:`tol` is `None`
+                                   then it's equivalent to setting `rtol=tol` and  `atol=tol` otherwise.
 
 Keyword args:
-    atol (float, Tensor): the absolute tolerance value. Default: `0.0`.
-    rtol (float, Tensor): the relative tolerance value. See above for the value it takes when `None`.
-                         Default: `None`.
+    atol (float, Tensor, optional): the absolute tolerance value. When `None` it's considered to be zero.
+                                    Default: `None`.
+    rtol (float, Tensor, optional): the relative tolerance value. See above for the value it takes when `None`.
+                                    Default: `None`.
     hermitian(bool): indicates whether :attr:`A` is Hermitian if complex
                      or symmetric if real. Default: `False`.
     out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
@@ -1001,10 +1000,10 @@ Examples::
     >>> torch.linalg.matrix_rank(A, hermitian=True)
     tensor([[3, 3, 3, 3],
             [3, 3, 3, 3]])
-    >>> torch.linalg.matrix_rank(A, atol=1.0)
+    >>> torch.linalg.matrix_rank(A, atol=1.0, rtol=0.0)
     tensor([[3, 2, 2, 2],
             [1, 2, 1, 2]])
-    >>> torch.linalg.matrix_rank(A, atol=1.0, hermitian=True)
+    >>> torch.linalg.matrix_rank(A, atol=1.0, rtol=0.0, hermitian=True)
     tensor([[2, 2, 2, 1],
             [1, 2, 2, 2]])
 """)
@@ -1645,7 +1644,7 @@ Examples::
 
 pinv = _add_docstr(_linalg.linalg_pinv, r"""
 linalg.pinv(A, *, atol=None, rtol=None, hermitian=False, out=None) -> Tensor
-linalg.pinv(A, rcond=1e-15, hermitian=False, *, out=None) -> Tensor
+linalg.pinv(A, rcond, hermitian=False, *, out=None) -> Tensor
 
 Computes the pseudoinverse (Moore-Penrose inverse) of a matrix.
 
@@ -1690,7 +1689,6 @@ the batch.
 
 .. note::
     Use of the positional argument :attr:`rcond` is deprecated in favor of :attr:`rtol`.
-    The default values for :attr:`rcond` and :attr:`rtol` are different.
 
 .. warning::
     This function uses internally :func:`torch.linalg.svd` (or :func:`torch.linalg.eigh`
@@ -1711,10 +1709,12 @@ Args:
                                        If it is a :class:`torch.Tensor`, its shape must be
                                        broadcastable to that of the singular values of
                                        :attr:`A` as returned by :func:`torch.svd`.
-                                       Default: `1e-15`.
+                                       If the value of :attr:`rcond` is specified then
+                                       it's equivalent to setting `rtol=rcond`.
 
 Keyword args:
-    atol (float, Tensor, optional): the absolute tolerance value. Default: `None`.
+    atol (float, Tensor, optional): the absolute tolerance value. When `None` it's considered to be zero.
+                                    Default: `None`.
     rtol (float, Tensor, optional): the relative tolerance value. See above for the value it takes when `None`.
                                     Default: `None`.
     hermitian(bool, optional): indicates whether :attr:`A` is Hermitian if complex
