@@ -11267,6 +11267,86 @@ Example::
 """)
 
 
+add_docstr(torch.quantized_max_pool1d,
+           r"""
+quantized_max_pool1d(input, kernel_size, stride, padding, dilation, ceil_mode) -> Tensor
+
+Applies a 1D max pooling over an input quantized tensor composed of several input planes.
+
+Arguments:
+    input (Tensor): quantized tensor
+    kernel_size (list of int): the size of the sliding window
+    stride (optional list of int): the stride of the sliding window
+    padding (optional list of int): padding to be added on both sides, must be >= 0 and <= kernel_size / 2
+    dilation (optional list of int): The stride between elements within a sliding window, must be > 0. Default 1
+    ceil_mode (optional bool):  If True, will use ceil instead of floor to compute the output shape.
+        Defaults to False.
+
+
+Returns:
+    Tensor: A quantized tensor with max_pool1d applied.
+
+Example::
+
+    >>> qx
+    tensor([[0.0000, 0.0000],
+            [0.0000, 1.5000]], size=(2, 2), dtype=torch.quint8,
+        quantization_scheme=torch.per_tensor_affine, scale=1.5, zero_point=3)
+    >>> torch.quantized_max_pool1d(qx, [2])
+    tensor([[0.0000],
+            [1.5000]], size=(2, 1), dtype=torch.quint8,
+        quantization_scheme=torch.per_tensor_affine, scale=1.5, zero_point=3)
+""")
+
+
+add_docstr(torch.quantized_max_pool2d,
+           r"""
+quantized_max_pool2d(input, kernel_size, stride, padding, dilation, ceil_mode) -> Tensor
+
+Applies a 2D max pooling over an input quantized tensor composed of several input planes.
+
+Arguments:
+    input (Tensor): quantized tensor
+    kernel_size (list of int): the size of the sliding window
+    stride (optional list of int): the stride of the sliding window
+    padding (optional list of int): padding to be added on both sides, must be >= 0 and <= kernel_size / 2
+    dilation (optional list of int): The stride between elements within a sliding window, must be > 0. Default 1
+    ceil_mode (optional bool):  If True, will use ceil instead of floor to compute the output shape.
+        Defaults to False.
+
+
+Returns:
+    Tensor: A quantized tensor with max_pool2d applied.
+
+Example::
+
+    >>> qx
+    tensor([[[[1.5000, 0.0000],
+            [1.5000, 0.0000]],
+
+            [[1.5000, 1.5000],
+            [0.0000, 0.0000]]],
+
+
+            [[[0.0000, 0.0000],
+            [0.0000, 0.0000]],
+
+            [[0.0000, 0.0000],
+            [0.0000, 0.0000]]]], size=(2, 2, 2, 2), dtype=torch.quint8,
+        quantization_scheme=torch.per_tensor_affine, scale=1.5, zero_point=3)
+    >>> torch.quantized_max_pool2d(qx, [2,2])
+    tensor([[[[1.5000]],
+
+            [[1.5000]]],
+
+
+            [[[0.0000]],
+
+            [[0.0000]]]], size=(2, 2, 1, 1), dtype=torch.quint8,
+        quantization_scheme=torch.per_tensor_affine, scale=1.5, zero_point=3)
+""")
+
+
 add_docstr(torch.Generator,
            r"""
 Generator(device='cpu') -> Generator
