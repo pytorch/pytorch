@@ -143,6 +143,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
 
   std::cout << ">>>>> CUDA MATMUL\n";
 
+  // TODO: is it possible to combine the dispatch code?
   if (isIntegralType(scalar_type, false)) {
     AT_DISPATCH_INDEX_TYPES(scalar_type, "addmm_cuda_int", [&] {
       using scalar_t = index_t;
@@ -151,6 +152,17 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
       scalar_t* mat1_ptr = mat1_->data_ptr<scalar_t>();
       scalar_t* mat2_ptr = mat2_->data_ptr<scalar_t>();
       scalar_t* result_ptr = result_->data_ptr<scalar_t>();
+
+      at::cuda::blas::gemm<scalar_t>(
+        transpose_mat1 ? 't' : 'n',
+        transpose_mat2 ? 't' : 'n',
+        m, n, k,
+        alpha_val,
+        mat1_ptr, mat1_ld,
+        mat2_ptr, mat2_ld,
+        beta_val,
+        result_ptr, result_ld
+    );
     });
   }
   else {

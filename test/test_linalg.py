@@ -6071,7 +6071,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
     @onlyCUDA
     @dtypes(torch.int32, torch.int64)
-    def test_matmul_long_tensor(self, device, dtype):
+    def test_matmul_integer_tensor(self, device, dtype):
         m = 256
         n = 128
 
