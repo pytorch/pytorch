@@ -333,12 +333,13 @@ def set_default_dtype(d):
     and the intent of set_default_dtype(torch.float64) is to facilitate NumPy-like
     type inference. The default floating point dtype is used to:
 
-    1. Infer the dtype of Python floats. This affect tensor constructors like
-       :func:`torch.tensor` and type promotion between bool and integer tensors
-       and Python floats.
-    2. Implicitly determine the default complex dtype. When the default floating point
+    1. Implicitly determine the default complex dtype. When the default floating point
        type is float32 the default complex dtype is complex64, and when the default
        floating point type is float64 the default complex type is complex128.
+    2. Infer the dtype for tensors constructed using Python floats or complex Python 
+       numbers. See examples below.
+    3. Determine the result of type promotion between bool and integer tensors and
+       Python floats and complex Python numbers.
 
     Args:
         d (:class:`torch.dtype`): the floating point dtype to make the default.
