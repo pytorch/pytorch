@@ -29,6 +29,7 @@
 #include <ATen/core/ivalue.h>
 #include <c10/core/thread_pool.h>
 #include <c10/util/SmallVector.h>
+#include <c10/util/irange.h>
 #include <c10/util/math_compat.h>
 #include <c10/util/string_utils.h>
 
@@ -190,7 +191,7 @@ void minList(Stack* stack) {
   c10::List<T> b = pop(stack).to<c10::List<T>>();
 
   size_t min_size = std::min(a.size(), b.size());
-  for (size_t i = 0; i < min_size; i++) {
+  for (const auto i : c10::irange(min_size)) {
     if (a[i] == b[i]) {
       continue;
     }
@@ -208,7 +209,7 @@ void maxList(Stack* stack) {
   c10::List<T> b = pop(stack).to<c10::List<T>>();
 
   size_t min_size = std::min(a.size(), b.size());
-  for (size_t i = 0; i < min_size; i++) {
+  for (const auto i : c10::irange(min_size)) {
     if (a[i] == b[i]) {
       continue;
     }
@@ -253,7 +254,7 @@ void listMin(Stack* stack) {
   }
 
   T min_elem = list[0];
-  for (size_t i = 1; i < list_size; ++i) {
+  for (const auto i : c10::irange(1, list_size)) {
     T elem = list[i];
     min_elem = elem < min_elem ? elem : min_elem;
   }
@@ -270,7 +271,7 @@ void listMax(Stack* stack) {
   }
 
   T max_elem = list[0];
-  for (size_t i = 1; i < list_size; ++i) {
+  for (const auto i : c10::irange(1, list_size)) {
     T elem = list[i];
     max_elem = elem > max_elem ? elem : max_elem;
   }
@@ -339,7 +340,7 @@ inline bool tensor_list_equal(
     return false;
   }
 
-  for (size_t i = 0; i < a.size(); ++i) {
+  for (const auto i : c10::irange(a.size())) {
     at::Tensor a_element = a[i];
     at::Tensor b_element = b[i];
     // This preserves Python's semantics, which uses eq() to compare two
