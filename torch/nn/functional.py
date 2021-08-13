@@ -458,10 +458,11 @@ def fractional_max_pool2d_with_indices(
     if output_size is None:
         assert output_ratio is not None
         _output_ratio = _pair(output_ratio)
-        output_size = [int(input.size(2) * _output_ratio[0]), int(input.size(3) * _output_ratio[1])]
+        output_size = [int(input.size(-2) * _output_ratio[0]), int(input.size(-1) * _output_ratio[1])]
 
     if _random_samples is None:
-        _random_samples = torch.rand(input.size(0), input.size(1), 2, dtype=input.dtype, device=input.device)
+        n_batch = 1 if input.dim() == 3 else input.size(0)
+        _random_samples = torch.rand(n_batch, input.size(-3), 2, dtype=input.dtype, device=input.device)
     return torch._C._nn.fractional_max_pool2d(input, kernel_size, output_size, _random_samples)
 
 
