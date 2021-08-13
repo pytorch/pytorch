@@ -2,6 +2,9 @@
 #include <c10d/ucc/UCXUtils.hpp>
 #include <c10/macros/Export.h>
 
+// TODO support profiler:
+// Reference PR: https://github.com/pytorch/pytorch/pull/52004/files
+
 namespace {
 
 static void check_tensor(const std::vector<at::Tensor>& tensors) {
