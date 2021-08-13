@@ -76,6 +76,11 @@ Device::Device(const std::string& device_string) : Device(Type::CPU) {
           device_string,
           "' which has an invalid device index");
     }
+    TORCH_CHECK(
+        index_ >= 0,
+        "Invalid device string: '",
+        device_string,
+        "' which has a negative device index");
   } else {
     device_name = device_string;
   }
