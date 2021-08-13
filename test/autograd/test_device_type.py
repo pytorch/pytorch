@@ -1,3 +1,8 @@
+# Do not add this to test/run_test.py as this is run with
+# test/test_autograd.py.
+#
+# If you add a TestCase here, import it in test/test_autograd.py.
+
 import math
 import sys
 import time
