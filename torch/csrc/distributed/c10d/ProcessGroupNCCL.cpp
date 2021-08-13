@@ -1777,7 +1777,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall(
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::send(
     std::vector<at::Tensor>& tensors,
     int dstRank,
-    int tag) {
+    int /* unused */) {
   check_gpu_tensors(tensors);
   auto ret = pointToPoint(
       tensors,
@@ -1797,7 +1797,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::send(
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::recv(
     std::vector<at::Tensor>& tensors,
     int srcRank,
-    int tag) {
+    int /* unused */) {
   check_gpu_tensors(tensors);
   auto ret = pointToPoint(
       tensors,
