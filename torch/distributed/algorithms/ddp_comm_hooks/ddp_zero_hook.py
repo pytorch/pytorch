@@ -124,20 +124,11 @@ def _save_ddp_bucket_info(
         overlap_info.total_size += bucket_size
 
 
-class _HookDirective(Enum):
-    r"""
-    This represents a directive to be returned by
-    :func:`_hook_with_zero_step_setup`.
-    """
-    RETURN = 0
-    CONTINUE = 1
-
-
 def _hook_with_zero_step_setup(
     ddp_ref: weakref.ReferenceType,
     zero: ZeroRedundancyOptimizer,
     bucket: dist.GradBucket,
-) -> _HookDirective:
+):
     r"""
     Encapsulates the setup logic for :func:`hook_with_zero_step` and
     :func:`hook_with_zero_step_interleaved`, meaning the logic to run in the
@@ -151,15 +142,11 @@ def _hook_with_zero_step_setup(
         zero (ZeroRedundancyOptimizer): the calling process's
             :class:`ZeroRedundancyOptimizer` instance.
         bucket (dist.GradBucket): the current gradient bucket.
-
-    Returns:
-        ``RETURN`` if the hook should return the future directly and
-        ``CONTINUE`` if the hook should proceed with further logic.
     """
     # Proceed as normal until the DDP buckets have been rebuilt
     if not ddp_ref()._has_rebuilt_buckets:  # type: ignore[union-attr]
         assert zero._overlap_info.status == _OverlapStatus.UNINITIALIZED
-        return _HookDirective.RETURN
+        return
 
     bucket_index = bucket.index()
     overlap_info = zero._overlap_info
@@ -176,9 +163,6 @@ def _hook_with_zero_step_setup(
             # Once DDP buckets have been rebuilt but ZeRO has not been
             # properly initialized yet, save the information needed
             _save_ddp_bucket_info(bucket, zero)
-            return _HookDirective.RETURN
-
-    return _HookDirective.CONTINUE
 
 
 def hook_with_zero_step(
@@ -273,7 +257,8 @@ def hook_with_zero_step(
                 gradient bucket.
         """
         fut = hook(state, bucket)
-        if _hook_with_zero_step_setup(ddp_ref, zero, bucket) == _HookDirective.RETURN:
+        _hook_with_zero_step_setup(ddp_ref, zero, bucket)
+        if zero._overlap_info.status != _OverlapStatus.INITIALIZED:
             return fut
 
         overlap_info = zero._overlap_info
@@ -426,7 +411,8 @@ def hook_with_zero_step_interleaved(
                 gradient bucket.
         """
         fut = hook(state, bucket)
-        if _hook_with_zero_step_setup(ddp_ref, zero, bucket) == _HookDirective.RETURN:
+        _hook_with_zero_step_setup(ddp_ref, zero, bucket)
+        if zero._overlap_info.status != _OverlapStatus.INITIALIZED:
             return fut
 
         def zero_step(fut: torch.futures.Future) -> torch.Tensor:
