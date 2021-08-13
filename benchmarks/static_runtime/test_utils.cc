@@ -1,6 +1,6 @@
 // (c) Facebook, Inc. and its affiliates. Confidential and proprietary.
 
-#include "caffe2/benchmarks/static_runtime/test_utils.h"
+#include "test_utils.h"
 
 #include <ATen/core/ivalue.h>
 #include <gtest/gtest.h>
@@ -94,7 +94,9 @@ std::unique_ptr<StaticRuntimeTestContext> makeTestContext(
 
 void compareTensorLists(
     const std::vector<IValue>& l, /* expects */
-    const std::vector<IValue>& r /* values */) {
+    const std::vector<IValue>& r, /* values */
+    const bool use_allclose,
+    const bool use_equalnan) {
   EXPECT_TRUE(l.size() == r.size());
   for (int i = 0; i < l.size(); ++i) {
     ASSERT_TRUE(l[i].isTensor());
@@ -104,22 +106,16 @@ void compareTensorLists(
     if (!l[i].toTensor().defined()) {
       EXPECT_TRUE(!r[i].toTensor().defined());
     } else {
-      EXPECT_TRUE(l[i].toTensor().equal(r[i].toTensor()));
-    }
-  }
-}
-
-void compareTensorLists(
-    const std::vector<at::Tensor>& l, /* expects */
-    const std::vector<at::Tensor>& r /* values */) {
-  EXPECT_TRUE(l.size() == r.size());
-  for (int i = 0; i < l.size(); ++i) {
-    VLOG(2) << "expect " << i << ": \n" << l[i] << std::endl;
-    VLOG(2) << "output " << i << ": \n" << r[i] << std::endl;
-    if (!l[i].defined()) {
-      EXPECT_TRUE(!r[i].defined());
-    } else {
-      EXPECT_TRUE(l[i].equal(r[i]));
+      if (use_allclose) {
+        EXPECT_TRUE(at::allclose(
+            l[i].toTensor(),
+            r[i].toTensor(),
+            /*rtol*/ 1e-05,
+            /*atol*/ 1e-08,
+            use_equalnan));
+      } else {
+        EXPECT_TRUE(l[i].toTensor().equal(r[i].toTensor()));
+      }
     }
   }
 }
@@ -127,13 +123,19 @@ void compareTensorLists(
 void compareResults(
     const IValue& expect,
     const IValue& actual,
-    const bool use_allclose = false) {
+    const bool use_allclose = false,
+    const bool use_equalnan = false) {
   if (expect.isTensor()) {
     VLOG(2) << "expect " << expect.toTensor() << std::endl;
     VLOG(2) << "output " << actual.toTensor() << std::endl;
     EXPECT_TRUE(actual.isTensor());
     if (use_allclose) {
-      EXPECT_TRUE(at::allclose(expect.toTensor(), actual.toTensor()));
+      EXPECT_TRUE(at::allclose(
+          expect.toTensor(),
+          actual.toTensor(),
+          /*rtol*/ 1e-05,
+          /*atol*/ 1e-08,
+          use_equalnan));
     } else {
       EXPECT_TRUE(expect.toTensor().equal(actual.toTensor()));
     }
@@ -176,7 +178,8 @@ void testStaticRuntime(
     const std::string& source,
     const std::vector<IValue>& args,
     const std::vector<IValue>& args2,
-    const bool use_allclose) {
+    const bool use_allclose,
+    const bool use_equalnan) {
   auto test_context = makeTestContext(source);
 
   std::vector<IValue> args_tensors, args_copy;
@@ -194,9 +197,15 @@ void testStaticRuntime(
     auto smodule = test_context->makeStaticModule(
         {true, enable_out_variant, enable_out_variant});
     auto actual = smodule(args, {});
+    if (actual.isTensor()) {
+      EXPECT_GE(smodule.nodes().size(), 2)
+          << "If we only have one node, the output of the op we are testing is "
+          << "not being managed by the memory planner! A failure here "
+          << "can typically be fixed by clone()ing the output of the test script.";
+    }
     smodule.runtime().check_for_memory_leak();
     // first run
-    compareResults(expect, actual, use_allclose);
+    compareResults(expect, actual, use_allclose, use_equalnan);
 
     // args2 is used to check for dynamic shapes
     // it also exercises the memory planner
@@ -205,24 +214,24 @@ void testStaticRuntime(
       actual = smodule(args2, {});
       smodule.runtime().check_for_memory_leak();
       // second run
-      compareResults(expect, actual, use_allclose);
+      compareResults(expect, actual, use_allclose, use_equalnan);
 
       expect = test_context->getExpected(args);
       actual = smodule(args, {});
       smodule.runtime().check_for_memory_leak();
       // third run
-      compareResults(expect, actual, use_allclose);
+      compareResults(expect, actual, use_allclose, use_equalnan);
     } else {
       // run static runtime again to exercise the memory planner
       actual = smodule(args, {});
       smodule.runtime().check_for_memory_leak();
       // second run
-      compareResults(expect, actual, use_allclose);
+      compareResults(expect, actual, use_allclose, use_equalnan);
     }
   }
 
   // make sure inputs were not modified
-  compareTensorLists(args_tensors, args_copy);
+  compareTensorLists(args_tensors, args_copy, use_allclose, use_equalnan);
 }
 
 } // namespace test

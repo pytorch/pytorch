@@ -96,6 +96,8 @@ class TORCH_API SavedVariable {
   std::weak_ptr<Node> grad_accumulator_;
   bool requires_grad_ = false;
 
-  void save_common_metadata(const Variable& data);
+  void save_metadata(const Variable& data);
+  static std::unique_ptr<SavedVariableHooks> get_default_hooks();
+  void set_hooks_and_pack_data(std::unique_ptr<SavedVariableHooks>&& hooks, const Variable& data);
 };
 }} // namespace torch::autograd

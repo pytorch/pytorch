@@ -2102,6 +2102,49 @@ TEST(InlinedCallStackTest, BlockAnnotation) {
   ASSERT_NE(mul_ss.str().find("return x * y"), std::string::npos);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(InlinedCallStackTest, SelfCallMethods) {
+  Module a("A");
+  a.define(R"(
+    def my_new_method(self, x):
+      return x * 3
+    def forward_impl_(self, x, y):
+      return self.my_new_method(x) + y
+    def forward(self, x, y):
+      y = y + 2
+      return self.forward_impl_(x, y)
+  )");
+  Module b("B");
+  b.define(R"(
+    def forward(self, x):
+      return x + 2
+  )");
+  Module c("C");
+  c.register_module("A0", a);
+  c.register_module("B0", b);
+  c.define(R"(
+    def call_b(self, x):
+      return self.B0.forward(x)
+    def forward(self, x, y):
+      return self.A0.forward(x, y) + self.call_b(x)
+  )");
+
+  auto graph = c.get_method("forward").function().optimized_graph();
+  std::unordered_map<std::string, size_t> module_hierarchies;
+  for (Node* n : graph->nodes()) {
+    auto hierarchy = torch::jit::utils::getNodesModuleHierarchy(*n);
+    if (module_hierarchies.count(hierarchy) == 0) {
+      module_hierarchies[hierarchy] = 0;
+    }
+    module_hierarchies[hierarchy] += 1;
+  }
+  ASSERT_EQ(module_hierarchies["A0(A)"], 2);
+  ASSERT_EQ(module_hierarchies["A0(A).SELF(A).SELF(A)"], 2);
+  ASSERT_EQ(module_hierarchies["A0(A).SELF(A)"], 1);
+  ASSERT_EQ(module_hierarchies["SELF(C)"], 1);
+  ASSERT_EQ(module_hierarchies["SELF(C).B0(B)"], 1);
+}
+
 TEST(AutogradSymbolsTest, Basic) {
   Symbol sym = Symbol::fromQualString("aten::test_symbol");
   Graph graph;

@@ -207,6 +207,113 @@ struct vec_host_softmax_lastdim {
   }
 };
 
+inline void _vec_softmax(
+    BFloat16* input_data_base,
+    BFloat16* output_data_base,
+    int64_t outer_size,
+    int64_t inner_size,
+    int64_t dim_size) {
+  using Vec = vec::Vectorized<float>;
+  using Vec_bf16 = vec::Vectorized<BFloat16>;
+  int64_t dim_stride = inner_size;
+  int64_t outer_stride = dim_size * dim_stride;
+  int64_t grain_size = std::min(internal::GRAIN_SIZE / dim_size, (int64_t)1);
+  int vectorized_step = Vec_bf16().size(); // Currently, we only support BFloat16 in this special implementation
+  parallel_for(
+      0, outer_size * inner_size, grain_size, [&](int64_t begin, int64_t end) {
+        int64_t idx = begin;
+        std::unique_ptr<float[]> temp_vec_input(new float[dim_size*vectorized_step*2]());
+        std::unique_ptr<float[]> temp_vec_output(new float[dim_size*vectorized_step*2]());
+        float* temp_vec_input_data = temp_vec_input.get();
+        float* temp_vec_output_data = temp_vec_output.get();
+        while (idx < end) {
+          int64_t outer_idx = idx / inner_size;
+          int64_t inner_idx = idx % inner_size;
+          if (((inner_idx + vectorized_step) <= inner_size) && ((idx + vectorized_step) <= end)) {
+            // Vectorization
+            BFloat16* input_data =
+                input_data_base + outer_idx * outer_stride + inner_idx;
+            BFloat16* output_data =
+                output_data_base + outer_idx * outer_stride + inner_idx;
+            // Step 1: Get max Score
+            Vec_bf16 max_vec_bf16 = Vec_bf16::loadu(input_data);
+            std::tuple<vec::Vectorized<float>, vec::Vectorized<float>> convert_result = convert_bfloat16_float(max_vec_bf16);
+            Vec max_vec_o1 = std::get<0>(convert_result);
+            Vec max_vec_o2 = std::get<1>(convert_result);
+            std::get<0>(convert_result).store(temp_vec_input_data);
+            std::get<1>(convert_result).store(temp_vec_input_data + vectorized_step);
+            for (int64_t d = 1; d < dim_size; d++) {
+              Vec_bf16 input_vec_bf16 = Vec_bf16::loadu(input_data + d * dim_stride);
+              convert_result = convert_bfloat16_float(input_vec_bf16);
+              max_vec_o1 = vec::maximum(max_vec_o1, std::get<0>(convert_result));
+              max_vec_o2 = vec::maximum(max_vec_o2, std::get<1>(convert_result));
+              std::get<0>(convert_result).store(temp_vec_input_data + d*vectorized_step*2);
+              std::get<1>(convert_result).store(temp_vec_input_data + d*vectorized_step*2 + vectorized_step);
+            }
+            // Step2: Calculate sum
+            Vec sum_vec_o1 = Vec(0.0);
+            Vec sum_vec_o2 = Vec(0.0);
+            for (int64_t d = 0; d < dim_size; d++) {
+              Vec output_vec_o1 = Vec::loadu(temp_vec_input_data + d*vectorized_step*2);
+              Vec output_vec_o2 = Vec::loadu(temp_vec_input_data + d*vectorized_step*2 + vectorized_step);
+              output_vec_o1 = output_vec_o1.exp();
+              output_vec_o2 = output_vec_o2.exp();
+
+              output_vec_o1.store(temp_vec_output_data + d*vectorized_step*2);
+              output_vec_o2.store(temp_vec_output_data + d*vectorized_step*2 + vectorized_step);
+
+              sum_vec_o1 = sum_vec_o1 + output_vec_o1;
+              sum_vec_o2 = sum_vec_o2 + output_vec_o2;
+            }
+            // Step3: Unify
+            for (int64_t d = 0; d < dim_size; d++) {
+              Vec output_vec_o1 = Vec::loadu(temp_vec_output_data + d*vectorized_step*2);
+              Vec output_vec_o2 = Vec::loadu(temp_vec_output_data + d*vectorized_step*2 + vectorized_step);
+              output_vec_o1 = output_vec_o1/sum_vec_o1;
+              output_vec_o2 = output_vec_o2/sum_vec_o2;
+              Vec_bf16 output_vec_bf16 = convert_float_bfloat16(output_vec_o1, output_vec_o2);
+              output_vec_bf16.store(output_data + d * dim_stride);
+            }
+            idx += vectorized_step;
+          } else {
+            // Tail case(Scalar): it is exactly same logic as host_softmax
+            // inside aten/src/ATen/native/SoftMax.cpp. There are 2 kind of
+            // cases which will fall through this part:
+            // Case 1: For the idx at the end of total chunk for each thread, there are not enough numbers for parallization.
+            // Case 2: For the idx at the end of each inner_size inside thread, there are not enough numbers for parallization.
+            int64_t tail_number = ((idx+vectorized_step) > end) ? /*Case1*/ (end - idx) : /*Case2*/ (inner_size - inner_idx);
+            for (int64_t i=0; i < tail_number; i++) {
+              outer_idx = (idx + i) / inner_size;
+              inner_idx = (idx + i) % inner_size;
+              BFloat16* input_data =
+                  input_data_base + outer_idx * outer_stride + inner_idx;
+              BFloat16* output_data =
+                  output_data_base + outer_idx * outer_stride + inner_idx;
+              // Step1: Get max score
+              float max_input = float(input_data[0]);
+              for (int64_t d = 1; d < dim_size; d++) {
+                max_input = std::max(max_input, float(input_data[d * dim_stride]));
+              }
+              // Step2: Calculate the Sum
+              float sum_data = 0.0;
+              float temp_output_data = 0.0;
+              for (int64_t d = 0; d < dim_size; d++) {
+                temp_output_data = std::exp(input_data[d * dim_stride] - max_input);
+                sum_data += temp_output_data;
+                output_data[d * dim_stride] = c10::BFloat16(temp_output_data);
+              }
+              // Step3: Unify
+              for (int64_t d = 0; d < dim_size; d++) {
+                output_data[d * dim_stride] =
+                    c10::BFloat16(float(output_data[d * dim_stride])/sum_data);
+              }
+            }
+            idx += tail_number;
+          }
+        }
+      });
+}
+
 template <typename scalar_t>
 inline void _vec_softmax(
     scalar_t* input_data_base,
@@ -218,16 +325,7 @@ inline void _vec_softmax(
   int64_t dim_stride = inner_size;
   int64_t outer_stride = dim_size * dim_stride;
   int64_t grain_size = std::min(internal::GRAIN_SIZE / dim_size, (int64_t)1);
-  int vectorized_step = Vec().size(); // Currently, we only support scalar_t with double or float32
-#ifdef CPU_CAPABILITY_AVX512
-  TORCH_INTERNAL_ASSERT(
-    (vectorized_step == 16) || (vectorized_step == 8),
-    "vectorized_step must be 16 with dtype float or 8 with dtype double");
-#else
-  TORCH_INTERNAL_ASSERT(
-    (vectorized_step == 8) || (vectorized_step == 4),
-    "vectorized_step must be 8 with dtype float or 4 with dtype double");
-#endif
+  int vectorized_step = Vec().size();
   parallel_for(
       0, outer_size * inner_size, grain_size, [&](int64_t begin, int64_t end) {
         int64_t idx = begin;
@@ -241,24 +339,24 @@ inline void _vec_softmax(
             scalar_t* output_data =
                 output_data_base + outer_idx * outer_stride + inner_idx;
             // Step 1: Get max Score
-            Vec max_m256 = Vec::loadu(input_data);
-            for (int64_t d = 1; d < dim_size; d += 1) {
-              Vec input_m256 = Vec::loadu(input_data + d * dim_stride);
-              max_m256 = vec::maximum(max_m256, input_m256);
+            Vec max_vec = Vec::loadu(input_data);
+            for (int64_t d = 1; d < dim_size; d++) {
+              Vec input_vec = Vec::loadu(input_data + d * dim_stride);
+              max_vec = vec::maximum(max_vec, input_vec);
             }
             // Step2: Calculate sum
-            Vec sum_m256 = Vec(0.0);
-            for (int64_t d = 0; d < dim_size; d += 1) {
-              Vec output_m256 =
-                  (Vec::loadu(input_data + d * dim_stride) - max_m256).exp();
-              output_m256.store(output_data + d * dim_stride);
-              sum_m256 = sum_m256 + output_m256;
+            Vec sum_vec = Vec(0.0);
+            for (int64_t d = 0; d < dim_size; d++) {
+              Vec output_vec =
+                  (Vec::loadu(input_data + d * dim_stride) - max_vec).exp();
+              output_vec.store(output_data + d * dim_stride);
+              sum_vec = sum_vec + output_vec;
             }
             // Step3: Unify
-            for (int64_t d = 0; d < dim_size; d += 1) {
-              Vec output_m256 =
-                  Vec::loadu(output_data + d * dim_stride) / sum_m256;
-              output_m256.store(output_data + d * dim_stride);
+            for (int64_t d = 0; d < dim_size; d++) {
+              Vec output_vec =
+                  Vec::loadu(output_data + d * dim_stride) / sum_vec;
+              output_vec.store(output_data + d * dim_stride);
             }
             idx += vectorized_step;
           } else {
@@ -277,18 +375,18 @@ inline void _vec_softmax(
                   output_data_base + outer_idx * outer_stride + inner_idx;
               // Step1: Get max score
               scalar_t max_input = input_data[0];
-              for (int64_t d = 1; d < dim_size; d += 1) {
+              for (int64_t d = 1; d < dim_size; d++) {
                 max_input = std::max(max_input, input_data[d * dim_stride]);
               }
               // Step2: Calculate the Sum
               scalar_t sum_data = 0;
-              for (int64_t d = 0; d < dim_size; d += 1) {
+              for (int64_t d = 0; d < dim_size; d++) {
                 output_data[d * dim_stride] =
                     std::exp(input_data[d * dim_stride] - max_input);
                 sum_data += output_data[d * dim_stride];
               }
               // Step3: Unify
-              for (int64_t d = 0; d < dim_size; d += 1) {
+              for (int64_t d = 0; d < dim_size; d++) {
                 output_data[d * dim_stride] =
                     output_data[d * dim_stride]/sum_data;
               }
@@ -350,9 +448,9 @@ static void softmax_lastdim_kernel_impl(
 }
 
 static void softmax_kernel_impl(Tensor& result, const Tensor& self, int64_t dim) {
-  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "softmax_kernel_impl", [&] {
-    vec_softmax<scalar_t, false>::apply(result, self, dim);
-  });
+  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16, self.scalar_type(),
+    "softmax_kernel_impl",
+    [&] { vec_softmax<scalar_t, false>::apply(result, self, dim); });
 }
 
 static void log_softmax_lastdim_kernel_impl(

@@ -1,7 +1,6 @@
 set(ATen_CUDA_SRCS ${ATen_CUDA_SRCS}
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialClassNLLCriterion.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialConvolutionMM.cu
-${CMAKE_CURRENT_SOURCE_DIR}/SpatialDepthwiseConvolution.cu
 PARENT_SCOPE)
 
 set(ATen_CUDA_INCLUDE ${ATen_CUDA_INCLUDE}
