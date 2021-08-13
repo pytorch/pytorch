@@ -952,7 +952,7 @@ class CosineAnnealingWarmRestarts(_LRScheduler):
         https://arxiv.org/abs/1608.03983
     """
 
-    def __init__(self, optimizer, T_0, T_mult=1, eta_min=0, last_epoch=-1, verbose=False):
+    def __init__(self, optimizer, T_0, T_mult=1, eta_min=0, last_epoch=-1, gamma=1., verbose=False):
         if T_0 <= 0 or not isinstance(T_0, int):
             raise ValueError("Expected positive integer T_0, but got {}".format(T_0))
         if T_mult < 1 or not isinstance(T_mult, int):
@@ -965,13 +965,15 @@ class CosineAnnealingWarmRestarts(_LRScheduler):
         super(CosineAnnealingWarmRestarts, self).__init__(optimizer, last_epoch, verbose)
 
         self.T_cur = self.last_epoch
+        self.gamma = gamma
+        self.cycle = 1
 
     def get_lr(self):
         if not self._get_lr_called_within_step:
             warnings.warn("To get the last learning rate computed by the scheduler, "
                           "please use `get_last_lr()`.", UserWarning)
 
-        return [self.eta_min + (base_lr - self.eta_min) * (1 + math.cos(math.pi * self.T_cur / self.T_i)) / 2
+        return [self.eta_min + ((base_lr * (self.gamma**self.cycle)) - self.eta_min) * (1 + math.cos(math.pi * self.T_cur / self.T_i)) / 2
                 for base_lr in self.base_lrs]
 
     def step(self, epoch=None):
@@ -1007,21 +1009,22 @@ class CosineAnnealingWarmRestarts(_LRScheduler):
             epoch = self.last_epoch + 1
             self.T_cur = self.T_cur + 1
             if self.T_cur >= self.T_i:
+
+                self.cycle += 1
                 self.T_cur = self.T_cur - self.T_i
                 self.T_i = self.T_i * self.T_mult
         else:
-            if epoch < 0:
-                raise ValueError("Expected non-negative epoch, but got {}".format(epoch))
-            if epoch >= self.T_0:
-                if self.T_mult == 1:
-                    self.T_cur = epoch % self.T_0
-                else:
-                    n = int(math.log((epoch / self.T_0 * (self.T_mult - 1) + 1), self.T_mult))
-                    self.T_cur = epoch - self.T_0 * (self.T_mult ** n - 1) / (self.T_mult - 1)
-                    self.T_i = self.T_0 * self.T_mult ** (n)
-            else:
-                self.T_i = self.T_0
-                self.T_cur = epoch
+            skipped = epoch - self.last_epoch
+            if skipped < 0:
+                raise ValueError("Expected epoch number larger than {}, but got {}".format(self.last_epoch, epoch))
+
+            self.T_cur = self.T_cur + skipped
+            if self.T_cur >= self.T_i:
+
+                self.cycle += 1
+                self.T_cur = self.T_cur - self.T_i
+                self.T_i = self.T_i * self.T_mult
+
         self.last_epoch = math.floor(epoch)
 
         class _enable_get_lr_call:
