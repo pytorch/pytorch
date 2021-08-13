@@ -352,6 +352,7 @@ Pointwise Ops
     polygamma
     positive
     pow
+    quantized_batch_norm
     rad2deg
     real
     reciprocal
