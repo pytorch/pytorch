@@ -72,7 +72,7 @@ std::shared_ptr<UCPEndpoint> UCPWorker::connect(const UCPWorker::Address &addres
   return std::shared_ptr<UCPEndpoint>(new UCPEndpoint(shared_from_this(), address));
 }
 
-unsigned UCPWorker::progress() {
+unsigned UCPWorker::progress() const {
   return ucp_worker_progress(worker);
 }
 
@@ -94,7 +94,7 @@ UCPEndpoint::~UCPEndpoint() {
   }
   if (UCS_PTR_IS_PTR(request)) {
     do {
-      ucp_worker_progress(worker->get());
+      worker->progress();
       st = ucp_request_check_status(request);
     } while (st != UCS_OK);
     ucp_request_free(request);

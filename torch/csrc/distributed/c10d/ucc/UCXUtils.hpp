@@ -33,7 +33,7 @@ public:
   using Address = std::vector<uint8_t>;
   Address address() const;
   std::shared_ptr<UCPEndpoint> connect(const Address &address) const;
-  unsigned progress();
+  unsigned progress() const;
 };
 
 class UCPEndpoint {
