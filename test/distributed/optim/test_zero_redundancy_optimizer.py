@@ -33,6 +33,10 @@ from torch.optim import SGD
 from torch.testing._internal import common_distributed, common_utils
 from torch.testing._internal.common_utils import IS_WINDOWS
 
+if IS_WINDOWS:
+    print("Test fails on windows, see https://github.com/pytorch/pytorch/issues/63086")
+    sys.exit(0)
+
 try:
     import torchvision
     HAS_TORCHVISION = True

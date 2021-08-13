@@ -267,11 +267,38 @@ class BatchNormNet(nn.Module):
         return F.softmax(x, dim=1)
 
 
-class TwoLinLayerNet(nn.Module):
+class UnusedParamTwoLinLayerNet(nn.Module):
     def __init__(self):
         super().__init__()
         self.a = nn.Linear(10, 10, bias=False)
         self.b = nn.Linear(10, 10, bias=False)
+        self.c = nn.Linear(5, 5, bias=False)
+
+    def forward(self, x):
+        a = self.a(x)
+        b = self.b(x)
+        return (a, b)
+
+
+class DictOutputModule(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.module = UnusedParamTwoLinLayerNet()
+
+    def forward(self, x):
+        predictions = self.module(x)
+        loss = (predictions[0] + predictions[1]).sum()
+        return {
+            "predictions": predictions,
+            "loss": loss,
+        }
+
+
+class TwoLinLayerNet(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.a = nn.Linear(10, 10, bias=False)
+        self.b = nn.Linear(10, 1, bias=False)
 
     def forward(self, x):
         a = self.a(x)
@@ -1003,7 +1030,7 @@ class DistributedTest:
         # NCCL Batch SEND RECV
         @skip_if_no_gpu
         @sandcastle_skip_if(BACKEND != "nccl", "NCCL Batch Send Recv Only")
-        @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
+        @requires_nccl_version((2, 7, 0), "Need NCCL 2.7+ for send/recv")
         def test_batch_isend_irecv_nccl(self):
             self._barrier()
             rank = dist.get_rank()
@@ -1030,7 +1057,7 @@ class DistributedTest:
 
         @skip_if_no_gpu
         @sandcastle_skip_if(BACKEND != "nccl", "NCCL Batch Send Recv Only")
-        @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
+        @requires_nccl_version((2, 7, 0), "Need NCCL 2.7+ for send/recv")
         def test_batch_isend_irecv_self_nccl(self):
             self._barrier()
             rank = dist.get_rank()
@@ -1055,7 +1082,7 @@ class DistributedTest:
         @skip_if_no_gpu
         @skip_if_small_worldsize
         @sandcastle_skip_if(BACKEND != "nccl", "NCCL Batch Send Recv Only")
-        @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
+        @requires_nccl_version((2, 7, 0), "Need NCCL 2.7+ for send/recv")
         def test_batch_isend_irecv_no_rank_zero_nccl(self):
             self._barrier()
             rank = dist.get_rank()
@@ -1131,7 +1158,7 @@ class DistributedTest:
 
         # NCCL Batch SEND RECV Tensor Error
         @sandcastle_skip_if(BACKEND != "nccl", "NCCL Batch Send Recv Only")
-        @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
+        @requires_nccl_version((2, 7, 0), "Need NCCL 2.7+ for send/recv")
         def test_batch_isend_irecv_tensor_err(self):
             self._barrier()
             rank = dist.get_rank()
@@ -1148,7 +1175,7 @@ class DistributedTest:
 
         # NCCL Batch SEND RECV Op Error
         @sandcastle_skip_if(BACKEND != "nccl", "NCCL Batch Send Recv Only")
-        @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
+        @requires_nccl_version((2, 7, 0), "Need NCCL 2.7+ for send/recv")
         def test_batch_isend_irecv_op_err(self):
             self._barrier()
             rank = dist.get_rank()
@@ -1163,7 +1190,7 @@ class DistributedTest:
 
         # NCCL Batch SEND RECV p2p_op_list Error
         @sandcastle_skip_if(BACKEND != "nccl", "NCCL Batch Send Recv Only")
-        @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
+        @requires_nccl_version((2, 7, 0), "Need NCCL 2.7+ for send/recv")
         def test_batch_isend_irecv_op_list_err(self):
             self._barrier()
             rank = dist.get_rank()
@@ -1177,7 +1204,7 @@ class DistributedTest:
 
         # NCCL Batch SEND RECV Mixed Backend Error
         @sandcastle_skip_if(BACKEND != "nccl", "NCCL Batch Send Recv Only")
-        @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
+        @requires_nccl_version((2, 7, 0), "Need NCCL 2.7+ for send/recv")
         def test_batch_isend_irecv_mixed_backend_err(self):
             self._barrier()
             rank = dist.get_rank()
@@ -1198,7 +1225,7 @@ class DistributedTest:
         # NCCL SEND RECV
         @skip_if_no_gpu
         @sandcastle_skip_if(BACKEND != "nccl", "NCCL Send Recv Only")
-        @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
+        @requires_nccl_version((2, 7, 0), "Need NCCL 2.7+ for send/recv")
         def _test_send_recv_nccl(self, profiler_ctx=None):
             # TODO: now that nccl send/recv is supported, there does not seem to
             # be a need to have nccl send/recv be tested separately.
@@ -1244,20 +1271,20 @@ class DistributedTest:
 
         @skip_if_no_gpu
         @sandcastle_skip_if(BACKEND != "nccl", "NCCL Send Recv Only")
-        @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
+        @requires_nccl_version((2, 7, 0), "Need NCCL 2.7+ for send/recv")
         def test_send_recv_nccl(self):
             self._test_send_recv_nccl()
 
         @skip_if_no_gpu
         @sandcastle_skip_if(BACKEND != "nccl", "NCCL Send Recv Only")
-        @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
+        @requires_nccl_version((2, 7, 0), "Need NCCL 2.7+ for send/recv")
         def test_send_recv_nccl_autograd_profiler(self):
             profiler_ctx = torch.autograd.profiler.profile(record_shapes=True)
             self._test_send_recv_nccl(profiler_ctx)
 
         @skip_if_no_gpu
         @sandcastle_skip_if(BACKEND != "nccl", "NCCL Send Recv Only")
-        @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
+        @requires_nccl_version((2, 7, 0), "Need NCCL 2.7+ for send/recv")
         @sandcastle_skip_if(IS_FBCODE, "Kineto in fbcode causes hang")
         @sandcastle_skip_if(
             IS_MACOS or IS_WINDOWS,
@@ -6868,88 +6895,151 @@ class DistributedTest:
             # early which causes failure with Barrier.sync.
             dist.barrier(group_gloo)
 
-        @with_dist_debug_levels(levels=["OFF", "INFO", "DETAIL"])
-        @require_backend({"gloo", "nccl"})
-        @require_backends_available({"gloo", "nccl"})
-        @skip_if_lt_x_gpu(2)
-        def test_output_unused_in_loss(self):
-            model = TwoLinLayerNet()
-            # Need copy of model to pass into 2nd DDP ctor otherwise autograd hooks
-            # on first DDP reducer will execute!
-            model_copy = copy.deepcopy(model)
+        def _test_output_unused_in_loss(self, module_cls, gradient_as_bucket_view):
+            model = module_cls()
+            local_net = copy.deepcopy(model)
             net = torch.nn.parallel.DistributedDataParallel(
                 copy.deepcopy(model).cuda(self.rank),
-                device_ids=[self.rank],
-            )
-            net_with_find_unused = torch.nn.parallel.DistributedDataParallel(
-                model_copy.cuda(self.rank),
                 device_ids=[self.rank],
                 find_unused_parameters=True,
             )
 
+            # Tests that certain parameters not getting gradient since the
+            # output is unused in loss computation is supported. Specifically,
+            # checks that the grads remain unchanged and are the same as local
+            # training.
             inp = torch.randn(10, 10)
 
-            for ddp in [net, net_with_find_unused]:
-                for i in range(2):
-                    if i == 0:
-                        a, b = ddp(inp)
-                        loss = b.sum()
-                        loss.backward()
+            # Ensure that if a param is not used in loss computation, its
+            # gradient is untouched, i.e. if it is None before it is None after,
+            # not zero.
+            if module_cls == DictOutputModule:
+                a, b = local_net(inp)["predictions"]
+                a_dist, b_dist = net(inp)["predictions"]
+            else:
+                a, b = local_net(inp)
+                a_dist, b_dist = net(inp)
+
+            loss_dist = b_dist.sum()
+            loss_dist.backward()
+
+            # Ensure that gradient corresponding to parameter "a" was not
+            # touched, i.e. it is None and matches the local grad.
+            if module_cls == DictOutputModule:
+                self.assertTrue(net.module.module.a.weight.grad is None)
+                self.assertEqual(
+                    net.module.module.a.weight.grad, local_net.module.a.weight.grad
+                )
+            else:
+                self.assertTrue(net.module.a.weight.grad is None)
+                self.assertEqual(net.module.a.weight.grad, local_net.a.weight.grad)
+
+            saved_a_local_grad = None
+            saved_a_dist_grad = None
+            net.zero_grad()
+            local_net.zero_grad()
+            for i in range(6):
+                if module_cls == DictOutputModule:
+                    a, b = local_net(inp)["predictions"]
+                    a_dist, b_dist = net(inp)["predictions"]
+                else:
+                    a, b = local_net(inp)
+                    a_dist, b_dist = net(inp)
+                if i < 2:
+                    # Use both params in loss computation. Later, "a" will go
+                    # unused and we check to ensure DDP supports this and
+                    # gradients remain the same as local training.
+                    t = a @ b
+                    t_dist = a_dist @ b_dist
+                    loss = t.sum()
+                    loss_dist = t_dist.sum()
+                else:
+                    # Model output "a" unused in loss.
+                    loss = b.sum()
+                    loss_dist = b_dist.sum()
+                loss.backward()
+                loss_dist.backward()
+                if i == 1:
+                    # Save grads to compare with them in next iterations.
+                    if module_cls == DictOutputModule:
+                        saved_a_local_grad = local_net.module.a.weight.grad
+                        saved_a_dist_grad = net.module.module.a.weight.grad
                     else:
-                        try:
-                            a, b = ddp(inp)
-                            loss = b.sum()
-                            loss.backward()
-                        except RuntimeError as e:
-                            msg = str(e)
-                            unused_index = 0
-                            unused_index_substr = (
-                                f"Parameter indices which did not receive grad for rank {self.rank}: {unused_index}"
-                            )
-                            if ddp == net:
-                                expected_strs = [
-                                    ddp_prev_reduction_unfinished_str,
-                                    ddp_recommend_find_unused_params_str,
-                                    ddp_outputs_not_used_in_loss_str,
-                                    unused_index_substr,
-                                ]
-                                unexpected_strs = [
-                                    ddp_find_unused_params_enabled_str,
-                                ]
-                            elif ddp == net_with_find_unused:
-                                expected_strs = [
-                                    ddp_prev_reduction_unfinished_str,
-                                    ddp_outputs_not_used_in_loss_str,
-                                    ddp_find_unused_params_enabled_str,
-                                    unused_index_substr,
-                                ]
-                                unexpected_strs = [
-                                    ddp_recommend_find_unused_params_str,
-                                ]
-                            # In debug mode, should show parameters that weren't reduced.
-                            # Without debug mode, should show suggestion to use debug mode.
-                            if (
-                                dist._get_debug_mode()
-                                == dist._DistributedDebugLevel.OFF
-                            ):
-                                expected_strs.append(ddp_suggest_debug_mode_str)
-                            else:
-                                unreduced_params = ", ".join(["a.weight"])
-                                expected_strs.append(
-                                    f"did not receive grad for rank {self.rank}: {unreduced_params}"
-                                )
-                            for s in expected_strs:
-                                self.assertTrue(
-                                    s in msg, f"Expected {s} to be in {msg}"
-                                )
-                            for s in unexpected_strs:
-                                self.assertFalse(
-                                    s in msg, f"Expected {s} not to be in {msg}"
-                                )
-                        else:
-                            self.assertFalse(True, "DDP error not raised")
+                        saved_a_local_grad = local_net.a.weight.grad
+                        saved_a_dist_grad = net.module.a.weight.grad
+                    self.assertEqual(saved_a_local_grad, saved_a_dist_grad)
+                elif i >= 2:
+                    # parameter "a" of both models should be the same and not change
+                    if module_cls == DictOutputModule:
+                        self.assertEqual(net.module.module.a.weight.grad, saved_a_dist_grad)
+                        self.assertEqual(local_net.module.a.weight.grad, saved_a_local_grad)
+                    else:
+                        self.assertEqual(net.module.a.weight.grad, saved_a_dist_grad)
+                        self.assertEqual(local_net.a.weight.grad, saved_a_local_grad)
+
+                # Verify grads are the same
+                for (local_param, dist_param) in zip(
+                    local_net.parameters(), net.parameters()
+                ):
+                    local_grad = local_param.grad
+                    dist_grad = dist_param.grad
+                    self.assertEqual(local_grad, dist_grad)
 
             dist.barrier()
+
+        @sandcastle_skip_if(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only Nccl & Gloo backend support DistributedDataParallel",
+        )
+        @skip_if_lt_x_gpu(2)
+        def test_output_unused_in_loss_tuple_module(self):
+            module_cls = UnusedParamTwoLinLayerNet
+            for grad_as_bucket_view in [True, False]:
+                self._test_output_unused_in_loss(module_cls, grad_as_bucket_view)
+
+        @sandcastle_skip_if(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only Nccl & Gloo backend support DistributedDataParallel",
+        )
+        @skip_if_lt_x_gpu(2)
+        def test_output_unused_in_loss_dict_module(self):
+            module_cls = DictOutputModule
+            for grad_as_bucket_view in [True, False]:
+                self._test_output_unused_in_loss(module_cls, grad_as_bucket_view)
+
+        @sandcastle_skip_if(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only Nccl & Gloo backend support DistributedDataParallel",
+        )
+        @skip_if_lt_x_gpu(2)
+        def test_undefined_grad_parity_unused_parameters(self):
+            # TODO: enable this for general training use cases:
+            # https://github.com/pytorch/pytorch/issues/58511.
+            x = torch.ones(1, 2).to(self.rank)
+            net = Net().to(self.rank)
+            local_net = copy.deepcopy(net)
+            net = torch.nn.parallel.DistributedDataParallel(
+                net,
+                device_ids=[self.rank],
+                find_unused_parameters=True,
+            )
+            out = net(x).sum()
+            local_out = local_net(x).sum()
+            # Simulates undefined gradients.
+            torch._C._functions.UndefinedGrad()(out).backward()
+            torch._C._functions.UndefinedGrad()(local_out).backward()
+            for (dist_param_name, dist_param), (local_param_name, local_param) in zip(
+                net.named_parameters(), local_net.named_parameters()
+            ):
+                dist_grad = dist_param.grad
+                local_grad = local_param.grad
+                self.assertEqual(
+                    dist_grad,
+                    local_grad,
+                    f"""DDP param {dist_param_name} with grad {dist_grad}
+                    does not match local param {local_param_name} with grad
+                    {local_grad}""",
+                )
 
         def _test_different_graph_across_ranks(
             self, find_unused_parameters=False, static_graph=False
@@ -7614,6 +7704,45 @@ class DistributedTest:
                         model.parameters(), model_static_graph.parameters()
                     ):
                         self.assertEqual(p, p_static)
+
+        @skip_if_lt_x_gpu(2)
+        @sandcastle_skip_if(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only Nccl & Gloo backend support DistributedDataParallel",
+        )
+        def test_ddp_returns_tensor_with_no_grad(self):
+            # Tests case where module returns tensor that does not require grad.
+            torch.cuda.set_device(self.rank)
+
+            class MyModel(nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.fc1 = nn.Linear(10, 10, bias=False)
+                    self.fc2 = nn.Linear(10, 10, bias=False)
+
+                def forward(self, x):
+                    x = self.fc2(F.relu(self.fc1(x)))
+                    y = x.clone()
+                    x = x.detach()
+                    assert not x.requires_grad
+                    return (x, y)
+
+            model = MyModel().to(self.rank)
+            inp = torch.randn(1, 10, device=self.rank)
+            for (find_unused, static_graph) in itertools.product([True, False], [True, False]):
+                ddp = DistributedDataParallel(
+                    model,
+                    device_ids=[self.rank],
+                    output_device=self.rank,
+                    find_unused_parameters=find_unused
+                )
+                if static_graph:
+                    ddp._set_static_graph()
+                for i in range(6):
+                    out = ddp(inp)
+                    self.assertFalse(out[0].requires_grad)
+                    o = (out[0] + out[1]).sum()
+                    o.backward()
 
         @skip_if_lt_x_gpu(2)
         @sandcastle_skip_if(
