@@ -944,6 +944,8 @@ else:
         return False
 
 def is_final(ann) -> bool:
+    if isinstance(ann, str):
+        raise RuntimeError("String type annotations don't work with JIT! Please use `from __future__ import annotations` to enable forward references!")
     return ann.__module__ in {'typing', 'typing_extensions'} and \
         (getattr(ann, '__origin__', None) is Final or isinstance(ann, type(Final)))
 
