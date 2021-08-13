@@ -1,3 +1,8 @@
+
+
+
+
+
 import os
 import uuid
 
@@ -27,9 +32,7 @@ class TestRedisStoreHandlerOp(TestCase):
                 [store_handler],
                 prefix=self.uuid,
                 host=os.getenv("REDIS_HOST", "localhost"),
-                port=int(os.getenv("REDIS_PORT", 6379)),
-            )
-        )
+                port=int(os.getenv("REDIS_PORT", 6379))))
         return store_handler
 
     def test_set_get(self):

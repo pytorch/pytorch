@@ -1,8 +1,7 @@
 import math
-from typing import Optional
-
 import torch
 from torch._six import inf
+from typing import Optional
 
 
 class __PrinterOptions(object):
@@ -18,12 +17,12 @@ PRINT_OPTS = __PrinterOptions()
 
 # We could use **kwargs, but this will give better docs
 def set_printoptions(
-    precision=None,
-    threshold=None,
-    edgeitems=None,
-    linewidth=None,
-    profile=None,
-    sci_mode=None,
+        precision=None,
+        threshold=None,
+        edgeitems=None,
+        linewidth=None,
+        profile=None,
+        sci_mode=None
 ):
     r"""Set options for printing. Items shamelessly taken from NumPy
 
@@ -84,13 +83,11 @@ class _Formatter(object):
 
         if not self.floating_dtype:
             for value in tensor_view:
-                value_str = "{}".format(value)
+                value_str = '{}'.format(value)
                 self.max_width = max(self.max_width, len(value_str))
 
         else:
-            nonzero_finite_vals = torch.masked_select(
-                tensor_view, torch.isfinite(tensor_view) & tensor_view.ne(0)
-            )
+            nonzero_finite_vals = torch.masked_select(tensor_view, torch.isfinite(tensor_view) & tensor_view.ne(0))
 
             if nonzero_finite_vals.numel() == 0:
                 # no valid number, do nothing
@@ -109,38 +106,27 @@ class _Formatter(object):
             if self.int_mode:
                 # in int_mode for floats, all numbers are integers, and we append a decimal to nonfinites
                 # to indicate that the tensor is of floating type. add 1 to the len to account for this.
-                if (
-                    nonzero_finite_max / nonzero_finite_min > 1000.0
-                    or nonzero_finite_max > 1.0e8
-                ):
+                if nonzero_finite_max / nonzero_finite_min > 1000. or nonzero_finite_max > 1.e8:
                     self.sci_mode = True
                     for value in nonzero_finite_vals:
-                        value_str = (
-                            ("{{:.{}e}}").format(PRINT_OPTS.precision).format(value)
-                        )
+                        value_str = ('{{:.{}e}}').format(PRINT_OPTS.precision).format(value)
                         self.max_width = max(self.max_width, len(value_str))
                 else:
                     for value in nonzero_finite_vals:
-                        value_str = ("{:.0f}").format(value)
+                        value_str = ('{:.0f}').format(value)
                         self.max_width = max(self.max_width, len(value_str) + 1)
             else:
                 # Check if scientific representation should be used.
-                if (
-                    nonzero_finite_max / nonzero_finite_min > 1000.0
-                    or nonzero_finite_max > 1.0e8
-                    or nonzero_finite_min < 1.0e-4
-                ):
+                if nonzero_finite_max / nonzero_finite_min > 1000.\
+                        or nonzero_finite_max > 1.e8\
+                        or nonzero_finite_min < 1.e-4:
                     self.sci_mode = True
                     for value in nonzero_finite_vals:
-                        value_str = (
-                            ("{{:.{}e}}").format(PRINT_OPTS.precision).format(value)
-                        )
+                        value_str = ('{{:.{}e}}').format(PRINT_OPTS.precision).format(value)
                         self.max_width = max(self.max_width, len(value_str))
                 else:
                     for value in nonzero_finite_vals:
-                        value_str = (
-                            ("{{:.{}f}}").format(PRINT_OPTS.precision).format(value)
-                        )
+                        value_str = ('{{:.{}f}}').format(PRINT_OPTS.precision).format(value)
                         self.max_width = max(self.max_width, len(value_str))
 
         if PRINT_OPTS.sci_mode is not None:
@@ -152,20 +138,16 @@ class _Formatter(object):
     def format(self, value):
         if self.floating_dtype:
             if self.sci_mode:
-                ret = (
-                    ("{{:{}.{}e}}")
-                    .format(self.max_width, PRINT_OPTS.precision)
-                    .format(value)
-                )
+                ret = ('{{:{}.{}e}}').format(self.max_width, PRINT_OPTS.precision).format(value)
             elif self.int_mode:
-                ret = "{:.0f}".format(value)
+                ret = '{:.0f}'.format(value)
                 if not (math.isinf(value) or math.isnan(value)):
-                    ret += "."
+                    ret += '.'
             else:
-                ret = ("{{:.{}f}}").format(PRINT_OPTS.precision).format(value)
+                ret = ('{{:.{}f}}').format(PRINT_OPTS.precision).format(value)
         else:
-            ret = "{}".format(value)
-        return (self.max_width - len(ret)) * " " + ret
+            ret = '{}'.format(value)
+        return (self.max_width - len(ret)) * ' ' + ret
 
 
 def _scalar_str(self, formatter1, formatter2=None):
@@ -173,13 +155,12 @@ def _scalar_str(self, formatter1, formatter2=None):
         real_str = _scalar_str(self.real, formatter1)
         imag_str = (_scalar_str(self.imag, formatter2) + "j").lstrip()
         # handles negative numbers, +0.0, -0.0
-        if imag_str[0] == "+" or imag_str[0] == "-":
+        if imag_str[0] == '+' or imag_str[0] == '-':
             return real_str + imag_str
         else:
             return real_str + "+" + imag_str
     else:
         return formatter1.format(self.item())
-
 
 def _vector_str(self, indent, summarize, formatter1, formatter2=None):
     # length includes spaces and comma between elements
@@ -188,9 +169,7 @@ def _vector_str(self, indent, summarize, formatter1, formatter2=None):
         # width for imag_formatter + an extra j for complex
         element_length += formatter2.width() + 1
 
-    elements_per_line = max(
-        1, int(math.floor((PRINT_OPTS.linewidth - indent) / (element_length)))
-    )
+    elements_per_line = max(1, int(math.floor((PRINT_OPTS.linewidth - indent) / (element_length))))
     char_per_line = element_length * elements_per_line
 
     def _val_formatter(val, formatter1=formatter1, formatter2=formatter2):
@@ -198,7 +177,7 @@ def _vector_str(self, indent, summarize, formatter1, formatter2=None):
             real_str = formatter1.format(val.real)
             imag_str = (formatter2.format(val.imag) + "j").lstrip()
             # handles negative numbers, +0.0, -0.0
-            if imag_str[0] == "+" or imag_str[0] == "-":
+            if imag_str[0] == '+' or imag_str[0] == '-':
                 return real_str + imag_str
             else:
                 return real_str + "+" + imag_str
@@ -206,20 +185,15 @@ def _vector_str(self, indent, summarize, formatter1, formatter2=None):
             return formatter1.format(val)
 
     if summarize and self.size(0) > 2 * PRINT_OPTS.edgeitems:
-        data = (
-            [_val_formatter(val) for val in self[: PRINT_OPTS.edgeitems].tolist()]
-            + [" ..."]
-            + [_val_formatter(val) for val in self[-PRINT_OPTS.edgeitems :].tolist()]
-        )
+        data = ([_val_formatter(val) for val in self[:PRINT_OPTS.edgeitems].tolist()] +
+                [' ...'] +
+                [_val_formatter(val) for val in self[-PRINT_OPTS.edgeitems:].tolist()])
     else:
         data = [_val_formatter(val) for val in self.tolist()]
 
-    data_lines = [
-        data[i : i + elements_per_line] for i in range(0, len(data), elements_per_line)
-    ]
-    lines = [", ".join(line) for line in data_lines]
-    return "[" + ("," + "\n" + " " * (indent + 1)).join(lines) + "]"
-
+    data_lines = [data[i:i + elements_per_line] for i in range(0, len(data), elements_per_line)]
+    lines = [', '.join(line) for line in data_lines]
+    return '[' + (',' + '\n' + ' ' * (indent + 1)).join(lines) + ']'
 
 # formatter2 is only used for printing complex tensors.
 # For complex tensors, formatter1 and formatter2 are the formatters for tensor.real
@@ -234,36 +208,21 @@ def _tensor_str_with_formatter(self, indent, summarize, formatter1, formatter2=N
         return _vector_str(self, indent, summarize, formatter1, formatter2)
 
     if summarize and self.size(0) > 2 * PRINT_OPTS.edgeitems:
-        slices = (
-            [
-                _tensor_str_with_formatter(
-                    self[i], indent + 1, summarize, formatter1, formatter2
-                )
-                for i in range(0, PRINT_OPTS.edgeitems)
-            ]
-            + ["..."]
-            + [
-                _tensor_str_with_formatter(
-                    self[i], indent + 1, summarize, formatter1, formatter2
-                )
-                for i in range(len(self) - PRINT_OPTS.edgeitems, len(self))
-            ]
-        )
+        slices = ([_tensor_str_with_formatter(self[i], indent + 1, summarize, formatter1, formatter2)
+                   for i in range(0, PRINT_OPTS.edgeitems)] +
+                  ['...'] +
+                  [_tensor_str_with_formatter(self[i], indent + 1, summarize, formatter1, formatter2)
+                   for i in range(len(self) - PRINT_OPTS.edgeitems, len(self))])
     else:
-        slices = [
-            _tensor_str_with_formatter(
-                self[i], indent + 1, summarize, formatter1, formatter2
-            )
-            for i in range(0, self.size(0))
-        ]
+        slices = [_tensor_str_with_formatter(self[i], indent + 1, summarize, formatter1, formatter2)
+                  for i in range(0, self.size(0))]
 
-    tensor_str = ("," + "\n" * (dim - 1) + " " * (indent + 1)).join(slices)
-    return "[" + tensor_str + "]"
-
+    tensor_str = (',' + '\n' * (dim - 1) + ' ' * (indent + 1)).join(slices)
+    return '[' + tensor_str + ']'
 
 def _tensor_str(self, indent):
     if self.numel() == 0:
-        return "[]"
+        return '[]'
 
     if self.has_names():
         # There are two main codepaths (possibly more) that tensor printing goes through:
@@ -285,34 +244,27 @@ def _tensor_str(self, indent):
     if self.dtype.is_complex:
         # handle the conjugate bit
         self = self.resolve_conj()
-        real_formatter = _Formatter(
-            get_summarized_data(self.real) if summarize else self.real
-        )
-        imag_formatter = _Formatter(
-            get_summarized_data(self.imag) if summarize else self.imag
-        )
-        return _tensor_str_with_formatter(
-            self, indent, summarize, real_formatter, imag_formatter
-        )
+        real_formatter = _Formatter(get_summarized_data(self.real) if summarize else self.real)
+        imag_formatter = _Formatter(get_summarized_data(self.imag) if summarize else self.imag)
+        return _tensor_str_with_formatter(self, indent, summarize, real_formatter, imag_formatter)
     else:
         formatter = _Formatter(get_summarized_data(self) if summarize else self)
         return _tensor_str_with_formatter(self, indent, summarize, formatter)
 
-
 def _add_suffixes(tensor_str, suffixes, indent, force_newline):
     tensor_strs = [tensor_str]
-    last_line_len = len(tensor_str) - tensor_str.rfind("\n") + 1
+    last_line_len = len(tensor_str) - tensor_str.rfind('\n') + 1
     for suffix in suffixes:
         suffix_len = len(suffix)
         if force_newline or last_line_len + suffix_len + 2 > PRINT_OPTS.linewidth:
-            tensor_strs.append(",\n" + " " * indent + suffix)
+            tensor_strs.append(',\n' + ' ' * indent + suffix)
             last_line_len = indent + suffix_len
             force_newline = False
         else:
-            tensor_strs.append(", " + suffix)
+            tensor_strs.append(', ' + suffix)
             last_line_len += suffix_len + 2
-    tensor_strs.append(")")
-    return "".join(tensor_strs)
+    tensor_strs.append(')')
+    return ''.join(tensor_strs)
 
 
 def get_summarized_data(self):
@@ -321,21 +273,19 @@ def get_summarized_data(self):
         return self
     if dim == 1:
         if self.size(0) > 2 * PRINT_OPTS.edgeitems:
-            return torch.cat(
-                (self[: PRINT_OPTS.edgeitems], self[-PRINT_OPTS.edgeitems :])
-            )
+            return torch.cat((self[:PRINT_OPTS.edgeitems], self[-PRINT_OPTS.edgeitems:]))
         else:
             return self
     if self.size(0) > 2 * PRINT_OPTS.edgeitems:
         start = [self[i] for i in range(0, PRINT_OPTS.edgeitems)]
-        end = [self[i] for i in range(len(self) - PRINT_OPTS.edgeitems, len(self))]
+        end = ([self[i]
+               for i in range(len(self) - PRINT_OPTS.edgeitems, len(self))])
         return torch.stack([get_summarized_data(x) for x in (start + end)])
     else:
         return torch.stack([get_summarized_data(x) for x in self])
 
-
 def _str_intern(inp):
-    prefix = "tensor("
+    prefix = 'tensor('
     indent = len(prefix)
     suffixes = []
 
@@ -351,120 +301,88 @@ def _str_intern(inp):
     # torch._C._get_default_device() only returns either cpu or cuda.
     # In other cases, we don't have a way to set them as default yet,
     # and we should always print out device for them.
-    if self.device.type != torch._C._get_default_device() or (
-        self.device.type == "cuda" and torch.cuda.current_device() != self.device.index
-    ):
-        suffixes.append("device='" + str(self.device) + "'")
+    if self.device.type != torch._C._get_default_device()\
+            or (self.device.type == 'cuda' and torch.cuda.current_device() != self.device.index):
+        suffixes.append('device=\'' + str(self.device) + '\'')
 
     # TODO: add an API to map real -> complex dtypes
-    _default_complex_dtype = (
-        torch.cdouble if torch.get_default_dtype() == torch.double else torch.cfloat
-    )
-    has_default_dtype = self.dtype in (
-        torch.get_default_dtype(),
-        _default_complex_dtype,
-        torch.int64,
-        torch.bool,
-    )
+    _default_complex_dtype = torch.cdouble if torch.get_default_dtype() == torch.double else torch.cfloat
+    has_default_dtype = self.dtype in (torch.get_default_dtype(), _default_complex_dtype, torch.int64, torch.bool)
     if self.is_sparse:
-        suffixes.append("size=" + str(tuple(self.shape)))
-        suffixes.append("nnz=" + str(self._nnz()))
+        suffixes.append('size=' + str(tuple(self.shape)))
+        suffixes.append('nnz=' + str(self._nnz()))
         if not has_default_dtype:
-            suffixes.append("dtype=" + str(self.dtype))
-        indices_prefix = "indices=tensor("
+            suffixes.append('dtype=' + str(self.dtype))
+        indices_prefix = 'indices=tensor('
         indices = self._indices().detach()
         indices_str = _tensor_str(indices, indent + len(indices_prefix))
         if indices.numel() == 0:
-            indices_str += ", size=" + str(tuple(indices.shape))
-        values_prefix = "values=tensor("
+            indices_str += ', size=' + str(tuple(indices.shape))
+        values_prefix = 'values=tensor('
         values = self._values().detach()
         values_str = _tensor_str(values, indent + len(values_prefix))
         if values.numel() == 0:
-            values_str += ", size=" + str(tuple(values.shape))
-        tensor_str = (
-            indices_prefix
-            + indices_str
-            + "),\n"
-            + " " * indent
-            + values_prefix
-            + values_str
-            + ")"
-        )
+            values_str += ', size=' + str(tuple(values.shape))
+        tensor_str = indices_prefix + indices_str + '),\n' + ' ' * indent + values_prefix + values_str + ')'
     elif self.is_sparse_csr:
-        suffixes.append("size=" + str(tuple(self.shape)))
-        suffixes.append("nnz=" + str(self._nnz()))
+        suffixes.append('size=' + str(tuple(self.shape)))
+        suffixes.append('nnz=' + str(self._nnz()))
         if not has_default_dtype:
-            suffixes.append("dtype=" + str(self.dtype))
-        crow_indices_prefix = "crow_indices=tensor("
+            suffixes.append('dtype=' + str(self.dtype))
+        crow_indices_prefix = 'crow_indices=tensor('
         crow_indices = self.crow_indices().detach()
         crow_indices_str = _tensor_str(crow_indices, indent + len(crow_indices_prefix))
         if crow_indices.numel() == 0:
-            crow_indices_str += ", size=" + str(tuple(crow_indices.shape))
-        col_indices_prefix = "col_indices=tensor("
+            crow_indices_str += ', size=' + str(tuple(crow_indices.shape))
+        col_indices_prefix = 'col_indices=tensor('
         col_indices = self.col_indices().detach()
         col_indices_str = _tensor_str(col_indices, indent + len(col_indices_prefix))
         if col_indices.numel() == 0:
-            col_indices_str += ", size=" + str(tuple(col_indices.shape))
-        values_prefix = "values=tensor("
+            col_indices_str += ', size=' + str(tuple(col_indices.shape))
+        values_prefix = 'values=tensor('
         values = self.values().detach()
         values_str = _tensor_str(values, indent + len(values_prefix))
         if values.numel() == 0:
-            values_str += ", size=" + str(tuple(values.shape))
-        tensor_str = (
-            crow_indices_prefix
-            + crow_indices_str
-            + "),\n"
-            + " " * indent
-            + col_indices_prefix
-            + col_indices_str
-            + "),\n"
-            + " " * indent
-            + values_prefix
-            + values_str
-            + ")"
-        )
+            values_str += ', size=' + str(tuple(values.shape))
+        tensor_str = crow_indices_prefix + crow_indices_str + '),\n' + ' ' * indent +\
+            col_indices_prefix + col_indices_str + '),\n' + ' ' * indent +\
+            values_prefix + values_str + ')'
     elif self.is_quantized:
-        suffixes.append("size=" + str(tuple(self.shape)))
+        suffixes.append('size=' + str(tuple(self.shape)))
         if not has_default_dtype:
-            suffixes.append("dtype=" + str(self.dtype))
-        suffixes.append("quantization_scheme=" + str(self.qscheme()))
-        if (
-            self.qscheme() == torch.per_tensor_affine
-            or self.qscheme() == torch.per_tensor_symmetric
-        ):
-            suffixes.append("scale=" + str(self.q_scale()))
-            suffixes.append("zero_point=" + str(self.q_zero_point()))
-        elif (
-            self.qscheme() == torch.per_channel_affine
-            or self.qscheme() == torch.per_channel_symmetric
-            or self.qscheme() == torch.per_channel_affine_float_qparams
-        ):
-            suffixes.append("scale=" + str(self.q_per_channel_scales()))
-            suffixes.append("zero_point=" + str(self.q_per_channel_zero_points()))
-            suffixes.append("axis=" + str(self.q_per_channel_axis()))
+            suffixes.append('dtype=' + str(self.dtype))
+        suffixes.append('quantization_scheme=' + str(self.qscheme()))
+        if self.qscheme() == torch.per_tensor_affine or self.qscheme() == torch.per_tensor_symmetric:
+            suffixes.append('scale=' + str(self.q_scale()))
+            suffixes.append('zero_point=' + str(self.q_zero_point()))
+        elif self.qscheme() == torch.per_channel_affine or self.qscheme() == torch.per_channel_symmetric \
+                or self.qscheme() == torch.per_channel_affine_float_qparams:
+            suffixes.append('scale=' + str(self.q_per_channel_scales()))
+            suffixes.append('zero_point=' + str(self.q_per_channel_zero_points()))
+            suffixes.append('axis=' + str(self.q_per_channel_axis()))
         tensor_str = _tensor_str(self.dequantize(), indent)
     else:
         if self.is_meta:
-            suffixes.append("size=" + str(tuple(self.shape)))
+            suffixes.append('size=' + str(tuple(self.shape)))
             if self.dtype != torch.get_default_dtype():
-                suffixes.append("dtype=" + str(self.dtype))
+                suffixes.append('dtype=' + str(self.dtype))
             # TODO: This implies that ellipses is valid syntax for allocating
             # a meta tensor, which it could be, but it isn't right now
-            tensor_str = "..."
+            tensor_str = '...'
         else:
             if self.numel() == 0 and not self.is_sparse:
                 # Explicitly print the shape if it is not (0,), to match NumPy behavior
                 if self.dim() != 1:
-                    suffixes.append("size=" + str(tuple(self.shape)))
+                    suffixes.append('size=' + str(tuple(self.shape)))
 
                 # In an empty tensor, there are no elements to infer if the dtype
                 # should be int64, so it must be shown explicitly.
                 if self.dtype != torch.get_default_dtype():
-                    suffixes.append("dtype=" + str(self.dtype))
-                tensor_str = "[]"
+                    suffixes.append('dtype=' + str(self.dtype))
+                tensor_str = '[]'
             else:
                 if not has_default_dtype:
-                    suffixes.append("dtype=" + str(self.dtype))
+                    suffixes.append('dtype=' + str(self.dtype))
 
                 if self.layout != torch.strided:
                     tensor_str = _tensor_str(self.to_dense(), indent)
@@ -472,28 +390,25 @@ def _str_intern(inp):
                     tensor_str = _tensor_str(self, indent)
 
     if self.layout != torch.strided:
-        suffixes.append("layout=" + str(self.layout))
+        suffixes.append('layout=' + str(self.layout))
 
     # Use inp here to get the original grad_fn and not the one generated by the forward grad
     # unpacking.
     if inp.grad_fn is not None:
         name = type(inp.grad_fn).__name__
-        if name == "CppFunction":
-            name = inp.grad_fn.name().rsplit("::", 1)[-1]
-        suffixes.append("grad_fn=<{}>".format(name))
+        if name == 'CppFunction':
+            name = inp.grad_fn.name().rsplit('::', 1)[-1]
+        suffixes.append('grad_fn=<{}>'.format(name))
     elif inp.requires_grad:
-        suffixes.append("requires_grad=True")
+        suffixes.append('requires_grad=True')
 
     if self.has_names():
-        suffixes.append("names={}".format(self.names))
+        suffixes.append('names={}'.format(self.names))
 
     if tangent is not None:
-        suffixes.append("tangent={}".format(tangent))
+        suffixes.append('tangent={}'.format(tangent))
 
-    return _add_suffixes(
-        prefix + tensor_str, suffixes, indent, force_newline=self.is_sparse
-    )
-
+    return _add_suffixes(prefix + tensor_str, suffixes, indent, force_newline=self.is_sparse)
 
 def _str(self):
     with torch.no_grad():
