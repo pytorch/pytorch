@@ -1432,7 +1432,7 @@
   output_differentiability: [True, False]
   self: not_implemented("_unique")
 
-- name: unique_dim(Tensor self, int dim, bool sorted=True, bool return_inverse=False, bool return_counts=False) -> (Tensor, Tensor, Tensor)
+- name: _unique_dim(Tensor self, int dim, bool sorted=True, bool return_inverse=False, bool return_counts=False) -> (Tensor, Tensor, Tensor)
   output_differentiability: [True, False, False]
   self: not_implemented("unique_dim")
 

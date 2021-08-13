@@ -648,7 +648,7 @@ def _unique_impl(input: Tensor, sorted: bool = True,
             return_counts=return_counts, dim=dim)
 
     if dim is not None:
-        output, inverse_indices, counts = _VF.unique_dim(
+        output, inverse_indices, counts = _VF._unique_dim(
             input,
             dim,
             sorted=sorted,
