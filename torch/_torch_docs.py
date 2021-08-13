@@ -9739,6 +9739,7 @@ Args:
     unitriangular (bool, optional): whether :math:`A` is unit triangular.
         If True, the diagonal elements of :math:`A` are assumed to be
         1 and not referenced from :math:`A`. Default: ``False``.
+    out ((Tensor, Tensor), optional): the output tensors
 
 Returns:
     A namedtuple `(solution, cloned_coefficient)` where `cloned_coefficient`
