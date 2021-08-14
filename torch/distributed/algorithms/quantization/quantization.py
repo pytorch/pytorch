@@ -41,13 +41,8 @@ def _quantize_tensor_list(tensor_list, qtype):
         raise RuntimeError(
             f"_quantize_tensor_list expecting list of torch.Tensor as input but found {type(tensor_list)}"
         )
-    if ((qtype == DQuantType.FP16) or (qtype == DQuantType.BFP16)):
-        quantized_tensor_list = [_quantize_tensor(t, qtype) for t in tensor_list]
-        return quantized_tensor_list
-    else:
-        raise RuntimeError(
-            f'Quantization type {qtype} is not supported'
-        )
+    quantized_tensor_list = [_quantize_tensor(t, qtype) for t in tensor_list]
+    return quantized_tensor_list
 
 def _dequantize_tensor(tensor, qtype, quant_loss=None):
     if not isinstance(tensor, torch.Tensor):
@@ -83,16 +78,8 @@ def _dequantize_tensor_list(tensor_list, qtype, quant_loss=None):
         raise RuntimeError(
             f"_dequantize_tensor_list expecting list of torch.Tensor as input but found {type(tensor_list)}"
         )
-    elif (qtype == DQuantType.FP16):
-        dequantized_tensor_list = [_dequantize_tensor(t, qtype) for t in tensor_list]
-        return dequantized_tensor_list
-    elif (qtype == DQuantType.BFP16):
-        dequantized_tensor_list = [_dequantize_tensor(t, qtype) for t in tensor_list]
-        return dequantized_tensor_list
-    else:
-        raise RuntimeError(
-            f'Quantization type {qtype} is not supported'
-        )
+    dequantized_tensor_list = [_dequantize_tensor(t, qtype) for t in tensor_list]
+    return dequantized_tensor_list
 
 
 def auto_quantize(func, qtype, quant_loss=None):
@@ -116,8 +103,6 @@ def auto_quantize(func, qtype, quant_loss=None):
     """
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
-        out_splits = kwargs.get('out_splits', None)
-        in_splits = kwargs.get('in_splits', None)
         group = kwargs.get('group', None)
         async_op = kwargs.get('async_op', False)
         if (async_op is True):
@@ -142,6 +127,9 @@ def auto_quantize(func, qtype, quant_loss=None):
 
         elif (func == dist.all_to_all_single):
             tensors = args[0]
+            out_splits = kwargs.get('out_splits', None)
+            in_splits = kwargs.get('in_splits', None)
+            # Quantizing the input/output tensor
             input_tensors = _quantize_tensor(args[1], qtype)
             out_tensors = _quantize_tensor(tensors, qtype)
             dist.all_to_all_single(out_tensors, input_tensors, out_splits, in_splits, group=group)
