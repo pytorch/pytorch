@@ -4,36 +4,17 @@ import torch
 from torch._C import _add_docstr, _fft  # type: ignore[attr-defined]
 from torch._torch_docs import factory_common_args, common_args
 
-__all__ = [
-    "fft",
-    "ifft",
-    "fft2",
-    "ifft2",
-    "fftn",
-    "ifftn",
-    "rfft",
-    "irfft",
-    "rfft2",
-    "irfft2",
-    "rfftn",
-    "irfftn",
-    "hfft",
-    "ihfft",
-    "fftfreq",
-    "rfftfreq",
-    "fftshift",
-    "ifftshift",
-    "Tensor",
-]
+__all__ = ['fft', 'ifft', 'fft2', 'ifft2', 'fftn', 'ifftn',
+           'rfft', 'irfft', 'rfft2', 'irfft2', 'rfftn', 'irfftn',
+           'hfft', 'ihfft', 'fftfreq', 'rfftfreq', 'fftshift', 'ifftshift',
+           'Tensor']
 
 Tensor = torch.Tensor
 
 # Note: This not only adds the doc strings for the spectral ops, but
 # connects the torch.fft Python namespace to the torch._C._fft builtins.
 
-fft = _add_docstr(
-    _fft.fft_fft,
-    r"""
+fft = _add_docstr(_fft.fft_fft, r"""
 fft(input, n=None, dim=-1, norm=None, *, out=None) -> Tensor
 
 Computes the one dimensional discrete Fourier transform of :attr:`input`.
@@ -80,14 +61,9 @@ Example:
     >>> t = torch.tensor([0.+1.j, 2.+3.j, 4.+5.j, 6.+7.j])
     >>> torch.fft.fft(t)
     tensor([12.+16.j, -8.+0.j, -4.-4.j,  0.-8.j])
-""".format(
-        **common_args
-    ),
-)
+""".format(**common_args))
 
-ifft = _add_docstr(
-    _fft.fft_ifft,
-    r"""
+ifft = _add_docstr(_fft.fft_ifft, r"""
 ifft(input, n=None, dim=-1, norm=None, *, out=None) -> Tensor
 
 Computes the one dimensional inverse discrete Fourier transform of :attr:`input`.
@@ -119,14 +95,9 @@ Example:
     >>> t = torch.tensor([ 6.+0.j, -2.+2.j, -2.+0.j, -2.-2.j])
     >>> torch.fft.ifft(t)
     tensor([0.+0.j, 1.+0.j, 2.+0.j, 3.+0.j])
-""".format(
-        **common_args
-    ),
-)
+""".format(**common_args))
 
-fft2 = _add_docstr(
-    _fft.fft_fft2,
-    r"""
+fft2 = _add_docstr(_fft.fft_fft2, r"""
 fft2(input, s=None, dim=(-2, -1), norm=None, *, out=None) -> Tensor
 
 Computes the 2 dimensional discrete Fourier transform of :attr:`input`.
@@ -178,14 +149,9 @@ Example:
     >>> two_ffts = torch.fft.fft(torch.fft.fft(x, dim=0), dim=1)
     >>> torch.testing.assert_close(fft2, two_ffts, check_stride=False)
 
-""".format(
-        **common_args
-    ),
-)
+""".format(**common_args))
 
-ifft2 = _add_docstr(
-    _fft.fft_ifft2,
-    r"""
+ifft2 = _add_docstr(_fft.fft_ifft2, r"""
 ifft2(input, s=None, dim=(-2, -1), norm=None, *, out=None) -> Tensor
 
 Computes the 2 dimensional inverse discrete Fourier transform of :attr:`input`.
@@ -229,14 +195,9 @@ Example:
     >>> two_iffts = torch.fft.ifft(torch.fft.ifft(x, dim=0), dim=1)
     >>> torch.testing.assert_close(ifft2, two_iffts, check_stride=False)
 
-""".format(
-        **common_args
-    ),
-)
+""".format(**common_args))
 
-fftn = _add_docstr(
-    _fft.fft_fftn,
-    r"""
+fftn = _add_docstr(_fft.fft_fftn, r"""
 fftn(input, s=None, dim=None, norm=None, *, out=None) -> Tensor
 
 Computes the N dimensional discrete Fourier transform of :attr:`input`.
@@ -288,14 +249,9 @@ Example:
     >>> two_ffts = torch.fft.fft(torch.fft.fft(x, dim=0), dim=1)
     >>> torch.testing.assert_close(fftn, two_ffts, check_stride=False)
 
-""".format(
-        **common_args
-    ),
-)
+""".format(**common_args))
 
-ifftn = _add_docstr(
-    _fft.fft_ifftn,
-    r"""
+ifftn = _add_docstr(_fft.fft_ifftn, r"""
 ifftn(input, s=None, dim=None, norm=None, *, out=None) -> Tensor
 
 Computes the N dimensional inverse discrete Fourier transform of :attr:`input`.
@@ -338,14 +294,9 @@ Example:
     >>> two_iffts = torch.fft.ifft(torch.fft.ifft(x, dim=0), dim=1)
     >>> torch.testing.assert_close(ifftn, two_iffts, check_stride=False)
 
-""".format(
-        **common_args
-    ),
-)
+""".format(**common_args))
 
-rfft = _add_docstr(
-    _fft.fft_rfft,
-    r"""
+rfft = _add_docstr(_fft.fft_rfft, r"""
 rfft(input, n=None, dim=-1, norm=None, *, out=None) -> Tensor
 
 Computes the one dimensional Fourier transform of real-valued :attr:`input`.
@@ -392,14 +343,9 @@ Example:
     Notice that the symmetric element ``T[-1] == T[1].conj()`` is omitted.
     At the Nyquist frequency ``T[-2] == T[2]`` is it's own symmetric pair,
     and therefore must always be real-valued.
-""".format(
-        **common_args
-    ),
-)
+""".format(**common_args))
 
-irfft = _add_docstr(
-    _fft.fft_irfft,
-    r"""
+irfft = _add_docstr(_fft.fft_irfft, r"""
 irfft(input, n=None, dim=-1, norm=None, *, out=None) -> Tensor
 
 Computes the inverse of :func:`~torch.fft.rfft`.
@@ -465,14 +411,9 @@ Example:
     >>> roundtrip = torch.fft.irfft(T, t.numel())
     >>> torch.testing.assert_close(roundtrip, t, check_stride=False)
 
-""".format(
-        **common_args
-    ),
-)
+""".format(**common_args))
 
-rfft2 = _add_docstr(
-    _fft.fft_rfft2,
-    r"""
+rfft2 = _add_docstr(_fft.fft_rfft2, r"""
 rfft2(input, s=None, dim=(-2, -1), norm=None, *, out=None) -> Tensor
 
 Computes the 2-dimensional discrete Fourier transform of real :attr:`input`.
@@ -530,14 +471,9 @@ Example:
     >>> two_ffts = torch.fft.fft(torch.fft.rfft(t, dim=1), dim=0)
     >>> torch.testing.assert_close(rfft2, two_ffts, check_stride=False)
 
-""".format(
-        **common_args
-    ),
-)
+""".format(**common_args))
 
-irfft2 = _add_docstr(
-    _fft.fft_irfft2,
-    r"""
+irfft2 = _add_docstr(_fft.fft_irfft2, r"""
 irfft2(input, s=None, dim=(-2, -1), norm=None, *, out=None) -> Tensor
 
 Computes the inverse of :func:`~torch.fft.rfft2`.
@@ -608,14 +544,9 @@ Example:
     torch.Size([10, 9])
     >>> torch.testing.assert_close(roundtrip, t, check_stride=False)
 
-""".format(
-        **common_args
-    ),
-)
+""".format(**common_args))
 
-rfftn = _add_docstr(
-    _fft.fft_rfftn,
-    r"""
+rfftn = _add_docstr(_fft.fft_rfftn, r"""
 rfftn(input, s=None, dim=None, norm=None, *, out=None) -> Tensor
 
 Computes the N-dimensional discrete Fourier transform of real :attr:`input`.
@@ -673,14 +604,9 @@ Example:
     >>> two_ffts = torch.fft.fft(torch.fft.rfft(t, dim=1), dim=0)
     >>> torch.testing.assert_close(rfftn, two_ffts, check_stride=False)
 
-""".format(
-        **common_args
-    ),
-)
+""".format(**common_args))
 
-irfftn = _add_docstr(
-    _fft.fft_irfftn,
-    r"""
+irfftn = _add_docstr(_fft.fft_irfftn, r"""
 irfftn(input, s=None, dim=None, norm=None, *, out=None) -> Tensor
 
 Computes the inverse of :func:`~torch.fft.rfftn`.
@@ -750,14 +676,9 @@ Example:
     torch.Size([10, 9])
     >>> torch.testing.assert_close(roundtrip, t, check_stride=False)
 
-""".format(
-        **common_args
-    ),
-)
+""".format(**common_args))
 
-hfft = _add_docstr(
-    _fft.fft_hfft,
-    r"""
+hfft = _add_docstr(_fft.fft_hfft, r"""
 hfft(input, n=None, dim=-1, norm=None, *, out=None) -> Tensor
 
 Computes the one dimensional discrete Fourier transform of a Hermitian
@@ -837,14 +758,9 @@ Example:
 
     >>> torch.fft.hfft(T[:3])
     tensor([0.1250, 0.2809, 0.6250, 0.9691])
-""".format(
-        **common_args
-    ),
-)
+""".format(**common_args))
 
-ihfft = _add_docstr(
-    _fft.fft_ihfft,
-    r"""
+ihfft = _add_docstr(_fft.fft_ihfft, r"""
 ihfft(input, n=None, dim=-1, norm=None, *, out=None) -> Tensor
 
 Computes the inverse of :func:`~torch.fft.hfft`.
@@ -890,14 +806,9 @@ Example:
     >>> torch.fft.ifft(t)
     tensor([ 2.0000-0.0000j, -0.5000-0.6882j, -0.5000-0.1625j, -0.5000+0.1625j,
             -0.5000+0.6882j])
-""".format(
-        **common_args
-    ),
-)
+""".format(**common_args))
 
-fftfreq = _add_docstr(
-    _fft.fft_fftfreq,
-    r"""
+fftfreq = _add_docstr(_fft.fft_fftfreq, r"""
 fftfreq(n, d=1.0, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
 Computes the discrete Fourier Transform sample frequencies for a signal of size :attr:`n`.
@@ -941,14 +852,9 @@ Example:
     >>> torch.fft.fftfreq(4)
     tensor([ 0.0000,  0.2500, -0.5000, -0.2500])
 
-""".format(
-        **factory_common_args
-    ),
-)
+""".format(**factory_common_args))
 
-rfftfreq = _add_docstr(
-    _fft.fft_rfftfreq,
-    r"""
+rfftfreq = _add_docstr(_fft.fft_rfftfreq, r"""
 rfftfreq(n, d=1.0, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
 Computes the sample frequencies for :func:`~torch.fft.rfft` with a signal of size :attr:`n`.
@@ -992,14 +898,9 @@ Example:
     >>> torch.fft.fftfreq(4)
     tensor([ 0.0000,  0.2500, -0.5000, -0.2500])
 
-""".format(
-        **factory_common_args
-    ),
-)
+""".format(**factory_common_args))
 
-fftshift = _add_docstr(
-    _fft.fft_fftshift,
-    r"""
+fftshift = _add_docstr(_fft.fft_fftshift, r"""
 fftshift(input, dim=None) -> Tensor
 
 Reorders n-dimensional FFT data, as provided by :func:`~torch.fft.fftn`, to have
@@ -1079,12 +980,9 @@ Example:
     >>> torch.testing.assert_close(x_centered.to(torch.complex64), x_centered_2, check_stride=False)
 
 
-""",
-)
+""")
 
-ifftshift = _add_docstr(
-    _fft.fft_ifftshift,
-    r"""
+ifftshift = _add_docstr(_fft.fft_ifftshift, r"""
 ifftshift(input, dim=None) -> Tensor
 
 Inverse of :func:`~torch.fft.fftshift`.
@@ -1109,5 +1007,4 @@ Example:
     >>> torch.fft.ifftshift(shifted)
     tensor([ 0.0000,  0.2000,  0.4000, -0.4000, -0.2000])
 
-""",
-)
+""")

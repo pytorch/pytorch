@@ -12,11 +12,9 @@ class LoggingTest(TestCase):
         s = TestCase.runWithPytorchAPIUsageStderr("import torch")
         self.assertRegexpMatches(s, "PYTORCH_API_USAGE.*import")
         # import the shared library directly - it triggers static init but doesn't call anything
-        s = TestCase.runWithPytorchAPIUsageStderr(
-            "from ctypes import CDLL; CDLL('{}')".format(torch._C.__file__)
-        )
+        s = TestCase.runWithPytorchAPIUsageStderr("from ctypes import CDLL; CDLL('{}')".format(torch._C.__file__))
         self.assertNotRegexpMatches(s, "PYTORCH_API_USAGE")
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     run_tests()

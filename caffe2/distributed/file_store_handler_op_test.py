@@ -1,7 +1,12 @@
+
+
+
+
+
 import errno
 import os
-import shutil
 import tempfile
+import shutil
 
 from caffe2.distributed.python import StoreHandlerTimeoutError
 from caffe2.distributed.store_ops_test_util import StoreOpsTests
@@ -42,9 +47,10 @@ class TestFileStoreHandlerOp(TestCase):
         store_handler = "store_handler"
         workspace.RunOperatorOnce(
             core.CreateOperator(
-                "FileStoreHandlerCreate", [], [store_handler], path=path
-            )
-        )
+                "FileStoreHandlerCreate",
+                [],
+                [store_handler],
+                path=path))
 
         return store_handler
 
