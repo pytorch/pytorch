@@ -9,6 +9,7 @@
 #include <string>
 #include <tuple>
 #include <vector>
+#include <ctype.h>
 
 namespace c10 {
 namespace {
@@ -60,7 +61,7 @@ Device::Device(const std::string& device_string) : Device(Type::CPU) {
   DeviceStringParsingState pstate = DeviceStringParsingState::START;
 
   // The code below tries to match the string in the variable
-  // device_string against thr regular expression:
+  // device_string against the regular expression:
   // ([a-zA-Z_]+)(?::([1-9]\\d*|0))?
   for (size_t i = 0;
        pstate != DeviceStringParsingState::ERROR && i < device_string.size();
