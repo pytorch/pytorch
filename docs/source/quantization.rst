@@ -161,14 +161,13 @@ Please see our `Introduction to Quantization on Pytorch
 for a more comprehensive overview of the tradeoffs between these quantization
 types.
 
-Operator coverage varies between dynamic and static quantization and is captured in the table below
+Operator coverage varies between dynamic and static quantization and is captured in the table below:
 
 -----------------+--------------------+-------------------+
 |                 |Static             |      Dynamic      |
 |                 |Quantization       | Quantization      |
 +-----------------+-------------------+-------------------+
 |nn.Linear        | Y                 | Y                 |
-+-----------------+-------------------+-------------------+
 |nn.Conv1d/2d/3d  | Y                 | N                 |
 +-----------------+-------------------+-------------------+
 |nn.LSTM          | N                 | Y                 |
