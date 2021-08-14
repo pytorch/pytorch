@@ -27,6 +27,8 @@ enum class C10_API_ENUM RecordScope : uint8_t {
   TORCHSCRIPT_FUNCTION,
   // Kernel Function dtype Tag
   KERNEL_FUNCTION_DTYPE,
+  // Kernel Function dtype Tag
+  LITE_INTERPRETER,
   // User defined scope (e.g. with record_function())
   USER_SCOPE,
   NUM_SCOPES, // must be the last in the list
@@ -502,11 +504,11 @@ class TORCH_API RecordFunctionCallback {
       }                                             \
     }
 
-// Helper macros to record user_scope events with debug handles
-#define RECORD_USER_SCOPE_WITH_DEBUG_HANDLE_AND_INPUTS(         \
-    fn, debug_handle, inputs)                                   \
-    RECORD_WITH_SCOPE_DEBUG_HANDLE_AND_INPUTS(                  \
-        at::RecordScope::USER_SCOPE, fn, debug_handle, inputs)
+// Helper macros to record LITE INTERPETER scope events with debug handles
+#define RECORD_EDGE_SCOPE_WITH_DEBUG_HANDLE_AND_INPUTS(             \
+    fn, debug_handle, inputs)                                       \
+    RECORD_WITH_SCOPE_DEBUG_HANDLE_AND_INPUTS(                      \
+        at::RecordScope::LITE_INTERPRETER, fn, debug_handle, inputs)
 
 // Notes:
 //  - two types of callbacks are provided: thread local and global

@@ -485,10 +485,17 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     endif()
   endif()
 
+  list(APPEND LITE_PROFILER_SRCS "")
+  if(USE_LITE_INTERPRETER_PROFILER)
+    append_filelist("libtorch_edge_profiler_sources " LITE_PROFILER_SRCS)
+  endif()
+
   # Switch between the full jit interpreter and lite interpreter
   if(BUILD_LITE_INTERPRETER)
     append_filelist("libtorch_lite_cmake_sources" LIBTORCH_CMAKE_SRCS)
     list(APPEND LIBTORCH_CMAKE_SRCS ${LITE_EAGER_SYMOBLICATION_SRCS})
+    list(APPEND LIBTORCH_CMAKE_SRCS ${LITE_PROFILER_SRCS})
+    set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
   else()
     append_filelist("libtorch_cmake_sources" LIBTORCH_CMAKE_SRCS)
 
