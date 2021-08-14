@@ -2310,7 +2310,7 @@ def sample_inputs_layer_norm(opinfo, device, dtype, requires_grad, **kwargs):
                 kwargs=kwargs
             )
         # Without any optional args
-        # yield SampleInput(make_arg((1, 2)), args=((2,),))
+        yield SampleInput(make_arg((1, 2)), args=((2,),))
 
     return list(generator())
 
