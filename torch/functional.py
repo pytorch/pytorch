@@ -1442,27 +1442,21 @@ def _lu_impl(A, pivot=True, get_infos=False, out=None):
     ``True``.
 
     .. note::
-        The pivots returned by the function are 1-indexed. If :attr:`pivot` is ``False``,
-        then the returned pivots is a tensor filled with zeros of the appropriate size.
-
-    .. note::
-        LU factorization with :attr:`pivot` = ``False`` is not available for CPU, and attempting
-        to do so will throw an error. However, LU factorization with :attr:`pivot` = ``False`` is
-        available for CUDA.
-
-    .. note::
-        This function does not check if the factorization was successful or not if
-        :attr:`get_infos` is ``True`` since the status of the factorization is present in the
-        third element of the return tuple.
-
-    .. note::
-        In the case of batches of square matrices with size less or
-        equal to 32 on a CUDA device, the LU factorization is repeated
-        for singular matrices due to the bug in the MAGMA library (see
-        magma issue 13).
-
-    .. note::
-       ``L``, ``U``, and ``P`` can be derived using :func:`torch.lu_unpack`.
+        * The pivots returned by the function are 1-indexed. If :attr:`pivot`
+          is ``False``, then the returned pivots is a tensor filled with
+          zeros of the appropriate size.
+        * LU factorization with :attr:`pivot` = ``False`` is not available
+          for CPU, and attempting to do so will throw an error. However,
+          LU factorization with :attr:`pivot` = ``False`` is available for
+          CUDA.
+        * This function does not check if the factorization was successful
+          or not if :attr:`get_infos` is ``True`` since the status of the
+          factorization is present in the third element of the return tuple.
+        * In the case of batches of square matrices with size less or equal
+          to 32 on a CUDA device, the LU factorization is repeated for
+          singular matrices due to the bug in the MAGMA library
+          (see magma issue 13).
+        * ``L``, ``U``, and ``P`` can be derived using :func:`torch.lu_unpack`.
 
     .. warning::
         The LU factorization does have backward support,
