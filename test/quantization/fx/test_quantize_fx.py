@@ -1610,14 +1610,14 @@ class TestQuantizeFx(QuantizationTestCase):
         matches = ['.fake_quant_enabled', '.observer_enabled']
         for key, v in scripted.state_dict().items():
             if any(x in key for x in matches):
-                self.assertEqual(v, torch.tensor([0], dtype=torch.uint8))
+                self.assertEqual(v, torch.tensor([0], dtype=torch.int64))
 
         # enable them back
         scripted.apply(torch.quantization.enable_fake_quant)
         scripted.apply(torch.quantization.enable_observer)
         for key, v in scripted.state_dict().items():
             if any(x in key for x in matches):
-                self.assertEqual(v, torch.tensor([1], dtype=torch.uint8))
+                self.assertEqual(v, torch.tensor([1], dtype=torch.int64))
 
     @skipIfNoFBGEMM
     def test_save_observer_state_dict(self):
@@ -2572,7 +2572,7 @@ class TestQuantizeFx(QuantizationTestCase):
         self.checkGraphModeFxOp(
             m1, data, QuantType.QAT,
             prepare_expected_node_occurrence={
-                ns.call_module(torch.quantization.FakeQuantize): 1,
+                ns.call_module(torch.quantization.FusedMovingAvgObsFakeQuantize): 1,
             },
             expected_node_occurrence={
                 ns.call_function(torch.quantize_per_tensor): 1,
@@ -2594,7 +2594,7 @@ class TestQuantizeFx(QuantizationTestCase):
             m2, data, QuantType.QAT,
             prepare_expected_node_occurrence={
                 # one for weights, one for activations
-                ns.call_module(torch.quantization.FakeQuantize): 2,
+                ns.call_module(torch.quantization.FusedMovingAvgObsFakeQuantize): 2,
             },
             expected_node_occurrence={
                 ns.call_function(torch.quantize_per_tensor): 1,
@@ -2616,7 +2616,7 @@ class TestQuantizeFx(QuantizationTestCase):
             m3, data, QuantType.QAT,
             prepare_expected_node_occurrence={
                 # one for weights, one for activations
-                ns.call_module(torch.quantization.FakeQuantize): 2,
+                ns.call_module(torch.quantization.FusedMovingAvgObsFakeQuantize): 2,
             },
             expected_node_occurrence={
                 ns.call_function(torch.quantize_per_tensor): 1,
@@ -2906,7 +2906,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 },
                 # There should be 3 observers: after input, weight and activation.
                 QuantType.QAT: {
-                    ns.call_module(torch.quantization.FakeQuantize): 3,
+                    ns.call_module(torch.quantization.FusedMovingAvgObsFakeQuantize): 3,
                 },
             }
             model = FuncLinear(use_bias, has_relu, f_relu)
@@ -3144,7 +3144,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 },
                 # There should be 3 observers: after input, weight and activation.
                 QuantType.QAT: {
-                    ns.call_module(torch.quantization.FakeQuantize): 3,
+                    ns.call_module(torch.quantization.FusedMovingAvgObsFakeQuantize): 3,
                 },
             }
             data_dims = [2, 3] + [4] * dim
@@ -3423,7 +3423,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
 
         m = M()
         expected_node_occurrence = {
-            ns.call_module(torch.quantization.FakeQuantize): 6,
+            ns.call_module(torch.quantization.FusedMovingAvgObsFakeQuantize): 6,
         }
         self._test_quantized_add_mul_qat(m, expected_node_occurrence)
 
@@ -3446,7 +3446,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
 
         m = M()
         expected_node_occurrence = {
-            ns.call_module(torch.quantization.FakeQuantize): 6,
+            ns.call_module(torch.quantization.FusedMovingAvgObsFakeQuantize): 6,
         }
         self._test_quantized_add_mul_qat(m, expected_node_occurrence)
 
@@ -3470,7 +3470,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             m, {'': torch.quantization.get_default_qat_qconfig('fbgemm')},
             prepare_custom_config_dict={"input_quantized_idxs": [0]})
         expected_node_occurrence = {
-            ns.call_module(torch.quantization.FakeQuantize): 0,
+            ns.call_module(torch.quantization.FusedMovingAvgObsFakeQuantize): 0,
         }
         self.checkGraphModuleNodes(
             mp, expected_node_occurrence=expected_node_occurrence)
@@ -5151,6 +5151,8 @@ class TestQuantizeFxModels(QuantizationTestCase):
         prepared.to(device)
         prepared_ref.to(device)
 
+        prepared.apply(torch.quantization.disable_fake_quant)
+        prepared.apply(torch.quantization.disable_observer)
         prepared_ref.apply(torch.quantization.disable_fake_quant)
         prepared_ref.apply(torch.quantization.disable_observer)
 
