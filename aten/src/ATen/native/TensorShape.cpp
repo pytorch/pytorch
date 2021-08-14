@@ -2462,7 +2462,7 @@ Tensor& replace_(Tensor& self, const Tensor& other) {
   // This is important because we want to retain all of the
   // aliasing + python metadata from the original tensor
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!other_impl->is_view());
-  self_impl->replace_(other);
+  self_impl->replace_(other_impl);
   return self;
 }
 

@@ -48,7 +48,7 @@ void FunctionalTensorImplBase::sync_() {
   t = t.clone();
   // This call to replace_() doesn't go through the dispatcher.
   // It's a virtual method implemented directly on TensorImpl subclasses.
-  replace_(t);
+  replace_(t.unsafeGetTensorImpl());
   generation_ = alias_->generation();
 }
 
