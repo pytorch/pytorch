@@ -43,7 +43,7 @@ Returns an opaque token representing the id of a graph memory pool.
 Begins capturing CUDA work on the current stream.
 
 Arguments:
-    pool (optional): Token (returned by :func:`~torch.cuda.graph_pool_handle` or ``some_other_graph.pool()``) that hints this graph may share memory with the indicated pool.
+    pool (optional): Token (returned by :func:`~torch.cuda.graph_pool_handle` or :meth:`other_Graph_instance.pool()<torch.cuda.CUDAGraph.pool>`) that hints this graph may share memory with the indicated pool.
            )",
            py::arg("pool") = c10::cuda::MempoolId_t{0, 0})
       .def("capture_end",

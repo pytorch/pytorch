@@ -25,7 +25,7 @@ class graph(object):
 
     Arguments:
         graph (torch.cuda.CUDAGraph): Graph object used for capture.
-        pool: Opaque token (returned by a call to :func:`~torch.cuda.graph_pool_handle()` or :meth:`other_Graph_instance.pool()<torch.cuda.CUDAGraph.pool`) hinting this graph's capture may share memory from the specified pool.
+        pool: Opaque token (returned by a call to :func:`~torch.cuda.graph_pool_handle()` or :meth:`other_Graph_instance.pool()<torch.cuda.CUDAGraph.pool>`) hinting this graph's capture may share memory from the specified pool.
         stream (torch.cuda.Stream, optional): If supplied, will be set as the current ambient stream in the context.  If not supplied, ``Graph`` sets its own internal side stream as the ambient stream in the context.
 
     .. note::
