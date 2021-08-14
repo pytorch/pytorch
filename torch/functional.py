@@ -67,6 +67,7 @@ def broadcast_tensors(*tensors):
         tensor([[0, 1, 2],
                 [0, 1, 2]])
     """
+    # This wrapper exists to support variadic args.
     if has_torch_function(tensors):
         return handle_torch_function(broadcast_tensors, tensors, *tensors)
     return _VF.broadcast_tensors(tensors)  # type: ignore[attr-defined]
@@ -97,6 +98,7 @@ def broadcast_shapes(*shapes):
     Raises:
         RuntimeError: If shapes are incompatible.
     """
+    # This wrapper exists to support variadic args.
     # TODO Movie this to C++ once the jit has better support for torch.Size.
     with torch.no_grad():
         scalar = torch.zeros((), device="cpu")
@@ -278,6 +280,7 @@ def einsum(*args):
         tensor([[-0.3430, -5.2405,  0.4494],
                 [ 0.3311,  5.5201, -3.0356]])
     """
+    # This wrapper exists to support variadic args.
     if len(args) < 2:
         raise ValueError('einsum(): must specify the equation string and at least one operand, '
                          'or at least one operand and its subscripts list')
@@ -325,6 +328,7 @@ def einsum(*args):
     return _VF.einsum(equation, operands)  # type: ignore[attr-defined]
 
 
+# This wrapper exists to support variadic args.
 if TYPE_CHECKING:
     # The JIT doesn't understand Union, so only add type annotation for mypy
     def meshgrid(*tensors: Union[Tensor, List[Tensor]]) -> Tuple[Tensor, ...]:
@@ -990,6 +994,7 @@ def cartesian_prod(*tensors):
                 [3, 4],
                 [3, 5]])
     """
+    # This wrapper exists to support variadic args.
     if has_torch_function(tensors):
         return handle_torch_function(cartesian_prod, tensors, *tensors)
     return _VF.cartesian_prod(tensors)  # type: ignore[attr-defined]
@@ -1024,6 +1029,7 @@ def block_diag(*tensors):
                 [0, 0, 0, 0, 0, 0, 0, 0, 0, 5],
                 [0, 0, 0, 0, 0, 0, 0, 0, 0, 6]])
     """
+    # This wrapper exists to support variadic args.
     if has_torch_function(tensors):
         return handle_torch_function(block_diag, tensors, *tensors)
     return torch._C._VariableFunctions.block_diag(tensors)  # type: ignore[attr-defined]
@@ -1111,6 +1117,7 @@ def atleast_1d(*tensors):
         >>> torch.atleast_1d((x,y))
         (tensor([0.5000]), tensor([1.]))
     """
+    # This wrapper exists to support variadic args.
     if has_torch_function(tensors):
         return handle_torch_function(atleast_1d, tensors, *tensors)
     if len(tensors) == 1:
@@ -1147,6 +1154,7 @@ def atleast_2d(*tensors):
         >>> torch.atleast_2d((x,y))
         (tensor([[0.5000]]), tensor([[1.]]))
     """
+    # This wrapper exists to support variadic args.
     if has_torch_function(tensors):
         return handle_torch_function(atleast_2d, tensors, *tensors)
     if len(tensors) == 1:
@@ -1191,6 +1199,7 @@ def atleast_3d(*tensors):
         >>> torch.atleast_3d((x,y))
         (tensor([[[0.5000]]]), tensor([[[1.]]]))
     """
+    # This wrapper exists to support variadic args.
     if has_torch_function(tensors):
         return handle_torch_function(atleast_3d, tensors, *tensors)
     if len(tensors) == 1:
@@ -1425,6 +1434,7 @@ def chain_matmul(*matrices, out=None):
 
     .. _`[CLRS]`: https://mitpress.mit.edu/books/introduction-algorithms-third-edition
     """
+    # This wrapper exists to support variadic args.
     if has_torch_function(matrices):
         return handle_torch_function(chain_matmul, matrices, *matrices)
 
