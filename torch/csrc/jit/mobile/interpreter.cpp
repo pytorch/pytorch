@@ -54,7 +54,7 @@ bool InterpreterState::run(Stack& stack) {
   size_t pc = 0;
   while (true) {
     try {
-      Instruction inst = code_->instructions_[pc];
+      Instruction inst = code_->instructions_with_handles_[pc].instruction;
 
       //    std::cout << "RUNNING " << pc << " " << code_->instructions_[pc];
       //    if (inst.op == OP) {
