@@ -5204,7 +5204,6 @@ def reference_layer_norm(inp: np.ndarray, normalized_shape: Tuple[int], weight=N
     feature_size = np.prod(normalized_shape)
     inp_view = inp.reshape(-1, feature_size)
     mean = inp_view.mean(axis=-1, keepdims=True)
-    # ddof=1 provides an unbiased estimator of the variance
     var = inp_view.var(axis=-1, ddof=0, keepdims=True)
     Y = (inp_view - mean) / np.sqrt(var + eps)
     if weight is None and bias is not None:
