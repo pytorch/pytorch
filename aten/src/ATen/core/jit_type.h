@@ -1913,7 +1913,7 @@ struct TORCH_API ClassType : public NamedType {
     return ss.str();
   }
 
-  const std::vector<torch::jit::Function*>& methods() const;
+  const std::vector<torch::jit::Function*> methods() const;
 
   TypePtr findAttribute(const std::string& name) const {
     size_t pos = 0;
@@ -2246,7 +2246,7 @@ struct TORCH_API ClassType : public NamedType {
   std::vector<TypePtr> attributeTypes_;
 
   // List of methods associated with this class.
-  std::vector<torch::jit::Function*> methods_;
+  std::unordered_map<std::string, torch::jit::Function*> methods_;
   std::vector<torch::jit::Function*> staticmethods_;
 
   // List of hooks to be run before/after forward.

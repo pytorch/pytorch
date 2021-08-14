@@ -1123,7 +1123,7 @@ void ClassType::addMethod(torch::jit::Function* method) {
       method->name(),
       " on class: ",
       repr_str());
-  methods_.push_back(method);
+  methods_[method->name()] = method;
 }
 
 const std::vector<torch::jit::Function*>& ClassType::getForwardHooks() const {
@@ -1429,13 +1429,13 @@ void ClassType::checkForwardHookSchema(
 }
 
 torch::jit::Function* ClassType::findMethod(const std::string& name) const {
-  for (auto method : methods_) {
-    if (name == method->name()) {
-      return method;
-    }
+  auto it = methods_.find(name);
+  if (it == methods_.end()) {
+    return nullptr;
   }
-  return nullptr;
+  return it->second;
 }
+
 torch::jit::Function& ClassType::getMethod(const std::string& name) const {
   auto method = findMethod(name);
   TORCH_CHECK(
@@ -1492,20 +1492,16 @@ torch::jit::Function* ClassType::findStaticMethod(const std::string& name) const
 }
 
 void ClassType::unsafeRemoveMethod(const std::string& name) {
-  size_t slot = 0;
-  for (auto method : methods_) {
-    if (method->name() == name) {
-      methods_.erase(methods_.begin() + slot);
-      return;
-    }
-    slot++;
+  auto it = methods_.find(name);
+  if (it == methods_.end()) {
+    TORCH_CHECK(
+        false,
+        "Can't delete undefined method ",
+        name,
+        " on class: ",
+        repr_str());
   }
-  TORCH_CHECK(
-      false,
-      "Can't delete undefined method ",
-      name,
-      " on class: ",
-      repr_str());
+  methods_.erase(it);
 }
 
 ClassTypePtr ClassType::refine(at::ArrayRef<TypePtr> refined_slots) const {
@@ -1661,8 +1657,12 @@ ClassType::ClassType(
       doc_string_(std::move(doc_string)),
       unresolved_class_attributes_(std::move(unresolved_class_attributes)) {}
 
-const std::vector<torch::jit::Function*>& ClassType::methods() const {
-  return methods_;
+const std::vector<torch::jit::Function*> ClassType::methods() const {
+  std::vector<torch::jit::Function*> methods;
+  for (const auto& method : methods_) {
+    methods.push_back(method.second);
+  }
+  return methods;
 }
 
 void ClassType::checkNotExist(const std::string& name, const std::string& what) const {

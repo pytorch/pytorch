@@ -1422,7 +1422,13 @@ struct PythonPrintImpl {
       }
 
       // TODO fields
-      for (auto& method : classType->methods()) {
+      auto methods = classType->methods();
+      // sort to make sure the order is preserved
+      std::sort(
+          methods.begin(), methods.end(), [](const auto& lhs, const auto& rhs) {
+            return lhs->name() < rhs->name();
+          });
+      for (auto& method : methods) {
         printFunction(*method);
       }
       std::set<std::string> already_printed;
