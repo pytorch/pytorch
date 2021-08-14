@@ -257,6 +257,7 @@ c10::intrusive_ptr<JitFuture> pyRpcTorchscript(
 PyRRef pyRemoteBuiltin(
     const WorkerInfo& dst,
     const std::string& opName,
+    const py::dict& devMap,
     const float rpcTimeoutSeconds,
     const py::args& args,
     const py::kwargs& kwargs) {
@@ -319,8 +320,16 @@ PyRRef pyRemotePythonUdf(
     const WorkerInfo& dst,
     std::string& pickledPythonUDF,
     std::vector<torch::Tensor>& tensors,
+    const py::dict& devMap,
     const float rpcTimeoutSeconds,
     const bool isAsyncExecution) {
+
+  // py::gil_scoped_acquire acquire;
+  // std::cout << "pyRemotePythonUdf" << std::endl;
+  // for (auto t : tensors) {
+  //   std::cout << (devMap[py::cast(t)].cast<torch::Device>()) << std::endl;
+  // }
+
   DCHECK(!PyGILState_Check());
   auto& ctx = RRefContext::getInstance();
   auto serializedPyObj =
@@ -373,6 +382,7 @@ PyRRef pyRemotePythonUdf(
 PyRRef pyRemoteTorchscript(
     const std::string& dstWorkerName,
     const std::string& qualifiedNameStr,
+    const py::dict& devMap,
     const float rpcTimeoutSeconds,
     const bool isAsyncExecution,
     const py::args& args,

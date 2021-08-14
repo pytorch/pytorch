@@ -481,6 +481,62 @@ for method_name, method in inspect.getmembers(PyRRef):
     setattr(RRef, method_name, new_method)
 
 
+class StorageOnDevice:
+  def __init__(self, arg, device):
+     self.arg = arg
+     self.device = device
+  
+  def getArg(self):
+    return self.arg
+  
+  def getDevice(self):
+    return self.device
+
+
+from collections import Mapping, Set, Sequence
+string_types = (str, unicode) if str is bytes else (str, bytes)
+
+def isinstance_namedtuple(obj) -> bool:
+    return (
+            isinstance(obj, tuple) and
+            hasattr(obj, '_asdict') and
+            hasattr(obj, '_fields')
+    )
+
+def objwalk(obj, visited=None, dev_map=None):
+    if visited is None:
+        visited = set()
+    if dev_map is None:
+        dev_map = dict()
+    if isinstance(obj, Mapping):
+        if id(obj) not in visited:
+            obj_id = id(obj)
+            visited.add(obj_id)
+            obj = {objwalk(k, visited, dev_map)[0]: objwalk(v, visited, dev_map)[0] for k, v in obj.items()}
+            visited.remove(obj_id)
+    elif isinstance(obj, (Sequence, Set)) and not isinstance(obj, string_types) and not isinstance_namedtuple(obj):
+        if id(obj) not in visited:
+            obj_id = id(obj)
+            visited.add(obj_id)
+            obj_type = type(obj)
+            obj = obj_type([objwalk(x, visited, dev_map)[0] for x in obj])
+            visited.remove(obj_id)
+        
+    if isinstance(obj, StorageOnDevice):
+        dev_map[obj.getArg()] = obj.getDevice()
+        obj = obj.getArg()
+
+    # if isinstance(obj, torch.Tensor):
+    #     dev_map[obj] = obj.device
+
+    return obj, dev_map
+
+
+def extractDeviceMapping(func, args, kwargs):
+    (args, kwargs), dev_map = objwalk((args, kwargs))
+    return func, args, kwargs, dev_map
+
+
 @_require_initialized
 def remote(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
     r"""
@@ -583,6 +639,7 @@ def remote(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
         >>> rpc.init_rpc("worker1", rank=1, world_size=2)
         >>> rpc.shutdown()
     """
+    func, args, kwargs, dev_map = extractDeviceMapping(func, args, kwargs)
     qualified_name = torch.jit._builtins._find_builtin(func)
     dst_worker_info = _to_worker_info(to)
     should_profile = torch.autograd._profiler_enabled()
@@ -601,11 +658,12 @@ def remote(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
                 func = wrapped
 
         if qualified_name is not None:
-            rref = _invoke_remote_builtin(dst_worker_info, qualified_name, timeout, *args, **kwargs)
+            rref = _invoke_remote_builtin(dst_worker_info, qualified_name, dev_map, timeout, *args, **kwargs)
         elif isinstance(func, torch.jit.ScriptFunction):
             rref = _invoke_remote_torchscript(
                 dst_worker_info.name,
                 torch._jit_internal._qualified_name(func),
+                dev_map,
                 timeout,
                 is_async_exec,
                 *args,
@@ -619,6 +677,7 @@ def remote(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
                 dst_worker_info,
                 pickled_python_udf,
                 tensors,
+                dev_map,
                 timeout,
                 is_async_exec
             )
@@ -632,6 +691,8 @@ def remote(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
     return rref
 
 def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None, rpc_timeout=UNSET_RPC_TIMEOUT):
+    func, args, kwargs, dev_map = extractDeviceMapping(func, args, kwargs)
+
     if not callable(func):
         raise TypeError("function should be callable.")
 
@@ -657,6 +718,7 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None, rpc_timeout=UNSET_RP
             fut = _invoke_rpc_builtin(
                 dst_worker_info,
                 qualified_name,
+                dev_map,
                 rpc_timeout,
                 *args,
                 **kwargs
@@ -667,6 +729,7 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None, rpc_timeout=UNSET_RP
                 torch._jit_internal._qualified_name(func),
                 args,
                 kwargs,
+                dev_map,
                 rpc_timeout,
                 is_async_exec
             )
@@ -678,6 +741,7 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None, rpc_timeout=UNSET_RP
                 dst_worker_info,
                 pickled_python_udf,
                 tensors,
+                dev_map,
                 rpc_timeout,
                 is_async_exec
             )

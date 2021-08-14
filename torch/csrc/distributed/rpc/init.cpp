@@ -681,6 +681,7 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
       "_invoke_rpc_builtin",
       [](const WorkerInfo& dst,
          const std::string& opName,
+         const py::dict& devMap,
          const float rpcTimeoutSeconds,
          const py::args& args,
          const py::kwargs& kwargs) {
@@ -694,6 +695,7 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
       [](const WorkerInfo& dst,
          std::string& pickledPythonUDF,
          std::vector<torch::Tensor>& tensors,
+         const py::dict& devMap,
          const float rpcTimeoutSeconds,
          const bool isAsyncExecution) {
         return std::make_shared<jit::PythonFutureWrapper>(pyRpcPythonUdf(
@@ -711,6 +713,7 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
          const std::string& qualifiedNameStr,
          const py::tuple& argsTuple,
          const py::dict& kwargsDict,
+         const py::dict& devMap,
          const float rpcTimeoutSeconds,
          const bool isAsyncExecution) {
         return std::make_shared<jit::PythonFutureWrapper>(pyRpcTorchscript(
