@@ -147,22 +147,53 @@ The following table compares the differences between Eager Mode Quantization and
 +-----------------+-------------------+-------------------+
 
 
-Eager Mode Quantization
-^^^^^^^^^^^^^^^^^^^^^^^
-
-There are three types of quantization supported in Eager Mode Quantization:
+There are three types of quantization supported:
 
 1. dynamic quantization (weights quantized with activations read/stored in
    floating point and quantized for compute.)
 2. static quantization (weights quantized, activations quantized, calibration
    required post training)
-3. quantization aware training (weights quantized, activations quantized,
+3. static quantization aware training (weights quantized, activations quantized,
    quantization numerics modeled during training)
 
 Please see our `Introduction to Quantization on Pytorch
 <https://pytorch.org/blog/introduction-to-quantization-on-pytorch/>`_ blog post
 for a more comprehensive overview of the tradeoffs between these quantization
 types.
+
+Operator coverage varies between dynamic and static quantization and is captured in the table below
+
+-----------------+--------------------+-------------------+
+|                 |Static             |      Dynamic      |
+|                 |Quantization       | Quantization      |
++-----------------+-------------------+-------------------+
+|nn.Linear        | Y                 | Y                 |
++-----------------+-------------------+-------------------+
+|nn.Conv1d/2d/3d  | Y                 | N                 |
++-----------------+-------------------+-------------------+
+|nn.LSTM          | N                 | Y                 |
+|nn.GRU           |                   |                   |
++-----------------+-------------------+-------------------+
+|nn.RNNCell       | N                 | Y                 |
+|nn.GRUCell       |                   |                   |
+|nn.LSTMCell      |                   |                   |
++-----------------+-------------------+-------------------+
+|nn.EmbeddingBag  | Y* (activations   |                   |
+|                 | are in fp32)      | Y                 |
++-----------------+-------------------+-------------------+
+|nn.Embedding     | Y*                | N                 |
++-----------------+-------------------+-------------------+
+|nn.MHA           |* Supported via    |                   |
+|                 | custom modules    | Not supported     |
++-----------------+-------------------+-------------------+
+|Activations      | Broadly supported | Un-changed,       |
+|                 |                   | computations      |
+|                 |                   |stay in fp32       |
++-----------------+-------------------+-------------------+
+
+Eager Mode Quantization
+^^^^^^^^^^^^^^^^^^^^^^^
+
 
 Dynamic Quantization
 ~~~~~~~~~~~~~~~~~~~~
