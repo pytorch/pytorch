@@ -43,7 +43,7 @@ inline int64_t getTimeUs() {
 }
 
 std::string shapesToStr(const std::vector<std::vector<int64_t>>& shapes);
-std::string stacksToStr(const std::vector<std::string>& stacks);
+std::string stacksToStr(const std::vector<std::string>& stacks, const char* delim);
 std::string dtypesToStr(const std::vector<std::string>& types);
 std::vector<std::string> inputTypes(const at::RecordFunction& fn);
 
@@ -109,6 +109,9 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
       }
       if (ctx->stack && !ctx->stack->empty()) {
         kineto_events_.back().stack(*ctx->stack);
+      }
+      if (ctx->module_hierarchy) {
+        kineto_events_.back().moduleHierarchy(*ctx->module_hierarchy);
       }
       if (ctx->extraArgs && !ctx->extraArgs->empty()) {
         kineto_events_.back().flops(computeFlops(std::string(fn.name().str()), *ctx->extraArgs));
@@ -228,7 +231,10 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
         activity.addMetadata("Input Dims", shapesToStr(kineto_event.shapes()));
       }
       if (kineto_event.hasStack()) {
-        activity.addMetadata("Call stack", stacksToStr(kineto_event.stack()));
+        activity.addMetadata("Call stack", stacksToStr(kineto_event.stack(), ";"));
+      }
+      if (kineto_event.hasModuleHierarchy()) {
+        activity.addMetadata("Module Hierarchy", stacksToStr(kineto_event.moduleHierarchy(), "."));
       }
       if (kineto_event.hasTypes()) {
         activity.addMetadata("Input type", dtypesToStr(kineto_event.dtypes()));
@@ -326,6 +332,10 @@ void pushProfilingCallbacks() {
             }
             ctx_ptr->stack = callstackStr(cs);
           }
+          if (config.with_modules &&
+              fn.scope() != at::RecordScope::BACKWARD_FUNCTION) {
+            ctx_ptr->module_hierarchy = jit::currentModuleHierarchy();
+          }
   #endif
           if (config.state == ProfilerState::KINETO_GPU_FALLBACK) {
             try {
@@ -416,12 +426,12 @@ std::string dtypesToStr(const std::vector<std::string>& types) {
   }
 }
 
-std::string stacksToStr(const std::vector<std::string>& stacks) {
+std::string stacksToStr(const std::vector<std::string>& stacks, const char* delim) {
   std::ostringstream oss;
   std::transform(
       stacks.begin(),
       stacks.end(),
-      std::ostream_iterator<std::string>(oss, ";"),
+      std::ostream_iterator<std::string>(oss, delim),
       [](std::string s) -> std::string {
 #ifdef _WIN32
         // replace the windows backslash with forward slash
@@ -430,7 +440,6 @@ std::string stacksToStr(const std::vector<std::string>& stacks) {
         return s;
       });
   auto rc = oss.str();
-  rc.pop_back();
   return "\"" + rc + "\"";
 }
 

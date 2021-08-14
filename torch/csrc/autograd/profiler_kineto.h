@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/csrc/autograd/profiler_legacy.h>
+#include <vector>
 
 #ifdef USE_KINETO
 // skip Kineto dependency on mobile
@@ -38,6 +39,7 @@ struct KinetoObserverContext : public at::ObserverContext {
   uint64_t fwdThreadId;
   uint8_t recFunScope;
   c10::optional<std::vector<std::string>> stack;
+  c10::optional<std::vector<std::string>> module_hierarchy;
   // Extra arguments for computing op flops
   c10::optional<std::unordered_map<std::string, c10::IValue>> extraArgs;
   CUDAEventStub cuda_event_start_ = nullptr;
@@ -147,6 +149,19 @@ struct TORCH_API KinetoEvent {
     return *this;
   }
 
+  bool hasModuleHierarchy() const {
+    return module_hierarchy_ != c10::nullopt;
+  }
+
+  const std::vector<std::string>& moduleHierarchy() const {
+    return *module_hierarchy_;
+  }
+
+  KinetoEvent& moduleHierarchy(const std::vector<std::string>& module_hierarchy) {
+    module_hierarchy_ = module_hierarchy;
+    return *this;
+  }
+
   std::string name() const {
     return name_;
   }
@@ -248,6 +263,7 @@ struct TORCH_API KinetoEvent {
   uint8_t activity_type_ = 0;
   c10::optional<std::vector<std::vector<int64_t>>> shapes_;
   c10::optional<std::vector<std::string>> stack_;
+  c10::optional<std::vector<std::string>> module_hierarchy_;
   c10::optional<std::vector<std::string>> dtypes_;
   uint64_t flops_ = 0;
 
