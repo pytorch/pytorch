@@ -2292,7 +2292,7 @@ def sample_inputs_layer_norm(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     # Ordered as input shape, normalized_shape and a kwarg dict for eps
-    cases: Tuple[Tuple[int], Tuple[int], Dict] = (  # type: ignore[assignment]
+    cases: Tuple[Tuple[int], Tuple[int], dict] = (  # type: ignore[assignment]
         ((1, 2, 3), (1, 2, 3), {'eps': 0.5}),
         ((1, 2, 3), (2, 3), {'eps': -0.5}),
         ((1,), (1,), {}),
@@ -5202,7 +5202,7 @@ def reference_mse_loss(input, target, reduction="mean"):
 
 def reference_layer_norm(inp: np.ndarray, normalized_shape: Tuple[int], weight=None, bias=None, eps=1e-5):
     feature_size = np.prod(normalized_shape)
-    inp_view = inp.reshape(-1, feature_size)
+    inp_view = inp.reshape(-1, feature_size)  # type: ignore[call-overload]
     mean = inp_view.mean(axis=-1, keepdims=True)
     var = inp_view.var(axis=-1, ddof=0, keepdims=True)
     Y = (inp_view - mean) / np.sqrt(var + eps)
