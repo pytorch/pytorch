@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <c10/core/Device.h>
+#include <c10/util/Exception.h>
 
 // -- Device -------------------------------------------------------
 
@@ -25,6 +26,11 @@ TEST(DeviceTest, BasicConstruction) {
       "cuda:",
       "cpu:0:0",
       "cpu:0:",
+      "cpu:-1",
+      "::",
+      ":",
+      "cpu:00",
+      "cpu:01"
   };
 
   for (auto& ds : valid_devices) {
@@ -35,13 +41,9 @@ TEST(DeviceTest, BasicConstruction) {
         << "Device String: " << ds.device_string;
   }
 
+  auto make_device = [](const std::string& ds) { return c10::Device(ds); };
+
   for (auto& ds : invalid_device_strings) {
-    bool got_exception = false;
-    try {
-      c10::Device d(ds);
-    } catch (c10::Error& ex) {
-      got_exception = true;
-    }
-    ASSERT_TRUE(got_exception) << "Device String: " << ds;
+    EXPECT_THROW(make_device(ds), c10::Error) << "Device String: " << ds;
   }
 }
