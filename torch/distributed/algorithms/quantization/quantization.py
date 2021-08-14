@@ -41,13 +41,8 @@ def _quantize_tensor_list(tensor_list, qtype):
         raise RuntimeError(
             f"_quantize_tensor_list expecting list of torch.Tensor as input but found {type(tensor_list)}"
         )
-    if ((qtype == DQuantType.FP16) or (qtype == DQuantType.BFP16)):
-        quantized_tensor_list = [_quantize_tensor(t, qtype) for t in tensor_list]
-        return quantized_tensor_list
-    else:
-        raise RuntimeError(
-            f'Quantization type {qtype} is not supported'
-        )
+    quantized_tensor_list = [_quantize_tensor(t, qtype) for t in tensor_list]
+    return quantized_tensor_list
 
 def _dequantize_tensor(tensor, qtype, quant_loss=None):
     if not isinstance(tensor, torch.Tensor):
@@ -83,16 +78,8 @@ def _dequantize_tensor_list(tensor_list, qtype, quant_loss=None):
         raise RuntimeError(
             f"_dequantize_tensor_list expecting list of torch.Tensor as input but found {type(tensor_list)}"
         )
-    elif (qtype == DQuantType.FP16):
-        dequantized_tensor_list = [_dequantize_tensor(t, qtype) for t in tensor_list]
-        return dequantized_tensor_list
-    elif (qtype == DQuantType.BFP16):
-        dequantized_tensor_list = [_dequantize_tensor(t, qtype) for t in tensor_list]
-        return dequantized_tensor_list
-    else:
-        raise RuntimeError(
-            f'Quantization type {qtype} is not supported'
-        )
+    dequantized_tensor_list = [_dequantize_tensor(t, qtype) for t in tensor_list]
+    return dequantized_tensor_list
 
 
 def auto_quantize(func, qtype, quant_loss=None):
