@@ -1,4 +1,5 @@
 #include <torch/csrc/python_headers.h>
+
 #include <c10/util/intrusive_ptr.h>
 #include <c10d/FileStore.hpp>
 #include <c10d/TCPStore.hpp>
@@ -30,7 +31,7 @@
 #include <c10d/frontend.hpp>
 #include <c10d/logger.hpp>
 #include <c10d/reducer.hpp>
-#include <c10d/quantization/quantization_gpu.h>
+
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/distributed/c10d/python_comm_hook.h>
 #include <torch/csrc/distributed/c10d/quantization/quantization.h>

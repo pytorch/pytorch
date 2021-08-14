@@ -18,17 +18,9 @@ def _build_tensor(size, value=None, dtype=torch.float, device_id=None):
     if value is None:
         value = size
     if device_id is None:
-        return torch.empty(size, size, size, dtype=dtype).fill_(value)
+        return torch.empty(size, dtype=dtype).fill_(value)
     else:
-        return torch.empty(size, size, size, dtype=dtype).fill_(value).cuda(device_id)
-
-def _build_2Dtensor(size, value=None, dtype=torch.float, device_id=None):
-    if value is None:
-        value = size
-    if device_id is None:
-        return torch.empty(size, size, dtype=dtype).fill_(value)
-    else:
-        return torch.empty(size, size, dtype=dtype).fill_(value).cuda(device_id)
+        return torch.empty(size, dtype=dtype).fill_(value).cuda(device_id)
 
 class DistQuantizationTests(TestDistBackend, DistributedTest._DistTestBase):
     def setUp(self):
@@ -80,14 +72,14 @@ class DistQuantizationTests(TestDistBackend, DistributedTest._DistTestBase):
     def _test_all_gather(
             self, group, group_id, rank, cuda=False, rank_to_GPU=None, dtype=torch.float, qtype=DQuantType.FP16):
         for dest in group:
-            tensor = _build_tensor(dest + 1, rank, dtype=dtype)
-            tensors = [_build_tensor(dest + 1, -1, dtype=dtype) for i in group]
-            expected_tensors = [_build_tensor(dest + 1, i, dtype=dtype) for i in group]
+            tensor = _build_tensor([dest + 1, dest + 1, dest + 1], rank, dtype=dtype)
+            tensors = [_build_tensor([dest + 1, dest + 1, dest + 1], -1, dtype=dtype) for i in group]
+            expected_tensors = [_build_tensor([dest + 1, dest + 1, dest + 1], i, dtype=dtype) for i in group]
             if (qtype == DQuantType.BFP16):
-                tensor = _build_2Dtensor(dest + 1, rank, dtype=dtype)
-                tensors = [_build_2Dtensor(dest + 1, -1, dtype=dtype) for i in group]
+                tensor = _build_tensor([dest + 1, dest + 1], rank, dtype=dtype)
+                tensors = [_build_tensor([dest + 1, dest + 1], -1, dtype=dtype) for i in group]
                 expected_tensors = [
-                    _build_2Dtensor(dest + 1, i, dtype=dtype) for i in group
+                    _build_tensor([dest + 1, dest + 1], i, dtype=dtype) for i in group
                 ]
             if cuda:
                 tensor = tensor.cuda(rank_to_GPU[rank][0])
