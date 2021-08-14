@@ -304,7 +304,6 @@ void pushProfilingCallbacks() {
 #endif // USE_KINETO
 
           auto ctx_ptr = std::make_unique<KinetoObserverContext>();
-          ctx_ptr->startUs = getTimeUs();
           ctx_ptr->correlationId = corr_id;
           ctx_ptr->startThreadId = at::RecordFunction::currentThreadId();
 
@@ -337,6 +336,7 @@ void pushProfilingCallbacks() {
             ctx_ptr->module_hierarchy = jit::currentModuleHierarchy();
           }
   #endif
+          ctx_ptr->startUs = getTimeUs();
           if (config.state == ProfilerState::KINETO_GPU_FALLBACK) {
             try {
               cudaStubs()->record(nullptr, &ctx_ptr->cuda_event_start_, nullptr);
