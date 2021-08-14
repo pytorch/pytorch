@@ -23,7 +23,7 @@ class _FunctionalSGD(object):
         dampening: float = 0.0,
         weight_decay: float = 0.0,
         nesterov: bool = False,
-        allow_empty_param_list: bool = False
+        _allow_empty_param_list: bool = False
     ):
         self.defaults = {
             "lr": lr,
@@ -34,7 +34,7 @@ class _FunctionalSGD(object):
         self.nesterov = nesterov
         self.state = torch.jit.annotate(Dict[torch.Tensor, Dict[str, torch.Tensor]], {})
 
-        if len(params) == 0 and not allow_empty_param_list:
+        if len(params) == 0 and not _allow_empty_param_list:
             raise ValueError("optimizer got an empty parameter list")
 
         # NOTE: we only have one param_group and don't allow user to add additional
