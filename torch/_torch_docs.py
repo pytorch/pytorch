@@ -11239,10 +11239,10 @@ Applies batch normalization on a 4D (NCHW) quantized tensor.
 
 Arguments:
     input (Tensor): quantized tensor
-    weight (Tensor): tensor that corresponds to the gamma, size C
-    bias (Tensor):  tensor that corresponds to the beta, size C
-    mean (Tensor): mean value in batch normalization, size C
-    var (Tensor): variance value, size C
+    weight (Tensor): float tensor that corresponds to the gamma, size C
+    bias (Tensor):  float tensor that corresponds to the beta, size C
+    mean (Tensor): float mean value in batch normalization, size C
+    var (Tensor): float tensor for variance, size C
     eps (float): a value added to the denominator for numerical stability.
     output_scale (float): output quantized tensor scale
     output_zero_point (int): output quantized tensor zero_point
