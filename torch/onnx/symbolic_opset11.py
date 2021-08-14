@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 from sys import maxsize
+from numpy.core.numeric import indices
 
 import torch
 import torch.onnx.symbolic_helper as sym_help
@@ -388,6 +389,12 @@ def topk(g, self, k, dim, largest, sorted, out=None):
 @parse_args("v", "i", "i", "none")
 def sort(g, self, dim, decending, out=None):
     return sym_help._sort_helper(g, self, dim, decending=decending, out=out)
+
+
+@parse_args("v", "i", "i")
+def argsort(g, self, dim, decending):
+    _, indices = sym_help._sort_helper(g, self, dim, decending=decending)
+    return indices
 
 
 def round(g, self):
