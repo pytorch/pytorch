@@ -2075,13 +2075,13 @@ TEST(InlinedCallStackTest, BlockAnnotation) {
       for (Block* block : n->blocks()) {
         for (Node* if_node : block->nodes()) {
           if (if_node->kind() == aten::add) {
-            for (const auto e : if_node->callstack().value()->vec()) {
+            for (const auto& e : if_node->callstack().value()->vec()) {
               add_ss << std::get<1>(e);
             }
             add_ss << if_node->sourceRange();
           }
           if (if_node->kind() == aten::mul) {
-            for (const auto e : if_node->callstack().value()->vec()) {
+            for (const auto& e : if_node->callstack().value()->vec()) {
               mul_ss << std::get<1>(e);
             }
             mul_ss << if_node->sourceRange();
@@ -2532,6 +2532,10 @@ TEST(ComputeFlopsTest, Basic) {
   extra_args["mat1_size"] = at::IValue(at::IntArrayRef(mat1_sizes));
   extra_args["mat2_size"] = at::IValue(at::IntArrayRef(mat2_sizes));
   flops = computeFlops(std::string("aten::mm"), extra_args);
+  ASSERT_EQ(flops, 43200);
+
+  // Test aten::addmm
+  flops = computeFlops(std::string("aten::addmm"), extra_args);
   ASSERT_EQ(flops, 43200);
 
   // Test mm out of range

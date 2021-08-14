@@ -1102,7 +1102,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
 
     @skipIfNoFBGEMM
     @unittest.skip("Broken by https://github.com/pytorch/pytorch/pull/62608, enable after"
-    "dtype inference is supported")
+                   "dtype inference is supported")
     def test_add_shadow_loggers_mod_ptq(self):
         self._test_add_shadow_loggers_mod_impl(prepare_fn=prepare_fx)
 
@@ -1129,7 +1129,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
 
     @skipIfNoFBGEMM
     @unittest.skip("Broken by https://github.com/pytorch/pytorch/pull/62608, enable after"
-    "dtype inference is supported")
+                   "dtype inference is supported")
     def test_add_shadow_loggers_meth_ptq(self):
         """
         Verify that add_loggers works on methods
@@ -1681,7 +1681,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
 
     @skipIfNoFBGEMM
     @unittest.skip("Broken by https://github.com/pytorch/pytorch/pull/62608, enable after"
-    "dtype inference is supported")
+                   "dtype inference is supported")
     def test_layer_names(self):
         m = nn.Sequential(
             nn.Conv2d(1, 1, 1),
