@@ -264,7 +264,7 @@ from torch._C._autograd import (DeviceType, ProfilerActivity, ProfilerState, Pro
                                 _enable_profiler_legacy, _disable_profiler_legacy, _profiler_enabled,
                                 _enable_record_function, _set_empty_test_observer, kineto_available,
                                 _supported_activities, _add_metadata_json, SavedTensor,
-                                _register_default_hooks, _reset_default_hooks)
+                                _register_saved_tensors_default_hooks, _reset_saved_tensors_default_hooks)
 
 from torch._C._autograd import (_ProfilerResult, _KinetoEvent,
                                 _prepare_profiler, _enable_profiler, _disable_profiler)
