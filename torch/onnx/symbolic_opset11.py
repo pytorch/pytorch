@@ -2,7 +2,6 @@
 # -*- coding: utf-8 -*-
 
 from sys import maxsize
-from numpy.core.numeric import indices
 
 import torch
 import torch.onnx.symbolic_helper as sym_help
