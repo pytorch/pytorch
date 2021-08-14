@@ -1022,7 +1022,13 @@ class CosineAnnealingWarmRestarts(_LRScheduler):
             if epoch - self.last_epoch < 0:
                 raise ValueError("Expected epoch number larger than {}, but got {}".format(self.last_epoch, epoch))
 
-            self.T_cur = epoch % self.T_0 # do antiquated calc of how far into this restart
+            if self.T_mult == 1:
+                self.T_cur = epoch % self.T_0
+            else:
+                n = int(math.log((epoch / self.T_0 * (self.T_mult - 1) + 1), self.T_mult))
+                self.T_cur = epoch - self.T_0 * (self.T_mult ** n - 1) / (self.T_mult - 1)
+                self.T_i = self.T_0 * self.T_mult ** (n)
+
             if self.T_cur >= self.T_i:
                 self.cycle += 1
                 self.T_cur = self.T_cur - self.T_i
