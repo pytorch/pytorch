@@ -2603,6 +2603,13 @@ and :attr:`other`.
 If :attr:`dim` is not given, it defaults to the first dimension found with the
 size 3. Note that this might be unexpected.
 
+.. seealso::
+        :func:`torch.linalg.cross` which is a variant that has a slightly
+        different default behaviour, i.e dim=-1.
+
+.. warning:: This function may change in a future PyTorch release to match
+        the default behaviour in :func:`torch.linalg.cross`.
+
 Args:
     {input}
     other (Tensor): the second input tensor

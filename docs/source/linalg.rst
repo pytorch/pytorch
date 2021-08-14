@@ -67,6 +67,7 @@ Matrix Products
     :toctree: generated
     :nosignatures:
 
+    cross
     matrix_power
     multi_dot
     householder_product

@@ -14,6 +14,51 @@ common_notes = {
 # Note: This not only adds doc strings for functions in the linalg namespace, but
 # also connects the torch.linalg Python namespace to the torch._C._linalg builtins.
 
+cross = _add_docstr(_linalg.linalg_cross, r"""
+cross(input, other, dim=-1, *, out=None) -> Tensor
+Returns the cross product of vectors in dimension :attr:`dim` of :attr:`input`
+and :attr:`other`.
+:attr:`input` and :attr:`other` must have the same size, and the size of their
+:attr:`dim` dimension should be 3.
+If :attr:`dim` is not given, it defaults to the last dimension expecting that
+the size of last dimension is 3.
+
+Args:
+    input (Tensor): the input tensor.
+    other (Tensor): the second input tensor.
+    dim  (int, optional): the dimension to take the cross-product in.
+
+Keyword args:
+    out (Tensor, optional): the output tensor.
+
+Raises:
+    RuntimeError: If the :attr:`input` tensor and :attr:`other` tensor don't have the same size,
+                  and the size of their :attr:`dim` dimension is not 3.
+Example::
+    >>> a = torch.randn(4, 3)
+    >>> a
+    tensor([[-0.3956,  1.1455,  1.6895],
+            [-0.5849,  1.3672,  0.3599],
+            [-1.1626,  0.7180, -0.0521],
+            [-0.1339,  0.9902, -2.0225]])
+    >>> b = torch.randn(4, 3)
+    >>> b
+    tensor([[-0.0257, -1.4725, -1.2251],
+            [-1.1479, -0.7005, -1.9757],
+            [-1.3904,  0.3726, -1.1836],
+            [-0.9688, -0.7153,  0.2159]])
+    >>> torch.linalg.cross(a, b, dim=1)
+    tensor([[ 1.0844, -0.5281,  0.6120],
+            [-2.4490, -1.5687,  1.9792],
+            [-0.8304, -1.3037,  0.5650],
+            [-1.2329,  1.9883,  1.0551]])
+    >>> torch.linalg.cross(a, b)
+    tensor([[ 1.0844, -0.5281,  0.6120],
+            [-2.4490, -1.5687,  1.9792],
+            [-0.8304, -1.3037,  0.5650],
+            [-1.2329,  1.9883,  1.0551]])
+""")
+
 cholesky = _add_docstr(_linalg.linalg_cholesky, r"""
 linalg.cholesky(A, *, upper=False, out=None) -> Tensor
 
