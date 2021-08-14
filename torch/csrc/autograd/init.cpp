@@ -73,7 +73,13 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .value("CUDA", ActivityType::CUDA);
 
   py::class_<ProfilerConfig>(m, "ProfilerConfig")
-      .def(py::init<ProfilerState, bool, bool, bool, bool>());
+      .def(py::init<ProfilerState,
+          bool, /* record_input_shapes */
+          bool, /* profile_memory */
+          bool, /* with_stac k*/
+          bool, /* with_flops */
+          bool  /* with_modules */
+          >());
 
   py::class_<LegacyEvent>(m, "ProfilerEvent")
       .def("kind", &LegacyEvent::kindStr)
