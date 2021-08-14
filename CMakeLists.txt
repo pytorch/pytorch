@@ -265,6 +265,10 @@ if(NOT DEFINED USE_VULKAN)
       "ANDROID" OFF)
 endif()
 
+if(IOS)
+  set(USE_BREAKPAD OFF)
+endif()
+
 option(USE_SOURCE_DEBUG_ON_MOBILE "Enable " ON)
 option(USE_LITE_INTERPRETER_PROFILER "Enable " ON)
 option(USE_VULKAN_FP16_INFERENCE "Vulkan - Use fp16 inference" OFF)
