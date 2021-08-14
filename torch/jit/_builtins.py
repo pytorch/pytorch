@@ -101,7 +101,7 @@ _builtin_ops = [
     (torch._VF.istft, "aten::istft"),  # type: ignore[attr-defined]
     (torch._VF.cdist, "aten::cdist"),  # type: ignore[attr-defined]
     (torch._VF.norm, "aten::norm"),  # type: ignore[attr-defined]
-    (torch._VF.unique_dim, "aten::unique_dim"),
+    (torch._VF._unique_dim, "aten::_unique_dim"),
     (torch._VF.unique_consecutive, "aten::unique_consecutive"),  # type: ignore[attr-defined]
     (torch._VF.nuclear_norm, "aten::nuclear_norm"),
     (torch._VF.frobenius_norm, "aten::frobenius_norm"),
