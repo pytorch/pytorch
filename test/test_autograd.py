@@ -5569,7 +5569,7 @@ for shape in [(1,), ()]:
                     assert_only_first_requires_grad(res)
 
                     res = torch._VF._unique_dim(inp, dim=0, sorted=sort, return_inverse=return_inverse,
-                                               return_counts=return_counts)
+                                                return_counts=return_counts)
                     assert_only_first_requires_grad(res)
 
                     # We don't test `unique_dim_consecutive` here.
