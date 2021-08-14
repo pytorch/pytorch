@@ -83,6 +83,4 @@ Tensor & linalg_cross_out(const Tensor & input, const Tensor & other, const int6
   return out;
 }
 
-
-
 }} // namespace at::native

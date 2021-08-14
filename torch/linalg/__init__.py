@@ -15,11 +15,12 @@ common_notes = {
 # also connects the torch.linalg Python namespace to the torch._C._linalg builtins.
 
 cross = _add_docstr(_linalg.linalg_cross, r"""
-cross(input, other, dim=-1, *, out=None) -> Tensor
+linalg.cross(input, other, dim=-1, *, out=None) -> Tensor
+
+
 Returns the cross product of vectors in dimension :attr:`dim` of :attr:`input`
 and :attr:`other`.
-:attr:`input` and :attr:`other` must have the same size, and the size of their
-:attr:`dim` dimension should be 3.
+
 If :attr:`dim` is not given, it defaults to the last dimension expecting that
 the size of last dimension is 3.
 
