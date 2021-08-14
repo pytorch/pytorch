@@ -5568,9 +5568,7 @@ for shape in [(1,), ()]:
                     res = torch._unique(inp, sorted=sort, return_inverse=return_inverse)
                     assert_only_first_requires_grad(res)
 
-                    # This looks public but is actually manually deleted from the
-                    # torch namespace in torch/functional.py
-                    res = torch._VF.unique_dim(inp, dim=0, sorted=sort, return_inverse=return_inverse,
+                    res = torch._VF._unique_dim(inp, dim=0, sorted=sort, return_inverse=return_inverse,
                                                return_counts=return_counts)
                     assert_only_first_requires_grad(res)
 
