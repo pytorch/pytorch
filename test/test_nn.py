@@ -12988,32 +12988,6 @@ class TestNNDeviceType(NNTestCase):
             self._test_LayerNorm_cuda_half(device)
 
     @onlyOnCPUAndCUDA
-    def test_LayerNorm_numeric(self, device):
-        def layer_norm_ref(X, gamma, beta, normalized_shape, eps):
-            feature_size = np.prod(normalized_shape)
-            X_view = X.view(-1, feature_size)
-            mean = X_view.mean(dim=-1, keepdim=True)
-            var = X_view.var(dim=-1, unbiased=False, keepdim=True)
-            Y = (X_view - mean) / torch.sqrt(var + eps)
-            Y = Y * gamma.view(-1) + beta.view(-1)
-            return Y.view(*X.size())
-
-        normalized_shape = [256, 256, 144]
-        layer_norm = nn.LayerNorm(normalized_shape).float().to(device)
-        X = torch.rand(2, *normalized_shape, dtype=torch.float32,
-                       device=device)
-
-        Y = layer_norm(X)
-        Y_ref = layer_norm_ref(X, layer_norm.weight.data, layer_norm.bias.data,
-                               normalized_shape, layer_norm.eps)
-        self.assertEqual(Y, Y_ref, rtol=0, atol=1e-5)
-
-        if self.device_type == 'cuda':
-            layer_norm.cpu()
-            Y_cpu = layer_norm(X.cpu())
-            self.assertEqual(Y_cpu, Y, rtol=0, atol=1e-5)
-
-    @onlyOnCPUAndCUDA
     def test_GroupNorm_general(self, device):
         self._test_GroupNorm_general(device)
 
