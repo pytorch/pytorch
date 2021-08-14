@@ -29,7 +29,7 @@
   AT_CUDA_CHECK(cudaGetLastError());                                      \
 } while (false)
 
-#ifdef __HIP_PLATFORM_HCC__
+#ifdef USE_ROCM
 #define NO_ROCM(x)
 #else
 #define NO_ROCM(x) x
@@ -63,7 +63,7 @@ struct cuda_type<c10::BFloat16> {
   using type = __nv_bfloat16;
 };
 
-#elif !defined(__HIP_PLATFORM_HCC__)
+#elif !defined(USE_ROCM)
 
 // backport https://github.com/NVIDIA/cub/pull/306 for c10::BFloat16
 

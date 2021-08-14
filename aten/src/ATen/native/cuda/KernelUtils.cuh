@@ -34,6 +34,7 @@ __device__ __forceinline__ void fastSpecializedAtomicAdd(
     const index_t numel,
     scalar_t value) {
 #if (                         \
+    (defined(USE_ROCM))    || \ 
     (CUDA_VERSION < 10000) || \
     (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 700)))
   gpuAtomicAddNoReturn(

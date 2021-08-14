@@ -272,7 +272,7 @@ bool THC_pointwiseApply1(THCState* state,
       getTensorInfo<ScalarTypeA, TensorTypeA, unsigned int>(state, a);
     rearrangeDims(&aInfo);
     aInfo.collapseDims();
-#if CUDA_VERSION < 9000
+#if CUDA_VERSION < 9000 || defined(USE_ROCM)
     if (!aInfo.isContiguous()) {
         grid.x = min(at::cuda::getCurrentDeviceProperties()->multiProcessorCount * THC_APPLY_BLOCKS_PER_SM , grid.x);
     }
@@ -299,7 +299,7 @@ bool THC_pointwiseApply1(THCState* state,
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
 
-#if CUDA_VERSION < 9000
+#if CUDA_VERSION < 9000 || defined(USE_ROCM)
         grid.x = min(at::cuda::getCurrentDeviceProperties()->multiProcessorCount * THC_APPLY_BLOCKS_PER_SM , grid.x);
 #endif
       OffsetInfo<ScalarTypeA, uint64_t, -1>
@@ -439,7 +439,7 @@ bool THC_pointwiseApply2(THCState* state,
     rearrangeDims(&aInfo, &bInfo);
     aInfo.collapseDims();
     bInfo.collapseDims();
-#if CUDA_VERSION < 9000
+#if CUDA_VERSION < 9000 || defined(USE_ROCM)
     if (!(aInfo.isContiguous() && bInfo.isContiguous()))
         grid.x = min(at::cuda::getCurrentDeviceProperties()->multiProcessorCount * THC_APPLY_BLOCKS_PER_SM , grid.x);
 #endif
@@ -473,7 +473,7 @@ bool THC_pointwiseApply2(THCState* state,
           aOffset, bOffset, (uint64_t) totalElements, op);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
-#if CUDA_VERSION < 9000
+#if CUDA_VERSION < 9000 || defined(USE_ROCM)
       grid.x = min(at::cuda::getCurrentDeviceProperties()->multiProcessorCount * THC_APPLY_BLOCKS_PER_SM , grid.x);
 #endif
       OffsetInfo<ScalarTypeA, uint64_t, -1>
@@ -659,7 +659,7 @@ bool THC_pointwiseApply3(THCState* state,
     bInfo.collapseDims();
     cInfo.collapseDims();
 
-#if CUDA_VERSION < 9000
+#if CUDA_VERSION < 9000 || defined(USE_ROCM)
       if (!(aInfo.isContiguous() && bInfo.isContiguous() && cInfo.isContiguous()))
           grid.x = min(at::cuda::getCurrentDeviceProperties()->multiProcessorCount * THC_APPLY_BLOCKS_PER_SM , grid.x);
 #endif
@@ -699,7 +699,7 @@ bool THC_pointwiseApply3(THCState* state,
           aOffset, bOffset, cOffset, (uint64_t) totalElements, op);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
-#if CUDA_VERSION < 9000
+#if CUDA_VERSION < 9000 || defined(USE_ROCM)
       grid.x = min(at::cuda::getCurrentDeviceProperties()->multiProcessorCount * THC_APPLY_BLOCKS_PER_SM , grid.x);
 #endif
 
