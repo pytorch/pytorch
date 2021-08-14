@@ -73,7 +73,7 @@ Tensor & linalg_cross_out(const Tensor & input, const Tensor & other, const int6
 
   // default dimension=-1
   int64_t dim = maybe_wrap_dim(dimension, input.dim());
-  TORCH_CHECK(input.size(dim) == 3, "dimension ", dim, " does not have size 3");
+  TORCH_CHECK(input.size(dim) == 3, "dimension ", dimension, " does not have size 3");
 
   // check if resizing output is required
   // raise a warning while resizing if output has one or more elements
