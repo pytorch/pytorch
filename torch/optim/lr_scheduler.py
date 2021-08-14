@@ -957,11 +957,11 @@ class CosineAnnealingWarmRestarts(_LRScheduler):
             raise ValueError("Expected positive integer T_0, but got {}".format(T_0))
         if T_mult < 1 or not isinstance(T_mult, int):
             raise ValueError("Expected integer T_mult >= 1, but got {}".format(T_mult))
+
         self.T_0 = T_0
         self.T_i = T_0
         self.T_mult = T_mult
         self.eta_min = eta_min
-
         self.T_cur = last_epoch
         self.gamma = gamma
         self.cycle = 1
@@ -974,10 +974,12 @@ class CosineAnnealingWarmRestarts(_LRScheduler):
                           "please use `get_last_lr()`.", UserWarning)
 
         if self.gamma is None:
-            return [self.eta_min + (base_lr - self.eta_min) * (1 + math.cos(math.pi * self.T_cur / self.T_i)) / 2
+            return [self.eta_min + (base_lr - self.eta_min)
+                    * (1 + math.cos(math.pi * self.T_cur / self.T_i)) / 2
                     for base_lr in self.base_lrs]
         else:
-            return [self.eta_min + ((base_lr * (self.gamma**self.cycle)) - self.eta_min) * (1 + math.cos(math.pi * self.T_cur / self.T_i)) / 2
+            return [self.eta_min + ((base_lr * (self.gamma**self.cycle)) - self.eta_min)
+                    * (1 + math.cos(math.pi * self.T_cur / self.T_i)) / 2
                     for base_lr in self.base_lrs]
 
     def step(self, epoch=None):
@@ -1013,18 +1015,15 @@ class CosineAnnealingWarmRestarts(_LRScheduler):
             epoch = self.last_epoch + 1
             self.T_cur = self.T_cur + 1
             if self.T_cur >= self.T_i:
-
                 self.cycle += 1
                 self.T_cur = self.T_cur - self.T_i
                 self.T_i = self.T_i * self.T_mult
         else:
-            skipped = epoch - self.last_epoch
-            if skipped < 0:
+            if epoch - self.last_epoch < 0:
                 raise ValueError("Expected epoch number larger than {}, but got {}".format(self.last_epoch, epoch))
 
-            self.T_cur = self.T_cur + skipped
+            self.T_cur = epoch % self.T_0 # do antiquated calc of how far into this restart
             if self.T_cur >= self.T_i:
-
                 self.cycle += 1
                 self.T_cur = self.T_cur - self.T_i
                 self.T_i = self.T_i * self.T_mult
