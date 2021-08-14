@@ -5803,24 +5803,14 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex(),
            dtypesIfCUDA=all_types_and_complex_and(torch.half),
            sample_inputs_func=sample_inputs_cross,
-           supports_forward_ad=True,
-           skips=(
-               # AssertionError: UserWarning not triggered :
-               # Resized a non-empty tensor but did not warn about it.
-               SkipInfo('TestCommon', 'test_out'),
-           )),
+           supports_forward_ad=True),
     OpInfo('linalg.cross',
            op=torch.linalg.cross,
            dtypes=all_types_and_complex(),
            dtypesIfCUDA=all_types_and_complex_and(torch.half),
            aten_name='linalg_cross',
            sample_inputs_func=sample_inputs_cross,
-           supports_forward_ad=True,
-           skips=(
-               # AssertionError: UserWarning not triggered :
-               # Resized a non-empty tensor but did not warn about it.
-               SkipInfo('TestCommon', 'test_out'),
-           )),
+           supports_forward_ad=True),
     OpInfo('cumsum',
            dtypesIfCPU=all_types_and_complex(),
            dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),

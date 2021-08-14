@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/native/Resize.h>
 
 #include <ATen/native/Cross.h>
 
@@ -42,9 +43,9 @@ Tensor & cross_out(const Tensor & input, const Tensor & other, const c10::option
     TORCH_CHECK(input.size(dim) == 3, "dimension ", dimension.value(), " does not have size 3");
   }
 
-  if (out.sizes() != input.sizes()) {
-    out.resize_as_(input);
-  }
+  // check if resizing output is required
+  // raise a warning while resizing if output has one or more elements
+  at::native::resize_output(out, input.sizes());
 
   cross_stub(device1, out, input, other, dim);
   return out;
@@ -74,9 +75,9 @@ Tensor & linalg_cross_out(const Tensor & input, const Tensor & other, const int6
   int64_t dim = maybe_wrap_dim(dimension, input.dim());
   TORCH_CHECK(input.size(dim) == 3, "dimension ", dim, " does not have size 3");
 
-  if (out.sizes() != input.sizes()) {
-    out.resize_as_(input);
-  }
+  // check if resizing output is required
+  // raise a warning while resizing if output has one or more elements
+  at::native::resize_output(out, input.sizes());
 
   cross_stub(device1, out, input, other, dim);
   return out;
