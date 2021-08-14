@@ -78,7 +78,8 @@ def export(model, args, f, export_params=True, verbose=False, training=None,
            opset_version=None, _retain_param_name=None, do_constant_folding=True,
            example_outputs=None, strip_doc_string=None, dynamic_axes=None,
            keep_initializers_as_inputs=None, custom_opsets=None,
-           enable_onnx_checker=None, use_external_data_format=False):
+           enable_onnx_checker=None, use_external_data_format=False,
+           export_modules_as_functions=None):
     if operator_export_type is None:
         if torch.onnx.PYTORCH_ONNX_CAFFE2_BUNDLE:
             operator_export_type = OperatorExportTypes.ONNX_ATEN_FALLBACK
@@ -101,7 +102,8 @@ def export(model, args, f, export_params=True, verbose=False, training=None,
             operator_export_type=operator_export_type, opset_version=opset_version,
             do_constant_folding=do_constant_folding, example_outputs=example_outputs,
             dynamic_axes=dynamic_axes, keep_initializers_as_inputs=keep_initializers_as_inputs,
-            custom_opsets=custom_opsets, use_external_data_format=use_external_data_format)
+            custom_opsets=custom_opsets, use_external_data_format=use_external_data_format,
+            export_modules_as_functions=export_modules_as_functions)
 
 
 def _is_constant_tensor_list(node):
@@ -650,13 +652,28 @@ def _find_missing_ops_onnx_export(model, args, f, verbose=False, training=Traini
             unsupported_ops.append(node.kind())
     return graph, unsupported_ops
 
+def _setup_trace_module_map(model, export_modules_as_functions=None):
+    if export_modules_as_functions is not None and isinstance(export_modules_as_functions, list):
+        trace_module_map = {_m : torch.typename(_m) for _m in model.modules()}
+        torch.jit._trace._trace_module_map = trace_module_map
+
+        for i in range(len(export_modules_as_functions)):
+            if isinstance(export_modules_as_functions[i], (torch.nn.Module, type)):
+                export_modules_as_functions[i] = torch.typename(export_modules_as_functions[i])
+
+def _reset_trace_module_map():
+    torch.jit._trace._trace_module_map = None
+
 def _export(model, args, f, export_params=True, verbose=False, training=None,
             input_names=None, output_names=None, operator_export_type=None,
             export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None,
             opset_version=None, do_constant_folding=True,
             dynamic_axes=None, keep_initializers_as_inputs=None,
             fixed_batch_size=False, custom_opsets=None, add_node_names=True,
-            use_external_data_format=False, onnx_shape_inference=True):
+            use_external_data_format=False, onnx_shape_inference=True,
+            export_modules_as_functions=None):
+
+    _setup_trace_module_map(model, export_modules_as_functions)
 
     if isinstance(model, torch.nn.DataParallel):
         raise ValueError("torch.nn.DataParallel is not supported by ONNX "
@@ -717,16 +734,22 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
             if custom_opsets is None:
                 custom_opsets = {}
 
+            val_map = {}
+            attr_ref_map = {}
+            if export_modules_as_functions is not None:
+                val_map, attr_ref_map = torch._C._jit_pass_onnx_function_extraction(graph, export_modules_as_functions, list(params_dict.keys()))
             if export_params:
                 proto, export_map = graph._export_onnx(
                     params_dict, opset_version, dynamic_axes, defer_weight_export,
                     operator_export_type, not verbose, val_keep_init_as_ip, custom_opsets,
-                    val_add_node_names, val_use_external_data_format, model_file_location)
+                    val_add_node_names, val_use_external_data_format, model_file_location,
+                    val_map, attr_ref_map)
             else:
                 proto, export_map = graph._export_onnx(
                     {}, opset_version, dynamic_axes, False, operator_export_type,
                     not verbose, val_keep_init_as_ip, custom_opsets, val_add_node_names,
-                    val_use_external_data_format, model_file_location)
+                    val_use_external_data_format, model_file_location,
+                    val_map, attr_ref_map)
 
             if export_type == ExportTypes.PROTOBUF_FILE:
                 assert(len(export_map) == 0)
@@ -772,6 +795,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
     finally:
         assert __IN_ONNX_EXPORT
         __IN_ONNX_EXPORT = False
+        _reset_trace_module_map()
     return torch_out
 
 
