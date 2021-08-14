@@ -43,7 +43,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
     run_tests,
     retry_on_connect_failures,
-    TEST_WITH_ASAN,
+    TEST_WITH_DEV_DBG_ASAN,
     TEST_WITH_TSAN,
     sandcastle_skip,
     sandcastle_skip_if,
@@ -65,7 +65,7 @@ if TEST_WITH_TSAN:
     )
     sys.exit(0)
 
-if TEST_WITH_ASAN:
+if TEST_WITH_DEV_DBG_ASAN:
     print(
         "Skip ASAN as torch + multiprocessing spawn have known issues", file=sys.stderr
     )
