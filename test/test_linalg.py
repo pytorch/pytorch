@@ -5073,7 +5073,7 @@ class TestLinalg(TestCase):
         y = torch.rand(100, 3, 100, dtype=dtype, device=device)
         res1 = torch.linalg.cross(x, y, dim=1)
         res2 = torch.tensor((), dtype=dtype, device=device)
-        torch.cross(x, y, out=res2)
+        torch.linalg.cross(x, y, dim=1, out=res2)
         self.assertEqual(res1, res2)
 
     @onlyCPU
