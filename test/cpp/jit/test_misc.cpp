@@ -2481,7 +2481,7 @@ TEST(RecordDebugHandles, Basic) {
           torch::autograd::profiler::ProfilerState::KINETO, false, false),
       activities);
   {
-    RECORD_USER_SCOPE_WITH_DEBUG_HANDLE_AND_INPUTS("my_function", 42, {});
+    RECORD_EDGE_SCOPE_WITH_DEBUG_HANDLE_AND_INPUTS("my_function", 42, {});
     float x{5.9999}, y{2.1212};
     float z = x / y;
   }
@@ -2533,7 +2533,7 @@ TEST(RecordDebugHandles, ScopedCallbacks) {
       torch::autograd::profiler::ProfilerConfig(
           torch::autograd::profiler::ProfilerState::KINETO, false, false),
       {torch::autograd::profiler::ActivityType::CPU},
-      {at::RecordScope::USER_SCOPE});
+      {at::RecordScope::LITE_INTERPRETER});
   {
     auto a = torch::rand({128, 128});
     auto b = torch::rand({128, 128});
@@ -2550,9 +2550,9 @@ TEST(RecordDebugHandles, ScopedCallbacks) {
       torch::autograd::profiler::ProfilerConfig(
           torch::autograd::profiler::ProfilerState::KINETO, false, false),
       {torch::autograd::profiler::ActivityType::CPU},
-      {at::RecordScope::USER_SCOPE});
+      {at::RecordScope::LITE_INTERPRETER});
   {
-    RECORD_USER_SCOPE_WITH_DEBUG_HANDLE_AND_INPUTS("my_function", 42, {});
+    RECORD_EDGE_SCOPE_WITH_DEBUG_HANDLE_AND_INPUTS("my_function", 42, {});
     auto a = torch::rand({128, 128});
     auto b = torch::rand({128, 128});
     auto c = a + b;
@@ -2568,11 +2568,9 @@ TEST(RecordDebugHandles, ScopedCallbacks) {
   for (const auto& e : kineto_events) {
     if (e.name() == "my_function") {
       ASSERT_EQ(e.debugHandle(), 42);
-    } else if (e.name() == "not_my_function") {
-      ASSERT_EQ(e.debugHandle(), -1);
     }
   }
-  ASSERT_TRUE(profiler_results_ptr->events().size() == 2);
+  ASSERT_TRUE(profiler_results_ptr->events().size() == 1);
 }
 
 TEST(IValueKWargsTest, Basic) {

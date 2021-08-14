@@ -119,6 +119,10 @@ libtorch_profiler_sources = [
     "torch/csrc/autograd/profiler_kineto.cpp",
 ]
 
+libtorch_edge_profiler_sources = libtorch_profiler_sources + [
+    "torch/csrc/jit/mobile/profiler_edge.cpp",
+]
+
 core_trainer_sources = [
     "torch/csrc/autograd/anomaly_mode.cpp",
     "torch/csrc/autograd/autograd.cpp",
