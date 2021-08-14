@@ -571,3 +571,138 @@ class TestPeephole(JitTestCase):
         FileCheck().check("graph").check("):").check_next("aten::Int") \
                    .check_next("ListConstruct").check_next("return").run(foo.graph)
         self.assertEqual(foo(0, 1, 2, 3), [1, 3])
+
+    def test_peephole_dict_getitem_simple(self):
+        @torch.jit.script
+        def foo(a: int, b: int):
+            d = {0: a, 1: b}
+            x = d[1]
+            y = d[0]
+            return x, y
+
+        self.run_pass("peephole", foo.graph)
+        FileCheck().check_not("DictConstruct").check_not("__getitem__").run(foo.graph)
+        self.assertEqual(foo(0, 1), (1, 0))
+
+        @torch.jit.script
+        def foo(a: int, b: int):
+            d = {'0': a, '1': b}
+            x = d['1']
+            y = d['0']
+            return x, y
+
+        self.run_pass("peephole", foo.graph)
+        FileCheck().check_not("DictConstruct").check_not("__getitem__").run(foo.graph)
+        self.assertEqual(foo(0, 1), (1, 0))
+
+        @torch.jit.script
+        def foo(a: int, b: int):
+            d = {0.0: a, 1.0: b}
+            x = d[1.0]
+            y = d[0.0]
+            return x, y
+
+        self.run_pass("peephole", foo.graph)
+        FileCheck().check_not("DictConstruct").check_not("__getitem__").run(foo.graph)
+        self.assertEqual(foo(0, 1), (1, 0))
+
+    def test_peephole_dict_getitem_no_optimization_missing_key(self):
+        @torch.jit.script
+        def foo():
+            d = {0: 1}
+            return d[2]
+
+        self.run_pass("peephole", foo.graph)
+        FileCheck().check("DictConstruct").check("__getitem__").run(foo.graph)
+
+    def test_peephole_dict_getitem_no_optimization_get_input_arg(self):
+        # Here we don't know if the input arg is in the dict, so we can't
+        # make the optimization.
+        @torch.jit.script
+        def foo(a: int):
+            d = {0: 1}
+            return d[a]
+
+        self.run_pass("peephole", foo.graph)
+        FileCheck().check("DictConstruct").check("__getitem__").run(foo.graph)
+        self.assertEqual(foo(0), 1)
+
+    def test_peephole_dict_getitem_no_optimization_dict_modified(self):
+        @torch.jit.script
+        def foo():
+            d = {0: 1}
+            d[0] = 2
+            return d[0]
+
+        self.run_pass("peephole", foo.graph)
+        FileCheck().check("DictConstruct").check("__getitem__").run(foo.graph)
+        self.assertEqual(foo(), 2)
+
+    def test_peephole_dict_getitem_no_optimization_overlapping_keys(self):
+        @torch.jit.script
+        def foo():
+            d = {0: 1, 0: 2}  # noqa: F601
+            return d[0]
+
+        self.run_pass("peephole", foo.graph)
+        FileCheck().check("DictConstruct").check("__getitem__").run(foo.graph)
+
+    def test_peephole_dict_getitem_no_optimization_keys_might_overlap(self):
+        @torch.jit.script
+        def foo(x: int):
+            d = {0: 1, x: 2}
+            return d[x]
+
+        self.run_pass("peephole", foo.graph)
+        FileCheck().check("DictConstruct").check("__getitem__").run(foo.graph)
+
+    def test_peephole_dict_getitem_no_optimization_unsupported_type(self):
+        @torch.jit.script
+        def foo():
+            a = torch.rand((2, 2))
+            d = {a: 1}
+            return d[a]
+
+        self.run_pass("peephole", foo.graph)
+        FileCheck().check("DictConstruct").check("__getitem__").run(foo.graph)
+        self.assertEqual(foo(), 1)
+
+    def test_peephole_dict_len(self):
+        @torch.jit.script
+        def foo():
+            d = {0: 1, 1: 2}
+            return len(d)
+
+        self.run_pass("peephole", foo.graph)
+        FileCheck().check_not("DictConstruct").check_not("len").run(foo.graph)
+        self.assertEqual(foo(), 2)
+
+    def test_peephole_dict_len_no_optimization_overlapping_keys(self):
+        @torch.jit.script
+        def foo():
+            d = {0: 1, 0: 2}  # noqa: F601
+            return len(d)
+
+        self.run_pass("peephole", foo.graph)
+        FileCheck().check("DictConstruct").check("len").run(foo.graph)
+        self.assertEqual(foo(), 1)
+
+    def test_peephole_dict_len_no_optimization_keys_might_overlap(self):
+        @torch.jit.script
+        def foo(x: int):
+            d = {0: 1, x: 2}
+            return len(d)
+
+        self.run_pass("peephole", foo.graph)
+        FileCheck().check("DictConstruct").check("len").run(foo.graph)
+
+    def test_peephole_dict_len_no_optimization_unsupported_type(self):
+        @torch.jit.script
+        def foo():
+            a = torch.rand((2, 2))
+            d = {a: 1}
+            return len(d)
+
+        self.run_pass("peephole", foo.graph)
+        FileCheck().check("DictConstruct").check("len").run(foo.graph)
+        self.assertEqual(foo(), 1)
