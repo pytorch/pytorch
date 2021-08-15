@@ -269,7 +269,7 @@ class TestReductions(TestCase):
             self.assertEqual(result.shape, _reduced_shape(t.shape, dim))
 
     @ops(reduction_ops)
-    def test_noncontiguous_input(self, device, dtype, op: ReductionOpInfo):
+    def test_noncontiguous_tensor(self, device, dtype, op: ReductionOpInfo):
         """Tests reducing along non contiguous dimensions"""
         t = make_tensor((10, 10), device, dtype)
 
