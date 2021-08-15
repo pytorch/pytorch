@@ -78,8 +78,8 @@ set SCCACHE_IDLE_TIMEOUT=0
 sccache --stop-server
 sccache --start-server
 sccache --zero-stats
-set CC=sccache-clang-cl
-set CXX=sccache-clang-cl
+set CC=clang-cl
+set CXX=clang-cl
 set LD=lld-link
 
 set CMAKE_GENERATOR=Ninja
