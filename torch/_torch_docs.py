@@ -11333,61 +11333,32 @@ Example::
         quantization_scheme=torch.per_tensor_affine, scale=1.5, zero_point=3)
 """)
 
-add_docstr(torch.quantized_lstm,
+add_docstr(torch.choose_qparams_optimized,
            r"""
-quantized_lstm(input, hx, params, has_biases, num_layers, dropout, train, bidirectional, batch_first, *,
-    dtype=None, use_dynamic=False) -> (Tensor, Tensor, Tensor)
+choose_qparams_optimized(input, numel, n_bins, ratio, bit_width) -> (Tensor, Tensor)
 
-Applies a multi-layer long short-term memory (LSTM) RNN to an input sequence using dynamic quantized operations
+Helper function to find the best min/max for a tensor to calculate qparams.
+It uses a greedy approach to nudge the min and max and calculate the l2 norm
+and tries to minimize the quant error by doing `torch.norm(x-fake_quant(x,s,z))`
+Returns the optimized xmax and xmin value of the tensor.
 
 Arguments:
-    input (Tensor): tensor of shape :math:`(L, N, H_{in})` when ``batch_first=False`` or
-        :math:`(N, L, H_{in})` when ``batch_first=True`` containing the features of
-        the input sequence.
-    hx (list of tensors): hidden state h_0, c_0
-        h_0: tensor of shape :math:`(D * \text{num\_layers}, N, H_{out})` containing the
-        initial hidden state for each element in the batch.
-        c_0: tensor of shape :math:`(D * \text{num\_layers}, N, H_{cell})` containing the
-        initial cell state for each element in the batch.
-    params (list of tensors): packed weight parameters corresponding to the hidden state.
-        Created using `torch.ops.quantized.linear_prepack` and `torch.ops.quantized.make_quantized_cell_params_dynamic`
-    has_biases (bool):  If False, then the layer does not use bias weights b_ih and b_hh.
-    num_layers (int): Number of recurrent layers
-    dropout (float): If non-zero, introduces a Dropout layer on the outputs of each LSTM layer except the last layer
-    train (bool): True if train mode
-    bidirectional (bool):  If True, becomes a bidirectional LSTM
-    batch_first (bool): If True, then the input and output tensors are provided as `(batch, seq, feature)`
-        instead of `(seq, batch, feature)`.
-
-Keyword args:
-    {dtype}
-    use_dynamic (bool): Use dynamic quantization for the quantized LSTM. Note: This always uses dynamic quantization in the op.
-
+    input (Tensor): float tensor for which we need to compute min/max.
+    numel (int): number of elements in the input tensor.
+    n_bins (int): number of bins used to compute the optimized params.
+    ratio (float): ratio used to compute the increment of min val, based on the
+    formula `n_bins * (1.0 - ratio)`.
+    bit_width (int): bit width of the target quantization range.
 
 Returns:
-    output (Tensor)
-    h_n (Tensor): tensor containing the final hidden state for each element in the batch.
-    c_n (Tensor): tensor containing the final cell state for each element in the batch.
+    x_max (Tensor): optimized max val of the tensor.
+    x_min (Tensor): optimized min val of the tensor.
 
 Example::
 
-    >>> xq = torch.randn(1, 1, 5)
-    >>> h0 = torch.rand(2, 1, 4)
-    >>> c0 = torch.rand(2, 1, 4)
-    >>> w1 = torch.quantize_per_tensor(torch.rand(16, 5), 1.0, 0, torch.qint8)
-    >>> b1 = torch.rand(16)
-    >>> w2 = torch.quantize_per_tensor(torch.rand(16, 4), 1.0, 0, torch.qint8)
-    >>> b2 = torch.rand(16)
-    >>> packed_ih = torch.ops.quantized.linear_prepack(w1, b1)
-    >>> packed_hh = torch.ops.quantized.linear_prepack(w2, b2)
-    >>> cell_params = torch.ops.quantized.make_quantized_cell_params_dynamic(packed_ih, packed_hh, b1, b2, False)
-    >>> torch.quantized_lstm(xq, (h0, c0), ([cell_params, cell_params]), True, 1, 0, False, True,
-    >>>    False, dtype=torch.qint8, use_dynamic=True)
-    (tensor([[[0.6867, 0.8030, 0.7735, 0.6986, 0.7039, 0.7012, 0.7139, 0.4340]]]), tensor([[[0.6867, 0.8030, 0.7735, 0.6986]],
-
-            [[0.7039, 0.7012, 0.7139, 0.4340]]]), tensor([[[1.2029, 1.1808, 1.1215, 1.0423]],
-
-            [[1.2997, 0.9337, 1.0201, 0.5783]]]))
+    >>> x = torch.randn(2, 2)
+    >>> torch.choose_qparams_optimized(x, 4, 200, 0.016, 255)
+    (tensor([1.5765]), tensor([-0.9451]))
 
 """.format(**factory_common_args))
 
