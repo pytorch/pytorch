@@ -1,3 +1,4 @@
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include <ATen/Parallel.h>
@@ -210,5 +211,62 @@ TEST(InterpreterTest, runAsyncBasicTest) {
   interp.runAsync(stack)->wait();
   ASSERT_TRUE(asyncCounter > 0);
 }
+
+TEST(
+    EnableRethrowCaughtExceptionTest,
+    EnableRethrowCaughtExceptionTestRethrowsCaughtException) {
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  parseIR(
+      R"IR(
+graph(%0 : Tensor,
+      %1 : Tensor):
+  %2 : int = prim::Constant[value=2]()
+  %3 : Tensor = aten::add(%0, %1, %2)
+  return (%3)
+  )IR",
+      &*graph,
+      vmap);
+  Code function(graph, "");
+  InterpreterState interp = InterpreterState(function);
+  auto a = at::zeros({2, 2}, at::kFloat);
+  auto b = at::ones({2, 3}, at::kFloat);
+  a.set_requires_grad(true);
+  a = a.to(at::kCPU);
+  std::vector<IValue> stack({a, b});
+
+  bool original_flag_value = FLAGS_torch_jit_enable_rethrow_caught_exception;
+  bool exception_handled = false;
+  try {
+    FLAGS_torch_jit_enable_rethrow_caught_exception = false;
+    interp.run(stack);
+  } catch (std::runtime_error& e) {
+    exception_handled = true;
+    std::string exception_msg = e.what();
+    EXPECT_THAT(
+        exception_msg,
+        ::testing::HasSubstr("%3 : Tensor = aten::add(%0, %1, %2)"));
+    EXPECT_THAT(
+        exception_msg,
+        ::testing::HasSubstr(
+            "The size of tensor a (2) must match the size of tensor b (3) at non-singleton dimension 1"));
+  }
+  EXPECT_TRUE(exception_handled);
+
+  exception_handled = false;
+  try {
+    FLAGS_torch_jit_enable_rethrow_caught_exception = true;
+    interp.run(stack);
+  } catch (c10::Error& e) {
+    exception_handled = true;
+    std::string exception_msg = e.what_without_backtrace();
+    EXPECT_STREQ(
+        exception_msg.c_str(),
+        "The size of tensor a (2) must match the size of tensor b (3) at non-singleton dimension 1");
+  }
+  EXPECT_TRUE(exception_handled);
+  FLAGS_torch_jit_enable_rethrow_caught_exception = original_flag_value;
+}
+
 } // namespace jit
 } // namespace torch
