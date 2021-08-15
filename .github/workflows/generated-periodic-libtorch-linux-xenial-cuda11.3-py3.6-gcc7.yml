@@ -1,19 +1,18 @@
 # @generated DO NOT EDIT MANUALLY
 # Template is at:    .github/templates/linux_ci_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
-name: libtorch-linux-xenial-cuda11.1-cudnn8-py3.6-gcc7
+name: periodic-libtorch-linux-xenial-cuda11.3-py3.6-gcc7
 
 on:
-  # TODO: Enable pull_request builds when we can verify capacity can be met by auto-scalers
-  push:
-    branches:
-      - master
-      - release/*
+  pull_request:
+    types: [unassigned]
+  schedule:
+    - cron: 45 0,4,8,12,16,20 * * *
   workflow_dispatch:
 
 env:
-  BUILD_ENVIRONMENT: libtorch-linux-xenial-cuda11.1-cudnn8-py3.6-gcc7
-  DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7
+  BUILD_ENVIRONMENT: periodic-libtorch-linux-xenial-cuda11.3-py3.6-gcc7
+  DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7
   SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
   TORCH_CUDA_ARCH_LIST: 5.2
   IN_CI: 1
@@ -24,13 +23,20 @@ env:
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
 
 concurrency:
-  group: libtorch-linux-xenial-cuda11.1-cudnn8-py3.6-gcc7-${{ github.event.pull_request.number || github.sha }}
+  group: periodic-libtorch-linux-xenial-cuda11.3-py3.6-gcc7-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 
 jobs:
+  ciflow_should_run:
+    runs-on: ubuntu-18.04
+    if: ${{ (github.event_name != 'pull_request') || (github.event.action !='unassigned') || (github.event.action == 'unassigned' && contains(github.event.pull_request.labels.*.name, 'ciflow/scheduled')) }}
+    steps:
+      - name: noop
+        run: echo running ciflow_should_run
   calculate-docker-image:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.2xlarge
+    needs: [ciflow_should_run]
     env:
       DOCKER_BUILDKIT: 1
     timeout-minutes: 90
@@ -104,10 +110,10 @@ jobs:
 
   build:
     runs-on: linux.2xlarge
-    needs: [calculate-docker-image, ]
+    needs: [calculate-docker-image, ciflow_should_run]
     env:
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
-      JOB_BASE_NAME: libtorch-linux-xenial-cuda11.1-cudnn8-py3.6-gcc7-build
+      JOB_BASE_NAME: periodic-libtorch-linux-xenial-cuda11.3-py3.6-gcc7-build
     steps:
       - name: Log in to ECR
         run: |

@@ -233,10 +233,16 @@ TORCH_IMPL_FUNC(topk_out_cuda)
     inputInfo.sizes[dim] = 1;                                             \
     topKInfo.sizes[dim] = 1;                                              \
     indicesInfo.sizes[dim] = 1;                                           \
+    /* stash the stride of dim because it can be accidentally collapsed */ \
+    auto strideTopK = topKInfo.strides[dim];                              \
+    auto strideIndices = indicesInfo.strides[dim];                        \
     /* Collapse all other dims */                                         \
     int collapseInputDim = inputInfo.collapseDims(dim);                   \
     int collapseTopKDim = topKInfo.collapseDims(dim);                     \
     int collapseIndicesDim = indicesInfo.collapseDims(dim);               \
+    /* restore stride in case it was collapsed */                         \
+    topKInfo.strides[collapseTopKDim] = strideTopK;                       \
+    indicesInfo.strides[collapseIndicesDim] = strideIndices;              \
     int64_t inputSlices = 1;                                              \
     for (int i = 0; i < inputInfo.dims; ++i) {                            \
       inputSlices *= inputInfo.sizes[i];                                  \
