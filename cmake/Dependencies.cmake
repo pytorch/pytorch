@@ -744,6 +744,13 @@ if(USE_FBGEMM)
       "Turn this warning off by USE_FBGEMM=OFF.")
     set(USE_FBGEMM OFF)
   endif()
+  if(MSVC AND "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
+    message(WARNING
+      "FBGEMM does not support Clang-cl. "
+      "Not compiling with FBGEMM. "
+      "Turn this warning off by USE_FBGEMM=OFF.")
+    set(USE_FBGEMM OFF)
+  endif()
   if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
     message(WARNING
       "x64 operating system is required for FBGEMM. "

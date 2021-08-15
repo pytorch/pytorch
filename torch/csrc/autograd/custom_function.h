@@ -78,7 +78,7 @@ using forward_t = decltype(X::forward(nullptr, std::declval<Args>()...));
 /// y[0].sum().backward();
 /// ```
 template <class T>
-struct TORCH_API Function {
+struct Function {
   // We need to use a different template parameter than T here because T will
   // inherit from Function, and when Function<T> is instantiated, T::forward
   // is not declared yet.

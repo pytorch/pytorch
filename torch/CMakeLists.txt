@@ -352,6 +352,11 @@ endif()
 
 install(TARGETS torch_python DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 
+# Install PDB files for MSVC builds
+if (MSVC AND BUILD_SHARED_LIBS)
+  install(FILES $<TARGET_PDB_FILE:torch_python> DESTINATION "${TORCH_INSTALL_LIB_DIR}" OPTIONAL)
+endif()
+
 # Generate torch/version.py from the appropriate CMake cache variables.
 if(${CMAKE_BUILD_TYPE} STREQUAL "Debug")
   set(TORCH_VERSION_DEBUG 1)

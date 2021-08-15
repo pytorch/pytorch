@@ -565,7 +565,7 @@ else()
       set(c_compiler_realpath "")
     endif()
     set(CUDA_HOST_COMPILER "${c_compiler_realpath}" CACHE FILEPATH "Host side compiler used by NVCC")
-  elseif(MSVC AND "${CMAKE_C_COMPILER}" MATCHES "clcache|sccache")
+  elseif(MSVC AND "${CMAKE_C_COMPILER}" MATCHES "clcache|sccache|clang-cl")
     # NVCC does not think it will work if it is passed clcache.exe or sccache.exe
     # as the host compiler, which means that builds with CC=cl.exe won't work.
     # Best to just feed it whatever the actual cl.exe is as the host compiler.
