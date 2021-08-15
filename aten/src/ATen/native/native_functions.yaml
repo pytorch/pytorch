@@ -10402,16 +10402,13 @@
   python_module: linalg
   variants: function
 
-# It's not possible to specify both atol and rtol as optional with floats that would work in C++
-# because calling linalg_pinv(self) would be ambiguous, it clashes with the tensor overload.
-# Having one of the float as optional would conflict with the old rcond overload
-# Therefore for floats both values need to be specified and there is no default.
-
-- func: linalg_pinv.atol_rtol_float(Tensor self, *, float atol, float rtol, bool hermitian=False) -> Tensor
+- func: linalg_pinv.atol_rtol_float(Tensor self, *, float? atol=None, float? rtol=None, bool hermitian=False) -> Tensor
+  cpp_no_default_args: ['atol', 'rtol']
   python_module: linalg
   variants: function
 
-- func: linalg_pinv.atol_rtol_float_out(Tensor self, *, float atol, float rtol, bool hermitian=False, Tensor(a!) out) -> Tensor(a!)
+- func: linalg_pinv.atol_rtol_float_out(Tensor self, *, float? atol=None, float? rtol=None, bool hermitian=False, Tensor(a!) out) -> Tensor(a!)
+  cpp_no_default_args: ['atol', 'rtol']
   python_module: linalg
   variants: function
 
@@ -10490,11 +10487,13 @@
   python_module: linalg
   variants: function
 
-- func: linalg_matrix_rank.atol_rtol_float(Tensor self, *, float atol, float rtol, bool hermitian=False) -> Tensor
+- func: linalg_matrix_rank.atol_rtol_float(Tensor self, *, float? atol=None, float? rtol=None, bool hermitian=False) -> Tensor
+  cpp_no_default_args: ['atol', 'rtol']
   python_module: linalg
   variants: function
 
-- func: linalg_matrix_rank.atol_rtol_float_out(Tensor self, *, float atol, float rtol, bool hermitian=False, Tensor(a!) out) -> Tensor(a!)
+- func: linalg_matrix_rank.atol_rtol_float_out(Tensor self, *, float? atol=None, float? rtol=None, bool hermitian=False, Tensor(a!) out) -> Tensor(a!)
+  cpp_no_default_args: ['atol', 'rtol']
   python_module: linalg
   variants: function
 

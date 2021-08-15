@@ -225,8 +225,19 @@ std::tuple<Tensor, Tensor> get_atol_rtol(
 
 std::tuple<Tensor, Tensor> get_atol_rtol(
     const Tensor& input,
-    double atol,
-    double rtol) {
+    optional<double> atol_opt,
+    optional<double> rtol_opt) {
+  double atol = atol_opt.has_value() ? atol_opt.value() : 0.0;
+  double rtol;
+  if (rtol_opt.has_value()) {
+    rtol = rtol_opt.value();
+  } else {
+    ScalarType real_dtype = toValueType(input.scalar_type());
+    auto default_rtol = _get_epsilon(real_dtype) * std::max(input.size(-1), input.size(-2));
+    rtol = (atol_opt.has_value() && atol_opt.value() > 0.0)
+           ? 0.0
+           : default_rtol;
+  }
   auto options = input.options().dtype(ScalarType::Double);
   auto atol_tensor = at::full({}, atol, options);
   auto rtol_tensor = at::full({}, rtol, options);
@@ -284,7 +295,7 @@ Tensor linalg_pinv(
   }
 }
 
-Tensor linalg_pinv(const Tensor& input, double atol, double rtol, bool hermitian) {
+Tensor linalg_pinv(const Tensor& input, optional<double> atol, optional<double> rtol, bool hermitian) {
   Tensor atol_tensor, rtol_tensor;
   std::tie(atol_tensor, rtol_tensor) = get_atol_rtol(input, atol, rtol);
   return at::linalg_pinv(input, atol_tensor, rtol_tensor, hermitian);
@@ -320,8 +331,8 @@ Tensor& linalg_pinv_out(
 
 Tensor& linalg_pinv_out(
     const Tensor& input,
-    double atol,
-    double rtol,
+    optional<double> atol,
+    optional<double> rtol,
     bool hermitian,
     Tensor& result) {
   checkSameDevice("linalg_pinv", result, input);
@@ -510,7 +521,7 @@ Tensor& linalg_matrix_rank_out(
   return result;
 }
 
-Tensor& linalg_matrix_rank_out(const Tensor& input, double atol, double rtol, bool hermitian, Tensor& result) {
+Tensor& linalg_matrix_rank_out(const Tensor& input, optional<double> atol, optional<double> rtol, bool hermitian, Tensor& result) {
   Tensor atol_tensor, rtol_tensor;
   std::tie(atol_tensor, rtol_tensor) = get_atol_rtol(input, atol, rtol);
   result = linalg_matrix_rank_out(input, atol_tensor, rtol_tensor, hermitian, result);
@@ -523,7 +534,7 @@ Tensor linalg_matrix_rank(const Tensor& input, const optional<Tensor>& atol, con
   return result;
 }
 
-Tensor linalg_matrix_rank(const Tensor& input, double atol, double rtol, bool hermitian) {
+Tensor linalg_matrix_rank(const Tensor& input, optional<double> atol, optional<double> rtol, bool hermitian) {
   Tensor result = at::empty({0}, input.options().dtype(ScalarType::Long));
   result = at::linalg_matrix_rank_outf(input, atol, rtol, hermitian, result);
   return result;
@@ -571,7 +582,7 @@ Tensor matrix_rank(const Tensor& self, bool symmetric) {
     "and will be removed in a future PyTorch release. The parameter 'symmetric' was ",
     "renamed in torch.linalg.matrix_rank to 'hermitian'."
   );
-  return at::linalg_matrix_rank(self, c10::nullopt, c10::nullopt, symmetric);
+  return at::linalg_matrix_rank(self, 0.0, c10::nullopt, symmetric);
 }
 
 // multi_dot helper functions

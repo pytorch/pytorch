@@ -3347,8 +3347,7 @@ class TestLinalg(TestCase):
                 rconds.append(torch.rand(A.shape[-3], device=device))
             for rcond in rconds:
                 actual = torch.linalg.pinv(A, rcond=rcond, hermitian=hermitian)
-                atol = 0.0 if isinstance(rcond, float) else None
-                torch_rtol = torch.linalg.pinv(A, atol=atol, rtol=rcond, hermitian=hermitian)
+                torch_rtol = torch.linalg.pinv(A, rtol=rcond, hermitian=hermitian)
                 self.assertEqual(actual, torch_rtol)
                 numpy_rcond = rcond if isinstance(rcond, float) else rcond.cpu().numpy()
                 expected = np.linalg.pinv(A.cpu().numpy(), rcond=numpy_rcond, hermitian=hermitian)
@@ -4115,8 +4114,7 @@ class TestLinalg(TestCase):
             if a.ndim > 2:
                 tolerances.append(make_tensor(a.shape[-3], dtype=torch.float32, device=device, low=0))
             for tol in tolerances:
-                rtol = 0.0 if isinstance(tol, float) else None
-                actual = torch.linalg.matrix_rank(a, atol=tol, rtol=rtol)
+                actual = torch.linalg.matrix_rank(a, atol=tol)
                 actual_tol = torch.linalg.matrix_rank(a, tol=tol)
                 self.assertEqual(actual, actual_tol)
                 numpy_tol = tol if isinstance(tol, float) else tol.cpu().numpy()
@@ -4141,13 +4139,11 @@ class TestLinalg(TestCase):
         # test float and tensor variants
         for tol_value in [0.5, torch.tensor(0.5, device=device)]:
             # using rtol (relative tolerance) takes into account the largest singular value (0.9 in this case)
-            atol = 0.0 if isinstance(tol_value, float) else None  # float overload doesn't support default values
-            result = torch.linalg.matrix_rank(a, atol=atol, rtol=tol_value)
+            result = torch.linalg.matrix_rank(a, rtol=tol_value)
             self.assertEqual(result, 5)  # there are 5 singular values above 0.9*0.5=0.45
 
             # atol is used directly to compare with singular values
-            rtol = 0.0 if isinstance(tol_value, float) else None  # float overload doesn't support default values
-            result = torch.linalg.matrix_rank(a, atol=tol_value, rtol=rtol)
+            result = torch.linalg.matrix_rank(a, atol=tol_value)
             self.assertEqual(result, 4)  # there are 4 singular values above 0.5
 
             # when both are specified the maximum tolerance is used
