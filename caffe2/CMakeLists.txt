@@ -967,10 +967,10 @@ if(NOT MSVC AND USE_XNNPACK)
   TARGET_LINK_LIBRARIES(torch_cpu PRIVATE fxdiv)
 endif()
 
-if (MSVC AND "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
+if(MSVC AND "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
   execute_process(COMMAND ${CMAKE_CXX_COMPILER} --version OUTPUT_VARIABLE clang_version_output)
-  string (REGEX REPLACE ".*clang version ([0-9]+\\.[0-9]+\\.[0-9]+).*" "\\1" CLANG_VERSION_STRING ${clang_version_output})
-  string (REGEX REPLACE ".*InstalledDir: ([^\n]+).*" "\\1" CLANG_BINDIR ${clang_version_output})
+  string(REGEX REPLACE ".*clang version ([0-9]+\\.[0-9]+\\.[0-9]+).*" "\\1" CLANG_VERSION_STRING ${clang_version_output})
+  string(REGEX REPLACE ".*InstalledDir: ([^\n]+).*" "\\1" CLANG_BINDIR ${clang_version_output})
 
   get_filename_component(CLANG_ROOT ${CLANG_BINDIR} DIRECTORY)
   set(CLANG_RT_BUILTIN_LIB "${CLANG_ROOT}/lib/clang/${CMAKE_CXX_COMPILER_VERSION}/lib/windows/clang_rt.builtins-x86_64.lib")
