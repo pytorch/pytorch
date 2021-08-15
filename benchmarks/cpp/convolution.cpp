@@ -201,6 +201,7 @@ static void BM_conv2d_native(
           state.iterations(),
       benchmark::Counter::kIsRate);
   state.counters["GB/s"] = benchmark::Counter(
+      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       state.iterations() * (input.nbytes() + weight.nbytes() + output.nbytes()),
       benchmark::Counter::kIsRate);
 }
@@ -262,6 +263,7 @@ static void BM_conv2d_mkldnn(
           state.iterations(),
       benchmark::Counter::kIsRate);
   state.counters["GB/s"] = benchmark::Counter(
+      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       state.iterations() * (input.nbytes() + weight.nbytes() + output.nbytes()),
       benchmark::Counter::kIsRate);
 }

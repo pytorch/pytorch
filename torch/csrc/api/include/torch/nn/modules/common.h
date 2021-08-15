@@ -1,5 +1,7 @@
 #pragma once
 
+#include <c10/util/irange.h>
+
 /// This macro enables a module with default arguments in its forward method
 /// to be used in a Sequential module.
 ///
@@ -83,7 +85,7 @@
     TORCH_INTERNAL_ASSERT(arguments.size() >= _forward_num_required_args() && arguments.size() <= num_all_args); \
     std::vector<torch::nn::AnyValue> ret; \
     ret.reserve(num_all_args); \
-    for (size_t i = 0; i < arguments.size(); i++) { \
+    for (const auto i : c10::irange(arguments.size())) { \
       ret.emplace_back(std::move(arguments[i])); \
     } \
     for (auto& arg_info : args_info) { \

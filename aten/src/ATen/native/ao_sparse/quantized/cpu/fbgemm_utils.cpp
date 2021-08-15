@@ -22,6 +22,7 @@ torch::class_<LinearPackedParamsBase> register_linear_params() {
                       LinearPackedParamsBase> { // __setstate__
                 at::Tensor weight;
                 c10::optional<at::Tensor> bias;
+                // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
                 int64_t out_features_block_size, in_features_block_size;
                 weight = std::move(std::get<0>(state));
                 bias = std::move(std::get<1>(state));

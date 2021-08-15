@@ -12,7 +12,6 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 // Uses a compressed index representation for faster comparisons
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 typedef c10::SparseBitVector<256> MemoryLocations;
 namespace torch {
 namespace jit {
@@ -30,8 +29,7 @@ class MemoryDAG;
  */
 class TORCH_API MemoryDAGBuilder {
  public:
-  // NOLINTNEXTLINE(modernize-use-equals-default)
-  MemoryDAGBuilder() {}
+  MemoryDAGBuilder() = default;
   MemoryDAGBuilder(const MemoryDAGBuilder&) = delete;
   MemoryDAGBuilder& operator=(const MemoryDAGBuilder&) = delete;
 

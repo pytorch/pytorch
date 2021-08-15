@@ -167,6 +167,7 @@ bool SoftmaxWithLossOp<float, CPUContext>::RunOnDevice() {
   auto& T = Input(1); // Labels / targets
 
   const auto canonical_axis = X.canonical_axis_index(axis_);
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t N, D;
   N = X.size_to_dim(canonical_axis); // batch size
   D = X.size_from_dim(canonical_axis);
@@ -217,11 +218,13 @@ bool SoftmaxWithLossOp<float, CPUContext>::RunOnDevice() {
           label_data[i],
           " vs ",
           D);
+      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       float weight = weights ? weights[i] : 1.0;
       float l = -Pdata[i * D + label_data[i]] * weight;
       loss_sum += l;
       weight_sum += weight;
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     math::Exp(N * D, Pdata, Pdata, &context_);
   } else {
     const float* label_data = T.data<float>();
@@ -229,6 +232,7 @@ bool SoftmaxWithLossOp<float, CPUContext>::RunOnDevice() {
     for (int i = 0; i < N; ++i) {
       float l = 0.0;
       float total_prob = 0.0;
+      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       float weight = weights ? weights[i] : 1.0;
       for (int j = 0; j < D; ++j) {
         CAFFE_ENFORCE(
@@ -277,10 +281,12 @@ bool SoftmaxWithLossGradientOp<float, CPUContext>::RunOnDevice() {
   const float* weights = (InputSize() > 4 ? Input(2).data<float>() : nullptr);
 
   const auto canonical_axis = X.canonical_axis_index(axis_);
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int N, D;
   N = X.size_to_dim(canonical_axis); // batch size
   D = X.size_from_dim(canonical_axis);
   auto* dX = Output(0, X.sizes(), at::dtype<float>());
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   float avg_denominator;
 
   if (label_prob_mode_) {
@@ -313,6 +319,7 @@ bool SoftmaxWithLossGradientOp<float, CPUContext>::RunOnDevice() {
       for (int i = 0; i < N; ++i) {
         int idx = i * D + label_data[i];
         float weight = weights[i];
+        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         dX_data[idx] = Pdata[idx] - 1.0;
         for (int d = 0; d < D; d++) {
           int k = i * D + d;
@@ -326,6 +333,7 @@ bool SoftmaxWithLossGradientOp<float, CPUContext>::RunOnDevice() {
         int idx = i * D + label_data[i];
         dX_data[idx] = Pdata[idx] - 1.0f;
       }
+      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       total_weight = N;
     }
   } else {
@@ -347,6 +355,7 @@ bool SoftmaxWithLossGradientOp<float, CPUContext>::RunOnDevice() {
           dX_data[idx] = Pdata[idx] - label_data[idx];
         }
       }
+      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       total_weight = N;
     }
   }
@@ -354,6 +363,7 @@ bool SoftmaxWithLossGradientOp<float, CPUContext>::RunOnDevice() {
   // Scale by d_avg_loss / N
   if (total_weight > 0) {
     if (average_by_batch_size_) {
+      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       avg_denominator = N;
     } else {
       avg_denominator = total_weight;

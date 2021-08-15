@@ -1,6 +1,7 @@
 import io
 import os
 import sys
+import typing
 
 import torch
 import torch.nn as nn
@@ -211,23 +212,6 @@ class TestONNXExport(JitTestCase):
             mte, (torch.zeros(1, 2, 3, dtype=torch.float),), None, verbose=False,
             example_outputs=outputs)
 
-    def test_onnx_raw_export_script_truediv(self):
-        class ModuleToExport(torch.jit.ScriptModule):
-            def __init__(self):
-                super(ModuleToExport, self).__init__()
-
-            @torch.jit.script_method
-            def forward(self, x):
-                z = x.size(0) / 2
-                return x + z
-
-        mte = ModuleToExport()
-        outputs = mte(torch.zeros(1, 2, 3))
-        torch.onnx.export_to_pretty_string(
-            mte, (torch.zeros(1, 2, 3),), None, verbose=False,
-            add_node_names=False, do_constant_folding=False,
-            example_outputs=outputs, export_raw_ir=True)
-
     def test_onnx_export_script_non_alpha_add_sub(self):
         class ModuleToExport(torch.jit.ScriptModule):
             def __init__(self):
@@ -381,3 +365,19 @@ class TestONNXExport(JitTestCase):
         f = io.BytesIO()
         torch.onnx.export_to_pretty_string(
             DynamicSliceExportMod(), (input,), f, example_outputs=example_outs, opset_version=10)
+
+    def test_export_dict(self):
+        class DictModule(torch.nn.Module):
+            def forward(self, x_in: torch.Tensor) -> typing.Dict[str, torch.Tensor]:
+                return {"test_key_out": x_in}
+
+        x_in = torch.tensor(1)
+        mod = DictModule()
+        mod.train(False)
+
+        f = io.BytesIO()
+        torch.onnx.export_to_pretty_string(mod, (x_in,), f)
+
+        with self.assertRaisesRegex(RuntimeError, r"DictConstruct.+is not supported."):
+            torch.onnx.export_to_pretty_string(
+                torch.jit.script(mod), (x_in,), f, example_outputs=(mod(x_in),))

@@ -19,6 +19,7 @@ class EigenConvOp final : public ConvPoolOpBase<CPUContext> {
       : ConvPoolOpBase<CPUContext>(operator_def, ws) {
     OPERATOR_NEEDS_FEATURE(group_ == 1, "Group convolution not supported yet.");
   }
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~EigenConvOp() override {}
 
   bool RunOnDeviceWithOrderNCHW() override;
@@ -49,6 +50,7 @@ bool EigenConvOp<T>::RunOnDeviceWithOrderNCHW() {
 
   Eigen::Tensor<T, 4, Eigen::RowMajor> filter_tensor =
       Eigen::TensorMap<Eigen::Tensor<T, 4, Eigen::RowMajor>>(
+          // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
           const_cast<T*>(filter.template data<T>()),
           M,
           C,
@@ -57,6 +59,7 @@ bool EigenConvOp<T>::RunOnDeviceWithOrderNCHW() {
           .shuffle(kernel_shuffles);
   Eigen::Tensor<T, 4, Eigen::RowMajor> X_tensor =
       Eigen::TensorMap<Eigen::Tensor<T, 4, Eigen::RowMajor>>(
+          // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
           const_cast<T*>(X.template data<T>()), N, C, H, W)
           .shuffle(input_shuffles);
 
@@ -148,10 +151,12 @@ bool EigenConvOp<T>::RunOnDeviceWithOrderNHWC() {
   // TODO(jiayq): right now we const cast away the const pointer, but we will
   // need to figure out how to properly do a const tensormap.
   Eigen::TensorMap<Eigen::Tensor<T, 4, Eigen::RowMajor>> X_tensor(
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
       const_cast<T*>(X.template data<T>()), N, H, W, C);
   Eigen::TensorMap<Eigen::Tensor<T, 4, Eigen::RowMajor>> Y_tensor(
       Y->template mutable_data<T>(), N, Y->dim32(1), Y->dim32(2), M);
   Eigen::TensorMap<Eigen::Tensor<T, 4, Eigen::RowMajor>> filter_tensor(
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
       const_cast<T*>(temp_filter.data()), kernel_h(), kernel_w(), C, M);
 
   // For Eigen, the definition of row and col actually correspond to width
@@ -200,6 +205,7 @@ bool EigenConvOp<T>::RunOnDeviceWithOrderNHWC() {
     CAFFE_ENFORCE(1 == bias.dim());
     CAFFE_ENFORCE(bias.dim32(0) == M);
     Eigen::TensorMap<Eigen::Tensor<T, 4, Eigen::RowMajor>> bias_tensor(
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
         const_cast<T*>(bias.template data<T>()), 1, 1, 1, M);
     // It seems that the bias broadcast is still slower so let's do the
     // following for now.

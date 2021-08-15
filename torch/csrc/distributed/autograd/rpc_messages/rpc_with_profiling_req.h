@@ -15,7 +15,7 @@ class TORCH_API RpcWithProfilingReq : public rpc::RpcCommandBase {
   // For sending RPCs, invoked when client is creating this RPC command.
   RpcWithProfilingReq(
       rpc::MessageType messageType,
-      rpc::Message&& wrappedMessage,
+      c10::intrusive_ptr<rpc::Message> wrappedMessage,
       torch::autograd::profiler::ProfilerConfig&& profilerConfig,
       rpc::ProfilingId profilingKeyId);
 
@@ -30,7 +30,7 @@ class TORCH_API RpcWithProfilingReq : public rpc::RpcCommandBase {
       rpc::ProfilingId profilingKeyId);
 
   // Convert this RPC Command to a Message that can be sent over the wire.
-  rpc::Message toMessageImpl() && override;
+  c10::intrusive_ptr<rpc::Message> toMessageImpl() && override;
   static std::unique_ptr<RpcWithProfilingReq> fromMessage(
       const rpc::Message& message);
 
@@ -50,7 +50,7 @@ class TORCH_API RpcWithProfilingReq : public rpc::RpcCommandBase {
   // message type
   const rpc::MessageType messageType_;
   // wrapped message
-  rpc::Message wrappedMessage_;
+  c10::intrusive_ptr<rpc::Message> wrappedMessage_;
   std::unique_ptr<RpcCommandBase> wrappedRpc_;
   rpc::MessageType wrappedMessageType_;
   std::vector<torch::Tensor> tensors_;

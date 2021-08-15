@@ -731,6 +731,7 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenFallbackKernelWithou
 }
 
 TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithOptionalInputs_withoutOutput_whenRegistered_thenCanBeCalled) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   bool called;
   c10::optional<Tensor> called_arg2 = c10::nullopt;
   c10::optional<int64_t> called_arg3 = c10::nullopt;
@@ -770,6 +771,7 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithOptionalIn
 }
 
 TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithOptionalInputs_withOutput_whenRegistered_thenCanBeCalled) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   bool called;
   c10::optional<Tensor> called_arg2 = c10::nullopt;
   c10::optional<int64_t> called_arg3 = c10::nullopt;
@@ -812,6 +814,7 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithOptionalIn
 }
 
 TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithOptionalInputs_withMultipleOutputs_whenRegistered_thenCanBeCalled) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   bool called;
   c10::optional<Tensor> called_arg2 = c10::nullopt;
   c10::optional<int64_t> called_arg3 = c10::nullopt;

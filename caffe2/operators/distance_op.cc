@@ -18,11 +18,13 @@ bool SquaredL2DistanceOp<float, CPUContext>::RunOnDevice() {
   }
   int N = X.dim() > 0 ? X.dim32(0) : 1;
   auto* distance = Output(0, {N}, at::dtype<float>());
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   int D = N > 0 ? X.numel() / N : 0;
   float* distance_data = distance->template mutable_data<float>();
   const float* X_data = X.data<float>();
   const float* Y_data = Y.data<float>();
   for (int i = 0; i < N; ++i) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     float Xscale, Yscale, cross;
     math::Dot<float, CPUContext>(
         D, X_data + i * D, X_data + i * D, &Xscale, &context_);
@@ -30,6 +32,7 @@ bool SquaredL2DistanceOp<float, CPUContext>::RunOnDevice() {
         D, Y_data + i * D, Y_data + i * D, &Yscale, &context_);
     math::Dot<float, CPUContext>(
         D, X_data + i * D, Y_data + i * D, &cross, &context_);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     distance_data[i] = (Xscale + Yscale) * 0.5 - cross;
   }
   return true;
@@ -46,6 +49,7 @@ bool L1DistanceOp<float, CPUContext>::RunOnDevice() {
   }
   int N = X.dim() > 0 ? X.dim32(0) : 1;
   auto* distance = Output(0, {N}, at::dtype<float>());
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   int D = N > 0 ? X.numel() / N : 0;
 
   const float* X_data = X.data<float>();
@@ -72,6 +76,7 @@ bool L1DistanceGradientOp<float, CPUContext>::RunOnDevice() {
     CAFFE_ENFORCE_EQ(X.dim32(i), Y.dim32(i));
   }
   int N = X.dim() > 0 ? X.dim32(0) : 1;
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   int D = N > 0 ? X.numel() / N : 0;
   CAFFE_ENFORCE(X.dim() == Y.dim());
   for (int i = 0; i < X.dim(); ++i) {
@@ -122,6 +127,7 @@ bool CosineSimilarityOp<float, CPUContext>::RunOnDevice() {
   float* result_data = result->template mutable_data<float>();
   const float* X_data = X.data<float>();
   const float* Y_data = Y.data<float>();
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   float X2, Y2;
   const float kEps = 1e-12f;
   for (int i = 0; i < N; ++i) { // TODO: multithreading
@@ -159,6 +165,7 @@ bool CosineSimilarityGradientOp<float, CPUContext>::RunOnDevice() {
   const auto* dCos_data = dCos.template data<float>();
   auto* dX_data = dX->template mutable_data<float>();
   auto* dY_data = dY->template mutable_data<float>();
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   float XN, YN, XY;
   const float kEps = 1e-12f;
   for (int i = 0; i < N; ++i) { // TODO: multithreading
@@ -210,9 +217,11 @@ bool DotProductOp<float, CPUContext>::RunOnDevice() {
   for (int i = 0; i < X.dim(); ++i) {
     CAFFE_ENFORCE_EQ(X.dim32(i), Y.dim32(i), "dimension at ", i);
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int N, D;
   if (X.numel() > 0) {
     N = X.dim() > 0 ? X.dim32(0) : 1;
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     D = X.numel() / N;
   } else {
     N = 0;
@@ -259,9 +268,11 @@ bool DotProductGradientOp<float, CPUContext>::RunOnDevice() {
   auto& Y = Input(Y_IN);
   auto& dDot = Input(DER_DOT_IN);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int N, D;
   if (X.numel() > 0) {
     N = X.dim() > 0 ? X.dim32(0) : 1;
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     D = X.numel() / N;
   } else {
     N = 0;
@@ -299,10 +310,13 @@ bool DotProductWithPaddingOp<float, CPUContext>::RunOnDevice() {
   CAFFE_ENFORCE_EQ(X.dim(), Y.dim());
   CAFFE_ENFORCE_EQ(X.dim32(0), Y.dim32(0));
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int N, D, DX, DY, restD;
   if (X.numel() > 0) {
     N = X.dim() > 0 ? X.dim32(0) : 1;
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     DX = X.numel() / N;
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     DY = Y.numel() / N;
   } else {
     N = 0;
@@ -320,7 +334,9 @@ bool DotProductWithPaddingOp<float, CPUContext>::RunOnDevice() {
     auto offsetX = i * DX, offsetY = i * DY;
     if (replicate_) {
       // L_ for longer vector and S_ for shorter vector
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       const float *L_data, *S_data;
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int DL, DS;
       if (DX > DY) {
         L_data = X_data + offsetX;
@@ -347,6 +363,7 @@ bool DotProductWithPaddingOp<float, CPUContext>::RunOnDevice() {
     }
 
     if (!replicate_ && DX != DY) {
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       const float* rest_data;
       float rest_sum = 0;
       if (DX > DY) {

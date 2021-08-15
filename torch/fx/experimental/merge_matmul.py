@@ -3,7 +3,7 @@ import torch
 from torch.fx.graph import Graph
 from torch.fx.graph_module import GraphModule
 from torch.fx.node import Node
-from torch.fx.symbolic_trace import symbolic_trace
+from torch.fx._symbolic_trace import symbolic_trace
 
 import itertools
 import operator

@@ -47,4 +47,4 @@ void CopyBytes(
   ptr(nbytes, src, src_device, dst, dst_device);
 }
 
-}
+} // namespace c10

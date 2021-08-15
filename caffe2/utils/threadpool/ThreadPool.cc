@@ -59,6 +59,7 @@ size_t getDefaultNumThreads() {
         /* 2+4 big.LITTLE */
         numThreads = 2;
         break;
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,bugprone-branch-clone)
       case 8:
         /* 4+4 big.LITTLE */
         numThreads = 4;
@@ -100,6 +101,7 @@ ThreadPool::ThreadPool(int numThreads)
       numThreads_(numThreads),
       workersPool_(std::make_shared<WorkersPool>()) {}
 
+// NOLINTNEXTLINE(modernize-use-equals-default)
 ThreadPool::~ThreadPool() {}
 
 int ThreadPool::getNumThreads() const {
@@ -141,7 +143,9 @@ void ThreadPool::run(const std::function<void(int, size_t)>& fn, size_t range) {
   }
 
   struct FnTask : public Task {
+    // NOLINTNEXTLINE(modernize-use-equals-default,cppcoreguidelines-pro-type-member-init)
     FnTask(){};
+    // NOLINTNEXTLINE(modernize-use-equals-default)
     ~FnTask() override{};
     const std::function<void(int, size_t)>* fn_;
     int idx_;
@@ -159,6 +163,7 @@ void ThreadPool::run(const std::function<void(int, size_t)>& fn, size_t range) {
   tasks_.resize(numThreads);
   for (size_t i = 0; i < numThreads; ++i) {
     if (!tasks_[i]) {
+      // NOLINTNEXTLINE(modernize-make-shared)
       tasks_[i].reset(new FnTask());
     }
     auto* task = (FnTask*)tasks_[i].get();

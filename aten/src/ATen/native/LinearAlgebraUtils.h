@@ -328,7 +328,7 @@ static inline Tensor _move_to_end(const Tensor& self, IntArrayRef axes) {
 }
 
 // parse the "mode" param in linalg_qr: return a tuple of bools (compute_q, reduced)
-static inline std::tuple<bool, bool> _parse_qr_mode(std::string mode) {
+static inline std::tuple<bool, bool> _parse_qr_mode(c10::string_view mode) {
   bool compute_q;
   bool reduced;
   if (mode == "reduced") {
@@ -385,27 +385,47 @@ static inline std::tuple<Tensor, Tensor, Tensor> _create_U_S_VT(const Tensor& in
   auto sizes = input.sizes().vec();
   int64_t m = input.size(-2), n = input.size(-1);
 
-  sizes[input.dim() - 1] = (compute_uv && some) ? std::min(m, n) : m;
-  auto strides = at::detail::defaultStrides(sizes);
+  sizes[input.dim() - 1] = some ? std::min(m, n) : m;
+  auto u_strides = at::detail::defaultStrides(sizes);
   // U should be a column-major or a batch of column-major matrices
   // ... x m x ucol will have strides: ...., ucol, 1
   // We require: ...., 1, m
-  strides[input.dim() - 1] = m;
-  strides[input.dim() - 2] = 1;
+  u_strides[input.dim() - 1] = m;
+  u_strides[input.dim() - 2] = 1;
 
-  Tensor U_empty = at::empty_strided(sizes, strides, input.options().device(usvt_device));
-  U_empty.zero_();
+  // cuSOLVER's gesvdjBatched fails with illegal memory access and
+  // cuSOLVER's gesvdj fails with CUSOLVER_STATUS_EXECUTION_FAILED
+  // if matrices for U and VT are not allocated
+  // even though the result of computation is not used we need to allocate this memory
+
+  Tensor U_empty = (compute_uv || svd_use_cusolver)
+      ? at::empty_strided(sizes, u_strides, input.options().device(usvt_device))
+      : at::empty({0}, input.options().device(usvt_device));
 
   // VT should be a column-major or a batch of column-major matrices
-  sizes[input.dim() - 2] = n;
+  sizes[input.dim() - 2] = some ? std::min(m, n) : n;
   sizes[input.dim() - 1] = n;
-  // VT should be a column-major or a batch of column-major matrices
-  Tensor VT_empty = at::zeros(sizes, input.options().device(usvt_device));
-  VT_empty.transpose_(-2, -1);
+  auto vt_strides = at::detail::defaultStrides(sizes);
+  if (!svd_use_cusolver) {
+    vt_strides[input.dim() - 1] = sizes[input.dim() - 2];
+    vt_strides[input.dim() - 2] = 1;
+  }
+  Tensor VT_empty = (compute_uv || svd_use_cusolver)
+      ? at::empty_strided(sizes, vt_strides, input.options().device(usvt_device))
+      : at::empty({0}, input.options().device(usvt_device));
+
+  // U and VT might not get filled in this case
+  if (!some && compute_uv && input.numel() == 0) {
+    U_empty.zero_();
+    VT_empty.zero_();
+    // make U and VT an identity matrix, because they should be orthogonal
+    U_empty.diagonal(0, -2, -1).fill_(1);
+    VT_empty.diagonal(0, -2, -1).fill_(1);
+  }
 
   sizes.pop_back();
   sizes[input.dim() - 2] = std::min(m, n);
-  ScalarType dtype = toValueType(typeMetaToScalarType(input.dtype()));
+  ScalarType dtype = toValueType(input.scalar_type());
   Tensor S_empty = at::empty(sizes, input.options().dtype(dtype).device(usvt_device));
 
   return std::tuple<Tensor, Tensor, Tensor>(U_empty, S_empty, VT_empty);
@@ -463,9 +483,14 @@ static inline std::vector<int64_t> create_reverse_permutation(std::vector<int64_
 static inline int64_t computeLRWorkDim(const char jobz, int64_t m, int64_t n) {
   auto mn = std::min(m, n);
   auto mx = std::max(m, n);
-  // These settings are valid for on LAPACK 3.6+
   if (jobz == 'N') {
+#ifdef __APPLE__
+    // According to `vecLib.framework/Headers/clapack.h` Accelerate.framework is based on LAPACK 3.2.1
+    return 7 * mn;
+#else
+    // These setting is valid for on LAPACK 3.6+
     return 5 * mn;
+#endif
   }
   if (mx > 10 * mn) {
     return 5 * mn * mn + 5 * mn;
@@ -475,7 +500,7 @@ static inline int64_t computeLRWorkDim(const char jobz, int64_t m, int64_t n) {
 
 // This function checks whether the uplo argument input is valid
 // Allowed strings are "u", "U", "l", "L"
-static inline void checkUplo(const std::string& uplo) {
+static inline void checkUplo(const c10::string_view uplo) {
   // To use std::toupper safely with plain chars (or signed chars), the argument should first be converted to unsigned char
   char uplo_uppercase = static_cast<char>(std::toupper(static_cast<unsigned char>(uplo[0])));
   TORCH_CHECK(uplo.size() == 1 && (uplo_uppercase == 'U' || uplo_uppercase == 'L'),

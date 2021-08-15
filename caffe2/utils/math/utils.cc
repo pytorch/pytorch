@@ -324,6 +324,7 @@ void ComputeTransposeAxesForReduceOp(
     const int ndim,
     const int* dims,
     int* axes) {
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   const int d = ndim - std::count(dims, dims + ndim, 1);
   int p = 0;
   int q = d;

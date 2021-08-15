@@ -59,10 +59,13 @@ TEST(FFTTest, fft_pad) {
 
 TEST(FFTTest, fft_norm) {
   auto t = torch::randn(128, torch::kComplexDouble);
+  // NOLINTNEXTLINE(bugprone-argument-comment)
   auto unnorm = torch::fft::fft(t, /*n=*/{}, /*axis=*/-1, /*norm=*/{});
+  // NOLINTNEXTLINE(bugprone-argument-comment)
   auto norm = torch::fft::fft(t, /*n=*/{}, /*axis=*/-1, /*norm=*/"forward");
   ASSERT_TRUE(torch::allclose(unnorm / 128, norm));
 
+  // NOLINTNEXTLINE(bugprone-argument-comment)
   auto ortho_norm = torch::fft::fft(t, /*n=*/{}, /*axis=*/-1, /*norm=*/"ortho");
   ASSERT_TRUE(torch::allclose(unnorm / std::sqrt(128), ortho_norm));
 }

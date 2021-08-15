@@ -1,5 +1,9 @@
 #include <ATen/native/layer_norm.h>
 
+#include <type_traits>
+
+#include <thrust/tuple.h>
+
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
@@ -27,24 +31,35 @@ __global__ void RowwiseMomentsCUDAKernel(
     T* mean,
     T* rstd) {
   using T_ACC = acc_type<T, true>;
-  __shared__ T_ACC m_shared[C10_WARP_SIZE];
-  __shared__ T_ACC v_shared[C10_WARP_SIZE];
+  using WelfordType = WelfordData<T_ACC, int64_t, T_ACC>;
+  using WelfordOp =
+      WelfordOps<T_ACC, T_ACC, int64_t, T_ACC, thrust::pair<T_ACC, T_ACC>>;
+
+  __shared__
+      typename std::aligned_storage<sizeof(WelfordType), alignof(WelfordType)>::
+          type val_shared[C10_WARP_SIZE];
+  WelfordType* val_shared_ptr = reinterpret_cast<WelfordType*>(val_shared);
+
   const int64_t i = blockIdx.x;
-  T_ACC sum1 = 0;
-  T_ACC sum2 = 0;
+  WelfordOp welford_op = {/*correction=*/0, /*take_sqrt=*/false};
+  WelfordType val(0, 0, 0, 0);
+
   for (int64_t j = threadIdx.x; j < N; j += blockDim.x) {
     const int64_t index = i * N + j;
-    sum1 += static_cast<T_ACC>(X[index]);
-    sum2 += static_cast<T_ACC>(X[index]) * static_cast<T_ACC>(X[index]);
+    val = welford_op.reduce(val, static_cast<T_ACC>(X[index]), index);
   }
-  sum1 = cuda_utils::BlockReduceSum<T_ACC>(sum1, m_shared);
-  sum2 = cuda_utils::BlockReduceSum<T_ACC>(sum2, v_shared);
+  val = cuda_utils::BlockReduce(
+      val,
+      welford_op,
+      /*identity_element=*/WelfordType(0, 0, 0, 0),
+      val_shared_ptr);
+
   if (threadIdx.x == 0) {
-    const T_ACC scale = T_ACC(1) / static_cast<T_ACC>(N);
-    sum1 *= scale;
-    sum2 = c10::cuda::compat::max(sum2 * scale - sum1 * sum1, T_ACC(0));
-    mean[i] = sum1;
-    rstd[i] = c10::cuda::compat::rsqrt(sum2 + static_cast<T_ACC>(eps));
+    T_ACC m1;
+    T_ACC m2;
+    thrust::tie(m2, m1) = welford_op.project(val);
+    mean[i] = m1;
+    rstd[i] = c10::cuda::compat::rsqrt(m2 + static_cast<T_ACC>(eps));
   }
 }
 
@@ -294,8 +309,12 @@ void LayerNormKernelImpl(
     Tensor* Y,
     Tensor* mean,
     Tensor* rstd) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16,
-      X.scalar_type(), "LayerNormKernelImpl", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::Half,
+      at::ScalarType::BFloat16,
+      X.scalar_type(),
+      "LayerNormKernelImpl",
+      [&]() {
         LayerNormKernelImplInternal<scalar_t>(
             X, gamma, beta, M, N, static_cast<scalar_t>(eps), Y, mean, rstd);
       });
@@ -328,7 +347,10 @@ void LayerNormBackwardKernelImplInternal(
   T* dX_data = dX->defined() ? dX->template data_ptr<T>() : nullptr;
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
   if (dX_data != nullptr) {
-    const auto kAccType = (X.scalar_type() == kHalf || X.scalar_type() == kBFloat16) ? kFloat : X.scalar_type();
+    const auto kAccType =
+        (X.scalar_type() == kHalf || X.scalar_type() == kBFloat16)
+        ? kFloat
+        : X.scalar_type();
     Tensor ds = at::empty({M}, X.options().dtype(kAccType));
     Tensor db = at::empty({M}, X.options().dtype(kAccType));
     Tensor scale = at::empty({M}, X.options().dtype(kAccType));
@@ -413,10 +435,14 @@ void LayerNormBackwardKernelImpl(
     Tensor* dX,
     Tensor* dgamma,
     Tensor* dbeta) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16,
-      X.scalar_type(), "LayerNormBackwardKernelImpl", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::Half,
+      at::ScalarType::BFloat16,
+      X.scalar_type(),
+      "LayerNormBackwardKernelImpl",
+      [&]() {
         LayerNormBackwardKernelImplInternal<scalar_t>(
-            dY, X, mean, rstd, gamma, M, N, dX, dgamma, dbeta);
+            dY.contiguous(), X, mean, rstd, gamma, M, N, dX, dgamma, dbeta);
       });
 }
 
@@ -424,32 +450,36 @@ void LayerNormBackwardKernelImpl(
 
 std::tuple<Tensor, Tensor, Tensor> layer_norm_cuda(
     const Tensor& input,
-    IntArrayRef normalized_shape, const c10::optional<Tensor>& weight_opt /* optional */, const c10::optional<Tensor>& bias_opt /* optional */,
+    IntArrayRef normalized_shape,
+    const c10::optional<Tensor>& weight_opt /* optional */,
+    const c10::optional<Tensor>& bias_opt /* optional */,
     double eps) {
   // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  c10::MaybeOwned<Tensor> weight_maybe_owned =
+      at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
-  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> bias_maybe_owned =
+      at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
 
-
-  auto inputs = _prepare_layer_norm_inputs(input, normalized_shape, weight, bias);
-  auto X = std::get<0>(inputs);
-  auto gamma = std::get<1>(inputs);
-  auto beta = std::get<2>(inputs);
-  auto M = std::get<3>(inputs);
-  auto N = std::get<4>(inputs);
+  auto M_N = _check_layer_norm_inputs(input, normalized_shape, weight, bias);
+  auto M = M_N.first;
+  auto N = M_N.second;
+  auto X = input.expect_contiguous();
+  auto gamma = weight.expect_contiguous();
+  auto beta = bias.expect_contiguous();
 
   Tensor Y = at::native::empty_like(
-      X,
+      *X,
       c10::nullopt /* dtype */,
       c10::nullopt /* layout */,
       c10::nullopt /* device */,
       c10::nullopt /* pin_memory */,
       LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  Tensor mean = at::empty({M}, X.options());
-  Tensor rstd = at::empty({M}, X.options());
+  Tensor mean = at::empty({M}, X->options());
+  Tensor rstd = at::empty({M}, X->options());
   if (M > 0) {
-    LayerNormKernelImpl(X, gamma, beta, M, N, eps, &Y, &mean, &rstd);
+    LayerNormKernelImpl(*X, *gamma, *beta, M, N, eps, &Y, &mean, &rstd);
 
     const auto input_shape = input.sizes();
     const size_t axis = input.dim() - normalized_shape.size();
@@ -473,72 +503,75 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cuda(
     const Tensor& input,
     IntArrayRef normalized_shape,
     const Tensor& mean,
-    const Tensor& rstd, const c10::optional<Tensor>& weight_opt /* optional */, const c10::optional<Tensor>& bias_opt /* optional */,
+    const Tensor& rstd,
+    const c10::optional<Tensor>& weight_opt /* optional */,
+    const c10::optional<Tensor>& bias_opt /* optional */,
     std::array<bool, 3> grad_input_mask) {
   // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  c10::MaybeOwned<Tensor> weight_maybe_owned =
+      at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
-  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> bias_maybe_owned =
+      at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
 
+  auto M_N = _check_layer_norm_inputs(input, normalized_shape, weight, bias);
+  auto M = M_N.first;
+  auto N = M_N.second;
+  auto X = input.expect_contiguous();
+  auto gamma = weight.expect_contiguous();
+  auto beta = bias.expect_contiguous();
 
-    auto inputs = _prepare_layer_norm_inputs(input, normalized_shape, weight, bias);
-    auto X = std::get<0>(inputs);
-    auto gamma = std::get<1>(inputs);
-    auto beta = std::get<2>(inputs);
-    auto M = std::get<3>(inputs);
-    auto N = std::get<4>(inputs);
-
-    Tensor dX;
-    Tensor dgamma;
-    Tensor dbeta;
-    if (grad_input_mask[0]) {
-      dX = at::native::empty_like(
-          X,
-          c10::nullopt /* dtype */,
-          c10::nullopt /* layout */,
-          c10::nullopt /* device */,
-          c10::nullopt /* pin_memory */,
-          LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-    }
-    if (grad_input_mask[1]) {
-      dgamma = M > 0 ? at::native::empty_like(
-                           gamma,
-                           c10::nullopt /* dtype */,
-                           c10::nullopt /* layout */,
-                           c10::nullopt /* device */,
-                           c10::nullopt /* pin_memory */,
-                           LEGACY_CONTIGUOUS_MEMORY_FORMAT)
-                     : at::native::zeros_like(
-                           gamma,
-                           c10::nullopt /* dtype */,
-                           c10::nullopt /* layout */,
-                           c10::nullopt /* device */,
-                           c10::nullopt /* pin_memory */,
-                           LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-    }
-    if (grad_input_mask[2]) {
-      dbeta = M > 0 ? at::native::empty_like(
-                          beta,
-                          c10::nullopt /* dtype */,
-                          c10::nullopt /* layout */,
-                          c10::nullopt /* device */,
-                          c10::nullopt /* pin_memory */,
-                          LEGACY_CONTIGUOUS_MEMORY_FORMAT)
-                    : at::native::zeros_like(
-                          beta,
-                          c10::nullopt /* dtype */,
-                          c10::nullopt /* layout */,
-                          c10::nullopt /* device */,
-                          c10::nullopt /* pin_memory */,
-                          LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-    }
-    if (M > 0) {
-      LayerNormBackwardKernelImpl(
-          dY, X, mean, rstd, gamma, M, N, &dX, &dgamma, &dbeta);
-    }
-    return std::make_tuple(std::move(dX), std::move(dgamma), std::move(dbeta));
+  Tensor dX;
+  Tensor dgamma;
+  Tensor dbeta;
+  if (grad_input_mask[0]) {
+    dX = at::native::empty_like(
+        *X,
+        c10::nullopt /* dtype */,
+        c10::nullopt /* layout */,
+        c10::nullopt /* device */,
+        c10::nullopt /* pin_memory */,
+        LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  }
+  if (grad_input_mask[1]) {
+    dgamma = M > 0 ? at::native::empty_like(
+                         *gamma,
+                         c10::nullopt /* dtype */,
+                         c10::nullopt /* layout */,
+                         c10::nullopt /* device */,
+                         c10::nullopt /* pin_memory */,
+                         LEGACY_CONTIGUOUS_MEMORY_FORMAT)
+                   : at::native::zeros_like(
+                         *gamma,
+                         c10::nullopt /* dtype */,
+                         c10::nullopt /* layout */,
+                         c10::nullopt /* device */,
+                         c10::nullopt /* pin_memory */,
+                         LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  }
+  if (grad_input_mask[2]) {
+    dbeta = M > 0 ? at::native::empty_like(
+                        *beta,
+                        c10::nullopt /* dtype */,
+                        c10::nullopt /* layout */,
+                        c10::nullopt /* device */,
+                        c10::nullopt /* pin_memory */,
+                        LEGACY_CONTIGUOUS_MEMORY_FORMAT)
+                  : at::native::zeros_like(
+                        *beta,
+                        c10::nullopt /* dtype */,
+                        c10::nullopt /* layout */,
+                        c10::nullopt /* device */,
+                        c10::nullopt /* pin_memory */,
+                        LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  }
+  if (M > 0) {
+    LayerNormBackwardKernelImpl(
+        dY, *X, mean, rstd, *gamma, M, N, &dX, &dgamma, &dbeta);
+  }
+  return std::make_tuple(std::move(dX), std::move(dgamma), std::move(dbeta));
 }
-
 
 REGISTER_DISPATCH(LayerNormKernel, &LayerNormKernelImpl);
 REGISTER_DISPATCH(LayerNormBackwardKernel, &LayerNormBackwardKernelImpl);

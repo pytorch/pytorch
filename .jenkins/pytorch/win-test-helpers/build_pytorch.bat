@@ -22,7 +22,7 @@ call %INSTALLER_DIR%\install_miniconda3.bat
 
 
 :: Install ninja and other deps
-if "%REBUILD%"=="" ( pip install -q "ninja==1.9.0" dataclasses typing_extensions )
+if "%REBUILD%"=="" ( pip install -q "ninja==1.10.0.post1" dataclasses typing_extensions "expecttest==0.1.3" )
 
 :: Override VS env here
 pushd .
@@ -38,7 +38,15 @@ if not "%USE_CUDA%"=="1" goto cuda_build_end
 
 set CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v%CUDA_VERSION%
 
+if x%CUDA_VERSION:.=%==x%CUDA_VERSION% (
+    echo CUDA version %CUDA_VERSION% format isn't correct, which doesn't contain '.'
+    exit /b 1
+)
 rem version transformer, for example 10.1 to 10_1.
+if x%CUDA_VERSION:.=%==x%CUDA_VERSION% (
+    echo CUDA version %CUDA_VERSION% format isn't correct, which doesn't contain '.'
+    exit /b 1
+)
 set VERSION_SUFFIX=%CUDA_VERSION:.=_%
 set CUDA_PATH_V%VERSION_SUFFIX%=%CUDA_PATH%
 
@@ -119,6 +127,9 @@ python setup.py install --cmake && sccache --show-stats && (
     7z a %TMP_DIR_WIN%\%IMAGE_COMMIT_TAG%.7z %CONDA_PARENT_DIR%\Miniconda3\Lib\site-packages\torch %CONDA_PARENT_DIR%\Miniconda3\Lib\site-packages\caffe2 && copy /Y "%TMP_DIR_WIN%\%IMAGE_COMMIT_TAG%.7z" "%PYTORCH_FINAL_PACKAGE_DIR%\"
 
     :: export test times so that potential sharded tests that'll branch off this build will use consistent data
-    python test/run_test.py --export-past-test-times %PYTORCH_FINAL_PACKAGE_DIR%/.pytorch-test-times
+    python test/run_test.py --export-past-test-times %PYTORCH_FINAL_PACKAGE_DIR%/.pytorch-test-times.json
+
+    :: Also save build/.ninja_log as an artifact
+    copy /Y "build\.ninja_log" "%PYTORCH_FINAL_PACKAGE_DIR%\"
   )
 )

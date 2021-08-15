@@ -7,6 +7,7 @@
 
 namespace torch {
 namespace nn {
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class ParameterListImpl : public Cloneable<ParameterListImpl> {
  public:
   using Iterator = typename std::vector<

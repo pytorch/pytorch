@@ -313,13 +313,13 @@ TEST(Expr, IntrinsicsDtypes) {
 
 TEST(Expr, Substitute01) {
   KernelScope kernel_scope;
-  const Var* x = new Var("x", kFloat);
-  const Var* y = new Var("y", kFloat);
-  const Expr* e = new Mul(new Sub(x, new FloatImm(1.0f)), new Add(x, y));
+  Var* x = new Var("x", kFloat);
+  Var* y = new Var("y", kFloat);
+  Expr* e = new Mul(new Sub(x, new FloatImm(1.0f)), new Add(x, y));
 
-  const Var* z = new Var("z", kFloat);
-  const Expr* e2 = Substitute(e, {{x, new Add(z, new FloatImm(5.0f))}});
-  const Expr* e2_ref = new Mul(
+  Var* z = new Var("z", kFloat);
+  Expr* e2 = Substitute(e, {{x, new Add(z, new FloatImm(5.0f))}});
+  Expr* e2_ref = new Mul(
       new Sub(new Add(z, new FloatImm(5.0f)), new FloatImm(1.0f)),
       new Add(new Add(z, new FloatImm(5.0f)), y));
   std::ostringstream oss;
@@ -406,6 +406,7 @@ TEST(Expr, UnaryMath01) {
     ASSERT_NEAR(eval.value<float>(), v_ref, 1e-6);
   }
 
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   for (float input_v : {std::nan("1"), 0., .5}) {
     ExprHandle v = FloatImm::make(input_v);
     SimpleIRExprEval eval(Intrinsics::make(kIsNan, v));
@@ -435,6 +436,116 @@ TEST(Expr, BinaryMath01) {
     SimpleIRExprEval eval(v_expr);
     ASSERT_NEAR(eval.value<float>(), v_ref, 1e-6);
   }
+}
+
+TEST(Expr, LogicalOps01) {
+  KernelScope kernel_scope;
+  ExprHandle a(23);
+  ExprHandle b(11);
+  ExprHandle c(0.72f);
+  ExprHandle d(0.69f);
+  ExprHandle f1 = (a > b) && (c > d);
+  ExprHandle f2 = (a > b) && (c < d);
+  ExprHandle f3 = (a < b) && (c > d);
+  ExprHandle f4 = (a < b) && (c < d);
+  ExprHandle f5 = (a < b) || (c > d);
+  ExprHandle f6 = (a < b) || (c < d);
+  ExprHandle f7 = (a > b) || (c < d);
+  ExprHandle f8 = (a > b) || (c > d);
+
+  SimpleIRExprEval eval1(f1);
+  SimpleIRExprEval eval2(f2);
+  SimpleIRExprEval eval3(f3);
+  SimpleIRExprEval eval4(f4);
+  SimpleIRExprEval eval5(f5);
+  SimpleIRExprEval eval6(f6);
+  SimpleIRExprEval eval7(f7);
+  SimpleIRExprEval eval8(f8);
+  ASSERT_EQ(eval1.value<int>(), 1);
+  ASSERT_EQ(eval2.value<int>(), 0);
+  ASSERT_EQ(eval3.value<int>(), 0);
+  ASSERT_EQ(eval4.value<int>(), 0);
+  ASSERT_EQ(eval5.value<int>(), 1);
+  ASSERT_EQ(eval6.value<int>(), 0);
+  ASSERT_EQ(eval7.value<int>(), 1);
+  ASSERT_EQ(eval8.value<int>(), 1);
+}
+
+TEST(Expr, LogicalOps02) {
+  KernelScope kernel_scope;
+  ExprHandle a(23);
+  ExprHandle b(11);
+  ExprHandle c(0.72f);
+  ExprHandle d(0.72f);
+
+  ExprHandle f1 = (a > b) || (c > d);
+  ExprHandle f2 = (a > b) && (c <= d);
+  ExprHandle f3 = (a > b) && (c > d);
+  ExprHandle ff1 = f1 && f2;
+  ExprHandle ff2 = f2 || f3;
+
+  SimpleIRExprEval eval1(ff1);
+  SimpleIRExprEval eval2(ff2);
+  ASSERT_EQ(eval1.value<int>(), 1);
+  ASSERT_EQ(eval2.value<int>(), 1);
+}
+
+TEST(Expr, LogicalOps03) {
+  KernelScope kernel_scope;
+  ExprHandle a(23);
+  ExprHandle b(11);
+  ExprHandle c(0.72f);
+  ExprHandle d(0.69f);
+
+  // Bool types
+  ExprHandle bool_f1 = (a > b) && BoolImm::make(true);
+  ExprHandle bool_f2 = (c <= d) || BoolImm::make(true);
+
+  // Int types
+  ExprHandle int_f1 = (a > b) && IntImm::make(1);
+  ExprHandle int_f2 = (c <= d) || IntImm::make(1);
+
+  // Short types
+  ExprHandle short_f1 = (a > b) && ShortImm::make(1);
+  ExprHandle short_f2 = (c <= d) || ShortImm::make(1);
+
+  // Long types
+  ExprHandle long_f1 = (a > b) && LongImm::make(1);
+  ExprHandle long_f2 = (c <= d) || LongImm::make(1);
+
+  // Char types
+  ExprHandle char_f1 = (a > b) && CharImm::make(1);
+  ExprHandle char_f2 = (c <= d) || CharImm::make(1);
+
+  // Byte types
+  ExprHandle byte_f1 = (a > b) && ByteImm::make(1);
+  ExprHandle byte_f2 = (c <= d) || ByteImm::make(1);
+
+  SimpleIRExprEval eval1(bool_f1);
+  SimpleIRExprEval eval2(bool_f2);
+  SimpleIRExprEval eval3(int_f1);
+  SimpleIRExprEval eval4(int_f2);
+  SimpleIRExprEval eval5(short_f1);
+  SimpleIRExprEval eval6(short_f2);
+  SimpleIRExprEval eval7(long_f1);
+  SimpleIRExprEval eval8(long_f2);
+  SimpleIRExprEval eval9(char_f1);
+  SimpleIRExprEval eval10(char_f2);
+  SimpleIRExprEval eval11(byte_f1);
+  SimpleIRExprEval eval12(byte_f2);
+
+  ASSERT_EQ(eval1.value<bool>(), true);
+  ASSERT_EQ(eval2.value<bool>(), true);
+  ASSERT_EQ(eval3.value<int>(), 1);
+  ASSERT_EQ(eval4.value<int>(), 1);
+  ASSERT_EQ(eval5.value<int16_t>(), 1);
+  ASSERT_EQ(eval6.value<int16_t>(), 1);
+  ASSERT_EQ(eval7.value<int64_t>(), 1);
+  ASSERT_EQ(eval8.value<int64_t>(), 1);
+  ASSERT_EQ(eval9.value<int8_t>(), 1);
+  ASSERT_EQ(eval10.value<int8_t>(), 1);
+  ASSERT_EQ(eval11.value<uint8_t>(), 1);
+  ASSERT_EQ(eval12.value<uint8_t>(), 1);
 }
 
 TEST(Expr, BitwiseOps) {
@@ -552,7 +663,7 @@ void testStmtClone() {
   // original statement hasn't changed while the cloned one has.
   Stmt* body_addition = a_buf.store({index}, 33);
   Block* cloned_body =
-      static_cast<Block*>(static_cast<const For*>(cloned_loop)->body());
+      static_cast<Block*>(static_cast<For*>(cloned_loop)->body());
   cloned_body->append_stmt(body_addition);
 
   std::vector<int> orig_loop_results_after_mutation(N);

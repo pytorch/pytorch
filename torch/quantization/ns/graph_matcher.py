@@ -1,3 +1,4 @@
+import collections
 import enum
 
 import torch
@@ -6,46 +7,26 @@ toq = torch.ops.quantized
 from torch.fx import GraphModule
 from torch.fx.graph import Graph, Node
 
-from .utils import getattr_from_fqn
+from torch.quantization.utils import getattr_from_fqn
 from .ns_types import NSSubgraph, NSNodeTargetType
 from .mappings import (
-    FUNS_UNMATCHABLE,
-    MODS_UNMATCHABLE,
-    METHS_UNMATCHABLE,
+    get_base_name_to_sets_of_related_ops,
+    get_unmatchable_types_map,
 )
 from .pattern_utils import (
-    get_base_name_to_sets_of_related_ops,
     get_type_a_related_to_b,
     get_reversed_fusions,
     end_node_matches_reversed_fusion,
 )
+from torch.quantization import (
+    ObserverBase,
+    FakeQuantizeBase,
+)
 
-from typing import Dict, Tuple, List, Optional, Set, Callable, Any
+from typing import Dict, Tuple, List, Optional, Set, Any
 
 def _get_output_nodes(g: Graph) -> List[Node]:
     return [n for n in g.nodes if n.op == 'output']
-
-def get_non_matchable_functions() -> Set[Callable]:
-    """
-    `call_function` nodes pointing to these functions are non-matchable.
-    """
-    # TODO(future PR): allow customizations
-    return FUNS_UNMATCHABLE
-
-def get_non_matchable_modules() -> Set[Callable]:
-    """
-    `call_module` nodes pointing to instances of these types are non-matchable.
-    """
-    # TODO(future PR): allow customizations
-    return MODS_UNMATCHABLE
-
-def get_non_matchable_methods() -> Set[str]:
-    """
-    `call_method` nodes pointing to these targets are non-matchable.
-
-    """
-    # TODO(future PR): allow customizations
-    return METHS_UNMATCHABLE
 
 class _NSGraphMatchableSubgraphsIterator:
     """
@@ -58,14 +39,14 @@ class _NSGraphMatchableSubgraphsIterator:
     def __init__(
         self,
         gm: GraphModule,
-        non_matchable_functions: Set[Callable],
-        non_matchable_modules: Set[Callable],
-        non_matchable_methods: Set[str],
+        non_matchable_functions: Set[NSNodeTargetType],
+        non_matchable_modules: Set[NSNodeTargetType],
+        non_matchable_methods: Set[NSNodeTargetType],
     ):
         self.gm: GraphModule = gm
-        self.non_matchable_functions: Set[Callable] = non_matchable_functions
-        self.non_matchable_modules: Set[Callable] = non_matchable_modules
-        self.non_matchable_methods: Set[str] = non_matchable_methods
+        self.non_matchable_functions: Set[NSNodeTargetType] = non_matchable_functions
+        self.non_matchable_modules: Set[NSNodeTargetType] = non_matchable_modules
+        self.non_matchable_methods: Set[NSNodeTargetType] = non_matchable_methods
         self.seen_nodes: Set[Node] = set()
         self.stack: List[Node] = []
         for start_node in _get_output_nodes(self.gm.graph):
@@ -120,12 +101,21 @@ class _NSGraphMatchableSubgraphsIterator:
             for arg in cur_start_node.all_input_nodes:
                 self._recursively_add_node_arg_to_stack(arg)
 
-            # skip observers, etc
+            # skip unmatchable nodes
             # note: this check is done on the start_node, i.e.
             # if we are matching linear-relu in reverse, this would do the matchable
             # check on the linear
             if not self._is_matchable(cur_base_op_node):
                 continue
+
+            # If an observer or a fake_quant was not matched as a part of
+            # a pattern of multiple nodes, ignore it. One case where this is
+            # relevant is an observer on a graph input, which was added because
+            # it is necessary for the next node.
+            if cur_end_node.op == 'call_module' and cur_start_node is cur_end_node:
+                maybe_obs = getattr_from_fqn(self.gm, cur_end_node.target)  # type: ignore[arg-type]
+                if isinstance(maybe_obs, (ObserverBase, FakeQuantizeBase)):
+                    continue
 
             return NSSubgraph(
                 start_node=cur_start_node, end_node=cur_end_node,
@@ -168,10 +158,13 @@ class GraphMatchingException(Exception):
     pass
 
 class SubgraphTypeRelationship(enum.Enum):
-    # same type
+    # same type, known
     # example: F.linear and F.linear, or nn.Conv2d and nn.Conv2d
     EQUAL = enum.auto()
-    # same subgraph_relationship set, but not the same type
+    # same type, but the type is not known to Numerical Suite
+    # (user defined type, etc).
+    EQUAL_BUT_UKNOWN = enum.auto()
+    # known, same subgraph_relationship set, but not the same type
     # example: F.linear and toq.linear
     RELATED_BUT_NOT_EQUAL = enum.auto()
     # not related
@@ -189,11 +182,22 @@ def _get_subgraph_relationship_type(
 
     # TODO(next): make this code handle matching by what is before the base op
     if node_a.op != node_b.op:
-        # for now, comparing call_module to call_function is not supported
-        # this can be added later if needed
-        return SubgraphTypeRelationship.NOT_RELATED
+        if not (
+            node_a.op in ('call_function', 'call_method') and
+            node_b.op in ('call_function', 'call_method')
+        ):
+            return SubgraphTypeRelationship.NOT_RELATED
 
-    if node_a.op == 'call_function':
+    if node_a.op in ('call_function', 'call_method'):
+        key = (node_a.target, node_b.target)
+
+        if key not in type_a_related_to_b:
+            if node_a.target == node_b.target:
+                return SubgraphTypeRelationship.EQUAL_BUT_UKNOWN
+            else:
+                return SubgraphTypeRelationship.NOT_RELATED
+        # after this point, we are dealing with known types
+
         if node_a.target == node_b.target:
             node_a_has_prev = subgraph_a.base_op_node == subgraph_a.start_node
             node_b_has_prev = subgraph_b.base_op_node == subgraph_b.start_node
@@ -207,7 +211,6 @@ def _get_subgraph_relationship_type(
                 # TODO(future PR): check for matches start_op_node and base_op_node
                 return SubgraphTypeRelationship.EQUAL
 
-        key = (node_a.target, node_b.target)
         if key in type_a_related_to_b:
             return SubgraphTypeRelationship.RELATED_BUT_NOT_EQUAL
         else:
@@ -221,25 +224,19 @@ def _get_subgraph_relationship_type(
         mod_a = getattr_from_fqn(gm_a, node_a.target)
         assert isinstance(node_b.target, str)
         mod_b = getattr_from_fqn(gm_b, node_b.target)
-        # modules with equivalent types always match (i.e. nn.Conv2d and nn.Conv2d)
-        if type(mod_a) == type(mod_b):
-            return SubgraphTypeRelationship.EQUAL
+
         key = (type(mod_a), type(mod_b))
-        if key in type_a_related_to_b:
-            return SubgraphTypeRelationship.RELATED_BUT_NOT_EQUAL
-        else:
-            return SubgraphTypeRelationship.NOT_RELATED
-    elif node_a.op == 'call_method':
-        assert (subgraph_a.base_op_node == subgraph_a.start_node and
-                subgraph_b.base_op_node == subgraph_b.start_node), \
-            "Matching call_method patterns where base_op_node != start_node is not supported yet"
-        if node_a.target == node_b.target:
+
+        if key not in type_a_related_to_b:
+            if type(mod_a) == type(mod_b):
+                return SubgraphTypeRelationship.EQUAL_BUT_UKNOWN
+            else:
+                return SubgraphTypeRelationship.NOT_RELATED
+        elif type(mod_a) == type(mod_b):
             return SubgraphTypeRelationship.EQUAL
-        key = (node_a.target, node_b.target)
-        if key in type_a_related_to_b:
-            return SubgraphTypeRelationship.RELATED_BUT_NOT_EQUAL
         else:
-            return SubgraphTypeRelationship.NOT_RELATED
+            return SubgraphTypeRelationship.RELATED_BUT_NOT_EQUAL
+
     return SubgraphTypeRelationship.NOT_RELATED
 
 def _get_name_for_subgraph(
@@ -306,6 +303,8 @@ def _get_node_target_type(node: Node, gm: GraphModule) -> Optional[NSNodeTargetT
 def get_matching_subgraph_pairs(
     gm_a: GraphModule,
     gm_b: GraphModule,
+    base_name_to_sets_of_related_ops: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
+    unmatchable_types_map: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
 ) -> Dict[str, Tuple[NSSubgraph, NSSubgraph]]:
     """
     Matches matchable subgraphs of graph_a to graph_b.
@@ -370,17 +369,21 @@ def get_matching_subgraph_pairs(
         ),
     }
     """
-    non_matchable_functions = get_non_matchable_functions()
-    non_matchable_modules = get_non_matchable_modules()
-    non_matchable_methods = get_non_matchable_methods()
+    if unmatchable_types_map is None:
+        unmatchable_types_map = get_unmatchable_types_map()
+    non_matchable_functions = unmatchable_types_map['funs_unmatchable']
+    non_matchable_modules = unmatchable_types_map['mods_unmatchable']
+    non_matchable_methods = unmatchable_types_map['meths_unmatchable']
+
     graph_a_iterator = _NSGraphMatchableSubgraphsIterator(
         gm_a, non_matchable_functions, non_matchable_modules,
         non_matchable_methods)
     graph_b_iterator = _NSGraphMatchableSubgraphsIterator(
         gm_b, non_matchable_functions, non_matchable_modules,
         non_matchable_methods)
-    results = {}
-    base_name_to_sets_of_related_ops = get_base_name_to_sets_of_related_ops()
+    results = collections.OrderedDict()
+    if base_name_to_sets_of_related_ops is None:
+        base_name_to_sets_of_related_ops = get_base_name_to_sets_of_related_ops()
     type_a_related_to_b = \
         get_type_a_related_to_b(base_name_to_sets_of_related_ops)
 
@@ -417,9 +420,15 @@ def get_matching_subgraph_pairs(
                 gm_a, gm_b, type_a_related_to_b)
             if subgraph_relationship == SubgraphTypeRelationship.NOT_RELATED:
                 msg = f"""
+The subgraphs
 ({cur_subgraph_a}, {type_start_a}) and
-({cur_subgraph_b}, {type_start_b}) are not related"""
+({cur_subgraph_b}, {type_start_b})
+are not related. Please ensure that the two models you pass in have the same number
+of subgraphs, and each pair of subgraphs is related to each other."""
                 raise GraphMatchingException(msg)
+            elif subgraph_relationship == SubgraphTypeRelationship.EQUAL_BUT_UKNOWN:
+                # skip matching but unknown types
+                continue
             key_name_a = _get_name_for_subgraph(
                 cur_subgraph_a, gm_a, base_name_to_sets_of_related_ops,
                 existing_names_a)
@@ -436,8 +445,16 @@ def get_matching_subgraph_pairs(
         else:
             # only one node was fetched, no match possible, throw error
             msg = f"""
-Matchable nodes count mismatch: ({cur_subgraph_a}, {type_start_a}) and
-({cur_subgraph_b}, {type_start_b})"""
+Attempting to match
+({cur_subgraph_a}, {type_start_a}) and
+({cur_subgraph_b}, {type_start_b}),
+one of which is empty. Please ensure that the two models you pass in have the same number
+of subgraphs."""
             raise GraphMatchingException(msg)
+
+    # The subgraph pairs are originally created by traversing the two graphs
+    # from the outputs to the inputs. Reverse the results to return the
+    # subgraphs in their order of execution.
+    results = collections.OrderedDict(reversed(list(results.items())))
 
     return results

@@ -123,6 +123,7 @@ static thread_local size_t workspace_size = 0;
 
 static inline void deallocate_workspace() {
   if (workspace) {
+    // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
     std::free(workspace);
     workspace = nullptr;
   }

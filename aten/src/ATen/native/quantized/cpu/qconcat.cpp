@@ -1,9 +1,10 @@
 #include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
-#include <torch/library.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/NativeFunctions.h>
+#include <c10/util/irange.h>
+#include <torch/library.h>
 
 #include <algorithm>
 #include <vector>
@@ -19,6 +20,7 @@ namespace {
 bool is_cat_nhwc_fast_path(const c10::List<Tensor>& qxs, int dim) {
   TORCH_CHECK(qxs.size() > 0);
   bool is_fast_path = dim == 1;
+  // NOLINTNEXTLINE(performance-implicit-conversion-in-loop)
   for (const at::Tensor& qx : qxs) {
     is_fast_path &= qx.dim() == 4;
     is_fast_path &= qx.is_contiguous(c10::MemoryFormat::ChannelsLast);
@@ -33,7 +35,7 @@ bool is_valid_quantization_scheme(const Tensor& t) {
 
 bool all_inputs_sharing_qparams(TensorList qxs) {
   bool is_valid = true;
-  for (int i = 1; i < qxs.size(); ++i) {
+  for (const auto i : c10::irange(1, qxs.size())) {
     is_valid |= qxs[0].is_quantized();
     is_valid |= qxs[i].is_quantized() == qxs[0].is_quantized();
     is_valid |= qxs[i].qscheme() == qxs[0].qscheme();
@@ -73,6 +75,7 @@ Tensor quantized_cat_impl(
   const auto x_qscheme = qxs.get(0).qscheme();
   std::vector<Tensor> xs;
   xs.reserve(qxs.size());
+  // NOLINTNEXTLINE(performance-implicit-conversion-in-loop)
   for (const at::Tensor& qx : qxs) {
     TORCH_CHECK(x_dtype == qx.scalar_type(), "All dtypes must be the same.");
     TORCH_CHECK(
@@ -82,6 +85,7 @@ Tensor quantized_cat_impl(
   const Tensor y = at::cat(xs, dim);
   Tensor qy;
   AT_DISPATCH_QINT_TYPES(x_dtype, "qcat", [&]() {
+    // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
     qy = at::quantize_per_tensor(y, scale, zero_point, SCALAR_TYPE);
     if (ReLUFused) {
       auto iter = TensorIterator::unary_op(qy, qy);

@@ -127,13 +127,13 @@ int main(int argc, char* argv[]) {
     // Let's start with defining a domain. We do this by creating a Buf object.
 
     // First, let's specify the sizes:
-    std::vector<const Expr*> dims = {
+    std::vector<Expr*> dims = {
         new IntImm(64), new IntImm(32)}; // IntImm stands for Integer Immediate
-                                         // and represents an integer constant
+    // and represents an integer constant
 
     // Now we can create a Buf object by providing a name, dimensions, and a
     // data type of the elements:
-    const Buf* buf = new Buf("X", dims, kInt);
+    Buf* buf = new Buf("X", dims, kInt);
 
     // Next we need to spefify the computation. We can do that by either
     // constructing a complete tensor statement for it (statements are
@@ -144,9 +144,9 @@ int main(int argc, char* argv[]) {
 
     // Let's define two variables, i and j - they will be axis in our
     // computation.
-    const Var* i = new Var("i", kInt);
-    const Var* j = new Var("j", kInt);
-    std::vector<const Var*> args = {i, j};
+    Var* i = new Var("i", kInt);
+    Var* j = new Var("j", kInt);
+    std::vector<Var*> args = {i, j};
 
     // Now we can define the body of the tensor computation using these
     // variables. What this means is that values in our tensor are:
@@ -254,6 +254,7 @@ int main(int argc, char* argv[]) {
 
     // Creating a loop nest is as quite simple, we just need to specify a list
     // of all and a list of output tensors:
+    // NOLINTNEXTLINE(bugprone-argument-comment)
     LoopNest loopnest(/*outputs=*/{Y}, /*all=*/{X, Y});
 
     // An IR used in LoopNest is based on tensor statements, represented by
@@ -311,16 +312,17 @@ int main(int argc, char* argv[]) {
     // our loop nest now. Let's split the inner loop with a factor of 9, for
     // instance.
     std::vector<For*> loops = loopnest.getLoopStmtsFor(Y);
-    For* j_outer;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     For* j_inner;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     For* j_tail;
     int split_factor = 9;
     loopnest.splitWithTail(
         loops[1], // loops[0] is the outer loop, loops[1] is inner
         split_factor,
-        &j_outer, // These are handles that we would be using for
         &j_inner, // further transformations
         &j_tail);
+    // loops[1] will become the outer loop, j_outer, after splitWithTail.
     std::cout << *loopnest.root_stmt() << std::endl;
     // Prints:
     // {

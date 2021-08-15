@@ -33,13 +33,10 @@ class RendezvousStateError(RendezvousError):
 class RendezvousHandler(ABC):
     """Main rendezvous interface.
 
-    .. note:: torchelastic users normally **do not** need to implement their
-              own ``RendezvousHandler``. An implementation based on
-              `etcd <https://etcd.io/>`__ is already provided, and is recommended
-              for most users, provided they can deploy it in their environment.
-
-    .. warning:: torchelastic is currently considered experimental,
-                 so the APIs may change!
+    Note:
+        Distributed Torch users normally **do not** need to implement their own
+        ``RendezvousHandler``. An implementation based on C10d Store is already
+        provided, and is recommended for most users.
     """
 
     @abstractmethod

@@ -12,7 +12,6 @@
 #include <c10/util/string_utils.h>
 #include <torch/csrc/jit/tensorexpr/codegen.h>
 #include <torch/csrc/jit/tensorexpr/exceptions.h>
-#include <torch/csrc/jit/tensorexpr/execution_counter.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
@@ -22,9 +21,6 @@
 namespace torch {
 namespace jit {
 namespace tensorexpr {
-
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-DECLARE_TRIGGER(simple_ir_eval_executed);
 
 class Value {
  public:
@@ -109,18 +105,20 @@ class TORCH_API SimpleIREvaluator : public CodeGen {
   ~SimpleIREvaluator() override;
 
   void call(const std::vector<CallArg>& args) override;
+  void call_raw(const std::vector<void*>& args) override;
 
   template <typename... Ts>
   void operator()(const Ts&... ts) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<CallArg> args({CallArg(ts)...});
     call(args);
   }
 
-  void bindVar(const Var* v, const Expr* e);
+  void bindVar(Var* v, Expr* e);
   Value value() const;
 
  private:
-  void bindArg(const BufferArg& buf, const CallArg& data);
+  void bindArg(const BufferArg& buf, void* data);
   void expand_intrinsics() {
     GenericIntrinsicsExpander intrinsics_expander;
     apply_mutator(&intrinsics_expander);
@@ -140,20 +138,23 @@ class ExprEval {
   ExprEval(const ExprHandle& expr, Ts... ts)
       : ExprEval(expr, {BufferArg(ts)...}) {}
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   ExprEval(const ExprHandle& expr, const std::vector<BufferArg>& buffer_args)
       : dtype_(expr.dtype()) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<BufferArg> buffer_args_extended = buffer_args;
     Placeholder ret_buf("ret_val", dtype_, {1});
-    std::vector<const Expr*> indices;
-    const Expr* zero = new IntImm(0);
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    std::vector<Expr*> indices;
+    Expr* zero = new IntImm(0);
     for (size_t i = 0; i < ret_buf.data()->ndim(); i++) {
       indices.push_back(zero);
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Stmt* store_stmt =
         // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
         new Store(ret_buf.data(), indices, expr.node());
-    // NOLINTNEXTLINE(modernize-use-emplace)
-    buffer_args_extended.push_back(ret_buf);
+    buffer_args_extended.emplace_back(ret_buf);
     codegen_.reset(new CodeGenType(store_stmt, buffer_args_extended));
   }
 
@@ -166,7 +167,7 @@ class ExprEval {
     call(call_args);
   }
 
-  void bindVar(const Var* v, const Expr* e) {
+  void bindVar(Var* v, Expr* e) {
     codegen_->bindVar(v, e);
   }
 
@@ -180,6 +181,7 @@ class ExprEval {
   }
 
   void call(const std::vector<CallArg>& call_args) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<CallArg> call_args_extended = call_args;
     switch (dtype_.scalar_type()) {
 #define TYPE_CASE(Type, Name)                           \
@@ -193,9 +195,9 @@ class ExprEval {
       AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
 #undef TYPE_CASE
       case ScalarType::Bool: {
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         std::vector<unsigned char> ret_val_arg(1);
-        // NOLINTNEXTLINE(modernize-use-emplace)
-        call_args_extended.push_back(CallArg(ret_val_arg.data()));
+        call_args_extended.emplace_back(ret_val_arg.data());
         codegen_->call(call_args_extended);
         ret_value_ = Value((bool)ret_val_arg[0]);
       } break;
@@ -204,9 +206,34 @@ class ExprEval {
     }
   }
 
+  void call_raw(const std::vector<void*>& args) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    std::vector<void*> args_extended = args;
+    switch (dtype_.scalar_type()) {
+#define TYPE_CASE(Type, Name)                    \
+  case ScalarType::Name: {                       \
+    std::vector<Type> ret_val_arg(1);            \
+    args_extended.push_back(ret_val_arg.data()); \
+    codegen_->call_raw(args_extended);           \
+    ret_value_ = Value(ret_val_arg[0]);          \
+  } break;
+      AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
+#undef TYPE_CASE
+      case ScalarType::Bool: {
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+        std::vector<unsigned char> ret_val_arg(1);
+        args_extended.push_back(ret_val_arg.data());
+        codegen_->call_raw(args_extended);
+        ret_value_ = Value((bool)ret_val_arg[0]);
+      } break;
+      default:
+        throw unsupported_dtype();
+    }
+  }
+
   template <typename T>
-  T value(std::vector<void*>& args) {
-    call(args);
+  T value(const std::vector<void*>& args) {
+    call_raw(args);
     return ret_value_.as<T>();
   }
 
@@ -226,7 +253,7 @@ class ExprEval {
   Value ret_value_;
 };
 
-inline const Expr* Substitute(const Expr* expr, const VarMapping& var_mapping) {
+inline Expr* Substitute(Expr* expr, const VarMapping& var_mapping) {
   VarSubMutator var_sub(var_mapping);
   return expr->accept_mutator(&var_sub);
 }

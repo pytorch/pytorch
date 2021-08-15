@@ -3,6 +3,7 @@
 #include <ATen/core/qualified_name.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/frontend/versioned_symbols.h>
@@ -10,6 +11,7 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/resource_guard.h>
+#include <torch/csrc/jit/runtime/calculate_necessary_args.h>
 
 #include <algorithm>
 
@@ -25,7 +27,7 @@ static bool isValidIdentifierChar(char c, size_t pos) {
 static bool isValidIdentifier(const std::string& name) {
   if (name.size() == 0)
     return false;
-  for (size_t i = 0; i < name.size(); ++i) {
+  for (const auto i : c10::irange(name.size())) {
     if (!isValidIdentifierChar(name[i], i))
       return false;
   }
@@ -313,7 +315,7 @@ struct PythonPrintImpl {
     // We will probably need to optimize this at some point using hashing.
     if (val.isTensor()) {
       auto& t = val.toTensor();
-      for (size_t i = 0; i < constant_table_.size(); ++i) {
+      for (const auto i : c10::irange(constant_table_.size())) {
         if (!constant_table_[i].isTensor()) {
           continue;
         }
@@ -355,6 +357,7 @@ struct PythonPrintImpl {
       std::unordered_set<std::string>& used) {
     std::string name = candidate;
     while (used.count(name) || reserved_names.count(name)) {
+      // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
       name = candidate + c10::to_string(next_id[name]++);
     }
     used.insert(name);
@@ -407,8 +410,9 @@ struct PythonPrintImpl {
     }
     TORCH_INTERNAL_ASSERT(
         false,
-        "Value was not present in either expressions"
-        " table or ident refs table");
+        "Value (debug name: \"",
+        v->debugName(),
+        "\") was not present in either expressions table or ident refs table");
   }
   void assignValue(Value* v, const std::string& s) {
     ident_refs_[v] = s;
@@ -428,7 +432,8 @@ struct PythonPrintImpl {
   size_t level = 0;
   // indent to the current indent level
   TaggedStringStream& indent() {
-    for (size_t i = 0; i < level; ++i) {
+    for (const auto i : c10::irange(level)) {
+      (void)i; // Suppress unused variable warning
       body_ << "  ";
     }
     return body_;
@@ -518,7 +523,7 @@ struct PythonPrintImpl {
   void printAnnotatedAssignment(
       at::ArrayRef<Value*> lhs,
       at::ArrayRef<Value*> rhs) {
-    for (size_t i = 0; i < lhs.size(); ++i) {
+    for (const auto i : c10::irange(lhs.size())) {
       indent();
       body_ << useOf(lhs[i]);
       if (requiresAnnotation(lhs[i], rhs[i])) {
@@ -602,6 +607,7 @@ struct PythonPrintImpl {
   }
 
   bool isLongLine(const std::string& str) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     return str.size() + level * 2 >= 40;
   }
 
@@ -860,7 +866,7 @@ struct PythonPrintImpl {
     auto checkSubvalue = [&hasNonASCII](const IValue& val) {
       if (val.isString()) {
         const auto maxASCII = 0x7fu;
-        for (auto& c : val.toStringRef()) {
+        for (auto c : val.toStringRef()) {
           if (c > maxASCII) {
             hasNonASCII = true;
             return true;
@@ -1153,10 +1159,14 @@ struct PythonPrintImpl {
         printOpName(stmt, node->kind());
         const FunctionSchema& schema = node->schema();
         stmt << "(";
-        for (size_t i = 0; i < node->inputs().size(); ++i) {
-          if (i > 0) {
+        // calculate how many args are specified.
+        // see (https://github.com/pytorch/pytorch/pull/56079) for more
+        // details.
+        size_t necessary_args =
+            CalculateNecessaryArgs(schema.arguments(), node->inputs());
+        for (const auto i : c10::irange(necessary_args)) {
+          if (i > 0)
             stmt << ", ";
-          }
           auto v = useOf(node->inputs().at(i));
           // print the kwarg name if it is a kwarg only argument.
           if (i < schema.arguments().size()) {
@@ -1195,7 +1205,8 @@ struct PythonPrintImpl {
   IValue createBroadList(dtype value, const int64_t& N) {
     c10::List<dtype> repeated;
     repeated.reserve(N);
-    for (int i = 0; i < N; ++i) {
+    for (const auto i : c10::irange(N)) {
+      (void)i; // Suppress unused variable warning
       repeated.push_back(value);
     }
     return repeated;
@@ -1328,7 +1339,7 @@ struct PythonPrintImpl {
         std::vector<std::string> buffers;
         // Populate the __parameters__ field. This tells the importer which
         // attributes are parameters.
-        for (size_t i = 0; i < numAttrs; i++) {
+        for (const auto i : c10::irange(numAttrs)) {
           if (classType->is_parameter(i)) {
             params.push_back(classType->getAttributeName(i));
           }
@@ -1370,7 +1381,7 @@ struct PythonPrintImpl {
         }
       }
 
-      for (size_t i = 0; i < numAttrs; i++) {
+      for (const auto i : c10::irange(numAttrs)) {
         const auto& name = classType->getAttributeName(i);
         const auto& type = classType->getAttribute(i);
         registerClassDependencies(type);
@@ -1398,7 +1409,7 @@ struct PythonPrintImpl {
       }
 
       size_t numConstants = classType->numConstants();
-      for (size_t i = 0; i < numConstants; i++) {
+      for (const auto i : c10::irange(numConstants)) {
         const auto& name = classType->getConstantName(i);
         IValue v = classType->getConstant(i);
 
@@ -1465,10 +1476,10 @@ struct PythonPrintImpl {
               method.arguments().at(0).name() == "self");
           for (const Argument& arg :
                at::ArrayRef<Argument>(method.arguments()).slice(1)) {
-            auto type = arg.type();
-            registerClassDependencies(type);
+            const auto& arg_type = arg.type();
+            registerClassDependencies(arg_type);
             body_ << ", " << arg.name() << ": "
-                  << type->annotation_str(type_printer_);
+                  << arg_type->annotation_str(type_printer_);
           }
           auto return_type = method.returns().at(0).type();
           registerClassDependencies(return_type);

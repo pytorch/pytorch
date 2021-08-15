@@ -95,6 +95,7 @@ VTensor* grad(VTensor* y, VTensor* x, VTensor* j) {
     // Every time we "stay left," add the other consumers to q
     // If we find y -- add the whole route to need_grad
     // If we can't find y -- add the whole route to no_grad
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     VTensor* var;
     std::unordered_set<VTensor*> route;
     std::tie(var, route) = q.front();
@@ -193,6 +194,7 @@ VTensor* grad(VTensor* y, VTensor* x, VTensor* j) {
 
 VOp::VOp(
     const std::string& name,
+    // NOLINTNEXTLINE(modernize-pass-by-value)
     const std::vector<VTensor*>& inputs_,
     size_t num_outputs,
     VGraph* graph_)
@@ -210,7 +212,9 @@ std::vector<DimArg> get_vars(
     std::vector<std::string> dims,
     const std::map<std::string, torch::jit::tensorexpr::VarHandle>& vbindings) {
   std::vector<DimArg> vars;
+  // NOLINTNEXTLINE(performance-for-range-copy)
   for (auto k : dims) {
+    // NOLINTNEXTLINE(performance-inefficient-vector-operation)
     vars.emplace_back(vbindings.at(k));
   }
   if (vars.size() == 0) {
@@ -464,6 +468,7 @@ to_tensorexpr(const VGraph& graph, std::vector<VTensor*> outputs) {
 
   for (const auto& t : graph.vtensors) {
     auto id = reinterpret_cast<size_t>(&t);
+    // NOLINTNEXTLINE(performance-for-range-copy)
     for (auto d : t.shape) {
       if (!vbindings.count(d)) {
         VarHandle D(d, kInt);
@@ -474,6 +479,7 @@ to_tensorexpr(const VGraph& graph, std::vector<VTensor*> outputs) {
     if (!t.op) {
       std::vector<DimArg> vars;
       std::vector<ExprHandle> exprs;
+      // NOLINTNEXTLINE(performance-for-range-copy)
       for (auto k : t.shape) {
         vars.emplace_back(vbindings.at(k));
         exprs.emplace_back(vbindings.at(k));

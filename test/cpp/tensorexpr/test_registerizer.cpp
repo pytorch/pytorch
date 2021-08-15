@@ -1179,6 +1179,7 @@ TEST(Registerizer, RegisterizerConditionInsideOverlap1) {
   VarHandle y("y", kInt);
 
   Stmt* stmt = Block::make(
+      // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
       {Store::make(a, {x}, Load::make(b, {x})),
        Store::make(c, {x}, Load::make(a, {x})),
        Cond::make(
@@ -1238,6 +1239,7 @@ TEST(Registerizer, RegisterizerConditionInsideOverlap2) {
   VarHandle y("y", kInt);
 
   Stmt* stmt = Block::make(
+      // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
       {Store::make(a, {x}, Load::make(b, {x})),
        Store::make(a, {x}, Load::make(b, {x + 1})),
        Store::make(c, {x}, Load::make(a, {x})),
@@ -2470,6 +2472,7 @@ TEST(Registerizer, RegisterizerNestedBlocks) {
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
   Stmt* stmt = Block::make(
+      // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
       {Store::make(a, {0}, Add::make(Load::make(a, {0}), 1)),
        Block::make({Store::make(a, {0}, Add::make(Load::make(a, {0}), 2))}),
        Block::make(
@@ -2669,6 +2672,7 @@ TEST(Registerizer, RegisterizerNestedConditionsHiddenFirst) {
 
   ASSERT_EQ(before.str(), after.str());
 
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   stmt = registerize(stmt);
 }
 
@@ -2711,6 +2715,7 @@ TEST(Registerizer, RegisterizerNestedConditionsHiddenSecond) {
 
   ASSERT_EQ(before.str(), after.str());
 
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   stmt = registerize(stmt);
 }
 
@@ -2973,6 +2978,7 @@ TEST(Registerizer, RegisterizerHiddenAccessYes) {
                10,
                Block::make(
                    {Store::make(b, {x}, 0),
+                    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
                     Cond::make(
                         CompareSelect::make(x, 3, CompareSelectOperation::kEQ),
                         For::make(
@@ -3053,6 +3059,7 @@ TEST(Registerizer, RegisterizerHiddenAccessNo) {
           10,
           Block::make(
               {Store::make(b, {x}, 0),
+               // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
                Cond::make(
                    CompareSelect::make(x, 3, CompareSelectOperation::kEQ),
                    For::make(
@@ -3695,6 +3702,7 @@ TEST(Registerizer, RegisterizerMultiDim3DReduction2) {
       x,
       0,
       10,
+      // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
       For::make(
           y,
           0,

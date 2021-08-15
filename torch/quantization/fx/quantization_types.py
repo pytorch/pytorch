@@ -1,4 +1,4 @@
-from typing import Union, Callable, Tuple, Any
+from typing import Any, Callable, Tuple, Union
 
 Pattern = Union[Callable, Tuple[Callable, Callable], Tuple[Callable, Callable, Callable]]
 

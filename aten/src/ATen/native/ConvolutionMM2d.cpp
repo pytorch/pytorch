@@ -270,7 +270,7 @@ void slow_conv2d_backward_out_cpu_template(
   const int64_t batch_size = input.size(0);
   at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
     NoGradGuard no_grad;
-    AutoDispatchBelowInplaceOrView non_variable_type_mode;
+    AutoDispatchBelowADInplaceOrView non_variable_type_mode;
     for (int64_t t = start; t < end; t++) {
       Tensor grad_input_t = grad_input[t];
       Tensor grad_output_t = grad_output[t];
@@ -419,7 +419,6 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv2d_forward_out_cpu(const Tensor& 
       false);
 
   const Tensor input = self.contiguous();
-  const int64_t ndim = input.dim();
   const int64_t dim_planes = 1;
   const int64_t dim_height = 2;
   const int64_t dim_width = 3;
@@ -449,7 +448,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv2d_forward_out_cpu(const Tensor& 
 
   at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
     NoGradGuard no_grad;
-    AutoDispatchBelowInplaceOrView non_variable_type_mode;
+    AutoDispatchBelowADInplaceOrView non_variable_type_mode;
     for (int64_t t = start; t < end; t++) {
       Tensor input_t = input[t].unsqueeze(0);
       Tensor output_t = output[t];
@@ -522,6 +521,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv2d_backward_out_cpu(const Tensor&
         self,
         weight,
         finput,
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
         const_cast<Tensor&>(fgrad_input),   // cast away auto-generated const of buffer
         kernel_size,
         stride,

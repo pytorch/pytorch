@@ -64,18 +64,20 @@ def get_approximate_basis(A: Tensor,
 
     R = torch.randn(n, q, dtype=dtype, device=A.device)
 
+    # The following code could be made faster using torch.geqrf + torch.ormqr
+    # but geqrf is not differentiable
     A_H = _utils.transjugate(A)
     if M is None:
-        (Q, _) = matmul(A, R).qr()
+        Q = torch.linalg.qr(matmul(A, R)).Q
         for i in range(niter):
-            (Q, _) = matmul(A_H, Q).qr()
-            (Q, _) = matmul(A, Q).qr()
+            Q = torch.linalg.qr(matmul(A_H, Q)).Q
+            Q = torch.linalg.qr(matmul(A, Q)).Q
     else:
         M_H = _utils.transjugate(M)
-        (Q, _) = (matmul(A, R) - matmul(M, R)).qr()
+        Q = torch.linalg.qr(matmul(A, R) - matmul(M, R)).Q
         for i in range(niter):
-            (Q, _) = (matmul(A_H, Q) - matmul(M_H, Q)).qr()
-            (Q, _) = (matmul(A, Q) - matmul(M, Q)).qr()
+            Q = torch.linalg.qr(matmul(A_H, Q) - matmul(M_H, Q)).Q
+            Q = torch.linalg.qr(matmul(A, Q) - matmul(M, Q)).Q
 
     return Q
 
@@ -96,10 +98,10 @@ def svd_lowrank(A: Tensor, q: Optional[int] = 6, niter: Optional[int] = 2,
     .. note:: The input is assumed to be a low-rank matrix.
 
     .. note:: In general, use the full-rank SVD implementation
-              ``torch.svd`` for dense matrices due to its 10-fold
+              :func:`torch.linalg.svd` for dense matrices due to its 10-fold
               higher performance characteristics. The low-rank SVD
               will be useful for huge sparse matrices that
-              ``torch.svd`` cannot handle.
+              :func:`torch.linalg.svd` cannot handle.
 
     Args::
         A (Tensor): the input tensor of size :math:`(*, m, n)`
@@ -154,7 +156,8 @@ def _svd_lowrank(A: Tensor, q: Optional[int] = 6, niter: Optional[int] = 2,
         assert B_t.shape[-2] == m, (B_t.shape, m)
         assert B_t.shape[-1] == q, (B_t.shape, q)
         assert B_t.shape[-1] <= B_t.shape[-2], B_t.shape
-        U, S, V = torch.svd(B_t)
+        U, S, Vh = torch.linalg.svd(B_t, full_matrices=False)
+        V = Vh.conj().transpose(-2, -1)
         V = Q.matmul(V)
     else:
         Q = get_approximate_basis(A, q, niter=niter, M=M)
@@ -167,7 +170,8 @@ def _svd_lowrank(A: Tensor, q: Optional[int] = 6, niter: Optional[int] = 2,
         assert B_t.shape[-2] == q, (B_t.shape, q)
         assert B_t.shape[-1] == n, (B_t.shape, n)
         assert B_t.shape[-1] <= B_t.shape[-2], B_t.shape
-        U, S, V = torch.svd(B_t)
+        U, S, Vh = torch.linalg.svd(B_t, full_matrices=False)
+        V = Vh.conj().transpose(-2, -1)
         U = Q.matmul(U)
 
     return U, S, V

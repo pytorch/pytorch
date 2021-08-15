@@ -42,6 +42,7 @@ TEST_F(SequentialTest, ConstructsFromConcreteType) {
 
   struct M : torch::nn::Module {
     explicit M(int value_) : value(value_) {}
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     M(const M& other) : torch::nn::Module(other) {
       copy_count++;
     }
@@ -510,6 +511,7 @@ TEST_F(SequentialTest, ModuleForwardMethodOptionalArg) {
 
     auto query = torch::ones({batch_size, tgt_len, embed_dim});
     auto key = torch::ones({batch_size, src_len, embed_dim});
+    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
     auto value = key;
 
     Sequential sequential(MultiheadAttention(embed_dim, num_heads));

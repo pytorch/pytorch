@@ -22,10 +22,8 @@ namespace torch {
 namespace jit {
 
 // Controls whether graph source ranges are printed by default
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 bool global_print_source_ranges = true;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 Symbol ConcretePythonOp::Kind = prim::PythonOp;
 
 using c10::Type;
@@ -141,6 +139,7 @@ std::string ConcretePythonOp::name() const {
 }
 
 void ConcretePythonOp::cloneFrom(Node* other_) {
+  // NOLINTNEXTLINE(bugprone-parent-virtual-call)
   Node::cloneFrom(other_);
   auto other = other_->cast<ConcretePythonOp>();
   this->cconv = other->cconv;
@@ -277,7 +276,6 @@ void initPythonIRBindings(PyObject* module_) {
                 add_node_names,
                 use_external_data_format,
                 onnx_file_path);
-            graph = serialize_model_proto_to_string(model_proto);
             std::unordered_map<std::string, py::bytes>
                 python_serialized_export_map;
             for (auto& kv : export_map) {
@@ -462,7 +460,9 @@ void initPythonIRBindings(PyObject* module_) {
       .VS(requires_grad)
       .def(
           "requiresGrad",
-          [](Value& n) { n.type()->expectRef<TensorType>().requiresGrad(); })
+          [](Value& n) {
+            return n.type()->expectRef<TensorType>().requiresGrad();
+          })
       .def("toIValue", [](Value& n) { return toIValue(&n); })
       .def("type", [](Value& v) { return v.type(); });
 #undef VS
@@ -567,6 +567,9 @@ void initPythonIRBindings(PyObject* module_) {
           py::arg("recurse") = true)
       .def("input", [](Node& n) { return n.input(); })
       .def("output", [](Node& n) { return n.output(); })
+      .def(
+          "getModuleHierarchy",
+          [](Node& n) { return torch::jit::utils::getNodesModuleHierarchy(n); })
       .NS(addInput)
       .NS(replaceInput)
       .NS(replaceInputWith)
@@ -736,6 +739,36 @@ void initPythonIRBindings(PyObject* module_) {
               }
             }
             return py::none();
+          })
+      .def(
+          "symbolic_sizes",
+          [](Type& t) -> py::object {
+            if (auto ptt = t.expect<TensorType>()) {
+              auto ss = ptt->symbolic_sizes();
+              if (!ss.rank().has_value()) {
+                return py::none();
+              }
+
+              std::vector<int64_t> ss_vals;
+              for (size_t i = 0; i < *ss.rank(); ++i) {
+                ss_vals.push_back(ss.at(i).value());
+              }
+              return py::cast(ss_vals);
+            }
+            return py::none();
+          })
+      .def(
+          "with_sizes",
+          [](Type& t, c10::optional<std::vector<c10::optional<int64_t>>> sizes)
+              -> py::object {
+            auto ptt = t.expect<TensorType>();
+            if (!ptt) {
+              return py::none();
+            }
+            if (!sizes) {
+              return py::cast(ptt->withSymbolicShapes(c10::SymbolicShape()));
+            }
+            return py::cast(ptt->withSymbolicShapes(*sizes));
           })
       .def(
           "varyingSizes",

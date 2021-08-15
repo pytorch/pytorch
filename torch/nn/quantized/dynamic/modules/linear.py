@@ -79,7 +79,7 @@ class Linear(nnq.Linear):
             mod (Module): a float module, either produced by torch.quantization
                           utilities or provided by the user
         """
-        float_modules = [torch.nn.Linear, torch.nn.modules.linear._LinearWithBias]
+        float_modules = [torch.nn.Linear, torch.nn.modules.linear.NonDynamicallyQuantizableLinear]
         assert type(mod) in float_modules, \
             'nn.quantized.dynamic.Linear.from_float only works for one of' + \
             str([float_mod.__name__ for float_mod in float_modules])

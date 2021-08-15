@@ -25,14 +25,17 @@ from tools.codegen.context import with_native_function
 from tools.codegen.model import BaseOperatorName, NativeFunction
 import tools.codegen.api.python as python
 from .gen_python_functions import should_generate_py_binding, is_py_torch_function, \
-    is_py_nn_function, is_py_linalg_function, is_py_variable_method
+    is_py_nn_function, is_py_linalg_function, is_py_variable_method, is_py_special_function, \
+    is_py_fft_function
 
 def gen_annotated(native_yaml_path: str, out: str, autograd_dir: str) -> None:
-    native_functions = parse_native_yaml(native_yaml_path)
+    native_functions = parse_native_yaml(native_yaml_path).native_functions
     mappings = (
         (is_py_torch_function, 'torch._C._VariableFunctions'),
         (is_py_nn_function, 'torch._C._nn'),
         (is_py_linalg_function, 'torch._C._linalg'),
+        (is_py_special_function, 'torch._C._special'),
+        (is_py_fft_function, 'torch._C._fft'),
         (is_py_variable_method, 'torch.Tensor'),
     )
     annotated_args: List[str] = []
@@ -48,7 +51,7 @@ def gen_annotated(native_yaml_path: str, out: str, autograd_dir: str) -> None:
 
     template_path = os.path.join(autograd_dir, 'templates')
     fm = FileManager(install_dir=out, template_dir=template_path, dry_run=False)
-    fm.write_with_template('annotated_fn_args.py', 'annotated_fn_args.py', lambda: {
+    fm.write_with_template('annotated_fn_args.py', 'annotated_fn_args.py.in', lambda: {
         'annotated_args': textwrap.indent('\n'.join(annotated_args), '    '),
     })
 

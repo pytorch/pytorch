@@ -16,7 +16,11 @@ namespace jit {
 namespace detail {
 
 // Note: CPU fusion is currently disabled due to test flakiness
+#if defined(FBCODE_CAFFE2)
+bool cpu_fuser_enabled = true;
+#else
 bool cpu_fuser_enabled = false;
+#endif
 
 bool gpu_fuser_enabled = true;
 

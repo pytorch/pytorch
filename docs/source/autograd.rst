@@ -50,6 +50,10 @@ you can use it as ``functional.jacobian(lambda x: f(x, constant, flag=flag), inp
 Locally disabling gradient computation
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+See :ref:`locally-disable-grad-doc` for more information on the differences
+between no-grad and inference mode as well as other related mechanisms that
+may be confused with the two.
+
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -57,6 +61,7 @@ Locally disabling gradient computation
     no_grad
     enable_grad
     set_grad_enabled
+    inference_mode
 
 .. _default-grad-layouts:
 
@@ -236,3 +241,18 @@ Anomaly detection
 .. autoclass:: detect_anomaly
 
 .. autoclass:: set_detect_anomaly
+
+
+Saved tensors default hooks
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Some operations need intermediary results to be saved during the forward pass
+in order to execute the backward pass.
+You can define how these saved tensors should be packed / unpacked using hooks.
+A common application is to trade compute for memory by saving those intermediary results
+to disk or to CPU instead of leaving them on the GPU. This is especially useful if you
+notice your model fits on GPU during evaluation, but not training.
+
+.. autoclass:: torch.autograd.graph.saved_tensors_hooks
+
+.. autoclass:: torch.autograd.graph.save_on_cpu

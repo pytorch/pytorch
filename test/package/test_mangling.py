@@ -1,3 +1,5 @@
+from io import BytesIO
+
 from torch.package import PackageExporter, PackageImporter
 from torch.package._mangling import (
     PackageMangler,
@@ -6,8 +8,6 @@ from torch.package._mangling import (
     is_mangled,
 )
 from torch.testing._internal.common_utils import run_tests
-
-from io import BytesIO
 
 try:
     from .common import PackageTestCase
@@ -81,7 +81,8 @@ class TestMangling(PackageTestCase):
         obj = package_a.subpackage.PackageASubpackageObject()
         obj2 = package_a.PackageAObject(obj)
         f1 = BytesIO()
-        with PackageExporter(f1, verbose=False) as pe:
+        with PackageExporter(f1) as pe:
+            pe.intern("**")
             pe.save_pickle("obj", "obj.pkl", obj2)
         f1.seek(0)
         importer1 = PackageImporter(f1)

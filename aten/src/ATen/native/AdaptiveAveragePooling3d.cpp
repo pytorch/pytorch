@@ -8,10 +8,12 @@ namespace native {
 namespace {
 
 inline int start_index(int a, int b, int c) {
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   return (int)std::floor((float)(a * c) / b);
 }
 
 inline int end_index(int a, int b, int c) {
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   return (int)std::ceil((float)((a + 1) * c) / b);
 }
 
@@ -81,10 +83,10 @@ void adaptive_avg_pool3d_out_cpu_template(
     IntArrayRef output_size) {
   TORCH_CHECK(output_size.size() == 3, "adaptive_avg_pool3d: output_size must be 3");
 
-  for (int64_t i = 0; i < input.ndimension(); i++) {
+  for (int64_t i = 1; i < input.ndimension(); i++) {
     TORCH_CHECK(
         input.size(i) > 0,
-        "adaptive_avg_pool3d(): expected input to have non-empty spatial dimensions, "
+        "adaptive_avg_pool3d(): Expected input to have non-zero size for non-batch dimensions, "
         "but input has sizes ",
         input.sizes(),
         " with dimension ",
@@ -95,7 +97,8 @@ void adaptive_avg_pool3d_out_cpu_template(
 
   TORCH_CHECK(
       (input.ndimension() == 4 || input.ndimension() == 5),
-      "non-empty 4D or 5D (batch mode) tensor expected for input");
+      "adaptive_avg_pool3d(): Expected 3D or 4D tensor, but got ",
+      input.sizes());
   TORCH_CHECK(input.dtype() == output.dtype(),
       "expected dtype ", input.dtype(), " for `output` but got dtype ", output.dtype());
 

@@ -19,6 +19,7 @@ TEST(PyTorchStreamWriterAndReader, SaveAndLoad) {
     oss.write(static_cast<const char*>(b), n);
     return oss ? n : 0;
   });
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,cppcoreguidelines-avoid-magic-numbers)
   std::array<char, 127> data1;
 
   for (int i = 0; i < data1.size(); ++i) {
@@ -26,15 +27,18 @@ TEST(PyTorchStreamWriterAndReader, SaveAndLoad) {
   }
   writer.writeRecord("key1", data1.data(), data1.size());
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,cppcoreguidelines-avoid-magic-numbers)
   std::array<char, 64> data2;
   for (int i = 0; i < data2.size(); ++i) {
     data2[i] = data2.size() - i;
   }
   writer.writeRecord("key2", data2.data(), data2.size());
 
-  const std::vector<std::string>& written_records = writer.getAllWrittenRecords();
-  ASSERT_EQ(written_records[0], "key1");
-  ASSERT_EQ(written_records[1], "key2");
+  const std::unordered_set<std::string>& written_records =
+      writer.getAllWrittenRecords();
+  ASSERT_EQ(written_records.size(), 2);
+  ASSERT_EQ(written_records.count("key1"), 1);
+  ASSERT_EQ(written_records.count("key2"), 1);
 
   writer.writeEndOfFile();
 
@@ -51,6 +55,7 @@ TEST(PyTorchStreamWriterAndReader, SaveAndLoad) {
   ASSERT_TRUE(reader.hasRecord("key2"));
   ASSERT_FALSE(reader.hasRecord("key2000"));
   at::DataPtr data_ptr;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t size;
   std::tie(data_ptr, size) = reader.getRecord("key1");
   size_t off1 = reader.getRecordOffset("key1");
@@ -75,6 +80,7 @@ TEST(PytorchStreamWriterAndReader, GetNonexistentRecordThrows) {
     oss.write(static_cast<const char*>(b), n);
     return oss ? n : 0;
   });
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,cppcoreguidelines-avoid-magic-numbers)
   std::array<char, 127> data1;
 
   for (int i = 0; i < data1.size(); ++i) {
@@ -82,15 +88,18 @@ TEST(PytorchStreamWriterAndReader, GetNonexistentRecordThrows) {
   }
   writer.writeRecord("key1", data1.data(), data1.size());
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,cppcoreguidelines-avoid-magic-numbers)
   std::array<char, 64> data2;
   for (int i = 0; i < data2.size(); ++i) {
     data2[i] = data2.size() - i;
   }
   writer.writeRecord("key2", data2.data(), data2.size());
 
-  const std::vector<std::string>& written_records = writer.getAllWrittenRecords();
-  ASSERT_EQ(written_records[0], "key1");
-  ASSERT_EQ(written_records[1], "key2");
+  const std::unordered_set<std::string>& written_records =
+      writer.getAllWrittenRecords();
+  ASSERT_EQ(written_records.size(), 2);
+  ASSERT_EQ(written_records.count("key1"), 1);
+  ASSERT_EQ(written_records.count("key2"), 1);
 
   writer.writeEndOfFile();
 
@@ -103,6 +112,7 @@ TEST(PytorchStreamWriterAndReader, GetNonexistentRecordThrows) {
 
   // read records through readers
   PyTorchStreamReader reader(&iss);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   EXPECT_THROW(reader.getRecord("key3"), c10::Error);
 
   // Reader should still work after throwing

@@ -1,4 +1,3 @@
-import unittest
 import tempfile
 import sys
 import torch
@@ -7,7 +6,7 @@ import time
 from typing import List
 
 from torch.testing._internal.common_distributed import requires_nccl, create_tcp_store
-from torch.testing._internal.common_utils import load_tests, TEST_WITH_TSAN, run_tests, IS_WINDOWS
+from torch.testing._internal.common_utils import load_tests, TEST_WITH_TSAN, run_tests, sandcastle_skip_if
 from torch.testing._internal.jit_utils import JitTestCase
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -30,11 +29,10 @@ def unique_process_group_name(prefix):
     now = int(time.time() * 1000)
     return "%s_%d" % (prefix, now)
 
-@unittest.skipIf(
-    TEST_WITH_TSAN,
-    "TSAN is not fork-safe since we're forking in a multi-threaded environment",
-)
-@unittest.skipIf(IS_WINDOWS, "TCPStore not available on Windows")
+if TEST_WITH_TSAN:
+    print("Skip as TSAN is not fork-safe since we're forking in a multi-threaded environment", file=sys.stderr)
+    sys.exit(0)
+
 class ProcessGroupNCCLJitTest(JitTestCase):
     MAIN_PROCESS_RANK = 0
 
@@ -42,9 +40,6 @@ class ProcessGroupNCCLJitTest(JitTestCase):
         self.rank = self.MAIN_PROCESS_RANK
         self.world_size = 1
         self.file = tempfile.NamedTemporaryFile(delete=False)
-        self.num_gpus = torch.cuda.device_count()
-        if self.num_gpus < 2:
-            raise unittest.SkipTest("NCCL test requires 2+ GPUs")
 
     def _create_nccl_pg(self, name_prefix):
         tcp_store = create_tcp_store(jit_class=True)
@@ -61,10 +56,12 @@ class ProcessGroupNCCLJitTest(JitTestCase):
             self.world_size, self.rank, [], "nccl", tcp_store, name, 0)
 
     @requires_nccl()
+    @sandcastle_skip_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
     def test_init_process_group_nccl_torchbind(self):
         self._create_nccl_pg("raw_process_group_nccl_torchbind")
 
     @requires_nccl()
+    @sandcastle_skip_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
     def test_process_group_nccl_torchbind_alltoall(self):
         nccl_pg = self._create_nccl_pg("process_group_nccl_as_base_class")
 
@@ -86,11 +83,13 @@ class ProcessGroupNCCLJitTest(JitTestCase):
         run_pg_nccl_alltoall(nccl_pg, output, input)
 
     @requires_nccl()
+    @sandcastle_skip_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
     def test_init_process_group_nccl_as_base_process_group_torchbind(self):
         name = unique_process_group_name("creation_test_process_group")
         self._create_nccl_pg_as_base_process_group(name)
 
     @requires_nccl()
+    @sandcastle_skip_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
     def test_process_group_nccl_as_base_process_group_torchbind_alltoall(self):
         name = unique_process_group_name("alltoall_test_process_group")
         nccl_pg = self._create_nccl_pg_as_base_process_group(name)
@@ -113,6 +112,7 @@ class ProcessGroupNCCLJitTest(JitTestCase):
         run_pg_nccl_alltoall(nccl_pg, output, input)
 
     @requires_nccl()
+    @sandcastle_skip_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
     def test_process_group_nccl_serialization(self):
         class TestModule(torch.nn.Module):
             def __init__(self, pg_nccl):
@@ -159,17 +159,14 @@ class StoreTest(JitTestCase):
         create_prefix_file_store(self.filestore, self.prefix)
 
 
-@unittest.skipIf(IS_WINDOWS, "TCPStore not available on Windows")
 class C10dFrontendJitTest(JitTestCase):
     def setUp(self):
         self.rank = 0
         self.world_size = 1
         self.file = tempfile.NamedTemporaryFile(delete=False)
-        self.num_gpus = torch.cuda.device_count()
-        if self.num_gpus < 2:
-            raise unittest.SkipTest("NCCL test requires 2+ GPUs")
 
     @requires_nccl()
+    @sandcastle_skip_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
     def test_frontend_singleton(self):
         frontend1 = torch.classes.dist_c10d.frontend()
         frontend2 = torch.classes.dist_c10d.frontend()
@@ -184,14 +181,10 @@ class C10dFrontendJitTest(JitTestCase):
         ProcessGroupNCCL2 = frontend2.get_process_group_by_name(pg_name)
         self.assertEqual(frontend2.get_name_of_process_group(ProcessGroupNCCL2), pg_name)
 
-@unittest.skipIf(IS_WINDOWS, "TCPStore not available on Windows")
 class C10dProcessGroupSerialization(JitTestCase):
-    def setUp(self):
-        self.num_gpus = torch.cuda.device_count()
-        if self.num_gpus < 2:
-            raise unittest.SkipTest("NCCL test requires 2+ GPUs")
 
     @requires_nccl()
+    @sandcastle_skip_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
     def test_process_group_as_module_member(self):
         class TestModule(torch.nn.Module):
             def __init__(self):

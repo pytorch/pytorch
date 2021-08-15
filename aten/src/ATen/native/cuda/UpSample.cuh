@@ -171,7 +171,7 @@ __device__ __forceinline__ static void upsample_increment_value_bounded(
   /* TODO: result here is truncated to scalar_t,
      check: https://github.com/pytorch/pytorch/pull/19630#discussion_r281426912
    */
-  gpuAtomicAdd(
+  gpuAtomicAddNoReturn(
       &data[batch][channel][access_y][access_x], static_cast<scalar_t>(value));
 }
 

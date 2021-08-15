@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/passes/erase_number_types.h>
 
 #include <torch/csrc/jit/ir/constants.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 
 namespace torch {
@@ -67,6 +68,7 @@ void EraseNumberTypes(const std::shared_ptr<Graph>& graph) {
     SetNumTypeToTensorType(inp);
   }
   EraseNumberTypesOnBlock(graph->block());
+  GRAPH_DUMP("After EraseNumberTypes: ", graph);
 }
 } // namespace jit
 } // namespace torch

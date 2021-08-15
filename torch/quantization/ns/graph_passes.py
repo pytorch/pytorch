@@ -1,7 +1,6 @@
 import torch
 from torch.fx import GraphModule, map_arg
 from torch.fx.graph import Graph, Node
-from torch.quantization.fx.quantize import is_activation_post_process
 from torch.quantization.fx.utils import get_new_attr_name_with_prefix
 
 from .utils import (
@@ -11,14 +10,37 @@ from .utils import (
     return_first_non_observer_node,
     get_number_of_non_param_args,
     get_target_type_str,
+    get_arg_indices_of_inputs_to_log,
+    get_node_input_qparams,
 )
 
 from .ns_types import (
     NSSingleResultValuesType,
     NSSubgraph,
+    NSNodeTargetType,
 )
+from torch.quantization.ns.mappings import (
+    get_node_type_to_io_type_map,
+)
+from torch.quantization.quantize import is_activation_post_process
 
-from typing import Dict, Tuple, Callable, List, Any, Union, Optional
+from typing import Dict, Tuple, Callable, List, Any, Union, Optional, Set
+
+def _maybe_get_fqn(node: Node, gm: GraphModule) -> Optional[str]:
+    fqn = None
+    if hasattr(gm, '_node_name_to_scope'):
+        # fqn on observers is not present, because they do not
+        # exist when the fqns are created during tracing. If this is
+        # an observer, get the fqn of the node being observed.
+        node_to_use_for_fqn = node
+        if node.op == 'call_module':
+            assert isinstance(node.target, str)
+            module = getattr_from_fqn(gm, node.target)
+            if is_activation_post_process(module):
+                assert isinstance(node.args[0], Node)
+                node_to_use_for_fqn = node.args[0]
+        fqn = gm._node_name_to_scope[node_to_use_for_fqn.name][0]  # type: ignore[index]
+    return fqn  # type: ignore[return-value]
 
 def _insert_logger_after_node(
     node: Node,
@@ -28,8 +50,11 @@ def _insert_logger_after_node(
     ref_node_name: str,
     model_name: str,
     ref_name: str,
+    ref_node_target_type: str,
     results_type: str,
     index_within_arg: int,
+    index_of_arg: int,
+    fqn: Optional[str],
 ) -> Node:
     """
     Given a starting graph of
@@ -48,22 +73,23 @@ def _insert_logger_after_node(
     # create the logger object
     logger_obj = logger_cls(
         ref_node_name, node.name, model_name, ref_name, target_type,
-        results_type, index_within_arg)
+        ref_node_target_type,
+        results_type, index_within_arg, index_of_arg, fqn)
     # attach the logger object to the parent module
     setattr(gm, logger_node_name, logger_obj)
     logger_node = node.graph.create_node(
         'call_module', logger_node_name, (node,), {})
     return logger_node
 
-def remove_observers_add_loggers(
+def add_loggers_to_model(
     gm: GraphModule,
-    node_to_instrument_inputs_to_ref_node_name: Dict[Node, str],
-    node_to_instrument_outputs_to_ref_node_name: Dict[Node, str],
+    node_to_instrument_inputs_to_ref_node_name: Dict[Node, Tuple[str, str]],
+    node_to_instrument_outputs_to_ref_node_name: Dict[Node, Tuple[str, str]],
     logger_cls: Callable,
     model_name: str,
 ) -> GraphModule:
     """
-    Takes the graph of gm, removes all observers, adds loggers to the output
+    Takes the graph of gm, adds loggers to the output
     of each node in nodes_to_instrument. Returns a GraphModule with the new
     graph.
     """
@@ -80,52 +106,90 @@ def remove_observers_add_loggers(
             new_graph.output(map_arg(node.args[0], load_arg))
             continue
 
-        if node.op == 'call_module' and is_activation_post_process(modules[node.target]):
-            # remove activation post process node
-            env[node.name] = env[node.args[0].name]
-
-        elif (
+        if (
             (node in node_to_instrument_inputs_to_ref_node_name) or
             (node in node_to_instrument_outputs_to_ref_node_name)
         ):
+            fqn = _maybe_get_fqn(node, gm)
 
             if node in node_to_instrument_inputs_to_ref_node_name:
-                ref_name = node_to_instrument_inputs_to_ref_node_name[node]
-                if type(node.args[0]) == Node:
-                    # create a single input logger
-                    prev_node = env[node.args[0].name]
-                    env[node.args[0].name] = _insert_logger_after_node(
-                        prev_node, gm, logger_cls, '_ns_logger_', node.name,
-                        model_name, ref_name, NSSingleResultValuesType.NODE_INPUT.value,
-                        index_within_arg=0)
-                elif type(node.args[0]) == torch.fx.immutable_collections.immutable_list:
-                    # create N input loggers, one for each node
-                    for arg_idx, arg in enumerate(node.args[0]):
-                        prev_node = env[arg.name]
-                        env[prev_node.name] = _insert_logger_after_node(
+                ref_name, ref_node_type = node_to_instrument_inputs_to_ref_node_name[node]
+                # Ops such add and mul are special because either
+                # one or two of the first two arguments can be tensors,
+                # and if one argument is a tensor it can be first or
+                # second (x + 1 versus 1 + x).
+                arg_indices_to_log = get_arg_indices_of_inputs_to_log(node)
+                for node_arg_idx in arg_indices_to_log:
+                    node_arg = node.args[node_arg_idx]
+                    if type(node_arg) == Node:
+                        # create a single input logger
+                        prev_node = env[node_arg.name]
+                        env[node_arg.name] = _insert_logger_after_node(
                             prev_node, gm, logger_cls, '_ns_logger_', node.name,
-                            model_name, ref_name, NSSingleResultValuesType.NODE_INPUT.value,
-                            index_within_arg=arg_idx)
-                else:
-                    raise AssertionError(f"type {type(node.args[0])} is not handled yet")
+                            model_name, ref_name, ref_node_type,
+                            NSSingleResultValuesType.NODE_INPUT.value,
+                            index_within_arg=0, index_of_arg=node_arg_idx,
+                            fqn=fqn)
+                    elif type(node_arg) == torch.fx.immutable_collections.immutable_list:
+                        # create N input loggers, one for each node
+                        for arg_idx, arg in enumerate(node_arg):
+                            prev_node = env[arg.name]
+                            env[prev_node.name] = _insert_logger_after_node(
+                                prev_node, gm, logger_cls, '_ns_logger_', node.name,
+                                model_name, ref_name, ref_node_type,
+                                NSSingleResultValuesType.NODE_INPUT.value,
+                                index_within_arg=arg_idx, index_of_arg=node_arg_idx,
+                                fqn=fqn)
+                    else:
+                        pass
 
             # ensure env is populated with base node
             # Note: runs for both inputs and outputs
             env[node.name] = new_graph.node_copy(node, load_arg)
 
             if node in node_to_instrument_outputs_to_ref_node_name:
-                ref_name = node_to_instrument_outputs_to_ref_node_name[node]
+                ref_name, ref_node_type = node_to_instrument_outputs_to_ref_node_name[node]
                 # add the logger after the base node
                 env[node.name] = _insert_logger_after_node(
                     env[node.name], gm, logger_cls, '_ns_logger_', node.name,
-                    model_name, ref_name, NSSingleResultValuesType.NODE_OUTPUT.value,
-                    index_within_arg=0)
+                    model_name, ref_name, ref_node_type,
+                    NSSingleResultValuesType.NODE_OUTPUT.value,
+                    index_within_arg=0, index_of_arg=0, fqn=fqn)
 
         else:
             env[node.name] = new_graph.node_copy(node, load_arg)
 
     new_gm = GraphModule(gm, new_graph)
     return new_gm
+
+def _insert_quantize_per_tensor_node(
+    prev_node_c: Node,
+    node_a: Node,
+    gm_b: GraphModule,
+    graph_c: Graph,
+    scale: Union[torch.Tensor, float],
+    zero_point: Union[torch.Tensor, int],
+    dtype_cast_name: str,
+) -> Node:
+    # copy scale
+    scale_node_name = \
+        get_new_attr_name_with_prefix(
+            node_a.name + '_input_scale_')(gm_b)
+    setattr(gm_b, scale_node_name, scale)
+    scale_node = graph_c.create_node(
+        'get_attr', scale_node_name, (), {}, scale_node_name)
+    # copy zero_point
+    zero_point_node_name = \
+        get_new_attr_name_with_prefix(
+            node_a.name + '_input_zero_point_')(gm_b)
+    setattr(gm_b, zero_point_node_name, zero_point)
+    zero_point_node = graph_c.create_node(
+        'get_attr', zero_point_node_name, (), {}, zero_point_node_name)
+    # create the quantize_per_tensor call
+    return graph_c.create_node(
+        'call_function', torch.quantize_per_tensor,
+        (prev_node_c, scale_node, zero_point_node, torch.quint8), {},
+        dtype_cast_name)
 
 def _insert_dtype_cast_after_node(
     node_a: Node,
@@ -136,6 +200,7 @@ def _insert_dtype_cast_after_node(
     graph_c: Graph,
     node_name_prefix: str,
     logger_cls: Callable,
+    node_type_to_io_type_map: Dict[str, Set[NSNodeTargetType]],
 ) -> Union[Node, List[Node]]:
     """
     Given a starting graph C (derived from graph B) of
@@ -155,33 +220,43 @@ def _insert_dtype_cast_after_node(
     """
     dtype_cast_op = None
     dtype_cast_mod_cls = None
+    dtype_cast_scale = None
+    dtype_cast_zero_point = None
     node_input_type_a, _node_output_type_a = \
-        get_node_first_input_and_output_type(node_a, gm_a, logger_cls)
+        get_node_first_input_and_output_type(
+            node_a, gm_a, logger_cls, node_type_to_io_type_map)
     node_input_type_c, _node_output_type_c = \
-        get_node_first_input_and_output_type(node_c, gm_b, logger_cls)
+        get_node_first_input_and_output_type(
+            node_c, gm_b, logger_cls, node_type_to_io_type_map)
 
     if (
         (node_input_type_a == NodeInputOrOutputType.FP32 and
          node_input_type_c == NodeInputOrOutputType.INT8) or
         (node_input_type_a == NodeInputOrOutputType.FP32 and
-         node_input_type_c == NodeInputOrOutputType.FP16)
+         node_input_type_c == NodeInputOrOutputType.FP16) or
+        # TODO(future PR): determine the actual dtype of node_c,
+        # the current code only works because dequantize works with
+        # multiple input dtypes.
+        (node_input_type_a == NodeInputOrOutputType.FP32 and
+         node_input_type_c == NodeInputOrOutputType.FP32_OR_INT8)
     ):
         dtype_cast_op = torch.dequantize
     elif (
-        node_input_type_a == NodeInputOrOutputType.FP32 and
-        node_input_type_c == NodeInputOrOutputType.FP32
+        node_input_type_a == node_input_type_c and
+        node_input_type_a != NodeInputOrOutputType.UNKNOWN
     ):
         dtype_cast_mod_cls = torch.nn.Identity
     elif (
         node_input_type_a == NodeInputOrOutputType.INT8 and
-        node_input_type_c == NodeInputOrOutputType.INT8
+        node_input_type_c == NodeInputOrOutputType.FP32
     ):
-        dtype_cast_mod_cls = torch.nn.Identity
-    elif (
-        node_input_type_a == NodeInputOrOutputType.FP32_OR_INT8 and
-        node_input_type_c == NodeInputOrOutputType.FP32_OR_INT8
-    ):
-        dtype_cast_mod_cls = torch.nn.Identity
+        # int8 shadows fp32, the dtype cast needs to quantize to int8
+        # with the right qparams.
+        node_a_input_qparams = get_node_input_qparams(
+            node_a, gm_a, node_type_to_io_type_map)
+        if node_a_input_qparams is not None:
+            dtype_cast_op = torch.quantize_per_tensor  # type: ignore[assignment]
+            dtype_cast_scale, dtype_cast_zero_point = node_a_input_qparams
     else:
         raise AssertionError(
             f"dtype cast from {node_input_type_c} {node_c.format_node()} to " +
@@ -191,9 +266,14 @@ def _insert_dtype_cast_after_node(
         new_dtype_cast_name = \
             get_new_attr_name_with_prefix(node_name_prefix)(gm_b)
         if dtype_cast_op:
-            return graph_c.create_node(
-                'call_function', dtype_cast_op, (prev_node_c,), {},
-                new_dtype_cast_name)
+            if dtype_cast_scale is not None and dtype_cast_zero_point is not None:
+                return _insert_quantize_per_tensor_node(
+                    prev_node_c, node_a, gm_b, graph_c, dtype_cast_scale,
+                    dtype_cast_zero_point, new_dtype_cast_name)
+            else:
+                return graph_c.create_node(
+                    'call_function', dtype_cast_op, (prev_node_c,), {},
+                    new_dtype_cast_name)
         else:
             assert dtype_cast_mod_cls
             dtype_cast_mod = dtype_cast_mod_cls()
@@ -207,6 +287,7 @@ def _insert_dtype_cast_after_node(
             new_dtype_cast_name = \
                 get_new_attr_name_with_prefix(node_name_prefix)(gm_b)
             if dtype_cast_op:
+                # TODO(future PR): add handling for quantize_per_tensor
                 new_dtype_cast_node = graph_c.create_node(
                     'call_function', dtype_cast_op, (prev_node_c_inner,), {},
                     new_dtype_cast_name)
@@ -222,6 +303,49 @@ def _insert_dtype_cast_after_node(
         return results
     else:
         raise AssertionError(f"type f{type(prev_node_c)} is not handled")
+
+# TODO(future PR): look into using copy_node API instead
+def _copy_node_from_a_to_c(
+    node_a: Node,
+    gm_a: GraphModule,
+    gm_b: GraphModule,
+    graph_c: Graph,
+) -> Node:
+    """
+    Simple copy of node_a to graph_c.
+    """
+    if node_a.op == 'get_attr':
+        node_a_copy_name = \
+            get_new_attr_name_with_prefix(node_a.name + '_shadow_copy_')(gm_b)
+        node_a_obj = getattr_from_fqn(gm_a, node_a.target)  # type: ignore[arg-type]
+        if torch.is_tensor(node_a_obj):
+            node_a_obj = node_a_obj.detach()
+        setattr(gm_b, node_a_copy_name, node_a_obj)
+        node_a_copy = graph_c.create_node(
+            node_a.op, node_a_copy_name, (), {}, node_a_copy_name)
+        return node_a_copy
+    elif node_a.op == 'call_method':
+        assert node_a.target in ('dequantize', 'to'), \
+            f"target {node_a.target} is not implemented"
+        if node_a.target == 'dequantize':
+            arg_copy = _copy_node_from_a_to_c(node_a.args[0], gm_a, gm_b, graph_c)  # type: ignore[arg-type]
+            node_a_copy_name = \
+                get_new_attr_name_with_prefix(node_a.name + '_shadow_copy_')(gm_b)
+            node_a_copy = graph_c.create_node(
+                node_a.op, node_a.target, (arg_copy,), {}, node_a_copy_name)
+            return node_a_copy
+        else:  # to
+            arg_copy = _copy_node_from_a_to_c(node_a.args[0], gm_a, gm_b, graph_c)  # type: ignore[arg-type]
+            node_a_copy_name = \
+                get_new_attr_name_with_prefix(node_a.name + '_shadow_copy_')(gm_b)
+            node_a_copy = graph_c.create_node(
+                node_a.op, node_a.target, (arg_copy, node_a.args[1]), {},
+                node_a_copy_name)
+            return node_a_copy
+
+    else:
+        raise AssertionError(
+            f"handling of node with op {node_a.op} is not implemented")
 
 def _insert_copy_of_subgraph_a_after_input_node_c(
     input_node_c: Union[Node, List[Node]],
@@ -330,23 +454,21 @@ def _insert_copy_of_node_a_after_input_node_c(
 
     # generically handle all args and kwargs except for the input
     # Note: this hasn't been tested with many ops, logic may change.
-    new_args = []
+    new_args: List[Any] = []
     # assumes that the first arg is the input
     num_non_param_args = 1 if input_node_c_2 is None else 2
     for node_a_arg in node_a.args[num_non_param_args:]:
         if isinstance(node_a_arg, Node):
             arg_a = return_first_non_observer_node(node_a_arg, gm_a)
-            if arg_a.op == 'get_attr':
-                arg_a_copy_name = \
-                    get_new_attr_name_with_prefix(arg_a.name + '_shadow_copy_')(gm_b)
-                arg_a_obj = getattr_from_fqn(gm_a, arg_a.target)  # type: ignore[arg-type]
-                setattr(gm_b, arg_a_copy_name, arg_a_obj.detach())
-                node_a_arg_copy = graph_c.create_node(
-                    'get_attr', arg_a_copy_name, (), {}, arg_a_copy_name)
-                new_args.append(node_a_arg_copy)
-            else:
-                raise AssertionError(
-                    f"handling of node with op {arg_a.op} is not implemented")
+            node_a_arg_copy = _copy_node_from_a_to_c(arg_a, gm_a, gm_b, graph_c)
+            new_args.append(node_a_arg_copy)
+        elif isinstance(node_a_arg, (int, float)):
+            new_args.append(node_a_arg)
+        elif isinstance(node_a_arg, (list, tuple)):
+            for el in node_a_arg:
+                assert not isinstance(el, Node), \
+                    "handling of Node inside list is not implemented"
+            new_args.append(node_a_arg)
         else:
             raise AssertionError(
                 f"handling for arg of type {type(node_a_arg)} is not implemented")
@@ -355,12 +477,7 @@ def _insert_copy_of_node_a_after_input_node_c(
     for node_a_k, node_a_kwarg in node_a.kwargs.items():
         if isinstance(node_a_kwarg, Node):
             kwarg_a = return_first_non_observer_node(node_a_kwarg, gm_a)
-            kwarg_a_copy_name = \
-                get_new_attr_name_with_prefix(kwarg_a.name + '_shadow_copy_')(gm_b)
-            kwarg_a_obj = getattr_from_fqn(gm_a, kwarg_a.target)  # type: ignore[arg-type]
-            setattr(gm_b, kwarg_a_copy_name, kwarg_a_obj.detach())
-            node_a_kwarg_copy = graph_c.create_node(
-                'get_attr', kwarg_a_copy_name, (), {}, kwarg_a_copy_name)
+            node_a_kwarg_copy = _copy_node_from_a_to_c(kwarg_a, gm_a, gm_b, graph_c)
             new_kwargs[node_a_k] = node_a_kwarg_copy
         else:
             new_kwargs[node_a_k] = node_a_kwarg
@@ -400,6 +517,7 @@ def create_a_shadows_b(
     matched_subgraph_pairs: Dict[str, Tuple[NSSubgraph, NSSubgraph]],
     logger_cls: Callable,
     should_log_inputs: bool,
+    node_type_to_io_type_map: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
 ) -> GraphModule:
     """
     Creates a new GraphModule consisting of the graph of C, with the meaningful
@@ -427,6 +545,9 @@ def create_a_shadows_b(
     * adds loggers to the outputs of node_a and node_b
     """
 
+    if node_type_to_io_type_map is None:
+        node_type_to_io_type_map = get_node_type_to_io_type_map()
+
     # graph_c is the graph created from copying the nodes of graph_b and inserting
     # the shadows with the nodes copied from graph_a
     graph_c = Graph()
@@ -440,10 +561,12 @@ def create_a_shadows_b(
     end_node_b_to_matched_subgraph_a_and_name = {}
     for match_name, match in matched_subgraph_pairs.items():
         subgraph_a, subgraph_b = match
+        ref_node_type_a = get_target_type_str(subgraph_a.base_op_node, gm_a)
+        ref_node_type_b = get_target_type_str(subgraph_b.base_op_node, gm_b)
         start_node_b_to_matched_subgraph_a_and_name[subgraph_b.start_node] = \
-            (subgraph_a, match_name)
+            (subgraph_a, match_name, ref_node_type_a, ref_node_type_b)
         end_node_b_to_matched_subgraph_a_and_name[subgraph_b.end_node] = \
-            (subgraph_a, match_name)
+            (subgraph_a, match_name, ref_node_type_a, ref_node_type_b)
 
     for node_b in gm_b.graph.nodes:
         if node_b.op == 'output':
@@ -451,31 +574,29 @@ def create_a_shadows_b(
             continue
 
         # calculate the flags to determine what to do with this node
-        node_b_is_observer = \
-            node_b.op == 'call_module' and is_activation_post_process(modules[node_b.target])
         node_b_is_start_node = node_b in start_node_b_to_matched_subgraph_a_and_name
         node_b_is_end_node = node_b in end_node_b_to_matched_subgraph_a_and_name
 
-        if node_b_is_observer:
-            # remove activation post process node
-            env_c[node_b.name] = env_c[node_b.args[0].name]
-
-        elif (node_b_is_start_node or node_b_is_end_node):
+        if (node_b_is_start_node or node_b_is_end_node):
 
             if node_b_is_start_node:
-                subgraph_a, ref_name = \
+                subgraph_a, ref_name, ref_node_type_a, ref_node_type_b = \
                     start_node_b_to_matched_subgraph_a_and_name[node_b]
             else:
                 assert node_b_is_end_node
-                subgraph_a, ref_name = \
+                subgraph_a, ref_name, ref_node_type_a, ref_node_type_b = \
                     end_node_b_to_matched_subgraph_a_and_name[node_b]
 
             # For both start_node and end_node verify that we know how to do
             # the dtype cast. If we do not, skip.
             node_input_type_a, node_output_type_a = \
-                get_node_first_input_and_output_type(subgraph_a.start_node, gm_a, logger_cls)
+                get_node_first_input_and_output_type(
+                    subgraph_a.start_node, gm_a, logger_cls,
+                    node_type_to_io_type_map)
             node_input_type_b, node_output_type_b = \
-                get_node_first_input_and_output_type(node_b, gm_b, logger_cls)
+                get_node_first_input_and_output_type(
+                    node_b, gm_b, logger_cls,
+                    node_type_to_io_type_map)
             node_io_types_known_a_and_b = (
                 node_input_type_a != NodeInputOrOutputType.UNKNOWN and
                 node_output_type_a != NodeInputOrOutputType.UNKNOWN and
@@ -490,6 +611,26 @@ def create_a_shadows_b(
                 env_c[node_b.name] = graph_c.node_copy(node_b, load_arg)
                 continue
 
+            # If we are shadowing from fp32 to int8, we need to insert
+            # quantize_per_tensor call with qparams from the previous node.
+            # Only do this if we are able to infer these qparams from the graph.
+            if (
+                node_input_type_a == NodeInputOrOutputType.INT8 and
+                node_input_type_b == NodeInputOrOutputType.FP32
+            ):
+                node_a_input_qparams = get_node_input_qparams(
+                    subgraph_a.start_node, gm_a, node_type_to_io_type_map)
+                if not node_a_input_qparams:
+                    print(
+                        f'skipping shadow loggers for node_b: {get_target_type_str(node_b, gm_b)}' +
+                        f', start_node_a: {get_target_type_str(subgraph_a.start_node, gm_a)}' +
+                        ', unknown input qparams')
+                    env_c[node_b.name] = graph_c.node_copy(node_b, load_arg)
+                    continue
+
+            fqn_base_a = _maybe_get_fqn(subgraph_a.base_op_node, gm_a)
+            fqn_base_b = _maybe_get_fqn(subgraph_b.base_op_node, gm_b)
+
             if node_b_is_start_node:
 
                 # if necessary, log the input of node_c
@@ -498,9 +639,10 @@ def create_a_shadows_b(
                         prev_node_c = env_c[node_b.args[0].name]
                         env_c[prev_node_c.name] = _insert_logger_after_node(
                             prev_node_c, gm_b, logger_cls, '_ns_logger_b_inp_',
-                            node_b.name, name_b, ref_name,
+                            node_b.name, name_b, ref_name, ref_node_type_b,
                             NSSingleResultValuesType.NODE_INPUT.value,
-                            index_within_arg=0)
+                            index_within_arg=0, index_of_arg=0,
+                            fqn=fqn_base_b)
                     elif isinstance(node_b.args[0], list):
                         # first, save the prev_node instances, because they
                         # will be overwritten in the env after the first logger
@@ -511,9 +653,10 @@ def create_a_shadows_b(
                             prev_node_c = prev_node_c_list[arg_idx]
                             env_c[prev_node_c.name] = _insert_logger_after_node(
                                 prev_node_c, gm_b, logger_cls, '_ns_logger_b_inp_',
-                                node_b.name, name_b, ref_name,
+                                node_b.name, name_b, ref_name, ref_node_type_b,
                                 NSSingleResultValuesType.NODE_INPUT.value,
-                                index_within_arg=arg_idx)
+                                index_within_arg=arg_idx, index_of_arg=0,
+                                fqn=fqn_base_b)
                     else:
                         # logging of inputs which are not lists is not supported yet
                         raise AssertionError(f"type {type(node_b.args[0])} is not handled yet")
@@ -551,7 +694,8 @@ def create_a_shadows_b(
                         prev_node_c = [arg.args[0] for arg in prev_node_c]
                 dtype_cast_node = _insert_dtype_cast_after_node(
                     subgraph_a.start_node, node_c, prev_node_c, gm_a, gm_b, graph_c,
-                    node_b.name + '_dtype_cast_', logger_cls)
+                    node_b.name + '_dtype_cast_', logger_cls,
+                    node_type_to_io_type_map)
                 # note: not inserting to env_c because all nodes which use the dtype
                 #   casts are copied from graph_a
                 #
@@ -568,9 +712,10 @@ def create_a_shadows_b(
                     if isinstance(dtype_cast_node, Node):
                         dtype_cast_node = _insert_logger_after_node(
                             dtype_cast_node, gm_b, logger_cls, '_ns_logger_a_inp_',
-                            ref_node_name, name_a, ref_name,
+                            ref_node_name, name_a, ref_name, ref_node_type_a,
                             NSSingleResultValuesType.NODE_INPUT.value,
-                            index_within_arg=0)
+                            index_within_arg=0, index_of_arg=0,
+                            fqn=fqn_base_a)
                         input_logger: Union[Node, List[Node]] = dtype_cast_node
                     else:
                         assert isinstance(dtype_cast_node, list)
@@ -578,9 +723,11 @@ def create_a_shadows_b(
                         for dtype_cast_idx, dtype_cast_node_inner in enumerate(dtype_cast_node):
                             dtype_cast_logger = _insert_logger_after_node(
                                 dtype_cast_node_inner, gm_b, logger_cls, '_ns_logger_a_inp_',
-                                ref_node_name, name_a, ref_name,
+                                ref_node_name, name_a, ref_name, ref_node_type_a,
                                 NSSingleResultValuesType.NODE_INPUT.value,
-                                index_within_arg=dtype_cast_idx)
+                                index_within_arg=dtype_cast_idx,
+                                index_of_arg=0,
+                                fqn=fqn_base_a)
                             new_loggers.append(dtype_cast_logger)
                         dtype_cast_node = new_loggers
                         input_logger = dtype_cast_node
@@ -635,9 +782,10 @@ def create_a_shadows_b(
                 # hook up a logger to the mod_a copy
                 env_c[node_a_shadows_c.name] = _insert_logger_after_node(
                     env_c[node_a_shadows_c.name], gm_b, logger_cls, '_ns_logger_a_',
-                    node_a_shadows_c.name, name_a, ref_name,
+                    node_a_shadows_c.name, name_a, ref_name, ref_node_type_a,
                     NSSingleResultValuesType.NODE_OUTPUT.value,
-                    index_within_arg=0)
+                    index_within_arg=0, index_of_arg=0,
+                    fqn=fqn_base_a)
                 # subgraph so far:
                 #
                 #       dtype_cast_node -> (logger_a_input)? -> subgraph_a_copy -> logger_a
@@ -649,9 +797,10 @@ def create_a_shadows_b(
                 # hook up a logger to the mod_b copy
                 env_c[node_b.name] = _insert_logger_after_node(
                     env_c[node_b.name], gm_b, logger_cls, '_ns_logger_b_',
-                    node_b.name, name_b, ref_name,
+                    node_b.name, name_b, ref_name, ref_node_type_b,
                     NSSingleResultValuesType.NODE_OUTPUT.value,
-                    index_within_arg=0)
+                    index_within_arg=0, index_of_arg=0,
+                    fqn=fqn_base_b)
                 # subgraph so far:
                 #
                 #       dtype_cast_node -> (logger_a_input)? -> subgraph_a_copy -> logger_a

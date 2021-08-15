@@ -14,8 +14,6 @@
 #include <ATen/Tensor.h>
 #include <ATen/cpu/FlushDenormal.h>
 
-#include <TH/TH.h> // for USE_LAPACK
-
 #ifdef USE_FBGEMM
 #include <fbgemm/Fbgemm.h>
 #endif // USE_FBGEMM
@@ -65,11 +63,6 @@ bool Context::deterministicAlgorithms() const {
 }
 
 void Context::setDeterministicAlgorithms(bool b) {
-  if (b) {
-    TORCH_WARN_ONCE("torch.use_deterministic_algorithms is in beta, and its design and"
-      " functionality may change in the future.");
-  }
-
   _deterministic_algorithms = b;
 }
 
@@ -92,7 +85,9 @@ void Context::setAllowTF32CuDNN(bool b) {
   allow_tf32_cudnn = b;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 static const char cublas_config_var_name[] = "CUBLAS_WORKSPACE_CONFIG";
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 static const char* const cublas_deterministic_configs[] = { ":4096:8", ":16:8" };
 
 bool Context::checkCuBLASConfigDeterministic() {
@@ -163,7 +158,7 @@ bool Context::hasOpenMP() {
 }
 
 bool Context::hasLAPACK() {
-#ifdef USE_LAPACK
+#if AT_BUILD_WITH_LAPACK()
   return true;
 #else
   return false;

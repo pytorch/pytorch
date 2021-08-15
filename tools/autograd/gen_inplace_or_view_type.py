@@ -28,7 +28,7 @@ from .gen_trace_type import (
 #
 # A map: function name => name of the argument that all outputs are view of
 
-VIEW_FUNCTIONS_WITH_METADATA_CHANGE = ['view_as_real', 'view_as_complex']
+VIEW_FUNCTIONS_WITH_METADATA_CHANGE = ['view_as_complex', 'view_as_real', '_conj', '_neg_view']
 
 VIEW_FUNCTIONS = {
     'numpy_T': 'self',
@@ -58,17 +58,11 @@ VIEW_FUNCTIONS = {
     # discrete anyways.
     # FIXME: clone indices on construction.
     'sparse_coo_tensor_with_dims_and_tensors': 'values',
+    '_reshape_alias': 'self',
 }
 
 for key in VIEW_FUNCTIONS_WITH_METADATA_CHANGE:
     VIEW_FUNCTIONS[key] = 'self'
-
-# Functions for which we use CreationMeta::MULTI_OUTPUT_SAFE. I.e., the ones for
-# which inplace modification of outputs is being gradually deprecated.
-MULTI_OUTPUT_SAFE_FUNCTIONS = {
-    'split',
-    'split_with_sizes',
-}
 
 # note: some VIEW_FUNCTIONS are just compositions of the view functions above
 # this list contains both the root view functions and any that are purely composed
@@ -80,6 +74,16 @@ RETURNS_VIEWS_OF_INPUT = set(VIEW_FUNCTIONS.keys()).union({
     'expand_as', 'view_as', 'real', 'imag', 'narrow', 'movedim',
     'tensor_split', 'swapdims', 'swapaxes'
 })
+
+# These are the functions we consider views for the purposes of validating
+# StorageImpl and TensorImpl in gen_variable_type.
+# `_unsafe_view` is not included in VIEW_FUNCTIONS above because it is not a
+# view for the purposes of ADInplaceOrView kernel, we do not want to call as_view
+# See NOTE [Unsafe View] for more info.
+ALL_VIEW_FUNCTIONS = {
+    **VIEW_FUNCTIONS,
+    '_unsafe_view': 'self',
+}
 
 ARRAYREF_TO_VEC = CodeTemplate("""\
 auto ${vec} = ${arg}.vec();
@@ -122,7 +126,7 @@ m.impl("${unqual_operator_name_with_overload}",
 
 INPLACE_REDISPATCH = CodeTemplate("""\
 {
-  at::AutoDispatchBelowInplaceOrView guard;
+  at::AutoDispatchBelowADInplaceOrView guard;
   at::redispatch::${api_name}(${unpacked_args});
 }
 """)
@@ -133,7 +137,7 @@ ${return_values} = ${rhs_value};
 
 VIEW_REDISPATCH = CodeTemplate("""\
 ${assign_return_values} ([&]() {
-  at::AutoDispatchBelowInplaceOrView guard;
+  at::AutoDispatchBelowADInplaceOrView guard;
   return at::redispatch::${api_name}(${unpacked_args});
 })();
 """)
@@ -153,6 +157,9 @@ def is_tensor_list_type(t: Type) -> bool:
 
 UNPACK_TENSOR = CodeTemplate("""\
 auto${ref} ${arg_name}_ = unpack${suffix}(${arg_name}, "${arg_name}", ${arg_pos});""")
+
+def unpacked_name(arg_name: str) -> str:
+    return arg_name + '_'
 
 @with_native_function
 def unpack_args(f: NativeFunction) -> Tuple[List[str], List[Binding]]:
@@ -186,7 +193,7 @@ def unpack_args(f: NativeFunction) -> Tuple[List[str], List[Binding]]:
             ref='&' if ref else '',
         ))
         unpacked_bindings.append(Binding(
-            name=binding.name + '_',
+            name=unpacked_name(binding.name),
             nctype=binding.nctype,
             argument=binding.argument,
             default=binding.default,
@@ -292,14 +299,17 @@ def emit_view_body(fn: NativeFunctionWithDifferentiabilityInfo, var: str) -> Tup
         # We only support simple Tensor or a TensorList for functions that return views
         if not is_tensor_type(return_info.type) and not is_tensor_list_type(return_info.type):
             raise RuntimeError(f'{base_name} that return differentiable views can only return Tensor or Tensor[]')
+
+        # See Note [ View + Inplace detection]
+        def get_creation_meta_in_mode(original: str) -> str:
+            creation_meta_with_grad_mode = f'(at::GradMode::is_enabled() ? {original} : CreationMeta::NO_GRAD_MODE)'
+            return f'InferenceMode::is_enabled() ? CreationMeta::INFERENCE_MODE : {creation_meta_with_grad_mode}'
+
         # Only allow rebasing of the history if we return a single Tensor
         # If we are in a no grad block, raise a warning
         # See NOTE [ View + Inplace detection ] for more details about this logic
         if is_tensor_list_type(return_info.type):
-            if base_name in MULTI_OUTPUT_SAFE_FUNCTIONS:
-                creation_meta = 'CreationMeta::MULTI_OUTPUT_SAFE'
-            else:
-                creation_meta = 'CreationMeta::MULTI_OUTPUT_NODE'
+            creation_meta = get_creation_meta_in_mode('CreationMeta::MULTI_OUTPUT_NODE')
             call += (f'as_view(/* base */ {view_info}, /* output */ {var}, /* is_bw_differentiable */ true, '
                      '/* is_fw_differentiable */ true, '
                      f'/* creation_meta */ {creation_meta});')
@@ -307,9 +317,7 @@ def emit_view_body(fn: NativeFunctionWithDifferentiabilityInfo, var: str) -> Tup
         else:
             _, unpacked_bindings = unpack_args(f)
             call += emit_view_lambda(f, unpacked_bindings)
-            creation_meta = ('InferenceMode::is_enabled() ? '
-                             'CreationMeta::INFERENCE_MODE : '
-                             '(at::GradMode::is_enabled() ? CreationMeta::DEFAULT : CreationMeta::NO_GRAD_MODE)')
+            creation_meta = get_creation_meta_in_mode('CreationMeta::DEFAULT')
             rhs_value = (f'as_view(/* base */ {view_info}, /* output */ {var}, /* is_bw_differentiable */ true, '
                          '/* is_fw_differentiable */ true, '
                          f'/* view_func */ func, /* creation_meta */ {creation_meta})')
@@ -330,9 +338,9 @@ def emit_inplace_or_view_body(fn: NativeFunctionWithDifferentiabilityInfo) -> Li
     dispatcher_sig = DispatcherSignature.from_schema(f.func)
     dispatcher_exprs = dispatcher_sig.exprs()
 
-    # code-generated InplaceOrView kernels plumb and recompute dispatch keys directly through the kernel for performance.
+    # code-generated ADInplaceOrView kernels plumb and recompute dispatch keys directly through the kernel for performance.
     # See Note [Plumbing Keys Through The Dispatcher] for details.
-    dispatch_key_set = 'ks & c10::after_InplaceOrView_keyset'
+    dispatch_key_set = 'ks & c10::after_ADInplaceOrView_keyset'
     redispatch_args = ', '.join([dispatch_key_set] + [a.expr for a in dispatcher_exprs])
 
     # Note that this calls the slow, dispatching variants of manual_cpp_binding ops.
@@ -395,7 +403,7 @@ def inplace_or_view_method_registration(fn: NativeFunctionWithDifferentiabilityI
     return WRAPPER_REGISTRATION.substitute(
         unqual_operator_name_with_overload=f.func.name,
         type_wrapper_name=type_wrapper_name(f),
-        class_type='InplaceOrView',
+        class_type='ADInplaceOrView',
     )
 
 def use_derived(fn: NativeFunctionWithDifferentiabilityInfo) -> bool:
@@ -409,8 +417,8 @@ def gen_inplace_or_view_type_shard(
 
     filtered_fns_with_infos = list(filter(use_derived, fns_with_infos))
 
-    fm.write_with_template('InplaceOrViewType%s.cpp' % suffix, 'InplaceOrViewType.cpp', lambda: {
-        'generated_comment': f'@generated from {fm.template_dir}/InplaceOrViewType.cpp',
+    fm.write_with_template('ADInplaceOrViewType%s.cpp' % suffix, 'ADInplaceOrViewType.cpp', lambda: {
+        'generated_comment': f'@generated from {fm.template_dir}/ADInplaceOrViewType.cpp',
         'inplace_or_view_method_definitions': list(mapMaybe(inplace_or_view_method_definition, filtered_fns_with_infos)),
         'inplace_or_view_wrapper_registrations': list(mapMaybe(inplace_or_view_method_registration, filtered_fns_with_infos)),
     })

@@ -61,6 +61,7 @@ static bool EmbeddingLookupGenericSlow(
       ++current;
     }
     if (normalize_by_lengths && lengths[m]) {
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       float scale = 1.f / lengths[m];
       for (const auto j : c10::irange(block_size)) {
         out[j] *= scale;

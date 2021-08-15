@@ -17,6 +17,7 @@ class IDEEPDropoutOp final : public IDEEPOperator {
     CAFFE_ENFORCE_GE(ratio_, 0);
     CAFFE_ENFORCE_LT(ratio_, 1);
   }
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~IDEEPDropoutOp() override {}
 
   bool RunOnDevice() override {
@@ -57,6 +58,7 @@ class IDEEPDropoutGradientOp final : public IDEEPOperator {
     CAFFE_ENFORCE_GE(ratio_, 0);
     CAFFE_ENFORCE_LT(ratio_, 1);
   }
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~IDEEPDropoutGradientOp() override {}
 
   bool RunOnDevice() override {
@@ -77,7 +79,9 @@ class IDEEPDropoutGradientOp final : public IDEEPOperator {
   }
 
  protected:
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   float ratio_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   bool is_test_;
 
   INPUT_TAGS(OUTPUT_GRAD , MASK);

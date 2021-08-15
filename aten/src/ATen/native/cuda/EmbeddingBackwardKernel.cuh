@@ -7,13 +7,8 @@
 
 #include <THC/THCDeviceUtils.cuh>
 #include <THC/THCTensorMathReduce.cuh>
-#include <THC/THCTensorSort.cuh>
 #include <THC/THCThrustAllocator.cuh>
 #include <THC/THCAtomics.cuh>
-
-#include <thrust/execution_policy.h>
-#include <thrust/unique.h>
-#include <thrust/device_vector.h>
 
 #pragma once
 
