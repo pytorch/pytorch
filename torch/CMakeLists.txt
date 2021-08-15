@@ -118,6 +118,14 @@ if(${USE_ITT})
   list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_ITT)
 endif()
 
+if(${USE_ITT})
+  list(APPEND TORCH_PYTHON_SRCS
+    ${TORCH_SRC_DIR}/csrc/itt_wrapper.cpp
+    ${TORCH_SRC_DIR}/csrc/itt.cpp
+  )
+  list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_ITT)
+endif()
+
 if(USE_CUDA)
     append_filelist("libtorch_python_cuda_core_sources" TORCH_PYTHON_SRCS)
     list(APPEND TORCH_PYTHON_SRCS ${GENERATED_THNN_CXX_CUDA})

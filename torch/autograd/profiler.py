@@ -485,7 +485,7 @@ class emit_itt(object):
     Args:
         enabled (bool, optional, default=True): Setting ``enabled=False`` makes this context manager a no-op.
             Default: ``True``.
-        record_shapes (bool, optional, default=False): If ``record_shapes=True``, the nvtx range wrapping
+        record_shapes (bool, optional, default=False): If ``record_shapes=True``, the itt range wrapping
             each autograd op will append information about the sizes of Tensor arguments received
             by that op, in the following format:
             ``[[arg0.size(0), arg0.size(1), ...], [arg1.size(0), arg1.size(1), ...], ...]``
