@@ -115,6 +115,7 @@ ALLOW_LIST = [
     ("aten::_fake_quantize_per_tensor_affine_cachemask_tensor_qparams", datetime.date(2021, 8, 15)),
     ("aten::_cumsum", datetime.date(2021, 8, 31)),
     ("aten::_cumprod", datetime.date(2021, 8, 31)),
+    ("aten::_unique_dim", datetime.date(2021, 9, 30)),
 ]
 
 ALLOW_LIST_COMPILED = [
