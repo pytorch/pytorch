@@ -364,6 +364,8 @@ void pushProfilingCallbacks(const std::unordered_set<at::RecordScope>& scopes) {
           }
           cudaStubs()->nvtxRangePushA(getNvtxStr(
             fn.name(), fn.seqNr(), shapes).c_str());
+        } else if (config.state == ProfilerState::ITT) {
+          ittStubs()->ittRangePush(fn.name().str());
         }
         return nullptr;
       },
@@ -395,6 +397,8 @@ void pushProfilingCallbacks(const std::unordered_set<at::RecordScope>& scopes) {
 #endif // USE_KINETO
         } else if (config.state == ProfilerState::NVTX) {
           cudaStubs()->nvtxRangePop();
+        } else if (config.state == ProfilerState::ITT) {
+          ittStubs()->ittRangePop();
         }
       })
     .needsInputs(state_ptr->config().report_input_shapes)
@@ -461,7 +465,7 @@ std::string stacksToStr(const std::vector<std::string>& stacks, const char* deli
 void prepareProfiler(
     const ProfilerConfig& config,
     const std::set<ActivityType>& activities) {
-  if (config.state == ProfilerState::NVTX) {
+  if (config.state == ProfilerState::NVTX || config.state == ProfilerState::ITT) {
     return;
   }
   TORCH_CHECK(
@@ -520,14 +524,17 @@ void enableProfiler(
     const ProfilerConfig& config,
     const std::set<ActivityType>& activities,
     const std::unordered_set<at::RecordScope>& scopes) {
-  if (config.state != ProfilerState::NVTX) {
+  if (config.state != ProfilerState::NVTX && config.state != ProfilerState::ITT) {
     TORCH_CHECK(
         config.state == ProfilerState::KINETO ||
         config.state == ProfilerState::KINETO_GPU_FALLBACK);
     TORCH_CHECK(!activities.empty(), "No activities specified for Kineto profiler");
-  } else {
+  } else if (config.state == ProfilerState::NVTX) {
     TORCH_CHECK(cudaStubs()->enabled(),
         "Can't use NVTX profiler - PyTorch was compiled without CUDA");
+  } else {
+    TORCH_CHECK(ittStubs()->enabled(),
+        "Can't use ITT profiler - PyTorch was compiled without CUDA");
   }
 
   auto state_ptr = getProfilerTLSState();
@@ -535,12 +542,15 @@ void enableProfiler(
   auto state = std::make_shared<KinetoThreadLocalState>(config);
   c10::ThreadLocalDebugInfo::_push(c10::DebugInfoKind::PROFILER_STATE, state);
 
-  if (activities.count(ActivityType::CPU) || config.state == ProfilerState::NVTX) {
+  if (activities.count(ActivityType::CPU) ||
+      config.state == ProfilerState::NVTX ||
+      config.state == ProfilerState::ITT) {
     pushProfilingCallbacks(scopes);
   }
 
 #ifdef USE_KINETO
-  if (config.state != ProfilerState::NVTX) {
+  if (config.state != ProfilerState::NVTX &&
+      config.state != ProfilerState::ITT) {
     libkineto::api().activityProfiler().startTrace();
   }
 #endif // USE_KINETO
@@ -555,14 +565,16 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
   TORCH_CHECK(state_ptr && (
       config.state == ProfilerState::KINETO ||
       config.state == ProfilerState::KINETO_GPU_FALLBACK ||
-      config.state == ProfilerState::NVTX),
+      config.state == ProfilerState::NVTX ||
+      config.state == ProfilerState::ITT),
       "Can't disable Kineto profiler when it's not running");
 
   if (state_ptr->hasCallbackHandle()) {
     at::removeCallback(state_ptr->callbackHandle());
   }
 
-  if (state_ptr->config().state == ProfilerState::NVTX) {
+  if (state_ptr->config().state == ProfilerState::NVTX ||
+      state_ptr->config().state == ProfilerState::ITT) {
     return std::make_unique<ProfilerResult>();
   }
 
