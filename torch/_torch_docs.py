@@ -9350,6 +9350,8 @@ Example::
     tensor([[ 0.4875,  0.3938],
             [ 0.9158, -0.6929],
             [-0.5872,  0.6932]])
+
+See also :func:`torch.transpose`.
 """.format(**common_args))
 
 add_docstr(torch.flip,
@@ -9709,6 +9711,8 @@ Example::
     tensor([[ 1.0028, -0.1669],
             [-0.9893,  0.7299],
             [ 0.5809,  0.4942]])
+
+See also :func:`torch.t`.
 """.format(**common_args))
 
 add_docstr(torch.triangular_solve,
@@ -11166,14 +11170,14 @@ quantize_per_tensor(input, scale, zero_point, dtype) -> Tensor
 Converts a float tensor to a quantized tensor with given scale and zero point.
 
 Arguments:
-    input (Tensor): float tensor to quantize
-    scale (float): scale to apply in quantization formula
-    zero_point (int): offset in integer value that maps to float zero
+    input (Tensor): float tensor or list of tensors to quantize
+    scale (float or Tensor): scale to apply in quantization formula
+    zero_point (int or Tensor): offset in integer value that maps to float zero
     dtype (:class:`torch.dtype`): the desired data type of returned tensor.
         Has to be one of the quantized dtypes: ``torch.quint8``, ``torch.qint8``, ``torch.qint32``
 
 Returns:
-    Tensor: A newly quantized tensor
+    Tensor: A newly quantized tensor or list of quantized tensors.
 
 Example::
 
@@ -11182,6 +11186,15 @@ Example::
            quantization_scheme=torch.per_tensor_affine, scale=0.1, zero_point=10)
     >>> torch.quantize_per_tensor(torch.tensor([-1.0, 0.0, 1.0, 2.0]), 0.1, 10, torch.quint8).int_repr()
     tensor([ 0, 10, 20, 30], dtype=torch.uint8)
+    >>> torch.quantize_per_tensor([torch.tensor([-1.0, 0.0]), torch.tensor([-2.0, 2.0])],
+    >>> torch.tensor([0.1, 0.2]), torch.tensor([10, 20]), torch.quint8)
+    (tensor([-1.,  0.], size=(2,), dtype=torch.quint8,
+        quantization_scheme=torch.per_tensor_affine, scale=0.1, zero_point=10),
+        tensor([-2.,  2.], size=(2,), dtype=torch.quint8,
+        quantization_scheme=torch.per_tensor_affine, scale=0.2, zero_point=20))
+    >>> torch.quantize_per_tensor(torch.tensor([-1.0, 0.0, 1.0, 2.0]), torch.tensor(0.1), torch.tensor(10), torch.quint8)
+    tensor([-1.,  0.,  1.,  2.], size=(4,), dtype=torch.quint8,
+       quantization_scheme=torch.per_tensor_affine, scale=0.10, zero_point=10)
 """)
 
 add_docstr(torch.quantize_per_channel,
