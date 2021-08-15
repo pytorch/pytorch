@@ -3125,109 +3125,138 @@ std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
 
 }
 
-std::tuple<Tensor, Tensor, Tensor>
-infinitely_differentiable_native_layer_norm_backward(
-    const Tensor& dY,
-    const Tensor& dmean,
-    const Tensor& drstd,
-    const Tensor& X,
-    const Tensor& mean,
-    const Tensor& rstd,
+std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
+    const Tensor& input_t,
     const c10::optional<Tensor>& gamma,
+    const Tensor& ggI,
+    const Tensor& ggG,
+    const Tensor& ggB,
+    const Tensor& gO_t,
+    const Tensor& save_mean_t,
+    const Tensor& save_invstd_t,
     IntArrayRef normalized_shape,
-    double eps,
-    std::array<bool, 3> grad_input_mask) {
+    std::array<bool, 3> output_mask) {
 
   const int normalized_ndim = normalized_shape.size();
-  const auto input_shape = X.sizes();
-  const auto input_ndim = X.dim();
+  const auto input_shape = input_t.sizes();
+  const auto input_ndim = input_t.dim();
   // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   const int axis = input_ndim - normalized_ndim;
   const int64_t M =
       c10::multiply_integers(input_shape.cbegin(), input_shape.cbegin() + axis);
   const int64_t N =
       c10::multiply_integers(input_shape.cbegin() + axis, input_shape.cend());
+  //printf("M: %ld, N: %ld", M, N);
 
-  Tensor dX;
-  Tensor dgamma;
-  Tensor dbeta;
+  auto input = input_t.reshape({M, N});
+  auto gO = gO_t.reshape({M, N});
+  auto save_mean = save_mean_t.reshape({M, 1});
+  auto save_invstd = save_invstd_t.reshape({M, 1});
 
-  const Tensor X_tensor = X.reshape({M, N});
-  const Tensor mean_tensor = mean.reshape({M, 1});
-  const Tensor rstd_tensor = rstd.reshape({M, 1});
-  const double s = 1.0 / static_cast<double>(N);
-
-  Tensor dY_tensor;
-  if (dY.defined()) {
-    dY_tensor = dY.reshape({M, N});
-  }
-
-  if (grad_input_mask[0]) {
-    Tensor gamma_tensor;
-    if (isDefined(gamma)) {
-      gamma_tensor = gamma->reshape({1, N});
+  bool affine = isDefined(gamma);
+  Tensor gamma_expanded;
+  Tensor ggG_expanded, ggB_expanded;
+  if (affine) {
+    gamma_expanded = gamma->reshape({1, N});
+    if (ggG.defined()) {
+      ggG_expanded = ggG.reshape({1, N});
     }
-    Tensor rstd_cube = rstd_tensor * rstd_tensor * rstd_tensor;
-    Tensor var;
-    Tensor dvar;
-    if (drstd.defined()) {
-      var = ((rstd_tensor * rstd_tensor).reciprocal_() - eps).clamp_min(0);
-      dvar = -0.5 * rstd_cube * drstd.view({M, 1});
+    if (ggB.defined()) {
+      ggB_expanded = ggB.reshape({1, N});
     }
-    Tensor ds;
-    Tensor db;
-    if (dY.defined()) {
-      ds = (isDefined(gamma) ? dY_tensor * X_tensor * gamma_tensor
-                            : dY_tensor * X_tensor)
-               .sum(1)
-               .unsqueeze_(-1);
-      db = (isDefined(gamma) ? dY_tensor * gamma_tensor : dY_tensor)
-               .sum(1)
-               .unsqueeze_(-1);
-      const Tensor& a = rstd_tensor;
-      const Tensor b = (db * mean_tensor - ds) * rstd_cube * s;
-      const Tensor c = -b * mean_tensor - db * rstd_tensor * s;
-      if (isDefined(gamma)) {
-        dX = a * dY_tensor * gamma_tensor + b * X_tensor + c;
-      } else {
-        dX = a * dY_tensor + b * X_tensor + c;
-      }
-      if (dmean.defined() && drstd.defined()) {
-        dX += var_std_mean_backward(
-            {dvar, dmean.view({M, 1})},
-            X_tensor,
-            var,
-            mean_tensor,
-            /*dim=*/IntArrayRef{1},
-            /*correction=*/0,
-            /*keepdim=*/true,
-            /*is_std=*/false);
-      }
-      dX = dX.reshape_as(X);
-    } else if (dmean.defined() && drstd.defined()) {
-      dX = var_std_mean_backward(
-               {dvar, dmean.view({M, 1})},
-               X_tensor,
-               var,
-               mean_tensor,
-               /*dim=*/IntArrayRef{1},
-               /*correction=*/0,
-               /*keepdim=*/true,
-               /*is_std=*/false)
-               .reshape_as(X);
-    }
+  } else {
+    gamma_expanded = at::ones({1}, input.options());
   }
 
-  if (grad_input_mask[1] && dY.defined()) {
-    dgamma = (dY_tensor * (X_tensor - mean_tensor) * rstd_tensor)
-                 .sum(0)
-                 .reshape_as(toNonOptTensor(gamma));
-  }
-  if (grad_input_mask[2] && dY.defined()) {
-    dbeta = dY_tensor.sum(0).reshape_as(toNonOptTensor(gamma));
+  Tensor ggI_expanded;
+  if (ggI.defined()) {
+    ggI_expanded = ggI.reshape({M, N});
   }
 
-  return std::make_tuple(dX, dgamma, dbeta);
+  // for half inputs, save_mean, save_invstd are float
+  // (ideally, we would cast everything else, but not now)
+  auto mu = save_mean.to(input.scalar_type());
+  auto input_sub_mu = input - mu;
+  auto sigma2_eps_neg_1_2 = save_invstd.to(input.scalar_type());
+  auto sigma2_eps_neg_1 = sigma2_eps_neg_1_2.pow(2);
+  auto sigma2_eps_neg_3_2 = sigma2_eps_neg_1_2.pow(3);
+
+  Tensor gI;
+  // calculate gI
+  auto input_mu_sigma2_neg_3_2 = input_sub_mu * sigma2_eps_neg_3_2;
+
+  if (ggI.defined()) {
+
+    auto gxhat = gO * gamma_expanded;
+    auto gxhat_mu_sum = (gxhat * input_sub_mu).sum(1, true);
+    auto gxhat_sum = gxhat.sum(1, true);
+
+    auto ggI_sum = ggI_expanded.sum(1, true);
+    auto ggI_mu_sum = (ggI_expanded * input_sub_mu).sum(1, true);
+
+    auto all_sub = ((ggI_sum * gxhat_sum).div_(N)).sub_((ggI_expanded * gxhat).sum(1, true)).add_(
+                    (sigma2_eps_neg_1 * gxhat_mu_sum * ggI_mu_sum).mul_(3. / N));
+    auto gI_0t = (input_mu_sigma2_neg_3_2 * all_sub).div_(N);
+    auto gI_1t = (ggI_mu_sum * sigma2_eps_neg_3_2).div_(N) * (gxhat_sum.div(N) - gxhat);
+    auto gI_2t = (gxhat_mu_sum * sigma2_eps_neg_3_2).div_(N) * (ggI_sum.div(N) - ggI_expanded);
+
+    gI = (gI_0t.add_(gI_1t).add_(gI_2t));
+  }
+
+  // add contribution of gamma term to gI
+  if (affine && ggG.defined()) {
+    auto t0 = gO * ggG_expanded * sigma2_eps_neg_1_2;
+    auto t1 = (sigma2_eps_neg_1_2 * (gO * ggG_expanded).sum(1, true)).div_(-N);
+    auto t2 = (input_mu_sigma2_neg_3_2 * (gO * ggG_expanded * input_sub_mu).sum(1,true)).div_(-N);
+    auto gI_G_term = t0.add_(t1).add_(t2);
+    gI = gI.defined() ? gI.add_(gI_G_term) : gI_G_term;
+  }
+
+
+  if (gI.defined()) {
+    //printf("=== computing gI\n");
+    gI = gI.reshape_as(input_t);
+  }
+
+  // this is the grad_input for the first backward function
+  auto first_bwd_fn_grad_input = [&](const Tensor& gO_local, const Tensor& gamma_local) -> Tensor {
+    auto h0 = (gamma_local * sigma2_eps_neg_1_2).div_(N);
+    auto h1 = (N * gO_local).sub_(gO_local.sum(1,true)).sub_(
+                input_sub_mu.mul(sigma2_eps_neg_1) * (gO_local * input_sub_mu).sum(1,true));
+    return h0 * h1;
+  };
+
+  // calculate gG
+  Tensor gG;
+  if (affine && ggI.defined()) {
+    gG = first_bwd_fn_grad_input(ggI_expanded, at::ones({}, sigma2_eps_neg_1_2.options()));
+    gG = (gO * gG).sum(0);
+    gG = gG.reshape_as(*gamma);
+  }
+
+  // calculate ggO
+  Tensor ggO;
+  // contribution of input term
+  if (ggI.defined()) {
+    ggO = first_bwd_fn_grad_input(ggI_expanded, gamma_expanded);
+  }
+  if (ggG.defined()) {
+    auto ggO_G_term = ggG_expanded * input_sub_mu * sigma2_eps_neg_1_2;
+    ggO = ggO.defined() ? ggO.add_(ggO_G_term) : ggO_G_term;
+  }
+  if (ggB.defined()) {
+    auto ggO_B_term = ggB_expanded;
+    ggO = ggO.defined() ? ggO.add_(ggO_B_term) : ggO_B_term;
+  }
+  if (ggO.defined()) {
+    ggO = ggO.expand({M, N}).reshape_as(input_t);
+  }
+
+  if (output_mask[1] && !gG.defined()) {
+    AT_ASSERTM(affine, "gamma should always be defined when it requires grad");
+  }
+
+  return std::tuple<Tensor, Tensor, Tensor>{gI, gG, ggO};
 }
 
 std::tuple<Tensor, Tensor, Tensor>
@@ -3562,6 +3591,147 @@ Tensor i1e_backward(
     return grad *
         at::where(self_is_not_tiny, gradx, at::full({}, 0.5, self.options()));
   });
+}
+
+// lu_solve is a map (LU, P, B) -> (PLU)^{-1} B,
+// where LU = L + U - I and P is a permutation matrix, and is fixed.
+//
+// Let 1 = ones_like(LU),
+// 1_U = 1.triu(),
+// 1_L = 1 - 1_U (note the zero diagonal),
+// * := the Hadamard (element-wise) product
+//
+// Forward AD:
+//
+// Let X := U^{-1} L^{-1} P^T B be the output of the function.
+// Also, the LU input of the function could be represented as
+// LU = L + U - I.
+//
+// Differentiating LU = L + U - I produces:
+// dLU = dL + dU.
+// Noting that dL and dU are lower- and upper-triangular, respectively,
+// and that the diagonal of L is never explicitly exposed, so
+// diag(dL) = 0, it follows
+// dL = dLU * 1_L,
+// dU = dLU * 1_U.
+//
+// Differentiating X = U^{-1} L^{-1} P^T B produces:
+// dX = dU^{-1} L^{-1} P^T B + U^{-1} dL^{-1} P^T B + U^{-1} L^{-1} P^T dB
+// Note that for any invertible matrix A we have A A^{-1} = I, hence
+// dA A^{-1} + A dA^{-1} = 0 => dA^{-1} = -A^{-1} dA A^{-1}.
+// Inserting it back into the definition of dX gives:
+// dX = -U^{-1} dU U^{-1} L^{-1} P^T B - U^{-1} L^{-1} dL L^{-1} P^T B + U^{-1} L^{-1} P^T dB
+//
+// Backward AD:
+//
+// Using the definition of dL, dU from above:
+// Tr(L_grad^H dL) + Tr(U_grad^H dU) = Tr(L_grad^H (dLU * 1_L)) + Tr(U_grad^H (dLU * 1_U))
+//                                   = [using Tr(A (B * C)) = Tr((A * B^T) C)
+//                                   = Tr((L_grad^H * 1_L^T) dLU) + Tr((U_grad^H * 1_U^T) dLU),
+// hence
+// LU_grad = L_grad * 1_L + U_grad * 1_U (!!!)
+//
+// Using the definition of dX:
+// Tr(X_grad^H X) = Tr(-U^{-1} L^{-1} P^T B X_grad^H U^{-1} dU)
+//                + Tr(-L^{-1} P^T B X_grad^H U^{-1} L^{-1} dL)
+//                + Tr(X_grad^H U^{-1} L^{-1} P^T dB).
+// And we immediately get:
+// B_grad = [X_grad^H U^{-1} L^{-1} P^T]^H = [U^{-1} L^{-1} P^T]^H X_grad.
+// Let Z := L^{-1} P^T B X_grad^H U^{-1}, then
+// U_grad = [-U^{-1} Z]^H,
+// L_grad = [-Z L^{-1}]^H.
+// After inserting U_grad and L_grad into (!!!) we get the value for LU_grad.
+
+std::tuple<Tensor, Tensor> lu_solve_backward(
+  const Tensor& grad,
+  const Tensor& self,
+  const Tensor& LU_data,
+  const Tensor& LU_pivots
+) {
+  if (!grad.defined()) {
+    return std::make_tuple(Tensor{}, Tensor{});
+  }
+
+  Tensor P, L, U;
+  std::tie(P, L, U) = at::lu_unpack(LU_data, LU_pivots);
+
+  auto n = LU_data.size(-1);
+  auto nrhs = self.size(-1);
+
+  // stores L^{-1} P^T
+  Tensor Y;
+
+  Tensor LU_data_grad;
+  if (LU_data.requires_grad()) {
+    // X = -L^{-1} P^T B grad^H
+    auto X = -std::get<0>(at::triangular_solve(
+      (nrhs < n) ? P.transpose(-2, -1).matmul(self) : P.transpose(-2, -1),
+      L,
+      /*upper=*/false,
+      /*transpose=*/false,
+      /*unitriangular=*/true
+    ));
+    if (nrhs >= n) {
+      // Y stores L^{-1} P^T to be reused in the computation of self_grad
+      if (self.requires_grad()) {
+        Y = -X;
+      }
+      X = X.matmul(self);
+    }
+    X = X.matmul(grad.transpose(-2, -1).conj());
+
+    // X <- X U^{-1}
+    X = std::get<0>(at::triangular_solve(
+      X.transpose(-2, -1),
+      U,
+      /*upper=*/true,
+      /*transpose=*/true,
+      /*unitriangular=*/false
+    )).transpose(-2, -1);
+
+    // U_grad = [U^{-1} X]^H
+    auto U_grad = std::get<0>(at::triangular_solve(
+      X,
+      U,
+      /*upper=*/true,
+      /*transpose=*/false,
+      /*unitriangular=*/false
+    )).transpose(-2, -1).conj();
+
+    // L_grad = L^{-H} X^H
+    auto L_grad = std::get<0>(at::triangular_solve(
+      X.transpose(-2, -1),
+      L,
+      /*upper=*/false,
+      /*transpose=*/true,
+      /*unitriangular=*/true
+    )).conj();
+
+    // LU_data_grad = L_grad * 1_L + U_grad * 1_U
+    LU_data_grad = L_grad.tril(-1) + U_grad.triu();
+  }
+
+  // self_grad = [grad^H U^{-1} L^{-1} P^T]^H = [U^{-1} L^{-1} P^T]^H grad
+  Tensor self_grad;
+  if (self.requires_grad()) {
+    self_grad = std::get<0>(at::triangular_solve(
+      // reuse Y := L^{-1} P^T if already computed
+      Y.defined() ? Y : std::get<0>(at::triangular_solve(
+        P.transpose(-2, -1),
+        L,
+        /*upper=*/false,
+        /*transpose=*/false,
+        /*unitriangular=*/true
+      )),
+      U,
+      /*upper=*/true,
+      /*transpose=*/false,
+      /*unitriangular=*/false
+    )).transpose(-2, -1).conj().matmul(grad);
+  }
+
+
+  return std::make_tuple(self_grad, LU_data_grad);
 }
 
 Tensor lu_unpack_backward(
