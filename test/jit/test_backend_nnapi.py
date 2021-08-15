@@ -47,10 +47,6 @@ class TestNnapiBackend(TestNNAPI):
         # Load nnapi delegate library
         torch.ops.load_library(str(lib_path))
 
-        # Disable execution tests, only test lowering modules
-        # TODO: Re-enable execution tests after the Nnapi delegate is complete
-        super().set_can_run_nnapi(False)
-
     # Override
     def call_lowering_to_nnapi(self, traced_module, args):
         compile_spec = {"forward": {"inputs": args}}
