@@ -391,7 +391,11 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   endif()
 
   set(GENERATED_CXX_PYTHON
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_functions.cpp"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_functions_0.cpp"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_functions_1.cpp"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_functions_2.cpp"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_functions_3.cpp"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_functions_4.cpp"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_variable_methods.cpp"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_torch_functions.cpp"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions.cpp"
@@ -481,10 +485,17 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     endif()
   endif()
 
+  list(APPEND LITE_PROFILER_SRCS "")
+  if(USE_LITE_INTERPRETER_PROFILER)
+    append_filelist("libtorch_edge_profiler_sources " LITE_PROFILER_SRCS)
+  endif()
+
   # Switch between the full jit interpreter and lite interpreter
   if(BUILD_LITE_INTERPRETER)
     append_filelist("libtorch_lite_cmake_sources" LIBTORCH_CMAKE_SRCS)
     list(APPEND LIBTORCH_CMAKE_SRCS ${LITE_EAGER_SYMOBLICATION_SRCS})
+    list(APPEND LIBTORCH_CMAKE_SRCS ${LITE_PROFILER_SRCS})
+    set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
   else()
     append_filelist("libtorch_cmake_sources" LIBTORCH_CMAKE_SRCS)
 
