@@ -16,7 +16,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCPU, dtypes, dtypesIfCUDA, dtypesIfCPU,
     onlyOnCPUAndCUDA, onlyCUDA, largeTensorTest, ops, precisionOverride)
 from torch.testing._internal.common_methods_invocations import (
-    ReductionOpInfo, reduction_op_db)
+    ReductionOpInfo, reduction_ops)
 
 # TODO: replace with make_tensor
 def _generate_input(shape, dtype, device, with_extremal):
@@ -61,7 +61,7 @@ class TestReductions(TestCase):
     # ReductionOpInfo unit tests
     ###########################################################################
 
-    @ops(reduction_op_db, allowed_dtypes=[torch.float])
+    @ops(reduction_ops, allowed_dtypes=[torch.float])
     def test_dim_default(self, device, dtype, op: ReductionOpInfo):
         """Tests that the default behavior is to reduce all dimensions."""
         t = make_tensor((2, 3), device, dtype)
