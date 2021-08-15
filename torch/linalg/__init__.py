@@ -949,6 +949,8 @@ the relative tolerance is set to be
     \text{rtol} = \max(m, n) \varepsilon
 
 and :math:`\varepsilon` is the epsilon value for the dtype of :attr:`A` (see :class:`torch.finfo`).
+If :attr:`rtol` is not specified and :attr:`atol` is specified to be larger than zero then
+:attr:`rtol` is set to zero.
 If :attr:`A` is a batch of matrices, :attr:`rtol` is computed this way for every element of
 the batch.
 
@@ -1671,6 +1673,8 @@ the relative tolerance is set to be
     \text{rtol} = \max(m, n) \varepsilon
 
 and :math:`\varepsilon` is the epsilon value for the dtype of :attr:`A` (see :class:`torch.finfo`).
+If :attr:`rtol` is not specified and :attr:`atol` is specified to be larger than zero then
+:attr:`rtol` is set to zero.
 If :attr:`A` is a batch of matrices, :attr:`rtol` is computed this way for every element of
 the batch.
 
