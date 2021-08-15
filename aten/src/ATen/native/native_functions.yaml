@@ -10221,13 +10221,13 @@
   python_module: linalg
   variants: function
 
-- func: linalg_cross(Tensor self, Tensor other, int dim=-1) -> Tensor
+- func: linalg_cross(Tensor self, Tensor other, *, int dim=-1) -> Tensor
   python_module: linalg
   variants: function
   dispatch:
     CPU, CUDA: linalg_cross
 
-- func: linalg_cross.out(Tensor self, Tensor other, int dim=-1, *, Tensor(a!) out) -> Tensor(a!)
+- func: linalg_cross.out(Tensor self, Tensor other, *, int dim=-1, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
   dispatch:
     CPU, CUDA: linalg_cross_out
