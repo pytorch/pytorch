@@ -924,13 +924,12 @@ Examples::
 
 matrix_rank = _add_docstr(_linalg.linalg_matrix_rank, r"""
 linalg.matrix_rank(A, *, atol=None, rtol=None, hermitian=False, out=None) -> Tensor
-linalg.matrix_rank(A, tol, hermitian=False, *, out=None) -> Tensor
 
 Computes the numerical rank of a matrix.
 
 The matrix rank is computed as the number of singular values
 (or eigenvalues in absolute value when :attr:`hermitian`\ `= True`)
-that are greater than `max(atol, σ₁*rtol)` threshold,
+that are greater than :math:`\max(\text{atol}, \sigma_1 * \text{rtol})` threshold,
 where :math:`\sigma_1` is the largest singular value (or eigenvalue).
 
 Supports input of float, double, cfloat and cdouble dtypes.
@@ -942,17 +941,14 @@ symmetric if real, but this is not checked internally. Instead, just the lower
 triangular part of the matrix is used in the computations.
 
 If :attr:`rtol` is not specified and :attr:`A` is a matrix of dimensions `(m, n)`,
-the relative tolerance is set to be
-
-.. math::
-
-    \text{rtol} = \max(m, n) \varepsilon
-
+the relative tolerance is set to be :math:`\text{rtol} = \max(m, n) \varepsilon`
 and :math:`\varepsilon` is the epsilon value for the dtype of :attr:`A` (see :class:`torch.finfo`).
 If :attr:`rtol` is not specified and :attr:`atol` is specified to be larger than zero then
 :attr:`rtol` is set to zero.
-If :attr:`A` is a batch of matrices, :attr:`rtol` is computed this way for every element of
-the batch.
+
+.. note::
+    This function has NumPy compatible variant `linalg.matrix_rank(A, tol, hermitian=False)`.
+    However, use of the positional argument :attr:`tol` is deprecated in favor of :attr:`atol` and :attr:`rtol`.
 
 """ + fr"""
 .. note:: The matrix rank is computed using singular value decomposition
@@ -965,7 +961,7 @@ Args:
     A (Tensor): tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.
     tol (float, Tensor, optional): the tolerance value.
                                    If the value of :attr:`tol` is `None`
-                                   then it's equivalent to setting `rtol=tol` and  `atol=tol` otherwise.
+                                   then it's equivalent to setting `rtol=tol` and `atol=tol` otherwise.
 
 Keyword args:
     atol (float, Tensor, optional): the absolute tolerance value. When `None` it's considered to be zero.
@@ -1646,7 +1642,6 @@ Examples::
 
 pinv = _add_docstr(_linalg.linalg_pinv, r"""
 linalg.pinv(A, *, atol=None, rtol=None, hermitian=False, out=None) -> Tensor
-linalg.pinv(A, rcond, hermitian=False, *, out=None) -> Tensor
 
 Computes the pseudoinverse (Moore-Penrose inverse) of a matrix.
 
@@ -1662,21 +1657,15 @@ symmetric if real, but this is not checked internally. Instead, just the lower
 triangular part of the matrix is used in the computations.
 
 The singular values (or the norm of the eigenvalues when :attr:`hermitian`\ `= True`)
-that are below `max(atol, σ₁*rtol)` threshold are treated as zero and discarded in the computation,
+that are below :math:`\max(\text{atol}, \sigma_1 * \text{rtol})` threshold are
+treated as zero and discarded in the computation,
 where :math:`\sigma_1` is the largest singular value (or eigenvalue).
 
 If :attr:`rtol` is not specified and :attr:`A` is a matrix of dimensions `(m, n)`,
-the relative tolerance is set to be
-
-.. math::
-
-    \text{rtol} = \max(m, n) \varepsilon
-
+the relative tolerance is set to be :math:`\text{rtol} = \max(m, n) \varepsilon`
 and :math:`\varepsilon` is the epsilon value for the dtype of :attr:`A` (see :class:`torch.finfo`).
 If :attr:`rtol` is not specified and :attr:`atol` is specified to be larger than zero then
 :attr:`rtol` is set to zero.
-If :attr:`A` is a batch of matrices, :attr:`rtol` is computed this way for every element of
-the batch.
 
 .. note:: This function uses :func:`torch.linalg.svd` if :attr:`hermitian`\ `= False` and
           :func:`torch.linalg.eigh` if :attr:`hermitian`\ `= True`.
@@ -1692,7 +1681,8 @@ the batch.
     numerically stable than computing the pseudoinverse explicitly.
 
 .. note::
-    Use of the positional argument :attr:`rcond` is deprecated in favor of :attr:`rtol`.
+    This function has NumPy compatible variant `linalg.pinv(A, rcond, hermitian=False)`.
+    However, use of the positional argument :attr:`rcond` is deprecated in favor of :attr:`rtol`.
 
 .. warning::
     This function uses internally :func:`torch.linalg.svd` (or :func:`torch.linalg.eigh`
