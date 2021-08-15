@@ -12,7 +12,7 @@ import numpy as np
 from torch._six import inf
 import collections.abc
 
-from typing import Callable, List, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, List, Optional, Sequence, Tuple, Union
 
 from torch.testing import \
     (make_non_contiguous, floating_types, floating_types_and, complex_types,
@@ -527,6 +527,7 @@ class OpInfo(object):
                  # the following metadata relates to complex support and is checked in test_ops.py
                  test_conjugated_samples=True,
                  test_neg_view=True,
+                 assert_jit_shape_analysis=False,  # assert that jit shape analysis fully propagates shape
                  ):
 
         dtypes_args = (dtypes, dtypesIfCPU, dtypesIfCUDA, dtypesIfROCM)
@@ -622,6 +623,8 @@ class OpInfo(object):
         self.aliases = ()
         if aliases is not None:
             self.aliases = tuple(AliasInfo(a) for a in aliases)  # type: ignore[assignment]
+
+        self.assert_jit_shape_analysis = assert_jit_shape_analysis
 
         self.test_conjugated_samples = test_conjugated_samples
         self.test_neg_view = test_neg_view
@@ -758,62 +761,62 @@ class OpInfo(object):
                 else supported.intersection(self._default_test_dtypes))
 
 
-# Generates input tensors for testing reduction ops
 def _generate_reduction_inputs(device, dtype, requires_grad):
-    yield make_tensor((), device, dtype, requires_grad=requires_grad)
-    yield make_tensor((2,), device, dtype, requires_grad=requires_grad)
-    yield make_tensor((2, 3), device, dtype, requires_grad=requires_grad, noncontiguous=True)
-    yield make_tensor((3, 2, 1, 2, 2), device, dtype, requires_grad=requires_grad)
+    """Generates input tensors for testing reduction operators"""
+    make = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    yield make(())
+    yield make((2,))
+    yield make((2, 3), noncontiguous=True)
+    yield make((3, 2, 1, 2, 2))
 
 
-# Generates a subset of possible dim and keepdim kwargs for a tensor
-# with ndim dims appropriate for testing. If supports_multiple_dims
-# is True (default) then dim kwarg can be a list of dims.
 def _generate_reduction_kwargs(ndim, supports_multiple_dims=True):
+    """Generates valid dim and keepdim parameters for testing reduction
+    operators on inputs with the given ndim."""
+
+    # Test default dim and keepdim
+    yield {}
+
     for keepdim in [True, False]:
-        # Always test reducing inner and outer most dimensions
+        # Test reducing inner and outer most dimensions
         yield {'dim': 0, 'keepdim': keepdim}
         yield {'dim': -1, 'keepdim': keepdim}
 
-        # Also reduce middle dimension
+        # Test reducing middle dimension
         if ndim > 2:
             yield {'dim': ndim // 2, 'keepdim': keepdim}
 
         if supports_multiple_dims:
-            # Always test reducing all dims
+            # Test reducing all dimensions
             yield {'dim': tuple(range(ndim)), 'keepdim': keepdim}
 
             # Test reducing both first and last dimensions
             if ndim > 1:
-                yield {'dim': (0, ndim - 1), 'keepdim': keepdim}
+                yield {'dim': (0, -1), 'keepdim': keepdim}
 
             # Test reducing every other dimension starting with the second
             if ndim > 3:
                 yield {'dim': tuple(range(1, ndim, 2)), 'keepdim': keepdim}
 
 
-# Wraps sample_inputs_reduction function to provide the additional supports_multiple_dims args
-def sample_inputs_reduction_wrapper(supports_multiple_dims):
-    # Generates sample inputs for reduction ops that contain the input tensor
-    # and dim and keepdim kwargs. If a reduction op needs to test additional
-    # args/kwargs then create a separate sample_inputs function
-    def sample_inputs_func(op_info, device, dtype, requires_grad):
-        inputs = []
+def sample_inputs_reduction(op_info, device, dtype, requires_grad, **kwargs):
+    """Sample inputs for reduction operators."""
 
-        for t in _generate_reduction_inputs(device, dtype, requires_grad):
-            # Add case without dim and keepdim kwargs
-            inputs.append(SampleInput(t))
-            for kwargs in _generate_reduction_kwargs(t.ndim, supports_multiple_dims):
-                inputs.append(SampleInput(t, kwargs=kwargs))
+    # TODO(@heitorschueroff) Once all reduction operators are using
+    # ReductionOpInfo use op_info.supports_multiple_dims directly.
+    supports_multiple_dims: bool = kwargs.get('supports_multiple_dims', True)
 
-        return inputs
+    inputs: List[SampleInput] = []
+    for t in _generate_reduction_inputs(device, dtype, requires_grad):
+        for kwargs in _generate_reduction_kwargs(t.ndim, supports_multiple_dims):
+            inputs.append(SampleInput(t, kwargs=kwargs))
 
-    return sample_inputs_func
+    return inputs
 
 
 # NOTE [Reductions]:
 #
-# For the purpose of testing, we relax the definition of a reduction operator
+# For testing purposes, we relax the definition of a reduction operator
 # as defined in the docstring below. We do this to capture operators with
 # a similar API so they can be tested automatically. However...
 #
@@ -821,25 +824,27 @@ def sample_inputs_reduction_wrapper(supports_multiple_dims):
 # array to a single scalar value and that can be computed from the partial
 # result of reducing subarrays. This usually means that the reduction operation
 # should be commutative and associative. This definition is important when it
-# comes to implementation as it defines how a reduction can be parallelized.
+# comes to implementation as it determines how a reduction can be parallelized.
 #
 # For example, many summary statistics such as median, mode and quantile cannot
 # be computed from partial results because these are sorting and counting based
-# algorithms and need information that would be lost in the reduced value.
+# algorithms that need information that would be lost in the reduced value.
 class ReductionOpInfo(OpInfo):
     """Reduction operator information.
 
-    ReductionOpInfo tests that reduction operators provide a consistent API.
-    The optional keyword parameters represent parts of the API that are
-    optional for a reduction operator to implement, such as an identity value.
+    An operator is a reduction operator if it reduces one or more dimensions of
+    the input tensor to a single value. Reduction operators must implement the
+    following signature:
 
-    If a particular reduction operator does not yet implement parts of the API
-    that are required, this should be signaled by asserting that the relevant
-    tests fail so that it is clear that support should be added.
+    - `op(input, *args, *, dim=None, keepdim=False, **kwargs)`
 
-    For ReductionOpInfo tests, a reduction operator is an operator that:
-        - accepts dim and keepdim parameters
-        - reduces one or more dimensions of a tensor to one or more values
+    ReductionOpInfo testing tests that reduction operators have a consistent
+    API. Optional behavior such as reducing over multiple dimensions or
+    returning multiple output tensors are captured in optional parameters.
+
+    If a reduction operator does not yet implement the full required API of
+    reduction operators, this should be documented by skipping the failing
+    tests rather than adding optional parameters to ReductionOpInfo.
 
     NOTE
     The API for reduction operators has not yet been finalized and some
@@ -851,13 +856,13 @@ class ReductionOpInfo(OpInfo):
     def __init__(
         self, name, *,
 
-        # The identity value of the operator.
-        identity: Optional[Union[int, float, complex]] = None,
+        # The identity value for the operator if it has one.
+        identity: Optional[Any] = None,
 
-        # possible values are:
+        # The nan policy for the operator if it implements one.
         # - propagate: NaN values are propagated to the output
-        # - omit: only non-NaN values participate in computing reduction
-        nan_policy: str = 'propagate',
+        # - omit: NaN values are discarded during the reduction
+        nan_policy: Optional[str] = None,
 
         # Whether the operator supports reducing multiple dimensions.
         supports_multiple_dims: bool = True,
@@ -865,7 +870,7 @@ class ReductionOpInfo(OpInfo):
         # Whether the operator promotes integral dtypes to floating point dtypes
         promotes_int_to_float: bool = False,
 
-        # Whether the operator promotes all integral dtypes (including bool) to int64
+        # Whether the operator promotes integral dtypes to int64
         promotes_int_to_int64: bool = False,
 
         # If a specific dtype is given, then the operator always returns that
@@ -873,32 +878,29 @@ class ReductionOpInfo(OpInfo):
         # the dtype according to the type promotion rules above.
         result_dtype: Optional[torch.dtype] = None,
 
-        # A function that takes the input tensor and optional dim kwarg and
-        # generates tuples of args and kwargs to use when calling the operator
-        # and reference implementation with the given dim kwarg. Note that some
-        # tests will only use the first generated args and kwargs.
-        generate_args_kwargs: Callable = lambda t, dim=None: (yield tuple(), {}),
+        # ReductionOpInfo tests generate their own input, dim and keepdim
+        # arguments and call this function to generate tuples of extra args and
+        # kwargs to use when calling the op. This is required for operators that
+        # have other required parameters besides the input tensor.
+        generate_args_kwargs: Callable = lambda t, dim=None, keepdim=False: (yield tuple(), {}),
 
         # Options from the OpInfo base class
         **kwargs,
     ):
+        assert nan_policy in (None, 'propagate', 'omit')
+
         # These are mutually exclusive options
-        assert not (promotes_int_to_float and promotes_int_to_int64)
         assert not (result_dtype and promotes_int_to_float)
         assert not (result_dtype and promotes_int_to_int64)
+        assert not (promotes_int_to_float and promotes_int_to_int64)
 
-        assert nan_policy in ('propagate', 'omit')
-
-        # ReductionOpInfo tests generate their own input tensors and the dim
-        # and keepdim parameters. Operators can provide a `generate_args_kwargs`
-        # to augment the arguments to the operator and the reference implementation
-        # or specify `sample_inputs_func` to provide their own sample inputs for
-        # the OpInfo base class. However, the test_reductions.py file will still
-        # generate its own inputs.
+        # Default sample_inputs_func for ReductionOpInfo which augments sample
+        # inputs from sample_inputs_reduction with the args and kwargs from
+        # generate_args_kwargs.
         def sample_inputs_func(*args, **kwargs):
             result: List[SampleInput] = []
-            f = sample_inputs_reduction_wrapper(supports_multiple_dims)
-            for sample in f(*args, **kwargs):
+            kwargs['supports_multiple_dims'] = supports_multiple_dims
+            for sample in sample_inputs_reduction(*args, **kwargs):
                 dim = sample.kwargs.get('dim', None)
                 for args, kwargs in generate_args_kwargs(sample.input, dim=dim):
                     kwargs.update(sample.kwargs)
@@ -2042,28 +2044,6 @@ def sample_inputs_take_along_dim(op_info, device, dtype, requires_grad, **kwargs
             )
 
 
-def sample_inputs_amax_amin(op_info, device, dtype, requires_grad, **kwargs):
-    # Ordered as (input shape, kwargs)
-    test_cases: Tuple[tuple, dict] = (  # type: ignore[assignment]
-        ((S, S, S), {}),
-        ((S, S, S), {'dim': 1}),
-        ((S, S, S), {'dim': (1, 2,)}),
-        ((S, S, S), {'dim': 1, 'keepdim': True}),
-        ((), {'dim': 0}),
-        ((), {}),
-        ((), {'dim': 0, 'keepdim': True}),
-    )
-
-    samples: List[SampleInput] = []
-    for shape, kwargs in test_cases:
-        samples.append(SampleInput(
-            make_tensor(shape, device, dtype, requires_grad=requires_grad),
-            kwargs=kwargs))
-
-    return samples
-
-# TODO (@heitorschueroff) Once aminmax supports multiple dims this should
-# be combined with the above test.
 def sample_inputs_aminmax(op_info, device, dtype, requires_grad, **kwargs):
     test_cases: Tuple[tuple, dict] = (  # type: ignore[assignment]
         ((S, S, S), {}),
@@ -2384,6 +2364,70 @@ def sample_inputs_max_min_binary(op_info, device, dtype, requires_grad, **kwargs
                                                  requires_grad=requires_grad),),))
                   for input_tensor, other_tensor in args_for_binary_op)
     return inputs
+
+def sample_inputs_adaptive_avg_pool2d(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    # Ordered as (input shape, output size)
+    cases = (
+        ((1, 8, 8, 8), (5, 7)),
+        ((2, 8, 8, 8), (None, 7)),
+        ((1, 8, 4, 3), (5, None)),
+        ((1, 8, 4, 3), (None, None)),
+        ((1, 8, 4, 3), (5)),
+    )
+
+    def generator():
+        for input_shape, output_size in cases:
+            yield SampleInput(make_arg(input_shape), args=(output_size,))
+
+    return list(generator())
+
+def sample_inputs_normalize(self, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, low=-1, high=1, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    cases: Tuple[Tuple[int], dict] = (  # type: ignore[assignment]
+                                     ((2, 1, 4, 5), {'p': 1., 'dim': 2}),
+                                     ((2, 3, 4, 5), {'p': 2., 'dim': 1}),
+                                     ((1, 2, 4, 5), {'p': 0.5, 'dim': 0}),
+                                     ((1, 3, 4, 5), {'p': -1., 'dim': 1}),
+                                     ((1, 3, 4, 5), {'p': 0., 'dim': -1}),
+                                     ((), {'p': 1.2, 'dim': 0}),
+                                     ((2, 3, 4, 5), {}),
+                                     ((2, 3, 4, 5), {'eps': 1e-4}))
+
+    def generator():
+        for input_shape, kwargs in cases:
+            yield SampleInput(make_arg(input_shape), kwargs=kwargs)
+
+    return list(generator())
+
+def sample_inputs_conv_transpose2d(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    # Ordered as shapes for input, weight, bias
+    # and a dict of values of (stride, padding, output_padding, groups, dilation)
+    cases: Tuple[Tuple[int], Tuple[int], Tuple[int], dict] = (  # type: ignore[assignment]
+        ((1, 3, 4, 4), (3, 3, 3, 3), (3,),
+         {'stride': (2, 2), 'padding': 2, 'output_padding': (1, 1), 'groups': 1}),
+        ((2, 2, 4, 4), (2, 2, 4, 5), (4,),
+         {'stride': (3, 2), 'padding': (1, 2), 'output_padding': (2, 3), 'groups': 2, 'dilation': (4, 4)}),
+        ((1, 1, 4, 5), (1, 1, 4, 3), (1,),
+         {'stride': 2, 'padding': 1, 'output_padding': 1, 'groups': 1, 'dilation': (2, 3)}),
+        ((1, 1, 4, 3), (1, 2, 3, 4), None,
+         {'stride': 2, 'padding': 1, 'output_padding': 1, 'groups': 1}),
+        ((1, 4, 5, 5), (4, 8, 3, 3), None,
+         {})
+    )
+
+    def generator():
+        for input_shape, weight, bias, kwargs in cases:
+            yield SampleInput(make_arg(input_shape), args=(
+                make_arg(weight),
+                make_arg(bias) if bias is not None else bias
+            ), kwargs=kwargs)
+
+    return list(generator())
 
 def sample_inputs_hardswish(self, device, dtype, requires_grad):
     N = 5
@@ -3239,6 +3283,33 @@ def sample_inputs_lu(op_info, device, dtype, requires_grad=False, **kwargs):
             shape = batch_shape + (S, S)
             input = make_tensor(shape, device, dtype, requires_grad=requires_grad, low=None, high=None)
             yield SampleInput(input, args=(True, get_infos))
+
+    return list(generate_samples())
+
+
+def sample_inputs_lu_solve(op_info, device, dtype, requires_grad=False, **kwargs):
+    from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
+
+    batches = [(), (0, ), (2, )]
+    ns = [5, 3, 0]
+    nrhs = [0, 1, 6]
+
+    def generate_samples():
+        for n, batch, rhs in product(ns, batches, nrhs):
+            a = random_fullrank_matrix_distinct_singular_value(n, *batch, dtype=dtype, device=device)
+            requires_grad_options = (False,) if not requires_grad else (True, False)
+            # we try all possible combinations of requires_grad for each input
+            for lu_requires_grad, b_requires_grad in product(requires_grad_options, requires_grad_options):
+                # when requires_grad == True, at least one input has to have requires_grad enabled
+                if requires_grad and not lu_requires_grad and not b_requires_grad:
+                    continue
+                # we run LU several times to guarantee that the produced SampleInputs are independent
+                # this is especially important when setting different requries_grad for same tensors!
+                lu, pivs = a.lu()
+                lu.requires_grad = lu_requires_grad
+                b = torch.randn(*batch, n, rhs, dtype=dtype, device=device)
+                b.requires_grad = b_requires_grad
+                yield SampleInput(b, args=(lu, pivs))
 
     return list(generate_samples())
 
@@ -5270,7 +5341,7 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo('acosh',
                    aliases=('arccosh', ),
                    ref=np.arccosh,
-                   domain=(1, float('inf')),
+                   domain=(1, None),
                    dtypes=all_types_and_complex_and(torch.bool),
                    dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -5373,7 +5444,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            decorators=[
                DecorateInfo(
-                   toleranceOverride({torch.float32: tol(atol=1e-05, rtol=1.3e-05),
+                   toleranceOverride({torch.float32: tol(atol=1.3e-05, rtol=1.3e-05),
                                       torch.complex64: tol(atol=1e-05, rtol=1.2e-03)}),
                    'TestCommon', 'test_reference_testing')],
            skips=(
@@ -5471,14 +5542,6 @@ op_db: List[OpInfo] = [
                # TODO: update sample inputs with for_inplace_variant kwarg to support this test
                SkipInfo('TestCommon', 'test_variant_consistency_eager'),),
            sample_inputs_func=sample_inputs_addcmul_addcdiv),
-    OpInfo('amax',
-           ref=lambda a, dim=None, keepdim=False, **kwargs: np.amax(a, axis=dim, keepdims=keepdim, **kwargs),
-           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-           sample_inputs_func=sample_inputs_amax_amin,),
-    OpInfo('amin',
-           ref=lambda a, dim=None, keepdim=False, **kwargs: np.amin(a, axis=dim, keepdims=keepdim, **kwargs),
-           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-           sample_inputs_func=sample_inputs_amax_amin),
     OpInfo('argmax',
            dtypes=all_types_and(torch.float16, torch.bfloat16),
            supports_autograd=False,
@@ -5493,11 +5556,16 @@ op_db: List[OpInfo] = [
                    domain=(-1, 1),
                    supports_sparse=True,
                    supports_forward_ad=True,
-                   decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
                    safe_casts_outputs=True,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    assert_autodiffed=True,
+                   decorators=[
+                       DecorateInfo(
+                           toleranceOverride({torch.float16: tol(atol=1e-05, rtol=1e-03)}),
+                           'TestUnaryUfuncs', device_type='cuda'),
+                       precisionOverride({torch.bfloat16: 1e-2}),
+                   ],
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                 device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
@@ -6274,6 +6342,9 @@ op_db: List[OpInfo] = [
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack, skipCUDAIfRocm],
            supports_inplace_autograd=False,
            skips=(
+               # Will be removed once https://github.com/pytorch/pytorch/issues/62328 is fixed
+               # Probable fix (open PR): https://github.com/pytorch/pytorch/pull/62570
+               SkipInfo('TestGradients', 'test_fn_grad', device_type='cuda', dtypes=(torch.complex128,)),
                SkipInfo('TestCommon', 'test_dtypes'),
                SkipInfo('TestGradients', 'test_fn_gradgrad'),
                # This test fails because singular inputs cannot be reliably
@@ -6431,7 +6502,7 @@ op_db: List[OpInfo] = [
            )),
     UnaryUfuncInfo('log',
                    ref=np.log,
-                   domain=(0, float('inf')),
+                   domain=(0, None),
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    assert_autodiffed=True,
@@ -6445,7 +6516,7 @@ op_db: List[OpInfo] = [
                    )),
     UnaryUfuncInfo('log10',
                    ref=np.log10,
-                   domain=(0, float('inf')),
+                   domain=(0, None),
                    decorators=(precisionOverride({torch.bfloat16: 5e-2}),),
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    assert_autodiffed=True,
@@ -6460,7 +6531,7 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo('log1p',
                    ref=np.log1p,
                    aliases=('special.log1p',),
-                   domain=(-1, float('inf')),
+                   domain=(-1, None),
                    dtypes=all_types_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
                    decorators=(precisionOverride({torch.bfloat16: 1e-1}),),
@@ -6469,7 +6540,7 @@ op_db: List[OpInfo] = [
                    assert_autodiffed=True),
     UnaryUfuncInfo('log2',
                    ref=np.log2,
-                   domain=(0, float('inf')),
+                   domain=(0, None),
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    assert_autodiffed=True,
@@ -6540,6 +6611,12 @@ op_db: List[OpInfo] = [
                # Skip operator schema test because this is a functional and not an operator
                SkipInfo('TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
            )),
+    OpInfo('lu_solve',
+           op=torch.lu_solve,
+           dtypes=floating_and_complex_types(),
+           check_batched_gradgrad=False,
+           sample_inputs_func=sample_inputs_lu_solve,
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack]),
     OpInfo('lu_unpack',
            op=torch.lu_unpack,
            dtypes=floating_and_complex_types(),
@@ -6583,6 +6660,7 @@ op_db: List[OpInfo] = [
            backward_dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
                                                                 *[torch.bfloat16] if (SM60OrLater and CUDA11OrLater) else []),
            assert_autodiffed=True,
+           assert_jit_shape_analysis=True,
            sample_inputs_func=sample_inputs_matmul,
            skips=(
                # matmul does not correctly warn when resizing out= inputs
@@ -6618,19 +6696,19 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=all_types_and(torch.float16),
            # TODO: some signatures of median do support out
            supports_out=False,
-           sample_inputs_func=sample_inputs_reduction_wrapper(False)),
+           sample_inputs_func=partial(sample_inputs_reduction, supports_multiple_dims=False)),
     OpInfo('nanmedian',
            dtypes=all_types(),
            dtypesIfCPU=all_types_and(torch.bfloat16),
            dtypesIfCUDA=all_types_and(torch.float16),
            # TODO: some signatures of nanmedian do support out
            supports_out=False,
-           sample_inputs_func=sample_inputs_reduction_wrapper(False)),
+           sample_inputs_func=partial(sample_inputs_reduction, supports_multiple_dims=False)),
     OpInfo('var_mean',
            dtypes=floating_and_complex_types_and(torch.half),
            dtypesIfCPU=floating_and_complex_types_and(torch.half, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
-           sample_inputs_func=sample_inputs_reduction_wrapper(False),
+           sample_inputs_func=partial(sample_inputs_reduction, supports_multiple_dims=False),
            backward_dtypes=floating_types_and(torch.half),
            backward_dtypesIfCPU=floating_types_and(torch.half, torch.bfloat16),
            backward_dtypesIfCUDA=floating_types_and(torch.half),
@@ -6649,7 +6727,7 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types_and(torch.half),
            dtypesIfCPU=floating_and_complex_types_and(torch.half, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
-           sample_inputs_func=sample_inputs_reduction_wrapper(False),
+           sample_inputs_func=partial(sample_inputs_reduction, supports_multiple_dims=False),
            backward_dtypes=floating_types_and(torch.half),
            backward_dtypesIfCPU=floating_types_and(torch.half, torch.bfloat16),
            backward_dtypesIfCUDA=floating_types_and(torch.half),
@@ -6688,16 +6766,12 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_max_min_reduction_no_dim,),
-    OpInfo('nansum',
-           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-           supports_out=False,
-           sample_inputs_func=sample_inputs_reduction_wrapper(supports_multiple_dims=True)),
     # TODO(@heitorschueroff) Add test for dtype kwarg
     OpInfo('mean',
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            assert_autodiffed=True,
            supports_forward_ad=True,
-           sample_inputs_func=sample_inputs_reduction_wrapper(supports_multiple_dims=True),
+           sample_inputs_func=sample_inputs_reduction,
            # Need to skip out test because one of the overload for mean does not support it
            # TODO(@heitorschueroff) fix this when implementing ReductionInfo
            skips=(SkipInfo('TestCommon', 'test_out'),)),
@@ -6735,6 +6809,16 @@ op_db: List[OpInfo] = [
            sample_inputs_func=partial(sample_inputs_softmax_variant, with_dtype=True),
            assert_autodiffed=True,
            supports_out=False),
+    OpInfo('nn.functional.normalize',
+           dtypesIfCPU=floating_and_complex_types_and(torch.bfloat16),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
+           sample_inputs_func=sample_inputs_normalize,
+           skips=(
+               # RuntimeError: aliasOp != torch::jit::getOperatorAliasMap().end()
+               # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":159,
+               # please report a bug to PyTorch.
+               SkipInfo('TestJit', 'test_variant_consistency_jit',),
+           )),
     OpInfo('aminmax',
            ref=lambda x, dim=None, keepdim=False: (np.amin(x, axis=dim, keepdims=keepdim), np.amax(x, axis=dim, keepdims=keepdim)),
            dtypes=all_types_and(torch.bool),
@@ -6746,6 +6830,15 @@ op_db: List[OpInfo] = [
                # FIXME: aminmax does not check for safe casting to output
                SkipInfo('TestCommon', 'test_out'),
            )),
+    OpInfo('nn.functional.adaptive_avg_pool2d',
+           dtypes=floating_types(),
+           dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+           skips=(
+               SkipInfo('TestJit', 'test_variant_consistency_jit'),
+           ),
+           supports_out=False,
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+           sample_inputs_func=sample_inputs_adaptive_avg_pool2d),
     OpInfo('nn.functional.relu',
            aten_name="relu",
            supports_autograd=True,
@@ -6753,6 +6846,19 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_nn_activation_relu,
            supports_out=False),
+    OpInfo('nn.functional.conv_transpose2d',
+           aten_name='conv_transpose2d',
+           aliases=('conv_transpose2d',),
+           dtypesIfCPU=floating_types_and(torch.int64),
+           dtypesIfCUDA=floating_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
+           sample_inputs_func=sample_inputs_conv_transpose2d,
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+           skips=(
+               # RuntimeError: !lhs.isAliasOf(rhs)INTERNAL ASSERT FAILED at
+               # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":104, please report a bug to PyTorch.
+               SkipInfo('TestJit', 'test_variant_consistency_jit'),
+           ),
+           supports_out=False,),
     OpInfo('nn.functional.hardswish',
            aten_name="hardswish",
            supports_autograd=True,
@@ -6892,17 +6998,17 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_mode,),
     MvlGammaInfo(variant_test_name='mvlgamma_p_1',
-                 domain=(1, float('inf')),
+                 domain=(1, None),
                  skips=skips_mvlgamma(),
                  sample_kwargs=lambda device, dtype, input: ({'p': 1}, {'d': 1})),
     MvlGammaInfo(variant_test_name='mvlgamma_p_3',
-                 domain=(2, float('inf')),
+                 domain=(2, None),
                  skips=skips_mvlgamma(skip_redundant=True) + (
                      SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard', dtypes=(torch.float16,)),
                  ),
                  sample_kwargs=lambda device, dtype, input: ({'p': 3}, {'d': 3})),
     MvlGammaInfo(variant_test_name='mvlgamma_p_5',
-                 domain=(3, float('inf')),
+                 domain=(3, None),
                  skips=skips_mvlgamma(skip_redundant=True) + (
                      SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard', dtypes=(torch.float16,)),
                  ),
@@ -7405,7 +7511,7 @@ op_db: List[OpInfo] = [
                    )),
     UnaryUfuncInfo('rsqrt',
                    ref=lambda x: np.reciprocal(np.sqrt(x)),
-                   domain=(0, float('inf')),
+                   domain=(0, None),
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    decorators=(precisionOverride({torch.half: 5e-2}),),
@@ -7416,7 +7522,7 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo('sqrt',
                    ref=np.sqrt,
                    supports_sparse=True,
-                   domain=(0, float('inf')),
+                   domain=(0, None),
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    assert_autodiffed=True,
@@ -7745,9 +7851,6 @@ op_db: List[OpInfo] = [
            op=lambda x, other: x.reshape_as(other),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_view_as_reshape_as,
-           skips=(
-               # Because reshape_as does not have a function variant.
-               SkipInfo('TestJit', 'test_variant_consistency_jit'),),
            supports_out=False,
            supports_forward_ad=True,
            ),
@@ -7972,10 +8075,6 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
            supports_autograd=False,
-           skips=(
-               # JIT has issue when op is passed as lambda
-               SkipInfo('TestJit', 'test_variant_consistency_jit'),
-           ),
            sample_inputs_func=sample_inputs_resize_ops),
     OpInfo('resize_as_',
            op=lambda x, other: torch.resize_as_(x.clone(), other),
@@ -7984,10 +8083,6 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
            supports_autograd=False,
-           skips=(
-               # JIT has issue when op is passed as lambda
-               SkipInfo('TestJit', 'test_variant_consistency_jit'),
-           ),
            sample_inputs_func=sample_inputs_resize_ops),
     OpInfo('take_along_dim',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
@@ -8457,17 +8552,54 @@ op_db: List[OpInfo] = [
             ),
         ),
     ),
-]
-
-# Reduction operator database
-reduction_op_db: List[ReductionOpInfo] = [
+    ReductionOpInfo(
+        'amax',
+        nan_policy='propagate',
+        dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+        ref=lambda a, dim=None, keepdim=False, **kwargs: np.amax(a, axis=dim, keepdims=keepdim, **kwargs),
+        skips=(
+            # FIXME: sum reduces all dimensions when dim=[]
+            SkipInfo('TestReductions', 'test_dim_empty'),
+            SkipInfo('TestReductions', 'test_dim_empty_keepdim'),
+        ),
+    ),
+    ReductionOpInfo(
+        'amin',
+        nan_policy='propagate',
+        dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+        ref=lambda a, dim=None, keepdim=False, **kwargs: np.amin(a, axis=dim, keepdims=keepdim, **kwargs),
+        skips=(
+            # FIXME: sum reduces all dimensions when dim=[]
+            SkipInfo('TestReductions', 'test_dim_empty'),
+            SkipInfo('TestReductions', 'test_dim_empty_keepdim'),
+        ),
+    ),
     ReductionOpInfo(
         'sum',
         identity=0,
-        promotes_int_to_int64=True,
+        nan_policy='propagate',
         supports_out=False,
         supports_forward_ad=True,
+        promotes_int_to_int64=True,
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+        skips=(
+            # FIXME: sum does not support passing keepdim without passing dim
+            SkipInfo('TestReductions', 'test_dim_default_keepdim'),
+            # FIXME: sum reduces all dimensions when dim=[]
+            SkipInfo('TestReductions', 'test_dim_empty'),
+            SkipInfo('TestReductions', 'test_dim_empty_keepdim'),
+            # FIXME: sum does not support passing None to dim
+            SkipInfo('TestReductions', 'test_dim_none'),
+            SkipInfo('TestReductions', 'test_dim_none_keepdim'),
+        ),
+    ),
+    ReductionOpInfo(
+        'nansum',
+        identity=0,
+        nan_policy='omit',
+        promotes_int_to_int64=True,
+        supports_out=False,
+        dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
         skips=(
             # FIXME: sum does not support passing keepdim without passing dim
             SkipInfo('TestReductions', 'test_dim_default_keepdim'),
@@ -8481,13 +8613,12 @@ reduction_op_db: List[ReductionOpInfo] = [
     ),
 ]
 
-op_db += reduction_op_db
-
 # Common operator groupings
 unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo)]
 spectral_funcs = [op for op in op_db if isinstance(op, SpectralFuncInfo)]
 sparse_unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo) and op.supports_sparse is True]
 shape_funcs = [op for op in op_db if isinstance(op, ShapeFuncInfo)]
+reduction_ops = [op for op in op_db if isinstance(op, ReductionOpInfo)]
 
 # TODO: review porting these to make_tensor
 def index_variable(shape, max_indices, device=torch.device('cpu')):

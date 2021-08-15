@@ -9,7 +9,8 @@ from itertools import product, combinations, permutations
 import warnings
 
 from torch._six import inf, nan
-from torch.testing import integral_types_and, floating_and_complex_types_and
+from torch.testing import (
+    integral_types_and, floating_and_complex_types_and)
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, skipIfNoSciPy, slowTest, torch_to_numpy_dtype_dict,
     IS_WINDOWS, make_tensor)
@@ -17,7 +18,7 @@ from torch.testing._internal.common_device_type import (
     OpDTypes, instantiate_device_type_tests, onlyCPU, dtypes, dtypesIfCUDA, dtypesIfCPU,
     onlyOnCPUAndCUDA, onlyCUDA, largeTensorTest, ops, precisionOverride)
 from torch.testing._internal.common_methods_invocations import (
-    ReductionOpInfo, reduction_op_db)
+    ReductionOpInfo, reduction_ops)
 
 # TODO: replace with make_tensor
 def _generate_input(shape, dtype, device, with_extremal):
@@ -56,11 +57,24 @@ def _rand_shape(dim, min_size, max_size):
         shape.append(random.randint(min_size, max_size))
     return tuple(shape)
 
-def reduced_shape(shape, dim=None, keepdim=False):
+def _reduced_shape(shape, dim=None, keepdim=False):
+    """Reduces the given dimensions of the input shape
+
+    Args:
+        shape: The shape to reduce
+        dim : The dimensions to reduce
+        keepdim: If true, reduced dimensions have size 1 in the reduced shape,
+            otherwise they are removed from the reduced shape.
+
+    Returns:
+        The reduced shape
+    """
     if dim is None:
         return [1] * len(shape) if keepdim else []
 
-    dim = set(dim if isinstance(dim, Sequence) else [dim])
+    # Wrap negative dims
+    dim = dim if isinstance(dim, Sequence) else [dim]
+    dim = set(i if i >= 0 else len(shape) + i for i in dim)
 
     result = []
     for i, size in enumerate(shape):
@@ -77,136 +91,130 @@ class TestReductions(TestCase):
     # ReductionOpInfo unit tests
     ###########################################################################
 
-    # TODO(@heitorschueroff) combine cases with keepdim=False and keepdim=True
-    # once there's support for a @parametrize decorator.
+    def _test_dim_keepdim(self, op: ReductionOpInfo, device, *, ndim, **dim_keepdim):
+        """Tests output shape for input with ndim and dim and keepdim kwargs"""
+        shape = torch.randint(2, 5, (ndim,)).tolist()
+        t = make_tensor(shape, device, torch.float)
+        args, kwargs = next(op.generate_args_kwargs(t, **dim_keepdim))
+        result = op(t, *args, **dim_keepdim, **kwargs)
+        expected_shape = _reduced_shape(shape, **dim_keepdim)
+        self.assertEqual(result.shape, expected_shape, f"""
+        expected output shape to be {expected_shape} but got {list(result.shape)}
+        for input shape {shape} and {dim_keepdim}
+        """)
 
-    @ops(reduction_op_db, allowed_dtypes=[torch.float])
-    def test_dim_default(self, device, dtype, op: ReductionOpInfo):
-        """Tests that the default behavior is to reduce all dimensions."""
-        t = make_tensor((2, 3), device, dtype)
-        args, kwargs = next(op.generate_args_kwargs(t))
-        self.assertEqual(op(t, *args, **kwargs).ndim, 0)
+    # TODO(@heitorschueroff) combine cases with and without keepdim once
+    # there's support for a @parametrize decorator.
 
-    @ops(reduction_op_db, allowed_dtypes=[torch.float])
-    def test_dim_default_keepdim(self, device, dtype, op: ReductionOpInfo):
-        """Tests that the default when keepdim=True is to reduce all dimensions to size 1."""
-        t = make_tensor((2, 3), device, dtype)
-        args, kwargs = next(op.generate_args_kwargs(t))
-        self.assertEqual(op(t, *args, keepdim=True, **kwargs).shape, [1, 1])
+    @ops(reduction_ops, dtypes=OpDTypes.none)
+    def test_dim_default(self, device, op: ReductionOpInfo):
+        """Tests that the default dim reduces all dimensions."""
+        self._test_dim_keepdim(op, device, ndim=2)
 
-    @ops(reduction_op_db, allowed_dtypes=[torch.float])
-    def test_dim_none(self, device, dtype, op: ReductionOpInfo):
+    @ops(reduction_ops, dtypes=OpDTypes.none)
+    def test_dim_default_keepdim(self, device, op: ReductionOpInfo):
+        """Tests that the default dim, when keepdim=True, reduces all dimensions to size 1."""
+        self._test_dim_keepdim(op, device, ndim=2, keepdim=True)
+
+    @ops(reduction_ops, dtypes=OpDTypes.none)
+    def test_dim_none(self, device, op: ReductionOpInfo):
         """Tests that dim=None reduces all dimensions."""
-        t = make_tensor((2, 3), device, dtype)
-        args, kwargs = next(op.generate_args_kwargs(t, dim=None))
-        self.assertEqual(op(t, *args, dim=None, **kwargs).ndim, 0)
+        self._test_dim_keepdim(op, device, ndim=2, dim=None)
 
-    @ops(reduction_op_db, allowed_dtypes=[torch.float])
-    def test_dim_none_keepdim(self, device, dtype, op: ReductionOpInfo):
-        """Tests that dim=None, keepdim=True reduces all dimensions to size 1."""
-        t = make_tensor((2, 3), device, dtype)
-        args, kwargs = next(op.generate_args_kwargs(t, dim=None))
-        self.assertEqual(op(t, *args, dim=None, keepdim=True, **kwargs).shape, [1, 1])
+    @ops(reduction_ops, dtypes=OpDTypes.none)
+    def test_dim_none_keepdim(self, device, op: ReductionOpInfo):
+        """Tests that dim=None, when keepdim=True, reduces all dimensions to size 1."""
+        self._test_dim_keepdim(op, device, ndim=2, dim=None, keepdim=True)
 
-    @ops(reduction_op_db, allowed_dtypes=[torch.float])
-    def test_dim_single(self, device, dtype, op: ReductionOpInfo):
+    @ops(reduction_ops, dtypes=OpDTypes.none)
+    def test_dim_single(self, device, op: ReductionOpInfo):
         """Tests that dim=i reduces dimension i."""
-        t = make_tensor((2, 3), device, dtype)
-        args, kwargs = next(op.generate_args_kwargs(t, dim=0))
-        self.assertEqual(op(t, *args, dim=0, **kwargs).shape, [3])
+        self._test_dim_keepdim(op, device, ndim=2, dim=0)
+        self._test_dim_keepdim(op, device, ndim=2, dim=-1)
 
-    @ops(reduction_op_db, allowed_dtypes=[torch.float])
-    def test_dim_single_keepdim(self, device, dtype, op: ReductionOpInfo):
-        """Tests that dim=i, keepdim=True reduces dimension i to size 1."""
-        t = make_tensor((2, 3), device, dtype)
-        args, kwargs = next(op.generate_args_kwargs(t, dim=0))
-        self.assertEqual(op(t, *args, dim=0, keepdim=True, **kwargs).shape, [1, 3])
+    @ops(reduction_ops, dtypes=OpDTypes.none)
+    def test_dim_single_keepdim(self, device, op: ReductionOpInfo):
+        """Tests that dim=i, when keepdim=True, reduces dimension i to size 1."""
+        self._test_dim_keepdim(op, device, ndim=2, dim=0, keepdim=True)
+        self._test_dim_keepdim(op, device, ndim=2, dim=-1, keepdim=True)
 
-    @ops(filter(lambda op: op.supports_multiple_dims, reduction_op_db), allowed_dtypes=[torch.float])
-    def test_dim_multi(self, device, dtype, op: ReductionOpInfo):
+    @ops(filter(lambda op: op.supports_multiple_dims, reduction_ops), dtypes=OpDTypes.none)
+    def test_dim_empty(self, device, op: ReductionOpInfo):
+        """Tests that dim=[] is a no-op"""
+        self._test_dim_keepdim(op, device, ndim=2, dim=[])
+
+    @ops(filter(lambda op: op.supports_multiple_dims, reduction_ops), dtypes=OpDTypes.none)
+    def test_dim_empty_keepdim(self, device, op: ReductionOpInfo):
+        """Tests that dim=[], when keepdim=True, is a no-op"""
+        self._test_dim_keepdim(op, device, ndim=2, dim=[], keepdim=True)
+
+    @ops(filter(lambda op: op.supports_multiple_dims, reduction_ops), dtypes=OpDTypes.none)
+    def test_dim_multi(self, device, op: ReductionOpInfo):
         """Tests that dim=[i, j, ...] reduces dimensions i, j, ...."""
-        t = make_tensor((2, 3, 2), device, dtype)
-        args, kwargs = next(op.generate_args_kwargs(t, dim=[0, 2]))
-        self.assertEqual(op(t, *args, dim=[0, 2], **kwargs).shape, [3])
+        self._test_dim_keepdim(op, device, ndim=3, dim=[0, 2])
+        self._test_dim_keepdim(op, device, ndim=3, dim=[-1, 0])
 
-    @ops(filter(lambda op: op.supports_multiple_dims, reduction_op_db), allowed_dtypes=[torch.float])
-    def test_dim_multi_keepdim(self, device, dtype, op: ReductionOpInfo):
-        """Tests that dim=[i, j, ...], keepdim=True reduces dimensions i, j, ... to size 1."""
-        t = make_tensor((2, 3, 2), device, dtype)
-        args, kwargs = next(op.generate_args_kwargs(t, dim=[0, 2]))
-        self.assertEqual(op(t, *args, dim=[0, 2], keepdim=True, **kwargs).shape, [1, 3, 1])
+    @ops(filter(lambda op: op.supports_multiple_dims, reduction_ops), dtypes=OpDTypes.none)
+    def test_dim_multi_keepdim(self, device, op: ReductionOpInfo):
+        """Tests that dim=[i, j, ...], when keepdim=True, reduces dimensions i, j, .... to size 1."""
+        self._test_dim_keepdim(op, device, ndim=3, dim=[0, 2], keepdim=True)
+        self._test_dim_keepdim(op, device, ndim=3, dim=[-1, 0], keepdim=True)
 
-    @ops(filter(lambda op: not op.supports_multiple_dims, reduction_op_db), allowed_dtypes=[torch.float])
-    def test_dim_multi_unsupported(self, device, dtype, op: ReductionOpInfo):
+    @ops(filter(lambda op: not op.supports_multiple_dims, reduction_ops), dtypes=OpDTypes.none)
+    def test_dim_multi_unsupported(self, device, op: ReductionOpInfo):
         """Tests that ops claiming to not support multi dim actually don't."""
-        t = make_tensor((2, 3, 2), device, dtype)
         with self.assertRaises(TypeError):
-            args, kwargs = next(op.generate_args_kwargs(t, dim=[0, 2]))
-            self.assertEqual(op(t, *args, dim=[0, 2], **kwargs).shape, [3])
+            self._test_dim_keepdim(op, device, ndim=3, dim=[0, 2])
 
-    @ops(filter(lambda op: op.supports_multiple_dims, reduction_op_db), allowed_dtypes=[torch.float])
-    def test_dim_empty(self, device, dtype, op: ReductionOpInfo):
-        """Tests that dim=[] is a noop"""
-        t = make_tensor((2, 3), device, dtype)
-        args, kwargs = next(op.generate_args_kwargs(t, dim=[]))
-        self.assertEqual(op(t, *args, dim=[], **kwargs), t)
-
-    @ops(filter(lambda op: op.supports_multiple_dims, reduction_op_db), allowed_dtypes=[torch.float])
-    def test_dim_empty_keepdim(self, device, dtype, op: ReductionOpInfo):
-        """Tests that dim=[], keepdim=True is a noop"""
-        t = make_tensor((2, 3), device, dtype)
-        args, kwargs = next(op.generate_args_kwargs(t, dim=[]))
-        self.assertEqual(op(t, *args, dim=[], keepdim=True, **kwargs), t)
-
-    @ops(reduction_op_db, allowed_dtypes=[torch.float])
-    def test_dim_offbounds(self, device, dtype, op: ReductionOpInfo):
+    @ops(reduction_ops, dtypes=OpDTypes.none)
+    def test_dim_offbounds(self, device, op: ReductionOpInfo):
         """Tests that passing an off-bounds dim throws"""
-        t = make_tensor((2, 3), device, dtype)
-        args, kwargs = next(op.generate_args_kwargs(t, dim=2))
         with self.assertRaises(IndexError):
-            op(t, *args, dim=2, **kwargs)
+            self._test_dim_keepdim(op, device, ndim=2, dim=2)
 
-    @ops(reduction_op_db, allowed_dtypes=[torch.float])
-    def test_dim_offbounds_keepdim(self, device, dtype, op: ReductionOpInfo):
+    @ops(reduction_ops, dtypes=OpDTypes.none)
+    def test_dim_offbounds_keepdim(self, device, op: ReductionOpInfo):
         """Tests that passing an off-bounds dim and keepdim=True throws"""
-        t = make_tensor((2, 3), device, dtype)
-        args, kwargs = next(op.generate_args_kwargs(t, dim=2))
         with self.assertRaises(IndexError):
-            op(t, *args, dim=2, keepdim=True, **kwargs)
+            self._test_dim_keepdim(op, device, ndim=2, dim=2, keepdim=True)
 
-    @ops(reduction_op_db, allowed_dtypes=[torch.float])
-    def test_empty_slice(self, device, dtype, op: ReductionOpInfo):
-        """Tests for consistent behavior when reducing over an empty slice."""
-        t = make_tensor((0, 2, 3), device, dtype)
-        for dim in [0] + [[0, 1]] if op.supports_multiple_dims else []:
-            args, kwargs = next(op.generate_args_kwargs(t, dim=dim))
-            if op.identity is not None:
-                # Reducing along empty slice should return identity
-                result = op(t, *args, dim=dim, **kwargs)
-                self.assertEqual(result.shape, reduced_shape(t.shape, dim))
-                self.assertEqual(result, torch.full_like(result, op.identity))
-            elif op.promotes_int_to_float:
-                # Reducing along empty slice should return NaN
-                result = op(t, *args, dim=dim, **kwargs)
-                self.assertEqual(result.shape, reduced_shape(t.shape, dim))
-                self.assertEqual(result, torch.full_like(result, torch.nan))
-            else:
-                # Reducing along empty slice should raise an error
-                with self.assertRaises(IndexError):
-                    op(t, *args, dim=dim, **kwargs)
+    @ops(filter(lambda op: op.identity is not None, reduction_ops), dtypes=OpDTypes.supported)
+    def test_identity(self, device, dtype, op: ReductionOpInfo):
+        """Tests that the identity value is an identity for the operator"""
+        t = make_tensor((10,), device, dtype)
+        t[1::2] = op.identity
+        args, kwargs = next(op.generate_args_kwargs(t))
+        result = op(t[::2], *args, **kwargs)
+        result_with_identity = op(t, *args, **kwargs)
+        self.assertEqual(result, result_with_identity, """
+        Adding identity value to the input tensor should not change the result.
+        """)
 
-    @ops(reduction_op_db, allowed_dtypes=[torch.float])
-    def test_non_empty_slice_of_empty_tensor(self, device, dtype, op: ReductionOpInfo):
-        """Tests that reducing a nonzero size dimension of an empty tensor is
-        allowed and returns an empty tensor with the dimensions reduced
-        """
-        t = make_tensor((0, 2, 3), device, dtype)
-        for dim in [1] + [[1, 2]] if op.supports_multiple_dims else []:
-            args, kwargs = next(op.generate_args_kwargs(t, dim=dim))
-            result = op(t, *args, dim=dim, **kwargs)
-            self.assertEqual(result.shape, reduced_shape(t.shape, dim))
+    # TODO(@heitorschueroff) Update these to use the nan_policy kwarg once
+    # it is added to reduction operators.
 
-    @ops(reduction_op_db, dtypes=OpDTypes.supported)
+    @ops(filter(lambda op: op.nan_policy == 'propagate', reduction_ops), dtypes=OpDTypes.supported,
+         allowed_dtypes=floating_and_complex_types_and(torch.bfloat16, torch.float16))
+    def test_nan_policy_propagate(self, device, dtype, op: ReductionOpInfo):
+        """Tests that nan is propagated to the output by default"""
+        t = make_tensor((5,), device, dtype)
+        t[2] = torch.nan
+        args, kwargs = next(op.generate_args_kwargs(t))
+        result = op(t, *args, **kwargs)
+        self.assertTrue(result.isnan())
+
+    @ops(filter(lambda op: op.nan_policy == 'omit', reduction_ops), dtypes=OpDTypes.supported,
+         allowed_dtypes=floating_and_complex_types_and(torch.bfloat16, torch.float16))
+    def test_nan_policy_omit(self, device, dtype, op: ReductionOpInfo):
+        """Tests that NaN values do not affect the result."""
+        t = make_tensor((10,), device, dtype)
+        t[1::2] = torch.nan
+        args, kwargs = next(op.generate_args_kwargs(t))
+        result = op(t[::2], *args, **kwargs)
+        result_with_nan = op(t, *args, **kwargs)
+        self.assertEqual(result, result_with_nan)
+
+    @ops(reduction_ops, dtypes=OpDTypes.supported)
     def test_result_dtype(self, device, dtype, op: ReductionOpInfo):
         """Tests that the result has the correct dtype"""
         t = make_tensor((5,), device, dtype)
@@ -220,26 +228,44 @@ class TestReductions(TestCase):
         else:
             self.assertEqual(result.dtype, op.result_dtype or dtype)
 
-    # TODO(@heitorschueroff) Update these to use the nan_policy kwarg once
-    # it is added to reduction operators.
+    @ops(reduction_ops, dtypes=OpDTypes.none)
+    def test_empty_tensor_empty_slice(self, device, op: ReductionOpInfo):
+        """Tests for consistent behavior when reducing over an empty slice.
 
-    @ops(filter(lambda op: op.nan_policy == 'propagate', reduction_op_db),
-         allowed_dtypes=floating_and_complex_types_and(torch.bfloat16, torch.float16))
-    def test_nan_policy_propagate(self, device, dtype, op: ReductionOpInfo):
-        """Tests that nan is propagated to the output by default"""
-        t = torch.tensor([0, torch.nan, 2])
-        args, kwargs = next(op.generate_args_kwargs(t))
-        result = op(t, *args, **kwargs)
-        self.assertEqual(result, torch.nan)
+        The rules for reducing over an empty slice are as follows:
+            - Return the identity value if the operator has one
+            - Otherwise, return NaN if the operator promotes integral dtype to
+              floating point dtypes and the result of the operation for the
+              given inputs is floating point dtype.
+            - Otherwise, raise an error
 
-    @ops(filter(lambda op: op.nan_policy == 'omit', reduction_op_db),
-         allowed_dtypes=floating_and_complex_types_and(torch.bfloat16, torch.float16))
-    def test_nan_policy_omit(self, device, dtype, op: ReductionOpInfo):
-        """Tests that NaN values do not affect the result."""
-        t = torch.tensor([0, torch.nan, 2])
-        args, kwargs = next(op.generate_args_kwargs(t))
-        result = op(t, *args, **kwargs)
-        self.assertEqual(result, op(t[~t.isnan()], *args, **kwargs))
+        See discussion here https://github.com/pytorch/pytorch/issues/61901
+        """
+        t = make_tensor((0, 2, 3), device, torch.float)
+        for dim in [0] + [[0, 2]] if op.supports_multiple_dims else []:
+            args, kwargs = next(op.generate_args_kwargs(t, dim=dim))
+            if op.identity is not None:
+                # Reducing along empty slice should return identity
+                result = op(t, *args, dim=dim, **kwargs)
+                self.assertEqual(result, torch.full_like(result, op.identity))
+            elif op.promotes_int_to_float:
+                # Reducing along empty slice should return NaN
+                result = op(t, *args, dim=dim, **kwargs)
+                self.assertEqual(result, torch.full_like(result, torch.nan))
+            else:
+                # Reducing along empty slice should raise an error
+                with self.assertRaises(IndexError):
+                    op(t, *args, dim=dim, **kwargs)
+
+    @ops(reduction_ops, dtypes=OpDTypes.none)
+    def test_empty_tensor_nonempty_slice(self, device, op: ReductionOpInfo):
+        """Tests that reducing a nonempty slice of an empty tensor returns an
+        empty tensor with the dimensions reduced."""
+        t = make_tensor((0, 2, 3), device, torch.float)
+        for dim in [1] + [[1, 2]] if op.supports_multiple_dims else []:
+            args, kwargs = next(op.generate_args_kwargs(t, dim=dim))
+            result = op(t, *args, dim=dim, **kwargs)
+            self.assertEqual(result.shape, _reduced_shape(t.shape, dim))
 
     ###########################################################################
     # TODO: Legacy tests - port to ReductionOpInfo
