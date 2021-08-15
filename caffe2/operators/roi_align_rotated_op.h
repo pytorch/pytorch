@@ -35,7 +35,7 @@ class RoIAlignRotatedOp final : public Operator<Context> {
   }
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-// Prevent the conflicting redefinition of symbol `RunOnDevice` 
+// Prevent the conflicting redefinition of symbol `RunOnDevice`
 // in `caffe2\ideep\operators\operator_fallback_ideep.cc`
 // for clang on Windows.
 #ifndef CAFFE2_IDEEP_FALLBACK_IDEEP_DEFINITION
