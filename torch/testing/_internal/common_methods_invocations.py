@@ -2452,6 +2452,8 @@ def sample_inputs_reduction_quantile(op_info, device, dtype, requires_grad):
             inputs.append(SampleInput(t, args=(quantiles,)))
             for kwargs in _generate_reduction_kwargs(t.ndim, supports_multiple_dims=False):
                 # Interpolation kwarg for now is only supported when providing both dim and keepdim
+                kwargs.setdefault('dim', None)
+                kwargs.setdefault('keepdim', False)
                 for interpolation in test_interpolations:
                     kwargs['interpolation'] = interpolation
                     inputs.append(SampleInput(t, args=(quantiles,), kwargs=kwargs))
