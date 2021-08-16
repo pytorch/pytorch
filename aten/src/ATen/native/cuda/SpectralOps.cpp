@@ -312,6 +312,7 @@ static const Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_
   // Workaround for gh-63152, gh-58724
   // Bluestein plans in CUDA 11.1 (cufft 10.3) cannot be re-used
   bool use_caching = true;
+#ifdef CUFFT_VERSION
   if (10300 <= CUFFT_VERSION && CUFFT_VERSION < 10400) {
     // Only cache plans for transforms with small prime factors
     use_caching = std::none_of(
@@ -319,6 +320,7 @@ static const Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_
       return has_large_prime_factor(dim_size);
     });
   }
+#endif
 
   if (use_caching && plan_cache.max_size() > 0) {
     guard.lock();
