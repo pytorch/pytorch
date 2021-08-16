@@ -1234,7 +1234,7 @@ else:
         pass
 
 
-def norm(input, p=None, dim=None, keepdim=False, out=None, dtype=None):  # noqa: F811
+def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: F811
     r"""Returns the matrix norm or vector norm of a given tensor.
 
     .. warning::
