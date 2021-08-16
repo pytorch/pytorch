@@ -7828,17 +7828,11 @@ op_db: List[OpInfo] = [
     OpInfo('stack',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_stack,
-           assert_autodiffed=True,
-           skips=(
-               # stack does not correctly warn when resizing out= inputs
-               SkipInfo('TestCommon', 'test_out'),),),
+           assert_autodiffed=True),
     OpInfo('hstack',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_hstack_dstack_vstack,
-           supports_forward_ad=True,
-           skips=(
-               # hstack does not correctly warn when resizing out= inputs
-               SkipInfo('TestCommon', 'test_out'),),),
+           supports_forward_ad=True),
     OpInfo('hypot',
            dtypes=floating_types(),
            dtypesIfCPU=floating_types_and(torch.bfloat16),
