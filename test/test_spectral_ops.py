@@ -1088,7 +1088,6 @@ class TestFFT(TestCase):
         for n in [2048, 3199, 5999]:
             a = torch.randn(n, device=device, dtype=torch.complex64)
             res1 = torch.fft.fftn(a)
-            a = a.clone()
             res2 = torch.fft.fftn(a.clone())
             self.assertEqual(res1, res2)
 
