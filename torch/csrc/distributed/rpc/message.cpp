@@ -71,15 +71,13 @@ std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> Message::getStorages()
   // Sparse tensors do not have storage. Instead, a sparse tensor
   // contains two tensors indices and values, and both contain storage.
   std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> storages;
-  int64_t storagePtrs = 0;
+  auto numStorages = tensors_.size();
   for (const at::Tensor& tensor : tensors_) {
     if (tensor.is_sparse()) {
-      storagePtrs += 2;
-    } else {
-      storagePtrs += 1;
+      ++numStorages;
     }
   }
-  storages.reserve(storagePtrs);
+  storages.reserve(numStorages);
   for (const at::Tensor& tensor : tensors_) {
     if (tensor.is_sparse()) {
       storages.emplace_back(tensor._indices().storage().getWeakStorageImpl());
