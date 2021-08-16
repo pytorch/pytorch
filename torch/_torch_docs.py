@@ -27,7 +27,6 @@ def parse_kwargs(desc):
 def merge_dicts(*dicts):
     return {x: d[x] for d in dicts for x in d}
 
-
 common_args = parse_kwargs("""
     input (Tensor): the input tensor.
     generator (:class:`torch.Generator`, optional): a pseudorandom number generator for sampling
@@ -36,28 +35,35 @@ common_args = parse_kwargs("""
         returned tensor. Default: ``torch.preserve_format``.
 """)
 
-reduceops_common_args = merge_dicts(common_args, parse_kwargs("""
-    dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
-        If specified, the input tensor is casted to :attr:`dtype` before the operation
-        is performed. This is useful for preventing data type overflows. Default: None.
-    keepdim (bool): whether the output tensor has :attr:`dim` retained or not.
+reduction_common_args = merge_dicts(common_args, parse_kwargs("""
+    keepdim (bool, optional): If `True`, reduced dimensions are kept in the
+        output tensor as dimensions with size 1. This allows the output tensor
+        to broadcast with the input tensor. If `False`, the reduced dimensions
+        are removed from the output tensor as if calling :func:`torch.squeeze()`.
+        Default is `False`.
+    dtype (:class:`torch.dtype`, optional): The desired data type of the output
+        tensor. This is also the data type used for the operation which can be
+        useful in preventing overflow. If `None`, the data type of the input
+        tensor is used. Default is `None`.
 """))
 
-multi_dim_common = merge_dicts(reduceops_common_args, parse_kwargs("""
-    dim (int or tuple of ints): the dimension or dimensions to reduce.
-"""), {'keepdim_details': """
-If :attr:`keepdim` is ``True``, the output tensor is of the same size
-as :attr:`input` except in the dimension(s) :attr:`dim` where it is of size 1.
-Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting in the
-output tensor having 1 (or ``len(dim)``) fewer dimension(s).
-"""})
+reduction_single_dim_common = merge_dicts(reduction_common_args, parse_kwargs("""
+    dim (int): The dimension to reduce.
+"""))
 
-single_dim_common = merge_dicts(reduceops_common_args, parse_kwargs("""
-    dim (int): the dimension to reduce.
-"""), {'keepdim_details': """If :attr:`keepdim` is ``True``, the output tensor is of the same size
-as :attr:`input` except in the dimension :attr:`dim` where it is of size 1.
-Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting in
-the output tensor having 1 fewer dimension than :attr:`input`."""})
+reduction_single_dim_opt_common = merge_dicts(reduction_common_args, parse_kwargs("""
+    dim (int, optional): The dimension to reduce. If `None`, reduces all
+        dimensions. Default is `None`.
+"""))
+
+reduction_multi_dim_common = merge_dicts(reduction_common_args, parse_kwargs("""
+    dim (Union[int, Tuple[int, ...]]): The dimension(s) to reduce.
+"""))
+
+reduction_multi_dim_opt_common = merge_dicts(reduction_common_args, parse_kwargs("""
+    dim (Union[int, Tuple[int, ...]], optional): The dimension(s) to reduce.
+        If `None`, reduces all dimensions. Default is `None`.
+"""))
 
 factory_common_args = merge_dicts(common_args, parse_kwargs("""
     dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
@@ -611,115 +617,6 @@ Example::
     >>> torch.allclose(torch.tensor([1.0, float('nan')]), torch.tensor([1.0, float('nan')]), equal_nan=True)
     True
 """)
-
-add_docstr(torch.all,
-           r"""
-all(input) -> Tensor
-
-Tests if all elements in :attr:`input` evaluate to `True`.
-
-.. note:: This function matches the behaviour of NumPy in returning
-          output of dtype `bool` for all supported dtypes except `uint8`.
-          For `uint8` the dtype of output is `uint8` itself.
-
-Example::
-
-    >>> a = torch.rand(1, 2).bool()
-    >>> a
-    tensor([[False, True]], dtype=torch.bool)
-    >>> torch.all(a)
-    tensor(False, dtype=torch.bool)
-    >>> a = torch.arange(0, 3)
-    >>> a
-    tensor([0, 1, 2])
-    >>> torch.all(a)
-    tensor(False)
-
-.. function:: all(input, dim, keepdim=False, *, out=None) -> Tensor
-   :noindex:
-
-For each row of :attr:`input` in the given dimension :attr:`dim`,
-returns `True` if all elements in the row evaluate to `True` and `False` otherwise.
-
-{keepdim_details}
-
-Args:
-    {input}
-    {dim}
-    {keepdim}
-
-Keyword args:
-    {out}
-
-Example::
-
-    >>> a = torch.rand(4, 2).bool()
-    >>> a
-    tensor([[True, True],
-            [True, False],
-            [True, True],
-            [True, True]], dtype=torch.bool)
-    >>> torch.all(a, dim=1)
-    tensor([ True, False,  True,  True], dtype=torch.bool)
-    >>> torch.all(a, dim=0)
-    tensor([ True, False], dtype=torch.bool)
-""".format(**single_dim_common))
-
-add_docstr(torch.any,
-           r"""
-any(input) -> Tensor
-
-Args:
-    {input}
-
-Tests if any element in :attr:`input` evaluates to `True`.
-
-.. note:: This function matches the behaviour of NumPy in returning
-          output of dtype `bool` for all supported dtypes except `uint8`.
-          For `uint8` the dtype of output is `uint8` itself.
-
-Example::
-
-    >>> a = torch.rand(1, 2).bool()
-    >>> a
-    tensor([[False, True]], dtype=torch.bool)
-    >>> torch.any(a)
-    tensor(True, dtype=torch.bool)
-    >>> a = torch.arange(0, 3)
-    >>> a
-    tensor([0, 1, 2])
-    >>> torch.any(a)
-    tensor(True)
-
-.. function:: any(input, dim, keepdim=False, *, out=None) -> Tensor
-   :noindex:
-
-For each row of :attr:`input` in the given dimension :attr:`dim`,
-returns `True` if any element in the row evaluate to `True` and `False` otherwise.
-
-{keepdim_details}
-
-Args:
-    {input}
-    {dim}
-    {keepdim}
-
-Keyword args:
-    {out}
-
-Example::
-
-    >>> a = torch.randn(4, 2) < 0
-    >>> a
-    tensor([[ True,  True],
-            [False,  True],
-            [ True,  True],
-            [False, False]])
-    >>> torch.any(a, 1)
-    tensor([ True,  True,  True, False])
-    >>> torch.any(a, 0)
-    tensor([True, True])
-""".format(**single_dim_common))
 
 add_docstr(torch.angle,
            r"""
@@ -2792,31 +2689,6 @@ Example::
             -1.8209, -2.9780, -3.4022])
 """.format(**reduceops_common_args))
 
-add_docstr(torch.count_nonzero,
-           r"""
-count_nonzero(input, dim=None) -> Tensor
-
-Counts the number of non-zero values in the tensor :attr:`input` along the given :attr:`dim`.
-If no dim is specified then all non-zeros in the tensor are counted.
-
-Args:
-    {input}
-    dim (int or tuple of ints, optional): Dim or tuple of dims along which to count non-zeros.
-
-Example::
-
-    >>> x = torch.zeros(3,3)
-    >>> x[torch.randn(3,3) > 0.5] = 1
-    >>> x
-    tensor([[0., 1., 1.],
-            [0., 0., 0.],
-            [0., 0., 1.]])
-    >>> torch.count_nonzero(x)
-    tensor(3)
-    >>> torch.count_nonzero(x, dim=0)
-    tensor([0, 1, 2])
-""".format(**reduceops_common_args))
-
 add_docstr(torch.dequantize,
            r"""
 dequantize(tensor) -> Tensor
@@ -4803,53 +4675,6 @@ Examples::
             [0., 0., 3., 4.]])
 """)
 
-add_docstr(torch.kthvalue,
-           r"""
-kthvalue(input, k, dim=None, keepdim=False, *, out=None) -> (Tensor, LongTensor)
-
-Returns a namedtuple ``(values, indices)`` where ``values`` is the :attr:`k` th
-smallest element of each row of the :attr:`input` tensor in the given dimension
-:attr:`dim`. And ``indices`` is the index location of each element found.
-
-If :attr:`dim` is not given, the last dimension of the `input` is chosen.
-
-If :attr:`keepdim` is ``True``, both the :attr:`values` and :attr:`indices` tensors
-are the same size as :attr:`input`, except in the dimension :attr:`dim` where
-they are of size 1. Otherwise, :attr:`dim` is squeezed
-(see :func:`torch.squeeze`), resulting in both the :attr:`values` and
-:attr:`indices` tensors having 1 fewer dimension than the :attr:`input` tensor.
-
-.. note::
-    When :attr:`input` is a CUDA tensor and there are multiple valid
-    :attr:`k` th values, this function may nondeterministically return
-    :attr:`indices` for any of them.
-
-Args:
-    {input}
-    k (int): k for the k-th smallest element
-    dim (int, optional): the dimension to find the kth value along
-    {keepdim}
-
-Keyword args:
-    out (tuple, optional): the output tuple of (Tensor, LongTensor)
-                           can be optionally given to be used as output buffers
-
-Example::
-
-    >>> x = torch.arange(1., 6.)
-    >>> x
-    tensor([ 1.,  2.,  3.,  4.,  5.])
-    >>> torch.kthvalue(x, 4)
-    torch.return_types.kthvalue(values=tensor(4.), indices=tensor(3))
-
-    >>> x=torch.arange(1.,7.).resize_(2,3)
-    >>> x
-    tensor([[ 1.,  2.,  3.],
-            [ 4.,  5.,  6.]])
-    >>> torch.kthvalue(x, 2, 0, True)
-    torch.return_types.kthvalue(values=tensor([[4., 5., 6.]]), indices=tensor([[1, 1, 1]]))
-""".format(**single_dim_common))
-
 add_docstr(torch.lcm,
            r"""
 lcm(input, other, *, out=None) -> Tensor
@@ -5385,38 +5210,6 @@ Example::
     tensor([4.0])
 """.format(**factory_common_args))
 
-add_docstr(torch.logsumexp,
-           r"""
-logsumexp(input, dim, keepdim=False, *, out=None)
-
-Returns the log of summed exponentials of each row of the :attr:`input`
-tensor in the given dimension :attr:`dim`. The computation is numerically
-stabilized.
-
-For summation index :math:`j` given by `dim` and other indices :math:`i`, the result is
-
-    .. math::
-        \text{{logsumexp}}(x)_{{i}} = \log \sum_j \exp(x_{{ij}})
-
-{keepdim_details}
-
-Args:
-    {input}
-    {dim}
-    {keepdim}
-
-Keyword args:
-    {out}
-
-Example::
-
-    >>> a = torch.randn(3, 3)
-    >>> torch.logsumexp(a, 1)
-    tensor([1.4907, 1.0593, 1.5696])
-    >>> torch.dist(torch.logsumexp(a, 1), torch.log(torch.sum(torch.exp(a), 1)))
-    tensor(1.6859e-07)
-""".format(**multi_dim_common))
-
 add_docstr(torch.lstsq,
            r"""
 lstsq(input, A, *, out=None) -> (Tensor, Tensor)
@@ -5757,68 +5550,6 @@ Example::
             [-0.8660,  0.5000]])
 """.format(**common_args))
 
-add_docstr(torch.max,
-           r"""
-max(input) -> Tensor
-
-Returns the maximum value of all elements in the ``input`` tensor.
-
-.. warning::
-    This function produces deterministic (sub)gradients unlike ``max(dim=0)``
-
-Args:
-    {input}
-
-Example::
-
-    >>> a = torch.randn(1, 3)
-    >>> a
-    tensor([[ 0.6763,  0.7445, -2.2369]])
-    >>> torch.max(a)
-    tensor(0.7445)
-
-.. function:: max(input, dim, keepdim=False, *, out=None) -> (Tensor, LongTensor)
-   :noindex:
-
-Returns a namedtuple ``(values, indices)`` where ``values`` is the maximum
-value of each row of the :attr:`input` tensor in the given dimension
-:attr:`dim`. And ``indices`` is the index location of each maximum value found
-(argmax).
-
-If ``keepdim`` is ``True``, the output tensors are of the same size
-as ``input`` except in the dimension ``dim`` where they are of size 1.
-Otherwise, ``dim`` is squeezed (see :func:`torch.squeeze`), resulting
-in the output tensors having 1 fewer dimension than ``input``.
-
-.. note:: If there are multiple maximal values in a reduced row then
-          the indices of the first maximal value are returned.
-
-Args:
-    {input}
-    {dim}
-    {keepdim} Default: ``False``.
-
-Keyword args:
-    out (tuple, optional): the result tuple of two output tensors (max, max_indices)
-
-Example::
-
-    >>> a = torch.randn(4, 4)
-    >>> a
-    tensor([[-1.2360, -0.2942, -0.1222,  0.8475],
-            [ 1.1949, -1.1127, -2.2379, -0.6702],
-            [ 1.5717, -0.9207,  0.1297, -1.8768],
-            [-0.6172,  1.0036, -0.6060, -0.2432]])
-    >>> torch.max(a, 1)
-    torch.return_types.max(values=tensor([0.8475, 1.1949, 1.5717, 1.0036]), indices=tensor([3, 0, 0, 1]))
-
-.. function:: max(input, other, *, out=None) -> Tensor
-   :noindex:
-
-See :func:`torch.maximum`.
-
-""".format(**single_dim_common))
-
 add_docstr(torch.maximum, r"""
 maximum(input, other, *, out=None) -> Tensor
 
@@ -5872,118 +5603,14 @@ Example::
     tensor([9.7000, 0.5000, 3.1000,    nan])
 """.format(**common_args))
 
-add_docstr(torch.amax,
-           r"""
-amax(input, dim, keepdim=False, *, out=None) -> Tensor
+############################################################################
+# Reductions
+############################################################################
 
-Returns the maximum value of each slice of the :attr:`input` tensor in the given
-dimension(s) :attr:`dim`.
+_argmax_argmin_template = r"""
+arg{}(input, dim=None, keepdim=False, *, out=None) -> Tensor
 
-.. note::
-    The difference between ``max``/``min`` and ``amax``/``amin`` is:
-        - ``amax``/``amin`` supports reducing on multiple dimensions,
-        - ``amax``/``amin`` does not return indices,
-        - ``amax``/``amin`` evenly distributes gradient between equal values,
-          while ``max(dim)``/``min(dim)`` propagates gradient only to a single
-          index in the source tensor.
-
-{keepdim_details}
-
-Args:
-    {input}
-    {dim}
-    {keepdim}
-
-Keyword args:
-  {out}
-
-Example::
-
-    >>> a = torch.randn(4, 4)
-    >>> a
-    tensor([[ 0.8177,  1.4878, -0.2491,  0.9130],
-            [-0.7158,  1.1775,  2.0992,  0.4817],
-            [-0.0053,  0.0164, -1.3738, -0.0507],
-            [ 1.9700,  1.1106, -1.0318, -1.0816]])
-    >>> torch.amax(a, 1)
-    tensor([1.4878, 2.0992, 0.0164, 1.9700])
-""".format(**multi_dim_common))
-
-add_docstr(torch.argmax,
-           r"""
-argmax(input) -> LongTensor
-
-Returns the indices of the maximum value of all elements in the :attr:`input` tensor.
-
-This is the second value returned by :meth:`torch.max`. See its
-documentation for the exact semantics of this method.
-
-.. note:: If there are multiple maximal values then the indices of the first maximal value are returned.
-
-Args:
-    {input}
-
-Example::
-
-    >>> a = torch.randn(4, 4)
-    >>> a
-    tensor([[ 1.3398,  0.2663, -0.2686,  0.2450],
-            [-0.7401, -0.8805, -0.3402, -1.1936],
-            [ 0.4907, -1.3948, -1.0691, -0.3132],
-            [-1.6092,  0.5419, -0.2993,  0.3195]])
-    >>> torch.argmax(a)
-    tensor(0)
-
-.. function:: argmax(input, dim, keepdim=False) -> LongTensor
-   :noindex:
-
-Returns the indices of the maximum values of a tensor across a dimension.
-
-This is the second value returned by :meth:`torch.max`. See its
-documentation for the exact semantics of this method.
-
-Args:
-    {input}
-    {dim} If ``None``, the argmax of the flattened input is returned.
-    {keepdim} Ignored if ``dim=None``.
-
-Example::
-
-    >>> a = torch.randn(4, 4)
-    >>> a
-    tensor([[ 1.3398,  0.2663, -0.2686,  0.2450],
-            [-0.7401, -0.8805, -0.3402, -1.1936],
-            [ 0.4907, -1.3948, -1.0691, -0.3132],
-            [-1.6092,  0.5419, -0.2993,  0.3195]])
-    >>> torch.argmax(a, dim=1)
-    tensor([ 0,  2,  0,  1])
-""".format(**single_dim_common))
-
-add_docstr(torch.mean,
-           r"""
-mean(input) -> Tensor
-
-Returns the mean value of all elements in the :attr:`input` tensor.
-
-Args:
-    {input}
-
-Example::
-
-    >>> a = torch.randn(1, 3)
-    >>> a
-    tensor([[ 0.2294, -0.5481,  1.3288]])
-    >>> torch.mean(a)
-    tensor(0.3367)
-
-.. function:: mean(input, dim, keepdim=False, *, out=None) -> Tensor
-   :noindex:
-
-Returns the mean value of each row of the :attr:`input` tensor in the given
-dimension :attr:`dim`. If :attr:`dim` is a list of dimensions,
-reduce over all of them.
-
-{keepdim_details}
+Returns the indices of the {}imum values along a specified dimension.
 
 Args:
     {input}
@@ -5993,72 +5620,494 @@ Args:
 Keyword args:
     {out}
 
-Example::
+Returns:
+    The reduced tensor with the default index data type.
 
-    >>> a = torch.randn(4, 4)
-    >>> a
-    tensor([[-0.3841,  0.6320,  0.4254, -0.7384],
-            [-0.9644,  1.0131, -0.6549, -1.4279],
-            [-0.2951, -1.3350, -0.7694,  0.5600],
-            [ 1.0842, -0.9580,  0.3623,  0.2343]])
-    >>> torch.mean(a, 1)
-    tensor([-0.0163, -0.5085, -0.4599,  0.1807])
-    >>> torch.mean(a, 1, True)
-    tensor([[-0.0163],
-            [-0.5085],
-            [-0.4599],
-            [ 0.1807]])
-""".format(**multi_dim_common))
-
-add_docstr(torch.median,
-           r"""
-median(input) -> Tensor
-
-Returns the median of the values in :attr:`input`.
+Raises:
+    IndexError: If any of the dimensions to reduce have size 0.
 
 .. note::
-    The median is not unique for :attr:`input` tensors with an even number
-    of elements. In this case the lower of the two medians is returned. To
-    compute the mean of both medians, use :func:`torch.quantile` with ``q=0.5`` instead.
 
-.. warning::
-    This function produces deterministic (sub)gradients unlike ``median(dim=0)``
+    If the {}imum values occur multiple times, the indices corresponding to
+    the first occurrences are returned.
+
+.. note::
+
+    If the input has NaN values, their indices will be returned.
+
+.. seealso:: {seealso}
+
+Example:: {examples}
+"""
+
+add_docstr(torch.argmax, _argmax_argmin_template.format(
+    "max",
+    seealso="""
+        :func:`torch.argmin` returns the indices of the minimum values.
+        :func:`torch.amax` returns the maximum values.
+    """,
+    examples="""
+        TODO(@heitorschueroff)
+    """,
+    **reduction_single_dim_opt_common
+))
+
+add_docstr(torch.argmin, _argmax_argmin_template.format(
+    "min",
+    seealso="""
+        :func:`torch.argmax` returns the indices of the maximum values.
+        :func:`torch.amin` returns the minimum values.
+    """,
+    examples="""
+        TODO(@heitorschueroff)
+    """,
+    **reduction_single_dim_opt_common
+))
+
+_amax_amin_template = r"""
+a{}(input, dim=None, keepdim=False, *, out=None) -> Tensor
+
+Returns the {}imum values along a specified dimension.
+
+Args:
+    {input}
+    {dim}
+    {keepdim}
+
+Keyword args:
+    {out}
+
+Returns:
+    The reduced tensor with the same data type as the :attr:`input` tensor.
+
+Raises:
+    IndexError: If any of the dimensions to reduce have size 0.
+
+.. note::
+
+    The difference between ``max``/``min`` and ``amax``/``amin`` is:
+        - ``amax``/``amin`` supports reducing on multiple dimensions,
+        - ``amax``/``amin`` does not return indices,
+        - ``amax``/``amin`` evenly distributes gradient between equal values,
+          while ``max(dim)``/``min(dim)`` propagates gradient only to a single
+          index in the source tensor.
+
+.. note::
+
+    NaN values are propagated to the output if at least one value is NaN.
+
+.. seealso:: {seealso}
+
+Example:: {examples}
+"""
+
+add_docstr(torch.amax, _amax_amin_template.format(
+    "max",
+    seealso="""
+        :func:`torch.amin` returns the minimum values.
+        :func:`torch.argmax` returns the indices of the maximum values.
+    """,
+    examples="""
+        TODO(@heitorschueroff)
+    """,
+    **reduction_multi_dim_opt_common
+))
+
+add_docstr(torch.amin, _amax_amin_template.format(
+    "min",
+    seealso="""
+        :func:`torch.amax` returns the maximum values.
+        :func:`torch.argmin` returns the indices of the minimum values.
+    """,
+    examples="""
+        TODO(@heitorschueroff)
+    """,
+    **reduction_multi_dim_opt_common
+))
+
+add_docstr(torch.aminmax, r"""
+aminmax(input, *, dim=None, keepdim=False, out=None) -> (Tensor min, Tensor max)
+
+Returns the minimum and maximum values along a specified dimension.
 
 Args:
     {input}
 
-Example::
+Keyword args:
+    {dim}
+    {keepdim}
+    {out}
 
-    >>> a = torch.randn(1, 3)
-    >>> a
-    tensor([[ 1.5219, -1.5212,  0.2202]])
-    >>> torch.median(a)
-    tensor(0.2202)
+Returns:
+    A named tuple ``(min, max)`` containing the reduced tensors with the same
+    data type as the :attr`input` tensor.
 
-.. function:: median(input, dim=-1, keepdim=False, *, out=None) -> (Tensor, LongTensor)
-   :noindex:
-
-Returns a namedtuple ``(values, indices)`` where ``values`` contains the median of each row of :attr:`input`
-in the dimension :attr:`dim`, and ``indices`` contains the index of the median values found in the dimension :attr:`dim`.
-
-By default, :attr:`dim` is the last dimension of the :attr:`input` tensor.
-
-If :attr:`keepdim` is ``True``, the output tensors are of the same size
-as :attr:`input` except in the dimension :attr:`dim` where they are of size 1.
-Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting in
-the outputs tensor having 1 fewer dimension than :attr:`input`.
+Raises:
+    IndexError: If any of the dimensions to reduce have size 0.
 
 .. note::
-    The median is not unique for :attr:`input` tensors with an even number
-    of elements in the dimension :attr:`dim`. In this case the lower of the
-    two medians is returned. To compute the mean of both medians in
-    :attr:`input`, use :func:`torch.quantile` with ``q=0.5`` instead.
+
+    NaN values are propagated to the output if at least one value is NaN.
+
+.. seealso::
+
+    :func:`torch.amin` computes just the minimum value.
+    :func:`torch.amax` computes just the maximum value.
+
+Example::
+    >>> torch.aminmax(torch.tensor([1, -3, 5]))
+    torch.return_types.aminmax(
+    min=tensor(-3),
+    max=tensor(5))
+
+    # aminmax propagates NaNs
+    >>> torch.aminmax(torch.tensor([1, -3, 5, torch.nan]))
+    torch.return_types.aminmax(
+    min=tensor(nan),
+    max=tensor(nan))
+
+    >>> t = torch.arange(10).view(2, 5)
+    >>> t
+    tensor([[0, 1, 2, 3, 4],
+            [5, 6, 7, 8, 9]])
+    >>> t.aminmax(dim=0, keepdim=True)
+    torch.return_types.aminmax(
+    min=tensor([[0, 1, 2, 3, 4]]),
+    max=tensor([[5, 6, 7, 8, 9]]))
+""".format(**reduction_single_dim_opt_common))
+
+_max_min_template = r"""
+{}(input) -> Tensor
+
+Returns the {}imum value of the :attr:`input` tensor.
 
 .. warning::
+
+    This function produces deterministic (sub)gradients unlike ``{}`` with
+    ``dim`` and ``keepdim`` parameters.
+
+Args:
+    {input}
+
+Returns:
+    A scalar tensor with the same data type as the :attr:`input` tensor.
+
+Raises:
+    IndexError: If the :attr:`input` tensor is empty.
+
+.. function:: {}(input, dim, keepdim=False, *, out=None) -> (Tensor values, Tensor indices)
+   :noindex:
+
+Returns the {}imum values and their indices along a specified dimension.
+
+Args:
+    {input}
+    {dim}
+    {keepdim}
+
+Keyword args:
+    {out}
+
+Returns:
+    A namedtuple (values, indices) containing the reduced tensors with the same
+    data type as the :attr:`input` tensor.
+
+Raises:
+    IndexError: If any of the dimensions to reduce have size 0.
+
+.. note::
+
+    If the {}imum values occur multiple times, the values and indices
+    corresponding to the first occurrences are returned.
+
+.. note::
+
+    NaN values are propagated to the output if at least one value is NaN.
+
+.. seealso:: {seealso}
+
+Example:: {examples}
+
+.. function:: {}(input, other, *, out=None) -> Tensor
+   :noindex:
+
+Alias for :func:`torch.{}imum`.
+"""
+
+add_docstr(torch.max, _max_min_template.format(
+    "max",
+    seealso="""
+        :func:`torch.amax` returns only the maximum values.
+        :func:`torch.argmax` returns only the indices of the maximum values.
+        :func:`torch.min` returns the minimum values and their indices.
+    """,
+    examples="""
+        TODO(@heitorschueroff)
+    """,
+    **reduction_single_dim_common
+))
+
+add_docstr(torch.min, _max_min_template.format(
+    "min",
+    seealso="""
+        :func:`torch.amin` returns only the minimum values.
+        :func:`torch.argmin` returns only the indices of the minimum values.
+        :func:`torch.max` returns the maximum values and their indices.
+    """,
+    examples="""
+        TODO(@heitorschueroff)
+    """,
+    **reduction_single_dim_common
+))
+
+add_docstr(torch.all, r"""
+all(input) -> Tensor
+
+Returns whether all elements in the :attr:`input` tensor evaluate to `True`.
+
+.. function:: all(input, dim, keepdim=False, *, out=None) -> Tensor
+   :noindex:
+
+Returns whether all elements along the specified dimension evaluate to `True`.
+
+Args:
+    {input}
+    {dim}
+    {keepdim}
+
+Keyword args:
+    {out}
+
+Returns:
+    The reduced tensor. If the data type of the :attr:`input` tensor is `uint8`
+    then the data type of the returned tensor is also `uint8`. For all other
+    input data types, the data type of the returned tensor is `bool`.
+
+.. seealso::
+
+    :func:`torch.any` returns whether any element evaluates to `True`.
+
+Example::
+
+    TODO(@heitorschueroff)
+
+""".format(**reduction_single_dim_common))
+
+add_docstr(torch.any, r"""
+any(input) -> Tensor
+
+Returns whether any element in the :attr:`input` tensor evaluates to `True`.
+
+.. function:: any(input, dim, keepdim=False, *, out=None) -> Tensor
+   :noindex:
+
+Returns whether any element along the specified dimension evaluates to `True`.
+
+Args:
+    {input}
+    {dim}
+    {keepdim}
+
+Keyword args:
+    {out}
+
+Returns:
+    The reduced tensor. If the data type of the :attr:`input` tensor is `uint8`
+    then the data type of the returned tensor is also `uint8`. For all other
+    input data types, the data type of the returned tensor is `bool`.
+
+.. seealso::
+
+    :func:`torch.all` returns whether all elements evaluate to `True`.
+
+Example::
+
+    TODO(@heitorschueroff)
+
+""".format(**reduction_single_dim_common))
+
+_sum_prod_template = r"""
+{}(input, *, dtype=None) -> Tensor
+
+Returns the {op} of all elements in the :attr:`input` tensor.
+
+.. function:: {}(input, dim, keepdim=False, *, dtype=None, out=None) -> Tensor
+   :noindex:
+
+Returns the {op} of all elements along the specified dimension.
+
+Args:
+    {input}
+    {dim}
+    {keepdim}
+
+Keyword args:
+    {dtype}
+    {out}
+
+Returns:
+    The reduced tensor. For :attr:`input` with integral data types, including
+    bool, the result tensor has `int64` dtype. For all other data types, the
+    result has the same data type as the :attr:`input` tensor.
+
+.. note::
+
+    NaN values are propagated to the output if at least one value is NaN.
+
+.. seealso:: {seealso}
+
+Example:: {examples}
+"""
+
+add_docstr(torch.sum, _sum_prod_template.format(
+    "sum",
+    op="sum",
+    seealso="""
+        :func:`prod` retuns the product of all elements.
+    """,
+    examples="""
+        TODO(@heitorschueroff)
+    """,
+    **reduction_multi_dim_common
+))
+
+add_docstr(torch.prod, _sum_prod_template.format(
+    "prod",
+    op="product",
+    seealso="""
+        :func:`sum` retuns the sum of all elements.
+    """,
+    examples="""
+        TODO(@heitorschueroff)
+    """,
+    **reduction_single_dim_common
+))
+
+add_docstr(torch.nansum, r"""
+nansum(input, *, dtype=None) -> Tensor
+
+Returns the sum of all non-`NaN` elements in the :attr:`input` tensor.
+
+.. function:: nansum(input, dim, keepdim=False, *, dtype=None, out=None) -> Tensor
+   :noindex:
+
+Returns the sum of all non-`NaN` elements along the specified dimension(s).
+
+Args:
+    {input}
+    {dim}
+    {keepdim}
+
+Keyword args:
+    {dtype}
+    {out}
+
+Returns:
+    The reduced tensor. For :attr:`input` with integral data types, including
+    bool, the result tensor has `int64` dtype. For all other data types, the
+    result has the same data type as the :attr:`input` tensor.
+
+.. note::
+
+    `nansum(t, *args, **kwargs) == sum(t[~t.isnan()], *args, **kwargs)`.
+
+.. seealso::
+
+    :func:`torch.sum` returns the sum of all elements, propagating `NaN`s.
+
+Example::
+
+    TODO(@heitorschueroff)
+
+""".format(**reduction_multi_dim_common))
+
+add_docstr(torch.logsumexp, r"""
+logsumexp(input, dim, keepdim=False, *, out=None) -> Tensor
+
+Returns the log of summed exponentials of the elements along the specified dimension(s).
+
+This is more numerically stable than calling `log(sum(exp(input)))`.
+
+For summation index :math:`j` given by `dim` and other indices :math:`i`,
+the result is:
+
+    .. math::
+        \text{{logsumexp}}(x)_{{i}} = \log \sum_j \exp(x_{{ij}})
+
+Args:
+    {input}
+    {dim}
+    {keepdim}
+
+Keyword args:
+    {out}
+
+Returns:
+    The reduced tensor. For :attr:`input` with integral data types, the result
+    will have the default floating point data type. Otherwise, the result will
+    have the same data type as the :attr:`input` tensor.
+
+Example::
+    >>> a = torch.randn(3, 3)
+    >>> torch.logsumexp(a, 1)
+    tensor([1.4907, 1.0593, 1.5696])
+    >>> torch.dist(torch.logsumexp(a, 1), torch.log(torch.sum(torch.exp(a), 1)))
+    tensor(1.6859e-07)
+""".format(**reduction_multi_dim_common))
+
+add_docstr(torch.mean, r"""
+mean(input) -> Tensor
+
+Returns the mean value of all elements in the :attr:`input` tensor.
+
+.. function:: mean(input, dim, keepdim=False, *, out=None) -> Tensor
+   :noindex:
+
+Returns the mean value of all elements along the specified dimension.
+
+Args:
+    {input}
+    {dim}
+    {keepdim}
+
+Keyword args:
+    {out}
+
+Returns:
+    The reduced tensor. For :attr:`input` with integral data types, the result
+    will have the default floating point data type. Otherwise, the result will
+    have the same data type as the :attr:`input` tensor.
+
+.. note::
+
+    NaN values are propagated to the output if at least one value is NaN.
+
+Example::
+
+    TODO(@heitorschueroff)
+
+""".format(**reduction_multi_dim_common))
+
+add_docstr(torch.median, r"""
+median(input) -> Tensor
+
+Returns the median value of all elements in the :attr:`input` tensor.
+
+.. warning::
+
+    This function produces deterministic (sub)gradients unlike ``median`` with
+    `dim` and `keepdim` parameters.
+
+.. function:: median(input, dim, keepdim=False, *, out=None) -> (Tensor values, Tensor indices)
+   :noindex:
+
+Returns the median values and their indices along a specified dimension.
+
+.. warning::
+
     ``indices`` does not necessarily contain the first occurrence of each
-    median value found, unless it is unique.
-    The exact implementation details are device-specific.
-    Do not expect the same result when run on CPU and GPU in general.
+    median value found, unless it is unique. The exact implementation details
+    are device-specific. Do not expect the same result when run on CPU and GPU.
     For the same reason do not expect the gradients to be deterministic.
 
 Args:
@@ -6067,54 +6116,41 @@ Args:
     {keepdim}
 
 Keyword args:
-    out ((Tensor, Tensor), optional): The first tensor will be populated with the median values and the second
-                                      tensor, which must have dtype long, with their indices in the dimension
-                                      :attr:`dim` of :attr:`input`.
+    {out}
+
+.. note::
+
+    The median is not unique for :attr:`input` tensors with an even number
+    of elements. In this case the lower of the two medians is returned. For a
+    median that returns the midpoint, use :func:`torch.quantile` with ``q=0.5``.
+
+.. note::
+
+    NaN values are propagated to the output if at least one value is NaN.
+
+.. seealso::
+
+    :func:`torch.nanmedian` returns the median values of the non-NaN elements.
 
 Example::
 
-    >>> a = torch.randn(4, 5)
-    >>> a
-    tensor([[ 0.2505, -0.3982, -0.9948,  0.3518, -1.3131],
-            [ 0.3180, -0.6993,  1.0436,  0.0438,  0.2270],
-            [-0.2751,  0.7303,  0.2192,  0.3321,  0.2488],
-            [ 1.0778, -1.9510,  0.7048,  0.4742, -0.7125]])
-    >>> torch.median(a, 1)
-    torch.return_types.median(values=tensor([-0.3982,  0.2270,  0.2488,  0.4742]), indices=tensor([1, 4, 4, 3]))
-""".format(**single_dim_common))
+    TODO(@heitorschueroff)
 
-add_docstr(torch.nanmedian,
-           r"""
+""".format(**reduction_single_dim_common))
+
+add_docstr(torch.nanmedian, r"""
 nanmedian(input) -> Tensor
 
-Returns the median of the values in :attr:`input`, ignoring ``NaN`` values.
-
-This function is identical to :func:`torch.median` when there are no ``NaN`` values in :attr:`input`.
-When :attr:`input` has one or more ``NaN`` values, :func:`torch.median` will always return ``NaN``,
-while this function will return the median of the non-``NaN`` elements in :attr:`input`.
-If all the elements in :attr:`input` are ``NaN`` it will also return ``NaN``.
-
-Args:
-    {input}
-
-Example::
-
-    >>> a = torch.tensor([1, float('nan'), 3, 2])
-    >>> a.median()
-    tensor(nan)
-    >>> a.nanmedian()
-    tensor(2.)
+Returns the median value of all non-`NaN` elements in the :attr:`input` tensor.
 
 .. function:: nanmedian(input, dim=-1, keepdim=False, *, out=None) -> (Tensor, LongTensor)
    :noindex:
 
-Returns a namedtuple ``(values, indices)`` where ``values`` contains the median of each row of :attr:`input`
-in the dimension :attr:`dim`, ignoring ``NaN`` values, and ``indices`` contains the index of the median values
-found in the dimension :attr:`dim`.
+Returns the median values of all non-`NaN` elements and their indices along a
+specified dimension.
 
-This function is identical to :func:`torch.median` when there are no ``NaN`` values in a reduced row. When a reduced row has
-one or more ``NaN`` values, :func:`torch.median` will always reduce it to ``NaN``, while this function will reduce it to the
-median of the non-``NaN`` elements. If all the elements in a reduced row are ``NaN`` then it will be reduced to ``NaN``, too.
+This is a variant of `median` that does not propagate `NaN`s. See documentation
+for :func:`torch.median` for more details.
 
 Args:
     {input}
@@ -6122,11 +6158,22 @@ Args:
     {keepdim}
 
 Keyword args:
-    out ((Tensor, Tensor), optional): The first tensor will be populated with the median values and the second
-                                      tensor, which must have dtype long, with their indices in the dimension
-                                      :attr:`dim` of :attr:`input`.
+    {out}
+
+.. note::
+
+    `nanmedian(t, *args, **kwargs)` is equivalent to `median(t[~t.isnan()], *args, **kwargs`.
+
+.. seealso::
+
+    :func:`torch.median` returns the median values, propagating `NaN`.
 
 Example::
+    >>> a = torch.tensor([1, float('nan'), 3, 2])
+    >>> a.median()
+    tensor(nan)
+    >>> a.nanmedian()
+    tensor(2.)
 
     >>> a = torch.tensor([[2, 3, 1], [float('nan'), 1, float('nan')]])
     >>> a
@@ -6136,7 +6183,44 @@ Example::
     torch.return_types.median(values=tensor([nan, 1., nan]), indices=tensor([1, 1, 1]))
     >>> a.nanmedian(0)
     torch.return_types.nanmedian(values=tensor([2., 1., 1.]), indices=tensor([0, 1, 0]))
-""".format(**single_dim_common))
+""".format(**reduction_single_dim_common))
+
+# TODO(@heitorschueroff) finish updating the docs for the following reduction ops
+
+add_docstr(torch.mode, r"""
+mode(input, dim=-1, keepdim=False, *, out=None) -> (Tensor, LongTensor)
+
+Returns a namedtuple ``(values, indices)`` where ``values`` is the mode
+value of each row of the :attr:`input` tensor in the given dimension
+:attr:`dim`, i.e. a value which appears most often
+in that row, and ``indices`` is the index location of each mode value found.
+
+By default, :attr:`dim` is the last dimension of the :attr:`input` tensor.
+
+If :attr:`keepdim` is ``True``, the output tensors are of the same size as
+:attr:`input` except in the dimension :attr:`dim` where they are of size 1.
+Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting
+in the output tensors having 1 fewer dimension than :attr:`input`.
+
+.. note:: This function is not defined for ``torch.cuda.Tensor`` yet.
+
+Args:
+    {input}
+    {dim}
+    {keepdim}
+
+Keyword args:
+    out (tuple, optional): the result tuple of two output tensors (values, indices)
+
+Example::
+
+    >>> a = torch.randint(10, (5,))
+    >>> a
+    tensor([6, 5, 1, 0, 2])
+    >>> b = a + (torch.randn(50, 1) * 5).long()
+    >>> torch.mode(b, 0)
+    torch.return_types.mode(values=tensor([6, 5, 1, 0, 2]), indices=tensor([2, 2, 2, 2, 2]))
+""".format(**reduction_single_dim_common))
 
 add_docstr(torch.quantile, r"""
 quantile(input, q, dim=None, keepdim=False, *, out=None) -> Tensor
@@ -6186,7 +6270,7 @@ Example::
     >>> a = torch.arange(4.)
     >>> a
     tensor([0., 1., 2., 3.])
-""".format(**single_dim_common))
+""".format(**reduction_single_dim_common))
 
 add_docstr(torch.nanquantile, r"""
 nanquantile(input, q, dim=None, keepdim=False, *, out=None) -> Tensor
@@ -6220,68 +6304,273 @@ Example::
     tensor([1., 2.])
     >>> t.nanquantile(0.5, dim=1)
     tensor([   nan, 1.5000])
-""".format(**single_dim_common))
+""".format(**reduction_single_dim_common))
 
-add_docstr(torch.min,
+add_docstr(torch.kthvalue,
            r"""
-min(input) -> Tensor
+kthvalue(input, k, dim=None, keepdim=False, *, out=None) -> (Tensor, LongTensor)
 
-Returns the minimum value of all elements in the :attr:`input` tensor.
+Returns a namedtuple ``(values, indices)`` where ``values`` is the :attr:`k` th
+smallest element of each row of the :attr:`input` tensor in the given dimension
+:attr:`dim`. And ``indices`` is the index location of each element found.
 
-.. warning::
-    This function produces deterministic (sub)gradients unlike ``min(dim=0)``
+If :attr:`dim` is not given, the last dimension of the `input` is chosen.
 
-Args:
-    {input}
+If :attr:`keepdim` is ``True``, both the :attr:`values` and :attr:`indices` tensors
+are the same size as :attr:`input`, except in the dimension :attr:`dim` where
+they are of size 1. Otherwise, :attr:`dim` is squeezed
+(see :func:`torch.squeeze`), resulting in both the :attr:`values` and
+:attr:`indices` tensors having 1 fewer dimension than the :attr:`input` tensor.
 
-Example::
-
-    >>> a = torch.randn(1, 3)
-    >>> a
-    tensor([[ 0.6750,  1.0857,  1.7197]])
-    >>> torch.min(a)
-    tensor(0.6750)
-
-.. function:: min(input, dim, keepdim=False, *, out=None) -> (Tensor, LongTensor)
-   :noindex:
-
-Returns a namedtuple ``(values, indices)`` where ``values`` is the minimum
-value of each row of the :attr:`input` tensor in the given dimension
-:attr:`dim`. And ``indices`` is the index location of each minimum value found
-(argmin).
-
-If :attr:`keepdim` is ``True``, the output tensors are of the same size as
-:attr:`input` except in the dimension :attr:`dim` where they are of size 1.
-Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting in
-the output tensors having 1 fewer dimension than :attr:`input`.
-
-.. note:: If there are multiple minimal values in a reduced row then
-          the indices of the first minimal value are returned.
+.. note::
+    When :attr:`input` is a CUDA tensor and there are multiple valid
+    :attr:`k` th values, this function may nondeterministically return
+    :attr:`indices` for any of them.
 
 Args:
     {input}
+    k (int): k for the k-th smallest element
     {dim}
     {keepdim}
 
 Keyword args:
-    out (tuple, optional): the tuple of two output tensors (min, min_indices)
+    out (tuple, optional): the output tuple of (Tensor, LongTensor)
+                           can be optionally given to be used as output buffers
 
 Example::
 
-    >>> a = torch.randn(4, 4)
-    >>> a
-    tensor([[-0.6248,  1.1334, -1.1899, -0.2803],
-            [-1.4644, -0.2635, -0.3651,  0.6134],
-            [ 0.2457,  0.0384,  1.0128,  0.7015],
-            [-0.1153,  2.9849,  2.1458,  0.5788]])
-    >>> torch.min(a, 1)
-    torch.return_types.min(values=tensor([-1.1899, -1.4644,  0.0384, -0.1153]), indices=tensor([2, 0, 1, 0]))
+    >>> x = torch.arange(1., 6.)
+    >>> x
+    tensor([ 1.,  2.,  3.,  4.,  5.])
+    >>> torch.kthvalue(x, 4)
+    torch.return_types.kthvalue(values=tensor(4.), indices=tensor(3))
 
-.. function:: min(input, other, *, out=None) -> Tensor
+    >>> x=torch.arange(1.,7.).resize_(2,3)
+    >>> x
+    tensor([[ 1.,  2.,  3.],
+            [ 4.,  5.,  6.]])
+    >>> torch.kthvalue(x, 2, 0, True)
+    torch.return_types.kthvalue(values=tensor([[4., 5., 6.]]), indices=tensor([[1, 1, 1]]))
+""".format(**reduction_single_dim_opt_common))
+
+add_docstr(torch.topk,
+           r"""
+topk(input, k, dim=None, largest=True, sorted=True, *, out=None) -> (Tensor, LongTensor)
+
+Returns the :attr:`k` largest elements of the given :attr:`input` tensor along
+a given dimension.
+
+If :attr:`dim` is not given, the last dimension of the `input` is chosen.
+
+If :attr:`largest` is ``False`` then the `k` smallest elements are returned.
+
+A namedtuple of `(values, indices)` is returned, where the `indices` are the indices
+of the elements in the original `input` tensor.
+
+The boolean option :attr:`sorted` if ``True``, will make sure that the returned
+`k` elements are themselves sorted
+
+Args:
+    {input}
+    k (int): the k in "top-k"
+    dim (int, optional): the dimension to sort along
+    largest (bool, optional): controls whether to return largest or
+           smallest elements
+    sorted (bool, optional): controls whether to return the elements
+           in sorted order
+
+Keyword args:
+    out (tuple, optional): the output tuple of (Tensor, LongTensor) that can be
+        optionally given to be used as output buffers
+
+Example::
+
+    >>> x = torch.arange(1., 6.)
+    >>> x
+    tensor([ 1.,  2.,  3.,  4.,  5.])
+    >>> torch.topk(x, 3)
+    torch.return_types.topk(values=tensor([5., 4., 3.]), indices=tensor([4, 3, 2]))
+""".format(**common_args))
+
+add_docstr(torch.std, r"""
+std(input, dim, unbiased, keepdim=False, *, out=None) -> Tensor
+
+If :attr:`unbiased` is ``True``, Bessel's correction will be used.
+Otherwise, the sample deviation is calculated, without any correction.
+
+Args:
+    {input}
+    {dim}
+
+Keyword args:
+    unbiased (bool): whether to use Bessel's correction (:math:`\delta N = 1`).
+    {keepdim}
+    {out}
+
+
+.. function:: std(input, unbiased) -> Tensor
    :noindex:
 
-See :func:`torch.minimum`.
-""".format(**single_dim_common))
+Calculates the standard deviation of all elements in the :attr:`input` tensor.
+
+If :attr:`unbiased` is ``True``, Bessel's correction will be used.
+Otherwise, the sample deviation is calculated, without any correction.
+
+Args:
+    {input}
+    unbiased (bool): whether to use Bessel's correction (:math:`\delta N = 1`).
+
+Example::
+
+    >>> a = torch.tensor([[-0.8166, -1.3802, -0.3560]])
+    >>> torch.std(a, unbiased=False)
+    tensor(0.4188)
+""".format(**reduction_multi_dim_common))
+
+add_docstr(torch.std_mean,
+           r"""
+std_mean(input, dim, unbiased, keepdim=False, *, out=None) -> (Tensor, Tensor)
+
+If :attr:`unbiased` is ``True``, Bessel's correction will be used to calculate
+the standard deviation. Otherwise, the sample deviation is calculated, without
+any correction.
+
+Args:
+    {input}
+    {dim}
+
+Keyword args:
+    unbiased (bool): whether to use Bessel's correction (:math:`\delta N = 1`).
+    {keepdim}
+    {out}
+
+Returns:
+    A tuple (std, mean) containing the standard deviation and mean.
+
+.. function:: std_mean(input, unbiased) -> (Tensor, Tensor)
+   :noindex:
+
+Calculates the standard deviation and mean of all elements in the :attr:`input`
+tensor.
+
+If :attr:`unbiased` is ``True``, Bessel's correction will be used.
+Otherwise, the sample deviation is calculated, without any correction.
+
+Args:
+    {input}
+    unbiased (bool): whether to use Bessel's correction (:math:`\delta N = 1`).
+
+Returns:
+    A tuple (std, mean) containing the standard deviation and mean.
+
+Example::
+
+    >>> a = torch.tensor([[-0.8166, -1.3802, -0.3560]])
+    >>> torch.std_mean(a, unbiased=False)
+    (tensor(0.4188), tensor(-0.8509))
+""".format(**reduction_multi_dim_common))
+
+add_docstr(torch.var, r"""
+var(input, dim, unbiased, keepdim=False, *, out=None) -> Tensor
+
+If :attr:`unbiased` is ``True``, Bessel's correction will be used.
+Otherwise, the sample variance is calculated, without any correction.
+
+Args:
+    {input}
+    {dim}
+
+Keyword args:
+    unbiased (bool): whether to use Bessel's correction (:math:`\delta N = 1`).
+    {keepdim}
+    {out}
+
+.. function:: var(input, unbiased) -> Tensor
+   :noindex:
+
+Calculates the variance of all elements in the :attr:`input` tensor.
+
+If :attr:`unbiased` is ``True``, Bessel's correction will be used.
+Otherwise, the sample deviation is calculated, without any correction.
+
+Args:
+    {input}
+    unbiased (bool): whether to use Bessel's correction (:math:`\delta N = 1`).
+
+Example::
+
+    >>> a = torch.tensor([[-0.8166, -1.3802, -0.3560]])
+    >>> torch.var(a, unbiased=False)
+    tensor(0.1754)
+""".format(**reduction_multi_dim_common))
+
+add_docstr(torch.var_mean,
+           r"""
+var_mean(input, dim, unbiased, keepdim=False, *, out=None) -> (Tensor, Tensor)
+
+If :attr:`unbiased` is ``True``, Bessel's correction will be used to calculate
+the variance. Otherwise, the sample variance is calculated, without any
+correction.
+
+Args:
+    {input}
+    {dim}
+
+Keyword args:
+    unbiased (bool): whether to use Bessel's correction (:math:`\delta N = 1`).
+    {keepdim}
+    {out}
+
+Returns:
+    A tuple (var, mean) containing the variance and mean.
+
+.. function:: var_mean(input, unbiased) -> (Tensor, Tensor)
+   :noindex:
+
+Calculates the variance and mean of all elements in the :attr:`input`
+tensor.
+
+If :attr:`unbiased` is ``True``, Bessel's correction will be used.
+Otherwise, the sample deviation is calculated, without any correction.
+
+Args:
+    {input}
+    unbiased (bool): whether to use Bessel's correction (:math:`\delta N = 1`).
+
+Returns:
+    A tuple (var, mean) containing the variance and mean.
+
+Example::
+
+    >>> a = torch.tensor([[-0.8166, -1.3802, -0.3560]])
+    >>> torch.var_mean(a, unbiased=False)
+    (tensor(0.1754), tensor(-0.8509))
+""".format(**reduction_multi_dim_common))
+
+add_docstr(torch.count_nonzero,
+           r"""
+count_nonzero(input, dim=None) -> Tensor
+
+Counts the number of non-zero values in the tensor :attr:`input` along the given :attr:`dim`.
+If no dim is specified then all non-zeros in the tensor are counted.
+
+Args:
+    {input}
+    {dim}
+
+Example::
+
+    >>> x = torch.zeros(3,3)
+    >>> x[torch.randn(3,3) > 0.5] = 1
+    >>> x
+    tensor([[0., 1., 1.],
+            [0., 0., 0.],
+            [0., 0., 1.]])
+    >>> torch.count_nonzero(x)
+    tensor(3)
+    >>> torch.count_nonzero(x, dim=0)
+    tensor([0, 1, 2])
+""".format(**reduction_multi_dim_opt_common))
 
 add_docstr(torch.minimum, r"""
 minimum(input, other, *, out=None) -> Tensor
@@ -6335,139 +6624,6 @@ Example::
     >>> torch.fmin(a, b)
     tensor([-9.3000, 0.1000, 2.1000,    nan])
 """.format(**common_args))
-
-add_docstr(torch.amin,
-           r"""
-amin(input, dim, keepdim=False, *, out=None) -> Tensor
-
-Returns the minimum value of each slice of the :attr:`input` tensor in the given
-dimension(s) :attr:`dim`.
-
-.. note::
-    The difference between ``max``/``min`` and ``amax``/``amin`` is:
-        - ``amax``/``amin`` supports reducing on multiple dimensions,
-        - ``amax``/``amin`` does not return indices,
-        - ``amax``/``amin`` evenly distributes gradient between equal values,
-          while ``max(dim)``/``min(dim)`` propagates gradient only to a single
-          index in the source tensor.
-
-{keepdim_details}
-
-Args:
-    {input}
-    {dim}
-    {keepdim}
-
-Keyword args:
-  {out}
-
-Example::
-
-    >>> a = torch.randn(4, 4)
-    >>> a
-    tensor([[ 0.6451, -0.4866,  0.2987, -1.3312],
-            [-0.5744,  1.2980,  1.8397, -0.2713],
-            [ 0.9128,  0.9214, -1.7268, -0.2995],
-            [ 0.9023,  0.4853,  0.9075, -1.6165]])
-    >>> torch.amin(a, 1)
-    tensor([-1.3312, -0.5744, -1.7268, -1.6165])
-""".format(**multi_dim_common))
-
-add_docstr(torch.aminmax, r"""
-aminmax(input, *, dim=None, keepdim=False, out=None) -> (Tensor min, Tensor max)
-
-Computes the minimum and maximum values of the :attr:`input` tensor.
-
-Args:
-    input (Tensor):
-        The input tensor
-
-Keyword Args:
-    dim (Optional[int]):
-        The dimension along which to compute the values. If `None`,
-        computes the values over the entire :attr:`input` tensor.
-        Default is `None`.
-    keepdim (bool):
-        If `True`, the reduced dimensions will be kept in the output
-        tensor as dimensions with size 1 for broadcasting, otherwise
-        they will be removed, as if calling (:func:`torch.squeeze`).
-        Default is `False`.
-    out (Optional[Tuple[Tensor, Tensor]]):
-        Optional tensors on which to write the result. Must have the same
-        shape and dtype as the expected output.
-        Default is `None`.
-
-Returns:
-    A named tuple `(min, max)` containing the minimum and maximum values.
-
-Raises:
-    RuntimeError
-        If any of the dimensions to compute the values over has size 0.
-
-.. note::
-    NaN values are propagated to the output if at least one value is NaN.
-
-.. seealso::
-    :func:`torch.amin` computes just the minimum value
-    :func:`torch.amax` computes just the maximum value
-
-Example::
-
-    >>> torch.aminmax(torch.tensor([1, -3, 5]))
-    torch.return_types.aminmax(
-    min=tensor(-3),
-    max=tensor(5))
-
-    >>> # aminmax propagates NaNs
-    >>> torch.aminmax(torch.tensor([1, -3, 5, torch.nan]))
-    torch.return_types.aminmax(
-    min=tensor(nan),
-    max=tensor(nan))
-
-    >>> t = torch.arange(10).view(2, 5)
-    >>> t
-    tensor([[0, 1, 2, 3, 4],
-            [5, 6, 7, 8, 9]])
-    >>> t.aminmax(dim=0, keepdim=True)
-    torch.return_types.aminmax(
-    min=tensor([[0, 1, 2, 3, 4]]),
-    max=tensor([[5, 6, 7, 8, 9]]))
-""")
-
-add_docstr(torch.argmin,
-           r"""
-argmin(input, dim=None, keepdim=False) -> LongTensor
-
-Returns the indices of the minimum value(s) of the flattened tensor or along a dimension
-
-This is the second value returned by :meth:`torch.min`. See its
-documentation for the exact semantics of this method.
-
-.. note:: If there are multiple minimal values then the indices of the first minimal value are returned.
-
-Args:
-    {input}
-    {dim} If ``None``, the argmin of the flattened input is returned.
-    {keepdim} Ignored if ``dim=None``.
-
-Example::
-
-    >>> a = torch.randn(4, 4)
-    >>> a
-    tensor([[ 0.1139,  0.2254, -0.1381,  0.3687],
-            [ 1.0100, -1.1975, -0.0102, -0.4732],
-            [-0.9240,  0.1207, -0.7506, -1.0213],
-            [ 1.7809, -1.2960,  0.9384,  0.1438]])
-    >>> torch.argmin(a)
-    tensor(13)
-    >>> torch.argmin(a, dim=1)
-    tensor([ 2,  1,  3,  1])
-    >>> torch.argmin(a, dim=1, keepdim=True)
-    tensor([[2],
-            [1],
-            [3],
-            [1]])
-""".format(**single_dim_common))
 
 add_docstr(torch.mm,
            r"""
@@ -6592,42 +6748,6 @@ Example::
     torch.Size([10, 3, 5])
 
 """.format(**common_args, **tf32_notes))
-
-add_docstr(torch.mode,
-           r"""
-mode(input, dim=-1, keepdim=False, *, out=None) -> (Tensor, LongTensor)
-
-Returns a namedtuple ``(values, indices)`` where ``values`` is the mode
-value of each row of the :attr:`input` tensor in the given dimension
-:attr:`dim`, i.e. a value which appears most often
-in that row, and ``indices`` is the index location of each mode value found.
-
-By default, :attr:`dim` is the last dimension of the :attr:`input` tensor.
-
-If :attr:`keepdim` is ``True``, the output tensors are of the same size as
-:attr:`input` except in the dimension :attr:`dim` where they are of size 1.
-Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting
-in the output tensors having 1 fewer dimension than :attr:`input`.
-
-.. note:: This function is not defined for ``torch.cuda.Tensor`` yet.
-
-Args:
-    {input}
-    {dim}
-    {keepdim}
-
-Keyword args:
-    out (tuple, optional): the result tuple of two output tensors (values, indices)
-
-Example::
-
-    >>> a = torch.randint(10, (5,))
-    >>> a
-    tensor([6, 5, 1, 0, 2])
-    >>> b = a + (torch.randn(50, 1) * 5).long()
-    >>> torch.mode(b, 0)
-    torch.return_types.mode(values=tensor([6, 5, 1, 0, 2]), indices=tensor([2, 2, 2, 2, 2]))
-""".format(**single_dim_common))
 
 add_docstr(torch.mul, r"""
 mul(input, other, *, out=None) -> Tensor
@@ -7554,54 +7674,6 @@ Example::
     >>> torch.float_power(a, exp)
     tensor([1.0000e+00, 1.2500e-01, 8.1000e+01, 9.7656e-04], dtype=torch.float64)
 """.format(**common_args))
-
-add_docstr(torch.prod,
-           r"""
-prod(input, *, dtype=None) -> Tensor
-
-Returns the product of all elements in the :attr:`input` tensor.
-
-Args:
-    {input}
-
-Keyword args:
-    {dtype}
-
-Example::
-
-    >>> a = torch.randn(1, 3)
-    >>> a
-    tensor([[-0.8020,  0.5428, -1.5854]])
-    >>> torch.prod(a)
-    tensor(0.6902)
-
-.. function:: prod(input, dim, keepdim=False, *, dtype=None) -> Tensor
-   :noindex:
-
-Returns the product of each row of the :attr:`input` tensor in the given
-dimension :attr:`dim`.
-
-{keepdim_details}
-
-Args:
-    {input}
-    {dim}
-    {keepdim}
-
-Keyword args:
-    {dtype}
-
-Example::
-
-    >>> a = torch.randn(4, 2)
-    >>> a
-    tensor([[ 0.5261, -0.3837],
-            [ 1.1857, -0.2498],
-            [-1.1646,  0.0705],
-            [ 1.1131, -1.0629]])
-    >>> torch.prod(a, 1)
-    tensor([-0.2018, -0.2962, -0.0821, -1.1831])
-""".format(**single_dim_common))
 
 add_docstr(torch.promote_types,
            r"""
@@ -8877,84 +8949,6 @@ Example::
     torch.Size([2, 2, 1, 2])
 """.format(**common_args))
 
-add_docstr(torch.std, r"""
-std(input, dim, unbiased, keepdim=False, *, out=None) -> Tensor
-
-If :attr:`unbiased` is ``True``, Bessel's correction will be used.
-Otherwise, the sample deviation is calculated, without any correction.
-
-Args:
-    {input}
-    {dim}
-
-Keyword args:
-    unbiased (bool): whether to use Bessel's correction (:math:`\delta N = 1`).
-    {keepdim}
-    {out}
-
-
-.. function:: std(input, unbiased) -> Tensor
-   :noindex:
-
-Calculates the standard deviation of all elements in the :attr:`input` tensor.
-
-If :attr:`unbiased` is ``True``, Bessel's correction will be used.
-Otherwise, the sample deviation is calculated, without any correction.
-
-Args:
-    {input}
-    unbiased (bool): whether to use Bessel's correction (:math:`\delta N = 1`).
-
-Example::
-
-    >>> a = torch.tensor([[-0.8166, -1.3802, -0.3560]])
-    >>> torch.std(a, unbiased=False)
-    tensor(0.4188)
-""".format(**multi_dim_common))
-
-add_docstr(torch.std_mean,
-           r"""
-std_mean(input, dim, unbiased, keepdim=False, *, out=None) -> (Tensor, Tensor)
-
-If :attr:`unbiased` is ``True``, Bessel's correction will be used to calculate
-the standard deviation. Otherwise, the sample deviation is calculated, without
-any correction.
-
-Args:
-    {input}
-    {dim}
-
-Keyword args:
-    unbiased (bool): whether to use Bessel's correction (:math:`\delta N = 1`).
-    {keepdim}
-    {out}
-
-Returns:
-    A tuple (std, mean) containing the standard deviation and mean.
-
-.. function:: std_mean(input, unbiased) -> (Tensor, Tensor)
-   :noindex:
-
-Calculates the standard deviation and mean of all elements in the :attr:`input`
-tensor.
-
-If :attr:`unbiased` is ``True``, Bessel's correction will be used.
-Otherwise, the sample deviation is calculated, without any correction.
-
-Args:
-    {input}
-    unbiased (bool): whether to use Bessel's correction (:math:`\delta N = 1`).
-
-Returns:
-    A tuple (std, mean) containing the standard deviation and mean.
-
-Example::
-
-    >>> a = torch.tensor([[-0.8166, -1.3802, -0.3560]])
-    >>> torch.std_mean(a, unbiased=False)
-    (tensor(0.4188), tensor(-0.8509))
-""".format(**multi_dim_common))
-
 add_docstr(torch.sub, r"""
 sub(input, other, *, alpha=1, out=None) -> Tensor
 
@@ -8988,106 +8982,6 @@ subtract(input, other, *, alpha=1, out=None) -> Tensor
 
 Alias for :func:`torch.sub`.
 """)
-
-add_docstr(torch.sum,
-           r"""
-sum(input, *, dtype=None) -> Tensor
-
-Returns the sum of all elements in the :attr:`input` tensor.
-
-Args:
-    {input}
-
-Keyword args:
-    {dtype}
-
-Example::
-
-    >>> a = torch.randn(1, 3)
-    >>> a
-    tensor([[ 0.1133, -0.9567,  0.2958]])
-    >>> torch.sum(a)
-    tensor(-0.5475)
-
-.. function:: sum(input, dim, keepdim=False, *, dtype=None) -> Tensor
-   :noindex:
-
-Returns the sum of each row of the :attr:`input` tensor in the given
-dimension :attr:`dim`. If :attr:`dim` is a list of dimensions,
-reduce over all of them.
-
-{keepdim_details}
-
-Args:
-    {input}
-    {dim}
-    {keepdim}
-
-Keyword args:
-    {dtype}
-
-Example::
-
-    >>> a = torch.randn(4, 4)
-    >>> a
-    tensor([[ 0.0569, -0.2475,  0.0737, -0.3429],
-            [-0.2993,  0.9138,  0.9337, -1.6864],
-            [ 0.1132,  0.7892, -0.1003,  0.5688],
-            [ 0.3637, -0.9906, -0.4752, -1.5197]])
-    >>> torch.sum(a, 1)
-    tensor([-0.4598, -0.1381,  1.3708, -2.6217])
-    >>> b = torch.arange(4 * 5 * 6).view(4, 5, 6)
-    >>> torch.sum(b, (2, 1))
-    tensor([  435.,  1335.,  2235.,  3135.])
-""".format(**multi_dim_common))
-
-add_docstr(torch.nansum,
-           r"""
-nansum(input, *, dtype=None) -> Tensor
-
-Returns the sum of all elements, treating Not a Numbers (NaNs) as zero.
-
-Args:
-    {input}
-
-Keyword args:
-    {dtype}
-
-Example::
-
-    >>> a = torch.tensor([1., 2., float('nan'), 4.])
-    >>> torch.nansum(a)
-    tensor(7.)
-
-.. function:: nansum(input, dim, keepdim=False, *, dtype=None) -> Tensor
-   :noindex:
-
-Returns the sum of each row of the :attr:`input` tensor in the given
-dimension :attr:`dim`, treating Not a Numbers (NaNs) as zero.
-If :attr:`dim` is a list of dimensions, reduce over all of them.
-
-{keepdim_details}
-
-Args:
-    {input}
-    {dim}
-    {keepdim}
-
-Keyword args:
-    {dtype}
-
-Example::
-
-    >>> torch.nansum(torch.tensor([1., float("nan")]))
-    1.0
-    >>> a = torch.tensor([[1, 2], [3., float("nan")]])
-    >>> torch.nansum(a)
-    tensor(6.)
-    >>> torch.nansum(a, dim=0)
-    tensor([4., 2.])
-    >>> torch.nansum(a, dim=1)
-    tensor([3., 3.])
-""".format(**multi_dim_common))
 
 add_docstr(torch.svd,
            r"""
@@ -9627,45 +9521,6 @@ Example::
     tensor([ 0.7156, -0.6218,  0.8257,  0.2553])
 """.format(**common_args))
 
-add_docstr(torch.topk,
-           r"""
-topk(input, k, dim=None, largest=True, sorted=True, *, out=None) -> (Tensor, LongTensor)
-
-Returns the :attr:`k` largest elements of the given :attr:`input` tensor along
-a given dimension.
-
-If :attr:`dim` is not given, the last dimension of the `input` is chosen.
-
-If :attr:`largest` is ``False`` then the `k` smallest elements are returned.
-
-A namedtuple of `(values, indices)` is returned, where the `indices` are the indices
-of the elements in the original `input` tensor.
-
-The boolean option :attr:`sorted` if ``True``, will make sure that the returned
-`k` elements are themselves sorted
-
-Args:
-    {input}
-    k (int): the k in "top-k"
-    dim (int, optional): the dimension to sort along
-    largest (bool, optional): controls whether to return largest or
-           smallest elements
-    sorted (bool, optional): controls whether to return the elements
-           in sorted order
-
-Keyword args:
-    out (tuple, optional): the output tuple of (Tensor, LongTensor) that can be
-        optionally given to be used as output buffers
-
-Example::
-
-    >>> x = torch.arange(1., 6.)
-    >>> x
-    tensor([ 1.,  2.,  3.,  4.,  5.])
-    >>> torch.topk(x, 3)
-    torch.return_types.topk(values=tensor([5., 4., 3.]), indices=tensor([4, 3, 2]))
-""".format(**common_args))
-
 add_docstr(torch.trace,
            r"""
 trace(input) -> Tensor
@@ -10141,83 +9996,6 @@ Example::
             [ 3],
             [ 4]])
 """.format(**common_args))
-
-add_docstr(torch.var, r"""
-var(input, dim, unbiased, keepdim=False, *, out=None) -> Tensor
-
-If :attr:`unbiased` is ``True``, Bessel's correction will be used.
-Otherwise, the sample variance is calculated, without any correction.
-
-Args:
-    {input}
-    {dim}
-
-Keyword args:
-    unbiased (bool): whether to use Bessel's correction (:math:`\delta N = 1`).
-    {keepdim}
-    {out}
-
-.. function:: var(input, unbiased) -> Tensor
-   :noindex:
-
-Calculates the variance of all elements in the :attr:`input` tensor.
-
-If :attr:`unbiased` is ``True``, Bessel's correction will be used.
-Otherwise, the sample deviation is calculated, without any correction.
-
-Args:
-    {input}
-    unbiased (bool): whether to use Bessel's correction (:math:`\delta N = 1`).
-
-Example::
-
-    >>> a = torch.tensor([[-0.8166, -1.3802, -0.3560]])
-    >>> torch.var(a, unbiased=False)
-    tensor(0.1754)
-""".format(**multi_dim_common))
-
-add_docstr(torch.var_mean,
-           r"""
-var_mean(input, dim, unbiased, keepdim=False, *, out=None) -> (Tensor, Tensor)
-
-If :attr:`unbiased` is ``True``, Bessel's correction will be used to calculate
-the variance. Otherwise, the sample variance is calculated, without any
-correction.
-
-Args:
-    {input}
-    {dim}
-
-Keyword args:
-    unbiased (bool): whether to use Bessel's correction (:math:`\delta N = 1`).
-    {keepdim}
-    {out}
-
-Returns:
-    A tuple (var, mean) containing the variance and mean.
-
-.. function:: var_mean(input, unbiased) -> (Tensor, Tensor)
-   :noindex:
-
-Calculates the variance and mean of all elements in the :attr:`input`
-tensor.
-
-If :attr:`unbiased` is ``True``, Bessel's correction will be used.
-Otherwise, the sample deviation is calculated, without any correction.
-
-Args:
-    {input}
-    unbiased (bool): whether to use Bessel's correction (:math:`\delta N = 1`).
-
-Returns:
-    A tuple (var, mean) containing the variance and mean.
-
-Example::
-
-    >>> a = torch.tensor([[-0.8166, -1.3802, -0.3560]])
-    >>> torch.var_mean(a, unbiased=False)
-    (tensor(0.1754), tensor(-0.8509))
-""".format(**multi_dim_common))
 
 add_docstr(torch.zeros,
            r"""
