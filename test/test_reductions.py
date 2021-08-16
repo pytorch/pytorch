@@ -312,7 +312,7 @@ class TestReductions(TestCase):
     def test_ref_small_input(self, device, dtype, op: ReductionOpInfo):
         """Compares op against reference for many small random input tensors"""
         def make(*size):
-            return make_tensor(size, device, dtype)
+            return make_tensor(size, device, dtype, exclude_zero=True)
 
         self._test_ref(op, make(32))
         self._test_ref(op, make(5, 2, 4, 3))
@@ -327,14 +327,15 @@ class TestReductions(TestCase):
          allowed_dtypes=get_all_dtypes(include_bfloat16=False))
     def test_ref_large_input(self, device, dtype, op: ReductionOpInfo):
         """Compares op against reference for a very large input to check stability"""
-        self._test_ref(op, make_tensor((2 ** 20,), device, dtype))
+        self._test_ref(op, make_tensor((2 ** 20,), device, dtype, exclude_zero=True))
 
     @ops(filter(lambda op: op.ref is not None, reduction_ops),
          allowed_dtypes=get_all_dtypes(include_bfloat16=False))
     def test_ref_extremal_values(self, device, dtype, op: ReductionOpInfo):
         """Compares op against reference for input tensors with extremal values"""
-        t = make_tensor((10,), device, dtype)
-        for extremal in [nan, inf, -inf] if torch.is_floating_point(t) else [0, 1]:
+        t = make_tensor((10,), device, dtype, exclude_zero=True)
+        extremals = [0, 1] + ([nan, inf, -inf] if torch.is_floating_point(t) else [])
+        for extremal in extremals:
             t[5] = extremal
             self._test_ref(op, t)
 

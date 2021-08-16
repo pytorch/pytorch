@@ -764,10 +764,9 @@ class OpInfo(object):
 def _generate_reduction_inputs(device, dtype, requires_grad):
     """Generates input tensors for testing reduction operators"""
     make = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
-    yield make(())
     yield make((2,))
     yield make((2, 3), noncontiguous=True)
-    yield make((3, 2, 1, 2, 2))
+    yield make((3, 2, 5, 2))
 
 
 def _generate_reduction_kwargs(ndim, supports_multiple_dims=True):
@@ -3342,24 +3341,6 @@ def sample_inputs_rot90(op_info, device, dtype, requires_grad=False, **kwargs):
     return list(generator())
 
 
-def sample_inputs_std_var(op_info, device, dtype, requires_grad, **kwargs):
-    tensor_nd = make_tensor((S, S, S), device=device, dtype=dtype,
-                            low=None, high=None, requires_grad=requires_grad)
-    tensor_1d = make_tensor((S,), device=device, dtype=dtype,
-                            low=None, high=None, requires_grad=requires_grad)
-
-    return [
-        SampleInput(tensor_nd),
-        SampleInput(tensor_nd, kwargs=dict(dim=1)),
-        SampleInput(tensor_nd, kwargs=dict(dim=1, unbiased=True, keepdim=True)),
-        SampleInput(tensor_1d, kwargs=dict(dim=0, unbiased=True, keepdim=True)),
-        SampleInput(tensor_1d, kwargs=dict(dim=0, unbiased=False, keepdim=False)),
-
-        SampleInput(tensor_nd, kwargs=dict(dim=(1,), correction=S // 2)),
-        SampleInput(tensor_nd, kwargs=dict(dim=None, correction=0, keepdim=True)),
-    ]
-
-
 def _generate_correlation_inputs(device, dtype, requires_grad):
     shapes = [(2,), (1, 2), (3, 2), (2, 3)]
     for shape in shapes:
@@ -5227,7 +5208,7 @@ def gradcheck_wrapper_triangular_input(op, input, *args, upper=False, **kwargs):
     return op(input.triu() if upper else input.tril(), upper)
 
 
-def reference_reduction_numpy(f, supports_keepdims=True):
+def reference_reduction_numpy(f, *, supports_keepdims=True):
     """Wraps a NumPy reduction operator.
 
     The wrapper function will forward dim and keepdim kwargs to the wrapped
@@ -5272,6 +5253,39 @@ def reference_reduction_numpy(f, supports_keepdims=True):
         return result
 
     return wrapper
+
+
+def reference_std_var(f):
+    """Forwards unbiased/correction kwargs as NumPy's equivalent ddof"""
+    g = reference_reduction_numpy(f)
+
+    @wraps(f)
+    def wrapper(x: np.ndarray, *args, **kwargs):
+        assert not ('unbiased' in kwargs and 'correction' in kwargs)
+
+        if 'unbiased' in kwargs:
+            kwargs['ddof'] = int(kwargs.pop('unbiased'))
+        elif 'correction' in kwargs:
+            kwargs['ddof'] = kwargs.pop('correction')
+
+        return g(x, *args, **kwargs)
+
+    return wrapper
+
+
+def generate_std_var_kwargs(t: torch.Tensor, **kwargs):
+    """Generates unbiased/correction kwargs for std/var operators"""
+    yield ((), {'unbiased': True})
+    yield ((), {'unbiased': False})
+
+    # Currently, calling std with correction is only enabled when
+    # both dim and keepdim are provided.
+    if 'dim' in kwargs and 'keepdim' in kwargs:
+        yield ((), {'correction': 0})
+        yield ((), {'correction': 1})
+
+        numel = torch.tensor(t.shape)[kwargs.get('dim')].prod()
+        yield ((), {'correction': numel // 2})
 
 
 # Operator database (sorted alphabetically)
@@ -7324,16 +7338,6 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_legacy_solve,
            check_batched_gradgrad=False,
            decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack]),
-    OpInfo('std',
-           dtypes=floating_and_complex_types_and(torch.half),
-           dtypesIfCPU=floating_and_complex_types_and(torch.half, torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
-           backward_dtypesIfCPU=floating_and_complex_types_and(torch.half, torch.bfloat16),
-           sample_inputs_func=sample_inputs_std_var,
-           # TODO: std does support out in some signatures
-           supports_out=False,
-           assert_autodiffed=True,
-           ),
     UnaryUfuncInfo('tan',
                    ref=np.tan,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
@@ -8083,17 +8087,6 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            assert_autodiffed=True,
            sample_inputs_func=sample_unsqueeze),
-    OpInfo('var',
-           dtypes=floating_and_complex_types_and(torch.half),
-           dtypesIfCPU=floating_and_complex_types_and(torch.half, torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
-           backward_dtypesIfCPU=floating_and_complex_types_and(torch.half, torch.bfloat16),
-           backward_dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
-           sample_inputs_func=sample_inputs_std_var,
-           # TODO: revisit, some var signatures do support out (see std, too)
-           supports_out=False,
-           assert_autodiffed=True,
-           ),
     OpInfo('xlogy',
            aliases=('special.xlogy',),
            dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
@@ -8703,13 +8696,13 @@ op_db: List[OpInfo] = [
         ref=reference_reduction_numpy(np.mean),
         decorators=(
             DecorateInfo(toleranceOverride({
-                torch.float16: tol(1e-03, 1e-05),
+                torch.float16: tol(atol=1e-03, rtol=1e-05),
             }), 'TestReductions', 'test_noncontiguous_input'),
             DecorateInfo(toleranceOverride({
-                torch.float16: tol(1e-03, 1e-05),
+                torch.float16: tol(atol=1e-03, rtol=1e-05),
             }), 'TestReductions', 'test_ref_small_input'),
             DecorateInfo(toleranceOverride({
-                torch.float16: tol(1e-02, 1e-05),
+                torch.float16: tol(atol=1e-02, rtol=1e-05),
             }), 'TestReductions', 'test_ref_large_input'),
         ),
         skips=(
@@ -8721,6 +8714,79 @@ op_db: List[OpInfo] = [
             # FIXME: dim=[] reduces all dimensions
             SkipInfo('TestReductions', 'test_dim_empty'),
             SkipInfo('TestReductions', 'test_dim_empty_keepdim'),
+        ),
+    ),
+    ReductionOpInfo(
+        'std',
+        nan_policy='propagate',
+        supports_out=False,
+        assert_autodiffed=True,
+        promotes_int_to_float=True,
+        dtypes=floating_and_complex_types_and(torch.half),
+        dtypesIfCPU=floating_and_complex_types_and(torch.half, torch.bfloat16),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
+        backward_dtypesIfCPU=floating_and_complex_types_and(torch.half, torch.bfloat16),
+        ref=reference_std_var(np.std),
+        generate_args_kwargs=generate_std_var_kwargs,
+        decorators=(
+            DecorateInfo(toleranceOverride({
+                torch.float16: tol(atol=1e-03, rtol=1e-03),
+            }), 'TestReductions', 'test_ref_small_input'),
+            DecorateInfo(toleranceOverride({
+                torch.float16: tol(atol=1e-03, rtol=1e-03),
+            }), 'TestReductions', 'test_ref_extremal_values'),
+        ),
+        skips=(
+            # FIXME: cannot specify keepdim without dim
+            SkipInfo('TestReductions', 'test_dim_default_keepdim'),
+            # FIXME: dim=None not supported
+            SkipInfo('TestReductions', 'test_dim_none'),
+            SkipInfo('TestReductions', 'test_dim_none_keepdim'),
+            # FIXME: dim=[] reduces all dimensions
+            SkipInfo('TestReductions', 'test_dim_empty'),
+            SkipInfo('TestReductions', 'test_dim_empty_keepdim'),
+            # TODO(@heitorschueroff) std return float for complex types
+            # need to find a better way to model result dtype
+            SkipInfo('TestReductions', 'test_result_dtype'),
+            # NumPy is giving NaN for this
+            SkipInfo('TestReductions', 'test_ref_large_input'),
+        ),
+    ),
+    ReductionOpInfo(
+        'var',
+        nan_policy='propagate',
+        supports_out=False,
+        assert_autodiffed=True,
+        promotes_int_to_float=True,
+        dtypes=floating_and_complex_types_and(torch.half),
+        dtypesIfCPU=floating_and_complex_types_and(torch.half, torch.bfloat16),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
+        backward_dtypesIfCPU=floating_and_complex_types_and(torch.half, torch.bfloat16),
+        backward_dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
+        ref=reference_std_var(np.var),
+        generate_args_kwargs=generate_std_var_kwargs,
+        decorators=(
+            DecorateInfo(toleranceOverride({
+                torch.float16: tol(atol=1e-03, rtol=1e-02),
+            }), 'TestReductions', 'test_ref_small_input'),
+            DecorateInfo(toleranceOverride({
+                torch.float16: tol(atol=1e-03, rtol=1e-03),
+            }), 'TestReductions', 'test_ref_extremal_values'),
+        ),
+        skips=(
+            # FIXME: cannot specify keepdim without dim
+            SkipInfo('TestReductions', 'test_dim_default_keepdim'),
+            # FIXME: dim=None not supported
+            SkipInfo('TestReductions', 'test_dim_none'),
+            SkipInfo('TestReductions', 'test_dim_none_keepdim'),
+            # FIXME: dim=[] reduces all dimensions
+            SkipInfo('TestReductions', 'test_dim_empty'),
+            SkipInfo('TestReductions', 'test_dim_empty_keepdim'),
+            # TODO(@heitorschueroff) std return float for complex types
+            # need to find a better way to model result dtype
+            SkipInfo('TestReductions', 'test_result_dtype'),
+            # NumPy is giving NaN for this
+            SkipInfo('TestReductions', 'test_ref_large_input'),
         ),
     ),
 ]
