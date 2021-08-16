@@ -46,10 +46,3 @@ target_include_directories(test_deploy_lib BEFORE PRIVATE ${PYTHON_INC_DIR})
 add_executable(deploy_benchmark ${DEPLOY_DIR}/example/benchmark.cpp)
 target_include_directories(deploy_benchmark PRIVATE ${PYTORCH_ROOT}/torch)
 target_link_libraries(deploy_benchmark PUBLIC torch_deploy)
-
-add_custom_target(deploy_generated_examples ALL
-  COMMAND python torch/csrc/deploy/example/generate_examples.py
-  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-  COMMENT "Generating torch::deploy examples"
-  VERBATIM
-)
