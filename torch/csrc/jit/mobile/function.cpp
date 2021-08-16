@@ -122,41 +122,33 @@ bool Function::append_operator(
 //        }
 //      }
 
-//      fn = [fn, num_specified_args, &args](Stack& stack)  {
-      fn = [fn, num_specified_args, args](Stack& stack)  {
+      fn = [fn, num_specified_args, &args](Stack& stack)  {
+//      fn = [fn, num_specified_args, args](Stack& stack)  {
         std::cout << "stack.size()" << stack.size();
         c10::optional<c10::Argument> out_args;
-//        if(!args.empty()) {
-//          auto last = args.back();
-//          if (last.is_out()) {
-//            out_args = args.back();
-//            args.pop_back();
-//          }
-//        }
-        std::vector<c10::Argument> local_args;
-        for (auto arg: args) {
-          if(!arg.is_out()) {
-            local_args.emplace_back(arg);
+        if(!args.empty()) {
+          auto last = args.back();
+          if (last.is_out()) {
+            out_args = args.back();
+            args.pop_back();
           }
         }
-//        for (size_t i = 0; i < args.size(); ++i) {
-//          if(args[i].default_value().has_value()) {
-//            stack.push_back(args[i].default_value());
+//        std::vector<c10::Argument> local_args;
+//        for (auto arg: args) {
+//          if(!arg.is_out()) {
+//            local_args.emplace_back(arg);
 //          }
-//          }
-        for (size_t i = num_specified_args.value(); i < local_args.size(); ++i) {
-          stack.push_back(local_args[i].default_value());
-        }
+//        }
+//        for (size_t i = num_specified_args.value(); i < local_args.size(); ++i) {
+//          stack.push_back(local_args[i].default_value());
+//        }
 
-//        for (size_t i = num_specified_args.value(); i < args.size(); ++i) {
-//          stack.push_back(args[i].default_value());
-//        }
-//        if(out_args.has_value()) {
-//          args.push_back(out_args.value());
-//        }
-//        for (size_t i = num_specified_args.value(); i < args.size(); ++i) {
-//          stack.push_back(args[i].default_value());
-//        }
+        for (size_t i = num_specified_args.value(); i < args.size(); ++i) {
+          stack.push_back(args[i].default_value());
+        }
+        if(out_args.has_value()) {
+          args.push_back(out_args.value());
+        }
 
         fn(stack);
       };
