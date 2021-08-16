@@ -5,6 +5,7 @@
 #endif
 
 #include <ATen/record_function.h>
+#include <ATen/SavedTensorHooks.h>
 
 namespace at {
 
@@ -13,6 +14,8 @@ ThreadLocalState::ThreadLocalState()
       debug_info_(c10::ThreadLocalDebugInfo::current()),
       autograd_tls_(c10::AutogradTLS::get_mode()) {
   rf_tls_ = at::get_record_function_tls_();
+  saved_tensors_default_hooks_ = SavedTensorDefaultHooks::get_hooks();
+
   bumped_record_all_functions_ = at::checkRecordAllFunctions();
 }
 
@@ -32,6 +35,10 @@ void ThreadLocalState::setThreadLocalState(
   c10::AutogradTLS::set_mode(state.autograd_tls_);
 
   at::set_record_function_tls_(state.rf_tls_);
+
+  SavedTensorDefaultHooks::set_hooks(
+      state.saved_tensors_default_hooks_.first,
+      state.saved_tensors_default_hooks_.second);
 
   c10::ThreadLocalDebugInfo::_forceCurrentDebugInfo(state.debug_info_);
 
