@@ -1414,6 +1414,9 @@ def instance_norm(g, input, weight, bias, running_mean, running_var, use_input_s
         # https://github.com/pytorch/pytorch/blob/master/aten/src/ATen/native/Normalization.cpp#L542
         input_size_reshape = input_size.copy()
         n = input_size[0]
+        if n is None:
+            raise RuntimeError("Unsupported: ONNX export of instance_norm training for unknown "
+                               "batch size.")
         c = input_size[1]
         input_size_reshape[0] = 1
         input_size_reshape[1] = n * c
