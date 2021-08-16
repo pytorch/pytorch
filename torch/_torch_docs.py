@@ -214,26 +214,25 @@ Alias for :func:`torch.acosh`.
 """.format(**common_args))
 
 add_docstr(torch.add, r"""
-add(input, other, *, alpha=1, out=None) -> Tensor
+add(input, other, *, out=None) -> Tensor
 
-Adds :attr:`other`, scaled by :attr:`alpha`, to :attr:`input` elementwise.
+Adds the scalar :attr:`other` to each element of the input :attr:`input`
+and returns a new resulting tensor.
 
 .. math::
-    \text{{out}}_i = \text{{input}}_i + \text{{alpha}} \times \text{{other}}_i
-""" + r"""
+    \text{{out}} = \text{{input}} + \text{{other}}
 
-Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
-:ref:`type promotion <type-promotion-doc>`, and integer, float, and complex inputs.
+If :attr:`input` is of type FloatTensor or DoubleTensor, :attr:`other` must be
+a real number, otherwise it should be an integer.
 
 Args:
     {input}
-    other (Tensor or Number): the tensor or number to add to input.
+    other (Number): the number to be added to each element of :attr:`input`
 
 Keyword arguments:
-    alpha (Number): the multiplier for :attr:`other`.
     {out}
 
-Examples::
+Example::
 
     >>> a = torch.randn(4)
     >>> a
@@ -241,16 +240,42 @@ Examples::
     >>> torch.add(a, 20)
     tensor([ 20.0202,  21.0985,  21.3506,  19.3944])
 
-    >>> b = torch.randn(4)
-    >>> b
+.. function:: add(input, other, *, alpha=1, out=None) -> Tensor
+   :noindex:
+
+Each element of the tensor :attr:`other` is multiplied by the scalar
+:attr:`alpha` and added to each element of the tensor :attr:`input`.
+The resulting tensor is returned.
+
+The shapes of :attr:`input` and :attr:`other` must be
+:ref:`broadcastable <broadcasting-semantics>`.
+
+.. math::
+    \text{{out}} = \text{{input}} + \text{{alpha}} \times \text{{other}}
+
+If :attr:`other` is of type FloatTensor or DoubleTensor, :attr:`alpha` must be
+a real number, otherwise it should be an integer.
+
+Args:
+    input (Tensor): the first input tensor
+    other (Tensor): the second input tensor
+
+Keyword args:
+    alpha (Number): the scalar multiplier for :attr:`other`
+    {out}
+
+Example::
+
+    >>> a = torch.randn(4)
+    >>> a
     tensor([-0.9732, -0.3497,  0.6245,  0.4022])
-    >>> c = torch.randn(4, 1)
-    >>> c
+    >>> b = torch.randn(4, 1)
+    >>> b
     tensor([[ 0.3743],
             [-1.7724],
             [-0.5811],
             [-0.8017]])
-    >>> torch.add(b, c, alpha=10)
+    >>> torch.add(a, b, alpha=10)
     tensor([[  2.7695,   3.3930,   4.3672,   4.1450],
             [-18.6971, -18.0736, -17.0994, -17.3216],
             [ -6.7845,  -6.1610,  -5.1868,  -5.4090],
@@ -767,29 +792,15 @@ add_docstr(torch.as_tensor,
            r"""
 as_tensor(data, dtype=None, device=None) -> Tensor
 
-Converts :attr:`data` into a tensor, sharing data and preserving autograd
-history if possible.
-
-If data is already a tensor with the same
-:attr:`dtype` and :attr:`device` then data itself is returned, but if data is a
-tensor with a different dtype or device then it's copied as if using
-`data.to(dtype=dtype, device=device)`.
-
-If data is a NumPy array (an ndarray) with the same dtype and device then a
-tensor is constructed using :func:`torch.from_numpy`.
-
-.. seealso::
-
-    :func:`torch.tensor` never shares its data and creates a new "leaf tensor."
-
+Convert the data into a `torch.Tensor`. If the data is already a `Tensor` with the same `dtype` and `device`,
+no copy will be performed, otherwise a new `Tensor` will be returned with computational graph retained if data
+`Tensor` has ``requires_grad=True``. Similarly, if the data is an ``ndarray`` of the corresponding `dtype` and
+the `device` is the cpu, no copy will be performed.
 
 Args:
     {data}
     {dtype}
-    device - the device of the constructed tensor. If None and data is a tensor
-        then the device of data is used. If None and data is not a tensor then
-        the result tensor is constructed on the CPU.
-
+    {device}
 
 Example::
 
@@ -6621,24 +6632,23 @@ Example::
 add_docstr(torch.mul, r"""
 mul(input, other, *, out=None) -> Tensor
 
-Multiplies :attr:`input` by :attr:`other` elementwise.
-
+Multiplies each element of the input :attr:`input` with the scalar
+:attr:`other` and returns a new resulting tensor.
 
 .. math::
-    \text{out}_i = \text{input}_i \times \text{other}_i
+    \text{out}_i = \text{other} \times \text{input}_i
 """ + r"""
-
-Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
-:ref:`type promotion <type-promotion-doc>`, and integer, float, and complex inputs.
+If :attr:`input` is of type `FloatTensor` or `DoubleTensor`, :attr:`other`
+should be a real number, otherwise it should be an integer
 
 Args:
     {input}
-    other (Tensor or Number) - the tensor or number to multiply input by.
+    other (Number): the number to be multiplied to each element of :attr:`input`
 
 Keyword args:
     {out}
 
-Examples::
+Example::
 
     >>> a = torch.randn(3)
     >>> a
@@ -6646,16 +6656,38 @@ Examples::
     >>> torch.mul(a, 100)
     tensor([  20.1494,  -42.5491,  260.8663])
 
-    >>> b = torch.randn(4, 1)
-    >>> b
+.. function:: mul(input, other, *, out=None) -> Tensor
+   :noindex:
+
+Each element of the tensor :attr:`input` is multiplied by the corresponding
+element of the Tensor :attr:`other`. The resulting tensor is returned.
+
+The shapes of :attr:`input` and :attr:`other` must be
+:ref:`broadcastable <broadcasting-semantics>`.
+
+.. math::
+    \text{{out}}_i = \text{{input}}_i \times \text{{other}}_i
+""".format(**common_args) + r"""
+
+Args:
+    input (Tensor): the first multiplicand tensor
+    other (Tensor): the second multiplicand tensor
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> a = torch.randn(4, 1)
+    >>> a
     tensor([[ 1.1207],
             [-0.3137],
             [ 0.0700],
             [ 0.8378]])
-    >>> c = torch.randn(1, 4)
-    >>> c
+    >>> b = torch.randn(1, 4)
+    >>> b
     tensor([[ 0.5146,  0.1216, -0.5244,  2.2382]])
-    >>> torch.mul(b, c)
+    >>> torch.mul(a, b)
     tensor([[ 0.5767,  0.1363, -0.5877,  2.5083],
             [-0.1614, -0.0382,  0.1645, -0.7021],
             [ 0.0360,  0.0085, -0.0367,  0.1567],
@@ -7963,34 +7995,29 @@ add_docstr(torch.tensor,
            r"""
 tensor(data, *, dtype=None, device=None, requires_grad=False, pin_memory=False) -> Tensor
 
-Constructs a tensor with no autograd history (a "leaf tensor") by copying :attr:`data`.
+Constructs a tensor with :attr:`data`.
 
 .. warning::
 
-    When working with tensors prefer using :func:`torch.Tensor.clone`,
-    :func:`torch.Tensor.detach`, and :func:`torch.Tensor.requires_grad_` for
-    readability. Letting `t` be a tensor, ``torch.tensor(t)`` is equivalent to
-    ``t.clone().detach()``, and ``torch.tensor(t, requires_grad=True)``
-    is equivalent to ``t.clone().detach().requires_grad_(True)``.
+    :func:`torch.tensor` always copies :attr:`data`. If you have a Tensor
+    ``data`` and want to avoid a copy, use :func:`torch.Tensor.requires_grad_`
+    or :func:`torch.Tensor.detach`.
+    If you have a NumPy ``ndarray`` and want to avoid a copy, use
+    :func:`torch.as_tensor`.
 
-    To change whether a tensor requires grad without copying it use just
-    :func:`torch.Tensor.requires_grad_` or :func:`torch.Tensor.detach` without
-    cloning the tensor.
+.. warning::
 
-
-.. seealso::
-
-    :func:`torch.as_tensor` preserves autograd history and avoids copies where possible.
-    :func:`torch.from_numpy` creates a tensor that shares storage with a NumPy array.
+    When data is a tensor `x`, :func:`torch.tensor` reads out 'the data' from whatever it is passed,
+    and constructs a leaf variable. Therefore ``torch.tensor(x)`` is equivalent to ``x.clone().detach()``
+    and ``torch.tensor(x, requires_grad=True)`` is equivalent to ``x.clone().detach().requires_grad_(True)``.
+    The equivalents using ``clone()`` and ``detach()`` are recommended.
 
 Args:
     {data}
 
 Keyword args:
     {dtype}
-    device - the device of the constructed tensor. If None and data is a tensor
-        then the device of data is used. If None and data is not a tensor then
-        the result tensor is constructed on the CPU.
+    {device}
     {requires_grad}
     {pin_memory}
 
@@ -8007,10 +8034,10 @@ Example::
 
     >>> torch.tensor([[0.11111, 0.222222, 0.3333333]],
     ...              dtype=torch.float64,
-    ...              device=torch.device('cuda:0'))  # creates a double tensor on a CUDA device
+    ...              device=torch.device('cuda:0'))  # creates a torch.cuda.DoubleTensor
     tensor([[ 0.1111,  0.2222,  0.3333]], dtype=torch.float64, device='cuda:0')
 
-    >>> torch.tensor(3.14159)  # Create a zero-dimensional (scalar) tensor
+    >>> torch.tensor(3.14159)  # Create a scalar (zero-dimensional tensor)
     tensor(3.1416)
 
     >>> torch.tensor([])  # Create an empty tensor (of size (0,))
@@ -8942,10 +8969,10 @@ Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
 
 Args:
     {input}
-    other (Tensor or Number): the tensor or number to subtract from :attr:`input`.
+    other (Tensor or Scalar): the tensor or scalar to subtract from :attr:`input`
 
 Keyword args:
-    alpha (Number): the multiplier for :attr:`other`.
+    alpha (Scalar): the scalar multiplier for :attr:`other`
     {out}
 
 Example::
