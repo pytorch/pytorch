@@ -22,6 +22,7 @@ try:
     sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
     from tools.testing.test_selections import (
         export_S3_test_times,
+        export_target_det_list,
         get_shard_based_on_S3,
         get_slow_tests_based_on_S3,
         get_specified_test_cases,
@@ -341,6 +342,8 @@ TARGET_DET_LIST = [
     'distributed/pipeline/sync/test_transparency',
     'distributed/pipeline/sync/test_worker',
 ]
+
+TARGET_DET_FILE = '.pytorch-target-det-list.json'
 
 # the JSON file to store the S3 test stats
 TEST_TIMES_FILE = '.pytorch-test-times.json'
@@ -712,6 +715,13 @@ def parse_args():
         help='dumps test times from previous S3 stats into a file, format JSON',
     )
     parser.add_argument(
+        '--export-target-det-list',
+        nargs='?',
+        type=str,
+        const=TARGET_DET_FILE,
+        help='dumps test times from previous S3 stats into a file, format JSON',
+    )
+    parser.add_argument(
         '--shard',
         nargs=2,
         type=int,
@@ -1050,6 +1060,13 @@ def main():
             if determine_target(TARGET_DET_LIST + slow_tests, test, touched_files, options)
         ]
         sys.path.remove('test')
+
+        # TODO: move this to tools/test_selections.py
+        target_det_filename = options.export_target_det_list
+        if target_det_filename:
+            print(f'Determine target list and report to {target_det_filename}.')
+            export_target_det_list(selected_tests, target_det_filename)
+            return
 
     if IS_IN_CI:
         selected_tests = get_reordered_tests(selected_tests, ENABLE_PR_HISTORY_REORDERING)

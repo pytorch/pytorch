@@ -18,6 +18,7 @@ coverage.xml
 **/.pytorch_specified_test_cases.csv
 **/.pytorch-disabled-tests.json
 **/.pytorch-slow-tests.json
+**/.pytorch-target-det-list.json
 **/.pytorch-test-times.json
 */*.pyc
 */*.so*

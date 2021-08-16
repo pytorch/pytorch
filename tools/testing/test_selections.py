@@ -290,6 +290,17 @@ def export_S3_test_times(test_times_filename: Optional[str] = None) -> Dict[str,
     return test_times
 
 
+# TODO refactor this and unify with tools.stats.export_*
+def export_target_det_list(selected_test: List[Any], target_det_filename: str) -> None:
+    if target_det_filename is not None:
+        print(f'Exporting target determination result to {target_det_filename}.')
+        if os.path.exists(target_det_filename):
+            print(f'Overwriting existent file: {target_det_filename}')
+        with open(target_det_filename, 'w+') as file:
+            json.dump(selected_test, file, indent='    ', separators=(',', ': '))
+            file.write('\n')
+
+
 def get_test_case_configs(dirpath: str) -> None:
     get_slow_tests(dirpath=dirpath)
     get_disabled_tests(dirpath=dirpath)
