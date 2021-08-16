@@ -3,6 +3,7 @@
 #include <ATen/native/Resize.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/Reduce.cuh>
+#include <ATen/native/cuda/Resize.cuh>
 #include <ATen/native/cuda/Normalization.cuh>
 #include <c10/cuda/CUDAMathCompat.h>
 
@@ -70,6 +71,7 @@ void batch_norm_elementwise(
   case Impl::Contiguous: {
     c10::MaybeOwned<Tensor> weight = at::borrow_from_optional_tensor(weight_opt);
     c10::MaybeOwned<Tensor> bias = at::borrow_from_optional_tensor(bias_opt);
+    resize_output(out, self.sizes());
     AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, self.scalar_type(),
                                     "batch_norm_elementwise_cuda", [&] {
       using accscalar_t = at::acc_type<scalar_t, true>;
@@ -87,7 +89,12 @@ void batch_norm_elementwise(
   case Impl::ChannelsLast: {
     auto weight = at::borrow_from_optional_tensor(weight_opt);
     auto bias = at::borrow_from_optional_tensor(bias_opt);
-    if ((!weight->defined() || weight->is_contiguous()) &&
+
+    if (resize_output_check(out, self.sizes())) {
+        resize_impl_cuda_(out.unsafeGetTensorImpl(), self.sizes(), self.strides());
+    }
+    if ((out.strides() == self.strides()) &&
+        (!weight->defined() || weight->is_contiguous()) &&
         (!bias->defined() || bias->is_contiguous()) &&
         (!mean_.defined() || mean_.is_contiguous()) &&
         (!invstd_.defined() || invstd_.is_contiguous())) {
@@ -397,7 +404,7 @@ void batch_norm_calc_invstd(const Tensor& out_invstd, const Tensor& running_var,
 
 std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_cuda_out(const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt, const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt, bool train, double momentum, double epsilon, Tensor& output, Tensor& save_mean, Tensor& save_invstd) {
   const bool has_running_mean = (running_mean_opt.has_value() && running_mean_opt->defined());
-  const bool has_running_var = (running_mean_opt.has_value() && running_mean_opt->defined());
+  const bool has_running_var = (running_var_opt.has_value() && running_var_opt->defined());
   TORCH_CHECK(has_running_mean == has_running_var);
 
   if (train) {
@@ -422,7 +429,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_cuda_out(const Tensor& self, co
 }
 
 std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda(const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt, const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt, bool train, double momentum, double epsilon) {
-  auto output = at::empty_like(self, at::MemoryFormat::Contiguous);
+  auto output = at::empty_like(self);
   int64_t n_input = self.size(1);
   auto options = self.options().dtype(
       at::toAccumulateType(self.scalar_type(), /*is_cuda=*/true));
@@ -553,7 +560,7 @@ Tensor batch_norm_elemt_cuda(
     const Tensor& self, const c10::optional<Tensor>& weight_opt,
     const c10::optional<Tensor>& bias_opt, const Tensor& mean,
     const Tensor& invstd, double epsilon) {
-  auto output = at::empty_like(self, self.suggest_memory_format());
+  auto output = at::empty_like(self);
   // FIXME: Epsilon parameter isn't required, we don't take the reciprocal
   batch_norm_elementwise(output, self, weight_opt, bias_opt, mean, invstd);
   return output;

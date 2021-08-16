@@ -632,7 +632,6 @@ class TestFXGraphMatcher(QuantizationTestCase):
                 qp.BatchNormQuantizeHandler,
                 qp.EmbeddingQuantizeHandler,
                 qp.RNNDynamicQuantizeHandler,
-                qp.ELUQuantizeHandler,
             ]
 
             qhandler_cls_quant_op_same_signature = [
@@ -1549,7 +1548,6 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
                     qp.LinearReLUQuantizeHandler,
                     qp.BatchNormQuantizeHandler,
                     qp.DefaultNodeQuantizeHandler,
-                    qp.ELUQuantizeHandler,
                 )
             ):
                 self.assertTrue(
@@ -1631,7 +1629,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
             torch.quantization.ns.weight_utils.get_linear_fun_weight
 
         # test compare weights
-        results = _extract_weights_impl(
+        results = extract_weights(
             'a', m1, 'b', m2,
             base_name_to_sets_of_related_ops=base_name_to_sets_of_related_ops,
             op_to_type_to_weight_extraction_fn=op_to_type_to_weight_extraction_fn)

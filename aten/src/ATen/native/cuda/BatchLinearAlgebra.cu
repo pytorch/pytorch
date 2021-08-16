@@ -2616,9 +2616,9 @@ AT_ERROR("svd: MAGMA library not found in "
   auto S_data = S.data_ptr<value_t>();
   auto VT_data = VT.data_ptr<scalar_t>();
   auto self_stride = matrixStride(self);
-  auto U_stride = matrixStride(U);
+  auto U_stride = jobchar == 'N' ? 1 : matrixStride(U);
   auto S_stride = S.size(-1);
-  auto VT_stride = matrixStride(VT);
+  auto VT_stride = jobchar == 'N' ? 1 :matrixStride(VT);
   auto batchsize = batchCount(self);
 
   magma_vec_t jobz = jobchar == 'A' ? MagmaAllVec : (jobchar == 'S' ? MagmaSomeVec : MagmaNoVec);
@@ -2626,7 +2626,7 @@ AT_ERROR("svd: MAGMA library not found in "
   magma_int_t m = magma_int_cast(self.size(-2), "m");
   magma_int_t n = magma_int_cast(self.size(-1), "n");
   auto lda = std::max<magma_int_t>(1, m);
-  auto ldvt = std::max<magma_int_t>(1, n);
+  auto ldvt = std::max<magma_int_t>(1, jobchar == 'N' ? 1 : VT.size(-2));
   auto mn = std::min(m, n);
 
   c10::Storage storage_rwork;
@@ -2706,19 +2706,12 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda_legacy(const Tensor& self, b
   S_working_copy = same_stride_to(S_working_copy, S_working_copy.options().device(self.device()));
   VT_working_copy = same_stride_to(VT_working_copy, self.options());
 
-  if (!compute_uv) {
-    VT_working_copy.zero_();
-    U_working_copy.zero_();
-  }
-
-  if (some) {
-    VT_working_copy = VT_working_copy.narrow(-2, 0, k);
-  }
-
   // so far we have computed VT, but torch.svd returns V instead. Adjust accordingly.
   // Note that the 'apply_svd' routine returns VT = V^T (for real inputs) or VT = V^H (for complex inputs), not V.
-  VT_working_copy = VT_working_copy.conj();
-  VT_working_copy.transpose_(-2, -1);
+  if (compute_uv) {
+    VT_working_copy = VT_working_copy.conj();
+    VT_working_copy.transpose_(-2, -1);
+  }
   return std::make_tuple(U_working_copy, S_working_copy, VT_working_copy);
 }
 
@@ -2907,8 +2900,11 @@ cublasOperation_t _get_cublas_trans(char trans) {
 static void lu_solve_trans_dispatch(const Tensor& b, const Tensor& lu, const Tensor& pivots, char trans) {
   auto batch_size = batchCount(lu);
   auto m = lu.size(-2);
+  auto b2 = b.size(-1);
+  bool over_magma_dim_limit = b2 > 1024;  // magma implementation of LU solve cannot handle a b tensor with last dim > 1024 (https://bitbucket.org/icl/magma/issues/19/dgesv_batched-dgetrs_batched-fails-for)
+  // heuristics determined from tests dicussed in https://github.com/pytorch/pytorch/pull/59148
 #ifdef USE_CUSOLVER
-  if (batch_size == 1 && m > 512) {
+  if ((batch_size == 1 && m > 512) || (batch_size <= 8 && over_magma_dim_limit)) {
     lu_solve_looped_cusolver(b, lu, pivots, _get_cublas_trans(trans));
   }
 #else
@@ -2917,7 +2913,7 @@ static void lu_solve_trans_dispatch(const Tensor& b, const Tensor& lu, const Ten
   }
 #endif // ifdef USE_CUSOLVER
 #ifdef CUDART_VERSION
-  else if (batch_size > 2 && m <= 128) {
+  else if ((batch_size > 2 && m <= 128) || (batch_size > 8 && over_magma_dim_limit)) {
     lu_solve_batched_cublas(b, lu, pivots, _get_cublas_trans(trans));
   }
 #endif // ifdef CUDART_VERSION

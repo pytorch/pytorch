@@ -14,8 +14,8 @@ OverlapKind boundOverlap(Bound a, Bound b) {
     return ContainedOrEqual;
   }
 
-  const Expr* lowDiff = IRSimplifier::simplify(new Sub(a.start, b.end));
-  const Expr* highDiff = IRSimplifier::simplify(new Sub(b.start, a.end));
+  Expr* lowDiff = IRSimplifier::simplify(new Sub(a.start, b.end));
+  Expr* highDiff = IRSimplifier::simplify(new Sub(b.start, a.end));
 
   if (lowDiff->isConstant() && highDiff->isConstant()) {
     int low = immediateAs<int>(lowDiff);
@@ -26,8 +26,8 @@ OverlapKind boundOverlap(Bound a, Bound b) {
     }
   }
 
-  const Expr* diff_start = IRSimplifier::simplify(new Sub(b.start, a.start));
-  const Expr* diff_end = IRSimplifier::simplify(new Sub(b.end, a.end));
+  Expr* diff_start = IRSimplifier::simplify(new Sub(b.start, a.start));
+  Expr* diff_end = IRSimplifier::simplify(new Sub(b.end, a.end));
 
   // If one side fully encloses the other, they're adjacent.
   if (diff_start->isConstant() && diff_end->isConstant()) {
@@ -122,8 +122,8 @@ std::vector<Bound> subtractBound(Bound a, Bound b, OverlapKind overlap) {
     return {a};
   }
 
-  const Expr* lowDiff = IRSimplifier::simplify(new Sub(b.start, a.start));
-  const Expr* highDiff = IRSimplifier::simplify(new Sub(b.end, a.end));
+  Expr* lowDiff = IRSimplifier::simplify(new Sub(b.start, a.start));
+  Expr* highDiff = IRSimplifier::simplify(new Sub(b.end, a.end));
 
   // If the diff has only a single var, we can try to guess sign.
   if (!lowDiff->isConstant()) {
@@ -161,8 +161,7 @@ std::vector<Bound> subtractBound(Bound a, Bound b, OverlapKind overlap) {
   }
 
   if (hasTail) {
-    const Expr* tailStart =
-        IRSimplifier::simplify(new Add(b.end, new IntImm(1)));
+    Expr* tailStart = IRSimplifier::simplify(new Add(b.end, new IntImm(1)));
     res.emplace_back(tailStart, a.end);
   }
 
