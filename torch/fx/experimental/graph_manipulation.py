@@ -372,7 +372,7 @@ def serialize_module(fx_module: GraphModule, weights: Dict, name_prefix="") -> D
                 user_targets = {
                     _get_qualified_name(
                         n.target
-                    ).replace("glow.fb.fx.oss_acc_tracer.", "").replace("glow.fb.fx.", ""): n
+                    ).replace("torch.fx.experimental.fx_acc.", "").replace("glow.fb.fx.", ""): n
                     for n in node.users.keys()
                 }
                 if (

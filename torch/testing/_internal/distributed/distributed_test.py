@@ -1030,7 +1030,7 @@ class DistributedTest:
         # NCCL Batch SEND RECV
         @skip_if_no_gpu
         @sandcastle_skip_if(BACKEND != "nccl", "NCCL Batch Send Recv Only")
-        @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
+        @requires_nccl_version((2, 7, 0), "Need NCCL 2.7+ for send/recv")
         def test_batch_isend_irecv_nccl(self):
             self._barrier()
             rank = dist.get_rank()
@@ -1057,7 +1057,7 @@ class DistributedTest:
 
         @skip_if_no_gpu
         @sandcastle_skip_if(BACKEND != "nccl", "NCCL Batch Send Recv Only")
-        @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
+        @requires_nccl_version((2, 7, 0), "Need NCCL 2.7+ for send/recv")
         def test_batch_isend_irecv_self_nccl(self):
             self._barrier()
             rank = dist.get_rank()
@@ -1082,7 +1082,7 @@ class DistributedTest:
         @skip_if_no_gpu
         @skip_if_small_worldsize
         @sandcastle_skip_if(BACKEND != "nccl", "NCCL Batch Send Recv Only")
-        @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
+        @requires_nccl_version((2, 7, 0), "Need NCCL 2.7+ for send/recv")
         def test_batch_isend_irecv_no_rank_zero_nccl(self):
             self._barrier()
             rank = dist.get_rank()
@@ -1158,7 +1158,7 @@ class DistributedTest:
 
         # NCCL Batch SEND RECV Tensor Error
         @sandcastle_skip_if(BACKEND != "nccl", "NCCL Batch Send Recv Only")
-        @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
+        @requires_nccl_version((2, 7, 0), "Need NCCL 2.7+ for send/recv")
         def test_batch_isend_irecv_tensor_err(self):
             self._barrier()
             rank = dist.get_rank()
@@ -1175,7 +1175,7 @@ class DistributedTest:
 
         # NCCL Batch SEND RECV Op Error
         @sandcastle_skip_if(BACKEND != "nccl", "NCCL Batch Send Recv Only")
-        @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
+        @requires_nccl_version((2, 7, 0), "Need NCCL 2.7+ for send/recv")
         def test_batch_isend_irecv_op_err(self):
             self._barrier()
             rank = dist.get_rank()
@@ -1190,7 +1190,7 @@ class DistributedTest:
 
         # NCCL Batch SEND RECV p2p_op_list Error
         @sandcastle_skip_if(BACKEND != "nccl", "NCCL Batch Send Recv Only")
-        @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
+        @requires_nccl_version((2, 7, 0), "Need NCCL 2.7+ for send/recv")
         def test_batch_isend_irecv_op_list_err(self):
             self._barrier()
             rank = dist.get_rank()
@@ -1204,7 +1204,7 @@ class DistributedTest:
 
         # NCCL Batch SEND RECV Mixed Backend Error
         @sandcastle_skip_if(BACKEND != "nccl", "NCCL Batch Send Recv Only")
-        @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
+        @requires_nccl_version((2, 7, 0), "Need NCCL 2.7+ for send/recv")
         def test_batch_isend_irecv_mixed_backend_err(self):
             self._barrier()
             rank = dist.get_rank()
@@ -1225,7 +1225,7 @@ class DistributedTest:
         # NCCL SEND RECV
         @skip_if_no_gpu
         @sandcastle_skip_if(BACKEND != "nccl", "NCCL Send Recv Only")
-        @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
+        @requires_nccl_version((2, 7, 0), "Need NCCL 2.7+ for send/recv")
         def _test_send_recv_nccl(self, profiler_ctx=None):
             # TODO: now that nccl send/recv is supported, there does not seem to
             # be a need to have nccl send/recv be tested separately.
@@ -1271,20 +1271,20 @@ class DistributedTest:
 
         @skip_if_no_gpu
         @sandcastle_skip_if(BACKEND != "nccl", "NCCL Send Recv Only")
-        @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
+        @requires_nccl_version((2, 7, 0), "Need NCCL 2.7+ for send/recv")
         def test_send_recv_nccl(self):
             self._test_send_recv_nccl()
 
         @skip_if_no_gpu
         @sandcastle_skip_if(BACKEND != "nccl", "NCCL Send Recv Only")
-        @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
+        @requires_nccl_version((2, 7, 0), "Need NCCL 2.7+ for send/recv")
         def test_send_recv_nccl_autograd_profiler(self):
             profiler_ctx = torch.autograd.profiler.profile(record_shapes=True)
             self._test_send_recv_nccl(profiler_ctx)
 
         @skip_if_no_gpu
         @sandcastle_skip_if(BACKEND != "nccl", "NCCL Send Recv Only")
-        @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
+        @requires_nccl_version((2, 7, 0), "Need NCCL 2.7+ for send/recv")
         @sandcastle_skip_if(IS_FBCODE, "Kineto in fbcode causes hang")
         @sandcastle_skip_if(
             IS_MACOS or IS_WINDOWS,
@@ -4172,6 +4172,17 @@ class DistributedTest:
             self._test_ddp_hook_parity(
                 state=state, hook=post_localSGD.post_localSGD_hook
             )
+
+            # When `subgroup` is None, it is equivalent to the subgroup on the each node.
+            # For this single-node test environment, the intra-node process group is equivalent to
+            # the global process group.
+            if self.world_size == dist.get_world_size():
+                state = post_localSGD.PostLocalSGDState(
+                    process_group=None, subgroup=None, start_localSGD_iter=10
+                )
+                self._test_ddp_hook_parity(
+                    state=state, hook=post_localSGD.post_localSGD_hook
+                )
 
             # Since we start local SGD later than the total number of 100 iterations,
             # no local SGD actually is executed, and we don't even need to provide a subgroup for this case.
