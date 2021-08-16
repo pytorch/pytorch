@@ -3112,11 +3112,11 @@ TEST(LoopNest, IsNormalized) {
   Block::make({for_stmt});
   ASSERT_FALSE(LoopNest::isNormalized(for_stmt));
 
-  for_stmt->setStart(alloc<IntImm>(0));
+  for_stmt->set_start(alloc<IntImm>(0));
   ASSERT_TRUE(LoopNest::isNormalized(for_stmt));
 
   VarHandle N("N", kInt);
-  for_stmt->setStart(N.node());
+  for_stmt->set_start(N.node());
   ASSERT_FALSE(LoopNest::isNormalized(for_stmt));
 }
 
@@ -3972,7 +3972,7 @@ TEST(LoopNest, DeadStoreElimination) {
   StmtPtr stmt = Block::make({stmt1});
 
   // Will eliminate if not used by an output.
-  LoopNest loop(stmt, {f.node()});
+  LoopNest loop(Stmt::clone(stmt), {f.node()});
   loop.eliminateDeadStores();
 
   checkIR(loop.root_stmt(), R"IR(

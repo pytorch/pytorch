@@ -737,22 +737,22 @@ void MemDependencyChecker::visit(ForPtr v) {
         // should apply the substitution to the reverse of the bounds.
         if (info->bounds()[i].swapped) {
           info->bounds()[i].end = IRSimplifier::simplify(
-              Substitute(info->bounds()[i].end, {{var, v->start()}}));
-          info->bounds()[i].start = IRSimplifier::simplify(Substitute(
+              SubstituteInClone(info->bounds()[i].end, {{var, v->start()}}));
+          info->bounds()[i].start = IRSimplifier::simplify(SubstituteInClone(
               info->bounds()[i].start,
               {{var, alloc<Sub>(v->stop(), alloc<IntImm>(1))}}));
 
         } else {
           info->bounds()[i].start = IRSimplifier::simplify(
-              Substitute(info->bounds()[i].start, {{var, v->start()}}));
-          info->bounds()[i].end = IRSimplifier::simplify(Substitute(
+              SubstituteInClone(info->bounds()[i].start, {{var, v->start()}}));
+          info->bounds()[i].end = IRSimplifier::simplify(SubstituteInClone(
               info->bounds()[i].end,
               {{var, alloc<Sub>(v->stop(), alloc<IntImm>(1))}}));
         }
 
         ExprPtr zeroStep = indices[i];
-        ExprPtr oneStep =
-            Substitute(indices[i], {{var, alloc<Add>(var, alloc<IntImm>(1))}});
+        ExprPtr oneStep = SubstituteInClone(
+            indices[i], {{var, alloc<Add>(var, alloc<IntImm>(1))}});
         loopIndicesStride[i] =
             IRSimplifier::simplify(alloc<Sub>(oneStep, zeroStep));
 
@@ -783,8 +783,8 @@ void MemDependencyChecker::visit(ForPtr v) {
       // does nothing.
       for (auto& bound : bounds) {
         bound.start = IRSimplifier::simplify(
-            Substitute(bound.start, {{var, v->start()}}));
-        bound.end = IRSimplifier::simplify(Substitute(
+            SubstituteInClone(bound.start, {{var, v->start()}}));
+        bound.end = IRSimplifier::simplify(SubstituteInClone(
             bound.end, {{var, alloc<Sub>(v->stop(), alloc<IntImm>(1))}}));
 
         // If the start < end then swap the order of the bound.
@@ -1287,8 +1287,8 @@ class VarBoundBinder : public IRVisitor {
       return;
     }
 
-    min_ = Substitute(min_, {{v, it->second.start}});
-    max_ = Substitute(max_, {{v, it->second.end}});
+    min_ = SubstituteInClone(min_, {{v, it->second.start}});
+    max_ = SubstituteInClone(max_, {{v, it->second.end}});
   }
 
   ExprPtr min_{nullptr};
