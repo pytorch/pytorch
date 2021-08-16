@@ -72,6 +72,11 @@ class TORCH_API Cast : public ExprNode<Cast> {
   ExprPtr src_value() const {
     return src_value_;
   }
+
+  void set_src_value(ExprPtr src_value) {
+    src_value_ = src_value;
+  }
+
   static ExprHandle make(Dtype dtype, const ExprHandle& src_value) {
     return ExprHandle(alloc<Cast>(dtype, src_value.node()));
   }
@@ -97,6 +102,11 @@ class TORCH_API BitCast : public ExprNode<BitCast> {
   ExprPtr src_value() const {
     return src_value_;
   }
+
+  void set_src_value(ExprPtr src_value) {
+    src_value_ = src_value;
+  }
+
   static ExprHandle make(Dtype dtype, const ExprHandle& src_value) {
     return ExprHandle(alloc<BitCast>(dtype, src_value.node()));
   }
@@ -129,6 +139,14 @@ class BinaryOpNode : public ExprNode<Op> {
   }
   ExprPtr rhs() const {
     return this->rhs_;
+  }
+
+  void set_lhs(ExprPtr lhs) {
+    lhs_ = lhs;
+  }
+
+  void set_rhs(ExprPtr rhs) {
+    rhs_ = rhs;
   }
 
   static ExprHandle make(const ExprHandle& lhs, const ExprHandle& rhs) {
@@ -361,6 +379,15 @@ class TORCH_API Ramp : public ExprNode<Ramp> {
   ExprPtr stride() const {
     return stride_;
   }
+
+  void set_base(ExprPtr base) {
+    base_ = base;
+  }
+
+  void set_stride(ExprPtr stride) {
+    stride_ = stride;
+  }
+
   static ExprHandle make(
       const ExprHandle& base,
       const ExprHandle& stride,
@@ -401,6 +428,15 @@ class TORCH_API Load : public ExprNode<Load> {
   BufPtr buf() const {
     return buf_;
   }
+
+  void set_buf(BufPtr buf) {
+    buf_ = buf;
+  }
+
+  void set_indices(std::vector<ExprPtr> indices) {
+    indices_ = indices;
+  }
+
   static ExprHandle make(
       Dtype dtype,
       const BufHandle& buf,
@@ -412,10 +448,6 @@ class TORCH_API Load : public ExprNode<Load> {
   Load(Dtype dtype, BufPtr base_handle, std::vector<ExprPtr> indices);
   Load(BufPtr base_handle, const std::vector<ExprPtr>& indices);
 
-  void set_indices(std::vector<ExprPtr> indices) {
-    indices_ = indices;
-  };
-
  private:
   BufPtr buf_;
   std::vector<ExprPtr> indices_;
@@ -426,6 +458,11 @@ class TORCH_API Broadcast : public ExprNode<Broadcast> {
   ExprPtr value() const {
     return value_;
   }
+
+  void set_value(ExprPtr value) {
+    value_ = value;
+  }
+
   int lanes() const {
     return lanes_;
   }
@@ -456,6 +493,18 @@ class TORCH_API IfThenElse : public ExprNode<IfThenElse> {
   // Lazily evaluated only if condition is false
   ExprPtr false_value() const {
     return false_;
+  }
+
+  void set_condition(ExprPtr condition) {
+    condition_ = condition;
+  }
+
+  void set_true_value(ExprPtr true_value) {
+    true_ = true_value;
+  }
+
+  void set_false_value(ExprPtr false_value) {
+    false_ = false_value;
   }
 
   static ExprHandle make(
@@ -500,6 +549,23 @@ class TORCH_API CompareSelect : public ExprNode<CompareSelect> {
   ExprPtr ret_val2() const {
     return this->ret_val2_;
   }
+
+  void set_lhs(ExprPtr lhs) {
+    lhs_ = lhs;
+  }
+
+  void set_rhs(ExprPtr rhs) {
+    rhs_ = rhs;
+  }
+
+  void set_ret_val1(ExprPtr ret_val1) {
+    ret_val1_ = ret_val1;
+  }
+
+  void set_ret_val2(ExprPtr ret_val2) {
+    ret_val2_ = ret_val2;
+  }
+
   CompareSelectBias bias() const {
     return bias_;
   }
@@ -786,6 +852,10 @@ class TORCH_API Intrinsics : public ExprNode<Intrinsics> {
   }
   const std::vector<ExprPtr>& params() const {
     return params_;
+  }
+
+  void set_params(std::vector<ExprPtr> params) {
+    params_ = std::move(params);
   }
 
  private:

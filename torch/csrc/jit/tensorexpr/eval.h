@@ -253,14 +253,36 @@ class ExprEval {
   Value ret_value_;
 };
 
+// Substitutes the given vars with their corresponding expressions in the input
+// expression.
 inline ExprPtr Substitute(ExprPtr expr, const VarMapping& var_mapping) {
   VarSubMutator var_sub(var_mapping);
   return expr->accept_mutator(&var_sub);
 }
 
+// Substitutes the given vars with their corresponding expressions in the input
+// statement.
 inline StmtPtr Substitute(StmtPtr stmt, const VarMapping& var_mapping) {
   VarSubMutator var_sub(var_mapping);
   return stmt->accept_mutator(&var_sub);
+}
+
+// Creates a clone of the input expression and substitutes the given vars with
+// their corresponding expressions in the clone.
+// NOTE: This works because cloning reuses variables and does not create new
+// ones, and `VarMapping` input has variables as the key.
+inline ExprPtr SubstituteInClone(ExprPtr expr, const VarMapping& var_mapping) {
+  VarSubMutator var_sub(var_mapping);
+  return Expr::clone(expr)->accept_mutator(&var_sub);
+}
+
+// Creates a clone of the input statement and substitutes the given vars with
+// their corresponding expressions in the clone.
+// NOTE: This works because cloning reuses variables and does not create new
+// ones, and `VarMapping` input has variables as the key.
+inline StmtPtr SubstituteInClone(StmtPtr stmt, const VarMapping& var_mapping) {
+  VarSubMutator var_sub(var_mapping);
+  return Stmt::clone(stmt)->accept_mutator(&var_sub);
 }
 
 } // namespace tensorexpr
