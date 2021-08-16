@@ -115,7 +115,7 @@ public:
         tensors_requiring_grad.push_back(&t);
       }
       num_tensor_inputs++;
-      TORCH_CHECK_NOT_IMPLEMENTED(!isFwdGradDefined(t), "Trying to use forward AD with ", op_name, " that does not support it.");
+      TORCH_CHECK_NOT_IMPLEMENTED(!isFwGradDefined(t), "Trying to use forward AD with ", op_name, " that does not support it.");
     }, std::forward<Args>(args)...);
 
     std::shared_ptr<NotImplemented> grad_fn;
@@ -194,5 +194,7 @@ template<typename ReturnT, typename... Args>
 auto autogradNotImplementedFallback2(ReturnT(*op)(Args...), std::string schema_string) {
   return AutogradNotImplementedFallback<ReturnT, Args...>(op, schema_string);
 }
+
+TORCH_API void autogradNotImplementedFallback(const c10::OperatorHandle& op, at::DispatchKeySet dispatch_keys, torch::jit::Stack* stack);
 
 }} // namespace torch::autograd
