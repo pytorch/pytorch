@@ -14,11 +14,12 @@ from torch.testing._internal.common_distributed import (
 
 from torch.testing._internal.common_utils import (
     run_tests,
+    sandcastle_skip_if,
 )
 
 class TestShardingSpec(TestCase):
 
-    @skip_if_lt_x_gpu(1)
+    @sandcastle_skip_if(torch.cuda.device_count() < 2, '2 GPU is needed')
     def test_device_placement(self):
         # valid devices
         DevicePlacementSpec("cuda:0")
@@ -38,7 +39,7 @@ class TestShardingSpec(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Invalid device string"):
             DevicePlacementSpec("rank:0/cpu2")
 
-    @skip_if_lt_x_gpu(2)
+    @sandcastle_skip_if(torch.cuda.device_count() < 2, '2 GPU is needed')
     def test_chunked_sharding_spec(self):
         # Test valid specs.
         ChunkShardingSpec(0, [torch.device(0), torch.device(1)])
@@ -68,7 +69,7 @@ class TestShardingSpec(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Invalid device string"):
             ChunkShardingSpec(0, ["rank:0/cuda:foo", "cuda:1"])
 
-    @skip_if_lt_x_gpu(4)
+    @sandcastle_skip_if(torch.cuda.device_count() < 2, '2 GPU is needed')
     def test_enumerable_sharding_spec(self):
         # test valid specs
 
