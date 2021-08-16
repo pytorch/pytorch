@@ -918,4 +918,7 @@ def _build_table(
     append("Self CPU time total: {}".format(_format_time(sum_self_cpu_time_total)))
     if has_cuda_time:
         append("Self CUDA time total: {}".format(_format_time(sum_self_cuda_time_total)))
+    if not events[0].is_legacy:
+        append(("You can try PyTorch profiler Tensorboard plugin for visualization "
+                "from https://pytorch.org/tutorials/intermediate/tensorboard_profiler_tutorial.html"))
     return ''.join(result)
