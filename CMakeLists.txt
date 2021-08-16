@@ -202,7 +202,7 @@ cmake_dependent_option(
     "USE_CUDNN" OFF)
 option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" ON)
 option(USE_KINETO "Use Kineto profiling library" ON)
-option(USE_BREAKPAD "Use breakpad crash dump" ON)
+option(USE_BREAKPAD "Use breakpad crash dump library" ON)
 option(USE_CUPTI_SO "Use CUPTI as a shared library" OFF)
 option(USE_FAKELOWP "Use FakeLowp operators" OFF)
 option(USE_FFMPEG "Use ffmpeg" OFF)
