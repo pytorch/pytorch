@@ -107,13 +107,11 @@ inline ucs_memory_type getUCSMemoryType(c10::DeviceType type) {
 }
 
 std::shared_ptr<UCPRequest> UCPWorker::submit_p2p_request(
-  size_t size, c10::DeviceType device,
+  c10::DeviceType device,
   const std::function<ucs_status_ptr_t(const ucp_request_param_t *)> &work
 ) const {
   ucp_request_param_t params;
-  params.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK |
-      UCP_OP_ATTR_FIELD_DATATYPE | UCP_OP_ATTR_FIELD_MEMORY_TYPE;
-  params.datatype = ucp_dt_make_contig(size);
+  params.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK | UCP_OP_ATTR_FIELD_MEMORY_TYPE;
   params.memory_type = getUCSMemoryType(device);
   params.cb.recv = [](void* request,
                       ucs_status_t status,
@@ -131,26 +129,28 @@ std::shared_ptr<UCPRequest> UCPWorker::submit_p2p_request(
     new UCPRequest(reinterpret_cast<UCPRequest::Data *>(request)));
 }
 
-std::shared_ptr<UCPRequest> UCPWorker::recv_with_tag(void *data, size_t size, int tag, c10::DeviceType device) const {
+std::shared_ptr<UCPRequest> UCPWorker::recv_with_tag_and_mask(void *data, size_t size, ucp_tag_t tag, ucp_tag_t tag_mask, c10::DeviceType device) const {
   // TODO: srcRank is not used here!!! Is this corrrect?
   // No, this is not. We need to use commid and rank to distinguish
-  return submit_p2p_request(size, device, [&](const ucp_request_param_t *params) {
-    return ucp_tag_recv_nbx(worker, data, 1, tag, 0, params);
+  return submit_p2p_request(device, [&](const ucp_request_param_t *params) {
+    return ucp_tag_recv_nbx(worker, data, size, tag, tag_mask, params);
   });
 }
 
+std::shared_ptr<UCPRequest> UCPWorker::recv_any_with_tag(void *data, size_t size, int tag, c10::DeviceType device) const {
+  return recv_with_tag_and_mask(data, size, tag, 0, device);
+}
+
 std::shared_ptr<UCPRequest> UCPEndpoint::send_with_tag(void *data, size_t size, int tag, c10::DeviceType device) const {
-  return worker->submit_p2p_request(size, device, [&](const ucp_request_param_t *params) {
-    return ucp_tag_send_nbx(endpoint, data, 1, tag, params);
+  return worker->submit_p2p_request(device, [&](const ucp_request_param_t *params) {
+    return ucp_tag_send_nbx(endpoint, data, size, tag, params);
   });
 }
 
 std::shared_ptr<UCPRequest> UCPEndpoint::recv_with_tag(void *data, size_t size, int tag, c10::DeviceType device) const {
   // TODO: srcRank is not used here!!! Is this corrrect?
   // No, this is not. We need to use commid and rank to distinguish
-  return worker->submit_p2p_request(size, device, [&](const ucp_request_param_t *params) {
-    return ucp_tag_recv_nbx(worker->get(), data, 1, tag, 0, params);
-  });
+  return worker->recv_with_tag_and_mask(data, size, tag, 0, device);
 }
 
 } // namespace c10d

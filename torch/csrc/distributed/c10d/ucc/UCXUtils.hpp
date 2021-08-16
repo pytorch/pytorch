@@ -74,10 +74,11 @@ public:
   std::shared_ptr<UCPEndpoint> connect(const Address &address) const;
   unsigned progress() const { return ucp_worker_progress(worker); }
 
-  std::shared_ptr<UCPRequest> submit_p2p_request(size_t size, c10::DeviceType device, const std::function<ucs_status_ptr_t(const ucp_request_param_t *)> &work) const;
+  std::shared_ptr<UCPRequest> submit_p2p_request(c10::DeviceType device, const std::function<ucs_status_ptr_t(const ucp_request_param_t *)> &work) const;
+  std::shared_ptr<UCPRequest> recv_with_tag_and_mask(void *data, size_t size, ucp_tag_t tag, ucp_tag_t tag_mask, c10::DeviceType device) const;
 
-  // Receive from any source. See [Receive from an endpont]
-  std::shared_ptr<UCPRequest> recv_with_tag(void *data, size_t size, int tag, c10::DeviceType device) const; // receive from any source
+  // Receive from any source. See [Receive from an endpoint]
+  std::shared_ptr<UCPRequest> recv_any_with_tag(void *data, size_t size, int tag, c10::DeviceType device) const;
 };
 
 class UCPEndpoint {
@@ -99,7 +100,7 @@ public:
 
   // Receive data from this endpoint
   //
-  // Note [Receive from an endpont]:
+  // Note [Receive from an endpoint]:
   // UCP does not support receiving from a specific endpoint. So we use tag
   // matching to simulate this behavior. We use higher bits of a tag to store
   // rank, and use lower bits to store the real tag. When receiving from any

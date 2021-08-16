@@ -260,7 +260,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::recvAnysource(
     int tag) {
   check_tensor(tensors);
   auto& tensor = tensors[0];
-  auto request = worker->recv_with_tag(
+  auto request = worker->recv_any_with_tag(
     tensor.data_ptr(), tensor.element_size() * tensor.numel(),
     tag, tensor.device().type());
   return c10::make_intrusive<ProcessGroupUCC::WorkUCP>(worker, request);

@@ -1440,9 +1440,6 @@ class DistributedTest:
                 )
                 self._barrier()
 
-        @sandcastle_skip_if(
-            BACKEND == "nccl", "Nccl does not support send/recv from any source"
-        )
         def test_send_recv_any_source(self):
             self._test_send_recv_any_source(profiler_ctx=None)
 
@@ -1590,6 +1587,10 @@ class DistributedTest:
         def test_irecv(self):
             rank = dist.get_rank()
             world_size = dist.get_world_size()
+            print(world_size)
+
+            tensor = _build_tensor(rank, 10)
+            dist.send(tensor, 0)
 
             if rank == 0:
                 expected_tensors = [
@@ -1597,16 +1598,13 @@ class DistributedTest:
                 ]
                 requests = [
                     dist.irecv(expected_tensors[src - 1], src)
-                    for src in range(1, world_size)
+                    for src in range(0, world_size)
                 ]
 
-                for src in range(1, world_size):
+                for src in range(0, world_size):
                     requests[src - 1].wait()
                     self.assertTrue(requests[src - 1].is_completed())
                     self.assertEqual(expected_tensors[src - 1], _build_tensor(src, 10))
-            else:
-                tensor = _build_tensor(rank, 10)
-                dist.send(tensor, 0)
 
             self._barrier()
 

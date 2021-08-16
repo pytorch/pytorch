@@ -237,8 +237,9 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCLWithUCC::send(
     std::vector<at::Tensor>& tensors,
     int dstRank,
     int tag) {
-  if (nccl_enabled() && pg_nccl.get() != nullptr && tensors[0].device().type() == c10::kCUDA) {
-    return pg_nccl->send(tensors, dstRank, tag);
+  // NCCL send/recv does not support tag matching
+  if (tag == 0 && nccl_enabled() && pg_nccl.get() != nullptr && tensors[0].device().type() == c10::kCUDA) {
+    return pg_nccl->send(tensors, dstRank, 0);
   }
   if (ucc_enabled() && pg_ucc.get() != nullptr) {
     return pg_ucc->send(tensors, dstRank, tag);
@@ -250,8 +251,9 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCLWithUCC::recv(
     std::vector<at::Tensor>& tensors,
     int srcRank,
     int tag) {
-  if (ucc_enabled() && pg_nccl.get() != nullptr && tensors[0].device().type() == c10::kCUDA) {
-    return pg_nccl->recv(tensors, srcRank, tag);
+  // NCCL send/recv does not support tag matching
+  if (tag == 0 && nccl_enabled() && pg_nccl.get() != nullptr && tensors[0].device().type() == c10::kCUDA) {
+    return pg_nccl->recv(tensors, srcRank, 0);
   }
   if (ucc_enabled() && pg_ucc.get() != nullptr) {
     return pg_ucc->recv(tensors, srcRank, tag);
@@ -262,8 +264,12 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCLWithUCC::recv(
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCLWithUCC::recvAnysource(
     std::vector<at::Tensor>& tensors,
     int tag) {
-  if (nccl_enabled() && pg_nccl.get() != nullptr && tensors[0].device().type() == c10::kCUDA) {
-    return pg_nccl->recvAnysource(tensors, tag);
+  // NCCL send/recv does not support tag matching
+  if (tag == 0 && nccl_enabled() && pg_nccl.get() != nullptr && tensors[0].device().type() == c10::kCUDA) {
+    TORCH_CHECK(false, "NCCL backend is selected for tag == 0 on GPU, "
+                "But NCCL does not support receiving from any rank. "
+                "Try using a different tag so that UCC backend is selected.");
+    return pg_nccl->recvAnysource(tensors, 0);
   }
   if (ucc_enabled() && pg_ucc.get() != nullptr) {
     return pg_ucc->recvAnysource(tensors, tag);
