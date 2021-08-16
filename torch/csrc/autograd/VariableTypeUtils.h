@@ -1,14 +1,12 @@
 #pragma once
 
 #include <c10/util/irange.h>
-#include <torch/csrc/autograd/generated/VariableType.h>
 
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/autograd/saved_variable.h>
-#include <torch/csrc/autograd/generated/Functions.h>
 #include <torch/csrc/autograd/functions/tensor.h>
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/jit/frontend/tracer.h>
@@ -36,9 +34,39 @@
 #endif
 
 using namespace at;
-using namespace torch::autograd::generated;
 
 namespace torch { namespace autograd {
+
+// The requires_grad argument is used to know if the inplace operation needs
+// gradient to be setup for it.
+// In particular, we can have tensor.requires_grad() != requires_grad when writing
+// a Tensor that requires gradients inplace into a Tensor that does not require gradients:
+// a = torch.rand(2)
+// b = torch.rand(2, requires_grad=True)
+// a.copy_(b)
+inline void check_inplace(const Tensor& tensor, bool requires_grad) {
+  if (requires_grad && GradMode::is_enabled()) {
+    auto diff_view_meta = impl::get_view_autograd_meta(tensor);
+    if (diff_view_meta && diff_view_meta->has_bw_view()) {
+      // This can throw or warn
+      handle_view_on_rebase(diff_view_meta);
+      if (tensor.requires_grad() && tensor._base().is_leaf()) {
+          AT_ERROR(
+            "a view of a leaf Variable that requires grad is being used in an in-place operation.");
+      }
+    }
+    if (tensor.requires_grad() && tensor.is_leaf()) {
+      AT_ERROR(
+        "a leaf Variable that requires grad is being used in an in-place operation.");
+    }
+  }
+}
+
+inline void check_inplace(const TensorList tensors, bool requires_grad) {
+  for (const auto& tensor : tensors) {
+    check_inplace(tensor, requires_grad);
+  }
+}
 
 inline void throw_error_out_requires_grad(const char* name) {
   AT_ERROR(
@@ -56,6 +84,30 @@ inline void throw_error_for_complex_autograd(const Tensor& tensor, const char* n
 inline void throw_error_for_complex_autograd(const TensorList& tensorlist, const char* name) {
   for (const auto& tensor: tensorlist) {
     throw_error_for_complex_autograd(tensor, name);
+  }
+}
+
+// TODO: Blegh, bare references
+
+inline void rebase_history(Variable& var, std::shared_ptr<Node> grad_fn) {
+  if (grad_fn && var.defined()) {
+    grad_fn->add_input_metadata(var);
+    impl::rebase_history(var, {std::move(grad_fn), 0});
+  }
+}
+
+inline void rebase_history(std::vector<Variable>&& vars, std::shared_ptr<Node> grad_fn) {
+  if (grad_fn) {
+    for (auto& var : vars) {
+      if (var.defined()) {
+        // TODO: eliminate const_cast
+        // NOLINTNEXTLINE(bugprone-use-after-move)
+        auto output_nr = grad_fn->add_input_metadata(var);
+        impl::rebase_history(var, {std::move(grad_fn), output_nr});
+      } else {
+        grad_fn->add_input_metadata(Node::undefined_input());
+      }
+    }
   }
 }
 
@@ -304,4 +356,5 @@ inline std::vector<ScalarType> to_args_scalartypes(TensorList tensors) {
   }
   return args_scalartypes;
 }
+
 }} // namespace torch::autograd

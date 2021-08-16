@@ -28,37 +28,6 @@ TORCH_API variable_list wrap_outputs(const variable_list& inputs, tensor_list&& 
 /// items are not nullptr. If not specified, `required_args` defaults to `args`.
 TORCH_API void check_input_variables(const char* name, const variable_list& inputs, int args, int required_args=-1, bool allow_undefined=false);
 
-// The requires_grad argument is used to know if the inplace operation needs
-// gradient to be setup for it.
-// In particular, we can have tensor.requires_grad() != requires_grad when writing
-// a Tensor that requires gradients inplace into a Tensor that does not require gradients:
-// a = torch.rand(2)
-// b = torch.rand(2, requires_grad=True)
-// a.copy_(b)
-inline void check_inplace(const Tensor& tensor, bool requires_grad) {
-  if (requires_grad && GradMode::is_enabled()) {
-    auto diff_view_meta = impl::get_view_autograd_meta(tensor);
-    if (diff_view_meta && diff_view_meta->has_bw_view()) {
-      // This can throw or warn
-      handle_view_on_rebase(diff_view_meta);
-      if (tensor.requires_grad() && tensor._base().is_leaf()) {
-          AT_ERROR(
-            "a view of a leaf Variable that requires grad is being used in an in-place operation.");
-      }
-    }
-    if (tensor.requires_grad() && tensor.is_leaf()) {
-      AT_ERROR(
-        "a leaf Variable that requires grad is being used in an in-place operation.");
-    }
-  }
-}
-
-inline void check_inplace(const TensorList tensors, bool requires_grad) {
-  for (const auto& tensor : tensors) {
-    check_inplace(tensor, requires_grad);
-  }
-}
-
 struct ComputeRequiresGrad : IterArgs<ComputeRequiresGrad> {
   bool out = false;
   using IterArgs<ComputeRequiresGrad>::operator();
@@ -118,30 +87,7 @@ inline void set_history(
   }
 }
 
-// TODO: Blegh, bare references
-inline void rebase_history(Variable& var, std::shared_ptr<Node> grad_fn) {
-  if (grad_fn && var.defined()) {
-    grad_fn->add_input_metadata(var);
-    impl::rebase_history(var, {std::move(grad_fn), 0});
-  }
-}
-
-inline void rebase_history(std::vector<Variable>&& vars, std::shared_ptr<Node> grad_fn) {
-  if (grad_fn) {
-    for (auto& var : vars) {
-      if (var.defined()) {
-        // TODO: eliminate const_cast
-        // NOLINTNEXTLINE(bugprone-use-after-move)
-        auto output_nr = grad_fn->add_input_metadata(var);
-        impl::rebase_history(var, {std::move(grad_fn), output_nr});
-      } else {
-        grad_fn->add_input_metadata(Node::undefined_input());
-      }
-    }
-  }
-}
-
-inline bool isFwGradDefined(const c10::optional<Tensor>& t) {
+inline bool isFwGradDefined(const c10::optional<at::Tensor>& t) {
   return t.has_value() && t->defined() && t->_fw_grad(/*level */ 0).defined();
 }
 
