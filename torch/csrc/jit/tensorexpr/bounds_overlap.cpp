@@ -130,8 +130,8 @@ std::vector<Bound> subtractBound(Bound a, Bound b, OverlapKind overlap) {
     auto vars = VarFinder::find(lowDiff);
     if (vars.size() == 1) {
       lowDiff = IRSimplifier::simplify(new Sub(
-          Substitute(b.start, {{*vars.begin(), new IntImm(1)}}),
-          Substitute(a.start, {{*vars.begin(), new IntImm(1)}})));
+          SubstituteInClone(b.start, {{*vars.begin(), new IntImm(1)}}),
+          SubstituteInClone(a.start, {{*vars.begin(), new IntImm(1)}})));
     }
   }
 
@@ -139,8 +139,8 @@ std::vector<Bound> subtractBound(Bound a, Bound b, OverlapKind overlap) {
     auto vars = VarFinder::find(highDiff);
     if (vars.size() == 1) {
       highDiff = IRSimplifier::simplify(new Sub(
-          Substitute(b.end, {{*vars.begin(), new IntImm(1)}}),
-          Substitute(a.end, {{*vars.begin(), new IntImm(1)}})));
+          SubstituteInClone(b.end, {{*vars.begin(), new IntImm(1)}}),
+          SubstituteInClone(a.end, {{*vars.begin(), new IntImm(1)}})));
     }
   }
 
