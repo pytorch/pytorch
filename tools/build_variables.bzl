@@ -14,7 +14,11 @@ GENERATED_CPP = [
     "autograd/generated/TraceType_4.cpp",
     "autograd/generated/ADInplaceOrViewType_0.cpp",
     "autograd/generated/ADInplaceOrViewType_1.cpp",
-    "autograd/generated/python_functions.cpp",
+    "autograd/generated/python_functions_0.cpp",
+    "autograd/generated/python_functions_1.cpp",
+    "autograd/generated/python_functions_2.cpp",
+    "autograd/generated/python_functions_3.cpp",
+    "autograd/generated/python_functions_4.cpp",
     "autograd/generated/python_nn_functions.cpp",
     "autograd/generated/python_fft_functions.cpp",
     "autograd/generated/python_linalg_functions.cpp",
@@ -113,6 +117,10 @@ libtorch_sources_common = core_sources_common
 libtorch_profiler_sources = [
     "torch/csrc/autograd/profiler_legacy.cpp",
     "torch/csrc/autograd/profiler_kineto.cpp",
+]
+
+libtorch_edge_profiler_sources = libtorch_profiler_sources + [
+    "torch/csrc/jit/mobile/profiler_edge.cpp",
 ]
 
 core_trainer_sources = [
@@ -215,6 +223,7 @@ core_sources_full_mobile = [
     "torch/csrc/jit/passes/lower_grad_of.cpp",
     "torch/csrc/jit/passes/lower_tuples.cpp",
     "torch/csrc/jit/passes/normalize_ops.cpp",
+    "torch/csrc/jit/passes/peephole_dict_idioms.cpp",
     "torch/csrc/jit/passes/peephole_list_idioms.cpp",
     "torch/csrc/jit/passes/value_refinement_utils.cpp",
     "torch/csrc/jit/passes/peephole_alias_sensitive.cpp",
@@ -738,7 +747,11 @@ libtorch_python_distributed_sources = libtorch_python_distributed_core_sources +
 
 def glob_libtorch_python_sources(gencode_pattern = ":generate-code[{}]"):
     _libtorch_python_sources = [gencode_pattern.format(name) for name in [
-        "autograd/generated/python_functions.cpp",
+        "autograd/generated/python_functions_0.cpp",
+        "autograd/generated/python_functions_1.cpp",
+        "autograd/generated/python_functions_2.cpp",
+        "autograd/generated/python_functions_3.cpp",
+        "autograd/generated/python_functions_4.cpp",
         "autograd/generated/python_nn_functions.cpp",
         "autograd/generated/python_fft_functions.cpp",
         "autograd/generated/python_linalg_functions.cpp",
@@ -840,6 +853,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/native/mkldnn/Utils.cpp",
     "aten/src/ATen/native/quantized/cpu/init_qnnpack.cpp",
     "aten/src/ATen/record_function.cpp",
+    "aten/src/ATen/SavedTensorHooks.cpp",
     "aten/src/ATen/vulkan/Context.cpp",
 ]
 
