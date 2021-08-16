@@ -338,6 +338,11 @@ StmtPtr Stmt::clone(StmtPtr s) {
   return cloned;
 }
 
+ExprPtr Expr::clone(ExprPtr e) {
+  IRCloner cloner;
+  return e->accept_mutator(&cloner);
+}
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch

@@ -97,8 +97,7 @@ Tensor& mean_out_quantized_cpu(
   }
 #endif
   auto self_dequantized = self.dequantize();
-  auto result_dequantized =
-      at::native::mean_cpu_gpu(self_dequantized, dim, keepdim, opt_dtype);
+  auto result_dequantized = at::mean(self_dequantized, dim, keepdim, opt_dtype);
   result = at::quantize_per_tensor(
       result_dequantized,
       self.q_scale(),
