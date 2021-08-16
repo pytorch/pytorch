@@ -158,9 +158,9 @@ def register_module_full_backward_hook(
     in :attr:`grad_input` and :attr:`grad_output` will be ``None`` for all non-Tensor
     arguments.
 
-    Note that this hook need to apply a Function to the inputs and outputs of the Module
-    during the forward pass. This means that Tensors passed as argument to the Module and
-    the ones received by the forward function will not be the same, but views of each other.
+    For technical reasons, when this hook is applied to a Module, its forward function will
+    receive a view of each Tensor passed to the Module. Similarly the caller receive a view
+    of each Tensor returned by the Module's forward function.
 
     Global hooks are called before hooks registered with `register_backward_hook`
 
@@ -904,9 +904,9 @@ class Module:
         in :attr:`grad_input` and :attr:`grad_output` will be ``None`` for all non-Tensor
         arguments.
 
-        Note that this hook need to apply a Function to the inputs and outputs of the Module
-        during the forward pass. This means that Tensors passed as argument to the Module and
-        the ones received by the forward function will not be the same, but views of each other.
+        For technical reasons, when this hook is applied to a Module, its forward function will
+        receive a view of each Tensor passed to the Module. Similarly the caller receive a view
+        of each Tensor returned by the Module's forward function.
 
         .. warning ::
             Modifying inputs or outputs inplace is not allowed when using backward hooks and
