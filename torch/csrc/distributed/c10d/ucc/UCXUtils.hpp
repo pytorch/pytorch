@@ -39,6 +39,11 @@ public:
     return data->status;
   }
 
+  const ucp_tag_recv_info_t &info() const {
+    TORCH_INTERNAL_ASSERT(data != nullptr);
+    return data->info;
+  }
+
   ~UCPRequest() { if (data != nullptr) { ucp_request_free(data); } }
 
 private:

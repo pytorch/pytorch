@@ -47,20 +47,27 @@ public:
   public:
     WorkUCP(const std::shared_ptr<UCPWorker> &worker, const std::shared_ptr<UCPRequest> &request)
       : request(request), worker(worker) {}
+
     bool isCompleted() override {
       // TODO: progress worker in a side thread for true async
       worker->progress();
       return request->status() != UCS_INPROGRESS;
-    };
+    }
+
     bool isSuccess() const override {
       // TODO: progress worker in a side thread for true async
       worker->progress();
       return request->status() == UCS_OK;
-    };
+    }
+
     bool wait(std::chrono::milliseconds timeout = kUnsetTimeout) override {
       while(!isCompleted());
       return true;
-    };
+    }
+
+    int sourceRank() const {
+      return get_rank_from_tag(request->info().sender_tag);
+    }
   };
 
   explicit ProcessGroupUCC(
