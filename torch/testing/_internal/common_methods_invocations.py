@@ -3204,8 +3204,8 @@ def sample_inputs_lu(op_info, device, dtype, requires_grad=False, **kwargs):
     # not needed once OpInfo tests support Iterables
     def generate_samples():
         batch_shapes = ((), (3,), (3, 3))
-        for batch_shape, get_infos in product(batch_shapes, (True, False)):
-            shape = batch_shape + (S, S)
+        for batch_shape, get_infos, size_delta in product(batch_shapes, (True, False), (-2, -1, 0, +1, +2)):
+            shape = batch_shape + (S + size_delta, S)
             input = make_tensor(shape, device, dtype, requires_grad=requires_grad, low=None, high=None)
             yield SampleInput(input, args=(True, get_infos))
 
@@ -6533,16 +6533,16 @@ op_db: List[OpInfo] = [
            op=torch.lu,
            dtypes=floating_and_complex_types(),
            supports_inplace_autograd=False,
+           # we use in-place operations which cannot be avoided.
+           # This causes vmap failures, hence we skip batched gradient checks
+           check_batched_grad=False,
            check_batched_gradgrad=False,
            supports_out=False,
            sample_inputs_func=sample_inputs_lu,
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],
            skips=(
-               # we skip jit tests because lu_backward is impelemented as autograd.Function,
-               # which does not support autograd with scripting
+               # we skip jit tests because `lu` is a torch function
                SkipInfo('TestJit', 'test_variant_consistency_jit'),
-               # Skip operator schema test because this is a functional and not an operator
-               SkipInfo('TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
            )),
     OpInfo('lu_solve',
            op=torch.lu_solve,
@@ -6555,7 +6555,7 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types(),
            supports_inplace_autograd=False,
            # we use in-place operations which cannot be avoided.
-           # This cases vmap failures, hence we skip batched gradient checks
+           # This causes vmap failures, hence we skip batched gradient checks
            check_batched_grad=False,
            supports_out=True,
            sample_inputs_func=sample_inputs_lu_unpack,
