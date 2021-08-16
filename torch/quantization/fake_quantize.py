@@ -276,8 +276,8 @@ class FusedMovingAvgObsFakeQuantize(FakeQuantize):
             "Fused observer+fake_quant module only works with MovingAverageMinMaxObserver"
         self.quant_min: int = quant_min
         self.quant_max: int = quant_max
-        self.register_buffer("fake_quant_enabled", torch.tensor([0], dtype=torch.long))
-        self.register_buffer("observer_enabled", torch.tensor([0], dtype=torch.long))
+        self.register_buffer("fake_quant_enabled", torch.tensor([1], dtype=torch.long))
+        self.register_buffer("observer_enabled", torch.tensor([1], dtype=torch.long))
         self.is_symmetric_quant = _is_symmetric_quant(self.activation_post_process.qscheme)
 
         self.quant_min, self.quant_max = self.activation_post_process.quant_min, self.activation_post_process.quant_max
@@ -371,7 +371,8 @@ def _is_fake_quant_script_module(mod):
         # qualified name looks like '__torch__.torch.quantization.fake_quantize.___torch_mangle_2.FakeQuantize'
         suffix = mod._c.qualified_name.split('.', 1)[1]
         name = re.sub(r'\.___torch_mangle_\d+', '', suffix)
-        return name == 'torch.quantization.fake_quantize.FakeQuantize'
+        return name == 'torch.quantization.fake_quantize.FakeQuantize' or \
+            name == 'torch.quantization.fake_quantize.FusedMovingAvgObsFakeQuantize'
     return False
 
 def disable_fake_quant(mod):
