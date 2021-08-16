@@ -2275,7 +2275,7 @@ class TestFX(JitTestCase):
         traced = GraphModule(ast_rewriter.root, graph, "gm")
 
         traced.graph.lint()
-        
+
     def test_ast_rewriter_wrapped_via_decorator(self):
         class F(torch.nn.Module):
             def forward(self, x):
