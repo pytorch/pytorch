@@ -44,7 +44,8 @@ class profiler(object):
             Note that this support exist, at the moment, only for TorchScript models
             and not eager mode models.
     """
-    def __init__(self,
+    def __init__(
+            self,
             *,
             activities: Optional[Iterable[ProfilerActivity]] = None,
             record_shapes: bool = False,
