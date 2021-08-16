@@ -1455,7 +1455,15 @@ Tensor matmul(
     }
 
     // fold the batch into the first dimension
-    Tensor t1 = tensor1.expect_contiguous()->view({-1, size1[size1.size() - 1]});
+    // Why not tensor1.view(-1, size1[size1.size() -1])?
+    // If the last dim is 0, then view(-1, 0) won't work because the -1 becomes ambiguous.
+    // This can happen in e.g. [3, 5, 0] @ [0, 0].
+    // So we manually compute the folding as a result.
+    auto dim1_size = 1;
+    for (const auto idx : c10::irange(0, size1.size() - 1)) {
+      dim1_size *= size1[idx];
+    }
+    auto t1 = tensor1.expect_contiguous()->view({dim1_size, size1[size1.size() - 1]});
     Tensor output = has_out ? at::_unsafe_view(at::mm_out(out, t1, t2), output_size)
                             : at::_unsafe_view(t1.mm(t2), output_size);
     return has_out ? out.set_(output) : output;
