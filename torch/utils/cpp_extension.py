@@ -18,6 +18,7 @@ from ._cpp_extension_versioner import ExtensionVersioner
 from .hipify import hipify_python
 from .hipify.hipify_python import get_hip_file_path, GeneratedFileCleaner
 from typing import List, Optional, Union, Tuple
+from torch.torch_version import TorchVersion
 
 from setuptools.command.build_ext import build_ext
 from pkg_resources import packaging  # type: ignore[attr-defined]
@@ -37,23 +38,26 @@ TORCH_LIB_PATH = os.path.join(_TORCH_PATH, 'lib')
 BUILD_SPLIT_CUDA = os.getenv('BUILD_SPLIT_CUDA') or (os.path.exists(os.path.join(
     TORCH_LIB_PATH, f'{CLIB_PREFIX}torch_cuda_cu{CLIB_EXT}')) and os.path.exists(os.path.join(TORCH_LIB_PATH, f'{CLIB_PREFIX}torch_cuda_cpp{CLIB_EXT}')))
 
+MINIMUM_GCC_VERSION = (5, 0, 0)
+MINIMUM_MSVC_VERSION = (19, 0, 24215)
+
 # The following values were taken from the following GitHub gist that
 # summarizes the minimum valid major versions of g++/clang++ for each supported
 # CUDA version: https://gist.github.com/ax3l/9489132
 CUDA_GCC_VERSIONS = {
-    '10.2': (float('-inf'), 8),
-    '11.1': (5.4, 10),
-    '11.2': (5.4, 10),
-    '11.3': (5.4, 10),
-    '11.4': (6, 10)
+    '10.2': (MINIMUM_GCC_VERSION, (8, 0, 0)),
+    '11.1': (MINIMUM_GCC_VERSION, (10, 0, 0)),
+    '11.2': (MINIMUM_GCC_VERSION, (10, 0, 0)),
+    '11.3': (MINIMUM_GCC_VERSION, (10, 0, 0)),
+    '11.4': ((6, 0, 0), (10, 0, 0))
 }
 
 CUDA_CLANG_VERSIONS = {
-    '10.2': (3.3, 8),
-    '11.1': (6, 10),
-    '11.2': (6, 10),
-    '11.3': (6, 10),
-    '11.4': (6, 10)
+    '10.2': ((3, 3, 0), (8, 0, 0)),
+    '11.1': ((6, 0, 0), (10, 0, 0)),
+    '11.2': ((6, 0, 0), (10, 0, 0)),
+    '11.3': ((6, 0, 0), (10, 0, 0)),
+    '11.4': ((6, 0, 0), (10, 0, 0))
 }
 
 # Taken directly from python stdlib < 3.9
@@ -138,8 +142,6 @@ def _join_rocm_home(*paths) -> str:
     return os.path.join(ROCM_HOME, *paths)
 
 
-MINIMUM_GCC_VERSION = (5, 0, 0)
-MINIMUM_MSVC_VERSION = (19, 0, 24215)
 ABI_INCOMPATIBILITY_WARNING = '''
 
                                !! WARNING !!
@@ -290,7 +292,7 @@ def check_compiler_ok_for_platform(compiler: str) -> bool:
     return False
 
 
-def get_compiler_abi_compatibility_and_version(compiler) -> Tuple[bool, Tuple[str, ...]]:
+def get_compiler_abi_compatibility_and_version(compiler) -> Tuple[bool, TorchVersion]:
     r'''
     Determine if the given compiler is ABI-compatible with PyTorch alongside
     its version.
@@ -304,9 +306,9 @@ def get_compiler_abi_compatibility_and_version(compiler) -> Tuple[bool, Tuple[st
         followed by a tuple of strings that correspond to the compiler version.
     '''
     if not _is_binary_build():
-        return (True, ('0', '0', '0'))
+        return (True, TorchVersion('0.0.0'))
     if os.environ.get('TORCH_DONT_CHECK_COMPILER_ABI') in ['ON', '1', 'YES', 'TRUE', 'Y']:
-        return (True, ('0', '0', '0'))
+        return (True, TorchVersion('0.0.0'))
 
     # First check if the compiler is one of the expected ones for the particular platform.
     if not check_compiler_ok_for_platform(compiler):
@@ -314,11 +316,11 @@ def get_compiler_abi_compatibility_and_version(compiler) -> Tuple[bool, Tuple[st
             user_compiler=compiler,
             pytorch_compiler=_accepted_compilers_for_platform()[0],
             platform=sys.platform))
-        return (False, ('0', '0', '0'))
+        return (False, TorchVersion('0.0.0'))
 
     if sys.platform.startswith('darwin'):
         # There is no particular minimum version we need for clang, so we're good here.
-        return (True, ('0', '0', '0'))
+        return (True, TorchVersion('0.0.0'))
     try:
         if sys.platform.startswith('linux'):
             minimum_required_version = MINIMUM_GCC_VERSION
@@ -332,15 +334,15 @@ def get_compiler_abi_compatibility_and_version(compiler) -> Tuple[bool, Tuple[st
     except Exception:
         _, error, _ = sys.exc_info()
         warnings.warn(f'Error checking compiler version for {compiler}: {error}')
-        return (False, ('0', '0', '0'))
+        return (False, TorchVersion('0.0.0'))
 
     if tuple(map(int, version)) >= minimum_required_version:
-        return (True, ('0', '0', '0'))
+        return (True, TorchVersion('.'.join(version)))
 
     compiler = f'{compiler} {".".join(version)}'
     warnings.warn(ABI_INCOMPATIBILITY_WARNING.format(compiler))
 
-    return (False, tuple(version))
+    return (False, TorchVersion('.'.join(version)))
 
 
 # See below for why we inherit BuildExtension from object.
@@ -768,7 +770,7 @@ class BuildExtension(build_ext, object):
             ext_filename = '.'.join(without_abi)
         return ext_filename
 
-    def _check_abi(self) -> Tuple[str, Tuple[str, ...]]:
+    def _check_abi(self) -> Tuple[str, TorchVersion]:
         # On some platforms, like Windows, compiler_cxx is not available.
         if hasattr(self.compiler, 'compiler_cxx'):
             compiler = self.compiler.compiler_cxx[0]
@@ -785,7 +787,7 @@ class BuildExtension(build_ext, object):
             raise UserWarning(msg)
         return compiler, version
 
-    def _check_cuda_version(self, compiler_name: str, compiler_version: Tuple[str, ...]):
+    def _check_cuda_version(self, compiler_name: str, compiler_version: TorchVersion):
         if CUDA_HOME:
             nvcc = os.path.join(CUDA_HOME, 'bin', 'nvcc')
             cuda_version_str = subprocess.check_output([nvcc, '--version']).strip().decode()
@@ -799,33 +801,30 @@ class BuildExtension(build_ext, object):
                     if getattr(cuda_ver, "major", float("nan")) != getattr(torch_cuda_version, "major", float("nan")):
                         raise RuntimeError(CUDA_MISMATCH_MESSAGE.format(cuda_str_version, torch.version.cuda))
                     warnings.warn(CUDA_MISMATCH_WARN.format(cuda_str_version, torch.version.cuda))
-                if sys.platform.startswith('linux'):
+                if (sys.platform.startswith('linux') and
+                        os.environ.get('TORCH_DONT_CHECK_COMPILER_ABI') not in ['ON', '1', 'YES', 'TRUE', 'Y']):
                     cuda_compiler_bounds = CUDA_CLANG_VERSIONS if compiler_name.startswith('clang') else CUDA_GCC_VERSIONS
 
-                    min_compiler_version, max_compiler_version = cuda_compiler_bounds[cuda_str_version]
-                    major_compiler_version = float(compiler_version[0])
-                    if isinstance(min_compiler_version, float) or isinstance(max_compiler_version, float):
-                        major_compiler_version = float('.'.join(compiler_version[:2]))
-                    version_str = '.'.join(compiler_version)
+                    if cuda_str_version not in cuda_compiler_bounds:
+                        warnings.warn(f'There are no {compiler_name} version bounds defined for CUDA version {cuda_str_version}')
+                    else:
+                        min_compiler_version, max_compiler_version = cuda_compiler_bounds[cuda_str_version]
 
-                    version_bound_str = ''
-                    if min_compiler_version != float('-inf'):
-                        version_bound_str = f'>= {min_compiler_version}'
-                    if max_compiler_version != float('inf'):
-                        version_bound_str = f'{version_bound_str}, <= {max_compiler_version}'
+                        version_bound_str = f'>={".".join(min_compiler_version)}'
+                        version_bound_str = f'{version_bound_str}, <={".".join(max_compiler_version)}'
 
-                    if major_compiler_version < min_compiler_version:
-                        raise RuntimeError(
-                            f'The current installed version of {compiler_name} ({version_str}) is less '
-                            f'than the minimum required version by CUDA {cuda_str_version} ({min_compiler_version}). '
-                            f'Please make sure to use an adequate version of {compiler_name}.'
-                        )
-                    elif major_compiler_version > max_compiler_version:
-                        raise RuntimeError(
-                            f'The current installed version of {compiler_name} ({version_str}) is greater '
-                            f'than the maximum required version by CUDA {cuda_str_version} ({min_compiler_version}). '
-                            f'Please make sure to use an adequate version of {compiler_name}.'
-                        )
+                        if compiler_version < min_compiler_version:
+                            raise RuntimeError(
+                                f'The current installed version of {compiler_name} ({compiler_version}) is less '
+                                f'than the minimum required version by CUDA {cuda_str_version} ({min_compiler_version}). '
+                                f'Please make sure to use an adequate version of {compiler_name} ({version_bound_str}).'
+                            )
+                        elif compiler_version > max_compiler_version:
+                            raise RuntimeError(
+                                f'The current installed version of {compiler_name} ({compiler_version}) is greater '
+                                f'than the maximum required version by CUDA {cuda_str_version} ({min_compiler_version}). '
+                                f'Please make sure to use an adequate version of {compiler_name} ({version_bound_str}).'
+                            )
         else:
             raise RuntimeError(CUDA_NOT_FOUND_MESSAGE)
 
