@@ -562,6 +562,16 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                 # returns a struct containing them which must be saved so that it
                 # can be unpacked when generating code to call the impl.
                 sig_body.append(f"auto precompute = op.meta({meta_exprs});")
+
+                # Put all of the contents of the precompute struct into the context
+                # so that translate will be able to return the correct args for the
+                # call to the impl.
+                for precomputed_elems in self.g.out.precomputed.replace.values():
+                    for arg in precomputed_elems:
+                        context.append(Expr(
+                            expr=f"precompute.{arg.name}",
+                            type=structured.argument_type(arg, binds=arg.name),
+                        ))
             else:
                 sig_body.append(f"op.meta({meta_exprs});")
 
@@ -607,30 +617,13 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                 # I didn't do it for this version
                 sig_body.append(f"at::{api_name}({out_exprs});")
             elif self.backend_index.dispatch_key != DispatchKey.Meta:
-                impl_exprs_gen = [e.expr for e in translate(context, structured.impl_arguments(self.g), method=False)]
-
-                if self.g.out.precomputed:
-                    # A list of arguments for the impl function with
-                    # certain arguments replaced with precomputed counterparts
-                    # as specified in native_functions.yaml.
-                    impl_exprs_replaced = []
-
-                    for expr in impl_exprs_gen:
-                        if expr in self.g.out.precomputed.replace:
-                            # If expr is in precompute.replace, append the argument
-                            # that should replace it on to impl_exprs_replaced. This argument
-                            # will be a specific member of the precomputed_out struct returned
-                            # by the meta function.
-                            for replacement in self.g.out.precomputed.replace[expr]:
-                                impl_exprs_replaced.append(f"precompute.{replacement.name}")
-                        else:
-                            # If not, push expr as is.
-                            impl_exprs_replaced.append(expr)
-
-                    impl_exprs = ', '.join(impl_exprs_replaced)
-                else:
-                    impl_exprs = ', '.join(impl_exprs_gen)
-
+                impl_exprs = ', '.join(
+                    e.expr for e in translate(
+                        context,
+                        structured.impl_arguments(self.g),
+                        method=False
+                    )
+                )
                 sig_body.append(f"op.impl({impl_exprs});")
 
             # Destructively return the final tensors

@@ -1,7 +1,7 @@
 import re
 
 from dataclasses import dataclass
-from typing import Any, List, Dict, Optional, Iterator, Tuple, Set, NoReturn, Sequence, Callable, Union
+from typing import List, Dict, Optional, Iterator, Tuple, Set, NoReturn, Sequence, Callable, Union
 from enum import Enum, auto
 import itertools
 

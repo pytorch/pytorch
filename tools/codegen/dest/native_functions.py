@@ -23,36 +23,13 @@ def gen_unstructured(f: NativeFunction, backend_index: BackendIndex) -> Optional
 def gen_structured(g: NativeFunctionsGroup, backend_index: BackendIndex) -> List[str]:
     meta_name = meta.name(g)
     out_args = structured.impl_arguments(g)
-    precompute = g.out.precomputed
     metadata = backend_index.get_kernel(g)
     if metadata is None:
         return []
     prefix = '' if backend_index.external else 'TORCH_API '
-
-    if precompute:
-        # A list of parameters for the impl function with
-        # certain parameters replaced with precomputed counterparts
-        # as specified in native_functions.yaml.
-        impl_args_replaced = []
-
-        for a in out_args:
-            if a.name in precompute.replace:
-                # If a is in precompute.replace, append the parameters
-                # that should replace it onto impl_args_replaced.
-                for replacement in precompute.replace[a.name]:
-                    cpp_type = structured.argument_type(replacement, binds=replacement.name)
-                    impl_args_replaced.append(f"{cpp_type.cpp_type(strip_ref=True)} {replacement.name}")
-            else:
-                # If not, push a as is.
-                impl_args_replaced.append(a.decl())
-
-        impl_args = ', '.join(impl_args_replaced)
-    else:
-        impl_args = ', '.join(a.decl() for a in out_args)
-
     return [f"""\
 struct {prefix}structured_{metadata.kernel} : public at::meta::structured_{meta_name} {{
-void impl({impl_args});
+void impl({', '.join(a.decl() for a in out_args)});
 }};
 """]
 

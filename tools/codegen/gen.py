@@ -462,7 +462,8 @@ def compute_meta_function_declaration(g: NativeFunctionsGroup) -> Optional[str]:
         if precomputed:
             # Generate a string containing declarations of all precomputed elements.
             precomputed_elements_with_cpp_types = (
-                structured.argument_type(elem, binds=elem.name) for replace_list in precomputed.replace.values() for elem in replace_list
+                structured.argument_type(elem, binds=elem.name)
+                for replace_list in precomputed.replace.values() for elem in replace_list
             )
             precomputed_elements = ";\n".join(
                 f"{elem.cpp_type(strip_ref=True)} {elem.name}" for elem in precomputed_elements_with_cpp_types
