@@ -108,10 +108,11 @@ class FileWriter(object):
         event = event_pb2.Event(graph_def=graph.SerializeToString())
         self.add_event(event, None, walltime)
 
-        trm = event_pb2.TaggedRunMetadata(
-            tag='step1', run_metadata=stepstats.SerializeToString())
-        event = event_pb2.Event(tagged_run_metadata=trm)
-        self.add_event(event, None, walltime)
+        if stepstats is not None:
+            trm = event_pb2.TaggedRunMetadata(
+                tag='step1', run_metadata=stepstats.SerializeToString())
+            event = event_pb2.Event(tagged_run_metadata=trm)
+            self.add_event(event, None, walltime)
 
     def add_onnx_graph(self, graph, walltime=None):
         """Adds a `Graph` protocol buffer to the event file.
@@ -718,8 +719,9 @@ class SummaryWriter(object):
         torch._C._log_api_usage_once("tensorboard.logging.add_onnx_graph")
         self._get_file_writer().add_onnx_graph(load_onnx_graph(prototxt))
 
-    def add_graph(self, model, input_to_model=None, verbose=False, use_strict_trace=True):
-        """Add graph data to summary.
+    @staticmethod
+    def model_to_graph(model, input_to_model=None, verbose=False, use_strict_trace=True):
+        """model to graph
 
         Args:
             model (torch.nn.Module): Model to draw.
@@ -733,7 +735,7 @@ class SummaryWriter(object):
         torch._C._log_api_usage_once("tensorboard.logging.add_graph")
         if hasattr(model, 'forward'):
             # A valid PyTorch model should have a 'forward' method
-            self._get_file_writer().add_graph(graph(model, input_to_model, verbose, use_strict_trace))
+            return graph(model, input_to_model, verbose, use_strict_trace)
         else:
             # Caffe2 models do not have the 'forward' method
             from caffe2.proto import caffe2_pb2
@@ -749,9 +751,23 @@ class SummaryWriter(object):
             else:
                 # Handles cnn.CNNModelHelper, model_helper.ModelHelper
                 current_graph = model_to_graph_def(model)
-            event = event_pb2.Event(
-                graph_def=current_graph.SerializeToString())
-            self._get_file_writer().add_event(event)
+
+            return current_graph, None
+
+    def add_graph(self, model, input_to_model=None, verbose=False, use_strict_trace=True):
+        """Add graph data to summary.
+
+        Args:
+            model (torch.nn.Module): Model to draw.
+            input_to_model (torch.Tensor or list of torch.Tensor): A variable or a tuple of
+                variables to be fed.
+            verbose (bool): Whether to print graph structure in console.
+            use_strict_trace (bool): Whether to pass keyword argument `strict` to
+                `torch.jit.trace`. Pass False when you want the tracer to
+                record your mutable container types (list, dict)
+        """
+        graph_profile = self.model_to_graph(model, input_to_model, verbose, use_strict_trace)
+        self._get_file_writer().add_graph(graph_profile)
 
     @staticmethod
     def _encode(rawstr):

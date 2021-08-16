@@ -250,6 +250,7 @@ class profile(object):
         self.current_action = self.schedule(self.step_num)
         self.profiler: Optional[prof.profile] = None
         self.step_rec_fn: Optional[prof.record_function] = None
+        self.graph = None
 
     def __enter__(self):
         self.start()
@@ -329,11 +330,32 @@ class profile(object):
             self.step_rec_fn = prof.record_function("ProfilerStep#" + str(self.step_num))
             self.step_rec_fn.__enter__()
 
+    def export_graph(self, model, args, verbose=False):
+        try:
+            from ..utils.tensorboard import SummaryWriter
+            try:
+                self.graph = SummaryWriter.model_to_graph(model, args, verbose)
+            except Exception as e:
+                warn("model to graph failed with {}".format(e))
+                self.graph = None
+        except ImportError:
+            warn("import Tensorboard fail, please make sure Tensorboard is installed.")
+
     def export_chrome_trace(self, path: str):
         """
         Exports the collected trace in Chrome JSON format.
         """
         assert self.profiler
+        if self.graph is not None:
+            try:
+                from ..utils.tensorboard import FileWriter
+                writer = FileWriter(os.path.dirname(path))
+                writer.add_graph(self.graph)
+                writer.flush()
+                writer.close()
+            except ImportError:
+                warn("import Tensorboard fail, please make sure Tensorboard is installed.")
+
         if path.endswith('.gz'):
             fp = tempfile.NamedTemporaryFile('w+t', suffix='.json', delete=False)
             fp.close()
