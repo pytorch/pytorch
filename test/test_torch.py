@@ -3947,7 +3947,7 @@ else:
         input = torch.randn(2, 3, 5, 5, device=device)
         target = torch.rand(2, 5, 5, device=device).mul(3).floor().long()
 
-        @expectedAlertNondeterministic('SpatialClassNLLCriterion_updateOutput', 'cuda')
+        @expectedAlertNondeterministic('nll_loss2d_forward_out_cuda_template', 'cuda')
         def forward_func(slf, device):
             module(input, target)
 

@@ -27,9 +27,9 @@ class TORCH_API Stmt : public KernelScopedObject {
   /*
    * Make a deep copy of the given statement.
    *
-   * All statements used in children of the statement are cloned. Note that
-   * expressions and variables are not deep-copied: it is not necessary since
-   * they are immutable.
+   * All statements and expressions used in children of the statement are
+   * cloned. Note that the variables are not deep-copied since they are
+   * immutable.
    */
   static Stmt* clone(Stmt* s);
 
@@ -201,20 +201,14 @@ class TORCH_API Block : public StmtNode<Block> {
     stmts_.clear();
   }
 
+  void set_stmts(const std::vector<Stmt*>& stmts) {
+    clear();
+    init(stmts);
+  }
+
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   explicit Block(const std::vector<Stmt*>& stmts) {
-    for (Stmt* s : stmts) {
-      if (!s) {
-        continue;
-      }
-      if (!s->get_parent()) {
-        // If we get here, it's a bug, but we cannot throw an error from a
-        // constructor. But IR verifier would catch this.
-        set_parent(s, this);
-      }
-
-      stmts_.push_back(s);
-    }
+    init(stmts);
   }
 
   typedef std::list<Stmt*>::iterator iterator;
@@ -297,6 +291,21 @@ class TORCH_API Block : public StmtNode<Block> {
 
  private:
   std::list<Stmt*> stmts_;
+
+  void init(const std::vector<Stmt*>& stmts) {
+    for (Stmt* s : stmts) {
+      if (!s) {
+        continue;
+      }
+      if (!s->get_parent()) {
+        // If we get here, it's a bug, but we cannot throw an error from a
+        // constructor. But IR verifier would catch this.
+        set_parent(s, this);
+      }
+
+      stmts_.push_back(s);
+    }
+  }
 };
 
 class TORCH_API Store : public StmtNode<Store> {
@@ -318,16 +327,24 @@ class TORCH_API Store : public StmtNode<Store> {
     return buf_;
   }
 
+  void set_buf(Buf* buf) {
+    buf_ = buf;
+  }
+
+  void set_indices(std::vector<Expr*> indices) {
+    indices_ = std::move(indices);
+  }
+
+  void set_value(Expr* value) {
+    value_ = value;
+  }
+
   static Store* make(
       const BufHandle& buf,
       const std::vector<ExprHandle>& indices,
       const ExprHandle& value);
 
   Store(Buf* buf, std::vector<Expr*> indices, Expr* value);
-
-  void set_indices(std::vector<Expr*> indices) {
-    indices_ = indices;
-  };
 
  private:
   Buf* buf_;
@@ -360,6 +377,10 @@ class TORCH_API Allocate : public StmtNode<Allocate> {
     return buf_;
   }
 
+  void set_buf(Buf* buf) {
+    buf_ = buf;
+  }
+
   explicit Allocate(Buf* buf) : buf_(buf) {}
 
  private:
@@ -380,6 +401,10 @@ class TORCH_API Free : public StmtNode<Free> {
 
   Buf* buf() const {
     return buf_;
+  }
+
+  void set_buf(Buf* buf) {
+    buf_ = buf;
   }
 
   explicit Free(Buf* buf) : buf_(buf) {}
@@ -406,6 +431,14 @@ class TORCH_API Let : public StmtNode<Let> {
 
   Expr* value() const {
     return val_;
+  }
+
+  void set_var(Var* var) {
+    var_ = var;
+  }
+
+  void set_val(Expr* val) {
+    val_ = val;
   }
 
  private:
@@ -435,8 +468,11 @@ class TORCH_API Cond : public StmtNode<Cond> {
     return false_stmt_;
   }
 
-  Cond(Expr* condition, Stmt* true_stmt, Stmt* false_stmt)
-      : condition_(condition) {
+  void set_condition(Expr* condition) {
+    condition_ = condition;
+  }
+
+  void set_true_stmt(Stmt* true_stmt) {
     if (true_stmt) {
       Block* b = dynamic_cast<Block*>(true_stmt);
       if (!b) {
@@ -445,6 +481,9 @@ class TORCH_API Cond : public StmtNode<Cond> {
       true_stmt_ = b;
       set_parent(true_stmt_, this);
     }
+  }
+
+  void set_false_stmt(Stmt* false_stmt) {
     if (false_stmt) {
       Block* b = dynamic_cast<Block*>(false_stmt);
       if (!b) {
@@ -453,6 +492,12 @@ class TORCH_API Cond : public StmtNode<Cond> {
       false_stmt_ = b;
       set_parent(false_stmt_, this);
     }
+  }
+
+  Cond(Expr* condition, Stmt* true_stmt, Stmt* false_stmt)
+      : condition_(condition) {
+    set_true_stmt(true_stmt);
+    set_false_stmt(false_stmt);
   }
 
   Cond* cloneWithNewBodies(Stmt* true_stmt, Stmt* false_stmt) {
@@ -703,29 +748,25 @@ class TORCH_API For : public StmtNode<For> {
     return res;
   }
 
-  Block* setBody(Stmt* body) {
+  void set_body(Stmt* body) {
     Block* b = dynamic_cast<Block*>(body);
     if (!b) {
       b = new Block({body});
     }
     body_ = b;
     set_parent(body_, this);
-    return body_;
   }
 
-  Expr* setStart(Expr* start) {
+  void set_start(Expr* start) {
     start_ = start;
-    return start_;
   }
 
-  Expr* setStop(Expr* stop) {
+  void set_stop(Expr* stop) {
     stop_ = stop;
-    return stop_;
   }
 
-  Var* setVar(Var* var) {
+  void set_var(Var* var) {
     var_ = var;
-    return var_;
   }
 
  private:
@@ -765,6 +806,18 @@ class TORCH_API AtomicAdd : public StmtNode<AtomicAdd> {
 
   const std::vector<Expr*>& indices() const {
     return indices_;
+  }
+
+  void set_buf(Buf* buf) {
+    buf_ = buf;
+  }
+
+  void set_indices(std::vector<Expr*> indices) {
+    indices_ = std::move(indices);
+  }
+
+  void set_value(Expr* value) {
+    value_ = value;
   }
 
  private:
@@ -819,6 +872,18 @@ class TORCH_API ExternalCall : public StmtNode<ExternalCall> {
 
   std::vector<Expr*> args() const {
     return args_;
+  }
+
+  void set_buf(Buf* buf) {
+    buf_ = buf;
+  }
+
+  void set_buf_args(std::vector<Buf*> buf_args) {
+    buf_args_ = std::move(buf_args);
+  }
+
+  void set_args(std::vector<Expr*> args) {
+    args_ = std::move(args);
   }
 
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
