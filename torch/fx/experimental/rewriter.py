@@ -34,12 +34,13 @@ class AST_Rewriter(ast.NodeTransformer):
 
         # Pull out the compiled fucntion from the newly-created Module
         code = compile(dest_ast, "", "exec")
-        globals_dict = fn.__globals__
+        globals_dict = copy.copy(fn.__globals__)
         keys_before = set(globals_dict.keys())
         exec(code, globals_dict)
         new_keys = list(set(globals_dict.keys()) - keys_before)
         assert len(new_keys) == 1
         fn_compiled = globals_dict[new_keys[0]]
+        fn_compiled = _copy_func(fn_compiled, globals=fn.__globals__)
 
         # Return the correct FunctionType object
         return fn_compiled
@@ -103,3 +104,20 @@ def _rewrite(fn: Union[torch.nn.Module, Callable]) -> Union[torch.nn.Module, Cal
     else:
         # Rewrite this single free function
         return AST_Rewriter().rewrite(cast(FunctionType, fn))
+    
+def _copy_func(f, globals=None, module=None):
+    """Based on https://stackoverflow.com/a/13503277/2988730 (@unutbu)"""
+    if globals is None:
+        globals = f.__globals__
+    g = FunctionType(
+        f.__code__,
+        globals,
+        name=f.__name__,
+        argdefs=f.__defaults__,
+        closure=f.__closure__,
+    )
+    g = functools.update_wrapper(g, f)
+    if module is not None:
+        g.__module__ = module
+    g.__kwdefaults__ = copy.copy(f.__kwdefaults__)
+    return g
