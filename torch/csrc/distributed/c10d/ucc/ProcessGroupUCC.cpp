@@ -50,13 +50,12 @@ public:
     bool isCompleted() override {
       // TODO: progress worker in a side thread for true async
       worker->progress();
-      return request->is_completed();
+      return request->status() != UCS_INPROGRESS;
     };
     bool isSuccess() const override {
       // TODO: progress worker in a side thread for true async
-      // TODO: what if fail?
       worker->progress();
-      return request->is_completed();
+      return request->status() == UCS_OK;
     };
     bool wait(std::chrono::milliseconds timeout = kUnsetTimeout) override {
       while(!isCompleted());

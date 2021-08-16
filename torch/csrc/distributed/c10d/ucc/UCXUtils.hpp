@@ -28,14 +28,15 @@ namespace c10d {
 class UCPRequest {
 public:
   struct Data {
-    bool completed;
+    ucs_status_t status;
+    ucp_tag_recv_info_t info;
   };
 
-  bool is_completed() const {
+  ucs_status_t status() const {
     if (data == nullptr) {
-      return true;
+      return UCS_OK;
     }
-    return data->completed;
+    return data->status;
   }
 
   ~UCPRequest() { if (data != nullptr) { ucp_request_free(data); } }

@@ -30,7 +30,7 @@ UCPContext::UCPContext() {
   params.features = UCP_FEATURE_TAG;
   params.request_init = [](void* request) {
     auto r = reinterpret_cast<UCPRequest::Data *>(request);
-    r->completed = false;
+    r->status = UCS_INPROGRESS;
   };
   params.request_cleanup = [](void*) {};
   st = ucp_init(&params, config, &context);
@@ -117,8 +117,10 @@ std::shared_ptr<UCPRequest> UCPWorker::submit_p2p_request(
                       ucs_status_t status,
                       const ucp_tag_recv_info_t* info,
                       void* user_data) {
+    // http://openucx.github.io/ucx/api/latest/html/group___u_c_p___c_o_m_m.html#ga70e110cf7c85ed5f281bd52438488d75
     auto r = reinterpret_cast<UCPRequest::Data *>(request);
-    r->completed = true;
+    r->status = status;
+    r->info = *info;
   };
   ucs_status_ptr_t request = work(&params);
   if (UCS_PTR_STATUS(request) == UCS_OK) {
