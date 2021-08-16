@@ -69,7 +69,7 @@ Usually, PyTorch is used either as:
 - A replacement for NumPy to use the power of GPUs.
 - A deep learning research platform that provides maximum flexibility and speed.
 
-Elaborating Further:
+Elaborating further:
 
 ### A GPU-Ready Tensor Library
 
@@ -177,7 +177,7 @@ If you want to compile with CUDA support, install
 - [NVIDIA CUDA](https://developer.nvidia.com/cuda-downloads) 9.2 or above
 - [NVIDIA cuDNN](https://developer.nvidia.com/cudnn) v7 or above
 - [Compiler](https://gist.github.com/ax3l/9489132) compatible with CUDA
-Note: You could refer to the [cuDNN Support Matrix](https://docs.nvidia.com/deeplearning/cudnn/pdf/cuDNN-Support-Matrix.pdf) for cuDNN versions with the various supported CUDA, CUDA driver and NVIDIA hardwares
+Note: You could refer to the [cuDNN Support Matrix](https://docs.nvidia.com/deeplearning/cudnn/pdf/cuDNN-Support-Matrix.pdf) for cuDNN versions with the various supported CUDA, CUDA driver and NVIDIA hardware
 
 If you want to disable CUDA support, export environment variable `USE_CUDA=0`.
 Other potentially useful environment variables may be found in `setup.py`.
@@ -415,7 +415,7 @@ We appreciate all contributions. If you are planning to contribute back bug-fixe
 If you plan to contribute new features, utility functions, or extensions to the core, please first open an issue and discuss the feature with us.
 Sending a PR without discussion might end up resulting in a rejected PR because we might be taking the core in a different direction than you might be aware of.
 
-To learn more about making a contribution to Pytorch, please see our [Contribution page](CONTRIBUTING.md).
+To learn more about contributing to Pytorch, please see our [Contribution page](CONTRIBUTING.md).
 
 ## The Team
 
