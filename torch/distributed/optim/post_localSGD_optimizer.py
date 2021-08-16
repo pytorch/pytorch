@@ -66,13 +66,8 @@ class PostLocalSGDOptimizer(torch.optim.Optimizer):
     ):
         self.params = list(params)
         self.optim = optimizer_class(iter(self.params), **defaults)
+        self.param_groups = self.optim.param_groups
         self.averager = averager
-
-    def __getstate__(self):
-        return self.optim.__getstate__()
-
-    def __setstate__(self, state):
-        self.optim.__setstate__(state)
 
     @property
     def state(self):
@@ -81,19 +76,11 @@ class PostLocalSGDOptimizer(torch.optim.Optimizer):
     def __repr__(self):
         return self.optim.__repr__()
 
-    @property
-    def param_groups(self):
-        return self.optim.param_groups
-
-    @param_groups.setter
-    def param_groups(self, value):
-        self.optim.param_groups = value
-
     def state_dict(self):
         return self.optim.state_dict()
 
     def load_state_dict(self, state_dict):
-        raise self.optim.load_state_dict(state_dict)
+        self.optim.load_state_dict(state_dict)
 
     def step(self):
         r"""
