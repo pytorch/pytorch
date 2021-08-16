@@ -494,6 +494,7 @@ void validateParallelize(Fusion* fusion) {
       }
       const auto parallel_bcast_doms =
           pred_map.getParallelBroadcastDomains(producer);
+      ParallelTypeBitmap pt_map;
       for (size_t i = 0; i < producer->nDims(); ++i) {
         // If a producer axis is threaded, either with threadIdx or
         // blockIdx, there must be a mapped consumer axis with the
@@ -508,6 +509,16 @@ void validateParallelize(Fusion* fusion) {
         if (!isParallelTypeThread(producer_ptype)) {
           continue;
         }
+        // Each ParallelType can be used only once.
+        TORCH_INTERNAL_ASSERT(
+            !pt_map.get(producer_ptype),
+            "Multiple use of ",
+            producer_ptype,
+            " in tensor t",
+            producer->name(),
+            ": ",
+            producer);
+        pt_map.set(producer_ptype, true);
         // When the producer axis is a broadcast, it is not really
         // parallelized unless thread-predicated
         if (producer_axis->isBroadcast() && parallel_bcast_doms.none()) {
