@@ -228,6 +228,17 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::alltoall_base(
   TORCH_CHECK(false, "ProcessGroupUCC does not support alltoall_base");
 };
 
+// Note [Receive from an endpoint]:
+// UCP does not support receiving from a specific endpoint. So we use tag
+// matching to simulate this behavior. We use higher bits of a tag to store
+// rank, and use lower bits to store the real tag. When receiving from any
+// source, tag mask is used to disable higher bits.
+//
+// TODO: unit test should be modified so that recv from different endpoint
+// with the same tag are covered.
+
+
+
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::send(
     std::vector<at::Tensor>& tensors,
     int dstRank,
@@ -248,9 +259,9 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::recv(
   check_tensor(tensors);
   TORCH_CHECK(srcRank < ucp_endpoints.size(), "Invalid dest rank");
   auto& tensor = tensors[0];
-  auto request = ucp_endpoints[srcRank]->recv_with_tag(
+  auto request = worker->recv_with_tag_and_mask(
     tensor.data_ptr(), tensor.element_size() * tensor.numel(),
-    tag, tensor.device().type());
+    tag, 0, tensor.device().type());
   return c10::make_intrusive<ProcessGroupUCC::WorkUCP>(worker, request);
 }
 
@@ -259,9 +270,9 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::recvAnysource(
     int tag) {
   check_tensor(tensors);
   auto& tensor = tensors[0];
-  auto request = worker->recv_any_with_tag(
+  auto request = worker->recv_with_tag_and_mask(
     tensor.data_ptr(), tensor.element_size() * tensor.numel(),
-    tag, tensor.device().type());
+    tag, 0, tensor.device().type());
   return c10::make_intrusive<ProcessGroupUCC::WorkUCP>(worker, request);
 };
 

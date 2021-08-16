@@ -139,20 +139,10 @@ std::shared_ptr<UCPRequest> UCPWorker::recv_with_tag_and_mask(void *data, size_t
   });
 }
 
-std::shared_ptr<UCPRequest> UCPWorker::recv_any_with_tag(void *data, size_t size, int tag, c10::DeviceType device) const {
-  return recv_with_tag_and_mask(data, size, tag, 0, device);
-}
-
-std::shared_ptr<UCPRequest> UCPEndpoint::send_with_tag(void *data, size_t size, int tag, c10::DeviceType device) const {
+std::shared_ptr<UCPRequest> UCPEndpoint::send_with_tag(void *data, size_t size, ucp_tag_t tag, c10::DeviceType device) const {
   return worker->submit_p2p_request(device, [&](const ucp_request_param_t *params) {
     return ucp_tag_send_nbx(endpoint, data, size, tag, params);
   });
-}
-
-std::shared_ptr<UCPRequest> UCPEndpoint::recv_with_tag(void *data, size_t size, int tag, c10::DeviceType device) const {
-  // TODO: srcRank is not used here!!! Is this corrrect?
-  // No, this is not. We need to use commid and rank to distinguish
-  return worker->recv_with_tag_and_mask(data, size, tag, 0, device);
 }
 
 } // namespace c10d
