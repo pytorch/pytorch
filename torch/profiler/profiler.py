@@ -11,6 +11,164 @@ import torch.autograd.profiler as prof
 from torch.autograd import kineto_available, ProfilerActivity
 
 
+def supported_activities():
+    """
+    Returns a set of supported profiler tracing activities.
+
+    Note: profiler uses CUPTI library to trace on-device CUDA kernels.
+    In case when CUDA is enabled but CUPTI is not available, passing
+    ``ProfilerActivity.CUDA`` to profiler results in using the legacy CUDA
+    profiling code (same as in the legacy ``torch.autograd.profiler``).
+    This, in turn, results in including CUDA time in the profiler table output,
+    but not in the JSON trace.
+    """
+    return torch.autograd._supported_activities()
+
+
+class profiler(object):
+    """Low-level profiler wrap the autograd profile
+
+    Args:
+        activities (iterable): list of activity groups (CPU, CUDA) to use in profiling, supported values:
+            ``torch.profiler.ProfilerActivity.CPU``, ``torch.profiler.ProfilerActivity.CUDA``.
+            Default value: ProfilerActivity.CPU and (when available) ProfilerActivity.CUDA.
+        record_shapes (bool): save information about operator's input shapes.
+        profile_memory (bool): track tensor memory allocation/deallocation.
+        with_stack (bool): record source information (file and line number) for the ops.
+        with_flops (bool): use formula to estimate the FLOPS of specific operators
+            (matrix multiplication and 2D convolution).
+        with_modules (bool): record module hierarchy (including function names)
+            corresponding to the callstack of the op. e.g. If module A's forward call's
+            module B's forward which contains an aten::add op,
+            then aten::add's module hierarchy is A.B
+            Note that this support exist, at the moment, only for TorchScript models
+            and not eager mode models.
+    """
+    def __init__(self,
+            *,
+            activities: Optional[Iterable[ProfilerActivity]] = None,
+            record_shapes: bool = False,
+            profile_memory: bool = False,
+            with_stack: bool = False,
+            with_flops: bool = False,
+            with_modules: bool = False):
+        if activities:
+            self.activities = set(activities)
+        else:
+            self.activities = supported_activities()
+        self.record_shapes = record_shapes
+        self.with_flops = with_flops
+        self.profile_memory = profile_memory
+        self.with_stack = with_stack
+        self.with_modules = with_modules
+        self.profiler: Optional[prof.profile] = None
+        self.step_rec_fn: Optional[prof.record_function] = None
+
+    def prepare_trace(self):
+        self.profiler = prof.profile(
+            use_cuda=(ProfilerActivity.CUDA in self.activities),
+            use_cpu=(ProfilerActivity.CPU in self.activities),
+            record_shapes=self.record_shapes,
+            with_flops=self.with_flops,
+            profile_memory=self.profile_memory,
+            with_stack=self.with_stack,
+            with_modules=self.with_modules,
+            use_kineto=True,
+        )
+        self.profiler._prepare_trace()
+
+    def start_trace(self):
+        assert self.profiler is not None
+        self.profiler._start_trace()
+
+        if kineto_available():
+            dist_info = self._get_distributed_info()
+            if dist_info:
+                self.add_metadata_json("distributedInfo", json.dumps(dist_info))
+
+    def stop_trace(self):
+        assert self.profiler is not None
+        self.profiler.__exit__(None, None, None)
+
+    def export_chrome_trace(self, path: str):
+        """
+        Exports the collected trace in Chrome JSON format.
+        """
+        assert self.profiler
+        if path.endswith('.gz'):
+            fp = tempfile.NamedTemporaryFile('w+t', suffix='.json', delete=False)
+            fp.close()
+            retvalue = self.profiler.export_chrome_trace(fp.name)
+            with open(fp.name) as fin:
+                with gzip.open(path, 'wt') as fout:
+                    fout.writelines(fin)
+            os.remove(fp.name)
+            return retvalue
+        else:
+            return self.profiler.export_chrome_trace(path)
+
+    def export_stacks(self, path: str, metric: str = "self_cpu_time_total"):
+        """Save stack traces in a file in a format suitable for visualization.
+
+        Args:
+            path (str): save stacks file to this location;
+            metric (str): metric to use: "self_cpu_time_total" or "self_cuda_time_total"
+
+        .. note::
+            Example of using FlameGraph tool:
+
+            - git clone https://github.com/brendangregg/FlameGraph
+            - cd FlameGraph
+            - ./flamegraph.pl --title "CPU time" --countname "us." profiler.stacks > perf_viz.svg
+        """
+        assert self.profiler
+        return self.profiler.export_stacks(path, metric)
+
+    def key_averages(self, group_by_input_shape: bool = False, group_by_stack_n: int = 0):
+        """Averages events, grouping them by operator name and (optionally) input shapes and
+        stack.
+
+        .. note::
+            To use shape/stack functionality make sure to set record_shapes/with_stack
+            when creating profiler context manager.
+        """
+        assert self.profiler
+        return self.profiler.key_averages(group_by_input_shape, group_by_stack_n)
+
+    def events(self):
+        """
+        Returns the list of unaggregated profiler events,
+        to be used in the trace callback or after the profiling is finished
+        """
+        assert self.profiler
+        return self.profiler.function_events
+
+    def add_metadata(self, key: str, value: str):
+        """
+        Adds a user defined metadata with a string key and a string value
+        into the trace file
+        """
+        wrapped_value = "\"" + value.replace('"', '\\"') + "\""
+        torch.autograd._add_metadata_json(key, wrapped_value)
+
+    def add_metadata_json(self, key: str, value: str):
+        """
+        Adds a user defined metadata with a string key and a valid json value
+        into the trace file
+        """
+        torch.autograd._add_metadata_json(key, value)
+
+    def _get_distributed_info(self):
+        import torch.distributed as dist
+        if not dist.is_available() or not dist.is_initialized():
+            return None
+
+        return {
+            "backend": dist.get_backend(),
+            "rank": dist.get_rank(),
+            "world_size": dist.get_world_size()
+        }
+
 class ProfilerAction(Enum):
     """
     Profiler actions that can be taken at the specified intervals
@@ -86,21 +244,8 @@ def tensorboard_trace_handler(dir_name: str, worker_name: Optional[str] = None, 
         prof.export_chrome_trace(os.path.join(dir_name, file_name))
     return handler_fn
 
-def supported_activities():
-    """
-    Returns a set of supported profiler tracing activities.
 
-    Note: profiler uses CUPTI library to trace on-device CUDA kernels.
-    In case when CUDA is enabled but CUPTI is not available, passing
-    ``ProfilerActivity.CUDA`` to profiler results in using the legacy CUDA
-    profiling code (same as in the legacy ``torch.autograd.profiler``).
-    This, in turn, results in including CUDA time in the profiler table output,
-    but not in the JSON trace.
-    """
-    return torch.autograd._supported_activities()
-
-
-class profile(object):
+class profile(profiler):
     """Profiler context manager.
 
     Args:
@@ -219,10 +364,14 @@ class profile(object):
             with_modules: bool = False,
             # deprecated:
             use_cuda: Optional[bool] = None):
-        if activities:
-            self.activities = set(activities)
-        else:
-            self.activities = supported_activities()
+        super().__init__(
+            activities=activities,
+            record_shapes=record_shapes,
+            profile_memory=profile_memory,
+            with_stack=with_stack,
+            with_flops=with_flops,
+            with_modules=with_modules
+        )
 
         if use_cuda is not None:
             warn("use_cuda is deprecated, use activities argument instead")
@@ -241,14 +390,8 @@ class profile(object):
             self.schedule = _default_schedule_fn
             self.record_steps = False
         self.on_trace_ready = on_trace_ready
-        self.record_shapes = record_shapes
-        self.with_flops = with_flops
-        self.profile_memory = profile_memory
-        self.with_stack = with_stack
-        self.with_modules = with_modules
         self.step_num = 0
         self.current_action = self.schedule(self.step_num)
-        self.profiler: Optional[prof.profile] = None
         self.step_rec_fn: Optional[prof.record_function] = None
 
     def __enter__(self):
@@ -284,170 +427,65 @@ class profile(object):
                 pass
             elif prev_action == ProfilerAction.WARMUP:
                 warn("Incorrect schedule: WARMUP followed by NONE")
-                self._start_trace()
-                self._stop_trace()
+                self.start_trace()
+                self.stop_trace()
             elif prev_action == ProfilerAction.RECORD:
                 warn("Incorrect schedule: RECORD followed by NONE")
-                self._stop_trace()
+                self.stop_trace()
             else:
                 assert prev_action == ProfilerAction.RECORD_AND_SAVE
-                self._stop_trace()
+                self.stop_trace()
                 if self.on_trace_ready:
                     self.on_trace_ready(self)
         elif self.current_action == ProfilerAction.WARMUP:
             if prev_action == ProfilerAction.NONE:
-                self._start_warmup()
+                self.prepare_trace()
             elif prev_action == ProfilerAction.WARMUP:
                 pass
             elif prev_action == ProfilerAction.RECORD:
                 warn("Incorrect schedule: RECORD followed by WARMUP")
-                self._stop_trace()
+                self.stop_trace()
             else:
                 assert prev_action == ProfilerAction.RECORD_AND_SAVE
-                self._stop_trace()
+                self.stop_trace()
                 if self.on_trace_ready:
                     self.on_trace_ready(self)
-                self._start_warmup()
+                self.prepare_trace()
         elif self.current_action in \
                 [ProfilerAction.RECORD, ProfilerAction.RECORD_AND_SAVE]:
             if prev_action == ProfilerAction.NONE:
-                self._start_warmup()
-                self._start_trace()
+                self.prepare_trace()
+                self.start_trace()
             elif prev_action == ProfilerAction.WARMUP:
-                self._start_trace()
+                self.start_trace()
             elif prev_action == ProfilerAction.RECORD:
                 pass
             else:
                 assert prev_action == ProfilerAction.RECORD_AND_SAVE
-                self._stop_trace()
+                self.stop_trace()
                 if self.on_trace_ready:
                     self.on_trace_ready(self)
-                self._start_warmup()
-                self._start_trace()
+                self.prepare_trace()
+                self.start_trace()
 
         if self.record_steps:
             self.step_rec_fn = prof.record_function("ProfilerStep#" + str(self.step_num))
             self.step_rec_fn.__enter__()
 
-    def export_chrome_trace(self, path: str):
-        """
-        Exports the collected trace in Chrome JSON format.
-        """
-        assert self.profiler
-        if path.endswith('.gz'):
-            fp = tempfile.NamedTemporaryFile('w+t', suffix='.json', delete=False)
-            fp.close()
-            retvalue = self.profiler.export_chrome_trace(fp.name)
-            with open(fp.name) as fin:
-                with gzip.open(path, 'wt') as fout:
-                    fout.writelines(fin)
-            os.remove(fp.name)
-            return retvalue
-        else:
-            return self.profiler.export_chrome_trace(path)
-
-    def export_stacks(self, path: str, metric: str = "self_cpu_time_total"):
-        """Save stack traces in a file in a format suitable for visualization.
-
-        Args:
-            path (str): save stacks file to this location;
-            metric (str): metric to use: "self_cpu_time_total" or "self_cuda_time_total"
-
-        .. note::
-            Example of using FlameGraph tool:
-
-            - git clone https://github.com/brendangregg/FlameGraph
-            - cd FlameGraph
-            - ./flamegraph.pl --title "CPU time" --countname "us." profiler.stacks > perf_viz.svg
-        """
-        assert self.profiler
-        return self.profiler.export_stacks(path, metric)
-
-    def key_averages(self, group_by_input_shape: bool = False, group_by_stack_n: int = 0):
-        """Averages events, grouping them by operator name and (optionally) input shapes and
-        stack.
-
-        .. note::
-            To use shape/stack functionality make sure to set record_shapes/with_stack
-            when creating profiler context manager.
-        """
-        assert self.profiler
-        return self.profiler.key_averages(group_by_input_shape, group_by_stack_n)
-
-    def events(self):
-        """
-        Returns the list of unaggregated profiler events,
-        to be used in the trace callback or after the profiling is finished
-        """
-        assert self.profiler
-        return self.profiler.function_events
-
-    def add_metadata(self, key: str, value: str):
-        """
-        Adds a user defined metadata with a string key and a string value
-        into the trace file
-        """
-        wrapped_value = "\"" + value.replace('"', '\\"') + "\""
-        torch.autograd._add_metadata_json(key, wrapped_value)
-
-    def add_metadata_json(self, key: str, value: str):
-        """
-        Adds a user defined metadata with a string key and a valid json value
-        into the trace file
-        """
-        torch.autograd._add_metadata_json(key, value)
-
-    def _get_distributed_info(self):
-        import torch.distributed as dist
-        if not dist.is_available() or not dist.is_initialized():
-            return None
-
-        return {
-            "backend": dist.get_backend(),
-            "rank": dist.get_rank(),
-            "world_size": dist.get_world_size()
-        }
-
     def _enter_actions(self):
         if self.current_action == ProfilerAction.WARMUP:
-            self._start_warmup()
+            self.prepare_trace()
         elif self.current_action in \
                 [ProfilerAction.RECORD, ProfilerAction.RECORD_AND_SAVE]:
-            self._start_warmup()
-            self._start_trace()
+            self.prepare_trace()
+            self.start_trace()
 
     def _exit_actions(self):
         if self.current_action == ProfilerAction.WARMUP:
-            self._start_trace()
-            self._stop_trace()
+            self.start_trace()
+            self.stop_trace()
         elif self.current_action in \
                 [ProfilerAction.RECORD, ProfilerAction.RECORD_AND_SAVE]:
-            self._stop_trace()
+            self.stop_trace()
             if self.on_trace_ready:
                 self.on_trace_ready(self)
-
-    def _start_warmup(self):
-        self.profiler = prof.profile(
-            use_cuda=(ProfilerActivity.CUDA in self.activities),
-            use_cpu=(ProfilerActivity.CPU in self.activities),
-            record_shapes=self.record_shapes,
-            with_flops=self.with_flops,
-            profile_memory=self.profile_memory,
-            with_stack=self.with_stack,
-            with_modules=self.with_modules,
-            use_kineto=True,
-        )
-        self.profiler._prepare_trace()
-
-    def _start_trace(self):
-        assert self.profiler is not None
-        self.profiler._start_trace()
-
-        if kineto_available():
-            dist_info = self._get_distributed_info()
-            if dist_info:
-                self.add_metadata_json("distributedInfo", json.dumps(dist_info))
-
-    def _stop_trace(self):
-        assert self.profiler is not None
-        self.profiler.__exit__(None, None, None)
