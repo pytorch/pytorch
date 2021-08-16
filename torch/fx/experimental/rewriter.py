@@ -104,7 +104,7 @@ def _rewrite(fn: Union[torch.nn.Module, Callable]) -> Union[torch.nn.Module, Cal
     else:
         # Rewrite this single free function
         return AST_Rewriter().rewrite(cast(FunctionType, fn))
-    
+
 def _copy_func(f, globals=None, module=None):
     """Based on https://stackoverflow.com/a/13503277/2988730 (@unutbu)"""
     if globals is None:
