@@ -272,6 +272,7 @@ def get_pip_packages(run_lambda):
     """Returns `pip list` output. Note: will also find conda-installed pytorch
     and numpy packages."""
     # People generally have `pip` as `pip` or `pip3`
+    # But here it is incoved as `python -mpip`
     def run_with_pip(pip):
         if get_platform() == 'win32':
             system_root = os.environ.get('SYSTEMROOT', 'C:\\Windows')
@@ -281,22 +282,10 @@ def get_pip_packages(run_lambda):
             grep_cmd = r'grep "torch\|numpy"'
         return run_and_read_all(run_lambda, pip + ' list --format=freeze | ' + grep_cmd)
 
-    # Try to figure out if the user is running pip or pip3.
-    out2 = run_with_pip('pip')
-    out3 = run_with_pip('pip3')
+    pip_version = 'pip3' if sys.version[0] == '3' else 'pip'
+    out = run_with_pip(sys.executable + ' -mpip')
 
-    num_pips = len([x for x in [out2, out3] if x is not None])
-    if num_pips == 0:
-        return 'pip', out2
-
-    if num_pips == 1:
-        if out2 is not None:
-            return 'pip', out2
-        return 'pip3', out3
-
-    # num_pips is 2. Return pip3 by default b/c that most likely
-    # is the one associated with Python 3
-    return 'pip3', out3
+    return pip_version, out
 
 
 def get_cachingallocator_config():
