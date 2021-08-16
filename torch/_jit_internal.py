@@ -742,7 +742,14 @@ def get_overload_no_implementation_error_message(kind, obj):
     )
 
 def _check_overload_body(func):
-    parsed_def = parse_def(func)
+    try:
+        parsed_def = parse_def(func)
+    except OSError as e:
+        # Parsing the function definition can raise an OSError if source is unavailable.
+        # Since this is just an initial check, just raise a warning if this is the case.
+        warnings.warn(f"Unable to retrieve source for @torch.jit._overload function: {func}.")
+        return
+
     body = parsed_def.ast.body[0].body
 
     def is_pass(x):
@@ -1125,12 +1132,22 @@ def check_args_exist(target_type) -> None:
         raise_error_container_parameter_missing("Optional")
 
 
+def check_empty_containers(obj) -> None:
+    if not obj:
+        warnings.warn("The inner type of a container is lost when "
+                      "calling torch.jit.isinstance in eager mode. For "
+                      "example, List[int] would become list and "
+                      "therefore falsely return True for List[float] or"
+                      " List[str].")
+
+
 # supports List/Dict/Tuple and Optional types
 # TODO support future
 def container_checker(obj, target_type) -> bool:
     origin_type = get_origin(target_type)
     check_args_exist(target_type)
     if origin_type is list or origin_type is List:
+        check_empty_containers(obj)
         if not isinstance(obj, list):
             return False
         arg_type = get_args(target_type)[0]
@@ -1144,6 +1161,7 @@ def container_checker(obj, target_type) -> bool:
                 return False
         return True
     elif origin_type is Dict or origin_type is dict:
+        check_empty_containers(obj)
         if not isinstance(obj, dict):
             return False
         key_type = get_args(target_type)[0]
@@ -1160,6 +1178,7 @@ def container_checker(obj, target_type) -> bool:
                 return False
         return True
     elif origin_type is Tuple or origin_type is tuple:
+        check_empty_containers(obj)
         if not isinstance(obj, tuple):
             return False
         arg_types = get_args(target_type)
