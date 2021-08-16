@@ -7,6 +7,14 @@ from torch.distributed._sharding_spec import (
     ShardMetadata,
 )
 from torch.distributed._sharding_spec._internals import check_tensor
+from torch.testing._internal.common_utils import (
+    TestCase,
+    load_tests,
+    run_tests,
+    retry_on_connect_failures,
+    ADDRESS_IN_USE,
+    CONNECT_TIMEOUT,
+)
 
 class TestShardingSpec(TestCase):
 
@@ -217,3 +225,11 @@ class TestShardingSpec(TestCase):
 
         with self.assertRaisesRegex(ValueError, 'does not match tensor volume'):
             check_tensor(spec.shards, torch.rand(10, 10).size())
+
+
+if __name__ == "__main__":
+    assert (
+        not torch.cuda._initialized
+    ), "test_distributed must not have initialized CUDA context on main process"
+
+    run_tests()

@@ -60,6 +60,45 @@ class Shard(object):
     metadata: ShardMetadata
 
 @dataclass
+class TensorInitCommonParams(object):
+    """ Container holding list of params used to create local Tensor """
+
+    __slots__ = ['create_op', 'dtype', 'layout', 'requires_grad', 'pin_memory', 'memory_format']
+
+    # TODO(bowangbj): use Union or Enum
+    create_op: str
+    dtype: torch.dtype
+    layout: torch.layout
+    requires_grad: bool
+    pin_memory: bool
+    memory_format: torch.memory_format
+
+# TypeError: ones() received an invalid combination of arguments - got (int, int, pin_memory=bool, dtype=torch.dtype, equires_grad=bool, device=str, layout=torch.layout), but expected one of:
+#  * (tuple of ints size, *, tuple of names names, torch.dtype dtype, torch.layout layout, torch.device device, bool pin_memory, bool requires_grad)
+#  * (tuple of ints size, *, Tensor out, torch.dtype dtype, torch.layout layout, torch.device device, bool pin_memory, bool requires_grad)
+
+# TODO(bowangbj): add type for local device
+def create_tensor_from_params(*size, local_device, params: TensorInitCommonParams):
+    if params.create_op == 'ones':
+        return torch.ones(*size,
+                          dtype=params.dtype,
+                          layout=params.layout,
+                          device=local_device,
+                          pin_memory=params.pin_memory,
+                          requires_grad=params.requires_grad,
+                          )
+    elif params.create_op == 'empty':
+        return torch.empty(*size,
+                            dtype=params.dtype,
+                            layout=params.layout,
+                            device=local_device,
+                            requires_grad=params.requires_grad,
+                            memory_format=params.memory_format,
+                            pin_memory=params.pin_memory,)
+    else:
+        raise ValueError(f'unsupported create_op: {params.create_op}')
+
+@dataclass
 class ShardedTensorMetadata(object):
     """
     Represents metadata for :class:`ShardedTensor`
@@ -172,11 +211,12 @@ class ShardedTensor(object):
         self,
         sharding_spec: ShardingSpec,
         *size,
-        dtype=None,
-        layout=torch.strided,
-        requires_grad=False,
-        pin_memory=False,
-        memory_format=torch.contiguous_format,
+        tensor_init_common_params: TensorInitCommonParams,
+        # dtype=None,
+        # layout=torch.strided,
+        # requires_grad=False,
+        # pin_memory=False,
+        # memory_format=torch.contiguous_format,
         process_group=None,
         init_rrefs=False,
     ):
@@ -184,13 +224,13 @@ class ShardedTensor(object):
         # _process_group, _local_shards, etc.
         self._prepare_init(process_group=process_group, init_rrefs=init_rrefs)
 
-        if dtype is None:
-            dtype = torch.get_default_dtype()
+        if tensor_init_common_params.dtype is None:
+            tensor_init_common_params.dtype = torch.get_default_dtype()
 
-        if layout != torch.strided:
+        if tensor_init_common_params.layout != torch.strided:
             raise ValueError('Only torch.strided layout is currently supported')
 
-        if memory_format != torch.contiguous_format:
+        if tensor_init_common_params.memory_format != torch.contiguous_format:
             raise ValueError('Only torch.contiguous_format memory_format is currently supported')
 
         if len(size) == 1 and isinstance(size[0], collections.Sequence):
@@ -207,20 +247,12 @@ class ShardedTensor(object):
         if isinstance(self._sharding_spec, ChunkShardingSpec):
             self._init_chunked(
                 dims,
-                dtype,
-                layout,
-                requires_grad,
-                pin_memory,
-                memory_format,
+                tensor_init_common_params,
             )
         elif isinstance(self._sharding_spec, EnumerableShardingSpec):
             self._init_enumerable(
                 dims,
-                dtype,
-                layout,
-                requires_grad,
-                pin_memory,
-                memory_format,
+                tensor_init_common_params,
             )
         else:
             raise ValueError(f'Unsupported sharding_spec: {self._sharding_spec}')
@@ -425,11 +457,12 @@ class ShardedTensor(object):
     def _init_chunked(
         self,
         dims,
-        dtype,
-        layout,
-        requires_grad,
-        pin_memory,
-        memory_format,
+        tensor_init_common_params: TensorInitCommonParams,
+        # dtype,
+        # layout,
+        # requires_grad,
+        # pin_memory,
+        # memory_format,
     ):
         current_rank = dist.get_rank(self._process_group)
         sharding_dim = self._sharding_spec.dim  # type: ignore[attr-defined]
@@ -474,37 +507,29 @@ class ShardedTensor(object):
                 # Build the local shard for the current rank if it is involved in the sharding spec.
                 if current_rank == rank:
                     # Initialize the local shard.
-                    local_shard = torch.empty(
-                        *rank_dims,
-                        dtype=dtype,
-                        layout=layout,
-                        device=local_device,
-                        requires_grad=requires_grad,
-                        memory_format=memory_format,
-                        pin_memory=pin_memory,
-                    )
-
+                    local_shard = create_tensor_from_params(*rank_dims, local_device=local_device, params=tensor_init_common_params)
                     self._local_shards.append(Shard(local_shard, shard_metadata))
 
         # Build overall metadata
         self._metadata = ShardedTensorMetadata(
             shards_metadata,
             dims,
-            dtype,
-            layout,
-            requires_grad,
-            memory_format,
-            pin_memory,
+            tensor_init_common_params.dtype,
+            tensor_init_common_params.layout,
+            tensor_init_common_params.requires_grad,
+            tensor_init_common_params.memory_format,
+            tensor_init_common_params.pin_memory,
         )
 
     def _init_enumerable(
         self,
         dims,
-        dtype,
-        layout,
-        requires_grad,
-        pin_memory,
-        memory_format,
+        tensor_init_common_params: TensorInitCommonParams,
+        # dtype,
+        # layout,
+        # requires_grad,
+        # pin_memory,
+        # memory_format,
     ):
         # Validate the sharding spec is compatible with the tensor.
         check_tensor(self._sharding_spec.shards, dims)  # type: ignore[attr-defined]
@@ -518,27 +543,19 @@ class ShardedTensor(object):
 
             if current_rank == rank:
                 # Initialize the local shard.
-                local_shard = torch.empty(
-                    *shard_metadata.shard_lengths,
-                    dtype=dtype,
-                    layout=layout,
-                    device=local_device,
-                    requires_grad=requires_grad,
-                    memory_format=memory_format,
-                    pin_memory=pin_memory,
-                )
-
+                local_shard = create_tensor_from_params(
+                    *shard_metadata.shard_lengths, local_device=local_device, params=tensor_init_common_params)
                 self._local_shards.append(Shard(local_shard, shard_metadata))
 
         # Build overall metadata
         self._metadata = ShardedTensorMetadata(
             shards_metadata,
             dims,
-            dtype,
-            layout,
-            requires_grad,
-            memory_format,
-            pin_memory,
+            tensor_init_common_params.dtype,
+            tensor_init_common_params.layout,
+            tensor_init_common_params.requires_grad,
+            tensor_init_common_params.memory_format,
+            tensor_init_common_params.pin_memory,
         )
 
     def _parse_and_validate_remote_device(self, device):

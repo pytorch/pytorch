@@ -24,6 +24,15 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
 )
 
+from torch.testing._internal.common_utils import (
+    TestCase,
+    load_tests,
+    run_tests,
+    retry_on_connect_failures,
+    ADDRESS_IN_USE,
+    CONNECT_TIMEOUT,
+)
+
 if TEST_WITH_DEV_DBG_ASAN:
     print("Skip dev-asan as torch + multiprocessing spawn have known issues", file=sys.stderr)
     sys.exit(0)
@@ -50,9 +59,14 @@ class MyShardedModel1(torch.nn.Module):
 
 class ShardedTensorTestBase(object):
 
+    # def __init__(self):
+    #     object().__init__(self)
+    #     self._world_size = 2
+
     @property
     def world_size(self):
-        return 4
+        # Change to 2 for temp testing.
+        return 2
 
     def init_pg(self):
         dist.init_process_group(
@@ -87,6 +101,7 @@ class ShardedTensorTestBase(object):
         dist.destroy_process_group()
 
     def setUp(self) -> None:
+        print("bowangbj setUp invoked.")
         super().setUp()
         self._spawn_processes()
 
@@ -102,17 +117,53 @@ class ShardedTensorTestBase(object):
         self.assertEqual(st1.sharding_spec(), st2.sharding_spec())
         self.assertEqual(len(st1.remote_shards()), len(st2.remote_shards()))
 
-
 def with_comms(func):
     @wraps(func)
     def wrapper(self):
+        print("bowangbj wrapper enter")
         self.init_comms()
         func(self)
         self.destroy_comms()
     return wrapper
 
-
+# bowangbj: question to pritam -- which setup to use?
 class TestShardedTensorChunked(ShardedTensorTestBase, MultiProcessTestCase):
+
+    # TODO(bowangbj): Add variants for the test.
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    @requires_nccl()
+    def test_init_empty_shared_tensor(self):
+        print("bowangbj test_init_empty_shared_tensor invoked. ")
+        spec = ChunkShardingSpec(
+            dim=0,
+            placements=[
+                "rank:0/cuda:0",
+                "rank:1/cuda:1",
+            ],
+        )
+
+        sharded_tensor = _sharded_tensor.ones(spec, 10, 20, init_rrefs=False)
+        sharded_tensor_metadata = sharded_tensor.metadata()
+        self.assertEqual(torch.Size([10, 20]), sharded_tensor_metadata.size)
+        self.assertEqual(torch.float, sharded_tensor_metadata.dtype)
+        self.assertEqual(torch.strided, sharded_tensor_metadata.layout)
+        self.assertEqual(False, sharded_tensor_metadata.requires_grad)
+        self.assertEqual(torch.contiguous_format, sharded_tensor_metadata.memory_format)
+        self.assertEqual(False, sharded_tensor_metadata.pin_memory)
+
+        sharded_tensor = _sharded_tensor.ones(spec, 10, 20, requires_grad=True, init_rrefs=False)
+        sharded_tensor_metadata = sharded_tensor.metadata()
+        self.assertEqual(True, sharded_tensor_metadata.requires_grad)
+
+        sharded_tensor = _sharded_tensor.ones(spec, 10, 20, dtype=torch.double, init_rrefs=True)
+        sharded_tensor_metadata = sharded_tensor.metadata()
+        self.assertEqual(torch.double, sharded_tensor_metadata.dtype)
+
+        print("\n\n\n bowangbj local_shards: \n\n")
+        print(f"rank: {dist.get_rank()}")
+
+        print(str(sharded_tensor.local_shards()[0].tensor))
 
     @with_comms
     @skip_if_lt_x_gpu(4)
@@ -1437,3 +1488,11 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase, MultiProcessTestCa
 
         with self.assertRaisesRegex(ValueError, "does not match tensor volume"):
             sharded_tensor = _sharded_tensor.init_from_local_shards(local_shards, sharded_tensor_metadata, init_rrefs=True)
+
+
+if __name__ == "__main__":
+    assert (
+        not torch.cuda._initialized
+    ), "test_distributed must not have initialized CUDA context on main process"
+
+    run_tests()
