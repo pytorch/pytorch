@@ -116,6 +116,7 @@ ALLOW_LIST = [
     ("aten::_cumsum", datetime.date(2021, 8, 31)),
     ("aten::_cumprod", datetime.date(2021, 8, 31)),
     ("aten::_unique_dim", datetime.date(2021, 9, 30)),
+    ("aten::unique_dim", datetime.date(2021, 9, 30)),
 ]
 
 ALLOW_LIST_COMPILED = [
