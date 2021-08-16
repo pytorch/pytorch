@@ -2276,6 +2276,42 @@ class TestFX(JitTestCase):
 
         traced.graph.lint()
 
+    def test_ast_rewriter_wrap(self):
+        self.assertEqual(3 + 4 + 5, a_lifted_leaf((3, 4), 5))
+
+        def to_trace(y):
+            return (
+                a_lifted_leaf((4, y), 3)
+                + a_lifted_leaf((3, 4), 5)
+                + a_lifted_leaf((y, y), y)
+            )
+
+        ast_rewriter = RewritingTracer()
+        graph = ast_rewriter.trace(to_trace)
+        traced = GraphModule(ast_rewriter.root, graph, "gm")
+
+        self.assertIn("a_lifted_leaf", traced.code)
+        self.assertEqual(27, traced(2))
+        self.assertIs(a_lifted_leaf, real_a_lifed_leaf)
+
+    def test_ast_rewriter_wrap_fn_directly(self):
+        self.assertEqual(3 + 4 + 5, a_lifted_leaf2((3, 4), 5))
+
+        def to_trace(y):
+            return (
+                a_lifted_leaf2((4, y), 3)
+                + a_lifted_leaf2((3, 4), 5)
+                + a_lifted_leaf2((y, y), y)
+            )
+
+        ast_rewriter = RewritingTracer()
+        graph = ast_rewriter.trace(to_trace)
+        traced = GraphModule(ast_rewriter.root, graph, "gm")
+
+        self.assertIn("a_lifted_leaf2", traced.code)
+        self.assertEqual(27, traced(2))
+        self.assertIs(a_lifted_leaf2, real_a_lifed_leaf2)
+
     def test_ast_rewriter_wrapped_via_decorator(self):
         class F(torch.nn.Module):
             def forward(self, x):
@@ -2289,6 +2325,46 @@ class TestFX(JitTestCase):
         self.assertEqual(traced(0), 1)
         self.assertIs(wrapped_via_decorator, real_wrapped_via_decorator)
         self.assertFalse(hasattr(wrapped_via_decorator, "__fx_already_patched"))
+
+    def test_ast_rewriter_wrapped_via_decorator_and_transformed(self):
+        self.assertEqual(wrapped_via_decorator(0), 1)
+
+        def to_trace(y):
+            return wrapped_via_decorator(y)
+
+        ast_rewriter = RewritingTracer()
+        graph = ast_rewriter.trace(to_trace)
+        traced = GraphModule(ast_rewriter.root, graph, "gm")
+
+        self.assertIn("wrapped_via_decorator", traced.code)
+        self.assertEqual(traced(0), 1)
+        self.assertIs(wrapped_via_decorator, real_wrapped_via_decorator)
+        self.assertFalse(hasattr(wrapped_via_decorator, "__fx_already_patched"))
+
+        transformed = torch.fx.Transformer(traced).transform()
+        self.assertIn("wrapped_via_decorator", transformed.code)
+        self.assertEqual(transformed(0), 1)
+        self.assertIs(wrapped_via_decorator, real_wrapped_via_decorator)
+        self.assertFalse(hasattr(wrapped_via_decorator, "__fx_already_patched"))
+
+    def test_ast_rewriter_wrap_with_submodule(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.batchnorm1d = torch.nn.BatchNorm1d(2, affine=False)
+
+            def forward(self, x: torch.Tensor):
+                return wrapped_with_submodule(x, self.batchnorm1d)
+
+        ast_rewriter = RewritingTracer()
+        graph = ast_rewriter.trace(M())
+        traced = GraphModule(ast_rewriter.root, graph, "gm")
+
+        self.assertIn("wrapped_with_submodule", traced.code)
+
+        input = torch.rand(3, 2)
+        ref_batchnorm1d = torch.nn.BatchNorm1d(2, affine=False)
+        self.assertEqual(ref_batchnorm1d(input), traced(input))
 
     def test_submodule_manipulation_API(self):
         class C(torch.nn.Module):
