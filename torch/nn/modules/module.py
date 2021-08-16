@@ -159,7 +159,7 @@ def register_module_full_backward_hook(
     arguments.
 
     For technical reasons, when this hook is applied to a Module, its forward function will
-    receive a view of each Tensor passed to the Module. Similarly the caller receive a view
+    receive a view of each Tensor passed to the Module. Similarly the caller will receive a view
     of each Tensor returned by the Module's forward function.
 
     Global hooks are called before hooks registered with `register_backward_hook`
@@ -905,7 +905,7 @@ class Module:
         arguments.
 
         For technical reasons, when this hook is applied to a Module, its forward function will
-        receive a view of each Tensor passed to the Module. Similarly the caller receive a view
+        receive a view of each Tensor passed to the Module. Similarly the caller will receive a view
         of each Tensor returned by the Module's forward function.
 
         .. warning ::
