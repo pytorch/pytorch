@@ -1234,12 +1234,14 @@ else:
         pass
 
 
-def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: F811
+def norm(input, p=None, dim=None, keepdim=False, out=None, dtype=None):  # noqa: F811
     r"""Returns the matrix norm or vector norm of a given tensor.
 
     .. warning::
 
         torch.norm is deprecated and may be removed in a future PyTorch release.
+        Its documentation and behavior may be incorrect, and it is no longer
+        actively maintained.
 
         Use :func:`torch.linalg.norm`, instead, or :func:`torch.linalg.vector_norm`
         when computing vector norms and :func:`torch.linalg.matrix_norm` when
