@@ -71,6 +71,13 @@ class profile(object):
 
         with_stack (bool, optional): record source information (file and line number) for the ops.
 
+        with_modules (bool): record module hierarchy (including function names)
+            corresponding to the callstack of the op. e.g. If module A's forward call's
+            module B's forward which contains an aten::add op,
+            then aten::add's module hierarchy is A.B
+            Note that this support exist, at the moment, only for TorchScript models
+            and not eager mode models.
+
         use_kineto (bool, optional): experimental, enable profiling with Kineto profiler.
 
         use_cpu (bool, optional): profile CPU events; setting to ``False`` requires
@@ -118,6 +125,7 @@ class profile(object):
             with_flops=False,
             profile_memory=False,
             with_stack=False,
+            with_modules=False,
             use_kineto=False,
             use_cpu=True):
         self.enabled: bool = enabled
@@ -131,6 +139,7 @@ class profile(object):
         self.record_shapes |= self.with_flops
         self.profile_memory = profile_memory
         self.with_stack = with_stack
+        self.with_modules = with_modules
         self.use_cpu = use_cpu
         self.kineto_results: Optional[_ProfilerResult] = None
 
@@ -165,7 +174,8 @@ class profile(object):
             self.record_shapes,
             self.profile_memory,
             self.with_stack,
-            self.with_flops)
+            self.with_flops,
+            self.with_modules)
 
     def __enter__(self):
         if not self.enabled:
@@ -555,6 +565,7 @@ class emit_nvtx(object):
             ProfilerConfig(
                 ProfilerState.NVTX,
                 self.record_shapes,
+                False,
                 False,
                 False,
                 False),
