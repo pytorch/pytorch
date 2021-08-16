@@ -2,6 +2,7 @@ import ast
 import inspect
 import textwrap
 import copy
+import functools
 from types import FunctionType
 from typing import cast, Union, Callable, Dict, Optional, Any
 from torch.fx._symbolic_trace import Tracer
