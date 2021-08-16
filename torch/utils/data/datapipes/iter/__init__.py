@@ -44,7 +44,7 @@ from torch.utils.data.datapipes.iter.ziparchivereader import (
     ZipArchiveReaderIterDataPipe as ZipArchiveReader,
 )
 
-__all__ = ['Batch',
+__all__ = ['Batcher',
            'BucketBatcher',
            'ByKeyGrouper',
            'Collator',
