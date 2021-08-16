@@ -7,14 +7,15 @@
 #include <ATen/ATen.h>
 #include <functorch/csrc/BatchRulesHelper.h>
 #include <functorch/csrc/BatchedFallback.h>
+#include <ATen/core/dispatch/Dispatcher.h>
 #include <c10/util/Metaprogramming.h>
 
 
 namespace at { namespace functorch {
 
-
 void unsupportedDynamicOp(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
-    TORCH_CHECK(false, "vmap: We do not support batching operators that can output dynamic shape.");
+    TORCH_CHECK(false, "vmap: We do not support batching operators that can output dynamic shape. ",
+        "Attempted to vmap over ", op.schema().operator_name());
 }
 #define UNSUPPORTED_DYNAMIC(op) \
     m.impl(#op, torch::CppFunction::makeFromBoxedFunction<&unsupportedDynamicOp>());
