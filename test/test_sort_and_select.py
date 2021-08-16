@@ -612,7 +612,7 @@ class TestSortAndSelect(TestCase):
             self._test_topk_dtype(device, dtype, False, curr_size)
 
     @dtypesIfCUDA(*torch.testing.get_all_fp_dtypes())
-    @dtypes(torch.float, torch.double)
+    @dtypes(torch.float, torch.double, torch.bfloat16)
     def test_topk_nonfinite(self, device, dtype):
         if TEST_WITH_ROCM and dtype == torch.bfloat16:
             return

@@ -157,7 +157,7 @@ c10::intrusive_ptr<JitFuture> toPyJitFuture(
               return;
             }
 
-            child->markCompleted(ivalue, future.dataPtrs());
+            child->markCompleted(ivalue, future.storages());
           }
         }));
     return child;

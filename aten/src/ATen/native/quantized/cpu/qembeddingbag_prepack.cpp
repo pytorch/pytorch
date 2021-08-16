@@ -1,3 +1,4 @@
+#include <c10/core/ScalarType.h>
 #include <ATen/ATen.h>
 #include <ATen/Parallel.h>
 #include <ATen/native/quantized/cpu/embedding_packed_params.h>
@@ -197,6 +198,10 @@ Tensor qembeddingbag_byte_prepack(const Tensor& weight) {
   // packed_weights = torch.ops.quantized.embedding_bag_byte_prepack(weights)
   // assert(packed_weights.size() == torch.Size([2, 10, 11]))
 
+  TORCH_CHECK(
+    weight.scalar_type() == at::ScalarType::Float || weight.scalar_type() == at::ScalarType::Half,
+    "'embedding_bag_byte_prepack' only support float32 or float16.");
+
   const auto weight_sizes = weight.sizes();
   const auto cols_dim = weight_sizes.size() - 1;
   const int32_t embedding_rows = c10::size_to_dim_(cols_dim, weight_sizes);
@@ -205,7 +210,6 @@ Tensor qembeddingbag_byte_prepack(const Tensor& weight) {
   const int32_t output_columns = embedding_cols + 2 * sizeof(float);
   Tensor weight_contig = weight.contiguous(weight.suggest_memory_format());
 
-  const float* weight_data = weight_contig.data_ptr<float>();
   // Adjust output dimensions to account for FP32 scale and zero_points.
   std::vector<int64_t> output_shape = weight_sizes.vec();
   output_shape[cols_dim] = output_columns;
@@ -218,17 +222,34 @@ Tensor qembeddingbag_byte_prepack(const Tensor& weight) {
   auto* output_data = output.data_ptr<uint8_t>();
 
 #ifdef USE_FBGEMM
-
-  at::parallel_for(
-      0, embedding_rows, 1, [&](int32_t start_idx, int32_t end_idx) {
-        for (int64_t row = start_idx; row < end_idx; ++row) {
-          fbgemm::FloatOrHalfToFused8BitRowwiseQuantizedSBFloat<float>(
-            weight_data + row * embedding_cols, 1,
-              embedding_cols, output_data + row * output_columns);
-        }
-      });
+  if (weight.scalar_type() == at::ScalarType::Half) {
+    const auto weight_data = static_cast<fbgemm::float16*>(weight.data_ptr());
+    at::parallel_for(
+        0, embedding_rows, 1, [&](int32_t start_idx, int32_t end_idx) {
+          for (int64_t row = start_idx; row < end_idx; ++row) {
+            fbgemm::FloatOrHalfToFused8BitRowwiseQuantizedSBFloat<fbgemm::float16>(
+              weight_data + row * embedding_cols, 1,
+                embedding_cols, output_data + row * output_columns);
+          }
+        });
+  }
+  else {
+    const auto weight_data = weight.data_ptr<float>();
+    at::parallel_for(
+        0, embedding_rows, 1, [&](int32_t start_idx, int32_t end_idx) {
+          for (int64_t row = start_idx; row < end_idx; ++row) {
+            fbgemm::FloatOrHalfToFused8BitRowwiseQuantizedSBFloat<float>(
+              weight_data + row * embedding_cols, 1,
+                embedding_cols, output_data + row * output_columns);
+          }
+        });
+  }
 
 #else
+  const auto float_weight = weight_contig.scalar_type() == at::ScalarType::Half
+    ? weight_contig.to(at::ScalarType::Float)
+    : weight_contig;
+  const auto weight_data = float_weight.data_ptr<float>();
   constexpr float kEpsilon = 1e-8f;
   for (std::size_t row = 0; row < embedding_rows; ++row) {
     const float* input_row = weight_data + row * embedding_cols;
@@ -262,12 +283,15 @@ Tensor _qembeddingbag_nbit_prepack_helper(
     const bool optimized_qparams,
     const int64_t nbins,
     const double ratio) {
+  TORCH_CHECK(
+    weight.scalar_type() == at::ScalarType::Float || weight.scalar_type() == at::ScalarType::Half,
+    "'qembeddingbag_nbit_prepack' only support float32 or float16.");
+
   int64_t embedding_rows = weight.size(0);
   int64_t embedding_cols = weight.size(1);
 
   Tensor weight_contig = weight.contiguous(weight.suggest_memory_format());
 
-  const auto weight_data = weight.data_ptr<float>();
   TORCH_CHECK(
       bit_width == 4 || bit_width == 2,
       "bit_width must be either 2 or 4 to use 'qembeddingbag_nbit_prepack'."
@@ -299,18 +323,35 @@ Tensor _qembeddingbag_nbit_prepack_helper(
 
 #ifdef USE_FBGEMM
   if (!optimized_qparams) {
-    at::parallel_for(
-      0, embedding_rows, 1, [&](int32_t start_idx, int32_t end_idx) {
-        for (int64_t row = start_idx; row < end_idx; ++row) {
-          fbgemm::FloatOrHalfToFusedNBitRowwiseQuantizedSBHalf<float>(
-            bit_width, weight_data + row * embedding_cols, 1,
-            embedding_cols, output_data + row * output_shape[1]);
-        }
-      });
+    if (weight.scalar_type() == at::ScalarType::Half) {
+      const auto weight_data = static_cast<fbgemm::float16*>(weight.data_ptr());
+      at::parallel_for(
+        0, embedding_rows, 1, [&](int32_t start_idx, int32_t end_idx) {
+          for (int64_t row = start_idx; row < end_idx; ++row) {
+            fbgemm::FloatOrHalfToFusedNBitRowwiseQuantizedSBHalf<fbgemm::float16>(
+              bit_width, weight_data + row * embedding_cols, 1,
+              embedding_cols, output_data + row * output_shape[1]);
+          }
+        });
+    }
+    else {
+      const auto weight_data = weight.data_ptr<float>();
+      at::parallel_for(
+        0, embedding_rows, 1, [&](int32_t start_idx, int32_t end_idx) {
+          for (int64_t row = start_idx; row < end_idx; ++row) {
+            fbgemm::FloatOrHalfToFusedNBitRowwiseQuantizedSBHalf<float>(
+              bit_width, weight_data + row * embedding_cols, 1,
+              embedding_cols, output_data + row * output_shape[1]);
+          }
+        });
+    }
   } else {
 #endif // USE_FBGEMM
     const auto output_columns = output.size(output.dim() - 1);
-
+    const auto float_weight = weight_contig.scalar_type() == at::ScalarType::Half
+        ? weight_contig.to(at::ScalarType::Float)
+        : weight_contig;
+    const auto weight_data = float_weight.data_ptr<float>();
     for (int row = 0; row < embedding_rows; ++row) {
       const float* input_row = weight_data + row * embedding_cols;
       std::uint8_t* output_row = output_data + row * output_columns;
@@ -320,7 +361,7 @@ Tensor _qembeddingbag_nbit_prepack_helper(
       if (optimized_qparams) {
         at::Tensor xmax_tensor, xmin_tensor;
         std::tie(xmax_tensor, xmin_tensor) = at::choose_qparams_optimized(
-            weight_contig[row], embedding_cols, nbins, ratio, bit_width);
+            float_weight[row], embedding_cols, nbins, ratio, bit_width);
         TORCH_CHECK(
             xmax_tensor.numel() == 1 && xmin_tensor.numel() == 1,
             "Expected choose_qparams_optimized to return min/max tensors of size 1");

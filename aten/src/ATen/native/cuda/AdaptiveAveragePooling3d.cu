@@ -194,7 +194,7 @@ __global__ void adaptiveaveragegradinput(
           for (ow = ostartW; ow < oendW; ++ow) {
             int kW = end_index(ow, osizeW, isizeW) - start_index(ow, osizeW, isizeW);
             const accscalar_t divide_factor = kW * kH * kT;
-            accscalar_t grad_delta = static_cast<accscalar_t>(ptr_gradOutput[oh*isizeW + ow] / divide_factor);
+            accscalar_t grad_delta = static_cast<accscalar_t>(ptr_gradOutput[oh*osizeW + ow] / divide_factor);
             *ptr_gradInput += static_cast<scalar_t>(grad_delta);
           }
         }

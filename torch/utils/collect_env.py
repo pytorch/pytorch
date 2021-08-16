@@ -1,5 +1,6 @@
 from __future__ import print_function
 
+# Unlike the rest of the PyTorch this file must be python2 compliant.
 # This script outputs relevant system environment info
 # Run it with `python collect_env.py`.
 import datetime
@@ -324,10 +325,12 @@ def get_env_info():
         version_str = debug_mode_str = cuda_available_str = cuda_version_str = 'N/A'
         hip_compiled_version = hip_runtime_version = miopen_runtime_version = 'N/A'
 
+    sys_version = sys.version.replace("\n", " ")
+
     return SystemEnv(
         torch_version=version_str,
         is_debug_build=debug_mode_str,
-        python_version='{}.{} ({}-bit runtime)'.format(sys.version_info[0], sys.version_info[1], sys.maxsize.bit_length() + 1),
+        python_version='{} ({}-bit runtime)'.format(sys_version, sys.maxsize.bit_length() + 1),
         python_platform=get_python_platform(),
         is_cuda_available=cuda_available_str,
         cuda_compiled_version=cuda_version_str,

@@ -801,7 +801,7 @@ def _unpool_output_size(
     input_size = input.size()
     default_size = torch.jit.annotate(List[int], [])
     for d in range(len(kernel_size)):
-        default_size.append((input_size[d + 2] - 1) * stride[d] + kernel_size[d] - 2 * padding[d])
+        default_size.append((input_size[-len(kernel_size) + d] - 1) * stride[d] + kernel_size[d] - 2 * padding[d])
     if output_size is None:
         ret = default_size
     else:
@@ -861,7 +861,7 @@ def max_unpool1d(
         output_size = output_size + [1]
     else:
         output_size = output_size + (1,)
-    return torch._C._nn.max_unpool2d(input.unsqueeze(3), indices.unsqueeze(3), output_size).squeeze(3)
+    return torch._C._nn.max_unpool2d(input.unsqueeze(-1), indices.unsqueeze(-1), output_size).squeeze(-1)
 
 
 def max_unpool2d(
@@ -1748,7 +1748,7 @@ def log_softmax(input: Tensor, dim: Optional[int] = None, _stacklevel: int = 3, 
     r"""Applies a softmax followed by a logarithm.
 
     While mathematically equivalent to log(softmax(x)), doing these two
-    operations separately is slower, and numerically unstable. This function
+    operations separately is slower and numerically unstable. This function
     uses an alternative formulation to compute the output and gradient correctly.
 
     See :class:`~torch.nn.LogSoftmax` for more details.
@@ -1757,7 +1757,7 @@ def log_softmax(input: Tensor, dim: Optional[int] = None, _stacklevel: int = 3, 
         input (Tensor): input
         dim (int): A dimension along which log_softmax will be computed.
         dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
-          If specified, the input tensor is casted to :attr:`dtype` before the operation
+          If specified, the input tensor is cast to :attr:`dtype` before the operation
           is performed. This is useful for preventing data type overflows. Default: None.
     """
     if has_torch_function_unary(input):
@@ -2476,7 +2476,7 @@ def nll_loss(
     Args:
         input: :math:`(N, C)` where `C = number of classes` or :math:`(N, C, H, W)`
             in case of 2D Loss, or :math:`(N, C, d_1, d_2, ..., d_K)` where :math:`K \geq 1`
-            in the case of K-dimensional loss.
+            in the case of K-dimensional loss. `input` is expected to be log-probabilities.
         target: :math:`(N)` where each value is :math:`0 \leq \text{targets}[i] \leq C-1`,
             or :math:`(N, d_1, d_2, ..., d_K)` where :math:`K \geq 1` for
             K-dimensional loss.
@@ -2556,7 +2556,7 @@ def poisson_nll_loss(
             is set to ``False``, the losses are instead summed for each minibatch. Ignored
             when reduce is ``False``. Default: ``True``
         eps (float, optional): Small value to avoid evaluation of :math:`\log(0)` when
-            :attr:`log_input`=``False``. Default: 1e-8
+            :attr:`log_input`\ =\ ``False``. Default: 1e-8
         reduce (bool, optional): Deprecated (see :attr:`reduction`). By default, the
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
@@ -2691,8 +2691,9 @@ def kl_div(
     See :class:`~torch.nn.KLDivLoss` for details.
 
     Args:
-        input: Tensor of arbitrary shape
-        target: Tensor of the same shape as input
+        input: Tensor of arbitrary shape in log-probabilities.
+        target: Tensor of the same shape as input. See :attr:`log_target` for
+            the target's interpretation.
         size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
             the losses are averaged over each loss element in the batch. Note that for
             some losses, there multiple elements per sample. If the field :attr:`size_average`
@@ -2767,18 +2768,19 @@ def cross_entropy(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
 ) -> Tensor:
-    r"""This criterion combines `log_softmax` and `nll_loss` in a single
-    function.
+    r"""This criterion computes the cross entropy loss between input and target.
 
     See :class:`~torch.nn.CrossEntropyLoss` for details.
 
     Args:
         input (Tensor) : :math:`(N, C)` where `C = number of classes` or :math:`(N, C, H, W)`
             in case of 2D Loss, or :math:`(N, C, d_1, d_2, ..., d_K)` where :math:`K \geq 1`
-            in the case of K-dimensional loss.
-        target (Tensor) : :math:`(N)` where each value is :math:`0 \leq \text{targets}[i] \leq C-1`,
-            or :math:`(N, d_1, d_2, ..., d_K)` where :math:`K \geq 1` for
-            K-dimensional loss.
+            in the case of K-dimensional loss. `input` is expected to contain unnormalized scores
+            (often referred to as logits).
+        target (Tensor) : If containing class indices, shape :math:`(N)` where each value is
+            :math:`0 \leq \text{targets}[i] \leq C-1`, or :math:`(N, d_1, d_2, ..., d_K)` with
+            :math:`K \geq 1` in the case of K-dimensional loss. If containing class probabilities,
+            same shape as the input.
         weight (Tensor, optional): a manual rescaling weight given to each
             class. If given, has to be a Tensor of size `C`
         size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
@@ -2788,7 +2790,9 @@ def cross_entropy(
             when reduce is ``False``. Default: ``True``
         ignore_index (int, optional): Specifies a target value that is ignored
             and does not contribute to the input gradient. When :attr:`size_average` is
-            ``True``, the loss is averaged over non-ignored targets. Default: -100
+            ``True``, the loss is averaged over non-ignored targets. Note that
+            :attr:`ignore_index` is only applicable when the target contains class indices.
+            Default: -100
         reduce (bool, optional): Deprecated (see :attr:`reduction`). By default, the
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
@@ -2802,8 +2806,15 @@ def cross_entropy(
 
     Examples::
 
+        >>> # Example of target with class indices
         >>> input = torch.randn(3, 5, requires_grad=True)
         >>> target = torch.randint(5, (3,), dtype=torch.int64)
+        >>> loss = F.cross_entropy(input, target)
+        >>> loss.backward()
+        >>>
+        >>> # Example of target with class probabilities
+        >>> input = torch.randn(3, 5, requires_grad=True)
+        >>> target = torch.randn(3, 5).softmax(dim=1)
         >>> loss = F.cross_entropy(input, target)
         >>> loss.backward()
     """
@@ -2832,14 +2843,14 @@ def binary_cross_entropy(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
 ) -> Tensor:
-    r"""Function that measures the Binary Cross Entropy
-    between the target and the output.
+    r"""Function that measures the Binary Cross Entropy between the target and input
+    probabilities.
 
     See :class:`~torch.nn.BCELoss` for details.
 
     Args:
-        input: Tensor of arbitrary shape
-        target: Tensor of the same shape as input
+        input: Tensor of arbitrary shape as probabilities.
+        target: Tensor of the same shape as input with values between 0 and 1.
         weight (Tensor, optional): a manual rescaling weight
                 if provided it's repeated to match input tensor shape
         size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
@@ -2902,14 +2913,14 @@ def binary_cross_entropy_with_logits(
     reduction: str = "mean",
     pos_weight: Optional[Tensor] = None,
 ) -> Tensor:
-    r"""Function that measures Binary Cross Entropy between target and output
+    r"""Function that measures Binary Cross Entropy between target and input
     logits.
 
     See :class:`~torch.nn.BCEWithLogitsLoss` for details.
 
     Args:
-        input: Tensor of arbitrary shape
-        target: Tensor of the same shape as input
+        input: Tensor of arbitrary shape as unnormalized scores (often referred to as logits).
+        target: Tensor of the same shape as input with values between 0 and 1
         weight (Tensor, optional): a manual rescaling weight
             if provided it's repeated to match input tensor shape
         size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
@@ -4034,7 +4045,7 @@ def affine_grid(theta: Tensor, size: List[int], align_corners: Optional[bool] = 
         Up to version 1.2.0, all grid points along a unit dimension were
         considered arbitrarily to be at ``-1``.
         From version 1.3.0, under ``align_corners = True`` all grid points
-        along a unit dimension are considered to be at ```0``
+        along a unit dimension are considered to be at ``0``
         (the center of the input image).
     """
     if has_torch_function_unary(theta):
@@ -4086,7 +4097,7 @@ def affine_grid(theta: Tensor, size: List[int], align_corners: Optional[bool] = 
     return torch.affine_grid_generator(theta, size, align_corners)
 
 
-def _pad(input: Tensor, pad: List[int], mode: str = "constant", value: float = 0) -> Tensor:
+def _pad(input: Tensor, pad: List[int], mode: str = "constant", value: float = 0.0) -> Tensor:
     r"""Pads tensor.
 
     Padding size:
@@ -4151,9 +4162,8 @@ def _pad(input: Tensor, pad: List[int], mode: str = "constant", value: float = 0
     if mode == "constant":
         return _VF.constant_pad_nd(input, pad, value)
     else:
-        assert value == 0, 'Padding mode "{}"" doesn\'t take in value argument'.format(mode)
-        if input.dim() == 3:
-            assert len(pad) == 2, "3D tensors expect 2 values for padding"
+        assert value == 0.0, 'Padding mode "{}"" doesn\'t take in value argument'.format(mode)
+        if len(pad) == 2 and (input.dim() == 2 or input.dim() == 3):
             if mode == "reflect":
                 return torch._C._nn.reflection_pad1d(input, pad)
             elif mode == "replicate":
@@ -4163,8 +4173,7 @@ def _pad(input: Tensor, pad: List[int], mode: str = "constant", value: float = 0
             else:
                 raise NotImplementedError
 
-        elif input.dim() == 4:
-            assert len(pad) == 4, "4D tensors expect 4 values for padding"
+        elif len(pad) == 4 and (input.dim() == 3 or input.dim() == 4):
             if mode == "reflect":
                 return torch._C._nn.reflection_pad2d(input, pad)
             elif mode == "replicate":
@@ -4174,8 +4183,7 @@ def _pad(input: Tensor, pad: List[int], mode: str = "constant", value: float = 0
             else:
                 raise NotImplementedError
 
-        elif input.dim() == 5:
-            assert len(pad) == 6, "5D tensors expect 6 values for padding"
+        elif len(pad) == 6 and (input.dim() == 4 or input.dim() == 5):
             if mode == "reflect":
                 return torch._C._nn.reflection_pad3d(input, pad)
             elif mode == "replicate":
@@ -4185,7 +4193,7 @@ def _pad(input: Tensor, pad: List[int], mode: str = "constant", value: float = 0
             else:
                 raise NotImplementedError
         else:
-            raise NotImplementedError("Only 3D, 4D, 5D padding with non-constant padding are supported for now")
+            raise NotImplementedError("Only 2D, 3D, 4D, 5D padding with non-constant padding are supported for now")
 
 
 # We define this function as _pad because it takes an argument
@@ -4241,6 +4249,8 @@ Returns cosine similarity between x1 and x2, computed along dim.
 
 .. math ::
     \text{similarity} = \dfrac{x_1 \cdot x_2}{\max(\Vert x_1 \Vert _2 \cdot \Vert x_2 \Vert _2, \epsilon)}
+
+Supports :ref:`type promotion <type-promotion-doc>`.
 
 Args:
     x1 (Tensor): First input.

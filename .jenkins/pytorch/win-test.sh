@@ -73,7 +73,7 @@ run_tests() {
           "$SCRIPT_HELPERS_DIR"/test_libtorch.bat
         fi
     else
-        if [[ "${BUILD_ENVIRONMENT}" == "pytorch-win-vs2019-cpu-py3" ]]; then
+        if [[ "${BUILD_ENVIRONMENT}" == *win-vs2019-cpu-py3* ]]; then
           export PYTORCH_COLLECT_COVERAGE=1
           export COVERAGE_RCFILE=$PWD/.coveragerc # coverage config file needed for plug-ins and settings to work
         fi
@@ -102,7 +102,7 @@ run_tests
 assert_git_not_dirty
 echo "TEST PASSED"
 
-if [[ "${BUILD_ENVIRONMENT}" == "pytorch-win-vs2019-cpu-py3" ]]; then
+if [[ "${BUILD_ENVIRONMENT}" == *win-vs2019-cpu-py3* ]]; then
   pushd "$TEST_DIR"
   python -mpip install coverage==5.5
   python -mpip install -e "$PROJECT_DIR/tools/coverage_plugins_package"

@@ -1339,6 +1339,67 @@ TEST(VulkanAPITest, sigmoid_) {
   ASSERT_TRUE(check);
 }
 
+TEST(VulkanAPITest, softmax) {
+  at::Tensor test_in[] = {
+    at::rand({1, 196, 302, 5}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
+    at::rand({1, 197, 302, 5}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
+    at::rand({1, 198, 302, 5}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
+    at::rand({1, 199, 302, 5}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
+  };
+
+  for (auto in_cpu : test_in) {
+    const auto out_cpu = at::softmax(in_cpu, 1);
+
+    const auto in_vulkan = in_cpu.vulkan();
+    const auto out_vulkan = at::softmax(in_vulkan, 1);
+
+    const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+    if (!check) {
+      showRtol(out_cpu, out_vulkan.cpu());
+    }
+
+    ASSERT_TRUE(check);
+  }
+}
+
+TEST(VulkanAPITest, tanh) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  const auto in_cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_vulkan = in_cpu.vulkan();
+
+  const auto out_cpu = at::tanh(in_cpu);
+  const auto out_vulkan = at::tanh(in_vulkan);
+
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST(VulkanAPITest, tanh_) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  auto cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat));
+  auto vulkan = cpu.vulkan();
+
+  at::tanh_(cpu);
+  at::tanh_(vulkan);
+
+  const auto check = almostEqual(cpu, vulkan.cpu());
+  if (!check) {
+    showRtol(cpu, vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
 TEST(VulkanAPITest, sub) {
   if (!at::is_vulkan_available()) {
     return;

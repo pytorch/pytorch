@@ -1,5 +1,6 @@
 #include <ATen/core/interned_strings.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -90,6 +91,7 @@ struct SymbolicShapeAnalyzer {
     for (size_t i = 0; i < node_->inputs().size(); i++) {
       auto type = node_->input(i)->type();
       if (auto tt = type->castRaw<TensorType>()) {
+        // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
         c10::SymbolicShape symbolic_shapes = tt->symbolic_sizes();
 
         // for testing, we don't insert complete tensor shapes and rely on our
@@ -121,8 +123,9 @@ struct SymbolicShapeAnalyzer {
 
   c10::SymbolicShape run() {
     // TODO: only run while the last iteration has made a change
-    size_t num_optimization_iters = 6;
-    for (size_t i = 0; i < num_optimization_iters; i++) {
+    constexpr size_t num_optimization_iters = 6;
+    for (const auto i : c10::irange(num_optimization_iters)) {
+      (void)i; // Suppress unused variable warning
       // XXX: we cannot substitute symbolic dims before passes like constant
       // propagation, or we might inadvertently use them in arithmetic or
       // other operators
@@ -228,12 +231,12 @@ struct SymbolicShapeAnalyzer {
 
     // there are ways to compute this more efficiently but typically number of
     // Values for each symbolic set is low and this is cheap to run
-    for (size_t i = 0; i < symbolic_set.size(); ++i) {
+    for (const auto i : c10::irange(symbolic_set.size())) {
       Value* v = symbolic_set[i];
       Value* dominating_value = v;
-      for (size_t j = 0; j < symbolic_set.size(); ++j) {
-        if (dominating_value->node()->isDominatedBy(symbolic_set[j]->node())) {
-          dominating_value = symbolic_set[j];
+      for (const auto& sym_set : symbolic_set) {
+        if (dominating_value->node()->isDominatedBy(sym_set->node())) {
+          dominating_value = sym_set;
         }
       }
       if (dominating_value != v) {

@@ -18,11 +18,11 @@ void IRPrinter::print(ExprHandle expr) {
   expr.node()->accept(this);
 }
 
-void IRPrinter::print(const Expr& expr) {
+void IRPrinter::print(Expr& expr) {
   expr.accept(this);
 }
 
-void IRPrinter::print(const Stmt& stmt) {
+void IRPrinter::print(Stmt& stmt) {
   stmt.accept(this);
 }
 
@@ -30,7 +30,7 @@ void IRPrinter::print(const Stmt& stmt) {
 // we need to look at the operator precedence to make the output simpler.
 template <typename Op>
 void visitBinaryOp(
-    const BinaryOpNode<Op>* v,
+    BinaryOpNode<Op>* v,
     const std::string& op_str,
     IRPrinter* printer,
     bool parens = true) {
@@ -58,43 +58,43 @@ void visitBinaryOp(
   }
 }
 
-void IRPrinter::visit(const Add* v) {
+void IRPrinter::visit(Add* v) {
   visitBinaryOp(v, "+", this);
 }
 
-void IRPrinter::visit(const Sub* v) {
+void IRPrinter::visit(Sub* v) {
   visitBinaryOp(v, "-", this);
 }
 
-void IRPrinter::visit(const Mul* v) {
+void IRPrinter::visit(Mul* v) {
   visitBinaryOp(v, "*", this);
 }
 
-void IRPrinter::visit(const Div* v) {
+void IRPrinter::visit(Div* v) {
   visitBinaryOp(v, "/", this);
 }
 
-void IRPrinter::visit(const And* v) {
+void IRPrinter::visit(And* v) {
   visitBinaryOp(v, "&", this);
 }
 
-void IRPrinter::visit(const Or* v) {
+void IRPrinter::visit(Or* v) {
   visitBinaryOp(v, "|", this);
 }
 
-void IRPrinter::visit(const Xor* v) {
+void IRPrinter::visit(Xor* v) {
   visitBinaryOp(v, "^", this);
 }
 
-void IRPrinter::visit(const Lshift* v) {
+void IRPrinter::visit(Lshift* v) {
   visitBinaryOp(v, "<<", this);
 }
 
-void IRPrinter::visit(const Rshift* v) {
+void IRPrinter::visit(Rshift* v) {
   visitBinaryOp(v, ">>", this);
 }
 
-void IRPrinter::visit(const Mod* v) {
+void IRPrinter::visit(Mod* v) {
   if (v->dtype().is_integral()) {
     visitBinaryOp(v, "%", this);
   } else if (v->dtype().is_floating_point()) {
@@ -104,7 +104,7 @@ void IRPrinter::visit(const Mod* v) {
   }
 }
 
-void IRPrinter::visit(const Max* v) {
+void IRPrinter::visit(Max* v) {
   os() << "Max(";
   v->lhs()->accept(this);
   os() << ", ";
@@ -112,7 +112,7 @@ void IRPrinter::visit(const Max* v) {
   os() << ", " << (unsigned int)v->propagate_nans() << ")";
 }
 
-void IRPrinter::visit(const Min* v) {
+void IRPrinter::visit(Min* v) {
   os() << "Min(";
   v->lhs()->accept(this);
   os() << ", ";
@@ -120,7 +120,7 @@ void IRPrinter::visit(const Min* v) {
   os() << ", " << (unsigned int)v->propagate_nans() << ")";
 }
 
-void IRPrinter::visit(const CompareSelect* v) {
+void IRPrinter::visit(CompareSelect* v) {
   CompareSelectOperation cmp_op = v->compare_select_op();
   int self_prec = getPrecedence(v->expr_type());
   int lhs_prec = getPrecedence(v->lhs()->expr_type());
@@ -165,7 +165,7 @@ void IRPrinter::visit(const CompareSelect* v) {
   }
   os() << " ? ";
 
-  auto withParens = [&](const Expr* e) {
+  auto withParens = [&](Expr* e) {
     auto prec = getPrecedence(e->expr_type());
     if (prec >= self_prec) {
       os() << "(";
@@ -219,30 +219,30 @@ static void formatImm(std::ostream& os, T v) {
 AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_PRINT_VISIT);
 #undef IMM_PRINT_VISIT
 
-void IRPrinter::visit(const Cast* v) {
+void IRPrinter::visit(Cast* v) {
   auto dtype = v->dtype();
   os() << dtypeToCppString(dtype) << "(";
   v->src_value()->accept(this);
   os() << ")";
 }
 
-void IRPrinter::visit(const Var* v) {
+void IRPrinter::visit(Var* v) {
   os() << name_manager_.get_unique_name(v);
 }
 
-void IRPrinter::visit(const Ramp* v) {
+void IRPrinter::visit(Ramp* v) {
   os() << "Ramp(" << *v->base() << ", " << *v->stride() << ", " << v->lanes()
        << ")";
 }
 
-void IRPrinter::visit(const Load* v) {
+void IRPrinter::visit(Load* v) {
   // TODO: support the mask case
   if (v->indices().size() == 0) {
     os() << *v->base_handle();
   } else {
     os() << *v->base_handle() << "[";
     size_t i = 0;
-    for (const Expr* ind : v->indices()) {
+    for (Expr* ind : v->indices()) {
       if (i++) {
         os() << ", ";
       }
@@ -255,18 +255,18 @@ void IRPrinter::visit(const Load* v) {
   }
 }
 
-void IRPrinter::visit(const Broadcast* v) {
+void IRPrinter::visit(Broadcast* v) {
   os() << "Broadcast(" << *v->value() << ", " << v->lanes() << ")";
 }
 
-void IRPrinter::visit(const IfThenElse* v) {
+void IRPrinter::visit(IfThenElse* v) {
   os() << "IfThenElse(" << *v->condition() << ", " << *v->true_value() << ", "
        << *v->false_value() << ")";
 }
 
-void IRPrinter::visit(const Intrinsics* v) {
+void IRPrinter::visit(Intrinsics* v) {
   os() << v->func_name() << "(";
-  for (const auto i : c10::irange(v->nparams())) {
+  for (auto i : c10::irange(v->nparams())) {
     if (i > 0) {
       os() << ", ";
     }
@@ -275,7 +275,7 @@ void IRPrinter::visit(const Intrinsics* v) {
   os() << ")";
 }
 
-void IRPrinter::visit(const Term* v) {
+void IRPrinter::visit(Term* v) {
   os() << "Term(";
   v->scalar()->accept(this);
   for (auto* t : v->variables()) {
@@ -285,7 +285,7 @@ void IRPrinter::visit(const Term* v) {
   os() << ")";
 }
 
-void IRPrinter::visit(const Polynomial* v) {
+void IRPrinter::visit(Polynomial* v) {
   bool first = true;
   os() << "Polynomial(";
   for (auto* t : v->variables()) {
@@ -303,7 +303,7 @@ void IRPrinter::visit(const Polynomial* v) {
   os() << ")";
 }
 
-void IRPrinter::visit(const RoundOff* v) {
+void IRPrinter::visit(RoundOff* v) {
   os() << "RoundOff(";
   v->lhs()->accept(this);
   os() << ", ";
@@ -311,7 +311,7 @@ void IRPrinter::visit(const RoundOff* v) {
   os() << ")";
 }
 
-void IRPrinter::visit(const MaxTerm* v) {
+void IRPrinter::visit(MaxTerm* v) {
   os() << "MaxTerm(";
   if (v->scalar()) {
     v->scalar()->accept(this);
@@ -326,7 +326,7 @@ void IRPrinter::visit(const MaxTerm* v) {
   os() << ")";
 }
 
-void IRPrinter::visit(const MinTerm* v) {
+void IRPrinter::visit(MinTerm* v) {
   os() << "MinTerm(";
   if (v->scalar()) {
     v->scalar()->accept(this);
@@ -341,7 +341,7 @@ void IRPrinter::visit(const MinTerm* v) {
   os() << ")";
 }
 
-void IRPrinter::visit(const ReduceOp* v) {
+void IRPrinter::visit(ReduceOp* v) {
   os() << "ReduceOp(";
   os() << *v->body() << ", ";
 
@@ -363,7 +363,7 @@ void IRPrinter::visit(const ReduceOp* v) {
 // each statement in a `Block` the printer will insert indentation before
 // the statement and a newline after the statement.
 
-void IRPrinter::visit(const Store* v) {
+void IRPrinter::visit(Store* v) {
   // TODO: handle the mask
   if (v->indices().size() == 0) {
     os() << *v->base_handle() << " = " << *v->value() << ";";
@@ -372,7 +372,7 @@ void IRPrinter::visit(const Store* v) {
 
   os() << *v->base_handle() << "[";
   size_t i = 0;
-  for (const Expr* ind : v->indices()) {
+  for (Expr* ind : v->indices()) {
     if (i++) {
       os() << ", ";
     }
@@ -384,8 +384,8 @@ void IRPrinter::visit(const Store* v) {
   os() << "] = " << *v->value() << ";";
 }
 
-void IRPrinter::visit(const For* v) {
-  const Var* var = v->var();
+void IRPrinter::visit(For* v) {
+  Var* var = v->var();
   VarHandle vv(var);
   os() << "for (" << dtypeToCppString(var->dtype()) << " " << vv << " = "
        << ExprHandle(v->start()) << "; " << vv << " < " << ExprHandle(v->stop())
@@ -401,7 +401,7 @@ void IRPrinter::visit(const For* v) {
   }
 }
 
-void IRPrinter::visit(const Block* v) {
+void IRPrinter::visit(Block* v) {
   os() << "{\n";
   indent_++;
 
@@ -414,12 +414,12 @@ void IRPrinter::visit(const Block* v) {
   os() << "}";
 }
 
-void IRPrinter::visit(const Allocate* v) {
+void IRPrinter::visit(Allocate* v) {
   os() << "Allocate(" << *v->buffer_var()
        << "); // dtype=" << dtypeToCppString(v->dtype());
   os() << ", dims=[";
-  const std::vector<const Expr*>& dims = v->dims();
-  for (const auto i : c10::irange(dims.size())) {
+  const std::vector<Expr*>& dims = v->dims();
+  for (auto i : c10::irange(dims.size())) {
     if (i != 0) {
       os() << ", ";
     }
@@ -428,18 +428,18 @@ void IRPrinter::visit(const Allocate* v) {
   os() << "]";
 }
 
-void IRPrinter::visit(const Free* v) {
+void IRPrinter::visit(Free* v) {
   os() << "Free(" << *v->buffer_var() << ");";
 }
 
-void IRPrinter::visit(const Let* v) {
+void IRPrinter::visit(Let* v) {
   os() << dtypeToCppString(v->dtype()) << " " << *v->var();
   os() << " = " << *v->value();
   os() << ";";
 }
 
-void IRPrinter::visit(const Cond* v) {
-  const Expr* cond = v->condition();
+void IRPrinter::visit(Cond* v) {
+  Expr* cond = v->condition();
   Stmt* true_stmt = v->true_stmt();
   Stmt* false_stmt = v->false_stmt();
   if (!true_stmt) {
@@ -455,10 +455,10 @@ void IRPrinter::visit(const Cond* v) {
   }
 }
 
-void IRPrinter::visit(const AtomicAdd* v) {
+void IRPrinter::visit(AtomicAdd* v) {
   os() << "atomicAdd(&" << *v->base_handle() << "[";
   size_t i = 0;
-  for (const Expr* ind : v->indices()) {
+  for (Expr* ind : v->indices()) {
     if (i++) {
       os() << ", ";
     }
@@ -470,16 +470,16 @@ void IRPrinter::visit(const AtomicAdd* v) {
   os() << "], " << *v->value() << ");";
 }
 
-void IRPrinter::visit(const SyncThreads* v) {
+void IRPrinter::visit(SyncThreads* v) {
   os() << "__syncthreads();";
 }
 
-void IRPrinter::visit(const ExternalCall* v) {
+void IRPrinter::visit(ExternalCall* v) {
   os() << *v->buf() << " = " << v->func_name() << "(";
 
   os() << "buf_args={";
   int i = 0;
-  for (const Buf* buf_arg : v->buf_args()) {
+  for (Buf* buf_arg : v->buf_args()) {
     if (i++ > 0) {
       os() << ", ";
     }
@@ -488,7 +488,7 @@ void IRPrinter::visit(const ExternalCall* v) {
 
   os() << "}, args={";
   i = 0;
-  for (const Expr* arg : v->args()) {
+  for (Expr* arg : v->args()) {
     if (i++ > 0) {
       os() << ", ";
     }
@@ -504,11 +504,12 @@ void IRPrinter::emitIndent() {
 std::ostream& operator<<(std::ostream& stream, const ExprHandle& expr) {
   IRPrinter::PrinterStream* printer_stream =
       dynamic_cast<IRPrinter::PrinterStream*>(&stream);
+  ExprHandle& mutable_expr = const_cast<ExprHandle&>(expr);
   if (printer_stream != nullptr) {
-    expr.node()->accept(printer_stream->printer());
+    mutable_expr.node()->accept(printer_stream->printer());
   } else {
     IRPrinter p(stream);
-    p.print(expr);
+    p.print(mutable_expr);
   }
   return stream;
 }
@@ -516,11 +517,12 @@ std::ostream& operator<<(std::ostream& stream, const ExprHandle& expr) {
 std::ostream& operator<<(std::ostream& stream, const Expr& expr) {
   IRPrinter::PrinterStream* printer_stream =
       dynamic_cast<IRPrinter::PrinterStream*>(&stream);
+  Expr& mutable_expr = const_cast<Expr&>(expr);
   if (printer_stream != nullptr) {
-    expr.accept(printer_stream->printer());
+    mutable_expr.accept(printer_stream->printer());
   } else {
     IRPrinter p(stream);
-    p.print(expr);
+    p.print(mutable_expr);
   }
   return stream;
 }
@@ -528,11 +530,12 @@ std::ostream& operator<<(std::ostream& stream, const Expr& expr) {
 std::ostream& operator<<(std::ostream& stream, const Stmt& stmt) {
   IRPrinter::PrinterStream* printer_stream =
       dynamic_cast<IRPrinter::PrinterStream*>(&stream);
+  Stmt& mutable_stmt = const_cast<Stmt&>(stmt);
   if (printer_stream != nullptr) {
-    stmt.accept(printer_stream->printer());
+    mutable_stmt.accept(printer_stream->printer());
   } else {
     IRPrinter p(stream);
-    p.print(stmt);
+    p.print(mutable_stmt);
   }
   return stream;
 }
@@ -544,8 +547,9 @@ std::ostream& operator<<(std::ostream& stream, const Tensor& t) {
 
 void print(const Expr* expr) {
   if (expr) {
+    Expr* mutable_expr = const_cast<Expr*>(expr);
     IRPrinter p(std::cout);
-    p.print(*expr);
+    p.print(*mutable_expr);
   } else {
     std::cout << "(null expr)";
   }
@@ -554,8 +558,9 @@ void print(const Expr* expr) {
 
 void print(const Stmt* stmt) {
   if (stmt) {
+    Stmt* mutable_stmt = const_cast<Stmt*>(stmt);
     IRPrinter p(std::cout);
-    p.print(*stmt);
+    p.print(*mutable_stmt);
   } else {
     std::cout << "(null stmt)\n";
   }
@@ -589,7 +594,7 @@ std::string to_string(const Tensor* t) {
   std::ostringstream oss;
   // TODO: move this to Buf printer
   oss << "Tensor " << t->buf()->name_hint() << "[";
-  for (const auto i : c10::irange(t->buf()->ndim())) {
+  for (auto i : c10::irange(t->buf()->ndim())) {
     if (i != 0) {
       oss << ", ";
     }

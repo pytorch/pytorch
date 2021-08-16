@@ -41,6 +41,7 @@ class _FunctionalAdadelta(object):
 
     def step(self, gradients: List[Optional[Tensor]]):
         params = self.param_group['params']
+        params_with_grad = []
         grads = []
         square_avgs = []
         acc_deltas = []
@@ -58,6 +59,7 @@ class _FunctionalAdadelta(object):
 
         for param, gradient in zip(params, gradients):
             if gradient is not None:
+                params_with_grad.append(param)
                 grads.append(gradient)
                 # Lazy state initialization
                 if param not in self.state:
@@ -72,7 +74,7 @@ class _FunctionalAdadelta(object):
                 acc_deltas.append(state['acc_delta'])
 
         with torch.no_grad():
-            F.adadelta(params,
+            F.adadelta(params_with_grad,
                        grads,
                        square_avgs,
                        acc_deltas,

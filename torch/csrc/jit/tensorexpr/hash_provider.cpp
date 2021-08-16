@@ -28,91 +28,91 @@ bool SimplifierHashType::operator!=(const size_t other) const {
   return _h != other;
 }
 
-void HashProvider::visit(const Add* v) {
+void HashProvider::visit(Add* v) {
   CACHE_GUARD();
   v->lhs()->accept(this);
   v->rhs()->accept(this);
   putHash(v, hash_combine(hashOf(v->lhs()), "+", hashOf(v->rhs())));
 }
 
-void HashProvider::visit(const Sub* v) {
+void HashProvider::visit(Sub* v) {
   CACHE_GUARD();
   v->lhs()->accept(this);
   v->rhs()->accept(this);
   putHash(v, hash_combine(hashOf(v->lhs()), "-", hashOf(v->rhs())));
 }
 
-void HashProvider::visit(const Mul* v) {
+void HashProvider::visit(Mul* v) {
   CACHE_GUARD();
   v->lhs()->accept(this);
   v->rhs()->accept(this);
   putHash(v, hash_combine(hashOf(v->lhs()), "*", hashOf(v->rhs())));
 }
 
-void HashProvider::visit(const Div* v) {
+void HashProvider::visit(Div* v) {
   CACHE_GUARD();
   v->lhs()->accept(this);
   v->rhs()->accept(this);
   putHash(v, hash_combine(hashOf(v->lhs()), "/", hashOf(v->rhs())));
 }
 
-void HashProvider::visit(const Mod* v) {
+void HashProvider::visit(Mod* v) {
   CACHE_GUARD();
   v->lhs()->accept(this);
   v->rhs()->accept(this);
   putHash(v, hash_combine(hashOf(v->lhs()), "%", hashOf(v->rhs())));
 }
 
-void HashProvider::visit(const Max* v) {
+void HashProvider::visit(Max* v) {
   CACHE_GUARD();
   v->lhs()->accept(this);
   v->rhs()->accept(this);
   putHash(v, hash_combine(hashOf(v->lhs()), "Mx", hashOf(v->rhs())));
 }
 
-void HashProvider::visit(const Min* v) {
+void HashProvider::visit(Min* v) {
   CACHE_GUARD();
   v->lhs()->accept(this);
   v->rhs()->accept(this);
   putHash(v, hash_combine(hashOf(v->lhs()), "Mn", hashOf(v->rhs())));
 }
 
-void HashProvider::visit(const And* v) {
+void HashProvider::visit(And* v) {
   CACHE_GUARD();
   v->lhs()->accept(this);
   v->rhs()->accept(this);
   putHash(v, hash_combine(hashOf(v->lhs()), "&", hashOf(v->rhs())));
 }
 
-void HashProvider::visit(const Or* v) {
+void HashProvider::visit(Or* v) {
   CACHE_GUARD();
   v->lhs()->accept(this);
   v->rhs()->accept(this);
   putHash(v, hash_combine(hashOf(v->lhs()), "|", hashOf(v->rhs())));
 }
 
-void HashProvider::visit(const Xor* v) {
+void HashProvider::visit(Xor* v) {
   CACHE_GUARD();
   v->lhs()->accept(this);
   v->rhs()->accept(this);
   putHash(v, hash_combine(hashOf(v->lhs()), "^", hashOf(v->rhs())));
 }
 
-void HashProvider::visit(const Lshift* v) {
+void HashProvider::visit(Lshift* v) {
   CACHE_GUARD();
   v->lhs()->accept(this);
   v->rhs()->accept(this);
   putHash(v, hash_combine(hashOf(v->lhs()), "<<", hashOf(v->rhs())));
 }
 
-void HashProvider::visit(const Rshift* v) {
+void HashProvider::visit(Rshift* v) {
   CACHE_GUARD();
   v->lhs()->accept(this);
   v->rhs()->accept(this);
   putHash(v, hash_combine(hashOf(v->lhs()), ">>", hashOf(v->rhs())));
 }
 
-void HashProvider::visit(const CompareSelect* v) {
+void HashProvider::visit(CompareSelect* v) {
   CACHE_GUARD();
   v->lhs()->accept(this);
   v->rhs()->accept(this);
@@ -128,18 +128,18 @@ void HashProvider::visit(const CompareSelect* v) {
           hashOf(v->ret_val2())));
 }
 
-void HashProvider::visit(const Cast* v) {
+void HashProvider::visit(Cast* v) {
   CACHE_GUARD();
   v->src_value()->accept(this);
   putHash(v, hash_combine("cast", v->dtype(), hashOf(v->src_value())));
 }
 
-void HashProvider::visit(const Var* v) {
+void HashProvider::visit(Var* v) {
   CACHE_GUARD();
   putHash(v, hash_combine("var", name_manager_.get_unique_name(v)));
 }
 
-void HashProvider::visit(const Ramp* v) {
+void HashProvider::visit(Ramp* v) {
   CACHE_GUARD();
   v->base()->accept(this);
   v->stride()->accept(this);
@@ -148,22 +148,22 @@ void HashProvider::visit(const Ramp* v) {
       hash_combine("ramp", hashOf(v->base()), hashOf(v->stride()), v->lanes()));
 }
 
-void HashProvider::visit(const Load* v) {
+void HashProvider::visit(Load* v) {
   CACHE_GUARD();
   v->base_handle()->accept(this);
   SimplifierHashType indices_hash;
-  for (const Expr* ind : v->indices()) {
+  for (Expr* ind : v->indices()) {
     ind->accept(this);
     indices_hash = hash_combine(indices_hash, hashOf(ind));
   }
   putHash(v, hash_combine("load", hashOf(v->base_handle()), indices_hash));
 }
 
-void HashProvider::visit(const Store* v) {
+void HashProvider::visit(Store* v) {
   CACHE_GUARD();
   v->base_handle()->accept(this);
   SimplifierHashType indices_hash;
-  for (const Expr* ind : v->indices()) {
+  for (Expr* ind : v->indices()) {
     ind->accept(this);
     indices_hash = hash_combine(indices_hash, hashOf(ind));
   }
@@ -174,7 +174,7 @@ void HashProvider::visit(const Store* v) {
           "store", hashOf(v->base_handle()), indices_hash, hashOf(v->value())));
 }
 
-void HashProvider::visit(const Block* v) {
+void HashProvider::visit(Block* v) {
   CACHE_GUARD();
   SimplifierHashType hash;
 
@@ -185,7 +185,7 @@ void HashProvider::visit(const Block* v) {
   putHash(v, hash);
 }
 
-void HashProvider::visit(const For* v) {
+void HashProvider::visit(For* v) {
   CACHE_GUARD();
   v->var()->accept(this);
   v->start()->accept(this);
@@ -202,13 +202,13 @@ void HashProvider::visit(const For* v) {
   putHash(v, hash);
 }
 
-void HashProvider::visit(const Broadcast* v) {
+void HashProvider::visit(Broadcast* v) {
   CACHE_GUARD();
   v->value()->accept(this);
   putHash(v, hash_combine("broadcast", hashOf(v->value()), v->lanes()));
 }
 
-void HashProvider::visit(const IfThenElse* v) {
+void HashProvider::visit(IfThenElse* v) {
   CACHE_GUARD();
   v->condition()->accept(this);
   v->true_value()->accept(this);
@@ -223,7 +223,7 @@ void HashProvider::visit(const IfThenElse* v) {
           hashOf(v->false_value())));
 }
 
-void HashProvider::visit(const Intrinsics* v) {
+void HashProvider::visit(Intrinsics* v) {
   CACHE_GUARD();
   // calls to rand are not symbolic and have a different value each time, they
   // should not hash to anything and this is the best we can do.
@@ -234,7 +234,7 @@ void HashProvider::visit(const Intrinsics* v) {
   }
 
   SimplifierHashType hash(te_hash(v->func_name()));
-  for (const auto i : c10::irange(v->nparams())) {
+  for (auto i : c10::irange(v->nparams())) {
     v->param(i)->accept(this);
     hash = hash_combine(hash, hashOf(v->param(i)));
   }
@@ -242,33 +242,33 @@ void HashProvider::visit(const Intrinsics* v) {
   putHash(v, hash);
 }
 
-void HashProvider::visit(const Allocate* v) {
+void HashProvider::visit(Allocate* v) {
   CACHE_GUARD();
-  const Var* buffer_var = v->buffer_var();
+  Var* buffer_var = v->buffer_var();
   buffer_var->accept(this);
 
   SimplifierHashType hash =
       hash_combine("allocate", hashOf(buffer_var), v->dtype());
 
-  std::vector<const Expr*> dims = v->dims();
-  for (const Expr* dim : dims) {
+  std::vector<Expr*> dims = v->dims();
+  for (Expr* dim : dims) {
     dim->accept(this);
     hash = hash_combine(hash, hashOf(dim));
   }
   putHash(v, hash);
 }
 
-void HashProvider::visit(const Free* v) {
+void HashProvider::visit(Free* v) {
   CACHE_GUARD();
-  const Var* buffer_var = v->buffer_var();
+  Var* buffer_var = v->buffer_var();
   buffer_var->accept(this);
 
   putHash(v, hash_combine("free", hashOf(buffer_var)));
 }
 
-void HashProvider::visit(const Cond* v) {
+void HashProvider::visit(Cond* v) {
   CACHE_GUARD();
-  const Expr* condition = v->condition();
+  Expr* condition = v->condition();
   Stmt* true_stmt = v->true_stmt();
   Stmt* false_stmt = v->false_stmt();
   condition->accept(this);
@@ -286,7 +286,7 @@ void HashProvider::visit(const Cond* v) {
   putHash(v, hash);
 }
 
-void HashProvider::visit(const Term* v) {
+void HashProvider::visit(Term* v) {
   CACHE_GUARD();
   v->scalar()->accept(this);
 
@@ -299,7 +299,7 @@ void HashProvider::visit(const Term* v) {
   putHash(v, hash);
 }
 
-void HashProvider::visit(const Polynomial* v) {
+void HashProvider::visit(Polynomial* v) {
   CACHE_GUARD();
   v->scalar()->accept(this);
 
@@ -312,7 +312,7 @@ void HashProvider::visit(const Polynomial* v) {
   putHash(v, hash);
 }
 
-void HashProvider::visit(const MaxTerm* v) {
+void HashProvider::visit(MaxTerm* v) {
   CACHE_GUARD();
   SimplifierHashType hash = hash_combine("maxterm");
   if (v->scalar()) {
@@ -328,7 +328,7 @@ void HashProvider::visit(const MaxTerm* v) {
   putHash(v, hash);
 }
 
-void HashProvider::visit(const MinTerm* v) {
+void HashProvider::visit(MinTerm* v) {
   CACHE_GUARD();
   SimplifierHashType hash = hash_combine("minterm");
   if (v->scalar()) {

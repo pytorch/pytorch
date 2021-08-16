@@ -2,6 +2,7 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <memory>
 #include <string>
+#include <unordered_map>
 
 // `TorchScript` offers a simple logging facility that can enabled by setting an
 // environment variable `PYTORCH_JIT_LOG_LEVEL`.
@@ -61,6 +62,7 @@ class JitLoggingConfig {
   std::string logging_levels;
   std::unordered_map<std::string, size_t> files_to_levels;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   JitLoggingConfig() {
     const char* jit_log_level = std::getenv("PYTORCH_JIT_LOG_LEVEL");
     logging_levels.assign(jit_log_level == nullptr ? "" : jit_log_level);

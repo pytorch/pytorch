@@ -1127,13 +1127,11 @@ std::shared_ptr<BoundShapeInferencerBase> getBoundShapeInferencer(
   return std::make_shared<BoundShapeInferencer>(spec);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_SHARED_REGISTRY(
     BoundShapeInferencerRegistry,
     BoundShapeInferencerBase,
     const BoundShapeSpec&);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_REGISTER_CREATOR(
     BoundShapeInferencerRegistry,
     C10,

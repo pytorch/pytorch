@@ -19,7 +19,6 @@ from typing import (
     Set,
     Union,
 )
-from urllib.parse import quote
 
 import torch
 from torch.serialization import location_tag, normalize_storage_type
@@ -49,6 +48,11 @@ class _ModuleProviderAction(Enum):
     EXTERN = 2
     MOCK = 3
     DENY = 4
+    # Special case: when a module is mocked, PackageExporter writes out a
+    # `_mock` module that implements our mocking stubs. If we re-package code,
+    # we may encounter a `_mock` module from the original package. If we do,
+    # just ignore it and write a `_mock` module once.
+    REPACKAGED_MOCK_MODULE = 5
 
 
 class PackagingErrorReason(Enum):
@@ -170,7 +174,6 @@ class PackageExporter:
         self,
         f: Union[str, Path, BinaryIO],
         importer: Union[Importer, Sequence[Importer]] = sys_importer,
-        verbose: bool = True,
     ):
         """
         Create an exporter.
@@ -180,8 +183,6 @@ class PackageExporter:
                 or a binary I/O object.
             importer: If a single Importer is passed, use that to search for modules.
                 If a sequence of importers are passsed, an ``OrderedImporter`` will be constructed out of them.
-            verbose: Print information about dependency resolution to stdout.
-                Useful for tracking down why certain files get included.
         """
         if isinstance(f, (Path, str)):
             f = str(f)
@@ -191,8 +192,9 @@ class PackageExporter:
 
         self.zip_file = torch._C.PyTorchFileWriter(f)
         self.zip_file.set_min_version(6)
+        self._written_files: Set[str] = set()
+
         self.serialized_reduces: Dict[int, Any] = {}
-        self.serialized_storages: Set[str] = set()
 
         # A graph tracking all the modules and pickle objects added to this
         # package and the dependencies between them.
@@ -200,8 +202,8 @@ class PackageExporter:
         # - Each directed edge (u, v) means u depends on v.
         # - Nodes may contain metadata that describe how to write the thing to the zipfile.
         self.dependency_graph = DiGraph()
-        self.verbose = verbose
         self.script_module_serializer = torch._C.ScriptModuleSerializer(self.zip_file)
+        self.storage_context = self.script_module_serializer.storage_context()
 
         # These are OrderedDicts for compatibility with RemovableHandle.
         # Generic OrderedDict type annotations are not present until 3.7.
@@ -330,10 +332,6 @@ class PackageExporter:
             if self._module_exists(dep_module_name):
                 dependencies[dep_module_name] = True
 
-        if self.verbose:
-            dep_str = "".join(f"  {dep}\n" for dep in dependencies)
-            print(f"{module_name} depends on:\n{dep_str}\n")
-
         return list(dependencies.keys())
 
     def save_source_string(
@@ -365,7 +363,7 @@ class PackageExporter:
 
             for dep in deps:
                 self.dependency_graph.add_edge(module_name, dep)
-                self.require_module_if_not_provided(dep)
+                self.add_dependency(dep)
 
     def _write_source_string(
         self,
@@ -401,20 +399,6 @@ class PackageExporter:
         except Exception:
             return False
 
-    def _write_dep_graph(self, failing_module=None):
-        edges = "\n".join(f'"{f}" -> "{t}";' for f, t in self.dependency_graph.edges)
-        failing = "" if failing_module is None else f'"{failing_module}" [color=red];'
-        template = f"""\
-digraph G {{
-rankdir = LR;
-node [shape=box];
-{failing}
-{edges}
-}}
-"""
-        arg = quote(template, safe="")
-        return f"https://dreampuf.github.io/GraphvizOnline/#{arg}"
-
     def _get_source_of_module(self, module: types.ModuleType) -> Optional[str]:
         filename = getattr(module, "__file__", None)
         result = (
@@ -428,19 +412,25 @@ node [shape=box];
 
         return "".join(result)
 
-    def require_module_if_not_provided(self, module_name: str, dependencies=True):
+    def add_dependency(self, module_name: str, dependencies=True):
+        """Given a module, add it to the dependency graph according to patterns
+        specified by the user.
+        """
         if (
             module_name in self.dependency_graph
             and self.dependency_graph.nodes[module_name].get("provided") is True
         ):
             return
 
+        if module_name == "_mock":
+            self.dependency_graph.add_node(
+                module_name,
+                action=_ModuleProviderAction.REPACKAGED_MOCK_MODULE,
+                provided=True,
+            )
+            return
+
         if self._can_implicitly_extern(module_name):
-            if self.verbose:
-                print(
-                    f"implicitly adding {module_name} to external modules "
-                    f"since it is part of the standard library and is a dependency."
-                )
             self.dependency_graph.add_node(
                 module_name, action=_ModuleProviderAction.EXTERN, provided=True
             )
@@ -462,7 +452,7 @@ node [shape=box];
                 # If we are interning this module, we need to retrieve its
                 # dependencies and package those as well.
                 if pattern_info.action == _ModuleProviderAction.INTERN:
-                    self._add_module_to_dependency_graph(module_name, dependencies)
+                    self._intern_module(module_name, dependencies)
                 return
 
         # No patterns have matched. Explicitly add this as an error.
@@ -485,15 +475,19 @@ node [shape=box];
             )
 
         self.dependency_graph.add_node(
-            module_name, provided=True, action=_ModuleProviderAction.INTERN
+            module_name,
+            provided=True,
         )
-        self._add_module_to_dependency_graph(module_name, dependencies)
+        self._intern_module(module_name, dependencies)
 
-    def _add_module_to_dependency_graph(
+    def _intern_module(
         self,
         module_name: str,
         dependencies: bool,
     ):
+        """Adds the module to the dependency graph as an interned module,
+        along with any metadata needed to write it out to the zipfile at serialization time.
+        """
         module_obj = self._import_module(module_name)
 
         # Find dependencies of this module and require them as well.
@@ -513,6 +507,7 @@ node [shape=box];
                 error_context = f"filename: {filename}"
             self.dependency_graph.add_node(
                 module_name,
+                action=_ModuleProviderAction.INTERN,
                 is_package=is_package,
                 error=packaging_error,
                 error_context=error_context,
@@ -520,14 +515,18 @@ node [shape=box];
             return
 
         self.dependency_graph.add_node(
-            module_name, is_package=is_package, source=source, provided=True
+            module_name,
+            action=_ModuleProviderAction.INTERN,
+            is_package=is_package,
+            source=source,
+            provided=True,
         )
 
         if dependencies:
             deps = self._get_dependencies(source, module_name, is_package)
             for dep in deps:
                 self.dependency_graph.add_edge(module_name, dep)
-                self.require_module_if_not_provided(dep)
+                self.add_dependency(dep)
 
     def save_pickle(
         self, package: str, resource: str, obj: Any, dependencies: bool = True
@@ -573,13 +572,9 @@ node [shape=box];
                     if module not in all_dependencies:
                         all_dependencies.append(module)
 
-            if self.verbose:
-                dep_string = "".join(f"  {dep}\n" for dep in all_dependencies)
-                print(f"{resource} depends on:\n{dep_string}\n")
-
             for module_name in all_dependencies:
                 self.dependency_graph.add_edge(name_in_dependency_graph, module_name)
-                self.require_module_if_not_provided(module_name)
+                self.add_dependency(module_name)
 
         self._write(filename, data_value)
 
@@ -776,20 +771,19 @@ node [shape=box];
     def _persistent_id(self, obj):
         if torch.is_storage(obj):
             storage_type = normalize_storage_type(type(obj))
-            obj_key = str(obj._cdata)
             location = location_tag(obj)
-            name = f".data/{obj_key}.storage"
 
-            if name not in self.serialized_storages:
-                # check to see if storage was previously serialized
-                serialized_files = self.zip_file.get_all_written_records()
-                if name not in serialized_files:
-                    if obj.device.type != "cpu":
-                        obj = obj.cpu()
-                    num_bytes = obj.size() * obj.element_size()
-                    self.zip_file.write_record(name, obj.data_ptr(), num_bytes)
-                self.serialized_storages.add(name)
-            return ("storage", storage_type, obj_key, location, obj.size())
+            # serialize storage if not already written
+            storage_present = self.storage_context.has_storage(obj)
+            storage_id = self.storage_context.get_or_add_storage(obj)
+            if not storage_present:
+                if obj.device.type != "cpu":
+                    obj = obj.cpu()
+                num_bytes = obj.size() * obj.element_size()
+                self.zip_file.write_record(
+                    f".data/{storage_id}.storage", obj.data_ptr(), num_bytes
+                )
+            return ("storage", storage_type, storage_id, location, obj.size())
 
         if hasattr(obj, "__reduce_package__"):
             if _gate_torchscript_serialization and isinstance(
@@ -826,8 +820,15 @@ node [shape=box];
         self.close()
 
     def _write(self, filename, str_or_bytes):
+        if filename in self._written_files:
+            raise AssertionError(
+                f"Tried to write file '{filename}', but it already exists in this archive. "
+                "Please file a bug."
+            )
+        self._written_files.add(filename)
+
         if is_mangled(filename):
-            raise RuntimeError(
+            raise AssertionError(
                 f"Tried to save a torch.package'd module as '{filename}'. "
                 "Directly saving torch.package'd modules is not allowed."
             )
@@ -847,6 +848,11 @@ node [shape=box];
                 raise EmptyMatchError(
                     f"Exporter did not match any modules to {pattern}, which was marked as allow_empty=False"
                 )
+
+    def _write_mock_file(self):
+        if "_mock.py" not in self._written_files:
+            mock_file = str(Path(__file__).parent / "_mock.py")
+            self._write_source_string("_mock", _read_file(mock_file), is_package=False)
 
     def _execute_dependency_graph(self):
         """Takes a finalized dependency graph describing how to package all
@@ -869,12 +875,7 @@ node [shape=box];
                 for hook in self._mock_hooks.values():
                     hook(self, module_name)
 
-                if not _mock_written:
-                    mock_file = str(Path(__file__).parent / "_mock.py")
-                    self._write_source_string(
-                        "_mock", _read_file(mock_file), is_package=False
-                    )
-                    _mock_written = True
+                self._write_mock_file()
 
                 is_package = hasattr(self._import_module(module_name), "__path__")
                 self._write_source_string(module_name, _MOCK_IMPL, is_package)
@@ -898,6 +899,9 @@ node [shape=box];
                 source = attrs["source"]
                 self._write_source_string(module_name, source, is_package)
 
+            elif action == _ModuleProviderAction.REPACKAGED_MOCK_MODULE:
+                self._write_mock_file()
+
             else:
                 raise AssertionError(
                     f"Invalid action: {module_name}, {action}. Please report a bug to PyTorch."
@@ -913,9 +917,6 @@ node [shape=box];
             with PackageExporter("file.zip") as e:
                 ...
         """
-        if self.verbose:
-            print(f"Dependency graph for exported package: \n{self._write_dep_graph()}")
-
         self._execute_dependency_graph()
 
         self.script_module_serializer.write_files()
@@ -938,6 +939,79 @@ node [shape=box];
             top_level_package_name not in _DISALLOWED_MODULES
             and is_stdlib_module(top_level_package_name)
         )
+
+    def dependency_graph_string(self) -> str:
+        """Returns digraph string representation of dependencies in package.
+
+        Returns:
+            A string representation of dependencies in package.
+        """
+        edges = "\n".join(f'"{f}" -> "{t}";' for f, t in self.dependency_graph.edges)
+        return f"""\
+digraph G {{
+rankdir = LR;
+node [shape=box];
+{edges}
+}}
+"""
+
+    def _nodes_with_action_type(
+        self, action: Optional[_ModuleProviderAction]
+    ) -> List[str]:
+        result = []
+        for name, node_dict in self.dependency_graph.nodes.items():
+            node_action = node_dict.get("action", None)
+            if node_action == action and "is_pickle" not in node_dict:
+                result.append(name)
+        result.sort()
+        return result
+
+    def externed_modules(self) -> List[str]:
+        """Return all modules that are currently externed.
+
+        Returns:
+            A list containing the names of modules which will be
+            externed in this package.
+        """
+        return self._nodes_with_action_type(_ModuleProviderAction.EXTERN)
+
+    def interned_modules(self) -> List[str]:
+        """Return all modules that are currently interned.
+
+        Returns:
+            A list containing the names of modules which will be
+            interned in this package.
+        """
+        return self._nodes_with_action_type(_ModuleProviderAction.INTERN)
+
+    def mocked_modules(self) -> List[str]:
+        """Return all modules that are currently mocked.
+
+        Returns:
+            A list containing the names of modules which will be
+            mocked in this package.
+        """
+        return self._nodes_with_action_type(_ModuleProviderAction.MOCK)
+
+    def denied_modules(self) -> List[str]:
+        """Return all modules that are currently denied.
+
+        Returns:
+            A list containing the names of modules which will be
+            denied in this package.
+        """
+        return self._nodes_with_action_type(_ModuleProviderAction.DENY)
+
+    def get_rdeps(self, module_name: str) -> List[str]:
+        """Return a list of all modules which depend on the module ``module_name``.
+
+        Returns:
+            A list containing the names of modules which depend on ``module_name``.
+        """
+        if module_name in self.dependency_graph._pred.keys():
+            return list(self.dependency_graph._pred[module_name].keys())
+        else:
+            return []
 
 
 # even though these are in the standard library, we do not allow them to be

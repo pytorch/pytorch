@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import torch
+import torch.utils.data
 import numpy as np
 
 import contextlib
@@ -32,7 +33,7 @@ from torch.testing._internal.common_utils import (
     do_test_dtypes, IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, load_tests, slowTest,
     skipCUDAMemoryLeakCheckIf, BytesIOContext, noarchTest,
     skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
-    wrapDeterministicFlagAPITest, DeterministicGuard, make_tensor)
+    wrapDeterministicFlagAPITest, DeterministicGuard, CudaSyncGuard, make_tensor)
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -2919,21 +2920,35 @@ def torch_vital_set(value):
 
 
 # Tests Vital Signs for Torch
-class TestVitalSigns(TestCase):
+class TestBasicVitalSigns(TestCase):
     def test_basic_vitals(self):
         with torch_vital_set(''):
             self.assertFalse(torch.vitals_enabled())
         with torch_vital_set('ON'):
             self.assertTrue(torch.vitals_enabled())
 
-    def test_write_vital(self):
+    def test_basic_vitals_read_write(self):
         with torch_vital_set('ON'):
             self.assertTrue(torch.vitals_enabled())
             # This tests the code path of setting a vital
-            self.assertTrue(torch.set_vital('Dataloader', 'basic_unit_test', 'TEST'))
-            # Ideally we would have a read test for vitals, though because the the C++ design
-            # pattern of loggers we use, we can't know the whole list of vitals until the
-            # global C++ namespace is destructed.
+            self.assertTrue(torch.set_vital('Dataloader', 'basic_unit_test', 'TEST_VALUE_STRING'))
+            self.assertIn('TEST_VALUE_STRING', torch.read_vitals())
+            self.assertIn('CUDA.used', torch.read_vitals())
+
+    def test_dataloader_vitals(self):
+        with torch_vital_set('ON'):
+            inps = torch.arange(10 * 5, dtype=torch.float32).view(10, 5)
+            tgts = torch.arange(10 * 5, dtype=torch.float32).view(10, 5)
+            dataset = torch.utils.data.TensorDataset(inps, tgts)
+            loader = torch.utils.data.DataLoader(dataset, batch_size=2)
+            self.assertIn('Dataloader.enabled\t\t True', torch.read_vitals())
+
+
+class TestVitalSignsCuda(TestCase):
+    @onlyCUDA
+    def test_cuda_vitals_gpu_only(self, device):
+        with torch_vital_set('ON'):
+            self.assertIn('CUDA.used\t\t true', torch.read_vitals())
 
 
 # Device-generic tests. Instantiated below and not run directly.
@@ -2946,34 +2961,6 @@ class TestTorchDeviceType(TestCase):
         for i in range(dim):
             shape.append(random.randint(min_size, max_size))
         return tuple(shape)
-
-    @onlyCPU
-    def test_set_deterministic_deprecated_warning(self, device):
-        with DeterministicGuard(torch.are_deterministic_algorithms_enabled()):
-            # Calling set_deterministic throws a warning about deprecation once
-            # per process but testing this is tricky here since we actually get
-            # two warnings: one for the deprecated use of `set_deterministic`
-            # and one for the 'beta' use of `use_deterministic_algorithms`.
-            # The assertWarnsOnceRegex cannot handle two different warnings
-            with warnings.catch_warnings(record=True) as ws:
-                warnings.simplefilter("always")  # allow any warning to be raised
-                prev = torch.is_warn_always_enabled()
-                torch.set_warn_always(True)
-                try:
-                    torch.set_deterministic(True)
-                finally:
-                    torch.set_warn_always(prev)
-                for w in ws:
-                    txt = str(w.message)
-                    assert ("torch.use_deterministic_algorithms is in beta" in txt or
-                            "torch.set_deterministic is deprecated" in txt)
-
-    @onlyCPU
-    def test_is_deterministic_deprecated_warning(self, device):
-        with DeterministicGuard(torch.are_deterministic_algorithms_enabled()):
-            # Calling is_deterministic throws a warning about deprecation once per process
-            with self.assertWarnsOnceRegex(UserWarning, "torch.is_deterministic is deprecated"):
-                torch.is_deterministic()
 
     # Validates that mathematical constants are defined properly, as required by
     # the Python Array API (https://data-apis.org/array-api/latest/API_specification/constants.html)
@@ -4239,6 +4226,65 @@ else:
 
             self.assertEqual(res, expected, atol=0, rtol=0)
 
+    @onlyCUDA
+    def test_sync_warning(self, device):
+
+        def _sync_raises_helper(f, level):
+            with CudaSyncGuard(level):
+                if level == 1:
+                    with self.assertWarnsRegex(UserWarning, "called a synchronizing "):
+                        f()
+                elif level == 2:
+                    with self.assertRaisesRegex(RuntimeError, "called a synchronizing "):
+                        f()
+
+        def _no_sync_helper(f, level):
+            with CudaSyncGuard(level):
+                f()
+
+        def _ind_put_fn(x, ind, val):
+            x[ind] = val
+            return x
+
+        def _ind_get_fn(x, ind):
+            return x[ind]
+
+        def _cond_fn(x):
+            if x:  # taking boolean value of a tensor synchronizes
+                return x
+            else:
+                return 2 * x
+
+        # prepare inputs for subsequent ops
+        size = 4
+        x = torch.rand(size, device=device)
+        y = torch.rand((), device=device)
+        ind = torch.randint(size, (3,), device=device)
+        ind_cpu = ind.cpu()
+        repeats = torch.full((1,), 2, device=device)
+        mask = torch.randint(2, (size,), device=device, dtype=bool)
+        expect_no_sync = (lambda: _ind_put_fn(x, mask, 1.),
+                          lambda: _ind_put_fn(x, ind, y),
+                          lambda: _ind_get_fn(x, ind),
+                          lambda: torch.nn.functional.one_hot(ind, num_classes=size),
+                          lambda: torch.randperm(20000, device=device),
+                          lambda: torch.repeat_interleave(x, 2, output_size=2 * size),
+                          lambda: torch.repeat_interleave(x, repeats, output_size=2 * size))
+        expect_sync = (lambda: _ind_put_fn(x, mask, y),
+                       lambda: _ind_put_fn(x, ind_cpu, y),
+                       lambda: _ind_get_fn(x, mask),
+                       lambda: _ind_get_fn(x, ind_cpu),
+                       lambda: x.nonzero(),
+                       lambda: _cond_fn(y),
+                       lambda: torch.nn.functional.one_hot(ind),
+                       lambda: torch.repeat_interleave(x, 2),
+                       lambda: torch.repeat_interleave(x, repeats))
+        for f, level in product(expect_no_sync, (1, 2)):
+            _no_sync_helper(f, level)
+        for f, level in product(expect_sync, (1, 2)):
+            _sync_raises_helper(f, level)
+
+
     @dtypes(*torch.testing.get_all_fp_dtypes())
     def test_log_normal(self, device, dtype):
         a = torch.tensor([10], dtype=dtype, device=device).log_normal_()
@@ -4366,6 +4412,61 @@ else:
         x = torch.empty(50000000, device=device, dtype=dtype).exponential_()
         self.assertTrue(x.min() > 0)
 
+    def _generate_correlation_tensors(self, device, dtype):
+        yield make_tensor((0, 0), device, dtype)
+        yield make_tensor((1, 0), device, dtype)
+        yield make_tensor((0, 1), device, dtype)
+        yield make_tensor((2,), device, dtype)
+        yield make_tensor((2, 1), device, dtype)
+        yield make_tensor((2, 2), device, dtype)
+        yield make_tensor((2, 3), device, dtype)
+        yield make_tensor((5, 10), device, dtype)
+        yield make_tensor((5, 10), device, dtype, noncontiguous=True)
+        if dtype != torch.int:
+            yield torch.tensor([0, -2, nan, 10.2, inf], dtype=dtype, device=device)
+
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.int, torch.float, torch.cfloat)
+    def test_corrcoef(self, device, dtype):
+        for x in self._generate_correlation_tensors(device, dtype):
+            res = torch.corrcoef(x)
+            ref = np.corrcoef(x.cpu().numpy())
+            self.assertEqual(res, ref, exact_dtype=False)
+
+    @dtypes(torch.int, torch.float, torch.cfloat)
+    def test_cov(self, device, dtype):
+        def check(t, correction=1, fweights=None, aweights=None):
+            res = torch.cov(t, correction=correction, fweights=fweights, aweights=aweights)
+            t = t.cpu().numpy()
+            fweights = fweights.cpu().numpy() if fweights is not None else None
+            aweights = aweights.cpu().numpy() if aweights is not None else None
+            ref = np.cov(t, ddof=correction, fweights=fweights, aweights=aweights)
+            self.assertEqual(res, ref, atol=1e-05, rtol=1e-05, exact_dtype=False)
+
+        for x in self._generate_correlation_tensors(device, dtype):
+            check(x)
+            num_observations = x.numel() if x.ndim < 2 else x.size(1)
+            if num_observations > 0:
+                fweights = torch.randint(1, 10, (num_observations,), device=device)
+                aweights = make_tensor((num_observations,), device, torch.float, low=1)
+                for correction, fw, aw in product([0, 1, 2], [None, fweights], [None, aweights]):
+                    check(x, correction, fweights, aweights)
+
+    def test_cov_error(self, device):
+        def check(msg, *args, **kwargs):
+            with self.assertRaisesRegex(RuntimeError, r'cov\(\):.*' + msg + r'.*'):
+                torch.cov(*args, **kwargs)
+
+        a = torch.rand(2)
+        check(r'expected input to have two or fewer dimensions', torch.rand(2, 2, 2))
+        check(r'expected fweights to have one or fewer dimensions', a, fweights=torch.rand(2, 2))
+        check(r'expected aweights to have one or fewer dimensions', a, aweights=torch.rand(2, 2))
+        check(r'expected fweights to have integral dtype', a, fweights=torch.rand(2))
+        check(r'expected aweights to have floating point dtype', a, aweights=torch.tensor([1, 1]))
+        check(r'expected fweights to have the same numel', a, fweights=torch.tensor([1]))
+        check(r'expected aweights to have the same numel', a, aweights=torch.rand(1))
+        check(r'fweights cannot be negative', a, fweights=torch.tensor([-1, -2]))
+        check(r'aweights cannot be negative', a, aweights=torch.tensor([-1., -2.]))
 
     @skipIfNoSciPy
     @dtypes(*torch.testing.get_all_fp_dtypes())
@@ -4425,6 +4526,16 @@ else:
                 t = torch.empty(size, dtype=dtype, device=device).cauchy_(median=median, sigma=sigma)
                 res = stats.kstest(t.cpu().to(torch.double), 'cauchy', args=(median, sigma))
                 self.assertTrue(res.statistic < 0.1)
+
+    @slowTest
+    @onlyCUDA
+    @dtypes(torch.bfloat16, torch.float32)
+    def test_cauchy_no_inf(self, device, dtype):
+        # torch.float16 will have `inf` because of its smaller range.
+        for _ in range((2**16) * 2):
+            x = torch.empty((2**16), dtype=dtype, device=device)
+            x.cauchy_()
+            self.assertFalse(x.isinf().sum())
 
     @skipIfNoSciPy
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes()))
@@ -5250,6 +5361,13 @@ else:
                 UserWarning, "This overload of addcmul is deprecated"):
             self.assertEqual(actual, torch.addcmul(a, alpha, b, c))
 
+        if self.device_type == 'cuda' and dtype == torch.half:
+            a = torch.tensor([60000.0], device=device, dtype=dtype)
+            b = torch.tensor([60000.0], device=device, dtype=dtype)
+            c = torch.tensor([2.0], device=device, dtype=dtype)
+            out = torch.addcmul(a, b, c, value=-1)
+            self.assertTrue(not (out.isnan() or out.isinf()))
+
     def test_narrow_empty(self, device):
         x = torch.randn(2, 3, 4, device=device)
         for d in range(x.dim()):
@@ -5824,6 +5942,8 @@ else:
         dst = dst.masked_scatter(mask, src)
         self.assertEqual(dst, torch.tensor([True, True, True], device=device))
 
+    # refer https://github.com/pytorch/pytorch/issues/60190
+    @skipIfRocm
     @onlyCUDA
     @largeTensorTest('30GB')
     def test_masked_scatter_large_tensor(self, device):
@@ -6250,6 +6370,13 @@ else:
                 _test_addcdiv()
         else:
             _test_addcdiv()
+
+        if self.device_type == 'cuda' and dtype == torch.half:
+            a = torch.tensor([60000.0], device=device, dtype=dtype)
+            b = torch.tensor([60000.0], device=device, dtype=dtype)
+            c = torch.tensor([1.0], device=device, dtype=dtype)
+            out = torch.addcmul(a, b, c, value=-2)
+            self.assertTrue(not (out.isnan() or out.isinf()))
 
     def test_nullary_op_mem_overlap(self, device):
         ops = (
@@ -7610,6 +7737,36 @@ else:
         # Reset the original dtype
         torch.set_default_dtype(default_dtype)
 
+    def test_hook_remove(self, device):
+        # Reference: https://github.com/pytorch/pytorch/issues/58354
+        def _test_helper(remove_hook):
+            def install_hook(tensor):
+                handle = None
+
+                def hook(tensor):
+                    if remove_hook:
+                        handle.remove()
+                    return torch.zeros_like(tensor)
+                handle = tensor.register_hook(hook)
+
+            t = torch.ones((1, 5), device=device, requires_grad=True)
+            install_hook(t)
+
+            # First call to backward
+            t.mean().backward()
+            self.assertEqual(t.grad, torch.zeros_like(t))
+
+            # Second call to backward
+            t.mean().backward()
+            if remove_hook:
+                # After removing the hook, make sure the usual gradient is returned
+                self.assertEqual(t.grad, 0.2 * torch.ones_like(t))
+            else:
+                self.assertEqual(t.grad, torch.zeros_like(t))
+
+        _test_helper(remove_hook=True)
+        _test_helper(remove_hook=False)
+
 # Tests that compare a device's computation with the (gold-standard) CPU's.
 class TestDevicePrecision(TestCase):
     exact_dtype = True
@@ -8135,6 +8292,7 @@ class TestTensorDeviceOps(TestCase):
 # pytest will fail.
 add_neg_dim_tests()
 instantiate_device_type_tests(TestViewOps, globals())
+instantiate_device_type_tests(TestVitalSignsCuda, globals())
 instantiate_device_type_tests(TestTensorDeviceOps, globals())
 instantiate_device_type_tests(TestTorchDeviceType, globals())
 instantiate_device_type_tests(TestDevicePrecision, globals(), except_for='cpu')

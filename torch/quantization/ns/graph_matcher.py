@@ -1,3 +1,4 @@
+import collections
 import enum
 
 import torch
@@ -16,6 +17,10 @@ from .pattern_utils import (
     get_type_a_related_to_b,
     get_reversed_fusions,
     end_node_matches_reversed_fusion,
+)
+from torch.quantization import (
+    ObserverBase,
+    FakeQuantizeBase,
 )
 
 from typing import Dict, Tuple, List, Optional, Set, Any
@@ -96,12 +101,21 @@ class _NSGraphMatchableSubgraphsIterator:
             for arg in cur_start_node.all_input_nodes:
                 self._recursively_add_node_arg_to_stack(arg)
 
-            # skip observers, etc
+            # skip unmatchable nodes
             # note: this check is done on the start_node, i.e.
             # if we are matching linear-relu in reverse, this would do the matchable
             # check on the linear
             if not self._is_matchable(cur_base_op_node):
                 continue
+
+            # If an observer or a fake_quant was not matched as a part of
+            # a pattern of multiple nodes, ignore it. One case where this is
+            # relevant is an observer on a graph input, which was added because
+            # it is necessary for the next node.
+            if cur_end_node.op == 'call_module' and cur_start_node is cur_end_node:
+                maybe_obs = getattr_from_fqn(self.gm, cur_end_node.target)  # type: ignore[arg-type]
+                if isinstance(maybe_obs, (ObserverBase, FakeQuantizeBase)):
+                    continue
 
             return NSSubgraph(
                 start_node=cur_start_node, end_node=cur_end_node,
@@ -367,7 +381,7 @@ def get_matching_subgraph_pairs(
     graph_b_iterator = _NSGraphMatchableSubgraphsIterator(
         gm_b, non_matchable_functions, non_matchable_modules,
         non_matchable_methods)
-    results = {}
+    results = collections.OrderedDict()
     if base_name_to_sets_of_related_ops is None:
         base_name_to_sets_of_related_ops = get_base_name_to_sets_of_related_ops()
     type_a_related_to_b = \
@@ -406,8 +420,11 @@ def get_matching_subgraph_pairs(
                 gm_a, gm_b, type_a_related_to_b)
             if subgraph_relationship == SubgraphTypeRelationship.NOT_RELATED:
                 msg = f"""
+The subgraphs
 ({cur_subgraph_a}, {type_start_a}) and
-({cur_subgraph_b}, {type_start_b}) are not related"""
+({cur_subgraph_b}, {type_start_b})
+are not related. Please ensure that the two models you pass in have the same number
+of subgraphs, and each pair of subgraphs is related to each other."""
                 raise GraphMatchingException(msg)
             elif subgraph_relationship == SubgraphTypeRelationship.EQUAL_BUT_UKNOWN:
                 # skip matching but unknown types
@@ -428,8 +445,16 @@ def get_matching_subgraph_pairs(
         else:
             # only one node was fetched, no match possible, throw error
             msg = f"""
-Matchable nodes count mismatch: ({cur_subgraph_a}, {type_start_a}) and
-({cur_subgraph_b}, {type_start_b})"""
+Attempting to match
+({cur_subgraph_a}, {type_start_a}) and
+({cur_subgraph_b}, {type_start_b}),
+one of which is empty. Please ensure that the two models you pass in have the same number
+of subgraphs."""
             raise GraphMatchingException(msg)
+
+    # The subgraph pairs are originally created by traversing the two graphs
+    # from the outputs to the inputs. Reverse the results to return the
+    # subgraphs in their order of execution.
+    results = collections.OrderedDict(reversed(list(results.items())))
 
     return results

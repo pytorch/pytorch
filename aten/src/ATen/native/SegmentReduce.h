@@ -7,7 +7,7 @@
 namespace at {
 namespace native {
 
-enum SegmentReductionType { MAX, MEAN };
+enum SegmentReductionType { MAX, MEAN, MIN, SUM };
 
 using segment_reduce_fn = Tensor (*)(
     SegmentReductionType,

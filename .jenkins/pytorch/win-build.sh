@@ -26,7 +26,7 @@ fi
 export TMP_DIR="${PWD}/build/win_tmp"
 TMP_DIR_WIN=$(cygpath -w "${TMP_DIR}")
 export TMP_DIR_WIN
-export PYTORCH_FINAL_PACKAGE_DIR="/c/w/build-results"
+export PYTORCH_FINAL_PACKAGE_DIR=${PYTORCH_FINAL_PACKAGE_DIR:-/c/w/build-results}
 if [[ -n "$PYTORCH_FINAL_PACKAGE_DIR" ]]; then
     mkdir -p "$PYTORCH_FINAL_PACKAGE_DIR" || true
 fi

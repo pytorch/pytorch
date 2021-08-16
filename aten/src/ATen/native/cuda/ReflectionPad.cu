@@ -249,7 +249,7 @@ __global__ void reflection_pad3d_backward_out_kernel(
           int64_t input_x) {
         auto value_to_add = grad_output[batch][plane][output_z][output_y][output_x];
         auto target = &grad_input[batch][plane][input_z][input_y][input_x];
-        gpuAtomicAdd(target, value_to_add);
+        gpuAtomicAddNoReturn(target, value_to_add);
       });
 }
 
@@ -580,8 +580,8 @@ TORCH_IMPL_FUNC(reflection_pad3d_out_cuda) (
         auto output_inner = output;
         if (!batch_mode) {
           // non-batch mode
-          auto input_inner = input.unsqueeze(0);
-          auto output_inner = output.unsqueeze(0);
+          input_inner = input.unsqueeze(0);
+          output_inner = output.unsqueeze(0);
         }
 
         auto input_packed = input_inner.packed_accessor64<scalar_t, 5>();

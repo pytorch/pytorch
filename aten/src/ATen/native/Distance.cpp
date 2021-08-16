@@ -8,13 +8,9 @@
 
 namespace at { namespace native {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(pdist_forward_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(pdist_backward_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(cdist_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(cdist_backward_stub);
 
 Tensor pairwise_distance(const Tensor& x1, const Tensor& x2, double p, double eps, bool keepdim) {
@@ -241,11 +237,14 @@ Tensor _pdist_backward(const Tensor& grad, const Tensor& self, const double p, c
 Tensor cosine_similarity(const Tensor& x1, const Tensor& x2, int64_t dim, double eps) {
   TORCH_CHECK(x1.sizes() == x2.sizes(), "cosine_similarity requires both inputs to have the same sizes, but x1 has ",
               x1.sizes(), " and x2 has ", x2.sizes())
+  auto commonDtype = at::result_type(x1, x2);
+  Tensor x1_ = x1.to(commonDtype);
+  Tensor x2_ = x2.to(commonDtype);
   // Follow scipy impl to improve numerical precision
   // Use x / sqrt(x * x) instead of x / (sqrt(x) * sqrt(x))
-  Tensor w12 = at::sum(x1 * x2, dim);
-  Tensor w1 = at::sum(x1 * x1, dim);
-  Tensor w2 = at::sum(x2 * x2, dim);
+  Tensor w12 = at::sum(x1_ * x2_, dim);
+  Tensor w1 = at::sum(x1_ * x1_, dim);
+  Tensor w2 = at::sum(x2_ * x2_, dim);
   Tensor n12 = (w1 * w2).clamp_min_(eps * eps).sqrt_();
   return w12.div_(n12);
 }

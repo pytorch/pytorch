@@ -281,7 +281,13 @@ static inline __device__ void atomicAdd(bool *address, bool val) {
   gpuAtomicAdd(address, val);
 }
 
-/* Provide explicitly non-returning atomics. */
+/* Note [explicitly non-returning atomics]
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ * AMD's MI100 (gfx908) provides an optimized fp32 atomicAdd, exposed via atomicAddNoRet().
+ * Due to compiler limitations, callers must opt-in to guarantee the optimized instruction.
+ * This non-returning atomicAddNoRet cannot be used to implement the returning atomicAdd,
+ * therefore we need a new API 'gpuAtomicAddNoReturn'.
+ */
 template<typename T>
 static inline __device__ void gpuAtomicAddNoReturn(c10::complex<T> *address, c10::complex<T> val) { gpuAtomicAdd(address, val); }
 static inline __device__ void gpuAtomicAddNoReturn(uint8_t *address, uint8_t val) { gpuAtomicAdd(address, val); }
@@ -293,45 +299,12 @@ static inline __device__ void gpuAtomicAddNoReturn(bool *address, bool val) { gp
 static inline __device__ void gpuAtomicAddNoReturn(at::Half *address, at::Half val) { gpuAtomicAdd(address, val); }
 static inline __device__ void gpuAtomicAddNoReturn(at::BFloat16 *address, at::BFloat16 val) { gpuAtomicAdd(address, val); }
 static inline __device__ void gpuAtomicAddNoReturn(double *address, double val) { gpuAtomicAdd(address, val); }
-template<typename T>
-static inline __device__ void atomicAddNoReturn(c10::complex<T> *address, c10::complex<T> val) { gpuAtomicAdd(address, val); }
-static inline __device__ void atomicAddNoReturn(uint8_t *address, uint8_t val) { gpuAtomicAdd(address, val); }
-static inline __device__ void atomicAddNoReturn(int8_t *address, int8_t val) { gpuAtomicAdd(address, val); }
-static inline __device__ void atomicAddNoReturn(int16_t *address, int16_t val) { gpuAtomicAdd(address, val); }
-static inline __device__ void atomicAddNoReturn(int32_t *address, int32_t val) { gpuAtomicAdd(address, val); }
-static inline __device__ void atomicAddNoReturn(int64_t *address, int64_t val) { gpuAtomicAdd(address, val); }
-static inline __device__ void atomicAddNoReturn(bool *address, bool val) { gpuAtomicAdd(address, val); }
-static inline __device__ void atomicAddNoReturn(at::Half *address, at::Half val) { gpuAtomicAdd(address, val); }
-static inline __device__ void atomicAddNoReturn(at::BFloat16 *address, at::BFloat16 val) { gpuAtomicAdd(address, val); }
-static inline __device__ void atomicAddNoReturn(double *address, double val) { gpuAtomicAdd(address, val); }
 
 /* Special case fp32 atomic. */
-#ifdef __HIP_PLATFORM_HCC__
-#ifdef __gfx908__
-static inline __device__ bool __hip_is_shared(const __attribute__((address_space(0))) void*) asm("llvm.amdgcn.is.shared");
-/* return type of intrinsic was void in earlier ROCm versions */
-#if defined(HIP_ATOMIC_RETURN_FLOAT) || HIP_VERSION >= 401
-static inline __device__ float atomicAddNoRet_impl(__attribute__((address_space(1))) float*, float) asm("llvm.amdgcn.global.atomic.fadd.f32.p1f32.f32");
-#else
-static inline __device__ void atomicAddNoRet_impl(__attribute__((address_space(1))) float*, float) asm("llvm.amdgcn.global.atomic.fadd.p1f32.f32");
-#endif
-static inline __device__ void gpuAtomicAddNoReturn(float* address, float val) {
-    using FP = __attribute__((address_space(0))) float*;
-    using GP = __attribute__((address_space(1))) float*;
-    using LP = __attribute__((address_space(3))) float*;
-    if (!__hip_is_shared((FP)address))
-        atomicAddNoRet_impl((GP)address, val);
-    else
-        __builtin_amdgcn_ds_faddf((LP)address, val, 0, 0, false);
-}
-static inline __device__ void atomicAddNoReturn(float *address, float val) { gpuAtomicAddNoReturn(address, val); }
-#else
+#if defined(__HIP_PLATFORM_HCC__) && defined(__gfx908__)
 static inline __device__ void gpuAtomicAddNoReturn(float *address, float val) { atomicAddNoRet(address, val); }
-static inline __device__ void atomicAddNoReturn(float *address, float val) { atomicAddNoRet(address, val); }
-#endif
 #else
 static inline __device__ void gpuAtomicAddNoReturn(float *address, float val) { gpuAtomicAdd(address, val); }
-static inline __device__ void atomicAddNoReturn(float *address, float val) { gpuAtomicAdd(address, val); }
 #endif
 
 // Atomic multiplication implementation.
