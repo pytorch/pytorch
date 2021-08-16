@@ -90,7 +90,7 @@ ncclDataType_t to_nccl_data_type(c10::ScalarType type) {
       return ncclDataType_t::ncclUint8;
     case at::kBool:
       return ncclDataType_t::ncclUint8;
-#if defined(__HIP_PLATFORM_HCC__) && HIP_VERSION >= 301
+#if defined(__HIP_PLATFORM_HCC__) && TORCH_HIP_VERSION >= 301
     case at::kBFloat16:
       return ncclDataType_t::ncclBfloat16;
 #endif
@@ -329,9 +329,13 @@ bool is_available(TensorList tensors) {
 
 std::uint64_t version() {
 #if defined(NCCL_MAJOR)
-  return NCCL_MAJOR * 1000 + NCCL_MINOR * 100 + NCCL_PATCH;
+  constexpr std::uint64_t ver = (((uint64_t) NCCL_MAJOR) << 32) |
+                                (((uint64_t) NCCL_MINOR) << 16) |
+                                ((uint64_t) NCCL_PATCH);
+  return ver;
 #elif defined(USE_NCCL)
-  return 1000;
+  // return major version "1"
+  return ((uint64_t) 1) << 32;
 #else
   return 0;
 #endif
