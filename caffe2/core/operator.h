@@ -1342,6 +1342,12 @@ struct TORCH_API DeviceTypeRegisterer {
   }
 };
 
+#if defined(_MSC_VER)
+#define IMPORT_IF_NOT_MSVC
+#else
+#define IMPORT_IF_NOT_MSVC C10_IMPORT
+#endif
+
 #define CAFFE_REGISTER_DEVICE_TYPE(type, registry_function) \
   namespace {                                               \
   static DeviceTypeRegisterer C10_ANONYMOUS_VARIABLE(       \
@@ -1362,11 +1368,11 @@ C10_DECLARE_REGISTRY(
     Workspace*);
 #define REGISTER_CPU_OPERATOR_CREATOR(key, ...) \
   C10_REGISTER_CREATOR(CPUOperatorRegistry, key, __VA_ARGS__)
-#define REGISTER_CPU_OPERATOR(name, ...)                           \
-  C10_IMPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();  \
-  static void CAFFE2_UNUSED CAFFE_ANONYMOUS_VARIABLE_CPU##name() { \
-    CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();                \
-  }                                                                \
+#define REGISTER_CPU_OPERATOR(name, ...)                                   \
+  IMPORT_IF_NOT_MSVC void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();  \
+  static void CAFFE2_UNUSED CAFFE_ANONYMOUS_VARIABLE_CPU##name() {         \
+    CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();                        \
+  }                                                                        \
   C10_REGISTER_CLASS(CPUOperatorRegistry, name, __VA_ARGS__)
 #define REGISTER_CPU_OPERATOR_STR(str_name, ...) \
   C10_REGISTER_TYPED_CLASS(CPUOperatorRegistry, str_name, __VA_ARGS__)
@@ -1397,11 +1403,11 @@ C10_DECLARE_REGISTRY(
     Workspace*);
 #define REGISTER_CUDA_OPERATOR_CREATOR(key, ...) \
   C10_REGISTER_CREATOR(CUDAOperatorRegistry, key, __VA_ARGS__)
-#define REGISTER_CUDA_OPERATOR(name, ...)                           \
-  C10_IMPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();   \
-  static void CAFFE2_UNUSED CAFFE_ANONYMOUS_VARIABLE_CUDA##name() { \
-    CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();                 \
-  }                                                                 \
+#define REGISTER_CUDA_OPERATOR(name, ...)                                   \
+  IMPORT_IF_NOT_MSVC void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();   \
+  static void CAFFE2_UNUSED CAFFE_ANONYMOUS_VARIABLE_CUDA##name() {         \
+    CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();                         \
+  }                                                                         \
   C10_REGISTER_CLASS(CUDAOperatorRegistry, name, __VA_ARGS__)
 #define REGISTER_CUDA_OPERATOR_STR(str_name, ...) \
   C10_REGISTER_TYPED_CLASS(CUDAOperatorRegistry, str_name, __VA_ARGS__)
@@ -1421,11 +1427,11 @@ C10_DECLARE_REGISTRY(
     Workspace*);
 #define REGISTER_HIP_OPERATOR_CREATOR(key, ...) \
   C10_REGISTER_CREATOR(HIPOperatorRegistry, key, __VA_ARGS__)
-#define REGISTER_HIP_OPERATOR(name, ...)                           \
-  C10_IMPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();  \
-  static void CAFFE2_UNUSED CAFFE_ANONYMOUS_VARIABLE_HIP##name() { \
-    CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();                \
-  }                                                                \
+#define REGISTER_HIP_OPERATOR(name, ...)                                   \
+  IMPORT_IF_NOT_MSVC void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();  \
+  static void CAFFE2_UNUSED CAFFE_ANONYMOUS_VARIABLE_HIP##name() {         \
+    CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();                        \
+  }                                                                        \
   C10_REGISTER_CLASS(HIPOperatorRegistry, name, __VA_ARGS__)
 #define REGISTER_HIP_OPERATOR_STR(str_name, ...) \
   C10_REGISTER_TYPED_CLASS(HIPOperatorRegistry, str_name, __VA_ARGS__)
