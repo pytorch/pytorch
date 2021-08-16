@@ -135,6 +135,9 @@ NodePtr SigmoidBackward(const Value& grad_output, const Value& output);
 NodePtr LogSoftmaxBackwardOp(const Value& grad_output, const Value& output,
                              lazy_tensors::int64 dim);
 
+NodePtr TSLogSoftmaxBackwardOp(const Value& grad_output, const Value& output,
+                               lazy_tensors::int64 dim, const Value& self);
+
 NodePtr SoftmaxBackwardOp(const Value& grad_output, const Value& output,
                           lazy_tensors::int64 dim);
 

@@ -11,6 +11,7 @@
 #include "lazy_tensor_core/csrc/ops/permute.h"
 #include "lazy_tensor_core/csrc/ops/softmax_backward.h"
 #include "lazy_tensor_core/csrc/ops/sum.h"
+#include "lazy_tensor_core/csrc/ops/ts_log_softmax_backward.h"
 #include "lazy_tensor_core/csrc/ops/ts_softmax_backward.h"
 #include "lazy_tensor_core/csrc/tensor_util.h"
 #include "lazy_tensor_core/csrc/torch_util.h"
@@ -140,6 +141,14 @@ NodePtr LogSoftmaxBackwardOp(const Value& grad_output, const Value& output,
   return MakeNode<LogSoftmaxBackward>(
       grad_output, output,
       Helpers::GetCanonicalDimensionIndex(dim, grad_output.shape().rank()));
+}
+
+NodePtr TSLogSoftmaxBackwardOp(const Value& grad_output, const Value& output,
+                               lazy_tensors::int64 dim, const Value& self) {
+  return MakeNode<TSLogSoftmaxBackward>(
+      grad_output, output,
+      Helpers::GetCanonicalDimensionIndex(dim, grad_output.shape().rank()),
+      self);
 }
 
 NodePtr SoftmaxBackwardOp(const Value& grad_output, const Value& output,
