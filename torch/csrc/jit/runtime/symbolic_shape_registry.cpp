@@ -109,15 +109,9 @@ const std::string shape_compute_functions =
           return [self[0]]
 
         def unsqueeze(li: List[int], dim: int):
-          out: List[int] = []
-          ndim = len(li)
-          dim = maybe_wrap_dim(dim, len(li))
-          for i in range(len(li)):
-            if i == dim:
-              out.append(1)
-            out.append(li[i])
-          if dim == ndim:
-            out.append(1)
+          dim = maybe_wrap_dim(dim, len(li) + 1)
+          out = _copy(li)
+          out.insert(dim, 1)
           return out
 
         def squeeze_nodim(li: List[int]):
