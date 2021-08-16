@@ -1,14 +1,12 @@
 #pragma once
 
 #include <c10/util/irange.h>
-#include <torch/csrc/autograd/generated/VariableType.h>
 
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/autograd/saved_variable.h>
-#include <torch/csrc/autograd/generated/Functions.h>
 #include <torch/csrc/autograd/functions/tensor.h>
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/jit/frontend/tracer.h>
@@ -36,7 +34,6 @@
 #endif
 
 using namespace at;
-using namespace torch::autograd::generated;
 
 namespace torch { namespace autograd {
 
@@ -359,4 +356,5 @@ inline std::vector<ScalarType> to_args_scalartypes(TensorList tensors) {
   }
   return args_scalartypes;
 }
+
 }} // namespace torch::autograd
