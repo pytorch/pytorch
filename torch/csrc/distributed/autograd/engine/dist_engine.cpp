@@ -359,6 +359,7 @@ void DistEngine::execute_graph_task_until_ready_queue_empty(
         continue;
       }
       if (task.fn_ && !local_graph_task->has_error_.load()) {
+        at::ThreadLocalStateGuard tls_guard(local_graph_task->thread_locals_);
         AutoGradMode grad_mode(local_graph_task->grad_mode_);
         try {
           GraphTaskGuard guard(local_graph_task);
