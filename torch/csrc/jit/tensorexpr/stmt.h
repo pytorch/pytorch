@@ -21,20 +21,21 @@ class TORCH_API Stmt : public std::enable_shared_from_this<Stmt> {
   virtual StmtPtr accept_mutator(IRMutator* mutator) = 0;
 
   StmtPtr get_parent() const {
-    return parent_.lock();
+    return parent_ ? parent_->getptr() : nullptr;
   }
 
   /*
    * Make a deep copy of the given statement.
    *
-   * All statements used in children of the statement are cloned. Note that
-   * expressions and variables are not deep-copied: it is not necessary since
-   * they are immutable.
+   * All statements and expressions used in children of the statement are
+   * cloned. Note that the variables are not deep-copied since they are
+   * immutable.
    */
   static StmtPtr clone(StmtPtr s);
 
  protected:
-  static void set_parent(StmtPtr s, std::weak_ptr<Stmt> new_parent) {
+  static void set_parent(StmtPtr s, Stmt* new_parent) {
+    TORCH_INTERNAL_ASSERT(!s->parent_ || !new_parent);
     s->parent_ = new_parent;
   }
   //   template <typename Derived>
@@ -45,12 +46,12 @@ class TORCH_API Stmt : public std::enable_shared_from_this<Stmt> {
   std::shared_ptr<Stmt> getptr() {
     return shared_from_this();
   }
-  std::weak_ptr<Stmt> getweakptr() {
-    return weak_from_this();
+  Stmt* getweakptr() {
+    return this;
   }
 
  private:
-  std::weak_ptr<Stmt> parent_;
+  Stmt* parent_ = nullptr;
 };
 
 template <class Op>
@@ -153,7 +154,7 @@ class TORCH_API Block : public StmtNode<Block> {
     }
     stmts_.insert(pos, new_stmt);
     stmts_.erase(pos);
-    set_parent(old_stmt, std::weak_ptr<Stmt>());
+    set_parent(old_stmt, nullptr);
     set_parent(new_stmt, getweakptr());
     return true;
   }
@@ -192,7 +193,7 @@ class TORCH_API Block : public StmtNode<Block> {
       return false;
     }
 
-    set_parent(stmt, std::weak_ptr<Stmt>());
+    set_parent(stmt, nullptr);
     stmts_.erase(pos);
     return true;
   }
@@ -203,11 +204,20 @@ class TORCH_API Block : public StmtNode<Block> {
 
   void clear() {
     for (const auto& s : stmts_) {
-      set_parent(s, std::weak_ptr<Stmt>());
+      set_parent(s, nullptr);
     }
     stmts_.clear();
   }
 
+  void set_stmts(const std::vector<StmtPtr>& stmts) {
+    clear();
+    init(stmts);
+  }
+
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  explicit Block(const std::vector<StmtPtr>& stmts) {
+    init(stmts);
+  }
   Block() = default;
 
   typedef std::list<StmtPtr>::iterator iterator;
@@ -247,6 +257,7 @@ class TORCH_API Block : public StmtNode<Block> {
 
   void splice(Block::iterator it, BlockPtr other) {
     for (StmtPtr s : *other) {
+      set_parent(s, nullptr);
       set_parent(s, getweakptr());
     }
 
@@ -290,6 +301,21 @@ class TORCH_API Block : public StmtNode<Block> {
 
  private:
   std::list<StmtPtr> stmts_;
+
+  void init(const std::vector<StmtPtr>& stmts) {
+    for (StmtPtr s : stmts) {
+      if (!s) {
+        continue;
+      }
+      if (!s->get_parent()) {
+        // If we get here, it's a bug, but we cannot throw an error from a
+        // constructor. But IR verifier would catch this.
+        set_parent(s, this);
+      }
+
+      stmts_.push_back(s);
+    }
+  }
 };
 
 class TORCH_API Store : public StmtNode<Store> {
@@ -311,6 +337,18 @@ class TORCH_API Store : public StmtNode<Store> {
     return buf_;
   }
 
+  void set_buf(BufPtr buf) {
+    buf_ = buf;
+  }
+
+  void set_indices(std::vector<ExprPtr> indices) {
+    indices_ = std::move(indices);
+  }
+
+  void set_value(ExprPtr value) {
+    value_ = value;
+  }
+
   static StorePtr make(
       const BufHandle& buf,
       const std::vector<ExprHandle>& indices,
@@ -321,10 +359,6 @@ class TORCH_API Store : public StmtNode<Store> {
       ExprPtr value);
 
   Store(BufPtr buf, std::vector<ExprPtr> indices, ExprPtr value);
-
-  void set_indices(std::vector<ExprPtr> indices) {
-    indices_ = indices;
-  };
 
  private:
   BufPtr buf_;
@@ -357,6 +391,10 @@ class TORCH_API Allocate : public StmtNode<Allocate> {
     return buf_;
   }
 
+  void set_buf(BufPtr buf) {
+    buf_ = buf;
+  }
+
   explicit Allocate(BufPtr buf) : buf_(buf) {}
 
  private:
@@ -377,6 +415,10 @@ class TORCH_API Free : public StmtNode<Free> {
 
   BufPtr buf() const {
     return buf_;
+  }
+
+  void set_buf(BufPtr buf) {
+    buf_ = buf;
   }
 
   explicit Free(BufPtr buf) : buf_(buf) {}
@@ -403,6 +445,14 @@ class TORCH_API Let : public StmtNode<Let> {
 
   ExprPtr value() const {
     return val_;
+  }
+
+  void set_var(VarPtr var) {
+    var_ = var;
+  }
+
+  void set_val(ExprPtr val) {
+    val_ = val;
   }
 
  private:
@@ -456,7 +506,38 @@ class TORCH_API Cond : public StmtNode<Cond> {
     return false_stmt_;
   }
 
+  void set_condition(ExprPtr condition) {
+    condition_ = condition;
+  }
+
+  void set_true_stmt(StmtPtr true_stmt) {
+    if (true_stmt) {
+      BlockPtr b = to<Block>(true_stmt);
+      if (!b) {
+        b = alloc<Block>(std::vector<StmtPtr>({true_stmt}));
+      }
+      true_stmt_ = b;
+      set_parent(true_stmt_, this);
+    }
+  }
+
+  void set_false_stmt(StmtPtr false_stmt) {
+    if (false_stmt) {
+      BlockPtr b = to<Block>(false_stmt);
+      if (!b) {
+        b = alloc<Block>(std::vector<StmtPtr>({false_stmt}));
+      }
+      false_stmt_ = b;
+      set_parent(false_stmt_, this);
+    }
+  }
   Cond() = default;
+
+  Cond(ExprPtr condition, StmtPtr true_stmt, StmtPtr false_stmt)
+      : condition_(condition) {
+    set_true_stmt(true_stmt);
+    set_false_stmt(false_stmt);
+  }
 
   CondPtr cloneWithNewBodies(StmtPtr true_stmt, StmtPtr false_stmt) {
     return Cond::make(condition_, true_stmt, false_stmt);
@@ -716,34 +797,30 @@ class TORCH_API For : public StmtNode<For> {
 
   BlockPtr removeBody() {
     auto res = body_;
-    set_parent(res, std::weak_ptr<Stmt>());
+    set_parent(res, nullptr);
     body_ = nullptr;
     return res;
   }
 
-  BlockPtr setBody(StmtPtr body) {
+  void set_body(StmtPtr body) {
     BlockPtr b = to<Block>(body);
     if (!b) {
       b = Block::make({body});
     }
     body_ = b;
     set_parent(body_, getweakptr());
-    return body_;
   }
 
-  ExprPtr setStart(ExprPtr start) {
+  void set_start(ExprPtr start) {
     start_ = start;
-    return start_;
   }
 
-  ExprPtr setStop(ExprPtr stop) {
+  void set_stop(ExprPtr stop) {
     stop_ = stop;
-    return stop_;
   }
 
-  VarPtr setVar(VarPtr var) {
+  void set_var(VarPtr var) {
     var_ = var;
-    return var_;
   }
 
  private:
@@ -783,6 +860,18 @@ class TORCH_API AtomicAdd : public StmtNode<AtomicAdd> {
 
   const std::vector<ExprPtr>& indices() const {
     return indices_;
+  }
+
+  void set_buf(BufPtr buf) {
+    buf_ = buf;
+  }
+
+  void set_indices(std::vector<ExprPtr> indices) {
+    indices_ = std::move(indices);
+  }
+
+  void set_value(ExprPtr value) {
+    value_ = value;
   }
 
  private:
@@ -837,6 +926,18 @@ class TORCH_API ExternalCall : public StmtNode<ExternalCall> {
 
   std::vector<ExprPtr> args() const {
     return args_;
+  }
+
+  void set_buf(BufPtr buf) {
+    buf_ = buf;
+  }
+
+  void set_buf_args(std::vector<BufPtr> buf_args) {
+    buf_args_ = std::move(buf_args);
+  }
+
+  void set_args(std::vector<ExprPtr> args) {
+    args_ = std::move(args);
   }
 
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)

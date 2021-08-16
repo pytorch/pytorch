@@ -1227,8 +1227,7 @@ ExprPtr combineMinMaxTerms(
     for (auto v : m2->variables()) {
       variables.push_back(v);
     }
-    return alloc<OpTerm>(
-        hasher, scalar, propagate_nans, std::move(variables));
+    return alloc<OpTerm>(hasher, scalar, propagate_nans, std::move(variables));
   };
 
   auto add_expr_to_opterm = [&](ExprPtr expr, NodePtr<OpTerm> opterm) {
@@ -1244,8 +1243,7 @@ ExprPtr combineMinMaxTerms(
     } else {
       variables.push_back(expr);
     }
-    return alloc<OpTerm>(
-        hasher, scalar, propagate_nans, std::move(variables));
+    return alloc<OpTerm>(hasher, scalar, propagate_nans, std::move(variables));
   };
 
   auto lhs_opterm = to<OpTerm>(lhs);
@@ -1594,17 +1592,17 @@ StmtPtr PolynomialBase::mutate(CondPtr v) {
   if (cond_new->isConstant()) {
     if (!immediateEquals(cond_new, 0)) {
       // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
-      return true_new ? Stmt::clone(true_new) : nullptr;
+      return true_new;
     } else {
       // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
-      return false_new ? Stmt::clone(false_new) : nullptr;
+      return false_new;
     }
   }
 
   // If both branches are the same then don't do the condition.
   if (true_new && false_new &&
       hasher_.hash(true_new) == hasher_.hash(false_new)) {
-    return Stmt::clone(true_new);
+    return true_new;
   }
 
   BlockPtr true_block = to<Block>(true_new);
@@ -1615,19 +1613,16 @@ StmtPtr PolynomialBase::mutate(CondPtr v) {
   if (true_empty && false_empty) {
     return Block::make({});
   }
-
-  if (cond_old == cond_new && true_old == true_new && false_old == false_new) {
-    return (StmtPtr)v;
+  if (cond_old != cond_new) {
+    v->set_condition(cond_new);
   }
-
-  if (true_old && true_new == true_old) {
-    true_new = Stmt::clone(true_old);
+  if (true_old != true_new) {
+    v->set_true_stmt(true_new);
   }
-  if (false_old && false_new == false_old) {
-    false_new = Stmt::clone(false_old);
+  if (false_old != false_new) {
+    v->set_false_stmt(false_new);
   }
-
-  return Cond::make(cond_new, true_new, false_new);
+  return v;
 }
 
 StmtPtr handleForCondReordering(ForPtr loop, CondPtr cond) {
@@ -1692,21 +1687,28 @@ StmtPtr PolynomialBase::mutate(ForPtr v) {
     }
   }
 
-  if (var == var_new && start == start_new && stop == stop_new &&
-      body == body_new) {
-    return (StmtPtr)v;
+  if (var != var_new) {
+    v->set_var(var_new);
   }
-  if (body_new == body) {
-    body_new = Stmt::clone(body);
+  if (start != start_new) {
+    v->set_start(start_new);
   }
-  return For::make(var_new, start_new, stop_new, body_new, loop_options);
+  if (stop != stop_new) {
+    v->set_stop(stop_new);
+  }
+  if (body != body_new) {
+    v->set_body(body_new);
+  }
+  return v;
 }
 
 StmtPtr PolynomialBase::mutate(BlockPtr v) {
   std::vector<StmtPtr> stmts;
   // Flatten sub-blocks:
+  bool stmts_changed = false;
   for (StmtPtr stmt : *v) {
     StmtPtr stmt_new = stmt->accept_mutator(this);
+    stmts_changed |= stmt != stmt_new;
     if (stmt_new == nullptr) {
       continue;
     }
@@ -1719,12 +1721,15 @@ StmtPtr PolynomialBase::mutate(BlockPtr v) {
         subBlock->remove_stmt(s);
         stmts.push_back(s);
       }
+      stmts_changed = true;
     } else {
-      stmts.push_back(Stmt::clone(stmt_new));
+      stmts.push_back(stmt_new);
     }
   }
-
-  return Block::make(stmts);
+  if (stmts_changed) {
+    v->set_stmts(stmts);
+  }
+  return v;
 }
 
 // TermExpander
@@ -2369,11 +2374,10 @@ StmtPtr TermExpander::mutate(AllocatePtr v) {
     return nullptr;
   }
 
-  if (buf_new == buf) {
-    return (StmtPtr)v;
+  if (buf != buf_new) {
+    v->set_buf(buf_new);
   }
-
-  return alloc<Allocate>(buf_new);
+  return v;
 }
 
 StmtPtr TermExpander::mutate(FreePtr v) {
@@ -2386,11 +2390,10 @@ StmtPtr TermExpander::mutate(FreePtr v) {
     return nullptr;
   }
 
-  if (buf_new == buf) {
-    return (StmtPtr)v;
+  if (buf != buf_new) {
+    v->set_buf(buf_new);
   }
-
-  return alloc<Free>(buf_new);
+  return v;
 }
 
 // Combines adjactent Cond nodes with identical conditions.
@@ -2625,14 +2628,19 @@ StmtPtr SimplifierUnderContext::mutate(ForPtr v) {
     }
   }
 
-  if (var == var_new && start == start_new && stop == stop_new &&
-      body == body_new) {
-    return (StmtPtr)v;
+  if (var != var_new) {
+    v->set_var(var_new);
   }
-  if (body_new == body) {
-    body_new = Stmt::clone(body);
+  if (start != start_new) {
+    v->set_start(start_new);
   }
-  return For::make(var_new, start_new, stop_new, body_new, loop_options);
+  if (stop != stop_new) {
+    v->set_stop(stop_new);
+  }
+  if (body != body_new) {
+    v->set_body(body_new);
+  }
+  return v;
 }
 
 // Simplify division using distributive laws for the following cases:

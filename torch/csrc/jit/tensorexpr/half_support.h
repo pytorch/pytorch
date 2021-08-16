@@ -61,16 +61,19 @@ class HalfRewriter : public IRMutator {
   }
 
   StmtPtr mutate(StorePtr v) override {
+    // Since mutation changes the `value()` expression in-place, we need to
+    // get the dtype of the `value()` before that is mutated.
+    Dtype newType = v->value()->dtype();
     ExprPtr new_val = v->value()->accept_mutator(this);
 
-    Dtype newType = v->value()->dtype();
     if (newType.scalar_type() == ScalarType::Half) {
       new_val =
           alloc<Cast>(newType.cloneWithScalarType(ScalarType::Half), new_val);
       inserted_half_casts_.insert(new_val);
     }
 
-    return alloc<Store>(v->buf(), v->indices(), new_val);
+    v->set_value(new_val);
+    return v;
   }
 
   ExprPtr mutate(HalfImmPtr v) override {

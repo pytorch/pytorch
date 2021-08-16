@@ -3498,10 +3498,8 @@ TEST(Simplify, SimplifyConstantCond) {
   }
 
   {
-    StmtPtr cond = Cond::make(
-        ExprHandle(true).node(),
-        nullptr,
-        Block::make({}));
+    StmtPtr cond =
+        Cond::make(ExprHandle(true).node(), nullptr, Block::make({}));
     StmtPtr simplified = IRSimplifier::simplify(cond);
     ASSERT_EQ(simplified, nullptr);
   }
@@ -4101,8 +4099,7 @@ TEST(Simplify, SimplifyEliminateZeroLengthAlloc) {
     FreePtr free2_ = Free::make(b2);
     FreePtr free1_ = Free::make(b1);
 
-    BlockPtr block1 =
-        Block::make({alloc1, alloc2, free2_, free1_});
+    BlockPtr block1 = Block::make({alloc1, alloc2, free2_, free1_});
     ASSERT_EQ(block1->nstmts(), 4);
 
     StmtPtr simplified = IRSimplifier::simplify(block1);
@@ -4125,8 +4122,7 @@ TEST(Simplify, SimplifyEliminateZeroLengthAlloc) {
     FreePtr free2_ = Free::make(b2);
     FreePtr free1_ = Free::make(b1);
 
-    BlockPtr block1 =
-        Block::make({alloc1, alloc2, free2_, free1_});
+    BlockPtr block1 = Block::make({alloc1, alloc2, free2_, free1_});
     ASSERT_EQ(block1->nstmts(), 4);
     StmtPtr simplified = IRSimplifier::simplify(block1);
     IS_NODE_WITH_NAME(Block, simplified, block2);

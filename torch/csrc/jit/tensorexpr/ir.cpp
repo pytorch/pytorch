@@ -8,6 +8,36 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
+#define SKIP_IMM(Type, Name)                       \
+  if (auto imm = dynamic_cast<Name##Imm*>(this)) { \
+    return;                                        \
+  }
+void Expr::set_expr_parent(Expr* new_parent) {
+  if (auto v = dynamic_cast<Var*>(this)) {
+    return;
+  }
+  if (auto b = dynamic_cast<Buf*>(this)) {
+    return;
+  }
+  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, SKIP_IMM);
+  TORCH_INTERNAL_ASSERT((!expr_parent_ && !stmt_parent_) || !new_parent);
+  expr_parent_ = new_parent;
+  stmt_parent_ = nullptr;
+}
+void Expr::set_stmt_parent(Stmt* new_parent) {
+  if (auto v = dynamic_cast<Var*>(this)) {
+    return;
+  }
+  if (auto b = dynamic_cast<Buf*>(this)) {
+    return;
+  }
+  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, SKIP_IMM);
+  TORCH_INTERNAL_ASSERT((!expr_parent_ && !stmt_parent_) || !new_parent);
+  expr_parent_ = nullptr;
+  stmt_parent_ = new_parent;
+}
+#undef SKIP_IMM
+
 static Dtype ChooseDtype(const Dtype& buffer_dtype, const Dtype& index_dtype) {
   return Dtype(buffer_dtype, index_dtype.lanes());
 }
@@ -43,10 +73,17 @@ void castIndicesToInts(std::vector<ExprPtr>& indices) {
 Load::Load(Dtype dtype, BufPtr buf, std::vector<ExprPtr> indices)
     : ExprNodeBase(dtype), buf_(buf), indices_(std::move(indices)) {
   castIndicesToInts(indices_);
+  for (auto idx : indices_) {
+    idx->set_expr_parent(this);
+  }
 }
 
 Load::Load(BufPtr buf, const std::vector<ExprPtr>& indices)
-    : Load(ChooseDtype(buf->dtype(), dtypeOfIndices(indices)), buf, indices) {}
+    : Load(ChooseDtype(buf->dtype(), dtypeOfIndices(indices)), buf, indices) {
+  for (auto idx : indices_) {
+    idx->set_expr_parent(this);
+  }
+}
 
 ExprHandle Load::make(
     Dtype dtype,
@@ -65,6 +102,10 @@ ExprHandle Load::make(
 Store::Store(BufPtr buf, std::vector<ExprPtr> indices, ExprPtr value)
     : buf_(buf), indices_(std::move(indices)), value_(value) {
   castIndicesToInts(indices_);
+  for (auto idx : indices_) {
+    idx->set_stmt_parent(this);
+  }
+  value_->set_stmt_parent(this);
 }
 
 StorePtr Store::make(

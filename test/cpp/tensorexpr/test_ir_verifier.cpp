@@ -150,12 +150,9 @@ TEST(IRVerifier, Block) {
     StmtPtr store = alloc<Store>(B, std::vector<ExprPtr>({I}), I);
     // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
     StmtPtr block1 = Block::make({store});
-    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
-    StmtPtr block2 = Block::make({store});
     // Stmt can't have multiple parrents, thus inserting it into several blocks
     // is illegal
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto,clang-analyzer-cplusplus.NewDeleteLeaks)
-    EXPECT_ANY_THROW(verify(block2));
+    EXPECT_ANY_THROW({ StmtPtr block2 = Block::make({store}); });
   }
 }
 

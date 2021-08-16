@@ -338,7 +338,23 @@ StmtPtr IRCloner::mutate(CondPtr v) {
 StmtPtr Stmt::clone(StmtPtr s) {
   IRCloner cloner;
   StmtPtr cloned = s->accept_mutator(&cloner);
-  set_parent(cloned, std::weak_ptr<Stmt>());
+  set_parent(cloned, nullptr);
+  return cloned;
+}
+
+ExprPtr Expr::clone(ExprPtr e) {
+  IRCloner cloner;
+  ExprPtr cloned = e->accept_mutator(&cloner);
+  cloned->set_expr_parent(nullptr);
+  return cloned;
+}
+
+std::vector<ExprPtr> Expr::clone(const std::vector<ExprPtr>& v) {
+  std::vector<ExprPtr> cloned;
+  cloned.reserve(v.size());
+  for (auto e : v) {
+    cloned.push_back(Expr::clone(e));
+  }
   return cloned;
 }
 
