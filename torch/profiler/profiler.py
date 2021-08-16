@@ -100,7 +100,7 @@ def supported_activities():
     return torch.autograd._supported_activities()
 
 
-class profile(object):
+class profile:
     """Profiler context manager.
 
     Args:

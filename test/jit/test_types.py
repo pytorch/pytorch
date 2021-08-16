@@ -97,7 +97,7 @@ class TestTypesAndAnnotation(JitTestCase):
         FileCheck().check("dropout_modality").check("in_batch").run(str(sm.graph))
 
     def test_python_callable(self):
-        class MyPythonClass(object):
+        class MyPythonClass:
             @torch.jit.ignore
             def __call__(self, *args) -> str:
                 return str(type(args[0]))

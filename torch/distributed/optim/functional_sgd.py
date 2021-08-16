@@ -14,7 +14,7 @@ from torch import Tensor
 # NOTE: This should be only used by distributed optimizer internals
 # and not meant to expose to the user.
 @torch.jit.script
-class _FunctionalSGD(object):
+class _FunctionalSGD:
     def __init__(
         self,
         params: List[Tensor],

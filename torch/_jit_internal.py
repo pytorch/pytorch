@@ -148,7 +148,7 @@ def createResolutionCallbackFromFrame(frames_up: int = 0):
     f_locals = frame.f_locals
     f_globals = frame.f_globals
 
-    class env(object):
+    class env:
         def __getattr__(self, key):
             if key in f_locals:
                 return f_locals[key]
@@ -225,7 +225,7 @@ def createResolutionCallbackFromClosure(fn):
     """
     closure = get_closure(fn)
 
-    class closure_lookup(object):
+    class closure_lookup:
         # This is a class since `closure` is a dict and it's easier in
         # `env_helper` if everything just works with `getattr` calls
         def __getattr__(self, key):
@@ -449,7 +449,7 @@ def boolean_dispatch(arg_name, arg_index, default, if_true, if_false, module_nam
     return fn
 
 
-class FunctionModifiers(object):
+class FunctionModifiers:
     """
     Used to denote the behavior of a function in TorchScript. See export() and
     ignore() for details.
@@ -948,7 +948,7 @@ def is_final(ann) -> bool:
         (getattr(ann, '__origin__', None) is Final or isinstance(ann, type(Final)))
 
 # allows BroadcastingList instance to be subscriptable
-class BroadcastingListCls(object):
+class BroadcastingListCls:
     def __getitem__(self, types):
         return
 

@@ -42,7 +42,7 @@ if TEST_SCIPY:
     import scipy.special
 
 
-class DecorateInfo(object):
+class DecorateInfo:
     """Describes which test, or type of tests, should be wrapped in the given
        decorators when testing an operator. Any test that matches all provided
        arguments will be decorated. The decorators will only be applied if the
@@ -91,7 +91,7 @@ class SkipInfo(DecorateInfo):
                          device_type=device_type, dtypes=dtypes, active_if=active_if)
 
 
-class SampleInput(object):
+class SampleInput:
     """Represents sample inputs to a function."""
 
     __slots__ = ['input', 'args', 'kwargs', 'output_process_fn_grad', 'broadcasts_input', 'name']
@@ -184,7 +184,7 @@ class SampleInput(object):
         sample_np_input, np_args, np_kwargs = to_numpy(self.input), to_numpy(self.args), to_numpy(self.kwargs)
         return (sample_np_input, np_args, np_kwargs)
 
-class AliasInfo(object):
+class AliasInfo:
     """Class holds alias information. For example, torch.abs ->
     torch.absolute, torch.Tensor.absolute, torch.Tensor.absolute_
     """
@@ -442,7 +442,7 @@ def _getattr_qual(obj, name, default=_NOTHING):
 #   simple as testing unary elementwise operations today.
 
 # Classes and methods for the operator database
-class OpInfo(object):
+class OpInfo:
     """Operator information and helper functions for acquiring it."""
 
     def __init__(self,

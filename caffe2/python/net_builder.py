@@ -203,7 +203,7 @@ class NetBuilder(context.Managed):
         return self.name or 'Un-named NetBuilder'
 
 
-class Operations(object):
+class Operations:
     """
     Operations to be used in the context of a NetBuilder.
     """

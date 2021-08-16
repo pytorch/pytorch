@@ -182,7 +182,7 @@ def execution_step_with_progress(name, init_net, substeps, rows_read):
         report_interval=5)
 
 
-class Dataset(object):
+class Dataset:
     """Represents an in-memory dataset with fixed schema.
 
     Use this to store and iterate through datasets with complex schema that

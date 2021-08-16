@@ -40,7 +40,7 @@ default_collate: _collate_fn_t = _utils.collate.default_collate
 
 get_worker_info = _utils.worker.get_worker_info
 
-class _DatasetKind(object):
+class _DatasetKind:
     Map = 0
     Iterable = 1
 
@@ -481,7 +481,7 @@ class DataLoader(Generic[T_co]):
                 cpuset_checked))
 
 
-class _BaseDataLoaderIter(object):
+class _BaseDataLoaderIter:
     def __init__(self, loader: DataLoader) -> None:
         self._dataset = loader.dataset
         self._dataset_kind = loader._dataset_kind

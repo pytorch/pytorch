@@ -30,7 +30,7 @@ def dispatch(*types, **kwargs):
     ... def foo(x):
     ...     return x + 1
     Dispatch on instance methods within classes
-    >>> class MyClass(object):
+    >>> class MyClass:
     ...     @dispatch(list)
     ...     def __init__(self, data):
     ...         self.data = data

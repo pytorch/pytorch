@@ -282,7 +282,7 @@ API dispatch mechanism. We'll create a custom type that represents a 2D scalar
 tensor, parametrized by the order ``N`` and value along the diagonal entries,
 ``value``::
 
-     class ScalarTensor(object):
+     class ScalarTensor:
         def __init__(self, N, value):
             self._N = N
             self._value = value
@@ -319,7 +319,7 @@ possible for the above operation to succeed. Let's re-do our implementation,
 this time adding a ``__torch_function__`` implementation::
 
   HANDLED_FUNCTIONS = {}
-  class ScalarTensor(object):
+  class ScalarTensor:
       def __init__(self, N, value):
           self._N = N
           self._value = value
@@ -546,7 +546,7 @@ is a generic sort of wrapping for the full :mod:`torch` API, we do not need to
 individually implement each override so we can make the ``__torch_function__``
 implementation more permissive about what operations are allowed::
 
-  class MetadataTensor(object):
+  class MetadataTensor:
       def __init__(self, data, metadata=None, **kwargs):
           self._t = torch.as_tensor(data, **kwargs)
           self._metadata = metadata

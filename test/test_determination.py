@@ -5,7 +5,7 @@ import run_test
 from torch.testing._internal.common_utils import run_tests
 
 
-class DummyOptions(object):
+class DummyOptions:
     verbose = False
 
 

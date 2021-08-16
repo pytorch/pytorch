@@ -76,7 +76,7 @@ def initialize_params_from_file(*args, **kwargs):
     return checkpoint.initialize_params_from_file(*args, **kwargs)
 
 
-class AnyExpTrainer(object):
+class AnyExpTrainer:
 
     def __init__(self, opts):
         import logging

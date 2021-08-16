@@ -76,7 +76,7 @@ __all__ = [
 ]
 
 
-class ConstraintRegistry(object):
+class ConstraintRegistry:
     """
     Registry to link constraints to transforms.
     """

@@ -27,7 +27,7 @@ import cimodel.lib.miniutils as miniutils
 import cimodel.lib.miniyaml as miniyaml
 
 
-class File(object):
+class File:
     """
     Verbatim copy the contents of a file into config.yml
     """
@@ -66,7 +66,7 @@ def horizontal_rule():
     return "".join("#" * 78)
 
 
-class Header(object):
+class Header:
     def __init__(self, title, summary=None):
         self.title = title
         self.summary_lines = summary or []

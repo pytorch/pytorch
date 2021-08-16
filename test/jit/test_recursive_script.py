@@ -199,7 +199,7 @@ class TestRecursiveScript(JitTestCase):
 
     def test_ignore_class(self):
         @torch.jit.ignore
-        class MyScriptClass(object):
+        class MyScriptClass:
             def unscriptable(self):
                 return "a" + 200
 
@@ -289,7 +289,7 @@ class TestRecursiveScript(JitTestCase):
         def other_fn(a: int, b: Tensor) -> Tensor:
             return a * b
 
-        class B(object):
+        class B:
             def __init__(self, x):
                 self.x = 2
 
@@ -383,7 +383,7 @@ class TestRecursiveScript(JitTestCase):
         self.assertEqual(a_script_fn(t, t, t), t + t + t)
 
     def test_error_stack_class(self):
-        class X(object):
+        class X:
             def bad_fn(self):
                 import pdb  # noqa: F401
 
@@ -399,7 +399,7 @@ class TestRecursiveScript(JitTestCase):
             checker.run(str(e))
 
     def test_error_stack_annotation(self):
-        class X(object):
+        class X:
             def bad_fn(self):
                 import pdb  # noqa: F401
 
@@ -548,18 +548,18 @@ class TestRecursiveScript(JitTestCase):
 
     def test_attributes(self):
         @torch.jit.script
-        class Inner2(object):
+        class Inner2:
             def __init__(self):
                 self.b = "a string"
 
         @torch.jit.script
-        class Foo(object):
+        class Foo:
             def __init__(self):
                 self.a = 4
                 self.inner = Inner2()
 
         @torch.jit.script
-        class SFoo(object):
+        class SFoo:
             def __init__(self):
                 self.a = 4
                 self.inner = Inner2()

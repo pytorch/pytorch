@@ -17,7 +17,7 @@ from itertools import chain
 from six import binary_type, text_type
 
 
-class Visitor(object):
+class Visitor:
     @classmethod
     def register(cls, Type):
         if not(hasattr(cls, 'visitors')):
@@ -156,7 +156,7 @@ def analyze(obj):
     Analyzer()(obj)
 
 
-class Text(object):
+class Text:
     def __init__(self):
         self._indent = 0
         self._lines_in_context = [0]

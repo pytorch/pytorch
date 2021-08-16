@@ -452,7 +452,7 @@ In this example, a TorchScript custom class defines a class variable name, which
     import torch
 
     @torch.jit.script
-    class MyClass(object):
+    class MyClass:
         name = "MyClass"
         def __init__(self, x: int):
             self.x = x

@@ -7,7 +7,7 @@ from caffe2.python import core, workspace
 from hypothesis import given, settings
 
 
-class TestSelfBinningHistogramBase(object):
+class TestSelfBinningHistogramBase:
     def __init__(self, bin_spacing, dtype, abs=False):
         self.bin_spacing = bin_spacing
         self.dtype = dtype

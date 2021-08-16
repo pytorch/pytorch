@@ -6,7 +6,7 @@ import torch.distributed as dist
 from . import default_hooks as default
 
 
-class PostLocalSGDState(object):
+class PostLocalSGDState:
     r"""
     Stores the state for all-reducing gradients globally using ``process_group`` until step ``start_localSGD_iter``,
     and all-reducing gradients locally using ``subgroup`` afterwards.

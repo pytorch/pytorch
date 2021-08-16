@@ -120,7 +120,7 @@ class Pair(NamedTuple):
     y : torch.Tensor
 
 # for testing pytrees
-class Foo(object):  # noqa: B209
+class Foo:  # noqa: B209
     def __init__(self, a, b):
         self.a = a
         self.b = b

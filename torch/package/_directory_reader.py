@@ -17,7 +17,7 @@ _storages: List[Any] = [
 _dtype_to_storage = {data_type(0).dtype: data_type for data_type in _storages}
 
 # because get_storage_from_record returns a tensor!?
-class _HasStorage(object):
+class _HasStorage:
     def __init__(self, storage):
         self._storage = storage
 
@@ -25,7 +25,7 @@ class _HasStorage(object):
         return self._storage
 
 
-class DirectoryReader(object):
+class DirectoryReader:
     """
     Class to allow PackageImporter to operate on unzipped packages. Methods
     copy the behavior of the internal PyTorchFileReader class (which is used for

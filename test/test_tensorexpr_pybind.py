@@ -9,7 +9,7 @@ import unittest
 LLVM_ENABLED = torch._C._llvm_enabled()
 
 
-class kernel_arena_scope(object):
+class kernel_arena_scope:
     def __enter__(self):
         self.scope = torch._C._te.KernelScope()
 

@@ -3,7 +3,7 @@
 from torch import nn
 
 
-class OrderedDictWrapper(object):
+class OrderedDictWrapper:
     """
     A wrapper around a C++ OrderedDict that dynamically evaluates the
     OrderedDict getter on a bound C++ module, such that new changes on the C++

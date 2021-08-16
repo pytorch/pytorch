@@ -20,7 +20,7 @@ if IS_WINDOWS:
     # On Windows, the parent ID of the worker process remains unchanged when the manager process
     # is gone, and the only way to check it through OS is to let the worker have a process handle
     # of the manager and ask if the process status has changed.
-    class ManagerWatchdog(object):
+    class ManagerWatchdog:
         def __init__(self):
             self.manager_pid = os.getppid()
 
@@ -46,7 +46,7 @@ if IS_WINDOWS:
                 self.manager_dead = self.kernel32.WaitForSingleObject(self.manager_handle, 0) == 0
             return not self.manager_dead
 else:
-    class ManagerWatchdog(object):  # type: ignore[no-redef]
+    class ManagerWatchdog:  # type: ignore[no-redef]
         def __init__(self):
             self.manager_pid = os.getppid()
             self.manager_dead = False
@@ -59,7 +59,7 @@ else:
 _worker_info = None
 
 
-class WorkerInfo(object):
+class WorkerInfo:
     __initialized = False
 
     def __init__(self, **kwargs):
@@ -111,12 +111,12 @@ def get_worker_info():
 
 r"""Dummy class used to signal the end of an IterableDataset"""
 @dataclass(frozen=True)
-class _IterableDatasetStopIteration(object):
+class _IterableDatasetStopIteration:
     worker_id: int
 
 r"""Dummy class used to resume the fetching when worker reuse is enabled"""
 @dataclass(frozen=True)
-class _ResumeIteration(object):
+class _ResumeIteration:
     pass
 
 # The function `_generate_state` is adapted from `numpy.random.SeedSequence`

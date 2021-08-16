@@ -49,7 +49,7 @@ class MyShardedModel1(torch.nn.Module):
         self.random_tensor1 = torch.nn.Parameter(torch.rand(2, 2))
         self.submodule = MyShardedModel2(spec, group)
 
-class ShardedTensorTestBase(object):
+class ShardedTensorTestBase:
 
     @property
     def world_size(self):

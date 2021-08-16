@@ -229,7 +229,7 @@ def cudart():
     return _cudart
 
 
-class cudaStatus(object):
+class cudaStatus:
     SUCCESS: int = 0
     ERROR_NOT_READY: int = 34
 
@@ -244,7 +244,7 @@ def check_error(res: int) -> None:
         raise CudaError(res)
 
 
-class device(object):
+class device:
     r"""Context-manager that changes the selected device.
 
     Args:
@@ -362,7 +362,7 @@ def can_device_access_peer(device: _device_t, peer_device: _device_t) -> bool:
     return torch._C._cuda_canDeviceAccessPeer(device, peer_device)
 
 
-class StreamContext(object):
+class StreamContext:
     r"""Context-manager that selects a given stream.
 
     All CUDA kernels queued within its context will be enqueued on a selected
@@ -596,7 +596,7 @@ def _lazy_new(cls, *args, **kwargs):
     return super(_CudaBase, cls).__new__(cls, *args, **kwargs)
 
 
-class _CudaBase(object):
+class _CudaBase:
     is_cuda = True
     is_sparse = False
 

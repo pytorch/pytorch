@@ -7,7 +7,7 @@ from typing import Any, TypeVar
 from ..modules import Module
 
 
-class WeightNorm(object):
+class WeightNorm:
     name: str
     dim: int
 

@@ -7766,7 +7766,7 @@ class TestONNXRuntime(unittest.TestCase):
          zip(ort_outs1, ort_outs2)]
 
     def test_script_custom_class_error(self):
-        class BoxCoder(object):
+        class BoxCoder:
             def __init__(self, bbox_xform_clip: float):
                 # type: (float) -> None
                 self.bbox_xform_clip = bbox_xform_clip

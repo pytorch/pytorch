@@ -32,7 +32,7 @@ Device = Union[_device, str, None]
 
 # Storage protocol implemented by ${Type}StorageBase classes
 
-class Storage(object):
+class Storage:
     _cdata: int
 
     def __deepcopy__(self, memo) -> 'Storage':

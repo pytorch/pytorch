@@ -8,7 +8,7 @@ import fnmatch
 from typing import Any, IO, BinaryIO, Union
 
 
-class FakeObject(object):
+class FakeObject:
     def __init__(self, module, name, args):
         self.module = module
         self.name = name
@@ -42,7 +42,7 @@ class FakeObject(object):
         raise Exception("Need to implement")
 
 
-class FakeClass(object):
+class FakeClass:
     def __init__(self, module, name):
         self.module = module
         self.name = name

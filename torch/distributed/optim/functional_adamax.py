@@ -14,7 +14,7 @@ from torch import Tensor
 # NOTE: This should be only used by distributed optimizer internals
 # and not meant to expose to the user.
 @torch.jit.script
-class _FunctionalAdamax(object):
+class _FunctionalAdamax:
     def __init__(
         self,
         params: List[Tensor],

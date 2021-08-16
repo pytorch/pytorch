@@ -47,7 +47,7 @@ def load_with_process_group(process_group):
         _CURRENT_PROCESS_GROUP = None
 
 @dataclass
-class Shard(object):
+class Shard:
     """
     Container which holds the data for a shard as a Tensor and also
     the associated metadata for that shard.
@@ -58,7 +58,7 @@ class Shard(object):
     metadata: ShardMetadata
 
 @dataclass
-class ShardedTensorMetadata(object):
+class ShardedTensorMetadata:
     """
     Represents metadata for :class:`ShardedTensor`
     """
@@ -123,7 +123,7 @@ def _register_remote_shards(sharded_tensor_id: int, rrefs: List[rpc.RRef[Shard]]
         _sharded_tensor_map[sharded_tensor_id]._register_remote_shards(rrefs, rpc_rank)
 
 
-class ShardedTensor(object):
+class ShardedTensor:
     """
     ShardedTensor is an abstraction to represent Tensors that are sharded
     across multiple devices and multiple processes.

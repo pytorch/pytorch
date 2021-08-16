@@ -7,7 +7,7 @@ import warnings
 import functools
 
 
-class _RequiredParameter(object):
+class _RequiredParameter:
     """Singleton class representing a required parameter for an Optimizer."""
     def __repr__(self):
         return "<required parameter>"
@@ -15,7 +15,7 @@ class _RequiredParameter(object):
 required = _RequiredParameter()
 
 
-class Optimizer(object):
+class Optimizer:
     r"""Base class for all optimizers.
 
     .. warning::

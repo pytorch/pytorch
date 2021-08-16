@@ -14,7 +14,7 @@ import itertools
 from warnings import warn
 
 
-class profile(object):
+class profile:
     """DEPRECATED: use torch.profiler instead"""
     def __init__(
             self,

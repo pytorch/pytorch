@@ -35,7 +35,7 @@ def CreateNetOnce(net, created_names=set()): # noqa
         workspace.CreateNet(net)
 
 
-class CharRNN(object):
+class CharRNN:
     def __init__(self, args):
         self.seq_length = args.seq_length
         self.batch_size = args.batch_size

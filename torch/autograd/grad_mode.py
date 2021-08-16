@@ -172,7 +172,7 @@ class enable_grad(_DecoratorContextManager):
         torch._C._set_grad_enabled(self.prev)
 
 
-class set_grad_enabled(object):
+class set_grad_enabled:
     r"""Context-manager that sets gradient calculation to on or off.
 
     ``set_grad_enabled`` will enable or disable grads based on its argument :attr:`mode`.

@@ -680,12 +680,12 @@ class TestSaveLoad(JitTestCase):
         in two different CompilationUnits on save/load.
         """
         @torch.jit.interface
-        class MyInterface(object):
+        class MyInterface:
             def bar(self, x: Tensor) -> Tensor:
                 pass
 
         @torch.jit.script
-        class ImplementInterface(object):
+        class ImplementInterface:
             def __init__(self):
                 pass
 
@@ -710,12 +710,12 @@ class TestSaveLoad(JitTestCase):
         clear_class_registry()
 
         @torch.jit.interface
-        class MyInterface(object):
+        class MyInterface:
             def not_bar(self, x: Tensor) -> Tensor:
                 pass
 
         @torch.jit.script  # noqa: F811
-        class ImplementInterface(object):  # noqa: F811
+        class ImplementInterface:  # noqa: F811
             def __init__(self):
                 pass
 
@@ -765,12 +765,12 @@ class TestSaveLoad(JitTestCase):
             a: int
 
         @torch.jit.interface
-        class MyInterface(object):
+        class MyInterface:
             def bar(self, x: Tensor) -> Tensor:
                 pass
 
         @torch.jit.script
-        class ImplementInterface(object):
+        class ImplementInterface:
             def __init__(self):
                 pass
 
@@ -806,12 +806,12 @@ class TestSaveLoad(JitTestCase):
         clear_class_registry()
 
         @torch.jit.interface
-        class MyInterface(object):
+        class MyInterface:
             def not_bar(self, x: Tensor) -> Tensor:
                 pass
 
         @torch.jit.script
-        class ImplementInterface(object):  # noqa: F811
+        class ImplementInterface:  # noqa: F811
             def __init__(self):
                 pass
 

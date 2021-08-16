@@ -59,7 +59,7 @@ def gpus_for_rank(world_size):
     return gpus_for_rank
 
 
-class StoreTestBase(object):
+class StoreTestBase:
     def _create_store(self, i):
         raise RuntimeError("not implemented")
 

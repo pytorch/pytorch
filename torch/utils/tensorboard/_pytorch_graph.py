@@ -22,7 +22,7 @@ methods_IO = ['node', 'offset', 'debugName']
 GETATTR_KIND = 'prim::GetAttr'
 CLASSTYPE_KIND = 'ClassType'
 
-class NodeBase(object):
+class NodeBase:
     def __init__(self, debugName=None, inputs=None, scope=None, tensor_size=None, op_type='UnSpecified', attributes=''):
         # TODO; Specify a __slots__ for this class or potentially
         # used namedtuple instead
@@ -94,7 +94,7 @@ class NodePyOP(NodePy):
         self.kind = node_cpp.kind()
 
 
-class GraphPy(object):
+class GraphPy:
     """Helper class to convert torch.nn.Module to GraphDef proto and visualization
     with TensorBoard.
 

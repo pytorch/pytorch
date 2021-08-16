@@ -70,7 +70,7 @@ def fp16_compress_hook(
     return fut.then(decompress)
 
 
-class _OptimizerHookState(object):
+class _OptimizerHookState:
     """
     Holds state for running optimizer in-line after DDP communication hook.
     Currently contains only optimizer class which must have a method `step_param`.

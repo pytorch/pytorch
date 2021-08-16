@@ -9,7 +9,7 @@ from collections import OrderedDict
 from typing import Any, List, Optional
 
 
-class _ContextMethodMixin(object):
+class _ContextMethodMixin:
 
     def save_for_backward(self, *tensors):
         r"""Saves given tensors for a future call to :func:`~Function.backward`.
@@ -70,7 +70,7 @@ class _ContextMethodMixin(object):
         """
         self.materialize_grads = value
 
-class _HookMixin(object):
+class _HookMixin:
 
     @staticmethod
     def _register_hook(backward_hooks, hook):

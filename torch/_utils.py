@@ -400,7 +400,7 @@ class KeyErrorMessage(str):
         return self
 
 
-class ExceptionWrapper(object):
+class ExceptionWrapper:
     r"""Wraps an exception plus traceback to communicate across threads"""
     def __init__(self, exc_info=None, where="in background"):
         # It is important that we don't store exc_info, see

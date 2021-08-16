@@ -48,7 +48,7 @@ def _fuse_fx(
     fuser = Fuser()
     return fuser.fuse(graph_module, fuse_custom_config_dict)
 
-class Scope(object):
+class Scope:
     """ Scope object that records the module path and the module type
     of a module. Scope is used to track the information of the module
     that contains a Node in a Graph of GraphModule. For example:
@@ -75,7 +75,7 @@ class Scope(object):
         self.module_path = module_path
         self.module_type = module_type
 
-class ScopeContextManager(object):
+class ScopeContextManager:
     """ A context manager to track the Scope of Node during symbolic
     tracing.
     When entering a forward function of a Module, we'll update the scope information of

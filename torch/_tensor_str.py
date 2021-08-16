@@ -4,7 +4,7 @@ from torch._six import inf
 from typing import Optional
 
 
-class __PrinterOptions(object):
+class __PrinterOptions:
     precision: int = 4
     threshold: float = 1000
     edgeitems: int = 3
@@ -71,7 +71,7 @@ def set_printoptions(
     PRINT_OPTS.sci_mode = sci_mode
 
 
-class _Formatter(object):
+class _Formatter:
     def __init__(self, tensor):
         self.floating_dtype = tensor.dtype.is_floating_point
         self.int_mode = True

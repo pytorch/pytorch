@@ -13,7 +13,7 @@ from future.utils import viewitems, viewvalues
 OpSchema = workspace.C.OpSchema
 
 
-class DocUploader(object):
+class DocUploader:
     def __init__(self):
         pass
 
@@ -21,7 +21,7 @@ class DocUploader(object):
         pass
 
 
-class DocGenerator(object):
+class DocGenerator:
     def __init__(self, formatter, uploader):
         self.formatter = formatter
         self.uploader = uploader
@@ -95,7 +95,7 @@ class OpDocGenerator(DocGenerator):
         self.content_body += self.formatter.dump()
 
 
-class OperatorEngine(object):
+class OperatorEngine:
     def __init__(self, name):
         self.op_name = name
         self.base_op_name, self.engine = name.split("_ENGINE_", 1)
@@ -117,7 +117,7 @@ class OperatorEngine(object):
                                                       impl=impl))
 
 
-class OperatorDoc(object):
+class OperatorDoc:
     def __init__(self, name, schema, priority):
         self.name = name
         self.schema = schema

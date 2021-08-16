@@ -21,7 +21,7 @@
 import caffe2.python._import_c_extension as C
 
 
-class Transformer(object):
+class Transformer:
     def __init__(self):
         pass
 

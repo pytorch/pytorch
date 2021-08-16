@@ -5317,7 +5317,7 @@ class NNTestCase(TestCase):
             self.assertLessEqual(max(differences), PRECISION)  # type: ignore[type-var]
 
 
-class TestBase(object):
+class TestBase:
 
     _required_arg_names = {'constructor_args', 'input', 'extra_args'}
 
@@ -5572,7 +5572,7 @@ class ModuleTest(TestBase):
 
         self.test_noncontig(test_case, gpu_module, gpu_input_tuple)
 
-class InputVariableMixin(object):
+class InputVariableMixin:
     def _get_input(self):
         input = TestBase._get_input(self, False)  # type: ignore[arg-type]
 

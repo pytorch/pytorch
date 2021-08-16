@@ -4,7 +4,7 @@ from dataclasses import dataclass
 import torch
 
 @dataclass
-class ShardMetadata(object):
+class ShardMetadata:
     """
     Represents a shard of the overall Tensor including its
     offsets, lengths and device placement.

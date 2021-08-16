@@ -120,7 +120,7 @@ def _patch_function(fn: FunctionType, nargs: int) -> FunctionType:
     # we can't call this function normally, otherwise it would try to unpack them
     # instead, let's make python think that args and kwargs are normal variables
 
-class _CPatchManager(object):
+class _CPatchManager:
     """
     Calls patch_function in order to intercept functions at the C-extension level
     """
@@ -157,7 +157,7 @@ class _CPatchManager(object):
     def __exit__(self, type, value, tb):
         sys.setprofile(None)
 
-class PHBase(object):
+class PHBase:
     """
     Object representing an input placeholder to `concrete_args`
     """
@@ -692,7 +692,7 @@ class _PatchedFnSetAttr(_PatchedFn):
         setattr(self.frame_dict, self.fn_name, self.orig_fn)
 
 
-class _Patcher(object):
+class _Patcher:
     def __init__(self):
         super(_Patcher, self).__init__()
         self.patches_made : List[_PatchedFn] = []

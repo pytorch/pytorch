@@ -11,7 +11,7 @@ _next_idx = 0
 # We fake dict here
 
 
-class _FakeDict(object):
+class _FakeDict:
     def __init__(self, fn):
         self.fn = fn
 

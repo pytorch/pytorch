@@ -194,7 +194,7 @@ class EtcdRendezvousHandler(RendezvousHandler):
 # but is verbose to add everywhere. Consider wrapping the client calls
 # into auto-retry for these errors?
 #
-class EtcdRendezvous(object):
+class EtcdRendezvous:
     """
     A rendezvous implementation that uses `etcd <https://etcd.io/>`__ as
     the backend store.

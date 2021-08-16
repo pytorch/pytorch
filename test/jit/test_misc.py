@@ -50,7 +50,7 @@ class TestMisc(JitTestCase):
         from dataclasses import dataclass
 
         @dataclass
-        class NormalizationInfo(object):
+        class NormalizationInfo:
             mean: float = 0.0
 
             def compute(self, total_rows):

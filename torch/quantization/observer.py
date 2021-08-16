@@ -10,7 +10,7 @@ import torch.nn as nn
 from .utils import check_min_max_valid, calculate_qmin_qmax
 
 
-class _PartialWrapper(object):
+class _PartialWrapper:
     def __init__(self, p):
         self.p = p
         self.callable_args = {}

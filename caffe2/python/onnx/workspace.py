@@ -12,7 +12,7 @@ from caffe2.python import workspace
 
 # Separating out the context manager part so that users won't
 # (mis-)use Workspace instances as context managers
-class _WorkspaceCtx(object):
+class _WorkspaceCtx:
     def __init__(self, workspace_id):
         self.workspace_id = workspace_id
         # A stack, so that the context manager is reentrant.
@@ -34,7 +34,7 @@ class _WorkspaceCtx(object):
         workspace.SwitchWorkspace(w, create_if_missing=True)
 
 
-class Workspace(object):
+class Workspace:
     """
     An object representing a Caffe2 workspace.  It is a context manager,
     so you can say 'with workspace:' to use the represented workspace

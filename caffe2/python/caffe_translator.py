@@ -192,7 +192,7 @@ def _GetInputDims(caffe_net):
     return input_dims
 
 
-class TranslatorRegistry(object):
+class TranslatorRegistry:
     registry_ = {}
 
     @classmethod

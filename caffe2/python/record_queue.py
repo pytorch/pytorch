@@ -45,7 +45,7 @@ class _QueueWriter(Writer):
         return status
 
 
-class RecordQueue(object):
+class RecordQueue:
     """ The class is used to feed data with some process from a reader into a
         queue and provider a reader interface for data fetching from the queue.
     """

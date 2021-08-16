@@ -7,7 +7,7 @@ def unifiable(cls):
     This uses the type and __dict__ or __slots__ attributes to define the
     nature of the term
     See Also:
-    >>> class A(object):
+    >>> class A:
     ...     def __init__(self, a, b):
     ...         self.a = a
     ...         self.b = b
@@ -32,7 +32,7 @@ def unifiable(cls):
 
 def reify_object(o, s):
     """ Reify a Python object with a substitution
-    >>> class Foo(object):
+    >>> class Foo:
     ...     def __init__(self, a, b):
     ...         self.a = a
     ...         self.b = b
@@ -86,7 +86,7 @@ def _reify(o, s):
 def unify_object(u, v, s):
     """ Unify two Python objects
     Unifies their type and ``__dict__`` attributes
-    >>> class Foo(object):
+    >>> class Foo:
     ...     def __init__(self, a, b):
     ...         self.a = a
     ...         self.b = b

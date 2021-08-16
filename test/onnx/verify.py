@@ -18,7 +18,7 @@ def colonize(msg, sep=": "):
         return msg + sep
 
 
-class Errors(object):
+class Errors:
     """
     An error-collecting object which supports error recovery.
 
@@ -186,7 +186,7 @@ class Errors(object):
         """
         parent_self = self
 
-        class Recover(object):
+        class Recover:
             def __enter__(self):
                 pass
 
@@ -206,7 +206,7 @@ class Errors(object):
         """
         parent_self = self
 
-        class AddContext(object):
+        class AddContext:
             def __enter__(self):
                 parent_self.context.append(msg)
 

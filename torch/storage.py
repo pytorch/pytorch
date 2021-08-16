@@ -5,7 +5,7 @@ from ._utils import _type, _cuda
 from typing import Any, TypeVar, Type
 
 T = TypeVar('T', bound='_StorageBase')
-class _StorageBase(object):
+class _StorageBase:
     _cdata: Any
     is_cuda: bool = False
     is_sparse: bool = False

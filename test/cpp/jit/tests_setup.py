@@ -3,7 +3,7 @@ import os
 import torch
 
 
-class Setup(object):
+class Setup:
     def setup(self):
         raise NotImplementedError()
 
@@ -11,7 +11,7 @@ class Setup(object):
         raise NotImplementedError()
 
 
-class FileSetup(object):
+class FileSetup:
     path = None
 
     def shutdown(self):

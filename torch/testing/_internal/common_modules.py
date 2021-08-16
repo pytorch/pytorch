@@ -97,7 +97,7 @@ def formatted_module_name(module_cls):
     return MODULE_CLASS_NAMES[module_cls].replace('.', '_')
 
 
-class FunctionInput(object):
+class FunctionInput:
     """ Contains args and kwargs to pass as input to a function. """
     __slots__ = ['args', 'kwargs']
 
@@ -106,7 +106,7 @@ class FunctionInput(object):
         self.kwargs = kwargs
 
 
-class ModuleInput(object):
+class ModuleInput:
     """ Contains args / kwargs for module instantiation + forward pass. """
     __slots__ = ['constructor_input', 'forward_input', 'desc', 'reference_fn']
 
@@ -129,7 +129,7 @@ class ModuleInput(object):
             self.reference_fn = copy_reference_fn
 
 
-class ModuleInfo(object):
+class ModuleInfo:
     """ Module information to be used in testing. """
 
     def __init__(self,

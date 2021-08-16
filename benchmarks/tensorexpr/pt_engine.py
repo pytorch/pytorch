@@ -1,7 +1,7 @@
 import torch
 
 
-class TorchTensorEngine(object):
+class TorchTensorEngine:
     def rand(self, shape, device=None, dtype=None, requires_grad=False):
         return torch.rand(shape, device=device, dtype=dtype, requires_grad=requires_grad)
 

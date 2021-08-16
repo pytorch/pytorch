@@ -80,7 +80,7 @@ def supports_complex(reduceOp: ReduceOp) -> bool:
     return reduceOp not in denyList
 
 
-class Backend(object):
+class Backend:
     """
     An enum-like class of available backends: GLOO, NCCL, MPI, and other registered
     backends.
@@ -148,7 +148,7 @@ _backend: str = Backend.UNDEFINED
 dist_backend = Backend
 
 
-class _reduce_op(object):
+class _reduce_op:
     r"""
     Deprecated enum-like class for reduction operations: ``SUM``, ``PRODUCT``,
     ``MIN``, and ``MAX``.
@@ -173,12 +173,12 @@ class _reduce_op(object):
 reduce_op = _reduce_op()
 
 
-class group(object):
+class group:
     # Points to the default PG once initialized.
     WORLD: Optional[ProcessGroup] = None
 
 
-class GroupMember(object):
+class GroupMember:
     # Alias to group.WORLD for backward compatibility
     WORLD = group.WORLD
     NON_GROUP_MEMBER = object()
@@ -961,7 +961,7 @@ def recv(tensor, src=None, group=None, tag=0):
         return src
 
 
-class P2POp(object):
+class P2POp:
     """
     A class to build point-to-point operations for ``batch_isend_irecv``.
 

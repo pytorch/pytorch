@@ -1318,7 +1318,7 @@ class TestFreezing(JitTestCase):
 
     def test_module_getattr_indirection(self):
         @torch.jit.script
-        class ValHolder(object):
+        class ValHolder:
             def __init__(self, val: int):
                 self.val: int = val
 
@@ -1388,7 +1388,7 @@ class TestFreezing(JitTestCase):
             mf = torch._C._freeze_module(m._c)
 
     def test_freeze_non_module_class_getattr(self):
-        class BoxCoder(object):
+        class BoxCoder:
             def __init__(self, bbox_xform_clip):
                 # type: (float) -> None
                 self.bbox_xform_clip = bbox_xform_clip

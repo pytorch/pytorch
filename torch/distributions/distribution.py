@@ -5,7 +5,7 @@ from torch.distributions.utils import lazy_property
 from typing import Dict, Optional, Any
 
 
-class Distribution(object):
+class Distribution:
     r"""
     Distribution is the abstract base class for probability distributions.
     """

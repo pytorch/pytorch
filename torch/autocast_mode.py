@@ -2,7 +2,7 @@ import torch
 import functools
 import warnings
 
-class autocast(object):
+class autocast:
     r"""
     Instances of :class:`autocast` serve as context managers or decorators that
     allow regions of your script to run in mixed precision.

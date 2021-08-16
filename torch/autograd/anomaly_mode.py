@@ -3,7 +3,7 @@ import warnings
 
 from typing import Any
 
-class detect_anomaly(object):
+class detect_anomaly:
     r"""Context-manager that enable anomaly detection for the autograd engine.
 
     This does two things:
@@ -81,7 +81,7 @@ class detect_anomaly(object):
         torch.set_anomaly_enabled(self.prev)
 
 
-class set_detect_anomaly(object):
+class set_detect_anomaly:
     r"""Context-manager that sets the anomaly detection for the autograd engine on or off.
 
     ``set_detect_anomaly`` will enable or disable the autograd anomaly detection
