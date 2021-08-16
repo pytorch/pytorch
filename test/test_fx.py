@@ -2275,7 +2275,21 @@ class TestFX(JitTestCase):
         traced = GraphModule(ast_rewriter.root, graph, "gm")
 
         traced.graph.lint()
+        
+    def test_ast_rewriter_wrapped_via_decorator(self):
+        class F(torch.nn.Module):
+            def forward(self, x):
+                return wrapped_via_decorator(x)
 
+        ast_rewriter = RewritingTracer()
+        graph = ast_rewriter.trace(F())
+        traced = GraphModule(ast_rewriter.root, graph, "gm")
+
+        self.assertIn("wrapped_via_decorator", traced.code)
+        self.assertEqual(traced(0), 1)
+        self.assertIs(wrapped_via_decorator, real_wrapped_via_decorator)
+        self.assertFalse(hasattr(wrapped_via_decorator, "__fx_already_patched"))
+        
     def test_submodule_manipulation_API(self):
         class C(torch.nn.Module):
             def __init__(self):
