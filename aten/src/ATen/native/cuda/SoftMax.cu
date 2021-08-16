@@ -126,7 +126,7 @@ void SpatialSoftMax_getLaunchSizes(
   uint32_t block_threads = block.x * block.y;
   smem_size = block.x == 1 ? 0 : block_threads * sizeof(accscalar_t);
   int max_active_blocks;
-#if defined(__HIP_PLATFORM_HCC__) && TORCH_HIP_VERSION < 305
+#if defined(__HIP_PLATFORM_HCC__) && HIP_VERSION < 305
   // HIP function signature is not compatible yet.
   uint32_t max_blocks;
   cudaOccupancyMaxActiveBlocksPerMultiprocessor(&max_blocks,
