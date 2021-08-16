@@ -26,8 +26,8 @@ def default_fn(data):
 
 
 @functional_datapipe('map')
-class MapIterDataPipe(IterDataPipe[T_co]):
-    r""" :class:`MapIterDataPipe`.
+class MapperIterDataPipe(IterDataPipe[T_co]):
+    r""" :class:`MapperIterDataPipe`.
 
     Iterable DataPipe to run a function over each item from the source DataPipe.
     The function can be any regular python function or partial object. Lambda
@@ -108,8 +108,8 @@ class MapIterDataPipe(IterDataPipe[T_co]):
 
 
 @functional_datapipe('collate')
-class CollateIterDataPipe(MapIterDataPipe):
-    r""" :class:`CollateIterDataPipe`.
+class CollatorIterDataPipe(MapperIterDataPipe):
+    r""" :class:`CollatorIterDataPipe`.
 
     Iterable DataPipe to collate samples from datapipe to Tensor(s) by `util_.collate.default_collate`,
     or customized Data Structure by collate_fn.
@@ -156,8 +156,8 @@ class CollateIterDataPipe(MapIterDataPipe):
 
 
 @functional_datapipe('legacy_transforms')
-class TransformsIterDataPipe(MapIterDataPipe):
-    r""" :class:`TransformsIterDataPipe`.
+class TransformerIterDataPipe(MapperIterDataPipe):
+    r""" :class:`TransformerIterDataPipe`.
 
     Iterable DataPipe to use transform(s) from torchvision or torchaudio to transform
     data from datapipe.

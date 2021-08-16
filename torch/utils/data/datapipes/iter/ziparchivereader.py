@@ -1,19 +1,20 @@
 from torch.utils.data import IterDataPipe
 from torch.utils.data.datapipes.utils.common import validate_pathname_binary_tuple
-from typing import Iterable, Iterator, Tuple, Optional, IO, cast
+from typing import Iterable, Iterator, Tuple, IO, cast
 from io import BufferedIOBase
 
 import os
-import tarfile
+import sys
+import zipfile
 import warnings
 
-class ReadFilesFromTarIterDataPipe(IterDataPipe[Tuple[str, BufferedIOBase]]):
-    r""" :class:`ReadFilesFromTarIDP`.
+class ZipArchiveReaderIterDataPipe(IterDataPipe[Tuple[str, BufferedIOBase]]):
+    r""" :class:`ZipArchiveReaderIterDataPipe`.
 
-    Iterable datapipe to extract tar binary streams from input iterable which contains tuples of
-    pathname and tar binary stream, yields pathname and extracted binary stream in a tuple.
+    Iterable data pipe to extract zip binary streams from input iterable which contains tuples of
+    pathname and zip binary stream, yields pathname and extracted binary stream in a tuple.
     args:
-        datapipe: Iterable datapipe that provides pathname and tar binary stream in tuples
+        datapipe: Iterable datapipe that provides pathname and zip binary stream in tuples
         length: a nominal length of the datapipe
 
     Note:
@@ -38,23 +39,25 @@ class ReadFilesFromTarIterDataPipe(IterDataPipe[Tuple[str, BufferedIOBase]]):
             pathname, data_stream = data
             try:
                 # typing.cast is used here to silence mypy's type checker
-                tar = tarfile.open(fileobj=cast(Optional[IO[bytes]], data_stream), mode="r:*")
-                for tarinfo in tar:
-                    if not tarinfo.isfile():
+                zips = zipfile.ZipFile(cast(IO[bytes], data_stream))
+                for zipinfo in zips.infolist():
+                    # major version should always be 3 here.
+                    if sys.version_info[1] >= 6:
+                        if zipinfo.is_dir():
+                            continue
+                    elif zipinfo.filename.endswith('/'):
                         continue
-                    extracted_fobj = tar.extractfile(tarinfo)
-                    if extracted_fobj is None:
-                        warnings.warn("failed to extract file {} from source tarfile {}".format(tarinfo.name, pathname))
-                        raise tarfile.ExtractError
-                    inner_pathname = os.path.normpath(os.path.join(pathname, tarinfo.name))
-                    # Add a reference of the source tarfile into extracted_fobj, so the source
-                    # tarfile handle won't be released until all the extracted file objs are destroyed.
-                    extracted_fobj.source_ref = tar  # type: ignore[attr-defined]
+
+                    extracted_fobj = zips.open(zipinfo)
+                    inner_pathname = os.path.normpath(os.path.join(pathname, zipinfo.filename))
+                    # Add a reference of the source zipfile into extracted_fobj, so the source
+                    # zipfile handle won't be released until all the extracted file objs are destroyed.
+                    extracted_fobj.source_ref = zips  # type: ignore[attr-defined]
                     # typing.cast is used here to silence mypy's type checker
                     yield (inner_pathname, cast(BufferedIOBase, extracted_fobj))
             except Exception as e:
                 warnings.warn(
-                    "Unable to extract files from corrupted tarfile stream {} due to: {}, abort!".format(pathname, e))
+                    "Unable to extract files from corrupted zipfile stream {} due to: {}, abort!".format(pathname, e))
                 raise e
 
 
