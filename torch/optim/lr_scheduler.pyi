@@ -18,6 +18,9 @@ class StepLR(_LRScheduler):
 class MultiStepLR(_LRScheduler):
     def __init__(self, optimizer: Optimizer, milestones: Iterable[int], gamma: float=..., last_epoch: int=...) -> None: ...
 
+class WarmUpLR(_LRScheduler):
+    def __init__(self, optimizer: Optimizer, warmup_factor: float=..., warmup_iters: int=..., warmup_method: str=..., last_epoch: int=...) -> None: ...
+
 class ExponentialLR(_LRScheduler):
     def __init__(self, optimizer: Optimizer, gamma: float, last_epoch: int=...) -> None: ...
 
