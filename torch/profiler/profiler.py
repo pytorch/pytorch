@@ -43,6 +43,12 @@ class profiler(object):
             then aten::add's module hierarchy is A.B
             Note that this support exist, at the moment, only for TorchScript models
             and not eager mode models.
+
+    .. note::
+        Enabling shape and stack tracing results in additional overhead.
+        When record_shapes=True is specified, profiler will temporarily hold references to the tensors;
+        that may further prevent certain optimizations that depend on the reference count and introduce
+        extra tensor copies.
     """
     def __init__(
             self,
@@ -210,7 +216,6 @@ def schedule(*, wait: int, warmup: int, active: int, repeat: int = 0, skip_first
     if warmup == 0:
         warn("Profiler won't be using warmup, this can skew profiler results")
     return schedule_fn
-
 
 def _default_schedule_fn(_: int) -> ProfilerAction:
     """

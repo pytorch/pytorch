@@ -11,6 +11,9 @@ Overview
 API Reference
 -------------
 
+.. autoclass:: torch.profiler.profiler
+  :members:
+
 .. autoclass:: torch.profiler.profile
   :members:
 
