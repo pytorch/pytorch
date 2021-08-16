@@ -2478,7 +2478,7 @@ def sample_inputs_reduction_quantile(op_info, device, dtype, requires_grad):
             inputs.append(SampleInput(t, args=(quantiles,)))
             for kwargs in _generate_reduction_kwargs(t.ndim, supports_multiple_dims=False):
                 # Interpolation kwarg for now is only supported when providing both dim and keepdim
-                kwargs.setdefault('dim', None)
+                kwargs.setdefault('dim', 0)
                 kwargs.setdefault('keepdim', False)
                 for interpolation in test_interpolations:
                     kwargs['interpolation'] = interpolation
@@ -8633,10 +8633,13 @@ op_db: List[OpInfo] = [
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         ref=reference_reduction_numpy(np.sum),
         decorators=(
-            DecorateInfo(toleranceOverride({torch.float16: tol(1e-05, 1e-02)}),
-                         'TestReductions', 'test_ref_small_input'),
-            DecorateInfo(toleranceOverride({torch.float16: tol(1e-05, 1e-03)}),
-                         'TestReductions', 'test_ref_large_input'),
+            DecorateInfo(toleranceOverride({
+                torch.float16: tol(atol=1e-03, rtol=1e-02),
+                torch.complex64: tol(atol=1e-03, rtol=1e-02),
+            }), 'TestReductions', 'test_ref_small_input'),
+            DecorateInfo(toleranceOverride({
+                torch.float16: tol(1e-03, 1e-02),
+            }), 'TestReductions', 'test_ref_large_input'),
         ),
         skips=(
             # FIXME: sum does not support passing keepdim without passing dim
@@ -8658,10 +8661,12 @@ op_db: List[OpInfo] = [
         dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
         ref=reference_reduction_numpy(np.nansum),
         decorators=(
-            DecorateInfo(toleranceOverride({torch.float16: tol(1e-05, 1e-02)}),
-                         'TestReductions', 'test_ref_small_input'),
-            DecorateInfo(toleranceOverride({torch.float16: tol(1e-05, 1e-03)}),
-                         'TestReductions', 'test_ref_large_input'),
+            DecorateInfo(toleranceOverride({
+                torch.float16: tol(atol=1e-03, rtol=1e-02),
+            }), 'TestReductions', 'test_ref_small_input'),
+            DecorateInfo(toleranceOverride({
+                torch.float16: tol(atol=1e-03, rtol=1e-02),
+            }), 'TestReductions', 'test_ref_large_input'),
         ),
         skips=(
             # FIXME: sum does not support passing keepdim without passing dim
