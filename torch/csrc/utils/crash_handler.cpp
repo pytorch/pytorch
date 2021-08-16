@@ -59,8 +59,14 @@ bool dump_callback(
     MDRawAssertionInfo* assertion,
     bool succeeded) {
   if (succeeded) {
-    std::wcerr << "Wrote minidump to " << dump_path << "\\"
-               << minidump_id << ".dmp" << std::endl;
+    // Printing with wcerr inserts spaces between all the characters for some
+    // reason. If someone figures that out then we can get rid of the std::string
+    // conversions here.
+    std::wstring dump_path_ws(dump_path);
+    std::string dump_path_string(dump_path_ws.begin(), dump_path_ws.end());
+    std::wstring minidump_id_ws(minidump_id);
+    std::string minidump_id_string(minidump_id_ws.begin(), minidump_id_ws.end());
+    std::cerr << "Wrote minidump to " << dump_path_string << "\\" << minidump_id_string << ".dmp" << std::endl;
   }
   return succeeded;
 }
