@@ -34,7 +34,7 @@ class TORCH_API LoopNest {
 
   // A constructor for building a LoopNest from an Stmt and a list of output
   // buffers.
-  LoopNest(Stmt* stmt, std::unordered_set<const Buf*> output_bufs);
+  LoopNest(Stmt* stmt, std::unordered_set<Buf*> output_bufs);
 
   // A constructor for building a LoopNest from another loopnest. It clones the
   // other loopnest's stmt.
@@ -45,10 +45,10 @@ class TORCH_API LoopNest {
   }
 
   std::vector<For*> getLoopStmtsFor(Tensor*) const;
-  std::vector<For*> getLoopStmtsFor(const Buf*) const;
+  std::vector<For*> getLoopStmtsFor(Buf*) const;
   std::vector<For*> getLoopStmtsFor(Stmt*) const;
   Stmt* getLoopBodyFor(Tensor*) const;
-  Stmt* getLoopBodyFor(const Buf*) const;
+  Stmt* getLoopBodyFor(Buf*) const;
 
   // Returns the For stmt indexed by 'indices' in the 'root' For stmt.
   //'indices' indicates the path to the returned loop from 'root' in AST, e.g.,
@@ -71,14 +71,14 @@ class TORCH_API LoopNest {
   For* getLoopAt(For* root, const std::vector<int>& indices) const;
 
   // Returns the For stmt that is immediately enclosing the given stmt.
-  static For* getParentLoop(const Stmt* st);
+  static For* getParentLoop(Stmt* st);
 
   // Returns the list of For stmts corresponding to the loopnest that is
   // enclosing the given stmt.
-  static std::vector<For*> getEnclosingLoopNest(const Stmt* st);
+  static std::vector<For*> getEnclosingLoopNest(Stmt* st);
 
   // Returns a list of all Stmts that write to the given buf.
-  std::vector<const Stmt*> getAllWritesToBuf(const Buf*) const;
+  std::vector<Stmt*> getAllWritesToBuf(Buf*) const;
 
   // The following methods return the For loops that contain writes to
   // the given buf.
@@ -98,18 +98,18 @@ class TORCH_API LoopNest {
   // to buf.
   // For the above example:
   //   getAllInnermostLoopsWritingToBuf(a) => {j1, k2, j3}
-  std::vector<For*> getAllInnermostLoopsWritingToBuf(const Buf*) const;
+  std::vector<For*> getAllInnermostLoopsWritingToBuf(Buf*) const;
 
   // Returns a list of For loopnests which contain a Stmt that writes to
   // the given buf. Each loopnest here is a vector For loops.
   // For the above example:
   //   getAllLoopNestsWritingToBuf(a) => {{i1,j1}, {i2,j2,k2}, {i2,j3}}
-  std::vector<std::vector<For*>> getAllLoopNestsWritingToBuf(const Buf*) const;
+  std::vector<std::vector<For*>> getAllLoopNestsWritingToBuf(Buf*) const;
 
   Stmt* simplify();
 
   bool computeInline(Stmt* s);
-  bool computeInline(const Buf* b);
+  bool computeInline(Buf* b);
   void inlineIntermediateBufs(bool allow_duplicated_work);
 
   // Optimizes conditionals.
@@ -463,12 +463,12 @@ class TORCH_API LoopNest {
   static void sliceTail(For* f, int factor, For** head, For** tail);
   static void sliceTail(For* f, int factor);
 
-  using AccessResult = std::pair<const Buf*, Stmt*>;
+  using AccessResult = std::pair<Buf*, Stmt*>;
   // Insert a cache for the consumer's usages of the buffer produced in
   // consumer, and redirect reads and writes in the consumer to that cache.
   // Returns a pair of the new cache buffer, and the new rewritten consumer.
   static AccessResult cacheAccesses(
-      const Buf* producer,
+      Buf* producer,
       const std::string& name,
       Stmt* consumer);
 
@@ -535,8 +535,8 @@ class TORCH_API LoopNest {
   void eliminateDeadStores();
   void prepareForCodegen();
 
-  const std::unordered_set<const Buf*> getInputBufs() const;
-  const std::unordered_set<const Buf*> getOutputBufs() const {
+  const std::unordered_set<Buf*> getInputBufs() const;
+  const std::unordered_set<Buf*> getOutputBufs() const {
     return output_bufs_;
   }
 
@@ -545,11 +545,11 @@ class TORCH_API LoopNest {
       const std::vector<Tensor*>& output_tensors,
       const std::vector<Tensor*>& tensors_to_compute);
   Stmt* insertAllocFree(Stmt* stmt);
-  const std::unordered_set<const Buf*> getIntermediateBufs() const;
+  const std::unordered_set<Buf*> getIntermediateBufs() const;
 
   Stmt* root_stmt_;
 
-  std::unordered_set<const Buf*> output_bufs_;
+  std::unordered_set<Buf*> output_bufs_;
 };
 
 TORCH_API Stmt* FlattenIndexes(Stmt* s);
@@ -568,8 +568,8 @@ struct BufLoadOrStoreUse {
  * in the vectors reflects the order in which the uses appear in the given
  * statement.
  */
-std::unordered_map<const Buf*, std::vector<BufLoadOrStoreUse>>
-findLoadOrStoreUses(Stmt* s);
+std::unordered_map<Buf*, std::vector<BufLoadOrStoreUse>> findLoadOrStoreUses(
+    Stmt* s);
 
 } // namespace tensorexpr
 } // namespace jit

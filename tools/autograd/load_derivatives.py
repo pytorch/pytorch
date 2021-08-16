@@ -16,7 +16,7 @@ from tools.codegen.api.types import (Binding, CppSignatureGroup, NamedCType, Bas
 from tools.codegen.api import cpp
 from tools.codegen.gen import parse_native_yaml
 from tools.codegen.context import with_native_function
-from tools.codegen.model import FunctionSchema, NativeFunction, Variant, Type, SchemaKind
+from tools.codegen.model import FunctionSchema, NativeFunction, Variant, Type
 from tools.codegen.utils import IDENT_REGEX, split_name_params, YamlLoader
 
 _GLOBAL_LOAD_DERIVATIVE_CACHE = {}
@@ -64,6 +64,7 @@ def load_derivatives(derivatives_yaml_path: str, native_yaml_path: str) -> Seque
                 args_with_derivatives=info.args_with_derivatives,
                 non_differentiable_arg_names=info.non_differentiable_arg_names,
                 output_differentiability=info.output_differentiability,
+                output_differentiability_conditions=info.output_differentiability_conditions,
             )
             for info, op_name in zip(infos, op_names)]
 
@@ -128,7 +129,9 @@ def create_forward_derivative(f: NativeFunction, formula: str, names: Tuple[str,
         var_name=var_name,
         var_type=var_type,
         required_inputs_fw_grad=None,
-        required_inputs_primal=None)
+        required_inputs_primal=None,
+        required_original_self_value=False,
+        is_reusing_outplace_formula=False)
 
 def postprocess_forward_derivatives(
     f: NativeFunction,
@@ -238,7 +241,6 @@ def postprocess_forward_derivatives(
             if Variant.function in f.variants:
                 fw_formula = "at::{}({})".format(defn_name, ", ".join(new_args))
             else:
-                assert f.func.kind() is not SchemaKind.inplace
                 assert Variant.method in f.variants
                 fw_formula = "{}.{}({})".format(new_args[0], defn_name, ", ".join(new_args[1:]))
 
@@ -257,7 +259,9 @@ def postprocess_forward_derivatives(
             var_name=defn.var_name,
             var_type=defn.var_type,
             required_inputs_fw_grad=required_inputs_tangent,
-            required_inputs_primal=required_inputs_primal))
+            required_inputs_primal=required_inputs_primal,
+            required_original_self_value=False,
+            is_reusing_outplace_formula=False))
 
     return updated_derivatives
 
@@ -378,6 +382,17 @@ def create_differentiability_info(
     # NB: Removes 'output_differentiability' from defn dictionary
     #     `None` means all differentiable.
     output_differentiability = defn.pop('output_differentiability', None)
+    output_differentiability_conditions = None
+    if output_differentiability and any([isinstance(diff, str) for diff in output_differentiability]):
+        if len(output_differentiability) != 1:
+            raise RuntimeError(f'Not supported: for {specification},'
+                               f'output_differentiability must either be '
+                               f'List[bool] or a List[str] where each str is a '
+                               f'condition. In the case where it is a condition, '
+                               f'we only support single-output functions. '
+                               f'Please file us an issue. ')
+        output_differentiability_conditions = output_differentiability
+        output_differentiability = [True]
 
     schema_function = functions_by_schema.get(specification)
     if not schema_function:
@@ -420,6 +435,7 @@ def create_differentiability_info(
         args_with_derivatives=args_with_derivatives,
         non_differentiable_arg_names=non_differentiable_arg_names,
         output_differentiability=output_differentiability,
+        output_differentiability_conditions=output_differentiability_conditions,
     )
 
 GRAD_INDEX_REGEX = r'(?:^|\W)grads\[(\d+)\]'
