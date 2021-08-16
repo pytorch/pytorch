@@ -6039,6 +6039,235 @@ def run_functional_checks(test_case, test_name, name, apply_fn, run_grad_checks,
         test_case.assertEqual(self_variable.size(), self_variable.grad.size())
 
 
+class TestAutogradNotImplementedKernel(TestCase):
+    def _compile_and_load_op(self, in_schema, out_schema, cpp_args, cpp_ret, name, fn_src, boxed):
+        import torch.utils.cpp_extension
+        # TODO: do we need a way to unload libraries to clean up?
+        # load_inline caches when the same exact code is ran, so no extra work is done when
+        # we attempt to load the same op multiple times
+        if boxed:
+            name += "_boxed"
+
+        ns = f"ns{name}"
+        schema = f"{name}({in_schema}) -> {out_schema}"
+        fn_src = f"{cpp_ret} {name}({cpp_args}) {{{fn_src}}}"
+        cpp_arg_types = ','.join(' '.join(a.split(' ')[:-1]) for a in cpp_args.split(','))
+
+        if boxed:
+            impl = f'm.impl("{name}", torch::CppFunction::makeFromBoxedFunction<&autogradNotImplementedFallback>());'
+        else:
+            impl = f'm.impl("{name}", autogradNotImplementedFallback2<{cpp_ret}, {cpp_arg_types}>(&{name}, "{schema}"));'
+
+        cpp_source = f"""
+        using namespace torch;
+        using namespace aten;
+        using namespace torch::autograd;
+        {fn_src}
+        TORCH_LIBRARY({ns}, m) {{
+        m.def("{name}({in_schema}) -> {out_schema}");
+        }}
+        TORCH_LIBRARY_IMPL({ns}, CPU, m) {{
+        m.impl("{name}", {name});
+        }}
+        TORCH_LIBRARY_IMPL({ns}, Autograd, m) {{
+            {impl}
+        }}
+        """
+
+        torch.utils.cpp_extension.load_inline(
+            name=ns,
+            cpp_sources=cpp_source,
+            is_python_module=False,
+            verbose=False,
+        )
+        return name, getattr(getattr(torch.ops, ns), name)
+
+    def _get_custom_op(self, boxed):
+        def ref(x, y):
+            return x + y
+        func = ("Tensor self, Tensor other", "Tensor",
+                "const torch::Tensor& self, const torch::Tensor& other", "torch::Tensor",
+                "my_custom_op", """
+                     return self + other;
+                """)
+        return self._compile_and_load_op(*func, boxed), ref
+
+    def _get_custom_op_return_tuple_non_tensor(self, boxed):
+        def ref(x, y):
+            return x - y, x + y, 12
+        func = ("Tensor self, Tensor other", "(Tensor, Tensor, int)",
+                "const torch::Tensor& self, const torch::Tensor& other", "std::tuple<torch::Tensor, torch::Tensor, int64_t>",
+                "ret_tuple_non_tensor", """
+                     torch::Tensor a = self - other;
+                     torch::Tensor b = self + other;
+                     return std::tuple<torch::Tensor, torch::Tensor, int64_t>(a, b, 12);
+                """)
+        return self._compile_and_load_op(*func, boxed), ref
+
+    def _get_custom_op_return_single_non_tensor(self, boxed):
+        def ref(x, y):
+            return 12
+        func = ("Tensor self, Tensor other", "int",
+                "const torch::Tensor& self, const torch::Tensor& other", "int64_t",
+                "ret_single_non_tensor", """
+                     return 12;
+                """)
+        return self._compile_and_load_op(*func, boxed), ref
+
+    def _get_custom_inplace_op(self, boxed):
+        def ref(x, y):
+            return x.add_(y)
+        inplace_func_info = ("Tensor(a!) self, Tensor other", "Tensor(a!)",
+                             "const torch::Tensor& self, const torch::Tensor& other", "torch::Tensor",
+                             "inplace_op", """
+                                  return self.add_(other);
+                             """)
+        return self._compile_and_load_op(*inplace_func_info, boxed), ref
+
+    def _get_custom_view_op(self, boxed):
+        view_func_info = ("Tensor(a) self, Tensor other", "Tensor(a)",
+                          "const torch::Tensor& self, const torch::Tensor& other", "torch::Tensor",
+                          "view_op", """
+                           return self.view(-1);
+                          """)
+        return self._compile_and_load_op(*view_func_info, boxed), None
+
+    def _get_optional_op(self, boxed):
+        def ref(self, other):
+            if other is not None:
+                return self + other
+            else:
+                return self.clone()
+        view_func_info = ("Tensor self, Tensor? other", "Tensor",
+                          "const torch::Tensor& self, const c10::optional<at::Tensor>& other", "torch::Tensor",
+                          "opt_op", """
+                           if (other.has_value()) {
+                               return self + other.value();
+                           } else {
+                               return self.clone();
+                           }
+                          """)
+        return self._compile_and_load_op(*view_func_info, boxed), ref
+
+    def _get_tensorlist_op(self, boxed):
+        def ref(x, y):
+            return x + sum(y)
+        func = ("Tensor self, Tensor[] other", "Tensor",
+                "const torch::Tensor& self, const at::TensorList& other", "torch::Tensor",
+                "tensorlist_op", """
+                     const auto& res = self.clone();
+                     for (const auto& t : other) {
+                          res.add_(t);
+                     }
+                     return res;
+                """)
+        return self._compile_and_load_op(*func, boxed), ref
+
+    def test_perform_basic_checks(self):
+        """NotImplemented error is triggered if input requires grad"""
+        for boxed in (True, False):
+            funcs = [
+                self._get_custom_op(boxed),
+                self._get_custom_op_return_tuple_non_tensor(boxed),
+                self._get_custom_view_op(boxed),
+            ]
+            for (name, op), ref in funcs:
+                a = torch.tensor(1., requires_grad=True)
+                b = torch.tensor(1.)
+                c = torch.tensor(1.)
+
+                # If any inputs require grad,
+                d = op(a, b)
+                out = d[0] if isinstance(d, tuple) else d
+                with self.assertRaisesRegex(RuntimeError, f"derivative for .*{name} is not implemented"):
+                    torch.autograd.grad(out, a)
+
+                # Should not have grad_fn if none require grad
+                d = op(b, c)
+                out = d[0] if isinstance(d, tuple) else d
+                with self.assertRaisesRegex(RuntimeError, "element 0 of tensors does not require grad and does not have a grad_fn"):
+                    torch.autograd.grad(out, b)
+
+                # Forward ad raises error as well
+                with fwAD.dual_level():
+                    p = torch.rand(2, 3)
+                    t = torch.rand(2, 3)
+                    dual_input = fwAD.make_dual(p, t)
+                    with self.assertRaisesRegex(RuntimeError, f"Trying to use forward AD with .*{name} that does not support it."):
+                        op(dual_input, dual_input)
+
+                if ref is not None:
+                    self.assertEqual(op(a, b), ref(a, b))
+
+    def test_check_single_nontensor(self):
+        for boxed in (True, False):
+            (_, op), ref = self._get_custom_op_return_single_non_tensor(boxed)
+
+            a = torch.tensor(1., requires_grad=True)
+            b = torch.tensor(1.)
+
+            c = op(a, b)
+            self.assertEqual(c, ref(a, b))
+
+    def test_check_inplace(self):
+        """Check basic inplace behavior"""
+        for boxed in (True, False):
+            (_, op), ref = self._get_custom_inplace_op(boxed)
+            a = torch.tensor(1., requires_grad=True)
+            b = torch.tensor(1.)
+
+            with self.assertRaisesRegex(RuntimeError, "a leaf Variable that requires grad is being used in an in-place operation"):
+                op(a, b)
+            op(b, a)
+            a = a.clone()
+            b = b.clone()
+            c = op(a, b)
+            self.assertEqual(c, ref(a, b))
+
+    def test_tensorlist_input(self):
+        for boxed in (True, False):
+            (name, op), ref = self._get_tensorlist_op(boxed)
+            a = torch.tensor(1.)
+            b = [torch.tensor(1.), torch.tensor(2., requires_grad=True)]
+            c = op(a, b)
+            with self.assertRaisesRegex(RuntimeError, f"derivative for .*{name} is not implemented"):
+                torch.autograd.grad(c, b[1])
+            with self.assertRaisesRegex(RuntimeError, "One of the differentiated Tensors does not require grad"):
+                torch.autograd.grad(c, b[0])
+            self.assertEqual(c, ref(a, b))
+
+    def test_inplace_on_view(self):
+        for boxed in (True, False):
+            (_, op), _ = self._get_custom_inplace_op(boxed)
+
+            b = torch.tensor([1.], requires_grad=True, dtype=torch.double).clone()
+            v = b.view(-1)
+            t = torch.tensor([1.], dtype=torch.double)
+
+            with torch.no_grad():
+                v_nograd = b.view(-1)
+                # in-place when in no-grad mode okay
+                op(v_nograd, t)
+
+            with self.assertRaisesRegex(RuntimeError, "A view was created in no_grad mode"):
+                op(v_nograd, t)
+
+            torch.autograd.gradcheck(op, (v, t))
+            self.assertTrue(op(v, t) is v)
+
+            # Make we use rebase_history so we don't overwrite old grad_fn
+            old_grad_fn = v.grad_fn
+            self.assertTrue(op(v, t).grad_fn is old_grad_fn)
+
+    def test_optional_tensor_input(self):
+        for boxed in (True, False):
+            (_, op), ref = self._get_optional_op(boxed)
+            a = torch.tensor(1., requires_grad=True)
+            b = torch.tensor(1.)
+            self.assertEqual(op(a, b), ref(a, b))
+            self.assertEqual(op(a, None), ref(a, None))
+
+
 class TestAutogradComplex(TestCase):
     def test_view_func_for_complex_views(self):
         # case 1: both parent and child have view_func
