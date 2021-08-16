@@ -164,6 +164,9 @@ std::pair<IValue, IValue> getFunctionTuple(
     // of arguments is not available for this operator, we don't do any backward
     // compatibility adaptation at runtime.
     int num_args = -1;
+    for(auto& it: op_to_specified_args) {
+      std::cout << it.first << ": " << it.second << std::endl;
+    }
     auto it = op_to_specified_args.find(unique_name);
     if (it != op_to_specified_args.end()) {
       num_args = it->second;

@@ -42,6 +42,7 @@ class Function {
       std::unordered_map<c10::OperatorName, OperatorFunctionWithSchema>;
 
   Function(c10::QualifiedName name);
+//  bool run(Stack& stack) const;
   bool run(Stack& stack) const;
   c10::IValue operator()(Stack& stack) const;
   const std::string& name() const;

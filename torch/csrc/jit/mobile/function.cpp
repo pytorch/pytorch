@@ -95,25 +95,69 @@ bool Function::append_operator(
       fn(stack);
     };
   } else {
+    bool it = num_specified_args.has_value();
+    int a = (it ? num_specified_args.value() : -1);
+    std::cout << "num_specified_args: " << a << std::endl;
+    std::cout << "if cond:" << (a < static_cast<int64_t>(args.size())) << std::endl;
     // num_specified_args >= 0 indicates number of arguments are available
     // from model. We can use it to handle backward compatibility.
     if (num_specified_args &&
         num_specified_args.value() < static_cast<int64_t>(args.size())) {
       // Sanity check at load time, to save perf at runtime
-      for (size_t i = num_specified_args.value(); i < args.size(); ++i) {
-        auto default_val = args[i].default_value();
-        TORCH_CHECK(
-            default_val.has_value(),
-            "Error happened at preparing for default values for the argument. The ",
-            i,
-            "th arguement of operator",
-            opname,
-            " does not have a specified value or default value. ");
-      }
-      fn = [fn, num_specified_args, args](Stack& stack) {
-        for (size_t i = num_specified_args.value(); i < args.size(); ++i) {
-          stack.push_back(args[i].default_value());
+//      for (size_t i = num_specified_args.value(); i < args.size(); ++i) {
+//        auto default_val = args[i].default_value();
+//        TORCH_CHECK(
+//            default_val.has_value(),
+//            "Error happened at preparing for default values for the argument. The ",
+//            i,
+//            "th arguement of operator",
+//            opname,
+//            " does not have a specified value or default value. ");
+//      }
+//      std::vector<size_t> default_values;
+//      for (size_t i = num_specified_args.value(); i < args.size(); ++i) {
+//        auto default_val = args[i].default_value();
+//        if(default_val.has_value()) {
+//          default_values.push_back(i);
+//        }
+//      }
+
+//      fn = [fn, num_specified_args, &args](Stack& stack)  {
+      fn = [fn, num_specified_args, args](Stack& stack)  {
+        std::cout << "stack.size()" << stack.size();
+        c10::optional<c10::Argument> out_args;
+//        if(!args.empty()) {
+//          auto last = args.back();
+//          if (last.is_out()) {
+//            out_args = args.back();
+//            args.pop_back();
+//          }
+//        }
+        std::vector<c10::Argument> local_args;
+        for (auto arg: args) {
+          if(!arg.is_out()) {
+            local_args.emplace_back(arg);
+          }
         }
+//        for (size_t i = 0; i < args.size(); ++i) {
+//          if(args[i].default_value().has_value()) {
+//            stack.push_back(args[i].default_value());
+//          }
+//          }
+        for (size_t i = num_specified_args.value(); i < local_args.size(); ++i) {
+          stack.push_back(local_args[i].default_value());
+        }
+
+//        for (size_t i = num_specified_args.value(); i < args.size(); ++i) {
+//          stack.push_back(args[i].default_value());
+//        }
+//        if(out_args.has_value()) {
+//          args.push_back(out_args.value());
+//        }
+//        for (size_t i = num_specified_args.value(); i < args.size(); ++i) {
+//          stack.push_back(args[i].default_value());
+//        }
+
         fn(stack);
       };
     }

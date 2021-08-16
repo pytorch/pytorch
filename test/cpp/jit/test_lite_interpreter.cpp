@@ -590,6 +590,47 @@ TEST(LiteInterpreterTest, TwoSubmodulesModuleInfo) {
   AT_ASSERT(module_debug_info_set.count("top(C).B0(B).aten::add"));
 }
 
+TEST(LiteInterpreterTest, RunKeyWordArgs) {
+  Module m("m");
+//  m.register_parameter("foo", torch::ones({}), false);
+  m.define(R"(
+    def forward(self, x, h):
+      torch.add(x, h, alpha=2.0, out=x)
+  )");
+//  m.define(R"(
+//    def forward(self, x, h):
+//      torch.add(x, h, out=x)
+//  )");
+//  m.define(R"(
+//    def forward(self, x, h):
+//      torch.add(x, h)
+//  )");
+
+  std::vector<IValue> inputs;
+  auto input_x = 2 * torch::ones({});
+  auto input_h = torch::ones({});
+  auto ref = m.run_method("forward", input_x, input_h);
+//
+  std::stringstream ss;
+//  m.save(ss);
+//  m.save("/Users/chenlai/Documents/pytorch/outarg/schema.pt");
+//  Module bc = load(ss);
+//  input_x = 2 * torch::ones({});
+//  input_h = torch::ones({});
+//  bc.run_method("forward", input_x, input_h);
+//  std::cout << input_x << std::endl;
+    m._save_for_mobile(ss);
+//    m._save_for_mobile("/Users/chenlai/Documents/pytorch/outarg/schema.ptl");
+    mobile::Module bc = _load_for_mobile(ss);
+    IValue res = bc.run_method("forward", input_x, input_h);
+  std::cout << input_x << std::endl;
+  std::cout << "final" << std::endl;
+//
+//  auto resd = res.toTensor().item<float>();
+//  auto refd = ref.toTensor().item<float>();
+//  AT_ASSERT(resd == refd);
+}
+
 TEST(LiteInterpreterTest, GetRuntimeByteCodeVersion) {
   auto runtime_bytecode_version = _get_runtime_bytecode_version();
   AT_ASSERT(
@@ -1193,6 +1234,7 @@ TEST(LiteInterpreterTest, DefaultArgsConv) {
   auto output = res.toTensor();
   AT_ASSERT(outputref.dim() == output.dim());
   AT_ASSERT(output.equal(outputref));
+  m._save_for_mobile("/Users/chenlai/Documents/pytorch/outarg/DefaultArgsConv.ptl");
 }
 
 namespace {
@@ -1240,6 +1282,7 @@ void testDefaultArgsPinv(int num_args) {
   input = input.view({N, N});
   inputs.push_back(input);
   testLiteModuleCompareResultTensors(m, inputs);
+  m._save_for_mobile("/Users/chenlai/Documents/pytorch/outarg/testDefaultArgsPinv_" + std::to_string(num_args) + ".ptl" );
 }
 } // namespace
 
