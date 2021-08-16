@@ -114,8 +114,7 @@ static PyObject * THPVariable_arange(PyObject* self, PyObject* args, PyObject* k
       return wrap(dispatch_arange(end, options));
     } else {
       TORCH_CHECK(!r.toBool(5), " `pin_memory` and `out` parameters are incompatible");
-      check_out_type_matches(r.tensor(1), r.scalartype(2), r.isNone(2), r.layout(3),
-                             r.device(4), r.isNone(4));
+      check_out_type_matches(r.tensor(1), r.scalartypeOptional(2), r.layout(3), r.deviceOptional(4));
       return wrap(dispatch_arange(r.scalar(0), r.tensor(1)).set_requires_grad(r.toBool(6)));
     }
   } else if (r.idx == 1) {
@@ -134,8 +133,7 @@ static PyObject * THPVariable_arange(PyObject* self, PyObject* args, PyObject* k
       return wrap(dispatch_arange(start, end, step, options));
     } else {
       TORCH_CHECK(!r.toBool(7), " `pin_memory` and `out` parameters are incompatible");
-      check_out_type_matches(r.tensor(3), r.scalartype(4), r.isNone(4), r.layout(5),
-                               r.device(6), r.isNone(6));
+      check_out_type_matches(r.tensor(3), r.scalartypeOptional(4), r.layout(5), r.deviceOptional(6));
       return wrap(dispatch_arange(r.scalar(0), r.scalar(1), r.scalar(2), r.tensor(3)).set_requires_grad(r.toBool(8)));
     }
   }
@@ -182,8 +180,7 @@ static PyObject * THPVariable_range(PyObject* self, PyObject* args, PyObject* kw
           .requires_grad(r.toBool(7));
       return wrap(dispatch_range(r.scalar(0), r.scalar(1), r.scalar(2), options));
     } else {
-      check_out_type_matches(r.tensor(3), r.scalartype(4), r.isNone(4),
-                             r.layout(5), r.device(6), r.isNone(6));
+      check_out_type_matches(r.tensor(3), r.scalartypeOptional(4), r.layout(5), r.device(6));
       return wrap(dispatch_range(r.scalar(0), r.scalar(1), r.scalar(2), r.tensor(3)).set_requires_grad(r.toBool(7)));
     }
   }
@@ -252,8 +249,7 @@ static PyObject * THPVariable_full(PyObject* self, PyObject* args, PyObject* kwa
     // Validates out tensor and other kwargs
     auto result = r.tensor(2);
     TORCH_CHECK(!r.toBool(6), " `pin_memory` and `out` parameters are incompatible");
-    check_out_type_matches(result, r.scalartype(3), r.isNone(3), r.layout(4),
-                          r.device(5), r.isNone(5));
+    check_out_type_matches(result, r.scalartypeOptional(3), r.layout(4), r.deviceOptional(5));
 
     return wrap(dispatch_full(size, fill_val, result).set_requires_grad(r.toBool(7)));
   } else if (r.idx == 1) {
@@ -339,8 +335,7 @@ static PyObject * THPVariable_randint(PyObject* self_, PyObject* args, PyObject*
           .requires_grad(r.toBool(7));
       return wrap(dispatch_randint(high, size, generator, options));
     } else {
-      check_out_type_matches(r.tensor(3), r.scalartype(4), r.isNone(4),
-                             r.layout(5), r.device(6), r.isNone(6));
+      check_out_type_matches(r.tensor(3), r.scalartypeOptional(4), r.layout(5), r.device(6));
       return wrap(dispatch_randint(r.toInt64(0), r.intlist(1), r.generator(2), r.tensor(3)).set_requires_grad(r.toBool(7)));
     }
   } else if (r.idx == 1) {
@@ -359,8 +354,7 @@ static PyObject * THPVariable_randint(PyObject* self_, PyObject* args, PyObject*
           .requires_grad(r.toBool(8));
       return wrap(dispatch_randint(low, high, size, generator, options));
     } else {
-      check_out_type_matches(r.tensor(4), r.scalartype(5), r.isNone(5),
-                             r.layout(6), r.device(7), r.isNone(7));
+      check_out_type_matches(r.tensor(4), r.scalartypeOptional(5), r.layout(6), r.device(7));
       return wrap(dispatch_randint(r.toInt64(0), r.toInt64(1), r.intlist(2), r.generator(3), r.tensor(4)).set_requires_grad(r.toBool(8)));
     }
   }
@@ -596,9 +590,7 @@ static PyObject * THPVariable_linspace(PyObject* self_, PyObject* args, PyObject
     return wrap(dispatch_linspace(_r.scalar(0), _r.scalar(1), _r.toInt64Optional(2), options));
   } else {
     // aten::linspace.out(Scalar start, Scalar end, int? steps=None, *, Tensor(a!) out) -> Tensor(a!)
-    check_out_type_matches(_r.tensor(3), _r.scalartype(4),
-                           _r.isNone(4), _r.layoutOptional(5),
-                           _r.device(6), _r.isNone(6));
+    check_out_type_matches(_r.tensor(3), _r.scalartypeOptional(4), _r.layoutOptional(5), _r.deviceOptional(6));
 
     auto dispatch_linspace_out = [](Tensor out, Scalar start, Scalar end, c10::optional<int64_t> steps) -> Tensor {
       pybind11::gil_scoped_release no_gil;
@@ -644,9 +636,7 @@ static PyObject * THPVariable_logspace(PyObject* self_, PyObject* args, PyObject
     return wrap(dispatch_logspace(_r.scalar(0), _r.scalar(1), _r.toInt64Optional(2), _r.toDouble(3), options));
   } else {
     // aten::logspace.out(Scalar start, Scalar end, int? steps=None, float base=10.0, *, Tensor(a!) out) -> Tensor(a!)
-    check_out_type_matches(_r.tensor(4), _r.scalartype(5),
-                           _r.isNone(5), _r.layoutOptional(6),
-                           _r.device(7), _r.isNone(7));
+    check_out_type_matches(_r.tensor(4), _r.scalartypeOptional(5), _r.layoutOptional(6), _r.deviceOptional(7));
 
     auto dispatch_logspace_out = [](Tensor out, Scalar start, Scalar end, c10::optional<int64_t> steps, double base) -> Tensor {
       pybind11::gil_scoped_release no_gil;

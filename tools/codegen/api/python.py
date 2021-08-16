@@ -533,10 +533,6 @@ class PythonArgParserOutputExpr:
     # The python argument it maps to.
     argument: PythonArgument
 
-    @property
-    def is_none_expr(self) -> str:
-        return f'_r.isNone({self.index})'
-
 # To pass PythonArgParser output to the lambda wrapper, we need bind
 # PythonArgParserOutputExpr to DispatchLambdaArgument.
 # They are not always 1-1 mapped, e.g. scattered TensorOptions fields
@@ -695,7 +691,7 @@ def signature(f: NativeFunction, *, method: bool = False, pyi: bool = False) -> 
     if is_factory_function or is_like_or_new_function:
         tensor_options_args.append(PythonArgument(
             name='dtype',
-            type=BaseType(BaseTy.ScalarType),
+            type=OptionalType(BaseType(BaseTy.ScalarType)),
             default='None' if pyi else _dtype_default_type_hack(name),
             default_init='self.scalar_type()' if is_like_or_new_function else None,
         ))
@@ -707,7 +703,7 @@ def signature(f: NativeFunction, *, method: bool = False, pyi: bool = False) -> 
         ))
         tensor_options_args.append(PythonArgument(
             name='device',
-            type=BaseType(BaseTy.Device),
+            type=OptionalType(BaseType(BaseTy.Device)),
             default='None',
             default_init='self.device()' if is_like_or_new_function else None,
         ))
@@ -997,7 +993,7 @@ def cpp_dispatch_exprs(f: NativeFunction, *,
 # For certain cases it is intentionally more restrictive than necessary,
 # e.g.: it doesn't accepts doublelist with definite size.
 def arg_parser_unpack_method(t: Type, has_default: bool) -> str:
-    if has_default and str(t) not in ('ScalarType', 'Device', 'Layout?'):
+    if has_default and str(t) not in ('ScalarType?', 'Device?', 'Layout?'):
         raise RuntimeError(f'type \'{t}\' does not supported unpacking with default')
 
     if isinstance(t, BaseType):
@@ -1023,7 +1019,7 @@ def arg_parser_unpack_method(t: Type, has_default: bool) -> str:
             return 'optionalTensor'
 
         elif isinstance(t.elem, BaseType):
-            if t.elem.name in [BaseTy.ScalarType, BaseTy.Scalar,
+            if t.elem.name in [BaseTy.Scalar,
                                BaseTy.int, BaseTy.bool,
                                BaseTy.float, BaseTy.str]:
                 # Regular cases: append 'Optional' to elem's unpacking method
@@ -1036,6 +1032,8 @@ def arg_parser_unpack_method(t: Type, has_default: bool) -> str:
                 return 'layoutWithDefault' if has_default else 'layoutOptional'
             elif t.elem.name == BaseTy.Device:
                 return 'deviceWithDefault' if has_default else 'deviceOptional'
+            elif t.elem.name == BaseTy.ScalarType:
+                return 'scalartypeWithDefault' if has_default else 'scalartypeOptional'
 
         elif isinstance(t.elem, ListType):
             if str(t.elem.elem) == 'int':
@@ -1093,8 +1091,8 @@ def arg_parser_output_exprs(
 
 # argument name to type for scattered tensor options fields
 TENSOR_OPTIONS_FIELDS = {
-    'dtype': 'ScalarType',
-    'device': 'Device',
+    'dtype': 'ScalarType?',
+    'device': 'Device?',
     'layout': 'Layout?',
     'pin_memory': 'bool',
     'requires_grad': 'bool',
@@ -1191,8 +1189,7 @@ torch::utils::maybe_initialize_cuda(options);
 
             inits.append(f"""\
 check_out_type_matches({arg_parser_outputs['out'].expr}, {arg_parser_outputs['dtype'].expr},
-                       {arg_parser_outputs['dtype'].is_none_expr}, {arg_parser_outputs['layout'].expr},
-                       {arg_parser_outputs['device'].expr}, {arg_parser_outputs['device'].is_none_expr});
+                       {arg_parser_outputs['layout'].expr}, {arg_parser_outputs['device'].expr});
 """)
         # we'll set requires_grad on outgoing tensor
         if 'requires_grad' not in tensor_options_args_names:
