@@ -40,6 +40,9 @@ class TORCH_API ThreadLocalState {
   bool keep_grad_mode_ = true;
 #endif
 
+  // TLS for saved tensors default hooks
+  std::pair<PyObject*, PyObject*> saved_tensors_default_hooks_;
+
   // Whether pre-sampling RecordFunction optimization was enabled
   bool bumped_record_all_functions_ = false;
 
