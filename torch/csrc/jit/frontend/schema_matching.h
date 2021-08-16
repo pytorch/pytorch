@@ -59,5 +59,8 @@ TORCH_API Value* tryConvertToType(
     const TypePtr& concrete_type,
     Value* value,
     bool allow_conversions);
+
+TORCH_API Symbol remapAliasSymbol(const Symbol& s);
+
 } // namespace jit
 } // namespace torch

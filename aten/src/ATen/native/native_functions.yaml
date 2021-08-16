@@ -341,11 +341,13 @@
     CompositeExplicitAutograd: _neg_view
 
 - func: acos(Tensor self) -> Tensor
+  alias: acos1
   device_check: NoCheck   # TensorIterator
   variants: function, method
   structured_delegate: acos.out
 
 - func: acos_(Tensor(a!) self) -> Tensor(a!)
+  alias: acos1_
   device_check: NoCheck   # TensorIterator
   variants: function, method
   structured_delegate: acos.out

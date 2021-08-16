@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/frontend/sugared_value.h>
+#include "jit/runtime/operator.h"
 
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
@@ -689,7 +690,15 @@ std::shared_ptr<SugaredValue> NamedTupleConstructor::call(
 std::shared_ptr<BuiltinFunction> BuiltinFunction::tryCreate(
     Symbol symbol,
     c10::optional<NamedValue> self) {
-  for (const std::shared_ptr<Operator>& op : getAllOperatorsFor(symbol)) {
+  auto ops = getAllOperatorsFor(symbol);
+  if (ops.size() == 0){
+    //try aliases
+    if (Symbol a = remapAliasSymbol(symbol)){
+      symbol = a;
+      ops = getAllOperatorsFor(a);
+    }
+  }
+  for (const std::shared_ptr<Operator>& op : ops) {
     if (!self) {
       return std::make_shared<BuiltinFunction>(symbol, nullptr);
     }

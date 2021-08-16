@@ -9,6 +9,10 @@
 namespace torch {
 namespace jit {
 
+namespace {
+  std::unordered_map<std::string, std::string> aliases{{"aten::acos1", "aten::acos"}};
+}
+
 static inline TypePtr unwrapOptional(TypePtr opt_type) {
   if (auto unwrap_list_type = opt_type->cast<OptionalType>()) {
     return unwrap_list_type->getElementType();
@@ -613,7 +617,13 @@ Value* emitBuiltinCall(
     at::ArrayRef<NamedValue> args,
     at::ArrayRef<NamedValue> kwargs,
     const c10::optional<NamedValue>& self) {
-  const auto& variants = getAllOperatorsFor(name);
+  auto variants = getAllOperatorsFor(name);
+  if (variants.size() == 0) {
+      if (Symbol a = remapAliasSymbol(name)) {
+        name = a;
+        variants = getAllOperatorsFor(name);
+      }
+  }
   const auto& builtin_functions = getAllBuiltinFunctionsFor(name);
 
   std::stringstream failure_messages;
@@ -646,9 +656,7 @@ Value* emitBuiltinCall(
     }
     throw error;
   }
-
   auto matched = matchSchemas(schemas, loc, graph, args, kwargs, self);
-
   if (matched.first < variants.size()) {
     return emitBuiltinNode(matched.second, loc, graph, name);
   } else {
@@ -656,6 +664,15 @@ Value* emitBuiltinCall(
     // we inline builtin calls because they are normally very small
     // wrappers and are not useful for keeping around to debug
     return insertGraph(graph, *fn->graph(), matched.second.inputs).at(0);
+  }
+}
+
+Symbol remapAliasSymbol(const Symbol& s){
+  auto alias_base = aliases.find(s.toQualString());
+  if (alias_base != aliases.end()){
+    return Symbol::fromQualString(alias_base->second);
+  } else {
+    return Symbol();
   }
 }
 
