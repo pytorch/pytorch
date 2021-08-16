@@ -303,7 +303,7 @@ def get_compiler_abi_compatibility_and_version(compiler) -> Tuple[bool, TorchVer
 
     Returns:
         A tuple that contains a boolean that defines if the compiler is (likely) ABI-incompatible with PyTorch,
-        followed by a tuple of strings that correspond to the compiler version.
+        followed by a `TorchVersion` string that contains the compiler version separated by dots.
     '''
     if not _is_binary_build():
         return (True, TorchVersion('0.0.0'))
