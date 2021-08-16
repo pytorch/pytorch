@@ -11351,8 +11351,8 @@ Arguments:
     bit_width (int): bit width of the target quantization range.
 
 Returns:
-    x_max (Tensor): optimized max val of the tensor.
-    x_min (Tensor): optimized min val of the tensor.
+    Tensor: optimized max val of the tensor.
+    Tensor: optimized min val of the tensor.
 
 Example::
 
@@ -11360,7 +11360,7 @@ Example::
     >>> torch.choose_qparams_optimized(x, 4, 200, 0.016, 255)
     (tensor([1.5765]), tensor([-0.9451]))
 
-""".format(**factory_common_args))
+""")
 
 
 add_docstr(torch.Generator,
