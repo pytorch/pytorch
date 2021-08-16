@@ -165,7 +165,7 @@ std::vector<Expr*> getBoundExtents(
   // Find the safe size of the temprorary buffer by determining the outer
   // extents of a union of all bounds.
   for (const TensorAccessBoundsInfo& p : infos) {
-    for (auto i : c10::irange(p.start.size())) {
+    for (const auto i : c10::irange(p.start.size())) {
       if (starts.size() <= i) {
         starts.push_back(p.start[i]);
       } else {
