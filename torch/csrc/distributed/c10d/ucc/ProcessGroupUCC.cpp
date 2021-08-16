@@ -153,6 +153,9 @@ ProcessGroupUCC::ProcessGroupUCC(
     const c10::intrusive_ptr<Store>& store,
     int rank,
     int size) : ProcessGroup(rank, size), store(store), worker(std::make_shared<UCPWorker>()) {
+  static_assert(std::is_same<decltype(size), world_size_type>::value,
+    "If you updated the type of `size`, please check with note [Receive from an endpoint]."
+  );
   store->set("ucp_address:" + std::to_string(rank_), worker->address());
   for (int i = 0; i < size_; i++) {
     UCPWorker::Address peer_addr = store->get("ucp_address:" + std::to_string(i));
@@ -228,51 +231,52 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::alltoall_base(
   TORCH_CHECK(false, "ProcessGroupUCC does not support alltoall_base");
 };
 
-// Note [Receive from an endpoint]:
-// UCP does not support receiving from a specific endpoint. So we use tag
-// matching to simulate this behavior. We use higher bits of a tag to store
-// rank, and use lower bits to store the real tag. When receiving from any
-// source, tag mask is used to disable higher bits.
-//
-// TODO: unit test should be modified so that recv from different endpoint
-// with the same tag are covered.
-
-
-
+// See note: [Receive from an endpoint]
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::send(
     std::vector<at::Tensor>& tensors,
     int dstRank,
     int tag) {
+  static_assert(std::is_same<decltype(tag), tag_type>::value,
+    "If you updated the type of tag, please check with note [Receive from an endpoint]."
+  );
   check_tensor(tensors);
   TORCH_CHECK(dstRank < ucp_endpoints.size(), "Invalid dest rank");
   auto& tensor = tensors[0];
   auto request = ucp_endpoints[dstRank]->send_with_tag(
     tensor.data_ptr(), tensor.element_size() * tensor.numel(),
-    tag, tensor.device().type());
+    wrap_tag(rank_, tag), tensor.device().type());
   return c10::make_intrusive<ProcessGroupUCC::WorkUCP>(worker, request);
 }
 
+// See note: [Receive from an endpoint]
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::recv(
     std::vector<at::Tensor>& tensors,
     int srcRank,
     int tag) {
+  static_assert(std::is_same<decltype(tag), tag_type>::value,
+    "If you updated the type of tag, please check with note [Receive from an endpoint]."
+  );
   check_tensor(tensors);
   TORCH_CHECK(srcRank < ucp_endpoints.size(), "Invalid dest rank");
   auto& tensor = tensors[0];
   auto request = worker->recv_with_tag_and_mask(
     tensor.data_ptr(), tensor.element_size() * tensor.numel(),
-    tag, 0, tensor.device().type());
+    wrap_tag(rank_, tag), 0, tensor.device().type());
   return c10::make_intrusive<ProcessGroupUCC::WorkUCP>(worker, request);
 }
 
+// See note: [Receive from an endpoint]
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::recvAnysource(
     std::vector<at::Tensor>& tensors,
     int tag) {
+  static_assert(std::is_same<decltype(tag), tag_type>::value,
+    "If you updated the type of tag, please check with note [Receive from an endpoint]."
+  );
   check_tensor(tensors);
   auto& tensor = tensors[0];
   auto request = worker->recv_with_tag_and_mask(
     tensor.data_ptr(), tensor.element_size() * tensor.numel(),
-    tag, 0, tensor.device().type());
+    wrap_tag(0, tag), any_source_mask(), tensor.device().type());
   return c10::make_intrusive<ProcessGroupUCC::WorkUCP>(worker, request);
 };
 

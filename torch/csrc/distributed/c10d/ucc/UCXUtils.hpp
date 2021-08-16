@@ -97,4 +97,52 @@ public:
   std::shared_ptr<UCPRequest> send_with_tag(void *data, size_t size, ucp_tag_t tag, c10::DeviceType device) const;
 };
 
+// Note [Receive from an endpoint]:
+// UCP does not support receiving from a specific endpoint. So we use tag
+// matching to simulate this behavior. In PyTorch, the world_size is int,
+// the tag is also int, and in UCP, the ucp_tag_t is uint64_t. So we use
+// the higher 32 bits of ucp_tag_t for rank, and use lower 32 bits for the
+// real tag. When receiving from a specified endpoint, the entire ucp_tag_t
+// should match. And when receiving from any source, tag mask is used to
+// disable the matching of the higher bits.
+
+// TODO: add test for INT_MAX tag
+
+using world_size_type = int;
+using tag_type = int;
+static_assert(
+  std::is_same<ucp_tag_t, uint64_t>::value &&
+  std::is_same<world_size_type, int>::value &&
+  std::is_same<tag_type, int>::value &&
+  sizeof(int) == 4,
+  "The implementation of UCP tag matching has unsatisfied assumptions.");
+
+constexpr ucp_tag_t any_source_mask() {
+  return 0xFFFFFFFF00000000UL;
+}
+
+inline ucp_tag_t wrap_tag(world_size_type rank, tag_type tag) {
+  union {
+    ucp_tag_t result;
+    struct {
+      world_size_type rank;
+      tag_type tag;
+    } s;
+  } u;
+  u.s = { rank, tag };
+  return u.result;
+}
+
+inline world_size_type get_rank_from_tag(ucp_tag_t tag) {
+  union {
+    ucp_tag_t input;
+    struct {
+      world_size_type rank;
+      tag_type tag;
+    } s;
+  } u;
+  u.input = tag;
+  return u.s.rank;
+}
+
 } // namespace c10d

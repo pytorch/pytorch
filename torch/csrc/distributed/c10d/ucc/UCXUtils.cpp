@@ -132,8 +132,6 @@ std::shared_ptr<UCPRequest> UCPWorker::submit_p2p_request(
 }
 
 std::shared_ptr<UCPRequest> UCPWorker::recv_with_tag_and_mask(void *data, size_t size, ucp_tag_t tag, ucp_tag_t tag_mask, c10::DeviceType device) const {
-  // TODO: srcRank is not used here!!! Is this corrrect?
-  // No, this is not. We need to use commid and rank to distinguish
   return submit_p2p_request(device, [&](const ucp_request_param_t *params) {
     return ucp_tag_recv_nbx(worker, data, size, tag, tag_mask, params);
   });

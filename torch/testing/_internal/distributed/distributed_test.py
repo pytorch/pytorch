@@ -1587,24 +1587,23 @@ class DistributedTest:
         def test_irecv(self):
             rank = dist.get_rank()
             world_size = dist.get_world_size()
-            print(world_size)
 
-            tensor = _build_tensor(rank, 10)
+            tensor = _build_tensor(10, value=rank)
             dist.send(tensor, 0)
 
             if rank == 0:
                 expected_tensors = [
-                    _build_tensor(src, -1) for src in range(1, world_size)
+                    _build_tensor(10, value=-1) for _ in range(world_size)
                 ]
                 requests = [
-                    dist.irecv(expected_tensors[src - 1], src)
-                    for src in range(0, world_size)
+                    dist.irecv(expected_tensors[src], src)
+                    for src in range(world_size)
                 ]
 
-                for src in range(0, world_size):
+                for src in range(world_size):
                     requests[src - 1].wait()
-                    self.assertTrue(requests[src - 1].is_completed())
-                    self.assertEqual(expected_tensors[src - 1], _build_tensor(src, 10))
+                    self.assertTrue(requests[src].is_completed())
+                    self.assertEqual(expected_tensors[src], _build_tensor(10, value=src))
 
             self._barrier()
 
