@@ -131,6 +131,67 @@ const std::string shape_compute_functions =
               out.append(li[i])
           return out
 
+        def index_select(self: List[int], dim: int, index: List[int]):
+          dim = maybe_wrap_dim(dim, len(self))
+          numel = multiply_integers(index)
+          assert len(index) <= 1
+          assert dim == 0 or dim < len(self)
+          result_size: List[int] = []
+          for i in range(len(self)):
+            if dim == i:
+              result_size.append(numel)
+            else:
+              result_size.append(self[i])
+          return result_size
+
+        def max_int():
+          return 9223372036854775807
+
+        def slice(self: List[int], dim: int, start: Optional[int], end: Optional[int], step: int):
+          ndim = len(self)
+          assert ndim != 0
+          dim = maybe_wrap_dim(dim, ndim)
+          start_val =  start if start is not None else 0
+          end_val = end if end is not None else max_int()
+          assert step > 0
+          if (start_val == max_int()):
+            start_val = 0
+          if start_val < 0:
+            start_val += self[dim]
+          if end_val < 0:
+            end_val += self[dim]
+          if start_val < 0:
+            start_val = 0
+          elif start_val >= self[dim]:
+            start_val = self[dim]
+          if end_val < start_val:
+            end_val = start_val
+          elif end_val >= self[dim]:
+            end_val = self[dim]
+          out: List[int] = []
+          len = end_val - start_val
+          # TODO: add support for index write
+          for i in range(ndim):
+            if i == dim:
+              out.append((len + step - 1) // step)
+            else:
+              out.append(self[i])
+          return out
+
+        def select(self: List[int], dim: int, index: int):
+          ndim = len(self)
+          assert ndim != 0
+          dim = maybe_wrap_dim(dim, ndim)
+          size = self[dim]
+          assert not (index < -size or index >= size)
+          if index < 0:
+            index += size
+          out: List[int] = []
+          for i in range(ndim):
+            if i != dim:
+              out.append(self[i])
+          return out
+
         def matmul(tensor1: List[int] , tensor2: List[int]):
           dim_tensor1 = len(tensor1)
           dim_tensor2 = len(tensor2)
@@ -343,6 +404,9 @@ static const OperatorMap<std::string>& get_schema_to_function_graph() {
       {"aten::squeeze(Tensor(a) self) -> Tensor(a)", "squeeze_nodim"},
       {"aten::squeeze.dim(Tensor(a) self, int dim) -> Tensor(a)", "squeeze"},
       {"aten::unsqueeze(Tensor(a) self, int dim) -> Tensor(a)", "unsqueeze"},
+      {"aten::slice.Tensor(Tensor(a) self, int dim=0, int? start=None, int? end=None, int step=1) -> Tensor(a)", "slice"},
+      {"aten::select.int(Tensor(a) self, int dim, int index) -> Tensor(a)", "select"},
+      {"aten::index_select(Tensor self, int dim, Tensor index) -> Tensor", "index_select"},
       {"aten::layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, "
        "float eps=1e-05, bool cudnn_enable=True) -> Tensor", "unary_five_unused_inputs"},
       {"aten::softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor", "unary_two_unused_inputs"},
