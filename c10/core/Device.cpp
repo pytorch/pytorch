@@ -2,6 +2,7 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 
+#include <ctype.h>
 #include <algorithm>
 #include <array>
 #include <exception>
@@ -9,7 +10,6 @@
 #include <string>
 #include <tuple>
 #include <vector>
-#include <ctype.h>
 
 namespace c10 {
 namespace {
