@@ -1507,9 +1507,8 @@ bool inline maybe_native_stack(Tensor& result, TensorList tensors, int64_t dim) 
     result_sizes.insert(result_sizes.begin() + dim, tensors.size());
 
     // skip resizing if size of result is same as expected
-    if (result.sizes() != result_sizes) {
-      result.resize_(result_sizes);
-    }
+    // raise a warning while resizing if output has one or more elements
+    at::native::resize_output(result, result_sizes);
     stack_serial_stub(kCPU, result, tensors, dim);
     return true;
   }
