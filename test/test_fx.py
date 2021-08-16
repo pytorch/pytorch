@@ -2289,7 +2289,7 @@ class TestFX(JitTestCase):
         self.assertEqual(traced(0), 1)
         self.assertIs(wrapped_via_decorator, real_wrapped_via_decorator)
         self.assertFalse(hasattr(wrapped_via_decorator, "__fx_already_patched"))
-        
+
     def test_submodule_manipulation_API(self):
         class C(torch.nn.Module):
             def __init__(self):
