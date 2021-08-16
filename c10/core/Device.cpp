@@ -2,9 +2,9 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 
-#include <ctype.h>
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <exception>
 #include <ostream>
 #include <string>
