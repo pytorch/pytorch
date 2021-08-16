@@ -234,7 +234,7 @@ void HashProvider::visit(Intrinsics* v) {
   }
 
   SimplifierHashType hash(te_hash(v->func_name()));
-  for (auto i : c10::irange(v->nparams())) {
+  for (const auto i : c10::irange(v->nparams())) {
     v->param(i)->accept(this);
     hash = hash_combine(hash, hashOf(v->param(i)));
   }

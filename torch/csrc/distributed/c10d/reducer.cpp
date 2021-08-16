@@ -98,7 +98,6 @@ Reducer::Reducer(
       div_factor_(kUnsetDivFactor),
       static_graph_(false),
       comm_hook_(nullptr),
-      thread_local_state_(at::ThreadLocalState()),
       ddp_debug_level_(parseDistDebugLevel()),
       param_names_(std::move(paramNames)),
       first_bucket_bytes_cap_(first_bucket_bytes_cap) {
@@ -566,11 +565,6 @@ void Reducer::set_logger(std::weak_ptr<c10d::Logger> logger) {
 // This function is only to be called from the autograd thread.
 void Reducer::autograd_hook(size_t index) {
   std::lock_guard<std::mutex> lock(this->mutex_);
-
-  // Carry over thread local state from main thread. This allows for
-  // thread-local flags such as profiler enabled to be configure correctly.
-  at::ThreadLocalStateGuard g(thread_local_state_);
-
   // Ignore if we don't expect to be called.
   // This may be the case if the user wants to accumulate gradients
   // for number of iterations before reducing them.
@@ -1469,14 +1463,6 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
       });
     }
   }
-}
-
-void Reducer::save_thread_local_state() {
-  std::lock_guard<std::mutex> guard(mutex_);
-  // Don't preserve grad_mode across thread boundaries, as we will be passing
-  // from forward pass to autograd engine hooks, and autograd engine takes care
-  // of grad mode.
-  thread_local_state_ = at::ThreadLocalState(/* keep_grad_mode */ false);
 }
 
 void Reducer::finalize_backward() {
