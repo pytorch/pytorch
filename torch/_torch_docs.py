@@ -2360,6 +2360,14 @@ Constructs a complex tensor whose elements are Cartesian coordinates
 corresponding to the polar coordinates with absolute value :attr:`abs` and angle
 :attr:`angle`.
 
+.. math::
+    \text{out} = \text{abs} \cdot \cos(\text{angle}) + \text{abs} \cdot \sin(\text{angle}) \cdot j
+
+The behavior of this function is undefined if the absolute value is NaN, or if the angle is infinite.
+The absoulute value input is not validated, and the function will
+still perform the computation as described if it contains negative values,
+because that is the behavior defined by `std::polar`.
+
 .. note::
     This implementation has the same exact logic as C++'s implementation of
     `std::polar <https://en.cppreference.com/w/cpp/numeric/complex/polar>`_
@@ -2367,13 +2375,9 @@ corresponding to the polar coordinates with absolute value :attr:`abs` and angle
     The latter implementations in `cmath` and `linalg` perform the inverse operation
     (i.e. take in a complex number as input and return a pair of absolute value and angle as output).
 
-.. math::
-    \text{out} = \text{abs} \cdot \cos(\text{angle}) + \text{abs} \cdot \sin(\text{angle}) \cdot j
 """ + r"""
 Args:
     abs (Tensor): The absolute value the complex tensor. Must be float or double.
-        Note: this input is not validated, and the function will still perform the computation as described
-        if this input tensor contains negative values, because that is the behavior defined by `std::polar`.
     angle (Tensor): The angle of the complex tensor. Must be same dtype as
         :attr:`abs`.
 
