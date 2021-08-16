@@ -32,8 +32,8 @@ class ShardingFilterIterDataPipe(IterDataPipe):
 
 
 @functional_datapipe('batch')
-class BatcherIterDataPipe(IterDataPipe[DataChunk[T_co]]):
-    r""" :class:`BatcherIterDataPipe`.
+class BatchIterDataPipe(IterDataPipe[DataChunk[T_co]]):
+    r""" :class:`BatchIterDataPipe`.
 
     Iterable DataPipe to create mini-batches of data. An outer dimension will be added as
     `batch_size` if `drop_last` is set to `True`, or `length % batch_size` for the
@@ -93,8 +93,8 @@ class BatcherIterDataPipe(IterDataPipe[DataChunk[T_co]]):
 
 
 @functional_datapipe('unbatch')
-class UnBatcherIterDataPipe(IterDataPipe):
-    r""" :class:`UnBatcherIterDataPipe`.
+class UnBatchIterDataPipe(IterDataPipe):
+    r""" :class:`UnBatchIterDataPipe`.
 
     Iterable DataPipe to undo batching of data. In other words, it flattens the data up to the specified level
     within a batched DataPipe.
@@ -255,7 +255,7 @@ def default_sort_data_fn(datalist: List[Tuple[str, Any]]):
 
 
 @functional_datapipe('groupby')
-class GrouperIterDataPipe(IterDataPipe):
+class GroupByIterDataPipe(IterDataPipe):
     # TODO(VtalyFedyunin): Add inline docs and tests (they are partially available in notebooks)
     def __init__(self,
                  datapipe: IterDataPipe[T_co],
@@ -329,7 +329,7 @@ class GrouperIterDataPipe(IterDataPipe):
 
 
 @functional_datapipe('group_by_key')
-class ByKeyGrouperIterDataPipe(IterDataPipe[list]):
+class GroupByKeyIterDataPipe(IterDataPipe[list]):
     r""" :class:`GroupByKeyIterDataPipe`.
 
     Iterable datapipe to group data from input iterable by keys which are generated from `group_key_fn`,
