@@ -275,11 +275,31 @@ LivenessMap GetLivenessMap(
   }
 
   for (const auto* node : graph->nodes()) {
-    for (const auto* input : node->inputs()) {
-      for (const auto* output : node->outputs()) {
+    auto inputs = node->inputs();
+    auto outputs = node->outputs();
+    for (const auto* input : inputs) {
+      for (const auto* output : outputs) {
         if (liveness_map.count(input) && liveness_map.count(output)) {
           liveness_map.at(input).insert(output);
           liveness_map.at(output).insert(input);
+        }
+      }
+    }
+    // All inputs should be alive at the same time.
+    for (size_t i = 0; i < inputs.size(); ++i) {
+      for (size_t j = 0; j < inputs.size(); ++j) {
+        if (liveness_map.count(inputs[i]) && liveness_map.count(inputs[j])) {
+          liveness_map.at(inputs[i]).insert(inputs[j]);
+          liveness_map.at(inputs[j]).insert(inputs[i]);
+        }
+      }
+    }
+    // All outputs should be alive at the same time.
+    for (size_t i = 0; i < outputs.size(); ++i) {
+      for (size_t j = 0; j < outputs.size(); ++j) {
+        if (liveness_map.count(outputs[i]) && liveness_map.count(outputs[j])) {
+          liveness_map.at(outputs[i]).insert(outputs[j]);
+          liveness_map.at(outputs[j]).insert(outputs[i]);
         }
       }
     }
