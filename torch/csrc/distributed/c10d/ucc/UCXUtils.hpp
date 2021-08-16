@@ -18,12 +18,13 @@ class UCXError : public c10::Error {
 
 namespace c10d {
 
-// When calling UCP operations like `ucp_tag_send_nbx`, `ucp_tag_recv_nbx`, etc.,
-// UCP will create a request object and return its pointer to the user. It is
-// the user's responsibility to free these objects by `ucp_request_free`. Here
-// we use RAII to implement this logic.
-// Some UCP operations finishes immediately. If this is the case, then no request
-// object will be created.
+// When calling UCP async operations like `ucp_tag_send_nbx`, `ucp_tag_recv_nbx`,
+// etc., UCP will create a request object and return its pointer to the user.
+// This request object is used to track the status of async operations. It is
+// the user's responsibility to free these objects with `ucp_request_free`. Here
+// we use RAII to implement this create-by-ucp-and-destroy-by-user logic. Some UCP
+// operations finishes immediately. If this is the case, then no request object
+// will be created.
 class UCPRequest {
 public:
   struct Data {
@@ -39,16 +40,20 @@ public:
 
   ~UCPRequest() { if (data != nullptr) { ucp_request_free(data); } }
 
-  // non-copyable
-  UCPRequest(const UCPRequest&) = delete;
-  UCPRequest& operator=(const UCPRequest &) = delete;
 private:
+  // Pointer towards the real underlying request object created by UCP.
+  // A nullptr represents that a request is finished immediately.
   Data *data;
 
-  // Only `UCPWorker` and `UCPEndpoint` can create `UCPRequest` objects.
-  UCPRequest(Data *data): data(data) {}
+  // `UCPRequest` objects should only be created by `UCPEndpoint`
+  // (for send/recv with an endpoint) or `UCPWorker` (for recv from any source).
+  // `UCPRequest` objects are non-copyable: The underlying data should only be
+  // allocated by UCP, and it should only be deallocated once.
   friend class UCPWorker;
   friend class UCPEndpoint;
+  UCPRequest(Data *data): data(data) {}
+  UCPRequest(const UCPRequest&) = delete;
+  UCPRequest& operator=(const UCPRequest &) = delete;
 };
 
 class UCPEndpoint;
@@ -60,7 +65,7 @@ public:
   ucp_worker_h get() const { return worker; }
   ~UCPWorker() { ucp_worker_destroy(worker); }
 
-  // non-copyable
+  // Non-copyable
   UCPWorker(const UCPWorker&) = delete;
   UCPWorker& operator=(const UCPWorker &) = delete;
 
@@ -70,6 +75,8 @@ public:
   unsigned progress() const { return ucp_worker_progress(worker); }
 
   std::shared_ptr<UCPRequest> submit_p2p_request(size_t size, c10::DeviceType device, const std::function<ucs_status_ptr_t(const ucp_request_param_t *)> &work) const;
+
+  // Receive from any source. See [Receive from an endpont]
   std::shared_ptr<UCPRequest> recv_with_tag(void *data, size_t size, int tag, c10::DeviceType device) const; // receive from any source
 };
 
@@ -82,13 +89,24 @@ class UCPEndpoint {
   friend UCPWorker;
 public:
   ~UCPEndpoint();
-  ucp_ep_h get() const { return endpoint; }
 
-  // non-copyable
+  // Non-copyable
   UCPEndpoint(const UCPEndpoint&) = delete;
   UCPEndpoint& operator=(const UCPEndpoint &) = delete;
 
+  // Send data to this endpoint
   std::shared_ptr<UCPRequest> send_with_tag(void *data, size_t size, int tag, c10::DeviceType device) const;
+
+  // Receive data from this endpoint
+  //
+  // Note [Receive from an endpont]:
+  // UCP does not support receiving from a specific endpoint. So we use tag
+  // matching to simulate this behavior. We use higher bits of a tag to store
+  // rank, and use lower bits to store the real tag. When receiving from any
+  // source, tag mask is used to disable higher bits.
+  //
+  // TODO: unit test should be modified so that recv from different endpoint
+  // with the same tag are covered.
   std::shared_ptr<UCPRequest> recv_with_tag(void *data, size_t size, int tag, c10::DeviceType device) const;
 };
 

@@ -13,7 +13,7 @@ constexpr const char* BACKEND_NAME = "nccl";
 class TORCH_API ProcessGroupNCCLWithUCC : public ProcessGroup {
 public:
 
-  // Options is only used by NCCL
+  // Options is only used by NCCL.
   struct Options : ProcessGroup::Options {
     // NOTE: timeout in ProcessGroupNCCL::Options denote the timeout for
     // operations. This is only used when blockingWait_ is enabled.
@@ -137,9 +137,13 @@ public:
 
 private:
   c10::intrusive_ptr<Options> options_;
+  c10::intrusive_ptr<ProcessGroup> pg_nccl;
+
+  // The UCC process group is build to a separate libucc.so.
+  // This library will be loaded at runtime, and UCC will will
+  // be available only if the dynamic load is successful.
   at::DynamicLibrary libucc;
   c10::intrusive_ptr<ProcessGroup> pg_ucc;
-  c10::intrusive_ptr<ProcessGroup> pg_nccl;
 };
 
 } // namespace c10d

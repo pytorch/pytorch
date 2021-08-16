@@ -107,8 +107,6 @@ std::shared_ptr<UCPRequest> UCPWorker::submit_p2p_request(
   size_t size, c10::DeviceType device,
   const std::function<ucs_status_ptr_t(const ucp_request_param_t *)> &work
 ) const {
-  // TODO: srcRank is not used here!!! Is this corrrect?
-  // No, this is not. We need to use commid and rank to distinguish
   ucp_request_param_t params;
   params.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK |
       UCP_OP_ATTR_FIELD_DATATYPE | UCP_OP_ATTR_FIELD_MEMORY_TYPE;
