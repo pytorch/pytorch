@@ -4,7 +4,7 @@
 
 #ifdef ADD_BREAKPAD_SIGNAL_HANDLER
 #ifdef __linux__
-#include <breakpad/client/linux/handler/exception_handler.h>
+#include <breakpad/src/client/linux/handler/exception_handler.h>
 #include <csignal>
 #elif __APPLE__
 #include <breakpad/src/client/mac/handler/exception_handler.h>

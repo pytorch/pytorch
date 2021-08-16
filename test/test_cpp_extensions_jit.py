@@ -16,7 +16,7 @@ import torch
 import torch.backends.cudnn
 import torch.utils.cpp_extension
 from torch.utils.cpp_extension import CUDA_HOME, ROCM_HOME
-from torch.testing._internal.common_utils import gradcheck, TEST_WITH_ASAN, has_breakpad
+from torch.testing._internal.common_utils import gradcheck, TEST_WITH_ASAN
 
 
 TEST_CUDA = torch.cuda.is_available() and CUDA_HOME is not None
@@ -869,7 +869,6 @@ class TestCppExtensionJIT(common.TestCase):
 
         gradcheck(torch.ops.my.add, [a, b], eps=1e-2)
 
-    # @unittest.skipIf(not has_breakpad(), "Breakpad library must be present on system for crash handler")
     @unittest.skipIf(TEST_WITH_ASAN, "ASAN disables the crash handler's signal handler")
     def test_crash_handler(self):
         def run_test(stderr_file, destination):
