@@ -987,8 +987,18 @@ std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> ivalue::Future::
     value.getSubValues(sub_values);
     for (const at::IValue& sub_value : sub_values) {
       if (sub_value.isTensor()) {
-        weakStorageImpls.push_back(
-            sub_value.toTensor().storage().getWeakStorageImpl());
+        auto& tensor = sub_value.toTensor();
+        if (tensor.is_sparse()) {
+          // Sparse tensor is indices and values. Both are tensors
+          // and contain storage.
+          weakStorageImpls.push_back(
+              tensor._indices().storage().getWeakStorageImpl());
+          weakStorageImpls.push_back(
+              tensor._values().storage().getWeakStorageImpl());
+        } else {
+          // A dense/strided tensor contains 1 storage
+          weakStorageImpls.push_back(tensor.storage().getWeakStorageImpl());
+        }
       }
     }
   }

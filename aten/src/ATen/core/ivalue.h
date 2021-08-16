@@ -872,10 +872,12 @@ struct TORCH_API IValue final {
   struct HashAliasedIValue {
     size_t operator()(const IValue& val) const {
       if (val.isTensor()) {
-        if (val.toTensor().is_mkldnn()) {
+        if (val.toTensor().is_mkldnn() || val.toTensor().is_sparse()) {
           // MKLDNN tensors dont have storage and dont create views
           // or aliasing so we can just use Tensor pointer, TODO: find way
           // to use mkldnn storage
+          // Sparse tensors don't have storage use unsafeGetTensorImpl
+          // instead of using the storage of indices or values.
           return reinterpret_cast<size_t>(val.toTensor().unsafeGetTensorImpl());
         } else {
           return reinterpret_cast<size_t>(
