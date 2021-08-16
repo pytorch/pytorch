@@ -1,32 +1,38 @@
 from torch.utils.data.datapipes.iter.callable import (
-    CollatorIterDataPipe as Collator,
-    MapperIterDataPipe as Mapper,
-    TransformerIterDataPipe as Transformer,
+    CollateIterDataPipe as Collate,
+    MapIterDataPipe as Map,
+    TransformsIterDataPipe as Transforms,
 )
 from torch.utils.data.datapipes.iter.combinatorics import (
     SamplerIterDataPipe as Sampler,
-    ShufflerIterDataPipe as Shuffler,
+    ShuffleIterDataPipe as Shuffle,
 )
 from torch.utils.data.datapipes.iter.combining import (
-    ConcaterIterDataPipe as Concater,
-    ZipperIterDataPipe as Zipper,
-)
-from torch.utils.data.datapipes.iter.filelister import (
-    FileListerIterDataPipe as FileLister,
-)
-from torch.utils.data.datapipes.iter.fileloader import (
-    FileLoaderIterDataPipe as FileLoader,
+    ConcatIterDataPipe as Concat,
+    ZipIterDataPipe as Zip,
 )
 from torch.utils.data.datapipes.iter.grouping import (
-    BatcherIterDataPipe as Batcher,
+    BatchIterDataPipe as Batch,
     BucketBatcherIterDataPipe as BucketBatcher,
-    ByKeyGrouperIterDataPipe as ByKeyGrouper,
+    GroupByKeyIterDataPipe as GroupByKey,
 )
 from torch.utils.data.datapipes.iter.httpreader import (
     HTTPReaderIterDataPipe as HttpReader,
 )
-from torch.utils.data.datapipes.iter.linereader import (
-    LineReaderIterDataPipe as LineReader,
+from torch.utils.data.datapipes.iter.listdirfiles import (
+    ListDirFilesIterDataPipe as ListDirFiles,
+)
+from torch.utils.data.datapipes.iter.loadfilesfromdisk import (
+    LoadFilesFromDiskIterDataPipe as LoadFilesFromDisk,
+)
+from torch.utils.data.datapipes.iter.readfilesfromtar import (
+    ReadFilesFromTarIterDataPipe as ReadFilesFromTar,
+)
+from torch.utils.data.datapipes.iter.readfilesfromzip import (
+    ReadFilesFromZipIterDataPipe as ReadFilesFromZip,
+)
+from torch.utils.data.datapipes.iter.readlinesfromfile import (
+    ReadLinesFromFileIterDataPipe as ReadLinesFromFile,
 )
 from torch.utils.data.datapipes.iter.routeddecoder import (
     RoutedDecoderIterDataPipe as RoutedDecoder,
@@ -34,35 +40,29 @@ from torch.utils.data.datapipes.iter.routeddecoder import (
 from torch.utils.data.datapipes.iter.selecting import (
     FilterIterDataPipe as Filter,
 )
-from torch.utils.data.datapipes.iter.streamreader import (
-    StreamReaderIterDataPipe as StreamReader,
-)
-from torch.utils.data.datapipes.iter.tararchivereader import (
-    TarArchiveReaderIterDataPipe as TarArchiveReader,
-)
-from torch.utils.data.datapipes.iter.ziparchivereader import (
-    ZipArchiveReaderIterDataPipe as ZipArchiveReader,
+from torch.utils.data.datapipes.iter.tobytes import (
+    ToBytesIterDataPipe as ToBytes,
 )
 
-__all__ = ['Batcher',
+__all__ = ['Batch',
            'BucketBatcher',
-           'ByKeyGrouper',
-           'Collator',
-           'Concater',
-           'FileLister',
-           'FileLoader',
+           'Collate',
+           'Concat',
            'Filter',
+           'GroupByKey',
            'HttpReader',
-           'LineReader',
-           'Mapper',
+           'ListDirFiles',
+           'LoadFilesFromDisk',
+           'Map',
+           'ReadFilesFromTar',
+           'ReadFilesFromZip',
+           'ReadLinesFromFile',
            'RoutedDecoder',
            'Sampler',
-           'Shuffler',
-           'StreamReader',
-           'TarArchiveReader',
-           'Transformer',
-           'ZipArchiveReader',
-           'Zipper']
+           'Shuffle',
+           'ToBytes',
+           'Transforms',
+           'Zip']
 
 # Please keep this list sorted
 assert __all__ == sorted(__all__)
