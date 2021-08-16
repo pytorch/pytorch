@@ -10549,6 +10549,16 @@
   cpp_no_default_args: ['a', 'b']
   python_module: nn
 
+- func: op_use_codegen(Tensor a, Tensor b) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _test_op_for_benchmarking_kernel
+
+- func: op_use_boxed(Tensor a, Tensor b) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _test_op_for_benchmarking_kernel
+
 - func: segment_reduce(Tensor data, str reduce, *, Tensor? lengths=None, Tensor? indices=None, int axis=0, bool unsafe=False, Scalar? initial=None) -> Tensor
   variants: function
   dispatch:

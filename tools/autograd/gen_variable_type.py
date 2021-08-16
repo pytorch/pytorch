@@ -405,7 +405,7 @@ def gen_variable_type_func(
         name = cpp.name(f.func)
         formals = gen_formals(f)
 
-        if fn.info is None and not get_base_name(f) in RESET_GRAD_ACCUMULATOR and not get_base_name(f) in DONT_REQUIRE_DERIVATIVE:
+        if (fn.info is None and not get_base_name(f) in RESET_GRAD_ACCUMULATOR and not get_base_name(f) in DONT_REQUIRE_DERIVATIVE) and get_base_name(f) != "op_use_codegen":
             # NOTE: [ Registering AutogradNotImplemented boxed kernel ]
             #
             # When there is no derivatives.yaml entry, we register a generic boxed NotImplemented kernel

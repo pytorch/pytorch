@@ -53,6 +53,10 @@ Tensor _test_string_default(const Tensor& dummy, c10::string_view a, c10::string
   return dummy;
 }
 
+Tensor _test_op_for_benchmarking_kernel(const Tensor& a, const Tensor& b) {
+  return a + b;
+}
+
 // Test that overloads with ambiguity created by defaulted parameters work.
 // The operator declared first should have priority always
 
