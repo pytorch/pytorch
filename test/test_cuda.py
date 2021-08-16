@@ -2292,7 +2292,7 @@ torch.cuda.synchronize()
         def run(data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
             for i, (input, target) in enumerate(data):
                 optimizer.zero_grad()
-                with torch.cuda.amp.autocast(enabled=try_scaling_api):
+                with torch.autocast('cuda', enabled=try_scaling_api):
                     output = model(input)
                     loss = loss_fn(output, target)
                 if try_scaling_api:
@@ -2709,7 +2709,7 @@ torch.cuda.synchronize()
             add_kwargs = {}
 
         self.assertFalse(torch.is_autocast_enabled())
-        with torch.cuda.amp.autocast():
+        with torch.autocast('cuda', ):
             self.assertTrue(torch.is_autocast_enabled())
 
             out_type = out_type if out_type is not None else run_as_type
@@ -2754,7 +2754,7 @@ torch.cuda.synchronize()
             # Compare numerics to Python-side "autocasting" that (we expect) does the same thing
             # as the C++-side autocasting, and should be bitwise accurate.
             output_to_compare = output if output is not None else output_method
-            with torch.cuda.amp.autocast(enabled=False):
+            with torch.autocast('cuda', enabled=False):
                 self.assertFalse(torch.is_autocast_enabled())
 
                 if module is not None and hasattr(module, op):
@@ -2834,13 +2834,13 @@ torch.cuda.synchronize()
             self._run_autocast_outofplace(op, args, torch.float32, module=None, out_type=out_type)
 
     def test_autocast_banned(self):
-        with torch.cuda.amp.autocast():
+        with torch.autocast('cuda'):
             for op, args, module in self.autocast_lists.banned:
                 with self.assertRaises(RuntimeError):
                     getattr(module, op)(*args)
 
     def test_autocast_ignored_types(self):
-        with torch.cuda.amp.autocast():
+        with torch.autocast('cuda'):
             for ignore_type in (torch.double, torch.int32):
                 a_ignore = torch.ones((8, 8), dtype=ignore_type, device="cuda:0")
                 b_ignore = torch.ones((8, 8), dtype=ignore_type, device="cuda:0")
@@ -2851,24 +2851,24 @@ torch.cuda.synchronize()
                 if ignore_type is torch.double:
                     with self.assertRaises(RuntimeError):
                         torch.mm(a_ignore, c_16)
-                    with torch.cuda.amp.autocast(enabled=False):
+                    with torch.autocast('cuda', enabled=False):
                         type_no_autocast = torch.mm(a_ignore, b_ignore).dtype
                     self.assertTrue(torch.mm(a_ignore, b_ignore).dtype is type_no_autocast)
 
                 # Tests if CastPolicy::fp32 ops ignore double and int
-                with torch.cuda.amp.autocast(enabled=False):
+                with torch.autocast('cuda', enabled=False):
                     type_no_autocast = torch.pow(a_ignore, 2.0).dtype
                 self.assertTrue(torch.pow(a_ignore, 2.0).dtype is type_no_autocast)
 
                 # Tests if CastPolicy::fp32_set_opt_dtype ops ignore double and int
-                with torch.cuda.amp.autocast(enabled=False):
+                with torch.autocast('cuda', enabled=False):
                     type_no_autocast = torch.sum(a_ignore).dtype
                 self.assertTrue(torch.sum(a_ignore).dtype is type_no_autocast)
 
                 # Tests if CastPolicy::fp32_append_dtype ops ignore double and int
                 # Currently, no ops belonging to this policy support integer inputs.
                 if ignore_type is torch.double:
-                    with torch.cuda.amp.autocast(enabled=False):
+                    with torch.autocast('cuda', enabled=False):
                         type_no_autocast = torch.norm(a_ignore).dtype
                     self.assertTrue(torch.norm(a_ignore).dtype is type_no_autocast)
 
@@ -2928,7 +2928,7 @@ torch.cuda.synchronize()
         # Sets requires_grad=False explicitly so we don't lie about expecting a gradient.
         y = (0, {0: torch.randn((8, 8), device="cuda", dtype=torch.float16, requires_grad=False)})
 
-        with torch.cuda.amp.autocast():
+        with torch.autocast('cuda', ):
             output = mymm(x, y, torch.float32)
             self.assertTrue(output.dtype is torch.float32)
             loss = output.sum()
@@ -2956,7 +2956,7 @@ torch.cuda.synchronize()
         model = Model()
         model_jit_script = torch.jit.script(model)
 
-        with torch.cuda.amp.autocast(True):
+        with torch.autocast('cuda', enabled=True):
             model()
             model_jit_script()
 
@@ -3006,7 +3006,7 @@ torch.cuda.synchronize()
                                     device="cuda", dtype=hidden_dtype)
                     h = (h, c)
 
-                with torch.cuda.amp.autocast():
+                with torch.autocast('cuda', ):
                     out, h_out = rnn(x, h)
                 out = out.data if input_layout == "packed" else out
                 self.assertEqual(out.dtype, torch.float16)
@@ -3049,7 +3049,7 @@ torch.cuda.synchronize()
         linear = torch.nn.Linear(10, 10).to('cuda')
         data = torch.randn(1, 10, device='cuda')
 
-        with torch.cuda.amp.autocast():
+        with torch.autocast('cuda', ):
             with torch.no_grad():
                 out = linear(data)
                 first_iter_mem = torch.cuda.memory_allocated()
@@ -3062,7 +3062,7 @@ torch.cuda.synchronize()
                                     torch.nn.Linear(8, 8),
                                     torch.nn.Linear(8, 8)).cuda()
         input = torch.rand((8, 8), device="cuda", dtype=torch.float16, requires_grad=True)
-        with torch.cuda.amp.autocast():
+        with torch.autocast('cuda', ):
             output = checkpoint_sequential(model, 2, input)
         self.assertTrue(output.requires_grad)
         self.assertTrue(output.dtype is torch.float16)
