@@ -1042,7 +1042,6 @@ class RpcTest(RpcAgentTestFixture):
     @dist_init
     def test_future_wait_twice(self):
         dst = worker_name((self.rank + 1) % self.world_size)
-        x = torch.ones(2, 2)
         futs = []
         for i in range(20):
             futs.append(rpc.rpc_async(dst, raise_func))
