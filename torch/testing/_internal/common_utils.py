@@ -39,8 +39,8 @@ import json
 import __main__  # type: ignore[import]
 import errno
 import typing
-from typing import (cast, Any, Callable, Dict, Iterable, Iterator, Optional, Set, Type,
-                    Union)
+from typing import (cast, Any, Callable, Dict, FrozenSet, Iterable, Iterator, Optional,
+                    Set, Type, Union)
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -2436,7 +2436,7 @@ def make_load_tests(
 
 
 def load_tests(loader, tests, pattern, *,
-               imported_test_cases: Set[Type[TestCase]] = set()):
+               imported_test_cases: FrozenSet[Type[TestCase]] = frozenset()):
     """Implements the unittest load_tests protocol.
 
     Our implementation doesn't allow you to implicitly import test
