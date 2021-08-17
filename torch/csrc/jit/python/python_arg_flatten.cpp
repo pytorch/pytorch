@@ -30,7 +30,9 @@ static constexpr char NoneType = 'n';
 
 namespace {
 
-inline bool PyNone_Check(PyObject *o) { return o == Py_None; }
+inline bool PyNone_Check(PyObject* o) {
+  return o == Py_None;
+}
 
 template <typename T>
 py::object cast_handle_sequence(std::vector<py::handle> objs) {
