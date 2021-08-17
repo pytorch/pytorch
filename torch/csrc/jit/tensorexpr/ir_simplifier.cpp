@@ -1463,17 +1463,17 @@ Stmt* PolynomialBase::mutate(Cond* v) {
   if (cond_new->isConstant()) {
     if (!immediateEquals(cond_new, 0)) {
       // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
-      return true_new ? Stmt::clone(true_new) : nullptr;
+      return true_new;
     } else {
       // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
-      return false_new ? Stmt::clone(false_new) : nullptr;
+      return false_new;
     }
   }
 
   // If both branches are the same then don't do the condition.
   if (true_new && false_new &&
       hasher_.hash(true_new) == hasher_.hash(false_new)) {
-    return Stmt::clone(true_new);
+    return true_new;
   }
 
   Block* true_block = dynamic_cast<Block*>(true_new);
@@ -1484,19 +1484,16 @@ Stmt* PolynomialBase::mutate(Cond* v) {
   if (true_empty && false_empty) {
     return new Block({});
   }
-
-  if (cond_old == cond_new && true_old == true_new && false_old == false_new) {
-    return (Stmt*)v;
+  if (cond_old != cond_new) {
+    v->set_condition(cond_new);
   }
-
-  if (true_old && true_new == true_old) {
-    true_new = Stmt::clone(true_old);
+  if (true_old != true_new) {
+    v->set_true_stmt(true_new);
   }
-  if (false_old && false_new == false_old) {
-    false_new = Stmt::clone(false_old);
+  if (false_old != false_new) {
+    v->set_false_stmt(false_new);
   }
-
-  return new Cond(cond_new, true_new, false_new);
+  return v;
 }
 
 Stmt* handleForCondReordering(For* loop, Cond* cond) {
@@ -1561,21 +1558,28 @@ Stmt* PolynomialBase::mutate(For* v) {
     }
   }
 
-  if (var == var_new && start == start_new && stop == stop_new &&
-      body == body_new) {
-    return (Stmt*)v;
+  if (var != var_new) {
+    v->set_var(var_new);
   }
-  if (body_new == body) {
-    body_new = Stmt::clone(body);
+  if (start != start_new) {
+    v->set_start(start_new);
   }
-  return new For(var_new, start_new, stop_new, body_new, loop_options);
+  if (stop != stop_new) {
+    v->set_stop(stop_new);
+  }
+  if (body != body_new) {
+    v->set_body(body_new);
+  }
+  return v;
 }
 
 Stmt* PolynomialBase::mutate(Block* v) {
   std::vector<Stmt*> stmts;
   // Flatten sub-blocks:
+  bool stmts_changed = false;
   for (Stmt* stmt : *v) {
     Stmt* stmt_new = stmt->accept_mutator(this);
+    stmts_changed |= stmt != stmt_new;
     if (stmt_new == nullptr) {
       continue;
     }
@@ -1588,12 +1592,15 @@ Stmt* PolynomialBase::mutate(Block* v) {
         subBlock->remove_stmt(s);
         stmts.push_back(s);
       }
+      stmts_changed = true;
     } else {
-      stmts.push_back(Stmt::clone(stmt_new));
+      stmts.push_back(stmt_new);
     }
   }
-
-  return new Block(stmts);
+  if (stmts_changed) {
+    v->set_stmts(stmts);
+  }
+  return v;
 }
 
 // TermExpander
@@ -2222,11 +2229,10 @@ Stmt* TermExpander::mutate(Allocate* v) {
     return nullptr;
   }
 
-  if (buf_new == buf) {
-    return (Stmt*)v;
+  if (buf != buf_new) {
+    v->set_buf(buf_new);
   }
-
-  return new Allocate(buf_new);
+  return v;
 }
 
 Stmt* TermExpander::mutate(Free* v) {
@@ -2239,11 +2245,10 @@ Stmt* TermExpander::mutate(Free* v) {
     return nullptr;
   }
 
-  if (buf_new == buf) {
-    return (Stmt*)v;
+  if (buf != buf_new) {
+    v->set_buf(buf_new);
   }
-
-  return new Free(buf_new);
+  return v;
 }
 
 // Combines adjactent Cond nodes with identical conditions.
@@ -2477,14 +2482,19 @@ Stmt* SimplifierUnderContext::mutate(For* v) {
     }
   }
 
-  if (var == var_new && start == start_new && stop == stop_new &&
-      body == body_new) {
-    return (Stmt*)v;
+  if (var != var_new) {
+    v->set_var(var_new);
   }
-  if (body_new == body) {
-    body_new = Stmt::clone(body);
+  if (start != start_new) {
+    v->set_start(start_new);
   }
-  return new For(var_new, start_new, stop_new, body_new, loop_options);
+  if (stop != stop_new) {
+    v->set_stop(stop_new);
+  }
+  if (body != body_new) {
+    v->set_body(body_new);
+  }
+  return v;
 }
 
 // Simplify division using distributive laws for the following cases:
