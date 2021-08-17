@@ -6,6 +6,10 @@ TEST_DIR="$ROOT_DIR/test"
 gtest_reports_dir="${TEST_DIR}/test-reports/cpp"
 pytest_reports_dir="${TEST_DIR}/test-reports/python"
 
+# Let's see what happens when we disable the caching allocator.
+export PYTORCH_NO_CUDA_MEMORY_CACHING=1
+export PYTORCH_NO_HIP_MEMORY_CACHING=1
+
 # Figure out which Python to use
 PYTHON="$(which python)"
 if [[ "${BUILD_ENVIRONMENT}" =~ py((2|3)\.?[0-9]?\.?[0-9]?) ]]; then

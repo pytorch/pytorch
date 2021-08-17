@@ -8,6 +8,10 @@ set -ex
 # Save the SCRIPT_DIR absolute path in case later we chdir (as occurs in the gpu perf test)
 SCRIPT_DIR="$( cd "$(dirname "${BASH_SOURCE[0]}")" ; pwd -P )"
 
+# Let's see what happens when we disable the caching allocator.
+export PYTORCH_NO_CUDA_MEMORY_CACHING=1
+export PYTORCH_NO_HIP_MEMORY_CACHING=1
+
 # Required environment variables:
 #   $BUILD_ENVIRONMENT (should be set by your Docker image)
 
