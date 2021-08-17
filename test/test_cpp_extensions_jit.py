@@ -921,7 +921,7 @@ class TestCppExtensionJIT(common.TestCase):
 
     @unittest.skipIf(TEST_WITH_ASAN, "ASAN disables the crash handler's signal handler")
     def test_crash_handler(self):
-        with tempfile.TemporaryDirectory() as temp_dir, tempfile.NamedTemporaryFile(delete=not sys.platform=="win32") as stderr:
+        with tempfile.TemporaryDirectory() as temp_dir, tempfile.NamedTemporaryFile(delete=not sys.platform == "win32") as stderr:
             # Use multiprocessing to spin up a separate process to make catching
             # the segfault easier
             p = Process(target=self._crash_handler_test_process, args=(stderr.name, temp_dir))
