@@ -6,7 +6,7 @@
 namespace torch {
 namespace jit {
 enum class Strategy {
-  NAIVE,
+  NAIVE = 0,
   GREEDY_BY_SIZE,
   GREEDY_BY_BREADTH,
   LINEAR_SCAN,

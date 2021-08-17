@@ -2,6 +2,7 @@
 
 #include <ATen/core/ivalue.h>
 #include <c10/util/irange.h>
+#include <torch/csrc/jit/passes/memory_planning/MemoryPlanningAllocator.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
 
 #include <algorithm>
@@ -167,6 +168,23 @@ RegisterOperators reg(
                  src, sizes, strides, at::TensorOptions(device).dtype(dtype));
              sub_tensor.storage().set_nbytes(size);
              push(stack, std::move(sub_tensor));
+           };
+         },
+         aliasAnalysisSpecialCase()),
+     Operator(
+         prim::PreAllocateTensor,
+         [](const Node* node) -> Operation {
+           size_t size = node->i(attr::size);
+           size_t offset = node->i(attr::offset);
+           auto device_type = static_cast<DeviceType>(node->i(attr::device));
+           return [offset, size, device_type](Stack* stack) {
+             c10::Storage buffer;
+             pop(stack, buffer);
+             MemoryPlanningAllocator* planning_allocator =
+                 dynamic_cast<MemoryPlanningAllocator*>(c10::GetAllocator(device_type));
+             if (planning_allocator) {
+               planning_allocator->push_allocation(buffer, size, offset, device_type);
+             }
            };
          },
          aliasAnalysisSpecialCase()),

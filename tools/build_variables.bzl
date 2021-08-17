@@ -246,6 +246,7 @@ core_sources_full_mobile = [
     "torch/csrc/jit/passes/memory_planning/greedy_by_size.cpp",
     "torch/csrc/jit/passes/memory_planning/greedy_by_breadth.cpp",
     "torch/csrc/jit/passes/memory_planning/greedy_util.cpp",
+    "torch/csrc/jit/passes/memory_planning/MemoryPlanningAllocator.cpp",
     "torch/csrc/jit/passes/xnnpack_rewrite.cpp",
     "torch/csrc/jit/passes/vulkan_rewrite.cpp",
     "torch/csrc/jit/passes/metal_rewrite.cpp",

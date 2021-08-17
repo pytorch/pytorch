@@ -12,6 +12,9 @@ C10_API std::string get_backtrace(
     size_t frames_to_skip = 0,
     size_t maximum_number_of_frames = 64,
     bool skip_python_frames = true);
+
+C10_API std::vector<std::string> backTraceToVecStr(const std::string& bt);
+
 } // namespace c10
 
 #endif // C10_UTIL_BACKTRACE_H_

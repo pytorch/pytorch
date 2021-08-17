@@ -4,6 +4,7 @@
 
 #include <functional>
 #include <memory>
+#include <regex>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -332,6 +333,19 @@ std::string get_backtrace(
 #else // !SUPPORTS_BACKTRACE && !_WIN32
   return "(no backtrace available)";
 #endif // SUPPORTS_BACKTRACE
+}
+
+std::vector<std::string> backTraceToVecStr(const std::string& bt) {
+  std::istringstream bt_stream(bt);
+  std::string bt_line;
+  std::vector<std::string> bt_lines;
+  while (std::getline(bt_stream, bt_line, '\n')) {
+    if (!bt_line.empty()) {
+      bt_lines.push_back(
+          std::regex_replace(bt_line, std::regex(R"(^frame\s#\d*:\s)"), ""));
+    }
+  }
+  return bt_lines;
 }
 
 } // namespace c10

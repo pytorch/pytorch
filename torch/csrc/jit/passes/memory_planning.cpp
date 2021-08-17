@@ -1,12 +1,17 @@
 #include <torch/csrc/jit/passes/memory_planning.h>
+#include <torch/csrc/jit/passes/memory_planning/MemoryPlanningAllocator.h>
 #include <torch/csrc/jit/passes/memory_planning/greedy_by_breadth.h>
 #include <torch/csrc/jit/passes/memory_planning/greedy_by_size.h>
 #include <torch/csrc/jit/passes/memory_planning/linear_scan.h>
 
+#include <regex>
+
+#include <c10/util/Backtrace.h>
 #include <jit/tensorexpr/kernel.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/runtime/static/ops.h>
+#include <aten/src/ATen/core/interned_strings.h>
 
 namespace torch {
 namespace jit {
@@ -225,6 +230,58 @@ void printAllocation(
     auto alloced_reg = allocations[lvr];
     std::cout << val->debugName() << ": " << lvr << " " << alloced_reg << "\n";
   }
+}
+
+c10::Symbol getNodeKindFromBt(std::string bt) {
+  auto frame_strs = c10::backTraceToVecStr(bt);
+
+  // e.g. at::native::_convolution(...) + 11551 (0x1275e23bf in
+  // libtorch_cpu.dylib) is this mapping at::native::_convolution - >
+  // aten::_convolution robust?
+  // when does <ident> parens fail?
+
+  std::string native_op_str = "";
+  std::regex rgx(R"(^at::native::(\w+)\(.*)");
+  std::smatch match;
+  auto frame_str = frame_strs.rbegin();
+  for (; frame_str != frame_strs.rend(); frame_str++) {
+    if (std::regex_search(*frame_str, match, rgx)) {
+      break;
+    }
+  }
+  TORCH_INTERNAL_ASSERT(frame_str != frame_strs.rend() && !match.empty());
+  return Symbol::aten(match[1].str());
+}
+
+void planMemoryWithTracing(
+    std::shared_ptr<Graph>& graph,
+    Strategy strat,
+    std::vector<MemEvent> allocation_traces) {
+  // validate
+  TORCH_INTERNAL_ASSERT(!allocation_traces.empty());
+
+  std::unordered_map<std::string, MemEvent> _allocs;
+  for (auto& mem_event : allocation_traces) {
+    if (mem_event.type == MemEvent::EventType::Allocate) {
+      _allocs.insert({mem_event.ptr_addr, mem_event});
+    } else if (mem_event.type == MemEvent::EventType::Free) {
+      TORCH_INTERNAL_ASSERT(
+          _allocs.count(mem_event.ptr_addr) > 0 &&
+          _allocs.at(mem_event.ptr_addr).type ==
+              MemEvent::EventType::Allocate &&
+          _allocs.at(mem_event.ptr_addr).size == mem_event.size &&
+          _allocs.at(mem_event.ptr_addr).time < mem_event.time);
+      _allocs.erase(mem_event.ptr_addr);
+    }
+  }
+  TORCH_INTERNAL_ASSERT(_allocs.empty());
+
+  std::sort(
+      allocation_traces.begin(), allocation_traces.end(), [](auto a1, auto a2) {
+        return a1.time < a2.time;
+      });
+
+
 }
 
 void planMemory(std::shared_ptr<Graph>& graph, Strategy strat) {
