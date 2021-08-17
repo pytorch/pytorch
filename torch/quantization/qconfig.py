@@ -209,3 +209,11 @@ def add_module_to_qconfig_obs_ctr(
         return QConfig(activation, weight)
     else:
         return QConfigDynamic(activation, weight)
+
+
+def qconfig_function_equality(q1: QConfigAny, q2: QConfigAny):
+    try:
+        assert q1 is not None and q2 is not None
+        return (q1.activation.p.func == q2.activation.p.func) and (q1.weight.p.func == q2.weight.p.func)
+    except:
+        return q1 == q2

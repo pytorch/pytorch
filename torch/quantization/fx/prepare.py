@@ -15,7 +15,7 @@ from torch.fx.graph import (
 )
 from torch.fx.node import Argument
 
-from ..qconfig import QConfigAny
+from ..qconfig import QConfigAny, qconfig_function_equality
 from .qconfig_utils import (
     convert_dict_to_ordered_dict,
     generate_qconfig_map,
@@ -194,7 +194,7 @@ def update_qconfig_for_fusion(
                     # Raise an error if the modules in the fused module have
                     # different qconfigs specified in the qconfig_dict
                     for op in ops:
-                        if object_type_dict.get(op, None) != fused_qconfig:
+                        if not qconfig_function_equality(object_type_dict.get(op, None), fused_qconfig):
                             raise LookupError("During fusion, we need to specify the same " +
                                               f"qconfigs for both modules in {module_type}.")
 
