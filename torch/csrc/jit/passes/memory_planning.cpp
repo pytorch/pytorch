@@ -1,31 +1,55 @@
-
-#include <c10/core/ScalarType.h>
-#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/memory_planning.h>
-#include <torch/csrc/jit/runtime/static/impl.h>
+#include <torch/csrc/jit/passes/memory_planning/greedy_by_breadth.h>
+#include <torch/csrc/jit/passes/memory_planning/greedy_by_size.h>
+#include <torch/csrc/jit/passes/memory_planning/linear_scan.h>
+
+#include <jit/tensorexpr/kernel.h>
+#include <torch/csrc/jit/ir/alias_analysis.h>
+#include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/runtime/static/ops.h>
 
 namespace torch {
 namespace jit {
 
-c10::TensorTypePtr checkIsSupported(const Value& value) {
-  TORCH_CHECK(
-      value.type()->cast<TensorType>(),
-      "out isn't a tensortype ",
-      *value.type());
-  auto ttp = value.type()->expect<TensorType>();
-  TORCH_CHECK(
-      ttp->scalarType().has_value(),
-      "This output was profiled but didn't have a scalar type: ",
-      *ttp,
-      ", ",
-      value.debugName())
-  TORCH_CHECK(
-      ttp->sizes().concrete_sizes().has_value(),
-      "This output was profiled but doesn't have sizes: ",
-      *ttp,
-      ", ",
-      value.debugName())
-  return ttp;
+c10::optional<uint64_t> computeStorageSize(const Value& value) {
+  auto ttp = value.type()->cast<TensorType>();
+  if (!ttp) {
+    TORCH_WARN("out isn't a tensortype ", *value.type());
+    return c10::nullopt;
+  }
+  if (!ttp->scalarType().has_value()) {
+    TORCH_WARN(
+        "This output was profiled but didn't have a scalar type: ",
+        *ttp,
+        ", ",
+        value.debugName());
+    return c10::nullopt;
+  }
+  if (!ttp->sizes().concrete_sizes().has_value()) {
+    TORCH_WARN(
+        "This output was profiled but doesn't have sizes: ",
+        *ttp,
+        ", ",
+        value.debugName());
+    return c10::nullopt;
+  }
+
+  auto scalar_type = ttp->scalarType();
+  if (!scalar_type.has_value()) {
+    TORCH_WARN(
+        "This value doesn't have a scalar type", *ttp, ", ", value.debugName());
+    return c10::nullopt;
+  }
+
+  auto element_size = c10::elementSize(scalar_type.value());
+  // TODO: when does this fail? answer: in place mutation
+  auto numel = ttp->numel();
+  if (!numel.has_value()) {
+    TORCH_WARN("doesn't have numel", *ttp, ", ", value.debugName());
+    return c10::nullopt;
+  }
+
+  return numel.value() * element_size;
 }
 
 std::pair<std::vector<int64_t>, std::vector<int64_t>> getSizesStrides(
@@ -51,216 +75,196 @@ std::pair<std::vector<int64_t>, std::vector<int64_t>> getSizesStrides(
   return std::make_pair(sizes, strides);
 }
 
-size_t computeStorageSize(const c10::TensorTypePtr& ttp) {
-  std::vector<int64_t> sizes, strides;
-  std::tie(sizes, strides) = getSizesStrides(ttp);
-  return at::detail::computeStorageNbytes(
-      sizes,
-      strides,
-      // TODO: why does this happen? answer: in place mutation
-      ttp->scalarType().has_value() ? elementSize(ttp->scalarType().value())
-                                    : aten::Float);
-}
-
-std::pair<size_t, std::map<Value*, c10::TensorTypePtr>>
-computeAlignedStorageSize(std::vector<Node*>& nodes) {
-  // TODO: liveness analysis
-  std::map<Value*, c10::TensorTypePtr> managed_tensors;
-  size_t managed_bytes = 0;
-  for (const auto& node : nodes) {
-    for (const auto& output : node->outputs()) {
-      auto ttp = checkIsSupported(*output);
-      managed_bytes += computeStorageSize(ttp);
-      managed_tensors.insert({output, ttp});
-    }
-  }
-
-  auto aligned_size = MemoryPlanner::compute_aligned_tensor_size(managed_bytes);
-  return std::make_pair(aligned_size, managed_tensors);
-}
-
-DeviceType findDeviceType(std::shared_ptr<Graph>& graph) {
-  for (const auto& inp : graph->inputs()) {
-    auto typ = inp->type()->cast<TensorType>();
-    if (typ && typ->device().has_value()) {
-      return typ->device().value().type();
-    }
-  }
-
-  for (const auto& node : graph->nodes()) {
-    for (const auto& inp : node->inputs()) {
-      auto typ = inp->type()->cast<TensorType>();
-      if (typ && typ->device().has_value()) {
-        return typ->device().value().type();
-      }
-    }
-  }
-  TORCH_CHECK(false, "couldn't find device type")
-}
-
-Node* insertAllocStorageNode(std::shared_ptr<Graph>& graph, size_t total_size) {
-  auto deviceType = findDeviceType(graph);
+Node* insertAllocStorageNode(
+    std::shared_ptr<Graph>& graph,
+    uint64_t total_size) {
   auto* storage = graph->create(prim::AllocateStorage, 1);
-  // TODO: pass device type here
   storage->i_(attr::total_size, total_size);
-  storage->i_(attr::device, static_cast<int8_t>(deviceType));
+
+  auto deviceType = jit::tensorexpr::pickDeviceType(graph);
+  if (deviceType.has_value()) {
+    storage->i_(attr::device, static_cast<int8_t>(deviceType.value().type()));
+  } else {
+    storage->i_(attr::device, static_cast<int8_t>(at::kCPU));
+  }
   storage->insertBefore(graph->nodes().front());
   return storage;
 }
 
 void insertAllocTensorNodes(
     std::shared_ptr<Graph>& graph,
-    std::vector<Node*> out_nodes,
     Node* storage,
-    std::map<Value*, c10::TensorTypePtr>& managed_tensors) {
-  size_t offset = 0;
-  size_t total_size = storage->i(attr::total_size);
-  for (auto* node : out_nodes) {
+    std::unordered_map<const Value*, Region> allocations) {
+  uint64_t total_size = storage->i(attr::total_size);
+  for (auto& allocation : allocations) {
+    // const_cast fishy?
+    auto node = const_cast<Node*>(allocation.first->node());
+    auto region = allocation.second;
+
+    // the way that this node magically *becomes* the out varaint is simply
+    // by add an extra input. this is because op resolution happens
+    // at runtime via the op registry (by matching on the schema).
     auto* alloc = graph->create(prim::AllocateTensor, 1);
     node->addInput(alloc->output());
     GRAPH_DEBUG("inserting allocation op for ", node->getOperator().schema());
     alloc->insertBefore(node);
     alloc->addInput(storage->output());
 
-    TORCH_CHECK(
-        managed_tensors.count(node->output()) > 0,
-        "output value not managed by memory planner.");
-    auto ttp = managed_tensors.at(node->output());
-    auto size = computeStorageSize(ttp);
+    auto ttp = allocation.first->type()->expect<c10::TensorType>();
     std::vector<int64_t> sizes, strides;
     std::tie(sizes, strides) = getSizesStrides(ttp);
-    TORCH_CHECK(offset + size <= total_size, "not enough memory");
-    alloc->i_(attr::size, size);
-    alloc->i_(attr::offset, offset);
+    TORCH_CHECK(
+        region.offset + region.size <= total_size,
+        "trying to create an allocation that exceeds previously planned memory");
+    alloc->i_(attr::size, region.size);
+    alloc->i_(attr::offset, region.offset);
     alloc->is_(attr::sizes, sizes);
     alloc->is_(attr::stride, strides);
     alloc->i_(attr::device, static_cast<int8_t>(storage->i(attr::device)));
     alloc->i_(attr::dtype, static_cast<int8_t>(ttp->scalarType().value()));
-
-    offset += size;
   }
-  TORCH_CHECK(offset == total_size, "exceeded total slab size");
-  GRAPH_DEBUG(offset, " bytes of entire slab ", total_size, " filled");
 }
 
-std::vector<Node*> findOutVariantNodes(std::shared_ptr<Graph>& graph) {
-  std::vector<Node*> out_nodes = {};
-  for (auto* node : graph->nodes()) {
-    for (const auto& variant : getAllOperatorsFor(node->kind())) {
-      auto variant_args = variant->schema().arguments();
-      auto maybe_out_arg =
-          /* TODO
-            aten::cat.names_out(Tensor[] tensors, str dim, *, Tensor(a!) out) ->
-            (Tensor(a!)) aten::cat.out(Tensor[] tensors, int dim=0, *,
-            Tensor(a!) out) -> (Tensor(a!))
-          */
-          std::find_if(variant_args.begin(), variant_args.end(), [](auto arg) {
-            return arg.name() == "out";
-          });
-      if (maybe_out_arg != variant_args.end()) {
-        out_nodes.emplace_back(node);
-        break;
-      }
+bool hasOutVariant(Node* node) {
+  for (const auto& variant : getAllOperatorsFor(node->kind())) {
+    auto variant_args = variant->schema().arguments();
+    /* TODO
+      aten::cat.names_out(Tensor[] tensors, str dim, *, Tensor(a!) out) ->
+      (Tensor(a!)) aten::cat.out(Tensor[] tensors, int dim=0, *,
+      Tensor(a!) out) -> (Tensor(a!))
+    */
+    auto maybe_out_arg =
+        std::find_if(variant_args.begin(), variant_args.end(), [](auto arg) {
+          return arg.name() == "out";
+        });
+    if (maybe_out_arg != variant_args.end()) {
+      return true;
     }
   }
-  return out_nodes;
+  return false;
 }
 
-std::map<Value*, std::vector<int>> computeLiveness(
-    std::shared_ptr<Graph>& graph) {
-  std::map<Value*, std::vector<int>> liveness_map = {};
-  int t = 0;
-  auto insert = [&](Value* v) {
-    if (liveness_map.count(v)) {
-      liveness_map.at(v).emplace_back(t);
-    } else {
-      liveness_map.insert({v, {t}});
-    }
-  };
+std::pair<std::vector<const Node*>, std::unordered_map<const Value*, uint64_t>>
+getManagedValues(
+    const std::shared_ptr<Graph>& graph,
+    std::unordered_set<const Value*> always_alive_values) {
+  std::unordered_map<const Value*, uint64_t> managed_tensor_values;
+  std::unordered_set<const Value*> leaked_values;
+  std::vector<const Node*> out_nodes;
 
-  std::unordered_set<Value*> graph_inputs = {};
-
-  for (const auto& inp : graph->inputs()) {
-    graph_inputs.insert(inp);
-  }
-
-  for (const auto& node : graph->nodes()) {
-    t++;
-    if (node->kind() == prim::Constant) {
+  for (auto node : graph->nodes()) {
+    if (!hasOutVariant(node)) {
       continue;
     }
-
-    for (const auto& inp : node->inputs()) {
-      if (graph_inputs.count(inp) == 0 &&
-          inp->node()->kind() != prim::Constant) {
-        insert(inp);
+    out_nodes.emplace_back(node);
+    for (const auto& out_v : node->outputs()) {
+      if (always_alive_values.count(out_v)) {
+        continue;
+      }
+      auto size = computeStorageSize(*out_v);
+      if (size.has_value() && size.value() > 0) {
+        managed_tensor_values.insert({out_v, size.value()});
+      } else if (isOptimizableContainerType(node)) {
+        leaked_values.insert(out_v);
+      } else {
+        TORCH_WARN(
+            "not handling unsupported value: ",
+            out_v->debugName(),
+            " ",
+            *out_v->type());
+        leaked_values.insert(out_v);
       }
     }
-    for (const auto& out : node->outputs()) {
-      insert(out);
+  }
+  return std::make_pair(out_nodes, managed_tensor_values);
+}
+
+std::tuple<
+    std::vector<const Node*>,
+    std::unordered_map<const Value*, uint64_t>,
+    std::unordered_map<const Value*, LiveRange>>
+getManagedStuff(std::shared_ptr<Graph>& graph) {
+  AliasDb alias_db(graph);
+  auto always_alive = jit::GetAlwaysAliveValues(graph, alias_db);
+  auto live_ranges = jit::GetLiveness(graph, always_alive, alias_db).second;
+  std::vector<const Node*> out_nodes;
+  std::unordered_map<const Value*, uint64_t> managed_tensor_values;
+  std::tie(out_nodes, managed_tensor_values) =
+      getManagedValues(graph, always_alive);
+
+  std::unordered_map<const Value*, LiveRange> managed_ranges;
+  for (const auto& lvr : live_ranges) {
+    if (managed_tensor_values.count(lvr.first) > 0) {
+      managed_ranges.insert(lvr);
     }
   }
+  return std::make_tuple(out_nodes, managed_tensor_values, managed_ranges);
+}
 
-  t++;
-  for (const auto& out : graph->outputs()) {
-    insert(out);
+uint64_t getTotalAllocationSize(
+    std::unordered_map<const Value*, Region> allocations) {
+  uint64_t total_size = 0;
+  for (const auto& item : allocations) {
+    total_size = std::max(total_size, item.second.offset + item.second.size);
+  }
+  return total_size;
+}
+
+void printAllocation(
+    std::unordered_map<const Value*, Region> allocations,
+    std::unordered_map<const Value*, LiveRange> managed_ranges) {
+  std::map<LiveRange, const Value*, live_range_start_comp>
+      sorted_start_live_ranges_map;
+  for (const auto& item : managed_ranges) {
+    sorted_start_live_ranges_map.insert({item.second, item.first});
   }
 
-//  std::map<Value*, std::pair<int, int>> value_to_range;
-//  std::map<int, std::vector<Value*>> time_to_value;
-//  std::vector<std::tuple<Value*, int, int>> tasks;
-//
-//  auto insert2 = [&](int t, Value* ident) {
-//    if (time_to_value.count(t)) {
-//      time_to_value.at(t).emplace_back(ident);
-//    } else {
-//      time_to_value.insert({t, {ident}});
-//    }
-//  };
-//
-//  for (const auto& v_lifespan : liveness_map) {
-//    auto v = v_lifespan.first;
-//    auto lifespan = v_lifespan.second;
-//
-//    auto start = lifespan.front();
-//    auto end = lifespan.back();
-//
-//    tasks.emplace_back(std::make_tuple(v, start, end));
-//    value_to_range.insert({v, std::make_pair(start, end)});
-//    insert2(start, v);
-//    insert2(end, v);
-//  }
-//
-//  std::unordered_set<Value*> active_set;
-//
-//  for (int tt = 1; tt <= t; ++tt) {
-//    for (const auto& v : time_to_value.at(tt)) {
-//      if (tt == value_to_range[v].first) {
-//        active_set.insert(v);
-//      } else {
-//        active_set.erase(v);
-//      }
-//    }
-//  }
-
-  return liveness_map;
+  for (const auto& item : sorted_start_live_ranges_map) {
+    auto lvr = item.first;
+    auto val = item.second;
+    auto alloced_reg = allocations[val];
+    std::cout << val->debugName() << ": " << lvr << " " << alloced_reg << "\n";
+  }
 }
 
-void planMemory(std::shared_ptr<Graph>& graph) {
-  auto liveness = computeLiveness(graph);
-  auto out_nodes = findOutVariantNodes(graph);
-  size_t aligned_size;
-  std::map<Value*, c10::TensorTypePtr> managed_tensors;
-  std::tie(aligned_size, managed_tensors) =
-      computeAlignedStorageSize(out_nodes);
+void planMemory(std::shared_ptr<Graph>& graph, Strategy strat) {
+  std::unordered_map<const Value*, uint64_t> managed_values;
+  std::unordered_map<const Value*, LiveRange> managed_ranges;
+  std::vector<const Node*> out_nodes;
+  std::tie(out_nodes, managed_values, managed_ranges) = getManagedStuff(graph);
+  std::unordered_map<const Value*, Region> allocations;
+
+  switch (strat) {
+    case Strategy::NAIVE: {
+      return;
+    }
+    case Strategy::GREEDY_BY_SIZE: {
+      allocations = greedyBySize(managed_values, managed_ranges);
+      break;
+    }
+    case Strategy::LINEAR_SCAN: {
+      allocations = linearScanHeuristic(managed_values, managed_ranges);
+      break;
+    };
+    case Strategy::GREEDY_BY_BREADTH: {
+      allocations =
+          greedyByOperatorBreadth(managed_values, managed_ranges, out_nodes);
+      break;
+    };
+    default:
+      return;
+  }
+  auto total_size = getTotalAllocationSize(allocations);
+
+  printAllocation(allocations, managed_ranges);
+
   GRAPH_DEBUG("\ngraph before inserting storage node\n", *graph);
 
-  auto storage_node = insertAllocStorageNode(graph, aligned_size);
+  auto storage_node = insertAllocStorageNode(graph, total_size);
   GRAPH_DEBUG("\ngraph after inserting storage node\n", *graph);
 
-  insertAllocTensorNodes(graph, out_nodes, storage_node, managed_tensors);
+  insertAllocTensorNodes(graph, storage_node, allocations);
   GRAPH_DEBUG("\ngraph after inserting alloc nodes\n", *graph);
 }
-
 } // namespace jit
 } // namespace torch
