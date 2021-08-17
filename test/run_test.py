@@ -3,6 +3,7 @@
 import argparse
 import copy
 from datetime import datetime
+from distutils.util import strtobool
 import modulefinder
 import os
 import shutil
@@ -698,7 +699,8 @@ def parse_args():
     parser.add_argument(
         '--continue-through-error',
         action='store_true',
-        help='Runs the full test suite despite one of the tests failing')
+        help='Runs the full test suite despite one of the tests failing',
+        default=strtobool(os.environ.get("CONTINUE_THROUGH_ERROR", "False")))
     parser.add_argument(
         'additional_unittest_args',
         nargs='*',
