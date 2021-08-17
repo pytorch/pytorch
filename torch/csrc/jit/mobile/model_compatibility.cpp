@@ -9,10 +9,12 @@
 
 #include <sstream>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace c10 {
 TypePtr parseType(const std::string& pythonStr);
+std::unordered_set<std::string> getContainedTypes(const std::string& pythonStr);
 } // namespace c10
 
 namespace torch {
@@ -188,11 +190,12 @@ std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
 /********************** Get Type Table **********************/
 
 // Get deduplicate type table given bytecode,
-std::vector<IValue> _get_type_table(std::vector<IValue> bytecode_ivalues) {
-  std::vector<IValue> all_type_table;
+SupportedType _get_type_table(std::vector<IValue> bytecode_ivalues) {
+  std::unordered_set<std::string> contained_primitive_types;
+  std::unordered_set<std::string> contained_custom_types;
   // type table can be either string (primitive type) or tuple (custom type)
   // IValue don't have a good hash function for IValue, so use type name
-  // (string) as the hash.
+  // (string, ex: "Dict[int, Tuple[Tensor, Tensor, Tensor]]") as the hash.
   std::unordered_set<std::string> all_type_names;
   for (const auto i : c10::irange(1, bytecode_ivalues.size())) {
     auto method_tuple = bytecode_ivalues.at(i).toTuple()->elements();
@@ -200,21 +203,29 @@ std::vector<IValue> _get_type_table(std::vector<IValue> bytecode_ivalues) {
     auto type_table =
         type_table_tuple.toTuple()->elements()[1].toTuple()->elements();
     for (const auto& type_definition : type_table) {
+      std::unordered_set<std::string> type_tokens;
       std::string type_name;
       if (type_definition.isString()) {
+        // For all primitive types
         type_name = type_definition.toString()->string();
       } else if (type_definition.isTuple()) {
+        // For all custom types
         type_name =
             type_definition.toTuple()->elements()[0].toString()->string();
       }
       if (all_type_names.find(type_name) == all_type_names.end()) {
         all_type_names.insert(type_name);
-        all_type_table.emplace_back(type_definition);
+        if (!type_name.empty()) {
+          // parse the type only if it's a new type
+          type_tokens = at::getContainedTypes(type_name);
+          contained_primitive_types.insert(
+              type_tokens.begin(), type_tokens.end());
+        }
       }
     }
   }
 
-  return all_type_table;
+  return SupportedType{contained_primitive_types, contained_custom_types};
 }
 
 /********************** Compatibility Checker **********************/
@@ -241,48 +252,8 @@ ModelCompatibilityInfo ModelCompatibilityInfo::get(
   uint64_t model_bytecode_version =
       _get_model_bytecode_version(bytecode_values);
   auto model_info = _get_model_ops_and_info(bytecode_values);
-  std::vector<IValue> type_table = _get_type_table(bytecode_values);
+  SupportedType type_table = _get_type_table(bytecode_values);
   return ModelCompatibilityInfo{model_bytecode_version, model_info, type_table};
-}
-
-std::unordered_set<std::string> splitString(const std::string& str) {
-  std::unordered_set<std::string> output;
-  std::string::size_type start = 0;
-  std::string delimiters = "[], ";
-  std::string::size_type last = str.find_first_of(delimiters);
-
-  // keep searching another delimiters until the end of the string.
-  while (last != std::string::npos) {
-    // if last is greater, one token is ready
-    if (last > start) {
-      output.insert(str.substr(start, last - start));
-    }
-    // reset start to the first character of the next token
-    start = ++last;
-    // find the first space and we start searchingat the first character of the
-    // next word
-    last = str.find_first_of(delimiters, last);
-  }
-
-  // pick up the last token when not reaching the end
-  if (start < str.length()) {
-    output.insert(str.substr(start));
-  }
-  return output;
-}
-
-SupportedType possible_types(IValue type_ivalue) {
-  std::unordered_set<std::string> possible_primitive_types;
-  std::unordered_set<std::string> possible_custom_types;
-  if (type_ivalue.isString()) {
-    std::string type_name = type_ivalue.toString()->string();
-    // Convert a type_name to a list of primitive type, for example:
-    // Dict[int, Tuple[Tensor, Tensor, Tensor]] => [Dict, Tuple, Tensor]
-    auto primitive_types = splitString(type_name);
-    possible_primitive_types.insert(
-        primitive_types.begin(), primitive_types.end());
-  }
-  return SupportedType{possible_primitive_types, possible_custom_types};
 }
 
 ModelCompatCheckResult is_compatible(
@@ -304,17 +275,7 @@ ModelCompatCheckResult is_compatible(
   std::unordered_set<std::string> all_custom_types;
 
   // Check type table
-  for (auto const& type : model_info.type_table) {
-    auto possible_type_list = possible_types(type);
-    all_primitive_types.insert(
-        possible_type_list.primitive_types.begin(),
-        possible_type_list.primitive_types.end());
-    all_custom_types.insert(
-        possible_type_list.custom_types.begin(),
-        possible_type_list.custom_types.end());
-  }
-
-  for (const auto& primitive_type : all_primitive_types) {
+  for (const auto& primitive_type : model_info.type_table.primitive_types) {
     if (supported_type.primitive_types.find(primitive_type) ==
         supported_type.primitive_types.end()) {
       result.status = ModelCompatibilityStatus::ERROR;
@@ -324,7 +285,8 @@ ModelCompatCheckResult is_compatible(
       result.errors.push_back(s.str());
     }
   }
-  for (const auto& custom_type : all_custom_types) {
+
+  for (const auto& custom_type : model_info.type_table.custom_types) {
     if (supported_type.custom_types.find(custom_type) ==
         supported_type.custom_types.end()) {
       result.status = ModelCompatibilityStatus::ERROR;
