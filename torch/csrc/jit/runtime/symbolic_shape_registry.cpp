@@ -168,14 +168,9 @@ const std::string shape_compute_functions =
             end_val = start_val
           elif end_val >= self[dim]:
             end_val = self[dim]
-          out: List[int] = []
           len = end_val - start_val
-          # TODO: add support for index write
-          for i in range(ndim):
-            if i == dim:
-              out.append((len + step - 1) // step)
-            else:
-              out.append(self[i])
+          out = _copy(self)
+          out[dim] = (len + step - 1) // step
           return out
 
         def select(self: List[int], dim: int, index: int):
