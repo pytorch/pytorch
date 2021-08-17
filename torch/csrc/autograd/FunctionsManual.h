@@ -247,16 +247,37 @@ Tensor i1e_backward(
     const Tensor& grad,
     const Tensor& self,
     const Tensor& result);
+std::tuple<Tensor, Tensor> lu_solve_backward(
+  const Tensor& grad,
+  const Tensor& self,
+  const Tensor& LU_data,
+  const Tensor& LU_pivots
+);
 Tensor lu_unpack_backward(
   const variable_list& grads,
   const Tensor& LU_data,
   bool unpack_data
 );
+
 Tensor _det_lu_based_helper_backward(
   const Tensor& det_grad,
   const Tensor& det,
   const Tensor& self,
   const Tensor& lu,
+  const Tensor& pivs
+);
+
+Tensor lu_backward_base(
+  const variable_list& grads,
+  const Tensor& self,
+  const Tensor& P,
+  const Tensor& L,
+  const Tensor& U
+);
+Tensor _lu_with_info_backward(
+  const Tensor& grad,
+  const Tensor& self,
+  const Tensor& LU,
   const Tensor& pivs
 );
 
