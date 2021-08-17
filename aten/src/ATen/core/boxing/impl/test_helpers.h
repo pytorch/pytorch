@@ -41,7 +41,7 @@ inline at::Tensor dummyTensor(c10::DispatchKey dispatch_key, bool requires_grad=
 template<class... Args>
 inline std::vector<c10::IValue> callOp(const c10::OperatorHandle& op, Args... args) {
   auto stack = makeStack(std::forward<Args>(args)...);
-  op.callBoxed(&stack);
+  op.callBoxed(stack);
   return stack;
 }
 

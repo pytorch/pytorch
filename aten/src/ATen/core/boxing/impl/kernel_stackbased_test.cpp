@@ -18,24 +18,24 @@ using std::unique_ptr;
 
 namespace {
 
-void errorKernel(const OperatorHandle&, Stack* stack) {
+void errorKernel(const OperatorHandle&, Stack&) {
   EXPECT_TRUE(false); // this kernel should never be called
 }
 
-void incrementKernel(const OperatorHandle&, Stack* stack) {
-  int input = torch::jit::pop(*stack).toInt();
-  torch::jit::pop(*stack); // pop the dummy tensor
-  torch::jit::push(*stack, input + 1);
+void incrementKernel(const OperatorHandle&, Stack& stack) {
+  int input = torch::jit::pop(stack).toInt();
+  torch::jit::pop(stack); // pop the dummy tensor
+  torch::jit::push(stack, input + 1);
 }
 
-void decrementKernel(const OperatorHandle&, Stack* stack) {
-  int input = torch::jit::pop(*stack).toInt();
-  torch::jit::pop(*stack); // pop the dummy tensor
-  torch::jit::push(*stack, input - 1);
+void decrementKernel(const OperatorHandle&, Stack& stack) {
+  int input = torch::jit::pop(stack).toInt();
+  torch::jit::pop(stack); // pop the dummy tensor
+  torch::jit::push(stack, input - 1);
 }
 
 bool called_redispatching_kernel = false;
-void redispatchingKernel_with_DispatchKeySet(const OperatorHandle& op, c10::DispatchKeySet ks, Stack* stack) {
+void redispatchingKernel_with_DispatchKeySet(const OperatorHandle& op, c10::DispatchKeySet ks, Stack& stack) {
   // this kernel is a no-op- it just redispatches to the lower-priority kernel
   called_redispatching_kernel = true;
   auto updated_ks = ks & c10::DispatchKeySet(c10::DispatchKeySet::FULL_AFTER, c10::DispatchKey::TESTING_ONLY_GenericWrapper);
@@ -126,7 +126,7 @@ TEST(OperatorRegistrationTest_StackBasedKernel, givenKernel_whenRegistrationRuns
 
 bool called = false;
 
-void kernelWithoutInputs(const OperatorHandle&, Stack*) {
+void kernelWithoutInputs(const OperatorHandle&, Stack&) {
   called = true;
 }
 
@@ -145,8 +145,8 @@ TEST(OperatorRegistrationTest_StackBasedKernel, givenFallbackKernelWithoutAnyArg
   EXPECT_TRUE(called);
 }
 
-void kernelWithoutTensorInputs(const OperatorHandle&, Stack* stack) {
-  stack->back() = stack->back().toInt() + 1;
+void kernelWithoutTensorInputs(const OperatorHandle&, Stack& stack) {
+  stack.back() = stack.back().toInt() + 1;
 }
 
 TEST(OperatorRegistrationTest_StackBasedKernel, givenFallbackKernelWithoutTensorArguments_whenRegistered_thenCanBeCalled) {
@@ -164,7 +164,7 @@ TEST(OperatorRegistrationTest_StackBasedKernel, givenFallbackKernelWithoutTensor
   EXPECT_EQ(4, outputs[0].toInt());
 }
 
-void kernelForSchemaInference(const OperatorHandle&, Stack* stack) {
+void kernelForSchemaInference(const OperatorHandle&, Stack&) {
 }
 
 TEST(OperatorRegistrationTest_StackBasedKernel, givenKernel_whenRegisteredWithoutSpecifyingSchema_thenFailsBecauseItCannotInferFromStackBasedKernel) {

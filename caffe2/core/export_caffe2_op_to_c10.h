@@ -42,7 +42,7 @@ inline c10::List<at::Tensor> _call_caffe2_op(
 // reduced when having _call_caffe2_op_from_c10 separate from the templated
 // call_caffe2_op_from_c10.
 inline void _call_caffe2_op_from_c10(
-    c10::Stack* stack,
+    c10::Stack& stack,
     const c10::FunctionSchema& schema,
     _CallCaffe2OpFunc* call_op) {
   // precondition: on the stack, there's one IValue for each argument of the
@@ -58,7 +58,7 @@ inline void _call_caffe2_op_from_c10(
       schema.arguments().size() != 0 &&
       schema.arguments().back().type()->isSubtypeOf(
           OptionalType::create(ListType::ofTensors())));
-  IValue preallocated_outputs = torch::jit::pop(*stack);
+  IValue preallocated_outputs = torch::jit::pop(stack);
 
   const size_t num_outputs = schema.returns().size();
   const size_t num_inputs = schema.arguments().size() -
@@ -77,7 +77,7 @@ inline void _call_caffe2_op_from_c10(
 
   // TODO Avoid vector allocation. One idea would be to keep the std::vector
   // instances in the cache.
-  std::vector<IValue> inputs = torch::jit::pop(*stack, num_inputs);
+  std::vector<IValue> inputs = torch::jit::pop(stack, num_inputs);
 
   outputs = (*call_op)(schema, std::move(inputs), std::move(outputs));
 
@@ -92,10 +92,10 @@ inline void _call_caffe2_op_from_c10(
   }
   if (return_tensor_list) {
     // We should not unwrap the list if we expect tensor list in the schema.
-    torch::jit::push(*stack, outputs);
+    torch::jit::push(stack, outputs);
   } else {
     for (size_t i = 0; i < outputs.size(); ++i) {
-      torch::jit::push(*stack, outputs.extract(i));
+      torch::jit::push(stack, outputs.extract(i));
     }
   }
 
@@ -108,7 +108,7 @@ inline void _call_caffe2_op_from_c10(
 template <const c10::FunctionSchema& (*Schema)(), class Caffe2Operator>
 void call_caffe2_op_from_c10(
     const c10::OperatorHandle& /*opHandle*/,
-    c10::Stack* stack) {
+    c10::Stack& stack) {
   _call_caffe2_op_from_c10(stack, Schema(), &_call_caffe2_op<Caffe2Operator>);
 }
 

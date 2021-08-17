@@ -15,7 +15,7 @@ struct OperatorKernel;
 // no overhead to fallthrough to the next key.  See cpp file for some more
 // implementation notes; notably, this does NOT actually go through the
 // boxing/unboxing codepath.
-TORCH_API void fallthrough_kernel(OperatorKernel*, const OperatorHandle&, DispatchKeySet, Stack*);
+TORCH_API void fallthrough_kernel(OperatorKernel*, const OperatorHandle&, DispatchKeySet, Stack&);
 
 // Note [Ambiguity in AutogradOther kernel]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -55,7 +55,7 @@ TORCH_API void fallthrough_kernel(OperatorKernel*, const OperatorHandle&, Dispat
 // but unimplemented backends would prefer CompositeImplicitAutograd.  Rather
 // than arbitrarily pick one or the other, we just register a kernel that raises
 // an error and let the user decide how to proceed.
-TORCH_API void ambiguous_autogradother_kernel(OperatorKernel*, const OperatorHandle&, DispatchKeySet, Stack*);
+TORCH_API void ambiguous_autogradother_kernel(OperatorKernel*, const OperatorHandle&, DispatchKeySet, Stack&);
 
 // Note [named_not_supported_kernel]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -64,7 +64,7 @@ TORCH_API void ambiguous_autogradother_kernel(OperatorKernel*, const OperatorHan
 // cased in the dispatcher to be triggered before we attempt boxing (so we can
 // give a good error message in cases when boxing is not supported).  When
 // boxing is universally supported this can be removed.
-[[noreturn]] TORCH_API void named_not_supported_kernel(OperatorKernel*, const OperatorHandle&, DispatchKeySet, Stack*);
+[[noreturn]] TORCH_API void named_not_supported_kernel(OperatorKernel*, const OperatorHandle&, DispatchKeySet, Stack&);
 
 /**
  * KernelFunction is similar to std::function but stores a kernel function.
@@ -99,10 +99,10 @@ public:
   //
   // The mechanism for optionally passing that DispatchKeySet into the kernel lives in make_boxed_from_unboxed_functor.h.
   // See Note [Plumbing Keys Through The Dispatcher 2] for details.
-  using InternalBoxedKernelFunction = void(OperatorKernel*, const OperatorHandle&, DispatchKeySet, Stack*);
+  using InternalBoxedKernelFunction = void(OperatorKernel*, const OperatorHandle&, DispatchKeySet, Stack&);
   // This is the public API for how boxed kernels are defined
-  using BoxedKernelFunction = void(const OperatorHandle&, Stack*);
-  using BoxedKernelFunction_withDispatchKeys = void(const OperatorHandle&, DispatchKeySet, Stack*);
+  using BoxedKernelFunction = void(const OperatorHandle&, Stack&);
+  using BoxedKernelFunction_withDispatchKeys = void(const OperatorHandle&, DispatchKeySet, Stack&);
 
   KernelFunction();
 
@@ -120,7 +120,7 @@ public:
    *
    * Example:
    *
-   * > void boxed_func(OperatorKernel*, Stack* stack) {...}
+   * > void boxed_func(OperatorKernel*, Stack& stack) {...}
    * > KernelFunction func = KernelFunction::makeFromBoxedFunction(&boxed_func);
    * > Tensor result = func.callBoxed(stack);
    *
@@ -130,7 +130,7 @@ public:
    * >      [] (Tensor a, bool b) -> Tensor {...});
    * > Tensor result = func.callBoxed(stack);
    */
-  void callBoxed(const OperatorHandle& opHandle, DispatchKeySet dispatchKeySet, Stack* stack) const;
+  void callBoxed(const OperatorHandle& opHandle, DispatchKeySet dispatchKeySet, Stack& stack) const;
 
   /**
    * Call the function in an unboxed way.
@@ -147,7 +147,7 @@ public:
    *
    * Or, with a boxed implementation:
    *
-   * > void boxed_func(OperatorKernel*, Stack* stack) {...}
+   * > void boxed_func(OperatorKernel*, Stack& stack) {...}
    * > KernelFunction func = KernelFunction::makeFromBoxedFunction(&boxed_func);
    * > Tensor result = func.call<Tensor, Tensor, bool>(tensor1, true);
    */
@@ -159,7 +159,7 @@ public:
    *
    * Example:
    *
-   * > void boxed_func(OperatorKernel*, Stack* stack) {...}
+   * > void boxed_func(OperatorKernel*, Stack& stack) {...}
    * > KernelFunction func = KernelFunction::makeFromBoxedFunction<&boxed_func>();
    */
   template<BoxedKernelFunction* func>
@@ -193,7 +193,7 @@ public:
    *
    * > class MyFunctor final : public c10::OperatorKernel {
    * >   public:
-   * >     void operator()(const OperatorHandle&, DispatchKeySet, Stack*) {...}
+   * >     void operator()(const OperatorHandle&, DispatchKeySet, Stack&) {...}
    * > };
    * > KernelFunction func = KernelFunction::makeFromBoxedFunctor(std::make_unique<MyFunctor>());
    */
@@ -234,10 +234,10 @@ public:
   static KernelFunction makeNamedNotSupported();
 
   template<BoxedKernelFunction* func>
-  static void make_boxed_function(OperatorKernel*, const OperatorHandle& opHandle, DispatchKeySet, Stack* stack);
+  static void make_boxed_function(OperatorKernel*, const OperatorHandle& opHandle, DispatchKeySet, Stack& stack);
 
   template<BoxedKernelFunction_withDispatchKeys* func>
-  static void make_boxed_function(OperatorKernel*, const OperatorHandle& opHandle, DispatchKeySet, Stack* stack);
+  static void make_boxed_function(OperatorKernel*, const OperatorHandle& opHandle, DispatchKeySet, Stack& stack);
 
   /**
    * Create a KernelFunction from an unboxed lambda.

@@ -24,7 +24,7 @@ struct MathOpFallback {
   // in-place operation corresponding to the math op represented by the bit. Im the future if this class
   // is generalized for ops that are not self inverse, then this must be replaced by op_inverse_inplace
   virtual Tensor& math_op_(Tensor&) = 0;
-  void fallback_impl(const c10::OperatorHandle& op, DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
+  void fallback_impl(const c10::OperatorHandle& op, DispatchKeySet dispatch_keys, torch::jit::Stack& stack) {
     // Situations to handle:
     //  1. Out-of-place operation.  Easy: materialize all inputs and
     //     call it a day.
@@ -41,7 +41,7 @@ struct MathOpFallback {
 
     const auto& arguments = op.schema().arguments();
     const auto num_arguments = arguments.size();
-    const auto stack_start = stack->size() - num_arguments;
+    const auto stack_start = stack.size() - num_arguments;
 
     c10::optional<bool> is_write;
     for (const auto i : c10::irange(num_arguments)) {
@@ -76,7 +76,7 @@ struct MathOpFallback {
     std::vector<Tensor> mutable_inputs;
 
     for (const auto i : c10::irange(num_arguments)) {
-      auto& ivalue = (*stack)[stack_start + i];
+      auto& ivalue = stack[stack_start + i];
       if (!(ivalue.isTensor() || ivalue.isTensorList())) {
         continue;
       }
@@ -102,7 +102,7 @@ struct MathOpFallback {
         } else {
           tensor = resolve_bit(tensor);
         }
-        (*stack)[stack_start + i] = std::move(tensor);
+        stack[stack_start + i] = std::move(tensor);
       } else if (ivalue.isTensorList()) {
         auto tensors = std::move(ivalue).toTensorList();
         if (mut_arg) {
@@ -117,7 +117,7 @@ struct MathOpFallback {
             tensors[j] = resolve_bit(tensors[j]);
           }
         }
-        (*stack)[stack_start + i] = std::move(tensors);
+        stack[stack_start + i] = std::move(tensors);
       }
     }
 

@@ -558,19 +558,19 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithCache_thenCache
 
   // expect first time calling returns a 4 (4 is the initial value in the cache)
   auto stack = makeStack(dummyTensor(DispatchKey::CPU));
-  op->callBoxed(&stack);
+  op->callBoxed(stack);
   EXPECT_EQ(1, stack.size());
   EXPECT_EQ(4, stack[0].toInt());
 
   // expect second time calling returns a 5
   stack = makeStack(dummyTensor(DispatchKey::CPU));
-  op->callBoxed(&stack);
+  op->callBoxed(stack);
   EXPECT_EQ(1, stack.size());
   EXPECT_EQ(5, stack[0].toInt());
 
   // expect third time calling returns a 6
   stack = makeStack(dummyTensor(DispatchKey::CPU));
-  op->callBoxed(&stack);
+  op->callBoxed(stack);
   EXPECT_EQ(1, stack.size());
   EXPECT_EQ(6, stack[0].toInt());
 }

@@ -448,7 +448,7 @@ namespace impl {
 
   template<class Functor, bool AllowDeprecatedTypes, size_t... ivalue_arg_indices,  typename... ArgTypes>
   std::decay_t<typename guts::infer_function_traits_t<Functor>::return_type>
-  call_functor_with_args_from_stack_(OperatorKernel* functor, DispatchKeySet dispatchKeySet, Stack* stack, std::index_sequence<ivalue_arg_indices...>, guts::typelist::typelist<ArgTypes...>*) {
+  call_functor_with_args_from_stack_(OperatorKernel* functor, DispatchKeySet dispatchKeySet, Stack& stack, std::index_sequence<ivalue_arg_indices...>, guts::typelist::typelist<ArgTypes...>*) {
     (void)(stack); // when sizeof...(ivalue_arg_indices) == 0, this argument would be unused and we have to silence the compiler warning.
 
     // We're explicitly filtering out DispatchKeySet from the argument list.
@@ -457,13 +457,13 @@ namespace impl {
     // See Note [Plumbing Keys Through The Dispatcher] for the background.
     return wrap_kernel_functor_unboxed<Functor>::call(functor, dispatchKeySet,
       ivalue_to_arg<typename decay_if_not_tensor<ArgTypes>::type, AllowDeprecatedTypes>::call(
-        torch::jit::peek(*stack, ivalue_arg_indices, sizeof...(ivalue_arg_indices))
+        torch::jit::peek(stack, ivalue_arg_indices, sizeof...(ivalue_arg_indices))
     )...);
   }
 
   template<class Functor, bool AllowDeprecatedTypes>
   std::decay_t<typename guts::infer_function_traits_t<Functor>::return_type>
-  call_functor_with_args_from_stack(OperatorKernel* functor, DispatchKeySet dispatchKeySet, Stack* stack) {
+  call_functor_with_args_from_stack(OperatorKernel* functor, DispatchKeySet dispatchKeySet, Stack& stack) {
     // We're explicitly filtering out DispatchKeySet from the argument list.
     // Some kernels take a DispatchKeySet as their first argument in order to plumb keys through the dispatcher.
     // We don't want to expose the DispatchKeySet type to jit, so we don't include this argument on the stack.
@@ -481,37 +481,37 @@ namespace impl {
     // to avoid one extra call to the move constructor in this case. This is still not a
     // universal reference though because OutputType is an explicitly specified class
     // template parameter.
-    static void call(OutputType&& output, Stack* stack) {
-      torch::jit::push(*stack, return_to_ivalue<OutputType, AllowDeprecatedTypes>::call(std::forward<OutputType>(output)));
+    static void call(OutputType&& output, Stack& stack) {
+      torch::jit::push(stack, return_to_ivalue<OutputType, AllowDeprecatedTypes>::call(std::forward<OutputType>(output)));
     }
-    static void copy(const OutputType& output, Stack* stack) {
-      torch::jit::push(*stack, return_to_ivalue<OutputType, AllowDeprecatedTypes>::copy(output));
+    static void copy(const OutputType& output, Stack& stack) {
+      torch::jit::push(stack, return_to_ivalue<OutputType, AllowDeprecatedTypes>::copy(output));
     }
   };
   template<class... OutputTypes, bool AllowDeprecatedTypes>
   struct push_outputs<std::tuple<OutputTypes...>, AllowDeprecatedTypes> final {
-    static void call(std::tuple<OutputTypes...>&& output, Stack* stack) {
+    static void call(std::tuple<OutputTypes...>&& output, Stack& stack) {
       call_(std::move(output), stack, std::make_index_sequence<sizeof...(OutputTypes)>());
     }
-    static void copy(const std::tuple<OutputTypes...>& output, Stack* stack) {
+    static void copy(const std::tuple<OutputTypes...>& output, Stack& stack) {
       copy_(output, stack, std::make_index_sequence<sizeof...(OutputTypes)>());
     }
 
   private:
     template<size_t... indices>
-    static void call_(std::tuple<OutputTypes...>&& output, Stack* stack, std::index_sequence<indices...>) {
-      torch::jit::push(*stack, return_to_ivalue<OutputTypes, AllowDeprecatedTypes>::call(std::forward<OutputTypes>(std::get<indices>(output)))...);
+    static void call_(std::tuple<OutputTypes...>&& output, Stack& stack, std::index_sequence<indices...>) {
+      torch::jit::push(stack, return_to_ivalue<OutputTypes, AllowDeprecatedTypes>::call(std::forward<OutputTypes>(std::get<indices>(output)))...);
     }
     template<size_t... indices>
-    static void copy_(const std::tuple<OutputTypes...>& output, Stack* stack, std::index_sequence<indices...>) {
-      torch::jit::push(*stack, return_to_ivalue<OutputTypes, AllowDeprecatedTypes>::copy(std::get<indices>(output))...);
+    static void copy_(const std::tuple<OutputTypes...>& output, Stack& stack, std::index_sequence<indices...>) {
+      torch::jit::push(stack, return_to_ivalue<OutputTypes, AllowDeprecatedTypes>::copy(std::get<indices>(output))...);
     }
   };
   template<bool AllowDeprecatedTypes>
   struct push_outputs<void, AllowDeprecatedTypes> final {
-    static void call(int /*dummy*/, Stack* /*stack*/) {
+    static void call(int /*dummy*/, Stack& /*stack*/) {
     }
-    static void copy(int /*dummy*/, Stack* /*stack*/) {
+    static void copy(int /*dummy*/, Stack& /*stack*/) {
     }
   };
 
@@ -522,7 +522,7 @@ namespace impl {
     static_assert(std::is_base_of<OperatorKernel, KernelFunctor>::value,
       "Tried to register a kernel functor using the kernel<Functor>() API, but it doesn't inherit from c10::OperatorKernel. Please have the functor inherit from it.");
 
-    static void call(OperatorKernel* functor, const OperatorHandle&, DispatchKeySet dispatchKeySet, Stack* stack) {
+    static void call(OperatorKernel* functor, const OperatorHandle&, DispatchKeySet dispatchKeySet, Stack& stack) {
       using ReturnType = typename guts::infer_function_traits_t<KernelFunctor>::return_type;
       // We're explicitly filtering out DispatchKeySet from the argument list.
       // Some kernels take a DispatchKeySet as their first argument in order to plumb keys through the dispatcher.
@@ -545,7 +545,7 @@ namespace impl {
         using ReturnType_ = std::decay_t<typename decltype(delay_check)::template type_identity<ReturnType>>;
         ReturnType_ output = call_functor_with_args_from_stack<KernelFunctor, AllowDeprecatedTypes>(functor, dispatchKeySet, delay_check(stack));
 #endif
-        torch::jit::drop(*stack, num_inputs);
+        torch::jit::drop(stack, num_inputs);
         push_outputs<ReturnType_, AllowDeprecatedTypes>::call(std::move(output), stack);
 #ifdef __cpp_if_constexpr
       } else {
@@ -553,7 +553,7 @@ namespace impl {
       }, /* else */ [&] {
 #endif
         call_functor_with_args_from_stack<KernelFunctor, AllowDeprecatedTypes>(functor, dispatchKeySet, stack);
-        torch::jit::drop(*stack, num_inputs);
+        torch::jit::drop(stack, num_inputs);
 #ifdef __cpp_if_constexpr
       }
 #else

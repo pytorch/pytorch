@@ -82,7 +82,7 @@ void concrete_decref_fn(const c10::impl::PyInterpreter* self, PyObject* pyobj) {
 };
 
 c10::intrusive_ptr<TensorImpl> concrete_detach_fn(const c10::impl::PyInterpreter*, const c10::TensorImpl* self);
-void concrete_dispatch_fn(const c10::impl::PyInterpreter*, const c10::OperatorHandle& op, torch::jit::Stack* stack);
+void concrete_dispatch_fn(const c10::impl::PyInterpreter*, const c10::OperatorHandle& op, torch::jit::Stack& stack);
 
 class PyInterpreterHolder {
  public:
@@ -1479,12 +1479,12 @@ bool isPythonTensor(const Tensor& tensor) {
   return tensor.unsafeGetTensorImpl()->key_set().has(c10::DispatchKey::Python);
 }
 
-void concrete_dispatch_fn(const c10::impl::PyInterpreter*, const c10::OperatorHandle& op, torch::jit::Stack* stack) {
+void concrete_dispatch_fn(const c10::impl::PyInterpreter*, const c10::OperatorHandle& op, torch::jit::Stack& stack) {
   const auto& schema = op.schema();
   const auto num_returns = schema.returns().size();
 
   const auto num_arguments = schema.arguments().size();
-  auto arguments = torch::jit::pop(*stack, num_arguments);
+  auto arguments = torch::jit::pop(stack, num_arguments);
 
   // Parse the name into namespace and name (no overload_name)
   // TODO: put this into the library

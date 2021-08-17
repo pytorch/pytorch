@@ -18,6 +18,6 @@ namespace at {
 // The performance of the fallback is not very good because it introduces an
 // extra copy from stacking the sliced outputs. Because of this, we prefer to
 // write batching rules for operators whenever possible.
-void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack);
+void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Stack& stack);
 
 } // namespace at

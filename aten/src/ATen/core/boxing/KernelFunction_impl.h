@@ -18,7 +18,7 @@ inline KernelFunction::KernelFunction(std::unique_ptr<OperatorKernel> functor, I
 {}
 
 template<KernelFunction::BoxedKernelFunction* func>
-inline void KernelFunction::make_boxed_function(OperatorKernel*, const OperatorHandle& opHandle, DispatchKeySet, Stack* stack) {
+inline void KernelFunction::make_boxed_function(OperatorKernel*, const OperatorHandle& opHandle, DispatchKeySet, Stack& stack) {
     // Note that we're dropping the DispatchKeySet argument.
     // See Note [Plumbing Keys Through The Dispatcher 2] for details.
     func(opHandle, stack);
@@ -29,7 +29,7 @@ inline bool KernelFunction::isValidUnboxed() const {
 }
 
 template<KernelFunction::BoxedKernelFunction_withDispatchKeys* func>
-inline void KernelFunction::make_boxed_function(OperatorKernel*, const OperatorHandle& opHandle, DispatchKeySet ks, Stack* stack) {
+inline void KernelFunction::make_boxed_function(OperatorKernel*, const OperatorHandle& opHandle, DispatchKeySet ks, Stack& stack) {
     // See Note [Plumbing Keys Through The Dispatcher 2] for details.
     func(opHandle, ks, stack);
 }
@@ -42,7 +42,7 @@ inline bool KernelFunction::isFallthrough() const {
     return boxed_kernel_func_ == &fallthrough_kernel;
 }
 
-inline void KernelFunction::callBoxed(const OperatorHandle& opHandle, DispatchKeySet dispatchKeySet, Stack* stack) const {
+inline void KernelFunction::callBoxed(const OperatorHandle& opHandle, DispatchKeySet dispatchKeySet, Stack& stack) const {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
         boxed_kernel_func_ != nullptr,
         "Tried to call KernelFunction::callBoxed() on an uninitialized KernelFunction."
@@ -143,7 +143,7 @@ inline KernelFunction KernelFunction::makeFromBoxedFunctor(std::unique_ptr<Kerne
     static_assert(std::is_base_of<OperatorKernel, KernelFunctor>::value, "Tried to call KernelFunction::makeFromBoxedFunctor<KernelFunctor>, but the functor doesn't inherit from c10::OperatorKernel. Please have the functor inherit from it.");
     return KernelFunction(
         std::move(kernelFunctor),
-        [](OperatorKernel* kernel, const OperatorHandle& op, DispatchKeySet ks, Stack* stack) {
+        [](OperatorKernel* kernel, const OperatorHandle& op, DispatchKeySet ks, Stack& stack) {
           (*static_cast<KernelFunctor*>(kernel))(op, ks, stack);
         },
         nullptr // no unboxed function pointer

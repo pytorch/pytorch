@@ -768,10 +768,10 @@ All builtin operators are represented using a stack machine concept. An operator
 
 ```cpp
 using Stack = std::vector<IValue>;
-using Operation = std::function<void(Stack*)>;
+using Operation = std::function<void(Stack&)>;
 
 // schema: example_add(Tensor a, Tensor b) -> Tensor
-void example_add(Stack* stack) {
+void example_add(Stack& stack) {
     Tensor a, b;
     // stack before: ? ? ? a b <- back
     pop(stack, a, b); // Templated helper function

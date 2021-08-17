@@ -22,7 +22,7 @@ static int64_t override_call_count = 0;
 
 // Mode implementation
 
-void generic_mode_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
+void generic_mode_fallback(const c10::OperatorHandle& op, torch::jit::Stack& stack) {
   override_call_count++;
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::TESTING_ONLY_GenericMode);
   op.callBoxed(stack);
@@ -43,39 +43,39 @@ struct GenericWrapperTensorImpl : public c10::TensorImpl {
   at::Tensor rep_;
 };
 
-void generic_wrapper_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
+void generic_wrapper_fallback(const c10::OperatorHandle& op, torch::jit::Stack& stack) {
   override_call_count++;
 
   auto num_arguments = op.schema().arguments().size();
   auto num_returns = op.schema().returns().size();
 
   // Unwrap all arguments
-  auto args = torch::jit::pop(*stack, num_arguments);
+  auto args = torch::jit::pop(stack, num_arguments);
   for (size_t i = 0; i < num_arguments; i++) {
     // TODO: Handle tensor list
     if (args[i].isTensor()) {
       auto* impl = args[i].unsafeToTensorImpl();
       if (impl->key_set().has(DispatchKey::TESTING_ONLY_GenericWrapper)) {
         auto* wrapper = static_cast<GenericWrapperTensorImpl*>(impl);
-        torch::jit::push(*stack, wrapper->rep_);  // no move!
+        torch::jit::push(stack, wrapper->rep_);  // no move!
       } else {
-        torch::jit::push(*stack, std::move(args[i]));
+        torch::jit::push(stack, std::move(args[i]));
       }
     } else {
-      torch::jit::push(*stack, std::move(args[i]));
+      torch::jit::push(stack, std::move(args[i]));
     }
   }
 
   op.callBoxed(stack);
 
   // Rewrap outputs
-  auto rets = torch::jit::pop(*stack, num_returns);
+  auto rets = torch::jit::pop(stack, num_returns);
   for (size_t i = 0; i < num_returns; i++) {
     // TODO: Handle tensor list
     if (rets[i].isTensor()) {
-      torch::jit::push(*stack, at::detail::make_tensor<GenericWrapperTensorImpl>(std::move(rets[i]).toTensor()));  // yes move!
+      torch::jit::push(stack, at::detail::make_tensor<GenericWrapperTensorImpl>(std::move(rets[i]).toTensor()));  // yes move!
     } else {
-      torch::jit::push(*stack, std::move(rets[i]));
+      torch::jit::push(stack, std::move(rets[i]));
     }
   }
 }

@@ -86,13 +86,13 @@ static void warnFallback(const c10::FunctionSchema& schema, bool is_inplace) {
 //   we repeatedly we slice the input arguments (if they are BatchedTensors),
 //   put the sliced (or a not-sliced) version of the input onto the stack, invoke
 //   the operator, and then pop the results off the stack.
-void batchedTensorInplaceForLoopFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
+void batchedTensorInplaceForLoopFallback(const c10::OperatorHandle& op, torch::jit::Stack& stack) {
   const auto& schema = op.schema();
   warnFallback(schema, /*in_place*/true);
 
   const auto num_arguments = static_cast<int64_t>(schema.arguments().size());
   const auto arguments = torch::jit::last(stack, num_arguments);
-  const auto arguments_begin = stack->size() - num_arguments;
+  const auto arguments_begin = stack.size() - num_arguments;
 
   // `self` is the Tensor being modified in-place
   Tensor self = arguments[0].toTensor();
@@ -180,7 +180,7 @@ void batchedTensorInplaceForLoopFallback(const c10::OperatorHandle& op, torch::j
     for (const auto arg_idx : c10::irange(num_arguments)) {
       // We assume that torch::jit::Stack is backed by vector<IValue> for
       // simplicity. When that is not the case, this code should be updated.
-      const auto& argument = (*stack)[arguments_begin + arg_idx];
+      const auto& argument = stack[arguments_begin + arg_idx];
       if (batched_tensor_inputs_pos_iter == batched_tensor_inputs_position.end()
           || arg_idx != *batched_tensor_inputs_pos_iter) {
         // argument isn't a BatchedTensor
@@ -243,7 +243,7 @@ static Tensor safeStack(TensorList tensors) {
 //   the operator, and then pop the results off the stack.
 // - Each result obtained from the previous step is a slice of the total result,
 //   so we stack those tensors together to form the final result.
-void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
+void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Stack& stack) {
   const auto& schema = op.schema();
   const auto num_returns = schema.returns().size();
 
@@ -264,7 +264,7 @@ void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Sta
 
   const auto num_arguments = static_cast<int64_t>(schema.arguments().size());
   const auto arguments = torch::jit::last(stack, num_arguments);
-  const auto arguments_begin = stack->size() - num_arguments;
+  const auto arguments_begin = stack.size() - num_arguments;
 
   // Figure out which arguments are BatchedTensor. Save them to a vector.
   // For each BatchedTensor, also record what position of `arguments` they came from.
@@ -323,7 +323,7 @@ void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Sta
     for (const auto arg_idx : c10::irange(num_arguments)) {
       // We assume that torch::jit::Stack is backed by vector<IValue> for
       // simplicity. When that is not the case, this code should be updated.
-      const auto& argument = (*stack)[arguments_begin + arg_idx];
+      const auto& argument = stack[arguments_begin + arg_idx];
       if (batched_tensor_inputs_pos_iter == batched_tensor_inputs_position.end()
           || arg_idx != *batched_tensor_inputs_pos_iter) {
         // argument isn't a BatchedTensor

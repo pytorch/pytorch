@@ -187,7 +187,7 @@ public:
   }
 
   /// Create a function from a boxed kernel function with signature
-  /// `void(const OperatorHandle&, Stack*)`; i.e., they receive a
+  /// `void(const OperatorHandle&, Stack&)`; i.e., they receive a
   /// stack of arguments in a boxed calling convention, rather than
   /// in the native C++ calling convention.  Boxed functions are
   /// typically only used to register backend fallbacks via
@@ -215,7 +215,7 @@ public:
   }
 
   /// Create a function from a boxed kernel functor which defines
-  /// `operator()(const OperatorHandle&, DispatchKeySet, Stack*)`
+  /// `operator()(const OperatorHandle&, DispatchKeySet, Stack&)`
   /// (receiving arguments from boxed calling convention) and inherits
   /// from `c10::OperatorKernel`.  Unlike makeFromBoxedFunction, functions
   /// registered in this way can also carry additional state which

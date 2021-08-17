@@ -72,7 +72,7 @@ bool Function::append_operator(
   } else {
     auto op = c10::Dispatcher::singleton().findSchema(opname_c10);
     if (op.has_value()) {
-      fn = [op](Stack& stack) { op->callBoxed(&stack); };
+      fn = [op](Stack& stack) { op->callBoxed(stack); };
       if (op->hasSchema()) {
         args = op->schema().arguments();
       } else {

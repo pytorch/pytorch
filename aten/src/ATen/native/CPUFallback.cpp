@@ -59,11 +59,11 @@ c10::optional<c10::Device> compute_target_device(std::vector<at::Tensor>& t_args
 }
 
 
-void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
+void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack& stack) {
   auto& schema_args = op.schema().arguments();
   const auto num_arguments = schema_args.size();
   auto arguments = torch::jit::last(stack, num_arguments);
-  const auto arguments_begin = stack->size() - num_arguments;
+  const auto arguments_begin = stack.size() - num_arguments;
 
   std::vector<at::Tensor> tensor_args;
   std::vector<int> tensor_args_indices;
@@ -82,7 +82,7 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
       // but XLA would benefit from materializing all tensor and TensorList args onto the CPU at the same time.
       // We can improve this if we need better perf for XLA's CPU fallbacks.
       auto cpu_ivalue = c10::IValue(c10::List<at::Tensor>(to_cpu(ivalue.toTensorList().vec())));
-      (*stack)[arguments_begin + idx] = std::move(cpu_ivalue);
+      stack[arguments_begin + idx] = std::move(cpu_ivalue);
       tensorlist_args.push_back(ivalue.toTensorList());
     }
   }
@@ -91,7 +91,7 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
 
   for (const auto i : c10::irange(tensor_args_indices.size())) {
     auto idx = tensor_args_indices[i];
-    (*stack)[arguments_begin + idx] = c10::IValue(cpu_tensors[i]);
+    stack[arguments_begin + idx] = c10::IValue(cpu_tensors[i]);
   }
 
   // Step 2: Call the underlying CPU implementation of the operator
@@ -129,7 +129,7 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   const auto& schema_returns = op.schema().returns();
   const auto& num_returns = schema_returns.size();
   auto returns = torch::jit::last(stack, num_returns);
-  const auto returns_begin = stack->size() - num_returns;
+  const auto returns_begin = stack.size() - num_returns;
 
   for (const auto idx : c10::irange(returns.size())) {
     if (returns[idx].isTensor()) {
@@ -149,7 +149,7 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
             if (input_tensor.defined() && alias_info == input_alias_info) {
               // We've found the original input tensor that aliases with the current output.
               // Wrap it in an IValue and put it directly on the stack.
-              (*stack)[returns_begin + idx] = c10::IValue(tensor_args[i]);
+              stack[returns_begin + idx] = c10::IValue(tensor_args[i]);
               found_alias = true;
               break;
             }
@@ -177,7 +177,7 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
           // We technically  might not have a target device, e.g. if you call torch.cat() with an empty list
           // In that case, we shouldn't have any tensors to schlep across devices anyway.
           if (tgt_device) {
-              (*stack)[returns_begin + idx] = c10::IValue(returns[idx].toTensor().to(*tgt_device));
+              stack[returns_begin + idx] = c10::IValue(returns[idx].toTensor().to(*tgt_device));
           }
         }
       }

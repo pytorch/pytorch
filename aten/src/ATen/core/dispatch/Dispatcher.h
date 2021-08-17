@@ -162,11 +162,11 @@ public:
   Return redispatch(const TypedOperatorHandle<Return (Args...)>& op, DispatchKeySet currentDispatchKeySet, Args... args) const;
 
   // Invoke an operator via the boxed calling convention using an IValue stack
-  void callBoxed(const OperatorHandle& op, Stack* stack) const;
+  void callBoxed(const OperatorHandle& op, Stack& stack) const;
 
   // TODO: This will only be useful if we write a backend fallback that plumbs dispatch keys (currently there are none)
   // See Note [Plumbing Keys Through The Dispatcher]
-  void redispatchBoxed(const OperatorHandle& op, DispatchKeySet dispatchKeySet, Stack* stack) const;
+  void redispatchBoxed(const OperatorHandle& op, DispatchKeySet dispatchKeySet, Stack& stack) const;
 
 
   // ------------------------------------------------------------------------
@@ -340,15 +340,11 @@ public:
     return TypedOperatorHandle<FuncType>(operatorIterator_);
   }
 
-  void callBoxed(Stack* stack) const {
+  void callBoxed(Stack& stack) const {
     c10::Dispatcher::singleton().callBoxed(*this, stack);
   }
 
-  void callBoxed(Stack& stack) const {
-    callBoxed(&stack);
-  }
-
-  void redispatchBoxed(DispatchKeySet ks, Stack* stack) const {
+  void redispatchBoxed(DispatchKeySet ks, Stack& stack) const {
     c10::Dispatcher::singleton().redispatchBoxed(*this, ks, stack);
   }
 
@@ -434,7 +430,7 @@ struct CaptureKernelCall {
   // Wraps the return values in a Stack.
   Stack getOutputs() {
     Stack stack;
-    impl::push_outputs<ReturnType, false>::copy(output_, &stack);
+    impl::push_outputs<ReturnType, false>::copy(output_, stack);
     return stack;
   }
   // Since we are returning the output_, we don't expect the output_ to be used
@@ -540,7 +536,7 @@ inline Return Dispatcher::redispatch(const TypedOperatorHandle<Return (Args...)>
   return kernel.template call<Return, Args...>(op, currentDispatchKeySet, std::forward<Args>(args)...);
 }
 
-inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const {
+inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack& stack) const {
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
   const auto& entry = op.operatorDef_->op;
   auto dispatchKeySet = entry.dispatchKeyExtractor().getDispatchKeySetBoxed(stack);
@@ -554,7 +550,7 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const 
       auto dispatchKey = dispatchKeySet.highestPriorityTypeId();
       if (entry.isObserved()) {
         if (guard.needsInputs()) {
-          runRecordFunction(guard, op, dispatchKey, *stack);
+          runRecordFunction(guard, op, dispatchKey, stack);
         } else {
           runRecordFunction(guard, op, dispatchKey);
         }
@@ -565,7 +561,7 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const 
     // track outputs
     if (C10_UNLIKELY(
             guard.isActive() && entry.isObserved() && guard.needsOutputs())) {
-      guard.setOutputs(*stack);
+      guard.setOutputs(stack);
     }
     return;
   }
@@ -573,7 +569,7 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const 
   kernel.callBoxed(op, dispatchKeySet, stack);
 }
 
-inline void Dispatcher::redispatchBoxed(const OperatorHandle& op, DispatchKeySet dispatchKeySet, Stack* stack) const {
+inline void Dispatcher::redispatchBoxed(const OperatorHandle& op, DispatchKeySet dispatchKeySet, Stack& stack) const {
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
   const auto& entry = op.operatorDef_->op;
   const auto& kernel = entry.lookup(dispatchKeySet.highestPriorityTypeId());

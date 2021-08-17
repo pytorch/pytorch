@@ -127,10 +127,10 @@ public:
     dispatch_arg_indices_reverse_ = c10::utils::bitset();
   }
 
-  DispatchKeySet getDispatchKeySetBoxed(const torch::jit::Stack* stack) const {
+  DispatchKeySet getDispatchKeySetBoxed(const torch::jit::Stack& stack) const {
     DispatchKeySet ks;
     dispatch_arg_indices_reverse_.for_each_set_bit([&] (size_t reverse_arg_index) {
-      const auto& ivalue = torch::jit::peek(*stack, 0, reverse_arg_index + 1);
+      const auto& ivalue = torch::jit::peek(stack, 0, reverse_arg_index + 1);
       if (C10_LIKELY(ivalue.isTensor())) {
         // NB: Take care not to introduce a refcount bump (there's
         // no safe toTensorRef method, alas)

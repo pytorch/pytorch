@@ -299,7 +299,7 @@ TEST(OperatorRegistrationTest, whenRegisteringMultipleKernelsInSameOpCallAndCall
 }
 
 bool called_stackbased_kernel = false;
-void stackBasedKernel(const OperatorHandle&, c10::Stack* stack) {
+void stackBasedKernel(const OperatorHandle&, c10::Stack& stack) {
   called_stackbased_kernel = true;
 }
 
@@ -414,8 +414,8 @@ TEST(OperatorRegistrationTest, whenRegisteringMismatchingKernelsInSameOpCall_the
   }, "Mismatch in kernel C++ signatures");
 }
 
-void backend_fallback_kernel(const c10::OperatorHandle& op, c10::Stack* stack) {
-  (*stack)[1] = (*stack)[1].toString()->string() + op.schema().name();
+void backend_fallback_kernel(const c10::OperatorHandle& op, c10::Stack& stack) {
+  stack[1] = stack[1].toString()->string() + op.schema().name();
 }
 
 TEST(OperatorRegistrationTest, whenRegisteringBackendFallbackKernel_thenCanBeCalled) {

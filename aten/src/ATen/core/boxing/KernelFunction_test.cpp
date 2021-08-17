@@ -33,34 +33,34 @@ optional<tuple<int64_t, int64_t>> called_with_args;
 // See Note [Plumbing Keys Through The Dispatcher] for details.
 c10::DispatchKeySet CPU_TEST_SET = c10::DispatchKeySet(c10::DispatchKey::CPU);
 
-void boxed_func_with_return(const OperatorHandle& /*opHandle*/, Stack* stack) {
-  EXPECT_EQ(2, stack->size());
-  EXPECT_TRUE(stack->at(0).isInt());
-  EXPECT_TRUE(stack->at(1).isInt());
-  called_with_args = tuple<int64_t, int64_t>(stack->at(0).toInt(), stack->at(1).toInt());
+void boxed_func_with_return(const OperatorHandle& /*opHandle*/, Stack& stack) {
+  EXPECT_EQ(2, stack.size());
+  EXPECT_TRUE(stack.at(0).isInt());
+  EXPECT_TRUE(stack.at(1).isInt());
+  called_with_args = tuple<int64_t, int64_t>(stack.at(0).toInt(), stack.at(1).toInt());
 
-  stack->clear();
-  stack->push_back(5);
+  stack.clear();
+  stack.push_back(5);
 }
 
-void boxed_func_without_return(const OperatorHandle& /*opHandle*/, Stack* stack) {
-  EXPECT_EQ(2, stack->size());
-  EXPECT_TRUE(stack->at(0).isInt());
-  EXPECT_TRUE(stack->at(1).isInt());
-  called_with_args = tuple<int64_t, int64_t>(stack->at(0).toInt(), stack->at(1).toInt());
+void boxed_func_without_return(const OperatorHandle& /*opHandle*/, Stack& stack) {
+  EXPECT_EQ(2, stack.size());
+  EXPECT_TRUE(stack.at(0).isInt());
+  EXPECT_TRUE(stack.at(1).isInt());
+  called_with_args = tuple<int64_t, int64_t>(stack.at(0).toInt(), stack.at(1).toInt());
 
-  stack->clear();
+  stack.clear();
 }
 
-void boxed_func_with_multi_return(const OperatorHandle& /*opHandle*/, Stack* stack) {
-  EXPECT_EQ(2, stack->size());
-  EXPECT_TRUE(stack->at(0).isInt());
-  int64_t a = stack->at(0).toInt();
-  EXPECT_TRUE(stack->at(1).isInt());
-  int64_t b = stack->at(1).toInt();
+void boxed_func_with_multi_return(const OperatorHandle& /*opHandle*/, Stack& stack) {
+  EXPECT_EQ(2, stack.size());
+  EXPECT_TRUE(stack.at(0).isInt());
+  int64_t a = stack.at(0).toInt();
+  EXPECT_TRUE(stack.at(1).isInt());
+  int64_t b = stack.at(1).toInt();
   called_with_args = tuple<int64_t, int64_t>(a, b);
 
-  stack->clear();
+  stack.clear();
   torch::jit::push(stack, a + b);
   torch::jit::push(stack, a * b);
 }
@@ -117,58 +117,58 @@ OperatorHandle makeDummyOperatorHandle() {
 // boxed kernels that return refs to tensor arguments, a la inplace/outplace kernels
 //
 
-void boxed_func_for_inplace_op(const OperatorHandle& /*opHandle*/, Stack* stack) {
+void boxed_func_for_inplace_op(const OperatorHandle& /*opHandle*/, Stack& stack) {
   // (Tensor(a!), Scalar) -> Tensor(a!)
-  EXPECT_EQ(2, stack->size());
+  EXPECT_EQ(2, stack.size());
 
-  ASSERT_TRUE(stack->at(0).isTensor());
-  auto t = stack->at(0).toTensor();
+  ASSERT_TRUE(stack.at(0).isTensor());
+  auto t = stack.at(0).toTensor();
 
-  ASSERT_TRUE(stack->at(1).isScalar());
-  auto s = stack->at(1).toScalar();
+  ASSERT_TRUE(stack.at(1).isScalar());
+  auto s = stack.at(1).toScalar();
 
   t.add_(s);
 
-  stack->clear();
+  stack.clear();
   torch::jit::push(stack, t);
 }
 
-void boxed_func_for_outofplace_op(const OperatorHandle& /*opHandle*/, Stack* stack) {
+void boxed_func_for_outofplace_op(const OperatorHandle& /*opHandle*/, Stack& stack) {
   // (Scalar, Tensor(a!)) -> Tensor(a!)
-  EXPECT_EQ(2, stack->size());
+  EXPECT_EQ(2, stack.size());
 
-  ASSERT_TRUE(stack->at(0).isScalar());
-  auto s = stack->at(0).toScalar();
+  ASSERT_TRUE(stack.at(0).isScalar());
+  auto s = stack.at(0).toScalar();
 
-  ASSERT_TRUE(stack->at(1).isTensor());
-  auto t = stack->at(1).toTensor();
+  ASSERT_TRUE(stack.at(1).isTensor());
+  auto t = stack.at(1).toTensor();
 
   t.add_(s);
 
-  stack->clear();
+  stack.clear();
   torch::jit::push(stack, t);
 }
 
-void boxed_func_for_outofplace_multi_op(const OperatorHandle& /*opHandle*/, Stack* stack) {
+void boxed_func_for_outofplace_multi_op(const OperatorHandle& /*opHandle*/, Stack& stack) {
   // (Scalar, Scalar, Tensor(a!), Tensor(b!)) -> (Tensor(a!), Tensor(b!))
-  EXPECT_EQ(4, stack->size());
+  EXPECT_EQ(4, stack.size());
 
-  ASSERT_TRUE(stack->at(0).isScalar());
-  auto s1 = stack->at(0).toScalar();
+  ASSERT_TRUE(stack.at(0).isScalar());
+  auto s1 = stack.at(0).toScalar();
 
-  ASSERT_TRUE(stack->at(1).isScalar());
-  auto s2 = stack->at(1).toScalar();
+  ASSERT_TRUE(stack.at(1).isScalar());
+  auto s2 = stack.at(1).toScalar();
 
-  ASSERT_TRUE(stack->at(2).isTensor());
-  auto t1 = stack->at(2).toTensor();
+  ASSERT_TRUE(stack.at(2).isTensor());
+  auto t1 = stack.at(2).toTensor();
 
-  ASSERT_TRUE(stack->at(3).isTensor());
-  auto t2 = stack->at(3).toTensor();
+  ASSERT_TRUE(stack.at(3).isTensor());
+  auto t2 = stack.at(3).toTensor();
 
   t1.add_(s1);
   t2.add_(s2);
 
-  stack->clear();
+  stack.clear();
   torch::jit::push(stack, t1);
   torch::jit::push(stack, t2);
 }
@@ -184,7 +184,7 @@ void expectBoxedCallingWithReturnWorks(const KernelFunction& func) {
   vector<IValue> stack {3, 4};
   OperatorHandle dummy = makeDummyOperatorHandle();
 
-  func.callBoxed(dummy, CPU_TEST_SET, &stack);
+  func.callBoxed(dummy, CPU_TEST_SET, stack);
 
   EXPECT_TRUE(called_with_args.has_value());
   EXPECT_EQ((tuple<int64_t, int64_t>(3, 4)), *called_with_args);
@@ -198,7 +198,7 @@ void expectBoxedCallingWithoutReturnWorks(const KernelFunction& func) {
   vector<IValue> stack {3, 4};
   OperatorHandle dummy = makeDummyOperatorHandle();
 
-  func.callBoxed(dummy, CPU_TEST_SET, &stack);
+  func.callBoxed(dummy, CPU_TEST_SET, stack);
 
   EXPECT_TRUE(called_with_args.has_value());
   EXPECT_EQ((tuple<int64_t, int64_t>(3, 4)), *called_with_args);
@@ -210,7 +210,7 @@ void expectBoxedCallingWithMultiReturnWorks(const KernelFunction& func) {
   vector<IValue> stack {3, 4};
   OperatorHandle dummy = makeDummyOperatorHandle();
 
-  func.callBoxed(dummy, CPU_TEST_SET, &stack);
+  func.callBoxed(dummy, CPU_TEST_SET, stack);
 
   EXPECT_TRUE(called_with_args.has_value());
   EXPECT_EQ((tuple<int64_t, int64_t>(3, 4)), *called_with_args);
@@ -231,7 +231,7 @@ void expectInPlaceBoxedCallingWorks(const KernelFunction& func) {
   auto t = at::zeros({1});
   auto s = 1.0f;
   vector<IValue> stack {t, s};
-  func.callBoxed(dummy, CPU_TEST_SET, &stack);
+  func.callBoxed(dummy, CPU_TEST_SET, stack);
 
   // kernel should have updated out arg and returned it
   EXPECT_EQ(t.item().toFloat(), 1.0f);
@@ -246,7 +246,7 @@ void expectOutOfPlaceBoxedCallingWorks(const KernelFunction& func) {
   auto s = 1.0f;
   auto t = at::zeros({1});
   vector<IValue> stack {s, t};
-  func.callBoxed(dummy, CPU_TEST_SET, &stack);
+  func.callBoxed(dummy, CPU_TEST_SET, stack);
 
   // kernel should have updated out arg and returned it on the stack
   EXPECT_EQ(t.item().toFloat(), 1.0f);
@@ -263,7 +263,7 @@ void expectOutOfPlaceMultiBoxedCallingWorks(const KernelFunction& func) {
   auto t1 = at::zeros({1});
   auto t2 = at::zeros({1});
   vector<IValue> stack {s1, s2, t1, t2};
-  func.callBoxed(dummy, CPU_TEST_SET, &stack);
+  func.callBoxed(dummy, CPU_TEST_SET, stack);
 
   // kernel should have updated output args and returned them on the stack
   EXPECT_EQ(t1.item().toFloat(), 1.0f);
@@ -281,7 +281,7 @@ void expectBoxedCallingFailsWith(const KernelFunction& func, const char* errorMe
   OperatorHandle dummy = makeDummyOperatorHandle();
 
   expectThrows<c10::Error>([&] {
-    func.callBoxed(dummy, CPU_TEST_SET, &stack);
+    func.callBoxed(dummy, CPU_TEST_SET, stack);
   }, errorMessage);
 }
 
