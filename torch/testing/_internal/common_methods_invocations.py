@@ -1273,6 +1273,10 @@ def sample_inputs_linalg_vector_norm(op_info, device, dtype, requires_grad, **kw
 # specify scalars of floating, integral & complex types as values for "alpha".
 # Keyword argument `rhs_exclude_zero` is used to exclude zero values from rhs tensor argument
 # This is necessary for operations like `true_divide`, where divide by zero throws an exception.
+# TODO:
+# 1. Add kwargs to specify the domain of LHS and RHS.
+# 2. Add kwarg exclude_scalar which if true will return Tensor only arguments.
+# 3. Add kwargs to specify requires_grad for LHS and RHS.
 def sample_inputs_binary_pwise(op_info, device, dtype, requires_grad, extra_kwargs=None, **kwargs):
     if extra_kwargs is None:
         extra_kwargs = {}
@@ -7021,6 +7025,8 @@ op_db: List[OpInfo] = [
                # Topk is not raising a warning when the out is resized
                SkipInfo('TestCommon', 'test_out'),
            )),
+    # We have to add 2 OpInfo entry for `igamma` and `igammac`.First is the
+    # standard entry, second is to run gradcheck tests on the second argument.
     OpInfo('igamma',
            dtypes=floating_types_and(torch.bfloat16, torch.float16),
            aliases=('torch.special.gammainc',),
@@ -7029,6 +7035,9 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_igamma_igammac),
     OpInfo('igamma',
            variant_test_name='grad_other',
+           # Since autograd formula is implemented only for other and
+           # gradcheck test verifies the formula for input in SampleInput,
+           # we permute the arguments.
            op=lambda self, other, **kwargs: torch.igamma(other, self, **kwargs),
            dtypes=floating_types_and(torch.bfloat16, torch.float16),
            backward_dtypesIfCPU=floating_types_and(torch.bfloat16),
@@ -7036,7 +7045,10 @@ op_db: List[OpInfo] = [
            backward_dtypesIfCUDA=floating_types(),
            supports_inplace_autograd=False,
            skips=(
+               # test does not work with passing lambda for op
                SkipInfo('TestJit', 'test_variant_consistency_jit'),
+               # test fails are we permute the arguments function variant
+               # but not for inplace or method.
                SkipInfo('TestCommon', 'test_variant_consistency_eager'),
            ),
            sample_inputs_func=sample_inputs_igamma_igammac),
@@ -7048,6 +7060,9 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_igamma_igammac),
     OpInfo('igammac',
            variant_test_name='grad_other',
+           # Since autograd formula is implemented only for other and
+           # gradcheck test verifies the formula for input in SampleInput,
+           # we permute the arguments
            op=lambda self, other, **kwargs: torch.igammac(other, self, **kwargs),
            dtypes=floating_types_and(torch.bfloat16, torch.float16),
            backward_dtypesIfCPU=floating_types_and(torch.bfloat16),
@@ -7055,7 +7070,10 @@ op_db: List[OpInfo] = [
            backward_dtypesIfCUDA=floating_types(),
            supports_inplace_autograd=False,
            skips=(
+               # test does not work with passing lambda for op
                SkipInfo('TestJit', 'test_variant_consistency_jit'),
+               # test fails are we permute the arguments function variant
+               # but not for inplace or method.
                SkipInfo('TestCommon', 'test_variant_consistency_eager'),
            ),
            sample_inputs_func=sample_inputs_igamma_igammac),
