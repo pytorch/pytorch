@@ -2934,6 +2934,8 @@ class TestVmapOperatorsOpInfo(TestCase):
         vmap_fail = {
             '__getitem__',
             'unfold',
+            'argmin',
+            'argmax',
         }
         if opinfo_in_dict(op, vmap_fail):
             return
