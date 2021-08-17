@@ -1539,6 +1539,7 @@ class TestClassType(JitTestCase):
             with self.assertRaisesRegex(RuntimeError, error_message_regex):
                 torch.jit.script(fn)
 
+    @unittest.skipIf(IS_SANDCASTLE, "Importing like this doesn't work in fbcode")
     def test_jit_script_not_as_decorator(self):
         from jit._imported_class_test import MyObj, inner, Nada, simple_func, NoConstructor
         # Assert that the below does not raise
