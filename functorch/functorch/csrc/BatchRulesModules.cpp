@@ -200,6 +200,42 @@ std::tuple<Tensor,Tensor> cudnn_convolution_backward_plumbing(const Tensor & sel
   return slow_fallback<Tensor,Tensor>(op, { self, grad_output, weight, padding, stride, dilation, groups, benchmark, deterministic, allow_tf32, output_mask });
 }
 
+// TODO: replace with targetable functionalization
+Tensor one_hot_decomposition_hack(const Tensor &self, int64_t num_classes) {
+    TORCH_CHECK(self.dtype() == kLong, "one_hot is only applicable to index tensor.");
+    auto shape = self.sizes().vec();
+
+    // empty tensor could be converted to one hot representation,
+    // but shape inference is not possible.
+    if (self.numel() == 0) {
+        if (num_classes <= 0) {
+            AT_ERROR("Can not infer total number of classes from empty tensor.");
+        } else {
+            shape.push_back(num_classes);
+            return at::empty(shape, self.options());
+        }
+    }
+
+    TORCH_CHECK(num_classes > 0, "When vmap-ing torch.nn.functional.one_hot, please "
+        "provide an explicit positive num_classes argument.");
+
+    // Disabling all of the following checks. This is OK because scatter has checks too.
+    // Maybe one_hot should be a primitive wrt autograd so we don't have to deal with this.
+    // // non-empty tensor
+    // if (self.device().type() != at::kCUDA) {
+    //   //for cuda, rely on device assert thrown by scatter
+    //   TORCH_CHECK(self.min().item().toLong() >= 0, "Class values must be non-negative.");
+    // }
+    // if (self.device().type() != at::kCUDA) {
+    //   //rely on device asserts from scatter to avoid sync here
+    //   TORCH_CHECK(num_classes > self.max().item().toLong(), "Class values must be smaller than num_classes.");
+    // }
+
+    shape.push_back(num_classes);
+    Tensor ret = at::zeros(shape, self.options());
+    return ret.scatter(-1, self.unsqueeze(-1), 1);
+}
+
 template <typename A, A a, typename C>
 struct UpsampleBackwardBatchRuleHelper;
 
@@ -264,6 +300,6 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   UPSAMPLE_BACKWARD(upsample_nearest2d_backward, vec);
   UPSAMPLE_BACKWARD(upsample_nearest3d_backward, vec);
   UPSAMPLE_BACKWARD(upsample_trilinear3d_backward, vec);
-
+  m.impl("one_hot", one_hot_decomposition_hack);
 }
 }}
