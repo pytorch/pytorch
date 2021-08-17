@@ -33,7 +33,7 @@ void prepare_and_call_rpc_op(
     int num_inputs,
     const std::string& rpc_op) {
   // Get inputs from the stack.
-  auto stackIter = stack->end() - num_inputs;
+  auto stackIter = stack.end() - num_inputs;
   auto& dstWorkerIValue = *stackIter++;
   auto& qualifiedNameIValue = *stackIter++;
   IValue emptyTuple(c10::ivalue::Tuple::create({}));
@@ -137,7 +137,7 @@ void prepare_and_call_rpc_op(
         rpcTimeout);
     // Push output to the stack.
     drop(stack, num_inputs);
-    stack->emplace_back(std::move(futureIValuePtr));
+    stack.emplace_back(std::move(futureIValuePtr));
   } else if (rpc_op == "rpc_sync") {
     // Send RPC request.
     auto futureIValuePtr = dist_rpc::rpcTorchscript(
@@ -154,7 +154,7 @@ void prepare_and_call_rpc_op(
       auto res = futureIValuePtr->value();
       // Push output to the stack.
       drop(stack, num_inputs);
-      stack->emplace_back(std::move(res));
+      stack.emplace_back(std::move(res));
     }
   } else if (rpc_op == "rpc_remote") {
     auto rrefPtr = dist_rpc::remoteTorchscript(
@@ -165,7 +165,7 @@ void prepare_and_call_rpc_op(
         rpcTimeout);
     // Push output to the stack.
     drop(stack, num_inputs);
-    stack->emplace_back(
+    stack.emplace_back(
         c10::static_intrusive_pointer_cast<c10::RRefInterface>(rrefPtr));
   } else {
     throw std::runtime_error(

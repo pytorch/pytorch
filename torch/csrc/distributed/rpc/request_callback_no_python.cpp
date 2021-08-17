@@ -582,7 +582,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::runJitOperator(
     std::vector<c10::Stream> streams) const {
   c10::MultiStreamGuard guard(streams);
   try {
-    op.getOperation()(&stack);
+    op.getOperation()(stack);
   } catch (const std::exception&) {
     return asFuture(std::current_exception());
   }
