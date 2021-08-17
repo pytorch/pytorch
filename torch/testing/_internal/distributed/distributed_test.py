@@ -4063,7 +4063,11 @@ class DistributedTest:
                 device_ids=[rank],
                 process_group=process_group,
             )
-            net_with_hook.register_comm_hook(state=state, hook=hook)
+            try:
+                net_with_hook.register_comm_hook(state=state, hook=hook)
+            except TypeError:
+                net_with_hook._register_builtin_comm_hook(hook)
+
             net_without_hook = torch.nn.parallel.DistributedDataParallel(
                 copy.deepcopy(m).to(rank),
                 device_ids=[rank],
@@ -4111,6 +4115,18 @@ class DistributedTest:
                     avg[0, 0],
                     msg=f"Expected hook grad to be close to allreduce {avg[0, 0]}, but got {avg_hook[0, 0]}",
                 )
+
+        @sandcastle_skip_if(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "MPI backend does not support DDP communication hook on CUDA devices",
+        )
+        @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
+        @skip_if_rocm
+        def test_ddp_hook_parity_allreduce_cpp_hook(self):
+            self._test_ddp_hook_parity(
+                state=None,
+                hook=dist.BuiltinCommHookType.FP16_COMPRESS
+            )
 
         @sandcastle_skip_if(
             BACKEND != "nccl" and BACKEND != "gloo",

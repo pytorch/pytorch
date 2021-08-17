@@ -23,15 +23,16 @@ c10::intrusive_ptr<c10::ivalue::Future> FP16CompressCommHook::runHook(
   std::vector<at::Tensor> tensors = {compressed_tensor};
 
   auto allreduce_fut = state_->allreduce(tensors)->getFuture();
-  auto decompress = [](c10::ivalue::Future& allreduce_fut) {
+  auto decompress = [bucket](c10::ivalue::Future& allreduce_fut) {
     auto result = allreduce_fut.value();
     TORCH_INTERNAL_ASSERT(
         result.isTensorList(),
         "ProcessGroup::allreduce should return TensorList");
 
     auto reduce_tensor = result.toTensorVector()[0];
-    reduce_tensor.copy_(reduce_tensor.to(torch::kFloat));
-    return c10::IValue(reduce_tensor);
+    const auto decompressed_tensor = bucket.getBuffer();
+    decompressed_tensor.copy_(reduce_tensor);
+    return c10::IValue(decompressed_tensor);
   };
 
   return allreduce_fut->then(decompress, allreduce_fut->elementType());
