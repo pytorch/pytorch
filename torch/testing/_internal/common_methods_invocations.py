@@ -5820,10 +5820,8 @@ op_db: List[OpInfo] = [
            op=lambda self, shape: self.expand(shape),
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_expand,
-           skips=(
-               # Because expand does not have a function variant.
-               SkipInfo('TestJit', 'test_variant_consistency_jit'),),
            supports_forward_ad=True,
+           assert_jit_shape_analysis=True,
            supports_out=False),
     OpInfo('expand_as',
            op=lambda self, other: self.expand_as(other),
