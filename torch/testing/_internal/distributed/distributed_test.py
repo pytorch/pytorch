@@ -4063,11 +4063,7 @@ class DistributedTest:
                 device_ids=[rank],
                 process_group=process_group,
             )
-            try:
-                net_with_hook.register_comm_hook(state=state, hook=hook)
-            except TypeError:
-                net_with_hook._register_builtin_comm_hook(hook)
-
+            net_with_hook.register_comm_hook(state=state, hook=hook)
             net_without_hook = torch.nn.parallel.DistributedDataParallel(
                 copy.deepcopy(m).to(rank),
                 device_ids=[rank],
@@ -4115,18 +4111,6 @@ class DistributedTest:
                     avg[0, 0],
                     msg=f"Expected hook grad to be close to allreduce {avg[0, 0]}, but got {avg_hook[0, 0]}",
                 )
-
-        @sandcastle_skip_if(
-            BACKEND != "nccl" and BACKEND != "gloo",
-            "MPI backend does not support DDP communication hook on CUDA devices",
-        )
-        @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
-        @skip_if_rocm
-        def test_ddp_hook_parity_allreduce_cpp_hook(self):
-            self._test_ddp_hook_parity(
-                state=None,
-                hook=dist.BuiltinCommHookType.FP16_COMPRESS
-            )
 
         @sandcastle_skip_if(
             BACKEND != "nccl" and BACKEND != "gloo",
@@ -4188,6 +4172,17 @@ class DistributedTest:
             self._test_ddp_hook_parity(
                 state=state, hook=post_localSGD.post_localSGD_hook
             )
+
+            # When `subgroup` is None, it is equivalent to the subgroup on the each node.
+            # For this single-node test environment, the intra-node process group is equivalent to
+            # the global process group.
+            if self.world_size == dist.get_world_size():
+                state = post_localSGD.PostLocalSGDState(
+                    process_group=None, subgroup=None, start_localSGD_iter=10
+                )
+                self._test_ddp_hook_parity(
+                    state=state, hook=post_localSGD.post_localSGD_hook
+                )
 
             # Since we start local SGD later than the total number of 100 iterations,
             # no local SGD actually is executed, and we don't even need to provide a subgroup for this case.
