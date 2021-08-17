@@ -269,6 +269,18 @@ void NodeToONNX(
     for (const auto i : c10::irange(num_old_outputs)) {
       auto old = old_outputs[i];
       if (outputs[i]) {
+        if (old->hasDebugName()) {
+          auto old_name = outputs[i]->debugName();
+          auto new_name = old->debugNameBase();
+          auto debug_names = new_block->owningGraph()->debugNames();
+          auto exist_name = debug_names.find(new_name);
+          outputs[i]->setDebugName(new_name);
+          if (exist_name != debug_names.end()) {
+            // setDebugName changes name of existing value with same name.
+            // Set again to revert the changes, but update name for new value with suffix.
+            exist_name->second->setDebugName(new_name);
+          }
+        }
         // Allow symbolic() to skip specifying the type of the return node.
         // Unfortunately, they are on the hook for all internal nodes
         // (though in practice, the types are not computed.)
@@ -303,9 +315,6 @@ void NodeToONNX(
           outputs[i]->node()->setSourceRange(node->sourceRange());
           outputs[i]->node()->setScope(node->scope());
           env[old] = outputs[i];
-        }
-        if (old->hasDebugName()) {
-          outputs[i]->setDebugName(old->debugNameBase());
         }
       } else {
         // Null output means that the ONNX op doesn't have outputs corresponding
