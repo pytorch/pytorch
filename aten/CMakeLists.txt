@@ -85,15 +85,9 @@ if(USE_ROCM)
 elseif(USE_CUDA)
   set(AT_CUDA_ENABLED 1)
   add_subdirectory(src/THC)
-  add_subdirectory(src/THCUNN)
 else()
   message("disabling CUDA because USE_CUDA is set false")
   set(AT_CUDA_ENABLED 0)
-endif()
-if(NOT USE_CUDA)
-  # we still parse THCUNN even if cuda is disabled to make sure to
-  # install it
-  install(FILES src/THCUNN/generic/THCUNN.h DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/THCUNN/generic")
 endif()
 
 if(NOT USE_NNPACK)
