@@ -86,7 +86,7 @@ lazy.)
 
 
 ```bash
-conda -y uninstall pytorch
+conda uninstall pytorch -y
 yes | pip uninstall torch
 ```
 
@@ -843,6 +843,8 @@ build should be substantially and noticeably faster than the first build. If thi
 If you are editing a single file and rebuilding in a tight loop, the time spent
 linking will dominate. The system linker available in most Linux distributions
 (GNU `ld`) is quite slow. Use a faster linker, like [lld](https://lld.llvm.org/).
+
+People on Mac, follow [this guide](https://stackoverflow.com/questions/42730345/how-to-install-llvm-for-mac) instead.
 
 The easiest way to use `lld` this is download the
 [latest LLVM binaries](http://releases.llvm.org/download.html#8.0.0) and run:
