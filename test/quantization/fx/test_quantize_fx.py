@@ -2807,6 +2807,28 @@ class TestQuantizeFx(QuantizationTestCase):
         m = convert_fx(m, is_reference=True)
         m(torch.rand(2, 1, 5, 5))
 
+    def test_preserve_tuple(self):
+        """ Test tuple input type is preserved
+        """
+        from typing import List
+
+        class LSTM(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lstm = nn.LSTM(50, 50, 1)
+
+            def forward(self, inputs: torch.Tensor, state: List[torch.Tensor]):
+                h = state[0]
+                c = state[1]
+                return self.lstm(inputs, (h, c))
+
+        m = LSTM().eval()
+        m = prepare_fx(m, {"": default_qconfig})
+        # make sure the arg[1] of lstm module is a tuple
+        for n in m.graph.nodes:
+            if n.target == "lstm":
+                self.assertEqual(type(n.args[1]), tuple)
+
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
     """Unit tests for individual ops
