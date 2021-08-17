@@ -367,11 +367,12 @@ jobs:
           cd "${GITHUB_WORKSPACE}"
 
           python3 -m tools.linter.clang_tidy \
-            --paths torch/csrc/fx \
-            --paths torch/csrc/utils \
-            --paths torch/csrc/generic \
-            --paths torch/csrc/deploy \
-            --paths torch/csrc/tensor \
+            --paths \
+              torch/csrc/fx \
+              torch/csrc/utils \
+              torch/csrc/generic \
+              torch/csrc/deploy \
+              torch/csrc/tensor \
             --clang-tidy-exe "$(which clang-tidy)" \
             --disable-progress-bar 2>&1 | tee "${GITHUB_WORKSPACE}"/clang-tidy-output.txt
 
