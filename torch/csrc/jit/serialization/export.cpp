@@ -641,7 +641,6 @@ void GraphEncoder::EncodeBlock(
       }
     }
   }
-
   for (auto output : block->outputs()) {
     onnx::ValueInfoProto* v = graph_proto->add_output();
     EncodeValueInfo(graph_proto, v, output, dynamic_axes);

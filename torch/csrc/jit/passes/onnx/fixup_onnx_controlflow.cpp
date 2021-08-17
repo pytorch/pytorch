@@ -190,7 +190,7 @@ std::vector<Value*> ConvertSequenceDependencies(Node* node, int opset_version) {
 // the block, linking with the value outside as workaround.
 void FixupONNXSubblockOutputs(Node* n) {
   for (auto* child_block : n->blocks()) {
-    insertIdentityForInputUsedAsOutput(child_block);
+    InsertIdentityForInputUsedAsOutput(child_block);
   }
 }
 
@@ -569,7 +569,6 @@ std::vector<Value*> FixupONNXIfNode(Node* node, int opset_version) {
   ONNXMergeIfBlockOutputShapes(node);
 
   GRAPH_DUMP("Graph after fixing controlflow: ", node->owningGraph());
-
   return node->outputs().vec();
 }
 
