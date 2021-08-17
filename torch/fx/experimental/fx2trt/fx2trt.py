@@ -197,7 +197,9 @@ def create_inputs_from_specs(input_specs):
         elif not has_batch_dim:
             shape = (1,) + tuple(shape)
 
-        inputs.append(torch.empty(shape, dtype=dtype, device=device))
+        inputs.append(
+            torch.randn(shape).to(dtype=dtype, device=device)
+        )
 
     return inputs
 
