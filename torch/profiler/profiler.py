@@ -4,7 +4,7 @@ import os
 import tempfile
 from enum import Enum
 from functools import partial
-from typing import Any, Callable, Iterable, Optional
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 from warnings import warn
 
 import torch
@@ -401,24 +401,35 @@ class profile(profiler):
         self.current_action = self.schedule(self.step_num)
         self.step_rec_fn: Optional[prof.record_function] = None
 
-        self.action_map = {
+        self.action_map:Dict[Tuple[ProfilerAction, Optional[ProfilerAction]], List[Any]] = {
             # key is (prev_action, current_action), value is action list corresponding to the state pair.
             (ProfilerAction.NONE, ProfilerAction.NONE): [],
             (ProfilerAction.NONE, ProfilerAction.WARMUP): [self.prepare_trace],
             (ProfilerAction.NONE, ProfilerAction.RECORD): [self.prepare_trace, self.start_trace],
             (ProfilerAction.NONE, ProfilerAction.RECORD_AND_SAVE): [self.prepare_trace, self.start_trace],
-            (ProfilerAction.WARMUP, ProfilerAction.NONE): [partial(warn, "Incorrect schedule: WARMUP followed by NONE"), self.start_trace, self.stop_trace],
+            (ProfilerAction.WARMUP, ProfilerAction.NONE): [
+                partial(warn, "Incorrect schedule: WARMUP followed by NONE"),
+                self.start_trace,
+                self.stop_trace],
             (ProfilerAction.WARMUP, ProfilerAction.WARMUP): [],
             (ProfilerAction.WARMUP, ProfilerAction.RECORD): [self.start_trace],
             (ProfilerAction.WARMUP, ProfilerAction.RECORD_AND_SAVE): [self.start_trace],
-            (ProfilerAction.RECORD, ProfilerAction.NONE): [partial(warn, "Incorrect schedule: RECORD followed by NONE"), self.stop_trace],
-            (ProfilerAction.RECORD, ProfilerAction.WARMUP): [partial(warn, "Incorrect schedule: RECORD followed by WARMUP"), self.stop_trace],
+            (ProfilerAction.RECORD, ProfilerAction.NONE): [
+                partial(warn,"Incorrect schedule: RECORD followed by NONE"),
+                self.stop_trace],
+            (ProfilerAction.RECORD, ProfilerAction.WARMUP): [
+                partial(warn, "Incorrect schedule: RECORD followed by WARMUP"),
+                self.stop_trace],
             (ProfilerAction.RECORD, ProfilerAction.RECORD): [],
             (ProfilerAction.RECORD, ProfilerAction.RECORD_AND_SAVE): [],
             (ProfilerAction.RECORD_AND_SAVE, ProfilerAction.NONE): [self.stop_trace, self._trace_ready],
             (ProfilerAction.RECORD_AND_SAVE, ProfilerAction.WARMUP): [self.stop_trace, self._trace_ready, self.prepare_trace],
             (ProfilerAction.RECORD_AND_SAVE, ProfilerAction.RECORD): [],
-            (ProfilerAction.RECORD_AND_SAVE, ProfilerAction.RECORD_AND_SAVE): [self.stop_trace, self._trace_ready, self.prepare_trace, self.start_trace],
+            (ProfilerAction.RECORD_AND_SAVE, ProfilerAction.RECORD_AND_SAVE): [
+                self.stop_trace,
+                self._trace_ready,
+                self.prepare_trace,
+                self.start_trace],
             # used for exit action
             (ProfilerAction.WARMUP, None): [self.start_trace, self.stop_trace],
             (ProfilerAction.RECORD, None): [self.stop_trace, self._trace_ready],
