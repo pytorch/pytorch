@@ -55,7 +55,7 @@ c10::List<T> make_result_list(const TypePtr& elemType) {
 template <>
 c10::impl::GenericList make_result_list<IValue>(const TypePtr& elemType);
 
-inline void noop(Stack* n) {}
+inline void noop(Stack& n) {}
 
 // As described in https://docs.python.org/3/library/functions.html#round
 // When a number is exactly halfway between two integers, python builtin round
@@ -181,12 +181,12 @@ void setItem(const c10::List<T>& list, int64_t idx, T&& value) {
   list.set(normalized_idx, std::forward<T>(value));
 }
 
-void listAppend(Stack* stack);
+void listAppend(Stack& stack);
 
-void listReverse(Stack* stack);
+void listReverse(Stack& stack);
 
 template <typename T>
-void minList(Stack* stack) {
+void minList(Stack& stack) {
   c10::List<T> a = pop(stack).to<c10::List<T>>();
   c10::List<T> b = pop(stack).to<c10::List<T>>();
 
@@ -204,7 +204,7 @@ void minList(Stack* stack) {
 }
 
 template <typename T>
-void maxList(Stack* stack) {
+void maxList(Stack& stack) {
   c10::List<T> a = pop(stack).to<c10::List<T>>();
   c10::List<T> b = pop(stack).to<c10::List<T>>();
 
@@ -221,18 +221,18 @@ void maxList(Stack* stack) {
   push(stack, b.size() > a.size() ? b : a);
 }
 
-void listPopImpl(Stack* stack, const char* empty_message);
+void listPopImpl(Stack& stack, const char* empty_message);
 
-void listPop(Stack* stack);
+void listPop(Stack& stack);
 
-void listClear(Stack* stack);
+void listClear(Stack& stack);
 
-void listDelete(Stack* stack);
+void listDelete(Stack& stack);
 
-void listInsert(Stack* stack);
+void listInsert(Stack& stack);
 
 template <typename T>
-void listRemove(Stack* stack) {
+void listRemove(Stack& stack) {
   T elem = pop(stack).to<T>();
   c10::List<T> list = pop(stack).to<c10::List<T>>();
 
@@ -246,7 +246,7 @@ void listRemove(Stack* stack) {
 }
 
 template <typename T>
-void listMin(Stack* stack) {
+void listMin(Stack& stack) {
   c10::List<T> list = pop(stack).to<c10::List<T>>();
   size_t list_size = list.size();
   if (list_size == 0) {
@@ -259,11 +259,11 @@ void listMin(Stack* stack) {
     min_elem = elem < min_elem ? elem : min_elem;
   }
 
-  stack->push_back(min_elem);
+  stack.push_back(min_elem);
 }
 
 template <typename T>
-void listMax(Stack* stack) {
+void listMax(Stack& stack) {
   c10::List<T> list = pop(stack).to<c10::List<T>>();
   size_t list_size = list.size();
   if (list_size == 0) {
@@ -276,14 +276,14 @@ void listMax(Stack* stack) {
     max_elem = elem > max_elem ? elem : max_elem;
   }
 
-  stack->push_back(max_elem);
+  stack.push_back(max_elem);
 }
 
 template <>
-void listRemove<at::Tensor>(Stack* stack);
+void listRemove<at::Tensor>(Stack& stack);
 
 template <typename T>
-void listIndex(Stack* stack) {
+void listIndex(Stack& stack) {
   T elem = pop(stack).to<T>();
   c10::List<T> list = pop(stack).to<c10::List<T>>();
 
@@ -297,10 +297,10 @@ void listIndex(Stack* stack) {
 }
 
 template <>
-void listIndex<at::Tensor>(Stack* stack);
+void listIndex<at::Tensor>(Stack& stack);
 
 template <typename T>
-void listCount(Stack* stack) {
+void listCount(Stack& stack) {
   T elem = pop(stack).to<T>();
   c10::List<T> list = pop(stack).to<c10::List<T>>();
 
@@ -309,25 +309,25 @@ void listCount(Stack* stack) {
 }
 
 template <>
-void listCount<at::Tensor>(Stack* stack);
+void listCount<at::Tensor>(Stack& stack);
 
-void listExtend(Stack* stack);
+void listExtend(Stack& stack);
 
-void listCopy(Stack* stack);
+void listCopy(Stack& stack);
 
-void listSelect(Stack* stack);
+void listSelect(Stack& stack);
 
-void listLen(Stack* stack);
+void listLen(Stack& stack);
 
 template <typename T>
-void listEq(Stack* stack) {
+void listEq(Stack& stack) {
   c10::List<T> b = pop(stack).to<c10::List<T>>();
   c10::List<T> a = pop(stack).to<c10::List<T>>();
   push(stack, a == b);
 }
 
 template <typename T>
-void listNe(Stack* stack) {
+void listNe(Stack& stack) {
   c10::List<T> b = pop(stack).to<c10::List<T>>();
   c10::List<T> a = pop(stack).to<c10::List<T>>();
   push(stack, a != b);
@@ -357,16 +357,16 @@ inline bool tensor_list_equal(
 
 // Specialization for at::Tensor, since it doesn't define operator==
 template <>
-void listEq<at::Tensor>(Stack* stack);
+void listEq<at::Tensor>(Stack& stack);
 
 // Specialization for at::Tensor, since it doesn't define operator==
 template <>
-void listNe<at::Tensor>(Stack* stack);
+void listNe<at::Tensor>(Stack& stack);
 
-void listList(Stack* stack);
+void listList(Stack& stack);
 
 template <typename T>
-void listContains(Stack* stack) {
+void listContains(Stack& stack) {
   auto key = pop(stack).to<T>();
   auto list = pop(stack).to<c10::List<T>>();
   // NOLINTNEXTLINE(performance-implicit-conversion-in-loop)
@@ -379,20 +379,20 @@ void listContains(Stack* stack) {
   push(stack, false);
 }
 
-void listAdd(Stack* stack);
+void listAdd(Stack& stack);
 
-void listInplaceAdd(Stack* stack);
+void listInplaceAdd(Stack& stack);
 
-void listMulIntLeftInPlace(Stack* stack);
+void listMulIntLeftInPlace(Stack& stack);
 
-void listMulIntLeft(Stack* stack);
+void listMulIntLeft(Stack& stack);
 
-void listMulIntRight(Stack* stack);
+void listMulIntRight(Stack& stack);
 
-void listSlice(Stack* stack);
+void listSlice(Stack& stack);
 
 template <typename T>
-void listSort(Stack* stack) {
+void listSort(Stack& stack) {
   bool reverse = pop(stack).toBool();
   c10::List<T> list = pop(stack).to<c10::List<T>>();
   std::sort(list.begin(), list.end(), [reverse](const T& a, const T& b) {
@@ -408,10 +408,10 @@ void listSort(Stack* stack) {
 
 // Specialization for at::Tensor
 template <>
-void listSort<at::Tensor>(Stack* stack);
+void listSort<at::Tensor>(Stack& stack);
 
 template <typename T>
-void listCopyAndSort(Stack* stack) {
+void listCopyAndSort(Stack& stack) {
   c10::List<T> list = pop(stack).to<c10::List<T>>();
   auto list_copied = list.copy();
   std::sort(list_copied.begin(), list_copied.end(), [](const T& a, const T& b) {
@@ -426,16 +426,16 @@ void listCopyAndSort(Stack* stack) {
 
 // Specialization for at::Tensor
 template <>
-void listCopyAndSort<at::Tensor>(Stack* stack);
+void listCopyAndSort<at::Tensor>(Stack& stack);
 
-void listSetItem(Stack* stack);
+void listSetItem(Stack& stack);
 
 #define DEFINE_GENERIC_BINARY_OP(                                             \
     aten_op, op, int_float_result, complex_result)                            \
   OperatorGenerator(                                                          \
       TORCH_SELECTIVE_SCHEMA(#aten_op                                         \
                              ".int_int(int a, int b) -> " #int_float_result), \
-      [](Stack* stack) {                                                      \
+      [](Stack& stack) {                                                      \
         int64_t a, b;                                                         \
         pop(stack, a, b);                                                     \
         push(stack, op);                                                      \
@@ -445,7 +445,7 @@ void listSetItem(Stack* stack);
           TORCH_SELECTIVE_SCHEMA(                                             \
               #aten_op                                                        \
               ".float_float(float a, float b) -> " #int_float_result),        \
-          [](Stack* stack) {                                                  \
+          [](Stack& stack) {                                                  \
             double a, b;                                                      \
             pop(stack, a, b);                                                 \
             push(stack, op);                                                  \
@@ -455,7 +455,7 @@ void listSetItem(Stack* stack);
           TORCH_SELECTIVE_SCHEMA(                                             \
               #aten_op                                                        \
               ".complex_complex(complex a, complex b) -> " #complex_result),  \
-          [](Stack* stack) {                                                  \
+          [](Stack& stack) {                                                  \
             c10::complex<double> a, b;                                        \
             pop(stack, a, b);                                                 \
             push(stack, op);                                                  \
@@ -466,7 +466,7 @@ void listSetItem(Stack* stack);
 #define DEFINE_GENERIC_OP(aten_op, int_op, float_op, int_result, float_result) \
   OperatorGenerator(                                                           \
       TORCH_SELECTIVE_SCHEMA(#aten_op ".int(int a, int b) -> " #int_result),   \
-      [](Stack* stack) {                                                       \
+      [](Stack& stack) {                                                       \
         int64_t a, b;                                                          \
         pop(stack, a, b);                                                      \
         push(stack, int_op);                                                   \
@@ -475,7 +475,7 @@ void listSetItem(Stack* stack);
       OperatorGenerator(                                                       \
           TORCH_SELECTIVE_SCHEMA(                                              \
               #aten_op ".float(float a, float b) -> " #float_result),          \
-          [](Stack* stack) {                                                   \
+          [](Stack& stack) {                                                   \
             double a, b;                                                       \
             pop(stack, a, b);                                                  \
             push(stack, float_op);                                             \
@@ -486,7 +486,7 @@ void listSetItem(Stack* stack);
   OperatorGenerator(                                                        \
       TORCH_SELECTIVE_SCHEMA(#aten_op                                       \
                              ".int_float(int a, float b) -> " #result),     \
-      [](Stack* stack) {                                                    \
+      [](Stack& stack) {                                                    \
         int64_t a;                                                          \
         double b;                                                           \
         pop(stack, a, b);                                                   \
@@ -496,7 +496,7 @@ void listSetItem(Stack* stack);
       OperatorGenerator(                                                    \
           TORCH_SELECTIVE_SCHEMA(#aten_op                                   \
                                  ".float_int(float a, int b) -> " #result), \
-          [](Stack* stack) {                                                \
+          [](Stack& stack) {                                                \
             double a;                                                       \
             int64_t b;                                                      \
             pop(stack, a, b);                                               \
@@ -507,7 +507,7 @@ void listSetItem(Stack* stack);
 #define DEFINE_INT_OP(aten_op, op)                                  \
   OperatorGenerator(                                                \
       TORCH_SELECTIVE_SCHEMA(#aten_op ".int(int a, int b) -> int"), \
-      [](Stack* stack) {                                            \
+      [](Stack& stack) {                                            \
         int64_t a, b;                                               \
         pop(stack, a, b);                                           \
         push(stack, op); /* NOLINT(hicpp-signed-bitwise) */         \
@@ -517,7 +517,7 @@ void listSetItem(Stack* stack);
 #define DEFINE_STR_CMP_OP(aten_op, op)                               \
   OperatorGenerator(                                                 \
       TORCH_SELECTIVE_SCHEMA(#aten_op ".str(str a, str b) -> bool"), \
-      [](Stack* stack) {                                             \
+      [](Stack& stack) {                                             \
         auto b = pop(stack).toStringRef();                           \
         auto a = pop(stack).toStringRef();                           \
         push(stack, op);                                             \
@@ -533,7 +533,7 @@ void listSetItem(Stack* stack);
   OperatorGenerator(                                              \
       TORCH_SELECTIVE_SCHEMA(#aten_op string_val                  \
                              "(Scalar a, Scalar b) -> " #result), \
-      [](Stack* stack) {                                          \
+      [](Stack& stack) {                                          \
         IValue x, y;                                              \
         pop(stack, x, y);                                         \
         if (x.isDouble()) {                                       \
@@ -588,7 +588,7 @@ void listSetItem(Stack* stack);
 #define DEFINE_UNARY_INT_OP(aten_op, op, result)                  \
   OperatorGenerator(                                              \
       TORCH_SELECTIVE_SCHEMA(#aten_op ".int(int a) -> " #result), \
-      [](Stack* stack) {                                          \
+      [](Stack& stack) {                                          \
         int64_t a;                                                \
         pop(stack, a);                                            \
         push(stack, op);                                          \
@@ -598,7 +598,7 @@ void listSetItem(Stack* stack);
 #define DEFINE_UNARY_FLOAT_OP(aten_op, op, result)                    \
   OperatorGenerator(                                                  \
       TORCH_SELECTIVE_SCHEMA(#aten_op ".float(float a) -> " #result), \
-      [](Stack* stack) {                                              \
+      [](Stack& stack) {                                              \
         double a;                                                     \
         pop(stack, a);                                                \
         push(stack, op);                                              \
@@ -610,7 +610,7 @@ void listSetItem(Stack* stack);
       DEFINE_UNARY_FLOAT_OP(aten_op, op, float_result),                   \
       OperatorGenerator(                                                  \
           TORCH_SELECTIVE_SCHEMA(#aten_op ".Scalar(Scalar a) -> Scalar"), \
-          [](Stack* stack) {                                              \
+          [](Stack& stack) {                                              \
             IValue x;                                                     \
             pop(stack, x);                                                \
             if (x.isDouble()) {                                           \
@@ -625,7 +625,7 @@ void listSetItem(Stack* stack);
 #define DEFINE_BOOL_OP(aten_op, op)                                     \
   OperatorGenerator(                                                    \
       TORCH_SELECTIVE_SCHEMA(#aten_op ".bool(bool a, bool b) -> bool"), \
-      [](Stack* stack) {                                                \
+      [](Stack& stack) {                                                \
         bool a, b;                                                      \
         pop(stack, a, b);                                               \
         push(stack, op);                                                \
@@ -634,7 +634,7 @@ void listSetItem(Stack* stack);
 #define DEFINE_STRING_OP(op_name, string_op, result)                    \
   OperatorGenerator(                                                    \
       TORCH_SELECTIVE_SCHEMA(#op_name ".str(str a, str b) ->" #result), \
-      [](Stack* stack) {                                                \
+      [](Stack& stack) {                                                \
         auto b = pop(stack).toStringRef();                              \
         auto a = pop(stack).toStringRef();                              \
         push(stack, string_op);                                         \
@@ -648,7 +648,7 @@ void listSetItem(Stack* stack);
 #define DEFINE_UNARY_COMPLEX_OP(aten_op, op, result)                      \
   OperatorGenerator(                                                      \
       TORCH_SELECTIVE_SCHEMA(#aten_op ".complex(complex a) -> " #result), \
-      [](Stack* stack) {                                                  \
+      [](Stack& stack) {                                                  \
         c10::complex<double> a;                                           \
         pop(stack, a);                                                    \
         push(stack, op);                                                  \
@@ -672,7 +672,7 @@ void listSetItem(Stack* stack);
       DEFINE_UNARY_COMPLEX_OP(aten_op, op, complex_result),               \
       OperatorGenerator(                                                  \
           TORCH_SELECTIVE_SCHEMA(#aten_op ".Scalar(Scalar a) -> Scalar"), \
-          [](Stack* stack) {                                              \
+          [](Stack& stack) {                                              \
             IValue x;                                                     \
             pop(stack, x);                                                \
             if (x.isDouble()) {                                           \
@@ -702,7 +702,7 @@ void listSetItem(Stack* stack);
     complex_result)                                                           \
   OperatorGenerator(                                                          \
       TORCH_SELECTIVE_SCHEMA(#aten_op ".int(int a, int b) -> " #int_result),  \
-      [](Stack* stack) {                                                      \
+      [](Stack& stack) {                                                      \
         int64_t a, b;                                                         \
         pop(stack, a, b);                                                     \
         push(stack, int_op);                                                  \
@@ -711,7 +711,7 @@ void listSetItem(Stack* stack);
       OperatorGenerator(                                                      \
           TORCH_SELECTIVE_SCHEMA(                                             \
               #aten_op ".complex(complex a, complex b) -> " #complex_result), \
-          [](Stack* stack) {                                                  \
+          [](Stack& stack) {                                                  \
             c10::complex<double> a, b;                                        \
             pop(stack, a, b);                                                 \
             push(stack, complex_op);                                          \
@@ -720,7 +720,7 @@ void listSetItem(Stack* stack);
       OperatorGenerator(                                                      \
           TORCH_SELECTIVE_SCHEMA(                                             \
               #aten_op ".float(float a, float b) -> " #float_result),         \
-          [](Stack* stack) {                                                  \
+          [](Stack& stack) {                                                  \
             double a, b;                                                      \
             pop(stack, a, b);                                                 \
             push(stack, float_op);                                            \
@@ -731,7 +731,7 @@ void listSetItem(Stack* stack);
   OperatorGenerator(                                                        \
       TORCH_SELECTIVE_SCHEMA(#aten_op                                       \
                              ".int_complex(int a, complex b) -> " #result), \
-      [](Stack* stack) {                                                    \
+      [](Stack& stack) {                                                    \
         int64_t a;                                                          \
         c10::complex<double> b;                                             \
         pop(stack, a, b);                                                   \
@@ -741,7 +741,7 @@ void listSetItem(Stack* stack);
       OperatorGenerator(                                                    \
           TORCH_SELECTIVE_SCHEMA(                                           \
               #aten_op ".complex_int(complex a, int b) -> " #result),       \
-          [](Stack* stack) {                                                \
+          [](Stack& stack) {                                                \
             c10::complex<double> a;                                         \
             int64_t b;                                                      \
             pop(stack, a, b);                                               \
@@ -753,7 +753,7 @@ void listSetItem(Stack* stack);
   OperatorGenerator(                                                      \
       TORCH_SELECTIVE_SCHEMA(                                             \
           #aten_op ".float_complex(float a, complex b) -> " #result),     \
-      [](Stack* stack) {                                                  \
+      [](Stack& stack) {                                                  \
         double a;                                                         \
         c10::complex<double> b;                                           \
         pop(stack, a, b);                                                 \
@@ -763,7 +763,7 @@ void listSetItem(Stack* stack);
       OperatorGenerator(                                                  \
           TORCH_SELECTIVE_SCHEMA(                                         \
               #aten_op ".complex_float(complex a, float b) -> " #result), \
-          [](Stack* stack) {                                              \
+          [](Stack& stack) {                                              \
             c10::complex<double> a;                                       \
             double b;                                                     \
             pop(stack, a, b);                                             \
@@ -776,7 +776,7 @@ void listSetItem(Stack* stack);
   OperatorGenerator(                                                  \
       TORCH_SELECTIVE_SCHEMA(#aten_op string_val                      \
                              "(Scalar a, Scalar b) -> " #result),     \
-      [](Stack* stack) {                                              \
+      [](Stack& stack) {                                              \
         IValue x, y;                                                  \
         pop(stack, x, y);                                             \
         if (x.isComplexDouble()) {                                    \
@@ -823,7 +823,7 @@ void listSetItem(Stack* stack);
     aten_op, int_op, float_op, complex_op, result)                         \
   OperatorGenerator(                                                       \
       TORCH_SELECTIVE_SCHEMA(#aten_op "(Scalar a, Scalar b) -> " #result), \
-      [](Stack* stack) {                                                   \
+      [](Stack& stack) {                                                   \
         IValue x, y;                                                       \
         pop(stack, x, y);                                                  \
         if (x.isComplexDouble()) {                                         \

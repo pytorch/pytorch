@@ -1397,7 +1397,7 @@ void ProcessedNode::run() {
     }
 
     DCHECK(op_);
-    op_->operator()(&stack);
+    op_->operator()(stack);
 
     DCHECK_EQ(stack.size(), node_->outputs().size());
     for (const auto i : c10::irange(node_->outputs().size())) {

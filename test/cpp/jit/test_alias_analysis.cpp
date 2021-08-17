@@ -484,7 +484,7 @@ TEST(AliasAnalysisTest, SafeToChangeAliasingRelationship) {
 TEST(WriteTrackingTest, Basic) {
   RegisterOperators reg({Operator(
       "prim::creates_alias(Tensor(a) x) -> Tensor(a)",
-      [](Stack* s) {},
+      [](Stack&) {},
       aliasAnalysisFromSchema())});
   const auto creates_alias = Symbol::fromQualString("prim::creates_alias");
   auto graph = std::make_shared<Graph>();
@@ -949,11 +949,11 @@ TEST(WildcardsTest, Basic) {
   RegisterOperators reg(
       {Operator(
            "prim::returns_wildcard(Tensor a) -> Tensor(*)",
-           [](Stack* stack) {},
+           [](Stack&) {},
            aliasAnalysisFromSchema()),
        Operator(
            "prim::writes(Tensor(z!) a) -> Tensor(a)",
-           [](Stack* stack) {},
+           [](Stack&) {},
            aliasAnalysisFromSchema())});
   const auto returns_wildcard =
       Symbol::fromQualString("prim::returns_wildcard");

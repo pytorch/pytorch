@@ -231,7 +231,7 @@ void InplaceMKLDNNSubgraph(std::shared_ptr<Graph> graph) {
 Operation createUnaryOp(
     std::function<void(at::Tensor output, at::Tensor input)> aten_op,
     bool inplace = false) {
-  return [aten_op, inplace](Stack* stack) {
+  return [aten_op, inplace](Stack& stack) {
     auto a = pop(stack).toTensor();
     c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
     // we cast `a` to an `ideep::tensor`, so we can get at its descriptor
@@ -272,7 +272,7 @@ Operation createUnaryOp(
 }
 
 Operation BroadOp(const Node* node) {
-  return [](Stack* stack) {
+  return [](Stack& stack) {
     auto b = pop(stack).toTensor();
     auto a = pop(stack).toTensor();
     auto b_size = b.sizes();
@@ -439,7 +439,7 @@ const RegisterOperators BroadOpReg({
 
 Operation ConstantMKLDNNTensorOp(const Node* node) {
   const auto& t = node->t(attr::value);
-  return [t](Stack* stack) {
+  return [t](Stack& stack) {
     push(stack, t);
     return 0;
   };
@@ -467,7 +467,7 @@ jit::RegisterOperators reg_fut_ops({
         // XXX: this follows the schema convention of conv2d/conv3d, not
         // aten::mkldnn_convolution, which is different for some reason!
         "prim::mkldnn_convolution(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups) -> Tensor",
-        [](jit::Stack* stack) {
+        [](jit::Stack& stack) {
           int64_t groups = pop(stack).toInt();
           auto dilation = pop(stack).toIntVector();
           auto padding = pop(stack).toIntVector();
@@ -516,7 +516,7 @@ jit::RegisterOperators reg_fut_ops({
     // in default bindings
     jit::Operator(
         "prim::MKLDNNScalarMul(Tensor self, Scalar other) -> Tensor",
-        [](jit::Stack* stack) {
+        [](jit::Stack& stack) {
           c10::impl::ExcludeDispatchKeyGuard edkg(
               c10::autograd_dispatch_keyset);
           float other = pop(stack).toScalar().toFloat();
@@ -534,7 +534,7 @@ jit::RegisterOperators reg_fut_ops({
         aliasAnalysisFromSchema()),
     jit::Operator(
         "prim::MKLDNNScalarMul_(Tensor(a!) self, Scalar other) -> Tensor(a!)",
-        [](jit::Stack* stack) {
+        [](jit::Stack& stack) {
           c10::impl::ExcludeDispatchKeyGuard edkg(
               c10::autograd_dispatch_keyset);
           float other = pop(stack).toScalar().toFloat();

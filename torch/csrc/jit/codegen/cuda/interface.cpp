@@ -182,8 +182,8 @@ RegisterOperators reg_fusion({
     Operator(
         prim::CudaFusionGroup,
         [](const Node* node) -> Operation {
-          return [node](Stack* stack) {
-            fuser::cuda::runFusionGroup(node, *stack);
+          return [node](Stack& stack) {
+            fuser::cuda::runFusionGroup(node, stack);
           };
         },
         aliasAnalysisSpecialCase()),
@@ -196,7 +196,7 @@ RegisterOperators reg_guard({
         // if we would ever return refined tensor, which would change aliasing
         // analysis, we should update aliasdb pass.
         [](const Node* node) -> Operation {
-          return [node](Stack* stack) {
+          return [node](Stack& stack) {
             // TODO: check latency here!!!!
             std::vector<TypePtr> types = node->tys(attr::types);
             const auto num_inputs = types.size();

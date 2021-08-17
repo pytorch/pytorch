@@ -9,7 +9,7 @@ namespace jit {
 
 using c10::IValue;
 using Stack = std::vector<IValue>;
-using Operation = std::function<void(Stack*)>;
+using Operation = std::function<void(Stack&)>;
 
 // An operation with N inputs and M outputs pops the last N inputs off
 // the stack and pushes its M inputs onto the stack
