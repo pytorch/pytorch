@@ -66,16 +66,13 @@ from torch.testing._internal.common_utils import (
     sandcastle_skip_if,
 )
 
+from torch.distributed.optim import functional_optim_map
+
 if not IS_WINDOWS:
     import torch.distributed.optim.post_localSGD_optimizer as post_localSGD_optimizer
     from torch.distributed.optim.functional_sgd import _FunctionalSGD
     from torch.distributed.optim.functional_adam import _FunctionalAdam
     from torch.distributed.optim.functional_adamw import _FunctionalAdamW
-    _SUPPORTED_OPTIM_MAPPING = {
-        _FunctionalSGD: torch.optim.SGD,
-        _FunctionalAdam: torch.optim.Adam,
-        _FunctionalAdamW: torch.optim.AdamW,
-    }
 
 from torch.utils.data.distributed import DistributedSampler
 
@@ -3949,7 +3946,8 @@ class DistributedTest:
                     if static_graph:
                         ddp_model_with_no_hook._set_static_graph()
 
-                    optimizer_no_hook = _SUPPORTED_OPTIM_MAPPING.get(functional_optim_cls)(
+                    mapping = {v: k for k, v in functional_optim_map.items()}
+                    optimizer_no_hook = mapping.get(functional_optim_cls)(
                         ddp_model_with_no_hook.parameters(),
                         *functional_optim_args,
                         **functional_optim_kwargs,

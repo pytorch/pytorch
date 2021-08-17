@@ -49,16 +49,12 @@ from torch.testing._internal.common_utils import (
     sandcastle_skip_if,
 )
 from torch.utils.checkpoint import checkpoint
+from torch.distributed.optim import functional_optim_map
 
 if not IS_WINDOWS:
     from torch.distributed.optim.functional_sgd import _FunctionalSGD
     from torch.distributed.optim.functional_adam import _FunctionalAdam
     from torch.distributed.optim.functional_adamw import _FunctionalAdamW
-    _SUPPORTED_OPTIM_MAPPING = {
-        _FunctionalSGD: torch.optim.SGD,
-        _FunctionalAdam: torch.optim.Adam,
-        _FunctionalAdamW: torch.optim.AdamW,
-    }
 
 if TEST_WITH_TSAN:
     print(
@@ -1639,7 +1635,8 @@ class DistributedDataParallelTest(
         gpu_model_allreduce = self._gpu_model_with_ddp_comm_hook(
             process_group, default.allreduce_hook, gradient_as_bucket_view, hook_state
         )
-        sgd = _SUPPORTED_OPTIM_MAPPING.get(functional_optim_cls)(
+        mapping = {v: k for k, v in functional_optim_map.items()}
+        sgd = mapping.get(functional_optim_cls)(
             gpu_model_allreduce.parameters(),
             *functional_optim_args,
             **functional_optim_kwargs,
