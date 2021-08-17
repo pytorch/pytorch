@@ -17,6 +17,7 @@
 
 #ifdef USE_C10D_NCCL
 #include <c10d/ProcessGroupNCCL.hpp>
+#include <torch/csrc/distributed/c10d/quantization/quantization_gpu.h>
 #endif
 
 #ifdef USE_C10D_MPI
@@ -1657,12 +1658,15 @@ TORCH_LIBRARY_IMPL(q, CPU, m) {
     m.impl("FloatToBfloat16Quantized", _float_to_bfloat16_cpu);
 }
 
-#define DISPATCH_TO_CUDA(name, function) \
-    m.impl(name, torch::dispatch(c10::DispatchKey::CUDA, TORCH_FN(function)))
-TORCH_LIBRARY_IMPL(q, CUDA, m) {
-    DISPATCH_TO_CUDA("FloatToBfloat16Quantized", _float_to_bfloat16_gpu);
-    DISPATCH_TO_CUDA("Bfloat16QuantizedToFloat", _bfloat16_to_float_gpu);
-}
+#ifdef USE_C10D_NCCL
+    #define DISPATCH_TO_CUDA(name, function) \
+        m.impl(name, torch::dispatch(c10::DispatchKey::CUDA, TORCH_FN(function)))
+    TORCH_LIBRARY_IMPL(q, CUDA, m) {
+        DISPATCH_TO_CUDA("FloatToBfloat16Quantized", _float_to_bfloat16_gpu);
+        DISPATCH_TO_CUDA("Bfloat16QuantizedToFloat", _bfloat16_to_float_gpu);
+    }
+#endif
+
 } // namespace quantization
 
 } // namespace c10d
