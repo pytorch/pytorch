@@ -8,6 +8,7 @@ namespace jit {
 enum class Strategy {
   NAIVE,
   GREEDY_BY_SIZE,
+  GREEDY_BY_BREADTH,
   LINEAR_SCAN,
 };
 
@@ -28,30 +29,34 @@ inline bool operator!=(const LiveRange& lhs, const LiveRange& rhs) {
 }
 
 struct live_range_start_comp {
-  std::uint64_t operator()(LiveRange const& range1, LiveRange const& range2)
+  bool operator()(LiveRange const& range1, LiveRange const& range2)
       const {
     return range1.begin < range2.begin;
   }
 };
 
 struct live_range_end_comp {
-  std::uint64_t operator()(LiveRange const& range1, LiveRange const& range2)
+  bool operator()(LiveRange const& range1, LiveRange const& range2)
       const {
     return range1.end < range2.end;
   }
 };
 
 struct region_size_cmp {
-  std::uint64_t operator()(Region const& reg1, Region const& reg2) const {
+  bool operator()(Region const& reg1, Region const& reg2) const {
     return reg1.size < reg2.size;
   }
 };
 
 struct region_offset_cmp {
-  std::uint64_t operator()(Region const& reg1, Region const& reg2) const {
+  bool operator()(const Region& reg1, const Region& reg2) const {
     return reg1.offset < reg2.offset;
   }
 };
+
+c10::optional<uint64_t> computeStorageSize(const Value& value);
+
+bool hasOutVariant(Node* node);
 
 TORCH_API void planMemory(std::shared_ptr<Graph>&, Strategy);
 

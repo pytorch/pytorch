@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/memory_planning.h>
+#include <torch/csrc/jit/passes/memory_planning/greedy_by_breadth.h>
 #include <torch/csrc/jit/passes/memory_planning/greedy_by_size.h>
 #include <torch/csrc/jit/passes/memory_planning/linear_scan.h>
 
@@ -10,28 +11,45 @@
 namespace torch {
 namespace jit {
 
-c10::TensorTypePtr checkIsSupported(const Value& value) {
+c10::optional<uint64_t> computeStorageSize(const Value& value) {
   auto ttp = value.type()->cast<TensorType>();
   if (!ttp) {
     TORCH_WARN("out isn't a tensortype ", *value.type());
+    return c10::nullopt;
   }
   if (!ttp->scalarType().has_value()) {
-    ttp = nullptr;
     TORCH_WARN(
         "This output was profiled but didn't have a scalar type: ",
         *ttp,
         ", ",
         value.debugName());
+    return c10::nullopt;
   }
   if (!ttp->sizes().concrete_sizes().has_value()) {
-    ttp = nullptr;
     TORCH_WARN(
         "This output was profiled but doesn't have sizes: ",
         *ttp,
         ", ",
         value.debugName());
+    return c10::nullopt;
   }
-  return ttp;
+
+  auto scalar_type = ttp->scalarType();
+  if (!scalar_type.has_value()) {
+    TORCH_WARN(
+        "This value doesn't have a scalar type", *ttp, ", ", value.debugName());
+    return c10::nullopt;
+  }
+
+  auto element_size = c10::elementSize(scalar_type.value());
+  // TODO: when does this fail? answer: in place mutation
+  auto numel = ttp->numel();
+  if (!numel.has_value()) {
+    TORCH_WARN("doesn't have numel", *ttp, ", ", value.debugName());
+    return c10::nullopt;
+  }
+
+  return numel.value() * element_size;
 }
 
 std::pair<std::vector<int64_t>, std::vector<int64_t>> getSizesStrides(
@@ -55,20 +73,6 @@ std::pair<std::vector<int64_t>, std::vector<int64_t>> getSizesStrides(
     strides = at::detail::defaultStrides(sizes);
   }
   return std::make_pair(sizes, strides);
-}
-
-c10::optional<uint64_t> computeStorageSize(const c10::TensorTypePtr& ttp) {
-  auto scalar_type = ttp->scalarType();
-  if (!scalar_type.has_value()) {
-    return c10::nullopt;
-  }
-  auto element_size = c10::elementSize(scalar_type.value());
-  // TODO: when does this fail? answer: in place mutation
-  auto numel = ttp->numel();
-  if (!numel.has_value()) {
-    return c10::nullopt;
-  }
-  return numel.value() * element_size;
 }
 
 Node* insertAllocStorageNode(
@@ -140,7 +144,8 @@ bool hasOutVariant(Node* node) {
   return false;
 }
 
-std::unordered_map<const Value*, uint64_t> findManagedValues(
+std::pair<std::vector<const Node*>, std::unordered_map<const Value*, uint64_t>>
+getManagedValues(
     const std::shared_ptr<Graph>& graph,
     std::unordered_set<const Value*> always_alive_values) {
   std::unordered_map<const Value*, uint64_t> managed_tensor_values;
@@ -156,9 +161,8 @@ std::unordered_map<const Value*, uint64_t> findManagedValues(
       if (always_alive_values.count(out_v)) {
         continue;
       }
-      auto ttp = checkIsSupported(*out_v);
-      auto size = computeStorageSize(ttp);
-      if (ttp && size.has_value() && size.value() > 0) {
+      auto size = computeStorageSize(*out_v);
+      if (size.has_value() && size.value() > 0) {
         managed_tensor_values.insert({out_v, size.value()});
       } else if (isOptimizableContainerType(node)) {
         leaked_values.insert(out_v);
@@ -172,24 +176,29 @@ std::unordered_map<const Value*, uint64_t> findManagedValues(
       }
     }
   }
-  return managed_tensor_values;
+  return std::make_pair(out_nodes, managed_tensor_values);
 }
 
-std::pair<
+std::tuple<
+    std::vector<const Node*>,
     std::unordered_map<const Value*, uint64_t>,
     std::unordered_map<const Value*, LiveRange>>
 getManagedStuff(std::shared_ptr<Graph>& graph) {
   AliasDb alias_db(graph);
   auto always_alive = jit::GetAlwaysAliveValues(graph, alias_db);
   auto live_ranges = jit::GetLiveness(graph, always_alive, alias_db).second;
-  auto managed_values = findManagedValues(graph, always_alive);
+  std::vector<const Node*> out_nodes;
+  std::unordered_map<const Value*, uint64_t> managed_tensor_values;
+  std::tie(out_nodes, managed_tensor_values) =
+      getManagedValues(graph, always_alive);
+
   std::unordered_map<const Value*, LiveRange> managed_ranges;
   for (const auto& lvr : live_ranges) {
-    if (managed_values.count(lvr.first) > 0) {
+    if (managed_tensor_values.count(lvr.first) > 0) {
       managed_ranges.insert(lvr);
     }
   }
-  return std::make_pair(managed_values, managed_ranges);
+  return std::make_tuple(out_nodes, managed_tensor_values, managed_ranges);
 }
 
 uint64_t getTotalAllocationSize(
@@ -205,23 +214,24 @@ void printAllocation(
     std::unordered_map<const Value*, Region> allocations,
     std::unordered_map<const Value*, LiveRange> managed_ranges) {
   std::map<LiveRange, const Value*, live_range_start_comp>
-  sorted_start_live_ranges_map;
+      sorted_start_live_ranges_map;
   for (const auto& item : managed_ranges) {
     sorted_start_live_ranges_map.insert({item.second, item.first});
   }
 
-  for (const auto &item : sorted_start_live_ranges_map) {
+  for (const auto& item : sorted_start_live_ranges_map) {
     auto lvr = item.first;
     auto val = item.second;
     auto alloced_reg = allocations[val];
-    std::cout << val->debugName() << ": " <<  lvr << " " << alloced_reg << "\n";
+    std::cout << val->debugName() << ": " << lvr << " " << alloced_reg << "\n";
   }
 }
 
 void planMemory(std::shared_ptr<Graph>& graph, Strategy strat) {
   std::unordered_map<const Value*, uint64_t> managed_values;
   std::unordered_map<const Value*, LiveRange> managed_ranges;
-  std::tie(managed_values, managed_ranges) = getManagedStuff(graph);
+  std::vector<const Node*> out_nodes;
+  std::tie(out_nodes, managed_values, managed_ranges) = getManagedStuff(graph);
   std::unordered_map<const Value*, Region> allocations;
 
   switch (strat) {
@@ -234,6 +244,11 @@ void planMemory(std::shared_ptr<Graph>& graph, Strategy strat) {
     }
     case Strategy::LINEAR_SCAN: {
       allocations = linearScanHeuristic(managed_values, managed_ranges);
+      break;
+    };
+    case Strategy::GREEDY_BY_BREADTH: {
+      allocations =
+          greedyByOperatorBreadth(managed_values, managed_ranges, out_nodes);
       break;
     };
     default:
