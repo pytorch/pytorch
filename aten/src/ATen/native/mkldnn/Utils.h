@@ -11,7 +11,7 @@ namespace at { namespace native {
 std::tuple<Tensor, Tensor, Tensor> mkldnn_layer_norm_last_index_weight_bias_f32(
     const Tensor& input,
     IntArrayRef normalized_shape, const Tensor& weight, const Tensor& bias,
-    double eps);
+    double eps, bool inplace = false);
 
 std::vector<int64_t> pool_output_sizes(
     IntArrayRef input_size,

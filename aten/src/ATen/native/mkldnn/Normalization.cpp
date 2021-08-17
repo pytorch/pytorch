@@ -28,7 +28,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm_backward(
 std::tuple<Tensor, Tensor, Tensor> mkldnn_layer_norm_last_index_weight_bias_f32(
     const Tensor& input,
     IntArrayRef normalized_shape, const Tensor& weight, const Tensor& bias,
-    double eps) {
+    double eps, bool inplace) {
   TORCH_CHECK(false, "mkldnn_layer_norm_last_index_weight_bias_f32: ATen not compiled with MKLDNN support");
 }
 
@@ -48,7 +48,7 @@ namespace native {
 std::tuple<Tensor, Tensor, Tensor> mkldnn_layer_norm_last_index_weight_bias_f32(
     const Tensor& input,
     IntArrayRef normalized_shape, const Tensor& weight, const Tensor& bias,
-    double eps) {
+    double eps, bool inplace) {
 
   TORCH_INTERNAL_ASSERT(normalized_shape.size() == 1, "only accept shapes with the last dimension");
   TORCH_INTERNAL_ASSERT(input.scalar_type() == at::kFloat);
@@ -75,7 +75,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_layer_norm_last_index_weight_bias_f32(
   auto weight_it = at::native::itensor_from_mkldnn(weight);
   auto bias_it = at::native::itensor_from_mkldnn(bias);
 
-  auto out_it = ideep::tensor(input_it.get_desc());
+  auto out_it = inplace ? input_it : ideep::tensor(input_it.get_desc());
   ideep::layer_normalization_forward::compute(input_it, weight_it, bias_it, out_it, mean_it, rstd_it, static_cast<float>(eps));
 
   auto dst = at::native::new_with_itensor_mkldnn(
