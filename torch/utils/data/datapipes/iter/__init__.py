@@ -13,7 +13,7 @@ from torch.utils.data.datapipes.iter.combining import (
 )
 from torch.utils.data.datapipes.iter.grouping import (
     BatchIterDataPipe as Batch,
-    BucketBatchIterDataPipe as BucketBatch,
+    BucketBatcherIterDataPipe as BucketBatcher,
     GroupByKeyIterDataPipe as GroupByKey,
 )
 from torch.utils.data.datapipes.iter.httpreader import (
@@ -45,7 +45,7 @@ from torch.utils.data.datapipes.iter.tobytes import (
 )
 
 __all__ = ['Batch',
-           'BucketBatch',
+           'BucketBatcher',
            'Collate',
            'Concat',
            'Filter',

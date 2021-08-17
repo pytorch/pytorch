@@ -2,10 +2,10 @@
 Utils shared by different modes of quantization (eager/graph)
 """
 import warnings
-
+import functools
 import torch
 from .quant_type import QuantType, quant_type_to_str
-from typing import Tuple
+from typing import Tuple, Any
 
 def get_combined_dict(default_dict, additional_dict):
     d = default_dict.copy()
@@ -20,6 +20,12 @@ def is_per_channel(qscheme):
     return qscheme in [torch.per_channel_affine,
                        torch.per_channel_affine_float_qparams,
                        torch.per_channel_symmetric]
+
+def getattr_from_fqn(obj: Any, fqn: str) -> Any:
+    """
+    Given an obj and a fqn such as "foo.bar.baz", returns gm.foo.bar.baz.
+    """
+    return functools.reduce(getattr, fqn.split("."), obj)
 
 def get_qparam_dict(observer_or_fake_quant):
     qscheme = observer_or_fake_quant.qscheme if hasattr(observer_or_fake_quant, "qscheme") else None
