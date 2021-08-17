@@ -669,3 +669,15 @@ const auto narrow_with_int_script = R"JIT(
   def forward(self, a: Tensor, dim: int, start: int, length: int):
       return a.narrow(dim, start, length).clone()
 )JIT";
+
+const auto two_tuple_unpack_script = R"JIT(
+  def forward(self, tup: Tuple[Tensor, Tensor]):
+      a, b = tup
+      return (a, b)
+)JIT";
+
+const auto three_tuple_unpack_script = R"JIT(
+  def forward(self, tup: Tuple[Tensor, Tensor, Tensor]):
+      a, b, c = tup
+      return (a, b, c)
+)JIT";
