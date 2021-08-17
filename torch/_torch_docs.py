@@ -216,7 +216,7 @@ Alias for :func:`torch.acosh`.
 add_docstr(torch.add, r"""
 add(input, other, *, alpha=1, out=None) -> Tensor
 
-Adds :attr:`other`, scaled by :attr:`alpha`, to :attr:`input` elementwise.
+Adds :attr:`other`, scaled by :attr:`alpha`, to :attr:`input`.
 
 .. math::
     \text{{out}}_i = \text{{input}}_i + \text{{alpha}} \times \text{{other}}_i
@@ -6607,7 +6607,7 @@ Example::
 add_docstr(torch.mul, r"""
 mul(input, other, *, out=None) -> Tensor
 
-Multiplies :attr:`input` by :attr:`other` elementwise.
+Multiplies :attr:`input` by :attr:`other`.
 
 
 .. math::
