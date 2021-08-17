@@ -1,5 +1,5 @@
 import torch
-from torch._C import ListType
+from torch._C import ListType, UnionType
 from torch.nn.modules.utils import _single, _pair, _triple
 
 import torch.onnx
@@ -60,7 +60,7 @@ import warnings
 # used to represent "missing" optional inputs
 def unused(g):
     n = g.op("prim::Constant")
-    n.setType(UnionType.createUnionOf(torch.Tensor))
+    n.setType(UnionType.createOptionalOf(torch.Tensor))
     return n
 
 def _shape_as_tensor(g, input):

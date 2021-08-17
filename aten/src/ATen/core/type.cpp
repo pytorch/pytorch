@@ -10,26 +10,18 @@
 
 namespace c10 {
 
-c10::optional<UnionTypePtr> Type::isOptional() const {
+bool Type::isOptional() const {
   if (auto as_union = this->cast<UnionType>()) {
     if (!as_union->canHoldType(NoneType::get())) {
-      return c10::nullopt;
+      return false;
     }
     if (as_union->canHoldType(NumberType::get())) {
-      if (as_union->containedTypes().size() != 4) {
-        return c10::nullopt;
-      } else {
-        return UnionType::create(as_union->containedTypes().vec());
-      }
+      return as_union->containedTypes().size() == 4;
     } else {
-      if (as_union->containedTypes().size() != 2) {
-        return c10::nullopt;
-      } else {
-        return UnionType::create(as_union->containedTypes().vec());;
-      }
+      return as_union->containedTypes().size() == 2;
     }
   }
-  return c10::nullopt;
+  return false;
 }
 
 TypeVerbosity type_verbosity() {
