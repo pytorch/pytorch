@@ -203,6 +203,13 @@ struct TORCH_API ReplicatedObj {
     TORCH_DEPLOY_SAFE_CATCH_RETHROW
   }
 
+  [[nodiscard]] bool hasattr(const char* name) const {
+    TORCH_DEPLOY_TRY
+    auto I = acquire_session();
+    return I.self.hasattr(name);
+    TORCH_DEPLOY_SAFE_CATCH_RETHROW
+  }
+
   void unload(const Interpreter* on_this_interpreter = nullptr);
 
  private:

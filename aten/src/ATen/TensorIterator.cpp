@@ -831,6 +831,15 @@ void TensorIteratorBase::build_comparison_op(const Tensor& out, const Tensor& a,
   build(config);
 }
 
+void TensorIteratorBase::build_ternary_op(const Tensor& out, const Tensor& a,
+    const Tensor& b, const Tensor& c) {
+  build(TensorIteratorConfig()
+      .add_owned_output(out)
+      .add_owned_input(a)
+      .add_owned_input(b)
+      .add_owned_input(c));
+}
+
 // This cannot be a function because TensorIteratorConfig is not
 // copyable or movable, so it can't be returned from the function.
 #define BINARY_OP_CONFIG()                              \
