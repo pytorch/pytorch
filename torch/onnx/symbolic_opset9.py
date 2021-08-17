@@ -1539,6 +1539,11 @@ def log1p(g, self):
     return log(g, add(g, sym_help._if_scalar_type_as(g, torch.ones(1), self), self))
 
 
+def log10(g, self):
+    log_div = g.op("Log", g.op("Constant", value_t=torch.tensor(10.0)))
+    return g.op("Div", g.op("Log", self), log_div)
+
+
 def pow(g, self, exponent):
     f_dtype = self_dtype = self.type().scalarType()
     if not sym_help._is_fp(self):
