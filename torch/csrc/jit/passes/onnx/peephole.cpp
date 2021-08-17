@@ -995,7 +995,7 @@ static void removeSequenceSplitConcat(Block* b) {
 // Work around limitation from ONNX that the block input cannot be used directly
 // as block output. Inserts an Identity node inside the block, and have the
 // block return the output of the Identity.
-void insertIdentityForInputUsedAsOutput(Block* b) {
+void InsertIdentityForInputUsedAsOutput(Block* b) {
   for (auto out : b->outputs()) {
     auto n = out->node();
     if (out->node()->owningBlock() != b) {
@@ -1010,7 +1010,7 @@ void insertIdentityForInputUsedAsOutput(Block* b) {
 
   for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
     for (auto* child_block : it->blocks()) {
-      insertIdentityForInputUsedAsOutput(child_block);
+      InsertIdentityForInputUsedAsOutput(child_block);
     }
   }
 }
@@ -1054,7 +1054,7 @@ void PeepholeOptimizeONNX(
   eraseListUnpack(graph->block(), opset_version);
   removeMaxPoolUnusedOutput(graph->block());
   removeSequenceSplitConcat(graph->block());
-  insertIdentityForInputUsedAsOutput(graph->block());
+  InsertIdentityForInputUsedAsOutput(graph->block());
 
   GRAPH_DUMP("After PeepholeOptimizeONNX", graph);
 }

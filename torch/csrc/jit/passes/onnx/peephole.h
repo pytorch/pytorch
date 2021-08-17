@@ -5,7 +5,7 @@
 namespace torch {
 namespace jit {
 
-void insertIdentityForInputUsedAsOutput(Block* b);
+void InsertIdentityForInputUsedAsOutput(Block* b);
 
 void PeepholeOptimizeONNX(
     std::shared_ptr<Graph>& graph,
