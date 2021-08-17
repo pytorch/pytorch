@@ -72,6 +72,9 @@ const std::string shape_compute_functions =
             out.append(elem)
           return out
 
+        def view_one_unused(self: List[int], sizes: List[int], *, implicit: bool=False):
+          return view(self, sizes)
+
         def mean_dim(self: List[int], dims: List[int], keep_dim: bool, dt : Any):
           out: List[int] = []
           for idx in range(len(self)):
@@ -335,11 +338,46 @@ const std::string shape_compute_functions =
             dim += dim_post_expr
           return dim
 
+        def zero_dim_tensor(input: Any):
+          out: List[int] = []
+          return out
+
         def multiply_integers(li: List[int]):
           out = 1
           for elem in li:
             out = out * elem
           return out
+
+        def arange_end(end: number, inp0: Any, inp1: Any, inp2: Any, inp3: Any):
+          assert end >= 0
+          return [int(end)]
+
+        def arange_start(start: number, end: number, inp0: Any, inp1: Any, inp2: Any, inp3: Any):
+          assert end >= 0
+          assert end >= start
+          return torch.ceil(start - end)
+
+        def arange_start_step(start: number, end: number, step: number, inp0: Any, inp1: Any, inp2: Any, inp3: Any):
+          assert step != 0
+          if step < 0:
+            assert start >= end
+          else:
+            assert end >= start
+          return int(torch.ceil((end - start) / step))
+
+        def permute(input: List[int], dims: List[int]):
+          assert len(input) == len(dims)
+          ndim = len(dims)
+          seen_dims: List[int] = []
+          newSizes: List[int] = []
+          for i in range(ndim):
+            dim = maybe_wrap_dim(dims[i], ndim)
+            seen_dims.append(dim)
+            newSizes.append(input[dim])
+          for i in range(1, ndim):
+            for j in range(i):
+              assert seen_dims[i] != seen_dims[j]
+          return newSizes
 
         def flatten(input: List[int], start_dim: int, end_dim: int):
           start_dim = maybe_wrap_dim(start_dim, len(input))
@@ -394,8 +432,13 @@ static const OperatorMap<std::string>& get_schema_to_function_graph() {
       {"aten::gelu(Tensor self) -> Tensor", "unary"},
       {"aten::tanh(Tensor self) -> Tensor", "unary"},
       {"aten::erf(Tensor self) -> (Tensor)", "unary"},
+      {"prim::NumToTensor.Scalar(Scalar a) -> Tensor", "zero_dim_tensor"},
+      {"prim::NumToTensor.bool(bool a) -> Tensor", "zero_dim_tensor"},
       {"aten::zeros(int[] size, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None) -> (Tensor)", "unary_four_unused_inputs"},
       {"aten::to.dtype(Tensor(a) self, int dtype, bool non_blocking=False, bool copy=False, int? memory_format=None) -> (Tensor(a))", "unary_four_unused_inputs"},
+      {"aten::arange(Scalar end, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None) -> (Tensor)", "arange_end"},
+      {"aten::arange.start(Scalar start, Scalar end, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor", "arange_start"},
+      {"aten::arange.start_step(Scalar start, Scalar end, Scalar step, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor", "arange_start_step"},
       {"aten::squeeze(Tensor(a) self) -> Tensor(a)", "squeeze_nodim"},
       {"aten::squeeze.dim(Tensor(a) self, int dim) -> Tensor(a)", "squeeze"},
       {"aten::unsqueeze(Tensor(a) self, int dim) -> Tensor(a)", "unsqueeze"},
@@ -417,8 +460,10 @@ static const OperatorMap<std::string>& get_schema_to_function_graph() {
       {"aten::conv3d(Tensor input, Tensor weight, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] dilation=1, int groups=1) -> Tensor", "conv3d"},
       {"aten::flatten.using_ints(Tensor(a) self, int start_dim=0, int end_dim=-1) -> Tensor(a)", "flatten"},
       {"aten::relu(Tensor self) -> Tensor", "unary"},
+      {"aten::permute(Tensor(a) self, int[] dims) -> Tensor(a)", "permute"},
       {"aten::view(Tensor(a) self, int[] size) -> Tensor(a)", "view"},
       {"aten::expand_as(Tensor(a) self, Tensor other) -> Tensor(a)", "view"},
+      {"aten::expand(Tensor(a) self, int[] size, *, bool implicit=False) -> Tensor(a)", "view_one_unused"},
       {"aten::mean.dim(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", "mean_dim"},
       {"aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor", "addmm"},
   };

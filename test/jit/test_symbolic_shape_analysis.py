@@ -116,3 +116,36 @@ class TestSymbolicShapeAnalysis(JitTestCase):
             inputs[1].setType(inputs[1].type().with_sizes(size_2))
             torch._C._jit_pass_propagate_shapes_on_graph(t.graph)
             self.assertEqual(next(t.graph.outputs()).type().symbolic_sizes(), [4, 4, 8])
+
+    def test_arange_shape(self):
+        inps = [
+            (10,),
+            (0, 10),
+            (0, 1000),
+            (1, -1, -1),
+            (1, 0, -1),
+            (1, 2, 1),
+            (0.6, 0.89, 0.1),
+            (1, 10, 0.3),
+            (0.6, 0.7, 0.8),
+            (1, 10, 0.3),
+            # (True,),  TODO: https://github.com/pytorch/pytorch/issues/63405
+            # (False,), TODO: https://github.com/pytorch/pytorch/issues/63405
+            (0, 5),
+            (0, 5, 2),
+            (0, 5 + 1e-6),
+            (0, 5 - 1e-6),
+            (10, -1 + 1e-6, -1),
+            (10, -1, -1),
+            (10, -1 - 1e-6, -1),
+        ]
+
+        for inp in inps:
+            out_size = torch.arange(*inp).size()
+            x = lambda : torch.arange(*inp)  # noqa: E731
+            fn = torch.jit.trace(x, ())
+
+            # For some reason sometimes output gets made into a constant,
+            # skip test then
+            if next(fn.graph.outputs()).toIValue() is not None:
+                self.checkShapeAnalysis(out_size, fn.graph, assert_propagation=True)
