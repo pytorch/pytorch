@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
@@ -16,6 +17,7 @@
 #include <torch/csrc/jit/passes/peephole_list_idioms.h>
 #include <torch/csrc/jit/passes/peephole_non_tensor.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
+#include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/symbolic_shape_analysis.h>
 #include <torch/csrc/jit/runtime/exception_message.h>
 #include <torch/csrc/jit/runtime/symbolic_shape_registry.h>
@@ -372,15 +374,25 @@ void PropagateShapesWithShapeFunction(
       n->output()->type()->expect<TensorType>()->withSymbolicShapes(out));
 }
 
-void PropagateShapesOnGraph(std::shared_ptr<Graph>& graph) {
-  AliasDb db(graph);
-  for (Node* n : graph->nodes()) {
-    if (n->maybeSchema()) {
+void PropagateShapesOnBlock(Block* b, const AliasDb& db) {
+  for (Node* n : b->nodes()) {
+    // TODO: handle loop
+    if (n->kind() == prim::If) {
+      IfView if_v(n);
+      PropagateShapesOnBlock(if_v.thenBlock(), db);
+      PropagateShapesOnBlock(if_v.elseBlock(), db);
+      mergeTypes(if_v.thenOutputs(), if_v.elseOutputs(), if_v.outputs());
+    } else if (n->maybeSchema()) {
       if (auto maybe_graph = shapeComputeGraphForSchema(n->schema())) {
         PropagateShapesWithShapeFunction(n, *maybe_graph, db);
       }
     }
   }
+}
+
+void PropagateShapesOnGraph(std::shared_ptr<Graph>& graph) {
+  AliasDb db(graph);
+  PropagateShapesOnBlock(graph->block(), db);
 }
 
 } // namespace jit
