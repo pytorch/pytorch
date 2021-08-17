@@ -45,7 +45,12 @@ def get_axes_for_reduce_op(dim, has_implicit_batch_dimension):
     return axes
 
 
-def create_constant(network, tensor, name):
+def create_constant(network, tensor, name, squeeze_vector=True):
+    """
+    Args:
+        squeeze_vector: if set to True, we'll squeeze a vector of shape (1, ..1, n) to (n,)
+        and rely on broadcasting to expand the dimensions as needed
+    """
     if isinstance(tensor, int):
         tensor = torch.IntTensor([tensor])
 
@@ -53,25 +58,25 @@ def create_constant(network, tensor, name):
         tensor = torch.Tensor([tensor])
 
     shape = tuple(tensor.shape)
+    if squeeze_vector:
+        # Remove all preceding 1s as they can be re-inserted later during broadcasting.
+        num_preceding_ones = 0
+        for j in range(len(shape)):
+            if int(shape[j]) == 1:
+                num_preceding_ones += 1
+            else:
+                break
 
-    # Remove all preceding 1s as they can be re-inserted later during broadcasting.
-    num_preceding_ones = 0
-    for j in range(len(shape)):
-        if int(shape[j]) == 1:
-            num_preceding_ones += 1
-        else:
-            break
-
-    # If shape is all 1s, we want last digit.
-    shape = shape[num_preceding_ones:] if num_preceding_ones < len(shape) else (1,)
+        # If shape is all 1s, we want last digit.
+        shape = shape[num_preceding_ones:] if num_preceding_ones < len(shape) else (1,)
     constant = network.add_constant(shape, to_numpy(tensor))
     constant.name = name
     return constant.get_output(0)
 
 
-def get_trt_tensor(network, input_val, name):
+def get_trt_tensor(network, input_val, name, squeeze_vector=True):
     if isinstance(input_val, (torch.Tensor, int, float)):
-        return create_constant(network, input_val, name)
+        return create_constant(network, input_val, name, squeeze_vector)
     elif not isinstance(input_val, trt.tensorrt.ITensor):
         raise RuntimeError(
             f"Received input {input_val} of name {name} that "
@@ -182,6 +187,40 @@ def add_transpose_layer(
     layer.name = name
     return layer.get_output(0)
 
+def add_matrix_multiply_layer(network, input_val, other_val, name, transpose_input=False, transpose_other=False):
+    """ Adds a matrix multiply layer to the TensorRT network
+    Args:
+        network: TensorRT Network
+        input_val: input matrix/vector TensorRT ITensor
+        other_val: another input matrix/vector TensorRT ITensor
+        name: Name of the matrix multiply layer
+        transpose_input: boolean indicating whether to transpose the input_val Tensor or not
+        transpose_other: boolean indicaiton whether to transpose the other_val Tensor or not
+    Returns:
+        output TensorRT ITensor from the matrix multiply layer
+    """
+    input_matrix_op = other_matrix_op = trt.MatrixOperation.NONE
+    preset_diff = 0
+
+    if len(input_val.shape) == 1:
+        assert not transpose_input, "can't transpose input vector"
+        preset_diff -= 1
+        input_matrix_op = trt.MatrixOperation.VECTOR
+    elif transpose_input:
+        input_matrix_op = trt.MatrixOperation.TRANSPOSE
+
+    if len(other_val.shape) == 1:
+        assert not transpose_input, "can't transpose other vector"
+        preset_diff += 1
+        other_matrix_op = trt.MatrixOperation.VECTOR
+    elif transpose_other:
+        other_matrix_op = trt.MatrixOperation.TRANSPOSE
+
+
+    input_val, other_val = broadcast(network, input_val, other_val, f"{name}_input", f"{name}_other", preset_diff)
+    layer = network.add_matrix_multiply(input_val, input_matrix_op, other_val, other_matrix_op)
+    layer.name = name
+    return layer.get_output(0)
 
 def process_attr(val, num_elem):
     if not isinstance(val, tuple):
@@ -673,6 +712,26 @@ def acc_ops_min_two_tensors_input(network, target, args, kwargs, name):
     )
 
 
+@tensorrt_converter(acc_ops.unsqueeze)
+def acc_ops_unsqueeze(network, target, args, kwargs, name):
+    input_val = kwargs["input"]
+
+    if not isinstance(input_val, trt.tensorrt.ITensor):
+        raise RuntimeError(f"unsqueeze received input {input_val} that is not part "
+                           "of the TensorRT region!")
+
+    dim = kwargs["dim"]
+    if network.has_implicit_batch_dimension:
+        assert dim != 0
+        dim -= 1
+
+    assert len(get_dynamic_dims(input_val.shape)) <= 1, "Currently we don't support unsqueeze with more than one dynamic dims."
+    layer = network.add_shuffle(input_val)
+    layer.reshape_dims = tuple(input_val.shape)[:dim] + (1,) + tuple(input_val.shape)[dim:]
+    layer.name = name
+    return layer.get_output(0)
+
+
 @tensorrt_converter(acc_ops.adaptive_avg_pool2d)
 def acc_ops_adaptive_avg_pool2d(network, target, args, kwargs, name):
     input_val = kwargs["input"]
@@ -800,25 +859,13 @@ def acc_ops_linear(network, target, args, kwargs, name):
         "dim for linear and it can't be the last dim."
     )
 
-    layer = network.add_shuffle(input_val)
-    layer.reshape_dims = tuple(input_val.shape) + (1, 1)
-    layer.name = f"{name}_pre_shuffle"
-
-    # add fully connected
-    layer = network.add_fully_connected(
-        input=layer.get_output(0),
-        num_outputs=kwargs["weight"].shape[0],
-        kernel=to_numpy(kwargs["weight"]),
-        bias=to_numpy(kwargs["bias"]),
-    )
-    layer.name = f"{name}_linear"
-
-    # reshape back
-    layer = network.add_shuffle(layer.get_output(0))
-    layer.reshape_dims = tuple(input_val.shape[:-1]) + (kwargs["weight"].shape[0],)
-    layer.name = f"{name}_post_shuffle"
-
-    return layer.get_output(0)
+    # add matrix multiply and add
+    weight = get_trt_tensor(network, kwargs["weight"], f"{name}_linear_weight", squeeze_vector=False)
+    output = add_matrix_multiply_layer(network, input_val, weight, f"{name}_linear_mm", transpose_other=True)
+    if kwargs["bias"] is not None:
+        return add_binary_elementwise_layer(network, output, kwargs["bias"], trt.ElementWiseOperation.SUM, f"{name}_linear_add")
+    else:
+        return output
 
 
 def add_clamp(network, input, val, op):
@@ -1023,26 +1070,7 @@ def acc_ops_matmul(network, target, args, kwargs, name):
                 f"matmul received input {i} that is not part " "of the TensorRT region!"
             )
 
-    input_matrix_op = other_matrix_op = trt.MatrixOperation.NONE
-    preset_diff = 0
-
-    if len(input_val.shape) == 1:
-        preset_diff -= 1
-        input_matrix_op = trt.MatrixOperation.VECTOR
-
-    if len(other_val.shape) == 1:
-        preset_diff += 1
-        other_matrix_op = trt.MatrixOperation.VECTOR
-
-    input_val, other_val = broadcast(
-        network, input_val, other_val, f"{name}_input", f"{name}_other", preset_diff
-    )
-    layer = network.add_matrix_multiply(
-        input_val, input_matrix_op, other_val, other_matrix_op
-    )
-    layer.name = name
-    return layer.get_output(0)
-
+    return add_matrix_multiply_layer(network, input_val, other_val, name)
 
 @tensorrt_converter(acc_ops.sigmoid)
 def acc_ops_sigmoid(network, target, args, kwargs, name):

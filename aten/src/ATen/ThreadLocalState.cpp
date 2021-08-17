@@ -12,7 +12,7 @@ namespace at {
 ThreadLocalState::ThreadLocalState()
     : dispatch_key_(c10::impl::tls_local_dispatch_key_set()),
       debug_info_(c10::ThreadLocalDebugInfo::current()),
-      autograd_tls_(c10::AutogradTLS::get_mode()) {
+      autograd_tls_(c10::AutogradState::get_tls_state()) {
   rf_tls_ = at::get_record_function_tls_();
   saved_tensors_default_hooks_ = SavedTensorDefaultHooks::get_hooks();
 
@@ -20,11 +20,7 @@ ThreadLocalState::ThreadLocalState()
 }
 
 void ThreadLocalState::set_grad_mode(bool enabled) {
-  if (enabled) {
-    autograd_tls_ |= AutogradTLS::GRAD_MODE_MASK;
-  } else {
-    autograd_tls_ &= ~AutogradTLS::GRAD_MODE_MASK;
-  }
+  autograd_tls_.set_grad_mode(enabled);
 }
 
 /* static */
@@ -32,7 +28,7 @@ void ThreadLocalState::setThreadLocalState(
     const ThreadLocalState& state) {
   // Note that setting the InferenceMode TLS in this function is ONLY ok because we always
   // restore the dispatch key set TLS at the same time.
-  c10::AutogradTLS::set_mode(state.autograd_tls_);
+  c10::AutogradState::set_tls_state(state.autograd_tls_);
 
   at::set_record_function_tls_(state.rf_tls_);
 
