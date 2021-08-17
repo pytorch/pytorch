@@ -924,16 +924,20 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
 
   y = y.slice(2, start, end, 1);
   window_envelop = window_envelop.slice(2, start, end, 1);
-  const auto window_envelop_lowest = window_envelop.abs().min().item().toDouble();
-  if (window_envelop_lowest < 1e-11) {
-    std::ostringstream ss;
-    REPR(ss) << "window overlap add min: " << window_envelop_lowest;
-    AT_ERROR(ss.str());
-  }
 
-  y = (y / window_envelop).squeeze(1);  // size: (channel, expected_output_signal_len)
+  // Apply window normalization on non-zero indices
+  window_envelop = window_envelop.repeat({y.size(0), y.size(1), 1});
+  auto index = at::indexing::TensorIndex(window_envelop.abs().to(kDouble) > 1e-11);
+  y.index_put_({index,}, y.index(index) / window_envelop.index(index));
+
+  y = y.squeeze(1);  // size: (channel, expected_output_signal_len)
   if (input_dim == 3) {
     y = y.squeeze(0);
+  }
+
+  // zero padding if the given lengthOpt is longer than expected
+  if(end > expected_output_signal_len) {
+    y = at::constant_pad_nd(y, {0, end - expected_output_signal_len}, 0);
   }
   return y;
 
