@@ -2542,6 +2542,14 @@ class TestVmapOperators(Namespace.TestVmapBase):
             for loop_out, batched_out in get_fallback_and_vmap_exhaustive(conv_fn, arg_values, kwarg_values):
                 self.assertEqual(loop_out, batched_out)
 
+    def test_one_hot(self):
+        sample_inputs = [
+            (torch.randint(0, 3, []), 3),
+            (torch.randint(0, 3, [2, 3, 4]), 4),
+        ]
+        for args in sample_inputs:
+            for loop_out, batched_out in get_fallback_and_vmap_exhaustive(F.one_hot, args, {}):
+                self.assertEqual(loop_out, batched_out)
 
     def test_mode_key(self):
         def vmap_f(x):
