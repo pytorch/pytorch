@@ -336,7 +336,7 @@ def set_default_dtype(d):
     1. Implicitly determine the default complex dtype. When the default floating point
        type is float32 the default complex dtype is complex64, and when the default
        floating point type is float64 the default complex type is complex128.
-    2. Infer the dtype for tensors constructed using Python floats or complex Python 
+    2. Infer the dtype for tensors constructed using Python floats or complex Python
        numbers. See examples below.
     3. Determine the result of type promotion between bool and integer tensors and
        Python floats and complex Python numbers.
