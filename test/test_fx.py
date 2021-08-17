@@ -779,6 +779,19 @@ class TestFX(JitTestCase):
         copied = copy.deepcopy(traced)
         copied.graph.lint()
 
+    def test_deepcopy_graph_with_tracer_cls(self):
+        class TestTracer(Tracer):
+            def is_leaf_module(self, module, name):
+                return True
+
+        g = Graph(tracer_cls=TestTracer)
+        x = g.placeholder("x")
+        g.output(x)
+
+        h = copy.deepcopy(g)
+        self.assertIsNotNone(h._tracer_cls)
+        self.assertTrue(g._tracer_cls == h._tracer_cls)
+
     def test_unpack_list_better_error(self):
         class SomeArgs(torch.nn.Module):
             def forward(self, a, b):
