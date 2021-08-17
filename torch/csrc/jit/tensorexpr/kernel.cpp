@@ -2,6 +2,7 @@
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 
 #include <ATen/ExpandUtils.h>
+#include <ATen/Parallel.h>
 #include <ATen/TensorGeometry.h>
 #include <c10/util/irange.h>
 #include <c10/util/string_utils.h>
@@ -2485,6 +2486,34 @@ void fuseAllLoops(Stmt* st) {
   }
 }
 
+// Flatten and parallelize outermost loops until available threads are
+// saturated.
+template <typename Bufs>
+void parallelizeOuterLoops(LoopNest& l, Bufs&& bufs) {
+  for (auto const& buf : bufs) {
+    auto threads = at::get_num_threads();
+    auto loops = l.getLoopStmtsFor(buf);
+    std::vector<For*> loopsToFlatten;
+    int64_t trips = 1;
+    for (auto loop : loops) {
+      if (trips >= threads) {
+        break;
+      }
+      if (auto stop = dynamic_cast<IntImm*>(loop->stop())) {
+        trips *= immediateAs<int>(stop);
+        loopsToFlatten.push_back(loop);
+        continue;
+      }
+      break;
+    }
+    if (loopsToFlatten.size()) {
+      For* flattened = nullptr;
+      LoopNest::flatten(loopsToFlatten, &flattened);
+      flattened->set_parallel();
+    }
+  }
+}
+
 Stmt* TensorExprKernel::transformLoops(BackendType backendType, Stmt* st) {
   torch::jit::tensorexpr::LoopNest l(st, bufOutputs_);
   GRAPH_DEBUG("Original Stmt:\n", std::to_string(l.root_stmt()), "\n");
@@ -2526,6 +2555,8 @@ Stmt* TensorExprKernel::transformLoops(BackendType backendType, Stmt* st) {
   if (backendType == kLLVMCodeGen) {
     fuseAllLoops(l.root_stmt());
     GRAPH_DEBUG("after fuse", *l.root_stmt());
+    parallelizeOuterLoops(l, bufOutputs_);
+    GRAPH_DEBUG("after parallelize", *l.root_stmt());
   }
 
   if (backendType == kCudaCodeGen) {
@@ -2600,6 +2631,7 @@ Stmt* TensorExprKernel::transformLoops(BackendType backendType, Stmt* st) {
   }
 
   l.prepareForCodegen();
+  l.simplify();
 
   if (backendType == kLLVMCodeGen && !hasReduction) {
     l.vectorizeInnerLoops();
