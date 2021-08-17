@@ -401,7 +401,7 @@ class profile(profiler):
         self.current_action = self.schedule(self.step_num)
         self.step_rec_fn: Optional[prof.record_function] = None
 
-        self.action_map:Dict[Tuple[ProfilerAction, Optional[ProfilerAction]], List[Any]] = {
+        self.action_map: Dict[Tuple[ProfilerAction, Optional[ProfilerAction]], List[Any]] = {
             # key is (prev_action, current_action), value is action list corresponding to the state pair.
             (ProfilerAction.NONE, ProfilerAction.NONE): [],
             (ProfilerAction.NONE, ProfilerAction.WARMUP): [self.prepare_trace],
@@ -415,7 +415,7 @@ class profile(profiler):
             (ProfilerAction.WARMUP, ProfilerAction.RECORD): [self.start_trace],
             (ProfilerAction.WARMUP, ProfilerAction.RECORD_AND_SAVE): [self.start_trace],
             (ProfilerAction.RECORD, ProfilerAction.NONE): [
-                partial(warn,"Incorrect schedule: RECORD followed by NONE"),
+                partial(warn, "Incorrect schedule: RECORD followed by NONE"),
                 self.stop_trace],
             (ProfilerAction.RECORD, ProfilerAction.WARMUP): [
                 partial(warn, "Incorrect schedule: RECORD followed by WARMUP"),
