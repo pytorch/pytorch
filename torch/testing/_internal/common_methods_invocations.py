@@ -4129,10 +4129,13 @@ def sample_inputs_matmul(op_info, device, dtype, requires_grad):
                   ((S, M), (M,)),
                   ((M,), (M, S)),
                   ((S, M), (M, S)),
+                  ((S, 0), (0, M)),
                   ((S, S, M), (M,)),
                   ((S, S, M), (M, S)),
+                  ((S, S, 0), (0, S)),
                   ((M,), (S, M, S)),
                   ((S, M), (S, M, S)),
+                  ((0, 0), (S, 0, 0)),
                   ((S, S, M, M), (S, S, M, S)),
                   ((S, S, M, M), (M,)),
                   ((M,), (S, S, M, S)))
