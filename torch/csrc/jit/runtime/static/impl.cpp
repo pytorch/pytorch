@@ -275,11 +275,31 @@ LivenessMap GetLivenessMap(
   }
 
   for (const auto* node : graph->nodes()) {
-    for (const auto* input : node->inputs()) {
-      for (const auto* output : node->outputs()) {
+    auto inputs = node->inputs();
+    auto outputs = node->outputs();
+    for (const auto* input : inputs) {
+      for (const auto* output : outputs) {
         if (liveness_map.count(input) && liveness_map.count(output)) {
           liveness_map.at(input).insert(output);
           liveness_map.at(output).insert(input);
+        }
+      }
+    }
+    // All inputs should be alive at the same time.
+    for (size_t i = 0; i < inputs.size(); ++i) {
+      for (size_t j = 0; j < inputs.size(); ++j) {
+        if (liveness_map.count(inputs[i]) && liveness_map.count(inputs[j])) {
+          liveness_map.at(inputs[i]).insert(inputs[j]);
+          liveness_map.at(inputs[j]).insert(inputs[i]);
+        }
+      }
+    }
+    // All outputs should be alive at the same time.
+    for (size_t i = 0; i < outputs.size(); ++i) {
+      for (size_t j = 0; j < outputs.size(); ++j) {
+        if (liveness_map.count(outputs[i]) && liveness_map.count(outputs[j])) {
+          liveness_map.at(outputs[i]).insert(outputs[j]);
+          liveness_map.at(outputs[j]).insert(outputs[i]);
         }
       }
     }
@@ -845,7 +865,8 @@ void StaticRuntime::benchmark(
     const std::vector<c10::IValue>& args,
     const std::unordered_map<std::string, c10::IValue>& kwargs,
     const int warmup_runs,
-    const int main_runs) {
+    const int main_runs,
+    bool print_per_node_time) {
   float time_per_iter = benchmark_model(args, kwargs, warmup_runs, main_runs);
   std::cout << "Static runtime ms per iter: " << time_per_iter
             << ". Iters per second: " << 1000.0 / time_per_iter << std::endl;
@@ -853,11 +874,13 @@ void StaticRuntime::benchmark(
   IndividualMetrics results =
       benchmark_individual_ops(args, kwargs, warmup_runs, main_runs);
 
-  for (const auto i : c10::irange(nodes_.size())) {
-    const Node* node = nodes_[i].node();
-    std::cout << "Node #" << i << ": " << results.time_per_node[i]
-              << " ms/iter, ";
-    node->print(std::cout, 0, nullptr, false);
+  if (print_per_node_time) {
+    for (const auto i : c10::irange(nodes_.size())) {
+      const Node* node = nodes_[i].node();
+      std::cout << "Node #" << i << ": " << results.time_per_node[i]
+                << " ms/iter, ";
+      node->print(std::cout, 0, nullptr, false);
+    }
   }
 
   std::vector<std::pair<std::string, double>> time_per_node_type_vec{
