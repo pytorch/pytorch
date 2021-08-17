@@ -4579,6 +4579,57 @@ TEST(NVFuserTest, FusionReduction6_CUDA) {
   testValidate(&fusion, cg_outputs, {input}, {aten_output}, __LINE__, __FILE__);
 }
 
+TEST(NVFuserTest, FusionMultiGridReduction_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  TensorView* tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+  TensorView* tv1 = max(tv0, {0});
+  TensorView* tv2 = sum(tv0, {0});
+
+  fusion.addOutput(tv1);
+  fusion.addOutput(tv2);
+
+  int numel_x = 4;
+  int numel_y = 2;
+
+  tv1->axis(0)->parallelize(ParallelType::BIDx);
+  tv1->axis(1)->parallelize(ParallelType::TIDx);
+
+  tv2->axis(0)->parallelize(ParallelType::BIDx);
+  tv2->axis(1)->parallelize(ParallelType::TIDx);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input = at::randn({numel_x, numel_y}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto cg_outputs = fe.runFusion({input});
+
+  std::vector<at::Tensor> aten_outputs = {
+      std::get<0>(input.to(at::kDouble).max(0)), input.to(at::kDouble).sum(0)};
+  testValidate(&fusion, cg_outputs, {input}, aten_outputs, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionMultiGridReduction2_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+  auto tv1 = sum(tv0, {0});
+  auto tv2 = sum(tv1, {0});
+  fusion.addOutput(tv2);
+
+  tv1->axis(0)->parallelize(ParallelType::BIDx);
+  tv1->axis(1)->parallelize(ParallelType::BIDy);
+  tv2->axis(0)->parallelize(ParallelType::BIDy);
+
+  FusionExecutor fe;
+  ASSERT_ANY_THROW(fe.compileFusion(&fusion));
+}
+
 TEST(NVFuserTest, FusionReductionTFT_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
@@ -13099,26 +13150,6 @@ TEST(NVFuserTest, FusionGridReductionInLoop_CUDA) {
   fusion.addOutput(tv1);
 
   tv1->axis(1)->parallelize(ParallelType::BIDx);
-
-  FusionExecutor fe;
-  ASSERT_ANY_THROW(fe.compileFusion(&fusion));
-}
-
-// Grid reduction can be executed only once in a kernel. Should result
-// in an error at the time of compilation.
-TEST(NVFuserTest, FusionMultipleGridReductions_CUDA) {
-  Fusion fusion;
-  FusionGuard fg(&fusion);
-
-  auto tv0 = makeSymbolicTensor(1);
-  fusion.addInput(tv0);
-  auto tv1 = sum(tv0, {0});
-  fusion.addOutput(tv1);
-  auto tv2 = sum(tv0, {0});
-  fusion.addOutput(tv2);
-
-  tv1->axis(0)->parallelize(ParallelType::BIDx);
-  tv2->axis(0)->parallelize(ParallelType::BIDx);
 
   FusionExecutor fe;
   ASSERT_ANY_THROW(fe.compileFusion(&fusion));

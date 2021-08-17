@@ -75,10 +75,9 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
     std::vector<std::pair<int, int>> io_alias_indices;
     std::vector<std::vector<int64_t>> output_sizes;
     std::vector<at::ScalarType> output_types;
-    std::vector<std::vector<int64_t>> empty_buffer_sizes;
-    std::vector<at::ScalarType> empty_buffer_types;
-    std::vector<std::vector<int64_t>> zero_buffer_sizes;
-    std::vector<at::ScalarType> zero_buffer_types;
+    std::vector<std::vector<int64_t>> buffer_sizes;
+    std::vector<at::ScalarType> buffer_types;
+    std::vector<bool> buffer_zero_init;
     uint64_t rand_offset;
   };
 
@@ -121,8 +120,8 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
  private:
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   struct GlobalBuffers {
-    std::vector<at::Tensor> empty_buffers;
-    std::vector<at::Tensor> zero_buffers;
+    std::vector<at::Tensor> buffers;
+    std::vector<bool> zero_init;
   };
 
   std::string kernelName() const {

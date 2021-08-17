@@ -211,10 +211,6 @@ void FusionExecutor::compileFusion(
   }
 
   TORCH_CHECK(
-      kernel_summary.number_of_grid_reductions <= 1,
-      "Multiple grid reductions in a fusion is not supported");
-
-  TORCH_CHECK(
       !kernel_summary.has_grid_reduction_in_loop,
       "Grid reduction must not be placed inside a loop.");
 
@@ -461,12 +457,14 @@ FusionExecutor::GlobalBuffers FusionExecutor::allocGlobalVals(
     if (kernel->isOutput(tv)) {
       continue;
     }
-    if (!alloc->zeroInit()) {
-      global_buffers.empty_buffers.push_back(
-          inferAndAlloc(tv, alloc->shape(), expr_eval, options_, false));
-    } else {
-      global_buffers.zero_buffers.push_back(
+    if (alloc->zeroInit()) {
+      global_buffers.buffers.push_back(
           inferAndAlloc(tv, alloc->shape(), expr_eval, options_, true));
+      global_buffers.zero_init.push_back(true);
+    } else {
+      global_buffers.buffers.push_back(
+          inferAndAlloc(tv, alloc->shape(), expr_eval, options_, false));
+      global_buffers.zero_init.push_back(false);
     }
   }
 
@@ -563,25 +561,21 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
       }
       {
         FUSER_PERF_SCOPE("ExecutorRunFusion::IntermediateBufferAlloc");
-        for (const auto i :
-             c10::irange(executor_entry->empty_buffer_sizes.size())) {
-          global_buffers.empty_buffers.push_back(at::native::empty_cuda(
-              executor_entry->empty_buffer_sizes[i],
-              executor_entry->empty_buffer_types[i],
-              c10::nullopt,
-              options_.device,
-              c10::nullopt));
-        }
-      }
-      {
-        FUSER_PERF_SCOPE("ExecutorRunFusion::IntermediateBufferAlloc");
-        for (const auto i :
-             c10::irange(executor_entry->zero_buffer_sizes.size())) {
-          auto tensor_options = at::TensorOptions()
-                                    .dtype(executor_entry->zero_buffer_types[i])
-                                    .device(options_.device);
-          global_buffers.zero_buffers.push_back(
-              at::zeros(executor_entry->zero_buffer_sizes[i], tensor_options));
+        for (const auto i : c10::irange(executor_entry->buffer_sizes.size())) {
+          if (executor_entry->buffer_zero_init[i]) {
+            global_buffers.buffers.push_back(at::zeros(
+                executor_entry->buffer_sizes[i],
+                at::TensorOptions()
+                    .dtype(executor_entry->buffer_types[i])
+                    .device(options_.device)));
+          } else {
+            global_buffers.buffers.push_back(at::native::empty_cuda(
+                executor_entry->buffer_sizes[i],
+                executor_entry->buffer_types[i],
+                c10::nullopt,
+                options_.device,
+                c10::nullopt));
+          }
         }
       }
     }
@@ -648,13 +642,13 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
         executor_entry->output_sizes.push_back(output.sizes().vec());
         executor_entry->output_types.push_back(output.scalar_type());
       }
-      for (const auto& buffer : global_buffers.empty_buffers) {
-        executor_entry->empty_buffer_sizes.push_back(buffer.sizes().vec());
-        executor_entry->empty_buffer_types.push_back(buffer.scalar_type());
-      }
-      for (const auto& buffer : global_buffers.zero_buffers) {
-        executor_entry->zero_buffer_sizes.push_back(buffer.sizes().vec());
-        executor_entry->zero_buffer_types.push_back(buffer.scalar_type());
+
+      for (const auto& i : c10::irange(global_buffers.buffers.size())) {
+        executor_entry->buffer_sizes.push_back(
+            global_buffers.buffers[i].sizes().vec());
+        executor_entry->buffer_types.push_back(
+            global_buffers.buffers[i].scalar_type());
+        executor_entry->buffer_zero_init.push_back(global_buffers.zero_init[i]);
       }
       executor_entry->rand_offset = rand_offset;
       executor_entry->init = true;
@@ -666,8 +660,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
     FUSER_PERF_SCOPE("ExecutorRunFusion::FillKernelArgStructure");
     kernel_arguments.push(inputs);
     kernel_arguments.push(allocated_outputs);
-    kernel_arguments.push(global_buffers.empty_buffers);
-    kernel_arguments.push(global_buffers.zero_buffers);
+    kernel_arguments.push(global_buffers.buffers);
     if (lowered_.kernel()->summary().is_stochastic) {
       kernel_arguments.appendPhiloxRNGSeed(rand_offset);
     }
@@ -691,15 +684,9 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
       std::cout << "  " << output.scalar_type() << " " << output.sizes()
                 << std::endl;
     }
-    std::cout << "Reduction buffers:" << std::endl;
-    for (const auto& buffer : global_buffers.empty_buffers) {
+    std::cout << "Reduction and semaphore buffers:" << std::endl;
+    for (const auto& buffer : global_buffers.buffers) {
       std::cout << "  " << buffer.scalar_type() << " " << buffer.sizes()
-                << std::endl;
-    }
-    std::cout << "Semaphores:" << std::endl;
-    for (const auto& buffer : global_buffers.zero_buffers) {
-      std::cout << "  " << buffer.scalar_type() << " " << buffer.sizes()
-                << std::endl
                 << std::endl;
     }
   }

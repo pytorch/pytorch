@@ -25,10 +25,19 @@ kir::Val* getPredicatePerParallelType(
       pt == ParallelType::BIDz) {
     auto source = source_map.at(pt);
     TORCH_INTERNAL_ASSERT(!source.empty(), "No predicate source found");
-    TORCH_INTERNAL_ASSERT(source.size() == 1, "Multiple sources detected");
-    auto src = *source.begin();
-    auto flag_name = kir::GridReduction::getPredicateFlagName(src);
-    return ir_builder.create<kir::NamedScalar>(flag_name, DataType::Bool);
+    kir::Val* pred = nullptr;
+    for (auto src : source) {
+      if (pred == nullptr) {
+        auto flag_name = kir::GridReduction::getPredicateFlagName(src);
+        pred = ir_builder.create<kir::NamedScalar>(flag_name, DataType::Bool);
+      } else {
+        auto flag_name = kir::GridReduction::getPredicateFlagName(src);
+        pred = ir_builder.andExpr(
+            pred,
+            ir_builder.create<kir::NamedScalar>(flag_name, DataType::Bool));
+      }
+    }
+    return pred;
   } else {
     return ir_builder.eqExpr(
         kir::NamedScalar::getParallelIndex(pt), ir_builder.create<kir::Int>(0));

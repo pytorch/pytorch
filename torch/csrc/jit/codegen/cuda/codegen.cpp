@@ -667,14 +667,14 @@ class CudaKernelGenerator : private kir::IrVisitor {
     if (has_block_reduce) {
       if (has_grid_reduce) {
         indent() << data_type << " "
-                 << "block_result=" << gen(node->init()) << ";\n";
+                 << "block_result_" << block_reduce_name_ << "="
+                 << gen(node->init()) << ";\n";
       }
       indent() << "blockReduce<" << (tidx ? "true" : "false") << ", "
                << (tidy ? "true" : "false") << ", " << (tidz ? "true" : "false")
                << ">(\n";
       if (has_grid_reduce) {
-        indent() << kTab << "block_result"
-                 << ",\n";
+        indent() << kTab << "block_result_" << block_reduce_name_ << ",\n";
       } else {
         indent() << kTab << gen(node->out()) << ",\n";
       }
@@ -747,22 +747,22 @@ class CudaKernelGenerator : private kir::IrVisitor {
       if (has_grid_reduce) {
         // allocate block result
         indent() << data_type << " "
-                 << "block_result_avg = " << gen(node->initAvg()) << ";\n";
+                 << "block_result_avg_" << block_reduce_name_ << " = "
+                 << gen(node->initAvg()) << ";\n";
         indent() << data_type << " "
-                 << "block_result_var = " << gen(node->initVar()) << ";\n";
+                 << "block_result_var_" << block_reduce_name_ << " = "
+                 << gen(node->initVar()) << ";\n";
         indent() << DataType::Int << " "
-                 << "block_result_n = " << gen(node->initN()) << ";\n";
+                 << "block_result_n_" << block_reduce_name_ << " = "
+                 << gen(node->initN()) << ";\n";
       }
       indent() << "blockWelford<" << (tidx ? "true" : "false") << ", "
                << (tidy ? "true" : "false") << ", " << (tidz ? "true" : "false")
                << ">(\n";
       if (has_grid_reduce) {
-        indent() << kTab << "block_result_avg"
-                 << ",\n"
-                 << kTab << "block_result_var"
-                 << ",\n"
-                 << kTab << "block_result_n"
-                 << ",\n";
+        indent() << kTab << "block_result_avg_" << block_reduce_name_ << ",\n"
+                 << kTab << "block_result_var_" << block_reduce_name_ << ",\n"
+                 << kTab << "block_result_n_" << block_reduce_name_ << ",\n";
       } else {
         indent() << kTab << gen(node->outAvg()) << ",\n";
         indent() << kTab << gen(node->outVar()) << ",\n";
@@ -865,8 +865,8 @@ class CudaKernelGenerator : private kir::IrVisitor {
              << "reduction::gridReduce<" << flags_str << ">(\n";
     indent() << kTab << gen(rop->out()) << ",\n";
     if (domain->hasBlockReduction()) {
-      indent() << kTab << "block_result"
-               << ",\n";
+      indent() << kTab << "block_result_" << block_reduce_name_ << ",\n";
+      block_reduce_name_++;
     } else {
       indent() << kTab << gen(rop->in()) << ",\n";
     }
@@ -920,9 +920,10 @@ class CudaKernelGenerator : private kir::IrVisitor {
              << kTab << gen(wop->outVar()) << ",\n"
              << kTab << gen(wop->outN()) << ",\n";
     if (domain->hasBlockReduction()) {
-      indent() << kTab << "block_result_avg,\n"
-               << kTab << "block_result_var,\n"
-               << kTab << "block_result_n,\n";
+      indent() << kTab << "block_result_avg_" << block_reduce_name_ << ",\n"
+               << kTab << "block_result_var_" << block_reduce_name_ << ",\n"
+               << kTab << "block_result_n_" << block_reduce_name_ << ",\n";
+      block_reduce_name_++;
     } else {
       indent() << kTab << gen(wop->inAvg()) << ",\n";
       if (wop->inVar() == nullptr) {
@@ -1137,6 +1138,7 @@ class CudaKernelGenerator : private kir::IrVisitor {
   std::stringstream code_;
   const kir::Kernel* kernel_;
   int block_nest_level_ = 0;
+  int block_reduce_name_ = 0;
 
   // TODO(kir): replace with explicit assignment statements
   bool print_inline_ = false;
