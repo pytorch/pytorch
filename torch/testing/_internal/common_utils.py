@@ -38,7 +38,6 @@ import tempfile
 import json
 import __main__  # type: ignore[import]
 import errno
-import typing
 from typing import (cast, Any, Callable, Dict, FrozenSet, Iterable, Iterator, Optional,
                     Set, Type, Union)
 from unittest.mock import MagicMock
