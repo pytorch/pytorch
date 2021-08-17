@@ -41,6 +41,10 @@ class TypeParser {
     return nonSimpleType;
   }
 
+  std::unordered_set<std::string> getContainedTypes() {
+    return contained_types_;
+  }
+
   TypePtr parseNonSimple(const std::string& token) {
     if (token == "List") {
       return CreateSingleElementType<ListType>();
@@ -72,11 +76,12 @@ class TypeParser {
     return nullptr;
   }
 
-  TypePtr parse() {
+  TypePtr parse(bool hard_fail = true) {
     std::string token = next();
+    contained_types_.insert(token);
     auto simpleTypeIt = string_to_type_lut().find(token);
     if (simpleTypeIt != string_to_type_lut().end()) {
-      if (cur() != "]" && cur() != "," && cur() != "") {
+      if (hard_fail && cur() != "]" && cur() != "," && cur() != "") {
         TORCH_CHECK(
             false, "Simple type ", token, " is followed by ", "invalid chars.");
       }
@@ -84,12 +89,14 @@ class TypeParser {
     } else if (getNonSimpleType().find(token) != getNonSimpleType().end()) {
       return parseNonSimple(token);
     } else {
-      TORCH_CHECK(
-          false,
-          "Type ",
-          token,
-          " is not supported in the parser, ",
-          "or the token is in wrong format.");
+      if (hard_fail) {
+        TORCH_CHECK(
+            false,
+            "Type ",
+            token,
+            " is not supported in the parser, ",
+            "or the token is in wrong format.");
+      }
     }
     return nullptr;
   }
@@ -166,6 +173,7 @@ class TypeParser {
   std::string pythonStr_;
   size_t start_;
   std::string next_token_;
+  std::unordered_set<std::string> contained_types_;
 };
 
 /*
@@ -329,8 +337,15 @@ class CustomTypeParser final {
 } // namespace
 
 TORCH_API TypePtr parseType(const std::string& pythonStr) {
-  TypeParser paser(pythonStr);
-  return paser.parse();
+  TypeParser parser(pythonStr);
+  return parser.parse();
+}
+
+TORCH_API std::unordered_set<std::string> getContainedTypes(
+    const std::string& pythonStr) {
+  TypeParser parser(pythonStr);
+  parser.parse(false);
+  return parser.getContainedTypes();
 }
 
 TORCH_API TypePtr parseCustomType(IValue custom_type) {
