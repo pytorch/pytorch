@@ -2368,8 +2368,8 @@ corresponding to the polar coordinates with absolute value :attr:`abs` and angle
     `std::polar <https://en.cppreference.com/w/cpp/numeric/complex/polar>`_
     and does not compute the polar decomposition
     of a complex tensor like Python's `cmath.polar` and SciPy's `linalg.polar` do.
-    Like `std::polar`, this operation does not validate its inputs.
-    The behavior of this function is undefined if the absolute value is NaN, or if the angle is infinite.
+    The behavior of this function is undefined if `abs` is negative or NaN, or if `angle` is
+    infinite.
 
 """ + r"""
 Args:
