@@ -10,10 +10,15 @@ from torch.distributed._sharded_tensor import (
     state_dict_hook,
     pre_load_state_dict_hook,
 )
-from torch.distributed._sharding_spec import (
-    ChunkShardingSpec,
-    EnumerableShardingSpec,
-    ShardMetadata
+from torch.distributed._sharded_tensor import (
+    load_with_process_group,
+    state_dict_hook,
+    pre_load_state_dict_hook,
+)
+from torch.distributed._sharded_tensor._internals import (
+    CreateOp,
+    InitCommonParams,
+    create_tensor_from_params,
 )
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
@@ -22,10 +27,10 @@ from torch.testing._internal.common_distributed import (
     TEST_SKIPS,
 )
 from torch.testing._internal.common_utils import (
+    TestCase,
     TEST_WITH_DEV_DBG_ASAN,
     run_tests,
 )
-
 if TEST_WITH_DEV_DBG_ASAN:
     print("Skip dev-asan as torch + multiprocessing spawn have known issues", file=sys.stderr)
     sys.exit(0)
@@ -115,6 +120,36 @@ def with_comms(func):
         self.destroy_comms()
     return wrapper
 
+class TestCreateTensorFromParams(TestCase):
+    def test_empty(self):
+        common_params = InitCommonParams(
+            create_op=CreateOp.EMPTY,
+            dtype=torch.double,
+            layout=torch.strided,
+            requires_grad=False,
+            pin_memory=False,
+            memory_format=torch.contiguous_format, )
+        local_device = torch.device('cuda:0')
+        local_tensor = create_tensor_from_params(
+            5, 10, local_device=local_device, params=common_params)
+        self.assertEqual(local_device, local_tensor.device)
+        self.assertEqual(torch.double, local_tensor.dtype)
+        self.assertEqual(torch.strided, local_tensor.layout)
+        self.assertEqual(False, local_tensor.requires_grad)
+
+    def test_ones(self):
+        common_params = InitCommonParams(
+            create_op=CreateOp.ONES,
+            dtype=torch.double,
+            layout=torch.strided,
+            requires_grad=False,
+            pin_memory=False,
+            memory_format=torch.contiguous_format, )
+        local_device = torch.device('cuda:0')
+        local_tensor = create_tensor_from_params(
+            5, 10, local_device=local_device, params=common_params)
+        expected_tensor = torch.ones(5, 10, device=local_device, dtype=torch.double)
+        self.assertEqual(expected_tensor, local_tensor)
 
 class TestShardedTensorChunked(ShardedTensorTestBase, MultiProcessTestCase):
 
@@ -224,11 +259,10 @@ class TestShardedTensorChunked(ShardedTensorTestBase, MultiProcessTestCase):
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
     def test_create_sharded_tensor_with_ones(self):
-        """ Test creation of _sharded_tensor.ones(...) """
+        """ Test _sharded_tensor.ones(...) """
 
-        dim = 0
         spec = ChunkShardingSpec(
-            dim=dim,
+            dim=0,
             placements=[
                 "rank:0/cuda:0",
                 "rank:1/cuda:1",
@@ -238,7 +272,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase, MultiProcessTestCase):
         )
         sharded_tensor = _sharded_tensor.ones(spec, 10, 20)
 
-        # Validate local shard are like torch.ones
+        # Validate local shard is initialized with torch.ones
         local_shards = sharded_tensor.local_shards()
         self.assertEqual(1, len(local_shards))
         local_shard = local_shards[0].tensor
@@ -853,7 +887,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase, MultiProcessTestCase):
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
     def test_create_sharded_tensor_with_ones(self):
-        """ Test _sharded_tensor.ones """
+        """ Test _sharded_tensor.ones(...) """
 
         spec = EnumerableShardingSpec([
             ShardMetadata(
@@ -882,7 +916,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase, MultiProcessTestCase):
         self.assertEqual((10, 10), sharded_tensor.size())
         self.assertEqual(1, len(sharded_tensor.local_shards()))
 
-        # Verify local shard.
+        # Verify local shard is initialized with torch.ones
         local_shard = sharded_tensor.local_shards()[0]
         self.assertEqual(torch.device(f'cuda:{self.rank}'), local_shard.tensor.device)
         self.assertEqual((5, 5), local_shard.tensor.size())

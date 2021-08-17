@@ -68,12 +68,10 @@ def ones(
         layout=torch.strided,
         requires_grad=False,
         pin_memory=False,
-        # TODO(bowangbj): remove
-        memory_format=torch.contiguous_format,
         process_group=None,
         init_rrefs=False):
     """
-    Creates an empty :class:`ShardedTensor`. Needs to be called on all ranks in an SPMD fashion.
+    Creates a ones :class:`ShardedTensor`. Needs to be called on all ranks in an SPMD fashion.
 
     Args:
         sharding_spec (:class:`torch.distributed._sharding_spec.ShardingSpec`): The specification
@@ -90,8 +88,6 @@ def ones(
             returned tensor. Default: ``False``.
         pin_memory (bool, optional): If set, returned tensor would be allocated in
             the pinned memory. Works only for CPU tensors. Default: ``False``.
-        memory_format (:class:`torch.memory_format`, optional): the desired memory format of
-            returned Tensor. Default: ``torch.contiguous_format``.
         process_group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         init_rrefs (bool, optional): Whether or not to initialize
@@ -103,7 +99,8 @@ def ones(
         A :class:`ShardedTensor` object on each rank
     """
     params = InitCommonParams(create_op=CreateOp.ONES, dtype=dtype, layout=layout,
-        requires_grad=requires_grad, pin_memory=pin_memory, memory_format=memory_format)
+                              requires_grad=requires_grad,
+                              pin_memory=pin_memory,)
     return ShardedTensor(
         sharding_spec,
         *size,

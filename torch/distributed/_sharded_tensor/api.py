@@ -23,6 +23,12 @@ from torch.distributed._sharding_spec._internals import (
     validate_non_overlapping_shards_metadata
 )
 
+from ._internals import (
+    CreateOp,
+    InitCommonParams,
+    create_tensor_from_params,
+)
+
 # Tracking for sharded tensor objects.
 _sharded_tensor_lock = threading.Lock()
 _sharded_tensor_current_id = 0
@@ -46,46 +52,6 @@ def load_with_process_group(process_group):
         yield process_group
     finally:
         _CURRENT_PROCESS_GROUP = None
-
-# TODO(bowang): Move to internal file.
-class CreateOp(Enum):
-    EMPTY = 0
-    ONES = 1
-
-@dataclass
-class InitCommonParams(object):
-    """ Container for list of common params to create new local tensor. """
-
-    __slots__ = ['create_op', 'dtype', 'layout', 'requires_grad', 'pin_memory', 'memory_format']
-
-    create_op: CreateOp
-    dtype: torch.dtype
-    layout: torch.layout
-    requires_grad: bool
-    pin_memory: bool
-    memory_format: torch.memory_format
-
-# TODO(bowangbj): Add Unit Test.
-def create_tensor_from_params(*size, local_device, params: InitCommonParams):
-    """ Helper to construct tensor from size, device and common params. """
-
-    if params.create_op == CreateOp.ONES:
-        return torch.ones(*size,
-                          dtype=params.dtype,
-                          layout=params.layout,
-                          device=local_device,
-                          pin_memory=params.pin_memory,
-                          requires_grad=params.requires_grad,)
-    elif params.create_op == CreateOp.EMPTY:
-        return torch.empty(*size,
-                           dtype=params.dtype,
-                           layout=params.layout,
-                           device=local_device,
-                           requires_grad=params.requires_grad,
-                           memory_format=params.memory_format,
-                           pin_memory=params.pin_memory,)
-    else:
-        raise ValueError(f'Unsupported create_op: {params.create_op}')
 
 @dataclass
 class Shard(object):
@@ -177,8 +143,9 @@ class ShardedTensor(object):
     ShardedTensor doesn't provide any Tensor like operations but is a wrapper
     providing the Tensor representing the local shard and the global metadata.
     Using these, users can build their custom distributed sharded computations
-    on top of this primitive. The local shards are all initialized using
-    :meth:`torch.empty`.
+    on top of this primitive. The local shards are all initialized using the
+    create_op specified by common_params.create_op, e.g., torch.ones, or
+    torch.empty
 
     Args:
         sharding_spec (:class:`torch.distributed._sharding_spec.ShardingSpec`): The specification
@@ -187,20 +154,7 @@ class ShardedTensor(object):
             tensor. Can be a variable number of arguments or a collection like a list or tuple.
 
     Keyword args:
-        dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
-            Default: if ``None``, uses a global default (see :func:`torch.set_default_tensor_type`).
-        layout (:class:`torch.layout`, optional): the desired layout of returned Tensor.
-            Default: ``torch.strided``.
-        requires_grad (bool, optional): If autograd should record operations on the
-            returned tensor. Default: ``False``.
-        pin_memory (bool, optional): If set, returned tensor would be allocated in
-            the pinned memory. Works only for CPU tensors. Default: ``False``.
-        memory_format (:class:`torch.memory_format`, optional): the desired memory format of
-            returned Tensor. Default: ``torch.contiguous_format``.
-        process_group (ProcessGroup, optional): The process group to work on. If None,
-            the default process group will be used. If specified the ShardedTensor is only
-            built on ranks that are part of this process group and the provided ``sharding_spec``
-            is applied in the context of this process group.
+        common_params (:class: `InitCommonParams`): common params to create tensor.
         init_rrefs (bool, optional): Whether or not to initialize
             :class:`torch.distributed.rpc.RRef`s pointing to remote shards.
             Need to initialize the RPC Framework if specified as ``True``.
