@@ -219,6 +219,37 @@ class TestShardedTensorChunked(ShardedTensorTestBase, MultiProcessTestCase):
                     else:
                         self.assertEqual((3, 20), shard.tensor.size())
 
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    @requires_nccl()
+    def test_create_sharded_tensor_with_ones(self):
+        """ Test creation of _sharded_tensor.ones(...) """
+
+        dim = 0
+        spec = ChunkShardingSpec(
+            dim=dim,
+            placements=[
+                "rank:0/cuda:0",
+                "rank:1/cuda:1",
+                "rank:2/cuda:2",
+                "rank:3/cuda:3",
+            ],
+        )
+        sharded_tensor = _sharded_tensor.ones(spec, 10, 20)
+
+        # Validate local shard are like torch.ones
+        local_shards = sharded_tensor.local_shards()
+        self.assertEqual(1, len(local_shards))
+        local_shard = local_shards[0].tensor
+        self.assertEqual(torch.device(f"cuda:{self.rank}"), local_shard.device)
+        if self.rank == 3:
+            self.assertEqual((1, 20), local_shard.size())
+            self.assertEqual(local_shard, torch.ones(1, 20))
+        else:
+            self.assertEqual((3, 20), local_shard.size())
+            self.assertEqual(local_shard, torch.ones(3, 20))
+
     @with_comms
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
@@ -817,6 +848,45 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase, MultiProcessTestCase):
                 self.assertEqual(rpc_rank, remote_shard.owner().id)
                 shard = remote_shard.to_here()
                 self.assertEqual((5, 5), shard.tensor.size())
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    @requires_nccl()
+    def test_create_sharded_tensor_with_ones(self):
+        """ Test _sharded_tensor.ones """
+
+        spec = EnumerableShardingSpec([
+            ShardMetadata(
+                shard_offsets=[0, 0],
+                shard_lengths=[5, 5],
+                placement="rank:0/cuda:0",
+            ),
+            ShardMetadata(
+                shard_offsets=[0, 5],
+                shard_lengths=[5, 5],
+                placement="rank:1/cuda:1",
+            ),
+            ShardMetadata(
+                shard_offsets=[5, 0],
+                shard_lengths=[5, 5],
+                placement="rank:2/cuda:2",
+            ),
+            ShardMetadata(
+                shard_offsets=[5, 5],
+                shard_lengths=[5, 5],
+                placement="rank:3/cuda:3",
+            )
+        ])
+
+        sharded_tensor = _sharded_tensor.ones(spec, 10, 10, init_rrefs=True)
+        self.assertEqual((10, 10), sharded_tensor.size())
+        self.assertEqual(1, len(sharded_tensor.local_shards()))
+
+        # Verify local shard.
+        local_shard = sharded_tensor.local_shards()[0]
+        self.assertEqual(torch.device(f'cuda:{self.rank}'), local_shard.tensor.device)
+        self.assertEqual((5, 5), local_shard.tensor.size())
+        self.assertEqual(local_shard.tensor, torch.ones(5, 5))
 
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
