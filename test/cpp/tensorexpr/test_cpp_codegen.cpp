@@ -14,11 +14,11 @@ using namespace torch::jit::tensorexpr;
 
 TEST(CppPrinter, AllocateOnStackThenFree) {
   KernelScope kernel_scope;
-  std::vector<Expr*> dims = {new IntImm(2), new IntImm(3)};
-  Buf* buf = new Buf("x", dims, kInt);
-  Allocate* alloc = new Allocate(buf);
-  Free* free = new Free(buf);
-  Block* block = Block::make({alloc, free});
+  std::vector<ExprPtr> dims = {alloc<IntImm>(2), alloc<IntImm>(3)};
+  BufPtr buf = alloc<Buf>("x", dims, kInt);
+  AllocatePtr alloc_ = alloc<Allocate>(buf);
+  FreePtr free_ = alloc<Free>(buf);
+  BlockPtr block = Block::make({alloc_, free_});
 
   std::stringstream ss;
   CppPrinter printer(&ss);
@@ -33,11 +33,12 @@ TEST(CppPrinter, AllocateOnStackThenFree) {
 
 TEST(CppPrinter, AllocateOnHeapThenFree) {
   KernelScope kernel_scope;
-  std::vector<Expr*> dims = {new IntImm(20), new IntImm(50), new IntImm(3)};
-  Buf* buf = new Buf("y", dims, kLong);
-  Allocate* alloc = new Allocate(buf);
-  Free* free = new Free(buf);
-  Block* block = Block::make({alloc, free});
+  std::vector<ExprPtr> dims = {
+      alloc<IntImm>(20), alloc<IntImm>(50), alloc<IntImm>(3)};
+  BufPtr buf = alloc<Buf>("y", dims, kLong);
+  AllocatePtr alloc_ = alloc<Allocate>(buf);
+  FreePtr free_ = alloc<Free>(buf);
+  BlockPtr block = Block::make({alloc_, free_});
 
   std::stringstream ss;
   CppPrinter printer(&ss);

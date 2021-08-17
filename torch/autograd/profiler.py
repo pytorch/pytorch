@@ -63,8 +63,8 @@ class profile(object):
             collection.
 
         with_flops (bool, optional): If with_flops is set, the profiler will estimate
-            the FLOPS (floating pointer operations per second) value using the operator's input shape
-            and total time. This allows one to estimate the hardware performance. Currently,
+            the FLOPs (floating point operations) value using the operator's input shape.
+            This allows one to estimate the hardware performance. Currently,
             this option only works for the matrix multiplication and 2D convolution operators.
 
         profile_memory (bool, optional): track tensor memory allocation/deallocation.
