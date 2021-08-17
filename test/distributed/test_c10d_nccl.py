@@ -1741,7 +1741,7 @@ class DistributedDataParallelTest(
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_hook_then_adam_nccl(self):
+    def test_hook_then_adamw_nccl(self):
         adamw_lr = 1e-2
         adamw_betas = (0.9, 0.99)
         adamw_eps = 1e-6

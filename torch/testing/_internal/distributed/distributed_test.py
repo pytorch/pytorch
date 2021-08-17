@@ -4011,7 +4011,7 @@ class DistributedTest:
         )
         @skip_if_lt_x_gpu(2)
         @skip_if_rocm
-        def test_ddp_hook_with_optimizer_parity_adam(self):
+        def test_ddp_hook_with_optimizer_parity_adamw(self):
             for grad_as_bucket_view, static_graph in itertools.product(
                 [True, False], [True, False]
             ):
