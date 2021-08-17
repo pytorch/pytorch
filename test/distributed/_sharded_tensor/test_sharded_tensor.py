@@ -30,6 +30,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
     TEST_WITH_DEV_DBG_ASAN,
     run_tests,
+    sandcastle_skip_if,
 )
 if TEST_WITH_DEV_DBG_ASAN:
     print("Skip dev-asan as torch + multiprocessing spawn have known issues", file=sys.stderr)
@@ -121,6 +122,7 @@ def with_comms(func):
     return wrapper
 
 class TestCreateTensorFromParams(TestCase):
+    @sandcastle_skip_if(torch.cuda.device_count() < 1, 'CUDA GPU is needed')
     def test_empty(self):
         common_params = InitCommonParams(
             create_op=CreateOp.EMPTY,
@@ -137,6 +139,7 @@ class TestCreateTensorFromParams(TestCase):
         self.assertEqual(torch.strided, local_tensor.layout)
         self.assertEqual(False, local_tensor.requires_grad)
 
+    @sandcastle_skip_if(torch.cuda.device_count() < 1, 'CUDA GPU is needed')
     def test_ones(self):
         common_params = InitCommonParams(
             create_op=CreateOp.ONES,
