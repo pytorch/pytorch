@@ -348,21 +348,10 @@ jobs:
         run: |
           cd "${GITHUB_WORKSPACE}"
           python3 -m tools.linter.clang_tidy.generate_build_files
-      - name: Run clang-tidy
-        if: ${{ github.event_name == 'pull_request' }}
-        run: |
-          cd "${GITHUB_WORKSPACE}"
 
-          # The Docker image has our custom build, so we don't need to install it
-          python3 -m tools.linter.clang_tidy \
-            --clang-tidy-exe "$(which clang-tidy)" \
-            --diff-file pr.diff \
-            --disable-progress-bar 2>&1 | tee "${GITHUB_WORKSPACE}"/clang-tidy-output.txt
-
-      # Run clang-tidy on a smaller subset of the codebase on master until we
+          # Run clang-tidy on a smaller subset of the codebase on master until we
       # make the repository clang-tidy clean
       - name: Run clang-tidy
-        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
         run: |
           cd "${GITHUB_WORKSPACE}"
 
