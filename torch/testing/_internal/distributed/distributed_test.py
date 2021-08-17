@@ -7867,6 +7867,7 @@ class DistributedTest:
             torch.cuda.set_device(self.rank)
             default_bucket_cap_mb = 25 * (1024 ** 2)
             first_bucket_bytes_mb = dist._DEFAULT_FIRST_BUCKET_BYTES
+            os.environ["DDP_SET_LAST_BUCKET_CAP"] = "1"
 
             class MyModel(nn.Module):
                 def __init__(self):
@@ -7884,32 +7885,24 @@ class DistributedTest:
                 device_ids=[self.rank]
             )
             inp = torch.randn(10, 2)
+            rebuilt_bucket_index = 2
             for i in range(6):
                 out = ddp(inp).sum()
                 out.backward()
                 logging_data = ddp._get_ddp_logging_data()
-                if i < 2:
-                    bucket_size_limits = [
-                        int(b) for b in logging_data["initial_bucket_size_limits"].split(", ")
-                    ]
-                    # first_bucket_bytes is actually the last because we reverse
-                    # parameter bucket order.
-                    self.assertEqual(bucket_size_limits[-1], first_bucket_bytes_mb)
-                    for j, bucket_size in enumerate(bucket_size_limits):
-                        if j != len(bucket_size_limits) - 1:
-                            self.assertEqual(bucket_size, default_bucket_cap_mb)
-                else:
-                    bucket_size_limits = [
-                        int(b) for b in logging_data["rebuilt_bucket_size_limits"].split(", ")
-                    ]
-                    # TODO: rebuild buckets places first bucket at beginning, but
-                    # might be better to move it to end.
-                    self.assertEqual(
-                        bucket_size_limits[0], first_bucket_bytes_mb
-                    )
-                    for j, bucket_size in enumerate(bucket_size_limits):
-                        if j != 0:
-                            self.assertEqual(bucket_size, default_bucket_cap_mb)
+                bucket_size_limits = [
+                    int(b) for b in logging_data[
+                        "{}_bucket_size_limits".format(
+                            "initial" if i < rebuilt_bucket_index else "rebuilt"
+                        )
+                    ].split(", ")
+                ]
+                # first_bucket_bytes is actually the last because we reverse
+                # parameter bucket order under DDP_SET_LAST_BUCKET_CAP flag.
+                self.assertEqual(bucket_size_limits[-1], first_bucket_bytes_mb)
+                for j, bucket_size in enumerate(bucket_size_limits):
+                    if j != len(bucket_size_limits) - 1:
+                        self.assertEqual(bucket_size, default_bucket_cap_mb)
 
         @skip_if_lt_x_gpu(2)
         @sandcastle_skip_if(
