@@ -145,7 +145,7 @@ class TestDataChunk(TestCase):
         chunk.reverse()
         self.assertTrue(isinstance(chunk, DataChunk))
         for i in range(10):
-            self.assertEqual(chunk[i], self.elements[9-i])
+            self.assertEqual(chunk[i], self.elements[9 - i])
 
     def test_random_shuffle(self):
         elements = list(range(10))
