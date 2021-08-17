@@ -4129,10 +4129,13 @@ def sample_inputs_matmul(op_info, device, dtype, requires_grad):
                   ((S, M), (M,)),
                   ((M,), (M, S)),
                   ((S, M), (M, S)),
+                  ((S, 0), (0, M)),
                   ((S, S, M), (M,)),
                   ((S, S, M), (M, S)),
+                  ((S, S, 0), (0, S)),
                   ((M,), (S, M, S)),
                   ((S, M), (S, M, S)),
+                  ((0, 0), (S, 0, 0)),
                   ((S, S, M, M), (S, S, M, S)),
                   ((S, S, M, M), (M,)),
                   ((M,), (S, S, M, S)))
@@ -4147,6 +4150,45 @@ def sample_inputs_matmul(op_info, device, dtype, requires_grad):
         else:
             raise RuntimeError("`op_info.name` must be 'matmul' or '__rmatmul__'")
     return tuple(sample_inputs)
+
+
+def sample_inputs_meshgrid(op_info: OpInfo, device: torch.device, dtype: torch.dtype,
+                           requires_grad: bool,
+                           *, variant: str) -> List[SampleInput]:
+    if variant == 'variadic':
+        def make_inputs(
+                tensors: List[torch.Tensor]) -> Tuple[Union[torch.Tensor,
+                                                            List[torch.Tensor]],
+                                                      Tuple[torch.Tensor, ...]]:
+            return tensors[0], tuple(tensors[1:])
+    elif variant == 'list':
+        def make_inputs(
+                tensors: List[torch.Tensor]) -> Tuple[Union[torch.Tensor,
+                                                            List[torch.Tensor]],
+                                                      Tuple[torch.Tensor, ...]]:
+            return tensors, ()
+    else:
+        raise ValueError(
+            'Unsupported variant, must be one of {"variadic", "list"}. '
+            f'Got "{variant}".')
+
+    SCALAR = torch.Size([])
+    VECTOR = torch.Size([3])
+    test_cases: List[List[torch.Size]] = [
+        [SCALAR],
+        [VECTOR],
+        [VECTOR, SCALAR],
+        [VECTOR, SCALAR, VECTOR],
+        [VECTOR, SCALAR, VECTOR, SCALAR],
+    ]
+
+    sample_inputs = []
+    for shapes in test_cases:
+        input, args = make_inputs(
+            [make_tensor(shape, device, dtype, requires_grad=requires_grad)
+             for shape in shapes])
+        sample_inputs.append(SampleInput(input=input, args=args))
+    return sample_inputs
 
 
 def sample_inputs_polar(op_info, device, dtype, requires_grad, **kwargs):
@@ -6759,6 +6801,42 @@ op_db: List[OpInfo] = [
                SkipInfo('TestGradients', 'test_fn_grad'),
                SkipInfo('TestGradients', 'test_fn_gradgrad'),
                SkipInfo('TestGradients', 'test_forward_mode_AD'))),
+    OpInfo('meshgrid',
+           variant_test_name='variadic_tensors',
+           # Our implementation corresponds to "ij" indexing for
+           # numpy.meshgrid, but its default value is "xy".
+           ref=lambda *tensors: np.meshgrid(*tensors, indexing='ij'),
+           dtypes=all_types_and_complex_and(torch.bfloat16, torch.bool, torch.float16),
+           sample_inputs_func=partial(sample_inputs_meshgrid, variant='variadic'),
+           skips=[
+               # JIT does not support variadic tensors.
+               SkipInfo('TestJit', 'test_variant_consistency_jit'),
+               # meshgrid is defined in torch.functional to take a
+               # variadic list of tensors. Variadic parameters are not
+               # compatible with the normalize operator tests.
+               SkipInfo('TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
+               # Skip operator schema test because this is a functional and not an operator
+               SkipInfo('TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
+           ],
+           supports_out=False,
+           supports_forward_ad=True),
+    OpInfo('meshgrid',
+           variant_test_name='list_of_tensors',
+           # Unlike the variant above, we do not use np.meshgrid as a
+           # ref since it does not officially support list of numpy
+           # arrays.
+           dtypes=all_types_and_complex_and(torch.bfloat16, torch.bool, torch.float16),
+           sample_inputs_func=partial(sample_inputs_meshgrid, variant='list'),
+           skips=[
+               # meshgrid is defined in torch.functional to take a
+               # variadic list of tensors. Variadic parameters are not
+               # compatible with the normalize operator tests.
+               SkipInfo('TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
+           ],
+           assert_autodiffed=True,
+           supports_out=False,
+           autodiff_nonfusible_nodes=[],
+           supports_forward_ad=True),
     OpInfo('min',
            op=torch.min,
            variant_test_name='binary',
@@ -6879,6 +6957,10 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
            sample_inputs_func=sample_inputs_conv_transpose2d,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+           decorators=[
+               DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1.3e-06), }),
+                   'TestCommon', 'test_variant_consistency_eager', device_type='cuda')],
            skips=(
                # RuntimeError: !lhs.isAliasOf(rhs)INTERNAL ASSERT FAILED at
                # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":104, please report a bug to PyTorch.
