@@ -737,8 +737,8 @@ struct MobileCodeImpl : CodeImpl {
         auto op_schema = node->getOperator().schema();
         // skip if schema has vararg
         if (!op_schema.is_vararg()) {
-          auto numInclude =
-              CalculateNecessaryArgs(op_schema.arguments(), node->inputs());
+          auto numInclude = CalculateNecessaryArgs(
+              op_schema.arguments(), node->inputs(), false);
           auto unique_name = op_schema.overload_name() != ""
               ? op_schema.name() + "." + op_schema.overload_name()
               : op_schema.name();

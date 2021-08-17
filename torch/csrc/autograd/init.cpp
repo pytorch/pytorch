@@ -18,6 +18,7 @@
 #include <c10/core/ScalarType.h>
 
 #include <set>
+#include <unordered_set>
 
 struct DisableTorchDispatch {
   DisableTorchDispatch() : guard_(c10::DispatchKey::Python) {
@@ -73,7 +74,13 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .value("CUDA", ActivityType::CUDA);
 
   py::class_<ProfilerConfig>(m, "ProfilerConfig")
-      .def(py::init<ProfilerState, bool, bool, bool, bool>());
+      .def(py::init<ProfilerState,
+          bool, /* record_input_shapes */
+          bool, /* profile_memory */
+          bool, /* with_stac k*/
+          bool, /* with_flops */
+          bool  /* with_modules */
+          >());
 
   py::class_<LegacyEvent>(m, "ProfilerEvent")
       .def("kind", &LegacyEvent::kindStr)
@@ -217,7 +224,11 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
 #endif // USE_KINETO
     ;
 
-  m.def("_enable_profiler", enableProfiler);
+  m.def("_enable_profiler",
+        &enableProfiler,
+        py::arg("config"),
+        py::arg("activities"),
+        py::arg("scopes") = std::unordered_set<at::RecordScope>());
   m.def("_disable_profiler", disableProfiler);
   m.def("_prepare_profiler", prepareProfiler);
 
@@ -272,10 +283,10 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   m.def("_clear_callbacks", []() {
     at::clearCallbacks();
   });
-  m.def("_register_default_hooks", [](py::function &pack_hook, py::function &unpack_hook) {
+  m.def("_register_saved_tensors_default_hooks", [](py::function &pack_hook, py::function &unpack_hook) {
     torch::autograd::PyDefaultSavedVariableHooks::set_hooks(pack_hook, unpack_hook);
   });
-  m.def("_reset_default_hooks", []() {
+  m.def("_reset_saved_tensors_default_hooks", []() {
     torch::autograd::PyDefaultSavedVariableHooks::reset_hooks();
   });
 
