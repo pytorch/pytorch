@@ -644,7 +644,6 @@ jobs:
           set -ex
           export SCRIBE_GRAPHQL_ACCESS_TOKEN="${SCRIBE_GRAPHQL_ACCESS_TOKEN}"
           export JOB_BASE_NAME="$CIRCLE_JOB"
-          export IN_WHEEL_TEST=1
           ${PARALLEL_FLAGS}
           cd workspace
           EOL
@@ -1381,6 +1380,7 @@ jobs:
             set -e
             export IN_CI=1
             export CROSS_COMPILE_ARM64=1
+            export JOB_BASE_NAME=$CIRCLE_JOB
 
             # Install sccache
             sudo curl --retry 3 https://s3.amazonaws.com/ossci-macos/sccache_v2.15 --output /usr/local/bin/sccache
@@ -1417,6 +1417,7 @@ jobs:
           command: |
             set -e
             export IN_CI=1
+            export JOB_BASE_NAME=$CIRCLE_JOB
 
             # Install sccache
             sudo curl --retry 3 https://s3.amazonaws.com/ossci-macos/sccache_v2.15 --output /usr/local/bin/sccache
@@ -1453,6 +1454,7 @@ jobs:
           command: |
             set -e
             export IN_CI=1
+            export JOB_BASE_NAME=$CIRCLE_JOB
 
             chmod a+x .jenkins/pytorch/macos-test.sh
             unbuffer .jenkins/pytorch/macos-test.sh 2>&1 | ts
@@ -1463,6 +1465,9 @@ jobs:
             set -ex
             source /Users/distiller/workspace/miniconda3/bin/activate
             pip install boto3
+
+            export IN_CI=1
+            export JOB_BASE_NAME=$CIRCLE_JOB
 
             # Using the same IAM user to write stats to our OSS bucket
             export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V4}
@@ -1489,6 +1494,7 @@ jobs:
             set -e
             export IN_CI=1
             export BUILD_LITE_INTERPRETER=1
+            export JOB_BASE_NAME=$CIRCLE_JOB
             chmod a+x ${HOME}/project/.jenkins/pytorch/macos-lite-interpreter-build-test.sh
             unbuffer ${HOME}/project/.jenkins/pytorch/macos-lite-interpreter-build-test.sh 2>&1 | ts
       - store_test_results:
@@ -7034,6 +7040,9 @@ workflows:
           name: "docker-pytorch-linux-xenial-py3-clang5-asan"
           image_name: "pytorch-linux-xenial-py3-clang5-asan"
       - docker_build_job:
+          name: "docker-pytorch-linux-xenial-py3-clang7-asan"
+          image_name: "pytorch-linux-xenial-py3-clang7-asan"
+      - docker_build_job:
           name: "docker-pytorch-linux-xenial-py3-clang7-onnx"
           image_name: "pytorch-linux-xenial-py3-clang7-onnx"
       - docker_build_job:
@@ -7229,24 +7238,24 @@ workflows:
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc7"
           resource_class: large
       - pytorch_linux_build:
-          name: pytorch_linux_xenial_py3_clang5_asan_build
+          name: pytorch_linux_xenial_py3_clang7_asan_build
           requires:
-            - "docker-pytorch-linux-xenial-py3-clang5-asan"
-          build_environment: "pytorch-linux-xenial-py3-clang5-asan-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-asan"
+            - "docker-pytorch-linux-xenial-py3-clang7-asan"
+          build_environment: "pytorch-linux-xenial-py3-clang7-asan-build"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang7-asan"
       - pytorch_linux_test:
-          name: pytorch_linux_xenial_py3_clang5_asan_test1
+          name: pytorch_linux_xenial_py3_clang7_asan_test1
           requires:
-            - pytorch_linux_xenial_py3_clang5_asan_build
-          build_environment: "pytorch-linux-xenial-py3-clang5-asan-test1"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-asan"
+            - pytorch_linux_xenial_py3_clang7_asan_build
+          build_environment: "pytorch-linux-xenial-py3-clang7-asan-test1"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang7-asan"
           resource_class: large
       - pytorch_linux_test:
-          name: pytorch_linux_xenial_py3_clang5_asan_test2
+          name: pytorch_linux_xenial_py3_clang7_asan_test2
           requires:
-            - pytorch_linux_xenial_py3_clang5_asan_build
-          build_environment: "pytorch-linux-xenial-py3-clang5-asan-test2"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-asan"
+            - pytorch_linux_xenial_py3_clang7_asan_build
+          build_environment: "pytorch-linux-xenial-py3-clang7-asan-test2"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang7-asan"
           resource_class: large
       - pytorch_linux_build:
           name: pytorch_linux_xenial_py3_clang7_onnx_build
@@ -7787,6 +7796,7 @@ workflows:
           ios_arch: x86_64
           ios_platform: SIMULATOR
           name: pytorch_ios_12_0_0_nightly_x86_64_build
+          use_metal: "1"
       - binary_ios_build:
           build_environment: libtorch-ios-12.0.0-nightly-arm64-build
           context: org-member
@@ -7796,6 +7806,7 @@ workflows:
           ios_arch: arm64
           ios_platform: OS
           name: pytorch_ios_12_0_0_nightly_arm64_build
+          use_metal: "1"
       - binary_ios_upload:
           build_environment: libtorch-ios-12.0.0-nightly-binary-build-upload
           context: org-member
@@ -7878,7 +7889,7 @@ workflows:
               only:
                 - postnightly
       - pytorch_windows_build:
-          build_environment: pytorch-win-vs2019-cuda10-cudnn7-py3
+          build_environment: pytorch-win-vs2019-cuda10.1-py3
           cuda_version: "10.1"
           filters:
             branches:
@@ -7894,7 +7905,7 @@ workflows:
           vc_year: "2019"
           vs_version: "16.8.6"
       - pytorch_windows_test:
-          build_environment: pytorch-win-vs2019-cuda10-cudnn7-py3
+          build_environment: pytorch-win-vs2019-cuda10.1-py3
           cuda_version: "10.1"
           filters:
             branches:
@@ -9515,7 +9526,7 @@ workflows:
           requires:
             - binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_shared-with-deps_build
       - pytorch_windows_build:
-          build_environment: pytorch-win-vs2019-cuda10-cudnn7-py3
+          build_environment: pytorch-win-vs2019-cuda10.1-py3
           cuda_version: "10.1"
           name: pytorch_windows_vs2019_py38_cuda10.1_build
           python_version: "3.8"
@@ -9525,7 +9536,7 @@ workflows:
           vc_year: "2019"
           vs_version: "16.8.6"
       - pytorch_windows_test:
-          build_environment: pytorch-win-vs2019-cuda10-cudnn7-py3
+          build_environment: pytorch-win-vs2019-cuda10.1-py3
           cuda_version: "10.1"
           name: pytorch_windows_vs2019_py38_cuda10.1_on_cpu_test1
           python_version: "3.8"

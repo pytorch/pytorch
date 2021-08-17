@@ -32,7 +32,7 @@ class HalfChecker : public IRVisitor {
     IRVisitor::visit(v);
   }
 
-  void visit(const HalfImm* v) override {
+  void visit(HalfImm* v) override {
     hasHalf_ = true;
   }
 
@@ -61,9 +61,11 @@ class HalfRewriter : public IRMutator {
   }
 
   Stmt* mutate(Store* v) override {
+    // Since mutation changes the `value()` expression in-place, we need to
+    // get the dtype of the `value()` before that is mutated.
+    Dtype newType = v->value()->dtype();
     Expr* new_val = v->value()->accept_mutator(this);
 
-    Dtype newType = v->value()->dtype();
     if (newType.scalar_type() == ScalarType::Half) {
       new_val =
           new Cast(newType.cloneWithScalarType(ScalarType::Half), new_val);
