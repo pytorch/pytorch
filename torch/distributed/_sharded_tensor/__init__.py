@@ -3,12 +3,16 @@ from typing import List
 import torch
 from torch.distributed._sharding_spec import ShardingSpec
 from .api import (
-    CreateOp,
-    InitCommonParams,
     Shard,
     ShardedTensor,
     ShardedTensorMetadata,
     load_with_process_group,
+)
+
+from ._internals import (
+    CreateOp,
+    InitCommonParams,
+    create_tensor_from_params,
 )
 
 def empty(
