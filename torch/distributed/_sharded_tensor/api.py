@@ -1,7 +1,6 @@
 import collections
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from enum import Enum
 from typing import (
     Dict,
     List
@@ -24,7 +23,6 @@ from torch.distributed._sharding_spec._internals import (
 )
 
 from ._internals import (
-    CreateOp,
     InitCommonParams,
     create_tensor_from_params,
 )
