@@ -12,7 +12,7 @@ namespace at {
 ThreadLocalState::ThreadLocalState(bool keep_grad_mode)
     : dispatch_key_(c10::impl::tls_local_dispatch_key_set()),
       debug_info_(c10::ThreadLocalDebugInfo::current()),
-      autograd_tls_(c10::AutogradTLS::get_mode()) {
+      autograd_tls_(c10::AutogradState::get_tls_state()) {
   rf_tls_ = at::get_record_function_tls_();
   saved_tensors_default_hooks_ = SavedTensorDefaultHooks::get_hooks();
 
@@ -29,12 +29,14 @@ void ThreadLocalState::setThreadLocalState(
   // restore the dispatch key set TLS at the same time.
 #if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
   if (state.keep_grad_mode_) {
-    c10::AutogradTLS::set_mode(state.autograd_tls_);
+    c10::AutogradState::set_tls_state(state.autograd_tls_);
   } else {
-    c10::AutogradTLS::set_inference_mode(state.autograd_tls_ & c10::AutogradTLS::INFERENCE_MODE_MASK);
+    auto new_state = c10::AutogradState(/* grad_mode */ c10::AutogradState::get_tls_state().get_grad_mode(),
+                                        /* inference_mode */ state.autograd_tls_.get_inference_mode());
+    c10::AutogradState::set_tls_state(new_state);
   }
 #else
-  c10::AutogradTLS::set_mode(state.autograd_tls_);
+  c10::AutogradState::set_tls_state(state.autograd_tls_);
 #endif
 
   at::set_record_function_tls_(state.rf_tls_);
