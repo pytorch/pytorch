@@ -41,10 +41,24 @@ class AST_Rewriter(ast.NodeTransformer):
         new_keys = list(set(globals_dict.keys()) - keys_before)
         assert len(new_keys) == 1
         fn_compiled = globals_dict[new_keys[0]]
-        fn_compiled = _copy_func_and_overwrite_globals(fn_compiled, globals=fn.__globals__)
 
+        # return the compiled function with the original globals
+        def change_func_globals(f, globals):
+            """Based on https://stackoverflow.com/a/13503277/2988730 (@unutbu)"""
+            # __globals__ is a private member of the function class
+            # so we have to copy the function, f, all of its member, except f.__globals__
+            g = FunctionType(
+                f.__code__,
+                globals,
+                name=f.__name__,
+                argdefs=f.__defaults__,
+                closure=f.__closure__,
+            )
+            g = functools.update_wrapper(g, f)
+            g.__kwdefaults__ = copy.copy(f.__kwdefaults__)
+            return g
         # Return the correct FunctionType object
-        return fn_compiled
+        return change_func_globals(fn_compiled, globals=fn.__globals__)
 
     def visit_Assert(self, node):
         """
@@ -105,16 +119,3 @@ def _rewrite(fn: Union[torch.nn.Module, Callable]) -> Union[torch.nn.Module, Cal
     else:
         # Rewrite this single free function
         return AST_Rewriter().rewrite(cast(FunctionType, fn))
-
-def _copy_func_and_overwrite_globals(f, globals):
-    """Based on https://stackoverflow.com/a/13503277/2988730 (@unutbu)"""
-    g = FunctionType(
-        f.__code__,
-        globals,
-        name=f.__name__,
-        argdefs=f.__defaults__,
-        closure=f.__closure__,
-    )
-    g = functools.update_wrapper(g, f)
-    g.__kwdefaults__ = copy.copy(f.__kwdefaults__)
-    return g
