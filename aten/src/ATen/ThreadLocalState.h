@@ -38,7 +38,7 @@ class TORCH_API ThreadLocalState {
   RecordFunctionTLS rf_tls_;
 
   // TLS for AutogradModes
-  uint8_t autograd_tls_;
+  AutogradState autograd_tls_;
 
   // TLS for saved tensors default hooks
   std::pair<PyObject*, PyObject*> saved_tensors_default_hooks_;
