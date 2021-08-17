@@ -568,7 +568,7 @@ class TestFXExperimental(JitTestCase):
             node_to_partition_id = {}
             partition_to_logical_devices = {}
             count = 0
-            GraphManipulation.get_size_of_all_nodes(traced, [a])
+            graph_manipulation.get_size_of_all_nodes(traced, [a])
             for node in traced.graph.nodes:
                 if node.op not in {"placeholder", "get_attr", "output"}:
                     node_to_partition_id[node] = count
