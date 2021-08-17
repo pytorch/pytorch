@@ -1044,7 +1044,7 @@ endif()
 
 if(USE_BREAKPAD)
   target_compile_definitions(torch_cpu PRIVATE ADD_BREAKPAD_SIGNAL_HANDLER)
-  target_include_directories(torch_cpu PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../third_party/breakpad/src)
+  target_include_directories(torch_cpu PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../third_party ${CMAKE_CURRENT_LIST_DIR}/../third_party/breakpad/src)
   target_link_libraries(torch_cpu PRIVATE breakpad)
 endif()
 
