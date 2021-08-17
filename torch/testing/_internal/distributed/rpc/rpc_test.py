@@ -1046,11 +1046,11 @@ class RpcTest(RpcAgentTestFixture):
         for i in range(20):
             futs.append(rpc.rpc_async(dst, raise_func))
 
-        with self.assertRaisesRegex(RuntimeError, "Expected error"):
+        with self.assertRaisesRegex(ValueError, "Expected error"):
             torch.futures.wait_all(futs)
 
         for fut in futs:
-            with self.assertRaisesRegex(RuntimeError, "Expected error"):
+            with self.assertRaisesRegex(ValueError, "Expected error"):
                 fut.wait()
 
     def _run_uneven_workload(self, num_repeat=30):
