@@ -54,6 +54,7 @@ export_onnx(
     bool add_node_names = true,
     bool use_external_data_format = false,
     const std::string& onnx_file_path = std::string(),
+    // const std::vector<std::string>& module_names_to_function = {},
     const ValAttrNameMap& val_attr_to_name = {},
     const NodeAttrNameMap& node_attr_to_name = {});
 
