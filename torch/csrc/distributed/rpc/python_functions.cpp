@@ -152,6 +152,13 @@ c10::intrusive_ptr<JitFuture> toPyJitFuture(
             IValue ivalue;
             try {
               ivalue = toPyIValue(message);
+            } catch (py::error_already_set& e) {
+              py::gil_scoped_acquire acquire;
+              // py::error_already_set requires GIL to destruct, take special care.
+              child->setErrorIfNeeded(std::make_exception_ptr(std::runtime_error(e.what())));
+              e.restore();
+              PyErr_Clear();
+              return;
             } catch (std::exception& e) {
               child->setErrorIfNeeded(std::current_exception());
               return;
