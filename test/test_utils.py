@@ -97,7 +97,7 @@ class TestCheckpoint(TestCase):
 
             def forward(self, input_var):
                 self.counter += 1
-                return input_var
+                return input_var * input_var
 
         # checkpointed
         modules = [Net() for _ in range(10)]
@@ -129,10 +129,9 @@ class TestCheckpoint(TestCase):
         chunks = 2
         modules = list(model.children())
         out = checkpoint_sequential(modules, chunks, input_var)
-        with self.assertRaisesRegex(RuntimeError, "Checkpointing is not compatible"):
-            torch.autograd.grad(
-                outputs=[out], grad_outputs=[torch.ones(1, 5)], inputs=[input_var], create_graph=True
-            )
+        torch.autograd.grad(
+            outputs=[out], grad_outputs=[torch.ones(1, 5)], inputs=[input_var], create_graph=True
+        )
 
     def test_checkpoint(self):
         model = nn.Sequential(
