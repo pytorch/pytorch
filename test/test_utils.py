@@ -19,7 +19,7 @@ import torch.utils.cpp_extension
 import torch.hub as hub
 from torch.autograd._functions.utils import check_onnx_broadcast
 from torch.onnx.symbolic_opset9 import _prepare_onnx_paddings
-from torch.testing._internal.common_utils import load_tests, retry, IS_SANDCASTLE, IS_WINDOWS, TEST_WITH_ASAN
+from torch.testing._internal.common_utils import has_breakpad, load_tests, retry, IS_SANDCASTLE, IS_WINDOWS, TEST_WITH_ASAN
 from urllib.error import URLError
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
@@ -740,6 +740,7 @@ class TestAssert(TestCase):
 
 class TestCrashHandler(TestCase):
     @unittest.skipIf(TEST_WITH_ASAN, "ASAN disables the crash handler's signal handler")
+    @unittest.skipIf(not has_breakpad(), "Built without breakpad")
     def test_python_exception_writing(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             torch.utils._crash_handler.enable_minidumps(temp_dir)

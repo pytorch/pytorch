@@ -16,7 +16,7 @@ import torch
 import torch.backends.cudnn
 import torch.utils.cpp_extension
 from torch.utils.cpp_extension import CUDA_HOME, ROCM_HOME
-from torch.testing._internal.common_utils import gradcheck, TEST_WITH_ASAN
+from torch.testing._internal.common_utils import gradcheck, TEST_WITH_ASAN, has_breakpad
 
 
 TEST_CUDA = torch.cuda.is_available() and CUDA_HOME is not None
@@ -920,6 +920,7 @@ class TestCppExtensionJIT(common.TestCase):
         module.fail()
 
     @unittest.skipIf(TEST_WITH_ASAN, "ASAN disables the crash handler's signal handler")
+    @unittest.skipIf(not has_breakpad(), "Built without breakpad")
     def test_crash_handler(self):
         with tempfile.TemporaryDirectory() as temp_dir, tempfile.NamedTemporaryFile(delete=not sys.platform == "win32") as stderr:
             # Use multiprocessing to spin up a separate process to make catching
