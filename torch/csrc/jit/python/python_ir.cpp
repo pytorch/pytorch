@@ -697,10 +697,8 @@ void initPythonIRBindings(PyObject* module_) {
           })
       .def(
           "tys_",
-          [](Node& n,
-             const char* name,
-             const std::vector<TypePtr>& types) {
-             return n.tys_(Symbol::attr(name), std::move(types));
+          [](Node& n, const char* name, const std::vector<TypePtr>& types) {
+            return n.tys_(Symbol::attr(name), std::move(types));
           })
       .def(
           "zs_",

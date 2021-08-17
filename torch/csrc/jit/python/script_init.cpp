@@ -445,16 +445,17 @@ static TypePtr inferShapeAndTypeForInput(
     const Stack::const_iterator& s_iter_end,
     bool complete) {
   if (auto tuple_type = input_type->cast<TupleType>()) {
-	  std::vector<TypePtr> types;
-	  for (const auto& sub_type : tuple_type->containedTypes()) {
-	    TORCH_INTERNAL_ASSERT(s_iter != s_iter_end);
-	    types.emplace_back(
-	        inferShapeAndTypeForInput(sub_type, s_iter, s_iter_end, complete));
-	  }
+    std::vector<TypePtr> types;
+    for (const auto& sub_type : tuple_type->containedTypes()) {
+      TORCH_INTERNAL_ASSERT(s_iter != s_iter_end);
+      types.emplace_back(
+          inferShapeAndTypeForInput(sub_type, s_iter, s_iter_end, complete));
+    }
     return TupleType::create(types);
   } else if (auto list_type = input_type->cast<ListType>()) {
-	  const TypePtr& sub_type = list_type->getElementType();
-    auto elem_type = inferShapeAndTypeForInput(sub_type, s_iter, s_iter_end, complete);
+    const TypePtr& sub_type = list_type->getElementType();
+    auto elem_type =
+        inferShapeAndTypeForInput(sub_type, s_iter, s_iter_end, complete);
     return ListType::create(elem_type);
   } else if (auto tensor_type = input_type->cast<TensorType>()) {
     auto type = getTensorType(s_iter->toTensor(), complete);
@@ -462,7 +463,8 @@ static TypePtr inferShapeAndTypeForInput(
     return type;
   } else if (auto optional_type = input_type->cast<OptionalType>()) {
     const TypePtr& sub_type = optional_type->getElementType();
-    auto elem_type = inferShapeAndTypeForInput(sub_type, s_iter, s_iter_end, complete);
+    auto elem_type =
+        inferShapeAndTypeForInput(sub_type, s_iter, s_iter_end, complete);
     return OptionalType::create(elem_type);
   } else {
     // Primitive type, keep as is.

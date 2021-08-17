@@ -611,6 +611,20 @@ void GraphEncoder::EncodeValueInfoType(
       onnx::TypeProto_Tensor* tensor_type =
           onnx_optional_type->mutable_elem_type()->mutable_tensor_type();
       tensorTypeToONNXType(inner_node_type, tensor_type);
+    } else if (ListTypePtr inner_node_type = elem_type->cast<ListType>()) {
+      auto list_elem_type = inner_node_type->getElementType();
+      if (TensorTypePtr inner_list_node_type =
+              list_elem_type->cast<TensorType>()) {
+        onnx::TypeProto* onnx_type = v->mutable_type();
+        onnx::TypeProto_Optional* onnx_optional_type =
+            onnx_type->mutable_optional_type();
+        onnx::TypeProto_Sequence* onnx_optional_sequence_type =
+            onnx_optional_type->mutable_elem_type()->mutable_sequence_type();
+        onnx::TypeProto_Tensor* tensor_type =
+            onnx_optional_sequence_type->mutable_elem_type()
+                ->mutable_tensor_type();
+        tensorTypeToONNXType(inner_list_node_type, tensor_type);
+      }
     }
   }
 }

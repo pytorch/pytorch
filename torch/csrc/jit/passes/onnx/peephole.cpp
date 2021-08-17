@@ -996,26 +996,15 @@ static void removeSequenceSplitConcat(Block* b) {
 // as block output. Inserts an Identity node inside the block, and have the
 // block return the output of the Identity.
 void insertIdentityForInputUsedAsOutput(Block* b) {
-  for (auto output : b->outputs()) {
-    auto n = output->node();
-    if (output->node()->owningBlock() != b) {
-      if (auto optional_output_type = output->type()->cast<OptionalType>()) {
-        // TODO: Add Optional type to onnx::Identity input types
-        const TypePtr& t = optional_output_type->getElementType();
-        Node* optional_node = b->owningGraph()->create(onnx::Optional);
-        optional_node->ty_(Symbol::attr("type"), t);
-        optional_node->insertBefore(b->return_node());
-        optional_node->output()->setType(OptionalType::create(t));
-        optional_node->copyMetadata(b->owningNode());
-        b->return_node()->replaceInputWith(output, optional_node->output());
-      } else {
-        Node* id_node = b->owningGraph()->create(onnx::Identity);
-        id_node->insertBefore(b->return_node());
-        id_node->addInput(output);
-        id_node->output()->setType(output->type());
-        id_node->copyMetadata(b->owningNode());
-        b->return_node()->replaceInputWith(output, id_node->output());
-      }
+  for (auto out : b->outputs()) {
+    auto n = out->node();
+    if (out->node()->owningBlock() != b) {
+      Node* id_node = b->owningGraph()->create(onnx::Identity);
+      id_node->insertBefore(b->return_node());
+      id_node->addInput(out);
+      id_node->output()->setType(out->type());
+      id_node->copyMetadata(b->owningNode());
+      b->return_node()->replaceInputWith(out, id_node->output());
     }
   }
 
