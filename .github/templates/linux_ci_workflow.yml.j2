@@ -395,6 +395,12 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      {%- if is_coverage %}
+      - name: Report coverage
+        run: |
+          python3 -mpip install codecov
+          python3 -mcodecov
+      {%- endif %}
       - name: Zip test reports for upload
         if: always()
         env:
