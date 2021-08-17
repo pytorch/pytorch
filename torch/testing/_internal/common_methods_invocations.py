@@ -21,7 +21,7 @@ from torch.testing import \
      integral_types_and, all_types, double_types)
 from .._core import _dispatch_dtypes
 from torch.testing._internal.common_device_type import \
-    (onlyOnCPUAndCUDA, skipIf, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfNoCusolver,
+    (expectedFailure, onlyOnCPUAndCUDA, skipIf, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfNoCusolver,
      skipCPUIfNoLapack, skipCPUIfNoFFT, skipCUDAIfRocm, precisionOverride, toleranceOverride, tol)
 from torch.testing._internal.common_cuda import CUDA11OrLater, SM53OrLater, SM60OrLater
 from torch.testing._internal.common_utils import \
@@ -83,11 +83,22 @@ class SkipInfo(DecorateInfo):
        an operator. Any test that matches all provided arguments will be skipped.
        The skip will only be checked if the active_if argument is True."""
 
-    def __init__(self, cls_name=None, test_name=None, *,
-                 device_type=None, dtypes=None, active_if=True):
-        super().__init__(decorators=skipIf(True, "Skipped!"), cls_name=cls_name,
-                         test_name=test_name, device_type=device_type, dtypes=dtypes,
-                         active_if=active_if)
+    def __init__(
+            self, cls_name=None, test_name=None, *, device_type=None, dtypes=None, active_if=True,
+            expected_failure=False):
+        """
+        Args:
+            cls_name: the name of the test class to skip
+            test_name: the name of the test within the test class to skip
+            device_type: the devices for which to skip the tests
+            dtypes: the dtypes for which to skip the tests
+            active_if: whether tests matching the above arguments should be skipped
+            expected_failure: whether to assert that skipped tests fail
+        """
+        decorator = expectedFailure(device_type) if expected_failure else skipIf(True, "Skipped!")
+        super().__init__(decorators=decorator, cls_name=cls_name, test_name=test_name,
+                         device_type=device_type, dtypes=dtypes, active_if=active_if)
+
 
 
 class SampleInput(object):
@@ -466,7 +477,7 @@ class OpInfo(object):
                  # modifying tests and a pointer to the op's sample inputs function
                  # this function lets the OpInfo generate valid inputs
                  skips=tuple(),  # information about which tests to skip
-                 decorators=None,  # decorators to apply to generated tests
+                 decorators=tuple(),  # decorators to apply to generated tests
                  sample_inputs_func=None,  # function to generate sample inputs
 
                  # the following metadata relates to dtype support and is tested for correctness in test_ops.py
@@ -593,8 +604,7 @@ class OpInfo(object):
         self.supports_out = supports_out
         self.safe_casts_outputs = safe_casts_outputs
 
-        self.skips = skips
-        self.decorators = decorators
+        self.decorators = (*decorators, *skips)
         self.sample_inputs_func = sample_inputs_func
 
         self.assert_autodiffed = assert_autodiffed
@@ -708,10 +718,16 @@ class OpInfo(object):
 
         return samples
 
-    # Returns True if the test should be skipped and False otherwise
-    def should_skip(self, cls_name, test_name, device_type, dtype):
-        return any(si.is_active(cls_name, test_name, device_type, dtype)
-                   for si in self.skips)
+    def get_decorators(self, test_class, test_name, device, dtype):
+        '''Returns the decorators targeting the given test.'''
+        result = []
+        for decorator in self.decorators:
+            if isinstance(decorator, DecorateInfo):
+                if decorator.is_active(test_class, test_name, device, dtype):
+                    result.extend(decorator.decorators)
+            else:
+                result.append(decorator)
+        return result
 
     def supported_dtypes(self, device_type):
         if device_type == 'cpu':
@@ -763,40 +779,39 @@ class OpInfo(object):
 
 def _generate_reduction_inputs(device, dtype, requires_grad):
     """Generates input tensors for testing reduction operators"""
-    make = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
-    yield make(())
-    yield make((2,))
-    yield make((2, 3), noncontiguous=True)
-    yield make((3, 2, 1, 2, 2))
+    yield make_tensor([], device, dtype, requires_grad=requires_grad)
+    yield make_tensor([2], device, dtype, requires_grad=requires_grad)
+    yield make_tensor([2, 3], device, dtype, requires_grad=requires_grad, noncontiguous=True)
+    yield make_tensor([3, 2, 1, 5], device, dtype, requires_grad=requires_grad)
 
 
 def _generate_reduction_kwargs(ndim, supports_multiple_dims=True):
-    """Generates valid dim and keepdim parameters for testing reduction
-    operators on inputs with the given ndim."""
+    """Generates a subset of all valid dim and keepdim kwargs given ndim that
+    is appropriate for testing reduction operators.
+    """
 
     # Test default dim and keepdim
     yield {}
 
-    for keepdim in [True, False]:
-        # Test reducing inner and outer most dimensions
-        yield {'dim': 0, 'keepdim': keepdim}
-        yield {'dim': -1, 'keepdim': keepdim}
+    # Test reducing inner and outer most dimensions
+    yield {'dim': 0, 'keepdim': True}
+    yield {'dim': -1, 'keepdim': False}
 
-        # Test reducing middle dimension
-        if ndim > 2:
-            yield {'dim': ndim // 2, 'keepdim': keepdim}
+    # Test reducing middle dimension
+    if ndim > 2:
+        yield {'dim': ndim // 2, 'keepdim': True}
 
-        if supports_multiple_dims:
-            # Test reducing all dimensions
-            yield {'dim': tuple(range(ndim)), 'keepdim': keepdim}
+    if supports_multiple_dims:
+        # Test reducing all dimensions
+        yield {'dim': tuple(range(ndim)), 'keepdim': False}
 
-            # Test reducing both first and last dimensions
-            if ndim > 1:
-                yield {'dim': (0, -1), 'keepdim': keepdim}
+        # Test reducing both first and last dimensions
+        if ndim > 1:
+            yield {'dim': (0, -1), 'keepdim': True}
 
-            # Test reducing every other dimension starting with the second
-            if ndim > 3:
-                yield {'dim': tuple(range(1, ndim, 2)), 'keepdim': keepdim}
+        # Test reducing every other dimension starting with the second
+        if ndim > 3:
+            yield {'dim': tuple(range(1, ndim, 2)), 'keepdim': False}
 
 
 def sample_inputs_reduction(op_info, device, dtype, requires_grad, **kwargs):
@@ -836,11 +851,11 @@ class ReductionOpInfo(OpInfo):
     the input tensor to a single value. Reduction operators must implement the
     following signature:
 
-    - `op(input, *args, *, dim=None, keepdim=False, **kwargs)`
+    - `op(input, *args, *, dim=None, keepdim=False, **kwargs) -> Tensor`
 
-    ReductionOpInfo testing tests that reduction operators have a consistent
-    API. Optional behavior such as reducing over multiple dimensions or
-    returning multiple output tensors are captured in optional parameters.
+    ReductionOpInfo tests that reduction operators implement a consistent API.
+    Optional features such as reducing over multiple dimensions are captured in
+    the optional keyword parameters of the ReductionOpInfo constructor.
 
     If a reduction operator does not yet implement the full required API of
     reduction operators, this should be documented by skipping the failing
@@ -867,10 +882,10 @@ class ReductionOpInfo(OpInfo):
         # Whether the operator supports reducing multiple dimensions.
         supports_multiple_dims: bool = True,
 
-        # Whether the operator promotes integral dtypes to floating point dtypes
+        # Whether the operator promotes integral to floating point dtypes.
         promotes_int_to_float: bool = False,
 
-        # Whether the operator promotes integral dtypes to int64
+        # Whether the operator promotes all integral dtypes to int64.
         promotes_int_to_int64: bool = False,
 
         # If a specific dtype is given, then the operator always returns that
@@ -896,7 +911,7 @@ class ReductionOpInfo(OpInfo):
 
         # Default sample_inputs_func for ReductionOpInfo which augments sample
         # inputs from sample_inputs_reduction with the args and kwargs from
-        # generate_args_kwargs.
+        # generate_args_kwargs. This is only used if sample_inputs_func is None.
         def sample_inputs_func(*args, **kwargs):
             result: List[SampleInput] = []
             kwargs['supports_multiple_dims'] = supports_multiple_dims
@@ -910,6 +925,8 @@ class ReductionOpInfo(OpInfo):
         # Override OpInfo defaults and call base class __init__
         kwargs.setdefault('inplace_variant', None)
         kwargs.setdefault('sample_inputs_func', sample_inputs_func)
+        kwargs.setdefault('default_test_dtypes', (
+            torch.uint8, torch.int64, torch.float16, torch.bfloat16, torch.float32, torch.complex64))
         super(ReductionOpInfo, self).__init__(name, **kwargs)
 
         self.identity = identity
@@ -2816,6 +2833,90 @@ def sample_inputs_squeeze(op_info, device, dtype, requires_grad, **kwargs):
     return list(generator())
 
 
+def sample_inputs_nn_pad(op_info, device, dtype, requires_grad, mode, **kwargs):
+    assert mode in ('constant', 'reflect', 'replicate', 'circular')
+    if mode in ['reflect', 'replicate']:
+        cases: tuple = (  # ignore
+            ((1, 3), (1, 2)),
+            ((1, 3), (0, 1)),
+            ((0, 3, 3), (1, 2)),
+            ((0, 3, 3), (0, 1)),
+            ((1, 3, 3), (1, 2)),
+            ((1, 3, 3), (0, 1)),
+            ((1, 3, 3), (0, 2, 0, 1)),
+            ((0, 3, 3, 3), (0, 2, 0, 1)),
+            ((3, 3, 5, 5), (0, 2, 0, 1)),
+            ((3, 3, 5, 5), (1, 1, 1, 1, 1, 1)),
+            ((1, 3, 3, 3, 3), (1, 1, 1, 1, 1, 1)),
+            ((1, 3, 4, 4), (-1, 1, -2, 1)),
+        )
+    elif mode == 'constant':
+        cases = (
+            ((1, 3), (1, 2)),
+            ((1, 3), (0, 1)),
+            ((1, 3), (0, 2, 0, 1)),
+            ((0, 3, 3), (1, 2)),
+            ((0, 3, 3), (0, 1)),
+            ((0, 3, 3), (0, 2, 0, 1)),
+            ((0, 3, 3), (1, 1, 1, 1, 1, 1)),
+            ((1, 3, 3), (1, 2)),
+            ((1, 3, 3), (0, 1)),
+            ((1, 3, 3), (0, 2, 0, 1)),
+            ((1, 3, 3), (1, 1, 1, 1, 1, 1)),
+            ((0, 3, 3, 3), (1, 2)),
+            ((0, 3, 3, 3), (0, 1)),
+            ((0, 3, 3, 3), (0, 2, 0, 1)),
+            ((0, 3, 3, 3), (1, 1, 1, 1, 1, 1)),
+            ((3, 3, 5, 5), (1, 2)),
+            ((3, 3, 5, 5), (0, 1)),
+            ((3, 3, 5, 5), (0, 2, 0, 1)),
+            ((3, 3, 5, 5), (1, 1, 1, 1, 1, 1)),
+            ((1, 3, 3, 3, 3), (1, 2)),
+            ((1, 3, 3, 3, 3), (0, 1)),
+            ((1, 3, 3, 3, 3), (0, 2, 0, 1)),
+            ((1, 3, 3, 3, 3), (1, 1, 1, 1, 1, 1)),
+            ((1, 3, 4, 4), (-1, 1, -2, 1)),
+        )
+    else:  # mode == 'circular'
+        if dtype == torch.bool:
+            # test_dtypes fails on ASAN with for the case ab
+            # runtime error: load of value 190, which is not a valid value for type 'bool'
+            # Reference: https://github.com/pytorch/pytorch/pull/62814#issuecomment-894156562
+            # Reference Issue: https://github.com/pytorch/pytorch/issues/63034
+            cases = (
+                ((2, 3, 3), (1, 2)),
+                ((1, 3, 3), (1, 2)),
+            )
+        else:
+            cases = (
+                ((0, 3, 3), (1, 2)),
+                ((0, 3, 3), (0, 1)),
+                ((1, 3, 3), (1, 2)),
+                ((1, 3, 3), (0, 1)),
+                ((0, 3, 3, 3), (0, 2, 0, 1)),
+                ((3, 3, 5, 5), (0, 2, 0, 1)),
+                ((1, 3, 3, 3, 3), (1, 1, 1, 1, 1, 1)),
+                ((1, 3, 4, 4), (-1, 1, -2, 1)),
+            )
+
+    make_inp = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    def generator():
+        if mode == 'constant':
+            # Default args
+            yield SampleInput(make_inp((1, 3, 3)), args=((2, 2),))
+
+        if mode in ['reflect', 'replicate', 'circular']:
+            for shape, pad in cases:
+                yield SampleInput(make_inp(shape), args=(pad, mode))
+        else:  # mode == 'constant'
+            for pad_value in (1., 2.):
+                for shape, pad in cases:
+                    yield SampleInput(make_inp(shape), args=(pad, mode, pad_value))
+
+    return list(generator())
+
+
 # TODO: reconcile with torch.linalg.det and torch.linalg.slogdet
 # Creates matrices with a positive nonzero determinant
 def sample_inputs_logdet(op_info, device, dtype, requires_grad, **kwargs):
@@ -3255,8 +3356,8 @@ def sample_inputs_lu(op_info, device, dtype, requires_grad=False, **kwargs):
     # not needed once OpInfo tests support Iterables
     def generate_samples():
         batch_shapes = ((), (3,), (3, 3))
-        for batch_shape, get_infos in product(batch_shapes, (True, False)):
-            shape = batch_shape + (S, S)
+        for batch_shape, get_infos, size_delta in product(batch_shapes, (True, False), (-2, -1, 0, +1, +2)):
+            shape = batch_shape + (S + size_delta, S)
             input = make_tensor(shape, device, dtype, requires_grad=requires_grad, low=None, high=None)
             yield SampleInput(input, args=(True, get_infos))
 
@@ -6583,16 +6684,16 @@ op_db: List[OpInfo] = [
            op=torch.lu,
            dtypes=floating_and_complex_types(),
            supports_inplace_autograd=False,
+           # we use in-place operations which cannot be avoided.
+           # This causes vmap failures, hence we skip batched gradient checks
+           check_batched_grad=False,
            check_batched_gradgrad=False,
            supports_out=False,
            sample_inputs_func=sample_inputs_lu,
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],
            skips=(
-               # we skip jit tests because lu_backward is impelemented as autograd.Function,
-               # which does not support autograd with scripting
+               # we skip jit tests because `lu` is a torch function
                SkipInfo('TestJit', 'test_variant_consistency_jit'),
-               # Skip operator schema test because this is a functional and not an operator
-               SkipInfo('TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
            )),
     OpInfo('lu_solve',
            op=torch.lu_solve,
@@ -6605,7 +6706,7 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types(),
            supports_inplace_autograd=False,
            # we use in-place operations which cannot be avoided.
-           # This cases vmap failures, hence we skip batched gradient checks
+           # This causes vmap failures, hence we skip batched gradient checks
            check_batched_grad=False,
            supports_out=True,
            sample_inputs_func=sample_inputs_lu_unpack,
@@ -6833,6 +6934,52 @@ op_db: List[OpInfo] = [
                SkipInfo('TestJit', 'test_variant_consistency_jit'),
            ),
            supports_out=False,),
+    OpInfo('nn.functional.pad',
+           variant_test_name='constant',
+           aten_name='constant_pad_nd',
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
+           sample_inputs_func=partial(sample_inputs_nn_pad, mode='constant'),
+           supports_out=False),
+    OpInfo('nn.functional.pad',
+           variant_test_name='reflect',
+           dtypes=floating_and_complex_types(),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.half),
+           sample_inputs_func=partial(sample_inputs_nn_pad, mode='reflect'),
+           skips=(
+               # op name not found in JIT graph
+               # There are multiple aten ops, namely reflection_pad_{1,2,3}d
+               # so we can't use aten_name argument in opinfo
+               # RuntimeError: aliasOp != torch::jit::getOperatorAliasMap().end()
+               SkipInfo('TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
+           ),
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+           supports_out=False),
+    OpInfo('nn.functional.pad',
+           variant_test_name='replicate',
+           dtypes=floating_and_complex_types(),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.half),
+           sample_inputs_func=partial(sample_inputs_nn_pad, mode='replicate'),
+           skips=(
+               # op name not found in JIT graph
+               # There are multiple aten ops, namely replication_pad_{1,2,3}d
+               # so we can't use aten_name argument in opinfo
+               # RuntimeError: aliasOp != torch::jit::getOperatorAliasMap().end()
+               SkipInfo('TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
+           ),
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+           supports_out=False),
+    OpInfo('nn.functional.pad',
+           variant_test_name='circular',
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
+           sample_inputs_func=partial(sample_inputs_nn_pad, mode='circular'),
+           supports_forward_ad=True,
+           check_batched_grad=False,
+           skips=(
+               # Doesn't have a corresponding aten operator.
+               # RuntimeError: aliasOp != torch::jit::getOperatorAliasMap().end()
+               SkipInfo('TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
+           ),
+           supports_out=False),
     OpInfo('nn.functional.hardswish',
            aten_name="hardswish",
            supports_autograd=True,
@@ -8618,36 +8765,13 @@ op_db: List[OpInfo] = [
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         ref=reference_reduction_numpy(np.sum),
         decorators=(
+            # FIXME: improve precision
+            DecorateInfo(toleranceOverride({
+                torch.bfloat16: tol(atol=1e-01, rtol=1e-05),
+            }), 'TestReductions', 'test_noncontiguous_expanded'),
             DecorateInfo(toleranceOverride({
                 torch.float16: tol(atol=1e-03, rtol=1e-02),
                 torch.complex64: tol(atol=1e-03, rtol=1e-02),
-            }), 'TestReductions', 'test_ref_small_input'),
-            DecorateInfo(toleranceOverride({
-                torch.float16: tol(1e-03, 1e-02),
-            }), 'TestReductions', 'test_ref_large_input'),
-        ),
-        skips=(
-            # FIXME: sum does not support passing keepdim without passing dim
-            SkipInfo('TestReductions', 'test_dim_default_keepdim'),
-            # FIXME: sum reduces all dimensions when dim=[]
-            SkipInfo('TestReductions', 'test_dim_empty'),
-            SkipInfo('TestReductions', 'test_dim_empty_keepdim'),
-            # FIXME: sum does not support passing None to dim
-            SkipInfo('TestReductions', 'test_dim_none'),
-            SkipInfo('TestReductions', 'test_dim_none_keepdim'),
-        ),
-    ),
-    ReductionOpInfo(
-        'nansum',
-        identity=0,
-        nan_policy='omit',
-        supports_out=False,
-        promotes_int_to_int64=True,
-        dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
-        ref=reference_reduction_numpy(np.nansum),
-        decorators=(
-            DecorateInfo(toleranceOverride({
-                torch.float16: tol(atol=1e-03, rtol=1e-02),
             }), 'TestReductions', 'test_ref_small_input'),
             DecorateInfo(toleranceOverride({
                 torch.float16: tol(atol=1e-03, rtol=1e-02),
@@ -8675,12 +8799,53 @@ op_db: List[OpInfo] = [
         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         ref=reference_reduction_numpy(np.prod),
         decorators=(
+            # FIXME: improve precision
             DecorateInfo(toleranceOverride({
                 torch.complex64: tol(atol=1e-03, rtol=1e-03),
             }), 'TestCommon', 'test_reference_testing'),
+            DecorateInfo(toleranceOverride({
+                torch.complex64: tol(atol=1e-03, rtol=1e-03),
+            }), 'TestReductions', 'test_ref_small_input'),
         ),
         skips=(
+            SkipInfo('TestJit', 'test_variant_consistency_jit',
+                     dtypes=[torch.complex64]),
             # FIXME: does not support passing keepdim without passing dim
+            SkipInfo('TestReductions', 'test_dim_default_keepdim'),
+            # FIXME: sum reduces all dimensions when dim=[]
+            SkipInfo('TestReductions', 'test_dim_empty'),
+            SkipInfo('TestReductions', 'test_dim_empty_keepdim'),
+            # FIXME: sum does not support passing None to dim
+            SkipInfo('TestReductions', 'test_dim_none'),
+            SkipInfo('TestReductions', 'test_dim_none_keepdim'),
+            # FIXME: failed to compare as equal with nan vs. inf
+            SkipInfo('TestReductions', 'test_noncontiguous_transposed',
+                     device_type='cuda', dtypes=[torch.complex64]),
+        ),
+    ),
+    ReductionOpInfo(
+        'nansum',
+        identity=0,
+        nan_policy='omit',
+        supports_out=False,
+        promotes_int_to_int64=True,
+        dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
+        ref=reference_reduction_numpy(np.nansum),
+        decorators=(
+            # FIXME: improve precision
+            DecorateInfo(toleranceOverride({
+                torch.bfloat16: tol(atol=1e-01, rtol=1e-05),
+            }), 'TestReductions', 'test_noncontiguous_expanded'),
+            DecorateInfo(toleranceOverride({
+                torch.float16: tol(atol=1e-03, rtol=1e-02),
+                torch.complex64: tol(atol=1e-03, rtol=1e-02),
+            }), 'TestReductions', 'test_ref_small_input'),
+            DecorateInfo(toleranceOverride({
+                torch.float16: tol(atol=1e-03, rtol=1e-02),
+            }), 'TestReductions', 'test_ref_large_input'),
+        ),
+        skips=(
+            # FIXME: sum does not support passing keepdim without passing dim
             SkipInfo('TestReductions', 'test_dim_default_keepdim'),
             # FIXME: sum reduces all dimensions when dim=[]
             SkipInfo('TestReductions', 'test_dim_empty'),
@@ -8704,7 +8869,10 @@ op_db: List[OpInfo] = [
         decorators=(
             DecorateInfo(toleranceOverride({
                 torch.float16: tol(1e-03, 1e-05),
-            }), 'TestReductions', 'test_noncontiguous_input'),
+            }), 'TestReductions', 'test_noncontiguous_all'),
+            DecorateInfo(toleranceOverride({
+                torch.bfloat16: tol(1e-02, 1e-05),
+            }), 'TestReductions', 'test_noncontiguous_expanded'),
             DecorateInfo(toleranceOverride({
                 torch.float16: tol(1e-03, 1e-05),
             }), 'TestReductions', 'test_ref_small_input'),
