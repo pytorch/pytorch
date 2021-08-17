@@ -647,6 +647,13 @@ jobs:
           ${PARALLEL_FLAGS}
           cd workspace
           EOL
+          # temporary fix for https://github.com/pytorch/pytorch/issues/60746
+          if [ -z "$CIRCLE_PR_NUMBER" ]; then
+            if [[ $CIRCLE_BRANCH =~ .*pull.* ]]; then
+              PR_NUMBER=$(echo $CIRCLE_BRANCH | sed 's/[^0-9]//g')
+              echo "export CIRCLE_PR_NUMBER=$PR_NUMBER" >> $BASH_ENV
+            fi
+          fi
           if [[ ${BUILD_ENVIRONMENT} == *"multigpu"* ]]; then
             echo ".jenkins/pytorch/multigpu-test.sh" >> docker_commands.sh
           elif [[ ${BUILD_ENVIRONMENT} == *onnx* ]]; then
