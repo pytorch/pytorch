@@ -405,7 +405,6 @@ kernel void hardswish(texture2d_array<half, access::read> in_arr[[texture(0), fu
     if (gid.x >= oW || gid.y >= oH) {
         return;
     }
-    
     ushort2 gid_ = gid.xy;
     if (hardswish_is_arr) {
       half4 value = in_arr.read(gid_, gid.z);
