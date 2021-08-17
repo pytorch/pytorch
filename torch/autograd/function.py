@@ -171,6 +171,9 @@ class FunctionCtx(object):
         """
         self.materialize_grads = value
 
+# DO NOT USE: This is only defined to be able to load old serialized models
+_ContextMethodMixin = FunctionCtx
+
 class _HookMixin(object):
 
     @staticmethod
