@@ -23,7 +23,8 @@ Tensor max_pool1d_impl(
 
   TORCH_CHECK(
       self.dim() == 2 || self.dim() == 3,
-      "max_pool1d() Expected 2D or 3D input tensor, but got ", self.sizes());
+      "max_pool1d() input tensor must have 2 or 3 dimensions but got ",
+      self.dim());
   TORCH_CHECK(
       kernel_size.size() == 1,
       "max_pool1d() kernel_size must be an int or int list of size 1 but got size ",

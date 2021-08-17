@@ -1513,9 +1513,9 @@ See :func:`torch.frexp`
 
 add_docstr_all('flatten',
                r"""
-flatten(start_dim=0, end_dim=-1) -> Tensor
+flatten(input, start_dim=0, end_dim=-1) -> Tensor
 
-See :func:`torch.flatten`
+see :func:`torch.flatten`
 """)
 
 add_docstr_all('gather',

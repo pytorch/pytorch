@@ -117,7 +117,6 @@ class _server_process_global_profile(profile):
             self.record_shapes,
             self.profile_memory,
             False,
-            False,
             False)
         _enable_server_process_global_profiler(profiler_config)
         return self

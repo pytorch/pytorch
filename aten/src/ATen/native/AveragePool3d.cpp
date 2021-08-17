@@ -66,7 +66,6 @@ TORCH_META_FUNC(avg_pool3d) (
     1, 1, 1,
     itime, iheight, iwidth,
     otime, oheight, owidth,
-    "avg_pool3d()",
     /*check_input_size=*/ true);
 
   /* resize output */
@@ -132,8 +131,7 @@ TORCH_META_FUNC(avg_pool3d_backward) (
     dT, dH, dW,
     padT, padH, padW,
     itime, iheight, iwidth,
-    otime_for_shape_check, oheight_for_shape_check, owidth_for_shape_check,
-    "avg_pool3d_backward()");
+    otime_for_shape_check, oheight_for_shape_check, owidth_for_shape_check);
 
   /* resize output */
   set_output(0, input.sizes(), input.options());

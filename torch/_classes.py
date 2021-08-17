@@ -13,8 +13,6 @@ class _ClassNamespace(types.ModuleType):
         return proxy
 
 class _Classes(types.ModuleType):
-    __file__ = '_classes.py'
-
     def __init__(self):
         super(_Classes, self).__init__('torch.classes')
 

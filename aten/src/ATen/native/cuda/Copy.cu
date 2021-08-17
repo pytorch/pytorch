@@ -9,6 +9,10 @@
 #include <ATen/native/cuda/Loops.cuh>
 #include <THC/THC.h>
 
+#ifdef __HIP_PLATFORM_HCC__
+#include <hip/hip_version.h>
+#endif
+
 namespace at {
 namespace native {
 

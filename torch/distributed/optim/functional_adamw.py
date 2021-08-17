@@ -22,8 +22,7 @@ class _FunctionalAdamW(object):
         betas: Tuple[float, float] = (0.9, 0.999),
         eps: float = 1e-8,
         weight_decay: float = 1e-2,
-        amsgrad: bool = False,
-        _allow_empty_param_list: bool = False,
+        amsgrad: bool = False
     ):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
@@ -46,7 +45,7 @@ class _FunctionalAdamW(object):
         self.amsgrad = amsgrad
         self.state = torch.jit.annotate(Dict[torch.Tensor, Dict[str, torch.Tensor]], {})
 
-        if len(params) == 0 and not _allow_empty_param_list:
+        if len(params) == 0:
             raise ValueError("optimizer got an empty parameter list")
 
         # NOTE: we only have one param_group and don't allow user to add additional

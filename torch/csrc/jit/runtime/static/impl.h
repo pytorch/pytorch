@@ -209,8 +209,7 @@ class TORCH_API StaticRuntime {
       const std::vector<c10::IValue>& args,
       const std::unordered_map<std::string, c10::IValue>& kwargs,
       const int warmup_runs,
-      const int main_runs,
-      bool print_per_node_time = false);
+      const int main_runs);
 
   float benchmark_model(
       const std::vector<c10::IValue>& args,

@@ -16,15 +16,15 @@ namespace {
   {
     TORCH_CHECK(output_size.size() == 2, "adaptive_avg_pool2d: output_size must be 2");
     int64_t ndim = input.ndimension();
-    for (int64_t i = 1; i < ndim; i++) {
+    for (int64_t i = 0; i < ndim; i++) {
       TORCH_CHECK(input.size(i) > 0,
-        "adaptive_avg_pool2d(): Expected input to have non-zero size for non-batch dimensions, "
+        "adaptive_avg_pooling2d(): expected input to have non-empty spatial dimensions, "
         "but input has sizes ", input.sizes(), " with dimension ", i, " being "
         "empty");
     }
 
     TORCH_CHECK((ndim == 3 || ndim == 4),
-      "adaptive_avg_pool2d(): Expected 3D or 4D tensor, but got ", input.sizes());
+      "non-empty 3D or 4D (batch mode) tensor expected for input");
     TORCH_CHECK(input.dtype() == output.dtype(),
       "expected dtype ", input.dtype(), " for `output` but got dtype ", output.dtype());
 
@@ -39,10 +39,6 @@ namespace {
       output.resize_({nbatch, channels, output_height, output_width}, input.suggest_memory_format());
     }
 
-    if (output.numel() == 0) {
-      return;
-    }
-
     adaptive_avg_pool2d_kernel(kCPU, output, input, output_size);
   }
 
@@ -52,15 +48,15 @@ namespace {
     const Tensor& input)
   {
     int64_t ndim = grad_output.ndimension();
-    for (int64_t i = 1; i < ndim; i++) {
+    for (int64_t i = 0; i < ndim; i++) {
       TORCH_CHECK(grad_output.size(i) > 0,
-        "adaptive_avg_pool2d_backward(): Expected grad_output to have non-zero size for non-batch dimensions, "
+        "adaptive_avg_pooling2d_backward(): expected grad_output to have non-empty spatial dimensions, "
         "but grad_output has sizes ", grad_output.sizes(), " with dimension ", i, " being "
         "empty");
     }
 
     TORCH_CHECK((ndim == 3 || ndim == 4),
-      "adaptive_avg_pool2d_backward(): Expected 3D or 4D tensor, but got ", input.sizes());
+      "non-empty 3D or 4D (batch mode) tensor expected for grad_output");
     TORCH_CHECK(input.dtype() == grad_output.dtype(),
       "expected dtype ", input.dtype(), " for `grad_output` but got dtype ", grad_output.dtype());
     TORCH_CHECK(input.dtype() == grad_input.dtype(),

@@ -62,5 +62,3 @@ if is_available():
         _create_process_group_wrapper,
         _rank_not_in_group,
     )
-
-    from .remote_device import _remote_device

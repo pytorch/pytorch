@@ -367,30 +367,33 @@ kernel void append_features_off(texture2d<half, access::read> in_tex[[texture(0)
     out.write(outtex, gid_, outz);
 }
 
-constant bool clamp_is_arr = (ushort_arg_1 > 1 || ushort_arg_0 > 4);
-constant bool clamp_is_tex = !clamp_is_arr;
-kernel void clamp(texture2d_array<half, access::read> in_arr[[texture(0), function_constant(clamp_is_arr)]],
-                  texture2d<half, access::read> in_tex[[texture(0), function_constant(clamp_is_tex)]],
-                  texture2d_array<half, access::write> out_arr[[texture(1), function_constant(clamp_is_arr)]],
-                  texture2d<half, access::write> out_tex[[texture(1), function_constant(clamp_is_tex)]],
+kernel void clamp_half4(texture2d_array<half, access::read> in[[texture(0)]],
+                 texture2d_array<half, access::write> out[[texture(1)]],
+                 constant half* clamp_buf[[buffer(0)]],
                  ushort3 gid[[thread_position_in_grid]]) {
-    const ushort w = clamp_is_arr? out_arr.get_width() : out_tex.get_width();
-    const ushort h = clamp_is_arr? out_arr.get_height() : out_tex.get_height();
-    if (gid.x >= w || gid.y >= h) {
+    if (gid.x >= out.get_width() || gid.y >= out.get_height()) {
         return;
     }
-    const float4 min_(float_arg_0, float_arg_0, float_arg_0, float_arg_0);
-    const float4 max_(float_arg_1, float_arg_1, float_arg_1, float_arg_1);
+    const half4 min_(clamp_buf[0], clamp_buf[0], clamp_buf[0], clamp_buf[0]);
+    const half4 max_(clamp_buf[1], clamp_buf[1], clamp_buf[1], clamp_buf[1]);
     ushort2 gid_ = gid.xy;
-    if(clamp_is_arr){
-        float4 value = (float4)in_arr.read(gid_, gid.z);
-        half4 clamped = (half4)clamp(value, min_, max_);
-        out_arr.write(clamped, gid_, gid.z);
-    } else {
-        float4 value = (float4)in_tex.read(gid_);
-        half4 clamped = (half4)clamp(value, min_, max_);
-        out_tex.write(clamped, gid_);
+    half4 value = in.read(gid_, gid.z);
+    half4 clamped = clamp(value, min_, max_);
+    out.write(clamped, gid_, gid.z);
+}
+
+kernel void clamp_half4_nonarray(texture2d<half, access::read> in[[texture(0)]],
+                          texture2d<half, access::write> out[[texture(1)]],
+                          constant half* clamp_buf[[buffer(0)]],
+                          ushort2 gid[[thread_position_in_grid]]) {
+    if (gid.x >= out.get_width() || gid.y >= out.get_height()) {
+        return;
     }
+    const half4 min_(clamp_buf[0], clamp_buf[0], clamp_buf[0], clamp_buf[0]);
+    const half4 max_(clamp_buf[1], clamp_buf[1], clamp_buf[1], clamp_buf[1]);
+    half4 value = in.read(gid);
+    half4 clamped = clamp(value, min_, max_);
+    out.write(clamped, gid);
 }
 
 kernel void hardswish(texture2d_array<half, access::read> in[[texture(0)]],
@@ -463,12 +466,8 @@ kernel void reflection_pad2d(texture2d_array<half, access::read> in_arr[[texture
   }
 }
 
-constant bool resize_is_arr = (ushort_arg_4 > 1 || ushort_arg_5 > 4);
-constant bool resize_is_tex = !resize_is_arr;
-kernel void resize_nearest(texture2d_array<half, access::sample> in_arr[[texture(0), function_constant(resize_is_arr)]],
-                           texture2d<half, access::sample> in_tex[[texture(0), function_constant(resize_is_tex)]],
-                           texture2d_array<half, access::write> out_arr[[texture(1), function_constant(resize_is_arr)]],
-                           texture2d<half, access::write> out_tex[[texture(1), function_constant(resize_is_tex)]],
+kernel void resize_nearest(texture2d_array<half, access::sample> in[[texture(0)]],
+                           texture2d_array<half, access::write> out[[texture(1)]],
                            ushort3 gid[[thread_position_in_grid]]) {
     const ushort oH = ushort_arg_0;
     const ushort oW = ushort_arg_1;
@@ -480,13 +479,24 @@ kernel void resize_nearest(texture2d_array<half, access::sample> in_arr[[texture
     constexpr sampler s(coord::pixel, address::clamp_to_edge, filter::nearest);
     const int in_y = (int)(gid.y / height_scale);
     const int in_x = (int)(gid.x / width_scale);
-    if(resize_is_arr) {
-        out_arr.write(in_arr.sample(s, float2(in_x, in_y), gid.z), gid.xy, gid.z);
-    } else {
-        out_tex.write(in_tex.sample(s, float2(in_x, in_y)), gid.xy);
-    }
+    out.write(in.sample(s, float2(in_x, in_y), gid.z), gid.xy, gid.z);
 }
 
+kernel void resize_nearest_nonarray(texture2d<half, access::sample> in[[texture(0)]],
+                                    texture2d<half, access::write> out[[texture(1)]],
+                                    ushort2 gid[[thread_position_in_grid]]) {
+    const ushort oH = ushort_arg_0;
+    const ushort oW = ushort_arg_1;
+    if (gid.x >= oW || gid.y >= oH) {
+        return;
+    }
+    const float height_scale = float(ushort_arg_2) / 10000;
+    const float width_scale = float(ushort_arg_3) / 10000;
+    constexpr sampler s(coord::pixel, address::clamp_to_edge, filter::nearest);
+    const int in_y = (int)(gid.y / height_scale);
+    const int in_x = (int)(gid.x / width_scale);
+    out.write(in.sample(s, float2(in_x, in_y)), gid.xy);
+}
 
 constant bool reshape_out_is_arr = (ushort_arg_3 > 1 || ushort_arg_2 > 4);
 constant bool reshape_out_is_tex = !reshape_out_is_arr;

@@ -229,6 +229,9 @@ void max_pool3d_with_indices_out_cuda_template(
   const int dilationH = dilation.size() == 1 ? dilationT : safe_downcast<int, int64_t>(dilation[1]);
   const int dilationW = dilation.size() == 1 ? dilationT : safe_downcast<int, int64_t>(dilation[2]);
 
+  TORCH_CHECK((input.ndimension() == 4 || input.ndimension() == 5),
+    "non-empty 4D or 5D (batch mode) tensor expected for input");
+
   const int64_t nbatch = input.ndimension() == 5 ? input.size(-5) : 1;
   const int64_t nslices = input.size(-4);
   const int64_t itime = input.size(-3);
@@ -247,8 +250,7 @@ void max_pool3d_with_indices_out_cuda_template(
     pT, pH, pW,
     dilationT, dilationH, dilationW,
     itime, iheight, iwidth,
-    otime, oheight, owidth,
-    "max_pool3d_with_indices_out_cuda_template()");
+    otime, oheight, owidth);
 
   if (input.ndimension() == 4) {
     output.resize_({ nslices, otime, oheight, owidth});
@@ -257,10 +259,6 @@ void max_pool3d_with_indices_out_cuda_template(
   else {
     output.resize_({nbatch, nslices, otime, oheight, owidth});
     indices.resize_({nbatch, nslices, otime, oheight, owidth});
-  }
-
-  if (input.numel() == 0) {
-    return;
   }
 
   Tensor work_input = input.contiguous();
@@ -340,12 +338,10 @@ void max_pool3d_with_indices_backward_out_cuda_template(
   const int dilationW = dilation.size() == 1 ? dilationT : safe_downcast<int, int64_t>(dilation[2]);
 
   TORCH_CHECK((input.ndimension() == 4 || input.ndimension() == 5),
-    "max_pool2d_with_indices_backward_out_cuda_template(): ",
-    "Expected 4D or 5D input tensor, but got ", input.sizes());
+    "non-empty 4D or 5D (batch mode) tensor expected for input");
 
   TORCH_CHECK((gradOutput.ndimension() == 4 || gradOutput.ndimension() == 5),
-    "max_pool2d_with_indices_backward_out_cuda_template(): ",
-    "Expected 4D or 5D gradOutput tensor, but got ", gradOutput.sizes());
+    "non-empty 4D or 5D (batch mode) tensor expected for gradOutput");
 
   // Resize and initialize result tensor.
   gradInput.resize_as_(input);
@@ -372,12 +368,7 @@ void max_pool3d_with_indices_backward_out_cuda_template(
     pT, pH, pW,
     dilationT, dilationH, dilationW,
     itime, iheight, iwidth,
-    otime, oheight, owidth,
-    "max_pool3d_with_indices_backward_out_cuda_template()");
-
-  if (gradOutput.numel() == 0) {
-    return;
-  }
+    otime, oheight, owidth);
 
   Tensor work_grad_input = gradInput;
   Tensor work_grad_output = gradOutput.contiguous();

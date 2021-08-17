@@ -2075,13 +2075,13 @@ TEST(InlinedCallStackTest, BlockAnnotation) {
       for (Block* block : n->blocks()) {
         for (Node* if_node : block->nodes()) {
           if (if_node->kind() == aten::add) {
-            for (const auto& e : if_node->callstack().value()->vec()) {
+            for (const auto e : if_node->callstack().value()->vec()) {
               add_ss << std::get<1>(e);
             }
             add_ss << if_node->sourceRange();
           }
           if (if_node->kind() == aten::mul) {
-            for (const auto& e : if_node->callstack().value()->vec()) {
+            for (const auto e : if_node->callstack().value()->vec()) {
               mul_ss << std::get<1>(e);
             }
             mul_ss << if_node->sourceRange();
@@ -2468,111 +2468,6 @@ TEST(ProfilerDisableInCallbackTest, Basic) {
   torch::autograd::profiler::disableProfilerLegacy(std::move(opts));
 }
 
-TEST(RecordDebugHandles, Basic) {
-  // Enable the profiler in this thread
-  const std::set<torch::autograd::profiler::ActivityType> activities(
-      {torch::autograd::profiler::ActivityType::CPU});
-  torch::autograd::profiler::prepareProfiler(
-      torch::autograd::profiler::ProfilerConfig(
-          torch::autograd::profiler::ProfilerState::KINETO, false, false),
-      activities);
-  torch::autograd::profiler::enableProfiler(
-      torch::autograd::profiler::ProfilerConfig(
-          torch::autograd::profiler::ProfilerState::KINETO, false, false),
-      activities);
-  {
-    RECORD_EDGE_SCOPE_WITH_DEBUG_HANDLE_AND_INPUTS("my_function", 42, {});
-    float x{5.9999}, y{2.1212};
-    float z = x / y;
-  }
-  {
-    RECORD_USER_SCOPE_WITH_INPUTS("not_my_function", {});
-    float x{5.9999}, y{2.1212};
-    float z = x / y;
-  }
-  auto profiler_results_ptr = torch::autograd::profiler::disableProfiler();
-  const auto& kineto_events = profiler_results_ptr->events();
-  size_t my_events{0};
-  for (const auto& e : kineto_events) {
-    if (e.name() == "my_function") {
-      ASSERT_EQ(e.debugHandle(), 42);
-      my_events++;
-    } else if (e.name() == "not_my_function") {
-      ASSERT_EQ(e.debugHandle(), -1);
-      my_events++;
-    }
-  }
-  ASSERT_EQ(my_events, 2);
-}
-
-TEST(RecordDebugHandles, ScopedCallbacks) {
-  // Enable the profiler in this thread
-  torch::autograd::profiler::prepareProfiler(
-      torch::autograd::profiler::ProfilerConfig(
-          torch::autograd::profiler::ProfilerState::KINETO, false, false),
-      {torch::autograd::profiler::ActivityType::CPU});
-  torch::autograd::profiler::enableProfiler(
-      torch::autograd::profiler::ProfilerConfig(
-          torch::autograd::profiler::ProfilerState::KINETO, false, false),
-      {torch::autograd::profiler::ActivityType::CPU});
-
-  {
-    auto a = torch::rand({128, 128});
-    auto b = torch::rand({128, 128});
-    auto c = a + b;
-  }
-  auto profiler_results_ptr = torch::autograd::profiler::disableProfiler();
-  ASSERT_TRUE(profiler_results_ptr->events().size() > 0);
-
-  // Enable the profiler in this thread
-  torch::autograd::profiler::prepareProfiler(
-      torch::autograd::profiler::ProfilerConfig(
-          torch::autograd::profiler::ProfilerState::KINETO, false, false),
-      {torch::autograd::profiler::ActivityType::CPU});
-  torch::autograd::profiler::enableProfiler(
-      torch::autograd::profiler::ProfilerConfig(
-          torch::autograd::profiler::ProfilerState::KINETO, false, false),
-      {torch::autograd::profiler::ActivityType::CPU},
-      {at::RecordScope::LITE_INTERPRETER});
-  {
-    auto a = torch::rand({128, 128});
-    auto b = torch::rand({128, 128});
-    auto c = a + b;
-  }
-  profiler_results_ptr = torch::autograd::profiler::disableProfiler();
-  ASSERT_TRUE(profiler_results_ptr->events().size() == 0);
-
-  torch::autograd::profiler::prepareProfiler(
-      torch::autograd::profiler::ProfilerConfig(
-          torch::autograd::profiler::ProfilerState::KINETO, false, false),
-      {torch::autograd::profiler::ActivityType::CPU});
-  torch::autograd::profiler::enableProfiler(
-      torch::autograd::profiler::ProfilerConfig(
-          torch::autograd::profiler::ProfilerState::KINETO, false, false),
-      {torch::autograd::profiler::ActivityType::CPU},
-      {at::RecordScope::LITE_INTERPRETER});
-  {
-    RECORD_EDGE_SCOPE_WITH_DEBUG_HANDLE_AND_INPUTS("my_function", 42, {});
-    auto a = torch::rand({128, 128});
-    auto b = torch::rand({128, 128});
-    auto c = a + b;
-  }
-  {
-    RECORD_USER_SCOPE_WITH_INPUTS("not_my_function", {});
-    auto a = torch::rand({128, 128});
-    auto b = torch::rand({128, 128});
-    auto c = a + b;
-  }
-  profiler_results_ptr = torch::autograd::profiler::disableProfiler();
-  const auto& kineto_events = profiler_results_ptr->events();
-  for (const auto& e : kineto_events) {
-    if (e.name() == "my_function") {
-      ASSERT_EQ(e.debugHandle(), 42);
-    }
-  }
-  ASSERT_TRUE(profiler_results_ptr->events().size() == 1);
-}
-
 TEST(IValueKWargsTest, Basic) {
   const auto text = R"(
     def foo(a : int, b : int, c : int = 4):
@@ -2637,10 +2532,6 @@ TEST(ComputeFlopsTest, Basic) {
   extra_args["mat1_size"] = at::IValue(at::IntArrayRef(mat1_sizes));
   extra_args["mat2_size"] = at::IValue(at::IntArrayRef(mat2_sizes));
   flops = computeFlops(std::string("aten::mm"), extra_args);
-  ASSERT_EQ(flops, 43200);
-
-  // Test aten::addmm
-  flops = computeFlops(std::string("aten::addmm"), extra_args);
   ASSERT_EQ(flops, 43200);
 
   // Test mm out of range

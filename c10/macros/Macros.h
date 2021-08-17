@@ -352,14 +352,7 @@ __host__ __device__
         const char* assertion,
         const char* file,
         unsigned int line,
-        const char* function) throw()
-// We match the declaration of __assert_fail exactly how it is in glibc in case
-// parts of the program are compiled with different NDEBUG settings. Otherwise
-// we might get 'ambiguous declaration' error.
-#ifdef __GNUC__
-        __attribute__((__noreturn__))
-#endif
-        ;
+        const char* function) throw();
 #endif
 }
 #endif // NDEBUG

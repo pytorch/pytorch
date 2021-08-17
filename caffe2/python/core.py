@@ -1469,15 +1469,12 @@ class Net(object):
         Net._net_names_used |= set([name])
         return name
 
-    def __init__(self, name_or_proto, inplace=False):
+    def __init__(self, name_or_proto):
         """
         Create a Net.
         Args:
-            name_or_proto:  If a NetDef is provided, clone it (or take ownership,
-                            depending on the value of `inplace`). Otherwise,
+            name_or_proto:  If a NetDef is provided, clone it. Otherwise,
                             create an empty net with the given name.
-            inplace: If a NetDef is provided, take ownership when `inplace` is True;
-                     otherwise, clone it.
         """
         self._input_record = None
         self._output_record = None
@@ -1490,13 +1487,10 @@ class Net(object):
         self._attr_dict = defaultdict(list)
         if type(name_or_proto) is caffe2_pb2.NetDef:
             proto = name_or_proto
-            # We are initializing a network by a NetDef. In this case, we will
+            # We rae initializing a network by a NetDef. In this case, we will
             # initialize our network with the given netdef.
-            if inplace:
-                self._net = proto
-            else:
-                self._net = caffe2_pb2.NetDef()
-                self._net.CopyFrom(proto)
+            self._net = caffe2_pb2.NetDef()
+            self._net.CopyFrom(proto)
 
             existing_outputs = [list(op.output) for op in self._net.op]
 

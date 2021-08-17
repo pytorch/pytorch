@@ -527,8 +527,7 @@ class MultiProcessTestCase(TestCase):
         self.run_test(test_name, parent_pipe, signal_send_pipe, event_listener_thread)
 
         # exit to avoid run teardown() for fork processes
-        # Use os._exit() as it is the recommended way for child processes.
-        os._exit(0)
+        sys.exit(0)
 
     def run_test(
         self, test_name: str, parent_pipe, signal_pipe=None, event_listener_thread=None
@@ -720,7 +719,7 @@ class MultiProcessTestCase(TestCase):
         self.assertEqual(
             first_process.exitcode,
             0,
-            msg="Expected zero exit code but got {} for pid: {}".format(first_process.exitcode, first_process.pid)
+            msg="Expected zero exit code but got {}".format(first_process.exitcode),
         )
 
     @property

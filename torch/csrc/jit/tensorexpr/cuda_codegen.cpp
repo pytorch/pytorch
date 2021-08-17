@@ -305,7 +305,7 @@ void CudaPrinter::visit(Intrinsics* v) {
   }
 
   os() << func_name << "(";
-  for (const auto i : c10::irange(v->nparams())) {
+  for (auto i : c10::irange(v->nparams())) {
     if (i > 0) {
       os() << ", ";
     }

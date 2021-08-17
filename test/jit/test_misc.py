@@ -79,10 +79,8 @@ class TestMisc(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, "missing value for argument 'n_tokens'"):
             sm()
 
-        with self.assertRaisesRegex(RuntimeError, "positional arg"):
-            sm(3, 'hello')
-
-        self.assertEqual(sm(n_tokens=3, device_name='hello'), (3, 'hello'))
+        input = (3, 'hello')
+        self.assertEqual(sm(*input), input)
 
     def test_tuple_subscripted_assign(self):
         with self.assertRaisesRegex(RuntimeError, "subscripted assignment"):

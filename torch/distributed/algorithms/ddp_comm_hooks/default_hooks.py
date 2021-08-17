@@ -85,7 +85,7 @@ class _OptimizerHookState(object):
             [],
             *functional_optim_args,
             **functional_optim_kwargs,
-            _allow_empty_param_list=True,
+            allow_empty_param_list=True,
         )
         if not hasattr(self.functional_optimizer, "step_param"):
             raise ValueError(

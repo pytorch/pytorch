@@ -1,5 +1,4 @@
 #include <torch/csrc/autograd/python_saved_variable_hooks.h>
-#include <ATen/SavedTensorHooks.h>
 
 #include <torch/csrc/THP.h>
 
@@ -46,37 +45,39 @@ namespace torch { namespace autograd {
     }
   }
 
+  std::mutex PyDefaultSavedVariableHooks::mutex_;
+  PyObject* PyDefaultSavedVariableHooks::pack_hook_(nullptr);
+  PyObject* PyDefaultSavedVariableHooks::unpack_hook_(nullptr);
+
   void PyDefaultSavedVariableHooks::set_hooks(py::function &pack_hook, py::function &unpack_hook) {
-    PyObject *pack_hook_(nullptr), *unpack_hook_(nullptr);
-    std::tie(pack_hook_, unpack_hook_) = at::SavedTensorDefaultHooks::get_hooks();
+    std::lock_guard<std::mutex> lock(mutex_);
     TORCH_CHECK(!pack_hook_ && !unpack_hook_,
         "Setting default hooks but they have already been set. "
         "Hint: only one pair of hooks is allowed at a time.");
-    at::SavedTensorDefaultHooks::enable();
-    at::SavedTensorDefaultHooks::set_hooks(pack_hook.release().ptr(), unpack_hook.release().ptr());
+    pack_hook_ = pack_hook.release().ptr();
+    unpack_hook_ = unpack_hook.release().ptr();
   }
 
   void PyDefaultSavedVariableHooks::reset_hooks() {
-    PyObject *pack_hook(nullptr), *unpack_hook(nullptr);
-    std::tie(pack_hook, unpack_hook) = at::SavedTensorDefaultHooks::get_hooks();
+    std::lock_guard<std::mutex> lock(mutex_);
     if (Py_IsInitialized()) {
       py::gil_scoped_acquire gil;
-      Py_XDECREF(pack_hook);
-      Py_XDECREF(unpack_hook);
+      Py_XDECREF(pack_hook_);
+      Py_XDECREF(unpack_hook_);
     }
-    at::SavedTensorDefaultHooks::set_hooks(nullptr, nullptr);
+    pack_hook_ = nullptr;
+    unpack_hook_ = nullptr;
   }
 
   std::unique_ptr<SavedVariableHooks> PyDefaultSavedVariableHooks::get_hooks() {
-    PyObject *pack_hook(nullptr), *unpack_hook(nullptr);
-    std::tie(pack_hook, unpack_hook) = at::SavedTensorDefaultHooks::get_hooks();
-    if (!pack_hook || !unpack_hook) {
+    if (!pack_hook_ || !unpack_hook_) {
       return nullptr;
     }
+    std::lock_guard<std::mutex> lock(mutex_);
     py::gil_scoped_acquire gil;
-    py::function pack_hook_ = py::reinterpret_borrow<py::function>(pack_hook);
-    py::function unpack_hook_ = py::reinterpret_borrow<py::function>(unpack_hook);
-    return std::make_unique<PySavedVariableHooks>(pack_hook_, unpack_hook_);
+    py::function pack_hook = py::reinterpret_borrow<py::function>(pack_hook_);
+    py::function unpack_hook = py::reinterpret_borrow<py::function>(unpack_hook_);
+    return std::make_unique<PySavedVariableHooks>(pack_hook, unpack_hook);
   }
 
 }}

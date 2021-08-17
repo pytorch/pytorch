@@ -6,4 +6,3 @@ matplotlib
 tensorboard
 # required to build torch.distributed.elastic.rendezvous.etcd* docs
 python-etcd>=0.4.5
-sphinx_copybutton

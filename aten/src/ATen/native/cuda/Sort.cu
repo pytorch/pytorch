@@ -150,14 +150,10 @@ void sortKeyValueInplace(const Tensor& key,
       at::cuda::detail::TensorInfo<int64_t, unsigned int> valueInfo =
         at::cuda::detail::getTensorInfo<int64_t, unsigned int>(value);
 
-      auto strideKey = keyInfo.strides[dim];
-      keyInfo.sizes[dim] = 1;
+      keyInfo.reduceDim(dim);
       int collapseKeyDim = keyInfo.collapseDims(dim);
-      keyInfo.strides[collapseKeyDim] = strideKey;
-      auto strideValue = valueInfo.strides[dim];
-      valueInfo.sizes[dim]=1;
+      valueInfo.reduceDim(dim);
       int collapseValueDim = valueInfo.collapseDims(dim);
-      valueInfo.strides[collapseValueDim] = strideValue;
 
       if (keyInfo.isContiguous()) {
         HANDLE_SORT_CASE(unsigned int, -2);
@@ -178,14 +174,10 @@ void sortKeyValueInplace(const Tensor& key,
       at::cuda::detail::TensorInfo<int64_t, uint64_t> valueInfo =
         at::cuda::detail::getTensorInfo<int64_t, uint64_t>(value);
 
-      auto strideKey = keyInfo.strides[dim];
-      keyInfo.sizes[dim] = 1;
+      keyInfo.reduceDim(dim);
       int collapseKeyDim = keyInfo.collapseDims(dim);
-      keyInfo.strides[collapseKeyDim] = strideKey;
-      auto strideValue = valueInfo.strides[dim];
-      valueInfo.sizes[dim]=1;
+      valueInfo.reduceDim(dim);
       int collapseValueDim = valueInfo.collapseDims(dim);
-      valueInfo.strides[collapseValueDim] = strideValue;
 
       // int64_t case is rare, just instantiate the generic version
       HANDLE_SORT_CASE(uint64_t, -1);

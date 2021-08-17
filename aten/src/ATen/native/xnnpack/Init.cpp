@@ -32,7 +32,8 @@ bool initialize() {
   return is_initialized_;
 }
 
-bool C10_UNUSED deinitialize() {
+// NOLINTNEXTLINE(clang-diagnostic-unused-function)
+bool deinitialize() {
   using namespace internal;
 
   // This implementation allows for retries.

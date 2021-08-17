@@ -20,18 +20,38 @@ static Expr* mutate_binary_op(
   Expr* rhs = v->rhs();
   Expr* lhs_new = lhs->accept_mutator(mutator);
   Expr* rhs_new = rhs->accept_mutator(mutator);
-  if (lhs != lhs_new) {
-    v->set_lhs(lhs_new);
+  if (lhs == lhs_new && rhs == rhs_new) {
+    return v;
   }
-  if (rhs != rhs_new) {
-    v->set_rhs(rhs_new);
+  IRNodeType expr_type = v->expr_type();
+  switch (expr_type) {
+    case IRNodeType::kAdd:
+      return new Add(lhs_new, rhs_new);
+    case IRNodeType::kSub:
+      return new Sub(lhs_new, rhs_new);
+    case IRNodeType::kMul:
+      return new Mul(lhs_new, rhs_new);
+    case IRNodeType::kDiv:
+      return new Div(lhs_new, rhs_new);
+    case IRNodeType::kMod:
+      return new Mod(lhs_new, rhs_new);
+    case IRNodeType::kMax:
+      return new Max(lhs_new, rhs_new, option);
+    case IRNodeType::kMin:
+      return new Min(lhs_new, rhs_new, option);
+    case IRNodeType::kAnd:
+      return new And(lhs_new, rhs_new);
+    case IRNodeType::kOr:
+      return new Or(lhs_new, rhs_new);
+    case IRNodeType::kXor:
+      return new Xor(lhs_new, rhs_new);
+    case IRNodeType::kLshift:
+      return new Lshift(lhs_new, rhs_new);
+    case IRNodeType::kRshift:
+      return new Rshift(lhs_new, rhs_new);
+    default:
+      throw unsupported_dtype();
   }
-  Dtype dtype_new =
-      BinaryOpDtype(lhs_new->dtype(), rhs_new->dtype(), ScalarType::Undefined);
-  if (dtype_new != v->dtype()) {
-    v->set_dtype(dtype_new);
-  }
-  return v;
 }
 
 Expr* IRMutator::mutate(Add* v) {
@@ -85,25 +105,24 @@ Expr* IRMutator::mutate(Min* v) {
 Expr* IRMutator::mutate(CompareSelect* v) {
   Expr* lhs = v->lhs();
   Expr* rhs = v->rhs();
-  Expr* ret_val1 = v->ret_val1();
-  Expr* ret_val2 = v->ret_val2();
+  Expr* retval1 = v->ret_val1();
+  Expr* retval2 = v->ret_val2();
   Expr* lhs_new = lhs->accept_mutator(this);
   Expr* rhs_new = rhs->accept_mutator(this);
-  Expr* ret_val1_new = ret_val1->accept_mutator(this);
-  Expr* ret_val2_new = ret_val2->accept_mutator(this);
-  if (lhs != lhs_new) {
-    v->set_lhs(lhs_new);
+  Expr* retval1_new = retval1->accept_mutator(this);
+  Expr* retval2_new = retval2->accept_mutator(this);
+  if (lhs == lhs_new && rhs == rhs_new && retval1 == retval1_new &&
+      retval2 == retval2_new) {
+    return v;
   }
-  if (rhs != rhs_new) {
-    v->set_rhs(rhs_new);
-  }
-  if (ret_val1 != ret_val1_new) {
-    v->set_ret_val1(ret_val1_new);
-  }
-  if (ret_val2 != ret_val2_new) {
-    v->set_ret_val2(ret_val2_new);
-  }
-  return v;
+  return CompareSelect::make(
+             ExprHandle(lhs_new),
+             ExprHandle(rhs_new),
+             ExprHandle(retval1_new),
+             ExprHandle(retval2_new),
+             v->compare_select_op(),
+             v->bias())
+      .node();
 }
 
 // NOLINTNEXTLINE
@@ -117,19 +136,19 @@ AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_MUTATE_DEFINE);
 Expr* IRMutator::mutate(Cast* v) {
   Expr* src_value = v->src_value();
   Expr* src_value_new = src_value->accept_mutator(this);
-  if (src_value != src_value_new) {
-    v->set_src_value(src_value_new);
+  if (src_value_new == v->src_value()) {
+    return v;
   }
-  return v;
+  return new Cast(v->dtype(), src_value_new);
 }
 
 Expr* IRMutator::mutate(BitCast* v) {
   Expr* src_value = v->src_value();
   Expr* src_value_new = src_value->accept_mutator(this);
-  if (src_value != src_value_new) {
-    v->set_src_value(src_value_new);
+  if (src_value_new == v->src_value()) {
+    return v;
   }
-  return v;
+  return new BitCast(v->dtype(), src_value_new);
 }
 
 Expr* IRMutator::mutate(Var* v) {
@@ -141,21 +160,18 @@ Expr* IRMutator::mutate(Ramp* v) {
   Expr* stride = v->stride();
   Expr* base_new = base->accept_mutator(this);
   Expr* stride_new = stride->accept_mutator(this);
-  if (base != base_new) {
-    v->set_base(base_new);
+  if (base == base_new && stride == stride_new) {
+    return v;
   }
-  if (stride != stride_new) {
-    v->set_stride(stride_new);
-  }
-  return v;
+  return new Ramp(base_new, stride_new, v->lanes());
 }
 
 Expr* IRMutator::mutate(Load* v) {
+  Dtype dtype = v->dtype();
   Buf* buf = v->buf();
 
   bool any_index_changed = false;
   std::vector<Expr*> indices_new;
-  indices_new.reserve(v->indices().size());
   for (Expr* ind : v->indices()) {
     Expr* new_ind = ind->accept_mutator(this);
     if (new_ind != ind) {
@@ -164,14 +180,10 @@ Expr* IRMutator::mutate(Load* v) {
     indices_new.push_back(new_ind);
   }
   Buf* buf_new = dynamic_cast<Buf*>(buf->accept_mutator(this));
-
-  if (buf != buf_new) {
-    v->set_buf(buf_new);
+  if (buf == buf_new && !any_index_changed) {
+    return v;
   }
-  if (any_index_changed) {
-    v->set_indices(indices_new);
-  }
-  return v;
+  return new Load(dtype, buf_new, indices_new);
 }
 
 Expr* IRMutator::mutate(Buf* v) {
@@ -182,32 +194,32 @@ Expr* IRMutator::mutate(Buf* v) {
   if (!var_new) {
     return nullptr;
   }
+  bool any_change = var_new != var;
 
-  bool dims_changed = false;
   std::vector<Expr*> dims_old = v->dims();
   std::vector<Expr*> dims_new(dims_old.size());
-  for (const auto i : c10::irange(dims_old.size())) {
+  for (auto i : c10::irange(dims_old.size())) {
     dims_new[i] = dims_old[i]->accept_mutator(this);
-    dims_changed |= (dims_new[i] != dims_old[i]);
+    any_change |= (dims_new[i] != dims_old[i]);
   }
 
-  if (var != var_new) {
-    v->set_base_handle(var_new);
-  }
-  if (dims_changed) {
-    v->set_dims(dims_new);
+  if (!any_change) {
+    return (Expr*)v;
   }
 
+  v->set_base_handle(var_new);
+  v->set_dims(dims_new);
   return v;
 }
 
 Expr* IRMutator::mutate(Broadcast* v) {
   Expr* value = v->value();
+  int lanes = v->lanes();
   Expr* value_new = value->accept_mutator(this);
-  if (value != value_new) {
-    v->set_value(value_new);
+  if (value == value_new) {
+    return v;
   }
-  return v;
+  return new Broadcast(value_new, lanes);
 }
 
 Expr* IRMutator::mutate(IfThenElse* v) {
@@ -218,16 +230,12 @@ Expr* IRMutator::mutate(IfThenElse* v) {
   Expr* true_value_new = true_value->accept_mutator(this);
   Expr* false_value_new = false_value->accept_mutator(this);
 
-  if (condition != condition_new) {
-    v->set_condition(condition_new);
+  if (condition == condition_new && true_value == true_value_new &&
+      false_value == false_value_new) {
+    return v;
   }
-  if (true_value != true_value_new) {
-    v->set_true_value(true_value_new);
-  }
-  if (false_value != false_value_new) {
-    v->set_false_value(false_value_new);
-  }
-  return v;
+
+  return new IfThenElse(condition_new, true_value_new, false_value_new);
 }
 
 Expr* IRMutator::mutate(Intrinsics* v) {
@@ -241,10 +249,10 @@ Expr* IRMutator::mutate(Intrinsics* v) {
     }
     params[i] = value_new;
   }
-  if (any_change) {
-    v->set_params(params);
+  if (!any_change) {
+    return v;
   }
-  return v;
+  return new Intrinsics(v->op_type(), params);
 }
 
 Expr* IRMutator::mutate(Term* v) {
@@ -323,19 +331,14 @@ Stmt* IRMutator::mutate(For* v) {
   if (!body_new) {
     return nullptr;
   }
-  if (body != body_new) {
-    v->set_body(body_new);
+  if (var == var_new && start == start_new && stop == stop_new &&
+      body == body_new) {
+    return (Stmt*)v;
   }
-  if (var != var_new) {
-    v->set_var(var_new);
+  if (body_new == body) {
+    body_new = Stmt::clone(body);
   }
-  if (start != start_new) {
-    v->set_start(start_new);
-  }
-  if (stop != stop_new) {
-    v->set_stop(stop_new);
-  }
-  return v;
+  return new For(var_new, start_new, stop_new, body_new, loop_options);
 }
 
 Stmt* IRMutator::mutate(Block* v) {
@@ -353,10 +356,10 @@ Stmt* IRMutator::mutate(Block* v) {
       stmts.push_back(stmt_new);
     }
   }
-  if (any_change) {
-    v->set_stmts(stmts);
+  if (!any_change) {
+    return (Stmt*)v;
   }
-  return v;
+  return Block::make(stmts);
 }
 
 Stmt* IRMutator::mutate(Store* v) {
@@ -374,17 +377,10 @@ Stmt* IRMutator::mutate(Store* v) {
   Expr* value = v->value();
   Buf* buf_new = dynamic_cast<Buf*>(buf->accept_mutator(this));
   Expr* value_new = value->accept_mutator(this);
-
-  if (buf != buf_new) {
-    v->set_buf(buf_new);
+  if (buf == buf_new && !any_index_changed && value == value_new) {
+    return (Stmt*)v;
   }
-  if (any_index_changed) {
-    v->set_indices(indices_new);
-  }
-  if (value != value_new) {
-    v->set_value(value_new);
-  }
-  return v;
+  return new Store(buf_new, indices_new, value_new);
 }
 
 Stmt* IRMutator::mutate(AtomicAdd* v) {
@@ -402,17 +398,10 @@ Stmt* IRMutator::mutate(AtomicAdd* v) {
   Expr* value = v->value();
   Buf* buf_new = dynamic_cast<Buf*>(buf->accept_mutator(this));
   Expr* value_new = value->accept_mutator(this);
-
-  if (buf != buf_new) {
-    v->set_buf(buf_new);
+  if (buf == buf_new && !any_index_changed && value == value_new) {
+    return (Stmt*)v;
   }
-  if (any_index_changed) {
-    v->set_indices(indices_new);
-  }
-  if (value != value_new) {
-    v->set_value(value_new);
-  }
-  return v;
+  return new AtomicAdd(buf_new, indices_new, value_new);
 }
 
 Stmt* IRMutator::mutate(SyncThreads* v) {
@@ -420,59 +409,48 @@ Stmt* IRMutator::mutate(SyncThreads* v) {
 }
 
 Stmt* IRMutator::mutate(ExternalCall* v) {
-  Buf* buf = v->buf();
-  Buf* buf_new = dynamic_cast<Buf*>(buf->accept_mutator(this));
-  TORCH_INTERNAL_ASSERT(buf_new);
+  bool changed = false;
+  Buf* new_buf = dynamic_cast<Buf*>(v->buf()->accept_mutator(this));
+  TORCH_INTERNAL_ASSERT(new_buf);
+  changed |= new_buf != v->buf();
 
-  bool buf_args_changed = false;
-  std::vector<Buf*> buf_args_new;
-  buf_args_new.reserve(v->buf_args().size());
+  std::vector<Buf*> new_buf_args;
   for (Buf* buf_arg : v->buf_args()) {
-    Buf* buf_arg_new = dynamic_cast<Buf*>(buf_arg->accept_mutator(this));
-    TORCH_INTERNAL_ASSERT(buf_arg_new);
-    buf_args_new.push_back(buf_arg_new);
-    buf_args_changed |= buf_arg_new != buf_arg;
+    Buf* new_buf_arg = dynamic_cast<Buf*>(buf_arg->accept_mutator(this));
+    TORCH_INTERNAL_ASSERT(new_buf_arg);
+    new_buf_args.push_back(new_buf_arg);
+    changed |= new_buf_arg != buf_arg;
   }
-
-  bool args_changed = false;
-  std::vector<Expr*> args_new;
-  args_new.reserve(v->args().size());
+  std::vector<Expr*> new_args;
   for (Expr* arg : v->args()) {
-    Expr* arg_new = arg->accept_mutator(this);
-    args_new.push_back(arg_new);
-    args_changed |= arg_new != arg;
+    Expr* new_arg = arg->accept_mutator(this);
+    new_args.push_back(new_arg);
+    changed |= new_arg != arg;
   }
-
-  if (buf != buf_new) {
-    v->set_buf(buf_new);
-  }
-  if (buf_args_changed) {
-    v->set_buf_args(buf_args_new);
-  }
-  if (args_changed) {
-    v->set_args(args_new);
-  }
-  return v;
+  return changed
+      ? new ExternalCall(new_buf, v->func_name(), new_buf_args, new_args)
+      : (Stmt*)v;
 }
 
 Stmt* IRMutator::mutate(Allocate* v) {
   Buf* buf = v->buf();
   Buf* buf_new = dynamic_cast<Buf*>(buf->accept_mutator(this));
   TORCH_INTERNAL_ASSERT(buf_new);
-  if (buf != buf_new) {
-    v->set_buf(buf_new);
+  if (buf_new == buf) {
+    return (Stmt*)v;
   }
-  return v;
+  return new Allocate(buf_new);
 }
 
 Stmt* IRMutator::mutate(Free* v) {
   Buf* buf = v->buf();
   Buf* buf_new = dynamic_cast<Buf*>(buf->accept_mutator(this));
   TORCH_INTERNAL_ASSERT(buf_new);
-  if (buf != buf_new) {
-    v->set_buf(buf_new);
+  if (buf_new == buf) {
+    return (Stmt*)v;
   }
-  return v;
+
+  return new Free(buf_new);
 }
 
 Stmt* IRMutator::mutate(Let* v) {
@@ -482,13 +460,11 @@ Stmt* IRMutator::mutate(Let* v) {
   Expr* val_old = v->value();
   Expr* val_new = val_old->accept_mutator(this);
 
-  if (var_old != var_new) {
-    v->set_var(var_new);
+  if (var_new == var_old && val_old == val_new) {
+    return (Stmt*)v;
   }
-  if (val_old != val_new) {
-    v->set_val(val_new);
-  }
-  return v;
+
+  return new Let(var_new, val_new);
 }
 
 Stmt* IRMutator::mutate(Cond* v) {
@@ -500,19 +476,82 @@ Stmt* IRMutator::mutate(Cond* v) {
   Stmt* true_new = true_old ? true_old->accept_mutator(this) : true_old;
   Stmt* false_new = false_old ? false_old->accept_mutator(this) : false_old;
 
-  if (cond_old != cond_new) {
-    v->set_condition(cond_new);
+  if (cond_old == cond_new && true_old == true_new && false_old == false_new) {
+    return (Stmt*)v;
   }
 
-  if (true_old != true_new) {
-    v->set_true_stmt(true_new);
+  if (true_old && true_new == true_old) {
+    true_new = Stmt::clone(true_old);
+  }
+  if (false_old && false_new == false_old) {
+    false_new = Stmt::clone(false_old);
   }
 
-  if (false_old != false_new) {
-    v->set_false_stmt(false_new);
-  }
+  return new Cond(cond_new, true_new, false_new);
+}
 
-  return v;
+class StmtClone : public IRMutator {
+ public:
+  Stmt* mutate(For* v) override;
+  Stmt* mutate(Block* v) override;
+  Stmt* mutate(Store* v) override;
+  Stmt* mutate(Allocate* v) override;
+  Stmt* mutate(Free* v) override;
+  Stmt* mutate(Let* v) override;
+  Stmt* mutate(Cond* v) override;
+  Stmt* mutate(AtomicAdd* v) override;
+};
+
+Stmt* StmtClone::mutate(For* v) {
+  // Only body needs to be cloned as only statements are mutable
+  Stmt* body_new = v->body()->accept_mutator(this);
+
+  return new For(v->var(), v->start(), v->stop(), body_new, v->loop_options());
+}
+
+Stmt* StmtClone::mutate(Block* v) {
+  std::vector<Stmt*> stmts;
+  for (Stmt* stmt : *v) {
+    stmts.push_back(stmt->accept_mutator(this));
+  }
+  return new Block(stmts);
+}
+
+Stmt* StmtClone::mutate(Store* v) {
+  return new Store(v->buf(), v->indices(), v->value());
+}
+
+Stmt* StmtClone::mutate(AtomicAdd* v) {
+  return new AtomicAdd(v->buf(), v->indices(), v->value());
+}
+
+Stmt* StmtClone::mutate(Allocate* v) {
+  return new Allocate(v->buf());
+}
+
+Stmt* StmtClone::mutate(Free* v) {
+  return new Free(v->buf());
+}
+
+Stmt* StmtClone::mutate(Let* v) {
+  return new Let(v->var(), v->value());
+}
+
+Stmt* StmtClone::mutate(Cond* v) {
+  Stmt* true_old = v->true_stmt();
+  Stmt* false_old = v->false_stmt();
+
+  Stmt* true_new = true_old ? true_old->accept_mutator(this) : true_old;
+  Stmt* false_new = false_old ? false_old->accept_mutator(this) : false_old;
+
+  return new Cond(v->condition(), true_new, false_new);
+}
+
+Stmt* Stmt::clone(Stmt* s) {
+  StmtClone clone_mutator;
+  Stmt* cloned = s->accept_mutator(&clone_mutator);
+  set_parent(cloned, nullptr);
+  return cloned;
 }
 
 } // namespace tensorexpr

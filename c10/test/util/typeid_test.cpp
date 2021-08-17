@@ -10,8 +10,8 @@ class TypeMetaTestFoo {};
 class TypeMetaTestBar {};
 } // namespace
 
-CAFFE_KNOWN_TYPE_NOEXPORT(TypeMetaTestFoo);
-CAFFE_KNOWN_TYPE_NOEXPORT(TypeMetaTestBar);
+CAFFE_KNOWN_TYPE(TypeMetaTestFoo);
+CAFFE_KNOWN_TYPE(TypeMetaTestBar);
 
 namespace {
 
@@ -87,8 +87,8 @@ class ClassNoAssignment {
 };
 } // namespace
 
-CAFFE_KNOWN_TYPE_NOEXPORT(ClassAllowAssignment);
-CAFFE_KNOWN_TYPE_NOEXPORT(ClassNoAssignment);
+CAFFE_KNOWN_TYPE(ClassAllowAssignment);
+CAFFE_KNOWN_TYPE(ClassNoAssignment);
 
 namespace {
 

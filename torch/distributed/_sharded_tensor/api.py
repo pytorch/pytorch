@@ -1,6 +1,6 @@
 import collections
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import (
     Dict,
     List
@@ -18,9 +18,11 @@ from torch.distributed._sharding_spec import (
     ShardingSpec,
 )
 from torch.distributed._sharding_spec._internals import (
+    is_valid_device,
     check_tensor,
     validate_non_overlapping_shards_metadata
 )
+from torch.distributed.utils import _parse_remote_device
 
 # Tracking for sharded tensor objects.
 _sharded_tensor_lock = threading.Lock()
@@ -64,17 +66,17 @@ class ShardedTensorMetadata(object):
     """
 
     # Metadata about each shard of the Tensor
-    shards_metadata: List[ShardMetadata] = field(default_factory=list)
+    shards_metadata: List[ShardMetadata]
 
     # Size of each dim of the overall Tensor.
-    size: torch.Size = field(default=torch.Size([]))
+    size: torch.Size
 
     # Regular tensor fields
-    dtype: torch.dtype = field(default=torch.get_default_dtype())
-    layout: torch.layout = field(default=torch.strided)
-    requires_grad: bool = False
-    memory_format: torch.memory_format = field(default=torch.contiguous_format)
-    pin_memory: bool = False
+    dtype: torch.dtype
+    layout: torch.layout
+    requires_grad: bool
+    memory_format: torch.memory_format
+    pin_memory: bool
 
     def __getstate__(self):
         # Since torch.memory_format cannot be pickled!
@@ -386,7 +388,7 @@ class ShardedTensor(object):
                     f'sharded_tensor_metadata pin_memory: {sharded_tensor_metadata.pin_memory}'
                 )
 
-            if local_shard_tensor.device != local_device:
+            if str(local_shard_tensor.device) != local_device:
                 raise ValueError(
                     f'Local shard tensor device does not match with local Shard placement! '
                     f'local shard tensor device: {local_shard_tensor.device}, '
@@ -441,14 +443,17 @@ class ShardedTensor(object):
             raise ValueError(f"Invalid sharding dim: {sharding_dim}")
 
         dim_size = dims[sharding_dim]
-        remote_devices = self._sharding_spec.placements  # type: ignore[attr-defined]
-        chunks = len(remote_devices)
+        devices = self._sharding_spec.placements  # type: ignore[attr-defined]
+        chunks = len(devices)
         # split_size computed similar to 'torch.chunk'
         split_size = (dim_size + chunks - 1) // chunks
 
         shards_metadata = []
-        for idx, remote_device in enumerate(remote_devices):
-            rank, local_device = self._parse_and_validate_remote_device(remote_device)
+        for idx, device in enumerate(devices):
+            if not is_valid_device(device):
+                raise ValueError(f"{device} is not a valid device")
+
+            rank, local_device = self._parse_and_validate_remote_device(device)
 
             # Adjust the sharding dim for this rank.
             sharded_dim_size = min(dim_size, split_size * (idx + 1)) - split_size * idx
@@ -463,7 +468,7 @@ class ShardedTensor(object):
                 rank_offsets[sharding_dim] = split_size * idx
                 rank_dims[sharding_dim] = sharded_dim_size
 
-                shard_metadata = ShardMetadata(rank_offsets, rank_dims, remote_device)
+                shard_metadata = ShardMetadata(rank_offsets, rank_dims, device)
                 shards_metadata.append(shard_metadata)
 
                 # Build the local shard for the current rank if it is involved in the sharding spec.
@@ -536,29 +541,27 @@ class ShardedTensor(object):
             pin_memory,
         )
 
-    def _parse_and_validate_remote_device(self, remote_device: torch.distributed._remote_device):
+    def _parse_and_validate_remote_device(self, device):
 
-        worker_name = remote_device.worker_name()
-        rank = remote_device.rank()
-        device = remote_device.device()
+        on, local_device = _parse_remote_device(device)
 
         # Validate rank, skip validation if rank is not part of process group.
         if not distributed_c10d._rank_not_in_group(self._process_group):
-            if rank is not None and (rank < 0 or rank >= dist.get_world_size(self._process_group)):
-                raise ValueError(f'Invalid rank: {rank}')
+            if isinstance(on, int) and (on < 0 or on >= dist.get_world_size(self._process_group)):
+                raise ValueError(f'Invalid rank: {on}')
 
-        if worker_name is not None:
+        if isinstance(on, str):
             if not rpc._is_current_rpc_agent_set():
-                raise RuntimeError(f'RPC framework needs to be initialized for using worker names: {worker_name}')
+                raise RuntimeError(f'RPC framework needs to be initialized for using worker names: {on}')
 
             workers = rpc._get_current_rpc_agent().get_worker_infos()
             for worker in workers:
-                if worker.name == worker_name:
-                    return worker.id, device
+                if worker.name == on:
+                    return worker.id, local_device
 
-            raise ValueError(f'Invalid worker name: {worker_name}')
+            raise ValueError(f'Invalid worker name: {on}')
 
-        return rank, device
+        return on, local_device
 
     def sharding_spec(self) -> ShardingSpec:
         """

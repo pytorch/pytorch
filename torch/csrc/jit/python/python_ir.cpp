@@ -759,16 +759,11 @@ void initPythonIRBindings(PyObject* module_) {
           })
       .def(
           "with_sizes",
-          [](Type& t, c10::optional<std::vector<c10::optional<int64_t>>> sizes)
-              -> py::object {
-            auto ptt = t.expect<TensorType>();
-            if (!ptt) {
-              return py::none();
+          [](Type& t, std::vector<c10::optional<int64_t>> sizes) -> py::object {
+            if (auto ptt = t.expect<TensorType>()) {
+              return py::cast(ptt->withSymbolicShapes(sizes));
             }
-            if (!sizes) {
-              return py::cast(ptt->withSymbolicShapes(c10::SymbolicShape()));
-            }
-            return py::cast(ptt->withSymbolicShapes(*sizes));
+            return py::none();
           })
       .def(
           "varyingSizes",

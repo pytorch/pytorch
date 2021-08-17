@@ -4,7 +4,8 @@
 
 namespace {
 
-C10_UNUSED void printBlobSizes() {
+// NOLINTNEXTLINE(clang-diagnostic-unused-function)
+void printBlobSizes() {
   ::caffe2::Workspace::ForEach(
       [&](::caffe2::Workspace* ws) { ws->PrintBlobSizes(); });
 }

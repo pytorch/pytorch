@@ -22,7 +22,6 @@ class _FunctionalAdadelta(object):
         rho: float = 0.9,
         eps: float = 1e-6,
         weight_decay: float = 0.0,
-        _allow_empty_param_list: bool = False,
     ):
         self.defaults = {
             "lr": lr,
@@ -31,7 +30,7 @@ class _FunctionalAdadelta(object):
             "weight_decay": weight_decay,
         }
 
-        if len(params) == 0 and not _allow_empty_param_list:
+        if len(params) == 0:
             raise ValueError("optimizer got an empty parameter list")
 
         # NOTE: we only have one param_group and don't allow user to add additional

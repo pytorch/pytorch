@@ -761,12 +761,25 @@ class ops(_TestParametrizer):
                 #   Test-specific decorators are applied to the original test,
                 #   however.
                 try:
+                    active_decorators = []
+                    if op.should_skip(generic_cls.__name__, test.__name__, device_cls.device_type, dtype):
+                        active_decorators.append(skipIf(True, "Skipped!"))
+
+                    if op.decorators is not None:
+                        for decorator in op.decorators:
+                            # Can't use isinstance as it would cause a circular import
+                            if decorator.__class__.__name__ == 'DecorateInfo':
+                                if decorator.is_active(generic_cls.__name__, test.__name__,
+                                                       device_cls.device_type, dtype):
+                                    active_decorators += decorator.decorators
+                            else:
+                                active_decorators.append(decorator)
+
                     @wraps(test)
                     def test_wrapper(*args, **kwargs):
                         return test(*args, **kwargs)
 
-                    for decorator in op.get_decorators(
-                            generic_cls.__name__, test.__name__, device_cls.device_type, dtype):
+                    for decorator in active_decorators:
                         test_wrapper = decorator(test_wrapper)
 
                     yield (test_wrapper, test_name, param_kwargs)

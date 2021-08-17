@@ -4,7 +4,6 @@
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #endif
 #include <aten/src/ATen/quantized/Quantizer.h>
-#include <c10/util/irange.h>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <string>
@@ -461,7 +460,7 @@ static inline double swapDouble(double value) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   double flipped;
   char* out_bytes = reinterpret_cast<char*>(&flipped);
-  for (const auto i : c10::irange(sizeof(double))) {
+  for (size_t i = 0; i < sizeof(double); ++i) {
     out_bytes[i] = bytes[sizeof(double) - i - 1];
   }
   return *reinterpret_cast<double*>(out_bytes);

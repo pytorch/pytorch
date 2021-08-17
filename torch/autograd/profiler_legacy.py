@@ -24,8 +24,7 @@ class profile(object):
             record_shapes=False,
             with_flops=False,
             profile_memory=False,
-            with_stack=False,
-            with_modules=False):
+            with_stack=False):
         self.enabled: bool = enabled
         if not self.enabled:
             return
@@ -37,7 +36,6 @@ class profile(object):
         self.record_shapes |= self.with_flops
         self.profile_memory = profile_memory
         self.with_stack = with_stack
-        self.with_modules = with_modules
 
         if self.use_cuda and not torch.cuda.is_available():
             warn("CUDA is not available, disabling CUDA profiling")
@@ -54,8 +52,7 @@ class profile(object):
             self.record_shapes,
             self.profile_memory,
             self.with_stack,
-            self.with_flops,
-            self.with_modules)
+            self.with_flops)
 
     def __enter__(self):
         if not self.enabled:
