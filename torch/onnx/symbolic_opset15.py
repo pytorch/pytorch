@@ -23,14 +23,22 @@
 #    Shape              https://github.com/onnx/onnx/pull/3580
 #                       Backwards compatible
 #                       TODO: optional start/end attribute.
+
+
+import torch
 from torch.onnx.symbolic_opset9 import eq, wrap_logical_op_with_negation
 from torch.onnx.symbolic_helper import _is_none
 
 
 def __is_(g, self, other):
     if _is_none(other):
-        none = g.op("OptionalHasElement", self)
-        return g.op("Not", none)
+        if self.type().kind() == "NoneType":
+            return g.op("Constant", value_t=torch.BoolTensor([1]))
+        elif self.type().kind() == "OptionalType":
+            none = g.op("OptionalHasElement", self)
+            return g.op("Not", none)
+        else:
+            return g.op("Constant", value_t=torch.BoolTensor([0]))
     return eq(g, self, other)
 
 
@@ -45,4 +53,7 @@ def prim_unchecked_cast(g, self):
     # if x is an optional Tensor, unchecked_cast will cast
     # x to Tensor, so the rest of the graph knows that x is a Tensor
     # this doesn't do anything in runtime and is a noop in ONNX
-    return g.op("OptionalGetElement", self)
+    if self.type().kind() == "OptionalType":
+        return g.op("OptionalGetElement", self)
+    else:
+        return self
