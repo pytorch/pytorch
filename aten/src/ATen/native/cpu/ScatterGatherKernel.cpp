@@ -103,12 +103,6 @@ struct cpu_scatter_gather_base_kernel {
   void operator()(Tensor& self, int64_t dim,
     const Tensor& index, const Scalar& value,
     const std::string& method_name, func_t& kernel_func) {
-    // no-op if index is empty
-    if (index.numel() == 0) {
-      return;
-    }
-
-    dim = maybe_wrap_dim(dim, self.dim());
 
     auto index_sizes = ensure_nonempty_vec(index.sizes().vec());
     auto index_strides = ensure_nonempty_vec(index.strides().vec());
@@ -196,18 +190,6 @@ struct cpu_scatter_gather_base_kernel {
   void operator()(Tensor& self, int64_t dim,
     const Tensor& index, const Tensor& src,
     const std::string& method_name, func_t& kernel_func) {
-
-    // no-op if index is empty
-    if (index.numel() == 0) {
-      return;
-    }
-
-    dim = maybe_wrap_dim(dim, self.dim());
-
-    scatter_gather_dtype_check(method_name, self, index, src);
-    if (!is_scatter_like) {
-      gather_shape_check(self, dim, index, src);
-    }
 
     auto iter = TensorIteratorConfig()
       .check_all_same_dtype(false)
@@ -326,6 +308,8 @@ void scatter_reduce_cpu_kernel(Tensor& self, const int64_t dim, const Tensor& in
     cpu_scatter_gather_base_kernel<>()(self, dim, index, src,
                                        "scatter_reduce_multiply_", reduce_multiply);
     break;
+  default:
+    TORCH_CHECK(false, "reduce argument must be either add or multiply.");
   }
 }
 
@@ -340,6 +324,8 @@ void scatter_scalar_reduce_cpu_kernel(Tensor& self, const int64_t dim, const Ten
     cpu_scatter_gather_base_kernel<>()(self, dim, index, value,
                                        "scatter_scalar_reduce_multiply_", reduce_multiply);
     break;
+  default:
+    TORCH_CHECK(false, "reduce argument must be either add or multiply.");
   }
 }
 

@@ -9,7 +9,7 @@ namespace at { namespace native {
 namespace {
 
 // checks whether index.dtype == int64
-// and self.dtyp == src.dtype if src is a Tensor
+// and self.dtype == src.dtype if src is a Tensor
 static void scatter_gather_dtype_check(
   const std::string& method_name,
   const Tensor& self,
@@ -38,6 +38,9 @@ static void scatter_gather_dtype_check(
 static void gather_shape_check(const Tensor& self, int64_t dim,
   const Tensor& index, const Tensor& src
 ) {
+  if (index.numel() == 0) {
+      return;
+  }
   auto self_dims = ensure_nonempty_dim(self.dim());
   TORCH_CHECK(self_dims == ensure_nonempty_dim(index.dim()),
     "Index tensor must have the same number of dimensions as out tensor"

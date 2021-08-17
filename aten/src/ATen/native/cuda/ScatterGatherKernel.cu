@@ -89,10 +89,6 @@ struct _cuda_scatter_gather_internal_kernel {
     int64_t index_stride,
     const func_t& f
   ) {
-    if (iter.numel() == 0) {
-      return;
-    }
-
     if (!iter.can_use_32bit_indexing()) {
       for (auto& sub_iter : iter.with_32bit_indexing()) {
         _cuda_scatter_gather_internal_kernel<is_scatter_like, scalar_t>()(
@@ -137,19 +133,6 @@ struct cuda_scatter_gather_base_kernel {
     const std::string& method_name,
     const func_t& f
   ) {
-    // no-op if index is empty
-    if (index.numel() == 0) {
-      return;
-    }
-    at::assert_no_internal_overlap(self);
-
-    dim = maybe_wrap_dim(dim, self.dim());
-
-    scatter_gather_dtype_check(method_name, self, index, src);
-    if (!is_scatter_like) {
-      gather_shape_check(self, dim, index, src);
-    }
-
     auto index_sizes = ensure_nonempty_vec(index.sizes().vec());
     auto self_strides = ensure_nonempty_vec(self.strides().vec());
     auto src_strides = ensure_nonempty_vec(src.strides().vec());
@@ -206,19 +189,6 @@ struct cuda_scatter_gather_base_kernel {
     const std::string& method_name,
     const ReduceMultiply& f
   ) {
-    // no-op if index is empty
-    if (index.numel() == 0) {
-      return;
-    }
-    at::assert_no_internal_overlap(self);
-
-    dim = maybe_wrap_dim(dim, self.dim());
-
-    scatter_gather_dtype_check(method_name, self, index, src);
-    if (!is_scatter_like) {
-      gather_shape_check(self, dim, index, src);
-    }
-
     auto index_sizes = ensure_nonempty_vec(index.sizes().vec());
     auto self_strides = ensure_nonempty_vec(self.strides().vec());
     auto src_strides = ensure_nonempty_vec(src.strides().vec());
@@ -280,10 +250,6 @@ struct _cuda_scatter_fill_internal_kernel {
     int64_t index_stride,
     const func_t& f
   ) {
-    if (iter.numel() == 0) {
-      return;
-    }
-
     if (!iter.can_use_32bit_indexing()) {
       for (auto& sub_iter : iter.with_32bit_indexing()) {
         _cuda_scatter_fill_internal_kernel<scalar_t>()(
@@ -327,10 +293,6 @@ struct cuda_scatter_fill_base_kernel {
     const std::string& method_name,
     const func_t& f
   ) {
-    // no-op if index is empty
-    if (index.numel() == 0) {
-      return;
-    }
     at::assert_no_internal_overlap(self);
 
     dim = maybe_wrap_dim(dim, self.dim());
@@ -376,10 +338,6 @@ struct cuda_scatter_fill_base_kernel {
     const std::string& method_name,
     const ReduceMultiply& f
   ) {
-    // no-op if index is empty
-    if (index.numel() == 0) {
-      return;
-    }
     at::assert_no_internal_overlap(self);
 
     dim = maybe_wrap_dim(dim, self.dim());
@@ -458,6 +416,8 @@ void scatter_reduce_cuda_kernel(Tensor& self, const int64_t dim, const Tensor& i
     cuda_scatter_gather_base_kernel<true, false>()(self, dim, index, src,
                                        "scatter_reduce_cuda_multiply_", reduce_multiply);
     break;
+  default:
+    TORCH_CHECK(false, "reduce argument must be either add or multiply.");
   }
 }
 
@@ -472,6 +432,8 @@ void scatter_scalar_reduce_cuda_kernel(Tensor& self, const int64_t dim, const Te
     cuda_scatter_fill_base_kernel<false>()(self, dim, index, value,
                                       "scatter_fill_cuda_multiply_", reduce_multiply);
     break;
+  default:
+    TORCH_CHECK(false, "reduce argument must be either add or multiply.");
   }
 }
 

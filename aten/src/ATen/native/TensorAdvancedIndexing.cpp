@@ -86,6 +86,9 @@ native::SCATTER_GATHER_OP get_operator_enum(const c10::string_view reduce) {
 TORCH_META_FUNC(gather)
 (const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
   const Tensor& result = maybe_get_output();
+  int64_t wrapped_dim = at::maybe_wrap_dim(dim, self.dim());
+  at::native::scatter_gather_dtype_check("gather", self, index, src);
+  at::native::gather_shape_check(self, wrapped_dim, index, src);
   if (result.defined()) {
   	at::assert_no_internal_overlap(result);
     at::assert_no_overlap(result, self);
