@@ -87,7 +87,7 @@ TEST_F(Kernel, InliningIntermediates) {
   }
 }
 
-TEST_F(Kernel, _1) {
+TEST_F(Kernel, Contiguous) {
   KernelScope kernel_scope;
 
   const auto graph_string = R"IR(
@@ -114,7 +114,7 @@ TEST_F(Kernel, _1) {
   const std::string& verification_pattern =
       R"IR(
 # CHECK: for
-# CHECK-NEXT: for
+# CHECK: for
 # CHECK-NOT: for)IR";
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
@@ -126,7 +126,7 @@ TEST_F(Kernel, _1) {
   }
 }
 
-TEST_F(Kernel, _2) {
+TEST_F(Kernel, Transposed2D) {
   KernelScope kernel_scope;
 
   const auto graph_string = R"IR(
@@ -155,6 +155,11 @@ TEST_F(Kernel, _2) {
       R"IR(
 # CHECK: for
 # CHECK-NEXT: for
+# CHECK-NEXT: aten_mul
+# CHECK: for
+# CHECK-NEXT: aten_mul
+# CHECK: for
+# CHECK-NEXT: aten_mul
 # CHECK-NOT: for)IR";
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
@@ -166,7 +171,7 @@ TEST_F(Kernel, _2) {
   }
 }
 
-TEST_F(Kernel, _3) {
+TEST_F(Kernel, Strided2D) {
   KernelScope kernel_scope;
 
   const auto graph_string = R"IR(
@@ -195,6 +200,53 @@ TEST_F(Kernel, _3) {
       R"IR(
 # CHECK: for
 # CHECK-NEXT: for
+# CHECK-NEXT: aten_mul
+# CHECK: for
+# CHECK-NEXT: aten_mul
+# CHECK: for
+# CHECK-NEXT: aten_mul
+# CHECK-NOT: for)IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  std::vector<IValue> stack = fmap<IValue>(inputs);
+  k.run(stack);
+  o = stack[0].toTensor();
+  for (size_t i = 0; i < 5 * 3; i++) {
+    CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
+  }
+}
+
+TEST_F(Kernel, UnevenVectorization) {
+  KernelScope kernel_scope;
+
+  const auto graph_string = R"IR(
+      graph(%0 : Float(15, strides=[1], device=cpu),
+            %1 : Float(15, strides=[2], device=cpu)):
+        %2 : Float(15, strides=[1]) = aten::mul(%0, %1)
+        %3 : Float(15, strides=[1]) = aten::mul(%0, %2)
+        return (%3))IR";
+  auto graph = std::make_shared<Graph>();
+  parseIR(graph_string, &*graph);
+
+  auto a = at::rand({15}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto b = at::rand({30}, TensorOptions(kCPU).dtype(at::kFloat))
+               .index({Slice(None, None, 2)});
+  auto ref = a * (a * b);
+  auto o = at::zeros_like(ref);
+  TensorExprKernel k(graph);
+  std::vector<at::Tensor> inputs = {a, b};
+  Stmt* s = k.getCodeGenStmt();
+
+  std::ostringstream oss;
+  oss << *s;
+
+  // Check the IR we produced
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: aten_mul
+# CHECK-NEXT: aten_mul
+# CHECK-NEXT: for
+# CHECK-NEXT: aten_mul
 # CHECK-NOT: for)IR";
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
@@ -705,8 +757,7 @@ TEST_F(Kernel, SumAllAxes) {
     // Check the IR we produced
     const std::string& verification_pattern =
         R"IR(
-# CHECK: for
-# CHECK-NEXT: for)IR";
+# CHECK: for)IR";
     torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
     std::vector<IValue> stack = fmap<IValue>(inputs);
@@ -1156,8 +1207,7 @@ TEST_F(Kernel, InlineReductionIntoConsumer) {
         # CHECK: for (int v = 0; v < 5;
         # CHECK-NEXT: for (int v_1 = 0; v_1 < 3;
         # CHECK-NEXT:   sum
-        # CHECK: for (int v_2 = 0; v_2 < 5;
-        # CHECK-NEXT: for (int v_3 = 0; v_3 < 3;
+        # CHECK: for (int _flat = 0; _flat < 15;
         # CHECK-NEXT:   aten_mul
         # CHECK-NOT: for)IR";
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());

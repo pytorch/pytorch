@@ -2494,6 +2494,8 @@ void parallelizeOuterLoops(LoopNest& l, Bufs&& bufs) {
     auto threads = at::get_num_threads();
     auto loops = l.getLoopStmtsFor(buf);
     std::vector<For*> loopsToFlatten;
+    // Figure out total trip count of the loop nest; stop adding nested loops
+    // when we have enough iterations to saturate the available threads.
     int64_t trips = 1;
     for (auto loop : loops) {
       if (trips >= threads) {
@@ -2506,9 +2508,23 @@ void parallelizeOuterLoops(LoopNest& l, Bufs&& bufs) {
       }
       break;
     }
-    if (loopsToFlatten.size()) {
-      For* flattened = nullptr;
-      LoopNest::flatten(loopsToFlatten, &flattened);
+    // There are no loops to parallelize; give up.
+    if (loopsToFlatten.size() < 2) {
+      continue;
+    }
+    // The loop nest contains a reduction; give up.
+    auto reductions = NodeFinder<ReduceOp>::find(loopsToFlatten[0]);
+    if (reductions.size() > 0) {
+      continue;
+    }
+    // The loop nest has loop carried dependences; give up.
+    if (LoopNest::hasLoopCarriedDependence(loopsToFlatten[0])) {
+      continue;
+    }
+    // Try to flatten the outer loops and parallelize them if successful.
+    For* flattened = nullptr;
+    LoopNest::flatten(loopsToFlatten, &flattened);
+    if (flattened) {
       flattened->set_parallel();
     }
   }
