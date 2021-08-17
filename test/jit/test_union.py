@@ -666,7 +666,6 @@ class TestUnion(JitTestCase):
         self.checkScript(fn, ())
 
     def test_union_with_list_comprehension(self):
-        self.maxDiff = None
         def fn():
             l: List[Tensor] = [torch.tensor([2, 3])]
             x: Union[List[torch.Tensor], int] = [t for t in l]
@@ -674,7 +673,8 @@ class TestUnion(JitTestCase):
                 x.append(torch.tensor(3))
             return x
 
-        self.checkScript(fn, ())
+        with torch._jit_internal._disable_emit_hooks():
+            self.checkScript(fn, ())
 
     def test_union_with_empty_listliteral_can_infer_list_type(self):
         def fn():
@@ -715,7 +715,8 @@ class TestUnion(JitTestCase):
                 x["bar"] = torch.tensor(3)
             return x
 
-        self.checkScript(fn, ())
+        with torch._jit_internal._disable_emit_hooks():
+            self.checkScript(fn, ())
 
     def test_union_with_dict_keyword(self):
         def fn():

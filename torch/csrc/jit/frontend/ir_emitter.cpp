@@ -1317,7 +1317,7 @@ struct to_ir {
             union_type_hint->containedTypes().end(),
             std::back_inserter(list_types),
             [&](TypePtr type_ptr) {
-              return type_ptr->isSubtypeOf(AnyListType::get());
+              return type_ptr->kind() == ListType::Kind;
             });
         if (list_types.empty()) {
           throw ErrorReport(lc)
@@ -3835,7 +3835,7 @@ struct to_ir {
     // of `List[T]`, use `T`. If the list is non-empty, find the
     // greatest common supertype of all the list elements (defaulting to
     // `Any` as a catch-all supertype). Assume `[]` is `List[Tensor]`
-    TypePtr elem_type = TensorType::get();
+    TypePtr inferred_elem_type = TensorType::get();
 
     // If `type_hint` is a Union, we're going to change it to be
     // the type of the rhs List, so we need to store the original
@@ -3844,6 +3844,11 @@ struct to_ir {
     // hint or because the type hint wasn't a Union)
     TypePtr annotated_union_type =
         type_hint && type_hint->kind() == UnionType::Kind ? type_hint : nullptr;
+
+    // This is used for error reporting in the case that we have a Union
+    // annotation that contains multiple Lists. We need to determine the
+    // actual type based on the rhs values
+    std::vector<TypePtr> all_candidates = {};
 
     // Basic `type_hint` check here for better error reporting. We also
     // see if we can narrow down the actual type if the given type hint
@@ -3857,25 +3862,30 @@ struct to_ir {
             union_type_hint->containedTypes().end(),
             std::back_inserter(list_types),
             [&](TypePtr type_ptr) {
-              return type_ptr->isSubtypeOf(AnyListType::get());
+              return type_ptr->kind() == ListType::Kind;
             });
         if (list_types.empty()) {
           throw ErrorReport(ll)
               << "Expected an Union type annotation "
               << "with an inner List type, but got " << type_hint->repr_str();
-        } else if (values.empty() && list_types.size() > 1) {
-          throw ErrorReport(ll)
-              << "Cannot assign an empty list to a "
-              << "variable annotated to be type " << type_hint->repr_str()
-              << " because there are multiple possible List "
-              << "type candidates in the Union annotation";
+        } else if (list_types.size() > 1) {
+          if (values.empty()) {
+            throw ErrorReport(ll)
+                << "Cannot assign an empty list to a "
+                << "variable annotated to be type " << type_hint->repr_str()
+                << " because there are multiple possible List "
+                << "type candidates in the Union annotation";
+          } else {
+            all_candidates = std::move(list_types);
+          }
         } else {
           type_hint = list_types[0];
         }
       }
 
-      if (auto list_type_hint = type_hint->cast<ListType>()) {
-        elem_type = list_type_hint->getElementType();
+      if (all_candidates.empty() && type_hint->kind() == ListType::Kind) {
+        auto list_type_hint = type_hint->cast<ListType>();
+        inferred_elem_type = list_type_hint->getElementType();
       } else {
         throw ErrorReport(ll) << "Expected an annotation of type "
                               << "List, but got " << type_hint->repr_str();
@@ -3890,37 +3900,71 @@ struct to_ir {
       // We don't want to use `elem_type` as the final argument to
       // `unifyTypeList` because there's a chance that `elem_type` is
       // the Tensor default
-      auto known_elem_type =
+      auto elem_type_hint =
           type_hint ? type_hint->cast<ListType>()->getElementType() : nullptr;
       c10::optional<TypePtr> unified = unifyTypeList(
-          types, nowhere, /*default_to_union=*/true, known_elem_type);
+          types, nowhere, /*default_to_union=*/true, elem_type_hint);
 
-      if (!type_hint && *unified == AnyType::get()) {
+      if (!type_hint && (*unified)->kind() == UnionType::Kind) {
         TORCH_WARN(
             "List consists of heterogeneous types, which means",
-            " that it has been typed as `List[Any]`. To use "
-            "any of the values in the List, it will be "
+            " that it has been typed as ", (*unified)->repr_str(),
+            ". To use any of the values in the List, it will be "
             "necessary to add an `assert isinstance` statement "
             "before first use to trigger type refinement. \n",
             ll.range().str());
       }
 
-      if (type_hint && !(*unified)->isSubtypeOf(elem_type)) {
+      if (all_candidates.empty() && type_hint && !(*unified)->isSubtypeOf(inferred_elem_type)) {
         throw ErrorReport(ll)
             << "List type annotation `" << type_hint->repr_str()
             << "` did not match the types of the given list elements,"
             << " which were unified to " << (*unified)->repr_str();
       }
 
+      if (!all_candidates.empty()) {
+        TypePtr greatest_supertype = nullptr;
+        std::for_each(all_candidates.begin(), all_candidates.end(),
+                      [&](TypePtr candidate) {
+                        if ((*unified)->isSubtypeOf(candidate)) {
+                          if (!greatest_supertype) {
+                            greatest_supertype = candidate;
+                          } else {
+                            greatest_supertype = *(unifyTypes(greatest_supertype, candidate));
+                          }
+                        }
+        });
+        if (!greatest_supertype) {
+            std::stringstream vector_repr;
+            for (size_t i = 0; i < all_candidates.size(); ++i) {
+              if (i > 0) {
+                vector_repr << ", ";
+              }
+              if (i != 0 && i == all_candidates.size() - 1) {
+                vector_repr << "or ";
+              }
+              vector_repr << all_candidates[i]->repr_str();
+            }
+            throw ErrorReport(ll)
+              << "Union type annotation `" << type_hint->repr_str()
+              << "` can hold " << vector_repr.str() << ", but none of "
+              << "those types match the types of the given list "
+              << "elements, which were unified to "
+              << (*unified)->repr_str();
+        } else {
+          type_hint = greatest_supertype;
+        }
+      }
+
       // We only want to set `elem_type` if we don't have a type hint
       // to allow for the case that `*unified` is a subtype of
       // `type_hint`
       if (!type_hint) {
-        elem_type = *unified;
+        inferred_elem_type = *unified;
       }
     }
 
-    Node* result = graph->insertNode(graph->createList(elem_type, values));
+    Node* result = graph->insertNode(graph->createList(inferred_elem_type, values));
     if (annotated_union_type) {
       Node* n = graph->insertNode(
           graph->create(prim::unchecked_cast, {result->output()}));

@@ -335,9 +335,6 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
           c10::make_intrusive<c10::ivalue::EnumHolder>(enum_type, name, value);
       return IValue(enum_holder);
     }
-    // We should never reach here. We only have this case for builds
-    // with the `-Werror` (treat compiler warnings as errors) flag set
-    case TypeKind::Pybind11_OptionalType: {}
   }
   throw py::cast_error(c10::str(
   "toIValue() cannot handle converting to type: ", type->repr_str()));
