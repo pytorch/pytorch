@@ -156,15 +156,15 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
           act.addMetadata("Reserved Bytes", std::to_string(total_reserved));
         }
 #endif // USE_KINETO
-
-        kineto_events_.emplace_back();
-        auto& evt = kineto_events_.back();
-        evt.name(kMemoryEventName)
-          .startUs(start_time)
-          .deviceIndex(device.index())
-          .deviceType(device.type())
-          .nBytes(alloc_size)
-          .startThreadId(at::RecordFunction::currentThreadId());
+	
+	kineto_events_.emplace_back();
+	auto& evt = kineto_events_.back();
+	      evt.name(kMemoryEventName)
+		.startUs(start_time)
+		.deviceIndex(device.index())
+		.deviceType(device.type())
+		.nBytes(alloc_size)
+		.startThreadId(at::RecordFunction::currentThreadId());
     }
   }
 

@@ -1,6 +1,3 @@
-from torch.fx.experimental.unification import Var  # type: ignore[attr-defined]
-
-
 class TensorType:
     """
     TensorType defines a type for tensors, which consists of a list of dimensions.
@@ -64,7 +61,7 @@ def is_consistent(t1, t2):
     if t1 == t2:
         return True
 
-    if t1 == Dyn or t2 == Dyn or isinstance(t1, Var) or isinstance(t2, Var):
+    if isinstance(t1, _DynType) or isinstance(t2, _DynType):
         return True
 
     if isinstance(t1, TensorType) and isinstance(t2, TensorType):

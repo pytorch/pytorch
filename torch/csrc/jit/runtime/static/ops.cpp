@@ -460,11 +460,6 @@ namespace {
 // contains FP divide, which is single-ported.
 static constexpr int kVectorWidth = 16;
 
-// disable NNC temporarily until a code cache is implemented
-#ifdef TORCH_ENABLE_LLVM
-#undef TORCH_ENABLE_LLVM
-#endif
-
 #ifdef TORCH_ENABLE_LLVM
 
 struct TEWrapper {
