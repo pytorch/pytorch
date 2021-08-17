@@ -323,7 +323,7 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
                 graph, node_name_to_target_dtype,
                 qhandler, prepare_custom_config_dict)
             new_arg_to_return.append(new_inner_arg)
-        return new_arg_to_return
+        return type(arg)(new_arg_to_return)
 
     if not isinstance(arg, Node):
         return arg
