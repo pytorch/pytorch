@@ -248,7 +248,7 @@ if(NOT MKL_FOUND)
             "$ENV{POCKETFFT_HOME}"
             "${PROJECT_SOURCE_DIR}/third_party/pocketfft"
            )
-  if(POCKETFFT_INCLUDE_DIR)
+  if(POCKETFFT_INCLUDE_DIR AND CMAKE_VERSION VERSION_GREATER "3.9")
     set(AT_POCKETFFT_ENABLED 1)
   endif()
 endif()
