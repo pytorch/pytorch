@@ -3,15 +3,17 @@ import unittest
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.optim import SGD, Adam
+from torch.optim import SGD, Adam, AdamW
 from torch.testing._internal.common_utils import TestCase, run_tests, IS_WINDOWS
 
 if not IS_WINDOWS:
     from torch.distributed.optim.functional_sgd import _FunctionalSGD
     from torch.distributed.optim.functional_adam import _FunctionalAdam
+    from torch.distributed.optim.functional_adamw import _FunctionalAdamW
     _SUPPORTED_OPTIM_MAPPING = {
         SGD: _FunctionalSGD,
-        Adam: _FunctionalAdam
+        Adam: _FunctionalAdam,
+        AdamW: _FunctionalAdamW,
     }
 
 
@@ -101,6 +103,13 @@ class TestFunctionalOptimParity(TestCase):
     )
     def test_functional_optim_parity_adam(self):
         self._test_functional_optim_parity(Adam, 1e-2, betas=(0.9, 0.999), eps=1e-6)
+
+    @unittest.skipIf(
+        IS_WINDOWS,
+        "Functional optimizer not support on windows, see https://github.com/pytorch/pytorch/issues/62137",
+    )
+    def test_functional_optim_parity_adam_w(self):
+        self._test_functional_optim_parity(AdamW, 1e-2, betas=(0.9, 0.999), eps=1e-6)
 
 
 if __name__ == "__main__":
