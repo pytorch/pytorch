@@ -3,7 +3,7 @@
 #include <ATen/ATen.h>
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
-#include <torch/csrc/jit/passes/memory_planning/linear_scan.h>
+#include <torch/csrc/jit/passes/memory_planning.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/runtime/profiling_graph_executor_impl.h>
 #include <torch/csrc/jit/runtime/profiling_record.h>
@@ -35,13 +35,18 @@ TEST(MemoryPlannerTest, Basic) {
   // plan
   ProfilingRecord::removeProfileCounter(pr->profiled_graph_->block());
   jit::RemoveProfileNodesAndSpecializeTypes(pr->profiled_graph_);
-  jit::planMemory(pr->profiled_graph_, Strategy::LINEAR_SCAN);
 
-  // run again to test
-  Code cd2(pr->profiled_graph_, "");
-  InterpreterState is2{cd2};
-  stack = createStack({input, hx, cx, w_ih, w_hh});
-  is2.run(stack);
+  for (int strategy = static_cast<int>(Strategy::NAIVE);
+           strategy <= static_cast<int>(Strategy::LINEAR_SCAN);
+           strategy++) {
+    std::cout << "running " << static_cast<Strategy>(strategy) << "\n";
+    jit::planMemory(pr->profiled_graph_, static_cast<Strategy>(strategy));
+    // run again to test
+    Code cd2(pr->profiled_graph_, "");
+    InterpreterState is2{cd2};
+    stack = createStack({input, hx, cx, w_ih, w_hh});
+    is2.run(stack);
+  }
 }
 
 } // namespace jit

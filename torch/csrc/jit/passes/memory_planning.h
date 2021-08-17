@@ -12,6 +12,25 @@ enum class Strategy {
   LINEAR_SCAN,
 };
 
+inline const char* toString(Strategy s) {
+  switch (s) {
+    case Strategy::NAIVE:
+      return "NAIVE";
+    case Strategy::GREEDY_BY_SIZE:
+      return "GREEDY_BY_SIZE";
+    case Strategy::GREEDY_BY_BREADTH:
+      return "GREEDY_BY_BREADTH";
+    case Strategy::LINEAR_SCAN:
+      return "LINEAR_SCAN";
+    default:
+      return "UNKNOWN STRATEGY";
+  }
+}
+
+inline std::ostream& operator<<(std::ostream& str, Strategy rhs) {
+  return str << toString(rhs);
+}
+
 typedef struct Region {
   uint64_t offset;
   uint64_t size;
@@ -29,15 +48,13 @@ inline bool operator!=(const LiveRange& lhs, const LiveRange& rhs) {
 }
 
 struct live_range_start_comp {
-  bool operator()(LiveRange const& range1, LiveRange const& range2)
-      const {
+  bool operator()(LiveRange const& range1, LiveRange const& range2) const {
     return range1.begin < range2.begin;
   }
 };
 
 struct live_range_end_comp {
-  bool operator()(LiveRange const& range1, LiveRange const& range2)
-      const {
+  bool operator()(LiveRange const& range1, LiveRange const& range2) const {
     return range1.end < range2.end;
   }
 };
