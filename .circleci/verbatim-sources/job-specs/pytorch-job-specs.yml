@@ -181,7 +181,7 @@ jobs:
           if [ -z "$CIRCLE_PR_NUMBER" ]; then
             if [[ $CIRCLE_BRANCH =~ .*pull.* ]]; then
               PR_NUMBER=$(echo $CIRCLE_BRANCH | sed 's/[^0-9]//g')
-              echo "export CIRCLE_PR_NUMBER=$PR_NUMBER" >> $BASH_ENV
+              echo "export CIRCLE_PR_NUMBER=$PR_NUMBER" >> docker_commands.sh
             fi
           fi
           if [[ ${BUILD_ENVIRONMENT} == *"multigpu"* ]]; then
