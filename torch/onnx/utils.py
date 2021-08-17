@@ -17,7 +17,7 @@ import warnings
 from torch._six import string_classes
 from torch.jit import _unique_state_dict
 from torch.onnx import ONNX_ARCHIVE_MODEL_PROTO_NAME, ExportTypes, OperatorExportTypes, TrainingMode
-from torch._C import ListType, OptionalType, _propagate_and_assign_input_shapes, _check_onnx_proto
+from torch._C import ListType, UnionType, _propagate_and_assign_input_shapes, _check_onnx_proto
 from typing import List, Tuple, Union
 
 
@@ -99,7 +99,7 @@ def _is_constant_tensor_list(node):
     output_type = node.output().type()
     if output_type.isSubtypeOf(ListType.ofTensors()):
         return True
-    if output_type.isSubtypeOf(ListType(OptionalType.ofTensor())):
+    if output_type.isSubtypeOf(ListType(UnionType.createOptionalOf(torch.Tensor))):
         return True
 
 # ONNX can't handle constants that are lists of tensors, which can
