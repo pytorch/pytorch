@@ -1083,6 +1083,21 @@ class TestFFT(TestCase):
 
     @onlyOnCPUAndCUDA
     @skipCPUIfNoFFT
+    def test_fft_plan_repeatable(self, device):
+        # Regression test for gh-58724 and gh-63152
+        for n in [2048, 3199, 5999]:
+            a = torch.randn(n, device=device, dtype=torch.complex64)
+            res1 = torch.fft.fftn(a)
+            res2 = torch.fft.fftn(a.clone())
+            self.assertEqual(res1, res2)
+
+            a = torch.randn(n, device=device, dtype=torch.float64)
+            res1 = torch.fft.rfft(a)
+            res2 = torch.fft.rfft(a.clone())
+            self.assertEqual(res1, res2)
+
+    @onlyOnCPUAndCUDA
+    @skipCPUIfNoFFT
     @dtypes(torch.double)
     def test_istft_round_trip_simple_cases(self, device, dtype):
         """stft -> istft should recover the original signale"""
