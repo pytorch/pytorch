@@ -815,7 +815,7 @@ if(USE_LLVM AND LLVM_FOUND)
   elseif(UNIX)
     set(LINKER_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/version_script.lds")
     set_target_properties(torch_cpu PROPERTIES LINK_DEPENDS ${LINKER_SCRIPT})
-    set_target_properties(torch_cpu PROPERTIES LINK_FLAGS "-Wl,--version-script=${LINKER_SCRIPT}")
+    target_link_libraries(torch_cpu PRIVATE "-Wl,--version-script=${LINKER_SCRIPT}")
   endif()
 endif(USE_LLVM AND LLVM_FOUND)
 

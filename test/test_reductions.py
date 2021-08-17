@@ -109,56 +109,82 @@ class TestReductions(TestCase):
     @ops(reduction_ops, dtypes=OpDTypes.none)
     def test_dim_default(self, device, op: ReductionOpInfo):
         """Tests that the default dim reduces all dimensions."""
-        self._test_dim_keepdim(op, device, ndim=2)
+        for ndim in range(3):
+            self._test_dim_keepdim(op, device, ndim=ndim)
 
     @ops(reduction_ops, dtypes=OpDTypes.none)
     def test_dim_default_keepdim(self, device, op: ReductionOpInfo):
         """Tests that the default dim, when keepdim=True, reduces all dimensions to size 1."""
-        self._test_dim_keepdim(op, device, ndim=2, keepdim=True)
+        for ndim in range(3):
+            self._test_dim_keepdim(op, device, ndim=ndim, keepdim=True)
 
     @ops(reduction_ops, dtypes=OpDTypes.none)
     def test_dim_none(self, device, op: ReductionOpInfo):
         """Tests that dim=None reduces all dimensions."""
-        self._test_dim_keepdim(op, device, ndim=2, dim=None)
+        for ndim in range(3):
+            self._test_dim_keepdim(op, device, ndim=ndim, dim=None)
 
     @ops(reduction_ops, dtypes=OpDTypes.none)
     def test_dim_none_keepdim(self, device, op: ReductionOpInfo):
         """Tests that dim=None, when keepdim=True, reduces all dimensions to size 1."""
-        self._test_dim_keepdim(op, device, ndim=2, dim=None, keepdim=True)
+        for ndim in range(3):
+            self._test_dim_keepdim(op, device, ndim=ndim, dim=None, keepdim=True)
 
     @ops(reduction_ops, dtypes=OpDTypes.none)
     def test_dim_single(self, device, op: ReductionOpInfo):
         """Tests that dim=i reduces dimension i."""
-        self._test_dim_keepdim(op, device, ndim=2, dim=0)
+        self._test_dim_keepdim(op, device, ndim=0, dim=0)
+        self._test_dim_keepdim(op, device, ndim=1, dim=0)
         self._test_dim_keepdim(op, device, ndim=2, dim=-1)
+        self._test_dim_keepdim(op, device, ndim=3, dim=1)
 
     @ops(reduction_ops, dtypes=OpDTypes.none)
     def test_dim_single_keepdim(self, device, op: ReductionOpInfo):
         """Tests that dim=i, when keepdim=True, reduces dimension i to size 1."""
-        self._test_dim_keepdim(op, device, ndim=2, dim=0, keepdim=True)
+        self._test_dim_keepdim(op, device, ndim=0, dim=0, keepdim=True)
+        self._test_dim_keepdim(op, device, ndim=1, dim=0, keepdim=True)
         self._test_dim_keepdim(op, device, ndim=2, dim=-1, keepdim=True)
+        self._test_dim_keepdim(op, device, ndim=3, dim=1, keepdim=True)
 
     @ops(filter(lambda op: op.supports_multiple_dims, reduction_ops), dtypes=OpDTypes.none)
     def test_dim_empty(self, device, op: ReductionOpInfo):
         """Tests that dim=[] is a no-op"""
+        self._test_dim_keepdim(op, device, ndim=0, dim=[])
         self._test_dim_keepdim(op, device, ndim=2, dim=[])
 
     @ops(filter(lambda op: op.supports_multiple_dims, reduction_ops), dtypes=OpDTypes.none)
     def test_dim_empty_keepdim(self, device, op: ReductionOpInfo):
         """Tests that dim=[], when keepdim=True, is a no-op"""
+        self._test_dim_keepdim(op, device, ndim=0, dim=[], keepdim=True)
         self._test_dim_keepdim(op, device, ndim=2, dim=[], keepdim=True)
 
     @ops(filter(lambda op: op.supports_multiple_dims, reduction_ops), dtypes=OpDTypes.none)
     def test_dim_multi(self, device, op: ReductionOpInfo):
         """Tests that dim=[i, j, ...] reduces dimensions i, j, ...."""
+        self._test_dim_keepdim(op, device, ndim=1, dim=[0])
         self._test_dim_keepdim(op, device, ndim=3, dim=[0, 2])
-        self._test_dim_keepdim(op, device, ndim=3, dim=[-1, 0])
 
     @ops(filter(lambda op: op.supports_multiple_dims, reduction_ops), dtypes=OpDTypes.none)
     def test_dim_multi_keepdim(self, device, op: ReductionOpInfo):
         """Tests that dim=[i, j, ...], when keepdim=True, reduces dimensions i, j, .... to size 1."""
+        self._test_dim_keepdim(op, device, ndim=1, dim=[0], keepdim=True)
         self._test_dim_keepdim(op, device, ndim=3, dim=[0, 2], keepdim=True)
-        self._test_dim_keepdim(op, device, ndim=3, dim=[-1, 0], keepdim=True)
+
+    @ops(filter(lambda op: op.supports_multiple_dims, reduction_ops), dtypes=OpDTypes.none)
+    def test_dim_multi_unsorted(self, device, op: ReductionOpInfo):
+        """Tests that operator correctly handles unsorted dim list."""
+        self._test_dim_keepdim(op, device, ndim=4, dim=[3, 0, 2])
+
+    @ops(filter(lambda op: op.supports_multiple_dims, reduction_ops), dtypes=OpDTypes.none)
+    def test_dim_multi_unsorted_keepdim(self, device, op: ReductionOpInfo):
+        """Tests that operator correctly handles unsorted dim list when keepdim=True."""
+        self._test_dim_keepdim(op, device, ndim=4, dim=[3, 0, 2], keepdim=True)
+
+    @ops(filter(lambda op: op.supports_multiple_dims, reduction_ops), dtypes=OpDTypes.none)
+    def test_dim_multi_duplicate(self, device, op: ReductionOpInfo):
+        """Tests that an error is raised if dim has duplicate entries."""
+        with self.assertRaises(RuntimeError):
+            self._test_dim_keepdim(op, device, ndim=3, dim=[0, 1, 1, 2])
 
     @ops(filter(lambda op: not op.supports_multiple_dims, reduction_ops), dtypes=OpDTypes.none)
     def test_dim_multi_unsupported(self, device, op: ReductionOpInfo):
