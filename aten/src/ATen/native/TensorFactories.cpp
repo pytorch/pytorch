@@ -1131,12 +1131,12 @@ Tensor bartlett_window(
     return at::empty({0}, options);
   }
   if (window_length == 1) {
-    return native::ones({1}, dtype, layout, device, pin_memory);
+    return native::ones({1}, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory());
   }
   if (periodic) {
     window_length += 1;
   }
-  auto window = native::arange(window_length, dtype, layout, device, pin_memory)
+  auto window = native::arange(window_length, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory())
                     .mul_(2. / static_cast<double>(window_length - 1));
   const int64_t first_half_size = ((window_length - 1) >> 1) + 1;
   window.narrow(0, first_half_size, window_length - first_half_size).mul_(-1).add_(2);
@@ -1169,14 +1169,14 @@ Tensor blackman_window(
     return at::empty({0}, options);
   }
   if (window_length == 1) {
-    return native::ones({1}, dtype, layout, device, pin_memory);
+    return native::ones({1}, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory());
   }
   if (periodic) {
     window_length += 1;
   }
   // from https://en.wikipedia.org/wiki/Window_function#Blackman_window
   auto window =
-      native::arange(window_length, dtype, layout, device, pin_memory)
+      native::arange(window_length, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory())
           .mul_(c10::pi<double> / static_cast<double>(window_length - 1));
   window = window.mul(4).cos_().mul_(0.08) - window.mul(2).cos_().mul_(0.5) + 0.42;
   return periodic ? window.narrow(0, 0, window_length - 1) : window;
@@ -1239,12 +1239,12 @@ Tensor hamming_window(
     return at::empty({0}, options);
   }
   if (window_length == 1) {
-    return native::ones({1}, dtype, layout, device, pin_memory);
+    return native::ones({1}, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory());
   }
   if (periodic) {
     window_length += 1;
   }
-  auto window = native::arange(window_length, dtype, layout, device, pin_memory);
+  auto window = native::arange(window_length, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory());
   window.mul_(c10::pi<double> * 2. / static_cast<double>(window_length - 1)).cos_().mul_(-beta).add_(alpha);
   return periodic ? window.narrow(0, 0, window_length - 1) : window;
 }
