@@ -1,9 +1,11 @@
 #include <ATen/Config.h>
 #include <ATen/Utils.h>
 #include <ATen/core/interned_strings.h>
+#include <ATen/native/layer_norm.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
+
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -33,6 +35,7 @@
 #if AT_MKLDNN_ENABLED()
 #include <ATen/CPUFunctions.h>
 #include <dnnl_types.h>
+#include <ATen/native/mkldnn/Utils.h>
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ideep.hpp>
 #endif
@@ -271,6 +274,33 @@ Operation createUnaryOp(
   };
 }
 
+void MKLDNNLayerNormOp(Stack* stack) {
+  c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
+
+  // enable_cudnn not used
+  pop(stack);
+  auto eps = pop(stack).toDouble();
+
+  Tensor bias{};
+  Tensor weight{};
+  auto bias_ival = pop(stack);
+  TORCH_INTERNAL_ASSERT(bias_ival.isTensor());
+  bias = bias_ival.toTensor();
+
+  auto weight_ival = pop(stack);
+  TORCH_INTERNAL_ASSERT(weight_ival.isTensor());
+  weight = weight_ival.toTensor();
+
+  auto shape = pop(stack).toIntVector();
+  auto input = pop(stack).toTensor();
+
+  at::Tensor dst, mean, rstd;
+  std::tie(dst, mean, rstd) =
+      at::native::mkldnn_layer_norm_last_index_weight_bias_f32(
+          input, shape, weight, bias, eps);
+  push(stack, dst);
+};
+
 Operation BroadOp(const Node* node) {
   return [](Stack* stack) {
     auto b = pop(stack).toTensor();
@@ -435,6 +465,13 @@ const RegisterOperators BroadOpReg({
         prim::BroadcastMKLDNNTensors,
         BroadOp,
         AliasAnalysisKind::INTERNAL_SPECIAL_CASE),
+});
+
+const RegisterOperators MKLDNNLayerNormOpReg({
+    torch::jit::Operator(
+        "prim::MKLDNNLayerNorm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> Tensor",
+        MKLDNNLayerNormOp,
+        AliasAnalysisKind::FROM_SCHEMA),
 });
 
 Operation ConstantMKLDNNTensorOp(const Node* node) {
@@ -719,6 +756,13 @@ void ComputeSubgraphInMKLDNN(Node* subgraph_node) {
       continue;
     }
 
+    if (body_node->matches(
+            "aten::layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> Tensor")) {
+      body_node->replaceWithNewSymbol(Symbol::prim("MKLDNNLayerNorm"));
+      body_node->destroy();
+      continue;
+    }
+
     if (body_node->kind() == aten::hardswish) {
       body_node->replaceWithNewSymbol(prim::MKLDNNHardSwish);
       body_node->destroy();
@@ -917,6 +961,16 @@ class MKLDNNSubgraphSlicer {
         return false;
       }
     }
+
+    if (n->matches(
+            "aten::layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> Tensor") &&
+        n->namedInput("weight")->type() != NoneType::get() &&
+        n->namedInput("bias")->type() != NoneType::get()) {
+      auto norm_shape =
+          constant_as<std::vector<int64_t>>(n->namedInput("normalized_shape"));
+      return norm_shape.has_value() && norm_shape->size() == 1;
+    }
+
     // unary ops we dont need to prove anything else than
     // the input is mkldnn supported
     switch (n->kind()) {
