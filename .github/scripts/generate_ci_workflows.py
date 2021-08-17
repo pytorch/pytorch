@@ -123,6 +123,7 @@ class CIWorkflow:
     docker_image_base: str = ''
     enable_doc_jobs: bool = False
     exclude_test: bool = False
+    is_coverage: bool = False
     is_libtorch: bool = False
     is_scheduled: str = ''
     num_test_shards: int = 1
@@ -359,6 +360,7 @@ LINUX_WORKFLOWS = [
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-py3.8-gcc9",
         test_runner_type=LINUX_CPU_TEST_RUNNER,
         on_pull_request=True,
+        is_coverage=True,
         num_test_shards=2,
         ciflow_config=CIFlowConfig(
             enabled=True,
