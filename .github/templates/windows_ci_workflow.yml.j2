@@ -3,6 +3,20 @@
 {# squid_no_proxy is a list of common set of fixed domains or IPs that we don't need to proxy. See https://docs.aws.amazon.com/AmazonECS/latest/developerguide/http_proxy_config.html#windows-proxy #}
 {%- set squid_no_proxy = "localhost,127.0.0.1,amazonaws.com,s3.amazonaws.com,169.254.169.254,169.254.170.2,/var/run/docker.sock" -%}
 
+{%- macro wait_and_kill_ssh() -%}
+      - name: Wait until all sessions have drained
+        shell: powershell
+        if: always()
+        timeout-minutes: 120
+        run: |
+          .github\scripts\wait_for_ssh_sessions.ps1
+      - name: Kill active ssh sessions if still around (Useful if workflow was cancelled)
+        shell: powershell
+        if: always()
+        run: |
+          .github\scripts\kill_ssh_sessions_for_user.ps1
+{%- endmacro -%}
+
 # Template is at:    .github/templates/windows_ci_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
 name: !{{ build_environment }}
@@ -75,6 +89,10 @@ jobs:
       http_proxy: "!{{ squid_proxy }}"
       https_proxy: "!{{ squid_proxy }}"
     steps:
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
@@ -121,6 +139,7 @@ jobs:
           if-no-files-found: error
           name: ${{ env.BUILD_ENVIRONMENT }}
           path: C:\${{ github.run_id }}\build-results
+      !{{ wait_and_kill_ssh() }}
       - name: Cleanup build-results and workspaces
         if: always()
         shell: bash
@@ -190,6 +209,10 @@ jobs:
           path: pytorch-${{ github.run_id }}
           # deep clone, to allow use of git merge-base
           fetch-depth: 0
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Install Visual Studio 2019 toolchain
         shell: powershell
         run: |
@@ -248,6 +271,7 @@ jobs:
           if-no-files-found: error
           path:
             pytorch-${{ github.run_id }}/test-reports-*.zip
+      !{{ wait_and_kill_ssh() }}
       - name: Cleanup workspace
         if: always()
         shell: bash

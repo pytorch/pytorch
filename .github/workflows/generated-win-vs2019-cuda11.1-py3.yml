@@ -43,6 +43,10 @@ jobs:
       http_proxy: "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128"
       https_proxy: "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128"
     steps:
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
@@ -87,6 +91,17 @@ jobs:
           if-no-files-found: error
           name: ${{ env.BUILD_ENVIRONMENT }}
           path: C:\${{ github.run_id }}\build-results
+      - name: Wait until all sessions have drained
+        shell: powershell
+        if: always()
+        timeout-minutes: 120
+        run: |
+          .github\scripts\wait_for_ssh_sessions.ps1
+      - name: Kill active ssh sessions if still around (Useful if workflow was cancelled)
+        shell: powershell
+        if: always()
+        run: |
+          .github\scripts\kill_ssh_sessions_for_user.ps1
       - name: Cleanup build-results and workspaces
         if: always()
         shell: bash
@@ -146,6 +161,10 @@ jobs:
           path: pytorch-${{ github.run_id }}
           # deep clone, to allow use of git merge-base
           fetch-depth: 0
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Install Visual Studio 2019 toolchain
         shell: powershell
         run: |
@@ -202,6 +221,17 @@ jobs:
           if-no-files-found: error
           path:
             pytorch-${{ github.run_id }}/test-reports-*.zip
+      - name: Wait until all sessions have drained
+        shell: powershell
+        if: always()
+        timeout-minutes: 120
+        run: |
+          .github\scripts\wait_for_ssh_sessions.ps1
+      - name: Kill active ssh sessions if still around (Useful if workflow was cancelled)
+        shell: powershell
+        if: always()
+        run: |
+          .github\scripts\kill_ssh_sessions_for_user.ps1
       - name: Cleanup workspace
         if: always()
         shell: bash
