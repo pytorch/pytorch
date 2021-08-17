@@ -25,14 +25,14 @@ c10::intrusive_ptr<c10::ivalue::Future> FP16CompressCommHook::runHook(
   std::vector<at::Tensor> tensors = {compressed_tensor};
 
   auto allreduce_fut = state_->allreduce(tensors)->getFuture();
-  auto decompress = [bucket](c10::ivalue::Future& allreduce_fut) {
+  auto decompressed_tensor = bucket.getBufferRef();
+  auto decompress = [decompressed_tensor](c10::ivalue::Future& allreduce_fut) {
     auto result = allreduce_fut.value();
     TORCH_INTERNAL_ASSERT(
         result.isTensorList(),
         "ProcessGroup::allreduce should return TensorList");
 
     auto reduce_tensor = result.toTensorVector()[0];
-    const auto& decompressed_tensor = bucket.getBuffer();
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       reduce_tensor.scalar_type() == at::ScalarType::Half,
       "Expected reduced tensor to be fp16 in FP16CompressHook, but got type ",
