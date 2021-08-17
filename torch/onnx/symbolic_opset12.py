@@ -71,7 +71,7 @@ def cross_entropy_loss(g, self, target, weight, reduction, ignore_index, label_s
     reduction_vals = ["none", "mean", "sum"]
     reduction = reduction_vals[reduction]
 
-    if label_smoothing == 0.0:
+    if label_smoothing != 0.0:
         raise RuntimeError("Unsupported: ONNX does not support label_smoothing")
 
     # in onnx SoftmaxCrossEntropyLoss specification, ignore_index is optional without default value.
