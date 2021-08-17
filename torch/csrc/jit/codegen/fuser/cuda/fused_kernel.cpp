@@ -118,7 +118,7 @@ FusedKernelCUDA::FusedKernelCUDA(
   AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcCreateProgram(
       &program, code_.c_str(), nullptr, 0, nullptr, nullptr));
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
   std::vector<const char*> args = {"--std=c++14"};
 #if ROCM_VERSION >= 40200
   args.push_back("-hip-pch");
@@ -182,7 +182,7 @@ FusedKernelCUDA::FusedKernelCUDA(
       nvrtc().cuModuleGetFunction(&function_, module_, name_.c_str()));
 
   // Computes max blocks
-#if defined(__HIP_PLATFORM_HCC__) && TORCH_HIP_VERSION < 305
+#if defined(USE_ROCM) && ROCM_VERSION < 30500
   // HIP function signature is not compatible yet
   uint32_t max_blocks;
   AT_CUDA_DRIVER_CHECK(nvrtc().hipOccupancyMaxActiveBlocksPerMultiprocessor(
