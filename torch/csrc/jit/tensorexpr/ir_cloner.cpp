@@ -336,6 +336,11 @@ Stmt* Stmt::clone(Stmt* s) {
   return cloned;
 }
 
+Expr* Expr::clone(Expr* e) {
+  IRCloner cloner;
+  return e->accept_mutator(&cloner);
+}
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
