@@ -447,6 +447,24 @@ def _get_named_param_dict(graph, params):
     _params_dict = dict(zip(param_names, params))
     return _params_dict
 
+def _get_example_outputs(model, args):
+    input_args = copy.deepcopy(args)
+    input_kwargs = {}
+    if input_args and isinstance(input_args[-1], dict):
+        input_kwargs = input_args[-1]
+        input_args = input_args[:-1]
+    try:
+        model_copy = copy.deepcopy(model)
+        example_outputs = model_copy(*input_args, **input_kwargs)
+    except Exception:
+        example_outputs = model(*input_args, **input_kwargs)
+
+    if isinstance(example_outputs, (torch.Tensor, int, float, bool)):
+        example_outputs = (example_outputs,)
+
+    if isinstance(example_outputs, list):
+        example_outputs = [example_outputs]
+    return example_outputs
 
 def _model_to_graph(model, args, verbose=False,
                     input_names=None, output_names=None,
@@ -481,24 +499,8 @@ def _model_to_graph(model, args, verbose=False,
                             dynamic_axes=dynamic_axes, input_names=input_names,
                             module=module)
     from torch.onnx.symbolic_helper import _onnx_shape_inference
-    if isinstance(model, torch.jit.ScriptModule) or isinstance(model, torch.jit.ScriptFunction):
-        input_args = copy.deepcopy(args)
-        input_kwargs = {}
-        if input_args and isinstance(input_args[-1], dict):
-            input_kwargs = input_args[-1]
-            input_args = input_args[:-1]
-        try:
-            model_copy = copy.deepcopy(model)
-            example_outputs = model_copy(*input_args, **input_kwargs)
-        except Exception:
-            example_outputs = model(*input_args, **input_kwargs)
-
-        if isinstance(example_outputs, (torch.Tensor, int, float, bool)):
-            example_outputs = (example_outputs,)
-
-        if isinstance(example_outputs, list):
-            example_outputs = [example_outputs]
-
+    if example_outputs is None and isinstance(model, torch.jit.ScriptModule) or isinstance(model, torch.jit.ScriptFunction):
+        example_outputs = _get_example_outputs(model, args)
         out_vars, desc = torch.jit._flatten(tuple(example_outputs))
         torch._C._jit_pass_onnx_assign_output_shape(graph, out_vars, desc, _onnx_shape_inference)
 
@@ -594,6 +596,8 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
         val_add_node_names = _decide_add_node_names(add_node_names, operator_export_type)
         val_do_constant_folding = _decide_constant_folding(do_constant_folding, operator_export_type, training)
         args = _decide_input_format(model, args)
+        if example_outputs is None and (isinstance(model, torch.jit.ScriptModule) or isinstance(model, torch.jit.ScriptFunction)):
+            example_outputs = _get_example_outputs(model, args)
         graph, params_dict, torch_out = _model_to_graph(model, args, verbose, input_names,
                                                         output_names, operator_export_type,
                                                         example_outputs, val_do_constant_folding,
