@@ -604,7 +604,7 @@ inline std::vector<c10::IValue> callOpByHandle(
     const c10::OperatorHandle& op,
     Args... args) {
   auto stack = makeStack(std::forward<Args>(args)...);
-  c10::Dispatcher::singleton().callBoxed(op, &stack);
+  c10::Dispatcher::singleton().callBoxed(op, stack);
   return stack;
 }
 
