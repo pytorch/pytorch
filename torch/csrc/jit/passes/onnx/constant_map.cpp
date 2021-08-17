@@ -187,7 +187,10 @@ c10::optional<bool> ConstantValueMap::GetUseInferredType(
 }
 
 template <typename Map>
-void UpdateStrKey(Map& map, const std::string& old_key, const std::string& new_key) {
+void UpdateStrKey(
+    Map& map,
+    const std::string& old_key,
+    const std::string& new_key) {
   TORCH_INTERNAL_ASSERT(old_key != new_key);
   TORCH_INTERNAL_ASSERT(map.find(new_key) == map.end());
   if (map.find(old_key) == map.end()) {
@@ -197,15 +200,22 @@ void UpdateStrKey(Map& map, const std::string& old_key, const std::string& new_k
   map.erase(old_key);
 }
 
-void ConstantValueMap::UpdateValueName(const std::string& old_name, const std::string& new_name) {
+void ConstantValueMap::UpdateValueName(
+    const std::string& old_name,
+    const std::string& new_name) {
   if (old_name == new_name) {
     return;
   }
-  UpdateStrKey<decltype(rankMap)>(ConstantValueMap::getInstance().rankMap, old_name, new_name);
-  UpdateStrKey<decltype(shapeMap)>(ConstantValueMap::getInstance().shapeMap, old_name, new_name);
-  UpdateStrKey<decltype(tensorValueMap)>(ConstantValueMap::getInstance().tensorValueMap, old_name, new_name);
-  UpdateStrKey<decltype(typeReliableMap)>(ConstantValueMap::getInstance().typeReliableMap, old_name, new_name);
-  UpdateStrKey<decltype(useInferredTypeMap)>(ConstantValueMap::getInstance().useInferredTypeMap, old_name, new_name);
+  UpdateStrKey<decltype(rankMap)>(
+      ConstantValueMap::getInstance().rankMap, old_name, new_name);
+  UpdateStrKey<decltype(shapeMap)>(
+      ConstantValueMap::getInstance().shapeMap, old_name, new_name);
+  UpdateStrKey<decltype(tensorValueMap)>(
+      ConstantValueMap::getInstance().tensorValueMap, old_name, new_name);
+  UpdateStrKey<decltype(typeReliableMap)>(
+      ConstantValueMap::getInstance().typeReliableMap, old_name, new_name);
+  UpdateStrKey<decltype(useInferredTypeMap)>(
+      ConstantValueMap::getInstance().useInferredTypeMap, old_name, new_name);
 }
 
 void ConstantValueMap::ClearMaps() {

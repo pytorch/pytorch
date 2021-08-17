@@ -277,9 +277,11 @@ void NodeToONNX(
           outputs[i]->setDebugName(new_name);
           if (exist_name != debug_names.end()) {
             // setDebugName changes name of existing value with same name.
-            // Set again to revert the changes, but update name for new value with suffix.
+            // Set again to revert the changes, but update name for new value
+            // with suffix.
             exist_name->second->setDebugName(new_name);
           }
+          ConstantValueMap::UpdateValueName(old_name, outputs[i]->debugName());
         }
         // Allow symbolic() to skip specifying the type of the return node.
         // Unfortunately, they are on the hook for all internal nodes

@@ -45,7 +45,9 @@ class ConstantValueMap {
   static bool HasUseInferredType(const std::string& tensorName);
   static c10::optional<bool> GetUseInferredType(const std::string& tensorName);
 
-  static void UpdateValueName(const std::string& old_name, const std::string& new_name);
+  static void UpdateValueName(
+      const std::string& old_name,
+      const std::string& new_name);
 
   static void PrintMaps();
   static void ClearMaps();
