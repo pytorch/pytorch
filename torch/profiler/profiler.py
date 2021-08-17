@@ -3,6 +3,7 @@ import json
 import os
 import tempfile
 from enum import Enum
+from functools import partial
 from typing import Any, Callable, Iterable, Optional
 from warnings import warn
 
@@ -400,6 +401,30 @@ class profile(profiler):
         self.current_action = self.schedule(self.step_num)
         self.step_rec_fn: Optional[prof.record_function] = None
 
+        self.action_map = {
+            # key is (prev_action, current_action), value is action list corresponding to the state pair.
+            (ProfilerAction.NONE, ProfilerAction.NONE): [],
+            (ProfilerAction.NONE, ProfilerAction.WARMUP): [self.prepare_trace],
+            (ProfilerAction.NONE, ProfilerAction.RECORD): [self.prepare_trace, self.start_trace],
+            (ProfilerAction.NONE, ProfilerAction.RECORD_AND_SAVE): [self.prepare_trace, self.start_trace],
+            (ProfilerAction.WARMUP, ProfilerAction.NONE): [partial(warn, "Incorrect schedule: WARMUP followed by NONE"), self.start_trace, self.stop_trace],
+            (ProfilerAction.WARMUP, ProfilerAction.WARMUP): [],
+            (ProfilerAction.WARMUP, ProfilerAction.RECORD): [self.start_trace],
+            (ProfilerAction.WARMUP, ProfilerAction.RECORD_AND_SAVE): [self.start_trace],
+            (ProfilerAction.RECORD, ProfilerAction.NONE): [partial(warn, "Incorrect schedule: RECORD followed by NONE"), self.stop_trace],
+            (ProfilerAction.RECORD, ProfilerAction.WARMUP): [partial(warn, "Incorrect schedule: RECORD followed by WARMUP"), self.stop_trace],
+            (ProfilerAction.RECORD, ProfilerAction.RECORD): [],
+            (ProfilerAction.RECORD, ProfilerAction.RECORD_AND_SAVE): [],
+            (ProfilerAction.RECORD_AND_SAVE, ProfilerAction.NONE): [self.stop_trace, self._trace_ready],
+            (ProfilerAction.RECORD_AND_SAVE, ProfilerAction.WARMUP): [self.stop_trace, self._trace_ready, self.prepare_trace],
+            (ProfilerAction.RECORD_AND_SAVE, ProfilerAction.RECORD): [],
+            (ProfilerAction.RECORD_AND_SAVE, ProfilerAction.RECORD_AND_SAVE): [self.stop_trace, self._trace_ready, self.prepare_trace, self.start_trace],
+            # used for exit action
+            (ProfilerAction.WARMUP, None): [self.start_trace, self.stop_trace],
+            (ProfilerAction.RECORD, None): [self.stop_trace, self._trace_ready],
+            (ProfilerAction.RECORD_AND_SAVE, None): [self.stop_trace, self._trace_ready]
+        }
+
     def __enter__(self):
         self.start()
         return self
@@ -408,7 +433,7 @@ class profile(profiler):
         self.stop()
 
     def start(self):
-        self._enter_actions()
+        self._transit_action(ProfilerAction.NONE, self.current_action)
         if self.record_steps:
             self.step_rec_fn = prof.record_function("ProfilerStep#" + str(self.step_num))
             self.step_rec_fn.__enter__()
@@ -416,7 +441,7 @@ class profile(profiler):
     def stop(self):
         if self.record_steps and self.step_rec_fn:
             self.step_rec_fn.__exit__(None, None, None)
-        self._exit_actions()
+        self._transit_action(self.current_action, None)
 
     def step(self):
         """
@@ -428,70 +453,18 @@ class profile(profiler):
         self.step_num += 1
         self.current_action = self.schedule(self.step_num)
 
-        if self.current_action == ProfilerAction.NONE:
-            if prev_action == ProfilerAction.NONE:
-                pass
-            elif prev_action == ProfilerAction.WARMUP:
-                warn("Incorrect schedule: WARMUP followed by NONE")
-                self.start_trace()
-                self.stop_trace()
-            elif prev_action == ProfilerAction.RECORD:
-                warn("Incorrect schedule: RECORD followed by NONE")
-                self.stop_trace()
-            else:
-                assert prev_action == ProfilerAction.RECORD_AND_SAVE
-                self.stop_trace()
-                if self.on_trace_ready:
-                    self.on_trace_ready(self)
-        elif self.current_action == ProfilerAction.WARMUP:
-            if prev_action == ProfilerAction.NONE:
-                self.prepare_trace()
-            elif prev_action == ProfilerAction.WARMUP:
-                pass
-            elif prev_action == ProfilerAction.RECORD:
-                warn("Incorrect schedule: RECORD followed by WARMUP")
-                self.stop_trace()
-            else:
-                assert prev_action == ProfilerAction.RECORD_AND_SAVE
-                self.stop_trace()
-                if self.on_trace_ready:
-                    self.on_trace_ready(self)
-                self.prepare_trace()
-        elif self.current_action in \
-                [ProfilerAction.RECORD, ProfilerAction.RECORD_AND_SAVE]:
-            if prev_action == ProfilerAction.NONE:
-                self.prepare_trace()
-                self.start_trace()
-            elif prev_action == ProfilerAction.WARMUP:
-                self.start_trace()
-            elif prev_action == ProfilerAction.RECORD:
-                pass
-            else:
-                assert prev_action == ProfilerAction.RECORD_AND_SAVE
-                self.stop_trace()
-                if self.on_trace_ready:
-                    self.on_trace_ready(self)
-                self.prepare_trace()
-                self.start_trace()
+        self._transit_action(prev_action, self.current_action)
 
         if self.record_steps:
             self.step_rec_fn = prof.record_function("ProfilerStep#" + str(self.step_num))
             self.step_rec_fn.__enter__()
 
-    def _enter_actions(self):
-        if self.current_action == ProfilerAction.WARMUP:
-            self.prepare_trace()
-        elif self.current_action in \
-                [ProfilerAction.RECORD, ProfilerAction.RECORD_AND_SAVE]:
-            self.prepare_trace()
-            self.start_trace()
+    def _trace_ready(self):
+        if self.on_trace_ready:
+            self.on_trace_ready(self)
 
-    def _exit_actions(self):
-        if self.current_action == ProfilerAction.WARMUP:
-            self.start_trace()
-            self.stop_trace()
-        elif self.current_action in \
-                [ProfilerAction.RECORD, ProfilerAction.RECORD_AND_SAVE]:
-            self.stop_trace()
-            if self.on_trace_ready:
-                self.on_trace_ready(self)
+    def _transit_action(self, prev_action, current_action):
+        action_list = self.action_map.get((prev_action, current_action))
+        if action_list:
+            for action in action_list:
+                action()
