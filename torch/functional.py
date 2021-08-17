@@ -10,7 +10,6 @@ from .overrides import (
     handle_torch_function)
 from ._jit_internal import boolean_dispatch, List
 from ._jit_internal import _overload as overload
-from torch._autograd_functions import _LU
 
 Tensor = torch.Tensor
 from torch import _VF
@@ -1459,8 +1458,10 @@ def _lu_impl(A, pivot=True, get_infos=False, out=None):
         * ``L``, ``U``, and ``P`` can be derived using :func:`torch.lu_unpack`.
 
     .. warning::
-        The LU factorization does have backward support,
-        but only for square inputs of full rank.
+        The gradients of this function will only be finite when :attr:`A` is full rank.
+        This is because the LU decomposition is just differentiable at full rank matrices.
+        Furthermore, if :attr:`A` is close to not being full rank,
+        the gradient will be numerically unstable as it depends on the computation of :math:`L^{-1}` and :math:`U^{-1}`.
 
     Args:
         A (Tensor): the tensor to factor of size :math:`(*, m, n)`
@@ -1508,23 +1509,6 @@ def _lu_impl(A, pivot=True, get_infos=False, out=None):
         ...   print('LU factorization succeeded for all samples!')
         LU factorization succeeded for all samples!
     """
-    if not torch._jit_internal.is_scripting():
-        if A.requires_grad:
-            if not (A.size(-2) == A.size(-1) and (A.dtype.is_floating_point or A.is_complex)):
-                raise ValueError(
-                    'lu.backward works only with batches of squared full-rank matrices'
-                    ' of floating or complex types.'
-                )
-
-            return _LU.apply(A, pivot, get_infos)
-    else:
-        if A.requires_grad:
-            raise RuntimeError(
-                'Script and require gradients is not supported at the moment.'
-                'If you just want to do the forward, use .detach()'
-                'on the input before calling the function.'
-            )
-
     # If get_infos is True, then we don't need to check for errors and vice versa
     return torch._lu_with_info(A, pivot=pivot, check_errors=(not get_infos))
 
