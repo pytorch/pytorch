@@ -30,8 +30,7 @@ TEST(DeviceTest, BasicConstruction) {
       "::",
       ":",
       "cpu:00",
-      "cpu:01"
-  };
+      "cpu:01"};
 
   for (auto& ds : valid_devices) {
     c10::Device d(ds.device_string);
