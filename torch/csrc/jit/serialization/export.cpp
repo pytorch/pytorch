@@ -179,8 +179,8 @@ class EncoderBase {
   EncoderBase(
       onnx_torch::OperatorExportTypes operator_export_type,
       bool strip_doc,
-      const ValAttrNameMap& val_to_attr_name = {},
-      const AttrRefNameMap& attr_to_ref_name = {});
+      const ValAttrNameMap& val_attr_to_name = {},
+      const NodeAttrNameMap& node_attr_to_name = {});
 
   onnx::ModelProto get_model_proto() {
     return model_proto_;
@@ -310,9 +310,9 @@ class EncoderBase {
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::set<std::string> domains_;
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  ValAttrNameMap val_to_attr_name_;
+  ValAttrNameMap val_attr_to_name_;
     // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  AttrRefNameMap attr_to_ref_name_;
+  NodeAttrNameMap node_attr_to_name_;
 
   // For large models, the parameters can be stored in separate binary files.
   // This parameter sets a threshold on the number of elements in the parameter
@@ -357,15 +357,15 @@ onnx::TensorProto_DataType ATenTypeToOnnxType(at::ScalarType at_type) {
 EncoderBase::EncoderBase(
     onnx_torch::OperatorExportTypes operator_export_type,
     bool strip_doc,
-    const ValAttrNameMap& val_to_attr_name,
-    const AttrRefNameMap& attr_to_ref_name)
+    const ValAttrNameMap& val_attr_to_name,
+    const NodeAttrNameMap& node_attr_to_name)
     : num_blocks_(0),
       num_op_nodes_(0),
       num_external_data_(0),
       operator_export_type_(operator_export_type),
       strip_doc_(strip_doc),
-      val_to_attr_name_(val_to_attr_name),
-      attr_to_ref_name_(attr_to_ref_name) {
+      val_attr_to_name_(val_attr_to_name),
+      node_attr_to_name_(node_attr_to_name) {
   model_proto_.set_producer_name("pytorch");
   // we pin IR version to version 6 (12/11/2019) instead of using
   // onnx::IR_VERSION. with this change, the test_operators.py will be more
@@ -574,8 +574,8 @@ void EncoderBase::EncodeNode(
     if (input->node()->mustBeNone()) {
       node_proto->add_input("");
     } else {
-      auto attr_it = val_to_attr_name_.find(input);
-      if (attr_it != val_to_attr_name_.end()) {
+      auto attr_it = val_attr_to_name_.find(input);
+      if (attr_it != val_attr_to_name_.end()) {
         node_proto->add_input(attr_it->second);
       } else {
         node_proto->add_input(input->debugName());
@@ -607,9 +607,9 @@ void EncoderBase::EncodeNode(
     node_proto->set_name(node_proto->op_type() + "_" + std::to_string(num_op_nodes_));
     num_op_nodes_++;
   }
-  auto attrs_it = attr_to_ref_name_.find(node);
+  auto attrs_it = node_attr_to_name_.find(node);
   for (auto attr_name : node->attributeNames()) {
-    if (attrs_it != attr_to_ref_name_.end()) {
+    if (attrs_it != node_attr_to_name_.end()) {
       auto attr_it = attrs_it->second.find(attr_name.toUnqualString());
       if (attr_it != attrs_it->second.end()) {
         AddAttribute(node_proto, attr_name, attr_it->second);
@@ -809,8 +809,8 @@ class GraphEncoder : public EncoderBase {
       bool add_node_names,
       bool use_external_data_format,
       const std::string& onnx_file_path,
-      const ValAttrNameMap& val_to_attr_name = {},
-      const AttrRefNameMap& attr_to_ref_name = {});
+      const ValAttrNameMap& val_attr_to_name = {},
+      const NodeAttrNameMap& node_attr_to_name = {});
 
   RawDataExportMap get_raw_data_export_map() {
     return raw_data_export_map_;
@@ -845,8 +845,8 @@ class GraphEncoder : public EncoderBase {
   bool defer_weight_export_;
   int64_t onnx_opset_version_;
   std::map<std::string, int> custom_opsets_;
-  ValAttrNameMap val_to_attr_name_;
-  AttrRefNameMap attr_to_ref_name_;
+  ValAttrNameMap val_attr_to_name_;
+  NodeAttrNameMap node_attr_to_name_;
   std::shared_ptr<Graph> graph_;
 };
 
@@ -865,9 +865,9 @@ GraphEncoder::GraphEncoder(
     bool add_node_names,
     bool use_external_data_format,
     const std::string& onnx_file_path,
-    const ValAttrNameMap& val_to_attr_name,
-    const AttrRefNameMap& attr_to_ref_name)
-    : EncoderBase(operator_export_type, strip_doc, val_to_attr_name, attr_to_ref_name),
+    const ValAttrNameMap& val_attr_to_name,
+    const NodeAttrNameMap& node_attr_to_name)
+    : EncoderBase(operator_export_type, strip_doc, val_attr_to_name, node_attr_to_name),
       defer_weight_export_(defer_weight_export),
       onnx_opset_version_(onnx_opset_version),
       custom_opsets_(custom_opsets),
@@ -1140,8 +1140,8 @@ export_onnx(
     bool add_node_names,
     bool use_external_data_format,
     const std::string& onnx_file_path,
-    const ValAttrNameMap& val_to_attr_name,
-    const AttrRefNameMap& attr_to_ref_name) {
+    const ValAttrNameMap& val_attr_to_name,
+    const NodeAttrNameMap& node_attr_to_name) {
   auto graph_encoder = GraphEncoder(
       graph,
       onnx_opset_version,
@@ -1155,8 +1155,8 @@ export_onnx(
       add_node_names,
       use_external_data_format,
       onnx_file_path,
-      val_to_attr_name,
-      attr_to_ref_name);
+      val_attr_to_name,
+      node_attr_to_name);
   GRAPH_DEBUG("onnx proto:", prettyPrint(graph_encoder.get_model_proto()));
   return std::make_tuple(
       std::make_shared<::ONNX_NAMESPACE::ModelProto>(

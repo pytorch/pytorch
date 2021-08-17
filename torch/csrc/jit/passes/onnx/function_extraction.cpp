@@ -3,13 +3,12 @@
 
 namespace torch {
 namespace jit {
+namespace onnx {
 
 namespace {
 
 // using ScopeNodesMap = std::map<ScopePtr, node_list>;
 using scope_list = std::vector<ScopePtr>;
-using ValAttrNameMap = std::unordered_map<const Value*, std::string>;
-using AttrRefNameMap = std::unordered_map<const Node*, std::unordered_map<std::string, std::string>>;
 
 static std::unordered_set<std::string> skip_scopes =
     {}; // e.g. Dropout, Embedding, Softmax
@@ -22,7 +21,7 @@ struct FunctionExtractor {
       const std::vector<std::string>& module_names,
       const std::vector<std::string>& param_names)
     : graph_(graph), module_names_(module_names.begin(), module_names.end()), param_names_(param_names.begin(), param_names.end()) {}
-  std::pair<ValAttrNameMap, AttrRefNameMap> run();
+  std::pair<ValAttrNameMap, NodeAttrNameMap> run();
 
  private:
   // NOTE: not useful. Hardly anyway to sort the scope properly. It is supposed
@@ -69,8 +68,8 @@ struct FunctionExtractor {
     std::unordered_map<Node*, std::unordered_map<Symbol, std::unordered_set<Node*>>> attribute_map_;
 
     // passed later to serialization.
-    ValAttrNameMap val_to_attr_name_;
-    AttrRefNameMap attr_to_ref_name_;
+    ValAttrNameMap val_attr_to_name_;
+    NodeAttrNameMap node_attr_to_name_;
   };
 
   using FunctionCtxPtr = FunctionContext*;
@@ -197,14 +196,14 @@ void FunctionExtractor::FunctionContext::SetAttrName(Node* ref_n, Symbol attr, c
   auto v_it = scope_ctxs_[scope_key_]->env_to_subgraph_.find(ref_n->outputs().at(0));
   TORCH_INTERNAL_ASSERT(v_it != scope_ctxs_[scope_key_]->env_to_subgraph_.end());
   auto* n_in_def = v_it->second->node();
-  auto n_attr_it = attr_to_ref_name_[n_in_def][attr.toUnqualString()] = name;
+  auto n_attr_it = node_attr_to_name_[n_in_def][attr.toUnqualString()] = name;
 }
 
 void FunctionExtractor::FunctionContext::SetAttrName(Node* ref_const_n, const std::string& name) {
   TORCH_INTERNAL_ASSERT(ref_const_n->kind() == c10::onnx::Constant);
   auto v_it = scope_ctxs_[scope_key_]->env_to_subgraph_.find(ref_const_n->output());
   TORCH_INTERNAL_ASSERT(v_it != scope_ctxs_[scope_key_]->env_to_subgraph_.end(), "node not found in env: ", *ref_const_n);
-  val_to_attr_name_[v_it->second] = name;
+  val_attr_to_name_[v_it->second] = name;
 }
 
 c10::optional<std::string> FunctionExtractor::FunctionContext::FindAttrName(Node* ref_n, Symbol attr) {
@@ -213,8 +212,8 @@ c10::optional<std::string> FunctionExtractor::FunctionContext::FindAttrName(Node
     return c10::nullopt;
   }
   auto* n_in_def = v_it->second->node();
-  auto n_attr_it = attr_to_ref_name_.find(n_in_def);
-  if (n_attr_it == attr_to_ref_name_.end()) {
+  auto n_attr_it = node_attr_to_name_.find(n_in_def);
+  if (n_attr_it == node_attr_to_name_.end()) {
     return c10::nullopt;
   }
   auto name_it = n_attr_it->second.find(attr.toUnqualString());
@@ -230,8 +229,8 @@ c10::optional<std::string> FunctionExtractor::FunctionContext::FindAttrName(Node
   if (v_it == scope_ctxs_[scope_key_]->env_to_subgraph_.end()) {
     return c10::nullopt;
   }
-  auto name_it = val_to_attr_name_.find(v_it->second);
-  if (name_it == val_to_attr_name_.end()) {
+  auto name_it = val_attr_to_name_.find(v_it->second);
+  if (name_it == val_attr_to_name_.end()) {
     return c10::nullopt;
   }
   return name_it->second;
@@ -513,7 +512,7 @@ Node* FunctionExtractor::CreateFunctionDefNode(FunctionContext& func_ctx, const 
     // Update
     func_ctx.SetAttrName(c_n, final_attr_name);
     // auto v_in_def = func_ctx.scope_ctxs_[func_ctx.scope_key_]->env_to_subgraph_[c_n->output()];
-    // func_ctx.val_to_attr_name_[v_in_def] = final_attr_name;
+    // func_ctx.val_attr_to_name_[v_in_def] = final_attr_name;
   }
   for (const auto n_it : func_ctx.attribute_map_) {
     auto* n = n_it.first;
@@ -525,7 +524,7 @@ Node* FunctionExtractor::CreateFunctionDefNode(FunctionContext& func_ctx, const 
       // Update
       func_ctx.SetAttrName(n, attr, final_attr_name);
       // auto n_in_def = func_ctx.scope_ctxs_[func_ctx.scope_key_]->env_to_subgraph_[n->outputs().at(0)]->node();
-      // func_ctx.attr_to_ref_name_[n_in_def][attr.toUnqualString()] = final_attr_name;
+      // func_ctx.node_attr_to_name_[n_in_def][attr.toUnqualString()] = final_attr_name;
     }
   }
 
@@ -559,7 +558,7 @@ Node* FunctionExtractor::CreateFunctionNode(FunctionContext& func_ctx, ScopeCont
     std::cout << "constant node: " << *it.first << std::endl;
     TORCH_INTERNAL_ASSERT(it.first->kind() == c10::onnx::Constant);
     TORCH_INTERNAL_ASSERT(it.first->outputs().size() == 1);
-    // auto attr_name = func_ctx.val_to_attr_name_[func_scope_ctx->env_to_subgraph_[it.first->output()]];
+    // auto attr_name = func_ctx.val_attr_to_name_[func_scope_ctx->env_to_subgraph_[it.first->output()]];
     auto attr_name = func_ctx.FindAttrName(it.first).value();
     auto val = it.first->t(attr::value);
     for (auto* n : scope_ctx.nlist_) {
@@ -606,7 +605,7 @@ Node* FunctionExtractor::CreateFunctionNode(FunctionContext& func_ctx, ScopeCont
       const auto& attr = attr_it.first;
       auto attr_name = func_ctx.FindAttrName(ref_n, attr).value();
       // auto n_in_def = func_scope_ctx->env_to_subgraph_[ref_n->outputs().at(0)]->node();
-      // auto attr_name = func_ctx.attr_to_ref_name_[n_in_def][attr.toUnqualString()];
+      // auto attr_name = func_ctx.node_attr_to_name_[n_in_def][attr.toUnqualString()];
       copy_attr(ref_n, func_n, attr, attr_name);
       for (auto* n : scope_ctx.nlist_) {
         if (attr_it.second.find(n) != attr_it.second.end()) {
@@ -1023,7 +1022,7 @@ scope_list FunctionExtractor::SortScopesByMaxDepth(std::unordered_map<ScopePtr, 
   return sorted_scopes;
 }
 
-std::pair<ValAttrNameMap, AttrRefNameMap> FunctionExtractor::run() {
+std::pair<ValAttrNameMap, NodeAttrNameMap> FunctionExtractor::run() {
   auto scope_ctxs = PartitionNodesByScope(graph_);
 
   PrintScopeContexts(scope_ctxs);
@@ -1083,14 +1082,14 @@ std::pair<ValAttrNameMap, AttrRefNameMap> FunctionExtractor::run() {
   PrintGraphWithFunction(graph_);
 
   // Construct return mappings
-  ValAttrNameMap val_to_attr_name;
-  AttrRefNameMap attr_to_ref_name;
+  ValAttrNameMap val_attr_to_name;
+  NodeAttrNameMap node_attr_to_name;
 
   for (const auto& it : func_ctxs_) {
-    auto func_val_map = it.second->val_to_attr_name_;
-    val_to_attr_name.insert(func_val_map.begin(), func_val_map.end());
-    auto func_ref_map = it.second->attr_to_ref_name_;
-    attr_to_ref_name.insert(func_ref_map.begin(), func_ref_map.end());
+    auto func_val_map = it.second->val_attr_to_name_;
+    val_attr_to_name.insert(func_val_map.begin(), func_val_map.end());
+    auto func_ref_map = it.second->node_attr_to_name_;
+    node_attr_to_name.insert(func_ref_map.begin(), func_ref_map.end());
   }
 
   // Clear
@@ -1101,7 +1100,7 @@ std::pair<ValAttrNameMap, AttrRefNameMap> FunctionExtractor::run() {
     delete it.second;
   }
 
-  return std::make_pair(val_to_attr_name, attr_to_ref_name);
+  return std::make_pair(val_attr_to_name, node_attr_to_name);
 }
 
 } // namespace
@@ -1112,5 +1111,6 @@ std::pair<std::unordered_map<const Value*, std::string>, std::unordered_map<cons
   return fe.run();
 }
 
+} // namespace onnx
 } // namespace jit
 } // namespace torch

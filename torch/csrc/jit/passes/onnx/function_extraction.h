@@ -10,18 +10,17 @@ namespace jit {
 //    1. Extract and preserve functions definition.
 //    2. Replace nodes within functions with a single node reflecting that
 //    function type.
-// export.cpp will convert to function_proto and node of function kind with
+// Function attribute map information is also returned, as Torch IR cannot
+// represent these info inside Graph object.
+// export.cpp will serialize the ONNX model with function_proto with
 // above information.
-//
-// Possible different designs to achieve the above 2 points.
-//    1. Return a separate list of <name, graph> pairs representing functions.
-//    2. Return a single graph, with dummy node within that keep function as
-//    subgraph.
-//
-// More details
-//    1. Manage inputs/initializers/attributes/constants of function.
+namespace onnx {
 
-TORCH_API std::pair<std::unordered_map<const Value*, std::string>, std::unordered_map<const Node*, std::unordered_map<std::string, std::string>>> ONNXFunctionExtraction(std::shared_ptr<Graph>& graph, const std::vector<std::string>& module_names, const std::vector<std::string>& param_names);
+using ValAttrNameMap = std::unordered_map<const Value*, std::string>;
+using NodeAttrNameMap = std::unordered_map<const Node*, std::unordered_map<std::string, std::string>>;
+
+TORCH_API std::pair<ValAttrNameMap, NodeAttrNameMap> ONNXFunctionExtraction(std::shared_ptr<Graph>& graph, const std::vector<std::string>& module_names, const std::vector<std::string>& param_names);
+}
 
 } // namespace jit
 } // namespace torch
