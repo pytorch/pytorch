@@ -124,7 +124,7 @@ class TestSerialization(TestCase):
         self.assertEqual(qmodule_scripted(input_tensor), expected, atol=prec)
         self.assertEqual(qmodule_traced(input_tensor), expected, atol=prec)
 
-    def _test_obs(self, obs, input_size, subname=None, generate=False):
+    def _test_obs(self, obs, input_size, subname=None, generate=False, check_numerics=True):
         """
         Test observer code can be loaded from state_dict.
         """
@@ -139,8 +139,8 @@ class TestSerialization(TestCase):
         input_tensor = torch.load(input_file)
         obs.load_state_dict(torch.load(state_dict_file))
         expected = torch.load(expected_file)
-
-        self.assertEqual(obs(input_tensor), expected)
+        if check_numerics:
+            self.assertEqual(obs(input_tensor), expected)
 
     @override_qengines
     def test_linear(self):
@@ -279,3 +279,22 @@ class TestSerialization(TestCase):
     def test_per_tensor_observer(self):
         obs = MinMaxObserver()
         self._test_obs(obs, input_size=[5, 5], generate=False)
+
+    def test_default_qat_qconfig(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super(Model, self).__init__()
+                self.linear = nn.Linear(5, 5)
+                self.relu = nn.ReLU()
+
+            def forward(self, x):
+                x = self.linear(x)
+                x = self.relu(x)
+                return x
+
+        model = Model()
+        model.linear.weight = torch.nn.Parameter(torch.randn(5, 5))
+        model.qconfig = torch.quantization.get_default_qat_qconfig("fbgemm")
+        ref_model = torch.quantization.QuantWrapper(model)
+        ref_model = torch.quantization.prepare_qat(ref_model)
+        self._test_obs(ref_model, input_size=[5, 5], generate=False, check_numerics=False)
