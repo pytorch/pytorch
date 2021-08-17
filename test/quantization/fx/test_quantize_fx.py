@@ -2812,6 +2812,7 @@ class TestQuantizeFx(QuantizationTestCase):
         """ Test tuple input type is preserved
         """
         from typing import List
+
         class LSTM(nn.Module):
             def __init__(self):
                 super().__init__()
