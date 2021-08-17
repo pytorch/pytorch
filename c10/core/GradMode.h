@@ -31,7 +31,8 @@ struct TORCH_API NoGradGuard : public AutoGradMode {
 // A RAII, thread local (!) guard that enables or disables forward grad mode
 // upon construction, and sets it back to the original value upon destruction.
 struct TORCH_API AutoFwGradMode {
-  AutoFwGradMode(bool enabled) : prev_mode(AutogradState::get_tls_state().get_fw_grad_mode()) {
+  AutoFwGradMode(bool enabled)
+      : prev_mode(AutogradState::get_tls_state().get_fw_grad_mode()) {
     AutogradState::get_tls_state().set_fw_grad_mode(enabled);
   }
   ~AutoFwGradMode() {
