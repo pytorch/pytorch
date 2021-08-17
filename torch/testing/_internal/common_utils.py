@@ -38,7 +38,8 @@ import tempfile
 import json
 import __main__  # type: ignore[import]
 import errno
-from typing import cast, Any, Dict, Iterable, Iterator, Optional, Union
+from typing import (cast, Any, Callable, Dict, FrozenSet, Iterable, Iterator, Optional,
+                    Set, Type, Union)
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -2412,11 +2413,62 @@ def check_test_defined_in_running_script(test_case):
             test_case.id(), running_script_path, test_case_class_file)
 
 
-def load_tests(loader, tests, pattern):
+# For this section, see:
+# https://docs.python.org/3/library/unittest.html#load-tests-protocol.
+
+def make_load_tests(
+        imported_test_cases: Set[Type[TestCase]]) -> Callable[[unittest.TestLoader,
+                                                               unittest.TestSuite,
+                                                               Optional[str]],
+                                                              unittest.TestSuite]:
+    """Creates a load_tests function that handles the provided imported tests.
+
+    If you have test cases that are not imported into your test file,
+    you should use this function instead of `load_tests` directly.
+
+    Example:
+      from subpackage.submodule import TestSomeFeature
+
+      load_tests = make_load_tests(imported_test_cases={TestSomeFeature})
+    """
+    return partial(load_tests, imported_test_cases=imported_test_cases)
+
+
+def load_tests(loader, tests, pattern, *,
+               imported_test_cases: FrozenSet[Type[TestCase]] = frozenset()):
+    """Implements the unittest load_tests protocol.
+
+    Our implementation doesn't allow you to implicitly import test
+    cases into your module to protect you from making mistakes. If you
+    have test cases from different modules, they need to be explicitly
+    registered. See `make_load_tests` for an easier way to handle
+    that.
+
+    If you don't have any external TestCase instances to test, it's
+    enough to have this function added to your test file's global
+    scope.
+
+    Example:
+      load_tests = common_utils.load_tests
+    """
     set_running_script_path()
     test_suite = unittest.TestSuite()
+    for test_case in imported_test_cases:
+        test_suite.addTest(loader.loadTestsFromTestCase(test_case))
     for test_group in tests:
         for test in test_group:
+            if test.__class__ in imported_test_cases:
+                # If the TestCase was imported (not just the module
+                # containing it), then it will also show up here since
+                # it is a TestCase at global scope.
+                #
+                # Since we're in this block, it was registered and
+                # thus added to the test suite above.
+                #
+                # If it was added to global scope and not registered,
+                # then it will raise below in
+                # check_test_defined_in_running_script.
+                continue
             check_test_defined_in_running_script(test)
             test_suite.addTest(test)
     return test_suite
