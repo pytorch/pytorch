@@ -89,7 +89,7 @@ def impl_arguments(g: NativeFunctionsGroup) -> List[Binding]:
         # A list of parameters for the impl function with
         # certain parameters replaced with precomputed counterparts
         # as specified in native_functions.yaml.
-        non_out_args_replaced = []
+        non_out_args_replaced: List[Union[Argument, TensorOptionsArguments, SelfArgument]] = []
 
         for a in g.out.func.arguments.non_out:
             if isinstance(a, Argument) and a.name in g.out.precomputed.replace:

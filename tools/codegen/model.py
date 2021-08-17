@@ -1528,10 +1528,10 @@ class Precompute:
         # should replace which kernel arguments.
         replace = {}
         for raw_replace_item in src:
-            arg, with_list = raw_replace_item.split(' -> ')
-            with_list = with_list.split(',')
-            with_list = [Argument.parse(name.strip()) for name in with_list]
-            replace[arg] = with_list
+            arg, with_list_raw = raw_replace_item.split(' -> ')
+            with_list = with_list_raw.split(',')
+            with_list_args = [Argument.parse(name.strip()) for name in with_list]
+            replace[arg] = with_list_args
 
         r = Precompute(replace=replace)
         assert r.to_list() == src, 'r.to_list() != src'
