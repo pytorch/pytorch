@@ -82,6 +82,24 @@ class TestSymbolicShapeAnalysis(JitTestCase):
         self.assertIsNotNone(mul_graph)
         self.assertIs(mul_graph, div_graph)
 
+    def test_write(self):
+        @torch.jit.script
+        def foo(a, b):
+            return a * b
+
+        # broadcast appends cant be removed, so we bail on propagation
+        torch._C._jit_pass_propagate_shapes_on_graph(foo.graph)
+        FileCheck().check("Tensor = aten::mul").run(foo.graph)
+
+        @torch.jit.script
+        def foo(y):
+            x = [1, 2, 3, 4]
+            x[0] = 5
+            return y.view(x)
+
+        torch._C._jit_pass_propagate_shapes_on_graph(foo.graph)
+        FileCheck().check("Tensor = aten::view").run(foo.graph)
+
     def test_unary_shape_functions(self):
         def apply(fn):
             return lambda x: fn(x)

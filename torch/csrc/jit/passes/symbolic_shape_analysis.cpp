@@ -82,10 +82,25 @@ void replaceWithIValue(Value* v, IValue val) {
 // of tensor dimensions which must be equal at runtime.
 
 struct SymbolicShapeAnalyzer {
-  SymbolicShapeAnalyzer(Node* n, std::shared_ptr<Graph> shape_compute_graph)
+  SymbolicShapeAnalyzer(
+      Node* n,
+      std::shared_ptr<Graph> shape_compute_graph,
+      const AliasDb& db)
       : graph_(shape_compute_graph->copy()), node_(n) {
     for (size_t i = 0; i < node_->inputs().size(); i++) {
       auto type = node_->input(i)->type();
+
+      if (auto opt_type =
+              graph_->inputs().at(i)->type()->cast<OptionalType>()) {
+        // None will get handled with constant substitution later
+        if (!type->cast<OptionalType>() &&
+            !NoneType::get()->isSubtypeOf(type)) {
+          graph_->inputs().at(i)->setType(opt_type->getElementType());
+        }
+      } else if (graph_->inputs().at(i)->type()->cast<NumberType>()) {
+        graph_->inputs().at(i)->setType(type);
+      }
+
       if (auto tt = type->castRaw<TensorType>()) {
         // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
         c10::SymbolicShape symbolic_shapes = tt->symbolic_sizes();
@@ -101,6 +116,14 @@ struct SymbolicShapeAnalyzer {
               graph_->inputs().at(i), *tt->sizes().concrete_sizes());
           continue;
         }
+        // TODO: remove, all constant tensors should have typed sizes
+        if (toIValue(node_->input(i)) && !symbolic_shape_analysis_test_mode) {
+          replaceWithIValue(
+              graph_->inputs().at(i),
+              constant_as<at::Tensor>(node_->input(i))->sizes());
+          continue;
+        }
+
         // we can't optimize a tensor without fixed rank
         if (symbolic_shapes.rank()) {
           node_symbolic_input_indices.emplace_back(i, symbolic_shapes);
@@ -115,7 +138,7 @@ struct SymbolicShapeAnalyzer {
           type->cast<ListType>() &&
           type->cast<ListType>()->getElementType()->cast<IntType>()) {
         if (node_->input(i)->node()->kind() == prim::ListConstruct &&
-            node_->input(i)->uses().size() == 1) {
+            !db.hasWriters(node_->input(i))) {
           // it is a very common in graphs to see patterns like:
           // z = x.view(y.size())
           // or:
@@ -304,10 +327,14 @@ struct SymbolicShapeAnalyzer {
       auto int_list = toIValue(output)->toIntVector();
       return c10::SymbolicShape(int_list);
     }
+    // TODO: would be nice if there were easy facility to look at uses and see
+    // if they are all pure instead of instanting db.
+    AliasDb db(graph_);
     // If it is not a single list construct or constant, bail,
     // otherwise we cannot analyze its output and it might be modified
     if (output->node()->kind() != prim::ListConstruct ||
-        output->uses().size() != 1) {
+        db.hasWriters(output)) {
+      GRAPH_DEBUG("Could not extract shape ", getHeader(node_));
       return c10::SymbolicShape();
     }
     Node* list_construct = output->node();
@@ -337,17 +364,20 @@ struct SymbolicShapeAnalyzer {
 
 void PropagateShapesWithShapeFunction(
     Node* n,
-    std::shared_ptr<Graph>& shape_compute_graph) {
-  c10::SymbolicShape out = SymbolicShapeAnalyzer(n, shape_compute_graph).run();
+    std::shared_ptr<Graph>& shape_compute_graph,
+    const AliasDb& db) {
+  c10::SymbolicShape out =
+      SymbolicShapeAnalyzer(n, shape_compute_graph, db).run();
   n->output()->setType(
       n->output()->type()->expect<TensorType>()->withSymbolicShapes(out));
 }
 
 void PropagateShapesOnGraph(std::shared_ptr<Graph>& graph) {
+  AliasDb db(graph);
   for (Node* n : graph->nodes()) {
     if (n->maybeSchema()) {
       if (auto maybe_graph = shapeComputeGraphForSchema(n->schema())) {
-        PropagateShapesWithShapeFunction(n, *maybe_graph);
+        PropagateShapesWithShapeFunction(n, *maybe_graph, db);
       }
     }
   }
