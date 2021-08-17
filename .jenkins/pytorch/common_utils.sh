@@ -51,10 +51,11 @@ function get_exit_code() {
 
 function file_diff_from_base() {
   # The fetch may fail on Docker hosts, this fetch is necessary for GHA
+  # lazy_tensor_staging is a hack to replace master to avoid some CI issues. Don't merge it.
   set +e
-  git fetch origin master --quiet
+  git fetch origin lazy_tensor_staging --quiet
   set -e
-  git diff --name-only "$(git merge-base origin/master HEAD)" > "$1"
+  git diff --name-only "$(git merge-base origin/lazy_tensor_staging HEAD)" > "$1"
 }
 
 function get_bazel() {
