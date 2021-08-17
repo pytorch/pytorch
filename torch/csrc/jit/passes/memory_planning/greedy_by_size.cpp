@@ -4,32 +4,29 @@
 namespace torch {
 namespace jit {
 
-std::unordered_map<const Value*, Region> greedyBySize(
-    std::unordered_map<const Value*, uint64_t> managed_tensor_sizes,
-    LiveRangesMap live_ranges) {
+std::unordered_map<LiveRange, Region, live_range_hash> greedyBySize(
+    std::unordered_map<LiveRange, uint64_t, live_range_hash>
+        managed_live_ranges) {
   // sort tensor usage records in non-increasing order of size
-  auto cmp = [&](auto v1, auto v2) {
-    return managed_tensor_sizes[v1] >= managed_tensor_sizes[v2];
+  auto cmp = [&managed_live_ranges](LiveRange& lvr1, LiveRange& lvr2) {
+    return managed_live_ranges[lvr1] >= managed_live_ranges[lvr2];
   };
-  std::map<const Value*, LiveRange, decltype(cmp)> sorted_size_live_ranges_map(
-      cmp);
-  for (const auto& item : live_ranges) {
-    sorted_size_live_ranges_map.insert({item.first, item.second});
-  }
+  std::vector<LiveRange> sorted_size_live_ranges;
+  std::sort(
+      sorted_size_live_ranges.begin(), sorted_size_live_ranges.end(), cmp);
 
-  std::multiset<std::pair<const Value*, Region>, _region_offset_cmp>
+  std::multiset<std::pair<LiveRange, Region>, _region_offset_cmp>
       ordered_allocations;
 
-  for (const auto& item : sorted_size_live_ranges_map) {
-    auto t_val = item.first;
-    auto lvr = item.second;
+  for (auto& lvr : sorted_size_live_ranges) {
     auto t_size =
-        MemoryPlanner::compute_aligned_tensor_size(managed_tensor_sizes[t_val]);
-    auto best_offset = findOffset(
-        lvr, t_size, managed_tensor_sizes, live_ranges, ordered_allocations);
-    ordered_allocations.insert({t_val, {best_offset, t_size}});
+        MemoryPlanner::compute_aligned_tensor_size(managed_live_ranges[lvr]);
+    auto best_offset =
+        findOffset(lvr, t_size, managed_live_ranges, ordered_allocations);
+    ordered_allocations.insert(
+        std::make_pair(lvr, Region{best_offset, t_size}));
   }
-  std::unordered_map<const Value*, Region> allocations;
+  std::unordered_map<LiveRange, Region, live_range_hash> allocations;
   for (auto& item : ordered_allocations) {
     allocations[item.first] = item.second;
   }

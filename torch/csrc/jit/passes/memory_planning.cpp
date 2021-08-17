@@ -94,12 +94,17 @@ Node* insertAllocStorageNode(
 void insertAllocTensorNodes(
     std::shared_ptr<Graph>& graph,
     Node* storage,
-    std::unordered_map<const Value*, Region> allocations) {
+    std::unordered_map<LiveRange, Region, live_range_hash> allocations,
+    std::map<LiveRange, const Value*, live_range_start_cmp>
+        manage_range_values) {
   uint64_t total_size = storage->i(attr::total_size);
-  for (auto& allocation : allocations) {
+  for (auto& item : manage_range_values) {
+    auto lvr = item.first;
+    auto region = allocations[lvr];
+    auto allocation = item.second;
+
     // const_cast fishy?
-    auto node = const_cast<Node*>(allocation.first->node());
-    auto region = allocation.second;
+    auto node = const_cast<Node*>(allocation->node());
 
     // the way that this node magically *becomes* the out varaint is simply
     // by add an extra input. this is because op resolution happens
@@ -110,7 +115,7 @@ void insertAllocTensorNodes(
     alloc->insertBefore(node);
     alloc->addInput(storage->output());
 
-    auto ttp = allocation.first->type()->expect<c10::TensorType>();
+    auto ttp = allocation->type()->expect<c10::TensorType>();
     std::vector<int64_t> sizes, strides;
     std::tie(sizes, strides) = getSizesStrides(ttp);
     TORCH_CHECK(
@@ -202,53 +207,54 @@ getManagedStuff(std::shared_ptr<Graph>& graph) {
 }
 
 uint64_t getTotalAllocationSize(
-    std::unordered_map<const Value*, Region> allocations) {
+    std::unordered_map<LiveRange, Region, live_range_hash>
+        managed_live_ranges) {
   uint64_t total_size = 0;
-  for (const auto& item : allocations) {
+  for (const auto& item : managed_live_ranges) {
     total_size = std::max(total_size, item.second.offset + item.second.size);
   }
   return total_size;
 }
 
 void printAllocation(
-    std::unordered_map<const Value*, Region> allocations,
-    std::unordered_map<const Value*, LiveRange> managed_ranges) {
-  std::map<LiveRange, const Value*, live_range_start_comp>
-      sorted_start_live_ranges_map;
+    std::unordered_map<LiveRange, Region, live_range_hash> allocations,
+    std::map<LiveRange, const Value*, live_range_start_cmp> managed_ranges) {
   for (const auto& item : managed_ranges) {
-    sorted_start_live_ranges_map.insert({item.second, item.first});
-  }
-
-  for (const auto& item : sorted_start_live_ranges_map) {
     auto lvr = item.first;
     auto val = item.second;
-    auto alloced_reg = allocations[val];
+    auto alloced_reg = allocations[lvr];
     std::cout << val->debugName() << ": " << lvr << " " << alloced_reg << "\n";
   }
 }
 
 void planMemory(std::shared_ptr<Graph>& graph, Strategy strat) {
-  std::unordered_map<const Value*, uint64_t> managed_values;
-  std::unordered_map<const Value*, LiveRange> managed_ranges;
+  std::unordered_map<const Value*, uint64_t> managed_value_sizes;
+  std::unordered_map<const Value*, LiveRange> managed_value_ranges;
   std::vector<const Node*> out_nodes;
-  std::tie(out_nodes, managed_values, managed_ranges) = getManagedStuff(graph);
-  std::unordered_map<const Value*, Region> allocations;
+  std::tie(out_nodes, managed_value_sizes, managed_value_ranges) =
+      getManagedStuff(graph);
+
+  std::unordered_map<LiveRange, uint64_t, live_range_hash> managed_live_ranges;
+  for (const auto& item : managed_value_sizes) {
+    managed_live_ranges[managed_value_ranges[item.first]] = item.second;
+  }
+  std::unordered_map<LiveRange, Region, live_range_hash> allocations;
 
   switch (strat) {
     case Strategy::NAIVE: {
       return;
     }
     case Strategy::GREEDY_BY_SIZE: {
-      allocations = greedyBySize(managed_values, managed_ranges);
+      allocations = greedyBySize(managed_live_ranges);
       break;
     }
     case Strategy::LINEAR_SCAN: {
-      allocations = linearScanHeuristic(managed_values, managed_ranges);
+      allocations = linearScanHeuristic(managed_live_ranges);
       break;
     };
     case Strategy::GREEDY_BY_BREADTH: {
-      allocations =
-          greedyByOperatorBreadth(managed_values, managed_ranges, out_nodes);
+      allocations = greedyByOperatorBreadth(
+          managed_value_sizes, managed_value_ranges, out_nodes);
       break;
     };
     default:
@@ -256,14 +262,27 @@ void planMemory(std::shared_ptr<Graph>& graph, Strategy strat) {
   }
   auto total_size = getTotalAllocationSize(allocations);
 
-  printAllocation(allocations, managed_ranges);
+  std::map<LiveRange, const Value*, live_range_start_cmp> managed_range_values;
+  for (const auto& item : managed_value_ranges) {
+    if (managed_range_values.count(item.second)) {
+      TORCH_WARN(
+          "overlapping live ranges ",
+          item.first->debugName(),
+          " with ",
+          managed_range_values.at(item.second)->debugName());
+    }
+    managed_range_values.insert({item.second, item.first});
+  }
+
+  printAllocation(allocations, managed_range_values);
 
   GRAPH_DEBUG("\ngraph before inserting storage node\n", *graph);
 
   auto storage_node = insertAllocStorageNode(graph, total_size);
   GRAPH_DEBUG("\ngraph after inserting storage node\n", *graph);
 
-  insertAllocTensorNodes(graph, storage_node, allocations);
+  insertAllocTensorNodes(
+      graph, storage_node, allocations, managed_range_values);
   GRAPH_DEBUG("\ngraph after inserting alloc nodes\n", *graph);
 }
 } // namespace jit

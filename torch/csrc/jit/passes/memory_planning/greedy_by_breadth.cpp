@@ -25,7 +25,7 @@ std::unordered_map<const Value*, uint64_t> getOpNodeTensorSizes(
   return all_tensor_sizes;
 }
 
-std::unordered_map<const Value*, Region> greedyByOperatorBreadth(
+std::unordered_map<LiveRange, Region, live_range_hash> greedyByOperatorBreadth(
     std::unordered_map<const Value*, uint64_t> managed_tensor_sizes,
     LiveRangesMap live_ranges,
     std::vector<const Node*> ops) {
@@ -52,14 +52,19 @@ std::unordered_map<const Value*, Region> greedyByOperatorBreadth(
         return breadth_op[op1] >= breadth_op[op2];
       });
 
+  std::unordered_map<LiveRange, uint64_t, live_range_hash> managed_live_ranges;
+  for (const auto& item : managed_tensor_sizes) {
+    managed_live_ranges[live_ranges[item.first]] = item.second;
+  }
+
   auto cmp = [&](auto v1, auto v2) {
     return managed_tensor_sizes[v1] >= managed_tensor_sizes[v2];
   };
   std::map<const Value*, LiveRange, decltype(cmp)> sorted_size_live_ranges_map(
       cmp);
-  std::multiset<std::pair<const Value*, Region>, _region_offset_cmp>
+  std::multiset<std::pair<LiveRange, Region>, _region_offset_cmp>
       ordered_allocations;
-  std::unordered_map<const Value*, Region> allocations;
+  std::unordered_map<LiveRange, Region, live_range_hash> allocations;
 
   for (const auto& op : ops) {
     std::vector<const Value*> op_managed_tensors;
@@ -79,9 +84,9 @@ std::unordered_map<const Value*, Region> greedyByOperatorBreadth(
       auto lvr = live_ranges[t_val];
       auto t_size = MemoryPlanner::compute_aligned_tensor_size(
           managed_tensor_sizes[t_val]);
-      auto best_offset = findOffset(
-          lvr, t_size, managed_tensor_sizes, live_ranges, ordered_allocations);
-      ordered_allocations.insert({t_val, {best_offset, t_size}});
+      auto best_offset =
+          findOffset(lvr, t_size, managed_live_ranges, ordered_allocations);
+      ordered_allocations.insert({lvr, Region{best_offset, t_size}});
     }
     for (auto& item : ordered_allocations) {
       allocations[item.first] = item.second;

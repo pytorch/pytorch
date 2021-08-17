@@ -47,15 +47,22 @@ inline bool operator!=(const LiveRange& lhs, const LiveRange& rhs) {
   return !(lhs == rhs);
 }
 
-struct live_range_start_comp {
+struct live_range_start_cmp {
   bool operator()(LiveRange const& range1, LiveRange const& range2) const {
     return range1.begin < range2.begin;
   }
 };
 
-struct live_range_end_comp {
+struct live_range_end_cmp {
   bool operator()(LiveRange const& range1, LiveRange const& range2) const {
     return range1.end < range2.end;
+  }
+};
+
+struct live_range_hash {
+  size_t operator()(LiveRange const& range) const {
+    return std::hash<size_t>()(range.begin) ^
+        (std::hash<size_t>()(range.end) << 1);
   }
 };
 

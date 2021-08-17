@@ -30,25 +30,24 @@ void coalesce_avail(std::set<Region, region_size_cmp>& avail_regions) {
 };
 
 // https://www.usenix.org/legacy/events/vee05/full_papers/p132-wimmer.pdf
-std::unordered_map<const Value*, Region> linearScanHeuristic(
-    std::unordered_map<const Value*, uint64_t> managed_tensor_sizes,
-    LiveRangesMap live_ranges) {
-  // WARNING: duplicate ranges not supported
-  std::map<LiveRange, const Value*, live_range_start_comp>
-      sorted_start_live_ranges_map;
-  for (const auto& item : live_ranges) {
-    sorted_start_live_ranges_map.insert({item.second, item.first});
-  }
+std::unordered_map<LiveRange, Region, live_range_hash> linearScanHeuristic(
+    std::unordered_map<LiveRange, uint64_t, live_range_hash>
+        managed_live_ranges) {
+  auto cmp = [](LiveRange& lvr1, LiveRange& lvr2) {
+    return lvr1.begin < lvr2.begin;
+  };
+  std::vector<LiveRange> sorted_start_live_ranges;
+  std::sort(
+      sorted_start_live_ranges.begin(), sorted_start_live_ranges.end(), cmp);
 
   int curr_end_reg = 0;
-  std::set<LiveRange, live_range_end_comp> active;
-  std::map<LiveRange, Region, live_range_start_comp> alloced_regions;
-  std::map<LiveRange, Region, live_range_start_comp> currently_alloced_regions;
+  std::set<LiveRange, live_range_end_cmp> active;
+  std::map<LiveRange, Region, live_range_start_cmp> alloced_regions;
+  std::map<LiveRange, Region, live_range_start_cmp> currently_alloced_regions;
   std::set<Region, region_size_cmp> avail_regions;
 
-  auto expire_old_intervals = [&](auto curr_range) {
-    for (auto& item : sorted_start_live_ranges_map) {
-      auto dead_range = item.first;
+  auto expire_old_intervals = [&](LiveRange& curr_range) {
+    for (auto& dead_range : sorted_start_live_ranges) {
       if (dead_range.end >= curr_range.begin) {
         break;
       }
@@ -63,13 +62,10 @@ std::unordered_map<const Value*, Region> linearScanHeuristic(
     }
   };
 
-  for (auto& curr_live_range : sorted_start_live_ranges_map) {
-    auto curr_range = curr_live_range.first;
-
+  for (auto& curr_range : sorted_start_live_ranges) {
     expire_old_intervals(curr_range);
 
-    auto curr_size =
-        managed_tensor_sizes[sorted_start_live_ranges_map[curr_range]];
+    auto curr_size = managed_live_ranges[curr_range];
     auto aligned_curr_size =
         MemoryPlanner::compute_aligned_tensor_size(curr_size);
 
@@ -131,15 +127,10 @@ std::unordered_map<const Value*, Region> linearScanHeuristic(
   }
 
   // last interval doesn't come back around to the top of the loop
-  expire_old_intervals(sorted_start_live_ranges_map.end()->first);
+  expire_old_intervals(sorted_start_live_ranges.back());
 
-
-  std::unordered_map<const Value*, Region> allocations;
-  for (auto& item : alloced_regions) {
-    auto lvr = item.first;
-    auto reg = item.second;
-    allocations[sorted_start_live_ranges_map[lvr]] = reg;
-  }
+  std::unordered_map<LiveRange, Region, live_range_hash> allocations(
+      alloced_regions.begin(), alloced_regions.end());
   return allocations;
 }
 

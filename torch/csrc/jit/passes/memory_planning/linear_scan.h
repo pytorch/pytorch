@@ -5,9 +5,9 @@
 namespace torch {
 namespace jit {
 
-std::unordered_map<const Value*, Region> linearScanHeuristic(
-    std::unordered_map<const Value*, uint64_t> managed_tensor_sizes,
-    LiveRangesMap live_ranges);
+std::unordered_map<LiveRange, Region, live_range_hash> linearScanHeuristic(
+    std::unordered_map<LiveRange, uint64_t, live_range_hash>
+        managed_live_ranges);
 
 } // namespace jit
 } // namespace torch
