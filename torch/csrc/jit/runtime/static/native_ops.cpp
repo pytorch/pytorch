@@ -55,6 +55,22 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
     });
 
 REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    prim::TupleUnpack,
+    prim_TupleUnpack,
+    [](Node* n) -> SROperator {
+      return [](ProcessedNode* p_node) {
+        const auto& elems = p_node->Input(0).toTuple()->elements();
+        const size_t num_outputs = p_node->outputs().size();
+        TORCH_CHECK(
+            num_outputs == elems.size(),
+            "Number of outputs must match number of tuple elements.")
+        for (size_t i = 0; i < num_outputs; ++i) {
+          p_node->Output(i) = elems[i];
+        }
+      };
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
     prim::DictConstruct,
     prim_DictConstruct,
     [](Node* n) -> SROperator {
