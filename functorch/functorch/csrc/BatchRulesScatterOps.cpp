@@ -97,6 +97,72 @@ int64_t bdim_size(
   TORCH_INTERNAL_ASSERT(false);
 }
 
+std::tuple<Tensor,optional<int64_t>> scatter_value_batch_rule(
+    const Tensor& self, optional<int64_t> self_bdim,
+    int64_t dim,
+    const Tensor& index, optional<int64_t> index_bdim,
+    const Scalar& value) {
+  auto self_logical_rank = rankWithoutBatchDim(self, self_bdim);
+  auto index_logical_rank = rankWithoutBatchDim(index, index_bdim);
+  auto batch_size = bdim_size(self, self_bdim, index, index_bdim);
+
+  auto self_ = moveBatchDimToFront(self, self_bdim);
+  auto index_ = moveBatchDimToFront(index, index_bdim);
+
+  if (self_logical_rank == 0) {
+    self_ = self_.unsqueeze(-1);
+  }
+  if (index_logical_rank == 0) {
+    index_ = index_.unsqueeze(-1);
+  }
+  self_ = ensure_has_bdim(self_, self_bdim.has_value(), batch_size);
+  index_ = ensure_has_bdim(index_, index_bdim.has_value(), batch_size);
+  auto physical_dim = getPhysicalDim(self_, /*has_batch_dim*/true, dim);
+
+  auto result = at::scatter(self_, physical_dim, index_, value);
+  // result should have same shape as self
+  if (self_logical_rank == 0) {
+    result = result.squeeze(-1);
+  }
+  return std::make_tuple(result, 0);
+}
+
+std::tuple<Tensor,optional<int64_t>> scatter_src_batch_rule(
+    const Tensor& self, optional<int64_t> self_bdim,
+    int64_t dim,
+    const Tensor& index, optional<int64_t> index_bdim,
+    const Tensor& src, optional<int64_t> src_bdim) {
+  auto self_logical_rank = rankWithoutBatchDim(self, self_bdim);
+  auto index_logical_rank = rankWithoutBatchDim(index, index_bdim);
+  auto src_logical_rank = rankWithoutBatchDim(src, src_bdim);
+  auto batch_size = bdim_size(self, self_bdim, index, index_bdim, src, src_bdim);
+
+  auto self_ = moveBatchDimToFront(self, self_bdim);
+  auto index_ = moveBatchDimToFront(index, index_bdim);
+  auto src_ = moveBatchDimToFront(src, src_bdim);
+
+  if (self_logical_rank == 0) {
+    self_ = self_.unsqueeze(-1);
+  }
+  if (index_logical_rank == 0) {
+    index_ = index_.unsqueeze(-1);
+  }
+  if (src_logical_rank == 0) {
+    src_ = src_.unsqueeze(-1);
+  }
+  self_ = ensure_has_bdim(self_, self_bdim.has_value(), batch_size);
+  index_ = ensure_has_bdim(index_, index_bdim.has_value(), batch_size);
+  src_ = ensure_has_bdim(src_, src_bdim.has_value(), batch_size);
+  auto physical_dim = getPhysicalDim(self_, /*has_batch_dim*/true, dim);
+
+  auto result = at::scatter(self_, physical_dim, index_, src_);
+  // result should have same shape as self
+  if (self_logical_rank == 0) {
+    result = result.squeeze(-1);
+  }
+  return std::make_tuple(result, 0);
+}
+
 std::tuple<Tensor,optional<int64_t>> gather_batch_rule(
     const Tensor& self, optional<int64_t> self_bdim,
     int64_t dim,
@@ -168,6 +234,8 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
     // m.impl("index.Tensor", index_plumbing);
   VMAP_SUPPORT("gather", gather_batch_rule);
   VMAP_SUPPORT("gather_backward", gather_backward_batch_rule);
+  VMAP_SUPPORT("scatter.value", scatter_value_batch_rule);
+  VMAP_SUPPORT("scatter.src", scatter_src_batch_rule);
 }
 
 }}
