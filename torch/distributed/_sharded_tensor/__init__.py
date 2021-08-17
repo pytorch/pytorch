@@ -68,6 +68,7 @@ def ones(
         layout=torch.strided,
         requires_grad=False,
         pin_memory=False,
+        memory_format=torch.contiguous_format,
         process_group=None,
         init_rrefs=False):
     """
@@ -100,7 +101,7 @@ def ones(
     """
     params = InitCommonParams(create_op=CreateOp.ONES, dtype=dtype, layout=layout,
                               requires_grad=requires_grad,
-                              pin_memory=pin_memory,)
+                              pin_memory=pin_memory, memory_format=memory_format)
     return ShardedTensor(
         sharding_spec,
         *size,

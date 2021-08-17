@@ -37,6 +37,7 @@ def create_tensor_from_params(*size, local_device, params: InitCommonParams):
                            layout=params.layout,
                            device=local_device,
                            requires_grad=params.requires_grad,
+                           # Note memory_format param is not accepted by torch.ones
                            memory_format=params.memory_format,
                            pin_memory=params.pin_memory,)
     else:

@@ -10,10 +10,10 @@ from torch.distributed._sharded_tensor import (
     state_dict_hook,
     pre_load_state_dict_hook,
 )
-from torch.distributed._sharded_tensor import (
-    load_with_process_group,
-    state_dict_hook,
-    pre_load_state_dict_hook,
+from torch.distributed._sharding_spec import (
+    ChunkShardingSpec,
+    EnumerableShardingSpec,
+    ShardMetadata
 )
 from torch.distributed._sharded_tensor._internals import (
     CreateOp,
