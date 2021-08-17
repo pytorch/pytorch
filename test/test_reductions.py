@@ -110,56 +110,82 @@ class TestReductions(TestCase):
     @ops(reduction_ops, dtypes=OpDTypes.none)
     def test_dim_default(self, device, op: ReductionOpInfo):
         """Tests that the default dim reduces all dimensions."""
-        self._test_dim_keepdim(op, device, ndim=2)
+        for ndim in range(3):
+            self._test_dim_keepdim(op, device, ndim=ndim)
 
     @ops(reduction_ops, dtypes=OpDTypes.none)
     def test_dim_default_keepdim(self, device, op: ReductionOpInfo):
         """Tests that the default dim, when keepdim=True, reduces all dimensions to size 1."""
-        self._test_dim_keepdim(op, device, ndim=2, keepdim=True)
+        for ndim in range(3):
+            self._test_dim_keepdim(op, device, ndim=ndim, keepdim=True)
 
     @ops(reduction_ops, dtypes=OpDTypes.none)
     def test_dim_none(self, device, op: ReductionOpInfo):
         """Tests that dim=None reduces all dimensions."""
-        self._test_dim_keepdim(op, device, ndim=2, dim=None)
+        for ndim in range(3):
+            self._test_dim_keepdim(op, device, ndim=ndim, dim=None)
 
     @ops(reduction_ops, dtypes=OpDTypes.none)
     def test_dim_none_keepdim(self, device, op: ReductionOpInfo):
         """Tests that dim=None, when keepdim=True, reduces all dimensions to size 1."""
-        self._test_dim_keepdim(op, device, ndim=2, dim=None, keepdim=True)
+        for ndim in range(3):
+            self._test_dim_keepdim(op, device, ndim=ndim, dim=None, keepdim=True)
 
     @ops(reduction_ops, dtypes=OpDTypes.none)
     def test_dim_single(self, device, op: ReductionOpInfo):
         """Tests that dim=i reduces dimension i."""
-        self._test_dim_keepdim(op, device, ndim=2, dim=0)
+        self._test_dim_keepdim(op, device, ndim=0, dim=0)
+        self._test_dim_keepdim(op, device, ndim=1, dim=0)
         self._test_dim_keepdim(op, device, ndim=2, dim=-1)
+        self._test_dim_keepdim(op, device, ndim=3, dim=1)
 
     @ops(reduction_ops, dtypes=OpDTypes.none)
     def test_dim_single_keepdim(self, device, op: ReductionOpInfo):
         """Tests that dim=i, when keepdim=True, reduces dimension i to size 1."""
-        self._test_dim_keepdim(op, device, ndim=2, dim=0, keepdim=True)
+        self._test_dim_keepdim(op, device, ndim=0, dim=0, keepdim=True)
+        self._test_dim_keepdim(op, device, ndim=1, dim=0, keepdim=True)
         self._test_dim_keepdim(op, device, ndim=2, dim=-1, keepdim=True)
+        self._test_dim_keepdim(op, device, ndim=3, dim=1, keepdim=True)
 
     @ops(filter(lambda op: op.supports_multiple_dims, reduction_ops), dtypes=OpDTypes.none)
     def test_dim_empty(self, device, op: ReductionOpInfo):
         """Tests that dim=[] is a no-op"""
+        self._test_dim_keepdim(op, device, ndim=0, dim=[])
         self._test_dim_keepdim(op, device, ndim=2, dim=[])
 
     @ops(filter(lambda op: op.supports_multiple_dims, reduction_ops), dtypes=OpDTypes.none)
     def test_dim_empty_keepdim(self, device, op: ReductionOpInfo):
         """Tests that dim=[], when keepdim=True, is a no-op"""
+        self._test_dim_keepdim(op, device, ndim=0, dim=[], keepdim=True)
         self._test_dim_keepdim(op, device, ndim=2, dim=[], keepdim=True)
 
     @ops(filter(lambda op: op.supports_multiple_dims, reduction_ops), dtypes=OpDTypes.none)
     def test_dim_multi(self, device, op: ReductionOpInfo):
         """Tests that dim=[i, j, ...] reduces dimensions i, j, ...."""
+        self._test_dim_keepdim(op, device, ndim=1, dim=[0])
         self._test_dim_keepdim(op, device, ndim=3, dim=[0, 2])
-        self._test_dim_keepdim(op, device, ndim=3, dim=[-1, 0])
 
     @ops(filter(lambda op: op.supports_multiple_dims, reduction_ops), dtypes=OpDTypes.none)
     def test_dim_multi_keepdim(self, device, op: ReductionOpInfo):
         """Tests that dim=[i, j, ...], when keepdim=True, reduces dimensions i, j, .... to size 1."""
+        self._test_dim_keepdim(op, device, ndim=1, dim=[0], keepdim=True)
         self._test_dim_keepdim(op, device, ndim=3, dim=[0, 2], keepdim=True)
-        self._test_dim_keepdim(op, device, ndim=3, dim=[-1, 0], keepdim=True)
+
+    @ops(filter(lambda op: op.supports_multiple_dims, reduction_ops), dtypes=OpDTypes.none)
+    def test_dim_multi_unsorted(self, device, op: ReductionOpInfo):
+        """Tests that operator correctly handles unsorted dim list."""
+        self._test_dim_keepdim(op, device, ndim=4, dim=[3, 0, 2])
+
+    @ops(filter(lambda op: op.supports_multiple_dims, reduction_ops), dtypes=OpDTypes.none)
+    def test_dim_multi_unsorted_keepdim(self, device, op: ReductionOpInfo):
+        """Tests that operator correctly handles unsorted dim list when keepdim=True."""
+        self._test_dim_keepdim(op, device, ndim=4, dim=[3, 0, 2], keepdim=True)
+
+    @ops(filter(lambda op: op.supports_multiple_dims, reduction_ops), dtypes=OpDTypes.none)
+    def test_dim_multi_duplicate(self, device, op: ReductionOpInfo):
+        """Tests that an error is raised if dim has duplicate entries."""
+        with self.assertRaises(RuntimeError):
+            self._test_dim_keepdim(op, device, ndim=3, dim=[0, 1, 1, 2])
 
     @ops(filter(lambda op: not op.supports_multiple_dims, reduction_ops), dtypes=OpDTypes.none)
     def test_dim_multi_unsupported(self, device, op: ReductionOpInfo):
@@ -268,26 +294,46 @@ class TestReductions(TestCase):
             result = op(t, *args, dim=dim, **kwargs)
             self.assertEqual(result.shape, _reduced_shape(t.shape, dim))
 
+    def _test_noncontiguous(self, op: ReductionOpInfo, t: torch.Tensor, **reduction_kwargs):
+        """Helper method to test noncontiguous input tensors."""
+        assert not t.is_contiguous()
+
+        t_contig = t.contiguous()
+        for args, kwargs in op.generate_args_kwargs(t_contig, **reduction_kwargs):
+            kwargs.update(reduction_kwargs)
+            result = op(t, *args, **kwargs)
+            expected = op(t_contig, *args, **kwargs)
+            self.assertEqual(result, expected)
+
     @ops(reduction_ops)
-    def test_noncontiguous_input(self, device, dtype, op: ReductionOpInfo):
-        """Tests reducing along non contiguous dimensions"""
+    def test_noncontiguous_innermost(self, device, dtype, op: ReductionOpInfo):
+        """Tests reducing along noncontiguous innermost dimension."""
         t = make_tensor((10, 10), device, dtype)
+        self._test_noncontiguous(op, t[:, ::2], dim=1)
 
-        test_cases = [
-            # innermost noncontiguous
-            (t[:, ::2], {'dim': 1}),
-            # outermost noncontiguous
-            (t[::2, :], {'dim': 0}),
-            # all dims noncontiguous
-            (t[1::2, :-2:3], {}),
-        ]
+    @ops(reduction_ops)
+    def test_noncontiguous_outermost(self, device, dtype, op: ReductionOpInfo):
+        """Tests reducing along noncontiguous outermost dimension."""
+        t = make_tensor((10, 10), device, dtype)
+        self._test_noncontiguous(op, t[::2, :], dim=0)
 
-        for t, opt_dim in test_cases:
-            t_contig = t.contiguous()
-            for args, kwargs in op.generate_args_kwargs(t, **opt_dim):
-                result = op(t, *args, **opt_dim, **kwargs)
-                expected = op(t_contig, *args, **opt_dim, **kwargs)
-                self.assertEqual(result, expected)
+    @ops(reduction_ops)
+    def test_noncontiguous_all(self, device, dtype, op: ReductionOpInfo):
+        """Tests reducing all dimensions of a noncontiguous tensor."""
+        t = make_tensor((10, 10), device, dtype)
+        self._test_noncontiguous(op, t[1::2, :-2:3])
+
+    @ops(reduction_ops)
+    def test_noncontiguous_transposed(self, device, dtype, op: ReductionOpInfo):
+        """Tests reducing a transposed tensor."""
+        t = make_tensor((10, 10), device, dtype)
+        self._test_noncontiguous(op, t.T)
+
+    @ops(reduction_ops)
+    def test_noncontiguous_expanded(self, device, dtype, op: ReductionOpInfo):
+        """Tests reducing a tensor with expanded singleton dimensions."""
+        t = make_tensor((10, 10), device, dtype)
+        self._test_noncontiguous(op, t.unsqueeze(1).expand(-1, 5, -1))
 
     # NumPy does not support BFloat16 so we don't test that against reference
     # implementations. We also don't compare dtypes or test for different
