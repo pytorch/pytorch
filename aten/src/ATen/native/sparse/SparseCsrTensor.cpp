@@ -217,6 +217,38 @@ Tensor sparse_csr_tensor(
       options.pinned_memory_opt());
 }
 
+Tensor empty_sparse_csr(
+    IntArrayRef size,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory,
+    c10::optional<MemoryFormat> optional_memory_format) {
+  check_size_nonnegative(size);
+
+  TORCH_CHECK(size.size() == 2, "torch.empty: Only 2D sparse CSR tensors are supported.");
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(layout == Layout::SparseCsr);
+
+  auto rows = size[0];
+  auto cols = size[1];
+  int64_t nnz = 0;
+
+  TensorOptions options = TensorOptions().dtype(ScalarType::Long).layout(Layout::Strided).device(device).pinned_memory(pin_memory);
+  auto crow_indices = at::empty({rows + 1}, options);
+  auto col_indices = at::empty({nnz}, options);
+  auto values = at::empty({nnz}, options.dtype(dtype));
+
+  return at::native::_sparse_csr_tensor_unsafe(
+      crow_indices,
+      col_indices,
+      values,
+      size,
+      dtype,
+      layout,
+      device,
+      pin_memory);
+}
+
 // Access members of CSR tensors.
 int64_t _nnz_sparse_csr(const SparseCsrTensor& self) {
   return get_sparse_csr_impl(self)->nnz();
