@@ -570,7 +570,8 @@ class AvgPool2d(_AvgPoolNd):
         padding: implicit zero padding to be added on both sides
         ceil_mode: when True, will use `ceil` instead of `floor` to compute the output shape
         count_include_pad: when True, will include the zero-padding in the averaging calculation
-        divisor_override: if specified, it will be used as divisor, otherwise :attr:`kernel_size` will be used
+        divisor_override: if specified, it will be used as divisor, otherwise size of the pooling region will be used.
+
 
     Shape:
         - Input: :math:`(N, C, H_{in}, W_{in})` or :math:`(C, H_{in}, W_{in})`.
@@ -726,6 +727,12 @@ class FractionalMaxPool2d(Module):
                       This has to be a number or tuple in the range (0, 1)
         return_indices: if ``True``, will return the indices along with the outputs.
                         Useful to pass to :meth:`nn.MaxUnpool2d`. Default: ``False``
+
+    Shape:
+        - Input: :math:`(N, C, H_{in}, W_{in})` or :math:`(C, H_{in}, W_{in})`.
+        - Output: :math:`(N, C, H_{out}, W_{out})` or :math:`(C, H_{out}, W_{out})`, where
+          :math:`(H_{out}, W_{out})=\text{output\_size}` or
+          :math:`(H_{out}, W_{out})=\text{output\_ratio} \times (H_{in}, W_{in})`.
 
     Examples:
         >>> # pool of square window of size=3, and target output size 13x12
