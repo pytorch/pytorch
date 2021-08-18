@@ -9337,7 +9337,7 @@ is equivalent to ``transpose(input, 0, 1)``.
 
 .. seealso::
 
-        :func:`torch.transpose`.
+        :func:`torch.transpose` for a function that can swap arbitrary dimensions of any tensor.
 
 Args:
     {input}
@@ -9708,7 +9708,7 @@ of the other.
 
 .. seealso::
 
-        :func:`torch.t`.
+        :func:`torch.t` for a function that transposes tensors with <=2 dimensions.
 
 Args:
     {input}
