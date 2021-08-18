@@ -360,6 +360,47 @@ $6 = torch._ops.aten.add_($1, $5)''')
             z = x + y
             self.assertTrue(isinstance(z, LoggingTensor))
 
+    def test_enable_python_mode_subclass_priority(self) -> None:
+        class ErrorA(RuntimeError):
+            pass
+
+        class ErrorB(RuntimeError):
+            pass
+
+        class A(torch.Tensor):
+            @staticmethod
+            def __new__(cls, elem):
+                return torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                raise ErrorA
+
+        class B(A):
+            @staticmethod
+            def __new__(cls, elem):
+                return torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                raise ErrorB
+
+        a = A(torch.empty(1))
+        b = B(torch.empty(1))
+        with self.assertRaises(ErrorA):
+            a + a
+
+        # B has precedence over A due to the subclass relationship
+        with self.assertRaises(ErrorB):
+            with enable_python_mode(A):
+                b + b
+        with self.assertRaises(ErrorB):
+            with enable_python_mode(B):
+                a + a
+        with self.assertRaises(ErrorB):
+            with enable_python_mode(B):
+                a + b
+
     def test_enable_python_mode_respects_no_dispatch(self) -> None:
         with enable_python_mode(LoggingTensor):
             z = torch.ones([2, 3])
