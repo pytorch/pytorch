@@ -72,8 +72,7 @@ from torch.distributed.optim.functional_sgd import _FunctionalSGD
 from torch.distributed.optim.functional_adam import _FunctionalAdam
 from torch.distributed.optim.functional_adamw import _FunctionalAdamW
 
-if not IS_WINDOWS:
-    import torch.distributed.optim.post_localSGD_optimizer as post_localSGD_optimizer
+import torch.distributed.optim.post_localSGD_optimizer as post_localSGD_optimizer
 
 from torch.utils.data.distributed import DistributedSampler
 
@@ -4616,9 +4615,6 @@ class DistributedTest:
         @sandcastle_skip_if(
             BACKEND != "nccl" and BACKEND != "gloo",
             "Only NCCL and GLOO backend support DistributedDataParallel",
-        )
-        @sandcastle_skip_if(
-            IS_WINDOWS, "PostLocalSGDOptimizer not yet supported with Windows."
         )
         def test_post_localSGD_optimizer_parity(self, grad_is_view=False):
             learning_rate = 0.03
