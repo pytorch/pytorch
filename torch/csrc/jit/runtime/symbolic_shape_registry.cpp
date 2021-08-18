@@ -62,15 +62,32 @@ const std::string shape_compute_functions =
         def unary(self: List[int]):
           return _copy(self)
 
+        def infer_size_impl(shape: List[int], numel: int) -> List[int]:
+          newsize = 1
+          infer_dim: Optional[int] = None
+          for dim in range(len(shape)):
+            if shape[dim] == -1:
+              if infer_dim is not None:
+                raise AssertionError("only one dimension can be inferred")
+              infer_dim = dim
+            elif shape[dim] >= 0:
+              newsize *= shape[dim]
+            else:
+              raise AssertionError("invalid shape dimensions")
+          if numel == newsize or (infer_dim is not None and newsize > 0 and numel % newsize == 0):
+            if infer_dim is not None:
+              out = _copy(shape)
+              out[infer_dim] = numel // newsize
+              return out
+            else:
+              return _copy(shape)
+          raise AssertionError("invalid shape")
+
         def view(self: List[int], sizes: List[int]):
-          # TODO: add assertions to check whether requested dims are valid
-          out: List[int] = []
-          for elem in sizes:
-            if elem == -1:
-              # TODO: support -1 in view dimensions
-              raise AssertionError("Shape function doesn't support -1 view dims yet")
-            out.append(elem)
-          return out
+          numel = 1
+          for elem in self:
+            numel *= elem
+          return infer_size_impl(sizes, numel)
 
         def view_one_unused(self: List[int], sizes: List[int], *, implicit: bool=False):
           return view(self, sizes)

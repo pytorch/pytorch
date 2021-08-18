@@ -4775,12 +4775,13 @@ def sample_inputs_resize_ops(op_info, device, dtype, requires_grad, **kwargs):
 
     return list(generator())
 
-
 def sample_inputs_view_reshape(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
     cases = (((S, S, S), (S * S, S)),
              ((S * S, S), (S, S, S)),
+             ((S * S, S), (S, -1, S)),
+             ((S * S * 2, S), (S, -1)),
              ((S,), (S,)),
              ((), ()),
              ((), (1,)))
@@ -4795,7 +4796,6 @@ def sample_inputs_view_reshape(op_info, device, dtype, requires_grad, **kwargs):
                 yield(SampleInput(inp.transpose(0, 1), args=(args, )))
 
     return list(generator())
-
 
 def sample_inputs_view_as_reshape_as(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device)
@@ -8031,9 +8031,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
            supports_forward_ad=True,
-           skips=(
-               # Because view does not have a function variant.
-               SkipInfo('TestJit', 'test_variant_consistency_jit'),),
+           assert_jit_shape_analysis=True,
            sample_inputs_func=sample_inputs_view_reshape,
            ),
     OpInfo('view_as',
