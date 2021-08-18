@@ -136,3 +136,6 @@
 [submodule "third_party/kineto"]
     path = third_party/kineto
     url = https://github.com/pytorch/kineto
+[submodule "third_party/pocketfft"]
+	path = third_party/pocketfft
+	url = https://github.com/mreineck/pocketfft
