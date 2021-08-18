@@ -219,7 +219,7 @@ def qconfig_function_equality(q1: QConfigAny, q2: QConfigAny):
         return same and p1.keywords == p2.keywords
 
     if q1 is None or q2 is None:
-        return q1==q2
+        return q1 == q2
     else:
         assert q1 is not None and q2 is not None
         return compare_partial(q1.activation.p, q2.activation.p) and compare_partial(q1.weight.p, q2.weight.p)
