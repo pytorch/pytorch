@@ -9031,7 +9031,7 @@ class TestONNXRuntime(unittest.TestCase):
     def test_tensordot_dim_count(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
-                output = torch.tensordot(x, y, 2)
+                output = torch.linalg.tensordot(x, y, 2)
                 return output
 
         x = torch.randint(6, (7, 5, 3, 4))
@@ -9043,7 +9043,7 @@ class TestONNXRuntime(unittest.TestCase):
     def test_tensordot_dim_list(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
-                output = torch.tensordot(x, y, ([1, -2, -1], [1, 0, 3]))
+                output = torch.linalg.tensordot(x, y, ([1, -2, -1], [1, 0, 3]))
                 return output
 
         x = torch.randint(6, (7, 4, 3, 5, 2))
@@ -9056,7 +9056,7 @@ class TestONNXRuntime(unittest.TestCase):
     def test_tensordot_dynamic_dim(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
-                output = torch.tensordot(x, y, 2)
+                output = torch.linalg.tensordot(x, y, 2)
                 return output
 
         x = torch.randint(6, (7, 5, 3, 4))
