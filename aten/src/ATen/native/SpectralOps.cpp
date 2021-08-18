@@ -926,7 +926,9 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
   window_envelop = window_envelop.slice(2, start, end, 1);
 
   // Apply window normalization on non-tiny indices
-  y = at::where(window_envelop.abs().to(kDouble) > 1e-11, y / window_envelop, y);
+  window_envelop = at::where(
+    window_envelop.abs() > 1e-11, window_envelop, at::ones({}, window_envelop.options()));
+  y = y / window_envelop;
   y = y.squeeze(1);  // size: (channel, expected_output_signal_len)
   if (input_dim == 3) {
     y = y.squeeze(0);

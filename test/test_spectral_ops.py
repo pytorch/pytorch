@@ -1125,10 +1125,21 @@ class TestFFT(TestCase):
                 for i in range(num_trials):
                     original = torch.randn(*sizes, dtype=dtype, device=device)
                     stft = torch.stft(original, return_complex=True, **stft_kwargs)
-                    inversed = torch.istft(stft, **istft_kwargs)
-
+                    inversed = torch.istft(stft, length=original.size(-1), **istft_kwargs)
+                    n_frames = stft.size(-1)
+                    if stft_kwargs["center"] is True:
+                        len_expected = stft_kwargs["n_fft"] // 2 + stft_kwargs["hop_length"] * (n_frames - 1)
+                    else:
+                        len_expected = stft_kwargs["n_fft"] + stft_kwargs["hop_length"] * (n_frames - 1)
                     # trim the original for case when constructed signal is shorter than original
-                    original = original[..., :inversed.size(-1)]
+                    if original.size(-1) > len_expected:
+                        padding = inversed[..., len_expected:]
+                        inversed = inversed[..., :len_expected]
+                        original = original[..., :len_expected]
+                        zeros = torch.zeros_like(padding, device=padding.device)
+                        self.assertEqual(
+                            padding, zeros, msg='istft padding values against zeros',
+                            atol=7e-6, rtol=0, exact_dtype=True)
                     self.assertEqual(
                         inversed, original, msg='istft comparison against original',
                         atol=7e-6, rtol=0, exact_dtype=True)
