@@ -322,7 +322,7 @@ def powerSGD_hook(
     world_size = group_to_use.size()
 
     # The input tensor is a flattened 1D tensor.
-    input_tensor = bucket.get_tensor()
+    input_tensor = bucket.buffer()
 
     # Run vanilla allreduce in the first `start_powerSGD_iter` iterations.
     if state.iter < state.start_powerSGD_iter:
@@ -596,7 +596,7 @@ def batched_powerSGD_hook(
     world_size = group_to_use.size()
 
     # The input tensor is a flattened 1D tensor.
-    input_tensor = bucket.get_tensor()
+    input_tensor = bucket.buffer()
 
     # Run vanilla allreduce in the first `start_powerSGD_iter` iterations.
     if state.iter < state.start_powerSGD_iter:

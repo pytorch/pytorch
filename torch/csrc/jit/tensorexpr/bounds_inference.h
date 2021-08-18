@@ -20,12 +20,12 @@ enum C10_API_ENUM TensorAccessKind { kLoad, kStore, kMutate };
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct TORCH_API TensorAccessBoundsInfo {
   TensorAccessKind kind;
-  std::vector<const Expr*> start;
-  std::vector<const Expr*> stop;
+  std::vector<Expr*> start;
+  std::vector<Expr*> stop;
 };
 
 using BoundsInfo =
-    std::unordered_map<const Buf*, std::vector<TensorAccessBoundsInfo>>;
+    std::unordered_map<Buf*, std::vector<TensorAccessBoundsInfo>>;
 
 TORCH_API BoundsInfo inferBounds(Stmt* s, bool distinctAccessKinds = true);
 
@@ -42,7 +42,7 @@ TORCH_API BoundsInfo getInferredBounds(
 
 TORCH_API void printBoundsInfo(const BoundsInfo& v);
 
-TORCH_API std::vector<const Expr*> getBoundExtents(
+TORCH_API std::vector<Expr*> getBoundExtents(
     const std::vector<TensorAccessBoundsInfo>& infos);
 
 // The kind of dependency found, in increasing order of exclusivity.

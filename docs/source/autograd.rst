@@ -241,3 +241,18 @@ Anomaly detection
 .. autoclass:: detect_anomaly
 
 .. autoclass:: set_detect_anomaly
+
+
+Saved tensors default hooks
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Some operations need intermediary results to be saved during the forward pass
+in order to execute the backward pass.
+You can define how these saved tensors should be packed / unpacked using hooks.
+A common application is to trade compute for memory by saving those intermediary results
+to disk or to CPU instead of leaving them on the GPU. This is especially useful if you
+notice your model fits on GPU during evaluation, but not training.
+
+.. autoclass:: torch.autograd.graph.saved_tensors_hooks
+
+.. autoclass:: torch.autograd.graph.save_on_cpu
