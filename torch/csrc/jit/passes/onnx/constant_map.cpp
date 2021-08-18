@@ -192,11 +192,10 @@ void UpdateStrKey(
     const std::string& old_key,
     const std::string& new_key) {
   TORCH_INTERNAL_ASSERT(old_key != new_key);
-  TORCH_INTERNAL_ASSERT(map.find(new_key) == map.end());
   if (map.find(old_key) == map.end()) {
     return;
   }
-  map.insert({new_key, map[old_key]});
+  map[new_key] = map[old_key];
   map.erase(old_key);
 }
 
