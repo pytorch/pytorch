@@ -335,7 +335,9 @@ def convert(model: GraphModule, is_reference: bool = False,
         else:
             return False
 
-    def is_output_quantized(node: Node, obj: QuantizeHandler, qconfig: QConfigAny, modules: Dict[str, torch.nn.Module], is_reference=False) -> bool:
+    def is_output_quantized(
+            node: Node, obj: QuantizeHandler, qconfig: QConfigAny,
+            modules: Dict[str, torch.nn.Module], is_reference=False) -> bool:
         """ Check if output node is quantized or not """
         assert modules is not None
         # by default the output for a quantizable node is expected to be quantized

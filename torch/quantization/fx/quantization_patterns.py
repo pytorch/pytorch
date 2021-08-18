@@ -157,6 +157,10 @@ class QuantizeHandler(ABC):
 
     def is_output_quantized(self, qconfig, is_reference):
         """ Returns true if the output node of convert is quantized
+        when is_reference is False, we would return float node when a certain dtype
+        combination is not supported (since fbgemm/qnnpack only support certain dtype
+        combinations), so the output may be float, but when is_reference is True,
+        we support all dtype combinations so the output will always be quantized.
         """
         return True
 

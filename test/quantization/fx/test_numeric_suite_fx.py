@@ -646,7 +646,6 @@ class TestFXGraphMatcher(QuantizationTestCase):
                 # these ops do not have quantized equivalents
                 ops_to_skip = [
                     torch.bmm,
-                    torch.sum,
                     torch.div,
                     torch.sub,
                     operator.truediv,
