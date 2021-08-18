@@ -7,19 +7,19 @@ namespace jit {
 namespace tensorexpr {
 
 ReduceOp* Reducer::operator()(
-    const Buf* result_buf,
+    Buf* result_buf,
     ExprHandle body,
-    const std::vector<const Expr*>& output,
-    const std::vector<const Var*>& inner) const {
+    const std::vector<Expr*>& output,
+    const std::vector<Var*>& inner) const {
   return new ReduceOp(
       complete(result_buf, interaction_, body, output, inner), inner, *this);
 }
 
 ReduceOp* Reducer::operator()(
-    const Buf* result_buf,
-    const Expr* body,
-    const std::vector<const Expr*>& output,
-    const std::vector<const Var*>& inner) const {
+    Buf* result_buf,
+    Expr* body,
+    const std::vector<Expr*>& output,
+    const std::vector<Var*>& inner) const {
   return new ReduceOp(
       complete(result_buf, interaction_, ExprHandle(body), output, inner),
       inner,

@@ -83,10 +83,12 @@ void cpu_max_unpool(
       AT_ERROR("Found an invalid max index: ", error_index,
           " (output volumes are of size ", output_depth,
           "x", output_height, "x", output_width);
+      (void)error_index;
     } else {
       AT_ERROR("Found an invalid max index: ", error_index,
           " (output volumes are of size ", output_height,
           "x", output_width);
+      (void)error_index;
     }
   }
 
@@ -155,6 +157,7 @@ void cpu_max_unpool_channels_last(
     AT_ERROR("Found an invalid max index: ", error_index,
         " (output volumes are of size ", output_height,
         "x", output_width);
+    (void)error_index;
   }
 
   if (!output_.is_contiguous(memory_format)) {
@@ -229,10 +232,12 @@ void cpu_max_unpool_backward(
           ", odepth= ", output_depth,
           ", owidth= ", output_width,
           ", oheight= ", output_height);
+      (void)error_index;
     } else {
       AT_ERROR("invalid max index ", error_index,
           ", owidth= ", output_width,
           ", oheight= ", output_height);
+      (void)error_index;
     }
   }
 
@@ -300,6 +305,7 @@ void cpu_max_unpool_backward_channels_last(
     AT_ERROR("invalid max index ", error_index,
         ", owidth= ", output_width,
         ", oheight= ", output_height);
+    (void)error_index;
   }
 
   if (!grad_input_.is_contiguous(memory_format)) {
