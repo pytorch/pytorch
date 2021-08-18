@@ -9571,7 +9571,7 @@ are designed to work with this function. See the examples below.
 .. seealso::
         NumPy's `take_along_axis` which accepts an axis argument along which 1-D slices are taken.
         :func:`torch.gather` which does not view the input as 1-D and accepts an additional argument
-            that specifies the indexing dimension.
+        that specifies the indexing dimension.
 
 Args:
     {input}
