@@ -315,12 +315,10 @@ variable_list CppNode<T>::apply(variable_list&& inputs) {
 
   auto outputs = T::backward(&ctx_, backward_inputs);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int num_forward_inputs = is_variable_input_.size();
-  auto num_outputs = outputs.size();
+  const auto num_forward_inputs = static_cast<int64_t>(is_variable_input_.size());
+  auto num_outputs = static_cast<int64_t>(outputs.size());
   // Returning too many results is ok, but only as long as they're all undefined.
   // Truncate the result vector in that case.
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   if (num_outputs > num_forward_inputs) {
     bool all_undef = true;
     for (const auto i : c10::irange(num_forward_inputs, num_outputs)) {
@@ -332,7 +330,6 @@ variable_list CppNode<T>::apply(variable_list&& inputs) {
     }
   }
 
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   if (num_outputs != num_forward_inputs) {
     std::string msg("function ");
     msg += name() + " returned an incorrect number of gradients (expected ";

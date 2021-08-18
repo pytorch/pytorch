@@ -17,7 +17,8 @@ def empty(
         requires_grad=False,
         pin_memory=False,
         memory_format=torch.contiguous_format,
-        process_group=None,):
+        process_group=None,
+        init_rrefs=False):
     """
     Creates an empty :class:`ShardedTensor`. Needs to be called on all ranks in an SPMD fashion.
 
@@ -40,6 +41,10 @@ def empty(
             returned Tensor. Default: ``torch.contiguous_format``.
         process_group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
+        init_rrefs (bool, optional): Whether or not to initialize
+            :class:`torch.distributed.rpc.RRef`s pointing to remote shards.
+            Need to initialize the RPC Framework if specified as ``True``.
+            Default: ``False``.
 
     Returns:
         A :class:`ShardedTensor` object on each rank
@@ -52,12 +57,15 @@ def empty(
         requires_grad=requires_grad,
         pin_memory=pin_memory,
         memory_format=memory_format,
-        process_group=process_group)
+        process_group=process_group,
+        init_rrefs=init_rrefs,
+    )
 
 def init_from_local_shards(
         local_shards: List[Shard],
         sharded_tensor_metadata: ShardedTensorMetadata,
-        process_group=None):
+        process_group=None,
+        init_rrefs=False):
     """
     Creates an :class:`ShardedTensor` from local shards and the global metadata.
     Needs to be called on all ranks in an SPMD fashion.
@@ -74,6 +82,10 @@ def init_from_local_shards(
     Keyword args:
         process_group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
+        init_rrefs (bool, optional): Whether or not to initialize
+            :class:`torch.distributed.rpc.RRef`s pointing to remote shards.
+            Need to initialize the RPC Framework if specified as ``True``.
+            Default: ``False``.
 
     Returns:
         A :class:`ShardedTensor` object handle on this rank
@@ -81,7 +93,9 @@ def init_from_local_shards(
     return ShardedTensor._init_from_local_shards(
         local_shards,
         sharded_tensor_metadata,
-        process_group=process_group)
+        process_group=process_group,
+        init_rrefs=init_rrefs
+    )
 
 def state_dict_hook(module, destination, prefix, local_metadata):
     """
