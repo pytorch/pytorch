@@ -813,6 +813,7 @@ class BuildExtension(build_ext, object):
                         version_bound_str = f'>={".".join(map(str, min_compiler_version))}'
                         version_bound_str = f'{version_bound_str}, <={".".join(map(str, max_compiler_version))}'
 
+                        print(compiler_version, min_compiler_version, max_compiler_version)
                         if compiler_version < min_compiler_version:  # type: ignore[operator]
                             raise RuntimeError(
                                 f'The current installed version of {compiler_name} ({compiler_version}) is less '
