@@ -681,3 +681,17 @@ const auto three_tuple_unpack_script = R"JIT(
       a, b, c = tup
       return (a, b, c)
 )JIT";
+
+const auto append_int_script = R"JIT(
+  def forward(self, a: int):
+      lst = [1, 2, 3]
+      lst.append(a)
+      return lst
+)JIT";
+
+const auto append_tensor_script = R"JIT(
+  def forward(self, a: Tensor):
+      lst = []
+      lst.append(a)
+      return lst
+)JIT";
