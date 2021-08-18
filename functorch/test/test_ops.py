@@ -24,39 +24,13 @@ from common_utils import (
     get_fallback_and_vmap_exhaustive,
     get_exhaustive_batched_inputs,
     opinfo_in_dict,
+    xfail,
+    skipOps,
 )
-from torch.testing._internal.common_methods_invocations import SkipInfo
 import types
 from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map
 from functorch import grad, vjp, vmap
 from functorch._src.eager_transforms import _as_tuple
-
-def xfail(op_name, variant_name=None, *, device_type=None, dtypes=None, expected_failure=True):
-    return (op_name, variant_name, device_type, dtypes, expected_failure)
-
-def skipOps(test_case_name, base_test_name, to_skip):
-    all_opinfos = functorch_lagging_op_db + additional_op_db
-    for xfail in to_skip:
-        op_name, variant_name, device_type, dtypes, expected_failure = xfail
-        if variant_name is None:
-            # match all variants
-            matching_opinfos = [o for o in all_opinfos if o.name == op_name]
-            assert len(matching_opinfos) >= 1, f"Couldn't find OpInfo for {xfail}"
-        else:
-            matching_opinfos = [o for o in all_opinfos
-                                if o.name == op_name and o.variant_test_name == variant_name]
-            assert len(matching_opinfos) >= 1, f"Couldn't find OpInfo for {xfail}"
-        for opinfo in matching_opinfos:
-            decorators = list(opinfo.decorators)
-            decorators.append(SkipInfo(test_case_name, base_test_name,
-                                       device_type=device_type, dtypes=dtypes,
-                                       expected_failure=True))
-            opinfo.decorators = tuple(decorators)
-
-    # This decorator doesn't modify fn in any way
-    def wrapped(fn):
-        return fn
-    return wrapped
 
 # Version of autograd.grad that handles outputs that don't depend on inputs
 def _autograd_grad(outputs, inputs, grad_outputs=None, retain_graph=False, create_graph=True):
