@@ -5,7 +5,6 @@
 namespace at {
 namespace vitals {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 APIVitals VitalsAPI;
 
 std::ostream& operator<<(std::ostream& os, TorchVital const& tv) {

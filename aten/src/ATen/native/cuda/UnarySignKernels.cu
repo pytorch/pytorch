@@ -21,6 +21,7 @@ void logical_not_kernel_cuda(TensorIteratorBase& iter) {
   });
 }
 
+// NB: Ignores the negative bit on tensors
 void neg_kernel_cuda(TensorIteratorBase& iter) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "neg_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {

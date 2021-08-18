@@ -37,8 +37,7 @@ bool areEqualScalars(Val* v1, Val* v2);
  */
 class TORCH_CUDA_CU_API UnaryOp : public Expr {
  public:
-  // NOLINTNEXTLINE(modernize-use-override)
-  ~UnaryOp() = default;
+  ~UnaryOp() override = default;
   UnaryOp(UnaryOpType _type, Val* _out, Val* _in);
 
   UnaryOp(const UnaryOp* src, IrCloner* ir_cloner);
@@ -76,8 +75,7 @@ class TORCH_CUDA_CU_API UnaryOp : public Expr {
  */
 class TORCH_CUDA_CU_API BinaryOp : public Expr {
  public:
-  // NOLINTNEXTLINE(modernize-use-override)
-  ~BinaryOp() = default;
+  ~BinaryOp() override = default;
   BinaryOp(BinaryOpType _type, Val* _out, Val* _lhs, Val* _rhs);
 
   BinaryOp(const BinaryOp* src, IrCloner* ir_cloner);
@@ -117,8 +115,7 @@ class TORCH_CUDA_CU_API BinaryOp : public Expr {
  */
 class TORCH_CUDA_CU_API BroadcastOp : public Expr {
  public:
-  // NOLINTNEXTLINE(modernize-use-override)
-  ~BroadcastOp() = default;
+  ~BroadcastOp() override = default;
   BroadcastOp(Val* _out, Val* _in);
 
   BroadcastOp(const BroadcastOp* src, IrCloner* ir_cloner);
@@ -152,8 +149,7 @@ class TORCH_CUDA_CU_API BroadcastOp : public Expr {
  */
 class TORCH_CUDA_CU_API ReductionOp : public Expr {
  public:
-  // NOLINTNEXTLINE(modernize-use-override)
-  ~ReductionOp() = default;
+  ~ReductionOp() override = default;
   ReductionOp(BinaryOpType _reduction_op_type, Val* _init, Val* _out, Val* _in);
 
   ReductionOp(const ReductionOp* src, IrCloner* ir_cloner);
@@ -189,8 +185,7 @@ class TORCH_CUDA_CU_API ReductionOp : public Expr {
 
 class TORCH_CUDA_CU_API TernaryOp : public Expr {
  public:
-  // NOLINTNEXTLINE(modernize-use-override)
-  ~TernaryOp() = default;
+  ~TernaryOp() override = default;
   TernaryOp(TernaryOpType _type, Val* _out, Val* _in1, Val* _in2, Val* _in3);
 
   TernaryOp(const TernaryOp* src, IrCloner* ir_cloner);
@@ -371,8 +366,7 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
 class TORCH_CUDA_CU_API TensorDomain : public Val {
  public:
   TensorDomain() = delete;
-  // NOLINTNEXTLINE(modernize-use-override)
-  ~TensorDomain() = default;
+  ~TensorDomain() override = default;
 
   TensorDomain(const TensorDomain& other) = delete;
   TensorDomain& operator=(const TensorDomain& other) = delete;
@@ -564,8 +558,7 @@ class TORCH_CUDA_CU_API TensorDomain : public Val {
  */
 class TORCH_CUDA_CU_API Split : public Expr {
  public:
-  // NOLINTNEXTLINE(modernize-use-override)
-  ~Split() = default;
+  ~Split() override = default;
 
   Split(const Split& other) = delete;
   Split& operator=(const Split& other) = delete;
@@ -607,8 +600,7 @@ class TORCH_CUDA_CU_API Split : public Expr {
  */
 class TORCH_CUDA_CU_API Merge : public Expr {
  public:
-  // NOLINTNEXTLINE(modernize-use-override)
-  ~Merge() = default;
+  ~Merge() override = default;
   Merge(IterDomain* _out, IterDomain* _outer, IterDomain* _inner);
 
   Merge(const Merge* src, IrCloner* ir_cloner);
@@ -646,8 +638,7 @@ class TORCH_CUDA_CU_API Merge : public Expr {
  */
 class TORCH_CUDA_CU_API NamedScalar : public Val {
  public:
-  // NOLINTNEXTLINE(modernize-use-override)
-  ~NamedScalar() = default;
+  ~NamedScalar() override = default;
   NamedScalar() = delete;
 
   // NOLINTNEXTLINE(modernize-pass-by-value)
