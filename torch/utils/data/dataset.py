@@ -39,7 +39,7 @@ class DataChunk(List[T]):
         res = indent + "[" + ", ".join([str(i) for i in iter(self)]) + "]"
         return res
 
-    def __str__(self):
+    def __repr__(self):
         return self.as_str()
 
     def __iter__(self) -> Iterator[T]:
