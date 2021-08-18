@@ -42,6 +42,7 @@ import torch.utils.data.sharding
 from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.utils.data import (
     DataLoader,
+    DataChunk,
     IterDataPipe,
     MapDataPipe,
     RandomSampler,
@@ -72,7 +73,7 @@ except ImportError:
     HAS_DILL = False
 skipIfNoDill = skipIf(not HAS_DILL, "no dill")
 
-T_co = TypeVar('T_co', covariant=True)
+T_co = TypeVar("T_co", covariant=True)
 
 
 def create_temp_dir_and_files():
@@ -108,8 +109,58 @@ def create_temp_dir_and_files():
             (temp_sub_dir, temp_sub_file1_name, temp_sub_file2_name)]
 
 
-class TestIterableDataPipeBasic(TestCase):
+class TestDataChunk(TestCase):
+    def setUp(self):
+        self.elements = list(range(10))
+        random.shuffle(self.elements)
+        self.chunk: DataChunk[int] = DataChunk(self.elements)
 
+    def test_getitem(self):
+        for i in range(10):
+            self.assertEqual(self.elements[i], self.chunk[i])
+
+    def test_iter(self):
+        for ele, dc in zip(self.elements, iter(self.chunk)):
+            self.assertEqual(ele, dc)
+
+    def test_len(self):
+        self.assertEqual(len(self.elements), len(self.chunk))
+
+    def test_as_string(self):
+        self.assertEqual(str(self.chunk), str(self.elements))
+
+        batch = [self.elements] * 3
+        chunks: List[DataChunk[int]] = [DataChunk(self.elements)] * 3
+        self.assertEqual(str(batch), str(chunks))
+
+    def test_sort(self):
+        chunk: DataChunk[int] = DataChunk(self.elements)
+        chunk.sort()
+        self.assertTrue(isinstance(chunk, DataChunk))
+        for i, d in enumerate(chunk):
+            self.assertEqual(i, d)
+
+    def test_reverse(self):
+        chunk: DataChunk[int] = DataChunk(self.elements)
+        chunk.reverse()
+        self.assertTrue(isinstance(chunk, DataChunk))
+        for i in range(10):
+            self.assertEqual(chunk[i], self.elements[9 - i])
+
+    def test_random_shuffle(self):
+        elements = list(range(10))
+        chunk: DataChunk[int] = DataChunk(elements)
+
+        rng = random.Random(0)
+        rng.shuffle(chunk)
+
+        rng = random.Random(0)
+        rng.shuffle(elements)
+
+        self.assertEqual(chunk, elements)
+
+
+class TestIterableDataPipeBasic(TestCase):
     def setUp(self):
         ret = create_temp_dir_and_files()
         self.temp_dir = ret[0][0]
@@ -140,7 +191,6 @@ class TestIterableDataPipeBasic(TestCase):
             count = count + 1
             self.assertTrue((pathname in self.temp_files) or (pathname in self.temp_sub_files))
         self.assertEqual(count, len(self.temp_files) + len(self.temp_sub_files))
-
 
     def test_loadfilesfromdisk_iterable_datapipe(self):
         # test import datapipe class directly
@@ -215,7 +265,6 @@ class TestIterableDataPipeBasic(TestCase):
             with open(temp_file, 'rb') as f:
                 self.assertEqual(data_ref[1].read(), f.read())
             data_ref[1].close()
-
 
     def test_routeddecoder_iterable_datapipe(self):
         temp_dir = self.temp_dir.name
@@ -697,56 +746,51 @@ class TestFunctionalIterDataPipe(TestCase):
             for i in unbatch_dp:
                 print(i)
 
-
     def test_bucket_batch_datapipe(self):
         input_dp = IDP(range(20))
         with self.assertRaises(AssertionError):
-            input_dp.bucket_batch(batch_size=0)
+            dp.iter.BucketBatcher(input_dp, batch_size=0)
 
         input_dp_nl = IDP_NoLen(range(20))
-        bucket_dp_nl = input_dp_nl.bucket_batch(batch_size=7)
+        bucket_dp_nl = dp.iter.BucketBatcher(input_dp_nl, batch_size=7)
         with self.assertRaisesRegex(TypeError, r"instance doesn't have valid length$"):
             len(bucket_dp_nl)
 
-        # Test Bucket Batch without sort_key
         def _helper(**kwargs):
-            arrs = list(range(100))
+            data_len = 100
+            arrs = list(range(data_len))
             random.shuffle(arrs)
             input_dp = IDP(arrs)
-            bucket_dp = input_dp.bucket_batch(**kwargs)
-            if kwargs["sort_key"] is None:
-                # BatchDataset as reference
-                ref_dp = input_dp.batch(batch_size=kwargs['batch_size'], drop_last=kwargs['drop_last'])
-                for batch, rbatch in zip(bucket_dp, ref_dp):
-                    self.assertEqual(batch, rbatch)
-            else:
-                bucket_size = bucket_dp.bucket_size
-                bucket_num = (len(input_dp) - 1) // bucket_size + 1
-                it = iter(bucket_dp)
-                for i in range(bucket_num):
-                    ref = sorted(arrs[i * bucket_size: (i + 1) * bucket_size])
-                    bucket: List = []
-                    while len(bucket) < len(ref):
-                        try:
-                            batch = next(it)
-                            bucket += batch
-                        # If drop last, stop in advance
-                        except StopIteration:
-                            break
-                    if len(bucket) != len(ref):
-                        ref = ref[:len(bucket)]
-                    # Sorted bucket
-                    self.assertEqual(bucket, ref)
+            bucket_dp = dp.iter.BucketBatcher(input_dp, **kwargs)
 
-        _helper(batch_size=7, drop_last=False, sort_key=None)
-        _helper(batch_size=7, drop_last=True, bucket_size_mul=5, sort_key=None)
+            self.assertEqual(len(bucket_dp), data_len // 3 if kwargs['drop_last'] else data_len // 3 + 1)
 
-        # Test Bucket Batch with sort_key
+            def _verify_bucket_sorted(bucket):
+                # Sort batch in a bucket
+                bucket = sorted(bucket, key=lambda x: x[0])
+                flat = [item for batch in bucket for item in batch]
+                # Elements in the bucket should be sorted
+                self.assertEqual(flat, sorted(flat))
+
+            batch_num = kwargs['batch_num'] if 'batch_num' in kwargs else 100
+            bucket = []
+            for idx, d in enumerate(bucket_dp):
+                self.assertEqual(d, sorted(d))
+                bucket.append(d)
+                if idx % batch_num == batch_num - 1:
+                    _verify_bucket_sorted(bucket)
+                    bucket = []
+            _verify_bucket_sorted(bucket)
+
         def _sort_fn(data):
-            return data
+            return sorted(data)
 
-        _helper(batch_size=7, drop_last=False, bucket_size_mul=5, sort_key=_sort_fn)
-        _helper(batch_size=7, drop_last=True, bucket_size_mul=5, sort_key=_sort_fn)
+        # In-batch shuffle
+        _helper(batch_size=3, drop_last=False, batch_num=5, sort_key=_sort_fn)
+        _helper(batch_size=3, drop_last=False, batch_num=2, bucket_num=2, sort_key=_sort_fn)
+        _helper(batch_size=3, drop_last=True, batch_num=2, sort_key=_sort_fn)
+        _helper(batch_size=3, drop_last=True, batch_num=2, bucket_num=2, sort_key=_sort_fn)
+
 
     def test_filter_datapipe(self):
         input_ds = IDP(range(10))
@@ -787,7 +831,8 @@ class TestFunctionalIterDataPipe(TestCase):
         for data, exp in zip(filter_dp, expected_dp1):
             self.assertEqual(data, exp)
 
-        filter_dp = input_ds.filter(nesting_level=-1, drop_empty_batches=False, filter_fn=_filter_fn, fn_kwargs={'val': 5})
+        filter_dp = input_ds.filter(nesting_level=-1, drop_empty_batches=False,
+                                    filter_fn=_filter_fn, fn_kwargs={'val': 5})
         expected_dp2: List[List[int]] = [[], [5, 6, 7, 8, 9]]
         self.assertEqual(len(list(filter_dp)), len(expected_dp2))
         for data, exp in zip(filter_dp, expected_dp2):
@@ -825,7 +870,6 @@ class TestFunctionalIterDataPipe(TestCase):
         self.assertEqual(len(list(filter_dp)), len(expected_dp6))
         for data2, exp2 in zip(filter_dp, expected_dp6):
             self.assertEqual(data2, exp2)
-
 
     def test_sampler_datapipe(self):
         input_dp = IDP(range(10))
@@ -1153,6 +1197,7 @@ class TestTyping(TestCase):
 
         class DP3(IterDataPipe[Tuple[T_co, str]]):
             r""" DataPipe without fixed type with __init__ function"""
+
             def __init__(self, datasource):
                 self.datasource = datasource
 
@@ -1168,6 +1213,7 @@ class TestTyping(TestCase):
 
         class DP4(IterDataPipe[tuple]):
             r""" DataPipe without __iter__ annotation"""
+
             def __iter__(self):
                 raise NotImplementedError
 
@@ -1177,6 +1223,7 @@ class TestTyping(TestCase):
 
         class DP5(IterDataPipe):
             r""" DataPipe without type annotation"""
+
             def __iter__(self) -> Iterator[str]:
                 raise NotImplementedError
 
@@ -1187,6 +1234,7 @@ class TestTyping(TestCase):
 
         class DP6(IterDataPipe[int]):
             r""" DataPipe with plain Iterator"""
+
             def __iter__(self) -> Iterator:
                 raise NotImplementedError
 
@@ -1205,7 +1253,6 @@ class TestTyping(TestCase):
 
         self.assertTrue(issubclass(DP8, IterDataPipe))
         self.assertTrue(DP8.type.param == Awaitable[str])
-
 
     def test_construct_time(self):
         class DP0(IterDataPipe[Tuple]):
@@ -1269,10 +1316,8 @@ class TestTyping(TestCase):
             with self.assertRaisesRegex(RuntimeError, r"Expected an instance as subtype"):
                 list(dp)
 
-
     def test_reinforce(self):
         T = TypeVar('T', int, str)
-
 
         class DP(IterDataPipe[T]):
             def __init__(self, ds):
@@ -1306,6 +1351,7 @@ class TestTyping(TestCase):
         with runtime_validation_disabled():
             self.assertEqual(list(d for d in dp), ds)
 
+
 class NumbersDataset(IterDataPipe):
     def __init__(self, size=10):
         self.size = size
@@ -1321,7 +1367,7 @@ class TestGraph(TestCase):
         numbers_dp = NumbersDataset(size=50)
         mapped_dp = numbers_dp.map(lambda x: x * 10)
         graph = torch.utils.data.graph.traverse(mapped_dp)
-        expected : Dict[Any, Any] = {mapped_dp: {numbers_dp: {}}}
+        expected: Dict[Any, Any] = {mapped_dp: {numbers_dp: {}}}
         self.assertEqual(expected, graph)
 
     # TODO(VitalyFedyunin): This test is incorrect because of 'buffer' nature
@@ -1376,6 +1422,7 @@ class TestSharding(TestCase):
             items.append(i)
 
         self.assertEqual(sorted(expected), sorted(items))
+
 
 if __name__ == '__main__':
     run_tests()
