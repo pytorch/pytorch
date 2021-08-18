@@ -453,28 +453,6 @@ class Tensor(torch._C._TensorBase):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.lu, (self,), self, pivot=pivot, get_infos=get_infos)
 
-        if not torch._jit_internal.is_scripting():
-            if self.requires_grad:
-                if not (self.size(-2) == self.size(-1) and (self.dtype.is_floating_point) or self.is_complex):
-                    raise ValueError(
-                        'lu.backward works only with batches of squared full-rank matrices'
-                        ' of floating or complex types.'
-                    )
-
-                from torch._autograd_functions import _LU
-                LU, pivots, infos = _LU.apply(self, pivot, get_infos)
-                if get_infos:
-                    return LU, pivots, infos
-                else:
-                    return LU, pivots
-        else:
-            if self.requires_grad:
-                raise RuntimeError(
-                    'Script and require gradients is not supported at the moment.'
-                    'If you just want to do the forward, use .detach()'
-                    'on the input before calling the function.'
-                )
-
         LU, pivots, infos = torch._lu_with_info(self, pivot=pivot, check_errors=(not get_infos))
         if get_infos:
             return LU, pivots, infos
@@ -993,8 +971,8 @@ class Tensor(torch._C._TensorBase):
             coalesced_self = self.coalesce()
             row_indices = coalesced_self.indices()[0]
             device = coalesced_self.values().device
-            arange = torch.arange(self.shape[0] + 1, dtype=row_indices.dtype, device=device)
-            crow_indices = torch.bucketize(arange, row_indices, out_int32=row_indices.dtype == torch.int32)
+            crow_indices = torch._convert_indices_from_coo_to_csr(
+                row_indices, self.shape[0], out_int32=row_indices.dtype == torch.int32)
             return torch.sparse_csr_tensor(crow_indices,
                                            coalesced_self.indices()[1].contiguous(),
                                            coalesced_self.values(),
