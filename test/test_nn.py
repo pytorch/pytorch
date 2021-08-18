@@ -13066,24 +13066,6 @@ class TestNNDeviceType(NNTestCase):
     @onlyOnCPUAndCUDA
     @dtypes(torch.float64, torch.complex128)
     def test_pad(self, device, dtype):
-        inputs = torch.randn(1, 3, 4, 4, device=device, dtype=dtype, requires_grad=True)
-        _assertGradAndGradgradChecks(self, lambda x: F.pad(x, (1, 1, 1, 1)), (inputs,),
-                                     nondet_tol=GRADCHECK_NONDET_TOL)
-        _assertGradAndGradgradChecks(self, lambda x: F.pad(x, (-1, 1, -2, 1)), (inputs,),
-                                     nondet_tol=GRADCHECK_NONDET_TOL)
-        _assertGradAndGradgradChecks(self, lambda x: F.pad(x, (-1, 1, -2, 1), value=2), (inputs,),
-                                     nondet_tol=GRADCHECK_NONDET_TOL)
-        self.assertTrue(gradcheck(lambda x: F.pad(x, (-1, 1, -2, 1), mode='replicate'), (inputs,),
-                                  nondet_tol=GRADCHECK_NONDET_TOL))
-        self.assertTrue(gradcheck(lambda x: F.pad(x, (-1, 1, -2, 1), mode='reflect'), (inputs,),
-                                  nondet_tol=GRADCHECK_NONDET_TOL))
-        self.assertTrue(gradcheck(lambda x: F.pad(x, (-1, 1, -2, 1), mode='circular'), (inputs,),
-                                  nondet_tol=GRADCHECK_NONDET_TOL))
-
-        inputs = torch.randn(1, 2, 3, 4, 4, device=device, dtype=dtype, requires_grad=True)
-        self.assertTrue(gradcheck(lambda x: F.pad(x, (1, 1, 1, 1, 1, 1), mode='replicate'), (inputs,),
-                                  nondet_tol=GRADCHECK_NONDET_TOL))
-
         # Assert assertion errors are raised for invalid circular padding values
         inputs = torch.randn(1, 1, 4, device=device, dtype=dtype, requires_grad=True)
         # Should raise error when trying to wrap around more than once
@@ -16571,9 +16553,11 @@ class TestNNDeviceType(NNTestCase):
                           lambda: nn.functional.multi_margin_loss(torch.randn(5, device=device),
                                                                   torch.zeros(3, device=device)))
 
-    def _test_bfloat16_ops(self, op, device, inp_dims=(), prec=1e-2):
+    def _test_bfloat16_ops(self, op, device, inp_dims=(), prec=1e-2, scale_factor=None):
         # fp32 compute
         input1 = torch.randn(inp_dims, dtype=torch.float32, device=device, requires_grad=True)
+        if scale_factor is not None:
+            input1 = (torch.rand(inp_dims, dtype=torch.bfloat16, device=device) * scale_factor).float().requires_grad_()
         out1 = op(input1)
         grad_input1 = torch.randn_like(out1, device=device)
         out1.backward(grad_input1)
@@ -16585,8 +16569,8 @@ class TestNNDeviceType(NNTestCase):
         out2 = op_bfp16(input2)
         out2.backward(grad_input2)
 
-        self.assertEqual(out1, out2, atol=prec, rtol=0, exact_dtype=False)
-        self.assertEqual(input1.grad.data, input2.grad.data, atol=prec, rtol=0, exact_dtype=False)
+        self.assertEqual(out1, out2, atol=prec, rtol=prec, exact_dtype=False)
+        self.assertEqual(input1.grad.data, input2.grad.data, atol=prec, rtol=prec, exact_dtype=False)
 
     @onlyCUDA
     def test_activations_bfloat16(self, device):
@@ -16611,6 +16595,8 @@ class TestNNDeviceType(NNTestCase):
     def test_softmax_bfloat16(self, device):
         for dim in [0, 1, 2, 3]:
             self._test_bfloat16_ops(torch.nn.Softmax(dim=dim), device, inp_dims=(16, 33, 15, 16), prec=1e-2)
+            # test softmax with large input value which casues exp() to overflow
+            self._test_bfloat16_ops(torch.nn.Softmax(dim=dim), device, inp_dims=(16, 33, 15, 16), prec=0.05, scale_factor=1000.0)
 
     @onlyCUDA
     @skipCUDAIfRocm

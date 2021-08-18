@@ -16,7 +16,6 @@ from ..qconfig import (
 from .graph_module import (
     is_observed_standalone_module,
 )
-from ..utils import get_qconfig_dtypes
 
 from typing import Any, Dict, List, Callable, Optional, Tuple, Set
 
