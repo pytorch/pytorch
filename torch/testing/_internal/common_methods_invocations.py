@@ -2305,6 +2305,44 @@ def sample_inputs_conv_transpose2d(op_info, device, dtype, requires_grad, **kwar
 
     return list(generator())
 
+
+def sample_inputs_conv2d(op_info, device, dtype, requires_grad, jit_fail_sample=False, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    # Ordered as shapes for input, weight, bias
+    # and a dict of values of (stride, padding, groups, dilation)
+    if jit_fail_sample:
+        cases = (
+            ((1, 4, 5, 5), (3, 4, 3, 3), None, {}),
+        )
+    else:
+        cases = (
+            ((1, 3, 4, 4), (3, 3, 3, 3), (3,),
+             {'stride': (2, 2), 'padding': 2, 'groups': 1}),
+            ((2, 4, 8, 8), (2, 2, 3, 3), (2,),
+             {'stride': (2, 2), 'padding': (2, 1), 'groups': 2, 'dilation': (4, 4)}),
+            ((1, 4, 5, 5), (1, 4, 2, 3), (1,),
+             {'stride': 2, 'padding': 1, 'groups': 1, 'dilation': (2, 3)}),
+            ((1, 4, 5, 5), (1, 4, 2, 3), (1,),
+             {'stride': 2, 'padding': 1, 'groups': 1, 'dilation': (2, 3)}),
+            ((1, 2, 4, 3), (4, 2, 3, 4), None,
+             {'stride': 2, 'padding': 1, 'groups': 1}),
+            ((1, 4, 5, 5), (1, 4, 2, 3), (1,),
+             {'stride': 2, 'padding': "valid"}),
+            ((1, 4, 5, 5), (1, 4, 2, 3), (1,),
+             {'stride': 1, 'padding': "same", 'dilation': 3}),
+        )
+
+    def generator():
+        for input_shape, weight, bias, kwargs in cases:
+            yield SampleInput(make_arg(input_shape), args=(
+                make_arg(weight),
+                make_arg(bias) if bias is not None else bias
+            ), kwargs=kwargs)
+
+    return list(generator())
+
+
 def sample_inputs_hardswish(self, device, dtype, requires_grad):
     N = 5
     # make sure we are testing -3 -> 3 range. default is -10 -> 10 so maybe unnecessary ?
@@ -6978,6 +7016,27 @@ op_db: List[OpInfo] = [
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1.3e-06), }),
                    'TestCommon', 'test_variant_consistency_eager', device_type='cuda')],
+           skips=(
+               # RuntimeError: !lhs.isAliasOf(rhs)INTERNAL ASSERT FAILED at
+               # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":104, please report a bug to PyTorch.
+               SkipInfo('TestJit', 'test_variant_consistency_jit'),
+           ),
+           supports_out=False,),
+    # Added 2 entries for conv2d as for a particular sample,
+    # JIT test fails and CPU kernel surprisingly supports additional set of dtypes.
+    OpInfo('conv2d',
+           aliases=('nn.functional.conv2d',),
+           dtypesIfCPU=floating_types_and(torch.int64),
+           dtypesIfCUDA=floating_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
+           sample_inputs_func=partial(sample_inputs_conv2d),
+           supports_out=False,),
+    OpInfo('conv2d',
+           variant_test_name='jit_fail',
+           aliases=('nn.functional.conv2d',),
+           # CPU surprisingly supports more dtypes in this case.
+           dtypesIfCPU=all_types_and(torch.bfloat16),
+           dtypesIfCUDA=floating_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
+           sample_inputs_func=partial(sample_inputs_conv2d, jit_fail_sample=True),
            skips=(
                # RuntimeError: !lhs.isAliasOf(rhs)INTERNAL ASSERT FAILED at
                # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":104, please report a bug to PyTorch.
