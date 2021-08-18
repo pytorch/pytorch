@@ -1530,7 +1530,7 @@ class Precompute:
         # should replace which kernel arguments.
         replace = {}
         for raw_replace_item in src:
-            assert instance(raw_replace_item, str)
+            assert isinstance(raw_replace_item, str)
 
             arg, with_list_raw = raw_replace_item.split(' -> ')
             with_list = with_list_raw.split(',')
