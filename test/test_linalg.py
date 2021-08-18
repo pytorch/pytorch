@@ -3734,7 +3734,7 @@ class TestLinalg(TestCase):
         a = torch.empty(0, 0, 1, 2, 3, 0, dtype=dtype, device=device)
         b = torch.empty(a.shape[:2], dtype=dtype, device=device)
         x = torch.linalg.tensorsolve(a, b)
-        self.assertEqual(torch.tensordot(a, x, dims=len(x.shape)), b)
+        self.assertEqual(torch.linalg.tensordot(a, x, dims=len(x.shape)), b)
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
@@ -7936,30 +7936,30 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     def test_tensordot(self, device):
         a = torch.arange(60., device=device).reshape(3, 4, 5)
         b = torch.arange(24., device=device).reshape(4, 3, 2)
-        c = torch.tensordot(a, b, dims=([1, 0], [0, 1])).cpu()
+        c = torch.linalg.tensordot(a, b, dims=([1, 0], [0, 1])).cpu()
         cn = torch.from_numpy(np.tensordot(a.cpu().numpy(), b.cpu().numpy(),
                                            axes=([1, 0], [0, 1])))
         self.assertEqual(c, cn)
 
         cout = torch.zeros((5, 2), device=device)
-        torch.tensordot(a, b, dims=([1, 0], [0, 1]), out=cout).cpu()
+        torch.linalg.tensordot(a, b, dims=([1, 0], [0, 1]), out=cout).cpu()
         self.assertEqual(c, cout)
 
         a = torch.randn(2, 3, 4, 5, device=device)
         b = torch.randn(4, 5, 6, 7, device=device)
-        c = torch.tensordot(a, b, dims=2).cpu()
+        c = torch.linalg.tensordot(a, b, dims=2).cpu()
         cn = torch.from_numpy(np.tensordot(a.cpu().numpy(), b.cpu().numpy(),
                                            axes=2))
 
         with self.assertRaisesRegex(RuntimeError, "expects dims >= 0"):
-            torch.tensordot(a, b, dims=-1)
+            torch.linalg.tensordot(a, b, dims=-1)
 
         self.assertEqual(c, cn)
-        c = torch.tensordot(a, b).cpu()
+        c = torch.linalg.tensordot(a, b).cpu()
         cn = torch.from_numpy(np.tensordot(a.cpu().numpy(), b.cpu().numpy()))
         self.assertEqual(c, cn)
 
-        a = torch.tensordot(torch.tensor(0.), torch.tensor(0.), 0)
+        a = torch.linalg.tensordot(torch.tensor(0.), torch.tensor(0.), 0)
         an = torch.from_numpy(np.tensordot(np.zeros((), dtype=np.float32), np.zeros((), dtype=np.float32), 0))
         self.assertEqual(a, an)
 

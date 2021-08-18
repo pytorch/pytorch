@@ -13,6 +13,7 @@ from ._jit_internal import _overload as overload
 
 Tensor = torch.Tensor
 from torch import _VF
+from torch._C import _linalg
 
 __all__ = [
     'atleast_1d',
@@ -957,9 +958,9 @@ def tensordot(a, b, dims=2, out: Optional[torch.Tensor] = None):  # noqa: F811
         dims_b = list(range(dims))
 
     if out is None:
-        return _VF.tensordot(a, b, dims_a, dims_b)  # type: ignore[attr-defined]
+        return _linalg.linalg_tensordot(a, b, dims_a, dims_b)  # type: ignore[attr-defined]
     else:
-        return _VF.tensordot(a, b, dims_a, dims_b, out=out)  # type: ignore[attr-defined]
+        return _linalg.linalg_tensordot(a, b, dims_a, dims_b, out=out)  # type: ignore[attr-defined]
 
 def cartesian_prod(*tensors):
     """Do cartesian product of the given sequence of tensors. The behavior is similar to

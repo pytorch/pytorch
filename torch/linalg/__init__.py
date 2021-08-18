@@ -2036,3 +2036,5 @@ Examples::
     >>> torch.dist(Q.transpose(-2, -1) @ Q, torch.eye(4))
     tensor(6.2158e-07)
 """)
+
+tensordot = torch.functional.tensordot

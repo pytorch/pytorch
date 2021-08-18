@@ -608,9 +608,18 @@ Tensor bilinear(const Tensor& input1, const Tensor& input2, const Tensor& weight
   return output;
 }
 
+// Alias
+Tensor tensordot(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, IntArrayRef dims2) {
+    return at::native::linalg_tensordot(input1, input2, dims1, dims2);
+}
+
+Tensor &tensordot_out(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, IntArrayRef dims2, Tensor& result) {
+    return at::native::linalg_tensordot_out(input1, input2, dims1, dims2, result);
+}
+
 // implements tensordot, a matrix-multiplication-like contraction, but the dimensions given
 // in the two dimension lists
-Tensor tensordot(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, IntArrayRef dims2) {
+Tensor linalg_tensordot(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, IntArrayRef dims2) {
   TORCH_CHECK(dims1.size() == dims2.size(), "both dimension lists should have same length");
   int64_t csize = 1;  // total size of the contracted dimensions
   Tensor t1 = input1;
@@ -666,8 +675,8 @@ Tensor tensordot(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, 
   return at::mm(t1, t2).reshape(rsizes);
 }
 
-Tensor &tensordot_out(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, IntArrayRef dims2, Tensor& result) {
-  Tensor result_tmp = at::native::tensordot(input1, input2, dims1, dims2);
+Tensor &linalg_tensordot_out(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, IntArrayRef dims2, Tensor& result) {
+  Tensor result_tmp = at::native::linalg_tensordot(input1, input2, dims1, dims2);
   auto result_dtype = result_tmp.scalar_type();
   auto output_tensor_dtype = result.scalar_type();
   auto output_device = result.device();

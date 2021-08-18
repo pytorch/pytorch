@@ -8370,6 +8370,7 @@ op_db: List[OpInfo] = [
            dtypesIfROCM=floating_and_complex_types_and(torch.half, torch.bfloat16),
            safe_casts_outputs=True,
            supports_forward_ad=True,
+           aliases=('linalg.tensordot',),
            sample_inputs_func=sample_inputs_tensordot,
            skips=(
                # Currently failing due to an INTERNAL_ASSERT_FAILED error.

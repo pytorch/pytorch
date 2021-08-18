@@ -4238,13 +4238,12 @@
   dispatch:
     CPU, CUDA: tanh_out
 
+# Alias to linalg.tensordot
 - func: tensordot(Tensor self, Tensor other, int[] dims_self, int[] dims_other) -> Tensor
   variants: function
 
 - func: tensordot.out(Tensor self, Tensor other, int[] dims_self, int[] dims_other, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
-  dispatch:
-    CPU, CUDA: tensordot_out
 
 # TODO: namespace threshold in 'nn'
 - func: threshold(Tensor self, Scalar threshold, Scalar value) -> Tensor
@@ -10513,6 +10512,16 @@
 
 - func: linalg_multi_dot.out(Tensor[] tensors, *, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
+
+- func: linalg_tensordot(Tensor self, Tensor other, int[] dims_self, int[] dims_other) -> Tensor
+  python_module: linalg
+  variants: function
+
+- func: linalg_tensordot.out(Tensor self, Tensor other, int[] dims_self, int[] dims_other, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
+  variants: function
+  dispatch:
+    CPU, CUDA: linalg_tensordot_out
 
 ## Functions that are only for testing
 # It is undocumented and should not be used outside of tests.
