@@ -2075,13 +2075,13 @@ TEST(InlinedCallStackTest, BlockAnnotation) {
       for (Block* block : n->blocks()) {
         for (Node* if_node : block->nodes()) {
           if (if_node->kind() == aten::add) {
-            for (const auto e : if_node->callstack().value()->vec()) {
+            for (const auto& e : if_node->callstack().value()->vec()) {
               add_ss << std::get<1>(e);
             }
             add_ss << if_node->sourceRange();
           }
           if (if_node->kind() == aten::mul) {
-            for (const auto e : if_node->callstack().value()->vec()) {
+            for (const auto& e : if_node->callstack().value()->vec()) {
               mul_ss << std::get<1>(e);
             }
             mul_ss << if_node->sourceRange();
@@ -2100,6 +2100,49 @@ TEST(InlinedCallStackTest, BlockAnnotation) {
   ASSERT_NE(
       mul_ss.str().find("return self.A0.forward(x, y, z)"), std::string::npos);
   ASSERT_NE(mul_ss.str().find("return x * y"), std::string::npos);
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(InlinedCallStackTest, SelfCallMethods) {
+  Module a("A");
+  a.define(R"(
+    def my_new_method(self, x):
+      return x * 3
+    def forward_impl_(self, x, y):
+      return self.my_new_method(x) + y
+    def forward(self, x, y):
+      y = y + 2
+      return self.forward_impl_(x, y)
+  )");
+  Module b("B");
+  b.define(R"(
+    def forward(self, x):
+      return x + 2
+  )");
+  Module c("C");
+  c.register_module("A0", a);
+  c.register_module("B0", b);
+  c.define(R"(
+    def call_b(self, x):
+      return self.B0.forward(x)
+    def forward(self, x, y):
+      return self.A0.forward(x, y) + self.call_b(x)
+  )");
+
+  auto graph = c.get_method("forward").function().optimized_graph();
+  std::unordered_map<std::string, size_t> module_hierarchies;
+  for (Node* n : graph->nodes()) {
+    auto hierarchy = torch::jit::utils::getNodesModuleHierarchy(*n);
+    if (module_hierarchies.count(hierarchy) == 0) {
+      module_hierarchies[hierarchy] = 0;
+    }
+    module_hierarchies[hierarchy] += 1;
+  }
+  ASSERT_EQ(module_hierarchies["A0(A)"], 2);
+  ASSERT_EQ(module_hierarchies["A0(A).SELF(A).SELF(A)"], 2);
+  ASSERT_EQ(module_hierarchies["A0(A).SELF(A)"], 1);
+  ASSERT_EQ(module_hierarchies["SELF(C)"], 1);
+  ASSERT_EQ(module_hierarchies["SELF(C).B0(B)"], 1);
 }
 
 TEST(AutogradSymbolsTest, Basic) {
@@ -2425,6 +2468,111 @@ TEST(ProfilerDisableInCallbackTest, Basic) {
   torch::autograd::profiler::disableProfilerLegacy(std::move(opts));
 }
 
+TEST(RecordDebugHandles, Basic) {
+  // Enable the profiler in this thread
+  const std::set<torch::autograd::profiler::ActivityType> activities(
+      {torch::autograd::profiler::ActivityType::CPU});
+  torch::autograd::profiler::prepareProfiler(
+      torch::autograd::profiler::ProfilerConfig(
+          torch::autograd::profiler::ProfilerState::KINETO, false, false),
+      activities);
+  torch::autograd::profiler::enableProfiler(
+      torch::autograd::profiler::ProfilerConfig(
+          torch::autograd::profiler::ProfilerState::KINETO, false, false),
+      activities);
+  {
+    RECORD_EDGE_SCOPE_WITH_DEBUG_HANDLE_AND_INPUTS("my_function", 42, {});
+    float x{5.9999}, y{2.1212};
+    float z = x / y;
+  }
+  {
+    RECORD_USER_SCOPE_WITH_INPUTS("not_my_function", {});
+    float x{5.9999}, y{2.1212};
+    float z = x / y;
+  }
+  auto profiler_results_ptr = torch::autograd::profiler::disableProfiler();
+  const auto& kineto_events = profiler_results_ptr->events();
+  size_t my_events{0};
+  for (const auto& e : kineto_events) {
+    if (e.name() == "my_function") {
+      ASSERT_EQ(e.debugHandle(), 42);
+      my_events++;
+    } else if (e.name() == "not_my_function") {
+      ASSERT_EQ(e.debugHandle(), -1);
+      my_events++;
+    }
+  }
+  ASSERT_EQ(my_events, 2);
+}
+
+TEST(RecordDebugHandles, ScopedCallbacks) {
+  // Enable the profiler in this thread
+  torch::autograd::profiler::prepareProfiler(
+      torch::autograd::profiler::ProfilerConfig(
+          torch::autograd::profiler::ProfilerState::KINETO, false, false),
+      {torch::autograd::profiler::ActivityType::CPU});
+  torch::autograd::profiler::enableProfiler(
+      torch::autograd::profiler::ProfilerConfig(
+          torch::autograd::profiler::ProfilerState::KINETO, false, false),
+      {torch::autograd::profiler::ActivityType::CPU});
+
+  {
+    auto a = torch::rand({128, 128});
+    auto b = torch::rand({128, 128});
+    auto c = a + b;
+  }
+  auto profiler_results_ptr = torch::autograd::profiler::disableProfiler();
+  ASSERT_TRUE(profiler_results_ptr->events().size() > 0);
+
+  // Enable the profiler in this thread
+  torch::autograd::profiler::prepareProfiler(
+      torch::autograd::profiler::ProfilerConfig(
+          torch::autograd::profiler::ProfilerState::KINETO, false, false),
+      {torch::autograd::profiler::ActivityType::CPU});
+  torch::autograd::profiler::enableProfiler(
+      torch::autograd::profiler::ProfilerConfig(
+          torch::autograd::profiler::ProfilerState::KINETO, false, false),
+      {torch::autograd::profiler::ActivityType::CPU},
+      {at::RecordScope::LITE_INTERPRETER});
+  {
+    auto a = torch::rand({128, 128});
+    auto b = torch::rand({128, 128});
+    auto c = a + b;
+  }
+  profiler_results_ptr = torch::autograd::profiler::disableProfiler();
+  ASSERT_TRUE(profiler_results_ptr->events().size() == 0);
+
+  torch::autograd::profiler::prepareProfiler(
+      torch::autograd::profiler::ProfilerConfig(
+          torch::autograd::profiler::ProfilerState::KINETO, false, false),
+      {torch::autograd::profiler::ActivityType::CPU});
+  torch::autograd::profiler::enableProfiler(
+      torch::autograd::profiler::ProfilerConfig(
+          torch::autograd::profiler::ProfilerState::KINETO, false, false),
+      {torch::autograd::profiler::ActivityType::CPU},
+      {at::RecordScope::LITE_INTERPRETER});
+  {
+    RECORD_EDGE_SCOPE_WITH_DEBUG_HANDLE_AND_INPUTS("my_function", 42, {});
+    auto a = torch::rand({128, 128});
+    auto b = torch::rand({128, 128});
+    auto c = a + b;
+  }
+  {
+    RECORD_USER_SCOPE_WITH_INPUTS("not_my_function", {});
+    auto a = torch::rand({128, 128});
+    auto b = torch::rand({128, 128});
+    auto c = a + b;
+  }
+  profiler_results_ptr = torch::autograd::profiler::disableProfiler();
+  const auto& kineto_events = profiler_results_ptr->events();
+  for (const auto& e : kineto_events) {
+    if (e.name() == "my_function") {
+      ASSERT_EQ(e.debugHandle(), 42);
+    }
+  }
+  ASSERT_TRUE(profiler_results_ptr->events().size() == 1);
+}
+
 TEST(IValueKWargsTest, Basic) {
   const auto text = R"(
     def foo(a : int, b : int, c : int = 4):
@@ -2489,6 +2637,10 @@ TEST(ComputeFlopsTest, Basic) {
   extra_args["mat1_size"] = at::IValue(at::IntArrayRef(mat1_sizes));
   extra_args["mat2_size"] = at::IValue(at::IntArrayRef(mat2_sizes));
   flops = computeFlops(std::string("aten::mm"), extra_args);
+  ASSERT_EQ(flops, 43200);
+
+  // Test aten::addmm
+  flops = computeFlops(std::string("aten::addmm"), extra_args);
   ASSERT_EQ(flops, 43200);
 
   // Test mm out of range
