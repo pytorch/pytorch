@@ -35,14 +35,9 @@ class TORCH_API Stmt : public std::enable_shared_from_this<Stmt> {
 
  protected:
   static void set_parent(StmtPtr s, Stmt* new_parent) {
-    TORCH_INTERNAL_ASSERT(!s->parent_ || !new_parent);
+    TORCH_INTERNAL_ASSERT(!s->parent_ || !new_parent || s->parent_ == new_parent);
     s->parent_ = new_parent;
   }
-  //   template <typename Derived>
-  //   std::shared_ptr<Derived> shared_from_base()
-  //   {
-  //         return std::static_pointer_cast<Derived>(shared_from_this());
-  //   }
   std::shared_ptr<Stmt> getptr() {
     return shared_from_this();
   }
@@ -59,7 +54,7 @@ class StmtNode : public Stmt {
  public:
   using StmtNodeBase = StmtNode<Op>;
   void accept(IRVisitor* visitor) override {
-    auto op_ptr = std::static_pointer_cast<Op>(getptr());
+    auto op_ptr = static_to<Op>(getptr());
     visitor->visit(op_ptr);
   }
   StmtPtr accept_mutator(IRMutator* mutator) override;
@@ -68,7 +63,7 @@ class StmtNode : public Stmt {
 
 template <class Op>
 StmtPtr StmtNode<Op>::accept_mutator(IRMutator* mutator) {
-  auto op_ptr = std::static_pointer_cast<Op>(getptr());
+  auto op_ptr = static_to<Op>(getptr());
   return mutator->mutate(op_ptr);
 }
 

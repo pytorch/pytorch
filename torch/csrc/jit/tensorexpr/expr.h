@@ -69,6 +69,12 @@ class TORCH_API Expr : public std::enable_shared_from_this<Expr> {
 
   void set_expr_parent(Expr* new_parent);
   void set_stmt_parent(Stmt* new_parent);
+  Expr* get_expr_parent() const {
+    return expr_parent_;
+  }
+  Stmt* get_stmt_parent() const {
+    return stmt_parent_;
+  }
 
  protected:
   Expr* getweakptr() {
