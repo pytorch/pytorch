@@ -41,7 +41,6 @@ struct FunctionExtractor {
 
   using ScopeCtxPtr = ScopeContext*;
   using scope_ctx_map = std::unordered_map<ScopePtr, ScopeCtxPtr>;
-  using scope_ctx_list = std::vector<ScopeContext>;
 
   struct FunctionContext {
     FunctionContext(
@@ -88,9 +87,6 @@ struct FunctionExtractor {
   scope_ctx_map PartitionNodesByScope(const std::shared_ptr<Graph>& graph);
   static std::unordered_map<ScopePtr, scope_list> PartitionIdenticalScopes(
       scope_ctx_map& scope_ctxs);
-  static func_ctx_map GenFuncCtx(
-      const std::unordered_map<ScopePtr, scope_list>&,
-      scope_ctx_map& scope_ctxs);
   static scope_list SortScopesByMaxDepth(
       std::unordered_map<ScopePtr, scope_list>&);
   Node* CreateFunctionDefNode(
@@ -104,7 +100,6 @@ struct FunctionExtractor {
       const std::shared_ptr<Graph>& graph,
       const std::string& domain_name,
       const std::string& func_name);
-  static void ReplaceNodesWithFunctionNode();
 
   static void DebugPrintScopeContexts(const scope_ctx_map&);
   static void DebugPrintGraphWithFunction(const std::shared_ptr<Graph>& g);
@@ -113,6 +108,9 @@ struct FunctionExtractor {
   std::shared_ptr<Graph> graph_;
   std::unordered_set<std::string> module_names_;
   std::unordered_set<std::string> param_names_;
+  // Track modules with same module name that are exported as different onnx
+  // local functions.
+  std::unordered_map<std::string, int> module_variant_count_;
   func_ctx_map func_ctxs_;
 };
 
@@ -656,8 +654,22 @@ void FunctionExtractor::ConvertScopeToFunction(
       func_ctx.scope_key_->name().toUnqualString());
   auto pos = module_class_name.rfind(".");
   TORCH_INTERNAL_ASSERT(pos != std::string::npos);
+
+  auto construct_unique_module_name = [&](std::string module_name) {
+    auto module_name_variant = module_variant_count_.find(module_name);
+    if (module_name_variant != module_variant_count_.end()) {
+      module_name =
+          module_name + "." + std::to_string(module_name_variant->second);
+    } else {
+      module_variant_count_[module_name] = 0;
+    }
+    module_variant_count_[module_name]++;
+    return module_name;
+  };
+
   const auto domain_name = module_class_name.substr(0, pos);
-  const auto func_name = module_class_name.substr(pos + 1);
+  const auto func_name =
+      construct_unique_module_name(module_class_name.substr(pos + 1));
 
   auto func_def_n =
       CreateFunctionDefNode(func_ctx, graph, domain_name, func_name);
@@ -811,7 +823,7 @@ void FunctionExtractor::HandleNoScopeNodes(
         "ONNX function extraction cannot determine the scope for node: ", *n);
   }
   TORCH_INTERNAL_ASSERT(
-      false,
+      no_scope_nlist.size() == 0,
       "ONNX function extraction cannot determine the scope for the above nodes.");
 }
 
@@ -994,22 +1006,6 @@ static bool HasSameAttribute(
   }
 
   return true;
-}
-
-FunctionExtractor::func_ctx_map FunctionExtractor::GenFuncCtx(
-    const std::unordered_map<ScopePtr, scope_list>& identical_scope_map,
-    scope_ctx_map& scope_ctxs) {
-  FunctionExtractor::func_ctx_map func_ctxs;
-
-  for (auto& it : identical_scope_map) {
-    const auto& scope_key = it.first;
-    const auto& scope_list = it.second;
-
-    func_ctxs.insert(std::make_pair(
-        scope_key, new FunctionContext(scope_key, scope_list, scope_ctxs)));
-  }
-
-  return func_ctxs;
 }
 
 scope_list FunctionExtractor::SortScopesByMaxDepth(
