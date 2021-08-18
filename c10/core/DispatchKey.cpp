@@ -65,6 +65,8 @@ const char* toString(DispatchKey t) {
 
     case DispatchKey::Python:
       return "Python";
+    case DispatchKey::PythonMode:
+      return "PythonMode";
 
     case DispatchKey::PrivateUse1:
       return "PrivateUse1";

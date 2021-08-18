@@ -21,6 +21,7 @@ ThreadLocalState::ThreadLocalState(bool keep_grad_mode)
   if (keep_grad_mode_) {
     grad_mode_enabled_ = GradMode::is_enabled();
   }
+  python_mode_state_ = at::impl::PythonModeTLS::get_state();
 #endif
   bumped_record_all_functions_ = at::checkRecordAllFunctions();
 }
@@ -32,6 +33,7 @@ void ThreadLocalState::setThreadLocalState(
   if (state.keep_grad_mode_) {
     GradMode::set_enabled(state.grad_mode_enabled_);
   }
+  at::impl::PythonModeTLS::set_state(state.python_mode_state_);
 #endif
 
   at::set_record_function_tls_(state.rf_tls_);

@@ -32,6 +32,7 @@
 
 #include <torch/library.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
+#include <torch/csrc/autograd/python_mode.h>
 
 
 #include <ATen/ATen.h>
@@ -82,7 +83,11 @@ void concrete_decref_fn(const c10::impl::PyInterpreter* self, PyObject* pyobj) {
 };
 
 c10::intrusive_ptr<TensorImpl> concrete_detach_fn(const c10::impl::PyInterpreter*, const c10::TensorImpl* self);
-void concrete_dispatch_fn(const c10::impl::PyInterpreter*, const c10::OperatorHandle& op, torch::jit::Stack* stack);
+void concrete_dispatch_fn(
+    const c10::impl::PyInterpreter*,
+    const c10::OperatorHandle& op,
+    torch::jit::Stack* stack,
+    const std::shared_ptr<TorchDispatchTypeObject>& type);
 
 class PyInterpreterHolder {
  public:
@@ -1479,7 +1484,19 @@ bool isPythonTensor(const Tensor& tensor) {
   return tensor.unsafeGetTensorImpl()->key_set().has(c10::DispatchKey::Python);
 }
 
-void concrete_dispatch_fn(const c10::impl::PyInterpreter*, const c10::OperatorHandle& op, torch::jit::Stack* stack) {
+// NOTE [dispatch_fn's type argument]
+// `type` is nullable and represents the PythonMode going on.
+// Right now we only support a single PythonMode, but in the future we could
+// change this to a stack of PythonModes.
+//
+// If `type` isn't null, then we consider the type for dispatch by prepending
+// it to the overloaded_args list. `handle_torch_funciton_no_python_arg_parser`
+// is responsible for doing overload resolution.
+void concrete_dispatch_fn(
+    const c10::impl::PyInterpreter*,
+    const c10::OperatorHandle& op,
+    torch::jit::Stack* stack,
+    const std::shared_ptr<TorchDispatchTypeObject>& type) {
   const auto& schema = op.schema();
   const auto num_returns = schema.returns().size();
 
@@ -1556,13 +1573,18 @@ void concrete_dispatch_fn(const c10::impl::PyInterpreter*, const c10::OperatorHa
   auto args = py::reinterpret_steal<py::object>(PyTuple_New(positional_default_start));
   py::dict kwargs;
 
+  if (type) {
+    append_overloaded_type(&overloaded_args,
+        std::static_pointer_cast<PythonTorchDispatchTypeObject>(type)->ptr());
+  }
+
   // Find overloaded tensors
   for (int64_t idx = 0; idx < arguments.size(); idx++) {
     const auto& ivalue = arguments[idx];
     if (ivalue.isTensor()) {
       const auto& tensor = ivalue.toTensor();
       if (isPythonTensor(tensor)) {
-        append_overloaded_arg(&overloaded_args, py::cast(tensor).ptr());
+        append_overloaded_tensor(&overloaded_args, py::cast(tensor).ptr());
       }
     } else if (ivalue.isList()) {
       const auto& list = ivalue.toListRef();
@@ -1571,7 +1593,7 @@ void concrete_dispatch_fn(const c10::impl::PyInterpreter*, const c10::OperatorHa
         if (nv.isTensor()) {
           const auto& tensor = nv.toTensor();
           if (isPythonTensor(tensor)) {
-            append_overloaded_arg(&overloaded_args, py::cast(tensor).ptr());
+            append_overloaded_tensor(&overloaded_args, py::cast(tensor).ptr());
           }
         }
       }
@@ -1621,7 +1643,7 @@ c10::intrusive_ptr<TensorImpl> concrete_detach_fn(const c10::impl::PyInterpreter
   Tensor self_t = Tensor(c10::intrusive_ptr<c10::TensorImpl, c10::UndefinedTensorImpl>::unsafe_reclaim_from_nonowning(const_cast<c10::TensorImpl*>(self)));
   auto self_p = py::reinterpret_steal<py::object>(THPVariable_Wrap(self_t));
   TORCH_INTERNAL_ASSERT(isPythonTensor(self_t));
-  append_overloaded_arg(&overloaded_args, self_p.ptr());
+  append_overloaded_tensor(&overloaded_args, self_p.ptr());
   auto args = py::reinterpret_steal<py::object>(PyTuple_New(1));
   PyTuple_SET_ITEM(args.ptr(), 0, self_p.release().ptr());
 
