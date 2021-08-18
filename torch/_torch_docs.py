@@ -3997,9 +3997,10 @@ for an efficient matrix-matrix multiplication.
 
 See `LAPACK documentation for geqrf`_ for further details.
 
-.. note::
-    See also :func:`torch.linalg.qr`, which computes Q and R matrices, and :func:`torch.linalg.lstsq`
-    with the ``driver="gels"`` option for a function that can solve matrix equations using a QR decomposition.
+.. seealso::
+
+        :func:`torch.linalg.qr`, which computes Q and R matrices, and :func:`torch.linalg.lstsq`
+        with the ``driver="gels"`` option for a function that can solve matrix equations using a QR decomposition.
 
 Args:
     input (Tensor): the input matrix
@@ -8647,8 +8648,9 @@ msort(input, *, out=None) -> Tensor
 Sorts the elements of the :attr:`input` tensor along its first dimension
 in ascending order by value.
 
-.. note:: `torch.msort(t)` is equivalent to `torch.sort(t, dim=0)[0]`.
-          See also :func:`torch.sort`.
+.. seealso::
+
+        :func:`torch.sort`; `torch.msort(t)` is equivalent to `torch.sort(t, dim=0)[0]`.
 
 Args:
     {input}
@@ -9566,9 +9568,9 @@ Selects values from :attr:`input` at the 1-dimensional indices from :attr:`indic
 Functions that return indices along a dimension, like :func:`torch.argmax` and :func:`torch.argsort`,
 are designed to work with this function. See the examples below.
 
-.. note::
-    This function is similar to NumPy's `take_along_axis`.
-    See also :func:`torch.gather`.
+.. seealso::
+        NumPy's `take_along_axis` which accepts an axis argument along which 1-D slices are taken.
+        :func:`torch.gather` which does not view the input as 1-D and accepts an additional argument that specifies the indexing dimension.
 
 Args:
     {input}
@@ -10496,11 +10498,9 @@ Example::
 .. function:: where(condition) -> tuple of LongTensor
    :noindex:
 
-``torch.where(condition)`` is identical to
-``torch.nonzero(condition, as_tuple=True)``.
+.. seealso::
 
-.. note::
-    See also :func:`torch.nonzero`.
+        :func:`torch.nonzero`; ``torch.nonzero(condition, as_tuple=True)`` is identical to ``torch.where(condition)``.
 """)
 
 add_docstr(torch.logdet,
