@@ -31,9 +31,8 @@ class NnapiBackend : public PyTorchBackendInterface {
   c10::impl::GenericDict compile(
       c10::IValue processed,
       c10::impl::GenericDict method_compile_spec) override {
-    auto dict = processed.toGenericDict();
-
     // Wrap procesed in dictionary: {"forward": processed}
+    auto dict = processed.toGenericDict();
     c10::Dict<c10::IValue, c10::IValue> handles(
         c10::StringType::get(), c10::AnyType::get());
     handles.insert("forward", dict);
@@ -105,7 +104,6 @@ class NnapiBackend : public PyTorchBackendInterface {
   // and cannot be passed through the handles dictionary
   std::unique_ptr<torch::nnapi::bind::NnapiCompilation> comp_;
   c10::List<at::Tensor> out_templates_;
-  mobile::Module shape_compute_module_;
 
   // Runs once per model initialization
   // Cannot be moved to compile(), because init() requires actual inputs
@@ -119,9 +117,9 @@ class NnapiBackend : public PyTorchBackendInterface {
     std::stringstream ss;
     auto shape_ptr = dict.at("shape_compute_module").toString();
     ss.str(*shape_ptr);
-    shape_compute_module_ = _load_for_mobile(ss);
+    auto shape_compute_module = _load_for_mobile(ss);
     out_templates_ =
-        shape_compute_module_.run_method("prepare", ser_model, inputs)
+        shape_compute_module.run_method("prepare", ser_model, inputs)
             .toTensorList();
 
     // Create and initialize NnapiComilation object
