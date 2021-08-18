@@ -13,7 +13,7 @@ from ._jit_internal import _overload as overload
 
 Tensor = torch.Tensor
 from torch import _VF
-from torch._C import _linalg
+from torch._C import _linalg  # type: ignore[attr-defined]
 
 __all__ = [
     'atleast_1d',
