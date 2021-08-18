@@ -6,6 +6,7 @@ import copy
 import operator
 import random
 import numbers
+import unittest
 
 import torch
 import numpy as np
@@ -21,7 +22,7 @@ from torch.testing import \
      integral_types_and, all_types, double_types)
 from .._core import _dispatch_dtypes
 from torch.testing._internal.common_device_type import \
-    (expectedFailure, onlyOnCPUAndCUDA, skipIf, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfNoCusolver,
+    (onlyOnCPUAndCUDA, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfNoCusolver,
      skipCPUIfNoLapack, skipCPUIfNoFFT, skipCUDAIfRocm, precisionOverride, toleranceOverride, tol)
 from torch.testing._internal.common_cuda import CUDA11OrLater, SM53OrLater, SM60OrLater
 from torch.testing._internal.common_utils import \
@@ -86,7 +87,7 @@ class SkipInfo(DecorateInfo):
             active_if: whether tests matching the above arguments should be skipped
             expected_failure: whether to assert that skipped tests fail
         """
-        decorator = expectedFailure(device_type) if expected_failure else skipIf(True, "Skipped!")
+        decorator = unittest.expectedFailure if expected_failure else unittest.skip("Skipped!")
         super().__init__(decorators=decorator, cls_name=cls_name, test_name=test_name,
                          device_type=device_type, dtypes=dtypes, active_if=active_if)
 
