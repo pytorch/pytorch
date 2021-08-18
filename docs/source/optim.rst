@@ -6,21 +6,21 @@ torch.optim
 How to use an optimizer
 -----------------------
 
-To use :mod:`torch.optim` you have to construct an optimizer object, that will hold
+To use :mod:`torch.optim`, you have to construct an optimizer object that will hold
 the current state and will update the parameters based on the computed gradients.
 
 Constructing it
 ^^^^^^^^^^^^^^^
 
-To construct an :class:`Optimizer` you have to give it an iterable containing the
-parameters (all should be :class:`~torch.autograd.Variable` s) to optimize. Then,
+To construct an :class:`Optimizer`, you have to give it an iterable containing the
+parameters (all of which should be :class:`~torch.autograd.Variable`s) to optimize. Then
 you can specify optimizer-specific options such as the learning rate, weight decay, etc.
 
 .. note::
 
     If you need to move a model to GPU via ``.cuda()``, please do so before
     constructing optimizers for it. Parameters of a model after ``.cuda()`` will
-    be different objects with those before the call.
+    be different objects than those before the call.
 
     In general, you should make sure that optimized parameters live in
     consistent locations when optimizers are constructed and used.
@@ -33,17 +33,17 @@ Example::
 Per-parameter options
 ^^^^^^^^^^^^^^^^^^^^^
 
-:class:`Optimizer` s also support specifying per-parameter options. To do this, instead
-of passing an iterable of :class:`~torch.autograd.Variable` s, pass in an iterable of
-:class:`dict` s. Each of them will define a separate parameter group, and should contain
-a ``params`` key, containing a list of parameters belonging to it. Other keys
+:class:`Optimizer`s also support specifying per-parameter options. To do this, instead
+of passing an iterable of :class:`~torch.autograd.Variable`s, pass in an iterable of
+:class:`dict`s. Each of them will define a separate parameter group and should contain
+a ``params`` key containing a list of parameters belonging to it. Other keys
 should match the keyword arguments accepted by the optimizers, and will be used
 as optimization options for this group.
 
 .. note::
 
     You can still pass options as keyword arguments. They will be used as
-    defaults, in the groups that didn't override them. This is useful when you
+    defaults in the groups that didn't override them. This is useful when you
     only want to vary a single option, while keeping all others consistent
     between parameter groups.
 
@@ -62,7 +62,7 @@ This means that ``model.base``'s parameters will use the default learning rate o
 Taking an optimization step
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-All optimizers implement a :func:`~Optimizer.step` method, that updates the
+All optimizers implement a :func:`~Optimizer.step` method that updates the
 parameters. It can be used in two ways:
 
 ``optimizer.step()``
@@ -145,7 +145,7 @@ How to adjust learning rate
 rate based on the number of epochs. :class:`torch.optim.lr_scheduler.ReduceLROnPlateau`
 allows dynamic learning rate reducing based on some validation measurements.
 
-Learning rate scheduling should be applied after optimizer's update; e.g., you
+Learning rate scheduling should be applied after the optimizer's update; e.g., you
 should write your code this way:
 
 Example::
@@ -184,7 +184,7 @@ Example::
         scheduler1.step()
         scheduler2.step()
 
-In many places in the documentation, we will use the following template to refer to schedulers
+In many places in the documentation, we will use the following template to refer to scheduler
 algorithms.
 
     >>> scheduler = ...
