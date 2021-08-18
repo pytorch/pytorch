@@ -392,7 +392,7 @@ def sort(g, self, dim, decending, out=None):
 
 @parse_args("v", "i", "i")
 def argsort(g, self, dim, decending):
-    values, indices = sym_help._sort_helper(g, self, dim, decending=decending)
+    values, indices = sym_help._argsort_helper(g, self, dim, decending=decending)
     return indices
 
 

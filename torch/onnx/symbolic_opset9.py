@@ -1995,7 +1995,7 @@ def argsort(g, self, dim, decending):
         dim_size = None
 
     if dim_size is None:
-        return _unimplemented("Sort", "input size not accessible")
+        return _unimplemented("ArgSort", "input size not accessible")
 
     values, indices = g.op("TopK", self, k_i=dim_size, axis_i=dim, outputs=2)
 
