@@ -2713,7 +2713,7 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
 
     if (is_block) {
       consumer_block->prepend_stmt(tmp_init);
-    } else{
+    } else {
       parent_block->insert_stmt_before(tmp_init, consumer);
     }
 
@@ -2734,7 +2734,7 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
 
     if (is_block) {
       consumer_block->append_stmt(tmp_store);
-    } else{
+    } else {
       parent_block->insert_stmt_after(tmp_store, consumer);
     }
 
@@ -2753,7 +2753,7 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
 
     if (is_block) {
       consumer_block->prepend_stmt(tmp_store);
-    } else{
+    } else {
       parent_block->insert_stmt_before(tmp_store, consumer);
     }
   }
