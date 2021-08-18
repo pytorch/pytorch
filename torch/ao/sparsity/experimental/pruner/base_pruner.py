@@ -1,4 +1,5 @@
 
+import warnings
 import abc
 import copy
 
@@ -8,11 +9,20 @@ from torch.nn.utils import parametrize
 
 from torch.nn.modules.container import ModuleDict, ModuleList
 
-from .parametrization import PruningParametrization, ActivationReconstruction, BiasHook
+from .parametrization import PruningParametrization, ZeroesParametrization, ActivationReconstruction, BiasHook
 
-SUPPORTED_MODULES = {
+SUPPORTED_MODULES = {  # added to config if None given
     nn.Linear,
-    nn.Conv2d
+    nn.Conv2d,
+    nn.BatchNorm2d,  # will need manual update to match conv2d
+}
+
+NEEDS_MANUAL_UPDATE = {  # if model contains these layers, user must provide pruned indices
+    nn.BatchNorm2d
+}
+
+NEEDS_ZEROS = {  # these layers should have pruned indices zero-ed, not removed
+    nn.BatchNorm2d
 }
 
 def _module_to_fqn(model, layer, prefix=''):
@@ -92,21 +102,27 @@ class BasePruner(abc.ABC):
             else:
                 module = config['module']
 
-            if getattr(module, 'mask', None) is None:
-                module.register_buffer('mask', torch.tensor(module.weight.shape[0]))
-            param = config.get('parametrization', PruningParametrization)
-            parametrize.register_parametrization(module, 'weight',
-                                                 param(module.mask),
-                                                 unsafe=True)
+            if not isinstance(module, tuple(NEEDS_ZEROS)):
+                # add pruning parametrization and forward hooks
+                if getattr(module, 'mask', None) is None:
+                    module.register_buffer('mask', torch.tensor(module.weight.shape[0]))
+                param = config.get('parametrization', PruningParametrization)
+                parametrize.register_parametrization(module, 'weight', param(module.mask), unsafe=True)
 
-            assert isinstance(module.parametrizations, ModuleDict)  # make mypy happy
-            assert isinstance(module.parametrizations.weight, ModuleList)
-            if isinstance(module, tuple(SUPPORTED_MODULES)):
-                self.activation_handles.append(module.register_forward_hook(
-                    ActivationReconstruction(module.parametrizations.weight[0])
-                ))
-            else:
-                raise NotImplementedError("This module type is not supported yet.")
+                assert isinstance(module.parametrizations, ModuleDict)  # make mypy happy
+                assert isinstance(module.parametrizations.weight, ModuleList)
+                if isinstance(module, tuple(SUPPORTED_MODULES)):
+                    self.activation_handles.append(module.register_forward_hook(
+                        ActivationReconstruction(module.parametrizations.weight[0])
+                    ))
+                else:
+                    raise NotImplementedError("This module type is not supported yet.")
+
+            else:  # needs zeros
+                if getattr(module, 'mask', None) is None:
+                    module.register_buffer('mask', torch.tensor(module.weight.shape[0]))
+                param = config.get('parametrization', ZeroesParametrization)
+                parametrize.register_parametrization(module, 'weight', param(module.mask), unsafe=True)
 
             if module.bias is not None:
                 module.register_parameter('_bias', nn.Parameter(module.bias.detach()))
@@ -143,6 +159,8 @@ class BasePruner(abc.ABC):
                     if type(child) in SUPPORTED_MODULES:
                         self.config.append(child)
                     else:
+                        if type(child) in NEEDS_MANUAL_UPDATE and also_prune_bias:
+                            warnings.warn(f"Models with {type(child)} layers must have pruned outputs provided by user.")
                         stack.append(child)
 
         for module_config in self.config:
@@ -178,6 +196,11 @@ class BasePruner(abc.ABC):
         raise NotImplementedError('`convert` is not implemented. Please, use '
                                   '`torch.ao.utils.convert` instead.')
 
+    def manual_mask_update(self, module, pruned_outputs):
+        r"""Updates mask of module with user-provided pruned outputs"""
+        param = module.parametrizations.weight[0]
+        param.pruned_outputs.update(pruned_outputs)
+
     def step(self, use_path=True):
         if not self.enable_mask_update:
             return
@@ -187,7 +210,10 @@ class BasePruner(abc.ABC):
                     module = _fqn_to_module(self.model, config['fqn'])
                 else:
                     module = config['module']
-                self.update_mask(module, **config)
+                if type(module) in NEEDS_MANUAL_UPDATE:
+                    warnings.warn(f"User must update mask of {type(module)} manually.")
+                else:
+                    self.update_mask(module, **config)
 
     @abc.abstractmethod
     def update_mask(self, layer, **kwargs):
