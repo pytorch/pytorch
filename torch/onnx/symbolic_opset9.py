@@ -2907,7 +2907,12 @@ def baddbmm(g, self, batch1, batch2, beta, alpha):
     return add(g, mul_a, mul_b)
 
 
-def meshgrid(g, tensor_list):
+@parse_args('v', 's')
+def meshgrid(g, tensor_list, indexing: Optional[str] = None):
+    if indexing is None:
+        indexing = 'ij'
+    elif indexing != 'ij':
+        raise ValueError(f'Unsupported indexing: {indexing}')
     tensors = [view(g, t, g.op("Constant", value_t=torch.LongTensor([-1]))) for t in sym_help._unpack_list(tensor_list)]
     tensors_shape = [g.op("Shape", t) for t in tensors]
     out_shape = g.op("Concat", *tensors_shape, axis_i=0)
