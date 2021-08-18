@@ -20,7 +20,9 @@ void Expr::set_expr_parent(Expr* new_parent) {
     return;
   }
   AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, SKIP_IMM);
-  TORCH_INTERNAL_ASSERT((!expr_parent_ && !stmt_parent_) || !new_parent || expr_parent_ == new_parent);
+  TORCH_INTERNAL_ASSERT(
+      (!expr_parent_ && !stmt_parent_) || !new_parent ||
+      expr_parent_ == new_parent);
   expr_parent_ = new_parent;
   stmt_parent_ = nullptr;
 }
@@ -32,7 +34,9 @@ void Expr::set_stmt_parent(Stmt* new_parent) {
     return;
   }
   AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, SKIP_IMM);
-  TORCH_INTERNAL_ASSERT((!expr_parent_ && !stmt_parent_) || !new_parent || stmt_parent_ == new_parent);
+  TORCH_INTERNAL_ASSERT(
+      (!expr_parent_ && !stmt_parent_) || !new_parent ||
+      stmt_parent_ == new_parent);
   expr_parent_ = nullptr;
   stmt_parent_ = new_parent;
 }

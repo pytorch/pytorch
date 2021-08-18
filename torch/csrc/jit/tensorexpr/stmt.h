@@ -35,7 +35,8 @@ class TORCH_API Stmt : public std::enable_shared_from_this<Stmt> {
 
  protected:
   static void set_parent(StmtPtr s, Stmt* new_parent) {
-    TORCH_INTERNAL_ASSERT(!s->parent_ || !new_parent || s->parent_ == new_parent);
+    TORCH_INTERNAL_ASSERT(
+        !s->parent_ || !new_parent || s->parent_ == new_parent);
     s->parent_ = new_parent;
   }
   std::shared_ptr<Stmt> getptr() {
