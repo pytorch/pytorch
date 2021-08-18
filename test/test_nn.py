@@ -17007,21 +17007,6 @@ class TestNNDeviceType(NNTestCase):
                 output_one_hot = m(input, target_one_hot)
                 self.assertEqual(output, output_one_hot)
 
-    def test_cross_entropy_label_smoothing_consistent_errors(self, device):
-        N, C = 10, 4
-        input = torch.randn(N, C, requires_grad=True, device=device)
-        target = torch.empty(N, dtype=torch.long, device=device).random_(0, C)
-
-        bad_target = torch.empty_like(input, device=device)
-        loss = nn.CrossEntropyLoss(label_smoothing=0.3)
-        with self.assertRaisesRegex(RuntimeError,
-                                    r'target must be specified as class indices to use label_smoothing'):
-            loss(input, bad_target)
-
-        loss = nn.CrossEntropyLoss(label_smoothing=0.3, ignore_index=1)
-        with self.assertRaisesRegex(RuntimeError, r'ignore_index is not supported to use label_smoothing'):
-            loss(input, target)
-
     def test_cross_entropy_label_smoothing_manual(self, device):
         input = torch.randn((1, 3), device=device)
         input_log_softmax = input.log_softmax(dim=-1)[0]
@@ -17029,9 +17014,10 @@ class TestNNDeviceType(NNTestCase):
         weights = [torch.tensor([4.0, 3.0, 1.0], device=device),
                    torch.ones(3, device=device), None]
         label_smoothings = [0.05, 0.1]
-        target_vals = torch.arange(0, 3, device=device)
-        for label_smoothing, target_val, weight in product(label_smoothings, target_vals, weights):
-            ce_loss_none = nn.CrossEntropyLoss(label_smoothing=label_smoothing, weight=weight, reduction='none')
+        target_vals = ignore_indices = torch.arange(0, 3, device=device)
+        for label_smoothing, target_val, weight, ignore_index in product(label_smoothings, target_vals, weights, ignore_indices):
+            ce_loss_none = nn.CrossEntropyLoss(
+                label_smoothing=label_smoothing, weight=weight, reduction='none', ignore_index=ignore_index)
 
             target = torch.tensor([target_val], device=device)
             output = ce_loss_none(input, target)
@@ -17040,24 +17026,29 @@ class TestNNDeviceType(NNTestCase):
                 # To have a uniformed way to compute the expected_value
                 weight = torch.ones(3, device=device)
 
-            not_target_indices_mask = (target_val != target_vals)
-            weighted_non_target = (
-                input_log_softmax[not_target_indices_mask] * weight[not_target_indices_mask])
+            if ignore_index != target_val:
+                not_target_indices_mask = (target_val != target_vals)
+                weighted_non_target = (
+                    input_log_softmax[not_target_indices_mask] * weight[not_target_indices_mask])
 
-            # y_k^ls = y_k * (1 - label_smoothing) + label_smoothing / n_classes
-            expected_value = -(
-                weight[target_val] * (1 - label_smoothing + label_smoothing / 3) * input_log_softmax[target_val]
-                + (label_smoothing / 3) * torch.sum(weighted_non_target)
-            )
+                # y_k^ls = y_k * (1 - label_smoothing) + label_smoothing / n_classes
+                expected_value = -(
+                    weight[target_val] * (1 - label_smoothing + label_smoothing / 3) * input_log_softmax[target_val]
+                    + (label_smoothing / 3) * torch.sum(weighted_non_target)
+                )
+            else:
+                expected_value = 0.0
             self.assertEqual(output, torch.tensor([expected_value], device=device))
 
             # sum returns the expected_value
-            ce_loss_sum = nn.CrossEntropyLoss(label_smoothing=label_smoothing, weight=weight, reduction='sum')
+            ce_loss_sum = nn.CrossEntropyLoss(
+                label_smoothing=label_smoothing, weight=weight, reduction='sum', ignore_index=ignore_index)
             output = ce_loss_sum(input, target)
             self.assertEqual(output, expected_value)
 
             # mean weights the value by weight
-            ce_loss_mean = nn.CrossEntropyLoss(label_smoothing=label_smoothing, weight=weight, reduction='mean')
+            ce_loss_mean = nn.CrossEntropyLoss(
+                label_smoothing=label_smoothing, weight=weight, reduction='mean', ignore_index=ignore_index)
             output = ce_loss_mean(input, target)
             self.assertEqual(output, expected_value / weight[target_val])
 
@@ -17086,7 +17077,34 @@ class TestNNDeviceType(NNTestCase):
                 reduction=reduction, label_smoothing=label_smoothing)
             output_with_index = loss(input, target)
 
-            self.assertEqual(output_with_prob, output_with_index, rtol=1e-5, atol=1e-6)
+            self.assertEqual(output_with_prob, output_with_index)
+
+    def test_cross_entropy_label_smoothing_with_probs(self, device):
+        N, C = 10, 4
+        ks = range(5)
+        reductions = ['none', 'mean', 'sum']
+        label_smoothings = [0.05, 0.15]
+
+        # Test with k-dimensional loss.
+        for k, label_smoothing in product(ks, label_smoothings):
+            other_dims = [torch.randint(2, 5, size=(1,)).item() for _ in range(k)]
+            input = torch.randn(N, C, *other_dims, device=device, requires_grad=True)
+            target = F.log_softmax(torch.randn(N, C, *other_dims, device=device), dim=1)
+
+            for reduction in reductions:
+                # use with label_smoothing
+                loss = nn.CrossEntropyLoss(reduction=reduction, label_smoothing=label_smoothing)
+                output_with_smoothing = loss(input, target)
+
+                # manually smoothing target
+                # class_proba^ls = class_proba * (1 - label_smoothing) +
+                #                  label_smoothing / n_classes
+                target_with_smoothing = target * (1 - label_smoothing) + label_smoothing / C
+                loss = nn.CrossEntropyLoss(reduction=reduction)
+                output_with_manual_smoothing = loss(input, target_with_smoothing)
+
+                self.assertEqual(output_with_smoothing, output_with_manual_smoothing)
+
 
     def test_softshrink_negative(self, device):
         input = torch.randn(5, device=device, requires_grad=True)

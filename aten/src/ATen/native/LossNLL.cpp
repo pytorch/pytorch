@@ -455,7 +455,8 @@ Tensor cross_entropy_loss_prob_target(
     const Tensor& self,
     const Tensor& target,
     const Tensor& weight,
-    int64_t reduction) {
+    int64_t reduction,
+    double label_smoothing) {
   const auto n_classes = self.size(1);
   TORCH_CHECK(
       !weight.defined() || (weight.dim() == 1 && weight.numel() == n_classes),
@@ -466,6 +467,13 @@ Tensor cross_entropy_loss_prob_target(
       weight.sizes());
 
   auto input = at::log_softmax(self, 1, self.scalar_type());
+
+  if (0 < label_smoothing && label_smoothing <= 1.0) {
+    input *= (target * (1 - label_smoothing) + label_smoothing / n_classes);
+  } else{
+    input *= target;
+  }
+
   if (weight.defined()) {
     // Expand weight to the correct number of dims for broadcasting with input / target
     auto weight_broadcast_shape = SmallBuffer<int64_t, 5>(input.dim());
@@ -475,22 +483,22 @@ Tensor cross_entropy_loss_prob_target(
 
     switch (reduction) {
       case Reduction::Mean:
-        return -(input * target * weight_).sum() / (input.numel() / input.size(1));
+        return -(input * weight_).sum() / (input.numel() / input.size(1));
       case Reduction::Sum:
-        return -(input * target * weight_).sum();
+        return -(input * weight_).sum();
       case Reduction::None:
-        return -(input * target * weight_).sum(1);
+        return -(input * weight_).sum(1);
       default:
         TORCH_CHECK(false, "Invalid reduction type encountered in cross_entropy: ", reduction);
     }
   } else {
     switch (reduction) {
       case Reduction::Mean:
-        return -(input * target).sum() / (input.numel() / input.size(1));
+        return -input.sum() / (input.numel() / input.size(1));
       case Reduction::Sum:
-        return -(input * target).sum();
+        return -input.sum();
       case Reduction::None:
-        return -(input * target).sum(1);
+        return -input.sum(1);
       default:
         TORCH_CHECK(false, "Invalid reduction type encountered in cross_entropy: ", reduction);
     }
@@ -502,10 +510,11 @@ Tensor cross_entropy_loss_label_smoothing(
     const Tensor& target,
     const Tensor& weight,
     int64_t reduction,
+    int64_t ignore_index,
     double label_smoothing) {
 
     auto input = at::log_softmax(self, 1, self.scalar_type());
-    auto nllloss = at::nll_loss_nd(input, target, weight, reduction);
+    auto nllloss = at::nll_loss_nd(input, target, weight, reduction, ignore_index);
     auto n_classes = input.size(1);
     auto batches = input.size(0);
 
@@ -521,6 +530,11 @@ Tensor cross_entropy_loss_label_smoothing(
       input *= weight_;
     }
     smooth_loss = -at::sum(input, 1);
+
+    if (ignore_index >= 0) {
+      auto ignore_mask = target.eq(ignore_index);
+      smooth_loss.masked_fill_(ignore_mask, 0.0);
+    }
 
     Tensor ret;
     switch (reduction) {
@@ -561,19 +575,16 @@ Tensor cross_entropy_loss(
     TORCH_CHECK(at::isFloatingType(target.scalar_type()),
         "Expected floating point type for target with class probabilities, got ", target.scalar_type());
     TORCH_CHECK(ignore_index < 0, "ignore_index is not supported for floating point target");
-    TORCH_CHECK(label_smoothing == 0.0, "target must be specified as class indices to use label_smoothing")
 
     // See [Note: hacky wrapper removal for optional tensor]
     c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight);
     const Tensor& weight_ = *weight_maybe_owned;
-    ret = cross_entropy_loss_prob_target(self, target, weight_, reduction);
-  } else if (0.0 < label_smoothing && label_smoothing < 1.0) {
-    TORCH_CHECK(ignore_index < 0, "ignore_index is not supported to use label_smoothing");
-
+    ret = cross_entropy_loss_prob_target(self, target, weight_, reduction, label_smoothing);
+  } else if (0.0 < label_smoothing && label_smoothing <= 1.0) {
     // See [Note: hacky wrapper removal for optional tensor]
     c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight);
     const Tensor& weight_ = *weight_maybe_owned;
-    ret = cross_entropy_loss_label_smoothing(self, target, weight_, reduction, label_smoothing);
+    ret = cross_entropy_loss_label_smoothing(self, target, weight_, reduction, ignore_index, label_smoothing);
   } else {
     ret = at::nll_loss_nd(
         at::log_softmax(self, 1, self.scalar_type()),

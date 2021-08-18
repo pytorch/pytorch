@@ -1103,9 +1103,10 @@ class CrossEntropyLoss(_WeightedLoss):
             and :attr:`reduce` are in the process of being deprecated, and in
             the meantime, specifying either of those two args will override
             :attr:`reduction`. Default: ``'mean'``
-        label_smoothing (float, optional): A float in [0.0, 1.0]. Specifies the amount of smoothing
-            when computing the loss, where 0.0 means no smoothing. This feature is supported
-            when targets are specified as class indices.
+        label_smoothing (float, optional): A float in [0.0, 1.0]. Specifies the amount
+            of smoothing when computing the loss, where 0.0 means no smoothing. The targets
+            become a mixture of the original ground truth and a uniform distribution as described in
+            `Rethinking the Inception Architecture for Computer Vision <https://arxiv.org/abs/1512.00567>`__.
 
     Shape:
         - Input: :math:`(N, C)` where `C = number of classes`, or
