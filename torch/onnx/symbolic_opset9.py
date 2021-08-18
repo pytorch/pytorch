@@ -1986,6 +1986,22 @@ def sort(g, self, dim, decending, out=None):
     return g.op("TopK", self, k_i=dim_size, axis_i=dim, outputs=2)
 
 
+@parse_args("v", "i", "i")
+def argsort(g, self, dim, decending):
+    self_sizes = sym_help._get_tensor_sizes(self)
+    try:
+        dim_size = self_sizes[dim]
+    except Exception:
+        dim_size = None
+
+    if dim_size is None:
+        return _unimplemented("Sort", "input size not accessible")
+
+    values, indices = g.op("TopK", self, k_i=dim_size, axis_i=dim, outputs=2)
+
+    return indices
+
+
 def numel(g, self):
     shape = g.op("Shape", self)
     return g.op("ReduceProd", shape, keepdims_i=0)

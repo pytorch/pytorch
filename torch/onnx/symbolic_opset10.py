@@ -63,6 +63,12 @@ def sort(g, self, dim, decending, out=None):
     return sym_help._sort_helper(g, self, dim, decending=decending, out=out)
 
 
+@parse_args("v", "i", "i")
+def argsort(g, self, dim, decending):
+    values, indices = sym_help._sort_helper(g, self, dim, decending=decending)
+    return indices
+
+
 @parse_args("v", "v", "i", "i", "i", "none")
 def topk(g, self, k, dim, largest, sorted, out=None):
     return sym_help._topk_helper(g, self, k, dim, largest=largest, sorted=sorted, out=out)
