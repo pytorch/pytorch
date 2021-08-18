@@ -314,6 +314,38 @@ class TestFuseFx(QuantizationTestCase):
 
             self.checkGraphModuleNodes(quantized, expected_node_list=node_list)
 
+    def test_problematic_fuse_example(self):
+        class LinearRelu(nn.Sequential):
+            def __init__(self):
+                super().__init__(
+                    nn.Linear(5, 5),
+                    nn.ReLU(),
+                )
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin_relu = LinearRelu()
+                self.linear = nn.Linear(5, 5)
+
+            def forward(self, x):
+                x = self.lin_relu(x)
+                x = self.linear(x)
+                return x
+
+        model = M().eval()
+        # these qconfigs somehow fail equality where default_qconfig does not
+        qconfig_dict = {
+            "": None,
+            "object_type": [
+                (torch.nn.Linear, get_default_qconfig('fbgemm')),
+                (torch.nn.ReLU, get_default_qconfig('fbgemm')),
+            ],
+        }
+        m = prepare_fx(model, qconfig_dict)
+
+        self.checkGraphModuleNodes(m, expected_node=ns.call_module(torch.nn.intrinsic.modules.fused.LinearReLU))
+
     def test_fuse_custom_config_dict_validity(self):
         r"""
         Verifies that if a user passes an invalid key or makes a typo when
@@ -2806,6 +2838,28 @@ class TestQuantizeFx(QuantizationTestCase):
             ), weight=torch.quantization.default_per_channel_weight_observer)})
         m = convert_fx(m, is_reference=True)
         m(torch.rand(2, 1, 5, 5))
+
+    def test_preserve_tuple(self):
+        """ Test tuple input type is preserved
+        """
+        from typing import List
+
+        class LSTM(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lstm = nn.LSTM(50, 50, 1)
+
+            def forward(self, inputs: torch.Tensor, state: List[torch.Tensor]):
+                h = state[0]
+                c = state[1]
+                return self.lstm(inputs, (h, c))
+
+        m = LSTM().eval()
+        m = prepare_fx(m, {"": default_qconfig})
+        # make sure the arg[1] of lstm module is a tuple
+        for n in m.graph.nodes:
+            if n.target == "lstm":
+                self.assertEqual(type(n.args[1]), tuple)
 
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
