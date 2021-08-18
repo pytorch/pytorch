@@ -1320,7 +1320,7 @@ Tensor kaiser_window(
   if (periodic) {
     window_length += 1;
   }
-  auto initial = at::arange(window_length, options);
+  auto initial = at::arange(window_length, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory());
   auto window = at::empty(window_length, options);
   auto iter = TensorIterator::unary_op(window, initial);
   kaiser_window_stub(iter.device_type(), iter, window_length, beta);

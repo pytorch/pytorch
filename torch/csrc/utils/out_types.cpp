@@ -8,8 +8,8 @@ namespace utils {
 void check_out_type_matches(const at::Tensor& result,
                             c10::optional<at::ScalarType> scalarType,
                             c10::optional<at::Layout> layout,
-                            c10::optional<at::Device> device) {
-  if (!scalarType && !layout && !device) {  // common case
+                            const at::Device& device, bool device_is_none) {
+  if (!scalarType && !layout && device_is_none) {  // common case
     return;
   }
   if (scalarType && result.scalar_type() != *scalarType) {
@@ -27,9 +27,10 @@ void check_out_type_matches(const at::Tensor& result,
         "layout ", *layout,
         " does not match layout of out parameter (", result.layout(), ")");
   }
-  if (device && result.device().type() != device->type()) {
+  auto device_type_arg = device_is_none ? result.device().type() : device.type();
+  if (result.device().type() != device_type_arg) {
     AT_ERROR(
-        "device type ", device->type(),
+        "device type ", device_type_arg,
         " does not match device type of out parameter (", result.device().type(), ")");
   }
 }

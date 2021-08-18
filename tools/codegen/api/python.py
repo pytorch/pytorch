@@ -533,6 +533,10 @@ class PythonArgParserOutputExpr:
     # The python argument it maps to.
     argument: PythonArgument
 
+    @property
+    def is_none_expr(self) -> str:
+        return f'_r.isNone({self.index})'
+
 # To pass PythonArgParser output to the lambda wrapper, we need bind
 # PythonArgParserOutputExpr to DispatchLambdaArgument.
 # They are not always 1-1 mapped, e.g. scattered TensorOptions fields
@@ -703,7 +707,13 @@ def signature(f: NativeFunction, *, method: bool = False, pyi: bool = False) -> 
         ))
         tensor_options_args.append(PythonArgument(
             name='device',
-            type=OptionalType(BaseType(BaseTy.Device)),
+            # Note: This should really be an Optional type, but changing that behavior would be BC-breaking.
+            # Currently, when no device argument is specified in a factory function, the python binding layer
+            # defaults the device to the device set by `torch.set_default_tensor_type`.
+            # If instead we defaulted to c10::nullopt, then factory functions would eventually use the default device
+            # of TensorOptions, which is kCPU - effectively ignoring `torch.set_default_tensor_type`.
+            # See https://github.com/pytorch/pytorch/pull/63364#issuecomment-900590178.
+            type=OptionalType(BaseType(BaseTy.Device)) if name == 'empty_quantized' else BaseType(BaseTy.Device),
             default='None',
             default_init='self.device()' if is_like_or_new_function else None,
         ))
@@ -993,7 +1003,7 @@ def cpp_dispatch_exprs(f: NativeFunction, *,
 # For certain cases it is intentionally more restrictive than necessary,
 # e.g.: it doesn't accepts doublelist with definite size.
 def arg_parser_unpack_method(t: Type, has_default: bool) -> str:
-    if has_default and str(t) not in ('ScalarType?', 'Device?', 'Layout?'):
+    if has_default and str(t) not in ('ScalarType?', 'Device', 'Layout?'):
         raise RuntimeError(f'type \'{t}\' does not supported unpacking with default')
 
     if isinstance(t, BaseType):
@@ -1092,7 +1102,7 @@ def arg_parser_output_exprs(
 # argument name to type for scattered tensor options fields
 TENSOR_OPTIONS_FIELDS = {
     'dtype': 'ScalarType?',
-    'device': 'Device?',
+    'device': 'Device',
     'layout': 'Layout?',
     'pin_memory': 'bool',
     'requires_grad': 'bool',
@@ -1189,7 +1199,8 @@ torch::utils::maybe_initialize_cuda(options);
 
             inits.append(f"""\
 check_out_type_matches({arg_parser_outputs['out'].expr}, {arg_parser_outputs['dtype'].expr},
-                       {arg_parser_outputs['layout'].expr}, {arg_parser_outputs['device'].expr});
+                       {arg_parser_outputs['layout'].expr},
+                       {arg_parser_outputs['device'].expr}, {arg_parser_outputs['device'].is_none_expr});
 """)
         # we'll set requires_grad on outgoing tensor
         if 'requires_grad' not in tensor_options_args_names:
