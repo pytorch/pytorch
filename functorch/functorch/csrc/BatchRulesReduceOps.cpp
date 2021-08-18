@@ -315,7 +315,9 @@ std::tuple<Tensor,optional<int64_t>> _softmax_backward_batch_rule(
 
   dim = getPhysicalDim(self_, /*has_batch_dim*/true, dim);
 
-  return std::make_tuple(at::_softmax_backward_data(grad_output_, output_, dim, self_), 0);
+  // Not sure why output_ needs to be marked as .contiguous(). Someting must
+  // have changed in PyTorch (and output of softmax is probably always contiguous)
+  return std::make_tuple(at::_softmax_backward_data(grad_output_, output_.contiguous(), dim, self_), 0);
 }
 
 std::tuple<Tensor,optional<int64_t>> _log_softmax_backward_batch_rule(
