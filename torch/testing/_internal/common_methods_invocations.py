@@ -2263,7 +2263,6 @@ def sample_inputs_adaptive_avg_pool2d(op_info, device, dtype, requires_grad, **k
 def sample_inputs_max_pool2d(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
-    # Ordered as (input shape, output size)
     kerneli = [[3, 2], [3, 3]]
     stridei = [[2, 2]]
     Ni = [8, 16]
