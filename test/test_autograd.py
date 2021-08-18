@@ -6120,6 +6120,19 @@ class TestAutogradNotImplementedKernel(TestCase):
                 """)
         return self._compile_and_load_op(*func), ref
 
+    def _get_custom_op_return_tensor_vector(self):
+        def ref(x, y):
+            return [x + y, x - y]
+        func = ("Tensor self, Tensor other", "Tensor[]",
+                "const torch::Tensor& self, const torch::Tensor& other", "std::vector<at::Tensor>",
+                "ret_tensor_vector", """
+                    std::vector<at::Tensor> out;
+                    out.push_back(self + other);
+                    out.push_back(self - other);
+                    return out;
+                """)
+        return self._compile_and_load_op(*func), ref
+
     def _get_custom_inplace_op(self):
         def ref(x, y):
             return x.add_(y)
@@ -6175,6 +6188,7 @@ class TestAutogradNotImplementedKernel(TestCase):
             self._get_custom_op(),
             self._get_custom_op_return_tuple_non_tensor(),
             self._get_custom_view_op(),
+            self._get_custom_op_return_tensor_vector(),
         ]
         for (name, op), ref in funcs:
             a = torch.tensor(1., requires_grad=True)
@@ -6183,13 +6197,13 @@ class TestAutogradNotImplementedKernel(TestCase):
 
             # If any inputs require grad,
             d = op(a, b)
-            out = d[0] if isinstance(d, tuple) else d
+            out = d[0] if not isinstance(d, torch.Tensor) else d
             with self.assertRaisesRegex(RuntimeError, f"derivative for .*{name} is not implemented"):
                 torch.autograd.grad(out, a)
 
             # Should not have grad_fn if none require grad
             d = op(b, c)
-            out = d[0] if isinstance(d, tuple) else d
+            out = d[0] if not isinstance(d, torch.Tensor) else d
             with self.assertRaisesRegex(RuntimeError, "element 0 of tensors does not require grad and does not have a grad_fn"):
                 torch.autograd.grad(out, b)
 
@@ -6256,9 +6270,8 @@ class TestAutogradNotImplementedKernel(TestCase):
         torch.autograd.gradcheck(op, (v, t))
         self.assertTrue(op(v, t) is v)
 
-        # Make we use rebase_history so we don't overwrite old grad_fn
-        old_grad_fn = v.grad_fn
-        self.assertTrue(op(v, t).grad_fn is old_grad_fn)
+        # Make we use rebase_history, in-place on view should produce as_strided
+        self.assertTrue("AsStridedBackward" in str(op(v, t).grad_fn))
 
     def test_optional_tensor_input(self):
         (_, op), ref = self._get_optional_op()

@@ -53,7 +53,7 @@ void autogradNotImplementedFallback(const c10::OperatorHandle& op, c10::Dispatch
   const auto num_returns = returns.size();
   const auto stack_start = stack->size() - num_arguments;
   const bool grad_mode = GradMode::is_enabled();
-  std::vector<const at::Tensor*> tensors_requiring_grad;
+  std::vector<const at::Tensor*> tensors_requiring_grad_on_stack;
 
   // Keep track of which outputs are output of in-place modification
   // so we can rebase_history if necessary
@@ -61,11 +61,33 @@ void autogradNotImplementedFallback(const c10::OperatorHandle& op, c10::Dispatch
   std::vector<bool> is_aliased_output;
   is_inplace_output.reserve(num_returns);
   is_aliased_output.reserve(num_returns);
+
   for (const auto i : c10::irange(num_returns)) {
     const auto& alias_info = returns[i].alias_info();
     is_inplace_output.push_back(alias_info.has_value() && alias_info->isWrite());
     is_aliased_output.push_back(alias_info.has_value());
+
   }
+
+  #ifndef NDEBUG
+  int aliased_input_idx = -1;
+  int aliased_output_idx = -1;
+  for (const auto i : c10::irange(num_returns)) {
+    const auto& alias_info = returns[i].alias_info();
+    if (alias_info.has_value()) {
+      AT_ASSERT(aliased_output_idx == -1); // Assume only a single aliased output
+      aliased_output_idx = i;
+    }
+  }
+  for (const auto i : c10::irange(num_arguments)) {
+    const auto& alias_info = arguments[i].alias_info();
+    if (alias_info.has_value()) {
+      AT_ASSERT(aliased_input_idx == -1); // Assume only a single aliased input
+      aliased_input_idx = i;
+    }
+  }
+  #endif
+
   size_t num_tensor_inputs = 0;  // Only used for DEBUG-only checks
 
   _foreach_tensor([&](size_t _, size_t idx_arg, const at::Tensor& t) {
@@ -73,13 +95,13 @@ void autogradNotImplementedFallback(const c10::OperatorHandle& op, c10::Dispatch
       TORCH_CHECK(t.defined(), "Expected argument ", idx_arg, " of ", op_name, " to be defined.");
     }
     if (grad_mode && t.requires_grad()) {
-      tensors_requiring_grad.push_back(&t);
+      tensors_requiring_grad_on_stack.push_back(&t);
     }
     num_tensor_inputs++;
     TORCH_CHECK_NOT_IMPLEMENTED(!isFwGradDefined(t), "Trying to use forward AD with ", op_name, " that does not support it.");
   }, stack, stack_start, num_arguments);
 
-  const bool any_requires_grad = tensors_requiring_grad.size() > 0;
+  const bool any_requires_grad = tensors_requiring_grad_on_stack.size() > 0;
 
   _foreach_tensor([&](size_t _, size_t i, const at::Tensor& t) {
     const auto& alias_info = arguments[i].alias_info();
@@ -91,7 +113,7 @@ void autogradNotImplementedFallback(const c10::OperatorHandle& op, c10::Dispatch
   std::shared_ptr<NotImplemented> grad_fn;
   if (any_requires_grad) {
     grad_fn = std::shared_ptr<NotImplemented>(new NotImplemented(op_name), deleteNode);
-    grad_fn->set_next_edges(collect_next_edges(tensors_requiring_grad));
+    grad_fn->set_next_edges(collect_next_edges(tensors_requiring_grad_on_stack));
   }
 
   #ifndef NDEBUG
@@ -107,7 +129,7 @@ void autogradNotImplementedFallback(const c10::OperatorHandle& op, c10::Dispatch
   }, &stack_copy, stack_start, num_arguments);
   #endif
   {
-    at::AutoDispatchBelowADInplaceOrView guard;
+    at::AutoDispatchBelowAutograd guard;
     op.redispatchBoxed(dispatch_keys & c10::after_autograd_keyset, stack);
   }
   #ifndef NDEBUG
@@ -117,30 +139,38 @@ void autogradNotImplementedFallback(const c10::OperatorHandle& op, c10::Dispatch
     if (impl_saved.at(idx_tensor))
       AT_ASSERT(impl_saved.at(idx_tensor) == t.getIntrusivePtr());
   }, &stack_copy, stack_start, num_arguments);
-  // Do we have alias information for tensors in tensorlist outputs?
   _foreach_tensor([&](size_t idx_tensor, size_t idx_ret, const at::Tensor& t) {
     if (!is_inplace_output[idx_ret])
       AT_ASSERT(t.use_count() <= 1);  // Okay to return undefined tensor
     if (!is_aliased_output[idx_ret] && t.has_storage())
       AT_ASSERT(t.storage().use_count() == 1);
   }, stack, stack->size() - num_returns, num_returns);
-  // TODO: Add check if view ops return tensor that is aliased with the right input
+  if (aliased_input_idx != -1 && aliased_output_idx != -1) {
+    const c10::IValue& aliased_input_iv = stack_copy[stack_start + aliased_input_idx];
+    const c10::IValue& aliased_output_iv = (*stack)[stack->size() - num_returns + aliased_output_idx];
+    // We do not support views embedded inside tensorlist
+    AT_ASSERT(aliased_input_iv.isTensor());
+    AT_ASSERT(aliased_output_iv.isTensor());
+    const at::Tensor& aliased_input = aliased_input_iv.toTensor();
+    const at::Tensor& aliased_output = aliased_input_iv.toTensor();
+    if(is_aliased_output[aliased_input_idx] && aliased_input.has_storage())
+      AT_ASSERT(aliased_input.storage().is_alias_of(aliased_output.storage()));
+  }
   #endif
   const auto& ret = torch::jit::last(stack, num_returns);
 
   if (any_requires_grad) {
-    for (const auto return_idx : c10::irange(ret.size())) {
-      if (ret[return_idx].isTensor()) {
-        const auto& t = ret[return_idx].toTensor();
-        if (isDifferentiableType(t.scalar_type())) {
-          if (is_inplace_output[return_idx]) {
-            rebase_history(const_cast<at::Tensor&>(t), grad_fn);
-          } else {
-            set_history(const_cast<at::Tensor&>(t), grad_fn);
-          }
+    _foreach_tensor([&](size_t idx_tensor, size_t idx_ret, const at::Tensor& t) {
+      if (isDifferentiableType(t.scalar_type())) {
+        if (is_inplace_output[idx_ret]) {
+          // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+          rebase_history(const_cast<at::Tensor&>(t), grad_fn);
+        } else {
+          // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+          set_history(const_cast<at::Tensor&>(t), grad_fn);
         }
       }
-    }
+    }, stack, stack->size() - num_returns, num_returns);
   }
 }
 
