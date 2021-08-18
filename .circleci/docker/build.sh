@@ -103,27 +103,6 @@ case "$image" in
     VISION=yes
     BREAKPAD=yes
     ;;
-  pytorch-linux-xenial-cuda10-cudnn7-py3-gcc7)
-    CUDA_VERSION=10.0
-    CUDNN_VERSION=7
-    ANACONDA_PYTHON_VERSION=3.6
-    GCC_VERSION=7
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    BREAKPAD=yes
-    ;;
-  pytorch-linux-xenial-cuda10.1-cudnn7-py3-gcc7)
-    CUDA_VERSION=10.1
-    CUDNN_VERSION=7
-    ANACONDA_PYTHON_VERSION=3.6
-    GCC_VERSION=7
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    KATEX=yes
-    BREAKPAD=yes
-    ;;
   pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7)
     CUDA_VERSION=10.2
     CUDNN_VERSION=7
@@ -160,6 +139,14 @@ case "$image" in
   pytorch-linux-xenial-py3-clang5-asan)
     ANACONDA_PYTHON_VERSION=3.6
     CLANG_VERSION=5.0
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    BREAKPAD=yes
+    ;;
+  pytorch-linux-xenial-py3-clang7-asan)
+    ANACONDA_PYTHON_VERSION=3.6
+    CLANG_VERSION=7
     PROTOBUF=yes
     DB=yes
     VISION=yes
@@ -216,16 +203,6 @@ case "$image" in
     CUDNN_VERSION=7
     ANACONDA_PYTHON_VERSION=3.6
     CLANG_VERSION=9
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    BREAKPAD=yes
-    ;;
-  pytorch-linux-bionic-cuda10.2-cudnn7-py3.8-gcc9)
-    CUDA_VERSION=10.2
-    CUDNN_VERSION=7
-    ANACONDA_PYTHON_VERSION=3.8
-    GCC_VERSION=9
     PROTOBUF=yes
     DB=yes
     VISION=yes

@@ -35,9 +35,8 @@ TEST(IMethodTest, GetArgumentNames) {
   auto scriptMethod = scriptModel.get_method("forward");
 
   auto& scriptNames = scriptMethod.getArgumentNames();
-  EXPECT_EQ(scriptNames.size(), 2);
-  EXPECT_STREQ(scriptNames[0].c_str(), "self");
-  EXPECT_STREQ(scriptNames[1].c_str(), "input");
+  EXPECT_EQ(scriptNames.size(), 1);
+  EXPECT_STREQ(scriptNames[0].c_str(), "input");
 
   torch::deploy::InterpreterManager manager(3);
   torch::deploy::Package package = manager.load_package(getenv("SIMPLE"));
@@ -45,7 +44,6 @@ TEST(IMethodTest, GetArgumentNames) {
   torch::deploy::PythonMethodWrapper pyMethod(pyModel, "forward");
 
   auto& pyNames = pyMethod.getArgumentNames();
-  EXPECT_EQ(pyNames.size(), 2);
+  EXPECT_EQ(pyNames.size(), 1);
   EXPECT_STREQ(pyNames[0].c_str(), "input");
-  EXPECT_STREQ(pyNames[1].c_str(), "kwargs");
 }
