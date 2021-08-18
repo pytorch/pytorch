@@ -9,12 +9,12 @@
         if: always()
         timeout-minutes: 120
         run: |
-          .github\scripts\wait_for_ssh_sessions.ps1
+          .\.github\scripts\wait_for_ssh_sessions.ps1
       - name: Kill active ssh sessions if still around (Useful if workflow was cancelled)
         shell: powershell
         if: always()
         run: |
-          .github\scripts\kill_ssh_sessions_for_user.ps1
+          .\.github\scripts\kill_ssh_sessions_for_user.ps1
 {%- endmacro -%}
 
 # Template is at:    .github/templates/windows_ci_workflow.yml.j2
