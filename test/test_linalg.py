@@ -5915,7 +5915,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 ---(input size: {:4}, eigenpairs:{:2}, units: relative error, maxiter={:4})---
 '''.format(tol, eq_err, eq_err_general, iters1, eq_err_scipy, eq_err_general_scipy, iters2, m, k, niter))
 
-    def _test_addmm_addmv(self, f, t, m, v, *, alpha=None, beta=None, transpose_out=False, layout=torch.strided):
+    def _test_addmm_addmv(self, f, t, m, v, *, alpha=None, beta=None, transpose_out=False, layout=torch.strided, all_sparse=False):
         """
         Unified test for checking `f(t, m, v, alpha=alpha, beta=beta)` computation,
         where f is `torch.addmv` or `torch.addmm`.
@@ -5944,7 +5944,11 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             else:
                 return mat
 
-        res1 = f(t, convert_layout(m), v, alpha=alpha, beta=beta)
+        if all_sparse:
+            res1 = f(*map(convert_layout, (t, m, v)), alpha=alpha, beta=beta)
+            res1 = res1.to_dense()
+        else:
+            res1 = f(t, convert_layout(m), v, alpha=alpha, beta=beta)
         res2 = torch.full_like(res1, math.nan)
         if transpose_out:
             res2 = res2.t().clone(memory_format=torch.contiguous_format).t()
@@ -6087,6 +6091,62 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
                     m1 = torch.randn(n, k + 1, device=device).to(dtype)
                     m2 = torch.randn(k, m, device=device).to(dtype)
+                    self.assertRaisesRegex(RuntimeError, f"{n}x{k + 1}.*{k}x{m}", lambda: torch.addmm(M, m1, m2))
+                    self.assertRaisesRegex(RuntimeError, f"{n}x{k + 1}.*{k}x{m}", lambda: torch.mm(m1, m2))
+
+    @onlyCUDA
+    @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 0.6,
+                        torch.half: 1e-1, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
+    @dtypesIfCUDA(*torch.testing.get_all_complex_dtypes(),
+                  *torch.testing.get_all_fp_dtypes(include_bfloat16=SM80OrLater,
+                                                   include_half=SM53OrLater))
+    def test_addmm_all_sparse_csr(self, device, dtype):
+        M = torch.randn(10, 25, device=device).to(dtype)
+        m1 = torch.randn(10, 50, device=device).to(dtype)
+        m2 = torch.randn(50, 25, device=device).to(dtype)
+        self._test_addmm_addmv(torch.addmm, M, m1, m2, layout=torch.sparse_csr, all_sparse=True)
+
+        # Test 0-strided
+        M = torch.randn(10, 1, device=device).to(dtype).expand(10, 25)
+        m1 = torch.randn(10, 1, device=device).to(dtype).expand(10, 50)
+        m2 = torch.randn(50, 25, device=device).to(dtype)
+        self._test_addmm_addmv(torch.addmm, M, m1, m2, layout=torch.sparse_csr, all_sparse=True)
+
+        # Test beta=0, M=nan
+        M = torch.full((10, 25), math.nan, device=device).to(dtype)
+        m1 = torch.randn(10, 50, device=device).to(dtype)
+        m2 = torch.randn(50, 25, device=device).to(dtype)
+        self._test_addmm_addmv(torch.addmm, M, m1, m2, beta=0, layout=torch.sparse_csr, all_sparse=True)
+
+        # Test transpose
+        for t1, t2, t3, t4 in itertools.product([True, False], repeat=4):
+            def maybe_transpose(cond, m):
+                if not cond:
+                    return m
+                return m.t().clone(memory_format=torch.contiguous_format).t()
+
+            M = maybe_transpose(t1, torch.randn(10, 25, device=device).to(dtype))
+            m1 = maybe_transpose(t2, torch.randn(10, 50, device=device).to(dtype))
+            m2 = maybe_transpose(t3, torch.randn(50, 25, device=device).to(dtype))
+            self._test_addmm_addmv(torch.addmm, M, m1, m2, transpose_out=t4, layout=torch.sparse_csr, all_sparse=True)
+
+    @onlyCUDA
+    @dtypesIfCUDA(*torch.testing.get_all_complex_dtypes(),
+                  *torch.testing.get_all_fp_dtypes(include_bfloat16=SM80OrLater,
+                                                   include_half=SM53OrLater))
+    def test_addmm_sizes_all_sparse_csr(self, device, dtype):
+        # TODO (@ivanyashchuk): torch.addmm with all sparse inputs doesn't handle 0-dim correctly
+        for m in [1, 25]:
+            for n in [1, 10]:
+                for k in [1, 8]:
+                    M = torch.randn(n, m, device=device).to(dtype)
+                    m1 = torch.randn(n, k, device=device).to(dtype)
+                    m2 = torch.randn(k, m, device=device).to(dtype)
+                    self._test_addmm_addmv(torch.addmm, M, m1, m2, layout=torch.sparse_csr, all_sparse=True)
+
+                    M = torch.randn(n, m, device=device).to(dtype).to_sparse_csr()
+                    m1 = torch.randn(n, k + 1, device=device).to(dtype).to_sparse_csr()
+                    m2 = torch.randn(k, m, device=device).to(dtype).to_sparse_csr()
                     self.assertRaisesRegex(RuntimeError, f"{n}x{k + 1}.*{k}x{m}", lambda: torch.addmm(M, m1, m2))
                     self.assertRaisesRegex(RuntimeError, f"{n}x{k + 1}.*{k}x{m}", lambda: torch.mm(m1, m2))
 

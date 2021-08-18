@@ -222,7 +222,7 @@ Tensor addmm_sparse_csr_dense(
     const Tensor& dense,
     const Scalar& beta,
     const Scalar& alpha) {
-  Tensor r = at::empty({0}, self.options());
+  Tensor r = at::empty({0, 0}, self.options());
   at::addmm_out(r, self, sparse, dense, beta, alpha);
   return r;
 }

@@ -1005,7 +1005,7 @@ Tensor _sparse_mm(
   const SparseTensor& sparse,
   const Tensor& dense
 ) {
-  Tensor t = at::zeros({}, dense.options());
+  Tensor t = at::empty(dense.sizes(), dense.options());
   return at::_sparse_addmm(t, sparse, dense, 0, 1);  // redispatch!
 }
 

@@ -89,6 +89,10 @@ Tensor& addmm_out_sparse_csr_dense_cuda(
   // when using same function for CUDA and SparseCsrCUDA dispatch keys
   TORCH_CHECK(mat1.dim() == 2 && mat2.dim() == 2, "tensors must be 2-D");
 
+  TORCH_CHECK(
+      mat1.sizes()[1] == mat2.sizes()[0], "mat1 and mat2 shapes cannot be multiplied (",
+      mat1.sizes()[0], "x", mat1.sizes()[1], " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")");
+
   TensorArg args[]{{result, "out", 0}, {self, "self", 1}, {mat1, "mat1", 2}, {mat2, "mat2", 3}};
   checkAllSameGPU(__func__, args);
 
@@ -96,7 +100,7 @@ Tensor& addmm_out_sparse_csr_dense_cuda(
   IntArrayRef mat2_sizes = mat2.sizes();
   IntArrayRef self__sizes;
   c10::MaybeOwned<Tensor> self_;
-  if (&result != &self) {
+  if (&result != &self && self.layout() == kStrided) {
     self_ = expand_size(self, {mat1_sizes[0], mat2_sizes[1]}, "addmm");
     self__sizes = self_->sizes();
   } else {
@@ -108,10 +112,12 @@ Tensor& addmm_out_sparse_csr_dense_cuda(
   }
 
   if (&result != &self) {
-    at::native::resize_output(result, self__sizes);
-    if (beta.toComplexDouble() != 0.0) {
-      at::native::copy_(result, *self_);
+    if (result.layout() == kStrided) {
+      at::native::resize_output(result, self__sizes);
+    } else {
+      at::native::resize_as_sparse_csr_(result, *self_);
     }
+    result.copy_(*self_);
   }
 
   IntArrayRef result_sizes = result.sizes();

@@ -210,6 +210,31 @@ class TORCH_CUDA_CPP_API CuSparseSpMatCsrDescriptor
     descriptor_.reset(raw_descriptor);
   }
 
+  std::tuple<int64_t, int64_t, int64_t> get_size() {
+    int64_t rows, cols, nnz;
+    TORCH_CUDASPARSE_CHECK(cusparseSpMatGetSize(
+        this->descriptor(),
+        &rows,
+        &cols,
+        &nnz));
+    return std::make_tuple(rows, cols, nnz);
+  }
+
+  void set_tensor(const Tensor& input) {
+    auto crow_indices = input.crow_indices();
+    auto col_indices = input.col_indices();
+    auto values = input.values();
+
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(crow_indices.is_contiguous());
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(col_indices.is_contiguous());
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(values.is_contiguous());
+    TORCH_CUDASPARSE_CHECK(cusparseCsrSetPointers(
+        this->descriptor(),
+        crow_indices.data_ptr(),
+        col_indices.data_ptr(),
+        values.data_ptr()));
+  }
+
 #if AT_USE_CUSPARSE_GENERIC_SPSV()
   void set_mat_fill_mode(bool upper) {
     cusparseFillMode_t fill_mode =
@@ -307,6 +332,16 @@ class TORCH_CUDA_CPP_API CuSparseSpSMDescriptor
   }
 };
 #endif
+
+class TORCH_CUDA_CPP_API CuSparseSpGEMMDescriptor
+    : public CuSparseDescriptor<cusparseSpGEMMDescr, &cusparseSpGEMM_destroyDescr> {
+ public:
+  CuSparseSpGEMMDescriptor() {
+    cusparseSpGEMMDescr_t raw_descriptor;
+    TORCH_CUDASPARSE_CHECK(cusparseSpGEMM_createDescr(&raw_descriptor));
+    descriptor_.reset(raw_descriptor);
+  }
+};
 
 } // namespace sparse
 } // namespace cuda
