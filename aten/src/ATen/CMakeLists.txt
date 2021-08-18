@@ -137,6 +137,7 @@ append_filelist("jit_core_sources" ATen_CORE_SRCS)
 
 add_subdirectory(quantized)
 add_subdirectory(nnapi)
+add_subdirectory(test)
 
 if(BUILD_LITE_INTERPRETER)
   set(all_cpu_cpp ${generated_cpp} ${core_generated_cpp} ${cpu_kernel_cpp})
@@ -495,8 +496,6 @@ list(APPEND ATen_MOBILE_BENCHMARK_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/benchmarks/tensor_add.cpp)
 list(APPEND ATen_MOBILE_BENCHMARK_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/benchmarks/quantize_per_channel.cpp)
-list(APPEND ATen_MOBILE_BENCHMARK_SRCS
-  ${CMAKE_CURRENT_SOURCE_DIR}/benchmarks/stateful_conv1d.cpp)
 
 # Pass source, includes, and libs to parent
 set(ATen_CORE_SRCS ${ATen_CORE_SRCS} PARENT_SCOPE)

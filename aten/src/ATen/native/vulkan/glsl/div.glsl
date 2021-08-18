@@ -21,11 +21,13 @@ void main() {
   const ivec3 pos = ivec3(gl_GlobalInvocationID);
 
   if (all(lessThan(pos, uBlock.size.xyz))) {
-    const ivec3 input0_pos = pos % uBlock.isize0.xyz;
-    const ivec3 input1_pos = pos % uBlock.isize1.xyz;
-    imageStore(
-        uOutput,
-        pos,
-        texelFetch(uInput0, input0_pos, 0) / texelFetch(uInput1, input1_pos, 0));
+    const ivec3 input0_pos = pos;
+    const ivec3 input1_pos = ivec3(pos.x, 0, 0);
+
+    const vec4 in0tex = texelFetch(uInput0, input0_pos, 0);
+    const vec4 in1tex = texelFetch(uInput1, input1_pos, 0);
+    vec4 outtex = in0tex / in1tex;
+
+    imageStore(uOutput, pos, outtex);
   }
 }
