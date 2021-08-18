@@ -77,7 +77,6 @@ c10::AliasAnalysisKind aliasAnalysisInternalSpecialCase() {
 // for debugging it is helpful to be able to force autodiff subgraphs
 // to be created, to check their correctness, even when the
 // size of the of the subgraph is too small to be profitable.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local bool autodiff_subgraph_inlining = true;
 void debugSetAutodiffSubgraphInlining(bool state) {
   autodiff_subgraph_inlining = state;
@@ -89,7 +88,6 @@ bool getAutodiffSubgraphInlining() {
 
 // for debugging it is helpful to be able to force fusion groups
 // to be created
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::atomic<bool> fusion_group_inlining(true);
 void debugSetFusionGroupInlining(bool state) {
   fusion_group_inlining = state;
@@ -99,7 +97,6 @@ bool getFusionGroupInlining() {
   return fusion_group_inlining;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local std::weak_ptr<Graph> last_executed_optimized_graph;
 std::shared_ptr<Graph> lastExecutedOptimizedGraph() {
   return last_executed_optimized_graph.lock();
@@ -456,7 +453,7 @@ struct DifferentiableGraphOp {
     // ourselves.
     const int64_t stack_size = stack.size();
     const int64_t stack_offset = stack_size - num_inputs;
-    for (int64_t i = stack_offset; i < stack_size; ++i) {
+    for (const auto i : c10::irange(stack_offset, stack_size)) {
       detach(stack[i]);
     }
   }
@@ -501,7 +498,6 @@ Gradient getGradient(const Node* n) {
 }
 } // anonymous namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators reg_graph_executor_ops({Operator(
     prim::DifferentiableGraph,
     [](const Node* n) -> Operation {

@@ -1,10 +1,22 @@
+{# squid_proxy is an private ELB that only available for GHA custom runners #}
+{%- set squid_proxy    = "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128" -%}
+{# squid_no_proxy is a list of common set of fixed domains or IPs that we don't need to proxy. See https://docs.aws.amazon.com/AmazonECS/latest/developerguide/http_proxy_config.html#windows-proxy #}
+{%- set squid_no_proxy = "localhost,127.0.0.1,amazonaws.com,s3.amazonaws.com,169.254.169.254,169.254.170.2,/var/run/docker.sock" -%}
+
 # Template is at:    .github/templates/windows_ci_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
-name: Windows CI (!{{ build_environment }})
+name: !{{ build_environment }}
 
 on:
 {%- if on_pull_request %}
   pull_request:
+  {%- if ciflow_config.enabled %}
+    {%- if ciflow_config.trigger_action_only %}
+    types: [!{{ ciflow_config.trigger_action }}]
+    {%- else %}
+    types: [opened, synchronize, reopened, !{{ ciflow_config.trigger_action }}]
+    {%- endif %}
+  {%- endif %}
 {%- endif %}
 {%- if is_scheduled %}
   schedule:
@@ -29,6 +41,8 @@ env:
   VC_VERSION: ""
   VS_VERSION: "16.8.6"
   VC_YEAR: "2019"
+  ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
+  no_proxy: !{{ squid_no_proxy }}
 {%- if cuda_version != "cpu" %}
   TORCH_CUDA_ARCH_LIST: "7.0"
   USE_CUDA: 1
@@ -39,19 +53,35 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+{%- if ciflow_config.enabled %}
+  !{{ ciflow_config.root_job_name }}:
+    runs-on: ubuntu-18.04
+    if: ${{ !{{ ciflow_config.root_job_condition }} }}
+    steps:
+      - name: noop
+        run: echo running !{{ ciflow_config.root_job_name }}
+{%- endif %}
   build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: "windows.4xlarge"
+    defaults:
+      run:
+        working-directory: pytorch-${{ github.run_id }}
+    {%- if ciflow_config.enabled %}
+    needs: [!{{ ciflow_config.root_job_name }}]
+    {%- endif %}
     env:
       JOB_BASE_NAME: !{{ build_environment }}-build
+      http_proxy: "!{{ squid_proxy }}"
+      https_proxy: "!{{ squid_proxy }}"
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
           submodules: recursive
-      - name: Clean workspace (including things in .gitignore)
-        shell: bash
-        run: |
-          git clean -xdf
+          path: pytorch-${{ github.run_id }}
+          # deep clone, to allow use of git merge-base
+          fetch-depth: 0
       - name: Install Visual Studio 2019 toolchain
         shell: powershell
         run: |
@@ -91,12 +121,15 @@ jobs:
           if-no-files-found: error
           name: ${{ env.BUILD_ENVIRONMENT }}
           path: C:\${{ github.run_id }}\build-results
-      - name: Cleanup build-results
+      - name: Cleanup build-results and workspaces
+        if: always()
         shell: bash
         env:
           PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
+        # Should remove the entirety of pytorch-${{ github.run_id }}
         run: |
           rm -rf "${PYTORCH_FINAL_PACKAGE_DIR}"
+          rm -rf ./*
 
   generate-test-matrix:
 {%- if only_build_on_pull_request %}
@@ -104,13 +137,19 @@ jobs:
 {%- else %}
     if: ${{ github.repository_owner == 'pytorch' }}
 {%- endif %}
+    {%- if ciflow_config.enabled %}
+    needs: [!{{ ciflow_config.root_job_name }}]
+    {%- endif %}
     runs-on: ubuntu-18.04
     env:
       TEST_RUNNER_TYPE: !{{ test_runner_type }}
       NUM_TEST_SHARDS: !{{ num_test_shards }}
+      NUM_TEST_SHARDS_ON_PULL_REQUEST: !{{ num_test_shards_on_pull_request }}
+      PR_BODY: ${{ github.event.pull_request.body }}
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
       render-matrix: ${{ steps.set-matrix.outputs.render-matrix }}
+      ignore-disabled-issues: ${{ steps.set-matrix.outputs.ignore-disabled-issues }}
     container:
       image: python:3.9
     steps:
@@ -130,22 +169,27 @@ jobs:
       JOB_BASE_NAME: !{{ build_environment }}-test
       SHARD_NUMBER: ${{ matrix.shard }}
       NUM_TEST_SHARDS: ${{ matrix.num_shards }}
-    needs:
-      - build
-      - generate-test-matrix
+      TEST_CONFIG: ${{ matrix.config }}
+      http_proxy: "!{{ squid_proxy }}"
+      https_proxy: "!{{ squid_proxy }}"
+      RUN_SMOKE_TESTS_ONLY_ON_PR: !{{ only_run_smoke_tests_on_pull_request }}
+      PYTORCH_IGNORE_DISABLED_ISSUES: ${{ needs.generate-test-matrix.outputs.ignore-disabled-issues }}
+    needs: [build, generate-test-matrix, !{{ ciflow_config.root_job_name }}]
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
       fail-fast: false
     runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        working-directory: pytorch-${{ github.run_id }}
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
           submodules: recursive
-      - name: Clean workspace (including things in .gitignore)
-        shell: bash
-        run: |
-          git clean -xdf
+          path: pytorch-${{ github.run_id }}
+          # deep clone, to allow use of git merge-base
+          fetch-depth: 0
       - name: Install Visual Studio 2019 toolchain
         shell: powershell
         run: |
@@ -182,16 +226,19 @@ jobs:
             if [[ $NUM_TEST_SHARDS -ne 2 ]]; then
               export SHARD_NUMBER=0
             fi
-            if [[ -n $GITHUB_HEAD_REF && "$USE_CUDA" == 1 ]]; then
+            if [[ -n $GITHUB_HEAD_REF && "$RUN_SMOKE_TESTS_ONLY_ON_PR" == "true" ]]; then
               export RUN_SMOKE_TESTS_ONLY=1
             fi
             .jenkins/pytorch/win-test.sh
       - name: Zip test reports for upload
         if: always()
+        env:
+          COMMIT_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+          WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
         shell: powershell
         run: |
           # -ir => recursive include all files in pattern
-          7z a "test-reports-$Env:TEST_CONFIG.zip" -ir'!test\*.xml'
+          7z a "test-reports-$Env:COMMIT_SHA1-$Env:WORKFLOW_ID.zip" -ir'!test\*.xml'
       - uses: actions/upload-artifact@v2
         name: Store PyTorch Test Reports
         if: always()
@@ -200,7 +247,13 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path:
-            test-reports-*.zip
+            pytorch-${{ github.run_id }}/test-reports-*.zip
+      - name: Cleanup workspace
+        if: always()
+        shell: bash
+        # Should remove the entirety of pytorch-${{ github.run_id }}
+        run: |
+          rm -rf ./*
 
   # this is a separate step from test because the log files from test are too
   # long: basically, GitHub tries to render all of the log files when you click
@@ -208,20 +261,30 @@ jobs:
   # logs (like test); we can always move it back to the other one, but it
   # doesn't create the best experience
   render_test_results:
+    needs: [generate-test-matrix, test, !{{ ciflow_config.root_job_name }}]
 {%- if only_build_on_pull_request %}
-    if:  ${{ github.event_name == 'push' && always() }}
+    if: ${{ github.event_name == 'push' && (needs.test.result != 'skipped' || failure()) }}
 {%- else %}
-    if: always()
+    if: ${{ needs.test.result != 'skipped' || failure() }}
 {%- endif %}
-    needs:
-      - generate-test-matrix
-      - test
-    runs-on: ubuntu-18.04
+    runs-on: linux.2xlarge
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.render-matrix) }}
       fail-fast: false
     # TODO: Make this into a composite step
     steps:
+      - name: Log in to ECR
+        run: |
+          aws ecr get-login --no-include-email --region us-east-1 > /tmp/ecr-login.sh
+          bash /tmp/ecr-login.sh
+          rm /tmp/ecr-login.sh
+      - name: Chown workspace
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "$(pwd)/../":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE:?}/*"
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
@@ -235,17 +298,14 @@ jobs:
       - name: Unzip test reports
         run: |
           unzip -o 'test-reports-*.zip'
-      - uses: actions/setup-python@v2
-        with:
-          python-version: 3.9
       - name: Install dependencies
         # boto3 version copied from .circleci/docker/common/install_conda.sh
         run: |
-          pip install -r requirements.txt
-          pip install boto3==1.16.34 junitparser rich
+          pip3 install -r requirements.txt
+          pip3 install boto3==1.16.34 junitparser rich
       - name: Output Test Results (Click Me)
         run: |
-          python tools/render_junit.py test
+          python3 tools/render_junit.py test
       - name: Parse ref
         id: parse-ref
         run: .github/scripts/parse_ref.py
@@ -253,9 +313,7 @@ jobs:
         # temporary hack: set CIRCLE_* vars, until we update
         # tools/stats/print_test_stats.py to natively support GitHub Actions
         env:
-          SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-1
           CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
           JOB_BASE_NAME: !{{ build_environment }}-test
           CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -263,4 +321,4 @@ jobs:
           CIRCLE_TAG: ${{ steps.parse-ref.outputs.tag }}
           CIRCLE_WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
         run: |
-          python -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
+          python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test

@@ -8,6 +8,10 @@ from tools.stats.s3_stat_parser import (
     get_previous_reports_for_pr,
     Report, Version2Report,
     HAVE_BOTO3)
+from tools.stats.import_test_stats import (
+    get_disabled_tests,
+    get_slow_tests
+)
 
 from typing import Any, Dict, List, Optional, Tuple, cast
 from typing_extensions import TypedDict
@@ -284,3 +288,8 @@ def export_S3_test_times(test_times_filename: Optional[str] = None) -> Dict[str,
             json.dump(job_times_json, file, indent='    ', separators=(',', ': '))
             file.write('\n')
     return test_times
+
+
+def get_test_case_configs(dirpath: str) -> None:
+    get_slow_tests(dirpath=dirpath)
+    get_disabled_tests(dirpath=dirpath)
