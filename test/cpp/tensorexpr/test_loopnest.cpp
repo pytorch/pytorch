@@ -29,6 +29,17 @@ void checkIR(StmtPtr s, const std::string& pattern) {
   torch::jit::testing::FileCheck().run(pattern, oss.str());
 }
 
+void checkExprIR(ExprPtr e, const std::string& pattern) {
+  std::string prefixed_pattern = "# CHECK: " + pattern + "\n";
+  std::ostringstream oss;
+  oss << *e << "\n";
+  torch::jit::testing::FileCheck().run(prefixed_pattern, oss.str());
+}
+
+void checkExprIR(const ExprHandle& e, const std::string& pattern) {
+  checkExprIR(e.node(), pattern);
+}
+
 TEST(LoopNest, ExprSimple01) {
   KernelScope kernel_scope;
   Tensor* tensor = Compute(
@@ -1305,7 +1316,7 @@ TEST(LoopNest, ScheduleInlineRandomUnrelated) {
 # CHECK: for (int m2 = 0; m2 < 4; m2++)
 # CHECK:   for (int n2 = 0; n2 < 5; n2++)
 # CHECK:     for (int k2 = 0; k2 < 6; k2++)
-# CHECK:       y[m2, n2, k2] = ((n2 * m2) * k2 + (rand())) + (rand());)IR");
+# CHECK:       y[m2, n2, k2] = ((k2 * m2) * n2 + (rand())) + (rand());)IR");
 }
 
 // Make sure we generate the right number of random values == the dimensionality
@@ -1710,11 +1721,11 @@ TEST(LoopNest, ScheduleInlineOutputTensors) {
 # CHECK: for (int m1 = 0; m1 < 4; m1++)
 # CHECK:   for (int n1 = 0; n1 < 5; n1++)
 # CHECK:     for (int k1 = 0; k1 < 6; k1++)
-# CHECK:       x[m1, n1, k1] = (n1 * m1) * k1;
+# CHECK:       x[m1, n1, k1] = (k1 * m1) * n1;
 # CHECK: for (int m2 = 0; m2 < 4; m2++)
 # CHECK:   for (int n2 = 0; n2 < 5; n2++)
 # CHECK:     for (int k2 = 0; k2 < 6; k2++)
-# CHECK:       y[m2, n2, k2] = (n2 * m2) * k2 + m2;)IR");
+# CHECK:       y[m2, n2, k2] = (k2 * m2) * n2 + m2;)IR");
 }
 
 TEST(LoopNest, ScheduleFuserStyle) {
@@ -2130,7 +2141,7 @@ TEST(LoopNest, Reduce2dComputeAt) {
 # CHECK:     cons[(0 + cy * (1 * W)) + cx * 1] = int(0);
 # CHECK:     for (int r = 0; r < 2; r++) {
 # CHECK:       for (int s = 0; s < 2; s++) {
-# CHECK:         cons[(0 + cy * (1 * W)) + cx * 1] = (cons[(0 + cy * (1 * W)) + cx * 1]) + (temp[(0 + r * (1 * (W + 1))) + (s + cx) * 1]);
+# CHECK:         cons[(0 + cy * (1 * W)) + cx * 1] = (cons[(0 + cy * (1 * W)) + cx * 1]) + (temp[(0 + r * (1 * (W + 1))) + (cx + s) * 1]);
 # CHECK:       }
 # CHECK:     }
 # CHECK:   }
@@ -3225,7 +3236,7 @@ TEST(LoopNest, NormalizeStartVariable) {
       {Store::make(a_buf, {x}, Load::make(kInt, b_buf, {x})),
        Store::make(b_buf, {x}, x * 2)});
   auto for_stmt = For::make(x, y, 100, for_body);
-  Block::make({for_stmt});
+  auto parent_block = Block::make({for_stmt});
 
   LoopNest::normalize(for_stmt);
 
@@ -3235,8 +3246,8 @@ TEST(LoopNest, NormalizeStartVariable) {
   const std::string& expected_ir =
       R"IR(
         # CHECK: for (int x = 0; x < 100 - y; x++) {
-        # CHECK:   A[y + x] = B[y + x];
-        # CHECK:   B[y + x] = 2 * (y + x);
+        # CHECK:   A[x + y] = B[x + y];
+        # CHECK:   B[x + y] = 2 * (x + y);
       )IR";
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
 }
@@ -3304,7 +3315,7 @@ TEST(LoopNest, NormalizeOnNestedInnerLoop) {
       R"IR(
         # CHECK: for (int x = 50; x < 100; x++) {
         # CHECK:   for (int y = 0; y < 90; y++) {
-        # CHECK:     A[x] = (((B[y + 10]) + 2 * y) + (A[x])) + 20;
+        # CHECK:     A[x] = (((A[x]) + (B[y + 10])) + 2 * y) + 20;
       )IR";
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
 }
@@ -3327,7 +3338,7 @@ TEST(LoopNest, NormalizeAndSplitWithTail) {
   BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kInt);
   VarHandle x("x", kInt);
   auto for_stmt = For::make(x, 5, 10, Store::make(a_buf, {x}, x * 2));
-  Block::make({for_stmt});
+  auto parent_block = Block::make({for_stmt});
 
   LoopNest::normalize(for_stmt);
 
@@ -3373,7 +3384,7 @@ TEST(LoopNest, FlattenSimpleLoopNest2D) {
   auto for_body = Block::make({Store::make(a_buf, {i, j}, i * j)});
   auto inner_for = For::make(j, 0, 5, for_body);
   auto outer_for = For::make(i, 0, 10, inner_for);
-  Block::make({outer_for});
+  auto parent_block = Block::make({outer_for});
 
   std::vector<ForPtr> loops = {outer_for, inner_for};
   ForPtr flattened = nullptr;
@@ -3420,7 +3431,7 @@ TEST(LoopNest, FlattenSimpleLoopNest3D) {
   auto for1 = For::make(k, 0, 7, for_body);
   auto for2 = For::make(j, 0, 5, for1);
   auto for3 = For::make(i, 0, 10, for2);
-  Block::make({for3});
+  auto parent_block = Block::make({for3});
 
   std::vector<ForPtr> loops = {for3, for2, for1};
   ForPtr flattened = nullptr;
@@ -3463,7 +3474,7 @@ TEST(LoopNest, FlattenLoopNestAfterNormalize) {
   auto for_body = Block::make({Store::make(a_buf, {i - 2, j - 3}, i * j)});
   auto inner_for = For::make(j, 3, 15, for_body);
   auto outer_for = For::make(i, 2, 10, inner_for);
-  Block::make({outer_for});
+  auto parent_block = Block::make({outer_for});
 
   std::vector<ForPtr> loops = {outer_for, inner_for};
   ForPtr flattened = nullptr;
@@ -3712,7 +3723,7 @@ TEST(LoopNest, CacheReadsSimple) {
 #CHECK:   A_local[j_1] = A[
 #CHECK:  }
 #CHECK:  for (int j_2
-#CHECK:   B[10 * i_1 + j_2] = A_local[j_2];
+#CHECK:   B[j_2 + 10 * i_1] = A_local[j_2];
 #CHECK:  }
 #CHECK: }
 #CHECK: for (int i_2
@@ -3769,7 +3780,7 @@ TEST(LoopNest, CacheReadsOuter) {
   checkIR(result, R"IR(
 #CHECK: Allocate(A_local); // dtype=int, dims=[21, 11]
 #CHECK: A_local[j_1 + 11 * i_1] =
-#CHECK: B[10 * i_2 + j_2] = (A_local[(j_2 + 11 * i_2) + 12]) + (A_local[j_2 + 11 * i_2]);
+#CHECK: B[j_2 + 10 * i_2] = (A_local[j_2 + 11 * i_2]) + (A_local[(j_2 + 11 * i_2) + 12]);
       )IR");
 
   std::vector<int> b_data(200, 0);
@@ -3816,7 +3827,7 @@ TEST(LoopNest, CacheReadsInternal) {
   checkIR(result, R"IR(
 #CHECK: Allocate(A_local); // dtype=int, dims=[2, 11]
 #CHECK: A_local[j_1 + 11 * i_2] =
-#CHECK: B[10 * i_1 + j_2] = (A_local[j_2 + 12]) + (A_local[j_2]);
+#CHECK: B[j_2 + 10 * i_1] = (A_local[j_2 + 12]) + (A_local[j_2]);
       )IR");
 
   std::vector<int> b_data(200, 0);
@@ -3863,8 +3874,8 @@ TEST(LoopNest, CacheReadsInner) {
 
   checkIR(result, R"IR(
 #CHECK: Allocate(A_local); // dtype=int, dims=[5, 2]
-#CHECK: A_local[2 * i_2 + j_2] =
-#CHECK: B[10 * i_1 + j_1] = (A_local[1]) + (A_local[8]);
+#CHECK: A_local[j_2 + 2 * i_2] =
+#CHECK: B[j_1 + 10 * i_1] = (A_local[1]) + (A_local[8]);
       )IR");
 
   std::vector<int> b_data(200, 0);
@@ -3914,7 +3925,7 @@ TEST(LoopNest, CacheWritesSimple) {
 #CHECK: for (int j = 0; j < 64
 #CHECK:   A_local[j] = i * j;
 #CHECK: for (int j_1 = 0; j_1 < 64
-#CHECK:   A[64 * i + j_1] = A_local[
+#CHECK:   A[j_1 + 64 * i] = A_local[
 #CHECK: Free(A_local);
 #CHECK-NOT: A_local
       )IR");
