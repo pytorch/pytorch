@@ -8363,14 +8363,16 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_inner,
            ),
-    OpInfo('tensordot',
+    OpInfo('linalg.tensordot',
+           op=torch.linalg.tensordot,
+           aliases=('tensordot',),
+           aten_name='linalg_tensordot',
            dtypes=floating_and_complex_types_and(torch.half),
            dtypesIfCPU=all_types_and_complex_and(torch.half, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
            dtypesIfROCM=floating_and_complex_types_and(torch.half, torch.bfloat16),
            safe_casts_outputs=True,
            supports_forward_ad=True,
-           aliases=('linalg.tensordot',),
            sample_inputs_func=sample_inputs_tensordot,
            skips=(
                # Currently failing due to an INTERNAL_ASSERT_FAILED error.
