@@ -1,6 +1,6 @@
 import collections
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import (
     Dict,
     List
@@ -18,11 +18,9 @@ from torch.distributed._sharding_spec import (
     ShardingSpec,
 )
 from torch.distributed._sharding_spec._internals import (
-    is_valid_device,
     check_tensor,
     validate_non_overlapping_shards_metadata
 )
-from torch.distributed.utils import _parse_remote_device
 
 # Tracking for sharded tensor objects.
 _sharded_tensor_lock = threading.Lock()
@@ -66,17 +64,17 @@ class ShardedTensorMetadata(object):
     """
 
     # Metadata about each shard of the Tensor
-    shards_metadata: List[ShardMetadata]
+    shards_metadata: List[ShardMetadata] = field(default_factory=list)
 
     # Size of each dim of the overall Tensor.
-    size: torch.Size
+    size: torch.Size = field(default=torch.Size([]))
 
     # Regular tensor fields
-    dtype: torch.dtype
-    layout: torch.layout
-    requires_grad: bool
-    memory_format: torch.memory_format
-    pin_memory: bool
+    dtype: torch.dtype = field(default=torch.get_default_dtype())
+    layout: torch.layout = field(default=torch.strided)
+    requires_grad: bool = False
+    memory_format: torch.memory_format = field(default=torch.contiguous_format)
+    pin_memory: bool = False
 
     def __getstate__(self):
         # Since torch.memory_format cannot be pickled!
@@ -96,14 +94,15 @@ class ShardedTensorMetadata(object):
             self.layout,
             self.requires_grad,
             mem_format_encoding,
-            self.pin_memory
+            self.pin_memory,
         )
 
     def __setstate__(
         self,
         state,
     ):
-        self.shards_metadata, self.size, self.dtype, self.layout, self.requires_grad, mem_format_encoding, self.pin_memory = state
+        (self.shards_metadata, self.size, self.dtype, self.layout,
+            self.requires_grad, mem_format_encoding, self.pin_memory) = state
 
         if mem_format_encoding == 0:
             self.memory_format = torch.contiguous_format
@@ -161,6 +160,10 @@ class ShardedTensor(object):
             the default process group will be used. If specified the ShardedTensor is only
             built on ranks that are part of this process group and the provided ``sharding_spec``
             is applied in the context of this process group.
+        init_rrefs (bool, optional): Whether or not to initialize
+            :class:`torch.distributed.rpc.RRef`s pointing to remote shards.
+            Need to initialize the RPC Framework if specified as ``True``.
+            Default: ``False``.
     """
 
     def __init__(
@@ -173,10 +176,11 @@ class ShardedTensor(object):
         pin_memory=False,
         memory_format=torch.contiguous_format,
         process_group=None,
+        init_rrefs=False,
     ):
         # prepare initialization, initialize fields like
         # _process_group, _local_shards, etc.
-        self._prepare_init(process_group=process_group)
+        self._prepare_init(process_group=process_group, init_rrefs=init_rrefs)
 
         if dtype is None:
             dtype = torch.get_default_dtype()
@@ -222,19 +226,9 @@ class ShardedTensor(object):
         # do post initialization (i.e. register sharded_tensor_id, initialize_rpc)
         self._post_init()
 
-    def _prepare_init(self, process_group=None):
-        self._rpc_initialized = False
+    def _prepare_init(self, process_group=None, init_rrefs=False):
+        self._init_rrefs = init_rrefs
         self._sharded_tensor_id = None
-        if rpc._is_current_rpc_agent_set():
-            # Validate PG and RPC ranks match.
-            pg_rank = dist.get_rank()
-            rpc_rank = rpc.get_worker_info().id
-            if pg_rank != rpc_rank:
-                raise ValueError(
-                    f'Default ProcessGroup and RPC ranks must be '
-                    f'the same for ShardedTensor, found process group rank: '
-                    f'{pg_rank} and RPC rank: {rpc_rank}'
-                )
 
         self._process_group = (
             process_group
@@ -254,7 +248,11 @@ class ShardedTensor(object):
             _sharded_tensor_current_id += 1
 
         # Initialize RPC if available.
-        if rpc._is_current_rpc_agent_set():
+        if self._init_rrefs:
+            if not rpc._is_current_rpc_agent_set():
+                raise RuntimeError(
+                    'RPC Framework needs to be initialized using'
+                    ' torch.distributed.rpc.init_rpc if init_rrefs is set to True')
             self._init_rpc()
 
     def __del__(self):
@@ -265,7 +263,16 @@ class ShardedTensor(object):
                 _sharded_tensor_map.pop(self._sharded_tensor_id)  # type: ignore[call-overload]
 
     def _init_rpc(self):
-        self._rpc_initialized = True
+        # Validate PG and RPC ranks match.
+        pg_rank = dist.get_rank()
+        rpc_rank = rpc.get_worker_info().id
+        if pg_rank != rpc_rank:
+            raise ValueError(
+                f'Default ProcessGroup and RPC ranks must be '
+                f'the same for ShardedTensor, found process group rank: '
+                f'{pg_rank} and RPC rank: {rpc_rank}'
+            )
+
         self._remote_shards = {}
 
         # Gather all the sharded tensor ids.
@@ -306,7 +313,8 @@ class ShardedTensor(object):
         cls,
         local_shards: List[Shard],
         sharded_tensor_metadata: ShardedTensorMetadata,
-        process_group=None
+        process_group=None,
+        init_rrefs=False,
     ):
         shards_metadata = sharded_tensor_metadata.shards_metadata
 
@@ -319,7 +327,7 @@ class ShardedTensor(object):
         sharded_tensor = cls.__new__(cls)
 
         # prepare initialization
-        sharded_tensor._prepare_init(process_group=process_group)
+        sharded_tensor._prepare_init(process_group=process_group, init_rrefs=init_rrefs)
 
         sharded_tensor._metadata = sharded_tensor_metadata
 
@@ -378,7 +386,7 @@ class ShardedTensor(object):
                     f'sharded_tensor_metadata pin_memory: {sharded_tensor_metadata.pin_memory}'
                 )
 
-            if str(local_shard_tensor.device) != local_device:
+            if local_shard_tensor.device != local_device:
                 raise ValueError(
                     f'Local shard tensor device does not match with local Shard placement! '
                     f'local shard tensor device: {local_shard_tensor.device}, '
@@ -433,17 +441,14 @@ class ShardedTensor(object):
             raise ValueError(f"Invalid sharding dim: {sharding_dim}")
 
         dim_size = dims[sharding_dim]
-        devices = self._sharding_spec.placements  # type: ignore[attr-defined]
-        chunks = len(devices)
+        remote_devices = self._sharding_spec.placements  # type: ignore[attr-defined]
+        chunks = len(remote_devices)
         # split_size computed similar to 'torch.chunk'
         split_size = (dim_size + chunks - 1) // chunks
 
         shards_metadata = []
-        for idx, device in enumerate(devices):
-            if not is_valid_device(device):
-                raise ValueError(f"{device} is not a valid device")
-
-            rank, local_device = self._parse_and_validate_remote_device(device)
+        for idx, remote_device in enumerate(remote_devices):
+            rank, local_device = self._parse_and_validate_remote_device(remote_device)
 
             # Adjust the sharding dim for this rank.
             sharded_dim_size = min(dim_size, split_size * (idx + 1)) - split_size * idx
@@ -458,7 +463,7 @@ class ShardedTensor(object):
                 rank_offsets[sharding_dim] = split_size * idx
                 rank_dims[sharding_dim] = sharded_dim_size
 
-                shard_metadata = ShardMetadata(rank_offsets, rank_dims, device)
+                shard_metadata = ShardMetadata(rank_offsets, rank_dims, remote_device)
                 shards_metadata.append(shard_metadata)
 
                 # Build the local shard for the current rank if it is involved in the sharding spec.
@@ -531,27 +536,29 @@ class ShardedTensor(object):
             pin_memory,
         )
 
-    def _parse_and_validate_remote_device(self, device):
+    def _parse_and_validate_remote_device(self, remote_device: torch.distributed._remote_device):
 
-        on, local_device = _parse_remote_device(device)
+        worker_name = remote_device.worker_name()
+        rank = remote_device.rank()
+        device = remote_device.device()
 
         # Validate rank, skip validation if rank is not part of process group.
         if not distributed_c10d._rank_not_in_group(self._process_group):
-            if isinstance(on, int) and (on < 0 or on >= dist.get_world_size(self._process_group)):
-                raise ValueError(f'Invalid rank: {on}')
+            if rank is not None and (rank < 0 or rank >= dist.get_world_size(self._process_group)):
+                raise ValueError(f'Invalid rank: {rank}')
 
-        if isinstance(on, str):
+        if worker_name is not None:
             if not rpc._is_current_rpc_agent_set():
-                raise RuntimeError(f'RPC framework needs to be initialized for using worker names: {on}')
+                raise RuntimeError(f'RPC framework needs to be initialized for using worker names: {worker_name}')
 
             workers = rpc._get_current_rpc_agent().get_worker_infos()
             for worker in workers:
-                if worker.name == on:
-                    return worker.id, local_device
+                if worker.name == worker_name:
+                    return worker.id, device
 
-            raise ValueError(f'Invalid worker name: {on}')
+            raise ValueError(f'Invalid worker name: {worker_name}')
 
-        return on, local_device
+        return rank, device
 
     def sharding_spec(self) -> ShardingSpec:
         """
@@ -591,11 +598,12 @@ class ShardedTensor(object):
         Returns a Dict[int, RRef] with keys being the RPC rank and values
         being RRefs to shards on that rank. Need to initialize the
         RPC framework for this functionality.
+
+        Raises an exception if ShardedTensor was created with ``init_rrefs=False``
         """
-        if not self._rpc_initialized:
+        if not self._init_rrefs:
             raise RuntimeError(
-                "RPC was not initialized before creating the ShardedTensor. Please initialize it using "
-                "torch.distributed.rpc.init_rpc before creating the ShardedTensor for remote_shards support"
+                'ShardedTensor created with init_rrefs=False, no RRefs to remote shards available'
             )
         return self._remote_shards
 
@@ -620,7 +628,7 @@ class ShardedTensor(object):
             distributed_c10d.get_world_size(),
         )
 
-        return self._local_shards, self._metadata, pg_state, self._sharding_spec
+        return self._local_shards, self._metadata, pg_state, self._sharding_spec, self._init_rrefs
 
     def __setstate__(self, state):
         self._sharded_tensor_id = None
@@ -629,8 +637,7 @@ class ShardedTensor(object):
                 'Need to initialize default process group using '
                 '"init_process_group" before loading ShardedTensor')
 
-        self._local_shards, self._metadata, pg_state, self._sharding_spec = state
-        self._rpc_initialized = False
+        self._local_shards, self._metadata, pg_state, self._sharding_spec, self._init_rrefs = state
 
         # Setup process group
         global _CURRENT_PROCESS_GROUP
