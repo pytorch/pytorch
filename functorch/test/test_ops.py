@@ -25,10 +25,38 @@ from common_utils import (
     get_exhaustive_batched_inputs,
     opinfo_in_dict,
 )
+from torch.testing._internal.common_methods_invocations import SkipInfo
 import types
 from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map
 from functorch import grad, vjp, vmap
 from functorch._src.eager_transforms import _as_tuple
+
+def xfail(op_name, variant_name=None, *, device_type=None, dtypes=None, expected_failure=True):
+    return (op_name, variant_name, device_type, dtypes, expected_failure)
+
+def skipOps(test_case_name, base_test_name, to_skip):
+    all_opinfos = functorch_lagging_op_db + additional_op_db
+    for xfail in to_skip:
+        op_name, variant_name, device_type, dtypes, expected_failure = xfail
+        if variant_name is None:
+            # match all variants
+            matching_opinfos = [o for o in all_opinfos if o.name == op_name]
+            assert len(matching_opinfos) >= 1, f"Couldn't find OpInfo for {xfail}"
+        else:
+            matching_opinfos = [o for o in all_opinfos
+                                if o.name == op_name and o.variant_test_name == variant_name]
+            assert len(matching_opinfos) >= 1, f"Couldn't find OpInfo for {xfail}"
+        for opinfo in matching_opinfos:
+            decorators = list(opinfo.decorators)
+            decorators.append(SkipInfo(test_case_name, base_test_name,
+                                       device_type=device_type, dtypes=dtypes,
+                                       expected_failure=True))
+            opinfo.decorators = tuple(decorators)
+
+    # This decorator doesn't modify fn in any way
+    def wrapped(fn):
+        return fn
+    return wrapped
 
 # Version of autograd.grad that handles outputs that don't depend on inputs
 def _autograd_grad(outputs, inputs, grad_outputs=None, retain_graph=False, create_graph=True):
@@ -140,22 +168,16 @@ def is_inplace(op, variant):
 
 
 vjp_fail = {
-    'linalg.cholesky',
-    'linalg.inv',
-    'linalg.matrix_power',
-    'linalg.matrix_norm',
-    'linalg.norm',
-    'nanquantile',
-    'quantile',
-    'tensor_split',
-    'norm',
-    'to_sparse',
-    'fft.hfft',
+    xfail('linalg.cholesky'),
+    xfail('linalg.inv'),
+    xfail('linalg.matrix_power'),
+    xfail('tensor_split'),
+    xfail('to_sparse'),
 }
-
 
 class TestOperators(TestCase):
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    @skipOps('TestOperators', 'test_grad', vjp_fail)
     def test_grad(self, device, dtype, op):
         if op.name in vjp_fail:
             self.skipTest("Skipped; Expected failures")
@@ -197,11 +219,8 @@ class TestOperators(TestCase):
             self.assertEqual(result, expected)
 
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    @skipOps('TestOperators', 'test_vjp', vjp_fail)
     def test_vjp(self, device, dtype, op):
-        if op.name in vjp_fail:
-            self.skipTest("Skipped; Expected failures")
-            return
-
         if not op.supports_autograd:
             self.skipTest("Skipped! Autograd not supported.")
             return
@@ -228,14 +247,8 @@ class TestOperators(TestCase):
             self.assertEqual(result_vjps, expected_vjps)
 
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    @skipOps('TestOperators', 'test_vjpvjp', vjp_fail)
     def test_vjpvjp(self, device, dtype, op):
-        op_skip = set({
-        })
-        op_skip = op_skip.union(vjp_fail)
-        if op.name in op_skip:
-            self.skipTest("Skipped; Expected failures")
-            return
-
         if not op.supports_autograd:
             self.skipTest("Skipped! Autograd not supported.")
             return
@@ -314,76 +327,52 @@ class TestOperators(TestCase):
                 self.assertEqual(loop_out, batched_out, atol=1e-4, rtol=1e-4)
 
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    @skipOps('TestOperators', 'test_vmapvjp', vjp_fail.union({
+        xfail('clamp', ''),
+        xfail('diag_embed'),
+        xfail('eig'),
+        xfail('fft.ihfft'),
+        xfail('fft.rfft'),
+        xfail('fft.rfftn'),
+        xfail('fmax'),
+        xfail('fmin'),
+        xfail('index_add'),
+        xfail('index_copy'),
+        xfail('index_fill'),
+        xfail('linalg.det', ''),
+        xfail('linalg.eigh'),
+        xfail('linalg.eigvals', device_type='cuda'),
+        xfail('linalg.householder_product'),
+        xfail('linalg.matrix_norm'),
+        xfail('linalg.norm'),
+        xfail('linalg.slogdet'),
+        xfail('log_softmax'),
+        xfail('logdet'),
+        xfail('lu'),
+        xfail('lu_unpack'),
+        xfail('masked_fill'),
+        xfail('masked_scatter'),
+        xfail('max', 'reduction_no_dim', device_type='cpu'),
+        xfail('median', device_type='cpu'),
+        xfail('min', 'reduction_no_dim', device_type='cpu'),
+        xfail('nanmedian', device_type='cpu'),
+        xfail('nanquantile'),
+        xfail('nn.functional.pad', 'circular'),
+        xfail('norm', 'fro'),
+        xfail('norm', 'nuc'),
+        xfail('prod'),
+        xfail('put'),
+        xfail('quantile'),
+        xfail('symeig'),
+        xfail('t', device_type='cuda'),
+        xfail('take'),
+        xfail('unfold'),
+        xfail('view_as_complex'),
+    }))
     def test_vmapvjp(self, device, dtype, op):
-        op_skip = {
-            'nn.functional.pad.circular',
-            'broadcast_to',
-            'dsplit',
-            'dstack',
-            'einsum',
-            'gradient',
-            'hsplit',
-            'hstack',
-            'linalg.multi_dot',
-            'lu',
-            'moveaxis',
-            'positive',
-            'ravel',
-            'squeeze',
-            'unfold',
-            'vsplit',
-            'vstack',
-            'resolve_conj',
-            'resolve_neg',
-            'cholesky',
-            'cholesky_inverse',
-            'clamp',
-            'diag_embed',
-            'eig',
-            'fft.ihfft',
-            'fft.rfft',
-            'fft.rfftn',
-            'fmax',
-            'fmin',
-            'index_add',
-            'index_copy',
-            'index_fill',
-            'inverse',
-            'linalg.cholesky_ex',
-            'linalg.det',
-            'linalg.eig',
-            'linalg.eigh',
-            'linalg.eigvalsh',
-            'linalg.householder_product',
-            'linalg.inv_ex',
-            'linalg.pinv',
-            'linalg.pinv',
-            'linalg.slogdet',
-            'linalg.svdvals',
-            'linalg.qr',
-            'log_softmax',
-            'logdet',
-            'lu_unpack',
-            'masked_fill',
-            'masked_scatter',
-            'max',
-            'median',
-            'min',
-            'nanmedian',
-            'nn.functional.conv2d',
-            'nn.functional.linear',
-            'pinverse',
-            'prod',
-            'put',
-            'qr',
-            'symeig',
-            'take',
-            'view_as_complex',
-        }
-        op_skip = op_skip.union(vjp_fail)
-        if opinfo_in_dict(op, op_skip):
-            self.skipTest("Skipped; Expected failures")
-            return
+        # These are too annoying to put into the list above
+        if op.name in {'nn.functional.linear', 'nn.functional.conv2d'}:
+            self.skipTest("Skipped! ExpectedF failures")
         if not op.supports_autograd:
             self.skipTest("Skipped! Autograd not supported.")
             return
@@ -401,40 +390,23 @@ class TestOperators(TestCase):
                 self.assertEqual(loop_out, batched_out, atol=1e-4, rtol=1e-4)
 
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    @skipOps('TestOperators', 'test_vjpvmap', vjp_fail.union({
+        xfail('__getitem__'),
+        xfail('broadcast_to'),
+        xfail('clamp', ''),
+        xfail('dsplit'),
+        xfail('fill_'),
+        xfail('gradient'),
+        xfail('hsplit'),
+        xfail('nn.functional.pad', 'circular'),
+        xfail('positive'),
+        xfail('ravel'),
+        xfail('resolve_conj'),
+        xfail('resolve_neg'),
+        xfail('unfold'),
+        xfail('vsplit'),
+    }))
     def test_vjpvmap(self, device, dtype, op):
-        op_skip = {
-            'nn.functional.pad.circular',
-            '__getitem__',
-            'broadcast_to',
-            'dsplit',
-            'gradient',
-            'hsplit',
-            'linalg.cholesky',
-            'linalg.inv',
-            'linalg.matrix_norm',
-            'linalg.matrix_power',
-            'linalg.norm',
-            'lu',
-            'moveaxis',
-            'nanquantile',
-            'positive',
-            'quantile',
-            'ravel',
-            'squeeze',
-            'tensor_split',
-            'unfold',
-            'vsplit',
-            'fill_',
-            'norm',
-            'resolve_conj',
-            'to_sparse',
-            'clamp',
-            'resolve_neg',
-        }
-        if opinfo_in_dict(op, op_skip):
-            self.skipTest("Skipped; Expected failures")
-            return
-
         if not op.supports_autograd:
             # If the op doesn't support autograd, vmap(op) won't either
             self.skipTest("Skipped! Autograd not supported.")
