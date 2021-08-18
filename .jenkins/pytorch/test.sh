@@ -241,17 +241,6 @@ if [[ "${BUILD_ENVIRONMENT}" == *tbb* ]]; then
   sudo cp -r "$PWD"/third_party/tbb/include/tbb/* /usr/include/tbb
 fi
 
-test_torch_deploy_begin() {
-  python torch/csrc/deploy/example/generate_examples.py
-  ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
-  ln -sf "$TORCH_LIB_DIR"/libshm* "$TORCH_BIN_DIR"
-  ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
-}
-
-test_torch_deploy_end() {
-  assert_git_not_dirty
-}
-
 test_libtorch() {
   if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
     echo "Testing libtorch"
@@ -280,9 +269,8 @@ test_libtorch() {
     python test/cpp/jit/tests_setup.py shutdown
     # Wait for background download to finish
     wait
-    test_torch_deploy_begin # test_api now includes IMethodTest that relies on torch::deploy.
-    OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" "$TORCH_BIN_DIR"/test_api --gtest_output=xml:$TEST_REPORTS_DIR/test_api.xml
-    test_torch_deploy_end
+    # Excludes IMethodTest that relies on torch::deploy.
+    OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" "$TORCH_BIN_DIR"/test_api --gtest_filter='-IMethodTest.*' --gtest_output=xml:$TEST_REPORTS_DIR/test_api.xml
     "$TORCH_BIN_DIR"/test_tensorexpr --gtest_output=xml:$TEST_REPORTS_DIR/test_tensorexpr.xml
     "$TORCH_BIN_DIR"/test_mobile_nnc --gtest_output=xml:$TEST_REPORTS_DIR/test_mobile_nnc.xml
     if [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-py3* ]]; then
@@ -486,9 +474,13 @@ test_vec256() {
 }
 
 test_torch_deploy() {
-  test_torch_deploy_begin
+  python torch/csrc/deploy/example/generate_examples.py
+  ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
+  ln -sf "$TORCH_LIB_DIR"/libshm* "$TORCH_BIN_DIR"
+  ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
   "$TORCH_BIN_DIR"/test_deploy
-  test_torch_deploy_end
+  "$TORCH_BIN_DIR"/test_api --gtest_filter='IMethodTest.*'
+  assert_git_not_dirty
 }
 
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
