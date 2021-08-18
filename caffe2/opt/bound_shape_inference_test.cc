@@ -54,7 +54,6 @@ void verifyShapeInfo(
 
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundShapeInference, SparseLengthsSum) {
   NetDef net;
   net.add_op()->CopyFrom(CreateOperatorDef(
@@ -94,7 +93,6 @@ TEST(BoundShapeInference, SparseLengthsSum) {
       {spec.max_batch_size, 16});
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundShapeInference, SparseLengthsSumSparseLookup) {
   NetDef net;
   net.add_op()->CopyFrom(CreateOperatorDef(
@@ -152,7 +150,6 @@ TEST(BoundShapeInference, SparseLengthsSumSparseLookup) {
       TensorProto_DataType_INT32);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundShapeInference, SparseLengthsSumFused8BitRowwise) {
   NetDef net;
   net.add_op()->CopyFrom(CreateOperatorDef(
@@ -198,7 +195,6 @@ TEST(BoundShapeInference, SparseLengthsSumFused8BitRowwise) {
       {spec.max_batch_size, 50});
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundShapeInference, SparseLengthsSum8BitRowwiseSparse) {
   NetDef net;
   net.add_op()->CopyFrom(CreateOperatorDef(
@@ -256,7 +252,6 @@ TEST(BoundShapeInference, SparseLengthsSum8BitRowwiseSparse) {
       {spec.max_batch_size, 50});
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundShapeInference, SparseLengthsSumFused4BitRowwise) {
   NetDef net;
   net.add_op()->CopyFrom(CreateOperatorDef(
@@ -302,7 +297,6 @@ TEST(BoundShapeInference, SparseLengthsSumFused4BitRowwise) {
       {spec.max_batch_size, 100});
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundShapeInference, LengthsRangeFill) {
   NetDef net;
   net.add_op()->CopyFrom(
@@ -334,7 +328,6 @@ TEST(BoundShapeInference, LengthsRangeFill) {
 }
 
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundShapeInference, ConstantFill) {
   NetDef net;
   net.add_op()->CopyFrom(
@@ -359,7 +352,6 @@ TEST(BoundShapeInference, ConstantFill) {
 }
 
 // https://github.com/pytorch/pytorch/issues/40861
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundShapeInference, DISABLED_ON_WINDOWS(Reshape)) {
   NetDef net;
   std::vector<int> new_shape{-1, 8};
@@ -412,7 +404,6 @@ TEST(BoundShapeInference, DISABLED_ON_WINDOWS(Reshape)) {
   EXPECT_TRUE(out_shape.find("Y2") == out_shape.end());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundShapeInference, ConcatMissingInput) {
   NetDef net;
   net.add_op()->CopyFrom(CreateOperatorDef(
@@ -446,7 +437,6 @@ TEST(BoundShapeInference, ConcatMissingInput) {
 }
 
 // See https://github.com/pytorch/pytorch/issues/35544
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     BoundShapeInference,
     DISABLED_ON_WINDOWS(Int8QuantizeInferInputBackwards)) {
@@ -506,7 +496,6 @@ TEST(
       true);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundShapeInference, ConcatInferInputBackwards) {
   NetDef net;
   net.add_op()->CopyFrom(CreateOperatorDef(
@@ -557,7 +546,6 @@ TEST(BoundShapeInference, ConcatInferInputBackwards) {
       {spec.max_batch_size, 101 - 60});
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundShapeInference, ElementwiseInferInputBackwards) {
   NetDef net;
   net.add_op()->CopyFrom(CreateOperatorDef(
@@ -605,7 +593,6 @@ TEST(BoundShapeInference, ElementwiseInferInputBackwards) {
       {spec.max_batch_size, 50});
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundShapeInference, ElementwiseOp) {
   NetDef net;
   net.add_op()->CopyFrom(CreateOperatorDef(
@@ -669,7 +656,6 @@ TEST(BoundShapeInference, ElementwiseOp) {
       {spec.max_batch_size, 40});
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundShapeInference, Bucketize) {
   NetDef net;
   net.add_op()->CopyFrom(CreateOperatorDef(
@@ -696,7 +682,6 @@ TEST(BoundShapeInference, Bucketize) {
       TensorProto_DataType_INT32);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundShapeInference, Split) {
   NetDef net;
   net.add_op()->CopyFrom(CreateOperatorDef(
@@ -781,7 +766,6 @@ TEST(BoundShapeInference, Split) {
 }
 
 // https://github.com/pytorch/pytorch/issues/41471
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundShapeInference, DISABLED_ON_WINDOWS(FC)) {
   NetDef net;
   net.add_op()->CopyFrom(
@@ -859,7 +843,6 @@ TEST(BoundShapeInference, DISABLED_ON_WINDOWS(FC)) {
       true);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundShapeInference, FC3D) {
   NetDef net;
   net.add_op()->CopyFrom(
@@ -890,7 +873,6 @@ TEST(BoundShapeInference, FC3D) {
       {spec.max_batch_size, 16});
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundShapeInference, Quantization) {
   NetDef net;
   net.add_op()->CopyFrom(CreateOperatorDef(
@@ -914,7 +896,6 @@ TEST(BoundShapeInference, Quantization) {
       TensorProto_DataType_UINT8);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundShapeInference, Tile) {
   NetDef net;
   net.add_op()->CopyFrom(CreateOperatorDef(
@@ -953,7 +934,6 @@ TEST(BoundShapeInference, Tile) {
       {8, 16});
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundShapeInference, Combo0) {
   NetDef net;
   net.add_op()->CopyFrom(CreateOperatorDef(
@@ -1003,7 +983,6 @@ TEST(BoundShapeInference, Combo0) {
       {spec.max_batch_size, 2});
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundShapeInference, Softmax) {
   NetDef net;
   net.add_op()->CopyFrom(CreateOperatorDef(
@@ -1030,7 +1009,6 @@ TEST(BoundShapeInference, Softmax) {
       {1, 16});
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundShapeInference, LpNorm) {
   NetDef net;
   net.add_op()->CopyFrom(CreateOperatorDef(
@@ -1057,7 +1035,6 @@ TEST(BoundShapeInference, LpNorm) {
       {1});
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundShapeInference, Transpose) {
   NetDef net;
   std::vector<int> axes{1, 0};

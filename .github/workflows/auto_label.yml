@@ -8,6 +8,7 @@ on:
 
 jobs:
   auto-label-rocm:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: ubuntu-18.04
     steps:
     - name: Retrieve information

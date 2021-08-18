@@ -58,7 +58,6 @@ struct MetalGuardImpl final : public c10::impl::DeviceGuardImplInterface {
       noexcept override {}
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_REGISTER_GUARD_IMPL(Metal, MetalGuardImpl);
 
 } // namespace detail

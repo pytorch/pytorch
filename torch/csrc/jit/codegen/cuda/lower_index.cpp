@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/index_compute.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
@@ -211,7 +212,7 @@ void IndexLowering::handle(ReductionOp* rop) {
 
     Val* buffer_size =
         buffer_ids.empty() ? new Int(1) : buffer_ids[0]->rawExtent();
-    for (size_t i = 1; i < buffer_ids.size(); i++) {
+    for (const auto i : c10::irange(1, buffer_ids.size())) {
       buffer_size = mul(buffer_size, buffer_ids[i]->rawExtent());
     }
 
@@ -226,7 +227,7 @@ void IndexLowering::handle(ReductionOp* rop) {
         sync_ids.end());
 
     Val* sync_size = sync_ids.empty() ? new Int(1) : sync_ids[0]->rawExtent();
-    for (size_t i = 1; i < sync_ids.size(); i++) {
+    for (const auto i : c10::irange(1, sync_ids.size())) {
       sync_size = mul(sync_size, sync_ids[i]->rawExtent());
     }
 

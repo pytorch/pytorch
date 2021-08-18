@@ -167,10 +167,15 @@ void fractional_max_pool3d_out_cuda_template(
 
     int64_t ndims = input.ndimension();
     TORCH_CHECK(
-      input.numel() != 0 && (ndims == 4 || ndims == 5),
-      "fractional_max_pool3d_out_cuda_template(): ",
-      "non-empty 4D or 5D (batch mode) tensor expected for input, but got: ",
-      ndims);
+                ndims == 4 || ndims == 5,
+                "fractional_max_pool3d_out_cuda_template(): ",
+                "Expected 4D or 5D tensor, but got: ", input.sizes());
+    for (int64_t i = 1; i < ndims; ++i) {
+      TORCH_CHECK(input.size(i) > 0,
+        "fractional_max_pool3d_out_cuda_template(): ",
+        "Expected input to have non-zero size for non-batch dimensions, but got",
+        input.sizes(), " with dimension ", i, " being empty.");
+    }
 
     if (ndims == 5) {
       numBatch = input.size(0);
@@ -221,6 +226,9 @@ void fractional_max_pool3d_out_cuda_template(
       output_ = output_.reshape({1, numPlanes, outputT, outputH, outputW});
       indices_ = indices_.reshape({1, numPlanes, outputT, outputH, outputW});
       input_ = input_.reshape({1, numPlanes, inputT, inputH, inputW});
+    }
+    if (output_.numel() == 0) {
+      return;
     }
 
     // block is limited to 4 warps
@@ -308,6 +316,10 @@ void fractional_max_pool3d_backward_out_cuda_template(
                                          outputH, outputW});
       indices_ = indices_.reshape({1, indices.size(0), outputT, outputH,
                                    outputW});
+    }
+
+    if (gradInput.numel() == 0) {
+      return;
     }
 
     /* backprop */
