@@ -5405,27 +5405,6 @@ else:
             ((0, 0), 'constant', ((0, 100), (1, 0)), {'constant_values': 1234}),
             ((0, 0), 'constant', ((1, 1), (1, 1)), {'constant_values': 1234}),
             ((0, 0), 'constant', ((0, 0), (0, 0)), {'constant_values': 1234}),
-
-            #################################################
-            # 'empty' mode
-            ((10, 10, 10), 'empty', ((0, 0), (0, 0), (0, 0)), {}),
-            ((4, 13, 2, 5), 'empty', ((3, 2), (8, 10), (1, 0), (5, 6)), {}),
-            ((10, 10), 'empty', ((2, 2), (2, 2)), {}),
-            ((10, 10), 'empty', ((2, 2), (2, 2)), {}),
-            ((5, 2, 4, 1, 7), 'empty', ((1, 2), (6, 4), (10, 7), (3, 3), (0, 0)), {}),
-            ((15,), 'empty', ((100, 100),), {}),
-
-            # pad_width containing zeros, and degenerate inputs
-            ((15,), 'empty', ((0, 1000),), {}),
-            ((15,), 'empty', ((100, 0),), {}),
-            ((0,), 'empty', ((100, 0),), {}),
-            ((0,), 'empty', ((0, 100),), {}),
-            ((0,), 'empty', ((0, 0),), {}),
-            ((0, 0), 'empty', ((100, 0), (100, 100)), {}),
-            ((0, 0), 'empty', ((1, 0), (1, 0)), {}),
-            ((0, 0), 'empty', ((0, 100), (1, 0)), {}),
-            ((0, 0), 'empty', ((1, 1), (1, 1)), {}),
-            ((0, 0), 'empty', ((0, 0), (0, 0)), {}),
         ]
 
         # 'constant' mode with each combination of the different formats for
@@ -5481,32 +5460,7 @@ else:
             msg = f'input_size: {input_size}, mode: {mode}, pad_width: {pad_width}, kwargs: {kwargs}'
 
             self.assertEqual(result.size(), result_np.size(), msg=msg)
-
-            if mode == 'empty':
-                # For empty mode, only check the non-padded elements,
-                # since the padded elements could have any value
-
-                if input.numel() == 0:
-                    continue
-
-                slices = []
-
-                pw = torch.tensor(pad_width)
-
-                if pw.numel() == 1:
-                    pw = pw.as_strided((input.dim(), 2), (0, 0))
-                elif (pw.dim() == 2) and (pw.size(0) == input.dim()) and (pw.size(1) == 1):
-                    pw = pw.as_strided((input.dim(), 2), (1, 0))
-                elif pw.numel() == 2:
-                    pw = pw.as_strided((input.dim(), 2), (0, 1))
-
-                for (before, after), dim_idx in zip(pw, range(input.dim())):
-                    slices.append([before, before + input.size(dim_idx) - 1])
-
-                self.assertEqual(result[slices], result_np[slices], msg=msg)
-
-            else:
-                self.assertEqual(result, result_np, msg=msg)
+            self.assertEqual(result, result_np, msg=msg)
 
     @onlyOnCPUAndCUDA
     @dtypes(*torch.testing.get_all_dtypes())
@@ -5560,13 +5514,6 @@ else:
             with self.assertRaisesRegex(RuntimeError, r"torch.pad: Expected 'pad_width' to be non-negative"):
                 torch.pad(input, pad_width)
 
-        # constant_values should only be legal for mode='constant'
-        for mode in ['empty']:
-            with self.assertRaisesRegex(
-                    RuntimeError,
-                    rf"torch.pad: Unsupported keyword argument for '{mode}' mode: constant_values"):
-                torch.pad(input, 0, mode=mode, constant_values=0)
-
     # This test ensures that torch.pad throws an error if input and
     # tensor constant_values arg have different dtypes.
     @onlyOnCPUAndCUDA
@@ -5588,7 +5535,7 @@ else:
     @onlyOnCPUAndCUDA
     @dtypes(*torch.testing.get_all_dtypes())
     def test_pad_errors_devices(self, device, dtype):
-        modes = ['constant', 'empty']
+        modes = ['constant']
 
         if torch.cuda.is_available():
             # If pad_width is a tensor, it must be CPU

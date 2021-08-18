@@ -73,15 +73,12 @@ std::vector<at::indexing::TensorIndex> pad_width_to_inner_slices(const Tensor& p
 }
 
 enum PadMode {
-  Empty,
   Constant
 };
 
 // Get PadMode enum val from pad mode string
 PadMode get_pad_mode_from_str(c10::string_view mode_str) {
-  if (mode_str.compare("empty") == 0) {
-    return PadMode::Empty;
-  } else if (mode_str.compare("constant") == 0) {
+  if (mode_str.compare("constant") == 0) {
     return PadMode::Constant;
   }
   TORCH_CHECK(false, "torch.pad: Unrecognized mode: ", mode_str);
@@ -237,10 +234,7 @@ Tensor& pad_out_impl(
     result = at::empty(result_size, self.options());
   }
 
-  if (mode == PadMode::Empty) {
-    fill_input(result, self, pad_width_);
-
-  } else if (mode == PadMode::Constant) {
+  if (mode == PadMode::Constant) {
     fill_input(result, self, pad_width_);
 
     Tensor constant_values = at::native::_expand_pad_specifier(
