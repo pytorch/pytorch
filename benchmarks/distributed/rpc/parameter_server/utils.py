@@ -36,7 +36,7 @@ def process_bucket_with_remote_server(state, bucket):
         bucket (GradBucket): gradient bucket
     """
     cref = state.cref
-    tensor = bucket.get_tensor()
+    tensor = bucket.buffer()
     if not cref.use_cuda_rpc:
         tensor = tensor.cpu()
     sparse = tensor.is_sparse
