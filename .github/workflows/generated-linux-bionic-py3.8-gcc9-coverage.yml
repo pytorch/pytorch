@@ -31,7 +31,7 @@ concurrency:
 jobs:
   ciflow_should_run:
     runs-on: ubuntu-18.04
-    if: ${{ (github.event_name != 'pull_request') || (github.event.action !='unassigned') || (github.event.action == 'unassigned' && contains(github.event.pull_request.labels.*.name, 'ciflow/default')) }}
+    if: ${{ (github.event_name != 'pull_request') || (github.event.action !='unassigned') || (contains(github.event.pull_request.labels.*.name, 'ciflow/coverage') || contains(github.event.pull_request.labels.*.name, 'ciflow/cpu') || contains(github.event.pull_request.labels.*.name, 'ciflow/default') || contains(github.event.pull_request.labels.*.name, 'ciflow/linux')) }}
     steps:
       - name: noop
         run: echo running ciflow_should_run
@@ -363,6 +363,10 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Report coverage
+        run: |
+          python3 -mpip install codecov
+          python3 -mcodecov
       - name: Zip test reports for upload
         if: always()
         env:
@@ -410,7 +414,7 @@ jobs:
   # doesn't create the best experience
   render_test_results:
     needs: [generate-test-matrix, test, ciflow_should_run]
-    if: ${{ needs.test.result == 'success' || needs.test.result == 'failure' }}
+    if: ${{ needs.test.result != 'skipped' || failure() }}
     runs-on: linux.2xlarge
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.render-matrix) }}

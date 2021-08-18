@@ -2362,10 +2362,18 @@ corresponding to the polar coordinates with absolute value :attr:`abs` and angle
 
 .. math::
     \text{out} = \text{abs} \cdot \cos(\text{angle}) + \text{abs} \cdot \sin(\text{angle}) \cdot j
+
+.. note::
+    `torch.polar` is similar to
+    `std::polar <https://en.cppreference.com/w/cpp/numeric/complex/polar>`_
+    and does not compute the polar decomposition
+    of a complex tensor like Python's `cmath.polar` and SciPy's `linalg.polar` do.
+    The behavior of this function is undefined if `abs` is negative or NaN, or if `angle` is
+    infinite.
+
 """ + r"""
 Args:
-    abs (Tensor): The absolute value the complex tensor. Must be float or
-        double.
+    abs (Tensor): The absolute value the complex tensor. Must be float or double.
     angle (Tensor): The angle of the complex tensor. Must be same dtype as
         :attr:`abs`.
 
@@ -9350,6 +9358,8 @@ Example::
     tensor([[ 0.4875,  0.3938],
             [ 0.9158, -0.6929],
             [-0.5872,  0.6932]])
+
+See also :func:`torch.transpose`.
 """.format(**common_args))
 
 add_docstr(torch.flip,
@@ -9709,6 +9719,8 @@ Example::
     tensor([[ 1.0028, -0.1669],
             [-0.9893,  0.7299],
             [ 0.5809,  0.4942]])
+
+See also :func:`torch.t`.
 """.format(**common_args))
 
 add_docstr(torch.triangular_solve,
@@ -10039,8 +10051,8 @@ Returns a new tensor with the data in :attr:`input` fake quantized using :attr:`
 
 Args:
     input (Tensor): the input value(s), in ``torch.float32``.
-    scale (double): quantization scale
-    zero_point (int64): quantization zero_point
+    scale (double or Tensor): quantization scale
+    zero_point (int64 or Tensor): quantization zero_point
     quant_min (int64): lower bound of the quantized domain
     quant_max (int64): upper bound of the quantized domain
 
@@ -10054,6 +10066,8 @@ Example::
     tensor([ 0.0552,  0.9730,  0.3973, -1.0780])
     >>> torch.fake_quantize_per_tensor_affine(x, 0.1, 0, 0, 255)
     tensor([0.1000, 1.0000, 0.4000, 0.0000])
+    >>> torch.fake_quantize_per_tensor_affine(x, torch.tensor(0.1), torch.tensor(0), 0, 255)
+    tensor([0.6000, 0.4000, 0.0000, 0.0000])
 """)
 
 add_docstr(torch.fake_quantize_per_channel_affine,
@@ -11166,14 +11180,14 @@ quantize_per_tensor(input, scale, zero_point, dtype) -> Tensor
 Converts a float tensor to a quantized tensor with given scale and zero point.
 
 Arguments:
-    input (Tensor): float tensor to quantize
-    scale (float): scale to apply in quantization formula
-    zero_point (int): offset in integer value that maps to float zero
+    input (Tensor): float tensor or list of tensors to quantize
+    scale (float or Tensor): scale to apply in quantization formula
+    zero_point (int or Tensor): offset in integer value that maps to float zero
     dtype (:class:`torch.dtype`): the desired data type of returned tensor.
         Has to be one of the quantized dtypes: ``torch.quint8``, ``torch.qint8``, ``torch.qint32``
 
 Returns:
-    Tensor: A newly quantized tensor
+    Tensor: A newly quantized tensor or list of quantized tensors.
 
 Example::
 
@@ -11182,6 +11196,15 @@ Example::
            quantization_scheme=torch.per_tensor_affine, scale=0.1, zero_point=10)
     >>> torch.quantize_per_tensor(torch.tensor([-1.0, 0.0, 1.0, 2.0]), 0.1, 10, torch.quint8).int_repr()
     tensor([ 0, 10, 20, 30], dtype=torch.uint8)
+    >>> torch.quantize_per_tensor([torch.tensor([-1.0, 0.0]), torch.tensor([-2.0, 2.0])],
+    >>> torch.tensor([0.1, 0.2]), torch.tensor([10, 20]), torch.quint8)
+    (tensor([-1.,  0.], size=(2,), dtype=torch.quint8,
+        quantization_scheme=torch.per_tensor_affine, scale=0.1, zero_point=10),
+        tensor([-2.,  2.], size=(2,), dtype=torch.quint8,
+        quantization_scheme=torch.per_tensor_affine, scale=0.2, zero_point=20))
+    >>> torch.quantize_per_tensor(torch.tensor([-1.0, 0.0, 1.0, 2.0]), torch.tensor(0.1), torch.tensor(10), torch.quint8)
+    tensor([-1.,  0.,  1.,  2.], size=(4,), dtype=torch.quint8,
+       quantization_scheme=torch.per_tensor_affine, scale=0.10, zero_point=10)
 """)
 
 add_docstr(torch.quantize_per_channel,
@@ -11214,6 +11237,114 @@ Example::
     tensor([[  0,  10],
             [100, 200]], dtype=torch.uint8)
 """)
+
+
+add_docstr(torch.quantized_batch_norm,
+           r"""
+quantized_batch_norm(input, weight=None, bias=None, mean, var, eps, output_scale, output_zero_point) -> Tensor
+
+Applies batch normalization on a 4D (NCHW) quantized tensor.
+
+.. math::
+
+        y = \frac{x - \mathrm{E}[x]}{\sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
+
+Arguments:
+    input (Tensor): quantized tensor
+    weight (Tensor): float tensor that corresponds to the gamma, size C
+    bias (Tensor):  float tensor that corresponds to the beta, size C
+    mean (Tensor): float mean value in batch normalization, size C
+    var (Tensor): float tensor for variance, size C
+    eps (float): a value added to the denominator for numerical stability.
+    output_scale (float): output quantized tensor scale
+    output_zero_point (int): output quantized tensor zero_point
+
+Returns:
+    Tensor: A quantized tensor with batch normalization applied.
+
+Example::
+
+    >>> qx = torch.quantize_per_tensor(torch.rand(2, 2, 2, 2), 1.5, 3, torch.quint8)
+    >>> torch.quantized_batch_norm(qx, torch.ones(2), torch.zeros(2), torch.rand(2), torch.rand(2), 0.00001, 0.2, 2)
+    tensor([[[[-0.2000, -0.2000],
+          [ 1.6000, -0.2000]],
+
+         [[-0.4000, -0.4000],
+          [-0.4000,  0.6000]]],
+
+
+        [[[-0.2000, -0.2000],
+          [-0.2000, -0.2000]],
+
+         [[ 0.6000, -0.4000],
+          [ 0.6000, -0.4000]]]], size=(2, 2, 2, 2), dtype=torch.quint8,
+       quantization_scheme=torch.per_tensor_affine, scale=0.2, zero_point=2)
+""")
+
+
+add_docstr(torch.quantized_max_pool1d,
+           r"""
+quantized_max_pool1d(input, kernel_size, stride=[], padding=0, dilation=1, ceil_mode=False) -> Tensor
+
+Applies a 1D max pooling over an input quantized tensor composed of several input planes.
+
+Arguments:
+    input (Tensor): quantized tensor
+    kernel_size (list of int): the size of the sliding window
+    stride (``list of int``, optional): the stride of the sliding window
+    padding (``list of int``, opttional): padding to be added on both sides, must be >= 0 and <= kernel_size / 2
+    dilation (``list of int``, optional): The stride between elements within a sliding window, must be > 0. Default 1
+    ceil_mode (bool, optional):  If True, will use ceil instead of floor to compute the output shape.
+        Defaults to False.
+
+
+Returns:
+    Tensor: A quantized tensor with max_pool1d applied.
+
+Example::
+
+    >>> qx = torch.quantize_per_tensor(torch.rand(2, 2), 1.5, 3, torch.quint8)
+    >>> torch.quantized_max_pool1d(qx, [2])
+    tensor([[0.0000],
+            [1.5000]], size=(2, 1), dtype=torch.quint8,
+        quantization_scheme=torch.per_tensor_affine, scale=1.5, zero_point=3)
+""")
+
+
+add_docstr(torch.quantized_max_pool2d,
+           r"""
+quantized_max_pool2d(input, kernel_size, stride=[], padding=0, dilation=1, ceil_mode=False) -> Tensor
+
+Applies a 2D max pooling over an input quantized tensor composed of several input planes.
+
+Arguments:
+    input (Tensor): quantized tensor
+    kernel_size (``list of int``): the size of the sliding window
+    stride (``list of int``, optional): the stride of the sliding window
+    padding (``list of int``, optional): padding to be added on both sides, must be >= 0 and <= kernel_size / 2
+    dilation (``list of int``, optional): The stride between elements within a sliding window, must be > 0. Default 1
+    ceil_mode (bool, optional):  If True, will use ceil instead of floor to compute the output shape.
+        Defaults to False.
+
+
+Returns:
+    Tensor: A quantized tensor with max_pool2d applied.
+
+Example::
+
+    >>> qx = torch.quantize_per_tensor(torch.rand(2, 2, 2, 2), 1.5, 3, torch.quint8)
+    >>> torch.quantized_max_pool2d(qx, [2,2])
+    tensor([[[[1.5000]],
+
+            [[1.5000]]],
+
+
+            [[[0.0000]],
+
+            [[0.0000]]]], size=(2, 2, 1, 1), dtype=torch.quint8,
+        quantization_scheme=torch.per_tensor_affine, scale=1.5, zero_point=3)
+""")
+
 
 add_docstr(torch.Generator,
            r"""

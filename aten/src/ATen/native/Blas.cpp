@@ -136,12 +136,12 @@ Tensor dot(const Tensor &self, const Tensor &other){
   if (self.is_complex()) {
     if (self.is_conj()) {
       if (other.is_conj()) {
-        return (at::dot(self.conj(), other.conj())).conj();
+        return (at::native::dot(self.conj(), other.conj())).conj();
        } else {
-         return at::vdot(self.conj(), other);
+         return at::native::vdot(self.conj(), other);
        }
     } else if (other.is_conj()) {
-      return at::vdot(other.conj(), self);
+      return at::native::vdot(other.conj(), self);
     }
   }
 
@@ -163,12 +163,12 @@ Tensor vdot(const Tensor &self, const Tensor &other){
 
   if (self.is_conj()) {
     if (other.is_conj()) {
-      return at::vdot(other.conj(), self.conj());
+      return at::native::vdot(other.conj(), self.conj());
     } else {
-      return at::dot(self.conj(), other);
+      return at::native::dot(self.conj(), other);
     }
   } else if (other.is_conj()) {
-    return (at::dot(self, other.conj())).conj();
+    return (at::native::dot(self, other.conj())).conj();
   }
 
   at::NoNamesGuard guard;
