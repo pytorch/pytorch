@@ -4171,8 +4171,8 @@ class TestQuantizeFxOps(QuantizationTestCase):
         # one quantize_per_tensor for input
         # check exact counts of quantize and dequantize
         count_check = {
-            ns.call_function(torch.quantize_per_tensor) : 1,
-            ns.call_method('dequantize') : 1
+            ns.call_function(torch.quantize_per_tensor) : 2,
+            ns.call_method('dequantize') : 2
         }
         order_check = [
             ns.call_function(torch.quantize_per_tensor),
