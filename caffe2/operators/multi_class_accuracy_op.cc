@@ -52,11 +52,9 @@ bool MultiClassAccuracyOp<float, CPUContext>::RunOnDevice() {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
   MultiClassAccuracy, MultiClassAccuracyOp<float, CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(MultiClassAccuracy)
   .NumInputs(2)
   .NumOutputs(2)
@@ -84,6 +82,5 @@ and predicted scores of each class for each instance.
     "amounts",
     "1-D int tensor (D,) of number of instances for each class in the batch.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(MultiClassAccuracy);
 }  // namespace caffe2

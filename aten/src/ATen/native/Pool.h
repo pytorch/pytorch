@@ -191,6 +191,7 @@ pool3d_shape_check(
   int dilationT, int dilationH, int dilationW,
   int64_t itime, int64_t iheight, int64_t iwidth,
   int64_t otime, int64_t oheight, int64_t owidth,
+  const char *fn_name,
   bool check_input_size=false)
 {
   const int64_t ndim = input.ndimension();
@@ -205,8 +206,14 @@ pool3d_shape_check(
               "dilation should be greater than zero, but got ",
               "dilationT: ", dilationT, " dilationH: ", dilationH, " dilationW: ", dilationW);
 
-  TORCH_CHECK(input.numel() > 0 && (ndim == 4 || ndim == 5),
-              "non-empty 4D or 5D (batch mode) tensor expected for input, but got ndim: ", ndim);
+  TORCH_CHECK(ndim == 4 || ndim == 5,
+              fn_name, ": Expected 4D or 5D tensor for input, but got: ", input.sizes());
+
+  for (int64_t i = 1; i < ndim; ++i) {
+    TORCH_CHECK(input.size(i) > 0,
+                fn_name, "Expected input to have non-zero size for non-batch dimensions, but got",
+                input.sizes(), " with dimension ", i, " being empty.");
+  }
 
   if (check_input_size) { // AveragePool3d
     TORCH_CHECK(itime >= kT && iheight >= kH && iwidth >= kW,
@@ -237,7 +244,8 @@ max_pool3d_backward_shape_check(
   int pT, int pH, int pW,
   int dilationT, int dilationH, int dilationW,
   int64_t itime, int64_t iheight, int64_t iwidth,
-  int64_t otime, int64_t oheight, int64_t owidth)
+  int64_t otime, int64_t oheight, int64_t owidth,
+  const char* fn_name)
 {
   const int64_t ndim = input.ndimension();
 
@@ -249,7 +257,7 @@ max_pool3d_backward_shape_check(
     pT, pH, pW,
     dilationT, dilationH, dilationW,
     itime, iheight, iwidth,
-    otime, oheight, owidth);
+    otime, oheight, owidth, fn_name);
 
   check_dim_size(gradOutput, ndim, ndim-4, nslices);
   check_dim_size(gradOutput, ndim, ndim-3, otime);
@@ -271,7 +279,8 @@ avg_pool3d_backward_shape_check(
   int dT, int dH, int dW,
   int pT, int pH, int pW,
   int64_t itime, int64_t iheight, int64_t iwidth,
-  int64_t otime, int64_t oheight, int64_t owidth)
+  int64_t otime, int64_t oheight, int64_t owidth,
+  const char *fn_name)
 {
   const int64_t ndim = input.ndimension();
 
@@ -284,7 +293,7 @@ avg_pool3d_backward_shape_check(
     1, 1, 1,
     itime, iheight, iwidth,
     otime, oheight, owidth,
-    true);
+    fn_name, true);
 
   check_dim_size(gradOutput, ndim, ndim-4, nslices);
   check_dim_size(gradOutput, ndim, ndim-3, otime);
