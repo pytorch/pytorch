@@ -17,10 +17,14 @@ namespace jit {
 namespace onnx {
 
 using ValAttrNameMap = std::unordered_map<const Value*, std::string>;
-using NodeAttrNameMap = std::unordered_map<const Node*, std::unordered_map<std::string, std::string>>;
+using NodeAttrNameMap = std::
+    unordered_map<const Node*, std::unordered_map<std::string, std::string>>;
 
-TORCH_API std::pair<ValAttrNameMap, NodeAttrNameMap> ONNXFunctionExtraction(std::shared_ptr<Graph>& graph, const std::vector<std::string>& module_names, const std::vector<std::string>& param_names);
-}
+TORCH_API std::pair<ValAttrNameMap, NodeAttrNameMap> ONNXFunctionExtraction(
+    std::shared_ptr<Graph>& graph,
+    const std::vector<std::string>& module_names,
+    const std::vector<std::string>& param_names);
+} // namespace onnx
 
 } // namespace jit
 } // namespace torch

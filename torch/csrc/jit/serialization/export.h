@@ -32,7 +32,8 @@ using SymbolDimMap = std::map<c10::ShapeSymbol, std::string>;
 
 // Used for modularized export settling function and node attributes.
 using ValAttrNameMap = std::unordered_map<const Value*, std::string>;
-using NodeAttrNameMap = std::unordered_map<const Node*, std::unordered_map<std::string, std::string>>;
+using NodeAttrNameMap = std::
+    unordered_map<const Node*, std::unordered_map<std::string, std::string>>;
 
 TORCH_API std::tuple<
     std::shared_ptr<::ONNX_NAMESPACE::ModelProto>,

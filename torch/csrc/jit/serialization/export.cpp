@@ -304,9 +304,7 @@ class GraphEncoder {
       const bool use_external_data_format = false,
       const std::string& onnx_file_path = std::string());
 
-  void AddAttribute(
-      onnx::FunctionProto* func_proto,
-      const std::string& name);
+  void AddAttribute(onnx::FunctionProto* func_proto, const std::string& name);
 
   SymbolDimMap symbol_dim_map_;
   onnx::ModelProto model_proto_;
@@ -592,11 +590,23 @@ void GraphEncoder::EncodeBlock(
     }
     if (node->kind() == ::c10::Symbol::onnx("LocalFunctionDef")) {
       auto* func_proto = model_proto_.add_functions();
-      EncodeLocalFunction(graph_proto, func_proto, node, add_node_names, use_external_data_format, onnx_file_path);
+      EncodeLocalFunction(
+          graph_proto,
+          func_proto,
+          node,
+          add_node_names,
+          use_external_data_format,
+          onnx_file_path);
       continue;
     }
     auto* n_proto = graph_proto->add_node();
-    EncodeNode(graph_proto, n_proto, node, add_node_names, use_external_data_format, onnx_file_path);
+    EncodeNode(
+        graph_proto,
+        n_proto,
+        node,
+        add_node_names,
+        use_external_data_format,
+        onnx_file_path);
   }
   AddInitializersIntoGraphProto(
       graph_proto,
@@ -674,7 +684,8 @@ void GraphEncoder::EncodeNode(
   }
   node_proto->set_op_type(node->kind().toUnqualString());
   if (add_node_names) {
-    node_proto->set_name(node_proto->op_type() + "_" + std::to_string(num_op_nodes_));
+    node_proto->set_name(
+        node_proto->op_type() + "_" + std::to_string(num_op_nodes_));
     num_op_nodes_++;
   }
   auto attrs_it = node_attr_to_name_.find(node);
@@ -866,7 +877,6 @@ void GraphEncoder::EncodeLocalFunctionOpsetImport(
     onnx::FunctionProto* func_proto,
     const Node* n,
     std::unordered_set<std::string>& custom_domains) {
-
   if (!n->kind().is_onnx()) {
     std::string domain;
     if (n->kind().is_aten() || n->kind().is_caffe2()) {
@@ -891,8 +901,8 @@ void GraphEncoder::EncodeLocalFunctionOpsetImport(
     }
   }
 
-  for (auto *b : n->blocks()) {
-    for (auto *sub_n : b->nodes()) {
+  for (auto* b : n->blocks()) {
+    for (auto* sub_n : b->nodes()) {
       EncodeLocalFunctionOpsetImport(func_proto, sub_n, custom_domains);
     }
   }
@@ -947,7 +957,13 @@ void GraphEncoder::EncodeLocalFunction(
       continue;
     }
     auto* n_proto = func_proto->add_node();
-    EncodeNode(graph_proto, n_proto, fsub_n, add_node_names, use_external_data_format, onnx_file_path);
+    EncodeNode(
+        graph_proto,
+        n_proto,
+        fsub_n,
+        add_node_names,
+        use_external_data_format,
+        onnx_file_path);
     EncodeLocalFunctionOpsetImport(func_proto, fsub_n, custom_domains);
   }
 }
