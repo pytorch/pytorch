@@ -1456,7 +1456,7 @@ class THCUncachedAllocator {
   // allocated streams by device pointer
   std::unordered_map<void*, cudaStream_t> allocated_streams;
 
-  void add_allocated_stream(void *ptr, cudaStream_t stream) {
+  void add_allocated_stream(void* ptr, cudaStream_t stream) {
     std::lock_guard<std::mutex> lock(mutex);
     allocated_streams[ptr] = stream;
   }
@@ -1464,7 +1464,8 @@ class THCUncachedAllocator {
   cudaStream_t get_allocated_stream(void* ptr) {
     std::lock_guard<std::mutex> lock(mutex);
     auto it = allocated_streams.find(ptr);
-    TORCH_INTERNAL_ASSERT(it != allocated_streams.end(), "allocation stream not found");
+    TORCH_INTERNAL_ASSERT(
+        it != allocated_streams.end(), "allocation stream not found");
     cudaStream_t stream = it->second;
     allocated_streams.erase(it);
     return stream;
