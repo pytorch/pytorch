@@ -451,6 +451,11 @@ class TORCH_API Tensor {
     return impl_->is_xla();
   }
 
+  /// Returns if a `Tensor` has Lazy backend.
+  bool is_lazy() const {
+    return impl_->is_lazy();
+  }
+
   /// Returns if a `Tensor` has HIP backend.
   bool is_hip() const {
     // NB: this is not a native function to avoid dispatching overhead.
