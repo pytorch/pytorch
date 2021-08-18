@@ -71,6 +71,11 @@ class TORCH_API Cast : public ExprNode<Cast> {
   Expr* src_value() const {
     return src_value_;
   }
+
+  void set_src_value(Expr* src_value) {
+    src_value_ = src_value;
+  }
+
   static ExprHandle make(Dtype dtype, const ExprHandle& src_value) {
     return ExprHandle(new Cast(dtype, src_value.node()));
   }
@@ -96,6 +101,11 @@ class TORCH_API BitCast : public ExprNode<BitCast> {
   Expr* src_value() const {
     return src_value_;
   }
+
+  void set_src_value(Expr* src_value) {
+    src_value_ = src_value;
+  }
+
   static ExprHandle make(Dtype dtype, const ExprHandle& src_value) {
     return ExprHandle(new BitCast(dtype, src_value.node()));
   }
@@ -128,6 +138,14 @@ class BinaryOpNode : public ExprNode<Op> {
   }
   Expr* rhs() const {
     return this->rhs_;
+  }
+
+  void set_lhs(Expr* lhs) {
+    lhs_ = lhs;
+  }
+
+  void set_rhs(Expr* rhs) {
+    rhs_ = rhs;
   }
 
   static ExprHandle make(const ExprHandle& lhs, const ExprHandle& rhs) {
@@ -319,9 +337,9 @@ Expr* getImmediateByType(Dtype dtype, T initialVal) {
 
 template <typename T>
 T immediateAs(Expr* e) {
-#define TYPE_CASE(Type, Name)                                     \
-  if (const Name##Imm* imm = dynamic_cast<const Name##Imm*>(e)) { \
-    return imm->value();                                          \
+#define TYPE_CASE(Type, Name)                         \
+  if (Name##Imm* imm = dynamic_cast<Name##Imm*>(e)) { \
+    return imm->value();                              \
   }
   AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
@@ -336,9 +354,9 @@ T immediateAs(ExprHandle e) {
 
 template <typename T>
 bool immediateEquals(Expr* e, T val) {
-#define TYPE_CASE(Type, Name)                                     \
-  if (const Name##Imm* imm = dynamic_cast<const Name##Imm*>(e)) { \
-    return imm->value() == val;                                   \
+#define TYPE_CASE(Type, Name)                         \
+  if (Name##Imm* imm = dynamic_cast<Name##Imm*>(e)) { \
+    return imm->value() == val;                       \
   }
   AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
@@ -346,16 +364,7 @@ bool immediateEquals(Expr* e, T val) {
   return false;
 }
 
-template <typename T>
-bool immediateIsNegative(const T* e) {
-#define TYPE_CASE(Type, Name)                                     \
-  if (const Name##Imm* imm = dynamic_cast<const Name##Imm*>(e)) { \
-    return imm->value() < 0;                                      \
-  }
-  AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
-#undef TYPE_CASE
-  return false;
-}
+TORCH_API bool immediateIsNegative(Expr* e);
 
 // Represents a ramp vector node:
 //     [base, base + 1 * stride, ... , base + (lanes - 1) * stride]
@@ -367,6 +376,15 @@ class TORCH_API Ramp : public ExprNode<Ramp> {
   Expr* stride() const {
     return stride_;
   }
+
+  void set_base(Expr* base) {
+    base_ = base;
+  }
+
+  void set_stride(Expr* stride) {
+    stride_ = stride;
+  }
+
   static ExprHandle make(
       const ExprHandle& base,
       const ExprHandle& stride,
@@ -407,6 +425,15 @@ class TORCH_API Load : public ExprNode<Load> {
   Buf* buf() const {
     return buf_;
   }
+
+  void set_buf(Buf* buf) {
+    buf_ = buf;
+  }
+
+  void set_indices(std::vector<Expr*> indices) {
+    indices_ = indices;
+  }
+
   static ExprHandle make(
       Dtype dtype,
       const BufHandle& buf,
@@ -418,10 +445,6 @@ class TORCH_API Load : public ExprNode<Load> {
   Load(Dtype dtype, Buf* base_handle, std::vector<Expr*> indices);
   Load(Buf* base_handle, const std::vector<Expr*>& indices);
 
-  void set_indices(std::vector<Expr*> indices) {
-    indices_ = indices;
-  };
-
  private:
   Buf* buf_;
   std::vector<Expr*> indices_;
@@ -432,6 +455,11 @@ class TORCH_API Broadcast : public ExprNode<Broadcast> {
   Expr* value() const {
     return value_;
   }
+
+  void set_value(Expr* value) {
+    value_ = value;
+  }
+
   int lanes() const {
     return lanes_;
   }
@@ -462,6 +490,18 @@ class TORCH_API IfThenElse : public ExprNode<IfThenElse> {
   // Lazily evaluated only if condition is false
   Expr* false_value() const {
     return false_;
+  }
+
+  void set_condition(Expr* condition) {
+    condition_ = condition;
+  }
+
+  void set_true_value(Expr* true_value) {
+    true_ = true_value;
+  }
+
+  void set_false_value(Expr* false_value) {
+    false_ = false_value;
   }
 
   static ExprHandle make(
@@ -506,6 +546,23 @@ class TORCH_API CompareSelect : public ExprNode<CompareSelect> {
   Expr* ret_val2() const {
     return this->ret_val2_;
   }
+
+  void set_lhs(Expr* lhs) {
+    lhs_ = lhs;
+  }
+
+  void set_rhs(Expr* rhs) {
+    rhs_ = rhs;
+  }
+
+  void set_ret_val1(Expr* ret_val1) {
+    ret_val1_ = ret_val1;
+  }
+
+  void set_ret_val2(Expr* ret_val2) {
+    ret_val2_ = ret_val2;
+  }
+
   CompareSelectBias bias() const {
     return bias_;
   }
@@ -766,6 +823,19 @@ class TORCH_API Intrinsics : public ExprNode<Intrinsics> {
     }
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  Intrinsics(
+      IntrinsicsOp op_type,
+      Dtype dtype,
+      const std::vector<Expr*>& params)
+      : ExprNodeBase(IntrinsicsDtype(op_type, dtype)),
+        params_(params),
+        op_type_(op_type) {
+    if (OpArgCount(op_type) != nparams()) {
+      throw malformed_input("bad arg count in Intrinsics");
+    }
+  }
+
   bool isPure() const {
     return op_type_ != kRand;
   }
@@ -779,6 +849,10 @@ class TORCH_API Intrinsics : public ExprNode<Intrinsics> {
   }
   const std::vector<Expr*>& params() const {
     return params_;
+  }
+
+  void set_params(std::vector<Expr*> params) {
+    params_ = std::move(params);
   }
 
  private:

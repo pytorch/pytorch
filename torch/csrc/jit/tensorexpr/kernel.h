@@ -11,6 +11,8 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
+TORCH_API void overrideThreadCount(int64_t threads);
+
 // Returns true if the TE fuser supports this conv2d.
 bool conv2dIsSupportedJit(const Node* node);
 // Returns true if the TE fuser supports this matmul.

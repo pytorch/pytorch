@@ -72,6 +72,15 @@ static bool te_must_use_llvm_on_cpu = true;
 static bool cat_wo_conditionals = true; // NOLINT
 static bool opt_conditionals = false; // NOLINT
 
+static int64_t& getNumThreads() {
+  static int64_t threads = at::get_num_threads();
+  return threads;
+}
+
+void overrideThreadCount(int64_t threads) {
+  getNumThreads() = threads;
+}
+
 bool setFallbackAllowed(bool value) {
   bool old_value = fallback_allowed;
   fallback_allowed = value;
@@ -627,7 +636,7 @@ ArgValue TensorExprKernel::toArg(const torch::jit::Value* v) const {
 std::vector<ExprHandle> TensorExprKernel::sizesFromVaryingShape(
     const c10::VaryingShape<int64_t>& shape) {
   std::vector<ExprHandle> dims;
-  for (auto i : c10::irange(*shape.size())) {
+  for (const auto i : c10::irange(*shape.size())) {
     dims.push_back(IntImm::make(*shape[i]));
   }
   return dims;
@@ -729,7 +738,7 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
     case aten::remainder:
     case aten::atan2: {
       std::vector<std::vector<ExprHandle>> shapes;
-      for (auto idx : c10::irange(2)) {
+      for (const auto idx : c10::irange(2)) {
         torch::jit::Value* inp = v->node()->input(idx);
         shapes.push_back(sizesForValue(inp));
       }
@@ -740,7 +749,7 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
     case aten::threshold:
     case aten::where: {
       std::vector<std::vector<ExprHandle>> shapes;
-      for (auto idx : c10::irange(3)) {
+      for (const auto idx : c10::irange(3)) {
         torch::jit::Value* inp = v->node()->input(idx);
         shapes.push_back(sizesForValue(inp));
       }
@@ -749,7 +758,7 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
 
     case aten::addcmul: {
       std::vector<std::vector<ExprHandle>> shapes;
-      for (auto idx : c10::irange(4)) {
+      for (const auto idx : c10::irange(4)) {
         torch::jit::Value* inp = v->node()->input(idx);
         shapes.push_back(sizesForValue(inp));
       }
@@ -2486,44 +2495,72 @@ void fuseAllLoops(Stmt* st) {
   }
 }
 
-// Flatten and parallelize outermost loops until available threads are
-// saturated.
+// Prune innermost loops until iterations satisfies a minimum grain size.
+static void pruneByGrainSize(std::vector<For*>& loops) {
+  constexpr int64_t minGrainSize = 32768;
+  int64_t grainSize = 1;
+  for (int64_t i = loops.size(); i > 0; i--) {
+    auto const& loop = loops[i - 1];
+    if (auto stop = dynamic_cast<IntImm*>(loop->stop())) {
+      grainSize *= immediateAs<int>(stop);
+      if (grainSize < minGrainSize) {
+        loops.pop_back();
+      }
+    }
+    break;
+  }
+}
+
+// Retain enough outermost loops to fill the number of threads.
+static void pruneByThreadCount(std::vector<For*>& loops) {
+  int64_t trips = 1;
+  auto threads = getNumThreads();
+  auto it = loops.begin();
+  for (; it != loops.end(); it++) {
+    if (trips >= threads) {
+      break;
+    }
+    auto const& loop = *it;
+    if (auto stop = dynamic_cast<IntImm*>(loop->stop())) {
+      trips *= immediateAs<int>(stop);
+      continue;
+    }
+    break;
+  }
+  loops.erase(it, loops.end());
+}
+
+// Flatten and parallelize outer loops, subject to a minimum number of elements
+// in the inner loop, and a maximum level of thread-level parallelism in the
+// outer loops.
 template <typename Bufs>
-void parallelizeOuterLoops(LoopNest& l, Bufs&& bufs) {
+static void parallelizeOuterLoops(LoopNest& l, Bufs&& bufs) {
   for (auto const& buf : bufs) {
     auto threads = at::get_num_threads();
     auto loops = l.getLoopStmtsFor(buf);
-    std::vector<For*> loopsToFlatten;
-    // Figure out total trip count of the loop nest; stop adding nested loops
-    // when we have enough iterations to saturate the available threads.
-    int64_t trips = 1;
-    for (auto loop : loops) {
-      if (trips >= threads) {
-        break;
-      }
-      if (auto stop = dynamic_cast<IntImm*>(loop->stop())) {
-        trips *= immediateAs<int>(stop);
-        loopsToFlatten.push_back(loop);
-        continue;
-      }
-      break;
-    }
+    pruneByGrainSize(loops);
+    pruneByThreadCount(loops);
+
     // There are no loops to parallelize; give up.
-    if (loopsToFlatten.size() < 2) {
+    if (loops.size() == 0) {
       continue;
     }
     // The loop nest contains a reduction; give up.
-    auto reductions = NodeFinder<ReduceOp>::find(loopsToFlatten[0]);
+    auto reductions = NodeFinder<ReduceOp>::find(loops[0]);
     if (reductions.size() > 0) {
       continue;
     }
     // The loop nest has loop carried dependences; give up.
-    if (LoopNest::hasLoopCarriedDependence(loopsToFlatten[0])) {
+    if (LoopNest::hasLoopCarriedDependence(loops[0])) {
       continue;
     }
     // Try to flatten the outer loops and parallelize them if successful.
     For* flattened = nullptr;
-    LoopNest::flatten(loopsToFlatten, &flattened);
+    if (loops.size() == 1) {
+      flattened = loops[0];
+    } else {
+      LoopNest::flatten(loops, &flattened);
+    }
     if (flattened) {
       flattened->set_parallel();
     }
@@ -2647,10 +2684,13 @@ Stmt* TensorExprKernel::transformLoops(BackendType backendType, Stmt* st) {
   }
 
   l.prepareForCodegen();
+  GRAPH_DEBUG("after prepareForCodegen", *l.root_stmt());
   l.simplify();
+  GRAPH_DEBUG("after simplification", *l.root_stmt());
 
   if (backendType == kLLVMCodeGen && !hasReduction) {
     l.vectorizeInnerLoops();
+    GRAPH_DEBUG("after vectorization", *l.root_stmt());
   }
 
   Stmt* stmt = l.root_stmt();

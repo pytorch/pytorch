@@ -17,6 +17,7 @@
 #include <torch/csrc/jit/tensorexpr/eval.h>
 #include <torch/csrc/jit/tensorexpr/expr.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
+#include <torch/csrc/jit/tensorexpr/ir_cloner.h>
 #include <torch/csrc/jit/tensorexpr/ir_mutator.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
@@ -169,6 +170,13 @@ class Vectorizer : public IRMutator {
     std::vector<Expr*> inputs = {v->lhs(), v->rhs()};
     return try_vectorize(v, inputs, [&]() {
       return ExprHandle(inputs[0]) / ExprHandle(inputs[1]);
+    });
+  }
+
+  Expr* mutate(Mod* v) override {
+    std::vector<Expr*> inputs = {v->lhs(), v->rhs()};
+    return try_vectorize(v, inputs, [&]() {
+      return ExprHandle(inputs[0]) % ExprHandle(inputs[1]);
     });
   }
 
@@ -360,6 +368,30 @@ class Vectorizer : public IRMutator {
     return new For(var, new_start, new_stop, new_body, loop_options);
   }
 
+  Stmt* mutate(Block* v) override {
+    // IRMutator does in-place mutations. But the logic in vectorization checks
+    // for success by looking for a new stmt. So, we override the in-place
+    // mutations and create a clone here if any of its statements change.
+    // TODO: Can we change the logic of vectorizer so that we don't need this?
+    bool any_change = false;
+    std::vector<Stmt*> stmts;
+    for (Stmt* stmt : *v) {
+      Stmt* stmt_new = stmt->accept_mutator(this);
+      if (stmt != stmt_new) {
+        any_change = true;
+      } else {
+        stmt_new = Stmt::clone(stmt);
+      }
+      if (stmt_new) {
+        stmts.push_back(stmt_new);
+      }
+    }
+    if (any_change) {
+      return new Block(stmts);
+    }
+    return v;
+  }
+
   template <typename T>
   Expr* try_vectorize(Expr* e, std::vector<Expr*>& inputs, T&& vec_ctor) {
     bool vectorize = vectorize_inputs(inputs);
@@ -510,7 +542,7 @@ class FunctionInliner : public IRMutator {
   Expr* mutate_loads(Buf* buf, std::vector<Expr*> dims) {
     std::vector<Var*> index_vars;
     TORCH_INTERNAL_ASSERT(buf->ndim() == producer_index_vars_.size());
-    for (auto i : c10::irange(buf->ndim())) {
+    for (const auto i : c10::irange(buf->ndim())) {
       Var* func_callee_arg = producer_index_vars_.at(i);
       Expr* func_caller_param = dims.at(i);
       if (func_callee_arg == nullptr) {
@@ -534,7 +566,7 @@ class FunctionInliner : public IRMutator {
 
     // Call the actual replacement.
     Expr* body = producer_->value();
-    Expr* result = body->accept_mutator(this);
+    Expr* result = Expr::clone(body)->accept_mutator(this);
 
     // Remove the mappings we created for this function parameters.
     for (auto* v : index_vars) {
@@ -968,7 +1000,9 @@ void LoopNest::prepareForCodegen() {
 
 namespace {
 
-class IfThenElseReplacer : public IRMutator {
+// This is extended from IRCloner instead of IRMutator because we want all
+// the rest of the IR nodes (the ones not touched directly) to be cloned.
+class IfThenElseReplacer : public IRCloner {
  public:
   IfThenElseReplacer(IfThenElse* to_replace, Expr* new_expr)
       : to_replace_(to_replace), new_expr_(new_expr) {}
@@ -977,7 +1011,7 @@ class IfThenElseReplacer : public IRMutator {
     if (i == to_replace_) {
       return new_expr_;
     }
-    return i;
+    return IRCloner::mutate(i);
   }
 
  private:
@@ -1369,7 +1403,7 @@ void LoopNest::splitWithTail(For* f, int factor, For** inner, For** tail) {
     Expr* combined_index2 = new Add(i_tail, new Mul(split_count, factor_expr));
 
     Stmt* body_tail =
-        Substitute(Stmt::clone(f->body()), {{f->var(), combined_index2}});
+        SubstituteInClone(f->body(), {{f->var(), combined_index2}});
     *tail = new For(i_tail, new IntImm(0), tail_size, body_tail);
 
     p->insert_stmt_after(*tail, f);
@@ -1381,10 +1415,10 @@ void LoopNest::splitWithTail(For* f, int factor, For** inner, For** tail) {
 
   *inner = new For(i_inner, new IntImm(0), factor_expr, body_inner);
   // The input loop `f` will be the outer loop after split.
-  f->setVar(i_outer);
-  f->setStart(new IntImm(0));
-  f->setStop(split_count);
-  f->setBody(*inner);
+  f->set_var(i_outer);
+  f->set_start(new IntImm(0));
+  f->set_stop(split_count);
+  f->set_body(*inner);
 }
 
 void LoopNest::splitWithMask(For* f, int factor) {
@@ -1446,10 +1480,10 @@ void LoopNest::splitWithMask(For* f, int factor, For** inner) {
 
   *inner = new For(i_inner, new IntImm(0), factor_expr, body_inner);
   // The input loop `f` will be the outer loop after split.
-  f->setVar(i_outer);
-  f->setStart(new IntImm(0));
-  f->setStop(split_count);
-  f->setBody(*inner);
+  f->set_var(i_outer);
+  f->set_start(new IntImm(0));
+  f->set_stop(split_count);
+  f->set_body(*inner);
 }
 
 std::vector<For*> LoopNest::distributeLoop(
@@ -1708,8 +1742,8 @@ bool LoopNest::unsafeFuseLoops(const std::vector<For*>& loops, For** fused) {
   // onwards and moving them into the first loop's body.
   // This way the final fused loop will be the same as the first loop.
   for (size_t i = 1; i < loops.size(); ++i) {
-    auto body = dynamic_cast<Block*>(Substitute(
-        Stmt::clone(loops[i]->body()), {{loops[i]->var(), first_loop->var()}}));
+    auto body = dynamic_cast<Block*>(SubstituteInClone(
+        loops[i]->body(), {{loops[i]->var(), first_loop->var()}}));
     first_loop->body()->splice(first_loop->body()->end(), body);
     root_block->remove_stmt(loops[i]);
   }
@@ -1974,9 +2008,9 @@ std::vector<For*> LoopNest::reorder(
 
   // Set the new bodies after reorder for all the loops.
   for (size_t i = 0; i < result.size() - 1; ++i) {
-    result[i]->setBody(result[i + 1]);
+    result[i]->set_body(result[i + 1]);
   }
-  result.back()->setBody(innermost_body);
+  result.back()->set_body(innermost_body);
   parent->replace_stmt(empty_block, result.front());
   return result;
 }
@@ -2078,10 +2112,8 @@ void LoopNest::unroll(For* f, Stmt** unrolled) {
   int stop_val = immediateAs<int>(stop_expr);
   for (int current = start_val; current < stop_val; ++current) {
     for (auto stmt : f->body()->stmts()) {
-      auto stmt_copy = Stmt::clone(stmt);
-      unrolled_stmts.push_back(Substitute(
-          stmt_copy,
-          {{f->var(), getImmediateByType(f->var()->dtype(), current)}}));
+      unrolled_stmts.push_back(SubstituteInClone(
+          stmt, {{f->var(), getImmediateByType(f->var()->dtype(), current)}}));
     }
   }
   *unrolled = new Block(unrolled_stmts);
@@ -2116,9 +2148,9 @@ bool LoopNest::normalize(For* f) {
   auto for_body_normalized = Substitute(
       f->body(),
       {{f->var(), (VarHandle(f->var()) + ExprHandle(f->start())).node()}});
-  f->setBody(IRSimplifier::simplify(for_body_normalized));
-  f->setStop(IRSimplifier::simplify(new Sub(f->stop(), f->start())));
-  f->setStart(new IntImm(0));
+  f->set_body(IRSimplifier::simplify(for_body_normalized));
+  f->set_stop(IRSimplifier::simplify(new Sub(f->stop(), f->start())));
+  f->set_start(new IntImm(0));
   return true;
 }
 
@@ -2195,10 +2227,10 @@ bool LoopNest::flatten(const std::vector<For*>& loops, For** flattened) {
   auto flattened_body =
       Substitute(normalized_loops.back()->removeBody(), var_mapping);
 
-  normalized_loops.front()->setVar(flat_var);
-  normalized_loops.front()->setStart(new IntImm(0));
-  normalized_loops.front()->setStop(stop);
-  normalized_loops.front()->setBody(flattened_body);
+  normalized_loops.front()->set_var(flat_var);
+  normalized_loops.front()->set_start(new IntImm(0));
+  normalized_loops.front()->set_stop(stop);
+  normalized_loops.front()->set_body(flattened_body);
   *flattened = normalized_loops.front();
   return true;
 }
@@ -2459,7 +2491,7 @@ class LoopComputeAtRewriter : public IRMutator {
       return v;
     }
     std::vector<Expr*> new_indices(v->indices().size());
-    for (auto i : c10::irange(v->indices().size())) {
+    for (const auto i : c10::irange(v->indices().size())) {
       new_indices[i] =
           IRSimplifier::simplify(new Sub(v->indices()[i], offsets_[i]));
     }
@@ -2607,8 +2639,9 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
 
   // Replace acceses to the producer in the consumer with the cache.
   CacheReplacer replacer(producer, tmp_buf, info.start);
+  // TODO: Can we reuse 'consumer' below without cloning?
   Stmt* new_consumer =
-      IRSimplifier::simplify(consumer->accept_mutator(&replacer));
+      IRSimplifier::simplify(Stmt::clone(consumer)->accept_mutator(&replacer));
 
   // replace the old consumer with the replaced consumer.
   Block* consumer_block = nullptr;
@@ -2836,7 +2869,7 @@ void LoopNest::computeAt(Stmt* s, For* f) {
 
   // Generate index variables for 'temp'
   std::vector<Expr*> temp_indices(dims.size());
-  for (auto i : c10::irange(dims.size())) {
+  for (const auto i : c10::irange(dims.size())) {
     // TODO: Use name-hint of the producer indices instead of 'idx'
     temp_indices[i] = new Var(std::string("idx") + c10::to_string(i), kInt);
   }
@@ -2852,7 +2885,7 @@ void LoopNest::computeAt(Stmt* s, For* f) {
   std::vector<std::pair<Var*, Expr*>> rewrite_indices_map;
   std::vector<Expr*> offsets;
   for (const TensorAccessBoundsInfo& p : bounds_it->second) {
-    for (auto i : c10::irange(p.start.size())) {
+    for (const auto i : c10::irange(p.start.size())) {
       if (offsets.size() <= i) {
         offsets.push_back(p.start[i]);
       } else {
@@ -2862,17 +2895,19 @@ void LoopNest::computeAt(Stmt* s, For* f) {
     }
   }
 
-  for (auto i : c10::irange(prod_indices.size())) {
+  for (const auto i : c10::irange(prod_indices.size())) {
     rewrite_indices_map.push_back(
         {prod_indices[i], new Add(temp_indices[i], offsets[i])});
   }
 
   // Construct the temp statement
   Stmt* bd = new Store(
-      temp_buf, temp_indices, Substitute(st->value(), rewrite_indices_map));
+      temp_buf,
+      temp_indices,
+      SubstituteInClone(st->value(), rewrite_indices_map));
 
   // Construct the loop nest for the temp computation
-  for (auto i : c10::irange(dims.size())) {
+  for (const auto i : c10::irange(dims.size())) {
     // We're creating loops from innermost to outermost, so we need to access
     // dimensions in reversed order.
     size_t dim_idx = dims.size() - 1 - i;

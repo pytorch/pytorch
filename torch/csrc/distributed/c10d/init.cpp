@@ -286,7 +286,7 @@ Returns:
 )")
       .def(
           "buffer",
-          &::c10d::GradBucket::getTensor,
+          &::c10d::GradBucket::getBuffer,
           py::call_guard<py::gil_scoped_release>(),
           R"(
 Returns:
@@ -321,8 +321,8 @@ Returns:
 )")
       .def(
           "set_buffer",
-          &::c10d::GradBucket::setTensor,
-          py::arg("tensor"),
+          &::c10d::GradBucket::setBuffer,
+          py::arg("buffer"),
           py::call_guard<py::gil_scoped_release>(),
           R"(
 Replaces the tensor in the bucket with the input tensor buffer.
@@ -344,7 +344,8 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
               int64_t,
               bool,
               bool,
-              std::unordered_map<size_t, std::string>>(),
+              std::unordered_map<size_t, std::string>,
+              int64_t>(),
           py::arg("replicas"),
           py::arg("bucket_indices"),
           py::arg("per_bucket_size_limits"),
@@ -355,6 +356,7 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           py::arg("gradient_as_bucket_view") = false,
           py::arg("param_to_name_mapping") =
               std::unordered_map<size_t, std::string>(),
+          py::arg("first_bucket_bytes_cap") = ::c10d::kDefaultFirstBucketBytes,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "prepare_for_forward",
@@ -392,10 +394,6 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
       .def(
           "_get_local_used_maps",
           &::c10d::Reducer::get_local_used_maps_on_device)
-      .def(
-          "save_thread_local_state",
-          &::c10d::Reducer::save_thread_local_state,
-          py::call_guard<py::gil_scoped_release>())
       .def(
           "_set_ddp_runtime_logging_sample_rate",
           &::c10d::Reducer::set_ddp_runtime_logging_sample_rate,

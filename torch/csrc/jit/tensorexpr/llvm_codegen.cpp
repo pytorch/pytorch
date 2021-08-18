@@ -230,7 +230,7 @@ class LLVMCodeGenImpl : public IRVisitor {
   void visit(Rshift* v) override;
   void visit(CompareSelect* v) override;
 
-#define IMM_VISIT_DECLARE(_1, Name) void visit(const Name##Imm* v) override;
+#define IMM_VISIT_DECLARE(_1, Name) void visit(Name##Imm* v) override;
   AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_VISIT_DECLARE);
 #undef IMM_VISIT_DECLARE
 
@@ -274,15 +274,24 @@ class LLVMCodeGenImpl : public IRVisitor {
   }
 };
 
+extern "C" {
 typedef void (*ParallelCallee)(int index, int8_t* packed_data);
-void DispatchParallel(int8_t* func, int start, int stop, int8_t* packed_data) {
+void DispatchParallel(
+    int8_t* func,
+    int start,
+    int stop,
+    int8_t* packed_data) noexcept {
   // TODO: preserve the func type.
-  ParallelCallee callee = reinterpret_cast<ParallelCallee>(func);
-  at::parallel_for(start, stop, 1, [&](int64_t f_begin, int64_t f_end) {
-    for (int index = f_begin; index < f_end; index++) {
-      callee(index, packed_data);
-    }
-  });
+  try {
+    ParallelCallee callee = reinterpret_cast<ParallelCallee>(func);
+    at::parallel_for(start, stop, 1, [&](int64_t f_begin, int64_t f_end) {
+      for (int index = f_begin; index < f_end; index++) {
+        callee(index, packed_data);
+      }
+    });
+  } catch (...) {
+  }
+}
 }
 
 } // namespace tensorexpr
@@ -403,7 +412,7 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   // Emit prototype and bind argument Vars to parameter indices.
   llvm::Type* retTy = dtypeToLLVM(dtype);
   std::vector<llvm::Type*> params;
-  for (auto i : c10::irange(args.size())) {
+  for (const auto i : c10::irange(args.size())) {
     auto const& arg = args[i];
     if (arg.isVar()) {
       params.push_back(dtypeToLLVM(arg.dtype()));
@@ -418,7 +427,7 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   fn_->addAttribute(
       llvm::AttributeList::AttrIndex::FunctionIndex,
       llvm::Attribute::AlwaysInline);
-  for (auto i : c10::irange(args.size())) {
+  for (const auto i : c10::irange(args.size())) {
     if (!args[i].isVar()) {
       fn_->addParamAttr(i, llvm::Attribute::NoAlias);
     }
@@ -465,7 +474,7 @@ void LLVMCodeGenImpl::emitWrapper(const std::vector<llvm::Type*>& params) {
   auto wrapBB = llvm::BasicBlock::Create(getContext(), "wrapBB", wrapper);
   irb_.SetInsertPoint(wrapBB);
   llvm::SmallVector<llvm::Value*, 6> wrappedArgs;
-  for (auto i : c10::irange(params.size())) {
+  for (const auto i : c10::irange(params.size())) {
     auto argp = irb_.CreateGEP(
         wrapper->arg_begin(), llvm::ConstantInt::getSigned(IntTy_, i));
     if (params[i]->isPointerTy()) {
@@ -884,17 +893,17 @@ getFromType(llvm::Type* type, T value) {
 }
 
 #define IMM_VISIT_DECLARE(Type, Name)                  \
-  void LLVMCodeGenImpl::visit(const Name##Imm* v) {    \
+  void LLVMCodeGenImpl::visit(Name##Imm* v) {          \
     value_ = getFromType<Type>(Name##Ty_, v->value()); \
   }
 AT_FORALL_SCALAR_TYPES(IMM_VISIT_DECLARE);
 #undef IMM_VISIT_DECLARE
 
-void LLVMCodeGenImpl::visit(const HalfImm* v) {
+void LLVMCodeGenImpl::visit(HalfImm* v) {
   value_ = llvm::ConstantFP::get(HalfTy_, v->value());
 }
 
-void LLVMCodeGenImpl::visit(const BoolImm* v) {
+void LLVMCodeGenImpl::visit(BoolImm* v) {
   value_ = llvm::ConstantInt::get(BoolTy_, v->value());
 }
 
@@ -1018,7 +1027,7 @@ void LLVMCodeGenImpl::replaceVarMapping(
     const std::vector<Var*>& vars,
     const std::vector<llvm::Value*>& vals) {
   TORCH_CHECK(vars.size() == vals.size());
-  for (auto i : c10::irange(vars.size())) {
+  for (const auto i : c10::irange(vars.size())) {
     Var* var = vars[i];
     llvm::Value* val = vals[i];
     if (val) {
@@ -1181,14 +1190,14 @@ llvm::Value* LLVMCodeGenImpl::packFuncArgs(
     return NullPtr;
   }
   std::vector<llvm::Type*> arg_types(func_args.size());
-  for (auto i : c10::irange(func_args.size())) {
+  for (const auto i : c10::irange(func_args.size())) {
     arg_types[i] = func_args[i]->getType();
   }
   llvm::StructType* packed_type = llvm::StructType::create(arg_types);
   llvm::Value* zero = llvm::ConstantInt::get(IntTy_, 0);
   llvm::Value* one = llvm::ConstantInt::get(IntTy_, 1);
   llvm::Value* packed = irb_.CreateAlloca(packed_type, one);
-  for (auto i : c10::irange(func_args.size())) {
+  for (const auto i : c10::irange(func_args.size())) {
     llvm::Value* dst_ptr = irb_.CreateInBoundsGEP(
         packed, {zero, llvm::ConstantInt::get(IntTy_, i)});
     irb_.CreateStore(func_args[i], dst_ptr);
@@ -1203,7 +1212,7 @@ std::vector<llvm::Value*> LLVMCodeGenImpl::unpackFuncArgs(
   // TODO: extract arg_count from packed.
   std::vector<llvm::Value*> func_args(arg_count);
   llvm::Value* zero = llvm::ConstantInt::get(IntTy_, 0);
-  for (auto i : c10::irange(arg_count)) {
+  for (const auto i : c10::irange(arg_count)) {
     llvm::Value* dst_ptr = irb_.CreateInBoundsGEP(
         packed, {zero, llvm::ConstantInt::get(IntTy_, i)});
     func_args[i] = irb_.CreateLoad(dst_ptr);
@@ -1287,6 +1296,7 @@ void LLVMCodeGenImpl::processParallelFor(For* v) {
       module_->getOrInsertFunction("DispatchParallel", dispatcher_fntype);
   llvm::Function* dispatcher =
       llvm::cast<llvm::Function>(dispatcher_callee.getCallee());
+  dispatcher->addFnAttr(llvm::Attribute::NoUnwind);
   irb_.CreateCall(
       dispatcher, {func_value, start, stop, packed_caller_args_ptr});
   value_ = llvm::ConstantInt::get(IntTy_, 0);
@@ -1832,7 +1842,7 @@ void LLVMCodeGenImpl::visit(ExternalCall* v) {
         llvm::ConstantInt::getSigned(LongTy_, b->dims().size()), gep);
 
     // Store dims of the buf
-    for (auto dim : c10::irange(b->dims().size())) {
+    for (const auto dim : c10::irange(b->dims().size())) {
       gep = irb_.CreateInBoundsGEP(
           buf_dims, {llvm::ConstantInt::getSigned(IntTy_, dim_idx)});
       b->dims()[dim]->accept(this);
