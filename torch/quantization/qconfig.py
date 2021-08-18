@@ -212,8 +212,14 @@ def add_module_to_qconfig_obs_ctr(
 
 
 def qconfig_function_equality(q1: QConfigAny, q2: QConfigAny):
-    try:
+    # functools.partial has no __eq__ operator defined so '==' defaults to 'is'
+    def compare_partial(p1, p2):
+        same = p1.func == p2.func
+        same = same and p1.args == p2.args
+        return same and p1.keywords == p2.keywords
+
+    if q1 is None or q2 is None:
+        return q1==q2
+    else:
         assert q1 is not None and q2 is not None
-        return (q1.activation.p.func == q2.activation.p.func) and (q1.weight.p.func == q2.weight.p.func)
-    except:
-        return q1 == q2
+        return compare_partial(q1.activation.p, q2.activation.p) and compare_partial(q1.weight.p, q2.weight.p)

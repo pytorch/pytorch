@@ -314,8 +314,7 @@ class TestFuseFx(QuantizationTestCase):
 
             self.checkGraphModuleNodes(quantized, expected_node_list=node_list)
 
-
-    def test_fuse_example_with_factory_kwargs_bug(self):
+    def test_problematic_fuse_example(self):
         class LinearRelu(nn.Sequential):
             def __init__(self):
                 super().__init__(
@@ -335,7 +334,7 @@ class TestFuseFx(QuantizationTestCase):
                 return x
 
         model = M().eval()
-
+        # these qconfigs somehow fail equality where default_qconfig does not
         qconfig_dict = {
             "": None,
             "object_type": [
