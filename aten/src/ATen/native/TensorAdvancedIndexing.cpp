@@ -88,7 +88,7 @@ TORCH_META_FUNC(gather)
   const Tensor& result = maybe_get_output();
   int64_t wrapped_dim = at::maybe_wrap_dim(dim, self.dim());
   if (result.defined()) {
-  	at::assert_no_internal_overlap(result);
+    at::assert_no_internal_overlap(result);
     at::assert_no_overlap(result, self);
     at::assert_no_partial_overlap(result, index);
     at::native::scatter_gather_dtype_check("gather", self, index, result);
