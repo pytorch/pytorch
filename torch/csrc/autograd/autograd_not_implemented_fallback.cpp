@@ -43,7 +43,7 @@ void _foreach_tensor(
 
 }
 
-void autogradNotImplementedFallback(const c10::OperatorHandle& op, c10::DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
+void autogradNotImplementedFallbackImpl(const c10::OperatorHandle& op, c10::DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
   // Mimics the logic of a VariableType NotImplemented kernel
   const auto& schema = op.schema();
   const auto& op_name = schema.operator_name().name;
@@ -157,7 +157,6 @@ void autogradNotImplementedFallback(const c10::OperatorHandle& op, c10::Dispatch
       AT_ASSERT(aliased_input.storage().is_alias_of(aliased_output.storage()));
   }
   #endif
-  const auto& ret = torch::jit::last(stack, num_returns);
 
   if (any_requires_grad) {
     _foreach_tensor([&](size_t idx_tensor, size_t idx_ret, const at::Tensor& t) {
@@ -172,6 +171,10 @@ void autogradNotImplementedFallback(const c10::OperatorHandle& op, c10::Dispatch
       }
     }, stack, stack->size() - num_returns, num_returns);
   }
+}
+
+torch::CppFunction autogradNotImplementedFallback() {
+  return torch::CppFunction::makeFromBoxedFunction<&autogradNotImplementedFallbackImpl>();
 }
 
 }} // namespace torch::autograd

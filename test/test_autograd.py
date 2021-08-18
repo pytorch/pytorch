@@ -6062,7 +6062,7 @@ class TestAutogradNotImplementedKernel(TestCase):
     def _compile_and_load_op(self, in_schema, out_schema, cpp_args, cpp_ret, name, fn_src):
         ns = f"ns{name}"
         fn_src = f"{cpp_ret} {name}({cpp_args}) {{{fn_src}}}"
-        impl = f'm.impl("{name}", torch::CppFunction::makeFromBoxedFunction<&autogradNotImplementedFallback>());'
+        impl = f'm.impl("{name}", autogradNotImplementedFallback());'
 
         cpp_source = f"""
         using namespace torch;
