@@ -134,6 +134,7 @@ struct cuda_scatter_gather_base_kernel {
     const func_t& f
   ) {
     at::assert_no_internal_overlap(self);
+    dim = maybe_wrap_dim(dim, self.dim());
 
     auto index_sizes = ensure_nonempty_vec(index.sizes().vec());
     auto self_strides = ensure_nonempty_vec(self.strides().vec());
@@ -186,11 +187,13 @@ struct cuda_scatter_gather_base_kernel {
   }
 
   void operator()(
-    Tensor& self, int64_t dim,
+    const Tensor& self, int64_t dim,
     const Tensor& index, const Tensor& src,
     const std::string& method_name,
     const ReduceMultiply& f
   ) {
+    at::assert_no_internal_overlap(self);
+    dim = maybe_wrap_dim(dim, self.dim());
     auto index_sizes = ensure_nonempty_vec(index.sizes().vec());
     auto self_strides = ensure_nonempty_vec(self.strides().vec());
     auto src_strides = ensure_nonempty_vec(src.strides().vec());
@@ -290,7 +293,7 @@ template <bool cast_to_opaque = true>
 struct cuda_scatter_fill_base_kernel {
   template <typename func_t>
   void operator()(
-    Tensor& self, int64_t dim,
+    const Tensor& self, int64_t dim,
     const Tensor& index, Scalar src,
     const std::string& method_name,
     const func_t& f
@@ -333,7 +336,7 @@ struct cuda_scatter_fill_base_kernel {
   }
 
   void operator()(
-    Tensor& self, int64_t dim,
+    const Tensor& self, int64_t dim,
     const Tensor& index, Scalar src,
     const std::string& method_name,
     const ReduceMultiply& f
@@ -388,7 +391,7 @@ void scatter_cuda_kernel(const Tensor& self, int64_t dim, const Tensor& index, c
     "scatter_cuda_", tensor_assign);
 }
 
-void scatter_fill_cuda_kernel(Tensor& self, int64_t dim, const Tensor& index, const Scalar& src) {
+void scatter_fill_cuda_kernel(const Tensor& self, int64_t dim, const Tensor& index, const Scalar& src) {
   cuda_scatter_fill_base_kernel<>()(
     self, dim, index, src,
     "scatter_fill_cuda_", tensor_assign);
@@ -417,7 +420,7 @@ void scatter_reduce_cuda_kernel(const Tensor& self, const int64_t dim, const Ten
   }
 }
 
-void scatter_scalar_reduce_cuda_kernel(Tensor& self, const int64_t dim, const Tensor& index,
+void scatter_scalar_reduce_cuda_kernel(const Tensor& self, const int64_t dim, const Tensor& index,
                                const Scalar& value, const SCATTER_GATHER_OP& reduce) {
   switch (reduce) {
   case SCATTER_GATHER_OP::REDUCE_ADD :

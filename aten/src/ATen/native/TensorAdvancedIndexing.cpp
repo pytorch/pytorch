@@ -1176,6 +1176,8 @@ TORCH_IMPL_FUNC(scatter_src_out)
  const Tensor& index,
  const Tensor& src,
  const Tensor& out) {
+  dim = maybe_wrap_dim(dim, self.dim());
+  if (index.numel() == 0) return;
   scatter_impl(self, dim, index, src, out,
                scatter_reduce_stub,
                scatter_stub);
@@ -1188,6 +1190,7 @@ TORCH_IMPL_FUNC(scatter_value_out)
  const Scalar& value,
  const Tensor& out) {
   dim = at::maybe_wrap_dim(dim, self.dim());
+  if (index.numel() == 0) return;
   scatter_impl(self, dim, index, value, out,
                scatter_scalar_reduce_stub,
                scatter_fill_stub);
@@ -1200,6 +1203,8 @@ TORCH_IMPL_FUNC(scatter_reduce_out)
  const Tensor& src,
  const c10::string_view reduce,
  const Tensor& out) {
+  dim = maybe_wrap_dim(dim, self.dim());
+  if (index.numel() == 0) return;
   scatter_impl(self, dim, index, src, out,
                scatter_reduce_stub,
                scatter_stub,
@@ -1213,6 +1218,8 @@ TORCH_IMPL_FUNC(scatter_value_reduce_out)
  const Scalar& value,
  const c10::string_view reduce,
  const Tensor& out) {
+  dim = maybe_wrap_dim(dim, self.dim());
+  if (index.numel() == 0) return;
   scatter_impl(self, dim, index, value, out,
                scatter_scalar_reduce_stub,
                scatter_fill_stub,
@@ -1226,10 +1233,13 @@ TORCH_IMPL_FUNC(scatter_add)
  const Tensor& src,
  const Tensor& out) {
   auto mut_out = const_cast<Tensor&>(out);
+  dim = maybe_wrap_dim(dim, self.dim());
 
   if (!self.is_same(mut_out)) {
     mut_out.copy_(self);
   }
+
+  if (index.numel() == 0) return;
 
   if (globalContext().deterministicAlgorithms() && self.device().type() == DeviceType::CUDA && self.dim() == 1) {
     TORCH_CHECK(index.dim() == 1 && src.dim() == 1, "index and src should be 1D tensors when self is a 1D tensor, "

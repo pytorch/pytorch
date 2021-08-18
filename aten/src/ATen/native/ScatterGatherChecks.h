@@ -82,6 +82,7 @@ static C10_UNUSED void scatter_shape_check(
   const Tensor& self, int64_t dim, const Tensor& index,
   const c10::optional<Tensor>& src_opt = c10::nullopt
 ) {
+  if (index.numel() == 0) return;
   TORCH_CHECK(
     ensure_nonempty_dim(self.dim()) == ensure_nonempty_dim(index.dim()),
     "Index tensor must have the same number of dimensions as self tensor"
