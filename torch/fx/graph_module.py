@@ -52,7 +52,7 @@ class EvalCacheLoader(object):
 
     # Part of the loader protocol (PEP 302)
     # linecache will use this method when trying to find source code
-    def get_source(self, module_name) -> str:
+    def get_source(self, module_name) -> Optional[str]:
         if module_name in self.eval_cache:
             return self.eval_cache[module_name]
         return None
