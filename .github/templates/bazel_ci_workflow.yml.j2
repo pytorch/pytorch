@@ -5,6 +5,21 @@
 # Generation script: .github/scripts/generate_ci_workflows.py
 name: !{{ build_environment }}
 {%- endblock %}
+
+on:
+{%- if on_pull_request %}
+  pull_request:
+  {%- if ciflow_config.enabled %}
+    {%- if ciflow_config.trigger_action_only %}
+    types: [!{{ ciflow_config.trigger_action }}]
+    {%- else %}
+    types: [opened, synchronize, reopened, !{{ ciflow_config.trigger_action }}]
+    {%- endif %}
+  {%- endif %}
+{%- else %}
+  # TODO: Enable pull_request builds when we can verify capacity can be met by auto-scalers
+{%- endif %}
+
 {% block build +%}
   # building and testing in a single job since bazel runs only small subset of tests
   build-and-test:
@@ -154,8 +169,8 @@ name: !{{ build_environment }}
   # logs (like test); we can always move it back to the other one, but it
   # doesn't create the best experience
   render_test_results:
-    if: always()
     needs: [build-and-test, !{{ ciflow_config.root_job_name }}]
+    if: ${{ needs.build-and-test.result != 'skipped' || failure() }}
     runs-on: linux.2xlarge
     steps:
       - name: Log in to ECR
@@ -201,7 +216,7 @@ name: !{{ build_environment }}
         env:
           AWS_DEFAULT_REGION: us-east-1
           CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          JOB_BASE_NAME: pytorch-linux-xenial-py3.6-gcc7-bazel-test-test
+          JOB_BASE_NAME: !{{ build_environment }}-build-and-test
           CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
           CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           CIRCLE_TAG: ${{ steps.parse-ref.outputs.tag }}

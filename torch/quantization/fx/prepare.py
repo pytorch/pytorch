@@ -1,11 +1,13 @@
 import torch
 import operator
+import warnings
 from torch.fx import (
     GraphModule,
 )
 
 from torch.quantization import (
     propagate_qconfig_,
+    ObserverBase,
 )
 from torch.fx.graph import (
     Graph,
@@ -485,6 +487,7 @@ def maybe_insert_input_equalization_observers_for_node(
     modules: Dict[str, torch.nn.Module],
     graph: Graph,
     node_name_to_target_dtype: Dict[str, Any],
+    is_branch: bool,
 ) -> None:
     """
     If `node` needs to be equalized, find the input/weight observers it needs in
@@ -493,6 +496,12 @@ def maybe_insert_input_equalization_observers_for_node(
     If `node` does not need an equalization observer, returns None.
     """
     if equalization_qconfig is None or not node_supports_equalization(node, modules):
+        return
+
+    if is_branch:
+        warnings.warn(
+            f"Cannot equalize {node} because it is part of a branch."
+        )
         return
 
     new_args = []
@@ -940,6 +949,32 @@ def insert_observers_for_model(
             if not skip_inserting_observers:
                 modules = dict(model.named_modules(remove_duplicate=False))
                 if node.op != 'output':
+
+                    # This is currently only used for equalization.
+                    # Checks if the current node is in a branch in which the two
+                    # first layers are both being quantized.
+                    #
+                    # ex.       conv2
+                    #         /
+                    #      x -> conv1
+                    #
+                    # If this is the case, we will not apply equalization to the
+                    # initial two layers.
+                    is_quantized_branch = False
+                    if (
+                        len(node.args) > 0 and
+                        isinstance(node.args[0], Node) and
+                        len(node.args[0].users) > 1
+                    ):
+                        for user in node.args[0].users:
+                            # Checks if there exists another user being quantized
+                            is_user_quantized = (
+                                qconfig_map.get(user.name, None) is not None or
+                                (user.op == 'call_module' and isinstance(modules[str(user.target)], ObserverBase))
+                            )
+                            if user != node and is_user_quantized:
+                                is_quantized_branch = True
+
                     # this modifies node inplace
                     maybe_insert_input_observers_for_node(
                         node, qconfig, model, modules, graph,
@@ -949,7 +984,7 @@ def insert_observers_for_model(
                     # Insert equalization input observers if needed
                     maybe_insert_input_equalization_observers_for_node(
                         node, equalization_qconfig, model, modules, graph,
-                        node_name_to_target_dtype)
+                        node_name_to_target_dtype, is_quantized_branch)
 
                     is_last_node_of_pattern = root_node is node
                     is_general_tensor_value_op = \
