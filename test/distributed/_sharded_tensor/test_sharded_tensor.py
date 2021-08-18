@@ -1,4 +1,5 @@
 from functools import wraps
+import math
 import io
 import sys
 import torch
@@ -273,19 +274,17 @@ class TestShardedTensorChunked(ShardedTensorTestBase, MultiProcessTestCase):
                 "rank:3/cuda:3",
             ],
         )
-        sharded_tensor = _sharded_tensor.ones(spec, 10, 20)
+        h, w = 10, 20
+        sharded_tensor = _sharded_tensor.ones(spec, h, w)
 
         # Validate local shard is initialized with torch.ones
         local_shards = sharded_tensor.local_shards()
         self.assertEqual(1, len(local_shards))
         local_shard = local_shards[0].tensor
         self.assertEqual(torch.device(f"cuda:{self.rank}"), local_shard.device)
-        if self.rank == 3:
-            self.assertEqual((1, 20), local_shard.size())
-            self.assertEqual(local_shard, torch.ones(1, 20))
-        else:
-            self.assertEqual((3, 20), local_shard.size())
-            self.assertEqual(local_shard, torch.ones(3, 20))
+        expected_h = math.floor(h / 4) if self.rank == 3 else math.ceil(h / 4)
+        self.assertEqual((expected_h, w), local_shard.size())
+        self.assertEqual(local_shard, torch.ones(expected_h, w))
 
     @with_comms
     @skip_if_lt_x_gpu(4)
