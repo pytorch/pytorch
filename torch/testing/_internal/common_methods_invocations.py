@@ -1375,7 +1375,7 @@ def sample_inputs_bmm(self, device, dtype, requires_grad, **kwargs):
     )
 
 def sample_inputs_dot_vdot(self, device, dtype, requires_grad, **kwargs):
-    sample_inputs=[]
+    sample_inputs = []
     sample_inputs.append(SampleInput(
         make_tensor((S, ), device, dtype, low=None, high=None, requires_grad=requires_grad),
         args=(
