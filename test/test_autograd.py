@@ -9373,7 +9373,7 @@ class TestMultithreadAutograd(TestCase):
                     else:
                         # DataParallel only uses one thread
                         # so hooks should be called here
-                        _self.assertEqual(len(w), 2)
+                        _self.assertGreater(len(w), 0)
 
         x = torch.ones(5, 5, requires_grad=True)
         model = torch.nn.DataParallel(Model())
@@ -9383,7 +9383,7 @@ class TestMultithreadAutograd(TestCase):
             with warnings.catch_warnings(record=True) as w:
                 y = x * x
                 # hooks should be called here
-                _self.assertEqual(len(w), 2)
+                _self.assertGreater(len(w), 0)
 
     def test_python_thread_in_middle(self):
         # User might write a network that starts on one CPU thread, then runs its second half
