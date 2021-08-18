@@ -46,7 +46,7 @@ effectively leave it ownerless.
 So, general rules of thumb:
 
 - When in doubt, don’t use ``MaybeOwned<Tensor>`` at all - in particular, prefer
-  introducing it it in code that doesn’t use it already. New usage should only be
+  avoiding using it in code that doesn’t use it already. New usage should only be
   introduced when critical (and demonstrable) performance gains result.
 
 - When modifying or calling code that already uses ``MaybeOwned<Tensor>``, remember
