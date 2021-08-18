@@ -36,7 +36,7 @@ inline bool use_mkldnn_bf16_gemm(
   c10::MaybeOwned<Tensor> result_maybe_owned = at::borrow_from_optional_tensor(result_opt);
   const Tensor& result = *result_maybe_owned;
 
-  const int64_t mkldnn_gemm_min_size = 16 * 16 * 16;
+  static const int64_t mkldnn_gemm_min_size = 16 * 16 * 16;
   // if dim = 2, mat1's size = (m * n), mat2's size = (n * k)
   // else dim = 3, mat1's size = (b * m * n), mat2's size = (b * n * k)
   // only m * n * k are large enough we can get benefit from mkldnn optimized gemm kernel
@@ -45,13 +45,13 @@ inline bool use_mkldnn_bf16_gemm(
   int64_t n = mat1.dim() == 2? mat1.size(1) : mat1.size(2);
   int64_t k = mat2.dim() == 2? mat2.size(1) : mat2.size(2);
   return (
-    m * n * k >= mkldnn_gemm_min_size &&
-    mkldnn_bf16_device_check() &&
     mat1.scalar_type() == kBFloat16 &&
     mat2.scalar_type() == kBFloat16 &&
     (!result.defined() || result.scalar_type() == kBFloat16) &&
     mat1.numel() != 0 &&
-    mat2.numel() != 0);
+    mat2.numel() != 0 &&
+    mkldnn_bf16_device_check() &&
+    m * n * k >= mkldnn_gemm_min_size);
 }
 
 }
