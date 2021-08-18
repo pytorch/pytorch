@@ -77,7 +77,7 @@ class SkipInfo(DecorateInfo):
 
     def __init__(
             self, cls_name=None, test_name=None, *, device_type=None, dtypes=None, active_if=True,
-            expected_failure=False):
+            expected_failure=True):
         """
         Args:
             cls_name: the name of the test class to skip
