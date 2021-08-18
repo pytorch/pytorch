@@ -2,6 +2,7 @@
 
 #include <ATen/core/ivalue.h>
 #include <c10/util/variant.h>
+#include <c10/util/Deprecated.h>
 
 // TODO move this to c10 namespace
 
@@ -15,7 +16,7 @@ class Operation {
  public:
   template <typename F,
             std::enable_if_t<c10::lib::cpp17::is_invocable<F, Stack*>::value, int> = 0>
-  [[deprecated("Please use void(Stack&) to register operator instead.")]]
+  C10_DEPRECATED_MESSAGE("Please use void(Stack&) to register operator instead.")
   Operation(F&& raw): op_([raw = std::forward<F>(raw)](Stack& stack) {
     raw(&stack);
   }) {}
