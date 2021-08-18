@@ -296,8 +296,6 @@ class TestCheckpoint(TestCase):
         res[1].sum().backward(retain_graph=True)
         res[4].sum().backward(retain_graph=True)
         res[6].sum().backward()
-        with self.assertRaisesRegex(RuntimeError, "Trying to backward through the graph a second time"):
-            res[6].sum().backward()
         t1_grad = t1.grad
         t2_grad = t2.grad
 
@@ -345,7 +343,7 @@ class TestCheckpoint(TestCase):
         input_var2 = torch.randn(1, 4, requires_grad=True)
         with self.assertRaisesRegex(
             RuntimeError,
-            r"none of output has requires_grad=True, this checkpoint\(\) is not necessary"
+            r"element 0 of tensors does not require grad and does not have a grad_fn"
         ):
             out = checkpoint(run_fn2, input_var, input_var2)
             out.sum().backward()

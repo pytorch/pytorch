@@ -166,11 +166,6 @@ def checkpoint(function, *args, **kwargs):
     be considered as part of autograd.
 
     .. warning::
-        Checkpointing currently only supports :func:`torch.autograd.backward`
-        and only if its `inputs` argument is not passed. :func:`torch.autograd.grad`
-        is not supported.
-
-    .. warning::
         If :attr:`function` invocation during backward does anything different
         than the one during forward, e.g., due to some global variable, the
         checkpointed version won't be equivalent, and unfortunately it can't be
@@ -208,7 +203,7 @@ def checkpoint(function, *args, **kwargs):
     if kwargs:
         raise ValueError("Unexpected keyword arguments: " + ",".join(arg for arg in kwargs))
 
-    return CheckpointFunction.apply(function, preserve, *args)
+    return Checkpoint(function, preserve)(*args)
 
 
 def checkpoint_sequential(functions, segments, input, **kwargs):
