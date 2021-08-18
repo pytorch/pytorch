@@ -53,9 +53,11 @@ from torch.utils.checkpoint import checkpoint
 if not IS_WINDOWS:
     from torch.distributed.optim.functional_sgd import _FunctionalSGD
     from torch.distributed.optim.functional_adam import _FunctionalAdam
+    from torch.distributed.optim.functional_adamw import _FunctionalAdamW
     _SUPPORTED_OPTIM_MAPPING = {
         _FunctionalSGD: torch.optim.SGD,
-        _FunctionalAdam: torch.optim.Adam
+        _FunctionalAdam: torch.optim.Adam,
+        _FunctionalAdamW: torch.optim.AdamW,
     }
 
 if TEST_WITH_TSAN:
@@ -1734,6 +1736,20 @@ class DistributedDataParallelTest(
             sgd_lr,
             momentum=sgd_momentum,
             weight_decay=sgd_weight_decay,
+            gradient_as_bucket_view=True
+        )
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_hook_then_adamw_nccl(self):
+        adamw_lr = 1e-2
+        adamw_betas = (0.9, 0.99)
+        adamw_eps = 1e-6
+        self._test_hook_then_optimizer(
+            _FunctionalAdamW,
+            adamw_lr,
+            betas=adamw_betas,
+            eps=adamw_eps,
             gradient_as_bucket_view=True
         )
 
