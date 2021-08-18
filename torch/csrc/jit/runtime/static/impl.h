@@ -86,6 +86,7 @@ class TORCH_API StaticModule {
 
   explicit StaticModule(
       const torch::jit::Module& m,
+      bool is_frozen = false,
       const StaticModuleOptions& opts = StaticModuleOptions());
 
   typedef enum {
@@ -208,7 +209,8 @@ class TORCH_API StaticRuntime {
       const std::vector<c10::IValue>& args,
       const std::unordered_map<std::string, c10::IValue>& kwargs,
       const int warmup_runs,
-      const int main_runs);
+      const int main_runs,
+      bool print_per_node_time = false);
 
   float benchmark_model(
       const std::vector<c10::IValue>& args,

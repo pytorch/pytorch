@@ -1214,6 +1214,56 @@ def fractional_max_pool2d_test(test_case):
             fullname='FractionalMaxPool2d_size')
 
 
+def fractional_max_pool2d_no_batch_dim_test(test_case, use_random_samples):
+    if use_random_samples:
+        # random_samples enables CPU and GPU checks to be consistent
+        random_samples = torch.empty((1, 3, 2), dtype=torch.double).uniform_()
+        if test_case == 'ratio':
+            return dict(
+                constructor=lambda: nn.FractionalMaxPool2d(
+                    2, output_ratio=0.5, _random_samples=random_samples),
+                cpp_constructor_args='''torch::nn::FractionalMaxPool2dOptions(2)
+                                        .output_ratio(0.5)
+                                        ._random_samples(random_samples)''',
+                input_size=(3, 5, 7),
+                cpp_var_map={'random_samples': random_samples},
+                reference_fn=single_batch_reference_fn,
+                fullname='FractionalMaxPool2d_ratio_no_batch_dim')
+        elif test_case == 'size':
+            return dict(
+                constructor=lambda: nn.FractionalMaxPool2d((2, 3), output_size=(
+                    4, 3), _random_samples=random_samples),
+                cpp_constructor_args='''torch::nn::FractionalMaxPool2dOptions({2, 3})
+                                        .output_size(std::vector<int64_t>({4, 3}))
+                                        ._random_samples(random_samples)''',
+                input_size=(3, 7, 6),
+                cpp_var_map={'random_samples': random_samples},
+                reference_fn=single_batch_reference_fn,
+                fullname='FractionalMaxPool2d_size_no_batch_dim')
+    else:
+        # can not check cuda because there RNG is different between cpu and cuda
+        if test_case == 'ratio':
+            return dict(
+                constructor=lambda: nn.FractionalMaxPool2d(
+                    2, output_ratio=0.5),
+                cpp_constructor_args='''torch::nn::FractionalMaxPool2dOptions(2)
+                                        .output_ratio(0.5)''',
+                input_size=(3, 5, 7),
+                reference_fn=single_batch_reference_fn,
+                test_cuda=False,
+                fullname='FractionalMaxPool2d_ratio_no_batch_dim_no_random_samples')
+        elif test_case == 'size':
+            return dict(
+                constructor=lambda: nn.FractionalMaxPool2d((2, 3), output_size=(
+                    4, 3)),
+                cpp_constructor_args='''torch::nn::FractionalMaxPool2dOptions({2, 3})
+                                        .output_size(std::vector<int64_t>({4, 3}))''',
+                input_size=(3, 7, 6),
+                reference_fn=single_batch_reference_fn,
+                test_cuda=False,
+                fullname='FractionalMaxPool2d_size_no_batch_dim_no_random_samples')
+
+
 def fractional_max_pool3d_test(test_case):
     random_samples = torch.empty((2, 4, 3), dtype=torch.double).uniform_()
     if test_case == 'ratio':
@@ -1314,6 +1364,10 @@ new_module_tests = [
     fractional_max_pool3d_test('ratio'),
     fractional_max_pool3d_test('size'),
     fractional_max_pool3d_test('asymsize'),
+    fractional_max_pool2d_no_batch_dim_test('ratio', True),
+    fractional_max_pool2d_no_batch_dim_test('ratio', False),
+    fractional_max_pool2d_no_batch_dim_test('size', True),
+    fractional_max_pool2d_no_batch_dim_test('size', False),
     dict(
         module_name='BatchNorm1d',
         constructor_args=(10,),
@@ -2110,6 +2164,14 @@ new_module_tests = [
         desc='stride_pad',
     ),
     dict(
+        module_name='AvgPool1d',
+        constructor_args=(2,),
+        cpp_constructor_args='torch::nn::AvgPool1dOptions(2)',
+        input_size=(3, 6),
+        reference_fn=single_batch_reference_fn,
+        desc='no_batch_dim',
+    ),
+    dict(
         module_name='AvgPool2d',
         constructor_args=((2, 2),),
         cpp_constructor_args='torch::nn::AvgPool2dOptions({2, 2})',
@@ -2237,6 +2299,14 @@ new_module_tests = [
         module_name='ReflectionPad2d',
         constructor_args=((1, 2, 3, 4),),
         cpp_constructor_args='torch::nn::ReflectionPad2dOptions({1, 2, 3, 4})',
+        input_size=(3, 8, 8),
+        reference_fn=single_batch_reference_fn,
+        desc='no_batch_dim',
+    ),
+    dict(
+        module_name='ReflectionPad2d',
+        constructor_args=((1, 2, 3, 4),),
+        cpp_constructor_args='torch::nn::ReflectionPad2dOptions({1, 2, 3, 4})',
         input_fn=lambda: torch.rand(2, 3, 8, 8, dtype=torch.complex128, requires_grad=True),
         skip_half=True,
         desc='complex'
@@ -2246,6 +2316,14 @@ new_module_tests = [
         constructor_args=((1, 2, 0, 2, 1, 2),),
         cpp_constructor_args='torch::nn::ReflectionPad3dOptions({1, 2, 0, 2, 1, 2})',
         input_size=(2, 3, 8, 8, 8),
+    ),
+    dict(
+        module_name='ReflectionPad3d',
+        constructor_args=((1, 2, 0, 2, 1, 2),),
+        cpp_constructor_args='torch::nn::ReflectionPad3dOptions({1, 2, 0, 2, 1, 2})',
+        input_size=(3, 8, 8, 8),
+        reference_fn=single_batch_reference_fn,
+        desc='no_batch_dim',
     ),
     dict(
         module_name='ReflectionPad3d',
@@ -2287,6 +2365,14 @@ new_module_tests = [
         module_name='ReplicationPad2d',
         constructor_args=((1, 2, 3, 4),),
         cpp_constructor_args='torch::nn::ReplicationPad2dOptions({1, 2, 3, 4})',
+        input_size=(3, 4, 4),
+        reference_fn=single_batch_reference_fn,
+        desc='no_batch_dim',
+    ),
+    dict(
+        module_name='ReplicationPad2d',
+        constructor_args=((1, 2, 3, 4),),
+        cpp_constructor_args='torch::nn::ReplicationPad2dOptions({1, 2, 3, 4})',
         input_fn=lambda: torch.rand(2, 3, 4, 4, dtype=torch.complex128, requires_grad=True),
         skip_half=True,
         desc='complex'
@@ -2296,6 +2382,14 @@ new_module_tests = [
         constructor_args=((1, 2, 3, 4),),
         cpp_constructor_args='torch::nn::ZeroPad2dOptions({1, 2, 3, 4})',
         input_size=(2, 3, 4, 4),
+    ),
+    dict(
+        module_name='ZeroPad2d',
+        constructor_args=((1, 2, 3, 4),),
+        cpp_constructor_args='torch::nn::ZeroPad2dOptions({1, 2, 3, 4})',
+        input_size=(3, 4, 4),
+        reference_fn=single_batch_reference_fn,
+        desc='no_batch_dim',
     ),
     dict(
         module_name='ZeroPad2d',
@@ -2646,6 +2740,14 @@ new_module_tests = [
         constructor_args=((1, 2, 3, 3, 2, 1),),
         cpp_constructor_args='torch::nn::ReplicationPad3dOptions({1, 2, 3, 3, 2, 1})',
         input_size=(2, 3, 2, 2, 2),
+    ),
+    dict(
+        module_name='ReplicationPad3d',
+        constructor_args=((1, 2, 3, 3, 2, 1),),
+        cpp_constructor_args='torch::nn::ReplicationPad3dOptions({1, 2, 3, 3, 2, 1})',
+        input_size=(3, 2, 2, 2),
+        reference_fn=single_batch_reference_fn,
+        desc='no_batch_dim',
     ),
     dict(
         module_name='ReplicationPad3d',
@@ -3193,6 +3295,13 @@ new_module_tests = [
         input_fn=lambda: _rand_tensor_non_equal(1, 3, 5),
     ),
     dict(
+        module_name='AdaptiveMaxPool1d',
+        constructor_args=(3,),
+        cpp_constructor_args='torch::nn::AdaptiveMaxPool1dOptions(3)',
+        input_fn=lambda: _rand_tensor_non_equal(3, 5),
+        desc='no_batch_dim',
+    ),
+    dict(
         module_name='AdaptiveMaxPool2d',
         constructor_args=(3,),
         cpp_constructor_args='torch::nn::AdaptiveMaxPool2dOptions(3)',
@@ -3208,6 +3317,14 @@ new_module_tests = [
     ),
     dict(
         module_name='AdaptiveMaxPool2d',
+        constructor_args=(3,),
+        cpp_constructor_args='torch::nn::AdaptiveMaxPool2dOptions(3)',
+        input_fn=lambda: _rand_tensor_non_equal(3, 5, 6),
+        reference_fn=single_batch_reference_fn,
+        desc='no_batch_dim',
+    ),
+    dict(
+        module_name='AdaptiveMaxPool2d',
         constructor_args=((3, None),),
         cpp_constructor_args='torch::nn::AdaptiveMaxPool2dOptions({3, c10::nullopt})',
         input_fn=lambda: _rand_tensor_non_equal(1, 3, 5, 6),
@@ -3219,6 +3336,14 @@ new_module_tests = [
         cpp_constructor_args='torch::nn::AdaptiveMaxPool3dOptions(3)',
         input_fn=lambda: _rand_tensor_non_equal(2, 3, 5, 6, 7),
         desc='single',
+    ),
+    dict(
+        module_name='AdaptiveMaxPool3d',
+        constructor_args=(3,),
+        cpp_constructor_args='torch::nn::AdaptiveMaxPool3dOptions(3)',
+        input_fn=lambda: _rand_tensor_non_equal(3, 5, 6, 7),
+        reference_fn=single_batch_reference_fn,
+        desc='no_batch_dim',
     ),
     dict(
         module_name='AdaptiveMaxPool3d',
@@ -3779,7 +3904,7 @@ new_module_tests = [
     ),
     dict(
         module_name='TransformerEncoderLayer',
-        constructor_args=(4, 2, 8, 0.0, 'gelu'),
+        constructor_args=(4, 2, 8, 0.0, F.gelu),
         cpp_constructor_args='''torch::nn::TransformerEncoderLayerOptions(4, 2)
                                 .dim_feedforward(8)
                                 .dropout(0.0)
@@ -3804,7 +3929,7 @@ new_module_tests = [
     ),
     dict(
         module_name='TransformerDecoderLayer',
-        constructor_args=(4, 2, 8, 0.0, 'gelu'),
+        constructor_args=(4, 2, 8, 0.0, F.gelu),
         cpp_constructor_args='''torch::nn::TransformerDecoderLayerOptions(4, 2)
                                 .dim_feedforward(8)
                                 .dropout(0.0)
@@ -3817,7 +3942,7 @@ new_module_tests = [
     ),
     dict(
         module_name='Transformer',
-        constructor_args=(4, 2, 2, 2, 8, 0.0, "relu"),
+        constructor_args=(4, 2, 2, 2, 8, 0.0, F.relu),
         cpp_constructor_args='''torch::nn::TransformerOptions()
                                 .d_model(4)
                                 .nhead(2)
@@ -3959,13 +4084,37 @@ def nlllossNd_reference(input, target, weight=None, ignore_index=-100,
     return output
 
 
+def cross_entropy_loss_prob_target_reference(input, target, weight=None, reduction='mean'):
+    assert input.dim() >= 2
+
+    input = torch.log_softmax(input, 1)
+    C = input.size(1)
+    if weight is None:
+        weight = torch.ones(C).type_as(input)
+    weight = weight.view(1, C, *(1 for _ in input.shape[2:]))
+
+    output = -(input * target * weight).sum(dim=1)
+    if reduction == 'mean':
+        return output.mean()
+    elif reduction == 'sum':
+        return output.sum()
+    return output
+
+
 def cross_entropy_loss_reference(input, target, weight=None, ignore_index=-100, reduction='mean'):
-    return nlllossNd_reference(
-        torch.log_softmax(input, 1),
-        target,
-        weight,
-        ignore_index=ignore_index,
-        reduction=reduction)
+    if input.shape == target.shape:
+        return cross_entropy_loss_prob_target_reference(
+            input,
+            target,
+            weight=weight,
+            reduction=reduction)
+    else:
+        return nlllossNd_reference(
+            torch.log_softmax(input, 1),
+            target,
+            weight,
+            ignore_index=ignore_index,
+            reduction=reduction)
 
 
 def nllloss_reference(input, target, weight=None, ignore_index=-100,
@@ -4696,6 +4845,72 @@ criterion_tests = [
         check_bfloat16=False,
     ),
     dict(
+        module_name='CrossEntropyLoss',
+        input_size=(5, 3),
+        target_fn=lambda: torch.rand(5, 3).softmax(dim=1),
+        reference_fn=lambda i, t, m:
+            loss_reference_fns['CrossEntropyLoss'](i, t, reduction=get_reduction(m)),
+        check_sum_reduction=True,
+        desc='2d_prob_target',
+        check_bfloat16=False,
+    ),
+    dict(
+        module_name='CrossEntropyLoss',
+        input_size=(5, 3, 4),
+        target_fn=lambda: torch.rand(5, 3, 4).softmax(dim=1),
+        reference_fn=lambda i, t, m:
+            loss_reference_fns['CrossEntropyLoss'](i, t, reduction=get_reduction(m)),
+        check_sum_reduction=True,
+        desc='3d_prob_target',
+        check_bfloat16=False,
+    ),
+    dict(
+        module_name='CrossEntropyLoss',
+        input_size=(5, 3, 4, 2),
+        target_fn=lambda: torch.rand(5, 3, 4, 2).softmax(dim=1),
+        reference_fn=lambda i, t, m:
+            loss_reference_fns['CrossEntropyLoss'](i, t, reduction=get_reduction(m)),
+        check_sum_reduction=True,
+        desc='4d_prob_target',
+        check_bfloat16=False,
+    ),
+    dict(
+        module_name='CrossEntropyLoss',
+        constructor_args_fn=lambda: (torch.rand(3),),
+        cpp_constructor_args='torch::nn::CrossEntropyLossOptions().weight(torch::rand(3))',
+        input_size=(5, 3),
+        target_fn=lambda: torch.rand(5, 3).softmax(dim=1),
+        reference_fn=lambda i, t, m:
+            loss_reference_fns['CrossEntropyLoss'](i, t, reduction=get_reduction(m), weight=get_weight(m)),
+        check_sum_reduction=True,
+        desc='2d_prob_target_weights',
+        check_bfloat16=False,
+    ),
+    dict(
+        module_name='CrossEntropyLoss',
+        constructor_args_fn=lambda: (torch.rand(3),),
+        cpp_constructor_args='torch::nn::CrossEntropyLossOptions().weight(torch::rand(3))',
+        input_size=(5, 3, 4),
+        target_fn=lambda: torch.rand(5, 3, 4).softmax(dim=1),
+        reference_fn=lambda i, t, m:
+            loss_reference_fns['CrossEntropyLoss'](i, t, reduction=get_reduction(m), weight=get_weight(m)),
+        check_sum_reduction=True,
+        desc='3d_prob_target_weights',
+        check_bfloat16=False,
+    ),
+    dict(
+        module_name='CrossEntropyLoss',
+        constructor_args_fn=lambda: (torch.rand(3),),
+        cpp_constructor_args='torch::nn::CrossEntropyLossOptions().weight(torch::rand(3))',
+        input_size=(5, 3, 4, 2),
+        target_fn=lambda: torch.rand(5, 3, 4, 2).softmax(dim=1),
+        reference_fn=lambda i, t, m:
+            loss_reference_fns['CrossEntropyLoss'](i, t, reduction=get_reduction(m), weight=get_weight(m)),
+        check_sum_reduction=True,
+        desc='4d_prob_target_weights',
+        check_bfloat16=False,
+    ),
+    dict(
         module_name='PoissonNLLLoss',  # Default is log_input=True, full=False
         input_size=(2, 3, 4, 5),
         target_fn=lambda: torch.randn(2, 3, 4, 5).floor_().abs_(),
@@ -4914,6 +5129,69 @@ criterion_tests = [
         check_half=False,
     ),
 ]
+
+
+def single_batch_reference_criterion_fn(*args):
+    """Reference function for criterion supporting no batch dimensions.
+
+    The criterion is passed the input and target in batched form with a single item.
+    The output is squeezed to compare with the no-batch input.
+    """
+    criterion = args[-1]
+    single_batch_input_args = [input.unsqueeze(0) for input in args[:-1]]
+
+    output = criterion(*single_batch_input_args)
+    reduction = get_reduction(criterion)
+
+    if reduction == 'none':
+        return output.squeeze(0)
+    # reduction is 'sum' or 'mean' which results in a scalar
+    return output
+
+
+# Check that regression criterion work with no batch dimensions
+regression_criterion_no_batch = [
+    'L1Loss', 'MSELoss', 'PoissonNLLLoss', 'KLDivLoss', 'HuberLoss', 'SmoothL1Loss'
+]
+reductions = ['none', 'mean', 'sum']
+for name, reduction in product(regression_criterion_no_batch, reductions):
+    regression_test_info = dict(
+        fullname="{}_no_batch_dim_{}".format(name, reduction),
+        constructor=lambda *args, name=name: getattr(nn, name)(reduction=reduction),
+        input_size=(3, ),
+        target_size=(3, ),
+        reference_fn=single_batch_reference_criterion_fn,
+        test_cpp_api_parity=False,
+    )
+    criterion_tests.append(regression_test_info)
+
+
+# Check that classification criterion work with no batch dimensions
+# List of tuples of (name, input_fn, target_fn)
+classification_criterion_no_batch = [
+    ('BCELoss', lambda: torch.sigmoid(torch.randn(9)), lambda: torch.randn(9)),
+    ('BCEWithLogitsLoss', lambda: torch.randn(9), lambda: torch.randn(9)),
+    ('HingeEmbeddingLoss', lambda: torch.randn(9), lambda: torch.tensor([-1, 1, 1] * 3)),
+    ('MultiLabelMarginLoss', lambda: torch.randn(4), lambda: torch.tensor([3, 0, -1, 1])),
+    ('SoftMarginLoss', lambda: torch.randn(9), lambda: torch.tensor([-1, 1, 1] * 3)),
+]
+classification_criterion_no_batch_extra_info: Dict[str, dict] = {
+    'MultiLabelMarginLoss': {'check_gradgrad': False},
+}
+reductions = ['none', 'mean', 'sum']
+for (name, input_fn, target_fn), reduction in product(classification_criterion_no_batch,
+                                                      reductions):
+    classification_test_info = dict(
+        fullname="{}_no_batch_dim_{}".format(name, reduction),
+        constructor=lambda *args, name=name: getattr(nn, name)(reduction=reduction),
+        input_fn=lambda f=input_fn: f(),
+        target_fn=lambda f=target_fn: f(),
+        reference_fn=single_batch_reference_criterion_fn,
+        test_cpp_api_parity=False,
+    )
+    extra_info = classification_criterion_no_batch_extra_info.get(name, {})
+    classification_test_info.update(extra_info)
+    criterion_tests.append(classification_test_info)
 
 
 class NNTestCase(TestCase):

@@ -15,7 +15,7 @@ common_notes = {
 # also connects the torch.linalg Python namespace to the torch._C._linalg builtins.
 
 cholesky = _add_docstr(_linalg.linalg_cholesky, r"""
-linalg.cholesky(A, *, out=None) -> Tensor
+linalg.cholesky(A, *, upper=False, out=None) -> Tensor
 
 Computes the Cholesky decomposition of a complex Hermitian or real symmetric positive-definite matrix.
 
@@ -54,6 +54,9 @@ Args:
                 consisting of symmetric or Hermitian positive-definite matrices.
 
 Keyword args:
+    upper (bool, optional): whether to return an upper triangular matrix.
+        The tensor returned with upper=True is the conjugate transpose of the tensor
+        returned with upper=False.
     out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
 
 Raises:
@@ -84,7 +87,7 @@ Examples::
 """)
 
 cholesky_ex = _add_docstr(_linalg.linalg_cholesky_ex, r"""
-linalg.cholesky_ex(A, *, check_errors=False, out=None) -> (Tensor, Tensor)
+linalg.cholesky_ex(A, *, upper=False, check_errors=False, out=None) -> (Tensor, Tensor)
 
 Computes the Cholesky decomposition of a complex Hermitian or real
 symmetric positive-definite matrix.
@@ -118,9 +121,12 @@ If ``check_errors=True`` and ``info`` contains positive integers, then a Runtime
 Args:
     A (Tensor): the Hermitian `n \times n` matrix or the batch of such matrices of size
                     `(*, n, n)` where `*` is one or more batch dimensions.
-    check_errors (bool, optional): controls whether to check the content of ``infos``. Default: `False`.
 
 Keyword args:
+    upper (bool, optional): whether to return an upper triangular matrix.
+        The tensor returned with upper=True is the conjugate transpose of the tensor
+        returned with upper=False.
+    check_errors (bool, optional): controls whether to check the content of ``infos``. Default: `False`.
     out (tuple, optional): tuple of two tensors to write the output to. Ignored if `None`. Default: `None`.
 
 Examples::
@@ -1377,7 +1383,7 @@ Supports input of float, double, cfloat and cdouble dtypes.
 Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
 the output has the same batch dimensions.
 
-The returned decomposition is a named tuple `(U, S, Vᴴ)`
+The returned decomposition is a named tuple `(U, S, Vh)`
 which corresponds to :math:`U`, :math:`S`, :math:`V^{\text{H}}` above.
 
 The singular values are returned in descending order.
@@ -1408,7 +1414,7 @@ Differences with `numpy.linalg.svd`:
              In this case, one may multiply the associated singular vectors of `U` and `V` spanning
              the subspace by a rotation matrix and `the resulting vectors will span the same subspace`_.
 
-.. warning:: Gradients computed using `U` or `Vᴴ` will only be finite when
+.. warning:: Gradients computed using `U` or `Vh` will only be finite when
              :attr:`A` does not have zero as a singular value or repeated singular values.
              Furthermore, if the distance between any two singular values is close to zero,
              the gradient will be numerically unstable, as it depends on the singular values
@@ -1437,19 +1443,19 @@ Args:
     full_matrices (bool, optional): controls whether to compute the full or reduced
                                     SVD, and consequently,
                                     the shape of the returned tensors
-                                    `U` and `Vᴴ`. Default: `True`.
+                                    `U` and `Vh`. Default: `True`.
 
 Keyword args:
     out (tuple, optional): output tuple of three tensors. Ignored if `None`.
 
 Returns:
-    A named tuple `(U, S, Vᴴ)` which corresponds to :math:`U`, :math:`S`, :math:`V^{\text{H}}` above.
+    A named tuple `(U, S, Vh)` which corresponds to :math:`U`, :math:`S`, :math:`V^{\text{H}}` above.
 
     `S` will always be real-valued, even when :attr:`A` is complex.
     It will also be ordered in descending order.
 
-    `U` and `Vᴴ` will have the same dtype as :attr:`A`. The left / right singular vectors will be given by
-    the columns of `U` and the rows of `Vᴴ` respectively.
+    `U` and `Vh` will have the same dtype as :attr:`A`. The left / right singular vectors will be given by
+    the columns of `U` and the rows of `Vh` respectively.
 
 Examples::
 

@@ -88,12 +88,12 @@ class TestLiteScriptModule(TestCase):
             assert(b"callstack_debug_map.pkl" in exported_module)
 
             mobile_module = _load_for_lite_interpreter(buffer)
-            with self.assertRaisesRegex(RuntimeError, r"Module hierarchy:top\(B\).A0\(A\)"):
+            with self.assertRaisesRegex(RuntimeError, r"Module hierarchy:top\(B\)::<unknown>.A0\(A\)::forward.aten::mul"):
                 x = torch.rand((2, 3))
                 y = torch.rand((8, 10))
                 z = torch.rand((8, 10))
                 mobile_module(x, y, z)
-            with self.assertRaisesRegex(RuntimeError, r"Module hierarchy:top\(B\).A1\(A\)"):
+            with self.assertRaisesRegex(RuntimeError, r"Module hierarchy:top\(B\)::<unknown>.A1\(A\)::forward.aten::mul"):
                 x = torch.rand((2, 3))
                 y = torch.rand((2, 3))
                 z = torch.rand((8, 10))
@@ -363,7 +363,14 @@ class TestLiteScriptModule(TestCase):
 
         _, lineno = inspect.getsourcelines(FooTest2)
 
-        with self.assertRaisesRegex(RuntimeError, 'test_lite_script_module.py\", line {}'.format(lineno + 3)):
+        # In C++ code, the type of exception thrown is torch::jit::JITException
+        # which does not extend c10::Error, and hence it isn't possible to add
+        # additional context to the exception message and preserve the correct
+        #  C++ stack trace for symbolication. i.e. it isn't possible to add
+        # the debug handle string to show where in the Python code the exception
+        # occured w/o first changing
+        # torch::jit::JITException to extend c10::Error.
+        with self.assertRaisesRegex(torch.jit.Error, 'foo'):
             ft = FooTest2()
             loaded = self.getScriptExportImportCopy(ft)
             loaded()
@@ -432,10 +439,17 @@ class TestLiteScriptModule(TestCase):
 
         try:
             loaded(42, torch.rand(3, 4), torch.rand(3, 4), torch.rand(30, 40))
-        except RuntimeError as e:
+        except torch.jit.Error as e:
             error_message = f"{e}"
-        self.assertTrue('test_lite_script_module.py\", line {}'.format(lineno + 8) in error_message)
-        self.assertTrue('top(FooTest5)' in error_message)
+
+        # In C++ code, the type of exception thrown is torch::jit::JITException
+        # which does not extend c10::Error, and hence it isn't possible to add
+        # additional context to the exception message and preserve the correct
+        #  C++ stack trace for symbolication. i.e. it isn't possible to add
+        # the debug handle string to show where in the Python code the exception
+        # occured w/o first changing
+        # torch::jit::JITException to extend c10::Error.
+        self.assertTrue('self.val and val are same' in error_message)
 
 
 class TestLiteScriptQuantizedModule(QuantizationLiteTestCase):

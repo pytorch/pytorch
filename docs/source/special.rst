@@ -38,6 +38,7 @@ Functions
 .. autofunction:: logsumexp
 .. autofunction:: log1p
 .. autofunction:: log_softmax
+.. autofunction:: multigammaln
 .. autofunction:: ndtr
 .. autofunction:: ndtri
 .. autofunction:: round
