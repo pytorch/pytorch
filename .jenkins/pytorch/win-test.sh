@@ -1,7 +1,7 @@
 #!/bin/bash
 set -ex
 # shellcheck disable=SC2034
-COMPACT_JOB_NAME=pytorch-win-ws2019-cuda10-cudnn7-py3-test
+COMPACT_JOB_NAME=pytorch-win-ws2019-cuda10.1-py3-test
 
 SCRIPT_PARENT_DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 # shellcheck source=./common.sh
