@@ -3904,6 +3904,39 @@ def sample_inputs_to_sparse(op_info, device, dtype, requires_grad, **kwargs):
             SampleInput(make_arg((S, S)), args=(1,), output_process_fn_grad=lambda x: x.to_dense()),)
 
 
+def sample_inputs_cross_entropy(op_info, device, dtype, requires_grad):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_arg_without_requires_grad = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
+    make_arg_integral = partial(make_tensor, device=device, dtype=torch.int64, requires_grad=requires_grad)
+
+    # Ordered as input shape (N, C, d1, d2, ...)
+    cases = (
+        ((2, 1)),
+        ((2, 1, 10)),  # 1-D Loss
+        ((3, 3, 10, 2)),  # 2-D Loss
+        ((3, 2, 10, 2, 3)),  # 3-D Loss
+    )
+
+    # Note:
+    # There are two cases for `target` arg:
+    # * Class indices (of shape (N,) or (N, d1, d2, ...)), values lying between [0, C-1] where C is input_shape[1]
+    # * Class probabilities (of shape same as that of input), values lying between [0, 1]
+    def generator():
+        for reduction in ['mean', 'sum', 'none']:
+            for input_shape in cases:
+                target_class_prob = make_arg(input_shape, low=0, high=1)
+                target_class_indices = make_arg_integral((input_shape[0], *input_shape[2:],), low=0, high=input_shape[1])
+                weight = make_arg_without_requires_grad(input_shape[1])
+
+                # For weight as an optional arg (and reduction), and when weight is passed as None
+                yield SampleInput(make_arg(input_shape), args=(target_class_prob,))
+                yield SampleInput(make_arg(input_shape), args=(target_class_indices, None,), kwargs={'reduction': reduction})
+                # For target as class probabilities and indices
+                yield SampleInput(make_arg(input_shape), args=(target_class_prob, weight), kwargs={'reduction': reduction})
+                yield SampleInput(make_arg(input_shape), args=(target_class_indices, weight,), kwargs={'reduction': reduction})
+
+    return list(generator())
+
 # Used for both log_softmax and softmax
 def sample_inputs_softmax_variant(op_info, device, dtype, requires_grad, with_dtype=False, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -6751,6 +6784,12 @@ op_db: List[OpInfo] = [
            sample_inputs_func=partial(sample_inputs_softmax_variant, with_dtype=True),
            assert_autodiffed=True,
            supports_out=False),
+    OpInfo('nn.functional.cross_entropy',
+           aten_name='cross_entropy_loss',
+           dtypes=floating_types_and(torch.bfloat16),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           sample_inputs_func=sample_inputs_cross_entropy,
+           supports_out=False,),
     OpInfo('nn.functional.normalize',
            dtypesIfCPU=floating_and_complex_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
