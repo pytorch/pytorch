@@ -4129,10 +4129,13 @@ def sample_inputs_matmul(op_info, device, dtype, requires_grad):
                   ((S, M), (M,)),
                   ((M,), (M, S)),
                   ((S, M), (M, S)),
+                  ((S, 0), (0, M)),
                   ((S, S, M), (M,)),
                   ((S, S, M), (M, S)),
+                  ((S, S, 0), (0, S)),
                   ((M,), (S, M, S)),
                   ((S, M), (S, M, S)),
+                  ((0, 0), (S, 0, 0)),
                   ((S, S, M, M), (S, S, M, S)),
                   ((S, S, M, M), (M,)),
                   ((M,), (S, S, M, S)))
@@ -4981,6 +4984,22 @@ def sample_inputs_softplus(op_info, device, dtype, requires_grad, **kwargs):
         SampleInput(make_input()),
         SampleInput(make_input(), kwargs=dict(beta=3)),
         SampleInput(make_input(low=1), kwargs=dict(threshold=1)),
+    ]
+
+def sample_inputs_tensorinv(op_info, device, dtype, requires_grad, **kwargs):
+    def make_input():
+        input = make_fullrank_matrices_with_distinct_singular_values(12, 12, device=device, dtype=dtype)
+        return input.requires_grad_(requires_grad)
+
+    # lhs / rhs shape can have any number of dimensions as long as their product equals 12
+    shapes = [
+        ((2, 2, 3), (12, 1)),
+        ((4, 3), (6, 1, 2)),
+    ]
+
+    return [
+        SampleInput(make_input().reshape(*shape_lhs, *shape_rhs), kwargs=dict(ind=len(shape_lhs)))
+        for shape_lhs, shape_rhs in shapes
     ]
 
 def sample_inputs_mse_loss(op_info, device, dtype, requires_grad, **kwargs):
@@ -6954,6 +6973,10 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
            sample_inputs_func=sample_inputs_conv_transpose2d,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+           decorators=[
+               DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1.3e-06), }),
+                   'TestCommon', 'test_variant_consistency_eager', device_type='cuda')],
            skips=(
                # RuntimeError: !lhs.isAliasOf(rhs)INTERNAL ASSERT FAILED at
                # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":104, please report a bug to PyTorch.
@@ -8665,6 +8688,19 @@ op_db: List[OpInfo] = [
                 dtypes=(torch.float32,),
             ),
         ),
+    ),
+    OpInfo(
+        "linalg.tensorinv",
+        ref=np.linalg.tensorinv,
+        dtypes=floating_and_complex_types(),
+        skips=(
+            # RuntimeError: aliasOp != torch::jit::getOperatorAliasMap().end()
+            # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":159,
+            # please report a bug to PyTorch.
+            SkipInfo('TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
+        ),
+        sample_inputs_func=sample_inputs_tensorinv,
+        supports_forward_ad=True,
     ),
     OpInfo(
         "nn.functional.mse_loss",
