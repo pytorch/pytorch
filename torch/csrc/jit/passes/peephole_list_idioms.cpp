@@ -24,6 +24,7 @@ c10::optional<size_t> normalizeIndex(int64_t index, size_t len) {
 }
 
 // see [value refinement algorithm]
+namespace {
 
 struct ListLenRefiner {
   ListLenRefiner(
@@ -150,6 +151,95 @@ struct ListLenRefiner {
   bool changed_ = false;
 };
 
+class AppendOptimizer {
+ public:
+  explicit AppendOptimizer(std::shared_ptr<Graph> graph)
+      : graph_(std::move(graph)), aliasDb_(std::make_unique<AliasDb>(graph_)) {}
+
+  bool run() {
+    collectOptimizableLists(graph_->block());
+    if (optimizable_list_constructs_.size() == 0) {
+      return false;
+    }
+
+    for (const auto& list_and_nodes : optimizable_list_constructs_) {
+      Node* list_construct = list_and_nodes.first;
+      auto& append_nodes = list_and_nodes.second;
+
+      auto inputs = list_construct->inputs().vec();
+      inputs.reserve(inputs.size() + append_nodes.size());
+      for (Node* append : append_nodes) {
+        inputs.push_back(append->input(1));
+      }
+
+      Node* new_node =
+          list_construct->owningGraph()->create(prim::ListConstruct, inputs);
+      new_node->output()->setType(list_construct->output()->type());
+
+      TORCH_CHECK(append_nodes.size() > 0);
+      Node* last_append = append_nodes[append_nodes.size() - 1];
+      new_node->insertAfter(last_append);
+      // Replace outputs of nodes that will be deleted. Note that the append
+      // node outputs alias the same list as the ListConstruct node output.
+      list_construct->output()->replaceAllUsesWith(new_node->output());
+      for (Node* append : append_nodes) {
+        append->output()->replaceAllUsesWith(new_node->output());
+      }
+    }
+    destroyOldLists();
+    return true;
+  }
+
+ private:
+  bool isAppendingToList(Node* user, Value* list) {
+    return user->kind() == aten::append && user->input(0) == list;
+  }
+
+  void collectOptimizableLists(Block* b) {
+    for (Node* n : b->nodes()) {
+      for (Block* block : n->blocks()) {
+        collectOptimizableLists(block);
+      }
+      if (n->kind() != prim::ListConstruct) {
+        continue;
+      }
+      Value* list = n->output();
+      Block* list_block = n->owningBlock();
+      const auto& uses = list->uses();
+      std::vector<Node*> append_nodes;
+      append_nodes.reserve(uses.size());
+      for (const auto& use : uses) {
+        Node* user = use.user;
+        // We need to check the user's owning block to avoid optimizing
+        // sequences involving control flow, e.g. "if x: li.append(1)"
+        if (!isAppendingToList(use.user, list) ||
+            user->owningBlock() != list_block) {
+          break;
+        }
+        append_nodes.push_back(user);
+      }
+      if (append_nodes.size() > 0) {
+        optimizable_list_constructs_.emplace(n, std::move(append_nodes));
+      }
+    }
+  }
+
+  void destroyOldLists() {
+    for (const auto& list_and_nodes : optimizable_list_constructs_) {
+      Node* list_construct = list_and_nodes.first;
+      const auto& append_nodes = list_and_nodes.second;
+      for (Node* append : append_nodes) {
+        append->destroy();
+      }
+      list_construct->destroy();
+    }
+  }
+
+  std::unordered_map<Node*, std::vector<Node*>> optimizable_list_constructs_;
+  std::shared_ptr<Graph> graph_;
+  std::unique_ptr<AliasDb> aliasDb_;
+};
+
 // This pass only does optimizations on lists which aren't mutated,
 // so we first use the Alias Db to collect the set of list values
 // which we shouldn't optimize.
@@ -167,6 +257,7 @@ struct PeepholeOptimizeListIdiomsImpl {
     if (refine_list_len_) {
       changed |= ListLenRefiner(graph_, mutated_lists_).run();
     }
+    changed |= AppendOptimizer(graph_).run();
     return changed;
   }
 
@@ -280,6 +371,8 @@ struct PeepholeOptimizeListIdiomsImpl {
   std::unique_ptr<AliasDb> aliasDb_;
   bool refine_list_len_;
 };
+
+} // namespace
 
 bool PeepholeOptimizeListIdioms(
     const std::shared_ptr<Graph>& graph,

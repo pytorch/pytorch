@@ -51,6 +51,21 @@ namespace jit {
 //
 // This is only applied to lists that are not modified.
 //
+// 5. ListConstruct + append
+// Given a function like this:
+//     def foo():
+//         li = [1, 2]
+//         li.append(3)
+//         return li
+// This pass produces:
+//     def foo():
+//         li = [1, 2, 3]
+//         return li
+//
+// This optimization is only applied to append ops that immediately
+// follow the ListConstruct with no users of the list before them.
+// They must also exist in the same owning block as the ListConstuct op.
+//
 // Currently this is invoked as part of PeepholeOptimize
 // return true if graph is modified.
 // If `refine_list_len` is true will attempt to refine the len of lists through

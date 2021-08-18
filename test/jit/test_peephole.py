@@ -721,3 +721,93 @@ class TestPeephole(JitTestCase):
         self.run_pass("peephole", foo.graph)
         FileCheck().check("DictConstruct").check("len").run(foo.graph)
         self.assertEqual(foo(), 1)
+
+    def test_peephole_list_append(self):
+        @torch.jit.script
+        def foo():
+            lst = [1, 2, 3]
+            lst.append(4)
+            lst.append(5)
+            return lst
+
+        self.run_pass("peephole", foo.graph)
+        FileCheck().check("ListConstruct").check_not("append").run(foo.graph)
+        self.assertEqual(foo(), [1, 2, 3, 4, 5])
+
+        @torch.jit.script
+        def foo(x: int):
+            lst = [0]
+            y = x * x
+            lst.append(y)
+            return lst
+
+        self.run_pass("peephole", foo.graph)
+        FileCheck().check("ListConstruct").check_not("append").run(foo.graph)
+        self.assertEqual(foo(1), [0, 1])
+
+        @torch.jit.script
+        def foo(x: int):
+            x = [0]
+            if x:
+                y = [1]
+                y.append(2)
+                x += y
+            return x
+
+        self.run_pass("peephole", foo.graph)
+        FileCheck().check("ListConstruct").check_not("append").run(foo.graph)
+        self.assertEqual(foo(1), [0, 1, 2])
+
+    def test_peephole_list_append_optimization_not_applied(self):
+        # Optimization not applied since user that is not append
+        # exists
+        @torch.jit.script
+        def foo():
+            lst = [1, 2, 3]
+            lst[0] = 0
+            lst.append(4)
+            return lst
+
+        self.run_pass("peephole", foo.graph)
+        FileCheck().check("ListConstruct").check("append").run(foo.graph)
+        self.assertEqual(foo(), [0, 2, 3, 4])
+
+        # Optimization not applied since append occurs in another block
+        @torch.jit.script
+        def foo(x: bool):
+            lst = [0]
+            if x:
+                lst.append(1)
+            return lst
+
+        self.run_pass("peephole", foo.graph)
+        FileCheck().check("ListConstruct").check("append").run(foo.graph)
+        self.assertEqual(foo(1), [0, 1])
+
+    def test_peephole_list_append_optimization_partially_applied(self):
+        @torch.jit.script
+        def foo(x: bool):
+            lst = [0]  # This line optimized to lst = [0, 1]
+            lst.append(1)
+            if x:
+                lst.append(2)
+            return lst
+
+        self.run_pass("peephole", foo.graph)
+        FileCheck().check("ListConstruct").check_count("append", 1, exactly=True).run(foo.graph)
+        self.assertEqual(foo(1), [0, 1, 2])
+
+        @torch.jit.script
+        def foo():
+            lst_1: List[List[int]] = []
+            lst_2: List[int] = []
+            # This append node uses lst_2, but lst_2 is not appended to!
+            # Therefore, we do not apply the optimization to lst_2
+            # However, we CAN apply the optimization to lst_1.
+            lst_1.append(lst_2)
+            lst_2.append(1)
+            return lst_1
+
+        self.run_pass("peephole", foo.graph)
+        FileCheck().check("ListConstruct").check_count("append", 1, exactly=True).run(foo.graph)
+        self.assertEqual(foo(), [[1]])
