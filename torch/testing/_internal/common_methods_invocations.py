@@ -2260,6 +2260,30 @@ def sample_inputs_adaptive_avg_pool2d(op_info, device, dtype, requires_grad, **k
 
     return list(generator())
 
+def sample_inputs_max_pool2d(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    # Ordered as (input shape, output size)
+    kerneli = [[3, 2], [3, 3]]
+    stridei = [[2, 2]]
+    Ni = [8, 16]
+    Ci = [32]
+    Hi = [8, 16]
+    Wi = [8, 16]
+    ceil_modei = [True, False]
+    paddingi = [0, 1]
+    dilationi = [1, (1, 2)]
+
+    def generator():
+        for kernel, stride, N, C, H, W, ceil_mode, padding, dilation in product(kerneli, stridei, Ni, Ci, Hi, Wi, ceil_modei, paddingi, dilationi):
+            max_pool = torch.nn.MaxPool2d(kernel, stride, ceil_mode=ceil_mode, padding=padding, dilation=dilation)
+
+            yield SampleInput(make_arg((N, C, H, W)), args=(max_pool.kernel_size, max_pool.stride,
+                              max_pool.padding, max_pool.dilation, max_pool.ceil_mode,
+                              max_pool.return_indices))
+
+    return list(generator())
+
 def sample_inputs_normalize(self, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, low=-1, high=1, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -7065,6 +7089,13 @@ op_db: List[OpInfo] = [
            dtypesIfCPU=floating_types_and(torch.int64),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_avgpool2d),
+    OpInfo('nn.functional.max_pool2d',
+           aten_name='max_pool2d',
+           supports_autograd=True,
+           supports_out=False,
+           dtypesIfCPU=floating_types_and(torch.int64),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           sample_inputs_func=sample_inputs_max_pool2d),
     UnaryUfuncInfo(
         'nn.functional.logsigmoid',
         aten_name="log_sigmoid",
