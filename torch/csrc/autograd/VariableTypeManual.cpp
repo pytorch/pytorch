@@ -123,7 +123,6 @@ Tensor & copy_(c10::DispatchKeySet ks, Tensor & self, const Tensor & src, bool n
     grad_fn = std::make_shared<CopyBackwards>();
     grad_fn->set_next_edges(collect_next_edges(self, src));
     grad_fn->src_options = src.options();
-    grad_fn->src_device = src.device();
   }
   {
     at::AutoDispatchBelowAutograd mode;

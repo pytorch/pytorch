@@ -59,8 +59,6 @@ _(aten, _cufft_clear_plan_cache) \
 _(aten, _cufft_get_plan_cache_max_size) \
 _(aten, _cufft_get_plan_cache_size) \
 _(aten, _cufft_set_plan_cache_max_size) \
-_(aten, _cumprod) \
-_(aten, _cumsum) \
 _(aten, _denseDims) \
 _(aten, _dimI) \
 _(aten, _dimV) \
@@ -192,6 +190,9 @@ _(aten, any) \
 _(aten, arange) \
 _(aten, argmax) \
 _(aten, argmin) \
+_(aten, amax) \
+_(aten, amin) \
+_(aten, aminmax) \
 _(aten, as_strided) \
 _(aten, as_tensor) \
 _(aten, atan2) \
@@ -445,8 +446,6 @@ _(aten, _log_softmax_backward_data) \
 _(aten, logcumsumexp) \
 _(aten, logdet) \
 _(aten, logspace) \
-_(aten, xlogy) \
-_(aten, special_xlog1py) \
 _(aten, lstm) \
 _(aten, lstm_cell) \
 _(aten, lstsq) \
@@ -518,7 +517,6 @@ _(aten, multilabel_margin_loss_backward) \
 _(aten, multilabel_margin_loss_forward) \
 _(aten, multinomial) \
 _(aten, mv) \
-_(aten, mvlgamma) \
 _(aten, nansum) \
 _(aten, nan_to_num) \
 _(aten, narrow) \
@@ -535,6 +533,10 @@ _(aten, native_zero) \
 _(aten, special_ndtr) \
 _(aten, nextafter) \
 _(aten, special_ndtri) \
+_(aten, logical_and) \
+_(aten, logical_not) \
+_(aten, logical_or) \
+_(aten, logical_xor) \
 _(aten, bitwise_and) \
 _(aten, bitwise_not) \
 _(aten, bitwise_or) \
@@ -566,7 +568,6 @@ _(aten, pinverse) \
 _(aten, pixel_shuffle) \
 _(aten, pixel_unshuffle) \
 _(aten, poisson) \
-_(aten, polygamma) \
 _(aten, pow) \
 _(aten, float_power) \
 _(aten, prelu) \

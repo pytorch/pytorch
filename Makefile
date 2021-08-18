@@ -69,8 +69,8 @@ setup_lint:
 		$(PYTHON) tools/actions_local_runner.py --file .github/workflows/lint.yml \
 		--job 'shellcheck' --step 'Install ShellCheck' --no-quiet; \
 	fi
-	pip install jinja2
-	pip install -r tools/linter/clang_tidy/requirements.txt
+	$(PYTHON) -mpip install jinja2 --user
+	$(PYTHON) -mpip install -r tools/linter/clang_tidy/requirements.txt --user
 	$(PYTHON) -m tools.linter.install.clang_tidy
 
 quick_checks:
@@ -87,7 +87,8 @@ quick_checks:
 		--step 'Ensure no unqualified noqa' \
 		--step 'Ensure no unqualified type ignore' \
 		--step 'Ensure no direct cub include' \
-		--step 'Ensure correct trailing newlines'
+		--step 'Ensure correct trailing newlines' \
+		--step 'Ensure no raw cuda api calls'
 
 flake8:
 	@$(PYTHON) tools/actions_local_runner.py \
