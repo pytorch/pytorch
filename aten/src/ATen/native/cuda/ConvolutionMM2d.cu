@@ -538,7 +538,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv2d_backward_out_cuda(
   }
   auto grad_output = grad_output_.expect_contiguous();
   if (grad_input.defined()) {
-    resize_output(grad_input, self.sizes());
+    resize_output(grad_input, self_.sizes());
     auto weight = weight_.expect_contiguous();
 
     slow_conv2d_backward(
