@@ -98,7 +98,6 @@ Reducer::Reducer(
       div_factor_(kUnsetDivFactor),
       static_graph_(false),
       comm_hook_(nullptr),
-      thread_local_state_(at::ThreadLocalState()),
       ddp_debug_level_(parseDistDebugLevel()),
       param_names_(std::move(paramNames)),
       first_bucket_bytes_cap_(first_bucket_bytes_cap) {
@@ -566,11 +565,6 @@ void Reducer::set_logger(std::weak_ptr<c10d::Logger> logger) {
 // This function is only to be called from the autograd thread.
 void Reducer::autograd_hook(size_t index) {
   std::lock_guard<std::mutex> lock(this->mutex_);
-
-  // Carry over thread local state from main thread. This allows for
-  // thread-local flags such as profiler enabled to be configure correctly.
-  at::ThreadLocalStateGuard g(thread_local_state_);
-
   // Ignore if we don't expect to be called.
   // This may be the case if the user wants to accumulate gradients
   // for number of iterations before reducing them.
@@ -1471,14 +1465,6 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
   }
 }
 
-void Reducer::save_thread_local_state() {
-  std::lock_guard<std::mutex> guard(mutex_);
-  // Don't preserve grad_mode across thread boundaries, as we will be passing
-  // from forward pass to autograd engine hooks, and autograd engine takes care
-  // of grad mode.
-  thread_local_state_ = at::ThreadLocalState(/* keep_grad_mode */ false);
-}
-
 void Reducer::finalize_backward() {
   // No longer expect autograd hooks to fire after this function returns.
   TORCH_INTERNAL_ASSERT(expect_autograd_hooks_);
@@ -1681,12 +1667,31 @@ bool Reducer::rebuild_buckets() {
   bucket_size_limits.push_back(first_bucket_bytes_cap_);
   bucket_size_limits.push_back(bucket_bytes_cap_);
   std::vector<size_t> per_bucket_size_limits;
+  auto ddp_set_last_bucket_as_small =
+      (parse_env("DDP_SET_LAST_BUCKET_CAP").compare("1") == 0);
+
+  if (ddp_set_last_bucket_as_small) {
+    // Reverse so that first_bucket_bytes_cap_ (smaller bucket) becomes the last
+    // bucket. We cannot simply pass in {bucket_bytes_cap_, first_bucket_bytes_cap}
+    // as the bucket order as we would immediately advance to the 2nd element
+    // after the first bucket, whereas we only want the last bucket to have
+    // a smaller size.
+    std::reverse(rebuilt_params_.begin(), rebuilt_params_.end());
+    std::reverse(rebuilt_param_indices_.begin(), rebuilt_param_indices_.end());
+  }
   std::tie(rebuilt_bucket_indices, per_bucket_size_limits) =
       compute_bucket_assignment_by_size(
           rebuilt_params_,
           bucket_size_limits,
           expect_sparse_gradients_[0],
           rebuilt_param_indices_);
+
+  if (ddp_set_last_bucket_as_small) {
+    // Reverse again because buckets were rebuilt in the opposite of gradient
+    // ready order.
+    std::reverse(rebuilt_bucket_indices.begin(), rebuilt_bucket_indices.end());
+    std::reverse(per_bucket_size_limits.begin(), per_bucket_size_limits.end());
+  }
 
   if (ddp_debug_level_ != c10d::DistributedDebugLevel::OFF) {
     TORCH_INTERNAL_ASSERT(
@@ -1708,6 +1713,7 @@ bool Reducer::rebuild_buckets() {
 
   initialize_buckets(
       std::move(rebuilt_bucket_indices), std::move(per_bucket_size_limits));
+
   return true;
 }
 

@@ -66,14 +66,13 @@ from torch.testing._internal.common_utils import (
     sandcastle_skip_if,
 )
 
+from torch.distributed.optim import functional_optim_map
+
 if not IS_WINDOWS:
     import torch.distributed.optim.post_localSGD_optimizer as post_localSGD_optimizer
     from torch.distributed.optim.functional_sgd import _FunctionalSGD
     from torch.distributed.optim.functional_adam import _FunctionalAdam
-    _SUPPORTED_OPTIM_MAPPING = {
-        _FunctionalSGD: torch.optim.SGD,
-        _FunctionalAdam: torch.optim.Adam
-    }
+    from torch.distributed.optim.functional_adamw import _FunctionalAdamW
 
 from torch.utils.data.distributed import DistributedSampler
 
@@ -1030,7 +1029,7 @@ class DistributedTest:
         # NCCL Batch SEND RECV
         @skip_if_no_gpu
         @sandcastle_skip_if(BACKEND != "nccl", "NCCL Batch Send Recv Only")
-        @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
+        @requires_nccl_version((2, 7, 0), "Need NCCL 2.7+ for send/recv")
         def test_batch_isend_irecv_nccl(self):
             self._barrier()
             rank = dist.get_rank()
@@ -1057,7 +1056,7 @@ class DistributedTest:
 
         @skip_if_no_gpu
         @sandcastle_skip_if(BACKEND != "nccl", "NCCL Batch Send Recv Only")
-        @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
+        @requires_nccl_version((2, 7, 0), "Need NCCL 2.7+ for send/recv")
         def test_batch_isend_irecv_self_nccl(self):
             self._barrier()
             rank = dist.get_rank()
@@ -1082,7 +1081,7 @@ class DistributedTest:
         @skip_if_no_gpu
         @skip_if_small_worldsize
         @sandcastle_skip_if(BACKEND != "nccl", "NCCL Batch Send Recv Only")
-        @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
+        @requires_nccl_version((2, 7, 0), "Need NCCL 2.7+ for send/recv")
         def test_batch_isend_irecv_no_rank_zero_nccl(self):
             self._barrier()
             rank = dist.get_rank()
@@ -1158,7 +1157,7 @@ class DistributedTest:
 
         # NCCL Batch SEND RECV Tensor Error
         @sandcastle_skip_if(BACKEND != "nccl", "NCCL Batch Send Recv Only")
-        @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
+        @requires_nccl_version((2, 7, 0), "Need NCCL 2.7+ for send/recv")
         def test_batch_isend_irecv_tensor_err(self):
             self._barrier()
             rank = dist.get_rank()
@@ -1175,7 +1174,7 @@ class DistributedTest:
 
         # NCCL Batch SEND RECV Op Error
         @sandcastle_skip_if(BACKEND != "nccl", "NCCL Batch Send Recv Only")
-        @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
+        @requires_nccl_version((2, 7, 0), "Need NCCL 2.7+ for send/recv")
         def test_batch_isend_irecv_op_err(self):
             self._barrier()
             rank = dist.get_rank()
@@ -1190,7 +1189,7 @@ class DistributedTest:
 
         # NCCL Batch SEND RECV p2p_op_list Error
         @sandcastle_skip_if(BACKEND != "nccl", "NCCL Batch Send Recv Only")
-        @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
+        @requires_nccl_version((2, 7, 0), "Need NCCL 2.7+ for send/recv")
         def test_batch_isend_irecv_op_list_err(self):
             self._barrier()
             rank = dist.get_rank()
@@ -1204,7 +1203,7 @@ class DistributedTest:
 
         # NCCL Batch SEND RECV Mixed Backend Error
         @sandcastle_skip_if(BACKEND != "nccl", "NCCL Batch Send Recv Only")
-        @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
+        @requires_nccl_version((2, 7, 0), "Need NCCL 2.7+ for send/recv")
         def test_batch_isend_irecv_mixed_backend_err(self):
             self._barrier()
             rank = dist.get_rank()
@@ -1225,7 +1224,7 @@ class DistributedTest:
         # NCCL SEND RECV
         @skip_if_no_gpu
         @sandcastle_skip_if(BACKEND != "nccl", "NCCL Send Recv Only")
-        @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
+        @requires_nccl_version((2, 7, 0), "Need NCCL 2.7+ for send/recv")
         def _test_send_recv_nccl(self, profiler_ctx=None):
             # TODO: now that nccl send/recv is supported, there does not seem to
             # be a need to have nccl send/recv be tested separately.
@@ -1271,20 +1270,20 @@ class DistributedTest:
 
         @skip_if_no_gpu
         @sandcastle_skip_if(BACKEND != "nccl", "NCCL Send Recv Only")
-        @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
+        @requires_nccl_version((2, 7, 0), "Need NCCL 2.7+ for send/recv")
         def test_send_recv_nccl(self):
             self._test_send_recv_nccl()
 
         @skip_if_no_gpu
         @sandcastle_skip_if(BACKEND != "nccl", "NCCL Send Recv Only")
-        @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
+        @requires_nccl_version((2, 7, 0), "Need NCCL 2.7+ for send/recv")
         def test_send_recv_nccl_autograd_profiler(self):
             profiler_ctx = torch.autograd.profiler.profile(record_shapes=True)
             self._test_send_recv_nccl(profiler_ctx)
 
         @skip_if_no_gpu
         @sandcastle_skip_if(BACKEND != "nccl", "NCCL Send Recv Only")
-        @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
+        @requires_nccl_version((2, 7, 0), "Need NCCL 2.7+ for send/recv")
         @sandcastle_skip_if(IS_FBCODE, "Kineto in fbcode causes hang")
         @sandcastle_skip_if(
             IS_MACOS or IS_WINDOWS,
@@ -3947,7 +3946,8 @@ class DistributedTest:
                     if static_graph:
                         ddp_model_with_no_hook._set_static_graph()
 
-                    optimizer_no_hook = _SUPPORTED_OPTIM_MAPPING.get(functional_optim_cls)(
+                    mapping = {v: k for k, v in functional_optim_map.items()}
+                    optimizer_no_hook = mapping.get(functional_optim_cls)(
                         ddp_model_with_no_hook.parameters(),
                         *functional_optim_args,
                         **functional_optim_kwargs,
@@ -3998,6 +3998,32 @@ class DistributedTest:
                         list(ddp_model_with_optimizer_hook.parameters()),
                     )
                     dist.barrier()
+
+        @sandcastle_skip_if(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only Nccl & Gloo backend support DistributedDataParallel",
+        )
+        @sandcastle_skip_if(
+            IS_WINDOWS,
+            "FunctionalAdam not yet supported with Windows, see https://github.com/pytorch/pytorch/issues/62137"
+        )
+        @skip_if_lt_x_gpu(2)
+        @skip_if_rocm
+        def test_ddp_hook_with_optimizer_parity_adamw(self):
+            for grad_as_bucket_view, static_graph in itertools.product(
+                [True, False], [True, False]
+            ):
+                adamw_lr = 1e-2
+                adamw_betas = (0.9, 0.99)
+                adamw_eps = 1e-6
+                self._test_ddp_hook_with_optimizer_parity(
+                    grad_as_bucket_view,
+                    static_graph,
+                    _FunctionalAdamW,
+                    adamw_lr,
+                    betas=adamw_betas,
+                    eps=adamw_eps,
+                )
 
         @sandcastle_skip_if(
             BACKEND != "nccl" and BACKEND != "gloo",
@@ -4172,6 +4198,17 @@ class DistributedTest:
             self._test_ddp_hook_parity(
                 state=state, hook=post_localSGD.post_localSGD_hook
             )
+
+            # When `subgroup` is None, it is equivalent to the subgroup on the each node.
+            # For this single-node test environment, the intra-node process group is equivalent to
+            # the global process group.
+            if self.world_size == dist.get_world_size():
+                state = post_localSGD.PostLocalSGDState(
+                    process_group=None, subgroup=None, start_localSGD_iter=10
+                )
+                self._test_ddp_hook_parity(
+                    state=state, hook=post_localSGD.post_localSGD_hook
+                )
 
             # Since we start local SGD later than the total number of 100 iterations,
             # no local SGD actually is executed, and we don't even need to provide a subgroup for this case.
@@ -7856,6 +7893,7 @@ class DistributedTest:
             torch.cuda.set_device(self.rank)
             default_bucket_cap_mb = 25 * (1024 ** 2)
             first_bucket_bytes_mb = dist._DEFAULT_FIRST_BUCKET_BYTES
+            os.environ["DDP_SET_LAST_BUCKET_CAP"] = "1"
 
             class MyModel(nn.Module):
                 def __init__(self):
@@ -7873,32 +7911,24 @@ class DistributedTest:
                 device_ids=[self.rank]
             )
             inp = torch.randn(10, 2)
+            rebuilt_bucket_index = 2
             for i in range(6):
                 out = ddp(inp).sum()
                 out.backward()
                 logging_data = ddp._get_ddp_logging_data()
-                if i < 2:
-                    bucket_size_limits = [
-                        int(b) for b in logging_data["initial_bucket_size_limits"].split(", ")
-                    ]
-                    # first_bucket_bytes is actually the last because we reverse
-                    # parameter bucket order.
-                    self.assertEqual(bucket_size_limits[-1], first_bucket_bytes_mb)
-                    for j, bucket_size in enumerate(bucket_size_limits):
-                        if j != len(bucket_size_limits) - 1:
-                            self.assertEqual(bucket_size, default_bucket_cap_mb)
-                else:
-                    bucket_size_limits = [
-                        int(b) for b in logging_data["rebuilt_bucket_size_limits"].split(", ")
-                    ]
-                    # TODO: rebuild buckets places first bucket at beginning, but
-                    # might be better to move it to end.
-                    self.assertEqual(
-                        bucket_size_limits[0], first_bucket_bytes_mb
-                    )
-                    for j, bucket_size in enumerate(bucket_size_limits):
-                        if j != 0:
-                            self.assertEqual(bucket_size, default_bucket_cap_mb)
+                bucket_size_limits = [
+                    int(b) for b in logging_data[
+                        "{}_bucket_size_limits".format(
+                            "initial" if i < rebuilt_bucket_index else "rebuilt"
+                        )
+                    ].split(", ")
+                ]
+                # first_bucket_bytes is actually the last because we reverse
+                # parameter bucket order under DDP_SET_LAST_BUCKET_CAP flag.
+                self.assertEqual(bucket_size_limits[-1], first_bucket_bytes_mb)
+                for j, bucket_size in enumerate(bucket_size_limits):
+                    if j != len(bucket_size_limits) - 1:
+                        self.assertEqual(bucket_size, default_bucket_cap_mb)
 
         @skip_if_lt_x_gpu(2)
         @sandcastle_skip_if(
