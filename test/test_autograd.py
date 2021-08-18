@@ -9341,6 +9341,50 @@ class TestMultithreadAutograd(TestCase):
         # be accumulate to the same place and should be the same
         self._run_py_multithread_fn(train_fn_grad, (x,))
 
+    def test_multithread_saved_tensors_hooks(self):
+        def pack(x):
+            warnings.warn("pack")
+            return x
+
+        def registers_hooks_for_each_thread():
+            with torch.autograd.graph.saved_tensors_hooks(pack, lambda x: x):
+                x = torch.ones(5, 5, requires_grad=True)
+                with warnings.catch_warnings(record=True) as w:
+                    y = x * x
+                    # should raise two warnings from x being saved twice
+                    self.assertEqual(len(w), 2)
+            y.sum().backward()
+
+    def test_dataparallel_saved_tensors_hooks(self):
+        def pack(x):
+            warnings.warn("pack")
+            return x
+
+        _self = self
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                with warnings.catch_warnings(record=True) as w:
+                    y = x * x
+                    if torch.cuda.device_count() >= 2:
+                        # DataParallel is calling the forward in different threads
+                        # without progating TLS, so hooks should not be called here
+                        _self.assertEqual(len(w), 0)
+                    else:
+                        # DataParallel only uses one thread
+                        # so hooks should be called here
+                        _self.assertGreater(len(w), 0)
+
+        x = torch.ones(5, 5, requires_grad=True)
+        model = torch.nn.DataParallel(Model())
+
+        with torch.autograd.graph.saved_tensors_hooks(pack, lambda x: x):
+            model(x)
+            with warnings.catch_warnings(record=True) as w:
+                y = x * x
+                # hooks should be called here
+                _self.assertGreater(len(w), 0)
+
     def test_python_thread_in_middle(self):
         # User might write a network that starts on one CPU thread, then runs its second half
         # concurrently with other threads (either via python threading or fork/join calls),
