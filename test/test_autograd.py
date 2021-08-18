@@ -5753,12 +5753,8 @@ for shape in [(1,), ()]:
             a = get_input()
             t = a * a
 
-            t.grad_fn._raw_saved_self.register_hooks(inplace_double, lambda x: x / 2)
-            y = t * 2
-            with self.assertRaisesRegex(
-                    RuntimeError,
-                    "one of the variables needed for gradient computation has been modified by an inplace operation"):
-                y.sum().backward()
+            with self.assertRaisesRegex(RuntimeError, "A saved tensor pack hook is modifying its input in place."):
+                t.grad_fn._raw_saved_self.register_hooks(inplace_double, lambda x: x / 2)
 
         # leaf
         test(lambda: torch.randn(5, requires_grad=True), True)
@@ -5790,8 +5786,7 @@ for shape in [(1,), ()]:
             warnings.warn("pack")
             return x
 
-        try:
-            torch.autograd.graph.set_saved_tensors_default_hooks(pack, lambda x: x)
+        with torch.autograd.graph.saved_tensors_hooks(pack, lambda x: x):
             a = torch.ones(5, requires_grad=True)
 
             warnings.simplefilter('always')
@@ -5799,41 +5794,30 @@ for shape in [(1,), ()]:
                 y = a * a
                 # should raise two warnings from a being saved twice
                 self.assertEqual(len(w), 2)
-        finally:
-            torch.autograd.graph.reset_saved_tensors_default_hooks()
 
-        try:
-            torch.autograd.graph.set_saved_tensors_default_hooks(lambda x: x, lambda x: x)
+        with torch.autograd.graph.saved_tensors_hooks(lambda x: x, lambda x: x):
             a = torch.randn(5, requires_grad=True)
             y = a * a
             self.assertEqual(a, y.grad_fn._saved_self)
             self.assertEqual(a, y.grad_fn._saved_other)
             y.sum().backward()
             self.assertEqual(2 * a, a.grad)
-        finally:
-            torch.autograd.graph.reset_saved_tensors_default_hooks()
 
-        try:
-            torch.autograd.graph.set_saved_tensors_default_hooks(lambda x: 2 * x, lambda x: x / 2)
+        with torch.autograd.graph.saved_tensors_hooks(lambda x: 2 * x, lambda x: x / 2):
             a = torch.randn(5, requires_grad=True)
             y = a * a
             self.assertEqual(a, y.grad_fn._saved_self)
             self.assertEqual(a, y.grad_fn._saved_other)
             y.sum().backward()
             self.assertEqual(2 * a, a.grad)
-        finally:
-            torch.autograd.graph.reset_saved_tensors_default_hooks()
 
-        try:
-            torch.autograd.graph.set_saved_tensors_default_hooks(lambda x: 2 * x, lambda x: x)
+        with torch.autograd.graph.saved_tensors_hooks(lambda x: 2 * x, lambda x: x):
             a = torch.randn(5, requires_grad=True)
             y = a * a
             self.assertEqual(2 * a, y.grad_fn._saved_self)
             self.assertEqual(2 * a, y.grad_fn._saved_other)
             y.sum().backward()
             self.assertEqual(4 * a, a.grad)
-        finally:
-            torch.autograd.graph.reset_saved_tensors_default_hooks()
 
         # Exited hooks correctly
         a = torch.randn(5, requires_grad=True)
@@ -5846,23 +5830,32 @@ for shape in [(1,), ()]:
     def test_saved_variable_packing_unpacking_did_not_save_original_with_default_hooks(self):
         # See also test_saved_variable_packing_unpacking_did_not_save_original_with_hooks
 
-        try:
-            torch.autograd.graph.set_saved_tensors_default_hooks(lambda x: x, lambda x: x)
+        with torch.autograd.graph.saved_tensors_hooks(lambda x: x, lambda x: x):
             a = torch.randn(5, requires_grad=True)
             y = torch.exp(a)
             self.assertEqual(y, y.grad_fn._saved_result)
             y.sum().backward()
             self.assertEqual(a.grad, y)
-        finally:
-            torch.autograd.graph.reset_saved_tensors_default_hooks()
 
     def test_setting_default_saved_variable_hooks_twice_should_fail(self):
-        try:
-            with self.assertRaisesRegex(RuntimeError, "Setting default hooks but they have already been set. "):
-                torch.autograd.graph.set_saved_tensors_default_hooks(lambda x: x, lambda x: x)
-                torch.autograd.graph.set_saved_tensors_default_hooks(lambda x: x, lambda x: x)
-        finally:
-            torch.autograd.graph.reset_saved_tensors_default_hooks()
+        with self.assertRaisesRegex(RuntimeError, "Setting default hooks but they have already been set. "):
+            with torch.autograd.graph.saved_tensors_hooks(lambda x: x, lambda x: x):
+                with torch.autograd.graph.saved_tensors_hooks(lambda x: x, lambda x: x):
+                    pass
+
+    def test_pack_hook_with_inplace_modification_should_fail(self):
+        a = torch.randn(5, requires_grad=True)
+
+        def inc(x):
+            x += 1
+            return x
+        with torch.autograd.graph.saved_tensors_hooks(inc, lambda x: x):
+            with self.assertRaisesRegex(RuntimeError, "A saved tensor pack hook is modifying its input in place."):
+                y = torch.exp(a)
+
+        y = torch.exp(a)
+        with self.assertRaisesRegex(RuntimeError, "A saved tensor pack hook is modifying its input in place."):
+            y.grad_fn._raw_saved_result.register_hooks(inc, lambda x: x)
 
     def test_saving_variable_to_disk(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -5874,56 +5867,46 @@ for shape in [(1,), ()]:
             def unpack(name):
                 return torch.load(name)
 
-            try:
-                torch.autograd.graph.set_saved_tensors_default_hooks(pack, unpack)
+            with torch.autograd.graph.saved_tensors_hooks(pack, unpack):
                 a = torch.ones(5, requires_grad=True)
                 y = a * a
                 self.assertEqual(a, y.grad_fn._saved_self)
 
                 y.sum().backward()
                 self.assertEqual(2 * a, a.grad)
-            finally:
-                torch.autograd.graph.reset_saved_tensors_default_hooks()
 
     def test_default_saved_variable_hooks_double_backward(self):
-        try:
-            torch.autograd.graph.set_saved_tensors_default_hooks(lambda x: x, lambda x: x)
+        with torch.autograd.graph.saved_tensors_hooks(lambda x: x, lambda x: x):
             a = torch.randn(5, requires_grad=True)
             y = a ** 3
             s = torch.sum(y)
             g, = torch.autograd.grad(s, (a, ), create_graph=True)
             g.sum().backward()
             self.assertEqual(6 * a, a.grad)
-        finally:
-            torch.autograd.graph.reset_saved_tensors_default_hooks()
 
-        try:
-            torch.autograd.graph.set_saved_tensors_default_hooks(lambda x: 2 * x, lambda x: x)
+
+        with torch.autograd.graph.saved_tensors_hooks(lambda x: 2 * x, lambda x: x):
             a = torch.randn(5, requires_grad=True)
             y = a ** 3
             s = torch.sum(y)
-        finally:
-            torch.autograd.graph.reset_saved_tensors_default_hooks()
         g, = torch.autograd.grad(s, (a, ), create_graph=True)
         g.sum().backward()
         # factor 2 because only a is saved once
         self.assertEqual(6 * 2 * a, a.grad)
 
+
         a = torch.randn(5, requires_grad=True)
         y = a ** 3
         s = torch.sum(y)
-        try:
-            torch.autograd.graph.set_saved_tensors_default_hooks(lambda x: 2 * x, lambda x: x)
+        with torch.autograd.graph.saved_tensors_hooks(lambda x: 2 * x, lambda x: x):
             g, = torch.autograd.grad(s, (a, ), create_graph=True)
             g.sum().backward()
             # factor 4 because pow_backward is grad * (exp * self.pow(exp - 1))
             # so grad is saved and self (i.e. a) is saved
             self.assertEqual(6 * 4 * a, a.grad)
-        finally:
-            torch.autograd.graph.reset_saved_tensors_default_hooks()
 
-        try:
-            torch.autograd.graph.set_saved_tensors_default_hooks(lambda x: 2 * x, lambda x: x)
+
+        with torch.autograd.graph.saved_tensors_hooks(lambda x: 2 * x, lambda x: x):
             a = torch.randn(5, requires_grad=True)
             y = a ** 3
             s = torch.sum(y)
@@ -5932,8 +5915,6 @@ for shape in [(1,), ()]:
             # combining the two above blocks: 2 * 4 = 8
             # note that in that sense, a is saved twice
             self.assertEqual(6 * 8 * a, a.grad)
-        finally:
-            torch.autograd.graph.reset_saved_tensors_default_hooks()
 
     def test_graph_save_on_cpu(self):
         def test(get_input, cuda, pin_memory):
@@ -9281,16 +9262,47 @@ class TestAutogradInferenceMode(TestCase):
         run_test(lambda x: x.add_(2))
         run_test(lambda x: x.transpose_(0, 1))
 
+
 class TestMultithreadAutograd(TestCase):
     def _run_py_multithread_fn(self, fn, args=(), num_threads=10, kwargs=None):
+
+        class PropagatingThread(threading.Thread):
+            '''Helper class to propagate exception from child
+            thread to main thread on join.
+
+            Reference: https://stackoverflow.com/a/31614591/5602957
+            '''
+
+            def run(self):
+                self.exception = None
+                try:
+                    self.ret = super(PropagatingThread, self).run()
+                except Exception as e:
+                    self.exception = e
+
+            def join(self, timeout=None):
+                super(PropagatingThread, self).join(timeout)
+                if self.exception:
+                    raise self.exception from self.exception
+                return self.ret
+
         threads = []
         for _ in range(num_threads):
-            p = threading.Thread(target=fn, args=(args))
+            p = PropagatingThread(target=fn, args=args)
             p.start()
             threads.append(p)
 
         for p in threads:
             p.join()
+
+    def test_multithreaded_exception_propagation(self):
+        # Test whether exception in child thread
+        # are propagated to main thread.
+        def fn():
+            self.assertTrue(False)
+
+        with self.assertRaises(AssertionError):
+            self._run_py_multithread_fn(fn)
 
     def test_simple_backward(self):
         # simple multithreaded backward that create threads in the beginning of training
@@ -9328,6 +9340,50 @@ class TestMultithreadAutograd(TestCase):
         # since we use functional grad() api, gradients will not
         # be accumulate to the same place and should be the same
         self._run_py_multithread_fn(train_fn_grad, (x,))
+
+    def test_multithread_saved_tensors_hooks(self):
+        def pack(x):
+            warnings.warn("pack")
+            return x
+
+        def registers_hooks_for_each_thread():
+            with torch.autograd.graph.saved_tensors_hooks(pack, lambda x: x):
+                x = torch.ones(5, 5, requires_grad=True)
+                with warnings.catch_warnings(record=True) as w:
+                    y = x * x
+                    # should raise two warnings from x being saved twice
+                    self.assertEqual(len(w), 2)
+            y.sum().backward()
+
+    def test_dataparallel_saved_tensors_hooks(self):
+        def pack(x):
+            warnings.warn("pack")
+            return x
+
+        _self = self
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                with warnings.catch_warnings(record=True) as w:
+                    y = x * x
+                    if torch.cuda.device_count() >= 2:
+                        # DataParallel is calling the forward in different threads
+                        # without progating TLS, so hooks should not be called here
+                        _self.assertEqual(len(w), 0)
+                    else:
+                        # DataParallel only uses one thread
+                        # so hooks should be called here
+                        _self.assertEqual(len(w), 2)
+
+        x = torch.ones(5, 5, requires_grad=True)
+        model = torch.nn.DataParallel(Model())
+
+        with torch.autograd.graph.saved_tensors_hooks(pack, lambda x: x):
+            model(x)
+            with warnings.catch_warnings(record=True) as w:
+                y = x * x
+                # hooks should be called here
+                _self.assertEqual(len(w), 2)
 
     def test_python_thread_in_middle(self):
         # User might write a network that starts on one CPU thread, then runs its second half

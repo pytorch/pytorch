@@ -11,7 +11,7 @@ from test_c10d_spawn import _torch_dist_nn_available
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU
 from torch.testing._internal.common_distributed import requires_gloo, \
     create_device, MultiProcessTestCase, skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import TestCase, run_tests, sandcastle_skip_if, TEST_WITH_TSAN, TEST_WITH_ASAN
+from torch.testing._internal.common_utils import TestCase, run_tests, sandcastle_skip_if, TEST_WITH_TSAN, TEST_WITH_DEV_DBG_ASAN
 
 # Fails on Python-3.9, see https://github.com/pytorch/pytorch/issues/51619
 if sys.version_info < (3, 9):
@@ -174,8 +174,8 @@ if not TEST_WITH_TSAN:
             self._test_base(net, inp, check_allclose=False)
 
 
-# Skip ASAN as torch + multiprocessing spawn have known issues
-if not TEST_WITH_ASAN:
+# Skip dev-asan as torch + multiprocessing spawn have known issues
+if not TEST_WITH_DEV_DBG_ASAN:
     class TestDistributedNNFunctions(MultiProcessTestCase):
         def setUp(self):
             super(TestDistributedNNFunctions, self).setUp()

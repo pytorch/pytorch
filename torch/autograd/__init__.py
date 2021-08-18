@@ -20,7 +20,7 @@ from .anomaly_mode import detect_anomaly, set_detect_anomaly
 from ..overrides import has_torch_function, handle_torch_function
 from . import functional
 from . import forward_ad
-from . import saved_variable_default_hooks as graph
+from . import graph
 
 __all__ = ['Variable', 'Function', 'backward', 'grad_mode']
 
@@ -264,7 +264,7 @@ from torch._C._autograd import (DeviceType, ProfilerActivity, ProfilerState, Pro
                                 _enable_profiler_legacy, _disable_profiler_legacy, _profiler_enabled,
                                 _enable_record_function, _set_empty_test_observer, kineto_available,
                                 _supported_activities, _add_metadata_json, SavedTensor,
-                                _register_default_hooks, _reset_default_hooks)
+                                _register_saved_tensors_default_hooks, _reset_saved_tensors_default_hooks)
 
 from torch._C._autograd import (_ProfilerResult, _KinetoEvent,
                                 _prepare_profiler, _enable_profiler, _disable_profiler)
