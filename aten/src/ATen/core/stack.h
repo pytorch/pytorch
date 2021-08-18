@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/core/ivalue.h>
+#include <c10/util/variant.h>
 
 // TODO move this to c10 namespace
 
@@ -9,7 +10,38 @@ namespace jit {
 
 using c10::IValue;
 using Stack = std::vector<IValue>;
-using Operation = std::function<void(Stack&)>;
+
+class Operation {
+ public:
+  template <typename F,
+            std::enable_if_t<c10::lib::cpp17::is_invocable<F, Stack*>::value, int> = 0>
+  [[deprecated("Please use void(Stack&) to register operator instead.")]]
+  Operation(F&& raw): op_([raw = std::forward<F>(raw)](Stack& stack) {
+    raw(&stack);
+  }) {}
+
+  template <typename F,
+            std::enable_if_t<c10::lib::cpp17::is_invocable<F, Stack&>::value, int> = 0>
+  Operation(F&& op): op_(std::forward<F>(op)) {}
+
+  Operation(std::nullptr_t) {}
+
+  explicit operator bool() const noexcept {
+    return op_ ? true : false;
+  }
+
+  void operator()(Stack& stack) {
+    op_(stack);
+  }
+
+  template <typename T>
+  T* target() noexcept {
+    return op_.target<T>();
+  }
+
+ private:
+  std::function<void(Stack&)> op_;
+};
 
 // An operation with N inputs and M outputs pops the last N inputs off
 // the stack and pushes its M inputs onto the stack
