@@ -994,14 +994,6 @@ class Tensor(torch._C._TensorBase):
         else:
             return super(Tensor, self).rename(names)
 
-    def itemsize(self):
-        # find how many bytes are in each element of tensor - mirrors numpy functionality
-        return self.element_size()
-
-    def nbytes(self):
-        # find total amount of bytes occupied by elements of this tensor - mirrors numpy functionality
-        return self.numel() * self.element_size()
-
     @property
     def grad(self):
         """
