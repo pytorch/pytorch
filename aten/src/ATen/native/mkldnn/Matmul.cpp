@@ -84,6 +84,13 @@ void mkldnn_matmul(
   ideep::tensor y = itensor_view_from_dense(result);
   ideep::matmul_forward::compute(x, w, y, alpha, beta,
       ideep::scale_t(), ideep::scale_t(), ideep::scale_t(), op_attr);
+  if (y.get_data_handle() != result.data_ptr()){
+    // ideep will query onednn expect format of output
+    // if given output format is not expected, ideep will re-init an output buffer
+    // under this case, we need copy the re-inited buffer back to given buffer
+    ideep::tensor public_y = itensor_view_from_dense(result);
+    y.reorder_to(public_y);
+  }
 }
 
 } // namespace native
