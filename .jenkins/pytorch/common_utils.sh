@@ -54,9 +54,9 @@ function get_pr_change_files() {
   # accepts PR_NUMBER and extract filename as arguments
   set +e
   tmp_file=$(mktemp)
-  wget -O $tmp_file "https://api.github.com/repos/pytorch/pytorch/pulls/$1/files"
+  wget -O "$tmp_file" "https://api.github.com/repos/pytorch/pytorch/pulls/$1/files"
   # this regex extracts the filename list according to the GITHUB REST API result.
-  sed -n "s/.*\"filename\": \"\(.*\)\",/\1/p" $tmp_file | tee $2
+  sed -n "s/.*\"filename\": \"\(.*\)\",/\1/p" "$tmp_file" | tee "$2"
   set -e
 }
 
