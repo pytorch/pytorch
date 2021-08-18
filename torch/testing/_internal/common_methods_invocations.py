@@ -7092,6 +7092,7 @@ op_db: List[OpInfo] = [
            aten_name='max_pool2d',
            supports_autograd=True,
            supports_out=False,
+           assert_jit_shape_analysis=True,
            dtypesIfCPU=floating_types_and(torch.int64),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_max_pool2d),
