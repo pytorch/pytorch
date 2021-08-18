@@ -7033,7 +7033,8 @@ op_db: List[OpInfo] = [
     OpInfo('conv2d',
            variant_test_name='jit_fail',
            aliases=('nn.functional.conv2d',),
-           # CPU surprisingly supports more dtypes in this case.
+           # CPU surprisingly supports more dtypes in this case
+           # Reference: https://github.com/pytorch/pytorch/issues/63518.
            dtypesIfCPU=all_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
            sample_inputs_func=partial(sample_inputs_conv2d, jit_fail_sample=True),
