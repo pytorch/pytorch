@@ -30,6 +30,7 @@
     - [Use Ninja](#use-ninja)
     - [Use CCache](#use-ccache)
     - [Use a faster linker](#use-a-faster-linker)
+    - [Use pre-compiled headers](#use-pre-compiled-headers)
   - [C++ frontend development tips](#c-frontend-development-tips)
   - [GDB integration](#gdb-integration)
 - [CUDA development tips](#cuda-development-tips)
@@ -848,6 +849,27 @@ The easiest way to use `lld` this is download the
 ```
 ln -s /path/to/downloaded/ld.lld /usr/local/bin/ld
 ```
+
+#### Use pre-compiled headers
+
+Sometimes there's no way of getting around rebuilding lots of files, for example
+editing `native_functions.yaml` usually means 1000+ files being rebuilt. If
+you're using CMake newer than 3.16, you can enable pre-compiled headers by
+setting `USE_PRECOMPILED_HEADERS=1` either on first setup, or in the
+`CMakeCache.txt` file.
+
+```sh
+USE_PRECOMPILED_HEADERS=1 python setup.py develop
+```
+
+This adds a build step where the compiler takes `<ATen/ATen.h>` and essentially
+dumps it's internal AST to a file so the compiler can avoid repeating itself for
+every `.cpp` file.
+
+One caveat is that when enabled, this header gets included in every file by default.
+Which may change what code is legal, for example:
+- internal functions can never alias existing names in `<ATen/ATen.h>`
+- names in `<ATen/ATen.h>` will work even if you don't explicitly include it.
 
 ### C++ frontend development tips
 

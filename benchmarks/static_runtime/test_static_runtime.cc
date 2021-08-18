@@ -1138,3 +1138,15 @@ TEST(StaticRuntime, InvidualOps_TupleUnpack) {
   testStaticRuntime(three_tuple_unpack_script, {three_tup});
   testStaticRuntime(three_tuple_unpack_script, {three_tup}, {three_tup_large});
 }
+
+TEST(StaticRuntime, IndividualOps_Append) {
+  std::vector<IValue> args_int{1};
+
+  testStaticRuntime(append_int_script, args_int);
+
+  std::vector<IValue> args_tensor{at::randn({1})};
+  std::vector<IValue> args_tensor_large{at::randn({2, 2})};
+
+  testStaticRuntime(append_tensor_script, args_tensor);
+  testStaticRuntime(append_tensor_script, args_tensor, args_tensor_large);
+}
