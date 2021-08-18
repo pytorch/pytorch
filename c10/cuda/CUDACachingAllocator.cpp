@@ -1449,6 +1449,45 @@ class THCCachingAllocator {
 
 THCCachingAllocator caching_allocator;
 
+class THCUncachedAllocator {
+ private:
+  std::mutex mutex;
+
+  // allocated streams by device pointer
+  std::unordered_map<void*, cudaStream_t> allocated_streams;
+
+  void add_allocated_stream(void *ptr, cudaStream_t stream) {
+    std::lock_guard<std::mutex> lock(mutex);
+    allocated_streams[ptr] = stream;
+  }
+
+  cudaStream_t get_allocated_stream(void* ptr) {
+    std::lock_guard<std::mutex> lock(mutex);
+    auto it = allocated_streams.find(ptr);
+    TORCH_INTERNAL_ASSERT(it != allocated_streams.end(), "allocation stream not found");
+    cudaStream_t stream = it->second;
+    allocated_streams.erase(it);
+    return stream;
+  }
+
+ public:
+  void malloc(void** devPtr, size_t size, cudaStream_t stream) {
+    C10_CUDA_CHECK(cudaMalloc(devPtr, size));
+    add_allocated_stream(*devPtr, stream);
+  }
+
+  void free(void* ptr) {
+    if (!ptr) {
+      return;
+    }
+    cudaStream_t stream = get_allocated_stream(ptr);
+    C10_CUDA_CHECK(cudaStreamSynchronize(stream));
+    C10_CUDA_CHECK(cudaFree(ptr));
+  }
+};
+
+THCUncachedAllocator uncached_allocator;
+
 // Returns whether to force all allocations to bypass the caching allocator and
 // go straight to cudaMalloc.  This setting is useful when debugging GPU memory
 // errors, since the caching allocator foils cuda-memcheck.
@@ -1459,7 +1498,7 @@ bool forceUncachedAllocator() {
 }
 
 static void uncached_delete(void* ptr) {
-  C10_CUDA_CHECK(cudaFree(ptr));
+  uncached_allocator.free(ptr);
 }
 
 // NB: I decided not to fold this into THCCachingAllocator, because the latter
@@ -1478,7 +1517,7 @@ struct CudaCachingAllocator : public Allocator {
     if (forceUncachedAllocator()) {
       // Deliberately don't use cudaMallocMaybeCapturing here, to force an error
       // if someone tries to use forceUncachedAllocator while capturing.
-      C10_CUDA_CHECK(cudaMalloc(&r, size));
+      uncached_allocator.malloc(&r, size, cuda::getCurrentCUDAStream(device));
       return {r, r, &uncached_delete, Device(DeviceType::CUDA, device)};
     }
     if (size != 0) {
