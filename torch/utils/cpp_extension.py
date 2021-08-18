@@ -306,8 +306,10 @@ def get_compiler_abi_compatibility_and_version(compiler) -> Tuple[bool, TorchVer
         followed by a `TorchVersion` string that contains the compiler version separated by dots.
     '''
     if not _is_binary_build():
+        print('1111111111111111111')
         return (True, TorchVersion('0.0.0'))
     if os.environ.get('TORCH_DONT_CHECK_COMPILER_ABI') in ['ON', '1', 'YES', 'TRUE', 'Y']:
+        print('2222222222222222222')
         return (True, TorchVersion('0.0.0'))
 
     # First check if the compiler is one of the expected ones for the particular platform.
@@ -316,10 +318,12 @@ def get_compiler_abi_compatibility_and_version(compiler) -> Tuple[bool, TorchVer
             user_compiler=compiler,
             pytorch_compiler=_accepted_compilers_for_platform()[0],
             platform=sys.platform))
+        print('333333333333333333')
         return (False, TorchVersion('0.0.0'))
 
     if sys.platform.startswith('darwin'):
         # There is no particular minimum version we need for clang, so we're good here.
+        print('444444444444444444')
         return (True, TorchVersion('0.0.0'))
     try:
         if sys.platform.startswith('linux'):
@@ -334,14 +338,17 @@ def get_compiler_abi_compatibility_and_version(compiler) -> Tuple[bool, TorchVer
     except Exception:
         _, error, _ = sys.exc_info()
         warnings.warn(f'Error checking compiler version for {compiler}: {error}')
+        print('555555555555555555')
         return (False, TorchVersion('0.0.0'))
 
     if tuple(map(int, version)) >= minimum_required_version:
+        print('666666666666666666')
         return (True, TorchVersion('.'.join(version)))
 
     compiler = f'{compiler} {".".join(version)}'
     warnings.warn(ABI_INCOMPATIBILITY_WARNING.format(compiler))
 
+    print('777777777777777777')
     return (False, TorchVersion('.'.join(version)))
 
 
