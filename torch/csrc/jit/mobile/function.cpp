@@ -100,20 +100,28 @@ bool Function::append_operator(
     if (num_specified_args &&
         num_specified_args.value() < static_cast<int64_t>(args.size())) {
       // Sanity check at load time, to save perf at runtime
-      for (size_t i = num_specified_args.value(); i < args.size(); ++i) {
-        auto default_val = args[i].default_value();
-        TORCH_CHECK(
-            default_val.has_value(),
-            "Error happened at preparing for default values for the argument. The ",
-            i,
-            "th arguement of operator",
-            opname,
-            " does not have a specified value or default value. ");
-      }
+//      for (size_t i = num_specified_args.value(); i < args.size(); ++i) {
+//        auto default_val = args[i].default_value();
+//        TORCH_CHECK(
+//            default_val.has_value(),
+//            "Error happened at preparing for default values for the argument. The ",
+//            i,
+//            "th arguement of operator",
+//            opname,
+//            " does not have a specified value or default value. ");
+//      }
       fn = [fn, num_specified_args, args](Stack& stack) {
-        for (size_t i = num_specified_args.value(); i < args.size(); ++i) {
-          stack.push_back(args[i].default_value());
-        }
+
+//        for (size_t i = num_specified_args.value(); i < args.size(); ++i) {
+//          stack.push_back(args[i].default_value());
+//        }
+        auto copy = stack[1];
+        stack.push_back(copy);
+//        for (size_t i = 0; i < args.size(); ++i) {
+//          if(args[i].default_value().has_value()) {
+//            stack.push_back(args[i].default_value());
+//          }
+//        }
         fn(stack);
       };
     }

@@ -594,6 +594,50 @@ TEST(LiteInterpreterTest, TwoSubmodulesModuleInfo) {
       "top(C)::<unknown>.B0(B)::forward.aten::add"));
 }
 
+TEST(LiteInterpreterTest, RunKeyWordArgs) {
+  Module m("m");
+//  m.register_parameter("foo", torch::ones({}), false);
+//  m.define(R"(
+//    def forward(self, x, h):
+//      torch.add(x, h, alpha=2, out=x)
+//  )");
+  m.define(R"(
+    def forward(self, x, h):
+      torch.add(x, h, out=x)
+  )");
+//  m.define(R"(
+//    def forward(self, x, h):
+//      torch.add(x, h, out=x)
+//  )");
+//  m.define(R"(
+//    def forward(self, x, h):
+//      torch.add(x, h)
+//  )");
+
+  std::vector<IValue> inputs;
+  auto input_x = 2 * torch::ones({});
+  auto input_h = torch::ones({});
+  auto ref = m.run_method("forward", input_x, input_h);
+
+  std::stringstream ss;
+//  m.save(ss);
+//  m.save("/Users/chenlai/Documents/pytorch/outarg/schema.pt");
+//  Module bc = load(ss);
+//  bc.run_method("forward", input_x, input_h);
+
+    m._save_for_mobile(ss);
+    m._save_for_mobile("/Users/chenlai/Documents/pytorch/outarg/schema_7_3.ptl");
+    mobile::Module bc = _load_for_mobile(ss);
+    bc.run_method("forward", input_x, input_h);
+
+    std::cout << "input_x" << input_x << std::endl;
+    std::cout << "finish";
+//  auto resd = res.toTensor().item<float>();
+//  auto refd = ref.toTensor().item<float>();
+//  AT_ASSERT(resd == refd);
+}
+
+
 TEST(LiteInterpreterTest, GetRuntimeByteCodeVersion) {
   auto runtime_bytecode_version = _get_runtime_bytecode_version();
   AT_ASSERT(
