@@ -3,6 +3,7 @@
 import argparse
 import copy
 from datetime import datetime
+from distutils.util import strtobool
 import modulefinder
 import os
 import shutil
@@ -77,6 +78,7 @@ TESTS = [
     'test_mkldnn',
     'test_model_dump',
     'test_module_init',
+    'test_modules',
     'test_multiprocessing',
     'test_multiprocessing_spawn',
     'distributed/test_nccl',
@@ -85,6 +87,7 @@ TESTS = [
     'test_nn',
     'test_ops',
     'test_optim',
+    'test_functional_optim',
     'test_pytree',
     'test_mobile_optimizer',
     'test_set_default_mobile_cpu_allocator',
@@ -169,6 +172,7 @@ TESTS = [
     'distributed/elastic/utils/distributed_test',
     'distributed/elastic/multiprocessing/api_test',
     'distributed/_sharding_spec/test_sharding_spec',
+    'distributed/_sharded_tensor/test_sharded_tensor',
 ]
 
 # Tests need to be run with pytest.
@@ -231,9 +235,9 @@ WINDOWS_BLOCKLIST = [
     'distributed/pipeline/sync/test_stream',
     'distributed/pipeline/sync/test_transparency',
     'distributed/pipeline/sync/test_worker',
-    'distributed/optim/test_zero_redundancy_optimizer',
     "distributed/elastic/agent/server/test/api_test",
     'distributed/elastic/multiprocessing/api_test',
+    'distributed/_sharded_tensor/test_sharded_tensor',
 ]
 
 ROCM_BLOCKLIST = [
@@ -695,7 +699,8 @@ def parse_args():
     parser.add_argument(
         '--continue-through-error',
         action='store_true',
-        help='Runs the full test suite despite one of the tests failing')
+        help='Runs the full test suite despite one of the tests failing',
+        default=strtobool(os.environ.get("CONTINUE_THROUGH_ERROR", "False")))
     parser.add_argument(
         'additional_unittest_args',
         nargs='*',
