@@ -48,7 +48,7 @@ if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
-  # Used so that only cuda specific versions of tests are generated
+  # Used so that only cuda specific versions of tests are generatedv
   # mainly used so that we're not spending extra cycles testing cpu
   # devices on expensive gpu machines
   export PYTORCH_TESTING_DEVICE_ONLY_FOR="cuda"
@@ -240,6 +240,17 @@ if [[ "${BUILD_ENVIRONMENT}" == *tbb* ]]; then
   sudo mkdir -p /usr/include/tbb
   sudo cp -r "$PWD"/third_party/tbb/include/tbb/* /usr/include/tbb
 fi
+
+test_torch_deploy_begin() {
+  python torch/csrc/deploy/example/generate_examples.py
+  ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
+  ln -sf "$TORCH_LIB_DIR"/libshm* "$TORCH_BIN_DIR"
+  ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
+}
+
+test_torch_deploy_end() {
+  assert_git_not_dirty
+}
 
 test_libtorch() {
   if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
@@ -472,17 +483,6 @@ test_vec256() {
     popd
     assert_git_not_dirty
   fi
-}
-
-test_torch_deploy_begin() {
-  python torch/csrc/deploy/example/generate_examples.py
-  ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
-  ln -sf "$TORCH_LIB_DIR"/libshm* "$TORCH_BIN_DIR"
-  ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
-}
-
-test_torch_deploy_end() {
-  assert_git_not_dirty
 }
 
 test_torch_deploy() {
