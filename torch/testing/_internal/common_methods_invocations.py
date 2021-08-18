@@ -2312,11 +2312,11 @@ def sample_inputs_conv2d(op_info, device, dtype, requires_grad, jit_fail_sample=
     # Ordered as shapes for input, weight, bias
     # and a dict of values of (stride, padding, groups, dilation)
     if jit_fail_sample:
-        cases = (
+        cases: Tuple = (
             ((1, 4, 5, 5), (3, 4, 3, 3), None, {}),
         )
     else:
-        cases = (
+        cases = (  # type: ignore[assignment]
             ((1, 3, 4, 4), (3, 3, 3, 3), (3,),
              {'stride': (2, 2), 'padding': 2, 'groups': 1}),
             ((2, 4, 8, 8), (2, 2, 3, 3), (2,),
