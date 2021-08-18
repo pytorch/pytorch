@@ -4016,7 +4016,7 @@ of elements from :attr:`input` and :attr:`other` along their last dimension.
     to `torch.mul(input, other)`.
 
     If both :attr:`input` and :attr:`other` are non-scalars, the size of their last
-    dimension must match and the result is equivalent to `torch.tensordot(input,
+    dimension must match and the result is equivalent to `torch.linalg.tensordot(input,
     other, dims=([-1], [-1]))`
 
 Args:

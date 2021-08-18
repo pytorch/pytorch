@@ -1810,7 +1810,7 @@ Examples::
 tensorinv = _add_docstr(_linalg.linalg_tensorinv, r"""
 linalg.tensorinv(A, ind=2, *, out=None) -> Tensor
 
-Computes the multiplicative inverse of :func:`torch.tensordot`.
+Computes the multiplicative inverse of :func:`torch.linalg.tensordot`.
 
 If `m` is the product of the first :attr:`ind` dimensions of :attr:`A` and `n` is the product of
 the rest of the dimensions, this function expects `m` and `n` to be equal.
@@ -1832,7 +1832,7 @@ Supports input of float, double, cfloat and cdouble dtypes.
     Consider using :func:`torch.linalg.tensorsolve` if possible for multiplying a tensor on the left
     by the tensor inverse, as::
 
-        tensorsolve(A, B) == torch.tensordot(tensorinv(A), B)
+        tensorsolve(A, B) == torch.linalg.tensordot(tensorinv(A), B)
 
     It is always prefered to use :func:`~tensorsolve` when possible, as it is faster and more
     numerically stable than computing the pseudoinverse explicitly.
@@ -1840,13 +1840,13 @@ Supports input of float, double, cfloat and cdouble dtypes.
 .. seealso::
 
         :func:`torch.linalg.tensorsolve` computes
-        `torch.tensordot(tensorinv(\ `:attr:`A`\ `), \ `:attr:`B`\ `)`.
+        `torch.linalg.tensordot(tensorinv(\ `:attr:`A`\ `), \ `:attr:`B`\ `)`.
 
 Args:
     A (Tensor): tensor to invert. Its shape must satisfy
                     `prod(\ `:attr:`A`\ `.shape[:\ `:attr:`ind`\ `]) ==
                     prod(\ `:attr:`A`\ `.shape[\ `:attr:`ind`\ `:])`.
-    ind (int): index at which to compute the inverse of :func:`torch.tensordot`. Default: `2`.
+    ind (int): index at which to compute the inverse of :func:`torch.linalg.tensordot`. Default: `2`.
 
 Keyword args:
     out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
@@ -1862,7 +1862,7 @@ Examples::
     >>> Ainv.shape
     torch.Size([8, 3, 4, 6])
     >>> B = torch.randn(4, 6)
-    >>> torch.allclose(torch.tensordot(Ainv, B), torch.linalg.tensorsolve(A, B))
+    >>> torch.allclose(torch.linalg.tensordot(Ainv, B), torch.linalg.tensorsolve(A, B))
     True
 
     >>> A = torch.randn(4, 4)
@@ -1875,7 +1875,7 @@ Examples::
 tensorsolve = _add_docstr(_linalg.linalg_tensorsolve, r"""
 linalg.tensorsolve(A, B, dims=None, *, out=None) -> Tensor
 
-Computes the solution `X` to the system `torch.tensordot(A, X) = B`.
+Computes the solution `X` to the system `torch.linalg.tensordot(A, X) = B`.
 
 If `m` is the product of the first :attr:`B`\ `.ndim`  dimensions of :attr:`A` and
 `n` is the product of the rest of the dimensions, this function expects `m` and `n` to be equal.
@@ -1895,7 +1895,7 @@ Supports inputs of float, double, cfloat and cdouble dtypes.
 .. seealso::
 
         :func:`torch.linalg.tensorinv` computes the multiplicative inverse of
-        :func:`torch.tensordot`.
+        :func:`torch.linalg.tensordot`.
 
 Args:
     A (Tensor): tensor to solve for. Its shape must satisfy
@@ -1920,7 +1920,7 @@ Examples::
     >>> X = torch.linalg.tensorsolve(A, B)
     >>> X.shape
     torch.Size([2, 3, 4])
-    >>> torch.allclose(torch.tensordot(A, X, dims=X.ndim), B)
+    >>> torch.allclose(torch.linalg.tensordot(A, X, dims=X.ndim), B)
     True
 
     >>> A = torch.randn(6, 4, 4, 3, 2)
@@ -1931,7 +1931,7 @@ Examples::
     >>> A = A.permute(1, 3, 4, 0, 2)
     >>> A.shape[B.ndim:]
     torch.Size([6, 4])
-    >>> torch.allclose(torch.tensordot(A, X, dims=X.ndim), B, atol=1e-6)
+    >>> torch.allclose(torch.linalg.tensordot(A, X, dims=X.ndim), B, atol=1e-6)
     True
 """)
 

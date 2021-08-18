@@ -24,7 +24,7 @@ The following functions will fail if used in TorchScript, either because they
 are not bound on `torch` or because Python expects a different schema than
 TorchScript.
 
-  * :func:`torch.tensordot`
+  * :func:`torch.linalg.tensordot`
   * :func:`torch.nn.init.calculate_gain`
   * :func:`torch.nn.init.eye_`
   * :func:`torch.nn.init.dirac_`

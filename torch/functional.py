@@ -887,7 +887,7 @@ def tensordot(a, b, dims=2, out: Optional[torch.Tensor] = None):  # noqa: F811
 
     When called with a non-negative integer argument :attr:`dims` = :math:`d`, and
     the number of dimensions of :attr:`a` and :attr:`b` is :math:`m` and :math:`n`,
-    respectively, :func:`~torch.tensordot` computes
+    respectively, :func:`torch.linalg.tensordot` computes
 
     .. math::
         r_{i_0,...,i_{m-d}, i_d,...,i_n}
@@ -895,14 +895,14 @@ def tensordot(a, b, dims=2, out: Optional[torch.Tensor] = None):  # noqa: F811
 
     When called with :attr:`dims` of the list form, the given dimensions will be contracted
     in place of the last :math:`d` of :attr:`a` and the first :math:`d` of :math:`b`. The sizes
-    in these dimensions must match, but :func:`~torch.tensordot` will deal with broadcasted
+    in these dimensions must match, but :func:`torch.linalg.tensordot` will deal with broadcasted
     dimensions.
 
     Examples::
 
         >>> a = torch.arange(60.).reshape(3, 4, 5)
         >>> b = torch.arange(24.).reshape(4, 3, 2)
-        >>> torch.tensordot(a, b, dims=([1, 0], [0, 1]))
+        >>> torch.linalg.tensordot(a, b, dims=([1, 0], [0, 1]))
         tensor([[4400., 4730.],
                 [4532., 4874.],
                 [4664., 5018.],
@@ -911,14 +911,14 @@ def tensordot(a, b, dims=2, out: Optional[torch.Tensor] = None):  # noqa: F811
 
         >>> a = torch.randn(3, 4, 5, device='cuda')
         >>> b = torch.randn(4, 5, 6, device='cuda')
-        >>> c = torch.tensordot(a, b, dims=2).cpu()
+        >>> c = torch.linalg.tensordot(a, b, dims=2).cpu()
         tensor([[ 8.3504, -2.5436,  6.2922,  2.7556, -1.0732,  3.2741],
                 [ 3.3161,  0.0704,  5.0187, -0.4079, -4.3126,  4.8744],
                 [ 0.8223,  3.9445,  3.2168, -0.2400,  3.4117,  1.7780]])
 
         >>> a = torch.randn(3, 5, 4, 6)
         >>> b = torch.randn(6, 4, 5, 3)
-        >>> torch.tensordot(a, b, dims=([2, 1, 3], [1, 2, 0]))
+        >>> torch.linalg.tensordot(a, b, dims=([2, 1, 3], [1, 2, 0]))
         tensor([[  7.7193,  -2.4867, -10.3204],
                 [  1.5513, -14.4737,  -6.5113],
                 [ -0.2850,   4.2573,  -3.5997]])

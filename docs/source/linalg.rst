@@ -80,6 +80,7 @@ Tensor Operations
 
     tensorinv
     tensorsolve
+    tensordot
 
 Experimental Functions
 ----------------------
