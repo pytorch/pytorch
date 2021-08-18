@@ -146,12 +146,11 @@ std::vector<Value*> ConvertSequenceDependencies(Node* node, int opset_version) {
       split_node->i_(attr::keepdims, 0);
       split_node->addInput(loop_output);
       split_node->insertAfter(loop_node);
-      split_node->output()->copyMetadata(loop_output);
+      split_node->output()->setType(loop_output->type());
       split_node->copyMetadata(loop_node);
 
-      // Update loop output metadata.
-      loop_output->copyMetadata(inserted_value);
-      loop_output->setType(c10::unshapedType(loop_output->type()));
+      // Update loop output type.
+      loop_output->setType(c10::unshapedType(inserted_value->type()));
 
       // The node that produces sequence should be safe to remove now.
       seq_node->destroy();
