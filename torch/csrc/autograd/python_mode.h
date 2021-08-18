@@ -13,15 +13,15 @@ struct TORCH_API PythonTorchDispatchTypeObject : public c10::TorchDispatchTypeOb
   // PythonTorchDispatchTypeObject takes a reference to the torch_dispatch_type_object.
   // It does this in case the user decides to delete the original type object.
   PythonTorchDispatchTypeObject(
-		  PyObject* torch_dispatch_type_object,
-		  c10::impl::PyInterpreter* pyinterpreter);
+      PyObject* torch_dispatch_type_object,
+      c10::impl::PyInterpreter* pyinterpreter);
   ~PythonTorchDispatchTypeObject() override;
   PyObject* ptr() const;
   c10::impl::PyInterpreter* pyinterpreter() const override;
 
  private:
   PyObject* data_ = nullptr;
-	c10::impl::PyInterpreter* pyinterpreter_ = nullptr;
+  c10::impl::PyInterpreter* pyinterpreter_ = nullptr;
 };
 
 struct TORCH_API PythonMode {

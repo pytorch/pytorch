@@ -359,8 +359,8 @@ struct C10_API NamedTensorMetaInterface {
 // PyObject* and a PyInterpreter* that says which python interpreter the class
 // came from.
 //
-// TorchDispatchTypeObject is virtual due to the libtorch_python library boundary.
-// See PythonTorchDispatchTypeObject for more details.
+// TorchDispatchTypeObject is virtual due to the libtorch_python library
+// boundary. See PythonTorchDispatchTypeObject for more details.
 //
 // See NOTE [dispatch_fn's type argument] for more details
 struct C10_API TorchDispatchTypeObject {

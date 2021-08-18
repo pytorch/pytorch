@@ -22,6 +22,11 @@ void PythonModeTLS::reset_state() {
   pythonModeState.reset((TorchDispatchTypeObject*)nullptr);
   c10::impl::tls_set_dispatch_key_included(DispatchKey::PythonMode, false);
 }
+
+static void dispatchToPython(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
+  auto* interpreter = pythonModeState->pyinterpreter();
+  interpreter->dispatch(op, stack, pythonModeState);
+}
 #else
 void PythonModeTLS::set_state(const std::shared_ptr<TorchDispatchTypeObject>& state) {
   TORCH_INTERNAL_ASSERT(false, "PythonModeTLS not enabled in build");
@@ -34,12 +39,11 @@ const std::shared_ptr<TorchDispatchTypeObject>& PythonModeTLS::get_state() {
 void PythonModeTLS::reset_state() {
   TORCH_INTERNAL_ASSERT(false, "PythonModeTLS not enabled in build");
 }
-#endif
 
 static void dispatchToPython(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
-	auto* interpreter = pythonModeState->pyinterpreter();
-	interpreter->dispatch(op, stack, pythonModeState);
+  TORCH_INTERNAL_ASSERT(false, "PythonModeTLS not enabled in build");
 }
+#endif
 
 TORCH_LIBRARY_IMPL(_, PythonMode, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&dispatchToPython>());
