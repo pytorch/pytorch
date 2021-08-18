@@ -304,7 +304,7 @@ class GraphEncoder {
       const bool use_external_data_format = false,
       const std::string& onnx_file_path = std::string());
 
-  void AddFunctionAttribute(
+  void AddAttribute(
       onnx::FunctionProto* func_proto,
       const std::string& name);
 
@@ -855,7 +855,7 @@ void GraphEncoder::AddAttribute(
   }
 }
 
-void GraphEncoder::AddFunctionAttribute(
+void GraphEncoder::AddAttribute(
     onnx::FunctionProto* func_proto,
     const std::string& name) {
   TORCH_INTERNAL_ASSERT(nullptr != func_proto);
@@ -925,7 +925,7 @@ void GraphEncoder::EncodeLocalFunction(
   // encode attributes names
   if (n->hasAttribute(Symbol::attr("attributes"))) {
     for (auto attr_name : n->ss(Symbol::attr("attributes"))) {
-      AddFunctionAttribute(func_proto, attr_name);
+      AddAttribute(func_proto, attr_name);
     }
   }
 

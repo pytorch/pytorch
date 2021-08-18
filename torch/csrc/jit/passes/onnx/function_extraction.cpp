@@ -7,11 +7,7 @@ namespace onnx {
 
 namespace {
 
-// using ScopeNodesMap = std::map<ScopePtr, node_list>;
 using scope_list = std::vector<ScopePtr>;
-
-static std::unordered_set<std::string> skip_scopes =
-    {}; // e.g. Dropout, Embedding, Softmax
 
 static bool HasSameAttribute(const Node* a, const Node* b, const c10::Symbol& attr);
 
@@ -24,27 +20,13 @@ struct FunctionExtractor {
   std::pair<ValAttrNameMap, NodeAttrNameMap> run();
 
  private:
-  // NOTE: not useful. Hardly anyway to sort the scope properly. It is supposed
-  // to be tree structure. struct ScopeDepthComp {
-  //   bool operator()(const ScopePtr& a, const ScopePtr& b) const {
-  //     return a->getDepth() < b->getDepth();
-  //   }
-  // };
-  // using scope_ctx_map = std::unordered_map<ScopePtr, ScopeContext,
-  // ScopeDepthComp>;
   struct ScopeContext {
-    // Currently only direct child is counted. might be useless, because we need
-    // all children.
     std::unordered_set<ScopePtr> children_;
     ScopePtr scope_;
     node_list nlist_;
     value_list inputs_;
     value_list outputs_;
     std::unordered_map<Value*, Value*> env_to_subgraph_;
-
-    // Not using this because if some constants/attributes are omitted, need to set as default as node?
-    // std::unordered_map<Node*, Node*> constant_map_;
-    // std::unordered_map<Node*, std::unordered_map<Symbol, Node*>> attribute_map_;
 
     void PopulateInputsOutputs(const std::unordered_set<std::string>& param_names);
     bool IsIdenticalFuncion(const ScopeContext& other_ctx) const;
@@ -56,7 +38,7 @@ struct FunctionExtractor {
 
   struct FunctionContext {
     FunctionContext(ScopePtr key, const scope_list& scopes, scope_ctx_map& scope_ctxs);
-    void Print() const;
+    void DebugPrint() const;
     void SetAttrName(Node* ref_n, Symbol attr, const std::string& name);
     void SetAttrName(Node* ref_const_n, const std::string& name);
     c10::optional<std::string> FindAttrName(Node* ref_n, Symbol attr);
@@ -67,7 +49,7 @@ struct FunctionExtractor {
     std::unordered_map<Node*, std::unordered_set<Node*>> constant_map_;
     std::unordered_map<Node*, std::unordered_map<Symbol, std::unordered_set<Node*>>> attribute_map_;
 
-    // passed later to serialization.
+    // Passed later to serialization.
     ValAttrNameMap val_attr_to_name_;
     NodeAttrNameMap node_attr_to_name_;
   };
@@ -82,11 +64,9 @@ struct FunctionExtractor {
   static c10::optional<ScopePtr> FindCommonAncestor(const scope_list& scopes);
   std::shared_ptr<Graph> ConstructFuncGraph(FunctionContext& ctx);
 
-
   void ConvertScopeToFunction(
       const ScopePtr& scope_key,
       const scope_list& scope_list,
-      // FunctionContext& func_ctx,
       scope_ctx_map& scope_ctxs,
       const std::shared_ptr<Graph>& graph);
 
@@ -100,9 +80,9 @@ struct FunctionExtractor {
   Node* CreateFunctionNode(FunctionContext& func_ctx, ScopeContext& scope_ctx, const std::shared_ptr<Graph>& graph, const std::string& domain_name, const std::string& func_name);
   static void ReplaceNodesWithFunctionNode();
 
-  static void PrintScopeContexts(const scope_ctx_map&);
-  static void PrintGraphWithFunction(const std::shared_ptr<Graph>& g);
-  static void PrintConstantDiff(const FunctionContext&);
+  static void DebugPrintScopeContexts(const scope_ctx_map&);
+  static void DebugPrintGraphWithFunction(const std::shared_ptr<Graph>& g);
+  static void DebugPrintConstantDiff(const FunctionContext&);
 
   std::shared_ptr<Graph> graph_;
   std::unordered_set<std::string> module_names_;
@@ -115,8 +95,7 @@ FunctionExtractor::FunctionContext::FunctionContext(ScopePtr key, const scope_li
   GRAPH_UPDATE("Process function family for scope ", scope_key_->name().toDisplayString());
   TORCH_INTERNAL_ASSERT(scopes.size() > 0);
   const auto& ref_ctx = scope_ctxs[scope_key_];
-  // loop over all context, fetch constants and attributes?
-  // NOTE: assumes identical scopes have same number and order of nodes.
+  // NOTE: Family scopes must have same number and order of nodes.
   GRAPH_DEBUG("Initialized family context for scope ", scope_key_->name().toDisplayString());
 
   for (const auto& scope : scopes) {
@@ -167,10 +146,10 @@ FunctionExtractor::FunctionContext::FunctionContext(ScopePtr key, const scope_li
   }
 
   GRAPH_DEBUG("Process scope family complete. ", scope_key_->name().toDisplayString());
-  Print();
+  DebugPrint();
 }
 
-void FunctionExtractor::FunctionContext::Print() const {
+void FunctionExtractor::FunctionContext::DebugPrint() const {
   GRAPH_DEBUG("Scope name: ", scope_key_->name().toDisplayString());
 
   for (const auto& it : constant_map_) {
@@ -236,7 +215,7 @@ c10::optional<std::string> FunctionExtractor::FunctionContext::FindAttrName(Node
   return name_it->second;
 }
 
-void FunctionExtractor::PrintScopeContexts(const scope_ctx_map& scope_ctxs) {
+void FunctionExtractor::DebugPrintScopeContexts(const scope_ctx_map& scope_ctxs) {
   for (auto& it : scope_ctxs) {
     GRAPH_UPDATE(
         "Scope name: ",
@@ -253,43 +232,15 @@ void FunctionExtractor::PrintScopeContexts(const scope_ctx_map& scope_ctxs) {
     GRAPH_UPDATE("Node types: \n", [&]() {
       std::stringstream ss;
       for (auto n : it.second->nlist_) {
-        // ss << n->kind().toDisplayString() << " ";
         ss << "  " << *n;
       }
       return ss.str();
     }());
-    // GRAPH_UPDATE("Node types + layer types: ", [&](){
-    //   std::stringstream ss;
-    //   auto ctx = it.second;
-    //   auto child_scope_set = ctx.children_;
-    //   for (auto n : ctx.nlist_) {
-    //     auto n_scope = n->scope();
-    //     if (n_scope == ctx.scope_) {
-    //       ss << n->kind().toDisplayString() << " ";
-    //     } else {
-    //       auto child = [&]() {
-    //         auto tmp_scope = n_scope;
-    //         while (!tmp_scope->isRoot()) {
-    //           if (child_scope_set.find(tmp_scope) != child_scope_set.end()) {
-    //             return tmp_scope;
-    //           }
-    //           tmp_scope = tmp_scope->parent();
-    //         }
-    //         return tmp_scope;
-    //       }();
-    //       if (child && !child->isRoot()) {
-    //         ss << child->name().toDisplayString() << " ";
-    //         child_scope_set.erase(child);
-    //       }
-    //     }
-    //   }
-    //   return ss.str();
-    // }());
     GRAPH_UPDATE("Node count: ", it.second->nlist_.size());
   }
 }
 
-void FunctionExtractor::PrintGraphWithFunction(const std::shared_ptr<Graph>& g) {
+void FunctionExtractor::DebugPrintGraphWithFunction(const std::shared_ptr<Graph>& g) {
   GRAPH_UPDATE("Local function definitions:");
   for (auto* n : g->nodes()) {
     if (n->kind() == Symbol::onnx("LocalFunctionDef")) {
@@ -353,7 +304,6 @@ c10::optional<ScopePtr> FunctionExtractor::FindCommonAncestor(
 
 c10::optional<ScopePtr> FunctionExtractor::FindCommonAncestor(
     const scope_list& scopes) {
-  // find common ancestor.
   if (scopes.size() == 0) {
     return c10::nullopt;
   }
@@ -370,7 +320,6 @@ c10::optional<ScopePtr> FunctionExtractor::FindCommonAncestor(
 }
 
 c10::optional<ScopePtr> FunctionExtractor::InferScope(Node* n) {
-  // TODO: add comments explaining logic for inference.
   scope_list input_scopes;
   scope_list output_scopes;
   for (auto input : n->inputs()) {
@@ -424,16 +373,7 @@ c10::optional<ScopePtr> FunctionExtractor::InferScope(Node* n) {
 
 std::shared_ptr<Graph> FunctionExtractor::ConstructFuncGraph(
     FunctionContext& func_ctx) {
-  // notes:
-  // 1. some modules can be skippedd:
-  //    1. single node modules: dropout, Linear?,
-  // 2. sub_nodes may form a function graph, substitute?
-  // 3. constants, had to copy values?
-  // 4. substitute original graph at the same time?
-  // 5. use only original graph, first do a pass to secure scoping, then bottom
-  // up construct functions?
   auto& ctx = *func_ctx.scope_ctxs_[func_ctx.scope_key_];
-  GRAPH_DEBUG("1 Constructing graph for ", ctx.scope_->namesFromRoot());
   const auto& nlist = ctx.nlist_;
   const auto& scope = ctx.scope_;
   auto& env = ctx.env_to_subgraph_;
@@ -509,10 +449,7 @@ Node* FunctionExtractor::CreateFunctionDefNode(FunctionContext& func_ctx, const 
     auto attr_name = std::string(c_n->kind().toUnqualString()) + '_' + c_n->output()->debugNameBase();
     auto final_attr_name = adjust_attr_name(attr_name);
     final_attr_names.emplace_back(final_attr_name);
-    // Update
     func_ctx.SetAttrName(c_n, final_attr_name);
-    // auto v_in_def = func_ctx.scope_ctxs_[func_ctx.scope_key_]->env_to_subgraph_[c_n->output()];
-    // func_ctx.val_attr_to_name_[v_in_def] = final_attr_name;
   }
   for (const auto n_it : func_ctx.attribute_map_) {
     auto* n = n_it.first;
@@ -521,10 +458,7 @@ Node* FunctionExtractor::CreateFunctionDefNode(FunctionContext& func_ctx, const 
       auto attr_name = std::string(n->kind().toUnqualString()) + '_' + attr.toUnqualString();
       auto final_attr_name = adjust_attr_name(attr_name);
       final_attr_names.emplace_back(final_attr_name);
-      // Update
       func_ctx.SetAttrName(n, attr, final_attr_name);
-      // auto n_in_def = func_ctx.scope_ctxs_[func_ctx.scope_key_]->env_to_subgraph_[n->outputs().at(0)]->node();
-      // func_ctx.node_attr_to_name_[n_in_def][attr.toUnqualString()] = final_attr_name;
     }
   }
 
@@ -555,10 +489,8 @@ Node* FunctionExtractor::CreateFunctionNode(FunctionContext& func_ctx, ScopeCont
   // set constants and attributes of different values as function attributes.
 
   for (const auto& it : func_ctx.constant_map_) {
-    std::cout << "constant node: " << *it.first << std::endl;
     TORCH_INTERNAL_ASSERT(it.first->kind() == c10::onnx::Constant);
     TORCH_INTERNAL_ASSERT(it.first->outputs().size() == 1);
-    // auto attr_name = func_ctx.val_attr_to_name_[func_scope_ctx->env_to_subgraph_[it.first->output()]];
     auto attr_name = func_ctx.FindAttrName(it.first).value();
     auto val = it.first->t(attr::value);
     for (auto* n : scope_ctx.nlist_) {
@@ -593,8 +525,7 @@ Node* FunctionExtractor::CreateFunctionNode(FunctionContext& func_ctx, ScopeCont
       case AttributeKind::tys:
       case AttributeKind::c:
       default:
-        // unhandled
-        // TODO: add warning or debug information.
+        TORCH_INTERNAL_ASSERT(false, "Unexpected attribute type ", a->kindOf(attr), " from node ", *a);
         break;
     }
   };
@@ -604,8 +535,6 @@ Node* FunctionExtractor::CreateFunctionNode(FunctionContext& func_ctx, ScopeCont
     for (const auto attr_it : it.second) {
       const auto& attr = attr_it.first;
       auto attr_name = func_ctx.FindAttrName(ref_n, attr).value();
-      // auto n_in_def = func_scope_ctx->env_to_subgraph_[ref_n->outputs().at(0)]->node();
-      // auto attr_name = func_ctx.node_attr_to_name_[n_in_def][attr.toUnqualString()];
       copy_attr(ref_n, func_n, attr, attr_name);
       for (auto* n : scope_ctx.nlist_) {
         if (attr_it.second.find(n) != attr_it.second.end()) {
@@ -709,8 +638,6 @@ bool FunctionExtractor::ScopeContext::IsIdenticalFuncion(
   //       when constants are passed inplace of inputs, this leads to different
   //       input count and node count. Likewise, due to different uses, output
   //       count can be different as well.
-  // TODO: constants may be different, even for same module. Need to save them
-  // as attributes.
   if (&other_ctx == this) {
     return true;
   }
@@ -787,29 +714,9 @@ void FunctionExtractor::HandleNoScopeNodes(
     node_list no_scope_nlist) {
   GRAPH_UPDATE("No scope node count: ", no_scope_nlist.size());
   for (auto n : no_scope_nlist) {
-    // NOTE: decide which scope n should belong to.
-    // If outputs are all from same scope -> output scope ?
-    // elseif inputs are all from same scope -> input scope
-    // else find common ancestor of inputs & outputs scopes.
-    //
-    // Assumption is no_scope_nlist is topological sorted, so all inputs must
-    // have scope.
-    //
-    // Actually, it wouldn't hurt too much if not handled too. Original nodes
-    // have their scope, so left outs are just left outs.
-
-    // Another point of view, when inputs are from different scope, it is always
-    // more dangerous to put node into input scope then output scope, because we
-    // don't know if other inputs are accessible from that scope. however for
-    // outputs, it is topologically ordered, guaranteed to be accessible.
-
-    // The possiblility is then, it might belong to the parent scope, when input
-    // and output scope are not the same. The glue code can be from upper, but
-    // not captured.
-
-    // Done during passing the node. TODO if there are still nodes that are left
-    // over.
+    TORCH_WARN("ONNX function extraction cannot determine the scope for node: ", *n);
   }
+  TORCH_INTERNAL_ASSERT(false, "ONNX function extraction cannot determine the scope for the above nodes.");
 }
 
 std::tuple<FunctionExtractor::scope_ctx_map, node_list> FunctionExtractor::
@@ -848,9 +755,7 @@ std::tuple<FunctionExtractor::scope_ctx_map, node_list> FunctionExtractor::
         n->setScope(inferred_scope.value());
         record_node_scope(n);
       } else {
-        // Print warning.
-        GRAPH_UPDATE("Cannot deduct proper scope for node: ", *n);
-        // pretty much useless now, as it is already handled above.
+        GRAPH_UPDATE("Cannot infer proper scope for node: ", *n);
         no_scope_nlist.emplace_back(n);
       }
     }
@@ -972,8 +877,7 @@ static bool HasSameAttribute(const Node* a, const Node* b, const c10::Symbol& at
     case AttributeKind::tys:
     case AttributeKind::c:
     default:
-      // unhandled
-      // TODO: add warning or debug information.
+      TORCH_INTERNAL_ASSERT(false, "Unexpected attribute type ", a_kind, " from node ", *a);
       break;
   }
 
@@ -1024,62 +928,17 @@ scope_list FunctionExtractor::SortScopesByMaxDepth(std::unordered_map<ScopePtr, 
 
 std::pair<ValAttrNameMap, NodeAttrNameMap> FunctionExtractor::run() {
   auto scope_ctxs = PartitionNodesByScope(graph_);
-
-  PrintScopeContexts(scope_ctxs);
-
-  // NOTE: sort scopes and start from the lowest depth.
-  //       useless. some inner scope function can appear at root level too.
-  //
-  //       Need to figure out duplications first? or get a graph first then
-  //       figure out? Dup first is much more efficient. less efficient when
-  //       copying large constants.
-  //
-  //       Current solution is the first one.
-
+  DebugPrintScopeContexts(scope_ctxs);
   auto identical_scope_map = PartitionIdenticalScopes(scope_ctxs);
-
-  // Find out constant & attribute differences
-  // TODO: problem with this design: nested functions
-  //       Func a
-  //          Func b - attr: 1.0
-  //          Func b - attr: 2.0
-  //       Func a
-  //          Func b - attr: 3.0
-  //          Func b - attr: 4.0
-  // both these attributes of func b need to become attributes of func a.
-  // So we cannot generate function context, and then convert to function nodes.
-  // Instead, we need to iteratively convert to function nodes,
-  // updating parent scope context.
-
-  // auto func_ctxs = GenFuncCtx(identical_scope_map, scope_ctxs);
-
-  // determine order of scope.
-  // scope of largest depth comes first, guaranteeing no other scope can be its
-  // child.
-
+  // Deepest scope comes first, guaranteeing no other scope can be its child.
   auto sorted_scope_keys = SortScopesByMaxDepth(identical_scope_map);
-
-  // Start from inner most
-  //  1. construct def
-  //  2. replace nodes in nlist in graph with new node.
-  //  3. replace nodes in nlist in other scope with new node.
   for (const auto& scope_key : sorted_scope_keys) {
     if (module_names_.empty() || module_names_.find(scope_key->name().toUnqualString()) != module_names_.end()) {
-      // ConvertScopeToFunction(*func_ctxs[scope], scope_ctxs, graph_);
       ConvertScopeToFunction(scope_key, identical_scope_map[scope_key], scope_ctxs, graph_);
     }
-
     GRAPH_DEBUG("Main graph afterwards: ", graph_->toString());
   }
-
-  // GRAPH_UPDATE("Finish construct function graph.");
-
-  // Create def nodes for each local function.
-  // NOTE: nested function cases.
-
-  // Replace nodes in graph with local function node.
-
-  PrintGraphWithFunction(graph_);
+  DebugPrintGraphWithFunction(graph_);
 
   // Construct return mappings
   ValAttrNameMap val_attr_to_name;
@@ -1096,9 +955,11 @@ std::pair<ValAttrNameMap, NodeAttrNameMap> FunctionExtractor::run() {
   for (auto& it : scope_ctxs) {
     delete it.second;
   }
+  scope_ctxs.clear();
   for (auto& it : func_ctxs_) {
     delete it.second;
   }
+  func_ctxs_.clear();
 
   return std::make_pair(val_attr_to_name, node_attr_to_name);
 }

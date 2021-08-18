@@ -734,22 +734,22 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
             if custom_opsets is None:
                 custom_opsets = {}
 
-            val_map = {}
-            attr_ref_map = {}
+            val_attr_to_name = {}
+            node_attr_to_name = {}
             if export_modules_as_functions is not None:
-                val_map, attr_ref_map = torch._C._jit_pass_onnx_function_extraction(graph, export_modules_as_functions, list(params_dict.keys()))
+                val_attr_to_name, node_attr_to_name = torch._C._jit_pass_onnx_function_extraction(graph, export_modules_as_functions, list(params_dict.keys()))
             if export_params:
                 proto, export_map = graph._export_onnx(
                     params_dict, opset_version, dynamic_axes, defer_weight_export,
                     operator_export_type, not verbose, val_keep_init_as_ip, custom_opsets,
                     val_add_node_names, val_use_external_data_format, model_file_location,
-                    val_map, attr_ref_map)
+                    val_attr_to_name, node_attr_to_name)
             else:
                 proto, export_map = graph._export_onnx(
                     {}, opset_version, dynamic_axes, False, operator_export_type,
                     not verbose, val_keep_init_as_ip, custom_opsets, val_add_node_names,
                     val_use_external_data_format, model_file_location,
-                    val_map, attr_ref_map)
+                    val_attr_to_name, node_attr_to_name)
 
             if export_type == ExportTypes.PROTOBUF_FILE:
                 assert(len(export_map) == 0)
