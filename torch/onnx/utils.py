@@ -453,12 +453,8 @@ def _get_example_outputs(model, args):
     if input_args and isinstance(input_args[-1], dict):
         input_kwargs = input_args[-1]
         input_args = input_args[:-1]
-    try:
-        model_copy = copy.deepcopy(model)
-        example_outputs = model_copy(*input_args, **input_kwargs)
-    except Exception:
-        example_outputs = model(*input_args, **input_kwargs)
 
+    example_outputs = model(*input_args, **input_kwargs)
     if isinstance(example_outputs, (torch.Tensor, int, float, bool)):
         example_outputs = (example_outputs,)
 
@@ -499,11 +495,15 @@ def _model_to_graph(model, args, verbose=False,
                             dynamic_axes=dynamic_axes, input_names=input_names,
                             module=module)
     from torch.onnx.symbolic_helper import _onnx_shape_inference
-    if example_outputs is None and isinstance(model, torch.jit.ScriptModule) or isinstance(model, torch.jit.ScriptFunction):
-        example_outputs = _get_example_outputs(model, args)
+    if isinstance(model, torch.jit.ScriptModule) or isinstance(model, torch.jit.ScriptFunction):
+        if example_outputs is None:
+            example_outputs = _get_example_outputs(model, args)
+        elif isinstance(example_outputs, list):
+            # exmaple_outpus specified
+            example_outputs = [example_outputs]
+
         out_vars, desc = torch.jit._flatten(tuple(example_outputs))
         torch._C._jit_pass_onnx_assign_output_shape(graph, out_vars, desc, _onnx_shape_inference)
-
     else:
         flatten_args, _ = torch._C._jit_flatten(args)
         # make sure that the param dict and the graph match each other
@@ -596,8 +596,6 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
         val_add_node_names = _decide_add_node_names(add_node_names, operator_export_type)
         val_do_constant_folding = _decide_constant_folding(do_constant_folding, operator_export_type, training)
         args = _decide_input_format(model, args)
-        if example_outputs is None and (isinstance(model, torch.jit.ScriptModule) or isinstance(model, torch.jit.ScriptFunction)):
-            example_outputs = _get_example_outputs(model, args)
         graph, params_dict, torch_out = _model_to_graph(model, args, verbose, input_names,
                                                         output_names, operator_export_type,
                                                         example_outputs, val_do_constant_folding,
