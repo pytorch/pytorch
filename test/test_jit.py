@@ -5944,6 +5944,9 @@ a")
         self.assertEqual(test_bool_arith_not(torch.zeros(3)), 1)
         self.assertTrue(str(test_bool_arith_not.graph).count('if') == 0)
 
+    # Very special case to cover a failing FB-internal test
+    def test_check_empty_containers_does_not_throw_with_tensor_of_no_values(self):
+        torch._jit_internal.check_empty_containers(torch.Tensor([]))
 
     def test_conditional_casting(self):
         def test_bool_cast_tensor(x):
