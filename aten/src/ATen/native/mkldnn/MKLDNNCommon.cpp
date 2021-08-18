@@ -86,20 +86,21 @@ ideep::tensor itensor_view_from_dense(const Tensor& tensor) {
   TORCH_CHECK(
       tensor.layout() == Layout::Strided,
       "itensor_view_from_dense expects dense tensor input");
-  auto data_type = tensor.scalar_type();
-  TORCH_CHECK(data_type == ScalarType::Float || data_type == ScalarType::BFloat16,
-             "itensor_view_from_dense expects float tensor input");
   TORCH_INTERNAL_ASSERT(at::impl::variable_excluded_from_dispatch());
-  if (data_type == ScalarType::Float) {
-    return {{{tensor.sizes().cbegin(), tensor.sizes().cend()},
-             ideep::tensor::data_type::f32,
-             {tensor.strides().cbegin(), tensor.strides().cend()}},
+  if (tensor.scalar_type() == ScalarType::Float) {
+    return {{tensor.sizes().vec(),
+            ideep::tensor::data_type::f32,
+            tensor.strides().vec()},
             tensor.template data_ptr<float>()};
-  } else {
-    return {{{tensor.sizes().cbegin(), tensor.sizes().cend()},
-             ideep::tensor::data_type::bf16,
-             {tensor.strides().cbegin(), tensor.strides().cend()}},
+  }
+  else if (tensor.scalar_type() == ScalarType::BFloat16) {
+    return {{tensor.sizes().vec(),
+            ideep::tensor::data_type::bf16,
+            tensor.strides().vec()},
             tensor.template data_ptr<BFloat16>()};
+  }
+  else {
+    TORCH_CHECK(false, "itensor_view_from_dense expects float/bfloat16 tensor input");
   }
 }
 
