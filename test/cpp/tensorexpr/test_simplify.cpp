@@ -149,9 +149,9 @@ TEST(Simplify, ConstantFoldWithVar) {
     ExprHandle body = x * (ExprHandle(2) + ExprHandle(4));
 
     ExprHandle newF = IRSimplifier::simplify(body);
-    const Mul* root = newF.AsNode<Mul>();
+    MulPtr root = newF.AsNode<Mul>();
     ASSERT_NE(root, nullptr);
-    ASSERT_NE(dynamic_cast<const IntImm*>(root->lhs()), nullptr);
+    ASSERT_NE(to<IntImm>(root->lhs()), nullptr);
 
     SimpleIRExprEval eval(newF);
     eval.bindVar(x, ExprHandle(3));
@@ -163,9 +163,9 @@ TEST(Simplify, ConstantFoldWithVar) {
     ExprHandle body = x * (ExprHandle(2.f) + ExprHandle(4.f));
 
     ExprHandle newF = IRSimplifier::simplify(body);
-    const Mul* root = newF.AsNode<Mul>();
+    MulPtr root = newF.AsNode<Mul>();
     ASSERT_NE(root, nullptr);
-    ASSERT_NE(dynamic_cast<const FloatImm*>(root->rhs()), nullptr);
+    ASSERT_NE(to<FloatImm>(root->rhs()), nullptr);
 
     SimpleIRExprEval eval(newF);
     eval.bindVar(x, ExprHandle(3.f));
@@ -274,7 +274,7 @@ TEST(Simplify, ConditionalSelectFoldWithVar) {
   ExprHandle f = x < 4.f;
 
   ExprHandle newF = IRSimplifier::simplify(f);
-  const IntImm* folded = newF.AsNode<IntImm>();
+  IntImmPtr folded = newF.AsNode<IntImm>();
   ASSERT_EQ(folded, nullptr);
 
   {
@@ -296,10 +296,10 @@ TEST(Simplify, UnFoldableExpr) {
   ExprHandle body = (ExprHandle(3) * x) + (ExprHandle(5) * y);
 
   ExprHandle newF = IRSimplifier::simplify(body);
-  const Add* root = newF.AsNode<Add>();
+  AddPtr root = newF.AsNode<Add>();
   ASSERT_NE(root, nullptr);
-  ASSERT_EQ(dynamic_cast<const FloatImm*>(root->lhs()), nullptr);
-  ASSERT_EQ(dynamic_cast<const FloatImm*>(root->rhs()), nullptr);
+  ASSERT_EQ(to<FloatImm>(root->lhs()), nullptr);
+  ASSERT_EQ(to<FloatImm>(root->rhs()), nullptr);
 
   SimpleIRExprEval eval(newF);
   eval.bindVar(x, ExprHandle(3.f));
@@ -334,7 +334,7 @@ TEST(Simplify, HashEquivalence) {
   VarHandle y("y", kFloat);
   ExprHandle f = (x * y) + (x * y);
 
-  const Add* root = f.AsNode<Add>();
+  AddPtr root = f.AsNode<Add>();
   ASSERT_NE(root, nullptr);
 
   HashProvider hasher;
@@ -370,7 +370,7 @@ TEST(Simplify, HashEquivalenceRand) {
   ExprHandle f =
       Intrinsics::make(kRand, kFloat) + Intrinsics::make(kRand, kInt);
 
-  const Add* root = f.AsNode<Add>();
+  AddPtr root = f.AsNode<Add>();
   ASSERT_NE(root, nullptr);
 
   HashProvider hasher;
@@ -415,18 +415,18 @@ TEST(Simplify, HashDifferenceTypes) {
   KernelScope kernel_scope;
 
   HashProvider hasher;
-  std::vector<const Expr*> immediates;
+  std::vector<ExprPtr> immediates;
 
-  immediates.push_back(new DoubleImm(1));
-  immediates.push_back(new FloatImm(1));
-  immediates.push_back(new HalfImm(1));
+  immediates.push_back(alloc<DoubleImm>(1));
+  immediates.push_back(alloc<FloatImm>(1));
+  immediates.push_back(alloc<HalfImm>(1));
   // NOLINTNEXTLINE(modernize-use-bool-literals)
-  immediates.push_back(new BoolImm(1));
-  immediates.push_back(new CharImm(1));
-  immediates.push_back(new ByteImm(1));
-  immediates.push_back(new ShortImm(1));
-  immediates.push_back(new IntImm(1));
-  immediates.push_back(new LongImm(1));
+  immediates.push_back(alloc<BoolImm>(1));
+  immediates.push_back(alloc<CharImm>(1));
+  immediates.push_back(alloc<ByteImm>(1));
+  immediates.push_back(alloc<ShortImm>(1));
+  immediates.push_back(alloc<IntImm>(1));
+  immediates.push_back(alloc<LongImm>(1));
 
   // Immediates of different types are not equal.
   for (unsigned int i = 0; i < immediates.size(); ++i) {
@@ -546,12 +546,12 @@ TEST(Simplify, SimplifyAdd) {
   ExprHandle body = (ExprHandle(2) + x) + ExprHandle(4);
 
   ExprHandle simplified = IRSimplifier::simplify(body);
-  const Add* root = simplified.AsNode<Add>();
+  AddPtr root = simplified.AsNode<Add>();
   ASSERT_NE(root, nullptr);
-  const Var* lhs = dynamic_cast<const Var*>(root->lhs());
+  VarPtr lhs = to<Var>(root->lhs());
   ASSERT_NE(lhs, nullptr);
   ASSERT_EQ(lhs->name_hint(), "x");
-  const IntImm* rhs = dynamic_cast<const IntImm*>(root->rhs());
+  IntImmPtr rhs = to<IntImm>(root->rhs());
   ASSERT_NE(rhs, nullptr);
   ASSERT_EQ(rhs->value(), 6.f);
 }
@@ -563,12 +563,12 @@ TEST(Simplify, SimplifySub) {
   ExprHandle body = (ExprHandle(2) - x) - ExprHandle(4);
 
   ExprHandle simplified = IRSimplifier::simplify(body);
-  const Sub* root = simplified.AsNode<Sub>();
+  SubPtr root = simplified.AsNode<Sub>();
   ASSERT_NE(root, nullptr);
-  const IntImm* lhs = dynamic_cast<const IntImm*>(root->lhs());
+  IntImmPtr lhs = to<IntImm>(root->lhs());
   ASSERT_NE(lhs, nullptr);
   ASSERT_EQ(lhs->value(), -2.f);
-  const Var* rhs = dynamic_cast<const Var*>(root->rhs());
+  VarPtr rhs = to<Var>(root->rhs());
   ASSERT_NE(rhs, nullptr);
   ASSERT_EQ(rhs->name_hint(), "x");
 }
@@ -594,12 +594,12 @@ TEST(Simplify, SimplifyMultiTerm) {
       (ExprHandle(2) * ((ExprHandle(3) * x)) - (x * ExprHandle(4)));
 
   ExprHandle simplified = IRSimplifier::simplify(body);
-  const Mul* root = simplified.AsNode<Mul>();
+  MulPtr root = simplified.AsNode<Mul>();
   ASSERT_NE(root, nullptr);
-  const IntImm* lhs = dynamic_cast<const IntImm*>(root->lhs());
+  IntImmPtr lhs = to<IntImm>(root->lhs());
   ASSERT_NE(lhs, nullptr);
   ASSERT_EQ(lhs->value(), 2);
-  const Var* rhs = dynamic_cast<const Var*>(root->rhs());
+  VarPtr rhs = to<Var>(root->rhs());
   ASSERT_NE(rhs, nullptr);
   ASSERT_EQ(rhs->name_hint(), "x");
 }
@@ -612,12 +612,12 @@ TEST(Simplify, SimplifyCasts) {
       (ExprHandle(2) * ((ExprHandle(3) * x)) - (x * ExprHandle(4)));
 
   ExprHandle simplified = IRSimplifier::simplify(body);
-  const Mul* root = simplified.AsNode<Mul>();
+  MulPtr root = simplified.AsNode<Mul>();
   ASSERT_NE(root, nullptr);
-  const LongImm* lhs = dynamic_cast<const LongImm*>(root->lhs());
+  LongImmPtr lhs = to<LongImm>(root->lhs());
   ASSERT_NE(lhs, nullptr);
   ASSERT_EQ(lhs->value(), 2);
-  const Var* rhs = dynamic_cast<const Var*>(root->rhs());
+  VarPtr rhs = to<Var>(root->rhs());
   ASSERT_NE(rhs, nullptr);
   ASSERT_EQ(rhs->name_hint(), "x");
 }
@@ -629,7 +629,7 @@ TEST(Simplify, SimplifyEliminatesNoOps) {
   ExprHandle body = (x + ExprHandle(0)) * 1;
 
   ExprHandle simplified = IRSimplifier::simplify(body);
-  const Var* root = simplified.AsNode<Var>();
+  VarPtr root = simplified.AsNode<Var>();
   ASSERT_NE(root, nullptr);
   ASSERT_EQ(root->name_hint(), "x");
 }
@@ -643,16 +643,16 @@ TEST(Simplify, SimplifyMultiVar) {
 
   ExprHandle simplified = IRSimplifier::simplify(body);
 
-  const Add* root = simplified.AsNode<Add>();
+  AddPtr root = simplified.AsNode<Add>();
   ASSERT_NE(root, nullptr);
-  const Mul* lhs = dynamic_cast<const Mul*>(root->lhs());
+  MulPtr lhs = to<Mul>(root->lhs());
   ASSERT_NE(lhs, nullptr);
-  const Var* varX = dynamic_cast<const Var*>(lhs->rhs());
+  VarPtr varX = to<Var>(lhs->rhs());
   ASSERT_NE(varX, nullptr);
   ASSERT_EQ(varX->name_hint(), "y");
-  const Mul* rhs = dynamic_cast<const Mul*>(root->rhs());
+  MulPtr rhs = to<Mul>(root->rhs());
   ASSERT_NE(rhs, nullptr);
-  const Var* varY = dynamic_cast<const Var*>(rhs->rhs());
+  VarPtr varY = to<Var>(rhs->rhs());
   ASSERT_NE(varY, nullptr);
   ASSERT_EQ(varY->name_hint(), "x");
 }
@@ -665,7 +665,7 @@ TEST(Simplify, DISABLED_SimplifyReorderings) {
   ExprHandle body = x + 2 + y;
   ExprHandle simplified = IRSimplifier::simplify(body);
 
-  const Add* root = simplified.AsNode<Add>();
+  AddPtr root = simplified.AsNode<Add>();
   ASSERT_NE(root, nullptr);
 
   IS_NODE_WITH_NAME(Add, root->lhs(), rhs);
@@ -1141,6 +1141,370 @@ TEST(Simplify, SimplifyDiv) {
 
     IS_VAR_WITH_NAME(simplified.node(), "x");
   }
+}
+
+TEST(Simplify, SimplifyDivWithLoopContext1) {
+  KernelScope kernel_scope;
+  // Stmt to simplify:
+  // for (int i = 0; i < 6; i++) {
+  //  A[i] = (i + 24) / 6;
+  //}
+  VarHandle i("i", kInt);
+  BufHandle a_buf("A", {6}, kInt);
+  auto for_stmt = For::make(i, 0, 6, Store::make(a_buf, {i}, (i + 24) / 6));
+
+  const StmtPtr simplified = IRSimplifier::simplify(for_stmt);
+
+  std::ostringstream oss;
+  oss << *(simplified);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK-NEXT:   A[i] = 4;
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+TEST(Simplify, SimplifyDivWithLoopContext2) {
+  KernelScope kernel_scope;
+  // Stmt to simplify:
+  // for (int i = 0; i < 5; i++) {
+  //  A[i] = (i + 25) / 6;
+  //}
+  VarHandle i("i", kInt);
+  BufHandle a_buf("A", {5}, kInt);
+  auto for_stmt = For::make(i, 0, 5, Store::make(a_buf, {i}, (i + 25) / 6));
+
+  const StmtPtr simplified = IRSimplifier::simplify(for_stmt);
+
+  std::ostringstream oss;
+  oss << *(simplified);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK-NEXT:   A[i] = 4;
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+TEST(Simplify, SimplifyDivWithLoopContext3) {
+  KernelScope kernel_scope;
+  // Stmt to simplify:
+  // for (int i = 0; i < 6; i++) {
+  //  A[i] = (i + 24) / (-6);
+  //}
+  VarHandle i("i", kInt);
+  BufHandle a_buf("A", {6}, kInt);
+  auto for_stmt = For::make(i, 0, 6, Store::make(a_buf, {i}, (i + 24) / (-6)));
+
+  const StmtPtr simplified = IRSimplifier::simplify(for_stmt);
+
+  std::ostringstream oss;
+  oss << *(simplified);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK-NOT:   A[i] = -4;
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+TEST(Simplify, SimplifyDivWithLoopContext4) {
+  KernelScope kernel_scope;
+  // Stmt to simplify:
+  // for (int i = 0; i < 5; i++) {
+  //  A[i] = (i - 5) / 6;
+  //}
+  VarHandle i("i", kInt);
+  BufHandle a_buf("A", {5}, kInt);
+  auto for_stmt = For::make(i, 0, 5, Store::make(a_buf, {i}, (i + (-5)) / 6));
+
+  const StmtPtr simplified = IRSimplifier::simplify(for_stmt);
+
+  std::ostringstream oss;
+  oss << *(simplified);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK-NOT:   A[i] = 0;
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+TEST(Simplify, SimplifyDivWithLoopContext5) {
+  KernelScope kernel_scope;
+  // Stmt to simplify:
+  // for (int i = 0; i < 6; i++) {
+  //  for (int j = 0; j < 10; j++) {
+  //    A[i, j] = (i + 6*j) / 6;
+  //  }
+  //}
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  BufHandle a_buf("A", {6, 10}, kInt);
+  auto for_j = For::make(j, 0, 10, Store::make(a_buf, {i, j}, (i + j * 6) / 6));
+  auto for_i = For::make(i, 0, 6, for_j);
+
+  const StmtPtr simplified = IRSimplifier::simplify(for_i);
+
+  std::ostringstream oss;
+  oss << *(simplified);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK:   for (int j
+# CHECK-NEXT:   A[i, j] = j;
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+TEST(Simplify, SimplifyDivWithLoopContext6) {
+  KernelScope kernel_scope;
+  // Stmt to simplify:
+  // for (int i = 0; i < 6; i++) {
+  //  for (int j = -1; j < 9; j++) {
+  //    A[i, j+1] = (i + 6*j) / 6;
+  //  }
+  //}
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  BufHandle a_buf("A", {6, 10}, kInt);
+  auto for_j =
+      For::make(j, -1, 9, Store::make(a_buf, {i, j + 1}, (i + j * 6) / 6));
+  auto for_i = For::make(i, 0, 6, for_j);
+
+  const StmtPtr simplified = IRSimplifier::simplify(for_i);
+
+  std::ostringstream oss;
+  oss << *(simplified);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK:   for (int j
+# CHECK-NOT:   A[i, j] = j;
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+TEST(Simplify, SimplifyDivWithLoopContext7) {
+  KernelScope kernel_scope;
+  // Stmt to simplify:
+  // for (int i = 0; i < 6; i++) {
+  //  for (int j = 0; j < 10; j++) {
+  //    A[i, j] = (i + 6*j) / (-6);
+  //  }
+  //}
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  BufHandle a_buf("A", {6, 10}, kInt);
+  auto for_j =
+      For::make(j, 0, 10, Store::make(a_buf, {i, j}, (i + j * 6) / (-6)));
+  auto for_i = For::make(i, 0, 6, for_j);
+
+  const StmtPtr simplified = IRSimplifier::simplify(for_i);
+
+  std::ostringstream oss;
+  oss << *(simplified);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK:   for (int j
+# CHECK-NOT:   A[i, j] = -j;
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+TEST(Simplify, SimplifyModWithLoopContext0) {
+  KernelScope kernel_scope;
+  // Stmt to simplify:
+  // for (int i = 0; i < 100; i++) {
+  //  A[i] = i % 100;
+  //}
+  VarHandle i("i", kInt);
+  BufHandle a_buf("A", {100}, kInt);
+  auto for_stmt = For::make(i, 0, 100, Store::make(a_buf, {i}, (i % 100)));
+
+  const StmtPtr simplified = IRSimplifier::simplify(for_stmt);
+
+  std::ostringstream oss;
+  oss << *(simplified);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK-NEXT:   A[i] = i;
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+TEST(Simplify, SimplifyModWithLoopContext1) {
+  KernelScope kernel_scope;
+  // Stmt to simplify:
+  // for (int i = 0; i < 6; i++) {
+  //  A[i] = (i + 24) % 6;
+  //}
+  VarHandle i("i", kInt);
+  BufHandle a_buf("A", {6}, kInt);
+  auto for_stmt = For::make(i, 0, 6, Store::make(a_buf, {i}, (i + 24) % 6));
+
+  const StmtPtr simplified = IRSimplifier::simplify(for_stmt);
+
+  std::ostringstream oss;
+  oss << *(simplified);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK-NEXT:   A[i] = i;
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+TEST(Simplify, SimplifyModWithLoopContext2) {
+  KernelScope kernel_scope;
+  // Stmt to simplify:
+  // for (int i = 0; i < 5; i++) {
+  //  A[i] = (i + 25) % 6;
+  //}
+  VarHandle i("i", kInt);
+  BufHandle a_buf("A", {5}, kInt);
+  auto for_stmt = For::make(i, 0, 5, Store::make(a_buf, {i}, (i + 25) % 6));
+
+  const StmtPtr simplified = IRSimplifier::simplify(for_stmt);
+
+  std::ostringstream oss;
+  oss << *(simplified);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK-NEXT:   A[i] = i + 1;
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+TEST(Simplify, SimplifyModWithLoopContext3) {
+  KernelScope kernel_scope;
+  // Stmt to simplify:
+  // for (int i = 0; i < 6; i++) {
+  //  A[i] = (i + 24) % (-6);
+  //}
+  VarHandle i("i", kInt);
+  BufHandle a_buf("A", {6}, kInt);
+  auto for_stmt = For::make(i, 0, 6, Store::make(a_buf, {i}, (i + 24) % (-6)));
+
+  const StmtPtr simplified = IRSimplifier::simplify(for_stmt);
+
+  std::ostringstream oss;
+  oss << *(simplified);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK-NOT:   A[i] = i;
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+TEST(Simplify, SimplifyModWithLoopContext4) {
+  KernelScope kernel_scope;
+  // Stmt to simplify:
+  // for (int i = 0; i < 5; i++) {
+  //  A[i] = (i - 5) % 6;
+  //}
+  VarHandle i("i", kInt);
+  BufHandle a_buf("A", {5}, kInt);
+  auto for_stmt = For::make(i, 0, 5, Store::make(a_buf, {i}, (i + (-5)) % 6));
+
+  const StmtPtr simplified = IRSimplifier::simplify(for_stmt);
+
+  std::ostringstream oss;
+  oss << *(simplified);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK-NOT:   A[i] = i - 5;
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+TEST(Simplify, SimplifyModWithLoopContext5) {
+  KernelScope kernel_scope;
+  // Stmt to simplify:
+  // for (int i = 0; i < 6; i++) {
+  //  for (int j = 0; j < 10; j++) {
+  //    A[i, j] = (i + 6*j) % 6;
+  //  }
+  //}
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  BufHandle a_buf("A", {6, 10}, kInt);
+  auto for_j = For::make(j, 0, 10, Store::make(a_buf, {i, j}, (i + j * 6) % 6));
+  auto for_i = For::make(i, 0, 6, for_j);
+
+  const StmtPtr simplified = IRSimplifier::simplify(for_i);
+
+  std::ostringstream oss;
+  oss << *(simplified);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK:   for (int j
+# CHECK-NEXT:   A[i, j] = i;
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+TEST(Simplify, SimplifyModWithLoopContext6) {
+  KernelScope kernel_scope;
+  // Stmt to simplify:
+  // for (int i = 0; i < 6; i++) {
+  //  for (int j = -1; j < 9; j++) {
+  //    A[i, j+1] = (i + 6*j) % 6;
+  //  }
+  //}
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  BufHandle a_buf("A", {6, 10}, kInt);
+  auto for_j =
+      For::make(j, -1, 9, Store::make(a_buf, {i, j + 1}, (i + j * 6) % 6));
+  auto for_i = For::make(i, 0, 6, for_j);
+
+  const StmtPtr simplified = IRSimplifier::simplify(for_i);
+
+  std::ostringstream oss;
+  oss << *(simplified);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK:   for (int j
+# CHECK-NOT:   A[i, j] = i;
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+TEST(Simplify, SimplifyModWithLoopContext7) {
+  KernelScope kernel_scope;
+  // Stmt to simplify:
+  // for (int i = 0; i < 6; i++) {
+  //  for (int j = 0; j < 10; j++) {
+  //    A[i, j] = (i + 6*j) % (-6);
+  //  }
+  //}
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  BufHandle a_buf("A", {6, 10}, kInt);
+  auto for_j =
+      For::make(j, 0, 10, Store::make(a_buf, {i, j}, (i + j * 6) % (-6)));
+  auto for_i = For::make(i, 0, 6, for_j);
+
+  const StmtPtr simplified = IRSimplifier::simplify(for_i);
+
+  std::ostringstream oss;
+  oss << *(simplified);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK:   for (int j
+# CHECK-NOT:   A[i, j] = i;
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 }
 
 TEST(Simplify, SimplifyMod) {
@@ -3148,12 +3512,12 @@ TEST(Simplify, SimplifyConstantCond) {
     BufHandle a("A", {1}, kInt);
     BufHandle b("B", {1}, kInt);
     ExprHandle condition(1);
-    Stmt* true_val = Store::make(a, {0}, 1);
-    Stmt* false_val = Store::make(b, {0}, 1);
+    StmtPtr true_val = Store::make(a, {0}, 1);
+    StmtPtr false_val = Store::make(b, {0}, 1);
 
-    Cond* body = new Cond(condition.node(), true_val, false_val);
-    Stmt* simplified = IRSimplifier::simplify(body);
-    Block* block = dynamic_cast<Block*>(simplified);
+    CondPtr body = alloc<Cond>(condition.node(), true_val, false_val);
+    StmtPtr simplified = IRSimplifier::simplify(body);
+    BlockPtr block = to<Block>(simplified);
     IS_NODE_WITH_NAME(Store, block->front(), store);
     IS_VAR_WITH_NAME(store->base_handle(), "A");
   }
@@ -3164,12 +3528,12 @@ TEST(Simplify, SimplifyConstantCond) {
     BufHandle a("A", {1}, kInt);
     BufHandle b("B", {1}, kInt);
     ExprHandle condition(0);
-    Stmt* true_val = Store::make(a, {0}, 1);
-    Stmt* false_val = Store::make(b, {0}, 1);
+    StmtPtr true_val = Store::make(a, {0}, 1);
+    StmtPtr false_val = Store::make(b, {0}, 1);
 
-    Stmt* body = new Cond(condition.node(), true_val, false_val);
-    Stmt* simplified = IRSimplifier::simplify(body);
-    Block* block = dynamic_cast<Block*>(simplified);
+    StmtPtr body = alloc<Cond>(condition.node(), true_val, false_val);
+    StmtPtr simplified = IRSimplifier::simplify(body);
+    BlockPtr block = to<Block>(simplified);
     IS_NODE_WITH_NAME(Store, block->front(), store);
     IS_VAR_WITH_NAME(store->base_handle(), "B");
   }
@@ -3181,12 +3545,12 @@ TEST(Simplify, SimplifyConstantCond) {
     BufHandle a("A", {1}, kInt);
     BufHandle b("B", {1}, kInt);
     ExprHandle condition(x - x);
-    Stmt* true_val = Store::make(a, {0}, 1);
-    Stmt* false_val = Store::make(b, {0}, 1);
+    StmtPtr true_val = Store::make(a, {0}, 1);
+    StmtPtr false_val = Store::make(b, {0}, 1);
 
-    Stmt* body = new Cond(condition.node(), true_val, false_val);
-    Stmt* simplified = IRSimplifier::simplify(body);
-    Block* block = dynamic_cast<Block*>(simplified);
+    StmtPtr body = alloc<Cond>(condition.node(), true_val, false_val);
+    StmtPtr simplified = IRSimplifier::simplify(body);
+    BlockPtr block = to<Block>(simplified);
     IS_NODE_WITH_NAME(Store, block->front(), store);
     IS_VAR_WITH_NAME(store->base_handle(), "B");
   }
@@ -3197,12 +3561,12 @@ TEST(Simplify, SimplifyConstantCond) {
     VarHandle x("x", kInt);
     BufHandle a("A", {1}, kInt);
     ExprHandle condition(x - x);
-    Stmt* true_val = Store::make(a, {0}, x);
-    Stmt* false_val = Store::make(a, {0}, x);
+    StmtPtr true_val = Store::make(a, {0}, x);
+    StmtPtr false_val = Store::make(a, {0}, x);
 
-    Stmt* body = new Cond(condition.node(), true_val, false_val);
-    Stmt* simplified = IRSimplifier::simplify(body);
-    Block* block = dynamic_cast<Block*>(simplified);
+    StmtPtr body = alloc<Cond>(condition.node(), true_val, false_val);
+    StmtPtr simplified = IRSimplifier::simplify(body);
+    BlockPtr block = to<Block>(simplified);
     IS_NODE_WITH_NAME(Store, block->front(), store);
     IS_VAR_WITH_NAME(store->base_handle(), "A");
   }
@@ -3213,12 +3577,12 @@ TEST(Simplify, SimplifyConstantCond) {
     VarHandle x("x", kInt);
     BufHandle a("A", {1}, kInt);
     ExprHandle condition(x - x);
-    Stmt* true_val = Store::make(a, {0}, ExprHandle(2) * x);
-    Stmt* false_val = Store::make(a, {0}, x + x);
+    StmtPtr true_val = Store::make(a, {0}, ExprHandle(2) * x);
+    StmtPtr false_val = Store::make(a, {0}, x + x);
 
-    Stmt* body = new Cond(condition.node(), true_val, false_val);
-    Stmt* simplified = IRSimplifier::simplify(body);
-    Block* block = dynamic_cast<Block*>(simplified);
+    StmtPtr body = alloc<Cond>(condition.node(), true_val, false_val);
+    StmtPtr simplified = IRSimplifier::simplify(body);
+    BlockPtr block = to<Block>(simplified);
     IS_NODE_WITH_NAME(Store, block->front(), store);
     IS_VAR_WITH_NAME(store->base_handle(), "A");
   }
@@ -3229,24 +3593,30 @@ TEST(Simplify, SimplifyConstantCond) {
     VarHandle x("x", kInt);
     BufHandle a("A", {1}, kInt);
     ExprHandle condition(x);
-    Stmt* true_val = Store::make(a, {0}, x);
-    Stmt* false_val = Store::make(a, {0}, ExprHandle(2) * x);
+    StmtPtr true_val = Store::make(a, {0}, x);
+    StmtPtr false_val = Store::make(a, {0}, ExprHandle(2) * x);
 
-    Stmt* body = new Cond(condition.node(), true_val, false_val);
-    Stmt* simplified = IRSimplifier::simplify(body);
-    Block* block = dynamic_cast<Block*>(simplified);
+    StmtPtr body = alloc<Cond>(condition.node(), true_val, false_val);
+    StmtPtr simplified = IRSimplifier::simplify(body);
+    BlockPtr block = to<Block>(simplified);
     ASSERT_EQ(block, nullptr);
   }
 
   {
-    Stmt* cond = new Cond(ExprHandle(false).node(), new Block({}), nullptr);
-    Stmt* simplified = IRSimplifier::simplify(cond);
+    StmtPtr cond = alloc<Cond>(
+        ExprHandle(false).node(),
+        alloc<Block>(std::vector<StmtPtr>({})),
+        nullptr);
+    StmtPtr simplified = IRSimplifier::simplify(cond);
     ASSERT_EQ(simplified, nullptr);
   }
 
   {
-    Stmt* cond = new Cond(ExprHandle(true).node(), nullptr, new Block({}));
-    Stmt* simplified = IRSimplifier::simplify(cond);
+    StmtPtr cond = alloc<Cond>(
+        ExprHandle(true).node(),
+        nullptr,
+        alloc<Block>(std::vector<StmtPtr>({})));
+    StmtPtr simplified = IRSimplifier::simplify(cond);
     ASSERT_EQ(simplified, nullptr);
   }
 }
@@ -3257,11 +3627,11 @@ TEST(Simplify, SimplifyEliminateEmptyCond) {
   {
     VarHandle x("x", kInt);
     ExprHandle condition(x);
-    Stmt* true_val = new Block({});
+    StmtPtr true_val = alloc<Block>(std::vector<StmtPtr>({}));
 
-    Stmt* body = new Cond(condition.node(), true_val, nullptr);
-    Stmt* simplified = IRSimplifier::simplify(body);
-    Block* block = dynamic_cast<Block*>(simplified);
+    StmtPtr body = alloc<Cond>(condition.node(), true_val, nullptr);
+    StmtPtr simplified = IRSimplifier::simplify(body);
+    BlockPtr block = to<Block>(simplified);
     ASSERT_NE(block, nullptr);
     ASSERT_EQ(block->nstmts(), 0);
   }
@@ -3269,11 +3639,11 @@ TEST(Simplify, SimplifyEliminateEmptyCond) {
   {
     VarHandle x("x", kInt);
     ExprHandle condition(x);
-    Stmt* false_val = new Block({});
+    StmtPtr false_val = alloc<Block>(std::vector<StmtPtr>({}));
 
-    Stmt* body = new Cond(condition.node(), nullptr, false_val);
-    Stmt* simplified = IRSimplifier::simplify(body);
-    Block* block = dynamic_cast<Block*>(simplified);
+    StmtPtr body = alloc<Cond>(condition.node(), nullptr, false_val);
+    StmtPtr simplified = IRSimplifier::simplify(body);
+    BlockPtr block = to<Block>(simplified);
     ASSERT_NE(block, nullptr);
     ASSERT_EQ(block->nstmts(), 0);
   }
@@ -3472,8 +3842,8 @@ TEST(Simplify, SimplifyEliminateZeroLengthFor) {
     BufHandle c("C", {4}, kInt);
     VarHandle i("i", kInt);
     auto body = For::make(i, 0, 0, Store::make(c, {i}, Load::make(a, {i})));
-    Stmt* simplified = IRSimplifier::simplify(body);
-    Block* block = dynamic_cast<Block*>(simplified);
+    StmtPtr simplified = IRSimplifier::simplify(body);
+    BlockPtr block = to<Block>(simplified);
     ASSERT_EQ(block->nstmts(), 0);
   }
 
@@ -3483,8 +3853,8 @@ TEST(Simplify, SimplifyEliminateZeroLengthFor) {
     BufHandle c("C", {4}, kInt);
     VarHandle i("i", kInt);
     auto body = For::make(i, 2, 2, Store::make(c, {i}, Load::make(a, {i})));
-    Stmt* simplified = IRSimplifier::simplify(body);
-    Block* block = dynamic_cast<Block*>(simplified);
+    StmtPtr simplified = IRSimplifier::simplify(body);
+    BlockPtr block = to<Block>(simplified);
     ASSERT_EQ(block->nstmts(), 0);
   }
 
@@ -3495,8 +3865,8 @@ TEST(Simplify, SimplifyEliminateZeroLengthFor) {
     BufHandle c("C", {4}, kInt);
     VarHandle i("i", kInt);
     auto body = For::make(i, x, x, Store::make(c, {i}, Load::make(a, {i})));
-    Stmt* simplified = IRSimplifier::simplify(body);
-    Block* block = dynamic_cast<Block*>(simplified);
+    StmtPtr simplified = IRSimplifier::simplify(body);
+    BlockPtr block = to<Block>(simplified);
     ASSERT_EQ(block->nstmts(), 0);
   }
 
@@ -3507,8 +3877,8 @@ TEST(Simplify, SimplifyEliminateZeroLengthFor) {
     BufHandle c("C", {4}, kInt);
     VarHandle i("i", kInt);
     auto body = For::make(i, 0, x - x, Store::make(c, {i}, Load::make(a, {i})));
-    Stmt* simplified = IRSimplifier::simplify(body);
-    Block* block = dynamic_cast<Block*>(simplified);
+    StmtPtr simplified = IRSimplifier::simplify(body);
+    BlockPtr block = to<Block>(simplified);
     ASSERT_EQ(block->nstmts(), 0);
   }
 
@@ -3518,7 +3888,7 @@ TEST(Simplify, SimplifyEliminateZeroLengthFor) {
     BufHandle c("C", {4}, kInt);
     VarHandle i("i", kInt);
     auto body = For::make(i, 0, 3, Store::make(c, {i}, Load::make(a, {i})));
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE(For, simplified);
   }
 }
@@ -3532,8 +3902,8 @@ TEST(Simplify, SimplifyOneLoopFor) {
     BufHandle c("C", {4}, kInt);
     VarHandle i("i", kInt);
     auto body = For::make(i, 0, 1, Store::make(c, {i}, Load::make(a, {i})));
-    Stmt* simplified = IRSimplifier::simplify(body);
-    Block* block = dynamic_cast<Block*>(simplified);
+    StmtPtr simplified = IRSimplifier::simplify(body);
+    BlockPtr block = to<Block>(simplified);
     IS_NODE_WITH_NAME(Store, block->front(), store);
     IS_VAR_WITH_NAME(store->base_handle(), "C");
     IS_IMM_WITH_VAL(Int, store->flat_index(), 0);
@@ -3545,8 +3915,8 @@ TEST(Simplify, SimplifyOneLoopFor) {
     BufHandle c("C", {4}, kInt);
     VarHandle i("i", kInt);
     auto body = For::make(i, 2, 3, Store::make(c, {i}, Load::make(a, {i})));
-    Stmt* simplified = IRSimplifier::simplify(body);
-    Block* block = dynamic_cast<Block*>(simplified);
+    StmtPtr simplified = IRSimplifier::simplify(body);
+    BlockPtr block = to<Block>(simplified);
     IS_NODE_WITH_NAME(Store, block->front(), store);
     IS_VAR_WITH_NAME(store->base_handle(), "C");
     IS_IMM_WITH_VAL(Int, store->flat_index(), 2);
@@ -3559,8 +3929,8 @@ TEST(Simplify, SimplifyOneLoopFor) {
     BufHandle c("C", {4}, kInt);
     VarHandle i("i", kInt);
     auto body = For::make(i, x, x + 1, Store::make(c, {i}, Load::make(a, {i})));
-    Stmt* simplified = IRSimplifier::simplify(body);
-    Block* block = dynamic_cast<Block*>(simplified);
+    StmtPtr simplified = IRSimplifier::simplify(body);
+    BlockPtr block = to<Block>(simplified);
     IS_NODE_WITH_NAME(Store, block->front(), store);
     IS_VAR_WITH_NAME(store->base_handle(), "C");
     IS_VAR_WITH_NAME(store->flat_index(), "x");
@@ -3574,8 +3944,8 @@ TEST(Simplify, SimplifyOneLoopFor) {
     VarHandle i("i", kInt);
     auto body =
         For::make(i, 0, x - x + 1, Store::make(c, {i}, Load::make(a, {i})));
-    Stmt* simplified = IRSimplifier::simplify(body);
-    Block* block = dynamic_cast<Block*>(simplified);
+    StmtPtr simplified = IRSimplifier::simplify(body);
+    BlockPtr block = to<Block>(simplified);
     IS_NODE_WITH_NAME(Store, block->front(), store);
     IS_VAR_WITH_NAME(store->base_handle(), "C");
     IS_IMM_WITH_VAL(Int, store->flat_index(), 0);
@@ -3587,7 +3957,7 @@ TEST(Simplify, SimplifyOneLoopFor) {
     BufHandle c("C", {4}, kInt);
     VarHandle i("i", kInt);
     auto body = For::make(i, 0, 3, Store::make(c, {i}, Load::make(a, {i})));
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE(For, simplified);
   }
 }
@@ -3604,7 +3974,7 @@ TEST(Simplify, SimplifyForWontLoseLoopOptions) {
     options.set_gpu_block_index(12);
     auto body =
         For::make(i, 0, 1, Store::make(c, {i}, Load::make(a, {i})), options);
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(For, simplified, for_);
     LoopOptions options2 = for_->loop_options();
     ASSERT_EQ(options.gpu_block_index(), options2.gpu_block_index());
@@ -3620,10 +3990,10 @@ TEST(Simplify, SimplifyMultilevelFor) {
     BufHandle c("C", {4}, kInt);
     VarHandle i("i", kInt);
     VarHandle j("j", kInt);
-    auto* body = For::make(i, 0, 1, Store::make(c, {i}, Load::make(a, {i})));
+    auto body = For::make(i, 0, 1, Store::make(c, {i}, Load::make(a, {i})));
     auto outer = For::make(j, 0, 1, body);
-    Stmt* simplified = IRSimplifier::simplify(outer);
-    Block* block = dynamic_cast<Block*>(simplified);
+    StmtPtr simplified = IRSimplifier::simplify(outer);
+    BlockPtr block = to<Block>(simplified);
     IS_NODE_WITH_NAME(Store, block->front(), store);
     IS_VAR_WITH_NAME(store->base_handle(), "C");
     IS_IMM_WITH_VAL(Int, store->flat_index(), 0);
@@ -3635,15 +4005,15 @@ TEST(Simplify, SimplifyMultilevelFor) {
     BufHandle c("C", {4}, kInt);
     VarHandle i("i", kInt);
     VarHandle j("j", kInt);
-    auto* body = For::make(i, 0, 1, Store::make(c, {i}, Load::make(a, {i})));
+    auto body = For::make(i, 0, 1, Store::make(c, {i}, Load::make(a, {i})));
     auto outer = For::make(j, 0, 2, body);
-    Stmt* simplified = IRSimplifier::simplify(outer);
-    For* for__ = static_cast<For*>(simplified);
+    StmtPtr simplified = IRSimplifier::simplify(outer);
+    ForPtr for__ = static_to<For>(simplified);
     IS_NODE_WITH_NAME(For, for__, for_);
     IS_VAR_WITH_NAME(for_->var(), "j");
     IS_IMM_WITH_VAL(Int, for_->start(), 0);
     IS_IMM_WITH_VAL(Int, for_->stop(), 2);
-    Block* block = dynamic_cast<Block*>(for_->body());
+    BlockPtr block = to<Block>(for_->body());
     ASSERT_NE(block, nullptr);
     IS_NODE_WITH_NAME(Store, block->front(), store);
     IS_VAR_WITH_NAME(store->base_handle(), "C");
@@ -3656,10 +4026,10 @@ TEST(Simplify, SimplifyMultilevelFor) {
     BufHandle c("C", {4}, kInt);
     VarHandle i("i", kInt);
     VarHandle j("j", kInt);
-    auto* body = For::make(i, 0, 2, Store::make(c, {i}, Load::make(a, {i})));
+    auto body = For::make(i, 0, 2, Store::make(c, {i}, Load::make(a, {i})));
     auto outer = For::make(j, 0, 1, body);
-    Stmt* simplified = IRSimplifier::simplify(outer);
-    Block* block = dynamic_cast<Block*>(simplified);
+    StmtPtr simplified = IRSimplifier::simplify(outer);
+    BlockPtr block = to<Block>(simplified);
     IS_NODE_WITH_NAME(For, block->front(), for_);
     IS_VAR_WITH_NAME(for_->var(), "i");
     IS_IMM_WITH_VAL(Int, for_->start(), 0);
@@ -3686,10 +4056,10 @@ TEST(Simplify, SimplifyForCleansUp) {
     LoopNest l({b});
     l.prepareForCodegen();
 
-    Stmt* body = l.root_stmt();
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr body = l.root_stmt();
+    StmtPtr simplified = IRSimplifier::simplify(body);
 
-    Block* block = dynamic_cast<Block*>(simplified);
+    BlockPtr block = to<Block>(simplified);
     IS_NODE_WITH_NAME(For, block->front(), for_);
     // for is over "m".
     IS_VAR_WITH_NAME(for_->var(), "m");
@@ -3705,13 +4075,13 @@ TEST(Simplify, SimplifyEliminateEmptyFor) {
 
   {
     // Flatten many layers around an empty block to an empty block.
-    Stmt* last = new Block({});
+    StmtPtr last = alloc<Block>(std::vector<StmtPtr>({}));
     for (int i = 0; i < 11; ++i) {
       VarHandle loopVar("loopVar", kInt);
       last = For::make(loopVar, 0, 10, last);
     }
 
-    Stmt* simplified = IRSimplifier::simplify(last);
+    StmtPtr simplified = IRSimplifier::simplify(last);
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 0);
   }
@@ -3724,14 +4094,14 @@ TEST(Simplify, SimplifyFlattenBlock) {
     // Flatten multiple blocks down to one.
     // { { { stmt1, stmt2 } } } =>  { stmt1, stmt2 }
     BufHandle a("A", {1}, kInt);
-    Store* store1 = Store::make(a, {0}, 1);
-    Store* store2 = Store::make(a, {0}, 0);
+    StorePtr store1 = Store::make(a, {0}, 1);
+    StorePtr store2 = Store::make(a, {0}, 0);
 
-    Block* block1 = new Block({store1, store2});
-    Block* block2 = new Block({block1});
+    BlockPtr block1 = alloc<Block>(std::vector<StmtPtr>({store1, store2}));
+    BlockPtr block2 = alloc<Block>(std::vector<StmtPtr>({block1}));
 
-    Block* enclosing = new Block({block2});
-    Stmt* simplified = IRSimplifier::simplify(enclosing);
+    BlockPtr enclosing = alloc<Block>(std::vector<StmtPtr>({block2}));
+    StmtPtr simplified = IRSimplifier::simplify(enclosing);
 
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 2);
@@ -3747,14 +4117,14 @@ TEST(Simplify, SimplifyFlattenBlock) {
     // Flatten multiple sub blocks containing statements.
     // { { stmt1 }, { stmt2 } } =>  { stmt1, stmt2 }
     BufHandle a("A", {1}, kInt);
-    Store* store1 = Store::make(a, {0}, 1);
-    Store* store2 = Store::make(a, {0}, 0);
+    StorePtr store1 = Store::make(a, {0}, 1);
+    StorePtr store2 = Store::make(a, {0}, 0);
 
-    Block* block1 = new Block({store1});
-    Block* block2 = new Block({store2});
+    BlockPtr block1 = alloc<Block>(std::vector<StmtPtr>({store1}));
+    BlockPtr block2 = alloc<Block>(std::vector<StmtPtr>({store2}));
 
-    Block* enclosing = new Block({block1, block2});
-    Stmt* simplified = IRSimplifier::simplify(enclosing);
+    BlockPtr enclosing = alloc<Block>(std::vector<StmtPtr>({block1, block2}));
+    StmtPtr simplified = IRSimplifier::simplify(enclosing);
 
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 2);
@@ -3770,14 +4140,14 @@ TEST(Simplify, SimplifyFlattenBlock) {
     // Flatten sub blocks with different depths.
     // { stmt1 , { { stmt2 } } } =>  { stmt1, stmt2 }
     BufHandle a("A", {1}, kInt);
-    Store* store1 = Store::make(a, {0}, 1);
-    Store* store2 = Store::make(a, {0}, 0);
+    StorePtr store1 = Store::make(a, {0}, 1);
+    StorePtr store2 = Store::make(a, {0}, 0);
 
-    Block* block1 = new Block({store2});
-    Block* block2 = new Block({block1});
+    BlockPtr block1 = alloc<Block>(std::vector<StmtPtr>({store2}));
+    BlockPtr block2 = alloc<Block>(std::vector<StmtPtr>({block1}));
 
-    Block* enclosing = new Block({store1, block2});
-    Stmt* simplified = IRSimplifier::simplify(enclosing);
+    BlockPtr enclosing = alloc<Block>(std::vector<StmtPtr>({store1, block2}));
+    StmtPtr simplified = IRSimplifier::simplify(enclosing);
 
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 2);
@@ -3791,12 +4161,12 @@ TEST(Simplify, SimplifyFlattenBlock) {
 
   {
     // Flatten many layers around an empty block to an empty block.
-    Stmt* last = new Block({});
+    StmtPtr last = alloc<Block>(std::vector<StmtPtr>({}));
     for (int i = 0; i < 11; ++i) {
-      last = new Block({last});
+      last = alloc<Block>(std::vector<StmtPtr>({last}));
     }
 
-    Stmt* simplified = IRSimplifier::simplify(last);
+    StmtPtr simplified = IRSimplifier::simplify(last);
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 0);
   }
@@ -3809,13 +4179,13 @@ TEST(Simplify, SimplifyEliminateZeroLengthAlloc) {
     // Simple positive case.
     BufHandle b("x", {0}, kInt);
 
-    Allocate* alloc = Allocate::make(b);
-    Free* free_ = Free::make(b);
+    AllocatePtr alloc_ = Allocate::make(b);
+    FreePtr free_ = Free::make(b);
 
-    Block* block1 = new Block({alloc, free_});
+    BlockPtr block1 = alloc<Block>(std::vector<StmtPtr>({alloc_, free_}));
     ASSERT_EQ(block1->nstmts(), 2);
 
-    Stmt* simplified = IRSimplifier::simplify(block1);
+    StmtPtr simplified = IRSimplifier::simplify(block1);
     IS_NODE_WITH_NAME(Block, simplified, block2);
     ASSERT_EQ(block2->nstmts(), 0);
   }
@@ -3824,13 +4194,13 @@ TEST(Simplify, SimplifyEliminateZeroLengthAlloc) {
     // Simple negative case.
     BufHandle b("x", {2}, kInt);
 
-    Allocate* alloc = Allocate::make(b);
-    Free* free_ = Free::make(b);
+    AllocatePtr alloc_ = Allocate::make(b);
+    FreePtr free_ = Free::make(b);
 
-    Block* block1 = new Block({alloc, free_});
+    BlockPtr block1 = alloc<Block>(std::vector<StmtPtr>({alloc_, free_}));
     ASSERT_EQ(block1->nstmts(), 2);
 
-    Stmt* simplified = IRSimplifier::simplify(block1);
+    StmtPtr simplified = IRSimplifier::simplify(block1);
     IS_NODE_WITH_NAME(Block, simplified, block2);
     ASSERT_EQ(block2->nstmts(), 2);
   }
@@ -3840,15 +4210,16 @@ TEST(Simplify, SimplifyEliminateZeroLengthAlloc) {
     BufHandle b1("x", {0}, kInt);
     BufHandle b2("y", {2}, kInt);
 
-    Allocate* alloc1 = Allocate::make(b1);
-    Allocate* alloc2 = Allocate::make(b2);
-    Free* free2_ = Free::make(b2);
-    Free* free1_ = Free::make(b1);
+    AllocatePtr alloc1 = Allocate::make(b1);
+    AllocatePtr alloc2 = Allocate::make(b2);
+    FreePtr free2_ = Free::make(b2);
+    FreePtr free1_ = Free::make(b1);
 
-    Block* block1 = new Block({alloc1, alloc2, free2_, free1_});
+    BlockPtr block1 =
+        alloc<Block>(std::vector<StmtPtr>({alloc1, alloc2, free2_, free1_}));
     ASSERT_EQ(block1->nstmts(), 4);
 
-    Stmt* simplified = IRSimplifier::simplify(block1);
+    StmtPtr simplified = IRSimplifier::simplify(block1);
     IS_NODE_WITH_NAME(Block, simplified, block2);
     ASSERT_EQ(block2->nstmts(), 2);
     IS_NODE_WITH_NAME(Allocate, block2->stmts().front(), simplified_alloc);
@@ -3863,14 +4234,15 @@ TEST(Simplify, SimplifyEliminateZeroLengthAlloc) {
     BufHandle b1("x", {0}, kInt);
     BufHandle b2("y", {z}, kInt);
 
-    Allocate* alloc1 = Allocate::make(b1);
-    Allocate* alloc2 = Allocate::make(b2);
-    Free* free2_ = Free::make(b2);
-    Free* free1_ = Free::make(b1);
+    AllocatePtr alloc1 = Allocate::make(b1);
+    AllocatePtr alloc2 = Allocate::make(b2);
+    FreePtr free2_ = Free::make(b2);
+    FreePtr free1_ = Free::make(b1);
 
-    Block* block1 = new Block({alloc1, alloc2, free2_, free1_});
+    BlockPtr block1 =
+        alloc<Block>(std::vector<StmtPtr>({alloc1, alloc2, free2_, free1_}));
     ASSERT_EQ(block1->nstmts(), 4);
-    Stmt* simplified = IRSimplifier::simplify(block1);
+    StmtPtr simplified = IRSimplifier::simplify(block1);
     IS_NODE_WITH_NAME(Block, simplified, block2);
     ASSERT_EQ(block2->nstmts(), 2);
   }
@@ -3929,7 +4301,7 @@ TEST(Simplify, SimplifyReorderForCond) {
             Store::make(c, {i}, Load::make(a, {i})),
             nullptr));
 
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Cond, simplified, cond);
     IS_NODE_WITH_NAME(Block, cond->true_stmt(), true_block);
     IS_NODE_WITH_NAME(For, true_block->front(), loop);
@@ -3946,7 +4318,7 @@ TEST(Simplify, SimplifyReorderForCond) {
             Store::make(c, {i}, Load::make(a, {i})),
             nullptr));
 
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(For, simplified, loop);
     IS_NODE_WITH_NAME(Cond, loop->body()->front(), cond);
   }
@@ -3964,7 +4336,7 @@ TEST(Simplify, SimplifyReorderForCond) {
             Store::make(c, {0}, Load::make(a, {i})),
             nullptr));
 
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(For, simplified, loop);
     IS_NODE_WITH_NAME(Cond, loop->body()->front(), cond);
   }
@@ -3981,7 +4353,7 @@ TEST(Simplify, SimplifyReorderForCond) {
             Store::make(c, {0}, Load::make(a, {i})),
             nullptr));
 
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Cond, simplified, cond);
     IS_NODE_WITH_NAME(Block, cond->true_stmt(), true_block);
     IS_NODE_WITH_NAME(For, true_block->front(), loop);
@@ -3999,7 +4371,7 @@ TEST(Simplify, SimplifyReorderForCond) {
             Store::make(c, {0}, Load::make(a, {i})),
             nullptr));
 
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Cond, simplified, cond);
     IS_NODE_WITH_NAME(Block, cond->true_stmt(), true_block);
     IS_NODE_WITH_NAME(For, true_block->front(), loop);
@@ -4018,7 +4390,7 @@ TEST(Simplify, SimplifyReorderForCond) {
                  Store::make(c, {0}, Load::make(a, {i})),
                  nullptr)}));
 
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(For, simplified, loop);
     IS_NODE_WITH_NAME(Let, loop->body()->front(), let);
     IS_NODE_WITH_NAME(Cond, loop->body()->back(), cond);
@@ -4040,7 +4412,7 @@ TEST(Simplify, SimplifyReorderForCond) {
                 nullptr),
             nullptr));
 
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Cond, simplified, cond);
     IS_NODE_WITH_NAME(Block, cond->true_stmt(), true_block);
     IS_NODE_WITH_NAME(Cond, true_block->front(), cond2);
@@ -4064,7 +4436,7 @@ TEST(Simplify, SimplifyReorderForCond) {
                 nullptr),
             nullptr));
 
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Cond, simplified, cond);
     IS_NODE_WITH_NAME(Block, cond->true_stmt(), true_block);
     IS_NODE_WITH_NAME(For, true_block->front(), loop);
@@ -4084,7 +4456,7 @@ TEST(Simplify, SimplifyReorderForCond) {
             Store::make(c, {0}, Load::make(a, {i})),
             Store::make(c, {0}, 0)));
 
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(For, simplified, loop);
     IS_NODE_WITH_NAME(Cond, loop->body()->front(), cond);
   }
@@ -4103,7 +4475,7 @@ TEST(Simplify, SimplifyReorderForCond) {
             Store::make(c, {1}, Load::make(a, {i})),
             nullptr));
 
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(For, simplified, loop);
     IS_NODE_WITH_NAME(Cond, loop->body()->front(), cond);
   }
@@ -4129,7 +4501,7 @@ TEST(Simplify, SimplifyFuseConditions) {
              Store::make(a, {1}, i),
              nullptr)});
 
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr simplified = IRSimplifier::simplify(body);
     // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 1);
@@ -4151,7 +4523,7 @@ TEST(Simplify, SimplifyFuseConditions) {
              Store::make(a, {1}, i),
              nullptr)});
 
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 2);
     IS_NODE_WITH_NAME(Cond, block->front(), cond1);
@@ -4177,7 +4549,7 @@ TEST(Simplify, SimplifyFuseConditions) {
              Store::make(a, {1}, i),
              nullptr)});
 
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 2);
     IS_NODE_WITH_NAME(Cond, block->front(), cond1);
@@ -4204,7 +4576,7 @@ TEST(Simplify, SimplifyFuseConditions) {
              Store::make(a, {1}, i),
              nullptr)});
 
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 2);
     IS_NODE_WITH_NAME(Cond, block->front(), cond1);
@@ -4225,25 +4597,15 @@ TEST(Simplify, SimplifyFuseConditions) {
     // TODO for later.
     auto body = Block::make(
         {Cond::make(
-             CompareSelect::make(
-                 i,
-                 10,
-                 new IntImm(1),
-                 new IntImm(0),
-                 CompareSelectOperation::kLT),
+             CompareSelect::make(i, 10, 1, 0, CompareSelectOperation::kLT),
              Store::make(a, {0}, i),
              nullptr),
          Cond::make(
-             CompareSelect::make(
-                 j,
-                 10,
-                 new IntImm(2),
-                 new IntImm(0),
-                 CompareSelectOperation::kLT),
+             CompareSelect::make(j, 10, 2, 0, CompareSelectOperation::kLT),
              Store::make(a, {1}, i),
              nullptr)});
 
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 2);
     IS_NODE_WITH_NAME(Cond, block->front(), cond1);
@@ -4270,7 +4632,7 @@ TEST(Simplify, SimplifyFuseConditions) {
              nullptr,
              Store::make(a, {1}, i))});
 
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 1);
     IS_NODE_WITH_NAME(Cond, block->front(), cond);
@@ -4291,7 +4653,7 @@ TEST(Simplify, SimplifyFuseConditions) {
              Store::make(a, {1}, i),
              Store::make(b, {1}, i))});
 
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 1);
     IS_NODE_WITH_NAME(Cond, block->front(), cond);
@@ -4313,7 +4675,7 @@ TEST(Simplify, SimplifyFuseConditions) {
              nullptr,
              Store::make(b, {1}, i))});
 
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 1);
     IS_NODE_WITH_NAME(Cond, block->front(), cond);
@@ -4359,7 +4721,7 @@ TEST(Simplify, SimplifyFuseConditions) {
             Store::make(a, {1}, j),
             nullptr),
     });
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 3);
     auto it = block->begin();
@@ -4390,7 +4752,7 @@ TEST(Simplify, SimplifyFuseConditions) {
             Store::make(a, {1}, j),
             nullptr),
     });
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 1);
     IS_NODE_WITH_NAME(Cond, block->front(), cond);
@@ -4420,7 +4782,7 @@ TEST(Simplify, SimplifyFuseConditions) {
             Store::make(a, {1}, j),
             nullptr),
     });
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 3);
     IS_NODE_WITH_NAME(Cond, block->front(), cond);
@@ -4455,7 +4817,7 @@ TEST(Simplify, SimplifyFuseConditions) {
                  CompareSelectOperation::kLT),
              Store::make(a, {1}, i),
              nullptr)});
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 1);
     IS_NODE_WITH_NAME(Cond, block->front(), cond);
@@ -4471,7 +4833,7 @@ TEST(Simplify, SimplifyFuseConditions) {
         {Cond::make(i, Store::make(a, {0}, i), nullptr),
          Cond::make(i, Store::make(a, {1}, i), nullptr)});
 
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 1);
     IS_NODE_WITH_NAME(Cond, block->front(), cond);
@@ -4486,7 +4848,7 @@ TEST(Simplify, SimplifyFuseConditions) {
         {Cond::make(i, Store::make(a, {0}, i), nullptr),
          Cond::make(j, Store::make(a, {1}, i), nullptr)});
 
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 2);
     IS_NODE_WITH_NAME(Cond, block->front(), cond1);
@@ -4499,7 +4861,7 @@ TEST(Simplify, SimplifyFuseConditions) {
     auto body = Block::make(
         {Cond::make(1, Store::make(a, {0}, i), nullptr),
          Cond::make(1, Store::make(a, {1}, i), nullptr)});
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 2);
     IS_NODE_WITH_NAME(Store, block->front(), store1);
@@ -4522,7 +4884,7 @@ TEST(Simplify, SimplifyFuseConditions) {
                  Store::make(a, {2}, Load::make(b, {0})),
                  nullptr)}));
 
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Cond, simplified, cond);
     IS_NODE_WITH_NAME(Block, cond->true_stmt(), true_block);
     IS_NODE_WITH_NAME(For, true_block->front(), loop);
@@ -4539,10 +4901,10 @@ TEST(Simplify, SimplifySyncThreads) {
     auto body = Block::make(
         // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
         {Store::make(a, {0}, 1),
-         new SyncThreads(),
-         new SyncThreads(),
+         alloc<SyncThreads>(),
+         alloc<SyncThreads>(),
          Store::make(a, {1}, 0)});
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 3);
     auto it = block->begin();
@@ -4554,9 +4916,9 @@ TEST(Simplify, SimplifySyncThreads) {
   {
     // Eliminate outer SyncThreads.
     auto body = Block::make(
-        {new SyncThreads(), Store::make(a, {1}, 0), new SyncThreads()});
+        {alloc<SyncThreads>(), Store::make(a, {1}, 0), alloc<SyncThreads>()});
 
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 1);
     auto it = block->begin();
@@ -4567,14 +4929,14 @@ TEST(Simplify, SimplifySyncThreads) {
     // Merge many inner SyncThreads.
     auto body = Block::make(
         {Store::make(a, {0}, 1),
-         new SyncThreads(),
-         new SyncThreads(),
-         new SyncThreads(),
-         new SyncThreads(),
-         new SyncThreads(),
+         alloc<SyncThreads>(),
+         alloc<SyncThreads>(),
+         alloc<SyncThreads>(),
+         alloc<SyncThreads>(),
+         alloc<SyncThreads>(),
          Store::make(a, {1}, 0)});
 
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 3);
     auto it = block->begin();
@@ -4586,15 +4948,15 @@ TEST(Simplify, SimplifySyncThreads) {
   {
     // Merge multiple outer SyncThreads.
     auto body = Block::make(
-        {new SyncThreads(),
-         new SyncThreads(),
+        {alloc<SyncThreads>(),
+         alloc<SyncThreads>(),
          Store::make(a, {1}, 0),
-         new SyncThreads(),
-         new SyncThreads(),
-         new SyncThreads(),
-         new SyncThreads()});
+         alloc<SyncThreads>(),
+         alloc<SyncThreads>(),
+         alloc<SyncThreads>(),
+         alloc<SyncThreads>()});
 
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 1);
     auto it = block->begin();
@@ -4605,16 +4967,16 @@ TEST(Simplify, SimplifySyncThreads) {
     // Merge multiple sections;
     auto body = Block::make(
         {Store::make(a, {0}, 1),
-         new SyncThreads(),
-         new SyncThreads(),
+         alloc<SyncThreads>(),
+         alloc<SyncThreads>(),
          Store::make(a, {1}, 0),
          Store::make(a, {2}, 0),
-         new SyncThreads(),
-         new SyncThreads(),
-         new SyncThreads(),
+         alloc<SyncThreads>(),
+         alloc<SyncThreads>(),
+         alloc<SyncThreads>(),
          Store::make(a, {3}, 0)});
 
-    Stmt* simplified = IRSimplifier::simplify(body);
+    StmtPtr simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 6);
     auto it = block->begin();
@@ -4633,7 +4995,7 @@ TEST(Simplify, SimplifyRampSubBroadcast) {
   ExprHandle ramp = Ramp::make(ExprHandle(0), ExprHandle(6), num_lanes);
   ExprHandle broadcast = Broadcast::make(ExprHandle(-5), num_lanes);
   ExprHandle simplified = IRSimplifier::simplify(ramp - broadcast);
-  Ramp* newRamp = simplified.AsNode<Ramp>();
+  RampPtr newRamp = simplified.AsNode<Ramp>();
   IS_NODE_WITH_NAME(IntImm, newRamp->base(), base);
   ASSERT_EQ(base->value(), 5);
   IS_NODE_WITH_NAME(IntImm, newRamp->stride(), stride);
@@ -4676,7 +5038,7 @@ TEST(Simplify, DISABLED_CompareSelectCondAlwaysInLoopBounds) {
   constexpr int N = 8;
   Placeholder b("b", kFloat, {N});
   VarHandle n("n", kInt);
-  Stmt* s = For::make(
+  StmtPtr s = For::make(
       n, 1, N, b.store({n}, CompareSelect::make(n, 1, 0.f, 1.0f, kLT)));
   s = IRSimplifier::simplify(s);
   std::ostringstream oss;
@@ -4701,7 +5063,7 @@ TEST(Simplify, DISABLED_IfThenCondAlwaysInLoopBounds) {
   constexpr int N = 8;
   Placeholder b("b", kFloat, {N});
   VarHandle n("n", kInt);
-  Stmt* s =
+  StmtPtr s =
       For::make(n, 1, N, b.store({n}, IfThenElse::make(n < 1, 0.f, 1.0f)));
   s = IRSimplifier::simplify(s);
   std::ostringstream oss;
@@ -4735,7 +5097,7 @@ TEST(Simplify, DISABLED_MultiClauseCondAlwaysInLoopBounds) {
   csel = CompareSelect::make(j, 1, 1, csel, kLT);
   csel = CompareSelect::make(i, N - 1, 1, csel, kGE);
   csel = CompareSelect::make(j, N - 1, 1, csel, kGE);
-  Stmt* s = b.store({i, j}, IfThenElse::make(csel, 0.f, 1.0f));
+  StmtPtr s = b.store({i, j}, IfThenElse::make(csel, 0.f, 1.0f));
   s = For::make(j, 1, N - 1, s);
   s = For::make(i, 1, N - 1, s);
   s = IRSimplifier::simplify(s);
@@ -4773,7 +5135,7 @@ TEST(Simplify, DISABLED_SimplifyLoopBounds) {
   csel = CompareSelect::make(j, 1, 1, csel, kLT);
   csel = CompareSelect::make(i, N - 1, 1, csel, kGE);
   csel = CompareSelect::make(j, N - 1, 1, csel, kGE);
-  Stmt* s = b.store(
+  StmtPtr s = b.store(
       {i, j}, b.load({i, j}) + IfThenElse::make(csel, 0.f, a.load({i, j})));
   s = For::make(j, 0, K, s);
   s = For::make(i, 0, K, s);
