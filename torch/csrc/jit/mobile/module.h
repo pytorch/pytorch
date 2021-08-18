@@ -115,6 +115,8 @@ class TORCH_API Module {
     return debug_table_;
   }
 
+  std::vector<c10::IValue> bvals_;
+
  private:
   c10::intrusive_ptr<c10::ivalue::Object> object_;
   std::unordered_map<std::string, std::string> metadata_;

@@ -365,7 +365,7 @@ void BytecodeDeserializer::parseMethods(
         expect_field(codeTable, "types", BYTECODE_INDEX_TYPE)
             .toTuple()
             ->elements();
-    const auto& register_size =
+    const int64_t register_size =
         expect_field(codeTable, "register_size", BYTECODE_INDEX_REGISTER_SIZE)
             .toInt();
 
@@ -380,21 +380,22 @@ void BytecodeDeserializer::parseMethods(
           debug_info_function_name == function_name,
           "The function names in the bytecode table and the debug info table do not match.");
       IValue debug_handles_table = debug_handles_m_tuple[1];
-      debug_handles_list = (expect_field(
-                                debug_handles_table,
-                                "function_debug_handles",
-                                BYTECODE_INDEX_MODULE_DEBUG_HANDLES)
-                                .toTuple()
-                                ->elements())[0]
-                               .toList()
-                               .vec();
+      (expect_field(
+           debug_handles_table,
+           "function_debug_handles",
+           BYTECODE_INDEX_MODULE_DEBUG_HANDLES)
+           .toTuple()
+           ->elements())[0]
+          .toList()
+          .vec()
+          .swap(debug_handles_list);
       TORCH_CHECK(
           debug_handles_list.size() == ins_list.size(),
           "The numbers of instructions and debug handles strings do not match.");
     }
 
     for (const auto j : c10::irange(ins_list.size())) {
-      auto ins_item = ins_list[j].toTuple()->elements();
+      auto& ins_item = ins_list[j].toTuple()->elements();
       TORCH_CHECK(
           ins_item.size() == 3,
           "There should be three parts in an instruction. The function name is ",
@@ -522,7 +523,8 @@ mobile::Module BytecodeDeserializer::deserialize(
   // being a Tuple (int, table), and the integer stands for the bytecode version
   // number. The rest of the elements are the same as before.
   //
-  auto bvals = readArchive("bytecode", mcu).toTuple()->elements();
+  std::vector<c10::IValue> bvals;
+  readArchive("bytecode", mcu).toTuple()->elements().swap(bvals);
 
   c10::optional<std::vector<IValue>> debug_handles;
   if (reader_->hasRecord("mobile_debug_handles.pkl")) {
@@ -531,6 +533,7 @@ mobile::Module BytecodeDeserializer::deserialize(
   }
   parseMethods(bvals, debug_handles, *mcu);
   auto m = mobile::Module(readArchive("data", mcu).toObject(), mcu);
+  m.bvals_ = std::move(bvals);
 #if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
   MobileDebugTable debug_table = MobileDebugTable(reader_, compilation_unit_);
   m.setDebugTable(std::move(debug_table));
