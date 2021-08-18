@@ -1,5 +1,5 @@
 #include <caffe2/operators/segment_reduction_op_gpu.cuh>
-#include <torch/csrc/distributed/c10d/quantization/quantization.h>
+#include <torch/csrc/distributed/c10d/quantization/quantization_gpu.h>
 #include <torch/csrc/distributed/c10d/quantization/quantization_utils.h>
 
 namespace torch {
