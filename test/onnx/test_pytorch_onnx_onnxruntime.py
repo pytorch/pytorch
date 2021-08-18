@@ -5405,6 +5405,31 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(3, 4)
         self.run_test(SortModel(), x)
 
+    @disableScriptTest()  # Sort with dynamic dim not supported in ONNX
+    def test_argsort(self):
+        class ArgSortModel(torch.nn.Module):
+            def forward(self, x):
+                out = []
+                for i in range(-2, 2):
+                    out.append(torch.argsort(x, dim=i, descending=True))
+                return out
+
+        x = torch.randn(3, 4)
+        self.run_test(ArgSortModel(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    @disableScriptTest()  # Sort with dynamic dim not supported in ONNX
+    def test_argsort_ascending(self):
+        class ArgSortModel(torch.nn.Module):
+            def forward(self, x):
+                out = []
+                for i in range(-2, 2):
+                    out.append(torch.argsort(x, dim=i, descending=False))
+                return out
+
+        x = torch.randn(3, 4)
+        self.run_test(ArgSortModel(), x)
+
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_masked_fill(self):
         class MaskedFillModel(torch.nn.Module):
