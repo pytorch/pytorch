@@ -24,6 +24,8 @@ from common_utils import (
     instantiate_parameterized_methods,
     get_fallback_and_vmap_exhaustive,
     opinfo_in_dict,
+    xfail,
+    skipOps,
 )
 import types
 
@@ -2904,41 +2906,32 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         self.assertEqual(result, torch.zeros(B0, *x.shape, device=device))
 
 class TestVmapOperatorsOpInfo(TestCase):
-    @onlyCPU
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
-    def test_vmap_exhaustive(self, device, dtype, op):
+    @skipOps('TestVmapOperatorsOpInfo', 'test_vmap_exhaustive', {
         # These are ops that we can't generate fallbacks for
-        op_skip = {
-            'broadcast_to',
-            'dsplit',
-            'hsplit',
-            'vsplit',
-            'ravel',
-            'moveaxis',
-            'positive',
-            'tensor_split',
-            'gradient',
-            'fill_',
-            'resize_as_',
-            'resolve_conj',
-            'resize_',
-            'to_sparse',
-            'resolve_neg',
-            'nn.functional.pad.circular',
-        }
-        # Unsupported input types
-        if opinfo_in_dict(op, op_skip):
-            return
+        xfail('broadcast_to'),
+        xfail('dsplit'),
+        xfail('fill_'),
+        xfail('gradient'),
+        xfail('hsplit'),
+        xfail('nn.functional.pad', 'circular'),
+        xfail('positive'),
+        xfail('ravel'),
+        xfail('resize_as_'),
+        xfail('resolve_conj'),
+        xfail('resolve_neg'),
+        xfail('tensor_split'),
+        xfail('to_sparse'),
+        xfail('vsplit'),
+
         # entries in here need don't work and need to be fixed.
         # Each one of these is a bug
-        vmap_fail = {
-            '__getitem__',
-            'unfold',
-            'argmin',
-            'argmax',
-        }
-        if opinfo_in_dict(op, vmap_fail):
-            return
+        xfail('__getitem__'),
+        xfail('argmax'),
+        xfail('argmin'),
+        xfail('unfold'),
+    })
+    def test_vmap_exhaustive(self, device, dtype, op):
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
         for sample_input in sample_inputs_itr:
             arg_values = [sample_input.input] + list(sample_input.args)
