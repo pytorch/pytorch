@@ -411,6 +411,12 @@ TEST_DILL = _check_module_exists('dill')
 
 TEST_LIBROSA = _check_module_exists('librosa')
 
+# bfloat16 is only supported by CUDA 11+
+BFLOAT16_AVAILABLE = (
+    torch.cuda.is_available()
+    and torch.version.cuda is not None
+    and int(torch.version.cuda.split('.')[0]) >= 11)
+
 # Python 2.7 doesn't have spawn
 NO_MULTIPROCESSING_SPAWN = os.environ.get('NO_MULTIPROCESSING_SPAWN', '0') == '1'
 TEST_WITH_ASAN = os.getenv('PYTORCH_TEST_WITH_ASAN', '0') == '1'
