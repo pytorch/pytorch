@@ -5,17 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.optim import SGD, Adam, AdamW
 from torch.testing._internal.common_utils import TestCase, run_tests, IS_WINDOWS
-
-if not IS_WINDOWS:
-    from torch.distributed.optim.functional_sgd import _FunctionalSGD
-    from torch.distributed.optim.functional_adam import _FunctionalAdam
-    from torch.distributed.optim.functional_adamw import _FunctionalAdamW
-    _SUPPORTED_OPTIM_MAPPING = {
-        SGD: _FunctionalSGD,
-        Adam: _FunctionalAdam,
-        AdamW: _FunctionalAdamW,
-    }
-
+from torch.distributed.optim import functional_optim_map
 
 class MyModule(torch.nn.Module):
     def __init__(self):
@@ -39,7 +29,7 @@ class TestFunctionalOptimParity(TestCase):
         optim_params = module_optim.parameters()
         functional_params = module_functional.parameters()
         optim = optim_cls(optim_params, *args, **kwargs)
-        functional_optim_cls = _SUPPORTED_OPTIM_MAPPING.get(optim_cls, None)
+        functional_optim_cls = functional_optim_map.get(optim_cls, None)
         if not functional_optim_cls:
             raise ValueError(f"Functional optimizer not implemented for {optim_cls}")
         optim_functional = functional_optim_cls(
