@@ -2536,7 +2536,6 @@ static void pruneByThreadCount(std::vector<For*>& loops) {
 template <typename Bufs>
 static void parallelizeOuterLoops(LoopNest& l, Bufs&& bufs) {
   for (auto const& buf : bufs) {
-    auto threads = at::get_num_threads();
     auto loops = l.getLoopStmtsFor(buf);
     pruneByGrainSize(loops);
     pruneByThreadCount(loops);
