@@ -337,6 +337,7 @@ jobs:
           docker run \
             ${GPU_FLAG:-} \
             -e BUILD_ENVIRONMENT \
+            -e PR_NUMBER \
             -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
             -e GITHUB_ACTIONS \
             -e IN_CI \
