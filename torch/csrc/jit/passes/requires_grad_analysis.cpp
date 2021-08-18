@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/passes/requires_grad_analysis.h>
 
 #include <ATen/core/jit_type.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -27,7 +28,7 @@ void setRequiresGrad(
     at::ArrayRef<Value*> outputs,
     const std::vector<bool>& values) {
   AT_ASSERT(outputs.size() == values.size());
-  for (size_t i = 0; i < values.size(); ++i) {
+  for (const auto i : c10::irange(values.size())) {
     setRequiresGrad(outputs[i], values[i]);
   }
 }
@@ -38,7 +39,7 @@ void setRequiresGrad(Node* node, const std::vector<bool>& values) {
 
 std::vector<bool> bitwiseOr(std::vector<bool> a, const std::vector<bool>& b) {
   AT_ASSERT(a.size() == b.size());
-  for (size_t i = 0; i < a.size(); ++i) {
+  for (const auto i : c10::irange(a.size())) {
     a[i] = a[i] || b[i];
   }
   return a;

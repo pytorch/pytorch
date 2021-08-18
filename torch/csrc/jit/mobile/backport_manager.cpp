@@ -439,7 +439,7 @@ bool BackportManager::backport(
     auto input_model_stream_version =
         _get_model_bytecode_version(input_model_stream);
 
-    if (input_model_stream_version != bytecode_version) {
+    if (static_cast<int64_t>(input_model_stream_version) != bytecode_version) {
       TORCH_WARN(
           "The bytecode version of input model stream is supposed to be ",
           bytecode_version,
@@ -456,7 +456,7 @@ bool BackportManager::backport(
     auto output_model_stream_version =
         _get_model_bytecode_version(output_model_stream);
 
-    if (output_model_stream_version != bytecode_version) {
+    if (static_cast<int64_t>(output_model_stream_version) != bytecode_version) {
       TORCH_WARN(
           "The bytecode version of output model stream is supposed to be ",
           bytecode_version,

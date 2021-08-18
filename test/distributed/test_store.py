@@ -197,7 +197,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
             world_size=1,
         )
 
-        backend_opts = rpc.ProcessGroupRpcBackendOptions(
+        backend_opts = rpc.TensorPipeRpcBackendOptions(
             init_method=f"tcp://{addr}:{port}"
         )
         rpc.init_rpc(

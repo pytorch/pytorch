@@ -20,7 +20,7 @@ namespace at { namespace native { namespace {
 using namespace vec;
 
 template <typename scalar_t, typename func_t>
-static inline void cpu_cum_base_kernel(Tensor& result,
+static inline void cpu_cum_base_kernel(const Tensor& result,
     const Tensor& self,
     int64_t dim,
     const func_t& f,
@@ -67,7 +67,7 @@ static inline void cpu_cum_base_kernel(Tensor& result,
   iter.for_each(loop);
 }
 
-static void cumsum_cpu_kernel(Tensor& result, const Tensor& self, int64_t dim) {
+static void cumsum_cpu_kernel(const Tensor& result, const Tensor& self, int64_t dim) {
   auto wrap_dim = maybe_wrap_dim(dim, self.dim());
   int64_t self_dim_size = ensure_nonempty_size(self, wrap_dim);
 
@@ -86,7 +86,7 @@ static void cumsum_cpu_kernel(Tensor& result, const Tensor& self, int64_t dim) {
   });
 }
 
-static void cumprod_cpu_kernel(Tensor& result, const Tensor& self, int64_t dim) {
+static void cumprod_cpu_kernel(const Tensor& result, const Tensor& self, int64_t dim) {
   auto wrap_dim = maybe_wrap_dim(dim, self.dim());
   int64_t self_dim_size = ensure_nonempty_size(self, wrap_dim);
 
@@ -395,31 +395,18 @@ static void argmin_kernel_impl(TensorIterator &iter) {
 
 }  // anonymous namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(std_var_stub, &std_var_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(prod_stub, &prod_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(mean_stub, &mean_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(norm_stub, &norm_kernel_tensor_iterator_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(and_stub, &and_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(or_stub, &or_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(min_values_stub, &min_values_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(max_values_stub, &max_values_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(argmax_stub, &argmax_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(argmin_stub, &argmin_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(cumprod_stub, &cumprod_cpu_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(cumsum_stub, &cumsum_cpu_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(logcumsumexp_stub, &logcumsumexp_cpu_kernel);
 
 }}  // namespace at::native

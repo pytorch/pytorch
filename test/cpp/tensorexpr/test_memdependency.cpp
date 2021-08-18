@@ -18,13 +18,14 @@ using namespace torch::jit::tensorexpr;
 // overlap. No Overlap & partial overlap is obvious. Contains means A is
 // larger and fully encloses B, while ContainedOrEqual is the reverse. Equal
 // ranges are ContainedOrEqual.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MemDependency, BoundOverlap) {
   KernelScope kernel_scope;
 
   using namespace analysis;
 
-  auto CB = [](int s, int e) { return Bound(new IntImm(s), new IntImm(e)); };
+  auto CB = [](int s, int e) {
+    return Bound(alloc<IntImm>(s), alloc<IntImm>(e));
+  };
 
   // Sanity check 3 overlap cases.
   ASSERT_EQ(ContainedOrEqual, boundOverlap(CB(0, 0), CB(0, 0)));
@@ -77,7 +78,6 @@ TEST(MemDependency, BoundOverlap) {
   ASSERT_EQ(ContainedOrEqual, boundOverlap(CB(15, 15), CB(2, 15)));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MemDependency, BoundOverlapSymbolic) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -115,13 +115,14 @@ TEST(MemDependency, BoundOverlapSymbolic) {
 // Tests the helper function for overlap of multi dimensional indices bounds.
 // This uses boundOverlap on each dimension and return the "lowest" kind of
 // overlap.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MemDependency, BoundOverlapMultiDim) {
   KernelScope kernel_scope;
 
   using namespace analysis;
 
-  auto CB = [](int s, int e) { return Bound(new IntImm(s), new IntImm(e)); };
+  auto CB = [](int s, int e) {
+    return Bound(alloc<IntImm>(s), alloc<IntImm>(e));
+  };
 
   // Sanity check one dimensional cases.
   ASSERT_EQ(ContainedOrEqual, overlaps({CB(0, 0)}, {CB(0, 0)}));
@@ -187,13 +188,14 @@ TEST(MemDependency, BoundOverlapMultiDim) {
 
 // Test the helper we use to subtract bounds: returns the regions(s) of A which
 // remain after removing the region of B.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MemDependency, BoundSubtract) {
   KernelScope kernel_scope;
 
   using namespace analysis;
 
-  auto CB = [](int s, int e) { return Bound(new IntImm(s), new IntImm(e)); };
+  auto CB = [](int s, int e) {
+    return Bound(alloc<IntImm>(s), alloc<IntImm>(e));
+  };
   auto EQ = [](const IndexBounds& x, const IndexBounds& y) {
     return indexBoundsEquals(x, y);
   };
@@ -221,7 +223,6 @@ TEST(MemDependency, BoundSubtract) {
   ASSERT_TRUE(EQ(subtractBound(CB(0, 5), CB(2, 4)), {CB(0, 1), CB(5, 5)}));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MemDependency, BoundSubtractSymbolic) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -271,13 +272,14 @@ TEST(MemDependency, BoundSubtractSymbolic) {
 
 // Tests the helper function that does subtraction, but for multi dimensional
 // indices bounds.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MemDependency, BoundSubtractMultiDim) {
   KernelScope kernel_scope;
 
   using namespace analysis;
 
-  auto CB = [](int s, int e) { return Bound(new IntImm(s), new IntImm(e)); };
+  auto CB = [](int s, int e) {
+    return Bound(alloc<IntImm>(s), alloc<IntImm>(e));
+  };
   auto EQ = [](std::vector<IndexBounds> x, std::vector<IndexBounds> y) {
     if (x.size() != y.size()) {
       return false;
@@ -332,7 +334,6 @@ TEST(MemDependency, BoundSubtractMultiDim) {
 
 // Tests the multi dimensional subtraction code for bounds that cannot be fully
 // materialized.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MemDependency, BoundSubtractMultiDimSymbolic) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -401,7 +402,6 @@ TEST(MemDependency, BoundSubtractMultiDimSymbolic) {
 }
 
 // Simple check that the analyzer does anything at all...
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MemDependency, MemDependencyCheckerSimple) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
@@ -414,10 +414,10 @@ TEST(MemDependency, MemDependencyCheckerSimple) {
    * B[0] = A[0] + 1;
    */
 
-  Store* aStore = Store::make(a, {0}, 3);
-  Store* bStore = Store::make(b, {0}, Add::make(Load::make(a, {0}), 1));
+  StorePtr aStore = Store::make(a, {0}, 3);
+  StorePtr bStore = Store::make(b, {0}, Add::make(Load::make(a, {0}), 1));
 
-  Stmt* stmt = Block::make({aStore, bStore});
+  StmtPtr stmt = Block::make({aStore, bStore});
 
   stmt->accept(&analyzer);
 
@@ -428,7 +428,6 @@ TEST(MemDependency, MemDependencyCheckerSimple) {
 }
 
 // Check that there is a difference between direct and indirect dependence.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MemDependency, MemDependencyCheckerMultiStmt) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
@@ -443,11 +442,11 @@ TEST(MemDependency, MemDependencyCheckerMultiStmt) {
    * C[0] = B[0] + 1;
    */
 
-  Store* aStore = Store::make(a, {0}, 3);
-  Store* bStore = Store::make(b, {0}, Load::make(a, {0}));
-  Store* cStore = Store::make(c, {0}, Add::make(Load::make(b, {0}), 1));
+  StorePtr aStore = Store::make(a, {0}, 3);
+  StorePtr bStore = Store::make(b, {0}, Load::make(a, {0}));
+  StorePtr cStore = Store::make(c, {0}, Add::make(Load::make(b, {0}), 1));
 
-  Stmt* stmt = Block::make({aStore, bStore, cStore});
+  StmtPtr stmt = Block::make({aStore, bStore, cStore});
 
   stmt->accept(&analyzer);
 
@@ -466,7 +465,6 @@ TEST(MemDependency, MemDependencyCheckerMultiStmt) {
 }
 
 // Verify that we do filter writes that are totally overlapped by later writes.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MemDependency, MemDependencyCheckerOverlap) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
@@ -480,11 +478,11 @@ TEST(MemDependency, MemDependencyCheckerOverlap) {
    * B[0] = A[0] + 1;
    */
 
-  Store* aStore = Store::make(a, {0}, 3);
-  Store* a2Store = Store::make(a, {0}, 6);
-  Store* bStore = Store::make(b, {0}, Add::make(Load::make(a, {0}), 1));
+  StorePtr aStore = Store::make(a, {0}, 3);
+  StorePtr a2Store = Store::make(a, {0}, 6);
+  StorePtr bStore = Store::make(b, {0}, Add::make(Load::make(a, {0}), 1));
 
-  Stmt* stmt = Block::make({aStore, a2Store, bStore});
+  StmtPtr stmt = Block::make({aStore, a2Store, bStore});
 
   stmt->accept(&analyzer);
 
@@ -500,7 +498,6 @@ TEST(MemDependency, MemDependencyCheckerOverlap) {
 
 // Verify that bounds match loop iterations, and that dependencies progress
 // across loop scopes.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MemDependency, MemDependencyCheckerLoop) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
@@ -518,11 +515,11 @@ TEST(MemDependency, MemDependencyCheckerLoop) {
    * B[0] = A[0] + 1;
    */
 
-  Store* aStore = Store::make(a, {x}, x);
-  Stmt* loop = For::make(x, 0, 10, aStore);
-  Store* bStore = Store::make(b, {0}, Add::make(Load::make(a, {4}), 1));
+  StorePtr aStore = Store::make(a, {x}, x);
+  StmtPtr loop = For::make(x, 0, 10, aStore);
+  StorePtr bStore = Store::make(b, {0}, Add::make(Load::make(a, {4}), 1));
 
-  Stmt* stmt = Block::make({loop, bStore});
+  StmtPtr stmt = Block::make({loop, bStore});
 
   stmt->accept(&analyzer);
 
@@ -539,11 +536,10 @@ TEST(MemDependency, MemDependencyCheckerLoop) {
 
   // It should have bounds covering the range of x: 0 <= x < 10.
   ASSERT_TRUE(indexBoundsEquals(
-      aStoreAccess->bounds(), {Bound(new IntImm(0), new IntImm(9))}));
+      aStoreAccess->bounds(), {Bound(alloc<IntImm>(0), alloc<IntImm>(9))}));
 }
 
 // Reductions should promote dependencies as well.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MemDependency, MemDependencyCheckerLoopReduce) {
   KernelScope kernel_scope;
   BufHandle a("A", {10}, kInt);
@@ -562,14 +558,14 @@ TEST(MemDependency, MemDependencyCheckerLoopReduce) {
    * B[0] = A[0];
    */
 
-  Store* aInit = Store::make(a, {0}, 0);
+  StorePtr aInit = Store::make(a, {0}, 0);
   ExprHandle reduce =
       ExprHandle(Sum()(a.node(), ExprHandle(1), {x.node()}, {x.node()}));
-  Store* aReduce = Store::make(a, {0}, reduce);
-  Stmt* loop = For::make(x, 0, 10, aReduce);
-  Store* bStore = Store::make(b, {0}, Load::make(a, {0}));
+  StorePtr aReduce = Store::make(a, {0}, reduce);
+  StmtPtr loop = For::make(x, 0, 10, aReduce);
+  StorePtr bStore = Store::make(b, {0}, Load::make(a, {0}));
 
-  Stmt* stmt = Block::make({aInit, loop, bStore});
+  StmtPtr stmt = Block::make({aInit, loop, bStore});
 
   stmt->accept(&analyzer);
 
@@ -594,16 +590,15 @@ TEST(MemDependency, MemDependencyCheckerLoopReduce) {
   // Find loads within the reduction:
   auto reduceLoads = NodeFinder<Load>::find(reduce.node());
   // Pull out the access for the load inside the loop.
-  for (auto* load : reduceLoads) {
+  for (auto load : reduceLoads) {
     auto loopLoad = analyzer.accessFor(load);
     // It should have 10 element long bounds.
     ASSERT_TRUE(indexBoundsEquals(
-        loopLoad->bounds(), {Bound(new IntImm(0), new IntImm(9))}));
+        loopLoad->bounds(), {Bound(alloc<IntImm>(0), alloc<IntImm>(9))}));
   }
 }
 
 // Lowering a reduction doesn't affect dependency analysis.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MemDependency, MemDependencyCheckerLoopReduceExpanded) {
   KernelScope kernel_scope;
   BufHandle a("A", {10}, kInt);
@@ -622,13 +617,13 @@ TEST(MemDependency, MemDependencyCheckerLoopReduceExpanded) {
    * B[0] = A[0];
    */
 
-  Store* aInit = Store::make(a, {0}, 0);
+  StorePtr aInit = Store::make(a, {0}, 0);
   ExprHandle aLoad = Load::make(a, {x});
-  Store* aReduce = Store::make(a, {0}, Add::make(aLoad, 1));
-  Stmt* loop = For::make(x, 0, 10, aReduce);
-  Store* bStore = Store::make(b, {0}, Load::make(a, {0}));
+  StorePtr aReduce = Store::make(a, {0}, Add::make(aLoad, 1));
+  StmtPtr loop = For::make(x, 0, 10, aReduce);
+  StorePtr bStore = Store::make(b, {0}, Load::make(a, {0}));
 
-  Stmt* stmt = Block::make({aInit, loop, bStore});
+  StmtPtr stmt = Block::make({aInit, loop, bStore});
 
   stmt->accept(&analyzer);
 
@@ -654,11 +649,10 @@ TEST(MemDependency, MemDependencyCheckerLoopReduceExpanded) {
   auto loopLoad = analyzer.accessFor(aLoad.node());
   // It should have 10 element long bounds.
   ASSERT_TRUE(indexBoundsEquals(
-      loopLoad->bounds(), {Bound(new IntImm(0), new IntImm(9))}));
+      loopLoad->bounds(), {Bound(alloc<IntImm>(0), alloc<IntImm>(9))}));
 }
 
 // Can determine dependencies of outputs, through to inputs.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MemDependency, MemDependencyCheckerInputsOutputs) {
   KernelScope kernel_scope;
   BufHandle a("A", {10}, kInt);
@@ -676,10 +670,10 @@ TEST(MemDependency, MemDependencyCheckerInputsOutputs) {
    */
 
   ExprHandle aLoad = Load::make(a, {x});
-  Store* bStore = Store::make(b, {x}, Max::make(aLoad, 0, true));
-  Stmt* loop = For::make(x, 0, 10, bStore);
+  StorePtr bStore = Store::make(b, {x}, Max::make(aLoad, 0, true));
+  StmtPtr loop = For::make(x, 0, 10, bStore);
 
-  Stmt* stmt = Block::make({loop});
+  StmtPtr stmt = Block::make({loop});
 
   stmt->accept(&analyzer);
 
@@ -712,7 +706,6 @@ TEST(MemDependency, MemDependencyCheckerInputsOutputs) {
 }
 
 // Can tell if an output does not depend on an input.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MemDependency, MemDependencyCheckerOutputDoesntDepend) {
   KernelScope kernel_scope;
   BufHandle a("A", {10}, kInt);
@@ -729,10 +722,10 @@ TEST(MemDependency, MemDependencyCheckerOutputDoesntDepend) {
    * }
    */
 
-  Store* bStore = Store::make(b, {x}, Max::make(x, 0, true));
-  Stmt* loop = For::make(x, 0, 10, bStore);
+  StorePtr bStore = Store::make(b, {x}, Max::make(x, 0, true));
+  StmtPtr loop = For::make(x, 0, 10, bStore);
 
-  Stmt* stmt = Block::make({loop});
+  StmtPtr stmt = Block::make({loop});
 
   stmt->accept(&analyzer);
 
@@ -752,7 +745,6 @@ TEST(MemDependency, MemDependencyCheckerOutputDoesntDepend) {
 
 // Verify different loop extents produce accesses with different bounds, and
 // that later accesses find dependencies that overlap their entire bound range.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MemDependency, MemDependencyCheckerLoopBounds) {
   KernelScope kernel_scope;
   BufHandle a("A", {10}, kInt);
@@ -782,14 +774,14 @@ TEST(MemDependency, MemDependencyCheckerLoopBounds) {
    * }
    */
 
-  std::vector<Stmt*> stmts(
+  std::vector<StmtPtr> stmts(
       {For::make(x, 1, 10, Store::make(b, {x}, Load::make(a, {x}))),
        For::make(
            x, 1, 9, Store::make(b, {x}, Mul::make(Load::make(b, {x}), 2))),
        For::make(x, 3, 4, Store::make(c, {x}, Load::make(a, {x}))),
        For::make(x, 0, 10, Store::make(c, {x}, Load::make(b, {x})))});
 
-  Stmt* stmt = Block::make(stmts);
+  StmtPtr stmt = Block::make(stmts);
 
   stmt->accept(&analyzer);
 
@@ -809,7 +801,9 @@ TEST(MemDependency, MemDependencyCheckerLoopBounds) {
   // The last write to C does not depend on the other write to C.
   ASSERT_FALSE(analyzer.dependsIndirectly(stmts[3], stmts[2]));
 
-  auto CB = [](int s, int e) { return Bound(new IntImm(s), new IntImm(e)); };
+  auto CB = [](int s, int e) {
+    return Bound(alloc<IntImm>(s), alloc<IntImm>(e));
+  };
   auto EQ = [](const IndexBounds& x, const IndexBounds& y) {
     return indexBoundsEquals(x, y);
   };
@@ -831,9 +825,9 @@ TEST(MemDependency, MemDependencyCheckerLoopBounds) {
   // much.
   auto history = analyzer.getHistory();
   ASSERT_EQ(history.size(), 10);
-  const Var* aVar = a.node()->base_handle();
-  const Var* bVar = b.node()->base_handle();
-  const Var* cVar = c.node()->base_handle();
+  VarPtr aVar = a.node()->base_handle();
+  VarPtr bVar = b.node()->base_handle();
+  VarPtr cVar = c.node()->base_handle();
 
   // The first access is the input A.
   ASSERT_EQ(history[0]->type(), AccessType::Input);
@@ -933,7 +927,6 @@ TEST(MemDependency, MemDependencyCheckerLoopBounds) {
 }
 
 // Verify that we can still infer bounds when the loop var is offset.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MemDependency, MemDependencyCheckerLoopBoundsIndexShift) {
   KernelScope kernel_scope;
   BufHandle a("A", {10}, kInt);
@@ -966,7 +959,7 @@ TEST(MemDependency, MemDependencyCheckerLoopBoundsIndexShift) {
    * }
    */
 
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {For::make(x, 1, 10, Store::make(a, {x}, Load::make(a, {x - 1}))),
        For::make(x, 0, 9, Store::make(a, {x}, Load::make(a, {x + 1}))),
        For::make(
@@ -984,7 +977,9 @@ TEST(MemDependency, MemDependencyCheckerLoopBoundsIndexShift) {
   // Sanity check output depends on Input.
   ASSERT_TRUE(analyzer.dependsIndirectly(b.node(), a.node()));
 
-  auto CB = [](int s, int e) { return Bound(new IntImm(s), new IntImm(e)); };
+  auto CB = [](int s, int e) {
+    return Bound(alloc<IntImm>(s), alloc<IntImm>(e));
+  };
   auto EQ = [](const IndexBounds& x, const IndexBounds& y) {
     return indexBoundsEquals(x, y);
   };
@@ -1006,8 +1001,8 @@ TEST(MemDependency, MemDependencyCheckerLoopBoundsIndexShift) {
   // Now let's look at the bounds of each access.
   auto history = analyzer.getHistory();
   ASSERT_EQ(history.size(), 12);
-  const Var* aVar = a.node()->base_handle();
-  const Var* bVar = b.node()->base_handle();
+  VarPtr aVar = a.node()->base_handle();
+  VarPtr bVar = b.node()->base_handle();
 
   // The first access is the input A.
   ASSERT_EQ(history[0]->type(), AccessType::Input);
@@ -1115,7 +1110,6 @@ TEST(MemDependency, MemDependencyCheckerLoopBoundsIndexShift) {
 // loop is dependent on a Store later in the same loop but in different
 // iteration. This is affected by whether or not we can trust the execution
 // order of the loop.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
   KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
@@ -1141,7 +1135,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
     // Not self dependent since all loop iterations use a different y.
 
     MemDependencyChecker analyzer;
-    Stmt* stmt = For::make(
+    StmtPtr stmt = For::make(
         y,
         0,
         10,
@@ -1161,7 +1155,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
     // Not self dependent due to different y (with offset).
 
     MemDependencyChecker analyzer;
-    Stmt* stmt = For::make(
+    StmtPtr stmt = For::make(
         y,
         0,
         10,
@@ -1182,7 +1176,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
     // Is self dependent since all loops use a common constant element of A.
 
     MemDependencyChecker analyzer;
-    Stmt* stmt = For::make(
+    StmtPtr stmt = For::make(
         x,
         0,
         10,
@@ -1202,7 +1196,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
     // read.
 
     MemDependencyChecker analyzer;
-    Stmt* stmt = For::make(
+    StmtPtr stmt = For::make(
         x,
         0,
         10,
@@ -1221,7 +1215,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
     // Is self dependent since all loops use a common symbolic element of A.
 
     MemDependencyChecker analyzer;
-    Stmt* stmt = For::make(
+    StmtPtr stmt = For::make(
         x,
         0,
         10,
@@ -1241,7 +1235,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
 
     MemDependencyChecker analyzer;
 
-    Stmt* stmt =
+    StmtPtr stmt =
         For::make(x, 0, 10, Store::make(a, {x}, Load::make(a, {x + 1})));
     stmt->accept(&analyzer);
 
@@ -1259,7 +1253,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
     MemDependencyChecker analyzer;
     analyzer.allowLoopExecutionOrderAnalysis();
 
-    Stmt* stmt =
+    StmtPtr stmt =
         For::make(x, 0, 10, Store::make(a, {x}, Load::make(a, {x + 1})));
     stmt->accept(&analyzer);
 
@@ -1276,7 +1270,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
 
     MemDependencyChecker analyzer;
 
-    Stmt* stmt =
+    StmtPtr stmt =
         For::make(x, 1, 10, Store::make(a, {x}, Load::make(a, {x - 1})));
     stmt->accept(&analyzer);
 
@@ -1292,7 +1286,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
     MemDependencyChecker analyzer;
     analyzer.allowLoopExecutionOrderAnalysis();
 
-    Stmt* stmt =
+    StmtPtr stmt =
         For::make(x, 1, 10, Store::make(a, {x}, Load::make(a, {x - 1})));
     stmt->accept(&analyzer);
 
@@ -1313,7 +1307,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
     MemDependencyChecker analyzer;
     analyzer.allowLoopExecutionOrderAnalysis();
 
-    Stmt* stmt = For::make(
+    StmtPtr stmt = For::make(
         x,
         3,
         10,
@@ -1337,7 +1331,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
     MemDependencyChecker analyzer;
     analyzer.allowLoopExecutionOrderAnalysis();
 
-    Stmt* stmt = For::make(
+    StmtPtr stmt = For::make(
         x,
         3,
         10,
@@ -1358,7 +1352,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
 
     MemDependencyChecker analyzer;
 
-    Stmt* stmt = For::make(
+    StmtPtr stmt = For::make(
         x,
         3,
         10,
@@ -1380,7 +1374,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
     MemDependencyChecker analyzer;
     analyzer.allowLoopExecutionOrderAnalysis();
 
-    Stmt* stmt =
+    StmtPtr stmt =
         For::make(x, 3, 10, Store::make(a, {x - 2}, Load::make(a, {x - 1})));
     stmt->accept(&analyzer);
 
@@ -1401,7 +1395,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
     // Execution order doesn't matter since the read and the write are totally
     // distinct.
 
-    Stmt* stmt =
+    StmtPtr stmt =
         For::make(x, 0, 10, Store::make(a, {x * 2}, Load::make(a, {x * 2})));
     stmt->accept(&analyzer);
 
@@ -1423,7 +1417,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
     // Execution order doesn't matter since the read and the write are totally
     // distinct.
 
-    Stmt* stmt = For::make(
+    StmtPtr stmt = For::make(
         x, 0, 10, Store::make(a, {x * 2}, Load::make(a, {x * 2 + 1})));
     stmt->accept(&analyzer);
 
@@ -1439,7 +1433,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
     // same if the read is behind the write so long as they are distinct.
 
     MemDependencyChecker analyzer;
-    Stmt* stmt = For::make(
+    StmtPtr stmt = For::make(
         x, 1, 10, Store::make(a, {x * 2}, Load::make(a, {x * 2 - 1})));
     stmt->accept(&analyzer);
 
@@ -1455,7 +1449,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
     // But not if the offset is in the stride.
 
     MemDependencyChecker analyzer;
-    Stmt* stmt = For::make(
+    StmtPtr stmt = For::make(
         x, 0, 10, Store::make(a, {x * 2}, Load::make(a, {x * 2 + 2})));
     stmt->accept(&analyzer);
 
@@ -1471,7 +1465,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
     // Works with negative offsets too.
 
     MemDependencyChecker analyzer;
-    Stmt* stmt = For::make(
+    StmtPtr stmt = For::make(
         x, 1, 10, Store::make(a, {x * 2}, Load::make(a, {x * 2 - 2})));
     stmt->accept(&analyzer);
 
@@ -1487,7 +1481,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
     // Detects accesses are distinct when offset is large but not a multiple
     // of stride.
     MemDependencyChecker analyzer;
-    Stmt* stmt = For::make(
+    StmtPtr stmt = For::make(
         x, 0, 10, Store::make(a, {x * 2}, Load::make(a, {x * 2 + 7})));
     stmt->accept(&analyzer);
 
@@ -1502,7 +1496,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
 
     // Works with offsets which are multiples of the stride.
     MemDependencyChecker analyzer;
-    Stmt* stmt = For::make(
+    StmtPtr stmt = For::make(
         x, 0, 10, Store::make(a, {x * 2}, Load::make(a, {x * 2 + 4})));
     stmt->accept(&analyzer);
 
@@ -1519,7 +1513,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
     // within.
 
     MemDependencyChecker analyzer;
-    Stmt* stmt = For::make(
+    StmtPtr stmt = For::make(
         x, 0, 10, Store::make(a, {x * 6}, Load::make(a, {x * 6 + 5})));
     stmt->accept(&analyzer);
 
@@ -1536,7 +1530,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
     // multiple.
 
     MemDependencyChecker analyzer;
-    Stmt* stmt =
+    StmtPtr stmt =
         For::make(x, 0, 10, Store::make(a, {x * 2}, Load::make(a, {x * 6})));
     stmt->accept(&analyzer);
 
@@ -1552,7 +1546,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
     // still works when the read axis is the smaller stride.
 
     MemDependencyChecker analyzer;
-    Stmt* stmt =
+    StmtPtr stmt =
         For::make(x, 0, 10, Store::make(a, {x * 4}, Load::make(a, {x * 2})));
     stmt->accept(&analyzer);
 
@@ -1569,7 +1563,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
     // and there is an offset.
 
     MemDependencyChecker analyzer;
-    Stmt* stmt = For::make(
+    StmtPtr stmt = For::make(
         x, 0, 10, Store::make(a, {x * 2}, Load::make(a, {x * 6 + 1})));
     stmt->accept(&analyzer);
 
@@ -1585,7 +1579,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
     // The smaller stride determines whether there is overlap.
 
     MemDependencyChecker analyzer;
-    Stmt* stmt = For::make(
+    StmtPtr stmt = For::make(
         x, 0, 10, Store::make(a, {x * 2}, Load::make(a, {x * 6 + 4})));
     stmt->accept(&analyzer);
 
@@ -1601,7 +1595,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
     // The smaller stride determines whether there is overlap, not the larger.
 
     MemDependencyChecker analyzer;
-    Stmt* stmt = For::make(
+    StmtPtr stmt = For::make(
         x, 0, 10, Store::make(a, {x * 2 + 3}, Load::make(a, {x * 6})));
     stmt->accept(&analyzer);
 
@@ -1616,7 +1610,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
 
     // If they have strides with no common muliple > 1, they overlap.
     MemDependencyChecker analyzer;
-    Stmt* stmt = For::make(
+    StmtPtr stmt = For::make(
         x, 0, 10, Store::make(a, {x * 2}, Load::make(a, {x * 3 + 1})));
     stmt->accept(&analyzer);
 
@@ -1632,7 +1626,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
     // If the offset is greater than the size of the loop, they can't overlap.
 
     MemDependencyChecker analyzer;
-    Stmt* stmt =
+    StmtPtr stmt =
         For::make(x, 0, 10, Store::make(a, {x}, Load::make(a, {x + 10})));
     stmt->accept(&analyzer);
 
@@ -1647,7 +1641,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
 
     // If they have different execution orders they may overlap.
     MemDependencyChecker analyzer;
-    Stmt* stmt = For::make(
+    StmtPtr stmt = For::make(
         x, 0, 10, Store::make(a, {x}, Load::make(a, {ExprHandle(9) - x})));
     stmt->accept(&analyzer);
 
@@ -1662,7 +1656,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
 
     // Or they may not, depending on their start offset and strides.
     MemDependencyChecker analyzer;
-    Stmt* stmt = For::make(
+    StmtPtr stmt = For::make(
         x,
         0,
         10,
@@ -1681,7 +1675,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
     // If the stride is not monotonic, they overlap.
 
     MemDependencyChecker analyzer;
-    Stmt* stmt =
+    StmtPtr stmt =
         For::make(x, 0, 10, Store::make(a, {x / 2}, Load::make(a, {x / 2})));
     stmt->accept(&analyzer);
 
@@ -1696,7 +1690,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
 
     // If the stride is not monotonic, they overlap - even with an offset.
     MemDependencyChecker analyzer;
-    Stmt* stmt = For::make(
+    StmtPtr stmt = For::make(
         x, 0, 10, Store::make(a, {x / 2}, Load::make(a, {x / 2 + 1})));
     stmt->accept(&analyzer);
 
@@ -1712,7 +1706,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
     // Mod too...
 
     analysis::MemDependencyChecker analyzer;
-    Stmt* stmt = For::make(
+    StmtPtr stmt = For::make(
         x,
         0,
         10,
@@ -1732,7 +1726,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
 
     {
       MemDependencyChecker analyzer;
-      Stmt* stmt =
+      StmtPtr stmt =
           For::make(x, y, z, Store::make(a, {x}, Load::make(a, {x + 1})));
       stmt->accept(&analyzer);
 
@@ -1742,7 +1736,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
     {
       MemDependencyChecker analyzer;
       analyzer.allowLoopExecutionOrderAnalysis();
-      Stmt* stmt =
+      StmtPtr stmt =
           For::make(x, y, z, Store::make(a, {x}, Load::make(a, {x + 1})));
       stmt->accept(&analyzer);
 
@@ -1754,7 +1748,6 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
 // Verify that a strided access still works.
 // TODO: actually this only works because of the size of the ranges, revist this
 // test after strided overlap is implemented.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MemDependency, MemDependencyCheckerLoopDistinctStrides) {
   KernelScope kernel_scope;
   BufHandle a("A", {20}, kInt);
@@ -1764,7 +1757,7 @@ TEST(MemDependency, MemDependencyCheckerLoopDistinctStrides) {
 
   using namespace analysis;
   MemDependencyChecker analyzer({a.node()}, {b.node()});
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {For::make(
            x, 0, 10, Store::make(b, {x * 2 + 1}, Load::make(a, {x * 2 + 1}))),
        For::make(x, 0, 10, Store::make(b, {x * 2}, Load::make(a, {x * 2})))
@@ -1791,7 +1784,7 @@ TEST(MemDependency, MemDependencyCheckerLoopDistinctStrides) {
 
   {
     analysis::MemDependencyChecker analyzer({a.node()}, {c.node()});
-    Stmt* stmt = Block::make(
+    StmtPtr stmt = Block::make(
         {For::make(
              x,
              0,
@@ -1812,7 +1805,6 @@ TEST(MemDependency, MemDependencyCheckerLoopDistinctStrides) {
 }*/
 
 // analysis on Stmts using Cond.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MemDependency, MemDependencyCheckerLoopBoundsCond) {
   KernelScope kernel_scope;
   BufHandle a("A", {10}, kInt);
@@ -1837,7 +1829,7 @@ TEST(MemDependency, MemDependencyCheckerLoopBoundsCond) {
     // Future usages may depend on accesses in both branches of a condition.
 
     MemDependencyChecker analyzer({a, b}, {c});
-    Stmt* stmt = Block::make(
+    StmtPtr stmt = Block::make(
         {For::make(x, 0, 10, Store::make(c, {x}, Load::make(a, {x}))),
          Cond::make(
              CompareSelect::make(y, 5, CompareSelectOperation::kLT),
@@ -1874,7 +1866,7 @@ TEST(MemDependency, MemDependencyCheckerLoopBoundsCond) {
     // Future usages may depend on accesses in both branches of a condition.
 
     MemDependencyChecker analyzer({a, b}, {c});
-    Stmt* stmt = Block::make(
+    StmtPtr stmt = Block::make(
         {For::make(x, 0, 10, Store::make(c, {x}, Load::make(a, {x}))),
          Cond::make(
              CompareSelect::make(y, 5, CompareSelectOperation::kLT),
@@ -1915,7 +1907,7 @@ TEST(MemDependency, MemDependencyCheckerLoopBoundsCond) {
     // Only has true branch.
 
     MemDependencyChecker analyzer({a, b}, {c});
-    Stmt* stmt = Block::make(
+    StmtPtr stmt = Block::make(
         {For::make(x, 0, 10, Store::make(c, {x}, Load::make(a, {x}))),
          Cond::make(
              CompareSelect::make(y, 5, CompareSelectOperation::kLT),
@@ -1953,7 +1945,7 @@ TEST(MemDependency, MemDependencyCheckerLoopBoundsCond) {
     // Only has false branch.
 
     MemDependencyChecker analyzer({a, b}, {c});
-    Stmt* stmt = Block::make(
+    StmtPtr stmt = Block::make(
         {For::make(x, 0, 10, Store::make(c, {x}, Load::make(a, {x}))),
          Cond::make(
              CompareSelect::make(y, 5, CompareSelectOperation::kLT),
@@ -1988,9 +1980,9 @@ TEST(MemDependency, MemDependencyCheckerLoopBoundsCond) {
     // Cond's Condition depends on a previous access.
 
     MemDependencyChecker analyzer({a}, {c});
-    Store* initStore = Store::make(c, {x}, Load::make(a, {x}));
+    StorePtr initStore = Store::make(c, {x}, Load::make(a, {x}));
     ExprHandle conditionalLoad = Load::make(c, {0});
-    Stmt* stmt = Block::make(
+    StmtPtr stmt = Block::make(
         {For::make(x, 0, 10, initStore),
          Cond::make(
              CompareSelect::make(
@@ -2009,7 +2001,6 @@ TEST(MemDependency, MemDependencyCheckerLoopBoundsCond) {
 }
 
 // Stmts using IfThenElse.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MemDependency, MemDependencyCheckerIfThenElse) {
   KernelScope kernel_scope;
   BufHandle a("A", {10}, kInt);
@@ -2030,14 +2021,14 @@ TEST(MemDependency, MemDependencyCheckerIfThenElse) {
     // Future usages may depend on accesses in both branches of a condition.
 
     MemDependencyChecker analyzer({a, b}, {c});
-    Store* ifStore = Store::make(
+    StorePtr ifStore = Store::make(
         c,
         {0},
         IfThenElse::make(
             CompareSelect::make(y, 5, CompareSelectOperation::kLT),
             Add::make(Load::make(b, {0}), 1),
             Add::make(Load::make(b, {1}), 1)));
-    Stmt* stmt = Block::make(
+    StmtPtr stmt = Block::make(
         {For::make(x, 0, 10, Store::make(c, {x}, Load::make(a, {x}))),
          ifStore});
 
@@ -2070,14 +2061,14 @@ TEST(MemDependency, MemDependencyCheckerIfThenElse) {
     // dependent on it.
 
     MemDependencyChecker analyzer({a, b}, {c});
-    Store* ifStore = Store::make(
+    StorePtr ifStore = Store::make(
         c,
         {0},
         IfThenElse::make(
             CompareSelect::make(y, 5, CompareSelectOperation::kLT),
             Add::make(Load::make(b, {0}), 1),
             42));
-    Stmt* stmt = Block::make(
+    StmtPtr stmt = Block::make(
         {For::make(x, 0, 10, Store::make(c, {x}, Load::make(a, {x}))),
          ifStore});
 
@@ -2102,14 +2093,14 @@ TEST(MemDependency, MemDependencyCheckerIfThenElse) {
     // uncertain if this would be helpful.
 
     MemDependencyChecker analyzer({a, b}, {c});
-    Store* ifStore = Store::make(
+    StorePtr ifStore = Store::make(
         c,
         {0},
         IfThenElse::make(
             CompareSelect::make(y, 5, CompareSelectOperation::kLT),
             Load::make(b, {x}),
             Load::make(a, {x})));
-    Stmt* stmt = Block::make({For::make(x, 0, 10, ifStore)});
+    StmtPtr stmt = Block::make({For::make(x, 0, 10, ifStore)});
 
     stmt->accept(&analyzer);
 
@@ -2120,7 +2111,6 @@ TEST(MemDependency, MemDependencyCheckerIfThenElse) {
 }
 
 // Cutting a loop with single elem writes
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MemDependency, MemDependencyCheckerCutLoop) {
   KernelScope kernel_scope;
   BufHandle a("A", {10}, kInt);
@@ -2139,7 +2129,7 @@ TEST(MemDependency, MemDependencyCheckerCutLoop) {
     // Cutting a loop with single element writes.
 
     MemDependencyChecker analyzer({a}, {b});
-    Stmt* stmt = Block::make(
+    StmtPtr stmt = Block::make(
         {For::make(x, 0, 10, Store::make(b, {x}, Load::make(a, {x}))),
          Store::make(b, {5}, 100)});
 
@@ -2170,12 +2160,13 @@ TEST(MemDependency, MemDependencyCheckerCutLoop) {
     // loop with one element writes.
 
     MemDependencyChecker analyzer({a}, {b});
-    For* firstLoop =
+    ForPtr firstLoop =
         For::make(x, 0, 10, Store::make(b, {x}, Load::make(a, {x})));
-    Store* secondStore = Store::make(b, {x}, Add::make(Load::make(b, {x}), 1));
-    For* secondLoop = For::make(x, 4, 7, secondStore);
+    StorePtr secondStore =
+        Store::make(b, {x}, Add::make(Load::make(b, {x}), 1));
+    ForPtr secondLoop = For::make(x, 4, 7, secondStore);
 
-    Stmt* stmt = Block::make(
+    StmtPtr stmt = Block::make(
         {firstLoop,
          secondLoop,
          Store::make(b, {4}, 100),
@@ -2202,7 +2193,6 @@ TEST(MemDependency, MemDependencyCheckerCutLoop) {
 }
 
 // Dynamic shapes (load in indices).
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MemDependency, MemDependencyCheckerDynamicShapes) {
   KernelScope kernel_scope;
   BufHandle a("A", {100}, kInt);
@@ -2226,7 +2216,7 @@ TEST(MemDependency, MemDependencyCheckerDynamicShapes) {
      * }
      */
     MemDependencyChecker analyzer({a, b}, {c});
-    Stmt* stmt = Block::make({For::make(
+    StmtPtr stmt = Block::make({For::make(
         x, 0, Load::make(b, {0}), Store::make(c, {x}, Load::make(a, {x})))});
 
     stmt->accept(&analyzer);
@@ -2264,7 +2254,7 @@ TEST(MemDependency, MemDependencyCheckerDynamicShapes) {
      * }
      */
     MemDependencyChecker analyzer({a, b}, {c});
-    Stmt* stmt = Block::make({For::make(
+    StmtPtr stmt = Block::make({For::make(
         x,
         Load::make(b, {0}),
         Load::make(b, {1}),
@@ -2309,7 +2299,7 @@ TEST(MemDependency, MemDependencyCheckerDynamicShapes) {
      * }
      */
     MemDependencyChecker analyzer({a, b}, {c});
-    Stmt* stmt = Block::make({For::make(
+    StmtPtr stmt = Block::make({For::make(
         x, 0, 10, Store::make(c, {x}, Load::make(a, {Load::make(b, {x})})))});
 
     stmt->accept(&analyzer);
@@ -2354,7 +2344,7 @@ TEST(MemDependency, MemDependencyCheckerDynamicShapes) {
      * }
      */
     MemDependencyChecker analyzer({a, b}, {c});
-    Stmt* stmt = Block::make({For::make(
+    StmtPtr stmt = Block::make({For::make(
         x, 0, 10, Store::make(c, {Load::make(b, {x})}, Load::make(a, {x})))});
 
     stmt->accept(&analyzer);
@@ -2398,7 +2388,7 @@ TEST(MemDependency, MemDependencyCheckerDynamicShapes) {
      * }
      */
     MemDependencyChecker analyzer({a, b}, {c});
-    Stmt* stmt = Block::make({For::make(
+    StmtPtr stmt = Block::make({For::make(
         x, 0, 10, Store::make(c, {Load::make(b, {Load::make(a, {x})})}, x))});
 
     stmt->accept(&analyzer);
@@ -2445,7 +2435,6 @@ TEST(MemDependency, MemDependencyCheckerDynamicShapes) {
 }
 
 // Verify multi dimensional bounds work.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MemDependency, MemDependencyCheckerMultiDim) {
   KernelScope kernel_scope;
   int M = 10, N = 9, K = 12;
@@ -2478,7 +2467,7 @@ TEST(MemDependency, MemDependencyCheckerMultiDim) {
     // Full range.
 
     MemDependencyChecker analyzer({a}, {b});
-    Stmt* stmt = Block::make({For::make(
+    StmtPtr stmt = Block::make({For::make(
         x,
         0,
         M,
@@ -2524,7 +2513,7 @@ TEST(MemDependency, MemDependencyCheckerMultiDim) {
     // Partial range.
 
     MemDependencyChecker analyzer({a}, {b});
-    Stmt* stmt = Block::make({For::make(
+    StmtPtr stmt = Block::make({For::make(
         x,
         0,
         5,
@@ -2567,7 +2556,7 @@ TEST(MemDependency, MemDependencyCheckerMultiDim) {
     // Partial loops.
 
     MemDependencyChecker analyzer({a}, {b});
-    Stmt* stmt = Block::make({For::make(
+    StmtPtr stmt = Block::make({For::make(
         x,
         0,
         N,
@@ -2608,7 +2597,7 @@ TEST(MemDependency, MemDependencyCheckerMultiDim) {
     // dimensionality.
 
     MemDependencyChecker analyzer({a, c}, {b});
-    Stmt* stmt = Block::make({For::make(
+    StmtPtr stmt = Block::make({For::make(
         x,
         0,
         M,
@@ -2667,7 +2656,7 @@ TEST(MemDependency, MemDependencyCheckerMultiDim) {
     // Multi-dim reductions.
 
     MemDependencyChecker analyzer({a}, {b});
-    Stmt* stmt = Block::make({For::make(
+    StmtPtr stmt = Block::make({For::make(
         x,
         0,
         M,
@@ -2713,7 +2702,6 @@ TEST(MemDependency, MemDependencyCheckerMultiDim) {
 }
 
 // Various tests using the external Compute/Reduce API.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MemDependency, MemDependencyCheckerComputeAPI) {
   KernelScope kernel_scope;
 
@@ -2762,12 +2750,11 @@ TEST(MemDependency, MemDependencyCheckerComputeAPI) {
   ASSERT_TRUE(analyzer.dependsIndirectly(d->buf(), b_buf.data()));
 
   // Second loop depends on first loop.
-  auto* c_loop = l.getLoopStmtsFor(c)[0];
-  auto* d_loop = l.getLoopStmtsFor(d)[0];
+  auto c_loop = l.getLoopStmtsFor(c)[0];
+  auto d_loop = l.getLoopStmtsFor(d)[0];
   ASSERT_TRUE(analyzer.dependsDirectly(d_loop, c_loop));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MemDependency, MemDependencyCheckerComputeInline) {
   KernelScope kernel_scope;
 
@@ -2815,7 +2802,6 @@ TEST(MemDependency, MemDependencyCheckerComputeInline) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MemDependency, MemDependencyCheckerComputeSplit) {
   KernelScope kernel_scope;
 
@@ -2840,7 +2826,7 @@ TEST(MemDependency, MemDependencyCheckerComputeSplit) {
   l.splitWithTail(l.getLoopStmtsFor(c)[0], 2);
 
   MemDependencyChecker analyzer_after({a_buf.data(), b_buf.data()}, {c->buf()});
-  Stmt* stmt = IRSimplifier::simplify(l.root_stmt());
+  StmtPtr stmt = IRSimplifier::simplify(l.root_stmt());
   stmt->accept(&analyzer_after);
 
   // Splitting should not change accesses at all.
@@ -2865,7 +2851,6 @@ TEST(MemDependency, MemDependencyCheckerComputeSplit) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MemDependency, MemDependencyCheckerComputeReorder) {
   KernelScope kernel_scope;
 
@@ -2891,7 +2876,7 @@ TEST(MemDependency, MemDependencyCheckerComputeReorder) {
   l.reorderAxis(loops[0], loops[1]);
 
   MemDependencyChecker analyzer_after({a_buf.data(), b_buf.data()}, {c->buf()});
-  Stmt* stmt = IRSimplifier::simplify(l.root_stmt());
+  StmtPtr stmt = IRSimplifier::simplify(l.root_stmt());
   stmt->accept(&analyzer_after);
 
   // Reordering should not change accesses at all.
@@ -2916,7 +2901,6 @@ TEST(MemDependency, MemDependencyCheckerComputeReorder) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MemDependency, MemDependencyCheckerComputeReduce) {
   KernelScope kernel_scope;
 
@@ -2962,8 +2946,8 @@ TEST(MemDependency, MemDependencyCheckerComputeReduce) {
   ASSERT_TRUE(analyzer.dependsIndirectly(d->buf(), b.data()));
 
   // Second loop depends on first loop.
-  auto* c_loop = l.getLoopStmtsFor(c)[0];
-  auto* d_loop = l.getLoopStmtsFor(d)[0];
+  auto c_loop = l.getLoopStmtsFor(c)[0];
+  auto d_loop = l.getLoopStmtsFor(d)[0];
   ASSERT_TRUE(analyzer.dependsDirectly(d_loop, c_loop));
 
   // Reduction depends on both inputs.
@@ -2972,7 +2956,6 @@ TEST(MemDependency, MemDependencyCheckerComputeReduce) {
   ASSERT_TRUE(analyzer.dependsIndirectly(reduces[0], b.data()));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MemDependency, MemDependencyCheckerComputeGEMM) {
   KernelScope kernel_scope;
   int M = 1024;
@@ -2994,36 +2977,36 @@ TEST(MemDependency, MemDependencyCheckerComputeGEMM) {
 
   {
     auto const& loops = loop.getLoopStmtsFor(CT);
-    For* m = loops[0];
+    ForPtr m = loops[0];
     loop.splitWithMask(m, 4);
   }
   {
     auto const& loops = loop.getLoopStmtsFor(CT);
-    For* n = loops[2];
+    ForPtr n = loops[2];
     loop.splitWithMask(n, 16);
   }
   // mo, mi, no, ni, k ->
   // mo, no, mi, ni, k
   {
     auto const& loops = loop.getLoopStmtsFor(CT);
-    For* mi = loops[1];
-    For* no = loops[2];
+    ForPtr mi = loops[1];
+    ForPtr no = loops[2];
     loop.reorderAxis(mi, no);
   }
   // mo, no, mi, ni, k ->
   // mo, no, mi, k, ni
   {
     auto const& loops = loop.getLoopStmtsFor(CT);
-    For* ni = loops[3];
-    For* k = loops[4];
+    ForPtr ni = loops[3];
+    ForPtr k = loops[4];
     loop.reorderAxis(ni, k);
   }
   // mo, no, mi, k, ni ->
   // mo, no, k, mi, ni
   {
     auto const& loops = loop.getLoopStmtsFor(CT);
-    For* mi = loops[2];
-    For* k = loops[3];
+    ForPtr mi = loops[2];
+    ForPtr k = loops[3];
     loop.reorderAxis(mi, k);
   }
   {
@@ -3039,7 +3022,7 @@ TEST(MemDependency, MemDependencyCheckerComputeGEMM) {
 
   // Test both unlowered and lowered form.
   {
-    Stmt* stmt = IRSimplifier::simplify(loop.root_stmt());
+    StmtPtr stmt = IRSimplifier::simplify(loop.root_stmt());
     stmt->accept(&analyzer_unlowered);
 
     // Outputs depend on inputs.
@@ -3083,7 +3066,7 @@ TEST(MemDependency, MemDependencyCheckerComputeGEMM) {
 
   // now check lowered dependency graph.
   {
-    Stmt* stmt = IRSimplifier::simplify(loop.root_stmt());
+    StmtPtr stmt = IRSimplifier::simplify(loop.root_stmt());
     stmt->accept(&analyzer_lowered);
 
     // Lowering will change the dimensionality of all bounds due to index
@@ -3149,18 +3132,19 @@ TEST(MemDependency, MemDependencyCheckerComputeGEMM) {
             history_before[i]->bounds(), history_after[i]->bounds()));
       } else {
         ASSERT_EQ(history_after[i]->bounds().size(), 1);
-        const Expr* flat_bounds = new IntImm(1);
+        ExprPtr flat_bounds = alloc<IntImm>(1);
 
         for (auto& b : history_before[i]->bounds()) {
-          flat_bounds = new Mul(flat_bounds, new Add(b.end, new IntImm(1)));
+          flat_bounds =
+              alloc<Mul>(flat_bounds, alloc<Add>(b.end, alloc<IntImm>(1)));
 
           // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
           ASSERT_TRUE(exprEquals(b.start, history_after[i]->bounds()[0].start));
         }
 
         flat_bounds = IRSimplifier::simplify(flat_bounds);
-        const Expr* after_bounds = IRSimplifier::simplify(
-            new Add(history_after[i]->bounds()[0].end, new IntImm(1)));
+        ExprPtr after_bounds = IRSimplifier::simplify(
+            alloc<Add>(history_after[i]->bounds()[0].end, alloc<IntImm>(1)));
         ASSERT_TRUE(exprEquals(flat_bounds, after_bounds));
       }
     }

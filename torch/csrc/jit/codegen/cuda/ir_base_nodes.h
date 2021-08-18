@@ -167,8 +167,7 @@ class TORCH_CUDA_CU_API Statement : public NonCopyable, public PolymorphicBase {
  */
 class TORCH_CUDA_CU_API Val : public Statement {
  public:
-  // NOLINTNEXTLINE(modernize-use-override)
-  virtual ~Val() = default;
+  ~Val() override = default;
 
   Val() = delete;
 
@@ -223,8 +222,7 @@ class TORCH_CUDA_CU_API Val : public Statement {
   Expr* getOrigin();
   const Expr* getOrigin() const;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-explicit-virtual-functions,clang-diagnostic-inconsistent-missing-override,modernize-use-override)
-  virtual bool sameType(const Statement* other) {
+  bool sameType(const Statement* other) override {
     return Statement::sameType(other) &&
         getDataType() == other->as<Val>()->getDataType();
   }
@@ -297,8 +295,7 @@ class TORCH_CUDA_CU_API Expr : public Statement {
   Expr() = delete;
   explicit Expr(ExprType _type);
   Expr(const Expr* src, IrCloner* ir_cloner);
-  // NOLINTNEXTLINE(modernize-use-override)
-  virtual ~Expr() = default;
+  ~Expr() override = default;
 
   Expr(const Expr& other) = delete;
   Expr& operator=(const Expr& other) = delete;

@@ -3,7 +3,8 @@ from tools.codegen.api.types import (BaseCType, Binding, ConstRefCType,
                                      Expr, MutRefCType, OptionalCType,
                                      NamedCType, SpecialArgName, tensorT,
                                      memoryFormatT, tensorOptionsT, scalarTypeT,
-                                     boolT, deviceT, layoutT, optionalTensorRefT)
+                                     boolT, deviceT, layoutT, optionalTensorRefT,
+                                     scalarT, optionalScalarRefT)
 
 # This file implements a small program synthesis engine that implements
 # conversions between one API to another.
@@ -97,6 +98,10 @@ def translate(
         if t.type == ConstRefCType(OptionalCType(BaseCType(tensorT))):
             ctx[NamedCType(t.name, BaseCType(optionalTensorRefT))] = \
                 f'(({b.expr}.has_value() && (*{b.expr}).defined()) ? at::OptionalTensorRef(*{b.expr}) : at::OptionalTensorRef())'
+
+        if t.type == ConstRefCType(OptionalCType(BaseCType(scalarT))):
+            ctx[NamedCType(t.name, BaseCType(optionalScalarRefT))] = \
+                f'({b.expr}.has_value() ? at::OptionalScalarRef(&({b.expr}.value())) : at::OptionalScalarRef())'
 
     # Add implicit bindings if the generated code is inside a Tensor method
     if method:
