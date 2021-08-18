@@ -70,9 +70,11 @@ if not IS_WINDOWS:
     import torch.distributed.optim.post_localSGD_optimizer as post_localSGD_optimizer
     from torch.distributed.optim.functional_sgd import _FunctionalSGD
     from torch.distributed.optim.functional_adam import _FunctionalAdam
+    from torch.distributed.optim.functional_adamw import _FunctionalAdamW
     _SUPPORTED_OPTIM_MAPPING = {
         _FunctionalSGD: torch.optim.SGD,
-        _FunctionalAdam: torch.optim.Adam
+        _FunctionalAdam: torch.optim.Adam,
+        _FunctionalAdamW: torch.optim.AdamW,
     }
 
 from torch.utils.data.distributed import DistributedSampler
@@ -3998,6 +4000,32 @@ class DistributedTest:
                         list(ddp_model_with_optimizer_hook.parameters()),
                     )
                     dist.barrier()
+
+        @sandcastle_skip_if(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only Nccl & Gloo backend support DistributedDataParallel",
+        )
+        @sandcastle_skip_if(
+            IS_WINDOWS,
+            "FunctionalAdam not yet supported with Windows, see https://github.com/pytorch/pytorch/issues/62137"
+        )
+        @skip_if_lt_x_gpu(2)
+        @skip_if_rocm
+        def test_ddp_hook_with_optimizer_parity_adamw(self):
+            for grad_as_bucket_view, static_graph in itertools.product(
+                [True, False], [True, False]
+            ):
+                adamw_lr = 1e-2
+                adamw_betas = (0.9, 0.99)
+                adamw_eps = 1e-6
+                self._test_ddp_hook_with_optimizer_parity(
+                    grad_as_bucket_view,
+                    static_graph,
+                    _FunctionalAdamW,
+                    adamw_lr,
+                    betas=adamw_betas,
+                    eps=adamw_eps,
+                )
 
         @sandcastle_skip_if(
             BACKEND != "nccl" and BACKEND != "gloo",
