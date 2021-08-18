@@ -253,7 +253,7 @@ void slow_conv2d_forward(
 }
 
 void slow_conv2d_backward(
-    const Tensor &input_,
+    const Tensor &input,
     const Tensor &grad_output_,
     const Tensor &grad_input_,
     const Tensor &weight_,
@@ -263,7 +263,7 @@ void slow_conv2d_backward(
     int dH, int dW,
     int padH, int padW) {
   Tensor weight = new_view_weight_MM2d(weight_);
-  slow_conv2d_shape_check(input_, grad_output_, weight, {},
+  slow_conv2d_shape_check(input, grad_output_, weight, {},
                           kH, kW, dH, dW, padH, padW, /*weight_nullable=*/false);
 
   // Params
@@ -271,15 +271,12 @@ void slow_conv2d_backward(
   int nInputPlane = weight_sizes.size() == 2 ? weight_sizes[1]/(kW*kH) : weight_sizes[1];
   int nOutputPlane = weight_sizes[0];
 
-  TORCH_INTERNAL_ASSERT(input_.is_contiguous());
   TORCH_INTERNAL_ASSERT(grad_output_.is_contiguous());
 
-  Tensor input = input_;
   Tensor grad_output = grad_output_;
-  const bool is_batched = input_.dim() == 4;
+  const bool is_batched = input.dim() == 4;
   if (!is_batched) {
     // Force batch
-    input = input_.unsqueeze(0);
     grad_output = grad_output_.unsqueeze(0);
   }
 
@@ -294,7 +291,7 @@ void slow_conv2d_backward(
   int64_t batchSize = input_sizes[0];
 
   // Resize output
-  resize_output(grad_input_, input_.sizes());
+  resize_output(grad_input_, input_sizes);
   TORCH_CHECK(grad_input_.is_contiguous(), "grad_input must be contiguous");
   const auto grad_input = is_batched ? grad_input_ : grad_input_.unsqueeze(0);
 
@@ -519,8 +516,9 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv2d_forward_cuda(
       self, weight, kernel_size, bias, stride, padding, output, finput, fgrad_input);
 }
 
-std::tuple<Tensor&, Tensor&, Tensor&> slow_conv2d_backward_out_cuda(const Tensor& grad_output,
-    const Tensor& self,
+std::tuple<Tensor&, Tensor&, Tensor&> slow_conv2d_backward_out_cuda(
+    const Tensor& grad_output_,
+    const Tensor& self_,
     const Tensor& weight_,
     IntArrayRef kernel_size,
     IntArrayRef stride,
@@ -538,12 +536,13 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv2d_backward_out_cuda(const Tensor
     resize_output(grad_bias, {weight_.sizes()[0]});
     grad_bias.zero_();
   }
+  auto grad_output = grad_output_.expect_contiguous();
   if (grad_input.defined()) {
     resize_output(grad_input, self.sizes());
     auto weight = weight_.expect_contiguous();
 
     slow_conv2d_backward(
-        self, grad_output,
+        self_, *grad_output,
         grad_input, *weight,
         finput, fgrad_input,
         kernel_size[0], kernel_size[1],
@@ -551,9 +550,10 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv2d_backward_out_cuda(const Tensor
         padding[0], padding[1]);
   }
   if (grad_weight.defined() || grad_bias.defined()) {
+    auto self = self_.expect_contiguous();
     slow_conv2d_grad_weight_bias(
-        self,
-        grad_output,
+        *self,
+        *grad_output,
         grad_weight,
         grad_bias,
         finput,
