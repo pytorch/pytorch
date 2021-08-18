@@ -268,9 +268,14 @@ class GraphModule(torch.nn.Module):
 
         self.graph = graph
 
-        # Store the Tracer class responsible for creating a Graph separately,
-        # because torch.package will serialize a GraphModule without retaining the Graph.
-        self._tracer_cls = self.graph._tracer_cls
+        # Store the Tracer class responsible for creating a Graph separately as part of the
+        # GraphModule state, except when the Tracer is defined in a local namespace.
+        # Locally defined Tracers are not pickleable. This is needed because torch.package will
+        # serialize a GraphModule without retaining the Graph, and needs to use the correct Tracer
+        # to re-create the Graph during deserialization.
+        self._tracer_cls = None
+        if self.graph._tracer_cls and '<locals>' not in self.graph._tracer_cls.__qualname__:
+            self._tracer_cls = self.graph._tracer_cls
 
     # TorchScript breaks trying to compile the graph setter because of the
     # continued string literal. Issue here: https://github.com/pytorch/pytorch/issues/44842
@@ -571,21 +576,23 @@ class {module_name}(torch.nn.Module):
     # define their own Tracer (extending fx.Tracer).
     def __reduce_deploy__(self, importer: Importer):
         dict_without_graph = self.__dict__.copy()
+        dict_without_graph['_graphmodule_cls_name'] = self.__class__.__name__
+        del dict_without_graph['_graph']
+
         python_code = self.recompile()
         import_block = _format_import_block(python_code.globals, importer)
-        del dict_without_graph['_graph']
         return (reduce_deploy_graph_module, (dict_without_graph, import_block))
 
     def __reduce_package__(self, exporter: PackageExporter):
+        dict_without_graph = self.__dict__.copy()
+        dict_without_graph['_graphmodule_cls_name'] = self.__class__.__name__
+        del dict_without_graph['_graph']
+
         generated_module_name = f'fx-generated._{exporter.get_unique_id()}'
         python_code = self.recompile()
         import_block = _format_import_block(python_code.globals, exporter.importer)
         module_code = import_block + self.code
         exporter.save_source_string(generated_module_name, module_code)
-
-        dict_without_graph = self.__dict__.copy()
-        dict_without_graph['_graphmodule_cls_name'] = self.__class__.__name__
-        del dict_without_graph['_graph']
         return (reduce_package_graph_module, (dict_without_graph, generated_module_name))
 
     def __reduce__(self):

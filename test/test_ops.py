@@ -706,7 +706,7 @@ class TestJit(JitCommonTestCase):
             variants = {'method': getattr(torch.Tensor, op.name)}
             samples = op.sample_inputs(device, dtype, requires_grad=False)
 
-        support_script = not op.skip_jit_scripting
+        support_script = op.supports_scripting
 
         tested = False
         for sample in samples:
