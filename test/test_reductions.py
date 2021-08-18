@@ -58,7 +58,7 @@ def _rand_shape(dim, min_size, max_size):
     return tuple(shape)
 
 def _reduced_shape(shape, dim=None, keepdim=False):
-    """Reduces the given dimensions of the input shape
+    """Computes the expected reduced shape given dim and keepdim
 
     Args:
         shape: The shape to reduce
@@ -84,7 +84,6 @@ def _reduced_shape(shape, dim=None, keepdim=False):
             result.append(1)
 
     return result
-
 
 class TestReductions(TestCase):
 
@@ -200,10 +199,12 @@ class TestReductions(TestCase):
             self._test_dim_keepdim(op, device, ndim=2, dim=2)
 
     @ops(reduction_ops, dtypes=OpDTypes.none)
-    def test_dim_offbounds_keepdim(self, device, op: ReductionOpInfo):
-        """Tests that passing an off-bounds dim and keepdim=True throws"""
-        with self.assertRaises(IndexError):
-            self._test_dim_keepdim(op, device, ndim=2, dim=2, keepdim=True)
+    def test_dim_ndim_limit(self, device, op: ReductionOpInfo):
+        """Tests that an exception is raised when reducing a tensor with more
+        than 64 dims along some specific dimensions. dim=None is ok"""
+        t = make_tensor([1] * 65, device, torch.float)
+        with self.assertRaisesRegex(RuntimeError, "only tensors with up to 64 dims are supported"):
+            op(t, dim=0)
 
     @ops(filter(lambda op: op.identity is not None, reduction_ops), dtypes=OpDTypes.supported)
     def test_identity(self, device, dtype, op: ReductionOpInfo):
@@ -252,8 +253,10 @@ class TestReductions(TestCase):
             self.assertTrue(torch.is_floating_point(result.dtype))
         elif op.promotes_int_to_int64 and is_integral:
             self.assertEqual(result.dtype, torch.int64)
+        elif op.result_dtype is not None:
+            self.assertEqual(result.dtype, op.result_dtype)
         else:
-            self.assertEqual(result.dtype, op.result_dtype or dtype)
+            self.assertEqual(result.dtype, dtype)
 
     @ops(reduction_ops, dtypes=OpDTypes.none)
     def test_empty_tensor_empty_slice(self, device, op: ReductionOpInfo):
@@ -262,8 +265,7 @@ class TestReductions(TestCase):
         The rules for reducing over an empty slice are as follows:
             - Return the identity value if the operator has one
             - Otherwise, return NaN if the operator promotes integral dtype to
-              floating point dtypes and the result of the operation for the
-              given inputs is floating point dtype.
+              floating point dtypes.
             - Otherwise, raise an error
 
         See discussion here https://github.com/pytorch/pytorch/issues/61901
@@ -320,8 +322,8 @@ class TestReductions(TestCase):
     @ops(reduction_ops)
     def test_noncontiguous_all(self, device, dtype, op: ReductionOpInfo):
         """Tests reducing all dimensions of a noncontiguous tensor."""
-        t = make_tensor((10, 10), device, dtype)
-        self._test_noncontiguous(op, t[1::2, :-2:3])
+        t = make_tensor((5, 5, 5), device, dtype)
+        self._test_noncontiguous(op, t[::2, 1::2, :-1:3])
 
     @ops(reduction_ops)
     def test_noncontiguous_transposed(self, device, dtype, op: ReductionOpInfo):
@@ -332,12 +334,14 @@ class TestReductions(TestCase):
     @ops(reduction_ops)
     def test_noncontiguous_expanded(self, device, dtype, op: ReductionOpInfo):
         """Tests reducing a tensor with expanded singleton dimensions."""
-        t = make_tensor((10, 10), device, dtype)
+        t = make_tensor((3, 2), device, dtype)
         self._test_noncontiguous(op, t.unsqueeze(1).expand(-1, 5, -1))
 
     # NumPy does not support BFloat16 so we don't test that against reference
     # implementations. We also don't compare dtypes or test for different
     # keepdim because we already have other tests covering those.
+    # The test_reference_testing in test_ops.py only uses the samples from
+    # sample_inputs_func which do not test as exhaustively as these tests.
 
     def _test_ref(self, op: ReductionOpInfo, t: torch.Tensor, **reduction_kwargs):
         """Compares op against op.ref for the given input and reduction kwargs"""
@@ -356,31 +360,51 @@ class TestReductions(TestCase):
     @ops(filter(lambda op: op.ref is not None, reduction_ops),
          allowed_dtypes=get_all_dtypes(include_bfloat16=False))
     def test_ref_small_input(self, device, dtype, op: ReductionOpInfo):
-        """Compares op against reference for many small random input tensors"""
-        def make(*size):
-            return make_tensor(size, device, dtype)
-
-        self._test_ref(op, make(32))
-        self._test_ref(op, make(5, 2, 4, 3))
-        self._test_ref(op, make(5, 2, 4, 3), dim=0)
-        self._test_ref(op, make(5, 2, 4, 3), dim=-1)
-
+        """Compares op against reference for small input tensors"""
+        t = make_tensor((8, 4, 1, 2), device, dtype, exclude_zero=True)
+        self._test_ref(op, t)
+        dims = [0, 1, -1]
         if op.supports_multiple_dims:
-            self._test_ref(op, make(10, 1, 7, 4), dim=(0, -1))
-            self._test_ref(op, make(10, 1, 7, 4), dim=(0, 1, 3))
+            dims += [[0, 2], [1, 3], [0, 2, 3]]
+        for dim in dims:
+            self._test_ref(op, t, dim=dim)
+
+    @ops(filter(lambda op: op.ref is not None, reduction_ops),
+         allowed_dtypes=[torch.float32])
+    def test_ref_large_input_1D(self, device, dtype, op: ReductionOpInfo):
+        """Compares op against reference for a large 1D input tensor to check stability"""
+        self._test_ref(op, make_tensor((2 ** 20,), device, dtype, low=-1, high=1, exclude_zero=True))
+
+    @ops(filter(lambda op: op.ref is not None, reduction_ops),
+         allowed_dtypes=[torch.float32])
+    def test_ref_large_input_2D(self, device, dtype, op: ReductionOpInfo):
+        """Compares op against reference for a large 2D input tensor to test parallelism"""
+        t = make_tensor((32, 2 ** 16), device, dtype, low=-1, high=1, exclude_zero=True)
+        self._test_ref(op, t, dim=1)
+
+    @ops(filter(lambda op: op.ref is not None, reduction_ops),
+         allowed_dtypes=[torch.float32])
+    def test_ref_large_input_64bit_indexing(self, device, dtype, op: ReductionOpInfo):
+        """Compares op against reference for a very large input tensor that requires 64 bit indexing"""
+        self._test_ref(op, make_tensor((275000000,), device, dtype, low=-1, high=1, exclude_zero=True))
 
     @ops(filter(lambda op: op.ref is not None, reduction_ops),
          allowed_dtypes=get_all_dtypes(include_bfloat16=False))
-    def test_ref_large_input(self, device, dtype, op: ReductionOpInfo):
-        """Compares op against reference for a very large input to check stability"""
-        self._test_ref(op, make_tensor((2 ** 20,), device, dtype))
+    def test_ref_duplicate_values(self, device, dtype, op: ReductionOpInfo):
+        """Compares op against reference for input tensors with duplicate values"""
+        t = make_tensor((8, 8), device, dtype, exclude_zero=True)
+        t[::2, ::2] = t[1::2, 1::2]
+        self._test_ref(op, t)
+        self._test_ref(op, t, dim=0)
+        self._test_ref(op, t, dim=1)
 
     @ops(filter(lambda op: op.ref is not None, reduction_ops),
-         allowed_dtypes=get_all_dtypes(include_bfloat16=False))
+         allowed_dtypes=[torch.float32, torch.complex64])
     def test_ref_extremal_values(self, device, dtype, op: ReductionOpInfo):
         """Compares op against reference for input tensors with extremal values"""
-        t = make_tensor((10,), device, dtype)
-        for extremal in [nan, inf, -inf] if torch.is_floating_point(t) else [0, 1]:
+        t = make_tensor((10,), device, dtype, exclude_zero=True)
+        extremals = [0, 1] + [nan, inf, -inf] if torch.is_floating_point(t) else []
+        for extremal in extremals:
             t[5] = extremal
             self._test_ref(op, t)
 
