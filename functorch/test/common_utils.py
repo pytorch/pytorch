@@ -8,6 +8,9 @@ import itertools
 import torch
 from functorch import vmap
 import torch.utils._pytree as pytree
+from functorch_lagging_op_db import functorch_lagging_op_db
+from functorch_additional_op_db import additional_op_db
+from torch.testing._internal.common_methods_invocations import SkipInfo
 
 """
 Usage:
@@ -221,3 +224,31 @@ def get_fallback_and_vmap_exhaustive(op, arg_values, kwarg_values):
 
 def opinfo_in_dict(opinfo, d):
     return (opinfo.name in d) or (f'{opinfo.name}.{opinfo.variant_test_name}' in d)
+
+def xfail(op_name, variant_name=None, *, device_type=None, dtypes=None, expected_failure=True):
+    return (op_name, variant_name, device_type, dtypes, expected_failure)
+
+def skipOps(test_case_name, base_test_name, to_skip):
+    all_opinfos = functorch_lagging_op_db + additional_op_db
+    for xfail in to_skip:
+        op_name, variant_name, device_type, dtypes, expected_failure = xfail
+        if variant_name is None:
+            # match all variants
+            matching_opinfos = [o for o in all_opinfos if o.name == op_name]
+            assert len(matching_opinfos) >= 1, f"Couldn't find OpInfo for {xfail}"
+        else:
+            matching_opinfos = [o for o in all_opinfos
+                                if o.name == op_name and o.variant_test_name == variant_name]
+            assert len(matching_opinfos) >= 1, f"Couldn't find OpInfo for {xfail}"
+        for opinfo in matching_opinfos:
+            decorators = list(opinfo.decorators)
+            decorators.append(SkipInfo(test_case_name, base_test_name,
+                                       device_type=device_type, dtypes=dtypes,
+                                       expected_failure=True))
+            opinfo.decorators = tuple(decorators)
+
+    # This decorator doesn't modify fn in any way
+    def wrapped(fn):
+        return fn
+    return wrapped
+
