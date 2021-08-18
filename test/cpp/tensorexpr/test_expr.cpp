@@ -23,7 +23,6 @@ using namespace torch::jit::tensorexpr;
 
 using SimpleIRExprEval = ExprEval<SimpleIREvaluator>;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, BasicValueTest) {
   KernelScope kernel_scope;
   ExprHandle a = IntImm::make(2), b = IntImm::make(3);
@@ -32,7 +31,6 @@ TEST(Expr, BasicValueTest) {
   ASSERT_EQ(eval.value<int>(), 5);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, BasicValueTest02) {
   KernelScope kernel_scope;
   ExprHandle a(2.0f);
@@ -44,7 +42,6 @@ TEST(Expr, BasicValueTest02) {
   ASSERT_EQ(eval.value<float>(), -4.0f);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, LetTest01) {
   KernelScope kernel_scope;
   VarHandle x("x", kFloat);
@@ -54,7 +51,6 @@ TEST(Expr, LetTest01) {
   ASSERT_EQ(eval.value<float>(), 2 + (3 * 3 + 4));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, LetTest02) {
   KernelScope kernel_scope;
   VarHandle x("x", kFloat);
@@ -67,7 +63,6 @@ TEST(Expr, LetTest02) {
   ASSERT_EQ(eval.value<float>(), 2 + (3 * 3 + 4 * 6));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, LetStmtTest01) {
   KernelScope kernel_scope;
   Placeholder a_buf("a", kFloat, {1});
@@ -75,9 +70,9 @@ TEST(Expr, LetStmtTest01) {
 
   ExprHandle load_a = a_buf.load(0);
   VarHandle var = VarHandle("v", kFloat);
-  Stmt* let_store = Let::make(var, load_a);
-  Stmt* store_b = b_buf.store({0}, var);
-  Block* block = Block::make({let_store, store_b});
+  StmtPtr let_store = Let::make(var, load_a);
+  StmtPtr store_b = b_buf.store({0}, var);
+  BlockPtr block = Block::make({let_store, store_b});
 
   SimpleIREvaluator eval(block, {a_buf, b_buf});
 
@@ -92,7 +87,6 @@ TEST(Expr, LetStmtTest01) {
   ExpectAllNear(b_v, b_ref, 1e-5);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, IntTest) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -102,7 +96,6 @@ TEST(Expr, IntTest) {
   ASSERT_EQ(eval.value<int>(), 2 + (3 * 3 + 4));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, FloatTest) {
   KernelScope kernel_scope;
   VarHandle x("x", kFloat);
@@ -112,7 +105,6 @@ TEST(Expr, FloatTest) {
   ASSERT_EQ(eval.value<float>(), 2 + (3 * 3 + 4));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, ByteTest) {
   KernelScope kernel_scope;
   VarHandle x("x", kByte);
@@ -123,7 +115,6 @@ TEST(Expr, ByteTest) {
   ASSERT_EQ(eval.value<uint8_t>(), 2 + (3 * 3 + 4));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, CharTest) {
   KernelScope kernel_scope;
   VarHandle x("x", kChar);
@@ -134,7 +125,6 @@ TEST(Expr, CharTest) {
   ASSERT_EQ(eval.value<int8_t>(), 2 + (3 * 3 + 4));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, ShortTest) {
   KernelScope kernel_scope;
   VarHandle x("x", kShort);
@@ -145,7 +135,6 @@ TEST(Expr, ShortTest) {
   ASSERT_EQ(eval.value<int16_t>(), 2 + (3 * 3 + 4));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, LongTest) {
   KernelScope kernel_scope;
   VarHandle x("x", kLong);
@@ -156,7 +145,6 @@ TEST(Expr, LongTest) {
   ASSERT_EQ(eval.value<int64_t>(), 2 + (3 * 3 + 4));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, HalfTest) {
   KernelScope kernel_scope;
   VarHandle x("x", kHalf);
@@ -167,7 +155,6 @@ TEST(Expr, HalfTest) {
   ASSERT_EQ(eval.value<at::Half>(), 2 + (3 * 3 + 4));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, DoubleTest) {
   KernelScope kernel_scope;
   VarHandle x("x", kDouble);
@@ -178,7 +165,6 @@ TEST(Expr, DoubleTest) {
   ASSERT_EQ(eval.value<double>(), 2 + (3 * 3 + 4));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, VectorAdd01) {
   KernelScope kernel_scope;
   const int kVectorSize = 8;
@@ -203,9 +189,9 @@ TEST(Expr, VectorAdd01) {
   ExprHandle load_b =
       b_buf.load({Ramp::make(index * kVectorSize, 1, kVectorSize)});
   ExprHandle value = load_a + load_b;
-  Stmt* store_c =
+  StmtPtr store_c =
       c_buf.store({Ramp::make(index * kVectorSize, 1, kVectorSize)}, value);
-  Stmt* stmt = For::make(index, 0, kVectorCount, store_c);
+  StmtPtr stmt = For::make(index, 0, kVectorCount, store_c);
 
   ASSERT_EQ(load_a.dtype(), Dtype(kFloat, kVectorSize));
   ASSERT_EQ(load_b.dtype(), Dtype(kFloat, kVectorSize));
@@ -225,7 +211,6 @@ TEST(Expr, VectorAdd01) {
   ExpectAllNear(c_v, c_ref, 1e-5);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, CompareSelectEQ) {
   KernelScope kernel_scope;
   constexpr int N = 1024;
@@ -259,7 +244,6 @@ TEST(Expr, CompareSelectEQ) {
   assertAllEqual(c_buffer, 1);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, CompareSelectDtypes) {
   // LHS and RHS expressions should have the same dtype, but this dtype could
   // differ from the dtype of the return values (but dtypes of true and false
@@ -305,7 +289,6 @@ TEST(Expr, CompareSelectDtypes) {
   ExpectAllNear(c_buffer, c_ref, 1e-7);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, IntrinsicsDtypes) {
   KernelScope kernel_scope;
   constexpr int N = 256;
@@ -328,18 +311,18 @@ TEST(Expr, IntrinsicsDtypes) {
   ExpectAllNear(b_buffer, b_ref, 1e-7);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, Substitute01) {
   KernelScope kernel_scope;
-  const Var* x = new Var("x", kFloat);
-  const Var* y = new Var("y", kFloat);
-  const Expr* e = new Mul(new Sub(x, new FloatImm(1.0f)), new Add(x, y));
+  VarPtr x = alloc<Var>("x", kFloat);
+  VarPtr y = alloc<Var>("y", kFloat);
+  ExprPtr e =
+      alloc<Mul>(alloc<Sub>(x, alloc<FloatImm>(1.0f)), alloc<Add>(x, y));
 
-  const Var* z = new Var("z", kFloat);
-  const Expr* e2 = Substitute(e, {{x, new Add(z, new FloatImm(5.0f))}});
-  const Expr* e2_ref = new Mul(
-      new Sub(new Add(z, new FloatImm(5.0f)), new FloatImm(1.0f)),
-      new Add(new Add(z, new FloatImm(5.0f)), y));
+  VarPtr z = alloc<Var>("z", kFloat);
+  ExprPtr e2 = Substitute(e, {{x, alloc<Add>(z, alloc<FloatImm>(5.0f))}});
+  ExprPtr e2_ref = alloc<Mul>(
+      alloc<Sub>(alloc<Add>(z, alloc<FloatImm>(5.0f)), alloc<FloatImm>(1.0f)),
+      alloc<Add>(alloc<Add>(z, alloc<FloatImm>(5.0f)), y));
   std::ostringstream oss;
   oss << *e2;
   std::string e2_str = oss.str();
@@ -350,7 +333,6 @@ TEST(Expr, Substitute01) {
   ASSERT_EQ(e2_str, e2_ref_str);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, Math01) {
   KernelScope kernel_scope;
   ExprHandle v = sin(ExprHandle(1.0f));
@@ -365,7 +347,6 @@ TEST(Expr, Math01) {
   ASSERT_NEAR(res, v_ref, 1e-6);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, UnaryMath01) {
   KernelScope kernel_scope;
   struct TestConfig {
@@ -434,7 +415,6 @@ TEST(Expr, UnaryMath01) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, BinaryMath01) {
   KernelScope kernel_scope;
   struct TestConfig {
@@ -459,7 +439,6 @@ TEST(Expr, BinaryMath01) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, LogicalOps01) {
   KernelScope kernel_scope;
   ExprHandle a(23);
@@ -493,7 +472,6 @@ TEST(Expr, LogicalOps01) {
   ASSERT_EQ(eval8.value<int>(), 1);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, LogicalOps02) {
   KernelScope kernel_scope;
   ExprHandle a(23);
@@ -513,7 +491,6 @@ TEST(Expr, LogicalOps02) {
   ASSERT_EQ(eval2.value<int>(), 1);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, LogicalOps03) {
   KernelScope kernel_scope;
   ExprHandle a(23);
@@ -572,7 +549,6 @@ TEST(Expr, LogicalOps03) {
   ASSERT_EQ(eval12.value<uint8_t>(), 1);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, BitwiseOps) {
   KernelScope kernel_scope;
   ExprHandle a(59);
@@ -585,7 +561,6 @@ TEST(Expr, BitwiseOps) {
   ASSERT_EQ(eval.value<int>(), 11);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, DynamicShapeAdd) {
   KernelScope kernel_scope;
   auto testWithSize = [](int32_t size) {
@@ -594,7 +569,7 @@ TEST(Expr, DynamicShapeAdd) {
     Placeholder b(BufHandle("b", {n}, kFloat));
     Placeholder c(BufHandle("c", {n}, kFloat));
     VarHandle i("i", kInt);
-    Stmt* s = For::make(i, 0, n, c.store({i}, a.load(i) + b.load(i)));
+    StmtPtr s = For::make(i, 0, n, c.store({i}, a.load(i) + b.load(i)));
     std::vector<float> aData(size, 1.0f);
     std::vector<float> bData(size, 2.0f);
     std::vector<float> cData(size, 0.0f);
@@ -612,11 +587,11 @@ void testCond01() {
   PaddedBuffer<float> a_v(N);
   Placeholder a_buf("a", kFloat, {N});
   VarHandle index = VarHandle("index", kInt);
-  Stmt* assign_x2 = a_buf.store({index}, cast<float>(index) * 2);
-  Stmt* assign_x3 = a_buf.store({index}, cast<float>(index) * 3);
+  StmtPtr assign_x2 = a_buf.store({index}, cast<float>(index) * 2);
+  StmtPtr assign_x3 = a_buf.store({index}, cast<float>(index) * 3);
   ExprHandle even_cond = CompareSelect::make(Mod::make(index, 2), 0, kEQ);
-  Stmt* assign = Cond::make(even_cond, assign_x2, assign_x3);
-  Stmt* for_stmt = For::make(index, 0, N, assign);
+  StmtPtr assign = Cond::make(even_cond, assign_x2, assign_x3);
+  StmtPtr for_stmt = For::make(index, 0, N, assign);
   SimpleIREvaluator(for_stmt, {a_buf})(a_v);
 
   PaddedBuffer<float> a_ref(N);
@@ -673,10 +648,10 @@ void testStmtClone() {
 
   Placeholder a_buf("a", kInt, {N});
   VarHandle index = VarHandle("index", kInt);
-  Stmt* body = a_buf.store({index}, 5);
-  Stmt* loop = For::make(index, 0, N, body);
+  StmtPtr body = a_buf.store({index}, 5);
+  StmtPtr loop = For::make(index, 0, N, body);
 
-  Stmt* cloned_loop = Stmt::clone(loop);
+  StmtPtr cloned_loop = Stmt::clone(loop);
   std::vector<int> orig_loop_results(N);
   std::vector<int> cloned_loop_results(N);
   SimpleIREvaluator(loop, {a_buf})(orig_loop_results);
@@ -687,9 +662,8 @@ void testStmtClone() {
 
   // Let's add another assign to the body in the cloned loop and verify that the
   // original statement hasn't changed while the cloned one has.
-  Stmt* body_addition = a_buf.store({index}, 33);
-  Block* cloned_body =
-      static_cast<Block*>(static_cast<const For*>(cloned_loop)->body());
+  StmtPtr body_addition = a_buf.store({index}, 33);
+  BlockPtr cloned_body = static_to<Block>(static_to<For>(cloned_loop)->body());
   cloned_body->append_stmt(body_addition);
 
   std::vector<int> orig_loop_results_after_mutation(N);

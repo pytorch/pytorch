@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/runtime/static/impl.h>
 
+#include <ATen/MemoryOverlap.h>
 #include <ATen/core/interned_strings.h>
 #include <c10/core/CPUAllocator.h>
 #include <c10/core/InferenceMode.h>
@@ -8,6 +9,7 @@
 #include <caffe2/core/timer.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
+#include <torch/csrc/jit/passes/concat_opt.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
@@ -19,6 +21,36 @@
 
 namespace torch {
 namespace jit {
+
+// graph must be frozen or canEnableStaticRuntime would return false if there's
+// any prim::CallMethod op left in the graph
+bool canEnableStaticRuntime(const std::shared_ptr<torch::jit::Graph>& graph) {
+  // check for sub-blocks
+  bool can_support = true;
+  bool has_blocks = false;
+  for (auto* node : graph->block()->nodes()) {
+    if (node->blocks().size() > 0) {
+      has_blocks = true;
+      VLOG(1) << "Found nested sub-blocks in graph at node: "
+              << PrintNode(node);
+    }
+    if (node->kind() == prim::Constant) {
+      continue;
+    }
+    // check if can get op from Node
+    const Operator* op = node->maybeOperator();
+    if (!op && !nativeOpIsRegistered(node->kind())) {
+      can_support = false;
+      LOG(WARNING) << "Found unsupported op: " << node->kind().toQualString();
+    }
+  }
+  if (has_blocks) {
+    LOG(WARNING)
+        << "Found nested sub-block in graph. Static Runtime doesn't support nested sub-blocks.";
+    can_support = false;
+  }
+  return can_support;
+}
 
 namespace {
 
@@ -33,6 +65,7 @@ void OptimizeGraph(
   ConstantPropagation(graph);
   EliminateDeadCode(graph);
   FuseInferenceOpsForSparseNN(graph);
+  UseVariadicCat(graph);
 
   // TODO: we can avoid this guard by moving operations
   // to exposed folders.
@@ -43,20 +76,6 @@ void OptimizeGraph(
   }
 #endif
   ConstantPropagation(graph);
-}
-
-bool CheckGraphEligibility(const std::shared_ptr<torch::jit::Graph>& graph) {
-  // check for sub-blocks
-  bool can_support = true;
-  for (auto* node : graph->block()->nodes()) {
-    for (Block* sub_block : node->blocks()) {
-      VLOG(1) << "Found nested sub-blocks in graph at node: "
-              << PrintNode(node);
-      can_support = false;
-    }
-  }
-
-  return can_support;
 }
 
 // remove unused input 0 from graph
@@ -256,11 +275,31 @@ LivenessMap GetLivenessMap(
   }
 
   for (const auto* node : graph->nodes()) {
-    for (const auto* input : node->inputs()) {
-      for (const auto* output : node->outputs()) {
+    auto inputs = node->inputs();
+    auto outputs = node->outputs();
+    for (const auto* input : inputs) {
+      for (const auto* output : outputs) {
         if (liveness_map.count(input) && liveness_map.count(output)) {
           liveness_map.at(input).insert(output);
           liveness_map.at(output).insert(input);
+        }
+      }
+    }
+    // All inputs should be alive at the same time.
+    for (size_t i = 0; i < inputs.size(); ++i) {
+      for (size_t j = 0; j < inputs.size(); ++j) {
+        if (liveness_map.count(inputs[i]) && liveness_map.count(inputs[j])) {
+          liveness_map.at(inputs[i]).insert(inputs[j]);
+          liveness_map.at(inputs[j]).insert(inputs[i]);
+        }
+      }
+    }
+    // All outputs should be alive at the same time.
+    for (size_t i = 0; i < outputs.size(); ++i) {
+      for (size_t j = 0; j < outputs.size(); ++j) {
+        if (liveness_map.count(outputs[i]) && liveness_map.count(outputs[j])) {
+          liveness_map.at(outputs[i]).insert(outputs[j]);
+          liveness_map.at(outputs[j]).insert(outputs[i]);
         }
       }
     }
@@ -463,14 +502,14 @@ GenerateSameStorageValues(
 void PrepareGraphForStaticModule(
     std::shared_ptr<torch::jit::Graph> graph,
     const StaticModuleOptions& opts) {
-  // TODO: call CheckGraphEligibility before trying to enable static runtime
-  TORCH_CHECK(CheckGraphEligibility(graph));
+  TORCH_CHECK(canEnableStaticRuntime(graph));
   OptimizeGraph(graph, opts);
 }
 
 std::pair<std::shared_ptr<Graph>, std::shared_ptr<Module>>
 PrepareForStaticModule(
     const torch::jit::Module& m,
+    bool is_frozen,
     const StaticModuleOptions& opts) {
   VLOG(1) << "StaticModuleOptions: cleanup_activations "
           << opts.cleanup_activations << ", enable_out_variant "
@@ -478,10 +517,14 @@ PrepareForStaticModule(
           << opts.optimize_memory << ", optimize_graph_output_memory"
           << opts.optimize_graph_output_memory;
 
-  auto module = m.copy();
-  module.eval();
-
-  auto module_ptr = std::make_shared<Module>(freeze_module(module));
+  std::shared_ptr<Module> module_ptr;
+  if (!is_frozen) {
+    auto module = m.copy();
+    module.eval();
+    module_ptr = std::make_shared<Module>(freeze_module(module));
+  } else {
+    module_ptr = std::make_shared<Module>(m.copy());
+  }
 
   Method method = module_ptr->get_method("forward");
   auto graph = module_ptr->get_method("forward").graph();
@@ -509,8 +552,9 @@ StaticModule::StaticModule(
 
 StaticModule::StaticModule(
     const torch::jit::Module& m,
+    bool is_frozen,
     const StaticModuleOptions& opts)
-    : StaticModule(PrepareForStaticModule(m, opts), opts) {}
+    : StaticModule(PrepareForStaticModule(m, is_frozen, opts), opts) {}
 
 StaticModule::StaticModule(
     std::pair<std::shared_ptr<torch::jit::Graph>, std::shared_ptr<Module>>
@@ -549,8 +593,7 @@ StaticModule::StaticModule(
   std::unordered_map<Value*, DefInfo> value_to_ssa_def;
 
   // N inputs map to the first N entries in storage
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  for (auto i = 0; i < graph_->inputs().size(); ++i) {
+  for (const auto i : c10::irange(graph_->inputs().size())) {
     Value* input = graph_->inputs()[i];
     value_to_ivalue[input] = nullptr;
     value_to_ssa_def[input] = std::make_pair(INPUT_VALUE, i);
@@ -659,7 +702,7 @@ StaticRuntime::StaticRuntime(const StaticModule& sm) : static_module_(sm) {
     nodes_[idx] = n_ref; // copy the node
     auto& n = nodes_[idx];
     // hook up the inputs
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
+
     for (const auto i : c10::irange(n.inputs().size())) {
       if (n.inputs()[i] == nullptr) {
         int node_idx = 0;
@@ -803,8 +846,7 @@ c10::IValue StaticRuntime::operator()(
   if (static_module_.num_outputs() > 1) {
     std::vector<c10::IValue> outputs;
     outputs.reserve(static_module_.num_outputs());
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    for (auto i = 0; i < static_module_.num_outputs(); ++i) {
+    for (const auto i : c10::irange(static_module_.num_outputs())) {
       // use move here. Otherwise, clean up outputs_[i] explicitly
       outputs.emplace_back(std::move(*outputs_[i]));
     }
@@ -823,7 +865,8 @@ void StaticRuntime::benchmark(
     const std::vector<c10::IValue>& args,
     const std::unordered_map<std::string, c10::IValue>& kwargs,
     const int warmup_runs,
-    const int main_runs) {
+    const int main_runs,
+    bool print_per_node_time) {
   float time_per_iter = benchmark_model(args, kwargs, warmup_runs, main_runs);
   std::cout << "Static runtime ms per iter: " << time_per_iter
             << ". Iters per second: " << 1000.0 / time_per_iter << std::endl;
@@ -831,11 +874,13 @@ void StaticRuntime::benchmark(
   IndividualMetrics results =
       benchmark_individual_ops(args, kwargs, warmup_runs, main_runs);
 
-  for (const auto i : c10::irange(nodes_.size())) {
-    const Node* node = nodes_[i].node();
-    std::cout << "Node #" << i << ": " << results.time_per_node[i]
-              << " ms/iter, ";
-    node->print(std::cout, 0, nullptr, false);
+  if (print_per_node_time) {
+    for (const auto i : c10::irange(nodes_.size())) {
+      const Node* node = nodes_[i].node();
+      std::cout << "Node #" << i << ": " << results.time_per_node[i]
+                << " ms/iter, ";
+      node->print(std::cout, 0, nullptr, false);
+    }
   }
 
   std::vector<std::pair<std::string, double>> time_per_node_type_vec{
@@ -913,10 +958,8 @@ float StaticRuntime::benchmark_model(
 bool display_ivalue(const IValue& iv) {
   if (iv.isTensor()) {
     std::cout << "Tensor " << iv.toTensor().toString() << " {";
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    for (auto i = 0; i < iv.toTensor().sizes().size(); ++i) {
+    for (const auto i : c10::irange(iv.toTensor().sizes().size())) {
       std::cout << iv.toTensor().sizes()[i];
-      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       if (iv.toTensor().sizes().size() > i + 1) {
         std::cout << ", ";
       }
@@ -948,16 +991,14 @@ bool display_ivalue(const IValue& iv) {
 void display_pnode_info(const ProcessedNode& pnode) {
   pnode.node()->print(std::cout, 0, nullptr, false);
   const std::vector<const IValue*>& inputs = pnode.inputs();
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  for (auto i = 0; i < inputs.size(); ++i) {
+  for (const auto i : c10::irange(inputs.size())) {
     std::cout << "\ti" << i << ": ";
     if (!display_ivalue(*inputs[i])) {
       std::cout << *(pnode.node()->inputs()[i]->type()) << '\n';
     }
   }
   const std::vector<IValue>& outputs = pnode.outputs();
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  for (auto i = 0; i < outputs.size(); ++i) {
+  for (const auto i : c10::irange(outputs.size())) {
     std::cout << "\to" << i << ": ";
     if (!display_ivalue(outputs[i])) {
       std::cout << *(pnode.node()->outputs()[i]->type()) << '\n';
@@ -1207,7 +1248,6 @@ MemoryPlanner::MemoryPlanner(
   if (enable_out_variant) {
     for (ProcessedNode& pnode : runtime->nodes()) {
       if (pnode.has_out_variant()) {
-        // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
         for (const auto i : c10::irange(pnode.outputs().size())) {
           const Value* out_v = pnode.node()->outputs()[i];
           if (external_values.count(out_v)) {
@@ -1230,7 +1270,6 @@ MemoryPlanner::MemoryPlanner(
   // collect unmanaged output ivalues
   std::unordered_set<IValue*> unmanaged_ivalues;
   for (ProcessedNode& pnode : runtime->nodes()) {
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (const auto i : c10::irange(pnode.outputs().size())) {
       // Types are stored in the underlying TorchScript IR
       const Value* out_v = pnode.node()->outputs()[i];
@@ -1357,13 +1396,13 @@ ProcessedNode::ProcessedNode(
   }
   {
     const Operator& op = node->getOperator();
-    TORCH_CHECK(op.hasOperation());
     op_ = op.getOperation(node);
     VLOG(1) << "Fallback interpreter for node: " << PrintNode(node);
   }
 }
 
 void ProcessedNode::run() {
+  DCHECK(verify_outputs_not_overlapping_with_immutable_inputs());
   if (fn_) {
     fn_(this);
   } else if (native_fn_) {
@@ -1371,9 +1410,13 @@ void ProcessedNode::run() {
   } else {
     std::vector<IValue> stack;
     const size_t size = node_->inputs().size();
-    stack.reserve(size);
+    stack.reserve(size + 1);
     for (const auto i : c10::irange(size)) {
       stack.emplace_back(Input(i));
+    }
+    // Need to store the number of inputs in stack for variadic ops.
+    if (hasVarArgs(node_)) {
+      stack.emplace_back(static_cast<int>(size));
     }
 
     DCHECK(op_);
@@ -1384,6 +1427,31 @@ void ProcessedNode::run() {
       Output(i) = std::move(stack[i]);
     }
   }
+}
+
+bool ProcessedNode::verify_outputs_not_overlapping_with_immutable_inputs()
+    const {
+  auto schema = node()->maybeSchema();
+  if (!schema || schema->is_mutable()) {
+    return true;
+  }
+  for (const IValue* in : inputs_) {
+    if (!in->isTensor()) {
+      continue;
+    }
+    const auto& in_t = in->toTensor();
+    for (const IValue& out : outputs_) {
+      if (!out.isTensor()) {
+        continue;
+      }
+      const auto& out_t = out.toTensor();
+      at::MemOverlapStatus status = at::get_overlap_status(in_t, out_t);
+      if (status != at::MemOverlapStatus::NO) {
+        return false;
+      }
+    }
+  }
+  return true;
 }
 
 } // namespace jit

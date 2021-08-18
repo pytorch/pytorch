@@ -6,21 +6,17 @@
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(FC, FullyConnectedOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_GRADIENT_OPERATOR(
     FCGradient,
     FullyConnectedGradientOp<CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     FCTransposed,
     FullyConnectedOp<
         CPUContext,
         DefaultEngine,
         false /* don't transpose weight */>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_GRADIENT_OPERATOR(
     FCTransposedGradient,
     FullyConnectedGradientOp<
@@ -29,7 +25,6 @@ REGISTER_CPU_GRADIENT_OPERATOR(
         false /* don't transpose weight */>);
 
 using namespace std::placeholders;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(FCTransposed)
     .NumInputs(3)
     .NumOutputs(1)
@@ -43,7 +38,6 @@ FCTransposed stands for calling blass with no noTrans, noTrans
 )DOC")
     .InheritOnnxSchema();
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(FC)
     .NumInputs(3)
     .NumOutputs(1)
@@ -144,7 +138,6 @@ Y:
         "Output blob containing a 2D output matrix of shape $(M,N)$, where $M$ is the batch size and $N$ is the number of nodes in the layer. The output is calculated as $Y=XW^T+b$.")
     .InheritOnnxSchema("Gemm");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 GRADIENT_OPERATOR_SCHEMA(FCGradient)
     .NumInputs(3)
     .NumOutputs(2, 3)
@@ -153,7 +146,6 @@ GRADIENT_OPERATOR_SCHEMA(FCGradient)
     .CostInferenceFunction(
         // NOLINTNEXTLINE(modernize-avoid-bind)
         std::bind(CostInferenceForFCGradient, _1, _2, false));
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 GRADIENT_OPERATOR_SCHEMA(FCTransposedGradient)
     .NumInputs(3)
     .NumOutputs(2, 3)
@@ -179,9 +171,7 @@ class GetFCGradient : public GradientMakerBase {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(FC, GetFCGradient);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(FCTransposed, GetFCGradient);
 
 } // namespace

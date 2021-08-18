@@ -18,7 +18,11 @@ from .quantization_mappings import (
 )
 
 from .stubs import DeQuantStub, QuantWrapper
-from .qconfig import default_dynamic_qconfig, float16_dynamic_qconfig, float_qparams_weight_only_qconfig
+from .qconfig import (
+    add_module_to_qconfig_obs_ctr,
+    default_dynamic_qconfig,
+    float16_dynamic_qconfig,
+    float_qparams_weight_only_qconfig)
 
 def is_activation_post_process(module):
     return (isinstance(module, torch.quantization.ObserverBase) or
@@ -52,11 +56,13 @@ def _propagate_qconfig_helper(module, qconfig_dict, allow_list=None,
 
     torch.quantization.qconfig.assert_valid_qconfig(module_qconfig, module)
 
-    module.qconfig = module_qconfig
+    qconfig_with_device_check = add_module_to_qconfig_obs_ctr(module_qconfig, module)
+    module.qconfig = qconfig_with_device_check
+
     for name, child in module.named_children():
         module_prefix = prefix + '.' + name if prefix else name
         _propagate_qconfig_helper(child, qconfig_dict, allow_list,
-                                  module_qconfig, module_prefix)
+                                  qconfig_with_device_check, module_prefix)
 
 # TODO(jerryzh): expose allow_list
 def propagate_qconfig_(module, qconfig_dict=None, allow_list=None):
@@ -132,7 +138,8 @@ def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=No
         # We don't insert observer/fake_quantize for DeQuantStub
         if needs_observation(m) and not isinstance(m, DeQuantStub):
             # observer and hook will be gone after we swap the module
-            m.add_module('activation_post_process', get_activation_post_process(m.qconfig, device, special_act_post_process))
+            m.add_module('activation_post_process', get_activation_post_process(
+                m.qconfig, device, special_act_post_process))
             # Register observer as the first entry in the hook list
             # All post forward hooks are preserved and will be executed after the observer before convert
             handle = register_activation_post_process_hook(m)
