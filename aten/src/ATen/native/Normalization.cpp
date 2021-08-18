@@ -417,6 +417,22 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
   const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
 
   auto num_features = input.sizes()[1];
+
+  if (input.numel()==0){
+    Tensor reserve = at::empty({0}, input.options().dtype(kByte));
+    auto options = input.options().dtype(
+        at::toAccumulateType(input.scalar_type(), /*is_cuda=*/input.is_cuda()));
+    auto save_mean = at::empty({num_features}, options);
+    auto save_invstd = at::empty({num_features}, options);
+
+    //don't return view of input, don't return empty tensor because it will break gradient chain
+    auto out = input.clone();
+    if (weight.defined()) out = out * weight[0];
+    if (bias.defined()) out = out + bias[0];
+    return std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t>(
+        out, save_mean, save_invstd, reserve, 0);
+  }
+
   if (running_mean.defined()) {
     check_dims_match_num_input_features("running_mean", num_features, running_mean.numel());
   } else if (!training) {
@@ -501,6 +517,7 @@ std::tuple<Tensor, Tensor, Tensor> _batch_norm_impl_index_backward(
     int64_t impl_index,
     const Tensor& input, const Tensor& grad_output, const c10::optional<Tensor>& weight_opt /* optional */, const c10::optional<Tensor>& running_mean_opt /* optional */, const c10::optional<Tensor>& running_var_opt /* optional */, const c10::optional<Tensor>& save_mean_opt /* optional */, const c10::optional<Tensor>& save_var_transform_opt /* optional */,
     bool train, double epsilon, std::array<bool, 3> output_mask, const Tensor &reservedSpace) {
+
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
@@ -508,6 +525,27 @@ std::tuple<Tensor, Tensor, Tensor> _batch_norm_impl_index_backward(
   const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
   const Tensor& save_mean = c10::value_or_else(save_mean_opt, [] {return Tensor();});
   const Tensor& save_var_transform = c10::value_or_else(save_var_transform_opt, [] {return Tensor();});
+
+  if (input.numel()==0) {
+    int64_t num_batch = input.size(0);
+    int64_t num_feature = input.size(1);
+    std::vector<int64_t> dims{0, 2};
+
+    //don't return view of input, don't return empty tensor because it will break gradient chain
+    auto grad_input = grad_output.clone();
+    Tensor grad_weight;
+    Tensor grad_bias;
+    if (output_mask[2]) {
+      grad_bias = grad_input.view({num_batch, num_feature, -1}).sum(dims);
+    }
+    if (output_mask[1]) {
+      grad_weight = (grad_input.view({num_batch, num_feature, -1}) * input).sum(dims);
+    }
+    if (output_mask[0] && weight.defined()) {
+      grad_input = grad_input * weight[0];
+    }
+    return std::make_tuple(grad_input, grad_weight, grad_bias);
+  }
 
   // backward in inference mode is not supported in cudnn, fallback to native
   // TODO: verify the same thing in miopen
