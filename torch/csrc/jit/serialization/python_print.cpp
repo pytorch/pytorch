@@ -1169,8 +1169,10 @@ struct PythonPrintImpl {
           // calculate how many args are specified.
           // see (https://github.com/pytorch/pytorch/pull/56079) for more
           // details.
-          size_t necessary_args =
+          auto specified_args =
               CalculateNecessaryArgs(schema.arguments(), node->inputs(), true);
+
+          auto necessary_args = specified_args.first + specified_args.second;
 
           size_t schema_idx = num_schema_args - 1;
           while (schema_idx >= 0) {
