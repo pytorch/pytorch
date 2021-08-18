@@ -9335,6 +9335,10 @@ and 1.
 0-D and 1-D tensors are returned as is. When input is a 2-D tensor this
 is equivalent to ``transpose(input, 0, 1)``.
 
+.. seealso::
+
+        :func:`torch.transpose`.
+
 Args:
     {input}
 
@@ -9358,8 +9362,6 @@ Example::
     tensor([[ 0.4875,  0.3938],
             [ 0.9158, -0.6929],
             [-0.5872,  0.6932]])
-
-See also :func:`torch.transpose`.
 """.format(**common_args))
 
 add_docstr(torch.flip,
@@ -9704,6 +9706,10 @@ The resulting :attr:`out` tensor shares its underlying storage with the
 :attr:`input` tensor, so changing the content of one would change the content
 of the other.
 
+.. seealso::
+
+        :func:`torch.t`.
+
 Args:
     {input}
     dim0 (int): the first dimension to be transposed
@@ -9719,8 +9725,6 @@ Example::
     tensor([[ 1.0028, -0.1669],
             [-0.9893,  0.7299],
             [ 0.5809,  0.4942]])
-
-See also :func:`torch.t`.
 """.format(**common_args))
 
 add_docstr(torch.triangular_solve,
