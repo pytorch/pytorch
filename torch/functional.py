@@ -356,7 +356,11 @@ def _maybe_convert_pad_specifier(pad_spec, arg_name, dtype, device):
             return (not dtype.is_floating_point) and (not dtype.is_complex)
 
         if is_int(dtype) and not is_int(pad_spec_tensor.dtype):
-            raise RuntimeError(f"Expected '{arg_name}' to be of integer type")
+            raise RuntimeError(f"torch.pad: Expected '{arg_name}' to be of integer type")
+        elif dtype.is_floating_point and pad_spec_tensor.dtype.is_complex:
+            raise RuntimeError(
+                f"torch.pad: Expected '{arg_name}' to be of floating point or integer type")
+
 
         pad_spec_tensor = pad_spec_tensor.to(dtype)
 
@@ -374,6 +378,12 @@ def pad(input, pad_width, mode='constant', *, constant_values=None, out=None):
     elements are filled with values according to the chosen padding mode.
     Padding can be added to the beginning of each dimension, called "before
     padding", and/or the end of each dimension, called "after padding".
+
+    .. note:: :func:`torch.pad` is a newer padding function that offers a
+        NumPy-compatible interface and fewer argument size restrictions
+        than :func:`torch.nn.functional.pad`. :func:`torch.pad` does not
+        yet offer all the functionality available in :func:`numpy.pad` or
+        :func:`torch.nn.functional.pad`, but it will in the future.
 
     Args:
         input (Tensor): Tensor to pad

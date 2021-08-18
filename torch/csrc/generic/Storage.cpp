@@ -145,7 +145,6 @@ static Py_ssize_t THPStorage_(length)(THPStorage *self)
 static PyObject * THPStorage_(get)(THPStorage *self, PyObject *index)
 {
   HANDLE_TH_ERRORS
-    std::cout << "in THPStorage_get" << std::endl;
   /* Integer index */
   if (THPUtils_checkLong(index)) {
     int64_t nindex = THPUtils_unpackLong(index);

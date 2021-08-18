@@ -2100,22 +2100,28 @@ def sample_inputs_index_put(op_info, device, dtype, requires_grad, **kwargs):
     return inputs
 
 def sample_inputs_pad(op_info, device, dtype, requires_grad, **kwargs):
-    inputs = [
-        SampleInput(
-            make_tensor((S, S, S), device, dtype, low=None, high=None, requires_grad=requires_grad),
-            args=(
-                10,
-            ),
-            kwargs=dict(mode='constant')),
-        SampleInput(
-            make_tensor((S, S, S, S), device, dtype, low=None, high=None, requires_grad=requires_grad),
-            args=(
-                ((1, 2), (3, 4), (5, 6), (7, 0)),
-            ),
-            kwargs=dict(
-                mode='constant',
-                constant_values=((-3, -2), (-1, 0), (1, 2), (3, 4)))),
-    ]
+    def make_input_tensor(size):
+        return make_tensor(
+            size, device, dtype, low=None, high=None,
+            requires_grad=requires_grad)
+
+    inputs = []
+
+    inputs.append(SampleInput(
+        make_input_tensor((S, S, S)),
+        args=(
+            10,
+        ),
+        kwargs=dict(mode='constant')))
+
+    inputs.append(SampleInput(
+        make_input_tensor((S, S, S, S)),
+        args=(
+            ((1, 2), (3, 4), (5, 6), (7, 0)),
+        ),
+        kwargs=dict(
+            mode='constant',
+            constant_values=((-3, -2), (-1, 0), (1, 2), (3, 4)))))
 
     return inputs
 

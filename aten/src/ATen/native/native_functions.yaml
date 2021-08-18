@@ -10564,7 +10564,7 @@
   variants: function
 
 - func: pad(Tensor self, Tensor pad_width, str mode='constant', *, Tensor? constant_values=None) -> Tensor
-  variants: function, method
+  variants: function
   dispatch:
     CPU, CUDA: pad
   device_check: NoCheck  # pad_width can only be on CPU, for better performance

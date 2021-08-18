@@ -5475,7 +5475,7 @@ else:
             input = make_tensor(input_size, device, dtype, low=-9, high=9)
             input_np = input.cpu().numpy()
 
-            result = input.pad(pad_width, mode, **kwargs).cpu()
+            result = torch.pad(input, pad_width, mode, **kwargs).cpu()
             result_np = torch.from_numpy(np.pad(input_np, pad_width, mode, **kwargs))
 
             msg = f'input_size: {input_size}, mode: {mode}, pad_width: {pad_width}, kwargs: {kwargs}'
@@ -5508,41 +5508,6 @@ else:
             else:
                 self.assertEqual(result, result_np, msg=msg)
 
-    # This test ensures that torch.pad's input and constant_values arg can have
-    # different dtypes, for mode='constant'. The result should match what we
-    # get if we cast constant_values to the input's dtype before the torch.pad
-    # call.
-    @onlyOnCPUAndCUDA
-    @dtypes(*torch.testing.get_all_dtypes())
-    def test_pad_constant_values_dtypes(self, device, dtype):
-        input = make_tensor((3, 3, 3), device, dtype, low=-9, high=9)
-        dtypes = torch.testing.get_all_dtypes()
-        sizes = [(), (1,), (2,), (1, 1), (1, 2), (input.dim(), 1), (input.dim(), 2)]
-        pad_widths = ((3, 4), (5, 6), (7, 8))
-
-        for constant_values_dtype, constant_values_size in product(dtypes, sizes):
-            constant_values = torch.zeros(constant_values_size, device=device, dtype=constant_values_dtype)
-
-            result_torch = input.pad(pad_widths, constant_values=constant_values).cpu()
-
-            result_torch_precast = input.pad(pad_widths, constant_values=constant_values.to(dtype)).cpu()
-            self.assertEqual(result_torch, result_torch_precast)
-
-            if torch.bfloat16 not in [dtype, constant_values_dtype]:
-                # numpy.pad has weird inconsistent support for dtype mismatches
-                # between the input and constant_values. Mismatches are
-                # supported in most cases, but when both of the following are
-                # conditions are true, numpy.pad throws an error
-                size_unsupported_condition = constant_values.size() in [torch.Size([input.dim(), 1]), torch.Size([input.dim(), 2])]
-                dtypes_unsupported_condition = constant_values_dtype.is_complex and not dtype.is_complex and (dtype != torch.bool)
-
-                if not size_unsupported_condition or not dtypes_unsupported_condition:
-                    result_numpy = torch.tensor(np.pad(
-                        input.cpu().numpy(),
-                        pad_widths,
-                        constant_values=constant_values.cpu().numpy()))
-                    self.assertEqual(result_torch, result_numpy)
-
     @onlyOnCPUAndCUDA
     @dtypes(*torch.testing.get_all_dtypes())
     def test_pad_errors(self, device, dtype):
@@ -5554,12 +5519,12 @@ else:
                 pad_width = torch.zeros(pad_width_size, device='cpu', dtype=pad_width_dtype)
 
                 if pad_width_dtype == torch.int64:
-                    input.pad(pad_width)
+                    torch.pad(input, pad_width)
                     if torch.bfloat16 not in [dtype, pad_width_dtype]:
                         np.pad(input.cpu().numpy(), pad_width.cpu().numpy())
                 else:
-                    with self.assertRaisesRegex(RuntimeError, r"Expected 'pad_width' to be Long dtype"):
-                        input.pad(pad_width)
+                    with self.assertRaisesRegex(RuntimeError, r"torch.pad: Expected 'pad_width' to be Long dtype"):
+                        torch.pad(input, pad_width)
 
                     if torch.bfloat16 not in [dtype, pad_width_dtype]:
                         # Numpy does support char, short, and int types, but torch.pad only supports long
@@ -5569,17 +5534,55 @@ else:
 
         # pad_width primitive type errors
         for pad_width in [0., (0.,), ((0, 0), (0, 0), (0., 0)), 1j, (1j,), ((0, 0), (0, 0), (1j, 0))]:
-            with self.assertRaisesRegex(RuntimeError, r"Expected 'pad_width' to be of integer type"):
-                input.pad(pad_width)
+            with self.assertRaisesRegex(RuntimeError, r"torch.pad: Expected 'pad_width' to be of integer type"):
+                torch.pad(input, pad_width)
 
             if dtype != torch.bfloat16:
                 with self.assertRaises(TypeError):
                     np.pad(input.cpu().numpy(), pad_width)
 
+        # constant_values primitives must be integers if dtype is an integer
+        if not dtype.is_floating_point and not dtype.is_complex:
+            for constant_values in [0., (1.,), ((0, 2.),), inf, nan, 1j, (5j,), ((1, 2j),)]:
+                with self.assertRaisesRegex(RuntimeError, r"torch.pad: Expected 'constant_values' to be of integer type"):
+                    torch.pad(input, 1, constant_values=constant_values)
+
+        # constant_values primitives cannot be complex if input isn't complex
+        if dtype.is_floating_point:
+            for constant_values in [1j, (5j,), ((1, 2j),)]:
+                with self.assertRaisesRegex(
+                        RuntimeError,
+                        r"torch.pad: Expected 'constant_values' to be of floating point or integer type"):
+                    torch.pad(input, 1, constant_values=constant_values)
+
+        # pad_width negative value error
+        for pad_width in [-2, (-5,), ((0, 0), (0, 0), (-10, 0)), torch.tensor(-1)]:
+            with self.assertRaisesRegex(RuntimeError, r"torch.pad: Expected 'pad_width' to be non-negative"):
+                torch.pad(input, pad_width)
+
         # constant_values should only be legal for mode='constant'
         for mode in ['empty']:
-            with self.assertRaisesRegex(RuntimeError, rf"Unsupported keyword argument for '{mode}' mode: constant_values"):
-                input.pad(0, mode=mode, constant_values=0)
+            with self.assertRaisesRegex(
+                    RuntimeError,
+                    rf"torch.pad: Unsupported keyword argument for '{mode}' mode: constant_values"):
+                torch.pad(input, 0, mode=mode, constant_values=0)
+
+    # This test ensures that torch.pad throws an error if input and
+    # tensor constant_values arg have different dtypes.
+    @onlyOnCPUAndCUDA
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_pad_errors_constant_values_dtypes(self, device, dtype):
+        input = make_tensor((3, 3, 3), device, dtype, low=-9, high=9)
+        dtypes = torch.testing.get_all_dtypes()
+        sizes = [(), (1,), (2,), (1, 1), (1, 2), (input.dim(), 1), (input.dim(), 2)]
+        pad_widths = ((3, 4), (5, 6), (7, 8))
+
+        for constant_values_dtype, constant_values_size in product(dtypes, sizes):
+            constant_values = torch.zeros(constant_values_size, device=device, dtype=constant_values_dtype)
+            if constant_values_dtype != dtype:
+                error_msg = r'torch.pad: Expected constant_values.dtype to match input.dtype'
+                with self.assertRaisesRegex(RuntimeError, error_msg):
+                    torch.pad(input, pad_widths, constant_values=constant_values)
 
     # Ensure proper device checking for tensor inputs to torch.pad
     @onlyOnCPUAndCUDA
@@ -5593,8 +5596,8 @@ else:
             for mode in modes:
                 pad_width = torch.tensor(1, device='cuda', dtype=torch.int64)
 
-                with self.assertRaisesRegex(RuntimeError, r"Expected 'pad_width' to be on CPU, but got cuda"):
-                    input.pad(pad_width, mode=mode)
+                with self.assertRaisesRegex(RuntimeError, r"torch.pad: Expected 'pad_width' to be on CPU, but got cuda"):
+                    torch.pad(input, pad_width, mode=mode)
 
     # Check that torch.pad throws an error for incorrect pad_width argument sizes
     @onlyOnCPUAndCUDA
@@ -5648,10 +5651,10 @@ else:
             input = make_tensor(input_size, device, dtype, low=-9, high=9)
             pad_width = torch.zeros(pad_width_size, dtype=torch.int64, device='cpu')
             if should_error:
-                with self.assertRaisesRegex(RuntimeError, r'Expected pad_width.size\(\) to be either'):
-                    input.pad(pad_width)
+                with self.assertRaisesRegex(RuntimeError, r'torch.pad: Expected pad_width.size\(\) to be either'):
+                    torch.pad(input, pad_width)
             else:
-                input.pad(pad_width)
+                torch.pad(input, pad_width)
 
     @dtypes(*torch.testing.get_all_dtypes())
     def test_index_copy(self, device, dtype):

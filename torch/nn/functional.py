@@ -4105,6 +4105,12 @@ def affine_grid(theta: Tensor, size: List[int], align_corners: Optional[bool] = 
 def _pad(input: Tensor, pad: List[int], mode: str = "constant", value: float = 0.0) -> Tensor:
     r"""Pads tensor.
 
+    .. note:: :func:`torch.pad` is a newer padding function that offers a
+        NumPy-compatible interface and fewer argument size restrictions
+        than :func:`torch.nn.functional.pad`. :func:`torch.pad` does not
+        yet offer all the functionality available in :func:`numpy.pad` or
+        :func:`torch.nn.functional.pad`, but it will in the future.
+
     Padding size:
         The padding size by which to pad some dimensions of :attr:`input`
         are described starting from the last dimension and moving forward.

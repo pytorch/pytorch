@@ -22,8 +22,8 @@ Tensor _expand_pad_specifier(const Tensor& pad_spec, c10::string_view arg_name, 
     // size [], [1], [2] cases
     TORCH_CHECK(
       (pad_spec_ndim >= 0) && (pad_spec_ndim <= 2),
-      "Expected ", arg_name, ".size() to be either ",
-      "[], [1], [2], [1, 1], [1, 2], [self.dim(), 1], or [self.dim(), 2], but got ",
+      "torch.pad: Expected ", arg_name, ".size() to be either ",
+      "[], [1], [2], [1, 1], [1, 2], [input.dim(), 1], or [input.dim(), 2], but got ",
       pad_spec.sizes());
     return pad_spec.as_strided({ndim, 2}, {0, 0});
 
@@ -35,8 +35,8 @@ Tensor _expand_pad_specifier(const Tensor& pad_spec, c10::string_view arg_name, 
     // size [1, 1] and [1, 2] cases
     TORCH_CHECK(
       (pad_spec_ndim == 1) || ((pad_spec_ndim == 2) && (pad_spec.size(-1) == 2)),
-      "Expected ", arg_name, ".size() to be either ",
-      "[], [1], [2], [1, 1], [1, 2], [self.dim(), 1], or [self.dim(), 2], but got ",
+      "torch.pad: Expected ", arg_name, ".size() to be either ",
+      "[], [1], [2], [1, 1], [1, 2], [input.dim(), 1], or [input.dim(), 2], but got ",
       pad_spec.sizes());
     return pad_spec.as_strided({ndim, 2}, {0, 1});
 
@@ -44,8 +44,8 @@ Tensor _expand_pad_specifier(const Tensor& pad_spec, c10::string_view arg_name, 
     // size [ndim, 2] case
     TORCH_CHECK(
       (pad_spec_ndim == 2) && (pad_spec.size(0) == ndim) && (pad_spec.size(1) == 2),
-      "Expected ", arg_name, ".size() to be either ",
-      "[], [1], [2], [1, 1], [1, 2], [self.dim(), 1], or [self.dim(), 2], but got ",
+      "torch.pad: Expected ", arg_name, ".size() to be either ",
+      "[], [1], [2], [1, 1], [1, 2], [input.dim(), 1], or [input.dim(), 2], but got ",
       pad_spec.sizes());
     // NOTE: There is no need to restride in this case, since it's
     // already the correct shape
@@ -84,7 +84,7 @@ PadMode get_pad_mode_from_str(c10::string_view mode_str) {
   } else if (mode_str.compare("constant") == 0) {
     return PadMode::Constant;
   }
-  TORCH_CHECK(false, "Unrecognized mode: ", mode_str);
+  TORCH_CHECK(false, "torch.pad: Unrecognized mode: ", mode_str);
 }
 
 // Fill the pad result with data from the input tensor
@@ -159,7 +159,8 @@ void fill_constant_pad(Tensor& result, const Tensor& self, const Tensor& pad_wid
 
 void check_pad_specifier_is_none(const c10::optional<Tensor>& arg, const char* arg_name, c10::string_view mode_str) {
   TORCH_CHECK(!arg.has_value(),
-    "Unsupported keyword argument for '", std::string(mode_str), "' mode: ", arg_name);
+    "torch.pad: Unsupported keyword argument for '", std::string(mode_str),
+    "' mode: ", arg_name);
 }
 
 // Calculate the size of the padded tensor
@@ -184,8 +185,8 @@ IntArrayRef tensor_to_arrayref(const Tensor& size_tensor) {
 // Check that a tensor is on the expected device
 void check_device(const Tensor& arg, const char* arg_name, at::Device self_device) {
   TORCH_CHECK(arg.device() == self_device,
-    "Expected '", arg_name, "' to be on the same device as 'self' (",
-    self_device, ") but got ", arg.device());
+    "torch.pad: Expected '", arg_name, "' to be on the same device as ",
+    "'input' (", self_device, ") but got ", arg.device());
 }
 
 Tensor& pad_out_impl(
@@ -195,12 +196,14 @@ Tensor& pad_out_impl(
   const c10::optional<Tensor>& constant_values_opt,
   Tensor& result
 ) {
-  // pad_width must be Long and on CPU
+  // pad_width must be Long, on CPU, and non-negative
   TORCH_CHECK(pad_width.device() == at::kCPU,
-    "Expected 'pad_width' to be on CPU, but got ", pad_width.device());
+    "torch.pad: Expected 'pad_width' to be on CPU, but got ", pad_width.device());
   TORCH_CHECK(pad_width.scalar_type() == at::ScalarType::Long,
-    "Expected 'pad_width' to be Long dtype, but got ",
+    "torch.pad: Expected 'pad_width' to be Long dtype, but got ",
     pad_width.scalar_type());
+  TORCH_CHECK(pad_width.ge(0).all().item<bool>(),
+    "torch.pad: Expected 'pad_width' to be non-negative");
 
   PadMode mode = get_pad_mode_from_str(mode_str);
 
@@ -217,7 +220,8 @@ Tensor& pad_out_impl(
   // If `out` is given, it must match `self`'s dtype and device
   if (result.defined()) {
     TORCH_CHECK(result.scalar_type() == self.scalar_type(),
-      "Expected 'out' dtype ", self.scalar_type(), " but got ", result.scalar_type());
+      "torch.pad: Expected 'out' dtype ", self.scalar_type(),
+      " but got ", result.scalar_type());
     check_device(result, "out", self.device());
   }
 
@@ -228,6 +232,8 @@ Tensor& pad_out_impl(
   if (result.defined()) {
     at::native::resize_output(result, result_size);
   } else {
+    // TODO: In constant mode, if constant_values is a single scalar, we could
+    // use at::full here for better performance than fill_constant_pad
     result = at::empty(result_size, self.options());
   }
 
@@ -242,6 +248,11 @@ Tensor& pad_out_impl(
         at::zeros({1}, self.options().device(at::kCPU))),
       "constant_values",
       self.dim());
+
+    TORCH_CHECK(
+      constant_values.scalar_type() == self.dtype(),
+      "torch.pad: Expected constant_values.dtype to match input.dtype (",
+      self.dtype(), ") but got ", constant_values.dtype());
 
     fill_constant_pad(result, self, pad_width_, constant_values);
   }
