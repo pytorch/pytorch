@@ -5,7 +5,7 @@
 namespace torch {
 namespace crash_handler {
 
-#if _WIN32
+#ifdef _WIN32
 typedef std::wstring STRING_TYPE;
 #else
 typedef std::string STRING_TYPE;
