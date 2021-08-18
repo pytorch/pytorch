@@ -249,6 +249,41 @@ Tensor empty_sparse_csr(
       pin_memory);
 }
 
+const Tensor& resize_sparse_csr_(
+    const Tensor& self,
+    IntArrayRef size,
+    c10::optional<MemoryFormat> optional_memory_format) {
+  check_size_nonnegative(size);
+  TORCH_CHECK(size.size() == 2, "torch.resize_: Only 2D sparse CSR tensors are supported.");
+  TORCH_CHECK(
+      self.size(1) <= size[1],
+      "torch.resize_: Resizing columns of sparse CSR tensors to a smaller value is not supported. ",
+      "The original number of columns is ",
+      self.size(1),
+      " while the requested new number of columns is ", size[1], ".");
+  get_sparse_csr_impl(self)->resize_(self._nnz(), size);
+  return self;
+}
+
+Tensor& copy_sparse_csr_(Tensor& self, const Tensor& src, bool non_blocking) {
+  TORCH_CHECK(
+      self.sizes() == src.sizes(),
+      "copy_sparse_csr_: only same size tensors are supported.");
+  TORCH_CHECK(
+      self.is_sparse_csr() && src.is_sparse_csr(),
+      "copy_sparse_csr_: copy between different layouts is not supported. Found self type = ",
+      self.toString(),
+      " and src type = ",
+      src.toString());
+  TORCH_CHECK(
+      self._nnz() == src._nnz(),
+      "copy_sparse_csr_: only tensors with the same number of specified elements are supported.");
+  self.crow_indices().copy_(src.crow_indices(), non_blocking);
+  self.col_indices().copy_(src.col_indices(), non_blocking);
+  self.values().copy_(src.values(), non_blocking);
+  return self;
+}
+
 // Access members of CSR tensors.
 int64_t _nnz_sparse_csr(const SparseCsrTensor& self) {
   return get_sparse_csr_impl(self)->nnz();
