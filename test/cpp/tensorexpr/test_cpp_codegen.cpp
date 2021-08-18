@@ -245,7 +245,8 @@ TEST(CppPrinter, Intrinsics) {
       auto v = alloc<Intrinsics>(op, alloc<FloatImm>(2.0f));
       STR_CHECK(v, "std::" + v->func_name() + "(2.f)");
     } else {
-      auto v = alloc<Intrinsics>(op, alloc<FloatImm>(1.0f), alloc<FloatImm>(2.0f));
+      auto v =
+          alloc<Intrinsics>(op, alloc<FloatImm>(1.0f), alloc<FloatImm>(2.0f));
       STR_CHECK(v, "std::" + v->func_name() + "(1.f, 2.f)");
     }
   }
@@ -260,7 +261,8 @@ TEST(CppPrinter, ExternalCall) {
   auto scalar_arg = alloc<Add>(alloc<IntImm>(1), alloc<IntImm>(2));
   std::vector<BufPtr> buf_args{buf_arg1, buf_arg2};
   std::vector<ExprPtr> scalar_args{scalar_arg};
-  auto call = alloc<ExternalCall>(output, "nnc_aten_matmul", buf_args, scalar_args);
+  auto call =
+      alloc<ExternalCall>(output, "nnc_aten_matmul", buf_args, scalar_args);
   const std::string pattern = R"(
    # CHECK: {
    # CHECK:   void* buf_ptrs[]{out, a, b};
