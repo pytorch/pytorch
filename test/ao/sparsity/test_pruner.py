@@ -332,11 +332,11 @@ class TestBasePruner(TestCase):
         self._check_pruner_valid_before_step(model, pruner, device)
         pruner.step()
         if type(model) is Conv2dBN:
-            pruner.manual_mask_update(model.seq[1], model.seq[0].parametrizations.weight[0].pruned_outputs)
-            pruner.manual_mask_update(model.bn, model.conv2d.parametrizations.weight[0].pruned_outputs)
+            pruner.manual_mask_update(model.seq[1], pruner.get_module_pruned_outputs(model.seq[0]))
+            pruner.manual_mask_update(model.bn, pruner.get_module_pruned_outputs(model.conv2d))
             # BatchNorm pruned outputs should match preceding Conv2d
-            assert model.seq[1].parametrizations.weight[0].pruned_outputs == model.seq[0].parametrizations.weight[0].pruned_outputs
-            assert model.bn.parametrizations.weight[0].pruned_outputs == model.conv2d.parametrizations.weight[0].pruned_outputs
+            assert pruner.get_module_pruned_outputs(model.seq[1]) == pruner.get_module_pruned_outputs(model.seq[0])
+            assert pruner.get_module_pruned_outputs(model.bn) == pruner.get_module_pruned_outputs(model.conv2d)
         self._check_pruner_valid_after_step(model, pruner, {1}, device)
         assert model(x).shape == (1, 64, 24, 24)
 
