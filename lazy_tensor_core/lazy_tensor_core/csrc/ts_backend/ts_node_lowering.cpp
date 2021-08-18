@@ -30,6 +30,7 @@
 #include "lazy_tensor_core/csrc/ops/stack.h"
 #include "lazy_tensor_core/csrc/ops/sum.h"
 #include "lazy_tensor_core/csrc/ops/ts_embedding_dense_backward.h"
+#include "lazy_tensor_core/csrc/ops/ts_log_softmax_backward.h"
 #include "lazy_tensor_core/csrc/ops/ts_native_batch_norm_backward.h"
 #include "lazy_tensor_core/csrc/ops/ts_native_batch_norm_forward.h"
 #include "lazy_tensor_core/csrc/ops/ts_softmax_backward.h"
@@ -269,6 +270,10 @@ class TSNodeLowering : public NodeLowering {
     if (node->op().op == at::aten::log_softmax) {
       return LowerLogSoftmax(
           ir::NodeCast<ir::ops::LogSoftmax>(node, ir::OpKind(at::aten::log_softmax)));
+    }
+    if (node->op().op == at::aten::_log_softmax_backward_data) {
+      return LowerLogSoftmaxBackward(ir::NodeCast<ir::ops::TSLogSoftmaxBackward>(
+          node, ir::OpKind(at::aten::_log_softmax_backward_data)));
     }
     if (node->op().op == at::aten::permute) {
       return LowerPermute(
@@ -680,6 +685,15 @@ class TSNodeLowering : public NodeLowering {
     arguments.emplace_back(loctx()->GetOutputOp(node->operand(0)));
     arguments.emplace_back(node->dim());
     arguments.emplace_back(node->dtype());
+    return LowerBuiltin(node, arguments);
+  }
+
+  TSOpVector LowerLogSoftmaxBackward(const ir::ops::TSLogSoftmaxBackward* node) {
+    std::vector<torch::jit::NamedValue> arguments;
+    arguments.emplace_back(loctx()->GetOutputOp(node->operand(0)));
+    arguments.emplace_back(loctx()->GetOutputOp(node->operand(1)));
+    arguments.emplace_back(node->dim());
+    arguments.emplace_back(loctx()->GetOutputOp(node->operand(2)));
     return LowerBuiltin(node, arguments);
   }
 

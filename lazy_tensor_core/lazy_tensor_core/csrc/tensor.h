@@ -715,6 +715,11 @@ class LazyTensor {
                                          const LazyTensor& output,
                                          lazy_tensors::int64 dim);
 
+  static LazyTensor ts_log_softmax_backward(const LazyTensor& grad_output,
+                                            const LazyTensor& output,
+                                            lazy_tensors::int64 dim,
+                                            const LazyTensor& self);
+
   static LazyTensor log1p(const LazyTensor& input);
   static void log1p_(LazyTensor& input);
 
