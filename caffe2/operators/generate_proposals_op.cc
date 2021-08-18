@@ -357,13 +357,10 @@ bool GenerateProposalsOp<CPUContext>::RunOnDevice() {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(GenerateProposals, GenerateProposalsOp<CPUContext>);
 // For backward compatibility
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(GenerateProposalsCPP, GenerateProposalsOp<CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(GenerateProposals)
     .NumInputs(4)
     .NumOutputs(2)
@@ -414,13 +411,10 @@ non-maximum suppression is applied to generate the final bounding boxes.
         "format (image_index, x1, y1, x2, y2)")
     .Output(1, "rois_probs", "scores of proposals, size (n)");
 // For backward compatibility
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(GenerateProposalsCPP).NumInputs(4).NumOutputs(2);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(GenerateProposals);
 // For backward compatibility
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(GenerateProposalsCPP);
 
 } // namespace caffe2

@@ -1513,9 +1513,9 @@ See :func:`torch.frexp`
 
 add_docstr_all('flatten',
                r"""
-flatten(input, start_dim=0, end_dim=-1) -> Tensor
+flatten(start_dim=0, end_dim=-1) -> Tensor
 
-see :func:`torch.flatten`
+See :func:`torch.flatten`
 """)
 
 add_docstr_all('gather',
@@ -2461,6 +2461,12 @@ add_docstr_all('minimum',
 minimum(other) -> Tensor
 
 See :func:`torch.minimum`
+""")
+
+add_docstr_all('aminmax', r"""
+aminmax(*, dim=None, keepdim=False) -> (Tensor min, Tensor max)
+
+See :func:`torch.aminmax`
 """)
 
 add_docstr_all('fmin',
@@ -3812,14 +3818,16 @@ inferred from the arguments of ``self.to(*args, **kwargs)``.
 
 Here are the ways to call ``to``:
 
-.. function:: to(dtype, non_blocking=False, copy=False, memory_format=torch.preserve_format) -> Tensor
+.. method:: to(dtype, non_blocking=False, copy=False, memory_format=torch.preserve_format) -> Tensor
+   :noindex:
 
     Returns a Tensor with the specified :attr:`dtype`
 
     Args:
         {memory_format}
 
-.. function:: to(device=None, dtype=None, non_blocking=False, copy=False, memory_format=torch.preserve_format) -> Tensor
+.. method:: to(device=None, dtype=None, non_blocking=False, copy=False, memory_format=torch.preserve_format) -> Tensor
+   :noindex:
 
     Returns a Tensor with the specified :attr:`device` and (optional)
     :attr:`dtype`. If :attr:`dtype` is ``None`` it is inferred to be ``self.dtype``.
@@ -3832,7 +3840,8 @@ Here are the ways to call ``to``:
     Args:
         {memory_format}
 
-.. function:: to(other, non_blocking=False, copy=False) -> Tensor
+.. method:: to(other, non_blocking=False, copy=False) -> Tensor
+   :noindex:
 
     Returns a Tensor with same :class:`torch.dtype` and :class:`torch.device` as
     the Tensor :attr:`other`. When :attr:`non_blocking`, tries to convert
@@ -4381,7 +4390,8 @@ Example::
     False
 
 
-.. function:: view(dtype) -> Tensor
+.. method:: view(dtype) -> Tensor
+   :noindex:
 
 Returns a new tensor with the same data as the :attr:`self` tensor but of a
 different :attr:`dtype`. :attr:`dtype` must have the same number of bytes per

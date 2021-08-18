@@ -91,15 +91,12 @@ FusedKernelCUDA::FusedKernelCUDA(
           has_random),
       device_(device) {
   // Initializes driver's API context (if necessary)
-  // NOLINTNEXTLINE(modernize-use-nullptr)
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  CUcontext pctx = 0;
+  CUcontext pctx = nullptr;
   AT_CUDA_DRIVER_CHECK(nvrtc().cuCtxGetCurrent(&pctx));
   if (!pctx) {
     std::unique_lock<std::mutex> cudaFreeMutexLock(
         *(c10::cuda::CUDACachingAllocator::getFreeMutex()));
-    // NOLINTNEXTLINE(modernize-use-nullptr)
-    cudaFree(0);
+    cudaFree(nullptr);
   }
 
   // Note: hacked at::DeviceGuard since at::DeviceGuard was failing to work
@@ -185,7 +182,7 @@ FusedKernelCUDA::FusedKernelCUDA(
       nvrtc().cuModuleGetFunction(&function_, module_, name_.c_str()));
 
   // Computes max blocks
-#if defined(__HIP_PLATFORM_HCC__) && HIP_VERSION < 305
+#if defined(__HIP_PLATFORM_HCC__) && TORCH_HIP_VERSION < 305
   // HIP function signature is not compatible yet
   uint32_t max_blocks;
   AT_CUDA_DRIVER_CHECK(nvrtc().hipOccupancyMaxActiveBlocksPerMultiprocessor(
@@ -278,7 +275,6 @@ static std::shared_ptr<FusedKernel> createFusionKernel(
       has_random);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterFusionBackend reg(DeviceType::CUDA, createFusionKernel);
 
 } // namespace cuda

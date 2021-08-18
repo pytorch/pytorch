@@ -110,10 +110,8 @@ bool InstanceNormOp<float, CPUContext>::RunOnDeviceWithOrderNHWC(
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(InstanceNorm, InstanceNormOp<float, CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(InstanceNorm)
     .NumInputs(3)
     .NumOutputs(1, 3)
