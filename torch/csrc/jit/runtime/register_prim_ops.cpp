@@ -79,6 +79,13 @@ c10::List<std::string> splitNoneSeparator(const std::string& string) {
   return splits;
 }
 
+template <typename T, typename U>
+auto powWrapper(T a, U b) {
+  TORCH_CHECK(
+      !(a == 0.0 && b < 0.0), "0.0 cannot be raised to a negative power")
+  return pow(a, b);
+}
+
 static const OperatorGeneratorArgs opGenArgs[] = {
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::str(t elem) -> str"),
@@ -1153,13 +1160,6 @@ static std::vector<c10::optional<Operator>> createOperators(
     }
   }
   return result;
-}
-
-template <typename T, typename U>
-auto powWrapper(T a, U b) {
-  TORCH_CHECK(
-      !(a == 0.0 && b < 0.0), "0.0 cannot be raised to a negative power")
-  return pow(a, b);
 }
 
 RegisterOperators reg(([]() {
