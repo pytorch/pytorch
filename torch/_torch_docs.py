@@ -2362,10 +2362,18 @@ corresponding to the polar coordinates with absolute value :attr:`abs` and angle
 
 .. math::
     \text{out} = \text{abs} \cdot \cos(\text{angle}) + \text{abs} \cdot \sin(\text{angle}) \cdot j
+
+.. note::
+    `torch.polar` is similar to
+    `std::polar <https://en.cppreference.com/w/cpp/numeric/complex/polar>`_
+    and does not compute the polar decomposition
+    of a complex tensor like Python's `cmath.polar` and SciPy's `linalg.polar` do.
+    The behavior of this function is undefined if `abs` is negative or NaN, or if `angle` is
+    infinite.
+
 """ + r"""
 Args:
-    abs (Tensor): The absolute value the complex tensor. Must be float or
-        double.
+    abs (Tensor): The absolute value the complex tensor. Must be float or double.
     angle (Tensor): The angle of the complex tensor. Must be same dtype as
         :attr:`abs`.
 

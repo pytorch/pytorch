@@ -159,6 +159,16 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
     });
 
 REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    aten::append,
+    aten_append,
+    [](Node* n) -> SROperator {
+      return [](ProcessedNode* p_node) {
+        auto list = p_node->Input(0).toList();
+        list.push_back(p_node->Input(1));
+      };
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
     prim::GetAttr,
     prim_GetAttr,
     [](Node* n) -> SROperator {

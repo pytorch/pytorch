@@ -58,7 +58,7 @@ def _rand_shape(dim, min_size, max_size):
     return tuple(shape)
 
 def _reduced_shape(shape, dim=None, keepdim=False):
-    """Reduces the given dimensions of the input shape
+    """Computes the expected reduced shape given dim and keepdim
 
     Args:
         shape: The shape to reduce
@@ -199,10 +199,12 @@ class TestReductions(TestCase):
             self._test_dim_keepdim(op, device, ndim=2, dim=2)
 
     @ops(reduction_ops, dtypes=OpDTypes.none)
-    def test_dim_offbounds_keepdim(self, device, op: ReductionOpInfo):
-        """Tests that passing an off-bounds dim and keepdim=True throws"""
-        with self.assertRaises(IndexError):
-            self._test_dim_keepdim(op, device, ndim=2, dim=2, keepdim=True)
+    def test_dim_ndim_limit(self, device, op: ReductionOpInfo):
+        """Tests that an exception is raised when reducing a tensor with more
+        than 64 dims along some specific dimensions. dim=None is ok"""
+        t = make_tensor([1] * 65, device, torch.float)
+        with self.assertRaisesRegex(RuntimeError, "only tensors with up to 64 dims are supported"):
+            op(t, dim=0)
 
     @ops(filter(lambda op: op.identity is not None, reduction_ops), dtypes=OpDTypes.supported)
     def test_identity(self, device, dtype, op: ReductionOpInfo):
@@ -251,8 +253,10 @@ class TestReductions(TestCase):
             self.assertTrue(torch.is_floating_point(result.dtype))
         elif op.promotes_int_to_int64 and is_integral:
             self.assertEqual(result.dtype, torch.int64)
+        elif op.result_dtype is not None:
+            self.assertEqual(result.dtype, op.result_dtype)
         else:
-            self.assertEqual(result.dtype, op.result_dtype or dtype)
+            self.assertEqual(result.dtype, dtype)
 
     @ops(reduction_ops, dtypes=OpDTypes.none)
     def test_empty_tensor_empty_slice(self, device, op: ReductionOpInfo):
@@ -261,8 +265,7 @@ class TestReductions(TestCase):
         The rules for reducing over an empty slice are as follows:
             - Return the identity value if the operator has one
             - Otherwise, return NaN if the operator promotes integral dtype to
-              floating point dtypes and the result of the operation for the
-              given inputs is floating point dtype.
+              floating point dtypes.
             - Otherwise, raise an error
 
         See discussion here https://github.com/pytorch/pytorch/issues/61901
