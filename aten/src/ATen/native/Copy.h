@@ -13,5 +13,7 @@ using copy_fn = void (*)(TensorIterator&, bool non_blocking);
 
 DECLARE_DISPATCH(copy_fn, copy_stub);
 
+TORCH_API void copy_ignoring_overlaps(const Tensor &src, const Tensor &dst);
+
 } // namespace native
 } // namespace at
