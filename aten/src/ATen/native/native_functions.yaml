@@ -488,7 +488,7 @@
   device_check: NoCheck   # TensorIterator
   structured: True
   precomputed:
-    - dim -> int dim
+  - dim -> int dim
   dispatch:
     CPU, CUDA: all_out
 
@@ -511,7 +511,7 @@
   device_check: NoCheck   # TensorIterator
   structured: True
   precomputed:
-    - dim -> int dim
+  - dim -> int dim
   dispatch:
     CPU, CUDA: any_out
 
@@ -8819,9 +8819,9 @@
   python_module: nn
   structured: True
   precomputed:
-    - kernel_size -> int kH, int kW
-    - stride -> int dH, int dW
-    - padding -> int padH, int padW
+  - kernel_size -> int kH, int kW
+  - stride -> int dH, int dW
+  - padding -> int padH, int padW
   dispatch:
     CPU: avg_pool2d_out_cpu
     CUDA: avg_pool2d_out_cuda

@@ -1521,13 +1521,17 @@ class Precompute:
     replace: Dict[str, List[Argument]]
 
     @staticmethod
-    def parse(src: List[str]) -> 'Precompute':
+    def parse(src: object) -> 'Precompute':
+        assert isinstance(src, list)
+
         # src is a list of strings of the format:
         #   {kernel param name} -> {replacement decl}[, {replacement decl}, ...]
         # Parse this list to get the names of which precomputed elements
         # should replace which kernel arguments.
         replace = {}
         for raw_replace_item in src:
+            assert instance(raw_replace_item, str)
+
             arg, with_list_raw = raw_replace_item.split(' -> ')
             with_list = with_list_raw.split(',')
             with_list_args = [Argument.parse(name.strip()) for name in with_list]
