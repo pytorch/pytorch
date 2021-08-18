@@ -32,13 +32,7 @@ c10::MaybeOwned<Tensor> inline prepare_matrix_for_cublas(const Tensor& tensor, b
     return resolve_conj_if_indicated(tensor, (transpose_tensor == transpose_result));
   } else {
     transpose_tensor = true;
-    if (tensor.is_conj() && (transpose_tensor != transpose_result)) {
-      Tensor t = tensor.conj().clone(at::MemoryFormat::Contiguous);
-      t._set_conj(true);
-      return c10::MaybeOwned<Tensor>::owned(static_cast<at::Tensor>(t));
-    } else {
-      return c10::MaybeOwned<Tensor>::owned(tensor.clone(at::MemoryFormat::Contiguous));
-    }
+    return c10::MaybeOwned<Tensor>::owned(tensor.clone(at::MemoryFormat::Contiguous));
   }
 }
 
