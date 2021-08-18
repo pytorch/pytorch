@@ -125,9 +125,7 @@ m.impl("${unqual_operator_name_with_overload}",
 """)
 
 AUTOGRAD_NOT_IMPLEMENTED_REGISTRATION = CodeTemplate("""\
-m.impl("${unqual_operator_name_with_overload}",
-   torch::CppFunction::makeFromBoxedFunction<&torch::autograd::autogradNotImplementedFallback>()
-);
+m.impl("${unqual_operator_name_with_overload}", torch::autograd::autogradNotImplementedFallback());
 """)
 
 INPLACE_REDISPATCH = CodeTemplate("""\

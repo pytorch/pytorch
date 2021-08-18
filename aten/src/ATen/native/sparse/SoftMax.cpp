@@ -407,6 +407,9 @@ void cpu_sparse_coo_softmax_backward(const Tensor& grad_input, const Tensor& gra
   indices.resize_as_(out_indices);
   indices.copy_(out_indices);
 
+  // TOOO: We need this when we call into from RedispatchBoxed (why?)
+  at::sparse::alias_into_sparse(grad_input, indices, values);
+
   auto out_offsets = get_offsets(out_indices, sizes, -1);
   auto grad_offsets = get_offsets(grad_indices, sizes, -1);
 

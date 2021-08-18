@@ -405,19 +405,23 @@ def gen_variable_type_func(
         name = cpp.name(f.func)
         formals = gen_formals(f)
 
-        if fn.info is None and not get_base_name(f) in RESET_GRAD_ACCUMULATOR and not get_base_name(f) in DONT_REQUIRE_DERIVATIVE:
+        if fn.info is None and not get_base_name(f) in RESET_GRAD_ACCUMULATOR \
+                and not get_base_name(f) in DONT_REQUIRE_DERIVATIVE \
+                and len(gen_differentiable_outputs(fn)) > 0:
             # NOTE: [ Registering AutogradNotImplemented boxed kernel ]
             #
-            # When there is no derivatives.yaml entry, we register a generic boxed NotImplemented kernel
-            # to set grad_fn to be NotImplemented, so that forward proceeds as usual but an error is
-            # properly produced on backward.
+            # When there is no derivatives.yaml entry, we register a generic boxed
+            # NotImplemented kernel to set grad_fn to be NotImplemented, so that forward
+            # proceeds as usual but an error is properly produced on backward.
             #
             # There are two cases where still let codegen handle it:
-            # 1) ops that need to reset grad accumulator (we let codegen handle this case because) the
-            #    list is (currently) only accessible in Python and there are only 2 op.
-            # 2) User explicitly specifies DONT_REQUIRE_DERIVATIVE. This basically makes autograd a
-            #    fallthrough with NDEBUG checks. This can be useful for when all outputs are integral.
-            #
+            # 1) ops that need to reset grad accumulator (we let codegen handle this case
+            #     because) the list is (currently) only accessible in Python and there are
+            #     only 2 op.
+            # 2) User explicitly specifies DONT_REQUIRE_DERIVATIVE. This basically makes
+            #    autograd a fallthrough with NDEBUG checks. This can be useful for when all
+            #    outputs are integral.
+            # 3) When there are no differentiable outputs. This is similar to (2).
             type_definition = ""
             wrapper_registration = AUTOGRAD_NOT_IMPLEMENTED_REGISTRATION.substitute(
                 unqual_operator_name_with_overload=f.func.name)

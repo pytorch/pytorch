@@ -365,12 +365,15 @@ SparseTensor& floor_divide_out_sparse_zerodim(const SparseTensor& dividend,
 
   // Resizes and indexes result like dividend_tmp
   result.resize_as_(dividend_tmp);
-  result._indices().resize_as_(dividend_tmp._indices());
-  result._indices().copy_(dividend_tmp._indices());
-
+  auto indices = result._indices();
+  indices.resize_as_(dividend_tmp._indices());
+  indices.copy_(dividend_tmp._indices());
   // Computes result
   Tensor result_values = result._values();
   at::floor_divide_out(result_values, dividend_tmp._values(), divisor);
+
+  // TOOO: We need this when we call into from RedispatchBoxed (why?)
+  at::sparse::alias_into_sparse(result, indices, result_values);
   get_sparse_impl(result)->set_nnz_and_narrow(dividend_tmp._nnz());
   result._coalesced_(dividend_tmp.is_coalesced());
   return result;
