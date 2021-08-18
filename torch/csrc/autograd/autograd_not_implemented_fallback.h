@@ -1,10 +1,11 @@
 #pragma once
 
 #include <ATen/ATen.h>
+#include <torch/library.h>
 
 namespace torch {
 namespace autograd {
 
-TORCH_API void autogradNotImplementedFallback(const c10::OperatorHandle& op, c10::DispatchKeySet dispatch_keys, torch::jit::Stack* stack);
+TORCH_API torch::CppFunction autogradNotImplementedFallback();
 
 }} // namespace torch::autograd
