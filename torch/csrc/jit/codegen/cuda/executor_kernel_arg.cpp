@@ -1,4 +1,5 @@
 #include <ATen/CUDAGeneratorImpl.h>
+#include <c10/util/irange.h>
 
 // Extract size and strides
 #include <torch/csrc/jit/codegen/cuda/kernel_cache.h>
@@ -39,7 +40,7 @@ void KernelArgumentHolder::push(const at::Tensor& tensor) {
   c10::ScalarType dtype = tensor.scalar_type();
   std::unique_ptr<TensorArgAbstract> tensor_arg = getTensorArg(dtype, nDims);
   tensor_arg->setPointer(tensor.data_ptr());
-  for (int i = 0; i < nDims; i++) {
+  for (const auto i : c10::irange(nDims)) {
     tensor_arg->setSize(i, tensor.sizes()[i]);
     tensor_arg->setStride(i, tensor.strides()[i]);
   }
@@ -54,6 +55,7 @@ void KernelArgumentHolder::push(const IValue& val) {
       "Tried to push an arg to run in a fused kernel, expected a scalar but got, ",
       val);
   switch (val.toScalar().type()) {
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     case c10::ScalarType::Double:
       arguments_.push_back(std::make_unique<FloatArg>((float)val.toDouble()));
       return;
@@ -79,7 +81,7 @@ void KernelArgumentHolder::push(const uint64_t& val) {
 void** KernelArgumentHolder::getBuffer() {
   if (changed_) {
     void_ptrs_ = std::vector<void*>(arguments_.size(), nullptr);
-    for (size_t i = 0; i < arguments_.size(); i++) {
+    for (const auto i : c10::irange(arguments_.size())) {
       void_ptrs_[i] = static_cast<void*>(arguments_[i]->arg());
     }
     changed_ = false;

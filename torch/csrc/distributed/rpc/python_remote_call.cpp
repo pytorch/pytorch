@@ -16,7 +16,7 @@ PythonRemoteCall::PythonRemoteCall(
       retForkId_(std::move(retForkId)),
       isAsyncExecution_(isAsyncExecution) {}
 
-Message PythonRemoteCall::toMessageImpl() && {
+c10::intrusive_ptr<Message> PythonRemoteCall::toMessageImpl() && {
   std::vector<IValue> ivalues = std::move(serializedPyObj_).toIValues();
   ivalues.emplace_back(retRRefId_);
   ivalues.emplace_back(retForkId_);
@@ -26,7 +26,7 @@ Message PythonRemoteCall::toMessageImpl() && {
   auto payload =
       jit::pickle(c10::ivalue::Tuple::create(ivalues), &tensor_table);
 
-  return Message(
+  return c10::make_intrusive<Message>(
       std::move(payload),
       std::move(tensor_table),
       MessageType::PYTHON_REMOTE_CALL);

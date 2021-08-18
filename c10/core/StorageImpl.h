@@ -20,13 +20,13 @@ namespace c10 {
 // but a lot of things won't work correctly, including:
 //
 // - An ordinary deleter on such a storage is wrong, because normal deleters
-//   assume unique ownership, but if you have two storages at the same data, that
-//   implies there is some sort of shared ownership. So your deleter would have to
-//   actually be internally doing some sort of refcount thing
+//   assume unique ownership, but if you have two storages at the same data,
+//   that implies there is some sort of shared ownership. So your deleter would
+//   have to actually be internally doing some sort of refcount thing
 // - Deepcopy in Python side relies on storage equality and not data pointer
 //   equality; so if there are two separate storages pointing to the same data,
-//   the data will actually get duplicated in that case (one data ptr before, two
-//   data ptrs after)
+//   the data will actually get duplicated in that case (one data ptr before,
+//   two data ptrs after)
 // - Version counts won't work correctly, because we do all VC tracking at the
 //   level of storages (unless you explicitly disconnect the VC with detach);
 //   mutation because data pointers are the same are totally untracked

@@ -9,6 +9,7 @@ from torch.utils import set_module
 from torch._jit_internal import (
     Final,
     Future,
+    _IgnoreContextManager,
     _overload,
     _overload_method,
     ignore,
@@ -19,14 +20,17 @@ from torch._jit_internal import (
 )
 from torch.jit._script import (
     script,
+    _script_pdt,
     Attribute,
     ScriptModule,
     script_method,
+    RecursiveScriptClass,
     RecursiveScriptModule,
     ScriptWarning,
     interface,
     CompilationUnit,
     ScriptFunction,
+    _ScriptProfile,
     _unwrap_optional,
 )
 from torch.jit._trace import (
@@ -46,8 +50,7 @@ from torch.jit._trace import (
 from torch.jit._async import fork, wait
 from torch.jit._serialization import save, load
 from torch.jit._fuser import optimized_execution, fuser, last_executed_optimized_graph
-
-from torch.jit._freeze import freeze, optimize_frozen_module
+from torch.jit._freeze import freeze, optimize_for_inference, run_frozen_optimizations
 
 # For backwards compatibility
 _fork = fork
@@ -78,10 +81,11 @@ def annotate(the_type, the_value):
     compiler the type of `the_value`. It is a no-op when running outside of TorchScript.
 
     Though TorchScript can infer correct type for most Python expressions, there are some cases where
-    type infernece can be wrong, including:
-    - Empty containers like `[]` and `{}`, which TorchScript assumes to be container of `Tensor`s
+    type inference can be wrong, including:
+
+    - Empty containers like `[]` and `{}`, which TorchScript assumes to be container of `Tensor`
     - Optional types like `Optional[T]` but assigned a valid value of type `T`, TorchScript would assume
-    it is type `T` rather than `Optional[T]`
+      it is type `T` rather than `Optional[T]`
 
     Note that `annotate()` does not help in `__init__` method of `torch.nn.Module` subclasses because it
     is executed in eager mode. To annotate types of `torch.nn.Module` attributes,
@@ -187,12 +191,12 @@ def isinstance(obj, target_type):
 # Graph class, so mypy checks need to be skipped.
 @contextmanager
 def _hide_source_ranges() -> Iterator[None]:
-    old_enable_source_ranges = torch._C.Graph.global_print_source_ranges  # type: ignore
+    old_enable_source_ranges = torch._C.Graph.global_print_source_ranges  # type: ignore[attr-defined]
     try:
-        torch._C.Graph.set_global_print_source_ranges(False)  # type: ignore
+        torch._C.Graph.set_global_print_source_ranges(False)  # type: ignore[attr-defined]
         yield
     finally:
-        torch._C.Graph.set_global_print_source_ranges(old_enable_source_ranges)  # type: ignore
+        torch._C.Graph.set_global_print_source_ranges(old_enable_source_ranges)  # type: ignore[attr-defined]
 
 
 if not torch._C._jit_init():

@@ -59,6 +59,7 @@ endif()
 if(${USE_GLOG})
     target_link_libraries(c10 PUBLIC glog::glog)
 endif()
+target_link_libraries(c10 PRIVATE fmt::fmt-header-only)
 
 find_package(Backtrace)
 if(Backtrace_FOUND)

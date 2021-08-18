@@ -1,5 +1,5 @@
 import unittest
-import onnxruntime  # noqa
+import onnxruntime  # noqa: F401
 
 from test_models import TestModels
 from test_pytorch_onnx_onnxruntime import run_model_test
@@ -39,5 +39,5 @@ TestModels_new_jit_API = type(str("TestModels_new_jit_API"),
                                    onnx_shape_inference=True))
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

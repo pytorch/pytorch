@@ -40,7 +40,7 @@ def test_default_skip_tracker_by_data_parallel():
     class Stash(nn.Module):
         def forward(self, input):
             yield stash("foo", input)
-            return input * 2 # noqa
+            return input * 2  # noqa: B901
 
     @skippable(pop=["foo"])
     class Pop(nn.Module):

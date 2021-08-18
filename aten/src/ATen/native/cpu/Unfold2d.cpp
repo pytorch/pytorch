@@ -1,5 +1,5 @@
 #include <ATen/Parallel.h>
-#include <ATen/cpu/vec256/vec256.h>
+#include <ATen/cpu/vec/vec.h>
 #include <ATen/native/Unfold2d.h>
 #include <ATen/native/cpu/Loops.h>
 #include <cmath>
@@ -15,9 +15,12 @@ static inline void cadd(
     const scalar_t* x,
     const scalar_t* y,
     int64_t n) {
-  using Vec = vec256::Vec256<scalar_t>;
+  using Vec = vec::Vectorized<scalar_t>;
+  // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
   char* ptrs[] = {reinterpret_cast<char*>(z),
+                  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
                   reinterpret_cast<char*>(const_cast<scalar_t*>(x)),
+                  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
                   reinterpret_cast<char*>(const_cast<scalar_t*>(y))};
   vectorized_loop(
       ptrs,
@@ -44,7 +47,9 @@ static void unfolded2d_acc(
     int64_t output_width) {
   at::parallel_for(0, n_input_plane, 0, [&](int64_t start, int64_t end) {
     for (auto nip = start; nip < end; nip++) {
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int64_t kw, kh, y, x;
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int64_t ix, iy;
       for (kh = 0; kh < kH; kh++) {
         for (kw = 0; kw < kW; kw++) {
@@ -55,6 +60,7 @@ static void unfolded2d_acc(
           scalar_t* dst =
               input_data + nip * ((size_t)input_height * input_width);
           if (padW > 0 || padH > 0) {
+            // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
             int64_t lpad, rpad;
             for (y = 0; y < output_height; y++) {
               iy = (int64_t)y * dH - padH + kh;
@@ -173,7 +179,9 @@ static void unfolded2d_copy(
           int64_t rest = k % (kH * kW);
           int64_t kh = rest / kW;
           int64_t kw = rest % kW;
+          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           int64_t x, y;
+          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           int64_t ix, iy;
           scalar_t* dst = finput_data +
               nip * ((size_t)kH * kW * output_height * output_width) +
@@ -182,6 +190,7 @@ static void unfolded2d_copy(
           scalar_t* src =
               input_data + nip * ((size_t)input_height * input_width);
           if (padW > 0 || padH > 0) {
+            // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
             int64_t lpad, rpad;
             for (y = 0; y < output_height; y++) {
               iy = (int64_t)y * dH - padH + kh;

@@ -16,7 +16,7 @@ TEST(Registerizer, RegisterizerSimple) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Store::make(a, {0}, 0),
        For::make(
            x,
@@ -61,7 +61,7 @@ TEST(Registerizer, RegisterizerLoop) {
   KernelScope kernel_scope;
   BufHandle a("A", {10}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Store::make(a, {0}, 0),
        For::make(
            x,
@@ -108,7 +108,7 @@ TEST(Registerizer, RegisterizerLoopFixedLoad) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Store::make(a, {0}, 0),
        For::make(
            x,
@@ -155,7 +155,7 @@ TEST(Registerizer, RegisterizerLoopInternal) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make({For::make(
+  StmtPtr stmt = Block::make({For::make(
       x,
       0,
       10,
@@ -172,11 +172,15 @@ TEST(Registerizer, RegisterizerLoopInternal) {
 
   stmt = registerize(stmt);
 
+  // TODO: the order of terms in addition changes and in general depends on
+  // some hash value. This results in unpredictable swaps of the operands from
+  // random changes, which is not great. Ideally, we should ensure some
+  // specific order (ideally, the original one).
   /*
    * for (int x = 0; x < 10; x++) {
    *   int A_1 = A[x];
-   *   A_1 = A_1 + x;
-   *   A_1 = A_1 + x;
+   *   A_1 = x + A_1;
+   *   A_1 = x + A_1;
    *   A[x] = A_1;
    * }
    */
@@ -188,8 +192,8 @@ TEST(Registerizer, RegisterizerLoopInternal) {
       R"IR(
 # CHECK: for (int x = 0; x < 10; x++)
 # CHECK: int A_1 = A[x];
-# CHECK:   A_1 = A_1 + x;
-# CHECK:   A_1 = A_1 + x;
+# CHECK:   A_1 = x + A_1;
+# CHECK:   A_1 = x + A_1;
 # CHECK:   A[x] = A_1;
 # CHECK: })IR";
 
@@ -205,11 +209,12 @@ TEST(Registerizer, RegisterizerLoopInternalLoadOverlap) {
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
   VarHandle z("z", kInt);
-  Stmt* stmt = Block::make({For::make(
+  StmtPtr stmt = Block::make({For::make(
       x,
       0,
       10,
       Store::make(a, {x}, Add::make(Load::make(b, {y}), Load::make(b, {z}))))});
+  stmt = IRSimplifier::simplify(stmt);
 
   /*
    * for (int x = 0; x < 10; x++) {
@@ -233,7 +238,7 @@ TEST(Registerizer, RegisterizerLoopInternalRepeated) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {For::make(
            x,
            0,
@@ -305,7 +310,7 @@ TEST(Registerizer, RegisterizerLoopInternalRepeatedOverlapLoopVar) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {For::make(
            x,
            0,
@@ -322,6 +327,7 @@ TEST(Registerizer, RegisterizerLoopInternalRepeatedOverlapLoopVar) {
                 Store::make(a, {0}, Add::make(Load::make(a, {x}), x))}))
 
       });
+  stmt = IRSimplifier::simplify(stmt);
 
   /*
    * for (int x = 0; x < 10; x++) {
@@ -351,7 +357,7 @@ TEST(Registerizer, RegisterizerLoopInternalRepeatedOverlapOther) {
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {For::make(
            x,
            0,
@@ -397,7 +403,7 @@ TEST(Registerizer, RegisterizerMultiVar) {
   KernelScope kernel_scope;
   BufHandle a("A", {2}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make({
+  StmtPtr stmt = Block::make({
       Store::make(a, {0}, 0),
       Store::make(a, {1}, 0),
       For::make(
@@ -455,7 +461,7 @@ TEST(Registerizer, RegisterizerVariableLoad) {
   BufHandle b("B", {10}, kInt);
   VarHandle x("x", kInt);
   VarHandle x2("x", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Store::make(a, {0}, 0),
        For::make(x, 0, 10, Store::make(b, {x}, x)),
        For::make(
@@ -463,10 +469,7 @@ TEST(Registerizer, RegisterizerVariableLoad) {
            0,
            10,
            Block::make({Store::make(
-               a,
-               {0},
-               Add::make(Load::make(a, {0}), Load::make(b, {x2})),
-               1)}))});
+               a, {0}, Add::make(Load::make(a, {0}), Load::make(b, {x2})))}))});
 
   /*
    * A[0] = 0;
@@ -514,7 +517,7 @@ TEST(Registerizer, RegisterizerSymbolicIndices) {
   VarHandle N("N", kInt);
   BufHandle a("A", {N}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Store::make(a, {i}, 0),
        For::make(
            x,
@@ -560,7 +563,7 @@ TEST(Registerizer, RegisterizerMultiLoop) {
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Store::make(a, {0}, 0),
        For::make(
            x,
@@ -573,8 +576,7 @@ TEST(Registerizer, RegisterizerMultiLoop) {
                Block::make({Store::make(
                    a,
                    {0},
-                   Mul::make(Add::make(Load::make(a, {0}), x), y),
-                   1)})))});
+                   Mul::make(Add::make(Load::make(a, {0}), x), y))})))});
 
   /*
    * A[0] = 0;
@@ -617,7 +619,7 @@ TEST(Registerizer, RegisterizerRepeated) {
   KernelScope kernel_scope;
   BufHandle a("A", {2}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make({
+  StmtPtr stmt = Block::make({
       Store::make(a, {0}, 0),
       Store::make(a, {1}, 0),
       For::make(
@@ -674,7 +676,7 @@ TEST(Registerizer, RegisterizerNoLoads) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Store::make(a, {0}, 0),
        For::make(
            x, 0, 10, Block::make({Store::make(a, {0}, Add::make(x, 1))}))});
@@ -716,7 +718,7 @@ TEST(Registerizer, RegisterizerNoRepeatedStores) {
   BufHandle a("A", {1}, kInt);
   BufHandle b("B", {10}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Store::make(a, {0}, 0),
        For::make(
            x,
@@ -764,7 +766,7 @@ TEST(Registerizer, RegisterizerMultiVarOverlap) {
   KernelScope kernel_scope;
   BufHandle a("A", {2}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make({
+  StmtPtr stmt = Block::make({
       Store::make(a, {0}, 0),
       Store::make(a, {1}, 0),
       For::make(
@@ -775,6 +777,7 @@ TEST(Registerizer, RegisterizerMultiVarOverlap) {
               {Store::make(a, {x}, Add::make(Load::make(a, {0}), x)),
                Store::make(a, {x + 1}, Sub::make(Load::make(a, {1}), x))})),
   });
+  stmt = IRSimplifier::simplify(stmt);
 
   std::ostringstream before;
   before << *stmt;
@@ -797,7 +800,7 @@ TEST(Registerizer, RegisterizerAllocs) {
 
   BufHandle b("B", {Load::make(c, {0})}, kInt);
 
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Allocate::make(b),
        Store::make(a, {0}, Load::make(c, {0})),
        Store::make(b, {0}, 0),
@@ -860,7 +863,7 @@ TEST(Registerizer, RegisterizerNoInitializer) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make({For::make(
+  StmtPtr stmt = Block::make({For::make(
       x,
       0,
       10,
@@ -900,11 +903,12 @@ TEST(Registerizer, RegisterizerNoInitializerLoopVar) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make({For::make(
+  StmtPtr stmt = Block::make({For::make(
       x,
       0,
       10,
       Block::make({Store::make(a, {x}, Add::make(Load::make(a, {x}), x))}))});
+  stmt = IRSimplifier::simplify(stmt);
 
   /*
    * for (int x = 0; x < 10; x++) {
@@ -929,7 +933,7 @@ TEST(Registerizer, RegisterizerLoadThenStore) {
   BufHandle a("A", {1}, kInt);
   BufHandle b("B", {1}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make({For::make(
+  StmtPtr stmt = Block::make({For::make(
       x,
       0,
       10,
@@ -981,7 +985,7 @@ TEST(Registerizer, RegisterizerParallelized) {
   VarHandle x("x", kInt);
   LoopOptions loopOpts;
   loopOpts.set_gpu_block_index(0);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Store::make(a, {0}, 0),
        For::make(
            x,
@@ -1011,7 +1015,7 @@ TEST(Registerizer, RegisterizerConditionAfter) {
   BufHandle c("C", {5}, kInt);
   VarHandle x("x", kInt);
 
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Store::make(a, {x}, Load::make(b, {x})),
        Store::make(c, {x}, Load::make(a, {x})),
        Cond::make(
@@ -1061,7 +1065,7 @@ TEST(Registerizer, RegisterizerConditionBefore) {
   BufHandle c("C", {5}, kInt);
   VarHandle x("x", kInt);
 
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Cond::make(
            CompareSelect::make(x, 5, CompareSelectOperation::kLT),
            Store::make(a, {x}, Add::make(Load::make(a, {x}), 1)),
@@ -1113,7 +1117,7 @@ TEST(Registerizer, RegisterizerConditionInside) {
   BufHandle c("C", {5}, kInt);
   VarHandle x("x", kInt);
 
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Store::make(a, {x}, Load::make(b, {x})),
        Store::make(c, {x}, Load::make(a, {x})),
        Cond::make(
@@ -1174,7 +1178,8 @@ TEST(Registerizer, RegisterizerConditionInsideOverlap1) {
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
 
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
+      // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
       {Store::make(a, {x}, Load::make(b, {x})),
        Store::make(c, {x}, Load::make(a, {x})),
        Cond::make(
@@ -1233,7 +1238,8 @@ TEST(Registerizer, RegisterizerConditionInsideOverlap2) {
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
 
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
+      // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
       {Store::make(a, {x}, Load::make(b, {x})),
        Store::make(a, {x}, Load::make(b, {x + 1})),
        Store::make(c, {x}, Load::make(a, {x})),
@@ -1317,7 +1323,7 @@ TEST(Registerizer, RegisterizerConditionHidden) {
   BufHandle c("C", {5}, kInt);
   VarHandle x("x", kInt);
 
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Cond::make(
            CompareSelect::make(x, 5, CompareSelectOperation::kLT),
            Store::make(a, {x}, Add::make(Load::make(a, {x}), 1)),
@@ -1359,7 +1365,7 @@ TEST(Registerizer, RegisterizerConditionUnhidden) {
   BufHandle c("C", {5}, kInt);
   VarHandle x("x", kInt);
 
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Cond::make(
            CompareSelect::make(x, 5, CompareSelectOperation::kLT),
            Store::make(a, {x}, Add::make(Load::make(a, {x}), 1)),
@@ -1420,7 +1426,7 @@ TEST(Registerizer, RegisterizerCondCondition) {
   BufHandle c("C", {5}, kInt);
   VarHandle x("x", kInt);
 
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Store::make(a, {x}, Load::make(b, {x})),
        Store::make(c, {x}, Load::make(a, {x})),
        Cond::make(
@@ -1471,7 +1477,7 @@ TEST(Registerizer, RegisterizerCondConditionUnhidden) {
   BufHandle c("C", {5}, kInt);
   VarHandle x("x", kInt);
 
-  Stmt* stmt = Block::make({Cond::make(
+  StmtPtr stmt = Block::make({Cond::make(
       CompareSelect::make(Load::make(a, {x}), 5, CompareSelectOperation::kLT),
       Store::make(a, {x}, Add::make(Load::make(a, {x}), 1)),
       Store::make(a, {x}, Add::make(Load::make(a, {x}), 10)))});
@@ -1521,23 +1527,21 @@ TEST(Registerizer, RegisterizerIfThenElseHidden) {
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
 
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Store::make(
            b,
            {y},
            IfThenElse::make(
                CompareSelect::make(x, 5, CompareSelectOperation::kLT),
                Add::make(Load::make(a, {x}), 1),
-               Add::make(Load::make(a, {x + 1}), 2)),
-           1),
+               Add::make(Load::make(a, {x + 1}), 2))),
        Store::make(
            b,
            {y + 1},
            IfThenElse::make(
                CompareSelect::make(x, 5, CompareSelectOperation::kLT),
                Add::make(Load::make(a, {x}), 1),
-               Add::make(Load::make(a, {x + 1}), 2)),
-           1)});
+               Add::make(Load::make(a, {x + 1}), 2)))});
 
   /*
    * B[y] = IfThenElse(x<5 ? 1 : 0, (A[x]) + 1, (A[x + 1]) + 2);
@@ -1565,7 +1569,7 @@ TEST(Registerizer, RegisterizerIfThenElseUnhidden) {
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
 
-  Stmt* stmt = Block::make({
+  StmtPtr stmt = Block::make({
       Store::make(a, {x}, 0),
       Store::make(
           b,
@@ -1573,16 +1577,14 @@ TEST(Registerizer, RegisterizerIfThenElseUnhidden) {
           IfThenElse::make(
               CompareSelect::make(x, 5, CompareSelectOperation::kLT),
               Add::make(Load::make(a, {x}), 1),
-              Add::make(Load::make(a, {x + 1}), 2)),
-          1),
+              Add::make(Load::make(a, {x + 1}), 2))),
       Store::make(
           b,
           {y + 1},
           IfThenElse::make(
               CompareSelect::make(x, 5, CompareSelectOperation::kLT),
               Add::make(Load::make(a, {x}), 1),
-              Add::make(Load::make(a, {x + 1}), 2)),
-          1),
+              Add::make(Load::make(a, {x + 1}), 2))),
   });
 
   /*
@@ -1622,7 +1624,7 @@ TEST(Registerizer, RegisterizerIfThenElseNested) {
   BufHandle d("D", {5}, kInt);
   VarHandle x("x", kInt);
 
-  Stmt* stmt = Block::make({Store::make(
+  StmtPtr stmt = Block::make({Store::make(
       a,
       {x},
       IfThenElse::make(
@@ -1634,8 +1636,7 @@ TEST(Registerizer, RegisterizerIfThenElseNested) {
           IfThenElse::make(
               CompareSelect::make(x, 5, CompareSelectOperation::kEQ),
               Load::make(c, {x}),
-              Load::make(d, {x}))),
-      1)});
+              Load::make(d, {x}))))});
 
   /*
    * A[x] = IfThenElse(x<3 ? 1 : 0,
@@ -1666,14 +1667,13 @@ TEST(Registerizer, RegisterizerIfThenElseInternal) {
   BufHandle b("B", {5}, kFloat);
   VarHandle x("x", kInt);
 
-  Stmt* stmt = Block::make({Store::make(
+  StmtPtr stmt = Block::make({Store::make(
       a,
       {x},
       IfThenElse::make(
           CompareSelect::make(x, 3, CompareSelectOperation::kLT),
           Add::make(Load::make(b, {x}), Load::make(b, {x})),
-          Load::make(b, {x})),
-      1)});
+          Load::make(b, {x})))});
 
   /*
    * A[x] = IfThenElse(x<3 ? 1 : 0, (B[x]) + (B[x]), B[x]);
@@ -1746,7 +1746,7 @@ TEST(Registerizer, RegisterizerIfThenElseCondition) {
   BufHandle c("C", {5}, kInt);
   VarHandle x("x", kInt);
 
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Store::make(a, {x}, Load::make(a, {x})),
        Store::make(
            a,
@@ -1792,15 +1792,14 @@ TEST(Registerizer, RegisterizerIfThenElseConditionUnhidden) {
   BufHandle c("C", {5}, kInt);
   VarHandle x("x", kInt);
 
-  Stmt* stmt = Block::make({Store::make(
+  StmtPtr stmt = Block::make({Store::make(
       b,
       {x},
       IfThenElse::make(
           CompareSelect::make(
               Load::make(a, {x}), 5, CompareSelectOperation::kLT),
           Add::make(Load::make(a, {x}), 1),
-          Add::make(Load::make(a, {x}), 10)),
-      1)});
+          Add::make(Load::make(a, {x}), 10)))});
 
   /*
    * B[x] = IfThenElse((A[x])<5 ? 1 : 0, (A[x]) + 1, (A[x]) + 10);
@@ -1830,7 +1829,7 @@ TEST(Registerizer, RegisterizerConditionBranchOnly) {
   KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make({For::make(
+  StmtPtr stmt = Block::make({For::make(
       x,
       0,
       10,
@@ -1843,17 +1842,16 @@ TEST(Registerizer, RegisterizerConditionBranchOnly) {
                   IfThenElse::make(
                       CompareSelect::make(x, 5, CompareSelectOperation::kLT),
                       Add::make(Load::make(a, {x}), x),
-                      Add::make(Load::make(a, {x - 5}), x)),
-                  1),
+                      Add::make(Load::make(a, {x - 5}), x))),
               Store::make(
                   a,
                   {x - 5},
                   IfThenElse::make(
                       CompareSelect::make(x, 5, CompareSelectOperation::kLT),
                       Add::make(Load::make(a, {x}), x),
-                      Add::make(Load::make(a, {x - 5}), x)),
-                  1)),
+                      Add::make(Load::make(a, {x - 5}), x)))),
       }))});
+  stmt = IRSimplifier::simplify(stmt);
 
   std::ostringstream before;
   before << *stmt;
@@ -1885,7 +1883,7 @@ TEST(Registerizer, RegisterizerCondIfThenElse) {
   BufHandle c("C", {5}, kInt);
   VarHandle x("x", kInt);
 
-  Stmt* stmt = Block::make({Cond::make(
+  StmtPtr stmt = Block::make({Cond::make(
       CompareSelect::make(
           IfThenElse::make(
               CompareSelect::make(
@@ -1935,7 +1933,7 @@ TEST(Registerizer, RegisterizerIfThenElseLoop) {
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
 
-  Stmt* stmt = For::make(
+  StmtPtr stmt = For::make(
       y,
       0,
       10,
@@ -1945,8 +1943,7 @@ TEST(Registerizer, RegisterizerIfThenElseLoop) {
           IfThenElse::make(
               CompareSelect::make(x, 3, CompareSelectOperation::kLT),
               Load::make(a, {x}),
-              Load::make(b, {y})),
-          1));
+              Load::make(b, {y}))));
 
   /*
    * for (int y = 0; y < 10; y++) {
@@ -1986,7 +1983,7 @@ TEST(Registerizer, RegisterizerIfThenElseLoopCut) {
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
 
-  Stmt* stmt = Block::make({For::make(
+  StmtPtr stmt = Block::make({For::make(
       y,
       0,
       10,
@@ -1996,8 +1993,7 @@ TEST(Registerizer, RegisterizerIfThenElseLoopCut) {
           IfThenElse::make(
               CompareSelect::make(x, 3, CompareSelectOperation::kLT),
               Load::make(a, {x}),
-              Load::make(a, {y})),
-          1))});
+              Load::make(a, {y}))))});
 
   /*
    * for (int y = 0; y < 10; y++) {
@@ -2023,7 +2019,7 @@ TEST(Registerizer, RegisterizerPartialAfter) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Store::make(a, {0}, 0),
        For::make(
            x,
@@ -2048,7 +2044,7 @@ TEST(Registerizer, RegisterizerPartialAfter) {
   /*
    * int A_1 = 0;
    * for (int x = 0; x < 10; x++) {
-   *   A_1 = A_1 + x;
+   *   A_1 = x + A_1;
    * }
    * A[0] = A_1;
    * for (int x = 1; x < 10; x++) {
@@ -2063,7 +2059,7 @@ TEST(Registerizer, RegisterizerPartialAfter) {
       R"IR(
 # CHECK: int A_1 = 0;
 # CHECK: for (
-# CHECK:   A_1 = A_1 + x;
+# CHECK:   A_1 = x + A_1;
 # CHECK: }
 # CHECK: A[0] = A_1;
 # CHECK: for (
@@ -2080,7 +2076,7 @@ TEST(Registerizer, RegisterizerPartialBefore) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {For::make(x, 1, 10, Store::make(a, {x}, Load::make(a, {x - 1}))),
        Store::make(a, {0}, 0),
        For::make(
@@ -2108,7 +2104,7 @@ TEST(Registerizer, RegisterizerPartialBefore) {
    * }
    * int A_1 = 0;
    * for (int x = 0; x < 10; x++) {
-   *   A_1 = A_1 + x;
+   *   A_1 = x + A_1;
    * }
    * A[0] = A_1;
    */
@@ -2124,7 +2120,7 @@ TEST(Registerizer, RegisterizerPartialBefore) {
 # CHECK: }
 # CHECK: int A_1 = 0;
 # CHECK: for (
-# CHECK:   A_1 = A_1 + x;
+# CHECK:   A_1 = x + A_1;
 # CHECK: }
 # CHECK: A[0] = A_1;)IR";
 
@@ -2139,7 +2135,7 @@ TEST(Registerizer, RegisterizerPartialInside) {
   VarHandle x1("x1", kInt);
   VarHandle x2("x2", kInt);
   VarHandle x3("x3", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Store::make(a, {0}, 2),
        For::make(
            x1, 0, 10, Store::make(a, {0}, Add::make(Load::make(a, {0}), x1))),
@@ -2165,7 +2161,7 @@ TEST(Registerizer, RegisterizerPartialInside) {
   /*
    * int A_1 = 2;
    * for (int x1 = 0; x1 < 10; x1++) {
-   *   A_1 = A_1 + x1;
+   *   A_1 = x1 + A_1;
    * }
    * A[0] = A_1;
    * for (int x2 = 1; x2 < 10; x2++) {
@@ -2173,7 +2169,7 @@ TEST(Registerizer, RegisterizerPartialInside) {
    * }
    * int A_2 = A[0];
    * for (int x3 = 0; x3 < 10; x3++) {
-   *   A_2 = A_2 + x3;
+   *   A_2 = x3 + A_2;
    * }
    * A[0] = A_2;
    */
@@ -2185,7 +2181,7 @@ TEST(Registerizer, RegisterizerPartialInside) {
       R"IR(
 # CHECK: int A_1 = 2;
 # CHECK: for (
-# CHECK:   A_1 = A_1 + x1;
+# CHECK:   A_1 = x1 + A_1;
 # CHECK: }
 # CHECK: A[0] = A_1;
 # CHECK: for (
@@ -2193,7 +2189,7 @@ TEST(Registerizer, RegisterizerPartialInside) {
 # CHECK: }
 # CHECK: int A_2 = A[0];
 # CHECK: for (
-# CHECK:   A_2 = A_2 + x3;
+# CHECK:   A_2 = x3 + A_2;
 # CHECK: }
 # CHECK: A[0] = A_2;)IR";
 
@@ -2207,7 +2203,7 @@ TEST(Registerizer, RegisterizerPartialCondition) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Store::make(a, {0}, 2),
        For::make(
            x, 0, 10, Store::make(a, {0}, Add::make(Load::make(a, {0}), x))),
@@ -2236,7 +2232,7 @@ TEST(Registerizer, RegisterizerPartialCondition) {
   /*
    * int A_1 = 2;
    * for (int x = 0; x < 10; x++) {
-   *   A_1 = A_1 + x;
+   *   A_1 = x + A_1;
    * }
    * A[0] = A_1;
    * if (x<5 ? 1 : 0) {
@@ -2244,7 +2240,7 @@ TEST(Registerizer, RegisterizerPartialCondition) {
    * }
    * int A_2 = A[0];
    * for (int x = 0; x < 10; x++) {
-   *   A_2 = A_2 + x;
+   *   A_2 = x + A_2;
    * }
    * A[0] = A_2;
    */
@@ -2256,7 +2252,7 @@ TEST(Registerizer, RegisterizerPartialCondition) {
       R"IR(
 # CHECK: int A_1 = 2;
 # CHECK: for (
-# CHECK:   A_1 = A_1 + x;
+# CHECK:   A_1 = x + A_1;
 # CHECK: }
 # CHECK: A[0] = A_1;
 # CHECK: if (
@@ -2264,7 +2260,7 @@ TEST(Registerizer, RegisterizerPartialCondition) {
 # CHECK: }
 # CHECK: int A_2 = A[0];
 # CHECK: for (
-# CHECK:   A_2 = A_2 + x;
+# CHECK:   A_2 = x + A_2;
 # CHECK: }
 # CHECK: A[0] = A_2;)IR";
 
@@ -2277,7 +2273,7 @@ TEST(Registerizer, RegisterizerPartialConditionInternalCut) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Store::make(a, {0}, 1),
        Store::make(a, {0}, 3),
        Cond::make(
@@ -2340,7 +2336,7 @@ TEST(Registerizer, RegisterizerPartialConditionInternalStart) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Store::make(a, {0}, 1),
        Store::make(a, {0}, 3),
        Cond::make(
@@ -2404,7 +2400,7 @@ TEST(Registerizer, RegisterizerPartialOverlapsTwo) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Store::make(a, {1}, Load::make(a, {0})),
        Store::make(a, {0}, Load::make(a, {1})),
        Store::make(a, {0}, Load::make(a, {1})),
@@ -2475,7 +2471,8 @@ TEST(Registerizer, RegisterizerNestedBlocks) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
+      // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
       {Store::make(a, {0}, Add::make(Load::make(a, {0}), 1)),
        Block::make({Store::make(a, {0}, Add::make(Load::make(a, {0}), 2))}),
        Block::make(
@@ -2528,7 +2525,7 @@ TEST(Registerizer, RegisterizerNestedConditions) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make({Cond::make(
+  StmtPtr stmt = Block::make({Cond::make(
       CompareSelect::make(x, 5, CompareSelectOperation::kLT),
       Block::make(
           {Store::make(a, {0}, Add::make(Load::make(a, {0}), 1)),
@@ -2584,7 +2581,7 @@ TEST(Registerizer, RegisterizerNestedConditionsUnhidden) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Store::make(a, {0}, Add::make(Load::make(a, {0}), 1)),
        Cond::make(
            CompareSelect::make(x, 5, CompareSelectOperation::kLT),
@@ -2640,7 +2637,7 @@ TEST(Registerizer, RegisterizerNestedConditionsHiddenFirst) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Cond::make(
            CompareSelect::make(x, 2, CompareSelectOperation::kEQ),
            Store::make(a, {0}, Add::make(Load::make(a, {0}), 1)),
@@ -2675,6 +2672,7 @@ TEST(Registerizer, RegisterizerNestedConditionsHiddenFirst) {
 
   ASSERT_EQ(before.str(), after.str());
 
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   stmt = registerize(stmt);
 }
 
@@ -2682,7 +2680,7 @@ TEST(Registerizer, RegisterizerNestedConditionsHiddenSecond) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Cond::make(
            CompareSelect::make(x, 5, CompareSelectOperation::kLT),
            Block::make({Cond::make(
@@ -2717,6 +2715,7 @@ TEST(Registerizer, RegisterizerNestedConditionsHiddenSecond) {
 
   ASSERT_EQ(before.str(), after.str());
 
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   stmt = registerize(stmt);
 }
 
@@ -2726,7 +2725,7 @@ TEST(Registerizer, RegisterizerNestedConditionsCut) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Store::make(a, {0}, Add::make(Load::make(a, {0}), 1)),
        Cond::make(
            CompareSelect::make(x, 5, CompareSelectOperation::kLT),
@@ -2766,7 +2765,7 @@ TEST(Registerizer, RegisterizerNestedConditionLoopHidden) {
   BufHandle a("A", {10}, kInt);
   BufHandle b("B", {10}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Cond::make(
            CompareSelect::make(x, 2, CompareSelectOperation::kEQ),
            Store::make(a, {0}, Add::make(Load::make(a, {0}), 1)),
@@ -2813,7 +2812,7 @@ TEST(Registerizer, RegisterizerNestedConditionThreeDeep) {
   BufHandle a("A", {10}, kInt);
   BufHandle b("B", {10}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Store::make(a, {4}, 0),
        Cond::make(
            CompareSelect::make(x, 2, CompareSelectOperation::kGT),
@@ -2913,7 +2912,7 @@ TEST(Registerizer, RegisterizerNestedLoopSimple) {
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
-  Stmt* stmt = Block::make({For::make(
+  StmtPtr stmt = Block::make({For::make(
       y,
       0,
       10,
@@ -2969,7 +2968,7 @@ TEST(Registerizer, RegisterizerHiddenAccessYes) {
   BufHandle b("B", {10}, kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
-  Stmt* stmt = Block::make({Cond::make(
+  StmtPtr stmt = Block::make({Cond::make(
       CompareSelect::make(x, 2, CompareSelectOperation::kEQ),
       Block::make(
           {Store::make(a, {0}, 0),
@@ -2979,6 +2978,7 @@ TEST(Registerizer, RegisterizerHiddenAccessYes) {
                10,
                Block::make(
                    {Store::make(b, {x}, 0),
+                    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
                     Cond::make(
                         CompareSelect::make(x, 3, CompareSelectOperation::kEQ),
                         For::make(
@@ -3051,7 +3051,7 @@ TEST(Registerizer, RegisterizerHiddenAccessNo) {
   BufHandle b("B", {10}, kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
-  Stmt* stmt = Block::make({Cond::make(
+  StmtPtr stmt = Block::make({Cond::make(
       CompareSelect::make(x, 2, CompareSelectOperation::kEQ),
       Block::make({For::make(
           x,
@@ -3059,6 +3059,7 @@ TEST(Registerizer, RegisterizerHiddenAccessNo) {
           10,
           Block::make(
               {Store::make(b, {x}, 0),
+               // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
                Cond::make(
                    CompareSelect::make(x, 3, CompareSelectOperation::kEQ),
                    For::make(
@@ -3130,7 +3131,7 @@ TEST(Registerizer, RegisterizerHiddenAccessMultiLoop) {
   BufHandle b("B", {10}, kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
-  Stmt* stmt = Block::make({Cond::make(
+  StmtPtr stmt = Block::make({Cond::make(
       CompareSelect::make(x, 2, CompareSelectOperation::kEQ),
       Block::make(
           {Store::make(a, {0}, 0),
@@ -3210,7 +3211,7 @@ TEST(Registerizer, RegisterizerTwoConditionalLoops) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Cond::make(
            CompareSelect::make(x, 5, CompareSelectOperation::kLT),
            For::make(
@@ -3282,7 +3283,7 @@ TEST(Registerizer, RegisterizerTwoConditionalLoopsCut) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Cond::make(
            CompareSelect::make(x, 5, CompareSelectOperation::kLT),
            For::make(
@@ -3365,7 +3366,7 @@ TEST(Registerizer, RegisterizerLoopLetVar) {
   BufHandle a("A", {10}, kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
-  Stmt* stmt = Block::make({For::make(
+  StmtPtr stmt = Block::make({For::make(
       x,
       0,
       10,
@@ -3399,7 +3400,7 @@ TEST(Registerizer, RegisterizerLoopLetVarOuter) {
   BufHandle a("A", {10}, kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Let::make(y, 30),
        For::make(
            x,
@@ -3446,7 +3447,7 @@ TEST(Registerizer, RegisterizerMultiDim) {
   KernelScope kernel_scope;
   BufHandle a("A", {3, 4, 5}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Store::make(a, {0, 1, 2}, 0),
        For::make(
            x,
@@ -3492,7 +3493,7 @@ TEST(Registerizer, RegisterizerMultiDimPartial) {
   KernelScope kernel_scope;
   BufHandle a("A", {3, 4, 5}, kInt);
   VarHandle x("x", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Store::make(a, {0, 1, 2}, 0),
        For::make(
            x,
@@ -3541,7 +3542,7 @@ TEST(Registerizer, RegisterizerMultiDimOverlap) {
   BufHandle a("A", {3, 4, 5}, kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Store::make(a, {0, 1, 2}, 0),
        For::make(
            x,
@@ -3549,6 +3550,7 @@ TEST(Registerizer, RegisterizerMultiDimOverlap) {
            10,
            Block::make({Store::make(
                a, {0, x, 2}, Add::make(Load::make(a, {y, 2, 2}), x))}))});
+  stmt = IRSimplifier::simplify(stmt);
 
   /*
    * A[0, 1, 2] = 0;
@@ -3575,7 +3577,7 @@ TEST(Registerizer, RegisterizerMultiDimPartialOverlap) {
   BufHandle a("A", {3, 4, 5}, kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {Store::make(a, {0, 1, 2}, 0),
        For::make(
            x,
@@ -3597,7 +3599,7 @@ TEST(Registerizer, RegisterizerMultiDimPartialOverlap) {
    * A[0, 1, 2] = 0;
    * int A_1 = A[y, 2, 4];
    * for (int x = 0; x < 10; x++) {
-   *   A[0, x, 2] = A_1 + x;
+   *   A[0, x, 2] = x + A_1;
    * }
    */
 
@@ -3609,7 +3611,7 @@ TEST(Registerizer, RegisterizerMultiDimPartialOverlap) {
 # CHECK: A[0, 1, 2] = 0;
 # CHECK: int A_1 = A[y, 2, 4];
 # CHECK: for (
-# CHECK:   A[0, x, 2] = A_1 + x;
+# CHECK:   A[0, x, 2] = x + A_1;
 # CHECK: })IR";
 
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
@@ -3624,7 +3626,7 @@ TEST(Registerizer, RegisterizerMultiDim3DReduction1) {
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
   VarHandle z("z", kInt);
-  Stmt* stmt = For::make(
+  StmtPtr stmt = For::make(
       x,
       0,
       10,
@@ -3641,8 +3643,7 @@ TEST(Registerizer, RegisterizerMultiDim3DReduction1) {
                   {x, y, z},
                   Add::make(
                       Load::make(c, {x, y, z}),
-                      Mul::make(
-                          Load::make(b, {x, y}, 1), Load::make(a, {x}, 1)))))));
+                      Mul::make(Load::make(b, {x, y}), Load::make(a, {x})))))));
 
   /*
    * for (int x = 0; x < 10; x++) {
@@ -3697,10 +3698,11 @@ TEST(Registerizer, RegisterizerMultiDim3DReduction2) {
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
   VarHandle z("z", kInt);
-  Stmt* stmt = For::make(
+  StmtPtr stmt = For::make(
       x,
       0,
       10,
+      // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
       For::make(
           y,
           0,
@@ -3734,12 +3736,12 @@ TEST(Registerizer, RegisterizerMultiDim3DReduction2) {
 
   /*
    * for (int x = 0; x < 10; x++) {
-   *   int A_1 = A[x];
    *   int C_1 = C[x];
+   *   int A_1 = A[x];
    *   for (int y = 0; y < 10; y++) {
    *     int B_1 = B[y];
    *     for (int z = 0; z < 10; z++) {
-   *       C_1 = B_1 * A_1 + C_1;
+   *       C_1 = C_1 + A_1 * B_1;
    *     }
    *   }
    *   C[x] = C_1;
@@ -3752,12 +3754,12 @@ TEST(Registerizer, RegisterizerMultiDim3DReduction2) {
   const std::string& verification_pattern =
       R"IR(
 # CHECK: for (int x
-# CHECK:   int A_1 = A[x];
 # CHECK:   int C_1 = C[x];
+# CHECK:   int A_1 = A[x];
 # CHECK:   for (int y
 # CHECK:     int B_1 = B[y];
 # CHECK:       for (int z
-# CHECK:         C_1 = B_1 * A_1 + C_1;
+# CHECK:         C_1 = C_1 + A_1 * B_1;
 # CHECK:       }
 # CHECK:     }
 # CHECK:   C[x] = C_1;

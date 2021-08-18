@@ -2,12 +2,13 @@ import argparse
 import os
 import sys
 import yaml
+from typing import Any, List, Optional, cast
 
 try:
     # use faster C loader if available
     from yaml import CSafeLoader as YamlLoader
 except ImportError:
-    from yaml import SafeLoader as YamlLoader
+    from yaml import SafeLoader as YamlLoader  # type: ignore[misc]
 
 source_files = {'.py', '.cpp', '.h'}
 
@@ -16,7 +17,7 @@ NATIVE_FUNCTIONS_PATH = 'aten/src/ATen/native/native_functions.yaml'
 
 # TODO: This is a little inaccurate, because it will also pick
 # up setup_helper scripts which don't affect code generation
-def all_generator_source():
+def all_generator_source() -> List[str]:
     r = []
     for directory, _, filenames in os.walk('tools'):
         for f in filenames:
@@ -26,15 +27,15 @@ def all_generator_source():
     return sorted(r)
 
 
-def generate_code(ninja_global=None,
-                  declarations_path=None,
-                  nn_path=None,
-                  native_functions_path=None,
-                  install_dir=None,
-                  subset=None,
-                  disable_autograd=False,
-                  force_schema_registration=False,
-                  operator_selector=None):
+def generate_code(ninja_global: Optional[str] = None,
+                  declarations_path: Optional[str] = None,
+                  nn_path: Optional[str] = None,
+                  native_functions_path: Optional[str] = None,
+                  install_dir: Optional[str] = None,
+                  subset: Optional[str] = None,
+                  disable_autograd: bool = False,
+                  force_schema_registration: bool = False,
+                  operator_selector: Any = None) -> None:
     from tools.autograd.gen_autograd import gen_autograd, gen_autograd_python
     from tools.autograd.gen_annotated_fn_args import gen_annotated
     from tools.codegen.selective_build.selector import SelectiveBuilder
@@ -86,7 +87,7 @@ def generate_code(ninja_global=None,
 
 def get_selector_from_legacy_operator_selection_list(
         selected_op_list_path: str,
-):
+) -> Any:
     with open(selected_op_list_path, 'r') as f:
         # strip out the overload part
         # It's only for legacy config - do NOT copy this code!
@@ -113,7 +114,10 @@ def get_selector_from_legacy_operator_selection_list(
     return selector
 
 
-def get_selector(selected_op_list_path, operators_yaml_path):
+def get_selector(
+    selected_op_list_path: Optional[str],
+    operators_yaml_path: Optional[str],
+) -> Any:
     # cwrap depends on pyyaml, so we can't import it earlier
     root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     sys.path.insert(0, root)
@@ -129,10 +133,10 @@ def get_selector(selected_op_list_path, operators_yaml_path):
     elif selected_op_list_path is not None:
         return get_selector_from_legacy_operator_selection_list(selected_op_list_path)
     else:
-        return SelectiveBuilder.from_yaml_path(operators_yaml_path)
+        return SelectiveBuilder.from_yaml_path(cast(str, operators_yaml_path))
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description='Autogenerate code')
     parser.add_argument('--declarations-path')
     parser.add_argument('--native-functions-path')

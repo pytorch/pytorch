@@ -32,11 +32,16 @@ int64_t _version(const Tensor& self) {
 }
 
 Tensor& requires_grad_(Tensor& self, bool _requires_grad) {
-  return self.requires_grad_(_requires_grad);
+  self.requires_grad_(_requires_grad);
+  return self;
 }
 
 void retain_grad(Tensor& self) {
   return self.retain_grad();
+}
+
+bool retains_grad(const Tensor& self) {
+  return self.retains_grad();
 }
 
 Tensor _fw_primal(const Tensor& self, int64_t level) {

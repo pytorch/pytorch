@@ -8,7 +8,7 @@ import uuid
 
 TEST_TENSORBOARD = True
 try:
-    import tensorboard.summary.writer.event_file_writer  # noqa F401
+    import tensorboard.summary.writer.event_file_writer  # noqa: F401
     from tensorboard.compat.proto.summary_pb2 import Summary
 except ImportError:
     TEST_TENSORBOARD = False
@@ -99,7 +99,7 @@ class TestTensorBoardPyTorchNumpy(BaseTestCase):
         self.assertIsInstance(make_np(0.1), np.ndarray)
 
     def test_pytorch_autograd_np(self):
-        x = torch.autograd.Variable(torch.Tensor(1))
+        x = torch.autograd.Variable(torch.empty(1))
         self.assertIsInstance(make_np(x), np.ndarray)
 
     def test_pytorch_write(self):
@@ -289,8 +289,8 @@ class TestTensorBoardSummaryWriter(BaseTestCase):
 class TestTensorBoardEmbedding(BaseTestCase):
     def test_embedding(self):
         w = self.createSummaryWriter()
-        all_features = torch.Tensor([[1, 2, 3], [5, 4, 1], [3, 7, 7]])
-        all_labels = torch.Tensor([33, 44, 55])
+        all_features = torch.tensor([[1., 2., 3.], [5., 4., 1.], [3., 7., 7.]])
+        all_labels = torch.tensor([33., 44., 55.])
         all_images = torch.zeros(3, 3, 5, 5)
 
         w.add_embedding(all_features,
@@ -309,8 +309,8 @@ class TestTensorBoardEmbedding(BaseTestCase):
 
     def test_embedding_64(self):
         w = self.createSummaryWriter()
-        all_features = torch.Tensor([[1, 2, 3], [5, 4, 1], [3, 7, 7]])
-        all_labels = torch.Tensor([33, 44, 55])
+        all_features = torch.tensor([[1., 2., 3.], [5., 4., 1.], [3., 7., 7.]])
+        all_labels = torch.tensor([33., 44., 55.])
         all_images = torch.zeros((3, 3, 5, 5), dtype=torch.float64)
 
         w.add_embedding(all_features,
@@ -363,32 +363,32 @@ class TestTensorBoardSummary(BaseTestCase):
             summary.image('dummy',
                           tensor_N(shape=(1, 8, 8)),
                           dataformats='CHW'),
-                          self))  # noqa E127
+                          self))  # noqa: E131
 
     def test_image_with_one_channel_batched(self):
         self.assertTrue(compare_image_proto(
             summary.image('dummy',
                           tensor_N(shape=(2, 1, 8, 8)),
                           dataformats='NCHW'),
-                          self))  # noqa E127
+                          self))  # noqa: E131
 
     def test_image_with_3_channel_batched(self):
         self.assertTrue(compare_image_proto(
             summary.image('dummy',
                           tensor_N(shape=(2, 3, 8, 8)),
                           dataformats='NCHW'),
-                          self))  # noqa E127
+                          self))  # noqa: E131
 
     def test_image_without_channel(self):
         self.assertTrue(compare_image_proto(
             summary.image('dummy',
                           tensor_N(shape=(8, 8)),
                           dataformats='HW'),
-                          self))  # noqa E127
+                          self))  # noqa: E131
 
     def test_video(self):
         try:
-            import moviepy  # noqa F401
+            import moviepy  # noqa: F401
         except ImportError:
             return
         self.assertTrue(compare_proto(summary.video('dummy', tensor_N(shape=(4, 3, 1, 8, 8))), self))
@@ -569,6 +569,41 @@ class TestTensorBoardPytorchGraph(BaseTestCase):
             self.assertEquals(
                 sorted(expected_node.attr.keys()), sorted(actual_node.attr.keys()))
 
+    def test_pytorch_graph_dict_input(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l = torch.nn.Linear(3, 5)
+
+            def forward(self, x):
+                return self.l(x)
+
+        class ModelDict(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l = torch.nn.Linear(3, 5)
+
+            def forward(self, x):
+                return {"out": self.l(x)}
+
+
+        dummy_input = torch.zeros(1, 3)
+
+        with self.createSummaryWriter() as w:
+            w.add_graph(Model(), dummy_input)
+
+        with self.createSummaryWriter() as w:
+            w.add_graph(Model(), dummy_input, use_strict_trace=True)
+
+        # expect error: Encountering a dict at the output of the tracer...
+        with self.assertRaises(RuntimeError):
+            with self.createSummaryWriter() as w:
+                w.add_graph(ModelDict(), dummy_input, use_strict_trace=True)
+
+        with self.createSummaryWriter() as w:
+            w.add_graph(ModelDict(), dummy_input, use_strict_trace=False)
+
+
     def test_mlp_graph(self):
         dummy_input = (torch.zeros(2, 1, 28, 28),)
 
@@ -661,11 +696,11 @@ class TestTensorBoardFigure(BaseTestCase):
             figures.append(figure)
 
         writer.add_figure("add_figure/figure_list", figures, 0, close=False)
-        self.assertTrue(all([plt.fignum_exists(figure.number) is True for figure in figures]))  # noqa F812
+        self.assertTrue(all([plt.fignum_exists(figure.number) is True for figure in figures]))  # noqa: F812
 
         writer.add_figure("add_figure/figure_list", figures, 1)
         if matplotlib.__version__ != '3.3.0':
-            self.assertTrue(all([plt.fignum_exists(figure.number) is False for figure in figures]))  # noqa F812
+            self.assertTrue(all([plt.fignum_exists(figure.number) is False for figure in figures]))  # noqa: F812
         else:
             print("Skipping fignum_exists, see https://github.com/matplotlib/matplotlib/issues/18163")
 

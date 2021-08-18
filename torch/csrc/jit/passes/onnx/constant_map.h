@@ -39,9 +39,10 @@ class ConstantValueMap {
   static void ClearMaps();
   ~ConstantValueMap() = default;
 
- private:
-  ConstantValueMap(){};
   ConstantValueMap& operator=(const ConstantValueMap&) = delete;
+
+ private:
+  ConstantValueMap() = default;
 
   std::unordered_map<std::string, size_t> rankMap;
   std::unordered_map<std::string, c10::SymbolicShape> shapeMap;

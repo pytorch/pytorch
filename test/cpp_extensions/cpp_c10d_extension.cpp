@@ -54,11 +54,11 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupTest::allgather(
   throw std::runtime_error("ProcessGroupTest does not support allgather");
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupTest::allgather_base(
+c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupTest::_allgather_base(
     at::Tensor& outputBuffer,
     at::Tensor& inputBuffer,
     const AllgatherOptions& opts) {
-  throw std::runtime_error("ProcessGroupTest does not support allgather_base");
+  throw std::runtime_error("ProcessGroupTest does not support _allgather_base");
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupTest::barrier(

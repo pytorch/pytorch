@@ -70,9 +70,9 @@ TEST(Expr, LetStmtTest01) {
 
   ExprHandle load_a = a_buf.load(0);
   VarHandle var = VarHandle("v", kFloat);
-  Stmt* let_store = Let::make(var, load_a);
-  Stmt* store_b = b_buf.store({0}, var);
-  Block* block = Block::make({let_store, store_b});
+  StmtPtr let_store = Let::make(var, load_a);
+  StmtPtr store_b = b_buf.store({0}, var);
+  BlockPtr block = Block::make({let_store, store_b});
 
   SimpleIREvaluator eval(block, {a_buf, b_buf});
 
@@ -184,18 +184,14 @@ TEST(Expr, VectorAdd01) {
     }
   */
   VarHandle index = VarHandle("index", kInt);
-  ExprHandle load_a = a_buf.loadWithMask(
-      {Ramp::make(index * kVectorSize, 1, kVectorSize)},
-      Broadcast::make(1, kVectorSize));
-  ExprHandle load_b = b_buf.loadWithMask(
-      {Ramp::make(index * kVectorSize, 1, kVectorSize)},
-      Broadcast::make(1, kVectorSize));
+  ExprHandle load_a =
+      a_buf.load({Ramp::make(index * kVectorSize, 1, kVectorSize)});
+  ExprHandle load_b =
+      b_buf.load({Ramp::make(index * kVectorSize, 1, kVectorSize)});
   ExprHandle value = load_a + load_b;
-  Stmt* store_c = c_buf.storeWithMask(
-      {Ramp::make(index * kVectorSize, 1, kVectorSize)},
-      value,
-      Broadcast::make(1, kVectorSize));
-  Stmt* stmt = For::make(index, 0, kVectorCount, store_c);
+  StmtPtr store_c =
+      c_buf.store({Ramp::make(index * kVectorSize, 1, kVectorSize)}, value);
+  StmtPtr stmt = For::make(index, 0, kVectorCount, store_c);
 
   ASSERT_EQ(load_a.dtype(), Dtype(kFloat, kVectorSize));
   ASSERT_EQ(load_b.dtype(), Dtype(kFloat, kVectorSize));
@@ -317,15 +313,16 @@ TEST(Expr, IntrinsicsDtypes) {
 
 TEST(Expr, Substitute01) {
   KernelScope kernel_scope;
-  const Var* x = new Var("x", kFloat);
-  const Var* y = new Var("y", kFloat);
-  const Expr* e = new Mul(new Sub(x, new FloatImm(1.0f)), new Add(x, y));
+  VarPtr x = alloc<Var>("x", kFloat);
+  VarPtr y = alloc<Var>("y", kFloat);
+  ExprPtr e =
+      alloc<Mul>(alloc<Sub>(x, alloc<FloatImm>(1.0f)), alloc<Add>(x, y));
 
-  const Var* z = new Var("z", kFloat);
-  const Expr* e2 = Substitute(e, {{x, new Add(z, new FloatImm(5.0f))}});
-  const Expr* e2_ref = new Mul(
-      new Sub(new Add(z, new FloatImm(5.0f)), new FloatImm(1.0f)),
-      new Add(new Add(z, new FloatImm(5.0f)), y));
+  VarPtr z = alloc<Var>("z", kFloat);
+  ExprPtr e2 = Substitute(e, {{x, alloc<Add>(z, alloc<FloatImm>(5.0f))}});
+  ExprPtr e2_ref = alloc<Mul>(
+      alloc<Sub>(alloc<Add>(z, alloc<FloatImm>(5.0f)), alloc<FloatImm>(1.0f)),
+      alloc<Add>(alloc<Add>(z, alloc<FloatImm>(5.0f)), y));
   std::ostringstream oss;
   oss << *e2;
   std::string e2_str = oss.str();
@@ -410,6 +407,7 @@ TEST(Expr, UnaryMath01) {
     ASSERT_NEAR(eval.value<float>(), v_ref, 1e-6);
   }
 
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   for (float input_v : {std::nan("1"), 0., .5}) {
     ExprHandle v = FloatImm::make(input_v);
     SimpleIRExprEval eval(Intrinsics::make(kIsNan, v));
@@ -441,6 +439,116 @@ TEST(Expr, BinaryMath01) {
   }
 }
 
+TEST(Expr, LogicalOps01) {
+  KernelScope kernel_scope;
+  ExprHandle a(23);
+  ExprHandle b(11);
+  ExprHandle c(0.72f);
+  ExprHandle d(0.69f);
+  ExprHandle f1 = (a > b) && (c > d);
+  ExprHandle f2 = (a > b) && (c < d);
+  ExprHandle f3 = (a < b) && (c > d);
+  ExprHandle f4 = (a < b) && (c < d);
+  ExprHandle f5 = (a < b) || (c > d);
+  ExprHandle f6 = (a < b) || (c < d);
+  ExprHandle f7 = (a > b) || (c < d);
+  ExprHandle f8 = (a > b) || (c > d);
+
+  SimpleIRExprEval eval1(f1);
+  SimpleIRExprEval eval2(f2);
+  SimpleIRExprEval eval3(f3);
+  SimpleIRExprEval eval4(f4);
+  SimpleIRExprEval eval5(f5);
+  SimpleIRExprEval eval6(f6);
+  SimpleIRExprEval eval7(f7);
+  SimpleIRExprEval eval8(f8);
+  ASSERT_EQ(eval1.value<int>(), 1);
+  ASSERT_EQ(eval2.value<int>(), 0);
+  ASSERT_EQ(eval3.value<int>(), 0);
+  ASSERT_EQ(eval4.value<int>(), 0);
+  ASSERT_EQ(eval5.value<int>(), 1);
+  ASSERT_EQ(eval6.value<int>(), 0);
+  ASSERT_EQ(eval7.value<int>(), 1);
+  ASSERT_EQ(eval8.value<int>(), 1);
+}
+
+TEST(Expr, LogicalOps02) {
+  KernelScope kernel_scope;
+  ExprHandle a(23);
+  ExprHandle b(11);
+  ExprHandle c(0.72f);
+  ExprHandle d(0.72f);
+
+  ExprHandle f1 = (a > b) || (c > d);
+  ExprHandle f2 = (a > b) && (c <= d);
+  ExprHandle f3 = (a > b) && (c > d);
+  ExprHandle ff1 = f1 && f2;
+  ExprHandle ff2 = f2 || f3;
+
+  SimpleIRExprEval eval1(ff1);
+  SimpleIRExprEval eval2(ff2);
+  ASSERT_EQ(eval1.value<int>(), 1);
+  ASSERT_EQ(eval2.value<int>(), 1);
+}
+
+TEST(Expr, LogicalOps03) {
+  KernelScope kernel_scope;
+  ExprHandle a(23);
+  ExprHandle b(11);
+  ExprHandle c(0.72f);
+  ExprHandle d(0.69f);
+
+  // Bool types
+  ExprHandle bool_f1 = (a > b) && BoolImm::make(true);
+  ExprHandle bool_f2 = (c <= d) || BoolImm::make(true);
+
+  // Int types
+  ExprHandle int_f1 = (a > b) && IntImm::make(1);
+  ExprHandle int_f2 = (c <= d) || IntImm::make(1);
+
+  // Short types
+  ExprHandle short_f1 = (a > b) && ShortImm::make(1);
+  ExprHandle short_f2 = (c <= d) || ShortImm::make(1);
+
+  // Long types
+  ExprHandle long_f1 = (a > b) && LongImm::make(1);
+  ExprHandle long_f2 = (c <= d) || LongImm::make(1);
+
+  // Char types
+  ExprHandle char_f1 = (a > b) && CharImm::make(1);
+  ExprHandle char_f2 = (c <= d) || CharImm::make(1);
+
+  // Byte types
+  ExprHandle byte_f1 = (a > b) && ByteImm::make(1);
+  ExprHandle byte_f2 = (c <= d) || ByteImm::make(1);
+
+  SimpleIRExprEval eval1(bool_f1);
+  SimpleIRExprEval eval2(bool_f2);
+  SimpleIRExprEval eval3(int_f1);
+  SimpleIRExprEval eval4(int_f2);
+  SimpleIRExprEval eval5(short_f1);
+  SimpleIRExprEval eval6(short_f2);
+  SimpleIRExprEval eval7(long_f1);
+  SimpleIRExprEval eval8(long_f2);
+  SimpleIRExprEval eval9(char_f1);
+  SimpleIRExprEval eval10(char_f2);
+  SimpleIRExprEval eval11(byte_f1);
+  SimpleIRExprEval eval12(byte_f2);
+
+  ASSERT_EQ(eval1.value<bool>(), true);
+  ASSERT_EQ(eval2.value<bool>(), true);
+  ASSERT_EQ(eval3.value<int>(), 1);
+  ASSERT_EQ(eval4.value<int>(), 1);
+  ASSERT_EQ(eval5.value<int16_t>(), 1);
+  ASSERT_EQ(eval6.value<int16_t>(), 1);
+  ASSERT_EQ(eval7.value<int64_t>(), 1);
+  ASSERT_EQ(eval8.value<int64_t>(), 1);
+  ASSERT_EQ(eval9.value<int8_t>(), 1);
+  ASSERT_EQ(eval10.value<int8_t>(), 1);
+  ASSERT_EQ(eval11.value<uint8_t>(), 1);
+  ASSERT_EQ(eval12.value<uint8_t>(), 1);
+}
+
 TEST(Expr, BitwiseOps) {
   KernelScope kernel_scope;
   ExprHandle a(59);
@@ -461,7 +569,7 @@ TEST(Expr, DynamicShapeAdd) {
     Placeholder b(BufHandle("b", {n}, kFloat));
     Placeholder c(BufHandle("c", {n}, kFloat));
     VarHandle i("i", kInt);
-    Stmt* s = For::make(i, 0, n, c.store({i}, a.load(i) + b.load(i)));
+    StmtPtr s = For::make(i, 0, n, c.store({i}, a.load(i) + b.load(i)));
     std::vector<float> aData(size, 1.0f);
     std::vector<float> bData(size, 2.0f);
     std::vector<float> cData(size, 0.0f);
@@ -479,11 +587,11 @@ void testCond01() {
   PaddedBuffer<float> a_v(N);
   Placeholder a_buf("a", kFloat, {N});
   VarHandle index = VarHandle("index", kInt);
-  Stmt* assign_x2 = a_buf.store({index}, cast<float>(index) * 2);
-  Stmt* assign_x3 = a_buf.store({index}, cast<float>(index) * 3);
+  StmtPtr assign_x2 = a_buf.store({index}, cast<float>(index) * 2);
+  StmtPtr assign_x3 = a_buf.store({index}, cast<float>(index) * 3);
   ExprHandle even_cond = CompareSelect::make(Mod::make(index, 2), 0, kEQ);
-  Stmt* assign = Cond::make(even_cond, assign_x2, assign_x3);
-  Stmt* for_stmt = For::make(index, 0, N, assign);
+  StmtPtr assign = Cond::make(even_cond, assign_x2, assign_x3);
+  StmtPtr for_stmt = For::make(index, 0, N, assign);
   SimpleIREvaluator(for_stmt, {a_buf})(a_v);
 
   PaddedBuffer<float> a_ref(N);
@@ -540,10 +648,10 @@ void testStmtClone() {
 
   Placeholder a_buf("a", kInt, {N});
   VarHandle index = VarHandle("index", kInt);
-  Stmt* body = a_buf.store({index}, 5);
-  Stmt* loop = For::make(index, 0, N, body);
+  StmtPtr body = a_buf.store({index}, 5);
+  StmtPtr loop = For::make(index, 0, N, body);
 
-  Stmt* cloned_loop = Stmt::clone(loop);
+  StmtPtr cloned_loop = Stmt::clone(loop);
   std::vector<int> orig_loop_results(N);
   std::vector<int> cloned_loop_results(N);
   SimpleIREvaluator(loop, {a_buf})(orig_loop_results);
@@ -554,9 +662,8 @@ void testStmtClone() {
 
   // Let's add another assign to the body in the cloned loop and verify that the
   // original statement hasn't changed while the cloned one has.
-  Stmt* body_addition = a_buf.store({index}, 33);
-  Block* cloned_body =
-      static_cast<Block*>(static_cast<const For*>(cloned_loop)->body());
+  StmtPtr body_addition = a_buf.store({index}, 33);
+  BlockPtr cloned_body = static_to<Block>(static_to<For>(cloned_loop)->body());
   cloned_body->append_stmt(body_addition);
 
   std::vector<int> orig_loop_results_after_mutation(N);

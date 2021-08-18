@@ -5,7 +5,7 @@ import operator
 import traceback
 
 from .graph import magic_methods, reflectable_magic_methods, Graph
-from typing import Tuple, Dict, Optional, Iterable, Any, Iterator
+from typing import Tuple, Dict, Optional, Iterable, Any, Iterator, Callable
 from .node import Target, Node, Argument, base_types, map_aggregate
 
 class TracerBase:
@@ -27,8 +27,11 @@ class TracerBase:
     def proxy(self, node: Node) -> 'Proxy':
         return Proxy(node, self)
 
+
+
     def create_proxy(self, kind: str, target: Target, args: Tuple[Any, ...], kwargs: Dict[str, Any],
-                     name: Optional[str] = None, type_expr : Optional[Any] = None):
+                     name: Optional[str] = None, type_expr : Optional[Any] = None,
+                     proxy_factory_fn: Callable[[Node], 'Proxy'] = None):
         '''
         Create a Node from the given arguments, then return the Node
         wrapped in a Proxy object.
@@ -43,14 +46,20 @@ class TracerBase:
         kwargs_ = self.create_arg(kwargs)
         assert isinstance(args_, tuple)
         assert isinstance(kwargs_, dict)
-        proxy = self.proxy(self.create_node(kind, target, args_, kwargs_, name, type_expr))
+
+        node = self.create_node(kind, target, args_, kwargs_, name, type_expr)
+
+        if not proxy_factory_fn:
+            proxy = self.proxy(node)
+        else:
+            proxy = proxy_factory_fn(node)
 
         # Optionally set stack trace on the created Node for debugging purposes
         if self.record_stack_traces:
             user_frame = self._find_user_frame()
             if user_frame:
                 walk_stack_gen = traceback.walk_stack(user_frame)
-                summary = traceback.StackSummary.extract(walk_stack_gen)  # type: ignore
+                summary = traceback.StackSummary.extract(walk_stack_gen)  # type: ignore[arg-type]
                 tb_lines = summary.format()
                 proxy.node.stack_trace = ''.join(tb_lines)
 
@@ -84,13 +93,15 @@ class TracerBase:
 
         Can be override to support more trace-specific types.
         """
+        if not isinstance(a, Proxy) and hasattr(a, '__fx_create_arg__'):
+            return a.__fx_create_arg__(self)
         # aggregates
-        if isinstance(a, tuple) and hasattr(a, '_fields'):
+        elif isinstance(a, tuple) and hasattr(a, '_fields'):
             # NamedTuple constructors don't seem to like getting a generator
             # expression as an argument to their constructor, so build this
             # intermediate tuple and unpack it into the NamedTuple constructor
             args = tuple(self.create_arg(elem) for elem in a)
-            return type(a)(*args)  # type: ignore
+            return type(a)(*args)  # type: ignore[arg-type]
         elif isinstance(a, (tuple, list)):
             return type(a)(self.create_arg(elem) for elem in a)
         elif isinstance(a, dict):
@@ -134,8 +145,14 @@ class TracerBase:
         we don't know the value of the proxy, but a custom tracer can attach more
         information to the graph node using create_node and can choose to return an iterator.
         """
-        raise TraceError('Proxy object cannot be iterated. '
-                         'This can be attempted when used in a for loop or as a *args or **kwargs function argument.')
+        raise TraceError('Proxy object cannot be iterated. This can be '
+                         'attempted when the Proxy is used in a loop or'
+                         ' as a *args or **kwargs function argument. '
+                         'See the torch.fx docs on pytorch.org for a '
+                         'more detailed explanation of what types of '
+                         'control flow can be traced, and check out the'
+                         ' Proxy docstring for help troubleshooting '
+                         'Proxy iteration errors')
 
     def keys(self, obj: 'Proxy') -> Any:
         """Called when a proxy object is has the keys() method called.
@@ -165,6 +182,23 @@ class Proxy:
     If you're doing graph transforms, you can wrap your own ``Proxy``
     method around a raw ``Node`` so that you can use the overloaded
     operators to add additional things to a ``Graph``.
+
+    ``Proxy`` objects cannot be iterated. In other words, the symbolic
+    tracer will throw an error if a ``Proxy`` is used in a loop or as
+    an ``*args``/``**kwargs`` function argument.
+
+    There are two main ways around this:
+    1. Factor out the untraceable logic into a top-level function and
+    use ``fx.wrap`` on it.
+    2. If the control flow is static (i.e. the loop trip count is
+    based on some hyperparameter), the code can be kept in its original
+    position and refactored into something like::
+
+        for i in range(self.some_hyperparameter):
+            indexed_item = proxied_value[i]
+
+    For a more detailed description into the Proxy internals, check out
+    the "Proxy" section in `torch/fx/OVERVIEW.md`
     """
     def __init__(self, node: Node, tracer: 'Optional[TracerBase]' = None):
         if tracer is None:
@@ -191,7 +225,7 @@ class Proxy:
         assert calling_frame is not None
         inst = list(dis.get_instructions(calling_frame.f_code))[calling_frame.f_lasti // 2]
         if inst.opname == 'UNPACK_SEQUENCE':
-            return (self[i] for i in range(inst.argval))  # type: ignore
+            return (self[i] for i in range(inst.argval))  # type: ignore[index]
 
         return self.tracer.iter(self)
 
@@ -209,9 +243,9 @@ class Proxy:
     def __torch_function__(self, orig_method, types, args=None, kwargs=None):
         args = args if args else ()
         kwargs = kwargs if kwargs else {}
+
         if isinstance(orig_method, torch._C.ScriptMethod):
-            assert isinstance(args[0], torch._C.ScriptMethod)
-            args = (args[0].owner,) + args[1:]
+            args = (orig_method.owner,) + args
             return self.tracer.create_proxy('call_method', orig_method.name, args, kwargs)
         if torch.overrides.is_tensor_method_or_property(orig_method):
             return self.tracer.create_proxy('call_method', orig_method.__name__, args, kwargs)
@@ -236,6 +270,43 @@ class Attribute(Proxy):
 
     def __call__(self, *args, **kwargs):
         return self.tracer.create_proxy('call_method', self.attr, (self.root,) + args, kwargs)
+
+
+class ParameterProxy(Proxy):
+    """
+    a special proxy which lets "shape", "size", "dim", and a few other
+    attribute accesses pass through to the underlying  module parameter object,
+    so that conditional tests on these attributes will not throw exception during tracing
+    """
+    def __init__(self, tracer: TracerBase, node: Node, name, param):
+        super().__init__(node, tracer)
+        assert(isinstance(param, torch.nn.Parameter))
+        self.param = param
+        self.name = name
+
+    def __repr__(self) -> str:
+        return f'ParameterProxy({self.name})'
+
+    @property
+    def shape(self):
+        return self.param.shape
+
+    def size(self):
+        return self.param.size()
+
+    def dim(self):
+        return self.param.dim()
+
+    @property
+    def ndim(self):
+        return self.param.ndim
+
+    def numel(self):
+        return self.param.numel()
+
+    def nelement(self):
+        return self.param.nelement()
+
 
 for method in magic_methods:
     def scope(method):

@@ -192,6 +192,7 @@ graph(%x: Tensor, %y: Tensor):
   }
 }
 
+// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 static constexpr char op_list[] = "foofoo::bar.template;foo::another";
 #define TORCH_SELECTIVE_NAME_IN_SCHEMA(l, n)                                   \
   torch::detail::SelectiveStr<c10::impl::op_allowlist_contains_name_in_schema( \
@@ -204,6 +205,7 @@ TEST(TestCustomOperator, OperatorGeneratorUndeclared) {
       TORCH_SELECTIVE_NAME_IN_SCHEMA(
           op_list, "foofoo::not_exist(float a, Tensor b) -> Tensor"),
       [](Stack* stack) {
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         double a;
         at::Tensor b;
         pop(stack, a, b);
@@ -222,6 +224,7 @@ TEST(TestCustomOperator, OperatorGeneratorBasic) {
       TORCH_SELECTIVE_NAME_IN_SCHEMA(
           op_list, "foofoo::bar.template(float a, Tensor b) -> Tensor"),
       [](Stack* stack) {
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         double a;
         at::Tensor b;
         pop(stack, a, b);

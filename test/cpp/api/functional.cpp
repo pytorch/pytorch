@@ -250,6 +250,7 @@ TEST_F(FunctionalTest, SmoothL1LossBeta) {
   auto input = torch::tensor({0.1, 1.5, 10.0}, torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({0., 1., 5.}, torch::kFloat);
   auto output =
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,bugprone-argument-comment)
       F::smooth_l1_loss(input, target, /*reduction=*/torch::kMean, /*beta=*/0.5);
   auto expected = torch::tensor(1.67, torch::kFloat);
   auto s = output.sum();
@@ -262,6 +263,7 @@ TEST_F(FunctionalTest, SmoothL1LossNoReduction) {
   auto input = torch::tensor({0.1, 1.2, 4.7}, torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({0., 1., 5.}, torch::kFloat);
   auto output =
+      // NOLINTNEXTLINE(bugprone-argument-comment)
       F::smooth_l1_loss(input, target, /*reduction=*/torch::kNone);
   auto expected = torch::tensor({0.005, 0.02, 0.045}, torch::kFloat);
   auto s = output.sum();
@@ -939,7 +941,7 @@ TEST_F(FunctionalTest, GELU) {
   const auto x = torch::linspace(-3.0, 3.0, 100);
   const auto y_exp = x * 0.5 * (1.0 + torch::erf(x / std::sqrt(2.0)));
   const auto y = F::gelu(x);
-  ASSERT_TRUE(torch::allclose(y, y_exp));
+  ASSERT_TRUE(torch::allclose(y, y_exp, 1.4e-06, 1e-05));
 }
 
 TEST_F(FunctionalTest, Hardshrink) {
@@ -1105,7 +1107,9 @@ TEST_F(FunctionalTest, GumbelSoftmax) {
   }
 
   // Test 4: 3D shape, 1 and -1 dim
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   int dims[] = {1, -1};
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers)
   int expected[] = {5*3, 5*4};
   for(auto i=0; i<2; i++) {
     auto logits = torch::randn({5, 4, 3});
@@ -1151,6 +1155,7 @@ TEST_F(FunctionalTest, GumbelSoftmax) {
 
 TEST_F(FunctionalTest, Softmax) {
   auto input = torch::arange(10, torch::kFloat).reshape({2, 5});
+  // NOLINTNEXTLINE(bugprone-argument-comment)
   auto output = F::softmax(input, /*dim=*/1);
   auto sum = torch::sum(torch::exp(input), 1);
 
@@ -1162,6 +1167,7 @@ TEST_F(FunctionalTest, Softmax) {
 
 TEST_F(FunctionalTest, Softmin) {
   auto input = torch::arange(10, torch::kFloat).reshape({2, 5});
+  // NOLINTNEXTLINE(bugprone-argument-comment)
   auto output = F::softmin(input, /*dim=*/1);
   auto sum = torch::sum(torch::exp(-input), 1);
 
@@ -1173,6 +1179,7 @@ TEST_F(FunctionalTest, Softmin) {
 
 TEST_F(FunctionalTest, LogSoftmax) {
   auto input = torch::arange(10, torch::kFloat).reshape({2, 5});
+  // NOLINTNEXTLINE(bugprone-argument-comment)
   auto output = F::log_softmax(input, /*dim=*/1);
   auto sum = torch::sum(torch::exp(input), 1);
 
@@ -1283,8 +1290,8 @@ TEST_F(FunctionalTest, EmbeddingBag) {
   auto offsets = torch::tensor({0,4}, torch::kLong);
   auto weight = torch::empty({10, 3});
   torch::nn::init::normal_(weight);
-  auto y = F::embedding_bag(input, weight, F::EmbeddingBagFuncOptions().mode(torch::kSum).offsets(offsets));
-  auto y_exp = std::get<0>(torch::embedding_bag(weight, input, offsets, false, 0, false, torch::Tensor()));
+  auto y = F::embedding_bag(input, weight, F::EmbeddingBagFuncOptions().mode(torch::kSum).offsets(offsets).padding_idx(4));
+  auto y_exp = std::get<0>(torch::embedding_bag(weight, input, offsets, false, 0, false, torch::Tensor(), false, 4));
   ASSERT_TRUE(torch::allclose(y, y_exp));
 
   // no options test
@@ -1366,6 +1373,7 @@ TEST_F(FunctionalTest, ReLU) {
       ASSERT_TRUE(torch::allclose(x, y_exp));
     }
 
+    // NOLINTNEXTLINE(bugprone-argument-comment)
     y = F::relu(x, /*inplace=*/inplace);
 
     ASSERT_EQ(y.ndimension(), 3);
@@ -1405,6 +1413,7 @@ TEST_F(FunctionalTest, ReLU6) {
       ASSERT_TRUE(torch::allclose(x, y_exp));
     }
 
+    // NOLINTNEXTLINE(bugprone-argument-comment)
     y = F::relu6(x, /*inplace=*/inplace);
 
     ASSERT_EQ(y.ndimension(), 3);
@@ -1611,6 +1620,7 @@ TEST_F(FunctionalTest, Softshrink) {
   for (const auto lambda : {0.0, 0.42, 1.0, 4.2, 42.42}) {
     auto x = torch::linspace(-10.0, 10.0, size * size * size);
     x.resize_({size, size, size}).set_requires_grad(true);
+    // NOLINTNEXTLINE(bugprone-argument-comment)
     auto y = F::softshrink(x, /*lambda=*/lambda);
     torch::Tensor s = y.sum();
 
@@ -1644,6 +1654,14 @@ TEST_F(FunctionalTest, Softsign) {
   auto x = torch::randn(100) * 10;
   auto y_exp = x / (1 + x.abs());
   auto y = F::softsign(x);
+
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
+TEST_F(FunctionalTest, Mish) {
+  auto x = torch::randn(100) * 10;
+  auto y_exp = x * x.exp().log1p().tanh();
+  auto y = F::mish(x);
 
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
@@ -2204,6 +2222,36 @@ TEST_F(FunctionalTest, Pad) {
            { 9.,  9., 10., 11., 11., 11.},
            { 9.,  9., 10., 11., 11., 11.}}}}}, torch::kDouble);
     ASSERT_EQ(output.sizes(), std::vector<int64_t>({1, 1, 5, 5, 6}));
+    ASSERT_TRUE(output.allclose(expected, 1e-04));
+  }
+  {
+    auto input = torch::arange(18, torch::kDouble).reshape({1, 1, 3, 2, 3});
+    auto output = F::pad(input, F::PadFuncOptions({0, 2, 1, 0, 1, 2}).mode(torch::kReflect));
+    auto expected = torch::tensor(
+       {{{{{ 9.,  10.,  11.,  10.,  9.},
+           { 6.,   7.,   8.,   7.,  6.},
+           { 9.,  10.,  11.,  10.,  9.}},
+
+          {{ 3.,  4.,  5.,  4.,  3.},
+           { 0.,  1.,  2.,  1.,  0.},
+           { 3.,  4.,  5.,  4.,  3.}},
+
+          {{ 9.,  10.,  11.,  10.,  9.},
+           { 6.,   7.,   8.,   7.,  6.},
+           { 9.,  10.,  11.,  10.,  9.}},
+
+          {{ 15.,  16.,  17.,  16.,  15.},
+           { 12.,  13.,  14.,  13.,  12.},
+           { 15.,  16.,  17.,  16.,  15.}},
+
+          {{ 9.,  10.,  11.,  10.,  9.},
+           { 6.,   7.,   8.,   7.,  6.},
+           { 9.,  10.,  11.,  10.,  9.}},
+
+          {{ 3.,  4.,  5.,  4.,  3.},
+           { 0.,  1.,  2.,  1.,  0.},
+           { 3.,  4.,  5.,  4.,  3.}}}}}, torch::kDouble);
+    ASSERT_EQ(output.sizes(), std::vector<int64_t>({1, 1, 6, 3, 5}));
     ASSERT_TRUE(output.allclose(expected, 1e-04));
   }
   {
@@ -2894,6 +2942,7 @@ TEST_F(FunctionalTest, BCEWithLogitsLoss) {
       F::BinaryCrossEntropyWithLogitsFuncOptions().pos_weight(pos_weight).reduction(torch::kSum)
     ).backward();
     const auto expected_grad = torch::empty({3, 1}).fill_(0.5);
+    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
     const auto grad = output.grad();
     ASSERT_TRUE(torch::allclose(grad, expected_grad));
   }

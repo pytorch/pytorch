@@ -2,8 +2,8 @@
 // https://github.com/JuliaLang/julia/blob/v1.1.0/src/support/strtod.c
 
 #include <ATen/core/Macros.h>
-#include <locale.h>
-#include <stdlib.h>
+#include <clocale>
+#include <cstdlib>
 
 #if defined(__APPLE__) || defined(__FreeBSD__)
 #include <xlocale.h>
@@ -21,10 +21,10 @@
 // respective
 //   C stdlib functions
 
-#include <ctype.h>
-#include <errno.h>
-#include <math.h>
-#include <string.h>
+#include <cctype>
+#include <cerrno>
+#include <cmath>
+#include <cstring>
 #include <locale>
 
 #define D_PNAN ((double)+NAN)

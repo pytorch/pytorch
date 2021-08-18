@@ -3,7 +3,8 @@
 
 import torch
 import torch.nn as nn
-
+from torch import Tensor
+from typing import Tuple, Optional
 
 class RNNModel(nn.Module):
     """Container module with an encoder, a recurrent module, and a decoder."""
@@ -71,3 +72,33 @@ class RNNModel(nn.Module):
                     weight.new(self.nlayers, bsz, self.nhid).zero_())
         else:
             return weight.new(self.nlayers, bsz, self.nhid).zero_()
+
+class RNNModelWithTensorHidden(RNNModel):
+    """Supports GRU scripting."""
+    @staticmethod
+    def repackage_hidden(h):
+        """Detach hidden states from their history."""
+        return h.detach()
+
+    def forward(self, input: Tensor, hidden: Tensor):
+        emb = self.drop(self.encoder(input))
+        output, hidden = self.rnn(emb, hidden)
+        output = self.drop(output)
+        decoded = self.decoder(output.view(output.size(0) * output.size(1), output.size(2)))
+        self.hidden = RNNModelWithTensorHidden.repackage_hidden(hidden)
+        return decoded.view(output.size(0), output.size(1), decoded.size(1))
+
+class RNNModelWithTupleHidden(RNNModel):
+    """Supports LSTM scripting."""
+    @staticmethod
+    def repackage_hidden(h: Tuple[Tensor, Tensor]):
+        """Detach hidden states from their history."""
+        return (h[0].detach(), h[1].detach())
+
+    def forward(self, input: Tensor, hidden: Optional[Tuple[Tensor, Tensor]] = None):
+        emb = self.drop(self.encoder(input))
+        output, hidden = self.rnn(emb, hidden)
+        output = self.drop(output)
+        decoded = self.decoder(output.view(output.size(0) * output.size(1), output.size(2)))
+        self.hidden = self.repackage_hidden(tuple(hidden))
+        return decoded.view(output.size(0), output.size(1), decoded.size(1))

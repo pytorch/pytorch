@@ -14,7 +14,7 @@ class WithTorchFunction:
             self._tensor = data
             return
 
-        self._tensor = torch.Tensor(data, requires_grad)
+        self._tensor = torch.tensor(data, requires_grad=requires_grad)
 
     def __torch_function__(self, func, types, args=(), kwargs=None):
         if kwargs is None:

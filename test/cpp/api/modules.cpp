@@ -590,7 +590,9 @@ TEST_F(ModulesTest, Unflatten) {
   // Named tensor
   auto make_dimnames = [](std::vector<std::string> names) {
     std::vector<torch::Dimname> dimnames;
+    // NOLINTNEXTLINE(performance-for-range-copy)
     for (auto name : names) {
+      // NOLINTNEXTLINE(performance-inefficient-vector-operation)
       dimnames.push_back(
           torch::Dimname::fromSymbol(torch::Symbol::dimname(name)));
     }
@@ -2817,6 +2819,15 @@ TEST_F(ModulesTest, GELU) {
   const auto x = torch::linspace(-3.0, 3.0, 100);
   const auto y_exp = x * 0.5 * (1.0 + torch::erf(x / std::sqrt(2.0)));
   const auto y = model(x);
+  ASSERT_TRUE(torch::allclose(y, y_exp, 1.4e-06, 1e-05));
+}
+
+TEST_F(ModulesTest, Mish) {
+  Mish model;
+  auto x = torch::randn(100) * 10;
+  auto y_exp = x * x.exp().log1p().tanh();
+  auto y = model(x);
+
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
@@ -3322,6 +3333,7 @@ TEST_F(ModulesTest, BCEWithLogitsLoss) {
       BCEWithLogitsLossOptions().pos_weight(pos_weight).reduction(torch::kSum)
     )(output, target).backward();
     const auto expected_grad = torch::empty({3, 1}).fill_(0.5);
+    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
     const auto grad = output.grad();
     ASSERT_TRUE(torch::allclose(grad, expected_grad));
   }
@@ -3400,6 +3412,7 @@ namespace detail {
     }
     auto reference = _softmax(QKT);
     auto ref_attn_weight = reference;
+    // NOLINTNEXTLINE(bugprone-argument-comment)
     ref_attn_weight = torch::sum(ref_attn_weight, /*axis=*/1) / b2;
     reference = _batchmatmul(reference, V);
     return std::tie(reference, ref_attn_weight);
@@ -3418,7 +3431,9 @@ namespace detail {
   }
 
   torch::Tensor _fc(torch::Tensor X, torch::Tensor X_weight, torch::Tensor X_bias) {
+    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
     auto X_fc_b = X_bias;
+    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
     auto X_fc_w = X_weight;
     return torch::matmul(X, torch::t(X_fc_w)) + X_fc_b;
   }
@@ -3437,6 +3452,7 @@ namespace detail {
       const auto d_head = d_3_10(generator);
       const auto nheads = d_3_10(generator);
       const auto d_model = d_head * nheads;
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int kv_dim;
       if (same_embed_dim) {
         kv_dim = d_model;
@@ -3467,6 +3483,7 @@ namespace detail {
       }
       const auto decoder_state = torch::rand({batch_sz, d_model});
       const torch::Tensor K = torch::rand(dims);
+      // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
       const torch::Tensor V = K;
       const torch::Tensor Q = decoder_state.clone().resize_({batch_sz, 1, d_model});
       auto attn_mask = torch::randint(0, 2, {1, seq_len});
@@ -3474,6 +3491,7 @@ namespace detail {
       attn_mask_tensor.masked_fill_(attn_mask_tensor == 0, -std::numeric_limits<double>::infinity());
       attn_mask_tensor.masked_fill_(attn_mask_tensor > 0, double(0.0));
 
+      // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
       const torch::Tensor decoder_state_tensor = decoder_state;
       const torch::Tensor source_hid_tensor = K.transpose(0, 1);
 
@@ -3516,7 +3534,9 @@ namespace detail {
       }
 
       torch::Tensor _Q = decoder_state_tensor.unsqueeze(1).transpose(0, 1);
+      // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
       torch::Tensor _V = source_hid_tensor;
+      // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
       torch::Tensor _K = source_hid_tensor;
 
       torch::Tensor result;
@@ -3642,6 +3662,7 @@ namespace detail {
       );
       const auto combined_attn_heads = _combine_heads_ref(attn_heads, {batch_sz, 1}, nheads, d_head);
       auto reference = _fc(combined_attn_heads, multihead_attn_module->out_proj->weight, multihead_attn_module->out_proj->bias);
+      // NOLINTNEXTLINE(bugprone-argument-comment)
       reference = torch::squeeze(reference, /*axis=*/1);
 
       // result = reference
@@ -3807,6 +3828,58 @@ TEST_F(ModulesTest, ReflectionPad2d) {
   }
 }
 
+TEST_F(ModulesTest, ReflectionPad3d) {
+  {
+    ReflectionPad3d m(ReflectionPad3dOptions(1));
+    auto input = torch::arange(8, torch::kFloat).reshape({1, 1, 2, 2, 2});
+    auto output = m(input);
+    auto expected = torch::tensor({{{{{7., 6., 7., 6.},
+                                      {5., 4., 5., 4.},
+                                      {7., 6., 7., 6.},
+                                      {5., 4., 5., 4.}},
+                                     {{3., 2., 3., 2.},
+                                      {1., 0., 1., 0.},
+                                      {3., 2., 3., 2.},
+                                      {1., 0., 1., 0.}},
+                                     {{7., 6., 7., 6.},
+                                      {5., 4., 5., 4.},
+                                      {7., 6., 7., 6.},
+                                      {5., 4., 5., 4.}},
+                                     {{3., 2., 3., 2.},
+                                      {1., 0., 1., 0.},
+                                      {3., 2., 3., 2.},
+                                      {1., 0., 1., 0.}}}}}, torch::kFloat);
+    ASSERT_TRUE(output.allclose(expected));
+  }
+  {
+    ReflectionPad3d m(ReflectionPad3dOptions({0, 1, 1, 0, 1, 2}));
+    auto input = torch::arange(16, torch::kFloat).reshape({1, 1, 4, 2, 2});
+    auto output = m(input);
+    auto expected = torch::tensor({{{{{6., 7., 6.},
+                                      {4., 5., 4.},
+                                      {6., 7., 6.}},
+                                     {{2., 3., 2.},
+                                      {0., 1., 0.},
+                                      {2., 3., 2.}},
+                                     {{6., 7., 6.},
+                                      {4., 5., 4.},
+                                      {6., 7., 6.}},
+                                     {{10., 11., 10.},
+                                      {8., 9., 8.},
+                                      {10., 11., 10.}},
+                                     {{14., 15., 14.},
+                                      {12., 13., 12.},
+                                      {14., 15., 14.}},
+                                     {{10., 11., 10.},
+                                      {8., 9., 8.},
+                                      {10., 11., 10.}},
+                                     {{6., 7., 6.},
+                                      {4., 5., 4.},
+                                      {6., 7., 6.}}}}}, torch::kFloat);
+    ASSERT_EQ(output.sizes(), std::vector<int64_t>({1, 1, 7, 3, 3}));
+    ASSERT_TRUE(output.allclose(expected));
+  }
+}
 TEST_F(ModulesTest, ReplicationPad1d) {
   {
     ReplicationPad1d m(ReplicationPad1dOptions(2));
@@ -4568,6 +4641,9 @@ TEST_F(ModulesTest, PrettyPrintEmbeddingBag) {
   ASSERT_EQ(
       c10::str(EmbeddingBag(EmbeddingBagOptions(10, 2).max_norm(2).norm_type(2.5).scale_grad_by_freq(true).sparse(true).mode(torch::kSum))),
       "torch::nn::EmbeddingBag(num_embeddings=10, embedding_dim=2, max_norm=2, norm_type=2.5, scale_grad_by_freq=true, sparse=true, mode=kSum)");
+  ASSERT_EQ(
+      c10::str(EmbeddingBag(EmbeddingBagOptions(10, 2).max_norm(2).norm_type(2.5).scale_grad_by_freq(true).sparse(true).mode(torch::kSum).padding_idx(5))),
+      "torch::nn::EmbeddingBag(num_embeddings=10, embedding_dim=2, max_norm=2, norm_type=2.5, scale_grad_by_freq=true, sparse=true, mode=kSum, padding_idx=5)");
 }
 
 TEST_F(ModulesTest, PrettyPrintL1Loss) {

@@ -15,6 +15,7 @@ float halfbits2float(unsigned short h) {
     exponent = 0xff;
   } else if (!exponent) { /* Denorm or Zero */
     if (mantissa) {
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       unsigned int msb;
       exponent = 0x71;
       do {
@@ -31,6 +32,7 @@ float halfbits2float(unsigned short h) {
   unsigned result_bit = (sign << 31) | (exponent << 23) | mantissa;
 
   // Reinterpret the result bit pattern as a float
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   float result_float;
   std::memcpy(&result_float, &result_bit, sizeof(result_float));
   return result_float;
@@ -38,10 +40,13 @@ float halfbits2float(unsigned short h) {
 
 unsigned short float2halfbits(float src) {
   // Reinterpret the float as a bit pattern
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   unsigned x;
   std::memcpy(&x, &src, sizeof(x));
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables,cppcoreguidelines-avoid-magic-numbers)
   unsigned u = (x & 0x7fffffff), remainder, shift, lsb, lsb_s1, lsb_m1;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   unsigned sign, exponent, mantissa;
 
   // Get rid of +NaN/-NaN case first.

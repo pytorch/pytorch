@@ -66,6 +66,7 @@ class LoadOp final : public Operator<Context> {
         db_name_(this->template GetSingleArgument<string>("db", "")),
         db_names_(this->template GetRepeatedArgument<string>("dbs")),
         db_type_(this->template GetSingleArgument<string>("db_type", "")),
+        db_options_(this->template GetSingleArgument<string>("db_options", "")),
         keep_device_(this->template GetSingleArgument<int>("keep_device", 0)),
         load_all_(this->template GetSingleArgument<int>("load_all", 0)),
         allow_incomplete_(
@@ -92,6 +93,7 @@ class LoadOp final : public Operator<Context> {
       }
     }
     CAFFE_ENFORCE(
+        // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
         blob_names_.empty() || blob_names_.size() == OutputSize(),
         "Number of output blobs and source_blob_names mismatch.");
     CAFFE_ENFORCE(
@@ -132,12 +134,16 @@ class LoadOp final : public Operator<Context> {
         extract(i, reader.cursor(), &blob_states, &total_loaded_blobs);
       }
     } else {
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       for (int i = 0; i < db_names_.size(); ++i) {
         string full_db_name = absolute_path_
             ? db_names_[i]
             : (ws_->RootFolder() + "/" + db_names_[i]);
         std::unique_ptr<DB> in_db(
             caffe2::db::CreateDB(db_type_, full_db_name, caffe2::db::READ));
+        if (!db_options_.empty()) {
+          in_db->SetOptions(db_options_);
+        }
         CAFFE_ENFORCE(
             in_db.get(),
             "Cannot find db implementation of type ",
@@ -172,6 +178,18 @@ class LoadOp final : public Operator<Context> {
     if (allow_incomplete_) {
       VLOG(1) << "Loaded " << total_loaded_blobs << " blobs out of "
               << OutputSize() << " blobs from db(s).";
+      for (const auto& output_index : output_indices_) {
+        if (!blob_states.count(output_index.first)) {
+          const auto& blobName = output_index.first;
+          const auto* blob = ws_->GetBlob(output_index.first);
+          if (blob == nullptr || blob->GetRaw() == nullptr){
+            // If blob was not loaded in this op and
+            // it did not exist in the workspace before,
+            // remove it.
+            ws_->RemoveBlob(blobName);
+          }
+        }
+      }
     } else {
       for (const string& output_name : this->debug_def().output()) {
         if (blob_states.count(output_name) == 0) {
@@ -288,6 +306,7 @@ class LoadOp final : public Operator<Context> {
   string db_name_;
   std::vector<std::string> db_names_;
   string db_type_;
+  std::string db_options_;
   bool keep_device_;
   bool load_all_;
   bool allow_incomplete_;
@@ -309,6 +328,7 @@ class TORCH_API SaveOpImpl {
   std::string strip_prefix_;
   std::string full_db_name_;
   std::string db_type_;
+  std::string db_options_;
   std::vector<std::string> blob_names_;
   SerializationOptions options_;
 };
@@ -338,6 +358,7 @@ std::string FormatString(const std::string& pattern, Ts... values) {
   if (bytes_written < 0) {
     throw std::runtime_error("FormatString failed");
   }
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   if (bytes_written > buffer.size()) {
     // Our initial buffer size wasn't enough, resize and run again.
     buffer.resize(bytes_written + 1);

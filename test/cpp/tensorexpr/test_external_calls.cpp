@@ -12,6 +12,8 @@
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
 #include <ATen/NativeFunctions.h>
+#include <ATen/core/dispatch/Dispatcher.h>
+#include <ATen/native/xnnpack/OpContext.h>
 
 namespace torch {
 namespace jit {
@@ -191,6 +193,216 @@ TEST(ExternalCall, Conv2d_nobias_noargs) {
   ASSERT_TRUE(at::allclose(nnc_result, ref));
 }
 
+TEST(ExternalCall, Addmm_float) {
+  KernelScope kernel_scope;
+
+  Placeholder Input("Input", kFloat, {100, 300});
+  Placeholder Mat1("Mat1", kFloat, {100, 200});
+  Placeholder Mat2("Mat2", kFloat, {200, 300});
+  BufHandle ResultBuf("Result", {100, 300}, kFloat);
+  int64_t beta = 2;
+  int64_t alpha = 2;
+
+  Tensor* Result = new Tensor(
+      ResultBuf.node(),
+      ExternalCall::make(
+          ResultBuf,
+          "nnc_aten_addmm",
+          {BufHandle(Input.data()),
+           BufHandle(Mat1.data()),
+           BufHandle(Mat2.data())},
+          {beta, alpha}));
+  LoopNest l({Result});
+  l.prepareForCodegen();
+  l.simplify();
+
+  auto options = at::TensorOptions()
+                     .dtype(at::kFloat)
+                     .layout(at::kStrided)
+                     .device(at::kCPU)
+                     .requires_grad(false);
+  at::Tensor input = at::ones({100, 300}, options) * 5.f;
+  at::Tensor mat1 = at::ones({100, 200}, options) * 6.f;
+  at::Tensor mat2 = at::ones({200, 300}, options) * 11.f;
+  at::Tensor ref = at::addmm(input, mat1, mat2, beta, alpha);
+
+  at::Tensor nnc_result;
+  std::vector<float> input_buf(100 * 300, 5.f);
+  std::vector<float> mat1_buf(100 * 200, 6.f);
+  std::vector<float> mat2_buf(200 * 300, 11.f);
+  std::vector<float> result_buf(100 * 300, -1.f);
+
+#ifdef TORCH_ENABLE_LLVM
+  LLVMCodeGen llvm_codegen(l.root_stmt(), {Input, Mat1, Mat2, Result});
+
+  llvm_codegen.call({input_buf, mat1_buf, mat2_buf, result_buf});
+  nnc_result = at::from_blob(result_buf.data(), {100, 300}, options);
+  ASSERT_TRUE(at::allclose(nnc_result, ref));
+#endif
+
+  SimpleIREvaluator ir_eval(l.root_stmt(), {Input, Mat1, Mat2, Result});
+
+  ir_eval.call({input_buf, mat1_buf, mat2_buf, result_buf});
+  nnc_result = at::from_blob(result_buf.data(), {100, 300}, options);
+  ASSERT_TRUE(at::allclose(nnc_result, ref));
+}
+
+#ifdef USE_XNNPACK
+
+TEST(ExternalCall, Prepacked_Linear_float) {
+  using namespace at::native::xnnpack;
+
+  KernelScope kernel_scope;
+
+  Placeholder Input("Input", kFloat, {100, 200});
+  BufHandle ResultBuf("Result", {100, 300}, kFloat);
+
+  // Calculate reference result using at::linear.
+  auto options = at::TensorOptions()
+                     .dtype(at::kFloat)
+                     .layout(at::kStrided)
+                     .device(at::kCPU)
+                     .requires_grad(false);
+  at::Tensor input =
+      at::linspace(-10.0, 10.0, 100 * 200, options).resize_({100, 200});
+  at::Tensor weight =
+      at::linspace(-10.0, 10.0, 300 * 200, options).resize_({300, 200});
+  at::Tensor bias = at::linspace(-10.0, 10.0, 300, options);
+  at::Tensor ref = at::linear(input, weight, bias);
+
+  // Create prepacked xnnpack context object.
+  auto linear_clamp_prepack_op =
+      c10::Dispatcher::singleton()
+          .findSchemaOrThrow("prepacked::linear_clamp_prepack", "")
+          .typed<c10::intrusive_ptr<LinearOpContext>(
+              at::Tensor,
+              c10::optional<at::Tensor>,
+              const c10::optional<at::Scalar>&,
+              const c10::optional<at::Scalar>&)>();
+  auto prepacked = linear_clamp_prepack_op.call(
+      weight, bias, c10::optional<at::Scalar>(), c10::optional<at::Scalar>());
+
+  Placeholder DummyPrepacked("DummyPrepacked", kFloat, {1});
+  Tensor* Result = new Tensor(
+      ResultBuf.node(),
+      ExternalCall::make(
+          ResultBuf,
+          "nnc_prepacked_linear_clamp_run",
+          {BufHandle(Input.data()), BufHandle(DummyPrepacked.data())},
+          {}));
+  LoopNest l({Result});
+  l.prepareForCodegen();
+  l.simplify();
+
+  at::Tensor nnc_result;
+  std::vector<float> input_buf(
+      input.data_ptr<float>(), input.data_ptr<float>() + 100 * 200);
+  std::vector<float> result_buf(100 * 300, -1.f);
+
+#ifdef TORCH_ENABLE_LLVM
+  LLVMCodeGen llvm_codegen(l.root_stmt(), {Input, DummyPrepacked, Result});
+
+  llvm_codegen.call({input_buf, prepacked.get(), result_buf});
+  nnc_result = at::from_blob(result_buf.data(), {100, 300}, options);
+  ASSERT_TRUE(at::allclose(nnc_result, ref));
+#endif
+
+  SimpleIREvaluator ir_eval(l.root_stmt(), {Input, DummyPrepacked, Result});
+
+  ir_eval.call({input_buf, prepacked.get(), result_buf});
+  nnc_result = at::from_blob(result_buf.data(), {100, 300}, options);
+  ASSERT_TRUE(at::allclose(nnc_result, ref));
+}
+
+TEST(ExternalCall, Prepacked_Conv2d_float) {
+  using namespace at::native::xnnpack;
+
+  KernelScope kernel_scope;
+
+  Placeholder Input("Input", kFloat, {1, 3, 224, 224});
+  BufHandle ResultBuf("Result", {1, 16, 112, 112}, kFloat);
+  int64_t stride = 2;
+  int64_t pad = 1;
+  int64_t dilation = 1;
+  int64_t groups = 1;
+
+  // Calculate reference result using at::conv2d.
+  auto options = at::TensorOptions()
+                     .dtype(at::kFloat)
+                     .layout(at::kStrided)
+                     .device(at::kCPU)
+                     .requires_grad(false);
+  at::Tensor input = at::linspace(-10.0, 10.0, 1 * 3 * 224 * 224, options)
+                         .resize_({1, 3, 224, 224});
+  at::Tensor weight =
+      at::linspace(-10.0, 10.0, 16 * 3 * 3 * 3, options).resize_({16, 3, 3, 3});
+  at::Tensor bias = at::linspace(-10.0, 10.0, 16, options);
+  at::Tensor ref = at::conv2d(
+      input,
+      weight,
+      bias,
+      {stride, stride},
+      {pad, pad},
+      {dilation, dilation},
+      groups);
+
+  // Create prepacked xnnpack context object.
+  auto conv2d_clamp_prepack_op =
+      c10::Dispatcher::singleton()
+          .findSchemaOrThrow("prepacked::conv2d_clamp_prepack", "")
+          .typed<c10::intrusive_ptr<Conv2dOpContext>(
+              at::Tensor,
+              c10::optional<at::Tensor>,
+              std::vector<int64_t>,
+              std::vector<int64_t>,
+              std::vector<int64_t>,
+              int64_t,
+              const c10::optional<at::Scalar>&,
+              const c10::optional<at::Scalar>&)>();
+  auto prepacked = conv2d_clamp_prepack_op.call(
+      weight,
+      bias,
+      {stride, stride},
+      {pad, pad},
+      {dilation, dilation},
+      groups,
+      c10::optional<at::Scalar>(),
+      c10::optional<at::Scalar>());
+
+  Placeholder DummyPrepacked("DummyPrepacked", kFloat, {1});
+  Tensor* Result = new Tensor(
+      ResultBuf.node(),
+      ExternalCall::make(
+          ResultBuf,
+          "nnc_prepacked_conv2d_clamp_run",
+          {BufHandle(Input.data()), BufHandle(DummyPrepacked.data())},
+          {}));
+  LoopNest l({Result});
+  l.prepareForCodegen();
+  l.simplify();
+
+  at::Tensor nnc_result;
+  std::vector<float> input_buf(
+      input.data_ptr<float>(), input.data_ptr<float>() + 1 * 3 * 224 * 224);
+  std::vector<float> result_buf(1 * 16 * 112 * 112, -1.f);
+
+#ifdef TORCH_ENABLE_LLVM
+  LLVMCodeGen llvm_codegen(l.root_stmt(), {Input, DummyPrepacked, Result});
+
+  llvm_codegen.call({input_buf, prepacked.get(), result_buf});
+  nnc_result = at::from_blob(result_buf.data(), {1, 16, 112, 112}, options);
+  ASSERT_TRUE(at::allclose(nnc_result, ref, 1e-03, 1e-03));
+#endif
+
+  SimpleIREvaluator ir_eval(l.root_stmt(), {Input, DummyPrepacked, Result});
+
+  ir_eval.call({input_buf, prepacked.get(), result_buf});
+  nnc_result = at::from_blob(result_buf.data(), {1, 16, 112, 112}, options);
+  ASSERT_TRUE(at::allclose(nnc_result, ref, 1e-03, 1e-03));
+}
+
+#endif // USE_XNNPACK
+
 TEST(ExternalCall, BinaryFloat) {
   KernelScope kernel_scope;
   using TensorFunc = std::function<at::Tensor(at::Tensor, at::Tensor)>;
@@ -240,6 +452,7 @@ TEST(ExternalCall, BinaryFloat) {
     at::Tensor ref = torchFunc(a, b);
 
     auto prod = [](std::vector<int64_t> v) {
+      // NOLINTNEXTLINE(modernize-use-transparent-functors)
       return std::accumulate(v.begin(), v.end(), 1, std::multiplies<int64_t>());
     };
 
@@ -279,20 +492,20 @@ TEST(ExternalCall, UnaryFloat) {
       std::string,
       std::vector<ExprHandle>>;
   std::vector<Test> tests = {};
-  tests.push_back(Test{
-      {1, 64, 8, 9},
-      {1, 64, 5, 7},
-      [](at::Tensor x) {
-        return at::adaptive_avg_pool2d(x, {5, 7});
-      },
-      "nnc_aten_adaptive_avg_pool2d",
-      toExprHandleVec({5, 7})});
-  tests.push_back(Test{
-      {100, 200},
-      {100},
-      [](at::Tensor x) { return at::mean(x, {1}); },
-      "nnc_aten_mean",
-      toExprHandleVec({1})});
+  tests.push_back(Test{// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+                       {1, 64, 8, 9},
+                       {1, 64, 5, 7},
+                       [](at::Tensor x) {
+                         return at::adaptive_avg_pool2d(x, {5, 7});
+                       },
+                       "nnc_aten_adaptive_avg_pool2d",
+                       toExprHandleVec({5, 7})});
+  tests.push_back(Test{// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+                       {100, 200},
+                       {100},
+                       [](at::Tensor x) { return at::mean(x, {1}); },
+                       "nnc_aten_mean",
+                       toExprHandleVec({1})});
   for (auto curTest : tests) {
     std::vector<int64_t> aShape, resShape;
     TensorFunc torchFunc;
@@ -320,6 +533,7 @@ TEST(ExternalCall, UnaryFloat) {
     at::Tensor ref = torchFunc(a);
 
     auto prod = [](std::vector<int64_t> v) {
+      // NOLINTNEXTLINE(modernize-use-transparent-functors)
       return std::accumulate(v.begin(), v.end(), 1, std::multiplies<int64_t>());
     };
 
@@ -388,7 +602,7 @@ TEST(ExternalCall, ComputeInterop) {
           const VarHandle& c,
           const VarHandle& h,
           const VarHandle& w) {
-        return ConvResult->call(n, c, h, w) + MatmulResult->call(n, c, h, w);
+        return ConvResult->load(n, c, h, w) + MatmulResult->load(n, c, h, w);
       });
 
   LoopNest l({Input, Weight, ConvResult, MatmulResult, Result});
@@ -463,11 +677,11 @@ TEST(ExternalCall, Inlining) {
       "Result",
       {{8, "i"}, {8, "j"}},
       [&](const VarHandle& i, const VarHandle& j) {
-        return MatmulResult->call(i, j) + FloatImm::make(3.0f);
+        return MatmulResult->load(i, j) + FloatImm::make(3.0f);
       });
 
-  Stmt* root_stmt =
-      new Block({A->stmt(), B->stmt(), MatmulResult->stmt(), Result->stmt()});
+  StmtPtr root_stmt = alloc<Block>(std::vector<StmtPtr>(
+      {A->stmt(), B->stmt(), MatmulResult->stmt(), Result->stmt()}));
   LoopNest l(root_stmt, {Result->buf()});
 
   // Inlining should not inline anything here since all Bufs are either

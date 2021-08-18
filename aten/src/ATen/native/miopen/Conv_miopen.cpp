@@ -622,7 +622,8 @@ Tensor miopen_convolution(
     int64_t groups, bool benchmark, bool deterministic)
 {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& bias_t = c10::value_or_else(bias_t_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> bias_t_maybe_owned = at::borrow_from_optional_tensor(bias_t_opt);
+  const Tensor& bias_t = *bias_t_maybe_owned;
 
   TensorArg input  { input_t,  "input",  1 },
             weight { weight_t, "weight", 2 },
@@ -699,7 +700,8 @@ Tensor miopen_depthwise_convolution(
     int64_t groups, bool benchmark, bool deterministic)
 {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& bias_t = c10::value_or_else(bias_t_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> bias_t_maybe_owned = at::borrow_from_optional_tensor(bias_t_opt);
+  const Tensor& bias_t = *bias_t_maybe_owned;
 
   TensorArg input  { input_t,  "input",  1 },
             weight { weight_t, "weight", 2 },
@@ -953,7 +955,8 @@ Tensor miopen_convolution_transpose(
     int64_t groups, bool benchmark, bool deterministic)
 {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& bias_t = c10::value_or_else(bias_t_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> bias_t_maybe_owned = at::borrow_from_optional_tensor(bias_t_opt);
+  const Tensor& bias_t = *bias_t_maybe_owned;
 
   TensorArg input  { input_t,  "input",  1 },
             weight { weight_t, "weight", 2 },

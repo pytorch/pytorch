@@ -50,7 +50,7 @@ function get_exit_code() {
 }
 
 function file_diff_from_base() {
-  # The fetch may fail on Docker hosts, but it's not always necessary.
+  # The fetch may fail on Docker hosts, this fetch is necessary for GHA
   set +e
   git fetch origin master --quiet
   set -e
@@ -85,4 +85,8 @@ function checkout_install_torchvision() {
   git checkout "$TORCHVISION_COMMIT"
   time python setup.py install
   popd
+}
+
+function clone_pytorch_xla() {
+  git clone --recursive https://github.com/pytorch/xla.git
 }

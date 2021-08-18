@@ -12,7 +12,7 @@ from torch.optim import SGD
 from torch.autograd import Variable
 from torch import sparse
 from torch.optim.lr_scheduler import LambdaLR, MultiplicativeLR, StepLR, \
-    MultiStepLR, ExponentialLR, CosineAnnealingLR, ReduceLROnPlateau, \
+    MultiStepLR, WarmUpLR, ExponentialLR, CosineAnnealingLR, ReduceLROnPlateau, \
     _LRScheduler, CyclicLR, CosineAnnealingWarmRestarts, OneCycleLR
 from torch.optim.swa_utils import AveragedModel, SWALR, update_bn
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests, \
@@ -30,7 +30,7 @@ def rosenbrock(tensor):
 
 def drosenbrock(tensor):
     x, y = tensor
-    return torch.Tensor((-400 * x * (y - x ** 2) - 2 * (1 - x), 200 * (y - x ** 2)))
+    return torch.tensor((-400 * x * (y - x ** 2) - 2 * (1 - x), 200 * (y - x ** 2)))
 
 
 class TestOptim(TestCase):
@@ -40,7 +40,7 @@ class TestOptim(TestCase):
                                 sparse_only=False):
         if scheduler_constructors is None:
             scheduler_constructors = []
-        params_t = torch.Tensor([1.5, 1.5])
+        params_t = torch.tensor([1.5, 1.5])
 
         params = Variable(params_t, requires_grad=True)
         optimizer = constructor([params])
@@ -52,7 +52,7 @@ class TestOptim(TestCase):
             params_c = Variable(params_t.clone(), requires_grad=True)
             optimizer_c = constructor([params_c])
 
-        solution = torch.Tensor([1, 1])
+        solution = torch.tensor([1, 1])
         initial_dist = params.data.dist(solution)
 
         def eval(params, sparse_grad, w):
@@ -66,11 +66,11 @@ class TestOptim(TestCase):
             if w:
                 i = torch.LongTensor([[0, 0]])
                 x = grad[0]
-                v = torch.Tensor([x / 4., x - x / 4.])
+                v = torch.tensor([x / 4., x - x / 4.])
             else:
                 i = torch.LongTensor([[1, 1]])
                 y = grad[1]
-                v = torch.Tensor([y - y / 4., y / 4.])
+                v = torch.tensor([y - y / 4., y / 4.])
             x = sparse.DoubleTensor(i, v, torch.Size([2])).to(dtype=v.dtype)
             with torch.no_grad():
                 if sparse_grad:
@@ -274,6 +274,19 @@ class TestOptim(TestCase):
             )
             self._test_basic_cases(
                 lambda weight, bias: optimizer([weight, bias], lr=1e-3),
+                [lambda opt: WarmUpLR(opt, warmup_factor=0.4, warmup_iters=4, warmup_method="linear")]
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-3),
+                [lambda opt: WarmUpLR(opt, warmup_factor=0.4, warmup_iters=4, warmup_method="constant")]
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-3),
+                [lambda opt: StepLR(opt, gamma=0.9, step_size=10),
+                 lambda opt: WarmUpLR(opt, warmup_factor=0.4, warmup_iters=4)]
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-3),
                 [lambda opt: StepLR(opt, gamma=0.9, step_size=10),
                  lambda opt: ReduceLROnPlateau(opt)]
             )
@@ -318,8 +331,14 @@ class TestOptim(TestCase):
             ((optim.AdamW, optim._multi_tensor.AdamW), dict(weight_decay=1., amsgrad=False)),
             ((optim.AdamW, optim._multi_tensor.AdamW), dict(weight_decay=0., amsgrad=True)),
             ((optim.AdamW, optim._multi_tensor.AdamW), dict(weight_decay=0., amsgrad=False)),
+            ((optim.NAdam, optim._multi_tensor.NAdam), dict(weight_decay=0., momentum_decay=6e-3)),
+            ((optim.NAdam, optim._multi_tensor.NAdam), dict(weight_decay=1., momentum_decay=6e-3)),
+            ((optim.NAdam, optim._multi_tensor.NAdam), dict(weight_decay=0., momentum_decay=4e-3)),
+            ((optim.NAdam, optim._multi_tensor.NAdam), dict(weight_decay=0.01, momentum_decay=4e-3)),
             ((optim.SGD, optim._multi_tensor.SGD), dict(lr=0.2, momentum=1, dampening=0, weight_decay=1, nesterov=True)),
             ((optim.SGD, optim._multi_tensor.SGD), dict(lr=0.2, momentum=1, dampening=0.5, weight_decay=1, nesterov=False)),
+            ((optim.RAdam, optim._multi_tensor.RAdam), dict(weight_decay=0)),
+            ((optim.RAdam, optim._multi_tensor.RAdam), dict(weight_decay=1)),
             ((optim.RMSprop, optim._multi_tensor.RMSprop), dict(weight_decay=1, momentum=1, centered=True)),
             ((optim.RMSprop, optim._multi_tensor.RMSprop), dict(weight_decay=1, momentum=0, centered=True)),
             ((optim.RMSprop, optim._multi_tensor.RMSprop), dict(weight_decay=1, momentum=1, centered=False)),
@@ -331,6 +350,8 @@ class TestOptim(TestCase):
             ((optim.Adamax, optim._multi_tensor.Adamax), dict(weight_decay=1)),
             ((optim.Adadelta, optim._multi_tensor.Adadelta), dict(weight_decay=0)),
             ((optim.Adadelta, optim._multi_tensor.Adadelta), dict(weight_decay=1)),
+            ((optim.Adagrad, optim._multi_tensor.Adagrad), dict(weight_decay=0)),
+            ((optim.Adagrad, optim._multi_tensor.Adagrad), dict(weight_decay=1)),
         ]
 
         kIterations = 11
@@ -376,7 +397,7 @@ class TestOptim(TestCase):
                 res.append(model.parameters())
 
             for p1, p2 in zip(res[0], res[1]):
-                self.assertEqual(p1, p2)
+                self.assertEqual(p1, p2, atol=5e-5, rtol=0)
 
     def test_adam(self):
         for optimizer in [optim.Adam, optim_mt.Adam]:
@@ -406,6 +427,23 @@ class TestOptim(TestCase):
                 [lambda opt: ExponentialLR(opt, gamma=0.9)]
             )
             self._test_basic_cases(
+                lambda weight, bias: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-2),
+                    lr=1e-3),
+                [lambda opt: WarmUpLR(opt, warmup_factor=0.4, warmup_iters=4, warmup_method="linear")]
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-2),
+                    lr=1e-3),
+                [lambda opt: WarmUpLR(opt, warmup_factor=0.4, warmup_iters=4, warmup_method="constant")]
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-3, amsgrad=True),
+                [lambda opt: ExponentialLR(opt, gamma=0.9),
+                 lambda opt: WarmUpLR(opt, warmup_factor=0.4, warmup_iters=4, warmup_method="constant")]
+            )
+            self._test_basic_cases(
                 lambda weight, bias: optimizer([weight, bias], lr=1e-3, amsgrad=True),
                 [lambda opt: ExponentialLR(opt, gamma=0.9),
                  lambda opt: ReduceLROnPlateau(opt)]
@@ -422,6 +460,21 @@ class TestOptim(TestCase):
 
             with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
                 optimizer(None, lr=1e-2, weight_decay=-1)
+
+    # Test whether variance parameter is always real
+    def test_complex_adam_variance(self):
+        complex_param = torch.randn(5, 5, dtype=torch.complex64, requires_grad=True)
+        target = torch.randn(5, 5, dtype=torch.complex64)
+        optimizer = optim.Adam([complex_param], lr=0.001)
+
+        for i in range(20):
+            optimizer.zero_grad()
+            loss = (complex_param - target).pow(2).sum()
+            loss.backward()
+            optimizer.step()
+            for idx in optimizer.state_dict()['state'].keys():
+                variance = optimizer.state_dict()['state'][idx]['exp_avg_sq']
+                self.assertEqual(variance.imag, torch.zeros(variance.imag.shape))
 
     def test_adamw(self):
         for optimizer in [optim.AdamW, optim_mt.AdamW]:
@@ -478,44 +531,69 @@ class TestOptim(TestCase):
             with self.assertRaisesRegex(ValueError, "Invalid rho value: 1.1"):
                 optimizer(None, lr=1e-2, rho=1.1)
 
+    def test_nadam(self):
+        for optimizer in [optim.NAdam, optim_mt.NAdam]:
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-3)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-2),
+                    lr=1e-3)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-3, weight_decay=0.1, momentum_decay=6e-3)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-3, weight_decay=0.1, momentum_decay=6e-3),
+                [lambda opt: ExponentialLR(opt, gamma=0.9)]
+            )
+            with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 0: 1.0"):
+                optimizer(None, lr=1e-2, betas=(1.0, 0.0))
+            with self.assertRaisesRegex(ValueError, "Invalid momentum_decay value: -0.2"):
+                optimizer(None, lr=1e-2, momentum_decay=-0.2)
+
     def test_adagrad(self):
-        self._test_basic_cases(
-            lambda weight, bias: optim.Adagrad([weight, bias], lr=1e-1)
-        )
-        self._test_basic_cases(
-            lambda weight, bias: optim.Adagrad([weight, bias], lr=1e-1,
-                                               initial_accumulator_value=0.1)
-        )
-        self._test_basic_cases(
-            lambda weight, bias: optim.Adagrad(
-                self._build_params_dict(weight, bias, lr=1e-2),
-                lr=1e-1)
-        )
-        self._test_basic_cases(
-            lambda weight, bias: optim.Adagrad(
-                self._build_params_dict(weight, bias, lr=1e-2),
-                lr=1e-1),
-            [lambda opt: ReduceLROnPlateau(opt)]
-        )
-        self._test_basic_cases(
-            lambda weight, bias: optim.Adagrad(
-                self._build_params_dict(weight, bias, lr=1e-2),
-                lr=1e-1),
-            [lambda opt: ReduceLROnPlateau(opt),
-             lambda opt: ExponentialLR(opt, gamma=0.99)]
-        )
-        with self.assertRaisesRegex(ValueError, "Invalid lr_decay value: -0.5"):
-            optim.Adagrad(None, lr=1e-2, lr_decay=-0.5)
+        for optimizer in [optim.Adagrad, optim_mt.Adagrad]:
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-1)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer(
+                    [weight, bias], lr=1e-1, initial_accumulator_value=0.1
+                )
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-2),
+                    lr=1e-1)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-2),
+                    lr=1e-1),
+                [lambda opt: ReduceLROnPlateau(opt)]
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-2),
+                    lr=1e-1),
+                [lambda opt: ReduceLROnPlateau(opt),
+                 lambda opt: ExponentialLR(opt, gamma=0.99)]
+            )
+            with self.assertRaisesRegex(ValueError, "Invalid lr_decay value: -0.5"):
+                optimizer(None, lr=1e-2, lr_decay=-0.5)
 
     def test_adagrad_sparse(self):
-        self._test_rosenbrock_sparse(
-            lambda params: optim.Adagrad(params, lr=1e-1)
-        )
-        self._test_rosenbrock_sparse(
-            lambda params: optim.Adagrad(params, lr=0.1),
-            [lambda opt: StepLR(opt, gamma=1 - 1e-5, step_size=500),
-             lambda opt: ReduceLROnPlateau(opt, threshold=1e-4)]
-        )
+        for optimizer in [optim.Adagrad, optim_mt.Adagrad]:
+            self._test_rosenbrock_sparse(
+                lambda params: optimizer(params, lr=1e-1)
+            )
+            self._test_rosenbrock_sparse(
+                lambda params: optimizer(params, lr=0.1),
+                [lambda opt: StepLR(opt, gamma=1 - 1e-5, step_size=500),
+                 lambda opt: ReduceLROnPlateau(opt, threshold=1e-4)]
+            )
 
     def test_adamax(self):
         for optimizer in [optim.Adamax, optim_mt.Adamax]:
@@ -532,6 +610,30 @@ class TestOptim(TestCase):
             )
             with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 1: 1.0"):
                 optimizer(None, lr=1e-2, betas=(0.0, 1.0))
+
+    def test_radam(self):
+        for optimizer in [optim.RAdam, optim_mt.RAdam]:
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-3)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-2),
+                    lr=1e-3)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-3, weight_decay=0.1)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-3),
+                [lambda opt: ExponentialLR(opt, gamma=0.9),
+                    lambda opt: ReduceLROnPlateau(opt)]
+            )
+            with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 0: 1.0"):
+                optimizer(None, lr=1e-2, betas=(1.0, 0.0))
+
+            with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
+                optimizer(None, lr=1e-2, weight_decay=-1)
 
     def test_rmsprop(self):
         for optimizer in [optim.RMSprop, optim_mt.RMSprop]:
@@ -614,7 +716,7 @@ class TestOptim(TestCase):
         opt2 = optim.LBFGS(params, 0.01, tolerance_grad=-inf)
 
         def closure():
-            return torch.Tensor([10])
+            return torch.tensor([10])
 
         res1 = opt1.step(closure)
         res2 = opt2.step(closure)
@@ -707,7 +809,7 @@ class TestLRScheduler(TestCase):
 
     def test_no_cyclic_references(self):
         import gc
-        param = Variable(torch.Tensor(10), requires_grad=True)
+        param = Variable(torch.empty(10), requires_grad=True)
         optim = SGD([param], lr=0.5)
         scheduler = LambdaLR(optim, lambda epoch: 1.0)
         del scheduler
@@ -890,6 +992,14 @@ class TestLRScheduler(TestCase):
         scheduler = ExponentialLR(self.opt, gamma=0.9)
         self._test_lr_is_constant_for_constant_epoch(scheduler)
 
+    def test_constant_warmup_lr_is_constant_for_constant_epoch(self):
+        scheduler = WarmUpLR(self.opt, warmup_method="constant")
+        self._test_lr_is_constant_for_constant_epoch(scheduler)
+
+    def test_linear_warmup_lr_is_constant_for_constant_epoch(self):
+        scheduler = WarmUpLR(self.opt, warmup_method="linear")
+        self._test_lr_is_constant_for_constant_epoch(scheduler)
+
     def test_step_lr(self):
         # lr = 0.05     if epoch < 3
         # lr = 0.005    if 30 <= epoch < 6
@@ -941,6 +1051,78 @@ class TestLRScheduler(TestCase):
         scheduler = MultiStepLR(self.opt, gamma=0.1, milestones=[2, 5, 9])
         self._test_with_epoch(scheduler, targets, epochs)
 
+    def test__get_last_lr_constant_warmup_lr(self):
+        # lr = 0.025     if epoch < 5
+        # lr = 0.005    if 5 <= epoch
+        epochs = 10
+        single_targets = [0.025] * 5 + [0.05] * 5
+        targets = [single_targets, [x * epochs for x in single_targets]]
+        scheduler = WarmUpLR(self.opt, warmup_factor=1.0 / 2, warmup_iters=5, warmup_method="constant")
+        self._test_get_last_lr(scheduler, targets, epochs)
+
+    def test__get_last_lr_linear_warmup_lr(self):
+        # lr = 0.025     if epoch == 0
+        # lr = 0.03125   if epoch == 1
+        # lr = 0.0375    if epoch == 2
+        # lr = 0.04375   if epoch == 3
+        # lr = 0.005     if 4 <= epoch
+        epochs = 10
+        factor = 1.0 / 2
+        iters = 4
+        interpolation = [factor + i * (1 - factor) / iters for i in range(iters)]
+        single_targets = [x * 0.05 for x in interpolation] + [0.05] * (epochs - iters)
+        targets = [single_targets, [x * epochs for x in single_targets]]
+        scheduler = WarmUpLR(self.opt, warmup_factor=factor, warmup_iters=iters, warmup_method="linear")
+        self._test_get_last_lr(scheduler, targets, epochs)
+
+    def test__constant_warmup_lr(self):
+        # lr = 0.025     if epoch < 5
+        # lr = 0.005    if 5 <= epoch
+        epochs = 10
+        single_targets = [0.025] * 5 + [0.05] * 5
+        targets = [single_targets, [x * epochs for x in single_targets]]
+        scheduler = WarmUpLR(self.opt, warmup_factor=1.0 / 2, warmup_iters=5, warmup_method="constant")
+        self._test(scheduler, targets, epochs)
+
+    def test__linear_warmup_lr(self):
+        # lr = 0.025     if epoch == 0
+        # lr = 0.03125   if epoch == 1
+        # lr = 0.0375    if epoch == 2
+        # lr = 0.04375   if epoch == 3
+        # lr = 0.005     if 4 <= epoch
+        epochs = 10
+        factor = 1.0 / 2
+        iters = 4
+        interpolation = [factor + i * (1 - factor) / iters for i in range(iters)]
+        single_targets = [x * 0.05 for x in interpolation] + [0.05] * (epochs - iters)
+        targets = [single_targets, [x * epochs for x in single_targets]]
+        scheduler = WarmUpLR(self.opt, warmup_factor=factor, warmup_iters=iters, warmup_method="linear")
+        self._test(scheduler, targets, epochs)
+
+    def test_constant_warmup_with_epoch(self):
+        # lr = 0.025     if epoch < 5
+        # lr = 0.005    if 5 <= epoch
+        epochs = 10
+        single_targets = [0.025] * 5 + [0.05] * 5
+        targets = [single_targets, [x * epochs for x in single_targets]]
+        scheduler = WarmUpLR(self.opt, warmup_factor=1.0 / 2, warmup_iters=5, warmup_method="constant")
+        self._test_with_epoch(scheduler, targets, epochs)
+
+    def test_linear_warmup_with_epoch(self):
+        # lr = 0.025     if epoch == 0
+        # lr = 0.03125   if epoch == 1
+        # lr = 0.0375    if epoch == 2
+        # lr = 0.04375   if epoch == 3
+        # lr = 0.005     if 4 <= epoch
+        epochs = 10
+        factor = 1.0 / 2
+        iters = 4
+        interpolation = [factor + i * (1 - factor) / iters for i in range(iters)]
+        single_targets = [x * 0.05 for x in interpolation] + [0.05] * (epochs - iters)
+        targets = [single_targets, [x * epochs for x in single_targets]]
+        scheduler = WarmUpLR(self.opt, warmup_factor=factor, warmup_iters=iters, warmup_method="linear")
+        self._test_with_epoch(scheduler, targets, epochs)
+
     def test_exp_lr(self):
         epochs = 10
         single_targets = [0.05 * (0.9 ** x) for x in range(epochs)]
@@ -961,6 +1143,16 @@ class TestLRScheduler(TestCase):
     def test_closed_form_step_lr(self):
         scheduler = StepLR(self.opt, gamma=0.1, step_size=3)
         closed_form_scheduler = StepLR(self.opt, gamma=0.1, step_size=3)
+        self._test_against_closed_form(scheduler, closed_form_scheduler, 20)
+
+    def test_closed_form_linear_warmup_lr(self):
+        scheduler = WarmUpLR(self.opt, warmup_factor=1.0 / 3, warmup_iters=4, warmup_method="linear")
+        closed_form_scheduler = WarmUpLR(self.opt, warmup_factor=1.0 / 3, warmup_iters=4, warmup_method="linear")
+        self._test_against_closed_form(scheduler, closed_form_scheduler, 20)
+
+    def test_closed_form_constant_warmup_lr(self):
+        scheduler = WarmUpLR(self.opt, warmup_factor=1.0 / 3, warmup_iters=4, warmup_method="constant")
+        closed_form_scheduler = WarmUpLR(self.opt, warmup_factor=1.0 / 3, warmup_iters=4, warmup_method="constant")
         self._test_against_closed_form(scheduler, closed_form_scheduler, 20)
 
     def test_closed_form_multi_step_lr(self):
@@ -1093,6 +1285,43 @@ class TestLRScheduler(TestCase):
         schedulers[1] = ExponentialLR(self.opt, gamma=0.9)
         self._test(schedulers, targets, epochs)
 
+    def test_compound_exp_and_linear_warmup_lr(self):
+        epochs = 10
+        iters = 4
+        factor = 0.4
+        schedulers = [None] * 2
+        single_targets = [0.05 * (0.9 ** x) for x in range(11)]
+        for i in range(iters):
+            single_targets[i] *= factor + i / iters * (1 - factor)
+        targets = [single_targets, [x * epochs for x in single_targets]]
+        schedulers[0] = ExponentialLR(self.opt, gamma=0.9)
+        schedulers[1] = WarmUpLR(self.opt, warmup_factor=factor, warmup_iters=iters, warmup_method="linear")
+        self._test(schedulers, targets, epochs)
+
+    def test_compound_step_and_constant_warmup(self):
+        epochs = 10
+        iters = 4
+        factor = 0.4
+        schedulers = [None] * 2
+        single_targets = [0.05 * 0.4] * 3 + [0.005 * 0.4] + [0.005] * 2 + [0.0005] * 3 + [0.00005] * 3
+        targets = [single_targets, [x * epochs for x in single_targets]]
+        schedulers[0] = StepLR(self.opt, gamma=0.1, step_size=3)
+        schedulers[1] = WarmUpLR(self.opt, warmup_factor=0.4, warmup_iters=4, warmup_method="constant")
+        self._test(schedulers, targets, epochs)
+
+    def test_compound_linear_warmup_and_multistep_lr(self):
+        epochs = 10
+        iters = 4
+        factor = 0.4
+        schedulers = [None] * 2
+        single_targets = [0.05] * 2 + [0.005] * 3 + [0.0005] * 4 + [0.00005] * 2
+        for i in range(iters):
+            single_targets[i] *= factor + i / iters * (1 - factor)
+        targets = [single_targets, [x * epochs for x in single_targets]]
+        schedulers[0] = MultiStepLR(self.opt, gamma=0.1, milestones=[2, 5, 9])
+        schedulers[1] = WarmUpLR(self.opt, warmup_factor=factor, warmup_iters=iters, warmup_method="linear")
+        self._test(schedulers, targets, epochs)
+
     def test_compound_cosanneal_and_step_lr(self):
         epochs = 10
         eta_min = 1e-10
@@ -1118,6 +1347,22 @@ class TestLRScheduler(TestCase):
         schedulers = [None] * 2
         schedulers[0] = CosineAnnealingLR(self.opt, T_max=epochs, eta_min=eta_min)
         schedulers[1] = MultiStepLR(self.opt, gamma=0.1, milestones=[2, 5, 9])
+        self._test(schedulers, targets, epochs)
+
+    def test_compound_cosanneal_and_linear_warmup_lr(self):
+        epochs = 10
+        iters = 4
+        factor = 0.4
+        eta_min = 1e-10
+        schedulers = [None] * 2
+        single_targets = [eta_min + (0.05 - eta_min) *
+                          (1 + math.cos(math.pi * x / epochs)) / 2
+                          for x in range(epochs)]
+        for i in range(iters):
+            single_targets[i] *= factor + i / iters * (1 - factor)
+        targets = [single_targets, [x * epochs for x in single_targets]]
+        schedulers[0] = CosineAnnealingLR(self.opt, T_max=epochs, eta_min=eta_min)
+        schedulers[1] = WarmUpLR(self.opt, warmup_factor=factor, warmup_iters=iters, warmup_method="linear")
         self._test(schedulers, targets, epochs)
 
     def test_compound_cosanneal_and_exp_lr(self):
@@ -1198,6 +1443,26 @@ class TestLRScheduler(TestCase):
         schedulers[0] = ReduceLROnPlateau(self.opt, mode='max', patience=3,
                                           threshold_mode='rel', threshold=0.1)
         schedulers[1] = CosineAnnealingLR(self.opt, epochs, eta_min)
+        self._test_reduce_lr_on_plateau(schedulers, targets, metrics, epochs)
+
+    def test_compound_reduce_lr_on_plateau5(self):
+        iters = 4
+        factor = 0.4
+        epochs = 22
+        for param_group in self.opt.param_groups:
+            param_group['lr'] = 0.5
+        single_targets = [0.5] * 6 + [0.05] * 7 + [0.005] * 7 + [0.0005] * 2
+        multipliers = [1] * 22
+        for i in range(iters):
+            multipliers[i] *= factor + i / iters * (1 - factor)
+        single_targets = [x * y for x, y in zip(single_targets, multipliers)]
+        targets = [single_targets]
+        targets = targets[1:]  # test runs step before checking lr
+        metrics = [10 - i * 0.0165 for i in range(22)]
+        schedulers = [None] * 2
+        schedulers[0] = ReduceLROnPlateau(self.opt, patience=5, cooldown=0, threshold_mode='abs',
+                                          mode='min', threshold=0.1)
+        schedulers[1] = WarmUpLR(self.opt, warmup_factor=factor, warmup_iters=iters, warmup_method="linear")
         self._test_reduce_lr_on_plateau(schedulers, targets, metrics, epochs)
 
     def test_cycle_lr_invalid_mode(self):

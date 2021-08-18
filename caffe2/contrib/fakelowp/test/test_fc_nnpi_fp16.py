@@ -186,8 +186,7 @@ class FCTest(serial.SerializedTestCase):
                         0.0680542, 0.4255371, -0.42895508, -0.4128418,
                         -0.47973633, 0.33251953,
                         0.27807617, 0.3701172]], dtype=np.float32)
-        b0 = [0.47851562]
-        b0 = np.array(b0, dtype=np.float32)
+        b0 = np.array([0.47851562], dtype=np.float32)
 
         workspace.FeedBlob("W0", W0)
         workspace.FeedBlob("b0", b0)
@@ -252,7 +251,6 @@ class FCTest(serial.SerializedTestCase):
                     "m": m,
                     "k": k,
                     "n": n,
-                    "X": X0,
                     "W0": W0,
                     "b0": b0,
                     "Y_glow": Y_glow,

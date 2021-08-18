@@ -16,12 +16,12 @@ void NamesMode::set_enabled(bool enabled) {
   c10::impl::tls_set_dispatch_key_excluded(DispatchKey::Named, !enabled);
 }
 
-Tensor& internal_set_names_inplace(Tensor& tensor, optional<DimnameList> names) {
+const Tensor& internal_set_names_inplace(const Tensor& tensor, optional<DimnameList> names) {
   impl::internal_set_names_inplace(tensor.unsafeGetTensorImpl(), names, /*validate_names=*/true);
   return tensor;
 }
 
-Tensor& internal_set_names_inplace(Tensor& tensor, std::vector<Dimname>&& names, bool validate_names) {
+const Tensor& internal_set_names_inplace(const Tensor& tensor, std::vector<Dimname>&& names, bool validate_names) {
   impl::internal_set_names_inplace(tensor.unsafeGetTensorImpl(), std::move(names), validate_names);
   return tensor;
 }

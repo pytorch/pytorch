@@ -5,6 +5,7 @@ from functools import wraps
 import torch
 import torch.cuda
 import torch.distributed as dist
+from torch.testing._internal.common_utils import TEST_WITH_TSAN
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -43,6 +44,9 @@ def skip_if_no_ninja(func):
 
     return wrapper
 
+if TEST_WITH_TSAN:
+    print("Skip as TSAN is not fork-safe since we're forking in a multi-threaded environment", file=sys.stderr)
+    sys.exit(0)
 
 if BACKEND == "gloo" or BACKEND == "nccl":
 

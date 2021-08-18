@@ -22,12 +22,28 @@ bool is_floating_point(const Tensor& self) {
   return self.is_floating_point();
 }
 
+bool is_inference(const Tensor& self) {
+  return self.is_inference();
+}
+
 bool is_signed(const Tensor &self) {
   return self.is_signed();
 }
 
+bool is_conj(const Tensor& self) {
+  return self.is_conj();
+}
+
+bool is_neg(const Tensor& self) {
+  return self.is_neg();
+}
+
 bool is_sparse(const Tensor& self) {
   return self.is_sparse();
+}
+
+bool is_sparse_csr(const Tensor& self) {
+  return self.is_sparse_csr();
 }
 
 bool is_quantized(const Tensor& self) {
@@ -57,6 +73,7 @@ static inline ScalarType promote_skip_undefined(ScalarType a, ScalarType b) {
 
 
 static inline ScalarType combine_categories(ScalarType higher, ScalarType lower) {
+  // NOLINTNEXTLINE(bugprone-branch-clone)
   if(isComplexType(higher)) {
     return higher;
   }
@@ -121,6 +138,7 @@ ScalarType result_type(TensorList tensors) {
 }
 
 ScalarType result_type(const Tensor &tensor, const Tensor &other) {
+  // NOLINTNEXTLINE(performance-move-const-arg)
   std::vector<Tensor> tensors{std::move(tensor), std::move(other)};
   return native::result_type(tensors);
 }

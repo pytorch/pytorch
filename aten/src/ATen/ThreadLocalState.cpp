@@ -5,13 +5,16 @@
 #endif
 
 #include <ATen/record_function.h>
+#include <ATen/SavedTensorHooks.h>
 
 namespace at {
 
 ThreadLocalState::ThreadLocalState(bool keep_grad_mode)
     : dispatch_key_(c10::impl::tls_local_dispatch_key_set()),
-      debug_info_(c10::ThreadLocalDebugInfo::current()) {
+      debug_info_(c10::ThreadLocalDebugInfo::current()),
+      inference_mode_enabled_(c10::InferenceMode::is_enabled()) {
   rf_tls_ = at::get_record_function_tls_();
+  saved_tensors_default_hooks_ = SavedTensorDefaultHooks::get_hooks();
 
 #if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
   keep_grad_mode_ = keep_grad_mode;
@@ -33,9 +36,15 @@ void ThreadLocalState::setThreadLocalState(
 
   at::set_record_function_tls_(state.rf_tls_);
 
+  SavedTensorDefaultHooks::set_hooks(
+      state.saved_tensors_default_hooks_.first,
+      state.saved_tensors_default_hooks_.second);
+
   c10::ThreadLocalDebugInfo::_forceCurrentDebugInfo(state.debug_info_);
 
   c10::impl::_force_tls_local_dispatch_key_set(state.dispatch_key_);
+
+  c10::InferenceMode::_set_enabled(state.inference_mode_enabled_);
 }
 
 } // namespace at

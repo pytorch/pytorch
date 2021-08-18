@@ -91,6 +91,7 @@ TEST(DominatorTree, Test2) {
     {n5, {n1, n7}},
     {n6, {n7}}
   };
+  // NOLINTNEXTLINE(performance-for-range-copy)
   for (auto pair : domFrontMap) {
     EXPECT_EQ(pair.second, checkMap[pair.first]);
   }

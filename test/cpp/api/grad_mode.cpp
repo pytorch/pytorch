@@ -45,7 +45,7 @@ TEST(GradModeTest, TestRequiresGradViewOpExiting) {
 
     {
       torch::AutoGradMode mode(false);
-      view_out = a.view({2, 3});  // go through kernels: VariableType, InplaceOrView, CPU
+      view_out = a.view({2, 3});  // go through kernels: VariableType, ADInplaceOrView, CPU
       assert_tensor_creation_meta(view_out, torch::autograd::CreationMeta::NO_GRAD_MODE);
       ASSERT_EQ(view_out.requires_grad(), requires_grad);
       ASSERT_TRUE(view_out.is_leaf());
@@ -53,10 +53,15 @@ TEST(GradModeTest, TestRequiresGradViewOpExiting) {
 
     tmp = view_out * view_out;
     ASSERT_EQ(tmp.requires_grad(), requires_grad);
+    if (requires_grad) {
+      tmp.backward(torch::ones_like(tmp));
+      // TODO: this behavior is a side effect of issue #11390.
+      ASSERT_FALSE(view_out.grad().defined());
+    }
 
     if (requires_grad) {
-      ASSERT_THROWS_WITH(view_out.mul_(2),  // go through kernels: VariableType, InplaceOrView, CPU
-        "A view was created in no_grad mode and is being modified inplace")
+      ASSERT_THROWS_WITH(view_out.mul_(2),  // go through kernels: VariableType, ADInplaceOrView, CPU
+        "A view was created in no_grad mode and is being modified inplace");
     } else {
         view_out.mul_(2);
     }

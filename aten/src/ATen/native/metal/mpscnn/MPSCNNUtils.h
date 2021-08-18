@@ -1,5 +1,6 @@
 #import <Metal/Metal.h>
 #import <MetalPerformanceShaders/MetalPerformanceShaders.h>
+#include <string>
 
 namespace at {
 namespace native {
@@ -26,10 +27,10 @@ LaunchParams spatialPointwiseKernelLaunchParams(
     NSUInteger width);
 
 API_AVAILABLE(ios(10.0), macos(10.13))
-static inline NSString* kernelFor(
+static inline std::string kernelFor(
     MPSImage* image,
-    NSString* arrayKernel,
-    NSString* nonArrayKernel) {
+    const std::string& arrayKernel,
+    const std::string& nonArrayKernel) {
   if (image.featureChannels > 4 || image.numberOfImages > 1) {
     return arrayKernel;
   }

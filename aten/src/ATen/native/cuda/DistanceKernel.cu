@@ -1,5 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/Exceptions.h>
+#include <ATen/cuda/DeviceUtils.cuh>
+#include <ATen/cuda/CUDAContext.h>
 #include <THC/THCTensorMathReduce.cuh>
 #include <math.h>
 
@@ -331,7 +333,8 @@ void cdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const Tensor
   const int64_t r1 = x1.size(-2);
   const int64_t r2 = x2.size(-2);
   const int64_t m = x1.size(-1);
-  int64_t batch = x1.dim() > 2 ? x1.size(0) : 1;
+  // Just like we do in the CPU code, assume that result is always batched
+  int64_t batch = result.size(0);
   const int block_x = 64;
   const int block_y = 16;
   const int grid_x = (m + block_x * 8 - 1) / (block_x * 8);
@@ -352,7 +355,7 @@ void cdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const Tensor
   //we call grad.contiguous() before backward, so stride is guaranteed to be 1
   const int64_t gs = 1;
 
-  Tensor buffer = (x1.dim() > 2) ? at::empty({batch, r2, r1, m}, result.options()) : at::empty({r2, r1, m}, result.options());
+  Tensor buffer = at::empty({batch, r2, r1, m}, result.options());
   AT_DISPATCH_FLOATING_TYPES(result.scalar_type(), "cdist_cuda_backward", [&] {
     if (p == 1.0) {
       cdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::one><<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(buffer.data_ptr<scalar_t>(),
@@ -382,11 +385,7 @@ void cdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const Tensor
     }
   });
 
-  if (x1.dim() > 2) {
-    at::sum_out(result, buffer, 1);
-  } else {
-    at::sum_out(result, buffer, 0);
-  }
+  at::sum_out(result, buffer, 1);
 
 }
 

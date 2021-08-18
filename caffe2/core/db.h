@@ -3,7 +3,8 @@
 
 #include <mutex>
 
-#include "c10/util/Registry.h"
+#include <c10/util/Registry.h>
+#include <c10/util/string_view.h>
 #include "caffe2/core/blob_serialization.h"
 #include "caffe2/proto/caffe2_pb.h"
 
@@ -67,7 +68,7 @@ class TORCH_API Transaction {
   /**
    * Puts the key value pair to the database.
    */
-  virtual void Put(const string& key, const string& value) = 0;
+  virtual void Put(const std::string& key, std::string&& value) = 0;
   /**
    * Commits the current writes.
    */
@@ -97,6 +98,19 @@ class TORCH_API DB {
    * ownership of the pointer.
    */
   virtual std::unique_ptr<Transaction> NewTransaction() = 0;
+
+  /**
+   * Set DB options.
+   *
+   * These options should apply for the lifetime of the DB, or until a
+   * subsequent SetOptions() call overrides them.
+   *
+   * This is used by the Save operator to allow the client to pass in
+   * DB-specific options to control the behavior.  This is an opaque string,
+   * where the format is specific to the DB type.  DB types may pass in a
+   * serialized protobuf message here if desired.
+   */
+  virtual void SetOptions(c10::string_view /* options */) {}
 
  protected:
   Mode mode_;

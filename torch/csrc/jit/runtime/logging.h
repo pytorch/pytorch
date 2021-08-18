@@ -28,7 +28,7 @@ TORCH_API LoggerBase* setLogger(LoggerBase* logger);
 class NoopLogger : public LoggerBase {
  public:
   void addStatValue(const std::string& stat_name, int64_t val) override {}
-  ~NoopLogger() = default;
+  ~NoopLogger() override = default;
 };
 
 // Trivial locking logger. Pass in an instance of this to setLogger() to use it.
@@ -42,7 +42,7 @@ class TORCH_API LockingLogger : public LoggerBase {
   virtual int64_t getCounterValue(const std::string& name) const;
   enum class AggregationType { SUM = 0, AVG = 1 };
   void setAggregationType(const std::string& stat_name, AggregationType type);
-  ~LockingLogger() = default;
+  ~LockingLogger() override = default;
 
  private:
   mutable std::mutex m;
@@ -61,7 +61,9 @@ struct JITTimePoint {
 };
 
 TORCH_API JITTimePoint timePoint();
-TORCH_API void recordDurationSince(const std::string& name, JITTimePoint tp);
+TORCH_API void recordDurationSince(
+    const std::string& name,
+    const JITTimePoint& tp);
 
 namespace runtime_counters {
 constexpr const char* GRAPH_EXECUTORS_CONSTRUCTED =

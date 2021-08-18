@@ -4,7 +4,9 @@ from torch._python_dispatcher import PythonDispatcher
 
 from collections import namedtuple
 import itertools
+import os
 import re
+import torch.utils.cpp_extension
 
 # TODO: Expand the dispatcher API to be a generic API for interfacing with
 # the dispatcher from Python!
@@ -264,7 +266,7 @@ Inferred operator schema for a C++ kernel function doesn't match the expected fu
     registered at /dev/null:0
   inferred schema: (Tensor _0) -> (Tensor _0)
     impl_t_t
-  reason: The number of arguments is different. 2 vs 1.''')  # noqa
+  reason: The number of arguments is different. 2 vs 1.''')
 
     def test_def_with_inference(self):
         state = self.commute("foo", [
@@ -722,7 +724,7 @@ alias analysis kind: PURE_FUNCTION
             self.commute("foo", ops, expect_raises=True).state,
             '''Tried to register an operator (test::foo(Tensor x) -> (Tensor)) with the same name and overload '''
             '''name multiple times. Each overload's schema should only be registered with a single call to def(). '''
-            '''Duplicate registration: registered at /dev/null:0. Original registration: registered at /dev/null:0'''  # noqa
+            '''Duplicate registration: registered at /dev/null:0. Original registration: registered at /dev/null:0'''
         )
 
     def test_multiple_fallback(self):
@@ -734,7 +736,7 @@ alias analysis kind: PURE_FUNCTION
             self.assertExpectedInline(
                 str(e),
                 '''Tried to register multiple backend fallbacks for the same dispatch key XLA; previous registration '''
-                '''registered at /dev/null:0, new registration registered at /dev/null:0'''  # noqa
+                '''registered at /dev/null:0, new registration registered at /dev/null:0'''
             )
         else:
             self.assertTrue(False)
@@ -755,10 +757,39 @@ CompositeImplicitAutograd[alias] (inactive): fn1 :: (Tensor _0) -> (Tensor _0) [
 '''
         )
 
+    def test_find_dangling_impls(self):
+        dangling_impls = C._dispatch_find_dangling_impls()
+        self.assertEqual(
+            0,
+            len(dangling_impls),
+            msg=f"Expect zero dangling impls, but found: {dangling_impls}"
+        )
+
+    def test_find_dangling_impls_ext(self):
+        extension_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cpp_extensions', 'dangling_impl_extension.cpp')
+        module = torch.utils.cpp_extension.load(
+            name="dangling_impl_extension",
+            sources=[
+                extension_path,
+            ],
+            extra_cflags=["-g"],
+            verbose=True,
+        )
+
+        impls = C._dispatch_find_dangling_impls()
+        self.assertEqual(1, len(impls))
+        self.assertEqual(
+            '''\
+name: __test::foo
+schema: (none)
+CPU: registered at {}:5 :: () -> () [ boxed unboxed ]
+'''.format(extension_path),
+            impls[0])
+
 class TestPythonDispatcher(TestCase):
     def test_basic(self):
         dispatcher = PythonDispatcher()
-        dispatcher.register(["CPU", "XLA", "CompositeImplicitAutograd"])
+        dispatcher.register(["CPU", "XLA", "Lazy", "CompositeImplicitAutograd"])
         self.assertExpectedInline(
             dispatcher.dispatchTable(),
             '''\
@@ -768,16 +799,18 @@ key             kernel
 ---------------------------
 CPU             fn_CPU [kernel]
 XLA             fn_XLA [kernel]
+Lazy            fn_Lazy [kernel]
 QuantizedCPU    fn_CompositeImplicitAutograd [math kernel]
 AutogradOther   fn_CompositeImplicitAutograd [math kernel]
 AutogradCPU     fallthrough [backend fallback]
 AutogradXLA     fallthrough [backend fallback]
+AutogradLazy    fallthrough [backend fallback]
 '''
         )
 
     def test_math_autogradcpu(self):
         dispatcher = PythonDispatcher()
-        dispatcher.register(["CPU", "XLA", "CompositeImplicitAutograd", "AutogradCPU"])
+        dispatcher.register(["CPU", "XLA", "Lazy", "CompositeImplicitAutograd", "AutogradCPU"])
         self.assertExpectedInline(
             dispatcher.dispatchTable(),
             '''\
@@ -787,10 +820,12 @@ key             kernel
 ---------------------------
 CPU             fn_CPU [kernel]
 XLA             fn_XLA [kernel]
+Lazy            fn_Lazy [kernel]
 QuantizedCPU    fn_CompositeImplicitAutograd [math kernel]
 AutogradOther   fn_CompositeImplicitAutograd [math kernel]
 AutogradCPU     fn_AutogradCPU [kernel]
 AutogradXLA     fallthrough [backend fallback]
+AutogradLazy    fallthrough [backend fallback]
 '''
         )
         self.assertExpectedInline(
@@ -802,6 +837,7 @@ key             kernel
 ---------------------------
 CPU             fn_CPU
 XLA             fn_XLA
+Lazy            fn_Lazy
 AutogradCPU     fn_AutogradCPU
 CompositeImplicitAutograd[alias] fn_CompositeImplicitAutograd
 '''
@@ -809,7 +845,7 @@ CompositeImplicitAutograd[alias] fn_CompositeImplicitAutograd
 
     def test_defaultbackend_autogradcpu(self):
         dispatcher = PythonDispatcher()
-        dispatcher.register(["CPU", "XLA", "CompositeExplicitAutograd", "AutogradCPU"])
+        dispatcher.register(["CPU", "XLA", "Lazy", "CompositeExplicitAutograd", "AutogradCPU"])
         self.assertExpectedInline(
             dispatcher.dispatchTable(),
             '''\
@@ -819,10 +855,12 @@ key             kernel
 ---------------------------
 CPU             fn_CPU [kernel]
 XLA             fn_XLA [kernel]
+Lazy            fn_Lazy [kernel]
 QuantizedCPU    fn_CompositeExplicitAutograd [default backend kernel]
 AutogradOther   fallthrough [backend fallback]
 AutogradCPU     fn_AutogradCPU [kernel]
 AutogradXLA     fallthrough [backend fallback]
+AutogradLazy    fallthrough [backend fallback]
 '''
         )
 
@@ -835,6 +873,7 @@ key             kernel
 ---------------------------
 CPU             fn_CPU
 XLA             fn_XLA
+Lazy            fn_Lazy
 AutogradCPU     fn_AutogradCPU
 CompositeExplicitAutograd[alias] fn_CompositeExplicitAutograd
 '''
@@ -852,10 +891,12 @@ key             kernel
 ---------------------------
 CPU             fn_CPU [kernel]
 XLA             fn_CompositeImplicitAutograd [math kernel]
+Lazy            fn_CompositeImplicitAutograd [math kernel]
 QuantizedCPU    fn_QuantizedCPU [kernel]
 AutogradOther   ambiguous_autogradother [ambiguous autogradother]
 AutogradCPU     fallthrough [backend fallback]
 AutogradXLA     fn_CompositeImplicitAutograd [math kernel]
+AutogradLazy    fn_CompositeImplicitAutograd [math kernel]
 '''
         )
 
@@ -885,7 +926,6 @@ CompositeImplicitAutograd[alias] fn_CompositeImplicitAutograd
                 RuntimeError,
                 r"Registration to both CompositeImplicitAutograd and CompositeExplicitAutograd is not allowed"):
             dispatcher.register(["CompositeExplicitAutograd", "CompositeImplicitAutograd"])
-
 
 if __name__ == '__main__':
     run_tests()

@@ -5,6 +5,8 @@
 #include "caffe2/utils/proto_utils.h"
 #include "caffe2/utils/string_utils.h"
 
+#include <c10/util/irange.h>
+
 namespace caffe2 {
 
 namespace {
@@ -77,9 +79,10 @@ int takePrecedenceOver(
   if (left.size() == 0 || right.size() == 0) {
     return right.size() > left.size();
   }
-  for (int i = 0; i < right.size(); i++) {
+  for (auto i: c10::irange(right.size())) {
     // If right.size > left.size and left[0:i] == right[0:i],
     // right take precedence
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     if (i >= left.size()) {
       return 1;
     }
@@ -175,6 +178,8 @@ void BoundShapeInferencer::InferOps(
     InferLpNorm(op);
   } else if (op.type() == "Transpose") {
     InferTranspose(op);
+  } else if (op.type() == "Bucketize") {
+    InferBucketize(op);
   } else {
     InferCommonOp(op);
   }
@@ -280,7 +285,7 @@ TensorShape& BoundShapeInferencer::CheckAndSetTensorBoundShape(
     // new value is skipped.
     if (precedence == 1) {
       shape_info.setDimType(t);
-      for (int i = 0; i < bound_dims.size(); i++) {
+      for (auto i: c10::irange(bound_dims.size())) {
         shape.set_dims(i, bound_dims[i]);
       }
     } else if (precedence == 0 && !allow_existing_shape) {
@@ -425,6 +430,7 @@ void BoundShapeInferencer::InferSparseLengthsSum(const OperatorDef& op) {
        op.type() == "SparseLengthsWeightedSum4BitRowwiseSparse" ||
        op.type() == "SparseLengthsSum4BitRowwiseSparse");
 
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
   const bool isSparse =
       (op.type() == "SparseLengthsSum4BitRowwiseSparse" ||
        op.type() == "SparseLengthsWeightedSum4BitRowwiseSparse" ||
@@ -551,6 +557,7 @@ void BoundShapeInferencer::InferElementwiseOpInput(const OperatorDef& op) {
 void BoundShapeInferencer::InferConcatInputs(const OperatorDef& op) {
   ArgumentHelper helper(op);
   const auto add_axis = helper.GetSingleArgument<int32_t>("add_axis", 0);
+  // NOLINTNEXTLINE(bugprone-branch-clone)
   if (add_axis) {
     return;
   } else if (op.output_size() == 0 || !shape_info_.count(op.output(0))) {
@@ -730,6 +737,7 @@ void BoundShapeInferencer::InferFC(const OperatorDef& op) {
     dimTypes.push_back(TensorBoundShape_DimType_CONSTANT);
     current_dim_type_ = TensorBoundShape_DimType_BATCH;
     current_max_batch_size_ = spec_.max_batch_size;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     TensorProto::DataType w_data_type;
     if (fp16) {
       w_data_type = TensorProto_DataType_FLOAT;
@@ -777,6 +785,7 @@ void BoundShapeInferencer::InferFC(const OperatorDef& op) {
   }
   std::vector<TensorShape> output_shapes = InferOutput(op, input_shapes);
   CAFFE_ENFORCE_EQ(output_shapes.size(), 1);
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   TensorProto::DataType output_data_type;
   if (fp16) {
     output_data_type = TensorProto_DataType_FLOAT;
@@ -865,7 +874,7 @@ void BoundShapeInferencer::InferUnPackRecords(const OperatorDef& op) {
     }
   }
 
-  for (int i = 0; i < output_shapes.size(); i++) {
+  for (auto i: c10::irange(output_shapes.size())) {
     const auto& shape = output_shapes[i];
 
     CheckAndSetTensorBoundShape(
@@ -913,7 +922,7 @@ void BoundShapeInferencer::InferSoftmax(const OperatorDef& op) {
 
   auto it = shape_info_.find(op.input(0));
   if (it == shape_info_.end()) {
-    LOG(WARNING) << "Didn't find shape info for the input of Softmax";
+    LOG(WARNING) << "Didn't find shape info for the input of Softmax, skipping";
     return;
   }
 
@@ -923,6 +932,23 @@ void BoundShapeInferencer::InferSoftmax(const OperatorDef& op) {
       ConvertToVec(it->second.shape.dims()),
       it->second.shape.data_type(),
       false);
+}
+
+void BoundShapeInferencer::InferBucketize(const OperatorDef& op) {
+  CAFFE_ENFORCE_EQ(op.input_size(), 1, op.type(), " must have 1 input");
+  CAFFE_ENFORCE_EQ(op.output_size(), 1, op.type(), " must have 1 output");
+
+  auto it = shape_info_.find(op.input(0));
+  if (it == shape_info_.end()) {
+    LOG(WARNING) << "Didn't find shape info for the input of Bucketize, skipping";
+    return;
+  }
+
+  InferCommonOp(op);
+  auto it_output = shape_info_.find(op.output(0));
+  if (it_output != shape_info_.end()) {
+    it_output->second.setDimType(it->second.getDimType());
+  }
 }
 
 void BoundShapeInferencer::InferLpNorm(const OperatorDef& op) {
@@ -941,7 +967,7 @@ void BoundShapeInferencer::InferTranspose(const OperatorDef& op) {
 
   auto it = shape_info_.find(op.input(0));
   if (it == shape_info_.end()) {
-    LOG(WARNING) << "Didn't find shape info for the input of Softmax";
+    LOG(WARNING) << "Didn't find shape info for the input of Transpose";
     return;
   }
 
@@ -1051,6 +1077,7 @@ void BoundShapeInferencer::InferCommonOp(
       if (target == -1) {
         infered_data_type = TensorProto::UINT8;
       } else {
+        // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
         CAFFE_ENFORCE(target < input_shapes.size());
         infered_data_type = input_shapes[target].data_type();
       }
@@ -1063,7 +1090,7 @@ void BoundShapeInferencer::InferCommonOp(
       infered_data_type = TensorProto::FLOAT;
     }
 
-    for (int i = 0; i < output_shapes.size(); i++) {
+    for (auto i: c10::irange(output_shapes.size())) {
       const auto& shape = output_shapes[i];
       if (shape.unknown_shape()) {
         continue;

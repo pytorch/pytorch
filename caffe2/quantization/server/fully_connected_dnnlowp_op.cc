@@ -454,6 +454,7 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::RunOnDevice() {
         int32_t sum = 0;
         for (int k = 0; k < K; ++k) {
           int x = Xdata[i * K + k];
+          // NOLINTNEXTLINE(bugprone-signed-char-misuse)
           int w = Wdata[j * K + k];
           sum += x * w;
 #ifdef DNNLOWP_DETAILED_LOG_IN_SLOW_PATH
@@ -499,12 +500,15 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::RunOnDevice() {
       size_t X_size = M * K;
       size_t W_size = N * K;
       size_t Y_size = M * N;
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       for (int i = 0; i < X_size; i++) {
         X_q_data[i] = Xdata[i];
       }
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       for (int i = 0; i < W_size; i++) {
         W_q_data[i] = Wdata[i];
       }
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       for (int i = 0; i < Y_size; i++) {
         Y_q_data[i] = Y_int32_[i];
       }
@@ -681,6 +685,7 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::GetQuantizationParameters_() {
       filter_zero_points_.resize(filter_qparams_.size());
       requantization_params_.resize(filter_qparams_.size());
       requantization_multipliers_.resize(filter_qparams_.size());
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       for (int i = 0; i < filter_qparams_.size(); ++i) {
         filter_scales_[i] = filter_qparams_[i].scale;
         filter_zero_points_[i] = filter_qparams_[i].zero_point;
@@ -788,6 +793,7 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::GetQuantizationParameters_() {
     } else {
       const auto& bias = InputTensorCPU_(2);
       if (this->template InputIsType<int8::Int8TensorCPU>(2)) {
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
         TensorQuantizationParams bias_qparams;
         bias_qparams.scale = this->template Input<int8::Int8TensorCPU>(2).scale;
         bias_qparams.zero_point =
@@ -806,7 +812,8 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::GetQuantizationParameters_() {
           b_dequantized_.resize(N);
           for (int j = 0; j < N; ++j) {
             b_dequantized_[j] = fbgemm::Dequantize<int32_t>(
-                b_quantized_data_[j], in_qparams_[2]);
+                b_quantized_data_[j],
+                filter_qparams_[quantize_channelwise_ ? j : 0]);
           }
           b_dequantized_data_ = b_dequantized_.data();
         }
@@ -818,7 +825,8 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::GetQuantizationParameters_() {
             (*b_quantized_)[j] = fbgemm::Quantize<int32_t>(
                 b_dequantized_data_[j],
                 0,
-                in_qparams_[0].scale * filter_qparams_[0].scale,
+                in_qparams_[0].scale *
+                    filter_qparams_[quantize_channelwise_ ? j : 0].scale,
                 32);
           }
           b_quantized_data_ = b_quantized_->data();
@@ -838,6 +846,7 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::GetQuantizationParameters_() {
         b_quantized_->assign(b_quantized_data_, b_quantized_data_ + N);
         b_quantized_data_ = b_quantized_->data();
       }
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       vector<int32_t>* column_offset_ptr;
       vector<int32_t> column_offset_temp;
       if (this->template InputIsType<Int8FCDNNLowPPackedWeightBlob>(1)) {
@@ -889,6 +898,7 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::GetQuantizationParameters_() {
       float in_scale = input_qparam_blob->qparam.scale;
       int in_zero_point = input_qparam_blob->qparam.zero_point;
 
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
       dnnlowp::TensorQuantizationParams out_qparams_overwrite;
       out_qparams_overwrite.scale = in_scale;
       out_qparams_overwrite.zero_point = in_zero_point;
@@ -898,6 +908,7 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::GetQuantizationParameters_() {
       GetOutputQuantizationParams_();
     }
 
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int i = 0; i < filter_qparams_.size(); ++i) {
       float real_multiplier =
           in_qparams_[0].scale * filter_qparams_[i].scale / out_qparams_.scale;
@@ -972,7 +983,9 @@ using namespace std::placeholders;
 OPERATOR_SCHEMA(Int8FCRelu)
     .NumInputs(3, 4)
     .NumOutputs(1)
+    // NOLINTNEXTLINE(modernize-avoid-bind)
     .TensorInferenceFunction(std::bind(FCShapeInference, _1, _2, false))
+    // NOLINTNEXTLINE(modernize-avoid-bind)
     .CostInferenceFunction(std::bind(CostInferenceForFC, _1, _2, false));
 
 } // namespace caffe2

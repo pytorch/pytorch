@@ -2,7 +2,6 @@
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/LegacyTHFunctionsCPU.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/WrapDimUtils.h>
 
@@ -27,15 +26,106 @@ namespace at {
 
 namespace meta {
 
-#define CREATE_UNARY_META_FUNC(func)                  \
+// Unary float operations always produce floating point
+// outputs for floating point and integral types
+// For complex inputs, the output type should be the same as input type.
+#define CREATE_UNARY_FLOAT_META_FUNC(func)                  \
   TORCH_META_FUNC(func) (const Tensor& self) {        \
     build_unary_float_op(maybe_get_output(), self);   \
   }
 
-// Use this macro iff you need to dispatch and don't need
-// extra error checking/have a different signature, etc.
-CREATE_UNARY_META_FUNC(sin)
-CREATE_UNARY_META_FUNC(sinc)
+CREATE_UNARY_FLOAT_META_FUNC(acos)
+CREATE_UNARY_FLOAT_META_FUNC(acosh)
+CREATE_UNARY_FLOAT_META_FUNC(asin)
+CREATE_UNARY_FLOAT_META_FUNC(asinh)
+CREATE_UNARY_FLOAT_META_FUNC(atan)
+CREATE_UNARY_FLOAT_META_FUNC(atanh)
+CREATE_UNARY_FLOAT_META_FUNC(cos)
+CREATE_UNARY_FLOAT_META_FUNC(cosh)
+CREATE_UNARY_FLOAT_META_FUNC(digamma)
+CREATE_UNARY_FLOAT_META_FUNC(erf)
+CREATE_UNARY_FLOAT_META_FUNC(erfc)
+CREATE_UNARY_FLOAT_META_FUNC(erfinv)
+CREATE_UNARY_FLOAT_META_FUNC(exp)
+CREATE_UNARY_FLOAT_META_FUNC(exp2)
+CREATE_UNARY_FLOAT_META_FUNC(expm1)
+CREATE_UNARY_FLOAT_META_FUNC(i0)
+CREATE_UNARY_FLOAT_META_FUNC(lgamma)
+CREATE_UNARY_FLOAT_META_FUNC(log)
+CREATE_UNARY_FLOAT_META_FUNC(log10)
+CREATE_UNARY_FLOAT_META_FUNC(log1p)
+CREATE_UNARY_FLOAT_META_FUNC(log2)
+CREATE_UNARY_FLOAT_META_FUNC(reciprocal)
+CREATE_UNARY_FLOAT_META_FUNC(rsqrt)
+CREATE_UNARY_FLOAT_META_FUNC(sigmoid)
+CREATE_UNARY_FLOAT_META_FUNC(sin)
+CREATE_UNARY_FLOAT_META_FUNC(sinc)
+CREATE_UNARY_FLOAT_META_FUNC(sinh)
+CREATE_UNARY_FLOAT_META_FUNC(special_entr)
+CREATE_UNARY_FLOAT_META_FUNC(special_erfcx)
+CREATE_UNARY_FLOAT_META_FUNC(special_i0e)
+CREATE_UNARY_FLOAT_META_FUNC(special_i1)
+CREATE_UNARY_FLOAT_META_FUNC(special_i1e)
+CREATE_UNARY_FLOAT_META_FUNC(special_ndtri)
+CREATE_UNARY_FLOAT_META_FUNC(sqrt)
+CREATE_UNARY_FLOAT_META_FUNC(tan)
+CREATE_UNARY_FLOAT_META_FUNC(tanh)
+
+TORCH_META_FUNC(polygamma)(int64_t n, const Tensor& self) {
+  TORCH_CHECK(n >= 0, "polygamma(n, x) does not support negative n.");
+  build_unary_float_op(maybe_get_output(), self);
+}
+
+// These are normal unary ops that preserve dtype
+#define CREATE_UNARY_META_FUNC(func)                  \
+  TORCH_META_FUNC(func) (const Tensor& self) {        \
+    build_unary_op(maybe_get_output(), self);   \
+  }
+CREATE_UNARY_META_FUNC(bitwise_not)
+CREATE_UNARY_META_FUNC(frac)
+CREATE_UNARY_META_FUNC(round)
+CREATE_UNARY_META_FUNC(sgn)
+
+TORCH_META_FUNC(neg)(const Tensor& self) {
+  TORCH_CHECK(self.scalar_type() != kBool,
+              "Negation, the `-` operator, on a bool tensor is not supported. "
+              "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
+  build_unary_op(maybe_get_output(), self);
+}
+
+TORCH_META_FUNC(trunc) (const Tensor& self) {
+  // Note: this is consistent with NumPy
+  TORCH_CHECK(!self.is_complex(),
+    "trunc is not supported for complex inputs");
+  build_unary_op(maybe_get_output(), self);
+}
+
+TORCH_META_FUNC(floor) (const Tensor& self) {
+  // Note: this is consistent with NumPy
+  TORCH_CHECK(!self.is_complex(),
+    "floor is not supported for complex inputs");
+  build_unary_op(maybe_get_output(), self);
+}
+
+TORCH_META_FUNC(sign) (const Tensor& self) {
+  TORCH_CHECK(!self.is_complex(),
+              "Unlike NumPy, torch.sign is not intended to support complex numbers. Please use torch.sgn instead.");
+  build_unary_op(maybe_get_output(), self);
+}
+
+TORCH_META_FUNC(signbit) (const Tensor& self) {
+  TORCH_CHECK(!self.is_complex(), "signbit is not implemented for complex tensors.");
+  TORCH_CHECK(maybe_get_output().defined() ? maybe_get_output().dtype() == at::kBool : true,
+              "signbit does not support non-boolean outputs.");
+  build_unary_force_boolean_op(maybe_get_output(), self);
+}
+
+TORCH_META_FUNC(ceil) (const Tensor& self) {
+  // Note: this is consistent with NumPy
+  TORCH_CHECK(!self.is_complex(),
+    "ceil is not supported for complex inputs");
+  build_unary_op(maybe_get_output(), self);
+}
 
 } // namespace meta
 
@@ -45,9 +135,75 @@ namespace native {
 // them work for your case, but just write something new instead. Here we use helper functions instead of a flat fat
 // macro that implements everything, because the former allows some simple preprocessing that are unique to some
 // operators (more is foreseeable) and is more flexible and elegant than the latter.
-#define CREATE_UNARY_TORCH_IMPL_FUNC(func)                                \
-TORCH_IMPL_FUNC(func##_out) (const Tensor& self, const Tensor& result) {  \
-  func##_stub(device_type(), *this);                                      \
+#define CREATE_UNARY_TORCH_IMPL_FUNC(func_out, func_stub)                                \
+TORCH_IMPL_FUNC(func_out) (const Tensor& self, const Tensor& result) {  \
+  func_stub(device_type(), *this);                                      \
+}
+
+CREATE_UNARY_TORCH_IMPL_FUNC(acos_out, acos_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(acosh_out, acosh_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(asin_out, asin_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(asinh_out, asinh_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(atan_out, atan_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(atanh_out, atanh_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(bitwise_not_out, bitwise_not_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(ceil_out, ceil_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(cos_out, cos_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(cosh_out, cosh_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(digamma_out, digamma_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(erf_out, erf_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(erfc_out, erfc_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(erfinv_out, erfinv_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(exp_out, exp_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(exp2_out, exp2_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(expm1_out, expm1_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(floor_out, floor_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(frac_out, frac_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(i0_out, i0_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(lgamma_out, lgamma_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(log_out, log_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(log10_out, log10_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(log1p_out, log1p_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(log2_out, log2_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(neg_out, neg_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(reciprocal_out, reciprocal_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(round_out, round_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(rsqrt_out, rsqrt_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(sigmoid_out, sigmoid_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(sign_out, sign_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(sin_out, sin_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(sinc_out, sinc_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(sinh_out, sinh_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(special_entr_out, special_entr_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(special_erfcx_out, special_erfcx_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(special_i0e_out, special_i0e_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(special_i1e_out, special_i1e_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(special_i1_out, special_i1_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(special_ndtri_out, special_ndtri_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(sqrt_out, sqrt_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(tan_out, tan_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(tanh_out, tanh_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(trunc_out, trunc_stub)
+
+TORCH_IMPL_FUNC(polygamma_out)
+(int64_t n, const Tensor& self, const Tensor& result) {
+  polygamma_stub(device_type(), *this, n);
+}
+
+TORCH_IMPL_FUNC(signbit_out) (const Tensor& self, const Tensor& result) {
+  at::native::resize_output(result, self.sizes());
+  if (self.dtype() == at::kBool) {
+    result.fill_(false);
+  } else {
+    signbit_stub(device_type(), *this);
+  }
+}
+
+// since polygamma_ has different signature from its
+// out and functional variant, we explicitly
+// define it (instead of using structured kernel).
+Tensor& polygamma_(Tensor& self, int64_t n) {
+  return at::polygamma_out(self, n, self);
 }
 
 template <typename Stub>
@@ -134,20 +290,10 @@ static inline Tensor& unary_op_impl_(Tensor& self, OutImpl& out_impl) {
   return out_impl(self, self);
 }
 
-Tensor& acos_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, acos_stub); }
-Tensor acos(const Tensor& self) { return unary_op_impl_float(self, acos_stub); }
-Tensor& acos_(Tensor& self) { return unary_op_impl_(self, at::acos_out); }
-
 // arccos, alias for acos
 Tensor& arccos_out(const Tensor& self, Tensor& result) { return at::acos_out(result, self); }
 Tensor arccos(const Tensor& self) { return self.acos(); }
 Tensor& arccos_(Tensor& self) { return self.acos_(); }
-
-static Tensor wrapped_scalar_tensor(const Scalar& scalar) {
-  auto tensor = scalar_to_tensor(scalar);
-  tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
-  return tensor;
-}
 
 Tensor& rad2deg_out(const Tensor& self, Tensor& result) {
   TORCH_CHECK(!self.is_complex(), "rad2deg is not supported for complex tensors.");
@@ -185,18 +331,10 @@ Tensor deg2rad(const Tensor& self) {
 }
 Tensor& deg2rad_(Tensor& self) { return unary_op_impl_(self, at::deg2rad_out); }
 
-Tensor& asin_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, asin_stub); }
-Tensor asin(const Tensor& self) { return unary_op_impl_float(self, asin_stub); }
-Tensor& asin_(Tensor& self) { return unary_op_impl_(self, at::asin_out); }
-
 // arcsin, alias of asin
 Tensor& arcsin_out(const Tensor& self, Tensor& result) { return at::asin_out(result, self); }
 Tensor arcsin(const Tensor& self) { return self.asin(); }
 Tensor& arcsin_(Tensor& self) { return self.asin_(); }
-
-Tensor& atan_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, atan_stub); }
-Tensor atan(const Tensor& self) { return unary_op_impl_float(self, atan_stub); }
-Tensor& atan_(Tensor& self) { return unary_op_impl_(self, at::atan_out); }
 
 // arctan, alias of atan
 Tensor& arctan_out(const Tensor& self, Tensor& result) { return at::atan_out(result, self); }
@@ -245,60 +383,90 @@ Tensor angle(const Tensor& self) {
 
 Tensor real(const Tensor& self) {
   if (self.is_complex()) {
-    auto real_tensor = at::view_as_real(self);
+    Tensor real_tensor;
+    if (self.is_conj()) {
+      real_tensor = at::view_as_real(self._conj());
+    } else {
+      real_tensor = at::view_as_real(self);
+    }
     return at::select(real_tensor, real_tensor.dim() - 1, 0);
   } else {
     TORCH_CHECK(false, "real is not implemented for tensors with non-complex dtypes.");
   }
 }
 
+Tensor _neg_view(const Tensor& self) {
+  Tensor self_ = self.alias();
+  self_._set_neg(!self.is_neg());
+  namedinference::propagate_names(self_, self);
+  return self_;
+}
+
 Tensor imag(const Tensor& self) {
   if (self.is_complex()) {
-    auto real_tensor = at::view_as_real(self);
+    Tensor real_tensor;
+    if (self.is_conj()) {
+      real_tensor = at::view_as_real(self._conj());
+      // preemptively set the negative flag for the final imag tensor
+      real_tensor = real_tensor._neg_view();
+    } else {
+      real_tensor = at::view_as_real(self);
+    }
     return at::select(real_tensor, real_tensor.dim() - 1, 1);
   } else {
     TORCH_CHECK(false, "imag is not implemented for tensors with non-complex dtypes.");
   }
 }
 
-Tensor& conj_out(const Tensor& self, Tensor& result) {
-  return unary_op_impl_out(result, self, conj_stub);
+Tensor& conj_physical_out(const Tensor& self, Tensor& result) {
+  return unary_op_impl_out(result, self, conj_physical_stub);
 }
 
-Tensor _conj(const Tensor& self) { return unary_op_impl(self, at::conj_out); }
+Tensor _conj_physical(const Tensor& self) {
+  if (self.is_conj()) {
+    return self.conj().clone();
+  }
+  return unary_op_impl(self, at::conj_physical_out);
+}
+
+Tensor conj_physical(const Tensor& self) {
+  if (!self.is_complex()) return self;
+  return at::_conj_physical(self);
+}
+
+Tensor& conj_physical_(Tensor& self) {
+  if (!self.is_complex()) return self;
+  return unary_op_impl_out(self, self, conj_physical_stub);
+}
+
+// No op if the neg bit is not set
+// else returns a new negated tensor with neg bit set to 0
+Tensor resolve_neg(const Tensor& self) {
+  if (!self.is_neg()) { return self; }
+  // negation is materialized in `copy_()` that clone ultimately calls into
+  return self.clone();
+}
+
+// No op if the conj bit is not set
+// else returns a new negated tensor with neg bit set to 0
+Tensor resolve_conj(const Tensor& self) {
+  if (!self.is_conj()) { return self; }
+  // conjugation is materialized in `copy_()` that clone ultimately calls into
+  return self.clone();
+}
+
+Tensor _conj(const Tensor& self) {
+  Tensor self_ = self.alias();
+  self_._set_conj(!self.is_conj());
+  namedinference::propagate_names(self_, self);
+  return self_;
+}
 
 Tensor conj(const Tensor& self) {
-  if (!self.is_complex()) {
-    return self;
-  }
-  return at::_conj(self);
+  // This might look like an infinite recursion but it's not.
+  // This actually calls into `conj()` defined in the Tensor class.
+  return self.conj();
 }
-
-Tensor& bitwise_not_out(const Tensor& self, Tensor& result) { return unary_op_impl_out(result, self, bitwise_not_stub); }
-Tensor bitwise_not(const Tensor& self) { return unary_op_impl(self, at::bitwise_not_out); }
-Tensor& bitwise_not_(Tensor& self) { return unary_op_impl_(self, at::bitwise_not_out); }
-
-Tensor& ceil_out(const Tensor& self, Tensor& result) {
-  // Note: this is consistent with NumPy
-  TORCH_CHECK(!self.is_complex(),
-    "ceil is not supported for complex inputs");
-
-  return unary_op_impl_out(result, self, ceil_stub);
-}
-Tensor ceil(const Tensor& self) { return unary_op_impl(self, at::ceil_out); }
-Tensor& ceil_(Tensor& self) { return unary_op_impl_(self, at::ceil_out); }
-
-Tensor& exp_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, exp_stub); }
-Tensor exp(const Tensor& self) { return unary_op_impl_float(self, exp_stub); }
-Tensor& exp_(Tensor& self) { return unary_op_impl_(self, at::exp_out); }
-
-Tensor& exp2_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, exp2_stub); }
-Tensor exp2(const Tensor& self) { return unary_op_impl_float(self, exp2_stub); }
-Tensor& exp2_(Tensor& self) { return unary_op_impl_(self, at::exp2_out); }
-
-Tensor& expm1_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, expm1_stub); }
-Tensor expm1(const Tensor& self) { return unary_op_impl_float(self, expm1_stub); }
-Tensor& expm1_(Tensor& self) { return unary_op_impl_(self, at::expm1_out); }
 
 // special_exp2, alias for exp2
 Tensor& special_exp2_out(const Tensor& self, Tensor& result) { return at::exp2_out(result, self); }
@@ -307,18 +475,6 @@ Tensor special_exp2(const Tensor& self) { return self.exp2(); }
 // special_expm1, alias for expm1
 Tensor& special_expm1_out(const Tensor& self, Tensor& result) { return at::expm1_out(result, self); }
 Tensor special_expm1(const Tensor& self) { return self.expm1(); }
-
-Tensor& erf_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, erf_stub); }
-Tensor erf(const Tensor& self) { return unary_op_impl_float(self, erf_stub); }
-Tensor& erf_(Tensor& self) { return unary_op_impl_(self, at::erf_out); }
-
-Tensor& erfc_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, erfc_stub); }
-Tensor erfc(const Tensor& self) { return unary_op_impl_float(self, erfc_stub); }
-Tensor& erfc_(Tensor& self) { return unary_op_impl_(self, at::erfc_out); }
-
-Tensor& erfinv_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, erfinv_stub); }
-Tensor erfinv(const Tensor& self) { return unary_op_impl_float(self, erfinv_stub); }
-Tensor& erfinv_(Tensor& self) { return unary_op_impl_(self, at::erfinv_out); }
 
 // special_erf, alias for erf
 Tensor& special_erf_out(const Tensor& self, Tensor& result) { return at::erf_out(result, self); }
@@ -332,133 +488,94 @@ Tensor special_erfc(const Tensor& self) { return self.erfc(); }
 Tensor& special_erfinv_out(const Tensor& self, Tensor& result) { return at::erfinv_out(result, self); }
 Tensor special_erfinv(const Tensor& self) { return self.erfinv(); }
 
-Tensor& frac_out(const Tensor& self, Tensor& result) { return unary_op_impl_out(result, self, frac_stub); }
-Tensor frac(const Tensor& self) { return unary_op_impl(self, at::frac_out); }
-Tensor& frac_(Tensor& self) { return unary_op_impl_(self, at::frac_out); }
+// special_polygamma, alias for polygamma
+Tensor& special_polygamma_out(int64_t n, const Tensor& self, Tensor& result) { return at::polygamma_out(result, n, self); }
+Tensor special_polygamma(int64_t n, const Tensor& self) { return self.polygamma(n); }
 
-Tensor& floor_out(const Tensor& self, Tensor& result) {
-  // Note: this is consistent with NumPy
-  TORCH_CHECK(!self.is_complex(),
-    "floor is not supported for complex inputs");
+// special_psi, alias for digamma
+Tensor& special_psi_out(const Tensor& self, Tensor& result) { return at::digamma_out(result, self); }
+Tensor special_psi(const Tensor& self) { return self.digamma(); }
+// special_digamma, alias for digamma
+Tensor& special_digamma_out(const Tensor& self, Tensor& result) { return at::digamma_out(result, self); }
+Tensor special_digamma(const Tensor& self) { return self.digamma(); }
 
-  return unary_op_impl_out(result, self, floor_stub);
+// special_i0, alias for i0
+Tensor& special_i0_out(const Tensor& self, Tensor& result) { return at::i0_out(result, self); }
+Tensor special_i0(const Tensor& self) { return self.i0(); }
+
+// special_log1p, alias for log1p
+Tensor& special_log1p_out(const Tensor& self, Tensor& result) { return at::log1p_out(result, self); }
+Tensor special_log1p(const Tensor& self) { return self.log1p(); }
+
+// special_round, alias for round
+Tensor& special_round_out(const Tensor& self, Tensor& result) { return at::round_out(result, self); }
+Tensor special_round(const Tensor& self) { return self.round(); }
+
+// special_sinc, alias for sinc
+Tensor& special_sinc_out(const Tensor& self, Tensor& result) { return at::sinc_out(result, self); }
+Tensor special_sinc(const Tensor& self) { return self.sinc(); }
+
+namespace {
+
+inline Tensor calc_ndtr(const Tensor& self) {
+  auto x_sqrt_2 = self / std::sqrt(2.);
+  return (1 + at::erf(x_sqrt_2)) * 0.5;
 }
-Tensor floor(const Tensor& self) { return unary_op_impl(self, at::floor_out); }
-Tensor& floor_(Tensor& self) { return unary_op_impl_(self, at::floor_out); }
 
-Tensor& i0_out(const Tensor& self, Tensor& result) { return unary_op_impl_out(result, self, i0_stub); }
-Tensor i0(const Tensor& self) { return unary_op_impl(self, at::i0_out); }
-Tensor& i0_(Tensor& self) { return unary_op_impl_(self, at::i0_out); }
+} // namespace
 
-Tensor& log_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, log_stub); }
-Tensor log(const Tensor& self) { return unary_op_impl_float(self, log_stub); }
-Tensor& log_(Tensor& self) { return unary_op_impl_(self, at::log_out); }
+// special_ndtr
+Tensor& special_ndtr_out(const Tensor& self, Tensor& result) {
+  TORCH_CHECK(
+      self.device() == result.device(),
+      "Expected all tensors to be on the same device, but found at least two devices, ",
+      self.device(),
+      " and ",
+      result.device(),
+      "!");
 
-Tensor& log10_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, log10_stub); }
-Tensor log10(const Tensor& self) { return unary_op_impl_float(self, log10_stub); }
-Tensor& log10_(Tensor& self) { return unary_op_impl_(self, at::log10_out); }
+  auto ndtr = calc_ndtr(self);
+  TORCH_CHECK(
+      at::can_cast(ndtr.scalar_type(), result.scalar_type()),
+      "result type ",
+      ndtr.scalar_type(),
+      " can't be cast to the desired output type ",
+      result.scalar_type());
 
-Tensor& log1p_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, log1p_stub); }
-Tensor log1p(const Tensor& self) { return unary_op_impl_float(self, log1p_stub); }
-Tensor& log1p_(Tensor& self) { return unary_op_impl_(self, at::log1p_out); }
-
-Tensor& log2_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, log2_stub); }
-Tensor log2(const Tensor& self) { return unary_op_impl_float(self, log2_stub); }
-Tensor& log2_(Tensor& self) { return unary_op_impl_(self, at::log2_out); }
-
-Tensor& round_out(const Tensor& self, Tensor& result) { return unary_op_impl_out(result, self, round_stub); }
-Tensor round(const Tensor& self) { return unary_op_impl(self, at::round_out); }
-Tensor& round_(Tensor& self) { return unary_op_impl_(self, at::round_out); }
-
-Tensor& digamma_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, digamma_stub); }
-Tensor digamma(const Tensor& self) { return unary_op_impl_float(self, digamma_stub); }
-Tensor& digamma_(Tensor& self) { return unary_op_impl_(self, digamma_out); }
-
-Tensor& reciprocal_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, reciprocal_stub); }
-Tensor reciprocal(const Tensor& self) { return unary_op_impl_float(self, reciprocal_stub); }
-Tensor& reciprocal_(Tensor& self) { return unary_op_impl_(self, at::reciprocal_out); }
-
-Tensor& rsqrt_out(const Tensor& self, Tensor& result) {
-  return unary_op_impl_float_out(result, self, rsqrt_stub);
+  at::native::resize_output(result, ndtr.sizes());
+  return result.copy_(ndtr);
 }
-Tensor rsqrt(const Tensor& self) {
-  return unary_op_impl_float(self, rsqrt_stub);
+Tensor special_ndtr(const Tensor& self) {
+  return calc_ndtr(self);
 }
-Tensor& rsqrt_(Tensor& self) { return unary_op_impl_(self, at::rsqrt_out); }
 
-Tensor& sign_out(const Tensor& self, Tensor& result) {
-  TORCH_CHECK(!self.is_complex(),
-              "Unlike NumPy, torch.sign is not intended to support complex numbers. Please use torch.sgn instead.");
-  return unary_op_impl_out(result, self, sign_stub);
-}
-Tensor sign(const Tensor& self) { return unary_op_impl(self, at::sign_out); }
-Tensor& sign_(Tensor& self) { return unary_op_impl_(self, at::sign_out); }
-
-Tensor& sgn_out(const Tensor& self, Tensor& result) {
+// FIXME: remove const_cast once unary_op_impl_out is updated
+TORCH_IMPL_FUNC(sgn_out) (const Tensor& self, const Tensor& result) {
   if (self.is_complex()) {
-    return unary_op_impl_out(result, self, sgn_stub);
+    sgn_stub(device_type(), *this);
   } else {
-    return unary_op_impl_out(result, self, sign_stub);
+    sign_stub(device_type(), *this);
   }
 }
-
-Tensor sgn(const Tensor& self) { return unary_op_impl(self, at::sgn_out); }
-Tensor& sgn_(Tensor& self) { return unary_op_impl_(self, at::sgn_out); }
-
-CREATE_UNARY_TORCH_IMPL_FUNC(sin)
-
-Tensor& cos_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, cos_stub); }
-Tensor cos(const Tensor& self) { return unary_op_impl_float(self, cos_stub); }
-Tensor& cos_(Tensor& self) { return unary_op_impl_(self, at::cos_out); }
-
-CREATE_UNARY_TORCH_IMPL_FUNC(sinc)
-
-Tensor& sinh_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, sinh_stub); }
-Tensor sinh(const Tensor& self) { return unary_op_impl_float(self, sinh_stub); }
-Tensor& sinh_(Tensor& self) { return unary_op_impl_(self, at::sinh_out); }
-
-Tensor& cosh_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, cosh_stub); }
-Tensor cosh(const Tensor& self) { return unary_op_impl_float(self, cosh_stub); }
-Tensor& cosh_(Tensor& self) { return unary_op_impl_(self, at::cosh_out); }
-
-Tensor& acosh_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, acosh_stub); }
-Tensor acosh(const Tensor& self) { return unary_op_impl_float(self, acosh_stub); }
-Tensor& acosh_(Tensor& self) { return unary_op_impl_(self, at::acosh_out); }
 
 // arccosh, alias for acosh
 Tensor& arccosh_out(const Tensor& self, Tensor& result) { return at::acosh_out(result, self); }
 Tensor arccosh(const Tensor& self) { return at::acosh(self); }
 Tensor& arccosh_(Tensor& self) { return at::acosh_(self); }
 
-Tensor& asinh_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, asinh_stub); }
-Tensor asinh(const Tensor& self) { return unary_op_impl_float(self, asinh_stub); }
-Tensor& asinh_(Tensor& self) { return unary_op_impl_(self, at::asinh_out); }
-
 // arcsinh, alias for asinh
 Tensor& arcsinh_out(const Tensor& self, Tensor& result) { return at::asinh_out(result, self); }
 Tensor arcsinh(const Tensor& self) { return self.asinh(); }
 Tensor& arcsinh_(Tensor& self) { return self.asinh_(); }
-
-Tensor& atanh_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, atanh_stub); }
-Tensor atanh(const Tensor& self) { return unary_op_impl_float(self, atanh_stub); }
-Tensor& atanh_(Tensor& self) { return unary_op_impl_(self, at::atanh_out); }
 
 // arctanh, alias for atanh
 Tensor& arctanh_out(const Tensor& self, Tensor& result) { return at::atanh_out(result, self); }
 Tensor arctanh(const Tensor& self) { return self.atanh(); }
 Tensor& arctanh_(Tensor& self) { return self.atanh_(); }
 
-Tensor& sqrt_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, sqrt_stub); }
-Tensor sqrt(const Tensor& self) { return unary_op_impl_float(self, sqrt_stub); }
-Tensor& sqrt_(Tensor& self) { return unary_op_impl_(self, at::sqrt_out); }
-
 Tensor& square_out(const Tensor& self, Tensor& result) { return at::pow_out(result, self, 2); }
 Tensor square(const Tensor& self) { return at::pow(self, 2); }
 Tensor& square_(Tensor& self) { return self.pow_(2); }
-
-Tensor& sigmoid_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, sigmoid_stub);  }
-Tensor sigmoid(const Tensor& self) { return unary_op_impl_float(self, sigmoid_stub);  }
-Tensor& sigmoid_(Tensor& self) { return unary_op_impl_(self, at::sigmoid_out);  }
 
 Tensor& logit_out(const Tensor& self,
     c10::optional<double> eps,
@@ -472,6 +589,21 @@ Tensor logit(const Tensor& self, c10::optional<double> eps) {
 }
 Tensor& logit_(Tensor& self, c10::optional<double> eps) {
   return at::logit_out(self, self, eps);
+}
+
+Tensor& special_logit_out(const Tensor& self, c10::optional<double> eps, Tensor& result) {
+  return at::logit_out(result, self, eps);
+}
+Tensor special_logit(const Tensor& self, c10::optional<double> eps) {
+  return self.logit(eps);
+}
+
+// special_expit, alias for sigmoid
+Tensor& special_expit_out(const Tensor& self, Tensor& result) {
+  return at::sigmoid_out(result, self);
+}
+Tensor special_expit(const Tensor& self) {
+  return self.sigmoid();
 }
 
 Tensor& nan_to_num_out(const Tensor& self,
@@ -514,37 +646,15 @@ Tensor& nan_to_num_(
   return at::nan_to_num_out(self, self, nan, pos_inf, neg_inf);
 }
 
-Tensor& tanh_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, tanh_stub); }
-Tensor tanh(const Tensor& self) { return unary_op_impl_float(self, tanh_stub); }
-Tensor& tanh_(Tensor& self) { return unary_op_impl_(self, at::tanh_out); }
-
-Tensor& tan_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, tan_stub);  }
-Tensor tan(const Tensor& self) { return unary_op_impl_float(self, tan_stub);  }
-Tensor& tan_(Tensor& self) { return unary_op_impl_(self, at::tan_out);  }
-
-Tensor& trunc_out(const Tensor& self, Tensor& result) {
-  // Note: this is consistent with NumPy
-  TORCH_CHECK(!self.is_complex(),
-    "trunc is not supported for complex inputs");
-
-  return unary_op_impl_out(result, self, trunc_stub);
-}
-Tensor trunc(const Tensor& self) { return unary_op_impl(self, at::trunc_out); }
-Tensor& trunc_(Tensor& self) { return unary_op_impl_(self, at::trunc_out); }
-
 // Alias for trunc
 Tensor& fix_out(const Tensor& self, Tensor& result) { return at::trunc_out(result, self); }
 Tensor fix(const Tensor& self) { return self.trunc(); }
 Tensor& fix_(Tensor& self) { return self.trunc_(); }
 
-Tensor& neg_out(const Tensor& self, Tensor& result) {
-  TORCH_CHECK(self.scalar_type() != kBool,
-              "Negation, the `-` operator, on a bool tensor is not supported. "
-              "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
-  return unary_op_impl_out(result, self, neg_stub);
+Tensor positive(const Tensor& self) {
+  TORCH_CHECK(self.scalar_type() != kBool, "The `+` operator, on a bool tensor is not supported.");
+  return self;
 }
-Tensor neg(const Tensor& self) { return unary_op_impl(self, at::neg_out); }
-Tensor& neg_(Tensor& self) { return unary_op_impl_(self, at::neg_out); }
 
 Tensor& negative_out(const Tensor& self, Tensor& result) { return at::neg_out(result, self); }
 Tensor negative(const Tensor& self) { return self.neg(); }
@@ -569,124 +679,12 @@ Tensor& logical_not_out(const Tensor& self, Tensor& result) {
   return result;
 }
 
-Tensor& signbit_out(const Tensor& self, Tensor& result) {
-  TORCH_CHECK(!self.is_complex(), "signbit is not implemented for complex tensors.");
-  TORCH_CHECK(result.scalar_type() == at::kBool, "signbit does not support non-boolean outputs.");
-  at::native::resize_output(result, self.sizes());
-
-  if (self.dtype() == at::kBool) {
-    return result.fill_(false);
-  } else {
-    TensorIterator iter = TensorIteratorConfig()
-      .check_all_same_dtype(false)
-      .add_output(result)
-      .add_input(self)
-      .build();
-    signbit_stub(iter.device_type(), iter);
-  }
-  return result;
-}
-
-Tensor signbit(const Tensor& self) {
-  Tensor result = at::empty({0}, self.options().dtype(kBool));
-  return at::signbit_out(result, self);
-}
-
-Tensor& clamp_out(const Tensor& self, const optional<Scalar>& min, const optional<Scalar>& max, Tensor& result) {
-  if (min && max) {
-    TORCH_CHECK(self.layout() == Layout::Strided,
-                "clamp only supports strided layout, got: ", self.layout());
-    auto iter = TensorIterator::unary_op(result, self);
-    clamp_stub(iter.device_type(), iter, *min, *max);
-  } else if (max) {
-    at::clamp_max_out(result, self, *max);
-  } else if (min) {
-    at::clamp_min_out(result, self, *min);
-  } else {
-    TORCH_CHECK(false, "At least one of 'min' or 'max' must not be None");
-  }
-  return result;
-}
-
-Tensor clamp(const Tensor& self, const optional<Scalar>& min, const optional<Scalar>& max) {
-  Tensor result = at::empty({0}, self.options());
-  return at::clamp_out(result, self, min, max);
-}
-
-Tensor& clamp_(Tensor& self, const optional<Scalar>& min, const optional<Scalar>& max) {
-  return at::clamp_out(self, self, min, max);
-}
-
-Tensor& clamp_max_out(const Tensor& self, const Scalar& max, Tensor& result) {
-  TORCH_CHECK(self.layout() == Layout::Strided,
-              "clamp_max only supports strided layout, got: ", self.layout());
-  auto iter = TensorIterator::unary_op(result, self);
-  clamp_max_stub(iter.device_type(), iter, max);
-  return result;
-}
-
-Tensor clamp_max(const Tensor& self, const Scalar& max) {
-  Tensor result = at::empty({0}, self.options());
-  return at::clamp_max_out(result, self, max);
-}
-
-Tensor& clamp_max_(Tensor& self, const Scalar& max) {
-  return at::clamp_max_out(self, self, max);
-}
-
-Tensor& clamp_min_out(const Tensor& self, const Scalar& min, Tensor& result) {
-  TORCH_CHECK(self.layout() == Layout::Strided,
-              "clamp_min only supports strided layout, got: ", self.layout());
-  auto iter = TensorIterator::unary_op(result, self);
-  clamp_min_stub(iter.device_type(), iter, min);
-  return result;
-}
-
-Tensor clamp_min(const Tensor& self, const Scalar& min) {
-  Tensor result = at::empty({0}, self.options());
-  return at::clamp_min_out(result, self, min);
-}
-
-Tensor& clamp_min_(Tensor& self, const Scalar& min) {
-  return at::clamp_min_out(self, self, min);
-}
-
-// Implements the "clip" alias for clamp
-Tensor& clip_out(const Tensor& self, const optional<Scalar>& min, const optional<Scalar>& max, Tensor& result) {
-  return at::clamp_out(result, self, min, max);
-}
-
-Tensor clip(const Tensor& self, const optional<Scalar>& min, const optional<Scalar>& max) {
-  return at::clamp(self, min, max);
-}
-
-Tensor& clip_(Tensor& self, const optional<Scalar>& min, const optional<Scalar>& max) {
-  return at::clamp_(self, min, max);
-}
-
-Tensor polygamma(int64_t n, const Tensor& self) {
-  Tensor result = at::empty({0}, self.options());
-  at::polygamma_out(result, n, self);
-  return result;
-}
-Tensor& polygamma_(Tensor& self, int64_t n) {
-  return at::polygamma_out(self, n, self);
-}
-Tensor& polygamma_out(int64_t n, const Tensor& self, Tensor& result) {
-  TORCH_CHECK(n >= 0, "polygamma(n, x) does not support negative n.");
-  auto iter = TensorIterator::unary_op(result, self);
-  polygamma_stub(iter.device_type(), iter, n);
-  return result;
-}
-
 namespace {
 constexpr double HALF = 0.5;
 constexpr double QUARTER = 0.25;
 }
 
 static inline void mvlgamma_check(const Tensor& self, int64_t p) {
-  TORCH_CHECK(at::isFloatingType(self.scalar_type()),
-              "mvlgamma is not implemented for ", self.scalar_type());
   TORCH_CHECK((self > HALF * (p - 1)).all().item<bool>(),
               "All elements must be greater than (p-1)/2");
   TORCH_CHECK(p >= 1, "p has to be greater than or equal to 1");
@@ -694,11 +692,16 @@ static inline void mvlgamma_check(const Tensor& self, int64_t p) {
 
 Tensor mvlgamma(const Tensor& self, int64_t p) {
   mvlgamma_check(self, p);
+  auto dtype = c10::scalarTypeToTypeMeta(self.scalar_type());
+  if (at::isIntegralType(self.scalar_type(), /*include_bool=*/true)) {
+    // int -> float promotion
+    dtype = c10::get_default_dtype();
+  }
   Tensor args = native::arange(
       -p * HALF + HALF,
       HALF,
       HALF,
-      optTypeMetaToScalarType(self.options().dtype_opt()),
+      optTypeMetaToScalarType(dtype),
       self.options().layout_opt(),
       self.options().device_opt(),
       self.options().pinned_memory_opt());
@@ -722,9 +725,25 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
   return self.copy_(args.lgamma_().sum(-1).add_(p2_sub_p * std::log(c10::pi<double>) * QUARTER));
 }
 
-Tensor& lgamma_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, lgamma_stub); }
-Tensor lgamma(const Tensor& self) { return unary_op_impl_float(self, lgamma_stub); }
-Tensor& lgamma_(Tensor& self) { return unary_op_impl_(self, at::lgamma_out); }
+Tensor& mvlgamma_out(const Tensor& self, int64_t p, Tensor& result) {
+  auto out = self.mvlgamma(p);
+  TORCH_CHECK(
+      at::can_cast(out.scalar_type(), result.scalar_type()),
+      "mvlgamma: result type ",
+      self.scalar_type(),
+      " can't be cast to the desired output type ",
+      out.scalar_type());
+  at::native::resize_output(result, out.sizes());
+  return result.copy_(out);
+}
+
+Tensor special_multigammaln(const Tensor& self, int64_t p) {
+  return self.mvlgamma(p);
+};
+
+Tensor& special_multigammaln_out(const Tensor& self, int64_t p, Tensor& result) {
+  return at::mvlgamma_out(result, self, p);
+};
 
 std::tuple<Tensor, Tensor> frexp(const Tensor& self) {
   Tensor mantissa = at::empty_like(self);
@@ -765,14 +784,11 @@ std::tuple<Tensor&, Tensor&> frexp_out(const Tensor& self,
 Tensor special_gammaln(const Tensor& self) { return self.lgamma(); }
 Tensor& special_gammaln_out(const Tensor& self, Tensor& result) { return at::lgamma_out(result, self); }
 
-Tensor special_entr(const Tensor& self) { return unary_op_impl_float(self, entr_stub); }
-Tensor& special_entr_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, entr_stub);}
-
 DEFINE_DISPATCH(abs_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(angle_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(real_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(imag_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-DEFINE_DISPATCH(conj_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(conj_physical_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(acos_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(acosh_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(asinh_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
@@ -781,13 +797,11 @@ DEFINE_DISPATCH(asin_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-v
 DEFINE_DISPATCH(atan_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(bitwise_not_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(ceil_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-DEFINE_DISPATCH(clamp_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-DEFINE_DISPATCH(clamp_max_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-DEFINE_DISPATCH(clamp_min_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(cos_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(cosh_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(digamma_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-DEFINE_DISPATCH(entr_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(special_entr_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(special_erfcx_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(erf_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(erfc_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(erfinv_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
@@ -798,11 +812,15 @@ DEFINE_DISPATCH(floor_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-
 DEFINE_DISPATCH(frac_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(frexp_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(i0_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(special_i0e_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(special_i1_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(special_i1e_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(log_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(log10_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(log1p_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(log2_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(logical_not_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(special_ndtri_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(neg_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(nan_to_num_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(polygamma_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
@@ -823,5 +841,6 @@ DEFINE_DISPATCH(tanh_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-v
 DEFINE_DISPATCH(trigamma_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(trunc_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(lgamma_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+
 } // namespace native
 } // namespace at

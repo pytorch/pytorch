@@ -25,7 +25,8 @@ list(APPEND ATen_CPU_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/weakref_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/quantized_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/extension_backend_test.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/xla_tensor_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/operators_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/lazy_tensor_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/tensor_iterator_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/math_kernel_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/memory_overlapping_test.cpp
@@ -35,6 +36,7 @@ list(APPEND ATen_CPU_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/pow_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/variant_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/reduce_ops_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/reportMemoryUsage_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/memory_format_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cpu_rng_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/ivalue_test.cpp
@@ -52,9 +54,11 @@ list(APPEND ATen_CUDA_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_distributions_test.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_optional_test.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_packedtensoraccessor_test.cu
+  ${CMAKE_CURRENT_SOURCE_DIR}/cuda_reportMemoryUsage_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_vectorized_test.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_dlconvertor_test.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/cuda_generator_test.cu)
+  ${CMAKE_CURRENT_SOURCE_DIR}/cuda_generator_test.cu
+  ${CMAKE_CURRENT_SOURCE_DIR}/cuda_cub_test.cu)
 if(CAFFE2_USE_CUDNN)
   list(APPEND ATen_CUDA_TEST_SRCS
     ${CMAKE_CURRENT_SOURCE_DIR}/cuda_cudnn_test.cpp)
@@ -81,13 +85,13 @@ list(APPEND ATen_VULKAN_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/vulkan_api_test.cpp)
 
 list(APPEND ATen_MOBILE_TEST_SRCS
-  ${CMAKE_CURRENT_SOURCE_DIR}/vec256_test_all_types.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/vec_test_all_types.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cpu_profiling_allocator_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cpu_caching_allocator_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/quantized_test.cpp)
 
-list(APPEND ATen_VEC256_TEST_SRCS
-  ${CMAKE_CURRENT_SOURCE_DIR}/vec256_test_all_types.cpp
+list(APPEND ATen_VEC_TEST_SRCS
+  ${CMAKE_CURRENT_SOURCE_DIR}/vec_test_all_types.cpp
   )
 
 # Caffe2 specific tests
@@ -105,4 +109,4 @@ set(ATen_CUDA_TEST_SRCS ${ATen_CUDA_TEST_SRCS} PARENT_SCOPE)
 set(ATen_HIP_TEST_SRCS ${ATen_HIP_TEST_SRCS} PARENT_SCOPE)
 set(ATen_VULKAN_TEST_SRCS ${ATen_VULKAN_TEST_SRCS} PARENT_SCOPE)
 set(ATen_MOBILE_TEST_SRCS ${ATen_MOBILE_TEST_SRCS} PARENT_SCOPE)
-set(ATen_VEC256_TEST_SRCS ${ATen_VEC256_TEST_SRCS} PARENT_SCOPE)
+set(ATen_VEC_TEST_SRCS ${ATen_VEC_TEST_SRCS} PARENT_SCOPE)

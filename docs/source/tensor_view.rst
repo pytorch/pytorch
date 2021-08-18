@@ -64,7 +64,6 @@ For reference, here’s a full list of view ops in PyTorch:
 - :attr:`~torch.Tensor.real`
 - :attr:`~torch.Tensor.imag`
 - :meth:`~torch.Tensor.view_as_real`
-- :meth:`~torch.Tensor.view_as_imag`
 - :meth:`~torch.Tensor.unflatten`
 - :meth:`~torch.Tensor.unfold`
 - :meth:`~torch.Tensor.unsqueeze`
@@ -72,6 +71,9 @@ For reference, here’s a full list of view ops in PyTorch:
 - :meth:`~torch.Tensor.view_as`
 - :meth:`~torch.Tensor.unbind`
 - :meth:`~torch.Tensor.split`
+- :meth:`~torch.Tensor.hsplit`
+- :meth:`~torch.Tensor.vsplit`
+- :meth:`~torch.Tensor.tensor_split`
 - :meth:`~torch.Tensor.split_with_sizes`
 - :meth:`~torch.Tensor.swapaxes`
 - :meth:`~torch.Tensor.swapdims`

@@ -80,9 +80,9 @@ nn_functional_tests = [
     ('relu', (S, S, S), (), '', (True,)),
     ('relu', (S, S, S), (), 'inplace'),
     ('glu', (S - 1, S - 1, S - 1), (),),
-    ('hardtanh', (S, S, S), (-0.5, 0.5),),
+    ('hardtanh', (S, S, S), (-0.5, 0.5), '', (True,)),
     ('hardtanh', (S, S, S), (-0.5, 0.5, True), 'inplace'),
-    ('relu6', (S, S, S), (),),
+    ('relu6', (S, S, S), (), '', (True,)),
     ('relu6', (S, S, S), (True), 'inplace'),
     ('elu', (S, S, S), (0.9,),),
     ('elu', (S, S, S), (0.9, True), 'inplace'),
@@ -90,11 +90,11 @@ nn_functional_tests = [
     ('selu', (S, S, S), (True), 'inplace'),
     ('celu', (S, S, S), (0.9,),),
     ('celu', (S, S, S), (0.9, True), 'inplace'),
-    ('leaky_relu', (S, S, S), (0.02,),),
+    ('leaky_relu', (S, S, S), (0.02,), '', (True,)),
     ('leaky_relu', (S, S, S), (0.02,), 'inplace'),
     ('rrelu', (S, S), (0.1, 0.3, False),),
     ('rrelu', (S, S), (0.1, 0.3, False, True), 'inplace'),
-    ('hardshrink', (S, S, S), (0.4,),),
+    ('hardshrink', (S, S, S), (0.4,), '', (True,)),
     ('tanhshrink', (S, S, S), (),),
     ('softsign', (S, S, S), (),),
     ('softplus', (S, S, S), (),),
@@ -113,14 +113,14 @@ nn_functional_tests = [
         '', (False, 'aten::_batch_norm_impl_index')),
     ('instance_norm', (S, S, S), (non_differentiable(torch.zeros(S)), non_differentiable(torch.ones(S))),),
     ('layer_norm', (S, S, S, S), ([5],), '',
-     (False, ['aten::contiguous', 'aten::_batch_norm_impl_index'])),
+     (True, ['aten::native_layer_norm'])),
     ('layer_norm', (S, S, S, S), ([5], non_differentiable(torch.rand(S)),), 'with_only_weight',
-     (False, ['aten::contiguous', 'aten::_batch_norm_impl_index'])),
+     (True, ['aten::native_layer_norm'])),
     ('layer_norm', (S, S, S, S), ([5], None, non_differentiable(torch.rand(S)),), 'with_only_bias',
-     (False, ['aten::contiguous', 'aten::_batch_norm_impl_index'])),
+     (True, ['aten::native_layer_norm'])),
     ('layer_norm', (S, S, S, S), ([5], non_differentiable(torch.rand(S)),
                                   non_differentiable(torch.rand(S))), 'with_weight_and_bias',
-     (False, ['aten::contiguous', 'aten::_batch_norm_impl_index', 'aten::addcmul'])),
+     (True, ['aten::native_layer_norm'])),
     ('group_norm', (S, S, S), (1, torch.rand(5),),),
     ('local_response_norm', (S, S, S), (2, ),),
     ('nll_loss', F.log_softmax(torch.randn(3, 5), dim=0), (torch.tensor([1, 0, 4]),), '',),
@@ -336,6 +336,7 @@ def create_traced_fn(self, fn):
         output = traced(*inputs_tensors)
         # skip type annotate function attributes for now, see: https://github.com/python/mypy/issues/2087
         traced_fn.last_graph = traced.graph_for(*inputs_tensors)  # type: ignore[attr-defined]
+        traced_fn.graph = traced.graph  # type: ignore[attr-defined]
         return output
     return traced_fn
 
@@ -357,7 +358,8 @@ EXCLUDE_SCRIPT = {
     'test_nn_fold',
 
     # jit doesn't support sparse tensors.
-    'test_to_sparse'
+    'test_to_sparse',
+    'test_to_sparse_dim',
 }
 
 # generates a script function and set of example inputs
@@ -483,6 +485,9 @@ def check_alias_annotation(method_name, args, kwargs, *, aten_name, func_type='m
     call = get_call(method_name, func_type, actuals, kwargs)
     script = script_template.format(', '.join(formals), call)
     CU = torch.jit.CompilationUnit(script)
+    # to clean up IR
+    torch._C._jit_pass_inline(CU.the_method.graph)
+    torch._C._jit_pass_constant_propagation(CU.the_method.graph)
     torch._C._jit_check_alias_annotation(CU.the_method.graph, tuple(tensors), aten_name)
 
 def get_nn_module_name_from_kwargs(**kwargs):

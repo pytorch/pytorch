@@ -14,8 +14,11 @@ coverage.xml
 .gradle
 .hypothesis
 .mypy_cache
-**/.pytorch-test-times
-**/.pytorch-slow-tests
+/.extracted_scripts/
+**/.pytorch_specified_test_cases.csv
+**/.pytorch-disabled-tests.json
+**/.pytorch-slow-tests.json
+**/.pytorch-test-times.json
 */*.pyc
 */*.so*
 */**/__pycache__
@@ -54,6 +57,7 @@ test/generated_type_hints_smoketest.py
 test/htmlcov
 test/cpp_extensions/install/
 third_party/build/
+tools/coverage_plugins_package/pip-wheel-metadata/
 tools/shared/_utils_internal.py
 tools/fast_nvcc/wrap_nvcc.sh
 tools/fast_nvcc/tmp/
@@ -255,8 +259,10 @@ cmake-build-debug
 # Below files are not deleted by "setup.py clean".
 
 # Visual Studio Code files
-.vscode
 .vs
+/.vscode/*
+!/.vscode/extensions.json
+!/.vscode/settings_recommended.json
 
 # YouCompleteMe config file
 .ycm_extra_conf.py
@@ -278,8 +284,9 @@ TAGS
 # ccls file
 .ccls-cache/
 
-# clang-format storage location used by apply_clang_format.py
+# clang tooling storage location
 .clang-format-bin
+.clang-tidy-bin
 
 # clangd background index
 .clangd/
@@ -287,3 +294,22 @@ TAGS
 
 # bazel symlinks
 bazel-*
+
+# direnv, posh-direnv
+.envrc
+.psenvrc
+
+# generated shellcheck directories
+.shellcheck_generated*/
+
+# zip archives
+*.zip
+
+# core dump files
+core.*
+
+# Generated if you use the pre-commit script for clang-tidy
+pr.diff
+
+# coverage files
+*/**/.coverage.*

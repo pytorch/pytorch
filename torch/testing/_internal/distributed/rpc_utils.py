@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
 import os
+import sys
 import unittest
 from enum import Flag, auto
 from typing import Dict, List, Type
 
 from torch.testing._internal.common_distributed import MultiProcessTestCase
 from torch.testing._internal.common_utils import (
-    TEST_WITH_ASAN,
+    TEST_WITH_DEV_DBG_ASAN,
     TEST_WITH_TSAN,
     find_free_port,
+    IS_SANDCASTLE,
 )
 from torch.testing._internal.distributed.ddp_under_dist_autograd_test import (
+    CudaDdpComparisonTest,
     DdpComparisonTest,
     DdpUnderDistAutogradTest,
 )
@@ -18,12 +21,15 @@ from torch.testing._internal.distributed.pipe_with_ddp_test import (
     PipeWithDDPTest,
 )
 from torch.testing._internal.distributed.nn.api.remote_module_test import (
+    CudaRemoteModuleTest,
     RemoteModuleTest,
+    ThreeWorkersRemoteModuleTest,
 )
 from torch.testing._internal.distributed.rpc.dist_autograd_test import (
     DistAutogradTest,
+    CudaDistAutogradTest,
     FaultyAgentDistAutogradTest,
-    TensorPipeDistAutogradTest
+    TensorPipeCudaDistAutogradTest
 )
 from torch.testing._internal.distributed.rpc.dist_optimizer_test import (
     DistOptimizerTest,
@@ -39,10 +45,11 @@ from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
 )
 from torch.testing._internal.distributed.rpc.rpc_test import (
+    CudaRpcTest,
     FaultyAgentRpcTest,
-    ProcessGroupAgentRpcTest,
     RpcTest,
     TensorPipeAgentRpcTest,
+    TensorPipeAgentCudaRpcTest,
 )
 from torch.testing._internal.distributed.rpc.examples.parameter_server_test import ParameterServerTest
 from torch.testing._internal.distributed.rpc.examples.reinforcement_learning_rpc_test import (
@@ -89,7 +96,7 @@ class ForkHelper(MultiProcessTestCase):
         super().tearDown()
 
 @unittest.skipIf(
-    TEST_WITH_ASAN, "Skip ASAN as torch + multiprocessing spawn have known issues"
+    TEST_WITH_DEV_DBG_ASAN, "Skip ASAN as torch + multiprocessing spawn have known issues"
 )
 class SpawnHelper(MultiProcessTestCase):
     def setUp(self):
@@ -126,18 +133,17 @@ GENERIC_TESTS = [
     JitRpcTest,
     JitDistAutogradTest,
     RemoteModuleTest,
+    ThreeWorkersRemoteModuleTest,
     DdpUnderDistAutogradTest,
     DdpComparisonTest,
-    PipeWithDDPTest,
     ReinforcementLearningRpcTest,
 ]
-
-
-# This list contains test suites that will only be run on the ProcessGroupAgent.
-# These suites should be standalone, and separate from the ones in the generic
-# list (not subclasses of those!).
-PROCESS_GROUP_TESTS = [
-    ProcessGroupAgentRpcTest
+GENERIC_CUDA_TESTS = [
+    CudaRpcTest,
+    CudaDistAutogradTest,
+    CudaRemoteModuleTest,
+    CudaDdpComparisonTest,
+    PipeWithDDPTest,
 ]
 
 
@@ -146,7 +152,10 @@ PROCESS_GROUP_TESTS = [
 # list (not subclasses of those!).
 TENSORPIPE_TESTS = [
     TensorPipeAgentRpcTest,
-    TensorPipeDistAutogradTest
+]
+TENSORPIPE_CUDA_TESTS = [
+    TensorPipeAgentCudaRpcTest,
+    TensorPipeCudaDistAutogradTest,
 ]
 
 
@@ -189,6 +198,19 @@ def generate_tests(
         for mp_type in MultiProcess:
             if mp_type & mp_type_filter:
                 mp_helper, suffix = MP_HELPERS_AND_SUFFIXES[mp_type]
+                if IS_SANDCASTLE:
+                    if mp_helper == SpawnHelper and TEST_WITH_DEV_DBG_ASAN:
+                        print(
+                            f'Skipping test {test_class} on sandcastle for the following reason: '
+                            'Skip dev-asan as torch + multiprocessing spawn have known issues', file=sys.stderr)
+                        continue
+                    elif mp_helper == ForkHelper and TEST_WITH_TSAN:
+                        print(
+                            f'Skipping test {test_class} on sandcastle for the following reason: '
+                            'TSAN and fork() is broken'
+                        )
+                        continue
+
                 name = f"{prefix}{test_class.__name__}{suffix}"
                 class_ = type(name, (test_class, mixin, mp_helper), dict())
                 class_.__module__ = module_name

@@ -3,6 +3,7 @@
 #include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
 #include <c10/util/hash.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -15,18 +16,15 @@ namespace jit {
 // GraphExecutor creates specializations of Graphs for different
 // dimensionalitities and types of inputs.
 
-inline static at::Device ConvertIntToCPUOrCUDA(int device) {
-  return device < 0 ? at::kCPU : at::Device(DeviceType::CUDA, device);
-}
 struct ArgumentInfo {
   friend struct ArgumentSpec;
-  using plain_data_type = uint32_t;
+  using plain_data_type = uint64_t;
 
   bool defined() const {
     return defined_;
   }
-  int device() const {
-    return device_;
+  at::Device device() const {
+    return at::Device(DeviceType(dev_type_), device_);
   }
   // XXX: It is guaranteed that this will return false when called on non-tensor
   // arguments
@@ -34,6 +32,7 @@ struct ArgumentInfo {
     return requires_grad_;
   }
   int dim() const {
+    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     return dim_;
   }
   at::ScalarType type() const {
@@ -44,10 +43,7 @@ struct ArgumentInfo {
       return TensorType::get();
 
     return TensorType::create(
-        type(),
-        ConvertIntToCPUOrCUDA(device()),
-        c10::optional<size_t>(dim()),
-        requires_grad());
+        type(), device(), c10::optional<size_t>(dim()), requires_grad());
   }
   operator TypePtr() const {
     return toType();
@@ -58,9 +54,10 @@ struct ArgumentInfo {
   unsigned requires_grad_ : 1;
   unsigned : 5;
   unsigned dim_ : 8;
-  int device_ : 8; // NOTE: this needs to be signed because we use -1 to
-                   // represent CPU
+  unsigned device_ : 8;
   unsigned type_ : 8;
+  unsigned dev_type_ : 16;
+  unsigned : 16;
 };
 
 static_assert(
@@ -71,6 +68,7 @@ static_assert(
     "ArgumentInfo is expected to be a 32-bit struct");
 
 struct ArgumentSpec {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   ArgumentSpec(size_t num_flat_tensor_inputs, size_t num_flat_optional_inputs) {
     hash_code =
         c10::hash_combine(num_flat_tensor_inputs, num_flat_optional_inputs);
@@ -101,13 +99,20 @@ struct ArgumentSpec {
     if ((arg.defined_ = t->defined())) {
       arg.requires_grad_ = with_grad && autograd::Variable(*t).requires_grad();
       arg.dim_ = t->dim();
-      arg.device_ = t->is_cuda() ? t->get_device() : -1;
+      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
+      at::Device device = t->device();
+      arg.dev_type_ =
+          // NOLINTNEXTLINE(bugprone-signed-char-misuse)
+          static_cast<std::underlying_type<DeviceType>::type>(device.type());
+      // NOLINTNEXTLINE(bugprone-signed-char-misuse)
+      arg.device_ = device.index();
       arg.type_ = static_cast<unsigned>(t->scalar_type());
     }
     combineHash(arg);
   }
 
   void combineHash(const ArgumentInfo& arg) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     ArgumentInfo::plain_data_type arg_data;
     std::memcpy(&arg_data, &arg, sizeof(ArgumentInfo));
     hash_code = c10::hash_combine(hash_code, arg_data);
@@ -214,7 +219,9 @@ struct CompleteArgumentInfoPOD {
   unsigned defined : 1;
   unsigned requires_grad : 1;
   signed device : 14;
-  uint32_t total_dims; // all TensorInfoPODs are in CompleteArgumentSpec's
+  unsigned dev_type : 16;
+  unsigned
+      total_dims : 16; // all TensorInfoPODs are in CompleteArgumentSpec's
                        // tensor_info() array. total_dims is the total number of
                        // dimensions seen so far in all previous members of
                        // tensor_info(), including this tensor 2*total_dims
@@ -230,11 +237,13 @@ static_assert(
 struct CompleteArgumentInfo;
 
 struct CompleteArgumentSpec {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   CompleteArgumentSpec(bool with_grad, at::ArrayRef<IValue> inputs)
       : hash_code(0), ninputs(inputs.size()) {
     int32_t all_dims = 0;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     const int32_t num_inputs = inputs.size();
-    for (int32_t i = 0; i < num_inputs; i++) {
+    for (const auto i : c10::irange(num_inputs)) {
       if (!inputs[i].isTensor())
         continue;
       auto& tensor = inputs[i].toTensor();
@@ -244,10 +253,11 @@ struct CompleteArgumentSpec {
     data.resize(ninputs + all_dims * 2);
 
     // and reinterpret our data array as these structs
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     auto* pods = reinterpret_cast<CompleteArgumentInfoPOD*>(data.data());
     int64_t* next_dim = sizes_strides();
     int32_t total_dims = 0;
-    for (int32_t i = 0; i < num_inputs; i++) {
+    for (const auto i : c10::irange(num_inputs)) {
       auto& pod = pods[i];
       pod.is_tensor = static_cast<uint32_t>(inputs[i].isTensor());
       if (pod.is_tensor) {
@@ -255,7 +265,13 @@ struct CompleteArgumentSpec {
         pod.defined = t.defined();
         if (pod.defined) {
           pod.type = static_cast<int>(t.scalar_type());
-          pod.device = (!t.is_cuda()) ? -1 : t.get_device();
+          // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
+          at::Device device = t.device();
+          // NOLINTNEXTLINE(bugprone-signed-char-misuse)
+          pod.dev_type = static_cast<std::underlying_type<DeviceType>::type>(
+              device.type());
+          // NOLINTNEXTLINE(bugprone-signed-char-misuse)
+          pod.device = device.index();
           pod.requires_grad = with_grad && t.requires_grad();
           total_dims += t.ndimension();
           auto sizes = t.sizes();
@@ -267,6 +283,10 @@ struct CompleteArgumentSpec {
         }
       }
       // each POD has a running tally of all dimensions including its own
+      TORCH_CHECK(
+          total_dims < std::numeric_limits<uint16_t>::max(),
+          "The number of dims cannot be packed into CompleteArgumentSpec:",
+          total_dims);
       pod.total_dims = total_dims;
     }
     // we precompute the hash_code to minimize the time inside of hash
@@ -332,8 +352,10 @@ struct CompleteArgumentInfo {
   bool requires_grad() const {
     return pod(i).requires_grad;
   }
-  int device() const {
-    return pod(i).device;
+  at::Device device() const {
+    return at::Device(
+        DeviceType(pod(i).dev_type),
+        static_cast<c10::DeviceIndex>(pod(i).device));
   }
   int ndimension() const {
     // See [valid range], it is always valid to ask for offset for (i + 1)
@@ -353,7 +375,7 @@ struct CompleteArgumentInfo {
       return TensorType::get();
     return TensorType::create(
         type(),
-        ConvertIntToCPUOrCUDA(device()),
+        device(),
         c10::VaryingShape<int64_t>{sizes()},
         c10::VaryingShape<int64_t>{strides()},
         requires_grad());
@@ -367,6 +389,7 @@ struct CompleteArgumentInfo {
   int sizes_strides_offset(int j) const {
     if (j == 0)
       return 0;
+    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     return 2 * pod(j - 1).total_dims;
   }
   const CompleteArgumentInfoPOD& pod(int j) const {
@@ -388,13 +411,13 @@ inline std::ostream& operator<<(std::ostream& out, const ArgumentInfo& info) {
 
 inline std::ostream& operator<<(std::ostream& out, const ArgumentSpec& spec) {
   out << "{";
-  for (size_t i = 0; i < spec.numTensors(); ++i) {
+  for (const auto i : c10::irange(spec.numTensors())) {
     if (i > 0)
       out << ", ";
     out << spec.tensorAt(i);
   }
   out << "; ";
-  for (size_t i = 0; i < spec.numOptionals(); ++i) {
+  for (const auto i : c10::irange(spec.numOptionals())) {
     if (i > 0)
       out << ", ";
     out << spec.isPresent(i);
@@ -419,7 +442,7 @@ inline std::ostream& operator<<(
     std::ostream& out,
     const CompleteArgumentSpec& spec) {
   out << "{";
-  for (size_t i = 0; i < spec.size(); ++i) {
+  for (const auto i : c10::irange(spec.size())) {
     if (i > 0)
       out << ", ";
     out << spec.at(i);

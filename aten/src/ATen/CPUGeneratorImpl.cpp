@@ -22,6 +22,7 @@ struct CPUGeneratorImplStateLegacy {
   int left;  /* = 1; */
   int seeded; /* = 0; */
   uint64_t next;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   uint64_t state[at::MERSENNE_STATE_N]; /* the array for the state vector  */
 
   /********************************/
@@ -140,6 +141,7 @@ void CPUGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
   auto double_normal_sample = c10::optional<double>();
 
   // Construct the state of at::CPUGeneratorImpl based on input byte tensor size.
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   CPUGeneratorImplStateLegacy* legacy_pod;
   auto new_state_size = new_state.numel();
   if (new_state_size == size_legacy) {
@@ -183,6 +185,7 @@ void CPUGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
   // Note that CPUGeneratorImplStateLegacy stored a state array of 64 bit uints, whereas in our
   // redefined mt19937, we have changed to a state array of 32 bit uints. Hence, we are
   // doing a std::copy.
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   at::mt19937_data_pod rng_data;
   std::copy(std::begin(legacy_pod->state), std::end(legacy_pod->state), rng_data.state_.begin());
   rng_data.seed_ = legacy_pod->the_initial_seed;

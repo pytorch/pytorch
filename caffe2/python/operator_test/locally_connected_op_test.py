@@ -103,7 +103,7 @@ class TestLocallyConnectedOp(serial.SerializedTestCase):
            op_name=st.sampled_from(["LC", "LC1D"]),
            use_bias=st.booleans(),
            **hu.gcs)
-    @settings(deadline=5000)
+    @settings(deadline=None)
     # Increased timeout from 1 second to 5 for ROCM
     def test_lc_1d(self, N, C, size, M, kernel, op_name, use_bias, gc, dc):
         if size < kernel:
@@ -163,7 +163,7 @@ class TestLocallyConnectedOp(serial.SerializedTestCase):
            op_name=st.sampled_from(["LC", "LC3D"]),
            use_bias=st.booleans(),
            **hu.gcs)
-    @settings(deadline=1000)
+    @settings(deadline=None)
     def test_lc_3d(self, N, C, T, H, W, M, kernel, op_name, use_bias, gc, dc):
         if T < kernel:
             kernel = T

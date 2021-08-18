@@ -33,7 +33,7 @@ Tensor& linspace_cpu_out(const Scalar& start, const Scalar& end, c10::optional<i
     result.fill_(start);
   } else {
     Tensor r = result.is_contiguous() ? result : result.contiguous();
-    auto iter = TensorIterator::nullary_op(r);
+    auto iter = TensorIterator::borrowing_nullary_op(r);
     linspace_stub(iter.device_type(), iter, start, end, steps);
     if (!result.is_contiguous()) {
       result.copy_(r);
@@ -147,7 +147,7 @@ Tensor& range_cpu_out(const Scalar& start, const Scalar& end, const Scalar& step
 }
 
 Tensor& arange_cpu_out(const Scalar& start, const Scalar& end, const Scalar& step, Tensor& result) {
-  AT_DISPATCH_ALL_TYPES(result.scalar_type(), "arange_cpu", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, result.scalar_type(), "arange_cpu", [&]() {
     using accscalar_t = at::acc_type<scalar_t, false>;
     auto xstart = start.to<accscalar_t>();
     auto xend = end.to<accscalar_t>();
@@ -161,6 +161,7 @@ Tensor& arange_cpu_out(const Scalar& start, const Scalar& end, const Scalar& ste
     // we dont want.
     // the corner-case we do want to take into account is int64_t, which has higher precision than double
     double size_d;
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     if (std::is_same<scalar_t, int64_t>::value) {
       size_d = std::ceil(static_cast<double>(end.to<accscalar_t>() - start.to<accscalar_t>())
                          / step.to<accscalar_t>());
@@ -193,7 +194,7 @@ Tensor& arange_cpu_out(const Scalar& start, const Scalar& end, const Scalar& ste
     }
 
     Tensor r = result.is_contiguous() ? result : result.contiguous();
-    auto iter = TensorIterator::nullary_op(r);
+    auto iter = TensorIterator::borrowing_nullary_op(r);
     arange_stub(iter.device_type(), iter, start, size, step);
     if (!result.is_contiguous()) {
       result.copy_(r);

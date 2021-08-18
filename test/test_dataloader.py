@@ -13,12 +13,12 @@ import itertools
 import warnings
 import tempfile
 from torch import multiprocessing as mp
-from torch.utils.data import _utils, Dataset, IterableDataset, TensorDataset, DataLoader, ConcatDataset, ChainDataset
+from torch.utils.data import _utils, Dataset, IterableDataset, TensorDataset, DataLoader, ConcatDataset, ChainDataset, Subset
 from torch.utils.data._utils import MP_STATUS_CHECK_INTERVAL
 from torch.utils.data.dataset import random_split
 from torch._utils import ExceptionWrapper
 from torch.testing._internal.common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS,
-                                                  IS_PYTORCH_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm, slowTest,
+                                                  IS_IN_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm, slowTest,
                                                   load_tests, TEST_WITH_TSAN, IS_SANDCASTLE)
 
 try:
@@ -28,7 +28,7 @@ except ImportError:
     HAS_PSUTIL = False
     err_msg = ("psutil not found. Some critical data loader tests relying on it "
                "(e.g., TestDataLoader.test_proper_exit) will not run.")
-    if IS_PYTORCH_CI:
+    if IS_IN_CI:
         raise ImportError(err_msg) from None
     else:
         warnings.warn(err_msg)
@@ -150,6 +150,35 @@ class TestDatasetRandomSplit(TestCase):
         random_split(range(10), [5, 5], generator=torch.Generator().manual_seed(42))
         b = torch.rand(10)
         self.assertEqual(a, b)
+
+    def test_slicing_of_subset_of_dataset(self):
+        # Testing slicing a subset initialized with a dataset
+        dataset = TensorDataset(torch.tensor([1, 2, 3, 4, 5]))
+        subset_of_dataset = Subset(dataset, [0, 1, 2, 3, 4])
+        self.assertEqual(subset_of_dataset[:], dataset[:])
+        self.assertEqual(subset_of_dataset[1:2], dataset[1:2])
+        self.assertEqual(subset_of_dataset[0:-1:2], dataset[0:-1:2])
+        # Testing slicing of subset from random split
+        subset1, subset2 = random_split(dataset, [3, 2])
+        self.assertEqual(subset1[:], dataset[subset1.indices[:]])
+        self.assertEqual(subset1[0:2], dataset[subset1.indices[0:2]])
+        self.assertEqual(subset1[0:-1:2], dataset[subset1.indices[0:-1:2]])
+
+    def test_slicing_of_subset_of_subset(self):
+        # Testing slicing a subset initialized with a subset
+        dataset = TensorDataset(torch.tensor([1, 2, 3, 4, 5]))
+        subset_of_dataset = Subset(dataset, [0, 1, 2, 3, 4])
+        subset_of_subset = Subset(subset_of_dataset, [0, 1, 2, 3, 4])
+        self.assertEqual(subset_of_subset[:], dataset[:])
+        self.assertEqual(subset_of_subset[0:2], dataset[0:2])
+        self.assertEqual(subset_of_subset[0:-1:2], dataset[0:-1:2])
+        # Testing slicing of subset of subset from random split
+        subset1, subset2 = random_split(dataset, [4, 1])
+        subset_of_subset1, subset_of_subset2 = random_split(subset1, [3, 1])
+        idx = [subset1.indices[i] for i in subset_of_subset1.indices]
+        self.assertEqual(subset_of_subset1[:], dataset[idx[:]])
+        self.assertEqual(subset_of_subset1[0:2], dataset[idx[0:2]])
+        self.assertEqual(subset_of_subset1[0:-1:2], dataset[idx[0:-1:2]])
 
 
 class CUDACountingDataset(Dataset):
@@ -898,7 +927,7 @@ class RandomDataset(IterableDataset):
 try:
     keep_fds_alive = []
     resource.setrlimit(resource.RLIMIT_NOFILE, (100, 100))
-    for random_t in DataLoader(RandomDataset(200, (2,2)),
+    for random_t in DataLoader(RandomDataset(200, (2,2)), multiprocessing_context="fork",
                                num_workers=1):
       random_t.max(dim=0)
       keep_fds_alive.append(random_t)
@@ -1529,6 +1558,34 @@ except RuntimeError as e:
         self.assertIsInstance(batch, torch.DoubleTensor)
         self.assertEqual(batch.size(), torch.Size([12, 2, 3, 4]))
 
+    @unittest.skipIf(not TEST_NUMPY, "numpy unavailable")
+    def test_numpy_gen_state(self):
+        from torch.utils.data._utils.worker import _generate_state
+        # Using NumPy generated states as the reference to test `_generate_state`
+        # having the same result.
+        # Test case: ((worker_id, base_seed), expected_state)
+        test_cases = [
+            ((4, 13434589827475259383), (2884386318, 1088094898, 3523808998, 3860348662)),
+            ((1, 15014285634777110771), (1934848465, 763213760, 2959016433, 179751970)),
+            ((10, 978296274032934101), (1759791917, 3550927336, 1225977135, 1036538043)),
+            ((12, 11868770762134256968), (3974661794, 3331131333, 3630387033, 2885815368)),
+            ((9, 15378787925219019706), (3815056996, 3162224466, 2735102421, 3190253477)),
+            ((5, 9055612723125076328), (3522565701, 3368424109, 959377806, 621878693)),
+            ((15, 14617792358407278405), (3402479508, 1588702753, 1169536393, 3675067356)),
+            ((9, 17363320784006640087), (957989458, 2518334477, 1421725660, 3086155459)),
+            ((12, 480002904169484764), (2732851467, 1762620729, 4055801988, 1277640511)),
+            ((15, 16803975943592702950), (3479415043, 4022359553, 295994005, 3358606349)),
+            ((9, 11704776406047813044), (1968928009, 710113752, 2442656196, 1587420279)),
+            ((10, 16357891985431864516), (1271733898, 4197047399, 3727213786, 2338547348)),
+            ((2, 17423369006318065007), (544294336, 1911284083, 3299147734, 3231058347)),
+            ((2, 2889492011444113593), (3721591783, 2595811276, 2212881745, 977682627)),
+            ((0, 8979703111668486195), (4276723937, 2556068849, 2962827292, 233130238)),
+            ((6, 6269787272229682235), (2548857855, 1216457374, 1012973562, 2999759647))
+        ]
+
+        for (worker_id, base_seed), exp in test_cases:
+            self.assertEqual(exp, _generate_state(base_seed, worker_id))
+
     def test_error(self):
         self._test_error(self._get_data_loader(ErrorDataset(100), batch_size=2, shuffle=True))
 
@@ -1911,7 +1968,7 @@ class DictDataset(Dataset):
 
     def __getitem__(self, ndx):
         return {
-            'a_tensor': torch.Tensor(4, 2).fill_(ndx),
+            'a_tensor': torch.empty(4, 2).fill_(ndx),
             'another_dict': {
                 'a_number': ndx,
             },
@@ -2015,7 +2072,7 @@ class RandomDataset(IterableDataset):
 try:
     keep_fds_alive = []
     resource.setrlimit(resource.RLIMIT_NOFILE, (100, 100))
-    for random_t in DataLoader(RandomDataset(200, (2,2)),
+    for random_t in DataLoader(RandomDataset(200, (2,2)), multiprocessing_context="fork",
                                num_workers=1, persistent_workers=True):
       random_t.max(dim=0)
       keep_fds_alive.append(random_t)
