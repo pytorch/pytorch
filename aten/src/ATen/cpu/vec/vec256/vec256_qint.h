@@ -310,12 +310,6 @@ struct Vectorized<c10::qint32> : public Vectorizedqi {
       return _mm256_add_epi32(rounded, zero_point_v);
     }
 
-    void dump() const {
-        for (size_t i = 0; i < 8; ++i) {
-          std::cout << ((int32_t*)&vals)[i] << " ";
-        }
-        std::cout << std::endl;
-    }
  private:
     // Load from memory constructor
     Vectorized(const void* ptr) {
@@ -538,12 +532,6 @@ struct Vectorized<c10::qint8> : public Vectorizedqi {
       return RequantizeAvx2<value_type>(inp, multiplier_v, zero_point_v);
     }
 
-    void dump() const {
-        for (size_t i = 0; i < size(); ++i) {
-            std::cout << (int)((value_type*)&vals)[i] << " ";
-        }
-        std::cout << std::endl;
-    }
  private:
     // Load from memory constructor
     Vectorized(const void* ptr) {
@@ -703,12 +691,6 @@ struct Vectorized<c10::quint8> : public Vectorizedqi {
       return RequantizeAvx2<value_type>(inp, multiplier_v, zero_point_v);
     }
 
-    void dump() const {
-        for (size_t i = 0; i < size(); ++i) {
-            std::cout << (int)((value_type*)&vals)[i] << " ";
-        }
-        std::cout << std::endl;
-    }
  private:
 
     // Load from memory constructor
@@ -791,13 +773,6 @@ struct VectorizedQuantizedConverter {
           tmp_vals[7]);
     }
     return rv;
-  }
-
-  void dump() const {
-      for (int i = 0; i < size(); ++i) {
-          std::cout << vals[i] << " ";
-      }
-      std::cout << std::endl;
   }
 
  protected:
