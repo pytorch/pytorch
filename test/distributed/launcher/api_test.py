@@ -30,7 +30,7 @@ from torch.distributed.launcher.api import (
     _get_entrypoint_name,
 )
 from torch.testing._internal.common_utils import (
-    TEST_WITH_ASAN,
+    TEST_WITH_DEV_DBG_ASAN,
     TEST_WITH_TSAN,
     sandcastle_skip_if,
 )
@@ -128,7 +128,7 @@ class ElasticLaunchTest(unittest.TestCase):
         )
 
     @sandcastle_skip_if(
-        TEST_WITH_ASAN or TEST_WITH_TSAN, "tests incompatible with tsan or asan"
+        TEST_WITH_DEV_DBG_ASAN or TEST_WITH_TSAN, "tests incompatible with tsan and dev/dbg asan"
     )
     def test_launch_script_python(self):
         nnodes = 1
@@ -145,7 +145,7 @@ class ElasticLaunchTest(unittest.TestCase):
         self.check_works_ran(world_size)
 
     @sandcastle_skip_if(
-        TEST_WITH_ASAN or TEST_WITH_TSAN, "tests incompatible with tsan or asan"
+        TEST_WITH_DEV_DBG_ASAN or TEST_WITH_TSAN, "tests incompatible with tsan and dev/dbg asan"
     )
     def test_launch_script_python_local_rank_transfer(self):
         nnodes = 1
@@ -162,7 +162,7 @@ class ElasticLaunchTest(unittest.TestCase):
         self.check_works_ran(world_size)
 
     @sandcastle_skip_if(
-        TEST_WITH_ASAN or TEST_WITH_TSAN, "tests incompatible with tsan or asan"
+        TEST_WITH_DEV_DBG_ASAN or TEST_WITH_TSAN, "tests incompatible with tsan and dev/dbg asan"
     )
     def test_launch_script_bash(self):
         nnodes = 1
@@ -177,7 +177,7 @@ class ElasticLaunchTest(unittest.TestCase):
         self.check_works_ran(world_size)
 
     @sandcastle_skip_if(
-        TEST_WITH_ASAN or TEST_WITH_TSAN, "tests incompatible with tsan or asan"
+        TEST_WITH_DEV_DBG_ASAN or TEST_WITH_TSAN, "tests incompatible with tsan and dev/dbg asan"
     )
     def test_launch_function(self):
         nnodes = 1
@@ -193,7 +193,7 @@ class ElasticLaunchTest(unittest.TestCase):
         self.assertEqual(expected_res, actual_res)
 
     @sandcastle_skip_if(
-        TEST_WITH_ASAN or TEST_WITH_TSAN, "tests incompatible with tsan or asan"
+        TEST_WITH_DEV_DBG_ASAN or TEST_WITH_TSAN, "tests incompatible with tsan and dev/dbg asan"
     )
     def test_launch_dist_sum_with_static_rdzv(self):
         nnodes = 1
@@ -224,7 +224,7 @@ class ElasticLaunchTest(unittest.TestCase):
         self.assertEqual(expected_res, actual_res)
 
     @sandcastle_skip_if(
-        TEST_WITH_ASAN or TEST_WITH_TSAN, "tests incompatible with tsan or asan"
+        TEST_WITH_DEV_DBG_ASAN or TEST_WITH_TSAN, "tests incompatible with tsan and dev/dbg asan"
     )
     def test_launch_elastic(self):
         nproc_per_node = 4
