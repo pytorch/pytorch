@@ -38,7 +38,7 @@ def reshape(g, self, shape):
 
 @parse_args("v", "v", "v", "v", "v", "i", "f", "f", "i")
 def batch_norm(g, input, weight, bias, running_mean, running_var, training, momentum, eps, cudnn_enabled):
-    sym_help.assert_training_mode(training, "batch_norm")
+    sym_help.check_training_mode(training, "batch_norm")
     weight, bias, running_mean, running_var = sym_help._batchnorm_helper(g, input, weight, bias, running_mean, running_var)
     out = g.op("BatchNormalization", input, weight, bias, running_mean, running_var,
                epsilon_f=eps,
