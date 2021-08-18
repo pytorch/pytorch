@@ -1960,9 +1960,10 @@ class TestFrozenOptimizations(JitTestCase):
                         # we should convert `aten::layer_norm` to `prim::MKLDNNLayerNorm`
                         if layernorm.elementwise_affine and len(param[1]) == 1:
                             inplace_suffix = "_" if inplace else ""
-                            FileCheck().check("prim::MKLDNNLayerNorm" + inplace_suffix).check_count("aten::to_dense", 1, exactly=True).run(mod.graph)
+                            (FileCheck().check("prim::MKLDNNLayerNorm" + inplace_suffix).
+                                check_count("aten::to_dense", 1, exactly=True).run(mod.graph))
                         else:
-                            FileCheck().check_count("aten::to_dense", 1, exactly=True).run(mod.graph)
+                            FileCheck().check_count("aten::to_dense", 1, exactly=True).check("aten::layer_norm").run(mod.graph)
                         self.assertTrue(torch.allclose(sub_model(param[2]), mod(param[2]), 1e-04, 1e-04))
 
     @skipIfNoTorchVision
