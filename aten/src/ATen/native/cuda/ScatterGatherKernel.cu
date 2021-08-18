@@ -128,11 +128,13 @@ template <bool is_scatter_like = true, bool cast_to_opaque = true>
 struct cuda_scatter_gather_base_kernel {
   template <typename func_t>
   void operator()(
-    Tensor& self, int64_t dim,
+    const Tensor& self, int64_t dim,
     const Tensor& index, const Tensor& src,
     const std::string& method_name,
     const func_t& f
   ) {
+    at::assert_no_internal_overlap(self);
+
     auto index_sizes = ensure_nonempty_vec(index.sizes().vec());
     auto self_strides = ensure_nonempty_vec(self.strides().vec());
     auto src_strides = ensure_nonempty_vec(src.strides().vec());
@@ -295,8 +297,6 @@ struct cuda_scatter_fill_base_kernel {
   ) {
     at::assert_no_internal_overlap(self);
 
-    dim = maybe_wrap_dim(dim, self.dim());
-
     auto index_sizes = ensure_nonempty_vec(index.sizes().vec());
 
     // restride self such that
@@ -340,8 +340,6 @@ struct cuda_scatter_fill_base_kernel {
   ) {
     at::assert_no_internal_overlap(self);
 
-    dim = maybe_wrap_dim(dim, self.dim());
-
     auto index_sizes = ensure_nonempty_vec(index.sizes().vec());
 
     // restride self such that
@@ -380,11 +378,11 @@ struct cuda_scatter_fill_base_kernel {
 
 void gather_cuda_kernel(const Tensor& result, const Tensor& self, int64_t dim, const Tensor& index) {
   cuda_scatter_gather_base_kernel</*is_scatter_like=*/false>()(
-    const_cast<Tensor&>(result), dim, index, self,
+    result, dim, index, self,
     "gather_out_cuda", tensor_assign);
 }
 
-void scatter_cuda_kernel(Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
+void scatter_cuda_kernel(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
   cuda_scatter_gather_base_kernel<>()(
     self, dim, index, src,
     "scatter_cuda_", tensor_assign);
@@ -396,7 +394,7 @@ void scatter_fill_cuda_kernel(Tensor& self, int64_t dim, const Tensor& index, co
     "scatter_fill_cuda_", tensor_assign);
 }
 
-void scatter_add_cuda_kernel(Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
+void scatter_add_cuda_kernel(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage
   globalContext().alertNotDeterministic("scatter_add_cuda_kernel");
@@ -405,7 +403,7 @@ void scatter_add_cuda_kernel(Tensor& self, int64_t dim, const Tensor& index, con
     "scatter_add_cuda_", reduce_add);
 }
 
-void scatter_reduce_cuda_kernel(Tensor& self, const int64_t dim, const Tensor& index,
+void scatter_reduce_cuda_kernel(const Tensor& self, const int64_t dim, const Tensor& index,
                                const Tensor& src, const SCATTER_GATHER_OP& reduce) {
   switch (reduce) {
   case SCATTER_GATHER_OP::REDUCE_ADD :
@@ -416,8 +414,6 @@ void scatter_reduce_cuda_kernel(Tensor& self, const int64_t dim, const Tensor& i
     cuda_scatter_gather_base_kernel<true, false>()(self, dim, index, src,
                                        "scatter_reduce_cuda_multiply_", reduce_multiply);
     break;
-  default:
-    TORCH_CHECK(false, "reduce argument must be either add or multiply.");
   }
 }
 
@@ -432,8 +428,6 @@ void scatter_scalar_reduce_cuda_kernel(Tensor& self, const int64_t dim, const Te
     cuda_scatter_fill_base_kernel<false>()(self, dim, index, value,
                                       "scatter_fill_cuda_multiply_", reduce_multiply);
     break;
-  default:
-    TORCH_CHECK(false, "reduce argument must be either add or multiply.");
   }
 }
 

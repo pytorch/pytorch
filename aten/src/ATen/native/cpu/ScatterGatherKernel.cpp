@@ -100,7 +100,7 @@ struct _cpu_scatter_gather_dim_loop {
 template <bool is_scatter_like = true>
 struct cpu_scatter_gather_base_kernel {
   template <typename func_t>
-  void operator()(Tensor& self, int64_t dim,
+  void operator()(const Tensor& self, int64_t dim,
     const Tensor& index, const Scalar& value,
     const std::string& method_name, func_t& kernel_func) {
 
@@ -187,7 +187,7 @@ struct cpu_scatter_gather_base_kernel {
   }
 
   template <typename func_t>
-  void operator()(Tensor& self, int64_t dim,
+  void operator()(const Tensor& self, int64_t dim,
     const Tensor& index, const Tensor& src,
     const std::string& method_name, func_t& kernel_func) {
 
@@ -276,28 +276,28 @@ struct cpu_scatter_gather_base_kernel {
 
 void gather_cpu_kernel(const Tensor& result, const Tensor& self, int64_t dim, const Tensor& index) {
   cpu_scatter_gather_base_kernel</*is_scatter_like=*/false>()(
-    const_cast<Tensor&>(result), dim, index, self,
+    result, dim, index, self,
     "gather_out_cpu", tensor_assign);
 }
 
-void scatter_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
+void scatter_cpu_kernel(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
   cpu_scatter_gather_base_kernel<>()(
     self, dim, index, src, "scatter_cpu_", tensor_assign);
 }
 
-void scatter_fill_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, const Scalar& value) {
+void scatter_fill_cpu_kernel(const Tensor& self, int64_t dim, const Tensor& index, const Scalar& value) {
   cpu_scatter_gather_base_kernel<>()(
     self, dim, index, value, "scatter_fill_cpu_", tensor_assign);
 }
 
-void scatter_add_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
+void scatter_add_cpu_kernel(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
   cpu_scatter_gather_base_kernel<>()(
     self, dim, index, src,
     "scatter_add_", reduce_add);
 
 }
 
-void scatter_reduce_cpu_kernel(Tensor& self, const int64_t dim, const Tensor& index,
+void scatter_reduce_cpu_kernel(const Tensor& self, const int64_t dim, const Tensor& index,
                                const Tensor& src, const SCATTER_GATHER_OP& reduce) {
   switch (reduce) {
   case SCATTER_GATHER_OP::REDUCE_ADD :
@@ -308,12 +308,10 @@ void scatter_reduce_cpu_kernel(Tensor& self, const int64_t dim, const Tensor& in
     cpu_scatter_gather_base_kernel<>()(self, dim, index, src,
                                        "scatter_reduce_multiply_", reduce_multiply);
     break;
-  default:
-    TORCH_CHECK(false, "reduce argument must be either add or multiply.");
   }
 }
 
-void scatter_scalar_reduce_cpu_kernel(Tensor& self, const int64_t dim, const Tensor& index,
+void scatter_scalar_reduce_cpu_kernel(const Tensor& self, const int64_t dim, const Tensor& index,
                                       const Scalar& value, const SCATTER_GATHER_OP& reduce) {
   switch (reduce) {
   case SCATTER_GATHER_OP::REDUCE_ADD :
@@ -324,8 +322,6 @@ void scatter_scalar_reduce_cpu_kernel(Tensor& self, const int64_t dim, const Ten
     cpu_scatter_gather_base_kernel<>()(self, dim, index, value,
                                        "scatter_scalar_reduce_multiply_", reduce_multiply);
     break;
-  default:
-    TORCH_CHECK(false, "reduce argument must be either add or multiply.");
   }
 }
 

@@ -87,12 +87,16 @@ TORCH_META_FUNC(gather)
 (const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
   const Tensor& result = maybe_get_output();
   int64_t wrapped_dim = at::maybe_wrap_dim(dim, self.dim());
-  at::native::scatter_gather_dtype_check("gather", self, index, src);
-  at::native::gather_shape_check(self, wrapped_dim, index, src);
   if (result.defined()) {
   	at::assert_no_internal_overlap(result);
     at::assert_no_overlap(result, self);
     at::assert_no_partial_overlap(result, index);
+    at::native::scatter_gather_dtype_check("gather", self, index, result);
+    at::native::gather_shape_check(self, wrapped_dim, index, result);
+  }
+  else {
+    at::native::scatter_gather_dtype_check("gather", self, index, c10::nullopt);
+    at::native::gather_shape_check(self, wrapped_dim, index, c10::nullopt);
   }
   set_output(index.sizes(), self.options());
 }
@@ -1129,10 +1133,12 @@ Tensor index_fill(const Tensor & self, int64_t dim, const Tensor & index, const 
 // gather_out_cpu_cuda
 TORCH_IMPL_FUNC(gather_out)
 (const Tensor& self, int64_t dim, const Tensor& index, bool sparse_grad, const Tensor& result) {
+  dim = at::maybe_wrap_dim(dim, self.dim());
   gather_stub(result.device().type(), result, self, dim, index);
 }
 
 Tensor gather_backward(const Tensor& grad, const Tensor& self, int64_t dim, const Tensor& index, bool sparse_grad) {
+  dim = at::maybe_wrap_dim(dim, self.dim());
   if (sparse_grad) {
     return at::_gather_sparse_backward(self, dim, index, grad);
   }
@@ -1149,6 +1155,7 @@ void scatter_impl(
     ReduceStub& reduce_stub,
     FillStub& fill_stub,
     const c10::optional<c10::string_view> reduce = nullopt) {
+  dim = at::maybe_wrap_dim(dim, self.dim());
   auto mut_out = const_cast<Tensor&>(out);
 
   if (!self.is_same(mut_out)) {
@@ -1180,6 +1187,7 @@ TORCH_IMPL_FUNC(scatter_value_out)
  const Tensor& index,
  const Scalar& value,
  const Tensor& out) {
+  dim = at::maybe_wrap_dim(dim, self.dim());
   scatter_impl(self, dim, index, value, out,
                scatter_scalar_reduce_stub,
                scatter_fill_stub);
