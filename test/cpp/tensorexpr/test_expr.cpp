@@ -313,13 +313,13 @@ TEST(Expr, IntrinsicsDtypes) {
 
 TEST(Expr, Substitute01) {
   KernelScope kernel_scope;
-  const Var* x = new Var("x", kFloat);
-  const Var* y = new Var("y", kFloat);
-  const Expr* e = new Mul(new Sub(x, new FloatImm(1.0f)), new Add(x, y));
+  Var* x = new Var("x", kFloat);
+  Var* y = new Var("y", kFloat);
+  Expr* e = new Mul(new Sub(x, new FloatImm(1.0f)), new Add(x, y));
 
-  const Var* z = new Var("z", kFloat);
-  const Expr* e2 = Substitute(e, {{x, new Add(z, new FloatImm(5.0f))}});
-  const Expr* e2_ref = new Mul(
+  Var* z = new Var("z", kFloat);
+  Expr* e2 = Substitute(e, {{x, new Add(z, new FloatImm(5.0f))}});
+  Expr* e2_ref = new Mul(
       new Sub(new Add(z, new FloatImm(5.0f)), new FloatImm(1.0f)),
       new Add(new Add(z, new FloatImm(5.0f)), y));
   std::ostringstream oss;
@@ -663,7 +663,7 @@ void testStmtClone() {
   // original statement hasn't changed while the cloned one has.
   Stmt* body_addition = a_buf.store({index}, 33);
   Block* cloned_body =
-      static_cast<Block*>(static_cast<const For*>(cloned_loop)->body());
+      static_cast<Block*>(static_cast<For*>(cloned_loop)->body());
   cloned_body->append_stmt(body_addition);
 
   std::vector<int> orig_loop_results_after_mutation(N);
