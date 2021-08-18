@@ -57,7 +57,7 @@ class TestDdpCommHook(nn.Module):
 class DistributedDataParallelCommHookTest(MultiProcessTestCase):
     def setUp(self):
         super(DistributedDataParallelCommHookTest, self).setUp()
-        self._fork_processes()
+        self._spawn_processes()
 
     def tearDown(self):
         try:

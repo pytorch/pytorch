@@ -13,7 +13,6 @@ import torch.distributed.elastic.timer as timer
 from torch.distributed.elastic.timer.api import TimerRequest
 from torch.distributed.elastic.timer.local_timer import MultiprocessingRequestQueue
 from torch.testing._internal.common_utils import (
-    TEST_WITH_TSAN,
     run_tests,
     IS_WINDOWS,
     IS_MACOS,
@@ -62,7 +61,6 @@ if not (IS_WINDOWS or IS_MACOS):
             with timer.expires(after=0.5):
                 time.sleep(0.1)
 
-        @sandcastle_skip_if(TEST_WITH_TSAN, "test is tsan incompatible")
         def test_get_timer_recursive(self):
             """
             If a function acquires a countdown timer with default scope,
@@ -89,7 +87,8 @@ if not (IS_WINDOWS or IS_MACOS):
                         func2(n - 1)
                         time.sleep(0.2)
 
-            p = mp.Process(target=func2, args=(2,))
+            ctx = mp.get_context('spawn')
+            p = ctx.Process(target=func2, args=(2,))
             p.start()
             p.join()
             self.assertEqual(-signal.SIGKILL, p.exitcode)
@@ -102,7 +101,6 @@ if not (IS_WINDOWS or IS_MACOS):
             with timer.expires(after=timeout):
                 time.sleep(duration)
 
-        @sandcastle_skip_if(TEST_WITH_TSAN, "test is tsan incompatible")
         def test_timer(self):
             timeout = 0.1
             duration = 1
@@ -193,7 +191,6 @@ if not (IS_WINDOWS or IS_MACOS):
         def tearDown(self):
             self.server.stop()
 
-        @sandcastle_skip_if(TEST_WITH_TSAN, "test is tsan incompatible")
         def test_watchdog_call_count(self):
             """
             checks that the watchdog function ran wait/interval +- 1 times
@@ -226,7 +223,6 @@ if not (IS_WINDOWS or IS_MACOS):
         def _release_timer(self, pid, scope):
             return TimerRequest(worker_id=pid, scope_id=scope, expiration_time=-1)
 
-        @sandcastle_skip_if(TEST_WITH_TSAN, "test is tsan incompatible")
         @mock.patch("os.kill")
         def test_expired_timers(self, mock_os_kill):
             """
