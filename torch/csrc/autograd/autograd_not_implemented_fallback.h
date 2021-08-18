@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/torch.h>
+#include <ATen/ATen.h>
 
 namespace torch {
 namespace autograd {
