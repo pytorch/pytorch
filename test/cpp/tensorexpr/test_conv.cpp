@@ -223,7 +223,7 @@ TEST(Conv, Conv2D) {
   // LoopNest, IRSimplifier, etc.
   te::LoopNest loop({conv});
   loop.prepareForCodegen();
-  te::Stmt* s = loop.root_stmt();
+  te::StmtPtr s = loop.root_stmt();
   s = te::IRSimplifier::simplify(s);
 
   at::Tensor result = at::empty_like(ref);
