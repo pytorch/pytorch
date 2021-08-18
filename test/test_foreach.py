@@ -63,7 +63,7 @@ class ForeachFuncWrapper:
         if (
             is_cuda and
             torch.autograd.kineto_available() and
-            torch.profiler.ProfilerActivity.CUDA in torch.profiler._supported_kineto_activities()
+            torch.profiler.ProfilerActivity.CUDA in torch.profiler.supported_activities()
         ):
             with torch.profiler.profile(activities=(torch.profiler.ProfilerActivity.CPU,)) as p:
                 actual = self.func(*inputs, **kwargs)
@@ -134,11 +134,27 @@ class TestForeach(TestCase):
             if dtype in torch.testing.get_all_int_dtypes():
                 alpha = 3
             elif dtype.is_complex:
-                dtype = complex(3, 3)
+                alpha = complex(3, 3)
             else:
                 alpha = 3.14
             self._binary_test(dtype, op, ref, inputs, is_fastpath, is_inplace=False, alpha=alpha)
             self._binary_test(dtype, inplace_op, inplace_ref, inputs, is_fastpath, is_inplace=True, alpha=alpha)
+
+        # Tests of implicit broadcasting
+        # When sizes of tensors don't match, foreach functions are supposed to choose slow path
+        # even if this methods's argument `is_fastpath` is True.
+        # `cudaLaunchKernel` will be equal to `N`. For assert in `ForeachFuncWrapper` to pass,
+        # we pass `is_fastpath and disable_fastpath` to `_binary_test`'s argument of is_fastpath.
+        # as n_expected_cudaLaunchKernels is N if disable_fastpath.
+        inputs = [
+            opinfo.sample_inputs(device, dtype, N, noncontiguous=not is_fastpath),
+            [
+                make_tensor((N - i , 1), device=device, dtype=dtype, noncontiguous=not is_fastpath) for i in range(N)
+            ],
+        ]
+        self._binary_test(dtype, op, ref, inputs, is_fastpath and disable_fastpath, is_inplace=False)
+        self._binary_test(
+            dtype, inplace_op, inplace_ref, inputs, is_fastpath and disable_fastpath, is_inplace=True)
 
     # note(mkozuki): Why ROCm?
     # ROCm is supposed to compile slow path as in
@@ -263,6 +279,21 @@ class TestForeach(TestCase):
         self._pointwise_test(dtype, op, ref, inputs, is_fastpath, is_inplace=False, values=values)
         self._pointwise_test(dtype, inplace_op, inplace_ref, inputs, is_fastpath, is_inplace=True, values=values)
 
+        # Tests of implicit broadcasting
+        inputs = [
+            opinfo.sample_inputs(device, dtype, N, noncontiguous=not is_fastpath, same_size=True),
+            [
+                make_tensor((N - i, 1), device=device, dtype=dtype, noncontiguous=not is_fastpath) for i in range(N)
+            ],
+            [
+                make_tensor((1, N - i), device=device, dtype=dtype, noncontiguous=not is_fastpath) for i in range(N)
+            ],
+        ]
+        self._pointwise_test(dtype, op, ref, inputs, is_fastpath and disable_fastpath, is_inplace=False, values=values)
+        self._pointwise_test(
+            dtype, inplace_op, inplace_ref, inputs, is_fastpath and disable_fastpath, is_inplace=True, values=values)
+
+    @skipMeta
     @ops(foreach_pointwise_op_db)
     def test_pointwise_op_fastpath(self, device, dtype, op):
         disable_fastpath = dtype in torch.testing.get_all_int_dtypes() + [torch.bool]
@@ -427,7 +458,7 @@ class TestForeach(TestCase):
     @dtypes(*torch.testing.get_all_dtypes())
     @ops(foreach_binary_op_db)
     def test_binary_op_list_error_cases(self, device, dtype, op):
-        foreach_op, foreach_op_ = op.method_variant, op.inplace_variant
+        foreach_op, foreach_op_, ref, ref_ = op.method_variant, op.inplace_variant, op.ref, op.ref_inplace
         tensors1 = []
         tensors2 = []
 
@@ -452,13 +483,21 @@ class TestForeach(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Tensor lists must have the same number of tensors, got 1 and 2"):
             foreach_op_(tensors1, tensors2)
 
-        # Corresponding tensors with different sizes
+        # Corresponding tensors with different sizes that aren't compatible with broadcast
+        # If sizes are different then foreach chooses slow path, thus error messages are expected
+        # to be the same as torch regular function.
         tensors1 = [torch.zeros(10, 10, device=device, dtype=dtype) for _ in range(10)]
         tensors2 = [torch.ones(11, 11, device=device, dtype=dtype) for _ in range(10)]
-        with self.assertRaisesRegex(RuntimeError, "Corresponding tensors in lists must have the same size"):
+        try:
             foreach_op(tensors1, tensors2)
-        with self.assertRaisesRegex(RuntimeError, r", got \[10, 10\] and \[11, 11\]"):
+        except RuntimeError as e:
+            with self.assertRaisesRegex(type(e), re.escape(str(e))):
+                [ref(t1, t2) for t1, t2 in zip(tensors1, tensors2)]
+        try:
             foreach_op_(tensors1, tensors2)
+        except RuntimeError as e:
+            with self.assertRaisesRegex(type(e), re.escape(str(e))):
+                [ref_(t1, t2) for t1, t2 in zip(tensors1, tensors2)]
 
         # different devices
         if self.device_type == "cuda" and torch.cuda.device_count() > 1:

@@ -113,14 +113,14 @@ nn_functional_tests = [
         '', (False, 'aten::_batch_norm_impl_index')),
     ('instance_norm', (S, S, S), (non_differentiable(torch.zeros(S)), non_differentiable(torch.ones(S))),),
     ('layer_norm', (S, S, S, S), ([5],), '',
-     (False, ['aten::contiguous', 'aten::_batch_norm_impl_index'])),
+     (True, ['aten::native_layer_norm'])),
     ('layer_norm', (S, S, S, S), ([5], non_differentiable(torch.rand(S)),), 'with_only_weight',
-     (False, ['aten::contiguous', 'aten::_batch_norm_impl_index'])),
+     (True, ['aten::native_layer_norm'])),
     ('layer_norm', (S, S, S, S), ([5], None, non_differentiable(torch.rand(S)),), 'with_only_bias',
-     (False, ['aten::contiguous', 'aten::_batch_norm_impl_index'])),
+     (True, ['aten::native_layer_norm'])),
     ('layer_norm', (S, S, S, S), ([5], non_differentiable(torch.rand(S)),
                                   non_differentiable(torch.rand(S))), 'with_weight_and_bias',
-     (False, ['aten::contiguous', 'aten::_batch_norm_impl_index', 'aten::addcmul'])),
+     (True, ['aten::native_layer_norm'])),
     ('group_norm', (S, S, S), (1, torch.rand(5),),),
     ('local_response_norm', (S, S, S), (2, ),),
     ('nll_loss', F.log_softmax(torch.randn(3, 5), dim=0), (torch.tensor([1, 0, 4]),), '',),
@@ -336,6 +336,7 @@ def create_traced_fn(self, fn):
         output = traced(*inputs_tensors)
         # skip type annotate function attributes for now, see: https://github.com/python/mypy/issues/2087
         traced_fn.last_graph = traced.graph_for(*inputs_tensors)  # type: ignore[attr-defined]
+        traced_fn.graph = traced.graph  # type: ignore[attr-defined]
         return output
     return traced_fn
 
