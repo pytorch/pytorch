@@ -1284,6 +1284,7 @@ class BinaryUfuncInfo(OpInfo):
     def __init__(self, name, *, lhs_make_tensor_kwargs=None, rhs_make_tensor_kwargs=None, **kwargs):
         super().__init__(name, **kwargs)
 
+        # [lr]hs_make_tensor_kwargs are part of the OpInfo to be able to dynamically generate valid samples later on.
         if lhs_make_tensor_kwargs is None:
             lhs_make_tensor_kwargs = {}
         self.lhs_make_tensor_kwargs = lhs_make_tensor_kwargs
@@ -1296,6 +1297,12 @@ class BinaryUfuncInfo(OpInfo):
 def _resolve_binay_pwise_kwargs(
         op_info, *, op_kwargs=None, lhs_make_tensor_kwargs=None, rhs_make_tensor_kwargs=None
 ):
+    """Resolves default values for :func:`sample_inputs_binary_pwise`.
+
+    By default :attr:`op_kwargs`, :attr:`lhs_make_tensor_kwargs`, and :attr:`rhs_make_tensor_kwargs` are just empty
+    dictionaries. In case :attr:`op_info` is a :class:`BinaryUfuncInfo`, :attr:`BinaryUfuncInfo.lhs_make_tensor_kwargs`
+    and :attr:`BinaryUfuncInfo.rhs_make_tensor_kwargs` will be used as defaults.
+    """
     if op_kwargs is None:
         op_kwargs = {}
     if lhs_make_tensor_kwargs is None:
@@ -1311,6 +1318,7 @@ def sample_inputs_binary_pwise(
     device,
     dtype,
     requires_grad,
+    *,
     python_scalars=False,
     op_kwargs=None,
     lhs_make_tensor_kwargs=None,
@@ -1393,11 +1401,13 @@ def sample_inputs_add_sub(
         requires_grad,
         python_scalars=python_scalars,
         op_kwargs=op_kwargs,
+        lhs_make_tensor_kwargs=lhs_make_tensor_kwargs,
+        rhs_make_tensor_kwargs=rhs_make_tensor_kwargs,
         **kwargs,
     )
 
-    lhs = make_tensor((S, S), device=device, dtype=dtype, requires_grad=requires_grad, **op_info.lhs_make_tensor_kwargs)
-    rhs = make_tensor((S, S), device=device, dtype=dtype, requires_grad=requires_grad, **op_info.rhs_make_tensor_kwargs)
+    lhs = make_tensor((S, S), device=device, dtype=dtype, requires_grad=requires_grad, **lhs_make_tensor_kwargs)
+    rhs = make_tensor((S, S), device=device, dtype=dtype, requires_grad=requires_grad, **rhs_make_tensor_kwargs)
     sample_inputs.append(SampleInput(lhs, args=(rhs,), kwargs=dict(op_kwargs, alpha=alpha), broadcasts_input=False))
 
     return sample_inputs
