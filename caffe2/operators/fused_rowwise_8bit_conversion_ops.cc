@@ -17,7 +17,6 @@ void convertfp32fp16(at::Half* dst, const float* src, size_t N) {
 }
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     FloatToFused8BitRowwiseQuantized,
     FloatToFused8BitRowwiseQuantizedOp<
@@ -26,7 +25,6 @@ REGISTER_CPU_OPERATOR(
         nullptr,
         false,
         CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(FloatToFused8BitRowwiseQuantized)
     .NumInputs(1)
     .NumOutputs(1)
@@ -56,10 +54,8 @@ input tensor with dimension 5x2x4 is interpreted as 10 rows and 4 columns.
 )DOC")
     .Input(0, "input", "Float32 input data")
     .Output(0, "output", "Fused scale, bias and quantized data");
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(FloatToFused8BitRowwiseQuantized);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     FloatToFused8BitRowwiseQuantizedHalfScaleBias,
     FloatToFused8BitRowwiseQuantizedOp<
@@ -68,7 +64,6 @@ REGISTER_CPU_OPERATOR(
         nullptr,
         false,
         CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(FloatToFused8BitRowwiseQuantizedHalfScaleBias)
     .NumInputs(1)
     .NumOutputs(1)
@@ -95,10 +90,8 @@ followed by another half float containing the scale.)
 )DOC")
     .Input(0, "input", "Float32 input data")
     .Output(0, "output", "Fused scale, bias and quantized data");
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(FloatToFused8BitRowwiseQuantizedHalfScaleBias);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     HalfFloatToFused8BitRowwiseQuantized,
     FloatToFused8BitRowwiseQuantizedOp<
@@ -107,7 +100,6 @@ REGISTER_CPU_OPERATOR(
         convertfp16fp32,
         true,
         CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(HalfFloatToFused8BitRowwiseQuantized)
     .NumInputs(1)
     .NumOutputs(1)
@@ -133,10 +125,8 @@ followed by another float containing the scale.)
 )DOC")
     .Input(0, "input", "Float16 input data")
     .Output(0, "output", "Fused scale, bias and quantized data");
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(HalfFloatToFused8BitRowwiseQuantized);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     HalfFloatToFused8BitRowwiseQuantizedHalfScaleBias,
     FloatToFused8BitRowwiseQuantizedOp<
@@ -145,7 +135,6 @@ REGISTER_CPU_OPERATOR(
         convertfp16fp32,
         true,
         CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(HalfFloatToFused8BitRowwiseQuantizedHalfScaleBias)
     .NumInputs(1)
     .NumOutputs(1)
@@ -172,10 +161,8 @@ followed by another float containing the scale.)
 )DOC")
     .Input(0, "input", "Float16 input data")
     .Output(0, "output", "Fused scale, bias and quantized data");
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(HalfFloatToFused8BitRowwiseQuantizedHalfScaleBias);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     Fused8BitRowwiseQuantizedToFloat,
     Fused8BitRowwiseQuantizedToFloatOp<
@@ -184,7 +171,6 @@ REGISTER_CPU_OPERATOR(
         nullptr,
         false,
         CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Fused8BitRowwiseQuantizedToFloat)
     .NumInputs(1)
     .NumOutputs(1)
@@ -214,10 +200,8 @@ the original, un-quantized floating point values.
         "scale_bias_quantized_input",
         "Fused scale, bias and quantized data")
     .Output(0, "float_output", "Float32 data");
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(Fused8BitRowwiseQuantizedToFloat);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     Fused8BitRowwiseQuantizedHalfScaleBiasToFloat,
     Fused8BitRowwiseQuantizedToFloatOp<
@@ -226,7 +210,6 @@ REGISTER_CPU_OPERATOR(
         nullptr,
         false,
         CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Fused8BitRowwiseQuantizedHalfScaleBiasToFloat)
     .NumInputs(1)
     .NumOutputs(1)
@@ -257,10 +240,8 @@ the original, un-quantized floating point values.
         "scale_bias_quantized_input",
         "Fused scale, bias and quantized data")
     .Output(0, "float_output", "Float32 data");
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(Fused8BitRowwiseQuantizedHalfScaleBiasToFloat);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     Fused8BitRowwiseQuantizedToHalfFloat,
     Fused8BitRowwiseQuantizedToFloatOp<
@@ -269,7 +250,6 @@ REGISTER_CPU_OPERATOR(
         convertfp32fp16,
         true,
         CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Fused8BitRowwiseQuantizedToHalfFloat)
     .NumInputs(1)
     .NumOutputs(1)
@@ -299,10 +279,8 @@ the original, un-quantized floating point values.
         "scale_bias_quantized_input",
         "Fused scale, bias and quantized data")
     .Output(0, "float16_output", "Float16 data");
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(Fused8BitRowwiseQuantizedToHalfFloat);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     Fused8BitRowwiseQuantizedHalfScaleBiasToHalfFloat,
     Fused8BitRowwiseQuantizedToFloatOp<
@@ -311,7 +289,6 @@ REGISTER_CPU_OPERATOR(
         nullptr,
         false,
         CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Fused8BitRowwiseQuantizedHalfScaleBiasToHalfFloat)
     .NumInputs(1)
     .NumOutputs(1)
@@ -342,7 +319,6 @@ the original, un-quantized floating point values.
         "scale_bias_quantized_input",
         "Fused scale, bias and quantized data")
     .Output(0, "float_output", "Float32 data");
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(Fused8BitRowwiseQuantizedHalfScaleBiasToHalfFloat);
 
 } // namespace caffe2

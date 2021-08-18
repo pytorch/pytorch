@@ -75,14 +75,14 @@ Tensor* conv2d_depthwise_static(
   constexpr int kLoopH = 2, kLoopW = 3;
   if (R == 3 && stride == 2 && pad == 1) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    For *head, *tail;
+    ForPtr head, tail;
     auto loops = nest.getLoopStmtsFor(conv);
     nest.sliceHead(loops[kLoopW], 2, &head, &tail);
     loops = nest.getLoopStmtsFor(conv);
     nest.sliceHead(loops[kLoopH], 2, &head, &tail);
   } else if (R == 3 && stride == 1 && pad == 1) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    For *main, *peeled;
+    ForPtr main, peeled;
     auto loops = nest.getAllLoopNestsWritingToBuf(conv->buf());
     main = loops[1][kLoopW];
     nest.sliceHead(main, 1, &peeled, &main);

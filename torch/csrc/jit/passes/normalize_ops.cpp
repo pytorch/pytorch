@@ -124,8 +124,11 @@ const std::unordered_map<Symbol, Symbol>& getOperatorAliasMap() {
       {aten::special_digamma, aten::digamma},
       {aten::special_psi, aten::digamma},
       {aten::special_i0, aten::i0},
+      {aten::special_xlogy, aten::xlogy},
       {aten::special_log_softmax, aten::log_softmax},
       {aten::orgqr, aten::linalg_householder_product},
+      {aten::special_multigammaln, aten::mvlgamma},
+      {aten::special_polygamma, aten::polygamma},
       {aten::special_gammaln, aten::lgamma}};
   return alias_map;
 }

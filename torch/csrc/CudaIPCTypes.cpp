@@ -3,13 +3,7 @@
 #include <map>
 #include <mutex>
 #include <random>
-
-#ifdef _MSC_VER
-#include <c10/util/win32-headers.h>
-#else
-#include <sys/types.h>
-#include <unistd.h>
-#endif
+#include <string>
 
 namespace torch {
 
@@ -54,7 +48,6 @@ struct CudaIPCGlobalEntities {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 CudaIPCGlobalEntities cuda_ipc_global_entities;
 
 CudaIPCSentDataLimbo::~CudaIPCSentDataLimbo() {
@@ -167,7 +160,7 @@ CudaIPCSentData::CudaIPCSentData(
     event_sync_required_ = true;
   } else {
     auto stream = c10::cuda::getCurrentCUDAStream(device.index());
-    C10_CUDA_CHECK(cudaStreamSynchronize(stream));
+    at::cuda::stream_synchronize(stream);
     event_ = nullptr;
     event_sync_required_ = false;
   }
@@ -175,7 +168,7 @@ CudaIPCSentData::CudaIPCSentData(
   // cuIpcGetEventHandle with HIP is not supported, so we have to sync
   // stream instead of passing event
   auto stream = c10::cuda::getCurrentCUDAStream(device.index());
-  C10_CUDA_CHECK(cudaStreamSynchronize(stream));
+  at::cuda::stream_synchronize(stream);
   event_sync_required_ = false;
 #endif
 }
@@ -203,15 +196,7 @@ at::DataPtr GetNewRefCountedSentData(void* data, at::Device device) {
     std::lock_guard<std::mutex> lock(
         cuda_ipc_global_entities.ref_counters_mutex_);
     if (!cuda_ipc_global_entities.next_available_ref_counters_file_) {
-      static std::random_device rd;
-      std::string ref_counter_handle = "/torch_";
-#ifdef _MSC_VER
-      ref_counter_handle += std::to_string(GetCurrentProcessId());
-#else
-      ref_counter_handle += std::to_string(getpid());
-#endif
-      ref_counter_handle += "_";
-      ref_counter_handle += std::to_string(rd());
+      std::string ref_counter_handle = at::NewProcessWideShmHandle();
 
       int flags = at::ALLOCATOR_MAPPED_SHAREDMEM | at::ALLOCATOR_MAPPED_EXCLUSIVE;
       at::DataPtr sptr = at::RefcountedMapAllocator::makeDataPtr(
@@ -252,7 +237,6 @@ bool CudaIPCCollect() {
 
 namespace c10 {
 namespace {
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_FREE_MEMORY_CALLBACK("cuda_ipc_collect", CudaIPCCollectCallback);
 }
 } // namespace c10
