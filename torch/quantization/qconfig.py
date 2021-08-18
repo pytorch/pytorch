@@ -222,4 +222,7 @@ def qconfig_function_equality(q1: QConfigAny, q2: QConfigAny):
         return q1 == q2
     else:
         assert q1 is not None and q2 is not None
-        return compare_partial(q1.activation.p, q2.activation.p) and compare_partial(q1.weight.p, q2.weight.p)
+        try:
+            return compare_partial(q1.activation.p, q2.activation.p) and compare_partial(q1.weight.p, q2.weight.p)
+        except AttributeError:
+            return q1 == q2
