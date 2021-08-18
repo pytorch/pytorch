@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/passes/peephole.h>
 
 #include <ATen/core/jit_type.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/jit_log.h>
 
@@ -123,7 +124,7 @@ struct PeepholeOptimizeNonTensorImpl {
         IfView n(node);
         // this handles redundant short circuits like "x and True" or "x or
         // False"
-        for (size_t i = 0; i < n.outputs().size(); ++i) {
+        for (const auto i : c10::irange(n.outputs().size())) {
           if (n.outputs().at(i)->type() != BoolType::get()) {
             continue;
           }
@@ -192,25 +193,49 @@ struct PeepholeOptimizeNonTensorImpl {
           node->output()->replaceAllUsesWith(node->input());
           changed = true;
         }
+      } else if (node->kind() == aten::Int) {
+        if (node->input()->type()->cast<IntType>()) {
+          GRAPH_UPDATE(
+              "Removing ", getHeader(node), " as input is already an integer");
+          node->output()->replaceAllUsesWith(node->input());
+          changed = true;
+        }
       } else if (node->kind() == aten::ne || node->kind() == aten::eq) {
         if (node->inputs().size() != 2 ||
             node->inputs().at(0) != node->inputs().at(1)) {
           continue;
         }
-        auto inp_kind = node->inputs().at(0)->type()->kind();
+        auto inp_type = node->inputs().at(0)->type();
         // only handling common immutable types here because other types like
         // Tensor or list of Tensor might throw on aten::eq
-        switch (inp_kind) {
-          case TypeKind::BoolType:
-          case TypeKind::IntType:
-          case TypeKind::FloatType: {
-            WithInsertPoint guard(node);
-            node->output()->replaceAllUsesWith(
-                graph_->insertConstant(node->kind() == aten::eq));
-            changed = true;
-          }
-          default:
-            break;
+        auto immut_type = [&](const TypePtr& type) {
+          auto kind = type->kind();
+          static const std::vector<TypeKind> handled_immutable_types = {
+              TypeKind::BoolType,
+              TypeKind::IntType,
+              TypeKind::FloatType,
+              TypeKind::NoneType};
+          return (
+              std::find(
+                  handled_immutable_types.begin(),
+                  handled_immutable_types.end(),
+                  kind) != handled_immutable_types.end());
+        };
+        bool non_throwing_type = false;
+        if (auto li_type = inp_type->cast<ListType>()) {
+          non_throwing_type = immut_type(li_type->getElementType());
+        } else if (auto di_type = inp_type->cast<DictType>()) {
+          non_throwing_type =
+              (immut_type(di_type->getKeyType()) &&
+               immut_type(di_type->getValueType()));
+        } else {
+          non_throwing_type = immut_type(inp_type);
+        }
+        if (non_throwing_type) {
+          WithInsertPoint guard(node);
+          node->output()->replaceAllUsesWith(
+              graph_->insertConstant(node->kind() == aten::eq));
+          changed = true;
         }
       } else if (
           node->kind() == aten::mul || node->kind() == aten::floordiv ||
