@@ -295,8 +295,8 @@ class QLinearPackWeightFp16Legacy final {
  public:
   static Tensor run(at::Tensor weight, c10::optional<Tensor> bias) {
     auto& ctx = at::globalContext();
-    auto options = weight.options();
 #ifdef USE_FBGEMM
+    auto options = weight.options();
     if (ctx.qEngine() == at::QEngine::FBGEMM) {
       auto prepacked =
           PackedLinearWeightFp16::prepack(std::move(weight), std::move(bias));

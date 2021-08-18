@@ -28,45 +28,45 @@ class TORCH_API CppPrinter : public IRPrinter {
   using IRPrinter::visit;
 
   // Binary expressions.
-  void visit(Mod*) override;
-  void visit(Max*) override;
-  void visit(Min*) override;
+  void visit(ModPtr) override;
+  void visit(MaxPtr) override;
+  void visit(MinPtr) override;
 
   // Conditional expressions.
-  void visit(CompareSelect*) override;
-  void visit(IfThenElse*) override;
+  void visit(CompareSelectPtr) override;
+  void visit(IfThenElsePtr) override;
 
   // Tensor operations.
-  void visit(Allocate*) override;
-  void visit(Free*) override;
-  void visit(Load*) override;
-  void visit(Store*) override;
+  void visit(AllocatePtr) override;
+  void visit(FreePtr) override;
+  void visit(LoadPtr) override;
+  void visit(StorePtr) override;
 
   // Casts.
-  void visit(Cast*) override;
-  void visit(BitCast*) override;
+  void visit(CastPtr) override;
+  void visit(BitCastPtr) override;
 
   // Calls.
-  void visit(Intrinsics*) override;
-  void visit(ExternalCall*) override;
+  void visit(IntrinsicsPtr) override;
+  void visit(ExternalCallPtr) override;
 
   // Vars.
-  void visit(Let*) override;
-  void visit(Var*) override;
+  void visit(LetPtr) override;
+  void visit(VarPtr) override;
 
   // Vector data types.
-  void visit(Ramp*) override;
-  void visit(Broadcast*) override;
+  void visit(RampPtr) override;
+  void visit(BroadcastPtr) override;
 
  private:
   int lane_;
-  std::unordered_map<const Var*, const Expr*> vector_vars_;
+  std::unordered_map<VarPtr, ExprPtr> vector_vars_;
 };
 
 class TORCH_API CppCodeGen : public CodeGen {
  public:
   CppCodeGen(
-      Stmt* stmt,
+      StmtPtr stmt,
       const std::vector<BufferArg>& buffer_args,
       at::Device device = at::kCPU,
       const std::string& kernel_func_name = "func");

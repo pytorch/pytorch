@@ -3,6 +3,7 @@
 #include "test/cpp/tensorexpr/test_base.h"
 
 #include <torch/csrc/jit/tensorexpr/cpp_codegen.h>
+#include <torch/csrc/jit/tensorexpr/fwd_decls.h>
 #include <torch/csrc/jit/tensorexpr/mem_arena.h>
 #include <torch/csrc/jit/tensorexpr/stmt.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
@@ -27,132 +28,132 @@ using namespace torch::jit::tensorexpr;
 
 TEST(CppPrinter, IntImm) {
   KernelScope kernel_scope;
-  auto i = new IntImm(10);
+  auto i = alloc<IntImm>(10);
   STR_CHECK(i, "10");
 }
 
 TEST(CppPrinter, FloatImm) {
   KernelScope kernel_scope;
-  auto f = new FloatImm(10);
+  auto f = alloc<FloatImm>(10);
   STR_CHECK(f, "10.f");
 }
 
 TEST(CppPrinter, FloatImm1) {
   KernelScope kernel_scope;
-  auto f = new FloatImm(10);
+  auto f = alloc<FloatImm>(10);
   STR_CHECK(f, "10.f");
 }
 
 TEST(CppPrinter, DoubleImm) {
   KernelScope kernel_scope;
-  auto d = new DoubleImm(10);
+  auto d = alloc<DoubleImm>(10);
   STR_CHECK(d, "10.0");
 }
 
 TEST(CppPrinter, DoubleImm1) {
   KernelScope kernel_scope;
-  auto d = new DoubleImm(10.1);
+  auto d = alloc<DoubleImm>(10.1);
   STR_CHECK(d, "10.1");
 }
 
 TEST(CppPrinter, HalfImm) {
   KernelScope kernel_scope;
-  auto h = new HalfImm(10);
+  auto h = alloc<HalfImm>(10);
   STR_CHECK(h, "10");
 }
 
 TEST(CppPrinter, Add) {
   KernelScope kernel_scope;
-  auto add = new Add(new IntImm(1), new IntImm(2));
+  auto add = alloc<Add>(alloc<IntImm>(1), alloc<IntImm>(2));
   STR_CHECK(add, "1 + 2");
 }
 
 TEST(CppPrinter, AddExpr1) {
   KernelScope kernel_scope;
-  Add* add = new Add(
-      new Add(new IntImm(0), new IntImm(1)),
-      new Sub(new IntImm(2), new IntImm(3)));
+  auto add = alloc<Add>(
+      alloc<Add>(alloc<IntImm>(0), alloc<IntImm>(1)),
+      alloc<Sub>(alloc<IntImm>(2), alloc<IntImm>(3)));
   STR_CHECK(add, "(0 + 1) + (2 - 3)");
 }
 
 TEST(CppPrinter, AddExpr2) {
   KernelScope kernel_scope;
-  Add* add = new Add(
-      new Mul(new IntImm(0), new IntImm(1)),
-      new Sub(new IntImm(2), new IntImm(3)));
+  auto add = alloc<Add>(
+      alloc<Mul>(alloc<IntImm>(0), alloc<IntImm>(1)),
+      alloc<Sub>(alloc<IntImm>(2), alloc<IntImm>(3)));
   STR_CHECK(add, "0 * 1 + (2 - 3)");
 }
 
 TEST(CppPrinter, AddExpr3) {
   KernelScope kernel_scope;
-  Add* add = new Add(
-      new Add(new IntImm(0), new IntImm(1)),
-      new Div(new IntImm(2), new IntImm(3)));
+  auto add = alloc<Add>(
+      alloc<Add>(alloc<IntImm>(0), alloc<IntImm>(1)),
+      alloc<Div>(alloc<IntImm>(2), alloc<IntImm>(3)));
   STR_CHECK(add, "(0 + 1) + 2 / 3");
 }
 
 TEST(CppPrinter, Mod) {
   KernelScope kernel_scope;
-  auto mod = new Mod(new IntImm(1), new IntImm(2));
+  auto mod = alloc<Mod>(alloc<IntImm>(1), alloc<IntImm>(2));
   STR_CHECK(mod, "1 % 2");
 }
 
 TEST(CppPrinter, ModFloat) {
   KernelScope kernel_scope;
-  auto mod = new Mod(new FloatImm(1), new FloatImm(2));
+  auto mod = alloc<Mod>(alloc<FloatImm>(1), alloc<FloatImm>(2));
   STR_CHECK(mod, "std::fmod(1.f, 2.f)");
 }
 
 TEST(CppPrinter, Max) {
   KernelScope kernel_scope;
-  auto max = new Max(new IntImm(1), new IntImm(2), false);
+  auto max = alloc<Max>(alloc<IntImm>(1), alloc<IntImm>(2), false);
   STR_CHECK(max, "std::max(1, 2)");
 }
 
 TEST(CppPrinter, MaxFloat) {
   KernelScope kernel_scope;
-  auto max = new Max(new FloatImm(1), new FloatImm(2), false);
+  auto max = alloc<Max>(alloc<FloatImm>(1), alloc<FloatImm>(2), false);
   STR_CHECK(max, "std::max(1.f, 2.f)");
 }
 
 TEST(CppPrinter, MaxHalf) {
   KernelScope kernel_scope;
-  auto max = new Max(new HalfImm(1), new HalfImm(2), false);
+  auto max = alloc<Max>(alloc<HalfImm>(1), alloc<HalfImm>(2), false);
   STR_CHECK(max, "(1 < 2) ? 2 : 1");
 }
 
 TEST(CppPrinter, And) {
   KernelScope kernel_scope;
-  auto v = new And(new IntImm(1), new IntImm(2));
+  auto v = alloc<And>(alloc<IntImm>(1), alloc<IntImm>(2));
   STR_CHECK(v, "1 & 2");
 }
 
 TEST(CppPrinter, CompareSelect) {
   KernelScope kernel_scope;
-  auto cs = new CompareSelect(
-      new IntImm(1),
-      new IntImm(2),
-      new FloatImm(1),
-      new FloatImm(2),
+  auto cs = alloc<CompareSelect>(
+      alloc<IntImm>(1),
+      alloc<IntImm>(2),
+      alloc<FloatImm>(1),
+      alloc<FloatImm>(2),
       CompareSelectOperation::kLE);
   STR_CHECK(cs, "((1 <= 2) ? 1.f : 2.f)");
 }
 
 TEST(CppPrinter, IfThenElse) {
   KernelScope kernel_scope;
-  auto cond = new Add(new IntImm(1), new IntImm(2));
-  auto true_value = new Sub(new IntImm(0), new IntImm(1));
-  auto false_value = new Mul(new IntImm(2), new IntImm(3));
-  auto v = new IfThenElse(cond, true_value, false_value);
+  auto cond = alloc<Add>(alloc<IntImm>(1), alloc<IntImm>(2));
+  auto true_value = alloc<Sub>(alloc<IntImm>(0), alloc<IntImm>(1));
+  auto false_value = alloc<Mul>(alloc<IntImm>(2), alloc<IntImm>(3));
+  auto v = alloc<IfThenElse>(cond, true_value, false_value);
   STR_CHECK(v, "((1 + 2) ? 0 - 1 : 2 * 3)");
 }
 
 TEST(CppPrinter, AllocateFree) {
   KernelScope kernel_scope;
   BufHandle buf("x", {2, 3}, kInt);
-  Allocate* alloc = Allocate::make(buf);
-  Free* free = Free::make(buf);
-  Block* block = Block::make({alloc, free});
+  AllocatePtr alloc = Allocate::make(buf);
+  FreePtr free = Free::make(buf);
+  BlockPtr block = Block::make({alloc, free});
 
   const std::string pattern = R"(
    # CHECK: {
@@ -174,27 +175,27 @@ TEST(CppPrinter, LoadStore) {
 
 TEST(CppPrinter, Var) {
   KernelScope kernel_scope;
-  auto var = new Var("x", kInt);
+  auto var = alloc<Var>("x", kInt);
   STR_CHECK(var, "x");
 }
 
 TEST(CppPrinter, Cast) {
   KernelScope kernel_scope;
-  auto cast = new Cast(kFloat, new IntImm(1));
+  auto cast = alloc<Cast>(kFloat, alloc<IntImm>(1));
   STR_CHECK(cast, "static_cast<float>(1)");
 }
 
 TEST(CppPrinter, BitCast) {
   KernelScope kernel_scope;
-  auto cast = new BitCast(kInt, new FloatImm(20));
+  auto cast = alloc<BitCast>(kInt, alloc<FloatImm>(20));
   STR_CHECK(cast, "std::bitcast<float, int>(20.f)");
 }
 
 TEST(CppPrinter, Let) {
   KernelScope kernel_scope;
-  auto var = new Var("x", kFloat);
-  auto val = new FloatImm(2);
-  auto let = new Let(var, val);
+  auto var = alloc<Var>("x", kFloat);
+  auto val = alloc<FloatImm>(2);
+  auto let = alloc<Let>(var, val);
   STR_CHECK(let, "float x = 2.f;\n");
 }
 
@@ -241,10 +242,10 @@ TEST(CppPrinter, Intrinsics) {
     }
 
     if (Intrinsics::OpArgCount(op) == 1) {
-      auto v = new Intrinsics(op, new FloatImm(2.0f));
+      auto v = alloc<Intrinsics>(op, alloc<FloatImm>(2.0f));
       STR_CHECK(v, "std::" + v->func_name() + "(2.f)");
     } else {
-      auto v = new Intrinsics(op, new FloatImm(1.0f), new FloatImm(2.0f));
+      auto v = alloc<Intrinsics>(op, alloc<FloatImm>(1.0f), alloc<FloatImm>(2.0f));
       STR_CHECK(v, "std::" + v->func_name() + "(1.f, 2.f)");
     }
   }
@@ -252,12 +253,14 @@ TEST(CppPrinter, Intrinsics) {
 
 TEST(CppPrinter, ExternalCall) {
   KernelScope kernel_scope;
-  Buf* output = new Buf("out", {new IntImm(2), new IntImm(2)}, kFloat);
-  Buf* buf_arg1 = new Buf("a", {new IntImm(2), new IntImm(2)}, kFloat);
-  Buf* buf_arg2 = new Buf("b", {new IntImm(2), new IntImm(2)}, kFloat);
-  Expr* scalar_arg = new Add(new IntImm(1), new IntImm(2));
-  auto call = new ExternalCall(
-      output, "nnc_aten_matmul", {buf_arg1, buf_arg2}, {scalar_arg});
+  std::vector<ExprPtr> dims{alloc<IntImm>(2), alloc<IntImm>(2)};
+  auto output = alloc<Buf>("out", dims, kFloat);
+  auto buf_arg1 = alloc<Buf>("a", dims, kFloat);
+  auto buf_arg2 = alloc<Buf>("b", dims, kFloat);
+  auto scalar_arg = alloc<Add>(alloc<IntImm>(1), alloc<IntImm>(2));
+  std::vector<BufPtr> buf_args{buf_arg1, buf_arg2};
+  std::vector<ExprPtr> scalar_args{scalar_arg};
+  auto call = alloc<ExternalCall>(output, "nnc_aten_matmul", buf_args, scalar_args);
   const std::string pattern = R"(
    # CHECK: {
    # CHECK:   void* buf_ptrs[]{out, a, b};
