@@ -1170,6 +1170,10 @@ class DeviceCachingAllocator {
   }
 
   void release_block(Block* block) {
+#ifdef __HIP_PLATFORM_HCC__
+    // HIP runtime does not synchronize non-blocking streams during free
+    C10_CUDA_CHECK(cudaStreamSynchronize(block->stream));
+#endif
     C10_CUDA_CHECK(cudaFree((void*)block->ptr));
     total_allocated_memory -= block->size;
 
