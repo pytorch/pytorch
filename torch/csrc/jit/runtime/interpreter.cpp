@@ -720,7 +720,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
       }
       if (FLAGS_torch_jit_enable_rethrow_caught_exception) {
         if (future_) {
-          future_->setError(std::make_exception_ptr(e));
+          future_->setError(std::current_exception());
+          return false;
         }
         throw;
       }
