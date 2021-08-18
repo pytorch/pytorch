@@ -18,8 +18,8 @@ using namespace torch::jit::tensorexpr;
 
 TEST(IRVerifier, BitwiseOps) {
   KernelScope kernel_scope;
-  const Var* X = new Var("x", kInt);
-  const Var* Y = new Var("y", kFloat);
+  Var* X = new Var("x", kInt);
+  Var* Y = new Var("y", kFloat);
   {
     auto a = new And(X, Y);
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto,clang-analyzer-cplusplus.NewDeleteLeaks)
@@ -49,8 +49,8 @@ TEST(IRVerifier, BitwiseOps) {
 
 TEST(IRVerifier, CompareSelect) {
   KernelScope kernel_scope;
-  const Expr* X = new IntImm(1);
-  const Expr* Y = new FloatImm(3.14f);
+  Expr* X = new IntImm(1);
+  Expr* Y = new FloatImm(3.14f);
   {
     auto a = new CompareSelect(X, X, X, Y, kEQ);
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto,clang-analyzer-cplusplus.NewDeleteLeaks)
@@ -65,8 +65,8 @@ TEST(IRVerifier, CompareSelect) {
 
 TEST(IRVerifier, Ramp) {
   KernelScope kernel_scope;
-  const Var* I = new Var("i", kInt);
-  const Var* J = new Var("j", kFloat);
+  Var* I = new Var("i", kInt);
+  Var* J = new Var("j", kFloat);
   {
     auto a = new Ramp(I, J, 4);
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto,clang-analyzer-cplusplus.NewDeleteLeaks)
@@ -76,10 +76,10 @@ TEST(IRVerifier, Ramp) {
 
 TEST(IRVerifier, Load) {
   KernelScope kernel_scope;
-  const Var* I = new Var("i", kInt);
-  const Var* J = new Var("j", kLong);
-  const Var* K = new Var("k", kFloat);
-  const Buf* B = new Buf("b", {new IntImm(10), new IntImm(20)}, kFloat);
+  Var* I = new Var("i", kInt);
+  Var* J = new Var("j", kLong);
+  Var* K = new Var("k", kFloat);
+  Buf* B = new Buf("b", {new IntImm(10), new IntImm(20)}, kFloat);
   {
     // Indices with different int dtypes (kInt, kLong) are ok
     auto a = new Load(B, {I, J});
@@ -103,9 +103,9 @@ TEST(IRVerifier, Load) {
 
 TEST(IRVerifier, IfThenElse) {
   KernelScope kernel_scope;
-  const Var* I = new Var("i", kInt);
-  const Var* J = new Var("j", kLong);
-  const Var* K = new Var("k", kFloat);
+  Var* I = new Var("i", kInt);
+  Var* J = new Var("j", kLong);
+  Var* K = new Var("k", kFloat);
   {
     // Condition must be integral
     auto a = new IfThenElse(K, I, I);
@@ -128,8 +128,8 @@ TEST(IRVerifier, IfThenElse) {
 
 TEST(IRVerifier, For) {
   KernelScope kernel_scope;
-  const Var* I = new Var("i", kInt);
-  const Var* J = new Var("j", kInt);
+  Var* I = new Var("i", kInt);
+  Var* J = new Var("j", kInt);
   Stmt* body = new Block({});
   {
     // Can't have nullptr as a Var
@@ -141,8 +141,8 @@ TEST(IRVerifier, For) {
 
 TEST(IRVerifier, Block) {
   KernelScope kernel_scope;
-  const Var* I = new Var("i", kInt);
-  const Buf* B = new Buf("B", {new IntImm(10)}, kInt);
+  Var* I = new Var("i", kInt);
+  Buf* B = new Buf("B", {new IntImm(10)}, kInt);
   {
     Stmt* store = new Store(B, {I}, I);
     // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
@@ -158,10 +158,10 @@ TEST(IRVerifier, Block) {
 
 TEST(IRVerifier, Store) {
   KernelScope kernel_scope;
-  const Var* I = new Var("i", kInt);
-  const Var* J = new Var("j", kLong);
-  const Var* K = new Var("k", kFloat);
-  const Buf* B = new Buf("b", {new IntImm(10), new IntImm(20)}, kFloat);
+  Var* I = new Var("i", kInt);
+  Var* J = new Var("j", kLong);
+  Var* K = new Var("k", kFloat);
+  Buf* B = new Buf("b", {new IntImm(10), new IntImm(20)}, kFloat);
   {
     // Indices with different int dtypes (kInt, kLong) are ok
     auto a = new Store(B, {I, J}, K);

@@ -183,7 +183,7 @@ CuFFTParamsLRUCache &cufft_get_plan_cache(int64_t device_index) {
 
   AT_ASSERT(device_index >= 0);
 
-  if (device_index >= plan_caches.size()) {
+  if (device_index >= static_cast<int64_t>(plan_caches.size())) {
     plan_caches.resize(device_index + 1);
   }
 
