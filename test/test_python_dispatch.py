@@ -353,6 +353,13 @@ $6 = torch._ops.aten.add_($1, $5)''')
             z = torch.empty([])
             self.assertTrue(isinstance(z, LoggingTensor))
 
+    def test_enable_python_mode_unrelated_tensors(self) -> None:
+        x = torch.randn([])
+        y = torch.randn([])
+        with enable_python_mode(LoggingTensor):
+            z = x + y
+            self.assertTrue(isinstance(z, LoggingTensor))
+
     def test_enable_python_mode_respects_no_dispatch(self) -> None:
         with enable_python_mode(LoggingTensor):
             z = torch.ones([2, 3])
