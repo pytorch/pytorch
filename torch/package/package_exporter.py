@@ -28,6 +28,7 @@ from ._digraph import DiGraph
 from ._importlib import _normalize_path
 from ._mangling import is_mangled
 from ._package_pickler import create_pickler
+from ._selective_intern import SELECTIVE_INTERN_LIST
 from ._stdlib import is_stdlib_module
 from .find_file_dependencies import find_files_source_depends_on
 from .glob_group import GlobGroup, GlobPattern
@@ -223,6 +224,7 @@ class PackageExporter:
             self.importer = OrderedImporter(*importer)
 
         self.patterns: Dict[GlobGroup, _PatternInfo] = {}
+        self._selective_interns: Dict[str, GlobGroup] = {}
         self._unique_id = 0
 
     def save_source_file(
@@ -430,11 +432,32 @@ class PackageExporter:
             )
             return
 
+
+        # SELECTIVE INTERN START
+        if module_name == "torch":
+            self.dependency_graph.add_node(
+                module_name,
+                action=_ModuleProviderAction.REPACKAGED_MOCK_MODULE,
+                provided=True,
+            )
+            return
+
+        base_module, _, name = module_name.partition(".")
+        if base_module == "torch":
+            if name in SELECTIVE_INTERN_LIST:
+                self._intern_module(module_name, dependencies)
+            else:
+                self.dependency_graph.add_node(
+                    module_name, action=_ModuleProviderAction.EXTERN, provided=True
+                )
+            return
+
         if self._can_implicitly_extern(module_name):
             self.dependency_graph.add_node(
                 module_name, action=_ModuleProviderAction.EXTERN, provided=True
             )
             return
+        # SELECTIVE INTERN END
 
         for pattern, pattern_info in self.patterns.items():
             if pattern.matches(module_name):
@@ -656,6 +679,16 @@ class PackageExporter:
         self._intern_hooks[handle.id] = hook
         return handle
 
+    def _selective_intern(
+        self,
+        package_name,
+        include: "GlobPattern",
+        *,
+        exclude: "GlobPattern" = (),
+        allow_empty: bool = True,
+    ):
+        self._selective_interns[package_name] = GlobGroup(include, exclude=exclude)
+
     def intern(
         self,
         include: "GlobPattern",
@@ -854,6 +887,13 @@ class PackageExporter:
             mock_file = str(Path(__file__).parent / "_mock.py")
             self._write_source_string("_mock", _read_file(mock_file), is_package=False)
 
+    def _write_selective_torch(self):
+        if "torch/__init__.py" not in self._written_files:
+            selective_torch_file = str(Path(__file__).parent / "_selective_intern.py")
+            self._write_source_string(
+                "torch", _read_file(selective_torch_file), is_package=True
+            )
+
     def _execute_dependency_graph(self):
         """Takes a finalized dependency graph describing how to package all
         modules and executes it, writing to the ZIP archive.
@@ -883,6 +923,8 @@ class PackageExporter:
             elif action == _ModuleProviderAction.INTERN:
                 for hook in self._intern_hooks.values():
                     hook(self, module_name)
+                if module_name.startswith("torch."):
+                    self._write_selective_torch()
 
                 # The node in the dependency graph contains metadata that tells us
                 # how to intern the module.
@@ -900,7 +942,11 @@ class PackageExporter:
                 self._write_source_string(module_name, source, is_package)
 
             elif action == _ModuleProviderAction.REPACKAGED_MOCK_MODULE:
-                self._write_mock_file()
+                if module_name == "_mock":
+                    self._write_mock_file()
+                else:
+                    assert module_name == "torch"
+                    self._write_selective_torch()
 
             else:
                 raise AssertionError(
@@ -935,9 +981,9 @@ class PackageExporter:
 
     def _can_implicitly_extern(self, module_name: str):
         top_level_package_name = module_name.partition(".")[0]
-        return top_level_package_name == "torch" or (
-            top_level_package_name not in _DISALLOWED_MODULES
-            and is_stdlib_module(top_level_package_name)
+        # return top_level_package_name == "torch" or (
+        return top_level_package_name not in _DISALLOWED_MODULES and is_stdlib_module(
+            top_level_package_name
         )
 
     def dependency_graph_string(self) -> str:

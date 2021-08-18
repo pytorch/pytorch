@@ -1869,7 +1869,7 @@ struct TORCH_API ClassAttribute {
  * User Defined Types
  */
 
-struct ClassType;
+struct TORCH_API ClassType;
 using ClassTypePtr = std::shared_ptr<ClassType>;
 using ::torch::jit::CompilationUnit;
 

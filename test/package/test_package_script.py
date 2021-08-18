@@ -637,7 +637,7 @@ class TestPackageScript(PackageTestCase):
         buffer_1 = BytesIO()
         with PackageExporter(buffer_1, importer=importer_0) as e:
             e.intern("**")
-            e.save_pickle("res", "scripted_mod.pkl", scripted_mod)
+            e.save_pickle("res", "scripted_mod.pkl", scripted_mod)  # fails
 
         buffer_1.seek(0)
         importer_1 = PackageImporter(buffer_1)
