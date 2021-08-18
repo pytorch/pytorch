@@ -241,6 +241,11 @@ option(USE_OBSERVERS "Use observers module." OFF)
 option(USE_OPENCL "Use OpenCL" OFF)
 option(USE_OPENCV "Use OpenCV" OFF)
 option(USE_OPENMP "Use OpenMP for parallel code" ON)
+option(USE_PRECOMPILED_HEADERS "Use pre-compiled headers to accelerate build. Requires cmake >= 3.16." OFF)
+if(USE_PRECOMPILED_HEADERS AND (CMAKE_VERSION VERSION_LESS "3.16"))
+  message(FATAL_ERROR "Precompiled headers require cmake >= 3.16")
+endif()
+
 option(USE_PROF "Use profiling" OFF)
 option(USE_QNNPACK "Use QNNPACK (quantized 8-bit operators)" ON)
 option(USE_PYTORCH_QNNPACK "Use ATen/QNNPACK (quantized 8-bit operators)" ON)
@@ -261,6 +266,7 @@ if(NOT DEFINED USE_VULKAN)
 endif()
 
 option(USE_SOURCE_DEBUG_ON_MOBILE "Enable " ON)
+option(USE_LITE_INTERPRETER_PROFILER "Enable " ON)
 option(USE_VULKAN_FP16_INFERENCE "Vulkan - Use fp16 inference" OFF)
 option(USE_VULKAN_RELAXED_PRECISION "Vulkan - Use relaxed precision math in the kernels (mediump)" OFF)
 option(USE_VULKAN_SHADERC_RUNTIME "Vulkan - Use runtime shader compilation as opposed to build-time (needs libshaderc)" OFF)
@@ -420,6 +426,7 @@ if(LINUX)
 endif()
 
 if(MSVC)
+  set(CMAKE_NINJA_CMCLDEPS_RC OFF)
   foreach(flag_var
       CMAKE_C_FLAGS CMAKE_C_FLAGS_DEBUG CMAKE_C_FLAGS_RELEASE
       CMAKE_C_FLAGS_MINSIZEREL CMAKE_C_FLAGS_RELWITHDEBINFO
@@ -679,6 +686,10 @@ endif()
 
 if(USE_SOURCE_DEBUG_ON_MOBILE)
   string(APPEND CMAKE_CXX_FLAGS " -DSYMBOLICATE_MOBILE_DEBUG_HANDLE")
+endif()
+
+if(USE_LITE_INTERPRETER_PROFILER)
+  string(APPEND CMAKE_CXX_FLAGS " -DEDGE_PROFILER_USE_KINETO")
 endif()
 
 # ---[ Allowlist file if allowlist is specified
