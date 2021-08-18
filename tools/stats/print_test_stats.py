@@ -107,8 +107,9 @@ def plural(n: int) -> str:
 
 
 def get_base_commit(sha1: str) -> str:
+    # lazy_tensor_staging is a hack to replace master to avoid some CI issues. Don't merge it.
     return subprocess.check_output(
-        ["git", "merge-base", sha1, "origin/master"],
+        ["git", "merge-base", sha1, "origin/lazy_tensor_staging"],
         encoding="ascii",
     ).strip()
 
