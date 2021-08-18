@@ -185,6 +185,10 @@ def _rebuild_mlc_tensor(data, dtype, device, requires_grad):
     return tensor
 
 
+def _rebuild_meta_tensor_no_storage(dtype, size, stride, requires_grad):
+    return torch.empty_strided(size, stride, dtype=dtype, device='meta', requires_grad=requires_grad)
+
+
 def _rebuild_qtensor(storage, storage_offset, size, stride, quantizer_params, requires_grad, backward_hooks):
     qscheme = quantizer_params[0]
     if qscheme == torch.per_tensor_affine:

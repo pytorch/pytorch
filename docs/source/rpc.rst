@@ -191,52 +191,6 @@ Example::
     :inherited-members:
 
 
-Process Group Backend
-"""""""""""""""""""""
-
-.. warning ::
-     The Process Group Backend will be deprecated soon, we recommend using the
-     TensorPipe Backend instead.
-
-The Process Group agent instantiates a process group from
-the :mod:`~torch.distributed` module and utilizes its point-to-point
-communication capabilities to send RPC messages. Internally, the process
-group uses `the Gloo library <https://github.com/facebookincubator/gloo/>`_.
-
-Gloo has been hardened by years of extensive use in PyTorch and is thus very
-reliable. However, as it was designed to perform collective communication, it
-may not always be the best fit for RPC. For example, each networking operation
-is synchronous and blocking, which means that it cannot be run in parallel with
-others. Moreover, it opens a connection between all pairs of nodes, and brings
-down all of them when one fails, thus reducing the resiliency and the elasticity
-of the system.
-
-Example::
-
-    >>> import os
-    >>> from torch.distributed import rpc
-    >>> os.environ['MASTER_ADDR'] = 'localhost'
-    >>> os.environ['MASTER_PORT'] = '29500'
-    >>>
-    >>> rpc.init_rpc(
-    >>>     "worker1",
-    >>>     rank=0,
-    >>>     world_size=2,
-    >>>     backend=rpc.BackendType.PROCESS_GROUP,
-    >>>     rpc_backend_options=rpc.ProcessGroupRpcBackendOptions(
-    >>>         num_send_recv_threads=16,
-    >>>         rpc_timeout=20 # 20 second timeout
-    >>>     )
-    >>> )
-    >>>
-    >>> # omitting init_rpc invocation on worker2
-
-
-.. autoclass:: ProcessGroupRpcBackendOptions
-    :members:
-    :inherited-members:
-
-
 .. _rref:
 
 RRef

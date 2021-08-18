@@ -1082,7 +1082,7 @@ def _run_slow_mode_and_get_error(func, tupled_inputs, outputs, input_idx, output
         def new_fn(inp):
             new_inputs = list(tupled_inputs)
             new_inputs[input_idx] = inp
-            return func(*new_inputs)[output_idx]
+            return _as_tuple(func(*new_inputs))[output_idx]
         slow_analytical = _get_analytical_jacobian_forward_ad(new_fn, (tupled_inputs[input_idx],), (outputs[output_idx],))[0][0]
     else:
         slow_analytical = _get_analytical_jacobian(tupled_inputs, outputs, input_idx, output_idx)
