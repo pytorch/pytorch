@@ -16,6 +16,7 @@
 #include <torch/csrc/autograd/utils/python_arg_parsing.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <c10/core/ScalarType.h>
+#include <ATen/ThreadLocalState.h>
 
 #include <set>
 
@@ -217,6 +218,13 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
 #endif // USE_KINETO
     ;
 
+  py::class_<at::ThreadLocalState>(m, "_ThreadLocalState")
+    .def(py::init<bool>());
+  
+  py::class_<at::ThreadLocalStateGuard>(m, "_ThreadLocalStateGuard")
+    .def(py::init<at::ThreadLocalState&>());
+
+  m.def("_use_main_TLS", useMainTLS);
   m.def("_enable_profiler", enableProfiler);
   m.def("_disable_profiler", disableProfiler);
   m.def("_prepare_profiler", prepareProfiler);

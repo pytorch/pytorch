@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/csrc/autograd/profiler_legacy.h>
+#include <ATen/ThreadLocalState.h>
 
 #ifdef USE_KINETO
 // skip Kineto dependency on mobile
@@ -301,6 +302,8 @@ struct TORCH_API ProfilerResult {
   bool saved_ = false;
 #endif // USE_KINETO
 };
+
+TORCH_API void useMainTLS(const at::ThreadLocalState& main_TLS);
 
 TORCH_API void enableProfiler(
     const ProfilerConfig& config,
