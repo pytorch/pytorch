@@ -8,3 +8,4 @@ functorch/_C.so
 t.py
 .vscode/
 ccache.sh
+*.ipynb
