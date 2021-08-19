@@ -630,6 +630,12 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
                                  std::tuple<Tensor, Tensor> (const Tensor &),
                                  &ADD_NS(frexp)>::type::call)));
 
+  m.impl(TORCH_SELECTIVE_NAME("aten::unique_consecutive"),
+         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
+                                 std::tuple<Tensor, Tensor, Tensor> (const Tensor &, bool, bool, c10::optional<int64_t>),
+                                 std::tuple<Tensor, Tensor, Tensor> (const Tensor &, bool, bool, c10::optional<int64_t>),
+                                 &ADD_NS(unique_consecutive)>::type::call)));
+
   m.impl(TORCH_SELECTIVE_NAME("aten::cummax"),
          TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
                                  std::tuple<Tensor, Tensor> (const Tensor &, int64_t),
