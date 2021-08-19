@@ -4905,17 +4905,6 @@ class TestLinalg(TestCase):
             run_test((4, 4), (2, 1, 3, 4, 2), device, upper, transpose, unitriangular)  # broadcasting A
             run_test((1, 3, 1, 4, 4), (2, 1, 3, 4, 5), device, upper, transpose, unitriangular)  # broadcasting A & b
 
-    @onlyCPU
-    @skipCPUIfNoLapack
-    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    def test_triangular_solve_singular(self, device, dtype):
-        b = torch.rand(3, 1, dtype=dtype, device=device)
-        A = torch.eye(3, 3, dtype=dtype, device=device)
-        A[-1, -1] = 0  # Now A is singular
-        err_str = r"triangular_solve: U\(3,3\) is zero, singular U\."
-        with self.assertRaisesRegex(RuntimeError, err_str):
-            torch.triangular_solve(b, A)
-
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
