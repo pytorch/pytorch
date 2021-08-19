@@ -7662,7 +7662,7 @@ else:
     def _where_valid_scalar_tensor_combination(self, scalar_type, dtype):
         if (dtype.is_floating_point):
             return scalar_type in (int, float)
-        elif dtype.is_complex:
+        if dtype.is_complex:
             return True
         return scalar_type == int
 
