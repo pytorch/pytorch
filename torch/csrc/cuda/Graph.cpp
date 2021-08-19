@@ -42,6 +42,10 @@ Returns an opaque token representing the id of a graph memory pool.
            R"(
 Begins capturing CUDA work on the current stream.
 
+Typically, you shouldn't call ``capture_begin`` yourself.
+Use :class:`~torch.cuda.graph` or :func:`~torch.cuda.make_graphed_callables,
+which call ``capture_begin`` internally.
+
 Arguments:
     pool (optional): Token (returned by :func:`~torch.cuda.graph_pool_handle` or :meth:`other_Graph_instance.pool()<torch.cuda.CUDAGraph.pool>`) that hints this graph may share memory with the indicated pool.
            )",
@@ -50,8 +54,12 @@ Arguments:
            &::at::cuda::CUDAGraph::capture_end,
            py::call_guard<py::gil_scoped_release>(),
            R"(
-Ends Cuda graph capture on the current stream.
+Ends CUDA graph capture on the current stream.
 After ``capture_end``, ``replay`` may be called on this instance.
+
+Typically, you shouldn't call ``capture_end`` yourself.
+Use :class:`~torch.cuda.graph` or :func:`~torch.cuda.make_graphed_callables,
+which call ``capture_end`` internally.
            )")
       .def("replay",
            &::at::cuda::CUDAGraph::replay,

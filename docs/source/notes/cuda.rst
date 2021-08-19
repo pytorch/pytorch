@@ -262,7 +262,7 @@ have the same stream-semantics relationship as any group of ops::
 BC note: Using grads on the default stream
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-In prior versions of Pytorch (1.9 and earlier), the autograd engine always synced
+In prior versions of PyTorch (1.9 and earlier), the autograd engine always synced
 the default stream with all backward ops, so the following pattern::
 
     with torch.cuda.stream(s):
@@ -270,7 +270,7 @@ the default stream with all backward ops, so the following pattern::
     use grads
 
 was safe as long as ``use grads`` happened on the default stream.
-In present Pytorch, that pattern is no longer safe. If ``backward()``
+In present PyTorch, that pattern is no longer safe. If ``backward()``
 and ``use grads`` are in different stream contexts, you must sync the streams::
 
     with torch.cuda.stream(s):
@@ -519,21 +519,23 @@ If you use :class:`~torch.nn.parallel.DistributedDataParallel`, you could use
 CUDA Graphs
 -----------
 
-A graph is a frozen record of CUDA work (mostly kernels and their arguments).
+A cuda graph is a record of the work (mostly kernels and their arguments) that a
+cuda stream and its dependent streams perform.
 For general principles and details on the underlying CUDA API, see
 `Getting Started with CUDA Graphs`_ and the
 `Graphs section`_ of the CUDA C Programming Guide.
 
-The Pytorch integration creates graphs using `stream capture`_, which puts a CUDA stream
-in *capture mode*. CUDA work issued to a capturing stream doesn't actually run on
-the GPU. Instead, the work is recorded in a graph.
+PyTorch supports the construction of cuda graphs using `stream capture`_, which puts a
+CUDA stream in *capture mode*. CUDA work issued to a capturing stream doesn't actually
+run on the GPU. Instead, the work is recorded in a graph.
 
 After capture, the graph can be *launched* to run the GPU work as many times as needed.
-Each replay runs the same frozen ops on the same memory addresses.
+Each replay runs the same kernels with the same arguments. For pointer arguments this
+means the same memory addresses are used.
 By filling input memory with new data (e.g., from a new batch) before each replay,
 you can rerun the same work on new data.
 
-Replay sacrifices the dynamic flexibility of typical eager execution in exchange for
+Replaying a graph sacrifices the dynamic flexibility of typical eager execution in exchange for
 **greatly reduced CPU overhead**.
 
 Eager execution runs deep, often CPU-intensive Python, C++, and CUDA library call chains
@@ -545,7 +547,7 @@ a single call to `cudaGraphLaunch`_).  Kernels in a replay also execute slightly
 on the GPU, but eliding CPU overhead is the main benefit.
 
 You should try CUDA graphs if all or part of your network is graph-safe (usually this means
-static shapes and control flow, but see the other :ref:`constraints<capture-constraints>`)
+static shapes and static control flow, but see the other :ref:`constraints<capture-constraints>`)
 and you suspect its runtime is at least somewhat CPU-limited.
 
 .. _Getting Started with CUDA Graphs:
@@ -557,22 +559,22 @@ and you suspect its runtime is at least somewhat CPU-limited.
 .. _cudaGraphLaunch:
     https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__GRAPH.html#group__CUDART__GRAPH_1g1accfe1da0c605a577c22d9751a09597
 
-Pytorch API
+PyTorch API
 ^^^^^^^^^^^
 
 .. warning::
     The API presented here is a prototype and may change in future releases.
 
-Pytorch exposes graphs as a primitive :class:`torch.cuda.CUDAGraph` class,
+PyTorch exposes graphs as a primitive :class:`torch.cuda.CUDAGraph` class,
 which offers :meth:`~torch.cuda.CUDAGraph.capture_begin`,
 :meth:`~torch.cuda.CUDAGraph.capture_end`, and
 :meth:`~torch.cuda.CUDAGraph.replay` methods.
 
 Typically, you shouldn't call :meth:`~torch.cuda.CUDAGraph.capture_begin` or
-:meth:`~torch.cuda.CUDAGraph.capture_begin` yourself. Instead, use one of the
-convenience wrappers (
+:meth:`~torch.cuda.CUDAGraph.capture_end` yourself. Instead, use one of the
+convenience wrappers:
 :class:`torch.cuda.graph` or
-:class:`torch.cuda.make_graphed_callables`).
+:class:`torch.cuda.make_graphed_callables`.
 
 :class:`torch.cuda.graph` is a context manager that captures whatever CUDA work
 you run in its context (no more, no less). It's simple and versatile. See
@@ -590,22 +592,27 @@ backward-pass work. See
 Constraints
 ~~~~~~~~~~~
 
+Violating any of the following will likely cause a hard error:
+
 * Capture must occur on a non-default stream. (This is only a concern if you use the raw
   :meth:`CUDAGraph.capture_begin<torch.cuda.CUDAGraph.capture_begin>` and
   :meth:`CUDAGraph.capture_end<torch.cuda.CUDAGraph.capture_end>` calls.
   :class:`~torch.cuda.graph` and
   :func:`~torch.cuda.make_graphed_callables` set a side stream for you.)
-* Within a process, only one capture may be underway at a time.
-* No non-captured CUDA work may run in this process (on any thread) while capture is underway.
-* CPU work is not captured. If the captured ops include CPU work, that work will be elided during replay.
 * Ops that sychronize the CPU with the GPU (e.g., ``.item()`` calls) are prohibited.
-* Every replay reads from and writes to the same (virtual) memory addresses.
 * Dynamic control flow (based on CPU or GPU data) is prohibited.
-* Dynamic shapes are prohihited. The graph assumes every tensor in the captured op sequence
-  has the same size and layout in every replay.
 * CUDA RNG ops are allowed, but must use default generators. For example, explicitly constructing a
   new :class:`torch.Generator` instance and passing it as the ``generator`` argument to an RNG function
   is prohibited.
+
+Violating any of the following will likely cause a silent error or undefined behavior:
+
+* Within a process, only one capture may be underway at a time.
+* No non-captured CUDA work may run in this process (on any thread) while capture is underway.
+* CPU work is not captured. If the captured ops include CPU work, that work will be elided during replay.
+* Every replay reads from and writes to the same (virtual) memory addresses.
+* Dynamic shapes are prohibited. The graph assumes every tensor in the captured op sequence
+  has the same size and layout in every replay.
 * Using multiple streams in a capture is allowed, but there are :ref:`restrictions<multistream-capture>`.
 
 Non-constraints
@@ -634,7 +641,7 @@ initial capturing stream after capture begins and rejoin the initial stream
 before capture ends::
 
     with torch.cuda.graph(G):
-        # on context manager entrance, torch.cuda.current_stream()
+        # at context manager entrance, torch.cuda.current_stream()
         # is the initial capturing stream
 
         # INCORRECT (does not branch out from or rejoin initial stream)
@@ -649,10 +656,23 @@ before capture ends::
         # rejoins initial stream before capture ends
         torch.cuda.current_stream().wait_stream(s)
 
+.. note::
+
+    To avoid confusion for power users looking at replays in nsight systems or nvprof:
+    Unlike eager execution, the graph interprets a nontrivial stream DAG in capture
+    as a hint, not a command. During replay, the graph may reorganize independent ops
+    onto different streams or enqueue them in a different order (while respecting your
+    original DAG's overall dependencies).
+
 .. _full-iteration-capture:
 
 Full-iteration capture
 ^^^^^^^^^^^^^^^^^^^^^^
+
+If your entire network obeys the :ref:`constraints<capture-constraints>`,
+you may capture and replay an entire iteration::
+
+    fdsa
 
 .. _partial-network-capture:
 
@@ -661,8 +681,8 @@ Partial-network capture
 
 If some of your network is unsafe to capture (e.g., due to dynamic control flow,
 dynamic shapes, CPU syncs, or essential CPU-side logic), you can run the unsafe
-parts eagerly and use :func:`torch.cuda.make_graphed_callables` to graph only
-the capture-safe parts.
+part(s) eagerly and use :func:`torch.cuda.make_graphed_callables` to graph only
+the capture-safe part(s).
 
 By default, callables returned by :func:`~torch.cuda.make_graphed_callables`
 are autograd-aware, and can be used in the training loop as direct replacements
@@ -670,13 +690,14 @@ for the functions or :class:`nn.Module<torch.nn.Module>`\ s you passed.
 
 Example::
 
-    fdsa
+    # Internally creates CUDAGraphs and side streams as needed,
+    # and runs warmup steps
 
 Usage with torch.cuda.amp
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
 For typical optimizers, :meth:`GradScaler.step<torch.cuda.amp.GradScaler.step>` syncs
-the CPU with the GPU, which is illegal during capture. To avoid errors, either use
+the CPU with the GPU, which is prohibited during capture. To avoid errors, either use
 :ref:`partial-network capture<partial-network-capture>`, or (if forward, loss,
 and backward are capture-safe) capture forward, loss, and backward but not the
 optimizer step::
@@ -686,10 +707,35 @@ optimizer step::
 Usage with DistributedDataParallel
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-you should::
+NCCL < 2.9.6
+~~~~~~~~~~~~
+
+NCCL versions earlier than 2.9.6 don't allow collectives to be captured.
+In this case, you must use :ref:`partial-network capture<partial-network-capture>`,
+which defers allreduces to happen outside graphed sections of backward.
+
+Call :func:`~torch.cuda.make_graphed_callables` on graphable network sections
+*before* wrapping the network with DDP.
+
+NCCL >= 2.9.6
+~~~~~~~~~~~~~
+
+NCCL versions 2.9.6 or later allow collectives in the graph, so
+approaches that capture an :ref:`entire backward pass<full-iteration-capture>`
+are a viable option.
+
+For static backward passes, full-backward capture is often cleaner
+and modestly faster than partial-network capture, but due to
+rough edges in the interaction with DDP, it needs some
+unintuitive setup steps.
+
+First, disable DDP's internal async error handling::
 
     os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "0"
-    torch.distributed.init_process_group(...
+    torch.distributed.init_process_group(...)
+
+Second, your warmup should run at least 11 DDP-enabled eager iterations before capture.
+
 
 Graph memory management, and sharing memory across graphs
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

@@ -3089,7 +3089,7 @@ torch.cuda.synchronize()
 
         with torch.cuda.stream(s):
             a = torch.full((1000,), 1, device="cuda")
-            g = torch.cuda._Graph()
+            g = torch.cuda.CUDAGraph()
             torch.cuda.empty_cache()
             g.capture_begin()
             b = a
@@ -3125,7 +3125,7 @@ torch.cuda.synchronize()
             with torch.cuda.stream(stream):
                 torch.cuda.manual_seed(5)
 
-                g = torch.cuda._Graph()
+                g = torch.cuda.CUDAGraph()
                 torch.cuda.empty_cache()
                 g.capture_begin()
                 graph_out = graph_in
@@ -3212,7 +3212,7 @@ torch.cuda.synchronize()
             with torch.cuda.stream(stream):
                 torch.cuda.manual_seed(5)
 
-                g = torch.cuda._Graph()
+                g = torch.cuda.CUDAGraph()
                 torch.cuda.empty_cache()
                 if (module == "torch"):
                     g.capture_begin()
@@ -3279,14 +3279,14 @@ torch.cuda.synchronize()
         s = torch.cuda.Stream()
 
         for share_mem in ("Don't share", "via pool()", "via graph_pool_handle()"):
-            g0 = torch.cuda._Graph()
-            g1 = torch.cuda._Graph()
+            g0 = torch.cuda.CUDAGraph()
+            g1 = torch.cuda.CUDAGraph()
 
             a = torch.ones((size,), device="cuda")
 
             s.wait_stream(torch.cuda.current_stream())
             with torch.cuda.stream(s):
-                g0_args = (torch.cuda._graph_pool_handle(),) if share_mem == "via graph_pool_handle()" else ()
+                g0_args = (torch.cuda.graph_pool_handle(),) if share_mem == "via graph_pool_handle()" else ()
                 g0.capture_begin(*g0_args)
                 b = a.clone()
                 for _ in range(5):
@@ -3343,8 +3343,8 @@ torch.cuda.synchronize()
         s = torch.cuda.Stream()
 
         for share_mem in ("Don't share", "via pool()", "via graph_pool_handle()"):
-            g0 = torch.cuda._Graph()
-            g1 = torch.cuda._Graph()
+            g0 = torch.cuda.CUDAGraph()
+            g1 = torch.cuda.CUDAGraph()
 
             s0 = torch.cuda.Stream()
             s1 = torch.cuda.Stream()
@@ -3353,7 +3353,7 @@ torch.cuda.synchronize()
 
             s.wait_stream(torch.cuda.current_stream())
             with torch.cuda.stream(s):
-                g0_args = (torch.cuda._graph_pool_handle(),) if share_mem == "via graph_pool_handle()" else ()
+                g0_args = (torch.cuda.graph_pool_handle(),) if share_mem == "via graph_pool_handle()" else ()
                 g0.capture_begin(*g0_args)
                 b = a.clone()
                 for _ in range(5):
@@ -3407,13 +3407,13 @@ torch.cuda.synchronize()
         for share_mem in ("Don't share", "via pool()", "via graph_pool_handle()"):
             a = torch.ones((size,), device="cuda")
 
-            g0 = torch.cuda._Graph()
-            g1 = torch.cuda._Graph()
-            g2 = torch.cuda._Graph()
+            g0 = torch.cuda.CUDAGraph()
+            g1 = torch.cuda.CUDAGraph()
+            g2 = torch.cuda.CUDAGraph()
 
             s.wait_stream(torch.cuda.current_stream())
             with torch.cuda.stream(s):
-                g0_args = (torch.cuda._graph_pool_handle(),) if share_mem == "via graph_pool_handle()" else ()
+                g0_args = (torch.cuda.graph_pool_handle(),) if share_mem == "via graph_pool_handle()" else ()
                 g0.capture_begin(*g0_args)
                 b = a.clone()
                 c = b + 1
@@ -3499,7 +3499,7 @@ torch.cuda.synchronize()
                 delta_active_blocks = 1  # We only check the large pool, which isn't affected by rng offset holder
                 delta_active_bytes = numel * elem
 
-            g = torch.cuda._Graph()
+            g = torch.cuda.CUDAGraph()
             s.wait_stream(torch.cuda.current_stream())
             with torch.cuda.stream(s):
                 # Allocation stat estimates assume input is created on the same stream as capture_begin()
@@ -3573,7 +3573,7 @@ torch.cuda.synchronize()
         s0 = torch.cuda.Stream()
         s1 = torch.cuda.Stream()
         s2 = torch.cuda.Stream()
-        g = torch.cuda._Graph()
+        g = torch.cuda.CUDAGraph()
 
         torch.cuda.synchronize()
         with torch.cuda.stream(s0):
@@ -3620,7 +3620,7 @@ torch.cuda.synchronize()
 
         y = model(x)
 
-        g = torch.cuda._Graph()
+        g = torch.cuda.CUDAGraph()
         s = torch.cuda.Stream()
         s.wait_stream(torch.cuda.current_stream())
         with torch.cuda.stream(s):
@@ -3638,7 +3638,7 @@ torch.cuda.synchronize()
         torch.cuda.empty_cache()
 
         scaler = torch.cuda.amp.GradScaler(init_scale=4.)
-        g = torch.cuda._Graph()
+        g = torch.cuda.CUDAGraph()
         s = torch.cuda.Stream()
 
         weight = torch.ones((100,), device="cuda", requires_grad=True)
@@ -3646,18 +3646,15 @@ torch.cuda.synchronize()
         static_input = torch.ones_like(weight)
         static_grad = torch.ones_like(weight)
 
-        s.wait_stream(torch.cuda.current_stream())
-        with torch.cuda.stream(s):
-            # warmup
+        # warmup
+        loss = (weight.half() * static_input).sum()
+        scaler.scale(loss).backward()
+        opt.zero_grad(set_to_none=True)
+
+        # capture
+        with torch.cuda.graph(g):
             loss = (weight.half() * static_input).sum()
             scaler.scale(loss).backward()
-            opt.zero_grad(set_to_none=True)
-            # capture
-            g.capture_begin()
-            loss = (weight.half() * static_input).sum()
-            scaler.scale(loss).backward()
-            g.capture_end()
-        torch.cuda.current_stream().wait_stream(s)
 
         input_vals = [5, 20000, 5, 40000]
         # If the scale gets updated properly, these are the scale, growth tracker,
