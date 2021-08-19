@@ -105,6 +105,8 @@ struct CodeImpl {
   // This is because for all usages, at most 3 args are used.
   std::unordered_map<std::string, size_t> op_to_num_specified_args_;
 
+  std::unordered_map<std::string, size_t> op_to_num_out_args_;
+
   // running count of uses as we emit. When we reach use_count_[v] =
   // v.uses().size() we know it is the final use and we can move rather than
   // load.
@@ -289,6 +291,12 @@ struct CodeImpl {
         emitUse(input, false);
         count++;
       }
+    }
+  }
+
+  void emitLoadInputs(at::ArrayRef<Value*> inputs, size_t start, size_t end) {
+    for (size_t i = start; i < end; i++) {
+      emitUse(inputs[i], false);
     }
   }
 
@@ -737,13 +745,19 @@ struct MobileCodeImpl : CodeImpl {
         auto op_schema = node->getOperator().schema();
         // skip if schema has vararg
         if (!op_schema.is_vararg()) {
-          auto numInclude =
-              CalculateNecessaryArgs(op_schema.arguments(), node->inputs());
+          auto specifiedArgs = CalculateNecessaryArgs(
+              op_schema.arguments(), node->inputs(), false);
+          // preserving the old behavior
+          auto numInclude = specifiedArgs.first;
+          // TODO uncomment this
+          // auto numInclude = specifiedArgs.first + specifiedArgs.second;
           auto unique_name = op_schema.overload_name() != ""
               ? op_schema.name() + "." + op_schema.overload_name()
               : op_schema.name();
           auto it = op_to_num_specified_args_.insert(
               std::pair<std::string, size_t>(unique_name, 0));
+          op_to_num_out_args_.insert(std::pair<std::string, size_t>(
+              unique_name, specifiedArgs.second));
           auto prev_value = it.first->second;
           it.first->second = std::max(numInclude, prev_value);
         }
@@ -769,6 +783,13 @@ struct MobileCodeImpl : CodeImpl {
           num_include = it->second;
         }
         emitLoadInputs(node->inputs(), num_include);
+        // TODO: uncomment this
+        // auto num_out = op_to_num_out_args_.find(unique_op_name)->second;
+        // auto num_specified_before_out = num_include - num_out;
+        // emitLoadInputs(node->inputs(), 0, num_specified_before_out);
+        // emitLoadInputs(node->inputs(), node->inputs().size() - num_out,
+        // node->inputs().size());
+
         insertInstruction(OP, operator_table_.size());
       }
       operator_table_.emplace_back(op.getOperation(node));
