@@ -89,7 +89,7 @@ def assert_allclose(
 
 
 for name in _dtype_getters.__all__:
-    if name.startswith("_"):
+    if name.startswith("_") or name == "get_all_math_dtypes":
         continue
 
     fn = getattr(_dtype_getters, name)
