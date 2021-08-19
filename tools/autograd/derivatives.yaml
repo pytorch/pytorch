@@ -1637,7 +1637,11 @@
   result: auto_element_wise
 
 - name: leaky_relu(Tensor self, Scalar negative_slope=0.01) -> Tensor
-  self: leaky_relu_backward(grad, result, negative_slope, false)
+  self: leaky_relu_backward(grad, self, negative_slope, false)
+  result: auto_element_wise
+  
+- name: leaky_relu_(Tensor self, Scalar negative_slope=0.01) -> Tensor
+  self: leaky_relu_backward(grad, result, negative_slope, true)
   result: auto_element_wise
 
 - name: log_sigmoid_forward(Tensor self) -> (Tensor output, Tensor buffer)
