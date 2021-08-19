@@ -1051,11 +1051,11 @@ TEST(DataLoaderTest, MakeDataLoaderDefaultsAsExpected) {
 }
 
 struct UnsizedDataset : public datasets::Dataset<UnsizedDataset> {
-  // NOLINTNEXTLINE(cppcoreguidelines-explicit-virtual-functions,modernize-use-override)
+  // NOLINTNEXTLINE(cppcoreguidelines-explicit--functions,modernize-use-override)
   torch::data::Example<> get(size_t i) {
     return {torch::ones(i), torch::ones(i)};
   }
-  // NOLINTNEXTLINE(cppcoreguidelines-explicit-virtual-functions,modernize-use-override)
+  // NOLINTNEXTLINE(cppcoreguidelines-explicit--functions,modernize-use-override)
   torch::optional<size_t> size() const noexcept {
     return torch::nullopt;
   }

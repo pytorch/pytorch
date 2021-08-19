@@ -241,6 +241,7 @@ Example::
     tensor([ 20.0202,  21.0985,  21.3506,  19.3944])
 
 .. function:: add(input, other, *, alpha=1, out=None) -> Tensor
+   :noindex:
 
 Each element of the tensor :attr:`other` is multiplied by the scalar
 :attr:`alpha` and added to each element of the tensor :attr:`input`.
@@ -635,6 +636,7 @@ Example::
     tensor(False)
 
 .. function:: all(input, dim, keepdim=False, *, out=None) -> Tensor
+   :noindex:
 
 For each row of :attr:`input` in the given dimension :attr:`dim`,
 returns `True` if all elements in the row evaluate to `True` and `False` otherwise.
@@ -690,6 +692,7 @@ Example::
     tensor(True)
 
 .. function:: any(input, dim, keepdim=False, *, out=None) -> Tensor
+   :noindex:
 
 For each row of :attr:`input` in the given dimension :attr:`dim`,
 returns `True` if any element in the row evaluate to `True` and `False` otherwise.
@@ -2359,10 +2362,18 @@ corresponding to the polar coordinates with absolute value :attr:`abs` and angle
 
 .. math::
     \text{out} = \text{abs} \cdot \cos(\text{angle}) + \text{abs} \cdot \sin(\text{angle}) \cdot j
+
+.. note::
+    `torch.polar` is similar to
+    `std::polar <https://en.cppreference.com/w/cpp/numeric/complex/polar>`_
+    and does not compute the polar decomposition
+    of a complex tensor like Python's `cmath.polar` and SciPy's `linalg.polar` do.
+    The behavior of this function is undefined if `abs` is negative or NaN, or if `angle` is
+    infinite.
+
 """ + r"""
 Args:
-    abs (Tensor): The absolute value the complex tensor. Must be float or
-        double.
+    abs (Tensor): The absolute value the complex tensor. Must be float or double.
     angle (Tensor): The angle of the complex tensor. Must be same dtype as
         :attr:`abs`.
 
@@ -2824,6 +2835,7 @@ Args:
     tensor (Tensor): A quantized Tensor
 
 .. function:: dequantize(tensors) -> sequence of Tensors
+   :noindex:
 
 Given a list of quantized Tensors, dequantize them and return a list of fp32 Tensors
 
@@ -3641,6 +3653,78 @@ Example::
     >>> a
     array([-1,  2,  3])
 """)
+
+add_docstr(torch.frombuffer,
+           r"""
+frombuffer(buffer, *, dtype, count=-1, offset=0, requires_grad=False) -> Tensor
+
+Creates a 1-dimensional :class:`Tensor` from an object that implements
+the Python buffer protocol.
+
+Skips the first :attr:`offset` bytes in the buffer, and interprets the rest of
+the raw bytes as a 1-dimensional tensor of type :attr:`dtype` with :attr:`count`
+elements.
+
+Note that either of the following must be true:
+
+1. :attr:`count` is a positive non-zero number, and the total number of bytes
+in the buffer is less than :attr:`offset` plus :attr:`count` times the size
+(in bytes) of :attr:`dtype`.
+
+2. :attr:`count` is negative, and the length (number of bytes) of the buffer
+subtracted by the :attr:`offset` is a multiple of the size (in bytes) of
+:attr:`dtype`.
+
+The returned tensor and buffer share the same memory. Modifications to
+the tensor will be reflected in the buffer and vice versa. The returned
+tensor is not resizable.
+
+.. note::
+    This function increments the reference count for the object that
+    owns the shared memory. Therefore, such memory will not be deallocated
+    before the returned tensor goes out of scope.
+
+.. warning::
+    This function's behavior is undefined when passed an object implementing
+    the buffer protocol whose data is not on the CPU. Doing so is likely to
+    cause a segmentation fault.
+
+.. warning::
+    This function does not try to infer the :attr:`dtype` (hence, it is not
+    optional). Passing a different :attr:`dtype` than its source may result
+    in unexpected behavior.
+
+Args:
+    buffer (object): a Python object that exposes the buffer interface.
+
+Keyword args:
+    dtype (:class:`torch.dtype`): the desired data type of returned tensor.
+    count (int, optional): the number of desired elements to be read.
+        If negative, all the elements (until the end of the buffer) will be
+        read. Default: -1.
+    offset (int, optional): the number of bytes to skip at the start of
+        the buffer. Default: 0.
+    {requires_grad}
+
+Example::
+
+    >>> import array
+    >>> a = array.array('i', [1, 2, 3])
+    >>> t = torch.frombuffer(a, dtype=torch.int32)
+    >>> t
+    tensor([ 1,  2,  3])
+    >>> t[0] = -1
+    >>> a
+    array([-1,  2,  3])
+
+    >>> # Interprets the signed char bytes as 32-bit integers.
+    >>> # Each 4 signed char elements will be interpreted as
+    >>> # 1 signed 32-bit integer.
+    >>> import array
+    >>> a = array.array('b', [-1, 0, 0, 0])
+    >>> torch.frombuffer(a, dtype=torch.int32)
+    tensor([255], dtype=torch.int32)
+""".format(**factory_common_args))
 
 add_docstr(torch.flatten,
            r"""
@@ -5702,6 +5786,7 @@ Example::
     tensor(0.7445)
 
 .. function:: max(input, dim, keepdim=False, *, out=None) -> (Tensor, LongTensor)
+   :noindex:
 
 Returns a namedtuple ``(values, indices)`` where ``values`` is the maximum
 value of each row of the :attr:`input` tensor in the given dimension
@@ -5736,6 +5821,7 @@ Example::
     torch.return_types.max(values=tensor([0.8475, 1.1949, 1.5717, 1.0036]), indices=tensor([3, 0, 0, 1]))
 
 .. function:: max(input, other, *, out=None) -> Tensor
+   :noindex:
 
 See :func:`torch.maximum`.
 
@@ -5857,6 +5943,7 @@ Example::
     tensor(0)
 
 .. function:: argmax(input, dim, keepdim=False) -> LongTensor
+   :noindex:
 
 Returns the indices of the maximum values of a tensor across a dimension.
 
@@ -5898,6 +5985,7 @@ Example::
     tensor(0.3367)
 
 .. function:: mean(input, dim, keepdim=False, *, out=None) -> Tensor
+   :noindex:
 
 Returns the mean value of each row of the :attr:`input` tensor in the given
 dimension :attr:`dim`. If :attr:`dim` is a list of dimensions,
@@ -5956,6 +6044,7 @@ Example::
     tensor(0.2202)
 
 .. function:: median(input, dim=-1, keepdim=False, *, out=None) -> (Tensor, LongTensor)
+   :noindex:
 
 Returns a namedtuple ``(values, indices)`` where ``values`` contains the median of each row of :attr:`input`
 in the dimension :attr:`dim`, and ``indices`` contains the index of the median values found in the dimension :attr:`dim`.
@@ -6025,6 +6114,7 @@ Example::
     tensor(2.)
 
 .. function:: nanmedian(input, dim=-1, keepdim=False, *, out=None) -> (Tensor, LongTensor)
+   :noindex:
 
 Returns a namedtuple ``(values, indices)`` where ``values`` contains the median of each row of :attr:`input`
 in the dimension :attr:`dim`, ignoring ``NaN`` values, and ``indices`` contains the index of the median values
@@ -6161,6 +6251,7 @@ Example::
     tensor(0.6750)
 
 .. function:: min(input, dim, keepdim=False, *, out=None) -> (Tensor, LongTensor)
+   :noindex:
 
 Returns a namedtuple ``(values, indices)`` where ``values`` is the minimum
 value of each row of the :attr:`input` tensor in the given dimension
@@ -6195,6 +6286,7 @@ Example::
     torch.return_types.min(values=tensor([-1.1899, -1.4644,  0.0384, -0.1153]), indices=tensor([2, 0, 1, 0]))
 
 .. function:: min(input, other, *, out=None) -> Tensor
+   :noindex:
 
 See :func:`torch.minimum`.
 """.format(**single_dim_common))
@@ -6288,6 +6380,67 @@ Example::
     >>> torch.amin(a, 1)
     tensor([-1.3312, -0.5744, -1.7268, -1.6165])
 """.format(**multi_dim_common))
+
+add_docstr(torch.aminmax, r"""
+aminmax(input, *, dim=None, keepdim=False, out=None) -> (Tensor min, Tensor max)
+
+Computes the minimum and maximum values of the :attr:`input` tensor.
+
+Args:
+    input (Tensor):
+        The input tensor
+
+Keyword Args:
+    dim (Optional[int]):
+        The dimension along which to compute the values. If `None`,
+        computes the values over the entire :attr:`input` tensor.
+        Default is `None`.
+    keepdim (bool):
+        If `True`, the reduced dimensions will be kept in the output
+        tensor as dimensions with size 1 for broadcasting, otherwise
+        they will be removed, as if calling (:func:`torch.squeeze`).
+        Default is `False`.
+    out (Optional[Tuple[Tensor, Tensor]]):
+        Optional tensors on which to write the result. Must have the same
+        shape and dtype as the expected output.
+        Default is `None`.
+
+Returns:
+    A named tuple `(min, max)` containing the minimum and maximum values.
+
+Raises:
+    RuntimeError
+        If any of the dimensions to compute the values over has size 0.
+
+.. note::
+    NaN values are propagated to the output if at least one value is NaN.
+
+.. seealso::
+    :func:`torch.amin` computes just the minimum value
+    :func:`torch.amax` computes just the maximum value
+
+Example::
+
+    >>> torch.aminmax(torch.tensor([1, -3, 5]))
+    torch.return_types.aminmax(
+    min=tensor(-3),
+    max=tensor(5))
+
+    >>> # aminmax propagates NaNs
+    >>> torch.aminmax(torch.tensor([1, -3, 5, torch.nan]))
+    torch.return_types.aminmax(
+    min=tensor(nan),
+    max=tensor(nan))
+
+    >>> t = torch.arange(10).view(2, 5)
+    >>> t
+    tensor([[0, 1, 2, 3, 4],
+            [5, 6, 7, 8, 9]])
+    >>> t.aminmax(dim=0, keepdim=True)
+    torch.return_types.aminmax(
+    min=tensor([[0, 1, 2, 3, 4]]),
+    max=tensor([[5, 6, 7, 8, 9]]))
+""")
 
 add_docstr(torch.argmin,
            r"""
@@ -6512,6 +6665,7 @@ Example::
     tensor([  20.1494,  -42.5491,  260.8663])
 
 .. function:: mul(input, other, *, out=None) -> Tensor
+   :noindex:
 
 Each element of the tensor :attr:`input` is multiplied by the corresponding
 element of the Tensor :attr:`other`. The resulting tensor is returned.
@@ -6635,32 +6789,9 @@ Example::
 
 add_docstr(torch.mvlgamma,
            r"""
-mvlgamma(input, p) -> Tensor
+mvlgamma(input, p, *, out=None) -> Tensor
 
-Computes the `multivariate log-gamma function
-<https://en.wikipedia.org/wiki/Multivariate_gamma_function>`_) with dimension
-:math:`p` element-wise, given by
-
-.. math::
-    \log(\Gamma_{p}(a)) = C + \displaystyle \sum_{i=1}^{p} \log\left(\Gamma\left(a - \frac{i - 1}{2}\right)\right)
-
-where :math:`C = \log(\pi) \times \frac{p (p - 1)}{4}` and :math:`\Gamma(\cdot)` is the Gamma function.
-
-All elements must be greater than :math:`\frac{p - 1}{2}`, otherwise an error would be thrown.
-
-Args:
-    input (Tensor): the tensor to compute the multivariate log-gamma function
-    p (int): the number of dimensions
-
-Example::
-
-    >>> a = torch.empty(2, 3).uniform_(1, 2)
-    >>> a
-    tensor([[1.6835, 1.8474, 1.1929],
-            [1.0475, 1.7162, 1.4180]])
-    >>> torch.mvlgamma(a, 2)
-    tensor([[0.3928, 0.4007, 0.7586],
-            [1.0311, 0.3901, 0.5049]])
+Alias for :func:`torch.special.multigammaln`.
 """)
 
 add_docstr(torch.movedim, r"""
@@ -7068,6 +7199,7 @@ Example::
               8.0505,   8.1408,   9.0563,  10.0566])
 
 .. function:: normal(mean=0.0, std, *, out=None) -> Tensor
+   :noindex:
 
 Similar to the function above, but the means are shared among all drawn
 elements.
@@ -7085,6 +7217,7 @@ Example::
     tensor([-1.2793, -1.0732, -2.0687,  5.1177, -1.2303])
 
 .. function:: normal(mean, std=1.0, *, out=None) -> Tensor
+   :noindex:
 
 Similar to the function above, but the standard deviations are shared among
 all drawn elements.
@@ -7102,6 +7235,7 @@ Example::
     tensor([ 1.1552,  2.6148,  2.6535,  5.8318,  4.2361])
 
 .. function:: normal(mean, std, size, *, out=None) -> Tensor
+   :noindex:
 
 Similar to the function above, but the means and standard deviations are shared
 among all drawn elements. The resulting tensor has size given by :attr:`size`.
@@ -7364,6 +7498,7 @@ Example::
     tensor([   1.,    4.,   27.,  256.])
 
 .. function:: pow(self, exponent, *, out=None) -> Tensor
+   :noindex:
 
 :attr:`self` is a scalar ``float`` value, and :attr:`exponent` is a tensor.
 The returned tensor :attr:`out` is of the same shape as :attr:`exponent`
@@ -7449,6 +7584,7 @@ Example::
     tensor(0.6902)
 
 .. function:: prod(input, dim, keepdim=False, *, dtype=None) -> Tensor
+   :noindex:
 
 Returns the product of each row of the :attr:`input` tensor in the given
 dimension :attr:`dim`.
@@ -8031,6 +8167,13 @@ Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
     Complex inputs are not supported. In some cases, it is not mathematically
     possible to satisfy the definition of a modulo operation with complex numbers.
     See :func:`torch.fmod` for how division by zero is handled.
+
+.. note::
+    This op, like NumPy's `remainder <https://numpy.org/doc/stable/reference/generated/numpy.remainder.html>`_,
+    is equivalent to Python's modulus operation, and different from Python's
+    `math.remainder <https://docs.python.org/dev/library/math.html#math.remainder>`_ and
+    C++'s `std::remainder <https://en.cppreference.com/w/cpp/numeric/math/remainder>`_ which implement
+    the IEEE remainder.
 
 Args:
     input (Tensor or Scalar): the dividend
@@ -8875,6 +9018,7 @@ Example::
     tensor(-0.5475)
 
 .. function:: sum(input, dim, keepdim=False, *, dtype=None) -> Tensor
+   :noindex:
 
 Returns the sum of each row of the :attr:`input` tensor in the given
 dimension :attr:`dim`. If :attr:`dim` is a list of dimensions,
@@ -8924,6 +9068,7 @@ Example::
     tensor(7.)
 
 .. function:: nansum(input, dim, keepdim=False, *, dtype=None) -> Tensor
+   :noindex:
 
 Returns the sum of each row of the :attr:`input` tensor in the given
 dimension :attr:`dim`, treating Not a Numbers (NaNs) as zero.
@@ -9213,6 +9358,8 @@ Example::
     tensor([[ 0.4875,  0.3938],
             [ 0.9158, -0.6929],
             [-0.5872,  0.6932]])
+
+See also :func:`torch.transpose`.
 """.format(**common_args))
 
 add_docstr(torch.flip,
@@ -9572,6 +9719,8 @@ Example::
     tensor([[ 1.0028, -0.1669],
             [-0.9893,  0.7299],
             [ 0.5809,  0.4942]])
+
+See also :func:`torch.t`.
 """.format(**common_args))
 
 add_docstr(torch.triangular_solve,
@@ -9902,8 +10051,8 @@ Returns a new tensor with the data in :attr:`input` fake quantized using :attr:`
 
 Args:
     input (Tensor): the input value(s), in ``torch.float32``.
-    scale (double): quantization scale
-    zero_point (int64): quantization zero_point
+    scale (double or Tensor): quantization scale
+    zero_point (int64 or Tensor): quantization zero_point
     quant_min (int64): lower bound of the quantized domain
     quant_max (int64): upper bound of the quantized domain
 
@@ -9917,6 +10066,8 @@ Example::
     tensor([ 0.0552,  0.9730,  0.3973, -1.0780])
     >>> torch.fake_quantize_per_tensor_affine(x, 0.1, 0, 0, 255)
     tensor([0.1000, 1.0000, 0.4000, 0.0000])
+    >>> torch.fake_quantize_per_tensor_affine(x, torch.tensor(0.1), torch.tensor(0), 0, 255)
+    tensor([0.6000, 0.4000, 0.0000, 0.0000])
 """)
 
 add_docstr(torch.fake_quantize_per_channel_affine,
@@ -10333,6 +10484,7 @@ Example::
             [0.0000, 0.0000]], dtype=torch.float64)
 
 .. function:: where(condition) -> tuple of LongTensor
+   :noindex:
 
 ``torch.where(condition)`` is identical to
 ``torch.nonzero(condition, as_tuple=True)``.
@@ -10723,7 +10875,7 @@ add_docstr(torch.trapezoid,
            r"""
 trapezoid(y, x=None, *, dx=None, dim=-1) -> Tensor
 
-Computes the `trapezoidal rule <https://en.wikipedia.org/wiki/Trapezoidal_rule>_ along
+Computes the `trapezoidal rule <https://en.wikipedia.org/wiki/Trapezoidal_rule>`_ along
 :attr:`dim`. By default the spacing between elements is assumed to be 1, but
 :attr:`dx` can be used to specify a different constant spacing, and :attr:`x` can be
 used to specify arbitrary spacing along :attr:`dim`.
@@ -10832,7 +10984,93 @@ add_docstr(torch.trapz,
 trapz(y, x, *, dim=-1) -> Tensor
 
 Alias for :func:`torch.trapezoid`.
+""")
 
+add_docstr(torch.cumulative_trapezoid,
+           r"""
+cumulative_trapezoid(y, x=None, *, dx=None, dim=-1) -> Tensor
+
+Cumulatively computes the `trapezoidal rule <https://en.wikipedia.org/wiki/Trapezoidal_rule>`_
+along :attr:`dim`. By default the spacing between elements is assumed to be 1, but
+:attr:`dx` can be used to specify a different constant spacing, and :attr:`x` can be
+used to specify arbitrary spacing along :attr:`dim`.
+
+For more details, please read :func:`torch.trapezoid`. The difference between :func:`torch.trapezoid`
+and this function is that, :func:`torch.trapezoid` returns a value for each integration,
+where as this function returns a cumulative value for every spacing within the integration. This
+is analogous to how `.sum` returns a value and `.cumsum` returns a cumulative sum.
+
+Arguments:
+    y (Tensor): Values to use when computing the trapezoidal rule.
+    x (Tensor): If specified, defines spacing between values as specified above.
+
+Keyword arguments:
+    dx (float): constant spacing between values. If neither :attr:`x` or :attr:`dx`
+        are specified then this defaults to 1. Effectively multiplies the result by its value.
+    dim (int): The dimension along which to compute the trapezoidal rule.
+        The last (inner-most) dimension by default.
+
+Examples::
+
+    >>> # Cumulatively computes the trapezoidal rule in 1D, spacing is implicitly 1.
+    >>> y = torch.tensor([1, 5, 10])
+    >>> torch.cumulative_trapezoid(y)
+    tensor([3., 10.5])
+
+    >>> # Computes the same trapezoidal rule directly up to each element to verify
+    >>> (1 + 5) / 2
+    3.0
+    >>> (1 + 10 + 10) / 2
+    10.5
+
+    >>> # Cumulatively computes the trapezoidal rule in 1D with constant spacing of 2
+    >>> # NOTE: the result is the same as before, but multiplied by 2
+    >>> torch.cumulative_trapezoid(y, dx=2)
+    tensor([6., 21.])
+
+    >>> # Cumulatively computes the trapezoidal rule in 1D with arbitrary spacing
+    >>> x = torch.tensor([1, 3, 6])
+    >>> torch.cumulative_trapezoid(y, x)
+    tensor([6., 28.5])
+
+    >>> # Computes the same trapezoidal rule directly up to each element to verify
+    >>> ((3 - 1) * (1 + 5)) / 2
+    6.0
+    >>> ((3 - 1) * (1 + 5) + (6 - 3) * (5 + 10)) / 2
+    28.5
+
+    >>> # Cumulatively computes the trapezoidal rule for each row of a 3x3 matrix
+    >>> y = torch.arange(9).reshape(3, 3)
+    tensor([[0, 1, 2],
+            [3, 4, 5],
+            [6, 7, 8]])
+    >>> torch.cumulative_trapezoid(y)
+    tensor([[ 0.5,  2.],
+            [ 3.5,  8.],
+            [ 6.5, 14.]])
+
+    >>> # Cumulatively computes the trapezoidal rule for each column of the matrix
+    >>> torch.cumulative_trapezoid(y, dim=0)
+    tensor([[ 1.5,  2.5,  3.5],
+            [ 6.0,  8.0, 10.0]])
+
+    >>> # Cumulatively computes the trapezoidal rule for each row of a 3x3 ones matrix
+    >>> #   with the same arbitrary spacing
+    >>> y = torch.ones(3, 3)
+    >>> x = torch.tensor([1, 3, 6])
+    >>> torch.cumulative_trapezoid(y, x)
+    tensor([[2., 5.],
+            [2., 5.],
+            [2., 5.]])
+
+    >>> # Cumulatively computes the trapezoidal rule for each row of a 3x3 ones matrix
+    >>> #   with different arbitrary spacing per row
+    >>> y = torch.ones(3, 3)
+    >>> x = torch.tensor([[1, 2, 3], [1, 3, 5], [1, 4, 7]])
+    >>> torch.cumulative_trapezoid(y, x)
+    tensor([[1., 2.],
+            [2., 4.],
+            [3., 6.]])
 """)
 
 add_docstr(torch.repeat_interleave,
@@ -10882,6 +11120,7 @@ Example::
             [3, 4]])
 
 .. function:: repeat_interleave(repeats, *, output_size=None) -> Tensor
+   :noindex:
 
 If the `repeats` is `tensor([n1, n2, n3, ...])`, then the output will be
 `tensor([0, 0, ..., 1, 1, ..., 2, 2, ..., ...])` where `0` appears `n1` times,
@@ -10935,14 +11174,14 @@ quantize_per_tensor(input, scale, zero_point, dtype) -> Tensor
 Converts a float tensor to a quantized tensor with given scale and zero point.
 
 Arguments:
-    input (Tensor): float tensor to quantize
-    scale (float): scale to apply in quantization formula
-    zero_point (int): offset in integer value that maps to float zero
+    input (Tensor): float tensor or list of tensors to quantize
+    scale (float or Tensor): scale to apply in quantization formula
+    zero_point (int or Tensor): offset in integer value that maps to float zero
     dtype (:class:`torch.dtype`): the desired data type of returned tensor.
         Has to be one of the quantized dtypes: ``torch.quint8``, ``torch.qint8``, ``torch.qint32``
 
 Returns:
-    Tensor: A newly quantized tensor
+    Tensor: A newly quantized tensor or list of quantized tensors.
 
 Example::
 
@@ -10951,6 +11190,15 @@ Example::
            quantization_scheme=torch.per_tensor_affine, scale=0.1, zero_point=10)
     >>> torch.quantize_per_tensor(torch.tensor([-1.0, 0.0, 1.0, 2.0]), 0.1, 10, torch.quint8).int_repr()
     tensor([ 0, 10, 20, 30], dtype=torch.uint8)
+    >>> torch.quantize_per_tensor([torch.tensor([-1.0, 0.0]), torch.tensor([-2.0, 2.0])],
+    >>> torch.tensor([0.1, 0.2]), torch.tensor([10, 20]), torch.quint8)
+    (tensor([-1.,  0.], size=(2,), dtype=torch.quint8,
+        quantization_scheme=torch.per_tensor_affine, scale=0.1, zero_point=10),
+        tensor([-2.,  2.], size=(2,), dtype=torch.quint8,
+        quantization_scheme=torch.per_tensor_affine, scale=0.2, zero_point=20))
+    >>> torch.quantize_per_tensor(torch.tensor([-1.0, 0.0, 1.0, 2.0]), torch.tensor(0.1), torch.tensor(10), torch.quint8)
+    tensor([-1.,  0.,  1.,  2.], size=(4,), dtype=torch.quint8,
+       quantization_scheme=torch.per_tensor_affine, scale=0.10, zero_point=10)
 """)
 
 add_docstr(torch.quantize_per_channel,
@@ -10983,6 +11231,114 @@ Example::
     tensor([[  0,  10],
             [100, 200]], dtype=torch.uint8)
 """)
+
+
+add_docstr(torch.quantized_batch_norm,
+           r"""
+quantized_batch_norm(input, weight=None, bias=None, mean, var, eps, output_scale, output_zero_point) -> Tensor
+
+Applies batch normalization on a 4D (NCHW) quantized tensor.
+
+.. math::
+
+        y = \frac{x - \mathrm{E}[x]}{\sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
+
+Arguments:
+    input (Tensor): quantized tensor
+    weight (Tensor): float tensor that corresponds to the gamma, size C
+    bias (Tensor):  float tensor that corresponds to the beta, size C
+    mean (Tensor): float mean value in batch normalization, size C
+    var (Tensor): float tensor for variance, size C
+    eps (float): a value added to the denominator for numerical stability.
+    output_scale (float): output quantized tensor scale
+    output_zero_point (int): output quantized tensor zero_point
+
+Returns:
+    Tensor: A quantized tensor with batch normalization applied.
+
+Example::
+
+    >>> qx = torch.quantize_per_tensor(torch.rand(2, 2, 2, 2), 1.5, 3, torch.quint8)
+    >>> torch.quantized_batch_norm(qx, torch.ones(2), torch.zeros(2), torch.rand(2), torch.rand(2), 0.00001, 0.2, 2)
+    tensor([[[[-0.2000, -0.2000],
+          [ 1.6000, -0.2000]],
+
+         [[-0.4000, -0.4000],
+          [-0.4000,  0.6000]]],
+
+
+        [[[-0.2000, -0.2000],
+          [-0.2000, -0.2000]],
+
+         [[ 0.6000, -0.4000],
+          [ 0.6000, -0.4000]]]], size=(2, 2, 2, 2), dtype=torch.quint8,
+       quantization_scheme=torch.per_tensor_affine, scale=0.2, zero_point=2)
+""")
+
+
+add_docstr(torch.quantized_max_pool1d,
+           r"""
+quantized_max_pool1d(input, kernel_size, stride=[], padding=0, dilation=1, ceil_mode=False) -> Tensor
+
+Applies a 1D max pooling over an input quantized tensor composed of several input planes.
+
+Arguments:
+    input (Tensor): quantized tensor
+    kernel_size (list of int): the size of the sliding window
+    stride (``list of int``, optional): the stride of the sliding window
+    padding (``list of int``, opttional): padding to be added on both sides, must be >= 0 and <= kernel_size / 2
+    dilation (``list of int``, optional): The stride between elements within a sliding window, must be > 0. Default 1
+    ceil_mode (bool, optional):  If True, will use ceil instead of floor to compute the output shape.
+        Defaults to False.
+
+
+Returns:
+    Tensor: A quantized tensor with max_pool1d applied.
+
+Example::
+
+    >>> qx = torch.quantize_per_tensor(torch.rand(2, 2), 1.5, 3, torch.quint8)
+    >>> torch.quantized_max_pool1d(qx, [2])
+    tensor([[0.0000],
+            [1.5000]], size=(2, 1), dtype=torch.quint8,
+        quantization_scheme=torch.per_tensor_affine, scale=1.5, zero_point=3)
+""")
+
+
+add_docstr(torch.quantized_max_pool2d,
+           r"""
+quantized_max_pool2d(input, kernel_size, stride=[], padding=0, dilation=1, ceil_mode=False) -> Tensor
+
+Applies a 2D max pooling over an input quantized tensor composed of several input planes.
+
+Arguments:
+    input (Tensor): quantized tensor
+    kernel_size (``list of int``): the size of the sliding window
+    stride (``list of int``, optional): the stride of the sliding window
+    padding (``list of int``, optional): padding to be added on both sides, must be >= 0 and <= kernel_size / 2
+    dilation (``list of int``, optional): The stride between elements within a sliding window, must be > 0. Default 1
+    ceil_mode (bool, optional):  If True, will use ceil instead of floor to compute the output shape.
+        Defaults to False.
+
+
+Returns:
+    Tensor: A quantized tensor with max_pool2d applied.
+
+Example::
+
+    >>> qx = torch.quantize_per_tensor(torch.rand(2, 2, 2, 2), 1.5, 3, torch.quint8)
+    >>> torch.quantized_max_pool2d(qx, [2,2])
+    tensor([[[[1.5000]],
+
+            [[1.5000]]],
+
+
+            [[[0.0000]],
+
+            [[0.0000]]]], size=(2, 2, 1, 1), dtype=torch.quint8,
+        quantization_scheme=torch.per_tensor_affine, scale=1.5, zero_point=3)
+""")
+
 
 add_docstr(torch.Generator,
            r"""

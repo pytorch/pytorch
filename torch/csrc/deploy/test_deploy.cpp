@@ -1,7 +1,9 @@
 #include <ATen/Parallel.h>
 #include <gtest/gtest.h>
+#include <cstring>
 
 #include <c10/util/irange.h>
+#include <libgen.h>
 #include <torch/csrc/deploy/deploy.h>
 #include <torch/script.h>
 #include <torch/torch.h>
@@ -51,6 +53,26 @@ TEST(TorchpyTest, LoadLibrary) {
       path("LOAD_LIBRARY", "torch/csrc/deploy/example/generated/load_library"));
   auto model = p.load_pickle("fn", "fn.pkl");
   model({});
+}
+
+TEST(TorchpyTest, InitTwice) {
+  { torch::deploy::InterpreterManager m(2); }
+  { torch::deploy::InterpreterManager m(1); }
+}
+
+TEST(TorchpyTest, DifferentInterps) {
+  torch::deploy::InterpreterManager m(2);
+  m.register_module_source("check_none", "check = id(None)\n");
+  int64_t id0, id1;
+  {
+    auto I = m.all_instances()[0].acquire_session();
+    id0 = I.global("check_none", "check").toIValue().toInt();
+  }
+  {
+    auto I = m.all_instances()[1].acquire_session();
+    id1 = I.global("check_none", "check").toIValue().toInt();
+  }
+  ASSERT_NE(id0, id1);
 }
 
 TEST(TorchpyTest, SimpleModel) {
@@ -110,6 +132,10 @@ TEST(TorchpyTest, MultiSerialSimpleModel) {
   kwargs["input"] = input;
   auto jit_output_kwargs = model.call_kwargs(kwargs).toTensor();
   ASSERT_TRUE(ref_output.equal(jit_output_kwargs));
+
+  // test hasattr
+  ASSERT_TRUE(model.hasattr("forward"));
+  ASSERT_FALSE(model.hasattr("make_prediction"));
 }
 
 TEST(TorchpyTest, ThreadedSimpleModel) {
@@ -272,3 +298,70 @@ TEST(TorchpyTest, FxModule) {
     ASSERT_TRUE(ref_output.equal(outputs[i]));
   }
 }
+
+#ifdef TEST_CUSTOM_LIBRARY
+thread_local int in_another_module = 5;
+TEST(TorchpyTest, SharedLibraryLoad) {
+  torch::deploy::InterpreterManager manager(2);
+  auto no_args = at::ArrayRef<torch::deploy::Obj>();
+  for (auto& interp : manager.all_instances()) {
+    auto I = interp.acquire_session();
+
+    const char* test_lib_path = getenv("LIBTEST_DEPLOY_LIB");
+    if (!test_lib_path) {
+      I.global("sys", "path").attr("append")({"torch/csrc/deploy"});
+      I.global("test_deploy_python", "setup")({getenv("PATH")});
+    } else {
+      char buf[PATH_MAX];
+      strncpy(buf, test_lib_path, PATH_MAX);
+      dirname(buf);
+      I.global("sys", "path").attr("append")({buf});
+    }
+
+    AT_ASSERT(I.global("libtest_deploy_lib", "check_initial_state")(no_args)
+                  .toIValue()
+                  .toBool());
+    ASSERT_TRUE(
+        I.global("libtest_deploy_lib", "simple_add")({5, 4})
+            .toIValue()
+            .toInt() == 9);
+    // I.global("numpy", "array"); // force numpy to load here so it is loaded
+    //                             // twice before we run the tests
+  }
+  for (auto& interp : manager.all_instances()) {
+    auto I = interp.acquire_session();
+    // auto i =
+    //     I.global("test_deploy_python", "numpy_test")({1}).toIValue().toInt();
+    I.global("libtest_deploy_lib", "raise_and_catch_exception")({true});
+    try {
+      I.global("libtest_deploy_lib", "raise_exception")(no_args);
+      ASSERT_TRUE(false); // raise_exception did not throw?
+    } catch (std::exception& err) {
+      ASSERT_TRUE(std::string(err.what()).find("yet") != std::string::npos);
+    }
+    in_another_module = 6;
+    ASSERT_TRUE(
+        I.global("libtest_deploy_lib", "get_in_another_module")(no_args)
+            .toIValue()
+            .toInt() == 6);
+    ASSERT_TRUE(
+        I.global("libtest_deploy_lib", "get_bar")(no_args).toIValue().toInt() ==
+        14);
+    {
+      std::thread foo([&] {
+        I.global("libtest_deploy_lib", "set_bar")({13});
+        ASSERT_TRUE(
+            I.global("libtest_deploy_lib", "get_bar")(no_args)
+                .toIValue()
+                .toInt() == 13);
+      });
+      foo.join();
+    }
+    ASSERT_TRUE(
+        I.global("libtest_deploy_lib", "get_bar_destructed")(no_args)
+            .toIValue()
+            .toInt() == 1);
+    I.global("libtest_deploy_lib", "set_bar")({12});
+  }
+}
+#endif

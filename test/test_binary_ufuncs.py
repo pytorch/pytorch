@@ -22,6 +22,7 @@ from torch.testing import all_types_and_complex_and, integral_types_and
 
 if TEST_SCIPY:
     import scipy.special
+    import scipy.integrate
 
 # TODO: remove this
 def _generate_input(shape, dtype, device, with_extremal):
@@ -1798,6 +1799,49 @@ class TestBinaryUfuncs(TestCase):
         expected = np.nextafter(a.cpu().numpy(), b.cpu().numpy())
         self.assertEqual(actual, expected, atol=0, rtol=0)
 
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.bfloat16)
+    def test_nextafter_bfloat16(self, device, dtype):
+        nan = float('nan')
+        inf = float('inf')
+        cases = (
+            # (from, to, expected)
+            (0, 1, 9.183549615799121e-41),
+            (0, -1, -9.183549615799121e-41),
+            (1, -2, 0.99609375),
+            (1, 0, 0.99609375),
+            (1, 2, 1.0078125),
+            (-1, -2, -1.0078125),
+            (-1, 0, -0.99609375),
+            (2, -1, 1.9921875),
+            (2, 1, 1.9921875),
+            (20, 3000, 20.125),
+            (20, -3000, 19.875),
+            (3000, -20, 2992.0),
+            (-3000, 20, -2992.0),
+            (65536, 0, 65280.0) ,
+            (65536, inf, 66048.0),
+            (-65536, 0, -65280.0),
+            (-65536, -inf, -66048.0),
+            (nan, 0, nan),
+            (0, nan, nan),
+            (nan, nan, nan),
+            (nan, inf, nan),
+            (inf, nan, nan),
+            (inf, -inf, 3.3895313892515355e+38),
+            (-inf, inf, -3.3895313892515355e+38),
+            (inf, 0, 3.3895313892515355e+38),
+            (0, inf, 9.183549615799121e-41),
+            (-inf, 0, -3.3895313892515355e+38),
+            (0, -inf, -9.183549615799121e-41),
+        )
+
+        for from_v, to_v, expected in cases:
+            from_t = torch.tensor([from_v], device=device, dtype=dtype)
+            to_t = torch.tensor([to_v], device=device, dtype=dtype)
+            actual = torch.nextafter(from_t, to_t).item()
+            self.assertEqual(actual, expected, atol=0, rtol=0)
+
     def _test_cop(self, torchfn, mathfn, dtype, device):
         def reference_implementation(res2):
             for i, j in iter_indices(sm1):
@@ -2562,6 +2606,75 @@ class TestBinaryUfuncs(TestCase):
                 'There must be one `x` value for each sample point'):
             test_x((2, 3), 1, [1.0, 2.0], device)
             test_x((2, 3), 1, [1.0, 2.0, 3.0, 4.0], device)
+
+    @skipIf(not TEST_SCIPY, "Scipy required for the test.")
+    def test_cumulative_trapezoid(self, device):
+
+        import scipy.integrate
+
+        if hasattr(scipy.integrate, 'cumulative_trapezoid'):
+            scipy_cumulative_trapezoid = scipy.integrate.cumulative_trapezoid
+        else:  # Older version of SciPy uses a different name
+            scipy_cumulative_trapezoid = scipy.integrate.cumtrapz
+
+        def test_dx(sizes, dim, dx, device):
+            t = torch.randn(sizes, device=device)
+            y = t.cpu().numpy()
+            actual = torch.cumulative_trapezoid(t, dx=dx, dim=dim)
+            expected = scipy_cumulative_trapezoid(t.cpu().numpy(), dx=dx, axis=dim)
+            self.assertEqual(expected.shape, actual.shape)
+            self.assertEqual(expected, actual, exact_dtype=False, atol=1e-4, rtol=1e-4)
+
+        def test_x(sizes, dim, x, device):
+            t = torch.randn(sizes, device=device)
+            actual = torch.cumulative_trapezoid(t, x=torch.tensor(x, device=device), dim=dim)
+            expected = scipy_cumulative_trapezoid(t.cpu().numpy(), x=x, axis=dim)
+            self.assertEqual(expected.shape, actual.shape)
+            self.assertEqual(expected, actual.cpu(), exact_dtype=False, atol=1e-4, rtol=1e-4)
+
+        def test_empty_x(sizes, dim, x, device):
+            t = torch.randn(sizes, device=device)
+            actual = torch.cumulative_trapezoid(t, x=torch.tensor(x, device=device), dim=dim)
+            self.assertEqual(torch.empty(actual.shape), actual)
+
+        test_dx((2,), -1, 1, device)
+        test_dx((3, 3), -1, 1, device)
+        test_dx((4, 2), 0, 1, device)
+        test_dx((2, 3, 4), 1, 1, device)
+        test_dx((10, 2), 0, 0.1, device)
+        test_dx((1, 10), 0, 2.3, device)
+        test_dx((0, 2), 0, 1.0, device)
+        test_dx((0, 2), 1, 1.0, device)
+        test_dx((512, 512), 1, 1.0, device)
+        test_dx((100, 100, 100), 1, 1.0, device)
+
+        test_x((2,), -1, [100, 50], device)
+        test_x((4, 2), 0, [2, 3, 4, 5], device)
+        test_x((2, 3, 4), 1, [1.0, 2.0, 3.0], device)
+        test_x((10, 2), 0, [2.0, 3.0, 4.0, 7.0, 11.0, 14.0, 22.0, 26.0, 26.1, 30.3], device)
+        test_x((1, 10), 0, [1.0], device)
+        test_x((0, 2), 1, [1, 2], device)
+
+        test_empty_x((0, 2), 0, [], device)  # SciPy failing when x == [], but our version returns empty
+
+        with self.assertRaisesRegex(
+                IndexError,
+                'Dimension out of range'):
+            test_x((2, 3), 2, [], device)
+            test_dx((2, 3), 2, 1.0, device)
+        with self.assertRaisesRegex(
+                RuntimeError,
+                'There must be one `x` value for each sample point'):
+            test_x((2, 3), 1, [1.0, 2.0], device)
+            test_x((0, 2), 0, [1.0, 2.0], device)
+            test_x((2, 3), 1, [1.0, 2.0, 3.0, 4.0], device)
+        with self.assertRaisesRegex(
+                RuntimeError,
+                'Currently, we only support dx as a real number'):
+            test_dx((2, 2), -1, complex(1, 1) , device)
+        with self.assertRaisesRegex(
+                TypeError, 'received an invalid combination of arguments'):
+            actual = torch.cumulative_trapezoid(torch.randn((3, 3)), x=torch.randn((3, 3)), dx=3)
 
     @dtypes(torch.double)
     def test_pow_scalar_overloads_mem_overlap(self, device, dtype):

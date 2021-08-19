@@ -26,7 +26,6 @@ namespace c10 {
   _(prim, BroadcastingChunk)         \
   _(prim, BroadcastSizes)            \
   _(prim, ReductionSizes)            \
-  _(prim, Concat)                    \
   _(prim, Constant)                  \
   _(prim, ChunkSizes)                \
   _(prim, ConstantMKLDNNTensor)      \
@@ -84,6 +83,7 @@ namespace c10 {
   _(prim, StringIndex)               \
   _(prim, NumToTensor)               \
   _(prim, Uninitialized)             \
+  _(prim, VarConcat)                 \
   _(prim, With)                      \
   _(prim, Enter)                     \
   _(prim, Exit)                      \
@@ -267,6 +267,7 @@ namespace c10 {
   _(aten, transpose_)                \
   _(aten, trapz)                     \
   _(aten, trapezoid)                 \
+  _(aten, cumulative_trapezoid)      \
   _(aten, unsqueeze_)                \
   _(aten, __getitem__)               \
   _(aten, _set_item)                 \
@@ -364,6 +365,8 @@ namespace c10 {
   _(aten, log_softmax)               \
   _(aten, special_log_softmax)       \
   _(aten, special_zeta)              \
+  _(aten, mvlgamma)                  \
+  _(aten, special_multigammaln)      \
   _(aten, has_torch_function)        \
   _(aten, hardswish)                 \
   _(aten, hardswish_)                \
@@ -463,7 +466,8 @@ namespace c10 {
   _(attr, keepdims)                  \
   _(attr, cache_id)                  \
   _(attr, new_axis)                  \
-  _(attr, warn_id)
+  _(attr, warn_id)                   \
+  _(attr, allowzero)
 
 // 'prim' symbols are synthetic operators that occur only in the IR
 // and don't have corresponding implementations in ATen.
