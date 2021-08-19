@@ -74,8 +74,6 @@ jit_core_headers = [
     "torch/csrc/jit/frontend/schema_type_parser.h",
     "torch/csrc/jit/frontend/error_report.h",
     "torch/csrc/jit/frontend/tree.h",
-    "torch/csrc/distributed/c10d/quantization/quantization_gpu.h",
-    "torch/csrc/distributed/c10d/quantization/quantization.h",
     "torch/custom_class.h",
     "torch/custom_class_detail.h",
     "torch/library.h",
@@ -550,6 +548,7 @@ libtorch_cuda_distributed_extra_sources = [
     "torch/csrc/distributed/c10d/NCCLUtils.cpp",
     "torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp",
     "torch/csrc/distributed/rpc/tensorpipe_cuda.cpp",
+    "torch/csrc/distributed/c10d/quantization/quantization_gpu.cu",
 ]
 
 libtorch_cuda_distributed_sources = libtorch_cuda_distributed_base_sources + libtorch_cuda_distributed_extra_sources
@@ -736,7 +735,6 @@ libtorch_python_distributed_core_sources = [
     "torch/csrc/distributed/c10d/init.cpp",
     "torch/csrc/distributed/c10d/python_comm_hook.cpp",
     "torch/csrc/distributed/c10d/quantization/quantization.cpp",
-    "torch/csrc/distributed/c10d/quantization/quantization_gpu.cu",
 ]
 
 libtorch_python_distributed_sources = libtorch_python_distributed_core_sources + [
