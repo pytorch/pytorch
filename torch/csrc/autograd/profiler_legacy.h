@@ -392,6 +392,11 @@ struct RangeEventList {
   static const size_t kReservedCapacity = 1024;
 };
 
+std::string getNvtxStr(
+    const at::StringView& name,
+    int64_t sequence_nr,
+    const std::vector<std::vector<int64_t>>& shapes);
+
 enum class C10_API_ENUM ProfilerState {
   Disabled = 0,
   CPU, // CPU-only profiling
@@ -403,23 +408,26 @@ enum class C10_API_ENUM ProfilerState {
 };
 
 struct TORCH_API ProfilerConfig {
-  ProfilerConfig(
+  explicit ProfilerConfig(
       ProfilerState state,
       bool report_input_shapes = false,
       bool profile_memory = false,
       bool with_stack = false,
-      bool with_flops = false)
+      bool with_flops = false,
+      bool with_modules = false)
       : state(state),
         report_input_shapes(report_input_shapes),
         profile_memory(profile_memory),
         with_stack(with_stack),
-        with_flops(with_flops) {}
+        with_flops(with_flops),
+        with_modules(with_modules) {}
   ~ProfilerConfig() = default;
   ProfilerState state;
   bool report_input_shapes;
   bool profile_memory;
   bool with_stack;
   bool with_flops;
+  bool with_modules;
 
   // Returns IValues corresponding to ProfilerConfig struct, to be used for
   // serialization.
@@ -478,17 +486,17 @@ private:
   void processEvents(const std::vector<LegacyEvent*>& events);
 };
 
-// A guard that enables the profiler, taking in an optional callback to process
+// A guard that enables the legacy profiler, taking in an optional callback to process
 // the results
 // Usage:
 // {
-//   TLSProfilerGuard g([](thread_event_lists profilerResults) {
+//   TLSLegacyProfilerGuard g([](thread_event_lists profilerResults) {
 //     // process profilerResults
 //   });
 //   Code to profile
 // }
-struct TORCH_API TLSProfilerGuard {
-  explicit TLSProfilerGuard(
+struct TORCH_API TLSLegacyProfilerGuard {
+  explicit TLSLegacyProfilerGuard(
       const ProfilerConfig& cfg,
       c10::optional<std::function<void(const thread_event_lists&)>>
           resultCallback = c10::nullopt,
@@ -499,7 +507,8 @@ struct TORCH_API TLSProfilerGuard {
         profilerDisableOptions_(std::move(profilerDisableOptions)) {
     enableProfilerLegacy(cfg);
   }
-  ~TLSProfilerGuard() {
+  ~TLSLegacyProfilerGuard() {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     thread_event_lists event_lists = disableProfilerLegacy(profilerDisableOptions_);
     if (cb_) {
       try {
@@ -525,6 +534,7 @@ TORCH_API std::vector<std::string> callstackStr(const std::vector<FileLineFunc>&
 TORCH_API std::vector<std::vector<int64_t>> inputSizes(const at::RecordFunction& fn);
 
 struct TORCH_API ProfilerThreadLocalState : public c10::MemoryReportingInfoBase {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   explicit ProfilerThreadLocalState(const ProfilerConfig& config)
       : config_(config), remoteProfiledEvents_{c10::nullopt} {}
   ~ProfilerThreadLocalState() override = default;
@@ -541,7 +551,6 @@ struct TORCH_API ProfilerThreadLocalState : public c10::MemoryReportingInfoBase 
   void pushRange(
       const at::RecordFunction& fn,
       const bool record_cuda,
-      const char* msg = "",
       std::vector<std::vector<int64_t>>&& shapes = {});
 
   void popRange(const at::RecordFunction& fn, const bool record_cuda);
@@ -561,17 +570,13 @@ struct TORCH_API ProfilerThreadLocalState : public c10::MemoryReportingInfoBase 
   void reportMemoryUsage(
       void* /* unused */,
       int64_t alloc_size,
+      int64_t /* total_allocated, unused for legacy */,
+      int64_t /* total_reserved, unused for legacy */,
       c10::Device device) override;
 
   bool memoryProfilingEnabled() const override;
 
  protected:
-  std::string getNvtxStr(
-      const at::StringView& name,
-      const char* msg,
-      int64_t sequence_nr,
-      const std::vector<std::vector<int64_t>>& shapes) const;
-
   RangeEventList& getEventList(int64_t thread_id = -1);
 
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)

@@ -1,11 +1,13 @@
 import torch
 import operator
+import warnings
 from torch.fx import (
     GraphModule,
 )
 
 from torch.quantization import (
     propagate_qconfig_,
+    ObserverBase,
 )
 from torch.fx.graph import (
     Graph,
@@ -13,22 +15,25 @@ from torch.fx.graph import (
 )
 from torch.fx.node import Argument
 
+from ..qconfig import QConfigAny, qconfig_function_equality
 from .qconfig_utils import (
     convert_dict_to_ordered_dict,
     generate_qconfig_map,
     get_flattened_qconfig_dict,
-    QConfigAny,
 )
 
 from .quantization_patterns import (
     QuantizeHandler,
-    CatQuantizeHandler,
-    CopyNodeQuantizeHandler,
     CustomModuleQuantizeHandler,
     StandaloneModuleQuantizeHandler,
 )
 
 from .quantization_types import Pattern
+
+from ._equalize import (
+    is_equalization_observer,
+    node_supports_equalization,
+)
 
 from .graph_module import (
     ObservedGraphModule,
@@ -56,6 +61,8 @@ from .utils import (
     WEIGHT_INDEX_DICT,
     FUNCTIONAL_OPS_WITH_BIAS,
 )
+
+from ..fuser_method_mappings import DEFAULT_OP_LIST_TO_FUSER_METHOD
 
 from ..quantization_mappings import (
     get_default_qat_module_mappings,
@@ -145,6 +152,58 @@ def qat_swap_modules(
         get_default_qat_module_mappings(), additional_qat_module_mapping)
     convert(root, mapping=all_mappings, inplace=True, remove_qconfig=False)
 
+def update_qconfig_for_qat(
+    qconfig_dict: Any,
+    additional_qat_module_mapping: Dict[Callable, Callable]
+) -> Any:
+    """
+    Update the qconfig_dict to account for module swaps during QAT.
+    During QAT we perform a module swap on the nn.Module types to the corresponding nn.qat.modules types.
+    """
+    all_qat_mappings = get_combined_dict(
+        get_default_qat_module_mappings(), additional_qat_module_mapping)
+    object_type_dict = qconfig_dict.get("object_type", None)
+    new_object_type_dict = object_type_dict.copy()
+    for k, v in new_object_type_dict.items():
+        if k in all_qat_mappings:
+            object_type_dict[all_qat_mappings[k]] = v
+    return qconfig_dict
+
+def update_qconfig_for_fusion(
+    model: GraphModule,
+    qconfig_dict: Any,
+) -> Any:
+    """
+    Update the qconfig_dict to account for fused modules such as LinearReLU.
+    """
+    object_type_dict = qconfig_dict.get("object_type", None)
+    if object_type_dict is None:
+        return qconfig_dict
+
+    modules = dict(model.named_modules())
+
+    for node in model.graph.nodes:
+        if node.op == 'call_module':
+            module_type = type(modules[str(node.target)])
+            if module_type not in list(DEFAULT_OP_LIST_TO_FUSER_METHOD.values()):
+                continue
+
+            for ops, fuser in DEFAULT_OP_LIST_TO_FUSER_METHOD.items():
+                if module_type == fuser:
+                    fused_qconfig = object_type_dict.get(ops[0], None)
+
+                    # Raise an error if the modules in the fused module have
+                    # different qconfigs specified in the qconfig_dict
+                    for op in ops:
+                        if not qconfig_function_equality(object_type_dict.get(op, None), fused_qconfig):
+                            raise LookupError("During fusion, we need to specify the same " +
+                                              f"qconfigs for both modules in {module_type}.")
+
+                    if fused_qconfig is not None:
+                        object_type_dict[module_type] = fused_qconfig
+
+    return qconfig_dict
+
 def insert_observer(
     node: Node,
     observer: torch.quantization.ObserverBase,
@@ -160,7 +219,10 @@ def insert_observer(
     if model_device:
         observer.to(model_device)
     # add observer module as attribute
-    prefix = node.name + '_activation_post_process_'
+    if is_equalization_observer(observer):
+        prefix = node.name + '_equalization_process_'
+    else:
+        prefix = node.name + '_activation_post_process_'
     get_new_observer_name = get_new_attr_name_with_prefix(prefix)
     observer_name = get_new_observer_name(model)
     setattr(model, observer_name, observer)
@@ -262,7 +324,7 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
                 graph, node_name_to_target_dtype,
                 qhandler, prepare_custom_config_dict)
             new_arg_to_return.append(new_inner_arg)
-        return new_arg_to_return
+        return type(arg)(new_arg_to_return)
 
     if not isinstance(arg, Node):
         return arg
@@ -278,8 +340,10 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
         # regular flow for most nodes, except standalone modules
         is_weight = node_arg_is_weight(node, arg)
         assert qconfig is not None
+
         act_post_process_ctr = qconfig.weight if is_weight else \
             qconfig.activation
+
         is_bias = node_arg_is_bias(node, arg)
         is_activation = not (is_weight or is_bias)
         weight_needs_obs = is_weight and weight_is_quantized(qconfig) and node.target not in NON_QUANTIZABLE_WEIGHT_OPS
@@ -415,8 +479,54 @@ def maybe_insert_input_observers_for_node(
 
     # assign the new args and kwargs to the node, inplace
     node.args = tuple(new_args)
-    node.kwargs = new_kwargs  # type: ignore[assignment]
+    node.kwargs = new_kwargs
 
+def maybe_insert_input_equalization_observers_for_node(
+    node: Node,
+    equalization_qconfig: Any,
+    model: torch.nn.Module,
+    modules: Dict[str, torch.nn.Module],
+    graph: Graph,
+    node_name_to_target_dtype: Dict[str, Any],
+    is_branch: bool,
+) -> None:
+    """
+    If `node` needs to be equalized, find the input/weight observers it needs in
+    `equalization_qconfig`, creates them, and inserts it into `graph`.
+
+    If `node` does not need an equalization observer, returns None.
+    """
+    if equalization_qconfig is None or not node_supports_equalization(node, modules):
+        return
+
+    if is_branch:
+        warnings.warn(
+            f"Cannot equalize {node} because it is part of a branch."
+        )
+        return
+
+    new_args = []
+    for arg in node.args:
+        if not isinstance(arg, Node) or node_arg_is_bias(node, arg):
+            new_args.append(arg)
+            continue
+
+        is_weight = node_arg_is_weight(node, arg)
+
+        act_eq_process_ctr = equalization_qconfig.weight if is_weight else \
+            equalization_qconfig.input_activation
+
+        new_eq_obs_mod = act_eq_process_ctr()
+        new_eq_obs_node = insert_observer(
+            arg, new_eq_obs_mod, model, modules, graph)
+
+        # set the type, so the next node can read it
+        node_name_to_target_dtype[new_eq_obs_node.name] = node_name_to_target_dtype[arg.name]
+
+        new_args.append(new_eq_obs_node)
+
+    # assign the new args and kwargs to the node, inplace
+    node.args = tuple(new_args)
 
 def maybe_insert_output_observer_for_node(
     node: Node,
@@ -446,9 +556,10 @@ def maybe_insert_output_observer_for_node(
     is_standalone_module = qhandler is not None and \
         isinstance(qhandler, StandaloneModuleQuantizeHandler)
 
+    dtype = node_name_to_target_dtype[node.name]
     should_insert_observer = \
         qhandler.should_insert_observer_for_output(
-            qconfig, model.training)
+            qconfig, model.training) and dtype not in (torch.bool, None, torch.float)
     # TODO(future PR): move the following logic to
     # should_insert_observer_for_output
     should_insert_observer = should_insert_observer and \
@@ -582,15 +693,16 @@ def maybe_propagate_dtype_for_node(
     matches: Dict[str, MatchResult],
 ) -> None:
     """
-    Assigns `target_dtype` to `node`. If `node` is matched to an instance
-    of `CopyNodeQuantizeHandler`, also call this function recursively on
+    Assigns `target_dtype` to `node`. If `node` is a general tensor shape op
+    (see GeneralTensorShapeOpQuantizeHandler in quantization_patterns.py for more details)
+    also call this function recursively on
     the first argument, to propagate the dtype to the caller.
     """
     node_name_to_target_dtype[node.name] = target_dtype
     # if this is a copy node, propagate to first arg
     root_node, matched_nodes, pattern, qhandler, qconfig = matches.get(
         node.name, (None, None, None, None, None))
-    if isinstance(qhandler, CopyNodeQuantizeHandler):
+    if qhandler is not None and qhandler.is_general_tensor_shape_op():
         prev_node = node.args[0]
         if isinstance(prev_node, Node):
             maybe_propagate_dtype_for_node(
@@ -618,35 +730,61 @@ def propagate_dtypes_for_known_nodes(
             maybe_propagate_dtype_for_node(
                 cur_node, torch.bool, node_name_to_target_dtype, matches)
 
-def adjust_observers_for_cat(
+def maybe_make_input_output_share_observers(
     node: Node,
     model: torch.nn.Module,
     modules: Dict[str, torch.nn.Module],
-) -> None:
+) -> bool:
     """
-    Ensures that for quantized `torch.cat` nodes, we share an observer
+    Ensures that we share an observer
     for all input arguments as well as the output argument. In detail, given
     a graph of
 
-      x0 -> obs0 -> cat -> x2
+      x0 -> obs0 -> op -> x2
                   /
       x1 -> obs1 /
 
     where node obs0 points to observer instance observer0,
     obs1 points to observer1 and obs2 points to observer2, we make nodes obs1
     and ob2 point to observer0.
+    Returns: whether the operation succeeded or not
     """
-    # find the observer module to use
-    first_arg = node.args[0]
-    assert isinstance(first_arg, (list, tuple))
-    first_arg_arg = first_arg[0]
+    first_arg = None
+    # find the first non-Tensor arg
+    for i in range(len(node.args)):
+        if isinstance(node.args[i], (Node, list, tuple)):
+            first_arg = node.args[i]
+            break
+
+    # if there is no non-Tensor arg, return directly
+    if first_arg is None:
+        return False
+
+    if isinstance(first_arg, (list, tuple)):
+        first_arg_arg = first_arg[0]
+    elif isinstance(first_arg, Node):
+        first_arg_arg = first_arg
+    else:
+        return False
 
     # if we have a graph such as
     #   observed_node -> non_observed_node -> cat
     # we need to navigate up to the first observer
     iteration_guard = 0
     while not is_activation_post_process_node(first_arg_arg, modules):
-        first_arg_arg = first_arg_arg.args[0]
+        # did not find an activation_post_process for the op
+        if first_arg_arg.op == "placeholder":
+            return False
+        # trace back the args until we found the first Tensor/Node
+        trace_back_node = None
+        for i in range(len(first_arg_arg.args)):
+            trace_back_node = first_arg_arg.args[i]
+            if isinstance(trace_back_node, Node):
+                break
+        if trace_back_node is None:
+            return False
+        first_arg_arg = trace_back_node
+
         iteration_guard += 1
         if iteration_guard > 10000:
             raise AssertionError('Unable to find observer of previous node')
@@ -656,19 +794,20 @@ def adjust_observers_for_cat(
     assert isinstance(target_to_use, str)
     obs_mod_to_use = modules[target_to_use]
 
-    # set all other input observer nodes to use that module
-    for input_idx, input_arg in enumerate(first_arg):
-        if input_idx == 0:
-            continue
-        iteration_guard = 0
-        while not is_activation_post_process_node(input_arg, modules):
-            input_arg = input_arg.args[0]
-            iteration_guard += 1
-            if iteration_guard > 10000:
-                raise AssertionError('Unable to find observer of previous node')
+    if isinstance(first_arg, (list, tuple)):
+        # set all other input observer nodes to use that module
+        for input_idx, input_arg in enumerate(first_arg):
+            if input_idx == 0:
+                continue
+            iteration_guard = 0
+            while not is_activation_post_process_node(input_arg, modules):
+                input_arg = input_arg.args[0]
+                iteration_guard += 1
+                if iteration_guard > 10000:
+                    raise AssertionError('Unable to find observer of previous node')
 
-        parent_name, name = _parent_name(input_arg.target)
-        setattr(modules[parent_name], name, obs_mod_to_use)
+            parent_name, name = _parent_name(input_arg.target)
+            setattr(modules[parent_name], name, obs_mod_to_use)
 
     # set the output observer node to use that module
     for output_obs_node, _ in node.users.items():
@@ -677,6 +816,17 @@ def adjust_observers_for_cat(
         setattr(modules[parent_name], name, obs_mod_to_use)
 
     # TODO(future PR): delete the orphaned observer modules
+    return True
+
+def remove_output_observer(
+        node: Node,
+        model: torch.nn.Module,
+        modules: Dict[str, torch.nn.Module]):
+    items = list(node.users.items())
+    for output_obs_node, _ in items:
+        assert is_activation_post_process_node(output_obs_node, modules)
+        output_obs_node.replace_all_uses_with(node)
+        model.graph.erase_node(output_obs_node)  # type: ignore[union-attr, operator]
 
 def swap_custom_module_to_observed(
         node: Node,
@@ -701,6 +851,7 @@ def insert_observers_for_model(
     qconfig_map: Dict[str, QConfigAny],
     graph: Graph,
     prepare_custom_config_dict: Dict[str, Any],
+    equalization_config_map: Dict[str, Any],
     input_quantized_idxs: List[int],
     output_quantized_idxs: List[int],
 ) -> Optional[Node]:
@@ -772,10 +923,6 @@ def insert_observers_for_model(
 
     for node in nodes_before_observation:
 
-        # check for matches
-        root_node, matched_nodes, pattern, qhandler, qconfig = matches.get(
-            node.name, (None, None, None, None, None))
-
         if node.op == 'placeholder':
             # if a graph input is in fp32, it does not need observation
             # if a graph input is in int8, we assume the observation happens
@@ -783,7 +930,11 @@ def insert_observers_for_model(
             pass
 
         elif node.op in ('call_module', 'call_method', 'call_function', 'output'):
-            modules = dict(model.named_modules(remove_duplicate=False))
+            # check for matches
+            root_node, matched_nodes, pattern, qhandler, qconfig = matches.get(
+                node.name, (None, None, None, None, None))
+            equalization_qconfig = equalization_config_map.get(node.name, None)
+
             this_node_dtype = node_name_to_target_dtype[node.name]
             output_not_a_tensor = this_node_dtype is None
             # TODO(future PR): consider stopping matching getitem
@@ -797,19 +948,53 @@ def insert_observers_for_model(
             ) and (not node.op == 'output')
 
             if not skip_inserting_observers:
+                modules = dict(model.named_modules(remove_duplicate=False))
                 if node.op != 'output':
+
+                    # This is currently only used for equalization.
+                    # Checks if the current node is in a branch in which the two
+                    # first layers are both being quantized.
+                    #
+                    # ex.       conv2
+                    #         /
+                    #      x -> conv1
+                    #
+                    # If this is the case, we will not apply equalization to the
+                    # initial two layers.
+                    is_quantized_branch = False
+                    if (
+                        len(node.args) > 0 and
+                        isinstance(node.args[0], Node) and
+                        len(node.args[0].users) > 1
+                    ):
+                        for user in node.args[0].users:
+                            # Checks if there exists another user being quantized
+                            is_user_quantized = (
+                                qconfig_map.get(user.name, None) is not None or
+                                (user.op == 'call_module' and isinstance(modules[str(user.target)], ObserverBase))
+                            )
+                            if user != node and is_user_quantized:
+                                is_quantized_branch = True
+
                     # this modifies node inplace
                     maybe_insert_input_observers_for_node(
                         node, qconfig, model, modules, graph,
                         node_name_to_target_dtype,
                         qhandler, prepare_custom_config_dict)
 
+                    # Insert equalization input observers if needed
+                    maybe_insert_input_equalization_observers_for_node(
+                        node, equalization_qconfig, model, modules, graph,
+                        node_name_to_target_dtype, is_quantized_branch)
+
                     is_last_node_of_pattern = root_node is node
-                    is_like_copy_node = \
-                        (qhandler is not None and (
-                            isinstance(qhandler, CopyNodeQuantizeHandler)
-                        ))
-                    if is_last_node_of_pattern and (not is_like_copy_node):
+                    is_general_tensor_value_op = \
+                        (qhandler is not None and qhandler.is_general_tensor_value_op())
+
+                    is_general_tensor_shape_op = \
+                        (qhandler is not None and qhandler.is_general_tensor_shape_op())
+
+                    if is_last_node_of_pattern and not is_general_tensor_shape_op:
                         # this returns the new observer node if it was needed
                         maybe_output_obs_node = maybe_insert_output_observer_for_node(
                             node, model, modules, graph, matches,
@@ -836,11 +1021,12 @@ def insert_observers_for_model(
                                     continue
                                 user_node.replace_input_with(node, maybe_output_obs_node)
 
-                            # for quantized cat nodes only, we modify the graph
+                            # for general tensor value ops, we modify the graph
                             # to make all inputs and outputs use the first input's
                             # observer
-                            if isinstance(qhandler, CatQuantizeHandler):
-                                adjust_observers_for_cat(node, model, modules)
+                            if is_general_tensor_value_op:
+                                if not maybe_make_input_output_share_observers(node, model, modules):
+                                    remove_output_observer(node, model, modules)
 
                             if isinstance(qhandler, CustomModuleQuantizeHandler):
                                 swap_custom_module_to_observed(node, qconfig, modules, prepare_custom_config_dict)
@@ -890,7 +1076,7 @@ def run_prepare_fx_on_standalone_modules(
             get_standalone_module_configs(
                 root_node, modules, prepare_custom_config_dict, qconfig)
 
-        standalone_module = modules[root_node.target]  # type: ignore[index]
+        standalone_module = modules[root_node.target]
         prepare = \
             torch.quantization.quantize_fx._prepare_standalone_module_fx  # type: ignore[attr-defined]
         observed_standalone_module = \
@@ -903,27 +1089,30 @@ def run_prepare_fx_on_standalone_modules(
         parent_name, name = _parent_name(root_node.target)
         setattr(modules[parent_name], name,
                 observed_standalone_module)
-        modules[root_node.target] = observed_standalone_module  # type: ignore[index]
+        modules[root_node.target] = observed_standalone_module
 
 def save_state(
     observed: GraphModule,
     qconfig_map: Dict[str, QConfigAny],
     node_name_to_scope: Dict[str, Tuple[str, type]],
     patterns: Dict[Pattern, QuantizeHandler],
-    prepare_custom_config_dict: Dict[str, Any]
+    prepare_custom_config_dict: Dict[str, Any],
+    equalization_qconfig_map: Dict[str, Any],
 ) -> None:
     observed._patterns = patterns  # type: ignore[assignment]
     observed._qconfig_map = qconfig_map  # type: ignore[assignment]
     observed._prepare_custom_config_dict = \
         prepare_custom_config_dict  # type: ignore[assignment]
     observed._node_name_to_scope = node_name_to_scope  # type: ignore[assignment]
+    observed._equalization_qconfig_map = equalization_qconfig_map  # type: ignore[assignment]
 
-def _prepare(
+def prepare(
         model: GraphModule,
         qconfig_dict: Any,
         node_name_to_scope: Dict[str, Tuple[str, type]],
-        prepare_custom_config_dict: Optional[Dict[str, Any]],
-        is_standalone_module: bool) -> ObservedGraphModule:
+        prepare_custom_config_dict: Optional[Dict[str, Any]] = None,
+        equalization_qconfig_dict: Optional[Dict[str, Any]] = None,
+        is_standalone_module: bool = False) -> ObservedGraphModule:
     """ standalone_module means it a submodule that is not inlined in
     parent module, and will be quantized separately as one unit.
 
@@ -946,6 +1135,8 @@ def _prepare(
     """
     if prepare_custom_config_dict is None:
         prepare_custom_config_dict = {}
+    if equalization_qconfig_dict is None:
+        equalization_qconfig_dict = {}
 
     additional_quant_patterns = \
         prepare_custom_config_dict.get("additional_quant_pattern", {})
@@ -963,13 +1154,19 @@ def _prepare(
         get_default_quant_patterns(), additional_quant_patterns)
 
     convert_dict_to_ordered_dict(qconfig_dict)
+    convert_dict_to_ordered_dict(equalization_qconfig_dict)
     flattened_qconfig_dict = get_flattened_qconfig_dict(qconfig_dict)
     # TODO: support regex as well
     propagate_qconfig_(model, flattened_qconfig_dict)
+
     if model.training:
         additional_qat_module_mapping = prepare_custom_config_dict.get(
             "additional_qat_module_mapping", {})
         qat_swap_modules(model, additional_qat_module_mapping)
+        qconfig_dict = update_qconfig_for_qat(qconfig_dict, additional_qat_module_mapping)
+
+    qconfig_dict = update_qconfig_for_fusion(model, qconfig_dict)
+    equalization_qconfig_dict = update_qconfig_for_fusion(model, equalization_qconfig_dict)
 
     # mapping from fully qualified module name to module instance
     # for example,
@@ -981,6 +1178,7 @@ def _prepare(
     modules = dict(model.named_modules())
 
     # fill qconfig_map, a map from node name to qconfig, used in find_matches
+    equalization_qconfig_map = generate_qconfig_map(model, modules, model.graph, equalization_qconfig_dict, node_name_to_scope)
     qconfig_map = generate_qconfig_map(model, modules, model.graph, qconfig_dict, node_name_to_scope)
 
     # match the patterns that will get quantized
@@ -1008,9 +1206,11 @@ def _prepare(
     result_node = insert_observers_for_model(
         model, modules, matches, qconfig_map,
         model.graph, prepare_custom_config_dict,
+        equalization_qconfig_map,
         input_quantized_idxs, output_quantized_idxs)
 
-    save_state(model, qconfig_map, node_name_to_scope, patterns, prepare_custom_config_dict)
+    save_state(model, qconfig_map, node_name_to_scope, patterns,
+               prepare_custom_config_dict, equalization_qconfig_map)
     preserved_attributes = set(prepare_custom_config_dict.get("preserved_attributes", []))
     model = ObservedGraphModule(model, model.graph, preserved_attributes)
     if is_standalone_module:

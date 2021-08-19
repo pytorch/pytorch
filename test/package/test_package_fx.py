@@ -29,7 +29,7 @@ class TestPackageFX(PackageTestCase):
         traced = symbolic_trace(st)
 
         f = BytesIO()
-        with PackageExporter(f, verbose=False) as pe:
+        with PackageExporter(f) as pe:
             pe.save_pickle("model", "model.pkl", traced)
 
         f.seek(0)
@@ -43,7 +43,7 @@ class TestPackageFX(PackageTestCase):
 
         model = SimpleTest()
         f = BytesIO()
-        with PackageExporter(f, verbose=False) as pe:
+        with PackageExporter(f) as pe:
             pe.intern("**")
             pe.save_pickle("model", "model.pkl", model)
 
@@ -59,7 +59,7 @@ class TestPackageFX(PackageTestCase):
 
         model = SimpleTest()
         f = BytesIO()
-        with PackageExporter(f, verbose=False) as pe:
+        with PackageExporter(f) as pe:
             pe.intern("**")
             pe.save_pickle("model", "model.pkl", model)
 
@@ -73,12 +73,12 @@ class TestPackageFX(PackageTestCase):
         # This should fail, because we are referencing some globals that are
         # only in the package.
         with self.assertRaises(ObjMismatchError):
-            with PackageExporter(f2, verbose=False) as pe:
+            with PackageExporter(f2) as pe:
                 pe.intern("**")
                 pe.save_pickle("model", "model.pkl", traced)
 
         f2.seek(0)
-        with PackageExporter(f2, importer=(pi, sys_importer), verbose=False) as pe:
+        with PackageExporter(f2, importer=(pi, sys_importer)) as pe:
             # Make the package available to the exporter's environment.
             pe.intern("**")
             pe.save_pickle("model", "model.pkl", traced)
@@ -102,7 +102,7 @@ class TestPackageFX(PackageTestCase):
         gm = GraphModule(torch.nn.Module(), graph)
 
         f = BytesIO()
-        with PackageExporter(f, verbose=False) as pe:
+        with PackageExporter(f) as pe:
             pe.intern("**")
             pe.save_pickle("model", "model.pkl", gm)
         f.seek(0)
@@ -120,6 +120,45 @@ class TestPackageFX(PackageTestCase):
         # not the same as in the outer env.
         packaged_dependency = pi.import_module("package_a.subpackage")
         self.assertTrue(packaged_dependency is not package_a.subpackage)
+
+    def test_package_fx_custom_tracer(self):
+        from package_a.test_all_leaf_modules_tracer import TestAllLeafModulesTracer
+        from package_a.test_module import SimpleTest, ModWithTwoSubmodsAndTensor
+
+        class SpecialGraphModule(torch.fx.GraphModule):
+            def __init__(self, root, graph, info):
+                super().__init__(root, graph)
+                self.info = info
+
+        sub_module = SimpleTest()
+        module = ModWithTwoSubmodsAndTensor(
+            torch.ones(3),
+            sub_module,
+            sub_module,
+        )
+        tracer = TestAllLeafModulesTracer()
+        graph = tracer.trace(module)
+
+        self.assertEqual(graph._tracer_cls, TestAllLeafModulesTracer)
+
+        gm = SpecialGraphModule(module, graph, "secret")
+        self.assertEqual(gm._tracer_cls, TestAllLeafModulesTracer)
+
+        f = BytesIO()
+        with PackageExporter(f) as pe:
+            pe.intern("**")
+            pe.save_pickle("model", "model.pkl", gm)
+        f.seek(0)
+
+        pi = PackageImporter(f)
+        loaded_gm = pi.load_pickle("model", "model.pkl")
+        self.assertEqual(
+            type(loaded_gm).__class__.__name__, SpecialGraphModule.__class__.__name__
+        )
+        self.assertEqual(loaded_gm.info, "secret")
+
+        input_x = torch.randn(3)
+        self.assertTrue(torch.allclose(loaded_gm(input_x), gm(input_x)))
 
 
 if __name__ == "__main__":

@@ -25,7 +25,7 @@ inline std::vector<at::Tensor> unflatten_dense_tensors(const at::Tensor& flat, a
   return at::unflatten_dense_tensors(flat, tensors);
 }
 
-
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct TensorGroup {
   std::vector<at::Tensor> tensors;
   size_t size = 0;
