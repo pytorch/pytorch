@@ -192,8 +192,8 @@ TEST(Registerizer, RegisterizerLoopInternal) {
       R"IR(
 # CHECK: for (int x = 0; x < 10; x++)
 # CHECK: int A_1 = A[x];
-# CHECK:   A_1 = x + A_1;
-# CHECK:   A_1 = x + A_1;
+# CHECK:   A_1 = A_1 + x;
+# CHECK:   A_1 = A_1 + x;
 # CHECK:   A[x] = A_1;
 # CHECK: })IR";
 
@@ -273,12 +273,12 @@ TEST(Registerizer, RegisterizerLoopInternalRepeated) {
    * int A_1 = A[1];
    * int A_2 = A[0];
    * for (int x = 0; x < 10; x++) {
-   *   A_2 = x + A_1;
-   *   A_2 = x + A_1;
+   *   A_2 = A_1 + x;
+   *   A_2 = A_1 + x;
    * }
    * for (int x = 0; x < 10; x++) {
-   *   A_2 = x + A_1;
-   *   A_2 = x + A_1;
+   *   A_2 = A_1 + x;
+   *   A_2 = A_1 + x;
    * }
    * A[0] = A_2;
    */
@@ -291,12 +291,12 @@ TEST(Registerizer, RegisterizerLoopInternalRepeated) {
 # CHECK: int A_1 = A[1];
 # CHECK: int A_2 = A[0];
 # CHECK: for (int x = 0; x < 10; x++)
-# CHECK:   A_2 = x + A_1;
-# CHECK:   A_2 = x + A_1;
+# CHECK:   A_2 = A_1 + x;
+# CHECK:   A_2 = A_1 + x;
 # CHECK: }
 # CHECK: for (int x = 0; x < 10; x++)
-# CHECK:   A_2 = x + A_1;
-# CHECK:   A_2 = x + A_1;
+# CHECK:   A_2 = A_1 + x;
+# CHECK:   A_2 = A_1 + x;
 # CHECK: }
 # CHECK-NOT: A[1]
 # CHECK: A[0] = A_2;
@@ -357,7 +357,7 @@ TEST(Registerizer, RegisterizerLoopInternalRepeatedOverlapOther) {
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
-  StmtPtr stmt = Block::make(
+  StmtPtr stmt = IRSimplifier::simplify(Block::make(
       {For::make(
            x,
            0,
@@ -373,7 +373,7 @@ TEST(Registerizer, RegisterizerLoopInternalRepeatedOverlapOther) {
                {Store::make(a, {0}, Add::make(x, Load::make(a, {y}))),
                 Store::make(a, {0}, Add::make(x, Load::make(a, {y})))}))
 
-      });
+      }));
 
   /*
    * for (int x = 0; x < 10; x++) {
@@ -2044,7 +2044,7 @@ TEST(Registerizer, RegisterizerPartialAfter) {
   /*
    * int A_1 = 0;
    * for (int x = 0; x < 10; x++) {
-   *   A_1 = x + A_1;
+   *   A_1 = A_1 + x;
    * }
    * A[0] = A_1;
    * for (int x = 1; x < 10; x++) {
@@ -2059,7 +2059,7 @@ TEST(Registerizer, RegisterizerPartialAfter) {
       R"IR(
 # CHECK: int A_1 = 0;
 # CHECK: for (
-# CHECK:   A_1 = x + A_1;
+# CHECK:   A_1 = A_1 + x;
 # CHECK: }
 # CHECK: A[0] = A_1;
 # CHECK: for (
@@ -2104,7 +2104,7 @@ TEST(Registerizer, RegisterizerPartialBefore) {
    * }
    * int A_1 = 0;
    * for (int x = 0; x < 10; x++) {
-   *   A_1 = x + A_1;
+   *   A_1 = A_1 + x;
    * }
    * A[0] = A_1;
    */
@@ -2120,7 +2120,7 @@ TEST(Registerizer, RegisterizerPartialBefore) {
 # CHECK: }
 # CHECK: int A_1 = 0;
 # CHECK: for (
-# CHECK:   A_1 = x + A_1;
+# CHECK:   A_1 = A_1 + x;
 # CHECK: }
 # CHECK: A[0] = A_1;)IR";
 
@@ -2161,7 +2161,7 @@ TEST(Registerizer, RegisterizerPartialInside) {
   /*
    * int A_1 = 2;
    * for (int x1 = 0; x1 < 10; x1++) {
-   *   A_1 = x1 + A_1;
+   *   A_1 = A_1 + x1;
    * }
    * A[0] = A_1;
    * for (int x2 = 1; x2 < 10; x2++) {
@@ -2169,7 +2169,7 @@ TEST(Registerizer, RegisterizerPartialInside) {
    * }
    * int A_2 = A[0];
    * for (int x3 = 0; x3 < 10; x3++) {
-   *   A_2 = x3 + A_2;
+   *   A_2 = A_2 + x3;
    * }
    * A[0] = A_2;
    */
@@ -2181,7 +2181,7 @@ TEST(Registerizer, RegisterizerPartialInside) {
       R"IR(
 # CHECK: int A_1 = 2;
 # CHECK: for (
-# CHECK:   A_1 = x1 + A_1;
+# CHECK:   A_1 = A_1 + x1;
 # CHECK: }
 # CHECK: A[0] = A_1;
 # CHECK: for (
@@ -2189,7 +2189,7 @@ TEST(Registerizer, RegisterizerPartialInside) {
 # CHECK: }
 # CHECK: int A_2 = A[0];
 # CHECK: for (
-# CHECK:   A_2 = x3 + A_2;
+# CHECK:   A_2 = A_2 + x3;
 # CHECK: }
 # CHECK: A[0] = A_2;)IR";
 
@@ -2232,7 +2232,7 @@ TEST(Registerizer, RegisterizerPartialCondition) {
   /*
    * int A_1 = 2;
    * for (int x = 0; x < 10; x++) {
-   *   A_1 = x + A_1;
+   *   A_1 = A_1 + x;
    * }
    * A[0] = A_1;
    * if (x<5 ? 1 : 0) {
@@ -2240,7 +2240,7 @@ TEST(Registerizer, RegisterizerPartialCondition) {
    * }
    * int A_2 = A[0];
    * for (int x = 0; x < 10; x++) {
-   *   A_2 = x + A_2;
+   *   A_2 = A_2 + x;
    * }
    * A[0] = A_2;
    */
@@ -2252,7 +2252,7 @@ TEST(Registerizer, RegisterizerPartialCondition) {
       R"IR(
 # CHECK: int A_1 = 2;
 # CHECK: for (
-# CHECK:   A_1 = x + A_1;
+# CHECK:   A_1 = A_1 + x;
 # CHECK: }
 # CHECK: A[0] = A_1;
 # CHECK: if (
@@ -2260,7 +2260,7 @@ TEST(Registerizer, RegisterizerPartialCondition) {
 # CHECK: }
 # CHECK: int A_2 = A[0];
 # CHECK: for (
-# CHECK:   A_2 = x + A_2;
+# CHECK:   A_2 = A_2 + x;
 # CHECK: }
 # CHECK: A[0] = A_2;)IR";
 
@@ -2937,7 +2937,7 @@ TEST(Registerizer, RegisterizerNestedLoopSimple) {
    * for (int y = 0; y < 10; y++) {
    *   int A_1 = A[y];
    *   for (int x = 0; x < 10; x++) {
-   *     A_1 = x + A_1;
+   *     A_1 = A_1 + x;
    *   }
    * A[y] = A_1;
    * }
@@ -2951,7 +2951,7 @@ TEST(Registerizer, RegisterizerNestedLoopSimple) {
 # CHECK: for (int y
 # CHECK:   int A_1 = A[y];
 # CHECK:   for (int x
-# CHECK:     A_1 = x + A_1;
+# CHECK:     A_1 = A_1 + x;
 # CHECK:   }
 # CHECK:   A[y] = A_1;
 # CHECK: })IR";
@@ -3366,13 +3366,13 @@ TEST(Registerizer, RegisterizerLoopLetVar) {
   BufHandle a("A", {10}, kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
-  StmtPtr stmt = Block::make({For::make(
+  StmtPtr stmt = IRSimplifier::simplify(Block::make({For::make(
       x,
       0,
       10,
       Block::make(
           {Let::make(y, 30),
-           Store::make(a, {y}, Add::make(x, Load::make(a, {y})))}))});
+           Store::make(a, {y}, Add::make(x, Load::make(a, {y})))}))}));
 
   /*
    * for (int x = 0; x < 10; x++) {
@@ -3422,7 +3422,7 @@ TEST(Registerizer, RegisterizerLoopLetVarOuter) {
    * int y = 30;
    * int A_1 = A[y];
    * for (int x = 0; x < 10; x++) {
-   *   A_1 = x + A_1;
+   *   A_1 = A_1 + x;
    * }
    * A[y] = A_1;
    */
@@ -3435,7 +3435,7 @@ TEST(Registerizer, RegisterizerLoopLetVarOuter) {
 # CHECK: int y = 30;
 # CHECK: int A_1 = A[y];
 # CHECK: for (int x
-# CHECK:   A_1 = x + A_1;
+# CHECK:   A_1 = A_1 + x;
 # CHECK: A[y] = A_1;)IR";
 
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
@@ -3516,7 +3516,7 @@ TEST(Registerizer, RegisterizerMultiDimPartial) {
    * int A_1 = A[0, 1, 4];
    * int A_2 = A[0, 2, 2];
    * for (int x = 0; x < 10; x++) {
-   *   A_2 = x + A_1;
+   *   A_2 = A_1 + x;
    * }
    * A[0, 2, 2] = A_2;
    */
@@ -3530,7 +3530,7 @@ TEST(Registerizer, RegisterizerMultiDimPartial) {
 # CHECK: int A_1 = A[0, 1, 4];
 # CHECK: int A_2 = A[0, 2, 2];
 # CHECK: for (
-# CHECK:   A_2 = x + A_1;
+# CHECK:   A_2 = A_1 + x;
 # CHECK: A[0, 2, 2] = A_2;)IR";
 
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
@@ -3599,7 +3599,7 @@ TEST(Registerizer, RegisterizerMultiDimPartialOverlap) {
    * A[0, 1, 2] = 0;
    * int A_1 = A[y, 2, 4];
    * for (int x = 0; x < 10; x++) {
-   *   A[0, x, 2] = x + A_1;
+   *   A[0, x, 2] = A_1 + x;
    * }
    */
 
@@ -3611,7 +3611,7 @@ TEST(Registerizer, RegisterizerMultiDimPartialOverlap) {
 # CHECK: A[0, 1, 2] = 0;
 # CHECK: int A_1 = A[y, 2, 4];
 # CHECK: for (
-# CHECK:   A[0, x, 2] = x + A_1;
+# CHECK:   A[0, x, 2] = A_1 + x;
 # CHECK: })IR";
 
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
@@ -3736,12 +3736,12 @@ TEST(Registerizer, RegisterizerMultiDim3DReduction2) {
 
   /*
    * for (int x = 0; x < 10; x++) {
-   *   int C_1 = C[x];
    *   int A_1 = A[x];
+   *   int C_1 = C[x];
    *   for (int y = 0; y < 10; y++) {
    *     int B_1 = B[y];
    *     for (int z = 0; z < 10; z++) {
-   *       C_1 = C_1 + A_1 * B_1;
+   *       C_1 = A_1 * B_1 + C_1;
    *     }
    *   }
    *   C[x] = C_1;
@@ -3754,12 +3754,12 @@ TEST(Registerizer, RegisterizerMultiDim3DReduction2) {
   const std::string& verification_pattern =
       R"IR(
 # CHECK: for (int x
-# CHECK:   int C_1 = C[x];
 # CHECK:   int A_1 = A[x];
+# CHECK:   int C_1 = C[x];
 # CHECK:   for (int y
 # CHECK:     int B_1 = B[y];
 # CHECK:       for (int z
-# CHECK:         C_1 = C_1 + A_1 * B_1;
+# CHECK:         C_1 = A_1 * B_1 + C_1;
 # CHECK:       }
 # CHECK:     }
 # CHECK:   C[x] = C_1;
