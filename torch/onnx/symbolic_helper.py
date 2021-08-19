@@ -805,7 +805,6 @@ def _handle_reduce_dim_none(g, self, op_name):
         return g.op(op_name, self, keepdims_i=1)
     return g.op(op_name, self, keepdims_i=0)
 
-
 # ---------------------------------------------------------------------
 # ONNX operator version
 # ---------------------------------------------------------------------
