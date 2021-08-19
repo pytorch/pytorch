@@ -105,7 +105,7 @@ TEST_F(Kernel, _1) {
   auto ref = a * (a * b);
   TensorExprKernel k(graph);
   std::vector<at::Tensor> inputs = {a, b};
-  Stmt* s = k.getCodeGenStmt();
+  StmtPtr s = k.getCodeGenStmt();
 
   std::ostringstream oss;
   oss << *s;
@@ -145,7 +145,7 @@ TEST_F(Kernel, _2) {
   auto ref = a * (a * b);
   TensorExprKernel k(graph);
   std::vector<at::Tensor> inputs = {a, b};
-  Stmt* s = k.getCodeGenStmt();
+  StmtPtr s = k.getCodeGenStmt();
 
   std::ostringstream oss;
   oss << *s;
@@ -185,7 +185,7 @@ TEST_F(Kernel, _3) {
   auto ref = a * (a * b);
   TensorExprKernel k(graph);
   std::vector<at::Tensor> inputs = {a, b};
-  Stmt* s = k.getCodeGenStmt();
+  StmtPtr s = k.getCodeGenStmt();
 
   std::ostringstream oss;
   oss << *s;
@@ -207,7 +207,6 @@ TEST_F(Kernel, _3) {
 }
 
 TEST_F(Kernel, ParallelStrided) {
-  torch::jit::tensorexpr::overrideThreadCount(6);
   KernelScope kernel_scope;
 
   const auto graph_string = R"IR(
@@ -229,19 +228,6 @@ TEST_F(Kernel, ParallelStrided) {
   auto o = at::zeros_like(ref);
   TensorExprKernel k(graph);
   std::vector<at::Tensor> inputs = {a, b};
-  Stmt* s = k.getCodeGenStmt();
-
-  std::ostringstream oss;
-  oss << *s;
-
-  // Check the IR we produced
-  const std::string& verification_pattern =
-      R"IR(
-# CHECK: for
-# CHECK-NEXT: for
-# CHECK-NOT: for)IR";
-  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
-
   std::vector<IValue> stack = fmap<IValue>(inputs);
   k.run(stack);
   o = stack[0].toTensor();
@@ -274,7 +260,7 @@ TEST_F(Kernel, DISABLED_Shape_Inference) {
     auto ref = a * (a * b);
     TensorExprKernel k(graph);
     std::vector<at::Tensor> inputs = {a, b};
-    Stmt* s = k.getCodeGenStmt();
+    StmtPtr s = k.getCodeGenStmt();
 
     std::ostringstream oss;
     oss << *s;
@@ -314,7 +300,7 @@ TEST_F(Kernel, DISABLED_Shape_Inference) {
     auto ref = t[0] * t[1];
     TensorExprKernel k(graph);
     std::vector<at::Tensor> inputs = {a, b};
-    Stmt* s = k.getCodeGenStmt();
+    StmtPtr s = k.getCodeGenStmt();
 
     std::ostringstream oss;
     oss << *s;
@@ -365,7 +351,7 @@ TEST_F(Kernel, DISABLED_Shape_Inference) {
 
     TensorExprKernel k(graph);
     std::vector<at::Tensor> inputs = {a, b, c};
-    Stmt* s = k.getCodeGenStmt();
+    StmtPtr s = k.getCodeGenStmt();
 
     std::ostringstream oss;
     oss << *s;
@@ -420,7 +406,7 @@ TEST_F(Kernel, DISABLED_Shape_Inference) {
 
     TensorExprKernel k(graph);
     std::vector<at::Tensor> inputs = {a, b, c};
-    Stmt* s = k.getCodeGenStmt();
+    StmtPtr s = k.getCodeGenStmt();
 
     std::ostringstream oss;
     oss << *s;
@@ -522,7 +508,7 @@ TEST_F(Kernel, CatInputTypesPromotion) {
 
     TensorExprKernel k(graph);
     std::vector<at::Tensor> inputs = {a, b, c};
-    Stmt* s = k.getCodeGenStmt();
+    StmtPtr s = k.getCodeGenStmt();
 
     std::ostringstream oss;
     oss << *s;
@@ -571,7 +557,7 @@ TEST_F(Kernel, CatWoConditionals) {
   parseIR(graph_string, &*graph);
 
   TensorExprKernel k(graph);
-  Stmt* s = k.getCodeGenStmt();
+  StmtPtr s = k.getCodeGenStmt();
   std::ostringstream oss;
   oss << *s;
 
@@ -636,7 +622,7 @@ TEST_F(Kernel, OptimizeConditionals) {
   parseIR(graph_string, &*graph);
 
   TensorExprKernel k(graph);
-  Stmt* s = k.getCodeGenStmt();
+  StmtPtr s = k.getCodeGenStmt();
   std::ostringstream oss;
   oss << *s;
 
@@ -741,7 +727,7 @@ TEST_F(Kernel, SumAllAxes) {
     auto ref = a.sum(/*dtype=*/dtype);
     TensorExprKernel k(graph);
     std::vector<at::Tensor> inputs = {a};
-    Stmt* s = k.getCodeGenStmt();
+    StmtPtr s = k.getCodeGenStmt();
 
     std::ostringstream oss;
     oss << *s;
@@ -813,7 +799,7 @@ TEST_F(Kernel, SumOneAxis) {
         auto o = at::empty({}, TensorOptions(kCPU));
         TensorExprKernel k(graph);
         std::vector<at::Tensor> inputs = {a};
-        Stmt* s = k.getCodeGenStmt();
+        StmtPtr s = k.getCodeGenStmt();
 
         std::ostringstream oss;
         oss << *s;
@@ -875,7 +861,7 @@ TEST_F(Kernel, SumMultipleAxes) {
 
         TensorExprKernel k(graph);
         std::vector<at::Tensor> inputs = {a};
-        Stmt* s = k.getCodeGenStmt();
+        StmtPtr s = k.getCodeGenStmt();
 
         std::ostringstream oss;
         oss << *s;
@@ -946,7 +932,7 @@ TEST_F(Kernel, Softmax2D) {
 
       TensorExprKernel k(graph);
       std::vector<at::Tensor> inputs = {a};
-      Stmt* s = k.getCodeGenStmt();
+      StmtPtr s = k.getCodeGenStmt();
 
       std::ostringstream oss;
       oss << *s;
@@ -1022,7 +1008,7 @@ TEST_F(Kernel, Softmax3D) {
 
       TensorExprKernel k(graph);
       std::vector<at::Tensor> inputs = {a};
-      Stmt* s = k.getCodeGenStmt();
+      StmtPtr s = k.getCodeGenStmt();
 
       std::ostringstream oss;
       oss << *s;
@@ -1104,7 +1090,7 @@ TEST_F(Kernel, Softmax4D) {
 
       TensorExprKernel k(graph);
       std::vector<at::Tensor> inputs = {a};
-      Stmt* s = k.getCodeGenStmt();
+      StmtPtr s = k.getCodeGenStmt();
 
       std::ostringstream oss;
       oss << *s;
@@ -1148,7 +1134,7 @@ TEST_F(Kernel, InlineProducerIntoReduction) {
   parseIR(graph_string, &*graph);
 
   TensorExprKernel k(graph);
-  Stmt* s = k.getCodeGenStmt();
+  StmtPtr s = k.getCodeGenStmt();
   std::ostringstream oss;
   oss << *s;
 
@@ -1189,7 +1175,7 @@ TEST_F(Kernel, InlineReductionIntoConsumer) {
   parseIR(graph_string, &*graph);
 
   TensorExprKernel k(graph);
-  Stmt* s = k.getCodeGenStmt();
+  StmtPtr s = k.getCodeGenStmt();
   std::ostringstream oss;
   oss << *s;
 
