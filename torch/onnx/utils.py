@@ -533,7 +533,7 @@ def export_to_pretty_string(model, args, f, export_params=True, verbose=False, t
                             export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None,
                             google_printer=False, opset_version=None, _retain_param_name=True,
                             keep_initializers_as_inputs=None, custom_opsets=None, add_node_names=True,
-                            do_constant_folding=True):
+                            do_constant_folding=True, dynamic_axes=None):
     return _export_to_pretty_string(model, args, f, export_params, verbose, training,
                                     input_names, output_names, operator_export_type,
                                     export_type, example_outputs, google_printer,
@@ -541,7 +541,7 @@ def export_to_pretty_string(model, args, f, export_params=True, verbose=False, t
                                     do_constant_folding=do_constant_folding,
                                     add_node_names=add_node_names,
                                     keep_initializers_as_inputs=keep_initializers_as_inputs,
-                                    custom_opsets=custom_opsets)
+                                    custom_opsets=custom_opsets, dynamic_axes=dynamic_axes)
 
 
 def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, training=None,
@@ -550,7 +550,7 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
                              google_printer=False, opset_version=None, _retain_param_name=False,
                              do_constant_folding=True, keep_initializers_as_inputs=None,
                              fixed_batch_size=False, custom_opsets=None, add_node_names=True,
-                             onnx_shape_inference=True):
+                             onnx_shape_inference=True, dynamic_axes=None):
     from torch.onnx.symbolic_helper import _default_onnx_opset_version, _set_opset_version
     from torch.onnx.symbolic_helper import _set_operator_export_type
     if opset_version is None:
@@ -572,7 +572,7 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
                                                         output_names, operator_export_type,
                                                         example_outputs, _retain_param_name,
                                                         val_do_constant_folding, fixed_batch_size=fixed_batch_size,
-                                                        training=training,
+                                                        training=training, dynamic_axes=dynamic_axes,
                                                         export_params=export_params,
                                                         keep_initializers_as_inputs=val_keep_init_as_ip)
 
@@ -1194,7 +1194,7 @@ def _node_getitem(self, k):
     return getattr(self, sel)(k)
 
 
-def register_custom_op_symbolic(symbolic_name, symbolic_fn, opset_version):
+def get_ns_op_name_from_custom_op(symbolic_name):
     if not bool(re.match(r"^[a-zA-Z0-9-_]*::[a-zA-Z-_]+[a-zA-Z0-9-_]*$", symbolic_name)):
         raise RuntimeError("Failed to register operator {}. \
                            The symbolic name must match the format Domain::Name, \
@@ -1206,12 +1206,32 @@ def register_custom_op_symbolic(symbolic_name, symbolic_fn, opset_version):
     if ns in unaccepted_domain_names:
         raise RuntimeError("Failed to register operator {}. The domain {} is already a used domain."
                            .format(symbolic_name, ns))
+    return ns, op_name
+
+
+# When the user registers symbolic for custom/contrib ops,
+# it is highly recommended to add shape inference for that operator via setType API,
+# otherwise the exported graph may have incorrect shape inference in some extreme cases.
+# An example of setType is test_aten_embedding_2 in test_operators.py..
+def register_custom_op_symbolic(symbolic_name, symbolic_fn, opset_version):
+    ns, op_name = get_ns_op_name_from_custom_op(symbolic_name)
     import torch.onnx.symbolic_registry as sym_registry
     from torch.onnx.symbolic_helper import _onnx_stable_opsets, _onnx_main_opset
 
     for version in _onnx_stable_opsets + [_onnx_main_opset]:
         if version >= opset_version:
             sym_registry.register_op(op_name, symbolic_fn, ns, version)
+
+
+def unregister_custom_op_symbolic(symbolic_name, opset_version):
+    ns, op_name = get_ns_op_name_from_custom_op(symbolic_name)
+    import torch.onnx.symbolic_registry as sym_registry
+    from torch.onnx.symbolic_helper import _onnx_stable_opsets, _onnx_main_opset
+
+    for version in _onnx_stable_opsets + [_onnx_main_opset]:
+        if version >= opset_version:
+            sym_registry.unregister_op(op_name, ns, version)
+
 
 # This helper function ensures dynamic axes argument is following the expected format
 def _validate_dynamic_axes(dynamic_axes, model, input_names, output_names):
