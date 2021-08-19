@@ -211,23 +211,6 @@ additional_op_db.extend([
            supports_out=False),
 ])
 
-# https://github.com/pytorch/pytorch/pull/61067
-additional_op_db.extend([
-    OpInfo('nn.functional.relu',
-        aten_name="relu",
-        dtypes=all_types(),
-        dtypesIfCPU=all_types_and(torch.bfloat16),
-        backward_dtypesIfCPU=floating_types(),
-        dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
-        backward_dtypesIfCUDA=floating_types_and(torch.float16),
-        supports_autograd=True,
-        assert_autodiffed=True,
-        sample_inputs_func=sample_inputs_hardshrink_hardtanh,
-        supports_gradgrad=True,
-        supports_out=False,
-        autodiff_nonfusible_nodes=["aten::relu"]),
-])
-
 # https://github.com/pytorch/pytorch/pull/61068
 def sample_inputs_dropout(self, device, dtype, requires_grad):
     samples = []
@@ -341,58 +324,6 @@ additional_op_db.extend([
            supports_out=False),
 ])
 
-def sample_inputs_pad(self, device, dtype, requires_grad, mode='constant', value=None):
-    valid_lengths = {
-        'constant': [1,2,3,4,5],
-        'reflect': [3, 4],
-        'replicate': [3, 4, 5],
-        'circular': [3, 4, 5],
-    }
-    sample_inputs = []
-    for length in valid_lengths[mode]:
-        inp = make_tensor(list(range(2, length + 2)), device=device, dtype=dtype,
-                        requires_grad=requires_grad, low=-1, high=1)
-        num_pad_dims = (length - 2) * 2
-        for pad in [[1] * num_pad_dims, [1, 2] * (num_pad_dims // 2)]:
-            args = (pad, mode) if value is None else (pad, mode, value)
-            sample_inputs.append(SampleInput(inp, args=args))
-    return sample_inputs
-
-for mode in ['constant', 'reflect', 'replicate', 'circular']:
-    additional_op_db.append(
-        OpInfo('nn.functional.pad',
-               aten_name="pad",
-               variant_test_name=mode,
-               supports_autograd=True,
-               sample_inputs_func=partial(sample_inputs_pad, mode=mode),
-               dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
-               supports_out=False))
-additional_op_db.append(
-    OpInfo('nn.functional.pad',
-           aten_name="pad",
-           variant_test_name='constant_value',
-           supports_autograd=True,
-           sample_inputs_func=partial(sample_inputs_pad, mode='constant', value=100),
-           dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
-           supports_out=False))
-
-def sample_inputs_normalize(self, device, dtype, requires_grad):
-    inp = make_tensor((2, 3, 4, 5), device=device, dtype=dtype,
-                      requires_grad=requires_grad, low=-1, high=1)
-    sample_inputs = []
-    for dim in (0, -1, 2):
-        for p in (1., 2.):
-            sample_inputs.append(SampleInput(inp, args=(p, dim)))
-    return sample_inputs
-
-additional_op_db.append(
-    OpInfo('nn.functional.normalize',
-           aten_name="normalize",
-           supports_autograd=True,
-           sample_inputs_func=sample_inputs_normalize,
-           dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
-           supports_out=True))
-
 def sample_inputs_cross_entropy(self, device, dtype, requires_grad, reduction):
     N = 2
     C = 10
@@ -426,49 +357,4 @@ for reduction in ['mean', 'sum', 'none']:
                dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
                supports_out=True))
 
-# Taken from https://github.com/pytorch/pytorch/pull/62254
-def sample_inputs_mse_loss(op_info, device, dtype, requires_grad, **kwargs):
-    _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
-    shapes_and_kwargs = [
-        ((), None),
-        ((S,), dict(reduction="mean")),
-        ((S,), dict(reduction="sum")),
-        ((S,), dict(reduction="none")),
-        ((S, S), None),
-        ((S, S, S), None),
-    ]
-
-    return [
-        SampleInput(_make_tensor(shape), args=(_make_tensor(shape),), kwargs=kwargs)
-        for shape, kwargs in shapes_and_kwargs
-    ]
-
-
-def reference_mse_loss(input, target, reduction="mean"):
-    se = (input - target) ** 2
-    if reduction == "mean":
-        return np.mean(se)
-    elif reduction == "sum":
-        return np.sum(se)
-    else:  # reduction == "none"
-        return se
-
-additional_op_db.append(
-OpInfo(
-        "nn.functional.mse_loss",
-        ref=reference_mse_loss,
-        sample_inputs_func=sample_inputs_mse_loss,
-        supports_out=False,
-        dtypesIfCPU=floating_types_and(torch.float16),
-        backward_dtypesIfCPU=floating_types(),
-        dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
-        skips=(
-            SkipInfo(
-                "TestJit",
-                "test_variant_consistency_jit",
-                dtypes=(torch.float32,),
-            ),
-        ),
-   )
-)
