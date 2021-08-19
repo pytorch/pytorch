@@ -9739,7 +9739,7 @@ batched outputs `X`
 
 If the diagonal of :attr:`A` contains zeros or elements that are very close to zero and
 :attr:`unitriangular`\ `= False` (default) or if the input matrix is badly conditioned,
-the result may contain `NaN`s.
+the result may contain `NaN` s.
 
 Supports input of float, double, cfloat and cdouble data types.
 
