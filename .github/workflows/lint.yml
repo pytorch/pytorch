@@ -104,6 +104,12 @@ jobs:
         uses: actions/checkout@v2
         with:
           fetch-depth: 0 # deep clone, to allow us to use git merge-base
+      - name: Fetch PR diff
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          cd "${GITHUB_WORKSPACE}"
+          wget -O pr.diff "https://patch-diff.githubusercontent.com/raw/pytorch/pytorch/pull/$PR_NUMBER.diff"
       - name: Run clang-format
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -114,22 +120,7 @@ jobs:
           git remote add upstream https://github.com/pytorch/pytorch
           git fetch upstream "$GITHUB_BASE_REF"
 
-          # only run clang-format on allowlisted files
-          echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
-          echo "| clang-format failures found! Run: "
-          echo "|    tools/linter/clang_format_ci.sh ${BASE_SHA} "
-          echo "| to fix this error. "
-          echo "| For more info, see: https://github.com/pytorch/pytorch/wiki/clang-format "
-          echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
-
-          tools/linter/clang_format_ci.sh "${BASE_SHA}"
-
-          GIT_DIFF=$(git diff)
-          if [[ -z $GIT_DIFF ]]; then
-            exit 0
-          fi
-          echo "$GIT_DIFF"
-          exit 1
+          python3 tools/linter/lint.py clang-format --diff-file pr.diff --error-if-changed
 
   py2-setup-validate-errormsg:
     runs-on: ubuntu-18.04
@@ -163,10 +154,8 @@ jobs:
       - name: Install requirements
         id: requirements
         run: |
-          pip3 install -r requirements.txt --user
-      - name: Install Jinja2
-        run: |
-          pip3 install Jinja2==3.0.1 --user
+          pip install -r requirements.txt --user
+          pip install -r tools/linter/shellcheck/requirements.txt --user
       - name: Checkout PyTorch
         uses: actions/checkout@v2
       - name: Regenerate workflows
@@ -198,25 +187,10 @@ jobs:
           cp "shellcheck-${scversion}/shellcheck" ~/.local/bin/
           rm -r "shellcheck-${scversion}"
           ~/.local/bin/shellcheck --version
-      - name: Extract scripts from GitHub Actions workflows
-        if: ${{ always() && steps.install_shellcheck.outcome == 'success' }}
-        run: |
-          # For local lints, remove the .extracted_scripts folder if it was already there
-          rm -rf .extracted_scripts
-          tools/extract_scripts.py --out=.extracted_scripts
       - name: Run ShellCheck
         if: ${{ always() && steps.install_shellcheck.outcome == 'success' }}
         run: |
-          if ! tools/linter/run_shellcheck.sh .extracted_scripts .jenkins/pytorch; then
-            echo
-            echo 'ShellCheck gave a nonzero exit code. Please fix the warnings'
-            echo 'listed above. Note that if a path in one of the above warning'
-            echo 'messages starts with .extracted_scripts/ then that means it'
-            echo 'is referring to a shell script embedded within another file,'
-            echo 'whose path is given by the path components immediately'
-            echo 'following the .extracted_scripts/ prefix.'
-            false
-          fi
+          python3 tools/linter/lint.py shellcheck
       - name: Check that jobs will be cancelled
         if: ${{ always() && steps.generate_workflows.outcome == 'success' }}
         run: |
@@ -287,13 +261,11 @@ jobs:
       - name: Install dependencies
         run: |
           set -eux
-          pip3 install typing-extensions --user # for tools/linter/translate_annotations.py
-          pip3 install -r requirements-flake8.txt --user
-          flake8 --version
+          pip install -r tools/linter/mypy/requirements.txt --user
       - name: Run flake8
         run: |
           set -eux
-          flake8 | tee "${GITHUB_WORKSPACE}"/flake8-output.txt
+          python3 tools/linter/lint.py flake8 2&>1 | tee "${GITHUB_WORKSPACE}"/flake8-output.txt
       - name: Translate annotations
         if: ${{ github.event_name == 'pull_request' }}
         env:
@@ -314,7 +286,7 @@ jobs:
           set -eu
           # Re-output flake8 status so GitHub logs show it on the step that actually failed
           cat "${GITHUB_WORKSPACE}"/flake8-output.txt
-          if [ -s "${GITHUB_WORKSPACE}"/flake8-output.txt ]; then
+          if grep -Fq "fail: flake8" "${GITHUB_WORKSPACE}"/flake8-output.txt; then
             echo 'Please fix the above Flake8 warnings.'
             false
           fi
@@ -344,17 +316,13 @@ jobs:
         run: |
           cd "${GITHUB_WORKSPACE}"
           wget -O pr.diff "https://patch-diff.githubusercontent.com/raw/pytorch/pytorch/pull/$PR_NUMBER.diff"
-      - name: Generate build files
-        run: |
-          cd "${GITHUB_WORKSPACE}"
-          python3 -m tools.linter.clang_tidy.generate_build_files
       - name: Run clang-tidy
         if: ${{ github.event_name == 'pull_request' }}
         run: |
           cd "${GITHUB_WORKSPACE}"
 
           # The Docker image has our custom build, so we don't need to install it
-          python3 -m tools.linter.clang_tidy \
+          python3 tools/linter/lint.py clang-tidy \
             --clang-tidy-exe "$(which clang-tidy)" \
             --diff-file pr.diff \
             --disable-progress-bar 2>&1 | tee "${GITHUB_WORKSPACE}"/clang-tidy-output.txt
@@ -398,7 +366,7 @@ jobs:
           cd "${GITHUB_WORKSPACE}"
           set -eu
           cat "${GITHUB_WORKSPACE}"/clang-tidy-output.txt
-          if grep -Fq "Warnings detected!" "${GITHUB_WORKSPACE}"/clang-tidy-output.txt; then
+          if grep -Fq "fail: clang-tidy" "${GITHUB_WORKSPACE}"/clang-tidy-output.txt; then
             echo 'Please fix the above clang-tidy warnings.'
             false
           fi
@@ -438,33 +406,17 @@ jobs:
       - name: Install dependencies
         run: |
           set -eux
-          pip3 install -r requirements.txt --user
-          pip3 install numpy==1.20 --user # https://github.com/pytorch/pytorch/pull/60472
-          pip3 install expecttest==0.1.3 mypy==0.812 --user
-          # Needed to check tools/render_junit.py
-          pip3 install junitparser rich --user
-      - name: Run autogen
-        run: |
-          set -eux
-          time python -mtools.generate_torch_version --is_debug=false
-          time python -mtools.codegen.gen -s aten/src/ATen -d build/aten/src/ATen
-          time python -mtools.pyi.gen_pyi --native-functions-path aten/src/ATen/native/native_functions.yaml --deprecated-functions-path "tools/autograd/deprecated.yaml"
+
+          pip install -r requirements.txt --user
+          pip install -r tools/linter/mypy/requirements.txt --user
       - name: Run mypy
         env:
           MYPY_FORCE_COLOR: 1
           TERM: xterm-color
         run: |
           set -eux
-          STATUS=
-          for CONFIG in mypy*.ini; do
-            if ! mypy --config="$CONFIG"; then
-              STATUS=fail
-            fi
-          done
-          if [ -n "$STATUS" ]; then
-            echo 'Please fix the above mypy warnings.'
-            false
-          fi
+          python3 -m tools.lint mypy --generate-stubs
+
 
 concurrency:
   group: lint-${{ github.event.pull_request.number || github.sha }}

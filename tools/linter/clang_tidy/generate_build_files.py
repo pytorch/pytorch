@@ -1,39 +1,26 @@
-import subprocess
 import sys
 import os
-from typing import List
+import asyncio
+
+from tools.linter.utils import CommandResult, run_cmd
 
 
-def run_cmd(cmd: List[str]) -> None:
-    print(f"Running: {cmd}")
-    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,)
-    stdout, stderr = result.stdout.decode("utf-8").strip(), result.stderr.decode("utf-8").strip()
-    print(stdout)
-    print(stderr)
-    if result.returncode != 0:
-        print(f"Failed to run {cmd}")
-        exit(1)
+async def update_submodules() -> CommandResult:
+    return await run_cmd(["git", "submodule", "update", "--init", "--recursive"])
 
 
-def run_timed_cmd(cmd: List[str]) -> None:
-    run_cmd(["time"] + cmd)
-
-
-def update_submodules() -> None:
-    run_cmd(["git", "submodule", "update", "--init", "--recursive"])
-
-
-def gen_compile_commands() -> None:
+async def gen_compile_commands() -> CommandResult:
     os.environ["USE_NCCL"] = "0"
     os.environ["USE_DEPLOY"] = "1"
     os.environ["CC"] = "clang"
     os.environ["CXX"] = "clang++"
-    run_timed_cmd([sys.executable, "setup.py", "--cmake-only", "build"])
+    return await run_cmd(["time", sys.executable, "setup.py", "--cmake-only", "build"])
 
 
-def run_autogen() -> None:
-    run_timed_cmd(
+async def run_autogen() -> CommandResult:
+    result = await run_cmd(
         [
+            "time",
             sys.executable,
             "-m",
             "tools.codegen.gen",
@@ -44,8 +31,9 @@ def run_autogen() -> None:
         ]
     )
 
-    run_timed_cmd(
+    result += await run_cmd(
         [
+            "time",
             sys.executable,
             "tools/setup_helpers/generate_code.py",
             "--declarations-path",
@@ -57,12 +45,18 @@ def run_autogen() -> None:
         ]
     )
 
+    return result
 
-def generate_build_files() -> None:
-    update_submodules()
-    gen_compile_commands()
-    run_autogen()
+
+async def generate_build_files() -> CommandResult:
+    return (
+        await update_submodules()
+        + await gen_compile_commands()
+        + await run_autogen()
+    )
 
 
 if __name__ == "__main__":
-    generate_build_files()
+    out = asyncio.get_event_loop().run_until_complete(generate_build_files())
+    print(out)
+

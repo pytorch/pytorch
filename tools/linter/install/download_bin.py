@@ -143,7 +143,9 @@ def download(
 
         if reference_bin_hash != actual_bin_hash:
             print("The downloaded binary is not what was expected!")
-            print(f"Downloaded hash: {repr(actual_bin_hash)} vs expected {reference_bin_hash}")
+            print(
+                f"Downloaded hash: {repr(actual_bin_hash)} vs expected {reference_bin_hash}"
+            )
 
             # Err on the side of caution and try to delete the downloaded binary.
             try:
