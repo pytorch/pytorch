@@ -133,14 +133,14 @@ class UnBatchIterDataPipe(IterDataPipe):
             else:
                 raise IndexError(f"unbatch_level {self.unbatch_level} exceeds the depth of the DataPipe")
 
-# TODO(ejguan): https://github.com/pytorch/pytorch/issues/63095
+
 def _in_batch_shuffle_fn(data: DataChunk):
-    d = list(data)
-    random.shuffle(d)
-    return DataChunk(d)
+    random.shuffle(data)
+    return data
+
 
 class BucketBatcherIterDataPipe(IterDataPipe[DataChunk[T_co]]):
-    r""" :class:`BucketBatcherIterDataPipe`.
+    r""":class:`BucketBatcherIterDataPipe`.
 
     Iterable DataPipe to create mini-batches of data from sorted bucket. An outer
     dimension will be added as `batch_size` if `drop_last` is set to `True`,
