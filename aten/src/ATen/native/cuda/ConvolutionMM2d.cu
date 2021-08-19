@@ -246,7 +246,6 @@ void slow_conv2d_backward(
   TORCH_INTERNAL_ASSERT(grad_output.is_contiguous());
 
   auto input_sizes = input.sizes();
-  TORCH_CHECK(input_sizes.size() == 4, "Expected a 4D input tensor but got ", input_sizes);
   int64_t inputWidth   = input_sizes[3];
   int64_t inputHeight  = input_sizes[2];
   auto output_sizes = grad_output.sizes();
@@ -328,7 +327,6 @@ void slow_conv2d_grad_weight_bias(
   TORCH_INTERNAL_ASSERT(grad_output.is_contiguous());
 
   auto input_sizes = input.sizes();
-  TORCH_CHECK(input_sizes.size() == 4, "Expected a 4D input tensor but got ", input_sizes);
   int64_t nInputPlane = input_sizes[1];
   int64_t nOutputPlane = grad_output.sizes()[1];
 

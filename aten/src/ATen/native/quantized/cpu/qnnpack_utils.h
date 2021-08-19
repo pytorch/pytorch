@@ -292,6 +292,7 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
   }
 
  private:
+  std::mutex qnnp_mutex_;
   template <bool ReluFused>
   at::Tensor apply_impl(
       const at::Tensor& input,
