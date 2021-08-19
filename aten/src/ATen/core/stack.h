@@ -1,7 +1,6 @@
 #pragma once
 
 #include <ATen/core/ivalue.h>
-#include <c10/util/variant.h>
 #include <c10/util/Deprecated.h>
 
 // TODO move this to c10 namespace
@@ -13,19 +12,22 @@ using c10::IValue;
 using Stack = std::vector<IValue>;
 
 class Operation {
+  template <typename F, typename Arg>
+  using accepts = std::is_constructible<std::function<void(Arg)>, F&&>;
+
  public:
   template <typename F,
-            std::enable_if_t<c10::lib::cpp17::is_invocable<F, Stack*>::value, int> = 0>
+            std::enable_if_t<accepts<F, Stack*>::value, int> = 0>
   C10_DEPRECATED_MESSAGE("Please use void(Stack&) to register operator instead.")
   Operation(F&& raw): op_([raw = std::forward<F>(raw)](Stack& stack) {
     raw(&stack);
   }) {}
 
   template <typename F,
-            std::enable_if_t<c10::lib::cpp17::is_invocable<F, Stack&>::value, int> = 0>
+            std::enable_if_t<accepts<F, Stack&>::value, int> = 0>
   Operation(F&& op): op_(std::forward<F>(op)) {}
 
-  Operation(std::nullptr_t) {}
+  Operation(std::nullptr_t) noexcept {}
 
   explicit operator bool() const noexcept {
     return op_ ? true : false;
