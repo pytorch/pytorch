@@ -43,7 +43,7 @@ from unittest.mock import MagicMock
 
 import numpy as np
 
-from torch.testing import floating_types_and, integral_types, complex_types, get_all_dtypes
+from torch.testing._internal.dtype_getters import floating_types_and, integral_types, complex_types, get_all_dtypes
 import expecttest
 from .._core import \
     (_compare_tensors_internal, _compare_scalars_internal, _compare_return_type)

@@ -7,7 +7,7 @@ import torch.jit.frontend
 import torch.jit.quantized
 
 # Testing utils
-from torch.testing import floating_and_complex_types_and
+from torch.testing._internal.dtype_getters import floating_and_complex_types_and
 from torch.testing._internal.common_utils import TestCase, \
     freeze_rng_state, TemporaryFileName, enable_profiling_mode_for_profiling_tests, is_iterable_of_tensors
 from torch.testing._internal.common_utils import enable_profiling_mode  # noqa: F401

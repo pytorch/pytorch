@@ -14,8 +14,7 @@ from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, TEST_
     skipCUDANonDefaultStreamIf, TEST_WITH_ASAN, TEST_WITH_UBSAN, TEST_WITH_TSAN, \
     IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, DeterministicGuard, TEST_SKIP_NOARCH
 from torch.testing._internal.common_cuda import _get_torch_cuda_version
-from torch.testing import \
-    (get_all_dtypes)
+from torch.testing._internal.dtype_getters import get_all_dtypes
 
 try:
     import psutil  # type: ignore[import]

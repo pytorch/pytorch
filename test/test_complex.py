@@ -1,11 +1,12 @@
 import torch
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes
 from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.dtype_getters import get_all_complex_dtypes
 
 devices = (torch.device('cpu'), torch.device('cuda:0'))
 
 class TestComplexTensor(TestCase):
-    @dtypes(*torch.testing.get_all_complex_dtypes())
+    @dtypes(*get_all_complex_dtypes())
     def test_to_list(self, device, dtype):
         # test that the complex float tensor has expected values and
         # there's no garbage value in the resultant list

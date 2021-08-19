@@ -9,6 +9,8 @@ from typing import Any, Callable, Optional, Tuple
 
 import torch
 
+from . import _dtype_getters
+
 
 __all__ = [
     "rand",
@@ -84,3 +86,16 @@ def assert_allclose(
         check_is_coalesced=False,
         msg=msg or None,
     )
+
+
+for name in _dtype_getters.__all__:
+    if name.startswith("_"):
+        continue
+
+    fn = getattr(_dtype_getters, name)
+    globals()[name] = warn_deprecated(f"The unparametrized call can be replaced with {fn()}")(fn)
+
+get_all_math_dtypes = warn_deprecated(
+    f"For CUDA devices, the call can be replaced with {_dtype_getters.get_all_math_dtypes(torch.device('cuda'))}. "
+    f"For all other devices, it can be replaced with {_dtype_getters.get_all_math_dtypes(torch.device('cpu'))}."
+)(_dtype_getters.get_all_math_dtypes)

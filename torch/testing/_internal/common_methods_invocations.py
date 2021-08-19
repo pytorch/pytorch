@@ -14,12 +14,12 @@ import collections.abc
 
 from typing import List, Sequence, Tuple, Union
 
-from torch.testing import \
-    (make_non_contiguous, floating_types, floating_types_and, complex_types,
+from torch.testing import make_non_contiguous
+from torch.testing._internal.dtype_getters import \
+    (_dispatch_dtypes, floating_types, floating_types_and, complex_types,
      floating_and_complex_types, floating_and_complex_types_and,
      all_types_and_complex_and, all_types_and, all_types_and_complex,
      integral_types_and, all_types, double_types)
-from .._core import _dispatch_dtypes
 from torch.testing._internal.common_device_type import \
     (expectedFailure, onlyOnCPUAndCUDA, skipIf, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfNoCusolver,
      skipCPUIfNoLapack, skipCPUIfNoFFT, skipCUDAIfRocm, precisionOverride, toleranceOverride, tol)

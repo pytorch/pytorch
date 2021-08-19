@@ -2,7 +2,7 @@ import torch
 from copy import deepcopy
 from functools import wraps, partial
 from itertools import chain
-from torch.testing import floating_types
+from torch.testing._internal.dtype_getters import floating_types
 from torch.testing._internal.common_device_type import (
     _TestParametrizer, _dtype_test_suffix, _update_param_kwargs, skipIf)
 from torch.testing._internal.common_nn import nllloss_reference

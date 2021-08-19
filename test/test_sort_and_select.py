@@ -5,7 +5,7 @@ import random
 from torch._six import nan
 from itertools import permutations, product
 
-from torch.testing import all_types, all_types_and
+from torch.testing._internal.dtype_getters import all_types, all_types_and
 from torch.testing._internal.common_utils import \
     (TEST_WITH_ROCM, TestCase, run_tests, make_tensor, slowTest)
 from torch.testing._internal.common_device_type import \
