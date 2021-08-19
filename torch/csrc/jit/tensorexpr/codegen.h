@@ -17,11 +17,13 @@ class TORCH_API CodeGen {
   class CallArg;
 
   template <typename... Ts>
-  CodeGen(Stmt* stmt, Ts... ts)
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  CodeGen(StmtPtr stmt, Ts... ts)
       : stmt_(stmt), buffer_args_({BufferArg(ts)...}) {}
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   CodeGen(
-      Stmt* stmt,
+      StmtPtr stmt,
       std::vector<BufferArg> buffer_args,
       at::Device device = at::kCPU,
       std::string kernel_func_name = "func")
@@ -32,11 +34,11 @@ class TORCH_API CodeGen {
 
   virtual ~CodeGen() = default;
 
-  Stmt* stmt() const {
+  StmtPtr stmt() const {
     return stmt_;
   }
 
-  void set_stmt(Stmt* s) {
+  void set_stmt(StmtPtr s) {
     stmt_ = s;
   }
 
@@ -93,7 +95,7 @@ class TORCH_API CodeGen {
   static void* argToPtr(const BufferArg& bufferArg, const CallArg& callArg);
 
  private:
-  Stmt* stmt_;
+  StmtPtr stmt_;
   std::vector<BufferArg> buffer_args_;
   at::Device device_ = at::kCPU;
   std::string kernel_func_name_ = "func";
@@ -106,11 +108,11 @@ class CodeGen::BufferArg {
   BufferArg(const VarHandle& var) : var_(var.node()), isVar_(true) {}
   BufferArg(const BufHandle& buf) : buf_(buf.node()) {}
 
-  const Var* var() const {
+  VarPtr var() const {
     return isVar_ ? var_ : buf_->base_handle();
   }
 
-  const Buf* buf() const {
+  BufPtr buf() const {
     return buf_;
   }
 
@@ -123,8 +125,8 @@ class CodeGen::BufferArg {
   }
 
  private:
-  const Var* var_ = nullptr;
-  const Buf* buf_ = nullptr;
+  VarPtr var_ = nullptr;
+  BufPtr buf_ = nullptr;
   bool isVar_ = false;
 };
 
@@ -136,6 +138,7 @@ class CodeGen::CallArg {
   template <typename T>
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,cppcoreguidelines-pro-type-const-cast)
   CallArg(const std::vector<T>& buffer)
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
       : data_(const_cast<T*>(buffer.data())) {}
 
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
@@ -165,6 +168,7 @@ class CodeGen::CallArg {
   void* data_;
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class RegisterCodeGenList {
  public:
   TORCH_API static RegisterCodeGenList& GetInstance() {
@@ -173,7 +177,7 @@ class RegisterCodeGenList {
   }
 
   using StmtFactoryMethod = std::function<std::unique_ptr<CodeGen>(
-      Stmt* stmt,
+      StmtPtr stmt,
       const std::vector<CodeGen::BufferArg>&,
       at::Device device,
       const std::string& kernel_func_name)>;
@@ -185,6 +189,7 @@ class RegisterCodeGenList {
  private:
   template <class CodeGenType>
   friend class RegisterCodeGen;
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   RegisterCodeGenList() = default;
   TORCH_API void AddStmtFactoryMethod(
       const std::string& name,
@@ -200,10 +205,11 @@ class RegisterCodeGen {
     RegisterCodeGenList& codegen_list = RegisterCodeGenList::GetInstance();
     codegen_list.AddStmtFactoryMethod(
         name,
-        [](Stmt* stmt,
+        [](StmtPtr stmt,
            const std::vector<CodeGen::BufferArg>& params,
            at::Device device,
            const std::string& kernel_func_name) {
+          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           std::unique_ptr<CodeGen> method(
               new CodeGenType(stmt, params, device, kernel_func_name));
           return method;
@@ -213,14 +219,14 @@ class RegisterCodeGen {
 
 TORCH_API std::unique_ptr<CodeGen> CreateCodeGen(
     const std::string& name,
-    Stmt* stmt,
+    StmtPtr stmt,
     const std::vector<CodeGen::BufferArg>& params,
     at::Device device = at::kCPU,
     const std::string& kernel_func_name = "func");
 
 class TORCH_API GenericIntrinsicsExpander : public IRMutator {
  protected:
-  const Expr* mutate(const Intrinsics* v) override;
+  ExprPtr mutate(IntrinsicsPtr v) override;
 };
 
 } // namespace tensorexpr

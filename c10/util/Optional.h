@@ -526,11 +526,14 @@ using OptionalBase = std::conditional_t<
             optional_base<std::remove_const_t<T>>>>>;
 #else
 template <class T>
-using OptionalBase = typename std::conditional<
-    std::is_trivially_destructible<T>::value, // if possible
-    constexpr_optional_base<typename std::remove_const<
-        T>::type>, // use base with trivial destructor
-    optional_base<typename std::remove_const<T>::type>>::type;
+using OptionalBase = std::conditional_t<
+    detail_::is_arrayref<T>::value,
+    arrayref_optional_base<T>,
+    std::conditional_t<
+        std::is_trivially_destructible<T>::value, // if possible
+        constexpr_optional_base<std::remove_const_t<T>>, // use base with
+                                                         // trivial destructor
+        optional_base<std::remove_const_t<T>>>>;
 #endif
 
 template <class T>
@@ -564,11 +567,14 @@ class optional : private OptionalBase<T> {
               optional_base<std::remove_const_t<U>>>>>;
 #else
   template <class U>
-  using OptionalBase = typename std::conditional<
-      std::is_trivially_destructible<U>::value, // if possible
-      constexpr_optional_base<typename std::remove_const<
-          U>::type>, // use base with trivial destructor
-      optional_base<typename std::remove_const<U>::type>>::type;
+  using OptionalBase = std::conditional_t<
+      detail_::is_arrayref<U>::value,
+      arrayref_optional_base<U>,
+      std::conditional_t<
+          std::is_trivially_destructible<U>::value, // if possible
+          constexpr_optional_base<std::remove_const_t<U>>, // use base with
+                                                           // trivial destructor
+          optional_base<std::remove_const_t<U>>>>;
 #endif
 
   static_assert(
@@ -638,7 +644,7 @@ class optional : private OptionalBase<T> {
       std::is_nothrow_move_constructible<T>::value) {
     if (rhs.initialized()) {
       ::new (static_cast<void*>(dataptr())) T(std::move(*rhs));
-      setInitialized(true);
+      OptionalBase<T>::setInitialized(true);
     }
   }
 #endif
@@ -1043,63 +1049,63 @@ constexpr bool operator>=(nullopt_t, const optional<T>& x) noexcept {
 }
 
 // 20.5.10, Comparison with T
-template <class T>
-constexpr bool operator==(const optional<T>& x, const T& v) {
+template <class T, class U>
+constexpr bool operator==(const optional<T>& x, const U& v) {
   return bool(x) ? *x == v : false;
 }
 
-template <class T>
-constexpr bool operator==(const T& v, const optional<T>& x) {
+template <class T, class U>
+constexpr bool operator==(const U& v, const optional<T>& x) {
   return bool(x) ? v == *x : false;
 }
 
-template <class T>
-constexpr bool operator!=(const optional<T>& x, const T& v) {
+template <class T, class U>
+constexpr bool operator!=(const optional<T>& x, const U& v) {
   return bool(x) ? *x != v : true;
 }
 
-template <class T>
-constexpr bool operator!=(const T& v, const optional<T>& x) {
+template <class T, class U>
+constexpr bool operator!=(const U& v, const optional<T>& x) {
   return bool(x) ? v != *x : true;
 }
 
-template <class T>
-constexpr bool operator<(const optional<T>& x, const T& v) {
+template <class T, class U>
+constexpr bool operator<(const optional<T>& x, const U& v) {
   return bool(x) ? *x < v : true;
 }
 
-template <class T>
-constexpr bool operator>(const T& v, const optional<T>& x) {
+template <class T, class U>
+constexpr bool operator>(const U& v, const optional<T>& x) {
   return bool(x) ? v > *x : true;
 }
 
-template <class T>
-constexpr bool operator>(const optional<T>& x, const T& v) {
+template <class T, class U>
+constexpr bool operator>(const optional<T>& x, const U& v) {
   return bool(x) ? *x > v : false;
 }
 
-template <class T>
-constexpr bool operator<(const T& v, const optional<T>& x) {
+template <class T, class U>
+constexpr bool operator<(const U& v, const optional<T>& x) {
   return bool(x) ? v < *x : false;
 }
 
-template <class T>
-constexpr bool operator>=(const optional<T>& x, const T& v) {
+template <class T, class U>
+constexpr bool operator>=(const optional<T>& x, const U& v) {
   return bool(x) ? *x >= v : false;
 }
 
-template <class T>
-constexpr bool operator<=(const T& v, const optional<T>& x) {
+template <class T, class U>
+constexpr bool operator<=(const U& v, const optional<T>& x) {
   return bool(x) ? v <= *x : false;
 }
 
-template <class T>
-constexpr bool operator<=(const optional<T>& x, const T& v) {
+template <class T, class U>
+constexpr bool operator<=(const optional<T>& x, const U& v) {
   return bool(x) ? *x <= v : true;
 }
 
-template <class T>
-constexpr bool operator>=(const T& v, const optional<T>& x) {
+template <class T, class U>
+constexpr bool operator>=(const U& v, const optional<T>& x) {
   return bool(x) ? v >= *x : true;
 }
 

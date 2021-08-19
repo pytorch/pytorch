@@ -29,9 +29,7 @@
 namespace at {
 namespace native {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(cat_serial_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(stack_serial_stub);
 
 Tensor _reshape_from_tensor(const Tensor& self, const Tensor& shape_tensor) {
@@ -137,7 +135,7 @@ Tensor & _cat_out_cpu(TensorList tensors, int64_t dim, Tensor& result) {
   }
   at::assert_no_internal_overlap(result);
 
-  const Tensor* pnotSkippedTensor = [](TensorList tensors) -> const Tensor* {
+  const Tensor* pnotSkippedTensor = [](const TensorList &tensors) -> const Tensor* {
     for (auto const &tensor : tensors) {
       if (should_skip(tensor)) {
         continue;
@@ -307,8 +305,7 @@ static bool sizes_match_except(IntArrayRef s1, IntArrayRef s2, int64_t dim_excep
   if (s1.size() != s2.size()) {
     return false;
   }
-  for (const auto i : c10::irange(s1.size())) {
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
+  for (const auto i : c10::irange(static_cast<int64_t>(s1.size()))) {
     if (i != dim_except && s1[i] != s2[i]) {
       return false;
     }
@@ -612,7 +609,13 @@ std::vector<Tensor> tensor_split(const Tensor& self, const Tensor& tensor_indice
     return self.tensor_split(sections, dim);
   } else {
     auto indices_data = tensor_indices_or_sections.data_ptr<int64_t>();
-    std::vector<int64_t> indices(indices_data, indices_data + tensor_indices_or_sections.numel());
+    auto stride = tensor_indices_or_sections.stride(0);
+    auto numel = tensor_indices_or_sections.numel();
+    std::vector<int64_t> indices(numel);
+    for (size_t offset = 0; offset < numel; offset++) {
+      // indices tensor could be non-contiguous
+      indices[offset] = *(indices_data + offset * stride);
+    }
     return self.tensor_split(indices, dim);
   }
 }
@@ -832,8 +835,7 @@ Tensor& narrow_copy_dense_cpu_out(
   if (dim < 0) {
     dim = at::maybe_wrap_dim(dim, self_sizes.size());
   } else {
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    TORCH_CHECK(dim < self_sizes.size());
+    TORCH_CHECK(dim < static_cast<int64_t>(self_sizes.size()));
   }
 
   // wrap start and do bound check
@@ -1042,19 +1044,41 @@ Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
     return at::_mkldnn_reshape(self, shape);
   }
 
-  auto stride =
-      at::detail::computeStride(self.sizes(), self.strides(), shape);
-    // `computeStride` returns the proper strides to use if this
-    // `reshape` can be just a view.
-    //
-    // NB: Even though we have viewable geometry and the target strides here,
-    //     we do not just call `as_strided` on `self` because the backward
-    //     for `as_strided` is not as efficient as that of `view` (since the
-    //     former is meant to handle general cases).
+  // `computeStride` returns the proper strides to use if this
+  // `reshape` can be just a view.
+  auto stride = at::detail::computeStride(self.sizes(), self.strides(), shape);
+
+  // NB: Even though we have viewable geometry and the target strides here,
+  //     we do not just call `as_strided` on `self` because the backward
+  //     for `as_strided` is not as efficient as that of `view` (since the
+  //     former is meant to handle general cases).
+  //
+  //     Similarly we don't call `view` because it duplicates some of the work
+  //     we've already done, and instead call our internal/private operator
+  //     `_reshape_alias` that essentially does the same thing as `view` and
+  //     `as_strided` without any of the extra overhead.
   if (stride.has_value()) {
-    return self.view(shape);
+    // Temporary check to revert to the old behavior/view in cases where the
+    // device is not supported (e.g. for XLA the operation is not supported
+    // so we use `view` instead).
+    //
+    // We need to do the checks here instead of in `native_functions.yaml`
+    // to preserve backwards compatibility.
+    if (!self.is_xla() && !self.is_lazy()) {
+      return self._reshape_alias(shape, stride.value());
+    } else {
+      return self.view(shape);
+    }
   }
   return at::_unsafe_view(self.clone(at::MemoryFormat::Contiguous), shape);
+}
+
+Tensor _reshape_alias(const Tensor& self, IntArrayRef sizes, IntArrayRef strides) {
+  // This is only used by `reshape` in cases where it would otherwise have dispatched
+  // to `view`. This removes the overhead of calling `view` which duplicates some of
+  // the work that's already been done (`infer_size_dv` and `computeStride`).
+
+  return alias_with_sizes_and_strides(self, sizes, strides);
 }
 
 Tensor reshape_as(const Tensor& self, const Tensor& other) {
@@ -1885,9 +1909,10 @@ Tensor & squeeze_(Tensor& self, int64_t dim) {
   return self;
 }
 
+// NOTE [ Unsafe View ]
 // _unsafe_view() differs from view() in that the returned tensor isn't treated
 // as a view for the purposes of automatic differentiation. (It's not listed in
-// VIEW_FUNCTIONS in gen_autograd.py).  It's only safe to use if the `self` tensor
+// VIEW_FUNCTIONS in gen_inplace_or_view_type.py).  It's only safe to use if the `self` tensor
 // is temporary. For example, the viewed tensor here (a + b) is discarded immediately
 // after viewing:
 //
@@ -2153,11 +2178,13 @@ Tensor numpy_T(const Tensor &self) {
   return self.permute(transpose_dims);
 }
 
-Tensor view(const Tensor& self, IntArrayRef size) {
+Tensor view(const Tensor& self,
+            IntArrayRef size) {
+
   at::DimVector inferred_size = at::infer_size_dv(size, self.numel());
   auto stride = at::detail::computeStride(self.sizes(),
-                                          self.strides(),
-                                          inferred_size);
+                                        self.strides(),
+                                        inferred_size);
   TORCH_CHECK(stride.has_value(), "view size is "
     "not compatible with input tensor's size and stride (at least one dimension"
     " spans across two contiguous subspaces). Use .reshape(...) instead.");

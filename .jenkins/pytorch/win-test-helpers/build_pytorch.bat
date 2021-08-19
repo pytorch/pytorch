@@ -22,7 +22,7 @@ call %INSTALLER_DIR%\install_miniconda3.bat
 
 
 :: Install ninja and other deps
-if "%REBUILD%"=="" ( pip install -q "ninja==1.10.0.post1" dataclasses typing_extensions )
+if "%REBUILD%"=="" ( pip install -q "ninja==1.10.0.post1" dataclasses typing_extensions "expecttest==0.1.3" )
 
 :: Override VS env here
 pushd .
@@ -128,5 +128,8 @@ python setup.py install --cmake && sccache --show-stats && (
 
     :: export test times so that potential sharded tests that'll branch off this build will use consistent data
     python test/run_test.py --export-past-test-times %PYTORCH_FINAL_PACKAGE_DIR%/.pytorch-test-times.json
+
+    :: Also save build/.ninja_log as an artifact
+    copy /Y "build\.ninja_log" "%PYTORCH_FINAL_PACKAGE_DIR%\"
   )
 )

@@ -1,16 +1,12 @@
 set(Aten_TH_AVX_extra_src)
 
 set(hdr
-  THGeneral.h THHalf.h THAllocator.h THStorage.h THStorageFunctions.h THTensor.h THTensorApply.h THBlas.h
-  THVector.h )
+  THGeneral.h THHalf.h THStorage.h THStorageFunctions.h THTensor.h)
 
 set(ATen_TH_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/THGeneral.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/THAllocator.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THStorageFunctions.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THTensor.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/THTensorMoreMath.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/THBlas.cpp
   )
 # Remember that PARENT_SCOPE variables are not in the current scope
 set(ATen_TH_SRCS ${ATen_TH_SRCS} PARENT_SCOPE)
@@ -37,8 +33,6 @@ configure_file(THGeneral.h.in "${CMAKE_CURRENT_BINARY_DIR}/THGeneral.h")
 
 install(FILES
   TH.h
-  THAllocator.h
-  THBlas.h
   ${CMAKE_CURRENT_BINARY_DIR}/THGeneral.h
   THGenerateAllTypes.h
   THGenerateBFloat16Type.h
@@ -64,17 +58,12 @@ install(FILES
   THStorage.h
   THStorageFunctions.h
   THTensor.h
-  THTensorApply.h
-  THTensorDimApply.h
-  THVector.h
   THHalf.h
   THTensor.hpp
   THStorageFunctions.hpp
   DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/TH")
 
 install(FILES
-  generic/THBlas.cpp
-  generic/THBlas.h
   generic/THStorage.cpp
   generic/THStorage.h
   generic/THStorageCopy.cpp
@@ -82,8 +71,5 @@ install(FILES
   generic/THTensor.cpp
   generic/THTensor.h
   generic/THTensor.hpp
-  generic/THTensorMath.h
-  generic/THVector.h
   # See Note [TH abstraction violation]
-  generic/THTensorFastGetSet.hpp
   DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/TH/generic")

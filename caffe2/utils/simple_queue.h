@@ -5,7 +5,7 @@
 #include <mutex>  // NOLINT
 #include <queue>
 
-#include "caffe2/core/logging.h"
+#include <c10/util/Logging.h>
 
 namespace caffe2 {
 

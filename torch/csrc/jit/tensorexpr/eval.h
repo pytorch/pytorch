@@ -12,7 +12,6 @@
 #include <c10/util/string_utils.h>
 #include <torch/csrc/jit/tensorexpr/codegen.h>
 #include <torch/csrc/jit/tensorexpr/exceptions.h>
-#include <torch/csrc/jit/tensorexpr/execution_counter.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
@@ -22,9 +21,6 @@
 namespace torch {
 namespace jit {
 namespace tensorexpr {
-
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-DECLARE_TRIGGER(simple_ir_eval_executed);
 
 class Value {
  public:
@@ -101,7 +97,7 @@ class SimpleIREvaluatorImpl;
 class TORCH_API SimpleIREvaluator : public CodeGen {
  public:
   SimpleIREvaluator(
-      Stmt* stmt,
+      StmtPtr stmt,
       const std::vector<BufferArg>& buffer_args,
       at::Device device = at::kCPU,
       const std::string& kernel_func_name = "func");
@@ -113,11 +109,12 @@ class TORCH_API SimpleIREvaluator : public CodeGen {
 
   template <typename... Ts>
   void operator()(const Ts&... ts) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<CallArg> args({CallArg(ts)...});
     call(args);
   }
 
-  void bindVar(const Var* v, const Expr* e);
+  void bindVar(VarPtr v, ExprPtr e);
   Value value() const;
 
  private:
@@ -141,20 +138,23 @@ class ExprEval {
   ExprEval(const ExprHandle& expr, Ts... ts)
       : ExprEval(expr, {BufferArg(ts)...}) {}
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   ExprEval(const ExprHandle& expr, const std::vector<BufferArg>& buffer_args)
       : dtype_(expr.dtype()) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<BufferArg> buffer_args_extended = buffer_args;
     Placeholder ret_buf("ret_val", dtype_, {1});
-    std::vector<const Expr*> indices;
-    const Expr* zero = new IntImm(0);
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    std::vector<ExprPtr> indices;
+    ExprPtr zero = alloc<IntImm>(0);
     for (size_t i = 0; i < ret_buf.data()->ndim(); i++) {
       indices.push_back(zero);
     }
-    Stmt* store_stmt =
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    StmtPtr store_stmt =
         // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
-        new Store(ret_buf.data(), indices, expr.node());
-    // NOLINTNEXTLINE(modernize-use-emplace)
-    buffer_args_extended.push_back(ret_buf);
+        alloc<Store>(ret_buf.data(), indices, expr.node());
+    buffer_args_extended.emplace_back(ret_buf);
     codegen_.reset(new CodeGenType(store_stmt, buffer_args_extended));
   }
 
@@ -167,7 +167,7 @@ class ExprEval {
     call(call_args);
   }
 
-  void bindVar(const Var* v, const Expr* e) {
+  void bindVar(VarPtr v, ExprPtr e) {
     codegen_->bindVar(v, e);
   }
 
@@ -181,6 +181,7 @@ class ExprEval {
   }
 
   void call(const std::vector<CallArg>& call_args) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<CallArg> call_args_extended = call_args;
     switch (dtype_.scalar_type()) {
 #define TYPE_CASE(Type, Name)                           \
@@ -194,9 +195,9 @@ class ExprEval {
       AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
 #undef TYPE_CASE
       case ScalarType::Bool: {
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         std::vector<unsigned char> ret_val_arg(1);
-        // NOLINTNEXTLINE(modernize-use-emplace)
-        call_args_extended.push_back(CallArg(ret_val_arg.data()));
+        call_args_extended.emplace_back(ret_val_arg.data());
         codegen_->call(call_args_extended);
         ret_value_ = Value((bool)ret_val_arg[0]);
       } break;
@@ -206,6 +207,7 @@ class ExprEval {
   }
 
   void call_raw(const std::vector<void*>& args) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<void*> args_extended = args;
     switch (dtype_.scalar_type()) {
 #define TYPE_CASE(Type, Name)                    \
@@ -218,6 +220,7 @@ class ExprEval {
       AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
 #undef TYPE_CASE
       case ScalarType::Bool: {
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         std::vector<unsigned char> ret_val_arg(1);
         args_extended.push_back(ret_val_arg.data());
         codegen_->call_raw(args_extended);
@@ -250,14 +253,36 @@ class ExprEval {
   Value ret_value_;
 };
 
-inline const Expr* Substitute(const Expr* expr, const VarMapping& var_mapping) {
+// Substitutes the given vars with their corresponding expressions in the input
+// expression.
+inline ExprPtr Substitute(ExprPtr expr, const VarMapping& var_mapping) {
   VarSubMutator var_sub(var_mapping);
   return expr->accept_mutator(&var_sub);
 }
 
-inline Stmt* Substitute(Stmt* stmt, const VarMapping& var_mapping) {
+// Substitutes the given vars with their corresponding expressions in the input
+// statement.
+inline StmtPtr Substitute(StmtPtr stmt, const VarMapping& var_mapping) {
   VarSubMutator var_sub(var_mapping);
   return stmt->accept_mutator(&var_sub);
+}
+
+// Creates a clone of the input expression and substitutes the given vars with
+// their corresponding expressions in the clone.
+// NOTE: This works because cloning reuses variables and does not create new
+// ones, and `VarMapping` input has variables as the key.
+inline ExprPtr SubstituteInClone(ExprPtr expr, const VarMapping& var_mapping) {
+  VarSubMutator var_sub(var_mapping);
+  return Expr::clone(expr)->accept_mutator(&var_sub);
+}
+
+// Creates a clone of the input statement and substitutes the given vars with
+// their corresponding expressions in the clone.
+// NOTE: This works because cloning reuses variables and does not create new
+// ones, and `VarMapping` input has variables as the key.
+inline StmtPtr SubstituteInClone(StmtPtr stmt, const VarMapping& var_mapping) {
+  VarSubMutator var_sub(var_mapping);
+  return Stmt::clone(stmt)->accept_mutator(&var_sub);
 }
 
 } // namespace tensorexpr

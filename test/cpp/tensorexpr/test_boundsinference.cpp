@@ -40,7 +40,6 @@ static void verifyConstBounds(
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, _1) {
   // Verify that bounds inference works for the following example:
   // for i in 0..100:
@@ -66,7 +65,6 @@ TEST(BoundsInference, _1) {
   verifyConstBounds(bounds_info.at(b->buf())[0], {{0, 99}});
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, _2) {
   // Verify that bounds inference works for the following example:
   // for i in 0..n:
@@ -92,7 +90,6 @@ TEST(BoundsInference, _2) {
   verifyConstBounds(bounds_info.at(b->buf())[0], {{0, -1}});
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, _3) {
   // Verify that bounds inference works for the following example:
   // for i in 0..100:
@@ -119,7 +116,6 @@ TEST(BoundsInference, _3) {
   verifyConstBounds(bounds_info.at(b->buf())[0], {{0, 99}});
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, _4) {
   // Verify that bounds inference works for the following example:
   //
@@ -142,8 +138,8 @@ TEST(BoundsInference, _4) {
         return a.load(y, x) * b->load(y, x);
       });
   LoopNest l({c});
-  std::vector<For*> loops = l.getLoopStmtsFor(c);
-  Stmt* body = l.getLoopBodyFor(c);
+  std::vector<ForPtr> loops = l.getLoopStmtsFor(c);
+  StmtPtr body = l.getLoopBodyFor(c);
   {
     // Infer bounds on the top-level loop scope
     auto bounds_info = inferBounds(loops[0]);
@@ -197,7 +193,6 @@ TEST(BoundsInference, _4) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, _5) {
   // Verify that bounds inference works for the following example:
   // for i in 0..100:
@@ -218,12 +213,12 @@ TEST(BoundsInference, _5) {
   LoopNest l({b});
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For* inner;
+  ForPtr inner;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For* tail;
-  std::vector<For*> loops = l.getLoopStmtsFor(b);
-  l.splitWithTail(loops[0], 16, &inner, &tail);
-  For* outer = loops[0];
+  ForPtr tail;
+  std::vector<ForPtr> loops = l.getLoopStmtsFor(b);
+  LoopNest::splitWithTail(loops[0], 16, &inner, &tail);
+  ForPtr outer = loops[0];
 
   {
     // Verify inferred bounds for the outer loop
@@ -253,7 +248,6 @@ TEST(BoundsInference, _5) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, _6) {
   // Verify that bounds inference works for the following example:
   //
@@ -278,8 +272,8 @@ TEST(BoundsInference, _6) {
         return a.load(y + 100, x + 100) * b->load(y * 2, x * 5);
       });
   LoopNest l({c});
-  std::vector<For*> loops = l.getLoopStmtsFor(c);
-  Stmt* body = l.getLoopBodyFor(c);
+  std::vector<ForPtr> loops = l.getLoopStmtsFor(c);
+  StmtPtr body = l.getLoopBodyFor(c);
   {
     // Infer bounds on the top-level loop scope
     auto bounds_info = inferBounds(loops[0]);
@@ -333,7 +327,6 @@ TEST(BoundsInference, _6) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, Adjacent) {
   KernelScope kernel_scope;
   ExprHandle H(6);
@@ -343,7 +336,7 @@ TEST(BoundsInference, Adjacent) {
   Tensor* c = Compute(
       "c", {{H, "x"}}, [&](const VarHandle& x) { return a.load(x + H); });
   LoopNest l({b, c});
-  std::vector<For*> loops = NodeFinder<For>::find(l.root_stmt());
+  std::vector<ForPtr> loops = NodeFinder<For>::find(l.root_stmt());
 
   {
     // Infer bounds on the top-level loop scope
@@ -394,7 +387,6 @@ TEST(BoundsInference, Adjacent) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, MultipleTopLoopLoad) {
   KernelScope kernel_scope;
   Placeholder a(BufHandle("a", {100}, kFloat));
@@ -451,7 +443,6 @@ TEST(BoundsInference, MultipleTopLoopLoad) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, MultipleTopLoopStore) {
   KernelScope kernel_scope;
   BufHandle a("a", {100}, kFloat);
@@ -462,7 +453,7 @@ TEST(BoundsInference, MultipleTopLoopStore) {
 
   // Same as above but the offsets are on the Store now.
   // Can't do this through ComputeAPI without transforms we don't have yet.
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {For::make(x, 0, 64, Store::make(b, {x}, Load::make(a, {x}))),
        For::make(x, 0, 32, Store::make(c, {x + 10}, Load::make(a, {x}))),
        For::make(x, 0, 96, Store::make(d, {x + 2}, Load::make(a, {x})))});
@@ -512,7 +503,6 @@ TEST(BoundsInference, MultipleTopLoopStore) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, CacheReads) {
   KernelScope kernel_scope;
 
@@ -532,8 +522,8 @@ TEST(BoundsInference, CacheReads) {
   LoopNest l({B, C});
   auto bounds_info_before = inferBounds(l.root_stmt());
 
-  Stmt* j_loop = l.getLoopStmtsFor(B)[1];
-  l.cacheAccesses(A->buf(), "A_local", j_loop);
+  StmtPtr j_loop = l.getLoopStmtsFor(B)[1];
+  LoopNest::cacheAccesses(A->buf(), "A_local", j_loop);
 
   auto bounds_info_after = inferBounds(l.root_stmt());
 
@@ -579,7 +569,6 @@ TEST(BoundsInference, CacheReads) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, Flattened) {
   KernelScope kernel_scope;
   Tensor* b = Compute(
@@ -603,11 +592,10 @@ TEST(BoundsInference, Flattened) {
   ASSERT_EQ(TABI.stop.size(), 1);
 
   // Bounds should be 0 -> (3*4*5)-1
-  ASSERT_TRUE(exprEquals(TABI.start[0], new IntImm(0)));
-  ASSERT_TRUE(exprEquals(TABI.stop[0], new IntImm(3 * 4 * 5 - 1)));
+  ASSERT_TRUE(exprEquals(TABI.start[0], alloc<IntImm>(0)));
+  ASSERT_TRUE(exprEquals(TABI.stop[0], alloc<IntImm>(3 * 4 * 5 - 1)));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, GetPotentialHazards) {
   KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
@@ -626,11 +614,11 @@ TEST(BoundsInference, GetPotentialHazards) {
      * C[0] = 5;
      */
 
-    Store* store1 = Store::make(a, {0}, Load::make(b, {0}));
-    Store* store2 = Store::make(b, {0}, 3);
-    Store* store3 = Store::make(a, {0}, Load::make(b, {0}));
-    Store* store4 = Store::make(c, {0}, 5);
-    Stmt* stmt = Block::make({store1, store2, store3, store4});
+    StorePtr store1 = Store::make(a, {0}, Load::make(b, {0}));
+    StorePtr store2 = Store::make(b, {0}, 3);
+    StorePtr store3 = Store::make(a, {0}, Load::make(b, {0}));
+    StorePtr store4 = Store::make(c, {0}, 5);
+    StmtPtr stmt = Block::make({store1, store2, store3, store4});
 
     MemDependencyChecker analyzer;
     stmt->accept(&analyzer);
@@ -660,7 +648,6 @@ TEST(BoundsInference, GetPotentialHazards) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, GetPotentialHazardsLoopNoHazard) {
   KernelScope kernel_scope;
 
@@ -680,8 +667,8 @@ TEST(BoundsInference, GetPotentialHazardsLoopNoHazard) {
   MemDependencyChecker analyzer;
   l.root_stmt()->accept(&analyzer);
 
-  For* loopRootA = l.getLoopStmtsFor(A)[0];
-  For* loopRootB = l.getLoopStmtsFor(B)[0];
+  ForPtr loopRootA = l.getLoopStmtsFor(A)[0];
+  ForPtr loopRootB = l.getLoopStmtsFor(B)[0];
 
   // No dependencies between loops.
   ASSERT_EQ(
@@ -689,7 +676,6 @@ TEST(BoundsInference, GetPotentialHazardsLoopNoHazard) {
       getPotentialHazards(analyzer, loopRootA, loopRootB));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, GetPotentialHazardsLoopCall) {
   KernelScope kernel_scope;
 
@@ -709,15 +695,14 @@ TEST(BoundsInference, GetPotentialHazardsLoopCall) {
   MemDependencyChecker analyzer;
   l.root_stmt()->accept(&analyzer);
 
-  For* loopRootA = l.getLoopStmtsFor(A)[0];
-  For* loopRootB = l.getLoopStmtsFor(B)[0];
+  ForPtr loopRootA = l.getLoopStmtsFor(A)[0];
+  ForPtr loopRootB = l.getLoopStmtsFor(B)[0];
 
   ASSERT_EQ(
       HazardKind::ReadAfterWrite,
       getPotentialHazards(analyzer, loopRootA, loopRootB));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, GetPotentialHazardsLoopSplit) {
   KernelScope kernel_scope;
 
@@ -728,13 +713,13 @@ TEST(BoundsInference, GetPotentialHazardsLoopSplit) {
 
   LoopNest l({A});
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For *inner, *tail;
+  ForPtr inner, tail;
 
   // Splitting with tail by something offset creates a tail which also writes to
   // A.
-  For* outer = l.getLoopStmtsFor(A)[0];
+  ForPtr outer = l.getLoopStmtsFor(A)[0];
   // `outer` loop get transformed to the outer loop after splitting.
-  l.splitWithTail(outer, 5, &inner, &tail);
+  LoopNest::splitWithTail(outer, 5, &inner, &tail);
 
   using namespace analysis;
 
@@ -745,7 +730,6 @@ TEST(BoundsInference, GetPotentialHazardsLoopSplit) {
       HazardKind::WriteAfterWrite, getPotentialHazards(analyzer, outer, tail));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, HasConflictingOverlapSameBufferWithPartialOverlap) {
   KernelScope kernel_scope;
 
@@ -770,7 +754,6 @@ TEST(BoundsInference, HasConflictingOverlapSameBufferWithPartialOverlap) {
   ASSERT_TRUE(hasConflictingOverlap(analyzer, forK, forJ));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, HasConflictingOverlapSameBufferWithFullOverlap) {
   KernelScope kernel_scope;
 
@@ -794,7 +777,6 @@ TEST(BoundsInference, HasConflictingOverlapSameBufferWithFullOverlap) {
   ASSERT_TRUE(hasConflictingOverlap(analyzer, forK, forJ));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, HasConflictingOverlapSameBufferWithFullOverlapRAW) {
   KernelScope kernel_scope;
 
@@ -820,7 +802,6 @@ TEST(BoundsInference, HasConflictingOverlapSameBufferWithFullOverlapRAW) {
   ASSERT_TRUE(hasConflictingOverlap(analyzer, forK, forJ));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, HasConflictingOverlapSameBufferNotOverlapping) {
   KernelScope kernel_scope;
 
@@ -845,7 +826,6 @@ TEST(BoundsInference, HasConflictingOverlapSameBufferNotOverlapping) {
   ASSERT_FALSE(hasConflictingOverlap(analyzer, forK, forJ));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, HasConflictingOverlap2DBufferWithOverlap) {
   KernelScope kernel_scope;
 
@@ -887,7 +867,6 @@ TEST(BoundsInference, HasConflictingOverlap2DBufferWithOverlap) {
   ASSERT_TRUE(hasConflictingOverlap(analyzer, storeA1, forM));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, HasConflictingOverlap2DBufferWithNoOverlap) {
   KernelScope kernel_scope;
 
@@ -929,7 +908,6 @@ TEST(BoundsInference, HasConflictingOverlap2DBufferWithNoOverlap) {
   ASSERT_FALSE(hasConflictingOverlap(analyzer, storeA1, forM));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, HasConflictingOverlapDifferentBuffers) {
   KernelScope kernel_scope;
 
@@ -970,7 +948,6 @@ TEST(BoundsInference, HasConflictingOverlapDifferentBuffers) {
   ASSERT_FALSE(hasConflictingOverlap(analyzer, storeA1, forM));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, HasConflictingOverlapDueToRAWDependence) {
   KernelScope kernel_scope;
 
@@ -1000,7 +977,6 @@ TEST(BoundsInference, HasConflictingOverlapDueToRAWDependence) {
   ASSERT_TRUE(hasConflictingOverlap(analyzer, forK, forJ));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, HasConflictingOverlapDueToWARDependence) {
   KernelScope kernel_scope;
 
@@ -1030,7 +1006,6 @@ TEST(BoundsInference, HasConflictingOverlapDueToWARDependence) {
   ASSERT_TRUE(hasConflictingOverlap(analyzer, forK, forJ));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, HasConflictingOverlapWithLoads) {
   KernelScope kernel_scope;
 
@@ -1065,7 +1040,6 @@ TEST(BoundsInference, HasConflictingOverlapWithLoads) {
   ASSERT_FALSE(hasConflictingOverlap(analyzer, forK, forJ));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, IsOverlapping) {
   KernelScope kernel_scope;
 
@@ -1092,10 +1066,8 @@ TEST(BoundsInference, IsOverlapping) {
       i, 0, 100, Block::make({storeA1, storeB, storeC, storeA2, storeA3}));
   tensorexpr::analysis::MemDependencyChecker analyzer;
   forI->accept(&analyzer);
-  ASSERT_TRUE(
-      isOverlapping(analyzer, storeA1, dynamic_cast<Load*>(loadA1.node())));
-  ASSERT_FALSE(
-      isOverlapping(analyzer, storeA1, dynamic_cast<Load*>(loadA2.node())));
+  ASSERT_TRUE(isOverlapping(analyzer, storeA1, to<Load>(loadA1.node())));
+  ASSERT_FALSE(isOverlapping(analyzer, storeA1, to<Load>(loadA2.node())));
   ASSERT_TRUE(isOverlapping(analyzer, storeA1, storeA2));
   ASSERT_FALSE(isOverlapping(analyzer, storeA1, storeA3));
 }

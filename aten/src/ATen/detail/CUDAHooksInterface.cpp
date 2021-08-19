@@ -24,7 +24,6 @@ namespace detail {
 //
 // CUDAHooks doesn't actually contain any data, so leaking it is very benign;
 // you're probably losing only a word (the vptr in the allocated object.)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static CUDAHooksInterface* cuda_hooks = nullptr;
 
 const CUDAHooksInterface& getCUDAHooks() {
@@ -52,7 +51,6 @@ const CUDAHooksInterface& getCUDAHooks() {
 }
 } // namespace detail
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_REGISTRY(CUDAHooksRegistry, CUDAHooksInterface, CUDAHooksArgs)
 
 } // namespace at

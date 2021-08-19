@@ -29,7 +29,7 @@ make_clean_env pr_39967
 make_clean_env ref_39744
 make_clean_env pr_39744
 
-git submodule update --init --recursive
+git submodule update --init --recursive --jobs 0
 wget https://github.com/pytorch/pytorch/pull/39850.diff
 wget https://github.com/pytorch/pytorch/pull/39744.diff
 

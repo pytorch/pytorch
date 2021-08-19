@@ -67,6 +67,8 @@ enum class DispatchKey : uint8_t {
   Metal,
   XPU, // For out of tree Intel's heterogeneous computing plug-in
   HPU, // For out of tree & closed source integration of HPU / Habana
+  VE, // For out of tree & closed source integration of SX-Aurora / NEC
+  Lazy, // For lazy tensor backends
 
   // A meta tensor is a tensor without any data associated with it.  (They
   // have also colloquially been referred to as tensors on the "null" device).
@@ -103,11 +105,13 @@ enum class DispatchKey : uint8_t {
   SparseHIP, // TODO: I think this is not actually used, due to Note
   // [Masquerading as CUDA]
   SparseXPU, // For out of tree Intel's heterogeneous computing plug-in
+  SparseVE, // For out of tree & closed source integration of SX-Aurora / NEC
 
   SparseCsrCPU,
   SparseCsrCUDA,
 
   NestedTensor, // lives out of tree at https://github.com/pytorch/nestedtensor
+
   // Here are reserved backends for user-defined backends, see Note [Private use
   // DispatchKey]
   // To see some example about how to use this, check out MSNPU
@@ -117,6 +121,8 @@ enum class DispatchKey : uint8_t {
 
   // Define an alias key to represent end of backend dispatch keys.
   // If you add new backend keys after PrivateUse3, please also update it here.
+  // (But you shouldn't: private use keys should have higher precedence than
+  // all built-in keys)
   EndOfBackendKeys = PrivateUse3,
 
   // In some situations, it is not immediately obvious what the correct
@@ -126,6 +132,7 @@ enum class DispatchKey : uint8_t {
   // correct backend.
   BackendSelect,
 
+  Python,
   FuncTorchPython, // See Note [Out-of-tree vmap+grad prototype]
 
   // The named dispatch key is set for any tensors with named dimensions.
@@ -146,6 +153,11 @@ enum class DispatchKey : uint8_t {
   // conjugation
   // This is implemented at a dispatch level right before any backends run
   Conjugate,
+
+  // The Negative dispatch key is set for any tensors that need to perform
+  // negation
+  // This is implemented at a dispatch level right before any backends run
+  Negative,
 
   // See Note [Out-of-tree vmap+grad prototype]. The purpose of this key
   // is to insert code after the "autograd subsystem" runs, so this key should
@@ -218,6 +230,7 @@ enum class DispatchKey : uint8_t {
   AutogradCPU,
   AutogradCUDA,
   AutogradXLA,
+  AutogradLazy,
   AutogradXPU,
   AutogradMLC,
   AutogradHPU,
@@ -234,6 +247,8 @@ enum class DispatchKey : uint8_t {
   // Autocasting precedes VariableTypeId, to ensure casts are autograd-exposed
   // and inputs are saved for backward in the post-autocast type.
   AutocastCPU,
+  // Naughtily, AutocastCUDA is also being used for XLA.  In the terminal state,
+  // it probably should get its own Autocast key
   AutocastCUDA,
 
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~ WRAPPERS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
