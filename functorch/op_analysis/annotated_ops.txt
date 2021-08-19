@@ -365,7 +365,7 @@ bitwise_or, primitive pointwise
 bitwise_xor, primitive pointwise
 addbmm, composite matmul
 diag, view/reshape
-cross, reduction
+cross, misc
 triu, view/reshape
 tril, view/reshape
 tril_indices, view/reshape

@@ -268,6 +268,10 @@ struct UpsampleBackwardBatchRuleHelper<F, Func, typelist<A, B, C, T...>> {
       &ATEN_FN2(op, overload),\
       c10::guts::function_traits<decltype(ATEN_FN2(op, overload))>::parameter_types>::apply))
 
+#define UPSAMPLE_BATCH(op) \
+  VMAP_SUPPORT(#op".vec", EXISTING_BDIM_BATCH_RULE(ATEN_FN2(op, vec))); \
+  VMAP_SUPPORT(#op, EXISTING_BDIM_BATCH_RULE(ATEN_FN(op)));
+
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("convolution", convolution_batching_rule);
   m.impl("conv1d", convNd_decomp);
@@ -286,13 +290,14 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("replication_pad2d", EXISTING_BDIM_BATCH_RULE(at::replication_pad2d));
   VMAP_SUPPORT("replication_pad3d", EXISTING_BDIM_BATCH_RULE(at::replication_pad3d));
 
-  VMAP_SUPPORT("upsample_bicubic2d.vec", EXISTING_BDIM_BATCH_RULE(ATEN_FN2(upsample_bicubic2d, vec)));
-  VMAP_SUPPORT("upsample_bilinear2d.vec", EXISTING_BDIM_BATCH_RULE(ATEN_FN2(upsample_bilinear2d, vec)));
-  VMAP_SUPPORT("upsample_linear1d.vec", EXISTING_BDIM_BATCH_RULE(ATEN_FN2(upsample_linear1d, vec)));
-  VMAP_SUPPORT("upsample_nearest1d.vec", EXISTING_BDIM_BATCH_RULE(ATEN_FN2(upsample_nearest1d, vec)));
-  VMAP_SUPPORT("upsample_nearest2d.vec", EXISTING_BDIM_BATCH_RULE(ATEN_FN2(upsample_nearest2d, vec)));
-  VMAP_SUPPORT("upsample_nearest3d.vec", EXISTING_BDIM_BATCH_RULE(ATEN_FN2(upsample_nearest3d, vec)));
-  VMAP_SUPPORT("upsample_trilinear3d.vec", EXISTING_BDIM_BATCH_RULE(ATEN_FN2(upsample_trilinear3d, vec)));
+  UPSAMPLE_BATCH(upsample_bicubic2d);
+  UPSAMPLE_BATCH(upsample_bilinear2d);
+  UPSAMPLE_BATCH(upsample_linear1d);
+  UPSAMPLE_BATCH(unsample_nearest1d);
+  UPSAMPLE_BATCH(unsample_nearest2d);
+  UPSAMPLE_BATCH(unsample_nearest3d);
+  UPSAMPLE_BATCH(unsample_trilinear3d);
+
   UPSAMPLE_BACKWARD(upsample_bicubic2d_backward, vec);
   UPSAMPLE_BACKWARD(upsample_bilinear2d_backward, vec);
   UPSAMPLE_BACKWARD(upsample_linear1d_backward, vec);
