@@ -2,7 +2,6 @@
 import os
 import sys
 import unittest
-from enum import Flag, auto
 from typing import Dict, List, Type
 
 from torch.testing._internal.common_distributed import MultiProcessTestCase
@@ -76,10 +75,10 @@ def _check_and_unset_tcp_init():
 # - different agents (ProcessGroup, TensorPipe, ...);
 # To avoid a combinatorial explosion in code size, and to prevent forgetting to
 # add a combination, these are generated automatically by the code in this file.
-# Here, we collect all the test suites that we need to cover and the two multi-
-# processing methods. We then have one separate file for each agent, from which
+# Here, we collect all the test suites that we need to cover.
+# We then have one separate file for each agent, from which
 # we call the generate_tests function of this file, passing to it a fixture for
-# the agent, which then gets mixed-in with each test suite and each mp method.
+# the agent, which then gets mixed-in with each test suite.
 
 @unittest.skipIf(
     TEST_WITH_DEV_DBG_ASAN, "Skip ASAN as torch + multiprocessing spawn have known issues"
@@ -160,8 +159,8 @@ def generate_tests(
     certain agent, as the `mixin` arg. Produces all combinations of them.
     Returns a dictionary of class names to class type
     objects which can be inserted into the global namespace of the calling
-    module. The name of each test will be a concatenation of the `prefix` arg,
-    the original name of the test suite.
+    module. The name of each test will be a concatenation of the `prefix` arg
+    and the original name of the test suite.
     The `module_name` should be the name of the calling module so
     that the classes can be fixed to make it look like they belong to it, which
     is necessary for pickling to work on them.
