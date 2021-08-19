@@ -323,18 +323,18 @@ class TestReductions(TestCase):
     def test_noncontiguous_all(self, device, dtype, op: ReductionOpInfo):
         """Tests reducing all dimensions of a noncontiguous tensor."""
         t = make_tensor((5, 5, 5), device, dtype)
-        self._test_noncontiguous(op, t[::2, 1::2, :-1:3])
+        self._test_noncontiguous(op, t[::2, ::3, 1:-1:2])
 
     @ops(reduction_ops)
     def test_noncontiguous_transposed(self, device, dtype, op: ReductionOpInfo):
         """Tests reducing a transposed tensor."""
-        t = make_tensor((10, 10), device, dtype)
+        t = make_tensor((5, 5), device, dtype)
         self._test_noncontiguous(op, t.T)
 
     @ops(reduction_ops)
     def test_noncontiguous_expanded(self, device, dtype, op: ReductionOpInfo):
         """Tests reducing a tensor with expanded singleton dimensions."""
-        t = make_tensor((3, 2), device, dtype)
+        t = make_tensor((2, 3), device, dtype)
         self._test_noncontiguous(op, t.unsqueeze(1).expand(-1, 5, -1))
 
     # NumPy does not support BFloat16 so we don't test that against reference
@@ -361,32 +361,29 @@ class TestReductions(TestCase):
          allowed_dtypes=get_all_dtypes(include_bfloat16=False))
     def test_ref_small_input(self, device, dtype, op: ReductionOpInfo):
         """Compares op against reference for small input tensors"""
-        t = make_tensor((8, 4, 1, 2), device, dtype, exclude_zero=True)
+        t = make_tensor((5, 3, 4, 2), device, dtype, exclude_zero=True)
         self._test_ref(op, t)
-        dims = [0, 1, -1]
-        if op.supports_multiple_dims:
-            dims += [[0, 2], [1, 3], [0, 2, 3]]
-        for dim in dims:
+        for dim in [0, 1, 3] + ([[0, 2], [1, 3]] if op.supports_multiple_dims else []):
             self._test_ref(op, t, dim=dim)
 
     @ops(filter(lambda op: op.ref is not None, reduction_ops),
          allowed_dtypes=[torch.float32])
     def test_ref_large_input_1D(self, device, dtype, op: ReductionOpInfo):
         """Compares op against reference for a large 1D input tensor to check stability"""
-        self._test_ref(op, make_tensor((2 ** 20,), device, dtype, low=-1, high=1, exclude_zero=True))
+        self._test_ref(op, make_tensor((2 ** 20,), device, dtype, low=-1, high=2, exclude_zero=True))
 
     @ops(filter(lambda op: op.ref is not None, reduction_ops),
          allowed_dtypes=[torch.float32])
     def test_ref_large_input_2D(self, device, dtype, op: ReductionOpInfo):
         """Compares op against reference for a large 2D input tensor to test parallelism"""
-        t = make_tensor((32, 2 ** 16), device, dtype, low=-1, high=1, exclude_zero=True)
+        t = make_tensor((32, 2 ** 16), device, dtype, low=-1, high=2, exclude_zero=True)
         self._test_ref(op, t, dim=1)
 
     @ops(filter(lambda op: op.ref is not None, reduction_ops),
          allowed_dtypes=[torch.float32])
     def test_ref_large_input_64bit_indexing(self, device, dtype, op: ReductionOpInfo):
         """Compares op against reference for a very large input tensor that requires 64 bit indexing"""
-        self._test_ref(op, make_tensor((275000000,), device, dtype, low=-1, high=1, exclude_zero=True))
+        self._test_ref(op, make_tensor((275000000,), device, dtype, low=-1, high=2, exclude_zero=True))
 
     @ops(filter(lambda op: op.ref is not None, reduction_ops),
          allowed_dtypes=get_all_dtypes(include_bfloat16=False))
