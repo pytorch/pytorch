@@ -3395,7 +3395,7 @@ Tensor constant_pad_nd_backward(const Tensor& grad, IntArrayRef pad) {
 }
 
 at::Tensor pad_backward(const at::Tensor& grad, const at::Tensor& self, const at::Tensor& pad_width, c10::string_view mode_str) {
-  Tensor pad_width_ = at::_expand_pad_specifier(pad_width, "pad_width", self.dim());
+  Tensor pad_width_ = at::native::expand_pad_specifier(pad_width, "pad_width", self.dim());
   std::vector<at::indexing::TensorIndex> slices = at::native::pad_width_to_inner_slices(pad_width_, self);
   return grad.index(slices);
 }

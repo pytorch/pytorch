@@ -5,15 +5,11 @@
 
 namespace at { namespace native {
 
-// Restrides a pad specifier argument to size(ndim, 2). Using a standard shape
-// lets us simplify the logic required to use pad specifier arguments.
-// This function also checks that the pad specifier has a legal format.
-//
 // TODO: Consider creating a PadSpecifier class, which would wrap the output of
 // this function. Helper functions could take the PadSpecifier instead of
 // a Tensor, so that we never accidentally give them the unprocessed pad
 // specifier tensor.
-Tensor _expand_pad_specifier(const Tensor& pad_spec, c10::string_view arg_name, int64_t ndim) {
+Tensor expand_pad_specifier(const Tensor& pad_spec, const char* arg_name, int64_t ndim) {
   auto pad_spec_ndim = pad_spec.dim();
   auto pad_spec_numel = pad_spec.numel();
 
@@ -56,7 +52,7 @@ Tensor _expand_pad_specifier(const Tensor& pad_spec, c10::string_view arg_name, 
 // Returns slices that can be used to index the inner section of the padded
 // tensor that corresponds with the original unpadded tensor.
 //
-// NOTE: pad_width must be processed with _expand_pad_specifier before
+// NOTE: pad_width must be processed with expand_pad_specifier before
 // calling this function
 std::vector<at::indexing::TensorIndex> pad_width_to_inner_slices(const Tensor& pad_width, const Tensor& self) {
   std::vector<at::indexing::TensorIndex> slices;
@@ -85,7 +81,7 @@ PadMode get_pad_mode_from_str(c10::string_view mode_str) {
 }
 
 // Fill the pad result with data from the input tensor
-// NOTE: pad_width must be processed with _expand_pad_specifier before
+// NOTE: pad_width must be processed with expand_pad_specifier before
 // calling this function
 void fill_input(Tensor& result, const Tensor& self, const Tensor& pad_width) {
   std::vector<at::indexing::TensorIndex> slices = pad_width_to_inner_slices(pad_width, self);
@@ -96,7 +92,7 @@ void fill_input(Tensor& result, const Tensor& self, const Tensor& pad_width) {
 // corresponding constant value
 //
 // NOTE: pad_width and constant_values must be processed with
-// _expand_pad_specifier before calling this function
+// expand_pad_specifier before calling this function
 void fill_constant_pad(Tensor& result, const Tensor& self, const Tensor& pad_width, const Tensor& constant_values) {
   for (int64_t pad_dim_idx = 0; pad_dim_idx < self.dim(); pad_dim_idx++) {
     auto width_before = pad_width[pad_dim_idx][0].item<int64_t>();
@@ -162,7 +158,7 @@ void check_pad_specifier_is_none(const c10::optional<Tensor>& arg, const char* a
 
 // Calculate the size of the padded tensor
 //
-// NOTE: pad_width must be processed with _expand_pad_specifier before
+// NOTE: pad_width must be processed with expand_pad_specifier before
 // calling this function
 Tensor get_result_size(const Tensor& self, const Tensor& pad_width) {
   auto result_size_tensor = at::tensor(
@@ -222,7 +218,7 @@ Tensor& pad_out_impl(
     check_device(result, "out", self.device());
   }
 
-  Tensor pad_width_ = at::native::_expand_pad_specifier(pad_width, "pad_width", self.dim());
+  Tensor pad_width_ = at::native::expand_pad_specifier(pad_width, "pad_width", self.dim());
 
   auto result_size_tensor = get_result_size(self, pad_width_);
   auto result_size = tensor_to_arrayref(result_size_tensor);
@@ -237,7 +233,7 @@ Tensor& pad_out_impl(
   if (mode == PadMode::Constant) {
     fill_input(result, self, pad_width_);
 
-    Tensor constant_values = at::native::_expand_pad_specifier(
+    Tensor constant_values = at::native::expand_pad_specifier(
       constant_values_opt.value_or(
         at::zeros({1}, self.options().device(at::kCPU))),
       "constant_values",
