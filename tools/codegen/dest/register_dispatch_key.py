@@ -572,6 +572,10 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                             expr=f"precompute.{arg.name}",
                             type=structured.argument_type(arg, binds=arg.name),
                         ))
+
+                # Add a use of the precompute struct so FB internal compilers don't
+                # complain that there is an unused variable.
+                sig_body.append("(void)precompute;")
             else:
                 sig_body.append(f"op.meta({meta_exprs});")
 
