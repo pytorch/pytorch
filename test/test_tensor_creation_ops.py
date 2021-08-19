@@ -711,7 +711,6 @@ class TestTensorCreation(TestCase):
     def test_cat_stack_cross_devices(self, device):
         cuda = torch.randn((3, 3), device=device)
         cpu = torch.randn((3, 3), device='cpu')
-        out_cuda = cuda.clone()
 
         # cat
         with self.assertRaisesRegex(RuntimeError,
@@ -721,10 +720,6 @@ class TestTensorCreation(TestCase):
                                     "Expected all tensors to be on the same device"):
             torch.cat((cpu, cuda))
 
-        with self.assertRaisesRegex(RuntimeError,
-                                    "Expected all tensors to be on the same device"):
-            torch.cat((cpu, cuda), out=out_cuda)
-
         # Stack
         with self.assertRaisesRegex(RuntimeError,
                                     "Expected all tensors to be on the same device"):
@@ -732,10 +727,6 @@ class TestTensorCreation(TestCase):
         with self.assertRaisesRegex(RuntimeError,
                                     "Expected all tensors to be on the same device"):
             torch.stack((cpu, cuda))
-
-        with self.assertRaisesRegex(RuntimeError,
-                                    "Expected all tensors to be on the same device"):
-            torch.stack((cpu, cuda), out=out_cuda)
 
     # TODO: reconcile with other cat tests
     # TODO: Compare with a NumPy reference instead of CPU
