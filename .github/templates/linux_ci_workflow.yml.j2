@@ -353,6 +353,7 @@ jobs:
       - name: Test PyTorch
         env:
           BUILD_ENVIRONMENT: !{{ build_environment }}-${{ matrix.config }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           if [[ $TEST_CONFIG == 'multigpu' ]]; then
             TEST_COMMAND=.jenkins/pytorch/multigpu-test.sh
@@ -368,6 +369,7 @@ jobs:
           docker run \
             ${GPU_FLAG:-} \
             -e BUILD_ENVIRONMENT \
+            -e PR_NUMBER \
             -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
             -e GITHUB_ACTIONS \
             -e IN_CI \

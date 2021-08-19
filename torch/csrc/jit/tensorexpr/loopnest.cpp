@@ -12,6 +12,7 @@
 #include <c10/util/string_utils.h>
 
 #include <ATen/core/functional.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/bounds_inference.h>
 #include <torch/csrc/jit/tensorexpr/eval.h>
@@ -558,12 +559,20 @@ class FunctionInliner : public IRMutator {
       }
       // Add a mapping for each function parameter to it's source name.
       inline_mapping_[func_callee_arg] = func_caller_param;
+      GRAPH_DEBUG(
+          "ComputeInline: Inline mapping: ",
+          std::to_string(func_callee_arg),
+          " -> ",
+          std::to_string(func_caller_param));
       index_vars.push_back(func_callee_arg);
     }
 
     // Call the actual replacement.
     ExprPtr body = producer_->value();
+    GRAPH_DEBUG("ComputeInline: Before rewriting body: ", std::to_string(body));
     ExprPtr result = Expr::clone(body)->accept_mutator(this);
+    GRAPH_DEBUG(
+        "ComputeInline: After rewriting body: ", std::to_string(result));
 
     // Remove the mappings we created for this function parameters.
     for (auto v : index_vars) {
@@ -575,6 +584,7 @@ class FunctionInliner : public IRMutator {
           }
         }
       }
+      GRAPH_DEBUG("ComputeInline: Inline mapping: erasing", std::to_string(v));
       inline_mapping_.erase(v);
     }
     return result;
@@ -617,6 +627,8 @@ class FunctionInliner : public IRMutator {
     const std::string& name = buf_->name_hint();
     VarPtr new_var = alloc<Var>(name, v->dtype());
     random_bindings_[alloc<Let>(new_var, v)] = index_vars_;
+    GRAPH_DEBUG(
+        "ComputeInline: created random bindings for ", std::to_string(new_var));
     return new_var;
   }
 
@@ -731,6 +743,7 @@ bool LoopNest::computeInline(BufPtr b) {
 
   TORCH_INTERNAL_ASSERT(relevant_store);
 
+  GRAPH_DEBUG("ComputeInline: Def: ", std::to_string(relevant_store));
   FunctionInliner inliner(relevant_store, output_bufs_);
   root_stmt_ = root_stmt_->accept_mutator(&inliner);
 
