@@ -22,6 +22,7 @@
 #include <torch/csrc/jit/serialization/type_name_uniquer.h>
 #include <torch/csrc/jit/serialization/mobile_bytecode_generated.h>
 #include <third_party/flatbuffers/include/flatbuffers/flatbuffers.h>
+#include <third_party/flatbuffers/include/flatbuffers/minireflect.h>
 
 #include <caffe2/serialize/inline_container.h>
 
@@ -32,6 +33,8 @@
 #include <string>
 #include <unordered_set>
 #include <vector>
+#include <fstream>
+
 
 namespace torch {
 namespace jit {
@@ -54,6 +57,17 @@ using mobile::serialization::IValue_Bool;
 using mobile::serialization::IValue_Double;
 using mobile::serialization::IValue_Tensor;
 using mobile::serialization::CreateTensor;
+using mobile::serialization::CreateIValue2;
+using mobile::serialization::CreateInt;
+using mobile::serialization::CreateDouble;
+using mobile::serialization::CreateBool;
+using mobile::serialization::IValue2;
+using flatbuffers::FlatBufferBuilder;
+
+// Only compress these records if they're not tiny.
+// The cpu cost of generating zip datastructs and compressing isn't
+// well-spent for very small records.
+static constexpr size_t kMinToCompress = 200;
 
 void CreateFBInstruction(
     flatbuffers::FlatBufferBuilder& fbb,
@@ -81,23 +95,29 @@ void CreateFBIValue(
     const IValue& value,
     uint8_t* value_type,
     flatbuffers::Offset<void>* value_value) {
+
   if (value.isInt()) {
-      *value_type = static_cast<uint8_t>(mobile::serialization::IValue_Int);
-      *value_value = fbb.CreateStruct(Int(value.toInt())).Union();
-      return;
-    }
+    *value_type = static_cast<uint8_t>(mobile::serialization::IValue_Int);
+    *value_value = fbb.CreateStruct(CreateInt(fbb, value.toInt())).Union();
+    return;
+  }
 
   if (value.isDouble()) {
     *value_type = static_cast<uint8_t>(mobile::serialization::IValue_Double);
-    *value_value = fbb.CreateStruct(Double(value.toDouble())).Union();
+    *value_value = fbb.CreateStruct(CreateDouble(fbb, value.toDouble())).Union();
     return;
   }
 
   if (value.isBool()) {
     *value_type = static_cast<uint8_t>(mobile::serialization::IValue_Bool);
-    *value_value = fbb.CreateStruct(Bool(value.toBool())).Union();
+    *value_value = fbb.CreateStruct(CreateBool(fbb, value.toBool())).Union();
         return;
   }
+
+  std::cout << " Real type is " << value.tagKind() << std::endl;
+  std::cout << " ivalue is " << value << std::endl;
+  *value_type = static_cast<uint8_t>(mobile::serialization::IValue_Int);
+  *value_value = fbb.CreateStruct(CreateInt(fbb, 123)).Union();
 
     // if (value.isTensor()) {
     // TODO: How to serialize Tensors?
@@ -107,8 +127,8 @@ void CreateFBIValue(
     //   return;
     // }
 
-  TORCH_INTERNAL_ASSERT(false, 
-      "IValue tag not yet supported for flatbuffer:" + value.tagKind());
+  // TORCH_INTERNAL_ASSERT(false, 
+  //    "IValue tag not yet supported for flatbuffer:" + value.tagKind());
 }
 
 void CreateConstants(
@@ -128,6 +148,19 @@ void CreateConstants(
     constant_types->push_back(const_type);
     constant_values->push_back(const_value);
   }
+}
+
+std::vector<flatbuffers::Offset<mobile::serialization::IValue2>> CreateConstants(
+    flatbuffers::FlatBufferBuilder& fbb,
+    const std::vector<IValue>& constants) {
+  uint8_t const_type;
+  flatbuffers::Offset<void> const_value;
+  std::vector<flatbuffers::Offset<mobile::serialization::IValue2>> consts;
+  for (const auto& constant : constants) {
+    CreateFBIValue(fbb, constant, &const_type, &const_value);
+    consts.emplace_back(CreateIValue2(fbb, static_cast<mobile::serialization::IValue>(const_type), const_value));
+  }
+  return consts;
 }
 
 flatbuffers::Offset<
@@ -210,27 +243,16 @@ void writeByteCodeFlatBuffer(const Module& module, const bool save_mobile_debug_
   std::vector<flatbuffers::Offset<mobile::serialization::Operator>> ops_vec({op1, op2});
   auto ops = fbb.CreateVector(ops_vec);
 
-  std::vector<uint8_t> union_types;
-  std::vector<flatbuffers::Offset<void>> union_values;
+  std::vector<flatbuffers::Offset<IValue2>> union_values;
 
-  union_values.push_back(fbb.CreateStruct(Int(1)).Union());
-  union_types.push_back(static_cast<uint8_t>(IValue_Int));
 
-  auto const2 = fbb.CreateStruct(Double(3.0f)).Union();
-  union_values.push_back(const2);
-  union_types.push_back(static_cast<uint8_t>(IValue_Double));
-
-  int8_t tensor_data[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
-  auto const3 = CreateTensor(fbb, fbb.CreateVector(tensor_data, 10));
-  union_types.push_back(static_cast<uint8_t>(IValue_Tensor));
-  union_values.push_back(const3.Union());
 
   auto type1 = "torch.type1";
   auto type2 = "torch.classes.type2";
   std::vector<std::string> types_vec({type1, type2});
   auto types = fbb.CreateVectorOfStrings(types_vec);
 
-  auto code = CreateCode(fbb, insts, ops, fbb.CreateVector(union_types), fbb.CreateVector(union_values), types, 10);
+  auto code = CreateCode(fbb, insts, ops, fbb.CreateVector(union_values), types, 10);
 }
 
 
@@ -392,9 +414,7 @@ std::pair<IValue, IValue> getFunctionTuple(
     constants.emplace_back(std::move(method_name));
   }
 
-  std::vector<uint8_t> constant_types;
-  std::vector<flatbuffers::Offset<void>> constant_values;
-  CreateConstants(fbb, constants, &constant_types, &constant_values);
+  auto fbb_constants = CreateConstants(fbb, constants);
 
   // types
   std::vector<std::string> type_strs;
@@ -426,8 +446,7 @@ std::pair<IValue, IValue> getFunctionTuple(
       fbb,
       instruction_offsets,
       operator_offsets,
-      fbb.CreateVector(constant_types),
-      fbb.CreateVector(constant_values),
+      fbb.CreateVector(fbb_constants),
       type_offsets,
       register_size);
 
@@ -494,6 +513,8 @@ std::pair<IValue, IValue> getFunctionTuple(
   // function tuple
   auto bytecode_vals = Tup({qn, codeTable, schemaTable});
 
+  std::cout << "name: " << qn << std::endl;
+
 
   c10::optional<IValue> debug_info_vals;
   // module debug info
@@ -510,6 +531,27 @@ std::pair<IValue, IValue> getFunctionTuple(
   auto debug_info_offset = CreateFBDebugInfo(fbb, op_debug_handles);
   auto function_offset =
       CreateFBFunction(fbb, qn, code_offset, schema_offset, debug_info_offset);
+
+  std::vector<flatbuffers::Offset<mobile::serialization::Function>> functions;
+  functions.push_back(function_offset);
+  auto functions_offset = fbb.CreateVector(functions);
+  auto mod = CreateModule(fbb, functions_offset);
+  fbb.Finish(mod);
+  uint8_t *buf = fbb.GetBufferPointer();
+  int size = fbb.GetSize();
+
+  std::cout <<flatbuffers::FlatBufferToString(buf, mobile::serialization::Module::MiniReflectTypeTable()) << std::endl;
+
+  std::ofstream wf("flatbuffer.dat", std::ios::out | std::ios::binary);
+  wf.write((const char*) buf, size);
+  wf.close();
+
+  std::cout << "Written some file" << std::endl;
+
+  int y;
+  std::cin >> y;
+
+
 
   return std::make_pair(bytecode_vals, debug_info_vals);
 }
@@ -662,6 +704,237 @@ void moduleMethodsTuple(
       type_name_uniquer_);
 }
 
+std::tuple<
+    std::vector<c10::OperatorName>,
+    std::vector<std::string>,
+    std::vector<int64_t>> 
+convertInstructionsForMobile(
+  const MobileCode* code,
+  std::vector<Instruction>* instructions,
+  BackendDebugInfoRecorder& debug_info_recorder
+) {
+  std::vector<c10::OperatorName> opnames;
+  std::vector<std::string> method_names;
+  std::vector<int64_t> op_debug_handles;
+  for (size_t i = 0; i < instructions->size(); ++i) {
+    Instruction ins = instructions->at(i);
+    if (ins.op == OP || ins.op == OPN) {
+      auto node = code->instructions_source()[i];
+      opnames.emplace_back(node->schema().operator_name());
+    }
+    // CALL nodes at this point represent built-in (i.e. non-Graph)
+    // functions that were not inlined. Here we convert the CALL
+    // instructions for these functions into INTERFACE_CALL instructions
+    // s.t. at runtime, we will look up the Function* on the Type of the
+    // 0th argument in the stack and call that directly.
+    if (ins.op == CALL) {
+      auto node = code->instructions_source()[i];
+      if (node->kind() == prim::CallMethod) {
+        // NB: replacing instruction
+        auto method_name_idx =
+            code->constant_table().size() + method_names.size();
+        method_names.emplace_back(node->s(attr::name));
+        Instruction new_instr{
+            INTERFACE_CALL,
+            static_cast<int32_t>(method_name_idx),
+            static_cast<uint16_t>(node->inputs().size())};
+        instructions->at(i) = new_instr;
+      } else {
+        TORCH_INTERNAL_ASSERT(
+            false, "Unsupported node kind on CALL opcode for mobile");
+      }
+    } else if (ins.op == RET) {
+      auto node = code->instructions_source()[i];
+      for (const auto& input : node->inputs()) {
+        const auto& input_type = input->type();
+        if (input_type->kind() == TypeKind::TupleType) {
+          if (const auto& name_typed_input =
+                  input_type->cast<at::NamedType>()) {
+            TORCH_CHECK(
+                !name_typed_input->name(),
+                "A named tuple type is not supported in mobile module. ",
+                "Workaround: instead of using a named tuple type's fields, ",
+                "use a dictionary type's key-value pair itmes or ",
+                "a pytorch class (class Foo(torch.nn.Module))'s attributes.'");
+          }
+        } else if (
+            input_type->kind() == TypeKind::ListType ||
+            input_type->kind() == TypeKind::DictType) {
+          for (const TypePtr& element_type : input_type->containedTypes()) {
+            TORCH_CHECK(
+                element_type->kind() != TypeKind::ClassType,
+                "Returining a list or dictionary with pytorch class type ",
+                "is not supported in mobile module "
+                "(List[Foo] or Dict[int, Foo] for class Foo(torch.nn.Module)). "
+                "Workaround: instead of using pytorch class as their element type, ",
+                "use a combination of list, dictionary, and single types.");
+          }
+        }
+      }
+    } else {
+      TORCH_CHECK(
+          isOpSupportedInMobile(ins.op),
+          toString(ins.op),
+          " is not supported in mobile module.");
+    }
+    auto node = code->instructions_source()[i];
+    int64_t debug_handle = debug_info_recorder.getNextDebugHandle(node);
+    // Note 1-to-1 correspondence between instructions and debug handles
+    op_debug_handles.emplace_back(debug_handle);
+  }
+  return std::make_tuple(opnames, method_names, op_debug_handles);
+}
+
+flatbuffers::Offset<mobile::serialization::Function>
+functionToFlatbuffers(
+    FlatBufferBuilder& fbb,
+    const Module& module,
+    const Function& func,
+    BackendDebugInfoRecorder& debug_info_recorder,
+    const std::basic_string<char>& qn,
+    TypeNameUniquer& type_name_uniquer_) {
+
+  auto graph = func.graph()->copy();
+  Inline(*graph);
+
+  std::shared_ptr<MobileCode> code;
+  code = std::make_shared<MobileCode>(
+      graph,
+      func.name(),
+      BytecodeEmitDefaultValueForUnspecifiedArgMode::
+          is_enabled() /* emit_default_input_instructions */);
+  auto instructions_copy = code->instructions();
+
+  std::vector<c10::OperatorName> opnames;
+  std::vector<std::string> method_names;
+  std::vector<int64_t> op_debug_handles;
+  std::tie(opnames, method_names, op_debug_handles) = convertInstructionsForMobile(
+    code.get(), &instructions_copy, debug_info_recorder);
+
+  // instructions
+  std::vector<flatbuffers::Offset<mobile::serialization::Instruction>> instruction_vector;
+  CreateFBInstruction(fbb, instructions_copy, &instruction_vector);
+  auto instruction_offsets = fbb.CreateVector(instruction_vector);
+
+  // operators
+  std::vector<flatbuffers::Offset<mobile::serialization::Operator>> operator_vector;
+  auto op_to_specified_args = code->op_to_num_specified_args();
+  operator_vector.reserve(opnames.size());
+  for (const auto& opname : opnames) {
+    auto unique_name = c10::toString(opname);
+    // For operator with vararg, adding default arguments would be confusing and
+    // is not allowed. For an operator with num_args = -1, it means the number
+    // of arguments is not available for this operator, we don't do any backward
+    // compatibility adaptation at runtime.
+    int num_args = -1;
+    auto it = op_to_specified_args.find(unique_name);
+    if (it != op_to_specified_args.end()) {
+      num_args = it->second;
+    }
+    CreateAndAppendOperator(fbb, opname.name, opname.overload_name, num_args, &operator_vector);
+  }
+
+  auto operator_offsets = fbb.CreateVector(operator_vector);
+
+  // constants
+  //
+  // Make a copy of the constants and append the method names
+  // that we emitted for the converted INTERFACE_CALL nodes above.
+  auto constants = code->constant_table();
+  for (auto& method_name : method_names) {
+    constants.emplace_back(std::move(method_name));
+  }
+
+  auto fbb_constants = CreateConstants(fbb, constants);
+
+  // types
+  std::vector<std::string> type_strs;
+  type_strs.reserve(code->type_table().size());
+  static const std::string torch_prefix("__torch__");
+  static const std::string class_prefix("__torch__.torch.classes");
+  for (const TypePtr& t : code->type_table()) {
+    auto type_str = t->annotation_str();
+    if (type_str.find(torch_prefix) == 0) {
+      TORCH_CHECK(
+          type_str.find(class_prefix) == 0,
+          "__torch__ types other than torchbind (__torch__.torch.classes)"
+          "are not supported in lite interpreter. ",
+          "Workaround: instead of using arbitrary class type (class Foo()), ",
+          "define a pytorch class (class Foo(torch.nn.Module)).");
+    }
+    type_strs.emplace_back(type_str);
+  }
+  auto type_offsets = CreateTypes(fbb, type_strs);
+
+  // since the register location is embedded into the bytecode, pass the
+  // register size
+  auto register_size = static_cast<int>(code->register_size());
+
+  auto code_offset = CreateCode(
+      fbb,
+      instruction_offsets,
+      operator_offsets,
+      fbb.CreateVector(fbb_constants),
+      type_offsets,
+      register_size);
+
+  // schema
+  const auto& schema = func.getSchema();
+  auto type_printer =
+      [&](const c10::ConstTypePtr& t) -> c10::optional<std::string> {
+    auto namedType = t->cast<c10::NamedType>();
+    if (namedType && namedType->name()) {
+      return type_name_uniquer_.getUniqueName(namedType).qualifiedName();
+    }
+    return c10::nullopt;
+  };
+  TORCH_CHECK(
+      schema.overload_name().empty(), // @TODO: is this check correct?
+      "Overloads are not supported in mobile modules.");
+  TORCH_CHECK(
+      !schema.is_vararg(), "Python *args are not supported in mobile modules.");
+  TORCH_CHECK(
+      !schema.is_varret(),
+      "A variable number of return values is not supported in mobile modules.");
+
+  auto schema_offset = CreateFBSchema(fbb, schema.arguments(), schema.returns(), type_printer);
+  std::cout << "name: " << qn << std::endl;
+  auto debug_info_offset = CreateFBDebugInfo(fbb, op_debug_handles);
+
+  auto function_offset =
+      CreateFBFunction(fbb, qn, code_offset, schema_offset, debug_info_offset);
+
+  return function_offset;
+}
+
+flatbuffers::DetachedBuffer 
+moduleToFlatbuffers(
+    const Module& module,
+    std::vector<c10::IValue>& debug_info_elements,
+    BackendDebugInfoRecorder& debug_info_recorder,
+    TypeNameUniquer& type_name_uniquer_) {
+  auto methods = module.get_methods();
+  std::unordered_set<std::string> qn_cache;
+  // top level methods
+  std::vector<flatbuffers::Offset<mobile::serialization::Function>> functions;
+  FlatBufferBuilder fbb;
+  for (const auto& method : methods) {
+    const auto qn = method.function().qualname().qualifiedName();
+    if (qn_cache.find(qn) != qn_cache.end()) {
+      continue;
+    }
+    auto func_offset = functionToFlatbuffers(
+        fbb, module, method.function(), debug_info_recorder, qn, type_name_uniquer_);
+    functions.push_back(func_offset);
+    qn_cache.emplace(qn);
+  }
+
+  auto functions_offset = fbb.CreateVector(functions);
+  auto mod = CreateModule(fbb, functions_offset);
+  fbb.Finish(mod);
+  return fbb.Release();
+}
+
 void SetExportModuleExtraFilesHook(ExportModuleExtraFilesHook hook) {
   GetExtraFilesHook() = std::move(hook);
 }
@@ -670,7 +943,8 @@ void ScriptModuleSerializer::serialize(
     const Module& module,
     const ExtraFilesMap& extra_files,
     bool bytecode_format,
-    bool save_mobile_debug_info) {
+    bool save_mobile_debug_info,
+    bool use_flatbuffer) {
   C10_LOG_API_USAGE_ONCE("torch.script.save");
   writeExtraFiles(module, extra_files);
   // Serialize the model object
@@ -694,7 +968,7 @@ void ScriptModuleSerializer::serialize(
         /*tensor_dir=*/"constants/",
         /*use_storage_context=*/true);
 
-    writeByteCode(module, save_mobile_debug_info);
+    writeByteCode(module, save_mobile_debug_info, use_flatbuffer);
   } else {
     writeArchive(
         c10::ivalue::Tuple::create(ivalue_constants),
@@ -837,11 +1111,6 @@ void ScriptModuleSerializer::writeFiles(const std::string& code_dir) {
 
     std::string src = item.value().str();
 
-    // Only compress these records if they're not tiny.
-    // The cpu cost of generating zip datastructs and compressing isn't
-    // well-spent for very small records.
-    static constexpr size_t kMinToCompress = 200;
-
     writer_.writeRecord(
         filename,
         src.c_str(),
@@ -865,29 +1134,43 @@ void ScriptModuleSerializer::writeFiles(const std::string& code_dir) {
 
 void ScriptModuleSerializer::writeByteCode(
     const Module& module,
-    const bool save_mobile_debug_info) {
-  std::vector<c10::IValue> elements;
+    const bool save_mobile_debug_info,
+    const bool use_flatbuffers) {
   BackendDebugInfoRecorder debug_info_recorder;
   int64_t version_to_write = caffe2::serialize::kProducedBytecodeVersion;
-
-  elements.emplace_back(static_cast<int64_t>(version_to_write));
   std::vector<c10::IValue> debug_info_elements;
   // Always save debug handles
   debug_info_elements.emplace_back(static_cast<int64_t>(version_to_write));
 
-  moduleMethodsTuple(
-      module,
-      elements,
-      debug_info_elements,
-      debug_info_recorder,
-      type_name_uniquer_);
-  auto telements = Tup(std::move(elements));
-  writeArchive(
-      telements,
-      /*archive_name=*/"bytecode",
-      /*archive_dir=*/"",
-      /*tensor_dir=*/"constants/",
-      /*use_storage_context=*/true);
+  if (use_flatbuffers) {
+    flatbuffers::DetachedBuffer buffer = moduleToFlatbuffers(
+        module,
+        debug_info_elements,
+        debug_info_recorder,
+        type_name_uniquer_);
+    writer_.writeRecord(
+        "bytecodes.flatbuffers",
+        buffer.data(),
+        buffer.size(),
+        buffer.size() > kMinToCompress /*compress*/);
+
+  } else {
+    std::vector<c10::IValue> elements;
+    elements.emplace_back(static_cast<int64_t>(version_to_write));
+    moduleMethodsTuple(
+        module,
+        elements,
+        debug_info_elements,
+        debug_info_recorder,
+        type_name_uniquer_);
+    auto telements = Tup(std::move(elements));
+    writeArchive(
+        telements,
+        /*archive_name=*/"bytecode",
+        /*archive_dir=*/"",
+        /*tensor_dir=*/"constants/",
+        /*use_storage_context=*/true);
+  }
 
   auto debug_info_telements = Tup(std::move(debug_info_elements));
 
@@ -1024,7 +1307,8 @@ void ExportModule(
     std::ostream& out,
     const ExtraFilesMap& extra_files,
     bool bytecode_format,
-    bool save_mobile_debug_info) {
+    bool save_mobile_debug_info,
+    bool use_flatbuffer) {
   caffe2::serialize::PyTorchStreamWriter writer(
       [&](const void* buf, size_t nbytes) -> size_t {
         out.write(static_cast<const char*>(buf), nbytes);
@@ -1032,7 +1316,7 @@ void ExportModule(
       });
   ScriptModuleSerializer serializer(writer);
   serializer.serialize(
-      module, extra_files, bytecode_format, save_mobile_debug_info);
+      module, extra_files, bytecode_format, save_mobile_debug_info, use_flatbuffer);
 }
 
 void ExportModule(
@@ -1040,11 +1324,12 @@ void ExportModule(
     const std::string& filename,
     const ExtraFilesMap& extra_files,
     bool bytecode_format,
-    bool save_mobile_debug_info) {
+    bool save_mobile_debug_info,
+    bool use_flatbuffer) {
   caffe2::serialize::PyTorchStreamWriter writer(filename);
   ScriptModuleSerializer serializer(writer);
   serializer.serialize(
-      module, extra_files, bytecode_format, save_mobile_debug_info);
+      module, extra_files, bytecode_format, save_mobile_debug_info, use_flatbuffer);
 }
 
 void ExportModule(
@@ -1052,11 +1337,12 @@ void ExportModule(
     const std::function<size_t(const void*, size_t)>& writer_func,
     const ExtraFilesMap& extra_files,
     bool bytecode_format,
-    bool save_mobile_debug_info) {
+    bool save_mobile_debug_info,
+    bool use_flatbuffer) {
   caffe2::serialize::PyTorchStreamWriter writer(writer_func);
   ScriptModuleSerializer serializer(writer);
   serializer.serialize(
-      module, extra_files, bytecode_format, save_mobile_debug_info);
+      module, extra_files, bytecode_format, save_mobile_debug_info, use_flatbuffer);
 }
 
 namespace {

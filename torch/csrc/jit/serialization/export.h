@@ -68,7 +68,8 @@ class TORCH_API ScriptModuleSerializer {
       const Module& module,
       const ExtraFilesMap& extra_files,
       bool bytecode_format,
-      bool save_mobile_debug_info);
+      bool save_mobile_debug_info,
+      bool use_flatbuffer);
   void serialize_unified_format(Module& module, uint64_t script_module_id);
   SerializationStorageContext& storage_context();
 
@@ -81,7 +82,7 @@ class TORCH_API ScriptModuleSerializer {
   void writeMobileMetadata(
       const Module& module,
       const ExtraFilesMap& extra_files);
-  void writeByteCode(const Module& module, bool save_mobile_debug_info);
+  void writeByteCode(const Module& module, bool save_mobile_debug_info, bool use_flatbuffers);
   void writeArchive(
       const IValue& value,
       const std::string& archive_name,
@@ -150,21 +151,24 @@ TORCH_API void ExportModule(
     std::ostream& out,
     const ExtraFilesMap& metadata = ExtraFilesMap(),
     bool bytecode_format = false,
-    bool save_mobile_debug_info = false);
+    bool save_mobile_debug_info = false,
+    bool use_flatbuffer = false);
 
 TORCH_API void ExportModule(
     const Module& module,
     const std::string& filename,
     const ExtraFilesMap& metadata = ExtraFilesMap(),
     bool bytecode_format = false,
-    bool save_mobile_debug_info = false);
+    bool save_mobile_debug_info = false,
+    bool use_flatbuffer = false);
 
 TORCH_API void ExportModule(
     const Module& module,
     const std::function<size_t(const void*, size_t)>& writer_func,
     const ExtraFilesMap& metadata = ExtraFilesMap(),
     bool bytecode_format = false,
-    bool save_mobile_debug_info = false);
+    bool save_mobile_debug_info = false,
+    bool use_flatbuffer = false);
 
 // Write the bytes of a pickle archive and the tensors referenced inside that
 // archive
