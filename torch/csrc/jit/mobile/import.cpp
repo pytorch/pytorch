@@ -10,7 +10,9 @@
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/import_read.h>
+#include <torch/csrc/jit/serialization/mobile_bytecode_generated.h>
 #include <torch/custom_class.h>
+#include <third_party/flatbuffers/include/flatbuffers/flatbuffers.h>
 
 #include <exception>
 #include <fstream>
@@ -119,6 +121,7 @@ TypePtr resolveTypeNameMobile(
   // check today, but there is no guarantee that this is the case. The
   // real solution is to merge type parsers so we can share class
   // resolution logic.
+
   static const c10::QualifiedName torchPrefix = "__torch__";
   static const c10::QualifiedName jitPrefix = "torch.jit";
   if (torchPrefix.isPrefixOf(qn) || jitPrefix.isPrefixOf(qn)) {
@@ -485,6 +488,102 @@ void BytecodeDeserializer::parseMethods(
   }
 }
 
+void parseMethodsFlatbuffer(
+    const void* data,
+    const size_t size,
+    const std::vector<IValue>& constants, 
+    const c10::optional<std::vector<IValue>>& debug_handles,
+    std::shared_ptr<mobile::CompilationUnit> mcu,
+    std::shared_ptr<CompilationUnit> cu
+) {
+  auto module_ptr = mobile::serialization::GetModule(data);
+  auto methods = module_ptr->methods();
+
+  bool has_debug_handles = debug_handles.has_value();
+
+  // A Global Cache for Operator functions across all methods in the model.
+  mobile::Function::OperatorCacheType operator_cache;
+
+  for (int i = 0; i < methods->size(); i++) {
+    const auto* method = methods->Get(i);
+
+    auto function = std::make_unique<mobile::Function>(c10::QualifiedName(method->qn()->str()));
+    const auto* code_tb = method->code();
+
+    int j = 0;
+    for (const auto* inst : *code_tb->instructions()) {
+      int64_t debug_handle = method->debug_info()->debug_handle()->Get(j);
+      function->append_instruction(static_cast<OpCode>(inst->op()), inst->x(), inst->n(), debug_handle);
+      j += 1;
+    }
+
+    for (const int const_index : *code_tb->constants()) {
+      function->append_constant(constants[const_index]);
+    }
+    
+    // insert operators
+    std::unordered_set<std::string> unsupported_op_names;
+    const int64_t model_version = 0x3L;
+    for (const auto* op : *code_tb->operators()) {
+      c10::optional<int> num_args;
+      if (op->num_args_serialized() > -1) {
+        num_args = op->num_args_serialized();
+      }
+
+      auto op_found = function->append_operator(
+          op->name()->str(),
+          op->overload_name()->str(),
+          num_args,
+          model_version,
+          operator_cache);
+      if (!op_found) {
+        unsupported_op_names.emplace(operator_str(
+          op->name()->str(), op->overload_name()->str()));
+      }
+    }
+
+    static const c10::QualifiedName classPrefix = "__torch__.torch.classes";
+    for (const auto* t : *code_tb->types()) {
+      c10::QualifiedName qn(t->str());
+      if (classPrefix.isPrefixOf(qn)) {
+        auto classType = getCustomClass(qn.qualifiedName());
+        TORCH_CHECK(
+            classType,
+            "The implementation of class ",
+            qn.qualifiedName(),
+            " cannot be found.");
+        function->append_type(classType);
+      } else {
+        function->append_type(c10::parseType(t->str()));
+      }
+    }
+
+    function->set_register_size(code_tb->register_size());
+
+    auto parseArgList = [&cu, &constants](const auto* args_fb) {
+      std::vector<c10::Argument> args;
+      for (const auto* arg_tb: *args_fb) {
+        IValue default_value = constants[arg_tb->default_value()];
+        TypePtr type_ptr = resolveTypeNameMobile(arg_tb->type()->str(), cu);
+        auto arg =
+            c10::Argument(arg_tb->name()->str(), type_ptr, c10::nullopt /*N*/, default_value);
+        args.emplace_back(std::move(arg));
+      }
+      return args;
+    };
+    c10::FunctionSchema schema(
+        method->qn()->str(),
+        "" /*overload_name*/,
+        parseArgList(method->schema()->arguments()),
+        parseArgList(method->schema()->returns()),
+        false /*is_varargs*/,
+        false /*is_varret*/);
+    function->setSchema(std::move(schema));
+
+    mcu->register_function(std::move(function));
+  }
+}
+
 void BytecodeDeserializer::deserialize_only_extra(
     c10::optional<at::Device> device,
     ExtraFilesMap& extra_files) {
@@ -510,8 +609,18 @@ mobile::Module BytecodeDeserializer::deserialize(
 
 mobile::Module BytecodeDeserializer::deserialize(
     c10::optional<at::Device> device) {
+  auto start = std::chrono::system_clock::now();
+  auto end = std::chrono::system_clock::now();
+  std::chrono::microseconds diff;
+
+  auto des_start = std::chrono::system_clock::now();
   device_ = device;
+
+  start = std::chrono::system_clock::now();
   auto mcu = std::make_shared<mobile::CompilationUnit>();
+  end = std::chrono::system_clock::now();
+  diff = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+  std::cout << " Make mcu " << diff.count() << "us\n";
 
   // bvals can have 2 possible formats:
   //
@@ -522,19 +631,87 @@ mobile::Module BytecodeDeserializer::deserialize(
   // being a Tuple (int, table), and the integer stands for the bytecode version
   // number. The rest of the elements are the same as before.
   //
-  auto bvals = readArchive("bytecode", mcu).toTuple()->elements();
 
+  start = std::chrono::system_clock::now();
   c10::optional<std::vector<IValue>> debug_handles;
   if (reader_->hasRecord("mobile_debug_handles.pkl")) {
     debug_handles =
         readArchive("mobile_debug_handles", mcu).toTuple()->elements();
   }
-  parseMethods(bvals, debug_handles, *mcu);
+  end = std::chrono::system_clock::now();
+  diff = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+  std::cout << " Debug handles " << diff.count() << "us\n";
+
+  if (reader_->hasRecord("bytecodes.flatbuffers")) {
+    // std::cerr << "HAN QI: parsing flatbuffer format"  << std::endl;
+    start = std::chrono::system_clock::now();
+    auto record = reader_->getRecord("bytecodes.flatbuffers");
+    end = std::chrono::system_clock::now();
+    diff = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+    std::cout << "    [NEW] Get record " << diff.count() << "us\n";
+    start = std::chrono::system_clock::now();
+    auto type_resolver = [this](const c10::QualifiedName& qn) {
+      return typeResolverMobile(qn, compilation_unit_);
+    };
+
+    auto obj_loader = [&](at::StrongTypePtr type, IValue input) {
+      return objLoaderMobile(type, input, mcu);
+    };
+
+    auto constants = torch::jit::readArchiveAndTensors(
+        "constants_ivalue",
+        /*pickle_prefix=*/"",
+        /*tensor_prefix=*/
+        "constants/",
+        type_resolver,
+        obj_loader,
+        device_,
+        *reader_.get()).toTuple()->elements();
+    end = std::chrono::system_clock::now();
+    diff = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+    std::cout << "    [NEW] Load const " << diff.count() << "us\n";
+
+    start = std::chrono::system_clock::now();
+    parseMethodsFlatbuffer(
+      std::get<0>(record).get(), 
+      std::get<1>(record), 
+      constants,
+      debug_handles,
+      mcu,
+      compilation_unit_);
+    end = std::chrono::system_clock::now();
+    diff = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+    std::cout << "    [NEW] Parse methods ff " << diff.count() << "us\n";
+  } else {
+    start = std::chrono::system_clock::now();
+    auto bvals = readArchive("bytecode", mcu).toTuple()->elements();
+    end = std::chrono::system_clock::now();
+    diff = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+    std::cout << "    [OLD] Get record" << diff.count() << "us\n";
+    start = std::chrono::system_clock::now();
+    parseMethods(bvals, debug_handles, *mcu);
+    end = std::chrono::system_clock::now();
+    diff = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+    std::cout << "    [OLD] parseMethods old " << diff.count() << "us\n";
+  }
+
+  start = std::chrono::system_clock::now();
   auto m = mobile::Module(readArchive("data", mcu).toObject(), mcu);
+  end = std::chrono::system_clock::now();
+  diff = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+  std::cout << " Get module and data" << diff.count() << "us\n";
+  start = std::chrono::system_clock::now();
 #if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
   MobileDebugTable debug_table = MobileDebugTable(reader_, compilation_unit_);
   m.setDebugTable(std::move(debug_table));
 #endif
+  end = std::chrono::system_clock::now();
+  diff = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+  std::cout << " MobileDebugTable " << diff.count() << "us\n";
+
+  auto des_end = std::chrono::system_clock::now();
+  auto fulldiff = std::chrono::duration_cast<std::chrono::microseconds>(des_end - des_start);
+  std::cout << " Total time of deserialize: " << fulldiff.count() << "us\n";
   return m;
 }
 

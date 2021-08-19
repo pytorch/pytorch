@@ -3,19 +3,19 @@
 // TODO(gmagogsfm): Update namespace.
 namespace torch.jit.mobile.serialization;
 
-struct Int {
+table Int {
   int_val:int;
 }
 
-struct Bool {
+table Bool {
   bool_val:bool;
 }
 
-struct Double{
+table Double{
   double_val:double;
 }
 
-struct None{
+table None{
   unused:byte;
 }
 
@@ -37,7 +37,11 @@ union IValue {
   TensorMetadata
 }
 
-table Instruction {
+table IValue2 {
+  pickled:[byte];
+}
+
+struct Instruction {
   // Should op be enum instead?
   op:byte;
   n:ushort;
@@ -53,7 +57,7 @@ table Operator {
 table Code {
   instructions:[Instruction];
   operators:[Operator];
-  constants:[IValue];
+  constants:[int]; // positions
   types:[string];
   register_size:int;
 }
@@ -63,7 +67,7 @@ table Arg {
   // Why do we use string to represent types
   // rather than index into Code.types?
   type:string;
-  default_value:IValue;
+  default_value:int;  // position into ivalues
 }
 
 table Schema {
@@ -84,6 +88,7 @@ table Function {
 
 table Module {
   methods:[Function];
+  // ivalues: [IValue2]
 }
 
 root_type Module;

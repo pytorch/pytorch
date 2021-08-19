@@ -1584,6 +1584,7 @@ endif()
 
 # TODO(gmagogsfm): Make sure generated files show up in build folder rather than in original source foldedr
 set(FLATBUFFERS_FLATC_EXECUTABLE ${CMAKE_BINARY_DIR}/bin/flatc)
+# cann add--reflect-names 
 add_custom_command(OUTPUT mobile_bytecode_generated.h
   COMMAND ${FLATBUFFERS_FLATC_EXECUTABLE} --cpp -o ${TORCH_SRC_DIR}/csrc/jit/serialization ${TORCH_SRC_DIR}/csrc/jit/serialization/mobile_bytecode.fbs
   COMMENT "Generating mobile_bytecode_generated.h"
