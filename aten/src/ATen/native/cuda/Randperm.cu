@@ -47,6 +47,8 @@ template <int N> struct alignas(N) OpaqueType { char data[N]; };
 
 Tensor& randperm_out_cuda(int64_t n, c10::optional<Generator> generator, Tensor& result) {
   TORCH_CHECK(n >= 0, "n must be non-negative, got", n);
+  TORCH_CHECK(n <= std::numeric_limits<int>::max(),
+    "randperm of tensors larger than INT_MAX is not supported yet in pytorch");
 
   check_supported_max_int_with_precision(n, result);
 
