@@ -54,7 +54,7 @@ def empty(
     """
     tensor_init_params = TensorInitParams(create_op=CreateOp.EMPTY, dtype=dtype, layout=layout,
                                           requires_grad=requires_grad,
-                                          pin_memory=pin_memory,memory_format=memory_format)
+                                          pin_memory=pin_memory, memory_format=memory_format)
     return ShardedTensor(
         sharding_spec,
         *size,
