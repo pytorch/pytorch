@@ -25,27 +25,21 @@ void slow_conv2d_shape_check(
   TORCH_CHECK(weight_nullable || weight.defined(),
               "weight tensor is expected to be non-nullable");
   TORCH_CHECK(!weight.defined() ||
-              ((weight.numel() > 0) && (weight.dim() == 2 || weight.dim() == 4)),
-              "non-empty 2D or 4D weight tensor expected, but got: ", weight.sizes());
+              ((weight.numel() > 0) && (weight.dim() == 2)),
+              "non-empty 2D weight tensor expected, but got: ", weight.sizes());
   TORCH_CHECK(!bias.defined() || (bias.dim() == 1 && bias.sizes()[0] == weight.sizes()[0]),
               "Expected bias to have shape [", weight.sizes()[0], "] but got ", bias.sizes());
 
   const auto in_sizes = input.sizes();
-  int ndim = in_sizes.size();
-  int dimf = 0;
-  int dimh = 1;
-  int dimw = 2;
-
-  if (ndim == 4) {
-    dimf++;
-    dimh++;
-    dimw++;
-  }
+  constexpr int ndim = 4;
+  constexpr int dimf = 1;
+  constexpr int dimh = 2;
+  constexpr int dimw = 3;
+  TORCH_CHECK(in_sizes.size() == ndim, "Expected 4D input tensor, but got ", in_sizes);
 
   // Allow for empty batch size but not other dimensions
   const bool valid_empty = c10::multiply_integers(in_sizes.slice(1)) != 0;
-  TORCH_CHECK((valid_empty) && (ndim == 3 || ndim == 4),
-              "non-empty 3D or 4D input tensor expected but got: ", in_sizes);
+  TORCH_CHECK(valid_empty, "non-empty input tensor expected but got: ", in_sizes);
 
   int64_t inputHeight = in_sizes[dimh];
   int64_t inputWidth = in_sizes[dimw];
@@ -110,18 +104,16 @@ void slow_conv2d_shape_check(
 
 Tensor new_view_weight_MM2d(const Tensor& weight_) {
   auto weight = weight_.expect_contiguous();
-  if (weight->dim() != 4) {
-    return *weight;
-  }
   const auto w_sizes = weight->sizes();
+  TORCH_CHECK(w_sizes.size() == 4);
   int64_t s1 = w_sizes[0];
   int64_t s2 = c10::multiply_integers(w_sizes.slice(1));
   return weight->view({s1, s2});
 }
 
 void slow_conv2d_forward(
-           const Tensor &input_,
-           const Tensor &output_,
+           const Tensor &input,
+           const Tensor &output,
            const Tensor &weight_,
            const Tensor &bias,
            const Tensor &columns,
@@ -131,23 +123,18 @@ void slow_conv2d_forward(
            int64_t padH, int64_t padW) {
   auto weight = new_view_weight_MM2d(weight_);
   slow_conv2d_shape_check(
-      input_, {}, weight, bias, kH, kW, dH, dW, padH, padW, /*weight_nullable*/false);
+      input, {}, weight, bias, kH, kW, dH, dW, padH, padW, /*weight_nullable*/false);
 
   TORCH_CHECK(!bias.defined() || bias.is_contiguous(),
               "bias tensor has to be contiguous");
 
-  int ndim = input_.dim();
-  int dimf = 0;
-  int dimh = 1;
-  int dimw = 2;
+  constexpr int ndim = 4;
+  constexpr int dimf = 1;
+  constexpr int dimh = 2;
+  constexpr int dimw = 3;
 
-  if (ndim == 4) {
-    dimf++;
-    dimh++;
-    dimw++;
-  }
-
-  auto in_sizes = input_.sizes();
+  auto in_sizes = input.sizes();
+  int64_t batchSize = in_sizes[0];
   int64_t nInputPlane  = in_sizes[dimf];
   int64_t inputHeight  = in_sizes[dimh];
   int64_t inputWidth   = in_sizes[dimw];
@@ -155,23 +142,8 @@ void slow_conv2d_forward(
   int64_t outputHeight = (inputHeight + 2*padH - kH) / dH + 1;
   int64_t outputWidth  = (inputWidth + 2*padW - kW) / dW + 1;
 
-  Tensor input = input_;
-  if (in_sizes.size() == 3) {
-    input = input.unsqueeze(0);
-  }
-
-  // Batch size + input planes
-  in_sizes = input.sizes();
-  int64_t batchSize = in_sizes[0];
-
   // Resize output
-  Tensor output = output_;
-  if (ndim == 4) {
-    resize_output(output, {batchSize, nOutputPlane, outputHeight, outputWidth});
-  } else {
-    resize_output(output, {nOutputPlane, outputHeight, outputWidth});
-    output = output.unsqueeze(0);
-  }
+  resize_output(output, {batchSize, nOutputPlane, outputHeight, outputWidth});
 
   // Resize temporary columns
   resize_output(columns, {nInputPlane * kW * kH, outputHeight * outputWidth});
@@ -254,8 +226,8 @@ void slow_conv2d_forward(
 
 void slow_conv2d_backward(
     const Tensor &input,
-    const Tensor &grad_output_,
-    const Tensor &grad_input_,
+    const Tensor &grad_output,
+    const Tensor &grad_input,
     const Tensor &weight_,
     const Tensor &grad_columns,
     const Tensor &ones,
@@ -263,24 +235,18 @@ void slow_conv2d_backward(
     int dH, int dW,
     int padH, int padW) {
   Tensor weight = new_view_weight_MM2d(weight_);
-  slow_conv2d_shape_check(input, grad_output_, weight, {},
+  slow_conv2d_shape_check(input, grad_output, weight, {},
                           kH, kW, dH, dW, padH, padW, /*weight_nullable=*/false);
 
   // Params
   auto weight_sizes = weight.sizes();
-  int nInputPlane = weight_sizes.size() == 2 ? weight_sizes[1]/(kW*kH) : weight_sizes[1];
+  int nInputPlane = weight_sizes[1]/(kW*kH);
   int nOutputPlane = weight_sizes[0];
 
-  TORCH_INTERNAL_ASSERT(grad_output_.is_contiguous());
-
-  Tensor grad_output = grad_output_;
-  const bool is_batched = input.dim() == 4;
-  if (!is_batched) {
-    // Force batch
-    grad_output = grad_output_.unsqueeze(0);
-  }
+  TORCH_INTERNAL_ASSERT(grad_output.is_contiguous());
 
   auto input_sizes = input.sizes();
+  TORCH_CHECK(input_sizes.size() == 4, "Expected a 4D input tensor but got ", input_sizes);
   int64_t inputWidth   = input_sizes[3];
   int64_t inputHeight  = input_sizes[2];
   auto output_sizes = grad_output.sizes();
@@ -291,9 +257,8 @@ void slow_conv2d_backward(
   int64_t batchSize = input_sizes[0];
 
   // Resize output
-  resize_output(grad_input_, input_sizes);
-  TORCH_CHECK(grad_input_.is_contiguous(), "grad_input must be contiguous");
-  const auto grad_input = is_batched ? grad_input_ : grad_input_.unsqueeze(0);
+  resize_output(grad_input, input_sizes);
+  TORCH_CHECK(grad_input.is_contiguous(), "grad_input must be contiguous");
 
   // Resize temporary columns
   resize_output(grad_columns, {nInputPlane*kW*kH, outputHeight*outputWidth});
@@ -337,8 +302,8 @@ void slow_conv2d_backward(
 }
 
 void slow_conv2d_grad_weight_bias(
-           const Tensor &input_,
-           const Tensor &grad_output_,
+           const Tensor &input,
+           const Tensor &grad_output,
            const Tensor &grad_weight_,
            const Tensor &grad_bias,
            const Tensor &columns,
@@ -355,21 +320,15 @@ void slow_conv2d_grad_weight_bias(
   }
 
   auto grad_weight = new_view_weight_MM2d(grad_weight_);
-  slow_conv2d_shape_check(input_, grad_output_, grad_weight, grad_bias,
+  slow_conv2d_shape_check(input, grad_output, grad_weight, grad_bias,
                           kH, kW, dH, dW, padH, padW, /*weight_nullable=*/true);
 
   // Params
-  TORCH_INTERNAL_ASSERT(input_.is_contiguous());
-  TORCH_INTERNAL_ASSERT(grad_output_.is_contiguous());
-
-  Tensor input = input_;
-  Tensor grad_output = grad_output_;
-  if (input.dim() == 3) {
-    input = input_.unsqueeze(0);
-    grad_output = grad_output_.unsqueeze(0);
-  }
+  TORCH_INTERNAL_ASSERT(input.is_contiguous());
+  TORCH_INTERNAL_ASSERT(grad_output.is_contiguous());
 
   auto input_sizes = input.sizes();
+  TORCH_CHECK(input_sizes.size() == 4, "Expected a 4D input tensor but got ", input_sizes);
   int64_t nInputPlane = input_sizes[1];
   int64_t nOutputPlane = grad_output.sizes()[1];
 
