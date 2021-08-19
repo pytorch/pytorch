@@ -245,7 +245,7 @@ class ChildFailedError(Exception):
                 other_failures_fmt.append(fmt)
 
         # upper boundary on width
-        width = max(width, 250)
+        width = min(width, 250)
 
         return Template(_MSG_FORMAT_TEMPLATE).substitute(
             boarder=boarder_delim * width,

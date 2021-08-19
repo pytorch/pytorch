@@ -29,6 +29,7 @@ class ObservedGraphModule(GraphModule):
             '_patterns',
             '_qconfig_map',
             '_prepare_custom_config_dict',
+            '_equalization_qconfig_map',
             '_node_name_to_scope']).union(preserved_attr_names)
         preserved_attrs = {attr: getattr(root, attr) for attr in self.preserved_attr_names if hasattr(root, attr)}
         super().__init__(root, graph)

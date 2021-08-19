@@ -77,8 +77,7 @@ struct C10_EXPORT ConcretePyObjectHolder final : PyObjectHolder {
   // nullptr, on destruction, effectively does nothing because of it calls
   // Py_XDECREF(NULL) underlying.
   // https://docs.python.org/3/c-api/refcounting.html#c.Py_XDECREF
-  // NOLINTNEXTLINE(modernize-use-override)
-  ~ConcretePyObjectHolder() {
+  ~ConcretePyObjectHolder() override {
     pybind11::gil_scoped_acquire ag;
     py_obj_.dec_ref();
     // explicitly setting PyObject* to nullptr to prevent py::object's dtor to

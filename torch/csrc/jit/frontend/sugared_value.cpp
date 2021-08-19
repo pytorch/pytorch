@@ -468,7 +468,7 @@ RangeValue::RangeValue(
     Function& m,
     std::vector<Value*> inputs,
     c10::optional<int64_t> static_len) {
-  for (size_t i = 0; i < inputs.size(); ++i) {
+  for (const auto i : c10::irange(inputs.size())) {
     auto typ = inputs[i]->type();
     if (!typ->cast<IntType>()) {
       throw ErrorReport(loc)
@@ -536,8 +536,7 @@ SugaredValuePtr RangeValue::getitem(
 std::vector<SugaredValuePtr> IterableTree::get_base_iterables() {
   std::vector<SugaredValuePtr> base_iters{};
 
-  // NOLINTNEXTLINE(performance-for-range-copy)
-  for (SugaredValuePtr sv : children_) {
+  for (SugaredValuePtr& sv : children_) {
     if (auto iv = std::dynamic_pointer_cast<IterableTree>(sv)) {
       std::vector<SugaredValuePtr> child_iters = iv->get_base_iterables();
       // merge child iters with the base_iters

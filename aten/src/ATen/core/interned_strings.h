@@ -83,6 +83,7 @@ namespace c10 {
   _(prim, StringIndex)               \
   _(prim, NumToTensor)               \
   _(prim, Uninitialized)             \
+  _(prim, VarConcat)                 \
   _(prim, With)                      \
   _(prim, Enter)                     \
   _(prim, Exit)                      \
@@ -264,6 +265,9 @@ namespace c10 {
   _(aten, linalg_householder_product)\
   _(aten, transpose)                 \
   _(aten, transpose_)                \
+  _(aten, trapz)                     \
+  _(aten, trapezoid)                 \
+  _(aten, cumulative_trapezoid)      \
   _(aten, unsqueeze_)                \
   _(aten, __getitem__)               \
   _(aten, _set_item)                 \
@@ -320,8 +324,12 @@ namespace c10 {
   _(aten, swapdims_)                 \
   _(aten, movedim)                   \
   _(aten, moveaxis)                  \
+  _(aten, polygamma)                 \
+  _(aten, special_polygamma)         \
   _(aten, lgamma)                    \
   _(aten, special_gammaln)           \
+  _(aten, logsumexp)                 \
+  _(aten, special_logsumexp)         \
   _(aten, digamma)                   \
   _(aten, special_psi)               \
   _(aten, special_digamma)           \
@@ -329,6 +337,7 @@ namespace c10 {
   _(aten, special_erf)               \
   _(aten, erfc)                      \
   _(aten, special_erfc)              \
+  _(aten, special_erfcx)             \
   _(aten, erfinv)                    \
   _(aten, special_erfinv)            \
   _(aten, logit)                     \
@@ -339,11 +348,25 @@ namespace c10 {
   _(aten, special_expm1)             \
   _(aten, exp2)                      \
   _(aten, special_exp2)              \
+  _(aten, log1p)                     \
+  _(aten, special_log1p)             \
+  _(aten, round)                     \
+  _(aten, special_round)             \
+  _(aten, sinc)                      \
+  _(aten, special_sinc)              \
   _(aten, i0)                        \
   _(aten, special_i0)                \
   _(aten, special_i0e)               \
   _(aten, special_i1)                \
   _(aten, special_i1e)               \
+  _(aten, xlogy)                     \
+  _(aten, special_xlogy)             \
+  _(aten, special_xlog1py)           \
+  _(aten, log_softmax)               \
+  _(aten, special_log_softmax)       \
+  _(aten, special_zeta)              \
+  _(aten, mvlgamma)                  \
+  _(aten, special_multigammaln)      \
   _(aten, has_torch_function)        \
   _(aten, hardswish)                 \
   _(aten, hardswish_)                \
@@ -443,7 +466,8 @@ namespace c10 {
   _(attr, keepdims)                  \
   _(attr, cache_id)                  \
   _(attr, new_axis)                  \
-  _(attr, warn_id)
+  _(attr, warn_id)                   \
+  _(attr, allowzero)
 
 // 'prim' symbols are synthetic operators that occur only in the IR
 // and don't have corresponding implementations in ATen.

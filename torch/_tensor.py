@@ -3,6 +3,7 @@ import functools
 from numbers import Number
 from typing import Any, Dict, Optional, Tuple, Union
 import warnings
+import copyreg
 
 import torch
 import torch._C as _C
@@ -11,7 +12,7 @@ from torch._namedtensor_internals import (
     unzip_namedshape, single_ellipsis_index, is_ellipsis)
 from torch.overrides import (
     has_torch_function, has_torch_function_unary, has_torch_function_variadic,
-    handle_torch_function)
+    handle_torch_function, get_default_nowrap_functions)
 import torch.utils.hooks as hooks
 
 
@@ -30,12 +31,41 @@ def _wrap_type_error_to_not_implemented(f):
             return NotImplemented
     return wrapped
 
+# Should not be used, this is kept only for BC of loading old serialized Tensor subclasses
 def _rebuild_from_type(func, type, args, dict):
     if type is Tensor:
         return func(*args)
 
     ret = func(*args).as_subclass(type)
     ret.__dict__ = dict
+    return ret
+
+def _rebuild_from_type_v2(func, new_type, args, state):
+    if new_type is Tensor:
+        return func(*args)
+
+    ret = func(*args).as_subclass(new_type)
+    # Tensor does define __setstate__ even though it doesn't define
+    # __getstate__. So only use __setstate__ if it is NOT the one defined
+    # on Tensor
+    if getattr(ret.__class__, "__setstate__", Tensor.__setstate__) is not Tensor.__setstate__:
+        ret.__setstate__(state)
+    else:
+        if isinstance(state, tuple):
+            if not len(state) == 2:
+                raise RuntimeError(f"Invalid serialized state: {state}")
+            dict_state = state[0]
+            slots_state = state[1]
+        else:
+            dict_state = state
+            slots_state = None
+
+        for k, v in dict_state.items():
+            setattr(ret, k, v)
+
+        if slots_state:
+            for k, v in slots_state.items():
+                setattr(ret, k, v)
     return ret
 
 
@@ -89,6 +119,8 @@ class Tensor(torch._C._TensorBase):
                     new_tensor.set_(new_storage, self.storage_offset(), self.size(), self.stride())
                     if self.is_conj():
                         new_tensor = new_tensor.conj_physical()
+                    if self.is_neg():
+                        new_tensor = new_tensor.neg()
                     new_tensor.requires_grad = self.requires_grad
             if self.grad is not None:
                 new_tensor.grad = self.grad.__deepcopy__(memo)
@@ -98,16 +130,25 @@ class Tensor(torch._C._TensorBase):
     def __reduce_ex__(self, proto):
         if type(self) is Tensor:
             return self._reduce_ex_internal(proto)
-        relevant_args = (self,)
-        from torch.overrides import has_torch_function, handle_torch_function
-        if type(self) is not Tensor and has_torch_function(relevant_args):
-            return handle_torch_function(Tensor.__reduce_ex__, relevant_args, self, proto)
-        func, args = self._reduce_ex_internal(proto)
-        return (_rebuild_from_type, (func, type(self), args, self.__dict__))
-
-    def _reduce_ex_internal(self, proto):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__reduce_ex__, (self,), self, proto)
+        func, args = self._reduce_ex_internal(proto)
+        # Get the state of the python subclass
+        # This loosely mimicks the function on the object class but since Tensor do not inherit
+        # from it, we cannot call that function directly
+        # https://github.com/python/cpython/blob/c83919bd635f4433f1c6ae8504996a9fe3c215e5/Objects/typeobject.c#L4891
+        getstate_fn = getattr(self, "__getstate__", None)
+        if getstate_fn:
+            state = getstate_fn()
+        else:
+            slots_to_save = copyreg._slotnames(self.__class__)  # type: ignore[attr-defined]
+            if slots_to_save:
+                state = (self.__dict__, {name: getattr(self, name) for name in slots_to_save if hasattr(self, name)})
+            else:
+                state = self.__dict__
+        return (_rebuild_from_type_v2, (func, type(self), args, state))
+
+    def _reduce_ex_internal(self, proto):
         check_serializing_named_tensor(self)
         # See Note [Don't serialize hooks]
         torch.utils.hooks.warn_if_has_hooks(self)
@@ -134,6 +175,16 @@ class Tensor(torch._C._TensorBase):
                        str(self.device),
                        self.requires_grad)
             return (torch._utils._rebuild_mlc_tensor, arg_mlc)
+        if self.device.type == 'meta':
+            # NB: This implementation BREAKS storage sharing.  Current
+            # hypothesis is that no one cares for meta tensors.
+            arg_meta = (
+                self.dtype,
+                tuple(self.size()),
+                self.stride(),
+                self.requires_grad,
+            )
+            return (torch._utils._rebuild_meta_tensor_no_storage, arg_meta)
         if self.is_quantized:
             # quantizer_params can be different type based on torch attribute
             quantizer_params: Union[Tuple[torch.qscheme, float, int], Tuple[Any, Tensor, Tensor, int]]
@@ -223,6 +274,13 @@ class Tensor(torch._C._TensorBase):
             in a user-specified CUDA stream context, see
             :ref:`Stream semantics of backward passes<bwd-cuda-stream-semantics>`.
 
+        .. note::
+
+            When ``inputs`` are provided and a given input is not a leaf,
+            the current implementation will call its grad_fn (though it is not strictly needed to get this gradients).
+            It is an implementation detail on which the user should not rely.
+            See https://github.com/pytorch/pytorch/pull/60521#issuecomment-867061780 for more details.
+
         Args:
             gradient (Tensor or None): Gradient w.r.t. the
                 tensor. If it is a tensor, it will be automatically converted
@@ -241,8 +299,7 @@ class Tensor(torch._C._TensorBase):
             inputs (sequence of Tensor): Inputs w.r.t. which the gradient will be
                 accumulated into ``.grad``. All other Tensors will be ignored. If not
                 provided, the gradient is accumulated into all the leaf Tensors that were
-                used to compute the attr::tensors. All the provided inputs must be leaf
-                Tensors.
+                used to compute the attr::tensors.
         """
         if has_torch_function_unary(self):
             return handle_torch_function(
@@ -396,28 +453,6 @@ class Tensor(torch._C._TensorBase):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.lu, (self,), self, pivot=pivot, get_infos=get_infos)
 
-        if not torch._jit_internal.is_scripting():
-            if self.requires_grad:
-                if not (self.size(-2) == self.size(-1) and (self.dtype.is_floating_point) or self.is_complex):
-                    raise ValueError(
-                        'lu.backward works only with batches of squared full-rank matrices'
-                        ' of floating or complex types.'
-                    )
-
-                from torch._autograd_functions import _LU
-                LU, pivots, infos = _LU.apply(self, pivot, get_infos)
-                if get_infos:
-                    return LU, pivots, infos
-                else:
-                    return LU, pivots
-        else:
-            if self.requires_grad:
-                raise RuntimeError(
-                    'Script and require gradients is not supported at the moment.'
-                    'If you just want to do the forward, use .detach()'
-                    'on the input before calling the function.'
-                )
-
         LU, pivots, infos = torch._lu_with_info(self, pivot=pivot, check_errors=(not get_infos))
         if get_infos:
             return LU, pivots, infos
@@ -559,6 +594,14 @@ class Tensor(torch._C._TensorBase):
     @_wrap_type_error_to_not_implemented
     def __rfloordiv__(self, other):
         return torch.floor_divide(other, self)
+
+    @_wrap_type_error_to_not_implemented
+    def __rlshift__(self, other):
+        return torch.bitwise_left_shift(other, self)
+
+    @_wrap_type_error_to_not_implemented
+    def __rrshift__(self, other):
+        return torch.bitwise_right_shift(other, self)
 
     @_wrap_type_error_to_not_implemented
     def __rmatmul__(self, other):
@@ -927,14 +970,9 @@ class Tensor(torch._C._TensorBase):
         if self.is_sparse:
             coalesced_self = self.coalesce()
             row_indices = coalesced_self.indices()[0]
-            ro = [0]
-            i = 0
-            for irow in range(self.shape[0]):
-                while i < row_indices.size()[0] and row_indices[i] == irow:
-                    i += 1
-                ro.append(i)
             device = coalesced_self.values().device
-            crow_indices = torch.tensor(ro, dtype=row_indices.dtype, device=device)
+            crow_indices = torch._convert_indices_from_coo_to_csr(
+                row_indices, self.shape[0], out_int32=row_indices.dtype == torch.int32)
             return torch.sparse_csr_tensor(crow_indices,
                                            coalesced_self.indices()[1].contiguous(),
                                            coalesced_self.values(),
@@ -1007,7 +1045,10 @@ class Tensor(torch._C._TensorBase):
 
         with _C.DisableTorchFunction():
             ret = func(*args, **kwargs)
-            return _convert(ret, cls)
+            if func in get_default_nowrap_functions():
+                return ret
+            else:
+                return _convert(ret, cls)
 
     __module__ = 'torch'
 
@@ -1015,7 +1056,7 @@ def _convert(ret, cls):
     if cls is Tensor:
         return ret
 
-    if isinstance(ret, Tensor):
+    if isinstance(ret, Tensor) and not isinstance(ret, cls):
         ret = ret.as_subclass(cls)
 
     if isinstance(ret, (tuple, list)):
