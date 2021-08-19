@@ -7,7 +7,7 @@ from typing import Dict, List, Type
 
 from torch.testing._internal.common_distributed import MultiProcessTestCase
 from torch.testing._internal.common_utils import (
-    TEST_WITH_ASAN,
+    TEST_WITH_DEV_DBG_ASAN,
     TEST_WITH_TSAN,
     find_free_port,
     IS_SANDCASTLE,
@@ -96,7 +96,7 @@ class ForkHelper(MultiProcessTestCase):
         super().tearDown()
 
 @unittest.skipIf(
-    TEST_WITH_ASAN, "Skip ASAN as torch + multiprocessing spawn have known issues"
+    TEST_WITH_DEV_DBG_ASAN, "Skip ASAN as torch + multiprocessing spawn have known issues"
 )
 class SpawnHelper(MultiProcessTestCase):
     def setUp(self):
@@ -199,10 +199,10 @@ def generate_tests(
             if mp_type & mp_type_filter:
                 mp_helper, suffix = MP_HELPERS_AND_SUFFIXES[mp_type]
                 if IS_SANDCASTLE:
-                    if mp_helper == SpawnHelper and TEST_WITH_ASAN:
+                    if mp_helper == SpawnHelper and TEST_WITH_DEV_DBG_ASAN:
                         print(
                             f'Skipping test {test_class} on sandcastle for the following reason: '
-                            'Skip ASAN as torch + multiprocessing spawn have known issues', file=sys.stderr)
+                            'Skip dev-asan as torch + multiprocessing spawn have known issues', file=sys.stderr)
                         continue
                     elif mp_helper == ForkHelper and TEST_WITH_TSAN:
                         print(
