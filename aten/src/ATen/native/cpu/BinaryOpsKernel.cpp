@@ -222,6 +222,30 @@ void remainder_kernel(TensorIteratorBase& iter) {
         return r;
       });
     });
+  } else if (iter.common_dtype() == kBFloat16) {
+    cpu_kernel_vec(iter,
+      [=](BFloat16 a, BFloat16 b) __ubsan_ignore_float_divide_by_zero__ -> BFloat16 {
+        float a0 = static_cast<float>(a);
+        float b0 = static_cast<float>(b);
+        float mod0 = std::fmod(a0, b0);
+        if ((mod0 != 0) && ((b0 < 0) != (mod0 < 0))) {
+          mod0 += b0;
+        }
+        return mod0;
+      },
+      [=](Vectorized<BFloat16> a, Vectorized<BFloat16> b) {
+        Vectorized<float> a0, a1, b0, b1;
+        std::tie(a0, a1) = convert_bfloat16_float(a);
+        std::tie(b0, b1) = convert_bfloat16_float(b);
+        auto mod0 = a0.fmod(b0);
+        auto mod1 = a1.fmod(b1);
+        const auto zero = Vectorized<float>(0);
+        auto mask0 = (mod0 != zero) & ((b0 < zero) ^ (mod0 < zero));
+        auto mask1 = (mod1 != zero) & ((b1 < zero) ^ (mod1 < zero));
+        a0 = Vectorized<float>::blendv(mod0, mod0 + b0, mask0);
+        a1 = Vectorized<float>::blendv(mod1, mod1 + b1, mask1);
+        return convert_float_bfloat16(a0, a1);
+      });
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.common_dtype(), "remainder_cpu", [&]() {
       cpu_kernel_vec(iter,
@@ -853,52 +877,119 @@ void fmod_kernel(TensorIteratorBase& iter) {
 }
 
 void logaddexp_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "logaddexp_cpu", [&]() {
+  if (iter.dtype() == kBFloat16) {
     cpu_kernel_vec(
         iter,
-        [=](scalar_t a, scalar_t b) -> scalar_t {
-          if (std::isinf(a) && a == b) {
-            return a;
+        [=](BFloat16 a, BFloat16 b) -> BFloat16 {
+          float a0 = static_cast<float>(a);
+          float b0 = static_cast<float>(b);
+          if (std::isinf(a0) && a0 == b0) {
+            return a0;
           } else {
-            scalar_t m = std::max(a, b);
-            return m + std::log((scalar_t)(1.0) + std::exp(-std::abs(a - b)));
+            float m0 = std::max(a0, b0);
+            return m0 + std::log(static_cast<float>(1.0) + std::exp(-std::abs(a0 - b0)));
           }
         },
-        [=](Vectorized<scalar_t> a, Vectorized<scalar_t> b) {
-          Vectorized<scalar_t> inf(std::numeric_limits<scalar_t>::infinity());
-          Vectorized<scalar_t> one(1.0);
-          Vectorized<scalar_t> m = maximum(a, b);
-          return Vectorized<scalar_t>::blendv(
-              m + (one + (a - b).abs().neg().exp()).log(),
-              a,
-              (a == b) & (a.abs() == inf));
+        [=](Vectorized<BFloat16> a, Vectorized<BFloat16> b) {
+          Vectorized<float> a0, a1, b0, b1;
+          std::tie(a0, a1) = convert_bfloat16_float(a);
+          std::tie(b0, b1) = convert_bfloat16_float(b);
+          Vectorized<float> inf(std::numeric_limits<float>::infinity());
+          Vectorized<float> one(1.0);
+          Vectorized<float> m0 = maximum(a0, b0);
+          Vectorized<float> m1 = maximum(a1, b1);
+          a0 = Vectorized<float>::blendv(
+              m0 + (one + (a0 - b0).abs().neg().exp()).log(),
+              a0,
+              (a0 == b0) & (a0.abs() == inf));
+          a1 = Vectorized<float>::blendv(
+              m1 + (one + (a1 - b1).abs().neg().exp()).log(),
+              a1,
+              (a1 == b1) & (a1.abs() == inf));
+          return convert_float_bfloat16(a0, a1);
         });
-  });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "logaddexp_cpu", [&]() {
+      cpu_kernel_vec(
+          iter,
+          [=](scalar_t a, scalar_t b) -> scalar_t {
+            if (std::isinf(a) && a == b) {
+              return a;
+            } else {
+              scalar_t m = std::max(a, b);
+              return m + std::log(static_cast<scalar_t>(1.0) + std::exp(-std::abs(a - b)));
+            }
+          },
+          [=](Vectorized<scalar_t> a, Vectorized<scalar_t> b) {
+            Vectorized<scalar_t> inf(std::numeric_limits<scalar_t>::infinity());
+            Vectorized<scalar_t> one(1.0);
+            Vectorized<scalar_t> m = maximum(a, b);
+            return Vectorized<scalar_t>::blendv(
+                m + (one + (a - b).abs().neg().exp()).log(),
+                a,
+                (a == b) & (a.abs() == inf));
+          });
+    });
+  }
 }
 
 void logaddexp2_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "logaddexp2_cpu", [&]() {
+  if (iter.dtype() == kBFloat16) {
     cpu_kernel_vec(
         iter,
-        [=](scalar_t a, scalar_t b) -> scalar_t {
-          if (std::isinf(a) && a == b) {
-            return a;
+        [=](BFloat16 a, BFloat16 b) -> BFloat16 {
+          float a0 = static_cast<float>(a);
+          float b0 = static_cast<float>(b);
+          if (std::isinf(a0) && a0 == b0) {
+            return a0;
           } else {
-            scalar_t m = std::max(a, b);
-            return m + std::log2((scalar_t)(1.0) + std::pow((scalar_t)(2), -std::abs(a - b)));
+            float m0 = std::max(a0, b0);
+            return m0 + std::log2(static_cast<float>(1.0) + std::pow(static_cast<float>(2), -std::abs(a0 - b0)));
           }
         },
-        [=](Vectorized<scalar_t> a, Vectorized<scalar_t> b) {
-          Vectorized<scalar_t> inf(std::numeric_limits<scalar_t>::infinity());
-          Vectorized<scalar_t> one(1.0);
-          Vectorized<scalar_t> two(2.0);
-          Vectorized<scalar_t> m = maximum(a, b);
-          return Vectorized<scalar_t>::blendv(
-              m + (one + two.pow((a - b).abs().neg())).log2(),
-              a,
-              (a == b) & (a.abs() == inf));
+        [=](Vectorized<BFloat16> a, Vectorized<BFloat16> b) {
+          Vectorized<float> a0, a1, b0, b1;
+          std::tie(a0, a1) = convert_bfloat16_float(a);
+          std::tie(b0, b1) = convert_bfloat16_float(b);
+          Vectorized<float> inf(std::numeric_limits<float>::infinity());
+          Vectorized<float> one(1.0);
+          Vectorized<float> two(2.0);
+          Vectorized<float> m0 = maximum(a0, b0);
+          Vectorized<float> m1 = maximum(a1, b1);
+          a0 = Vectorized<float>::blendv(
+              m0 + (one + two.pow((a0 - b0).abs().neg())).log2(),
+              a0,
+              (a0 == b0) & (a0.abs() == inf));
+          a1 = Vectorized<float>::blendv(
+              m1 + (one + two.pow((a1 - b1).abs().neg())).log2(),
+              a1,
+              (a1 == b1) & (a1.abs() == inf));
+          return convert_float_bfloat16(a0, a1);
         });
-  });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "logaddexp2_cpu", [&]() {
+      cpu_kernel_vec(
+          iter,
+          [=](scalar_t a, scalar_t b) -> scalar_t {
+            if (std::isinf(a) && a == b) {
+              return a;
+            } else {
+              scalar_t m = std::max(a, b);
+              return m + std::log2(static_cast<scalar_t>(1.0) + std::pow(static_cast<scalar_t>(2), -std::abs(a - b)));
+            }
+          },
+          [=](Vectorized<scalar_t> a, Vectorized<scalar_t> b) {
+            Vectorized<scalar_t> inf(std::numeric_limits<scalar_t>::infinity());
+            Vectorized<scalar_t> one(1.0);
+            Vectorized<scalar_t> two(2.0);
+            Vectorized<scalar_t> m = maximum(a, b);
+            return Vectorized<scalar_t>::blendv(
+                m + (one + two.pow((a - b).abs().neg())).log2(),
+                a,
+                (a == b) & (a.abs() == inf));
+          });
+    });
+  }
 }
 
 void gcd_kernel(TensorIteratorBase& iter) {
