@@ -189,10 +189,10 @@ When creating a new :class:`Function`, the following methods are available to `c
     :toctree: generated
     :nosignatures:
 
-    function._ContextMethodMixin.mark_dirty
-    function._ContextMethodMixin.mark_non_differentiable
-    function._ContextMethodMixin.save_for_backward
-    function._ContextMethodMixin.set_materialize_grads
+    function.FunctionCtx.mark_dirty
+    function.FunctionCtx.mark_non_differentiable
+    function.FunctionCtx.save_for_backward
+    function.FunctionCtx.set_materialize_grads
 
 .. _grad-check:
 
