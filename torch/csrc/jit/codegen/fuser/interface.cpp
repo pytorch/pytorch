@@ -13,7 +13,12 @@ namespace jit {
 
 namespace detail {
 
+#ifdef TORCH_ENABLE_LLVM
 bool cpu_fuser_enabled = true;
+#else
+bool cpu_fuser_enabled = false;
+#endif
+
 bool gpu_fuser_enabled = true;
 
 } // namespace detail
