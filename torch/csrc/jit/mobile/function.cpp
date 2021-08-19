@@ -101,16 +101,20 @@ bool Function::append_operator(
         num_specified_args.value() < static_cast<int64_t>(args.size())) {
       fn = [fn, num_specified_args, args](Stack& stack) {
         c10::optional<IValue> out_arg;
-        if(!args.empty() && args.back().is_out()) {
+        if (!args.empty() && args.back().is_out()) {
           out_arg = stack.back();
           stack.pop_back();
         }
-        for (size_t i = 0; i < args.size(); ++i) {
-          if(args[i].default_value().has_value()) {
+        size_t start_index =
+            num_specified_args.value() + (out_arg.has_value() ? -1 : 0);
+        // start_index = std::max(0, start_index);
+        for (size_t i = (start_index >= 0 ? start_index : 0); i < args.size();
+             ++i) {
+          if (args[i].default_value().has_value()) {
             stack.push_back(args[i].default_value());
           }
         }
-        if(out_arg.has_value()) {
+        if (out_arg.has_value()) {
           stack.push_back(out_arg.value());
         }
         fn(stack);

@@ -1162,23 +1162,67 @@ struct PythonPrintImpl {
         // calculate how many args are specified.
         // see (https://github.com/pytorch/pytorch/pull/56079) for more
         // details.
-        size_t necessary_args =
-            CalculateNecessaryArgs(schema.arguments(), node->inputs());
-        for (const auto i : c10::irange(necessary_args)) {
-          if (i > 0)
-            stmt << ", ";
-          auto v = useOf(node->inputs().at(i));
-          // print the kwarg name if it is a kwarg only argument.
-          if (i < schema.arguments().size()) {
-            auto arg = schema.arguments().at(i);
-            if (arg.kwarg_only()) {
-              stmt << arg.name() << "=";
+        size_t num_schema_args = schema.arguments().size();
+
+        // we only want to do this extra logic only when necessary.
+        if (num_schema_args > 0) {
+          // calculate how many args are specified.
+          // see (https://github.com/pytorch/pytorch/pull/56079) for more
+          // details.
+          auto specified_args =
+              CalculateNecessaryArgs(schema.arguments(), node->inputs(), true);
+
+          auto necessary_args = specified_args.first + specified_args.second;
+
+          size_t schema_idx = num_schema_args - 1;
+          while (schema_idx >= 0) {
+            auto current_arg = schema.arguments().at(schema_idx);
+            if (!current_arg.is_out()) {
+              break;
             }
-          } else {
-            // vararg functions like format can have extra arguments
-            AT_ASSERT(schema.is_vararg());
+            schema_idx--;
           }
-          stmt << *v;
+
+          auto num_out = schema.arguments().size() - schema_idx - 1;
+          auto num_specified_before_out = necessary_args - num_out;
+
+          for (size_t i = 0; i < num_specified_before_out; ++i) {
+            if (i > 0)
+              stmt << ", ";
+            auto v = useOf(node->inputs().at(i));
+            // print the kwarg name if it is a kwarg only argument.
+            if (i < num_schema_args) {
+              auto arg = schema.arguments().at(i);
+              if (arg.kwarg_only()) {
+                stmt << arg.name() << "=";
+              }
+            } else {
+              // vararg functions like format can have extra arguments
+              AT_ASSERT(schema.is_vararg());
+            }
+            stmt << *v;
+          }
+
+          // scan backwards to find the first index where out args start
+          size_t out_start = num_schema_args;
+          while (--out_start >= num_specified_before_out) {
+            auto arg = schema.arguments().at(out_start);
+            if (!arg.is_out()) {
+              break;
+            }
+          }
+
+          // print out args
+          for (size_t i = out_start + 1; i < schema.arguments().size(); i++) {
+            stmt << ", ";
+            auto arg = schema.arguments().at(i);
+            TORCH_INTERNAL_ASSERT(arg.is_out());
+            // figure out the corresponding input at this index
+            auto input_idx = node->inputs().size() - (num_schema_args - i);
+            if (input_idx < node->inputs().size()) {
+              stmt << arg.name() << "=" << *useOf(node->inputs().at(input_idx));
+            }
+          }
         }
         stmt << ")";
       } break;

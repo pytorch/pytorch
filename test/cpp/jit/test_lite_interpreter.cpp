@@ -594,26 +594,6 @@ TEST(LiteInterpreterTest, TwoSubmodulesModuleInfo) {
       "top(C)::<unknown>.B0(B)::forward.aten::add"));
 }
 
-TEST(LiteInterpreterTest, DefaultArgsWithOutArg) {
-  Module m("m");
-  m.define(R"(
-    def forward(self, x, h):
-      torch.add(x, h, out=x)
-  )");
-
-  std::vector<IValue> inputs;
-  auto input_x = 2 * torch::ones({});
-  auto input_h = torch::ones({});
-  auto ref = m.run_method("forward", input_x, input_h);
-
-  std::stringstream ss;
-
-  m._save_for_mobile(ss);
-  mobile::Module bc = _load_for_mobile(ss);
-  bc.run_method("forward", input_x, input_h);
-  AT_ASSERT(input_x.equal(4 * torch::ones({})));
-}
-
 TEST(LiteInterpreterTest, GetRuntimeByteCodeVersion) {
   auto runtime_bytecode_version = _get_runtime_bytecode_version();
   AT_ASSERT(
@@ -1372,6 +1352,82 @@ TEST(LiteInterpreterTest, DefaultArgsPinvSpecifyDefault) {
   input = input.view({N, N});
   inputs.push_back(input);
   testLiteModuleCompareResultTensors(m, inputs);
+}
+
+void testDefaultArgsPinvWithOutArg(int num_args) {
+  Module m("m");
+  if (num_args == 1) {
+    m.define(R"(
+      def forward(self, input):
+        return torch.linalg_pinv(input, out=input)
+    )");
+  } else if (num_args == 2) {
+    m.define(R"(
+      def forward(self, input):
+        return torch.linalg_pinv(input, 1e-5, out=input)
+    )");
+  } else if (num_args == 3) {
+    m.define(R"(
+      def forward(self, input):
+        return torch.linalg_pinv(input, 1e-5, True, out=input)
+    )");
+  }
+
+  // std::vector<torch::jit::IValue> inputs;
+  const int N = 28;
+  auto input = torch::range(1, N * N, 1);
+  input[0] = 1; // a more stable matrix
+  input = input.view({N, N});
+  // inputs.push_back(input);
+  auto ref = m.run_method("forward", input);
+  // testLiteModuleCompareResultTensors(m, inputs);
+}
+
+TEST(LiteInterpreterTest, DefaultArgsPinvWithOutArg) {
+  // Test with different number of specified arguments.
+  // Arguments not specified take default value.
+  for (int num_args = 1; num_args <= 3; ++num_args) {
+    testDefaultArgsPinvWithOutArg(num_args);
+  }
+}
+
+TEST(LiteInterpreterTest, DefaultArgsWithOutArg) {
+  Module m("m");
+  m.define(R"(
+    def forward(self, x, h):
+      torch.add(x, h, out=x)
+  )");
+
+  std::vector<IValue> inputs;
+  auto input_x = 2 * torch::ones({});
+  auto input_h = torch::ones({});
+  auto ref = m.run_method("forward", input_x, input_h);
+
+  std::stringstream ss;
+
+  m._save_for_mobile(ss, {}, true);
+  mobile::Module bc = _load_for_mobile(ss);
+  bc.run_method("forward", input_x, input_h);
+  AT_ASSERT(input_x.equal(4 * torch::ones({})));
+
+  std::set<std::string> module_debug_info_set;
+  size_t pc = 0;
+  while (true) {
+    try {
+      std::string module_info = bc.get_forward_method_debug_info(pc);
+      if (!module_info.empty() &&
+          (module_info.find("debug_handle") == std::string::npos)) {
+        module_debug_info_set.insert(module_info);
+      }
+      ++pc;
+    } catch (const std::exception& e) {
+      break;
+    }
+  }
+
+  for (auto& it : module_debug_info_set) {
+    std::cout << "one line: " << it << std::endl;
+  }
 }
 
 TEST(LiteInterpreterTest, TestExceptionStackWithTwoLevelModuleHierarchy) {
