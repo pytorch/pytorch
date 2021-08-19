@@ -45,11 +45,11 @@ static void testCudaTestVectorAdd01_impl() {
         return a_buf.load(n, b_id, t_id) + b_buf.load(n, b_id, t_id);
       });
   LoopNest l({c});
-  std::vector<For*> loops = l.getLoopStmtsFor(c);
+  std::vector<ForPtr> loops = l.getLoopStmtsFor(c);
   loops[1]->set_gpu_block_index(0);
   loops[2]->set_gpu_thread_index(0);
   l.prepareForCodegen();
-  Stmt* stmt = l.root_stmt();
+  StmtPtr stmt = l.root_stmt();
   CudaCodeGen cuda_cg(stmt, c, a_buf, b_buf);
   const int N = block_count * block_size * num_iter;
   PaddedBuffer<ctype> a_v(N);
@@ -110,11 +110,11 @@ TEST(Cuda, Sigmoid_CUDA) {
         return sigmoid(sigmoid(a_buf.load(n, b_id, t_id)));
       });
   LoopNest l({c});
-  std::vector<For*> loops = l.getLoopStmtsFor(c);
+  std::vector<ForPtr> loops = l.getLoopStmtsFor(c);
   loops[1]->set_gpu_block_index(0);
   loops[2]->set_gpu_thread_index(0);
   l.prepareForCodegen();
-  Stmt* stmt = l.root_stmt();
+  StmtPtr stmt = l.root_stmt();
   CudaCodeGen cuda_cg(stmt, c, a_buf);
   const int N = block_count * block_size * num_iter;
   PaddedBuffer<float> a_v(N);
@@ -172,13 +172,13 @@ static void testCudaTestVectorAdd02_impl(int N, int block_size) {
       },
       [&](const VarHandle& n) { return a_buf.load(n) + b_buf.load(n); });
   LoopNest l({c});
-  For* n_inner;
-  std::vector<For*> loops = l.getLoopStmtsFor(c);
+  ForPtr n_inner;
+  std::vector<ForPtr> loops = l.getLoopStmtsFor(c);
   l.splitWithMask(loops[0], block_size, &n_inner);
   loops[0]->set_gpu_block_index(0);
   n_inner->set_gpu_thread_index(0);
   l.prepareForCodegen();
-  Stmt* stmt = l.root_stmt();
+  StmtPtr stmt = l.root_stmt();
   CudaCodeGen cuda_cg(stmt, c, a_buf, b_buf);
   PaddedBuffer<float> a_v(N);
   PaddedBuffer<float> b_v(N);
@@ -231,7 +231,7 @@ TEST(Cuda, HalfCast_CUDA) {
 
   LoopNest l({b});
   l.prepareForCodegen();
-  Stmt* s = l.root_stmt();
+  StmtPtr s = l.root_stmt();
   CudaCodeGen cg(s, {a, b});
 
   std::vector<at::Half> aData(4, 2.0f);
@@ -273,7 +273,7 @@ TEST(Cuda, DynamicShape2D_CUDA) {
         });
     LoopNest l({c});
     l.prepareForCodegen();
-    Stmt* s = l.root_stmt();
+    StmtPtr s = l.root_stmt();
     CudaCodeGen cg(s, {a, b, c, m, n});
 
     std::vector<float> aData(M * N, 1.0f);
@@ -339,11 +339,11 @@ TEST(Cuda, TestRand01_CUDA) {
         return Intrinsics::make(IntrinsicsOp::kRand, kFloat);
       });
   LoopNest l({c});
-  std::vector<For*> loops = l.getLoopStmtsFor(c);
+  std::vector<ForPtr> loops = l.getLoopStmtsFor(c);
   loops[1]->set_gpu_block_index(0);
   loops[2]->set_gpu_thread_index(0);
   l.prepareForCodegen();
-  Stmt* stmt = l.root_stmt();
+  StmtPtr stmt = l.root_stmt();
   CudaCodeGen cuda_cg(stmt, c);
   const int N = block_count * block_size * num_iter;
   PaddedBuffer<float> c_v(N);
@@ -390,12 +390,12 @@ TEST(Cuda, DynamicShapeSplit_CUDA) {
   Tensor* b = Compute(
       "b", {{n, "n"}}, [&](const VarHandle& i) { return a.load(i) * 2.0f; });
   LoopNest l({b});
-  For* inner;
-  std::vector<For*> loops = l.getLoopStmtsFor(b);
+  ForPtr inner;
+  std::vector<ForPtr> loops = l.getLoopStmtsFor(b);
   l.splitWithMask(loops[0], 1024, &inner);
   loops[0]->set_gpu_block_index(0);
   inner->set_gpu_thread_index(0);
-  Stmt* s = l.root_stmt();
+  StmtPtr s = l.root_stmt();
   CudaCodeGen cg(s, {a, b, n});
 
   std::vector<float> aData(N, 1.0f);
@@ -448,23 +448,23 @@ TEST(Cuda, OneBlockOneThreadGlobalReduce1_CUDA) {
   //   }
   // }
 
-  Store* init_store = output_buf.store({0}, 0.f);
+  StorePtr init_store = output_buf.store({0}, 0.f);
   VarHandle i1("i1", kInt);
   ExprHandle load_data = Load::make(BufHandle(data_buf.data()), {i1});
   ExprHandle load_output = Load::make(BufHandle(output_buf.data()), {0});
   ExprHandle add_value = load_output + load_data;
-  Store* store_output = output_buf.store({0}, add_value);
-  For* for_output = For::make(i1, 0, N, store_output);
-  Stmt* reduce_block = Block::make({init_store, for_output});
+  StorePtr store_output = output_buf.store({0}, add_value);
+  ForPtr for_output = For::make(i1, 0, N, store_output);
+  StmtPtr reduce_block = Block::make({init_store, for_output});
   VarHandle thread_idx("tidx", kInt);
   LoopOptions thread_idx_options;
   thread_idx_options.set_gpu_thread_index(0);
-  For* thread_idx_loop =
+  ForPtr thread_idx_loop =
       For::make(thread_idx, 0, 1, reduce_block, thread_idx_options);
   VarHandle block_idx("bidx", kInt);
   LoopOptions block_idx_options;
   block_idx_options.set_gpu_block_index(0);
-  For* block_idx_loop =
+  ForPtr block_idx_loop =
       For::make(block_idx, 0, 1, thread_idx_loop, block_idx_options);
 
   CudaCodeGen cuda_cg(block_idx_loop, data_buf, output_buf);
@@ -517,7 +517,7 @@ TEST(Cuda, OneBlockMultiThreadGlobalReduce1_CUDA) {
   Placeholder a_buf("a", kFloat, {N});
   Placeholder b_buf("b", kFloat, {1});
 
-  Store* init_store = b_buf.store({0}, 0.f);
+  StorePtr init_store = b_buf.store({0}, 0.f);
   VarHandle t("t", kInt);
   VarHandle b("b", kInt);
 
@@ -526,25 +526,25 @@ TEST(Cuda, OneBlockMultiThreadGlobalReduce1_CUDA) {
   //      b[0] = 0
   ExprHandle cond_t_lt_1 =
       CompareSelect::make(t, 1, CompareSelectOperation::kLT);
-  Cond* masked_init_b = Cond::make(cond_t_lt_1, init_store, nullptr);
+  CondPtr masked_init_b = Cond::make(cond_t_lt_1, init_store, nullptr);
   LoopOptions thread_idx_options;
   thread_idx_options.set_gpu_thread_index(0);
-  For* for_init = For::make(t, 0, N, masked_init_b, thread_idx_options);
+  ForPtr for_init = For::make(t, 0, N, masked_init_b, thread_idx_options);
 
   //  for t in 0..1024: // thread-idx
   //    b[0] = b[0] + a[t] // implied atomic
   ExprHandle load_a = Load::make(BufHandle(a_buf.data()), {t});
   ExprHandle load_b = Load::make(BufHandle(b_buf.data()), {0});
   ExprHandle add_value = load_b + load_a;
-  Store* store_b = b_buf.store({0}, add_value);
-  For* for_b = For::make(t, 0, N, store_b, thread_idx_options);
+  StorePtr store_b = b_buf.store({0}, add_value);
+  ForPtr for_b = For::make(t, 0, N, store_b, thread_idx_options);
 
-  Stmt* reduce_block = Block::make({for_init, for_b});
+  StmtPtr reduce_block = Block::make({for_init, for_b});
 
   VarHandle block_idx("bidx", kInt);
   LoopOptions block_idx_options;
   block_idx_options.set_gpu_block_index(0);
-  For* block_idx_loop =
+  ForPtr block_idx_loop =
       For::make(block_idx, 0, 1, reduce_block, block_idx_options);
 
   CudaCodeGen cuda_cg(block_idx_loop, a_buf, b_buf);
@@ -607,35 +607,35 @@ TEST(Cuda, NoThreadIdxWrite_1_CUDA) {
   //   a[0] = 0
   //   for n in 0..2:
   //     a[0] = a[0] + n
-  Store* store_a0_0 = a_buf.store({0}, 0.f);
+  StorePtr store_a0_0 = a_buf.store({0}, 0.f);
   ExprHandle load_a0 = Load::make(BufHandle(a_buf.data()), {0});
   ExprHandle v1 = load_a0 + n;
-  Store* store_a0_v1 = a_buf.store({0}, v1);
-  For* loop_a_0 = For::make(n, 0, 2, store_a0_v1);
+  StorePtr store_a0_v1 = a_buf.store({0}, v1);
+  ForPtr loop_a_0 = For::make(n, 0, 2, store_a0_v1);
 
   //   for m in 0..1024: // thread-idx
   //     b[m] = m
-  Store* store_bm_m = b_buf.store({m}, m + 0.f);
+  StorePtr store_bm_m = b_buf.store({m}, m + 0.f);
   LoopOptions thread_idx_options;
   thread_idx_options.set_gpu_thread_index(0);
-  For* loop_b_1 = For::make(m, 0, N, store_bm_m, thread_idx_options);
+  ForPtr loop_b_1 = For::make(m, 0, N, store_bm_m, thread_idx_options);
 
   //   a[1] = 1
   //   for l in 0..2:
   //     a[1] = a[1] + l
-  Store* store_a1_1 = a_buf.store({1}, 1.f);
+  StorePtr store_a1_1 = a_buf.store({1}, 1.f);
   ExprHandle load_a1 = a_buf.load(1);
   ExprHandle v2 = load_a1 + l;
-  Store* store_a1_v2 = a_buf.store({1}, v2);
-  For* loop_a_1 = For::make(l, 0, 2, store_a1_v2);
+  StorePtr store_a1_v2 = a_buf.store({1}, v2);
+  ForPtr loop_a_1 = For::make(l, 0, 2, store_a1_v2);
 
-  Stmt* reduce_block =
+  StmtPtr reduce_block =
       Block::make({store_a0_0, loop_a_0, loop_b_1, store_a1_1, loop_a_1});
 
   VarHandle block_idx("bidx", kInt);
   LoopOptions block_idx_options;
   block_idx_options.set_gpu_block_index(0);
-  For* block_idx_loop =
+  ForPtr block_idx_loop =
       For::make(block_idx, 0, 1, reduce_block, block_idx_options);
 
   CudaCodeGen cuda_cg(block_idx_loop, a_buf, b_buf);
@@ -704,21 +704,21 @@ TEST(Cuda, SharedMemReduce_1_CUDA) {
   VarHandle m("m", kInt);
   VarHandle n("n", kInt);
 
-  std::vector<Stmt*> block;
-  std::vector<Expr*> dims;
+  std::vector<StmtPtr> block;
+  std::vector<ExprPtr> dims;
   dims.push_back(ExprHandle(N).node());
-  BufHandle c{new Buf("c", dims, kFloat)};
+  BufHandle c{alloc<Buf>("c", dims, kFloat)};
   {
     // alloc(c, 64);
-    Allocate* alloc = Allocate::make(c);
+    AllocatePtr alloc = Allocate::make(c);
     block.push_back(alloc);
   }
 
   {
     //    for n in 0..64:  // thread-idx
     //      c(n) = 0
-    Store* store_cn_0 = Store::make(c, {n}, 0.f);
-    For* loop_n1 = For::make(n, 0, N, store_cn_0, thread_idx_opt);
+    StorePtr store_cn_0 = Store::make(c, {n}, 0.f);
+    ForPtr loop_n1 = For::make(n, 0, N, store_cn_0, thread_idx_opt);
     block.push_back(loop_n1);
   }
 
@@ -730,9 +730,9 @@ TEST(Cuda, SharedMemReduce_1_CUDA) {
     ExprHandle a_kmn =
         Load::make(BufHandle(a.data()), {k * (M * N) + m * N + n});
     ExprHandle v_add = load_cn + a_kmn;
-    Store* store_cn_v = Store::make(c, {n}, v_add);
-    For* loop_n2 = For::make(n, 0, N, store_cn_v, thread_idx_opt);
-    For* loop_m1 = For::make(m, 0, M, loop_n2);
+    StorePtr store_cn_v = Store::make(c, {n}, v_add);
+    ForPtr loop_n2 = For::make(n, 0, N, store_cn_v, thread_idx_opt);
+    ForPtr loop_m1 = For::make(m, 0, M, loop_n2);
     block.push_back(loop_m1);
   }
 
@@ -740,24 +740,24 @@ TEST(Cuda, SharedMemReduce_1_CUDA) {
     //    b(k) = 0
     //    for n in 0..64:  // thread_idx
     //      b(k) = b(k) + c(n)
-    Store* store_bk_0 = b.store({k}, 0.f);
+    StorePtr store_bk_0 = b.store({k}, 0.f);
     block.push_back(store_bk_0);
     ExprHandle load_bk = b.load(k);
     ExprHandle load_cn = Load::make(kFloat, c, {n});
     ExprHandle v_add = load_bk + load_cn;
-    Store* store_bk = b.store({k}, v_add);
-    For* loop_n3 = For::make(n, 0, N, store_bk, thread_idx_opt);
+    StorePtr store_bk = b.store({k}, v_add);
+    ForPtr loop_n3 = For::make(n, 0, N, store_bk, thread_idx_opt);
     block.push_back(loop_n3);
   }
 
   {
     //    free(c)
-    Free* free_stmt = Free::make(c);
+    FreePtr free_stmt = Free::make(c);
     block.push_back(free_stmt);
   }
 
-  Block* reduce_body = Block::make(block);
-  For* loop_k1 = For::make(k, 0, 1, reduce_body, block_idx_opt);
+  BlockPtr reduce_body = Block::make(block);
+  ForPtr loop_k1 = For::make(k, 0, 1, reduce_body, block_idx_opt);
 
   // TODO: check the generated code for correctness.
   CudaCodeGen cuda_cg(loop_k1, a, b);
@@ -840,22 +840,23 @@ TEST(Cuda, LocalMemReduce_1_CUDA) {
   VarHandle m("m", kInt);
   VarHandle n("n", kInt);
 
-  BufHandle c{new Buf("c", {new IntImm(1)}, kFloat)};
-  std::vector<Stmt*> block_k;
+  BufHandle c{
+      alloc<Buf>("c", std::vector<ExprPtr>({alloc<IntImm>(1)}), kFloat)};
+  std::vector<StmtPtr> block_k;
   {
     //    b(k) = 0
-    Store* store_bk_0 = b.store({k}, 0.f);
+    StorePtr store_bk_0 = b.store({k}, 0.f);
     block_k.push_back(store_bk_0);
   }
-  std::vector<Stmt*> block_n;
+  std::vector<StmtPtr> block_n;
   {
     // alloc(c, 1);
-    Allocate* alloc = Allocate::make(c);
+    AllocatePtr alloc = Allocate::make(c);
     block_n.push_back(alloc);
   }
   {
     // c(0) = 0
-    Store* store_c0_0 = Store::make(c, {0}, 0.f);
+    StorePtr store_c0_0 = Store::make(c, {0}, 0.f);
     block_n.push_back(store_c0_0);
   }
   {
@@ -864,8 +865,8 @@ TEST(Cuda, LocalMemReduce_1_CUDA) {
     ExprHandle load_c0 = Load::make(kFloat, c, {0});
     ExprHandle a_kmn = a.load(k * (M * N) + m * N + n);
     ExprHandle v_add = load_c0 + a_kmn;
-    Store* store_c0_v = Store::make(c, {0}, v_add);
-    For* loop_m = For::make(m, 0, M, store_c0_v);
+    StorePtr store_c0_v = Store::make(c, {0}, v_add);
+    ForPtr loop_m = For::make(m, 0, M, store_c0_v);
     block_n.push_back(loop_m);
   }
   {
@@ -873,21 +874,21 @@ TEST(Cuda, LocalMemReduce_1_CUDA) {
     ExprHandle load_bk = b.load(k);
     ExprHandle load_c0 = Load::make(kFloat, c, {0});
     ExprHandle v_add = load_bk + load_c0;
-    Store* store_bk = b.store({k}, v_add);
+    StorePtr store_bk = b.store({k}, v_add);
     block_n.push_back(store_bk);
   }
   {
     //      free(c)
-    Free* free_stmt = Free::make(c);
+    FreePtr free_stmt = Free::make(c);
     block_n.push_back(free_stmt);
   }
   {
-    Block* block_n_stmt = Block::make(block_n);
-    For* for_n = For::make(n, 0, N, block_n_stmt, thread_idx_opt);
+    BlockPtr block_n_stmt = Block::make(block_n);
+    ForPtr for_n = For::make(n, 0, N, block_n_stmt, thread_idx_opt);
     block_k.push_back(for_n);
   }
-  Block* block_k_stmt = Block::make(block_k);
-  For* loop_k = For::make(k, 0, 1, block_k_stmt, block_idx_opt);
+  BlockPtr block_k_stmt = Block::make(block_k);
+  ForPtr loop_k = For::make(k, 0, 1, block_k_stmt, block_idx_opt);
 
   CudaCodeGen cuda_cg(loop_k, a, b);
   PaddedBuffer<float> a_v(1, M, N, "a_v");
@@ -941,7 +942,7 @@ TEST(Cuda, HalfSupport_CUDA) {
 
   LoopNest l({b, c, d});
   l.prepareForCodegen();
-  Stmt* s = l.root_stmt();
+  StmtPtr s = l.root_stmt();
   CudaCodeGen cg(s, {a, b, c, d});
 
   std::vector<at::Half> aData(4, 2.0f);
@@ -986,12 +987,12 @@ TEST(Cuda, HalfPropagation_CUDA) {
   auto half = ToDtype<at::Half>();
   Placeholder a("a", half, {4});
   Tensor* relu = Compute("relu", {{4, "n"}}, [&](const VarHandle& i) {
-    return Max::make(a.load(i), ExprHandle(new HalfImm(0)), true);
+    return Max::make(a.load(i), ExprHandle(alloc<HalfImm>(0)), true);
   });
 
   LoopNest l({relu});
   l.prepareForCodegen();
-  Stmt* s = l.root_stmt();
+  StmtPtr s = l.root_stmt();
   CudaCodeGen cg(s, {a, relu});
 
   std::ostringstream oss;
@@ -1036,12 +1037,12 @@ TEST(Cuda, UnusedHalfArgument_CUDA) {
   auto half = ToDtype<at::Half>();
   Placeholder b("b", half, {4});
   Tensor* relu = Compute("relu", {{4, "n"}}, [&](const VarHandle& i) {
-    return Max::make(a.load(i), ExprHandle(new FloatImm(0)), true);
+    return Max::make(a.load(i), ExprHandle(alloc<FloatImm>(0)), true);
   });
 
   LoopNest l({relu});
   l.prepareForCodegen();
-  Stmt* s = l.root_stmt();
+  StmtPtr s = l.root_stmt();
   CudaCodeGen cg(s, {a, b, relu});
 
   std::ostringstream oss;
@@ -1109,7 +1110,7 @@ TEST(Cuda, PrioritizeDependents_CUDA) {
   ExprHandle cmp = CompareSelect::make(i, 10, CompareSelectOperation::kLT);
   ExprHandle ite = IfThenElse::make(cmp, Add::make(load_a, load_b), load_b);
 
-  For* loop =
+  ForPtr loop =
       For::make(i, 0, 12, Block::make({c.store({i}, ite)}), block_idx_opt);
 
   CudaCodeGen cuda_cg(loop, a, b, c);
@@ -1175,13 +1176,13 @@ TEST(Cuda, MaskBlockDim_CUDA) {
   });
 
   LoopNest l({c, d});
-  std::vector<For*> loops = l.getLoopStmtsFor(c);
+  std::vector<ForPtr> loops = l.getLoopStmtsFor(c);
   loops[0]->set_gpu_block_index(0);
   loops = l.getLoopStmtsFor(d);
   loops[0]->set_gpu_block_index(0);
 
   l.prepareForCodegen();
-  Stmt* stmt = l.root_stmt();
+  StmtPtr stmt = l.root_stmt();
   CudaCodeGen cuda_cg(stmt, c, d, a_buf, b_buf);
 
   std::ostringstream oss;
@@ -1199,8 +1200,8 @@ TEST(Cuda, MaskBlockDim_CUDA) {
 
   auto blockExtents = cuda_cg.gpu_block_extents();
   auto threadExtents = cuda_cg.gpu_thread_extents();
-  ASSERT_TRUE(exprEquals(blockExtents[0], new IntImm(A_SIZE)));
-  ASSERT_TRUE(exprEquals(threadExtents[0], new IntImm(1)));
+  ASSERT_TRUE(exprEquals(blockExtents[0], alloc<IntImm>(A_SIZE)));
+  ASSERT_TRUE(exprEquals(threadExtents[0], alloc<IntImm>(1)));
 
   // Sanity check that the kernel works.
   PaddedBuffer<float> a_v(A_SIZE);
@@ -1268,13 +1269,13 @@ TEST(Cuda, MaskThreadDim_CUDA) {
   });
 
   LoopNest l({c, d});
-  std::vector<For*> loops = l.getLoopStmtsFor(c);
+  std::vector<ForPtr> loops = l.getLoopStmtsFor(c);
   loops[0]->set_gpu_thread_index(0);
   loops = l.getLoopStmtsFor(d);
   loops[0]->set_gpu_thread_index(0);
 
   l.prepareForCodegen();
-  Stmt* stmt = l.root_stmt();
+  StmtPtr stmt = l.root_stmt();
   CudaCodeGen cuda_cg(stmt, c, d, a_buf, b_buf);
 
   std::ostringstream oss;
@@ -1293,8 +1294,8 @@ TEST(Cuda, MaskThreadDim_CUDA) {
 
   auto blockExtents = cuda_cg.gpu_block_extents();
   auto threadExtents = cuda_cg.gpu_thread_extents();
-  ASSERT_TRUE(exprEquals(blockExtents[0], new IntImm(1)));
-  ASSERT_TRUE(exprEquals(threadExtents[0], new IntImm(B_SIZE)));
+  ASSERT_TRUE(exprEquals(blockExtents[0], alloc<IntImm>(1)));
+  ASSERT_TRUE(exprEquals(threadExtents[0], alloc<IntImm>(B_SIZE)));
 
   PaddedBuffer<float> a_v(A_SIZE);
   PaddedBuffer<float> b_v(B_SIZE);
@@ -1363,13 +1364,13 @@ TEST(Cuda, MaskMultiBlockDim_CUDA) {
   });
 
   LoopNest l({c, d});
-  std::vector<For*> loops = l.getLoopStmtsFor(c);
+  std::vector<ForPtr> loops = l.getLoopStmtsFor(c);
   loops[0]->set_gpu_block_index(0);
   loops = l.getLoopStmtsFor(d);
   loops[0]->set_gpu_block_index(1);
 
   l.prepareForCodegen();
-  Stmt* stmt = l.root_stmt();
+  StmtPtr stmt = l.root_stmt();
   CudaCodeGen cuda_cg(stmt, c, d, a_buf, b_buf);
 
   std::ostringstream oss;
@@ -1387,8 +1388,8 @@ TEST(Cuda, MaskMultiBlockDim_CUDA) {
 
   auto blockExtents = cuda_cg.gpu_block_extents();
   auto threadExtents = cuda_cg.gpu_thread_extents();
-  ASSERT_TRUE(exprEquals(blockExtents[0], new IntImm(A_SIZE)));
-  ASSERT_TRUE(exprEquals(blockExtents[1], new IntImm(B_SIZE)));
+  ASSERT_TRUE(exprEquals(blockExtents[0], alloc<IntImm>(A_SIZE)));
+  ASSERT_TRUE(exprEquals(blockExtents[1], alloc<IntImm>(B_SIZE)));
 
   PaddedBuffer<float> a_v(A_SIZE);
   PaddedBuffer<float> b_v(B_SIZE);
@@ -1457,13 +1458,13 @@ TEST(Cuda, MaskBlockAndThreadDim_CUDA) {
   });
 
   LoopNest l({c, d});
-  std::vector<For*> loops = l.getLoopStmtsFor(c);
+  std::vector<ForPtr> loops = l.getLoopStmtsFor(c);
   loops[0]->set_gpu_block_index(0);
   loops = l.getLoopStmtsFor(d);
   loops[0]->set_gpu_thread_index(0);
 
   l.prepareForCodegen();
-  Stmt* stmt = l.root_stmt();
+  StmtPtr stmt = l.root_stmt();
   CudaCodeGen cuda_cg(stmt, c, d, a_buf, b_buf);
 
   std::ostringstream oss;
@@ -1481,8 +1482,8 @@ TEST(Cuda, MaskBlockAndThreadDim_CUDA) {
 
   auto blockExtents = cuda_cg.gpu_block_extents();
   auto threadExtents = cuda_cg.gpu_thread_extents();
-  ASSERT_TRUE(exprEquals(blockExtents[0], new IntImm(A_SIZE)));
-  ASSERT_TRUE(exprEquals(threadExtents[0], new IntImm(B_SIZE)));
+  ASSERT_TRUE(exprEquals(blockExtents[0], alloc<IntImm>(A_SIZE)));
+  ASSERT_TRUE(exprEquals(threadExtents[0], alloc<IntImm>(B_SIZE)));
 
   PaddedBuffer<float> a_v(A_SIZE);
   PaddedBuffer<float> b_v(B_SIZE);
@@ -1556,7 +1557,7 @@ TEST(Cuda, MaskMultiDim_CUDA) {
       });
 
   LoopNest l({c, d});
-  std::vector<For*> loops = l.getLoopStmtsFor(c);
+  std::vector<ForPtr> loops = l.getLoopStmtsFor(c);
   loops[0]->set_gpu_block_index(0);
   loops[1]->set_gpu_thread_index(0);
   loops = l.getLoopStmtsFor(d);
@@ -1564,7 +1565,7 @@ TEST(Cuda, MaskMultiDim_CUDA) {
   loops[1]->set_gpu_thread_index(0);
 
   l.prepareForCodegen();
-  Stmt* stmt = l.root_stmt();
+  StmtPtr stmt = l.root_stmt();
   CudaCodeGen cuda_cg(stmt, c, d, a_buf, b_buf);
 
   std::ostringstream oss;
@@ -1574,17 +1575,17 @@ TEST(Cuda, MaskMultiDim_CUDA) {
   const std::string& verification_pattern =
       R"IR(
 # CHECK-NOT: if (
-# CHECK: C[100 * blockIdx.x + threadIdx.x] =
+# CHECK: C[threadIdx.x + 100 * blockIdx.x] =
 # CHECK: __syncthreads();
 # CHECK: if (threadIdx.x<50
-# CHECK:   D[50 * blockIdx.x + threadIdx.x] =)IR";
+# CHECK:   D[threadIdx.x + 50 * blockIdx.x] =)IR";
 
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
   auto blockExtents = cuda_cg.gpu_block_extents();
   auto threadExtents = cuda_cg.gpu_thread_extents();
-  ASSERT_TRUE(exprEquals(blockExtents[0], new IntImm(OUTER_SIZE)));
-  ASSERT_TRUE(exprEquals(threadExtents[0], new IntImm(A_SIZE)));
+  ASSERT_TRUE(exprEquals(blockExtents[0], alloc<IntImm>(OUTER_SIZE)));
+  ASSERT_TRUE(exprEquals(threadExtents[0], alloc<IntImm>(A_SIZE)));
 
   PaddedBuffer<float> a_v(OUTER_SIZE, A_SIZE);
   PaddedBuffer<float> b_v(OUTER_SIZE, B_SIZE);
@@ -1686,7 +1687,7 @@ TEST(Cuda, MaskMultiDimSymbolic_CUDA) {
       });
 
   LoopNest l({c, d});
-  std::vector<For*> loops = l.getLoopStmtsFor(c);
+  std::vector<ForPtr> loops = l.getLoopStmtsFor(c);
   loops[0]->set_gpu_block_index(0);
   loops[1]->set_gpu_thread_index(0);
   loops = l.getLoopStmtsFor(d);
@@ -1694,7 +1695,7 @@ TEST(Cuda, MaskMultiDimSymbolic_CUDA) {
   loops[1]->set_gpu_thread_index(0);
 
   l.prepareForCodegen();
-  Stmt* stmt = l.root_stmt();
+  StmtPtr stmt = l.root_stmt();
   CudaCodeGen cuda_cg(stmt, c, d, OUTER_SIZE, A_SIZE, B_SIZE, a_buf, b_buf);
 
   std::ostringstream oss;
@@ -1704,10 +1705,10 @@ TEST(Cuda, MaskMultiDimSymbolic_CUDA) {
   const std::string& verification_pattern =
       R"IR(
 # CHECK: if (threadIdx.x<A_SIZE
-# CHECK:   C[threadIdx.x + A_SIZE * blockIdx.x] =
+# CHECK:   C[A_SIZE * blockIdx.x + threadIdx.x] =
 # CHECK: __syncthreads();
 # CHECK: if (threadIdx.x<B_SIZE
-# CHECK:   D[threadIdx.x + B_SIZE * blockIdx.x] =)IR";
+# CHECK:   D[B_SIZE * blockIdx.x + threadIdx.x] =)IR";
 
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
@@ -1715,7 +1716,7 @@ TEST(Cuda, MaskMultiDimSymbolic_CUDA) {
   auto threadExtents = cuda_cg.gpu_thread_extents();
   ASSERT_TRUE(exprEquals(blockExtents[0], OUTER_SIZE.node()));
   ASSERT_TRUE(exprEquals(
-      threadExtents[0], new Max(A_SIZE.node(), B_SIZE.node(), true)));
+      threadExtents[0], alloc<Max>(A_SIZE.node(), B_SIZE.node(), true)));
 
   int OUTER_EXTENT = 10;
   int A_EXTENT = 100;
@@ -1820,7 +1821,7 @@ TEST(Cuda, MaskCompoundInnerLoop_CUDA) {
   VarHandle j("j", kInt);
   VarHandle k("k", kInt);
 
-  Stmt* stmt = For::make(
+  StmtPtr stmt = For::make(
       i,
       0,
       OUTER_SIZE,
@@ -1851,17 +1852,17 @@ TEST(Cuda, MaskCompoundInnerLoop_CUDA) {
   const std::string& verification_pattern =
       R"IR(
 # CHECK-NOT: if (
-# CHECK: c[100 * blockIdx.x + threadIdx.x] =
+# CHECK: c[threadIdx.x + 100 * blockIdx.x] =
 # CHECK: __syncthreads();
 # CHECK: if (threadIdx.x<50
-# CHECK:   d[50 * blockIdx.x + threadIdx.x] =)IR";
+# CHECK:   d[threadIdx.x + 50 * blockIdx.x] =)IR";
 
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
   auto blockExtents = cuda_cg.gpu_block_extents();
   auto threadExtents = cuda_cg.gpu_thread_extents();
-  ASSERT_TRUE(exprEquals(blockExtents[0], new IntImm(OUTER_SIZE)));
-  ASSERT_TRUE(exprEquals(threadExtents[0], new IntImm(A_SIZE)));
+  ASSERT_TRUE(exprEquals(blockExtents[0], alloc<IntImm>(OUTER_SIZE)));
+  ASSERT_TRUE(exprEquals(threadExtents[0], alloc<IntImm>(A_SIZE)));
 
   PaddedBuffer<float> a_v(OUTER_SIZE, A_SIZE);
   PaddedBuffer<float> b_v(OUTER_SIZE, B_SIZE);
@@ -1959,7 +1960,7 @@ TEST(Cuda, MaskInnerLoopOneBlock_CUDA) {
   VarHandle j("j", kInt);
   VarHandle k("k", kInt);
 
-  Stmt* stmt = For::make(
+  StmtPtr stmt = For::make(
       i,
       0,
       OUTER_SIZE,
@@ -1990,17 +1991,17 @@ TEST(Cuda, MaskInnerLoopOneBlock_CUDA) {
       R"IR(
 # CHECK: for (int i = 0; i < 10
 # CHECK-NOT: if (
-# CHECK: c[100 * i + threadIdx.x] =
+# CHECK: c[threadIdx.x + 100 * i] =
 # CHECK: __syncthreads();
 # CHECK: if (threadIdx.x<50
-# CHECK:   d[50 * i + threadIdx.x] =)IR";
+# CHECK:   d[threadIdx.x + 50 * i] =)IR";
 
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
   auto blockExtents = cuda_cg.gpu_block_extents();
   auto threadExtents = cuda_cg.gpu_thread_extents();
-  ASSERT_TRUE(exprEquals(blockExtents[0], new IntImm(1)));
-  ASSERT_TRUE(exprEquals(threadExtents[0], new IntImm(A_SIZE)));
+  ASSERT_TRUE(exprEquals(blockExtents[0], alloc<IntImm>(1)));
+  ASSERT_TRUE(exprEquals(threadExtents[0], alloc<IntImm>(A_SIZE)));
 
   PaddedBuffer<float> a_v(OUTER_SIZE, A_SIZE);
   PaddedBuffer<float> b_v(OUTER_SIZE, B_SIZE);
@@ -2100,7 +2101,7 @@ TEST(Cuda, MaskMultiDimMultiAxis_CUDA) {
       });
 
   LoopNest l({c, d});
-  std::vector<For*> loops = l.getLoopStmtsFor(c);
+  std::vector<ForPtr> loops = l.getLoopStmtsFor(c);
   loops[0]->set_gpu_block_index(0);
   loops[1]->set_gpu_thread_index(0);
   loops = l.getLoopStmtsFor(d);
@@ -2108,7 +2109,7 @@ TEST(Cuda, MaskMultiDimMultiAxis_CUDA) {
   loops[1]->set_gpu_thread_index(1);
 
   l.prepareForCodegen();
-  Stmt* stmt = l.root_stmt();
+  StmtPtr stmt = l.root_stmt();
   CudaCodeGen cuda_cg(stmt, c, d, a_buf, b_buf);
 
   std::ostringstream oss;
@@ -2118,7 +2119,7 @@ TEST(Cuda, MaskMultiDimMultiAxis_CUDA) {
   const std::string& verification_pattern =
       R"IR(
 # CHECK: if (threadIdx.y<1
-# CHECK:   C[30 * blockIdx.x + threadIdx.x] =
+# CHECK:   C[threadIdx.x + 30 * blockIdx.x] =
 # CHECK: __syncthreads();
 # CHECK: if (threadIdx.x<1
 # CHECK:   D[threadIdx.y + 15 * blockIdx.x] =)IR";
@@ -2127,8 +2128,8 @@ TEST(Cuda, MaskMultiDimMultiAxis_CUDA) {
 
   auto blockExtents = cuda_cg.gpu_block_extents();
   auto threadExtents = cuda_cg.gpu_thread_extents();
-  ASSERT_TRUE(exprEquals(blockExtents[0], new IntImm(OUTER_SIZE)));
-  ASSERT_TRUE(exprEquals(threadExtents[0], new IntImm(A_SIZE)));
+  ASSERT_TRUE(exprEquals(blockExtents[0], alloc<IntImm>(OUTER_SIZE)));
+  ASSERT_TRUE(exprEquals(threadExtents[0], alloc<IntImm>(A_SIZE)));
 
   PaddedBuffer<float> a_v(OUTER_SIZE, A_SIZE);
   PaddedBuffer<float> b_v(OUTER_SIZE, B_SIZE);
@@ -2231,7 +2232,7 @@ TEST(Cuda, MaskMultiDimMultiLevel_CUDA) {
       });
 
   LoopNest l({c, d});
-  std::vector<For*> loops = l.getLoopStmtsFor(c);
+  std::vector<ForPtr> loops = l.getLoopStmtsFor(c);
   loops[0]->set_gpu_block_index(0);
   loops[1]->set_gpu_thread_index(0);
   loops = l.getLoopStmtsFor(d);
@@ -2239,7 +2240,7 @@ TEST(Cuda, MaskMultiDimMultiLevel_CUDA) {
   loops[1]->set_gpu_thread_index(0);
 
   l.prepareForCodegen();
-  Stmt* stmt = l.root_stmt();
+  StmtPtr stmt = l.root_stmt();
   CudaCodeGen cuda_cg(stmt, c, d, a_buf, b_buf);
 
   std::ostringstream oss;
@@ -2249,7 +2250,7 @@ TEST(Cuda, MaskMultiDimMultiLevel_CUDA) {
   const std::string& verification_pattern =
       R"IR(
 # CHECK-NOT: if (
-# CHECK: C[30 * blockIdx.x + threadIdx.x] =
+# CHECK: C[threadIdx.x + 30 * blockIdx.x] =
 # CHECK: __syncthreads();
 # CHECK: if (blockIdx.x<5
 # CHECK:   if (threadIdx.x<15
@@ -2259,8 +2260,8 @@ TEST(Cuda, MaskMultiDimMultiLevel_CUDA) {
 
   auto blockExtents = cuda_cg.gpu_block_extents();
   auto threadExtents = cuda_cg.gpu_thread_extents();
-  ASSERT_TRUE(exprEquals(blockExtents[0], new IntImm(OUTER_A_SIZE)));
-  ASSERT_TRUE(exprEquals(threadExtents[0], new IntImm(A_SIZE)));
+  ASSERT_TRUE(exprEquals(blockExtents[0], alloc<IntImm>(OUTER_A_SIZE)));
+  ASSERT_TRUE(exprEquals(threadExtents[0], alloc<IntImm>(A_SIZE)));
 
   PaddedBuffer<float> a_v(OUTER_A_SIZE, A_SIZE);
   PaddedBuffer<float> b_v(OUTER_B_SIZE, B_SIZE);
