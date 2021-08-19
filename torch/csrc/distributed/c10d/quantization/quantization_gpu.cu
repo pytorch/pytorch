@@ -1,4 +1,8 @@
-#include <caffe2/operators/segment_reduction_op_gpu.cuh>
+//#include <caffe2/operators/segment_reduction_op_gpu.cuh>
+
+
+#include <c10/cuda/CUDAGuard.h>
+#include <c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/quantization/quantization_gpu.h>
 #include <torch/csrc/distributed/c10d/quantization/quantization_utils.h>
 
@@ -92,7 +96,7 @@ at::Tensor _float_to_bfloat16_cuda(const at::Tensor& input) {
       // TODO: replace Half by BFloat16, after BFloat16 is supported by Nvidia
       // NCCL
       reinterpret_cast<uint16_t*>(output.data_ptr<at::Half>()));
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
+  //C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   return output;
 }
