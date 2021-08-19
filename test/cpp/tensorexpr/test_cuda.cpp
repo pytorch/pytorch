@@ -34,7 +34,7 @@ static void testCudaTestVectorAdd01_impl() {
   Dtype dtype = ToDtype<ctype>();
   Placeholder a_buf("a", dtype, {num_iter, block_count, block_size});
   Placeholder b_buf("b", dtype, {num_iter, block_count, block_size});
-  Tensor* c = Compute(
+  Tensor c = Compute(
       "c",
       {
           {num_iter, "n"},
@@ -99,7 +99,7 @@ TEST(Cuda, Sigmoid_CUDA) {
   const int block_size = 128;
   Dtype dtype = ToDtype<float>();
   Placeholder a_buf("a", dtype, {num_iter, block_count, block_size});
-  Tensor* c = Compute(
+  Tensor c = Compute(
       "c",
       {
           {num_iter, "n"},
@@ -165,7 +165,7 @@ static void testCudaTestVectorAdd02_impl(int N, int block_size) {
   KernelScope kernel_scope;
   Placeholder a_buf("a", kFloat, {N});
   Placeholder b_buf("b", kFloat, {N});
-  Tensor* c = Compute(
+  Tensor c = Compute(
       "c",
       {
           {N, "N"},
@@ -225,7 +225,7 @@ TEST(Cuda, HalfCast_CUDA) {
   KernelScope ks;
   auto half = ToDtype<at::Half>();
   Placeholder a("a", half, {4});
-  Tensor* b = Compute("b", {{4, "n"}}, [&](const VarHandle& i) {
+  Tensor b = Compute("b", {{4, "n"}}, [&](const VarHandle& i) {
     return Cast::make(kFloat, a.load(i));
   });
 
@@ -267,7 +267,7 @@ TEST(Cuda, DynamicShape2D_CUDA) {
     VarHandle n("n", kInt);
     Placeholder a(BufHandle("a", {m, n}, kFloat));
     Placeholder b(BufHandle("b", {m, n}, kFloat));
-    Tensor* c = Compute(
+    Tensor c = Compute(
         "c", {{m, "m"}, {n, "n"}}, [&](const VarHandle& i, const VarHandle& j) {
           return a.load(i, j) + b.load(i, j);
         });
@@ -328,7 +328,7 @@ TEST(Cuda, TestRand01_CUDA) {
   const int num_iter = 3;
   const int block_count = 16;
   const int block_size = 128;
-  Tensor* c = Compute(
+  Tensor c = Compute(
       "c",
       {
           {num_iter, "n"},
@@ -387,7 +387,7 @@ TEST(Cuda, DynamicShapeSplit_CUDA) {
   constexpr int N = 4096;
   VarHandle n("n", kInt);
   Placeholder a(BufHandle("a", {n}, kFloat));
-  Tensor* b = Compute(
+  Tensor b = Compute(
       "b", {{n, "n"}}, [&](const VarHandle& i) { return a.load(i) * 2.0f; });
   LoopNest l({b});
   ForPtr inner;
@@ -928,15 +928,15 @@ TEST(Cuda, HalfSupport_CUDA) {
   KernelScope ks;
   auto half = ToDtype<at::Half>();
   Placeholder a("a", half, {4});
-  Tensor* b = Compute("b", {{4, "n"}}, [&](const VarHandle& i) {
+  Tensor b = Compute("b", {{4, "n"}}, [&](const VarHandle& i) {
     return Cast::make(half, ExprHandle(2.0f) * a.load(i));
   });
 
-  Tensor* c = Compute("c", {{4, "n"}}, [&](const VarHandle& i) {
+  Tensor c = Compute("c", {{4, "n"}}, [&](const VarHandle& i) {
     return Cast::make(kFloat, Cast::make(half, ExprHandle(42)) + b->load(i));
   });
 
-  Tensor* d = Compute("d", {{4, "n"}}, [&](const VarHandle& i) {
+  Tensor d = Compute("d", {{4, "n"}}, [&](const VarHandle& i) {
     return Cast::make(half, c->load(i));
   });
 
@@ -986,7 +986,7 @@ TEST(Cuda, HalfPropagation_CUDA) {
   KernelScope kernel_scope;
   auto half = ToDtype<at::Half>();
   Placeholder a("a", half, {4});
-  Tensor* relu = Compute("relu", {{4, "n"}}, [&](const VarHandle& i) {
+  Tensor relu = Compute("relu", {{4, "n"}}, [&](const VarHandle& i) {
     return Max::make(a.load(i), ExprHandle(alloc<HalfImm>(0)), true);
   });
 
@@ -1036,7 +1036,7 @@ TEST(Cuda, UnusedHalfArgument_CUDA) {
   Placeholder a("a", kFloat, {4});
   auto half = ToDtype<at::Half>();
   Placeholder b("b", half, {4});
-  Tensor* relu = Compute("relu", {{4, "n"}}, [&](const VarHandle& i) {
+  Tensor relu = Compute("relu", {{4, "n"}}, [&](const VarHandle& i) {
     return Max::make(a.load(i), ExprHandle(alloc<FloatImm>(0)), true);
   });
 
@@ -1168,10 +1168,10 @@ TEST(Cuda, MaskBlockDim_CUDA) {
   int B_SIZE = 50;
   Placeholder a_buf("a", kFloat, {A_SIZE});
   Placeholder b_buf("b", kFloat, {B_SIZE});
-  Tensor* c = Compute("c", {{A_SIZE, "i"}}, [&](const VarHandle& i) {
+  Tensor c = Compute("c", {{A_SIZE, "i"}}, [&](const VarHandle& i) {
     return a_buf.load(i) + 10;
   });
-  Tensor* d = Compute("d", {{B_SIZE, "i"}}, [&](const VarHandle& i) {
+  Tensor d = Compute("d", {{B_SIZE, "i"}}, [&](const VarHandle& i) {
     return a_buf.load(i) + b_buf.load(i);
   });
 
@@ -1261,10 +1261,10 @@ TEST(Cuda, MaskThreadDim_CUDA) {
   int B_SIZE = 100;
   Placeholder a_buf("a", kFloat, {A_SIZE});
   Placeholder b_buf("b", kFloat, {B_SIZE});
-  Tensor* c = Compute("c", {{A_SIZE, "i"}}, [&](const VarHandle& i) {
+  Tensor c = Compute("c", {{A_SIZE, "i"}}, [&](const VarHandle& i) {
     return a_buf.load(i) + 10;
   });
-  Tensor* d = Compute("d", {{B_SIZE, "i"}}, [&](const VarHandle& i) {
+  Tensor d = Compute("d", {{B_SIZE, "i"}}, [&](const VarHandle& i) {
     return a_buf.load(i / 2) + b_buf.load(i);
   });
 
@@ -1356,10 +1356,10 @@ TEST(Cuda, MaskMultiBlockDim_CUDA) {
   int B_SIZE = 50;
   Placeholder a_buf("a", kFloat, {A_SIZE});
   Placeholder b_buf("b", kFloat, {B_SIZE});
-  Tensor* c = Compute("c", {{A_SIZE, "i"}}, [&](const VarHandle& i) {
+  Tensor c = Compute("c", {{A_SIZE, "i"}}, [&](const VarHandle& i) {
     return a_buf.load(i) + 10;
   });
-  Tensor* d = Compute("d", {{B_SIZE, "i"}}, [&](const VarHandle& i) {
+  Tensor d = Compute("d", {{B_SIZE, "i"}}, [&](const VarHandle& i) {
     return a_buf.load(i) + b_buf.load(i);
   });
 
@@ -1450,10 +1450,10 @@ TEST(Cuda, MaskBlockAndThreadDim_CUDA) {
   int B_SIZE = 50;
   Placeholder a_buf("a", kFloat, {A_SIZE});
   Placeholder b_buf("b", kFloat, {B_SIZE});
-  Tensor* c = Compute("c", {{A_SIZE, "i"}}, [&](const VarHandle& i) {
+  Tensor c = Compute("c", {{A_SIZE, "i"}}, [&](const VarHandle& i) {
     return a_buf.load(i) + 10;
   });
-  Tensor* d = Compute("d", {{B_SIZE, "i"}}, [&](const VarHandle& i) {
+  Tensor d = Compute("d", {{B_SIZE, "i"}}, [&](const VarHandle& i) {
     return a_buf.load(i) + b_buf.load(i);
   });
 
@@ -1543,13 +1543,13 @@ TEST(Cuda, MaskMultiDim_CUDA) {
   int B_SIZE = 50;
   Placeholder a_buf("a", kFloat, {OUTER_SIZE, A_SIZE});
   Placeholder b_buf("b", kFloat, {OUTER_SIZE, B_SIZE});
-  Tensor* c = Compute(
+  Tensor c = Compute(
       "C",
       {{OUTER_SIZE, "i"}, {A_SIZE, "j"}},
       [&](const VarHandle& i, const VarHandle& j) {
         return ExprHandle(2) * a_buf.load(i, j);
       });
-  Tensor* d = Compute(
+  Tensor d = Compute(
       "D",
       {{OUTER_SIZE, "i"}, {B_SIZE, "j"}},
       [&](const VarHandle& i, const VarHandle& j) {
@@ -1673,13 +1673,13 @@ TEST(Cuda, MaskMultiDimSymbolic_CUDA) {
   VarHandle B_SIZE("B_SIZE", kInt);
   Placeholder a_buf("a", kFloat, {OUTER_SIZE, A_SIZE});
   Placeholder b_buf("b", kFloat, {OUTER_SIZE, B_SIZE});
-  Tensor* c = Compute(
+  Tensor c = Compute(
       "C",
       {{OUTER_SIZE, "i"}, {A_SIZE, "j"}},
       [&](const VarHandle& i, const VarHandle& j) {
         return ExprHandle(2) * a_buf.load(i, j);
       });
-  Tensor* d = Compute(
+  Tensor d = Compute(
       "D",
       {{OUTER_SIZE, "i"}, {B_SIZE, "j"}},
       [&](const VarHandle& i, const VarHandle& j) {
@@ -2087,13 +2087,13 @@ TEST(Cuda, MaskMultiDimMultiAxis_CUDA) {
   int B_SIZE = 15;
   Placeholder a_buf("a", kFloat, {OUTER_SIZE, A_SIZE});
   Placeholder b_buf("b", kFloat, {OUTER_SIZE, B_SIZE});
-  Tensor* c = Compute(
+  Tensor c = Compute(
       "C",
       {{OUTER_SIZE, "i"}, {A_SIZE, "j"}},
       [&](const VarHandle& i, const VarHandle& j) {
         return ExprHandle(2) * a_buf.load(i, j);
       });
-  Tensor* d = Compute(
+  Tensor d = Compute(
       "D",
       {{OUTER_SIZE, "i"}, {B_SIZE, "j"}},
       [&](const VarHandle& i, const VarHandle& j) {
@@ -2218,13 +2218,13 @@ TEST(Cuda, MaskMultiDimMultiLevel_CUDA) {
   int B_SIZE = 15;
   Placeholder a_buf("a", kFloat, {OUTER_A_SIZE, A_SIZE});
   Placeholder b_buf("b", kFloat, {OUTER_B_SIZE, B_SIZE});
-  Tensor* c = Compute(
+  Tensor c = Compute(
       "C",
       {{OUTER_A_SIZE, "i"}, {A_SIZE, "j"}},
       [&](const VarHandle& i, const VarHandle& j) {
         return ExprHandle(2) * a_buf.load(i, j);
       });
-  Tensor* d = Compute(
+  Tensor d = Compute(
       "D",
       {{OUTER_B_SIZE, "i"}, {B_SIZE, "j"}},
       [&](const VarHandle& i, const VarHandle& j) {

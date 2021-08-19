@@ -12,7 +12,7 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
-class TORCH_API Tensor : KernelScopedObject {
+class TORCH_API Tensor {
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Tensor(BufPtr buf, const std::vector<VarPtr>& args, ExprPtr body)
@@ -42,9 +42,9 @@ class TORCH_API Tensor : KernelScopedObject {
   }
 
   template <typename T>
-  inline ExprHandle load(const std::vector<T>& args);
+  inline ExprHandle load(const std::vector<T>& args) const;
   template <typename... Ts>
-  inline ExprHandle load(const Ts&... ts);
+  inline ExprHandle load(const Ts&... ts) const;
 
  private:
   StmtPtr constructStmt(
@@ -134,22 +134,22 @@ class Placeholder {
   std::vector<ExprPtr> strides_;
 };
 
-TORCH_API Tensor* Compute(
+TORCH_API Tensor Compute(
     const std::string& func_name,
     const std::vector<DimArg>& dim_args,
     const std::function<ExprHandle(const VarHandle&)>& body_func);
-TORCH_API Tensor* Compute(
+TORCH_API Tensor Compute(
     const std::string& func_name,
     const std::vector<DimArg>& dim_args,
     const std::function<ExprHandle(const VarHandle&, const VarHandle&)>&
         body_func);
-TORCH_API Tensor* Compute(
+TORCH_API Tensor Compute(
     const std::string& func_name,
     const std::vector<DimArg>& dim_args,
     const std::function<
         ExprHandle(const VarHandle&, const VarHandle&, const VarHandle&)>&
         body_func);
-TORCH_API Tensor* Compute(
+TORCH_API Tensor Compute(
     const std::string& func_name,
     const std::vector<DimArg>& dim_args,
     const std::function<ExprHandle(
@@ -157,7 +157,7 @@ TORCH_API Tensor* Compute(
         const VarHandle&,
         const VarHandle&,
         const VarHandle&)>& body_func);
-TORCH_API Tensor* Compute(
+TORCH_API Tensor Compute(
     const std::string& func_name,
     const std::vector<DimArg>& dim_args,
     const std::function<ExprHandle(const std::vector<VarHandle>&)>& body_func);
@@ -179,7 +179,7 @@ inline void unpack_dim_args(
 
 // Handle reductions over a Reducer and a body_func which produces values.
 template <typename InitFunc, typename BodyFunc>
-Tensor* Reduce(
+Tensor Reduce(
     const std::string& func_name,
     const std::vector<DimArg>& dim_args,
     const Reducer& reducer,
@@ -207,7 +207,7 @@ Tensor* Reduce(
             .node();
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     BufPtr func_result = alloc<Buf>(func_name, dims, body->dtype());
-    return new Tensor(func_result, vars, body);
+    return Tensor(func_result, vars, body);
   }
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -227,13 +227,13 @@ Tensor* Reduce(
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ReduceOpPtr reduce_op = reducer(func_result, body, output_args, reduce_vars);
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  Tensor* t =
-      new Tensor(func_result, vars, reduce_dims, reduce_vars, reduce_op);
+  Tensor t =
+      Tensor(func_result, vars, reduce_dims, reduce_vars, reduce_op);
   return t;
 }
 
 template <typename BodyFunc>
-Tensor* Reduce(
+Tensor Reduce(
     const std::string& func_name,
     const std::vector<DimArg>& dim_args,
     const Reducer& reducer,
@@ -250,7 +250,7 @@ Tensor* Reduce(
 
 // Overload which allows inline lambda functions for the body_func.
 template <typename BodyFunc>
-Tensor* Reduce(
+Tensor Reduce(
     const std::string& func_name,
     const std::vector<DimArg>& dim_args,
     const Reducer& reducer,
@@ -260,14 +260,14 @@ Tensor* Reduce(
 }
 
 // Overload for the common case of all dimensions of a Placeholder.
-TORCH_API Tensor* Reduce(
+TORCH_API Tensor Reduce(
     const std::string& func_name,
     const std::vector<DimArg>& dim_args,
     const Reducer& reducer,
     const Placeholder& buffer,
     const std::vector<DimArg>& reduce_args);
 
-TORCH_API Tensor* Reduce(
+TORCH_API Tensor Reduce(
     const std::string& name,
     const std::vector<DimArg>& dim_args,
     const Reducer& reducer,
@@ -276,22 +276,22 @@ TORCH_API Tensor* Reduce(
 
 // Overload for the common case of all dimensions of a prevously Computed
 // Tensor.
-TORCH_API Tensor* Reduce(
+TORCH_API Tensor Reduce(
     const std::string& func_name,
     const std::vector<DimArg>& dim_args,
     const Reducer& reducer,
-    Tensor* tensor,
+    Tensor tensor,
     const std::vector<DimArg>& reduce_args);
 
 template <typename... Ts>
-inline ExprHandle Tensor::load(const Ts&... ts) {
+inline ExprHandle Tensor::load(const Ts&... ts) const {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<ExprHandle> params({ExprHandle(ts)...});
   return Load::make(BufHandle(this->buf()), params);
 }
 
 template <typename T>
-inline ExprHandle Tensor::load(const std::vector<T>& args) {
+inline ExprHandle Tensor::load(const std::vector<T>& args) const {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<ExprHandle> params(args.begin(), args.end());
   return Load::make(BufHandle(this->buf()), params);

@@ -483,7 +483,7 @@ struct TEWrapper {
 
 void optimizePointwise(
     tensorexpr::LoopNest* ln,
-    tensorexpr::Tensor* target,
+    tensorexpr::Tensor target,
     int width) {
   using namespace torch::jit::tensorexpr;
   std::vector<ForPtr> loops = ln->getLoopStmtsFor(target);
@@ -496,7 +496,7 @@ void optimizePointwise(
 std::shared_ptr<TEWrapper> wrapTECompute(
     std::shared_ptr<TEWrapper> wrap,
     tensorexpr::Placeholder& in,
-    tensorexpr::Tensor* out,
+    tensorexpr::Tensor out,
     tensorexpr::VarHandle& dim,
     int width = kVectorWidth) {
   using namespace torch::jit::tensorexpr;
@@ -536,7 +536,7 @@ struct TEWrapper {
 std::shared_ptr<TEWrapper> wrapTECompute(
     std::shared_ptr<TEWrapper> wrap,
     tensorexpr::Placeholder& in,
-    tensorexpr::Tensor* out,
+    tensorexpr::Tensor out,
     tensorexpr::VarHandle& dim,
     int width = kVectorWidth) {
   return wrap;
@@ -576,7 +576,7 @@ std::shared_ptr<TEWrapper> createLogit(c10::optional<float> clamp) {
   auto wrap = std::make_shared<TEWrapper>();
   auto N = VarHandle("N", kInt);
   Placeholder A("A", kFloat, {N});
-  tensorexpr::Tensor* B = Compute("B", {N}, [&](const VarHandle& i) {
+  tensorexpr::Tensor B = Compute("B", {N}, [&](const VarHandle& i) {
     auto A_elem = [&]() {
       if (!clamp) {
         return A.load(i);
@@ -602,7 +602,7 @@ std::shared_ptr<TEWrapper> createRelu() {
   wrap = std::make_shared<TEWrapper>();
   auto N = VarHandle("N", kInt);
   Placeholder A("A", kFloat, {N});
-  tensorexpr::Tensor* B = Compute("B", {N}, [&](const VarHandle& i) {
+  tensorexpr::Tensor B = Compute("B", {N}, [&](const VarHandle& i) {
     auto zero = FloatImm::make(0.f);
     auto a = A.load(i);
     return ifThenElse(a < zero, zero, a);
@@ -621,7 +621,7 @@ std::shared_ptr<TEWrapper> createTanh() {
   wrap = std::make_shared<TEWrapper>();
   auto N = VarHandle("N", kInt);
   Placeholder A("A", kFloat, {N});
-  tensorexpr::Tensor* B = Compute("B", {N}, [&](const VarHandle& i) {
+  tensorexpr::Tensor B = Compute("B", {N}, [&](const VarHandle& i) {
     auto a = A.load(i);
     return fast_tanh(a);
   });
@@ -639,7 +639,7 @@ std::shared_ptr<TEWrapper> createSigmoid() {
   wrap = std::make_shared<TEWrapper>();
   auto N = VarHandle("N", kInt);
   Placeholder A("A", kFloat, {N});
-  Tensor* B =
+  Tensor B =
       Compute("B", {N}, [&](const VarHandle& i) { return sigmoid(A.load(i)); });
   // NNC uses sleef for vectorizing sigmoid, which comes in an 8-wide flavor
   // (Sleef_expf8).

@@ -185,9 +185,9 @@ void initTensorExprBindings(PyObject* module) {
              const std::vector<ExprHandle>& args,
              const ExprHandle& val) { return self.store(args, val); })
       .def("data", [](Placeholder& self) { return BufHandle(self.data()); });
-  py::class_<Tensor, std::unique_ptr<Tensor, py::nodelete>>(te, "Tensor")
+  py::class_<Tensor>(te, "Tensor")
       .def(py::init(
-          [](BufHandle& b, StmtPtr s) { return new Tensor(b.node(), s); }))
+          [](BufHandle& b, StmtPtr s) { return Tensor(b.node(), s); }))
       .def(
           "load",
           [](Tensor& self, const std::vector<ExprHandle>& v) {
@@ -268,7 +268,7 @@ void initTensorExprBindings(PyObject* module) {
       [](const std::string& func_name,
          const std::vector<DimArg>& dim_args,
          const Reducer& reducer,
-         Tensor* buffer,
+         Tensor buffer,
          const std::vector<DimArg>& reduce_args) {
         return Reduce(func_name, dim_args, reducer, buffer, reduce_args);
       },
@@ -380,7 +380,7 @@ void initTensorExprBindings(PyObject* module) {
       .def(py::init(&ExternalCall::make));
 
   py::class_<LoopNest>(te, "LoopNest")
-      .def(py::init<const std::vector<Tensor*>&>())
+      .def(py::init<const std::vector<Tensor>&>())
       .def(py::init([](StmtPtr s, const std::vector<BufHandle>& bufs) {
         std::unordered_set<BufPtr> buf_nodes;
         for (auto& buf : bufs) {
@@ -392,7 +392,7 @@ void initTensorExprBindings(PyObject* module) {
       .def("prepare_for_codegen", &LoopNest::prepareForCodegen)
       .def(
           "get_loop_body_for",
-          [](const LoopNest& self, Tensor* t) {
+          [](const LoopNest& self, Tensor t) {
             return self.getLoopBodyFor(t);
           },
           py::return_value_policy::reference)
@@ -404,7 +404,7 @@ void initTensorExprBindings(PyObject* module) {
           py::return_value_policy::reference)
       .def(
           "get_loops_for",
-          [](const LoopNest& self, Tensor* t) {
+          [](const LoopNest& self, Tensor t) {
             return self.getLoopStmtsFor(t);
           },
           py::return_value_policy::reference)
@@ -760,12 +760,12 @@ void initTensorExprBindings(PyObject* module) {
 
   py::class_<CodeGen::BufferArg>(te, "BufferArg")
       .def(py::init<const Placeholder&>())
-      .def(py::init<Tensor*>())
+      .def(py::init<Tensor>())
       .def(py::init<const VarHandle&>())
       .def(py::init<const BufHandle&>());
 
   py::implicitly_convertible<Placeholder, CodeGen::BufferArg>();
-  py::implicitly_convertible<Tensor*, CodeGen::BufferArg>();
+  py::implicitly_convertible<Tensor, CodeGen::BufferArg>();
   py::implicitly_convertible<VarHandle, CodeGen::BufferArg>();
   py::implicitly_convertible<BufHandle, CodeGen::BufferArg>();
 

@@ -960,7 +960,7 @@ std::vector<ExprHandle> TensorExprKernel::broadcastShapesMut(
   return res.first;
 }
 
-Tensor* computeOneOperand(
+Tensor computeOneOperand(
     const std::string& name,
     const std::vector<ArgValue>& inputValues,
     const std::vector<ExprHandle>& outputShape,
@@ -981,7 +981,7 @@ Tensor* computeOneOperand(
       });
 }
 
-Tensor* computeTwoOperand(
+Tensor computeTwoOperand(
     const std::string& name,
     const std::vector<ArgValue>& inputValues,
     const std::vector<ExprHandle>& outputShape,
@@ -1004,7 +1004,7 @@ Tensor* computeTwoOperand(
       });
 }
 
-Tensor* computeTwoOperandWithAlpha(
+Tensor computeTwoOperandWithAlpha(
     const std::string& name,
     const std::vector<ArgValue>& inputValues,
     const std::vector<ExprHandle>& outputShape,
@@ -1028,7 +1028,7 @@ Tensor* computeTwoOperandWithAlpha(
       });
 }
 
-Tensor* computeConditionWithTwoOperand(
+Tensor computeConditionWithTwoOperand(
     const std::string& name,
     const std::vector<ArgValue>& inputValues,
     const std::vector<ExprHandle>& outputShape,
@@ -1055,7 +1055,7 @@ Tensor* computeConditionWithTwoOperand(
       });
 }
 
-Tensor* computeThreeOperand(
+Tensor computeThreeOperand(
     const std::string& name,
     const std::vector<ArgValue>& inputValues,
     const std::vector<ExprHandle>& outputShape,
@@ -1083,7 +1083,7 @@ Tensor* computeThreeOperand(
         return demoteOutput(compute, outputType);
       });
 }
-Tensor* computeFourOperand(
+Tensor computeFourOperand(
     const std::string& name,
     const std::vector<ArgValue>& inputValues,
     const std::vector<ExprHandle>& outputShape,
@@ -1135,7 +1135,7 @@ std::pair<ScalarType, std::vector<BufHandle>> processCatList(
   }
   return {highType, nonEmptyInputs};
 }
-Tensor* computeCatWoConditionals(
+Tensor computeCatWoConditionals(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape) {
   // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
@@ -1164,7 +1164,7 @@ Tensor* computeCatWoConditionals(
   auto output_buf =
       alloc<Buf>("aten_cat", output_sizes_expr, ToDtype(high_type));
   if (non_empty_inputs.size() == 0) {
-    return new Tensor(
+    return Tensor(
         output_buf, alloc<tensorexpr::Block>(std::vector<StmtPtr>({})));
   }
 
@@ -1213,10 +1213,10 @@ Tensor* computeCatWoConditionals(
     concat_dim_size =
         alloc<Add>(concat_dim_size, input_dims[norm_concat_dim].node());
   }
-  return new Tensor(output_buf, IRSimplifier::simplify(block));
+  return Tensor(output_buf, IRSimplifier::simplify(block));
 }
 
-Tensor* computeCat(
+Tensor computeCat(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     at::Device device) {
@@ -1276,7 +1276,7 @@ Tensor* computeCat(
       });
 }
 
-Tensor* computeConv2d(
+Tensor computeConv2d(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const c10::optional<ScalarType>& outputType) {
@@ -1319,10 +1319,10 @@ Tensor* computeConv2d(
        dilation[0],
        dilation[1],
        groups});
-  return new Tensor(ResultBuf.node(), s);
+  return Tensor(ResultBuf.node(), s);
 }
 
-Tensor* tensorexpr::computeOperandValue(
+Tensor tensorexpr::computeOperandValue(
     c10::Symbol op,
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
@@ -2391,7 +2391,7 @@ c10::optional<ScalarType> findDtypeForValue(const torch::jit::Value* v) {
   return c10::nullopt;
 }
 
-Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
+Tensor TensorExprKernel::computeValue(const torch::jit::Value* v) {
   auto inputs = v->node()->inputs();
   auto op = v->node()->kind();
 
@@ -2703,9 +2703,9 @@ static std::vector<ExprHandle> toExprHandles(const std::vector<T>& sizes) {
   return dims;
 }
 
-Tensor* TensorExprKernel::bindInput(const torch::jit::Value* input) {
+Tensor TensorExprKernel::bindInput(const torch::jit::Value* input) {
   auto const& t = input->type();
-  Tensor* result = nullptr;
+  Tensor result(nullptr, nullptr);
   switch (t->kind()) {
     case TypeKind::TensorType: {
       auto tt = input->type()->cast<TensorType>();
@@ -2744,7 +2744,7 @@ Tensor* TensorExprKernel::bindInput(const torch::jit::Value* input) {
             }
             return inBuffer.load(idx);
           });
-      bufs_.emplace(input, result->buf());
+      bufs_.emplace(input, result.buf());
 
       bufferArgs_.emplace_back(inBuffer);
       break;
@@ -2800,7 +2800,7 @@ bool denseAndNonOverlapping(
   return (strides == at::infer_dense_strides(sizes, strides));
 }
 
-Tensor* TensorExprKernel::convertOutputToCorrectStrides(torch::jit::Value* v) {
+Tensor TensorExprKernel::convertOutputToCorrectStrides(torch::jit::Value* v) {
   const TensorTypePtr& tt = v->type()->expect<TensorType>();
   TORCH_INTERNAL_ASSERT(bufs_.count(v));
   BufPtr buf = bufs_.at(v);
@@ -2816,19 +2816,19 @@ Tensor* TensorExprKernel::convertOutputToCorrectStrides(torch::jit::Value* v) {
   auto sizes = *tt->sizes().concrete_sizes();
   std::vector<int64_t> default_strides = TensorType::contiguousStridesOf(sizes);
   if (!tt->strides().concrete_sizes()) {
-    return new Tensor(buf, nullptr);
+    return Tensor(buf, nullptr);
   }
   TORCH_INTERNAL_ASSERT(tt->strides().concrete_sizes());
   const std::vector<int64_t> strides = *tt->strides().concrete_sizes();
   // All Tensors in NNC are layed out in default, contiguous layout.
   // If the output is also default contiguous we don't need to do anything
   if (strides == default_strides) {
-    return new Tensor(buf, nullptr);
+    return Tensor(buf, nullptr);
   }
   // If the tensor is not dense or overlaps, we have
   // no way of matching the profiled striding
   if (!denseAndNonOverlapping(sizes, strides)) {
-    return new Tensor(buf, nullptr);
+    return Tensor(buf, nullptr);
   }
 
   auto dims = c10::fmap<DimArg>(sizesForValue(v));
@@ -2922,8 +2922,9 @@ void TensorExprKernel::compile() {
   nInputs_ = graph_->inputs().size();
   genInputDebugNames();
   for (auto const& input : graph_->inputs()) {
-    if (Tensor* t = bindInput(input)) {
-      block->append_stmt(t->stmt());
+    Tensor t = bindInput(input);
+    if (t.stmt()) {
+      block->append_stmt(t.stmt());
     }
   }
 
@@ -2937,10 +2938,9 @@ void TensorExprKernel::compile() {
     } else {
       for (auto const& output : n->outputs()) {
         if (output->hasUses()) {
-          Tensor* t = computeValue(output);
-          bufs_.emplace(output, t->buf());
-          // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
-          block->append_stmt(t->stmt());
+          Tensor t = computeValue(output);
+          bufs_.emplace(output, t.buf());
+          block->append_stmt(t.stmt());
         }
       }
     }
@@ -2958,12 +2958,12 @@ void TensorExprKernel::compile() {
     // The "strided" tensor will be incorrect if used in NNC,
     // since NNC views it as contiguous. Only convert it to the right
     // strides at the end of the kernel (if already contiguous it's a no-op)
-    Tensor* properly_strided_output = convertOutputToCorrectStrides(output);
-    if (properly_strided_output->stmt()) {
-      block->append_stmt(properly_strided_output->stmt());
+    Tensor properly_strided_output = convertOutputToCorrectStrides(output);
+    if (properly_strided_output.stmt()) {
+      block->append_stmt(properly_strided_output.stmt());
     }
     // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
-    bufs_[output] = properly_strided_output->buf();
+    bufs_[output] = properly_strided_output.buf();
     const auto& tt = output->type()->expect<TensorType>();
     auto sizes = *tt->sizes().concrete_sizes();
     tensorOutputSizes_.push_back(sizes);

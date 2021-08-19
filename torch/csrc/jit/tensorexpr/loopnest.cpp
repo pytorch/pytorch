@@ -47,14 +47,14 @@ LoopNest::LoopNest(StmtPtr stmt, std::unordered_set<BufPtr> output_bufs)
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 LoopNest::LoopNest(
-    const std::vector<Tensor*>& output_tensors,
-    const std::vector<Tensor*>& tensors_to_compute) {
+    const std::vector<Tensor>& output_tensors,
+    const std::vector<Tensor>& tensors_to_compute) {
   initialize(output_tensors, tensors_to_compute);
   verify(root_stmt_);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-LoopNest::LoopNest(const std::vector<Tensor*>& output_tensors) {
+LoopNest::LoopNest(const std::vector<Tensor>& output_tensors) {
   initialize(output_tensors, output_tensors);
   verify(root_stmt_);
 }
@@ -486,15 +486,15 @@ bool LoopNest::vectorize(ForPtr f) {
 }
 
 void LoopNest::initialize(
-    const std::vector<Tensor*>& output_tensors,
-    const std::vector<Tensor*>& tensors_to_compute) {
+    const std::vector<Tensor>& output_tensors,
+    const std::vector<Tensor>& tensors_to_compute) {
   for (auto t : output_tensors) {
-    output_bufs_.insert(t->buf());
+    output_bufs_.insert(t.buf());
   }
 
   std::vector<StmtPtr> loops;
-  for (Tensor* t : tensors_to_compute) {
-    StmtPtr loop = t->stmt();
+  for (Tensor t : tensors_to_compute) {
+    StmtPtr loop = t.stmt();
     if (loop->get_parent()) {
       std::cerr << "Error: creating a loopnest from already used Tensors\n";
       loops = {};
@@ -2390,7 +2390,7 @@ void LoopNest::compressAllBuffers(StmtPtr stmt) {
   }
 }
 
-std::vector<ForPtr> LoopNest::getLoopStmtsFor(Tensor* t) const {
+std::vector<ForPtr> LoopNest::getLoopStmtsFor(Tensor t) const {
   StmtPtr cur_stmt = getLoopBodyFor(t);
   return getLoopStmtsFor(cur_stmt);
 }
@@ -2413,8 +2413,8 @@ std::vector<ForPtr> LoopNest::getLoopStmtsFor(StmtPtr s) const {
   return result;
 }
 
-StmtPtr LoopNest::getLoopBodyFor(Tensor* t) const {
-  return getLoopBodyFor(t->buf());
+StmtPtr LoopNest::getLoopBodyFor(Tensor t) const {
+  return getLoopBodyFor(t.buf());
 }
 
 StmtPtr LoopNest::getLoopBodyFor(BufPtr buf) const {
