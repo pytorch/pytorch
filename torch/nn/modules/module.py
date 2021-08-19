@@ -115,7 +115,8 @@ def register_module_backward_hook(
 ) -> RemovableHandle:
     r"""Registers a backward hook common to all the modules.
 
-    This function is deprecated in favor of :meth:`nn.module.register_module_full_backward_hook`
+    This function is deprecated in favor of
+    :func:`torch.nn.modules.module.register_module_full_backward_hook`
     and the behavior of this function will change in future versions.
 
     Returns:
@@ -144,13 +145,6 @@ def register_module_full_backward_hook(
         This adds global state to the `nn.module` module
         and it is only intended for debugging/profiling purposes.
 
-        The current implementation will not have the presented behavior
-        for complex :class:`Module` that perform many operations.
-        In some failure cases, :attr:`grad_input` and :attr:`grad_output` will only
-        contain the gradients for a subset of the inputs and outputs.
-        For such :class:`Module`, you should use :func:`torch.Tensor.register_hook`
-        directly on a specific input or output to get the required gradients.
-
     The hook will be called every time the gradients with respect to module
     inputs are computed. The hook should have the following signature::
 
@@ -163,6 +157,10 @@ def register_module_full_backward_hook(
     as positional arguments and all kwarg arguments will not appear in the hook. Entries
     in :attr:`grad_input` and :attr:`grad_output` will be ``None`` for all non-Tensor
     arguments.
+
+    For technical reasons, when this hook is applied to a Module, its forward function will
+    receive a view of each Tensor passed to the Module. Similarly the caller will receive a view
+    of each Tensor returned by the Module's forward function.
 
     Global hooks are called before hooks registered with `register_backward_hook`
 
@@ -247,23 +245,23 @@ class Module:
     training: bool
     _is_full_backward_hook: Optional[bool]
 
-    def __init__(self):
+    def __init__(self) -> None:
         """
         Initializes internal Module state, shared by both nn.Module and ScriptModule.
         """
         torch._C._log_api_usage_once("python.nn_module")
 
         self.training = True
-        self._parameters = OrderedDict()
-        self._buffers = OrderedDict()
-        self._non_persistent_buffers_set = set()
-        self._backward_hooks = OrderedDict()
+        self._parameters: Dict[str, Optional[Parameter]] = OrderedDict()
+        self._buffers: Dict[str, Optional[Tensor]] = OrderedDict()
+        self._non_persistent_buffers_set: Set[str] = set()
+        self._backward_hooks: Dict[int, Callable] = OrderedDict()
         self._is_full_backward_hook = None
-        self._forward_hooks = OrderedDict()
-        self._forward_pre_hooks = OrderedDict()
-        self._state_dict_hooks = OrderedDict()
-        self._load_state_dict_pre_hooks = OrderedDict()
-        self._modules = OrderedDict()
+        self._forward_hooks: Dict[int, Callable] = OrderedDict()
+        self._forward_pre_hooks: Dict[int, Callable] = OrderedDict()
+        self._state_dict_hooks: Dict[int, Callable] = OrderedDict()
+        self._load_state_dict_pre_hooks: Dict[int, Callable] = OrderedDict()
+        self._modules: Dict[str, Optional['Module']] = OrderedDict()
 
     forward: Callable[..., Any] = _forward_unimplemented
 
@@ -525,7 +523,7 @@ class Module:
 
         buffer: torch.Tensor = getattr(mod, buffer_name)
 
-        if buffer not in mod._buffers.values():
+        if buffer_name not in mod._buffers:
             raise AttributeError("`" + buffer_name + "` is not a buffer")
 
         return buffer
@@ -549,29 +547,32 @@ class Module:
                 return False
 
         for key, param in self._parameters.items():
-            if param is not None:
-                # Tensors stored in modules are graph leaves, and we don't want to
-                # track autograd history of `param_applied`, so we have to use
-                # `with torch.no_grad():`
-                with torch.no_grad():
-                    param_applied = fn(param)
-                should_use_set_data = compute_should_use_set_data(param, param_applied)
-                if should_use_set_data:
-                    param.data = param_applied
-                else:
-                    assert isinstance(param, Parameter)
-                    assert param.is_leaf
-                    self._parameters[key] = Parameter(param_applied, param.requires_grad)
+            if param is None:
+                continue
+            # Tensors stored in modules are graph leaves, and we don't want to
+            # track autograd history of `param_applied`, so we have to use
+            # `with torch.no_grad():`
+            with torch.no_grad():
+                param_applied = fn(param)
+            should_use_set_data = compute_should_use_set_data(param, param_applied)
+            if should_use_set_data:
+                param.data = param_applied
+                out_param = param
+            else:
+                assert isinstance(param, Parameter)
+                assert param.is_leaf
+                out_param = Parameter(param_applied, param.requires_grad)
+                self._parameters[key] = out_param
 
-                if param.grad is not None:
-                    with torch.no_grad():
-                        grad_applied = fn(param.grad)
-                    should_use_set_data = compute_should_use_set_data(param.grad, grad_applied)
-                    if should_use_set_data:
-                        param.grad.data = grad_applied
-                    else:
-                        assert param.grad.is_leaf
-                        self._parameters[key].grad = grad_applied.requires_grad_(param.grad.requires_grad)
+            if param.grad is not None:
+                with torch.no_grad():
+                    grad_applied = fn(param.grad)
+                should_use_set_data = compute_should_use_set_data(param.grad, grad_applied)
+                if should_use_set_data:
+                    out_param.grad.data = grad_applied
+                else:
+                    assert param.grad.is_leaf
+                    out_param.grad = grad_applied.requires_grad_(param.grad.requires_grad)
 
         for key, buf in self._buffers.items():
             if buf is not None:
@@ -760,12 +761,16 @@ class Module:
         This can be called as
 
         .. function:: to(device=None, dtype=None, non_blocking=False)
+           :noindex:
 
         .. function:: to(dtype, non_blocking=False)
+           :noindex:
 
         .. function:: to(tensor, non_blocking=False)
+           :noindex:
 
         .. function:: to(memory_format=torch.channels_last)
+           :noindex:
 
         Its signature is similar to :meth:`torch.Tensor.to`, but only accepts
         floating point or complex :attr:`dtype`\ s. In addition, this method will
@@ -898,6 +903,10 @@ class Module:
         as positional arguments and all kwarg arguments are ignored. Entries
         in :attr:`grad_input` and :attr:`grad_output` will be ``None`` for all non-Tensor
         arguments.
+
+        For technical reasons, when this hook is applied to a Module, its forward function will
+        receive a view of each Tensor passed to the Module. Similarly the caller will receive a view
+        of each Tensor returned by the Module's forward function.
 
         .. warning ::
             Modifying inputs or outputs inplace is not allowed when using backward hooks and
@@ -1265,13 +1274,24 @@ class Module:
                 destination = hook_result
         return destination
 
-    def _register_load_state_dict_pre_hook(self, hook):
+    def _register_load_state_dict_pre_hook(self, hook, with_module=False):
         r"""These hooks will be called with arguments: `state_dict`, `prefix`,
         `local_metadata`, `strict`, `missing_keys`, `unexpected_keys`,
         `error_msgs`, before loading `state_dict` into `self`. These arguments
         are exactly the same as those of `_load_from_state_dict`.
+
+        If ``with_module`` is ``True``, then the first argument to the hook is
+        an instance of the module.
+
+        Arguments:
+            hook (Callable): Callable hook that will be invoked before
+                loading the state dict.
+            with_module (bool, optional): Whether or not to pass the module
+                instance to the hook as the first parameter.
         """
         handle = hooks.RemovableHandle(self._load_state_dict_pre_hooks)
+        if with_module:
+            hook = functools.partial(hook, self)
         self._load_state_dict_pre_hooks[handle.id] = hook
         return handle
 

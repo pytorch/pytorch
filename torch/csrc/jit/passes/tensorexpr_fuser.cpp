@@ -4,6 +4,7 @@
 #include <ATen/core/interned_strings.h>
 #include <ATen/record_function.h>
 #include <c10/util/FunctionRef.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/jit_log.h>
@@ -28,7 +29,6 @@ C10_DEFINE_bool(
 namespace torch {
 namespace jit {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static bool texpr_reductions_enabled = false;
 
 bool isSupportedForBlock(Node* node) {
@@ -249,9 +249,7 @@ bool isSupported(Node* node) {
 
 } // namespace tensorexpr
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static bool texpr_fuser_enabled_ = true;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static bool texpr_parallel_cpu_enabled = false;
 
 bool texprParallelCPUEnabled() {
@@ -495,7 +493,7 @@ class TensorExprFuser {
     auto inputs = fusion_group->inputs();
     auto sinputs = subgraph->inputs();
     AT_ASSERT(inputs.size() == sinputs.size());
-    for (size_t i = 0; i < inputs.size(); ++i) {
+    for (const auto i : c10::irange(inputs.size())) {
       if (inputs[i]->type()->isSubtypeOf(TensorType::get())) {
         Value* soutput = graph->insert(aten::size, {inputs[i]});
         aliasDb_->createValue(soutput);
@@ -515,7 +513,7 @@ class TensorExprFuser {
     auto outputs = fusion_group->outputs();
     auto soutputs = subgraph->outputs();
     AT_ASSERT(outputs.size() == soutputs.size());
-    for (size_t i = 0; i < outputs.size(); ++i) {
+    for (const auto i : c10::irange(outputs.size())) {
       if (usedOnlyInSize(outputs[i]))
         continue;
       Value* soutput = graph->insert(aten::size, {outputs[i]});
@@ -743,7 +741,7 @@ class TensorExprFuser {
     Node* prev_fusion_group =
         initial_fusion_groups.size() ? initial_fusion_groups[0] : nullptr;
 
-    for (size_t i = 1; i < initial_fusion_groups.size(); ++i) {
+    for (const auto i : c10::irange(1, initial_fusion_groups.size())) {
       // Try merging the just created fusion group into the previous one.
       // If it did not work, then put the previous fusion group into
       // fusion_groups vector - we will not touch it anymore in this loop.
@@ -972,9 +970,12 @@ class TensorExprFuser {
           return false;
         }
 
-        // Float16 has a few kinks on LLVM.  Disable it until we either move to
-        // a more stable version or find workarounds.
-        if (*st == c10::ScalarType::Half && *device == c10::kCPU) {
+        // Float16 support has some issues (see e.g. #61336 and #61382), so for
+        // now it's disabled. There seem to be some problems in HalfRewriter,
+        // but on top of that Float16 has a few kinks on LLVM.  Thus, on CPU we
+        // additionally disable it until we either move to a more stable version
+        // or find workarounds.
+        if (*st == c10::ScalarType::Half) {
           return false;
         }
 
@@ -1303,7 +1304,6 @@ Operation createTensorExprOp(const Node* node) {
   };
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators TensorExprOps({
     torch::jit::Operator(
         prim::TensorExprGroup,
