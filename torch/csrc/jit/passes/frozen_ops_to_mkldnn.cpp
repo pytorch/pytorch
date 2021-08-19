@@ -661,7 +661,7 @@ void moveConvWeightsToMKLDNN(Node* conv) {
   }
   replaceInputWithMKLDNNTensor(conv, "weight", conv_w_mkldnn);
 
-  if (conv->namedInput("bias")->type() != NoneType::get()) {
+  if (conv->namedInput("bias")->type()->cast<TensorType>() != nullptr) {
     replaceInputWithMKLDNNTensor(conv, "bias");
   }
 }
@@ -969,8 +969,8 @@ class MKLDNNSubgraphSlicer {
 
     if (n->matches(
             "aten::layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> Tensor") &&
-        n->namedInput("weight")->type() != NoneType::get() &&
-        n->namedInput("bias")->type() != NoneType::get()) {
+        n->namedInput("weight")->type()->cast<TensorType>() != nullptr &&
+        n->namedInput("bias")->type()->cast<TensorType>() != nullptr) {
       auto norm_shape =
           constant_as<std::vector<int64_t>>(n->namedInput("normalized_shape"));
       return norm_shape.has_value() && norm_shape->size() == 1;
