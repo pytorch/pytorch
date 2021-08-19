@@ -1,19 +1,21 @@
 # @generated DO NOT EDIT MANUALLY
 # Template is at:    .github/templates/windows_ci_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
-name: periodic-win-vs2019-cuda11-cudnn8-py3
+name: win-vs2019-cuda11.1-py3
 
 on:
   pull_request:
     types: [unassigned]
-  schedule:
-    - cron: 45 0,4,8,12,16,20 * * *
+  push:
+    branches:
+      - master
+      - release/*
   workflow_dispatch:
 
 env:
-  BUILD_ENVIRONMENT: periodic-win-vs2019-cuda11-cudnn8-py3
+  BUILD_ENVIRONMENT: win-vs2019-cuda11.1-py3
   BUILD_WHEEL: 1
-  CUDA_VERSION: "11.3"
+  CUDA_VERSION: "11.1"
   IN_CI: 1
   INSTALL_WINDOWS_SDK: 1
   PYTHON_VERSION: "3.8"
@@ -28,13 +30,13 @@ env:
   USE_CUDA: 1
 
 concurrency:
-  group: periodic-win-vs2019-cuda11-cudnn8-py3-${{ github.event.pull_request.number || github.sha }}
+  group: win-vs2019-cuda11.1-py3-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 
 jobs:
   ciflow_should_run:
     runs-on: ubuntu-18.04
-    if: ${{ (github.event_name != 'pull_request') || (github.event.action !='unassigned') || (github.event.action == 'unassigned' && contains(github.event.pull_request.labels.*.name, 'ciflow/scheduled')) }}
+    if: ${{ (github.event_name != 'pull_request') || (github.event.action !='unassigned') || (contains(github.event.pull_request.labels.*.name, 'ciflow/cuda') || contains(github.event.pull_request.labels.*.name, 'ciflow/win')) }}
     steps:
       - name: noop
         run: echo running ciflow_should_run
@@ -46,7 +48,7 @@ jobs:
         working-directory: pytorch-${{ github.run_id }}
     needs: [ciflow_should_run]
     env:
-      JOB_BASE_NAME: periodic-win-vs2019-cuda11-cudnn8-py3-build
+      JOB_BASE_NAME: win-vs2019-cuda11.1-py3-build
       http_proxy: "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128"
       https_proxy: "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128"
     steps:
@@ -130,7 +132,7 @@ jobs:
 
   test:
     env:
-      JOB_BASE_NAME: periodic-win-vs2019-cuda11-cudnn8-py3-test
+      JOB_BASE_NAME: win-vs2019-cuda11.1-py3-test
       SHARD_NUMBER: ${{ matrix.shard }}
       NUM_TEST_SHARDS: ${{ matrix.num_shards }}
       TEST_CONFIG: ${{ matrix.config }}
@@ -273,7 +275,7 @@ jobs:
         env:
           AWS_DEFAULT_REGION: us-east-1
           CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          JOB_BASE_NAME: periodic-win-vs2019-cuda11-cudnn8-py3-test
+          JOB_BASE_NAME: win-vs2019-cuda11.1-py3-test
           CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
           CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           CIRCLE_TAG: ${{ steps.parse-ref.outputs.tag }}
