@@ -5,7 +5,7 @@ from torch._torch_docs import common_args, multi_dim_common
 __all__ = ['entr', 'psi', 'digamma', 'gammaln', 'polygamma', 'erf', 'erfc', 'erfinv',
            'erfcx', 'logit', 'logsumexp', 'expit', 'exp2', 'expm1', 'xlog1py', 'xlogy',
            'i0', 'i0e', 'i1', 'i1e', 'ndtr', 'ndtri', 'log1p', 'sinc', 'round', 'log_softmax',
-           'zeta', 'multigammaln']
+           'zeta', 'multigammaln', 'gammainc', 'gammaincc']
 
 Tensor = torch.Tensor
 
