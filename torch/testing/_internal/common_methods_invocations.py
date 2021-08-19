@@ -2314,10 +2314,12 @@ def sample_inputs_layer_norm(opinfo, device, dtype, requires_grad, **kwargs):
         yield SampleInput(make_arg((1, 2)), args=((2,),))
 
         # TODO: @krshrimali, once to_numpy method in SampleInput class is modified to take None inputs,
-        # enable these inputs # With weight and a `None` bias
+        # enable these inputs; see https://github.com/pytorch/pytorch/pull/63276#discussion_r691950400
+
+        # With weight and a `None` bias
         # yield SampleInput(make_arg((1, 2)), args=((2,), make_arg((2,)), None))
 
-        # With bias and a `None` weight
+        # With `None` weight and bias (tests failing for this, see the link above)
         # yield SampleInput(make_arg((1, 2)), args=((2,), None, make_arg((2,))))
 
     return list(generator())
