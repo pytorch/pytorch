@@ -566,7 +566,7 @@ void raw_miopen_convolution_forward_out(
   args.handle = getMiopenHandle();
   setConvolutionParams(&args.params, args.handle, input, weight, padding, stride, dilation, groups, deterministic);
   args.idesc.set(input);
-  args.wdesc.set(weight);
+  args.wdesc.set(weight, input.suggest_memory_format(), 0);
   args.odesc.set(output);
   args.cdesc.set(dataType, c_mode, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups);
 
@@ -593,10 +593,26 @@ Tensor miopen_convolution_forward(
   checkAllSameType(c, {input, weight});
   checkAllSameGPU(c, {input, weight});
 
+  auto memory_format = at::MemoryFormat::Contiguous;
+  if (miopen_conv_use_channels_last(*input, *weight)) {
+    memory_format = (weight->ndimension() == 5) ? /*at::MemoryFormat::ChannelsLast3d*/at::MemoryFormat::Contiguous : at::MemoryFormat::ChannelsLast;
+  }
+
+  auto output_t = at::native::empty_cuda(
+                    conv_output_size(input->sizes(), weight->sizes(),
+                                     padding, stride, dilation),
+                    /*dtype=*/input->scalar_type(),
+                    /*layout=*/c10::nullopt,
+                    /*device=*/kCUDA,
+                    /*pin_memory=*/c10::nullopt,
+                    /*memory_format=*/memory_format);
+
+/*    
   auto output_t = at::empty(
                     conv_output_size(input->sizes(), weight->sizes(),
                                      padding, stride, dilation),
                     input->options());
+*/
 
   if (output_t.numel() == 0) {
     return output_t;
@@ -607,7 +623,14 @@ Tensor miopen_convolution_forward(
   convolution_shape_check(c, input, weight, output, padding, stride, dilation, groups);
 
   // See #4500
-  Tensor weight_contig = weight->contiguous();
+  Tensor weight_contig = weight->contiguous(memory_format);
+  /* TODO from cudnn/ConvShared? 
+  // Make sure that NC11 strides follow formula
+  weight_contig.resize_(weight_contig.sizes(), memory_format);
+  Tensor input_contig = input->contiguous(memory_format);
+  input_contig.resize_(input_contig.sizes(), memory_format);
+  */
+
 
   raw_miopen_convolution_forward_out(
       *output, *input, weight_contig,

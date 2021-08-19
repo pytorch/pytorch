@@ -106,10 +106,14 @@ std::ostream& operator<<(std::ostream & out, const TensorDescriptor& d);
 class FilterDescriptor
   : public Descriptor<miopenTensorDescriptor,
                       &miopenCreateTensorDescriptor,
-                      &miopenDestroyTensorDescriptor>
+                      &miopenDestroyTensorDescriptor> 
 {
-public:
-  void set(const at::Tensor &t, int64_t pad = 0);
+ public:
+  void set(const at::Tensor &t, int64_t pad = 0) {
+    set(t, at::MemoryFormat::Contiguous, pad);
+  }
+
+  void set(const at::Tensor &t, const at::MemoryFormat memory_format, int64_t pad = 0);
 
 private:
   void set(miopenDataType_t dataType, int dim, int* size, int* stride) {

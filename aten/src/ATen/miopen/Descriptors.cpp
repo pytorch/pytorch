@@ -88,7 +88,7 @@ std::ostream& operator<<(std::ostream & out, const TensorDescriptor& d) {
 
 void TensorDescriptor::print() { std::cout << *this; }
 
-void FilterDescriptor::set(const at::Tensor &t, int64_t pad) {
+void FilterDescriptor::set(const at::Tensor &t, const at::MemoryFormat memory_format, int64_t pad) {
   auto dim = t.ndimension();
   if (dim > MIOPEN_DIM_MAX || pad > MIOPEN_DIM_MAX)
 #define _STR(X) #X
@@ -96,9 +96,9 @@ void FilterDescriptor::set(const at::Tensor &t, int64_t pad) {
     throw std::runtime_error("MIOpen supports only up to " STR(MIOPEN_DIM_MAX) " dimensions");
 #undef _STR
 #undef STR
-  if (!t.is_contiguous()) {
-    throw std::runtime_error("MIOpen filters (a.k.a. weights) must be contiguous");
-  }
+  TORCH_CHECK(t.is_contiguous(memory_format),
+      "MIOpen filters (a.k.a. weights) must be contiguous");
+
   int size[MIOPEN_DIM_MAX];
   int stride[MIOPEN_DIM_MAX];
   for (int i = 0; i < dim; ++i) {
@@ -107,9 +107,18 @@ void FilterDescriptor::set(const at::Tensor &t, int64_t pad) {
   for (int i = dim; i < pad; ++i) {
     size[i] = (int) 1;
   }
-  for (int i = dim - 1; i >=0; --i) {
-    stride[i] = (i == dim - 1) ? 1 : stride[i+1] * size[i+1];
+  if( memory_format != at::MemoryFormat::ChannelsLast ) {
+      for (int i = dim - 1; i >=0; --i) {
+        stride[i] = (i == dim - 1) ? 1 : stride[i+1] * size[i+1];
+      }
   }
+  else {
+      // ChannelsLast
+      for (int i = 0 ; i < dim; i++ ) {
+          stride[i] = t.stride(i);
+      }
+  }
+
   dim = std::max(dim, pad);
   set(getDataType(t), (int) dim, size, stride);
 }
