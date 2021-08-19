@@ -6,15 +6,16 @@
 namespace at {
 namespace native {
 
+using forward_softmax_fn = void (*)(const Tensor&, const Tensor&, const bool);
 using forward_fn = void (*)(const Tensor&, const Tensor&);
 using backward_fn = void(*)(const Tensor &, const Tensor &, const Tensor&);
 
-DECLARE_DISPATCH(forward_fn, softmax_lastdim_kernel);
+DECLARE_DISPATCH(forward_softmax_fn, softmax_lastdim_kernel);
 DECLARE_DISPATCH(forward_fn, log_softmax_lastdim_kernel);
 DECLARE_DISPATCH(backward_fn, softmax_backward_lastdim_kernel);
 DECLARE_DISPATCH(backward_fn, log_softmax_backward_lastdim_kernel);
 
-using forward_fn_with_dim = void(*)(const Tensor &, const Tensor &, const int64_t);
+using forward_fn_with_dim = void(*)(const Tensor &, const Tensor &, const int64_t, const bool);
 DECLARE_DISPATCH(forward_fn_with_dim, softmax_kernel);
 
 }

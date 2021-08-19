@@ -4135,7 +4135,7 @@ TEST(NVFuserTest, FusionSoftmax1D_CUDA) {
   fe.compileFusion(&fusion);
   fe.runFusion({t0}, {cg_output});
 
-  auto t2 = at::_softmax(t0, -1, false);
+  auto t2 = at::_softmax(t0, -1, false, false);
   TORCH_CHECK(
       t2.allclose(cg_output, 1e-5, 1e-5),
       "Error of: ",
@@ -4206,7 +4206,7 @@ TEST(NVFuserTest, FusionSoftmax1DNormalized_CUDA) {
   fe.compileFusion(&fusion);
   auto outputs = fe.runFusion({t0});
 
-  auto t2 = at::_softmax(t0, -1, false);
+  auto t2 = at::_softmax(t0, -1, false, false);
   TORCH_CHECK(
       t2.allclose(outputs[0], 1e-5, 1e-5),
       "Error of: ",
@@ -4267,7 +4267,7 @@ TEST(NVFuserTest, FusionSoftmax3D_CUDA) {
   fe.compileFusion(&fusion);
   fe.runFusion({t0}, {cg_output});
 
-  auto t2 = at::_softmax(t0, -1, false);
+  auto t2 = at::_softmax(t0, -1, false, false);
   TORCH_CHECK(
       t2.allclose(cg_output, 1e-5, 1e-5),
       "Error of: ",
@@ -4343,7 +4343,7 @@ TEST(NVFuserTest, FusionSoftmax3DNormalized_CUDA) {
   fe.compileFusion(&fusion);
   auto outputs = fe.runFusion({t0});
 
-  auto t2 = at::_softmax(t0, -1, false);
+  auto t2 = at::_softmax(t0, -1, false, false);
   TORCH_CHECK(
       t2.allclose(outputs[0], 1e-5, 1e-5),
       "Error of: ",
@@ -5974,7 +5974,7 @@ TEST(NVFuserTest, FusionSmemDynamicPersistentSoftmax2D_CUDA) {
   fe.compileFusion(&fusion);
   auto outputs = fe.runFusion({t0, 128});
 
-  auto t1 = at::_softmax(t0, -1, false);
+  auto t1 = at::_softmax(t0, -1, false, false);
   TORCH_CHECK(
       t1.allclose(outputs[0], 1e-5, 1e-5),
       "Error of: ",
@@ -6094,7 +6094,7 @@ TEST(NVFuserTest, FusionPersistentSoftmaxLocalSmem_CUDA) {
   auto outputs =
       fe.runFusion({static_in, dynamic_in}, {static_out, dynamic_out});
 
-  auto t1 = at::_softmax(in, -1, false);
+  auto t1 = at::_softmax(in, -1, false, false);
   TORCH_CHECK(
       t1.allclose(out, 1e-5, 1e-5), "Error of: ", t1.sub(out).abs().max());
 }

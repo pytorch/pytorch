@@ -195,7 +195,7 @@ bool isSupported(Node* node) {
   static const OperatorSet supported_reduction_set{
       "aten::sum(Tensor self, *, ScalarType? dtype=None) -> Tensor",
       "aten::sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor",
-      "aten::softmax.int(Tensor self, int dim , ScalarType? dtype=None) -> Tensor",
+      "aten::softmax.int(Tensor self, int dim , ScalarType? dtype=None, bool _zero_if_all_neg_inf=False) -> Tensor",
       "aten::log_softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor",
   };
   static const OperatorSet supported_misc_set{

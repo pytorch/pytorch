@@ -3857,18 +3857,18 @@
   variants: function, method
 
 # softmax allows positional dtype, unlike most operators, because kwonly is BC-breaking when loading jit models.
-- func: softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
+- func: softmax.int(Tensor self, int dim, ScalarType? dtype=None, bool _zero_if_all_neg_inf=False) -> Tensor
   variants: function, method
 
-- func: softmax.Dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
+- func: softmax.Dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None, bool _zero_if_all_neg_inf=False) -> Tensor
   variants: function, method
 
-- func: _softmax(Tensor self, int dim, bool half_to_float) -> Tensor
+- func: _softmax(Tensor self, int dim, bool half_to_float, bool _zero_if_all_neg_inf) -> Tensor
   structured_delegate: _softmax.out
   dispatch:
     MkldnnCPU: mkldnn_softmax
 
-- func: _softmax.out(Tensor self, int dim, bool half_to_float, *, Tensor(a!) out) -> Tensor(a!)
+- func: _softmax.out(Tensor self, int dim, bool half_to_float, bool _zero_if_all_neg_inf, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
   dispatch:
     CPU: softmax_cpu_out

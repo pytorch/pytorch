@@ -1675,7 +1675,7 @@
 - name: rrelu_with_noise_(Tensor(a!) self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor(a!)
   self: rrelu_with_noise_backward(grad, result, noise, lower, upper, training, true)
 
-- name: _softmax(Tensor self, int dim, bool half_to_float) -> Tensor
+- name: _softmax(Tensor self, int dim, bool half_to_float, bool _zero_if_all_neg_inf) -> Tensor
   self: _softmax_backward_data(grad, result, dim, self)
 
 - name: _sparse_softmax(Tensor self, int dim, bool half_to_float) -> Tensor

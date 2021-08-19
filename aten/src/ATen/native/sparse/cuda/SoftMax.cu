@@ -385,7 +385,7 @@ void cuda_sparse_coo_softmax(
           at::cuda::_log_softmax(values, dim - sparse_dim + 1, false);
       out_values.set_(new_values);
     } else {
-      auto new_values = at::cuda::_softmax(values, dim - sparse_dim + 1, false);
+      auto new_values = at::cuda::_softmax(values, dim - sparse_dim + 1, false, false);
       out_values.set_(new_values);
     }
     return;

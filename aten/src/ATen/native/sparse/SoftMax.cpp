@@ -293,7 +293,7 @@ void cpu_sparse_coo_softmax(Tensor output, const Tensor& input, const int64_t di
           at::cpu::_log_softmax(values, dim - sparse_dim + 1, false);
       out_values.set_(new_values);
     } else {
-      auto new_values = at::cpu::_softmax(values, dim - sparse_dim + 1, false);
+      auto new_values = at::cpu::_softmax(values, dim - sparse_dim + 1, false, false);
       out_values.set_(new_values);
     }
     return;

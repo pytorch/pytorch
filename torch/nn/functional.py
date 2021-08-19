@@ -1647,7 +1647,7 @@ def softmin(input: Tensor, dim: Optional[int] = None, _stacklevel: int = 3, dtyp
     return ret
 
 
-def softmax(input: Tensor, dim: Optional[int] = None, _stacklevel: int = 3, dtype: Optional[int] = None) -> Tensor:
+def softmax(input: Tensor, dim: Optional[int] = None, _stacklevel: int = 3, dtype: Optional[int] = None, _zero_if_all_neg_inf: bool = False) -> Tensor:
     r"""Applies a softmax function.
 
     Softmax is defined as:
@@ -1677,9 +1677,9 @@ def softmax(input: Tensor, dim: Optional[int] = None, _stacklevel: int = 3, dtyp
     if dim is None:
         dim = _get_softmax_dim("softmax", input.dim(), _stacklevel)
     if dtype is None:
-        ret = input.softmax(dim)
+        ret = input.softmax(dim, _zero_if_all_neg_inf=_zero_if_all_neg_inf)
     else:
-        ret = input.softmax(dim, dtype=dtype)
+        ret = input.softmax(dim, dtype=dtype, _zero_if_all_neg_inf=_zero_if_all_neg_inf)
     return ret
 
 
@@ -4840,7 +4840,7 @@ def _scaled_dot_product_attention(
     attn = torch.bmm(q, k.transpose(-2, -1))
     if attn_mask is not None:
         attn += attn_mask
-    attn = softmax(attn, dim=-1)
+    attn = softmax(attn, dim=-1, _zero_if_all_neg_inf=True)
     if dropout_p > 0.0:
         attn = dropout(attn, p=dropout_p)
     # (B, Nt, Ns) x (B, Ns, E) -> (B, Nt, E)

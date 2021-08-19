@@ -62,7 +62,7 @@ __device__ __forceinline__ void warp_reduce(acc_t* sum) {
 // input_t=half,  acc_t=float, output_t=float => read half tensor, float accumulators, write float tensor.
 // input_t_float, acc_t=float, output_t=half  => read float tensor, float accumulators, write half tensor.
 
-template <typename input_t, typename output_t, typename acc_t, int log2_elements, bool is_log_softmax>
+template <typename input_t, typename output_t, typename acc_t, int log2_elements, bool is_log_softmax, bool _zero_if_all_neg_inf>
 __global__ void softmax_warp_forward(output_t *dst, const input_t *src, int batch_size, int stride, int element_count)
 {
     // WARP_SIZE and WARP_BATCH must match the return values batches_per_warp and warp_size of method warp_softmax_forward_kernel.
@@ -144,7 +144,11 @@ __global__ void softmax_warp_forward(output_t *dst, const input_t *src, int batc
                 if (is_log_softmax) {
                     dst[i*element_count+it*WARP_SIZE] = elements[i][it] - max_value[i] - sum[i];
                 } else {
-                    dst[i*element_count+it*WARP_SIZE] = elements[i][it] / sum[i];
+                    if (_zero_if_all_neg_inf && max_value[i] == -std::numeric_limits<acc_t>::infinity()) {
+                        dst[i*element_count+it*WARP_SIZE] = 0.0;
+                    } else {
+                        dst[i*element_count+it*WARP_SIZE] = elements[i][it] / sum[i];
+                    }
                 }
             } else {
                 break;
@@ -234,7 +238,7 @@ __global__ void softmax_warp_backward(output_t *gradInput, const input_t *grad, 
 
 } // end of anonymous namespace
 
-template<typename input_t, typename output_t, typename acc_t, bool is_log_softmax>
+template<typename input_t, typename output_t, typename acc_t, bool is_log_softmax, bool _zero_if_all_neg_inf>
 void dispatch_softmax_forward(output_t *dst, const input_t *src, int softmax_elements, int softmax_elements_stride, int batch_count)
 {
     TORCH_INTERNAL_ASSERT( softmax_elements >= 0 && softmax_elements <= 1024 );
@@ -260,7 +264,7 @@ void dispatch_softmax_forward(output_t *dst, const input_t *src, int softmax_ele
         // Launch code would be more elegant if C++ supported FOR CONSTEXPR
         switch (log2_elements) {
             #define LAUNCH_SOFTMAX_WARP_FORWARD(L2E) case L2E:                    \
-            softmax_warp_forward<input_t, output_t, acc_t, L2E, is_log_softmax>   \
+            softmax_warp_forward<input_t, output_t, acc_t, L2E, is_log_softmax, _zero_if_all_neg_inf>   \
                 <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(dst,   \
                     src, batch_count, softmax_elements_stride, softmax_elements); \
             C10_CUDA_KERNEL_LAUNCH_CHECK();                                       \

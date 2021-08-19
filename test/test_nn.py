@@ -12874,6 +12874,57 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(gx_expect, gx_actual)
         self.assertEqual(gy_expect, gy_actual)
 
+    @dtypes(torch.float, torch.double, torch.bfloat16)
+    def test_softmax_zero_if_all_neg_inf(self, device, dtype):
+        # softmax with dim=-1
+        input = torch.tensor([
+            [0.3, 0.7],
+            [float('-inf'), float('-inf')]], device=device, dtype=dtype)
+        output_with_neg_inf = F.softmax(input, dim=-1)
+        assert torch.all(torch.isnan(output_with_neg_inf[1]))
+
+        nan_mask = torch.isnan(output_with_neg_inf)
+        output_with_neg_inf[nan_mask] = 0
+
+        # private flag will rows with `-inf` to be 0
+        output_with_flag = F.softmax(input, dim=-1, _zero_if_all_neg_inf=True)
+        self.assertEqual(output_with_flag, output_with_neg_inf)
+
+        # softmax with dim=0
+        input = torch.tensor([
+            [0.3, float('-inf')],
+            [0.7, float('-inf')]], device=device, dtype=dtype)
+        output_with_neg_inf = F.softmax(input, dim=0)
+        assert torch.all(torch.isnan(output_with_neg_inf[:, 1]))
+
+        nan_mask = torch.isnan(output_with_neg_inf)
+        output_with_neg_inf[nan_mask] = 0
+        # private flag cols with `-inf` to be 0
+        output_with_flag = F.softmax(input, dim=0, _zero_if_all_neg_inf=True)
+        self.assertEqual(output_with_flag, output_with_neg_inf)
+
+        input = torch.tensor([
+            [float('-inf')],
+            [float('-inf')]], device=device, dtype=dtype)
+        output_with_flag = F.softmax(input, dim=0, _zero_if_all_neg_inf=True)
+        self.assertEqual(output_with_flag, torch.zeros((2, 1), device=device, dtype=dtype))
+
+    @dtypes(torch.float, torch.double, torch.bfloat16)
+    def test_multiheadattention_complete_masked(self, device, dtype):
+        # Non-regression test for https://github.com/pytorch/pytorch/issues/41508
+        x = torch.rand(2, 2, 1, device=device, dtype=dtype)
+        key_padding_mask = torch.tensor(
+            [[False, False],
+            [True, True]], dtype=torch.bool, device=device)
+        attn_mask = torch.tensor([[ 0., float('-inf')],
+                                  [ 0., 0.]], device=device, dtype=dtype)
+        attn = nn.MultiheadAttention(embed_dim=1, num_heads=1, dtype=dtype, device=device)
+        output, scores = attn(
+            x, x, x, key_padding_mask=key_padding_mask, attn_mask=attn_mask)
+
+        assert not torch.any(torch.isnan(output))
+        assert not torch.any(torch.isnan(scores))
+
     def test_Dropout(self, device):
         input = torch.empty(1000)
         self._test_dropout(nn.Dropout, device, input)
