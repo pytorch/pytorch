@@ -425,6 +425,20 @@ Tensor conv2d_clamp_run(
   return op_context->run(input);
 }
 
+std::tuple<IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t>
+unpack_prepacked_sizes_conv2d(
+    const c10::intrusive_ptr<xnnpack::Conv2dOpContext>& op_context) {
+  const auto tuple = op_context->unpack();
+  const auto bias = std::get<1>(tuple);
+  return std::make_tuple(
+      std::get<0>(tuple).sizes(),
+      bias ? bias->sizes() : std::vector<int64_t>(),
+      std::get<2>(tuple),
+      std::get<3>(tuple),
+      std::get<4>(tuple),
+      std::get<5>(tuple));
+}
+
 Tensor conv2d_transpose_clamp_run(
     const Tensor& input,
     const c10::intrusive_ptr<xnnpack::TransposeConv2dOpContext>& op_context) {
