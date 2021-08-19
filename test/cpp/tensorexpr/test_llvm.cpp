@@ -1642,7 +1642,7 @@ TEST(LLVM, CompositeParallel) {
         [=](const VarHandle& m, const VarHandle& n) {
           return t3->load(m, n) + m + n;
         });
-    LoopNest loop_nest({t4}, {t1, t2, t3, t4});
+    LoopNest loop_nest(std::vector<Tensor*>({t4}), {t1, t2, t3, t4});
     std::vector<ForPtr> loop_list;
     {
       auto const& loops = loop_nest.getLoopStmtsFor(t1);
