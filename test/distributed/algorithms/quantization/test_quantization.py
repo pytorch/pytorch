@@ -25,7 +25,7 @@ def _build_tensor(size, value=None, dtype=torch.float, device_id=None):
 class DistQuantizationTests(TestDistBackend, DistributedTest._DistTestBase):
     def setUp(self):
         super().setUp()
-        self._fork_processes()
+        self._spawn_processes()
 
     @requires_gloo()
     @sandcastle_skip_if(BACKEND != "gloo", "Only gloo backend supports all_gather_fp16")
