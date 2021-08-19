@@ -25,6 +25,13 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm_backward(
   TORCH_CHECK(false, "mkldnn_batch_norm_backward: ATen not compiled with MKLDNN support");
 }
 
+std::tuple<Tensor, Tensor, Tensor> mkldnn_layer_norm_last_index_weight_bias_f32(
+    const Tensor& input,
+    IntArrayRef normalized_shape, const Tensor& weight, const Tensor& bias,
+    double eps) {
+  TORCH_CHECK(false, "mkldnn_layer_norm_last_index_weight_bias_f32: ATen not compiled with MKLDNN support");
+}
+
 } // namespace native
 } // namespace at
 
@@ -32,9 +39,53 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm_backward(
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
+#include <ATen/native/layer_norm.h>
+#include <ideep/abstract_types.hpp>
 
 namespace at {
 namespace native {
+
+std::tuple<Tensor, Tensor, Tensor> mkldnn_layer_norm_last_index_weight_bias_f32(
+    const Tensor& input,
+    IntArrayRef normalized_shape, const Tensor& weight, const Tensor& bias,
+    double eps) {
+
+  TORCH_INTERNAL_ASSERT(normalized_shape.size() == 1, "only accept shapes with the last dimension");
+  TORCH_INTERNAL_ASSERT(input.scalar_type() == at::kFloat);
+  auto M_N = at::native::_check_layer_norm_inputs(input, normalized_shape, weight, bias);
+  auto M = M_N.first;
+
+  auto mean = empty_mkldnn(
+        {M},
+        input.scalar_type(),
+        input.options().layout_opt(),
+        input.options().device_opt(),
+        input.options().pinned_memory_opt());
+  auto rstd = empty_mkldnn(
+        {M},
+        input.scalar_type(),
+        input.options().layout_opt(),
+        input.options().device_opt(),
+        input.options().pinned_memory_opt());
+
+  auto mean_it = at::native::itensor_from_mkldnn(mean);
+  auto rstd_it = at::native::itensor_from_mkldnn(rstd);
+
+  auto input_it = at::native::itensor_from_mkldnn(input);
+  auto weight_it = at::native::itensor_from_mkldnn(weight);
+  auto bias_it = at::native::itensor_from_mkldnn(bias);
+
+  auto out_it = ideep::tensor(input_it.get_desc());
+  ideep::layer_normalization_forward::compute(input_it, weight_it, bias_it, out_it, mean_it, rstd_it, static_cast<float>(eps));
+
+  auto dst = at::native::new_with_itensor_mkldnn(
+      std::move(out_it),
+      optTypeMetaToScalarType(input.options().dtype_opt()),
+      input.options().device_opt());
+
+  return std::make_tuple(dst, mean, rstd);
+}
+
 
 std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
     const Tensor& input, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt, const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt,

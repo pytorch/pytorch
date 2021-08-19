@@ -1,10 +1,17 @@
 #pragma once
 
 #include <c10/util/ArrayRef.h>
+#include <ATen/ATen.h>
 #include <vector>
 #include <cpuinfo.h>
 
+
 namespace at { namespace native {
+
+std::tuple<Tensor, Tensor, Tensor> mkldnn_layer_norm_last_index_weight_bias_f32(
+    const Tensor& input,
+    IntArrayRef normalized_shape, const Tensor& weight, const Tensor& bias,
+    double eps);
 
 std::vector<int64_t> pool_output_sizes(
     IntArrayRef input_size,
