@@ -690,12 +690,24 @@ void Block::reIndexTopology() {
   }
 }
 
+bool foo(Block* block) {
+    for (Node* n : block->nodes()) {
+      if (n->kind() == prim::WidenToUnion) {
+        return true;
+      }
+    }
+  return false;
+}
+
 void Block::cloneFrom(Block* src, std::function<Value*(Value*)> value_map) {
   std::unordered_map<Value*, Value*> local_map;
   auto env = [&](Value* v) {
     auto it = local_map.find(v);
     if (it != local_map.end()) {
       return it->second;
+    }
+    if (foo(src)) {
+      int x = 5;
     }
     return value_map(v);
   };
@@ -737,6 +749,7 @@ void Block::destroy() {
 std::shared_ptr<Graph> Graph::copy() {
   auto new_g = std::make_shared<Graph>();
   auto env = [](Value* v) -> Value* {
+    int s = 5;
     AT_ERROR(
         "Graph::copy() encountered a use of a value " + v->debugName() +
         " not in scope. Run lint!");

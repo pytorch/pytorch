@@ -663,7 +663,19 @@ class TestUnion(JitTestCase):
                 x.append(torch.tensor(3))
             return x
 
-        self.checkScript(fn, ())
+        scripted = torch.jit.script(fn)
+        print(scripted.graph)
+        print("\n\n")
+        print(scripted.code)
+        scripted()
+        buffer1 = io.BytesIO()
+        torch.jit.save(scripted, buffer1)
+        buffer_copy = buffer1.getvalue()
+        buffer2 = io.BytesIO(buffer_copy)
+        loaded = torch.jit.load(buffer2)
+        print(loaded.graph)
+        loaded()
+        #self.checkScript(fn, ())
 
     def test_union_with_list_comprehension(self):
         def fn():

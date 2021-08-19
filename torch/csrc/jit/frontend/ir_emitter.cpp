@@ -631,6 +631,27 @@ struct WithLoopStatus {
   LoopStatus prev_value_;
 };
 
+void removeWidenToUnionNodes(std::shared_ptr<Graph>& graph) {
+  std::stack<Block*> blocks_to_visit;
+  blocks_to_visit.push(graph->block());
+  while (!blocks_to_visit.empty()) {
+    Block* block = blocks_to_visit.top();
+    blocks_to_visit.pop();
+    auto it = block->nodes().begin();
+    while (it != block->nodes().end()) {
+      auto n = *it;
+      it++;
+      for (Block* subblock : n->blocks()) {
+        blocks_to_visit.push(subblock);
+      }
+      if (n->kind() == prim::WidenToUnion) {
+        n->output()->replaceAllUsesWith(n->input());
+        n->destroy();
+      }
+    }
+  }
+}
+
 struct to_ir {
   to_ir(
       const Def& def,
@@ -653,6 +674,8 @@ struct to_ir {
           << "methods must have a self argument";
     }
     method.setSchema(emitDef(def, self, graph->block()));
+
+    removeWidenToUnionNodes(graph);
 
     // NB ORDERING: SSA conversion has to occur before
     // lifting of closures and forks, this way closures are converted
@@ -2807,6 +2830,14 @@ struct to_ir {
           type = typeParser_.parseTypeFromExpr(stmt.type().get());
         }
         auto rhs_sugared_val = emitSugaredExpr(rhs, 1, type);
+        auto sv_type = rhs_sugared_val->asValue(v.range(), method)->type();
+        if (type && type->kind() == UnionType::Kind) {
+          int x = 5;
+        }
+        //if (sv_type != type) {
+        //  Node* n = graph->createLoad(ll.)
+        //  createLoad(v.name().name(), type);
+        //}
         // START BC HACK
         //
         // For old serialized quantized RNN modules, switch
@@ -3966,10 +3997,15 @@ struct to_ir {
 
     Node* result = graph->insertNode(graph->createList(inferred_elem_type, values));
     if (annotated_union_type) {
-      Node* n = graph->insertNode(
-          graph->create(prim::unchecked_cast, {result->output()}));
-      n->output()->setType(std::move(annotated_union_type));
-      result = n;
+        Node* n = graph->insertNode(graph->create(prim::WidenToUnion, {result->output()}, 1));
+        n->output()->setType(annotated_union_type);
+        result = n;
+      //Node* n = graph->createLoad(ll.)
+      //createLoad(const std::string& name, const TypePtr& type)
+      //Node* n = graph->insertNode(
+      //    graph->create(prim::unchecked_cast, {result->output()}));
+      //n->output()->setType(std::move(annotated_union_type));
+      //result = n;
     }
 
     return result->output();
