@@ -63,7 +63,7 @@ void add_clamp_kernel(TensorIterator& iter, const Scalar& alpha_scalar, const Sc
 }
 
 void atan2_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "atan2_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "atan2_cpu", [&]() {
     cpu_kernel_vec(iter, [=](scalar_t a, scalar_t b) -> scalar_t {
     return std::atan2(a, b);
   },
@@ -929,15 +929,7 @@ void igammac_kernel(TensorIteratorBase& iter) {
 }
 
 void nextafter_kernel(TensorIteratorBase& iter) {
-  if (iter.common_dtype() == kBFloat16) {
-    using scalar_t = c10::BFloat16;
-    cpu_kernel(
-        iter,
-        [=](scalar_t a, scalar_t b) -> scalar_t {
-            return std::nextafter(a, b);
-        });
-  } else {
-    AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "nextafter_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.common_dtype(), "nextafter_cpu", [&]() {
     cpu_kernel_vec(
         iter,
         [=](scalar_t a, scalar_t b) -> scalar_t {
@@ -947,7 +939,6 @@ void nextafter_kernel(TensorIteratorBase& iter) {
             return a.nextafter(b);
         });
   });
-  }
 }
 
 void heaviside_kernel(TensorIteratorBase& iter) {

@@ -1842,6 +1842,12 @@ class TestBinaryUfuncs(TestCase):
             actual = torch.nextafter(from_t, to_t).item()
             self.assertEqual(actual, expected, atol=0, rtol=0)
 
+        a = torch.randn(100, device=device, dtype=dtype)
+        b = torch.randn(100, device=device, dtype=dtype)
+        actual = torch.nextafter(a, b)
+        expected = np.nextafter(a.cpu().float().numpy(), b.cpu().float().numpy())
+        self.assertEqual(actual.float(), expected, atol=0.01, rtol=0.01)
+
     def _test_cop(self, torchfn, mathfn, dtype, device):
         def reference_implementation(res2):
             for i, j in iter_indices(sm1):
@@ -2548,6 +2554,10 @@ class TestBinaryUfuncs(TestCase):
                                     device=device, dtype=torch.double)
             self.assertEqual(expected, actual.view(-1), rtol=0, atol=0.02)
 
+            # bfloat16
+            actual_bf16 = (a.bfloat16()).atan2(b.bfloat16())
+            self.assertEqual(expected, actual_bf16.view(-1).to(torch.double), rtol=0, atol=0.02)
+
         _test_atan2_with_size((2, 2), device)
         _test_atan2_with_size((3, 3), device)
         _test_atan2_with_size((5, 5), device)
@@ -2560,7 +2570,7 @@ class TestBinaryUfuncs(TestCase):
             actual = torch.atan2(y_tensor, x_tensor)
             self.assertEqual(expected_tensor, actual, rtol=0, atol=0.02)
 
-        for dtype in [torch.float, torch.double]:
+        for dtype in [torch.float, torch.double, torch.bfloat16]:
             _test_atan2(0, 0, 0, device, dtype)
             _test_atan2(0, 1, math.pi / 2, device, dtype)
             _test_atan2(0, -1, math.pi / -2, device, dtype)

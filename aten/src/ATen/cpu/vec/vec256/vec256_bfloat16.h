@@ -431,6 +431,15 @@ public:
     auto o2 = _mm256_xor_ps(mask, hi);
     return cvtfp32_bf16(o1, o2);
   }
+  Vectorized<BFloat16> nextafter(const Vectorized<BFloat16> &b) const {
+    __m256 lo, hi;
+    __m256 b1, b2;
+    cvtbf16_fp32(values, lo, hi);
+    cvtbf16_fp32(b.values, b1, b2);
+    auto o1 = Sleef_nextafterf8(lo, b1);
+    auto o2 = Sleef_nextafterf8(hi, b2);
+    return cvtfp32_bf16(o1, o2);
+  }
   Vectorized<BFloat16> round() const {
     __m256 lo, hi;
     cvtbf16_fp32(values, lo, hi);
