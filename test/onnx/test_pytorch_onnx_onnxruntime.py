@@ -3504,6 +3504,22 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(1, 3, 2)
         self.run_test(GatherModule(), (x,))
 
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.register_buffer("rb", torch.randn(1, 1, 3, 1, 1))
+
+            def forward(self, x):
+                x += self.rb[0]
+                return x
+
+            x = torch.randn(1, 3, 224, 224)
+            self.run_test(MyModule(), (x,),
+                dynamic_axes={
+                    "input": {0: "batch", 2: "height", 3: "width"},
+                    "output": {0: "batch", 1: "class", 2: "height", 3: "width"}},
+                input_names=['input'], output_names=['output'])
+
     @skipIfUnsupportedOpsetVersion([13])
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_expand(self):
