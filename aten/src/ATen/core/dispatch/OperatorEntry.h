@@ -176,6 +176,17 @@ public:
 
   std::string listAllDispatchKeys() const;
 
+  // Returns true if kernel_ has entry for any key in ks.
+  //
+  // Invariant: There are no alias keys in the passed-in dispatch key set.
+  // Note [No Alias Keys in DispatchKeySet]
+  // Alias keys should be checked using `hasKernelForDispatchKey`
+  // Alias keys shouldn't go inside of a DispatchKeySet, since they can technically
+  // have a value > 63 (causing overflow).
+  bool hasKernelForAnyDispatchKey(DispatchKeySet ks) const;
+  // Returns true if kernel_ has entry for a particular key.
+  bool hasKernelForDispatchKey(DispatchKey k) const;
+
 private:
 
   OperatorName name_;
@@ -248,17 +259,6 @@ private:
   void updateDispatchTable_(const c10::Dispatcher& dispatcher, DispatchKey dispatch_key);
   // Like above, but for ALL entries in the dispatch table.
   void updateDispatchTableFull_(const c10::Dispatcher& dispatcher);
-
-  // Returns true if kernel_ has entry for any key in ks.
-  //
-  // Invariant: There are no alias keys in the passed-in dispatch key set.
-  // Note [No Alias Keys in DispatchKeySet]
-  // Alias keys should be checked using `hasKernelForDispatchKey`
-  // Alias keys shouldn't go inside of a DispatchKeySet, since they can technically
-  // have a value > 63 (causing overflow).
-  bool hasKernelForAnyDispatchKey(DispatchKeySet ks) const;
-  // Returns true if kernel_ has entry for a particular key.
-  bool hasKernelForDispatchKey(DispatchKey k) const;
   // Retrieves a pointer to AnnotatedKernel at kernels_.at(dispatch_key).front().
   c10::optional<const AnnotatedKernel*> getKernelForDispatchKey(DispatchKey dispatch_key) const;
 };

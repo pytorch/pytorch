@@ -323,6 +323,16 @@ std::vector<OperatorHandle> Dispatcher::findDanglingImpls() const {
   });
 }
 
+void Dispatcher::printRegistrationsForDispatchKey(DispatchKey k) const {
+  operatorLookupTable_.read([&] (const ska::flat_hash_map<OperatorName, OperatorHandle>& operatorLookupTable) -> void {
+    for (const auto& op : operatorLookupTable) {
+      if (op.second.hasKernelForDispatchKey(k)) {
+          std::cout << op.first << std::endl;
+      }
+    }
+  });
+}
+
 int64_t Dispatcher::sequenceNumberForRunningRecordFunction(DispatchKey dispatchKey) {
   int64_t seq_num = -1;
   // Setting sequence number in the Autograd case to associate
