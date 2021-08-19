@@ -425,7 +425,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
     auto save_mean = at::empty({num_features}, options);
     auto save_invstd = at::empty({num_features}, options);
 
-    //don't return view of input, don't return empty tensor because it will break gradient chain
+    // don't return view of input, don't return empty tensor because it will break gradient chain
     auto out = input.clone();
     if (weight.defined()) out = out * weight[0];
     if (bias.defined()) out = out + bias[0];
@@ -517,7 +517,6 @@ std::tuple<Tensor, Tensor, Tensor> _batch_norm_impl_index_backward(
     int64_t impl_index,
     const Tensor& input, const Tensor& grad_output, const c10::optional<Tensor>& weight_opt /* optional */, const c10::optional<Tensor>& running_mean_opt /* optional */, const c10::optional<Tensor>& running_var_opt /* optional */, const c10::optional<Tensor>& save_mean_opt /* optional */, const c10::optional<Tensor>& save_var_transform_opt /* optional */,
     bool train, double epsilon, std::array<bool, 3> output_mask, const Tensor &reservedSpace) {
-
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
@@ -569,13 +568,6 @@ Tensor batch_norm(
   const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
   const Tensor& running_mean = c10::value_or_else(running_mean_opt, [] {return Tensor();});
   const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
-  if (input.numel()==0){
-    //don't return view of input, don't return empty tensor because it will break gradient chain
-    auto out = input.clone();
-    if (weight.defined()) out = out * weight[0];
-    if (bias.defined()) out = out + bias[0];
-    return out;
-  }
   return std::get<0>(at::_batch_norm_impl_index(input, weight, bias, running_mean, running_var,
                                                 training, momentum, eps, cudnn_enabled));
 }
