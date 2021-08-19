@@ -163,7 +163,7 @@ types.
 
 Operator coverage varies between dynamic and static quantization and is captured in the table below:
 
------------------+--------------------+-------------------+
++-----------------+--------------------+------------------+
 |                 |Static             |      Dynamic      |
 |                 |Quantization       | Quantization      |
 +-----------------+-------------------+-------------------+
@@ -189,6 +189,7 @@ Operator coverage varies between dynamic and static quantization and is captured
 |                 |                   | computations      |
 |                 |                   |stay in fp32       |
 +-----------------+-------------------+-------------------+
+
 
 Eager Mode Quantization
 ^^^^^^^^^^^^^^^^^^^^^^^
