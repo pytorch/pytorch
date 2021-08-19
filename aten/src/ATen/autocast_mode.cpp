@@ -8,6 +8,7 @@
 
 #include <iostream>
 #include <exception>
+#include <torch/csrc/jit/frontend/tracer.h>
 
 namespace at {
 namespace autocast {
@@ -103,7 +104,8 @@ Tensor cached_cast(at::ScalarType to_type, const Tensor& arg, DeviceType device_
     // See cached_casts declaration above for detailed strategy.
     bool can_try_cache = (to_type == get_lower_precision_fp_from_device_type(device_type) &&
                          arg.scalar_type() == at::kFloat && arg.requires_grad() &&
-                         arg.is_leaf() && !arg.is_view());
+                         arg.is_leaf() && !arg.is_view() && !at::GradMode::is_enabled() &&
+                         !torch::jit::tracer::isTracing());
     if (can_try_cache) {
       auto it = cached_casts.find(arg.unsafeGetTensorImpl());
       if (it != cached_casts.end()) {
