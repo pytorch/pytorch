@@ -197,7 +197,9 @@ def create_inputs_from_specs(input_specs):
         elif not has_batch_dim:
             shape = (1,) + tuple(shape)
 
-        inputs.append(torch.empty(shape, dtype=dtype, device=device))
+        inputs.append(
+            torch.randn(shape).to(dtype=dtype, device=device)
+        )
 
     return inputs
 
@@ -227,6 +229,10 @@ class TRTInterpreter(torch.fx.Interpreter):
         self.input_specs = input_specs
         self.input_specs_iter = 0
         self.validate_input_specs()
+        missing_ops = self.validate_conversion
+        if not missing_ops:
+            warnings.warn("Interpretation may fail due to missing operations \n"
+                          + "\n".join(f"{i}" for i in missing_ops))
         self._cur_node_name: Optional[str] = None
         self._input_names: List[str] = []
         self._output_names: List[str] = []
@@ -287,6 +293,19 @@ class TRTInterpreter(torch.fx.Interpreter):
                 assert (
                     len(shape_ranges) == 0
                 ), "shape_ranges are provided for input that doesn't have dynamic dim."
+
+    def validate_conversion(self):
+        missing_converter = set()
+
+        for node in self.module.graph.nodes:
+            if node.op in ["call_function", "call_method"] and not CONVERTERS.get(node.target):
+                missing_converter.add(f"{node.op} {node.target}")
+            elif node.op == "call_module":
+                submod = self.fetch_attr(node.target)
+                if not CONVERTERS.get(type(submod)):
+                    missing_converter.add(f"{node.op} {type(submod)}")
+
+        return missing_converter
 
     def run(
         self,
