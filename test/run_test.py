@@ -3,6 +3,7 @@
 import argparse
 import copy
 from datetime import datetime
+from distutils.util import strtobool
 import modulefinder
 import os
 import shutil
@@ -244,6 +245,7 @@ ROCM_BLOCKLIST = [
     'distributed/rpc/test_faulty_agent',
     'distributed/rpc/test_tensorpipe_agent',
     'distributed/rpc/cuda/test_tensorpipe_agent',
+    'distributed/_sharded_tensor/test_sharded_tensor',
     'test_determination',
     'test_multiprocessing',
     'test_jit_legacy',
@@ -698,7 +700,8 @@ def parse_args():
     parser.add_argument(
         '--continue-through-error',
         action='store_true',
-        help='Runs the full test suite despite one of the tests failing')
+        help='Runs the full test suite despite one of the tests failing',
+        default=strtobool(os.environ.get("CONTINUE_THROUGH_ERROR", "False")))
     parser.add_argument(
         'additional_unittest_args',
         nargs='*',
