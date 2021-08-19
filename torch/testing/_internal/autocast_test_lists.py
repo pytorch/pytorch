@@ -329,8 +329,6 @@ class AutocastCPUTestLists(object):
             ("max_pool2d", dummy_bf16[2], {"kernel_size": (3, 2), "stride": (1, 1)}),
             ("dropout", dummy_bf16[2], {"p": 0.1, "train": False}),
             ("binary_cross_entropy_with_logits", mat0_bf16 + (torch.rand((n, n), device=dev, dtype=torch.bfloat16),)),
-            ("pow", ((pointwise0_bf16[0] + 1.).clamp(0.0, 100.0),) + pointwise1_bf16),
-            ("pow", ((pointwise0_bf16[0] + 1.).clamp(0.0, 100.0),) + (1.7,)),
             ("instance_norm", dummy_bf16[1], {"weight": None, "bias": None, "running_mean": None,
                                               "running_var": None, "use_input_stats": True,
                                               "momentum": 0.1, "eps": 1e-5, "cudnn_enabled": False}),
@@ -351,9 +349,7 @@ class AutocastCPUTestLists(object):
             ("upsample_trilinear3d", dummy_bf16[4], {"output_size": (n, n, n), "align_corners": False}),
             ("binary_cross_entropy", (torch.rand((n, n), device=dev, dtype=torch.bfloat16),) +
                                      (torch.rand((n, n), device=dev, dtype=torch.bfloat16),)),
-            ("smooth_l1_loss", mat0_bf16 + mat1_bf16),
             ("reflection_pad1d", dummy_bf16[2], {"padding": (3, 3)}),
-            ("std", dummy_bf16[2]),
         ]
         self.torch_need_autocast_promote = [
             ("cat", (pointwise0_bf16 + pointwise1_fp32,)),
