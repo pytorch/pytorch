@@ -1455,7 +1455,12 @@ Tensor matmul(
     }
 
     // fold the batch into the first dimension
-    Tensor t1 = tensor1.expect_contiguous()->view({-1, size1[size1.size() - 1]});
+    // Why not tensor1.view(-1, size1[size1.size() -1])?
+    // If the last dim is 0, then view(-1, 0) won't work because the -1 becomes ambiguous.
+    // This can happen in e.g. [3, 5, 0] @ [0, 0].
+    // So we manually compute the folding as a result.
+    const auto dim1_size = c10::multiply_integers(size1.begin(), size1.end() - 1);
+    auto t1 = tensor1.expect_contiguous()->view({dim1_size, size1[size1.size() - 1]});
     Tensor output = has_out ? at::_unsafe_view(at::mm_out(out, t1, t2), output_size)
                             : at::_unsafe_view(t1.mm(t2), output_size);
     return has_out ? out.set_(output) : output;
@@ -2015,6 +2020,29 @@ Tensor mexp(const Tensor& a, bool compute_highest_degree_approx = false) {
       .view(a.sizes());
   }
 }
+
+// TODO This should be deprecated in favor of linalg_matrix_exp_differential
+//      in FunctionsManual.cpp
+template <typename func_t>
+Tensor backward_analytic_function_of_a_matrix(
+    const Tensor& self, const Tensor& grad,
+    const func_t& function_of_a_matrix
+  ) {
+  auto self_transposed = self.transpose(-2, -1).conj();
+  auto self_transposed_sizes = self_transposed.sizes().vec();
+  self_transposed_sizes[self.dim() - 2] <<= 1;
+  self_transposed_sizes[self.dim() - 1] <<= 1;
+
+  auto n = self_transposed.size(-1);
+  auto meta_grad = at::zeros(self_transposed_sizes, grad.options());
+  meta_grad.narrow(-2, 0, n).narrow(-1, 0, n).copy_(self_transposed);
+  meta_grad.narrow(-2, n, n).narrow(-1, n, n).copy_(self_transposed);
+  meta_grad.narrow(-2, 0, n).narrow(-1, n, n).copy_(grad);
+
+  auto grad_input = function_of_a_matrix(meta_grad)
+    .narrow(-2, 0, n).narrow(-1, n, n);
+  return grad_input;
+}
 } // end anon namespace
 
 // Computes the matrix exponential for a given batch of squared matrices.
@@ -2045,6 +2073,18 @@ Tensor linalg_matrix_exp(const Tensor& a) {
 // Alias
 Tensor matrix_exp(const Tensor& a) {
   return at::linalg_matrix_exp(a);
+}
+
+// TODO This should be deprecated in favor of linalg_matrix_exp_differential
+//      in FunctionsManual.cpp
+Tensor matrix_exp_backward(const Tensor& self, const Tensor& grad) {
+  NoTF32Guard disable_tf32;
+  return backward_analytic_function_of_a_matrix(
+    self, grad,
+    [](const Tensor& a) {
+      return a.matrix_exp();
+    }
+  );
 }
 
 Tensor frobenius_norm(const Tensor& self) {
@@ -2612,12 +2652,9 @@ Tensor linalg_tensorinv(const Tensor& self, int64_t ind) {
   shape_ind_end.insert(shape_ind_end.cend(), shape_start_ind.cbegin(), shape_start_ind.cend());
 
   // If the reshaped self is not invertible catch this error
-  Tensor result;
-  try {
-    result = at::inverse(self.reshape({prod_ind_end, prod_ind_end}));
-  } catch (...) {
-    TORCH_CHECK(false, "Failed to invert the input tensor, because it is singular.");
-  }
+  Tensor result, info;
+  std::tie(result, info) = at::linalg_inv_ex(self.reshape({prod_ind_end, prod_ind_end}), /*check_errors=*/false);
+  TORCH_CHECK(info.item<int64_t>() == 0, "Failed to invert the input tensor, because it is singular.");
 
   return result.reshape(shape_ind_end);
 }
