@@ -89,13 +89,18 @@ def assert_allclose(
 
 
 for name in _dtype_getters.__all__:
-    if name.startswith("_") or name == "get_all_math_dtypes":
+    if name.startswith("_"):
         continue
 
     fn = getattr(_dtype_getters, name)
-    globals()[name] = warn_deprecated(f"The unparametrized call can be replaced with {fn()}")(fn)
 
-get_all_math_dtypes = warn_deprecated(
-    f"For CUDA devices, the call can be replaced with {_dtype_getters.get_all_math_dtypes(torch.device('cuda'))}. "
-    f"For all other devices, it can be replaced with {_dtype_getters.get_all_math_dtypes(torch.device('cpu'))}."
-)(_dtype_getters.get_all_math_dtypes)
+    if name == "get_all_math_dtypes":
+        instructions = (
+            f"For CUDA devices, the call can be replaced with {fn('cuda')}. "
+            f"For all other devices, it can be replaced with {fn('cpu')}."
+        )
+    else:
+        instructions = f"The unparametrized call can be replaced with {fn()}"
+
+    globals()[name] = warn_deprecated(instructions)(fn)
+    __all__.append(name)
