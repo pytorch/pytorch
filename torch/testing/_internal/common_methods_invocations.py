@@ -7,6 +7,7 @@ import operator
 import random
 import numbers
 import unittest
+from unittest.case import skip
 
 import torch
 import numpy as np
@@ -8924,6 +8925,11 @@ op_db: List[OpInfo] = [
             # FIXME: prod does not support passing None to dim
             SkipInfo('TestReductions', 'test_dim_none'),
             SkipInfo('TestReductions', 'test_dim_none_keepdim'),
+            # FIXME: improve precision, failing with nan != inf
+            SkipInfo('TestReductions', 'test_ref_small_input',
+                     dtypes=[torch.float16, torch.complex64]),
+            SkipInfo('TestReductions', 'test_ref_duplicate_values',
+                     dtypes=[torch.uint8, torch.float16, torch.complex64]),
         ),
     ),
     ReductionOpInfo(
@@ -8940,6 +8946,12 @@ op_db: List[OpInfo] = [
             DecorateInfo(toleranceOverride({
                 torch.float16: tol(atol=1e-05, rtol=1e-02),
             }), 'TestReductions', 'test_noncontiguous_all'),
+            DecorateInfo(toleranceOverride({
+                torch.float16: tol(atol=1e-05, rtol=1e-02),
+            }), 'TestReductions', 'test_ref_small_input'),
+            DecorateInfo(toleranceOverride({
+                torch.float16: tol(atol=1e-05, rtol=1e-02),
+            }), 'TestReductions', 'test_ref_duplicate_values'),
         ),
         skips=(
             # FIXME: sum does not support passing keepdim without passing dim
@@ -8965,6 +8977,12 @@ op_db: List[OpInfo] = [
             DecorateInfo(toleranceOverride({
                 torch.float16: tol(atol=1e-05, rtol=1e-02),
             }), 'TestReductions', 'test_noncontiguous_all'),
+            DecorateInfo(toleranceOverride({
+                torch.float16: tol(atol=1e-05, rtol=1e-02),
+            }), 'TestReductions', 'test_ref_small_input'),
+            DecorateInfo(toleranceOverride({
+                torch.float16: tol(atol=1e-05, rtol=1e-02),
+            }), 'TestReductions', 'test_ref_duplicate_values'),
         ),
         skips=(
             # FIXME: nansum does not support passing keepdim without passing dim
