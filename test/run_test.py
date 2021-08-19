@@ -60,6 +60,7 @@ TESTS = [
     'distributed/test_pg_wrapper',
     'distributed/algorithms/test_join',
     'test_cuda',
+    'test_autocast',
     'test_jit_cuda_fuser',
     'test_cuda_primary_ctx',
     'test_dataloader',
