@@ -4522,15 +4522,11 @@ for shape in [(1,), ()]:
         mean_combined = torch.stack(feat_combined).mean()
         mean_combined.backward()
 
-    def test_checkpoint_valid_reset_on_error(self):
+    def test_checkpoint_works_wtih_grad(self):
         a = torch.randn(2, 2, requires_grad=True)
 
-        with self.assertRaisesRegex(Exception, "Checkpointing is not compatible with .grad()"):
-            b = checkpoint(torch.exp, a).sum()
-            torch.autograd.grad(b, (a,))
-
-        c = checkpoint(torch.exp, a).sum()
-        c.backward()
+        b = checkpoint(torch.exp, a).sum()
+        torch.autograd.grad(b, (a,))
 
     def test_checkpointing_with_hooks_correct_grad(self):
         a = torch.randn(2, 2, requires_grad=True)
