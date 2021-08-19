@@ -340,6 +340,8 @@ class TestOperators(TestCase):
         xfail('take'),
         xfail('unfold'),
         xfail('view_as_complex'),
+        xfail('linalg.tensorinv'),
+        xfail('nn.functional.conv_transpose2d', device_type='cuda'),
     }))
     def test_vmapvjp(self, device, dtype, op):
         # These are too annoying to put into the list above
