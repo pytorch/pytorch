@@ -162,6 +162,7 @@ def add(*, input, other):
     return input + other
 
 
+@register_acc_op_mapping(op_and_target=("call_method", "unsqueeze"))
 @register_acc_op_mapping(op_and_target=("call_function", torch.unsqueeze))
 @register_acc_op
 def unsqueeze(*, input, dim):
@@ -220,6 +221,12 @@ def transpose(*, input, dim0, dim1):
     if input.dim() < 2:
         return input
     return torch.transpose(**locals())
+
+
+@register_acc_op_mapping(op_and_target=("call_method", "contiguous"))
+@register_acc_op
+def contiguous(*, input):
+    return input.contiguous()
 
 
 @register_acc_op_mapping(op_and_target=("call_function", torch.nn.functional.softmax))
@@ -866,6 +873,15 @@ def slice_tensor(*, input, dims, starts, stops, steps):
 
 @register_custom_acc_mapper_fn(
     op_and_target=("call_function", torch.narrow),
+    arg_replacement_tuples=[
+        ("input", "input"),
+        ("dim", "dim"),
+        ("start", "start"),
+        ("length", "length"),
+    ],
+)
+@register_custom_acc_mapper_fn(
+    op_and_target=("call_method", "narrow"),
     arg_replacement_tuples=[
         ("input", "input"),
         ("dim", "dim"),
