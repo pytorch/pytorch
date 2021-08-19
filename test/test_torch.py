@@ -7660,16 +7660,11 @@ else:
     # For current implementation,
     # below are the valid `TensorDtype` and `ScalarType` combinations.
     def _where_valid_scalar_tensor_combination(self, scalar_type, dtype):
-        # Integral Tensor and Integral Scalar
-        if (not dtype.is_floating_point or dtype.is_complex) and scalar_type == int:
-            return True
-        # Float Tensor and Integral or Float Scalar
-        elif (dtype.is_floating_point) and scalar_type in [int, float]:
-            return True
-        # Complex Tensor and any Scalar
+        if (dtype.is_floating_point):
+            return scalar_type in (int, float)
         elif dtype.is_complex:
             return True
-        return False
+        return scalar_type == int
 
     @onlyOnCPUAndCUDA
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes() +
