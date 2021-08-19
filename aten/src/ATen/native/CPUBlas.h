@@ -12,7 +12,7 @@ namespace cpublas {
 enum TransposeType {
   Transpose,
   NoTranspose,
-  // ConjTranspose, -- Not implemented
+  ConjTranspose,
 };
 
 namespace internal {

@@ -15,6 +15,21 @@
 namespace at {
 namespace native {
 
+#if defined(USE_CUSOLVER) || defined(CUDART_VERSION)
+cublasOperation_t _get_cublas_trans(char trans) {
+  switch (trans) {
+    case 'N':
+      return CUBLAS_OP_N;
+    case 'T':
+      return CUBLAS_OP_T;
+    case 'C':
+      return CUBLAS_OP_C;
+    default:
+      return CUBLAS_OP_N;
+  }
+}
+#endif
+
 // Some cuBLAS and cuSOLVER batched routines require input to be a device array of pointers to device individual matrices
 // 'input' must be a contiguous tensor
 template <typename scalar_t>
@@ -70,10 +85,11 @@ void geqrf_batched_cublas(const Tensor& input, const Tensor& tau) {
 }
 
 template <typename scalar_t>
-static void apply_lu_solve_batched_cublas(const Tensor& b, const Tensor& lu, const Tensor& pivots, cublasOperation_t trans) {
+static void apply_lu_solve_batched_cublas(const Tensor& b, const Tensor& lu, const Tensor& pivots, char transpose) {
 #ifndef CUDART_VERSION
   TORCH_CHECK(false, "lu_solve: cuBLAS backend for lu_solve is not available.")
 #else
+  const auto trans = _get_cublas_trans(transpose);
 
   auto pivots_data = pivots.data_ptr<int>();
   auto batch_size = cuda_int_cast(batchCount(lu), "batch_size");;
@@ -94,29 +110,28 @@ static void apply_lu_solve_batched_cublas(const Tensor& b, const Tensor& lu, con
 #endif
 }
 
-void lu_solve_batched_cublas(const Tensor& b, const Tensor& lu, const Tensor& pivots, cublasOperation_t trans) {
+void lu_solve_batched_cublas(const Tensor& b, const Tensor& lu, const Tensor& pivots, char trans) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(lu.scalar_type(), "lu_solve_cublas", [&]{
     apply_lu_solve_batched_cublas<scalar_t>(b, lu, pivots, trans);
   });
 }
 
 template <typename scalar_t>
-static void apply_triangular_solve(Tensor& A, Tensor& B, bool upper, bool transpose, bool conjugate_transpose, bool unitriangular) {
+static void apply_triangular_solve(Tensor& A, Tensor& B, bool left, bool upper, char transpose, bool unitriangular) {
   cublasFillMode_t uplo = upper ? CUBLAS_FILL_MODE_UPPER : CUBLAS_FILL_MODE_LOWER;
-  cublasOperation_t trans = transpose ? CUBLAS_OP_T : CUBLAS_OP_N;
-  trans = conjugate_transpose ? CUBLAS_OP_C : trans;
+  const auto trans = _get_cublas_trans(transpose);
   cublasDiagType_t diag = unitriangular ? CUBLAS_DIAG_UNIT : CUBLAS_DIAG_NON_UNIT;
-  cublasSideMode_t side = CUBLAS_SIDE_LEFT;
+  cublasSideMode_t side = left ? CUBLAS_SIDE_LEFT : CUBLAS_SIDE_RIGHT;
 
   auto A_data = A.data_ptr<scalar_t>();
   auto B_data = B.data_ptr<scalar_t>();
   auto A_mat_stride = matrixStride(A);
   auto B_mat_stride = matrixStride(B);
   auto batch_size = batchCount(A);
-  auto m = cuda_int_cast(A.size(-2), "m");
-  auto n = cuda_int_cast(A.size(-1), "n");
-  auto nrhs = cuda_int_cast(B.size(-1), "nrhs");
-  auto lda = std::max<int>(1, m);
+  auto m = cuda_int_cast(B.size(-2), "m");
+  auto n = cuda_int_cast(B.size(-1), "n");
+  auto lda = std::max<int>(1, left ? m : n);
+  auto ldb = std::max<int>(1, m);
 
   auto alpha = scalar_t{1};
 
@@ -124,34 +139,32 @@ static void apply_triangular_solve(Tensor& A, Tensor& B, bool upper, bool transp
     scalar_t* A_working_ptr = &A_data[i * A_mat_stride];
     scalar_t* B_working_ptr = &B_data[i * B_mat_stride];
     auto handle = at::cuda::getCurrentCUDABlasHandle();
-    at::cuda::blas::trsm(handle, side, uplo, trans, diag, n, nrhs, &alpha, A_working_ptr, lda, B_working_ptr, lda);
+    at::cuda::blas::trsm(handle, side, uplo, trans, diag, m, n, &alpha, A_working_ptr, lda, B_working_ptr, ldb);
   }
 }
 
-void triangular_solve_cublas(Tensor& A, Tensor& B, Tensor& infos, bool upper, bool transpose, bool conjugate_transpose, bool unitriangular) {
-  (void)infos; // unused
+void triangular_solve_cublas(Tensor& A, Tensor& B, bool left, bool upper, char transpose, bool unitriangular) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(A.scalar_type(), "triangular_solve_cuda", [&]{
-    apply_triangular_solve<scalar_t>(A, B, upper, transpose, conjugate_transpose, unitriangular);
+    apply_triangular_solve<scalar_t>(A, B, left, upper, transpose, unitriangular);
   });
 }
 
 template <typename scalar_t>
-static void apply_triangular_solve_batched(Tensor& A, Tensor& B, bool upper, bool transpose, bool conjugate_transpose, bool unitriangular) {
+static void apply_triangular_solve_batched(Tensor& A, Tensor& B, bool left, bool upper, char transpose, bool unitriangular) {
   cublasFillMode_t uplo = upper ? CUBLAS_FILL_MODE_UPPER : CUBLAS_FILL_MODE_LOWER;
-  cublasOperation_t trans = transpose ? CUBLAS_OP_T : CUBLAS_OP_N;
-  trans = conjugate_transpose ? CUBLAS_OP_C : trans;
+  const auto trans = _get_cublas_trans(transpose);
   cublasDiagType_t diag = unitriangular ? CUBLAS_DIAG_UNIT : CUBLAS_DIAG_NON_UNIT;
-  cublasSideMode_t side = CUBLAS_SIDE_LEFT;
+  cublasSideMode_t side = left ? CUBLAS_SIDE_LEFT : CUBLAS_SIDE_RIGHT;
 
   auto A_data = A.data_ptr<scalar_t>();
   auto B_data = B.data_ptr<scalar_t>();
   auto A_mat_stride = matrixStride(A);
   auto B_mat_stride = matrixStride(B);
   auto batch_size = cuda_int_cast(batchCount(A), "batch_size");
-  auto m = cuda_int_cast(A.size(-2), "m");
-  auto n = cuda_int_cast(A.size(-1), "n");
-  auto nrhs = cuda_int_cast(B.size(-1), "nrhs");
-  auto lda = std::max<int>(1, m);
+  auto m = cuda_int_cast(B.size(-2), "m");
+  auto n = cuda_int_cast(B.size(-1), "n");
+  auto lda = std::max<int>(1, left ? m : n);
+  auto ldb = std::max<int>(1, m);
 
   auto alpha = scalar_t{1};
 
@@ -162,13 +175,12 @@ static void apply_triangular_solve_batched(Tensor& A, Tensor& B, bool upper, boo
   auto B_ptr_array_data = reinterpret_cast<scalar_t**>(B_ptr_array.data_ptr());
 
   auto handle = at::cuda::getCurrentCUDABlasHandle();
-  at::cuda::blas::trsmBatched(handle, side, uplo, trans, diag, n, nrhs, &alpha, A_ptr_array_data, lda, B_ptr_array_data, lda, batch_size);
+  at::cuda::blas::trsmBatched(handle, side, uplo, trans, diag, m, n, &alpha, A_ptr_array_data, lda, B_ptr_array_data, ldb, batch_size);
 }
 
-void triangular_solve_batched_cublas(Tensor& A, Tensor& B, Tensor& infos, bool upper, bool transpose, bool conjugate_transpose, bool unitriangular) {
-  (void)infos; // unused
+void triangular_solve_batched_cublas(Tensor& A, Tensor& B, bool left, bool upper, char transpose, bool unitriangular) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(A.scalar_type(), "triangular_solve_cuda", [&]{
-    apply_triangular_solve_batched<scalar_t>(A, B, upper, transpose, conjugate_transpose, unitriangular);
+    apply_triangular_solve_batched<scalar_t>(A, B, left, upper, transpose, unitriangular);
   });
 }
 
@@ -1315,8 +1327,9 @@ void lu_looped_cusolver(const Tensor& self, const Tensor& pivots, const Tensor& 
   }
 }
 
-void lu_solve_looped_cusolver(const Tensor& b, const Tensor& lu, const Tensor& pivots, cublasOperation_t trans) {
+void lu_solve_looped_cusolver(const Tensor& b, const Tensor& lu, const Tensor& pivots, char transpose) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(b.scalar_type(), "lu_solve_cusolver", [&] {
+    const auto trans = _get_cublas_trans(transpose);
     int n = cuda_int_cast(lu.size(-2), "n");
     int nrhs = cuda_int_cast(b.size(-1), "nrhs");
     auto batch_size = batchCount(lu);
