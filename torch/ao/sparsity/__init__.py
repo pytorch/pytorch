@@ -12,6 +12,8 @@ from .scheduler.lambda_scheduler import LambdaSL
 
 # Parametrizations
 from .sparsifier.utils import FakeSparsity
+from .sparsifier.utils import module_to_fqn
+from .sparsifier.utils import fqn_to_module
 
 # === Experimental ===
 

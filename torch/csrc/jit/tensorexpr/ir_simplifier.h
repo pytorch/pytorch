@@ -596,46 +596,10 @@ class TORCH_API TermExpander : public PolynomialBase {
 
 class TORCH_API IRSimplifier {
  public:
-  static ExprPtr simplify(ExprPtr e) {
-    SimplifierUnderContext ctxsimplifier;
-    e = e->accept_mutator(&ctxsimplifier);
-
-    PolynomialTransformer simplifier;
-    e = e->accept_mutator(&simplifier);
-
-    // There may be terms left in the IR, expand them.
-    TermExpander expander(&simplifier);
-    e = e->accept_mutator(&expander);
-    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
-    if (!expander.check_safe()) {
-      throw malformed_input("eliminated null Allocation without free");
-    }
-
-    return e;
-  }
-
+  static StmtPtr simplify(StmtPtr s);
+  static ExprPtr simplify(ExprPtr e);
   static ExprHandle simplify(const ExprHandle& e) {
     return ExprHandle(simplify(e.node()));
-  }
-
-  static StmtPtr simplify(StmtPtr s) {
-    SimplifierUnderContext ctxsimplifier;
-    s = s->accept_mutator(&ctxsimplifier);
-
-    PolynomialTransformer simplifier;
-    s = s->accept_mutator(&simplifier);
-    if (s == nullptr) {
-      return nullptr;
-    }
-
-    // There may be terms left in the IR, expand them.
-    TermExpander expander(&simplifier);
-    s = s->accept_mutator(&expander);
-    if (!expander.check_safe()) {
-      throw malformed_input("eliminated null Allocation without free");
-    }
-
-    return s;
   }
 };
 
