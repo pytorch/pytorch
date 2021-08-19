@@ -4207,26 +4207,25 @@ class TestNN(NNTestCase):
                 # can't use gradcheck because the function changes as we
                 # activate through it in training mode
                 if requires_grad:
-                    torch.autograd.grad(out.sum(), m.parametrizations.weight.original, retain_graph=True)
+                    torch.autograd.grad(out.sum(), m.parametrizations.weight.original)
 
                 # Get a fresh copy of the module, so u, v aren't connected to old graph
                 # gradcheck would fail otherwise
-                m, wrapped_m, spectral_norm_m = get_modules()
 
                 # test backward works with multiple forwards
                 # it uses training mode so we need to reset `u` and `v` vectors
                 # to same value at beginning for finite difference test to pass
-                saved_u = spectral_norm_m._u.clone()
-                saved_v = spectral_norm_m._v.clone()
+                saved_u = spectral_norm_m._u
+                saved_v = spectral_norm_m._v
 
                 def fn(input, _):
-                    spectral_norm_m._u.data.copy_(saved_u)
-                    spectral_norm_m._v.data.copy_(saved_v)
+                    spectral_norm_m._u = saved_u.detach().clone()
+                    spectral_norm_m._v = saved_v.detach().clone()
                     out0 = wrapped_m(input)
                     out1 = wrapped_m(input)
                     return out0 + out1
 
-                gradcheck(fn, (input.clone().requires_grad_(True), m.parametrizations.weight.original), check_batched_grad=False, check_undefined_grad=False)
+                gradcheck(fn, (input.clone().requires_grad_(True), m.parametrizations.weight.original), check_batched_grad=False)
 
                 # test removing
                 # spectral norm module needs to be in eval mode if we'd like to
@@ -4270,12 +4269,12 @@ class TestNN(NNTestCase):
                 # and eval modes
                 # it uses training mode so we need to reset `u` and `v` vectors
                 # to same value at beginning for finite difference test to pass
-                saved_u = spectral_norm_m._u.clone()
-                saved_v = spectral_norm_m._v.clone()
+                saved_u = spectral_norm_m._u
+                saved_v = spectral_norm_m._v
 
                 def fn(input):
-                    spectral_norm_m._u.data.copy_(saved_u)
-                    spectral_norm_m._v.data.copy_(saved_v)
+                    spectral_norm_m._u = saved_u.detach().clone()
+                    spectral_norm_m._v = saved_v.detach().clone()
                     wrapped_m.train()
                     out0 = wrapped_m(input)
                     wrapped_m.eval()
@@ -4286,14 +4285,16 @@ class TestNN(NNTestCase):
                     out3 = wrapped_m(input)
                     return out0 + out1 + out2 + out3
 
-                gradcheck(fn, (input.clone().requires_grad_(),), check_undefined_grad=False)
+                gradcheck(fn, (input.clone().requires_grad_(),))
 
                 # assert that backprop reaches weight_orig in eval
                 if requires_grad:
                     def fn(weight):
+                        spectral_norm_m._u = saved_u.detach().clone()
+                        spectral_norm_m._v = saved_v.detach().clone()
                         return wrapped_m(input)
 
-                    gradcheck(fn, (m.parametrizations.weight.original,), check_undefined_grad=False)
+                    gradcheck(fn, (m.parametrizations.weight.original,))
 
     def test_new_spectral_norm_load_state_dict(self):
         for activate_times in (0, 3):
