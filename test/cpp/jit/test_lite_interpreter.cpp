@@ -1354,11 +1354,11 @@ TEST(LiteInterpreterTest, DefaultArgsPinvSpecifyDefault) {
   testLiteModuleCompareResultTensors(m, inputs);
 }
 
-TEST(LiteInterpreterTest, SpecifiedArgsWithOutArg) {
+TEST(LiteInterpreterTest, DefaultArgsWithOutArg) {
   Module m("m");
   m.define(R"(
     def forward(self, x, h):
-      torch.add(x, h, alpha=2, out=x)
+      torch.add(x, h, out=x)
   )");
 
   std::vector<IValue> inputs;
