@@ -185,7 +185,8 @@ void InplaceMKLDNNSubgraph(std::shared_ptr<Graph> graph) {
     if (k == aten::relu || k == aten::sigmoid || k == aten::dropout ||
         k == prim::MKLDNNHardSwish || k == prim::MKLDNNHardSigmoid ||
         k == prim::MKLDNNHardTanh || k == aten::tanh ||
-        k == prim::MKLDNNClamp || k == Symbol::prim("MKLDNNScalarMul")) {
+        k == prim::MKLDNNClamp || k == Symbol::prim("MKLDNNScalarMul") ||
+        k == Symbol::prim("MKLDNNLayerNorm")) {
       if (set_liveness[alias_mapping[node->inputs().at(0)]]->isAfter(node)) {
         continue;
       }
@@ -274,7 +275,7 @@ Operation createUnaryOp(
   };
 }
 
-void MKLDNNLayerNormOp(Stack* stack) {
+void MKLDNNLayerNormOp(Stack* stack, bool inplace) {
   c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
 
   // enable_cudnn not used
@@ -297,7 +298,7 @@ void MKLDNNLayerNormOp(Stack* stack) {
   at::Tensor dst, mean, rstd;
   std::tie(dst, mean, rstd) =
       at::native::mkldnn_layer_norm_last_index_weight_bias_f32(
-          input, shape, weight, bias, eps);
+          input, shape, weight, bias, eps, inplace);
   push(stack, dst);
 };
 
@@ -470,7 +471,11 @@ const RegisterOperators BroadOpReg({
 const RegisterOperators MKLDNNLayerNormOpReg({
     torch::jit::Operator(
         "prim::MKLDNNLayerNorm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> Tensor",
-        MKLDNNLayerNormOp,
+        [](Stack* stack) { MKLDNNLayerNormOp(stack, false); },
+        AliasAnalysisKind::FROM_SCHEMA),
+    torch::jit::Operator(
+        "prim::MKLDNNLayerNorm_(Tensor(a!) input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> Tensor(a!)",
+        [](Stack* stack) { MKLDNNLayerNormOp(stack, true); },
         AliasAnalysisKind::FROM_SCHEMA),
 });
 
