@@ -11,7 +11,6 @@ using namespace torch::nn;
 
 struct AnyModuleTest : torch::test::SeedingFixture {};
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(AnyModuleTest, SimpleReturnType) {
   struct M : torch::nn::Module {
     int forward() {
@@ -22,7 +21,6 @@ TEST_F(AnyModuleTest, SimpleReturnType) {
   ASSERT_EQ(any.forward<int>(), 123);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(AnyModuleTest, SimpleReturnTypeAndSingleArgument) {
   struct M : torch::nn::Module {
     int forward(int x) {
@@ -33,7 +31,6 @@ TEST_F(AnyModuleTest, SimpleReturnTypeAndSingleArgument) {
   ASSERT_EQ(any.forward<int>(5), 5);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(AnyModuleTest, StringLiteralReturnTypeAndArgument) {
   struct M : torch::nn::Module {
     const char* forward(const char* x) {
@@ -44,7 +41,6 @@ TEST_F(AnyModuleTest, StringLiteralReturnTypeAndArgument) {
   ASSERT_EQ(any.forward<const char*>("hello"), std::string("hello"));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(AnyModuleTest, StringReturnTypeWithConstArgument) {
   struct M : torch::nn::Module {
     std::string forward(int x, const double f) {
@@ -56,7 +52,6 @@ TEST_F(AnyModuleTest, StringReturnTypeWithConstArgument) {
   ASSERT_EQ(any.forward<std::string>(x, 3.14), std::string("7"));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(
     AnyModuleTest,
     TensorReturnTypeAndStringArgumentsWithFunkyQualifications) {
@@ -76,7 +71,6 @@ TEST_F(
           .item<int32_t>() == 6);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(AnyModuleTest, WrongArgumentType) {
   struct M : torch::nn::Module {
     int forward(float x) {
@@ -97,7 +91,6 @@ struct M_test_wrong_number_of_arguments : torch::nn::Module {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(AnyModuleTest, WrongNumberOfArguments) {
   AnyModule any(M_test_wrong_number_of_arguments{});
 #if defined(_MSC_VER)
@@ -134,7 +127,6 @@ struct M_default_arg_without_macro : torch::nn::Module {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(AnyModuleTest, PassingArgumentsToModuleWithDefaultArgumentsInForwardMethod) {
   {
     AnyModule any(M_default_arg_with_macro{});
@@ -191,13 +183,11 @@ struct M : torch::nn::Module {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(AnyModuleTest, GetWithCorrectTypeSucceeds) {
   AnyModule any(M{5});
   ASSERT_EQ(any.get<M>().value, 5);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(AnyModuleTest, GetWithIncorrectTypeThrows) {
   struct N : torch::nn::Module {
     torch::Tensor forward(torch::Tensor input) {
@@ -208,7 +198,6 @@ TEST_F(AnyModuleTest, GetWithIncorrectTypeThrows) {
   ASSERT_THROWS_WITH(any.get<N>(), "Attempted to cast module");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(AnyModuleTest, PtrWithBaseClassSucceeds) {
   AnyModule any(M{5});
   auto ptr = any.ptr();
@@ -216,7 +205,6 @@ TEST_F(AnyModuleTest, PtrWithBaseClassSucceeds) {
   ASSERT_EQ(ptr->name(), "M");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(AnyModuleTest, PtrWithGoodDowncastSuccceeds) {
   AnyModule any(M{5});
   auto ptr = any.ptr<M>();
@@ -224,7 +212,6 @@ TEST_F(AnyModuleTest, PtrWithGoodDowncastSuccceeds) {
   ASSERT_EQ(ptr->value, 5);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(AnyModuleTest, PtrWithBadDowncastThrows) {
   struct N : torch::nn::Module {
     torch::Tensor forward(torch::Tensor input) {
@@ -235,7 +222,6 @@ TEST_F(AnyModuleTest, PtrWithBadDowncastThrows) {
   ASSERT_THROWS_WITH(any.ptr<N>(), "Attempted to cast module");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(AnyModuleTest, DefaultStateIsEmpty) {
   struct M : torch::nn::Module {
     explicit M(int value_) : value(value_) {}
@@ -252,7 +238,6 @@ TEST_F(AnyModuleTest, DefaultStateIsEmpty) {
   ASSERT_EQ(any.get<M>().value, 5);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(AnyModuleTest, AllMethodsThrowForEmptyAnyModule) {
   struct M : torch::nn::Module {
     int forward(int x) {
@@ -270,7 +255,6 @@ TEST_F(AnyModuleTest, AllMethodsThrowForEmptyAnyModule) {
       any.forward<int>(5), "Cannot call forward() on an empty AnyModule");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(AnyModuleTest, CanMoveAssignDifferentModules) {
   struct M : torch::nn::Module {
     std::string forward(int x) {
@@ -293,7 +277,6 @@ TEST_F(AnyModuleTest, CanMoveAssignDifferentModules) {
   ASSERT_EQ(any.forward<int>(5.0f), 8);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(AnyModuleTest, ConstructsFromModuleHolder) {
   struct MImpl : torch::nn::Module {
     explicit MImpl(int value_) : torch::nn::Module("M"), value(value_) {}
@@ -318,7 +301,6 @@ TEST_F(AnyModuleTest, ConstructsFromModuleHolder) {
   Linear linear(module.get<Linear>());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(AnyModuleTest, ConvertsVariableToTensorCorrectly) {
   struct M : torch::nn::Module {
     torch::Tensor forward(torch::Tensor input) {
@@ -358,7 +340,6 @@ AnyValue make_value(T&& value) {
 
 struct AnyValueTest : torch::test::SeedingFixture {};
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(AnyValueTest, CorrectlyAccessesIntWhenCorrectType) {
   auto value = make_value<int>(5);
   ASSERT_NE(value.try_get<int>(), nullptr);
@@ -376,19 +357,16 @@ TEST_F(AnyValueTest, CorrectlyAccessesIntWhenCorrectType) {
 //  // ASSERT_NE(value.try_get<int>(), nullptr);
 //  ASSERT_EQ(value.get<const int>(), 5);
 //}
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(AnyValueTest, CorrectlyAccessesStringLiteralWhenCorrectType) {
   auto value = make_value("hello");
   ASSERT_NE(value.try_get<const char*>(), nullptr);
   ASSERT_EQ(value.get<const char*>(), std::string("hello"));
 }
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(AnyValueTest, CorrectlyAccessesStringWhenCorrectType) {
   auto value = make_value(std::string("hello"));
   ASSERT_NE(value.try_get<std::string>(), nullptr);
   ASSERT_EQ(value.get<std::string>(), "hello");
 }
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(AnyValueTest, CorrectlyAccessesPointersWhenCorrectType) {
   std::string s("hello");
   std::string* p = &s;
@@ -396,7 +374,6 @@ TEST_F(AnyValueTest, CorrectlyAccessesPointersWhenCorrectType) {
   ASSERT_NE(value.try_get<std::string*>(), nullptr);
   ASSERT_EQ(*value.get<std::string*>(), "hello");
 }
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(AnyValueTest, CorrectlyAccessesReferencesWhenCorrectType) {
   std::string s("hello");
   const std::string& t = s;
@@ -405,7 +382,6 @@ TEST_F(AnyValueTest, CorrectlyAccessesReferencesWhenCorrectType) {
   ASSERT_EQ(value.get<std::string>(), "hello");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(AnyValueTest, TryGetReturnsNullptrForTheWrongType) {
   auto value = make_value(5);
   ASSERT_NE(value.try_get<int>(), nullptr);
@@ -414,7 +390,6 @@ TEST_F(AnyValueTest, TryGetReturnsNullptrForTheWrongType) {
   ASSERT_EQ(value.try_get<std::string>(), nullptr);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(AnyValueTest, GetThrowsForTheWrongType) {
   auto value = make_value(5);
   ASSERT_NE(value.try_get<int>(), nullptr);
@@ -428,7 +403,6 @@ TEST_F(AnyValueTest, GetThrowsForTheWrongType) {
       "but its actual type is int");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(AnyValueTest, MoveConstructionIsAllowed) {
   auto value = make_value(5);
   auto copy = make_value(std::move(value));
@@ -436,7 +410,6 @@ TEST_F(AnyValueTest, MoveConstructionIsAllowed) {
   ASSERT_EQ(copy.get<int>(), 5);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(AnyValueTest, MoveAssignmentIsAllowed) {
   auto value = make_value(5);
   auto copy = make_value(10);
@@ -445,19 +418,16 @@ TEST_F(AnyValueTest, MoveAssignmentIsAllowed) {
   ASSERT_EQ(copy.get<int>(), 5);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(AnyValueTest, TypeInfoIsCorrectForInt) {
   auto value = make_value(5);
   ASSERT_EQ(value.type_info().hash_code(), typeid(int).hash_code());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(AnyValueTest, TypeInfoIsCorrectForStringLiteral) {
   auto value = make_value("hello");
   ASSERT_EQ(value.type_info().hash_code(), typeid(const char*).hash_code());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(AnyValueTest, TypeInfoIsCorrectForString) {
   auto value = make_value(std::string("hello"));
   ASSERT_EQ(value.type_info().hash_code(), typeid(std::string).hash_code());

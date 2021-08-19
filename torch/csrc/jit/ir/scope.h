@@ -9,6 +9,12 @@
 
 namespace torch {
 namespace jit {
+struct ModuleInstanceInfo;
+constexpr size_t kModuleInstanceInfo = 2;
+
+namespace utils {
+std::string get_module_info(const ModuleInstanceInfo& module_instance_info);
+} // namespace utils
 
 // Scope is a node of a trie that represents the tree of nested scopes.
 // Individual scopes are pushed and popped from Graph, which holds a

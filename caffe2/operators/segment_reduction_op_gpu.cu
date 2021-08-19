@@ -3,6 +3,7 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/operators/segment_reduction_op.h"
 #include "caffe2/operators/segment_reduction_op_gpu.cuh"
+#include "caffe2/utils/GpuAtomics.cuh"
 #include "caffe2/utils/math.h"
 
 namespace caffe2 {
@@ -913,9 +914,9 @@ __global__ void UnsortedSegmentSumKernel(
     int slice_idx = i / slize_sz;
     int j = i % slize_sz;
     SIndex segment = segments[slice_idx];
-    atomicAdd(&out[segment * slize_sz + j], data[i]);
+    gpu_atomic_add(&out[segment * slize_sz + j], data[i]);
     if (scales && j == 0) {
-      atomicAdd(&scales[segment], 1);
+      gpu_atomic_add(&scales[segment], 1);
     }
   }
 }
@@ -1063,7 +1064,7 @@ class CUDAUnsortedSegmentSumOp : public Operator<CUDAContext> {
 template <typename SIndex>
 __global__ void segment_lengths_kernel(int N, const SIndex* X, SIndex* Y) {
   CUDA_1D_KERNEL_LOOP(i, N) {
-    atomicAdd(&Y[X[i]], 1);
+    gpu_atomic_add(&Y[X[i]], 1);
   }
 }
 

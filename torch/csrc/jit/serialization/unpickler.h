@@ -15,7 +15,7 @@ using TypeResolver =
 using ObjLoader = std::function<
     c10::intrusive_ptr<c10::ivalue::Object>(at::StrongTypePtr, IValue)>;
 
-class StorageContext;
+class DeserializationStorageContext;
 
 // [unpickler refactor] there is some cruft around PickleOpCode::BUILD,
 // PickleOpCode::NEWOBJ, and the last_opcode_ member below that should be
@@ -51,7 +51,7 @@ class TORCH_API Unpickler {
       std::function<at::DataPtr(const std::string&)> read_record,
       c10::optional<at::Device> device,
       bool use_storage_device = false,
-      std::shared_ptr<StorageContext> storage_context = nullptr)
+      std::shared_ptr<DeserializationStorageContext> storage_context = nullptr)
       : reader_(std::move(reader)),
         tensor_table_(),
         type_resolver_(std::move(type_resolver)),
@@ -157,7 +157,7 @@ class TORCH_API Unpickler {
 
   // Used for torch.package to enable sharing of storages across
   // ScriptModules and eager modules
-  std::shared_ptr<StorageContext> storage_context_;
+  std::shared_ptr<DeserializationStorageContext> storage_context_;
 
   // See [type tag serialization]
   uint64_t version_;

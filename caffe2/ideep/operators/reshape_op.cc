@@ -129,7 +129,6 @@ class IDEEPReshapeOp final : public IDEEPOperator {
   ideep::tensor::dims new_shape_;
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(Reshape, IDEEPReshapeOp);
 
 } // namespace

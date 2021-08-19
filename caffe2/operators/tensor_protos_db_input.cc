@@ -1,10 +1,8 @@
 #include "caffe2/operators/tensor_protos_db_input.h"
 
 namespace caffe2 {
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(TensorProtosDBInput, TensorProtosDBInput<CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(TensorProtosDBInput)
   .NumInputs(1)
   .NumOutputs(1, INT_MAX)
@@ -30,6 +28,5 @@ corresponding index in the TensorProtos objects in the DB.
           "DB as values. Each output tensor will be of size specified by the "
           "'batch_size' argument of the operator");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(TensorProtosDBInput);
 }  // namespace caffe2

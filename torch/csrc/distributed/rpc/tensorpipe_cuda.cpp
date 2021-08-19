@@ -1,8 +1,7 @@
-#include <torch/csrc/distributed/rpc/macros.h>
 #include <torch/csrc/distributed/rpc/tensorpipe_agent.h>
 #include <torch/csrc/distributed/rpc/tensorpipe_utils.h>
 
-#if defined(USE_TENSORPIPE) && defined(USE_CUDA_NOT_ROCM)
+#if defined(USE_TENSORPIPE) && !defined(__HIP_PLATFORM_HCC__)
 
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
@@ -25,7 +24,6 @@ std::unique_ptr<ChannelRegistration> makeCudaIpcChannel() {
 }
 
 // The cuda_ipc channels use cudaMemcpy to transmit CUDA tensor across processes
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_REGISTER_CREATOR(TensorPipeChannelRegistry, cuda_ipc, makeCudaIpcChannel);
 
 #endif
@@ -46,7 +44,6 @@ std::unique_ptr<ChannelRegistration> makeCudaGdrChannel() {
 // in order to ensure readiness and to agree on the device indices and thus the
 // queue pair to use. It automatically pairs each GPU to the "closest" NIC if
 // there are multiple of them (closest = longest prefix match in PCI tree).
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_REGISTER_CREATOR(TensorPipeChannelRegistry, cuda_gdr, makeCudaGdrChannel);
 
 #endif
@@ -58,7 +55,6 @@ std::unique_ptr<ChannelRegistration> makeCudaXthChannel() {
 }
 
 // The cuda_xth channel supports same-process GPU-to-GPU comm
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_REGISTER_CREATOR(TensorPipeChannelRegistry, cuda_xth, makeCudaXthChannel);
 
 std::unique_ptr<ChannelRegistration> makeCudaBasicChannel() {
@@ -69,7 +65,6 @@ std::unique_ptr<ChannelRegistration> makeCudaBasicChannel() {
 }
 
 // The cuda_basic is the fallback channel for GPU-to-GPU comm
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_REGISTER_CREATOR(
     TensorPipeChannelRegistry,
     cuda_basic,
@@ -126,7 +121,6 @@ class TensorpipeCudaConverter : public TensorpipeDeviceTypeConverter {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_REGISTER_TENSORPIPE_DEVICE_TYPE_CONVERTER(CUDA, TensorpipeCudaConverter);
 
 } // namespace

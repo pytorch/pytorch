@@ -396,11 +396,11 @@ inline Resource::Buffer::operator bool() const {
 inline bool operator==(
     const Resource::Image::Sampler::Descriptor& _1,
     const Resource::Image::Sampler::Descriptor& _2) {
-    static_assert(
-      std::is_trivially_copyable<Resource::Image::Sampler::Descriptor>::value,
-      "This implementation is no longer valid!");
 
-  return (0 == memcmp(&_1, &_2, sizeof(Resource::Image::Sampler::Descriptor)));
+  return (_1.filter == _2.filter && \
+          _1.mipmap_mode == _2.mipmap_mode && \
+          _1.address_mode == _2.address_mode && \
+          _1.border == _2.border);
 }
 
 inline size_t Resource::Image::Sampler::Factory::Hasher::operator()(

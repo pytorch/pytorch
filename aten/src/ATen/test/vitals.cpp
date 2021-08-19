@@ -1,3 +1,4 @@
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include <ATen/ATen.h>
@@ -5,8 +6,8 @@
 #include <cstdlib>
 
 using namespace at::vitals;
+using ::testing::HasSubstr;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Vitals, Basic) {
   std::stringstream buffer;
 
@@ -29,14 +30,13 @@ TEST(Vitals, Basic) {
   std::cout.rdbuf(sbuf);
 
   auto s = buffer.str();
-  ASSERT_TRUE(s.find("Testing.Attribute0\t\t 1") != std::string::npos);
-  ASSERT_TRUE(s.find("Testing.Attribute1\t\t 1") != std::string::npos);
-  ASSERT_TRUE(s.find("Testing.Attribute2\t\t 1") != std::string::npos);
-  ASSERT_TRUE(s.find("Testing.Attribute3\t\t 1") != std::string::npos);
-  ASSERT_TRUE(s.find("Testing.Attribute4\t\t  1") != std::string::npos);
+  ASSERT_THAT(s, HasSubstr("Testing.Attribute0\t\t 1"));
+  ASSERT_THAT(s, HasSubstr("Testing.Attribute1\t\t 1"));
+  ASSERT_THAT(s, HasSubstr("Testing.Attribute2\t\t 1"));
+  ASSERT_THAT(s, HasSubstr("Testing.Attribute3\t\t 1"));
+  ASSERT_THAT(s, HasSubstr("Testing.Attribute4\t\t  1"));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Vitals, MultiString) {
   std::stringstream buffer;
 
@@ -57,11 +57,10 @@ TEST(Vitals, MultiString) {
   std::cout.rdbuf(sbuf);
 
   auto s = buffer.str();
-  ASSERT_TRUE(s.find("Testing.Attribute0\t\t 1 of 2") != std::string::npos);
-  ASSERT_TRUE(s.find("Testing.Attribute1\t\t 1 of 2") != std::string::npos);
+  ASSERT_THAT(s, HasSubstr("Testing.Attribute0\t\t 1 of 2"));
+  ASSERT_THAT(s, HasSubstr("Testing.Attribute1\t\t 1 of 2"));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Vitals, OnAndOff) {
   for (auto i = 0; i < 2; ++i) {
     std::stringstream buffer;
@@ -93,7 +92,6 @@ TEST(Vitals, OnAndOff) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Vitals, APIVitals) {
   std::stringstream buffer;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -113,5 +111,5 @@ TEST(Vitals, APIVitals) {
 
   auto s = buffer.str();
   ASSERT_TRUE(rvalue);
-  ASSERT_TRUE(s.find("TestingSetVital.TestAttr\t\t TestValue") != std::string::npos);
+  ASSERT_THAT(s, HasSubstr("TestingSetVital.TestAttr\t\t TestValue"));
 }

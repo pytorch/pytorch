@@ -336,7 +336,7 @@ void listExtend(Stack* stack) {
   c10::List<IValue> a = pop(stack).to<c10::List<IValue>>();
 
   a.reserve(a.size() + b.size());
-  for (size_t i = 0; i < b.size(); ++i) {
+  for (const auto i : c10::irange(b.size())) {
     a.push_back(b.get(i));
   }
 }
@@ -397,7 +397,8 @@ void listMulIntLeftInPlace(Stack* stack) {
     list.clear();
   } else if (n > 1) {
     size_t list_size = list.size();
-    for (int64_t i = 1; i < n; i++) {
+    for (const auto i : c10::irange(1, n)) {
+      (void)i; // Suppress unused variable warning
       for (const auto j : c10::irange(list_size)) {
         list.push_back(list.get(j));
       }
@@ -448,14 +449,14 @@ void listSlice(Stack* stack) {
   auto end_val = pop(stack);
   auto start_val = pop(stack);
 
-  // In the future, start and end of list slice will be marked
-  // as None. To prepare for this change, we make listSlice method
-  // to be able to handle future models that are scripted with newer
-  // runtime.
+  // By default, both start and end will be None.
+  // By python convention, they will be translated into
+  // INT64_MAX. If the step size is not given, it will be 1.
   int64_t step = step_val.isInt() ? step_val.to<int64_t>() : 1;
   int64_t end = end_val.isInt() ? end_val.to<int64_t>()
                                 : std::numeric_limits<int64_t>::max();
-  int64_t start = start_val.isInt() ? start_val.to<int64_t>() : 0;
+  int64_t start = start_val.isInt() ? start_val.to<int64_t>()
+                                    : std::numeric_limits<int64_t>::max();
 
   c10::List<IValue> list = pop(stack).to<c10::List<IValue>>();
 
@@ -467,7 +468,8 @@ void listSlice(Stack* stack) {
   sliced_list.reserve(num_values);
 
   int i = start;
-  for (int j = 0; j < num_values; ++j) {
+  for (const auto j : c10::irange(num_values)) {
+    (void)j; // Suppress unused variable warning
     sliced_list.push_back(list.get(i));
     i += step;
   }

@@ -47,7 +47,7 @@ jobs:
         is_official_build: ${{ parameters.is_official_build}}
 
     # Sync and update PyTorch submodules
-    - script: git submodule update --init --recursive
+    - script: git submodule update --init --recursive --jobs 0
       displayName: Update PyTorch submodules
 
     # Build PyTorch and run unit tests - no packaging
