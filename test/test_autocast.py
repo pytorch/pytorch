@@ -78,6 +78,10 @@ class TestAutocastCPU(TestCase):
                     control = getattr(args[0].to(run_as_type), op)(*cast(args[1:], run_as_type), **add_kwargs)
                 self.assertTrue(type(output_to_compare) == type(control))
                 comparison = compare(output_to_compare, control)
+                if op == "instance_norm":
+                    print("comparison is: {}".format(comparison))
+                    print("output_to_compare is: {}".format(output_to_compare))
+                    print("control is: {}".format(control))
                 self.assertTrue(comparison, "torch.{} result did not match control".format(op))
             self.assertTrue(torch.is_autocast_cpu_enabled())
         self.assertFalse(torch.is_autocast_cpu_enabled())

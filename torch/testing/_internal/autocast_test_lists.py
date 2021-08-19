@@ -331,8 +331,8 @@ class AutocastCPUTestLists(object):
             ("binary_cross_entropy_with_logits", mat0_bf16 + (torch.rand((n, n), device=dev, dtype=torch.bfloat16),)),
             ("pow", ((pointwise0_bf16[0] + 1.).clamp(0.0, 100.0),) + pointwise1_bf16),
             ("pow", ((pointwise0_bf16[0] + 1.).clamp(0.0, 100.0),) + (1.7,)),
-            ("instance_norm", dummy_bf16[2], {"weight": None, "bias": None, "running_mean": torch.rand((n), dtype=torch.float32),
-                                              "running_var": torch.rand((n), dtype=torch.float32), "use_input_stats": False,
+            ("instance_norm", dummy_bf16[1], {"weight": None, "bias": None, "running_mean": None,
+                                              "running_var": None, "use_input_stats": True,
                                               "momentum": 0.1, "eps": 1e-5, "cudnn_enabled": False}),
         ]
         self.nn_bf16 = [
