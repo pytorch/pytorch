@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/memory_planning.h>
+#include <torch/csrc/jit/passes/memory_planning/linear_scan.h>
 
 #include <jit/tensorexpr/kernel.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
@@ -241,6 +242,10 @@ void planMemory(std::shared_ptr<Graph>& graph, Strategy strat) {
     case Strategy::NAIVE: {
       return;
     }
+    case Strategy::LINEAR_SCAN: {
+      allocations = linearScanHeuristic(managed_live_ranges);
+      break;
+    };
     default:
       return;
   }
