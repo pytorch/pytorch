@@ -1,5 +1,8 @@
 # Generates VariableType.h/cpp
 #
+# **If any changes are being made to the VariableType codegen please also check
+# if updates are needed in torch/csrc/autograd/autograd_not_implemented_fallback.cpp
+#
 # VariableType is a subclass of at::Type that provides the binding code
 # necessary to provide a differentiable version of ATen operators. There are a
 # number of different things we could mean:
