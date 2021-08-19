@@ -1,5 +1,7 @@
 #pragma once
 
+#include <type_traits>
+
 #include <ATen/core/ivalue.h>
 #include <c10/util/Deprecated.h>
 
@@ -24,7 +26,8 @@ class Operation {
   }) {}
 
   template <typename F,
-            std::enable_if_t<accepts<F, Stack&>::value, int> = 0>
+            std::enable_if_t<accepts<F, Stack&>::value &&
+                !std::is_same<std::decay_t<F>, Operation>::value, int> = 0>
   Operation(F&& op): op_(std::forward<F>(op)) {}
 
   Operation(std::nullptr_t) noexcept {}
