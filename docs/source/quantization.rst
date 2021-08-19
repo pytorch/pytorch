@@ -53,7 +53,7 @@ Today, PyTorch supports the following backends for running quantized operators e
   `qnnpack` (`<https://github.com/pytorch/QNNPACK>`_).
 
 The corresponding implementation is chosen automatically based on the PyTorch build mode, though users
-have the option to override this if needed by setting.
+have the option to override this by setting `torch.backends.quantization.engine` to `fbgemm` or `qnnpack`.
 
 .. note::
 
