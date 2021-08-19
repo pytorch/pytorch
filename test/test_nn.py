@@ -13944,7 +13944,7 @@ class TestNNDeviceType(NNTestCase):
         helper(4, 8, 8, 8, 3, divisor_override=42)
         helper(4, 8, 8, 8, 7)
         # ROCm 16GB MI25 hits OOM error. Clear caching allocator prior to running large subtest.
-        if 'cuda' in device:
+        if TEST_WITH_ROCM and 'cuda' in device:
             torch.cuda.empty_cache()
         helper(200, 512, 28, 28, 2)
         helper(4, 8, 7, 7, 3, stride=1)
