@@ -7,7 +7,7 @@ from typing import Any, List, Tuple, Optional, Dict, Union
 
 import torch
 import torch.nn as nn
-from .utils import check_min_max_valid
+from .utils import check_min_max_valid, calculate_qmin_qmax
 
 
 class _PartialWrapper(object):
@@ -30,8 +30,9 @@ class _PartialWrapper(object):
         return _with_args(self, **kwargs)
 
     def with_callable_args(self, **kwargs):
-        self.callable_args = {**self.callable_args, **kwargs}
-        return self
+        result = _PartialWrapper(p=self.p)
+        result.callable_args = {**self.callable_args, **kwargs}
+        return result
 
 
 def _with_args(cls_or_self, **kwargs):
@@ -193,8 +194,8 @@ class _ObserverBase(ObserverBase):
         self.has_customized_qrange = (quant_min is not None) and (quant_max is not None)
         if self.has_customized_qrange:
             self._validate_qmin_qmax(quant_min, quant_max)
-        self.quant_min = quant_min
-        self.quant_max = quant_max
+        self.quant_min, self.quant_max = \
+            calculate_qmin_qmax(quant_min, quant_max, self.has_customized_qrange, self.dtype, self.reduce_range)
 
     def _load_from_state_dict(
         self,
@@ -249,51 +250,6 @@ class _ObserverBase(ObserverBase):
         ), "qmin must be strictly less than qmax for user-specified quantization range."
 
     @torch.jit.export
-    def _calculate_qmin_qmax(self) -> Tuple[int, int]:
-        r"""Calculates actual qmin and qmax based on the quantization range,
-        observer datatype and if range is reduced.
-        """
-        if self.has_customized_qrange:
-            # This initialization here is to be resolve TorchScript compilation issues and allow
-            # using of refinement to decouple initial_qmin and initial_qmax from quantization range.
-            # The actual values of initial_qmin and initial_qmax will be reset below.
-            initial_quant_min, initial_quant_max = 0, 255
-            # The following assignment of self.qmin and self.qmax to the local variables and the if check refine the
-            # attribute from Optional valid integers for use, based on TorchScript's requirements.
-            custom_quant_min, custom_quant_max = self.quant_min, self.quant_max
-            if custom_quant_min is not None and custom_quant_max is not None:
-                initial_quant_min, initial_quant_max = (
-                    custom_quant_min,
-                    custom_quant_max,
-                )
-
-            qrange_len = initial_quant_max - initial_quant_min + 1
-            assert (
-                0 < qrange_len <= 256
-            ), "quantization range should be positive and not exceed the maximum bit range (=256)."
-            if self.dtype == torch.qint8:
-                quant_min, quant_max = -qrange_len // 2, qrange_len // 2 - 1
-            else:
-                quant_min, quant_max = 0, qrange_len - 1
-            if self.reduce_range:
-                quant_min, quant_max = quant_min // 2, quant_max // 2
-        else:
-            # Fallback onto default 8-bit qmin and qmax calculation if dynamic range is not used.
-            if self.dtype == torch.qint8:
-                if self.reduce_range:
-                    quant_min, quant_max = -64, 63
-                else:
-                    quant_min, quant_max = -128, 127
-            elif self.dtype == torch.quint8:
-                if self.reduce_range:
-                    quant_min, quant_max = 0, 127
-                else:
-                    quant_min, quant_max = 0, 255
-            else:
-                quant_min, quant_max = 0, 15
-        return quant_min, quant_max
-
-    @torch.jit.export
     def _calculate_qparams(
         self, min_val: torch.Tensor, max_val: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -311,7 +267,7 @@ class _ObserverBase(ObserverBase):
         if not check_min_max_valid(min_val, max_val):
             return torch.tensor([1.0], device=min_val.device.type), torch.tensor([0], device=min_val.device.type)
 
-        quant_min, quant_max = self._calculate_qmin_qmax()
+        quant_min, quant_max = self.quant_min, self.quant_max
         min_val_neg = torch.min(min_val, torch.zeros_like(min_val))
         max_val_pos = torch.max(max_val, torch.zeros_like(max_val))
 

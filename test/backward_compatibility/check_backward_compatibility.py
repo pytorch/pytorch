@@ -42,12 +42,16 @@ ALLOW_LIST = [
     ("aten::irfft", datetime.date(2021, 1, 31)),
     ("aten::rfft", datetime.date(2021, 1, 31)),
     ("aten::linalg_svd", datetime.date(2021, 5, 15)),
+    ("aten::linalg_cholesky.out", datetime.date(2021, 8, 30)),
+    ("aten::linalg_cholesky_ex", datetime.date(2021, 8, 30)),
+    ("aten::linalg_cholesky_ex.L", datetime.date(2021, 8, 30)),
     ("aten::_cholesky_helper", datetime.date(9999, 1, 1)),
     ("aten::_lstsq_helper", datetime.date(9999, 1, 1)),
     ("aten::linalg_lstsq", datetime.date(2021, 5, 1)),
     ("aten::_svd_helper", datetime.date(2021, 1, 31)),
     ("aten::_syevd_helper", datetime.date(9999, 1, 1)),
     ("aten::_lu_solve_helper", datetime.date(9999, 1, 1)),
+    ("aten::_lu_with_info", datetime.date(9999, 1, 1)),
     ("aten::_linalg_solve_out_helper_", datetime.date(9999, 1, 1)),
     ("aten::_cudnn_rnn_flatten_weight", datetime.date(2020, 12, 31)),
     ("aten::_cudnn_rnn", datetime.date(2020, 12, 31)),
@@ -120,7 +124,7 @@ ALLOW_LIST_COMPILED = [
         re.compile(item[0]),
         item[1],
         re.compile(item[2]) if len(item) > 2 else None,
-    ) for item in ALLOW_LIST if item[1] < datetime.date.today()
+    ) for item in ALLOW_LIST if item[1] >= datetime.date.today()
 ]
 
 def allow_listed(schema):

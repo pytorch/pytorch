@@ -209,6 +209,7 @@ struct CodeTemplate {
   // to indent correctly in the context.
   void emitIndent(std::ostream& out, size_t indent) const {
     for (const auto i : c10::irange(indent)) {
+      (void)i; // Suppress unused variable warning
       out << " ";
     }
   }
