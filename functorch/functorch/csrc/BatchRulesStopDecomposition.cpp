@@ -14,7 +14,8 @@
 namespace at { namespace functorch {
 
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
-//   m.impl("index_add_", torch::CppFunction::makeFromBoxedFunction<&batchedTensorForLoopFallback>());
+//   m.impl("quantile", torch::CppFunction::makeFromBoxedFunction<&batchedTensorForLoopFallback>());
+//   m.impl("quantile.new", torch::CppFunction::makeFromBoxedFunction<&batchedTensorForLoopFallback>());
 }
 
 }}
