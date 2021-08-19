@@ -27,7 +27,7 @@ TORCH_CUDA_CU_API void schedulePointwise(
     Fusion* fusion,
     const PointwiseParams& params);
 
-TORCH_CUDA_CU_API bool schedulePointwise(
+TORCH_CUDA_CU_API LaunchParams schedulePointwise(
     Fusion* fusion,
     const at::ArrayRef<c10::IValue>& runtime_inputs);
 

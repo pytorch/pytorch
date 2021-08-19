@@ -165,7 +165,7 @@ static void LstmCell_RunFusion(
   // outputs
   std::vector<at::Tensor> outputs;
 
-  schedulePointwise(&fusion, c10::ArrayRef<c10::IValue>(inputs));
+  auto lparams = schedulePointwise(&fusion, c10::ArrayRef<c10::IValue>(inputs));
 
   FusionExecutor executor;
   executor.compileFusion(&fusion);
@@ -173,7 +173,7 @@ static void LstmCell_RunFusion(
   cudaDeviceSynchronize();
 
   for (auto _ : benchmark_state) {
-    outputs = executor.runFusion(c10::ArrayRef<c10::IValue>(inputs));
+    outputs = executor.runFusion(c10::ArrayRef<c10::IValue>(inputs), lparams);
     cudaDeviceSynchronize();
   }
 }
@@ -201,7 +201,7 @@ static void LstmCell_RunFusion_GpuOnly(
   // outputs
   std::vector<at::Tensor> outputs;
 
-  schedulePointwise(&fusion, c10::ArrayRef<c10::IValue>(inputs));
+  auto lparams = schedulePointwise(&fusion, c10::ArrayRef<c10::IValue>(inputs));
 
   FusionExecutor executor;
   executor.setMeasureKernelTimeFlag(true);
@@ -210,7 +210,7 @@ static void LstmCell_RunFusion_GpuOnly(
   cudaDeviceSynchronize();
 
   for (auto _ : benchmark_state) {
-    outputs = executor.runFusion(c10::ArrayRef<c10::IValue>(inputs));
+    outputs = executor.runFusion(c10::ArrayRef<c10::IValue>(inputs), lparams);
     benchmark_state.SetIterationTime(executor.kernelTimeMs() / 1000.0);
     cudaDeviceSynchronize();
     clearL2Cache();
@@ -243,14 +243,14 @@ static void LstmCell_RunFusion_CpuOnly(
   // outputs
   std::vector<at::Tensor> outputs;
 
-  schedulePointwise(&fusion, c10::ArrayRef<c10::IValue>(inputs));
+  auto lparams = schedulePointwise(&fusion, c10::ArrayRef<c10::IValue>(inputs));
 
   FusionExecutor executor;
   executor.setExecuteKernelFlag(false);
   executor.compileFusion(&fusion);
 
   for (auto _ : benchmark_state) {
-    outputs = executor.runFusion(c10::ArrayRef<c10::IValue>(inputs));
+    outputs = executor.runFusion(c10::ArrayRef<c10::IValue>(inputs), lparams);
   }
 }
 

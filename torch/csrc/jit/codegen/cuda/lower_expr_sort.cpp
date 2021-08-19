@@ -633,61 +633,158 @@ ExprGroup* getProducer(ExprGroup* sg1, ExprGroup* sg2) {
   return nullptr;
 }
 
-std::vector<IterDomain*> mergeDomains(
-    const std::vector<IterDomain*>& domain1,
-    const std::vector<IterDomain*>& domain2) {
-  std::vector<IterDomain*> resulting_domain;
-  auto it1 = domain1.begin();
-  auto it2 = domain2.begin();
-
-  if (domain1.empty() || domain2.empty()) {
-    return domain1.empty() ? domain2 : domain1;
+// Go through all expressions and compute a local ordering of loops. Since
+// overloading comparison operators for iter domains doesn't make a lot of
+// sense, we instead fake having a < operator by considering that every
+// expressions output domain must be relatively ordered correctly. So we use all
+// of the expressions in a group to get a "local" ordering of the output IDs in
+// the group. We can't rely on any single expression because it may or may not
+// have all loops in the group. We also can't break ties without all
+// expressions.
+//
+// For example two expressions may have domains: [I0], [I1] Yet we
+// won't know the ordering unless we see a domain with: [I0, I1]. This happened
+// in advancedIndexing9 test when merging T5 with the group containing T10
+// (cache of T5, which is post broadcasted output) and T6(pre broadcasted
+// output).
+// T5 had the domain [0, 1, 2, 3, 4] produce at 3
+// T6 had the domain [0, 3, 4] compute at 3
+// Merging [0, 1, 2] and [0, 3, 4] resulted in the domain [0, 3, 4, 1, 2]
+//
+// If ID's are not in filter, we don't care about their ordering and ignore
+// them. This is because we're really focused on loops we will have to merge
+// across groups.If the domain is not in a produce at position in the producer
+// edges, or a compute at position in the consumer edges, the expressions we
+// look at may not have a unique ordering.
+std::vector<IterDomain*> getLocalDomainOrdering(
+    const std::vector<Expr*>& exprs,
+    const ComputeAtMap& map,
+    const std::unordered_set<IterDomain*> filter) {
+  if (exprs.empty()) {
+    return std::vector<IterDomain*>();
   }
 
-  // Need to merge domains together. These domains are representative of what's
-  // within all the compute at positions of their respective groups (could be
-  // many Exprs). The domains do not necessarily match, and we want to pull in
-  // all iteration domains, maintaining relative ordering of both domains, while
-  // removing as many duplicate iter domains (iter domains that map to eachother
-  // through index map).
-  while (it1 != domain1.end() || it2 != domain2.end()) {
-    // no lint is for repeated branching, don't lint to avoid running any_of
-    // when not necessary.
-    if (it1 == domain1.end()) { // NOLINT
-      // domain1 has all been pushed, finish pushing domain 2
-      resulting_domain.push_back(*it2++);
-    } else if (it2 == domain2.end()) { // NOLINT
-      // domain2 has all been pushed, finish pushing domain 1
-      resulting_domain.push_back(*it1++);
-    } else if (GpuLower::current()->caLoopMap().areMapped(
-                   *it1, *it2)) { // NOLINT
-      resulting_domain.push_back(*it1);
-      ++it1;
-      ++it2;
-    } else if (std::any_of(it1 + 1, domain1.end(), [&](IterDomain* id1) {
-                 return GpuLower::current()->caLoopMap().areMapped(id1, *it2);
-               })) { // NOLINT
-      // Increment it1, as a later iter domain matches the current one in
-      // domain2
-      resulting_domain.push_back(*it1++);
+  std::vector<std::vector<IterDomain*>> domains;
 
-    } else if (std::any_of(it2 + 1, domain2.end(), [&](IterDomain* id2) {
-                 return GpuLower::current()->caLoopMap().areMapped(id2, *it1);
-               })) { // NOLINT
-      // Increment it2, as a later iter domain matches the current one in
-      // domain1
-      resulting_domain.push_back(*it2++);
-    } else {
-      // This should not be reachable since the axes here only
-      // include the shared axes between the two expr groups.
-      // TODO: Evaluate
-      resulting_domain.push_back(*it1++);
-      resulting_domain.push_back(*it2++);
+  for (auto expr : exprs) {
+    if (!ir_utils::isTVOp(expr)) {
+      continue;
+    }
+
+    auto tv_inputs = ir_utils::filterByType<TensorView>(expr->inputs());
+    for (auto tv_input : tv_inputs) {
+      std::vector<IterDomain*> domain(
+          tv_input->domain()->domain().begin(),
+          tv_input->domain()->domain().begin() +
+              std::max(
+                  tv_input->getComputeAtPosition(),
+                  tv_input->getMaxProducerPosition()));
+
+      domain.erase(
+          std::remove_if(
+              domain.begin(),
+              domain.end(),
+              [&filter, &map](IterDomain* id) {
+                return filter.find(map.getConcreteMappedID(id)) == filter.end();
+              }),
+          domain.end());
+
+      domains.emplace_back(domain);
     }
   }
-  return resulting_domain;
-}
 
+  if (domains.size() == 1) {
+    return domains[0];
+  }
+
+  std::vector<IterDomain*> merged_domains;
+
+  // For each domain, keep an iterator to the current iter domain we're
+  // checking, and an iterator for the end of the domain.
+  typedef std::pair<
+      std::vector<IterDomain*>::const_iterator,
+      std::vector<IterDomain*>::const_iterator>
+      iter_pair_t;
+
+  std::vector<iter_pair_t> iterators(domains.size());
+  for (size_t i = 0; i < domains.size(); i++) {
+    iterators[i] = std::make_pair(domains[i].begin(), domains[i].end());
+  }
+
+  auto empty = [](iter_pair_t& iter_pair) {
+    return iter_pair.first == iter_pair.second;
+  };
+
+  size_t candidate_i = 0;
+  size_t iterations_since_merge = 0;
+  IterDomain* last_id_checked = nullptr;
+
+  while (std::any_of(
+      iterators.begin(), iterators.end(), [](iter_pair_t iter_pair) {
+        return iter_pair.first != iter_pair.second;
+      })) {
+    TORCH_INTERNAL_ASSERT(
+        iterations_since_merge <= iterators.size(),
+        "Infinite loop detected in lower_expr_sort:mergeDomains.");
+    iterations_since_merge++;
+
+    if (candidate_i == iterators.size()) {
+      candidate_i = 0;
+    }
+    if (empty(iterators[candidate_i])) {
+      candidate_i++;
+      continue;
+    }
+
+    auto iter_dom_candidate = *iterators[candidate_i].first;
+    if (iter_dom_candidate == last_id_checked) {
+      candidate_i++;
+      continue;
+    }
+    last_id_checked = iter_dom_candidate;
+
+    bool candidate_is_next = true;
+
+    // Make sure this iter domain is in all first positions of all iter
+    // lists that contain it, otherwise it shouldn't be the next iter domain.
+    for (auto iterator : iterators) {
+      if (empty(iterator)) {
+        continue;
+      }
+      if (!map.areMapped(iter_dom_candidate, *iterator.first)) {
+        if (std::any_of(
+                iterator.first + 1,
+                iterator.second,
+                [&map, iter_dom_candidate](IterDomain* id) {
+                  return map.areMapped(iter_dom_candidate, id);
+                })) {
+          candidate_is_next = false;
+          break;
+        }
+      }
+    }
+
+    if (!candidate_is_next) {
+      candidate_i++;
+      continue;
+    }
+
+    merged_domains.emplace_back(map.getConcreteMappedID(iter_dom_candidate));
+
+    for (auto match_i : c10::irange(iterators.size())) {
+      if (empty(iterators[match_i])) {
+        continue;
+      }
+      if (map.areMapped(iter_dom_candidate, *iterators[match_i].first)) {
+        iterators[match_i] = std::make_pair(
+            iterators[match_i].first + 1, iterators[match_i].second);
+      }
+    }
+    iterations_since_merge = 0;
+  }
+
+  return merged_domains;
+}
 } // namespace
 
 // Disconect group from neighbors, and return edges that were disconnected
@@ -764,36 +861,47 @@ ExprGroup* ExprSegmentationSorter::makeMergedNode(
   // Merge the compute at domain of all edges going out from the newly joined
   // group. The val's we're looking for are from our consumer edges, but we want
   // to grab the producer val as that's the one we generate.
-  std::vector<IterDomain*> joined_ca_domains;
+  std::unordered_set<IterDomain*> ca_ids;
   for (auto consumer_group_edge : joined_groups->consumerEdges()) {
     auto producer_of_consumer_edge = consumer_group_edge->producer_val_;
     if (producer_of_consumer_edge->isA<TensorView>()) {
       auto tv = producer_of_consumer_edge->as<TensorView>();
-      std::vector<IterDomain*> local_ca_domains;
       for (size_t tv_i = 0; tv_i < tv->getComputeAtPosition(); tv_i++) {
-        local_ca_domains.push_back(tv->axis(tv_i));
+        ca_ids.emplace(GpuLower::current()->caLoopMap().getConcreteMappedID(
+            tv->axis(tv_i)));
       }
-      joined_ca_domains = mergeDomains(joined_ca_domains, local_ca_domains);
     }
   }
-  joined_groups->payload()->ca_domains_ = joined_ca_domains;
 
   // Merge the produce at domain of all edges coming into the newly joined
   // group. The val's we're looking for are from our producer edges, but we want
   // to grab the consumer val as that's the one we generate.
-  std::vector<IterDomain*> joined_pa_domains;
+  std::unordered_set<IterDomain*> pa_ids;
   for (auto producer_group_edge : joined_groups->producerEdges()) {
     auto consumer_of_producer_edge = producer_group_edge->consumer_val_;
     if (consumer_of_producer_edge->isA<TensorView>()) {
       auto tv = consumer_of_producer_edge->as<TensorView>();
-      std::vector<IterDomain*> local_pa_domains;
       for (size_t tv_i = 0; tv_i < tv->getMaxProducerPosition(); tv_i++) {
-        local_pa_domains.push_back(tv->axis(tv_i));
+        pa_ids.emplace(GpuLower::current()->caLoopMap().getConcreteMappedID(
+            tv->axis(tv_i)));
       }
-      joined_pa_domains = mergeDomains(joined_pa_domains, local_pa_domains);
     }
   }
-  joined_groups->payload()->pa_domains_ = joined_pa_domains;
+
+  auto all_ca_pa_ids = ca_ids;
+  all_ca_pa_ids.insert(pa_ids.begin(), pa_ids.end());
+
+  auto ordered_ids = getLocalDomainOrdering(
+      joined_groups->exprs(), GpuLower::current()->caLoopMap(), all_ca_pa_ids);
+
+  for (auto id : ordered_ids) {
+    if (ca_ids.count(id)) {
+      joined_groups->payload()->ca_domains_.emplace_back(id);
+    }
+    if (pa_ids.count(id)) {
+      joined_groups->payload()->pa_domains_.emplace_back(id);
+    }
+  }
 
   return joined_groups;
 }
@@ -928,6 +1036,17 @@ void ExprSegmentationSorter::mergeNodes() {
   });
 }
 
+// Two expression groups can be merged together if there's a value produced by
+// producer group, consumed by consumer group, where the compute at position
+// maps to the inner most compute at domain of the producer group and maps to
+// the inner most produce at domain of the consumer. If this value doesn't exist
+// we can't be certain these domains share the "next" inner most loop.
+//
+// We're looking for this because we're starting at the inner most loops of all
+// expressions, and looking for neighboring expressions that share inner loops.
+// Once we've found all the inner most loops that expressions share, we merge
+// them together, then look at the next inner most loop of the group and figure
+// out which other groups share this next inner most loop.
 bool ExprSegmentationSorter::supportedMerge(ExprGroup* sg1, ExprGroup* sg2) {
   auto producer_group = getProducer(sg1, sg2);
   auto consumer_group = sg1 == producer_group ? sg2 : sg1;
@@ -942,16 +1061,18 @@ bool ExprSegmentationSorter::supportedMerge(ExprGroup* sg1, ExprGroup* sg2) {
     return false;
   }
 
-  auto producer_domain = producer_group->payload()->ca_domains_;
-  auto consumer_domain = consumer_group->payload()->pa_domains_;
+  const auto& producer_ca_domain = producer_group->payload()->ca_domains_;
+  const auto& consumer_pa_domain = consumer_group->payload()->pa_domains_;
 
-  if (producer_domain.empty() && consumer_domain.empty()) {
+  if (producer_ca_domain.empty() && consumer_pa_domain.empty()) {
     return true;
   }
 
-  if (producer_domain.empty() || consumer_domain.empty()) {
+  if (producer_ca_domain.empty() || consumer_pa_domain.empty()) {
     return false;
   }
+
+  const auto& loop_map = GpuLower::current()->caLoopMap();
 
   for (auto edge : producer_group->consumerEdges()) {
     if (edge->to != consumer_group) {
@@ -970,23 +1091,23 @@ bool ExprSegmentationSorter::supportedMerge(ExprGroup* sg1, ExprGroup* sg2) {
         producer_val,
         " is consumed by ",
         consumer_val);
+
     auto producer_tv = producer_val->as<TensorView>();
+
     auto compute_at_pos = producer_tv->getComputeAtPosition();
     auto compute_at_dim = compute_at_pos > 0
-        ? producer_tv->axis(producer_tv->getComputeAtPosition() - 1)
+        ? producer_tv->axis((int)producer_tv->getComputeAtPosition() - 1)
         : nullptr;
 
     if (compute_at_dim == nullptr) {
       continue;
     }
 
-    if (!GpuLower::current()->caLoopMap().areMapped(
-            compute_at_dim, producer_domain.back())) {
+    if (!loop_map.areMapped(compute_at_dim, producer_ca_domain.back())) {
       continue;
     }
 
-    if (GpuLower::current()->caLoopMap().areMapped(
-            compute_at_dim, consumer_domain.back())) {
+    if (loop_map.areMapped(compute_at_dim, consumer_pa_domain.back())) {
       return true;
     }
   }

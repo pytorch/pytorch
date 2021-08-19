@@ -184,6 +184,13 @@ bool shouldVectorize(
 // ignore all broadcast axes.
 std::vector<TensorView*> getVectorizableInputsOutputs(TensorView* reference_tv);
 
+// Returns a vector of counts, size = reference_tv->getRootDomain().size(), each
+// entry [i] is the number of inputs/outputs that have a non-broadcast dimension
+// mapped to the corresponding dimension in reference_tv. Count includes
+// reference_tv if reference_tv is an input or output. Count is multiplied by
+// data type size.
+std::vector<int64_t> mappedInputsOutputs(TensorView* reference_tv);
+
 } // namespace scheduler_utils
 } // namespace cuda
 } // namespace fuser

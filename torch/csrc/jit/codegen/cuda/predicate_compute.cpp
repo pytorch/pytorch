@@ -201,12 +201,20 @@ void UnswitchPredicate::predicateOn(kir::Expr* tv_expr) {
 
   for (auto i : c10::irange(pred_info.first.size())) {
     auto pred = pred_info.first[i];
+    if (pred->isConst() && pred->value()) {
+      continue;
+    }
+
     const auto& root_ids = pred_info.second[i];
 
     bool add_pred = false;
 
     for (auto root_id : root_ids) {
       auto kir_root_id = gpu_lower->lowerValue(root_id)->as<kir::IterDomain>();
+
+      if (kir_root_id->isBroadcast()) {
+        continue;
+      }
 
       if (std::find(
               predicated_iter_dom_.begin(),

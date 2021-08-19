@@ -601,6 +601,37 @@ void ComputeAt::traverseForward() {
   }
 }
 
+void ComputeAt::resetMaxProducerPos(TensorView* consumer_tv) {
+  if (consumer_tv->definition() == nullptr) {
+    consumer_tv->setMaxProducer(0, true);
+  }
+
+  unsigned int new_consummer_pa_pos = 0;
+
+  // Re-compute the max producer position as one or more
+  //  of the producers of this consumer have updated their
+  //  compute at position.
+  for (auto inp : ir_utils::producerTvsOf(consumer_tv)) {
+    if (!inp->isFusionInput()) {
+      // Locate consumer's position that aligns with
+      //  the producer's new compute at axis.
+      unsigned int inp_ca_pos_to_consumer =
+          getConsumerPosAlignedToProducerCA(consumer_tv, inp);
+
+      // Populate the max consumer position required by
+      //  producer compute at.
+      new_consummer_pa_pos =
+          std::max(new_consummer_pa_pos, inp_ca_pos_to_consumer);
+    }
+  }
+
+  // After going through all the producers, decrease the produce
+  //  position of current consumer if needed.
+  if (new_consummer_pa_pos <= consumer_tv->getMaxProducerPosition()) {
+    consumer_tv->setMaxProducer(new_consummer_pa_pos, true);
+  }
+}
+
 void ComputeAt::hoistInnermostBroadcast() {
   auto fusion = producer_->fusion();
 
@@ -631,30 +662,7 @@ void ComputeAt::hoistInnermostBroadcast() {
   // Update the produce positions of all affected consumers
   for (auto running_consumer : consumers_to_update) {
     TORCH_INTERNAL_ASSERT(running_consumer->definition() != nullptr);
-    unsigned int new_consummer_pa_pos = 0;
-
-    // Re-compute the max producer position as one or more
-    //  of the producers of this consumer have updated their
-    //  compute at position.
-    for (auto inp : ir_utils::filterByType<TensorView>(
-             running_consumer->definition()->inputs())) {
-      if (!inp->isFusionInput()) {
-        // Locate consumer's position that aligns with
-        //  the producer's new compute at axis.
-        unsigned int inp_ca_pos_to_consumer =
-            getConsumerPosAlignedToProducerCA(running_consumer, inp);
-
-        // Populate the max consumer position required by
-        //  producer compute at.
-        new_consummer_pa_pos =
-            std::max(new_consummer_pa_pos, inp_ca_pos_to_consumer);
-      }
-    }
-    // After going through all the producers, decrease the produce
-    //  position of current consumer if needed.
-    if (new_consummer_pa_pos < running_consumer->getMaxProducerPosition()) {
-      running_consumer->setMaxProducer(new_consummer_pa_pos, true);
-    }
+    resetMaxProducerPos(running_consumer);
   }
 }
 
@@ -715,6 +723,27 @@ void ComputeAt::updateSiblings() {
   }
 }
 
+void ComputeAt::updateInputProduceAts() {
+  std::unordered_set<TensorView*> consumers_to_check;
+
+  // Find all tensor views that may have been modified
+  auto chains = producer_use_chains_;
+  if (common_consumer_ != nullptr) {
+    chains = tvChains(
+        DependencyCheck::getAllDependencyChains(producer_, common_consumer_));
+  }
+
+  for (auto chain : chains) {
+    if (chain.size() > 1 && chain[0]->isFusionInput()) {
+      consumers_to_check.emplace(chain[1]);
+    }
+  }
+
+  for (auto tv : consumers_to_check) {
+    resetMaxProducerPos(tv);
+  }
+}
+
 void ComputeAt::runPass() {
   FUSER_PERF_SCOPE("ComputeAt::runPass");
 
@@ -729,6 +758,9 @@ void ComputeAt::runPass() {
 
   // Update siblings of multi output expressions
   updateSiblings();
+
+  // Clear max producer position of consumers from fusion inputs.
+  updateInputProduceAts();
 }
 
 ComputeAt::ComputeAt(

@@ -1529,6 +1529,63 @@ std::vector<TensorView*> getVectorizableInputsOutputs(
   return vectorizable_tensors;
 }
 
+std::vector<int64_t> mappedInputsOutputs(TensorView* reference_tv) {
+  auto fusion = reference_tv->fusion();
+  FusionGuard fg(fusion);
+
+  // All input or output tensor views
+  std::vector<TensorView*> in_out_tvs;
+  {
+    auto inp_tvs = ir_utils::filterByType<TensorView>(fusion->inputs());
+    in_out_tvs.insert(in_out_tvs.end(), inp_tvs.begin(), inp_tvs.end());
+    auto out_tvs = ir_utils::filterByType<TensorView>(fusion->outputs());
+    in_out_tvs.insert(in_out_tvs.end(), out_tvs.begin(), out_tvs.end());
+  }
+
+  // Shouldn't matter which compute at map we use
+  auto ca_index_map = ComputeAtMap(ComputeAtMap::MappingMode::INDEX);
+  ca_index_map.build(fusion);
+
+  auto ref_root_domain = reference_tv->getMaybeRFactorDomain();
+  std::vector<int64_t> mapping_count(ref_root_domain.size(), 0);
+
+  // Map all inputs and output domains to reference tv domains
+  for (auto in_out_tv : in_out_tvs) {
+    auto in_out_tv_domain = in_out_tv->getRootDomain();
+    auto in_out_tv_domain_list = std::list<IterDomain*>(
+        in_out_tv_domain.begin(), in_out_tv_domain.end());
+    auto in_out_dtype_size = dataTypeSize(in_out_tv->getDataType().value());
+
+    for (size_t ref_i = 0; ref_i < ref_root_domain.size(); ref_i++) {
+      auto ref_id = ref_root_domain[ref_i];
+
+      // If reference id is broadcast or reduction
+      if (ref_id->isBroadcast() || ref_id->isReduction()) {
+        continue;
+      }
+      auto map_it = std::find_if(
+          in_out_tv_domain_list.begin(),
+          in_out_tv_domain_list.end(),
+          [&ref_id, &ca_index_map](IterDomain* in_out_tv_id) {
+            return ca_index_map.areMapped(in_out_tv_id, ref_id);
+          });
+
+      if (map_it == in_out_tv_domain_list.end()) {
+        continue;
+      }
+
+      // If input/output id is broadcast or reduction
+      if ((*map_it)->isBroadcast() || (*map_it)->isReduction()) {
+        continue;
+      }
+
+      mapping_count[ref_i] = mapping_count[ref_i] + (int64_t)in_out_dtype_size;
+      in_out_tv_domain_list.erase(map_it);
+    }
+  }
+  return mapping_count;
+}
+
 } // namespace scheduler_utils
 } // namespace cuda
 } // namespace fuser

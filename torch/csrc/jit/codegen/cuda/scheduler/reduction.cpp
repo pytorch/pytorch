@@ -282,16 +282,13 @@ ReductionParams innerReductionHeuristic(
       bdimx,
       bdimy,
       LaunchParams::UNINITIALIZED_VAL);
-
-  const char* debug_env = getenv("PYTORCH_NVFUSER_RED_SCHED_DEBUG");
-  if (debug_env && atoi(debug_env)) {
+  if (isDebugDumpEnabled(DebugDumpOption::SchedulerDebug)) {
     std::cerr << "\n===== Reduction Stats ========\n"
               << "num_elems_in_reduction: " << num_elems_in_reduction << "\n"
               << "num_outputs_for_reduction: " << num_outputs_for_reduction
               << "\n"
               << "n_tensor_inputs: " << n_tensor_inputs << "\n"
-              << "max_input_dtype_size: " << max_input_dtype_size << "\n"
-              << "vectorize_factor: " << vectorize_factor << std::endl;
+              << "max_input_dtype_size: " << max_input_dtype_size << std::endl;
     std::cerr << rparams.toString() << std::endl;
   }
 
@@ -531,15 +528,13 @@ ReductionParams OuterReductionHeuristic(
       bdimy,
       LaunchParams::UNINITIALIZED_VAL);
 
-  const char* debug_env = getenv("PYTORCH_NVFUSER_RED_SCHED_DEBUG");
-  if (debug_env && atoi(debug_env)) {
+  if (isDebugDumpEnabled(DebugDumpOption::SchedulerDebug)) {
     std::cerr << "\n===== Reduction Stats ========\n"
               << "num_elems_in_reduction: " << num_elems_in_reduction << "\n"
               << "num_outputs_for_reduction: " << num_outputs_for_reduction
               << "\n"
               << "n_tensor_inputs: " << n_tensor_inputs << "\n"
-              << "max_input_dtype_size: " << max_input_dtype_size << "\n"
-              << "vectorize_factor: " << vectorize_factor << std::endl;
+              << "max_input_dtype_size: " << max_input_dtype_size << std::endl;
     std::cerr << rparams.toString() << std::endl;
   }
   return rparams;

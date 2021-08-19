@@ -31,7 +31,6 @@ static void setupBroadcast(Fusion* fusion, DataType dtype, int bcast_axis) {
   std::vector<bool> bcast_pattern(2, false);
   bcast_pattern[bcast_axis] = true;
 
-
   if (is_fp16) {
     tv0 = castOp(DataType::Float, tv0);
     tv1 = castOp(DataType::Float, tv1);

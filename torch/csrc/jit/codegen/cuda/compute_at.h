@@ -76,6 +76,11 @@ class ComputeAt {
   // of producer
   void traverseForward();
 
+  // Looks at producer tensor views of consumer_tv, recomputes its max
+  // producer position, and sets max producer position. This function can
+  // only potentially lower the max producer position of consumer_tv.
+  void resetMaxProducerPos(TensorView* consumer_tv);
+
   // Undo the inlining of block broadcast at the innermost positions
   //  to avoid generating repeated block broadcasts
   void hoistInnermostBroadcast();
@@ -85,6 +90,12 @@ class ComputeAt {
   // produce at from tv to siblings. Run as final pass as it will invalidate the
   // computeAt map originally computed.
   void updateSiblings();
+
+  // Compute at pass requires tracking "maxProducerPosition" even if set simply
+  // from input tensor views. However, when lowering, we need a valid produce at
+  // position of all tensors, so inputs should never actually set their
+  // consumers maxProduceAt position.
+  void updateInputProduceAts();
 
   // Run the computeAt pass
   void runPass();

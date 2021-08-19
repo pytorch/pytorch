@@ -310,8 +310,7 @@ ReductionParams innerNormalizationHeuristic(
   rparams.tag = persistence_required ? "Inner normalization heuristic.\n"
                                      : "Multi inner reduction (norm heuristic)";
 
-  const char* debug_env = getenv("PYTORCH_NVFUSER_RED_SCHED_DEBUG");
-  if (debug_env && atoi(debug_env)) {
+  if (isDebugDumpEnabled(DebugDumpOption::SchedulerDebug)) {
     std::cerr << "\n===== Reduction Stats ========\n"
               << "num_elems_in_reduction: " << num_elems_in_reduction << "\n"
               << "num_outputs_for_reduction: " << num_outputs_for_reduction
@@ -320,8 +319,7 @@ ReductionParams innerNormalizationHeuristic(
               << "max_input_dtype_size: " << max_input_dtype_size << "\n"
               << "persistence_required: " << persistence_required << "\n"
               << "max_persistent_buffer_size: " << max_persistent_buffer_size
-              << "\n"
-              << "vectorize_factor: " << vectorize_factor << std::endl;
+              << std::endl;
     std::cerr << rparams.toString() << std::endl;
   }
 
@@ -555,8 +553,7 @@ ReductionParams OuterNormalizationHeuristic(
   rparams.tag = persistence_required ? "Outer normalization heuristic.\n"
                                      : "Multi outer reduction (norm heuristic)";
 
-  const char* debug_env = getenv("PYTORCH_NVFUSER_RED_SCHED_DEBUG");
-  if (debug_env && atoi(debug_env)) {
+  if (isDebugDumpEnabled(DebugDumpOption::SchedulerDebug)) {
     std::cerr << "\n===== Reduction Stats ========\n"
               << "num_elems_in_reduction: " << num_elems_in_reduction << "\n"
               << "num_outputs_for_reduction: " << num_outputs_for_reduction
@@ -565,8 +562,7 @@ ReductionParams OuterNormalizationHeuristic(
               << "max_input_dtype_size: " << max_input_dtype_size << "\n"
               << "persistence_required: " << persistence_required << "\n"
               << "max_persistent_buffer_size: " << max_persistent_buffer_size
-              << "\n"
-              << "vectorize_factor: " << vectorize_factor << std::endl;
+              << std::endl;
     std::cerr << rparams.toString() << std::endl;
   }
 

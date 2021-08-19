@@ -63,15 +63,33 @@ c10::optional<PointwiseParams> getPointwiseHeuristics(
 
   TORCH_INTERNAL_ASSERT(largest_out != nullptr);
 
+  // If zero dimensional, return default parameters
+  if (TensorDomain::noReductions(
+          TensorDomain::noBroadcasts(largest_out->domain()->domain()))
+          .size() == 0) {
+    if (data_cache && data_cache->isRecording()) {
+      data_cache->setVectorizableInputsOutputs(std::vector<TensorView*>());
+      data_cache->setMappedInputOutputDims(std::vector<int64_t>());
+    }
+    return PointwiseParams();
+  }
+
+  auto ref_root = largest_out->getMaybeRFactorDomain();
+
+  std::vector<int64_t> elem_counts(ref_root.size(), 1);
   int64_t n_elems = 1;
-  for (auto id : largest_out->getMaybeRFactorDomain()) {
+  for (size_t ref_i = 0; ref_i < ref_root.size(); ref_i++) {
     auto inferred_val =
-        runtime_info.expressionEvaluator().evaluate(id->extent());
+        runtime_info.expressionEvaluator().evaluate(ref_root[ref_i]->extent());
     TORCH_INTERNAL_ASSERT(
         inferred_val.has_value(),
         "Error inferring size for pointwise scheduler.");
+    elem_counts[ref_i] = inferred_val.value();
     n_elems *= inferred_val.value();
   }
+
+  const int64_t device_multiprocessor_count =
+      (int64_t)at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
 
   // TODO: Set to 1?
   int64_t max_input_dtype_size = 2;
@@ -84,9 +102,6 @@ c10::optional<PointwiseParams> getPointwiseHeuristics(
     n_tensors++;
   }
   n_tensors += std::distance(out_tvs.begin(), out_tvs.end());
-
-  const int64_t device_multiprocessor_count =
-      (int64_t)at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
 
   constexpr int64_t kSixteen = 16; // clang tidy
 
@@ -150,20 +165,196 @@ c10::optional<PointwiseParams> getPointwiseHeuristics(
     params.vectorize = true;
     params.inner_factor = vectorize_factor;
   }
+  /*
+   * 2D pointwise scheduling logic. What is expected is there's some
+   * broadcasting pattern which would make scheduling as a 2D problem more
+   * efficient than scheduling simply as a 1D problem.
+   *
+   * Mapping count holds how many bytes are in each dimension for both inputs
+   * and outputs relative to the reference tensor. What we're looking for is a
+   * break point in reference_tvs dimensions which separates the outer dimension
+   * and inner dimension of the problem mapped to 2D.
+   *
+   * break_point is computed assuming no reuse, ignoring parallelization
+   * limitations, and simply figures out which point best separates broadcasted
+   * dimensions. In other words, where's the point where we isolate the most
+   * broadcasted elements to one side.
+   *
+   * Once a break point is found, simply schedule the pointwise op as 2D
+   * balancing parallelization as best as possible.
+   */
+
+  // Ideal break point location
+  int64_t break_point = 0;
+
+  // Elements on the right of break point (without break point all are on the
+  // right)
+  int64_t right_elem_count = 0;
+
+  int64_t bdimx = kThreadX;
+
+  // bdimy may be used if the right side of the break point is not large and we
+  // need to expand block level parallelism into the left side of the break
+  // point.
+  int64_t bdimy = 1;
+
+  // In 2D scheduler gdimx is used to parallelize the left side of the break
+  // point.
+  int64_t gdimx = 1;
+
+  // gdimy is used if there's too much parallelization in the right side of the
+  // break point. We will expand grid parallelization into the right side of the
+  // break point with gdimx and use gdimy for the left side of the break point.
+  int64_t gdimy = 1;
+
+  HeuristicCacheAccessor<std::vector<int64_t>> mapping_count_accessor;
+  // TODO: move all these boilerplate code into the accessor class
+  // (follow up)
+  if (data_cache && !data_cache->isRecording()) {
+    mapping_count_accessor.writeTemporary(
+        data_cache->getMappedInputOutputDims());
+  } else {
+    mapping_count_accessor.writeNew(
+        scheduler_utils::mappedInputsOutputs(largest_out));
+    if (data_cache && data_cache->isRecording()) {
+      data_cache->setMappedInputOutputDims(mapping_count_accessor.read());
+    }
+  }
+
+  auto mapping_count = mapping_count_accessor.read();
+
+  {
+    // How much would this transfer cost if it was done as a 1-D schedule
+    int64_t transfer_size_1d = 1;
+
+    auto max_dims =
+        std::max_element(mapping_count.begin(), mapping_count.end());
+
+    for (int64_t i = 0; i < (int64_t)ref_root.size(); i++) {
+      transfer_size_1d = transfer_size_1d * elem_counts[i] * (*max_dims);
+    }
+
+    // If there isn't very much parallelism available, just use 1D scheduler
+    if (true || n_elems * 2 > device_multiprocessor_count * kThreadX) {
+      int64_t min_total_transfer = std::numeric_limits<int64_t>::max();
+
+      for (int64_t break_point_i = 0; break_point_i < (int64_t)ref_root.size();
+           break_point_i++) {
+        // Number of elements in the right side of reference tv with
+        // break_point_i
+        int64_t cur_right_elem_count = 1;
+        for (int64_t right_i = break_point_i;
+             right_i < (int64_t)ref_root.size();
+             right_i++) {
+          cur_right_elem_count = cur_right_elem_count * elem_counts[right_i];
+        }
+
+        if (cur_right_elem_count <= 1) {
+          continue;
+        }
+
+        auto cur_left_elem_count = n_elems / cur_right_elem_count;
+        if (cur_left_elem_count <= 1) {
+          continue;
+        }
+
+        auto left_max_dims = std::max_element(
+            mapping_count.begin(), mapping_count.begin() + break_point_i);
+
+        auto right_max_dims = std::max_element(
+            mapping_count.begin() + break_point_i, mapping_count.end());
+
+        // Estimate transfer cost with this break point
+        int64_t cur_transfer_size = 1;
+
+        for (int64_t left_i = 0; left_i < break_point_i; left_i++) {
+          cur_transfer_size =
+              cur_transfer_size * elem_counts[left_i] * (*left_max_dims);
+        }
+
+        for (int64_t right_i = break_point_i;
+             right_i < (int64_t)ref_root.size();
+             right_i++) {
+          cur_transfer_size =
+              cur_transfer_size * elem_counts[right_i] * (*right_max_dims);
+        }
+
+        //  Continue if this break point doesn't save at least 10% of 1D
+        //  scheduling.
+        if (cur_transfer_size >= min_total_transfer ||
+            cur_transfer_size * 10 >= transfer_size_1d * 9) {
+          continue;
+        }
+
+        // Don't limit unroll factor with break point
+        if (cur_right_elem_count < max_unroll_factor) {
+          continue;
+        }
+
+        bdimx = std::min(
+            ceilDiv(cur_right_elem_count, max_unroll_factor), kThreadX);
+        bdimy = 1;
+        gdimy = 1;
+        // Put remainder in bdimy if there's at least a wave of grid level
+        // parallelism.
+        if (cur_left_elem_count > device_multiprocessor_count) {
+          bdimy = kThreadX / bdimx;
+        }
+        auto remainder_left = ceilDiv(cur_left_elem_count, bdimy);
+        auto remainder_right =
+            ceilDiv(cur_right_elem_count, bdimy * bdimx * max_unroll_factor);
+
+        // Use this break point
+        break_point = break_point_i;
+        min_total_transfer = cur_transfer_size;
+        right_elem_count = cur_right_elem_count;
+
+        gdimx = remainder_left;
+        if (remainder_right > 1 && bdimy <= 1) {
+          gdimy = remainder_right;
+        }
+      }
+    }
+  }
+
+  TORCH_INTERNAL_ASSERT(right_elem_count > 0 || params.break_point == 0);
+
+  TORCH_INTERNAL_ASSERT(!(bdimy > 1 && gdimy > 1));
+  params.break_point = break_point;
+  params.split_block = bdimy > 1;
+
+  params.lparams.bind(bdimx, ParallelType::TIDx);
+  if (params.split_block) {
+    params.lparams.bind(bdimy, ParallelType::TIDy);
+  }
+  if (gdimy > 65535) {
+    params.split_grid_y_dim = true;
+  }
+
+  if (isDebugDumpEnabled(DebugDumpOption::SchedulerDebug)) {
+    std::cerr << "\n===== Pointwise Stats ========\n"
+              << "num_elems: " << n_elems << "\n"
+              << "mapping_count: " << mapping_count << "\n"
+              << "elem_counts: " << elem_counts << "\n"
+              << "n_tensor_inputs: " << n_tensors << "\n"
+              << "max_input_dtype_size: " << max_input_dtype_size << "\n"
+              << "vectorize_factor: " << vectorize_factor << std::endl;
+    std::cerr << params.toString() << std::endl;
+  }
 
   return params;
 }
 
-bool schedulePointwise(
+// TODO: remove or return launch parameters
+LaunchParams schedulePointwise(
     Fusion* fusion,
     const at::ArrayRef<c10::IValue>& runtime_inputs) {
   FUSER_PERF_SCOPE("scheduleFusion");
   auto params = getPointwiseHeuristics(fusion, runtime_inputs);
-  if (!params.has_value()) {
-    return false;
-  }
+  TORCH_INTERNAL_ASSERT(
+      params.has_value(), "Could not schedule pointwise operation.");
   schedulePointwise(fusion, params.value());
-  return true;
+  return params.value().lparams;
 }
 
 namespace {
@@ -184,7 +375,7 @@ size_t nRootDims(const TensorView* tv) {
 // input/output caches)
 void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
   FusionGuard fg(fusion);
-
+  // fusion->printMath();
   // Make sure we don't have global memory set on intermediate tensors from
   // fusion segmentation
   scheduler_utils::clearMemorySpace(fusion);
@@ -303,41 +494,140 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
 
   auto all_tvs = ir_utils::allTvs(fusion);
 
-  scheduler_utils::mergeNonReduction(reference_tv);
-
-  if (params.vectorize) {
-    // Vectorize
-    reference_tv->split(0, params.inner_factor);
-    // Unswitch
-    reference_tv->split(0, 1);
-    // Threads
-    reference_tv->split(0, kThreadX);
-
-    reference_tv->axis(0)->parallelize(ParallelType::BIDx);
-    reference_tv->axis(1)->parallelize(ParallelType::TIDx);
-    reference_tv->axis(2)->parallelize(ParallelType::Unswitch);
-    // Aggressively mark with vectorized and cleanup later. That way we don't
-    // have to manually specify parallelization outside the reference.
-    reference_tv->axis(-1)->parallelize(ParallelType::Vectorize);
-
-    //[BIDx, TIDx, Unswitch, Vectorization]
-    // To make consistent with unrolling:
-    reference_tv->reorder({{1, 3}, {2, 1}, {3, 2}});
-    //[BIDx, Unswitch, Vectorization, TIDx]
-  } else {
-    // Threads
-    reference_tv->split(0, kThreadX);
-    // Unroll
-    reference_tv->split(0, params.inner_factor);
-    // Unswitch
-    reference_tv->split(0, 1);
-
-    // [BIDx, Unswitch, Unroll, TIDx]
-    reference_tv->axis(0)->parallelize(ParallelType::BIDx);
-    reference_tv->axis(1)->parallelize(ParallelType::Unswitch);
-    reference_tv->axis(3)->parallelize(ParallelType::TIDx);
+  // Merge right side of break point
+  int rhs_i = -1;
+  for (int i = (int)reference_tv->nDims(); i > (int)params.break_point; i--) {
+    auto axis_i = i - 1;
+    if (reference_tv->axis(axis_i)->isBroadcast() ||
+        reference_tv->axis(axis_i)->isReduction()) {
+      continue;
+    }
+    if (rhs_i == -1) {
+      rhs_i = axis_i;
+    } else {
+      reference_tv->merge(axis_i, rhs_i);
+      rhs_i = axis_i;
+    }
+  }
+  if (rhs_i >= 0) {
+    // If there's an rhs
+    reference_tv->reorder({{rhs_i, -1}});
   }
 
+  // Merge left side of break point
+  int lhs_i = -1;
+  for (int i = (int)params.break_point; i > 0; i--) {
+    auto axis_i = i - 1;
+    if (reference_tv->axis(axis_i)->isBroadcast() ||
+        reference_tv->axis(axis_i)->isReduction()) {
+      continue;
+    }
+    if (lhs_i == -1) {
+      lhs_i = axis_i;
+    } else {
+      reference_tv->merge(axis_i, lhs_i);
+      lhs_i = axis_i;
+    }
+  }
+
+  // Right (inner merged) dimension is at inner most position, left (outer
+  // merged) dimension is at lhs_i. Order as [lhs_i, rhs_i, unmerged...]
+  reference_tv->reorder({{lhs_i, 0}, {-1, 1}});
+
+  if (params.break_point) {
+    // 2D parallelization scheme
+    TORCH_INTERNAL_ASSERT(rhs_i >= 0 && lhs_i >= 0);
+
+    if (params.vectorize) {
+      reference_tv->split(1, params.inner_factor);
+      reference_tv->split(1, NamedScalar::getParallelDim(ParallelType::TIDx));
+      reference_tv->split(0, 1);
+      // [outer, Unswitch | i-remainder, TIDx, Vectorization]
+      reference_tv->axis(1)->parallelize(ParallelType::Unswitch);
+      reference_tv->axis(3)->parallelize(ParallelType::TIDx);
+
+      // Aggressively mark with vectorized and cleanup later. That way we
+      // don't have to manually specify parallelization outside the reference.
+      reference_tv->axis(4)->parallelize(ParallelType::Vectorize);
+
+      // [outer, Unswitch | i-remainder, TIDx, Vectorization]
+      // To make consistent with unrolling:
+      reference_tv->reorder({{1, 2}, {2, 1}, {3, 4}, {4, 3}});
+      //[outer | i-remainder, Unswitch, Vectorization, TIDx]
+    } else {
+      reference_tv->split(1, NamedScalar::getParallelDim(ParallelType::TIDx));
+      reference_tv->split(1, params.inner_factor);
+
+      reference_tv->split(0, 1);
+      // [outer, unswitch | i-remainder, unroll, TIDx ]
+      reference_tv->reorder({{1, 2}});
+      // [outer, i-remainder, unswitch, unroll, TIDx ]
+      reference_tv->axis(2)->parallelize(ParallelType::Unswitch);
+      reference_tv->axis(4)->parallelize(ParallelType::TIDx);
+
+      //[outer | i-remainder, Unswitch, Unroll, TIDx]
+    }
+
+    // Move out of the way to furthest left point
+    reference_tv->reorder({{1, 0}});
+
+    //[i-remainder | outer | Unswitch, Unroll, TIDx]
+    if (params.split_block) {
+      reference_tv->split(1, NamedScalar::getParallelDim(ParallelType::TIDy));
+      // [i-remainder | BIDx TIDy | Unswitch, Unroll, TIDx]
+      reference_tv->axis(1)->parallelize(ParallelType::BIDx);
+      reference_tv->axis(2)->parallelize(ParallelType::TIDy);
+    } else {
+      // [BIDy | BIDx | Unswitch, Unroll, TIDx]
+      reference_tv->axis(1)->parallelize(ParallelType::BIDx);
+      if (params.split_grid_y_dim) {
+        reference_tv->split(0, 65535);
+        reference_tv->axis(1)->parallelize(ParallelType::BIDy);
+      } else {
+        reference_tv->axis(0)->parallelize(ParallelType::BIDy);
+      }
+    }
+
+  } else {
+    // 1D Scheduler
+    TORCH_INTERNAL_ASSERT(rhs_i >= 0 && lhs_i == -1);
+    // right hand side exists and is the only axis we care to schedule, move it
+    // from the inner most position to left most.
+    reference_tv->reorder({{-1, 0}});
+
+    if (params.vectorize) {
+      // Vectorize
+      reference_tv->split(0, params.inner_factor);
+      // Unswitch
+      reference_tv->split(0, 1);
+      // Threads
+      reference_tv->split(0, kThreadX);
+
+      reference_tv->axis(0)->parallelize(ParallelType::BIDx);
+      reference_tv->axis(1)->parallelize(ParallelType::TIDx);
+      reference_tv->axis(2)->parallelize(ParallelType::Unswitch);
+      // Aggressively mark with vectorized and cleanup later. That way we don't
+      // have to manually specify parallelization outside the reference.
+      reference_tv->axis(-1)->parallelize(ParallelType::Vectorize);
+
+      //[BIDx, TIDx, Unswitch, Vectorization]
+      // To make consistent with unrolling:
+      reference_tv->reorder({{1, 3}, {2, 1}, {3, 2}});
+      //[BIDx, Unswitch, Vectorization, TIDx]
+    } else {
+      // Threads
+      reference_tv->split(0, kThreadX);
+      // Unroll
+      reference_tv->split(0, params.inner_factor);
+      // Unswitch
+      reference_tv->split(0, 1);
+
+      // [BIDx, Unswitch, Unroll, TIDx]
+      reference_tv->axis(0)->parallelize(ParallelType::BIDx);
+      reference_tv->axis(1)->parallelize(ParallelType::Unswitch);
+      reference_tv->axis(3)->parallelize(ParallelType::TIDx);
+    }
+  }
   TransformPropagator::from(reference_tv);
   scheduler_utils::parallelizeAllLike(reference_tv, all_tvs);
 

@@ -1459,7 +1459,8 @@ class TORCH_CUDA_CU_API ForLoop final : public Expr {
   bool isUnrollable() const {
     return start()->isConstScalar() && stop()->isConstScalar() &&
         !iter_domain()->isThread() && !iter_domain()->isBroadcast() &&
-        !(start()->isZeroInt() && stop()->isOneInt());
+        !(start()->isZeroInt() && stop()->isOneInt()) &&
+        iter_domain()->parallelType() != ParallelType::Vectorize;
   }
 
  private:

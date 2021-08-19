@@ -229,6 +229,7 @@ class TORCH_CUDA_CU_API HeuristicSummary {
     switch (heuristic_) {
       case ScheduleHeuristic::PointWise:
         TORCH_INTERNAL_ASSERT(vectorizable_inputs_outputs_);
+        TORCH_INTERNAL_ASSERT(mapped_input_output_dims_);
         break;
       case ScheduleHeuristic::Reduction:
         TORCH_INTERNAL_ASSERT(reduction_tvs_);
@@ -323,6 +324,18 @@ class TORCH_CUDA_CU_API HeuristicSummary {
     return scope_persistence_factor_map_.get();
   }
 
+  void setMappedInputOutputDims(const std::vector<int64_t>& input) {
+    TORCH_INTERNAL_ASSERT(recording_);
+
+    if (!mapped_input_output_dims_) {
+      mapped_input_output_dims_ = std::make_unique<std::vector<int64_t>>(input);
+    }
+  }
+
+  auto* getMappedInputOutputDims() {
+    return mapped_input_output_dims_.get();
+  }
+
  private:
   ScheduleHeuristic heuristic_;
   bool recording_ = true;
@@ -335,6 +348,7 @@ class TORCH_CUDA_CU_API HeuristicSummary {
   std::unique_ptr<bool> has_post_reduction_bcast_;
   std::unique_ptr<bool> supported_post_reduction_fusion_;
   std::unique_ptr<ScopedPersistenceFactorMap> scope_persistence_factor_map_;
+  std::unique_ptr<std::vector<int64_t>> mapped_input_output_dims_;
 };
 
 // A temporary utility class to save some boilerplate code when

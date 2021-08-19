@@ -42,6 +42,18 @@ std::string toString(ReductionParams rparams) {
 
 std::string toString(PointwiseParams params) {
   std::stringstream ss;
+  if (params.break_point) {
+    ss << "2D Schedule at " << params.break_point << "/";
+    if (params.split_block) {
+      ss << " Split block into y-dim/";
+    }
+    if (params.split_grid_y_dim) {
+      ss << " Split y grid dim/";
+    }
+  } else {
+    ss << "1D"
+       << "/";
+  }
   if (params.inner_factor > 1) {
     if (params.vectorize) {
       ss << "Vectorize, Factor: " << params.inner_factor;

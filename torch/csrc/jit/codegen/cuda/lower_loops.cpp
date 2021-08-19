@@ -90,7 +90,7 @@ void LoopNestGenerator::pushFront(kir::Expr* expr) {
   }
 }
 
-void LoopNestGenerator::handle(const Expr* expr) {
+void LoopNestGenerator::handle(Expr* expr) {
   const auto gpu_lower = GpuLower::current();
   kir::IrBuilder ir_builder(gpu_lower->kernel());
 
@@ -165,7 +165,42 @@ void LoopNestGenerator::handle(const Expr* expr) {
   auto n_loops_to_close =
       std::distance(last_for_loop_matched, for_loops_.end());
 
-  for (int64_t i = 0; i < n_loops_to_close; i++) {
+  TORCH_INTERNAL_ASSERT(
+      n_loops_to_close >= 0 &&
+          n_loops_to_close <= (std::ptrdiff_t)for_loops_.size(),
+      "Tried to close an invalid number of loops: ",
+      n_loops_to_close);
+
+  if (max_close < n_loops_to_close && max_close > 0) {
+    // Figure out where the last for loop matches from out_tv, go until the
+    // max_close loop marked from previous tv's producer domain. Make sure
+    // none of these domains are actually present in current out_tv. If these
+    // loops map to current out_tv, it should be responsible for deciding if
+    // they stay or go, this could result from an invalid compute at topology
+    // on the DAG or bad expression sorting.
+    auto for_loops_it = for_loops_.end() - n_loops_to_close;
+    auto for_loops_it_end = for_loops_.end() - max_close;
+
+    for (; for_loops_it != for_loops_it_end; for_loops_it++) {
+      TORCH_INTERNAL_ASSERT(
+          std::none_of(
+              loop_structure_it,
+              loop_structure.end(),
+              [&gpu_lower, &for_loops_it](IterDomain* loop_structure_id) {
+                // Check loop structure doesn't map for_loops in for loop map
+                auto id0 = (*for_loops_it)->iter_domain();
+                auto id1 = gpu_lower->lowerValue(loop_structure_id)
+                               ->as<kir::IterDomain>();
+                return gpu_lower->caLoopMap().areMapped(id0, id1);
+              }),
+          "Invalid loop found to close.");
+    }
+
+    n_loops_to_close = std::min(n_loops_to_close, max_close);
+  }
+
+  for (int64_t i_loop_close = 0; i_loop_close < n_loops_to_close;
+       i_loop_close++) {
     closeFor();
   }
 
@@ -174,6 +209,23 @@ void LoopNestGenerator::handle(const Expr* expr) {
     openFor(*loop_structure_it);
   }
 
+  if (out_tv->getMaxProducerPosition() == 0) {
+    max_close = -1;
+  } else {
+    auto produce_at_id = loop_structure[out_tv->getMaxProducerPosition() - 1];
+    auto max_close_loop = std::find_if(
+        for_loops_.begin(),
+        for_loops_.end(),
+        [&produce_at_id, &gpu_lower](kir::ForLoop* fl) {
+          auto produce_at_lowered_it =
+              gpu_lower->lowerValue(produce_at_id)->as<kir::IterDomain>();
+          return gpu_lower->caParallelMap().areMapped(
+              produce_at_lowered_it, fl->iter_domain());
+        });
+
+    max_close = std::distance(max_close_loop, for_loops_.end());
+    max_close = max_close > 0 ? max_close - 1 : max_close;
+  }
   pushFront(gpu_lower->lowerExpr(expr));
 }
 

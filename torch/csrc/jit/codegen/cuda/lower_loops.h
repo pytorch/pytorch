@@ -45,7 +45,7 @@ class TORCH_CUDA_CU_API LoopNestGenerator {
   // Appends an expression to the current scope
   void pushFront(kir::Expr* expr);
 
-  void handle(const Expr*);
+  void handle(Expr* expr);
 
   // Run the pass and accumulate output in lowered_exprs_
   void generate(const std::vector<Expr*>& exprs);
@@ -57,6 +57,9 @@ class TORCH_CUDA_CU_API LoopNestGenerator {
   // Keep all for loops conveniently to make unrolling easier, basically just a
   // stack of the active for_loops
   std::vector<kir::ForLoop*> for_loops_;
+
+  // How many loops can the next iteration close
+  std::ptrdiff_t max_close = -1;
 };
 
 } // namespace cuda

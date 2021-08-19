@@ -171,12 +171,7 @@ TensorDomain* IndexReferenceReplay::computeReplay() {
     }
 
     // Make a copy of the root_id for the reference to "own"
-    // TODO: Further investigation is needed.
-    // Switching to `IterDomain* root_id_copy = root_id->clone();` breaks cpp
-    // test `NVFuserTest.FusionBNBackwardRepro2_CUDA`, which suggests that the
-    // issue here is not the ownership.
-    IterDomain* root_id_copy = new IterDomain(
-        root_id->start(), root_id->extent(), root_id->getParallelType());
+    IterDomain* root_id_copy = root_id->clone();
 
     // Initialize root axes, concrete map, and leaf map for replay.
     root_axes.push_back(root_id_copy);

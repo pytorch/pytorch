@@ -2100,9 +2100,14 @@ Index::getReferenceRootPredicates(
   // If unswitch don't directly use indices from for loop, use for loop extent
   // minus 1
   if (unswitch) {
+    TORCH_INTERNAL_ASSERT(
+        loops.size() <= reference_domain->nDims(),
+        "Invalid reference generated.");
     bool within_unswitch = false;
     const auto one = ir_builder.create<kir::Int>(1);
-    for (auto loop : loops) {
+    for (size_t loop_i = 0; loop_i < loops.size(); loop_i++) {
+      auto loop = loops[loop_i];
+      auto ref_id = reference_domain->axis(loop_i);
       if (loop->iter_domain()->parallelType() == ParallelType::Unroll ||
           loop->iter_domain()->parallelType() == ParallelType::Unswitch ||
           loop->iter_domain()->parallelType() == ParallelType::Vectorize) {
@@ -2110,10 +2115,12 @@ Index::getReferenceRootPredicates(
       }
 
       if (within_unswitch) {
-        if (loop->iter_domain()->isBroadcast()) {
-          // Start with a thread binding but still on a broadcast can send
-          // indices through to predicates even if they're not needed below.
-          // Just don't bind anything to the broadcast dim.
+        // Rely on the reference to check broadcasting. The for loop could be
+        // broadcasted on a constant value from an unroll split. Since reference
+        // may convert this to an iter domain, that for loop could be valid to
+        // generate predication from.
+        if (ref_id->isBroadcast()) {
+          // Ignore indexing into broadcasted dimensions.
           continue;
         } else if (loop->iter_domain()->isThread()) {
           loop_to_ind_map[loop] = loop->start();
