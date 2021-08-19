@@ -16,15 +16,24 @@ from torch.testing._internal.common_utils import (
     run_tests,
     IS_WINDOWS,
     IS_MACOS,
-    sandcastle_skip_if,
 )
 
 
 # timer is not supported on windows or macos
 if not (IS_WINDOWS or IS_MACOS):
+    # func2 should time out
+    def func2(n, mp_queue):
+        if mp_queue is not None:
+            timer.configure(timer.LocalTimerClient(mp_queue))
+        if n > 0:
+            with timer.expires(after=0.1):
+                func2(n - 1, None)
+                time.sleep(0.2)
+
     class LocalTimerTest(unittest.TestCase):
         def setUp(self):
-            self.mp_queue = mp.Queue()
+            self.ctx = mp.get_context('spawn')
+            self.mp_queue = self.ctx.Queue()
             self.max_interval = 0.01
             self.server = timer.LocalTimerServer(self.mp_queue, self.max_interval)
             self.server.start()
@@ -80,15 +89,7 @@ if not (IS_WINDOWS or IS_MACOS):
 
             func(4)
 
-            # func2 should time out
-            def func2(n):
-                if n > 0:
-                    with timer.expires(after=0.1):
-                        func2(n - 1)
-                        time.sleep(0.2)
-
-            ctx = mp.get_context('spawn')
-            p = ctx.Process(target=func2, args=(2,))
+            p = self.ctx.Process(target=func2, args=(2, self.mp_queue))
             p.start()
             p.join()
             self.assertEqual(-signal.SIGKILL, p.exitcode)
