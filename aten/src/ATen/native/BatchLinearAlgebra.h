@@ -37,7 +37,7 @@ template <class scalar_t, class value_t = scalar_t>
 void lapackSyevd(char jobz, char uplo, int n, scalar_t* a, int lda, value_t* w, scalar_t* work, int lwork, value_t* rwork, int lrwork, int* iwork, int liwork, int* info);
 
 template <class scalar_t>
-void lapackTriangularSolve(char uplo, char trans, char diag, int n, int nrhs, scalar_t* a, int lda, scalar_t* b, int ldb, int* info);
+void lapackTriangularSolve(char side, char uplo, char trans, char diag, int n, int nrhs, scalar_t* a, int lda, scalar_t* b, int ldb);
 
 template <class scalar_t>
 void lapackGels(char trans, int m, int n, int nrhs,
@@ -210,11 +210,10 @@ DECLARE_DISPATCH(lstsq_fn, lstsq_stub);
 
 using triangular_solve_fn = void (*)(
     Tensor& /*A*/,
-    Tensor& /*b*/,
-    Tensor& /*infos*/,
+    Tensor& /*B*/,
+    bool /*left*/,
     bool /*upper*/,
-    bool /*transpose*/,
-    bool /*conjugate_transpose*/,
+    char /*transpose*/,
     bool /*unitriangular*/);
 DECLARE_DISPATCH(triangular_solve_fn, triangular_solve_stub);
 
