@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/frontend/schema_matching.h>
+#include "ATen/core/jit_type_base.h"
 
 #include <ATen/core/jit_type.h>
 #include <c10/util/irange.h>
@@ -192,6 +193,7 @@ static Value* tryMatchArgument(
 
       if (auto pt = value->type()->cast<TensorType>()) {
         if (pt->isInferredType()) {
+          std::cout << "F: " << pt->str() << std::endl;
           std::string inferred_type_hint;
           inferred_type_hint = c10::str(
               "Inferred the value for argument '",

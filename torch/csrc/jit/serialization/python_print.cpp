@@ -1420,7 +1420,6 @@ struct PythonPrintImpl {
         body_ << ss->str() << "\n";
       }
 
-      // TODO fields
       for (auto& method : classType->methods()) {
         printFunction(*method);
       }

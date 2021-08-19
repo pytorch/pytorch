@@ -2018,7 +2018,6 @@ void initJitScriptBindings(PyObject* module) {
              const std::vector<FunctionDefaults>& defaults) {
             TORCH_INTERNAL_ASSERT(methodDefs.size() == methodRcbs.size());
             TORCH_INTERNAL_ASSERT(properties.size() == propertyRcbs.size());
-
             std::vector<ResolverPtr> methodResolvers, propertyResolvers;
             methodResolvers.reserve(methodRcbs.size());
             for (auto& callback : methodRcbs) {

@@ -9,6 +9,7 @@ from typing import Dict, List, Set, Type
 
 import torch._jit_internal as _jit_internal
 from torch.jit.frontend import get_default_args, get_jit_class_def, get_jit_def, get_class_properties
+from torch._jit_internal import is_ignored_fn
 from torch.jit._builtins import _find_builtin
 from torch.jit._check import AttributeTypeIsSupportedChecker
 from torch.jit._state import _python_cu, _add_script_class, _get_script_class
@@ -69,12 +70,19 @@ def make_stubs_from_exported_methods(mod):
     stubs = []
     for name in dir(mod):
         item = getattr(mod, name, None)
-        if (
-            _jit_internal.get_torchscript_modifier(item)
-            is _jit_internal.FunctionModifiers.EXPORT
-        ):
+        is_exported = _jit_internal.get_torchscript_modifier(item) is _jit_internal.FunctionModifiers.EXPORT
+        if is_exported:
             stubs.append(make_stub_from_method(mod, name))
+    return stubs
 
+def make_stubs_from_exported_and_forward_methods(mod):
+    stubs = []
+    for name in dir(mod):
+        item = getattr(mod, name, None)
+        is_exported = _jit_internal.get_torchscript_modifier(item) is _jit_internal.FunctionModifiers.EXPORT
+        is_forward = name == "forward"
+        if is_exported or is_forward:
+            stubs.append(make_stub_from_method(mod, name))
     return stubs
 
 def jit_ignored_properties(module):
@@ -447,9 +455,9 @@ def create_script_module(nn_module, stubs_fn, share_types=True, is_tracing=False
     concrete_type = get_module_concrete_type(nn_module, share_types)
     if not is_tracing:
         AttributeTypeIsSupportedChecker().check(nn_module)
-    return create_script_module_impl(nn_module, concrete_type, stubs_fn)
+    return create_script_module_impl(nn_module, concrete_type, stubs_fn, is_tracing)
 
-def create_script_module_impl(nn_module, concrete_type, stubs_fn):
+def create_script_module_impl(nn_module, concrete_type, stubs_fn, is_tracing):
     """
     Convert an nn.Module to a RecursiveScriptModule.
 
@@ -460,6 +468,8 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
     """
     cpp_module = torch._C._create_module_with_type(concrete_type.jit_type)
     method_stubs = stubs_fn(nn_module)
+    for i in method_stubs:
+        print("HI", i)
     property_stubs = get_property_stubs(nn_module)
     hook_stubs, pre_hook_stubs = get_hook_stubs(nn_module)
 
@@ -487,8 +497,10 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
                 scripted = orig_value
             else:
                 # always reuse the provided stubs_fn to infer the methods to compile
-                scripted = create_script_module_impl(orig_value, sub_concrete_type, stubs_fn)
-
+                if stubs_fn == make_stubs_from_exported_methods:
+                    scripted = create_script_module_impl(orig_value, sub_concrete_type, make_stubs_from_exported_and_forward_methods, is_tracing)
+                else:
+                    scripted = create_script_module_impl(orig_value, sub_concrete_type, stubs_fn, is_tracing)
             cpp_module.setattr(name, scripted)
             script_module._modules[name] = scripted
 
@@ -512,7 +524,7 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
     script_module = torch.jit.RecursiveScriptModule._construct(cpp_module, init_fn)
 
     # Compile methods if necessary
-    if concrete_type not in concrete_type_store.methods_compiled:
+    if (concrete_type not in concrete_type_store.methods_compiled):
         create_methods_and_properties_from_stubs(concrete_type, method_stubs, property_stubs)
         # Create hooks after methods to ensure no name collisions between hooks and methods.
         # If done before, hooks can overshadow methods that aren't exported.
@@ -861,7 +873,10 @@ def compile_unbound_method(concrete_type, fn):
     with torch._jit_internal._disable_emit_hooks():
         # We don't want to call the hooks here since the graph that is calling
         # this function is not yet complete
+        print("ENTERING UNBOUND", fn)
+        lines = inspect.getsource(fn)
         create_methods_and_properties_from_stubs(concrete_type, (stub,), ())
+        print("EXITING UNBOUND")
     return stub
 
 def lazy_bind(concrete_type, unbound_method):

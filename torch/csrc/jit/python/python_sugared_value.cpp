@@ -651,6 +651,9 @@ std::shared_ptr<SugaredValue> ModuleValue::tryGetAttr(
     auto stub =
         py::module::import("torch.jit._recursive")
             .attr("compile_unbound_method")(concreteType_, unboundMethod);
+    if (field == "forward") {
+      std::cout << "HI\n";
+    }
     TORCH_INTERNAL_ASSERT(!stub.is_none());
     // Look up the attribute again, it will be available as a compiled method.
     return attr(loc, m, field);

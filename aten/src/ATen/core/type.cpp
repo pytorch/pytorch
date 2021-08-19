@@ -1117,6 +1117,9 @@ InterfaceTypePtr InterfaceType::create(QualifiedName qualifiedName, bool is_modu
 }
 
 void ClassType::addMethod(torch::jit::Function* method) {
+  if (method->name() == "forward" && repr_str().find("__torch__.LSTMLayer") == 0) {
+    auto f = findMethod(method->name());
+  }
   TORCH_CHECK(
       findMethod(method->name()) == nullptr,
       "Can't redefine method: ",

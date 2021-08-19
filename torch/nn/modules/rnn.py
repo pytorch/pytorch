@@ -249,6 +249,7 @@ class RNNBase(Module):
             max_batch_size = input.size(0) if self.batch_first else input.size(1)
             sorted_indices = None
             unsorted_indices = None
+
         if hx is None:
             input = cast(Tensor, input)
             num_directions = 2 if self.bidirectional else 1
@@ -656,7 +657,7 @@ class LSTM(RNNBase):
                 ) -> Tuple[PackedSequence, Tuple[Tensor, Tensor]]:  # noqa: F811
         pass
 
-    def forward(self, input, hx=None):  # noqa: F811
+    def forward(self, input, hx : Optional[Tuple[Tensor, Tensor]]=None):  # noqa: F811
         orig_input = input
         # xxx: isinstance check needs to be in conditional for TorchScript to compile
         if isinstance(orig_input, PackedSequence):
