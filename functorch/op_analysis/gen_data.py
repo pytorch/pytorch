@@ -39,7 +39,7 @@ def annotate_ops(ops, is_unique):
             categorization['conv'] += 1
             i['meta'] = 'conv'
             continue
-        if not is_unique and 'out' in i['full_name']:
+        if not is_unique and 'out' in i['full_name'].lower():
             categorization['out'] += 1
             i['meta'] = 'out'
             continue
