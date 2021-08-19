@@ -1733,7 +1733,7 @@ Computes the solution of a square system of linear equations with a unique solut
 
 Letting :math:`\mathbb{K}` be :math:`\mathbb{R}` or :math:`\mathbb{C}`,
 this function computes the solution :math:`X \in \mathbb{K}^{n \times k}` of the **linear system** associated to
-:math:`A \in \mathbb{K}^{n \times n}, B \in \mathbb{K}^{m \times k}`, which is defined as
+:math:`A \in \mathbb{K}^{n \times n}, B \in \mathbb{K}^{n \times k}`, which is defined as
 
 .. math:: AX = B
 
@@ -1757,9 +1757,18 @@ Letting `*` be zero or more batch dimensions,
     This function computes `X = \ `:attr:`A`\ `.inverse() @ \ `:attr:`B` in a faster and
     more numerically stable way than performing the computations separately.
 
+.. note::
+    It is possible to compute the solution of the system :math:`XA = B` by passing the inputs
+    :attr:`A` and :attr:`B` transposed and transposing the output returned by this function.
+
 """ + fr"""
 .. note:: {common_notes["sync_note"]}
 """ + r"""
+
+.. seealso::
+
+        :func:`torch.linalg.triangular_solve` computes the solution of a triangular system of linear
+        equations with a unique solution.
 
 Args:
     A (Tensor): tensor of shape `(*, n, n)` where `*` is zero or more batch dimensions.
@@ -1806,6 +1815,82 @@ Examples::
 .. _invertible:
     https://en.wikipedia.org/wiki/Invertible_matrix#The_invertible_matrix_theorem
 """)
+
+triangular_solve = _add_docstr(_linalg.linalg_triangular_solve, r"""
+linalg.triangular_solve(A, B, *, left=True, upper=True, unitriangular=False, out=None) -> Tensor
+
+Computes the solution of a triangular system of linear equations with a unique solution.
+
+Letting :math:`\mathbb{K}` be :math:`\mathbb{R}` or :math:`\mathbb{C}`,
+this function computes the solution :math:`X \in \mathbb{K}^{n \times k}` of the **linear system**
+associated to the upper triangular matrix :math:`A \in \mathbb{K}^{n \times n}` without zeros on the diagonal
+(that is, it is `invertible`_) and the rectangular matrix , :math:`B \in \mathbb{K}^{n \times k}`,
+which is defined as
+
+.. math:: AX = B
+
+If :attr:`upper`\ `= False`, :math:`A` will be assumed to be lower triangular without zeros on the diagonal.
+
+If :attr:`left`\ `= False`, the returned matrix :math:`X \in \mathbb{K}^{n \times k}` will solve the system
+
+.. math::
+
+    XA = B\mathrlap{\qquad A \in \mathbb{K}^{k \times k}, B \in \mathbb{K}^{n \times k}.}
+
+If :attr:`upper`\ `= True` (resp. `False`) just the upper (resp. lower) triangular half of :attr:`A`
+will accessed. The opposite half will be considered to be full of zeros and will not be accessed.
+
+If :attr:`unitriangular`\ `= True`, the diagonal of :attr:`A` is assumed to be ones and will not be accessed.
+
+If the diagonal of :attr:`A` contains zeros or elements that are very close to zero and
+:attr:`unitriangular`\ `= False` (default) or if the input matrix is badly conditioned,
+the result may contain `NaN` s.
+
+Supports inputs of float, double, cfloat and cdouble dtypes.
+Also supports batches of matrices, and if the inputs are batches of matrices then
+the output has the same batch dimensions.
+
+.. seealso::
+
+        :func:`torch.linalg.solve` computes the solution of a general square system of linear
+        equations with a unique solution.
+
+Args:
+    A (Tensor): tensor of shape `(*, n, n)` (or `(*, k, k)` if :attr:`left`\ `= True`)
+                where `*` is zero or more batch dimensions.
+    B (Tensor): right-hand side tensor of shape `(*, n, k)`.
+
+Keyword args:
+    left (bool optional): whether to solve the system :math:`AX=B` or :math:`XA = B`. Default: `True`.
+    upper (bool optional): whether :attr:`A` is an upper or lower triangular matrix. Default: `True`.
+    unitriangular (bool, optional): if `True`, the diagonal elements of :attr:`A` are assumed to be
+                                    all equal to `1`. Default: `False`.
+    out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
+
+Examples::
+
+    >>> A = torch.randn(3, 3).triu_()
+    >>> b = torch.randn(3, 4)
+    >>> X = torch.linalg.triangular_solve(A, B)
+    >>> torch.allclose(A @ X, B)
+    True
+
+    >>> A = torch.randn(2, 3, 3).tril_()
+    >>> B = torch.randn(2, 3, 4)
+    >>> X = torch.linalg.triangular_solve(A, B, upper=False)
+    >>> torch.allclose(A @ X, B)
+    True
+
+    >>> A = torch.randn(2, 4, 4).tril_()
+    >>> B = torch.randn(2, 3, 4)
+    >>> X = torch.linalg.triangular_solve(A, B, left=False)
+    >>> torch.allclose(X @ A, B)
+    True
+
+.. _invertible:
+    https://en.wikipedia.org/wiki/Invertible_matrix#The_invertible_matrix_theorem
+""")
+
 
 tensorinv = _add_docstr(_linalg.linalg_tensorinv, r"""
 linalg.tensorinv(A, ind=2, *, out=None) -> Tensor

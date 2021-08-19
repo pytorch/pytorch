@@ -3808,4 +3808,236 @@ Tensor _det_lu_based_helper_backward_helper(
   }
 }
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ solve_triangular ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+namespace {
+void checkSameDtype(const Tensor& t1,
+                    const Tensor& t2,
+                    const char* const f_name,
+                    const char* const t1_name,
+                    const char* const t2_name) {
+  TORCH_CHECK(t1.scalar_type() == t2.scalar_type(),
+              f_name, ": Expected ", t1_name, " and ", t2_name, " to have the same dtype. ",
+              "Got ", t1_name, ".dtype = ", t1.scalar_type(),
+              " and ", t2_name, ".dtype = ", t2.scalar_type());
+}
+
+void checkIsMatrix(const Tensor& t,
+                   const char* const f_name,
+                   const char* const t_name) {
+  TORCH_CHECK(t.dim() >= 2, f_name, ": Expected ", t_name,
+                            " to be a tensor of at least 2 dimensions.");
+}
+
+void checkIsSquareMatrix(const Tensor& t,
+                         const char* const f_name,
+                         const char* const t_name) {
+  checkIsMatrix(t, f_name, t_name);
+  TORCH_CHECK(t.size(-1) == t.size(-2),
+              f_name, ": Expected ", t_name,
+              " to be a square matrix or batch of square matrices. "
+              "Got matrices of size (", t.size(-2), ", ", t.size(-1), ").");
+}
+
+void checkInputsSolver(const Tensor& A,
+                       const Tensor& B,
+                       const Tensor& out,
+                       const bool left,
+                       const char* const f_name) {
+  checkSameDtype(A, B, f_name, "A", "B");
+  checkSameDtype(A, out, f_name, "A", "out");
+  checkIsSquareMatrix(A, f_name, "A");
+  checkIsMatrix(B, f_name, "B");
+  TORCH_CHECK(A.size(-1) == B.size(left ? -2 : -1),
+              f_name, ": Incompatible shapes for the equation ", left ? "AX = B" : "XA = B",
+              ". Each matrix in A is of shape (", A.size(-2), ", ", A.size(-1),
+              "), but each matrix in B is of shape (", B.size(-2), ", ", B.size(-1), ")");
+}
+
+bool is_fortran_compatible_column_major_order(const Tensor& t) {
+  const auto t_strides = t.strides();
+  const auto ndim = t.dim();
+  const auto rows = t.sizes()[ndim - 2];
+  return (t_strides[ndim - 2] == 1) && (t_strides[ndim - 1] >= std::max<int64_t>(1, rows));
+}
+
+bool is_fortran_compatible_row_major_order(const Tensor& t) {
+  const auto t_strides = t.strides();
+  const auto ndim = t.dim();
+  const auto cols = t.sizes()[ndim - 1];
+  return (t_strides[ndim - 1] == 1) && (t_strides[ndim - 2] >= std::max<int64_t>(1, cols));
+}
+
+bool is_fortran_ready(const Tensor& t) {
+  return t.is_non_overlapping_and_dense() ||
+         is_fortran_compatible_row_major_order(t) ||
+         is_fortran_compatible_column_major_order(t);
+}
+
+char trans_char(const bool contig, const bool conj) {
+    return conj ? 'C' : contig ? 'N' : 'T';
+}
+} // end of anonymous namespace
+
+/*
+Solves the matrix equation AX = B for A triangular.
+'upper' controls the portion of input matrix to consider in computations,
+'unitriangular' if true then we assume diag(A) to be ones
+'left' If true solves AX = B, if false solves XA = B
+'out' The tensor with the result. If A == out, A will be modified in place
+*/
+Tensor& linalg_triangular_solve_out(
+    const Tensor& A,
+    const Tensor& B,
+    bool left,
+    bool upper,
+    bool unitriangular,
+    Tensor& out) {
+  checkInputsSolver(A, B, out, left, "solve_triangular");
+  Tensor A_broad, B_broad;
+  std::tie(B_broad, A_broad) = _linalg_broadcast_batch_dims(B, A, "solve_triangular", /*check_errors*/ false);
+
+  // We'll write F-contig / F-transpose for FORTRAN contiguous / FORTRAN transpose etc
+  // At this point, A, B have been broadcasted but may or may not be F-ready
+
+  // The following algorithm minimises copies and allocations. In pseudocode:
+  // if out is wrong size:
+  //   resize_output(out)
+  // # Invariant: out is the right size
+  // Tensor out_f; # Tensor that we will pass to FORTRAN
+  // if out is F-ready:
+  //   out_f = out;
+  // else:
+  //   Allocate out_f F-ready
+  // if B != out_f:
+  //   copy B into out_f
+  // # Invariant: out_f F-ready and has B copied into it
+  // if out_f is F-transposed:
+  //   transpose equation
+  // if out_f is conj:
+  //   conjugate equation
+  // # Invariant: out_f is not conjugated and F-contig
+  // Tensor A_f; # Tensor that will be sent to FORTRAN
+  // if A is F-ready:
+  //   if A is conj and A is not transposed:
+  //     # We need to clone A in this case. See [Cloning A]
+  //     clone A F-contig into A_f
+  //   else:
+  //     A_f = A;
+  // else:
+  //   clone A F-contig into A_f
+  // # Invariant: out_f is F-contig and A_f is F-ready
+  // # We pass FORTRAN the flags indicating if A_f is transposed and or conjugated
+  //
+  // # Here we undo the conjugations / transposes on out_f if needed
+  //
+  // if out_f not same out:
+  //   copy out_f into out
+  // return out
+  //
+  // Note: [Cloning A] If we are careful when allocating B when it needs to be allocated at the
+  // beginning of the algorithm, it is possible to always elide the copy of A here.
+  // Via this trick, the algorithm will copy at most one of A or B (never both) whenever A
+  // and B are F-ready (which happens almost always in practice).
+  // In most practical situations, this function copy at most one tensor.
+  // When called as f(A, B, out=B) in most practical cases it'll perform no copies.
+  //
+  // Note: The logic for the negative bit is the same as that for the conjugate bit
+
+  const bool avoid_copy_A = is_fortran_ready(A_broad) && A_broad.stride(-2) == 1 && A_broad.is_conj();
+  if (avoid_copy_A){
+    // See Note: [Cloning A]
+    at::native::resize_output(out, B_broad.sizes());
+  }
+  else {
+    // poorman's reimplementation of resize_output with result F-contig
+    if (resize_output_check(out, B_broad.sizes())) {
+      out.resize_(B_broad.transpose(-2, -1).sizes(), MemoryFormat::Contiguous);
+      out.transpose_(-2, -1);  // make 'out' have Fortran contiguous memory layout
+    }
+  }
+  // Invariant: out has the right size, so we'll be able to copy into it later on
+
+  Tensor out_f;
+  // We use C10_LIKELY mostly for documentation as it helps following what's the most likely path
+  if C10_LIKELY (is_fortran_ready(out)) {
+    out_f = out;
+    if C10_LIKELY (!out.is_same(B_broad)) {
+      out_f.copy_(B_broad);
+    }
+  } else{
+    if (avoid_copy_A){
+      // See Note: [Cloning A]
+      out_f = B_broad.clone(at::MemoryFormat::Contiguous);
+    }
+    else {
+      out_f = cloneBatchedColumnMajor(B_broad);
+    }
+  }
+  // Invariant: out_f F-ready and has B copied into it
+
+  // out_f is F-transposed
+  bool transpose_A = false;
+  bool transpose_out_f = false;
+  if (out_f.stride(-1) == 1) {
+    left = !left;
+    transpose_A = true;
+    transpose_out_f = true;
+    out_f.transpose_(-2 ,-1);
+  }
+
+  // No need to conjugate anything if out_f is conj as AX = conj(B) <=> conj(A)conj(X) = B
+  // and X = B after the algortihm. We just anotate that A is conjugated later on
+  // The solution will be written into out_f, so it'll be conjugated already
+
+  Tensor A_f;
+  bool A_is_conj = A_broad.is_conj() != out_f.is_conj();
+  bool A_is_neg = A_broad.is_neg() != out_f.is_neg();
+  bool A_is_f_contig = (A_broad.stride(-1) == 1) == transpose_A;
+  if C10_LIKELY (is_fortran_ready(A_broad) && !((A_is_conj && !A_is_f_contig) || A_is_neg)) {
+    A_f = A_broad;
+  } else {
+    // We choose C-contig rather than F-contig because it has better memory access in solvers
+    // We resolve the conj as well
+    A_f = A_broad.clone(at::MemoryFormat::Contiguous);
+    A_is_f_contig = transpose_A;
+    A_is_conj = false;
+    A_is_neg = false;
+  }
+  // Invariant: out_f is F-contig and A_f is F-ready
+
+  // If we pass the matrix physically F-transposed, we need to change the parity of upper
+  if (A_f.stride(-1) == 1) {
+    upper = !upper;
+  }
+
+  const char transpose = trans_char(A_is_f_contig, A_is_conj);
+
+  triangular_solve_stub(
+    A_f.device().type(), A_f, out_f,
+    /*left=*/left,
+    /*upper=*/upper,
+    /*transpose*/transpose,
+    /*unitriangular=*/unitriangular);
+
+  if (transpose_out_f) {
+    out_f.transpose_(-2, -1);
+  }
+
+  if (!out_f.is_same(out)) {
+    out.copy_(out_f);
+  }
+  return out;
+}
+
+Tensor linalg_triangular_solve(
+    const Tensor& A,
+    const Tensor& B,
+    bool left,
+    bool upper,
+    bool unitriangular) {
+  Tensor out = at::empty({0}, A.options());
+  linalg_triangular_solve_out(A, B, left, upper, unitriangular, out);
+  return out;
+}
+
 }}  // namespace at::native

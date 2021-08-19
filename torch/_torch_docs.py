@@ -9727,11 +9727,11 @@ add_docstr(torch.triangular_solve,
            r"""
 triangular_solve(b, A, upper=True, transpose=False, unitriangular=False) -> (Tensor, Tensor)
 
-Solves a system of equations with a triangular coefficient matrix :math:`A`
+Solves a system of equations with a square upper or lower triangular invertible matrix :math:`A`
 and multiple right-hand sides :math:`b`.
 
-In particular, solves :math:`AX = b` and assumes :math:`A` is upper-triangular
-with the default keyword arguments.
+In symbols, it solves :math:`AX = b` and assumes :math:`A` is square upper-triangular
+(or lower-triangular if :attr:`upper`\ `= False`) and does not have zeros on the diagonal.
 
 `torch.triangular_solve(b, A)` can take in 2D inputs `b, A` or inputs that are
 batches of 2D matrices. If the inputs are batches, then returns
@@ -9748,10 +9748,8 @@ Args:
                 :math:`*` is zero of more batch dimensions
     A (Tensor): the input triangular coefficient matrix of size :math:`(*, m, m)`
                 where :math:`*` is zero or more batch dimensions
-    upper (bool, optional): whether to solve the upper-triangular system
-        of equations (default) or the lower-triangular system of equations. Default: ``True``.
-    transpose (bool, optional): whether :math:`A` should be transposed before
-        being sent into the solver. Default: ``False``.
+    upper (bool, optional): whether :math:`A` is upper or lower triangular. Default: ``True``.
+    transpose (bool, optional): whether to transpose :math:`A` before solving the system. Default: ``False``.
     unitriangular (bool, optional): whether :math:`A` is unit triangular.
         If True, the diagonal elements of :math:`A` are assumed to be
         1 and not referenced from :math:`A`. Default: ``False``.

@@ -1394,6 +1394,10 @@
 - name: triangular_solve(Tensor self, Tensor A, bool upper=True, bool transpose=False, bool unitriangular=False) -> (Tensor solution, Tensor cloned_coefficient)
   self, A: triangular_solve_backward(grads[0], grads[1], self, A, solution, upper, transpose, unitriangular, grad_input_mask)
 
+- name: linalg_triangular_solve(Tensor self, Tensor B, *, bool left=True, bool upper=True, bool unitriangular=False) -> Tensor
+  self, B: linalg_triangular_solve_backward(grad, self, result, left, upper, unitriangular, grad_input_mask)
+  result: linalg_triangular_solve_forward(self_t, B_t, self_p, result, left, upper, unitriangular)
+
 - name: tril(Tensor self, int diagonal=0) -> Tensor
   self: grad.tril(diagonal)
   result: auto_linear
