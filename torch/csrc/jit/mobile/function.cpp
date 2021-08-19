@@ -99,20 +99,19 @@ bool Function::append_operator(
     // from model. We can use it to handle backward compatibility.
     if (num_specified_args &&
         num_specified_args.value() < static_cast<int64_t>(args.size())) {
-      // Sanity check at load time, to save perf at runtime
-      for (size_t i = num_specified_args.value(); i < args.size(); ++i) {
-        auto default_val = args[i].default_value();
-        TORCH_CHECK(
-            default_val.has_value(),
-            "Error happened at preparing for default values for the argument. The ",
-            i,
-            "th arguement of operator",
-            opname,
-            " does not have a specified value or default value. ");
-      }
       fn = [fn, num_specified_args, args](Stack& stack) {
-        for (size_t i = num_specified_args.value(); i < args.size(); ++i) {
-          stack.push_back(args[i].default_value());
+        c10::optional<IValue> out_arg;
+        if(!args.empty() && args.back().is_out()) {
+          out_arg = stack.back();
+          stack.pop_back();
+        }
+        for (size_t i = 0; i < args.size(); ++i) {
+          if(args[i].default_value().has_value()) {
+            stack.push_back(args[i].default_value());
+          }
+        }
+        if(out_arg.has_value()) {
+          stack.push_back(out_arg.value());
         }
         fn(stack);
       };
