@@ -632,22 +632,34 @@ const auto argmin_with_keep_dim_script = R"JIT(
       return torch.argmin(a, dim, True).clone()
 )JIT";
 
-const auto getitem_tensor_script = R"JIT(
+const auto getitem_dict_tensor_script = R"JIT(
   def forward(self, key: Tensor):
       d = {key: 1}
       return d[key]
 )JIT";
 
-const auto getitem_int_script = R"JIT(
+const auto getitem_dict_int_script = R"JIT(
   def forward(self, key: int):
       d = {key: 1}
       return d[key]
 )JIT";
 
-const auto getitem_str_script = R"JIT(
+const auto getitem_dict_str_script = R"JIT(
   def forward(self, key: str):
       d = {key: 1}
       return d[key]
+)JIT";
+
+const auto getitem_list_int_script = R"JIT(
+  def forward(self, idx: int):
+      lst = [1, 2, 3]
+      return lst[idx]
+)JIT";
+
+const auto getitem_list_tensor_script = R"JIT(
+  def forward(self, tensor: Tensor, idx: int):
+      lst = [tensor, tensor]
+      return lst[idx]
 )JIT";
 
 const auto transpose_script = R"JIT(
