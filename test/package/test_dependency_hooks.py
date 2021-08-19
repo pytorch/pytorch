@@ -26,7 +26,7 @@ class TestDependencyHooks(PackageTestCase):
         def my_extern_hook(package_exporter, module_name):
             my_externs.add(module_name)
 
-        with PackageExporter(buffer, verbose=False) as exporter:
+        with PackageExporter(buffer) as exporter:
             exporter.extern(["package_a.subpackage", "module_a"])
             exporter.register_extern_hook(my_extern_hook)
             exporter.save_source_string("foo", "import module_a")
@@ -45,7 +45,7 @@ class TestDependencyHooks(PackageTestCase):
         def my_extern_hook2(package_exporter, module_name):
             my_externs.remove(module_name)
 
-        with PackageExporter(buffer, verbose=False) as exporter:
+        with PackageExporter(buffer) as exporter:
             exporter.extern(["package_a.subpackage", "module_a"])
             exporter.register_extern_hook(my_extern_hook)
             exporter.register_extern_hook(my_extern_hook2)
@@ -65,7 +65,7 @@ class TestDependencyHooks(PackageTestCase):
         def my_mock_hook2(package_exporter, module_name):
             my_mocks.remove(module_name)
 
-        with PackageExporter(buffer, verbose=False) as exporter:
+        with PackageExporter(buffer) as exporter:
             exporter.mock(["package_a.subpackage", "module_a"])
             exporter.register_mock_hook(my_mock_hook)
             exporter.register_mock_hook(my_mock_hook2)
@@ -85,7 +85,7 @@ class TestDependencyHooks(PackageTestCase):
         def my_extern_hook2(package_exporter, module_name):
             my_externs2.add(module_name)
 
-        with PackageExporter(buffer, verbose=False) as exporter:
+        with PackageExporter(buffer) as exporter:
             exporter.extern(["package_a.subpackage", "module_a"])
             handle = exporter.register_extern_hook(my_extern_hook)
             exporter.register_extern_hook(my_extern_hook2)
@@ -107,7 +107,7 @@ class TestDependencyHooks(PackageTestCase):
         def my_mock_hook(package_exporter, module_name):
             my_mocks.add(module_name)
 
-        with PackageExporter(buffer, verbose=False) as exporter:
+        with PackageExporter(buffer) as exporter:
             exporter.extern("module_a")
             exporter.mock("package_a")
             exporter.register_extern_hook(my_extern_hook)

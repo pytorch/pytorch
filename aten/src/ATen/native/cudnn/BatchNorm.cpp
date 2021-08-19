@@ -44,6 +44,34 @@ Tensor expandScale(const Tensor& t, int64_t dim) {
   return t.view(size);
 }
 
+cudnnBatchNormMode_t getCudnnBatchNormMode(bool training, at::MemoryFormat memory_format, int64_t dim) {
+  if (dim == 2) {
+    return CUDNN_BATCHNORM_PER_ACTIVATION;
+  } else if (training && memory_format == at::MemoryFormat::ChannelsLast) {
+
+#if CUDNN_VERSION >= 7400
+    return CUDNN_BATCHNORM_SPATIAL_PERSISTENT;
+#else
+    return CUDNN_BATCHNORM_SPATIAL;
+#endif // CUDNN_VERSION >= 7400
+
+  } else if (training && memory_format == at::MemoryFormat::ChannelsLast3d) {
+
+#if CUDNN_VERSION >= 8100
+    return CUDNN_BATCHNORM_SPATIAL_PERSISTENT;
+#else
+    return CUDNN_BATCHNORM_SPATIAL;
+#endif // CUDNN_VERSION >= 8100
+
+  } else {
+    // TODO: The new CUDNN_BATCHNORM_SPATIAL_PERSISTENT mode was
+    // introduced in CuDNN 7 for performance optimization, but it results in
+    // accuracy losses in convolution models such as ResNeXt-101 and
+    // video R(2+1)D. We will fall back to the normal CUDNN_BATCHNORM_SPATIAL
+    return CUDNN_BATCHNORM_SPATIAL;
+  }
+}
+
 }  // namespace
 
 std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
@@ -87,22 +115,11 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
     }
   }
 
-  cudnnBatchNormMode_t mode;
-  if (input->dim() == 2) {
-    mode = CUDNN_BATCHNORM_PER_ACTIVATION;
-  } else if (training && input->suggest_memory_format() == at::MemoryFormat::ChannelsLast) {
-#if CUDNN_VERSION >= 7400
-    mode = CUDNN_BATCHNORM_SPATIAL_PERSISTENT;
-#else
-    mode = CUDNN_BATCHNORM_SPATIAL;
-#endif // CUDNN_VERSION >= 7400
-  } else {
-    // TODO: The new CUDNN_BATCHNORM_SPATIAL_PERSISTENT mode was
-    // introduced in CuDNN 7 for performance optimization, but it results in
-    // accuracy losses in convolution models such as ResNeXt-101 and
-    // video R(2+1)D. We will fall back to the normal CUDNN_BATCHNORM_SPATIAL
-    mode = CUDNN_BATCHNORM_SPATIAL;
-  }
+  cudnnBatchNormMode_t mode = getCudnnBatchNormMode(
+                                training,
+                                input->suggest_memory_format(),
+                                input->dim()
+                              );
 
   auto output_t = at::empty_like(*input, input->options(), input->suggest_memory_format());
 
@@ -267,22 +284,11 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
     checkNumel(c, t, num_features);
   }
 
-  cudnnBatchNormMode_t mode;
-  if (input->dim() == 2) {
-    mode = CUDNN_BATCHNORM_PER_ACTIVATION;
-  } else if (input->suggest_memory_format() == at::MemoryFormat::ChannelsLast) {
-#if CUDNN_VERSION >= 7400
-    mode = CUDNN_BATCHNORM_SPATIAL_PERSISTENT;
-#else
-    mode = CUDNN_BATCHNORM_SPATIAL;
-#endif // CUDNN_VERSION >= 7400
-  } else {
-    // TODO: The new CUDNN_BATCHNORM_SPATIAL_PERSISTENT mode was
-    // introduced in CuDNN 7 for performance optimization, but it results in
-    // accuracy losses in convolution models such as ResNeXt-101 and
-    // video R(2+1)D. We will fall back to the normal CUDNN_BATCHNORM_SPATIAL
-    mode = CUDNN_BATCHNORM_SPATIAL;
-  }
+  cudnnBatchNormMode_t mode = getCudnnBatchNormMode(
+                                true, // training
+                                input->suggest_memory_format(),
+                                input->dim()
+                              );
 
   auto grad_input_t  = at::empty(input->sizes(), input->options(), input->suggest_memory_format());
   auto grad_weight_t = at::empty(weight->sizes(), weight->options());

@@ -66,6 +66,7 @@ class TORCH_CUDA_CU_API FusionGuard {
  *
  * The Fusion owns the whole IR graph (Vals and Exprs)
  */
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class TORCH_CUDA_CU_API Fusion final {
  public:
   Fusion() = default;

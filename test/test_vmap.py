@@ -2426,7 +2426,7 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
 
 
     @allowVmapFallbackUsage
-    def test_inplace_view(self, device):
+    def test_inplace_on_view(self, device):
         leaf = torch.randn(4, 5, requires_grad=True)
 
         def func(leaf):

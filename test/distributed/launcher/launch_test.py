@@ -14,8 +14,9 @@ from contextlib import closing
 import torch.distributed.launch as launch
 from torch.distributed.elastic.utils import get_socket_with_port
 from torch.testing._internal.common_utils import (
-    TEST_WITH_ASAN,
+    TEST_WITH_DEV_DBG_ASAN,
     TEST_WITH_TSAN,
+    sandcastle_skip_if,
 )
 
 
@@ -34,8 +35,8 @@ class LaunchTest(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.test_dir)
 
-    @unittest.skipIf(
-        TEST_WITH_ASAN or TEST_WITH_TSAN, "tests incompatible with tsan or asan"
+    @sandcastle_skip_if(
+        TEST_WITH_DEV_DBG_ASAN or TEST_WITH_TSAN, "tests incompatible with tsan and dev/dbg asan"
     )
     def test_launch_without_env(self):
         nnodes = 1
@@ -56,8 +57,8 @@ class LaunchTest(unittest.TestCase):
         ]
         launch.main(args)
 
-    @unittest.skipIf(
-        TEST_WITH_ASAN or TEST_WITH_TSAN, "tests incompatible with tsan or asan"
+    @sandcastle_skip_if(
+        TEST_WITH_DEV_DBG_ASAN or TEST_WITH_TSAN, "tests incompatible with tsan and dev/dbg asan"
     )
     def test_launch_with_env(self):
         nnodes = 1

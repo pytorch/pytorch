@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 import os
+import sys
 import unittest
 from enum import Flag, auto
 from typing import Dict, List, Type
 
 from torch.testing._internal.common_distributed import MultiProcessTestCase
 from torch.testing._internal.common_utils import (
-    TEST_WITH_ASAN,
+    TEST_WITH_DEV_DBG_ASAN,
     TEST_WITH_TSAN,
     find_free_port,
+    IS_SANDCASTLE,
 )
 from torch.testing._internal.distributed.ddp_under_dist_autograd_test import (
     CudaDdpComparisonTest,
@@ -45,8 +47,6 @@ from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
 from torch.testing._internal.distributed.rpc.rpc_test import (
     CudaRpcTest,
     FaultyAgentRpcTest,
-    ProcessGroupAgentRpcTest,
-    ProcessGroupAgentCudaRpcTest,
     RpcTest,
     TensorPipeAgentRpcTest,
     TensorPipeAgentCudaRpcTest,
@@ -96,7 +96,7 @@ class ForkHelper(MultiProcessTestCase):
         super().tearDown()
 
 @unittest.skipIf(
-    TEST_WITH_ASAN, "Skip ASAN as torch + multiprocessing spawn have known issues"
+    TEST_WITH_DEV_DBG_ASAN, "Skip ASAN as torch + multiprocessing spawn have known issues"
 )
 class SpawnHelper(MultiProcessTestCase):
     def setUp(self):
@@ -144,17 +144,6 @@ GENERIC_CUDA_TESTS = [
     CudaRemoteModuleTest,
     CudaDdpComparisonTest,
     PipeWithDDPTest,
-]
-
-
-# This list contains test suites that will only be run on the ProcessGroupAgent.
-# These suites should be standalone, and separate from the ones in the generic
-# list (not subclasses of those!).
-PROCESS_GROUP_TESTS = [
-    ProcessGroupAgentRpcTest
-]
-PROCESS_GROUP_CUDA_TESTS = [
-    ProcessGroupAgentCudaRpcTest,
 ]
 
 
@@ -209,6 +198,19 @@ def generate_tests(
         for mp_type in MultiProcess:
             if mp_type & mp_type_filter:
                 mp_helper, suffix = MP_HELPERS_AND_SUFFIXES[mp_type]
+                if IS_SANDCASTLE:
+                    if mp_helper == SpawnHelper and TEST_WITH_DEV_DBG_ASAN:
+                        print(
+                            f'Skipping test {test_class} on sandcastle for the following reason: '
+                            'Skip dev-asan as torch + multiprocessing spawn have known issues', file=sys.stderr)
+                        continue
+                    elif mp_helper == ForkHelper and TEST_WITH_TSAN:
+                        print(
+                            f'Skipping test {test_class} on sandcastle for the following reason: '
+                            'TSAN and fork() is broken'
+                        )
+                        continue
+
                 name = f"{prefix}{test_class.__name__}{suffix}"
                 class_ = type(name, (test_class, mixin, mp_helper), dict())
                 class_.__module__ = module_name

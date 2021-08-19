@@ -122,11 +122,14 @@ blocklist = [
 binary_ops = ('add', 'sub', 'mul', 'div', 'pow', 'lshift', 'rshift', 'mod', 'truediv',
               'matmul', 'floordiv',
               'radd', 'rsub', 'rmul', 'rtruediv', 'rfloordiv', 'rpow',          # reverse arithmetic
-              'and', 'or', 'xor',                   # logic
+              'and', 'or', 'xor', 'rand', 'ror', 'rxor',  # logic
               'iadd', 'iand', 'idiv', 'ilshift', 'imul',
               'ior', 'irshift', 'isub', 'ixor', 'ifloordiv', 'imod',  # inplace ops
               )
-comparison_ops = ('eq', 'ne', 'ge', 'gt', 'lt', 'le')
+symmetric_comparison_ops = ('eq', 'ne')
+asymmetric_comparison_ops = ('ge', 'gt', 'lt', 'le')
+comparison_ops = symmetric_comparison_ops + asymmetric_comparison_ops
+
 unary_ops = ('neg', 'abs', 'invert')
 to_py_type_ops = ('bool', 'float', 'complex', 'long', 'index', 'int', 'nonzero')
 all_ops = binary_ops + comparison_ops + unary_ops + to_py_type_ops
@@ -145,8 +148,11 @@ def sig_for_ops(opname: str) -> List[str]:
     if name in binary_ops:
         return ['def {}(self, other: Any) -> Tensor: ...'.format(opname)]
     elif name in comparison_ops:
-        # unsafe override https://github.com/python/mypy/issues/5704
-        return ['def {}(self, other: Any) -> Tensor: ...  # type: ignore[override]'.format(opname)]
+        sig = 'def {}(self, other: Any) -> Tensor: ...'.format(opname)
+        if name in symmetric_comparison_ops:
+            # unsafe override https://github.com/python/mypy/issues/5704
+            sig += '  # type: ignore[override]'
+        return [sig]
     elif name in unary_ops:
         return ['def {}(self) -> Tensor: ...'.format(opname)]
     elif name in to_py_type_ops:
@@ -277,6 +283,9 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
         'set_flush_denormal': ['def set_flush_denormal(mode: _bool) -> _bool: ...'],
         'get_default_dtype': ['def get_default_dtype() -> _dtype: ...'],
         'from_numpy': ['def from_numpy(ndarray) -> Tensor: ...'],
+        'frombuffer': ['def frombuffer(buffer: Any, *, dtype: _dtype, count: int=-1, '
+                       'offset: int=0, device: Union[_device, str, None]=None, '
+                       'requires_grad: _bool=False) -> Tensor: ...'],
         'numel': ['def numel(self: Tensor) -> _int: ...'],
         'as_tensor': ["def as_tensor(data: Any, dtype: _dtype=None, device: Optional[_device]=None) -> Tensor: ..."],
         'get_num_threads': ['def get_num_threads() -> _int: ...'],
