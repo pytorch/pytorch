@@ -48,7 +48,7 @@ if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
-  # Used so that only cuda specific versions of tests are generatedv
+  # Used so that only cuda specific versions of tests are generated
   # mainly used so that we're not spending extra cycles testing cpu
   # devices on expensive gpu machines
   export PYTORCH_TESTING_DEVICE_ONLY_FOR="cuda"
@@ -269,7 +269,7 @@ test_libtorch() {
     python test/cpp/jit/tests_setup.py shutdown
     # Wait for background download to finish
     wait
-    # Excludes IMethodTest that relies on torch::deploy.
+    # Exclude IMethodTest that relies on torch::deploy.
     OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" "$TORCH_BIN_DIR"/test_api --gtest_filter='-IMethodTest.*' --gtest_output=xml:$TEST_REPORTS_DIR/test_api.xml
     "$TORCH_BIN_DIR"/test_tensorexpr --gtest_output=xml:$TEST_REPORTS_DIR/test_tensorexpr.xml
     "$TORCH_BIN_DIR"/test_mobile_nnc --gtest_output=xml:$TEST_REPORTS_DIR/test_mobile_nnc.xml
@@ -500,6 +500,7 @@ elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   # TODO: run some C++ tests
   echo "no-op at the moment"
 elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 || "${SHARD_NUMBER}" == 1 ]]; then
+  # TODO(jwtan): Investigate why the test2 bot fails so badly.
   if [[ "${BUILD_ENVIRONMENT}" == *linux-xenial-cuda11.1*-test1* ]]; then
     test_torch_deploy
   fi
