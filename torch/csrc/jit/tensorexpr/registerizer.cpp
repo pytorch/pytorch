@@ -668,10 +668,8 @@ StmtPtr RegisterizerReplacer::mutate(StorePtr v) {
 
   ExprPtr new_val = v->value()->accept_mutator(this);
 
-  v->set_value(new_val);
-  v->set_buf(info->replacement().var_wrapper);
-  v->set_indices({});
-  return v;
+  return alloc<Store>(
+      info->replacement().var_wrapper, std::vector<ExprPtr>({}), new_val);
 }
 
 StmtPtr RegisterizerReplacer::mutate(BlockPtr v) {
