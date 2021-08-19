@@ -148,17 +148,12 @@ class TestPythonKeyOperatorsOpInfo(TestCase):
         # entries in here need don't work and need to be fixed.
         # Each one of these is a bug
         python_fail = {
-            'var',
-            'std',
-            'sort',
-            'prod',
             'to_sparse',
             'rsub.rsub_scalar',
             'linalg.matrix_power',
             'linalg.inv',
             'linalg.cholesky',
             'linalg.eigvals',
-            'tensor_split',
             'nn.functional.pad.circular',
         }
         if opinfo_in_dict(op, python_fail):
