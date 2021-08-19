@@ -21,7 +21,6 @@ namespace kir {
 //! to handle invalid IR states as much as possible.
 //!
 class TORCH_CUDA_CU_API IrPrinter : private OptInConstDispatch {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static constexpr char* kTab = "  ";
 
  public:

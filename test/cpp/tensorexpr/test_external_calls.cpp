@@ -19,7 +19,6 @@ namespace torch {
 namespace jit {
 using namespace torch::jit::tensorexpr;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ExternalCall, Conv2d_float) {
   KernelScope kernel_scope;
 
@@ -83,7 +82,6 @@ TEST(ExternalCall, Conv2d_float) {
   ASSERT_TRUE(at::allclose(nnc_result, ref));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ExternalCall, Conv2d_int) {
   // A similar test, but now using kInt tensors
   KernelScope kernel_scope;
@@ -148,7 +146,6 @@ TEST(ExternalCall, Conv2d_int) {
   ASSERT_TRUE(at::allclose(nnc_result, ref));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ExternalCall, Conv2d_nobias_noargs) {
   KernelScope kernel_scope;
 
@@ -196,7 +193,6 @@ TEST(ExternalCall, Conv2d_nobias_noargs) {
   ASSERT_TRUE(at::allclose(nnc_result, ref));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ExternalCall, Addmm_float) {
   KernelScope kernel_scope;
 
@@ -253,7 +249,6 @@ TEST(ExternalCall, Addmm_float) {
 
 #ifdef USE_XNNPACK
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ExternalCall, Prepacked_Linear_float) {
   using namespace at::native::xnnpack;
 
@@ -319,7 +314,6 @@ TEST(ExternalCall, Prepacked_Linear_float) {
   ASSERT_TRUE(at::allclose(nnc_result, ref));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ExternalCall, Prepacked_Conv2d_float) {
   using namespace at::native::xnnpack;
 
@@ -409,7 +403,6 @@ TEST(ExternalCall, Prepacked_Conv2d_float) {
 
 #endif // USE_XNNPACK
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ExternalCall, BinaryFloat) {
   KernelScope kernel_scope;
   using TensorFunc = std::function<at::Tensor(at::Tensor, at::Tensor)>;
@@ -485,7 +478,6 @@ TEST(ExternalCall, BinaryFloat) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ExternalCall, UnaryFloat) {
   KernelScope kernel_scope;
   using TensorFunc = std::function<at::Tensor(at::Tensor)>;
@@ -566,18 +558,17 @@ TEST(ExternalCall, UnaryFloat) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ExternalCall, ComputeInterop) {
   // This test verifies that Tensors using external calls can be used by and can
   // use Tensors built with Compute API.
   KernelScope kernel_scope;
 
-  BufHandle ConvResultBuf("ConvResult", {1, 16, 112, 112}, kFloat);
-  BufHandle MatmulResultBuf("MatmulResult", {1, 16, 112, 112}, kFloat);
+  BufHandle ConvResultBuf("ConvResult", {1, 16, 32, 32}, kFloat);
+  BufHandle MatmulResultBuf("MatmulResult", {1, 16, 32, 32}, kFloat);
 
   Tensor* Input = Compute(
       "Input",
-      {{1, "n"}, {16, "c"}, {112, "h"}, {112, "w"}},
+      {{1, "n"}, {16, "c"}, {32, "h"}, {32, "w"}},
       [&](const VarHandle& n,
           const VarHandle& c,
           const VarHandle& h,
@@ -606,7 +597,7 @@ TEST(ExternalCall, ComputeInterop) {
           {}));
   Tensor* Result = Compute(
       "Result",
-      {{1, "n"}, {16, "c"}, {112, "h"}, {112, "w"}},
+      {{1, "n"}, {16, "c"}, {32, "h"}, {32, "w"}},
       [&](const VarHandle& n,
           const VarHandle& c,
           const VarHandle& h,
@@ -628,18 +619,18 @@ TEST(ExternalCall, ComputeInterop) {
                      .layout(at::kStrided)
                      .device(at::kCPU)
                      .requires_grad(false);
-  at::Tensor input = at::ones({1, 16, 112, 112}, options) * 5.f;
+  at::Tensor input = at::ones({1, 16, 32, 32}, options) * 5.f;
   at::Tensor weight = at::ones({16, 16, 1, 1}, options) * 6.f;
   at::Tensor t = at::conv2d(input, weight);
   at::Tensor t2 = at::matmul(t, t);
   at::Tensor ref = t + t2;
 
   at::Tensor nnc_result;
-  std::vector<float> input_buf(1 * 16 * 112 * 112, 5.f);
+  std::vector<float> input_buf(1 * 16 * 32 * 32, 5.f);
   std::vector<float> weight_buf(16 * 16 * 1 * 1, 6.f);
-  std::vector<float> conv_result_buf(1 * 16 * 112 * 112, -1.f);
-  std::vector<float> matmul_result_buf(1 * 16 * 112 * 112, -1.f);
-  std::vector<float> result_buf(1 * 16 * 112 * 112, -1.f);
+  std::vector<float> conv_result_buf(1 * 16 * 32 * 32, -1.f);
+  std::vector<float> matmul_result_buf(1 * 16 * 32 * 32, -1.f);
+  std::vector<float> result_buf(1 * 16 * 32 * 32, -1.f);
 
 #ifdef TORCH_ENABLE_LLVM
   LLVMCodeGen llvm_codegen(
@@ -647,7 +638,7 @@ TEST(ExternalCall, ComputeInterop) {
 
   llvm_codegen.call(
       {input_buf, weight_buf, conv_result_buf, matmul_result_buf, result_buf});
-  nnc_result = at::from_blob(result_buf.data(), {1, 16, 112, 112}, options);
+  nnc_result = at::from_blob(result_buf.data(), {1, 16, 32, 32}, options);
   ASSERT_TRUE(at::allclose(nnc_result, ref));
 #endif
 
@@ -656,11 +647,10 @@ TEST(ExternalCall, ComputeInterop) {
 
   ir_eval.call(
       {input_buf, weight_buf, conv_result_buf, matmul_result_buf, result_buf});
-  nnc_result = at::from_blob(result_buf.data(), {1, 16, 112, 112}, options);
+  nnc_result = at::from_blob(result_buf.data(), {1, 16, 32, 32}, options);
   ASSERT_TRUE(at::allclose(nnc_result, ref));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ExternalCall, Inlining) {
   // This test verifies that Tensors using external calls can be used by and
   // can use Tensors built with Compute API.
@@ -690,8 +680,8 @@ TEST(ExternalCall, Inlining) {
         return MatmulResult->load(i, j) + FloatImm::make(3.0f);
       });
 
-  Stmt* root_stmt =
-      new Block({A->stmt(), B->stmt(), MatmulResult->stmt(), Result->stmt()});
+  StmtPtr root_stmt = alloc<Block>(std::vector<StmtPtr>(
+      {A->stmt(), B->stmt(), MatmulResult->stmt(), Result->stmt()}));
   LoopNest l(root_stmt, {Result->buf()});
 
   // Inlining should not inline anything here since all Bufs are either

@@ -9,10 +9,6 @@
 #include <ATen/native/cuda/Loops.cuh>
 #include <THC/THC.h>
 
-#ifdef __HIP_PLATFORM_HCC__
-#include <hip/hip_version.h>
-#endif
-
 namespace at {
 namespace native {
 
@@ -26,7 +22,8 @@ void copy_device_to_device(TensorIterator& iter, bool non_blocking) {
   // tensors are contiguous after dimension coalescing and reordering.
   bool same_type = iter.dtype(0) == iter.dtype(1);
   bool same_conj = iter.tensor(0).is_conj() == iter.tensor(1).is_conj();
-  bool memcpy_eligible = same_type && same_conj && iter.is_contiguous();
+  bool same_neg = iter.tensor(0).is_neg() == iter.tensor(1).is_neg();
+  bool memcpy_eligible = same_type && same_conj && same_neg && iter.is_contiguous();
 
   Device dst_device = iter.device(0);
   Device src_device = iter.device(1);
@@ -72,16 +69,30 @@ void copy_device_to_device(TensorIterator& iter, bool non_blocking) {
         gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return x; });
       });
     } else {
-      if (!same_conj && same_type) {
-        AT_DISPATCH_COMPLEX_TYPES(
-            dtype, "copy_conj_", [&] {
-              gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return std::conj(x); });
-            });
+      if (same_neg) {
+        if (!same_conj && same_type) {
+          AT_DISPATCH_COMPLEX_TYPES(
+              dtype, "copy_conj_", [&] {
+                gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return std::conj(x); });
+              });
+        } else {
+          AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+              kHalf, kBool, kBFloat16, dtype, "copy_", [&] {
+                gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return x; });
+              });
+        }
       } else {
-        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-            kHalf, kBool, kBFloat16, dtype, "copy_", [&] {
-              gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return x; });
-            });
+        if (!same_conj && same_type) {
+          AT_DISPATCH_COMPLEX_TYPES(
+              dtype, "copy_conj_", [&] {
+                gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return std::conj(-x); });
+              });
+        } else {
+          AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+              kHalf, kBool, kBFloat16, dtype, "copy_", [&] {
+                gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return -x; });
+              });
+        }
       }
     }
   }
@@ -164,6 +175,9 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
     dst_contig._set_conj(dst.is_conj());
     src_contig._set_conj(iter.tensor(1).is_conj());
 
+    dst_contig._set_neg(dst.is_neg());
+    src_contig._set_neg(iter.tensor(1).is_neg());
+
     // perform a same-dtype copy on contiguous tensors
     TORCH_INTERNAL_ASSERT(dst_contig.sizes().equals(src_contig.sizes()));
     TORCH_INTERNAL_ASSERT(dst_contig.scalar_type() == src_contig.scalar_type());
@@ -206,16 +220,14 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
     void* ptr = (dst_device == kCPU ? dst : src);
     AT_CUDA_CHECK(THCCachingHostAllocator_recordEvent(ptr, stream));
   } else {
-#if HIP_VERSION >= 301
-    AT_CUDA_CHECK(hipMemcpyWithStream(dst, src, nbytes, kind, stream));
-#else
-    AT_CUDA_CHECK(cudaMemcpyAsync(dst, src, nbytes, kind, stream));
-    AT_CUDA_CHECK(cudaStreamSynchronize(stream));
-#endif
+    at::cuda::memcpy_and_sync(dst, src, nbytes, kind, stream);
   }
 
   if (iter.tensor(0).is_conj() != iter.tensor(1).is_conj()) {
      iter.tensor(0).conj_physical_();
+  }
+  if (iter.tensor(0).is_neg() != iter.tensor(1).is_neg()) {
+     iter.tensor(0).neg_();
   }
 }
 

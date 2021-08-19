@@ -102,27 +102,116 @@ class TestFFT(TestCase):
     # (i.e. it cannot be a set of random numbers)
     # So for ROCm, call np.fft.rfftn and use its output as the input
     # for testing ops that call hipfftExecC2R
-    def _generate_valid_rocfft_input(self, input, op):
-        # check if op can invoke hipfftExecC2R or hipfftExecZ2D
-        if type(op) == SpectralFuncInfo:
-            supported_ops = op.supported_dtypes("")
-            if not all(ctype in supported_ops for ctype in [torch.cfloat, torch.double]):
-                return input
+    def _generate_valid_rocfft_input(self, input, op, s, dim, norm):
+        def get_op_name(op):
+            if type(op) == SpectralFuncInfo:
+                return op.name
+            else:
+                return op.__name__
+
+        op_name = get_op_name(op)
+
+        # pick ops that call hipfftExecC2R or hipfftExecZ2D
+        if op_name == "fft.irfft":
+            n = s
+            # figure out fft_size
+            if dim is None and n is None:
+                dim = tuple(range(-(input.dim()), 0))
+                s = [input.size(d) for d in dim]
+            elif dim is None and n is not None:
+                dim = -1
+                s = [n]
+            elif dim is not None and n is None:
+                s = [input.size(d) for d in [dim]]
+            else:
+                s = [n]
+            fft_size = s[-1]
+
+            # make fft_size even to match rocfft behavior to cuda and numpy
+            if (fft_size % 2) != 0:
+                n = fft_size + 1
+
+            # generate Hermitian symmetric input
+            if torch.is_complex(input):
+                valid_input = torch.fft.rfft(input.real, n=n, dim=dim, norm=norm)
+            else:
+                valid_input = torch.fft.rfft(input, n=n, dim=dim, norm=norm)
+
+            return (valid_input, n, dim, norm)
+        elif op_name == "fft.irfftn":
+            # figure out fft_size
+            if dim is None and s is None:
+                dim = tuple(range(-(input.dim()), 0))
+                s = [input.size(d) for d in dim]
+            elif dim is None and s is not None:
+                dim = tuple(range(-(len(s)), 0))
+            elif dim is not None and s is None:
+                s = [input.size(d) for d in dim]
+
+            fft_size = s[-1]
+
+            # make fft_size even to match rocfft behavior to cuda and numpy
+            if (fft_size % 2) != 0:
+                if type(s) is tuple:
+                    s = list(s)
+                    s[-1] = fft_size + 1
+
+            # generate Hermitian symmetric input
+            if torch.is_complex(input):
+                valid_input = torch.fft.rfftn(input.real, s=s, dim=dim, norm=norm)
+            else:
+                valid_input = torch.fft.rfftn(input, s=s, dim=dim, norm=norm)
+            return (valid_input, s, dim, norm)
+        elif op_name == "fft_irfft2":
+            # figure out fft_size
+            if dim is None and s is None:
+                dim = tuple(range(-(2), 0))
+                s = [input.size(d) for d in dim]
+            elif dim is None and s is not None:
+                dim = tuple(range(-(len(s)), 0))
+            elif dim is not None and s is None:
+                s = [input.size(d) for d in dim]
+            fft_size = s[-1]
+
+            # make fft_size even to match rocfft behavior to cuda and numpy
+            if (fft_size % 2) != 0:
+                if type(s) is tuple:
+                    s = list(s)
+                    s[-1] = fft_size + 1
+            # generate Hermitian symmetric input
+            if torch.is_complex(input):
+                valid_input = torch.fft.rfft2(input.real, s=s, dim=dim, norm=norm)
+            else:
+                valid_input = torch.fft.rfft2(input, s=s, dim=dim, norm=norm)
+            return (valid_input, s, dim, norm)
+        elif op_name == "fft.hfft":
+            n = s
+            # figure out fft_size
+            if dim is None and n is None:
+                dim = tuple(range(-(input.dim()), 0))
+                s = [input.size(d) for d in dim]
+            elif dim is None and n is not None:
+                dim = -1
+                s = [n]
+            elif dim is not None and n is None:
+                s = [input.size(d) for d in [dim]]
+            else:
+                s = [n]
+            fft_size = s[-1]
+
+            # make fft_size even to match rocfft behavior to cuda and numpy
+            if (fft_size % 2) != 0:
+                n = fft_size + 1
+
+            # generate Hermitian symmetric input
+            if torch.is_complex(input):
+                valid_input = torch.fft.ihfft(input.real, n=n, dim=dim, norm=norm)
+            else:
+                valid_input = torch.fft.ihfft(input, n=n, dim=dim, norm=norm)
+
+            return (valid_input, n, dim, norm)
         else:
-            if op.__name__ in ["fft_rfft2"]:
-                return input
-
-
-        # if input is complex use the real part
-        if torch.is_complex(input):
-            np_input_real = input.real.cpu().numpy()
-        else:
-            np_input_real = input.cpu().numpy()
-
-        # generate Hermitian symmetric input using rfftn
-        rfft_output = np.fft.rfftn(np_input_real)
-
-        return torch.from_numpy(rfft_output)
+            return (input, s, dim, norm)
 
     @onlyOnCPUAndCUDA
     @ops([op for op in spectral_funcs if not op.ndimensional])
@@ -158,8 +247,9 @@ class TestFFT(TestCase):
             input = args[0]
             args = args[1:]
 
-            if torch.version.hip is not None:
-                input = self._generate_valid_rocfft_input(input, op)
+            if torch.version.hip is not None and input.device.type == 'cuda':
+                input, args[0], args[1], args[2] = self._generate_valid_rocfft_input(
+                    input, op, args[0], args[1], args[2])
 
             expected = op.ref(input.cpu().numpy(), *args)
             exact_dtype = dtype in (torch.double, torch.complex128)
@@ -300,10 +390,10 @@ class TestFFT(TestCase):
             shape = itertools.islice(itertools.cycle(range(4, 9)), input_ndim)
             input = torch.randn(*shape, device=device, dtype=dtype)
 
-            if torch.version.hip is not None:
-                input = self._generate_valid_rocfft_input(input, op)
-
             for norm in norm_modes:
+                if torch.version.hip is not None:
+                    input, s, dim, norm = self._generate_valid_rocfft_input(
+                        input, op, s, dim, norm)
                 expected = op.ref(input.cpu().numpy(), s, dim, norm)
                 exact_dtype = dtype in (torch.double, torch.complex128)
                 actual = op(input, s, dim, norm)
@@ -404,22 +494,29 @@ class TestFFT(TestCase):
                 torch_fns = (torch_fn, torch.jit.script(fn))
 
                 if torch.version.hip is not None:
-                    valid_input = self._generate_valid_rocfft_input(input, torch_fn)
+                    valid_input_default, s, _, norm = self._generate_valid_rocfft_input(
+                        input, torch_fn, s, None, norm)
                 else:
-                    valid_input = input
+                    valid_input_default = input
 
                 # Once with dim defaulted
-                input_np = valid_input.cpu().numpy()
+                input_np = valid_input_default.cpu().numpy()
                 expected = numpy_fn(input_np, s, norm=norm)
                 for fn in torch_fns:
-                    actual = fn(valid_input, s, norm=norm)
+                    actual = fn(valid_input_default, s, norm=norm)
                     self.assertEqual(actual, expected)
 
                 # Once with explicit dims
                 dim = (1, 0)
-                expected = numpy_fn(valid_input.cpu(), s, dim, norm)
+                if torch.version.hip is not None:
+                    valid_input_explicit, s, dim, norm = self._generate_valid_rocfft_input(
+                        input, torch_fn, s, dim, norm)
+                else:
+                    valid_input_explicit = input
+
+                expected = numpy_fn(valid_input_explicit.cpu(), s, dim, norm)
                 for fn in torch_fns:
-                    actual = fn(valid_input, s, dim, norm)
+                    actual = fn(valid_input_explicit, s, dim, norm)
                     self.assertEqual(actual, expected)
 
     @skipCPUIfNoFFT
@@ -983,6 +1080,21 @@ class TestFFT(TestCase):
         half_spectrum_copy = half_spectrum.clone()
         _ = torch.fft.irfftn(half_spectrum_copy, s=(2, 2), dim=(-2, -1))
         self.assertEqual(half_spectrum, half_spectrum_copy)
+
+    @onlyOnCPUAndCUDA
+    @skipCPUIfNoFFT
+    def test_fft_plan_repeatable(self, device):
+        # Regression test for gh-58724 and gh-63152
+        for n in [2048, 3199, 5999]:
+            a = torch.randn(n, device=device, dtype=torch.complex64)
+            res1 = torch.fft.fftn(a)
+            res2 = torch.fft.fftn(a.clone())
+            self.assertEqual(res1, res2)
+
+            a = torch.randn(n, device=device, dtype=torch.float64)
+            res1 = torch.fft.rfft(a)
+            res2 = torch.fft.rfft(a.clone())
+            self.assertEqual(res1, res2)
 
     @onlyOnCPUAndCUDA
     @skipCPUIfNoFFT

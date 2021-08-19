@@ -33,6 +33,7 @@
 #include <gloo/scatter.h>
 
 #include <ATen/SparseTensorUtils.h>
+#include <ATen/ThreadLocalState.h>
 
 #include <c10/util/StringUtil.h>
 #include <c10/util/intrusive_ptr.h>
@@ -405,6 +406,9 @@ const auto kLoopbackAddress = "127.0.0.1";
 
 // static
 void ProcessGroupGloo::AsyncWork::execute(c10::intrusive_ptr<AsyncWork> work) {
+  if(work->recordFunctionBeforeCallback_){
+    work->recordFunctionBeforeCallback_();
+  }
   try {
     work->run();
   } catch (...) {
@@ -461,13 +465,47 @@ void returnFutureWithOutput(
 }
 } // namespace
 
+inline void ProcessGroupGloo::AsyncWork::recordAsyncWorkProfilingInfo(
+    const char* profilingTitle,
+    const c10::optional<std::vector<at::Tensor>>& inputTensors) {
+  auto recordingFunction =
+      std::make_shared<at::RecordFunction>(at::RecordScope::USER_SCOPE);
+  if (recordingFunction->isActive()) {
+    std::function<void()> before_handler =
+        [inputTensors, profilingTitle, recordingFunction]() {
+      // The work will be started and completed by different threads.
+      recordingFunction->_setAsync();
+      std::vector<c10::IValue> inputs;
+      if (inputTensors) {
+        inputs.reserve(inputTensors->size());
+        for (const auto& tensor : *inputTensors) {
+          inputs.emplace_back(tensor);
+        }
+      }
+      recordingFunction->before(profilingTitle, inputs);
+    };
+    recordFunctionBeforeCallback_ = at::wrapPropagateTLSState(before_handler);
+    std::function<void()> end_handler = [recordingFunction]() {
+      recordingFunction->end();
+    };
+    recordFunctionEndCallback_ = at::wrapPropagateTLSState(end_handler);
+  }
+}
+
 ProcessGroupGloo::AsyncWork::AsyncWork(
     std::vector<std::vector<at::Tensor>> outputTensors,
     const char* profilingTitle,
     const c10::optional<std::vector<at::Tensor>>& inputTensors)
-    : ProcessGroup::Work(-1, OpType::UNKNOWN, profilingTitle, inputTensors),
+    // Profiler: Pass nullptr as profilingTitle to parent constructor to
+    // replace default profiler implementation with async version that reports
+    // correct timestamps for work that is asynchronously executed.
+    : ProcessGroup::Work(-1, OpType::UNKNOWN, nullptr, inputTensors),
       outputTensors_(std::move(outputTensors)),
-      future_(createFutureAsOutput(outputTensors)) {}
+      future_(createFutureAsOutput(outputTensors)) {
+  if (profilingTitle != nullptr) {
+    recordAsyncWorkProfilingInfo(profilingTitle, inputTensors);
+  }
+}
 
 void ProcessGroupGloo::AsyncWork::finishWorkGlooError(std::exception_ptr eptr) {
   future_->setError(eptr);
