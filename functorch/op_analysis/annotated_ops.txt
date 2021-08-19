@@ -365,7 +365,7 @@ bitwise_or, primitive pointwise
 bitwise_xor, primitive pointwise
 addbmm, composite matmul
 diag, view/reshape
-cross, composite pointwise
+cross, composite reduction
 triu, view/reshape
 tril, view/reshape
 tril_indices, view/reshape
@@ -555,3 +555,16 @@ segment_reduce, misc
 pad_sequence, misc
 flatten_dense_tensors, misc
 unflatten_dense_tensors, misc
+bitwise_left_shift, primitive pointwise
+bitwise_right_shift, primitive pointwise
+trapezoid, primitive reduction
+special_ndtri, primitive pointwise
+special_psi, primitive pointwise
+special_digamma, primitive pointwise
+special_erfcx, primitive pointwise
+special_xlogy, primitive pointwise
+special_zeta, primitive pointwise
+special_sinc, primitive pointwise
+special_round, primitive pointwise
+special_log1p, primitive pointwise
+isin, composite reduction
