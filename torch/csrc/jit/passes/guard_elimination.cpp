@@ -455,7 +455,6 @@ struct GuardElimination {
 
   std::shared_ptr<Graph> graph_;
   std::unique_ptr<AliasDb> aliasDb_;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static std::unordered_set<Symbol> simple_ops_;
 };
 

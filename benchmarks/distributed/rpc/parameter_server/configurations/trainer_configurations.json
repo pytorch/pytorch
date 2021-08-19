@@ -1,8 +1,0 @@
-{
-    "DdpNcclTrainer": {
-        "trainer_class": "DdpNcclTrainer",
-        "configurations": {
-            "epochs": 10
-        }
-    }
-}

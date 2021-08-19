@@ -240,8 +240,7 @@ void checkAliasAnnotation(
   // it was created by the op.
   checkInputPreconditions(stack);
 
-  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-  const auto schema = node->schema();
+  const auto& schema = node->schema();
 
   std::vector<AliasAndIValue> inputsToCheck;
   for (const auto i : c10::irange(schema.arguments().size())) {

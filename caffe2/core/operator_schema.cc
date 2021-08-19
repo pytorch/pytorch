@@ -316,7 +316,6 @@ OpSchema::Arg(const char* name, const char* description, bool required) {
     return Arg(#str, description, true);                              \
   }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_STANDARG_ARG(IsTest, is_test)
 
 #undef DEFINE_STANDARG_ARG

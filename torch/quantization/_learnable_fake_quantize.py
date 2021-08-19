@@ -11,20 +11,20 @@ class _LearnableFakeQuantize(torch.quantization.FakeQuantizeBase):
     In addition to the attributes in the original FakeQuantize module, the _LearnableFakeQuantize
     module also includes the following attributes to support quantization parameter learning.
 
-    * :attr: `channel_len` defines the length of the channel when initializing scale and zero point
-             for the per channel case.
+    * :attr:`channel_len` defines the length of the channel when initializing scale and zero point
+      for the per channel case.
 
-    * :attr: `use_grad_scaling` defines the flag for whether the gradients for scale and zero point are
-              normalized by the constant, which is proportional to the square root of the number of
-              elements in the tensor. The related literature justifying the use of this particular constant
-              can be found here: https://openreview.net/pdf?id=rkgO66VKDS.
+    * :attr:`use_grad_scaling` defines the flag for whether the gradients for scale and zero point are
+      normalized by the constant, which is proportional to the square root of the number of
+      elements in the tensor. The related literature justifying the use of this particular constant
+      can be found here: https://openreview.net/pdf?id=rkgO66VKDS.
 
-    * :attr: `fake_quant_enabled` defines the flag for enabling fake quantization on the output.
+    * :attr:`fake_quant_enabled` defines the flag for enabling fake quantization on the output.
 
-    * :attr: `static_enabled` defines the flag for using observer's static estimation for
-             scale and zero point.
+    * :attr:`static_enabled` defines the flag for using observer's static estimation for
+      scale and zero point.
 
-    * attr: `learning_enabled` defines the flag for enabling backpropagation for scale and zero point.
+    * :attr:`learning_enabled` defines the flag for enabling backpropagation for scale and zero point.
     """
     def __init__(self, observer, quant_min=0, quant_max=255, scale=1., zero_point=0., channel_len=-1,
                  use_grad_scaling=False, **observer_kwargs):

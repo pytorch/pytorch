@@ -78,6 +78,7 @@ struct Obj {
       std::vector<at::IValue> args,
       std::unordered_map<std::string, c10::IValue> kwargs);
   Obj call_kwargs(std::unordered_map<std::string, c10::IValue> kwargs);
+  bool hasattr(const char* attr);
   Obj attr(const char* attr);
 
  private:
@@ -116,6 +117,7 @@ struct InterpreterSessionImpl {
       Obj obj,
       std::unordered_map<std::string, c10::IValue> kwargs) = 0;
   virtual Obj attr(Obj obj, const char* attr) = 0;
+  virtual bool hasattr(Obj obj, const char* attr) = 0;
 
  protected:
   int64_t ID(Obj obj) const {
@@ -125,6 +127,9 @@ struct InterpreterSessionImpl {
 
 struct InterpreterImpl {
   virtual InterpreterSessionImpl* acquire_session() = 0;
+  virtual void set_find_module(
+      std::function<at::optional<std::string>(const std::string&)>
+          find_module) = 0;
   virtual ~InterpreterImpl() = default; // this will uninitialize python
 };
 
@@ -162,6 +167,12 @@ inline Obj Obj::call_kwargs(
   return interaction_->call_kwargs(*this, std::move(kwargs));
   TORCH_DEPLOY_SAFE_CATCH_RETHROW
 }
+inline bool Obj::hasattr(const char* attr) {
+  TORCH_DEPLOY_TRY
+  return interaction_->hasattr(*this, attr);
+  TORCH_DEPLOY_SAFE_CATCH_RETHROW
+}
+
 inline Obj Obj::attr(const char* attr) {
   TORCH_DEPLOY_TRY
   return interaction_->attr(*this, attr);

@@ -27,7 +27,6 @@ namespace jit {
 
 namespace {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators reg(
     {Operator(
          prim::profile,
@@ -113,7 +112,7 @@ RegisterOperators reg(
                      " outputs, but got ",
                      num_results);
                }
-               for (int64_t i = num_results; i < chunks; ++i) {
+               for (const auto i : c10::irange(num_results, chunks)) {
                  TORCH_CHECK(
                      !outputs_used[i],
                      "Expected chunk to return at least ",
@@ -330,7 +329,6 @@ RegisterOperators reg(
          },
          aliasAnalysisSpecialCase())});
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators logging_operators(
     {Operator(
          "prim::AddStatValue(str key, int val) -> ()",
@@ -374,7 +372,7 @@ RegisterOperators logging_operators(
          },
          aliasAnalysisFromSchema())});
 
-void hashValue(Stack* stack) {
+C10_UNUSED void hashValue(Stack* stack) {
   auto value = pop(stack);
   push(stack, value.hash());
 }
@@ -425,7 +423,7 @@ bool isSortableListOfObjectsOrTuples(
   // best sorting methods. If in the future we need to support heterogenous
   // types inside list, then sorting needs to have runtime sortable checks.
   const size_t n = ivalues.size();
-  for (size_t i = 0; i < n; ++i) {
+  for (const auto i : c10::irange(n)) {
     const IValue& v = ivalues.get(i);
     auto curr_type = v.type();
     if (*curr_type != *type) {
@@ -484,7 +482,6 @@ void sort_op(Stack* stack) {
 }
 
 // NB: this must be registered after the other aten::sort operators
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators regSort({
     Operator(
         "aten::sorted.any(t[](a) self) -> (t[])",
@@ -519,7 +516,7 @@ std::vector<int64_t> _output_size(
     scale_repeated = scale_factors.toDoubleVector();
   }
   std::vector<int64_t> ret;
-  for (size_t i = 0; i < dim; ++i) {
+  for (const auto i : c10::irange(dim)) {
     ret.push_back(std::floor(input.size(i + 2) * scale_repeated[i]));
   }
   return ret;
@@ -787,7 +784,6 @@ void upsample_bilinear_op(Stack* stack) {
 }
 
 // These ops are no longer generated, but remain here for BC
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators reg3({
     Operator(
         "aten::__interpolate.scale_list(Tensor input, int? size = None, float[]? scale_factor = None, str mode = 'nearest', bool? align_corners = None, bool? recompute_scale_factor = None) -> Tensor",
@@ -854,7 +850,6 @@ std::string get_first(const c10::List<c10::List<std::string>>& strings) {
   return strings.get(0).get(0);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto reg4 =
     torch::RegisterOperators()
         .op("_test::leaky_relu(Tensor self, float v=0.01) -> Tensor",

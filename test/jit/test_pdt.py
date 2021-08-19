@@ -3,7 +3,7 @@ import sys
 import torch
 from torch.testing._internal.jit_utils import JitTestCase, make_global
 from torch.jit._monkeytype_config import _IS_MONKEYTYPE_INSTALLED
-from typing import List, Dict, Tuple, Any  # noqa: F401
+from typing import List, Dict, Tuple, Any, Optional, NamedTuple  # noqa: F401
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -405,3 +405,93 @@ class TestPDT(JitTestCase):
         user_class = ClassWithArgs(False)
         scripted_fn = torch.jit._script_pdt(test_model_with_args, example_inputs=[(10, user_class, ), (10.9, user_class, ), ])
         self.assertEqual(scripted_fn(100, ClassWithArgs(True), ), test_model_with_args(100, ClassWithArgs(True)))
+
+    def test_nn_parameter_as_arg(self):
+        class TestNNParameter(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.inp = torch.nn.Parameter(torch.ones(2, 3))
+
+            def add_nn_parameter_with_int(self, x, y):
+                return torch.add(x, y)
+
+            def forward(self, y):
+                return self.add_nn_parameter_with_int(self.inp, y)
+
+        make_global(TestNNParameter)
+        pdt_model = TestNNParameter()
+        scripted_fn = torch.jit._script_pdt(pdt_model, example_inputs={pdt_model: [(10, ), ], })
+        self.assertEqual(scripted_fn(20), pdt_model(20))
+
+    def test_fx_tracing_with_typing(self):
+        class FXModelOutput(NamedTuple):
+            result: List[int]
+
+        class FXModel(torch.nn.Module):
+            def forward(self, a) -> FXModelOutput:
+                result = FXModelOutput(result=a)
+                return result
+
+        make_global(FXModel, FXModelOutput)
+        pdt_model = FXModel()
+        scripted_fn = torch.jit._script_pdt(pdt_model, example_inputs={pdt_model: [([10, 20, ], ), ], })
+        self.assertEqual(scripted_fn([20]), pdt_model([20]))
+
+    def test_nonetype_as_optional_of_type(self):
+        def test_none(a) -> Any:
+            if a is None:
+                return 0
+            else:
+                return a + torch.ones(1)
+
+        make_global(test_none)
+
+        scripted_fn = torch.jit._script_pdt(test_none, example_inputs=[(None, ), (10.6, )])
+        self.assertEqual(scripted_fn(30.9, ), test_none(30.9, ))
+
+        scripted_fn = torch.jit._script_pdt(test_none, example_inputs=[(None, ), (10, )])
+        self.assertEqual(scripted_fn(2, ), test_none(2, ))
+
+        scripted_fn = torch.jit._script_pdt(test_none, example_inputs=[(None, ), (torch.Tensor(1), )])
+        self.assertEqual(scripted_fn(torch.ones(1), ), test_none(torch.ones(1), ))
+
+        class TestForwardWithNoneType(torch.nn.Module):
+            def forward(self, a):
+                count = 0
+                for i, val in enumerate(a):
+                    if val is None:
+                        count += 1
+                return count
+
+        make_global(TestForwardWithNoneType)
+        pdt_model = TestForwardWithNoneType()
+
+        # Test List[Optional[float]] as input
+        scripted_model = torch.jit._script_pdt(pdt_model, example_inputs=[([None, ], ), ([2.9, ], )])
+        self.assertEqual(scripted_model([2.8, 6.7, 3.8, None, ]), pdt_model([2.8, 6.7, 3.8, None, ]))
+
+        # Test Tuple[Optional[int]] as input
+        scripted_model = torch.jit._script_pdt(pdt_model, example_inputs=[((5.1, ), ), ((None, ), ), ])
+        self.assertEqual(scripted_model((6.2, None, 10.6, 80.1, None, )), pdt_model((6.2, None, 10.6, 80.1, None, )))
+
+        # Test List[Optional[int]] as input
+        scripted_model = torch.jit._script_pdt(pdt_model, example_inputs=[([None, ], ), ([2, ], )])
+        self.assertEqual(scripted_model([2, None, 6, 8, ]), pdt_model([2, None, 6, 8, ]))
+
+        # Test Tuple[Optional[int]] as input
+        scripted_model = torch.jit._script_pdt(pdt_model, example_inputs=[((None, ), ), ((5, ), )])
+        self.assertEqual(scripted_model((2, None, 6, 8)), pdt_model((2, None, 6, 8, )))
+
+        # Test Tuple[Optional[float]] as input
+        scripted_model = torch.jit._script_pdt(pdt_model, example_inputs=[((None, ), ), ((5, ), )])
+        self.assertEqual(scripted_model((2, None, 6, 8)), pdt_model((2, None, 6, 8, )))
+
+        # Test Tuple[Optional[torch.Tensor]] as input
+        scripted_model = torch.jit._script_pdt(pdt_model, example_inputs=[(((torch.ones(1), ), (None, ), ), )])
+        self.assertEqual(scripted_model((torch.ones(1), torch.ones(1), None)),
+                         pdt_model((torch.ones(1), torch.ones(1), None)))
+
+        # Test List[Optional[torch.Tensor]] as input
+        scripted_model = torch.jit._script_pdt(pdt_model, example_inputs=[([None, ], ), ([torch.ones(1), ], )])
+        self.assertEqual(scripted_model([torch.ones(1), torch.ones(1), None]),
+                         pdt_model([torch.ones(1), torch.ones(1), None]))

@@ -23,13 +23,7 @@ Variable CrossMapLRN2d::forward(
 
   torch::Tensor output = torch::empty({0}, input.options());
 
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
-  int64_t batch_size = input.size(0);
   int64_t channels = input.size(1);
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
-  int64_t input_height = input.size(2);
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
-  int64_t input_width = input.size(3);
 
   output.resize_as_(input);
   ctx->saved_data["scale"].toTensor().resize_as_(input);

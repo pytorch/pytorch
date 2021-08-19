@@ -60,8 +60,7 @@ def rendezvous(url: str, rank: int = -1, world_size: int = -1, **kwargs):
     result = urlparse(url)
     if rank != -1 or world_size != -1:
         query_dict: Dict[str, Union[int, str]] = dict(
-            # mypy doesn't allow dict() to accept List of values (#257)
-            pair.split("=") for pair in filter(None, result.query.split("&"))  # type: ignore[arg-type, misc]
+            pair.split("=") for pair in filter(None, result.query.split("&"))
         )
         assert (
             "rank" not in query_dict and "world_size" not in query_dict
@@ -188,7 +187,8 @@ def _env_rendezvous_handler(url: str, timeout: timedelta = default_pg_timeout, *
     use_torchelastic_store = os.environ.get("TORCHELASTIC_USE_AGENT_STORE", None)
 
     if use_torchelastic_store == str(True):
-        worker_process_prefix = "/worker"
+        attempt = os.environ["TORCHELASTIC_RESTART_COUNT"]
+        worker_process_prefix = f"/worker/attempt_{attempt}"
         # When TORCHELASTIC_USE_AGENT_STORE is set up, the worker process is assumed
         # to be invoked by the torchelastic agent. Torchelastic agent creates a tcp daemon thread
         # on the GROUP_RANK=0, as a result all user worker processes should create store with: daemon=False
