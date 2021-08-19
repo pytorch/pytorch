@@ -31,40 +31,27 @@ static void scatter_gather_dtype_check(
 }
 
 // Used for `gather`-like methods
+// self here means the input tensor
 // Test:
-// 1. index.size(d) == self.size(d) for all d != dim
-// 2. index.size(d) <= src.size(d) for all d != dim
-// 3. index.dim() == self.dim() == src.dim()
-//const c10::optional<Tensor>& src_opt = c10::nullopt
-static C10_UNUSED void gather_shape_check(const Tensor& src, int64_t dim,
+// 1. index.size(d) <= self.size(d) for all d != dim
+// 2. index.dim() == self.dim()
+static C10_UNUSED void gather_shape_check(const Tensor& self, int64_t dim,
   const Tensor& index
 ) {
-  /* auto self_dims = ensure_nonempty_dim(self.dim()); */
-  /* TORCH_CHECK(self_dims == ensure_nonempty_dim(index.dim()), */
-  /*   "Index tensor must have the same number of dimensions as out tensor" */
-  /* ); */
-
-  auto src_dims = ensure_nonempty_dim(src.dim());
-  TORCH_CHECK(src_dims == ensure_nonempty_dim(index.dim()),
+  auto self_dims = ensure_nonempty_dim(self.dim());
+  TORCH_CHECK(self_dims == ensure_nonempty_dim(index.dim()),
     "Index tensor must have the same number of dimensions as input tensor"
   );
 
-  for (int64_t i = 0; i < src_dims; ++i) {
+  for (int64_t i = 0; i < self_dims; ++i) {
     if (i != dim) {
       TORCH_CHECK(
-        ensure_nonempty_size(index, i) <= ensure_nonempty_size(src, i),
+        ensure_nonempty_size(index, i) <= ensure_nonempty_size(self, i),
         "Size does not match at dimension ", i,
         " expected index ", index.sizes(),
-        " to be smaller than src ", src.sizes(),
+        " to be smaller than self ", self.sizes(),
         " apart from dimension ", dim
       );
-
-      /* TORCH_CHECK( */
-      /*   ensure_nonempty_size(index, i) <= ensure_nonempty_size(src, i), */
-      /*   "Size does not match at dimension ", i, */
-      /*   " get ", ensure_nonempty_size(src, i), */
-      /*   " vs ", ensure_nonempty_size(index, i) */
-      /* ); */
     }
   }
 }

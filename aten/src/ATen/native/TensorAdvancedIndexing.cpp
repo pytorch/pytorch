@@ -92,11 +92,14 @@ TORCH_META_FUNC(gather)
     at::assert_no_internal_overlap(result);
     at::assert_no_overlap(result, self);
     at::assert_no_partial_overlap(result, index);
-    at::native::scatter_gather_dtype_check("gather", result, index, self);
   }
-  at::native::gather_shape_check(self, wrapped_dim, index);
+  TORCH_CHECK(
+    index.scalar_type() == at::ScalarType::Long,
+    "gather", "(): Expected dtype int64 for index"
+  );
   set_output(index.sizes(), self.options());
-  at::native::scatter_gather_dtype_check("gather", result, index, self);
+  at::native::gather_shape_check(self, wrapped_dim, index);
+  // at::native::scatter_gather_dtype_check("gather", result, index, self);
 }
 
 template <typename Meta>
