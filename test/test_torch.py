@@ -1098,7 +1098,7 @@ class AbstractTestCases:
         def test_scatter_add_mult_index(self):
             self._test_scatter_add_mult_index_base(self, lambda t: t)
 
-        @staticmethod  # TODO
+        @staticmethod
         def _test_scatter_base(self, cast, method, is_scalar=False, test_bounds=True, reduction=None, *, test_complex=False):
             if test_complex:
                 dtypes = [torch.complex64, torch.complex128]
@@ -1202,6 +1202,21 @@ class AbstractTestCases:
             for method in ["add", "multiply"]:
                 self._test_scatter_base(self, lambda t: t, 'scatter_', reduction=method)
                 self._test_scatter_base(self, lambda t: t, 'scatter_', True, reduction=method)
+
+        def test_scatter_index_larger_src(self):
+            shape_src = 3, 5
+            index = torch.ones(3, 7, dtype=torch.int64)
+            output = torch.zeros(shape_src)
+            values = torch.ones(shape_src)
+            output.scatter_(1, index, values, reduce='add')
+            expected = torch.tensor(
+                [
+                    [0., 7., 0., 0., 0.],
+                    [0., 7., 0., 0., 0.],
+                    [0., 5., 0., 0., 0.]
+                ]
+            )
+            self.assertEqual(output, expected, atol=0, rtol=0)
 
         def test_structseq_repr(self):
             a = torch.arange(250).reshape(5, 5, 10)
@@ -5736,7 +5751,6 @@ else:
                            [1, 0, 0, 0],
                            [0, 0, 0, 0]],
                           device=device, dtype=dtype), "add"),
-                            # TODO
             (torch.tensor([2], device=device, dtype=dtype).repeat(4, 4),
              torch.tensor([6], device=device, dtype=dtype).repeat(2, 2),
              torch.tensor([[2, 2, 2, 2],
@@ -5757,7 +5771,7 @@ else:
               torch.testing.get_all_complex_dtypes()))
     @dtypesIfCPU(*torch.testing.get_all_dtypes())
     @dtypesIfCUDA(*torch.testing.get_all_dtypes())
-    def test_scatter_reduce_scalar(self, device, dtype):  # TODO
+    def test_scatter_reduce_scalar(self, device, dtype):
         index = torch.tensor([[1], [2]], device=device, dtype=torch.long)
         test_data = [
             (torch.zeros(4, 4, device=device, dtype=dtype), 1,
@@ -5798,7 +5812,7 @@ else:
               torch.testing.get_all_complex_dtypes()))
     @dtypesIfCPU(*torch.testing.get_all_dtypes())
     @dtypesIfCUDA(*torch.testing.get_all_dtypes())
-    def test_scatter_reduce_non_unique_index(self, device, dtype):  # TODO
+    def test_scatter_reduce_non_unique_index(self, device, dtype):
         height = 2
         width = 2
         index = torch.zeros(height, width, dtype=torch.long, device=device)
@@ -5832,7 +5846,7 @@ else:
         with self.assertRaises(RuntimeError):
             input.scatter_(0, index, src, reduce="multiply")
 
-    def test_scatter_to_large_input(self, device):  # TODO
+    def test_scatter_to_large_input(self, device):
         input = torch.zeros(4, 4, device=device)
         src = torch.ones(2, 2, device=device)
         index = torch.tensor([[1], [2]], device=device, dtype=torch.long)
@@ -5852,7 +5866,7 @@ else:
                                               [1, 0, 0, 0],
                                               [0, 0, 0, 0]], device=device, dtype=torch.float32))
 
-    def test_scatter_bool(self, device):  # TODO
+    def test_scatter_bool(self, device):
         x = torch.tensor([[True, True, True], [True, True, True]], device=device)
         res = torch.zeros(3, 3, dtype=torch.bool, device=device)
         res = res.scatter_(0, torch.tensor([[0, 1, 2], [0, 1, 2]], device=device), x)
@@ -5870,7 +5884,7 @@ else:
 
     @onlyOnCPUAndCUDA
     @dtypes(*torch.testing.get_all_dtypes())
-    def test_masked_scatter(self, device, dtype):  # TODO
+    def test_masked_scatter(self, device, dtype):
         dt = dtype
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
