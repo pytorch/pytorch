@@ -35,6 +35,13 @@ that perform all or part of the computation in lower precision. Higher-level
 APIs are provided that incorporate typical workflows of converting FP32 model
 to lower precision with minimal accuracy loss.
 
+Quantization requires users to be aware of three concepts:
+1. Quantization Config (Qconfig): Specifies how weights and activations are to be quantized. Qconfig is needed to create a quantized model.
+2. Backend: Refers to kernels that support quantization, usually with different numerics.
+3. Quantization engine (torch.backends.quantization.engine): When a quantized model is executed, the qengine specifies which
+backed is to be used for execution. It is important to ensure that the qengine is consistent with the Qconfig.
+
+
 Natively supported backends
 ---------------------------
 
@@ -45,7 +52,8 @@ Today, PyTorch supports the following backends for running quantized operators e
 * ARM CPUs (typically found in mobile/embedded devices), via
   `qnnpack` (`<https://github.com/pytorch/QNNPACK>`_).
 
-The corresponding implementation is chosen automatically based on the PyTorch build mode.
+The corresponding implementation is chosen automatically based on the PyTorch build mode, though users
+have the option to override this if needed.
 
 .. note::
 
@@ -58,7 +66,7 @@ The corresponding implementation is chosen automatically based on the PyTorch bu
 
 
 When preparing a quantized model, it is necessary to ensure that qconfig
-and the qengine used for quantized computations match the backend on which
+and the engine used for quantized computations match the backend on which
 the model will be executed. The qconfig controls the type of observers used
 during the quantization passes. The qengine controls whether `fbgemm` or
 `qnnpack` specific packing function is used when packing weights for linear
