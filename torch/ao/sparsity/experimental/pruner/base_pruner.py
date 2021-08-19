@@ -1,6 +1,5 @@
 
 import abc
-import copy
 
 import torch
 from torch import nn
@@ -10,7 +9,7 @@ from torch.nn.modules.container import ModuleDict, ModuleList
 
 from .parametrization import PruningParametrization, ActivationReconstruction
 
-from torch.ao.sparsity.sparsifier.base_sparsifier import BaseSparsifier
+from torch.ao.sparsity import BaseSparsifier, fqn_to_module
 
 SUPPORTED_MODULES = {
     nn.Linear,
