@@ -128,6 +128,7 @@ async def shell_cmd(
     cmd: Union[str, List[str]],
     env: Optional[Dict[str, Any]] = None,
     redirect: bool = True,
+    check: bool = False,
 ) -> CommandResult:
     if isinstance(cmd, list):
         cmd_str = " ".join(shlex.quote(arg) for arg in cmd)
@@ -150,7 +151,13 @@ async def shell_cmd(
     if not redirect:
         return CommandResult(passed, "", "")
 
-    return CommandResult(passed, stdout.decode().strip(), stderr.decode().strip())
+    stdout = stdout.decode().strip()
+    stderr = stderr.decode().strip()
+
+    if check and not passed:
+        raise RuntimeError(f"'{cmd_str}' failed:\n{stdout}\n{stderr}")
+
+    return CommandResult(passed, stdout, stderr)
 
 
 class Check:
@@ -375,11 +382,35 @@ class ShellCheck(Check):
 
 
 class ClangTidy(Check):
-    name = "clang-tidy: Run clang-tidy"
-    common_options = [
-        "--clang-tidy-exe",
-        ".clang-tidy-bin/clang-tidy",
-    ]
+    name = "clang-tidy"
+    # common_options = [
+    #     "--clang-tidy-exe",
+    #     ".clang-tidy-bin/clang-tidy",
+    # ]
+    def __init__(self, exe: str, generate_build: bool):
+        self.exe = exe
+        self.generate_build = generate_build
+        self.common_options = [
+            "--clang-tidy-exe",
+            str(exe),
+        ]
+
+    # if not pathlib.Path("build").exists():
+    #     generate_build_files()
+
+    # # Check if clang-tidy executable exists
+    # exists = os.access(options.clang_tidy_exe, os.X_OK)
+
+    # if not exists:
+    #     msg = (
+    #         f"Could not find '{options.clang_tidy_exe}'\n"
+    #         + "We provide a custom build of clang-tidy that has additional checks.\n"
+    #         + "You can install it by running:\n"
+    #         + "$ python3 tools/linter/install/clang_tidy.py"
+    #     )
+    #     raise RuntimeError(msg)
+
+    # result, _ = run(options)
 
     def filter_files(self, files: List[str]) -> List[str]:
         return self.filter_ext(files, {".c", ".cc", ".cpp"})

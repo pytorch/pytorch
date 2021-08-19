@@ -5,6 +5,7 @@ import hashlib
 import subprocess
 import os
 import urllib.request
+import socket
 import urllib.error
 
 from typing import Dict
@@ -89,6 +90,10 @@ def download(
     Download a platform-appropriate binary if one doesn't already exist at the expected location and verifies
     that it is the right binary by checking its SHA256 hash against the expected hash.
     """
+    if socket.gethostname().endswith(".facebook.com"):
+        # FB-specific hack for internal dev machines
+        os.environ["HTTPS_PROXY"] = "http://fwdproxy:8080"
+
 
     output_path = os.path.join(output_dir, name)
     if not os.path.exists(output_dir):

@@ -6,7 +6,7 @@ from typing import List, Any
 VERBOSE = False
 
 def log(*args: Any) -> None:
-    if VERBOSE:
+    if VERBOSE or True:
         print(*args)
 
 

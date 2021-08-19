@@ -1,6 +1,11 @@
+from sys import executable
+import sys
+from click.core import Option
+
 import yaml
 import click
 import asyncio
+import pathlib
 
 from . import actions_local_runner
 from . import utils
@@ -107,7 +112,8 @@ def done(result: int, **kwargs: Kwargs) -> None:
 @click.option("--generate-stubs", help="(mypy) Generate stubs", is_flag=True)
 def _all(generate_stubs: bool, **kwargs: Kwargs) -> int:
     return run(
-        [actions_local_runner.Flake8(), actions_local_runner.Mypy(generate_stubs)], **kwargs
+        [actions_local_runner.Flake8(), actions_local_runner.Mypy(generate_stubs)],
+        **kwargs,
     )
 
 
@@ -149,6 +155,37 @@ def quick_checks(**kwargs: Kwargs) -> int:
     ]
 
     return run(checks, **kwargs)
+
+
+@cli.command()
+@add_common_options()
+@click.option("--exe", help="clang-tidy binary to use")
+@click.option(
+    "--generate-build",
+    help="Re-generate compile_commands.json + build files before running",
+    is_flag=True,
+)
+# @click.option("--generate-build", help="Re-generate compile_commands.json + build files before running")
+def clang_tidy(exe: Optional[str], generate_build: bool, **kwargs: Kwargs) -> int:
+    if exe is None:
+        exe = actions_local_runner.REPO_ROOT / ".clang-tidy-bin" / "clang-tidy"
+    else:
+        exe = pathlib.Path(exe)
+
+    if not exe.exists():
+        install_cmd = [sys.executable, "-m", "tools.linter.install.clang_tidy"]
+        print(
+            f"Could not find '{exe}'\nWould you like to download it now via '{' '.join(install_cmd)}'? (y/n) ",
+            end="",
+        )
+        c = input().lower()
+        if c == "y":
+            coro = actions_local_runner.shell_cmd(install_cmd, redirect=False, check=True)
+            asyncio.get_event_loop().run_until_complete(coro)
+        else:
+            return 1
+
+    return run([actions_local_runner.ClangTidy(exe, generate_build)], **kwargs)
 
 
 if __name__ == "__main__":
