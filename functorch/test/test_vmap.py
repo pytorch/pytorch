@@ -560,7 +560,7 @@ class TestVmapAPI(TestCase):
         # NB: One day we will implement a batching rule for torch.atan2.
         # If/when we do, this test should be replaced to test the fallback
         # path on another operator to avoid bitrot.
-        op = torch.atan2
+        op = torch.copysign
         x = torch.randn(11)
         y = torch.randn(11)
         with warnings.catch_warnings(record=True) as wa:
