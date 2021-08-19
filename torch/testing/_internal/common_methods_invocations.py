@@ -4858,6 +4858,8 @@ def sample_inputs_expand(op_info, device, dtype, requires_grad, **kwargs):
 
     cases = (((S, 1, 1), (S, S, S)),
              ((S, 1, S), (S, S, S)),
+             ((S, 1, S), (-1, S, -1)),
+             ((S, 1, S), (-1, S, S)),
              ((S, 1), (S, S, S)),
              ((1,), (S, S, S)),
              ((1, S), (1, 1, S)),
