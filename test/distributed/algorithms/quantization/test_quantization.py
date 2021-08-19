@@ -6,6 +6,7 @@ import torch.distributed.algorithms.quantization.quantization as quant
 from torch.distributed.algorithms.quantization.quantization import DQuantType
 from torch.testing._internal.common_distributed import (
     requires_gloo,
+    skip_if_rocm,
     skip_if_lt_x_gpu,
     requires_nccl,
 )
@@ -42,6 +43,7 @@ class DistQuantizationTests(TestDistBackend, DistributedTest._DistTestBase):
     @requires_nccl()
     @sandcastle_skip_if(BACKEND != "nccl", "Only nccl backend supports all_to_all_fp16")
     @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
+    @skip_if_rocm
     def test_all_to_all_fp16(self):
         group, group_id, rank = self._init_global_test()
         rank_to_GPU = self._init_multigpu_helper()
@@ -57,6 +59,7 @@ class DistQuantizationTests(TestDistBackend, DistributedTest._DistTestBase):
     @requires_nccl()
     @sandcastle_skip_if(BACKEND != "nccl", "Only nccl backend supports all_to_all_bfp16")
     @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
+    @skip_if_rocm
     def test_all_to_all_bfp16(self):
         group, group_id, rank = self._init_global_test()
         rank_to_GPU = self._init_multigpu_helper()
