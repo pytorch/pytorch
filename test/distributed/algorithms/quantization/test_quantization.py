@@ -56,21 +56,21 @@ class DistQuantizationTests(TestDistBackend, DistributedTest._DistTestBase):
             dtype=torch.float32,
             qtype=DQuantType.FP16)
 
-    # @requires_nccl()
-    # @sandcastle_skip_if(BACKEND != "nccl", "Only nccl backend supports all_to_all_bfp16")
-    # @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
-    # @skip_if_rocm
-    # def test_all_to_all_bfp16(self):
-    #     group, group_id, rank = self._init_global_test()
-    #     rank_to_GPU = self._init_multigpu_helper()
-    #     self._test_all_to_all(
-    #         group,
-    #         group_id,
-    #         rank,
-    #         cuda=True,
-    #         rank_to_GPU=rank_to_GPU,
-    #         dtype=torch.float32,
-    #         qtype=DQuantType.BFP16)
+    @requires_nccl()
+    @sandcastle_skip_if(BACKEND != "nccl", "Only nccl backend supports all_to_all_bfp16")
+    @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
+    @skip_if_rocm
+    def test_all_to_all_bfp16(self):
+        group, group_id, rank = self._init_global_test()
+        rank_to_GPU = self._init_multigpu_helper()
+        self._test_all_to_all(
+            group,
+            group_id,
+            rank,
+            cuda=True,
+            rank_to_GPU=rank_to_GPU,
+            dtype=torch.float32,
+            qtype=DQuantType.BFP16)
 
     def _test_all_gather(
             self, group, group_id, rank, cuda=False, rank_to_GPU=None, dtype=torch.float, qtype=DQuantType.FP16):

@@ -51,7 +51,7 @@ namespace distributed {
 namespace c10d {
 namespace quantization {
 
-at::Tensor _float_to_bfloat16_gpu(const at::Tensor& input) {
+at::Tensor _float_to_bfloat16_cuda(const at::Tensor& input) {
   TENSOR_ON_CUDA_GPU(input);
   // Currently it supports 2D inputs
   TENSOR_NDIM_EQUALS(input, 2);
@@ -97,7 +97,7 @@ at::Tensor _float_to_bfloat16_gpu(const at::Tensor& input) {
   return output;
 }
 
-at::Tensor _bfloat16_to_float_gpu(const at::Tensor& input) {
+at::Tensor _bfloat16_to_float_cuda(const at::Tensor& input) {
   TENSOR_ON_CUDA_GPU(input);
   // Currently it supports 2D inputs
   TENSOR_NDIM_EQUALS(input, 2);
