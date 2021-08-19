@@ -1186,7 +1186,7 @@ class TestTEFuser(JitTestCase):
             ref = fn(input_v, mask)
             try:
                 t = torch.jit.trace(fn, (input_v, mask))
-                torch.testing.assert_allclose(ref, t(input_v, mask))
+                torch.testing.assert_close(ref, t(input_v, mask))
                 print(torch.jit.last_executed_optimized_graph())
                 self.assertLastGraphAllFused()
             except Exception as e:
@@ -1287,7 +1287,7 @@ class TestTEFuser(JitTestCase):
                 continue
             try:
                 t = torch.jit.trace(fn, (x,))
-                torch.testing.assert_allclose(ref, t(x))
+                torch.testing.assert_close(ref, t(x))
                 self.assertAllFused(t.graph_for(x))
             except Exception as e:
                 raise RuntimeError(
@@ -1683,7 +1683,7 @@ class TestTEFuser(JitTestCase):
             for _ in range(4):
                 for pair in zip(script(*inputs), eager(*inputs)):
                     test, ref = pair
-                    torch.testing.assert_allclose(test, ref)
+                    torch.testing.assert_close(test, ref)
                     self.assertAllFused(script.graph_for(*inputs))
 
     def test_sub_gt_and(self):
@@ -1776,10 +1776,10 @@ class TestTEFuser(JitTestCase):
                 one = torch.tensor([[1]]).to(dtype2)
                 script = torch.jit.trace(eager, (x, zero))
                 for _ in range(3):
-                    torch.testing.assert_allclose(
+                    torch.testing.assert_close(
                         script(x, zero),
                         eager(x, zero))
-                    torch.testing.assert_allclose(
+                    torch.testing.assert_close(
                         script(x, one),
                         eager(x, one))
                 self.assertAllFused(script.graph_for(x, one))
@@ -1824,7 +1824,7 @@ class TestTEFuser(JitTestCase):
                 xs -= 0.1 * xs.grad
                 x.grad = None
                 xs.grad = None
-        torch.testing.assert_allclose(y, ys)
+        torch.testing.assert_close(y, ys)
 
     def test_relu_fwd_bwd(self):
         def eager(x):
@@ -1907,12 +1907,12 @@ class TestTEFuser(JitTestCase):
             for _ in range(3):
                 script(x)
 
-            torch.testing.assert_allclose(eager(x), script(x))
+            torch.testing.assert_close(eager(x), script(x))
 
             # Now when an input hits the unrolled path, it will produce an
             # incorrectly-sized tensor, since size=1 has been burned in.
             x = torch.ones((8, 1))
-            torch.testing.assert_allclose(eager(x), script(x))
+            torch.testing.assert_close(eager(x), script(x))
 
 works_list = [
     '__radd__',
