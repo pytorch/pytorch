@@ -41,7 +41,6 @@ void checkExprIR(const ExprHandle& e, const std::string& pattern) {
 }
 
 TEST(LoopNest, ExprSimple01) {
-  KernelScope kernel_scope;
   Tensor tensor = Compute(
       "f", {{16, "X"}, {5, "y"}}, [](const VarHandle& x, const VarHandle& y) {
         return ExprHandle(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
@@ -55,7 +54,6 @@ TEST(LoopNest, ExprSimple01) {
 }
 
 TEST(LoopNest, ExprLower01) {
-  KernelScope kernel_scope;
   Tensor tensor = Compute(
       "f", {{16, "x"}, {5, "y"}}, [](const VarHandle& x, const VarHandle& y) {
         return ExprHandle(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
@@ -69,7 +67,6 @@ TEST(LoopNest, ExprLower01) {
 }
 
 TEST(LoopNest, ExprSimple02) {
-  KernelScope kernel_scope;
   auto func = [](const ExprHandle& x, const ExprHandle& y) {
     return ExprHandle(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
   };
@@ -164,7 +161,6 @@ void assertForRanges(
 }
 
 TEST(LoopNest, ExprSliceHeadWithLoopOptions) {
-  KernelScope kernel_scope;
   auto func = [](const ExprHandle& x) {
     return ExprHandle(1.0f) + cast<float>(x);
   };
@@ -189,7 +185,6 @@ TEST(LoopNest, ExprSliceHeadWithLoopOptions) {
 }
 
 TEST(LoopNest, ExprSliceTailWithLoopOptions) {
-  KernelScope kernel_scope;
   auto func = [](const ExprHandle& x) {
     return ExprHandle(1.0f) + cast<float>(x);
   };
@@ -223,7 +218,6 @@ TEST(LoopNest, ExprSliceTailWithLoopOptions) {
 TEST(LoopNest, ExprSliceHeadWhenFactorEqualsSize) {
   // When factor equals the For loop's original size, keep using the original
   // For loop.
-  KernelScope kernel_scope;
   auto func = [](const ExprHandle& x) {
     return ExprHandle(1.0f) + cast<float>(x);
   };
@@ -245,7 +239,6 @@ TEST(LoopNest, ExprSliceHeadWhenFactorEqualsSize) {
 }
 
 TEST(LoopNest, ExprSliceHeadWhenFactorLargerThanSize) {
-  KernelScope kernel_scope;
   auto func = [](const ExprHandle& x) {
     return ExprHandle(1.0f) + cast<float>(x);
   };
@@ -267,7 +260,6 @@ TEST(LoopNest, ExprSliceHeadWhenFactorLargerThanSize) {
 }
 
 TEST(LoopNest, ExprSliceHead) {
-  KernelScope kernel_scope;
   auto func = [](const ExprHandle& x) {
     return ExprHandle(1.0f) + cast<float>(x);
   };
@@ -291,7 +283,6 @@ TEST(LoopNest, ExprSliceHead) {
 }
 
 TEST(LoopNest, ExprSliceHeadWithNonZeroStart) {
-  KernelScope kernel_scope;
   auto func = [](const ExprHandle& x) {
     return ExprHandle(1.0f) + cast<float>(x);
   };
@@ -319,7 +310,6 @@ TEST(LoopNest, ExprSliceHeadWithNonZeroStart) {
 TEST(LoopNest, ExprSliceTailWhenFactorEqualsSize) {
   // When factor equals the For loop's original size, keep using the original
   // For loop.
-  KernelScope kernel_scope;
   auto func = [](const ExprHandle& x) {
     return ExprHandle(1.0f) + cast<float>(x);
   };
@@ -343,7 +333,6 @@ TEST(LoopNest, ExprSliceTailWhenFactorEqualsSize) {
 TEST(LoopNest, ExprSliceTailWhenFactorLargerThanSize) {
   // When factor equals the For loop's original size, keep using the original
   // For loop.
-  KernelScope kernel_scope;
   auto func = [](const ExprHandle& x) {
     return ExprHandle(1.0f) + cast<float>(x);
   };
@@ -365,7 +354,6 @@ TEST(LoopNest, ExprSliceTailWhenFactorLargerThanSize) {
 }
 
 TEST(LoopNest, ExprSliceTail) {
-  KernelScope kernel_scope;
   auto func = [](const ExprHandle& x) {
     return ExprHandle(1.0f) + cast<float>(x);
   };
@@ -392,7 +380,6 @@ TEST(LoopNest, ExprSplitAndSlice) {
   // 0: splitWithTail
   // 1: sliceTail on inner loop
   // 2: sliceHead on outer loop
-  KernelScope kernel_scope;
   auto func = [](const ExprHandle& x) {
     return ExprHandle(1.0f) + cast<float>(x);
   };
@@ -446,7 +433,6 @@ TEST(LoopNest, ExprSplitAndSlice) {
 TEST(LoopNest, ExprSliceAndNormalize) {
   // 0: sliceHead
   // 1: normalize tail
-  KernelScope kernel_scope;
   auto func = [](const ExprHandle& x) {
     return ExprHandle(1.0f) + cast<float>(x);
   };
@@ -480,7 +466,6 @@ TEST(LoopNest, ExprSliceWithVariableDimension) {
   auto testWithDimension =
       [](int dimension,
          const std::vector<std::pair<int, int>>& expected_for_ranges) {
-        KernelScope kernel_scope;
         VarHandle dim("dim", kInt);
         Tensor tensor =
             Compute("f", {{dim, "x"}}, [](const ExprHandle& x) { return x; });
@@ -517,7 +502,6 @@ TEST(LoopNest, ExprSliceWithVariableDimension) {
 }
 
 TEST(LoopNest, ExprSplitWithTail) {
-  KernelScope kernel_scope;
   auto func = [](const ExprHandle& x) {
     return ExprHandle(1.0f) + cast<float>(x);
   };
@@ -548,7 +532,6 @@ TEST(LoopNest, ExprSplitWithTail) {
 }
 
 TEST(LoopNest, ExprSplitWithTailNone) {
-  KernelScope kernel_scope;
   auto func = [](const ExprHandle& x, const ExprHandle& y) {
     return ExprHandle(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
   };
@@ -607,7 +590,6 @@ TEST(LoopNest, ExprSplitWithTailNone) {
 }
 
 TEST(LoopNest, ExprSplitWithMask01) {
-  KernelScope kernel_scope;
   const int M = 26;
   const int N = 5;
   Placeholder a_buf("a", kFloat, {M, N});
@@ -644,7 +626,6 @@ TEST(LoopNest, ExprSplitWithMask01) {
 // Tests the case where we split a loop cleanly multiple times, we should not
 // insert any masks.
 TEST(LoopNest, ExprSplitWithMaskRepeatedNoMask) {
-  KernelScope kernel_scope;
   const int M = 64;
   Placeholder a_buf("a", kFloat, {M});
   Placeholder b_buf("b", kFloat, {M});
@@ -672,7 +653,6 @@ TEST(LoopNest, ExprSplitWithMaskRepeatedNoMask) {
 }
 
 TEST(LoopNest, getLoopAt) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //  for (int i = 0; i < 100; i++) {
@@ -731,7 +711,6 @@ TEST(LoopNest, getLoopAt) {
 }
 
 TEST(LoopNest, TileSimple) {
-  KernelScope kernel_scope;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   const int M = 64, N = 64;
   Placeholder a_buf("a", kFloat, {M, N});
@@ -778,7 +757,6 @@ TEST(LoopNest, TileSimple) {
 }
 
 TEST(LoopNest, TileWithTails) {
-  KernelScope kernel_scope;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   const int M = 64, N = 64;
   Placeholder a_buf("a", kFloat, {M, N});
@@ -826,7 +804,6 @@ TEST(LoopNest, TileWithTails) {
 }
 
 TEST(LoopNest, TileInMiddle) {
-  KernelScope kernel_scope;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   const int M = 8, N = 8, L = 8, K = 8;
   Placeholder a_buf("a", kFloat, {M, N, L, K});
@@ -887,7 +864,6 @@ TEST(LoopNest, TileInMiddle) {
 }
 
 TEST(LoopNest, SplitWithTailWithLoopOptions) {
-  KernelScope kernel_scope;
   const int M = 21;
   Placeholder a_buf("a", kFloat, {M});
   Placeholder b_buf("b", kFloat, {M});
@@ -918,7 +894,6 @@ TEST(LoopNest, SplitWithTailWithLoopOptions) {
 }
 
 TEST(LoopNest, SplitWithMaskWithLoopOptions) {
-  KernelScope kernel_scope;
   const int M = 21;
   Placeholder a_buf("a", kFloat, {M});
   Placeholder b_buf("b", kFloat, {M});
@@ -943,7 +918,6 @@ TEST(LoopNest, SplitWithMaskWithLoopOptions) {
 }
 
 TEST(LoopNest, ScheduleBroadcastAddBuffer) {
-  KernelScope kernel_scope;
   const int M = 4;
   const int N = 5;
   const int K = 6;
@@ -992,7 +966,6 @@ TEST(LoopNest, ScheduleBroadcastAddBuffer) {
 }
 
 TEST(LoopNest, ScheduleFunctionCall01) {
-  KernelScope kernel_scope;
   const int M = 4;
   const int N = 5;
   const int K = 6;
@@ -1049,7 +1022,6 @@ TEST(LoopNest, ScheduleFunctionCall01) {
 }
 
 TEST(LoopNest, ScheduleInlineSimple) {
-  KernelScope kernel_scope;
   const int M = 4;
   const int N = 5;
   const int K = 6;
@@ -1130,7 +1102,6 @@ static std::string remove_space(const std::string& str) {
 }
 
 void InlineFunc01Helper(const std::vector<std::string>& inline_order) {
-  KernelScope kernel_scope;
   const int M = 4;
   const int N = 5;
   const int K = 6;
@@ -1249,7 +1220,6 @@ TEST(LoopNest, ScheduleInlineFunc01) {
 
 // Make sure we cache random vars if we should.
 TEST(LoopNest, ScheduleInlineRandom) {
-  KernelScope kernel_scope;
   const int M = 4;
   const int N = 5;
   const int K = 6;
@@ -1285,7 +1255,6 @@ TEST(LoopNest, ScheduleInlineRandom) {
 
 // Make sure we don't cache random vars that are not being inlined.
 TEST(LoopNest, ScheduleInlineRandomUnrelated) {
-  KernelScope kernel_scope;
   const int M = 4;
   const int N = 5;
   const int K = 6;
@@ -1322,7 +1291,6 @@ TEST(LoopNest, ScheduleInlineRandomUnrelated) {
 // Make sure we generate the right number of random values == the dimensionality
 // of the production tensor.
 TEST(LoopNest, ScheduleInlineRandomLowerDimensions) {
-  KernelScope kernel_scope;
   const int M = 4;
   const int N = 5;
   const int K = 6;
@@ -1355,7 +1323,6 @@ TEST(LoopNest, ScheduleInlineRandomLowerDimensions) {
 
 // Make sure we don't screw up intrinsics thinking they're rand.
 TEST(LoopNest, ScheduleInlineIntrinsics) {
-  KernelScope kernel_scope;
   const int M = 4;
   const int N = 5;
   const int K = 6;
@@ -1416,7 +1383,6 @@ TEST(LoopNest, ScheduleInlineIntrinsics) {
 
 // Make sure we can handle rand and non-rand intrinsics.
 TEST(LoopNest, ScheduleInlineRandWithIntrinsics) {
-  KernelScope kernel_scope;
   const int M = 4;
   const int N = 5;
   const int K = 6;
@@ -1450,7 +1416,6 @@ TEST(LoopNest, ScheduleInlineRandWithIntrinsics) {
 
 // Split a Compute then inline it into another compute.
 TEST(LoopNest, ScheduleSplitAThenInline) {
-  KernelScope kernel_scope;
   Tensor a =
       Compute("a", {{18, "i"}}, [&](const VarHandle& i) { return i * i; });
   Tensor b = Compute("b", {{2, "j"}}, [&](const VarHandle& j) {
@@ -1465,7 +1430,6 @@ TEST(LoopNest, ScheduleSplitAThenInline) {
 
 // Split a Compute then inline another Compute into it.
 TEST(LoopNest, ScheduleSplitBThenInline) {
-  KernelScope kernel_scope;
   Tensor a =
       Compute("a", {{18, "i"}}, [&](const VarHandle& i) { return i * i; });
   Tensor b = Compute("b", {{6, "j"}}, [&](const VarHandle& j) {
@@ -1490,7 +1454,6 @@ TEST(LoopNest, ScheduleSplitBThenInline) {
 
 // Split a Compute twice then inline it.
 TEST(LoopNest, ScheduleSplitTwiceThenInline) {
-  KernelScope kernel_scope;
   Tensor a =
       Compute("a", {{18, "i"}}, [&](const VarHandle& i) { return i * i; });
   Tensor b = Compute("b", {{2, "j"}}, [&](const VarHandle& j) {
@@ -1508,7 +1471,6 @@ TEST(LoopNest, ScheduleSplitTwiceThenInline) {
 
 // Inline a Compute, then split.
 TEST(LoopNest, ScheduleInlineThenSplit) {
-  KernelScope kernel_scope;
   Tensor a =
       Compute("a", {{18, "i"}}, [&](const VarHandle& i) { return i * i; });
   Tensor b = Compute("b", {{6, "j"}}, [&](const VarHandle& j) {
@@ -1533,7 +1495,6 @@ TEST(LoopNest, ScheduleInlineThenSplit) {
 
 // Split a Compute, inline it, then split the result.
 TEST(LoopNest, ScheduleSplitInlineThenSplit) {
-  KernelScope kernel_scope;
   Tensor a =
       Compute("a", {{18, "i"}}, [&](const VarHandle& i) { return i * i; });
   Tensor b = Compute("b", {{16, "j"}}, [&](const VarHandle& j) {
@@ -1560,7 +1521,6 @@ TEST(LoopNest, ScheduleSplitInlineThenSplit) {
 
 // Oversplit a loop that is simplified out after inlining.
 TEST(LoopNest, ScheduleSplitInlineSimplify) {
-  KernelScope kernel_scope;
   Tensor a = Compute("a", {{18, "i"}}, [&](const VarHandle& i) {
     return ExprHandle(4) * i - ExprHandle(2) * i;
   });
@@ -1576,7 +1536,6 @@ TEST(LoopNest, ScheduleSplitInlineSimplify) {
 
 // Inline a Compute with two consumers.
 TEST(LoopNest, ScheduleInlineThreeMixedOnce) {
-  KernelScope kernel_scope;
   Tensor a =
       Compute("a", {{18, "i"}}, [&](const VarHandle& i) { return i * i; });
   Tensor b = Compute("b", {{6, "j"}}, [&](const VarHandle& j) {
@@ -1606,7 +1565,6 @@ TEST(LoopNest, ScheduleInlineThreeMixedOnce) {
 
 // Inline Compute A into B, then inline B into C.
 TEST(LoopNest, ScheduleInlineThreeMixedTwice) {
-  KernelScope kernel_scope;
   Tensor a =
       Compute("a", {{18, "i"}}, [&](const VarHandle& i) { return i * i; });
   Tensor b = Compute("b", {{6, "j"}}, [&](const VarHandle& j) {
@@ -1637,7 +1595,6 @@ TEST(LoopNest, ScheduleInlineThreeMixedTwice) {
 
 // Inline a Compute that is both a producer and consumer.
 TEST(LoopNest, ScheduleInlineThreeMixedInner) {
-  KernelScope kernel_scope;
   Tensor a =
       Compute("a", {{18, "i"}}, [&](const VarHandle& i) { return i * i; });
   Tensor b = Compute("b", {{6, "j"}}, [&](const VarHandle& j) {
@@ -1667,7 +1624,6 @@ TEST(LoopNest, ScheduleInlineThreeMixedInner) {
 
 // Split 3 Computes, then inline the first two into the last.
 TEST(LoopNest, ScheduleInlineThreeMixedSplit) {
-  KernelScope kernel_scope;
   Tensor a =
       Compute("a", {{18, "i"}}, [&](const VarHandle& i) { return i * i; });
   Tensor b = Compute("b", {{6, "j"}}, [&](const VarHandle& j) {
@@ -1691,7 +1647,6 @@ TEST(LoopNest, ScheduleInlineThreeMixedSplit) {
 
 // Check that inlining works for output tensors too
 TEST(LoopNest, ScheduleInlineOutputTensors) {
-  KernelScope kernel_scope;
   const int M = 4;
   const int N = 5;
   const int K = 6;
@@ -1729,7 +1684,6 @@ TEST(LoopNest, ScheduleInlineOutputTensors) {
 }
 
 TEST(LoopNest, ScheduleFuserStyle) {
-  KernelScope kernel_scope;
   const int kVectorSize = 8;
   const int kVectorCount = 128;
   const int kTotalSize = kVectorSize * kVectorCount;
@@ -1762,7 +1716,6 @@ TEST(LoopNest, ScheduleFuserStyle) {
 }
 
 TEST(LoopNest, ScheduleFuserThreeArg) {
-  KernelScope kernel_scope;
   const int kVectorSize = 8;
   const int kVectorCount = 128;
   const int kTotalSize = kVectorSize * kVectorCount;
@@ -1801,7 +1754,6 @@ TEST(LoopNest, ScheduleFuserThreeArg) {
 }
 
 TEST(LoopNest, ScheduleDynamicShape2D) {
-  KernelScope kernel_scope;
   auto testWithSize = [](int32_t M, int32_t N) {
     VarHandle m("m", kInt);
     VarHandle n("n", kInt);
@@ -1840,7 +1792,6 @@ TEST(LoopNest, LoopNestComputeAt_1) {
   // should be in that loop after the transformation. Also, computation of A
   // should not be inlined into B. Instead, it should be computed into the temp,
   // and the temp should be used in B.
-  KernelScope kernel_scope;
   VarHandle N("N", kInt);
   Tensor A = Compute(
       "A", {{N, "i_a"}}, [&](const VarHandle& i_a) { return i_a * i_a; });
@@ -1886,7 +1837,6 @@ TEST(LoopNest, LoopNestComputeAt_2) {
   //                 p[cy,cx+1] + p[cy+1,cx+1]
   //   }
   // }
-  KernelScope kernel_scope;
 
   const int kW = 16, kH = 16;
   VarHandle W("W", kInt);
@@ -1974,7 +1924,6 @@ TEST(LoopNest, LoopNestComputeAt_3) {
   // D(x,y) = A(x, y+1) + C(x, y)
   //
   // i.e. when 'A' comes to 'D' directly and indirectly through 'C'.
-  KernelScope kernel_scope;
 
   const int kW = 16, kH = 16;
   VarHandle W("W", kInt);
@@ -2077,7 +2026,6 @@ TEST(LoopNest, LoopNestComputeAt_3) {
 using Axis = const VarHandle&;
 
 TEST(LoopNest, Reduce2dComputeAt) {
-  KernelScope kernel_scope;
 
   const int kW = 16, kH = 16;
   VarHandle W("W", kInt);
@@ -2197,7 +2145,6 @@ TEST(LoopNest, DISABLED_Conv1d_NH) {
   // Lots of stuff is broken here.  The computeAt swaps the axes for some odd
   // reason.  Even without that, the index flattener fails due to "dimensions
   // mismatch in flatten index".
-  KernelScope kernel_scope;
 
   int N = 4;
   int H = 256;
@@ -2291,7 +2238,6 @@ class LoopOrderHelper : public IRVisitor {
 };
 
 TEST(LoopNest, LoopNestReorderAxis1) {
-  KernelScope kernel_scope;
   Tensor tensor = Compute(
       "f", {{2, "x"}, {3, "y"}}, [](const VarHandle& x, const VarHandle& y) {
         return ExprHandle(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
@@ -2340,7 +2286,6 @@ TEST(LoopNest, LoopNestReorderAxis1) {
 }
 
 TEST(LoopNest, LoopNestReorderPartialAxes) {
-  KernelScope kernel_scope;
   Tensor tensor = Compute(
       "f",
       {{2, "x"}, {3, "y"}, {4, "z"}},
@@ -2388,7 +2333,6 @@ TEST(LoopNest, LoopNestReorderPartialAxes) {
 }
 
 TEST(LoopNest, LoopNestReorderInternalAxis) {
-  KernelScope kernel_scope;
   Tensor tensor = Compute(
       "f",
       {{1, "w"}, {2, "x"}, {3, "y"}, {4, "z"}},
@@ -2425,7 +2369,6 @@ TEST(LoopNest, LoopNestReorderInternalAxis) {
 }
 
 TEST(LoopNest, LoopNestReorderEnclosingAxis) {
-  KernelScope kernel_scope;
   Tensor tensor = Compute(
       "f",
       {{1, "w"}, {2, "x"}, {3, "y"}, {4, "z"}},
@@ -2461,7 +2404,6 @@ TEST(LoopNest, LoopNestReorderEnclosingAxis) {
 }
 
 TEST(LoopNest, LoopNestReorderSameAxis) {
-  KernelScope kernel_scope;
   Tensor tensor = Compute(
       "f", {{2, "x"}, {3, "y"}}, [](const VarHandle& x, const VarHandle& y) {
         return ExprHandle(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
@@ -2490,7 +2432,6 @@ TEST(LoopNest, LoopNestReorderExtraStatements) {
    *     Stmt 4
    */
 
-  KernelScope kernel_scope;
 
   Tensor tensor = Compute(
       "f",
@@ -2626,7 +2567,6 @@ void LoopNestReorderTestHelper(
     bool append,
     int index1,
     int index2) {
-  KernelScope kernel_scope;
 
   Tensor c = Compute(
       "5d",
@@ -2743,7 +2683,6 @@ TEST(LoopNest, LoopNestReorderLongStringFull) {
 }
 
 TEST(LoopNest, LoopNestReorderInternalLoopNest) {
-  KernelScope kernel_scope;
   const int M = 4;
   const int N = 5;
   const int K = 6;
@@ -2844,7 +2783,6 @@ TEST(LoopNest, LoopNestReorderInternalLoopNest) {
 }
 
 TEST(LoopNest, OuterLoopVectorization) {
-  KernelScope kernel_scope;
   Tensor tensor = Compute(
       "f", {{8, "X"}, {8, "y"}}, [](const VarHandle& x, const VarHandle& y) {
         return ExprHandle(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
@@ -2872,7 +2810,6 @@ TEST(LoopNest, OuterLoopVectorization) {
 }
 
 TEST(LoopNest, VectorizeLoopNotNormalized) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int i = 0; i < 10; i++) {
@@ -2897,7 +2834,6 @@ TEST(LoopNest, VectorizeLoopNotNormalized) {
 namespace {
 
 std::string constantUpperBoundLoopIR(int upper_bound_val) {
-  KernelScope kernel_scope;
   ExprHandle upper_bound(upper_bound_val);
   Tensor A = Compute(
       "A", {{upper_bound, "x"}}, [&](const VarHandle& x) { return x * 2; });
@@ -2924,7 +2860,6 @@ TEST(LoopNest, Unroll) {
 }
 
 TEST(LoopNest, UnrollOuter) {
-  KernelScope kernel_scope;
   ExprHandle outer_bound(3);
   ExprHandle inner_bound(4);
   Tensor A = Compute(
@@ -2948,7 +2883,6 @@ TEST(LoopNest, UnrollOuter) {
 }
 
 TEST(LoopNest, UnrollInner) {
-  KernelScope kernel_scope;
   ExprHandle outer_bound(3);
   ExprHandle inner_bound(4);
   Tensor A = Compute(
@@ -2970,7 +2904,6 @@ TEST(LoopNest, UnrollInner) {
 }
 
 TEST(LoopNest, UnrollMultipleStatements) {
-  KernelScope kernel_scope;
   const int kTotalSize = 3;
   BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kInt);
   BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kInt);
@@ -2996,7 +2929,6 @@ TEST(LoopNest, UnrollMultipleStatements) {
 }
 
 TEST(LoopNest, UnrollNonLiteralConstantBounds) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int i = 2 - 1; i < 12 / 3; i++) {
@@ -3042,7 +2974,6 @@ TEST(LoopNest, UnrollEmpty) {
 }
 
 TEST(LoopNest, NoUnroll) {
-  KernelScope kernel_scope;
   VarHandle upper_bound("N", kInt);
   Tensor A = Compute(
       "A", {{upper_bound, "x"}}, [&](const VarHandle& x) { return x * 2; });
@@ -3054,7 +2985,6 @@ TEST(LoopNest, NoUnroll) {
 }
 
 TEST(LoopNest, UnrollWithLet) {
-  KernelScope kernel_scope;
   const int kTotalSize = 3;
   BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kInt);
   BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kInt);
@@ -3097,7 +3027,6 @@ TEST(LoopNest, UnrollWithLet) {
 }
 
 TEST(LoopNest, IsNormalized) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int i = 50; i < 100; i++) {
@@ -3121,7 +3050,6 @@ TEST(LoopNest, IsNormalized) {
 }
 
 TEST(LoopNest, NormalizeStartPositive) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int x = 50; x < 100; x++) {
@@ -3153,7 +3081,6 @@ TEST(LoopNest, NormalizeStartPositive) {
 }
 
 TEST(LoopNest, NormalizeStartNegative) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int x = -50; x < 100; x++) {
@@ -3185,7 +3112,6 @@ TEST(LoopNest, NormalizeStartNegative) {
 }
 
 TEST(LoopNest, NormalizeStartZero) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int x = 0; x < 100; x++) {
@@ -3219,7 +3145,6 @@ TEST(LoopNest, NormalizeStartZero) {
 }
 
 TEST(LoopNest, NormalizeStartVariable) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int x = y; x < 100; x++) {
@@ -3253,7 +3178,6 @@ TEST(LoopNest, NormalizeStartVariable) {
 }
 
 TEST(LoopNest, NormalizeOnNestedOuterLoop) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int x = 50; x < 100; x++) {
@@ -3287,7 +3211,6 @@ TEST(LoopNest, NormalizeOnNestedOuterLoop) {
 }
 
 TEST(LoopNest, NormalizeOnNestedInnerLoop) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int x = 50; x < 100; x++) {
@@ -3321,7 +3244,6 @@ TEST(LoopNest, NormalizeOnNestedInnerLoop) {
 }
 
 TEST(LoopNest, NormalizeAndSplitWithTail) {
-  KernelScope kernel_scope;
 
   // Create a dummy tensor to construct LoopNest.
   ExprHandle n(100);
@@ -3370,7 +3292,6 @@ TEST(LoopNest, NormalizeAndSplitWithTail) {
 }
 
 TEST(LoopNest, FlattenSimpleLoopNest2D) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int i = 0; i < 10; i++) {
@@ -3413,7 +3334,6 @@ TEST(LoopNest, FlattenSimpleLoopNest2D) {
 }
 
 TEST(LoopNest, FlattenSimpleLoopNest3D) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int i = 0; i < 10; i++) {
@@ -3460,7 +3380,6 @@ TEST(LoopNest, FlattenSimpleLoopNest3D) {
 }
 
 TEST(LoopNest, FlattenLoopNestAfterNormalize) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int i = 2; i < 10; i++) {
@@ -3503,7 +3422,6 @@ TEST(LoopNest, FlattenLoopNestAfterNormalize) {
 }
 
 TEST(LoopNest, FlattenLoopNestWithNonLiteralConstantBounds) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int i = 0; i < 15-5; i++) {
@@ -3545,7 +3463,6 @@ TEST(LoopNest, FlattenLoopNestWithNonLiteralConstantBounds) {
 }
 
 TEST(LoopNest, FlattenImperfectLoopNest) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int i = 0; i < 10; i++) {
@@ -3576,7 +3493,6 @@ TEST(LoopNest, FlattenImperfectLoopNest) {
 }
 
 TEST(LoopNest, FlattenReductionLoopNest) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int i = 0; i < 10; i++) {
@@ -3609,7 +3525,6 @@ TEST(LoopNest, FlattenReductionLoopNest) {
 }
 
 TEST(LoopNest, FlattenReductionLoopNestFromTensor) {
-  KernelScope kernel_scope;
   const int M = 3;
   const int N = 7;
   VarHandle m("m", kInt);
@@ -3629,7 +3544,6 @@ TEST(LoopNest, FlattenReductionLoopNestFromTensor) {
 }
 
 TEST(LoopNest, FlattenIncorrectLoopsAsInput) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int i = 0; i < 10; i++) {
@@ -3669,7 +3583,6 @@ TEST(LoopNest, FlattenIncorrectLoopsAsInput) {
 }
 
 TEST(LoopNest, DetectInlineRankMismatch) {
-  KernelScope kernel_scope;
   const int kTotalSize = 8;
 
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
@@ -3687,7 +3600,6 @@ TEST(LoopNest, DetectInlineRankMismatch) {
 }
 
 TEST(LoopNest, CacheReadsSimple) {
-  KernelScope kernel_scope;
 
   Tensor A = Compute(
       "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
@@ -3755,7 +3667,6 @@ TEST(LoopNest, CacheReadsSimple) {
 }
 
 TEST(LoopNest, CacheReadsOuter) {
-  KernelScope kernel_scope;
 
   Tensor A = Compute(
       "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
@@ -3803,7 +3714,6 @@ TEST(LoopNest, CacheReadsOuter) {
 }
 
 TEST(LoopNest, CacheReadsInternal) {
-  KernelScope kernel_scope;
 
   Tensor A = Compute(
       "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
@@ -3850,7 +3760,6 @@ TEST(LoopNest, CacheReadsInternal) {
 }
 
 TEST(LoopNest, CacheReadsInner) {
-  KernelScope kernel_scope;
 
   Tensor A = Compute(
       "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
@@ -3898,7 +3807,6 @@ TEST(LoopNest, CacheReadsInner) {
 }
 
 TEST(LoopNest, CacheWritesSimple) {
-  KernelScope kernel_scope;
 
   Tensor A = Compute(
       "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
@@ -3950,7 +3858,6 @@ TEST(LoopNest, CacheWritesSimple) {
 }
 
 TEST(LoopNest, DeadStoreElimination) {
-  KernelScope kernel_scope;
   VarHandle y("y", kInt);
   VarHandle x("x_tail", kInt);
   BufHandle f("f", {26, 5}, kInt);
@@ -3991,7 +3898,6 @@ TEST(LoopNest, DeadStoreElimination) {
 }
 
 TEST(LoopNest, DeadStoreEliminationWithIntermediates) {
-  KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
   VarHandle z("z", kInt);
@@ -4038,7 +3944,6 @@ TEST(LoopNest, DeadStoreEliminationWithIntermediates) {
 }
 
 TEST(LoopNest, CompoundTensorSimple) {
-  KernelScope kernel_scope;
 
   BufHandle a_buf("A", {10, 5}, kInt);
   VarHandle i("i", kInt);
@@ -4077,7 +3982,6 @@ TEST(LoopNest, CompoundTensorSimple) {
 }
 
 TEST(LoopNest, InlineConstantIndex) {
-  KernelScope kernel_scope;
   const int N = 10;
   Placeholder x_buf("a", kFloat, {1, N, 1});
   Tensor y = Compute(
@@ -4099,7 +4003,6 @@ TEST(LoopNest, InlineConstantIndex) {
 }
 
 TEST(LoopNest, CompoundTensorUsed) {
-  KernelScope kernel_scope;
 
   BufHandle a_buf("A", {10, 5}, kInt);
   VarHandle i("i", kInt);
@@ -4145,7 +4048,6 @@ TEST(LoopNest, CompoundTensorUsed) {
 }
 
 TEST(LoopNest, InlineFromLoad) {
-  KernelScope kernel_scope;
 
   constexpr int N = 1024;
   BufHandle a("A", {N}, kInt);
@@ -4171,7 +4073,6 @@ TEST(LoopNest, InlineFromLoad) {
 }
 
 TEST(LoopNest, OptimizeConditionalsSimple) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
@@ -4213,7 +4114,6 @@ TEST(LoopNest, OptimizeConditionalsSimple) {
 }
 
 TEST(LoopNest, OptimizeConditionalsNestedConditions) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
@@ -4262,7 +4162,6 @@ TEST(LoopNest, OptimizeConditionalsNestedConditions) {
 }
 
 TEST(LoopNest, OptimizeConditionalsMultipleStores) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
@@ -4322,7 +4221,6 @@ TEST(LoopNest, OptimizeConditionalsMultipleStores) {
 }
 
 TEST(LoopNest, OptimizeConditionalsMultipleStoresInOneLoop) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int i = 0; i < 50; i++) {
@@ -4376,7 +4274,6 @@ TEST(LoopNest, OptimizeConditionalsMultipleStoresInOneLoop) {
 }
 
 TEST(LoopNest, OptimizeConditionalsOuterLoopVar) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
@@ -4421,7 +4318,6 @@ TEST(LoopNest, OptimizeConditionalsOuterLoopVar) {
 }
 
 TEST(LoopNest, OptimizeConditionalsCompValuesNotOrdered) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
@@ -4462,7 +4358,6 @@ TEST(LoopNest, OptimizeConditionalsCompValuesNotOrdered) {
 }
 
 TEST(LoopNest, OptimizeConditionalsCompValuesNotConstants) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
@@ -4504,7 +4399,6 @@ TEST(LoopNest, OptimizeConditionalsCompValuesNotConstants) {
 }
 
 TEST(LoopNest, OptimizeConditionalsInvalidCondition) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
@@ -4545,7 +4439,6 @@ TEST(LoopNest, OptimizeConditionalsInvalidCondition) {
 }
 
 TEST(LoopNest, OptimizeConditionalsInvalidCondition2) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
@@ -4587,7 +4480,6 @@ TEST(LoopNest, OptimizeConditionalsInvalidCondition2) {
 }
 
 TEST(LoopNest, OptimizeConditionalsInvalidCondition3) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
@@ -4630,7 +4522,6 @@ TEST(LoopNest, OptimizeConditionalsInvalidCondition3) {
 }
 
 TEST(LoopNest, OptimizeConditionalsInvalidCondition4) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
@@ -4673,7 +4564,6 @@ TEST(LoopNest, OptimizeConditionalsInvalidCondition4) {
 }
 
 TEST(LoopNest, OptimizeConditionalsNotNormalized) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int i = 2; i < 20; i++) {
@@ -4784,7 +4674,6 @@ static void checkColReduce(StmtPtr s, Placeholder& p, Tensor t) {
 }
 
 TEST(LoopNest, ColReduceSplitTailEvenReorder) {
-  KernelScope kernel_scope;
   constexpr int M = 76, N = 128;
   auto p = colReduce(M, N);
   StmtPtr s = splitTailReorder(p.second);
@@ -4807,7 +4696,6 @@ TEST(LoopNest, ColReduceSplitTailEvenReorder) {
 }
 
 TEST(LoopNest, ColReduceSplitTailUnevenReorder) {
-  KernelScope kernel_scope;
   constexpr int M = 76, N = 100;
   auto p = colReduce(M, N);
   StmtPtr s = splitTailReorder(p.second);
@@ -4833,7 +4721,6 @@ TEST(LoopNest, ColReduceSplitTailUnevenReorder) {
 }
 
 TEST(LoopNest, ColReduceSplitMaskEvenReorder) {
-  KernelScope kernel_scope;
   constexpr int M = 76, N = 128;
   auto p = colReduce(M, N);
   StmtPtr s = splitMaskReorder(p.second);
@@ -4841,7 +4728,6 @@ TEST(LoopNest, ColReduceSplitMaskEvenReorder) {
 }
 
 TEST(LoopNest, ColReduceSplitMaskUnevenReorder) {
-  KernelScope kernel_scope;
   constexpr int M = 76, N = 100;
   auto p = colReduce(M, N);
   StmtPtr s = splitMaskReorder(p.second);
@@ -4849,7 +4735,6 @@ TEST(LoopNest, ColReduceSplitMaskUnevenReorder) {
 }
 
 TEST(LoopNest, ReorderAxisWithMultipleConds) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
@@ -4890,7 +4775,6 @@ TEST(LoopNest, ReorderAxisWithMultipleConds) {
 }
 
 TEST(LoopNest, VectorizeUse) {
-  KernelScope kernel_scope;
   constexpr int N = 8;
   Placeholder a("a", kFloat, {N});
   Tensor b = Compute(
@@ -4921,7 +4805,6 @@ const char* int64Loop = R"IR(
 )IR";
 
 TEST(LoopNest, Int64Direct) {
-  KernelScope kernel_scope;
 
   constexpr int64_t N = 12;
   Placeholder a("a", kLong, {N});
@@ -4935,7 +4818,6 @@ TEST(LoopNest, Int64Direct) {
 }
 
 TEST(LoopNest, Int64Compute) {
-  KernelScope kernel_scope;
 
   constexpr int64_t N = 12;
   Placeholder a("a", kLong, {N});
@@ -4951,7 +4833,6 @@ TEST(LoopNest, Int64Compute) {
 }
 
 TEST(LoopNest, DistributeLoopWithAllStmtsAsPivots) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
@@ -5013,7 +4894,6 @@ TEST(LoopNest, DistributeLoopWithAllStmtsAsPivots) {
 }
 
 TEST(LoopNest, DistributeLoopWithOneStmtAsPivot) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
@@ -5072,7 +4952,6 @@ TEST(LoopNest, DistributeLoopWithOneStmtAsPivot) {
 }
 
 TEST(LoopNest, DistributeLoopWithoutAnyPivot) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
@@ -5134,7 +5013,6 @@ TEST(LoopNest, DistributeLoopWithoutAnyPivot) {
 }
 
 TEST(LoopNest, DistributeLoopOverInnerLoops) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
@@ -5193,7 +5071,6 @@ TEST(LoopNest, DistributeLoopOverInnerLoops) {
 }
 
 TEST(LoopNest, DistributeLoopAndParentsWithoutAnyPivot) {
-  KernelScope kernel_scope;
 
   // Input IR:
   // for (int m = 0; m < 50; m++) {
@@ -5304,7 +5181,6 @@ TEST(LoopNest, DistributeLoopAndParentsWithoutAnyPivot) {
 }
 
 TEST(LoopNest, fuseLoopsSimple) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int j = 0; j < 100; j++) {
@@ -5340,7 +5216,6 @@ TEST(LoopNest, fuseLoopsSimple) {
 }
 
 TEST(LoopNest, fuseLoopsMultiple) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int i = 0; i < 100; i++) {
@@ -5383,7 +5258,6 @@ TEST(LoopNest, fuseLoopsMultiple) {
 }
 
 TEST(LoopNest, fuseLoopsNested) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int m = 0; m < 20; m++) {
@@ -5445,7 +5319,6 @@ TEST(LoopNest, fuseLoopsNested) {
 }
 
 TEST(LoopNest, fuseLoopsNested2D) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
@@ -5505,7 +5378,6 @@ TEST(LoopNest, fuseLoopsNested2D) {
 }
 
 TEST(LoopNest, fuseLoopsNested2DInner) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
@@ -5547,7 +5419,6 @@ TEST(LoopNest, fuseLoopsNested2DInner) {
 }
 
 TEST(LoopNest, fuseLoopsDifferentStopBounds) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int j = 0; j < 100; j++) {
@@ -5570,7 +5441,6 @@ TEST(LoopNest, fuseLoopsDifferentStopBounds) {
 }
 
 TEST(LoopNest, fuseLoopsDifferentStartBounds) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int j = 0; j < 100; j++) {
@@ -5593,7 +5463,6 @@ TEST(LoopNest, fuseLoopsDifferentStartBounds) {
 }
 
 TEST(LoopNest, fuseLoopsNotContiguous) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int j = 0; j < 100; j++) {
@@ -5618,7 +5487,6 @@ TEST(LoopNest, fuseLoopsNotContiguous) {
 }
 
 TEST(LoopNest, fuseLoopsWithDifferentParents) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int i = 0; i < 50; i++) {
@@ -5647,7 +5515,6 @@ TEST(LoopNest, fuseLoopsWithDifferentParents) {
 }
 
 TEST(LoopNest, fuseLoopsWithVariableBounds) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int j = 0; j < N; j++) {
@@ -5685,7 +5552,6 @@ TEST(LoopNest, fuseLoopsWithVariableBounds) {
 }
 
 TEST(LoopNest, fuseLoopsWithExprBounds) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int j = 0; j < M + N; j++) {
@@ -5723,7 +5589,6 @@ TEST(LoopNest, fuseLoopsWithExprBounds) {
 }
 
 TEST(LoopNest, fuseLoopsWithDifferentExprBounds) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int j = M; j < N * 2; j++) {
@@ -5762,7 +5627,6 @@ TEST(LoopNest, fuseLoopsWithDifferentExprBounds) {
 }
 
 TEST(LoopNest, fuseLoopsWithNonOverlappingBufferAccesses) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int j = 10; j < 100; j++) {
@@ -5799,7 +5663,6 @@ TEST(LoopNest, fuseLoopsWithNonOverlappingBufferAccesses) {
 }
 
 TEST(LoopNest, fuseLoopsWithNonOverlapping2DBufferAccesses) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
@@ -5849,7 +5712,6 @@ TEST(LoopNest, fuseLoopsWithNonOverlapping2DBufferAccesses) {
 }
 
 TEST(LoopNest, fuseLoopsWithReductions) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
@@ -5897,7 +5759,6 @@ TEST(LoopNest, fuseLoopsWithReductions) {
 }
 
 TEST(LoopNest, fuseLoopsWith2DReductions) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
@@ -5957,7 +5818,6 @@ TEST(LoopNest, fuseLoopsWith2DReductions) {
 }
 
 TEST(LoopNest, fuseLoopsWithComplexIndices) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
@@ -6005,7 +5865,6 @@ TEST(LoopNest, fuseLoopsWithComplexIndices) {
 }
 
 TEST(LoopNest, fuseLoopsWithMixedLoopVarsAsIndices) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
@@ -6036,7 +5895,6 @@ TEST(LoopNest, fuseLoopsWithMixedLoopVarsAsIndices) {
 }
 
 TEST(LoopNest, fuseLoopsWithTranspose) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
@@ -6067,7 +5925,6 @@ TEST(LoopNest, fuseLoopsWithTranspose) {
 }
 
 TEST(LoopNest, fuseLoopsThatViolateDependencies1) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int j = 10; j < 100; j++) {
@@ -6090,7 +5947,6 @@ TEST(LoopNest, fuseLoopsThatViolateDependencies1) {
 }
 
 TEST(LoopNest, fuseLoopsThatViolateDependencies2) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int j = 10; j < 100; j++) {
@@ -6113,7 +5969,6 @@ TEST(LoopNest, fuseLoopsThatViolateDependencies2) {
 }
 
 TEST(LoopNest, fuseLoopsThatViolateDependencies3) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int m = 0; m < 20; m++) {
@@ -6158,7 +6013,6 @@ TEST(LoopNest, fuseLoopsThatViolateDependencies3) {
 }
 
 TEST(LoopNest, fuseLoopsThatViolateDependencies4) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
@@ -6202,7 +6056,6 @@ TEST(LoopNest, fuseLoopsThatViolateDependencies4) {
 }
 
 TEST(LoopNest, fuseLoopsThatViolateDependencies5) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
@@ -6232,7 +6085,6 @@ TEST(LoopNest, fuseLoopsThatViolateDependencies5) {
 }
 
 TEST(LoopNest, fuseLoopsThatViolateDependencies6) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int j = 0; j < 100; j++) {
@@ -6260,7 +6112,6 @@ TEST(LoopNest, fuseLoopsThatViolateDependencies6) {
 }
 
 TEST(LoopNest, fuseLoopsThatViolateDependencies7) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int k = 0; k < 100; k++) {
@@ -6288,7 +6139,6 @@ TEST(LoopNest, fuseLoopsThatViolateDependencies7) {
 }
 
 TEST(LoopNest, areLoopsPerfectlyNested) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
@@ -6332,7 +6182,6 @@ TEST(LoopNest, areLoopsPerfectlyNested) {
 }
 
 TEST(LoopNest, reorderNestedLoops2D) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
@@ -6358,7 +6207,6 @@ TEST(LoopNest, reorderNestedLoops2D) {
 }
 
 TEST(LoopNest, reorderNestedLoops3D) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
@@ -6389,7 +6237,6 @@ TEST(LoopNest, reorderNestedLoops3D) {
 }
 
 TEST(LoopNest, reorderNestedLoops4D) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
@@ -6428,7 +6275,6 @@ TEST(LoopNest, reorderNestedLoops4D) {
 }
 
 TEST(LoopNest, reorderTrivialPermutation) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
@@ -6459,7 +6305,6 @@ TEST(LoopNest, reorderTrivialPermutation) {
 }
 
 TEST(LoopNest, reorderInvalidPermutations) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
@@ -6498,7 +6343,6 @@ TEST(LoopNest, reorderInvalidPermutations) {
 }
 
 TEST(LoopNest, reorderInvalidLoopNest) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
@@ -6541,7 +6385,6 @@ TEST(LoopNest, reorderInvalidLoopNest) {
 }
 
 TEST(LoopNest, compressBufferSimple) {
-  KernelScope kernel_scope;
 
   // Input IR:
   // for (int i = 0; i < 100; ++i) {
@@ -6587,7 +6430,6 @@ TEST(LoopNest, compressBufferSimple) {
 }
 
 TEST(LoopNest, compressBufferMultipleDims) {
-  KernelScope kernel_scope;
 
   // Input IR:
   // for (int i = 0; i < 100; ++i) {
@@ -6627,7 +6469,6 @@ TEST(LoopNest, compressBufferMultipleDims) {
 }
 
 TEST(LoopNest, compressBufferMultipleDims2) {
-  KernelScope kernel_scope;
 
   // Input IR:
   // for (int i = 0; i < 100; ++i) {
@@ -6677,7 +6518,6 @@ TEST(LoopNest, compressBufferMultipleDims2) {
 }
 
 TEST(LoopNest, compressBufferDifferentOrderIndices) {
-  KernelScope kernel_scope;
 
   // Input IR:
   // for (int i = 0; i < 100; ++i) {
@@ -6723,7 +6563,6 @@ TEST(LoopNest, compressBufferDifferentOrderIndices) {
 }
 
 TEST(LoopNest, compressBufferVariableBounds) {
-  KernelScope kernel_scope;
 
   // Input IR:
   // for (int i = 0; i < M; ++i) {
@@ -6772,7 +6611,6 @@ TEST(LoopNest, compressBufferVariableBounds) {
 }
 
 TEST(LoopNest, compressBufferNoCommonParentLoops) {
-  KernelScope kernel_scope;
 
   // Input IR:
   // for (int i = 0; i < 100; ++i) {
@@ -6823,7 +6661,6 @@ TEST(LoopNest, compressBufferNoCommonParentLoops) {
 }
 
 TEST(LoopNest, compressBufferIndicesMixed) {
-  KernelScope kernel_scope;
 
   // Input IR:
   // for (int i = 0; i < 100; ++i) {
@@ -6871,7 +6708,6 @@ TEST(LoopNest, compressBufferIndicesMixed) {
 }
 
 TEST(LoopNest, compressMultipleBuffers) {
-  KernelScope kernel_scope;
 
   // Input IR:
   // for (int i = 0; i < 100; ++i) {

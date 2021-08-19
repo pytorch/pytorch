@@ -20,7 +20,6 @@ namespace jit {
 using namespace torch::jit::tensorexpr;
 
 TEST(ExternalCall, Conv2d_float) {
-  KernelScope kernel_scope;
 
   Placeholder Input("Input", kFloat, {1, 3, 224, 224});
   Placeholder Weight("Weight", kFloat, {16, 3, 3, 3});
@@ -84,7 +83,6 @@ TEST(ExternalCall, Conv2d_float) {
 
 TEST(ExternalCall, Conv2d_int) {
   // A similar test, but now using kInt tensors
-  KernelScope kernel_scope;
 
   Placeholder Input("Input", kInt, {1, 3, 224, 224});
   Placeholder Weight("Weight", kInt, {16, 3, 3, 3});
@@ -147,7 +145,6 @@ TEST(ExternalCall, Conv2d_int) {
 }
 
 TEST(ExternalCall, Conv2d_nobias_noargs) {
-  KernelScope kernel_scope;
 
   Placeholder Input("Input", kFloat, {1, 16, 112, 112});
   Placeholder Weight("Weight", kFloat, {16, 16, 1, 1});
@@ -194,7 +191,6 @@ TEST(ExternalCall, Conv2d_nobias_noargs) {
 }
 
 TEST(ExternalCall, Addmm_float) {
-  KernelScope kernel_scope;
 
   Placeholder Input("Input", kFloat, {100, 300});
   Placeholder Mat1("Mat1", kFloat, {100, 200});
@@ -252,7 +248,6 @@ TEST(ExternalCall, Addmm_float) {
 TEST(ExternalCall, Prepacked_Linear_float) {
   using namespace at::native::xnnpack;
 
-  KernelScope kernel_scope;
 
   Placeholder Input("Input", kFloat, {100, 200});
   BufHandle ResultBuf("Result", {100, 300}, kFloat);
@@ -317,7 +312,6 @@ TEST(ExternalCall, Prepacked_Linear_float) {
 TEST(ExternalCall, Prepacked_Conv2d_float) {
   using namespace at::native::xnnpack;
 
-  KernelScope kernel_scope;
 
   Placeholder Input("Input", kFloat, {1, 3, 224, 224});
   BufHandle ResultBuf("Result", {1, 16, 112, 112}, kFloat);
@@ -404,7 +398,6 @@ TEST(ExternalCall, Prepacked_Conv2d_float) {
 #endif // USE_XNNPACK
 
 TEST(ExternalCall, BinaryFloat) {
-  KernelScope kernel_scope;
   using TensorFunc = std::function<at::Tensor(at::Tensor, at::Tensor)>;
   using Test = std::tuple<
       std::vector<int64_t>,
@@ -479,7 +472,6 @@ TEST(ExternalCall, BinaryFloat) {
 }
 
 TEST(ExternalCall, UnaryFloat) {
-  KernelScope kernel_scope;
   using TensorFunc = std::function<at::Tensor(at::Tensor)>;
   auto toExprHandleVec = [](std::vector<int64_t> v) {
     auto intV = std::vector<int>(v.begin(), v.end());
@@ -561,7 +553,6 @@ TEST(ExternalCall, UnaryFloat) {
 TEST(ExternalCall, ComputeInterop) {
   // This test verifies that Tensors using external calls can be used by and can
   // use Tensors built with Compute API.
-  KernelScope kernel_scope;
 
   BufHandle ConvResultBuf("ConvResult", {1, 16, 32, 32}, kFloat);
   BufHandle MatmulResultBuf("MatmulResult", {1, 16, 32, 32}, kFloat);
@@ -654,7 +645,6 @@ TEST(ExternalCall, ComputeInterop) {
 TEST(ExternalCall, Inlining) {
   // This test verifies that Tensors using external calls can be used by and
   // can use Tensors built with Compute API.
-  KernelScope kernel_scope;
 
   BufHandle MatmulResultBuf("MatmulResult", {8, 8}, kFloat);
 

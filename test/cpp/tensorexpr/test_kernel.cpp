@@ -39,7 +39,6 @@ TEST_F(Kernel, InliningIntermediates) {
           %4 : Float(5, 3, strides=[3, 1]) = aten::mul(%0, %2)
           %5: Float(5, 3, strides=[3, 1]) = aten::add(%4, %1, %one)
           return (%5))IR";
-    KernelScope kernel_scope;
     auto graph = std::make_shared<Graph>();
     parseIR(graph_string, &*graph);
     TensorExprKernel k(graph);
@@ -63,7 +62,6 @@ TEST_F(Kernel, InliningIntermediates) {
         continue;
       }
 
-      KernelScope kernel_scope;
       TemplateEnv env;
       env.s("device", use_cuda ? "cuda:0" : "cpu");
       const auto graph_string = format(graph_template, env);
@@ -88,7 +86,6 @@ TEST_F(Kernel, InliningIntermediates) {
 }
 
 TEST_F(Kernel, _1) {
-  KernelScope kernel_scope;
 
   const auto graph_string = R"IR(
       graph(%0 : Float(5, 3, strides=[3, 1], device=cpu),
@@ -127,7 +124,6 @@ TEST_F(Kernel, _1) {
 }
 
 TEST_F(Kernel, _2) {
-  KernelScope kernel_scope;
 
   const auto graph_string = R"IR(
       graph(%0 : Float(5, 3, strides=[3, 1], device=cpu),
@@ -167,7 +163,6 @@ TEST_F(Kernel, _2) {
 }
 
 TEST_F(Kernel, _3) {
-  KernelScope kernel_scope;
 
   const auto graph_string = R"IR(
       graph(%0 : Float(5, 3, strides=[3, 1], device=cpu),
@@ -212,7 +207,6 @@ TEST_F(Kernel, DISABLED_Shape_Inference) {
   // Test TensorExpr shape inference capabilities: it should only require shapes
   // for the inputs
   {
-    KernelScope kernel_scope;
 
     const auto graph_string = R"IR(
       graph(%0 : Float(5, 3, strides=[3, 1], device=cpu),
@@ -251,7 +245,6 @@ TEST_F(Kernel, DISABLED_Shape_Inference) {
     }
   }
   {
-    KernelScope kernel_scope;
 
     const auto graph_string = R"IR(
       graph(%0 : Float(8, 8, strides=[8, 1], device=cpu),
@@ -292,7 +285,6 @@ TEST_F(Kernel, DISABLED_Shape_Inference) {
   }
   {
     // Test that shape inference handles aten::unsqueeze
-    KernelScope kernel_scope;
 
     const auto graph_string = R"IR(
       graph(%a : Float(4, 2, strides=[2, 1], device=cpu),
@@ -355,7 +347,6 @@ TEST_F(Kernel, DISABLED_Shape_Inference) {
   }
   {
     // Test that shape inference handles aten::cat
-    KernelScope kernel_scope;
 
     const auto graph_string = R"IR(
       graph(%a : Float(5, 3, 2, strides=[6, 2, 1], device=cpu),
@@ -409,7 +400,6 @@ TEST_F(Kernel, DISABLED_Shape_Inference) {
   }
   {
     // Test that we throw an error when input list for aten::cat is empty
-    KernelScope kernel_scope;
 
     const auto graph_string = R"IR(
       graph():
@@ -427,7 +417,6 @@ TEST_F(Kernel, DISABLED_Shape_Inference) {
   }
   {
     // Test that we throw an error when 'dim' passed to aten::cat is invalid
-    KernelScope kernel_scope;
 
     const auto ir_dim_99 = R"IR(
       graph(%a : Float(5, 3, 2, strides=[6, 2, 1], device=cpu),
@@ -458,7 +447,6 @@ TEST_F(Kernel, DISABLED_Shape_Inference) {
 TEST_F(Kernel, CatInputTypesPromotion) {
   {
     // Test that we properly promote input types for aten::cat
-    KernelScope kernel_scope;
 
     const auto graph_string = R"IR(
       graph(%a : Float(5, 3, 2, strides=[6, 2, 1], device=cpu),
@@ -676,7 +664,6 @@ TEST_F(Kernel, SumAllAxes) {
   auto a = iotaTensor({5, 3}, TensorOptions(kCPU).dtype(at::kFloat));
 
   for (auto scalar_type : {ScalarType::Undefined, ScalarType::Double}) {
-    KernelScope kernel_scope;
     TemplateEnv env;
     env.s("dtype", dtypeConstant(scalar_type));
     if (scalar_type == ScalarType::Undefined) {
@@ -745,7 +732,6 @@ TEST_F(Kernel, SumOneAxis) {
   for (int dim = -a.dim(); dim < a.dim(); ++dim) {
     for (bool keepdim : {false, true}) {
       for (auto scalar_type : {ScalarType::Undefined, ScalarType::Double}) {
-        KernelScope kernel_scope;
         TemplateEnv env;
         env.d("dim", dim);
         env.d("keepdim", keepdim);
@@ -812,7 +798,6 @@ TEST_F(Kernel, SumMultipleAxes) {
   for (int dim1 = 0; dim1 < a.dim(); ++dim1) {
     for (int dim2 = dim1 + 1; dim2 < a.dim(); ++dim2) {
       for (bool keepdim : {false, true}) {
-        KernelScope kernel_scope;
         TemplateEnv env;
         env.d("dim1", dim1);
         env.d("dim2", dim2);
@@ -888,7 +873,6 @@ TEST_F(Kernel, Softmax2D) {
       auto other_dim = (softmax_dim + 1) % a.dim();
       auto ref =
           log_softmax ? a.log_softmax(softmax_dim) : a.softmax(softmax_dim);
-      KernelScope kernel_scope;
       TemplateEnv env;
       env.d("dim", softmax_dim);
       env.s("op", log_softmax ? "log_softmax" : "softmax");
@@ -964,7 +948,6 @@ TEST_F(Kernel, Softmax3D) {
       auto ref =
           log_softmax ? a.log_softmax(softmax_dim) : a.softmax(softmax_dim);
 
-      KernelScope kernel_scope;
       TemplateEnv env;
       env.d("dim", softmax_dim);
       env.s("op", log_softmax ? "log_softmax" : "softmax");
@@ -1046,7 +1029,6 @@ TEST_F(Kernel, Softmax4D) {
       auto ref =
           log_softmax ? a.log_softmax(softmax_dim) : a.softmax(softmax_dim);
 
-      KernelScope kernel_scope;
       TemplateEnv env;
       env.d("dim", softmax_dim);
       env.s("op", log_softmax ? "log_softmax" : "softmax");
@@ -1090,7 +1072,6 @@ TEST_F(Kernel, Softmax4D) {
 }
 
 TEST_F(Kernel, InlineProducerIntoReduction) {
-  KernelScope kernel_scope;
 
   // Inline producer (mul) into reduction (sum).
   const auto graph_string = R"IR(
@@ -1129,7 +1110,6 @@ TEST_F(Kernel, InlineProducerIntoReduction) {
 }
 
 TEST_F(Kernel, InlineReductionIntoConsumer) {
-  KernelScope kernel_scope;
 
   // Inline producer (mul %2) into reduction (sum %4) but DO NOT
   // inline the reduction into consumer (mul %4).
@@ -1179,7 +1159,6 @@ TEST_F(Kernel, SanitizeNames_CUDA) {
         %2 : Float(5, 3, strides=[3, 1]) = aten::mul(%0, %1)
         %4 : Float(5, 3, strides=[3, 1]) = aten::mul(%0, %2)
         return (%4))IR";
-  KernelScope kernel_scope;
   auto graph = std::make_shared<Graph>();
   parseIR(graph_string, &*graph);
   graph->inputs().at(0)->setDebugName("aten::add:");
@@ -1204,7 +1183,6 @@ TEST_F(Kernel, ConstantTensors) {
           %y : Float(16, 16, strides=[16, 1], device=cpu) = aten::ones(%sizes, %none, %none, %none, %none)
           %z : Float(16, 16, strides=[16, 1], device=cpu) = aten::mul(%x, %y)
           return (%z))IR";
-  KernelScope kernel_scope;
   auto graph = std::make_shared<Graph>();
   parseIR(graph_string, &*graph);
   // IRParser doesn't support tensor constants, so we insert a call to
@@ -1237,7 +1215,6 @@ TEST_F(Kernel, ConstantTensorsNonContiguous) {
           %y : Tensor = aten::t(%y_t)
           %z : Float(16, 16, strides=[16, 1], device=cpu) = aten::mul(%x, %y)
           return (%z))IR";
-  KernelScope kernel_scope;
   auto graph = std::make_shared<Graph>();
   parseIR(graph_string, &*graph);
   // IRParser doesn't support tensor constants, so we generate several aten
@@ -1261,7 +1238,6 @@ TEST_F(Kernel, ConstantTensorsNonContiguous) {
 TEST_F(Kernel, RunFast) {
 #ifdef TORCH_ENABLE_LLVM
   // TODO: Implement call_raw in IREval and remove the ifdef
-  KernelScope kernel_scope;
 
   const auto graph_string = R"IR(
       graph(%0 : Float(5, 3, strides=[3, 1], device=cpu),
@@ -1301,7 +1277,6 @@ TEST_F(Kernel, CodegenInspection) {
           %y : Tensor = aten::t(%y_t)
           %z : Float(16, 16, strides=[16, 1], device=cpu) = aten::mul(%x, %y)
           return (%z))IR";
-  KernelScope kernel_scope;
   auto graph = std::make_shared<Graph>();
   parseIR(graph_string, &*graph);
   // IRParser doesn't support tensor constants, so we generate several aten
@@ -1353,7 +1328,6 @@ TEST_F(Kernel, CustomLowering) {
           %y : Float(2, 2, strides=[2, 1], requires_grad=0, device=cpu) = aten::nan_to_num(%x, %none, %none, %none)
           return (%y)
 )IR";
-  KernelScope kernel_scope;
   auto graph = std::make_shared<Graph>();
   parseIR(graph_string, &*graph);
 

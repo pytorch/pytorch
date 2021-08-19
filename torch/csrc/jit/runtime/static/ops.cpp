@@ -464,8 +464,6 @@ static constexpr int kVectorWidth = 16;
 #ifdef TORCH_ENABLE_LLVM
 
 struct TEWrapper {
-  tensorexpr::KernelArena ka;
-  tensorexpr::KernelScope ks;
   std::unique_ptr<tensorexpr::LLVMCodeGen> cg;
   TEWrapper() = default;
   void update(std::unique_ptr<tensorexpr::LLVMCodeGen>&& cg_) {
@@ -517,8 +515,6 @@ std::shared_ptr<TEWrapper> wrapTECompute(
 #else
 
 struct TEWrapper {
-  tensorexpr::KernelArena ka;
-  tensorexpr::KernelScope ks;
   TEWrapper() = default;
   template <typename... Ts>
   void operator()(const Ts&... ts) {

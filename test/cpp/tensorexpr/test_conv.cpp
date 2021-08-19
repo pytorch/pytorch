@@ -21,7 +21,6 @@ static at::Tensor genTestData(c10::IntArrayRef args) {
 #ifdef TORCH_ENABLE_LLVM
 
 TEST(Conv, DepthwiseConv2D) {
-  te::KernelScope kernel_scope;
   constexpr int N = 1, C = 72, H = 56, W = 56;
   constexpr int K = 72, R = 3, S = 3;
   constexpr int kPad = 1, kStride = 2, kGroups = C;
@@ -53,7 +52,6 @@ TEST(Conv, DepthwiseConv2D) {
 }
 
 TEST(Conv, DepthwiseConv2DNoBias) {
-  te::KernelScope kernel_scope;
   constexpr int N = 1, C = 72, H = 56, W = 56;
   constexpr int K = 72, R = 3, S = 3;
   constexpr int kPad = 1, kStride = 2, kGroups = C;
@@ -80,7 +78,6 @@ TEST(Conv, DepthwiseConv2DNoBias) {
 }
 
 TEST(Conv, DepthwiseConv2DDynamicShapes) {
-  te::KernelScope kernel_scope;
   te::VarHandle N_var("N", te::kInt);
   te::VarHandle C_var("C", te::kInt);
   te::VarHandle H_var("H", te::kInt);
@@ -164,7 +161,6 @@ TEST(Conv, DepthwiseConv2DDynamicShapes) {
 #endif
 
 TEST(Conv, Conv2D) {
-  te::KernelScope kernel_scope;
 
   // Input dimensions.
   constexpr int N = 1;

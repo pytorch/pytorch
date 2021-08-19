@@ -27,7 +27,6 @@ using namespace torch::jit::tensorexpr;
 
 template <typename ctype>
 static void testCudaTestVectorAdd01_impl() {
-  KernelScope kernel_scope;
   const int num_iter = 3;
   const int block_count = 16;
   const int block_size = 128;
@@ -93,7 +92,6 @@ float sigmoid(float x) {
 }
 
 TEST(Cuda, Sigmoid_CUDA) {
-  KernelScope kernel_scope;
   const int num_iter = 3;
   const int block_count = 16;
   const int block_size = 128;
@@ -162,7 +160,6 @@ TEST(Cuda, TestVectorAdd01_CUDA) {
 }
 
 static void testCudaTestVectorAdd02_impl(int N, int block_size) {
-  KernelScope kernel_scope;
   Placeholder a_buf("a", kFloat, {N});
   Placeholder b_buf("b", kFloat, {N});
   Tensor c = Compute(
@@ -222,7 +219,6 @@ TEST(Cuda, TestVectorAdd02_CUDA) {
 }
 
 TEST(Cuda, HalfCast_CUDA) {
-  KernelScope ks;
   auto half = ToDtype<at::Half>();
   Placeholder a("a", half, {4});
   Tensor b = Compute("b", {{4, "n"}}, [&](const VarHandle& i) {
@@ -261,7 +257,6 @@ TEST(Cuda, HalfCast_CUDA) {
 }
 
 TEST(Cuda, DynamicShape2D_CUDA) {
-  KernelScope kernel_scope;
   auto testWithSize = [](int32_t M, int32_t N) {
     VarHandle m("m", kInt);
     VarHandle n("n", kInt);
@@ -324,7 +319,6 @@ TEST(Cuda, DynamicShape2D_CUDA) {
 }
 
 TEST(Cuda, TestRand01_CUDA) {
-  KernelScope kernel_scope;
   const int num_iter = 3;
   const int block_count = 16;
   const int block_size = 128;
@@ -383,7 +377,6 @@ TEST(Cuda, TestRand01_CUDA) {
 }
 
 TEST(Cuda, DynamicShapeSplit_CUDA) {
-  KernelScope ks;
   constexpr int N = 4096;
   VarHandle n("n", kInt);
   Placeholder a(BufHandle("a", {n}, kFloat));
@@ -434,7 +427,6 @@ TEST(Cuda, DynamicShapeSplit_CUDA) {
 
 TEST(Cuda, OneBlockOneThreadGlobalReduce1_CUDA) {
   const static int N = 1024;
-  KernelScope kernel_scope;
   Placeholder data_buf("data", kFloat, {N});
   Placeholder output_buf("output", kFloat, {1});
 
@@ -501,7 +493,6 @@ TEST(Cuda, OneBlockOneThreadGlobalReduce1_CUDA) {
 
 TEST(Cuda, OneBlockMultiThreadGlobalReduce1_CUDA) {
   const static int N = 1024;
-  KernelScope kernel_scope;
 
   // This test does the following reduction:
   // clang-format off
@@ -578,7 +569,6 @@ TEST(Cuda, OneBlockMultiThreadGlobalReduce1_CUDA) {
 }
 
 TEST(Cuda, NoThreadIdxWrite_1_CUDA) {
-  KernelScope kernel_scope;
 
   // This test does the following reduction:
   //
@@ -676,7 +666,6 @@ TEST(Cuda, NoThreadIdxWrite_1_CUDA) {
 
 TEST(Cuda, SharedMemReduce_1_CUDA) {
   // FIXME: this test is flaky in CI.
-  KernelScope kernel_scope;
   // This test does the following:
   //  for k in 0..1:  // block-idx
   //    alloc(c, 64)
@@ -814,7 +803,6 @@ TEST(Cuda, SharedMemReduce_1_CUDA) {
 }
 
 TEST(Cuda, LocalMemReduce_1_CUDA) {
-  KernelScope kernel_scope;
   // This test does the following:
   //  for k in 0..1:  // block-idx
   //    b(k) = 0
@@ -925,7 +913,6 @@ TEST(Cuda, LocalMemReduce_1_CUDA) {
 }
 
 TEST(Cuda, HalfSupport_CUDA) {
-  KernelScope ks;
   auto half = ToDtype<at::Half>();
   Placeholder a("a", half, {4});
   Tensor b = Compute("b", {{4, "n"}}, [&](const VarHandle& i) {
@@ -983,7 +970,6 @@ TEST(Cuda, HalfSupport_CUDA) {
 }
 
 TEST(Cuda, HalfPropagation_CUDA) {
-  KernelScope kernel_scope;
   auto half = ToDtype<at::Half>();
   Placeholder a("a", half, {4});
   Tensor relu = Compute("relu", {{4, "n"}}, [&](const VarHandle& i) {
@@ -1032,7 +1018,6 @@ TEST(Cuda, HalfPropagation_CUDA) {
 }
 
 TEST(Cuda, UnusedHalfArgument_CUDA) {
-  KernelScope kernel_scope;
   Placeholder a("a", kFloat, {4});
   auto half = ToDtype<at::Half>();
   Placeholder b("b", half, {4});
@@ -1089,7 +1074,6 @@ TEST(Cuda, UnusedHalfArgument_CUDA) {
 }
 
 TEST(Cuda, PrioritizeDependents_CUDA) {
-  KernelScope kernel_scope;
   Placeholder a("a", kFloat, {10});
   Placeholder b("b", kFloat, {12});
   Placeholder c("c", kFloat, {12});
@@ -1163,7 +1147,6 @@ TEST(Cuda, PrioritizeDependents_CUDA) {
 /// Tests the case where there are two loops which have different extents bound
 /// to the same block dimension. We must mask the smaller extent loop body.
 TEST(Cuda, MaskBlockDim_CUDA) {
-  KernelScope kernel_scope;
   int A_SIZE = 100;
   int B_SIZE = 50;
   Placeholder a_buf("a", kFloat, {A_SIZE});
@@ -1256,7 +1239,6 @@ TEST(Cuda, MaskBlockDim_CUDA) {
 /// to the same thread dimension. This is the same as the above - the smaller
 /// rank write should be masked. But this time we also need to syncthreads.
 TEST(Cuda, MaskThreadDim_CUDA) {
-  KernelScope kernel_scope;
   int A_SIZE = 50;
   int B_SIZE = 100;
   Placeholder a_buf("a", kFloat, {A_SIZE});
@@ -1351,7 +1333,6 @@ TEST(Cuda, MaskThreadDim_CUDA) {
 // Note: this is an extremely dumb pattern which we should never see, but is a
 // useful edge case to make sure we've got things covered.
 TEST(Cuda, MaskMultiBlockDim_CUDA) {
-  KernelScope kernel_scope;
   int A_SIZE = 100;
   int B_SIZE = 50;
   Placeholder a_buf("a", kFloat, {A_SIZE});
@@ -1445,7 +1426,6 @@ TEST(Cuda, MaskMultiBlockDim_CUDA) {
 // Note: this is an extremely dumb pattern which we should never see, but is a
 // useful edge case to make sure we've got things covered.
 TEST(Cuda, MaskBlockAndThreadDim_CUDA) {
-  KernelScope kernel_scope;
   int A_SIZE = 100;
   int B_SIZE = 50;
   Placeholder a_buf("a", kFloat, {A_SIZE});
@@ -1537,7 +1517,6 @@ TEST(Cuda, MaskBlockAndThreadDim_CUDA) {
 /// outer loop bound to blockDim.x and the inner loop bound to threadDim.x. In
 /// this case all writes with a rank smaller than the max should be masked.
 TEST(Cuda, MaskMultiDim_CUDA) {
-  KernelScope kernel_scope;
   int OUTER_SIZE = 10;
   int A_SIZE = 100;
   int B_SIZE = 50;
@@ -1667,7 +1646,6 @@ TEST(Cuda, MaskMultiDim_CUDA) {
 // In this case both stores must be masked against the extent of the other loop,
 // incase it is larger.
 TEST(Cuda, MaskMultiDimSymbolic_CUDA) {
-  KernelScope kernel_scope;
   VarHandle OUTER_SIZE("OUTER_SIZE", kInt);
   VarHandle A_SIZE("A_SIZE", kInt);
   VarHandle B_SIZE("B_SIZE", kInt);
@@ -1803,7 +1781,6 @@ TEST(Cuda, MaskMultiDimSymbolic_CUDA) {
 // extents but are bound to the same thread dimension. The smaller loop should
 // be masked.
 TEST(Cuda, MaskCompoundInnerLoop_CUDA) {
-  KernelScope kernel_scope;
   int OUTER_SIZE = 10;
   int A_SIZE = 100;
   int B_SIZE = 50;
@@ -1942,7 +1919,6 @@ TEST(Cuda, MaskCompoundInnerLoop_CUDA) {
 // the first thread dimensions. This should work just like the MaskThreadDim
 // test where the bigger loop is unmasked but the smaller is masked.
 TEST(Cuda, MaskInnerLoopOneBlock_CUDA) {
-  KernelScope kernel_scope;
   int OUTER_SIZE = 10;
   int A_SIZE = 100;
   int B_SIZE = 50;
@@ -2081,7 +2057,6 @@ TEST(Cuda, MaskInnerLoopOneBlock_CUDA) {
 // this case both bodies must be masked against the other dimension being > 0.
 // Note: this is a bit degenerate no one would actually write this for perf.
 TEST(Cuda, MaskMultiDimMultiAxis_CUDA) {
-  KernelScope kernel_scope;
   int OUTER_SIZE = 10;
   int A_SIZE = 30;
   int B_SIZE = 15;
@@ -2211,7 +2186,6 @@ TEST(Cuda, MaskMultiDimMultiAxis_CUDA) {
 // the second loop is smaller in both cases - the second store must be masked
 // for both the block and thread dimension.
 TEST(Cuda, MaskMultiDimMultiLevel_CUDA) {
-  KernelScope kernel_scope;
   int OUTER_A_SIZE = 10;
   int OUTER_B_SIZE = 5;
   int A_SIZE = 30;

@@ -36,7 +36,6 @@ using LLVMExprEval = ExprEval<LLVMCodeGen>;
 
 #define IMM_TEST(Type, Name, Val)                  \
   TEST(LLVM, Name##ImmTest) {                      \
-    KernelScope kernel_scope;                      \
     auto a = Name##Imm::make(Val);                 \
     LLVMExprEval cg(a);                            \
     if (std::is_floating_point<decltype(Val)>()) { \
@@ -50,7 +49,6 @@ TEST_LLVM_SCALAR_TYPES(IMM_TEST)
 
 #define ADD_TEST(Type, Name, Val)                  \
   TEST(LLVM, Name##AddTest) {                      \
-    KernelScope kernel_scope;                      \
     auto a = Name##Imm::make(Val);                 \
     auto b = Name##Imm::make(Val * 2);             \
     auto c = Add::make(a, b);                      \
@@ -66,7 +64,6 @@ TEST_LLVM_SCALAR_TYPES(ADD_TEST)
 
 #define SUB_TEST(Type, Name, Val)                  \
   TEST(LLVM, Name##SubTest) {                      \
-    KernelScope kernel_scope;                      \
     auto a = Name##Imm::make(Val * 2);             \
     auto b = Name##Imm::make(Val);                 \
     auto c = Sub::make(a, b);                      \
@@ -82,7 +79,6 @@ TEST_LLVM_SCALAR_TYPES(SUB_TEST)
 
 #define MUL_TEST(Type, Name, Val)                  \
   TEST(LLVM, Name##MulTest) {                      \
-    KernelScope kernel_scope;                      \
     auto a = Name##Imm::make(Val);                 \
     auto b = Name##Imm::make((Type)4);             \
     auto c = Mul::make(a, b);                      \
@@ -98,7 +94,6 @@ TEST_LLVM_SCALAR_TYPES(MUL_TEST)
 
 #define DIV_TEST(Type, Name, Val)                  \
   TEST(LLVM, Name##DivTest) {                      \
-    KernelScope kernel_scope;                      \
     auto a = Name##Imm::make((Type)6);             \
     auto b = Name##Imm::make((Type)3);             \
     auto c = Div::make(a, b);                      \
@@ -113,7 +108,6 @@ TEST_LLVM_SCALAR_TYPES(DIV_TEST)
 #undef DIV_TEST
 
 TEST(LLVM, IntToFloatCastTest) {
-  KernelScope kernel_scope;
   auto a = IntImm::make(2);
   auto b = Cast::make(kFloat, a);
   LLVMExprEval cg(b, {});
@@ -121,7 +115,6 @@ TEST(LLVM, IntToFloatCastTest) {
 }
 
 TEST(LLVM, FloatToIntCastTest) {
-  KernelScope kernel_scope;
   auto a = FloatImm::make(2.0);
   auto b = Cast::make(kInt, a);
   LLVMExprEval cg(b);
@@ -129,7 +122,6 @@ TEST(LLVM, FloatToIntCastTest) {
 }
 
 TEST(LLVM, IntToLongCastTest) {
-  KernelScope kernel_scope;
   auto a = IntImm::make(12345);
   auto b = Cast::make(kLong, a);
   LLVMExprEval cg(b);
@@ -137,7 +129,6 @@ TEST(LLVM, IntToLongCastTest) {
 }
 
 TEST(LLVM, ByteToCharCastTest) {
-  KernelScope kernel_scope;
   auto a = ByteImm::make(250);
   auto b = Cast::make(kChar, a);
   LLVMExprEval cg(b);
@@ -145,7 +136,6 @@ TEST(LLVM, ByteToCharCastTest) {
 }
 
 TEST(LLVM, HalfToLongCastTest) {
-  KernelScope kernel_scope;
   auto a = HalfImm::make(2.0);
   auto b = Cast::make(kLong, a);
   LLVMExprEval cg(b);
@@ -153,7 +143,6 @@ TEST(LLVM, HalfToLongCastTest) {
 }
 
 TEST(LLVM, ByteToDoubleCastTest) {
-  KernelScope kernel_scope;
   auto a = ByteImm::make(2);
   auto b = Cast::make(kDouble, a);
   LLVMExprEval cg(b);
@@ -170,7 +159,6 @@ TEST(LLVM, BitCast) {
 
   // this is broken
   /*{
-    KernelScope kernel_scope;
     at::Half k_;
     at::Half* k = &k_;
     *reinterpret_cast<int16_t*>(k) = ref16;
@@ -181,7 +169,6 @@ TEST(LLVM, BitCast) {
   }*/
 
   {
-    KernelScope kernel_scope;
     float k = raw_bitcast<float>(ref32);
     auto a = FloatImm::make(k);
     auto b = BitCast::make(kInt, a);
@@ -190,7 +177,6 @@ TEST(LLVM, BitCast) {
   }
 
   {
-    KernelScope kernel_scope;
     double k = raw_bitcast<double>(ref64);
     auto a = DoubleImm::make(k);
     auto b = BitCast::make(kLong, a);
@@ -199,7 +185,6 @@ TEST(LLVM, BitCast) {
   }
 
   {
-    KernelScope kernel_scope;
     int64_t k = raw_bitcast<int64_t>(reff64);
     auto a = LongImm::make(k);
     auto b = BitCast::make(kDouble, a);
@@ -208,7 +193,6 @@ TEST(LLVM, BitCast) {
   }
 
   {
-    KernelScope kernel_scope;
     int32_t k = raw_bitcast<int32_t>(reff32);
     auto a = IntImm::make(k);
     auto b = BitCast::make(kFloat, a);
@@ -218,7 +202,6 @@ TEST(LLVM, BitCast) {
 }
 
 TEST(LLVM, fastLogFloat) {
-  KernelScope kernel_scope;
   const int kTotalSize = 128 * 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
   Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
@@ -250,7 +233,6 @@ TEST(LLVM, fastLogFloat) {
 }
 
 TEST(LLVM, LetTest01) {
-  KernelScope kernel_scope;
 
   Placeholder a(BufHandle("A", {1}, kFloat));
   std::vector<float> v = {1, 0};
@@ -267,7 +249,6 @@ TEST(LLVM, LetTest01) {
 }
 
 TEST(LLVM, LetTest02) {
-  KernelScope kernel_scope;
 
   Placeholder a(BufHandle("A", {1}, kFloat));
   std::vector<float> v = {1, 0};
@@ -287,7 +268,6 @@ TEST(LLVM, LetTest02) {
 }
 
 TEST(LLVM, LetTestMultitype) {
-  KernelScope kernel_scope;
 
   Placeholder a(BufHandle("A", {1}, kDouble));
   std::vector<double> v = {1, 0};
@@ -310,7 +290,6 @@ TEST(LLVM, LetTestMultitype) {
 }
 
 TEST(LLVM, BufferTest) {
-  KernelScope kernel_scope;
   Placeholder a(BufHandle("A", {32}, kFloat));
   std::vector<int32_t> v(5);
   std::vector<void*> args({v.data()});
@@ -320,7 +299,6 @@ TEST(LLVM, BufferTest) {
 }
 
 TEST(LLVM, BlockTest) {
-  KernelScope kernel_scope;
   Placeholder a(BufHandle("A", {32}, kInt));
   std::vector<int32_t> v = {1, 2};
   std::vector<void*> args({v.data()});
@@ -338,7 +316,6 @@ TEST(LLVM, BlockTest) {
 }
 
 TEST(LLVM, LoadStoreTest) {
-  KernelScope kernel_scope;
   Placeholder a(BufHandle("A", {1}, kInt));
   Placeholder b(BufHandle("B", {1}, kInt));
   std::vector<int32_t> a_buffer = {42};
@@ -353,7 +330,6 @@ TEST(LLVM, LoadStoreTest) {
 }
 
 TEST(LLVM, IfThenElseTest) {
-  KernelScope kernel_scope;
   Placeholder a(BufHandle("A", {1}, kInt));
   Placeholder b(BufHandle("B", {1}, kInt));
   Placeholder c(BufHandle("C", {1}, kInt));
@@ -371,7 +347,6 @@ TEST(LLVM, IfThenElseTest) {
 
 // if (x < 10) x = x + 1
 TEST(LLVM, CondNoFalseBlockTest) {
-  KernelScope kernel_scope;
 
   Placeholder x(BufHandle("X", {1}, kInt));
   auto cmp = CompareSelect::make(x.load(0), 10, CompareSelectOperation::kLT);
@@ -396,7 +371,6 @@ TEST(LLVM, CondNoFalseBlockTest) {
 //   x = x - 1;
 // }
 TEST(LLVM, CondTest) {
-  KernelScope kernel_scope;
 
   Placeholder x(BufHandle("X", {1}, kInt));
   auto cmp = CompareSelect::make(x.load(0), 10, CompareSelectOperation::kLT);
@@ -434,7 +408,6 @@ TEST(LLVM, CondTest) {
 //   }
 // }
 TEST(LLVM, CondNestedTest) {
-  KernelScope kernel_scope;
 
   Placeholder x(BufHandle("X", {1}, kInt));
   auto true_cmp =
@@ -470,7 +443,6 @@ TEST(LLVM, CondNestedTest) {
 }
 
 TEST(LLVM, DirectVectorization) {
-  KernelScope ks;
   constexpr int M = 3;
   constexpr int N = 64;
   BufHandle a("a", {M, N}, kFloat);
@@ -491,7 +463,6 @@ TEST(LLVM, DirectVectorization) {
 }
 
 TEST(LLVM, VecLoadStoreTest) {
-  KernelScope kernel_scope;
   Placeholder a(BufHandle("A", {1}, kInt));
   Placeholder b(BufHandle("B", {1}, kInt));
   std::vector<int32_t> a_buffer = {1, 1, 1, 1};
@@ -513,7 +484,6 @@ TEST(LLVM, VecLoadStoreTest) {
 
 #define FLOAT_INTRINSICS_TEST(Name, Lanes)                                   \
   TEST(LLVM, VecFloat_##Name##Lane##Lanes##Test) {                           \
-    KernelScope kernel_scope;                                                \
     Placeholder a(BufHandle("A", {1}, kFloat));                              \
     Placeholder b(BufHandle("B", {1}, kFloat));                              \
     float val = 0.5f;                                                        \
@@ -552,7 +522,6 @@ FLOAT_INTRINSICS_TEST(lgamma, 8)
 
 #define DOUBLE_INTRINSICS_TEST(Name, Lanes)                                  \
   TEST(LLVM, VecDouble_##Name##Lane##Lanes##Test) {                          \
-    KernelScope kernel_scope;                                                \
     Placeholder a(BufHandle("A", {1}, kDouble));                             \
     Placeholder b(BufHandle("B", {1}, kDouble));                             \
     float val = 0.5f;                                                        \
@@ -590,7 +559,6 @@ DOUBLE_INTRINSICS_TEST(lgamma, 4)
 #undef DOUBLE_INTRINSICS_TEST
 
 TEST(LLVM, VectorizerLoadStoreTest) {
-  KernelScope kernel_scope;
   Placeholder a(BufHandle("A", {1}, kInt));
 
   Tensor c =
@@ -613,7 +581,6 @@ TEST(LLVM, VectorizerLoadStoreTest) {
 }
 
 TEST(LLVM, VectorizeBitCast) {
-  KernelScope kernel_scope;
   Placeholder a(BufHandle("A", {128}, kInt));
 
   Tensor c = Compute("c", {{128, "i"}}, [&](const VarHandle& i) {
@@ -639,7 +606,6 @@ TEST(LLVM, VectorizeBitCast) {
 }
 
 TEST(LLVM, MemcpyTest) {
-  KernelScope kernel_scope;
   constexpr int N = 32;
   Placeholder a(BufHandle("A", {N}, kInt));
   Placeholder b(BufHandle("B", {N}, kInt));
@@ -661,7 +627,6 @@ TEST(LLVM, MemcpyTest) {
 }
 
 TEST(LLVM, BzeroTest) {
-  KernelScope kernel_scope;
   constexpr int N = 32;
   Placeholder b(BufHandle("B", {N}, kInt));
   std::vector<int32_t> b_buffer(N, 11);
@@ -679,7 +644,6 @@ TEST(LLVM, BzeroTest) {
 }
 
 TEST(LLVM, ElemwiseAdd) {
-  KernelScope kernel_scope;
   constexpr int N = 1024;
   Placeholder a(BufHandle("A", {N}, kInt));
   Placeholder b(BufHandle("B", {N}, kInt));
@@ -705,7 +669,6 @@ TEST(LLVM, ElemwiseAdd) {
 }
 
 TEST(LLVM, ElemwiseAddFloat) {
-  KernelScope kernel_scope;
   constexpr int N = 1024;
   Placeholder a(BufHandle("A", {N}, kFloat));
   Placeholder b(BufHandle("B", {N}, kFloat));
@@ -731,7 +694,6 @@ TEST(LLVM, ElemwiseAddFloat) {
 }
 
 TEST(LLVM, ElemwiseLog10Float) {
-  KernelScope kernel_scope;
   constexpr int N = 1024;
   Placeholder a(BufHandle("A", {N}, kFloat));
   Placeholder b(BufHandle("B", {N}, kFloat));
@@ -758,7 +720,6 @@ TEST(LLVM, ElemwiseLog10Float) {
 }
 
 TEST(LLVM, ElemwiseLog1pFloat) {
-  KernelScope kernel_scope;
   constexpr int N = 1024;
   Placeholder a(BufHandle("A", {N}, kFloat));
   Placeholder b(BufHandle("B", {N}, kFloat));
@@ -785,7 +746,6 @@ TEST(LLVM, ElemwiseLog1pFloat) {
 }
 
 TEST(LLVM, ElemwiseMaxInt) {
-  KernelScope kernel_scope;
   constexpr int N = 1024;
   Placeholder a(BufHandle("A", {N}, kInt));
   Placeholder b(BufHandle("B", {N}, kInt));
@@ -812,7 +772,6 @@ TEST(LLVM, ElemwiseMaxInt) {
 }
 
 TEST(LLVM, ElemwiseMinInt) {
-  KernelScope kernel_scope;
   constexpr int N = 1024;
   Placeholder a(BufHandle("A", {N}, kInt));
   Placeholder b(BufHandle("B", {N}, kInt));
@@ -839,7 +798,6 @@ TEST(LLVM, ElemwiseMinInt) {
 }
 
 TEST(LLVM, ElemwiseMaxFloat) {
-  KernelScope kernel_scope;
   constexpr int N = 1024;
   Placeholder a(BufHandle("A", {N}, kFloat));
   Placeholder b(BufHandle("B", {N}, kFloat));
@@ -866,7 +824,6 @@ TEST(LLVM, ElemwiseMaxFloat) {
 }
 
 TEST(LLVM, ElemwiseMaxNaNFloat) {
-  KernelScope kernel_scope;
   constexpr int N = 1024;
   Placeholder a(BufHandle("A", {N}, kFloat));
   Placeholder b(BufHandle("B", {N}, kFloat));
@@ -894,7 +851,6 @@ TEST(LLVM, ElemwiseMaxNaNFloat) {
 }
 
 TEST(LLVM, ElemwiseMinFloat) {
-  KernelScope kernel_scope;
   constexpr int N = 1024;
   Placeholder a(BufHandle("A", {N}, kFloat));
   Placeholder b(BufHandle("B", {N}, kFloat));
@@ -921,7 +877,6 @@ TEST(LLVM, ElemwiseMinFloat) {
 }
 
 TEST(LLVM, ElemwiseMinNaNFloat) {
-  KernelScope kernel_scope;
   constexpr int N = 1024;
   Placeholder a(BufHandle("A", {N}, kFloat));
   Placeholder b(BufHandle("B", {N}, kFloat));
@@ -949,7 +904,6 @@ TEST(LLVM, ElemwiseMinNaNFloat) {
 }
 
 TEST(LLVM, ElemwiseMod) {
-  KernelScope kernel_scope;
   constexpr int N = 1024;
   Placeholder a(BufHandle("A", {N}, kInt));
   Placeholder b(BufHandle("B", {N}, kInt));
@@ -975,7 +929,6 @@ TEST(LLVM, ElemwiseMod) {
 }
 
 TEST(LLVM, CompareSelectIntEQ) {
-  KernelScope kernel_scope;
   constexpr int N = 1024;
   Placeholder a(BufHandle("A", {N}, kInt));
   Placeholder b(BufHandle("B", {N}, kInt));
@@ -1016,7 +969,6 @@ TEST(LLVM, CompareSelectIntEQ) {
 }
 
 TEST(LLVM, CompareSelectFloatEQ) {
-  KernelScope kernel_scope;
   constexpr int N = 1024;
   Placeholder a(BufHandle("A", {N}, kFloat));
   Placeholder b(BufHandle("B", {N}, kFloat));
@@ -1050,7 +1002,6 @@ TEST(LLVM, CompareSelectFloatEQ) {
 }
 
 TEST(LLVM, CompareSelectByteGT) {
-  KernelScope kernel_scope;
   constexpr int N = 1024;
   Placeholder a(BufHandle("A", {N}, kByte));
   Placeholder b(BufHandle("B", {N}, kByte));
@@ -1091,7 +1042,6 @@ TEST(LLVM, CompareSelectByteGT) {
 }
 
 TEST(LLVM, CompareSelectByteGE) {
-  KernelScope kernel_scope;
   constexpr int N = 1024;
   Placeholder a(BufHandle("A", {N}, kByte));
   Placeholder b(BufHandle("B", {N}, kByte));
@@ -1127,7 +1077,6 @@ TEST(LLVM, CompareSelectByteGE) {
 }
 
 TEST(LLVM, CompareSelectByteLT) {
-  KernelScope kernel_scope;
   constexpr int N = 1024;
   Placeholder a(BufHandle("A", {N}, kByte));
   Placeholder b(BufHandle("B", {N}, kByte));
@@ -1168,7 +1117,6 @@ TEST(LLVM, CompareSelectByteLT) {
 }
 
 TEST(LLVM, CompareSelectByteLE) {
-  KernelScope kernel_scope;
   constexpr int N = 1024;
   Placeholder a(BufHandle("A", {N}, kByte));
   Placeholder b(BufHandle("B", {N}, kByte));
@@ -1204,7 +1152,6 @@ TEST(LLVM, CompareSelectByteLE) {
 }
 
 TEST(LLVM, StoreFloat) {
-  KernelScope kernel_scope;
   Placeholder result(BufHandle("result", {1}, kFloat));
   std::vector<float> result_buffer = {0.0f};
   auto expr = result.store({0}, FloatImm::make(3.14f));
@@ -1215,7 +1162,6 @@ TEST(LLVM, StoreFloat) {
 }
 
 TEST(LLVM, SimpleMath01) {
-  KernelScope kernel_scope;
   const int N = 1024;
   Tensor tensor = Compute("f", {{N, "i"}}, [](const VarHandle& i) {
     return cast<float>(i * i + 1);
@@ -1237,7 +1183,6 @@ TEST(LLVM, SimpleMath01) {
 }
 
 TEST(LLVM, ComputeMul) {
-  KernelScope kernel_scope;
   const int N = 1024;
   Placeholder a(BufHandle("a", {N}, kFloat));
   Placeholder b(BufHandle("b", {N}, kFloat));
@@ -1260,7 +1205,6 @@ TEST(LLVM, ComputeMul) {
 }
 
 TEST(LLVM, BroadcastAdd) {
-  KernelScope kernel_scope;
   const int M = 32;
   const int N = 1024;
   Placeholder a(BufHandle("a", {M, N}, kFloat));
@@ -1293,7 +1237,6 @@ TEST(LLVM, BroadcastAdd) {
 }
 
 TEST(LLVM, BitwiseOps) {
-  KernelScope kernel_scope;
   auto a = IntImm::make(59);
   auto b = IntImm::make(11);
   auto c = IntImm::make(101);
@@ -1306,7 +1249,6 @@ TEST(LLVM, BitwiseOps) {
 }
 
 TEST(LLVM, ArithmeticRightShift) {
-  KernelScope ks;
   auto a = CharImm::make(-4);
   auto b = CharImm::make(1);
   ExprHandle f = a >> b;
@@ -1315,7 +1257,6 @@ TEST(LLVM, ArithmeticRightShift) {
 }
 
 TEST(LLVM, LogicalRightShift) {
-  KernelScope ks;
   auto a = ByteImm::make(0xfc);
   auto b = ByteImm::make(1);
   ExprHandle f = a >> b;
@@ -1324,7 +1265,6 @@ TEST(LLVM, LogicalRightShift) {
 }
 
 TEST(LLVM, DynamicShapeAdd) {
-  KernelScope kernel_scope;
   auto testWithSize = [](int32_t size) {
     VarHandle n("n", kInt);
     Placeholder a(BufHandle("a", {n}, kFloat));
@@ -1346,7 +1286,6 @@ TEST(LLVM, DynamicShapeAdd) {
 }
 
 TEST(LLVM, BindDynamicShapeAdd) {
-  KernelScope kernel_scope;
   auto testWithSize = [](int32_t size) {
     VarHandle n("n", kInt);
     Placeholder a(BufHandle("a", {n}, kFloat));
@@ -1367,7 +1306,6 @@ TEST(LLVM, BindDynamicShapeAdd) {
 }
 
 TEST(LLVM, TensorDynamicShapeAdd) {
-  KernelScope kernel_scope;
   auto testWithSize = [](int32_t size) {
     VarHandle n("n", kInt);
     Placeholder a(BufHandle("a", {n}, kFloat));
@@ -1390,7 +1328,6 @@ TEST(LLVM, TensorDynamicShapeAdd) {
 }
 
 TEST(LLVM, DynamicShape2D) {
-  KernelScope kernel_scope;
   auto testWithSize = [](int32_t M, int32_t N) {
     VarHandle m("m", kInt);
     VarHandle n("n", kInt);
@@ -1416,7 +1353,6 @@ TEST(LLVM, DynamicShape2D) {
 }
 
 TEST(LLVM, EmptyStmt) {
-  KernelScope kernel_scope;
   StmtPtr s = alloc<Block>(std::vector<StmtPtr>({}));
 
   LLVMCodeGen cg(s, {});
@@ -1425,7 +1361,6 @@ TEST(LLVM, EmptyStmt) {
 }
 
 TEST(LLVM, EliminatedStmt) {
-  KernelScope kernel_scope;
   Placeholder a(BufHandle("a", {1}, kFloat));
 
   Tensor c = Compute("c", {{0, "m"}}, [&](const VarHandle& m) { return m; });
@@ -1441,7 +1376,6 @@ TEST(LLVM, EliminatedStmt) {
 }
 
 TEST(LLVM, SimpleReduction) {
-  KernelScope kernel_scope;
 
   int M = 128;
   int N = 64;
@@ -1480,7 +1414,6 @@ TEST(LLVM, SimpleReduction) {
 }
 
 TEST(LLVM, RFactorReduction) {
-  KernelScope kernel_scope;
 
   int M = 128;
   int N = 64;
@@ -1530,7 +1463,6 @@ TEST(LLVM, RFactorReduction) {
 }
 
 TEST(LLVM, RFactorVectorizedReduction) {
-  KernelScope kernel_scope;
 
   int M = 128;
   int N = 64;
@@ -1582,7 +1514,6 @@ TEST(LLVM, SimpleParallel) {
   for (int test_cfg = 0; test_cfg < 4; test_cfg++) {
     // Compute a simple operation, and try all loop-axis combination to be
     // parallel or sequential.
-    KernelScope kernel_scope;
     const int M = 4;
     const int N = 6;
     Tensor f = Compute(
@@ -1623,7 +1554,6 @@ TEST(LLVM, CompositeParallel) {
   // Compute a composite operation, and try all loop-axis combination to be
   // parallel or sequential.
   for (int test_cfg = 0; test_cfg < test_count; test_cfg++) {
-    KernelScope kernel_scope;
     int M = 5;
     int N = 7;
     Tensor t1 =
@@ -1687,7 +1617,6 @@ TEST(LLVM, CompositeParallel) {
 }
 
 TEST(LLVM, VectorizedGEMM) {
-  KernelScope ks;
 
   int M = 32;
   int N = 32;
@@ -1771,7 +1700,6 @@ TEST(LLVM, VectorizedGEMM) {
 }
 
 TEST(LLVM, CallRaw) {
-  KernelScope kernel_scope;
   const int M = 32;
   VarHandle N("N", kInt);
   Placeholder a(BufHandle("a", {M, N}, kFloat));
@@ -1813,7 +1741,6 @@ TEST(LLVM, CallRaw) {
 }
 
 TEST(LLVM, CustomTarget) {
-  KernelScope kernel_scope;
   constexpr int M = 16;
   Placeholder a("a", kFloat, {M});
   Placeholder b("b", kFloat, {M});

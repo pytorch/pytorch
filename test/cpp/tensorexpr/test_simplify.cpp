@@ -14,7 +14,6 @@ using namespace torch::jit::tensorexpr;
 using SimpleIRExprEval = ExprEval<SimpleIREvaluator>;
 
 TEST(Simplify, ConstantFoldSimple) {
-  KernelScope kernel_scope;
   ExprHandle a(2.0f);
   ExprHandle b(3.0f);
   ExprHandle f = (a + b);
@@ -28,7 +27,6 @@ TEST(Simplify, ConstantFoldSimple) {
 }
 
 TEST(Simplify, ConstantFoldTwoLayer) {
-  KernelScope kernel_scope;
   ExprHandle a(2.0f);
   ExprHandle b(3.0f);
   ExprHandle c(4.0f);
@@ -44,7 +42,6 @@ TEST(Simplify, ConstantFoldTwoLayer) {
 }
 
 TEST(Simplify, ConstantFoldShifts) {
-  KernelScope kernel_scope;
   ExprHandle a(7);
   ExprHandle b(2);
   ExprHandle c(3);
@@ -59,7 +56,6 @@ TEST(Simplify, ConstantFoldShifts) {
 }
 
 TEST(Simplify, ConstantFoldBitwise) {
-  KernelScope kernel_scope;
   ExprHandle a(59);
   ExprHandle b(22);
   ExprHandle c(101);
@@ -74,7 +70,6 @@ TEST(Simplify, ConstantFoldBitwise) {
 }
 
 TEST(Simplify, ConstantFoldMultiOp) {
-  KernelScope kernel_scope;
   ExprHandle a(2.0f);
   ExprHandle b(3.0f);
   ExprHandle c(4.0f);
@@ -93,7 +88,6 @@ TEST(Simplify, ConstantFoldMultiOp) {
 }
 
 TEST(Simplify, ConstantFoldMinMax) {
-  KernelScope kernel_scope;
   ExprHandle a(12.0f);
   ExprHandle b(15.0f);
   ExprHandle c(17.0f);
@@ -113,7 +107,6 @@ TEST(Simplify, ConstantFoldMinMax) {
 }
 
 TEST(Simplify, ConstantFoldIntrinsics) {
-  KernelScope kernel_scope;
   ExprHandle a(2.0f);
   ExprHandle b(3.0f);
   ExprHandle c(4.0f);
@@ -135,7 +128,6 @@ TEST(Simplify, ConstantFoldIntrinsics) {
 }
 
 TEST(Simplify, ConstantFoldCastToBool) {
-  KernelScope kernel_scope;
   ExprHandle f = Cast::make(kBool, IntImm::make(0));
   ExprHandle newF = IRSimplifier::simplify(f);
   SimpleIRExprEval eval(newF);
@@ -143,7 +135,6 @@ TEST(Simplify, ConstantFoldCastToBool) {
 }
 
 TEST(Simplify, ConstantFoldWithVar) {
-  KernelScope kernel_scope;
   {
     VarHandle x("x", kInt);
     ExprHandle body = x * (ExprHandle(2) + ExprHandle(4));
@@ -174,7 +165,6 @@ TEST(Simplify, ConstantFoldWithVar) {
 }
 
 TEST(Simplify, ConditionalSelectFoldSimple) {
-  KernelScope kernel_scope;
   ExprHandle a(3.0f);
   ExprHandle b(4.0f);
   ExprHandle c(3.0f);
@@ -221,7 +211,6 @@ TEST(Simplify, ConditionalSelectFoldSimple) {
 }
 
 TEST(Simplify, ConditionalSelectFoldTwoLayer) {
-  KernelScope kernel_scope;
   ExprHandle a(3.0f);
   ExprHandle b(2.0f);
   ExprHandle c(2.0f);
@@ -269,7 +258,6 @@ TEST(Simplify, ConditionalSelectFoldTwoLayer) {
 }
 
 TEST(Simplify, ConditionalSelectFoldWithVar) {
-  KernelScope kernel_scope;
   VarHandle x("x", kFloat);
   ExprHandle f = x < 4.f;
 
@@ -290,7 +278,6 @@ TEST(Simplify, ConditionalSelectFoldWithVar) {
 }
 
 TEST(Simplify, UnFoldableExpr) {
-  KernelScope kernel_scope;
   VarHandle x("x", kFloat);
   VarHandle y("y", kFloat);
   ExprHandle body = (ExprHandle(3) * x) + (ExprHandle(5) * y);
@@ -308,7 +295,6 @@ TEST(Simplify, UnFoldableExpr) {
 }
 
 TEST(Simplify, HashSimple) {
-  KernelScope kernel_scope;
   VarHandle x("x", kFloat);
   ExprHandle a(2.0f);
   ExprHandle b(3.0f);
@@ -329,7 +315,6 @@ TEST(Simplify, HashSimple) {
 }
 
 TEST(Simplify, HashEquivalence) {
-  KernelScope kernel_scope;
   VarHandle x("x", kFloat);
   VarHandle y("y", kFloat);
   ExprHandle f = (x * y) + (x * y);
@@ -366,7 +351,6 @@ TEST(Simplify, HashEquivalence) {
 }
 
 TEST(Simplify, HashEquivalenceRand) {
-  KernelScope kernel_scope;
   ExprHandle f =
       Intrinsics::make(kRand, kFloat) + Intrinsics::make(kRand, kInt);
 
@@ -386,7 +370,6 @@ TEST(Simplify, HashEquivalenceRand) {
 }
 
 TEST(Simplify, HashEquivalenceAfterFolding) {
-  KernelScope kernel_scope;
   VarHandle x("x", kFloat);
   ExprHandle a(2.0f);
   ExprHandle b(3.0f);
@@ -412,7 +395,6 @@ TEST(Simplify, HashEquivalenceAfterFolding) {
 }
 
 TEST(Simplify, HashDifferenceTypes) {
-  KernelScope kernel_scope;
 
   HashProvider hasher;
   std::vector<ExprPtr> immediates;
@@ -446,7 +428,6 @@ TEST(Simplify, HashDifferenceTypes) {
 }
 
 TEST(Simplify, HashLargeExpression) {
-  KernelScope kernel_scope;
   constexpr int N = 1024;
   BufHandle a("A", {N}, kInt);
   BufHandle b("B", {N}, kInt);
@@ -490,7 +471,6 @@ TEST(Simplify, HashLargeExpression) {
 }
 
 TEST(Simplify, HashForLoopOptions) {
-  KernelScope kernel_scope;
   constexpr int N = 1024;
   BufHandle a("A", {N}, kInt);
   BufHandle b("B", {N}, kInt);
@@ -532,7 +512,6 @@ TEST(Simplify, HashForLoopOptions) {
 
 /// (2 + x) + 4 => x + 6
 TEST(Simplify, SimplifyAdd) {
-  KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
 
@@ -558,7 +537,6 @@ TEST(Simplify, SimplifyAdd) {
 
 /// (2 - x) - 4 => -2 - x
 TEST(Simplify, SimplifySub) {
-  KernelScope kernel_scope;
   VarHandle x("x", kInt);
   ExprHandle body = (ExprHandle(2) - x) - ExprHandle(4);
 
@@ -575,7 +553,6 @@ TEST(Simplify, SimplifySub) {
 
 /// 2 * (1 - x) - 4 => 2 * (-3 - x)
 TEST(Simplify, SimplifyMultiLayer) {
-  KernelScope kernel_scope;
   VarHandle x("x", kInt);
   ExprHandle body = ExprHandle(2) * ((ExprHandle(1) - x) - ExprHandle(4));
   ExprHandle simplified = IRSimplifier::simplify(body);
@@ -588,7 +565,6 @@ TEST(Simplify, SimplifyMultiLayer) {
 
 /// 2 * (3 * x) - (x * 4) => 2 * x
 TEST(Simplify, SimplifyMultiTerm) {
-  KernelScope kernel_scope;
   VarHandle x("x", kInt);
   ExprHandle body =
       (ExprHandle(2) * ((ExprHandle(3) * x)) - (x * ExprHandle(4)));
@@ -606,7 +582,6 @@ TEST(Simplify, SimplifyMultiTerm) {
 
 /// 2 * (3 * (long)x) - (x * 4) => 2 * x
 TEST(Simplify, SimplifyCasts) {
-  KernelScope kernel_scope;
   VarHandle x("x", kLong);
   ExprHandle body =
       (ExprHandle(2) * ((ExprHandle(3) * x)) - (x * ExprHandle(4)));
@@ -624,7 +599,6 @@ TEST(Simplify, SimplifyCasts) {
 
 /// (x + 0) * 1 => x
 TEST(Simplify, SimplifyEliminatesNoOps) {
-  KernelScope kernel_scope;
   VarHandle x("x", kInt);
   ExprHandle body = (x + ExprHandle(0)) * 1;
 
@@ -636,7 +610,6 @@ TEST(Simplify, SimplifyEliminatesNoOps) {
 
 /// Cannot simplify this.
 TEST(Simplify, SimplifyMultiVar) {
-  KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
   ExprHandle body = x * 24 + y * 34;
@@ -659,7 +632,6 @@ TEST(Simplify, SimplifyMultiVar) {
 
 // x + 2 + y => x + y + 2
 TEST(Simplify, DISABLED_SimplifyReorderings) {
-  KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
   ExprHandle body = x + 2 + y;
@@ -676,7 +648,6 @@ TEST(Simplify, DISABLED_SimplifyReorderings) {
 
 /// y + x * 0 => y
 TEST(Simplify, SimplifyEliminatesVar) {
-  KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
   ExprHandle body = y + x * ExprHandle(0);
@@ -686,7 +657,6 @@ TEST(Simplify, SimplifyEliminatesVar) {
 }
 
 TEST(Simplify, SimplifyAdds) {
-  KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
 
@@ -757,7 +727,6 @@ TEST(Simplify, SimplifyAdds) {
 }
 
 TEST(Simplify, SimplifyMuls) {
-  KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
 
@@ -959,7 +928,6 @@ TEST(Simplify, SimplifyMuls) {
 
 // Sub an expr from itself will result in zero.
 TEST(Simplify, SimplifySubs) {
-  KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
 
@@ -1125,7 +1093,6 @@ TEST(Simplify, SimplifySubs) {
 }
 
 TEST(Simplify, SimplifyDiv) {
-  KernelScope kernel_scope;
   VarHandle x("x", kInt);
 
   {
@@ -1144,7 +1111,6 @@ TEST(Simplify, SimplifyDiv) {
 }
 
 TEST(Simplify, SimplifyDivWithLoopContext1) {
-  KernelScope kernel_scope;
   // Stmt to simplify:
   // for (int i = 0; i < 6; i++) {
   //  A[i] = (i + 24) / 6;
@@ -1166,7 +1132,6 @@ TEST(Simplify, SimplifyDivWithLoopContext1) {
 }
 
 TEST(Simplify, SimplifyDivWithLoopContext2) {
-  KernelScope kernel_scope;
   // Stmt to simplify:
   // for (int i = 0; i < 5; i++) {
   //  A[i] = (i + 25) / 6;
@@ -1188,7 +1153,6 @@ TEST(Simplify, SimplifyDivWithLoopContext2) {
 }
 
 TEST(Simplify, SimplifyDivWithLoopContext3) {
-  KernelScope kernel_scope;
   // Stmt to simplify:
   // for (int i = 0; i < 6; i++) {
   //  A[i] = (i + 24) / (-6);
@@ -1210,7 +1174,6 @@ TEST(Simplify, SimplifyDivWithLoopContext3) {
 }
 
 TEST(Simplify, SimplifyDivWithLoopContext4) {
-  KernelScope kernel_scope;
   // Stmt to simplify:
   // for (int i = 0; i < 5; i++) {
   //  A[i] = (i - 5) / 6;
@@ -1232,7 +1195,6 @@ TEST(Simplify, SimplifyDivWithLoopContext4) {
 }
 
 TEST(Simplify, SimplifyDivWithLoopContext5) {
-  KernelScope kernel_scope;
   // Stmt to simplify:
   // for (int i = 0; i < 6; i++) {
   //  for (int j = 0; j < 10; j++) {
@@ -1259,7 +1221,6 @@ TEST(Simplify, SimplifyDivWithLoopContext5) {
 }
 
 TEST(Simplify, SimplifyDivWithLoopContext6) {
-  KernelScope kernel_scope;
   // Stmt to simplify:
   // for (int i = 0; i < 6; i++) {
   //  for (int j = -1; j < 9; j++) {
@@ -1287,7 +1248,6 @@ TEST(Simplify, SimplifyDivWithLoopContext6) {
 }
 
 TEST(Simplify, SimplifyDivWithLoopContext7) {
-  KernelScope kernel_scope;
   // Stmt to simplify:
   // for (int i = 0; i < 6; i++) {
   //  for (int j = 0; j < 10; j++) {
@@ -1315,7 +1275,6 @@ TEST(Simplify, SimplifyDivWithLoopContext7) {
 }
 
 TEST(Simplify, SimplifyModWithLoopContext0) {
-  KernelScope kernel_scope;
   // Stmt to simplify:
   // for (int i = 0; i < 100; i++) {
   //  A[i] = i % 100;
@@ -1337,7 +1296,6 @@ TEST(Simplify, SimplifyModWithLoopContext0) {
 }
 
 TEST(Simplify, SimplifyModWithLoopContext1) {
-  KernelScope kernel_scope;
   // Stmt to simplify:
   // for (int i = 0; i < 6; i++) {
   //  A[i] = (i + 24) % 6;
@@ -1359,7 +1317,6 @@ TEST(Simplify, SimplifyModWithLoopContext1) {
 }
 
 TEST(Simplify, SimplifyModWithLoopContext2) {
-  KernelScope kernel_scope;
   // Stmt to simplify:
   // for (int i = 0; i < 5; i++) {
   //  A[i] = (i + 25) % 6;
@@ -1381,7 +1338,6 @@ TEST(Simplify, SimplifyModWithLoopContext2) {
 }
 
 TEST(Simplify, SimplifyModWithLoopContext3) {
-  KernelScope kernel_scope;
   // Stmt to simplify:
   // for (int i = 0; i < 6; i++) {
   //  A[i] = (i + 24) % (-6);
@@ -1403,7 +1359,6 @@ TEST(Simplify, SimplifyModWithLoopContext3) {
 }
 
 TEST(Simplify, SimplifyModWithLoopContext4) {
-  KernelScope kernel_scope;
   // Stmt to simplify:
   // for (int i = 0; i < 5; i++) {
   //  A[i] = (i - 5) % 6;
@@ -1425,7 +1380,6 @@ TEST(Simplify, SimplifyModWithLoopContext4) {
 }
 
 TEST(Simplify, SimplifyModWithLoopContext5) {
-  KernelScope kernel_scope;
   // Stmt to simplify:
   // for (int i = 0; i < 6; i++) {
   //  for (int j = 0; j < 10; j++) {
@@ -1452,7 +1406,6 @@ TEST(Simplify, SimplifyModWithLoopContext5) {
 }
 
 TEST(Simplify, SimplifyModWithLoopContext6) {
-  KernelScope kernel_scope;
   // Stmt to simplify:
   // for (int i = 0; i < 6; i++) {
   //  for (int j = -1; j < 9; j++) {
@@ -1480,7 +1433,6 @@ TEST(Simplify, SimplifyModWithLoopContext6) {
 }
 
 TEST(Simplify, SimplifyModWithLoopContext7) {
-  KernelScope kernel_scope;
   // Stmt to simplify:
   // for (int i = 0; i < 6; i++) {
   //  for (int j = 0; j < 10; j++) {
@@ -1508,7 +1460,6 @@ TEST(Simplify, SimplifyModWithLoopContext7) {
 }
 
 TEST(Simplify, SimplifyMod) {
-  KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
   VarHandle z("z", kInt);
@@ -1635,7 +1586,6 @@ TEST(Simplify, SimplifyMod) {
 
 // Test that mixing ops together simplifies as expected.
 TEST(Simplify, SimplifyMultiOp) {
-  KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
 
@@ -1704,7 +1654,6 @@ TEST(Simplify, SimplifyMultiOp) {
 
 // Test that chaining many ops together works as expected.
 TEST(Simplify, SimplifyManyOps) {
-  KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
 
@@ -1752,7 +1701,6 @@ TEST(Simplify, SimplifyManyOps) {
 }
 
 TEST(Simplify, SimplifyFactorization) {
-  KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
 
@@ -1874,7 +1822,6 @@ TEST(Simplify, SimplifyFactorization) {
 
 // (4 * x + y + z * 2) + (4 * x + y + z * 4) => 2 * (y + 3 * z + 4 * x)
 TEST(Simplify, SimplifyFactorizeUneven) {
-  KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
   VarHandle z("z", kInt);
@@ -1901,7 +1848,6 @@ TEST(Simplify, SimplifyFactorizeUneven) {
 // (x * y) + (2 * x) * (x + y) => 2 * (x * x) + 3 * (x * y)
 // This is kind of a placeholder test for variable factorization.
 TEST(Simplify, SimplifyDeeperTerms) {
-  KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
   ExprHandle body = (x * y) + (ExprHandle(2) * x) * (x + y);
@@ -1925,7 +1871,6 @@ TEST(Simplify, SimplifyDeeperTerms) {
 // Tests the difference between two less trivial expressions.
 // (m * (1 * n_1) + (n  + 1)) - (m *  (1 * n_1) + n) => 1
 TEST(Simplify, SimplifyDeeperDifference) {
-  KernelScope kernel_scope;
   VarHandle n("n", kInt);
   VarHandle n_1("n_1", kInt);
   VarHandle m("m", kInt);
@@ -1939,7 +1884,6 @@ TEST(Simplify, SimplifyDeeperDifference) {
 // Test constant folding into the difference between expressions.
 // 2 + char((m * (1 * n_1) + (n  + 1)) - (m *  (1 * n_1) + n)) => 3
 TEST(Simplify, SimplifyFoldComplexDifference) {
-  KernelScope kernel_scope;
   VarHandle n("n", kInt);
   VarHandle n_1("n_1", kInt);
   VarHandle m("m", kInt);
@@ -1954,7 +1898,6 @@ TEST(Simplify, SimplifyFoldComplexDifference) {
 }
 
 TEST(Simplify, SimplifyIfComponents) {
-  KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
   ExprHandle body = IfThenElse::make(
@@ -1976,7 +1919,6 @@ TEST(Simplify, SimplifyIfComponents) {
 }
 
 TEST(Simplify, SimplifyOpaqueTerms) {
-  KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
 
@@ -2002,7 +1944,6 @@ TEST(Simplify, SimplifyOpaqueTerms) {
 }
 
 TEST(Simplify, SimplifySymbolicMinMax) {
-  KernelScope kernel_scope;
 
   {
     // Minimum with constant difference between terms.
@@ -2038,7 +1979,6 @@ TEST(Simplify, SimplifySymbolicMinMax) {
 }
 
 TEST(Simplify, SimplifyNestedMax) {
-  KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
   VarHandle z("z", kInt);
@@ -2315,7 +2255,6 @@ TEST(Simplify, SimplifyNestedMax) {
 }
 
 TEST(Simplify, SimplifyNestedMin) {
-  KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
   VarHandle z("z", kInt);
@@ -2592,7 +2531,6 @@ TEST(Simplify, SimplifyNestedMin) {
 }
 
 TEST(Simplify, SimplifyWontReorderFloat) {
-  KernelScope kernel_scope;
 
   {
     // 3 * (3 * x) - 3 * (3 * y) => 9 * (x - y)
@@ -2704,7 +2642,6 @@ TEST(Simplify, SimplifyWontReorderFloat) {
 }
 
 TEST(Simplify, SimplifyRoundModPattern) {
-  KernelScope kernel_scope;
 
   {
     // (x/y)*y + x%y => x.
@@ -2887,7 +2824,6 @@ TEST(Simplify, SimplifyRoundModPattern) {
 }
 
 TEST(Simplify, SimplifyRoundModPatternFactorization) {
-  KernelScope kernel_scope;
 
   {
     // Full factorization.
@@ -2947,7 +2883,6 @@ TEST(Simplify, SimplifyRoundModPatternFactorization) {
 }
 
 TEST(Simplify, SimplifyRoundModPatternMultivar) {
-  KernelScope kernel_scope;
 
   {
     // Multivar.
@@ -2997,7 +2932,6 @@ TEST(Simplify, SimplifyRoundModPatternMultivar) {
 }
 
 TEST(Simplify, SimplifyModRoundModPattern) {
-  KernelScope kernel_scope;
 
   {
     // t/7 % 9 * 7 + t % 7 => t%63
@@ -3085,7 +3019,6 @@ TEST(Simplify, SimplifyModRoundModPattern) {
 }
 
 TEST(Simplify, SimplifyModRoundModPatternFactorization) {
-  KernelScope kernel_scope;
 
   {
     // 2 * (t /7 % 9 * 7) + 2 * (t % 7) => 2 * (t % 63)
@@ -3154,7 +3087,6 @@ TEST(Simplify, SimplifyModRoundModPatternFactorization) {
 }
 
 TEST(Simplify, SimplifyModRoundModPatternMultivar) {
-  KernelScope kernel_scope;
 
   {
     // t/7 % 9 * 7 + t % 7 + t => t % 63 + t
@@ -3260,7 +3192,6 @@ TEST(Simplify, SimplifyModRoundModPatternMultivar) {
 }
 
 TEST(Simplify, SimplifyDivisionScalarFactorization) {
-  KernelScope kernel_scope;
 
   {
     // Simple factorization of numerator and denominator.
@@ -3332,7 +3263,6 @@ TEST(Simplify, SimplifyDivisionScalarFactorization) {
 }
 
 TEST(Simplify, SimplifyConstantBranches) {
-  KernelScope kernel_scope;
 
   {
     // If the condition is constant true then take the true_value.
@@ -3390,7 +3320,6 @@ TEST(Simplify, SimplifyConstantBranches) {
 }
 
 TEST(Simplify, SimplifyConstantCond) {
-  KernelScope kernel_scope;
 
   {
     // If the condition is constant true then take the true_value.
@@ -3508,7 +3437,6 @@ TEST(Simplify, SimplifyConstantCond) {
 }
 
 TEST(Simplify, SimplifyEliminateEmptyCond) {
-  KernelScope kernel_scope;
   // If the branches are empty in different ways, eliminate.
   {
     VarHandle x("x", kInt);
@@ -3536,7 +3464,6 @@ TEST(Simplify, SimplifyEliminateEmptyCond) {
 }
 
 TEST(Simplify, SimplifyConstantComparisons) {
-  KernelScope kernel_scope;
 
   auto ComparisonTest =
       [](ExprHandle a, ExprHandle b, CompareSelectOperation op, int result) {
@@ -3582,7 +3509,6 @@ TEST(Simplify, SimplifyConstantComparisons) {
 }
 
 TEST(Simplify, SimplifySymbolicComparisons) {
-  KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
 
@@ -3720,7 +3646,6 @@ TEST(Simplify, SimplifySymbolicComparisons) {
 }
 
 TEST(Simplify, SimplifyEliminateZeroLengthFor) {
-  KernelScope kernel_scope;
 
   {
     // Will eliminate zero loop For.
@@ -3780,7 +3705,6 @@ TEST(Simplify, SimplifyEliminateZeroLengthFor) {
 }
 
 TEST(Simplify, SimplifyOneLoopFor) {
-  KernelScope kernel_scope;
 
   {
     // Will remove the loop if the body is run once.
@@ -3849,7 +3773,6 @@ TEST(Simplify, SimplifyOneLoopFor) {
 }
 
 TEST(Simplify, SimplifyForWontLoseLoopOptions) {
-  KernelScope kernel_scope;
 
   {
     // Sanity check does nothing if the condition is not met.
@@ -3868,7 +3791,6 @@ TEST(Simplify, SimplifyForWontLoseLoopOptions) {
 }
 
 TEST(Simplify, SimplifyMultilevelFor) {
-  KernelScope kernel_scope;
 
   {
     // Multiple layers of For will be simplified out.
@@ -3927,7 +3849,6 @@ TEST(Simplify, SimplifyMultilevelFor) {
 }
 
 TEST(Simplify, SimplifyForCleansUp) {
-  KernelScope kernel_scope;
 
   {
     Placeholder a("a", kFloat, {1, 12, 1});
@@ -3957,7 +3878,6 @@ TEST(Simplify, SimplifyForCleansUp) {
 }
 
 TEST(Simplify, SimplifyEliminateEmptyFor) {
-  KernelScope kernel_scope;
 
   {
     // Flatten many layers around an empty block to an empty block.
@@ -3974,7 +3894,6 @@ TEST(Simplify, SimplifyEliminateEmptyFor) {
 }
 
 TEST(Simplify, SimplifyFlattenBlock) {
-  KernelScope kernel_scope;
 
   {
     // Flatten multiple blocks down to one.
@@ -4059,7 +3978,6 @@ TEST(Simplify, SimplifyFlattenBlock) {
 }
 
 TEST(Simplify, SimplifyEliminateZeroLengthAlloc) {
-  KernelScope kernel_scope;
 
   {
     // Simple positive case.
@@ -4135,7 +4053,6 @@ TEST(Simplify, SimplifyEliminateZeroLengthAlloc) {
 }
 
 TEST(Simplify, DontSimplifyRand) {
-  KernelScope kernel_scope;
 
   {
     // rand() + rand() = rand() + rand() NOT 2 * rand().
@@ -4169,7 +4086,6 @@ TEST(Simplify, DontSimplifyRand) {
 }
 
 TEST(Simplify, SimplifyReorderForCond) {
-  KernelScope kernel_scope;
   BufHandle a("A", {4}, kInt);
   BufHandle b("B", {1}, kInt);
   BufHandle c("C", {4}, kInt);
@@ -4368,7 +4284,6 @@ TEST(Simplify, SimplifyReorderForCond) {
 }
 
 TEST(Simplify, SimplifyFuseConditions) {
-  KernelScope kernel_scope;
   BufHandle a("A", {2}, kInt);
   BufHandle b("B", {2}, kInt);
   VarHandle i("i", kInt);
@@ -4778,7 +4693,6 @@ TEST(Simplify, SimplifyFuseConditions) {
 }
 
 TEST(Simplify, SimplifySyncThreads) {
-  KernelScope kernel_scope;
   BufHandle a("A", {4}, kInt);
   VarHandle i("i", kInt);
 
@@ -4876,7 +4790,6 @@ TEST(Simplify, SimplifySyncThreads) {
 }
 
 TEST(Simplify, SimplifyRampSubBroadcast) {
-  KernelScope kernel_scope;
   int num_lanes = 4;
   ExprHandle ramp = Ramp::make(ExprHandle(0), ExprHandle(6), num_lanes);
   ExprHandle broadcast = Broadcast::make(ExprHandle(-5), num_lanes);
@@ -4890,7 +4803,6 @@ TEST(Simplify, SimplifyRampSubBroadcast) {
 }
 
 TEST(Simplify, SimplifyBroadcastTermExpander) {
-  KernelScope kernel_scope;
   int num_lanes = 8;
   ExprHandle bc0 = Broadcast::make(ExprHandle(0), num_lanes);
   ExprHandle bc1 = Broadcast::make(ExprHandle(1), num_lanes);
@@ -4920,7 +4832,6 @@ TEST(Simplify, DISABLED_CompareSelectCondAlwaysInLoopBounds) {
   //   for (int n = 1; n < N; n++) {
   //     b[n] = 1.f;
   //   }
-  KernelScope kernel_scope;
   constexpr int N = 8;
   Placeholder b("b", kFloat, {N});
   VarHandle n("n", kInt);
@@ -4945,7 +4856,6 @@ TEST(Simplify, DISABLED_IfThenCondAlwaysInLoopBounds) {
   //   for (int n = 1; n < N; n++) {
   //     b[n] = 1.f;
   //   }
-  KernelScope kernel_scope;
   constexpr int N = 8;
   Placeholder b("b", kFloat, {N});
   VarHandle n("n", kInt);
@@ -4974,7 +4884,6 @@ TEST(Simplify, DISABLED_MultiClauseCondAlwaysInLoopBounds) {
   //   for (int i = 1; i < 7; i++) {
   //     for (int j = 1; j < 7; j++) {
   //       b[i, j] = 1.f;
-  KernelScope kernel_scope;
   constexpr int N = 8;
   Placeholder b("b", kFloat, {N, N});
   VarHandle i("i", kInt);
@@ -5010,7 +4919,6 @@ TEST(Simplify, DISABLED_SimplifyLoopBounds) {
   //   for (int i = 1; i < 3; i++) {
   //     for (int j = 1; j < 3; j++) {
   //       b[i, j] = (b[i, j]) + 1.f;
-  KernelScope kernel_scope;
   constexpr int N = 8;
   constexpr int K = 3;
   Placeholder a("a", kFloat, {N, N});

@@ -24,7 +24,6 @@ namespace jit {
 using namespace torch::jit::tensorexpr;
 
 TEST(Reductions, ReduceSum0D_1) {
-  KernelScope kernel_scope;
   const int M = 10;
 
   Placeholder b(BufHandle("b", {M}, kFloat));
@@ -50,7 +49,6 @@ TEST(Reductions, ReduceSum0D_1) {
 }
 
 TEST(Reductions, ReduceSum0D_2) {
-  KernelScope kernel_scope;
   const int M = 10;
 
   Placeholder b(BufHandle("b", {}, kFloat));
@@ -73,7 +71,6 @@ TEST(Reductions, ReduceSum0D_2) {
 
 // Sum an array to a single value.
 TEST(Reductions, ReduceSum1D) {
-  KernelScope kernel_scope;
 
   Placeholder b(BufHandle("b", {10}, kFloat));
   std::vector<float> in(10);
@@ -96,7 +93,6 @@ TEST(Reductions, ReduceSum1D) {
 }
 // Sum a 2D tensor to a 1D tensor with dynamic shapes.
 TEST(Reductions, ReduceSum2D) {
-  KernelScope kernel_scope;
 
   const int M = 3;
   const int N = 7;
@@ -138,7 +134,6 @@ TEST(Reductions, ReduceSum2D) {
 // Sum a 3D tensor to both a 2D and 1D tensor, then reduce the 2D tensor flat to
 // check our work.
 TEST(Reductions, ReduceSum3D) {
-  KernelScope kernel_scope;
 
   const int M = 10;
   VarHandle m("m", kInt);
@@ -209,7 +204,6 @@ TEST(Reductions, ReduceSum3D) {
 
 // Sum a large (10 D) Tensor 5 dimensions in.
 TEST(Reductions, ReduceSum10D) {
-  KernelScope kernel_scope;
 
   Placeholder in_(BufHandle("in_", {2, 3, 2, 3, 2, 3, 2, 3, 2, 3}, kFloat));
   const int InputSize = 2 * 3 * 2 * 3 * 2 * 3 * 2 * 3 * 2 * 3;
@@ -243,7 +237,6 @@ TEST(Reductions, ReduceSum10D) {
 
 // Reduce via Mul rather than Add using a custom Reducer.
 TEST(Reductions, ReduceProduct) {
-  KernelScope kernel_scope;
 
   const int M = 4;
   const int N = 4;
@@ -284,7 +277,6 @@ TEST(Reductions, ReduceProduct) {
 
 // Maximum reductions.
 TEST(Reductions, ReduceMax) {
-  KernelScope kernel_scope;
 
   Placeholder in_(BufHandle("b", {10}, kFloat));
 
@@ -325,7 +317,6 @@ TEST(Reductions, ReduceMax) {
 
 // Minimum reduction, with custom initialization.
 TEST(Reductions, ReduceMinCustomInitializer) {
-  KernelScope kernel_scope;
 
   VarHandle minInit("minInit", kFloat);
   Placeholder in_(BufHandle("b", {10}, kFloat));
@@ -363,7 +354,6 @@ TEST(Reductions, ReduceMinCustomInitializer) {
 // Example implementation of Any/All.
 // TODO: this is very awkward without logical And/Or operators.
 TEST(Reductions, ReduceAnyAll) {
-  KernelScope kernel_scope;
 
   VarHandle searchValue("searchValue", kInt);
   Placeholder b(BufHandle("b", {4, 10}, kInt));
@@ -449,7 +439,6 @@ TEST(Reductions, ReduceAnyAll) {
 }
 
 TEST(Reductions, ReduceMatmul2D) {
-  KernelScope kernel_scope;
 
   Placeholder tA(BufHandle("tA", {3, 2}, kFloat));
   Placeholder tB(BufHandle("tB", {2, 3}, kFloat));
@@ -491,7 +480,6 @@ TEST(Reductions, ReduceMatmul2D) {
 }
 
 TEST(Reductions, ReduceRfactorLike) {
-  KernelScope kernel_scope;
 
   Placeholder in(BufHandle("in", {10, 10}, kFloat));
   std::vector<float> in_(100);
@@ -518,7 +506,6 @@ TEST(Reductions, ReduceRfactorLike) {
 }
 
 TEST(Reductions, ReduceAsProducer) {
-  KernelScope kernel_scope;
 
   const int M = 10;
   VarHandle m("m", kInt);
@@ -563,7 +550,6 @@ TEST(Reductions, ReduceAsProducer) {
 }
 
 TEST(Reductions, ReduceAsConsumer) {
-  KernelScope kernel_scope;
 
   const int M = 10;
   VarHandle m("m", kInt);
@@ -614,7 +600,6 @@ TEST(Reductions, ReduceAsConsumer) {
 }
 
 TEST(Reductions, SplitReduceAxis) {
-  KernelScope kernel_scope;
 
   Placeholder in(BufHandle("in", {16, 8}, kFloat));
 
@@ -645,7 +630,6 @@ TEST(Reductions, SplitReduceAxis) {
 }
 
 TEST(Reductions, SplitNonReduceAxis) {
-  KernelScope kernel_scope;
 
   Placeholder in(BufHandle("in", {16, 8}, kFloat));
 
@@ -676,7 +660,6 @@ TEST(Reductions, SplitNonReduceAxis) {
 }
 
 TEST(Reductions, ReorderedReductionInitializer) {
-  KernelScope kernel_scope;
   /* From the quip:
   for k in 0..1:  // blockIdx
     for m in 0..128:
@@ -726,7 +709,6 @@ TEST(Reductions, ReorderedReductionInitializer) {
 }
 
 TEST(Reductions, ReduceRfactor) {
-  KernelScope kernel_scope;
 
   const int M = 10;
   const int N = 10;
@@ -759,7 +741,6 @@ TEST(Reductions, ReduceRfactor) {
 }
 
 TEST(Reductions, Reduce3DRfactorInner) {
-  KernelScope kernel_scope;
 
   const int M = 10;
   const int N = 10;
@@ -794,7 +775,6 @@ TEST(Reductions, Reduce3DRfactorInner) {
 }
 
 TEST(Reductions, Reduce3DRfactorOuter) {
-  KernelScope kernel_scope;
 
   const int M = 10;
   const int N = 10;
@@ -828,7 +808,6 @@ TEST(Reductions, Reduce3DRfactorOuter) {
 }
 
 TEST(Reductions, ReduceRepeatedInternalRfactor) {
-  KernelScope kernel_scope;
 
   Placeholder in_(BufHandle("in_", {2, 3, 4, 5, 6}, kFloat));
   const int InputSize = 2 * 3 * 4 * 5 * 6;
@@ -875,7 +854,6 @@ TEST(Reductions, ReduceRepeatedInternalRfactor) {
 
 // Split a reduction axis with a tail loop.
 TEST(Reductions, ReduceSplitTail) {
-  KernelScope kernel_scope;
 
   const int M = 10;
   const int N = 10;
@@ -908,7 +886,6 @@ TEST(Reductions, ReduceSplitTail) {
 
 // Split a reduction axis cleanly so there is no tail loop.
 TEST(Reductions, ReduceSplitNoTail) {
-  KernelScope kernel_scope;
 
   const int M = 10;
   const int N = 10;
@@ -941,7 +918,6 @@ TEST(Reductions, ReduceSplitNoTail) {
 // Split a reduction axis with only a tail loop (the split loop will be size 0
 // and eliminated out).
 TEST(Reductions, ReduceOverSplitTail) {
-  KernelScope kernel_scope;
 
   const int M = 10;
   const int N = 10;
@@ -974,7 +950,6 @@ TEST(Reductions, ReduceOverSplitTail) {
 
 // Split a reduction axis with a mask.
 TEST(Reductions, ReduceSplitMask) {
-  KernelScope kernel_scope;
 
   const int M = 10;
   const int N = 10;
@@ -1007,7 +982,6 @@ TEST(Reductions, ReduceSplitMask) {
 
 // Split a reduction axis cleanly not requiring a mask.
 TEST(Reductions, ReduceSplitNoMask) {
-  KernelScope kernel_scope;
 
   const int M = 10;
   const int N = 10;
@@ -1039,7 +1013,6 @@ TEST(Reductions, ReduceSplitNoMask) {
 
 // Split a reduction axis with all logic in the mask.
 TEST(Reductions, ReduceOverSplitMask) {
-  KernelScope kernel_scope;
 
   const int M = 10;
   const int N = 10;
@@ -1073,7 +1046,6 @@ TEST(Reductions, ReduceOverSplitMask) {
 // Test an rfactor when there are two ReduceOps in the graph due to a
 // splitWithTail.
 TEST(Reductions, ReduceSplitRfactor) {
-  KernelScope kernel_scope;
 
   const int M = 2;
   const int N = 10;
@@ -1117,7 +1089,6 @@ TEST(Reductions, ReduceSplitRfactor) {
 // Test an rfactor which ends up being eliminated since the total loop size is
 // smaller than the split factor.
 TEST(Reductions, ReduceOverSplitRfactor) {
-  KernelScope kernel_scope;
 
   const int N = 10;
   const int K = 10;
@@ -1174,7 +1145,6 @@ TEST(Reductions, ReduceOverSplitRfactor) {
 }
 
 TEST(Reductions, ReduceInlineReduction) {
-  KernelScope kernel_scope;
   const int M = 4;
   const int N = 5;
   const int K = 6;
@@ -1207,7 +1177,6 @@ TEST(Reductions, ReduceInlineReduction) {
 }
 
 TEST(Reductions, ReduceInlineConsumer) {
-  KernelScope kernel_scope;
   const int M = 4;
   const int N = 5;
   const int K = 6;
@@ -1261,7 +1230,6 @@ TEST(Reductions, ReduceInlineConsumer) {
 }
 
 TEST(Reductions, ReduceInlineReducerInternal) {
-  KernelScope kernel_scope;
   const int M = 4;
   const int N = 5;
   const int K = 6;
@@ -1319,7 +1287,6 @@ TEST(Reductions, ReduceInlineReducerInternal) {
 }
 
 TEST(Reductions, ReductionCacheAccessesOperatorAxis) {
-  KernelScope kernel_scope;
 
   int L = 4;
   int N = 3;
@@ -1396,7 +1363,6 @@ TEST(Reductions, ReductionCacheAccessesOperatorAxis) {
 }
 
 TEST(Reductions, ReductionCacheAccessesOuterReduceAxis) {
-  KernelScope kernel_scope;
 
   int L = 4;
   int N = 3;
@@ -1471,7 +1437,6 @@ TEST(Reductions, ReductionCacheAccessesOuterReduceAxis) {
 }
 
 TEST(Reductions, ReductionCacheAccessesInnerReduceAxis) {
-  KernelScope kernel_scope;
 
   int L = 4;
   int N = 3;
@@ -1546,7 +1511,6 @@ TEST(Reductions, ReductionCacheAccessesInnerReduceAxis) {
 }
 
 TEST(Reductions, ReductionCacheBodyAccess) {
-  KernelScope kernel_scope;
 
   Placeholder a(BufHandle("a", {24, 32, 12}, kFloat));
   Placeholder b(BufHandle("b", {24, 32, 12}, kFloat));
@@ -1587,7 +1551,6 @@ TEST(Reductions, ReductionCacheBodyAccess) {
 }
 
 TEST(Reductions, ReductionCacheConsumerAccess) {
-  KernelScope kernel_scope;
 
   Placeholder a(BufHandle("a", {24, 32, 12}, kFloat));
   Placeholder b(BufHandle("b", {24, 32, 12}, kFloat));
@@ -1628,7 +1591,6 @@ TEST(Reductions, ReductionCacheConsumerAccess) {
 }
 
 TEST(Reductions, ReductionSplitCacheConsumerAccess) {
-  KernelScope kernel_scope;
 
   Placeholder a(BufHandle("a", {24, 32, 12}, kFloat));
   Placeholder b(BufHandle("b", {24, 32, 12}, kFloat));
@@ -1676,7 +1638,6 @@ TEST(Reductions, ReductionSplitCacheConsumerAccess) {
 }
 
 TEST(Reductions, ReductionReorderCacheConsumerAccess) {
-  KernelScope kernel_scope;
 
   Placeholder a(BufHandle("a", {24, 32, 12}, kFloat));
   Placeholder b(BufHandle("b", {24, 32, 12}, kFloat));
@@ -1725,7 +1686,6 @@ TEST(Reductions, ReductionReorderCacheConsumerAccess) {
 }
 
 TEST(Reductions, ReductionRfactorCacheTempOuter) {
-  KernelScope kernel_scope;
 
   const int M = 10;
   const int N = 10;
@@ -1794,7 +1754,6 @@ TEST(Reductions, ReductionRfactorCacheTempOuter) {
 }
 
 TEST(Reductions, ReductionRfactorCacheTempInner) {
-  KernelScope kernel_scope;
 
   const int M = 10;
   const int N = 10;
@@ -1858,7 +1817,6 @@ TEST(Reductions, ReductionRfactorCacheTempInner) {
 }
 
 TEST(Reductions, ReductionVectorize) {
-  KernelScope kernel_scope;
 
   std::vector<float> in_(8 * 8);
   for (int i = 0; i < 8; ++i) {
@@ -1905,7 +1863,6 @@ TEST(Reductions, ReductionVectorize) {
 }
 
 TEST(Reductions, ReductionVectorizeInner) {
-  KernelScope kernel_scope;
 
   Placeholder in(BufHandle("in", {8, 8}, kFloat));
 
@@ -1916,7 +1873,6 @@ TEST(Reductions, ReductionVectorizeInner) {
 }
 
 TEST(Reductions, ReductionVectorizeRfactor) {
-  KernelScope kernel_scope;
 
   std::vector<float> in_(8 * 8);
   for (int i = 0; i < 8; ++i) {
@@ -1983,7 +1939,6 @@ TEST(Reductions, ReductionVectorizeRfactor) {
 }
 
 TEST(Reductions, InitFunction) {
-  KernelScope ks;
   constexpr int M = 32;
   constexpr int N = 16;
   Placeholder A("A", kFloat, {M, N});

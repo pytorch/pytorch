@@ -20,7 +20,6 @@ std::unique_ptr<SimpleIREvaluator> compile(
 }
 
 TEST(Ops, Sum) {
-  KernelScope ks;
 
   std::vector<IntList> testDims = {{0}, {1}, {0, 1}};
   for (auto const& dims : testDims) {

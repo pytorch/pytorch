@@ -46,7 +46,6 @@ TEST(BoundsInference, _1) {
   //   b[i] = a[i]
   // For this loop bounds inference should yield the following:
   // {{b, kStore, 0, 99}, {a, kLoad, 0, 99}}
-  KernelScope kernel_scope;
   ExprHandle n(100);
   Placeholder a(BufHandle("a", {n}, kFloat));
   Tensor b =
@@ -71,7 +70,6 @@ TEST(BoundsInference, _2) {
   //   b[i] = a[i]
   // For this loop bounds inference should yield the following:
   // {{b, kStore, 0, n-1}, {a, kLoad, 0, n-1}}
-  KernelScope kernel_scope;
   VarHandle n("n", kInt);
   Placeholder a(BufHandle("a", {n}, kFloat));
   Tensor b =
@@ -96,7 +94,6 @@ TEST(BoundsInference, _3) {
   //   b[i] = a[i] * a[i+10]
   // For this loop bounds inference should yield the following:
   // {{b, kStore, 0, 99}, {a, kLoad, 0, 109}}
-  KernelScope kernel_scope;
   ExprHandle n(100);
   Placeholder a(BufHandle("a", {n + 10}, kFloat));
   Tensor b = Compute("b", {{n, "i"}}, [&](const VarHandle& i) {
@@ -125,7 +122,6 @@ TEST(BoundsInference, _4) {
   // for y in 0..200:
   //   for x in 0..320:
   //     c[y,x] = a[y,x] * b[y,x]
-  KernelScope kernel_scope;
   ExprHandle W(320);
   ExprHandle H(200);
   Placeholder a(BufHandle("a", {H, W}, kFloat));
@@ -205,7 +201,6 @@ TEST(BoundsInference, _5) {
   //     b[i_outer * 16 + i_inner] = a[i_outer * 16 + i_inner]
   // for i_tail in 0..100%16:
   //   b[i_tail + (100/16)*16] = a[i_tail + (100/16)*16];
-  KernelScope kernel_scope;
   ExprHandle n(100);
   Placeholder a(BufHandle("a", {n}, kFloat));
   Tensor b =
@@ -257,7 +252,6 @@ TEST(BoundsInference, _6) {
   // for y in 0..20:
   //   for x in 0..32:
   //     c[y,x] = a[y+100,x+100] * b[y*2,x*5]
-  KernelScope kernel_scope;
   ExprHandle W(320);
   ExprHandle H(200);
   ExprHandle CW(32);
@@ -328,7 +322,6 @@ TEST(BoundsInference, _6) {
 }
 
 TEST(BoundsInference, Adjacent) {
-  KernelScope kernel_scope;
   ExprHandle H(6);
   Placeholder a(BufHandle("a", {20}, kFloat));
   Tensor b =
@@ -388,7 +381,6 @@ TEST(BoundsInference, Adjacent) {
 }
 
 TEST(BoundsInference, MultipleTopLoopLoad) {
-  KernelScope kernel_scope;
   Placeholder a(BufHandle("a", {100}, kFloat));
   Tensor b =
       Compute("b", {{64, "x"}}, [&](const VarHandle& x) { return a.load(x); });
@@ -444,7 +436,6 @@ TEST(BoundsInference, MultipleTopLoopLoad) {
 }
 
 TEST(BoundsInference, MultipleTopLoopStore) {
-  KernelScope kernel_scope;
   BufHandle a("a", {100}, kFloat);
   BufHandle b("b", {100}, kFloat);
   BufHandle c("c", {100}, kFloat);
@@ -504,7 +495,6 @@ TEST(BoundsInference, MultipleTopLoopStore) {
 }
 
 TEST(BoundsInference, CacheReads) {
-  KernelScope kernel_scope;
 
   Tensor A = Compute(
       "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
@@ -570,7 +560,6 @@ TEST(BoundsInference, CacheReads) {
 }
 
 TEST(BoundsInference, Flattened) {
-  KernelScope kernel_scope;
   Tensor b = Compute(
       "b",
       {{3, "z"}, {4, "y"}, {5, "x"}},
@@ -597,7 +586,6 @@ TEST(BoundsInference, Flattened) {
 }
 
 TEST(BoundsInference, GetPotentialHazards) {
-  KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
   BufHandle b("B", {5}, kInt);
   BufHandle c("C", {5}, kInt);
@@ -649,7 +637,6 @@ TEST(BoundsInference, GetPotentialHazards) {
 }
 
 TEST(BoundsInference, GetPotentialHazardsLoopNoHazard) {
-  KernelScope kernel_scope;
 
   Tensor A = Compute(
       "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
@@ -677,7 +664,6 @@ TEST(BoundsInference, GetPotentialHazardsLoopNoHazard) {
 }
 
 TEST(BoundsInference, GetPotentialHazardsLoopCall) {
-  KernelScope kernel_scope;
 
   Tensor A = Compute(
       "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
@@ -704,7 +690,6 @@ TEST(BoundsInference, GetPotentialHazardsLoopCall) {
 }
 
 TEST(BoundsInference, GetPotentialHazardsLoopSplit) {
-  KernelScope kernel_scope;
 
   Tensor A = Compute(
       "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
@@ -731,7 +716,6 @@ TEST(BoundsInference, GetPotentialHazardsLoopSplit) {
 }
 
 TEST(BoundsInference, HasConflictingOverlapSameBufferWithPartialOverlap) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int j = 10; j < 100; j++) {
@@ -755,7 +739,6 @@ TEST(BoundsInference, HasConflictingOverlapSameBufferWithPartialOverlap) {
 }
 
 TEST(BoundsInference, HasConflictingOverlapSameBufferWithFullOverlap) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int j = 10; j < 100; j++) {
@@ -778,7 +761,6 @@ TEST(BoundsInference, HasConflictingOverlapSameBufferWithFullOverlap) {
 }
 
 TEST(BoundsInference, HasConflictingOverlapSameBufferWithFullOverlapRAW) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int j = 10; j < 100; j++) {
@@ -803,7 +785,6 @@ TEST(BoundsInference, HasConflictingOverlapSameBufferWithFullOverlapRAW) {
 }
 
 TEST(BoundsInference, HasConflictingOverlapSameBufferNotOverlapping) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int j = 10; j < 100; j++) {
@@ -827,7 +808,6 @@ TEST(BoundsInference, HasConflictingOverlapSameBufferNotOverlapping) {
 }
 
 TEST(BoundsInference, HasConflictingOverlap2DBufferWithOverlap) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
@@ -868,7 +848,6 @@ TEST(BoundsInference, HasConflictingOverlap2DBufferWithOverlap) {
 }
 
 TEST(BoundsInference, HasConflictingOverlap2DBufferWithNoOverlap) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
@@ -909,7 +888,6 @@ TEST(BoundsInference, HasConflictingOverlap2DBufferWithNoOverlap) {
 }
 
 TEST(BoundsInference, HasConflictingOverlapDifferentBuffers) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
@@ -949,7 +927,6 @@ TEST(BoundsInference, HasConflictingOverlapDifferentBuffers) {
 }
 
 TEST(BoundsInference, HasConflictingOverlapDueToRAWDependence) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int j = 0; j < 100; j++) {
@@ -978,7 +955,6 @@ TEST(BoundsInference, HasConflictingOverlapDueToRAWDependence) {
 }
 
 TEST(BoundsInference, HasConflictingOverlapDueToWARDependence) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int k = 0; k < 100; k++) {
@@ -1007,7 +983,6 @@ TEST(BoundsInference, HasConflictingOverlapDueToWARDependence) {
 }
 
 TEST(BoundsInference, HasConflictingOverlapWithLoads) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int k = 10; k < 100; k++) {
@@ -1041,7 +1016,6 @@ TEST(BoundsInference, HasConflictingOverlapWithLoads) {
 }
 
 TEST(BoundsInference, IsOverlapping) {
-  KernelScope kernel_scope;
 
   // Input IR:
   //   for (int i = 0; i < 100; i++) {
