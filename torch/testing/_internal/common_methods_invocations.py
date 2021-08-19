@@ -3264,6 +3264,37 @@ def sample_inputs_linalg_solve(op_info, device, dtype, requires_grad=False, vect
         out.append(SampleInput(a, args=(b,)))
     return out
 
+def sample_inputs_linalg_triangular_solve(op_info, device, dtype, requires_grad=False, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device)
+    bs = (1, 2, 0)
+    ns = (3, 0)
+    ks = (1, 3, 0)
+
+    def gen_inputs():
+        for b, n, k in itertools.chain(product(bs, ns, ks)):
+            for left, upper, uni in product((True, False), repeat=3):
+                with torch.no_grad():
+                    if b == 1:
+                        A = make_arg((n, n)) if left else make_arg((k, k))
+                        B = make_arg((n, k))
+                    else:
+                        A = make_arg((b, n, n)) if left else make_arg((b, k, k))
+                        B = make_arg((b, n, k))
+                    if uni:
+                        # Not really necessary, but writing it for consistency
+                        A.diagonal(0, -2, -1).fill_(1.)
+                    else:
+                        d = A.diagonal(0, -2, -1)
+                        d[d.abs() < 1e-6] = 1.
+                    if upper:
+                        A.triu_()
+                    else:
+                        A.tril_()
+                A.requires_grad_(requires_grad)
+                B.requires_grad_(requires_grad)
+                yield SampleInput(A, args=(B,), kwargs={"left": left, "upper": upper, "unitriangular": uni})
+
+    return list(gen_inputs())
 
 def sample_inputs_legacy_solve(op_info, device, dtype, requires_grad=False, **kwargs):
     """
@@ -5331,7 +5362,7 @@ def gradcheck_wrapper_triangular_input(op, input, *args, upper=False, **kwargs):
     They require a modified function because the finite-difference algorithm
     for calculating derivatives does not preserve the triangular property of the input.
     """
-    return op(input.triu() if upper else input.tril(), upper)
+    return op(input.triu() if upper else input.tril(), *args, upper=upper, **kwargs)
 
 
 # Operator database (sorted alphabetically)
@@ -7757,6 +7788,16 @@ op_db: List[OpInfo] = [
            check_batched_gradgrad=False,
            supports_forward_ad=True,
            decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack]),
+    OpInfo('linalg.triangular_solve',
+           aten_name='linalg_triangular_solve',
+           op=torch.linalg.triangular_solve,
+           dtypes=floating_and_complex_types(),
+           sample_inputs_func=sample_inputs_linalg_triangular_solve,
+           # linalg.triangular_solve cannot be batched over because of a call to out.copy_(result);
+           check_batched_grad=False,
+           check_batched_gradgrad=False,
+           supports_forward_ad=True,
+           decorators=[skipCUDAIfRocm, skipCPUIfNoLapack]),
     OpInfo('linalg.matrix_rank',
            aten_name='linalg_matrix_rank',
            dtypes=floating_and_complex_types(),

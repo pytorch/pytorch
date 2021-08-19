@@ -6675,6 +6675,17 @@
   dispatch:
     CPU, CUDA: triangular_solve
 
+- func: linalg_triangular_solve.out(Tensor self, Tensor B, *, bool left=True, bool upper=True, bool unitriangular=False, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
+  dispatch:
+    CPU, CUDA: linalg_triangular_solve_out
+
+- func: linalg_triangular_solve(Tensor self, Tensor B, *, bool left=True, bool upper=True, bool unitriangular=False) -> Tensor
+  python_module: linalg
+  variants: method, function
+  dispatch:
+    CPU, CUDA: linalg_triangular_solve
+
 - func: symeig.e(Tensor self, bool eigenvectors=False, bool upper=True, *, Tensor(a!) e, Tensor(b!) V) -> (Tensor(a!) eigenvalues, Tensor(b!) eigenvectors)
   dispatch:
     CompositeExplicitAutograd: symeig_out
