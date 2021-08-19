@@ -90,6 +90,13 @@ void addmm_out_sparse_csr(
         cudaDataType compute_type = at::cuda::getCudaDataType<scalar_t>();
         auto handle = at::cuda::getCurrentCUDASparseHandle();
 
+#if defined(CUDA_VERSION) && CUDA_VERSION < 11000
+        auto algorithm = CUSPARSE_MM_ALG_DEFAULT;
+#else
+        // TODO: update this to support COO sparse layout
+        auto algorithm = CUSPARSE_SPMM_CSR_ALG2;
+#endif
+
         size_t buffer_size;
         TORCH_CUDASPARSE_CHECK(cusparseSpMM_bufferSize(
             handle,
@@ -101,7 +108,7 @@ void addmm_out_sparse_csr(
             &beta_,
             descC.descriptor(),
             compute_type,
-            CUSPARSE_SPMM_CSR_ALG2, // TODO: update this to support COO sparse layout
+            algorithm,
             &buffer_size // output
             ));
 
@@ -118,7 +125,7 @@ void addmm_out_sparse_csr(
             &beta_,
             descC.descriptor(),
             compute_type,
-            CUSPARSE_SPMM_CSR_ALG2, // TODO: update this to support COO sparse layout
+            algorithm,
             work_data.get()));
       });
 

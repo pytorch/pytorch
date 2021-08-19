@@ -19,24 +19,28 @@ namespace {
 // If a specific GPU model does not provide native support for a given data
 // type, cuSparse routines return CUSPARSE_STATUS_ARCH_MISMATCH error
 void check_supported_cuda_type(cudaDataType cuda_type) {
-  if (cuda_type == CUDA_R_16F || cuda_type == CUDA_R_16BF) {
+  if (cuda_type == CUDA_R_16F) {
     cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
     TORCH_CHECK(
-        prop->major >= 5 &&
-            !(cuda_type == CUDA_R_16F && (10 * prop->major + prop->minor) < 53),
+        prop->major >= 5 && ((10 * prop->major + prop->minor) >= 53),
         "Sparse operations with CUDA tensors of Float16 type are not supported on GPUs with compute capability < 5.3 (current: ",
         prop->major,
         ".",
         prop->minor,
         ")");
+  }
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+  if (cuda_type == CUDA_R_16BF) {
+    cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
     TORCH_CHECK(
-        !(cuda_type == CUDA_R_16BF && prop->major < 8),
+        prop->major >= 8,
         "Sparse operations with CUDA tensors of BFloat16 type are not supported on GPUs with compute capability < 8.0 (current: ",
         prop->major,
         ".",
         prop->minor,
         ")");
   }
+#endif
 }
 
 } // anonymous namespace
@@ -166,6 +170,7 @@ class TORCH_CUDA_CPP_API CuSparseSpMatCsrDescriptor
         value_type // data type of values
         ));
 
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
     if (ndim > 2) {
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
           at::native::batchCount(input) == at::native::batchCount(values));
@@ -182,6 +187,7 @@ class TORCH_CUDA_CPP_API CuSparseSpMatCsrDescriptor
           crow_indices_batch_stride,
           columns_values_batch_stride));
     }
+#endif
 
     descriptor_.reset(raw_descriptor);
   }
