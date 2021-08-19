@@ -82,6 +82,6 @@ def annotate_ops(ops, is_unique):
 categorization = annotate_ops(uniq_ops, True)
 categorization = annotate_ops(ops, False)
 
-for op in ops:
+for op in sorted(ops):
     info = [op['full_name'], op['meta'], not (op['full_name'] in noncomposite_ops), op['full_name'] in vmap_ops]
     print(','.join([str(i) for i in info]))
