@@ -189,6 +189,11 @@ def get_closure(fn):
         try:
             captures[captured_name] = fn.__closure__[index].cell_contents
         except ValueError:
+            # access to cell_contents raises if it's empty. The only time this
+            # happens is when @torch.jit.script is used as decorator to a
+            # class, and inside of some methods refers that class by name.
+            # Python preallocates a cell and fill it with what the decorator returns,
+            # so it's empty while torch.jit.script is running.
             pass
 
     return captures
