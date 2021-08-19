@@ -98,8 +98,7 @@ _compare_return_type = Tuple[bool, Optional[str]]
 #   the complex will be compared in the relaxed mode:
 #       2 + nan j == 3 + nan j ---> False when equal_nan=True
 #                                   True when equal_nan="relaxed"
-def _compare_tensors_internal(a: torch.Tensor, b: torch.Tensor, *, rtol, atol, equal_nan: Union[str, bool]) -> _compare_return_type:
-    assert equal_nan in {True, False, "relaxed"}
+def _compare_tensors_internal(a: torch.Tensor, b: torch.Tensor, *, rtol, atol, equal_nan) -> _compare_return_type:
     debug_msg : Optional[str]
     # Integer (including bool) comparisons are identity comparisons
     # when rtol is zero and atol is less than one
@@ -129,35 +128,6 @@ def _compare_tensors_internal(a: torch.Tensor, b: torch.Tensor, *, rtol, atol, e
                                    b_flat[greatest_diff_index],
                                    _unravel_index(greatest_diff_index, a.shape)))
         return (False, debug_msg)
-
-    # Compares complex tensors' real and imaginary parts separately.
-    # (see NOTE Test Framework Tensor "Equality")
-    if a.is_complex():
-        if equal_nan == "relaxed":
-            a = a.clone()
-            b = b.clone()
-            a.real[a.imag.isnan()] = math.nan
-            a.imag[a.real.isnan()] = math.nan
-            b.real[b.imag.isnan()] = math.nan
-            b.imag[b.real.isnan()] = math.nan
-
-        real_result, debug_msg = _compare_tensors_internal(a.real, b.real,
-                                                           rtol=rtol, atol=atol,
-                                                           equal_nan=equal_nan)
-
-        if not real_result:
-            debug_msg = "Real parts failed to compare as equal! " + cast(str, debug_msg)
-            return (real_result, debug_msg)
-
-        imag_result, debug_msg = _compare_tensors_internal(a.imag, b.imag,
-                                                           rtol=rtol, atol=atol,
-                                                           equal_nan=equal_nan)
-
-        if not imag_result:
-            debug_msg = "Imaginary parts failed to compare as equal! " + cast(str, debug_msg)
-            return (imag_result, debug_msg)
-
-        return (True, None)
 
     # All other comparisons use torch.allclose directly
     if torch.allclose(a, b, rtol=rtol, atol=atol, equal_nan=(equal_nan in {"relaxed", True})):

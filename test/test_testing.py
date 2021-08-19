@@ -420,14 +420,6 @@ class TestTesting(TestCase):
             (complex(float('nan'), float('nan')), complex(float('nan'), float('nan')), True),
         )
         self._isclose_helper(tests, device, dtype, True)
-
-        tests = (
-            (complex(1, 1), complex(1, float('nan')), False),
-            (complex(1, 1), complex(float('nan'), 1), False),
-            (complex(float('nan'), 1), complex(float('nan'), 1), True),
-            (complex(float('nan'), 1), complex(1, float('nan')), False),
-            (complex(float('nan'), float('nan')), complex(float('nan'), float('nan')), True),
-        )
         self._comparetensors_helper(tests, device, dtype, True)
 
     # Tests that isclose with rtol or atol values less than zero throws a
