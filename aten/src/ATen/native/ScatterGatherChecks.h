@@ -35,44 +35,40 @@ static void scatter_gather_dtype_check(
 // 1. index.size(d) == self.size(d) for all d != dim
 // 2. index.size(d) <= src.size(d) for all d != dim
 // 3. index.dim() == self.dim() == src.dim()
-static C10_UNUSED void gather_shape_check(const Tensor& self, int64_t dim,
-  const Tensor& index, const c10::optional<Tensor>& out_opt = c10::nullopt
+//const c10::optional<Tensor>& src_opt = c10::nullopt
+static C10_UNUSED void gather_shape_check(const Tensor& src, int64_t dim,
+  const Tensor& index
 ) {
-  auto self_dims = ensure_nonempty_dim(self.dim());
-  TORCH_CHECK(self_dims == ensure_nonempty_dim(index.dim()),
+  /* auto self_dims = ensure_nonempty_dim(self.dim()); */
+  /* TORCH_CHECK(self_dims == ensure_nonempty_dim(index.dim()), */
+  /*   "Index tensor must have the same number of dimensions as out tensor" */
+  /* ); */
+
+  auto src_dims = ensure_nonempty_dim(src.dim());
+  TORCH_CHECK(src_dims == ensure_nonempty_dim(index.dim()),
     "Index tensor must have the same number of dimensions as input tensor"
   );
 
-  if (out_opt.has_value()) {
-    auto out = out_opt.value();
-    auto out_dims = ensure_nonempty_dim(out.dim());
-    TORCH_CHECK(out_dims == ensure_nonempty_dim(index.dim()),
-      "Index tensor must have the same number of dimensions as out tensor"
-    );
-  }
-
-  for (int64_t i = 0; i < self_dims; ++i) {
+  for (int64_t i = 0; i < src_dims; ++i) {
     if (i != dim) {
       TORCH_CHECK(
-        ensure_nonempty_size(index, i) <= ensure_nonempty_size(self, i),
+        ensure_nonempty_size(index, i) <= ensure_nonempty_size(src, i),
         "Size does not match at dimension ", i,
         " expected index ", index.sizes(),
-        " to be smaller than src ", self.sizes(),
+        " to be smaller than src ", src.sizes(),
         " apart from dimension ", dim
       );
 
-      if (out_opt.has_value()) {
-        auto out = out_opt.value();
-        TORCH_CHECK(
-          ensure_nonempty_size(index, i) == ensure_nonempty_size(out, i),
-          "Size does not match at dimension ", i,
-          " get ", ensure_nonempty_size(out, i),
-          " vs ", ensure_nonempty_size(index, i)
-        );
-      }
+      /* TORCH_CHECK( */
+      /*   ensure_nonempty_size(index, i) <= ensure_nonempty_size(src, i), */
+      /*   "Size does not match at dimension ", i, */
+      /*   " get ", ensure_nonempty_size(src, i), */
+      /*   " vs ", ensure_nonempty_size(index, i) */
+      /* ); */
     }
   }
 }
+
 // Used for `scatter` and `scatter_add`
 // Tests:
 //  1. index.size(d) <= self.size(d) for all d != dim

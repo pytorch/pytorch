@@ -85,20 +85,18 @@ native::SCATTER_GATHER_OP get_operator_enum(const c10::string_view reduce) {
 
 TORCH_META_FUNC(gather)
 (const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
-  const Tensor& result = maybe_get_output();
+  const Tensor& result = maybe_get_output(0);
   int64_t wrapped_dim = at::maybe_wrap_dim(dim, self.dim());
+
   if (result.defined()) {
     at::assert_no_internal_overlap(result);
     at::assert_no_overlap(result, self);
     at::assert_no_partial_overlap(result, index);
-    at::native::scatter_gather_dtype_check("gather", self, index, result);
-    at::native::gather_shape_check(self, wrapped_dim, index, result);
+    at::native::scatter_gather_dtype_check("gather", result, index, self);
   }
-  else {
-    at::native::scatter_gather_dtype_check("gather", self, index, c10::nullopt);
-    at::native::gather_shape_check(self, wrapped_dim, index, c10::nullopt);
-  }
+  at::native::gather_shape_check(self, wrapped_dim, index);
   set_output(index.sizes(), self.options());
+  at::native::scatter_gather_dtype_check("gather", result, index, self);
 }
 
 template <typename Meta>
