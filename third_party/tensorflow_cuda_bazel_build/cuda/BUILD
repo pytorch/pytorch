@@ -445,7 +445,7 @@ genrule(
         "include/cudnn.h",
     ],
     cmd = """
-        ln -s /usr/include/x86_64-linux-gnu/cudnn_v7.h $(@D)/cudnn.h""",
+        ln -s /usr/include/x86_64-linux-gnu/cudnn_v8.h $(@D)/cudnn.h""",
     local = True,
     tags = ["no-cache"],
 )
