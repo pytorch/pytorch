@@ -810,21 +810,22 @@ class BuildExtension(build_ext, object):
                         warnings.warn(f'There are no {compiler_name} version bounds defined for CUDA version {cuda_str_version}')
                     else:
                         min_compiler_version, max_compiler_version = cuda_compiler_bounds[cuda_str_version]
+                        min_compiler_version = '.'.join(map(str, min_compiler_version))
+                        max_compiler_version = '.'.join(map(str, max_compiler_version))
 
-                        version_bound_str = f'>={".".join(map(str, min_compiler_version))}'
-                        version_bound_str = f'{version_bound_str}, <={".".join(map(str, max_compiler_version))}'
+                        version_bound_str = f'>={min_compiler_version}'
+                        version_bound_str = f'{version_bound_str}, <={max_compiler_version}'
 
-                        print(compiler_version, min_compiler_version, max_compiler_version)
-                        if compiler_version < min_compiler_version:  # type: ignore[operator]
+                        if compiler_version < TorchVersion(min_compiler_version):
                             raise RuntimeError(
                                 f'The current installed version of {compiler_name} ({compiler_version}) is less '
                                 f'than the minimum required version by CUDA {cuda_str_version} ({min_compiler_version}). '
                                 f'Please make sure to use an adequate version of {compiler_name} ({version_bound_str}).'
                             )
-                        elif compiler_version > max_compiler_version:  # type: ignore[operator]
+                        elif compiler_version > TorchVersion(max_compiler_version):
                             raise RuntimeError(
                                 f'The current installed version of {compiler_name} ({compiler_version}) is greater '
-                                f'than the maximum required version by CUDA {cuda_str_version} ({min_compiler_version}). '
+                                f'than the maximum required version by CUDA {cuda_str_version} ({max_compiler_version}). '
                                 f'Please make sure to use an adequate version of {compiler_name} ({version_bound_str}).'
                             )
         else:
