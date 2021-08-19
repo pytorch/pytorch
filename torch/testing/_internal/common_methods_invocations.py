@@ -6,6 +6,7 @@ import copy
 import operator
 import random
 import numbers
+import unittest
 
 import torch
 import numpy as np
@@ -21,7 +22,7 @@ from torch.testing import \
      integral_types_and, all_types, double_types)
 from .._core import _dispatch_dtypes
 from torch.testing._internal.common_device_type import \
-    (expectedFailure, onlyOnCPUAndCUDA, skipIf, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfNoCusolver,
+    (onlyOnCPUAndCUDA, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfNoCusolver,
      skipCPUIfNoLapack, skipCPUIfNoFFT, skipCUDAIfRocm, precisionOverride, toleranceOverride, tol)
 from torch.testing._internal.common_cuda import CUDA11OrLater, SM53OrLater, SM60OrLater
 from torch.testing._internal.common_utils import \
@@ -95,7 +96,7 @@ class SkipInfo(DecorateInfo):
             active_if: whether tests matching the above arguments should be skipped
             expected_failure: whether to assert that skipped tests fail
         """
-        decorator = expectedFailure(device_type) if expected_failure else skipIf(True, "Skipped!")
+        decorator = unittest.expectedFailure if expected_failure else unittest.skip("Skipped!")
         super().__init__(decorators=decorator, cls_name=cls_name, test_name=test_name,
                          device_type=device_type, dtypes=dtypes, active_if=active_if)
 
@@ -5032,6 +5033,22 @@ def sample_inputs_softplus(op_info, device, dtype, requires_grad, **kwargs):
         SampleInput(make_input(low=1), kwargs=dict(threshold=1)),
     ]
 
+def sample_inputs_tensorinv(op_info, device, dtype, requires_grad, **kwargs):
+    def make_input():
+        input = make_fullrank_matrices_with_distinct_singular_values(12, 12, device=device, dtype=dtype)
+        return input.requires_grad_(requires_grad)
+
+    # lhs / rhs shape can have any number of dimensions as long as their product equals 12
+    shapes = [
+        ((2, 2, 3), (12, 1)),
+        ((4, 3), (6, 1, 2)),
+    ]
+
+    return [
+        SampleInput(make_input().reshape(*shape_lhs, *shape_rhs), kwargs=dict(ind=len(shape_lhs)))
+        for shape_lhs, shape_rhs in shapes
+    ]
+
 def sample_inputs_mse_loss(op_info, device, dtype, requires_grad, **kwargs):
     _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -8730,6 +8747,19 @@ op_db: List[OpInfo] = [
                 dtypes=(torch.float32,),
             ),
         ),
+    ),
+    OpInfo(
+        "linalg.tensorinv",
+        ref=np.linalg.tensorinv,
+        dtypes=floating_and_complex_types(),
+        skips=(
+            # RuntimeError: aliasOp != torch::jit::getOperatorAliasMap().end()
+            # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":159,
+            # please report a bug to PyTorch.
+            SkipInfo('TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
+        ),
+        sample_inputs_func=sample_inputs_tensorinv,
+        supports_forward_ad=True,
     ),
     OpInfo(
         "nn.functional.mse_loss",
