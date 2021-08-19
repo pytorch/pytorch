@@ -293,10 +293,10 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   UPSAMPLE_BATCH(upsample_bicubic2d);
   UPSAMPLE_BATCH(upsample_bilinear2d);
   UPSAMPLE_BATCH(upsample_linear1d);
-  UPSAMPLE_BATCH(unsample_nearest1d);
-  UPSAMPLE_BATCH(unsample_nearest2d);
-  UPSAMPLE_BATCH(unsample_nearest3d);
-  UPSAMPLE_BATCH(unsample_trilinear3d);
+  UPSAMPLE_BATCH(upsample_nearest1d);
+  UPSAMPLE_BATCH(upsample_nearest2d);
+  UPSAMPLE_BATCH(upsample_nearest3d);
+  UPSAMPLE_BATCH(upsample_trilinear3d);
 
   UPSAMPLE_BACKWARD(upsample_bicubic2d_backward, vec);
   UPSAMPLE_BACKWARD(upsample_bilinear2d_backward, vec);
