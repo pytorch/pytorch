@@ -27,6 +27,7 @@ Functions
 .. autofunction:: expm1
 .. autofunction:: exp2
 .. autofunction:: gammaln
+.. autofunction:: polygamma
 .. autofunction:: digamma
 .. autofunction:: psi
 .. autofunction:: i0
@@ -34,10 +35,14 @@ Functions
 .. autofunction:: i1
 .. autofunction:: i1e
 .. autofunction:: logit
+.. autofunction:: logsumexp
 .. autofunction:: log1p
+.. autofunction:: log_softmax
+.. autofunction:: multigammaln
 .. autofunction:: ndtr
 .. autofunction:: ndtri
 .. autofunction:: round
 .. autofunction:: sinc
 .. autofunction:: xlog1py
+.. autofunction:: xlogy
 .. autofunction:: zeta

@@ -16,8 +16,9 @@ coverage.xml
 .mypy_cache
 /.extracted_scripts/
 **/.pytorch_specified_test_cases.csv
-**/.pytorch-test-times.json
+**/.pytorch-disabled-tests.json
 **/.pytorch-slow-tests.json
+**/.pytorch-test-times.json
 */*.pyc
 */*.so*
 */**/__pycache__
@@ -283,8 +284,9 @@ TAGS
 # ccls file
 .ccls-cache/
 
-# clang-format storage location used by apply_clang_format.py
+# clang tooling storage location
 .clang-format-bin
+.clang-tidy-bin
 
 # clangd background index
 .clangd/
@@ -305,3 +307,9 @@ bazel-*
 
 # core dump files
 core.*
+
+# Generated if you use the pre-commit script for clang-tidy
+pr.diff
+
+# coverage files
+*/**/.coverage.*

@@ -58,6 +58,7 @@ class DispatchKey(Enum):
     FPGA = auto()
     MSNPU = auto()
     XLA = auto()
+    Lazy = auto()
     Vulkan = auto()
     Metal = auto()
     XPU = auto()
@@ -89,6 +90,7 @@ class DispatchKey(Enum):
     AutogradCPU = auto()
     AutogradCUDA = auto()
     AutogradXLA = auto()
+    AutogradLazy = auto()
     AutogradNestedTensor = auto()
     AutogradXPU = auto()
     AutogradPrivateUse1 = auto()
@@ -639,6 +641,15 @@ class BackendIndex:
         if f.func.name not in self.index:
             return None
         return self.index[f.func.name]
+
+    def native_function_class_name(self) -> Optional[str]:
+        if self.external:
+            return f'{str(self.dispatch_key)}NativeFunctions'
+        else:
+            # TODO: This discrepancy isn't required; we could also generated
+            # a class for in-tree kernels. It'll just require carefully
+            # updating every kernel definition + callsite of every in-tree aten kernel.
+            return None
 
 
 # The function schema is undoubtedly the most important data structure

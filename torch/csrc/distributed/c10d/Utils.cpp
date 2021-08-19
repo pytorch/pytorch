@@ -228,9 +228,13 @@ void handleConnectException(
     // timeout. A timeout is specified if timeout != kNoTimeout.
     if (timeout != kNoTimeout) {
       const auto elapsed = std::chrono::high_resolution_clock::now() - start;
-      if (elapsed > timeout) {
-        TORCH_CHECK(false, kConnectTimeoutMsg);
-      }
+      TORCH_CHECK(
+          elapsed <= timeout,
+          c10::str(
+              kConnectTimeoutMsg,
+              " Original timeout was ",
+              timeout.count(),
+              " ms."));
     }
     std::this_thread::sleep_for(std::chrono::seconds(1));
     *anyRefused = false;

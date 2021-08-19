@@ -2,7 +2,7 @@ from .node import Node, Argument, Target, map_arg, _type_repr, _get_qualified_na
 import torch.utils._pytree as pytree
 from . import _pytree as fx_pytree
 
-from typing import TYPE_CHECKING, Callable, Any, List, Dict, NamedTuple, Optional, Tuple, Set, FrozenSet
+from typing import TYPE_CHECKING, Callable, Any, List, Dict, NamedTuple, Optional, Tuple, Set, FrozenSet, Type
 from dataclasses import dataclass
 from contextlib import contextmanager
 import copy
@@ -16,6 +16,7 @@ import warnings
 
 if TYPE_CHECKING:
     from .graph_module import GraphModule  # noqa: F401
+    from ._symbolic_trace import Tracer   # noqa: F401
 
 
 # Mapping of builtins to their `typing` equivalent.
@@ -282,7 +283,7 @@ class Graph:
 
     For the semantics of operations represented in the ``Graph``, please see :class:`Node`.
     """
-    def __init__(self, owning_module: Optional["GraphModule"] = None):
+    def __init__(self, owning_module: Optional["GraphModule"] = None, tracer_cls: Optional[Type["Tracer"]] = None):
         """
         Construct an empty Graph.
         """
@@ -293,6 +294,7 @@ class Graph:
         self._graph_namespace = _Namespace()
         self._owners = 0
         self._owning_module = owning_module
+        self._tracer_cls = tracer_cls
         self._pytree_info: Optional[_PyTreeInfo] = None
 
     @property
@@ -320,7 +322,7 @@ class Graph:
         """
         return _node_list(self)
 
-    def graph_copy(self, g : 'Graph', val_map : Dict[Node, Node]) -> 'Optional[Argument]':
+    def graph_copy(self, g : 'Graph', val_map : Dict[Node, Node], return_output_node=False) -> 'Optional[Argument]':
         """
         Copy all nodes from a given graph into ``self``.
 
@@ -342,7 +344,7 @@ class Graph:
                 continue
             if node.op == 'output':
                 rv = map_arg(node.args[0], lambda n: val_map[n])
-                return rv
+                return rv if not return_output_node else (rv, node)
             val_map[node] = self.node_copy(node, lambda n : val_map[n])
         return None
 
@@ -355,9 +357,11 @@ class Graph:
         nodes or other parts of the Graph from a custom GraphModule implementation
         """
         memo = memo if memo else {}
-        g = Graph()
-        output_val = g.graph_copy(self, val_map=memo)
-        g.output(output_val)
+        g = Graph(tracer_cls=self._tracer_cls)
+        output_vals = g.graph_copy(self, val_map=memo, return_output_node=True)
+        assert isinstance(output_vals, tuple)
+        output_val, old_output_val = output_vals
+        g.output(output_val, type_expr=getattr(old_output_val, 'type', None))
         return g
 
     def create_node(self, op: str, target: 'Target',
@@ -603,7 +607,7 @@ class Graph:
             as :meth:`Graph.create_node`.
         """
         if (self.owning_module and
-                self.owning_module.get_submodule(module_name) is not None):
+                self.owning_module.get_submodule(module_name) is None):
             warnings.warn("Attempted to insert a call_module Node with "
                           "no underlying reference in the owning "
                           "GraphModule! Call "

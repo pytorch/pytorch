@@ -5,6 +5,7 @@
 #include <torch/csrc/Types.h>
 
 typedef std::function<void(PyObject*, PyObject*, bool)> THPCopyFunction;
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct THPCopyInfo {
   PyTypeObject* srcType;  // Python type of src tensor/storage
   THPCopyFunction copy;   // copy function

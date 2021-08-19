@@ -6,13 +6,11 @@
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/util/Optional.h>
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(
     caffe2_keep_on_shrink,
     true,
     "If set, keeps memory when a tensor is shrinking its size.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int64(
     caffe2_max_keep_on_shrink_memory,
     LLONG_MAX,
@@ -449,8 +447,7 @@ at::DataPtr PlacementDeleteContext::makeDataPtr(
       device};
 }
 
-// NOLINTNEXTLINE(modernize-use-equals-default)
-AutogradMetaInterface::~AutogradMetaInterface() {}
+AutogradMetaInterface::~AutogradMetaInterface() = default;
 
 // Setting requires_grad to true on inference tensor outside InferenceMode
 // is forbidden.  Ideally it would also be illegal inside InferenceMode.
@@ -614,7 +611,6 @@ void TensorImpl::copy_tensor_metadata(
 namespace impl {
 
 namespace {
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 AutogradMetaFactory* meta_factory = nullptr;
 } // namespace
 

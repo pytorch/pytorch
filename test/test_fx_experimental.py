@@ -568,7 +568,7 @@ class TestFXExperimental(JitTestCase):
             node_to_partition_id = {}
             partition_to_logical_devices = {}
             count = 0
-            GraphManipulation.get_size_of_all_nodes(traced, [a])
+            graph_manipulation.get_size_of_all_nodes(traced, [a])
             for node in traced.graph.nodes:
                 if node.op not in {"placeholder", "get_attr", "output"}:
                     node_to_partition_id[node] = count
@@ -1467,6 +1467,7 @@ class TestNormalizeOperators(JitTestCase):
             "gradient",
             "index_put",
             "polygamma",
+            "special.polygamma",
             "repeat",
             "reshape_as",
             "resize_",
@@ -1485,6 +1486,9 @@ class TestNormalizeOperators(JitTestCase):
             "__rdiv__",
             "__rmod__",
             "__rpow__",
+            '__rand__',
+            '__ror__',
+            '__rxor__',
             "__rmatmul__",
         }
 

@@ -10,7 +10,6 @@ from .overrides import (
     handle_torch_function)
 from ._jit_internal import boolean_dispatch, List
 from ._jit_internal import _overload as overload
-from torch._autograd_functions import _LU
 
 Tensor = torch.Tensor
 from torch import _VF
@@ -926,6 +925,12 @@ def tensordot(a, b, dims=2, out: Optional[torch.Tensor] = None):  # noqa: F811
     if has_torch_function_variadic(a, b):
         return handle_torch_function(tensordot, (a, b), a, b, dims=dims)
 
+    if not isinstance(dims, (tuple, list, torch.Tensor, int)):
+        raise RuntimeError("tensordot expects dims to be int or "
+                           + "Tuple[List[int], List[int]] or "
+                           + "List[List[int]] containing two lists, but got "
+                           + f"dims={dims}")
+
     dims_a: List[int] = []
     dims_b: List[int] = []
 
@@ -950,9 +955,6 @@ def tensordot(a, b, dims=2, out: Optional[torch.Tensor] = None):  # noqa: F811
             raise RuntimeError(f"tensordot expects dims >= 0, but got dims={dims}")
         dims_a = list(range(-dims, 0))
         dims_b = list(range(dims))
-
-    if len(dims_a) == 0 or len(dims_b) == 0:
-        raise RuntimeError(f"unsupported input to tensordot, got dims={dims}")
 
     if out is None:
         return _VF.tensordot(a, b, dims_a, dims_b)  # type: ignore[attr-defined]
@@ -1237,6 +1239,8 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
     .. warning::
 
         torch.norm is deprecated and may be removed in a future PyTorch release.
+        Its documentation and behavior may be incorrect, and it is no longer
+        actively maintained.
 
         Use :func:`torch.linalg.norm`, instead, or :func:`torch.linalg.vector_norm`
         when computing vector norms and :func:`torch.linalg.matrix_norm` when
@@ -1439,31 +1443,27 @@ def _lu_impl(A, pivot=True, get_infos=False, out=None):
     ``True``.
 
     .. note::
-        The pivots returned by the function are 1-indexed. If :attr:`pivot` is ``False``,
-        then the returned pivots is a tensor filled with zeros of the appropriate size.
-
-    .. note::
-        LU factorization with :attr:`pivot` = ``False`` is not available for CPU, and attempting
-        to do so will throw an error. However, LU factorization with :attr:`pivot` = ``False`` is
-        available for CUDA.
-
-    .. note::
-        This function does not check if the factorization was successful or not if
-        :attr:`get_infos` is ``True`` since the status of the factorization is present in the
-        third element of the return tuple.
-
-    .. note::
-        In the case of batches of square matrices with size less or
-        equal to 32 on a CUDA device, the LU factorization is repeated
-        for singular matrices due to the bug in the MAGMA library (see
-        magma issue 13).
-
-    .. note::
-       ``L``, ``U``, and ``P`` can be derived using :func:`torch.lu_unpack`.
+        * The pivots returned by the function are 1-indexed. If :attr:`pivot`
+          is ``False``, then the returned pivots is a tensor filled with
+          zeros of the appropriate size.
+        * LU factorization with :attr:`pivot` = ``False`` is not available
+          for CPU, and attempting to do so will throw an error. However,
+          LU factorization with :attr:`pivot` = ``False`` is available for
+          CUDA.
+        * This function does not check if the factorization was successful
+          or not if :attr:`get_infos` is ``True`` since the status of the
+          factorization is present in the third element of the return tuple.
+        * In the case of batches of square matrices with size less or equal
+          to 32 on a CUDA device, the LU factorization is repeated for
+          singular matrices due to the bug in the MAGMA library
+          (see magma issue 13).
+        * ``L``, ``U``, and ``P`` can be derived using :func:`torch.lu_unpack`.
 
     .. warning::
-        The LU factorization does have backward support,
-        but only for square inputs of full rank.
+        The gradients of this function will only be finite when :attr:`A` is full rank.
+        This is because the LU decomposition is just differentiable at full rank matrices.
+        Furthermore, if :attr:`A` is close to not being full rank,
+        the gradient will be numerically unstable as it depends on the computation of :math:`L^{-1}` and :math:`U^{-1}`.
 
     Args:
         A (Tensor): the tensor to factor of size :math:`(*, m, n)`
@@ -1511,23 +1511,6 @@ def _lu_impl(A, pivot=True, get_infos=False, out=None):
         ...   print('LU factorization succeeded for all samples!')
         LU factorization succeeded for all samples!
     """
-    if not torch._jit_internal.is_scripting():
-        if A.requires_grad:
-            if not (A.size(-2) == A.size(-1) and (A.dtype.is_floating_point or A.is_complex)):
-                raise ValueError(
-                    'lu.backward works only with batches of squared full-rank matrices'
-                    ' of floating or complex types.'
-                )
-
-            return _LU.apply(A, pivot, get_infos)
-    else:
-        if A.requires_grad:
-            raise RuntimeError(
-                'Script and require gradients is not supported at the moment.'
-                'If you just want to do the forward, use .detach()'
-                'on the input before calling the function.'
-            )
-
     # If get_infos is True, then we don't need to check for errors and vice versa
     return torch._lu_with_info(A, pivot=pivot, check_errors=(not get_infos))
 

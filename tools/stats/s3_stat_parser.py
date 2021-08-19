@@ -48,6 +48,7 @@ class ReportMetaMeta(TypedDict):
     build_branch: str
     build_job: str
     build_workflow_id: str
+    build_start_time_epoch: str
 
 
 class ReportMeta(ReportMetaMeta):

@@ -4,11 +4,9 @@
 namespace caffe2 {
 namespace {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(BBoxTransform, BBoxTransformOp<float, CPUContext>);
 
 // Input: box, delta Output: box
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(BBoxTransform)
     .NumInputs(3)
     .NumOutputs(1, 2)
@@ -79,7 +77,6 @@ Transform proposal bounding boxes to target bounding box using bounding box
         "Tensor of shape (batch_size) with each element denoting the number "
         "of RoIs belonging to the corresponding image in batch");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(BBoxTransform);
 } // namespace
 

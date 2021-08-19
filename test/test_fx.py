@@ -14,7 +14,6 @@ import traceback
 import warnings
 import unittest
 from math import sqrt
-from pathlib import Path
 from torch.multiprocessing import Process
 from torch.testing import FileCheck
 from torch.testing._internal.common_methods_invocations import op_db
@@ -29,15 +28,28 @@ from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.fx.experimental.rewriter import RewritingTracer
 from torch.fx.operator_schemas import get_signature_for_torch_op
 from copy import deepcopy
+from collections import namedtuple
 
 from torch.fx.proxy import TraceError
 
 from fx.test_subgraph_rewriter import TestSubgraphRewriter  # noqa: F401
 from fx.test_dce_pass import TestDCE  # noqa: F401
 from fx.test_fx_const_fold import TestConstFold  # noqa: F401
+from fx.test_fx_param_shape_control_flow import TestConstParamShapeInControlFlow  # noqa: F401
 
+if sys.version_info >= (3, 7):
+    from fx.test_gradual_type import AnnotationsTest  # noqa: F401
+if sys.version_info >= (3, 7):
+    from fx.test_gradual_type import TypeCheckerTest  # noqa: F401
 from typing import Any, Callable, Dict, NamedTuple, List, Optional, Tuple, Union
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_ROCM, IS_WINDOWS, IS_SANDCASTLE, IS_MACOS
+from torch.testing._internal.common_utils import (
+    IS_FBCODE,
+    IS_MACOS,
+    IS_WINDOWS,
+    TEST_WITH_ROCM,
+    find_library_location,
+    run_tests,
+)
 from torch.testing._internal.jit_utils import JitTestCase
 
 from fx.named_tup import MyNamedTup
@@ -55,6 +67,17 @@ class SimpleTest(torch.nn.Module):
 
 def a_non_torch_leaf(a, b):
     return a + b
+
+# Used for test_autowrap_function. Autowrapped functions need to be global
+def fx_int(x: float) -> int:
+    return int(x)
+
+def fx_int_x2(x: float) -> int:
+    return int(x) * 2
+
+# used in test_pytree. It's all the way out here because pickling a GraphModule
+# that uses Point errors out if Point is local to the function
+Point = namedtuple('Point', ['x', 'y'])
 
 # Test wrap() passing both a function name as well as a function
 # directly
@@ -104,11 +127,10 @@ class Foo(object):  # noqa: B209
 
 class TestFX(JitTestCase):
     def setUp(self):
-        if TEST_WITH_ROCM or IS_SANDCASTLE or IS_WINDOWS or IS_MACOS:
+        if TEST_WITH_ROCM or IS_FBCODE or IS_WINDOWS or IS_MACOS:
             return
-        torch_root = Path(__file__).resolve().parent.parent
-        p = torch_root / 'build' / 'lib' / 'libtorchbind_test.so'
-        torch.ops.load_library(str(p))
+        lib_file_path = find_library_location('libtorchbind_test.so')
+        torch.ops.load_library(str(lib_file_path))
 
     def checkGraphModule(self, m: torch.nn.Module, args, kwargs=None):
         """Check that an nn.Module's results match the GraphModule version
@@ -433,7 +455,7 @@ class TestFX(JitTestCase):
         self.checkGraphModule(m, (a, b))
 
     def test_native_callable(self):
-        if TEST_WITH_ROCM or IS_SANDCASTLE or IS_WINDOWS or IS_MACOS:
+        if TEST_WITH_ROCM or IS_FBCODE or IS_WINDOWS or IS_MACOS:
             raise unittest.SkipTest("non-portable load_library call used in test")
         # This test exercises the case where we use FX to translate from Python
         # code to some native callable object
@@ -757,6 +779,19 @@ class TestFX(JitTestCase):
         copied = copy.deepcopy(traced)
         copied.graph.lint()
 
+    def test_deepcopy_graph_with_tracer_cls(self):
+        class TestTracer(Tracer):
+            def is_leaf_module(self, module, name):
+                return True
+
+        g = Graph(tracer_cls=TestTracer)
+        x = g.placeholder("x")
+        g.output(x)
+
+        h = copy.deepcopy(g)
+        self.assertIsNotNone(h._tracer_cls)
+        self.assertTrue(g._tracer_cls == h._tracer_cls)
+
     def test_unpack_list_better_error(self):
         class SomeArgs(torch.nn.Module):
             def forward(self, a, b):
@@ -840,6 +875,27 @@ class TestFX(JitTestCase):
 
         traced = torch.fx.symbolic_trace(IHaveATensorConstant())
         torch.jit.script(traced)
+
+    def test_autowrap_functions(self):
+        class AutowrapFnTest(torch.nn.Module):
+            def forward(self, x):
+                return fx_int(x.shape[0] / 2)
+
+        class AutowrapFnTest2(torch.nn.Module):
+            def forward(self, x):
+                return fx_int(x.shape[0] / 2) + fx_int_x2(x.shape[0] / 2)
+
+        # Check function(s) are wrapped
+        # `int` would normally throw a TypeError as argument can't be `Proxy`
+        tracer = Tracer(autowrap_functions=(fx_int,))
+        graph = tracer.trace(AutowrapFnTest())
+        traced = GraphModule(tracer.root, graph, 'test')
+        tracer_2 = Tracer(autowrap_functions=(fx_int, fx_int_x2))
+        tracer_2.trace(AutowrapFnTest2())
+
+        # Test scriptability
+        traced_scripted = torch.jit.script(traced)
+        self.assertEqual(traced_scripted(torch.rand(4)), 2)
 
     def test_torch_fx_len(self):
         class FXLenTest(torch.nn.Module):
@@ -1148,6 +1204,49 @@ class TestFX(JitTestCase):
         ms = torch.jit.script(m)
         with self.assertRaisesRegex(torch.jit.Error, "assert_foobar"):
             ms(torch.rand(4, 3))
+
+    def test_fx_create_arg(self):
+        class CustomArgObject:
+            def __init__(self, x, y):
+                self.x = x
+                self.y = y
+
+            def __fx_create_arg__(self, tracer: torch.fx.Tracer):
+                return tracer.create_node(
+                    "call_function",
+                    CustomArgObject,
+                    args=(
+                        tracer.create_arg(self.x),
+                        tracer.create_arg(self.y),
+                    ),
+                    kwargs={},
+                )
+
+        class HasCustomArgObjectWhenLeaf(torch.nn.Module):
+            def forward(self, o: CustomArgObject):
+                # Not normally traceable; good reason to make
+                # this module a leaf.
+                for x in o.x:
+                    o.y += x
+                return o.y
+
+        class Root(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.inner = HasCustomArgObjectWhenLeaf()
+
+            def forward(self, x, y):
+                o = CustomArgObject(x, y)
+                return self.inner(o)
+
+        class CreateArgTracer(torch.fx.Tracer):
+            def is_leaf_module(self, m, module_qualified_name):
+                return type(m) is HasCustomArgObjectWhenLeaf
+
+        m = Root()
+        graph = CreateArgTracer().trace(m)
+        gm = torch.fx.GraphModule(m, graph)
+        assert "CustomArgObject(" in gm.code
 
     def test_trace_fn_constant(self):
         some_constant = torch.rand(3, 4)
@@ -1928,7 +2027,7 @@ class TestFX(JitTestCase):
             node.__update_args_kwargs((), {})
 
     def test_torchbind_class_attribute_in_fx(self):
-        if TEST_WITH_ROCM or IS_SANDCASTLE or IS_WINDOWS or IS_MACOS:
+        if TEST_WITH_ROCM or IS_FBCODE or IS_WINDOWS or IS_MACOS:
             self.skipTest("torch.classes._TorchScriptTesting._StackString is registered, skipping")
 
         class FooBar1234(torch.nn.Module):
@@ -1943,7 +2042,7 @@ class TestFX(JitTestCase):
         self.checkGraphModule(m, ())
 
     def test_torchbind_class_attribute_in_fx_tensor_arg(self):
-        if TEST_WITH_ROCM or IS_SANDCASTLE or IS_WINDOWS or IS_MACOS:
+        if TEST_WITH_ROCM or IS_FBCODE or IS_WINDOWS or IS_MACOS:
             self.skipTest("torch.classes._TorchScriptTesting._ReLUClass is registered, skipping")
 
         class FooBar2341(torch.nn.Module):
@@ -2252,8 +2351,10 @@ class TestFX(JitTestCase):
 
         conv = [n for n in a.graph.nodes if n.target == "net_b.net_c.conv"][-1]
         with a.graph.inserting_before(conv):
-            dropout = a.graph.call_module(module_name="net_b.net_c.dropout",
-                                          args=conv.args)
+            with warnings.catch_warnings(record=True) as w:
+                dropout = a.graph.call_module(module_name="net_b.net_c.dropout",
+                                              args=conv.args)
+                self.assertEqual(len(w), 0)
 
         conv.replace_all_uses_with(dropout)
         a.graph.erase_node(conv)
@@ -2360,6 +2461,125 @@ class TestFX(JitTestCase):
         self.assertTrue(buffer_exists(a, "net_b.buf"))
 
         a.graph.lint()
+
+    def test_tracing_graphmodules_as_leaf_submodules(self):
+        class A(torch.nn.Module):
+            def forward(self, t):
+                return t + t
+
+        class B(torch.nn.Module):
+            def __init__(self):
+                super(type(self), self).__init__()
+                self.calling = False
+                self.called = False
+
+            def forward(self, t):
+                if self.calling:
+                    return t - t
+                else:
+                    return t + t
+
+            def __call__(self, *args):
+                self.called = True
+                self.calling = True
+                return super(type(self), self).__call__(*args)
+                self.calling = False
+
+        class M(torch.nn.Module):
+            def __init__(self, a, b):
+                super().__init__()
+                self.a = a
+                self.b = b
+
+            def forward(self, t):
+                x = self.a(t)
+                y = self.b(t)
+                return x + y
+
+        class LeafTracer(Tracer):
+            def is_leaf_module(self, module, name):
+                return True
+
+        class LeafTracerNotB(Tracer):
+            def is_leaf_module(self, module, name):
+                return False if "b" in name else True
+
+        # Recompile calls added "for fun", since they
+        # chain __call__ wrappers.
+
+        #
+        # Test: B as a regular, non-leaf module
+        #
+        a = symbolic_trace(A())
+        a.recompile()
+        m = M(a, B())
+        graph = LeafTracerNotB().trace(m)
+        gm = GraphModule(m, graph)
+        gm.recompile()
+
+        # Test graphmodule/submodule a is not inlined.
+        self.assertTrue(isinstance(gm.get_submodule("a"), GraphModule))
+        match = [n for n in gm.graph.nodes if n.op == "call_module" and n.target == "a"]
+        self.assertTrue(len(match) == 1)
+
+        # Test submodule b is not treated as leaf.
+        self.assertFalse(hasattr(gm, "b"))
+
+        # Test assert custom __call__ on submodule b was honored.
+        match = [
+            n
+            for n in gm.graph.nodes
+            if n.op == "call_function" and n.target == operator.sub
+        ]
+        self.assertTrue(len(match) == 1)
+
+        #
+        # Test: B as a regular, leaf module
+        # symbolic_trace should only patch torch.nn.Module.__call__,
+        # which means B.__call__ should still execute
+        #
+        a = symbolic_trace(A())
+        a.recompile()
+        b = B()
+        m = M(a, b)
+        graph = LeafTracer().trace(m)
+        gm = GraphModule(m, graph)
+        gm.recompile()
+
+        # Test graphmodule/submodule a is not inlined.
+        self.assertTrue(isinstance(gm.get_submodule("a"), GraphModule))
+        match = [n for n in gm.graph.nodes if n.op == "call_module" and n.target == "a"]
+        self.assertTrue(len(match) == 1)
+
+        # Test submodule b is leaf:
+        self.assertTrue(isinstance(gm.get_submodule("b"), torch.nn.Module))
+        match = [n for n in gm.graph.nodes if n.op == "call_module" and n.target == "b"]
+        self.assertTrue(len(match) == 1)
+
+        # Test b.__call__ was run
+        self.assertTrue(b.called)
+        self.assertTrue(gm.get_submodule("b").called)
+
+        #
+        # Test: B as GraphModule leaf
+        # __call__ not honored since symbolic_trace directly invokes forward()
+        #
+        a = symbolic_trace(A())
+        a.recompile()
+        b = symbolic_trace(B())
+        b.recompile()
+        m = M(a, b)
+        graph = LeafTracer().trace(m)
+        gm = GraphModule(m, graph)
+        gm.recompile()
+
+        self.assertTrue(isinstance(gm.get_submodule("a"), GraphModule))
+        match = [n for n in gm.graph.nodes if n.op == "call_module" and n.target == "a"]
+        self.assertTrue(len(match) == 1)
+
+        self.assertTrue(isinstance(gm.get_submodule("b"), torch.nn.Module))
+        match = [n for n in gm.graph.nodes if n.op == "call_module" and n.target == "b"]
+        self.assertTrue(len(match) == 1)
 
     def _test_graph_module_init_buffer_param_copied(self, use_dict_init: bool):
         class MyModule(torch.nn.Module):
@@ -2557,6 +2777,8 @@ class TestFX(JitTestCase):
         def f_dict_add(x):
             return x['a'] + sum(x['z'])
 
+        def f_namedtuple_add(x):
+            return x.x + x.y
 
         pytree._register_pytree_node(
             Foo,
@@ -2586,6 +2808,7 @@ class TestFX(JitTestCase):
             (f_custom, Foo(PH, 3)),
             (f_custom_dict, Foo({'a': PH, 'b': PH}, PH)),
             # (f_return_custom, Foo(PH, PH)), # Don't currently support output pytrees
+            (f_namedtuple_add, Point(PH, PH)),
         ]
 
         def verify_pytree(f, inp):
@@ -2655,8 +2878,10 @@ class TestOperatorSignatures(JitTestCase):
                            'fill_',
                            'hstack',
                            'linalg.multi_dot',
+                           'lu',
                            'norm',
                            'polygamma',
+                           'special.polygamma',
                            'repeat',
                            'reshape_as',
                            'resize_',
@@ -2677,6 +2902,9 @@ class TestOperatorSignatures(JitTestCase):
                            '__rdiv__',
                            '__rmod__',
                            '__rpow__',
+                           '__rand__',
+                           '__ror__',
+                           '__rxor__',
                            '__rmatmul__'}
 
         try:

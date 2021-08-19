@@ -1,16 +1,13 @@
-import errno
 import hypothesis.strategies as st
 from hypothesis import given, assume, settings
 import io
 import math
 import numpy as np
 import os
-import shutil
 import struct
 import unittest
 from pathlib import Path
 from typing import Dict, Generator, List, NamedTuple, Optional, Tuple, Type
-
 from caffe2.proto import caffe2_pb2
 from caffe2.proto.caffe2_pb2 import BlobSerializationOptions
 from caffe2.python import core, test_util, workspace
@@ -433,6 +430,26 @@ class TestLoadSave(TestLoadSaveBase):
         with self.assertRaises(RuntimeError):
             workspace.RunOperatorOnce(op)
 
+    def testLoadWithDBOptions(self) -> None:
+        tmp_folder = self.make_tempdir()
+        tmp_file, arrays = self.saveFile(tmp_folder, "db", self._db_type, 0)
+
+        db_files = [tmp_file, tmp_file]
+        workspace.ResetWorkspace()
+        self.assertEqual(len(workspace.Blobs()), 0)
+
+        db_options = b"test_db_options"
+        op = core.CreateOperator(
+            "Load",
+            [], [str(i) for i in range(len(arrays))],
+            absolute_path=1,
+            dbs=db_files, db_type=self._db_type,
+            load_all=False,
+            db_options=db_options,
+        )
+        with self.assertRaises(RuntimeError):
+            workspace.RunOperatorOnce(op)
+
     def create_test_blobs(
         self, size: int = 1234, feed: bool = True
     ) -> List[Tuple[str, np.ndarray]]:
@@ -643,6 +660,36 @@ class TestLoadSave(TestLoadSaveBase):
             len(blob_chunks["int64_data"]), math.ceil(num_elems / 40)
         )
 
+
+    def testSaveWithDBOptions(self) -> None:
+        num_elems = 1234
+        chunk_size = 32
+        expected_num_chunks = math.ceil(num_elems / chunk_size)
+
+        tmp_folder = self.make_tempdir()
+        tmp_file = str(tmp_folder / "save.output")
+
+        blobs = self.create_test_blobs(num_elems)
+
+        db_options = b"test_db_options"
+        # Saves the blobs to a local db.
+        save_op = core.CreateOperator(
+            "Save",
+            [name for name, data in blobs],
+            [],
+            absolute_path=1,
+            db=tmp_file,
+            db_type=self._db_type,
+            chunk_size=chunk_size,
+            db_options=db_options,
+        )
+        self.assertTrue(workspace.RunOperatorOnce(save_op))
+
+        self.load_and_check_blobs(blobs, [tmp_file])
+
+        blob_chunks = self._read_chunk_info(Path(tmp_file))
+        for blob_name, chunks in blob_chunks.items():
+            self.assertEqual(len(chunks), expected_num_chunks)
 
     def testSaveFloatToBfloat16(self) -> None:
         tmp_folder = self.make_tempdir()

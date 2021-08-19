@@ -57,6 +57,7 @@ Creation Ops
     as_tensor
     as_strided
     from_numpy
+    frombuffer
     zeros
     zeros_like
     ones
@@ -351,6 +352,9 @@ Pointwise Ops
     polygamma
     positive
     pow
+    quantized_batch_norm
+    quantized_max_pool1d
+    quantized_max_pool2d
     rad2deg
     real
     reciprocal
@@ -384,6 +388,7 @@ Reduction Ops
     argmin
     amax
     amin
+    aminmax
     all
     any
     max
@@ -481,6 +486,8 @@ Other Operations
     cdist
     clone
     combinations
+    corrcoef
+    cov
     cross
     cummax
     cummin
@@ -519,6 +526,7 @@ Other Operations
     view_as_real
     view_as_complex
     resolve_conj
+    resolve_neg
 
 
 BLAS and LAPACK Operations
@@ -568,6 +576,8 @@ BLAS and LAPACK Operations
     symeig
     lobpcg
     trapz
+    trapezoid
+    cumulative_trapezoid
     triangular_solve
     vdot
 

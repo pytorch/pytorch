@@ -18,6 +18,7 @@ class TORCH_CUDA_CU_API IrCloner : private OptInConstDispatch {
   friend class Statement;
 
  public:
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   explicit IrCloner(Fusion* new_fusion) : fusion_(new_fusion) {}
 
   Statement* clone(const Statement* statement);
@@ -30,6 +31,7 @@ class TORCH_CUDA_CU_API IrCloner : private OptInConstDispatch {
 
   template <class T>
   std::vector<T*> clone(const std::vector<T*>& container) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<T*> copy;
     copy.reserve(container.size());
     for (auto p : container) {

@@ -12,7 +12,7 @@ enum RPCErrorType {
   UNKNOWN_ERROR = 0, /* Indicates that error type could not be parsed */
   TIMEOUT = 1, /* Indicates that the RPC has timed out */
   INTENTIONAL_FAILURE = 2 /* Deliberate failure, such as those injected by
-                             FaultyProcessGroupAgent for testing */
+                             FaultyAgent for testing */
 };
 
 // The enum values are bitwise ORed with MessageType
@@ -153,7 +153,7 @@ class TORCH_API Message final : public torch::CustomClassHolder {
   int64_t id() const;
   void setId(int64_t id);
 
-  std::vector<c10::Storage> getStorages() const;
+  std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> getStorages() const;
 
  private:
   std::vector<char> payload_;
@@ -178,7 +178,9 @@ TORCH_API c10::intrusive_ptr<Message> createExceptionResponse(
     const std::string& exceptionStr,
     int64_t id);
 
-inline std::tuple<c10::intrusive_ptr<Message>, std::vector<c10::Storage>>
+inline std::tuple<
+    c10::intrusive_ptr<Message>,
+    std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>>>
 withStorages(c10::intrusive_ptr<Message> message) {
   auto storages = message->getStorages();
   return std::make_tuple(std::move(message), std::move(storages));

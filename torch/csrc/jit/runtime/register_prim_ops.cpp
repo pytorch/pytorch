@@ -79,7 +79,13 @@ c10::List<std::string> splitNoneSeparator(const std::string& string) {
   return splits;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+template <typename T, typename U>
+auto powWrapper(T a, U b) {
+  TORCH_CHECK(
+      !(a == 0.0 && b < 0.0), "0.0 cannot be raised to a negative power")
+  return pow(a, b);
+}
+
 RegisterOperators reg(
     {OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("aten::str(t elem) -> str"),
@@ -175,7 +181,8 @@ RegisterOperators reg(
                  "Output annotation list dimension and runtime tensor dimension must match for tolist()");
 
              // Wrap out_ty in a ListType dim times.
-             for (int i = 0; i < dim_val; ++i) {
+             for (const auto i : c10::irange(dim_val)) {
+               (void)i; // Suppress unused variable warning
                out_ty = ListType::create(out_ty);
              }
 
@@ -440,6 +447,14 @@ RegisterOperators reg(
          [](Stack* stack) {
            size_t num_inputs = pop(stack).toInt();
            format(*stack, num_inputs);
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA(
+             "aten::einsum.sublist(Tensor a, ...) -> Tensor"),
+         [](Stack* stack) {
+           size_t num_inputs = pop(stack).toInt();
+           einsum(*stack, num_inputs);
          },
          aliasAnalysisFromSchema()),
      OperatorGenerator(
@@ -748,9 +763,9 @@ RegisterOperators reg(
      // This is an alternative to aten::cat op that takes variable number of
      // parameters as input.
      // Format:
-     //    prim::Concat(Tensors..., dim) -> Tensor
+     //    prim::VarConcat(Tensors..., dim) -> Tensor
      OperatorGenerator(
-         TORCH_SELECTIVE_SCHEMA("prim::Concat(...) -> Tensor"),
+         TORCH_SELECTIVE_SCHEMA("prim::VarConcat(...) -> Tensor"),
          [](Stack* stack) {
            auto num_inputs = pop(stack).toInt();
            auto dim = pop(stack).toInt();
@@ -886,13 +901,16 @@ RegisterOperators reg(
      // results
      DEFINE_GENERIC_OP_WITH_COMPLEX(
          aten::pow,
-         static_cast<double>(pow(a, b)),
-         static_cast<double>(pow(a, b)),
+         static_cast<double>(powWrapper(a, b)),
+         static_cast<double>(powWrapper(a, b)),
          static_cast<c10::complex<double>>(pow(a, b)),
          float,
          float,
          complex),
-     DEFINE_INT_FLOAT_OP(aten::pow, pow(a, b), float),
+     DEFINE_INT_FLOAT_OP(
+         aten::pow,
+         static_cast<double>(powWrapper(a, b)),
+         float),
      DEFINE_FLOAT_COMPLEX_OP(aten::pow, pow(a, b), complex),
      DEFINE_SCALAR_BINARY_OP_AVOID_COLLISION(
          aten::pow,
@@ -905,7 +923,7 @@ RegisterOperators reg(
            // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
            int64_t a, b;
            pop(stack, a, b);
-           push(stack, pow(a, b));
+           push(stack, powWrapper(a, b));
          },
          aliasAnalysisFromSchema()),
      // min and max are in prim:: because there is a difference between
@@ -1484,7 +1502,6 @@ void dictConstructFromList(Stack* stack) {
           dictCopy,                                                            \
           aliasAnalysisFromSchema())
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators reg_dict_ops({
     CREATE_DICT_OPS("str"),
     CREATE_DICT_OPS("int"),
@@ -1900,7 +1917,8 @@ TORCH_LIBRARY_IMPL(aten, CatchAll, m) {
 
         std::stringstream ss;
         ss << string;
-        for (auto i = 0; i < to_append; ++i) {
+        for (const auto i : c10::irange(to_append)) {
+          (void)i; // Suppress unused variable warning
           ss << fillchar;
         }
 
@@ -1919,7 +1937,8 @@ TORCH_LIBRARY_IMPL(aten, CatchAll, m) {
             std::max(int64_t(0), width - static_cast<int64_t>(string.size()));
 
         std::stringstream ss;
-        for (auto i = 0; i < to_append; ++i) {
+        for (const auto i : c10::irange(to_append)) {
+          (void)i; // Suppress unused variable warning
           ss << fillchar;
         }
         ss << string;
@@ -1933,7 +1952,8 @@ TORCH_LIBRARY_IMPL(aten, CatchAll, m) {
             std::max(int64_t(0), width - static_cast<int64_t>(string.size()));
 
         std::stringstream ss;
-        for (auto i = 0; i < to_append; ++i) {
+        for (const auto i : c10::irange(to_append)) {
+          (void)i; // Suppress unused variable warning
           ss << '0';
         }
         ss << string;
@@ -2072,7 +2092,7 @@ RegisterOperators reg1(
            pop(stack, n);
            c10::List<int64_t> elems;
            elems.reserve(n);
-           for (int i = 0; i < n; i++) {
+           for (const auto i : c10::irange(n)) {
              elems.push_back(i);
            }
            push(stack, std::move(elems));
@@ -2267,7 +2287,7 @@ RegisterOperators reg1(
            auto num_inputs = pop(stack).toInt();
            std::vector<int64_t> size;
            size.reserve(8);
-           for (auto i = 0; i < num_inputs; ++i) {
+           for (const auto i : c10::irange(num_inputs)) {
              size =
                  at::infer_size(size, peek(stack, i, num_inputs).toIntVector());
            }
@@ -2304,7 +2324,7 @@ RegisterOperators reg1(
            auto sizes_tensor = torch::empty(
                {static_cast<int64_t>(sizes.size())}, at::dtype(at::kLong));
            auto accessor = sizes_tensor.accessor<int64_t, 1>();
-           for (size_t i = 0; i < sizes.size(); ++i) {
+           for (const auto i : c10::irange(sizes.size())) {
              accessor[i] = sizes[i];
            }
            stack->emplace_back(sizes_tensor);
@@ -2418,7 +2438,6 @@ void hashValue(Stack* stack) {
   push(stack, value.hash());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators reg2({
     // registered as Any[] so that heterogenous tuples can be called with len()
     OperatorGenerator(
@@ -2776,7 +2795,7 @@ RegisterOperators reg2({
           pop(stack, t);
           c10::List<int64_t> elems;
           elems.reserve(t.size(0));
-          for (int i = 0; i < t.size(0); i++) {
+          for (const auto i : c10::irange(t.size(0))) {
             elems.push_back(*t[i].data_ptr<int32_t>());
           }
           push(stack, std::move(elems));
@@ -2788,7 +2807,7 @@ RegisterOperators reg2({
           c10::List<int64_t> l = pop(stack).toIntList();
           auto t = torch::empty(
               {static_cast<int64_t>(l.size())}, at::dtype(at::kInt));
-          for (size_t i = 0; i < l.size(); i++) {
+          for (const auto i : c10::irange(l.size())) {
             t[i] = l.get(i);
           }
           push(stack, std::move(t));
@@ -2821,7 +2840,7 @@ RegisterOperators reg2({
         [](Stack* stack) {
           c10::List<c10::complex<double>> l = pop(stack).toComplexDoubleList();
           c10::complex<double> sum = 0.0;
-          for (int i = 0; i < l.size(); i++) {
+          for (const auto i : c10::irange(l.size())) {
             sum = sum + l.extract(i);
           }
           push(stack, sum);

@@ -9,6 +9,7 @@
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/native/IndexingUtils.h>
 
+#include <ATen/native/Copy.h>
 #include <ATen/native/CPUBlas.h>
 
 namespace at {
@@ -279,8 +280,7 @@ void _validate_sparse_coo_tensor_args(
   int64_t sparse_dim = indices.size(0);
   int64_t dense_dim = values.dim() - 1;
   TORCH_CHECK(
-      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-      size.size() == sparse_dim + dense_dim,
+      static_cast<int64_t>(size.size()) == sparse_dim + dense_dim,
       "number of dimensions must be sparse_dim (",
       sparse_dim,
       ") + dense_dim (",
@@ -501,10 +501,6 @@ Tensor sparse_to_dense(
     c10::optional<ScalarType> dtype) {
   TORCH_CHECK(
       !dtype.has_value(), "dtype argument is not supported by sparse_to_dense");
-  if (self.scalar_type() == ScalarType::Half &&
-      self.options().device().is_cpu()) {
-    TORCH_CHECK(false, "to_dense() not supported for float16 on CPU");
-  }
   Tensor dst = at::zeros(self.sizes(), self.options().layout(kStrided));
   return dst.add_(self);
 }
@@ -634,12 +630,13 @@ void inline sparse_mask_out_cpu_kernel(
   auto r_values_accessor = r_values.accessor<scalar_t, 1>();
   auto mask_indices_accessor = mask_indices.accessor<int64_t, 2>();
   scalar_t* t_ptr = t.data_ptr<scalar_t>();
+  auto t_strides = t.strides();
 
   at::parallel_for(0, r_nnz, 1000, [&](int64_t start, int64_t end) {
     for (auto i = start; i < end; i++) {
       int64_t idx = 0;
       for (int64_t d = 0; d < sparse_dim; d++) {
-        idx += mask_indices_accessor[d][i] * t.stride(d);
+        idx += mask_indices_accessor[d][i] * t_strides[d];
       }
       r_values_accessor[i] = t_ptr[idx];
     }
@@ -767,12 +764,31 @@ Tensor sparse_mask_helper_cpu(
 
   auto flattened_mask_indices =
       at::sparse::flatten_indices(mask_indices, full_size);
+
+  const auto copy_iter = TensorIteratorConfig()
+    .add_output(r_values)
+    .add_input(t_v)
+    .resize_outputs(false)
+    .declare_static_shape(r_values.sizes(), /*squash_dims=*/0)
+    .build();
+
   at::parallel_for(0, r_nnz, 0, [&](int64_t start, int64_t end) {
+    TensorIterator copy_iter_local(copy_iter);
+    const auto r_values_data = reinterpret_cast<char*>(r_values.data_ptr());
+    const auto t_values_data = reinterpret_cast<char*>(t_v.data_ptr());
+    const auto r_values_stride = r_values.strides()[0] * r_values.element_size();
+    const auto t_values_stride = t_v.strides()[0] * t_v.element_size();
+
     for (auto i = start; i < end; i++) {
       int64_t index = flattened_mask_indices.data_ptr<int64_t>()[i];
       auto iter = t_flatten_indices.find(index);
       if (iter != t_flatten_indices.end()) {
-        r_values[i] = t_v[iter->second];
+        // r_values[i].copy_(t_v[iter->second])
+        copy_iter_local.unsafe_replace_operand(
+            0, r_values_data + i * r_values_stride);
+        copy_iter_local.unsafe_replace_operand(
+            1, t_values_data + iter->second * t_values_stride);
+        copy_stub(kCPU, copy_iter_local, /*non_blocking=*/false);
       }
     }
   });

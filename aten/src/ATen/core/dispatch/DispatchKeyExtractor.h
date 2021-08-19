@@ -65,6 +65,13 @@ namespace detail {
         ts = ts | x.key_set();
       }
     }
+    void operator()(at::ArrayRef<c10::optional<at::Tensor>> xs) {
+      for (const auto& x : xs) {
+        if (x.has_value()) {
+          ts = ts | x.value().key_set();
+        }
+      }
+    }
     void operator()(const at::Generator& gen) {
       if (gen.defined()) {
         ts = ts | gen.key_set();
@@ -133,6 +140,14 @@ public:
           ks = ks | tensor.key_set();
         }
       }
+      // Tensor?[] translates to a c10::List<IValue> so we need to peek inside
+      else if (C10_UNLIKELY(ivalue.isList())) {
+        for (const auto& elt : ivalue.toListRef()) {
+          if (elt.isTensor()) {
+            ks = ks | elt.toTensor().key_set();
+          }
+        }
+      }
     });
     // Keys that are fallthrough should be skipped
     return impl::computeDispatchKeySet(ks, nonFallthroughKeys_);
@@ -160,6 +175,8 @@ private:
       if (schema.arguments()[index].type()->isSubtypeOf(TensorType::get()) ||
           schema.arguments()[index].type()->isSubtypeOf(
               ListType::ofTensors()) ||
+          schema.arguments()[index].type()->isSubtypeOf(
+              ListType::ofOptionalTensors()) ||
           schema.arguments()[index].type()->isSubtypeOf(
               OptionalType::ofTensor())) {
         dispatch_arg_indices_reverse.set(schema.arguments().size() - 1 - index);

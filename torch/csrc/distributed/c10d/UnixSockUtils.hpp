@@ -56,7 +56,15 @@ inline void waitSocketConnected(
     throw std::system_error(errno, std::system_category());
   } else if (numReady == 0) {
     errno = 0;
-    TORCH_CHECK(false, kConnectTimeoutMsg);
+    TORCH_CHECK(
+        false,
+        c10::str(
+            kConnectTimeoutMsg,
+            " Polled for ",
+            pollTimeout,
+            " ms with original timeout of ",
+            timeout.count(),
+            " ms."));
   }
 
   socklen_t errLen = sizeof(errno);

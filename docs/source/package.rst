@@ -100,7 +100,7 @@ use the glob-style ``include`` and ``exclude`` filtering arguments.
 
 ::
 
-    with PackageExporter('my_package.pt', verbose=False) as pe:
+    with PackageExporter('my_package.pt') as pe:
         pe.save_pickle('models', 'model_1.pkl', mod)
         # can limit printed items with include/exclude args
         print(pe.file_structure(include=["**/utils.py", "**/*.pkl"], exclude="**/*.storages"))
@@ -250,7 +250,7 @@ Steps:
 
     foo_1 = foo.Foo("foo_1 initial string")
     foo_2 = foo.Foo("foo_2 initial string")
-    with PackageExporter('foo_package.pt', verbose=False) as pe:
+    with PackageExporter('foo_package.pt') as pe:
         # save as normal, no extra work necessary
         pe.save_pickle('foo_collection', 'foo1.pkl', foo_1)
         pe.save_pickle('foo_collection', 'foo2.pkl', foo_2)
@@ -452,7 +452,7 @@ Saving TorchScript objects that are attributes or submodules is supported as wel
 ::
 
     # save TorchScript just like any other object
-    with PackageExporter(file_name, verbose=True) as e:
+    with PackageExporter(file_name) as e:
         e.save_pickle("res", "script_model.pkl", scripted_model)
         e.save_pickle("res", "mixed_model.pkl", python_model_with_scripted_submodule)
     # load as normal

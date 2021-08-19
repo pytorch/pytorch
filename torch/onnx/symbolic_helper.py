@@ -212,8 +212,23 @@ def _is_constant(value):
 def _is_tensor(x):
     return x.type().isSubtypeOf(torch._C.TensorType.get())
 
+def _is_list(x):
+    return isinstance(x.type(), torch._C.ListType)
+
 def _is_tensor_list(x):
-    return isinstance(x.type(), torch._C.ListType) and isinstance(x.type().getElementType(), torch._C.TensorType)
+    return _is_list(x) and isinstance(x.type().getElementType(), torch._C.TensorType)
+
+def _is_scalar_list(x):
+    """
+    Check if x is a scalar list, for example: List[float], List[int].
+
+    Besides checking the type is ListType, we also check if the data type is
+    a valid ONNX data type.
+    """
+    element_type = str(x.type().getElementType())
+    return _is_list(x) and \
+        element_type in scalar_name_to_pytorch.keys() and \
+        (scalar_name_to_pytorch[element_type] in cast_pytorch_to_onnx.keys())
 
 def _get_tensor_rank(x):
     if not _is_tensor(x) or x.type() is None:
@@ -298,14 +313,6 @@ def _slice_helper(g, input, axes, starts, ends, steps=None, dynamic_slice=False)
     else:
         from torch.onnx.symbolic_opset10 import _slice as _slice10
         return _slice10(g, input, axes, starts, ends, steps, dynamic_slice)
-
-def _hardtanh_helper(g, input, min_val, max_val):
-    if _export_onnx_opset_version <= 10:
-        from torch.onnx.symbolic_opset9 import hardtanh
-        return hardtanh(g, input, min_val, max_val)
-    else:
-        from torch.onnx.symbolic_opset11 import hardtanh  # type: ignore[no-redef]
-        return hardtanh(g, input, min_val, max_val)
 
 def _is_fp(value):
     if value:
@@ -661,6 +668,12 @@ def _arange_cast_helper(g, end, start=None, step=None, dtype=None):
     step = g.op("Cast", step, to_i=scalar_type_to_onnx[type]) if step else None
     return type, end, start, step
 
+def _arange_helper(g, *args):
+    if _export_onnx_opset_version <= 10:
+        from torch.onnx.symbolic_opset9 import arange
+    else:
+        from torch.onnx.symbolic_opset11 import arange  # type: ignore[no-redef]
+    return arange(g, *args)
 
 def _size_helper(g, self, dim):
     full_shape = g.op("Shape", self)
@@ -739,8 +752,8 @@ def _optional_input_placeholder_tensor(g):
     return n
 
 def _handle_reduce_dim_none(g, self, op_name):
-    dim_size = _get_tensor_dim_size(self, 0)
-    if dim_size is None or dim_size == 0:
+    rank = _get_tensor_rank(self)
+    if rank is not None and any([_get_tensor_dim_size(self, i) == 0 for i in range(rank)]):
         # If input tensor is empty, according to ONNX ReduceSum definition,
         # set keepdims=1 so that the resulted tensor has the same rank as the input.
         return g.op(op_name, self, keepdims_i=1)

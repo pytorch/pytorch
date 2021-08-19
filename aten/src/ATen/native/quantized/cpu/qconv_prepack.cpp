@@ -224,7 +224,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsQnnp<
   // QNNPACK expects weights to be of the format {out_c, kH, kW, in_c/groups},
   // but PyTorch lays them out as {out_c, in_c/groups, kH, kW}
   // (or for ConvTranspose {in_c, out_c/groups, kH, kW})
-  const size_t out_ch = transpose ? weight.size(1) * groups : weight.size(0);
+  const auto out_ch = transpose ? weight.size(1) * groups : weight.size(0);
   const uint32_t kernel_h = weight.size(2);
   const uint32_t kernel_w = weight.size(3);
 
@@ -237,7 +237,6 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsQnnp<
 
   TORCH_CHECK(
       !bias_fp32.defined() ||
-          // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
           (bias_fp32.ndimension() == 1 && bias_fp32.size(0) == out_ch),
       "quantized::conv2d_prepack (qnnpack): expected bias to be 1-dimensional "
       "with ",
@@ -253,7 +252,6 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsQnnp<
 
   TORCH_CHECK(
       !bias_fp32.defined() ||
-          // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
           (bias_fp32.ndimension() == 1 && bias_fp32.size(0) == out_ch),
       "quantized::conv3d_prepack (qnnpack): expected bias to be 1-dimensional "
       "with ",
