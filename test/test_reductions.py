@@ -667,7 +667,7 @@ class TestReductions(TestCase):
 
     @onlyOnCPUAndCUDA
     @dtypesIfCPU(torch.float, torch.double)
-    @dtypesIfCUDA(torch.half, torch.float)
+    @dtypesIfCUDA(torch.half, torch.float, torch.bfloat16)
     def test_aminmax(self, device, dtype):
 
         def _amin_wrapper(x, dim=None, keepdims=False):
@@ -1403,7 +1403,7 @@ class TestReductions(TestCase):
         x = torch.randn(20, dtype=torch.float32, device=device)
         y = torch.randn(1, dtype=torch.float32)
 
-        err_string = "Expected all tensors to be on the same device, but found at least two devices, {0}".format(device)
+        err_string = f"Expected out tensor to have device {device}, but got cpu instead"
 
         with self.assertRaisesRegex(RuntimeError, err_string):
             torch.sum(x, dim=[0], dtype=torch.float32, out=y)

@@ -7,10 +7,6 @@ namespace c10d {
 
 enum class ReduceOp : std::uint8_t {
   SUM = 0,
-#if defined(NCCL_MAJOR) && ((NCCL_MAJOR > 2) || \
-                            (NCCL_MAJOR == 2) && (NCCL_MINOR >= 10))
-  AVG,
-#endif
   PRODUCT,
   MIN,
   MAX,
