@@ -40,7 +40,7 @@ DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t) {
     case DispatchKey::Autograd:
       return autograd_dispatch_keyset;
     case DispatchKey::CompositeImplicitAutograd:
-      return math_dispatch_keyset;
+      return math_dispatch_keyset | DispatchKeySet({DispatchKey::FuncTorchBatched});
     case DispatchKey::CompositeExplicitAutograd:
       return backend_dispatch_keyset;
     default:
