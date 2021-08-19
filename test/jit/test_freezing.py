@@ -1929,6 +1929,30 @@ class TestFrozenOptimizations(JitTestCase):
 
     @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
     @skipIfNoTorchVision
+    def test_layernorm(self):
+        with set_default_dtype(torch.float):
+            model = torchvision.models.resnet18()
+            N, C, H, W, = 10, 3, 224, 224
+            for param in ((model.conv1, [W // 2], torch.randn(N, C, H, W)),
+                          (model.conv1, [H // 2, W // 2], torch.randn(N, C, H, W)),
+                          (torch.nn.Linear(H, W), [W], torch.randn(N, C, W)),):
+
+                for layernorm in (torch.nn.LayerNorm(param[1]),
+                                  torch.nn.LayerNorm(param[1], elementwise_affine=False)):
+                    sub_model = torch.nn.Sequential(param[0], layernorm)
+                    sub_model.eval()
+                    mod = torch.jit.freeze(torch.jit.script(sub_model))
+                    self.run_pass("convert_frozen_ops_to_mkldnn", mod.graph)
+                    # if weight and bias are present and shape is the last dimension
+                    # we should convert `aten::layer_norm` to `prim::MKLDNNLayerNorm`
+                    if layernorm.elementwise_affine and len(param[1]) == 1:
+                        FileCheck().check("prim::MKLDNNLayerNorm").check_count("aten::to_dense", 1, exactly=True).run(mod.graph)
+                    else:
+                        FileCheck().check_count("aten::to_dense", 1, exactly=True).run(mod.graph)
+                    self.assertTrue(torch.allclose(sub_model(param[2]), mod(param[2]), 1e-04, 1e-04))
+
+    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+    @skipIfNoTorchVision
     def test_conv_hardswish(self):
         with set_default_dtype(torch.float):
             class Clamp(torch.nn.Module):
@@ -1940,6 +1964,7 @@ class TestFrozenOptimizations(JitTestCase):
                 def forward(self, x):
                     return torch.clamp(x, self.min_val, self.max_val)
 
+            N, C, H, W, = 10, 3, 224, 224
             activations = [
                 torch.nn.Hardswish(),
                 torch.nn.Hardsigmoid(),
@@ -1960,7 +1985,6 @@ class TestFrozenOptimizations(JitTestCase):
                 sub_model = torch.nn.Sequential(model.conv1, activation)
                 sub_model.eval()
                 mod = torch.jit.freeze(torch.jit.script(sub_model))
-                N, C, H, W, = 10, 3, 224, 224
                 inp = torch.randn(N, C, H, W)
                 self.run_pass("convert_frozen_ops_to_mkldnn", mod.graph)
                 FileCheck().check_count("aten::to_dense", 1, exactly=True).run(mod.graph)
