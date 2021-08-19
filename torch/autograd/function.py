@@ -85,14 +85,14 @@ class BackwardCFunction(_C._FunctionBase, _ContextMethodMixin, _HookMixin):
     def apply(self, *args):
         # _forward_cls is defined by derived class
         # The user should define either backward or vjp but never both.
-        backward_fn = self._forward_cls.backward
-        vjp_fn = self._forward_cls.vjp
+        backward_fn = self._forward_cls.backward  # type: ignore[attr-defined]
+        vjp_fn = self._forward_cls.vjp  # type: ignore[attr-defined]
         if backward_fn is not Function.backward and vjp_fn is not Function.vjp:
             raise RuntimeError("Implementing both 'backward' and 'vjp' for a custom "
                                "Function is not allowed. You should only implement one "
                                "of them.")
         user_fn = vjp_fn if vjp_fn is not Function.vjp else backward_fn
-        return user_fn(self, *args)  # type: ignore[attr-defined]
+        return user_fn(self, *args)
 
 
 class FunctionMeta(type):
