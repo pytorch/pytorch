@@ -1662,7 +1662,7 @@ TORCH_LIBRARY_IMPL(q, CPU, m) {
     #define DISPATCH_TO_CUDA(name, function) \
         m.impl(name, torch::dispatch(c10::DispatchKey::CUDA, TORCH_FN(function)))
     TORCH_LIBRARY_IMPL(q, CUDA, m) {
-        DISPATCH_TO_CUDA("_Bfloat16QuantizedToFloat", _bfloat16_to_float_gpu);
+        // DISPATCH_TO_CUDA("_Bfloat16QuantizedToFloat", _bfloat16_to_float_gpu);
         DISPATCH_TO_CUDA("_FloatToBfloat16Quantized", _float_to_bfloat16_gpu);
     }
 #endif
