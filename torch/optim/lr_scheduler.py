@@ -328,7 +328,7 @@ class MultiplicativeLR(_LRScheduler):
             return [group['lr'] * lmbda(self.last_epoch)
                     for lmbda, group in zip(self.lr_lambdas, self.optimizer.param_groups)]
         else:
-            return list(self.base_lrs)
+            return [group['lr'] for group in self.optimizer.param_groups]
 
 
 class StepLR(_LRScheduler):
@@ -427,6 +427,83 @@ class MultiStepLR(_LRScheduler):
                 for base_lr in self.base_lrs]
 
 
+class WarmUpLR(_LRScheduler):
+    """Decays the learning rate of each parameter group by either a small constant
+    or linearly increasing small warmup factor until the number of epoch reaches a
+    pre-defined milestone: warmup_iters. Notice that such decay can happen
+    simultaneously with other changes to the learning rate from outside this scheduler.
+    When last_epoch=-1, sets initial lr as lr.
+
+    Args:
+        optimizer (Optimizer): Wrapped optimizer.
+        warmup_factor (float): The number we multiply learning rate in the first epoch.
+            If the warming up method is constant, the multiplication factor of the
+            learning rate stays the same in all epochs, but, in the linear case, it
+            starts increasing in the following epochs. Default: 1./3.
+        warmup_iters (int): The number of warming up steps. Default: 5.
+        warmup_method (str): One of `constant` and `linear`. In `constant` mode, the
+            learning rate will be multiplied with a small constant until a milestone
+            defined in warmup_iters. In the `linear` case, the multiplication factor
+            starts with warmup_factor in the first epoch then linearly increases to
+            reach 1. in the epoch number warmup_iters. Default: `linear`.
+        last_epoch (int): The index of the last epoch. Default: -1.
+        verbose (bool): If ``True``, prints a message to stdout for
+            each update. Default: ``False``.
+
+    Example:
+        >>> # Assuming optimizer uses lr = 0.05 for all groups
+        >>> # lr = 0.025    if epoch == 0
+        >>> # lr = 0.03125  if epoch == 1
+        >>> # lr = 0.0375   if epoch == 2
+        >>> # lr = 0.04375  if epoch == 3
+        >>> # lr = 0.005    if epoch >= 4
+        >>> scheduler = WarmUpLR(self.opt, warmup_factor=0.5, warmup_iters=4, warmup_method="linear")
+        >>> for epoch in range(100):
+        >>>     train(...)
+        >>>     validate(...)
+        >>>     scheduler.step()
+    """
+
+    def __init__(self, optimizer, warmup_factor=1.0 / 3, warmup_iters=5, warmup_method="linear",
+                 last_epoch=-1, verbose=False):
+        if warmup_method not in ("constant", "linear"):
+            raise ValueError(
+                "Only 'constant' or 'linear' warmup_method accepted, but "
+                "got {}".format(warmup_method)
+            )
+        self.warmup_factor = warmup_factor
+        self.warmup_iters = warmup_iters
+        self.warmup_method = warmup_method
+        super(WarmUpLR, self).__init__(optimizer, last_epoch, verbose)
+
+    def get_lr(self):
+        if not self._get_lr_called_within_step:
+            warnings.warn("To get the last learning rate computed by the scheduler, "
+                          "please use `get_last_lr()`.", UserWarning)
+
+        if self.last_epoch == 0:
+            return [group['lr'] * self.warmup_factor for group in self.optimizer.param_groups]
+
+        if (self.last_epoch > self.warmup_iters or
+                (self.warmup_method == "constant" and self.last_epoch != self.warmup_iters)):
+            return [group['lr'] for group in self.optimizer.param_groups]
+
+        if (self.warmup_method == "constant" and self.last_epoch == self.warmup_iters):
+            return [group['lr'] * (1.0 / self.warmup_factor) for group in self.optimizer.param_groups]
+
+        return [group['lr'] * (1. + (1.0 - self.warmup_factor) /
+                (self.warmup_iters * self.warmup_factor + (self.last_epoch - 1) * (1 - self.warmup_factor)))
+                for group in self.optimizer.param_groups]
+
+    def _get_closed_form_lr(self):
+        return [base_lr * (self.warmup_factor +
+                (1 - self.warmup_factor) * min(self.warmup_iters, self.last_epoch) /
+                self.warmup_iters * (self.warmup_method == "linear") +
+                (self.last_epoch >= self.warmup_iters) * (1 - self.warmup_factor) *
+                (self.warmup_method == "constant"))
+                for base_lr in self.base_lrs]
+
+
 class ExponentialLR(_LRScheduler):
     """Decays the learning rate of each parameter group by gamma every epoch.
     When last_epoch=-1, sets initial lr as lr.
@@ -449,7 +526,7 @@ class ExponentialLR(_LRScheduler):
                           "please use `get_last_lr()`.", UserWarning)
 
         if self.last_epoch == 0:
-            return self.base_lrs
+            return [group['lr'] for group in self.optimizer.param_groups]
         return [group['lr'] * self.gamma
                 for group in self.optimizer.param_groups]
 
@@ -509,7 +586,7 @@ class CosineAnnealingLR(_LRScheduler):
                           "please use `get_last_lr()`.", UserWarning)
 
         if self.last_epoch == 0:
-            return self.base_lrs
+            return [group['lr'] for group in self.optimizer.param_groups]
         elif (self.last_epoch - 1 - self.T_max) % (2 * self.T_max) == 0:
             return [group['lr'] + (base_lr - self.eta_min) *
                     (1 - math.cos(math.pi / self.T_max)) / 2
