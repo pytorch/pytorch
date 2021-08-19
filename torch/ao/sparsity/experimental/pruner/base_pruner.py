@@ -1,7 +1,7 @@
 
+import copy
 import warnings
 import abc
-import copy
 
 import torch
 from torch import nn
@@ -10,6 +10,8 @@ from torch.nn.utils import parametrize
 from torch.nn.modules.container import ModuleDict, ModuleList
 
 from .parametrization import PruningParametrization, ZeroesParametrization, ActivationReconstruction, BiasHook
+
+from torch.ao.sparsity import BaseSparsifier, module_to_fqn, fqn_to_module
 
 SUPPORTED_MODULES = {  # added to config if None given
     nn.Linear,
@@ -25,26 +27,8 @@ NEEDS_ZEROS = {  # these layers should have pruned indices zero-ed, not removed
     nn.BatchNorm2d
 }
 
-def _module_to_fqn(model, layer, prefix=''):
-    for name, child in model.named_children():
-        new_name = prefix + '.' + name
-        if child is layer:
-            return new_name
-        child_path = _module_to_fqn(child, layer, prefix=new_name)
-        if child_path is not None:
-            return child_path
-    return None
 
-def _fqn_to_module(model, path):
-    path = path.split('.')
-    for name in path:
-        model = getattr(model, name, None)
-        if model is None:
-            return None
-    return model
-
-
-class BasePruner(abc.ABC):
+class BasePruner(BaseSparsifier):
     r"""Base class for all pruners.
 
     Abstract methods that need to be implemented:
@@ -56,39 +40,13 @@ class BasePruner(abc.ABC):
         - defaults [dict]: default configurations will be attached to the
             configuration. Only the keys that don't exist in the `config` will
             be updated.
+        - also_prune_bias [bool]: whether to prune bias in addition to weights (to prune full output channel)
+            or not; default=True.
 
     """
-    def __init__(self, defaults):
-        super().__init__()
-        self.defaults = defaults
-        if self.defaults is None:
-            self.defaults = dict()
-
-        self.module_groups = []
-        self.enable_mask_update = True
-
-    def __getstate__(self):
-        return {
-            'defaults': self.defaults,
-            'module_groups': self.module_groups,
-        }
-
-    def __setstate__(self, state):
-        self.__dict__.update(state)
-
-    def __repr__(self):
-        format_string = self.__class__.__name__ + ' ('
-        for i, sparse_args in enumerate(self.module_groups):
-            module = sparse_args['module']
-            format_string += '\n'
-            format_string += f'\tModule Group {i}\n'
-            format_string += f'\t    module: {module}\n'
-            for key in sorted(sparse_args.keys()):
-                if key == 'module':
-                    continue
-                format_string += f'\t    {key}: {sparse_args[key]}\n'
-        format_string += ')'
-        return format_string
+    def __init__(self, defaults, also_prune_bias=True):
+        super().__init__(defaults)
+        self.prune_bias = also_prune_bias
 
     def _prepare(self, use_path=False, *args, **kwargs):
         r"""Adds mask parametrization to the layer weight
@@ -98,7 +56,7 @@ class BasePruner(abc.ABC):
 
         for config in self.module_groups:
             if use_path:
-                module = _fqn_to_module(self.model, config['fqn'])
+                module = fqn_to_module(self.model, config['fqn'])
             else:
                 module = config['module']
 
@@ -129,7 +87,7 @@ class BasePruner(abc.ABC):
                 module.bias = None
             self.bias_handles.append(module.register_forward_hook(BiasHook(module.parametrizations.weight[0], self.prune_bias)))
 
-    def prepare(self, model, config, also_prune_bias=True):
+    def prepare(self, model, config):
         r"""Prepares a model, by adding the parametrizations and forward post-hooks.
         Note::
             The model is modified inplace. If you need to preserve the original
@@ -141,12 +99,9 @@ class BasePruner(abc.ABC):
         - config [list]: configuration elements could either be instances of
             nn.Module or dict maps. The dicts must have a key 'module' with the
             value being an instance of a nn.Module.
-        - also_prune_bias [bool]: whether to prune bias in addition to weights (to prune full output channel)
-            or not; default=True.
         """
         self.model = model  # TODO: Need to figure out how to load without this.
         self.config = config
-        self.prune_bias = also_prune_bias
 
         # If no config -- try getting all the supported layers
         if self.config is None:
@@ -159,7 +114,7 @@ class BasePruner(abc.ABC):
                     if type(child) in SUPPORTED_MODULES:
                         self.config.append(child)
                     else:
-                        if type(child) in NEEDS_MANUAL_UPDATE and also_prune_bias:
+                        if type(child) in NEEDS_MANUAL_UPDATE and self.prune_bias:
                             warnings.warn(f"Models with {type(child)} layers must have pruned outputs provided by user.")
                         stack.append(child)
 
@@ -169,7 +124,7 @@ class BasePruner(abc.ABC):
             local_args = copy.deepcopy(self.defaults)
             local_args.update(module_config)
             module = local_args['module']
-            module_fqn = _module_to_fqn(model, module)
+            module_fqn = module_to_fqn(model, module)
             if module_fqn and module_fqn[0] == '.':
                 module_fqn = module_fqn[1:]
             local_args['fqn'] = module_fqn
@@ -180,7 +135,7 @@ class BasePruner(abc.ABC):
     def squash_mask(self, use_path=False, *args, **kwargs):
         for config in self.module_groups:
             if use_path:
-                module = _fqn_to_module(self.model, config['fqn'])
+                module = fqn_to_module(self.model, config['fqn'])
             else:
                 module = config['module']
             parametrize.remove_parametrizations(module, 'weight',
@@ -191,15 +146,11 @@ class BasePruner(abc.ABC):
                 del module._buffers['mask']
             delattr(module, 'mask')
 
-    def convert(self):
-        # TODO: Call the torch.ao.utils.convert in here
-        raise NotImplementedError('`convert` is not implemented. Please, use '
-                                  '`torch.ao.utils.convert` instead.')
-
     def get_module_pruned_outputs(self, module):
         r"""Returns the set of pruned indices of module"""
         assert parametrize.is_parametrized(module)  # can only get pruned indices of pruned module
-        return module.parametrizations.weight[0].pruned_outputs
+        assert module in {config['module'] for config in self.module_groups}  # check that module is in pruner.module_groups
+        return module.parametrizations.weight[0].pruned_outputs  # assume only one parametrization attached
 
     def manual_mask_update(self, module, pruned_outputs):
         r"""Updates mask of module with user-provided pruned outputs"""
@@ -212,7 +163,7 @@ class BasePruner(abc.ABC):
         with torch.no_grad():
             for config in self.module_groups:
                 if use_path:
-                    module = _fqn_to_module(self.model, config['fqn'])
+                    module = fqn_to_module(self.model, config['fqn'])
                 else:
                     module = config['module']
                 if type(module) in NEEDS_MANUAL_UPDATE:
