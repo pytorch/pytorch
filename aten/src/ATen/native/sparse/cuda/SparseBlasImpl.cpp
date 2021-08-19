@@ -157,7 +157,13 @@ void spgemm(
     const Scalar& beta,
     const Scalar& alpha,
     const at::sparse_csr::SparseCsrTensor& C) {
-
+#if defined(CUDA_VERSION) && CUDA_VERSION < 11000
+  TORCH_CHECK(
+      false,
+      "Calling addmm with sparse GPU tensors requires compiling ",
+      "PyTorch with CUDA 11+. ",
+      "Please use PyTorch built with newer CUDA version.");
+#else
   IntArrayRef A_sizes = A.sizes();
   auto ndim = A.dim();
   auto m = A_sizes[ndim - 2];
@@ -288,6 +294,7 @@ void spgemm(
             CUSPARSE_SPGEMM_DEFAULT,
             spgemm_desc.descriptor()));
       });
+#endif
 }
 
 } // anonymous namespace
