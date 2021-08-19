@@ -10,7 +10,7 @@ from torch.testing._internal.common_utils import \
     (TEST_WITH_ROCM, TestCase, run_tests, make_tensor, slowTest)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, onlyOnCPUAndCUDA,
-     skipCUDAIfRocm, onlyCUDA, dtypesIfCUDA, onlyCPU, largeTensorTest)
+     skipCUDAIfRocm, onlyCUDA, dtypesIfCUDA, dtypesIfCPU, onlyCPU, largeTensorTest)
 
 # TODO: remove this
 SIZE = 100
@@ -198,6 +198,29 @@ class TestSortAndSelect(TestCase):
     @dtypes(torch.float32)
     def test_sort_discontiguous_slow(self, device, dtype):
         self._test_sort_discontiguous(device, dtype)
+
+    @dtypes(torch.float32)
+    def test_sort_1d_output_discontiguous(self, device, dtype):
+        tensor = torch.randn(12, device=device, dtype=dtype)[:6]
+        values = torch.empty_like(tensor)[::2]
+        indices = torch.empty(18, device=device, dtype=torch.long)[::3]
+        torch.sort(tensor, out=(values, indices))
+        values_cont, indices_cont = tensor.sort()
+        self.assertEqual(indices, indices_cont)
+        self.assertEqual(values, values_cont)
+
+    @dtypes(torch.float32)
+    def test_topk_1d_output_discontiguous(self, device, dtype):
+        tensor = torch.randn(12, device=device, dtype=dtype)
+        values = torch.empty_like(tensor)[::2]
+        indices = torch.empty(18, device=device, dtype=torch.long)[::3]
+        for sorted in (True, False):
+            # outputs of `sorted=False` test are not guaranteed to be the same,
+            # but with current implementation they are
+            torch.topk(tensor, 6, sorted=sorted, out=(values, indices))
+            values_cont, indices_cont = tensor.topk(6, sorted=sorted)
+            self.assertEqual(indices, indices_cont)
+            self.assertEqual(values, values_cont)
 
     # FIXME: remove torch.bool from unsupported types once support is added for cub sort
     @dtypes(*set(torch.testing.get_all_dtypes()) - {torch.bool, torch.complex64, torch.complex128})
@@ -703,6 +726,7 @@ class TestSortAndSelect(TestCase):
                 self.assertEqual(expected_inverse.view(additional_shape), y_inverse)
                 self.assertEqual(expected_counts, y_counts)
 
+    @dtypesIfCPU(*set(torch.testing.get_all_dtypes()) - {torch.complex64, torch.complex128})
     @dtypes(*set(torch.testing.get_all_dtypes()) - {torch.bfloat16, torch.complex64, torch.complex128})
     def test_unique(self, device, dtype):
         if dtype is torch.half and self.device_type == 'cpu':
@@ -762,6 +786,7 @@ class TestSortAndSelect(TestCase):
                                 count += 1
                         self.assertEqual(j, count)
 
+    @dtypesIfCPU(*set(torch.testing.get_all_dtypes()) - {torch.complex64, torch.complex128})
     @dtypes(*set(torch.testing.get_all_dtypes()) - {torch.bfloat16, torch.complex64, torch.complex128})
     def test_unique_consecutive(self, device, dtype):
         if dtype is torch.half and self.device_type == 'cpu':

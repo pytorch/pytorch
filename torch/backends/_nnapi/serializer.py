@@ -418,6 +418,7 @@ class _NnapiSerializer(object):
             buf_num,
             offset,
             tsize))
+        # For NHWC NNAPI op, lay out data in the same dim order by permuting torch tensor
         if dim_order == DimOrder.CHANNELS_LAST:
             tensor = tensor.permute(0, 2, 3, 1)
         self.used_weights.append(tensor)
