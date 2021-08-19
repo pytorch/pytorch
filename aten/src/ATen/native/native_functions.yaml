@@ -2708,7 +2708,7 @@
 - func: matrix_exp(Tensor self) -> Tensor
   variants: function, method
 
-- func: linalg_matrix_exp_backward(Tensor self, Tensor grad) -> Tensor
+- func: matrix_exp_backward(Tensor self, Tensor grad) -> Tensor
 
 # DEPRECATED: Use torch.aminmax instead
 - func: _aminmax(Tensor self) -> (Tensor, Tensor)
