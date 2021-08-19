@@ -62,6 +62,27 @@ const std::string shape_compute_functions =
         def unary(self: List[int]):
           return _copy(self)
 
+        def expand(self: List[int], sizes: List[int]):
+          assert len(sizes) >= len(self)
+          ndim = len(sizes)
+          tensor_dim = len(self)
+          if ndim == 0:
+            return _copy(sizes)
+          out: List[int] = []
+          for i in range(ndim):
+            offset = ndim - 1 - i
+            dim = tensor_dim - 1 - offset
+            size = self[dim] if dim >=0 else 1
+            targetSize = sizes[i]
+            if targetSize == -1:
+              assert dim >= 0
+              targetSize = size
+            if size != targetSize:
+              assert size == 1
+              size = targetSize
+            out.append(size)
+          return out
+
         def infer_size_impl(shape: List[int], numel: int) -> List[int]:
           newsize = 1
           infer_dim: Optional[int] = None
@@ -479,8 +500,8 @@ static const OperatorMap<std::string>& get_schema_to_function_graph() {
       {"aten::relu(Tensor self) -> Tensor", "unary"},
       {"aten::permute(Tensor(a) self, int[] dims) -> Tensor(a)", "permute"},
       {"aten::view(Tensor(a) self, int[] size) -> Tensor(a)", "view"},
-      {"aten::expand_as(Tensor(a) self, Tensor other) -> Tensor(a)", "view"},
-      {"aten::expand(Tensor(a) self, int[] size, *, bool implicit=False) -> Tensor(a)", "view_one_unused"},
+      {"aten::expand_as(Tensor(a) self, Tensor other) -> Tensor(a)", "expand"},
+      {"aten::expand(Tensor(a) self, int[] size, *, bool implicit=False) -> Tensor(a)", "expand"},
       {"aten::mean.dim(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", "mean_dim"},
       {"aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor", "addmm"},
   };
