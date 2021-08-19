@@ -101,7 +101,7 @@ namespace {
 
 // This function is will ensure that the fw_grad_ is properly a view of the base for inplace ops on
 // Tensors that do not have forward grad originally.
-void AutogradMeta::set_fw_grad(const Variable& new_grad_, const Variable& self, uint64_t level, bool is_inplace_op) {
+void AutogradMeta::set_fw_grad(const at::TensorBase& new_grad_, const at::TensorBase& self, uint64_t level, bool is_inplace_op) {
   // Lazy initialization
   {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -124,7 +124,7 @@ void AutogradMeta::set_fw_grad(const Variable& new_grad_, const Variable& self, 
     // TODO(alband) remove this spurious version counter bump
     auto new_grad = new_grad_;
 
-    TORCH_CHECK(self.is_same_size(new_grad_), "Trying to set a forward gradient that has a different size than that "
+    TORCH_CHECK(at::is_same_size(self, new_grad_), "Trying to set a forward gradient that has a different size than that "
                 "of the original Tensor, this is not supported. Tensor is of size ", self.sizes(), " while the given "
                 "forward gradient is of size ", new_grad_.sizes(), ".");
 
@@ -182,7 +182,7 @@ void AutogradMeta::set_fw_grad(const Variable& new_grad_, const Variable& self, 
   }
 }
 
-const Variable& AutogradMeta::fw_grad(uint64_t level, const Variable& self) const {
+const at::TensorBase& AutogradMeta::fw_grad(uint64_t level, const at::TensorBase& self) const {
   // Ensure that concurent fw_grad() "reads" are thread safe
   std::lock_guard<std::mutex> lock(mutex_);
 

@@ -2,6 +2,10 @@
 
 // ${generated_comment}
 
+#ifdef TORCH_ASSERT_NO_OPERATORS
+#error "Operators.h was included in a file where it is disallowed"
+#endif
+
 #include <c10/core/Scalar.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/core/QScheme.h>

@@ -12,7 +12,7 @@ class TORCH_API OptionalTensorRef {
     ref_.unsafeReleaseTensorImpl();
   }
 
-  OptionalTensorRef(const Tensor& src)
+  OptionalTensorRef(const TensorBase& src)
       : ref_(Tensor::unsafe_borrow_t{}, src) {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(src.defined());
   }

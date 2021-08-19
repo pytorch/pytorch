@@ -43,7 +43,7 @@ auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
   // see Note [Thread Safety on Autograd Node]
   std::lock_guard<std::mutex> lock(mutex_);
 
-  at::Tensor& grad = variable.mutable_grad();
+  at::Tensor grad = variable.mutable_grad();
 
   // If the function has post hooks (for example, a DDP allreduce hook),
   // call_function in Engine.cpp will temporarily bump the expected refcount

@@ -6,7 +6,16 @@
 
 namespace at {
 
-void Tensor::enforce_invariants() {
+const TensorBase& get_tensor_base(const Tensor &t) {
+  return t;
+}
+
+TensorBase TensorBase::__dispatch_contiguous(c10::MemoryFormat memory_format) const {
+  OptionalTensorRef self(*this);
+  return at::_ops::contiguous::call(*self, memory_format);
+}
+
+void TensorBase::enforce_invariants() {
   if (impl_.get() == nullptr) {
     throw std::runtime_error("TensorImpl with nullptr is not supported");
   }
@@ -26,7 +35,7 @@ void Tensor::enforce_invariants() {
   }
 }
 
-void Tensor::print() const {
+void TensorBase::print() const {
   if (defined()) {
     std::cerr << "[" << toString() << " " << sizes() << "]" << std::endl;
   } else {
@@ -34,7 +43,7 @@ void Tensor::print() const {
   }
 }
 
-std::string Tensor::toString() const {
+std::string TensorBase::toString() const {
   std::string base_str;
   if (scalar_type() == ScalarType::Undefined) {
     base_str = "UndefinedType";
@@ -44,39 +53,39 @@ std::string Tensor::toString() const {
   return base_str;
 }
 
-Tensor Tensor::variable_data() const {
+TensorBase TensorBase::variable_data() const {
   return impl::GetVariableHooks()->variable_data(*this);
 }
 
-Tensor Tensor::tensor_data() const {
+TensorBase TensorBase::tensor_data() const {
   return impl::GetVariableHooks()->tensor_data(*this);
 }
 
-bool Tensor::is_leaf() const {
+bool TensorBase::is_leaf() const {
   return impl::GetVariableHooks()->is_leaf(*this);
 }
 
-int64_t Tensor::output_nr() const {
+int64_t TensorBase::output_nr() const {
   return impl::GetVariableHooks()->output_nr(*this);
 }
 
-void Tensor::set_data(const Tensor & new_data) const {
+void TensorBase::set_data(const TensorBase & new_data) const {
   impl::GetVariableHooks()->set_data(*this, new_data);
 }
 
-Tensor Tensor::data() const {
+TensorBase TensorBase::data() const {
   return impl::GetVariableHooks()->data(*this);
 }
 
-int64_t Tensor::_version() const {
+int64_t TensorBase::_version() const {
   return impl::GetVariableHooks()->_version(*this);
 }
 
-void Tensor::retain_grad() const {
+void TensorBase::retain_grad() const {
   impl::GetVariableHooks()->retain_grad(*this);
 }
 
-bool Tensor::retains_grad() const {
+bool TensorBase::retains_grad() const {
   return impl::GetVariableHooks()->retains_grad(*this);
 }
 
@@ -87,7 +96,7 @@ void Tensor::_backward(TensorList inputs,
   return impl::GetVariableHooks()->_backward(*this, inputs, gradient, keep_graph, create_graph);
 }
 
-const Tensor& Tensor::requires_grad_(bool _requires_grad) const {
+const TensorBase& TensorBase::requires_grad_(bool _requires_grad) const {
   impl::GetVariableHooks()->requires_grad_(*this, _requires_grad);
   return *this;
 }
@@ -95,15 +104,15 @@ const Tensor& Tensor::requires_grad_(bool _requires_grad) const {
 // View Variables
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-bool Tensor::is_view() const {
+bool TensorBase::is_view() const {
   return impl::GetVariableHooks()->is_view(*this);
 }
 
-const Tensor& Tensor::_base() const {
+const TensorBase& TensorBase::_base() const {
   return impl::GetVariableHooks()->base(*this);
 }
 
-const std::string& Tensor::name() const {
+const std::string& TensorBase::name() const {
   return impl::GetVariableHooks()->name(*this);
 }
 

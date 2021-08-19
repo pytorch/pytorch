@@ -248,13 +248,13 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
     return grad_;
   }
 
-  const Variable& grad() const override {
+  const at::TensorBase& grad() const override {
     return grad_;
   }
 
-  const Variable& fw_grad(uint64_t level, const Variable& self) const override;
+  const at::TensorBase& fw_grad(uint64_t level, const at::TensorBase& self) const override;
 
-  void set_fw_grad(const Variable& new_grad, const Variable& self, uint64_t level, bool is_inplace_op) override;
+  void set_fw_grad(const at::TensorBase& new_grad, const at::TensorBase& self, uint64_t level, bool is_inplace_op) override;
 
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   AutogradMeta(at::TensorImpl* self_impl = nullptr, bool requires_grad = false, Edge gradient_edge = Edge() ) {

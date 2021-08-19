@@ -71,7 +71,7 @@ at::Tensor& TensorImpl::mutable_grad() {
   return autograd_meta_->mutable_grad();
 }
 
-const at::Tensor& TensorImpl::grad() const {
+const at::TensorBase& TensorImpl::grad() const {
   // Yes, I know this looks really weird.  But I don't really have a choice as
   // long as this function returns a const reference to Tensor.  I'm not
   // really sure how I would have designed this API differently, but it
@@ -83,7 +83,7 @@ const at::Tensor& TensorImpl::grad() const {
   return autograd_meta_->grad();
 }
 
-const at::Tensor& TensorImpl::_fw_grad(uint64_t level, const at::Tensor& self)
+const at::TensorBase& TensorImpl::_fw_grad(uint64_t level, const at::TensorBase& self)
     const {
   // See TensorImpl::grad() above for explanation about the line below
   if (!autograd_meta_)
@@ -92,8 +92,8 @@ const at::Tensor& TensorImpl::_fw_grad(uint64_t level, const at::Tensor& self)
 }
 
 void TensorImpl::_set_fw_grad(
-    const at::Tensor& new_grad,
-    const at::Tensor& self,
+    const at::TensorBase& new_grad,
+    const at::TensorBase& self,
     uint64_t level,
     bool is_inplace_op) {
   if (!autograd_meta_)

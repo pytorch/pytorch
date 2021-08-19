@@ -22,7 +22,7 @@ THP_API PyObject *THPVariableClass;
 THP_API PyObject *ParameterClass;
 
 bool THPVariable_initModule(PyObject *module);
-THP_API PyObject * THPVariable_Wrap(torch::autograd::Variable var);
+THP_API PyObject * THPVariable_Wrap(const at::TensorBase &var);
 
 static inline bool THPVariable_CheckTypeExact(PyTypeObject* tp) {
   // Check that a python object is a `Tensor`, but not a `Tensor` subclass.

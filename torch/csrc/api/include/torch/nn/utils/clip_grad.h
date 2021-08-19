@@ -24,7 +24,7 @@ inline double clip_grad_norm_(
   std::vector<Tensor> params_with_grad;
 
   for (const auto& param : parameters) {
-    auto& grad = param.grad();
+    auto grad = param.grad();
     if (grad.defined()) {
       params_with_grad.push_back(param);
     }
