@@ -1022,6 +1022,7 @@ def sample_inputs_tensor_split(op_info, device, dtype, requires_grad, **kwargs):
         (torch.tensor([1, 2, 3]),),
         (torch.tensor(1),),
         (torch.tensor([1, 2, 3]), 1),
+        (torch.tensor([1, 4, 2, 5, 3, 6])[::2], 1),
         # Cases with list of indices.
         ((2, 4),),
         ((2, 4), 1),
@@ -7708,6 +7709,7 @@ op_db: List[OpInfo] = [
                                 active_if=(IS_MACOS or IS_WINDOWS)),
                    )),
     OpInfo('tensor_split',
+           ref=np.array_split,
            dtypes=all_types_and_complex_and(torch.bool),
            dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
