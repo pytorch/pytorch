@@ -1,7 +1,4 @@
-import torch
 from torch.fx import subgraph_rewriter
-from .quantization_types import Pattern
-from typing import Tuple, List, Callable, Dict
 from .graph_module import QuantizedGraphModule
 from .quantized_fusion_patterns_and_replacements import get_fbgemm_patterns_and_replacements
 
@@ -14,5 +11,4 @@ def _lower_to_native_backend(model: QuantizedGraphModule) -> QuantizedGraphModul
     for pattern, replacement in get_fbgemm_patterns_and_replacements():
         subgraph_rewriter.replace_pattern(model, pattern, replacement)
     model.graph.lint()
-    model.recompile()
     return model
