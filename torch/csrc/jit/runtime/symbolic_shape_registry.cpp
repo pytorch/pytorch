@@ -83,6 +83,9 @@ const std::string shape_compute_functions =
             out.append(size)
           return out
 
+        def expand_one_unused(self: List[int], sizes: List[int], inp0: Any):
+          return expand(self, sizes)
+
         def view(self: List[int], sizes: List[int]):
           # TODO: add assertions to check whether requested dims are valid
           out: List[int] = []
@@ -484,7 +487,7 @@ static const OperatorMap<std::string>& get_schema_to_function_graph() {
       {"aten::permute(Tensor(a) self, int[] dims) -> Tensor(a)", "permute"},
       {"aten::view(Tensor(a) self, int[] size) -> Tensor(a)", "view"},
       {"aten::expand_as(Tensor(a) self, Tensor other) -> Tensor(a)", "expand"},
-      {"aten::expand(Tensor(a) self, int[] size, *, bool implicit=False) -> Tensor(a)", "expand"},
+      {"aten::expand(Tensor(a) self, int[] size, *, bool implicit=False) -> Tensor(a)", "expand_one_unused"},
       {"aten::mean.dim(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", "mean_dim"},
       {"aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor", "addmm"},
   };
