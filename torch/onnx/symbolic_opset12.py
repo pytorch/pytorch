@@ -213,7 +213,7 @@ def unfold(g, input, dimension, size, step):
         return _unimplemented("Unfold", "input size not accessible")
 
 @parse_args("v", "v", "is", "is", "v")
-def tensordot(g, input_a, input_b, dims_a, dims_b, out=None):
+def linalg_tensordot(g, input_a, input_b, dims_a, dims_b, out=None):
     if out is not None:
         _unimplemented("Tensordot", "Out parameter is not supported for tensordot.")
 
