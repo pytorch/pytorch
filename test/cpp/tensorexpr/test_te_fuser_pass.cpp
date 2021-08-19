@@ -15,8 +15,7 @@ namespace jit {
 using namespace torch::jit::tensorexpr;
 
 struct WithCPUFuser {
-  WithCPUFuser(bool val = true)
-      : cpuFuserEnabled(canFuseOnCPU()) {
+  WithCPUFuser(bool val = true) : cpuFuserEnabled(canFuseOnCPU()) {
     overrideCanFuseOnCPU(val);
   }
 
