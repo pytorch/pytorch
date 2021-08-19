@@ -66,14 +66,13 @@ from torch.testing._internal.common_utils import (
     sandcastle_skip_if,
 )
 
+from torch.distributed.optim import functional_optim_map
+
 if not IS_WINDOWS:
     import torch.distributed.optim.post_localSGD_optimizer as post_localSGD_optimizer
     from torch.distributed.optim.functional_sgd import _FunctionalSGD
     from torch.distributed.optim.functional_adam import _FunctionalAdam
-    _SUPPORTED_OPTIM_MAPPING = {
-        _FunctionalSGD: torch.optim.SGD,
-        _FunctionalAdam: torch.optim.Adam
-    }
+    from torch.distributed.optim.functional_adamw import _FunctionalAdamW
 
 from torch.utils.data.distributed import DistributedSampler
 
@@ -3947,7 +3946,8 @@ class DistributedTest:
                     if static_graph:
                         ddp_model_with_no_hook._set_static_graph()
 
-                    optimizer_no_hook = _SUPPORTED_OPTIM_MAPPING.get(functional_optim_cls)(
+                    mapping = {v: k for k, v in functional_optim_map.items()}
+                    optimizer_no_hook = mapping.get(functional_optim_cls)(
                         ddp_model_with_no_hook.parameters(),
                         *functional_optim_args,
                         **functional_optim_kwargs,
@@ -3998,6 +3998,32 @@ class DistributedTest:
                         list(ddp_model_with_optimizer_hook.parameters()),
                     )
                     dist.barrier()
+
+        @sandcastle_skip_if(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only Nccl & Gloo backend support DistributedDataParallel",
+        )
+        @sandcastle_skip_if(
+            IS_WINDOWS,
+            "FunctionalAdam not yet supported with Windows, see https://github.com/pytorch/pytorch/issues/62137"
+        )
+        @skip_if_lt_x_gpu(2)
+        @skip_if_rocm
+        def test_ddp_hook_with_optimizer_parity_adamw(self):
+            for grad_as_bucket_view, static_graph in itertools.product(
+                [True, False], [True, False]
+            ):
+                adamw_lr = 1e-2
+                adamw_betas = (0.9, 0.99)
+                adamw_eps = 1e-6
+                self._test_ddp_hook_with_optimizer_parity(
+                    grad_as_bucket_view,
+                    static_graph,
+                    _FunctionalAdamW,
+                    adamw_lr,
+                    betas=adamw_betas,
+                    eps=adamw_eps,
+                )
 
         @sandcastle_skip_if(
             BACKEND != "nccl" and BACKEND != "gloo",
@@ -4093,20 +4119,13 @@ class DistributedTest:
                 grad_hook = net_with_hook.module.weight.grad
                 avg_hook = grad_hook.clone()
                 # Verify hook grad with expected.
-                # Cannot use exact match here due to a very small accuracy loss,
-                # e.g. 1e-05, for powerSGD hook case.
-                assert_func = (
-                    self.assertEqual
-                    if hook == default.allreduce_hook
-                    else torch.testing.assert_allclose
-                )
-                assert_func(
-                    avg_hook[0, 0],
+                self.assertEqual(
+                    avg_hook[0, 0].item(),
                     expected_grad,
                     msg=f"Expected hook grad of {expected_grad} but got {avg_hook[0, 0]}",
                 )
                 # Verify hook grad with vanilla allreduce
-                assert_func(
+                self.assertEqual(
                     avg_hook[0, 0],
                     avg[0, 0],
                     msg=f"Expected hook grad to be close to allreduce {avg[0, 0]}, but got {avg_hook[0, 0]}",
@@ -4911,8 +4930,8 @@ class DistributedTest:
                 model.module.running_mean,
                 model.module.running_var,
             )
-            torch.testing.assert_allclose(running_mean, all_input_var.mean(1))
-            torch.testing.assert_allclose(running_var, all_input_var.var(1))
+            torch.testing.assert_close(running_mean, all_input_var.mean(1))
+            torch.testing.assert_close(running_var, all_input_var.var(1))
 
         @sandcastle_skip_if(
             BACKEND != "nccl" and BACKEND != "gloo",
@@ -7867,6 +7886,7 @@ class DistributedTest:
             torch.cuda.set_device(self.rank)
             default_bucket_cap_mb = 25 * (1024 ** 2)
             first_bucket_bytes_mb = dist._DEFAULT_FIRST_BUCKET_BYTES
+            os.environ["DDP_SET_LAST_BUCKET_CAP"] = "1"
 
             class MyModel(nn.Module):
                 def __init__(self):
@@ -7884,32 +7904,24 @@ class DistributedTest:
                 device_ids=[self.rank]
             )
             inp = torch.randn(10, 2)
+            rebuilt_bucket_index = 2
             for i in range(6):
                 out = ddp(inp).sum()
                 out.backward()
                 logging_data = ddp._get_ddp_logging_data()
-                if i < 2:
-                    bucket_size_limits = [
-                        int(b) for b in logging_data["initial_bucket_size_limits"].split(", ")
-                    ]
-                    # first_bucket_bytes is actually the last because we reverse
-                    # parameter bucket order.
-                    self.assertEqual(bucket_size_limits[-1], first_bucket_bytes_mb)
-                    for j, bucket_size in enumerate(bucket_size_limits):
-                        if j != len(bucket_size_limits) - 1:
-                            self.assertEqual(bucket_size, default_bucket_cap_mb)
-                else:
-                    bucket_size_limits = [
-                        int(b) for b in logging_data["rebuilt_bucket_size_limits"].split(", ")
-                    ]
-                    # TODO: rebuild buckets places first bucket at beginning, but
-                    # might be better to move it to end.
-                    self.assertEqual(
-                        bucket_size_limits[0], first_bucket_bytes_mb
-                    )
-                    for j, bucket_size in enumerate(bucket_size_limits):
-                        if j != 0:
-                            self.assertEqual(bucket_size, default_bucket_cap_mb)
+                bucket_size_limits = [
+                    int(b) for b in logging_data[
+                        "{}_bucket_size_limits".format(
+                            "initial" if i < rebuilt_bucket_index else "rebuilt"
+                        )
+                    ].split(", ")
+                ]
+                # first_bucket_bytes is actually the last because we reverse
+                # parameter bucket order under DDP_SET_LAST_BUCKET_CAP flag.
+                self.assertEqual(bucket_size_limits[-1], first_bucket_bytes_mb)
+                for j, bucket_size in enumerate(bucket_size_limits):
+                    if j != len(bucket_size_limits) - 1:
+                        self.assertEqual(bucket_size, default_bucket_cap_mb)
 
         @skip_if_lt_x_gpu(2)
         @sandcastle_skip_if(

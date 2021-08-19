@@ -243,11 +243,12 @@ endif()
 # --- [ PocketFFT
 set(AT_POCKETFFT_ENABLED 0)
 if(NOT MKL_FOUND)
-  find_path(POCKETFFT_INCLUDE_DIR NAMES pocketfft_hdronly.h
-            PATHS /usr/local/include
-            PATHS $ENV{POCKETFFT_HOME}
+  find_path(POCKETFFT_INCLUDE_DIR NAMES pocketfft_hdronly.h PATHS
+            /usr/local/include
+            "$ENV{POCKETFFT_HOME}"
+            "${PROJECT_SOURCE_DIR}/third_party/pocketfft"
            )
-  if(POCKETFFT_INCLUDE_DIR)
+  if(POCKETFFT_INCLUDE_DIR AND CMAKE_VERSION VERSION_GREATER "3.9")
     set(AT_POCKETFFT_ENABLED 1)
   endif()
 endif()
@@ -1879,6 +1880,10 @@ set_target_properties(fmt-header-only PROPERTIES INTERFACE_COMPILE_FEATURES "")
 
 list(APPEND Caffe2_DEPENDENCY_LIBS fmt::fmt-header-only)
 set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS} CACHE BOOL "Build shared libs" FORCE)
+
+if(USE_BREAKPAD)
+  add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/breakpad)
+endif()
 
 # ---[ Kineto
 # edge profiler depends on KinetoProfiler but it only does cpu
