@@ -164,7 +164,7 @@ class LowRankMultivariateNormal(Distribution):
         # where :math:`C` is the capacitance matrix.
         Wt_Dinv = (self._unbroadcasted_cov_factor.transpose(-1, -2)
                    / self._unbroadcasted_cov_diag.unsqueeze(-2))
-        A = torch.triangular_solve(Wt_Dinv, self._capacitance_tril, upper=False)[0]
+        A = torch.linalg.triangular_solve(self._capacitance_tril, Wt_Dinv, upper=False)
         precision_matrix = (torch.diag_embed(self._unbroadcasted_cov_diag.reciprocal())
                             - torch.matmul(A.transpose(-1, -2), A))
         return precision_matrix.expand(self._batch_shape + self._event_shape +
