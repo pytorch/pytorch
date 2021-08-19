@@ -54,6 +54,8 @@ void handleBlock(Block *b) override{
     Value* op_value = n->inputs().at(0);
     auto weight = n->namedInput("weight");
     auto bias = n->namedInput("bias");
+
+    // make sure that weights can be cast as tensors and are not just opaque pointers
     if (!constant_as<Tensor>(weight).has_value() || !constant_as<Tensor>(bias).has_value()){
       continue;
     }
@@ -62,7 +64,6 @@ void handleBlock(Block *b) override{
       // it is shown to have big improvements
       continue;
     }
-    // make sure that weights can be cast as tensors and are not just opaque pointers
 
     if (tensorUsers.find(op_value) == tensorUsers.cend()){
       tensorUsers.insert({op_value, std::list<Node*>()});
@@ -149,17 +150,19 @@ void handleBlock(Block *b) override{
       linear_node->insertBefore(base_node);
 
       // Edit the outputs
-      int cur_loc = 0;
+      long long cur_loc = 0;
       Value* cur_val = zero;
       for(auto& orig_node : matching_nodes){
         Tensor out_tensor = constant_as<Tensor>(orig_node->output()).value();
-        int next_loc = cur_loc + out_tensor.size(0);
+        long long next_loc = cur_loc + out_tensor.size(0);
         Value* next_val = graph_->insertConstant(next_loc);
 
         auto slice = graph_->create(
             aten::slice, {linear_node->output(), zero, cur_val, next_val, one});
         slice->insertAfter(linear_node);
-
+        
+        cur_loc = next_loc;
+        cur_val = next_val;
         orig_node->replaceAllUsesWith(slice);
         orig_node->destroy();
       }
