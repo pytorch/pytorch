@@ -35,7 +35,7 @@ void RegisterCodeGenList::AddStmtFactoryMethod(
 
 std::unique_ptr<CodeGen> CreateCodeGen(
     const std::string& name,
-    Stmt* stmt,
+    StmtPtr stmt,
     const std::vector<CodeGen::BufferArg>& params,
     at::Device device,
     const std::string& kernel_func_name) {
@@ -44,7 +44,7 @@ std::unique_ptr<CodeGen> CreateCodeGen(
   return method(stmt, params, device, kernel_func_name);
 }
 
-Expr* GenericIntrinsicsExpander::mutate(Intrinsics* v) {
+ExprPtr GenericIntrinsicsExpander::mutate(IntrinsicsPtr v) {
   if (v->op_type() == kSigmoid) {
     auto x = v->param(0)->accept_mutator(this);
     auto one = expr_to_vec(
