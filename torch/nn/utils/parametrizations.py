@@ -1,3 +1,4 @@
+from re import S
 import torch
 from ..utils import parametrize
 from ..modules import Module
@@ -49,7 +50,7 @@ class _SpectralNorm(Module):
 
         return weight.flatten(1)
 
-    @torch.autograd.no_grad()
+    # @torch.autograd.no_grad()
     def _power_method(self, weight_mat: torch.Tensor, n_power_iterations: int) -> None:
         # See original note at torch/nn/utils/spectral_norm.py
         # NB: If `do_power_iteration` is set, the `u` and `v` vectors are
@@ -84,15 +85,19 @@ class _SpectralNorm(Module):
 
         # Precondition
         assert weight_mat.ndim > 1
-
         for _ in range(n_power_iterations):
             # Spectral norm of weight equals to `u^T W v`, where `u` and `v`
             # are the first left and right singular vectors.
             # This power iteration produces approximations of `u` and `v`.
-            self._u = F.normalize(torch.mv(weight_mat, self._v),      # type: ignore[has-type]
-                                  dim=0, eps=self.eps, out=self._u)   # type: ignore[has-type]
-            self._v = F.normalize(torch.mv(weight_mat.t(), self._u),
-                                  dim=0, eps=self.eps, out=self._v)   # type: ignore[has-type]
+            u = self._u.clone(memory_format=torch.preserve_format)
+            v = self._v.clone(memory_format=torch.preserve_format)
+            weight_mat = weight_mat.clone()
+            u = F.normalize(torch.mv(weight_mat, v),     # type: ignore[has-type]
+                                  dim=0, eps=self.eps)   # type: ignore[has-type]
+            v = F.normalize(torch.mv(weight_mat.t(), u),
+                                  dim=0, eps=self.eps)   # type: ignore[has-type]
+            self._u.copy_(u)
+            self._v.copy_(v)
 
     def forward(self, weight: torch.Tensor) -> torch.Tensor:
         if weight.ndim == 1:
@@ -103,12 +108,13 @@ class _SpectralNorm(Module):
             if self.training:
                 self._power_method(weight_mat, self.n_power_iterations)
             # See above on why we need to clone
-            u = self._u.clone(memory_format=torch.contiguous_format)
-            v = self._v.clone(memory_format=torch.contiguous_format)
+            u = self._u.clone(memory_format=torch.preserve_format)
+            v = self._v.clone(memory_format=torch.preserve_format)
             # The proper way of computing this should be through F.bilinear, but
             # it seems to have some efficiency issues:
             # https://github.com/pytorch/pytorch/issues/58093
             sigma = torch.dot(u, torch.mv(weight_mat, v))
+
             return weight / sigma
 
     def right_inverse(self, value: torch.Tensor) -> torch.Tensor:

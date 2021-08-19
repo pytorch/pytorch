@@ -4171,14 +4171,14 @@ class TestNN(NNTestCase):
 
             for requires_grad in (True, False):
                 def get_modules():
-                    m = nn.Linear(3, 4).to(device)
+                    m = nn.Linear(3, 4).to(device=device, dtype=torch.double)
                     m.weight.requires_grad_(requires_grad)
                     m = torch.nn.utils.parametrizations.spectral_norm(m)
                     wrapped_m = maybe_wrap(m)
                     spectral_norm_m = m.parametrizations.weight[0]
                     return m, wrapped_m, spectral_norm_m
 
-                input = torch.randn(2, 3, device=device)
+                input = torch.randn(2, 3, device=device, dtype=torch.double)
 
                 m, wrapped_m, spectral_norm_m = get_modules()
 
@@ -4192,7 +4192,9 @@ class TestNN(NNTestCase):
                 opt = torch.optim.SGD(wrapped_m.parameters(), lr=0.1)
 
                 opt.zero_grad()
-                wrapped_m(input).sum().backward()
+                # We need this retain_graph because _u is a function of computations
+                # from the previous forward!
+                wrapped_m(input).sum().backward(retain_graph=True)
                 opt.step()
 
                 out = wrapped_m(input)
@@ -4205,7 +4207,11 @@ class TestNN(NNTestCase):
                 # can't use gradcheck because the function changes as we
                 # activate through it in training mode
                 if requires_grad:
-                    torch.autograd.grad(out.sum(), m.parametrizations.weight.original)
+                    torch.autograd.grad(out.sum(), m.parametrizations.weight.original, retain_graph=True)
+
+                # Get a fresh copy of the module, so u, v aren't connected to old graph
+                # gradcheck would fail otherwise
+                m, wrapped_m, spectral_norm_m = get_modules()
 
                 # test backward works with multiple forwards
                 # it uses training mode so we need to reset `u` and `v` vectors
@@ -4213,17 +4219,14 @@ class TestNN(NNTestCase):
                 saved_u = spectral_norm_m._u.clone()
                 saved_v = spectral_norm_m._v.clone()
 
-                def fn(input):
+                def fn(input, _):
                     spectral_norm_m._u.data.copy_(saved_u)
                     spectral_norm_m._v.data.copy_(saved_v)
                     out0 = wrapped_m(input)
                     out1 = wrapped_m(input)
                     return out0 + out1
 
-                # Make sure we can compute gradients wrt to all the parameters in the case
-                # of double forward
-                fn(input.clone().requires_grad_()).sum().backward()
-                gradcheck(fn, (input.clone().requires_grad_(),), check_batched_grad=False)
+                gradcheck(fn, (input.clone().requires_grad_(True), m.parametrizations.weight.original), check_batched_grad=False, check_undefined_grad=False)
 
                 # test removing
                 # spectral norm module needs to be in eval mode if we'd like to
@@ -4283,14 +4286,14 @@ class TestNN(NNTestCase):
                     out3 = wrapped_m(input)
                     return out0 + out1 + out2 + out3
 
-                gradcheck(fn, (input.clone().requires_grad_(),))
+                gradcheck(fn, (input.clone().requires_grad_(),), check_undefined_grad=False)
 
                 # assert that backprop reaches weight_orig in eval
                 if requires_grad:
                     def fn(weight):
                         return wrapped_m(input)
 
-                    gradcheck(fn, (m.parametrizations.weight.original,))
+                    gradcheck(fn, (m.parametrizations.weight.original,), check_undefined_grad=False)
 
     def test_new_spectral_norm_load_state_dict(self):
         for activate_times in (0, 3):
