@@ -535,15 +535,14 @@ means the same memory addresses are used.
 By filling input memory with new data (e.g., from a new batch) before each replay,
 you can rerun the same work on new data.
 
+Why CUDA Graphs?
+^^^^^^^^^^^^^^^^
+
 Replaying a graph sacrifices the dynamic flexibility of typical eager execution in exchange for
-**greatly reduced CPU overhead**.
-
-Eager execution runs deep, often CPU-intensive Python, C++, and CUDA library call chains
-to set up arguments, dispatch them to kernels, and launch kernels one at a time.
-
-By contrast, a graph's arguments and kernels are fixed, so a graph replay elides the
-eager CPU plumbing (under the hood, a replay submits the entire graph's work to the GPU with
-a single call to `cudaGraphLaunch`_).  Kernels in a replay also execute slightly faster
+**greatly reduced CPU latency**. A graph's arguments and kernels are fixed, so graph replay
+skips all layers of argument setup and kernel dispatch, including Python, C++, and CUDA driver
+overheads. Under the hood, a replay submits the entire graph's work to the GPU with
+a single call to `cudaGraphLaunch`_.  Kernels in a replay also execute slightly faster
 on the GPU, but eliding CPU overhead is the main benefit.
 
 You should try CUDA graphs if all or part of your network is graph-safe (usually this means
