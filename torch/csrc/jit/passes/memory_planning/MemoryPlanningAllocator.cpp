@@ -3,7 +3,7 @@
 #include <sstream> //for std::stringstream
 
 #include <c10/util/Backtrace.h>
-#include <torch/csrc/autograd/profiler_kineto.h>
+#include <torch/csrc/jit/mobile/interpreter.h>
 
 static void DoNothing(void* ptr) {
   return;
@@ -66,19 +66,26 @@ struct MemoryTracingAllocator final : at::Allocator {
     auto orig_ptr = orig_allocator_.allocate(nbytes);
 
     auto bt = c10::get_backtrace(0, 200, true);
+    TORCH_INTERNAL_ASSERT(torch::jit::currentFrameId().has_value());
+    auto frame_node_id = torch::jit::currentFrameId().value();
     allocation_traces_.emplace_back(MemEvent{
-        timeSinceEpoch(std::chrono::system_clock::now()),
+        frame_node_id.pc,
         bt,
         dataPtrAddrToStr(orig_ptr.get()),
+        frame_node_id.node_schema,
+        frame_node_id.node_header,
         nbytes,
         MemEvent::EventType::Allocate});
     allocations_.insert({orig_ptr.get(), nbytes});
 
     auto deleter = [this, &bt, &nbytes](void* ptr) {
+      auto frame_node_id = torch::jit::currentFrameId().value();
       allocation_traces_.emplace_back(MemEvent{
-          timeSinceEpoch(std::chrono::system_clock::now()),
+          frame_node_id.pc,
           bt,
           dataPtrAddrToStr(ptr),
+          frame_node_id.node_schema,
+          frame_node_id.node_header,
           nbytes,
           MemEvent::EventType::Free});
       return DoNothing(ptr);

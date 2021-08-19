@@ -11,17 +11,23 @@ struct TORCH_API MemEvent {
   uint64_t time;
   std::string allocation_trace;
   std::string ptr_addr;
+  std::string node_schema;
+  std::string node_header;
   uint64_t size;
   EventType type;
   MemEvent(
       uint64_t t,
       std::string alloc_trace,
       std::string address,
+      std::string node_schem,
+      std::string node_head,
       uint64_t s,
       EventType e)
       : time(t),
         allocation_trace(std::move(alloc_trace)),
         ptr_addr(std::move(address)),
+        node_schema(std::move(node_schem)),
+        node_header(std::move(node_head)),
         size(s),
         type(e) {}
 

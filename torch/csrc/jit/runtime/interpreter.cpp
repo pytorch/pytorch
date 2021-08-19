@@ -800,6 +800,13 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     return entries;
   }
 
+  FrameNodeId currentFrameId() const {
+    auto& frame = frames.back();
+    Node* node = frame.function->instructions_source_[frame.pc];
+
+    return {frame.pc, canonicalSchemaString(node->schema()), getHeader(node)};
+  }
+
   c10::intrusive_ptr<Future> getOrCreateFuture() {
     if (!future_) {
       future_ =
@@ -838,6 +845,13 @@ std::vector<StackEntry> currentCallstack() {
     return cs;
   }
   return std::vector<StackEntry>();
+}
+
+c10::optional<FrameNodeId> currentFrameId() {
+  if (tls_int_state_ptr_) {
+    return tls_int_state_ptr_->currentFrameId();
+  }
+  return c10::nullopt;
 }
 
 std::ostream& operator<<(std::ostream& out, const Code& code) {
