@@ -24,7 +24,8 @@ enum class DebugDumpOption {
   EffectiveBandwidth, //! Measure kernel performance and print effective
                       //! bandwidth
   FusionSegmentsDrawing, //!< Dump Segmented Fusion Graph
-  PrintPtxasLog //!< Print the ptxas verbose log including register usage
+  PrintPtxasLog, //!< Print the ptxas verbose log including register usage
+  ParallelDimensions //!< Dump known parallel dimensions
 };
 
 bool isDebugDumpEnabled(DebugDumpOption option);

@@ -697,7 +697,10 @@ void IndexCompute::run() {
 
 kir::Val* IndexCompute::getExtent(kir::IterDomain* id) {
   if (isParallelTypeThread(id->parallelType())) {
-    return kir::NamedScalar::getParallelDim(id->parallelType());
+    auto parallel_dim =
+        GpuLower::current()->parallelDimensionMap().get(id->parallelType());
+    TORCH_INTERNAL_ASSERT(parallel_dim != nullptr);
+    return parallel_dim;
   } else if (extent_map_.find(id) != extent_map_.end()) {
     return extent_map_.at(id);
   } else {

@@ -291,6 +291,11 @@ void GpuLower::lower() {
 
   validateParallelize(fusion_);
 
+  parallelDimensionMap().build(fusion_);
+  if (isDebugDumpEnabled(DebugDumpOption::ParallelDimensions)) {
+    std::cout << parallelDimensionMap().toString();
+  }
+
   // Scan the whole fusion and build mappings about halo extensions of
   // all IterDomains
   haloInfo().build(fusion_);

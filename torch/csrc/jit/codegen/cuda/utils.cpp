@@ -26,7 +26,8 @@ auto parseDebugDumpOptions() {
       {DebugDumpOption::PrintRuntimeArgs, false},
       {DebugDumpOption::EffectiveBandwidth, false},
       {DebugDumpOption::FusionSegmentsDrawing, false},
-      {DebugDumpOption::PrintPtxasLog, false}};
+      {DebugDumpOption::PrintPtxasLog, false},
+      {DebugDumpOption::ParallelDimensions, false}};
 
   if (const char* dump_options = std::getenv("PYTORCH_NVFUSER_DUMP")) {
     c10::string_view options_view(dump_options);
@@ -57,6 +58,8 @@ auto parseDebugDumpOptions() {
         options_map[DebugDumpOption::FusionSegmentsDrawing] = true;
       } else if (token == "ptxas_verbose") {
         options_map[DebugDumpOption::PrintPtxasLog] = true;
+      } else if (token == "parallel_dimensions") {
+        options_map[DebugDumpOption::ParallelDimensions] = true;
       } else {
         TORCH_CHECK(
             false,
@@ -65,7 +68,7 @@ auto parseDebugDumpOptions() {
             "'\nAvailable options:\n",
             "\tfusion_ir, fusion_ir_math, kernel_ir, cuda_kernel, cuda_full,\n",
             "\tcuda_to_file, launch_param, segmented_fusion, print_args,\n",
-            "\tdump_eff_bandwidth, draw_segmented_fusion\n");
+            "\tdump_eff_bandwidth, draw_segmented_fusion, parallel_dimensions\n");
       }
       options_view = (end_pos != c10::string_view::npos)
           ? options_view.substr(end_pos + 1)

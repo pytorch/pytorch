@@ -529,6 +529,7 @@ libtorch_cuda_core_sources = [
     "torch/csrc/jit/codegen/cuda/mutator.cpp",
     "torch/csrc/jit/codegen/cuda/ops/composite.cpp",
     "torch/csrc/jit/codegen/cuda/ops/normalization.cpp",
+    "torch/csrc/jit/codegen/cuda/parallel_dimension_map.cpp",
     "torch/csrc/jit/codegen/cuda/parallel_type_bitmap.cpp",
     "torch/csrc/jit/codegen/cuda/parser.cpp",
     "torch/csrc/jit/codegen/cuda/partition.cpp",

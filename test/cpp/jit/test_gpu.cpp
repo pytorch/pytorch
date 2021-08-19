@@ -1167,32 +1167,32 @@ TEST(NVFuserTest, FusionParser_CUDA) {
   // 2. use a fuzzy compare (ignore non-significant whitespaces for example)
   const std::string expected_kernel = R"(
 __global__ void CUDAGeneratedKernel(Tensor<float, 1> T0, Tensor<float, 1> T1, Tensor<float, 1> T3) {
-  if ((((((((((nvfuser_index_t)blockIdx.x) * 1) + (1 - 1)) * 1) + (1 - 1)) * ((nvfuser_index_t)blockDim.x)) + ((nvfuser_index_t)threadIdx.x)) < T0.size[0])) {
-    constexpr nvfuser_index_t ki167 = 0;
+  if ((((((((((nvfuser_index_t)blockIdx.x) * 1) + (1 - 1)) * 1) + (1 - 1)) * 128) + ((nvfuser_index_t)threadIdx.x)) < T0.size[0])) {
+    constexpr nvfuser_index_t ki169 = 0;
     float T5[1];
-    constexpr nvfuser_index_t ki201 = 0;
-    T5[ki201] = 0;
-    constexpr nvfuser_index_t ki192 = 0;
-    T5[ki192]
-       = T1[(((((((((nvfuser_index_t)blockIdx.x) * 1) + ki167) * 1) + ki192) * ((nvfuser_index_t)blockDim.x)) + ((nvfuser_index_t)threadIdx.x)) * 1)];
+    constexpr nvfuser_index_t ki203 = 0;
+    T5[ki203] = 0;
+    constexpr nvfuser_index_t ki194 = 0;
+    T5[ki194]
+       = T1[(((((((((nvfuser_index_t)blockIdx.x) * 1) + ki169) * 1) + ki194) * 128) + ((nvfuser_index_t)threadIdx.x)) * 1)];
     float T4[1];
-    constexpr nvfuser_index_t ki207 = 0;
-    T4[ki207] = 0;
-    constexpr nvfuser_index_t ki187 = 0;
-    T4[ki187]
-       = T0[(((((((((nvfuser_index_t)blockIdx.x) * 1) + ki167) * 1) + ki187) * ((nvfuser_index_t)blockDim.x)) + ((nvfuser_index_t)threadIdx.x)) * 1)];
+    constexpr nvfuser_index_t ki209 = 0;
+    T4[ki209] = 0;
+    constexpr nvfuser_index_t ki189 = 0;
+    T4[ki189]
+       = T0[(((((((((nvfuser_index_t)blockIdx.x) * 1) + ki169) * 1) + ki189) * 128) + ((nvfuser_index_t)threadIdx.x)) * 1)];
     float T6[1];
-    constexpr nvfuser_index_t ki176 = 0;
+    constexpr nvfuser_index_t ki178 = 0;
     float T2[1];
     T2[0]
-      = T4[ki176]
-      * T5[ki176];
-    T6[ki176]
+      = T4[ki178]
+      * T5[ki178];
+    T6[ki178]
       = T2[0]
-      * T4[ki176];
-    constexpr nvfuser_index_t ki169 = 0;
-    T3[(((((((((nvfuser_index_t)blockIdx.x) * 1) + ki167) * 1) + ki169) * ((nvfuser_index_t)blockDim.x)) + ((nvfuser_index_t)threadIdx.x)) * 1)]
-       = T6[ki169];
+      * T4[ki178];
+    constexpr nvfuser_index_t ki171 = 0;
+    T3[(((((((((nvfuser_index_t)blockIdx.x) * 1) + ki169) * 1) + ki171) * 128) + ((nvfuser_index_t)threadIdx.x)) * 1)]
+       = T6[ki171];
   }
 }
 )";
@@ -1206,6 +1206,17 @@ __global__ void CUDAGeneratedKernel(Tensor<float, 1> T0, Tensor<float, 1> T1, Te
         << " \n ========= EXPECTED ========= \n"
         << expected_kernel << "\n========= ACTUAL ========== \n"
         << actual_kernel << "\n=================" << std::endl;
+    auto it = std::mismatch(
+        expected_kernel.begin(),
+        expected_kernel.end(),
+        actual_kernel.begin(),
+        actual_kernel.end());
+    std::string actual_mismatched_snippet(it.second, actual_kernel.end());
+    actual_mismatched_snippet = actual_mismatched_snippet.substr(0, 10);
+    std::string expected_mismatched_snippet(it.first, expected_kernel.end());
+    expected_mismatched_snippet = expected_mismatched_snippet.substr(0, 10);
+    std::cerr << "First mismatch found at: " << actual_mismatched_snippet
+              << ", expected: " << expected_mismatched_snippet << std::endl;
     TORCH_CHECK(false);
   }
 
@@ -15741,6 +15752,284 @@ TEST(NVFuserTest, FusionIssue1021_CUDA) {
   auto ref = (t0 + 1).unsqueeze(-1);
 
   testValidate(&fusion, outputs, inputs, {ref}, __LINE__, __FILE__);
+}
+
+// Reproducer of issue #1053
+TEST(NVFuserTest, FusionNonUniqueThreadDim_CUDA) {
+  auto fusion = std::make_unique<Fusion>();
+  FusionGuard fg(fusion.get());
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion->addInput(tv0);
+  auto tv1 = sum(tv0, {0});
+  fusion->addOutput(tv1);
+
+  auto tv2 = add(tv0, new Double(1));
+  fusion->addOutput(tv2);
+
+  tv1->split(0, 8);
+  auto tv1_rf = tv1->rFactor({-1});
+
+  tv1_rf->computeAt(tv1, 1);
+
+  tv1_rf->axis(-1)->parallelize(ParallelType::TIDx);
+
+  tv2->axis(0)->parallelize(ParallelType::TIDx);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input1 = at::randn({32}, options);
+
+  auto at_tv1 = (input1).sum({0});
+  auto at_tv2 = input1 + 1;
+
+  FusionExecutor fe;
+  fe.compileFusion(fusion.get());
+  auto outputs = fe.runFusion({input1});
+  testValidate(
+      fusion.get(), outputs, {input1}, {at_tv1, at_tv2}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionParallelDimensionMap1_CUDA) {
+  auto fusion = std::make_unique<Fusion>();
+  FusionGuard fg(fusion.get());
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion->addInput(tv0);
+  auto tv1 = add(tv0, new Double(1));
+  auto tv2 = add(tv0, new Double(1));
+  fusion->addOutput(tv1);
+  fusion->addOutput(tv2);
+
+  tv1->split(0, 8, false);
+  tv1->axis(1)->parallelize(ParallelType::TIDx);
+  tv2->split(0, 8, false);
+  tv2->axis(1)->parallelize(ParallelType::TIDx);
+
+  // The extents of tv1 and tv2 axes are equal even though their
+  // actual values are not statically known
+  GpuLower gpulw(fusion.get());
+  const auto& pdmap = gpulw.parallelDimensionMap();
+  auto kir_tv1 = gpulw.lowerValue(tv1)->as<kir::TensorView>();
+  auto kir_tv2 = gpulw.lowerValue(tv2)->as<kir::TensorView>();
+  for (size_t i = 0; i < kir_tv1->domain()->domain().size(); ++i) {
+    auto dom1 = kir_tv1->domain()->domain()[i];
+    auto dom2 = kir_tv2->domain()->domain()[i];
+    TORCH_INTERNAL_ASSERT(pdmap.equalDim(dom1->extent(), dom2->extent()));
+  }
+
+  TORCH_CHECK(pdmap.isExact(ParallelType::TIDx));
+  TORCH_CHECK(
+      pdmap.get(ParallelType::TIDx)->isA<kir::NamedScalar>() &&
+      pdmap.get(ParallelType::TIDx)->as<kir::NamedScalar>()->name() ==
+          "blockDim.x");
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input1 = at::randn({32}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(fusion.get());
+  auto outputs = fe.runFusion({input1});
+
+  testValidate(
+      fusion.get(),
+      outputs,
+      {input1},
+      {input1 + 1, input1 + 1},
+      __LINE__,
+      __FILE__);
+}
+
+TEST(NVFuserTest, FusionParallelDimensionMap2_CUDA) {
+  auto fusion = std::make_unique<Fusion>();
+  FusionGuard fg(fusion.get());
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion->addInput(tv0);
+  auto tv1 = makeSymbolicTensor(2);
+  fusion->addInput(tv1);
+  auto tv2 = broadcast(tv0, {false, true});
+  auto tv3 = add(tv1, tv2);
+  fusion->addOutput(tv3);
+
+  tv3->split(-1, 8, false);
+  tv2->computeAt(tv3, -1);
+
+  tv3->axis(-1)->parallelize(ParallelType::TIDx);
+  tv2->axis(-1)->parallelize(ParallelType::TIDx);
+
+  GpuLower gpulw(fusion.get());
+  const auto& pdmap = gpulw.parallelDimensionMap();
+  TORCH_CHECK(pdmap.isExact(ParallelType::TIDx));
+  TORCH_CHECK(
+      pdmap.get(ParallelType::TIDx)->isA<kir::NamedScalar>() &&
+      pdmap.get(ParallelType::TIDx)->as<kir::NamedScalar>()->name() ==
+          "blockDim.x");
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input1 = at::randn({11}, options);
+  at::Tensor input2 = at::randn({11, 13}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(fusion.get());
+  auto outputs = fe.runFusion({input1, input2});
+
+  auto ref = input1.unsqueeze(-1) + input2;
+
+  testValidate(
+      fusion.get(), outputs, {input1, input2}, {ref}, __LINE__, __FILE__);
+}
+
+// Mix symbolic and concrete tensors
+TEST(NVFuserTest, FusionParallelDimensionMap3_CUDA) {
+  auto fusion = std::make_unique<Fusion>();
+  FusionGuard fg(fusion.get());
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion->addInput(tv0);
+
+  auto tv2 = add(tv0, new Double(1));
+  fusion->addOutput(tv2);
+  auto tv3 = add(tv0, new Double(1));
+  fusion->addOutput(tv3);
+
+  tv2->split(0, 10);
+  tv3->split(0, 20);
+
+  auto tv4 = add(tv0, new Double(1));
+  fusion->addOutput(tv4);
+  auto tv5 = add(tv0, new Double(1));
+  fusion->addOutput(tv5);
+
+  // Not mapped but equal extent
+  tv4->split(0, 10);
+  tv5->split(0, 10);
+
+  tv2->axis(-1)->parallelize(ParallelType::TIDx);
+  tv3->axis(-1)->parallelize(ParallelType::TIDx);
+
+  tv4->axis(-1)->parallelize(ParallelType::TIDy);
+  tv5->axis(-1)->parallelize(ParallelType::TIDy);
+
+  GpuLower gpulw(fusion.get());
+  const auto& pdmap = gpulw.parallelDimensionMap();
+  TORCH_CHECK(!pdmap.isExact(ParallelType::TIDx));
+  TORCH_CHECK(
+      pdmap.get(ParallelType::TIDx)->isA<kir::NamedScalar>() &&
+      pdmap.get(ParallelType::TIDx)->as<kir::NamedScalar>()->name() ==
+          "blockDim.x");
+  TORCH_CHECK(pdmap.isExact(ParallelType::TIDy));
+  TORCH_CHECK(
+      pdmap.get(ParallelType::TIDy)->isConst() &&
+      pdmap.get(ParallelType::TIDy)->as<kir::Int>()->value().value() == 10);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input1 = at::randn({13}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(fusion.get());
+  auto outputs = fe.runFusion({input1});
+
+  testValidate(
+      fusion.get(),
+      outputs,
+      {input1},
+      {input1 + 1, input1 + 1, input1 + 1, input1 + 1},
+      __LINE__,
+      __FILE__);
+}
+
+// Parallelizing merged broadcast domains
+TEST(NVFuserTest, FusionParallelDimensionMap4_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+  auto tv1 = makeSymbolicTensor(2);
+  fusion.addInput(tv1);
+  auto tv2 = add(tv0, new Double(1));
+  auto tv3 = broadcast(tv2, {true, false});
+  auto tv4 = add(tv3, tv1);
+  fusion.addOutput(tv4);
+
+  tv4->split(1, 4);
+  tv4->reorder({{1, 2}, {2, 1}});
+  tv4->merge(0);
+  tv0->computeAt(tv4, 1);
+  tv1->computeAt(tv4, 1);
+
+  // TIDx is mapped to tv4.axis(0) as well as tv2.axis(0), so it's not
+  // exact.
+  tv4->axis(0)->parallelize(ParallelType::TIDx);
+
+  tv2->setMemoryType(MemoryType::Shared);
+  tv3->setMemoryType(MemoryType::Shared);
+
+  GpuLower gpulw(&fusion);
+  const auto& pdmap = gpulw.parallelDimensionMap();
+  TORCH_CHECK(!pdmap.isExact(ParallelType::TIDx));
+  TORCH_CHECK(
+      pdmap.get(ParallelType::TIDx)->isA<kir::NamedScalar>() &&
+      pdmap.get(ParallelType::TIDx)->as<kir::NamedScalar>()->name() ==
+          "blockDim.x");
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input1 = at::randn({13}, options);
+  at::Tensor input2 = at::randn({15, 13}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto outputs = fe.runFusion({input1, input2});
+
+  auto ref = (input1 + 1).unsqueeze(0) + input2;
+
+  testValidate(&fusion, outputs, {input1, input2}, {ref}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionParallelDimensionMap5_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+  auto tv1 = makeSymbolicTensor(2);
+  fusion.addInput(tv1);
+  auto tv3 = broadcast(tv0, {false, true});
+  auto tv4 = add(tv3, tv1);
+  fusion.addOutput(tv4);
+
+  tv4->split(1, 4);
+  tv0->computeAt(tv4, -1);
+  tv1->computeAt(tv4, -1);
+
+  tv4->axis(-1)->parallelize(ParallelType::TIDx);
+  tv3->axis(-1)->parallelize(ParallelType::TIDx);
+  tv4->axis(-2)->parallelize(ParallelType::TIDy);
+  tv3->axis(-2)->parallelize(ParallelType::TIDy);
+
+  GpuLower gpulw(&fusion);
+  const auto& pdmap = gpulw.parallelDimensionMap();
+  TORCH_CHECK(pdmap.isExact(ParallelType::TIDx));
+  TORCH_CHECK(pdmap.isExact(ParallelType::TIDy));
+  TORCH_CHECK(
+      pdmap.get(ParallelType::TIDx)->isConst() &&
+      pdmap.get(ParallelType::TIDx)->as<kir::Int>()->value().value() == 4);
+  TORCH_CHECK(
+      pdmap.get(ParallelType::TIDy)->isA<kir::NamedScalar>() &&
+      pdmap.get(ParallelType::TIDy)->as<kir::NamedScalar>()->name() ==
+          "blockDim.y");
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input1 = at::randn({13}, options);
+  at::Tensor input2 = at::randn({13, 15}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto outputs = fe.runFusion({input1, input2});
+
+  auto ref = (input1).unsqueeze(-1) + input2;
+
+  testValidate(&fusion, outputs, {input1, input2}, {ref}, __LINE__, __FILE__);
 }
 
 } // namespace jit
