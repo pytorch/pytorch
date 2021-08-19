@@ -464,12 +464,12 @@ std::vector<Value*> FixupONNXControlflowNode(Node* n, int opset_version) {
 void FixupONNXControlflowNodeOutputs(Node* n) {
   switch (n->kind()) {
     case ::c10::onnx::Loop: {
-      for (size_t i = 0; i < n->outputs().size(); ++i) {
-        auto loop_carried_output_size = n->blocks().at(0)->inputs().size() - 2;
+      auto loop_carried_output_size = n->blocks().at(0)->inputs().size() - 2;
+      for (auto i : c10::irange(n->outputs().size())) {
+        auto type = n->blocks().at(0)->outputs().at(i + 1)->type();
         if (i < loop_carried_output_size) {
-          n->output(i)->setType(n->blocks().at(0)->outputs().at(i + 1)->type());
+          n->output(i)->setType(type);
         } else {
-          auto type = n->blocks().at(0)->outputs().at(i + 1)->type();
           if (auto t_type = type->cast<TensorType>()) {
             auto sizes = t_type->symbolic_sizes().sizes();
             if (sizes.has_value()) {
