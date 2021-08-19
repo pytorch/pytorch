@@ -11,7 +11,7 @@ if not dist.is_available():
     sys.exit(0)
 
 from torch.testing._internal.common_utils import (
-    TEST_WITH_ASAN,
+    TEST_WITH_DEV_DBG_ASAN,
     TEST_WITH_TSAN,
     TestCase,
     run_tests,
@@ -21,7 +21,7 @@ from torch.testing._internal.common_utils import (
 def path(script):
     return os.path.join(os.path.dirname(__file__), script)
 
-if TEST_WITH_ASAN:
+if TEST_WITH_DEV_DBG_ASAN:
     print("Skip ASAN as torch + multiprocessing spawn have known issues", file=sys.stderr)
     sys.exit(0)
 
