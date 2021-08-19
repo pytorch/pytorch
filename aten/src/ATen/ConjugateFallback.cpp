@@ -52,6 +52,7 @@ TORCH_LIBRARY_IMPL(aten, Conjugate, m) {
   m.impl("full_like", torch::CppFunction::makeFallthrough());
   m.impl("solve_triangular", torch::CppFunction::makeFallthrough());
   m.impl("solve_triangular.out", torch::CppFunction::makeFromBoxedFunction<&conjugateFallbackToHandleOnlyMutableInputs>());
+  m.impl("lu_solve_backward", torch::CppFunction::makeFallthrough());
   m.impl("stride.int", torch::CppFunction::makeFallthrough());
   m.impl("stride.Dimname", torch::CppFunction::makeFallthrough());
   m.impl("size.int", torch::CppFunction::makeFallthrough());
