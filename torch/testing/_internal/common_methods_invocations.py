@@ -8968,7 +8968,7 @@ op_db: List[OpInfo] = [
                 torch.float16: tol(atol=1e-05, rtol=1e-02),
             }), 'TestReductions', 'test_noncontiguous_all'),
             DecorateInfo(toleranceOverride({
-                torch.float16: tol(atol=1e-05, rtol=1e-02),
+                torch.float16: tol(atol=1e-03, rtol=1e-02),
             }), 'TestReductions', 'test_ref_small_input'),
             DecorateInfo(toleranceOverride({
                 torch.float16: tol(atol=1e-05, rtol=1e-02),
@@ -8999,7 +8999,7 @@ op_db: List[OpInfo] = [
                 torch.float16: tol(atol=1e-05, rtol=1e-02),
             }), 'TestReductions', 'test_noncontiguous_all'),
             DecorateInfo(toleranceOverride({
-                torch.float16: tol(atol=1e-05, rtol=1e-02),
+                torch.float16: tol(atol=1e-03, rtol=1e-02),
             }), 'TestReductions', 'test_ref_small_input'),
             DecorateInfo(toleranceOverride({
                 torch.float16: tol(atol=1e-05, rtol=1e-02),
