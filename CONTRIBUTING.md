@@ -1150,7 +1150,7 @@ formatting and semantic checking of code. We provide a pre-commit git hook for
 performing these checks, before a commit is created:
 
   ```bash
-  ln -s ../../tools/git-pre-commit .git/hooks/pre-commit
+  ln -s tools/git-pre-commit .git/hooks/pre-commit
   ```
 
 You'll need to install an appropriately configured flake8; see
