@@ -56,8 +56,9 @@ class Hider extends Component {
 
   render({name, children}, {shown}) {
     let my_caret = html`<span class=caret onClick=${() => this.click()} >${caret(shown)}</span>`;
-    return html`<h2>${my_caret} ${name}</h2>
-      ${shown ? this.props.children : []}`;
+    return html`<div data-hider-title=${name} data-shown=${shown}>
+      <h2>${my_caret} ${name}</h2>
+      <div>${shown ? this.props.children : []}</div></div>`;
   }
 
   click() {
@@ -88,15 +89,15 @@ function ModelSizeSection({model: {file_size, zip_files}}) {
     </pre><//>`;
 }
 
-function ModelStructureSection({model: {model_data}}) {
+function StructuredDataSection({name, data, shown}) {
   return html`
-    <${Hider} name="Model Structure" shown=true>
+    <${Hider} name=${name} shown=${shown}>
     <div style="font-family:monospace;">
-      <${ModelData} data=${model_data} indent="" prefix=""/>
+      <${StructuredData} data=${data} indent="" prefix=""/>
     </div><//>`;
 }
 
-class ModelData extends Component {
+class StructuredData extends Component {
   constructor() {
     super();
     this.state = { shown: false };
@@ -236,7 +237,7 @@ class ModelData extends Component {
       let parts = [];
       for (let idx = 0; idx < data.length; idx++) {
         // Does it make sense to put explicit index numbers here?
-        parts.push(html`<br/><${ModelData} prefix=${idx + ": "} indent=${new_indent} data=${data[idx]} />`);
+        parts.push(html`<br/><${StructuredData} prefix=${idx + ": "} indent=${new_indent} data=${data[idx]} />`);
       }
       return parts;
     }
@@ -251,7 +252,7 @@ class ModelData extends Component {
         if (typeof(data.keys[idx]) != "string") {
           parts.push(html`<br/>${new_indent}Non-string key`);
         } else {
-          parts.push(html`<br/><${ModelData} prefix=${data.keys[idx] + ": "} indent=${new_indent} data=${data.values[idx]} />`);
+          parts.push(html`<br/><${StructuredData} prefix=${data.keys[idx] + ": "} indent=${new_indent} data=${data.values[idx]} />`);
         }
       }
       return parts;
@@ -271,16 +272,16 @@ class ModelData extends Component {
           } else if (this.IGNORED_STATE_KEYS.has(mstate.keys[idx])) {
             // Do nothing.
           } else {
-            parts.push(html`<br/><${ModelData} prefix=${mstate.keys[idx] + ": "} indent=${new_indent} data=${mstate.values[idx]} />`);
+            parts.push(html`<br/><${StructuredData} prefix=${mstate.keys[idx] + ": "} indent=${new_indent} data=${mstate.values[idx]} />`);
           }
         }
       } else if (mstate.__tuple_values__) {
-        parts.push(html`<br/><${ModelData} prefix="" indent=${new_indent} data=${mstate} />`);
+        parts.push(html`<br/><${StructuredData} prefix="" indent=${new_indent} data=${mstate} />`);
       } else if (mstate.__module_type__) {
         // We normally wouldn't have the state of a module be another module,
         // but we use "modules" to encode special values (like Unicode decode
         // errors) that might be valid states.  Just go with it.
-        parts.push(html`<br/><${ModelData} prefix="" indent=${new_indent} data=${mstate} />`);
+        parts.push(html`<br/><${StructuredData} prefix="" indent=${new_indent} data=${mstate} />`);
       } else {
         throw new Error("Bad module state");
       }
@@ -444,6 +445,13 @@ class OnePickleSection extends Component {
   }
 }
 
+function assertStorageAreEqual(key, lhs, rhs) {
+  if (lhs.length !== rhs.length ||
+    !lhs.every((val, idx) => val === rhs[idx])) {
+    throw new Error("Storage mismatch for key '" + key + "'");
+  }
+}
+
 function computeTensorMemory(numel, dtype) {
   const sizes = {
     "Byte": 1,
@@ -472,60 +480,74 @@ function computeTensorMemory(numel, dtype) {
 
 // TODO: Maybe track by dtype as well.
 // TODO: Maybe distinguish between visible size and storage size.
-// TODO: Maybe don't double-count if the model has
-// multiple references to the same submodule or tensor.
-function getTensorMemoryByDevice(data) {
+function getTensorStorages(data) {
   if (data === null) {
-    return {};
+    return new Map();
   }
   if (typeof(data) == "boolean") {
-    return {};
+    return new Map();
   }
   if (typeof(data) == "number") {
-    return {};
+    return new Map();
   }
   if (typeof(data) == "string") {
-    return {};
+    return new Map();
   }
   if (typeof(data) != "object") {
     throw new Error("Not an object");
   }
   if (Array.isArray(data)) {
-    let result = {};
+    let result = new Map();
     for (const item of data) {
-      const sizes = getTensorMemoryByDevice(item);
-      for (const [device, size] of Object.entries(sizes)) {
-        result[device] = (result[device] || 0) + size;
+      const tensors = getTensorStorages(item);
+      for (const [key, storage] of tensors.entries()) {
+        if (!result.has(key)) {
+          result.set(key, storage);
+        } else {
+          const old_storage = result.get(key);
+          assertStorageAreEqual(key, old_storage, storage);
+        }
       }
     }
     return result;
   }
   if (data.__tuple_values__) {
-    return getTensorMemoryByDevice(data.__tuple_values__);
+    return getTensorStorages(data.__tuple_values__);
   }
   if (data.__is_dict__) {
-    return getTensorMemoryByDevice(data.values);
+    return getTensorStorages(data.values);
   }
   if (data.__module_type__) {
-    return getTensorMemoryByDevice(data.state);
+    return getTensorStorages(data.state);
   }
   if (data.__tensor_v2__) {
     const [storage, offset, size, stride, grad] = data.__tensor_v2__;
     const [dtype, key, device, numel] = storage;
-    return {[device]: computeTensorMemory(numel, dtype)};
+    return new Map([[key, storage]]);
   }
   if (data.__qtensor__) {
     const [storage, offset, size, stride, quantizer, grad] = data.__qtensor__;
     const [dtype, key, device, numel] = storage;
-    return {[device]: computeTensorMemory(numel, dtype)};
+    return new Map([[key, storage]]);
   }
   throw new Error("Can't handle data type.", data);
 }
 
+function getTensorMemoryByDevice(data) {
+  const tensors = getTensorStorages(data);
+  let result = {};
+  for (const storage of tensors.values()) {
+    const [dtype, key, device, numel] = storage;
+    const size = computeTensorMemory(numel, dtype);
+    result[device] = (result[device] || 0) + size;
+  }
+  return result;
+}
+
 // Make this a separate component so it is rendered lazily.
 class OpenTensorMemorySection extends Component {
-  render({model_data}) {
-    let sizes = getTensorMemoryByDevice(model_data);
+  render({model: {model_data, constants}}) {
+    let sizes = getTensorMemoryByDevice([model_data, constants]);
     return html`
       <table>
         <thead>
@@ -546,10 +568,10 @@ class OpenTensorMemorySection extends Component {
   }
 }
 
-function TensorMemorySection({model: {model_data}}) {
+function TensorMemorySection({model}) {
   return html`
     <${Hider} name="Tensor Memory" shown=false>
-    <${OpenTensorMemorySection} model_data=${model_data} /><//>`;
+    <${OpenTensorMemorySection} model=${model} /><//>`;
 }
 
 class AuxContentPane extends Component {
@@ -639,7 +661,8 @@ class App extends Component {
         <h1>TorchScript Model (version ${model.version}): ${model.title}</h1>
         <button onClick=${() => console.log(model)}>Log Raw Model Info</button>
         <${ModelSizeSection} model=${model}/>
-        <${ModelStructureSection} model=${model}/>
+        <${StructuredDataSection} name="Model Data" data=${model.model_data} shown=true/>
+        <${StructuredDataSection} name="Constants" data=${model.constants} shown=false/>
         <${ZipContentsSection} model=${model}/>
         <${CodeSection} model=${model}/>
         <${ExtraJsonSection} files=${model.extra_files_jsons}/>

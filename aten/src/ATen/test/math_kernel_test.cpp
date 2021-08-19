@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <ATen/ATen.h>
+#include <ATen/CPUFunctions.h>
 
 using namespace at;
 
@@ -24,7 +25,6 @@ bool allClose(const at::Tensor& t1, const at::Tensor& t2, double rtol=1e-5, doub
 // Ideally we want to test both forward and backward on math kernels but I
 // haven't found an easy way to do it.  Currently we only test forward here
 // and rely on backward tests of each at:: function used in math kernels.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MathKernelTest, NativeGroupNorm) {
   int num_channels = 6;
   int N = 2;
@@ -51,7 +51,6 @@ TEST(MathKernelTest, NativeGroupNorm) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MathKernelTest, NativeLayerNorm) {
   const auto input = rand({20, 10, 10, 10});
   const auto input_shape = input.sizes();
@@ -79,7 +78,6 @@ TEST(MathKernelTest, NativeLayerNorm) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MathKernelTest, Addr) {
   const auto vec1 = arange(1., 4.);
   const auto vec2 = arange(1., 3.);
@@ -101,16 +99,14 @@ TEST(MathKernelTest, Addr) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MathKernelTest, SiluBackward) {
   const auto input = rand({20, 10});
   const auto grad_output = rand({20, 10});
-  auto out = at::native::silu_backward(grad_output, input);
+  auto out = at::cpu::silu_backward(grad_output, input);
   auto math_out = at::native::math_silu_backward(grad_output, input);
   ASSERT_ALLCLOSE_TOLERANCES(out, math_out, 1e-4, 1e-6);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MathKernelTest, MishBackward) {
   const auto input = rand({20, 10});
   const auto grad_output = rand({20, 10});
@@ -119,7 +115,6 @@ TEST(MathKernelTest, MishBackward) {
   ASSERT_ALLCLOSE_TOLERANCES(out, math_out, 1e-4, 1e-6);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MathKernelTest, NarrowCopy)  {
   auto x = rand({5, 8, 7});
   for (int64_t dim = 0; dim < 3; ++dim) {
@@ -130,7 +125,6 @@ TEST(MathKernelTest, NarrowCopy)  {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MathKernelTest, Bmm)  {
   auto test_bmm = [](int64_t last_dim) {
     auto x = rand({1, 4, 4}, at::kFloat);

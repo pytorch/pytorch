@@ -29,11 +29,9 @@ void calc_col_offsets_transpose(
     int32_t* B_zero_point,
     int32_t* col_offsets,
     c10::QScheme qtype) {
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  for (size_t i = 0; i < N; ++i) {
+  for (const auto i : c10::irange(N)) {
     int32_t sum = 0;
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    for (size_t j = 0; j < K; ++j) {
+    for (const auto j : c10::irange(K)) {
       sum += Bint8[i * K + j];
     }
     if (qtype == c10::kPerTensorAffine) {
@@ -297,8 +295,8 @@ class QLinearPackWeightFp16Legacy final {
  public:
   static Tensor run(at::Tensor weight, c10::optional<Tensor> bias) {
     auto& ctx = at::globalContext();
-    auto options = weight.options();
 #ifdef USE_FBGEMM
+    auto options = weight.options();
     if (ctx.qEngine() == at::QEngine::FBGEMM) {
       auto prepacked =
           PackedLinearWeightFp16::prepack(std::move(weight), std::move(bias));

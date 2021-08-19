@@ -1,3 +1,5 @@
+import functools
+
 from torch.utils.data import IterDataPipe, functional_datapipe
 from typing import Iterator, Optional, Sized, Tuple, TypeVar
 
@@ -40,6 +42,60 @@ class ConcatIterDataPipe(IterDataPipe):
         return len(self)
 
 
+# This is fake class to show API, going to be replaced by the copy from torchdata
+# TODO(VitalyFedyunin): Replace with valid version, documentation and tests
+class IterateBuffer(IterDataPipe):
+    def __init__(self, buffer):
+        self.buffer = buffer
+
+    def __iter__(self):
+        for i in self.buffer:
+            yield i
+
+
+@functional_datapipe('fork')
+class ForkIterDataPipe(IterDataPipe):
+
+    def __new__(cls, datapipe, instances):
+        result = []
+        buffer = list(datapipe)
+        return [IterateBuffer(buffer) for i in range(instances)]
+
+
+@functional_datapipe('demux')
+class DemultiplexerIterDataPipe(IterDataPipe):
+
+    def __new__(cls, datapipe, instances, classifier_fn):
+        result = []
+        buffer = list(datapipe)
+
+        def filter_fn(classifier_fn, i, x):
+            return classifier_fn(x) == i
+        return [IterateBuffer(buffer).filter(functools.partial(filter_fn, classifier_fn, i)) for i in range(instances)]
+
+@functional_datapipe('mux')
+class MultiplexerIterDataPipe(IterDataPipe):
+
+    def __init__(self, *datapipes):
+        self.datapipes = datapipes
+
+    def __iter__(self):
+        iterators = [iter(x) for x in self.datapipes]
+        finished = {}
+        had_more = True
+        while had_more:
+            had_more = False
+            for i in range(len(iterators)):
+                if i not in finished:
+                    try:
+                        value = iterators[i].__next__()
+                        had_more = True
+                        yield value
+                    except StopIteration:
+                        finished[i] = 1
+
+
+@functional_datapipe('zip')
 class ZipIterDataPipe(IterDataPipe[Tuple[T_co]]):
     r""" :class:`ZipIterDataPipe`.
 

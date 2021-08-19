@@ -16,54 +16,42 @@ CAFFE_KNOWN_TYPE(MapType32To64);
 
 namespace {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_BLOB_SERIALIZER(
     TypeMeta::Id<MapType64To64>(),
     MapSerializer<int64_t, int64_t>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_BLOB_SERIALIZER(
     TypeMeta::Id<MapType64To32>(),
     MapSerializer<int64_t, int32_t>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_BLOB_SERIALIZER(
     TypeMeta::Id<MapType32To32>(),
     MapSerializer<int32_t, int32_t>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_BLOB_SERIALIZER(
     TypeMeta::Id<MapType32To64>(),
     MapSerializer<int32_t, int64_t>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_BLOB_DESERIALIZER(
     (std::unordered_map<int64_t, int64_t>),
     MapDeserializer<int64_t, int64_t>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_BLOB_DESERIALIZER(
     (std::unordered_map<int64_t, int32_t>),
     MapDeserializer<int64_t, int32_t>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_BLOB_DESERIALIZER(
     (std::unordered_map<int32_t, int32_t>),
     MapDeserializer<int32_t, int32_t>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_BLOB_DESERIALIZER(
     (std::unordered_map<int32_t, int64_t>),
     MapDeserializer<int32_t, int64_t>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(CreateMap, CreateMapOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(KeyValueToMap, KeyValueToMapOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(MapToKeyValue, MapToKeyValueOp<CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(CreateMap)
     .NumInputs(0)
     .NumOutputs(1)
@@ -73,7 +61,6 @@ OPERATOR_SCHEMA(CreateMap)
     .Output(0, "map blob", "Blob reference to the map")
     .ScalarType(TensorProto_DataType_UNDEFINED);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(KeyValueToMap)
     .NumInputs(2)
     .NumOutputs(1)
@@ -82,7 +69,6 @@ OPERATOR_SCHEMA(KeyValueToMap)
     .Input(1, "value blob", "Blob reference to the value")
     .Output(0, "map blob", "Blob reference to the map");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(MapToKeyValue)
     .NumInputs(1)
     .NumOutputs(2)
