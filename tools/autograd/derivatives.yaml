@@ -1640,7 +1640,7 @@
   self: leaky_relu_backward(grad, self, negative_slope, false)
   result: auto_element_wise
   
-- name: leaky_relu_(Tensor self, Scalar negative_slope=0.01) -> Tensor
+- name: leaky_relu_(Tensor(a!) self, Scalar negative_slope=0.01) -> Tensor(a!)
   self: leaky_relu_backward(grad, result, negative_slope, true)
   result: auto_element_wise
 
