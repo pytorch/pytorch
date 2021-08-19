@@ -44,6 +44,9 @@ struct MathOpFallback {
     const auto stack_start = stack->size() - num_arguments;
 
     c10::optional<bool> is_write;
+    // Mutable inputs to be tracked separately
+    std::vector<Tensor> mutable_inputs;
+    bool check_for_alias_with_mut_arg = false;
     for (const auto i : c10::irange(num_arguments)) {
       // Three possible states:
       // 1. alias_info has no value --> out-of-place operation
@@ -60,6 +63,18 @@ struct MathOpFallback {
             "If you got this error on a core op, please report a bug to PyTorch.");
         } else {
           is_write = alias_info->isWrite();
+          auto& ivalue = (*stack)[stack_start + i];
+          //TODO: add a table listing all possible cases and clearly state what works/is allowed
+          if (ivalue.isTensor()) {
+            auto mut_arg_tensor = ivalue.toTensor();
+            if (mut_arg_tensor.is_conj()) {
+              check_for_alias_with_mut_arg = true;
+              mutable_inputs.emplace_back(mut_arg_tensor);
+            }
+          } else {
+            TORCH_CHECK(false, op_name, " fallback doesn't currently support mutable TensorLists.",
+              "Please materialize the ", op_name, " tensor(s) before calling ", op.schema().name());
+          }
         }
       }
     }
@@ -72,53 +87,77 @@ struct MathOpFallback {
       return;
     }
 
-    // Mutable inputs to be tracked separately
-    std::vector<Tensor> mutable_inputs;
+    /*
+    Different possible cases:
+    1. Functions with no tensorlist inputs
+      a. no mutable args
+      b. one or more mutable args
+         b.1. shared memory between mutable and non-mutable args (--handled)
+         b.2. shared memory between two or more mutable args (incorrect result but this is bad
+              and users shouldn't do it anyway)
+         b.3. shared memory between two or more non-mutable args (works fine since we never modify the memory)
+         b.4. no shared memory between args (-- works fine)
+    2. Functions with tensorlist inputs
+      a. no mutable args (-- works fine)
+      b. Mutable tensor arg(s) but non-mutable tensorlist arg
+        b.1. All the possible cases listed in 1.b (-- works fine)
+        b.2. shared memory between a tensor arg and a tensorlist arg ( -- Not currently supported)
+      c. Mutable tensorlist arg(s) ( -- Not currently supported)
+        c.1. shared memory between a mutable and non-mutable tensorlist
+        c.2. shared memory between two or more mutable tensorlist args
+        c.3. shared memory between two or more non-mutable tensorlist args
+        c.4. shared memory between two or more non-mutable tensor args
+        c.5. shared memory between a tensor and tensorlist arg
+        ...
+        c.n. no shared memory between args
+    */
 
+    // updates for non-mutable inputs
     for (const auto i : c10::irange(num_arguments)) {
       auto& ivalue = (*stack)[stack_start + i];
       if (!(ivalue.isTensor() || ivalue.isTensorList())) {
         continue;
       }
       const auto& argument = arguments[i];
-      bool mut_arg = false;
       if (argument.alias_info()) {
         // Was already tested by is_write loop above
         TORCH_INTERNAL_ASSERT_DEBUG_ONLY(argument.alias_info()->isWrite());
-        mut_arg = true;
+        continue;
       }
       if (ivalue.isTensor()) {
-        if (!is_bit_set(ivalue.toTensor())) {
-          continue;
-        }
-
         auto tensor = std::move(ivalue).toTensor();
         TORCH_CHECK_NOT_IMPLEMENTED(!tensor.is_meta(), op_name, " fallback does not support meta tensors.");
-        if (mut_arg) {
-          // TODO: This is a waste if the argument is write only
-          _set_bit(tensor, false);
-          math_op_(tensor);
-          mutable_inputs.emplace_back(tensor);
+        if (check_for_alias_with_mut_arg) {
+          bool cloned = false;
+          for (const auto& mutable_input : mutable_inputs) {
+            if (tensor.is_alias_of(mutable_input)) {
+              tensor = tensor.clone();
+              cloned = true;
+              continue;
+            }
+          }
+          if (!cloned) {
+            tensor = resolve_bit(tensor);
+          }
         } else {
           tensor = resolve_bit(tensor);
         }
         (*stack)[stack_start + i] = std::move(tensor);
-      } else if (ivalue.isTensorList()) {
+      } else {
+        TORCH_CHECK(!is_write.has_value(), op_name, " fallback doesn't currently support operators with TensorLists and mutable inputs.",
+              "Please materialize the ", op_name, " tensor(s) before calling ", op.schema().name());
         auto tensors = std::move(ivalue).toTensorList();
-        if (mut_arg) {
-          for(const auto j : c10::irange(tensors.size())) {
-            Tensor t = tensors[j];
-            _set_bit(t, false);
-            math_op_(t);
-            mutable_inputs.emplace_back(t);
-          }
-        } else {
-          for(const auto j : c10::irange(tensors.size())) {
-            tensors[j] = resolve_bit(tensors[j]);
-          }
+        for(const auto j : c10::irange(tensors.size())) {
+          tensors[j] = resolve_bit(tensors[j]);
         }
         (*stack)[stack_start + i] = std::move(tensors);
       }
+    }
+
+    // updates for mutable inputs
+    for (auto& mutable_input : mutable_inputs) {
+      _set_bit(mutable_input, false);
+      math_op_(mutable_input);
     }
 
     op.redispatchBoxed(dispatch_keys & c10::DispatchKeySet(DispatchKeySet::FULL_AFTER, key), stack);

@@ -28,6 +28,8 @@ TORCH_LIBRARY_IMPL(_, Negative, m) {
 }
 
 TORCH_LIBRARY_IMPL(aten, Negative, m) {
+  // NOTE: If you are adding an in-place operation to this list, please ensure it handles the
+  // case where input tensors share memory properly [See the note in MathBitsFallback.h]
   m.impl("requires_grad_", torch::CppFunction::makeFallthrough());
   m.impl("set_.source_Storage_storage_offset", torch::CppFunction::makeFallthrough());
   m.impl("set_.source_Tensor", torch::CppFunction::makeFallthrough());
