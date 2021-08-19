@@ -303,8 +303,6 @@ struct TORCH_API ProfilerResult {
 #endif // USE_KINETO
 };
 
-TORCH_API void useMainTLS(const at::ThreadLocalState& main_TLS);
-
 TORCH_API void enableProfiler(
     const ProfilerConfig& config,
     const std::set<ActivityType>& activities);

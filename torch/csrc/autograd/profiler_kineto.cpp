@@ -484,10 +484,6 @@ void prepareProfiler(
 #endif // USE_KINETO
 }
 
-void useMainTLS(const at::ThreadLocalState& main_TLS) {
-  at::ThreadLocalStateGuard g(main_TLS);
-}
-
 void enableProfiler(
     const ProfilerConfig& config,
     const std::set<ActivityType>& activities) {

@@ -224,7 +224,6 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   py::class_<at::ThreadLocalStateGuard>(m, "_ThreadLocalStateGuard")
     .def(py::init<at::ThreadLocalState&>());
 
-  m.def("_use_main_TLS", useMainTLS);
   m.def("_enable_profiler", enableProfiler);
   m.def("_disable_profiler", disableProfiler);
   m.def("_prepare_profiler", prepareProfiler);
