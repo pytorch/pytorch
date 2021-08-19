@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/passes/memory_planning.h>
 #include <torch/csrc/jit/passes/memory_planning/greedy_by_size.h>
+#include <torch/csrc/jit/passes/memory_planning/greedy_by_breadth.h>
 #include <torch/csrc/jit/passes/memory_planning/linear_scan.h>
 
 #include <jit/tensorexpr/kernel.h>
@@ -251,6 +252,11 @@ void planMemory(std::shared_ptr<Graph>& graph, Strategy strat) {
       allocations = greedyBySize(managed_live_ranges);
       break;
     }
+    case Strategy::GREEDY_BY_BREADTH: {
+      allocations = greedyByOperatorBreadth(
+          managed_value_sizes, managed_value_ranges, out_nodes);
+      break;
+    };
     default:
       return;
   }
