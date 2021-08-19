@@ -155,9 +155,9 @@ c10::intrusive_ptr<JitFuture> toPyJitFuture(
             } catch (py::error_already_set& e) {
               py::gil_scoped_acquire acquire;
               // FIXME: this is a temporary solution to add a special-case for
-              // ValueError and TypeError, as those are already used in our tests.
-              // We should have a more comprehensive coverage for other types of
-              // exceptions as well.
+              // ValueError and TypeError, as those are already used in our
+              // tests. We should have a more comprehensive coverage for other
+              // types of exceptions as well.
               if (e.matches(PyExc_ValueError)) {
                 child->setErrorIfNeeded(
                     std::make_exception_ptr(pybind11::value_error(e.what())));
@@ -165,7 +165,8 @@ c10::intrusive_ptr<JitFuture> toPyJitFuture(
                 child->setErrorIfNeeded(
                     std::make_exception_ptr(pybind11::type_error(e.what())));
               } else {
-                // py::error_already_set requires GIL to destruct, take special care.
+                // py::error_already_set requires GIL to destruct, take special
+                // care.
                 child->setErrorIfNeeded(
                     std::make_exception_ptr(std::runtime_error(e.what())));
               }
