@@ -1540,8 +1540,8 @@ def log1p(g, self):
 
 
 def log10(g, self):
-    log_div = g.op("Log", g.op("Constant", value_t=torch.tensor(10.0)))
-    return g.op("Div", g.op("Log", self), log_div)
+    _ln10 = 2.30258509299404568401
+    return g.op("Div", log(g, self), g.op("Constant", value_t=torch.tensor([_ln10])))
 
 
 def pow(g, self, exponent):
