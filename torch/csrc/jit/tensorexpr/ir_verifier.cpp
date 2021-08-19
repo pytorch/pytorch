@@ -167,13 +167,7 @@ void IRVerifier::visit(ForPtr v) {
 
 void IRVerifier::visit(BlockPtr v) {
   for (StmtPtr s : v->stmts()) {
-    if (s->get_parent().get() != v.get()) {
-      std::cerr << "V: " << v.get() << "\n";
-      std::cerr << "*V: " << *v << "\n";
-      std::cerr << "S: " << s.get() << "\n";
-      std::cerr << "*S: " << *s << "\n";
-      std::cerr << "S->parent: " << s->get_parent().get() << "\n";
-      std::cerr << "*S->parent: " << *s->get_parent() << "\n";
+    if (s->get_parent() != v) {
       throw malformed_ir("Broken child-parent link inside a Block");
     }
   }

@@ -21,7 +21,7 @@ static void visit_binary_op(NodePtr<Op> v, IRVisitor* visitor) {
   v->rhs()->accept(visitor);
 }
 
-void IRVisitor::visit(NodePtr<Add> v) {
+void IRVisitor::visit(AddPtr v) {
   visit_binary_op(v, this);
 }
 

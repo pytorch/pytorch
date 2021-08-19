@@ -32,84 +32,91 @@ void HashProvider::visit(AddPtr v) {
   CACHE_GUARD();
   v->lhs()->accept(this);
   v->rhs()->accept(this);
-  putHash(v.get(), hash_combine(hashOf(v->lhs()), "+", hashOf(v->rhs())));
+  putHash(v, hash_combine(hashOf(v->lhs()), "+", hashOf(v->rhs())));
 }
 
 void HashProvider::visit(SubPtr v) {
   CACHE_GUARD();
   v->lhs()->accept(this);
   v->rhs()->accept(this);
-  putHash(v.get(), hash_combine(hashOf(v->lhs()), "-", hashOf(v->rhs())));
+  putHash(v, hash_combine(hashOf(v->lhs()), "-", hashOf(v->rhs())));
 }
 
 void HashProvider::visit(MulPtr v) {
   CACHE_GUARD();
   v->lhs()->accept(this);
   v->rhs()->accept(this);
-  putHash(v.get(), hash_combine(hashOf(v->lhs()), "*", hashOf(v->rhs())));
+  putHash(v, hash_combine(hashOf(v->lhs()), "*", hashOf(v->rhs())));
 }
 
 void HashProvider::visit(DivPtr v) {
   CACHE_GUARD();
   v->lhs()->accept(this);
   v->rhs()->accept(this);
-  putHash(v.get(), hash_combine(hashOf(v->lhs()), "/", hashOf(v->rhs())));
+  putHash(v, hash_combine(hashOf(v->lhs()), "/", hashOf(v->rhs())));
 }
 
 void HashProvider::visit(ModPtr v) {
   CACHE_GUARD();
   v->lhs()->accept(this);
   v->rhs()->accept(this);
-  putHash(v.get(), hash_combine(hashOf(v->lhs()), "%", hashOf(v->rhs())));
+  putHash(v, hash_combine(hashOf(v->lhs()), "%", hashOf(v->rhs())));
+}
+
+void HashProvider::visit(RoundOffPtr v) {
+  CACHE_GUARD();
+  v->lhs()->accept(this);
+  v->rhs()->accept(this);
+  putHash(v, hash_combine(hashOf(v->lhs()), "rof", hashOf(v->rhs())));
 }
 
 void HashProvider::visit(MaxPtr v) {
   CACHE_GUARD();
   v->lhs()->accept(this);
   v->rhs()->accept(this);
-  putHash(v.get(), hash_combine(hashOf(v->lhs()), "Mx", hashOf(v->rhs())));
+  putHash(v, hash_combine(hashOf(v->lhs()), "Mx", hashOf(v->rhs())));
 }
 
 void HashProvider::visit(MinPtr v) {
   CACHE_GUARD();
   v->lhs()->accept(this);
   v->rhs()->accept(this);
-  putHash(v.get(), hash_combine(hashOf(v->lhs()), "Mn", hashOf(v->rhs())));
+  putHash(v, hash_combine(hashOf(v->lhs()), "Mn", hashOf(v->rhs())));
 }
 
 void HashProvider::visit(AndPtr v) {
   CACHE_GUARD();
   v->lhs()->accept(this);
   v->rhs()->accept(this);
-  putHash(v.get(), hash_combine(hashOf(v->lhs()), "&", hashOf(v->rhs())));
+  putHash(v, hash_combine(hashOf(v->lhs()), "&", hashOf(v->rhs())));
 }
 
 void HashProvider::visit(OrPtr v) {
   CACHE_GUARD();
   v->lhs()->accept(this);
   v->rhs()->accept(this);
-  putHash(v.get(), hash_combine(hashOf(v->lhs()), "|", hashOf(v->rhs())));
+  putHash(v, hash_combine(hashOf(v->lhs()), "|", hashOf(v->rhs())));
 }
 
 void HashProvider::visit(XorPtr v) {
   CACHE_GUARD();
   v->lhs()->accept(this);
   v->rhs()->accept(this);
-  putHash(v.get(), hash_combine(hashOf(v->lhs()), "^", hashOf(v->rhs())));
+  putHash(v, hash_combine(hashOf(v->lhs()), "^", hashOf(v->rhs())));
 }
 
 void HashProvider::visit(LshiftPtr v) {
   CACHE_GUARD();
   v->lhs()->accept(this);
   v->rhs()->accept(this);
-  putHash(v.get(), hash_combine(hashOf(v->lhs()), "<<", hashOf(v->rhs())));
+  putHash(v, hash_combine(hashOf(v->lhs()), "<<", hashOf(v->rhs())));
 }
 
 void HashProvider::visit(RshiftPtr v) {
   CACHE_GUARD();
   v->lhs()->accept(this);
   v->rhs()->accept(this);
-  putHash(v.get(), hash_combine(hashOf(v->lhs()), ">>", hashOf(v->rhs())));
+  putHash(v, hash_combine(hashOf(v->lhs()), ">>", hashOf(v->rhs())));
 }
 
 void HashProvider::visit(CompareSelectPtr v) {
@@ -119,7 +126,7 @@ void HashProvider::visit(CompareSelectPtr v) {
   v->ret_val1()->accept(this);
   v->ret_val2()->accept(this);
   putHash(
-      v.get(),
+      v,
       hash_combine(
           hashOf(v->lhs()),
           (int)v->compare_select_op(),
@@ -131,12 +138,12 @@ void HashProvider::visit(CompareSelectPtr v) {
 void HashProvider::visit(CastPtr v) {
   CACHE_GUARD();
   v->src_value()->accept(this);
-  putHash(v.get(), hash_combine("cast", v->dtype(), hashOf(v->src_value())));
+  putHash(v, hash_combine("cast", v->dtype(), hashOf(v->src_value())));
 }
 
 void HashProvider::visit(VarPtr v) {
   CACHE_GUARD();
-  putHash(v.get(), hash_combine("var", name_manager_.get_unique_name(v)));
+  putHash(v, hash_combine("var", name_manager_.get_unique_name(v)));
 }
 
 void HashProvider::visit(RampPtr v) {
@@ -144,7 +151,7 @@ void HashProvider::visit(RampPtr v) {
   v->base()->accept(this);
   v->stride()->accept(this);
   putHash(
-      v.get(),
+      v,
       hash_combine("ramp", hashOf(v->base()), hashOf(v->stride()), v->lanes()));
 }
 
@@ -156,8 +163,7 @@ void HashProvider::visit(LoadPtr v) {
     ind->accept(this);
     indices_hash = hash_combine(indices_hash, hashOf(ind));
   }
-  putHash(
-      v.get(), hash_combine("load", hashOf(v->base_handle()), indices_hash));
+  putHash(v, hash_combine("load", hashOf(v->base_handle()), indices_hash));
 }
 
 void HashProvider::visit(StorePtr v) {
@@ -170,7 +176,7 @@ void HashProvider::visit(StorePtr v) {
   }
   v->value()->accept(this);
   putHash(
-      v.get(),
+      v,
       hash_combine(
           "store", hashOf(v->base_handle()), indices_hash, hashOf(v->value())));
 }
@@ -183,7 +189,7 @@ void HashProvider::visit(BlockPtr v) {
     s->accept(this);
     hash = hash_combine(hash, hashOf(s));
   }
-  putHash(v.get(), hash);
+  putHash(v, hash);
 }
 
 void HashProvider::visit(ForPtr v) {
@@ -200,13 +206,13 @@ void HashProvider::visit(ForPtr v) {
     hash = hash_combine(hash, hashOf(v->body()));
   }
 
-  putHash(v.get(), hash);
+  putHash(v, hash);
 }
 
 void HashProvider::visit(BroadcastPtr v) {
   CACHE_GUARD();
   v->value()->accept(this);
-  putHash(v.get(), hash_combine("broadcast", hashOf(v->value()), v->lanes()));
+  putHash(v, hash_combine("broadcast", hashOf(v->value()), v->lanes()));
 }
 
 void HashProvider::visit(IfThenElsePtr v) {
@@ -216,7 +222,7 @@ void HashProvider::visit(IfThenElsePtr v) {
   v->false_value()->accept(this);
 
   putHash(
-      v.get(),
+      v,
       hash_combine(
           "ifthenelse",
           hashOf(v->condition()),
@@ -230,7 +236,7 @@ void HashProvider::visit(IntrinsicsPtr v) {
   // should not hash to anything and this is the best we can do.
   if (v->op_type() == kRand) {
     // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.rand)
-    putHash(v.get(), (SimplifierHashType)rand());
+    putHash(v, (SimplifierHashType)rand());
     return;
   }
 
@@ -240,7 +246,7 @@ void HashProvider::visit(IntrinsicsPtr v) {
     hash = hash_combine(hash, hashOf(v->param(i)));
   }
 
-  putHash(v.get(), hash);
+  putHash(v, hash);
 }
 
 void HashProvider::visit(AllocatePtr v) {
@@ -256,7 +262,7 @@ void HashProvider::visit(AllocatePtr v) {
     dim->accept(this);
     hash = hash_combine(hash, hashOf(dim));
   }
-  putHash(v.get(), hash);
+  putHash(v, hash);
 }
 
 void HashProvider::visit(FreePtr v) {
@@ -264,7 +270,7 @@ void HashProvider::visit(FreePtr v) {
   VarPtr buffer_var = v->buffer_var();
   buffer_var->accept(this);
 
-  putHash(v.get(), hash_combine("free", hashOf(buffer_var)));
+  putHash(v, hash_combine("free", hashOf(buffer_var)));
 }
 
 void HashProvider::visit(CondPtr v) {
@@ -284,7 +290,7 @@ void HashProvider::visit(CondPtr v) {
     hash = hash_combine(hash, hashOf(false_stmt));
   }
 
-  putHash(v.get(), hash);
+  putHash(v, hash);
 }
 
 void HashProvider::visit(TermPtr v) {
@@ -297,7 +303,7 @@ void HashProvider::visit(TermPtr v) {
     hash = hash_combine(hash, hashOf(c));
   }
 
-  putHash(v.get(), hash);
+  putHash(v, hash);
 }
 
 void HashProvider::visit(PolynomialPtr v) {
@@ -310,7 +316,7 @@ void HashProvider::visit(PolynomialPtr v) {
     hash = hash_combine(hash, hashOf(c));
   }
 
-  putHash(v.get(), hash);
+  putHash(v, hash);
 }
 
 void HashProvider::visit(MaxTermPtr v) {
@@ -326,7 +332,7 @@ void HashProvider::visit(MaxTermPtr v) {
     hash = hash_combine(hash, hashOf(c));
   }
 
-  putHash(v.get(), hash);
+  putHash(v, hash);
 }
 
 void HashProvider::visit(MinTermPtr v) {
@@ -342,7 +348,7 @@ void HashProvider::visit(MinTermPtr v) {
     hash = hash_combine(hash, hashOf(c));
   }
 
-  putHash(v.get(), hash);
+  putHash(v, hash);
 }
 
 } // namespace tensorexpr

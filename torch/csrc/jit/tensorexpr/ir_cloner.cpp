@@ -256,7 +256,7 @@ StmtPtr IRCloner::mutate(ForPtr v) {
   auto stop_new = v->stop()->accept_mutator(this);
   auto body_new = v->body()->accept_mutator(this);
 
-  return For::make(v->var(), start_new, stop_new, body_new, v->loop_options());
+  return alloc<For>(v->var(), start_new, stop_new, body_new, v->loop_options());
 }
 
 StmtPtr IRCloner::mutate(BlockPtr v) {
@@ -265,7 +265,7 @@ StmtPtr IRCloner::mutate(BlockPtr v) {
   for (StmtPtr stmt : *v) {
     stmts_new.push_back(stmt->accept_mutator(this));
   }
-  return Block::make(stmts_new);
+  return alloc<Block>(stmts_new);
 }
 
 StmtPtr IRCloner::mutate(StorePtr v) {
@@ -332,7 +332,7 @@ StmtPtr IRCloner::mutate(CondPtr v) {
   StmtPtr false_old = v->false_stmt();
   StmtPtr true_new = true_old ? true_old->accept_mutator(this) : true_old;
   StmtPtr false_new = false_old ? false_old->accept_mutator(this) : false_old;
-  return Cond::make(condition_new, true_new, false_new);
+  return alloc<Cond>(condition_new, true_new, false_new);
 }
 
 StmtPtr Stmt::clone(StmtPtr s) {
@@ -344,18 +344,7 @@ StmtPtr Stmt::clone(StmtPtr s) {
 
 ExprPtr Expr::clone(ExprPtr e) {
   IRCloner cloner;
-  ExprPtr cloned = e->accept_mutator(&cloner);
-  cloned->set_expr_parent(nullptr);
-  return cloned;
-}
-
-std::vector<ExprPtr> Expr::clone(const std::vector<ExprPtr>& v) {
-  std::vector<ExprPtr> cloned;
-  cloned.reserve(v.size());
-  for (auto e : v) {
-    cloned.push_back(Expr::clone(e));
-  }
-  return cloned;
+  return e->accept_mutator(&cloner);
 }
 
 } // namespace tensorexpr

@@ -65,21 +65,8 @@ class TORCH_API Expr : public std::enable_shared_from_this<Expr> {
    * that the variables are not deep-copied since they are immutable.
    */
   static ExprPtr clone(ExprPtr s);
-  static std::vector<ExprPtr> clone(const std::vector<ExprPtr>& v);
-
-  void set_expr_parent(Expr* new_parent);
-  void set_stmt_parent(Stmt* new_parent);
-  Expr* get_expr_parent() const {
-    return expr_parent_;
-  }
-  Stmt* get_stmt_parent() const {
-    return stmt_parent_;
-  }
 
  protected:
-  Expr* getweakptr() {
-    return this;
-  }
   std::shared_ptr<Expr> getptr() {
     return shared_from_this();
   }
@@ -87,8 +74,6 @@ class TORCH_API Expr : public std::enable_shared_from_this<Expr> {
  private:
   Dtype dtype_;
   IRNodeType expr_type_;
-  Expr* expr_parent_ = nullptr;
-  Stmt* stmt_parent_ = nullptr;
 };
 
 // A CRTP pattern to accept visitors for children class,

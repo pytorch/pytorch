@@ -1417,7 +1417,7 @@ TEST(LLVM, DynamicShape2D) {
 
 TEST(LLVM, EmptyStmt) {
   KernelScope kernel_scope;
-  StmtPtr s = Block::make({});
+  StmtPtr s = alloc<Block>(std::vector<StmtPtr>({}));
 
   LLVMCodeGen cg(s, {});
   cg.call({});

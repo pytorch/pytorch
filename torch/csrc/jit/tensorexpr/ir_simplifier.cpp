@@ -1611,7 +1611,7 @@ StmtPtr PolynomialBase::mutate(CondPtr v) {
   bool false_empty = !false_new || (false_block && false_block->nstmts() == 0);
 
   if (true_empty && false_empty) {
-    return Block::make({});
+    return alloc<Block>(std::vector<StmtPtr>({}));
   }
   if (cond_old != cond_new) {
     v->set_condition(cond_new);
@@ -1659,7 +1659,7 @@ StmtPtr PolynomialBase::mutate(ForPtr v) {
   loops = loops->accept_mutator(this);
   if (loop_options.isDefault() && loops->isConstant()) {
     if (immediateEquals(loops, 0)) {
-      return Block::make({});
+      return alloc<Block>(std::vector<StmtPtr>({}));
     } else if (immediateEquals(loops, 1)) {
       body_new = Substitute(body, {{var_new, start_new}});
       body_new = body_new->accept_mutator(this);
@@ -1669,12 +1669,12 @@ StmtPtr PolynomialBase::mutate(ForPtr v) {
 
   body_new = body_new->accept_mutator(this);
   if (!body_new) {
-    return Block::make({});
+    return alloc<Block>(std::vector<StmtPtr>({}));
   }
 
   if (auto block = to<Block>(body_new)) {
     if (block->nstmts() == 0) {
-      return Block::make({});
+      return alloc<Block>(std::vector<StmtPtr>({}));
     }
 
     if (block->nstmts() == 1) {
@@ -2422,8 +2422,8 @@ BlockPtr TermExpander::fuseConditions(BlockPtr v) {
 
     // Fuse the two Conds by appending the bodies of the second Cond to the
     // first.
-    BlockPtr true_block = Block::make({});
-    BlockPtr false_block = Block::make({});
+    BlockPtr true_block = alloc<Block>(std::vector<StmtPtr>({}));
+    BlockPtr false_block = alloc<Block>(std::vector<StmtPtr>({}));
 
     if (prev_cond->true_stmt()) {
       true_block->splice(true_block->end(), prev_cond->true_stmt());
@@ -2472,7 +2472,7 @@ BlockPtr TermExpander::fuseConditions(BlockPtr v) {
     }
   }
 
-  return Block::make(stmts);
+  return alloc<Block>(stmts);
 }
 
 StmtPtr TermExpander::fuseSyncThreads(BlockPtr block) {
@@ -2517,7 +2517,7 @@ StmtPtr TermExpander::fuseSyncThreads(BlockPtr block) {
     }
   }
 
-  return Block::make({stmts});
+  return alloc<Block>(std::vector<StmtPtr>({stmts}));
 }
 
 StmtPtr TermExpander::mutate(BlockPtr v) {
@@ -2582,7 +2582,7 @@ StmtPtr SimplifierUnderContext::mutate(ForPtr v) {
   iters = iters->accept_mutator(this);
   if (loop_options.isDefault() && iters->isConstant()) {
     if (immediateEquals(iters, 0)) {
-      return Block::make({});
+      return alloc<Block>(std::vector<StmtPtr>({}));
     } else if (immediateEquals(iters, 1)) {
       body_new = Substitute(body, {{var_new, start_new}});
       body_new = body_new->accept_mutator(this);
@@ -2608,12 +2608,12 @@ StmtPtr SimplifierUnderContext::mutate(ForPtr v) {
   }
 
   if (!body_new) {
-    return Block::make({});
+    return alloc<Block>(std::vector<StmtPtr>({}));
   }
 
   if (auto block = to<Block>(body_new)) {
     if (block->nstmts() == 0) {
-      return Block::make({});
+      return alloc<Block>(std::vector<StmtPtr>({}));
     }
 
     if (block->nstmts() == 1) {

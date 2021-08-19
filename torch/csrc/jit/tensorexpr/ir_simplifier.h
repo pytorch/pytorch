@@ -425,8 +425,8 @@ class TORCH_API PolynomialTransformer : public PolynomialBase {
   // variables.
   ExprPtr addPolynomials(PolynomialPtr lhs, PolynomialPtr rhs);
 
-  // Insert a new Term into the provided polynomial. If the new term has common
-  // variables to an existing term it is combined.
+  // Insert a new Term into the provided polynomial. If the new term has
+  // common variables to an existing term it is combined.
   ExprPtr insertTerm(PolynomialPtr poly, TermPtr term);
 
   // Merge and simplify addition.
