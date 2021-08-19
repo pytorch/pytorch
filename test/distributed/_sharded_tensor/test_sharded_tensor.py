@@ -16,9 +16,9 @@ from torch.distributed._sharding_spec import (
     EnumerableShardingSpec,
     ShardMetadata
 )
-from torch.distributed._sharded_tensor._internals import (
+from torch.distributed._sharded_tensor.api import (
     CreateOp,
-    InitCommonParams,
+    TensorInitParams,
     create_tensor_from_params,
 )
 from torch.testing._internal.common_distributed import (
@@ -125,7 +125,7 @@ def with_comms(func):
 class TestCreateTensorFromParams(TestCase):
     @sandcastle_skip_if(torch.cuda.device_count() < 1, 'CUDA GPU is needed')
     def test_empty(self):
-        common_params = InitCommonParams(
+        tensor_init_params = TensorInitParams(
             create_op=CreateOp.EMPTY,
             dtype=torch.double,
             layout=torch.strided,
@@ -134,7 +134,7 @@ class TestCreateTensorFromParams(TestCase):
             memory_format=torch.contiguous_format, )
         local_device = torch.device('cuda:0')
         local_tensor = create_tensor_from_params(
-            5, 10, local_device=local_device, params=common_params)
+            5, 10, local_device=local_device, tensor_init_params=tensor_init_params)
         self.assertEqual(local_device, local_tensor.device)
         self.assertEqual(torch.double, local_tensor.dtype)
         self.assertEqual(torch.strided, local_tensor.layout)
@@ -142,7 +142,7 @@ class TestCreateTensorFromParams(TestCase):
 
     @sandcastle_skip_if(torch.cuda.device_count() < 1, 'CUDA GPU is needed')
     def test_ones(self):
-        common_params = InitCommonParams(
+        tensor_init_params = TensorInitParams(
             create_op=CreateOp.ONES,
             dtype=torch.double,
             layout=torch.strided,
@@ -151,7 +151,7 @@ class TestCreateTensorFromParams(TestCase):
             memory_format=torch.contiguous_format, )
         local_device = torch.device('cuda:0')
         local_tensor = create_tensor_from_params(
-            5, 10, local_device=local_device, params=common_params)
+            5, 10, local_device=local_device, tensor_init_params=tensor_init_params)
         expected_tensor = torch.ones(5, 10, device=local_device, dtype=torch.double)
         self.assertEqual(expected_tensor, local_tensor)
 
@@ -282,7 +282,8 @@ class TestShardedTensorChunked(ShardedTensorTestBase, MultiProcessTestCase):
         self.assertEqual(1, len(local_shards))
         local_shard = local_shards[0].tensor
         self.assertEqual(torch.device(f"cuda:{self.rank}"), local_shard.device)
-        expected_h = math.floor(h / 4) if self.rank == 3 else math.ceil(h / 4)
+        # The split: for rank!=3 ceil(h/4)=3  for rank=3 1
+        expected_h = 1 if self.rank == 3 else math.ceil(h / 4)
         self.assertEqual((expected_h, w), local_shard.size())
         self.assertEqual(local_shard, torch.ones(expected_h, w))
 

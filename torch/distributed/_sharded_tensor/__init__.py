@@ -3,17 +3,14 @@ from typing import List
 import torch
 from torch.distributed._sharding_spec import ShardingSpec
 from .api import (
+    CreateOp,
     Shard,
     ShardedTensor,
     ShardedTensorMetadata,
+    TensorInitParams,
     load_with_process_group,
 )
 
-from ._internals import (
-    CreateOp,
-    InitCommonParams,
-    create_tensor_from_params,
-)
 
 def empty(
         sharding_spec: ShardingSpec,
@@ -55,13 +52,13 @@ def empty(
     Returns:
         A :class:`ShardedTensor` object on each rank
     """
-    params = InitCommonParams(create_op=CreateOp.EMPTY, dtype=dtype, layout=layout,
-                              requires_grad=requires_grad, pin_memory=pin_memory,
-                              memory_format=memory_format)
+    tensor_init_params = TensorInitParams(create_op=CreateOp.EMPTY, dtype=dtype, layout=layout,
+                                          requires_grad=requires_grad,
+                                          pin_memory=pin_memory,memory_format=memory_format)
     return ShardedTensor(
         sharding_spec,
         *size,
-        common_params=params,
+        tensor_init_params=tensor_init_params,
         process_group=process_group,
         init_rrefs=init_rrefs,
     )
@@ -104,13 +101,13 @@ def ones(
     Returns:
         A :class:`ShardedTensor` object on each rank
     """
-    params = InitCommonParams(create_op=CreateOp.ONES, dtype=dtype, layout=layout,
-                              requires_grad=requires_grad,
-                              pin_memory=pin_memory, memory_format=memory_format)
+    tensor_init_params = TensorInitParams(create_op=CreateOp.ONES, dtype=dtype, layout=layout,
+                                          requires_grad=requires_grad,
+                                          pin_memory=pin_memory, memory_format=memory_format)
     return ShardedTensor(
         sharding_spec,
         *size,
-        common_params=params,
+        tensor_init_params=tensor_init_params,
         process_group=process_group,
         init_rrefs=init_rrefs,
     )
