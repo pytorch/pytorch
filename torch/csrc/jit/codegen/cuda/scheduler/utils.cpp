@@ -601,8 +601,8 @@ TensorView* scheduleReductionTV(
 
         // [x-BIDx, x-Unswitch, x-Unroll, x-TIDy, rF-Remain, r-TIDx]
         //     0         1          2        3        4         5
-        // -> [x-BIDx, x-TIDy, rF-Leftover, x-Unswitch, x-Unroll, r-TIDx]
-        //       0        1          2           3          4       5
+        // -> [x-BIDx, x-TIDy, rF-Remain, x-Unswitch, x-Unroll, r-TIDx]
+        //       0        1         2           3          4       5
 
         reference_tv->reorder({{1, 3}, {2, 4}, {3, 1}, {4, 2}});
 
@@ -619,6 +619,7 @@ TensorView* scheduleReductionTV(
         }
       }
     } else {
+      // Not multiple reductions per block
       if (rparams.cross_grid) {
         TORCH_INTERNAL_ASSERT(
             rparams.reduction_unroll,
@@ -702,84 +703,131 @@ TensorView* scheduleReductionTV(
         }
 
       } else {
-        TORCH_INTERNAL_ASSERT(
-            rparams.reduction_unroll, "Iter unroll not implemented yet.");
-        // Fastest dim, Reduction Splits
-        // Output Dimensions
-        // [BIDx
-        //  0
-        //
-        // Reduction Dimensions
-        // rF-Remain, rf-Unswitch, rf-Unroll, r-TIDx]
-        // 1(r)      2(r+1)        3(r+2)      4(r+3)
-        // rF-Remain, rf-Unswitch, r-TIDx, rf-Vectorize]
-        // 1(r)      2(r+1)        3(r+2)      4(r+3)
+        // Not cross grid
+        if (rparams.reduction_unroll) {
+          // Fastest dim, Reduction unroll
+          // Output Dimensions
+          // [BIDx
+          //  0
+          //
+          // Reduction Dimensions
+          // rF-Remain, rf-Unswitch, rf-Unroll, r-TIDx]
+          // 1(r)      2(r+1)        3(r+2)      4(r+3)
+          // rF-Remain, rf-Unswitch, r-TIDx, rf-Vectorize]
+          // 1(r)      2(r+1)        3(r+2)      4(r+3)
 
-        //  r-TIDx, rF-Leftover, rf-Unswitch, rf-Unroll]
-        //  1(r)       2(r+1)      3(r+2)       4(r+3)
+          //  r-TIDx, rF-Leftover, rf-Unswitch, rf-Unroll]
+          //  1(r)       2(r+1)      3(r+2)       4(r+3)
 
-        if (!rparams.persistent_kernel) {
+          if (!rparams.persistent_kernel) {
+            if (rparams.vectorize) {
+              reduction_tv->split(reduce_axis, rparams.loop_unroll);
+              reduction_tv->split(
+                  reduce_axis, NamedScalar::getParallelDim(ParallelType::TIDx));
+            } else {
+              reduction_tv->split(
+                  reduce_axis, NamedScalar::getParallelDim(ParallelType::TIDx));
+              reduction_tv->split(reduce_axis, rparams.loop_unroll);
+            }
+            // Unswitch axis which gives us finer control on allocations with
+            // unrolling
+            reduction_tv->split(reduce_axis, 1);
+          } else {
+            if (rparams.vectorize) {
+              reduction_tv->split(
+                  reduce_axis, rparams.batches_per_block, false);
+              reduction_tv->split(reduce_axis + 1, rparams.loop_unroll);
+            } else {
+              reduction_tv->split(
+                  reduce_axis,
+                  rparams.batches_per_block * rparams.loop_unroll,
+                  false);
+              reduction_tv->split(reduce_axis, rparams.loop_unroll);
+            }
+            // Unswitch axis which gives us finer control on allocations with
+            // unrolling
+            reduction_tv->split(reduce_axis, 1);
+          }
+
           if (rparams.vectorize) {
-            reduction_tv->split(reduce_axis, rparams.loop_unroll);
+            reduction_tv->reorder(
+                {{reduce_axis + 2, reduce_axis},
+                 {reduce_axis, reduce_axis + 1},
+                 {reduce_axis + 1, reduce_axis + 2}});
+          } else {
+            reduction_tv->reorder(
+                {{reduce_axis + 3, reduce_axis},
+                 {reduce_axis, reduce_axis + 1},
+                 {reduce_axis + 1, reduce_axis + 2},
+                 {reduce_axis + 2, reduce_axis + 3}});
+          }
+
+          reference_tv = ir_utils::rfactorHelper(
+              reduction_tv,
+              {reduce_axis + 1, reduce_axis + 2, reduce_axis + 3});
+
+          reference_tv->axis(reduce_axis)->parallelize(ParallelType::TIDx);
+          if (rparams.vectorize) {
+            reference_tv->axis(reduce_axis + 3)
+                ->parallelize(ParallelType::Vectorize);
+          } else {
+            reference_tv->axis(reduce_axis + 3)
+                ->parallelize(ParallelType::Unroll);
+          }
+          reference_tv->axis(reduce_axis + 2)
+              ->parallelize(ParallelType::Unswitch);
+
+          if (has_iter_axis) {
+            if (rparams.split_grid_dim) {
+              reference_tv->split(iter_axis, x_grid_limit);
+              reference_tv->axis(iter_axis + 1)
+                  ->parallelize(ParallelType::BIDx);
+            } else {
+              reference_tv->axis(iter_axis)->parallelize(ParallelType::BIDx);
+            }
+          }
+        } else {
+          TORCH_INTERNAL_ASSERT(
+              has_iter_axis, "Need iteration axis for iteration unroll.");
+          // Fastest dim, Reduction Splits
+          // Output Dimensions
+          // [BIDx, x-Unswitch, x-Unroll
+          //  0
+          //
+          // Reduction Dimensions
+          // rF-Remain, r-TIDx]
+          // 1(r)       2(r+1)
+
+          if (!rparams.persistent_kernel) {
             reduction_tv->split(
                 reduce_axis, NamedScalar::getParallelDim(ParallelType::TIDx));
           } else {
-            reduction_tv->split(
-                reduce_axis, NamedScalar::getParallelDim(ParallelType::TIDx));
-            reduction_tv->split(reduce_axis, rparams.loop_unroll);
-          }
-          // Unswitch axis which gives us finer control on allocations with
-          // unrolling
-          reduction_tv->split(reduce_axis, 1);
-        } else {
-          if (rparams.vectorize) {
             reduction_tv->split(reduce_axis, rparams.batches_per_block, false);
-            reduction_tv->split(reduce_axis + 1, rparams.loop_unroll);
-          } else {
-            reduction_tv->split(
-                reduce_axis,
-                rparams.batches_per_block * rparams.loop_unroll,
-                false);
-            reduction_tv->split(reduce_axis, rparams.loop_unroll);
           }
+
+          reduction_tv->split(iter_axis, rparams.loop_unroll);
           // Unswitch axis which gives us finer control on allocations with
           // unrolling
-          reduction_tv->split(reduce_axis, 1);
-        }
+          reduction_tv->split(iter_axis, 1);
 
-        if (rparams.vectorize) {
-          reduction_tv->reorder(
-              {{reduce_axis + 2, reduce_axis},
-               {reduce_axis, reduce_axis + 1},
-               {reduce_axis + 1, reduce_axis + 2}});
-        } else {
-          reduction_tv->reorder(
-              {{reduce_axis + 3, reduce_axis},
-               {reduce_axis, reduce_axis + 1},
-               {reduce_axis + 1, reduce_axis + 2},
-               {reduce_axis + 2, reduce_axis + 3}});
-        }
+          // [x-BIDx, x-Unswitch, x-Unroll, rF-Remain, r-TIDx]
+          //     0         1          2        3        4
+          // -> [x-BIDx, rF-Remain, x-Unswitch, x-Unroll, r-TIDx]
+          //       0        1          2           3          4
 
-        reference_tv = ir_utils::rfactorHelper(
-            reduction_tv, {reduce_axis + 1, reduce_axis + 2, reduce_axis + 3});
+          reduction_tv->reorder({{1, 2}, {2, 3}, {3, 1}});
 
-        reference_tv->axis(reduce_axis)->parallelize(ParallelType::TIDx);
-        if (rparams.vectorize) {
-          reference_tv->axis(reduce_axis + 3)
-              ->parallelize(ParallelType::Vectorize);
-        } else {
-          reference_tv->axis(reduce_axis + 3)
-              ->parallelize(ParallelType::Unroll);
-        }
-        reference_tv->axis(reduce_axis + 2)
-            ->parallelize(ParallelType::Unswitch);
+          reference_tv = ir_utils::rfactorHelper(reduction_tv, {1});
 
-        if (has_iter_axis) {
+          reference_tv->axis(4)->parallelize(ParallelType::TIDx);
+          reference_tv->axis(3)->parallelize(ParallelType::Unroll);
+          reference_tv->axis(2)->parallelize(ParallelType::Unswitch);
+
           if (rparams.split_grid_dim) {
-            reference_tv->split(iter_axis, x_grid_limit);
-            reference_tv->axis(iter_axis + 1)->parallelize(ParallelType::BIDx);
+            reference_tv->split(0, x_grid_limit);
+            reference_tv->axis(1)->parallelize(ParallelType::BIDx);
           } else {
-            reference_tv->axis(iter_axis)->parallelize(ParallelType::BIDx);
+            reference_tv->axis(0)->parallelize(ParallelType::BIDx);
           }
         }
       }
@@ -797,8 +845,9 @@ TensorView* scheduleReductionTV(
 
         // Outer Dim, cross grid, cross block
 
-        // Unrolling in this case can only be applied to the reduction dimension
-        // since currently, grid reductions cannot be called multiple times
+        // Unrolling in this case can only be applied to the reduction
+        // dimension since currently, grid reductions cannot be called
+        // multiple times
         //
         // Output Dimensions
         // [x-BIDx, x-TIDx,
@@ -893,7 +942,8 @@ TensorView* scheduleReductionTV(
           //      0(-6)     1(-5)      2(-4)    3(-3)     4(-2)      5(-1)
           //    [x-BIDx, x-Unswitch, x-TIDx, x-Vectorize, rF-Leftover, r-TIDy]
           //      0(-6)     1(-5)      2(-4)    3(-3)     4(-2)      5(-1)
-          // -> [x-BIDx, x-TIDx, rF-Leftover, x-Unswitch, x-Unroll/Vect, r-TIDy]
+          // -> [x-BIDx, x-TIDx, rF-Leftover, x-Unswitch, x-Unroll/Vect,
+          // r-TIDy]
           //      0(-6)   1(-5)     2(-4)        3(-3)      4(-2)        5(-1)
 
           if (!rparams.persistent_kernel) {

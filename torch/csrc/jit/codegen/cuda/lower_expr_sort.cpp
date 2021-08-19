@@ -707,7 +707,7 @@ std::vector<IterDomain*> getLocalDomainOrdering(
       iter_pair_t;
 
   std::vector<iter_pair_t> iterators(domains.size());
-  for (size_t i = 0; i < domains.size(); i++) {
+  for (auto i : c10::irange(domains.size())) {
     iterators[i] = std::make_pair(domains[i].begin(), domains[i].end());
   }
 

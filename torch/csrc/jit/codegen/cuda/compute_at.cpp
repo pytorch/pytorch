@@ -625,11 +625,7 @@ void ComputeAt::resetMaxProducerPos(TensorView* consumer_tv) {
     }
   }
 
-  // After going through all the producers, decrease the produce
-  //  position of current consumer if needed.
-  if (new_consummer_pa_pos <= consumer_tv->getMaxProducerPosition()) {
-    consumer_tv->setMaxProducer(new_consummer_pa_pos, true);
-  }
+  consumer_tv->setMaxProducer(new_consummer_pa_pos, true);
 }
 
 void ComputeAt::hoistInnermostBroadcast() {
@@ -667,10 +663,15 @@ void ComputeAt::hoistInnermostBroadcast() {
 }
 
 void ComputeAt::updateSiblings() {
-  auto updateSiblingsOfTv = [](TensorView* tv) {
+  // Track which consumers may have a wrong produce at position to update
+  // later
+  auto updateSiblingsOfTv = [&](TensorView* tv) {
     if (tv->definition() == nullptr) {
       return;
     }
+
+    std::unordered_set<TensorView*> consumers_to_update;
+
     if (tv->definition()->outputs().size() > 1) {
       auto outs = tv->definition()->outputs();
       auto out_tvs = ir_utils::filterByType<TensorView>(outs);
@@ -697,12 +698,20 @@ void ComputeAt::updateSiblings() {
             id->parallelize(sibling_id->getParallelType());
           }
         }
-        auto sibling_domain =
-            TransformReplay::fullSelfReplay(sibling_tv->domain(), tv->domain());
-        sibling_tv->setDomain(sibling_domain);
-        sibling_tv->setComputeAt(tv->getComputeAtPosition());
-        sibling_tv->setMaxProducer(tv->getMaxProducerPosition());
+        if (tv->getComputeAtPosition() > sibling_tv->getComputeAtPosition()) {
+          auto sibling_domain = TransformReplay::fullSelfReplay(
+              sibling_tv->domain(), tv->domain());
+          validateDomain(sibling_tv, sibling_domain);
+          sibling_tv->setDomain(sibling_domain);
+          sibling_tv->setComputeAt(tv->getComputeAtPosition());
+          sibling_tv->setMaxProducer(tv->getMaxProducerPosition());
+          auto consumer_tvs = ir_utils::consumerTvsOf(sibling_tv);
+          consumers_to_update.insert(consumer_tvs.begin(), consumer_tvs.end());
+        }
       }
+    }
+    for (auto consumer : consumers_to_update) {
+      this->resetMaxProducerPos(consumer);
     }
   };
 
@@ -756,11 +765,12 @@ void ComputeAt::runPass() {
   // Back off on inlining the inner broadcast axes
   hoistInnermostBroadcast();
 
+  // Clear max producer position of consumers from fusion inputs.
+  updateInputProduceAts();
+
   // Update siblings of multi output expressions
   updateSiblings();
 
-  // Clear max producer position of consumers from fusion inputs.
-  updateInputProduceAts();
 }
 
 ComputeAt::ComputeAt(
