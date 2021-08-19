@@ -1578,8 +1578,8 @@ TEST(Reductions, ReductionCacheBodyAccess) {
 #CHECK: Allocate(scale_local); // dtype=float, dims=[1, 32, 12]
 #CHECK: for (int j = 0; j < 32; j++) {
 #CHECK:   for (int k = 0; k < 12; k++) {
-#CHECK:     scale_local[k + 12 * j] = scale[(k + 384 * l1) + 12 * j];
-#CHECK: sum[l1] = (sum[l1]) + (scale_local[12 * n1_1 + m1_1]);
+#CHECK:     scale_local[k + 12 * j] = scale[(k + 12 * j) + 384 * l1];
+#CHECK: sum[l1] = (sum[l1]) + (scale_local[m1_1 + 12 * n1_1]);
 #CHECK: scale_1[l] = (b[l]) * (sum[l]);
 #CHECK: Free(scale_local);
       )IR";
@@ -1667,7 +1667,7 @@ TEST(Reductions, ReductionSplitCacheConsumerAccess) {
   const std::string& expected_ir =
       R"IR(
 #CHECK: Allocate(sum_local); // dtype=float, dims=[4]
-#CHECK: sum[l1_inner + 4 * l1_outer] = (sum[l1_inner + 4 * l1_outer]) + (scale[((12 * n1_1 + 384 * l1_inner) + m1_1) + 1536 * l1_outer]);
+#CHECK: sum[l1_inner + 4 * l1_outer] = (sum[l1_inner + 4 * l1_outer]) + (scale[((m1_1 + 12 * n1_1) + 1536 * l1_outer) + 384 * l1_inner]);
 #CHECK: for (int i = 0; i < 4
 #CHECK:   sum_local[i] = sum[i + 4 * l_outer];
 #CHECK:   scale_1[l_inner + 4 * l_outer] = (b[l_inner + 4 * l_outer]) * (sum_local[l_inner]);
@@ -1716,7 +1716,7 @@ TEST(Reductions, ReductionReorderCacheConsumerAccess) {
   const std::string& expected_ir =
       R"IR(
 #CHECK: Allocate(sum_local); // dtype=float, dims=[4]
-#CHECK: sum[l1] = (sum[l1]) + (scale[(12 * n1_1 + m1_1) + 384 * l1]);
+#CHECK: sum[l1] = (sum[l1]) + (scale[(m1_1 + 12 * n1_1) + 384 * l1]);
 #CHECK: for (int i = 0; i < 4
 #CHECK:   sum_local[i] = sum[i + 4 * l_outer];
 #CHECK: scale_1[l_inner + 4 * l_outer] = (b[l_inner + 4 * l_outer]) * (sum_local[l_inner]);
