@@ -54,7 +54,7 @@ namespace jit {
 
 using CodeImpl = interpreter::CodeImpl;
 
-// Before we translate to intepreter instructions, we do
+// Before we translate to interpreter instructions, we do
 // some preprocessing of the graph to turn it into a form that is closer
 // to what the instructions will look like.
 // In particular we:

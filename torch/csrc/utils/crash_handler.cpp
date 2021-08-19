@@ -77,7 +77,7 @@ void enable_minidumps_on_exceptions() {
 }
 
 #else
-// On unspported systems we can't do anything, so stub out everything.
+// On unsupported systems we can't do anything, so stub out everything.
 void enable_minidumps(const std::string& dir) {
   AT_ERROR(
       "Minidump collection is currently only implemented for Linux platforms");

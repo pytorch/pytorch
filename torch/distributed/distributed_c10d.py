@@ -216,7 +216,7 @@ def _store_based_barrier(rank, store, timeout):
     world_size = get_world_size()
     # Use 'add' instead of 'get' since for some store implementations 'add'
     # doesn't work well with 'get'. Ideally the store implementations should
-    # be fixed, but for backward compatiblity reasons it is risky to change
+    # be fixed, but for backward compatibility reasons it is risky to change
     # the store implementations. Once, we completely migrate away from these
     # legacy stores, we can use 'get' here instead.
     worker_count = store.add(store_key, 0)

@@ -84,9 +84,9 @@ class PythonDispatcher:
       automatically generated and registered.
     """
     def register(self, dispatchKeys):
-        # Overriden is not supported and triggers a warning in C++ dispatcher.
+        # Overridden is not supported and triggers a warning in C++ dispatcher.
         if len(set(dispatchKeys)) != len(dispatchKeys):
-            raise RuntimeError(f"Overriden is not allowed but found duplicates in {dispatchKeys}.")
+            raise RuntimeError(f"Overridden is not allowed but found duplicates in {dispatchKeys}.")
         # We currently forbid this in codegen instead of C++ dispatcher.
         if 'CompositeImplicitAutograd' in dispatchKeys and 'CompositeExplicitAutograd' in dispatchKeys:
             raise RuntimeError("Registration to both CompositeImplicitAutograd and CompositeExplicitAutograd is not allowed.")

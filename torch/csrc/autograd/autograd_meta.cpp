@@ -183,7 +183,7 @@ void AutogradMeta::set_fw_grad(const Variable& new_grad_, const Variable& self, 
 }
 
 const Variable& AutogradMeta::fw_grad(uint64_t level, const Variable& self) const {
-  // Ensure that concurent fw_grad() "reads" are thread safe
+  // Ensure that concurrent fw_grad() "reads" are thread safe
   std::lock_guard<std::mutex> lock(mutex_);
 
   const auto& direct_fw_grad = fw_grad_ ? fw_grad_->value(level) : ForwardGrad::undef_grad();

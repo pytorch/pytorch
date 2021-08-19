@@ -365,7 +365,7 @@ def replace_pattern(gm: GraphModule, pattern: Callable, replacement: Callable) -
         # subgraph
         if subgraph_output.op != "output":
             # `subgraph_output` may have multiple args. These args could
-            # be from the orignal graph, or they could have come from
+            # be from the original graph, or they could have come from
             # the insertion of `replacement_subgraph`. We need to find
             # the Node that was originally matched as part of
             # `pattern` (i.e. a Node from the original graph). We can

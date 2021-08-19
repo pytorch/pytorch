@@ -1244,7 +1244,7 @@ void initCustomClassBindings() {
 #ifdef USE_C10D_NCCL
   // XXX: Ideally the Options of ProcessGroupNCCL should be
   // bound using `def_readwrite` like in pybind11, but we
-  // didn't do that because: 1. no milisecond support yet
+  // didn't do that because: 1. no millisecond support yet
   // 2. no def_readwrite or property support yet.
   // TODO: make this binding the same as pybind11
   static const auto ProcessGroupNCCLOptionsTorchBind =

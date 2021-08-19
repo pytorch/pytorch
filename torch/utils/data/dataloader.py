@@ -462,7 +462,7 @@ class DataLoader(Generic[T_co]):
                 pass
         if max_num_worker_suggest is None:
             # os.cpu_count() could return Optional[int]
-            # get cpu count first and check None in order to satify mypy check
+            # get cpu count first and check None in order to satisfy mypy check
             cpu_count = os.cpu_count()
             if cpu_count is not None:
                 max_num_worker_suggest = cpu_count

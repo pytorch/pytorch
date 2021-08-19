@@ -282,7 +282,7 @@ utility
 5. This module only supports homogeneous ``LOCAL_WORLD_SIZE``. That is, it is assumed that all
    nodes run the same number of local workers (per role).
 
-6. ``RANK`` is NOT stable. Between restarts, the local workers on a node can be assgined a
+6. ``RANK`` is NOT stable. Between restarts, the local workers on a node can be assigned a
    different range of ranks than before. NEVER hard code any assumptions about the stable-ness of
    ranks or some correlation between ``RANK`` and ``LOCAL_RANK``.
 

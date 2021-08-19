@@ -37,7 +37,7 @@ namespace cuda {
 class PredicateCompute {
  public:
   // Return the series of predicates, if an axis doesn't have a predicate
-  // reutrns 1
+  // returns 1
   static std::vector<kir::Bool*> computePredicates(
       const TensorView* tv,
       const std::vector<Val*>& indices,

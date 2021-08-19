@@ -157,7 +157,7 @@ class FusionExecutorCache {
   // Because of the move statement used in the constructor, it's tricky to
   // maintain the code if we have `has_reduction_` as a const member and
   // initizlize it in the initializer list, where the order of initialization
-  // is controled by the order of declaration instead of their order in the list
+  // is controlled by the order of declaration instead of their order in the list
   //
   //! cache fusion->hasReduction() because it's expensive;
   bool has_reduction_;

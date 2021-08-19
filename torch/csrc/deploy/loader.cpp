@@ -208,7 +208,7 @@ struct GnuHash {
   uint32_t name_len;
 };
 
-// this is a special builtin in the libc++ API used for telling C++ execption
+// this is a special builtin in the libc++ API used for telling C++ exception
 // frame unwinding about functions loaded from a pathway other than the libc
 // loader. it is passed a pointer to where the EH_FRAME section was loaded,
 // which appears to include frame information relative to that address.
@@ -265,7 +265,7 @@ typedef void (*linker_ctor_function_t)(int, const char**, char**);
 
 // https://refspecs.linuxfoundation.org/LSB_2.1.0/LSB-Core-generic/LSB-Core-generic/ehframehdr.html
 // note that eh_frame_ptr can be different types based on eh_frame_ptr_enc but
-// we only support one sepecific encoding that is stored in a int32_t and an
+// we only support one specific encoding that is stored in a int32_t and an
 // offset relative to the start of this struct.
 struct EH_Frame_HDR {
   char version;

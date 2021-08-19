@@ -23,7 +23,7 @@ struct TORCH_API InterpreterSession {
       : impl_(impl), manager_(manager) {}
 
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  Obj self; // when retreived from a PythonMovable this will be set.
+  Obj self; // when retrieved from a PythonMovable this will be set.
   InterpreterSession(InterpreterSession&&) noexcept = default;
   // NOLINTNEXTLINE(bugprone-exception-escape)
   ~InterpreterSession();

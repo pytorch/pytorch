@@ -219,7 +219,7 @@ struct PythonPrintImpl {
   bool canInline(Value* v) {
     Node* n = v->node();
     // there must be only 1 values, otherwise we need an assignment to handle
-    // the multiple outout values
+    // the multiple output values
     if (n->outputs().size() != 1)
       return false;
     // if it is used more than once, then we need a variable
@@ -1312,7 +1312,7 @@ struct PythonPrintImpl {
         enforce_importable_(enforce_importable) {}
 
   void printClass(const ClassTypePtr& classType) {
-    // If any of the methods are not Graph funtions, this indicates that
+    // If any of the methods are not Graph functions, this indicates that
     // this class is a custom-bound C++ class. Skip serialization
     // of this class, we will depend on the ClassType being defined
     // in the target process.

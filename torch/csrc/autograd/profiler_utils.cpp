@@ -29,7 +29,7 @@ static bool validateInput(const std::string &op_name, size_t min_size,
                        const std::vector<int>& should_be_tensor) {
   std::stringstream ss;
   if (inputs.size() < min_size) {
-      ss << "Failed to save extra arguments for flops compuation of op "
+      ss << "Failed to save extra arguments for flops computation of op "
          << op_name
          << ", min size: " << min_size
          << ", actual size: " << inputs.size();
@@ -38,7 +38,7 @@ static bool validateInput(const std::string &op_name, size_t min_size,
   }
   for (auto index : should_be_tensor) {
     if (!inputs[index].isTensor()) {
-      ss << "Failed to save extra arguments for flops compuation of op "
+      ss << "Failed to save extra arguments for flops computation of op "
          << op_name
          << ", input[" << index
          << "] must be a tensor.";

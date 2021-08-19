@@ -211,7 +211,7 @@ class _RemoteModule(nn.Module):
 
         enable_moving_cpu_tensors_to_cuda = self._prepare_init(remote_device)
 
-        # Default arguments preperation.
+        # Default arguments preparation.
         args = args if args is not None else ()
         kwargs = kwargs if kwargs is not None else {}
 

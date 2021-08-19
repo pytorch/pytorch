@@ -93,7 +93,7 @@ python oss_coverage.py --run-only=atest --interested-folder=c10 --summary
 **2. Run tests yourself**
 When you are developing a new feature, you may first run the tests yourself to make sure the implementation is all right and then want to learn its coverage. But sometimes the test take very long time and you don't want to wait to run it again when doing code coverage. In this case, you can use these arguments to accerate your development (make sure you build pytorch with the coverage option!):
 ```
-# run tests when you are devloping a new feature, assume the the test is `test_nn.py`
+# run tests when you are developing a new feature, assume the the test is `test_nn.py`
 python oss_coverage.py --run-only=test_nn.py
 # or you can run it yourself
 cd test/ && python test_nn.py

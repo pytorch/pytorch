@@ -147,7 +147,7 @@ def get_markdown_header(category):
 
 The main goal of this process is to rephrase all the commit messages below to make them clear and easy to read by the end user. You should follow the following instructions to do so:
 
-* **Please cleanup, and format commit titles to be readable by the general pytorch user.** [Detailed intructions here](https://fb.quip.com/OCRoAbEvrRD9#HdaACARZZvo)
+* **Please cleanup, and format commit titles to be readable by the general pytorch user.** [Detailed instructions here](https://fb.quip.com/OCRoAbEvrRD9#HdaACARZZvo)
 * Please sort commits into the following categories (you should not rename the categories!), I tried to pre-sort these to ease your work, feel free to move commits around if the current categorization is not good.
 * Please drop any commits that are not user-facing.
 * If anything is from another domain, leave it in the UNTOPICED section at the end and I'll come and take care of it.

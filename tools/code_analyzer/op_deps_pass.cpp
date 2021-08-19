@@ -461,7 +461,7 @@ private:
       //
       // NB: we probably should do the same for other LLVM instructions with
       // this kind of selective semantics. But for the purpose of analyzing
-      // PyTorch registrations it seems to be sufficent for now.
+      // PyTorch registrations it seems to be sufficient for now.
       if (isa<PHINode>(U)) {
         for (auto& S : U->operands()) {
           blocked.insert(S);

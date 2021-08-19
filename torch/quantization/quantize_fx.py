@@ -494,7 +494,7 @@ def convert_fx(
         `convert_custom_config_dict`: dictionary for custom configurations for convert function:
         convert_custom_config_dict = {
 
-          # addtional object (module/operator) mappings that will overwrite the default
+          # additional object (module/operator) mappings that will overwrite the default
           # module mappingn
           "additional_object_mapping": {
              "static": {

@@ -1251,7 +1251,7 @@ Arguments:
           processGroup,
           "Options",
           R"(
-Base class for all processs group options implementations, such as the nccl
+Base class for all process group options implementations, such as the nccl
 options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
 )")
           .def_readonly("backend", &::c10d::ProcessGroup::Options::backend)

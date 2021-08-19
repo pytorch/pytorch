@@ -888,7 +888,7 @@ kir::TensorIndex* Index::getProducerIndex_impl(
     const std::vector<kir::ForLoop*>& loops) {
   kir::IrBuilder ir_builder(GpuLower::current()->kernel());
 
-  // producer_tv->domain() is not replayed as the loop strucutre we were
+  // producer_tv->domain() is not replayed as the loop structure we were
   // provided, so replay it to match consumer_tv which is.
   auto producerAsC = TransformReplay::replayPasC(
                          producer_tv->domain(), consumer_tv->domain(), -1)

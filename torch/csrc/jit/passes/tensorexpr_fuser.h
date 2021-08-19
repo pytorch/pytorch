@@ -11,7 +11,7 @@ struct Graph;
 
 // Run TensorExpressions-based fuser.
 //
-// If shape checks are disabled it is the responsibilty of
+// If shape checks are disabled it is the responsibility of
 // the caller to ensure that the resultant subgraph is correctly
 // annotated with shapes by the time "getOperation" is called
 // on the node.

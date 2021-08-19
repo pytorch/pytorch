@@ -115,8 +115,8 @@ class elastic_launch:
         return outputs[0]
 
         # entrypoint is a command and ``script.py`` is the python module.
-        ouptuts = elestic_launch(LaunchConfig, "script.py")(args)
-        ouptuts = elestic_launch(LaunchConfig, "python")("script.py")
+        outputs = elestic_launch(LaunchConfig, "script.py")(args)
+        outputs = elestic_launch(LaunchConfig, "python")("script.py")
     """
 
     def __init__(
@@ -147,7 +147,7 @@ def _construct_event(config: LaunchConfig) -> events.Event:
 def _get_entrypoint_name(
     entrypoint: Union[Callable, str, None], args: List[Any]
 ) -> str:
-    """Retrive entrypoint name with the rule:
+    """Retrieve entrypoint name with the rule:
     1. If entrypoint is a function, use ``entrypont.__qualname__``.
     2. If entrypoint is a string, check its value:
         2.1 if entrypoint equals to ``sys.executable`` (like "python"), use the first element from ``args``

@@ -3836,7 +3836,7 @@ def sample_inputs_cumprod(op_info, device, dtype, requires_grad, **kwargs):
             result.narrow(dim_select[0], 4, 1).narrow(dim_select[1], 3, 1).zero_()
         return result
 
-    # will not be needed once OpInfo tests suport Iterables
+    # will not be needed once OpInfo tests support Iterables
     def sample_generator():
         for dim in range(3):
             yield SampleInput(make_arg((S, S, S)), args=(dim,))

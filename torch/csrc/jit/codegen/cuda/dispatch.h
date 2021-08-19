@@ -589,66 +589,66 @@ class TORCH_CUDA_CU_API OptInMutator {
 
   // Vals
   virtual Statement* mutate(IterDomain*) {
-    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for IterDomain.");
+    TORCH_INTERNAL_ASSERT(false, "Mutate not overridden for IterDomain.");
   }
   virtual Statement* mutate(TensorDomain*) {
-    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for TensorDomain.");
+    TORCH_INTERNAL_ASSERT(false, "Mutate not overridden for TensorDomain.");
   }
   virtual Statement* mutate(TensorView*) {
-    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for TensorView.");
+    TORCH_INTERNAL_ASSERT(false, "Mutate not overridden for TensorView.");
   }
   virtual Statement* mutate(kir::TensorIndex*) {
-    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for TensorIndex.");
+    TORCH_INTERNAL_ASSERT(false, "Mutate not overridden for TensorIndex.");
   }
   virtual Statement* mutate(Bool*) {
-    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for Bool.");
+    TORCH_INTERNAL_ASSERT(false, "Mutate not overridden for Bool.");
   }
   virtual Statement* mutate(Float*) {
-    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for Float.");
+    TORCH_INTERNAL_ASSERT(false, "Mutate not overridden for Float.");
   }
   virtual Statement* mutate(Int*) {
-    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for Int.");
+    TORCH_INTERNAL_ASSERT(false, "Mutate not overridden for Int.");
   }
   virtual Statement* mutate(NamedScalar*) {
-    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for NamedScalar.");
+    TORCH_INTERNAL_ASSERT(false, "Mutate not overridden for NamedScalar.");
   }
 
   // Exprs
   virtual Statement* mutate(Split*) {
-    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for Split.");
+    TORCH_INTERNAL_ASSERT(false, "Mutate not overridden for Split.");
   }
   virtual Statement* mutate(Merge*) {
-    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for Merge.");
+    TORCH_INTERNAL_ASSERT(false, "Mutate not overridden for Merge.");
   }
   virtual Statement* mutate(UnaryOp*) {
-    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for UnaryOp.");
+    TORCH_INTERNAL_ASSERT(false, "Mutate not overridden for UnaryOp.");
   }
   virtual Statement* mutate(BinaryOp*) {
-    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for BinaryOp.");
+    TORCH_INTERNAL_ASSERT(false, "Mutate not overridden for BinaryOp.");
   }
   virtual Statement* mutate(TernaryOp*) {
-    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for TernaryOp.");
+    TORCH_INTERNAL_ASSERT(false, "Mutate not overridden for TernaryOp.");
   }
   virtual Statement* mutate(ReductionOp*) {
-    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for ReductionOp.");
+    TORCH_INTERNAL_ASSERT(false, "Mutate not overridden for ReductionOp.");
   }
   virtual Statement* mutate(kir::GridReduction*) {
-    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for GridReduction.");
+    TORCH_INTERNAL_ASSERT(false, "Mutate not overridden for GridReduction.");
   }
   virtual Statement* mutate(BroadcastOp*) {
-    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for BroadcastOp.");
+    TORCH_INTERNAL_ASSERT(false, "Mutate not overridden for BroadcastOp.");
   }
   virtual Statement* mutate(kir::ForLoop*) {
-    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for ForLoop.");
+    TORCH_INTERNAL_ASSERT(false, "Mutate not overridden for ForLoop.");
   }
   virtual Statement* mutate(kir::Allocate*) {
-    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for Allocate.");
+    TORCH_INTERNAL_ASSERT(false, "Mutate not overridden for Allocate.");
   }
   virtual Statement* mutate(kir::Sync*) {
-    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for Sync.");
+    TORCH_INTERNAL_ASSERT(false, "Mutate not overridden for Sync.");
   }
   virtual Statement* mutate(kir::IfThenElse*) {
-    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for IfThenElse.");
+    TORCH_INTERNAL_ASSERT(false, "Mutate not overridden for IfThenElse.");
   }
 };
 

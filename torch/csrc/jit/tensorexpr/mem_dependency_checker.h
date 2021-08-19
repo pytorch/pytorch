@@ -32,7 +32,7 @@ using DependencySet = std::unordered_set<std::shared_ptr<AccessInfo>>;
 /* AccessInfo
  *
  * Represents a single bounded memory access to a buffer, for instance a Load or
- * a Store. Holds infomation relating to the specific access and links to
+ * a Store. Holds information relating to the specific access and links to
  * connected accesses in the dependency graph.
  */
 class TORCH_API AccessInfo {

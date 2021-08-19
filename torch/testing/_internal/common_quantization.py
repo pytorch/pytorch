@@ -366,7 +366,7 @@ class QuantizationTestCase(TestCase):
 
     def checkObservers(self, module, propagate_qconfig_list=None, prepare_custom_config_dict=None):
         r"""Checks the module or module's leaf descendants
-            have observers in preperation for quantization
+            have observers in preparation for quantization
         """
         if propagate_qconfig_list is None:
             propagate_qconfig_list = get_default_qconfig_propagation_list()

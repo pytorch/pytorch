@@ -225,7 +225,7 @@ class BucketBatcherIterDataPipe(IterDataPipe[DataChunk[T_co]]):
         raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
 
 
-# defaut group key is the file pathname without the extension.
+# default group key is the file pathname without the extension.
 # Assuming the passed in data is a tuple and 1st item is file's pathname.
 def default_group_key_fn(dataitem: Tuple[str, Any]):
     return os.path.splitext(dataitem[0])[0]

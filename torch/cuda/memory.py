@@ -50,7 +50,7 @@ def caching_allocator_alloc(size, device: Union[Device, int] = None, stream=None
     if not isinstance(stream, int):
         raise TypeError('Invalid type for stream argument, must be '
                         '`torch.cuda.Stream` or `int` representing a pointer '
-                        'to a exisiting stream')
+                        'to a existing stream')
     with torch.cuda.device(device):
         return torch._C._cuda_cudaCachingAllocator_raw_alloc(size, stream)
 

@@ -181,7 +181,7 @@ ProcessGroup::ProcessGroup(int rank, int size)
 ProcessGroup::~ProcessGroup() {}
 
 // This is introduced so that implementors of ProcessGroup would not need to
-// have this implmentation.
+// have this implementation.
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroup::allgather_coalesced(
     std::vector<std::vector<at::Tensor>>& /* usused */,
     std::vector<at::Tensor>& /* usused */,

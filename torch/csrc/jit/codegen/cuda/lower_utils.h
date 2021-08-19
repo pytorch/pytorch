@@ -54,7 +54,7 @@ Expr* firstInnerMostScope(Expr* scope);
 
 namespace ir_utils {
 
-// Somtimes we want to temporarily view a tensorview with another tensordomain.
+// Sometimes we want to temporarily view a tensorview with another tensordomain.
 // This isn't a permanent transformation, but in indexing we want to index
 // producers with a consumer set of indices, so we need to view the producer
 // transformed like consumer while we index. This will set the tv with td for

@@ -348,7 +348,7 @@ class ChunkDataset final
   }
 
   /// Default get_batch method of BatchDataset. This method returns
-  /// Example batches created from the preloaded chunks. The implemenation
+  /// Example batches created from the preloaded chunks. The implementation
   /// is dataset agnostic and does not need overriding in different chunk
   /// datasets.
   BatchType get_batch(size_t batch_size) override {

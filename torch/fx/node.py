@@ -202,7 +202,7 @@ class Node:
     def append(self, x: 'Node') -> None:
         """
         Insert x after this node in the list of nodes in the graph.
-        Equvalent to ``self.next.prepend(x)``
+        Equivalent to ``self.next.prepend(x)``
 
         Args:
             x (Node): The node to put after this node. Must be a member of the same graph.

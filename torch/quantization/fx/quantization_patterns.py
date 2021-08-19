@@ -1549,7 +1549,7 @@ class CustomModuleQuantizeHandler(QuantizeHandler):
             quantized_custom_module_class.from_observed(observed_custom_module)
         parent_name, name = _parent_name(node.target)
         setattr(modules[parent_name], name, quantized_custom_module)
-        # hardcoded the quntized input to be None (take whatever is in the environemnt),
+        # hardcoded the quntized input to be None (take whatever is in the enviroment),
         # we can extend this
         # if there is a need, e.g. get the indexes of quantized inputs from some
         # module attribute like module._QUANTIZED_INPUT_INDEXES

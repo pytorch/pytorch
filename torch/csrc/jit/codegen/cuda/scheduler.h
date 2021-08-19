@@ -18,7 +18,7 @@ TORCH_CUDA_CU_API bool scheduleFusion(
 // Parameters the Reduction Heuristic Generates to describe the optimial
 // schedule. Warning: equal operator is intended for use in caching the kernel
 // associated with these reduction parameteres. It does not check if the launch
-// parameters are equivelent!
+// parameters are equivalent!
 struct ReductionParams {
   // Reducing inner most dimension?
   bool fastest_dim = true;

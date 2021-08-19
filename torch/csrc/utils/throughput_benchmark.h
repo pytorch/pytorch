@@ -76,7 +76,7 @@ public:
   // even when running in the nn.Module mode. Otherwise destructor of the result
   // would race with Python
   void runOnce(Input&&) const;
-  // This method is to be used when calling from Python dirrectly
+  // This method is to be used when calling from Python directly
   Output runOnce(py::args&&, py::kwargs&&) const;
   // Aggregate input in the format Model expects in order to avoid further
   // conversions at the benchmark time
@@ -179,7 +179,7 @@ class C10_HIDDEN ThroughputBenchmark {
   // validation of its own
   void addInput(py::args args, py::kwargs kwargs);
 
-  // Equivalent to just running the model dirrectly on the given input
+  // Equivalent to just running the model directly on the given input
   py::object runOnce(py::args&& args, py::kwargs&& kwargs);
 
   // The main method of the class allows to perform a multi-threaded benchmark

@@ -862,7 +862,7 @@ class DistributedDataParallel(Module, Joinable):
                     work, self._divide_by_initial_world_size
                 )
 
-            # Calling _rebuild_buckets before forward compuation,
+            # Calling _rebuild_buckets before forward computation,
             # It may allocate new buckets before deallocating old buckets
             # inside _rebuild_buckets. To save peak memory usage,
             # call _rebuild_buckets before the peak memory usage increases
@@ -1455,7 +1455,7 @@ class DistributedDataParallel(Module, Joinable):
         r"""
         This interface allows users to set sample_rate of collecting
         runtime stats. The runtime stats will be recorded for the
-        first 10 iterations, after 10 iteratons runtime stats will be
+        first 10 iterations, after 10 iterations runtime stats will be
         recorded once every "sample_rate" training iterations. In
         default, runtime stats are recorded for the first 10 iterations,
         after 10 iterations runtime stats are recorded once every

@@ -901,7 +901,7 @@ void Engine::evaluate_function(
 }
 
 inline static uint64_t compute_min_topological_nr(const edge_list& outputs) {
-  // Computes the mininum topological number among all the outputs
+  // Computes the minimum topological number among all the outputs
   if (outputs.empty()) {
     return 0;
   }

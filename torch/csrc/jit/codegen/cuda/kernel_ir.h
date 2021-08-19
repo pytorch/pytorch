@@ -510,7 +510,7 @@ class TORCH_CUDA_CU_API BroadcastOp : public Expr {
 // describes the output of an operation.
 //
 // TODO: The components of Allocate like Type and Name could be separated from
-// the the assocated TensorView.  Perhaps that is more appropriate?
+// the the associated TensorView.  Perhaps that is more appropriate?
 class TORCH_CUDA_CU_API Allocate : public Expr {
  public:
   explicit Allocate(
