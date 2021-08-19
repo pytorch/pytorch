@@ -180,7 +180,7 @@ Operator coverage varies between dynamic and static quantization and is captured
 |nn.EmbeddingBag  | Y* (activations   |                   |
 |                 | are in fp32)      | Y                 |
 +-----------------+-------------------+-------------------+
-|nn.Embedding     | Y*                | N                 |
+|nn.Embedding     | Y                 | N                 |
 +-----------------+-------------------+-------------------+
 |nn.MHA           |* Supported via    |                   |
 |                 | custom modules    | Not supported     |
