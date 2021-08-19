@@ -476,10 +476,14 @@ class TestReductions(TestCase):
 
         # check integral inputs is promoted to floating point
         e = torch.randint(-100, 100, [5, 4], device=device)
-        actual = e.logsumexp(1)
+        actual = e.logsumexp(1).to(torch.float64)
         expected = logsumexp(e.cpu().numpy(), 1)
         self.assertEqual(expected.shape, actual.shape)
         self.assertEqual(expected, actual)
+
+        for dtype in [torch.bool, torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64]:
+            with self.assertRaisesRegex(RuntimeError, "Expected floating point type for result tensor"):
+                torch.logsumexp(e, 1, out=torch.empty(1, dtype=dtype))
 
     @onlyCPU
     def test_sum_parallel(self, device):
