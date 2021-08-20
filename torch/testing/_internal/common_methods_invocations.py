@@ -3904,6 +3904,34 @@ def sample_inputs_to_sparse(op_info, device, dtype, requires_grad, **kwargs):
             SampleInput(make_arg((S, S)), args=(1,), output_process_fn_grad=lambda x: x.to_dense()),)
 
 
+def sample_inputs_embedding(op_info, device, dtype, requires_grad):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_arg_long = partial(make_tensor, device=device, dtype=torch.long, low=0, requires_grad=requires_grad)
+
+    # Ordered as shapes for input and weight
+    cases = (
+        ((1, 2), 3, {'padding_idx': 0}),
+        ((1,), 2, {'max_norm': 0.3, 'padding_idx': 0}),
+        ((2, 3, 4), 0, {'max_norm': 0.3, 'norm_type': 2.3}),
+        ((2, 1, 10), 1, {'scale_grad_by_freq': True}),
+        ((1, 2, 3, 4), 1, {'max_norm': 0.3, 'sparse': True})
+    )
+
+    def generator():
+        for input_shape, embedding_dim, kwargs in cases:
+            inp = make_arg_long(input_shape)
+
+            # All these args/kwargs depend on input (index tensor)
+            embedding_shape = (torch.max(inp) + 1, embedding_dim)
+
+            yield SampleInput(
+                inp,
+                args=(make_arg(embedding_shape),),
+                kwargs=kwargs
+            )
+
+    return list(generator())
+
 # Used for both log_softmax and softmax
 def sample_inputs_softmax_variant(op_info, device, dtype, requires_grad, with_dtype=False, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -6733,6 +6761,16 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_max_min_binary,),
+    OpInfo('nn.functional.embedding',
+           aten_name='embedding',
+           dtypes=floating_types_and(torch.float16, torch.bfloat16),
+           sample_inputs_func=sample_inputs_embedding,
+           skips=(
+               # This op doesn't support negative values in index tensor
+               # Leads to error: IndexError: index out of range in self
+               SkipInfo('TestMathBits', 'test_neg_view'),
+           ),
+           supports_out=False,),
     # `softmax` supports different dtypes based on whether `dtype` argument,
     # is passed or not. Hence two OpInfo entries, one with dtype and other without.
     OpInfo('softmax',
