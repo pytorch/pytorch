@@ -697,6 +697,45 @@ class TestOldSerialization(TestCase, SerializationMixin):
             return super(TestOldSerialization, self).run(*args, **kwargs)
 
 
+class TestWrapperSubclass(torch.Tensor):
+    elem: torch.Tensor
+    __slots__ = ['elem', 'other']
+
+    @staticmethod
+    def __new__(cls, elem, *args, **kwargs):
+        # The wrapping tensor (TestSubclass) is just a meta tensor, so it
+        # doesn't hold any memory (meta tensor is generally the preferred type
+        # of tensor you want to make a subclass from)...
+        r = torch.Tensor._make_subclass(cls, elem.to('meta'), elem.requires_grad)
+        # ...the real tensor is held as an element on the tensor.
+        r.elem = elem
+        return r
+
+
+class TestGetStateSubclass(torch.Tensor):
+    elem: torch.Tensor
+    __slots__ = ['elem']
+
+    @staticmethod
+    def __new__(cls, elem, *args, **kwargs):
+        # The wrapping tensor (TestSubclass) is just a meta tensor, so it
+        # doesn't hold any memory (meta tensor is generally the preferred type
+        # of tensor you want to make a subclass from)...
+        r = torch.Tensor._make_subclass(cls, elem.to('meta'), elem.requires_grad)
+        # ...the real tensor is held as an element on the tensor.
+        r.elem = elem
+        return r
+
+    def __getstate__(self):
+        return ("foo", getattr(self, "elem", None), self.__dict__)
+
+    def __setstate__(self, state):
+        marker, self.elem, self.__dict__ = state
+        if not marker == "foo":
+            raise RuntimeError("Invalid state for TestGetStateSubclass")
+        self.reloaded = True
+
+
 class TestSerialization(TestCase, SerializationMixin):
     def test_serialization_zipfile(self):
         data = self._test_serialization_data()
@@ -750,6 +789,42 @@ class TestSerialization(TestCase, SerializationMixin):
             state = torch.load(f)
 
         self.assertEqual(state.weight.size(), big_model.weight.size())
+
+    def test_tensor_subclass_wrapper_serialization(self):
+        wrapped_tensor = torch.rand(2)
+        my_tensor = TestWrapperSubclass(wrapped_tensor)
+
+        foo_val = "bar"
+        my_tensor.foo = foo_val
+        self.assertEqual(my_tensor.foo, foo_val)
+
+        with BytesIOContext() as f:
+            torch.save(my_tensor, f)
+            f.seek(0)
+            new_tensor = torch.load(f)
+
+        self.assertIsInstance(new_tensor, TestWrapperSubclass)
+        self.assertEqual(new_tensor.elem, my_tensor.elem)
+        self.assertEqual(new_tensor.foo, foo_val)
+
+    def test_tensor_subclass_getstate_overwrite(self):
+        wrapped_tensor = torch.rand(2)
+        my_tensor = TestGetStateSubclass(wrapped_tensor)
+
+        foo_val = "bar"
+        my_tensor.foo = foo_val
+        self.assertEqual(my_tensor.foo, foo_val)
+
+        with BytesIOContext() as f:
+            torch.save(my_tensor, f)
+            f.seek(0)
+            new_tensor = torch.load(f)
+
+        self.assertIsInstance(new_tensor, TestGetStateSubclass)
+        self.assertEqual(new_tensor.elem, my_tensor.elem)
+        self.assertEqual(new_tensor.foo, foo_val)
+        self.assertTrue(new_tensor.reloaded)
+
 
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=True):

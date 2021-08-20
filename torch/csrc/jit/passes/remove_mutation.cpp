@@ -68,11 +68,27 @@ Node* MutationRemover::createSpecialMappedOp(Node* n) {
   return new_node;
 }
 
+bool removableSetItem(Node* n) {
+  if (n->kind() != aten::_set_item ||
+      n->input(1)->node()->kind() != prim::Constant) {
+    return false;
+  }
+  if (n->inputs().at(0)->node()->kind() != prim::ListConstruct) {
+    return false;
+  }
+  int64_t index = *constant_as<int64_t>(n->input(1));
+  if (index < 0) {
+    index += n->inputs().size();
+  }
+  return index < static_cast<int64_t>(n->input(0)->node()->inputs().size());
+}
+
 bool MutationRemover::listMutationFollowingListConstruct(Node* n) {
   return (
       (n->kind() == aten::append ||
        (n->kind() == aten::insert &&
-        n->inputs().at(1)->node()->kind() == prim::Constant)) &&
+        n->inputs().at(1)->node()->kind() == prim::Constant) ||
+       (removableSetItem(n))) &&
       n->inputs().at(0)->node()->kind() == prim::ListConstruct);
 }
 
@@ -169,6 +185,15 @@ bool MutationRemover::RemoveListMutation(Block* block) {
         // insert beyond current list length is the same as append
         pos = std::min(pos, size);
         list_construct->insertInput(pos, node->inputs().at(2));
+        break;
+      }
+      case aten::_set_item: {
+        int pos = toIValue(node->inputs().at(1))->toInt();
+        int size = list_construct->inputs().size();
+        if (pos < 0) {
+          pos = std::max(pos + size, 0);
+        }
+        list_construct->replaceInput(pos, node->input(2));
         break;
       }
       default:

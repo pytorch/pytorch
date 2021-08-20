@@ -24,7 +24,7 @@ if [[ "$BUILD_ENVIRONMENT" == *-mobile-code-analysis* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-mobile-code-analysis.sh" "$@"
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *linux-xenial-cuda11.1-cudnn8-py3-gcc7* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *linux-xenial-cuda11.1* ]]; then
   # Enabling DEPLOY build (embedded torch python interpreter, experimental)
   # only on one config for now, can expand later
   export USE_DEPLOY=ON
@@ -132,6 +132,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
   if [[ "${BUILD_ENVIRONMENT}" == *vulkan* ]]; then
     build_args+=("-DUSE_VULKAN=ON")
   fi
+  build_args+=("-DUSE_LITE_INTERPRETER_PROFILER=OFF")
   exec ./scripts/build_android.sh "${build_args[@]}" "$@"
 fi
 
@@ -187,7 +188,7 @@ fi
 export TORCH_CUDA_ARCH_LIST="5.2"
 
 # Add sm_75 support for the Linux CUDA 11.1 cuDNN 8 CircleCI build
-if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda11.1-cudnn8*build ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda11.1*build ]]; then
   export TORCH_CUDA_ARCH_LIST=$TORCH_CUDA_ARCH_LIST";7.5"
 fi
 
