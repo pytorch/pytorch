@@ -6,6 +6,7 @@
 #include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/vec_base.h>
 #include <c10/macros/Macros.h>
+#include <iostream>
 
 namespace at {
 namespace vec {
