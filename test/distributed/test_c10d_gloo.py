@@ -43,8 +43,16 @@ from torch.testing._internal.common_utils import (
     TestCase,
     run_tests,
     retry_on_connect_failures,
+    TEST_WITH_TSAN,
     sandcastle_skip,
 )
+
+if TEST_WITH_TSAN:
+    print(
+        "Skip as TSAN is not fork-safe since we're forking in a multi-threaded environment",
+        file=sys.stderr,
+    )
+    sys.exit(0)
 
 
 def simple_reduce_tests(rank, world_size):
@@ -210,7 +218,12 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
     def setUp(self):
         super(ProcessGroupGlooTest, self).setUp()
-        self._spawn_processes()
+
+        # For Windows platform, Python does not support fork, change it to spawn here.
+        if sys.platform == "win32":
+            self._spawn_processes()
+        else:
+            self._fork_processes()
 
     def opts(self, threads=2):
         opts = c10d.ProcessGroupGloo._Options()
@@ -1412,7 +1425,10 @@ class DistributedDataParallelTest(
 ):
     def setUp(self):
         super(DistributedDataParallelTest, self).setUp()
-        self._spawn_processes()
+        if sys.platform == "win32":
+            self._spawn_processes()
+        else:
+            self._fork_processes()
 
     def _test_gloo_backend(
         self, devices, device_ids, multi_device=False, gradient_as_bucket_view=False
@@ -2181,7 +2197,10 @@ class ReducerTest(TestCase):
 class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     def setUp(self):
         super(CommTest, self).setUp()
-        self._spawn_processes()
+        if sys.platform == "win32":
+            self._spawn_processes()
+        else:
+            self._fork_processes()
 
     def tearDown(self):
         super(CommTest, self).tearDown()
