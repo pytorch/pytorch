@@ -10,7 +10,7 @@ if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
-from torch.distributed.algorithms.join import _Join, _Joinable, _JoinHook
+from torch.distributed.algorithms.join import Join, Joinable, JoinHook
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     require_n_gpus_for_nccl_backend,
@@ -25,7 +25,7 @@ BEFORE_CONSTANT = 41
 AFTER_CONSTANT = 42
 
 
-class AllReducerJoinHook(_JoinHook):
+class AllReducerJoinHook(JoinHook):
     r"""
     Join hook for :class:`AllReducer`.
 
@@ -71,9 +71,9 @@ class AllReducerJoinHook(_JoinHook):
         dist.broadcast(self.allreducer.post_hook_tensor, src=common_rank)
 
 
-class AllReducer(_Joinable):
+class AllReducer(Joinable):
     r"""
-    Example :class:`_Joinable` that performs some number of all-reduces as its
+    Example :class:`Joinable` that performs some number of all-reduces as its
     per-iteration collective communication.
     """
     def __init__(self, device, process_group):
@@ -87,7 +87,7 @@ class AllReducer(_Joinable):
         All-reduces a dim-1 one tensor ``num_allreduces``-many times, and
         returns the total result.
         """
-        _Join.notify_join_context(self)
+        Join.notify_join_context(self)
         device = self.device
         total = 0
         for _ in range(num_allreduces):
@@ -96,7 +96,7 @@ class AllReducer(_Joinable):
             total += t.item()
         return total
 
-    def _join_hook(self, **kwargs) -> _JoinHook:
+    def join_hook(self, **kwargs) -> JoinHook:
         r"""
         Returns a join hook that shadows some number of all-reduces; by default,
         this number is 1.
@@ -110,11 +110,11 @@ class AllReducer(_Joinable):
         )
 
     @property
-    def _join_device(self) -> torch.device:
+    def join_device(self) -> torch.device:
         return self.device
 
     @property
-    def _join_process_group(self) -> Any:
+    def join_process_group(self) -> Any:
         return self.process_group
 
     def find_common_rank(self, rank, to_consider):
@@ -209,7 +209,7 @@ class TestJoin(MultiProcessTestCase):
         expected_total: Optional[int] = None,
     ):
         r"""
-        Skeleton for all :class:`_Join` tests.
+        Skeleton for all :class:`Join` tests.
 
         Arguments:
             uneven_inputs (bool): ``True`` to use uneven inputs; ``False``
@@ -249,7 +249,7 @@ class TestJoin(MultiProcessTestCase):
             RuntimeError,
             expected_msg
         ) if throw_on_early_termination else contextlib.suppress():
-            with _Join(
+            with Join(
                 allreducers,
                 enable=enable,
                 throw_on_early_termination=throw_on_early_termination,
@@ -277,7 +277,7 @@ class TestJoin(MultiProcessTestCase):
         WORLD_SIZE, BACKEND
     )
     def test_single_joinable_main_hooks(self):
-        r"""Tests the main hooks of a single :class:`_Joinable`."""
+        r"""Tests the main hooks of a single :class:`Joinable`."""
         num_joinables = 1
         num_allreduces = 1
         run_post_hooks = False
@@ -303,7 +303,7 @@ class TestJoin(MultiProcessTestCase):
         WORLD_SIZE, BACKEND
     )
     def test_single_joinable_post_hooks(self):
-        r"""Tests the post-hooks of a single :class:`_Joinable`."""
+        r"""Tests the post-hooks of a single :class:`Joinable`."""
         num_joinables = 1
         num_allreduces = 0  # set to 0 to skip the main hooks
         run_post_hooks = False
@@ -323,7 +323,7 @@ class TestJoin(MultiProcessTestCase):
     )
     def test_single_joinable(self):
         r"""
-        Tests the main hooks and post-hooks of a single :class:`_Joinable`
+        Tests the main hooks and post-hooks of a single :class:`Joinable`
         together.
 
         This combines ``test_single_joinable_main_hooks()`` and
@@ -353,11 +353,11 @@ class TestJoin(MultiProcessTestCase):
     )
     def test_multiple_joinables(self):
         r"""
-        Tests the main hooks and post-hooks of multiple :class:`_Joinable` s
+        Tests the main hooks and post-hooks of multiple :class:`Joinable` s
         together.
 
         This generalizes ``test_single_joinable()`` to multiple
-        :class:`_Joinable` s.
+        :class:`Joinable` s.
         """
         num_joinables = 3
         num_allreduces = 1
@@ -383,7 +383,7 @@ class TestJoin(MultiProcessTestCase):
         WORLD_SIZE, BACKEND
     )
     def test_single_joinable_disable(self):
-        r"""Tests ``enable=False`` for a single :class:`_Joinable`."""
+        r"""Tests ``enable=False`` for a single :class:`Joinable`."""
         num_joinables = 1
         num_allreduces = 1
         uneven_inputs = False
@@ -407,10 +407,10 @@ class TestJoin(MultiProcessTestCase):
     )
     def test_multiple_joinable_disable(self):
         r"""
-        Tests ``enable=False`` for multiple :class:`_Joinable` s.
+        Tests ``enable=False`` for multiple :class:`Joinable` s.
 
         This generalizes ``test_single_joinable_disable`` to multiple
-        :class:`_Joinable` s.
+        :class:`Joinable` s.
         """
         num_joinables = 3
         num_allreduces = 1
@@ -436,7 +436,7 @@ class TestJoin(MultiProcessTestCase):
     def test_single_joinable_throw(self):
         r"""
         Tests ``throw_on_early_termination=True`` for a single
-        :class:`_Joinable`.
+        :class:`Joinable`.
         """
         num_joinables = 1
         num_allreduces = 1
@@ -459,10 +459,10 @@ class TestJoin(MultiProcessTestCase):
     def test_multiple_joinables_throw(self):
         r"""
         Tests ``throw_on_early_termination=True`` for multiple
-        :class:`_Joinable` s together.
+        :class:`Joinable` s together.
 
         This generalizes ``test_single_joinable_throw`` to multiple
-        :class:`_Joinable` s.
+        :class:`Joinable` s.
         """
         num_joinables = 3
         num_allreduces = 1

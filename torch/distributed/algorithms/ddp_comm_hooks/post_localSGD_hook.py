@@ -81,7 +81,7 @@ def post_localSGD_hook(
     world_size = global_group_to_use.size()
 
     # The input tensor is a flattened 1D tensor.
-    input_tensor = bucket.get_tensor()
+    input_tensor = bucket.buffer()
 
     # Run allreduce using `global_group_to_use` in the first `start_localSGD_iter` iterations.
     if state.iter < state.start_localSGD_iter:

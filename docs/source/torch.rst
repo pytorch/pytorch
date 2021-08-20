@@ -385,6 +385,7 @@ Reduction Ops
     argmin
     amax
     amin
+    aminmax
     all
     any
     max

@@ -157,6 +157,59 @@ TORCH_META_FUNC(cumprod)
 
 } // namespace meta
 
+namespace meta {
+
+TORCH_META_FUNC(aminmax)
+(const Tensor& self, c10::optional<int64_t> dim_opt, bool keepdim) {
+  DimVector shape;
+  if (dim_opt.has_value()) {
+    auto dim = maybe_wrap_dim(dim_opt.value(), self.ndimension());
+    native::zero_numel_check_dims(self, dim, "aminmax");
+    shape = get_reduction_shape(self, dim, keepdim);
+  } else {
+    TORCH_CHECK(
+        self.numel() > 0,
+        "aminmax(): cannot compute aminmax over an empty dimension as the "
+        "operation has no identity.");
+    if (keepdim) {
+      shape = DimVector(self.ndimension(), 1);
+    }
+  }
+  const auto options = self.options();
+  this->set_output(0, shape, options);
+  this->set_output(1, shape, options);
+}
+
+} // namespace meta
+
+namespace native {
+
+DEFINE_DISPATCH(aminmax_stub);
+DEFINE_DISPATCH(aminmax_allreduce_stub);
+
+TORCH_IMPL_FUNC(aminmax_out)
+(const Tensor& self,
+ c10::optional<int64_t> dim_opt,
+ bool keepdim,
+ const Tensor& min,
+ const Tensor& max) {
+  auto mutable_min = const_cast<Tensor&>(min);
+  auto mutable_max = const_cast<Tensor&>(max);
+  if (dim_opt.has_value()) {
+    aminmax_stub(
+        self.device().type(),
+        self,
+        maybe_wrap_dim(dim_opt.value(), self.ndimension()),
+        keepdim,
+        mutable_min,
+        mutable_max);
+  } else {
+    aminmax_allreduce_stub(self.device().type(), self.contiguous(), mutable_min, mutable_max);
+  }
+}
+
+} // namespace native
+
 namespace native {
 
 DEFINE_DISPATCH(sum_stub);
@@ -1830,4 +1883,5 @@ Tensor value_selecting_reduction_backward(const Tensor& grad, int64_t dim, const
   return at::zeros(sizes, grad.options()).scatter_(dim, indices, grad);
 }
 
-}} // namespace at::native
+} // namespace native
+} // namespace at
