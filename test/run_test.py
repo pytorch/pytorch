@@ -902,6 +902,14 @@ def log_test_reason(file_type, filename, test, options):
                 test,
             )
         )
+    return {
+        'test': test, 
+        'result': 'TD_ENABLED', 
+        'reason': {
+            'trigger_type': file_type, 
+            'trigger_file': filename,
+        },
+    }
 
 
 def get_dep_modules(test):
@@ -953,7 +961,11 @@ def determine_target(target_det_list, test, touched_files, options):
     if test not in target_det_list:
         if options.verbose:
             print_to_stderr(f'Running {test} without determination')
-        return True
+        return {
+            'test': test, 
+            'result': 'TD_SKIPPED', 
+            'reason': None
+        }
     # HACK: "no_ninja" is not a real module
     if test.endswith('_no_ninja'):
         test = test[:(-1 * len('_no_ninja'))]
@@ -969,12 +981,10 @@ def determine_target(target_det_list, test, touched_files, options):
         elif file_type == 'CI':
             # Force all tests to run if any change is made to the CI
             # configurations.
-            log_test_reason(file_type, touched_file, test, options)
-            return True
+            return log_test_reason(file_type, touched_file, test, options)
         elif file_type == 'UNKNOWN':
             # Assume uncategorized source files can affect every test.
-            log_test_reason(file_type, touched_file, test, options)
-            return True
+            return log_test_reason(file_type, touched_file, test, options)
         elif file_type in ['TORCH', 'CAFFE2', 'TEST']:
             parts = os.path.splitext(touched_file)[0].split(os.sep)
             touched_module = ".".join(parts)
@@ -985,14 +995,17 @@ def determine_target(target_det_list, test, touched_files, options):
                 touched_module in dep_modules
                 or touched_module == test.replace('/', '.')
             ):
-                log_test_reason(file_type, touched_file, test, options)
-                return True
+                return log_test_reason(file_type, touched_file, test, options)
 
     # If nothing has determined the test has run, don't run the test.
     if options.verbose:
         print_to_stderr(f'Determination is skipping {test}')
 
-    return False
+    return {
+        'test': test, 
+        'result': 'TD_DISABLED', 
+        'reason': None,
+    }
 
 
 def run_test_module(test: str, test_directory: str, options) -> Optional[str]:
@@ -1055,9 +1068,12 @@ def main():
             ]
         # HACK: Ensure the 'test' paths can be traversed by Modulefinder
         sys.path.append('test')
+        td_results = [
+            determine_target(TARGET_DET_LIST + slow_tests, test, touched_files, options)
+            for test in selected_tests
+        ]
         selected_tests = [
-            test for test in selected_tests
-            if determine_target(TARGET_DET_LIST + slow_tests, test, touched_files, options)
+            td['test'] for td in td_results if td['result'] != 'TD_DISABLED'
         ]
         sys.path.remove('test')
 
@@ -1065,7 +1081,7 @@ def main():
         target_det_filename = options.export_target_det_list
         if target_det_filename:
             print(f'Determine target list and report to {target_det_filename}.')
-            export_target_det_list(selected_tests, target_det_filename)
+            export_target_det_list(td_results, target_det_filename)
             return
 
     if IS_IN_CI:
