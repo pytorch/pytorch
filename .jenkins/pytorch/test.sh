@@ -536,7 +536,7 @@ fi
 
 if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
   pushd test
-  if [[ -f "./.coverage*" ]]; then
+  if [[ -f "./**/.coverage*" ]]; then
     echo "Generating XML coverage report"
     time python -mcoverage xml
   else
@@ -544,7 +544,7 @@ if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
   fi
   popd
   pushd build
-  if [[ -f "./**/*.gcda" && -f "./**/*.gcno" ]]; then
+  if [[ -f "./**/*.gcda" || -f "./**/*.gcno" ]]; then
     echo "Generating lcov coverage report for C++ sources"
     time lcov --capture --directory . --output-file coverage.info
   else
