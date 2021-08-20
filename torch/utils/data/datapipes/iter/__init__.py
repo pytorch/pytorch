@@ -1,7 +1,6 @@
 from torch.utils.data.datapipes.iter.callable import (
     CollatorIterDataPipe as Collator,
     MapperIterDataPipe as Mapper,
-    TransformMapperIterDataPipe as TransformMapper,
 )
 from torch.utils.data.datapipes.iter.combinatorics import (
     SamplerIterDataPipe as Sampler,
@@ -64,7 +63,6 @@ __all__ = ['Batcher',
            'Shuffler',
            'StreamReader',
            'TarArchiveReader',
-           'TransformMapper',
            'ZipArchiveReader',
            'Zipper']
 

@@ -34,7 +34,6 @@ from unittest import skipIf
 import numpy as np
 
 import torch
-import torch.nn as nn
 import torch.utils.data.backward_compatibility
 import torch.utils.data.datapipes as dp
 import torch.utils.data.graph
@@ -53,13 +52,6 @@ from torch.utils.data import (
 from torch.utils.data.datapipes.utils.decoder import (
     basichandlers as decoder_basichandlers,
 )
-
-try:
-    import torchvision.transforms
-    HAS_TORCHVISION = True
-except ImportError:
-    HAS_TORCHVISION = False
-skipIfNoTorchVision = skipIf(not HAS_TORCHVISION, "no torchvision")
 
 try:
     import dill
@@ -913,48 +905,6 @@ class TestFunctionalIterDataPipe(TestCase):
         shuffle_dp_nl = IDP_NoLen(range(20)).shuffle(buffer_size=5)
         with self.assertRaisesRegex(TypeError, r"instance doesn't have valid length$"):
             len(shuffle_dp_nl)
-
-    @skipIfNoTorchVision
-    def test_transforms_datapipe(self):
-        torch.set_default_dtype(torch.float)
-        # A sequence of numpy random numbers representing 3-channel images
-        w = h = 32
-        inputs = [np.random.randint(0, 255, (h, w, 3), dtype=np.uint8) for i in range(10)]
-        tensor_inputs = [torch.tensor(x, dtype=torch.float).permute(2, 0, 1) / 255. for x in inputs]
-
-        input_dp = IDP(inputs)
-        # Raise TypeError for python function
-        with self.assertRaisesRegex(TypeError, r"`transforms` are required to be"):
-            input_dp.legacy_transforms(_fake_fn)
-
-        # transforms.Compose of several transforms
-        transforms = torchvision.transforms.Compose([
-            torchvision.transforms.ToTensor(),
-            torchvision.transforms.Pad(1, fill=1, padding_mode='constant'),
-        ])
-        tsfm_dp = input_dp.legacy_transforms(transforms)
-        self.assertEqual(len(tsfm_dp), len(input_dp))
-        for tsfm_data, input_data in zip(tsfm_dp, tensor_inputs):
-            self.assertEqual(tsfm_data[:, 1:(h + 1), 1:(w + 1)], input_data)
-
-        # nn.Sequential of several transforms (required to be instances of nn.Module)
-        input_dp = IDP(tensor_inputs)
-        transforms = nn.Sequential(
-            torchvision.transforms.Pad(1, fill=1, padding_mode='constant'),
-        )
-        tsfm_dp = input_dp.legacy_transforms(transforms)
-        self.assertEqual(len(tsfm_dp), len(input_dp))
-        for tsfm_data, input_data in zip(tsfm_dp, tensor_inputs):
-            self.assertEqual(tsfm_data[:, 1:(h + 1), 1:(w + 1)], input_data)
-
-        # Single transform
-        input_dp = IDP_NoLen(inputs)  # type: ignore[assignment]
-        transform = torchvision.transforms.ToTensor()
-        tsfm_dp = input_dp.legacy_transforms(transform)
-        with self.assertRaisesRegex(TypeError, r"instance doesn't have valid length$"):
-            len(tsfm_dp)
-        for tsfm_data, input_data in zip(tsfm_dp, tensor_inputs):
-            self.assertEqual(tsfm_data, input_data)
 
     def test_zip_datapipe(self):
         with self.assertRaises(TypeError):
