@@ -126,5 +126,4 @@ class TestSymbolicShapeAnalysis(JitTestCase):
             # For some reason sometimes output gets made into a constant,
             # skip test then
             if next(fn.graph.outputs()).toIValue() is not None:
-                print("output check")
                 self.checkShapeAnalysis(out_size, fn.graph, assert_propagation=True)
