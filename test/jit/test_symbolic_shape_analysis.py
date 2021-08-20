@@ -119,10 +119,11 @@ class TestSymbolicShapeAnalysis(JitTestCase):
         for inp in inps:
             t = torch.randn(*inp[0])
             out_size = torch.nn.functional.adaptive_avg_pool2d(t, inp[1]).size()
-            x = lambda : torch.nn.functional.adaptive_avg_pool2d(t, inp[1])  # noqa: E731
-            fn = torch.jit.trace(x, ())
-
-            # For some reason sometimes output gets made into a constant,
-            # skip test then
-            if next(fn.graph.outputs()).toIValue() is not None:
-                self.checkShapeAnalysis(out_size, fn.graph, assert_propagation=True)
+            def foo(x):
+                return torch.nn.functional.adaptive_avg_pool2d(x, inp[1])
+            fn = torch.jit.trace(foo, (t,))
+            torch._C._jit_erase_non_input_shape_information(fn.graph)
+            torch._C._jit_pass_peephole(fn.graph)
+            torch._C._jit_pass_constant_propagation(fn.graph)
+            self.checkShapeAnalysis(out_size, fn.graph, assert_propagation=True)
+        
