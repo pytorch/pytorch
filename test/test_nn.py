@@ -229,7 +229,7 @@ class TestAvgPool(TestCase):
                 actual = torch.nn.functional.avg_pool2d(input[0], (i, j))
                 actual = actual.view(1, actual.numel())
                 expected = self._avg_pool2d(input, (i, j))
-                self.assertTrue(torch.allclose(actual, expected, rtol=0, atol=1e-5))
+                self.assertEqual(actual, expected, rtol=0, atol=1e-5)
 
     def test_avg_pool2d_with_zero_divisor(self):
         self.assertRaisesRegex(RuntimeError, "divisor must be not zero",
@@ -244,7 +244,7 @@ class TestAvgPool(TestCase):
                     actual = F.avg_pool2d(input[0], (i, j), divisor_override=divisor)
                     actual = actual.view(1, actual.numel())
                     expected = self._sum_pool2d(input, (i, j)) / divisor
-                    self.assertTrue(torch.allclose(actual, expected, rtol=0, atol=1e-5))
+                    self.assertEqual(actual, expected, rtol=0, atol=1e-5)
 
     def test_doubletensor_avg_pool3d(self):
         h, w, d = 5, 6, 7
@@ -255,7 +255,7 @@ class TestAvgPool(TestCase):
                     actual = torch.nn.functional.avg_pool3d(input.unsqueeze(0), (i, j, k))
                     actual = actual.view(1, actual.numel())
                     expected = self._avg_pool3d(input, (i, j, k))
-                    self.assertTrue(torch.allclose(actual, expected, rtol=0, atol=1e-5))
+                    self.assertEqual(actual, expected, rtol=0, atol=1e-5)
 
     def test_doubletensor_avg_pool3d_with_divisor(self):
         h, w, d = 6, 5, 7
@@ -267,7 +267,7 @@ class TestAvgPool(TestCase):
                         actual = torch.nn.functional.avg_pool3d(input.unsqueeze(0), (i, j, k), divisor_override=divisor)
                         actual = actual.view(1, actual.numel())
                         expected = self._sum_pool3d(input, (i, j, k)) / divisor
-                        self.assertTrue(torch.allclose(actual, expected, rtol=0, atol=1e-5))
+                        self.assertEqual(actual, expected, rtol=0, atol=1e-5)
 
     def test_avg_pool3d_with_zero_divisor(self):
         self.assertRaisesRegex(RuntimeError, "divisor must be not zero",
@@ -2260,7 +2260,7 @@ class TestNN(NNTestCase):
         self.assertNotIn("weight", model._parameters)
         # Result should be skew-symmetric
         A = model.weight
-        self.assertTrue(torch.allclose(A, -A.T))
+        self.assertEqual(A, -A.T)
         # Remove and check consistency
         parametrize.remove_parametrizations(model, "weight", leave_parametrized=False)
         self.assertFalse(hasattr(model, "parametrizations"))
@@ -2277,7 +2277,7 @@ class TestNN(NNTestCase):
         self.assertNotIn("weight", model._parameters)
         # Result should be skew-symmetric
         A = model.weight
-        self.assertTrue(torch.allclose(A, -A.T))
+        self.assertEqual(A, -A.T)
         # Remove and check consistency
         parametrize.remove_parametrizations(model, "weight", leave_parametrized=False)
         self.assertFalse(hasattr(model, "parametrizations"))
@@ -2291,7 +2291,7 @@ class TestNN(NNTestCase):
         # Result should be orthogonal
         X = model.weight
         Id = torch.eye(X.size(0), device=X.device)
-        self.assertTrue(torch.allclose(X.T @ X, Id))
+        self.assertEqual(X.T @ X, Id)
         # Structure tests
         self.assertTrue(hasattr(model, "parametrizations"))
         self.assertTrue(parametrize.is_parametrized(model))
@@ -2810,10 +2810,10 @@ class TestNN(NNTestCase):
         init_weight = model.weight.clone()
         parametrize.register_parametrization(model, "weight", RankOne())
         # Projecting a rank 1 matrix onto the matrices of rank one does not change the matrix
-        self.assertTrue(torch.allclose(init_weight, model.weight))
+        self.assertEqual(init_weight, model.weight)
         parametrize.register_parametrization(model, "weight", Double())
         # The matrix now is twice the initial matrix
-        self.assertTrue(torch.allclose(2.0 * init_weight, model.weight))
+        self.assertEqual(2.0 * init_weight, model.weight)
         # Multiplying by a scalar does not change the rank
         self.assertEqual(torch.linalg.matrix_rank(model.weight).item(), 1)
 
@@ -11175,7 +11175,7 @@ class TestNN(NNTestCase):
         grads1 = torch.autograd.grad(layer_norm(x).sum(), x, create_graph=False)[0]
         grads2 = torch.autograd.grad(layer_norm(x).sum(), x, create_graph=True)[0]
 
-        self.assertTrue(torch.allclose(grads1, grads2, rtol, atol))
+        self.assertEqual(grads1, grads2, rtol, atol)
 
         if TEST_CUDA:
             x = x.to('cuda')
@@ -11184,7 +11184,7 @@ class TestNN(NNTestCase):
             grads1 = torch.autograd.grad(layer_norm(x).sum(), x, create_graph=False)[0]
             grads2 = torch.autograd.grad(layer_norm(x).sum(), x, create_graph=True)[0]
 
-            self.assertTrue(torch.allclose(grads1, grads2, rtol, atol))
+            self.assertEqual(grads1, grads2, rtol, atol)
 
     def test_padding_list(self):
         # Padding can be a list, or tuple (regression test for gh-54452)
@@ -11692,7 +11692,7 @@ class TestAddRelu(TestCase):
         relu_res = torch.relu(add_res)
         add_relu_res = torch._VF._add_relu(a, b)
 
-        self.assertTrue(torch.allclose(add_relu_res, relu_res))
+        self.assertEqual(add_relu_res, relu_res)
 
     def test_add_relu_broadcasting(self):
         a = torch.rand((1, 32))
@@ -11701,7 +11701,7 @@ class TestAddRelu(TestCase):
         res = torch._VF._add_relu(a, b)
         broadcasted_res = torch._VF._add_relu(a, b_scalar)
 
-        self.assertTrue(torch.allclose(broadcasted_res, res))
+        self.assertEqual(broadcasted_res, res)
 
 
 def add_test(test, decorator=None):
@@ -13935,8 +13935,8 @@ class TestNNDeviceType(NNTestCase):
 
             self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
             self.assertTrue(ref_out.is_contiguous())
-            self.assertTrue(torch.allclose(out, ref_out))
-            self.assertTrue(torch.allclose(input.grad, ref_input.grad))
+            self.assertEqual(out, ref_out)
+            self.assertEqual(input.grad, ref_input.grad)
 
         helper(4, 8, 8, 8, 3)
         helper(4, 8, 8, 8, 3, count_include_pad=False, padding=1)
@@ -14062,9 +14062,9 @@ class TestNNDeviceType(NNTestCase):
             self.assertTrue(ref_out.is_contiguous())
             self.assertTrue(ind.is_contiguous(memory_format=torch.channels_last))
             self.assertTrue(ref_ind.is_contiguous())
-            self.assertTrue(torch.allclose(out, ref_out))
-            self.assertTrue(torch.allclose(ind, ref_ind))
-            self.assertTrue(torch.allclose(input.grad, ref_input.grad))
+            self.assertEqual(out, ref_out)
+            self.assertEqual(ind, ref_ind)
+            self.assertEqual(input.grad, ref_input.grad)
 
         helper(4, 8, 8, 8, 7)
         helper(200, 512, 28, 28, 2)
@@ -17042,7 +17042,7 @@ class TestNNDeviceType(NNTestCase):
             shape = tuple(32 if i != dim else 256 for i in range(4))
             x = torch.randn(shape, device=device, requires_grad=True)
             F.max_pool3d(x, kernel_size=(1, 1, 1)).sum().backward()
-            self.assertTrue(torch.allclose(x.grad, torch.ones_like(x.grad)))
+            self.assertEqual(x.grad, torch.ones_like(x.grad))
 
     # Check that clip_grad_norm_ raises an error if the total norm of the
     # parameters' gradients is non-finite
@@ -17534,7 +17534,7 @@ class TestModuleGlobalHooks(TestCase):
 
         input = torch.randn(2, 2)
         output = module(input)
-        self.assertTrue(torch.allclose(torch.sigmoid(input), output))
+        self.assertEqual(torch.sigmoid(input), output)
 
         # make sure hook removal is successful
         self.assertFalse(handle.id in handle.hooks_dict_ref())
@@ -17569,7 +17569,7 @@ class TestModuleGlobalHooks(TestCase):
 
         input = torch.randn(2, 2)
         output = module(input)
-        self.assertTrue(torch.allclose(torch.sigmoid(input), output))
+        self.assertEqual(torch.sigmoid(input), output)
 
         # make sure hook removal is successful
         self.assertFalse(handle.id in handle.hooks_dict_ref())
@@ -17863,7 +17863,7 @@ class TestLazyModules(TestCase):
         module = TestModule()
         module.register_forward_pre_hook(hook_function)
         output = module(torch.zeros(2, 2))
-        self.assertTrue(torch.allclose(output, torch.ones(2, 2)))
+        self.assertEqual(output, torch.ones(2, 2))
 
     def test_lazy_forward_hook(self):
         """
@@ -17886,7 +17886,7 @@ class TestLazyModules(TestCase):
         module = TestModule()
         module.register_forward_hook(hook_function)
         output = module(torch.zeros(2, 2))
-        self.assertTrue(torch.allclose(output, torch.ones(2, 2)))
+        self.assertEqual(output, torch.ones(2, 2))
 
     @suppress_warnings
     def test_lazy_conv1d(self):

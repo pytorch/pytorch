@@ -4646,7 +4646,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             m2q = torch.quantization.convert(m2p)
             q_result2 = m2q(data)
             # verify results match
-            self.assertTrue(torch.allclose(q_result1, q_result2))
+            self.assertEqual(q_result1, q_result2)
 
     @unittest.skipUnless('qnnpack' in supported_qengines,
                          "This Pytorch Build has not been built with or does not support QNNPACK")

@@ -782,15 +782,15 @@ class TestEinsumOverride(TestCase):
     def test_wrapper(self):
         x = Wrapper(torch.randn(5))
         y = Wrapper(torch.randn(4))
-        self.assertTrue(torch.allclose(torch.einsum('i,j->ij', x, y),
-                                       torch.ger(x, y)))
+        self.assertEqual(torch.einsum('i,j->ij', x, y),
+                         torch.ger(x, y))
 
         # in the old einsum interface, `operands` is a list
         a = Wrapper(torch.randn(2, 3))
         b = Wrapper(torch.randn(5, 3, 7))
         c = Wrapper(torch.randn(2, 7))
-        self.assertTrue(torch.allclose(torch.einsum('ik,jkl,il->ij', [a, b, c]),
-                                       torch.nn.functional.bilinear(a, c, b)))
+        self.assertEqual(torch.einsum('ik,jkl,il->ij', [a, b, c]),
+                         torch.nn.functional.bilinear(a, c, b))
 
 class TestGradCheckOverride(TestCase):
     "Test that wrappers work with gradcheck."
