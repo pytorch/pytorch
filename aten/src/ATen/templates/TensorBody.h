@@ -93,8 +93,8 @@ class TORCH_API Tensor: public TensorBase {
   Tensor(const Tensor &tensor) = default;
   Tensor(Tensor &&tensor) = default;
 
-  // Implicitly constructible from TensorBase
-  /*implicit*/ Tensor(const TensorBase &base): TensorBase(base) {}
+  // Implicitly move-constructible from TensorBase, but must be explicit to increase refcount
+  explicit Tensor(const TensorBase &base): TensorBase(base) {}
   /*implicit*/ Tensor(TensorBase &&base): TensorBase(std::move(base)) {}
 
   // Creates a new wrapper from TensorImpl. Intentionally a free method because
@@ -541,14 +541,6 @@ class TORCH_API Tensor: public TensorBase {
   template <typename T>
   hook_return_var_t<T> register_hook(T&& hook) const;
 
-private:
-  unsigned _register_hook(std::function<Tensor(const Tensor&)> hook) const;
-
-public:
-
-  /// Remove hook at given position
-  void remove_hook(unsigned pos) const;
-
   // Variable methods
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -569,27 +561,6 @@ public:
 #ifdef _MSC_VER
 #pragma warning( pop )
 #endif
-
-inline int64_t get_device(const Tensor& self) {
-  return self.get_device();
-}
-
-template <typename T>
-auto Tensor::register_hook(T&& hook) const -> Tensor::hook_return_void_t<T> {
-  // Return the grad argument in case of a hook with void return type to have an
-  // std::function with Tensor return type
-  static_assert(std::is_same<decltype(hook(Tensor())), void>::value,
-                "Expected hook to return void");
-  return _register_hook([fn=std::forward<T>(hook)](const Tensor& grad) {
-    fn(grad);
-    return Tensor();
-  });
-}
-
-template <typename T>
-auto Tensor::register_hook(T&& hook) const -> Tensor::hook_return_var_t<T> {
-  return _register_hook(std::forward<T>(hook));
-}
 
 namespace detail {
 // Helper creator for Tensor class which doesn't requires the users to pass

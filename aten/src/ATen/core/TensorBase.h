@@ -626,6 +626,57 @@ class TORCH_API TensorBase {
   /// this and the base Variable.
   const std::shared_ptr<torch::autograd::Node>& grad_fn() const;
 
+  // Hooks
+  //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+  template <typename T>
+  using hook_return_void_t = std::enable_if_t<std::is_void<typename std::result_of<T&(TensorBase)>::type>::value, unsigned>;
+  template <typename T>
+  using hook_return_var_t = std::enable_if_t<std::is_same<typename std::result_of<T&(TensorBase)>::type, TensorBase>::value, unsigned>;
+
+  /// Registers a backward hook.
+  ///
+  /// The hook will be called every time a gradient with respect to the Tensor is computed.
+  /// The hook should have one of the following signature:
+  /// ```
+  /// hook(TensorBase grad) -> TensorBase
+  /// ```
+  /// ```
+  /// hook(TensorBase grad) -> void
+  /// ```
+  /// The hook should not modify its argument, but it can optionally return a new gradient
+  /// which will be used in place of `grad`.
+  ///
+  /// This function returns the index of the hook in the list which can be used to remove hook.
+  ///
+  /// Example:
+  /// @code
+  /// auto v = torch::tensor({0., 0., 0.}, torch::requires_grad());
+  /// auto h = v.register_hook([](torch::Tensor grad){ return grad * 2; }); // double the gradient
+  /// v.backward(torch::tensor({1., 2., 3.}));
+  /// // This prints:
+  /// // ```
+  /// //  2
+  /// //  4
+  /// //  6
+  /// // [ CPUFloatType{3} ]
+  /// // ```
+  /// std::cout << v.grad() << std::endl;
+  /// v.remove_hook(h);  // removes the hook
+  /// @endcode
+  template <typename T>
+  hook_return_void_t<T> register_hook(T&& hook) const;
+  template <typename T>
+  hook_return_var_t<T> register_hook(T&& hook) const;
+
+protected:
+  unsigned _register_hook(std::function<TensorBase(const TensorBase&)> hook) const;
+
+public:
+
+  /// Remove hook at given position
+  void remove_hook(unsigned pos) const;
+
   // Variable methods
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -676,6 +727,23 @@ private:
 
 inline int64_t get_device(const TensorBase& self) {
   return self.get_device();
+}
+
+template <typename T>
+auto TensorBase::register_hook(T&& hook) const -> TensorBase::hook_return_void_t<T> {
+  // Return the grad argument in case of a hook with void return type to have an
+  // std::function with Tensor return type
+  static_assert(std::is_same<decltype(hook(TensorBase())), void>::value,
+                "Expected hook to return void");
+  return _register_hook([fn=std::forward<T>(hook)](const TensorBase& grad) {
+    fn(grad);
+    return TensorBase();
+  });
+}
+
+template <typename T>
+auto TensorBase::register_hook(T&& hook) const -> TensorBase::hook_return_var_t<T> {
+  return _register_hook(std::move(hook));
 }
 
 namespace detail {

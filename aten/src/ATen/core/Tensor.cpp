@@ -120,11 +120,11 @@ const std::shared_ptr<torch::autograd::Node>& TensorBase::grad_fn() const {
   return impl::GetVariableHooks()->grad_fn(*this);
 }
 
-void Tensor::remove_hook(unsigned pos) const {
+void TensorBase::remove_hook(unsigned pos) const {
   impl::GetVariableHooks()->remove_hook(*this, pos);
 }
 
-unsigned Tensor::_register_hook(std::function<Tensor(const Tensor&)> hook) const {
+unsigned TensorBase::_register_hook(std::function<TensorBase(const TensorBase&)> hook) const {
   return impl::GetVariableHooks()->_register_hook(*this, std::move(hook));
 }
 

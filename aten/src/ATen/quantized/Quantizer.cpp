@@ -71,7 +71,7 @@ QuantizerPtr make_per_channel_affine_quantizer(
   }
 }
 
-QTensorImpl* get_qtensorimpl(const Tensor& self) {
+QTensorImpl* get_qtensorimpl(const TensorBase& self) {
   TORCH_CHECK(
       !self.requires_grad(),
       "quantized tensors do not support autograd");

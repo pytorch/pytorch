@@ -177,7 +177,7 @@ std::vector<c10::optional<Variable>> _wrap_outputs(const variable_list &input_va
   return outputs;
 }
 
-void check_variable_result(const Variable& original, const Variable& result, std::string hook_name) {
+void check_variable_result(const at::TensorBase& original, const at::TensorBase& result, std::string hook_name) {
   if (!original.options().type_equal(result.options())) {
     std::stringstream ss;
     ss << "hook '" << hook_name << "' has changed the type of value (";
