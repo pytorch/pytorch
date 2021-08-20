@@ -617,16 +617,15 @@ Tensor miopen_convolution_forward(
 
   // See #4500
   Tensor weight_contig = weight->contiguous(memory_format);
-  /* TODO from cudnn/ConvShared?
   // Make sure that NC11 strides follow formula
   weight_contig.resize_(weight_contig.sizes(), memory_format);
   Tensor input_contig = input->contiguous(memory_format);
   input_contig.resize_(input_contig.sizes(), memory_format);
-  */
+
 
 
   raw_miopen_convolution_forward_out(
-      *output, *input, weight_contig,
+      *output, input_contig, weight_contig,
       padding, stride, dilation, groups, benchmark, deterministic);
 
   return *output;
@@ -666,7 +665,7 @@ void raw_miopen_depthwise_convolution_forward_out(
   args.handle = getMiopenHandle();
   setConvolutionParams(&args.params, args.handle, input, weight, padding, stride, dilation, groups, deterministic);
   args.idesc.set(input);
-  args.wdesc.set(weight);
+  args.wdesc.set(weight, input.suggest_memory_format(), 0);
   args.odesc.set(output);
   args.cdesc.set(dataType, c_mode, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups);
 
@@ -784,7 +783,7 @@ void raw_miopen_convolution_backward_input_out(
   args.handle = getMiopenHandle();
   setConvolutionParams(&args.params, args.handle, grad_input, weight, padding, stride, dilation, groups, deterministic);
   args.idesc.set(grad_input);
-  args.wdesc.set(weight);
+  args.wdesc.set(weight, grad_output.suggest_memory_format(), 0);
   args.odesc.set(grad_output);
   args.cdesc.set(dataType, c_mode, grad_output.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups);
 
@@ -813,17 +812,33 @@ Tensor miopen_convolution_backward_input(
   checkAllSameType(c, {grad_output, weight});
   checkAllSameGPU(c, {grad_output, weight});
 
-  auto grad_input_t = at::empty(input_size, grad_output->options());
+  auto memory_format = at::MemoryFormat::Contiguous;
+  if (miopen_conv_use_channels_last(*grad_output, *weight)) {
+    memory_format = (weight->ndimension() == 5) ? /*at::MemoryFormat::ChannelsLast3d*/at::MemoryFormat::Contiguous : at::MemoryFormat::ChannelsLast;
+  }
+
+  auto grad_input_t = at::native::empty_cuda(
+                    input_size,
+                    /*dtype=*/grad_output->scalar_type(),
+                    /*layout=*/c10::nullopt,
+                    /*device=*/kCUDA,
+                    /*pin_memory=*/c10::nullopt,
+                    /*memory_format=*/memory_format);
 
   // Avoid "grad_input" when this is being used as transposed convolution
   TensorArg grad_input{ grad_input_t, "result", 0 };
   convolution_shape_check(c, grad_input, weight, grad_output, padding, stride, dilation, groups);
 
   // See #4500
-  Tensor weight_contig = weight->contiguous();
+  Tensor weight_contig = weight->contiguous(memory_format);
+  // Make sure that NC11 strides follow formula
+  weight_contig.resize_(weight_contig.sizes(), memory_format);
+
+  Tensor grad_output_contig = grad_output->contiguous(memory_format);
+  grad_output_contig.resize_(grad_output_contig.sizes(), memory_format);
 
   raw_miopen_convolution_backward_input_out(
-      *grad_input, *grad_output, weight_contig,
+      *grad_input, grad_output_contig, weight_contig,
       padding, stride, dilation, groups, benchmark, deterministic);
 
   return *grad_input;
@@ -869,7 +884,7 @@ void raw_miopen_depthwise_convolution_backward_input_out(
   args.handle = getMiopenHandle();
   setConvolutionParams(&args.params, args.handle, grad_input, weight, padding, stride, dilation, groups, deterministic);
   args.idesc.set(grad_input);
-  args.wdesc.set(weight);
+  args.wdesc.set(weight, grad_output.suggest_memory_format(), 0);
   args.odesc.set(grad_output);
   args.cdesc.set(dataType, c_mode, grad_output.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups);
 
@@ -928,7 +943,7 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> miopen_convolution_backward(
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic, std::array<bool,3> output_mask) {
 
-  Tensor grad_output = grad_output_t.contiguous();
+  Tensor grad_output = grad_output_t.contiguous(input.suggest_memory_format());
 
   Tensor grad_input, grad_weight, grad_bias;
   if (output_mask[0]) {
@@ -1004,7 +1019,7 @@ void raw_miopen_convolution_backward_weight_out(
   args.handle = getMiopenHandle();
   setConvolutionParams(&args.params, args.handle, input, grad_weight, padding, stride, dilation, groups, deterministic);
   args.idesc.set(input);
-  args.wdesc.set(grad_weight);
+  args.wdesc.set(grad_weight, input.suggest_memory_format(), 0);
   args.odesc.set(grad_output);
   args.cdesc.set(dataType, c_mode, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups);
 
@@ -1032,15 +1047,29 @@ Tensor miopen_convolution_backward_weight(
   checkAllSameType(c, {grad_output, input});
   checkAllSameGPU(c, {grad_output, input});
 
-  auto grad_weight_t = at::empty(weight_size, grad_output->options());
+  auto memory_format = at::MemoryFormat::Contiguous;
+  if (miopen_conv_use_channels_last(*input, *grad_output)) {
+    memory_format = (input->ndimension() == 5) ? /*at::MemoryFormat::ChannelsLast3d*/at::MemoryFormat::Contiguous : at::MemoryFormat::ChannelsLast;
+  }
+
+  Tensor grad_output_contig_t = grad_output->contiguous(memory_format);
+  // Make sure that NC11 strides follow formula
+  grad_output_contig_t.resize_(grad_output_contig_t.sizes(), memory_format);
+  TensorArg grad_output_contig{ grad_output_contig_t, "grad_output", 1 };
+
+  Tensor input_contig_t = input->contiguous(memory_format);
+  input_contig_t.resize_(input_contig_t.sizes(), memory_format);
+  TensorArg input_contig{ input_contig_t, "input", 2};
+
+  auto grad_weight_t = at::empty(weight_size, grad_output_contig->options(), memory_format);
 
   // For uniformity with everything else, although it seems grad_weight
   // would be unambiguous too.
   TensorArg grad_weight{ grad_weight_t, "result", 0 };
-  convolution_shape_check(c, input, grad_weight, grad_output, padding, stride, dilation, groups);
+  convolution_shape_check(c, input, grad_weight, grad_output_contig, padding, stride, dilation, groups);
 
   raw_miopen_convolution_backward_weight_out(
-      *grad_weight, *grad_output, *input,
+      *grad_weight, *grad_output_contig, *input_contig,
       padding, stride, dilation, groups, benchmark, deterministic);
 
   return grad_weight_t;
@@ -1059,7 +1088,7 @@ void raw_miopen_depthwise_convolution_backward_weight_out(
   args.handle = getMiopenHandle();
   setConvolutionParams(&args.params, args.handle, input, grad_weight, padding, stride, dilation, groups, deterministic);
   args.idesc.set(input);
-  args.wdesc.set(grad_weight);
+  args.wdesc.set(grad_weight, input.suggest_memory_format(), 0);
   args.odesc.set(grad_output);
   args.cdesc.set(dataType, c_mode, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups);
 

@@ -96,7 +96,7 @@ public:
 
 private:
   void set(miopenDataType_t dataType, int dim, int* size, int* stride) {
-    fixSizeOneDimStride(dim, size, stride);
+    // TODO: Why was this needed before ? fixSizeOneDimStride(dim, size, stride);
     MIOPEN_CHECK(miopenSetTensorDescriptor(mut_desc(), dataType, dim, size, stride));
   }
 };
@@ -117,7 +117,7 @@ class FilterDescriptor
 
 private:
   void set(miopenDataType_t dataType, int dim, int* size, int* stride) {
-    fixSizeOneDimStride(dim, size, stride);
+    // TODO: Why was this needed before ? fixSizeOneDimStride(dim, size, stride);
     MIOPEN_CHECK(miopenSetTensorDescriptor(mut_desc(), dataType, dim, size, stride));
   }
 };
