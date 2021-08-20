@@ -26,6 +26,7 @@ namespace {
 constexpr int64_t kBytecodeVersionV4 = 0x4L;
 constexpr int64_t kBytecodeVersionV5 = 0x5L;
 constexpr int64_t kBytecodeVersionV6 = 0x6L;
+constexpr int64_t kBytecodeVersionV7 = 0x7L;
 } // namespace
 
 // Utility function that can be reused by backport_vn_to_vn-1(). If any utility
@@ -296,7 +297,7 @@ std::stringstream backport_v6_to_v5(std::stringstream& input_model_stream) {
   // resolved at runtime init stage for better operator compatibility.
   std::stringstream intermediate_model_stream;
   {
-    BytecodeEmitDefaultInputsGuard argNumGuard(true);
+    BytecodeEmitModeGuard argNumGuard(true, false);
     torch_script._save_for_mobile(
         intermediate_model_stream, extra_files, hasBytecodeDebug);
   }
@@ -349,6 +350,94 @@ std::stringstream backport_v6_to_v5(std::stringstream& input_model_stream) {
 
   return ouput_model_stream;
 }
+
+std::stringstream backport_v7_to_v6(std::stringstream& input_model_stream) {
+  std::shared_ptr<IStreamAdapter> rai =
+      std::make_shared<IStreamAdapter>(&input_model_stream);
+  auto reader = std::make_shared<PyTorchStreamReader>(rai);
+  std::vector<IValue> constants_values =
+      readArchive(kArchiveNameConstants, *reader.get()).toTuple()->elements();
+
+  // If there are debug info files in the original model file, it should also
+  // show up in the backported model
+  bool hasBytecodeDebug = reader->hasRecord("mobile_debug_handles.pkl");
+
+  // extra_files are kept
+  auto records = reader->getAllRecords();
+  ExtraFilesMap extra_files;
+  for (const auto& record : records) {
+    std::size_t found = record.find_last_of("/\\");
+    auto path = record.substr(0, found);
+    if ("extra" == path) {
+      extra_files.emplace(record.substr(found + 1), "");
+    }
+  }
+  // Loading the TS module is required for this backport, because bytecode needs
+  // to be re-emitted (refer to the comments below)
+  Module torch_script = torch::jit::load(rai, c10::nullopt, extra_files);
+
+  // The RAII guard to change the flag, emitBytecodeDefaultInputs, to true, so
+  // that TS stores the default argument values in the constant table, and emits
+  // the instructions (LOADC, for example), to push the values to the stack. It
+  // restores the behavior of V5 and before. For V6, the default arg values are
+  // resolved at runtime init stage for better operator compatibility.
+  std::stringstream intermediate_model_stream;
+  {
+    // BytecodeEmitDefaultInputsGuard argNumGuard(true);
+    BytecodeEmitModeGuard argNumGuard(false, true);
+    torch_script._save_for_mobile(
+        intermediate_model_stream, extra_files, hasBytecodeDebug);
+  }
+
+  // Update the bytecode version (from 6 to 5)
+
+  PyTorchStreamReader reader_bytecode(&intermediate_model_stream);
+  std::vector<IValue> bytecode_values = get_bytecode_ivalues(reader_bytecode);
+  std::unordered_set<std::string> excluded_files{
+      "constants.pkl",
+      "bytecode.pkl",
+      "version",
+  };
+
+  std::unordered_set<std::string> excluded_dirs{
+      "constants",
+      "bytecode",
+  };
+
+  std::stringstream ouput_model_stream;
+  auto writer_func = [&](const void* buf, size_t nbytes) -> size_t {
+    ouput_model_stream.write(static_cast<const char*>(buf), nbytes);
+    return !ouput_model_stream ? 0 : nbytes;
+  };
+
+  PyTorchStreamWriter writer_bytecode(writer_func);
+
+  selective_copy(
+      reader_bytecode, writer_bytecode, excluded_files, excluded_dirs);
+
+  update_bytecode_version(bytecode_values, kBytecodeVersionV6);
+  auto bytecode_tuple = c10::ivalue::Tuple::create(std::move(bytecode_values));
+  SerializationStorageContext storage_context;
+  writeArchiveV5(
+      writer_bytecode,
+      c10::ivalue::Tuple::create(constants_values),
+      /*archive_name=*/"constants",
+      /*archive_dir=*/"",
+      /*tensor_dir=*/"constants/",
+      /*use_storage_context=*/true,
+      storage_context);
+  writeArchiveV5(
+      writer_bytecode,
+      bytecode_tuple,
+      /*archive_name=*/"bytecode",
+      /*archive_dir=*/"",
+      /*tensor_dir=*/"constants/",
+      /*use_storage_context=*/true,
+      storage_context);
+
+  return ouput_model_stream;
+}
+
 } // namespace
 
 // A generic contract for backport logic to the previous bytecode version.
@@ -362,6 +451,7 @@ using BytecodeBackportFunction =
 BackportManager::BackportManager() {
   registerBytecodeBackportFunction(kBytecodeVersionV5, backport_v5_to_v4);
   registerBytecodeBackportFunction(kBytecodeVersionV6, backport_v6_to_v5);
+  registerBytecodeBackportFunction(kBytecodeVersionV7, backport_v7_to_v6);
 }
 
 std::unordered_map<

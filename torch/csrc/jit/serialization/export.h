@@ -193,19 +193,36 @@ struct TORCH_API BytecodeEmitDefaultValueForUnspecifiedArgMode {
   static void set_enabled(bool enabled);
 };
 
+struct TORCH_API BytecodeEmitDefaultArgsBeforeOutArgsMode {
+  static bool is_enabled();
+  static void set_enabled(bool enabled);
+};
+
 // RAII guard to switch the way JIT emits the bytecode for inputs.
 // true: instruction of default argument values (like LOADC) is emitted.
 // false: instruction of default argument values are not emitted. Instead
 // they are fetched from operator schema.
-struct TORCH_API BytecodeEmitDefaultInputsGuard {
-  BytecodeEmitDefaultInputsGuard(bool enable)
-      : prev_mode(BytecodeEmitDefaultValueForUnspecifiedArgMode::is_enabled()) {
-    BytecodeEmitDefaultValueForUnspecifiedArgMode::set_enabled(enable);
+struct TORCH_API BytecodeEmitModeGuard {
+  BytecodeEmitModeGuard(
+      bool enable_default_value_for_unspecified_arg,
+      bool enable_default_args_before_out_args)
+      : prev_default_value_for_unspecified_arg_mode(
+            BytecodeEmitDefaultValueForUnspecifiedArgMode::is_enabled()),
+        prev_default_args_before_out_args(
+            BytecodeEmitDefaultArgsBeforeOutArgsMode::is_enabled()) {
+    BytecodeEmitDefaultValueForUnspecifiedArgMode::set_enabled(
+        enable_default_value_for_unspecified_arg);
+    BytecodeEmitDefaultArgsBeforeOutArgsMode::set_enabled(
+        enable_default_args_before_out_args);
   }
-  ~BytecodeEmitDefaultInputsGuard() {
-    BytecodeEmitDefaultValueForUnspecifiedArgMode::set_enabled(prev_mode);
+  ~BytecodeEmitModeGuard() {
+    BytecodeEmitDefaultValueForUnspecifiedArgMode::set_enabled(
+        prev_default_value_for_unspecified_arg_mode);
+    BytecodeEmitDefaultArgsBeforeOutArgsMode::set_enabled(
+        prev_default_args_before_out_args);
   }
-  bool prev_mode;
+  bool prev_default_value_for_unspecified_arg_mode;
+  bool prev_default_args_before_out_args;
 };
 
 } // namespace jit

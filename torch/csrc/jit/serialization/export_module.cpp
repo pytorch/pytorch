@@ -72,7 +72,9 @@ std::pair<IValue, IValue> getFunctionTuple(
       graph,
       func.name(),
       BytecodeEmitDefaultValueForUnspecifiedArgMode::
-          is_enabled() /* emit_default_input_instructions */);
+          is_enabled() /* emit_default_input_instructions */,
+      BytecodeEmitDefaultArgsBeforeOutArgsMode::
+          is_enabled() /* enable_defaults_args_with_out_args */);
   auto instructions_copy = code->instructions();
 
   // operator names
@@ -874,6 +876,15 @@ bool BytecodeEmitDefaultValueForUnspecifiedArgMode::is_enabled() {
 }
 void BytecodeEmitDefaultValueForUnspecifiedArgMode::set_enabled(bool enabled) {
   emitBytecodeDefaultInputs = enabled;
+}
+
+thread_local bool emitDefautlArgsWithOutArgs =
+    caffe2::serialize::kProducedBytecodeVersion <= 6 ? true : false;
+bool BytecodeEmitDefaultArgsBeforeOutArgsMode::is_enabled() {
+  return emitDefautlArgsWithOutArgs;
+}
+void BytecodeEmitDefaultArgsBeforeOutArgsMode::set_enabled(bool enabled) {
+  emitDefautlArgsWithOutArgs = enabled;
 }
 
 } // namespace jit
