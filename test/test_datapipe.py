@@ -624,6 +624,44 @@ class TestFunctionalIterDataPipe(TestCase):
         self.assertEqual(output, [(i, i) for i in range(10)])
 
 
+    def test_demux_datapipe(self):
+        input_dp = IDP(range(10))
+
+        # Test Case: split into 2 DataPipes and output them one at a time
+        dp1, dp2 = input_dp.demux(2, lambda x: x % 2)
+        output1, output2 = [], []
+        for n1 in dp1:
+            output1.append(n1)
+        for n2 in dp2:
+            output2.append(n2)
+        self.assertEqual(output1, list(range(0, 10, 2)))
+        self.assertEqual(output2, list(range(1, 10, 2)))
+
+        # Test Case: split into 2 DataPipes and output them together
+        dp1, dp2 = input_dp.demux(2, lambda x: x % 2)
+        output = []
+        for n1, n2 in zip(dp1, dp2):
+            output.append((n1, n2))
+        self.assertEqual(output, [(i, i + 1) for i in range(0, 10, 2)])
+
+        # Test case: values of the same classification are lumped together, and buffer_size = 3 being too small
+        dp1, dp2 = input_dp.demux(2, lambda x: 0 if x >= 5 else 1, 3)
+        output1, output2 = [], []
+        with self.assertRaises(BufferError):
+            for n1 in dp1:
+                output1.append(n1)
+
+        # Test case: values of the same classification are lumped together, and buffer_size = 5 is just enough
+        dp1, dp2 = input_dp.demux(2, lambda x: 0 if x >= 5 else 1, buffer_size=5)
+        output1, output2 = [], []
+        for n1 in dp1:
+            output1.append(n1)
+        for n2 in dp2:
+            output2.append(n2)
+        self.assertEqual(output1, list(range(5, 10)))
+        self.assertEqual(output2, list(range(0, 5)))
+
+
     def test_map_datapipe(self):
         input_dp = IDP(range(10))
 
