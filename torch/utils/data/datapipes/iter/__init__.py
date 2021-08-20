@@ -43,6 +43,9 @@ from torch.utils.data.datapipes.iter.tararchivereader import (
 from torch.utils.data.datapipes.iter.ziparchivereader import (
     ZipArchiveReaderIterDataPipe as ZipArchiveReader,
 )
+from torch.utils.data.datapipes.iter.utils import (
+    IterableWrapperIterDataPipe as IterableWrapper,
+)
 
 __all__ = ['Batcher',
            'BucketBatcher',
@@ -53,6 +56,7 @@ __all__ = ['Batcher',
            'FileLoader',
            'Filter',
            'HttpReader',
+           'IterableWrapper',
            'LineReader',
            'Mapper',
            'RoutedDecoder',
