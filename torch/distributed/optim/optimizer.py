@@ -2,19 +2,11 @@ from typing import List, Optional
 import logging
 
 import torch.distributed.rpc as rpc
-import torch.optim as optim
 import torch.jit as jit
 import torch.nn as nn
 from torch import Tensor
 from torch.distributed.rpc import RRef
-from .functional_adagrad import _FunctionalAdagrad
-from .functional_adam import _FunctionalAdam
-from .functional_adamw import _FunctionalAdamW
-from .functional_sgd import _FunctionalSGD
-from .functional_adadelta import _FunctionalAdadelta
-from .functional_rmsprop import _FunctionalRMSprop
-from .functional_rprop import _FunctionalRprop
-from .functional_adamax import _FunctionalAdamax
+from torch.distributed.optim import functional_optim_map
 import torch.distributed.autograd as dist_autograd
 
 
@@ -193,28 +185,13 @@ class DistributedOptimizer:
     __ https://github.com/pytorch/tutorials/pull/1465
     """
 
-    # dict to map a user passed in optimizer_class to a functional
-    # optimizer class if we have already defined inside the
-    # distributed.optim package, this is so that we hide the
-    # functional optimizer to user and still provide the same API.
-    functional_optim_map = {
-        optim.Adagrad: _FunctionalAdagrad,
-        optim.Adam: _FunctionalAdam,
-        optim.AdamW: _FunctionalAdamW,
-        optim.SGD: _FunctionalSGD,
-        optim.Adadelta: _FunctionalAdadelta,
-        optim.RMSprop: _FunctionalRMSprop,
-        optim.Rprop: _FunctionalRprop,
-        optim.Adamax: _FunctionalAdamax,
-    }
-
     def __init__(self, optimizer_class, params_rref, *args, **kwargs):
         per_worker_params_rref = defaultdict(list)
         for param in params_rref:
             per_worker_params_rref[param.owner()].append(param)
 
-        if optimizer_class in DistributedOptimizer.functional_optim_map and jit._state._enabled:
-            optim_ctor = DistributedOptimizer.functional_optim_map.get(optimizer_class)
+        if optimizer_class in functional_optim_map and jit._state._enabled:
+            optim_ctor = functional_optim_map.get(optimizer_class)
         else:
             optim_ctor = optimizer_class
         self.is_functional_optim = (optim_ctor != optimizer_class)
