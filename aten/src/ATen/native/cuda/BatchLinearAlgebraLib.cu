@@ -128,10 +128,11 @@ static void apply_triangular_solve(Tensor& A, Tensor& B, bool left, bool upper, 
   auto A_mat_stride = matrixStride(A);
   auto B_mat_stride = matrixStride(B);
   auto batch_size = batchCount(A);
-  auto m = cuda_int_cast(B.size(-2), "m");
+  // This allows to pass rectangular A and B when left = True
+  auto m = cuda_int_cast(left ? A.size(-1) : B.size(-2), "m");
   auto n = cuda_int_cast(B.size(-1), "n");
-  auto lda = std::max<int>(1, left ? m : n);
-  auto ldb = std::max<int>(1, m);
+  auto lda = std::max<int>(1, cuda_int_cast(A.size(-2), "lda"));
+  auto ldb = std::max<int>(1, cuda_int_cast(B.size(-2), "ldb"));
 
   auto alpha = scalar_t{1};
 
@@ -161,10 +162,11 @@ static void apply_triangular_solve_batched(Tensor& A, Tensor& B, bool left, bool
   auto A_mat_stride = matrixStride(A);
   auto B_mat_stride = matrixStride(B);
   auto batch_size = cuda_int_cast(batchCount(A), "batch_size");
-  auto m = cuda_int_cast(B.size(-2), "m");
+  // This allows to pass rectangular A and B when left = True
+  auto m = cuda_int_cast(left ? A.size(-1) : B.size(-2), "m");
   auto n = cuda_int_cast(B.size(-1), "n");
-  auto lda = std::max<int>(1, left ? m : n);
-  auto ldb = std::max<int>(1, m);
+  auto lda = std::max<int>(1, cuda_int_cast(A.size(-2), "lda"));
+  auto ldb = std::max<int>(1, cuda_int_cast(B.size(-2), "ldb"));
 
   auto alpha = scalar_t{1};
 
