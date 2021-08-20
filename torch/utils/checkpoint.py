@@ -273,8 +273,8 @@ def checkpoint_sequential(functions, segments, input, **kwargs):
     for start in range(0, segment_size * (segments - 1), segment_size):
         end = start + segment_size - 1
         input = Checkpoint(
-                run_function(start, end, functions),
-                preserve_rng_state=preserve)(input)
+            run_function(start, end, functions),
+            preserve_rng_state=preserve)(input)
     return run_function(end + 1, len(functions) - 1, functions)(input)
 
 
