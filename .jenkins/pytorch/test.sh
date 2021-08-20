@@ -91,7 +91,7 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     export PYTORCH_TEST_WITH_ASAN=1
     export PYTORCH_TEST_WITH_UBSAN=1
     # TODO: Figure out how to avoid hard-coding these paths
-    export ASAN_SYMBOLIZER_PATH=/usr/lib/llvm-5.0/bin/llvm-symbolizer
+    export ASAN_SYMBOLIZER_PATH=/usr/lib/llvm-7/bin/llvm-symbolizer
     export TORCH_USE_RTLD_GLOBAL=1
     # NB: We load libtorch.so with RTLD_GLOBAL for UBSAN, unlike our
     # default behavior.
