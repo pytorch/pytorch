@@ -5,6 +5,12 @@
 
 namespace c10 {
 
+KernelFunction::KernelFunction(std::unique_ptr<OperatorKernel> functor, InternalBoxedKernelFunction* boxed_kernel_func, void* unboxed_kernel_func)
+: functor_(std::move(functor))
+, boxed_kernel_func_(boxed_kernel_func)
+, unboxed_kernel_func_(unboxed_kernel_func)
+{}
+
 // This a "fake" kernel which doesn't actually do anything.  Instead, it is a
 // distinguished kernel which is special cased by the dispatch table to
 // be handled specially.  Its semantics is that it redispatches to the

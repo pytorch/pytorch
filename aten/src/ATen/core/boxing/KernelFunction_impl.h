@@ -11,12 +11,6 @@ inline KernelFunction::KernelFunction()
 , unboxed_kernel_func_(nullptr)
 {}
 
-inline KernelFunction::KernelFunction(std::unique_ptr<OperatorKernel> functor, InternalBoxedKernelFunction* boxed_kernel_func, void* unboxed_kernel_func)
-: functor_(std::move(functor))
-, boxed_kernel_func_(boxed_kernel_func)
-, unboxed_kernel_func_(unboxed_kernel_func)
-{}
-
 template<KernelFunction::BoxedKernelFunction* func>
 inline void KernelFunction::make_boxed_function(OperatorKernel*, const OperatorHandle& opHandle, DispatchKeySet, Stack* stack) {
     // Note that we're dropping the DispatchKeySet argument.
