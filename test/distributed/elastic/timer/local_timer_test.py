@@ -16,11 +16,12 @@ from torch.testing._internal.common_utils import (
     run_tests,
     IS_WINDOWS,
     IS_MACOS,
+    TEST_WITH_DEV_DBG_ASAN,
 )
 
 
 # timer is not supported on windows or macos
-if not (IS_WINDOWS or IS_MACOS):
+if not (IS_WINDOWS or IS_MACOS or TEST_WITH_DEV_DBG_ASAN):
     # func2 should time out
     def func2(n, mp_queue):
         if mp_queue is not None:
@@ -123,7 +124,7 @@ if not (IS_WINDOWS or IS_MACOS):
 
 
 # timer is not supported on windows or macos
-if not (IS_WINDOWS or IS_MACOS):
+if not (IS_WINDOWS or IS_MACOS or TEST_WITH_DEV_DBG_ASAN):
     class MultiprocessingRequestQueueTest(unittest.TestCase):
         def test_get(self):
             mp_queue = mp.Queue()
@@ -182,7 +183,7 @@ if not (IS_WINDOWS or IS_MACOS):
 
 
 # timer is not supported on windows or macos
-if not (IS_WINDOWS or IS_MACOS):
+if not (IS_WINDOWS or IS_MACOS or TEST_WITH_DEV_DBG_ASAN):
     class LocalTimerServerTest(unittest.TestCase):
         def setUp(self):
             self.mp_queue = mp.Queue()

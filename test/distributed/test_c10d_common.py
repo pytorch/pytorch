@@ -28,7 +28,12 @@ from torch.testing._internal.common_utils import (
     TestCase,
     load_tests,
     run_tests,
+    TEST_WITH_DEV_DBG_ASAN,
 )
+
+if TEST_WITH_DEV_DBG_ASAN:
+    print("Multiprocessing spawn is not compatible with dev/dbg asan", file=sys.stderr)
+    sys.exit(0)
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings

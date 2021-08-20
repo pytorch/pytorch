@@ -243,6 +243,7 @@ ROCM_BLOCKLIST = [
     'distributed/rpc/test_faulty_agent',
     'distributed/rpc/test_tensorpipe_agent',
     'distributed/rpc/cuda/test_tensorpipe_agent',
+    'distributed/_sharded_tensor/test_sharded_tensor',
     'test_determination',
     'test_multiprocessing',
     'test_jit_legacy',
