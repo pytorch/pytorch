@@ -66,7 +66,7 @@ template <typename T>
 auto Tensor::register_hook(T&& hook) const -> Tensor::hook_return_var_t<T> {
   return _register_hook([fn=std::forward<T>(hook)](const TensorBase& grad_base) {
     OptionalTensorRef grad(grad_base);
-    Tensor ret = fn(grad.getTensorRef());
+    Tensor ret = fn(*grad);
     return TensorBase(std::move(ret));
   });
 }

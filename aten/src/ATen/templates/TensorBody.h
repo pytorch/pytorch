@@ -175,14 +175,20 @@ class TORCH_API Tensor: public TensorBase {
   #pragma warning( disable : 4522 )
   #endif
 
-  Tensor& operator=(const Tensor& x) & = default;
-  Tensor& operator=(Tensor&& x) & = default;
-
-  Tensor& operator=(const TensorBase &x) & {
-    return operator=(Tensor(x));
+  Tensor& operator=(const TensorBase& x) & {
+    impl_ = x.getIntrusivePtr();
+    return *this;
   }
-  Tensor& operator=(TensorBase &&x) & {
-    return operator=(Tensor(std::move(x)));
+  Tensor& operator=(TensorBase&& x) & {
+    impl_ = x.unsafeReleaseIntrusivePtr();
+    return *this;
+  }
+
+  Tensor& operator=(const Tensor &x) & {
+    return operator=(static_cast<const TensorBase&>(x));
+  }
+  Tensor& operator=(Tensor &&x) & {
+    return operator=(static_cast<TensorBase&&>(x));
   }
 
   Tensor& operator=(Scalar v) &&;
