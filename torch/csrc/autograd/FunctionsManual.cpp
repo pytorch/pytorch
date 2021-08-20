@@ -2880,7 +2880,7 @@ std::tuple<Tensor, Tensor> triangular_solve_backward(
   return std::tuple<Tensor, Tensor>{grad_b, grad_a};
 }
 
-Tensor linalg_triangular_solve_forward(
+Tensor linalg_solve_triangular_forward(
     const Tensor& A_t,
     const Tensor& B_t,
     const Tensor& A,
@@ -2890,14 +2890,14 @@ Tensor linalg_triangular_solve_forward(
     const bool unitriangular) {
   // The forward AD formula (for left = true) is A^{-1}(B_t - A_tX)
   // For the derivation see:
-  // [Note: Forward / Backward AD triangular_solve]
+  // [Note: Forward / Backward AD solve_triangular]
   const Tensor proj_A_t = upper ? A_t.triu(static_cast<int>(unitriangular))
                                 : A_t.tril(- static_cast<int>(unitriangular));
   const Tensor X_t = B_t - (left ? at::matmul(proj_A_t, X) : at::matmul(X, proj_A_t));
-  return at::native::linalg_triangular_solve(A, X_t, left, upper, unitriangular);
+  return at::native::linalg_solve_triangular(A, X_t, left, upper, unitriangular);
 }
 
-std::tuple<Tensor, Tensor> linalg_triangular_solve_backward(
+std::tuple<Tensor, Tensor> linalg_solve_triangular_backward(
     const Tensor& grad,
     const Tensor& A,
     const Tensor& X,
@@ -2905,7 +2905,7 @@ std::tuple<Tensor, Tensor> linalg_triangular_solve_backward(
     const bool upper,
     const bool unitriangular,
     std::array<bool, 2> output_mask) {
-  // [Note: Forward / Backward AD triangular_solve]
+  // [Note: Forward / Backward AD solve_triangular]
   // Assume left=true for simplicity.
   // Remark: A solver computes A^{-1}B
   //
@@ -2938,7 +2938,7 @@ std::tuple<Tensor, Tensor> linalg_triangular_solve_backward(
   // We always need to comput G_B
   const Tensor A_H = A.conj().transpose(-2, -1);
   // gragrad does not go through because it gets confused with this !upper
-  const Tensor G_B = at::linalg_triangular_solve(A_H, grad, left, !upper, unitriangular);
+  const Tensor G_B = at::linalg_solve_triangular(A_H, grad, left, !upper, unitriangular);
 
   if (output_mask[0]) {
     const Tensor X_H = X.conj().transpose(-2, -1);
