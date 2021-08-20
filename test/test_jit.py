@@ -60,6 +60,7 @@ from jit.test_script_profile import TestScriptProfile  # noqa: F401
 from jit.test_convert_activation import TestFunctionalToInplaceActivation, TestInplaceToFunctionalActivation  # noqa: F401
 from jit.test_parametrization import TestParametrization  # noqa: F401
 from jit.test_attr import TestGetDefaultAttr  # noqa: F401
+from jit.test_aten_pow import TestAtenPow  # noqa: F401
 
 # Torch
 from torch import Tensor
@@ -496,7 +497,7 @@ class TestJit(JitTestCase):
         FileCheck().check_not("aten::relu(") \
             .check("aten::_add_relu(") \
             .run(m.graph)
-        torch.testing.assert_allclose(orig_res, new_res)
+        torch.testing.assert_close(orig_res, new_res)
 
         # add, relu_
         a = torch.rand((7, 11))
@@ -515,7 +516,7 @@ class TestJit(JitTestCase):
         FileCheck().check_not("aten::relu_(") \
             .check("aten::_add_relu(") \
             .run(m.graph)
-        torch.testing.assert_allclose(orig_res, new_res)
+        torch.testing.assert_close(orig_res, new_res)
 
         class Madd_(torch.nn.Module):
             def __init__(self, relu_op):
@@ -546,10 +547,10 @@ class TestJit(JitTestCase):
             .check_not("aten::relu_(") \
             .check("aten::_add_relu_(") \
             .run(m.graph)
-        torch.testing.assert_allclose(orig_res, new_res)
+        torch.testing.assert_close(orig_res, new_res)
         # Since _add_relu_ does inplace mutation ensure
         # a_copy is modified
-        torch.testing.assert_allclose(orig_res, a_copy)
+        torch.testing.assert_close(orig_res, a_copy)
 
         class Madd_out(torch.nn.Module):
             def __init__(self, relu_op):
@@ -584,10 +585,10 @@ class TestJit(JitTestCase):
             .check_not("aten::relu_(") \
             .check("aten::_add_relu(") \
             .run(m.graph)
-        torch.testing.assert_allclose(orig_res, new_res)
+        torch.testing.assert_close(orig_res, new_res)
         # Since _add_relu_ with out=a does inplace mutation ensure
         # a_copy is modified
-        torch.testing.assert_allclose(orig_res, a_copy)
+        torch.testing.assert_close(orig_res, a_copy)
 
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "Simple executor doesn't have shape information")
     def test_peephole_optimize_shape_ops(self):
@@ -1686,6 +1687,13 @@ graph(%Ra, %Rb):
         self.assertEqual(a + b, torch.ops.aten.add(a, b))
         self.assertEqual(a + 1, torch.ops.aten.add(a, 1))
 
+    def test_torch_ops_kwonly(self):
+        a, b = torch.rand(3, 4), torch.rand(3, 4)
+        with self.assertRaisesRegex(RuntimeError, "positional argument"):
+            torch.ops.aten.add(a, b, 2)
+        # h/t Chillee for this ambiguous case
+        self.assertEqual(a.prod(1), torch.ops.aten.prod(a, 1))
+
     def test_torch_complex(self):
         def fn(real, img):
             return torch.complex(real, img)
@@ -2716,6 +2724,17 @@ graph(%Ra, %Rb):
         s = str(torch.ops)
         self.assertRegex(s, r'ops')
 
+    def test_print_classes_module(self):
+        s = str(torch.classes)
+        self.assertRegex(s, r'classes')
+
+    def test_print_torch_ops_modules(self):
+        s = str(torch._ops.ops.quantized)
+        self.assertRegex(s, r'torch.ops')
+        s = str(torch._ops.ops.atan)
+        self.assertRegex(s, r'torch.ops')
+
+    @unittest.skipIf(IS_WINDOWS, 'TODO: fix occasional windows failure')
     def test_profiler(self):
         prev_opt = torch._C._get_graph_executor_optimize()
         torch._C._set_graph_executor_optimize(False)
@@ -8869,7 +8888,7 @@ dedent """
     def test_pack_unpack_state(self):
         sm = TestScript.DerivedStateModule()
         x = torch.rand(3, 4, dtype=torch.float)
-        torch.testing.assert_allclose(sm(x), x + torch.neg(torch.ones(3, 4, dtype=torch.float)))
+        torch.testing.assert_close(sm(x), x + torch.neg(torch.ones(3, 4, dtype=torch.float)))
 
         # Test save path
         self.assertFalse(sm.pack_called.item())
@@ -8880,11 +8899,11 @@ dedent """
         # ensure unpack was called after serialization so as to leave the module in an initialized state
         self.assertTrue(sm.unpack_called.item())
 
-        torch.testing.assert_allclose(sm.derived, torch.neg(sm.param))
+        torch.testing.assert_close(sm.derived, torch.neg(sm.param))
 
         # Test load paths
         self.assertTrue(imported.unpack_called.item())
-        torch.testing.assert_allclose(imported(x), x + torch.neg(torch.ones(3, 4, dtype=torch.float)))
+        torch.testing.assert_close(imported(x), x + torch.neg(torch.ones(3, 4, dtype=torch.float)))
 
     @unittest.skipIf(not TEST_MKL, "PyTorch is built without MKL support")
     def test_torch_functional(self):
@@ -9082,11 +9101,11 @@ dedent """
                 return self.submod(x + self.buf)
 
         m = Mod()
-        torch.testing.assert_allclose(m(torch.zeros(3, 4)), torch.ones(3, 4) * 6)
+        torch.testing.assert_close(m(torch.zeros(3, 4)), torch.ones(3, 4) * 6)
         m.apply(lambda s: s._pack())
-        torch.testing.assert_allclose(m(torch.zeros(3, 4)), torch.zeros(3, 4))
+        torch.testing.assert_close(m(torch.zeros(3, 4)), torch.zeros(3, 4))
         m.apply(lambda s: s._unpack())
-        torch.testing.assert_allclose(m(torch.zeros(3, 4)), torch.ones(3, 4) * 6)
+        torch.testing.assert_close(m(torch.zeros(3, 4)), torch.ones(3, 4) * 6)
 
     def test_torch_any(self):
         def fn(x):
@@ -10939,7 +10958,7 @@ dedent """
         torch._C._jit_pass_remove_dropout(m._c)
         res = m(data)
         FileCheck().check_not("aten::dropout").run(str(m.graph))
-        torch.testing.assert_allclose(ref_res, res, rtol=1e-2, atol=1e-3)
+        torch.testing.assert_close(ref_res, res, rtol=1e-2, atol=1e-3)
 
     def test_unfold_zero_dim(self):
         def fn(x):
@@ -14483,6 +14502,47 @@ dedent """
 
         with self.assertRaisesRegex(Exception, "Parameters not specified"):
             torch.jit.script(test)
+
+    def test_function_overload_misuse(self):
+        with self.assertRaisesRegex(RuntimeError, "Only `pass` statement or `...` can be the body"):
+            @torch.jit._overload
+            def wrong_decl_body(x: str) -> str:
+                return x + "0"
+
+        with self.assertRaisesRegex(RuntimeError, "Only `pass` statement or `...` can be the body"):
+            class MyClass:
+                @torch.jit._overload_method
+                def method(self):
+                    return 0
+
+        @torch.jit._overload
+        def null_overload(x: int) -> int: ...  # noqa: E704
+
+        @torch.jit._overload
+        def null_overload(x: str) -> str:  # noqa: F811
+            pass
+
+        def null_overload_driver():
+            return null_overload(0)
+
+        with self.assertRaisesRegex(RuntimeError, 'Implementation for the function ".+" is missing.'):
+            torch.jit.script(null_overload_driver)
+
+        class OverloadMisuse(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            @torch.jit._overload_method
+            def forward(self, x: int):
+                pass
+
+            @torch.jit._overload_method
+            def forward(self, x: Tensor):  # noqa: F811
+                pass
+
+        with self.assertRaisesRegex(RuntimeError, 'Implementation for the method ".+" is missing.'):
+            m = torch.jit.script(OverloadMisuse())
+
 
     def test_script_method_torch_function_overload(self):
         class MyCustomTensor(torch.Tensor):

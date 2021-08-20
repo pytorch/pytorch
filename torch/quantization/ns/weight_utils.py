@@ -11,7 +11,11 @@ toq = torch.ops.quantized
 from torch.fx import GraphModule
 from torch.fx.graph import Node
 
-from .utils import getattr_from_fqn, return_first_non_observer_node
+from .utils import (
+    get_target_type_str,
+    getattr_from_fqn,
+    return_first_non_observer_node,
+)
 
 from .ns_types import (
     NSSingleResultValuesType,
@@ -226,6 +230,8 @@ def extract_weight_from_node(
     if op_to_type_to_weight_extraction_fn is None:
         op_to_type_to_weight_extraction_fn = get_op_to_type_to_weight_extraction_fn()
 
+    ref_node_type = get_target_type_str(node, gm)
+
     if node.op == 'call_function':
         function_mapping = op_to_type_to_weight_extraction_fn['call_function']
         for target_fn_type, weight_extraction_fn in function_mapping.items():
@@ -237,6 +243,7 @@ def extract_weight_from_node(
                     'prev_node_name': node.name,
                     'prev_node_target_type': str(node.target),
                     'ref_node_name': node.name,
+                    'ref_node_target_type': ref_node_type,
                     'index_within_arg': 0,
                     'index_of_arg': 0,
                     'fqn': fqn,
@@ -256,6 +263,7 @@ def extract_weight_from_node(
                     'prev_node_name': node.name,
                     'prev_node_target_type': str(type(mod)),
                     'ref_node_name': node.name,
+                    'ref_node_target_type': ref_node_type,
                     'index_within_arg': 0,
                     'index_of_arg': 0,
                     'fqn': fqn,

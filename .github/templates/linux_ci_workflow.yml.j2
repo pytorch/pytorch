@@ -266,9 +266,11 @@ jobs:
       NUM_TEST_SHARDS: !{{ num_test_shards }}
       MULTIGPU_RUNNER_TYPE: linux.16xlarge.nvidia.gpu
       NOGPU_RUNNER_TYPE: linux.2xlarge
+      PR_BODY: ${{ github.event.pull_request.body }}
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
       render-matrix: ${{ steps.set-matrix.outputs.render-matrix }}
+      ignore-disabled-issues: ${{ steps.set-matrix.outputs.ignore-disabled-issues }}
     container:
       image: python:3.9
     steps:
@@ -292,6 +294,7 @@ jobs:
       TEST_CONFIG: ${{ matrix.config }}
       SHARD_NUMBER: ${{ matrix.shard }}
       NUM_TEST_SHARDS: ${{ matrix.num_shards }}
+      PYTORCH_IGNORE_DISABLED_ISSUES: ${{ needs.generate-test-matrix.outputs.ignore-disabled-issues }}
     steps:
       - name: Log in to ECR
         run: |
@@ -348,6 +351,9 @@ jobs:
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Test PyTorch
+        env:
+          BUILD_ENVIRONMENT: !{{ build_environment }}-${{ matrix.config }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           if [[ $TEST_CONFIG == 'multigpu' ]]; then
             TEST_COMMAND=.jenkins/pytorch/multigpu-test.sh
@@ -363,6 +369,7 @@ jobs:
           docker run \
             ${GPU_FLAG:-} \
             -e BUILD_ENVIRONMENT \
+            -e PR_NUMBER \
             -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
             -e GITHUB_ACTIONS \
             -e IN_CI \
@@ -371,6 +378,7 @@ jobs:
             -e JOB_BASE_NAME \
             -e TEST_CONFIG \
             -e NUM_TEST_SHARDS \
+            -e PYTORCH_IGNORE_DISABLED_ISSUES \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
             -e http_proxy="!{{squid_proxy}}" -e https_proxy="!{{squid_proxy}}" -e no_proxy="!{{squid_no_proxy}}" \
@@ -389,6 +397,12 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      {%- if is_coverage %}
+      - name: Report coverage
+        run: |
+          python3 -mpip install codecov
+          python3 -mcodecov
+      {%- endif %}
       - name: Zip test reports for upload
         if: always()
         env:
@@ -437,8 +451,8 @@ jobs:
   # logs (like test); we can always move it back to the other one, but it
   # doesn't create the best experience
   render_test_results:
-    if: always()
     needs: [generate-test-matrix, test, !{{ ciflow_config.root_job_name }}]
+    if: ${{ needs.test.result != 'skipped' || failure() }}
     runs-on: linux.2xlarge
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.render-matrix) }}
