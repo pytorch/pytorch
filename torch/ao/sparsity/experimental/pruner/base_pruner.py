@@ -128,7 +128,7 @@ class BasePruner(BaseSparsifier):
                     if type(child) in SUPPORTED_MODULES:
                         self.config.append(child)
                     else:
-                        if type(child) in NEEDS_MANUAL_UPDATE and self.prune_bias:
+                        if type(child) in NEEDS_ZEROS and self.prune_bias:
                             warnings.warn(f"Models with {type(child)} layers have config provided by user.")
                         stack.append(child)
 
