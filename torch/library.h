@@ -684,6 +684,10 @@ public:
     return _fallback(std::move(f));
   }
 
+  Library& fallback(CppFunction f) & {
+    return _fallback(std::move(f));
+  }
+
   template <class CurClass>
   inline torch::class_<CurClass> class_(const std::string& className);
 
