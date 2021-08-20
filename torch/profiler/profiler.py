@@ -97,7 +97,7 @@ def supported_activities():
     This, in turn, results in including CUDA time in the profiler table output,
     but not in the JSON trace.
     """
-    return torch.autograd._supported_kineto_activities()
+    return torch.autograd._supported_activities()
 
 
 class profile(object):

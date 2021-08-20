@@ -14,11 +14,11 @@ class TORCH_API CppPrinter : public IRPrinter {
   explicit CppPrinter(std::ostream* os) : IRPrinter(*os) {}
 
   using IRPrinter::visit;
-  void visit(const Allocate*) override;
-  void visit(const Free*) override;
+  void visit(Allocate*) override;
+  void visit(Free*) override;
 
  private:
-  std::unordered_set<const Var*> allocated_on_heap_;
+  std::unordered_set<Var*> allocated_on_heap_;
 };
 
 } // namespace tensorexpr

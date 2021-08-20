@@ -749,7 +749,50 @@ TEST(LiteInterpreterTest, GetRuntimeOpsAndInfo) {
   AT_ASSERT(runtime_ops.size() > 2900);
 }
 
+TEST(LiteInterpreterTest, isCompatibleSuccess) {
+  // test trivial success case
+  auto runtime_info = get_runtime_compatibility_info();
+  std::unordered_map<std::string, OperatorInfo> model_ops;
+  model_ops["aten::add.Scalar"] = OperatorInfo{2};
+
+  auto model_info = ModelCompatibilityInfo{
+      caffe2::serialize::kMaxSupportedBytecodeVersion, model_ops};
+
+  AT_ASSERT(
+      is_compatible(runtime_info, model_info).status ==
+      ModelCompatibilityStatus::OK);
+}
+
+TEST(LiteInterpreterTest, isCompatibleFail) {
+  // test trivial failure due to ops
+  std::unordered_map<std::string, OperatorInfo> model_ops;
+  model_ops["aten::add.Scalar"] = OperatorInfo{2};
+  auto model_info = ModelCompatibilityInfo{
+      caffe2::serialize::kMaxSupportedBytecodeVersion, model_ops};
+  std::unordered_map<std::string, OperatorInfo> runtime_ops;
+  runtime_ops["aten::add.Int"] = OperatorInfo{2};
+  auto runtime_info = RuntimeCompatibilityInfo{
+      caffe2::serialize::kMaxSupportedBytecodeVersion, runtime_ops};
+
+  auto result = is_compatible(runtime_info, model_info);
+  AT_ASSERT(result.status = ModelCompatibilityStatus::ERROR);
+  AT_ASSERT(
+      result.errors[0] ==
+      "Operator 'aten::add.Scalar' missing from runtime (not found)");
+
+  // test trivial failure due to bytecode
+  runtime_ops["aten::add.Scalar"] = OperatorInfo{2};
+  runtime_info = RuntimeCompatibilityInfo{
+      caffe2::serialize::kMaxSupportedBytecodeVersion, runtime_ops};
+  model_info.bytecode_version =
+      caffe2::serialize::kMaxSupportedBytecodeVersion + 1;
+
+  result = is_compatible(runtime_info, model_info);
+  AT_ASSERT(result.status = ModelCompatibilityStatus::ERROR);
+}
+
 #if !defined FB_XPLAT_BUILD
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteInterpreterTest, SequentialModuleInfo) {
   Module a("A");
   a.define(R"JIT(
