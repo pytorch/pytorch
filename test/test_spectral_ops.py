@@ -1125,21 +1125,7 @@ class TestFFT(TestCase):
                 for i in range(num_trials):
                     original = torch.randn(*sizes, dtype=dtype, device=device)
                     stft = torch.stft(original, return_complex=True, **stft_kwargs)
-                    inversed = torch.istft(stft, length=original.size(-1), **istft_kwargs)
-                    n_frames = stft.size(-1)
-                    if stft_kwargs["center"] is True:
-                        len_expected = stft_kwargs["n_fft"] // 2 + stft_kwargs["hop_length"] * (n_frames - 1)
-                    else:
-                        len_expected = stft_kwargs["n_fft"] + stft_kwargs["hop_length"] * (n_frames - 1)
-                    # trim the original for case when constructed signal is shorter than original
-                    if original.size(-1) > len_expected:
-                        padding = inversed[..., len_expected:]
-                        inversed = inversed[..., :len_expected]
-                        original = original[..., :len_expected]
-                        zeros = torch.zeros_like(padding, device=padding.device)
-                        self.assertEqual(
-                            padding, zeros, msg='istft padding values against zeros',
-                            atol=7e-6, rtol=0, exact_dtype=True)
+                    inversed = torch.istft(stft, length=original.size(1), **istft_kwargs)
                     self.assertEqual(
                         inversed, original, msg='istft comparison against original',
                         atol=7e-6, rtol=0, exact_dtype=True)
@@ -1178,18 +1164,58 @@ class TestFFT(TestCase):
                 'normalized': True,
                 'onesided': False,
             },
-            # hamming_window, not centered, not normalized, onesided
+            # hamming_window, centered, not normalized, onesided
             # window same size as n_fft
             {
                 'n_fft': 5,
                 'hop_length': 2,
                 'win_length': 5,
                 'window': torch.hamming_window(5, dtype=dtype, device=device),
-                'center': False,
+                'center': True,
                 'pad_mode': 'constant',
                 'normalized': False,
                 'onesided': True,
             },
+        ]
+        for i, pattern in enumerate(patterns):
+            _test_istft_is_inverse_of_stft(pattern)
+
+    @onlyOnCPUAndCUDA
+    @skipCPUIfNoFFT
+    @dtypes(torch.double)
+    def test_istft_round_trip_with_padding(self, device, dtype):
+        """long hop_length or not centered may cause length mismatch in the inversed signal"""
+        def _test_istft_is_inverse_of_stft_with_padding(stft_kwargs):
+            # generates a random sound signal for each tril and then does the stft/istft
+            # operation to check whether we can reconstruct signal
+            data_sizes = [(2, 20), (3, 15), (4, 10)]
+            num_trials = 100
+            istft_kwargs = stft_kwargs.copy()
+            del istft_kwargs['pad_mode']
+            for sizes in data_sizes:
+                for i in range(num_trials):
+                    original = torch.randn(*sizes, dtype=dtype, device=device)
+                    stft = torch.stft(original, return_complex=True, **stft_kwargs)
+                    inversed = torch.istft(stft, length=original.size(-1), **istft_kwargs)
+                    n_frames = stft.size(-1)
+                    if stft_kwargs["center"] is True:
+                        len_expected = stft_kwargs["n_fft"] // 2 + stft_kwargs["hop_length"] * (n_frames - 1)
+                    else:
+                        len_expected = stft_kwargs["n_fft"] + stft_kwargs["hop_length"] * (n_frames - 1)
+                    # trim the original for case when constructed signal is shorter than original
+                    padding = inversed[..., len_expected:]
+                    inversed = inversed[..., :len_expected]
+                    original = original[..., :len_expected]
+                    # test the padding points of the inversed signal are all zeros
+                    zeros = torch.zeros_like(padding, device=padding.device)
+                    self.assertEqual(
+                        padding, zeros, msg='istft padding values against zeros',
+                        atol=7e-6, rtol=0, exact_dtype=True)
+                    self.assertEqual(
+                        inversed, original, msg='istft comparison against original',
+                        atol=7e-6, rtol=0, exact_dtype=True)
+
+        patterns = [
             # hamming_window, not centered, not normalized, not onesided
             # window same size as n_fft
             {
@@ -1202,9 +1228,33 @@ class TestFFT(TestCase):
                 'normalized': False,
                 'onesided': False,
             },
+            # hamming_window, not centered, not normalized, onesided
+            # window same size as n_fft
+            {
+                'n_fft': 5,
+                'hop_length': 2,
+                'win_length': 5,
+                'window': torch.hamming_window(5, dtype=dtype, device=device),
+                'center': False,
+                'pad_mode': 'constant',
+                'normalized': False,
+                'onesided': True,
+            },
+            # hamming_window, centered, not normalized, onesided, long hop_length
+            # window same size as n_fft
+            {
+                'n_fft': 10,
+                'hop_length': 9,
+                'win_length': 10,
+                'window': torch.hamming_window(10, dtype=dtype, device=device),
+                'center': True,
+                'pad_mode': 'constant',
+                'normalized': False,
+                'onesided': True,
+            },
         ]
         for i, pattern in enumerate(patterns):
-            _test_istft_is_inverse_of_stft(pattern)
+            _test_istft_is_inverse_of_stft_with_padding(pattern)
 
     @onlyOnCPUAndCUDA
     def test_istft_throws(self, device):

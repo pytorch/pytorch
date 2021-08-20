@@ -920,7 +920,7 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
 
   // We need to trim the front padding away if centered
   const auto start = center ? n_fft / 2 : 0;
-  const auto end = lengthOpt.has_value()? start + lengthOpt.value() : - n_fft / 2;
+  const auto end = lengthOpt.has_value() ? start + lengthOpt.value() : (center ? - n_fft / 2 : -1);
 
   y = y.slice(2, start, end, 1);
   window_envelop = window_envelop.slice(2, start, end, 1);
