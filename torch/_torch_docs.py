@@ -9745,14 +9745,16 @@ Supports input of float, double, cfloat and cdouble data types.
 
 .. warning::
 
-    :func:`torch.triangular_solve` is deprecated in favor of :func:`torch.linalg.triangular_solve`
+    :func:`torch.triangular_solve` is deprecated in favor of :func:`torch.linalg.solve_triangular`
     and will be removed in a future PyTorch release.
+    :func:`torch.linalg.solve_triangular` has its arguments reversed and does not return a
+    copy of one of the inputs.
 
-    ``X = torch.triangular_solve(b, A, upper=upper, unitriangular=unitriangular).solution`` should be replaced with
+    ``X = torch.triangular_solve(B, A).solution`` should be replaced with
 
     .. code:: python
 
-        X = torch.linalg.triangular_solve(A, b, upper=upper, unitriangular=unitriangular)
+        X = torch.linalg.solve_triangular(A, B)
 
 Args:
     b (Tensor): multiple right-hand sides of size :math:`(*, m, k)` where

@@ -3264,7 +3264,7 @@ def sample_inputs_linalg_solve(op_info, device, dtype, requires_grad=False, vect
         out.append(SampleInput(a, args=(b,)))
     return out
 
-def sample_inputs_linalg_triangular_solve(op_info, device, dtype, requires_grad=False, **kwargs):
+def sample_inputs_linalg_solve_triangular(op_info, device, dtype, requires_grad=False, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device)
     bs = (1, 2, 0)
     ns = (3, 0)
@@ -7788,12 +7788,12 @@ op_db: List[OpInfo] = [
            check_batched_gradgrad=False,
            supports_forward_ad=True,
            decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack]),
-    OpInfo('linalg.triangular_solve',
-           aten_name='linalg_triangular_solve',
-           op=torch.linalg.triangular_solve,
+    OpInfo('linalg.solve_triangular',
+           aten_name='linalg_solve_triangular',
+           op=torch.linalg.solve_triangular,
            dtypes=floating_and_complex_types(),
-           sample_inputs_func=sample_inputs_linalg_triangular_solve,
-           # linalg.triangular_solve cannot be batched over because of a call to out.copy_(result);
+           sample_inputs_func=sample_inputs_linalg_solve_triangular,
+           # linalg.solve_triangular cannot be batched over because of a call to out.copy_(result);
            check_batched_grad=False,
            check_batched_gradgrad=False,
            supports_forward_ad=True,

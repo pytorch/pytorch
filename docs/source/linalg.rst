@@ -48,8 +48,8 @@ Solvers
     :nosignatures:
 
     solve
+    solve_triangular
     lstsq
-    triangular_solve
 
 Inverses
 --------

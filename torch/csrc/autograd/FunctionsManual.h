@@ -164,7 +164,7 @@ std::tuple<Tensor, Tensor> triangular_solve_backward(
     const Tensor & b, const Tensor & a, const Tensor & x,
     const bool upper, const bool transpose, const bool unitriangular,
     std::array<bool, 2> output_mask);
-Tensor linalg_triangular_solve_forward(
+Tensor linalg_solve_triangular_forward(
     const Tensor& A_t,
     const Tensor& B_t,
     const Tensor& A,
@@ -172,7 +172,7 @@ Tensor linalg_triangular_solve_forward(
     const bool left,
     const bool upper,
     const bool unitriangular);
-std::tuple<Tensor, Tensor> linalg_triangular_solve_backward(
+std::tuple<Tensor, Tensor> linalg_solve_triangular_backward(
     const Tensor& grad,
     const Tensor& A,
     const Tensor& X,

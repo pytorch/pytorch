@@ -1602,6 +1602,13 @@ static std::tuple<Tensor&, Tensor&> triangular_solve_out_info(
     const Tensor& input,
     const Tensor& other,
     bool upper, bool transpose, bool unitriangular) {
+  TORCH_WARN_ONCE(
+    "torch.triangular_solve is deprecated in favor of torch.linalg.solve_triangular",
+    "and will be removed in a future PyTorch release.\n",
+    "torch.linalg.solve_triangular has its arguments reversed and does not return a copy of one of the inputs.\n",
+    "X = torch.triangular_solve(B, A).solution\n",
+    "should be replaced with\n",
+    "X = torch.linalg.solve_triangular(A, B)"
   // These internal asserts make explicit the assumptions in the implementation
   // Error check with the actual error messages are done on the higher level of
   // the hierarchy of calls
@@ -3868,9 +3875,9 @@ bool is_fortran_compatible_row_major_order(const Tensor& t) {
 }
 
 bool is_fortran_ready(const Tensor& t) {
-  return t.is_non_overlapping_and_dense() ||
-         is_fortran_compatible_row_major_order(t) ||
-         is_fortran_compatible_column_major_order(t);
+  return t.is_non_overlapping_and_dense() &&
+         (is_fortran_compatible_row_major_order(t) ||
+          is_fortran_compatible_column_major_order(t));
 }
 
 char trans_char(const bool contig, const bool conj) {
@@ -3880,21 +3887,21 @@ char trans_char(const bool contig, const bool conj) {
 
 /*
 Solves the matrix equation AX = B for A triangular.
+'left' If true solves AX = B, if false solves XA = B
 'upper' controls the portion of input matrix to consider in computations,
 'unitriangular' if true then we assume diag(A) to be ones
-'left' If true solves AX = B, if false solves XA = B
 'out' The tensor with the result. If A == out, A will be modified in place
 */
-Tensor& linalg_triangular_solve_out(
+Tensor& linalg_solve_triangular_out(
     const Tensor& A,
     const Tensor& B,
     bool left,
     bool upper,
     bool unitriangular,
     Tensor& out) {
-  checkInputsSolver(A, B, out, left, "solve_triangular");
+  checkInputsSolver(A, B, out, left, "linalg.solve_triangular");
   Tensor A_broad, B_broad;
-  std::tie(B_broad, A_broad) = _linalg_broadcast_batch_dims(B, A, "solve_triangular", /*check_errors*/ false);
+  std::tie(B_broad, A_broad) = _linalg_broadcast_batch_dims(B, A, "linalg.solve_triangular", /*check_errors*/ false);
 
   // We'll write F-contig / F-transpose for FORTRAN contiguous / FORTRAN transpose etc
   // At this point, A, B have been broadcasted but may or may not be F-ready
@@ -4029,14 +4036,14 @@ Tensor& linalg_triangular_solve_out(
   return out;
 }
 
-Tensor linalg_triangular_solve(
+Tensor linalg_solve_triangular(
     const Tensor& A,
     const Tensor& B,
     bool left,
     bool upper,
     bool unitriangular) {
   Tensor out = at::empty({0}, A.options());
-  linalg_triangular_solve_out(A, B, left, upper, unitriangular, out);
+  linalg_solve_triangular_out(A, B, left, upper, unitriangular, out);
   return out;
 }
 
