@@ -269,6 +269,6 @@ from torch._C._autograd import (DeviceType, ProfilerActivity, ProfilerState, Pro
 from torch._C._autograd import (_ProfilerResult, _KinetoEvent,
                                 _prepare_profiler, _enable_profiler, _disable_profiler)
 
-from torch._C._autograd import (_ThreadLocalState, _ThreadLocalStateGuard)
+from torch._C._autograd import (_ThreadLocalState, _ThreadLocalStateGuard, _init_kineto_TLS)
 
 from . import profiler

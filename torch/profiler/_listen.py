@@ -4,7 +4,7 @@ from werkzeug.routing import Map, Rule
 from werkzeug.exceptions import HTTPException
 from threading import Thread
 from .profiler import profile, tensorboard_trace_handler
-from torch.autograd import (_ThreadLocalState, _ThreadLocalStateGuard)
+from torch.autograd import (_ThreadLocalState, _ThreadLocalStateGuard, _init_kineto_TLS)
 
 
 class JSONRequest(Request, JSONMixin):
@@ -14,7 +14,7 @@ class JSONRequest(Request, JSONMixin):
 
 class HTTPServer(object):
 
-    def __init__(self, main_TLS: _ThreadLocalState):
+    def __init__(self, main_TLS):
         self.url_map = Map([
             Rule('/', endpoint='index'),
             Rule('/cmd/start', endpoint='start'),
@@ -61,6 +61,7 @@ class Listener(object):
         self.proc = None
         self.host = host
         self.port = port
+        _init_kineto_TLS()
         self.state = _ThreadLocalState(True)
     
     def open(self):

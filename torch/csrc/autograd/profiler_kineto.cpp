@@ -48,8 +48,8 @@ std::string dtypesToStr(const std::vector<std::string>& types);
 std::vector<std::string> inputTypes(const at::RecordFunction& fn);
 
 struct KinetoThreadLocalState : public ProfilerThreadLocalState {
-  explicit KinetoThreadLocalState(const ProfilerConfig& config)
-    : ProfilerThreadLocalState(config) {
+  explicit KinetoThreadLocalState(const ProfilerConfig& config, bool is_service = false, bool is_waiting = false)
+    : ProfilerThreadLocalState(config), is_service_(is_service), is_waiting_(is_waiting) {
     start_time_ = getTimeUs();
 #ifdef USE_KINETO
     cpu_trace = std::make_unique<libkineto::CpuTraceBuffer>();
@@ -59,6 +59,18 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
 #endif // USE_KINETO
   }
   ~KinetoThreadLocalState() override = default;
+
+  void resetState(const ProfilerConfig& config, bool is_waiting) {
+    start_time_ = getTimeUs();
+#ifdef USE_KINETO
+    cpu_trace = std::make_unique<libkineto::CpuTraceBuffer>();
+    cpu_trace->span.startTime = start_time_;
+    cpu_trace->gpuOpCount = -1;
+    cpu_trace->span.name = "PyTorch Profiler";
+#endif // USE_KINETO
+    config_ = config;
+    is_waiting_ = is_waiting;
+  }
 
   void reportClientActivity(
       const at::RecordFunction& fn,
@@ -248,6 +260,8 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
   }
 
   std::unique_ptr<libkineto::CpuTraceBuffer> cpu_trace;
+  const bool is_service_;
+  bool is_waiting_;
 #endif // USE_KINETO
   uint64_t start_time_;
   std::vector<KinetoEvent> kineto_events_;
@@ -286,7 +300,7 @@ void pushProfilingCallbacks() {
   auto handle = at::addThreadLocalCallback(at::RecordFunctionCallback(
       [](const at::RecordFunction& fn) -> std::unique_ptr<at::ObserverContext> {
         auto state_ptr = getProfilerTLSState();
-        if (!state_ptr) {
+        if (!state_ptr || state_ptr->is_waiting_) {
           return nullptr;
         }
         const auto& config = state_ptr->config();
@@ -347,7 +361,7 @@ void pushProfilingCallbacks() {
       },
       [](const at::RecordFunction& fn, at::ObserverContext* ctx_ptr) {
         auto state_ptr = getProfilerTLSState();
-        if (!state_ptr) {
+        if (!state_ptr || state_ptr->is_waiting_ || (state_ptr->is_service_ && !ctx_ptr)) {
           return;
         }
         const auto& config = state_ptr->config();
@@ -484,6 +498,14 @@ void prepareProfiler(
 #endif // USE_KINETO
 }
 
+void initThreadLocalState() {
+  auto state_ptr = getProfilerTLSState();
+  TORCH_CHECK(!state_ptr, "Profiler is already enabled on this thread");
+  auto state = std::make_shared<KinetoThreadLocalState>(ProfilerConfig(ProfilerState::Disabled), true, true);
+  c10::ThreadLocalDebugInfo::_push(c10::DebugInfoKind::PROFILER_STATE, state);
+  pushProfilingCallbacks();
+}
+
 void enableProfiler(
     const ProfilerConfig& config,
     const std::set<ActivityType>& activities) {
@@ -496,14 +518,20 @@ void enableProfiler(
     TORCH_CHECK(cudaStubs()->enabled(),
         "Can't use NVTX profiler - PyTorch was compiled without CUDA");
   }
-
+  
   auto state_ptr = getProfilerTLSState();
-  TORCH_CHECK(!state_ptr, "Profiler is already enabled on this thread");
-  auto state = std::make_shared<KinetoThreadLocalState>(config);
-  c10::ThreadLocalDebugInfo::_push(c10::DebugInfoKind::PROFILER_STATE, state);
+  if(state_ptr && state_ptr->is_service_) {
+    auto state = c10::ThreadLocalDebugInfo::_peek(c10::DebugInfoKind::PROFILER_STATE);
+    auto state_ptr = static_cast<KinetoThreadLocalState*>(state.get());
+    state_ptr->resetState(config, false);
+  } else {
+    TORCH_CHECK(!state_ptr, "Profiler is already enabled on this thread");
+    auto state = std::make_shared<KinetoThreadLocalState>(config);
+    c10::ThreadLocalDebugInfo::_push(c10::DebugInfoKind::PROFILER_STATE, state);
 
-  if (activities.count(ActivityType::CPU) || config.state == ProfilerState::NVTX) {
-    pushProfilingCallbacks();
+    if (activities.count(ActivityType::CPU) || config.state == ProfilerState::NVTX) {
+      pushProfilingCallbacks();
+    }
   }
 
 #ifdef USE_KINETO
@@ -515,9 +543,10 @@ void enableProfiler(
 
 std::unique_ptr<ProfilerResult> disableProfiler() {
   // all the DebugInfoBase objects are scope based and supposed to use DebugInfoGuard
-  auto state = c10::ThreadLocalDebugInfo::_pop(c10::DebugInfoKind::PROFILER_STATE);
-
+  auto state = c10::ThreadLocalDebugInfo::_peek(c10::DebugInfoKind::PROFILER_STATE);
   auto state_ptr = static_cast<KinetoThreadLocalState*>(state.get());
+  if(!state_ptr->is_service_) c10::ThreadLocalDebugInfo::_pop(c10::DebugInfoKind::PROFILER_STATE);
+
   const auto& config = state_ptr->config();
   TORCH_CHECK(state_ptr && (
       config.state == ProfilerState::KINETO ||
@@ -525,30 +554,34 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
       config.state == ProfilerState::NVTX),
       "Can't disable Kineto profiler when it's not running");
 
-  if (state_ptr->hasCallbackHandle()) {
+  if (!state_ptr->is_service_ && state_ptr->hasCallbackHandle()) {
     at::removeCallback(state_ptr->callbackHandle());
   }
 
+  std::unique_ptr<ProfilerResult> result;
   if (state_ptr->config().state == ProfilerState::NVTX) {
-    return std::make_unique<ProfilerResult>();
+    result = std::make_unique<ProfilerResult>();
+  } else {
+#ifdef USE_KINETO
+    state_ptr->cpu_trace->span.endTime = getTimeUs();
+    state_ptr->finalizeCPUTrace();
+    libkineto::api().activityProfiler().transferCpuTrace(std::move(state_ptr->cpu_trace));
+
+    auto trace = libkineto::api().activityProfiler().stopTrace();
+    TORCH_CHECK(trace);
+    state_ptr->addTraceEvents(*trace);
+    result = std::make_unique<ProfilerResult>(
+        state_ptr->start_time_,
+        std::move(state_ptr->kineto_events_),
+        std::move(trace));
+#else
+    result = std::make_unique<ProfilerResult>(
+        std::move(state_ptr->kineto_events_));
+#endif // USE_KINETO
   }
 
-#ifdef USE_KINETO
-  state_ptr->cpu_trace->span.endTime = getTimeUs();
-  state_ptr->finalizeCPUTrace();
-  libkineto::api().activityProfiler().transferCpuTrace(std::move(state_ptr->cpu_trace));
-
-  auto trace = libkineto::api().activityProfiler().stopTrace();
-  TORCH_CHECK(trace);
-  state_ptr->addTraceEvents(*trace);
-  return std::make_unique<ProfilerResult>(
-      state_ptr->start_time_,
-      std::move(state_ptr->kineto_events_),
-      std::move(trace));
-#else
-  return std::make_unique<ProfilerResult>(
-      std::move(state_ptr->kineto_events_));
-#endif // USE_KINETO
+  if(state_ptr->is_service_) state_ptr->resetState(ProfilerConfig(ProfilerState::Disabled), false);
+  return result;
 }
 
 void addMetadataJson(const std::string& key, const std::string& value) {
