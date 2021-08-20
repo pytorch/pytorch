@@ -4,6 +4,7 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/jit_log.h>
+#include <algorithm>
 
 namespace torch {
 namespace jit {
@@ -193,13 +194,14 @@ struct PeepholeOptimizeNonTensorImpl {
           node->output()->replaceAllUsesWith(node->input());
           changed = true;
         }
-      } else if (node->kind() == aten::Int) {
-        if (node->input()->type()->cast<IntType>()) {
-          GRAPH_UPDATE(
-              "Removing ", getHeader(node), " as input is already an integer");
-          node->output()->replaceAllUsesWith(node->input());
-          changed = true;
-        }
+      } else if (
+          (node->kind() == aten::Int || node->kind() == aten::ceil) &&
+          node->inputs().size() == 1 &&
+          node->input()->type()->cast<IntType>()) {
+        GRAPH_UPDATE(
+            "Removing ", getHeader(node), " as input is already an integer");
+        node->output()->replaceAllUsesWith(node->input());
+        changed = true;
       } else if (node->kind() == aten::ne || node->kind() == aten::eq) {
         if (node->inputs().size() != 2 ||
             node->inputs().at(0) != node->inputs().at(1)) {
