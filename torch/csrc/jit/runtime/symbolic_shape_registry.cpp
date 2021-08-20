@@ -374,12 +374,12 @@ const std::string shape_compute_functions =
 
         def arange_end(end: number, inp0: Any, inp1: Any, inp2: Any, inp3: Any):
           assert end >= 0
-          return [int(end)]
+          return [int(torch.ceil(end))]
 
         def arange_start(start: number, end: number, inp0: Any, inp1: Any, inp2: Any, inp3: Any):
           assert end >= 0
           assert end >= start
-          return torch.ceil(start - end)
+          return [int(torch.ceil(end - start))]
 
         def arange_start_step(start: number, end: number, step: number, inp0: Any, inp1: Any, inp2: Any, inp3: Any):
           assert step != 0
@@ -387,7 +387,7 @@ const std::string shape_compute_functions =
             assert start >= end
           else:
             assert end >= start
-          return int(torch.ceil((end - start) / step))
+          return [int(torch.ceil((end - start) / step))]
 
         def permute(input: List[int], dims: List[int]):
           assert len(input) == len(dims)
