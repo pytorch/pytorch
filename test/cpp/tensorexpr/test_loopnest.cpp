@@ -380,7 +380,7 @@ TEST(LoopNest, ExprSliceTail) {
   LoopNest::sliceTail(loops[0], 4, &head, &tail);
 
   ASSERT_NE(head, nullptr);
-  ASSERT_NE(head, loops[0]);
+  ASSERT_EQ(head, loops[0]);
   ASSERT_NE(tail, nullptr);
   ASSERT_NE(tail, loops[0]);
 
