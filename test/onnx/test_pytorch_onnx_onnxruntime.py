@@ -5722,6 +5722,27 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.randint(10, (5, ))
         self.run_test(MatmulModel(), (x, y))
 
+    @skipIfUnsupportedMinOpsetVersion(9)  # MatMul long inputs is added in ONNX opset 9.
+    def test_dot(self):
+        class MatmulModel(torch.nn.Module):
+            def forward(self, input, other):
+                return torch.dot(input, other)
+
+        x = torch.randn(5, requires_grad=True)
+        y = torch.randn(5, requires_grad=True)
+        self.run_test(MatmulModel(), (x, y))
+
+        x = torch.randint(10, (5, ))
+        y = torch.randint(10, (5, ))
+        self.run_test(MatmulModel(), (x, y))
+
+    @disableScriptTest()  # SpectralNorm not TorchScript compatible.
+    def test_spectral_norm(self):
+        m = torch.nn.utils.spectral_norm(torch.nn.Linear(2, 4))
+
+        x = torch.randn(6, 2)
+        self.run_test(m, (x, ))
+
     def test_prelu(self):
         class PReluModel(torch.nn.Module):
             def __init__(self):
