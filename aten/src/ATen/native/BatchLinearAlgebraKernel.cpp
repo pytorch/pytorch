@@ -812,10 +812,11 @@ void apply_triangular_solve(Tensor& A, Tensor& B, bool left, bool upper, char tr
   auto A_mat_stride = matrixStride(A);
   auto B_mat_stride = matrixStride(B);
   auto batch_size = batchCount(A);
-  auto m = B.size(-2);
+  // This allows to pass rectangular A and B when left = True
+  auto m = left ? A.size(-1) : B.size(-2);
   auto n = B.size(-1);
-  auto lda = std::max<int64_t>(1, left ? m : n);
-  auto ldb = std::max<int64_t>(1, m);
+  auto lda = std::max<int64_t>(1, A.size(-2));
+  auto ldb = std::max<int64_t>(1, B.size(-2));
 
   for (const auto i : c10::irange(batch_size)) {
     scalar_t* A_working_ptr = &A_data[i * A_mat_stride];
