@@ -118,7 +118,7 @@ static inline bool miopen_conv_use_channels_last(const at::Tensor& input, const 
   auto input_memory_format = input.suggest_memory_format();
   auto weight_memory_format = weight.suggest_memory_format();
 
-  bool can_use_miopen_channels_last_2d = (ROCM_VERSION >= 40300) && (
+  bool can_use_miopen_channels_last_2d = (TORCH_HIP_VERSION >= 40300) && (
     (input_memory_format  == at::MemoryFormat::ChannelsLast) ||
     (weight_memory_format == at::MemoryFormat::ChannelsLast)
   );
