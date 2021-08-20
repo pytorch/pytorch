@@ -859,6 +859,7 @@ def sample_inputs_tensor_split(op_info, device, dtype, requires_grad, **kwargs):
         (torch.tensor([1, 2, 3]),),
         (torch.tensor(1),),
         (torch.tensor([1, 2, 3]), 1),
+        (torch.tensor([1, 4, 2, 5, 3, 6])[::2], 1),
         # Cases with list of indices.
         ((2, 4),),
         ((2, 4), 1),
@@ -1376,14 +1377,24 @@ def sample_inputs_bmm(self, device, dtype, requires_grad, **kwargs):
     )
 
 def sample_inputs_dot_vdot(self, device, dtype, requires_grad, **kwargs):
-    return (
-        SampleInput(
+    sample_inputs = []
+    sample_inputs.append(SampleInput(
+        make_tensor((S, ), device, dtype, low=None, high=None, requires_grad=requires_grad),
+        args=(
+            make_tensor((S, ), device, dtype, low=None, high=None, requires_grad=requires_grad),
+        )
+    ))
+    if dtype.is_complex:
+        # dot/vdot for (conj(input), conj(arg_tensor)) and (conj(input), arg_tensor)
+        # is tested in test_conj_view (which tests operations with only conjugated input tensor
+        # -- not conjugated arg tensors)
+        sample_inputs.append(SampleInput(
             make_tensor((S, ), device, dtype, low=None, high=None, requires_grad=requires_grad),
             args=(
-                make_tensor((S, ), device, dtype, low=None, high=None, requires_grad=requires_grad),
+                torch.conj(make_tensor((S, ), device, dtype, low=None, high=None, requires_grad=requires_grad)),
             )
-        ),
-    )
+        ))
+    return sample_inputs
 
 def sample_inputs_addmv(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
@@ -4987,6 +4998,22 @@ def sample_inputs_softplus(op_info, device, dtype, requires_grad, **kwargs):
         SampleInput(make_input(low=1), kwargs=dict(threshold=1)),
     ]
 
+def sample_inputs_tensorinv(op_info, device, dtype, requires_grad, **kwargs):
+    def make_input():
+        input = make_fullrank_matrices_with_distinct_singular_values(12, 12, device=device, dtype=dtype)
+        return input.requires_grad_(requires_grad)
+
+    # lhs / rhs shape can have any number of dimensions as long as their product equals 12
+    shapes = [
+        ((2, 2, 3), (12, 1)),
+        ((4, 3), (6, 1, 2)),
+    ]
+
+    return [
+        SampleInput(make_input().reshape(*shape_lhs, *shape_rhs), kwargs=dict(ind=len(shape_lhs)))
+        for shape_lhs, shape_rhs in shapes
+    ]
+
 def sample_inputs_mse_loss(op_info, device, dtype, requires_grad, **kwargs):
     _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -7574,6 +7601,7 @@ op_db: List[OpInfo] = [
                                 active_if=(IS_MACOS or IS_WINDOWS)),
                    )),
     OpInfo('tensor_split',
+           ref=np.array_split,
            dtypes=all_types_and_complex_and(torch.bool),
            dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
@@ -8673,6 +8701,19 @@ op_db: List[OpInfo] = [
                 dtypes=(torch.float32,),
             ),
         ),
+    ),
+    OpInfo(
+        "linalg.tensorinv",
+        ref=np.linalg.tensorinv,
+        dtypes=floating_and_complex_types(),
+        skips=(
+            # RuntimeError: aliasOp != torch::jit::getOperatorAliasMap().end()
+            # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":159,
+            # please report a bug to PyTorch.
+            SkipInfo('TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
+        ),
+        sample_inputs_func=sample_inputs_tensorinv,
+        supports_forward_ad=True,
     ),
     OpInfo(
         "nn.functional.mse_loss",
