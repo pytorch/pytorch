@@ -2538,32 +2538,39 @@ static void pruneByThreadCount(std::vector<ForPtr>& loops) {
 template <typename Bufs>
 static void parallelizeOuterLoops(LoopNest& l, Bufs&& bufs) {
   for (auto const& buf : bufs) {
-    auto loops = l.getLoopStmtsFor(buf);
-    pruneByGrainSize(loops);
-    pruneByThreadCount(loops);
+    GRAPH_DEBUG("buf: ", *buf);
+    for (auto const& write : l.getAllWritesToBuf(buf)) {
+      GRAPH_DEBUG("write: ", *write);
+      auto loops = LoopNest::getEnclosingLoopNest(write);
+      for (auto const& loop : loops) {
+        GRAPH_DEBUG("loop: ", *loop);
+      }
+      pruneByGrainSize(loops);
+      pruneByThreadCount(loops);
 
-    // There are no loops to parallelize; give up.
-    if (loops.size() == 0) {
-      continue;
-    }
-    // The loop nest contains a reduction; give up.
-    auto reductions = NodeFinder<ReduceOp>::find(loops[0]);
-    if (reductions.size() > 0) {
-      continue;
-    }
-    // The loop nest has loop carried dependences; give up.
-    if (LoopNest::hasLoopCarriedDependence(loops[0])) {
-      continue;
-    }
-    // Try to flatten the outer loops and parallelize them if successful.
-    ForPtr flattened = nullptr;
-    if (loops.size() == 1) {
-      flattened = loops[0];
-    } else {
-      LoopNest::flatten(loops, &flattened);
-    }
-    if (flattened) {
-      flattened->set_parallel();
+      // There are no loops to parallelize; give up.
+      if (loops.size() == 0) {
+        continue;
+      }
+      // The loop nest contains a reduction; give up.
+      auto reductions = NodeFinder<ReduceOp>::find(loops[0]);
+      if (reductions.size() > 0) {
+        continue;
+      }
+      // The loop nest has loop carried dependences; give up.
+      if (LoopNest::hasLoopCarriedDependence(loops[0])) {
+        continue;
+      }
+      // Try to flatten the outer loops and parallelize them if successful.
+      ForPtr flattened = nullptr;
+      if (loops.size() == 1) {
+        flattened = loops[0];
+      } else {
+        LoopNest::flatten(loops, &flattened);
+      }
+      if (flattened) {
+        flattened->set_parallel();
+      }
     }
   }
 }
