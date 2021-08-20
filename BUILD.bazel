@@ -122,6 +122,7 @@ genrule(
     name = "generated_cpp",
     srcs = [
         "aten/src/ATen/native/native_functions.yaml",
+        "torch/pyops/__init__.py",
     ] + glob(["aten/src/ATen/templates/**"]),
     outs = [
         "aten/src/ATen/Declarations.yaml",

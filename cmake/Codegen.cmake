@@ -241,6 +241,7 @@ if(INTERN_BUILD_ATEN_OPS)
     COMMAND ${GEN_COMMAND}
     DEPENDS ${all_python} ${all_templates}
       ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/native_functions.yaml
+      ${CMAKE_CURRENT_LIST_DIR}/../torch/pyops/__init__.py
     WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/..
     )
 

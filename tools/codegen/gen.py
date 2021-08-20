@@ -34,6 +34,7 @@ from tools.codegen.context import (method_with_native_function,
                                    with_native_function_and_indices,
                                    with_native_function)
 import tools.codegen.dest as dest
+from torch.pyops import write_pyops_cpp, gen_pyops_functions
 
 T = TypeVar('T')
 
@@ -94,6 +95,11 @@ def parse_native_yaml(path: str) -> ParsedYaml:
                 func, m = NativeFunction.from_yaml(e, loc)
                 rs.append(func)
                 BackendIndex.grow_index(bs, m)
+        # Adds functions defined by PyOps
+        generated = gen_pyops_functions(rs, bs)
+        for nf, m in generated:
+            rs.append(nf)
+            BackendIndex.grow_index(bs, m)
         error_check_native_functions(rs)
         # Default dict is to prevent the codegen from barfing when we have a dispatch key that has no kernels yet.
         indices: Dict[DispatchKey, BackendIndex] = defaultdict(lambda: BackendIndex(
@@ -1018,6 +1024,10 @@ def main() -> None:
         options.op_registration_whitelist,
         options.op_selection_yaml_path,
     )
+
+    # Writes operators defined in Python to PyOps.cpp
+    pyops_path = os.path.join(options.source_path, 'native/PyOps.cpp')
+    write_pyops_cpp(pyops_path)
 
     native_yaml_path = os.path.join(options.source_path, 'native/native_functions.yaml')
     parsed_yaml = parse_native_yaml(native_yaml_path)

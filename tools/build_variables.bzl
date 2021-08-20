@@ -1076,6 +1076,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/TensorIteratorReduce.cpp",
     "aten/src/ATen/native/TensorProperties.cpp",
     "aten/src/ATen/native/TensorShape.cpp",
+    "aten/src/ATen/native/PyOps.cpp",
     "aten/src/ATen/native/TensorTransformations.cpp",
     "aten/src/ATen/native/TestOps.cpp",
     "aten/src/ATen/native/TriangularOps.cpp",
