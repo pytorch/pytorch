@@ -2,6 +2,7 @@
 
 #include <iostream>
 
+#include <torch/csrc/jit/tensorexpr/fwd_decls.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/ir_visitor.h>
 #include <torch/csrc/jit/tensorexpr/unique_name_manager.h>
@@ -19,46 +20,46 @@ class TORCH_API IRPrinter : public IRVisitor {
   void print(ExprHandle);
   void print(Expr&);
   void print(Stmt&);
-  void visit(Add* v) override;
-  void visit(Sub* v) override;
-  void visit(Mul* v) override;
-  void visit(Div* v) override;
-  void visit(Mod* v) override;
-  void visit(Max* v) override;
-  void visit(Min* v) override;
-  void visit(And* v) override;
-  void visit(Or* v) override;
-  void visit(Xor* v) override;
-  void visit(Lshift* v) override;
-  void visit(Rshift* v) override;
-  void visit(CompareSelect* v) override;
-#define IMM_PRINT_VISIT(Type, Name) void visit(Name##Imm* v) override;
+  void visit(AddPtr v) override;
+  void visit(SubPtr v) override;
+  void visit(MulPtr v) override;
+  void visit(DivPtr v) override;
+  void visit(ModPtr v) override;
+  void visit(MaxPtr v) override;
+  void visit(MinPtr v) override;
+  void visit(AndPtr v) override;
+  void visit(OrPtr v) override;
+  void visit(XorPtr v) override;
+  void visit(LshiftPtr v) override;
+  void visit(RshiftPtr v) override;
+  void visit(CompareSelectPtr v) override;
+#define IMM_PRINT_VISIT(Type, Name) void visit(Name##ImmPtr v) override;
   AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_PRINT_VISIT);
 #undef IMM_PRINT_VISIT
-  void visit(Cast* v) override;
-  void visit(Var* v) override;
-  void visit(Ramp* v) override;
-  void visit(Load* v) override;
-  void visit(Broadcast* v) override;
-  void visit(IfThenElse* v) override;
-  void visit(Intrinsics* v) override;
-  void visit(Term* v) override;
-  void visit(Polynomial* v) override;
-  void visit(RoundOff* v) override;
-  void visit(MaxTerm* v) override;
-  void visit(MinTerm* v) override;
-  void visit(ReduceOp* v) override;
+  void visit(CastPtr v) override;
+  void visit(VarPtr v) override;
+  void visit(RampPtr v) override;
+  void visit(LoadPtr v) override;
+  void visit(BroadcastPtr v) override;
+  void visit(IfThenElsePtr v) override;
+  void visit(IntrinsicsPtr v) override;
+  void visit(TermPtr v) override;
+  void visit(PolynomialPtr v) override;
+  void visit(RoundOffPtr v) override;
+  void visit(MaxTermPtr v) override;
+  void visit(MinTermPtr v) override;
+  void visit(ReduceOpPtr v) override;
 
-  void visit(AtomicAdd* v) override;
-  void visit(SyncThreads* v) override;
-  void visit(ExternalCall* v) override;
-  void visit(Store* v) override;
-  void visit(For* v) override;
-  void visit(Cond* v) override;
-  void visit(Block* v) override;
-  void visit(Allocate* v) override;
-  void visit(Free* v) override;
-  void visit(Let* v) override;
+  void visit(AtomicAddPtr v) override;
+  void visit(SyncThreadsPtr v) override;
+  void visit(ExternalCallPtr v) override;
+  void visit(StorePtr v) override;
+  void visit(ForPtr v) override;
+  void visit(CondPtr v) override;
+  void visit(BlockPtr v) override;
+  void visit(AllocatePtr v) override;
+  void visit(FreePtr v) override;
+  void visit(LetPtr v) override;
 
   // A child class may have a difference rule for generating dtype
   // string, e.g. CUDA needs int64_t to be generated as long long.
@@ -100,8 +101,8 @@ TORCH_API std::ostream& operator<<(std::ostream& stream, const ExprHandle&);
 TORCH_API std::ostream& operator<<(std::ostream& stream, const Stmt&);
 TORCH_API std::ostream& operator<<(std::ostream& stream, const Tensor&);
 
-TORCH_API void print(const Expr* expr);
-TORCH_API void print(const Stmt* stmt);
+TORCH_API void print(ExprPtr expr);
+TORCH_API void print(StmtPtr stmt);
 TORCH_API void print(const Tensor* t);
 
 } // namespace tensorexpr
@@ -111,10 +112,12 @@ TORCH_API void print(const Tensor* t);
 namespace std {
 
 using torch::jit::tensorexpr::Expr;
+using torch::jit::tensorexpr::ExprPtr;
 using torch::jit::tensorexpr::Stmt;
+using torch::jit::tensorexpr::StmtPtr;
 using torch::jit::tensorexpr::Tensor;
 
-TORCH_API std::string to_string(const Expr* expr);
-TORCH_API std::string to_string(const Stmt* stmt);
+TORCH_API std::string to_string(ExprPtr expr);
+TORCH_API std::string to_string(StmtPtr stmt);
 TORCH_API std::string to_string(const Tensor* t);
 } // namespace std
