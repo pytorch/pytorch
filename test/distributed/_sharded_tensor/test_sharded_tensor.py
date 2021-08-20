@@ -23,6 +23,7 @@ from torch.testing._internal.common_distributed import (
 )
 from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
+    run_tests,
 )
 
 if TEST_WITH_DEV_DBG_ASAN:
@@ -1440,3 +1441,6 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase, MultiProcessTestCa
 
         with self.assertRaisesRegex(ValueError, "does not match tensor volume"):
             sharded_tensor = _sharded_tensor.init_from_local_shards(local_shards, sharded_tensor_metadata, init_rrefs=True)
+
+if __name__ == '__main__':
+    run_tests()

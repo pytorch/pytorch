@@ -162,6 +162,7 @@ def add(*, input, other):
     return input + other
 
 
+@register_acc_op_mapping(op_and_target=("call_method", "unsqueeze"))
 @register_acc_op_mapping(op_and_target=("call_function", torch.unsqueeze))
 @register_acc_op
 def unsqueeze(*, input, dim):
@@ -220,6 +221,12 @@ def transpose(*, input, dim0, dim1):
     if input.dim() < 2:
         return input
     return torch.transpose(**locals())
+
+
+@register_acc_op_mapping(op_and_target=("call_method", "contiguous"))
+@register_acc_op
+def contiguous(*, input):
+    return input.contiguous()
 
 
 @register_acc_op_mapping(op_and_target=("call_function", torch.nn.functional.softmax))
@@ -462,10 +469,12 @@ def quantize_per_tensor(*, input, acc_out_ty=None):
     )
 
 
-@register_acc_op_mapping(op_and_target=("call_function", torch.dequantize))
-@register_acc_op_mapping(op_and_target=("call_method", "dequantize"))
 @register_acc_op
-def dequantize(*, input):
+def dequantize(*, input, input_tensor_meta):
+    """ `input_tensor_meta` contains extra argument of quantization
+    parameters, e.g. scale/zero_point and will be using for
+    lowring dequantize op to TensorRT
+    """
     return torch.dequantize(input)
 
 
@@ -871,6 +880,15 @@ def slice_tensor(*, input, dims, starts, stops, steps):
         ("length", "length"),
     ],
 )
+@register_custom_acc_mapper_fn(
+    op_and_target=("call_method", "narrow"),
+    arg_replacement_tuples=[
+        ("input", "input"),
+        ("dim", "dim"),
+        ("start", "start"),
+        ("length", "length"),
+    ],
+)
 def custom_narrow_mapper(node: torch.fx.Node, mod: nn.Module) -> torch.fx.Node:
     kwargs = {
         "input": node.kwargs["input"],
@@ -1174,3 +1192,27 @@ def packed_quantized_convrelu2d_mapper(
         )
         relu_node.meta = node.meta
         return relu_node
+
+@register_custom_acc_mapper_fn(
+    op_and_target=("call_function", torch.dequantize),
+    arg_replacement_tuples=[
+        ("input", "input")
+    ]
+)
+@register_custom_acc_mapper_fn(
+    op_and_target=("call_method", "dequantize"),
+    arg_replacement_tuples=[
+        ("input", "input")
+    ]
+)
+def custom_dequantize_mapper(node: torch.fx.Node, mod: nn.Module) -> torch.fx.Node:
+    assert "tensor_meta" in node.kwargs["input"].meta
+    new_kwargs = {"input": node.kwargs["input"], "input_tensor_meta": node.kwargs["input"].meta["tensor_meta"]}
+    # `input_tensor_meta` contains quantization parameters that can be used to lower
+    # acc_ops.dequantize to TensorRT ops
+    with node.graph.inserting_before(node):
+        new_node = node.graph.create_node(
+            "call_function", dequantize, kwargs=new_kwargs, name=node.name
+        )
+        new_node.meta = node.meta
+        return new_node
