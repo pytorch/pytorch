@@ -286,6 +286,18 @@ const auto to_script_4 = R"JIT(
       return (c)
 )JIT";
 
+const auto detach_script_0 = R"JIT(
+  def forward(self, input: Tensor):
+      a = input.detach()
+      return input is a
+)JIT";
+
+const auto detach_script_1 = R"JIT(
+  def forward(self, input: Tensor):
+      a = input.detach()
+      return a.clone()
+)JIT";
+
 const std::string embedding_bag_default = R"JIT(
   def forward(self, a: Tensor, b: Tensor, c: Tensor):
       return torch.embedding_bag(a, b, c)
