@@ -66,8 +66,8 @@ struct MathOpFallback {
           auto& ivalue = (*stack)[stack_start + i];
           //TODO: add a table listing all possible cases and clearly state what works/is allowed
           if (ivalue.isTensor()) {
-            auto mut_arg_tensor = ivalue.toTensor();
-            if (mut_arg_tensor.is_conj()) {
+            const auto& mut_arg_tensor = ivalue.toTensor();
+            if (is_bit_set(mut_arg_tensor)) {
               check_for_alias_with_mut_arg = true;
               mutable_inputs.emplace_back(mut_arg_tensor);
             }
