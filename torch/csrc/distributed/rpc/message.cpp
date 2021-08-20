@@ -72,13 +72,13 @@ std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> Message::getStorages()
   // contains two tensors indices and values, and both contain storage.
   std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> storages;
   auto numStorages = tensors_.size();
-  for (const at::Tensor& tensor : tensors_) {
+  for (const auto& tensor : tensors_) {
     if (tensor.is_sparse()) {
       ++numStorages;
     }
   }
   storages.reserve(numStorages);
-  for (const at::Tensor& tensor : tensors_) {
+  for (const auto& tensor : tensors_) {
     if (tensor.is_sparse()) {
       storages.emplace_back(tensor._indices().storage().getWeakStorageImpl());
       storages.emplace_back(tensor._values().storage().getWeakStorageImpl());

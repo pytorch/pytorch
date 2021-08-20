@@ -650,6 +650,52 @@ class FooBackendOptions(rpc.RpcBackendOptions):
 load_tests = load_tests
 
 
+class MyEmbeddingBagModel(torch.nn.Module):
+    def __init__(self, sparse):
+        super().__init__()
+        self.eb = torch.nn.EmbeddingBag(
+            10,
+            10,
+            sparse=sparse
+        )
+
+    def forward(self, x):
+        return self.eb(x)
+
+
+class MyParameterServer:
+    def __init__(self, trainers):
+        self.lock = Lock()
+        self.trainers = trainers
+        self.updates = 0
+        self.futures = []
+        self.total = None
+        self.gradient = None
+
+    @staticmethod
+    def get_gradient(rref):
+        return rref.local_value().gradient
+
+    @staticmethod
+    @rpc.functions.async_execution
+    def average(rref, tensor):
+        self = rref.local_value()
+        fut = torch.futures.Future()
+        with self.lock:
+            self.futures.append(fut)
+            if self.total is None:
+                self.total = tensor
+            else:
+                self.total += tensor
+            self.updates += 1
+            if self.trainers == self.updates:
+                self.gradient = self.total / float(self.trainers)
+                for fut in self.futures:
+                    result = self.total / float(self.trainers)
+                    fut.set_result(result)
+        return fut
+
+
 class RpcTest(RpcAgentTestFixture):
     @dist_init
     def test_worker_id(self):
@@ -1210,6 +1256,20 @@ class RpcTest(RpcAgentTestFixture):
     @dist_init
     def test_multi_rpc_sparse(self):
         self._multi_rpc(True)
+
+    @dist_init
+    def test_future_wait_twice(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        futs = []
+        for i in range(20):
+            futs.append(rpc.rpc_async(dst, raise_func))
+
+        with self.assertRaisesRegex(ValueError, "Expected error"):
+            torch.futures.wait_all(futs)
+
+        for fut in futs:
+            with self.assertRaisesRegex(ValueError, "Expected error"):
+                fut.wait()
 
     def _run_uneven_workload(self, f, x, num_repeat=30):
         # worker0 drives and waits for worker1 and worker2
@@ -3582,7 +3642,7 @@ class RpcTest(RpcAgentTestFixture):
             # Ensure that we have the attribute on this module. Otherwise, the test could fail due to a caller-side pickling error.
             self.assertTrue(hasattr(this_module, "foo_add"))
             with self.assertRaisesRegex(
-                AttributeError, "RPC pickler does not serialize"
+                RuntimeError, "RPC pickler does not serialize"
             ):
                 rpc.rpc_sync(callee_worker, foo_add, args=())
 
@@ -4460,46 +4520,17 @@ class RpcTest(RpcAgentTestFixture):
 
         dist.barrier()
 
-    class VanillaPs:
-        def __init__(self, trainers):
-            self.lock = Lock()
-            self.trainers = trainers
-            self.updates = 0
-            self.futures = []
-            self.total = None
-
-        @staticmethod
-        @rpc.functions.async_execution
-        def average(rref, tensor):
-            self = rref.local_value()
-            fut = torch.futures.Future()
-            with self.lock:
-                self.futures.append(fut)
-                if self.total is None:
-                    self.total = tensor
-                else:
-                    self.total += tensor
-                self.updates += 1
-                if self.trainers == self.updates:
-                    for fut in self.futures:
-                        result = self.total / self.trainers
-                        fut.set_result(result)
-            return fut
-
-    def _trainer_func(self, rref, tensor):
-        fut = rref.rpc_async().average(*[rref, tensor])
+    def _trainer_func(self, rref, sparse):
+        m = MyEmbeddingBagModel(sparse=sparse)
+        loss_fn = nn.MSELoss()
+        outputs = m(torch.rand(10, 10).long())
+        loss_fn(outputs, torch.rand(10, 10)).backward()
+        gradient = list(m.parameters())[0].grad
+        fut = rref.rpc_async().average(rref, gradient)
         return fut.wait()
 
-    def _vanilla_ps(self, tensor):
-        # create rref on self
-        rref_self = rpc.remote(
-            worker_name(self.rank),
-            self.VanillaPs,
-            args=(self.world_size - 1,))
-        if tensor.is_sparse:
-            expected_value = build_sparse_tensor().to_dense().double()
-        else:
-            expected_value = torch.ones(3, 3)
+    def _my_parameter_server(self, sparse):
+        ps_rref = RRef(MyParameterServer(self.world_size - 1))
         futures = []
         for index in range(1, self.world_size):
             futures.append(
@@ -4507,24 +4538,33 @@ class RpcTest(RpcAgentTestFixture):
                     worker_name((self.rank + index) % self.world_size),
                     self._trainer_func,
                     args=(
-                        rref_self,
-                        tensor,
+                        ps_rref,
+                        sparse
                     ),
                 )
             )
+        trainer_gradient = None
         for fut in futures:
             result = fut.wait()
             if result.is_sparse:
                 result = result.to_dense().double()
-            self.assertTrue(torch.equal(expected_value, result))
+            if trainer_gradient is None:
+                trainer_gradient = result
+            else:
+                self.assertTrue(torch.equal(trainer_gradient, result))
+        ps_gradient = ps_rref.rpc_sync().get_gradient(ps_rref)
+        if ps_gradient.is_sparse:
+            ps_gradient = ps_gradient.to_dense().double()
+        self.assertTrue(torch.equal(trainer_gradient, ps_gradient))
 
     @dist_init
-    def test_vanilla_ps(self):
-        self._vanilla_ps(torch.ones(3, 3))
+    def test_my_parameter_server(self):
+        self._my_parameter_server(False)
 
     @dist_init
-    def test_vanilla_ps_sparse(self):
-        self._vanilla_ps(build_sparse_tensor())
+    def test_my_parameter_server_sparse(self):
+        self._my_parameter_server(True)
+
 
 class CudaRpcTest(RpcAgentTestFixture):
 
