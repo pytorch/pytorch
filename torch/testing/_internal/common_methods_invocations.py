@@ -2460,10 +2460,10 @@ def sample_inputs_maxpool2d(op_info, device, dtype, requires_grad, **kwargs):
         (((2, 3, 9, 9), (4, 4), (2, 2), (2, 1), 1), {'return_indices': False, 'ceil_mode': True}),
         (((1, 3, 3, 3), 2, 1, 1, 1), {'return_indices': True, 'ceil_mode': False}),
         (((4, 2, 5, 5), 3, 1, 1, 1), {'return_indices': True, 'ceil_mode': True}),
-        (((1, 1, 9, 9),), {'kernel_size': 1, 'stride': (3, 1), 'padding': 0, 'dilation':1,
-                        'return_indices': True, 'ceil_mode': True}),
-        (((1, 3, 25, 25),), {'kernel_size': (1, 4), 'stride': 1, 'padding': 0, 'dilation':3,
-                        'return_indices': False, 'ceil_mode': False})
+        (((1, 1, 9, 9),), {'kernel_size': 1, 'stride': (3, 1), 'padding': 0, 'dilation': 1,
+                           'return_indices': True, 'ceil_mode': True}),
+        (((1, 3, 25, 25),), {'kernel_size': (1, 4), 'stride': 1, 'padding': 0, 'dilation': 3,
+                             'return_indices': False, 'ceil_mode': False})
     )
 
     def generator():
