@@ -60,15 +60,6 @@ class TestSymbolicShapeAnalysis(JitTestCase):
         self.assertEqual(output_shape[1], sym2)
         self.assertEqual(output_shape[2], sym3)
 
-    def test_sharing_of_list_len(self):
-        @torch.jit.script
-        def foo(x, out: List[int]):
-            return torch.nn.functional.adaptive_avg_pool2d(x, out)
-
-        self.run_pass("inline", foo.graph)
-        torch._C._jit_pass_propagate_shapes_on_graph(foo.graph)
-        FileCheck().check("Tensor(*, *)").check_same("adaptive_avg_pool2d").run(foo.graph)
-
     def test_shared_shape_graph(self):
         @torch.jit.script
         def foo(x, y):
@@ -116,3 +107,24 @@ class TestSymbolicShapeAnalysis(JitTestCase):
             inputs[1].setType(inputs[1].type().with_sizes(size_2))
             torch._C._jit_pass_propagate_shapes_on_graph(t.graph)
             self.assertEqual(next(t.graph.outputs()).type().symbolic_sizes(), [4, 4, 8])
+
+    def test_adaptive_avg_pool2d(self):
+        inps = [
+            [(1, 64, 8, 9), (5, 7)],
+            [(1, 64, 10, 9), (7)],
+            [(1, 64, 10, 9), (5, None)],
+            [(1, 8, 4, 3), (None, None)],
+            [(1, 8, 4, 3), (None, 5)],
+        ]
+
+        for inp in inps:
+            t = torch.randn(*inp[0])
+            out_size = torch.nn.functional.adaptive_avg_pool2d(t, inp[1]).size()
+            x = lambda : torch.nn.functional.adaptive_avg_pool2d(t, inp[1])  # noqa: E731
+            fn = torch.jit.trace(x, ())
+
+            # For some reason sometimes output gets made into a constant,
+            # skip test then
+            if next(fn.graph.outputs()).toIValue() is not None:
+                print("output check")
+                self.checkShapeAnalysis(out_size, fn.graph, assert_propagation=True)
