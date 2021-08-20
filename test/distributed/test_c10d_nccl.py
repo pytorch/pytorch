@@ -44,7 +44,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     retry_on_connect_failures,
     TEST_WITH_DEV_DBG_ASAN,
-    TEST_WITH_TSAN,
+    TEST_WITH_ROCM,
     sandcastle_skip,
     sandcastle_skip_if,
 )
