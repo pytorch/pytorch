@@ -10,7 +10,9 @@
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/import_read.h>
+#include <torch/csrc/jit/serialization/mobile_bytecode_generated.h>
 #include <torch/custom_class.h>
+#include <third_party/flatbuffers/include/flatbuffers/flatbuffers.h>
 
 #include <exception>
 #include <fstream>
@@ -485,6 +487,79 @@ void BytecodeDeserializer::parseMethods(
   }
 }
 
+void parseMethodsFlatbuffer(
+    const void* data,
+    const size_t size,
+    const c10::optional<std::vector<IValue>>& debug_handles,
+    std::shared_ptr<mobile::CompilationUnit> mcu,
+    std::shared_ptr<CompilationUnit> cu
+) {
+  auto module_ptr = mobile::serialization::GetModule(data);
+  auto methods = module_ptr->methods();
+
+  bool has_debug_handles = debug_handles.has_value();
+
+  // A Global Cache for Operator functions across all methods in the model.
+  mobile::Function::OperatorCacheType operator_cache;
+
+  for (int i = 0; i < methods->size(); i++) {
+    const auto* method = methods->Get(i);
+
+    auto function = std::make_unique<mobile::Function>(c10::QualifiedName(method->qn()->str()));
+    const auto* code_tb = method->code();
+
+    for (const auto* inst : *code_tb->instructions()) {
+      function->append_instruction(static_cast<OpCode>(inst->op()), inst->x(), inst->n());
+    }
+
+    // TODO(qihan) append constants
+    // for (const auto& constant : consts_list) {
+    //   function->append_constant(constant);
+    // }
+
+
+    static const c10::QualifiedName classPrefix = "__torch__.torch.classes";
+    for (const auto* t : *code_tb->types()) {
+      c10::QualifiedName qn(t->str());
+      if (classPrefix.isPrefixOf(qn)) {
+        auto classType = getCustomClass(qn.qualifiedName());
+        TORCH_CHECK(
+            classType,
+            "The implementation of class ",
+            qn.qualifiedName(),
+            " cannot be found.");
+        function->append_type(classType);
+      } else {
+        function->append_type(c10::parseType(t->str()));
+      }
+    }
+
+    function->set_register_size(code_tb->register_size());
+
+    auto parseArgList = [&cu](const auto* args_fb) {
+      std::vector<c10::Argument> args;
+      for (const auto* arg_tb: *args_fb) {
+        IValue default_value(26);  // Todo
+        TypePtr type_ptr = resolveTypeNameMobile(arg_tb->type()->str(), cu);
+        auto arg =
+            c10::Argument(arg_tb->name()->str(), type_ptr, c10::nullopt /*N*/, default_value);
+        args.emplace_back(std::move(arg));
+      }
+      return args;
+    };
+    c10::FunctionSchema schema(
+        method->qn()->str(),
+        "" /*overload_name*/,
+        parseArgList(method->schema()->arguments()),
+        parseArgList(method->schema()->returns()),
+        false /*is_varargs*/,
+        false /*is_varret*/);
+    function->setSchema(std::move(schema));
+
+    mcu->register_function(std::move(function));
+  }
+}
+
 void BytecodeDeserializer::deserialize_only_extra(
     c10::optional<at::Device> device,
     ExtraFilesMap& extra_files) {
@@ -522,14 +597,28 @@ mobile::Module BytecodeDeserializer::deserialize(
   // being a Tuple (int, table), and the integer stands for the bytecode version
   // number. The rest of the elements are the same as before.
   //
-  auto bvals = readArchive("bytecode", mcu).toTuple()->elements();
-
   c10::optional<std::vector<IValue>> debug_handles;
   if (reader_->hasRecord("mobile_debug_handles.pkl")) {
     debug_handles =
         readArchive("mobile_debug_handles", mcu).toTuple()->elements();
   }
-  parseMethods(bvals, debug_handles, *mcu);
+
+  if (reader_->hasRecord("bytecodes.flatbuffers")) {
+    std::cerr << "HAN QI: parsing flatbuffer format"  << std::endl;
+    at::DataPtr data_ptr;
+    size_t size;
+    auto record = reader_->getRecord("bytecodes.flatbuffers");
+    parseMethodsFlatbuffer(
+      std::get<0>(record).get(), 
+      std::get<1>(record), 
+      debug_handles,
+      mcu,
+      compilation_unit_);
+  } else {
+    auto bvals = readArchive("bytecode", mcu).toTuple()->elements();
+    parseMethods(bvals, debug_handles, *mcu);
+  }
+
   auto m = mobile::Module(readArchive("data", mcu).toObject(), mcu);
 #if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
   MobileDebugTable debug_table = MobileDebugTable(reader_, compilation_unit_);
