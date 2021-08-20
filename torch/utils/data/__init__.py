@@ -11,9 +11,9 @@ from torch.utils.data.sampler import (
 from torch.utils.data.dataset import (
     ChainDataset,
     ConcatDataset,
-    DataChunk,
     Dataset,
     Dataset as MapDataPipe,
+    DataChunk,
     IterableDataset,
     IterableDataset as IterDataPipe,
     Subset,
@@ -34,14 +34,11 @@ from torch.utils.data._decorator import (
     runtime_validation,
     runtime_validation_disabled,
 )
-from torch.utils.data.dataloader_experimental import DataLoader2
-
 
 __all__ = ['BatchSampler',
            'ChainDataset',
            'ConcatDataset',
            'DataLoader',
-           'DataLoader2',
            'Dataset',
            'DistributedSampler',
            'IterDataPipe',
@@ -71,3 +68,4 @@ assert __all__ == sorted(__all__)
 ################################################################################
 # import subpackage
 ################################################################################
+from torch.utils.data import datapipes
