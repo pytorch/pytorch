@@ -284,7 +284,7 @@ TEST(LoopNest, ExprSliceHead) {
   ASSERT_NE(head, nullptr);
   ASSERT_NE(head, loops[0]);
   ASSERT_NE(tail, nullptr);
-  ASSERT_NE(tail, loops[0]);
+  ASSERT_EQ(tail, loops[0]);
 
   BlockPtr body = getSimplifiedBody(l);
   assertForRanges(body, {{0, 4}, {4, 10}});
@@ -380,7 +380,7 @@ TEST(LoopNest, ExprSliceTail) {
   LoopNest::sliceTail(loops[0], 4, &head, &tail);
 
   ASSERT_NE(head, nullptr);
-  ASSERT_NE(head, loops[0]);
+  ASSERT_EQ(head, loops[0]);
   ASSERT_NE(tail, nullptr);
   ASSERT_NE(tail, loops[0]);
 
@@ -4017,7 +4017,7 @@ TEST(LoopNest, DeadStoreEliminationWithIntermediates) {
 
   // Will eliminate the write to g, but not f since it used by the producer of
   // h.
-  LoopNest loop(stmt, {h.node()});
+  LoopNest loop(Stmt::clone(stmt), {h.node()});
   loop.eliminateDeadStores();
 
   checkIR(loop.root_stmt(), R"IR(
