@@ -1161,3 +1161,17 @@ TEST(StaticRuntime, IndividualOps_Append) {
   testStaticRuntime(append_tensor_script, args_tensor);
   testStaticRuntime(append_tensor_script, args_tensor, args_tensor_large);
 }
+
+TEST(StaticRuntime, QuantizedLinear) {
+  at::Tensor weight =
+      at::quantize_per_tensor(torch::randn({3, 2}), 2, 3, torch::kQInt8);
+  at::Tensor input =
+      at::quantize_per_tensor(torch::randn({3, 2}), 2, 3, torch::kQUInt8);
+
+  at::Tensor weight_2 =
+      at::quantize_per_tensor(torch::randn({4, 3}), 2, 3, torch::kQInt8);
+  at::Tensor input_2 =
+      at::quantize_per_tensor(torch::randn({4, 3}), 2, 3, torch::kQUInt8);
+
+  testStaticRuntime(quantize_script, {input, weight}, {input_2, weight_2});
+}
