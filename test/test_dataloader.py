@@ -13,9 +13,20 @@ import itertools
 import warnings
 import tempfile
 from torch import multiprocessing as mp
-from torch.utils.data import _utils, Dataset, IterableDataset, TensorDataset, DataLoader, ConcatDataset, ChainDataset, Subset
+from torch.utils.data import (
+    ChainDataset,
+    ConcatDataset,
+    DataLoader,
+    DataLoader2,
+    Dataset,
+    IterableDataset,
+    Subset,
+    TensorDataset,
+    _utils
+)
 from torch.utils.data._utils import MP_STATUS_CHECK_INTERVAL
 from torch.utils.data.dataset import random_split
+from torch.utils.data.datapipes.iter import IterableAsDataPipe
 from torch._utils import ExceptionWrapper
 from torch.testing._internal.common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS,
                                                   IS_IN_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm, slowTest,
@@ -1932,6 +1943,18 @@ except RuntimeError as e:
             UserWarning,
                 r"excessive worker creation might get DataLoader running slow or even freeze"):
             dataloader = DataLoader(self.dataset, batch_size=2, num_workers=1000)
+
+
+@unittest.skipIf(
+    TEST_WITH_TSAN,
+    "Fails with TSAN with the following error: starting new threads after multi-threaded "
+    "fork is not supported. Dying (set die_after_fork=0 to override)")
+class TestDataLoader2(TestCase):
+    def test_basics(self):
+        dp = IterableAsDataPipe(list(range(10)))
+        dl = DataLoader(dp, batch_size=3, collate_fn=lambda x: x, num_workers=2)
+        dl2 = DataLoader2(dp, batch_size=3, collate_fn=lambda x: x, num_workers=2)
+        self.assertEquals(list(dl), list(dl2))
 
 
 class StringDataset(Dataset):
