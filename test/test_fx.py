@@ -593,17 +593,17 @@ class TestFX(JitTestCase):
         x = torch.rand(3, 4)
         ref_out = msm(x)
         test_out = lowered(x)
-        torch.testing.assert_allclose(test_out, ref_out)
+        torch.testing.assert_close(test_out, ref_out)
 
         # Test TorchScript compilation
         scripted_lowered = torch.jit.script(lowered)
         script_out = scripted_lowered(x)
-        torch.testing.assert_allclose(script_out, ref_out)
+        torch.testing.assert_close(script_out, ref_out)
 
         # Test TorchScript ser/de
         import_copy = self.getExportImportCopy(scripted_lowered)
         imported_out = import_copy(x)
-        torch.testing.assert_allclose(imported_out, ref_out)
+        torch.testing.assert_close(imported_out, ref_out)
 
     def test_reserved_getattr(self):
         """Ensure that we do not name any nodes with a reserved builtin like `getattr`"""
