@@ -139,3 +139,6 @@
 [submodule "third_party/pocketfft"]
 	path = third_party/pocketfft
 	url = https://github.com/mreineck/pocketfft
+[submodule "third_party/breakpad"]
+	path = third_party/breakpad
+	url = https://github.com/driazati/breakpad.git
