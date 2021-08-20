@@ -312,6 +312,7 @@ TEST(TorchpyTest, SharedLibraryLoad) {
       I.global("sys", "path").attr("append")({"torch/csrc/deploy"});
       I.global("test_deploy_python", "setup")({getenv("PATH")});
     } else {
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
       char buf[PATH_MAX];
       strncpy(buf, test_lib_path, PATH_MAX);
       dirname(buf);
