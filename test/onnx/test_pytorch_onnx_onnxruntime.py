@@ -3321,6 +3321,7 @@ class TestONNXRuntime(unittest.TestCase):
         model = torch.nn.BatchNorm3d(3, affine=False)
         self.run_test(model, x)
 
+    @skipIfUnsupportedMinOpsetVersion(9)  # Because ConstantOfShape op is not supported for opset < 9
     def test_instancenorm1d_runningstats(self):
         x = torch.randn(10, 5, 128)
         model = torch.nn.InstanceNorm1d(5, affine=True, track_running_stats=True)
@@ -3337,6 +3338,7 @@ class TestONNXRuntime(unittest.TestCase):
         model = torch.nn.InstanceNorm1d(5, affine=False, track_running_stats=False)
         self.run_test(model, x)
 
+    @skipIfUnsupportedMinOpsetVersion(9)  # Because ConstantOfShape op is not supported for opset < 9
     def test_instancenorm2d_runningstats(self):
         x = torch.randn(10, 3, 128, 128)
         model = torch.nn.InstanceNorm2d(3, affine=True, track_running_stats=True)
@@ -3353,6 +3355,7 @@ class TestONNXRuntime(unittest.TestCase):
         model = torch.nn.InstanceNorm2d(3, affine=False, track_running_stats=False)
         self.run_test(model, x)
 
+    @skipIfUnsupportedMinOpsetVersion(9)  # Because ConstantOfShape op is not supported for opset < 9
     def test_instancenorm3d_runningstats(self):
         x = torch.randn(10, 3, 128, 128, 128)
         model = torch.nn.InstanceNorm3d(3, affine=True, track_running_stats=True)
@@ -7772,6 +7775,80 @@ class TestONNXRuntime(unittest.TestCase):
                 return x
 
         x = torch.randn(10, 3, 128, 128)
+        model_export = MyModule()
+        self.run_test(model_export, (x,), training=torch.onnx.TrainingMode.EVAL, rtol=1e-3, atol=1e-5)
+        model_export.eval()
+        self.run_test(model_export, (x,), training=torch.onnx.TrainingMode.PRESERVE, rtol=1e-3, atol=1e-5)
+
+    def test_instancenorm_training(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.in1 = torch.nn.InstanceNorm2d(3, affine=True)
+                self.cv1 = torch.nn.Conv2d(3, 3, 10)
+                self.in2 = torch.nn.InstanceNorm2d(3, affine=False)
+                self.cv2 = torch.nn.Conv2d(3, 3, 10)
+                self.in3 = torch.nn.InstanceNorm2d(3, affine=True)
+
+            def forward(self, x):
+                x = self.in1(x)
+                x = self.cv1(x)
+                x = self.in2(x)
+                x = self.cv2(x)
+                x = self.in3(x)
+                return x
+
+        x = torch.randn(10, 3, 128, 128)
+        model_export = MyModule()
+        self.run_test(model_export, (x,), training=torch.onnx.TrainingMode.TRAINING, rtol=1e-3, atol=1e-5)
+        model_export.train()
+        self.run_test(model_export, (x, ), training=torch.onnx.TrainingMode.PRESERVE, rtol=1e-3, atol=1e-5)
+
+    def test_instancenorm_training_mode_fix_layer(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.in1 = torch.nn.InstanceNorm2d(3, affine=True)
+                self.cv1 = torch.nn.Conv2d(3, 3, 10)
+                self.in2 = torch.nn.InstanceNorm2d(3, affine=False)
+                self.cv2 = torch.nn.Conv2d(3, 3, 10)
+                self.in3 = torch.nn.InstanceNorm2d(3, affine=True)
+                self.in3.eval()
+
+            def forward(self, x):
+                x = self.in1(x)
+                x = self.cv1(x)
+                x = self.in2(x)
+                x = self.cv2(x)
+                x = self.in3(x)
+                return x
+
+        x = torch.randn(10, 3, 128, 128)
+        model_export = MyModule()
+        self.run_test(model_export, (x,), training=torch.onnx.TrainingMode.TRAINING, rtol=1e-3, atol=1e-5)
+        model_export.train()
+        self.run_test(model_export, (x,), training=torch.onnx.TrainingMode.PRESERVE, rtol=1e-3, atol=1e-5)
+
+    def test_instancenorm_eval_mode_train_layer(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.in1 = torch.nn.InstanceNorm2d(8, affine=True)
+                self.cv1 = torch.nn.Conv2d(8, 8, 10)
+                self.in2 = torch.nn.InstanceNorm2d(8, affine=False)
+                self.cv2 = torch.nn.Conv2d(8, 8, 10)
+                self.in3 = torch.nn.InstanceNorm2d(8, affine=True)
+                self.in3.train()
+
+            def forward(self, x):
+                x = self.in1(x)
+                x = self.cv1(x)
+                x = self.in2(x)
+                x = self.cv2(x)
+                x = self.in3(x)
+                return x
+
+        x = torch.randn(10, 8, 128, 128)
         model_export = MyModule()
         self.run_test(model_export, (x,), training=torch.onnx.TrainingMode.EVAL, rtol=1e-3, atol=1e-5)
         model_export.eval()
