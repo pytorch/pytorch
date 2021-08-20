@@ -12,60 +12,60 @@ namespace jit {
 namespace tensorexpr {
 
 template <typename Op>
-static void visit_binary_op(const BinaryOpNode<Op>* v, IRVisitor* visitor) {
+static void visit_binary_op(BinaryOpNode<Op>* v, IRVisitor* visitor) {
   v->lhs()->accept(visitor);
   v->rhs()->accept(visitor);
 }
 
-void IRVisitor::visit(const Add* v) {
+void IRVisitor::visit(Add* v) {
   visit_binary_op(v, this);
 }
 
-void IRVisitor::visit(const Sub* v) {
+void IRVisitor::visit(Sub* v) {
   visit_binary_op(v, this);
 }
 
-void IRVisitor::visit(const Mul* v) {
+void IRVisitor::visit(Mul* v) {
   visit_binary_op(v, this);
 }
 
-void IRVisitor::visit(const Div* v) {
+void IRVisitor::visit(Div* v) {
   visit_binary_op(v, this);
 }
 
-void IRVisitor::visit(const Mod* v) {
+void IRVisitor::visit(Mod* v) {
   visit_binary_op(v, this);
 }
 
-void IRVisitor::visit(const Max* v) {
+void IRVisitor::visit(Max* v) {
   visit_binary_op(v, this);
 }
 
-void IRVisitor::visit(const Min* v) {
+void IRVisitor::visit(Min* v) {
   visit_binary_op(v, this);
 }
 
-void IRVisitor::visit(const And* v) {
+void IRVisitor::visit(And* v) {
   visit_binary_op(v, this);
 }
 
-void IRVisitor::visit(const Or* v) {
+void IRVisitor::visit(Or* v) {
   visit_binary_op(v, this);
 }
 
-void IRVisitor::visit(const Xor* v) {
+void IRVisitor::visit(Xor* v) {
   visit_binary_op(v, this);
 }
 
-void IRVisitor::visit(const Lshift* v) {
+void IRVisitor::visit(Lshift* v) {
   visit_binary_op(v, this);
 }
 
-void IRVisitor::visit(const Rshift* v) {
+void IRVisitor::visit(Rshift* v) {
   visit_binary_op(v, this);
 }
 
-void IRVisitor::visit(const CompareSelect* v) {
+void IRVisitor::visit(CompareSelect* v) {
   v->lhs()->accept(this);
   v->rhs()->accept(this);
   v->ret_val1()->accept(this);
@@ -78,65 +78,65 @@ void IRVisitor::visit(const CompareSelect* v) {
 AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_VISIT);
 #undef IMM_VISIT
 
-void IRVisitor::visit(const Cast* v) {
+void IRVisitor::visit(Cast* v) {
   v->src_value()->accept(this);
 }
-void IRVisitor::visit(const BitCast* v) {
+void IRVisitor::visit(BitCast* v) {
   v->src_value()->accept(this);
 }
-void IRVisitor::visit(const Var* v) {}
+void IRVisitor::visit(Var* v) {}
 
-void IRVisitor::visit(const Ramp* v) {
+void IRVisitor::visit(Ramp* v) {
   v->base()->accept(this);
   v->stride()->accept(this);
 }
 
-void IRVisitor::visit(const Load* v) {
+void IRVisitor::visit(Load* v) {
   v->buf()->accept(this);
-  for (const Expr* ind : v->indices()) {
+  for (Expr* ind : v->indices()) {
     ind->accept(this);
   }
 }
 
-void IRVisitor::visit(const Buf* v) {
+void IRVisitor::visit(Buf* v) {
   v->base_handle()->accept(this);
 }
 
-void IRVisitor::visit(const Store* v) {
+void IRVisitor::visit(Store* v) {
   v->buf()->accept(this);
-  for (const Expr* ind : v->indices()) {
+  for (Expr* ind : v->indices()) {
     ind->accept(this);
   }
   v->value()->accept(this);
 }
 
-void IRVisitor::visit(const AtomicAdd* v) {
+void IRVisitor::visit(AtomicAdd* v) {
   v->buf()->accept(this);
-  for (const Expr* ind : v->indices()) {
+  for (Expr* ind : v->indices()) {
     ind->accept(this);
   }
   v->value()->accept(this);
 }
 
-void IRVisitor::visit(const SyncThreads* v) {}
+void IRVisitor::visit(SyncThreads* v) {}
 
-void IRVisitor::visit(const ExternalCall* v) {
+void IRVisitor::visit(ExternalCall* v) {
   v->buf()->accept(this);
-  for (const Buf* buf_arg : v->buf_args()) {
+  for (Buf* buf_arg : v->buf_args()) {
     buf_arg->accept(this);
   }
-  for (const Expr* arg : v->args()) {
+  for (Expr* arg : v->args()) {
     arg->accept(this);
   }
 }
 
-void IRVisitor::visit(const Block* v) {
+void IRVisitor::visit(Block* v) {
   for (Stmt* s : *v) {
     s->accept(this);
   }
 }
 
-void IRVisitor::visit(const For* v) {
+void IRVisitor::visit(For* v) {
   v->var()->accept(this);
   v->start()->accept(this);
   v->stop()->accept(this);
@@ -145,41 +145,41 @@ void IRVisitor::visit(const For* v) {
   }
 }
 
-void IRVisitor::visit(const Broadcast* v) {
+void IRVisitor::visit(Broadcast* v) {
   v->value()->accept(this);
 }
 
-void IRVisitor::visit(const IfThenElse* v) {
+void IRVisitor::visit(IfThenElse* v) {
   v->condition()->accept(this);
   v->true_value()->accept(this);
   v->false_value()->accept(this);
 }
 
-void IRVisitor::visit(const Intrinsics* v) {
-  for (const auto i : c10::irange(v->nparams())) {
+void IRVisitor::visit(Intrinsics* v) {
+  for (auto i : c10::irange(v->nparams())) {
     v->param(i)->accept(this);
   }
 }
 
-void IRVisitor::visit(const Allocate* v) {
+void IRVisitor::visit(Allocate* v) {
   v->buffer_var()->accept(this);
-  std::vector<const Expr*> dims = v->dims();
-  for (const Expr* dim : dims) {
+  std::vector<Expr*> dims = v->dims();
+  for (Expr* dim : dims) {
     dim->accept(this);
   }
 }
 
-void IRVisitor::visit(const Free* v) {
+void IRVisitor::visit(Free* v) {
   v->buffer_var()->accept(this);
 }
 
-void IRVisitor::visit(const Let* v) {
+void IRVisitor::visit(Let* v) {
   v->var()->accept(this);
   v->value()->accept(this);
 }
 
-void IRVisitor::visit(const Cond* v) {
-  const Expr* condition = v->condition();
+void IRVisitor::visit(Cond* v) {
+  Expr* condition = v->condition();
   Stmt* true_stmt = v->true_stmt();
   Stmt* false_stmt = v->false_stmt();
   condition->accept(this);
@@ -191,26 +191,26 @@ void IRVisitor::visit(const Cond* v) {
   }
 }
 
-void IRVisitor::visit(const Term* v) {
+void IRVisitor::visit(Term* v) {
   v->scalar()->accept(this);
   for (auto* t : v->variables()) {
     t->accept(this);
   }
 }
 
-void IRVisitor::visit(const Polynomial* v) {
+void IRVisitor::visit(Polynomial* v) {
   v->scalar()->accept(this);
   for (auto* t : v->variables()) {
     t->accept(this);
   }
 }
 
-void IRVisitor::visit(const RoundOff* v) {
+void IRVisitor::visit(RoundOff* v) {
   v->lhs()->accept(this);
   v->rhs()->accept(this);
 }
 
-void IRVisitor::visit(const MaxTerm* v) {
+void IRVisitor::visit(MaxTerm* v) {
   if (v->scalar()) {
     v->scalar()->accept(this);
   }
@@ -219,7 +219,7 @@ void IRVisitor::visit(const MaxTerm* v) {
   }
 }
 
-void IRVisitor::visit(const MinTerm* v) {
+void IRVisitor::visit(MinTerm* v) {
   if (v->scalar()) {
     v->scalar()->accept(this);
   }
@@ -228,7 +228,7 @@ void IRVisitor::visit(const MinTerm* v) {
   }
 }
 
-void IRVisitor::visit(const ReduceOp* v) {
+void IRVisitor::visit(ReduceOp* v) {
   v->body()->accept(this);
 
   for (auto* r : v->reduce_args()) {
