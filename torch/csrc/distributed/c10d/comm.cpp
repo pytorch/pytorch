@@ -93,7 +93,7 @@ std::vector<at::Tensor> GradBucket::getGradients() const {
   per_parameter_tensors.reserve(num_parameters);
   for (const auto i : c10::irange(num_parameters)) {
     per_parameter_tensors.push_back(
-        tensor_.slice(0, offsets_[i], offsets_[i] + lengths_[i])
+        buffer_.slice(0, offsets_[i], offsets_[i] + lengths_[i])
             .view(sizes_vec_[i]));
   }
   return per_parameter_tensors;

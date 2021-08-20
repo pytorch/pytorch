@@ -391,7 +391,11 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   endif()
 
   set(GENERATED_CXX_PYTHON
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_functions.cpp"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_functions_0.cpp"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_functions_1.cpp"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_functions_2.cpp"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_functions_3.cpp"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_functions_4.cpp"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_variable_methods.cpp"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_torch_functions.cpp"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions.cpp"
@@ -481,10 +485,17 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     endif()
   endif()
 
+  list(APPEND LITE_PROFILER_SRCS "")
+  if(USE_LITE_INTERPRETER_PROFILER)
+    append_filelist("libtorch_edge_profiler_sources " LITE_PROFILER_SRCS)
+  endif()
+
   # Switch between the full jit interpreter and lite interpreter
   if(BUILD_LITE_INTERPRETER)
     append_filelist("libtorch_lite_cmake_sources" LIBTORCH_CMAKE_SRCS)
     list(APPEND LIBTORCH_CMAKE_SRCS ${LITE_EAGER_SYMOBLICATION_SRCS})
+    list(APPEND LIBTORCH_CMAKE_SRCS ${LITE_PROFILER_SRCS})
+    set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
   else()
     append_filelist("libtorch_cmake_sources" LIBTORCH_CMAKE_SRCS)
 
@@ -797,6 +808,15 @@ if(USE_LLVM AND LLVM_FOUND)
     support core analysis executionengine instcombine
     scalaropts transformutils ${LLVM_TARGETS_TO_BUILD} orcjit)
   target_link_libraries(torch_cpu PRIVATE ${LLVM_LINK_LIBS})
+  if(APPLE)
+    set(LINKER_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/unexported_symbols.lds")
+    set_target_properties(torch_cpu PROPERTIES LINK_DEPENDS ${LINKER_SCRIPT})
+    set_target_properties(torch_cpu PROPERTIES LINK_FLAGS "-Wl,-unexported_symbols_list,${LINKER_SCRIPT}")
+  elseif(UNIX)
+    set(LINKER_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/version_script.lds")
+    set_target_properties(torch_cpu PROPERTIES LINK_DEPENDS ${LINKER_SCRIPT})
+    target_link_libraries(torch_cpu PRIVATE "-Wl,--version-script=${LINKER_SCRIPT}")
+  endif()
 endif(USE_LLVM AND LLVM_FOUND)
 
 # This is required for older versions of CMake, which don't allow
@@ -1022,27 +1042,10 @@ if(USE_TBB)
   target_link_libraries(torch_cpu PUBLIC TBB::tbb)
 endif()
 
-
-if(LINUX)
-  find_library(BREAKPAD_LIB breakpad_client
-    PATHS /usr/local/lib/)
-  find_path(BREAKPAD_INCLUDE_DIR breakpad
-    PATHS /usr/local/include/)
-
-  if(BREAKPAD_LIB AND BREAKPAD_INCLUDE_DIR)
-    message(STATUS "found breakpad library")
-    target_link_libraries(torch_cpu PRIVATE ${BREAKPAD_LIB})
-    target_compile_definitions(torch_cpu PRIVATE ADD_BREAKPAD_SIGNAL_HANDLER)
-    target_include_directories(torch_cpu PRIVATE ${BREAKPAD_INCLUDE_DIR}/breakpad)
-  else()
-    if(BREAKPAD_INCLUDE_DIR)
-      message(STATUS "breakpad_client library not found")
-    elseif(BREAKPAD_LIB)
-      message(STATUS "breakpad include path not found")
-    else()
-      message(STATUS "breakpad_client library and include path not found")
-    endif()
-  endif()
+if(USE_BREAKPAD)
+  target_compile_definitions(torch_cpu PRIVATE ADD_BREAKPAD_SIGNAL_HANDLER)
+  target_include_directories(torch_cpu PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../third_party ${CMAKE_CURRENT_LIST_DIR}/../third_party/breakpad/src)
+  target_link_libraries(torch_cpu PRIVATE breakpad)
 endif()
 
   target_include_directories(torch_cpu PRIVATE ${ATen_CPU_INCLUDE})
