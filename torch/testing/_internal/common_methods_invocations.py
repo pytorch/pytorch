@@ -2447,6 +2447,32 @@ def sample_inputs_avgpool2d(op_info, device, dtype, requires_grad, **kwargs):
 
     return list(generator())
 
+def sample_inputs_maxpool2d(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    # args, kwargs: input_shape (n, c, h, w), kernel_size, stride, padding, dilation, return_indices, ceil_mode
+    cases: Tuple[tuple, dict] = (  # type: ignore[assignment]
+        (((1, 3, 1, 1), 1), {}),  # Default parameters
+        # Note: Not testing with all args only case due to problematic args ordering
+        # See https://github.com/pytorch/pytorch/issues/62545
+        # TODO: Add only args test case once #62545 is addressed
+        (((1, 3, 9, 9), (5, 5), (1, 1), (1, ), 1), {'return_indices': False, 'ceil_mode': False}),
+        (((2, 3, 9, 9), (4, 4), (2, 2), (2, 1), 1), {'return_indices': False, 'ceil_mode': True}),
+        (((1, 3, 3, 3), 2, 1, 1, 1), {'return_indices': True, 'ceil_mode': False}),
+        (((4, 2, 5, 5), 3, 1, 1, 1), {'return_indices': True, 'ceil_mode': True}),
+        (((1, 1, 9, 9),), {'kernel_size': 1, 'stride': (3, 1), 'padding': 0, 'dilation':1,
+                        'return_indices': True, 'ceil_mode': True}),
+        (((1, 3, 25, 25),), {'kernel_size': (1, 4), 'stride': 1, 'padding': 0, 'dilation':3,
+                        'return_indices': False, 'ceil_mode': False})
+    )
+
+    def generator():
+        for args, kwargs in cases:
+            input_shape = args[0]
+            yield SampleInput(make_arg(input_shape), args=args[1:], kwargs=kwargs)
+
+    return list(generator())
+
 def sample_inputs_topk(op_info, device, dtype, requires_grad, **kwargs):
     def get_tensor_input(size):
         return make_tensor(size, device, dtype, requires_grad=requires_grad)
@@ -7071,6 +7097,18 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            autodiff_nonfusible_nodes=["aten::leaky_relu"]),
+    OpInfo('nn.functional.max_pool2d',
+           aten_name='max_pool2d',
+           supports_autograd=True,
+           supports_out=False,
+           dtypesIfCPU=floating_types(),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           sample_inputs_func=sample_inputs_maxpool2d,
+           skips=(
+               # RuntimeError: aliasOp != torch::jit::getOperatorAliasMap().end()
+               # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":159,
+               # please report a bug to PyTorch.
+               SkipInfo('TestJit', 'test_variant_consistency_jit'),)),
     OpInfo('nn.functional.avg_pool2d',
            aten_name='avg_pool2d',
            supports_autograd=True,
