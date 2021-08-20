@@ -2289,10 +2289,16 @@ def sample_inputs_max_pool2d(op_info, device, dtype, requires_grad, **kwargs):
     def generator():
         for kernel, stride, N, C, H, W, ceil_mode, padding, dilation in products:
             max_pool = torch.nn.MaxPool2d(kernel, stride, ceil_mode=ceil_mode, padding=padding, dilation=dilation)
+            kwargs = {
+                "kernel_size": max_pool.kernel_size,
+                "stride": max_pool.stride,
+                "padding": max_pool.padding,
+                "dilation": max_pool.dilation,
+                "ceil_mode": max_pool.ceil_mode,
+                "return_indices": max_pool.return_indices,
+            }
 
-            yield SampleInput(make_arg((N, C, H, W)), args=(max_pool.kernel_size, max_pool.stride,
-                              max_pool.padding, max_pool.dilation, max_pool.ceil_mode,
-                              max_pool.return_indices))
+            yield SampleInput(make_arg((N, C, H, W)), kwargs=kwargs)
 
     return list(generator())
 
