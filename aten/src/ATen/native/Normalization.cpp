@@ -240,7 +240,6 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(
     grad_weight = at::empty_like(weight, at::MemoryFormat::Contiguous);
   }
   if (grad_input_mask[2]) {
-    auto options = input.options();
     grad_bias = at::empty({input.size(1)}, input.options());
   }
 
@@ -418,7 +417,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
 
   auto num_features = input.sizes()[1];
 
-  if (input.numel()==0){
+  if (input.numel() == 0) {
     Tensor reserve = at::empty({0}, input.options().dtype(kByte));
     auto options = input.options().dtype(
         at::toAccumulateType(input.scalar_type(), /*is_cuda=*/input.is_cuda()));
@@ -525,23 +524,23 @@ std::tuple<Tensor, Tensor, Tensor> _batch_norm_impl_index_backward(
   const Tensor& save_mean = c10::value_or_else(save_mean_opt, [] {return Tensor();});
   const Tensor& save_var_transform = c10::value_or_else(save_var_transform_opt, [] {return Tensor();});
 
-  if (input.numel()==0) {
-    int64_t num_batch = input.size(0);
-    int64_t num_feature = input.size(1);
-    std::vector<int64_t> dims{0, 2};
+  if (input.numel() == 0) {
+    std::vector<int64_t> dims(input.dim() - 1);
+    dims[0] = 0;
+    std::iota(dims.begin() + 1, dims.end(), 2);
 
-    //don't return view of input, don't return empty tensor because it will break gradient chain
-    auto grad_input = grad_output.clone();
+    // don't return empty tensor because it will break gradient chain
+    Tensor grad_input;
     Tensor grad_weight;
     Tensor grad_bias;
     if (output_mask[2]) {
-      grad_bias = grad_input.view({num_batch, num_feature, -1}).sum(dims);
+      grad_bias = grad_output.sum(dims);
     }
     if (output_mask[1]) {
-      grad_weight = (grad_input.view({num_batch, num_feature, -1}) * input).sum(dims);
+      grad_weight = (grad_output * input).sum(dims);
     }
     if (output_mask[0] && weight.defined()) {
-      grad_input = grad_input * weight[0];
+      grad_input = grad_output * weight[0];
     }
     return std::make_tuple(grad_input, grad_weight, grad_bias);
   }
