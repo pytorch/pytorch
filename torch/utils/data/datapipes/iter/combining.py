@@ -1,7 +1,7 @@
 import functools
 
 from torch.utils.data import IterDataPipe, functional_datapipe
-from typing import Callable, Iterator, Optional, Sized, Tuple, TypeVar, Deque
+from typing import Any, Iterator, Optional, Sized, Tuple, TypeVar, Deque
 from collections import deque
 
 T_co = TypeVar('T_co', covariant=True)
@@ -82,7 +82,8 @@ class _ForkIterDataPipe(IterDataPipe):
         as requested by the child DataPipes.
     """
     def __init__(self, datapipe: IterDataPipe, num_instances: int, buffer_size: int = 1000):
-        self.main_datapipe = iter(datapipe)
+        self.main_datapipe = datapipe
+        self.dp: Iterator[Any]
         self.num_instances = num_instances
         self.buffer: Deque = deque()
         self.buffer_size = buffer_size
@@ -92,6 +93,8 @@ class _ForkIterDataPipe(IterDataPipe):
         self.end_ptr = float('inf')
 
     def get_next(self, instance_id):
+        if not hasattr(self, "dp"):
+            self.dp = iter(self.main_datapipe)
         while self.child_pointers[instance_id] < self.end_ptr:
             if not self.buffer or self.child_pointers[instance_id] > self.leading_ptr:
                 self.leading_ptr = self.child_pointers[instance_id]
@@ -99,7 +102,7 @@ class _ForkIterDataPipe(IterDataPipe):
                     raise BufferError("ForkIterDataPipe buffer overflow," +
                                       f"buffer size {self.buffer_size} is insufficient.")
                 try:
-                    self.buffer.append(self.main_datapipe.__next__())
+                    self.buffer.append(self.dp.__next__())
                     self.child_pointers[instance_id] += 1
                     yield self.buffer[-1]
                 except StopIteration:
@@ -133,21 +136,13 @@ class ChildDataPipe(IterDataPipe):
         self.instance_id = instance_id
 
     def __iter__(self):
+        # TODO: Allow repeated calls to iter() and keep producing outputs, or explicitly asks user to call .fork again
+        # Will need make a decision about how the buffer interacts with that
         yield from self.main_data_pipe.get_next(self.instance_id)
 
 @functional_datapipe('demux')
 class DemultiplexerIterDataPipe(IterDataPipe):
 
-    # given n = num_instances
-    # You want classifier_fn to return (0, ..., n - 1)
-    # Check and make sure the output from classifier_fn is within range [0, n-1]
-    # We are forcing people to return an int
-
-    def __init__(self, datapipe: IterDataPipe[T_co], classifier_fn: Callable[[T_co], int]):
-        self.datapipe = datapipe
-        self.classifier_fn = classifier_fn
-
-    # Placeholder implementation
     def __new__(cls, datapipe, instances, classifier_fn):
         result = []
         buffer = list(datapipe)
