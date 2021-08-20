@@ -1,10 +1,10 @@
 import torch
-from torch.testing._internal.jit_utils import JitTestCase
+from torch.testing._internal.jit_utils import JitTestCase, execWrapper
 import operator
 
 from torch.testing import FileCheck
 from typing import List
-
+from textwrap import dedent
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
@@ -167,6 +167,7 @@ class TestSymbolicShapeAnalysis(JitTestCase):
             self.assertEqual(next(graph.outputs()).type().symbolic_sizes(), [5, 8, sym1])
 
     def test_arange_shape(self):
+        # no opinfo for tensor constructors
         inps = [
             (10,),
             (0, 10),
@@ -176,6 +177,7 @@ class TestSymbolicShapeAnalysis(JitTestCase):
             (1, 2, 1),
             (0.6, 0.89, 0.1),
             (1, 10, 0.3),
+            (1, 10, 4),
             (0.6, 0.7, 0.8),
             (1, 10, 0.3),
             # (True,),  TODO: https://github.com/pytorch/pytorch/issues/63405
@@ -190,11 +192,14 @@ class TestSymbolicShapeAnalysis(JitTestCase):
         ]
 
         for inp in inps:
-            out_size = torch.arange(*inp).size()
-            x = lambda : torch.arange(*inp)  # noqa: E731
-            fn = torch.jit.trace(x, ())
+            funcs_template = dedent('''
+            def func():
+                return torch.arange({args})
+            ''')
 
-            # For some reason sometimes output gets made into a constant,
-            # skip test then
-            if next(fn.graph.outputs()).toIValue() is not None:
-                self.checkShapeAnalysis(out_size, fn.graph, assert_propagation=True)
+            inp_s = str(inp)[1:-1]  # remove tuple parens
+            funcs_str = funcs_template.format(args=inp_s)
+            scope = {}
+            execWrapper(funcs_str, globals(), scope)
+            cu = torch.jit.CompilationUnit(funcs_str)
+            self.checkShapeAnalysis(list(cu.func().size()), cu.func.graph, assert_propagation=True, constant_prop=False)
