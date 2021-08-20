@@ -284,7 +284,7 @@ TEST(LoopNest, ExprSliceHead) {
   ASSERT_NE(head, nullptr);
   ASSERT_NE(head, loops[0]);
   ASSERT_NE(tail, nullptr);
-  ASSERT_NE(tail, loops[0]);
+  ASSERT_EQ(tail, loops[0]);
 
   BlockPtr body = getSimplifiedBody(l);
   assertForRanges(body, {{0, 4}, {4, 10}});
