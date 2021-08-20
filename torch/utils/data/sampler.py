@@ -89,7 +89,7 @@ class RandomSampler(Sampler[int]):
         self.replacement = replacement
         self._num_samples = num_samples
         self.generator = generator
-        self.gen = None
+        self.gen: Optional[torch.Generator] = None
 
         if not isinstance(self.replacement, bool):
             raise TypeError("replacement should be a boolean value, but got "

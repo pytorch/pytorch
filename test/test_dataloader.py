@@ -1509,7 +1509,6 @@ except RuntimeError as e:
             l2 = list(sampler) + list(sampler)
             self.assertEqual(l1, l2)
 
-
     def _test_sampler(self, **kwargs):
         indices = range(2, 12)  # using a regular iterable
         dl = self._get_data_loader(self.dataset, sampler=indices, batch_size=2, **kwargs)
