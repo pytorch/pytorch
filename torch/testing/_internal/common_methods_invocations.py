@@ -2277,16 +2277,17 @@ def sample_inputs_max_pool2d(op_info, device, dtype, requires_grad, **kwargs):
 
     kerneli = [[3, 2], [3, 3]]
     stridei = [[2, 2]]
-    Ni = [8, 16]
+    Ni = [1, 4]
     Ci = [32]
     Hi = [8, 16]
     Wi = [8, 16]
     ceil_modei = [True, False]
     paddingi = [0, 1]
     dilationi = [1, (1, 2)]
+    products = product(kerneli, stridei, Ni, Ci, Hi, Wi, ceil_modei, paddingi, dilationi)
 
     def generator():
-        for kernel, stride, N, C, H, W, ceil_mode, padding, dilation in product(kerneli, stridei, Ni, Ci, Hi, Wi, ceil_modei, paddingi, dilationi):
+        for kernel, stride, N, C, H, W, ceil_mode, padding, dilation in products:
             max_pool = torch.nn.MaxPool2d(kernel, stride, ceil_mode=ceil_mode, padding=padding, dilation=dilation)
 
             yield SampleInput(make_arg((N, C, H, W)), args=(max_pool.kernel_size, max_pool.stride,
