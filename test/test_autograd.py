@@ -20,9 +20,8 @@ import torch
 from torch import nn
 from torch._six import inf, nan
 from torch.autograd.function import once_differentiable
-from torch.autograd.profiler import (profile, format_time, EventList,
-                                     FunctionEvent, FunctionEventAvg,
-                                     record_function, emit_nvtx)
+from torch.autograd.profiler import (profile, record_function, emit_nvtx)
+from torch.autograd.profiler_util import (_format_time, EventList, FunctionEvent, FunctionEventAvg)
 import torch.autograd.functional as autogradF
 from torch.utils.checkpoint import checkpoint
 from torch.testing._internal.common_cuda import TEST_CUDA
@@ -3214,7 +3213,7 @@ class TestAutograd(TestCase):
         total_time_us = total_time_s * 1000.0 * 1000.0  # make it us which is profiler default
         print(
             "Total time based on python measurements: ",
-            format_time(total_time_us)
+            _format_time(total_time_us)
         )
         print(
             "CPU time measurement python side overhead: {:.2f}%".format(
@@ -5935,6 +5934,64 @@ for shape in [(1,), ()]:
             self.assertEqual(6 * 8 * a, a.grad)
         finally:
             torch.autograd.graph.reset_saved_tensors_default_hooks()
+
+    def test_graph_save_on_cpu(self):
+        def test(get_input, cuda, pin_memory):
+            with torch.autograd.graph.save_on_cpu(pin_memory):
+                a = get_input()
+                if cuda:
+                    a.cuda()
+                y = a * a
+                self.assertEqual(a, y.grad_fn._saved_self)
+                self.assertEqual(a, y.grad_fn._saved_other)
+                self.assertEqual(a.dtype, y.grad_fn._saved_self.dtype)
+                self.assertEqual(a.layout, y.grad_fn._saved_self.layout)
+                if y.is_sparse:
+                    y = y.to_dense()
+                y.sum().backward()
+                self.assertEqual(2 * a, a.grad)
+
+        for cuda in [False] + ([True] if torch.cuda.is_available() else []):
+            for pin_memory in [True, False]:
+                # FloatTensor
+                test(lambda: torch.randn(5, requires_grad=True), cuda, pin_memory)
+                # DoubleTensor
+                test(lambda: torch.randn(5, requires_grad=True, dtype=torch.double), cuda, pin_memory)
+                # Sparse tensor
+                x = torch.sparse_coo_tensor(torch.tensor([[1, 1]]).long(), torch.tensor([1., 1.]), requires_grad=True)
+                test(lambda: x, cuda, pin_memory)
+
+    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
+    def test_graph_save_on_cpu_cuda(self):
+        def f(x):
+            a = x + 1
+            return a * a
+
+        # with grad
+        a = torch.ones(1, requires_grad=True, device="cuda")
+        y = f(a)
+        memory_with_grad = torch.cuda.memory_allocated()
+
+        del a
+        del y
+
+        # without grad
+        a = torch.ones(1, requires_grad=True, device="cuda")
+        with torch.no_grad():
+            y = f(a)
+        memory_without_grad = torch.cuda.memory_allocated()
+
+        self.assertGreater(memory_with_grad, memory_without_grad)
+
+        del a
+        del y
+
+        # with hooks
+        with torch.autograd.graph.save_on_cpu():
+            a = torch.ones(1, requires_grad=True, device="cuda")
+            y = f(a)
+            memory_with_hooks = torch.cuda.memory_allocated()
+            self.assertEqual(memory_with_hooks, memory_without_grad)
 
 
 def index_perm_variable(shape, max_indices):

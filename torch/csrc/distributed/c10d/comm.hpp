@@ -22,13 +22,13 @@ class TORCH_API GradBucket {
       const std::vector<size_t>& offsets,
       const std::vector<size_t>& lengths,
       const std::vector<c10::IntArrayRef>& sizes_vec,
-      const std::vector<at::Tensor>& model_params_for_bucket)
+      const std::vector<at::Tensor>& parameters)
       : index_(index),
         tensor_(tensor),
         offsets_(offsets),
         lengths_(lengths),
         sizes_vec_(sizes_vec),
-        model_params_for_bucket_(model_params_for_bucket) {}
+        parameters_(parameters) {}
 
   // Returns the index of the bucket, which is unique across all the buckets.
   size_t getIndex() const {
@@ -49,20 +49,20 @@ class TORCH_API GradBucket {
     tensor_ = tensor;
   }
 
-  // Each tensor in the list that getPerParameterTensors corresponds to a
+  // Each tensor in the list that getGradients corresponds to a
   // parameter.
-  std::vector<at::Tensor> getPerParameterTensors() const;
+  std::vector<at::Tensor> getGradients() const;
 
   // Returns model parameters belonging to this bucket. They are returned in the
-  // same order as gradient tensors via getPerParameterTensors(). For example,
-  // getModelParamsForBucket[i] will have its gradient stored in
-  // getPerParameterTensors[i]
-  const std::vector<at::Tensor> getModelParamsForBucket() const {
-    return model_params_for_bucket_;
+  // same order as gradient tensors via getGradients(). For example,
+  // getParameters[i] will have its gradient stored in
+  // getGradients[i]
+  const std::vector<at::Tensor> getParameters() const {
+    return parameters_;
   }
 
   // Returns whther this bucket is the last bucket to allreduce in an iteration.
-  bool isTheLastBucketToAllreduce() const {
+  bool isLast() const {
     return index_ == 0;
   }
 
@@ -75,7 +75,7 @@ class TORCH_API GradBucket {
   std::vector<size_t> lengths_;
   std::vector<c10::IntArrayRef> sizes_vec_;
   // Model parameters for this bucket.
-  const std::vector<at::Tensor> model_params_for_bucket_;
+  const std::vector<at::Tensor> parameters_;
 };
 
 // Base class of both `PythonCommHook` and `CppCommHook`.

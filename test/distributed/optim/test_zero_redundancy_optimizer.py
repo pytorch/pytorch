@@ -25,7 +25,7 @@ from torch.distributed.algorithms.ddp_comm_hooks.ddp_zero_hook import (
 from torch.distributed.algorithms.ddp_comm_hooks.default_hooks import (
     allreduce_hook,
 )
-from torch.distributed.algorithms.join import _Join, _Joinable, _JoinHook
+from torch.distributed.algorithms.join import Join, Joinable, JoinHook
 from torch.distributed.optim import ZeroRedundancyOptimizer
 from torch.distributed.optim.zero_redundancy_optimizer import _broadcast_object
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -734,7 +734,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                 self.grads = grads  # remaining gradients to set (in order)
                 self.index = 0
 
-        class _SetGradsJoinHook(_JoinHook):
+        class _SetGradsJoinHook(JoinHook):
             def __init__(self, zero_optim, grads):
                 zero_optim._join_grad_info = _JoinGradInfo(grads)
                 self.zero = zero_optim
@@ -746,11 +746,11 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                 for p, grad in zip(self.zero._all_params, grads):
                     p.grad = grad.detach().clone().to(device)
 
-        class _GradientSetter(_Joinable):
+        class _GradientSetter(Joinable):
             def __init__(self):
                 super().__init__()
 
-            def _join_hook(self, **kwargs):
+            def join_hook(self, **kwargs):
                 assert "zero_optim" in kwargs
                 assert "grads" in kwargs
                 zero_optim = kwargs["zero_optim"]
@@ -758,22 +758,22 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                 return _SetGradsJoinHook(zero_optim, grads)
 
             @property
-            def _join_device(self):
+            def join_device(self):
                 return device
 
             @property
-            def _join_process_group(self):
+            def join_process_group(self):
                 return dist.group.WORLD
 
         num_grads_after_joining = NUM_EPOCHS * (world_size - rank - 1)
         grads = grads_at_each_iter[-num_grads_after_joining:]
         gradient_setter = _GradientSetter()
         iter = 0
-        with _Join([gradient_setter, zero_optim], zero_optim=zero_optim, grads=grads):
+        with Join([gradient_setter, zero_optim], zero_optim=zero_optim, grads=grads):
             for _ in range(NUM_EPOCHS):
                 for input in inputs:
                     # Notify join context that this process has not joined
-                    _Join.notify_join_context(gradient_setter)
+                    Join.notify_join_context(gradient_setter)
 
                     # Set gradients manually
                     for p, grad in zip(zero_model.parameters(), grads_at_each_iter[iter]):

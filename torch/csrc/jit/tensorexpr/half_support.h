@@ -22,12 +22,12 @@ class HalfChecker : public IRVisitor {
     return hasHalf_;
   }
 
-  void visit(const Load* v) override {
+  void visit(Load* v) override {
     hasHalf_ |= v->dtype().scalar_type() == ScalarType::Half;
     IRVisitor::visit(v);
   }
 
-  void visit(const Store* v) override {
+  void visit(Store* v) override {
     hasHalf_ |= v->buf()->dtype().scalar_type() == ScalarType::Half;
     IRVisitor::visit(v);
   }
@@ -36,7 +36,7 @@ class HalfChecker : public IRVisitor {
     hasHalf_ = true;
   }
 
-  void visit(const Cast* v) override {
+  void visit(Cast* v) override {
     hasHalf_ |= v->dtype().scalar_type() == ScalarType::Half;
     IRVisitor::visit(v);
   }
@@ -47,21 +47,21 @@ class HalfChecker : public IRVisitor {
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class HalfRewriter : public IRMutator {
-  const Expr* mutate(const Load* v) override {
-    const Expr* child = IRMutator::mutate(v);
+  Expr* mutate(Load* v) override {
+    Expr* child = IRMutator::mutate(v);
     if (child->dtype().scalar_type() != ScalarType::Half) {
       return child;
     }
 
-    const Expr* ret =
+    Expr* ret =
         new Cast(child->dtype().cloneWithScalarType(ScalarType::Float), child);
 
     inserted_half_casts_.insert(ret);
     return ret;
   }
 
-  Stmt* mutate(const Store* v) override {
-    const Expr* new_val = v->value()->accept_mutator(this);
+  Stmt* mutate(Store* v) override {
+    Expr* new_val = v->value()->accept_mutator(this);
 
     Dtype newType = v->value()->dtype();
     if (newType.scalar_type() == ScalarType::Half) {
@@ -73,12 +73,12 @@ class HalfRewriter : public IRMutator {
     return new Store(v->buf(), v->indices(), new_val);
   }
 
-  const Expr* mutate(const HalfImm* v) override {
+  Expr* mutate(HalfImm* v) override {
     return new Cast(kFloat, v);
   }
 
-  const Expr* mutate(const Cast* v) override {
-    const Expr* child = v->src_value()->accept_mutator(this);
+  Expr* mutate(Cast* v) override {
+    Expr* child = v->src_value()->accept_mutator(this);
 
     // just don't allow half casts we didn't insert.
     if (v->dtype().scalar_type() == ScalarType::Half) {
@@ -88,7 +88,7 @@ class HalfRewriter : public IRMutator {
     }
 
     // Remove Half(Float()) and friends.
-    const Cast* cast_child = dynamic_cast<const Cast*>(child);
+    Cast* cast_child = dynamic_cast<Cast*>(child);
     if (cast_child) {
       if (v->dtype().is_floating_point() &&
           cast_child->dtype().is_floating_point()) {
@@ -102,10 +102,10 @@ class HalfRewriter : public IRMutator {
 
     return new Cast(v->dtype(), child);
   }
-  Stmt* mutate(const Let* v) override {
+  Stmt* mutate(Let* v) override {
     if (v->dtype().scalar_type() == ScalarType::Half) {
-      const Var* load_new_var = new Var(v->var()->name_hint(), kFloat);
-      const Expr* new_value = new Cast(
+      Var* load_new_var = new Var(v->var()->name_hint(), kFloat);
+      Expr* new_value = new Cast(
           v->dtype().cloneWithScalarType(ScalarType::Float),
           v->value()->accept_mutator(this));
       var_map[v->var()] = load_new_var;
@@ -116,7 +116,7 @@ class HalfRewriter : public IRMutator {
     return IRMutator::mutate(v);
   }
 
-  const Expr* mutate(const Var* v) override {
+  Expr* mutate(Var* v) override {
     auto it = var_map.find(v);
     if (it != var_map.end()) {
       return it->second;
@@ -126,8 +126,8 @@ class HalfRewriter : public IRMutator {
   }
 
  private:
-  std::unordered_set<const Expr*> inserted_half_casts_;
-  std::unordered_map<const Var*, const Var*> var_map;
+  std::unordered_set<Expr*> inserted_half_casts_;
+  std::unordered_map<Var*, Var*> var_map;
 };
 
 } // namespace tensorexpr
