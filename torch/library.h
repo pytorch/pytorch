@@ -161,6 +161,12 @@ public:
     {}
 #endif
 
+  ~CppFunction();
+
+  CppFunction(CppFunction&&) noexcept = default;
+
+  CppFunction& operator=(CppFunction&&) = default;
+
   /// This creates a fallthrough function.  Fallthrough functions
   /// immediately redispatch to the next available dispatch key,
   /// but are implemented more efficiently than a hand written
