@@ -1929,6 +1929,8 @@ works_list = [
     'cosh',
     'div.no_rounding_mode',
     'div.true_rounding',
+    'div.floor_rounding',
+    'div.trunc_rounding',
     'eq',
     'erf',
     'erfc',
