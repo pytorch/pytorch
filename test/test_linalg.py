@@ -4814,13 +4814,13 @@ class TestLinalg(TestCase):
                     yield A, B, not tr_a, left, uni, expand_b
 
         for A, B, upper, left, uni, expand_b in gen_inputs():
-            X = torch.linalg.solve_triangularriangular_solve(A, B, left=left, upper=upper, unitriangular=uni)
+            X = torch.linalg.solve_triangular(A, B, left=left, upper=upper, unitriangular=uni)
             if left:
                 self.assertEqual(A @ X, B)
             else:
                 self.assertEqual(X @ A, B)
             out = B if not expand_b else B.clone()
-            torch.linalg.solve_triangularA, B, left=left, upper=upper, unitriangular=uni, out=out)
+            torch.linalg.solve_triangular(A, B, left=left, upper=upper, unitriangular=uni, out=out)
             self.assertEqual(X, out)
 
     @slowTest
