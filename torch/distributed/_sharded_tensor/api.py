@@ -453,7 +453,7 @@ class ShardedTensor(object):
                 # Build the local shard for the current rank if it is involved in the sharding spec.
                 if current_rank == rank:
                     # Initialize the local shard.
-                    local_shard = create_tensor_from_params(
+                    local_shard = _create_tensor_from_params(
                         *rank_dims, local_device=local_device, tensor_init_params=tensor_init_params)
                     self._local_shards.append(Shard(local_shard, shard_metadata))
 
@@ -481,7 +481,7 @@ class ShardedTensor(object):
 
             if current_rank == rank:
                 # Initialize the local shard.
-                local_shard = create_tensor_from_params(
+                local_shard = _create_tensor_from_params(
                     *shard_metadata.shard_lengths, local_device=local_device,
                     tensor_init_params=tensor_init_params)
                 self._local_shards.append(Shard(local_shard, shard_metadata))
@@ -635,7 +635,7 @@ class ShardedTensor(object):
         self._post_init()
 
 
-def create_tensor_from_params(*size, local_device, tensor_init_params: TensorInitParams):
+def _create_tensor_from_params(*size, local_device, tensor_init_params: TensorInitParams):
     """ Helper to construct tensor from size, device and common params. """
 
     if tensor_init_params.create_op == CreateOp.ONES:

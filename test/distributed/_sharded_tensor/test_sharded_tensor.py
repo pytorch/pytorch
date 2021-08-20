@@ -19,7 +19,7 @@ from torch.distributed._sharding_spec import (
 from torch.distributed._sharded_tensor.api import (
     CreateOp,
     TensorInitParams,
-    create_tensor_from_params,
+    _create_tensor_from_params,
 )
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
@@ -133,7 +133,7 @@ class TestCreateTensorFromParams(TestCase):
             pin_memory=False,
             memory_format=torch.contiguous_format, )
         local_device = torch.device('cuda:0')
-        local_tensor = create_tensor_from_params(
+        local_tensor = _create_tensor_from_params(
             5, 10, local_device=local_device, tensor_init_params=tensor_init_params)
         self.assertEqual(local_device, local_tensor.device)
         self.assertEqual(torch.double, local_tensor.dtype)
@@ -150,7 +150,7 @@ class TestCreateTensorFromParams(TestCase):
             pin_memory=False,
             memory_format=torch.contiguous_format, )
         local_device = torch.device('cuda:0')
-        local_tensor = create_tensor_from_params(
+        local_tensor = _create_tensor_from_params(
             5, 10, local_device=local_device, tensor_init_params=tensor_init_params)
         expected_tensor = torch.ones(5, 10, device=local_device, dtype=torch.double)
         self.assertEqual(expected_tensor, local_tensor)
