@@ -129,8 +129,8 @@ Tensor* computeSoftmax(
         });
     return new Tensor(
         result->buf(),
-        new tensorexpr::Block(
-            {max->stmt(), e->stmt(), sum->stmt(), result->stmt()}));
+        alloc<tensorexpr::Block>(std::vector<StmtPtr>(
+            {max->stmt(), e->stmt(), sum->stmt(), result->stmt()})));
   }
 
   auto log_sum = Compute(
@@ -147,12 +147,12 @@ Tensor* computeSoftmax(
       });
   return new Tensor(
       result->buf(),
-      new tensorexpr::Block(
+      alloc<tensorexpr::Block>(std::vector<StmtPtr>(
           {max->stmt(),
            e->stmt(),
            sum->stmt(),
            log_sum->stmt(),
-           result->stmt()}));
+           result->stmt()})));
 }
 
 } // namespace tensorexpr
