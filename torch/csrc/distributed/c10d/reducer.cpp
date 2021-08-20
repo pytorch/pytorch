@@ -1667,12 +1667,31 @@ bool Reducer::rebuild_buckets() {
   bucket_size_limits.push_back(first_bucket_bytes_cap_);
   bucket_size_limits.push_back(bucket_bytes_cap_);
   std::vector<size_t> per_bucket_size_limits;
+  auto ddp_set_last_bucket_as_small =
+      (parse_env("DDP_SET_LAST_BUCKET_CAP").compare("1") == 0);
+
+  if (ddp_set_last_bucket_as_small) {
+    // Reverse so that first_bucket_bytes_cap_ (smaller bucket) becomes the last
+    // bucket. We cannot simply pass in {bucket_bytes_cap_, first_bucket_bytes_cap}
+    // as the bucket order as we would immediately advance to the 2nd element
+    // after the first bucket, whereas we only want the last bucket to have
+    // a smaller size.
+    std::reverse(rebuilt_params_.begin(), rebuilt_params_.end());
+    std::reverse(rebuilt_param_indices_.begin(), rebuilt_param_indices_.end());
+  }
   std::tie(rebuilt_bucket_indices, per_bucket_size_limits) =
       compute_bucket_assignment_by_size(
           rebuilt_params_,
           bucket_size_limits,
           expect_sparse_gradients_[0],
           rebuilt_param_indices_);
+
+  if (ddp_set_last_bucket_as_small) {
+    // Reverse again because buckets were rebuilt in the opposite of gradient
+    // ready order.
+    std::reverse(rebuilt_bucket_indices.begin(), rebuilt_bucket_indices.end());
+    std::reverse(per_bucket_size_limits.begin(), per_bucket_size_limits.end());
+  }
 
   if (ddp_debug_level_ != c10d::DistributedDebugLevel::OFF) {
     TORCH_INTERNAL_ASSERT(
@@ -1694,6 +1713,7 @@ bool Reducer::rebuild_buckets() {
 
   initialize_buckets(
       std::move(rebuilt_bucket_indices), std::move(per_bucket_size_limits));
+
   return true;
 }
 
