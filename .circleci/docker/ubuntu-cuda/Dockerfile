@@ -61,6 +61,10 @@ RUN if [ -n "${VISION}" ]; then bash ./install_vision.sh; fi
 RUN rm install_vision.sh
 ENV INSTALLED_VISION ${VISION}
 
+ADD ./common/install_openssl.sh install_openssl.sh
+ENV OPENSSL_ROOT_DIR /opt/openssl
+RUN bash ./install_openssl.sh
+
 # (optional) Install non-default CMake version
 ARG CMAKE_VERSION
 ADD ./common/install_cmake.sh install_cmake.sh
@@ -94,10 +98,6 @@ ENV CUDA_PATH /usr/local/cuda
 
 # Install LLVM dev version (Defined in the pytorch/builder github repository)
 COPY --from=pytorch/llvm:9.0.1 /opt/llvm /opt/llvm
-
-ADD ./common/install_openssl.sh install_openssl.sh
-ENV OPENSSL_ROOT_DIR /opt/openssl
-RUN bash ./install_openssl.sh
 
 USER jenkins
 CMD ["bash"]
