@@ -801,11 +801,11 @@
 
 - name: xlogy.Tensor(Tensor self, Tensor other) -> Tensor
   self: grad * at::xlogy((self != 0), other)
-  other: grad * self / other
+  other: grad * at::where(other.isnan() | (self != 0), self / other, zeros_like(other))
   result: self_t * at::xlogy((self_p != 0), other_p) + other_t * self_p / other_p
 
 - name: xlogy.Scalar_Self(Scalar self, Tensor other) -> Tensor
-  other: grad * self / other
+  other: grad * at::where(other.isnan() | (!self.equal(0)), self / other, zeros_like(other))
   result: auto_element_wise
 
 - name: xlogy.Scalar_Other(Tensor self, Scalar other) -> Tensor
@@ -860,11 +860,11 @@
   self: zeros_like(self)
   other: zeros_like(other)
 
-- name: _lu_with_info(Tensor self, bool pivot=True, bool check_errors=True) -> (Tensor, Tensor, Tensor)
-  self: not_implemented("lu_with_info")
+- name: _lu_with_info(Tensor self, bool pivot=True, bool check_errors=True) -> (Tensor LU, Tensor pivots, Tensor info)
+  self: _lu_with_info_backward(grad, self, LU, pivots)
 
 - name: lu_solve(Tensor self, Tensor LU_data, Tensor LU_pivots) -> Tensor
-  self: not_implemented("lu_solve")
+  self, LU_data: lu_solve_backward(grad, self, LU_data, LU_pivots)
 
 - name: lu_unpack(Tensor LU_data, Tensor LU_pivots, bool unpack_data=True, bool unpack_pivots=True) -> (Tensor P, Tensor L, Tensor U)
   LU_data: lu_unpack_backward(grads, LU_data, unpack_data)

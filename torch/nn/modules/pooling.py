@@ -728,6 +728,12 @@ class FractionalMaxPool2d(Module):
         return_indices: if ``True``, will return the indices along with the outputs.
                         Useful to pass to :meth:`nn.MaxUnpool2d`. Default: ``False``
 
+    Shape:
+        - Input: :math:`(N, C, H_{in}, W_{in})` or :math:`(C, H_{in}, W_{in})`.
+        - Output: :math:`(N, C, H_{out}, W_{out})` or :math:`(C, H_{out}, W_{out})`, where
+          :math:`(H_{out}, W_{out})=\text{output\_size}` or
+          :math:`(H_{out}, W_{out})=\text{output\_ratio} \times (H_{in}, W_{in})`.
+
     Examples:
         >>> # pool of square window of size=3, and target output size 13x12
         >>> m = nn.FractionalMaxPool2d(3, output_size=(13, 12))
