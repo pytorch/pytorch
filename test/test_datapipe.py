@@ -590,76 +590,79 @@ class TestFunctionalIterDataPipe(TestCase):
         input_dp = IDP(range(10))
 
         # Test case: one child DataPipe yields all value first
-        dp1, dp2, dp3 = input_dp.fork(3)
-        output1, output2, output3 = [], [], []
-        for n1 in dp1:
-            output1.append(n1)
-        for n2 in dp2:
-            output2.append(n2)
-        for n3 in dp3:
-            output3.append(n3)
-        self.assertEqual(output1, list(range(10)))
-        self.assertEqual(output2, list(range(10)))
-        self.assertEqual(output3, list(range(10)))
+        dp1, dp2, dp3 = input_dp.fork(num_instances=3)
+        output1, output2, output3 = list(dp1), list(dp2), list(dp3)
+        self.assertEqual(list(range(10)), output1)
+        self.assertEqual(list(range(10)), output2)
+        self.assertEqual(list(range(10)), output3)
 
         # Test case: two child DataPipes yield value together
-        dp1, dp2 = input_dp.fork(2)
+        dp1, dp2 = input_dp.fork(num_instances=2)
         output = []
         for n1, n2 in zip(dp1, dp2):
             output.append((n1, n2))
-        self.assertEqual(output, [(i, i) for i in range(10)])
+        self.assertEqual([(i, i) for i in range(10)], output)
 
         # Test case: one child DataPipe yields all value first, but buffer_size = 5 being too small
-        dp1, dp2 = input_dp.fork(2, 5)
+        dp1, dp2 = input_dp.fork(num_instances=2, buffer_size=5)
         output1, output2 = [], []
         with self.assertRaises(BufferError):
-            for n1 in dp1:
-                output1.append(n1)
+            list(dp1)
 
         # Test case: two child DataPipes yield value together with buffer size 1
-        dp1, dp2 = input_dp.fork(2, buffer_size=1)
+        dp1, dp2 = input_dp.fork(num_instances=2, buffer_size=1)
         output = []
         for n1, n2 in zip(dp1, dp2):
             output.append((n1, n2))
-        self.assertEqual(output, [(i, i) for i in range(10)])
+        self.assertEqual([(i, i) for i in range(10)], output)
+
+        # Test case: make sure logic related to slowest_ptr is working properly
+        dp1, dp2, dp3 = input_dp.fork(num_instances=3)
+        output1, output2 , output3 = [], [], []
+        i = 0
+        for n1, n2 in zip(dp1, dp2):
+            output1.append(n1)
+            output2.append(n2)
+            i += 1
+            if i == 5:  # yield all of dp3 when halfway through dp1, dp2
+                output3 = list(dp3)
+        self.assertEqual(list(range(10)), output1)
+        self.assertEqual(list(range(10)), output2)
+        self.assertEqual(list(range(10)), output3)
 
 
     def test_demux_datapipe(self):
         input_dp = IDP(range(10))
 
         # Test Case: split into 2 DataPipes and output them one at a time
-        dp1, dp2 = input_dp.demux(2, lambda x: x % 2)
-        output1, output2 = [], []
-        for n1 in dp1:
-            output1.append(n1)
-        for n2 in dp2:
-            output2.append(n2)
-        self.assertEqual(output1, list(range(0, 10, 2)))
-        self.assertEqual(output2, list(range(1, 10, 2)))
+        dp1, dp2 = input_dp.demux(num_instances=2, classifier_fn=lambda x: x % 2)
+        output1, output2 = list(dp1), list(dp2)
+        self.assertEqual(list(range(0, 10, 2)), output1)
+        self.assertEqual(list(range(1, 10, 2)), output2)
 
         # Test Case: split into 2 DataPipes and output them together
-        dp1, dp2 = input_dp.demux(2, lambda x: x % 2)
+        dp1, dp2 = input_dp.demux(num_instances=2, classifier_fn=lambda x: x % 2)
         output = []
         for n1, n2 in zip(dp1, dp2):
             output.append((n1, n2))
-        self.assertEqual(output, [(i, i + 1) for i in range(0, 10, 2)])
+        self.assertEqual([(i, i + 1) for i in range(0, 10, 2)], output)
 
         # Test case: values of the same classification are lumped together, and buffer_size = 3 being too small
-        dp1, dp2 = input_dp.demux(2, lambda x: 0 if x >= 5 else 1, 3)
-        output1, output2 = [], []
+        dp1, dp2 = input_dp.demux(num_instances=2, classifier_fn=lambda x: 0 if x >= 5 else 1, buffer_size=3)
         with self.assertRaises(BufferError):
-            for n1 in dp1:
-                output1.append(n1)
+            output1 = list(dp1)
 
         # Test case: values of the same classification are lumped together, and buffer_size = 5 is just enough
-        dp1, dp2 = input_dp.demux(2, lambda x: 0 if x >= 5 else 1, buffer_size=5)
-        output1, output2 = [], []
-        for n1 in dp1:
-            output1.append(n1)
-        for n2 in dp2:
-            output2.append(n2)
-        self.assertEqual(output1, list(range(5, 10)))
-        self.assertEqual(output2, list(range(0, 5)))
+        dp1, dp2 = input_dp.demux(num_instances=2, classifier_fn=lambda x: 0 if x >= 5 else 1, buffer_size=5)
+        output1, output2 = list(dp1), list(dp2)
+        self.assertEqual(list(range(5, 10)), output1)
+        self.assertEqual(list(range(0, 5)), output2)
+
+        # Test case: classifer returns a value outside of [0, num_instance - 1]
+        dp = input_dp.demux(num_instances=1, classifier_fn=lambda x: x % 2)
+        with self.assertRaises(ValueError):
+            for n in dp[0]:
+                print(n)
 
 
     def test_map_datapipe(self):
@@ -1452,7 +1455,7 @@ class TestGraph(TestCase):
     # @skipIfNoDill
     # def test_traverse_forked(self):
     #     numbers_dp = NumbersDataset(size=50)
-    #     dp0, dp1, dp2 = numbers_dp.fork(3)
+    #     dp0, dp1, dp2 = numbers_dp.fork(num_instances=3)
     #     dp0_upd = dp0.map(lambda x: x * 10)
     #     dp1_upd = dp1.filter(lambda x: x % 3 == 1)
     #     combined_dp = dp0_upd.mux(dp1_upd, dp2)
@@ -1463,44 +1466,43 @@ class TestGraph(TestCase):
 
 class TestSharding(TestCase):
 
-    # TODO: This conflicts with new .fork implementation "TypeError: cannot pickle 'generator' object"
     def _get_pipeline(self):
         numbers_dp = NumbersDataset(size=10)
-        dp0, dp1 = numbers_dp.fork(2)
+        dp0, dp1 = numbers_dp.fork(num_instances=2)
         dp0_upd = dp0.map(lambda x: x * 10)
         dp1_upd = dp1.filter(lambda x: x % 3 == 1)
         combined_dp = dp0_upd.mux(dp1_upd)
         return combined_dp
 
-    # @skipIfNoDill
-    # def test_simple_sharding(self):
-    #     sharded_dp = self._get_pipeline().sharding_filter()
-    #     torch.utils.data.sharding.apply_sharding(sharded_dp, 3, 1)
-    #     items = list(sharded_dp)
-    #     self.assertEqual([1, 20, 40, 70], items)
-    #
-    #     all_items = list(self._get_pipeline())
-    #     items = []
-    #     for i in range(3):
-    #         sharded_dp = self._get_pipeline().sharding_filter()
-    #         torch.utils.data.sharding.apply_sharding(sharded_dp, 3, i)
-    #         items += list(sharded_dp)
-    #
-    #     self.assertEqual(sorted(all_items), sorted(items))
-    #
-    # @skipIfNoDill
-    # def test_old_dataloader(self):
-    #     dp = self._get_pipeline()
-    #     expected = list(dp)
-    #
-    #     dp = self._get_pipeline().sharding_filter()
-    #     dl = DataLoader(dp, batch_size=1, shuffle=False, num_workers=2,
-    #                     worker_init_fn=torch.utils.data.backward_compatibility.worker_init_fn)
-    #     items = []
-    #     for i in dl:
-    #         items.append(i)
-    #
-    #     self.assertEqual(sorted(expected), sorted(items))
+    @skipIfNoDill
+    def test_simple_sharding(self):
+        sharded_dp = self._get_pipeline().sharding_filter()
+        torch.utils.data.sharding.apply_sharding(sharded_dp, 3, 1)
+        items = list(sharded_dp)
+        self.assertEqual([1, 20, 40, 70], items)
+
+        all_items = list(self._get_pipeline())
+        items = []
+        for i in range(3):
+            sharded_dp = self._get_pipeline().sharding_filter()
+            torch.utils.data.sharding.apply_sharding(sharded_dp, 3, i)
+            items += list(sharded_dp)
+
+        self.assertEqual(sorted(all_items), sorted(items))
+
+    @skipIfNoDill
+    def test_old_dataloader(self):
+        dp = self._get_pipeline()
+        expected = list(dp)
+
+        dp = self._get_pipeline().sharding_filter()
+        dl = DataLoader(dp, batch_size=1, shuffle=False, num_workers=2,
+                        worker_init_fn=torch.utils.data.backward_compatibility.worker_init_fn)
+        items = []
+        for i in dl:
+            items.append(i)
+
+        self.assertEqual(sorted(expected), sorted(items))
 
 
 if __name__ == '__main__':

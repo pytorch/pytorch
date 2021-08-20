@@ -1,5 +1,5 @@
 from torch.utils.data import IterDataPipe, functional_datapipe
-from typing import Callable, Iterator, List, Optional, Sized, Tuple, TypeVar, Deque
+from typing import Any, Callable, Iterator, List, Optional, Sized, Tuple, TypeVar, Deque
 from collections import deque
 
 T_co = TypeVar('T_co', covariant=True)
@@ -80,7 +80,8 @@ class _ForkIterDataPipe(IterDataPipe):
         as requested by the child DataPipes.
     """
     def __init__(self, datapipe: IterDataPipe, num_instances: int, buffer_size: int = 1000):
-        self.main_datapipe = iter(datapipe)
+        self.main_datapipe = datapipe
+        self.dp: Iterator[Any]
         self.num_instances = num_instances
         self.buffer: Deque = deque()
         self.buffer_size = buffer_size
@@ -90,6 +91,8 @@ class _ForkIterDataPipe(IterDataPipe):
         self.end_ptr = float('inf')
 
     def get_next(self, instance_id):
+        if not hasattr(self, "dp"):
+            self.dp = iter(self.main_datapipe)
         while self.child_pointers[instance_id] < self.end_ptr:
             if not self.buffer or self.child_pointers[instance_id] > self.leading_ptr:
                 self.leading_ptr = self.child_pointers[instance_id]
@@ -97,7 +100,7 @@ class _ForkIterDataPipe(IterDataPipe):
                     raise BufferError("ForkIterDataPipe buffer overflow," +
                                       f"buffer size {self.buffer_size} is insufficient.")
                 try:
-                    self.buffer.append(self.main_datapipe.__next__())
+                    self.buffer.append(self.dp.__next__())
                     self.child_pointers[instance_id] += 1
                     yield self.buffer[-1]
                 except StopIteration:
@@ -131,6 +134,8 @@ class ChildDataPipe(IterDataPipe):
         self.instance_id = instance_id
 
     def __iter__(self):
+        # TODO: Allow repeated calls to iter() and keep producing outputs, or explicitly asks user to call .fork again
+        # Will need make a decision about how the buffer interacts with that
         yield from self.main_data_pipe.get_next(self.instance_id)
 
 @functional_datapipe('demux')
@@ -167,31 +172,31 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
                  classifier_fn: Callable[[T_co], int], buffer_size: int):
         self.main_datapipe = iter(datapipe)
         self.num_instances = num_instances
-        self.buffer_size = buffer_size
+        self.max_buffer_size = buffer_size
+        self.current_buffer_usage = 0
         self.child_buffers: List[Deque[T_co]] = [deque() for _ in range(num_instances)]
-        self.current_buffer_total = 0
         self.classifier_fn = classifier_fn
 
     def _find_next(self, instance_id: int) -> T_co:
         while True:
             value = self.main_datapipe.__next__()
             classification = self.classifier_fn(value)
-            if classification > self.num_instances:
+            if classification >= self.num_instances:
                 raise ValueError(f"Output of the classification fn should be between 0 and {self.num_instances - 1}. " +
                                  f"{classification} is returned.")
             if classification == instance_id:
                 return value
             self.child_buffers[classification].append(value)
-            self.current_buffer_total += 1
-            if self.current_buffer_total > self.buffer_size:
+            self.current_buffer_usage += 1
+            if self.current_buffer_usage > self.max_buffer_size:
                 raise BufferError(
-                    f"DemultiplexerIterDataPipe buffer overflow, buffer size {self.buffer_size} is insufficient.")
+                    f"DemultiplexerIterDataPipe buffer overflow, buffer size {self.max_buffer_size} is insufficient.")
 
     def get_next(self, instance_id: int):
         stop = False
         while not stop:
             if self.child_buffers[instance_id]:
-                self.current_buffer_total -= 1
+                self.current_buffer_usage -= 1
                 yield self.child_buffers[instance_id].popleft()
             else:
                 try:
