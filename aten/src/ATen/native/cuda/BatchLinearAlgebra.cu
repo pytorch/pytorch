@@ -1973,14 +1973,15 @@ AT_ERROR("triangular_solve: MAGMA library not found in "
 
   auto A_data = A.data_ptr<scalar_t>();
   auto b_data = b.data_ptr<scalar_t>();
-  magma_int_t m = magma_int_cast(b.size(-2), "m");
+  // This allows to pass rectangular A and b when left = True
+  magma_int_t m = magma_int_cast(left ? A.size(-1) : b.size(-2), "m");
   magma_int_t n = magma_int_cast(b.size(-1), "n");
   // magma returns early if m <= 0 || n <= 0 for magmaTriangularSolveBatched
   // magmaTriangularSolve is calling cuBLAS and it prints
   // ** On entry to DTRSM  parameter number 9 had an illegal value
   // so let's use proper lda parameter here
-  magma_int_t lda = std::max<magma_int_t>(1, left ? m : n);
-  magma_int_t ldb = std::max<magma_int_t>(1, m);
+  magma_int_t lda = std::max<magma_int_t>(1, A.size(-2));
+  magma_int_t ldb = std::max<magma_int_t>(1, b.size(-2));
   magma_int_t batch_size = magma_int_cast(batchCount(A), "batch_size");
 
   auto A_mat_stride = matrixStride(A);
@@ -2994,14 +2995,13 @@ void linalg_lstsq_gels(const Tensor& A, const Tensor& B, const Tensor& /*infos*/
     ormqr_kernel(A_broadcasted, tau_broadcasted, B, /*left=*/true, /*transpose=*/true);
 
     // Step 3: solve R X = B
-    bool upper = true;
-    char transpose = 'N';
-    bool unitriangular = false;
     triangular_solve_kernel(
         const_cast<Tensor&>(A_broadcasted),
         const_cast<Tensor&>(B),
         /*left=*/true,
-        upper, transpose, unitriangular);
+        /*upper=*/true,
+        /*transpose=*/'N',
+        /*unitriangular=*/false);
   } else { // underdetermined case
     Tensor Ah = cloneBatchedColumnMajor(A.conj().transpose(-2, -1));
 
@@ -3017,14 +3017,13 @@ void linalg_lstsq_gels(const Tensor& A, const Tensor& B, const Tensor& /*infos*/
     Tensor Ah_broadcasted = is_fortran_contiguous ? Ah_expanded : cloneBatchedColumnMajor(Ah_expanded);
 
     // Step 2: R^H Z = B
-    bool upper = true;
-    char transpose = 'C';
-    bool unitriangular = false;
     triangular_solve_kernel(
         const_cast<Tensor&>(Ah_broadcasted),
         const_cast<Tensor&>(B),
         /*left=*/true,
-        upper, transpose, unitriangular);
+        /*upper=*/true,
+        /*transpose=*/Ah_broadcasted.is_complex() ? 'C' : 'T',
+        /*unitriangular=*/false);
 
     // B matrix has the size max(m, n) x nrhs
     // triangular_solve_kernel writes its output into the first m rows of B leaving the rest untouched
