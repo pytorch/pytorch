@@ -19,10 +19,6 @@ SUPPORTED_MODULES = {  # added to config if None given
     nn.BatchNorm2d,  # will need manual update to match conv2d
 }
 
-NEEDS_MANUAL_UPDATE = {  # if model contains these layers, user must provide pruned indices
-    nn.BatchNorm2d
-}
-
 NEEDS_ZEROS = {  # these layers should have pruned indices zero-ed, not removed
     nn.BatchNorm2d
 }
@@ -55,37 +51,55 @@ class BasePruner(BaseSparsifier):
         self.bias_handles = []
 
         for config in self.module_groups:
+            modules = []
             if use_path:
-                module = fqn_to_module(self.model, config['fqn'])
-            else:
-                module = config['module']
-
-            if not isinstance(module, tuple(NEEDS_ZEROS)):
-                # add pruning parametrization and forward hooks
-                if getattr(module, 'mask', None) is None:
-                    module.register_buffer('mask', torch.tensor(module.weight.shape[0]))
-                param = config.get('parametrization', PruningParametrization)
-                parametrize.register_parametrization(module, 'weight', param(module.mask), unsafe=True)
-
-                assert isinstance(module.parametrizations, ModuleDict)  # make mypy happy
-                assert isinstance(module.parametrizations.weight, ModuleList)
-                if isinstance(module, tuple(SUPPORTED_MODULES)):
-                    self.activation_handles.append(module.register_forward_hook(
-                        ActivationReconstruction(module.parametrizations.weight[0])
-                    ))
+                if type(config['module']) is tuple:  # (Conv2d, BN)
+                    for fqn in config['fqn']:
+                        module = fqn_to_module(self.model, fqn)
+                        modules.append(module)
                 else:
-                    raise NotImplementedError("This module type is not supported yet.")
+                    module = fqn_to_module(self.model, config['fqn'])
+                    modules.append(module)
+            else:
+                if type(config['module']) is tuple:
+                    for module in config['module']:
+                        modules.append(module)
+                else:
+                    module = config['module']
+                    modules.append(module)
 
-            else:  # needs zeros
-                if getattr(module, 'mask', None) is None:
-                    module.register_buffer('mask', torch.tensor(module.weight.shape[0]))
-                param = config.get('parametrization', ZeroesParametrization)
-                parametrize.register_parametrization(module, 'weight', param(module.mask), unsafe=True)
+            for module in modules:
+                if not isinstance(module, tuple(NEEDS_ZEROS)):
+                    # add pruning parametrization and forward hooks
+                    if getattr(module, 'mask', None) is None:
+                        module.register_buffer('mask', torch.tensor(module.weight.shape[0]))
+                    param = config.get('parametrization', PruningParametrization)
+                    parametrize.register_parametrization(module, 'weight', param(module.mask), unsafe=True)
 
-            if module.bias is not None:
-                module.register_parameter('_bias', nn.Parameter(module.bias.detach()))
-                module.bias = None
-            self.bias_handles.append(module.register_forward_hook(BiasHook(module.parametrizations.weight[0], self.prune_bias)))
+                    assert isinstance(module.parametrizations, ModuleDict)  # make mypy happy
+                    assert isinstance(module.parametrizations.weight, ModuleList)
+                    if isinstance(module, tuple(SUPPORTED_MODULES)):
+                        self.activation_handles.append(module.register_forward_hook(
+                            ActivationReconstruction(module.parametrizations.weight[0])
+                        ))
+                    else:
+                        raise NotImplementedError("This module type is not supported yet.")
+
+                else:  # needs zeros
+                    if getattr(module, 'mask', None) is None:
+                        module.register_buffer('mask', torch.tensor(module.weight.shape[0]))
+                    param = config.get('parametrization', ZeroesParametrization)
+                    parametrize.register_parametrization(module, 'weight', param(module.mask), unsafe=True)
+
+                if module.bias is not None:
+                    module.register_parameter('_bias', nn.Parameter(module.bias.detach()))
+                    module.bias = None
+                self.bias_handles.append(module.register_forward_hook(BiasHook(module.parametrizations.weight[0], self.prune_bias)))
+
+            if len(modules) == 2:  # (Conv2d, BN)
+                # should have the same set of pruned outputs
+                modules[1].parametrizations.weight[0].pruned_outputs = modules[0].parametrizations.weight[0].pruned_outputs
+
 
     def prepare(self, model, config):
         r"""Prepares a model, by adding the parametrizations and forward post-hooks.
@@ -114,56 +128,93 @@ class BasePruner(BaseSparsifier):
                     if type(child) in SUPPORTED_MODULES:
                         self.config.append(child)
                     else:
-                        if type(child) in NEEDS_MANUAL_UPDATE and self.prune_bias:
-                            warnings.warn(f"Models with {type(child)} layers must have pruned outputs provided by user.")
+                        if type(child) in NEEDS_ZEROS and self.prune_bias:
+                            warnings.warn(f"Models with {type(child)} layers have config provided by user.")
                         stack.append(child)
 
         for module_config in self.config:
-            if isinstance(module_config, nn.Module):
+            if type(module_config) is tuple:
+                first_layer, next_layer = module_config
+                assert isinstance(first_layer, nn.Conv2d) and isinstance(next_layer, nn.BatchNorm2d)
                 module_config = {'module': module_config}
-            local_args = copy.deepcopy(self.defaults)
-            local_args.update(module_config)
-            module = local_args['module']
-            module_fqn = module_to_fqn(model, module)
-            if module_fqn and module_fqn[0] == '.':
-                module_fqn = module_fqn[1:]
-            local_args['fqn'] = module_fqn
+                local_args = copy.deepcopy(self.defaults)
+                local_args.update(module_config)
+                fqn_list = []
+                for module in local_args['module']:
+                    module_fqn = module_to_fqn(model, module)
+                    if module_fqn and module_fqn[0] == '.':
+                        module_fqn = module_fqn[1:]
+                    fqn_list.append(module_fqn)
+                local_args['fqn'] = fqn_list
+            else:
+                if isinstance(module_config, nn.Module):
+                    module_config = {'module': module_config}
+                local_args = copy.deepcopy(self.defaults)
+                local_args.update(module_config)
+                module = local_args['module']
+                module_fqn = module_to_fqn(model, module)
+                if module_fqn and module_fqn[0] == '.':
+                    module_fqn = module_fqn[1:]
+                local_args['fqn'] = module_fqn
+
             self.module_groups.append(local_args)
 
         self._prepare()
 
     def squash_mask(self, use_path=False, *args, **kwargs):
         for config in self.module_groups:
+            modules = []
             if use_path:
-                module = fqn_to_module(self.model, config['fqn'])
+                if type(config['module']) is tuple:  # (Conv2d, BN)
+                    for fqn in config['fqn']:
+                        module = fqn_to_module(self.model, fqn)
+                        modules.append(module)
+                else:
+                    module = fqn_to_module(self.model, config['fqn'])
+                    modules.append(module)
             else:
-                module = config['module']
-            parametrize.remove_parametrizations(module, 'weight',
-                                                leave_parametrized=True)
-            if getattr(module._parameters, 'mask', None):
-                del module._parameters['mask']
-            elif getattr(module._buffers, 'mask', None):
-                del module._buffers['mask']
-            delattr(module, 'mask')
+                if type(config['module']) is tuple:
+                    for module in config['module']:
+                        modules.append(module)
+                else:
+                    module = config['module']
+                    modules.append(module)
 
-    def manual_mask_update(self, module, pruned_outputs):
-        r"""Updates mask of module with user-provided pruned outputs"""
-        param = module.parametrizations.weight[0]
-        param.pruned_outputs.update(pruned_outputs)
+            for module in modules:
+                parametrize.remove_parametrizations(module, 'weight',
+                                                    leave_parametrized=True)
+                if getattr(module._parameters, 'mask', None):
+                    del module._parameters['mask']
+                elif getattr(module._buffers, 'mask', None):
+                    del module._buffers['mask']
+                delattr(module, 'mask')
 
-    def step(self, use_path=True):
+    def step(self, use_path=False):
         if not self.enable_mask_update:
             return
         with torch.no_grad():
             for config in self.module_groups:
+                modules = []
                 if use_path:
-                    module = fqn_to_module(self.model, config['fqn'])
+                    if type(config['module']) is tuple:  # (Conv2d, BN)
+                        for fqn in config['fqn']:
+                            module = fqn_to_module(self.model, fqn)
+                            modules.append(module)
+                    else:
+                        module = fqn_to_module(self.model, config['fqn'])
+                        modules.append(module)
                 else:
-                    module = config['module']
-                if type(module) in NEEDS_MANUAL_UPDATE:
-                    warnings.warn(f"User must update mask of {type(module)} manually.")
-                else:
-                    self.update_mask(module, **config)
+                    if type(config['module']) is tuple:
+                        for module in config['module']:
+                            modules.append(module)
+                    else:
+                        module = config['module']
+                        modules.append(module)
+
+                # only need to update the first module in modules if len(modules) > 1
+                # since they should share the same set of pruned outputs
+                module = modules[0]
+                self.update_mask(module, **config)
 
     @abc.abstractmethod
     def update_mask(self, layer, **kwargs):
