@@ -45,7 +45,11 @@ public:
   int64_t dense_dim() const { return dense_dim_; }
   bool coalesced() const { return coalesced_; }
   Tensor indices() const { return indices_; }
-  Tensor values() const { return values_; }
+  Tensor values() const {
+    std::cout << "values(): " << values_.unsafeGetTensorImpl() << std::endl;
+
+    return values_;
+  }
 
   IntArrayRef strides() const override;
   int64_t stride(int64_t d) const override;

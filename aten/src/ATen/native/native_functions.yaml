@@ -5089,6 +5089,11 @@
   device_check: NoCheck
   device_guard: False
 
+- func: my_test_sparse_op(Tensor self) -> ()
+  variants: function
+  dispatch:
+    CPU: my_test_sparse_op
+
 # This method doesn't do any check but only directly sets the flag. So it can be
 # a bit unsafe. Similar to _indices and _values, this is useful for implementing
 # custom sparse operations in Python/C++ extension.

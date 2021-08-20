@@ -57,28 +57,89 @@ inline Return callUnboxedKernelFunction(void* unboxed_kernel_func, OperatorKerne
     return (*func)(functor, dispatchKeySet, std::forward<Args>(args)...);
 }
 
+using InternalBoxedKernelFunction = void(OperatorKernel*, const OperatorHandle&, DispatchKeySet, Stack*);
+
+template <typename T>
+void myprint2(T t) {
+  std::cout << " KernelFunction::call: not a tensor" << std::endl;
+}
+
+inline void myprint2(at::Tensor t) {
+    if (t.defined()) {
+        std::cout <<  "KernelFunction::call: " << t.unsafeGetTensorImpl() << std::endl;
+    } else {
+        std::cout <<  "KernelFunction::call: (undefined tenosr)" << std::endl;
+    }
+}
+
+template<class Return, class... Args>
+struct kernel_function_call_impl {
+    std::shared_ptr<OperatorKernel> functor_;
+    InternalBoxedKernelFunction* boxed_kernel_func_;
+    void* unboxed_kernel_func_;
+
+    kernel_function_call_impl(InternalBoxedKernelFunction* const boxed_kernel_func, void* const unboxed_kernel_func, const std::shared_ptr<OperatorKernel> functor)
+     : boxed_kernel_func_(boxed_kernel_func),
+       unboxed_kernel_func_(unboxed_kernel_func)
+    {}
+    Return operator () (const OperatorHandle& opHandle, DispatchKeySet dispatchKeySet, Args... args) const {
+        if (C10_LIKELY(unboxed_kernel_func_ != nullptr)) {
+            std::cout << " KernelFunction::call (unboxed)" << std::endl;
+            return callUnboxedKernelFunction<Return, Args...>(unboxed_kernel_func_, functor_.get(), dispatchKeySet, std::forward<Args>(args)...);
+        }
+
+        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+            boxed_kernel_func_ != nullptr,
+            "Tried to call KernelFunction::call() on an uninitialized KernelFunction."
+        );
+
+        std::cout << " KernelFunction::call (boxed)" << std::endl;
+        return impl::BoxedKernelWrapper<Return(Args...)>::call(
+            boxed_kernel_func_,
+            functor_.get(),
+            opHandle,
+            dispatchKeySet,
+            std::forward<Args>(args)...
+        );
+    }
+};
+
+template<class... Args>
+struct kernel_function_call_impl<void, Args...> {
+    std::shared_ptr<OperatorKernel> functor_;
+    InternalBoxedKernelFunction* boxed_kernel_func_;
+    void* unboxed_kernel_func_;
+
+    kernel_function_call_impl(InternalBoxedKernelFunction* const boxed_kernel_func, void* const unboxed_kernel_func,const std::shared_ptr<OperatorKernel> functor)
+     : boxed_kernel_func_(boxed_kernel_func),
+       unboxed_kernel_func_(unboxed_kernel_func)
+    {}
+    void operator () (const OperatorHandle& opHandle, DispatchKeySet dispatchKeySet, Args... args) const {
+        if (C10_LIKELY(unboxed_kernel_func_ != nullptr)) {
+            return callUnboxedKernelFunction<void, Args...>(unboxed_kernel_func_, functor_.get(), dispatchKeySet, std::forward<Args>(args)...);
+        }
+
+        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+            boxed_kernel_func_ != nullptr,
+            "Tried to call KernelFunction::call() on an uninitialized KernelFunction."
+        );
+
+        return impl::BoxedKernelWrapper<void(Args...)>::call(
+            boxed_kernel_func_,
+            functor_.get(),
+            opHandle,
+            dispatchKeySet,
+            std::forward<Args>(args)...
+        );
+    }
+};
+
 template<class Return, class... Args>
 C10_ALWAYS_INLINE Return KernelFunction::call(const OperatorHandle& opHandle, DispatchKeySet dispatchKeySet, Args... args) const {
     // note: Args above is intentionally not Args&&. We don't want perfect
     // forwarding, which would require Args to be deduced, but instead we
     // want callers to explicitly specify the Args.
-
-    if (C10_LIKELY(unboxed_kernel_func_ != nullptr)) {
-        return callUnboxedKernelFunction<Return, Args...>(unboxed_kernel_func_, functor_.get(), dispatchKeySet, std::forward<Args>(args)...);
-    }
-
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        boxed_kernel_func_ != nullptr,
-        "Tried to call KernelFunction::call() on an uninitialized KernelFunction."
-    );
-
-    return impl::BoxedKernelWrapper<Return(Args...)>::call(
-        boxed_kernel_func_,
-        functor_.get(),
-        opHandle,
-        dispatchKeySet,
-        std::forward<Args>(args)...
-    );
+    return kernel_function_call_impl<Return, Args...>(boxed_kernel_func_, unboxed_kernel_func_, functor_)(opHandle, dispatchKeySet, std::forward<Args>(args)...);
 }
 
 template<KernelFunction::BoxedKernelFunction* func>

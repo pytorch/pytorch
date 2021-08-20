@@ -17,6 +17,15 @@ namespace native {
 
 using namespace at::sparse;
 
+void my_test_sparse_op(const Tensor& self) {
+  at::Tensor indices = at::tensor({0, 1, 2}, at::TensorOptions().dtype(at::kLong)).reshape({1, 3});
+  at::Tensor values = at::tensor({3, 3, 3});
+  auto s = at::sparse_coo_tensor(indices, values);
+
+  std::cout << "my_test_sparse_op" << std::endl;
+  auto s_values = s._values();
+  std::cout << "my_test_sparse_op: " << s_values.unsafeGetTensorImpl() << std::endl;
+}
 /******************************************************************************
  * access methods
  ******************************************************************************/
@@ -46,7 +55,10 @@ Tensor _indices_sparse(const SparseTensor& self) {
 }
 
 Tensor _values_sparse(const SparseTensor& self) {
-  return get_sparse_impl(self)->values();
+  std::cout << "_values_sparse" << std::endl;
+  auto s_values = get_sparse_impl(self)->values();
+  std::cout << "_values_sparse: " << s_values.unsafeGetTensorImpl() << std::endl;
+  return s_values;
 }
 
 Tensor& _coalesced_sparse_(SparseTensor& self, bool coalesced) {
