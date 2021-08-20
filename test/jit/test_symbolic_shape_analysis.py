@@ -3,7 +3,6 @@ from torch.testing._internal.jit_utils import JitTestCase
 import operator
 
 from torch.testing import FileCheck
-from typing import List
 
 
 if __name__ == '__main__':
