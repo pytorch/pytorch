@@ -2488,20 +2488,29 @@ void fuseAllLoops(StmtPtr st) {
   }
 }
 
+// Compute the trip count of a loop if it is a constant.
+c10::optional<int64_t> tripCount(ForPtr loop) {
+  auto tc = IRSimplifier::simplify(
+      cast<int64_t>(ExprHandle(loop->stop()) - ExprHandle(loop->start())));
+  if (auto val = to<LongImm>(tc.node())) {
+    return val->value();
+  }
+  return c10::nullopt;
+}
+
 // Prune innermost loops until iterations satisfies a minimum grain size.
 static void pruneByGrainSize(std::vector<ForPtr>& loops) {
   constexpr int64_t minGrainSize = 32768;
   int64_t grainSize = 1;
   for (int64_t i = loops.size(); i > 0; i--) {
-    auto const& loop = loops[i - 1];
-    if (auto stop = to<IntImm>(loop->stop())) {
-      grainSize *= stop->value();
-      if (grainSize < minGrainSize) {
-        loops.pop_back();
-      }
-      continue;
+    auto tc = tripCount(loops[i - 1]);
+    if (!tc) {
+      break;
     }
-    break;
+    grainSize *= *tc;
+    if (grainSize < minGrainSize) {
+      loops.pop_back();
+    }
   }
 }
 
@@ -2514,12 +2523,11 @@ static void pruneByThreadCount(std::vector<ForPtr>& loops) {
     if (trips >= threads) {
       break;
     }
-    auto const& loop = *it;
-    if (auto stop = to<IntImm>(loop->stop())) {
-      trips *= stop->value();
-      continue;
+    auto tc = tripCount(*it);
+    if (!tc) {
+      break;
     }
-    break;
+    trips *= *tc;
   }
   loops.erase(it, loops.end());
 }
@@ -2548,7 +2556,7 @@ static void parallelizeOuterLoops(LoopNest& l, Bufs&& bufs) {
       continue;
     }
     // Try to flatten the outer loops and parallelize them if successful.
-    For* flattened = nullptr;
+    ForPtr flattened = nullptr;
     if (loops.size() == 1) {
       flattened = loops[0];
     } else {

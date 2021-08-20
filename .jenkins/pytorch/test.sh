@@ -26,7 +26,11 @@ echo "Testing pytorch"
 
 export LANG=C.UTF-8
 
-PR_NUMBER=${PR_NUMBER:-${CIRCLE_PR_NUMBER:-}}
+# Try to pull value from CIRCLE_PULL_REQUEST first then GITHUB_HEAD_REF second
+# CIRCLE_PULL_REQUEST comes from CircleCI
+# NOTE: file_diff_from_base is currently bugged for GHA due to an issue finding a merge base for ghstack PRs
+#       see https://github.com/pytorch/pytorch/issues/60111
+IN_PULL_REQUEST=${CIRCLE_PULL_REQUEST:-}
 
 if [[ "$BUILD_ENVIRONMENT" == *-slow-* || $TEST_CONFIG == 'slow' ]]; then
   export PYTORCH_TEST_WITH_SLOW=1
@@ -60,7 +64,7 @@ else
   export PYTORCH_TEST_SKIP_NOARCH=1
 fi
 
-if [[ -n "$PR_NUMBER" ]] && [[ -z "$CI_MASTER" || "$CI_MASTER" == "false" ]]; then
+if [[ -n "$IN_PULL_REQUEST" ]] && [[ -z "$CI_MASTER" || "$CI_MASTER" == "false" ]]; then
   # skip expensive checks when on PR and CI_MASTER flag is not set
   export PYTORCH_TEST_SKIP_CUDA_MEM_LEAK_CHECK=1
 else
@@ -142,10 +146,7 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX512-* || $TEST_CONFIG == 'nogpu_NO_AVX
   export ATEN_CPU_CAPABILITY=avx2
 fi
 
-# NOTE: file_diff_from_base is currently bugged for GHA due to an issue finding a merge base for ghstack PRs
-#       see https://github.com/pytorch/pytorch/issues/60111
-#       change it back to PR_NUMBER when issue is fixed.
-if [ -n "$CIRCLE_PR_NUMBER" ] && [[ "$BUILD_ENVIRONMENT" != *coverage* ]]; then
+if [ -n "$IN_PULL_REQUEST" ] && [[ "$BUILD_ENVIRONMENT" != *coverage* ]]; then
   DETERMINE_FROM=$(mktemp)
   file_diff_from_base "$DETERMINE_FROM"
 fi
