@@ -56,6 +56,7 @@ class TestFuser(JitTestCase):
 
         a = torch.randn(5, device=device)
         scripted = self.checkScript(func, (a,))
+        print(scripted.graph_for(a))
         self.assertAllFused(scripted.graph_for(a))
 
     @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
