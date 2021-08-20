@@ -16,8 +16,6 @@
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
 #endif
-#include <ATen/native/cpu/Loops.h>
-#include <ATen/cpu/vec/vec.h>
 
 namespace at {
 namespace meta {
@@ -204,6 +202,8 @@ DEFINE_DISPATCH(silu_stub);
 DEFINE_DISPATCH(silu_backward_stub);
 DEFINE_DISPATCH(mish_stub);
 DEFINE_DISPATCH(mish_backward_stub);
+DEFINE_DISPATCH(prelu_cpu_stub);
+DEFINE_DISPATCH(prelu_backward_cpu_stub);
 
 TORCH_IMPL_FUNC(elu_out) (
   const Tensor& self, const Scalar& alpha, const Scalar& scale, const Scalar& input_scale, const Tensor& result
@@ -597,14 +597,28 @@ TORCH_IMPL_FUNC(threshold_backward_out)(const Tensor& grad, const Tensor& self, 
   threshold_stub(device_type(), *this, threshold, 0);
 }
 
-// -----------------------------------
-// prelu forward
-// -----------------------------------
-template <typename scalar_t>
-void inline prelu_cpu_kernel(
-  Tensor& result,
-  const Tensor& input,
-  const Tensor& weight) {
+Tensor prelu_cpu(const Tensor& self, const Tensor& weight_) {
+  auto input = self.contiguous();
+  auto weight = weight_.contiguous();
+
+  TORCH_CHECK(input.is_contiguous());
+  TORCH_CHECK(weight.is_contiguous());
+
+  int64_t weight_num = weight.numel();
+  Tensor result = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+
+  if (weight_num != 1) {
+    int64_t input_ndim = input.dim();
+    TORCH_CHECK(input_ndim > 0, "Not allow zero-dim input tensor.");
+
+    int64_t channel_size = 1; // channel_size default to 1
+    if (input_ndim > 1) {
+      channel_size = input.size(1); // channel is the 2nd dim of input
+    }
+    TORCH_CHECK(channel_size == weight_num,
+      "Mismatch of parameter numbers and input channel size. Found parameter numbers = ", weight_num,
+      " and channel size = ", channel_size, ".");
+  }
 
   const int64_t ndim = input.dim();
   // Helper to convert 1d tensors to an nd tensor that broadcasts with input
@@ -618,43 +632,32 @@ void inline prelu_cpu_kernel(
   };
   auto w = weight.defined() ? as_nd(weight) :
       at::detail::scalar_tensor_static(1, input.scalar_type(), kCPU);
+  
   auto iter = TensorIteratorConfig()
     .add_output(result)
     .add_input(input)
     .add_input(w)
     .build();
-  using Vec = Vectorized<scalar_t>;
-  auto zero_vec = Vec((scalar_t)(0));
-  auto one_vec = Vec((scalar_t)(1));
-  cpu_kernel_vec(
-    iter,
-    [=](scalar_t input, scalar_t weight) {
-      return (input > scalar_t(0)) ? input : weight * input;
-    },
-    [=](Vec input, Vec weight) {
-      auto r = Vec::blendv(weight, one_vec, input > zero_vec);
-      return input * r;
-    }
-  );
+  prelu_cpu_stub(iter.device_type(), iter);
+  return result;
 }
 
-Tensor prelu_cpu(const Tensor& self, const Tensor& weight_) {
+std::tuple<Tensor, Tensor> prelu_backward_cpu(const Tensor& grad_out_, const Tensor& self, const Tensor& weight_) {
   auto input = self.contiguous();
+  auto grad_out = grad_out_.contiguous();
   auto weight = weight_.contiguous();
 
   TORCH_CHECK(input.is_contiguous());
+  TORCH_CHECK(grad_out.is_contiguous());
   TORCH_CHECK(weight.is_contiguous());
 
   int64_t weight_num = weight.numel();
-  Tensor result = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
-  // case1: shared weight for all channels
-  if (weight_num == 1) {
-    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "prelu_cpu", [&] {
-      prelu_cpu_kernel<scalar_t>(result, input, weight);
-    });
-  }
-  else { // case2: multiple weights, one for each channel
+  Tensor input_grad = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  Tensor weight_grad = at::empty_like(weight, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  Tensor weight_grad_collector = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+
+  if (weight_num != 1) {
     int64_t input_ndim = input.dim();
     TORCH_CHECK(input_ndim > 0, "Not allow zero-dim input tensor.");
 
@@ -665,24 +668,7 @@ Tensor prelu_cpu(const Tensor& self, const Tensor& weight_) {
     TORCH_CHECK(channel_size == weight_num,
       "Mismatch of parameter numbers and input channel size. Found parameter numbers = ", weight_num,
       " and channel size = ", channel_size, ".");
-
-    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "prelu_cpu", [&] {
-      prelu_cpu_kernel<scalar_t>(result, input, weight);
-    });
   }
-  return result;
-}
-
-// -----------------------------------
-// prelu backward
-// -----------------------------------
-template <typename scalar_t>
-void inline prelu_cpu_backward_kernel_share_weights(
-  const Tensor& input,
-  const Tensor& weight,
-  const Tensor& grad_out,
-  Tensor& input_grad,
-  Tensor& weight_grad_collector) {
 
   const int64_t ndim = input.dim();
   // Helper to convert 1d tensors to an nd tensor that broadcasts with input
@@ -704,59 +690,14 @@ void inline prelu_cpu_backward_kernel_share_weights(
     .add_input(w)
     .build();
 
-  using Vec = Vectorized<scalar_t>;
-  auto zero_vec = Vec((scalar_t)(0));
-  auto one_vec = Vec((scalar_t)(1));
-  cpu_kernel_multiple_outputs(
-    iter,
-    [=](scalar_t input, scalar_t grad_out, scalar_t weight) -> std::tuple<scalar_t, scalar_t> {
-      scalar_t input_grad = (input > scalar_t(0)) ? grad_out : weight * grad_out;
-      scalar_t weight_grad_collector = (input > scalar_t(0)) ? scalar_t(0) : input * grad_out;
-      return {input_grad, weight_grad_collector};
-    }
-  );
-}
+  prelu_backward_cpu_stub(iter.device_type(), iter);
 
-std::tuple<Tensor, Tensor> prelu_backward_cpu(const Tensor& grad_out_, const Tensor& self, const Tensor& weight_) {
-  auto input = self.contiguous();
-  auto grad_out = grad_out_.contiguous();
-  auto weight = weight_.contiguous();
-
-  TORCH_CHECK(input.is_contiguous());
-  TORCH_CHECK(grad_out.is_contiguous());
-  TORCH_CHECK(weight.is_contiguous());
-
-  int64_t weight_num = weight.numel();
-
-  Tensor input_grad = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  Tensor weight_grad = at::empty_like(weight, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  Tensor weight_grad_collector = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-
-  // case1: shared parameter for all channels
   if (weight_num == 1) {
-    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "prelu_backward_cpu", [&] {
-      prelu_cpu_backward_kernel_share_weights<scalar_t>(input, weight, grad_out, input_grad, weight_grad_collector);
-    });
-    // update weight_grad
     weight_grad.fill_(weight_grad_collector.sum());
-  }
-  else { // case2: multiple parameters, one for each channel
-    int64_t input_ndim = input.dim();
-    TORCH_CHECK(input_ndim > 0, "Not allow zero-dim input tensor.");
-
-    int64_t channel_size = 1; // channel_size default to 1
-    if (input_ndim > 1) {
-      channel_size = input.size(1); // channel is the 2nd dim of input
-    }
-    TORCH_CHECK(channel_size == weight_num,
-      "Mismatch of parameter numbers and input channel size. Found parameter numbers = ", weight_num,
-      " and channel size = ", channel_size, ".");
-
-    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "prelu_backward_cpu", [&] {
-      prelu_cpu_backward_kernel_share_weights<scalar_t>(input, weight, grad_out, input_grad, weight_grad_collector);
-    });
+  } else {
     // update weight_grad
     std::vector<int64_t> reduce_dims;
+    int64_t input_ndim = input.dim();
     reduce_dims.push_back(0);
     if (input_ndim > 2) {
       for(int64_t i = 2; i < input_ndim; i++) reduce_dims.push_back(i);

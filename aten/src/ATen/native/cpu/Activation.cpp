@@ -698,6 +698,37 @@ void mish_backward_kernel(TensorIterator& iter) {
             });
       });
 }
+void prelu_cpu_kernel (TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "prelu_cpu", [&]() {
+  using Vec = Vectorized<scalar_t>;
+  auto zero_vec = Vec((scalar_t)(0));
+  auto one_vec = Vec((scalar_t)(1));
+  cpu_kernel_vec(
+    iter,
+    [=](scalar_t input, scalar_t weight) {
+      return (input > scalar_t(0)) ? input : weight * input;
+    },
+    [=](Vec input, Vec weight) {
+      auto r = Vec::blendv(weight, one_vec, input > zero_vec);
+      return input * r;
+    });
+  });
+}
+
+void prelu_backward_cpu_kernel (TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "prelu_backward_cpu", [&]() {
+  using Vec = Vectorized<scalar_t>;
+  auto zero_vec = Vec((scalar_t)(0));
+  auto one_vec = Vec((scalar_t)(1));
+  cpu_kernel_multiple_outputs(
+    iter,
+    [=](scalar_t input, scalar_t grad_out, scalar_t weight) -> std::tuple<scalar_t, scalar_t> {
+      scalar_t input_grad = (input > scalar_t(0)) ? grad_out : weight * grad_out;
+      scalar_t weight_grad_collector = (input > scalar_t(0)) ? scalar_t(0) : input * grad_out;
+      return {input_grad, weight_grad_collector};
+    });
+  });
+}
 
 } // namespace
 
@@ -726,6 +757,8 @@ REGISTER_DISPATCH(silu_stub, &silu_kernel);
 REGISTER_DISPATCH(silu_backward_stub, &silu_backward_kernel);
 REGISTER_DISPATCH(mish_stub, &mish_kernel);
 REGISTER_DISPATCH(mish_backward_stub, &mish_backward_kernel);
+REGISTER_DISPATCH(prelu_cpu_stub, &prelu_cpu_kernel);
+REGISTER_DISPATCH(prelu_backward_cpu_stub, &prelu_backward_cpu_kernel);
 
 } // namespace native
 } // namespace at
