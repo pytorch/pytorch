@@ -151,8 +151,8 @@ struct C10_API AutogradMetaInterface {
       at::TensorImpl* self_impl) = 0;
   virtual bool requires_grad() const = 0;
   virtual at::Tensor& mutable_grad() = 0;
-  virtual const at::TensorBase& grad() const = 0;
-  virtual const at::TensorBase& fw_grad(uint64_t level, const at::TensorBase& self)
+  virtual const at::Tensor& grad() const = 0;
+  virtual const at::Tensor& fw_grad(uint64_t level, const at::TensorBase& self)
       const = 0;
   virtual void set_fw_grad(
       const at::TensorBase& new_grad,
@@ -175,7 +175,7 @@ struct C10_API AutogradMetaFactory {
   virtual std::unique_ptr<AutogradMetaInterface> make() const = 0;
   // This method is the dumbest method.  But I don't have access
   // to Tensor (not TensorImpl) which is undefined in this header.
-  virtual const at::TensorBase& undefined_tensor() const = 0;
+  virtual const at::Tensor& undefined_tensor() const = 0;
 };
 
 C10_API void SetAutogradMetaFactory(AutogradMetaFactory* factory);
@@ -996,7 +996,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * Return the accumulated gradient of a tensor.  This gradient is written
    * into when performing backwards, when this tensor is a leaf tensor.
    */
-  const at::TensorBase& grad() const;
+  const at::Tensor& grad() const;
 
   /**
    * Whether or not the imaginary part of the tensor should be negated
@@ -1052,7 +1052,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    *   - "self" should represent the Tensor whose forward grad is accessed. It
    * is required when dealing with view.
    */
-  const at::TensorBase& _fw_grad(uint64_t level, const at::TensorBase& self) const;
+  const at::Tensor& _fw_grad(uint64_t level, const at::TensorBase& self) const;
 
   /**
    * Sets the forward gradient for this Tensor.

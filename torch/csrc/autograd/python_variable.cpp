@@ -158,7 +158,7 @@ static PyObject* THPVariable_NewWithVar(
 }
 
 // TODO: Make this take Variable by const reference
-PyObject * THPVariable_Wrap(const at::TensorBase &var)
+PyObject * THPVariable_Wrap(torch::autograd::Variable var)
 {
   if (!var.defined()) {
     Py_RETURN_NONE;

@@ -124,7 +124,7 @@ void AutogradMeta::set_fw_grad(const at::TensorBase& new_grad_, const at::Tensor
     // TODO(alband) remove this spurious version counter bump
     auto new_grad = new_grad_;
 
-    TORCH_CHECK(at::is_same_size(self, new_grad_), "Trying to set a forward gradient that has a different size than that "
+    TORCH_CHECK(self.sizes() == new_grad_.sizes(), "Trying to set a forward gradient that has a different size than that "
                 "of the original Tensor, this is not supported. Tensor is of size ", self.sizes(), " while the given "
                 "forward gradient is of size ", new_grad_.sizes(), ".");
 
@@ -182,7 +182,7 @@ void AutogradMeta::set_fw_grad(const at::TensorBase& new_grad_, const at::Tensor
   }
 }
 
-const at::TensorBase& AutogradMeta::fw_grad(uint64_t level, const at::TensorBase& self) const {
+const at::Tensor& AutogradMeta::fw_grad(uint64_t level, const at::TensorBase& self) const {
   // Ensure that concurent fw_grad() "reads" are thread safe
   std::lock_guard<std::mutex> lock(mutex_);
 

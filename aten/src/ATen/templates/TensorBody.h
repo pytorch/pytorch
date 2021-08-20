@@ -210,29 +210,6 @@ class TORCH_API Tensor: public TensorBase {
     return !at::impl::variable_excluded_from_dispatch();
   }
 
-  /// If a tensor is a quantized tensor, returns its quantizer
-  /// TODO: it's not in native_functions.yaml yet as it's not exposed to python
-  QuantizerPtr quantizer() const;
-
-  /// Returns if a `Tensor` has any dimension names
-  bool has_names() const {
-    // If a user is using unnamed tensors, then we can short-circuit right here.
-    // Otherwise, impl::has_names attempts to retrieve names.
-    if (!impl_->has_named_tensor_meta()) {
-      return false;
-    }
-    return impl::has_names(unsafeGetTensorImpl());
-  }
-
-  /// Returns a `Tensor`'s dimension names data structure
-  const NamedTensorMeta* get_named_tensor_meta() const {
-    return static_cast<NamedTensorMeta*>(impl_->named_tensor_meta());
-  }
-
-  NamedTensorMeta* get_named_tensor_meta() {
-    return static_cast<NamedTensorMeta*>(impl_->named_tensor_meta());
-  }
-
   template<typename T>
   C10_DEPRECATED_MESSAGE("Tensor.data<T>() is deprecated. Please use Tensor.data_ptr<T>() instead.")
   T * data() const {
@@ -428,16 +405,33 @@ class TORCH_API Tensor: public TensorBase {
   /// the first time a call to `backward()` computes gradients for this Tensor.
   /// The attribute will then contain the gradients computed and future calls
   /// to `backward()` will accumulate (add) gradients into it.
-  Tensor grad() const {
-    return TensorBase::grad();
+  const Tensor& grad() const {
+    const Tensor& maybe_grad = impl_->grad();
+    if (!is_leaf() && !retains_grad() && !maybe_grad.defined()) {
+      TORCH_WARN(
+        "The .grad attribute of a Tensor that is not a leaf Tensor is being accessed. Its .grad "
+        "attribute won't be populated during autograd.backward(). If you indeed want the .grad "
+        "field to be populated for a non-leaf Tensor, use .retain_grad() on the non-leaf Tensor. "
+        "If you access the non-leaf Tensor by mistake, make sure you access the leaf Tensor "
+        "instead. See github.com/pytorch/pytorch/pull/30531 for more informations.");
+    }
+    return maybe_grad;
   }
 
   // The Forward AD API functions below are low level and are not to be used by end
   // users who should use the API provided in torch/csrc/autograd.h
 
   /// This function returns the forward gradient for this Tensor at the given level.
-  Tensor _fw_grad(uint64_t level) const {
-    return TensorBase::_fw_grad(level);
+  const Tensor& _fw_grad(uint64_t level) const {
+    return impl_->_fw_grad(level, *this);
+  }
+
+  /// This function can be used to set the value of the forward grad.
+  /// Note that the given new_grad might not be used directly if it has different
+  /// metadata (size/stride/storage offset) compared to this Tensor. In that case,
+  /// new_grad content will be copied into a new Tensor
+  void _set_fw_grad(const TensorBase& new_grad, uint64_t level, bool is_inplace_op) const {
+    impl_->_set_fw_grad(new_grad, *this, level, is_inplace_op);
   }
 
 
@@ -504,18 +498,6 @@ class TORCH_API Tensor: public TensorBase {
     return TensorBase::variable_data();
   }
 
-  // Gradient Node and Edges
-  //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-  /// Gets the gradient function of the `Variable`. If this is a leaf variable,
-  /// the pointer returned will be null.
-  ///
-  /// For View Variables:
-  /// Gets the up-to-date grad_fn. If the shared data or base was modified, we
-  /// re-create the grad_fn to express the up-to-date view relationship between
-  /// this and the base Variable.
-  const std::shared_ptr<torch::autograd::Node>& grad_fn() const;
-
   // Hooks
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -580,10 +562,6 @@ public:
     TensorBase::requires_grad_(_requires_grad);
     return *this;
   }
-
-protected:
-  void enforce_invariants();
-  c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl> impl_;
 };
 
 // For "multiple ... operators specified" warnings, closing brace of class

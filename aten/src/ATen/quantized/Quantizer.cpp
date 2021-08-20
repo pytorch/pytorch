@@ -29,7 +29,7 @@ namespace {
 } // anonymous namespace
 
 // Note: this is not a native function as Quantizer is not exposed to python yet
-QuantizerPtr Tensor::quantizer() const {
+QuantizerPtr TensorBase::quantizer() const {
   // This is a terrible hack to emulate what VariableType is doing
   at::AutoDispatchBelowAutograd mode;
   return get_qtensorimpl(*this)->quantizer();
