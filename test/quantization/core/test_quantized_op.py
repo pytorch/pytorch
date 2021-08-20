@@ -1617,8 +1617,8 @@ class TestQuantizedOps(TestCase):
         quantized_out = torch.topk(qX, k, dim=dim, largest=largest, sorted=sorted)
 
         assert(len(unquantized_out) == len(quantized_out))
-        torch.testing.assert_allclose(quantized_out[0].dequantize(), unquantized_out[0])
-        torch.testing.assert_allclose(quantized_out[1], unquantized_out[1])
+        torch.testing.assert_close(quantized_out[0].dequantize(), unquantized_out[0])
+        torch.testing.assert_close(quantized_out[1], unquantized_out[1])
 
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
                                               min_side=1, max_side=10),
@@ -1643,8 +1643,8 @@ class TestQuantizedOps(TestCase):
         quantized_out = torch.topk(qX, k, dim=dim, largest=largest, sorted=sorted)
 
         assert(len(unquantized_out) == len(quantized_out))
-        torch.testing.assert_allclose(quantized_out[0].dequantize(), unquantized_out[0])
-        torch.testing.assert_allclose(quantized_out[1], unquantized_out[1])
+        torch.testing.assert_close(quantized_out[0].dequantize(), unquantized_out[0])
+        torch.testing.assert_close(quantized_out[1], unquantized_out[1])
 
 
     """Tests quantize concatenation (both fused and not)."""
@@ -1846,7 +1846,7 @@ class TestQuantizedOps(TestCase):
         else:
             out = torch.ops.quantized.cat([qX, qY], dim=1, scale=scale, zero_point=zero_point)
 
-        torch.testing.assert_allclose(out.dequantize(), ref.dequantize())
+        torch.testing.assert_close(out.dequantize(), ref.dequantize())
         self.assertNotEqual(out.stride(), sorted(out.stride()))
 
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=1, max_dims=5,
@@ -3400,8 +3400,7 @@ class TestQuantizedEmbeddingOps(TestCase):
             num_embeddings, embedding_dim, include_last_offset, weights,
             per_sample_weights, indices, offsets)
 
-        torch.testing.assert_allclose(reference_result, result, atol=atol,
-                                      rtol=rtol)
+        torch.testing.assert_close(reference_result, result, atol=atol, rtol=rtol)
 
 
         if bit_rate == 8 or bit_rate == 4:
@@ -3424,7 +3423,7 @@ class TestQuantizedEmbeddingOps(TestCase):
                         per_sample_weights=per_sample_weights,
                         compressed_indices_mapping=torch.tensor(mapping_table),
                         include_last_offset=include_last_offset)
-            torch.testing.assert_allclose(reference_result, result, atol=atol, rtol=rtol)
+            torch.testing.assert_close(reference_result, result, atol=atol, rtol=rtol)
 
 
 
@@ -3510,7 +3509,7 @@ class TestQuantizedEmbeddingOps(TestCase):
         qresult = quant_op(packed_weight, indices, pruned_weights=False)
 
         ref = torch.embedding(weights, indices, padding_idx=-1, scale_grad_by_freq=False, sparse=False)
-        torch.testing.assert_allclose(ref, qresult, atol=0.005, rtol=1e-3)
+        torch.testing.assert_close(ref, qresult, atol=0.005, rtol=1e-3)
 
 
     def test_embedding_2d_indices(self):
@@ -3533,7 +3532,7 @@ class TestQuantizedEmbeddingOps(TestCase):
         qweight = torch.quantize_per_channel(weights, qparams[0], qparams[1], axis=0, dtype=torch.quint8)
         packed_weight = prepack_op(qweight)
         qresult = quant_op(packed_weight, indices, pruned_weights=False)
-        torch.testing.assert_allclose(ref, qresult, atol=0.05, rtol=1e-3)
+        torch.testing.assert_close(ref, qresult, atol=0.05, rtol=1e-3)
 
     def test_embedding_bag_2d_indices(self):
         """
@@ -3555,7 +3554,7 @@ class TestQuantizedEmbeddingOps(TestCase):
         pt_prepack_op = torch.ops.quantized.embedding_bag_byte_prepack
         q_weights = pt_prepack_op(weights)
         qresult = pt_op(q_weights, indices, mode=0, pruned_weights=False)
-        torch.testing.assert_allclose(result, qresult, atol=0.05, rtol=1e-3)
+        torch.testing.assert_close(result, qresult, atol=0.05, rtol=1e-3)
 
         # Test TorchBind based embedding_bag operator
         obs = PerChannelMinMaxObserver(dtype=torch.quint8, qscheme=torch.per_channel_affine_float_qparams, ch_axis=0)
@@ -3569,7 +3568,7 @@ class TestQuantizedEmbeddingOps(TestCase):
         packed_weight = torch.ops.quantized.embedding_bag_prepack(qweight)
         qresult = torch.ops.quantized.embedding_bag_byte(packed_weight, indices, mode=0)
 
-        torch.testing.assert_allclose(result, qresult, atol=0.05, rtol=1e-3)
+        torch.testing.assert_close(result, qresult, atol=0.05, rtol=1e-3)
 
 
 class TestQuantizedConv(TestCase):
