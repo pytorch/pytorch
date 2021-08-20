@@ -80,6 +80,14 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
     op.id = ctx->correlationId;
     op.startTime = ctx->startUs;
     op.endTime = end_time;
+
+    if (jit::currentFrameId().has_value()) {
+      auto frame_id = jit::currentFrameId().value();
+      op.addMetadata("pc", std::to_string(frame_id.pc));
+      op.addMetadata("NodeSchema", "\"" + frame_id.node_schema + "\"");
+      op.addMetadata("NodeHeader", "\"" + frame_id.node_header + "\"");
+    }
+
     // optimization - postpone shapesToStr till finalizeCPUTrace
     // is called from disableProfiler
     // if (ctx->shapes && !ctx->shapes->empty()) {
@@ -155,10 +163,8 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
         act.addMetadata("pc", std::to_string(frame_id.pc));
         act.addMetadata("NodeSchema", "\"" + frame_id.node_schema + "\"");
         act.addMetadata("NodeHeader", "\"" + frame_id.node_header + "\"");
-      } else {
-        act.endTime = getTimeUs();
       }
-      act.endTime = act.startTime + 1;
+      act.endTime = getTimeUs();
 
       act.addMetadata("Device Type", std::to_string((int8_t)device.type()));
       act.addMetadata("Device Id", std::to_string(device.index()));
@@ -615,6 +621,12 @@ ProfilerResult::ProfilerResult() = default;
 ProfilerResult::~ProfilerResult() = default;
 
 #ifdef USE_KINETO
+
+const std::vector<std::unique_ptr<libkineto::TraceActivity>>* ProfilerResult::
+    getActivites() {
+  return trace_->activities();
+}
+
 void ProfilerResult::save(const std::string& path) {
   // Kineto's save is destructive
   TORCH_CHECK(!saved_, "Trace is already saved");

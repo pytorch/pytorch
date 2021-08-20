@@ -68,26 +68,26 @@ struct MemoryTracingAllocator final : at::Allocator {
     auto bt = c10::get_backtrace(0, 200, true);
     TORCH_INTERNAL_ASSERT(torch::jit::currentFrameId().has_value());
     auto frame_node_id = torch::jit::currentFrameId().value();
-    allocation_traces_.emplace_back(MemEvent{
+    allocation_traces_.emplace_back(torch::jit::MemEvent{
         frame_node_id.pc,
         bt,
         dataPtrAddrToStr(orig_ptr.get()),
         frame_node_id.node_schema,
         frame_node_id.node_header,
         nbytes,
-        MemEvent::EventType::Allocate});
+        torch::jit::MemEvent::EventType::Allocate});
     allocations_.insert({orig_ptr.get(), nbytes});
 
     auto deleter = [this, &bt, &nbytes](void* ptr) {
       auto frame_node_id = torch::jit::currentFrameId().value();
-      allocation_traces_.emplace_back(MemEvent{
+      allocation_traces_.emplace_back(torch::jit::MemEvent{
           frame_node_id.pc,
           bt,
           dataPtrAddrToStr(ptr),
           frame_node_id.node_schema,
           frame_node_id.node_header,
           nbytes,
-          MemEvent::EventType::Free});
+          torch::jit::MemEvent::EventType::Free});
       return DoNothing(ptr);
     };
     return c10::InefficientStdFunctionContext::makeDataPtr(
@@ -96,7 +96,7 @@ struct MemoryTracingAllocator final : at::Allocator {
 
  private:
   c10::Allocator& orig_allocator_;
-  mutable std::vector<MemEvent> allocation_traces_;
+  mutable std::vector<torch::jit::MemEvent> allocation_traces_;
   mutable std::map<void*, size_t> allocations_;
   friend WithProfileAllocationsGuard;
 };
@@ -107,7 +107,7 @@ WithProfileAllocationsGuard::WithProfileAllocationsGuard(
           MemoryTracingAllocator{device_type})),
       device_type_(device_type) {}
 
-std::vector<MemEvent> WithProfileAllocationsGuard::getAllocationTraces() {
+std::vector<torch::jit::MemEvent> WithProfileAllocationsGuard::getAllocationTraces() {
   return tracer_->allocation_traces_;
 }
 

@@ -13,6 +13,7 @@
 namespace libkineto {
 struct TraceActivity;
 class ActivityTraceInterface;
+class GenericTraceActivity;
 }
 #endif
 
@@ -291,6 +292,7 @@ struct TORCH_API ProfilerResult {
 
 #ifdef USE_KINETO
   void save(const std::string& path);
+  const std::vector<std::unique_ptr<libkineto::TraceActivity>>* getActivites();
 #endif // USE_KINETO
 
  private:

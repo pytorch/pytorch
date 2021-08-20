@@ -1,17 +1,18 @@
 #include <torch/csrc/jit/passes/memory_planning.h>
 #include <torch/csrc/jit/passes/memory_planning/MemoryPlanningAllocator.h>
-#include <torch/csrc/jit/passes/memory_planning/greedy_by_size.h>
 #include <torch/csrc/jit/passes/memory_planning/greedy_by_breadth.h>
+#include <torch/csrc/jit/passes/memory_planning/greedy_by_size.h>
 #include <torch/csrc/jit/passes/memory_planning/linear_scan.h>
 
 #include <regex>
 
+#include <aten/src/ATen/core/interned_strings.h>
 #include <c10/util/Backtrace.h>
 #include <jit/tensorexpr/kernel.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/static/ops.h>
-#include <aten/src/ATen/core/interned_strings.h>
 
 namespace torch {
 namespace jit {
@@ -139,44 +140,38 @@ void insertPreAllocTensorNodes(
     std::shared_ptr<Graph>& graph,
     Node* storage,
     std::unordered_map<LiveRange, Region, live_range_hash> allocations,
-    std::vector<std::tuple<LiveRange, FrameNodeId, std::string>>
-        live_range_node) {
-//  std::sort(
-//      live_range_node.begin(), live_range_node.end(), [](auto v1, auto v2) {
-//        return v1.first.begin < v2.first.begin;
-//      });
-  uint64_t total_size = storage->i(attr::total_size);
-  for (auto& item : live_range_node) {
-//    auto lvr = item.first;
-//    auto region = item.second;
-    //
-    //    // const_cast fishy?
-    //    auto node = const_cast<Node*>(allocation->node());
-    //
-    //    // the way that this node magically *becomes* the out varaint is
-    //    simply
-    //    // by add an extra input. this is because op resolution happens
-    //    // at runtime via the op registry (by matching on the schema).
-    //    auto* alloc = graph->create(prim::AllocateTensor, 1);
-    //    node->addInput(alloc->output());
-    //    GRAPH_DEBUG("inserting allocation op for ",
-    //    node->getOperator().schema()); alloc->insertBefore(node);
-    //    alloc->addInput(storage->output());
-    //
-    //    auto ttp = allocation->type()->expect<c10::TensorType>();
-    //    std::vector<int64_t> sizes, strides;
-    //    std::tie(sizes, strides) = getSizesStrides(ttp);
-    //    TORCH_CHECK(
-    //        region.offset + region.size <= total_size,
-    //        "trying to create an allocation that exceeds previously planned
-    //        memory");
-    //    alloc->i_(attr::size, region.size);
-    //    alloc->i_(attr::offset, region.offset);
-    //    alloc->is_(attr::sizes, sizes);
-    //    alloc->is_(attr::stride, strides);
-    //    alloc->i_(attr::device,
-    //    static_cast<int8_t>(storage->i(attr::device))); alloc->i_(attr::dtype,
-    //    static_cast<int8_t>(ttp->scalarType().value()));
+    std::vector<std::pair<FrameNodeId, std::vector<LiveRange>>>
+        collected_node_live_ranges) {
+  std::sort(
+      collected_node_live_ranges.begin(),
+      collected_node_live_ranges.end(),
+      frame_node_id_cmp());
+
+  //  uint64_t total_size = storage->i(attr::total_size);
+  auto node = graph->nodes().begin();
+
+  for (auto& item : collected_node_live_ranges) {
+    auto frame_id = item.first;
+    auto lvrs = item.second;
+    std::sort(lvrs.begin(), lvrs.end(), live_range_start_cmp());
+    while (!getHeader(*node).compare(frame_id.node_header)) {
+      node++;
+    }
+    TORCH_INTERNAL_ASSERT(
+        canonicalSchemaString(node->schema()).compare(frame_id.node_header));
+
+    for (const auto& lvr : lvrs) {
+      auto region = allocations[lvr];
+      auto* alloc = graph->create(prim::PreAllocateTensor, 0);
+      GRAPH_DEBUG(
+          "inserting allocation op for ",
+          getHeader(*node),
+          "with size ",
+          region.size);
+      alloc->insertBefore(*node);
+      alloc->i_(attr::size, region.size);
+      alloc->i_(attr::offset, region.offset);
+    }
   }
 }
 
@@ -276,57 +271,43 @@ void printAllocation(
   }
 }
 
-std::string getNodeKindAndOffsetFromBt(std::string bt) {
-  auto frame_strs = c10::backTraceToVecStr(bt);
+std::vector<std::pair<FrameNodeId, std::vector<LiveRange>>>
+collectLiveRangesPerNode(
+    std::vector<std::pair<LiveRange, FrameNodeId>> live_range_node_header) {
+  std::unordered_map<FrameNodeId, std::vector<LiveRange>, frame_node_id_hash>
+      node_live_ranges;
 
-  // e.g. at::native::_convolution(...) + 11551 (0x1275e23bf in
-  // libtorch_cpu.dylib) is this mapping at::native::_convolution - >
-  // aten::_convolution robust?
-  // when does <ident> parens fail?
-
-  std::string native_op_str = "";
-  std::regex rgx(R"(^at::native::(\w+)\(.*)");
-  std::smatch match;
-  auto frame_str = frame_strs.rbegin();
-  for (; frame_str != frame_strs.rend(); frame_str++) {
-    if (std::regex_search(*frame_str, match, rgx)) {
-      break;
-    }
+  for (const auto& item : live_range_node_header) {
+    auto lvr = item.first;
+    auto frame_node_id = item.second;
+    node_live_ranges[frame_node_id].emplace_back(lvr);
   }
-  TORCH_INTERNAL_ASSERT(frame_str != frame_strs.rend() && !match.empty());
-  TORCH_INTERNAL_ASSERT(nativeOpIsRegistered(Symbol::aten(match[1].str())));
-  return match[1].str();
-}
 
-size_t getInstructionOffset() {
-  return 0;
-}
-
-void collectAllocsPerNode(
-    std::vector<std::tuple<LiveRange, FrameNodeId, std::string>>
-        live_range_node_alloc) {
-  std::unordered_map<FrameNodeId, std::vector<std::string>, frame_node_id_hash>
-      node_allocs;
-
-  for (const auto& item : live_range_node_alloc) {
-    auto lvr = std::get<0>(item);
-    auto frame_node_id = std::get<1>(item);
-    auto bt = std::get<2>(item);
+  std::vector<std::pair<FrameNodeId, std::vector<LiveRange>>>
+      collected_node_live_ranges;
+  for (const auto& item : node_live_ranges) {
+    std::vector<LiveRange> lvrs(item.second.begin(), item.second.end());
+    std::sort(lvrs.begin(), lvrs.end(), live_range_start_cmp());
+    collected_node_live_ranges.emplace_back(
+        std::make_pair(item.first, lvrs));
   }
+  std::sort(
+      collected_node_live_ranges.begin(),
+      collected_node_live_ranges.end(),
+      frame_node_id_cmp());
+  return collected_node_live_ranges;
 }
 
-void planMemoryWithTracing(
-    std::shared_ptr<Graph>& graph,
-    Strategy strat,
-    std::vector<MemEvent> allocation_traces) {
-  // validate
-  TORCH_INTERNAL_ASSERT(!allocation_traces.empty());
+std::pair<
+    std::unordered_map<LiveRange, uint64_t, live_range_hash>,
+    std::vector<std::pair<LiveRange, FrameNodeId>>>
+getLiveRangesFromMemEvents(std::vector<MemEvent> mem_events) {
   std::unordered_map<LiveRange, uint64_t, live_range_hash> managed_live_ranges;
-  std::vector<std::tuple<LiveRange, FrameNodeId, std::string>>
-      live_range_node_alloc;
+  std::vector<std::pair<LiveRange, FrameNodeId>> live_range_node_header;
 
   std::unordered_map<std::string, MemEvent> allocs;
-  for (auto& mem_event : allocation_traces) {
+  // validate
+  for (auto& mem_event : mem_events) {
     if (mem_event.type == MemEvent::EventType::Allocate) {
       allocs.insert({mem_event.ptr_addr, mem_event});
     } else if (mem_event.type == MemEvent::EventType::Free) {
@@ -339,16 +320,43 @@ void planMemoryWithTracing(
           alloc.node_header == mem_event.node_header);
 
       auto lvr = LiveRange{alloc.time, mem_event.time};
-      managed_live_ranges[lvr] = alloc.size;
-      live_range_node_alloc.emplace_back(std::make_tuple(
-          lvr,
-          FrameNodeId{alloc.time, alloc.node_schema, alloc.node_header},
-          alloc.allocation_trace));
+      managed_live_ranges.insert({lvr, alloc.size});
+      live_range_node_header.emplace_back(std::make_tuple(
+          lvr, FrameNodeId{alloc.time, alloc.node_schema, alloc.node_header}));
     }
   }
   TORCH_INTERNAL_ASSERT(allocs.empty());
+  return std::make_pair(managed_live_ranges, live_range_node_header);
+}
+
+void planMemoryWithTracing(
+    std::shared_ptr<Graph>& graph,
+    Strategy strat,
+    std::vector<MemEvent> mem_events) {
+  TORCH_INTERNAL_ASSERT(!mem_events.empty());
+  std::unordered_map<LiveRange, uint64_t, live_range_hash> managed_live_ranges;
+  std::vector<std::pair<LiveRange, FrameNodeId>> live_range_node_header;
+  std::tie(managed_live_ranges, live_range_node_header) =
+      getLiveRangesFromMemEvents(mem_events);
 
   auto allocations = greedyBySize(managed_live_ranges);
+
+  switch (strat) {
+    case Strategy::NAIVE: {
+      return;
+    }
+    case Strategy::LINEAR_SCAN: {
+      allocations = linearScanHeuristic(managed_live_ranges);
+      break;
+    };
+    case Strategy::GREEDY_BY_SIZE: {
+      allocations = greedyBySize(managed_live_ranges);
+      break;
+    }
+    default:
+      return;
+  }
+
   auto total_size = getTotalAllocationSize(allocations);
 
   GRAPH_DEBUG("\ngraph before inserting storage node\n", *graph);
@@ -356,8 +364,10 @@ void planMemoryWithTracing(
   auto storage_node = insertAllocStorageNode(graph, total_size);
   GRAPH_DEBUG("\ngraph after inserting storage node\n", *graph);
 
+  auto collected_node_live_ranges =
+      collectLiveRangesPerNode(live_range_node_header);
   insertPreAllocTensorNodes(
-      graph, storage_node, allocations, live_range_node_alloc);
+      graph, storage_node, allocations, collected_node_live_ranges);
   GRAPH_DEBUG("\ngraph after inserting alloc nodes\n", *graph);
 }
 
