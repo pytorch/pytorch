@@ -149,6 +149,7 @@ case "$image" in
   pytorch-linux-xenial-py3-clang7-asan)
     ANACONDA_PYTHON_VERSION=3.6
     CLANG_VERSION=7
+    CMAKE_VERSION=3.10.3
     PROTOBUF=yes
     DB=yes
     VISION=yes
