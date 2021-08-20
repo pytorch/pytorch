@@ -156,8 +156,8 @@ class CollatorIterDataPipe(MapperIterDataPipe):
 
 
 @functional_datapipe('legacy_transforms')
-class TransformerIterDataPipe(MapperIterDataPipe):
-    r""" :class:`TransformerIterDataPipe`.
+class TransformMapperIterDataPipe(MapperIterDataPipe):
+    r""" :class:`TransformMapperIterDataPipe`.
 
     Iterable DataPipe to use transform(s) from torchvision or torchaudio to transform
     data from datapipe.
