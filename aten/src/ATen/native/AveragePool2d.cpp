@@ -82,14 +82,7 @@ TORCH_PRECOMPUTE_META_FUNC(avg_pool2d)
         input.options().memory_format(memory_format));
   }
 
-  return {
-        .kH=kH,
-        .kW=kW,
-        .dH=dH,
-        .dW=dW,
-        .padH=padH,
-        .padW=padW
-  };
+  return {kH, kW, dH, dW, padH, padW};
 }
 
 TORCH_META_FUNC(avg_pool2d_backward) (
