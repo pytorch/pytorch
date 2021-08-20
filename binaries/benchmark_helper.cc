@@ -16,7 +16,6 @@
 
 #include <chrono>
 #include <fstream>
-#include <iostream>
 #include <string>
 #include <thread>
 #ifdef _WIN32

@@ -15,6 +15,7 @@ import torch.distributed.elastic.timer as timer
 import torch.multiprocessing as torch_mp
 from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
+    TEST_WITH_TSAN,
     run_tests,
     IS_WINDOWS,
     IS_MACOS,
@@ -54,7 +55,7 @@ if not (IS_WINDOWS or IS_MACOS):
         unittest. As of now this will SIGSEGV.
         """
 
-        @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test is asan incompatible")
+        @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN or TEST_WITH_TSAN, "test is a/tsan incompatible")
         def test_torch_mp_example(self):
             # in practice set the max_interval to a larger value (e.g. 60 seconds)
             mp_queue = mp.get_context("spawn").Queue()
@@ -79,13 +80,17 @@ if not (IS_WINDOWS or IS_MACOS):
 
             server.stop()
 
-        @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test is asan incompatible")
+        @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN or TEST_WITH_TSAN, "test is a/tsan incompatible")
         def test_example_start_method_spawn(self):
             self._run_example_with(start_method="spawn")
 
-        # @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test is asan incompatible")
+        # @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN or TEST_WITH_TSAN, "test is a/tsan incompatible")
         # def test_example_start_method_forkserver(self):
         #     self._run_example_with(start_method="forkserver")
+
+        @sandcastle_skip_if(TEST_WITH_TSAN, "test is tsan incompatible")
+        def test_example_start_method_fork(self):
+            self._run_example_with(start_method="fork")
 
         def _run_example_with(self, start_method):
             spawn_ctx = mp.get_context(start_method)
