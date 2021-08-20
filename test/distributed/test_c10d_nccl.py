@@ -43,15 +43,19 @@ from torch.testing._internal.common_utils import (
     TestCase,
     run_tests,
     retry_on_connect_failures,
-    TEST_WITH_ASAN,
+    TEST_WITH_DEV_DBG_ASAN,
+    TEST_WITH_ROCM,
     TEST_WITH_TSAN,
     sandcastle_skip,
     sandcastle_skip_if,
 )
 from torch.utils.checkpoint import checkpoint
+from torch.distributed.optim import functional_optim_map
 
 if not IS_WINDOWS:
     from torch.distributed.optim.functional_sgd import _FunctionalSGD
+    from torch.distributed.optim.functional_adam import _FunctionalAdam
+    from torch.distributed.optim.functional_adamw import _FunctionalAdamW
 
 if TEST_WITH_TSAN:
     print(
@@ -60,12 +64,17 @@ if TEST_WITH_TSAN:
     )
     sys.exit(0)
 
-if TEST_WITH_ASAN:
+if TEST_WITH_DEV_DBG_ASAN:
     print(
         "Skip ASAN as torch + multiprocessing spawn have known issues", file=sys.stderr
     )
     sys.exit(0)
 
+# bfloat16 is only supported by CUDA 11+
+BFLOAT16_AVAILABLE = (
+    torch.cuda.is_available()
+    and torch.version.cuda is not None
+    and int(torch.version.cuda.split('.')[0]) >= 11)
 
 class RendezvousEnvTest(TestCase):
     @retry_on_connect_failures
@@ -1556,15 +1565,23 @@ class DistributedDataParallelTest(
 
     def _test_default_ddp_comm_hooks_nccl(self, gradient_as_bucket_view=False):
         """
-        This unit test verifies whether default Python DDP communication hooks ALLREDUCE and FP16_COMPRESS
-        can give the same result with the case of no hook registered.
+        This unit test verifies whether default Python DDP communication hooks ALLREDUCE, FP16_COMPRESS
+        and BF16_COMPRESS, can give the same result with the case of no hook registered.
         """
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         # For these default DDP comm hooks, the only state is process group.
         state = process_group
-        for hook in [default.allreduce_hook, default.fp16_compress_hook]:
+        hook_options = [default.allreduce_hook, default.fp16_compress_hook]
+        if (
+            not TEST_WITH_ROCM
+            and BFLOAT16_AVAILABLE
+            and c10d.is_nccl_available()
+            and torch.cuda.nccl.version() >= (2, 9, 7)
+        ):
+            hook_options.append(default.bf16_compress_hook)
+        for hook in hook_options:
             # Get GPU model with the hook registered.
             # The first arg 'process_group' is used for initializing the test environment,
             # so it cannot be replaced by 'state', although they have the same value.
@@ -1600,15 +1617,45 @@ class DistributedDataParallelTest(
             # check whether the grads are equal to what DDP without hook would return.
             self._run_and_verify_hook(gpu_model, 8, 0.25 * torch.ones(2, 2))
 
-    def _test_hook_then_optimizer(self, gradient_as_bucket_view=False):
+    def _test_bf16_compress_wrapper(self, gradient_as_bucket_view=False):
+        """
+        This unit test verifies whether wrapping the ALLREDUCE and POWER_SGD hooks with
+        the BF16_WRAPPER can give the same result as when there is no hook registered.
+        """
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+        powerSGD_state = powerSGD.PowerSGDState(process_group=process_group)
+
+        hook_args = [
+            (powerSGD.powerSGD_hook, powerSGD_state),
+            (default.allreduce_hook, process_group),
+        ]
+
+        for hook, state in hook_args:
+            gpu_model = self._gpu_model_with_ddp_comm_hook(
+                process_group,
+                default.bf16_compress_wrapper(hook),
+                gradient_as_bucket_view,
+                state,
+            )
+
+            # check whether the grads are equal to what DDP without hook would return.
+            self._run_and_verify_hook(gpu_model, 8, 0.25 * torch.ones(2, 2))
+
+    def _test_hook_then_optimizer(
+        self,
+        functional_optim_cls,
+        *functional_optim_args,
+        gradient_as_bucket_view=False,
+        **functional_optim_kwargs
+    ):
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
         hook, hook_state = default.allreduce_hook, process_group
-        sgd_lr = 1e-2
-        sgd_momentum = 0.9
-        sgd_weight_decay = 0.01
         opt_hook_state = default._OptimizerHookState(
-            _FunctionalSGD, sgd_lr, momentum=sgd_momentum, weight_decay=sgd_weight_decay
+            functional_optim_cls,
+            *functional_optim_args,
+            **functional_optim_kwargs,
         )
         gpu_model = self._gpu_model_with_ddp_comm_hook(
             process_group,
@@ -1627,11 +1674,11 @@ class DistributedDataParallelTest(
         gpu_model_allreduce = self._gpu_model_with_ddp_comm_hook(
             process_group, default.allreduce_hook, gradient_as_bucket_view, hook_state
         )
-        sgd = torch.optim.SGD(
+        mapping = {v: k for k, v in functional_optim_map.items()}
+        sgd = mapping.get(functional_optim_cls)(
             gpu_model_allreduce.parameters(),
-            sgd_lr,
-            momentum=sgd_momentum,
-            weight_decay=sgd_weight_decay,
+            *functional_optim_args,
+            **functional_optim_kwargs,
         )
         for _ in range(8):
             gpu_model_allreduce.zero_grad()
@@ -1702,14 +1749,84 @@ class DistributedDataParallelTest(
         self._test_fp16_compress_wrapper()
 
     @requires_nccl()
+    @requires_nccl_version((2, 9, 7), "Need NCCL 2.9.7+ for BF16_COMPRESS")
+    @sandcastle_skip_if(
+        not BFLOAT16_AVAILABLE,
+        "BFloat16 is only supported by CUDA 11+",
+    )
     @skip_if_lt_x_gpu(2)
-    def test_hook_then_optimizer_nccl(self):
-        self._test_hook_then_optimizer()
+    @skip_if_rocm
+    def test_bf16_compress_wrapper_nccl(self):
+        self._test_bf16_compress_wrapper()
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_hook_then_optimizer_nccl_grad_as_bucket_view(self):
-        self._test_hook_then_optimizer(gradient_as_bucket_view=True)
+    def test_hook_then_sgd_nccl(self):
+        sgd_lr = 1e-2
+        sgd_momentum = 0.9
+        sgd_weight_decay = 0.01
+        self._test_hook_then_optimizer(
+            _FunctionalSGD,
+            sgd_lr,
+            momentum=sgd_momentum,
+            weight_decay=sgd_weight_decay,
+        )
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_hook_then_sgd_nccl_grad_as_bucket_view(self):
+        sgd_lr = 1e-2
+        sgd_momentum = 0.9
+        sgd_weight_decay = 0.01
+        self._test_hook_then_optimizer(
+            _FunctionalSGD,
+            sgd_lr,
+            momentum=sgd_momentum,
+            weight_decay=sgd_weight_decay,
+            gradient_as_bucket_view=True
+        )
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_hook_then_adamw_nccl(self):
+        adamw_lr = 1e-2
+        adamw_betas = (0.9, 0.99)
+        adamw_eps = 1e-6
+        self._test_hook_then_optimizer(
+            _FunctionalAdamW,
+            adamw_lr,
+            betas=adamw_betas,
+            eps=adamw_eps,
+            gradient_as_bucket_view=True
+        )
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_hook_then_adam_nccl(self):
+        adam_lr = 1e-2
+        adam_betas = (0.9, 0.99)
+        adam_eps = 1e-6
+        self._test_hook_then_optimizer(
+            _FunctionalAdam,
+            adam_lr,
+            betas=adam_betas,
+            eps=adam_eps,
+            gradient_as_bucket_view=True
+        )
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_hook_then_adam_nccl_grad_as_bucket_view(self):
+        adam_lr = 1e-2
+        adam_betas = (0.9, 0.99)
+        adam_eps = 1e-6
+        self._test_hook_then_optimizer(
+            _FunctionalAdam,
+            adam_lr,
+            betas=adam_betas,
+            eps=adam_eps,
+            gradient_as_bucket_view=True
+        )
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
@@ -1740,6 +1857,17 @@ class DistributedDataParallelTest(
     @skip_if_lt_x_gpu(2)
     def test_fp16_compress_wrapper_is_view(self):
         self._test_fp16_compress_wrapper(gradient_as_bucket_view=True)
+
+    @requires_nccl()
+    @requires_nccl_version((2, 9, 7), "Need NCCL 2.9.7+ for BF16_COMPRESS")
+    @sandcastle_skip_if(
+        not BFLOAT16_AVAILABLE,
+        "BFloat16 is only supported by CUDA 11+",
+    )
+    @skip_if_lt_x_gpu(2)
+    @skip_if_rocm
+    def test_bf16_compress_wrapper_is_view(self):
+        self._test_bf16_compress_wrapper(gradient_as_bucket_view=True)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
@@ -2053,7 +2181,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         pg.allreduce(torch.rand(10).cuda(self.rank))
 
     @requires_nccl()
-    @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
+    @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
     @skip_if_rocm
     def test_nccl_errors_nonblocking(self):
@@ -2116,7 +2244,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
 
     @with_nccl_blocking_wait
     @requires_nccl()
-    @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
+    @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
     @skip_if_rocm
     def test_nccl_errors_blocking_clean_exit(self):
@@ -2124,7 +2252,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
 
     @with_nccl_blocking_wait
     @requires_nccl()
-    @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
+    @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
     @skip_if_rocm
     def test_nccl_errors_blocking_nonzero_exit(self):
@@ -2132,7 +2260,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
 
     @with_nccl_blocking_wait
     @requires_nccl()
-    @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
+    @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
     @skip_if_rocm
     @sandcastle_skip(
@@ -2143,7 +2271,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
 
     @with_nccl_blocking_wait
     @requires_nccl()
-    @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
+    @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
     @skip_if_rocm
     def test_nccl_errors_blocking_sigkill(self):
@@ -2151,7 +2279,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
 
     @with_nccl_blocking_wait
     @requires_nccl()
-    @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
+    @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
     @skip_if_rocm
     def test_nccl_errors_blocking_sigterm(self):
@@ -2159,7 +2287,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
 
     @with_nccl_blocking_wait
     @requires_nccl()
-    @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
+    @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
     def test_nccl_blocking_wait_with_barrier(self):
         store = c10d.FileStore(self.file_name, self.world_size)

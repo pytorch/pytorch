@@ -7,6 +7,12 @@ on:
     workflows:
       - Lint
 
+
+concurrency:
+  group: add-annotations-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+
 jobs:
   annotate:
     if: ${{ github.repository_owner == 'pytorch' }}

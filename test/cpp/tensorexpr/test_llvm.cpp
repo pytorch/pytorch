@@ -225,8 +225,8 @@ TEST(LLVM, fastLogFloat) {
 
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = a_buf.load(index);
-  Stmt* store_b = b_buf.store({index}, fast_log(load_a));
-  Stmt* stmt = For::make(index, 0, kTotalSize, store_b);
+  StmtPtr store_b = b_buf.store({index}, fast_log(load_a));
+  StmtPtr stmt = For::make(index, 0, kTotalSize, store_b);
 
   PaddedBuffer<float> a_v(kTotalSize);
   PaddedBuffer<float> b_v(kTotalSize);
@@ -478,7 +478,7 @@ TEST(LLVM, DirectVectorization) {
   BufHandle c("c", {M, N}, kFloat);
   VarHandle m("m", kInt);
   VarHandle n("n", kInt);
-  Stmt* s = For::make(
+  StmtPtr s = For::make(
       m,
       0,
       M,
@@ -598,11 +598,10 @@ TEST(LLVM, VectorizerLoadStoreTest) {
 
   Placeholder c_buf(BufHandle(c->buf()));
   LoopNest l({c});
-  Stmt* s = l.root_stmt();
-  ASSERT_TRUE(LoopNest::vectorize(
-      dynamic_cast<For*>(dynamic_cast<Block*>(s)->front())));
+  StmtPtr s = l.root_stmt();
+  ASSERT_TRUE(LoopNest::vectorize(to<For>(to<Block>(s)->front())));
 
-  ASSERT_TRUE(dynamic_cast<For*>(dynamic_cast<Block*>(s)->front()) == nullptr);
+  ASSERT_TRUE(to<For>(to<Block>(s)->front()) == nullptr);
 
   LLVMCodeGen cg(s, {a, c_buf});
 
@@ -623,10 +622,9 @@ TEST(LLVM, VectorizeBitCast) {
 
   Placeholder c_buf(BufHandle(c->buf()));
   LoopNest l({c});
-  Stmt* s = l.root_stmt();
-  ASSERT_TRUE(LoopNest::vectorize(
-      dynamic_cast<For*>(dynamic_cast<Block*>(s)->front())));
-  ASSERT_TRUE(dynamic_cast<For*>(dynamic_cast<Block*>(s)->front()) == nullptr);
+  StmtPtr s = l.root_stmt();
+  ASSERT_TRUE(LoopNest::vectorize(to<For>(to<Block>(s)->front())));
+  ASSERT_TRUE(to<For>(to<Block>(s)->front()) == nullptr);
 
   LLVMCodeGen cg(s, {a, c_buf});
 
@@ -1223,7 +1221,7 @@ TEST(LLVM, SimpleMath01) {
     return cast<float>(i * i + 1);
   });
   LoopNest l({tensor});
-  Stmt* stmt = l.root_stmt();
+  StmtPtr stmt = l.root_stmt();
   Placeholder f_buf(BufHandle(tensor->buf()));
   LLVMCodeGen cg(stmt, {f_buf});
 
@@ -1249,7 +1247,7 @@ TEST(LLVM, ComputeMul) {
 
   Placeholder c_buf(BufHandle(c->buf()));
   LoopNest l({c});
-  Stmt* s = l.root_stmt();
+  StmtPtr s = l.root_stmt();
 
   LLVMCodeGen cg(s, {a, b, c_buf});
 
@@ -1275,7 +1273,7 @@ TEST(LLVM, BroadcastAdd) {
   Placeholder c_buf(BufHandle(c->buf()));
   LoopNest l({c});
   l.prepareForCodegen();
-  Stmt* s = l.root_stmt();
+  StmtPtr s = l.root_stmt();
 
   LLVMCodeGen cg(s, {a, b, c_buf});
 
@@ -1333,7 +1331,7 @@ TEST(LLVM, DynamicShapeAdd) {
     Placeholder b(BufHandle("b", {n}, kFloat));
     Placeholder c(BufHandle("c", {n}, kFloat));
     VarHandle i("i", kInt);
-    Stmt* s = For::make(i, 0, n, c.store({i}, a.load(i) + b.load(i)));
+    StmtPtr s = For::make(i, 0, n, c.store({i}, a.load(i) + b.load(i)));
     std::vector<float> aData(size, 1.0f);
     std::vector<float> bData(size, 2.0f);
     std::vector<float> cData(size, 0.0f);
@@ -1355,7 +1353,7 @@ TEST(LLVM, BindDynamicShapeAdd) {
     Placeholder b(BufHandle("b", {n}, kFloat));
     Placeholder c(BufHandle("c", {n}, kFloat));
     VarHandle i("i", kInt);
-    Stmt* s = For::make(i, 0, n, c.store({i}, a.load(i) + b.load(i)));
+    StmtPtr s = For::make(i, 0, n, c.store({i}, a.load(i) + b.load(i)));
     std::vector<float> aData(size, 1.0f);
     std::vector<float> bData(size, 2.0f);
     std::vector<float> cData(size, 0.0f);
@@ -1378,7 +1376,7 @@ TEST(LLVM, TensorDynamicShapeAdd) {
       return a.load(i) + b.load(i);
     });
     LoopNest l({c});
-    Stmt* s = l.root_stmt();
+    StmtPtr s = l.root_stmt();
     LLVMCodeGen cg(s, {a, b, c, n});
     std::vector<float> aData(size, 1.0f);
     std::vector<float> bData(size, 2.0f);
@@ -1404,7 +1402,7 @@ TEST(LLVM, DynamicShape2D) {
         });
     LoopNest l({c});
     l.prepareForCodegen();
-    Stmt* s = l.root_stmt();
+    StmtPtr s = l.root_stmt();
     LLVMCodeGen cg(s, {a, b, c, m, n});
     std::vector<float> aData(M * N, 1.0f);
     std::vector<float> bData(M * N, 2.0f);
@@ -1419,7 +1417,7 @@ TEST(LLVM, DynamicShape2D) {
 
 TEST(LLVM, EmptyStmt) {
   KernelScope kernel_scope;
-  Stmt* s = new Block({});
+  StmtPtr s = alloc<Block>(std::vector<StmtPtr>({}));
 
   LLVMCodeGen cg(s, {});
   cg.call({});
@@ -1434,7 +1432,7 @@ TEST(LLVM, EliminatedStmt) {
 
   LoopNest l({c});
   l.prepareForCodegen();
-  Stmt* s = l.root_stmt();
+  StmtPtr s = l.root_stmt();
   s = IRSimplifier::simplify(s);
   LLVMCodeGen cg(s, {a, c});
   std::vector<float> aData(1, 1.0f);
@@ -1458,7 +1456,7 @@ TEST(LLVM, SimpleReduction) {
   LoopNest loop({b});
 
   loop.prepareForCodegen();
-  Stmt* s = loop.root_stmt();
+  StmtPtr s = loop.root_stmt();
   s = IRSimplifier::simplify(s);
 
   LLVMCodeGen cg(s, {a, b});
@@ -1496,19 +1494,19 @@ TEST(LLVM, RFactorReduction) {
   Tensor* b = Reduce("sum", axis, Sum(), a, reduce_axis);
   LoopNest loop({b});
 
-  std::vector<For*> loops = loop.getLoopStmtsFor(b);
-  For* loop_m = loops.at(1);
-  For* loop_n = loops.at(2);
+  std::vector<ForPtr> loops = loop.getLoopStmtsFor(b);
+  ForPtr loop_m = loops.at(1);
+  ForPtr loop_n = loops.at(2);
   loop.reorderAxis(loop_m, loop_n);
 
   loops = loop.getLoopStmtsFor(b);
   loop_m = loops.at(2);
   loop_n = loops.at(1);
-  auto b_body = const_cast<Stmt*>(loop.getAllWritesToBuf(b->buf())[1]);
+  auto b_body = loop.getAllWritesToBuf(b->buf())[1];
   ASSERT_TRUE(loop.rfactor(b_body, loop_n));
 
   loop.prepareForCodegen();
-  Stmt* s = loop.root_stmt();
+  StmtPtr s = loop.root_stmt();
   s = IRSimplifier::simplify(s);
 
   LLVMCodeGen cg(s, {a, b});
@@ -1542,10 +1540,10 @@ TEST(LLVM, RFactorVectorizedReduction) {
 
   Tensor* b = Reduce("sum", {{1, "K"}}, Sum(), a, {{M, "M"}, {N, "N"}});
   LoopNest loopnest({b});
-  std::vector<For*> loops = loopnest.getLoopStmtsFor(b);
+  std::vector<ForPtr> loops = loopnest.getLoopStmtsFor(b);
   // Reorder n and m loops
   loopnest.reorderAxis(loops.at(1), loops.at(2));
-  auto b_body = const_cast<Stmt*>(loopnest.getAllWritesToBuf(b->buf()).at(1));
+  auto b_body = loopnest.getAllWritesToBuf(b->buf()).at(1);
   auto all_loops = loopnest.getAllLoopNestsWritingToBuf(b->buf());
   ASSERT_TRUE(all_loops.size() == 2 && all_loops[1].size() == 3);
   ASSERT_TRUE(loopnest.rfactor(b_body, all_loops[1][1]));
@@ -1559,7 +1557,7 @@ TEST(LLVM, RFactorVectorizedReduction) {
 
   loopnest.prepareForCodegen();
 
-  Stmt* s = IRSimplifier::simplify(loopnest.root_stmt());
+  StmtPtr s = IRSimplifier::simplify(loopnest.root_stmt());
   LLVMCodeGen cg(s, {a, b});
 
   PaddedBuffer<float> a_v(1, M, N, "a_v");
@@ -1593,8 +1591,8 @@ TEST(LLVM, SimpleParallel) {
         });
     LoopNest loop_nest({f});
     auto const& loops = loop_nest.getLoopStmtsFor(f);
-    For* m = loops[0];
-    For* n = loops[1];
+    ForPtr m = loops[0];
+    ForPtr n = loops[1];
     if (test_cfg & 0x1) {
       m->set_parallel();
     }
@@ -1602,7 +1600,7 @@ TEST(LLVM, SimpleParallel) {
       n->set_parallel();
     }
     loop_nest.prepareForCodegen();
-    Stmt* stmt = loop_nest.root_stmt();
+    StmtPtr stmt = loop_nest.root_stmt();
     LLVMCodeGen cg(stmt, {f});
 
     PaddedBuffer<float> f_v(M, N, "f_v");
@@ -1645,7 +1643,7 @@ TEST(LLVM, CompositeParallel) {
           return t3->load(m, n) + m + n;
         });
     LoopNest loop_nest({t4}, {t1, t2, t3, t4});
-    std::vector<For*> loop_list;
+    std::vector<ForPtr> loop_list;
     {
       auto const& loops = loop_nest.getLoopStmtsFor(t1);
       loop_list.push_back(loops[0]);
@@ -1671,7 +1669,7 @@ TEST(LLVM, CompositeParallel) {
       }
     }
     loop_nest.prepareForCodegen();
-    Stmt* stmt = loop_nest.root_stmt();
+    StmtPtr stmt = loop_nest.root_stmt();
     LLVMCodeGen cg(stmt, {t4});
 
     PaddedBuffer<float> t4_v(M, N, "t4_v");
@@ -1709,36 +1707,36 @@ TEST(LLVM, VectorizedGEMM) {
 
   {
     auto const& loops = loop.getLoopStmtsFor(CT);
-    For* m = loops[0];
+    ForPtr m = loops[0];
     loop.splitWithMask(m, 16);
   }
   {
     auto const& loops = loop.getLoopStmtsFor(CT);
-    For* n = loops[2];
+    ForPtr n = loops[2];
     loop.splitWithMask(n, 16);
   }
   // mo, mi, no, ni, k ->
   // mo, no, mi, ni, k
   {
     auto const& loops = loop.getLoopStmtsFor(CT);
-    For* mi = loops[1];
-    For* no = loops[2];
+    ForPtr mi = loops[1];
+    ForPtr no = loops[2];
     loop.reorderAxis(mi, no);
   }
   // mo, no, mi, ni, k ->
   // mo, no, mi, k, ni
   {
     auto const& loops = loop.getLoopStmtsFor(CT);
-    For* ni = loops[3];
-    For* k = loops[4];
+    ForPtr ni = loops[3];
+    ForPtr k = loops[4];
     loop.reorderAxis(ni, k);
   }
   // mo, no, mi, k, ni ->
   // mo, no, k, mi, ni
   {
     auto const& loops = loop.getLoopStmtsFor(CT);
-    For* mi = loops[2];
-    For* k = loops[3];
+    ForPtr mi = loops[2];
+    ForPtr k = loops[3];
     loop.reorderAxis(mi, k);
   }
   {
@@ -1749,7 +1747,7 @@ TEST(LLVM, VectorizedGEMM) {
 
   loop.prepareForCodegen();
 
-  Stmt* s = loop.root_stmt();
+  StmtPtr s = loop.root_stmt();
   s = IRSimplifier::simplify(s);
   LLVMCodeGen cg(s, {AP, BP, CT});
 
@@ -1785,7 +1783,7 @@ TEST(LLVM, CallRaw) {
 
   LoopNest l({c});
   l.prepareForCodegen();
-  Stmt* s = l.root_stmt();
+  StmtPtr s = l.root_stmt();
 
   int32_t N_value = 1024;
   std::vector<float> av(M * N_value);
