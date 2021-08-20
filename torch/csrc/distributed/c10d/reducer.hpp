@@ -69,6 +69,7 @@ class TORCH_API Reducer {
   explicit Reducer(
       std::vector<std::vector<at::Tensor>> replicas,
       std::vector<std::vector<size_t>> bucket_indices,
+      std::vector<size_t> per_bucket_size_limits,
       c10::intrusive_ptr<c10d::ProcessGroup> process_group,
       std::vector<std::vector<bool>> expect_sparse_gradients,
       int64_t bucket_bytes_cap,
@@ -82,7 +83,9 @@ class TORCH_API Reducer {
   // of which is specified by a list of indices in the variables list.
   // This function performs validation that the variables within a bucket
   // all live on the same device and have the same dimensionality.
-  void initialize_buckets(std::vector<std::vector<size_t>> bucket_indices);
+  void initialize_buckets(
+      std::vector<std::vector<size_t>> bucket_indices,
+      std::vector<size_t> per_bucket_sizes);
 
   // This function is called when the forward function has produced an output,
   // and the user wishes to reduce gradients in the backwards pass.
@@ -385,6 +388,10 @@ class TORCH_API Reducer {
     // If this bucket should expect a single sparse gradient.
     // Implies: replicas[i].variables.size() == 1.
     bool expect_sparse_gradient = false;
+    // "Limit" of cumulative parameter sizes that this bucket manages. It is
+    // actually a soft limit because we don't shard parameters across buckets
+    // so a single parameter may push it over the cap.
+    size_t bucket_size_limit;
   };
 
   std::vector<Bucket> buckets_;

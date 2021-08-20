@@ -17,48 +17,48 @@ class TORCH_API IRPrinter : public IRVisitor {
   explicit IRPrinter(std::ostream& os) : printer_os_(this, os) {}
 
   void print(ExprHandle);
-  void print(const Expr&);
-  void print(const Stmt&);
-  void visit(const Add* v) override;
-  void visit(const Sub* v) override;
-  void visit(const Mul* v) override;
-  void visit(const Div* v) override;
-  void visit(const Mod* v) override;
-  void visit(const Max* v) override;
-  void visit(const Min* v) override;
-  void visit(const And* v) override;
-  void visit(const Or* v) override;
-  void visit(const Xor* v) override;
-  void visit(const Lshift* v) override;
-  void visit(const Rshift* v) override;
-  void visit(const CompareSelect* v) override;
+  void print(Expr&);
+  void print(Stmt&);
+  void visit(Add* v) override;
+  void visit(Sub* v) override;
+  void visit(Mul* v) override;
+  void visit(Div* v) override;
+  void visit(Mod* v) override;
+  void visit(Max* v) override;
+  void visit(Min* v) override;
+  void visit(And* v) override;
+  void visit(Or* v) override;
+  void visit(Xor* v) override;
+  void visit(Lshift* v) override;
+  void visit(Rshift* v) override;
+  void visit(CompareSelect* v) override;
 #define IMM_PRINT_VISIT(Type, Name) void visit(const Name##Imm* v) override;
   AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_PRINT_VISIT);
 #undef IMM_PRINT_VISIT
-  void visit(const Cast* v) override;
-  void visit(const Var* v) override;
-  void visit(const Ramp* v) override;
-  void visit(const Load* v) override;
-  void visit(const Broadcast* v) override;
-  void visit(const IfThenElse* v) override;
-  void visit(const Intrinsics* v) override;
-  void visit(const Term* v) override;
-  void visit(const Polynomial* v) override;
-  void visit(const RoundOff* v) override;
-  void visit(const MaxTerm* v) override;
-  void visit(const MinTerm* v) override;
-  void visit(const ReduceOp* v) override;
+  void visit(Cast* v) override;
+  void visit(Var* v) override;
+  void visit(Ramp* v) override;
+  void visit(Load* v) override;
+  void visit(Broadcast* v) override;
+  void visit(IfThenElse* v) override;
+  void visit(Intrinsics* v) override;
+  void visit(Term* v) override;
+  void visit(Polynomial* v) override;
+  void visit(RoundOff* v) override;
+  void visit(MaxTerm* v) override;
+  void visit(MinTerm* v) override;
+  void visit(ReduceOp* v) override;
 
-  void visit(const AtomicAdd* v) override;
-  void visit(const SyncThreads* v) override;
-  void visit(const ExternalCall* v) override;
-  void visit(const Store* v) override;
-  void visit(const For* v) override;
-  void visit(const Cond* v) override;
-  void visit(const Block* v) override;
-  void visit(const Allocate* v) override;
-  void visit(const Free* v) override;
-  void visit(const Let* v) override;
+  void visit(AtomicAdd* v) override;
+  void visit(SyncThreads* v) override;
+  void visit(ExternalCall* v) override;
+  void visit(Store* v) override;
+  void visit(For* v) override;
+  void visit(Cond* v) override;
+  void visit(Block* v) override;
+  void visit(Allocate* v) override;
+  void visit(Free* v) override;
+  void visit(Let* v) override;
 
   // A child class may have a difference rule for generating dtype
   // string, e.g. CUDA needs int64_t to be generated as long long.

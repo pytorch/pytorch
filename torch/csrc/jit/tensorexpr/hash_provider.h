@@ -53,7 +53,7 @@ class Polynomial;
 class TORCH_API HashProvider : public IRVisitor {
  public:
   template <class T>
-  SimplifierHashType hash(const T* e) {
+  SimplifierHashType hash(T* e) {
     // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
     e->accept(this);
     return hashOf(e);
@@ -67,19 +67,19 @@ class TORCH_API HashProvider : public IRVisitor {
     exprToHash_.clear();
   }
 
-  void visit(const Add* v) override;
-  void visit(const Sub* v) override;
-  void visit(const Mul* v) override;
-  void visit(const Div* v) override;
-  void visit(const Mod* v) override;
-  void visit(const Max* v) override;
-  void visit(const Min* v) override;
-  void visit(const And* v) override;
-  void visit(const Or* v) override;
-  void visit(const Xor* v) override;
-  void visit(const Lshift* v) override;
-  void visit(const Rshift* v) override;
-  void visit(const CompareSelect* v) override;
+  void visit(Add* v) override;
+  void visit(Sub* v) override;
+  void visit(Mul* v) override;
+  void visit(Div* v) override;
+  void visit(Mod* v) override;
+  void visit(Max* v) override;
+  void visit(Min* v) override;
+  void visit(And* v) override;
+  void visit(Or* v) override;
+  void visit(Xor* v) override;
+  void visit(Lshift* v) override;
+  void visit(Rshift* v) override;
+  void visit(CompareSelect* v) override;
 
 // NOLINTNEXTLINE
 #define IMM_VISIT(Type, Name)                    \
@@ -90,23 +90,23 @@ class TORCH_API HashProvider : public IRVisitor {
   AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_VISIT);
 #undef IMM_VISIT
 
-  void visit(const Cast* v) override;
-  void visit(const Var* v) override;
-  void visit(const Ramp* v) override;
-  void visit(const Load* v) override;
-  void visit(const Store* v) override;
-  void visit(const Block* v) override;
-  void visit(const For* v) override;
-  void visit(const Broadcast* v) override;
-  void visit(const IfThenElse* v) override;
-  void visit(const Intrinsics* v) override;
-  void visit(const Allocate* v) override;
-  void visit(const Free* v) override;
-  void visit(const Cond* v) override;
-  void visit(const Term* v) override;
-  void visit(const Polynomial* v) override;
-  void visit(const MaxTerm* v) override;
-  void visit(const MinTerm* v) override;
+  void visit(Cast* v) override;
+  void visit(Var* v) override;
+  void visit(Ramp* v) override;
+  void visit(Load* v) override;
+  void visit(Store* v) override;
+  void visit(Block* v) override;
+  void visit(For* v) override;
+  void visit(Broadcast* v) override;
+  void visit(IfThenElse* v) override;
+  void visit(Intrinsics* v) override;
+  void visit(Allocate* v) override;
+  void visit(Free* v) override;
+  void visit(Cond* v) override;
+  void visit(Term* v) override;
+  void visit(Polynomial* v) override;
+  void visit(MaxTerm* v) override;
+  void visit(MinTerm* v) override;
 
   template <typename... Types>
   SimplifierHashType hash_combine(const Types&... args) {
@@ -116,7 +116,7 @@ class TORCH_API HashProvider : public IRVisitor {
   }
 
  private:
-  SimplifierHashType hashOf(const Expr* e) {
+  SimplifierHashType hashOf(Expr* e) {
     auto it = exprToHash_.find(e);
     if (it != exprToHash_.end()) {
       return it->second;
@@ -132,7 +132,7 @@ class TORCH_API HashProvider : public IRVisitor {
     return hash;
   }
 
-  SimplifierHashType hashOf(const Stmt* s) {
+  SimplifierHashType hashOf(Stmt* s) {
     auto it = exprToHash_.find(s);
     if (it != exprToHash_.end()) {
       return it->second;
@@ -169,7 +169,7 @@ class TORCH_API HashProvider : public IRVisitor {
         (seed._h >> 4);
   }
 
-  void _hash_combine(SimplifierHashType& seed, const Expr* e) {
+  void _hash_combine(SimplifierHashType& seed, Expr* e) {
     _hash_combine(seed, hash(e));
   }
 

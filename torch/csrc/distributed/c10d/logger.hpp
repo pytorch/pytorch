@@ -37,6 +37,8 @@ class TORCH_API Logger {
   void set_parameter_stats();
   // Get size of each bucket (Bytes).
   std::vector<int> get_bucket_sizes();
+  // Get bucket size limits specified during DDP construction.
+  std::vector<int> get_bucket_size_limits();
   // Set comm. hook, if used
   void set_comm_hook(const std::string& hook);
   // Set running with uneven input detection (model.join() context manager)
