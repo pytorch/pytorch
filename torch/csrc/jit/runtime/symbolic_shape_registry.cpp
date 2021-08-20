@@ -42,7 +42,7 @@ const std::string shape_compute_functions =
             assert self[i] != 0
 
           shape: List[int] = []
-          for i in range(0, len(self)-2):
+          for i in range(0, len(self) -2):
             shape.append(self[i])
           for elem in out:
             shape.append(elem)
