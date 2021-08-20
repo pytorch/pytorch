@@ -3,6 +3,7 @@ import torch
 import torch.nn.functional as F
 import torch.nn as nn
 import torch.nn.quantized as nnq
+import torch.nn.quantized._reference as nnqr
 import torch.nn.quantized.dynamic as nnqd
 import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.quantized as nniq
@@ -570,7 +571,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 LinearModule,
                 (),
                 (linear_module_input,),
-                ns.call_module(nn.Linear) if is_reference else ns.call_module(nnqd.Linear),
+                ns.call_module(nnqr.Linear) if is_reference else ns.call_module(nnqd.Linear),
                 None,
             ),
             (
@@ -578,7 +579,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 LinearModule,
                 (),
                 (linear_module_input,),
-                ns.call_module(nn.Linear if is_reference else nnq.Linear),
+                ns.call_module(nnqr.Linear if is_reference else nnq.Linear),
                 None,
             ),
         ]
@@ -607,6 +608,13 @@ class TestQuantizeFx(QuantizationTestCase):
         """ Test quantizing functional conv and linear with reference option
         """
         tests = self._get_conv_linear_test_cases(is_reference=True)
+
+        def _get_keys(prefix, is_dynamic):
+            all_keys = [prefix + "." + k for k in ["weight_qscheme", "weight_dtype"]]
+            if not is_dynamic:
+                all_keys.extend([prefix + "." + k for k in ["weight_scale", "weight_zero_point"]])
+            return all_keys
+
         for (is_dynamic, ModuleClass, module_constructor_inputs,
              inputs, quantized_node, weight_prepack_node) in tests:
             quant_type = QuantType.DYNAMIC if is_dynamic else QuantType.STATIC
@@ -622,13 +630,19 @@ class TestQuantizeFx(QuantizationTestCase):
             qr = result_dict["quantized_reference"]
 
             def checkWeightQParams(model):
-                for module_name in ("linear", "conv"):
+                for module_name in ("conv",):
                     if hasattr(model, module_name):
                         self.assertTrue(hasattr(qr.get_submodule(module_name), "_weight_qparams"))
                         self.assertTrue("Reference" in qr.get_submodule(module_name)._get_name())
+                for module_name in ("linear",):
+                    if hasattr(model, module_name):
+                        self.assertTrue(hasattr(qr.get_submodule(module_name), "weight_qscheme"))
+                        self.assertTrue(hasattr(qr.get_submodule(module_name), "weight_scale"))
+                        self.assertTrue(hasattr(qr.get_submodule(module_name), "weight_zero_point"))
+                        self.assertTrue("Reference" in qr.get_submodule(module_name)._get_name())
 
-            def checkSerDeser(model):
-                for module_name in ("linear", "conv"):
+            def checkSerDeser(model, is_dynamic):
+                for module_name in ("conv",):
                     if hasattr(model, module_name):
                         # make sure seralization works
                         state_dict = copy.deepcopy(model.state_dict())
@@ -640,6 +654,20 @@ class TestQuantizeFx(QuantizationTestCase):
                         module._weight_qparams["scale"] = None
                         model.load_state_dict(state_dict)
                         self.assertTrue(torch.equal(prev_scale, module._weight_qparams["scale"]))
+                for module_name in ("linear",):
+                    if hasattr(model, module_name):
+                        # make sure seralization works
+                        state_dict = copy.deepcopy(model.state_dict())
+                        all_keys = _get_keys(module_name, is_dynamic)
+                        for key in all_keys:
+                            self.assertTrue(key in state_dict)
+                        # check load_state_dict restores states
+                        module = getattr(model, module_name)
+                        prev_scale = module.weight_scale
+                        module.weight_scale = None
+                        model.load_state_dict(state_dict)
+                        module = getattr(model, module_name)
+                        self.assertTrue(torch.equal(prev_scale, module.weight_scale))
 
 
             checkWeightQParams(qr)
@@ -647,7 +675,7 @@ class TestQuantizeFx(QuantizationTestCase):
             # make sure the qparams are preserved after copy
             checkWeightQParams(qr)
 
-            checkSerDeser(qr)
+            checkSerDeser(qr, is_dynamic)
 
     @skipIfNoFBGEMM
     def test_dynamic_quant_weight_observer(self):

@@ -47,6 +47,8 @@ from .utils import (
 
 from ..qconfig import QConfigAny
 
+import torch.nn.quantized._reference as nnqr
+
 from abc import ABC, abstractmethod
 import operator
 import warnings
@@ -887,7 +889,12 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                     weight_post_process(float_linear.weight)  # type: ignore[operator]
 
                 weight_qparams = get_qparam_dict(weight_post_process)
-                _to_reference(float_linear, weight_qparams)
+                # hardcoded for now, TODO: expose the api to user,
+                # we can have a map from module to reference module
+                # and allow user to register new ones
+                ref_linear = nnqr.Linear.from_float(float_linear, weight_qparams)
+                parent_name, name = _parent_name(self.linear_node.target)
+                setattr(modules[parent_name], name, ref_linear)
                 op_out = quantized_graph.create_node(
                     'call_module',
                     self.linear_node.target,
