@@ -6028,6 +6028,7 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo('cosh',
                    ref=np_unary_ufunc_integer_promotion_wrapper(np.cosh),
                    dtypes=all_types_and_complex_and(torch.bool),
+                   dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    safe_casts_outputs=True,
                    assert_autodiffed=True,
@@ -6413,6 +6414,7 @@ op_db: List[OpInfo] = [
                    op=torch.frexp,
                    ref=np.frexp,
                    dtypes=floating_types_and(torch.half),
+                   dtypesIfCPU=floating_types_and(torch.half, torch.bfloat16),
                    # skip testing torch.frexp as it is not supported by ROCm platform yet
                    decorators=[skipCUDAIfRocm],
                    supports_out=False,
@@ -7432,6 +7434,7 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo('sinh',
                    ref=np_unary_ufunc_integer_promotion_wrapper(np.sinh),
                    dtypes=all_types_and_complex_and(torch.bool),
+                   dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    safe_casts_outputs=True,
                    assert_autodiffed=True,
@@ -7753,6 +7756,7 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo('nan_to_num',
                    ref=np.nan_to_num,
                    dtypes=all_types_and(torch.half, torch.bool),
+                   dtypesIfCPU=all_types_and(torch.half, torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and(torch.half, torch.bool, torch.bfloat16),
                    supports_forward_ad=True,
                    # Passing numpy_kwargs via sample_kwargs, as numpy does comparison
