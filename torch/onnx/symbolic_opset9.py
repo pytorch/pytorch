@@ -3138,6 +3138,10 @@ def mv(g, self, vec):
     return matmul(g, self, vec)
 
 
+def dot(g, self, other):
+    return matmul(g, self, other)
+
+
 @parse_args('v', 'v')
 def fill(g, self, value):
     dtype = self.type().scalarType()
