@@ -630,9 +630,17 @@ Tensor prelu_cpu(const Tensor& self, const Tensor& weight_) {
     strides[1] = t.strides()[0];
     return t.as_strided(sizes, strides);
   };
-  auto w = weight.defined() ? as_nd(weight) :
-      at::detail::scalar_tensor_static(1, input.scalar_type(), kCPU);
-  
+  Tensor w;
+  if (input.scalar_type() == ScalarType::BFloat16) {
+    auto w_bf16 = at::empty(weight.sizes(), weight.options().dtype(ScalarType::BFloat16));
+    w_bf16.copy_(weight);
+    w = weight.defined() ? as_nd(w_bf16) :
+        at::detail::scalar_tensor_static(1, input.scalar_type(), kCPU);
+  } else {
+    w = weight.defined() ? as_nd(weight) :
+        at::detail::scalar_tensor_static(1, input.scalar_type(), kCPU);
+  }
+
   auto iter = TensorIteratorConfig()
     .add_output(result)
     .add_input(input)
@@ -680,8 +688,17 @@ std::tuple<Tensor, Tensor> prelu_backward_cpu(const Tensor& grad_out_, const Ten
     strides[1] = t.strides()[0];
     return t.as_strided(sizes, strides);
   };
-  auto w = weight.defined() ? as_nd(weight) :
-      at::detail::scalar_tensor_static(1, input.scalar_type(), kCPU);
+  Tensor w;
+  if (input.scalar_type() == ScalarType::BFloat16) {
+    auto w_bf16 = at::empty(weight.sizes(), weight.options().dtype(ScalarType::BFloat16));
+    w_bf16.copy_(weight);
+    w = weight.defined() ? as_nd(w_bf16) :
+        at::detail::scalar_tensor_static(1, input.scalar_type(), kCPU);
+  } else {
+    w = weight.defined() ? as_nd(weight) :
+        at::detail::scalar_tensor_static(1, input.scalar_type(), kCPU);
+  }
+
   auto iter = TensorIteratorConfig()
     .add_output(input_grad)
     .add_output(weight_grad_collector)
