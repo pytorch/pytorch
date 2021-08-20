@@ -89,7 +89,7 @@ class RandomSampler(Sampler[int]):
         self.replacement = replacement
         self._num_samples = num_samples
         self.generator = generator
-        self.gen: Optional[torch.Generator] = None
+        self._gen: Optional[torch.Generator] = None
 
         if not isinstance(self.replacement, bool):
             raise TypeError("replacement should be a boolean value, but got "
@@ -113,19 +113,19 @@ class RandomSampler(Sampler[int]):
     def __iter__(self) -> Iterator[int]:
         n = len(self.data_source)
         if self.generator is None:
-            if self.gen is None:
-                self.gen = torch.Generator()
-                self.gen.manual_seed(int(torch.empty((), dtype=torch.int64).random_().item()))
+            if self._gen is None:
+                self._gen = torch.Generator()
+                self._gen.manual_seed(int(torch.empty((), dtype=torch.int64).random_().item()))
         else:
-            self.gen = self.generator
+            self._gen = self.generator
 
         if self.replacement:
             for _ in range(self.num_samples // 32):
-                yield from torch.randint(high=n, size=(32,), dtype=torch.int64, generator=self.gen).tolist()
-            yield from torch.randint(high=n, size=(self.num_samples % 32,), dtype=torch.int64, generator=self.gen).tolist()
+                yield from torch.randint(high=n, size=(32,), dtype=torch.int64, generator=self._gen).tolist()
+            yield from torch.randint(high=n, size=(self.num_samples % 32,), dtype=torch.int64, generator=self._gen).tolist()
         else:
-            yield from torch.randperm(n, generator=self.gen).tolist()
-        self.gen = None
+            yield from torch.randperm(n, generator=self._gen).tolist()
+        self._gen = None
 
     def __len__(self) -> int:
         return self.num_samples

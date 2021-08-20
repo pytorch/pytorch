@@ -302,8 +302,9 @@ class TRTInterpreter(torch.fx.Interpreter):
                 missing_converter.add(f"{node.op} {node.target}")
             elif node.op == "call_module":
                 submod = self.fetch_attr(node.target)
-                if not CONVERTERS.get(type(submod)):
-                    missing_converter.add(f"{node.op} {type(submod)}")
+                submod_type = getattr(submod, "_base_class_origin", type(submod))
+                if not CONVERTERS.get(submod_type):
+                    missing_converter.add(f"{node.op} {submod_type}")
 
         return missing_converter
 
@@ -373,12 +374,11 @@ class TRTInterpreter(torch.fx.Interpreter):
     def call_module(self, target, args, kwargs):
         assert isinstance(target, str)
         submod = self.fetch_attr(target)
-        converter = CONVERTERS.get(type(submod))
+        submod_type = getattr(submod, "_base_class_origin", type(submod))
+        converter = CONVERTERS.get(submod_type)
 
         if not converter:
-            raise RuntimeError(
-                f"Conversion of module of type {type(submod)} not currently supported!"
-            )
+            raise RuntimeError(f'Conversion of module of type {submod_type} not currently supported!')
 
         return converter(self.network, submod, args, kwargs, self._cur_node_name)
 
