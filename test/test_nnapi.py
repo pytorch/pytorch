@@ -49,6 +49,7 @@ class TestNNAPI(TestCase):
         convert_args=None,
         atol_rtol=None,
         limit=None,
+        expected_memory_format=None
     ):
         with torch.no_grad():
             if isinstance(arg_or_args, torch.Tensor):
@@ -76,7 +77,8 @@ class TestNNAPI(TestCase):
                     # Too many mismatches.  Re-run the check with no tolerance
                     # to get a nice message.
                     self.assertEqual(eager_output, nnapi_output, atol=0, rtol=0)
-            return eager_output, nnapi_output
+            if expected_memory_format:
+                self.assertTrue(nnapi_out.is_contiguous(memory_format=expected_memory_format))
 
     def float_and_quant_and_nhwc(self, inp_float, scale, zero_point):
         torch.manual_seed(29)
@@ -338,9 +340,9 @@ class TestNNAPI(TestCase):
             for use_nhwc in [False, True]:
                 with self.subTest(mod_class=mod_class.__name__, use_nhwc=use_nhwc):
                     arg = arg_nhwc if use_nhwc else arg_contig
-                    eager_out, nnapi_out = self.check(mod_class(), arg)
-                    self.assertTrue(nnapi_out.is_contiguous(memory_format=(
-                        torch.channels_last if use_nhwc else torch.contiguous_format)))
+                    memory_format = torch.channels_last if use_nhwc else torch.contiguous_format
+                    self.check(mod_class(), arg,
+                               expected_memory_format=memory_format)
 
     def test_hardtanh(self):
         inp = torch.tensor([-2.0, -0.5, 0.5, 2.0, 7.0])
