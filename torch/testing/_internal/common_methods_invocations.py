@@ -859,6 +859,7 @@ def sample_inputs_tensor_split(op_info, device, dtype, requires_grad, **kwargs):
         (torch.tensor([1, 2, 3]),),
         (torch.tensor(1),),
         (torch.tensor([1, 2, 3]), 1),
+        (torch.tensor([1, 4, 2, 5, 3, 6])[::2], 1),
         # Cases with list of indices.
         ((2, 4),),
         ((2, 4), 1),
@@ -1376,14 +1377,24 @@ def sample_inputs_bmm(self, device, dtype, requires_grad, **kwargs):
     )
 
 def sample_inputs_dot_vdot(self, device, dtype, requires_grad, **kwargs):
-    return (
-        SampleInput(
+    sample_inputs = []
+    sample_inputs.append(SampleInput(
+        make_tensor((S, ), device, dtype, low=None, high=None, requires_grad=requires_grad),
+        args=(
+            make_tensor((S, ), device, dtype, low=None, high=None, requires_grad=requires_grad),
+        )
+    ))
+    if dtype.is_complex:
+        # dot/vdot for (conj(input), conj(arg_tensor)) and (conj(input), arg_tensor)
+        # is tested in test_conj_view (which tests operations with only conjugated input tensor
+        # -- not conjugated arg tensors)
+        sample_inputs.append(SampleInput(
             make_tensor((S, ), device, dtype, low=None, high=None, requires_grad=requires_grad),
             args=(
-                make_tensor((S, ), device, dtype, low=None, high=None, requires_grad=requires_grad),
+                torch.conj(make_tensor((S, ), device, dtype, low=None, high=None, requires_grad=requires_grad)),
             )
-        ),
-    )
+        ))
+    return sample_inputs
 
 def sample_inputs_addmv(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
@@ -7590,6 +7601,7 @@ op_db: List[OpInfo] = [
                                 active_if=(IS_MACOS or IS_WINDOWS)),
                    )),
     OpInfo('tensor_split',
+           ref=np.array_split,
            dtypes=all_types_and_complex_and(torch.bool),
            dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
