@@ -9,7 +9,6 @@ import time
 import traceback
 import types
 import unittest
-import warnings
 from contextlib import contextmanager
 from datetime import timedelta
 from enum import Enum
