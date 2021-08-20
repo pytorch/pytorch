@@ -335,6 +335,35 @@ C10_UNUSED void SplitOutPrecomputeOpsForSparseNN(
   ConstantPooling(graph);
 #endif
 }
+
+void UseFastGatherNoCast(std::shared_ptr<torch::jit::Graph>& graph) {
+  const std::string pattern = R"IR(
+    graph(%input, %indices):
+        %res = fb::fast_gather(%input, %indices)
+        return (%res)
+    )IR";
+
+  const std::string replace_pattern = R"IR(
+      graph(%input, %indices):
+          %dtype : int = prim::Constant[value=4]()
+          %copy : bool = prim::Constant[value=0]()
+          %non_blocking : bool = prim::Constant[value=0]()
+          %memory_format : NoneType = prim::Constant()
+
+          %new_indices : Tensor = aten::to(%indices, %dtype, %copy, %non_blocking, %memory_format)
+          %res = fb::fast_gather_no_cast(%input, %new_indices)
+          return (%res)
+    )IR";
+
+  SubgraphRewriter fuse;
+  fuse.RegisterRewritePattern(pattern, replace_pattern);
+  fuse.runOnGraph(graph);
+
+  // Deduplicate constant args passed to aten::to in case there are many
+  // calls to fb::fast_gather
+  ConstantPooling(graph);
+}
+
 } // namespace
 
 void FuseInferenceOpsForSparseNN(std::shared_ptr<torch::jit::Graph>& graph) {
@@ -355,6 +384,8 @@ void FuseInferenceOpsForSparseNN(std::shared_ptr<torch::jit::Graph>& graph) {
   // prioritize clip_ranges+gather_ranges+sigrid_hash fusion over
   // clip_ranges+gather_ranges
   ClipRangesGather(graph);
+
+  UseFastGatherNoCast(graph);
 #endif
 }
 
