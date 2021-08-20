@@ -6675,16 +6675,16 @@
   dispatch:
     CPU, CUDA: triangular_solve
 
-- func: linalg_triangular_solve.out(Tensor self, Tensor B, *, bool left=True, bool upper=True, bool unitriangular=False, Tensor(a!) out) -> Tensor(a!)
+- func: linalg_solve_triangular.out(Tensor self, Tensor B, *, bool left=True, bool upper=True, bool unitriangular=False, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
   dispatch:
-    CPU, CUDA: linalg_triangular_solve_out
+    CPU, CUDA: linalg_solve_triangular_out
 
-- func: linalg_triangular_solve(Tensor self, Tensor B, *, bool left=True, bool upper=True, bool unitriangular=False) -> Tensor
+- func: linalg_solve_triangular(Tensor self, Tensor B, *, bool left=True, bool upper=True, bool unitriangular=False) -> Tensor
   python_module: linalg
   variants: method, function
   dispatch:
-    CPU, CUDA: linalg_triangular_solve
+    CPU, CUDA: linalg_solve_triangular
 
 - func: symeig.e(Tensor self, bool eigenvectors=False, bool upper=True, *, Tensor(a!) e, Tensor(b!) V) -> (Tensor(a!) eigenvalues, Tensor(b!) eigenvectors)
   dispatch:

@@ -1767,7 +1767,7 @@ Letting `*` be zero or more batch dimensions,
 
 .. seealso::
 
-        :func:`torch.linalg.triangular_solve` computes the solution of a triangular system of linear
+        :func:`torch.linalg.solve_triangular` computes the solution of a triangular system of linear
         equations with a unique solution.
 
 Args:
@@ -1816,8 +1816,8 @@ Examples::
     https://en.wikipedia.org/wiki/Invertible_matrix#The_invertible_matrix_theorem
 """)
 
-triangular_solve = _add_docstr(_linalg.linalg_triangular_solve, r"""
-linalg.triangular_solve(A, B, *, left=True, upper=True, unitriangular=False, out=None) -> Tensor
+solve_triangular = _add_docstr(_linalg.linalg_solve_triangular, r"""
+linalg.solve_triangular(A, B, *, left=True, upper=True, unitriangular=False, out=None) -> Tensor
 
 Computes the solution of a triangular system of linear equations with a unique solution.
 
@@ -1871,19 +1871,19 @@ Examples::
 
     >>> A = torch.randn(3, 3).triu_()
     >>> b = torch.randn(3, 4)
-    >>> X = torch.linalg.triangular_solve(A, B)
+    >>> X = torch.linalg.solve_triangular(A, B)
     >>> torch.allclose(A @ X, B)
     True
 
     >>> A = torch.randn(2, 3, 3).tril_()
     >>> B = torch.randn(2, 3, 4)
-    >>> X = torch.linalg.triangular_solve(A, B, upper=False)
+    >>> X = torch.linalg.solve_triangular(A, B, upper=False)
     >>> torch.allclose(A @ X, B)
     True
 
     >>> A = torch.randn(2, 4, 4).tril_()
     >>> B = torch.randn(2, 3, 4)
-    >>> X = torch.linalg.triangular_solve(A, B, left=False)
+    >>> X = torch.linalg.solve_triangular(A, B, left=False)
     >>> torch.allclose(X @ A, B)
     True
 
