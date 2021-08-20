@@ -63,8 +63,11 @@ constexpr int64_t CUDA_IPC_MAXIMUM_EVENTS_TO_USE = 1000;
 struct CudaIPCSentDataLimbo final {
   ~CudaIPCSentDataLimbo();
   bool collect();
+  void clear_shared_blocks();
   void add(std::unique_ptr<CudaIPCSentData> shared_block);
-  uint64_t size();
+  uint64_t size() {
+    return shared_blocks_.size();
+  }
 
  private:
   // TODO: Can be changed to FIFO in order to avoid full traverse on every
