@@ -607,13 +607,6 @@ Tensor miopen_convolution_forward(
                     /*pin_memory=*/c10::nullopt,
                     /*memory_format=*/memory_format);
 
-/*    
-  auto output_t = at::empty(
-                    conv_output_size(input->sizes(), weight->sizes(),
-                                     padding, stride, dilation),
-                    input->options());
-*/
-
   if (output_t.numel() == 0) {
     return output_t;
   }
@@ -624,7 +617,7 @@ Tensor miopen_convolution_forward(
 
   // See #4500
   Tensor weight_contig = weight->contiguous(memory_format);
-  /* TODO from cudnn/ConvShared? 
+  /* TODO from cudnn/ConvShared?
   // Make sure that NC11 strides follow formula
   weight_contig.resize_(weight_contig.sizes(), memory_format);
   Tensor input_contig = input->contiguous(memory_format);

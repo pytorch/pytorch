@@ -106,7 +106,7 @@ std::ostream& operator<<(std::ostream & out, const TensorDescriptor& d);
 class FilterDescriptor
   : public Descriptor<miopenTensorDescriptor,
                       &miopenCreateTensorDescriptor,
-                      &miopenDestroyTensorDescriptor> 
+                      &miopenDestroyTensorDescriptor>
 {
  public:
   void set(const at::Tensor &t, int64_t pad = 0) {
