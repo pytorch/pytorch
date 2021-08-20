@@ -63,7 +63,7 @@ class ForeachFuncWrapper:
         if (
             is_cuda and
             torch.autograd.kineto_available() and
-            torch.profiler.ProfilerActivity.CUDA in torch.profiler._supported_kineto_activities()
+            torch.profiler.ProfilerActivity.CUDA in torch.profiler.supported_activities()
         ):
             with torch.profiler.profile(activities=(torch.profiler.ProfilerActivity.CPU,)) as p:
                 actual = self.func(*inputs, **kwargs)
@@ -293,6 +293,7 @@ class TestForeach(TestCase):
         self._pointwise_test(
             dtype, inplace_op, inplace_ref, inputs, is_fastpath and disable_fastpath, is_inplace=True, values=values)
 
+    @skipMeta
     @ops(foreach_pointwise_op_db)
     def test_pointwise_op_fastpath(self, device, dtype, op):
         disable_fastpath = dtype in torch.testing.get_all_int_dtypes() + [torch.bool]

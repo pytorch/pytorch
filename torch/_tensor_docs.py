@@ -2463,6 +2463,12 @@ minimum(other) -> Tensor
 See :func:`torch.minimum`
 """)
 
+add_docstr_all('aminmax', r"""
+aminmax(*, dim=None, keepdim=False) -> (Tensor min, Tensor max)
+
+See :func:`torch.aminmax`
+""")
+
 add_docstr_all('fmin',
                r"""
 fmin(other) -> Tensor
