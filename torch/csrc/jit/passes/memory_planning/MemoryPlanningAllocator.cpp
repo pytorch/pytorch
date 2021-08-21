@@ -75,7 +75,8 @@ struct MemoryTracingAllocator final : at::Allocator {
         frame_node_id.node_schema,
         frame_node_id.node_header,
         nbytes,
-        torch::jit::MemEvent::EventType::Allocate});
+        torch::jit::MemEvent::EventType::Allocate,
+        frame_node_id.node});
     allocations_.insert({orig_ptr.get(), nbytes});
 
     auto deleter = [this, &bt, &nbytes](void* ptr) {
@@ -107,7 +108,8 @@ WithProfileAllocationsGuard::WithProfileAllocationsGuard(
           MemoryTracingAllocator{device_type})),
       device_type_(device_type) {}
 
-std::vector<torch::jit::MemEvent> WithProfileAllocationsGuard::getAllocationTraces() {
+std::vector<torch::jit::MemEvent> WithProfileAllocationsGuard::
+    getAllocationTraces() {
   return tracer_->allocation_traces_;
 }
 

@@ -804,7 +804,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     auto& frame = frames.back();
     Node* node = frame.function->instructions_source_[frame.pc];
 
-    return {frame.pc, canonicalSchemaString(node->schema()), getHeader(node)};
+    return {
+        frame.pc, canonicalSchemaString(node->schema()), getHeader(node), node};
   }
 
   c10::intrusive_ptr<Future> getOrCreateFuture() {

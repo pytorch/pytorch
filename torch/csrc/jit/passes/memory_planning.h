@@ -46,6 +46,7 @@ struct TORCH_API MemEvent {
   std::string node_header;
   uint64_t size;
   EventType type;
+  c10::optional<Node*> node;
   MemEvent(
       uint64_t t,
       std::string alloc_trace,
@@ -53,15 +54,44 @@ struct TORCH_API MemEvent {
       std::string node_schem,
       std::string node_head,
       uint64_t s,
-      EventType e)
+      EventType e,
+      c10::optional<Node*> nod = c10::nullopt)
       : time(t),
         allocation_trace(std::move(alloc_trace)),
         ptr_addr(std::move(address)),
         node_schema(std::move(node_schem)),
         node_header(std::move(node_head)),
         size(s),
-        type(e) {}
+        type(e),
+        node(nod) {}
 };
+
+inline const char* toString(MemEvent::EventType me) {
+  switch (me) {
+    case MemEvent::EventType::Free:
+      return "Free";
+    case MemEvent::EventType::Allocate:
+      return "Allocate";
+    default:
+      return "unknown event type";
+  }
+}
+
+inline std::ostream& operator<<(std::ostream& str, MemEvent::EventType rhs) {
+  return str << toString(rhs);
+}
+
+inline std::ostream& operator<<(std::ostream& str, MemEvent rhs) {
+  return str << std::left << std::setfill(' ') << std::setw(15)
+             << "type: " << rhs.type << "\n"
+             << std::setw(15) << "t: " << rhs.time << "\n"
+             << std::setw(15) << "size: " << rhs.size << "\n"
+             << std::setw(15) << "ptr_addr: " << rhs.ptr_addr << "\n"
+             << std::setw(15) << "node_schema: " << rhs.node_schema << "\n"
+             << std::setw(15) << "node_header: " << rhs.node_header << "\n"
+             << std::setw(15)
+             << "alloc_trace: " << rhs.allocation_trace.substr(0, 20) << "...";
+}
 
 inline std::ostream& operator<<(std::ostream& str, Region reg) {
   return str << "{offset: " << reg.offset << ", size: " << reg.size << "}";
@@ -134,7 +164,8 @@ TORCH_API void planMemory(std::shared_ptr<Graph>&, Strategy);
 TORCH_API void planMemoryWithTracing(
     std::shared_ptr<Graph>& graph,
     Strategy strat,
-    std::vector<MemEvent> mem_events);
+    std::vector<MemEvent> mem_events,
+    c10::optional<at::Device> device_type);
 
 #define PRINT_CURR_ALLOC(x, y) \
   std::cout << __LINE__ << " " << x << " " << y << "\n";

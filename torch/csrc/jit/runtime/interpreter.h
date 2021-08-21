@@ -158,6 +158,7 @@ typedef struct TORCH_API FrameNodeId {
   size_t pc;
   std::string node_schema;
   std::string node_header;
+  c10::optional<Node*> node;
 } NodeId;
 
 TORCH_API c10::optional<FrameNodeId> currentFrameId();
