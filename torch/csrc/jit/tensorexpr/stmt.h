@@ -17,6 +17,7 @@ class Placeholder;
 class TORCH_API Stmt : public std::enable_shared_from_this<Stmt> {
  public:
   Stmt() = default;
+  virtual ~Stmt() = default;
   virtual void accept(IRVisitor* visitor) = 0;
   virtual StmtPtr accept_mutator(IRMutator* mutator) = 0;
 
