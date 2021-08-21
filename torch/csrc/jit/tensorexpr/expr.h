@@ -39,6 +39,7 @@ class TORCH_API Expr : public std::enable_shared_from_this<Expr> {
  public:
   explicit Expr(Dtype dtype, IRNodeType expr_type = kOther)
       : dtype_(dtype), expr_type_(expr_type) {}
+  virtual ~Expr() = default;
   Dtype dtype() const {
     return dtype_;
   }
