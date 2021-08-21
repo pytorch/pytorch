@@ -43,7 +43,7 @@ from torch.utils.data.datapipes.iter.ziparchivereader import (
     ZipArchiveReaderIterDataPipe as ZipArchiveReader,
 )
 from torch.utils.data.datapipes.iter.utils import (
-    IterableWrapperIterDataPipe as IterableWrapper,
+    IterableAsDataPipeIterDataPipe as IterableAsDataPipe,
 )
 
 __all__ = ['Batcher',
@@ -55,7 +55,7 @@ __all__ = ['Batcher',
            'FileLoader',
            'Filter',
            'HttpReader',
-           'IterableWrapper',
+           'IterableAsDataPipe',
            'LineReader',
            'Mapper',
            'RoutedDecoder',
