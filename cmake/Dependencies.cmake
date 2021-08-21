@@ -242,13 +242,13 @@ endif()
 
 # --- [ PocketFFT
 set(AT_POCKETFFT_ENABLED 0)
-if(NOT MKL_FOUND)
+if(NOT AT_MKL_ENABLED)
   find_path(POCKETFFT_INCLUDE_DIR NAMES pocketfft_hdronly.h PATHS
             /usr/local/include
-            "$ENV{POCKETFFT_HOME}"
+            ENV POCKETFFT_HOME
             "${PROJECT_SOURCE_DIR}/third_party/pocketfft"
            )
-  if(POCKETFFT_INCLUDE_DIR AND CMAKE_VERSION VERSION_GREATER "3.9")
+  if(POCKETFFT_INCLUDE_DIR)
     set(AT_POCKETFFT_ENABLED 1)
   endif()
 endif()
