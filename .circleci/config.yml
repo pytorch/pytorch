@@ -665,6 +665,7 @@ jobs:
           else
             echo ".jenkins/pytorch/test.sh" >> docker_commands.sh
           fi
+          cp docker_commands.sh run_commands.sh
           echo "(cat docker_commands.sh | docker exec -u jenkins -i "$id" bash) 2>&1" > command.sh
           unbuffer bash command.sh | ts
 
