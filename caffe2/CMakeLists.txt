@@ -341,6 +341,8 @@ if(NOT TORCH_INSTALL_LIB_DIR)
   set(TORCH_INSTALL_LIB_DIR lib)
 endif()
 
+
+
 if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
 
@@ -790,12 +792,12 @@ endif()
 
 # Pass path to PocketFFT
 if(AT_POCKETFFT_ENABLED)
-  if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.11")
+  if(CMAKE_VERSION VERSION_LESS "3.11")
+    target_include_directories(torch_cpu PRIVATE "${POCKETFFT_INCLUDE_DIR}")
+  else()
     set_source_files_properties(
         "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/mkl/SpectralOps.cpp"
         PROPERTIES INCLUDE_DIRECTORIES "${POCKETFFT_INCLUDE_DIR}")
-  else()
-    target_include_directories(torch_cpu PRIVATE "${POCKETFFT_INCLUDE_DIR}")
   endif()
 endif()
 
