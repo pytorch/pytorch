@@ -589,6 +589,17 @@ TEST(StaticRuntime, IndividualOps_to) {
   test_to(at::ScalarType::Half, false, true, c10::MemoryFormat::ChannelsLast);
 }
 
+TEST(StaticRuntime, IndividualOps_Detach) {
+  auto a = at::randn({4, 3, 1, 2});
+  auto b = at::randn({3, 2, 2});
+  std::vector<IValue> args{a};
+  std::vector<IValue> args2{b};
+  testStaticRuntime(detach_script_0, args);
+  testStaticRuntime(detach_script_0, args, args2);
+  testStaticRuntime(detach_script_1, args);
+  testStaticRuntime(detach_script_1, args, args2);
+}
+
 TEST(StaticRuntime, IndividualOps_Full) {
   auto dtype = at::ScalarType::Int;
   auto cpu = at::Device(DeviceType::CPU);
