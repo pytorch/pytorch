@@ -12,7 +12,6 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/canonicalize_graph_fuser_ops.h>
-#include <torch/csrc/jit/passes/common_expression_hoisting.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
@@ -204,8 +203,9 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_onnx_eval_peephole",
           [](std::shared_ptr<Graph>& graph,
-             std::map<std::string, IValue>& paramsDict) {
-            EvalPeepholeONNX(graph, paramsDict);
+             std::map<std::string, IValue>& paramsDict,
+             bool isAllowedToAdjustGraphInputs) {
+            EvalPeepholeONNX(graph, paramsDict, isAllowedToAdjustGraphInputs);
             return paramsDict;
           },
           pybind11::return_value_policy::move)
@@ -282,11 +282,6 @@ void initJITBindings(PyObject* module) {
           "_jit_pass_cse",
           [](std::shared_ptr<Graph>& g) {
             return EliminateCommonSubexpression(g); // overload resolution
-          })
-      .def(
-          "_jit_pass_common_expression_hoisting",
-          [](std::shared_ptr<Graph>& g) {
-            return HoistCommonExpression(g); // overload resolution
           })
       .def(
           "_jit_pass_fuse_quantized_add_relu",
