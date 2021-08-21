@@ -27,6 +27,7 @@ void THCPGraph_init(PyObject *module) {
            &::at::cuda::graph_pool_handle,
            R"(
 Returns an opaque token representing the id of a graph memory pool.
+See :ref:`Graph memory management<graph-memory-management>`.
            )");
 
   shared_ptr_class_<::at::cuda::CUDAGraph>
@@ -47,7 +48,7 @@ Use :class:`~torch.cuda.graph` or :func:`~torch.cuda.make_graphed_callables,
 which call ``capture_begin`` internally.
 
 Arguments:
-    pool (optional): Token (returned by :func:`~torch.cuda.graph_pool_handle` or :meth:`other_Graph_instance.pool()<torch.cuda.CUDAGraph.pool>`) that hints this graph may share memory with the indicated pool.
+    pool (optional): Token (returned by :func:`~torch.cuda.graph_pool_handle` or :meth:`other_Graph_instance.pool()<torch.cuda.CUDAGraph.pool>`) that hints this graph may share memory with the indicated pool.  See :ref:`Graph memory management<graph-memory-management>`.
            )",
            py::arg("pool") = c10::cuda::MempoolId_t{0, 0})
       .def("capture_end",
@@ -76,7 +77,7 @@ which call ``capture_end`` internally.
            py::call_guard<py::gil_scoped_release>(),
            R"(
 Returns an opaque token representing the id of this graph's memory pool.
-This id can optionally be passed to another graph's capture_begin,
+This id can optionally be passed to another graph's ``capture_begin``,
 which hints the other graph may share the same memory pool.
            )");
 }
