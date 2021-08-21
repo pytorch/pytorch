@@ -795,7 +795,7 @@ if(AT_POCKETFFT_ENABLED)
         "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/mkl/SpectralOps.cpp"
         PROPERTIES INCLUDE_DIRECTORIES "${POCKETFFT_INCLUDE_DIR}")
   else()
-    target_include_directories(torch_cpu "${POCKETFFT_INCLUDE_DIR}")
+    target_include_directories(torch_cpu PRIVATE "${POCKETFFT_INCLUDE_DIR}")
   endif()
 endif()
 
