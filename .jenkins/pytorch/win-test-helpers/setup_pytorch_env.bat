@@ -70,6 +70,7 @@ set NUMBAPRO_NVVM=%CUDA_PATH%\nvvm\bin\nvvm64_32_0.dll
 :cuda_build_end
 
 set PYTHONPATH=%TMP_DIR_WIN%\build;%PYTHONPATH%
+set _NT_ALT_SYMBOL_PATH=%TMP_DIR_WIN%\build\torch\lib
 
 if NOT "%BUILD_ENVIRONMENT%"=="" (
     pushd %TMP_DIR_WIN%\build

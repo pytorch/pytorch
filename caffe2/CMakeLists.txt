@@ -976,6 +976,7 @@ if(MSVC AND "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
   set(CLANG_RT_BUILTIN_LIB "${CLANG_ROOT}/lib/clang/${CMAKE_CXX_COMPILER_VERSION}/lib/windows/clang_rt.builtins-x86_64.lib")
 
   target_link_libraries(torch_cpu PRIVATE ${CLANG_RT_BUILTIN_LIB})
+  target_compile_options(torch_cpu PRIVATE "/Z7")
 endif()
 
 # ==========================================================

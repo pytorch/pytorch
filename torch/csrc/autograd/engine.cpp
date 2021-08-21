@@ -13,6 +13,7 @@
 #include <ATen/Parallel.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 
+#include <c10/util/AbortHandler.h>
 #include <c10/util/Exception.h>
 #include <c10/core/Stream.h>
 #include <c10/core/Event.h>
@@ -295,6 +296,10 @@ void Engine::decrement_non_reentrant_thread_count() {
 }
 
 void Engine::thread_init(int device, const std::shared_ptr<ReadyQueue>& ready_queue, bool should_increment) {
+#ifdef _WIN32
+  c10::set_terminate_handler();
+#endif
+
   if (should_increment) {
     increment_non_reentrant_thread_count();
   }
@@ -454,6 +459,9 @@ auto Engine::thread_main(const std::shared_ptr<GraphTask>& graph_task) -> void {
 // thread, but sharing the same cpu_ready_queue with parent thread is a
 // performance improvement and cuda thread still have to do the same thing.
 void Engine::reentrant_thread_init() {
+#ifdef _WIN32
+  c10::set_terminate_handler();
+#endif
   at::init_num_threads();
   auto tp_shared = thread_pool_shared_;
   while(true) {
