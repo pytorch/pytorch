@@ -109,13 +109,12 @@ class IndexFlattener : public IRMutator {
     ExprPtr value = v->value();
     ExprPtr new_value = value->accept_mutator(this);
     if (v->indices().size() == 1 && value == new_value) {
-      return v;
+      return (StmtPtr)v;
     }
-    std::vector<ExprPtr> indices = {
-        flatten_index(v->buf()->dims(), v->indices())};
-    v->set_indices(indices);
-    v->set_value(new_value);
-    return v;
+    return alloc<Store>(
+        v->buf(),
+        std::vector<ExprPtr>({flatten_index(v->buf()->dims(), v->indices())}),
+        new_value);
   }
 };
 
@@ -2576,9 +2575,8 @@ class CacheReplacer : public IRMutator {
       ExprPtr sub = IRSimplifier::simplify(alloc<Sub>(index, offset));
       newIndices.push_back(sub);
     }
-    v->set_buf(cache_);
-    v->set_indices(newIndices);
-    return v;
+
+    return alloc<Load>(cache_, newIndices);
   }
 
   StmtPtr mutate(StorePtr v) override {
@@ -2598,10 +2596,8 @@ class CacheReplacer : public IRMutator {
       ExprPtr sub = IRSimplifier::simplify(alloc<Sub>(index, offset));
       newIndices.push_back(sub);
     }
-    v->set_buf(cache_);
-    v->set_indices(newIndices);
-    v->set_value(newValue);
-    return v;
+
+    return alloc<Store>(cache_, newIndices, newValue);
   }
 
   BufPtr buf_;
@@ -2673,13 +2669,21 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
 
   // Replace acceses to the producer in the consumer with the cache.
   CacheReplacer replacer(producer, tmp_buf, info.start);
-  consumer->accept_mutator(&replacer);
+  // TODO: Can we reuse 'consumer' below without cloning?
+  StmtPtr new_consumer =
+      IRSimplifier::simplify(Stmt::clone(consumer)->accept_mutator(&replacer));
 
   // replace the old consumer with the replaced consumer.
-  BlockPtr consumer_block = to<Block>(consumer);
-  BlockPtr parent_block = to<Block>(consumer->get_parent());
+  BlockPtr consumer_block = nullptr;
   // if the consumer is a block, we should mutate it in place.
-  bool is_block = consumer_block != nullptr;
+  if ((consumer_block = to<Block>(consumer))) {
+    consumer_block->clear();
+    consumer_block->append_stmt(new_consumer);
+  } else {
+    consumer_block = to<Block>(consumer->get_parent());
+    assert(consumer_block);
+    consumer_block->replace_stmt(consumer, new_consumer);
+  }
 
   // If there's a reduction and we are operating on the reduce axis, we need to
   // initialize the cache with 0s. Also, we can't just write the result straight
@@ -2711,11 +2715,7 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
           alloc<For>(new_loop_vars[i], alloc<IntImm>(0), tmp_dims[i], tmp_init);
     }
 
-    if (is_block) {
-      consumer_block->prepend_stmt(tmp_init);
-    } else {
-      parent_block->insert_stmt_before(tmp_init, consumer);
-    }
+    consumer_block->insert_stmt_before(tmp_init, new_consumer);
 
     // Reduce back to the original buffer:
     StmtPtr tmp_store = alloc<Store>(
@@ -2732,13 +2732,9 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
           new_loop_vars[i], alloc<IntImm>(0), tmp_dims[i], tmp_store);
     }
 
-    if (is_block) {
-      consumer_block->append_stmt(tmp_store);
-    } else {
-      parent_block->insert_stmt_after(tmp_store, consumer);
-    }
+    consumer_block->insert_stmt_after(tmp_store, new_consumer);
 
-    return std::make_pair(tmp_buf, consumer);
+    return std::make_pair(tmp_buf, new_consumer);
   }
 
   if (hasReads) {
@@ -2751,11 +2747,7 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
           new_loop_vars[i], alloc<IntImm>(0), tmp_dims[i], tmp_store);
     }
 
-    if (is_block) {
-      consumer_block->prepend_stmt(tmp_store);
-    } else {
-      parent_block->insert_stmt_before(tmp_store, consumer);
-    }
+    consumer_block->insert_stmt_before(tmp_store, new_consumer);
   }
 
   if (hasWrites) {
@@ -2768,14 +2760,10 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
           new_loop_vars[i], alloc<IntImm>(0), tmp_dims[i], tmp_store);
     }
 
-    if (is_block) {
-      consumer_block->append_stmt(tmp_store);
-    } else {
-      parent_block->insert_stmt_after(tmp_store, consumer);
-    }
+    consumer_block->insert_stmt_after(tmp_store, new_consumer);
   }
 
-  return std::make_pair(tmp_buf, consumer);
+  return std::make_pair(tmp_buf, new_consumer);
 }
 
 /*

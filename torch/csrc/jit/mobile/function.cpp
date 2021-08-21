@@ -100,22 +100,26 @@ bool Function::append_operator(
     if (num_specified_args &&
         num_specified_args.value() < static_cast<int64_t>(args.size())) {
       fn = [fn, num_specified_args, args](Stack& stack) {
-        c10::optional<IValue> out_arg;
-        if (!args.empty() && args.back().is_out()) {
-          out_arg = stack.back();
+        std::vector<IValue> out_args;
+        int num_args = args.size();
+        // the end of stack will be out argument, and there might be more than
+        // one out argument. The following logic will pop all out argument
+        // from stack to out_args, push the default argument value, and then
+        // push the out_args back to stack
+        for (size_t i = args.size() - 1; i > 0 && args.at(i).is_out(); i--) {
+          out_args.push_back(stack.back());
           stack.pop_back();
         }
-        size_t start_index =
-            num_specified_args.value() + (out_arg.has_value() ? -1 : 0);
-        // start_index = std::max(0, start_index);
+        size_t start_index = num_specified_args.value() - out_args.size();
         for (size_t i = (start_index >= 0 ? start_index : 0); i < args.size();
              ++i) {
           if (args[i].default_value().has_value()) {
             stack.push_back(args[i].default_value());
           }
         }
-        if (out_arg.has_value()) {
-          stack.push_back(out_arg.value());
+        while (!out_args.empty()) {
+          stack.push_back(out_args.back());
+          out_args.pop_back();
         }
         fn(stack);
       };

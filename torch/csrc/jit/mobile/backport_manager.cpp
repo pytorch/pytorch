@@ -297,7 +297,9 @@ std::stringstream backport_v6_to_v5(std::stringstream& input_model_stream) {
   // resolved at runtime init stage for better operator compatibility.
   std::stringstream intermediate_model_stream;
   {
-    BytecodeEmitModeGuard argNumGuard(true, false);
+    BytecodeEmitModeGuard argNumGuard(
+        true /*emit_default_input_instructions*/,
+        false /*enable_defaults_args_with_out_args*/);
     torch_script._save_for_mobile(
         intermediate_model_stream, extra_files, hasBytecodeDebug);
   }
@@ -376,20 +378,21 @@ std::stringstream backport_v7_to_v6(std::stringstream& input_model_stream) {
   // to be re-emitted (refer to the comments below)
   Module torch_script = torch::jit::load(rai, c10::nullopt, extra_files);
 
-  // The RAII guard to change the flag, emitBytecodeDefaultInputs, to true, so
-  // that TS stores the default argument values in the constant table, and emits
-  // the instructions (LOADC, for example), to push the values to the stack. It
-  // restores the behavior of V5 and before. For V6, the default arg values are
-  // resolved at runtime init stage for better operator compatibility.
+  // The RAII guard to change the flag, emit_default_input_instructions, to
+  // false to keep the same behavior in bytecode version 6. Change the flag,
+  // enable_defaults_args_with_out_args, to deserialized the number of specified
+  // operators which allowing both out arguments and default arguments to
+  // #all_args, instead of (#all_args - #default_args)
   std::stringstream intermediate_model_stream;
   {
-    // BytecodeEmitDefaultInputsGuard argNumGuard(true);
-    BytecodeEmitModeGuard argNumGuard(false, true);
+    BytecodeEmitModeGuard argNumGuard(
+        false /*emit_default_input_instructions*/,
+        false /*enable_defaults_args_with_out_args*/);
     torch_script._save_for_mobile(
         intermediate_model_stream, extra_files, hasBytecodeDebug);
   }
 
-  // Update the bytecode version (from 6 to 5)
+  // Update the bytecode version (from 7 to 6)
 
   PyTorchStreamReader reader_bytecode(&intermediate_model_stream);
   std::vector<IValue> bytecode_values = get_bytecode_ivalues(reader_bytecode);

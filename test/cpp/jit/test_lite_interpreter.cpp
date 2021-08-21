@@ -1,5 +1,4 @@
 #include <test/cpp/jit/test_utils.h>
-#include <string>
 
 #include <gtest/gtest.h>
 
@@ -626,11 +625,12 @@ namespace {
 void compareModelOutput(
     const std::vector<IValue>& actual_result_list,
     const std::vector<Tensor>& expect_result_list) {
-  // AT_ASSERT(actual_result_list.size() == expect_result_list.size());
+  AT_ASSERT(actual_result_list.size() == expect_result_list.size());
   AT_ASSERT(actual_result_list[0].toTensor().equal(expect_result_list[0]));
   AT_ASSERT(
       actual_result_list[1].toTensor().dim() == expect_result_list[1].dim());
   AT_ASSERT(actual_result_list[2].toTensor().equal(expect_result_list[2]));
+  AT_ASSERT(actual_result_list[3].toTensor().equal(expect_result_list[3]));
 }
 
 void runAndCheckTorchScriptModel(
@@ -680,9 +680,6 @@ void backportAllVersionCheck(
   constexpr int64_t minimum_to_version = 4;
   int64_t current_to_version = from_version - 1;
 
-  Module m = load(test_model_file_stream);
-  m._save_for_mobile("/home/chenlai/local/data/out_args/model_v7.ptl");
-
   // Verify all candidate to_version work as expected. All backport to version
   // larger than minimum_to_version should success.
   while (current_to_version >= minimum_to_version) {
@@ -697,9 +694,6 @@ void backportAllVersionCheck(
 
     // Check backport model version
     auto backport_version = _get_model_bytecode_version(oss);
-    m._save_for_mobile(
-        "/home/chenlai/local/data/out_args/model_v" +
-        std::to_string(backport_version) + ".ptl");
     AT_ASSERT(backport_version == current_to_version);
 
     // Load and run the backport model, then compare the result with expect
@@ -748,6 +742,8 @@ TEST(LiteInterpreterTest, BackPortByteCodeModelAllVersions) {
   expect_result_list.emplace_back(at::ones({2, 2}, ScalarType::Float));
   expect_result_list.emplace_back(
       at::ones({1, 20, 24, 24}, ScalarType::Float) * 26);
+  expect_result_list.emplace_back(3 * at::ones({1}));
+
   backportAllVersionCheck(
       input_model_stream,
       input_data,
@@ -1388,9 +1384,8 @@ void testDefaultArgsPinvWithOutArg(int num_args) {
   auto input = torch::range(1, N * N, 1);
   input[0] = 1; // a more stable matrix
   input = input.view({N, N});
-  // inputs.push_back(input);
   auto ref = m.run_method("forward", input);
-  // testLiteModuleCompareResultTensors(m, inputs);
+  TORCH_CHECK(!input.equal(torch::range(1, N * N, 1)));
 }
 
 TEST(LiteInterpreterTest, DefaultArgsPinvWithOutArg) {
@@ -1420,24 +1415,11 @@ TEST(LiteInterpreterTest, DefaultArgsWithOutArg) {
   bc.run_method("forward", input_x, input_h);
   AT_ASSERT(input_x.equal(4 * torch::ones({})));
 
-  std::set<std::string> module_debug_info_set;
-  size_t pc = 0;
-  while (true) {
-    try {
-      std::string module_info = bc.get_forward_method_debug_info(pc);
-      if (!module_info.empty() &&
-          (module_info.find("debug_handle") == std::string::npos)) {
-        module_debug_info_set.insert(module_info);
-      }
-      ++pc;
-    } catch (const std::exception& e) {
-      break;
-    }
-  }
-
-  for (auto& it : module_debug_info_set) {
-    std::cout << "one line: " << it << std::endl;
-  }
+  auto ops = _get_model_ops_and_info(ss);
+  auto op = ops.find("aten::add.out");
+  TORCH_CHECK(
+      op != ops.end() && op->second.num_schema_args.has_value() &&
+      op->second.num_schema_args.value() == 3);
 }
 
 TEST(LiteInterpreterTest, TestExceptionStackWithTwoLevelModuleHierarchy) {
