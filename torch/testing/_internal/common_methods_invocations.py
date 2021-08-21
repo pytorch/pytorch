@@ -1268,53 +1268,151 @@ def sample_inputs_linalg_vector_norm(op_info, device, dtype, requires_grad, **kw
 
     return inputs
 
-# In order to use the kwarg alpha, partials should be used in an OpInfo's sample_inputs_func
-# eg. sample_inputs_func=partial(sample_inputs_binary_pwise, alpha=2)
-# Then one sample input would also be generated corresponding to the value of alpha provided.
-# In the future, kwargs 'alpha_floating', 'alpha_integral' & 'alpha_complex' can be used to
-# specify scalars of floating, integral & complex types as values for "alpha".
-# Keyword argument `rhs_exclude_zero` is used to exclude zero values from rhs tensor argument
-# This is necessary for operations like `true_divide`, where divide by zero throws an exception.
-def sample_inputs_binary_pwise(op_info, device, dtype, requires_grad, extra_kwargs=None, **kwargs):
-    if extra_kwargs is None:
-        extra_kwargs = {}
 
-    scalar = 3.14 + 3.14j if dtype.is_complex else (3.14 if dtype.is_floating_point else 3)
-    scalar = 1 if dtype is torch.bool else scalar
-    tests_list = [
-        ((S, S, S), (S, S, S), False),
-        ((S, S, S), (S, S), False),
-        ((), (), False),
-        ((S, S, S), (), False),
-        ((S, S, S), scalar, False),
-        ((), scalar, False)
-    ]
-    tests_with_lhs_broadcasting = [
-        ((S, S), (S, S, S), True),
-        ((), (S, S, S), True),
-        ((S, 1, S), (M, S), True),
-    ]
-    test_cases = tests_list + tests_with_lhs_broadcasting  # type: ignore[operator]
-    samples = []
-    for first_shape, shape_or_scalar, broadcasts_input in test_cases:
-        arg = shape_or_scalar
+# Metadata class for binary "universal functions (ufuncs)" that accept two
+# tensor and have common properties
+class BinaryUfuncInfo(OpInfo):
+    """Operator information for 'universal binary functions (binary ufuncs).'
+    These are functions of two tensors with common properties like:
+      - they are elementwise functions
+      - the output shape is determined by the input shape
+      - they typically have method and inplace variants
+      - they typically support the out kwarg
+      - they typically have NumPy or SciPy references
+    See NumPy's universal function documentation
+    (https://numpy.org/doc/stable/reference/ufuncs.html) for more details
+    about the concept of ufuncs.
+    """
+    def __init__(self, name, *, lhs_make_tensor_kwargs=None, rhs_make_tensor_kwargs=None, **kwargs):
+        super().__init__(name, **kwargs)
 
-        if isinstance(shape_or_scalar, tuple):
-            exclude_zero = kwargs.get('rhs_exclude_zero', False)
-            arg = make_tensor(shape_or_scalar, device=device, dtype=dtype,
-                              requires_grad=requires_grad, exclude_zero=exclude_zero)
-        samples.append(SampleInput(make_tensor(first_shape, device=device, dtype=dtype,
-                                               requires_grad=requires_grad),
-                                   args=(arg,), kwargs=extra_kwargs,
-                                   broadcasts_input=broadcasts_input))
-    # Adds an extra sample using "alpha" if it's passed in kwargs
-    if 'alpha' in kwargs:
-        a = make_tensor((S, S, S), device=device, dtype=dtype, requires_grad=requires_grad)
-        b = make_tensor((S, S, S), device=device, dtype=dtype, requires_grad=requires_grad)
-        extra_kwargs['alpha'] = kwargs['alpha']
-        sample = SampleInput(a, args=(b,), kwargs=extra_kwargs)
-        samples.append(sample)
-    return tuple(samples)
+        # [lr]hs_make_tensor_kwargs are part of the OpInfo to be able to dynamically generate valid samples later on.
+        if lhs_make_tensor_kwargs is None:
+            lhs_make_tensor_kwargs = {}
+        self.lhs_make_tensor_kwargs = lhs_make_tensor_kwargs
+
+        if rhs_make_tensor_kwargs is None:
+            rhs_make_tensor_kwargs = {}
+        self.rhs_make_tensor_kwargs = rhs_make_tensor_kwargs
+
+
+def _resolve_binay_pwise_kwargs(
+        op_info, *, op_kwargs=None, lhs_make_tensor_kwargs=None, rhs_make_tensor_kwargs=None
+):
+    """Resolves default values for :func:`sample_inputs_binary_pwise`.
+
+    By default :attr:`op_kwargs`, :attr:`lhs_make_tensor_kwargs`, and :attr:`rhs_make_tensor_kwargs` are just empty
+    dictionaries. In case :attr:`op_info` is a :class:`BinaryUfuncInfo`, :attr:`BinaryUfuncInfo.lhs_make_tensor_kwargs`
+    and :attr:`BinaryUfuncInfo.rhs_make_tensor_kwargs` will be used as defaults.
+    """
+    if op_kwargs is None:
+        op_kwargs = {}
+    if lhs_make_tensor_kwargs is None:
+        lhs_make_tensor_kwargs = op_info.lhs_make_tensor_kwargs if isinstance(op_info, BinaryUfuncInfo) else {}
+    if rhs_make_tensor_kwargs is None:
+        rhs_make_tensor_kwargs = op_info.rhs_make_tensor_kwargs if isinstance(op_info, BinaryUfuncInfo) else {}
+
+    return op_kwargs, lhs_make_tensor_kwargs, rhs_make_tensor_kwargs
+
+
+def sample_inputs_binary_pwise(
+    op_info,
+    device,
+    dtype,
+    requires_grad,
+    *,
+    python_scalars=False,
+    op_kwargs=None,
+    lhs_make_tensor_kwargs=None,
+    rhs_make_tensor_kwargs=None,
+    **kwargs,
+):
+    op_kwargs, lhs_make_tensor_kwargs, rhs_make_tensor_kwargs = _resolve_binay_pwise_kwargs(
+        op_info,
+        op_kwargs=op_kwargs,
+        lhs_make_tensor_kwargs=lhs_make_tensor_kwargs,
+        rhs_make_tensor_kwargs=rhs_make_tensor_kwargs,
+    )
+
+    scalar = make_tensor((), device=device, dtype=dtype, **rhs_make_tensor_kwargs)
+    if python_scalars:
+        scalar = scalar.item()  # type: ignore[assignment]
+
+    shapes = [
+        ((), scalar),
+        ((S,), scalar),
+        ((S, 1), (S,)),
+        ((M, S), scalar),
+        ((S, M, S), (M, S)),
+        ((S, M, S), (S, M, S)),
+        ((M, 1, S), (M, S)),
+        ((M, 1, S), (1, M, S)),
+    ]
+
+    sample_inputs = []
+    for shape_lhs, shape_rhs_or_scalar in shapes:
+        lhs = make_tensor(
+            shape_lhs,
+            device=device,
+            dtype=dtype,
+            requires_grad=requires_grad,
+            **lhs_make_tensor_kwargs,
+        )
+        if isinstance(shape_rhs_or_scalar, tuple):
+            # shape
+            rhs = make_tensor(
+                shape_rhs_or_scalar,
+                device=device,
+                dtype=dtype,
+                requires_grad=requires_grad,
+                **rhs_make_tensor_kwargs,
+            )
+            broadcasts_input = torch.broadcast_shapes(shape_lhs, shape_rhs_or_scalar) != shape_lhs
+        else:
+            # scalar
+            rhs = shape_rhs_or_scalar  # type: ignore[assignment]
+            broadcasts_input = False
+
+        sample_inputs.append(SampleInput(lhs, args=(rhs,), kwargs=op_kwargs, broadcasts_input=broadcasts_input))
+    return sample_inputs
+
+
+def sample_inputs_add_sub(
+    op_info,
+    device,
+    dtype,
+    requires_grad,
+    python_scalars=False,
+    alpha=1,
+    op_kwargs=None,
+    lhs_make_tensor_kwargs=None,
+    rhs_make_tensor_kwargs=None,
+    **kwargs,
+):
+    op_kwargs, lhs_make_tensor_kwargs, rhs_make_tensor_kwargs = _resolve_binay_pwise_kwargs(
+        op_info,
+        op_kwargs=op_kwargs,
+        lhs_make_tensor_kwargs=lhs_make_tensor_kwargs,
+        rhs_make_tensor_kwargs=rhs_make_tensor_kwargs,
+    )
+
+    sample_inputs = sample_inputs_binary_pwise(
+        op_info,
+        device,
+        dtype,
+        requires_grad,
+        python_scalars=python_scalars,
+        op_kwargs=op_kwargs,
+        lhs_make_tensor_kwargs=lhs_make_tensor_kwargs,
+        rhs_make_tensor_kwargs=rhs_make_tensor_kwargs,
+        **kwargs,
+    )
+
+    lhs = make_tensor((S, S), device=device, dtype=dtype, requires_grad=requires_grad, **lhs_make_tensor_kwargs)
+    rhs = make_tensor((S, S), device=device, dtype=dtype, requires_grad=requires_grad, **rhs_make_tensor_kwargs)
+    sample_inputs.append(SampleInput(lhs, args=(rhs,), kwargs=dict(op_kwargs, alpha=alpha), broadcasts_input=False))
+
+    return sample_inputs
 
 
 def sample_inputs_t(op_info, device, dtype, requires_grad, **kwargs):
@@ -4045,19 +4143,6 @@ def sample_inputs_logit(op_info, device, dtype, requires_grad, **kwargs):
 
     return samples
 
-def sample_inputs_floor_divide(op_info, device, dtype, requires_grad, **kwargs):
-    lhs = make_tensor((S, S, S), device, dtype, low=None, high=None, requires_grad=requires_grad)
-    rhs = make_tensor((S, S, S), device, dtype, low=None, high=None, requires_grad=requires_grad)
-    # Avoid integer divide by 0
-    if not (dtype.is_floating_point or dtype.is_complex):
-        rhs[rhs == 0] = 1
-
-    return [
-        SampleInput(lhs, args=(rhs,)),
-        SampleInput(lhs, args=(rhs[0],)),
-        SampleInput(lhs, args=(3.14,)),
-    ]
-
 def sample_inputs_isin(op_info, device, dtype, requires_grad):
     element = make_tensor((L,), device, dtype, low=None, high=None, requires_grad=requires_grad)
     indices = torch.randint(0, L, size=[S])
@@ -5450,31 +5535,31 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestGradients', 'test_method_grad',
                                 device_type='cuda', dtypes=[torch.cdouble], active_if=IS_WINDOWS),
                        SkipInfo('TestGradients', 'test_forward_mode_AD',
-                                dtypes=[torch.cdouble]),
+                                device_type='cpu', dtypes=[torch.cdouble]),
                    )),
-    OpInfo('add',
-           # NumPy has no builtin reference for the alpha kwarg, but it is easy enough to emulate
-           ref=lambda input, other, *, alpha=1: np.add(input, np.multiply(alpha, other)),
-           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
-           assert_autodiffed=True,
-           sample_inputs_func=partial(sample_inputs_binary_pwise, alpha=2),
-           supports_inplace_autograd=False,
-           supports_forward_ad=True),
-    OpInfo('mul',
-           aliases=('multiply',),
-           dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16, torch.bool),
-           assert_autodiffed=True,
-           supports_forward_ad=True,
-           sample_inputs_func=sample_inputs_binary_pwise),
-    OpInfo('sub',
-           # NumPy has no builtin reference for the alpha kwarg, but it is easy enough to emulate
-           ref=lambda input, other, *, alpha=1: np.subtract(input, np.multiply(alpha, other)),
-           aliases=('subtract',),
-           dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16),
-           assert_autodiffed=True,
-           supports_forward_ad=True,
-           sample_inputs_func=partial(sample_inputs_binary_pwise, alpha=2),
-           supports_inplace_autograd=False),
+    BinaryUfuncInfo('add',
+                    # NumPy has no builtin reference for the alpha kwarg, but it is easy enough to emulate
+                    ref=lambda input, other, *, alpha=1: np.add(input, np.multiply(alpha, other)),
+                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
+                    assert_autodiffed=True,
+                    sample_inputs_func=partial(sample_inputs_add_sub, alpha=2),
+                    supports_inplace_autograd=False,
+                    supports_forward_ad=True),
+    BinaryUfuncInfo('mul',
+                    aliases=('multiply',),
+                    dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16, torch.bool),
+                    assert_autodiffed=True,
+                    supports_forward_ad=True,
+                    sample_inputs_func=sample_inputs_binary_pwise),
+    BinaryUfuncInfo('sub',
+                    # NumPy has no builtin reference for the alpha kwarg, but it is easy enough to emulate
+                    ref=lambda input, other, *, alpha=1: np.subtract(input, np.multiply(alpha, other)),
+                    aliases=('subtract',),
+                    dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16),
+                    assert_autodiffed=True,
+                    supports_forward_ad=True,
+                    sample_inputs_func=partial(sample_inputs_add_sub, alpha=2),
+                    supports_inplace_autograd=False),
     OpInfo('addmm',
            # This addmm OpInfo is for when alpha and beta are not both equal to 1.
            # alpha=beta=1 is tested in the following opinfo, because that special case will
@@ -5572,12 +5657,17 @@ op_db: List[OpInfo] = [
            backward_dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if SM53OrLater else []),
            assert_autodiffed=True,
            supports_forward_ad=True,
+           decorators=(
+               DecorateInfo(toleranceOverride({
+                   torch.float32: tol(atol=1e-05, rtol=1e-02),
+               }), 'TestCommon', 'test_out', device_type='cuda'),
+           ),
            skips=(
                # FIXME: bfloat16 backward support likely depends on CUDA11+
                #   and SM53+
                SkipInfo('TestCommon', 'test_dtypes', active_if=IS_WINDOWS),
                # bmm does not correctly warn when resizing out= inputs
-               SkipInfo('TestCommon', 'test_out'),
+               SkipInfo('TestCommon', 'test_out', device_type='cpu'),
            ),
            sample_inputs_func=sample_inputs_bmm),
     OpInfo('mv',
@@ -5821,10 +5911,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            sample_inputs_func=sample_inputs_contiguous,
            supports_forward_ad=True,
-           skips=(
-               # JIT has issue when op is passed as lambda
-               SkipInfo('TestJit', 'test_variant_consistency_jit'),
-           ),
+           assert_autodiffed=True,
            supports_out=False),
     OpInfo('symeig',
            dtypes=floating_and_complex_types(),
@@ -5935,6 +6022,7 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo('cosh',
                    ref=np_unary_ufunc_integer_promotion_wrapper(np.cosh),
                    dtypes=all_types_and_complex_and(torch.bool),
+                   dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    safe_casts_outputs=True,
                    assert_autodiffed=True,
@@ -6021,41 +6109,43 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_diff),
-    OpInfo('div',
-           aliases=('divide',),
-           variant_test_name='no_rounding_mode',
-           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-           sample_inputs_func=partial(sample_inputs_binary_pwise, rhs_exclude_zero=True),
-           supports_forward_ad=True,
-           assert_autodiffed=True),
-    OpInfo('div',
-           aliases=('divide',),
-           variant_test_name='trunc_rounding',
-           dtypes=all_types_and(torch.half, torch.bfloat16),
-           sample_inputs_func=partial(sample_inputs_binary_pwise, extra_kwargs={
-                                      "rounding_mode": 'trunc'}, rhs_exclude_zero=True),
-           supports_forward_ad=True,
-           skips=(
-               # Reference: https://github.com/pytorch/pytorch/issues/59174
-               SkipInfo('TestJit', 'test_variant_consistency_jit'),
-           ),
-           assert_autodiffed=True),
-    OpInfo('div',
-           aliases=('divide',),
-           variant_test_name='floor_rounding',
-           dtypes=all_types_and(torch.half, torch.bfloat16),
-           sample_inputs_func=partial(sample_inputs_binary_pwise, extra_kwargs={
-                                      "rounding_mode": 'floor'}, rhs_exclude_zero=True),
-           supports_forward_ad=True,
-           skips=(
-               # Reference: https://github.com/pytorch/pytorch/issues/59174
-               SkipInfo('TestJit', 'test_variant_consistency_jit'),
-           ),
-           assert_autodiffed=True),
-    OpInfo('true_divide',
-           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-           supports_forward_ad=True,
-           sample_inputs_func=partial(sample_inputs_binary_pwise, rhs_exclude_zero=True)),
+    BinaryUfuncInfo('div',
+                    aliases=('divide',),
+                    variant_test_name='no_rounding_mode',
+                    dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                    sample_inputs_func=sample_inputs_binary_pwise,
+                    supports_forward_ad=True,
+                    assert_autodiffed=True,
+                    rhs_make_tensor_kwargs=dict(exclude_zero=True)),
+    BinaryUfuncInfo('div',
+                    aliases=('divide',),
+                    variant_test_name='trunc_rounding',
+                    dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                    sample_inputs_func=partial(sample_inputs_binary_pwise, rounding_mode="trunc"),
+                    supports_forward_ad=True,
+                    skips=(
+                        # Reference: https://github.com/pytorch/pytorch/issues/59174
+                        SkipInfo('TestJit', 'test_variant_consistency_jit'),
+                    ),
+                    assert_autodiffed=True,
+                    rhs_make_tensor_kwargs=dict(exclude_zero=True)),
+    BinaryUfuncInfo('div',
+                    aliases=('divide',),
+                    variant_test_name='floor_rounding',
+                    dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                    sample_inputs_func=partial(sample_inputs_binary_pwise, rounding_mode="floor"),
+                    supports_forward_ad=True,
+                    skips=(
+                        # Reference: https://github.com/pytorch/pytorch/issues/59174
+                        SkipInfo('TestJit', 'test_variant_consistency_jit'),
+                    ),
+                    assert_autodiffed=True,
+                    rhs_make_tensor_kwargs=dict(exclude_zero=True)),
+    BinaryUfuncInfo('true_divide',
+                    dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                    supports_forward_ad=True,
+                    sample_inputs_func=sample_inputs_binary_pwise,
+                    rhs_make_tensor_kwargs=dict(exclude_zero=True)),
     UnaryUfuncInfo('exp',
                    ref=np_unary_ufunc_integer_promotion_wrapper(np.exp),
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
@@ -6078,9 +6168,6 @@ op_db: List[OpInfo] = [
            op=lambda self, shape: self.expand(shape),
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_expand,
-           skips=(
-               # Because expand does not have a function variant.
-               SkipInfo('TestJit', 'test_variant_consistency_jit'),),
            supports_forward_ad=True,
            supports_out=False),
     OpInfo('expand_as',
@@ -6088,9 +6175,6 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_expand_as,
-           skips=(
-               # Because expand_as does not have a function variant.
-               SkipInfo('TestJit', 'test_variant_consistency_jit'),),
            supports_out=False),
     OpInfo('diag',
            dtypes=all_types_and_complex_and(torch.bool),
@@ -6308,15 +6392,17 @@ op_db: List[OpInfo] = [
                    dtypes=all_types_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and(torch.bool, torch.bfloat16, torch.float16),
                    safe_casts_outputs=True),
-    OpInfo('floor_divide',
-           dtypes=all_types_and(torch.half, torch.bfloat16),
-           sample_inputs_func=sample_inputs_floor_divide,
-           supports_autograd=False,
-           ),
+    BinaryUfuncInfo('floor_divide',
+                    dtypes=all_types_and(torch.half, torch.bfloat16),
+                    sample_inputs_func=sample_inputs_binary_pwise,
+                    supports_autograd=False,
+                    rhs_make_tensor_kwargs=dict(exclude_zero=True),
+                    ),
     UnaryUfuncInfo('frexp',
                    op=torch.frexp,
                    ref=np.frexp,
                    dtypes=floating_types_and(torch.half),
+                   dtypesIfCPU=floating_types_and(torch.half, torch.bfloat16),
                    # skip testing torch.frexp as it is not supported by ROCm platform yet
                    decorators=[skipCUDAIfRocm],
                    supports_out=False,
@@ -6508,10 +6594,7 @@ op_db: List[OpInfo] = [
            supports_out=True,
            sample_inputs_func=sample_inputs_linalg_lstsq,
            supports_autograd=False,
-           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
-           skips=(
-               SkipInfo('TestJit', 'test_variant_consistency_jit'),
-           )),
+           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],),
     OpInfo('linalg.matrix_power',
            aliases=('matrix_power',),
            aten_name='linalg_matrix_power',
@@ -6663,8 +6746,6 @@ op_db: List[OpInfo] = [
                        # torch.float32
                        SkipInfo('TestUnaryUfuncs', 'test_variant_consistency',
                                 dtypes=all_types_and_complex_and(torch.half, torch.bfloat16)),
-                       SkipInfo('TestCommon', 'test_variant_consistency_eager',
-                                dtypes=all_types_and_complex_and(torch.half, torch.bfloat16)),
                    )),
     OpInfo('lt',
            aliases=('less',),
@@ -6701,12 +6782,7 @@ op_db: List[OpInfo] = [
            check_batched_grad=False,
            supports_out=True,
            sample_inputs_func=sample_inputs_lu_unpack,
-           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],
-           skips=(
-               # cuda gradchecks are slow
-               # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
-               SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),
-           )),
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],),
     OpInfo('masked_fill',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_masked_fill,
@@ -6790,7 +6866,7 @@ op_db: List[OpInfo] = [
                # TODO: FIXME: complex inputs requiring grad error in forward
                SkipInfo('TestCommon', 'test_dtypes'),
                # TODO: review with var_mean tests in test_autograd.py
-               SkipInfo('TestJit', 'test_variant_consistency_jit'),
+               SkipInfo('TestJit', 'test_variant_consistency_jit', dtypes=[torch.float32]),
                SkipInfo('TestGradients', 'test_fn_grad'),
                SkipInfo('TestGradients', 'test_fn_gradgrad'),
                SkipInfo('TestGradients', 'test_forward_mode_AD'))),
@@ -6809,7 +6885,7 @@ op_db: List[OpInfo] = [
                # TODO: FIXME: complex inputs requiring grad error in forward
                SkipInfo('TestCommon', 'test_dtypes'),
                # TODO: fix along with var_mean autograd tests
-               SkipInfo('TestJit', 'test_variant_consistency_jit'),
+               SkipInfo('TestJit', 'test_variant_consistency_jit', dtypes=[torch.float32]),
                SkipInfo('TestGradients', 'test_fn_grad'),
                SkipInfo('TestGradients', 'test_fn_gradgrad'),
                SkipInfo('TestGradients', 'test_forward_mode_AD'))),
@@ -6822,7 +6898,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=partial(sample_inputs_meshgrid, variant='variadic'),
            skips=[
                # JIT does not support variadic tensors.
-               SkipInfo('TestJit', 'test_variant_consistency_jit'),
+               SkipInfo('TestJit', 'test_variant_consistency_jit', dtypes=[torch.float32]),
                # meshgrid is defined in torch.functional to take a
                # variadic list of tensors. Variadic parameters are not
                # compatible with the normalize operator tests.
@@ -6929,7 +7005,7 @@ op_db: List[OpInfo] = [
                # RuntimeError: aliasOp != torch::jit::getOperatorAliasMap().end()
                # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":159,
                # please report a bug to PyTorch.
-               SkipInfo('TestJit', 'test_variant_consistency_jit',),
+               SkipInfo('TestJit', 'test_variant_consistency_jit', dtypes=[torch.float32]),
            )),
     OpInfo('aminmax',
            ref=lambda x, dim=None, keepdim=False: (np.amin(x, axis=dim, keepdims=keepdim), np.amax(x, axis=dim, keepdims=keepdim)),
@@ -7220,9 +7296,7 @@ op_db: List[OpInfo] = [
     OpInfo('float_power',
            dtypes=all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool),
            sample_inputs_func=sample_inputs_pow,
-           supports_forward_ad=True,
-           skips=(
-               SkipInfo('TestMathBits', 'test_conj_view', device_type='cuda'),),),
+           supports_forward_ad=True,),
     OpInfo('prod',
            dtypes=all_types_and_complex_and(torch.bool),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
@@ -7312,6 +7386,7 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo('sinh',
                    ref=np_unary_ufunc_integer_promotion_wrapper(np.sinh),
                    dtypes=all_types_and_complex_and(torch.bool),
+                   dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    safe_casts_outputs=True,
                    assert_autodiffed=True,
@@ -7476,12 +7551,6 @@ op_db: List[OpInfo] = [
            variant_test_name='rsub_tensor',
            supports_out=False,
            supports_inplace_autograd=False,
-           skips=(
-               # Reference: https://github.com/pytorch/pytorch/issues/53797
-               # JIT doesn't understand complex literals
-               SkipInfo('TestJit', 'test_variant_consistency_jit',
-                        dtypes=[torch.cfloat, torch.cdouble]),
-           ),
            sample_inputs_func=partial(sample_inputs_rsub, variant='tensor'),),
     OpInfo('rsub',
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
@@ -7490,10 +7559,12 @@ op_db: List[OpInfo] = [
            supports_inplace_autograd=False,
            sample_inputs_func=partial(sample_inputs_rsub, variant='scalar'),
            skips=(
-               # Reference: https://github.com/pytorch/pytorch/issues/53797
-               # JIT doesn't understand complex literals
+               # RuntimeError: falseINTERNAL ASSERT FAILED at
+               # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":52,
+               # please report a bug to PyTorch.
                SkipInfo('TestJit', 'test_variant_consistency_jit',
-                        dtypes=all_types_and_complex_and(torch.bfloat16, torch.half)),),
+                        dtypes=[torch.float32]),
+           ),
            assert_autodiffed=True,),
     OpInfo('select',
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
@@ -7633,6 +7704,7 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo('nan_to_num',
                    ref=np.nan_to_num,
                    dtypes=all_types_and(torch.half, torch.bool),
+                   dtypesIfCPU=all_types_and(torch.half, torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and(torch.half, torch.bool, torch.bfloat16),
                    supports_forward_ad=True,
                    # Passing numpy_kwargs via sample_kwargs, as numpy does comparison
@@ -7853,22 +7925,6 @@ op_db: List[OpInfo] = [
                    safe_casts_outputs=True,
                    supports_forward_ad=True,
                    sample_inputs_func=sample_inputs_polygamma,
-                   skips=(
-                       # Probably related to the way the function is
-                       # scripted for JIT tests (or maybe not).
-                       # RuntimeError:
-                       # Arguments for call are not valid.
-                       # The following variants are available:
-                       #   aten::polygamma(int n, Tensor self) -> (Tensor):
-                       #   Expected a value of type 'Tensor' for argument 'self' but instead found type 'int'.
-                       #   aten::polygamma.out(int n, Tensor self, *, Tensor(a!) out) -> (Tensor(a!)):
-                       #   Expected a value of type 'Tensor' for argument 'self' but instead found type 'int'.
-                       # The original call is:
-                       #   File "<string>", line 3
-                       # def the_method(i0):
-                       #     return torch.polygamma(i0, 1)
-                       #            ~~~~~~~~~~~~~~~ <--- HERE
-                       SkipInfo('TestJit', 'test_variant_consistency_jit'),),
                    sample_kwargs=lambda device, dtype, input: ({'n': 0}, {'n': 0})),
     # A separate OpInfo entry for special.polygamma is needed to reorder the arguments
     # for the alias. See the discussion here: https://github.com/pytorch/pytorch/pull/59691#discussion_r650261939
@@ -8010,9 +8066,6 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
            supports_forward_ad=True,
-           skips=(
-               # Because view does not have a function variant.
-               SkipInfo('TestJit', 'test_variant_consistency_jit'),),
            sample_inputs_func=sample_inputs_view_reshape,
            ),
     OpInfo('view_as',
@@ -8020,9 +8073,6 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
            supports_forward_ad=True,
-           skips=(
-               # Because view_as does not have a function variant.
-               SkipInfo('TestJit', 'test_variant_consistency_jit'),),
            sample_inputs_func=sample_inputs_view_as_reshape_as,
            ),
     OpInfo('pinverse',
@@ -8163,9 +8213,6 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            check_batched_gradgrad=False,
            skips=(
-               # torch.unfold does not exist so we get a RuntimeError.
-               SkipInfo('TestJit', 'test_variant_consistency_jit',
-                        dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16)),
                # Skip operator schema test because this is a functional and not an operator
                SkipInfo('TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
            ),
@@ -8196,11 +8243,6 @@ op_db: List[OpInfo] = [
                   dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
                   supports_out=False,
                   supports_forward_ad=True,
-                  skips=(
-                      # torch.repeat does not exist so we get a RuntimeError.
-                      SkipInfo('TestJit', 'test_variant_consistency_jit',
-                               dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16)),
-                  ),
                   sample_inputs_func=sample_repeat_tile),
     OpInfo('squeeze',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
@@ -8376,9 +8418,6 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_tensordot,
            skips=(
-               # Currently failing due to an INTERNAL_ASSERT_FAILED error.
-               # Reference: https://github.com/pytorch/pytorch/issues/56314
-               SkipInfo("TestJit", "test_variant_consistency_jit", dtypes=[torch.float32]),
                # Skip operator schema test because this is a functional and not an operator.
                # Reference: https://github.com/pytorch/pytorch/issues/54574
                SkipInfo('TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
@@ -8397,7 +8436,7 @@ op_db: List[OpInfo] = [
                # TODO: FIXME: complex inputs requiring grad error in forward
                SkipInfo('TestCommon', 'test_dtypes'),
                # JIT has issue when op is passed as lambda
-               SkipInfo('TestJit', 'test_variant_consistency_jit'),
+               SkipInfo('TestJit', 'test_variant_consistency_jit', dtypes=[torch.float32]),
            )
            ),
     OpInfo('logcumsumexp',
@@ -8564,10 +8603,6 @@ op_db: List[OpInfo] = [
            op=lambda self, condition, other: torch.where(condition, self, other),
            sample_inputs_func=sample_inputs_where,
            supports_out=False,
-           skips=(
-               # test does not work with passing lambda for op
-               SkipInfo('TestJit', 'test_variant_consistency_jit'),
-           ),
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16)),
     # `torch.norm` has multiple code paths depending on the value of `p`.
     # These paths have different dtype support. Also JIT supports,
@@ -8712,6 +8747,7 @@ op_db: List[OpInfo] = [
 
 # Common operator groupings
 unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo)]
+binary_ufuncs = [op for op in op_db if isinstance(op, BinaryUfuncInfo)]
 spectral_funcs = [op for op in op_db if isinstance(op, SpectralFuncInfo)]
 sparse_unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo) and op.supports_sparse is True]
 shape_funcs = [op for op in op_db if isinstance(op, ShapeFuncInfo)]

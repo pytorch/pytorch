@@ -82,13 +82,6 @@ RUN rm AndroidManifest.xml
 RUN rm build.gradle
 ENV INSTALLED_ANDROID ${ANDROID}
 
-# (optional) Install breakpad
-ARG BREAKPAD
-ADD ./common/install_breakpad.sh install_breakpad.sh
-RUN if [ -n "${BREAKPAD}" ]; then bash ./install_breakpad.sh; fi
-RUN rm install_breakpad.sh
-ENV INSTALLED_BREAKPAD ${BREAKPAD}
-
 # (optional) Install Vulkan SDK
 ARG VULKAN_SDK_VERSION
 ADD ./common/install_vulkan_sdk.sh install_vulkan_sdk.sh
@@ -113,6 +106,10 @@ ADD ./common/install_ninja.sh install_ninja.sh
 RUN if [ -n "${NINJA_VERSION}" ]; then bash ./install_ninja.sh; fi
 RUN rm install_ninja.sh
 
+ADD ./common/install_openssl.sh install_openssl.sh
+RUN bash ./install_openssl.sh
+ENV OPENSSL_ROOT_DIR /opt/openssl
+
 # Install ccache/sccache (do this last, so we get priority in PATH)
 ADD ./common/install_cache.sh install_cache.sh
 ENV PATH /opt/cache/bin:$PATH
@@ -129,10 +126,6 @@ ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}
 
 # Install LLVM dev version (Defined in the pytorch/builder github repository)
 COPY --from=pytorch/llvm:9.0.1 /opt/llvm /opt/llvm
-
-ADD ./common/install_openssl.sh install_openssl.sh
-RUN bash ./install_openssl.sh
-ENV OPENSSL_ROOT_DIR /opt/openssl
 
 USER jenkins
 CMD ["bash"]
