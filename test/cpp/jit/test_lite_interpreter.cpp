@@ -1378,9 +1378,8 @@ void testDefaultArgsPinvWithOutArg(int num_args) {
   auto input = torch::range(1, N * N, 1);
   input[0] = 1; // a more stable matrix
   input = input.view({N, N});
-  // inputs.push_back(input);
   auto ref = m.run_method("forward", input);
-  // testLiteModuleCompareResultTensors(m, inputs);
+  TORCH_CHECK(!input.equal(torch::range(1, N * N, 1)));
 }
 
 TEST(LiteInterpreterTest, DefaultArgsPinvWithOutArg) {
@@ -1410,24 +1409,11 @@ TEST(LiteInterpreterTest, DefaultArgsWithOutArg) {
   bc.run_method("forward", input_x, input_h);
   AT_ASSERT(input_x.equal(4 * torch::ones({})));
 
-  std::set<std::string> module_debug_info_set;
-  size_t pc = 0;
-  while (true) {
-    try {
-      std::string module_info = bc.get_forward_method_debug_info(pc);
-      if (!module_info.empty() &&
-          (module_info.find("debug_handle") == std::string::npos)) {
-        module_debug_info_set.insert(module_info);
-      }
-      ++pc;
-    } catch (const std::exception& e) {
-      break;
-    }
-  }
-
-  for (auto& it : module_debug_info_set) {
-    std::cout << "one line: " << it << std::endl;
-  }
+  auto ops = _get_model_ops_and_info(ss);
+  auto op = ops.find("aten::add.out");
+  TORCH_CHECK(
+      op != ops.end() && op->second.num_schema_args.has_value() &&
+      op->second.num_schema_args.value() == 4);
 }
 
 TEST(LiteInterpreterTest, TestExceptionStackWithTwoLevelModuleHierarchy) {
