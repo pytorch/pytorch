@@ -267,7 +267,6 @@ class CMake:
 
         # Aliases which are lower priority than their canonical option
         low_priority_options = {
-            'CUDA_NVCC_EXECUTABLE': 'CMAKE_CUDA_COMPILER',
             'CUDA_HOST_COMPILER': 'CMAKE_CUDA_HOST_COMPILER',
         }
 
