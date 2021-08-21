@@ -790,7 +790,7 @@ endif()
 
 # Pass path to PocketFFT
 if(AT_POCKETFFT_ENABLED)
-  if (CMAKE_VERSION VERSION_GREATER_EQUAL "3.11")
+  if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.11")
     set_source_files_properties(
         "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/mkl/SpectralOps.cpp"
         PROPERTIES INCLUDE_DIRECTORIES "${POCKETFFT_INCLUDE_DIR}")
