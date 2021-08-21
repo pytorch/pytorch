@@ -1,5 +1,7 @@
 backend: Lazy
 cpp_namespace: torch_lazy_tensors
+codegen:
+  - sqrt
 supported:
   - _log_softmax
   - _log_softmax_backward_data
