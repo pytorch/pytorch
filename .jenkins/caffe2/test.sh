@@ -174,6 +174,5 @@ if [[ "$BUILD_ENVIRONMENT" == *onnx* ]]; then
     wget https://ortpypackage.blob.core.windows.net/ort-nightly/ort_nightly-1.8.0.dev202107131-cp36-cp36m-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
     pip install -q --user ort_nightly-1.8.0.dev202107131-cp36-cp36m-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
   fi
-  export PYTORCH_JIT_LOG_LEVEL=">>kernel"
   "$ROOT_DIR/scripts/onnx/test.sh"
 fi
