@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <vector>
+#include <unordered_map>
 
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/api/function_impl.h>
@@ -69,6 +70,8 @@ struct CodeImpl {
 
   std::vector<IValue> constant_table_;
   std::vector<Operation> operator_table_;
+  // Maps an operation to its index in operator_table_, used to avoid duplicates
+  std::unordered_map<Operation, int> operator_table_inv_;
   std::vector<Function*> function_table_;
   std::vector<std::unique_ptr<GraphFunction>> forked_functions_;
   std::vector<TypePtr> type_table_;
@@ -295,12 +298,12 @@ struct CodeImpl {
   virtual void emitOperator(Node* node) {
     emitLoadInputs(node->inputs());
     const Operator& op = node->getOperator();
+    int operation_index = add_to_operator_table(op.getOperation(node));
     if (op.hasOperation() && op.schema().is_vararg()) {
-      insertInstruction(OPN, operator_table_.size(), node->inputs().size());
+      insertInstruction(OPN, operation_index, node->inputs().size());
     } else {
-      insertInstruction(OP, operator_table_.size());
+      insertInstruction(OP, operation_index);
     }
-    operator_table_.emplace_back(op.getOperation(node));
   }
 
   void emitWait(Node* node) {
@@ -706,6 +709,22 @@ struct CodeImpl {
       dump(out, i);
     }
   }
+
+  /**
+   * Add an operation to operator_table_ if not a duplicate and return its index
+   */
+  int add_to_operator_table(const Operation& operation) {
+    auto operation_lookup = operator_table_inv_.find(operation);
+    
+    if (operation_lookup != operator_table_inv_.end()) {
+      return operation_lookup->second;
+    }
+
+    int operation_index = operator_table_.size();
+    operator_table_.emplace_back(operation);
+    operator_table_inv_.emplace(operation, operation_index);
+    return operation_index;
+  }
 };
 
 struct MobileCodeImpl : CodeImpl {
@@ -758,9 +777,12 @@ struct MobileCodeImpl : CodeImpl {
       CodeImpl::emitOperator(node);
     } else {
       const Operator& op = node->getOperator();
+      int operation_index = CodeImpl::add_to_operator_table(
+        op.getOperation(node)
+      );
       if (op.hasOperation() && op.schema().is_vararg()) {
         emitLoadInputs(node->inputs());
-        insertInstruction(OPN, operator_table_.size(), node->inputs().size());
+        insertInstruction(OPN, operation_index, node->inputs().size());
       } else {
         auto unique_op_name = c10::toString(op.schema().operator_name());
         auto num_include = node->inputs().size();
@@ -769,9 +791,8 @@ struct MobileCodeImpl : CodeImpl {
           num_include = it->second;
         }
         emitLoadInputs(node->inputs(), num_include);
-        insertInstruction(OP, operator_table_.size());
+        insertInstruction(OP, operation_index);
       }
-      operator_table_.emplace_back(op.getOperation(node));
     }
   }
 
