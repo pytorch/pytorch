@@ -1,11 +1,9 @@
-// (c) Facebook, Inc. and its affiliates. Confidential and proprietary.
+#include <torch/csrc/jit/mobile/model_tracer/OperatorCallTracer.h>
 
-#include "OperatorCallTracer.h"
-
-namespace facebook {
-namespace pytorch {
-
+namespace torch {
+namespace jit {
+namespace mobile {
 std::set<std::string> OperatorCallTracer::called_operators_;
-
-} // namespace pytorch
-} // namespace facebook
+} // namespace mobile
+} // namespace jit
+} // namespace torch

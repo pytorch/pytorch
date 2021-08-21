@@ -1,11 +1,10 @@
 #pragma once
-// (c) Facebook, Inc. and its affiliates. Confidential and proprietary.
 
 #include "ATen/record_function.h"
 
-namespace facebook {
-namespace pytorch {
-
+namespace torch {
+namespace jit {
+namespace mobile {
 /* The OperatorCallTracer class handles the attachment and removal of a
  * recording callback that traces invocation of ATen (and other) PyTorch
  * operators that get called via the Dispatcher.
@@ -44,6 +43,6 @@ struct OperatorCallTracer final {
     at::removeCallback(handle_);
   }
 };
-
-} // namespace pytorch
-} // namespace facebook
+} // namespace mobile
+} // namespace jit
+} // namespace torch

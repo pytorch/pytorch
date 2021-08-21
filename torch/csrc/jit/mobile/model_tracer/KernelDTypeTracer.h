@@ -1,14 +1,13 @@
 #pragma once
-// (c) Facebook, Inc. and its affiliates. Confidential and proprietary.
 
 #include <map>
 #include <set>
 #include <string>
 #include "ATen/record_function.h"
 
-namespace facebook {
-namespace pytorch {
-
+namespace torch {
+namespace jit {
+namespace mobile {
 /* The KernelDTypeTracer class handles the attachment and removal of a recording
  * callback that traces the invocation of code that handles specific dtypes in
  * kernel function implementations that are tagged with specific tags.
@@ -52,6 +51,6 @@ struct KernelDTypeTracer final {
     at::removeCallback(handle_);
   }
 };
-
-} // namespace pytorch
-} // namespace facebook
+}
+} // namespace jit
+} // namespace torch

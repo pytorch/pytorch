@@ -138,8 +138,8 @@ TEST(BoundsInference, _4) {
         return a.load(y, x) * b->load(y, x);
       });
   LoopNest l({c});
-  std::vector<For*> loops = l.getLoopStmtsFor(c);
-  Stmt* body = l.getLoopBodyFor(c);
+  std::vector<ForPtr> loops = l.getLoopStmtsFor(c);
+  StmtPtr body = l.getLoopBodyFor(c);
   {
     // Infer bounds on the top-level loop scope
     auto bounds_info = inferBounds(loops[0]);
@@ -213,12 +213,12 @@ TEST(BoundsInference, _5) {
   LoopNest l({b});
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For* inner;
+  ForPtr inner;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For* tail;
-  std::vector<For*> loops = l.getLoopStmtsFor(b);
+  ForPtr tail;
+  std::vector<ForPtr> loops = l.getLoopStmtsFor(b);
   LoopNest::splitWithTail(loops[0], 16, &inner, &tail);
-  For* outer = loops[0];
+  ForPtr outer = loops[0];
 
   {
     // Verify inferred bounds for the outer loop
@@ -272,8 +272,8 @@ TEST(BoundsInference, _6) {
         return a.load(y + 100, x + 100) * b->load(y * 2, x * 5);
       });
   LoopNest l({c});
-  std::vector<For*> loops = l.getLoopStmtsFor(c);
-  Stmt* body = l.getLoopBodyFor(c);
+  std::vector<ForPtr> loops = l.getLoopStmtsFor(c);
+  StmtPtr body = l.getLoopBodyFor(c);
   {
     // Infer bounds on the top-level loop scope
     auto bounds_info = inferBounds(loops[0]);
@@ -336,7 +336,7 @@ TEST(BoundsInference, Adjacent) {
   Tensor* c = Compute(
       "c", {{H, "x"}}, [&](const VarHandle& x) { return a.load(x + H); });
   LoopNest l({b, c});
-  std::vector<For*> loops = NodeFinder<For>::find(l.root_stmt());
+  std::vector<ForPtr> loops = NodeFinder<For>::find(l.root_stmt());
 
   {
     // Infer bounds on the top-level loop scope
@@ -453,7 +453,7 @@ TEST(BoundsInference, MultipleTopLoopStore) {
 
   // Same as above but the offsets are on the Store now.
   // Can't do this through ComputeAPI without transforms we don't have yet.
-  Stmt* stmt = Block::make(
+  StmtPtr stmt = Block::make(
       {For::make(x, 0, 64, Store::make(b, {x}, Load::make(a, {x}))),
        For::make(x, 0, 32, Store::make(c, {x + 10}, Load::make(a, {x}))),
        For::make(x, 0, 96, Store::make(d, {x + 2}, Load::make(a, {x})))});
@@ -522,7 +522,7 @@ TEST(BoundsInference, CacheReads) {
   LoopNest l({B, C});
   auto bounds_info_before = inferBounds(l.root_stmt());
 
-  Stmt* j_loop = l.getLoopStmtsFor(B)[1];
+  StmtPtr j_loop = l.getLoopStmtsFor(B)[1];
   LoopNest::cacheAccesses(A->buf(), "A_local", j_loop);
 
   auto bounds_info_after = inferBounds(l.root_stmt());
@@ -592,8 +592,8 @@ TEST(BoundsInference, Flattened) {
   ASSERT_EQ(TABI.stop.size(), 1);
 
   // Bounds should be 0 -> (3*4*5)-1
-  ASSERT_TRUE(exprEquals(TABI.start[0], new IntImm(0)));
-  ASSERT_TRUE(exprEquals(TABI.stop[0], new IntImm(3 * 4 * 5 - 1)));
+  ASSERT_TRUE(exprEquals(TABI.start[0], alloc<IntImm>(0)));
+  ASSERT_TRUE(exprEquals(TABI.stop[0], alloc<IntImm>(3 * 4 * 5 - 1)));
 }
 
 TEST(BoundsInference, GetPotentialHazards) {
@@ -614,11 +614,11 @@ TEST(BoundsInference, GetPotentialHazards) {
      * C[0] = 5;
      */
 
-    Store* store1 = Store::make(a, {0}, Load::make(b, {0}));
-    Store* store2 = Store::make(b, {0}, 3);
-    Store* store3 = Store::make(a, {0}, Load::make(b, {0}));
-    Store* store4 = Store::make(c, {0}, 5);
-    Stmt* stmt = Block::make({store1, store2, store3, store4});
+    StorePtr store1 = Store::make(a, {0}, Load::make(b, {0}));
+    StorePtr store2 = Store::make(b, {0}, 3);
+    StorePtr store3 = Store::make(a, {0}, Load::make(b, {0}));
+    StorePtr store4 = Store::make(c, {0}, 5);
+    StmtPtr stmt = Block::make({store1, store2, store3, store4});
 
     MemDependencyChecker analyzer;
     stmt->accept(&analyzer);
@@ -667,8 +667,8 @@ TEST(BoundsInference, GetPotentialHazardsLoopNoHazard) {
   MemDependencyChecker analyzer;
   l.root_stmt()->accept(&analyzer);
 
-  For* loopRootA = l.getLoopStmtsFor(A)[0];
-  For* loopRootB = l.getLoopStmtsFor(B)[0];
+  ForPtr loopRootA = l.getLoopStmtsFor(A)[0];
+  ForPtr loopRootB = l.getLoopStmtsFor(B)[0];
 
   // No dependencies between loops.
   ASSERT_EQ(
@@ -695,8 +695,8 @@ TEST(BoundsInference, GetPotentialHazardsLoopCall) {
   MemDependencyChecker analyzer;
   l.root_stmt()->accept(&analyzer);
 
-  For* loopRootA = l.getLoopStmtsFor(A)[0];
-  For* loopRootB = l.getLoopStmtsFor(B)[0];
+  ForPtr loopRootA = l.getLoopStmtsFor(A)[0];
+  ForPtr loopRootB = l.getLoopStmtsFor(B)[0];
 
   ASSERT_EQ(
       HazardKind::ReadAfterWrite,
@@ -713,11 +713,11 @@ TEST(BoundsInference, GetPotentialHazardsLoopSplit) {
 
   LoopNest l({A});
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For *inner, *tail;
+  ForPtr inner, tail;
 
   // Splitting with tail by something offset creates a tail which also writes to
   // A.
-  For* outer = l.getLoopStmtsFor(A)[0];
+  ForPtr outer = l.getLoopStmtsFor(A)[0];
   // `outer` loop get transformed to the outer loop after splitting.
   LoopNest::splitWithTail(outer, 5, &inner, &tail);
 
@@ -1066,10 +1066,8 @@ TEST(BoundsInference, IsOverlapping) {
       i, 0, 100, Block::make({storeA1, storeB, storeC, storeA2, storeA3}));
   tensorexpr::analysis::MemDependencyChecker analyzer;
   forI->accept(&analyzer);
-  ASSERT_TRUE(
-      isOverlapping(analyzer, storeA1, dynamic_cast<Load*>(loadA1.node())));
-  ASSERT_FALSE(
-      isOverlapping(analyzer, storeA1, dynamic_cast<Load*>(loadA2.node())));
+  ASSERT_TRUE(isOverlapping(analyzer, storeA1, to<Load>(loadA1.node())));
+  ASSERT_FALSE(isOverlapping(analyzer, storeA1, to<Load>(loadA2.node())));
   ASSERT_TRUE(isOverlapping(analyzer, storeA1, storeA2));
   ASSERT_FALSE(isOverlapping(analyzer, storeA1, storeA3));
 }
