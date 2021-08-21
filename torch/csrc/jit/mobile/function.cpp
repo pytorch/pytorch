@@ -101,7 +101,6 @@ bool Function::append_operator(
         num_specified_args.value() < static_cast<int64_t>(args.size())) {
       fn = [fn, num_specified_args, args](Stack& stack) {
         std::vector<IValue> out_args;
-        int num_args = args.size();
         // the end of stack will be out argument, and there might be more than
         // one out argument. The following logic will pop all out argument
         // from stack to out_args, push the default argument value, and then
