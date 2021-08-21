@@ -341,13 +341,6 @@ if(NOT TORCH_INSTALL_LIB_DIR)
   set(TORCH_INSTALL_LIB_DIR lib)
 endif()
 
-# Pass path to PocketFFT
-if(AT_POCKETFFT_ENABLED)
-  set_source_files_properties(
-      "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/mkl/SpectralOps.cpp"
-      PROPERTIES INCLUDE_DIRECTORIES "${POCKETFFT_INCLUDE_DIR}")
-endif()
-
 if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
 
@@ -793,6 +786,17 @@ if(USE_PRECOMPILED_HEADERS)
       ${Caffe2_CPU_SRCS_AVX2}
       ${Caffe2_CPU_SRCS_AVX512}
       PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
+endif()
+
+# Pass path to PocketFFT
+if(AT_POCKETFFT_ENABLED)
+  if (CMAKE_VERSION VERSION_GREATER_EQUAL "3.11")
+    set_source_files_properties(
+        "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/mkl/SpectralOps.cpp"
+        PROPERTIES INCLUDE_DIRECTORIES "${POCKETFFT_INCLUDE_DIR}")
+  else()
+    target_include_directories(torch_cpu "${POCKETFFT_INCLUDE_DIR}")
+  endif()
 endif()
 
 if(CMAKE_COMPILER_IS_GNUCXX AND BUILD_LIBTORCH_CPU_WITH_DEBUG)
