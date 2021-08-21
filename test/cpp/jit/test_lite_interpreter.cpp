@@ -1379,7 +1379,6 @@ void testDefaultArgsPinvWithOutArg(int num_args) {
     )");
   }
 
-  // std::vector<torch::jit::IValue> inputs;
   const int N = 28;
   auto input = torch::range(1, N * N, 1);
   input[0] = 1; // a more stable matrix
@@ -1389,7 +1388,7 @@ void testDefaultArgsPinvWithOutArg(int num_args) {
 }
 
 TEST(LiteInterpreterTest, DefaultArgsPinvWithOutArg) {
-  // Test with different number of specified arguments.
+  // Test with different number of specified arguments + out arg.
   // Arguments not specified take default value.
   for (int num_args = 1; num_args <= 3; ++num_args) {
     testDefaultArgsPinvWithOutArg(num_args);
