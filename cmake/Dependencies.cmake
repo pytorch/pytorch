@@ -250,6 +250,7 @@ if(NOT AT_MKL_ENABLED)
            )
   if(POCKETFFT_INCLUDE_DIR)
     set(AT_POCKETFFT_ENABLED 1)
+    message(STATUS "Using pocketfft in directory: ${POCKETFFT_INCLUDE_DIR}")
   endif()
 endif()
 
