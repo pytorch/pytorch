@@ -47,7 +47,7 @@ class TestTensorExprPyBind(JitTestCase):
             tB = torch.randn(n)
             tC = torch.empty(n)
             cg.call([tA, tB, tC])
-            torch.testing.assert_allclose(tA + tB, tC)
+            torch.testing.assert_close(tA + tB, tC)
 
     def test_call_raw(self):
         with kernel_arena_scope():
@@ -58,7 +58,7 @@ class TestTensorExprPyBind(JitTestCase):
             tB = torch.randn(n, dtype=torch.float64)
             tC = torch.empty(n, dtype=torch.float64)
             cg.call_raw([tA.data_ptr(), tB.data_ptr(), tC.data_ptr()])
-            torch.testing.assert_allclose(tA + tB, tC)
+            torch.testing.assert_close(tA + tB, tC)
 
     def test_external_calls(self):
         with kernel_arena_scope():
@@ -80,7 +80,7 @@ class TestTensorExprPyBind(JitTestCase):
             tB = torch.ones(4, 1)
             tC = torch.empty(1, 1)
             codegen.call([tA, tB, tC])
-            torch.testing.assert_allclose(torch.matmul(tA, tB), tC)
+            torch.testing.assert_close(torch.matmul(tA, tB), tC)
 
     def test_dynamic_shape(self):
         with kernel_arena_scope():
@@ -106,7 +106,7 @@ class TestTensorExprPyBind(JitTestCase):
                 tB = torch.randn(n, dtype=torch.double)
                 tC = torch.empty(n, dtype=torch.double)
                 cg.call([tA, tB, tC, n])
-                torch.testing.assert_allclose(tA - tB, tC)
+                torch.testing.assert_close(tA - tB, tC)
 
             test_with_shape(8)
             test_with_shape(31)
@@ -400,6 +400,25 @@ graph(%a : Float(1, 3, 1, strides=[3, 1, 1], requires_grad=0, device=cpu)):
     def test_forgot_kernel_arena(self):
         self.assertRaises(RuntimeError, lambda: torch._C._te.VarHandle("n", torch._C._te.Dtype.Int))
 
+    @unittest.skipIf(not LLVM_ENABLED, "LLVM backend not enabled")
+    def test_alloc_in_loop(self):
+        with kernel_arena_scope():
+            a, tmp, b = [
+                te.Placeholder(name, te.Dtype.Float, [te.ExprHandle.int(1)])
+                for name in ["a", "tmp", "b"]]
+            t0, t100 = [te.ExprHandle.int(n) for n in [0, 100]]
+            body = te.Block([
+                tmp.store([t0], a.load([t0])),
+                b.store([t0], tmp.load([t0]))
+            ])
+            for _ in range(4):
+                i = te.VarHandle("i", te.Dtype.Int)
+                body = te.For.make(i, t0, t100, body)
+            nest = te.LoopNest(body, [b.data()])
+            nest.prepare_for_codegen()
+            f = te.construct_codegen("llvm", nest.simplify(), [a, b])
+            ta, tb = [torch.ones(1) for _ in range(2)]
+            f.call([ta.data_ptr(), tb.data_ptr()])
 
 def has_sympy():
     try:

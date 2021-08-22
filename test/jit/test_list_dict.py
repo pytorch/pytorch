@@ -244,10 +244,10 @@ class TestList(JitTestCase):
         self.checkScript(fn, ())
 
     def test_dict_keyword_with_mismatched_annotations(self):
-        # TODO: This fails during function schema matching, so the error
-        # message is not very informative to the user. Change logic so
-        # that the error is thrown at a different time?
-        err_msg = "Arguments for call are not valid"
+        err_msg = r"Dict type annotation `Dict\[int, str\]` did not "\
+                  "match the types of the actual dict items"
+        err_msg = r"Dict type annotation `Dict\[int, str\]` did not "\
+                  "match the type of an actual key type `str`"
         highlight_msg = "dict([(\"foo\", 1), (\"bar\", 2), (\"baz\", 3"
         with self.assertRaisesRegexWithHighlight(RuntimeError, err_msg, highlight_msg):
             @torch.jit.script

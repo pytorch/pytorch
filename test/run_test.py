@@ -3,6 +3,7 @@
 import argparse
 import copy
 from datetime import datetime
+from distutils.util import strtobool
 import modulefinder
 import os
 import shutil
@@ -25,7 +26,8 @@ try:
         get_shard_based_on_S3,
         get_slow_tests_based_on_S3,
         get_specified_test_cases,
-        get_reordered_tests
+        get_reordered_tests,
+        get_test_case_configs,
     )
     HAVE_TEST_SELECTION_TOOLS = True
 except ImportError:
@@ -41,6 +43,7 @@ TESTS = [
     'test_autograd',
     'benchmark_utils/test_benchmark_utils',
     'test_binary_ufuncs',
+    'test_buffer_protocol',
     'test_bundled_inputs',
     'test_complex',
     'test_cpp_api_parity',
@@ -55,13 +58,13 @@ TESTS = [
     'distributed/test_c10d_spawn_nccl',
     'distributed/test_store',
     'distributed/test_pg_wrapper',
+    'distributed/algorithms/test_join',
     'test_cuda',
     'test_jit_cuda_fuser',
     'test_cuda_primary_ctx',
     'test_dataloader',
     'test_datapipe',
     'distributed/test_data_parallel',
-    'distributed/test_distributed_fork',
     'distributed/test_distributed_spawn',
     'distributions/test_constraints',
     'distributions/test_distributions',
@@ -74,6 +77,7 @@ TESTS = [
     'test_mkldnn',
     'test_model_dump',
     'test_module_init',
+    'test_modules',
     'test_multiprocessing',
     'test_multiprocessing_spawn',
     'distributed/test_nccl',
@@ -82,6 +86,7 @@ TESTS = [
     'test_nn',
     'test_ops',
     'test_optim',
+    'test_functional_optim',
     'test_pytree',
     'test_mobile_optimizer',
     'test_set_default_mobile_cpu_allocator',
@@ -166,6 +171,7 @@ TESTS = [
     'distributed/elastic/utils/distributed_test',
     'distributed/elastic/multiprocessing/api_test',
     'distributed/_sharding_spec/test_sharding_spec',
+    'distributed/_sharded_tensor/test_sharded_tensor',
 ]
 
 # Tests need to be run with pytest.
@@ -205,7 +211,6 @@ WINDOWS_BLOCKLIST = [
     'distributed/rpc/test_faulty_agent',
     'distributed/rpc/test_tensorpipe_agent',
     'distributed/rpc/cuda/test_tensorpipe_agent',
-    'distributed/test_distributed_fork',
     'distributed/pipeline/sync/skip/test_api',
     'distributed/pipeline/sync/skip/test_gpipe',
     'distributed/pipeline/sync/skip/test_inspect_skip_layout',
@@ -228,9 +233,9 @@ WINDOWS_BLOCKLIST = [
     'distributed/pipeline/sync/test_stream',
     'distributed/pipeline/sync/test_transparency',
     'distributed/pipeline/sync/test_worker',
-    'distributed/optim/test_zero_redundancy_optimizer',
     "distributed/elastic/agent/server/test/api_test",
     'distributed/elastic/multiprocessing/api_test',
+    'distributed/_sharded_tensor/test_sharded_tensor',
 ]
 
 ROCM_BLOCKLIST = [
@@ -238,6 +243,7 @@ ROCM_BLOCKLIST = [
     'distributed/rpc/test_faulty_agent',
     'distributed/rpc/test_tensorpipe_agent',
     'distributed/rpc/cuda/test_tensorpipe_agent',
+    'distributed/_sharded_tensor/test_sharded_tensor',
     'test_determination',
     'test_multiprocessing',
     'test_jit_legacy',
@@ -286,7 +292,6 @@ TARGET_DET_LIST = [
     'test_testing',
     'test_view_ops',
     'distributed/nn/jit/test_instantiator',
-    'distributed/test_distributed_fork',
     'distributed/rpc/test_tensorpipe_agent',
     'distributed/rpc/cuda/test_tensorpipe_agent',
     'distributed/algorithms/ddp_comm_hooks/test_ddp_hooks',
@@ -451,6 +456,9 @@ def run_test(test_module, test_directory, options, launcher_cmd=None, extra_unit
     # If using pytest, replace -f with equivalent -x
     if options.pytest:
         unittest_args = [arg if arg != '-f' else '-x' for arg in unittest_args]
+    elif IS_IN_CI:
+        # use the downloaded test cases configuration, not supported in pytest
+        unittest_args.extend(['--import-slow-tests', '--import-disabled-tests'])
 
     # Multiprocessing related tests cannot run with coverage.
     # Tracking issue: https://github.com/pytorch/pytorch/issues/50661
@@ -565,7 +573,7 @@ def test_distributed(test_module, test_directory, options):
             os.environ['INIT_METHOD'] = 'env://'
             os.environ.update(env_vars)
             if with_init_file:
-                if test_module in ["test_distributed_fork", "test_distributed_spawn"]:
+                if test_module == "test_distributed_spawn":
                     init_method = f'{FILE_SCHEMA}{tmp_dir}/'
                 else:
                     init_method = f'{FILE_SCHEMA}{tmp_dir}/shared_init_file'
@@ -600,7 +608,6 @@ CUSTOM_HANDLERS = {
     'test_cuda_primary_ctx': test_cuda_primary_ctx,
     'test_cpp_extensions_aot_no_ninja': test_cpp_extensions_aot_no_ninja,
     'test_cpp_extensions_aot_ninja': test_cpp_extensions_aot_ninja,
-    'distributed/test_distributed_fork': test_distributed,
     'distributed/test_distributed_spawn': test_distributed,
 }
 
@@ -689,7 +696,8 @@ def parse_args():
     parser.add_argument(
         '--continue-through-error',
         action='store_true',
-        help='Runs the full test suite despite one of the tests failing')
+        help='Runs the full test suite despite one of the tests failing',
+        default=strtobool(os.environ.get("CONTINUE_THROUGH_ERROR", "False")))
     parser.add_argument(
         'additional_unittest_args',
         nargs='*',
@@ -1044,6 +1052,8 @@ def main():
 
     if IS_IN_CI:
         selected_tests = get_reordered_tests(selected_tests, ENABLE_PR_HISTORY_REORDERING)
+        # downloading test cases configuration to local environment
+        get_test_case_configs(dirpath=os.path.dirname(os.path.abspath(__file__)))
 
     has_failed = False
     failure_messages = []

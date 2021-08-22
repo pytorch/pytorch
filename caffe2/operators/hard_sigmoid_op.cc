@@ -50,14 +50,12 @@ OpSchema::Cost CostInferenceForHardSigmoid(
 
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     HardSigmoid,
     UnaryElementwiseWithArgsOp<
         TensorTypes<float>,
         CPUContext,
         HardSigmoidFunctor<CPUContext>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     HardSigmoidGradient,
     BinaryElementwiseWithArgsOp<
@@ -66,7 +64,6 @@ REGISTER_CPU_OPERATOR(
         HardSigmoidGradientFunctor<CPUContext>>);
 
 // Input: X, output: Y
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(HardSigmoid)
     .NumInputs(1)
     .NumOutputs(1)
@@ -128,7 +125,6 @@ hard_sigmoid: [ 0.81488073,  0.56326419,  0.85684538,  0.78901446,  0.06546044]
     .InheritOnnxSchema();
 
 // Input: Y, dY, output: dX
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(HardSigmoidGradient)
     .NumInputs(2)
     .NumOutputs(1)
@@ -154,7 +150,6 @@ class GetHardSigmoidGradient : public GradientMakerBase {
 
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(HardSigmoid, GetHardSigmoidGradient);
 
 } // namespace caffe2

@@ -103,21 +103,21 @@ class PyInterpreterHolder {
  private:
   c10::impl::PyInterpreter* impl_;
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyInterpreterHolder self_interpreter;
 
 } // anonymous namespace
 
+c10::impl::PyInterpreter* getPyInterpreter() {
+  return self_interpreter.get();
+}
+
 namespace py = pybind11;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyObject *THPVariableClass = nullptr;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyObject *ParameterClass = nullptr;
 
 // clang-tidy gets confused by static const
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static const char* VOLATILE_WARNING =
     "volatile was removed and now has no effect. Use "
     "`with torch.no_grad():` instead.";
@@ -755,9 +755,7 @@ struct ConcretePythonGILHooks : public c10::impl::PythonGILHooks {
 // An alternative way to reduce the risk of python_gil_hooks going prematurely
 // dead would be to leak it at destruction time.  I didn't do that because
 // it's annoying to write the Registerer class for this case.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 ConcretePythonGILHooks python_gil_hooks;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static c10::impl::PythonGILHooksRegisterer python_gil_hooks_registerer(&python_gil_hooks);
 #endif
 
@@ -833,6 +831,17 @@ PyObject *THPVariable_is_mlc(THPVariable *self, void *unused)
   }
   auto& self_ = THPVariable_Unpack(self);
   return torch::autograd::utils::wrap(self_.is_mlc());
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject *THPVariable_is_ort(THPVariable *self, void *unused)
+{
+  HANDLE_TH_ERRORS
+  if (check_has_torch_function((PyObject *)self)) {
+    return handle_torch_function_getter(self, "is_ort");
+  }
+  auto& self_ = THPVariable_Unpack(self);
+  return torch::autograd::utils::wrap(self_.is_ort());
   END_HANDLE_TH_ERRORS
 }
 
@@ -982,6 +991,7 @@ static struct PyGetSetDef THPVariable_properties[] = {
   {"is_sparse_csr", (getter)THPVariable_is_sparse_csr, nullptr, nullptr, nullptr},
   {"is_mkldnn", (getter)THPVariable_is_mkldnn, nullptr, nullptr, nullptr},
   {"is_mlc", (getter)THPVariable_is_mlc, nullptr, nullptr, nullptr},
+  {"is_ort", (getter)THPVariable_is_ort, nullptr, nullptr, nullptr},
   {"is_vulkan", (getter)THPVariable_is_vulkan, nullptr, nullptr, nullptr},
   {"is_complex", (getter)THPVariable_is_complex, nullptr, nullptr, nullptr},
   {"is_quantized", (getter)THPVariable_is_quantized, nullptr, nullptr, nullptr},
@@ -996,7 +1006,6 @@ static struct PyGetSetDef THPVariable_properties[] = {
   {nullptr}
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static PyMappingMethods THPVariable_as_mapping = {
   THPVariable_length,
   THPVariable_getitem,
@@ -1029,14 +1038,12 @@ struct THPVariableMeta {
 
 int THPVariableMetaType_init(PyObject *cls, PyObject *args, PyObject *kwargs);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyTypeObject THPVariableMetaType = {
   PyVarObject_HEAD_INIT(DEFERRED_ADDRESS(&PyType_Type), 0)
   "torch._C._TensorMeta",                      /* tp_name */
   sizeof(THPVariableMeta),                     /* tp_basicsize */
   0,                                           /* tp_itemsize */
   nullptr,                                     /* tp_dealloc */
-  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                           /* tp_vectorcall_offset */
   nullptr,                                     /* tp_getattr */
   nullptr,                                     /* tp_setattr */
@@ -1072,7 +1079,6 @@ PyTypeObject THPVariableMetaType = {
   nullptr,                                     /* tp_new */
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyTypeObject THPVariableType = {
     PyVarObject_HEAD_INIT(
         &THPVariableMetaType,
@@ -1083,7 +1089,6 @@ PyTypeObject THPVariableType = {
     // directly.  Subclasses will have their tp_dealloc set appropriately
     // by the metaclass
     nullptr, /* tp_dealloc */
-    // NOLINTNEXTLINE(modernize-use-nullptr)
     0, /* tp_vectorcall_offset */
     nullptr, /* tp_getattr */
     nullptr, /* tp_setattr */
@@ -1150,10 +1155,8 @@ static void clear_slots(PyTypeObject* type, PyObject* self) {
     if (mp->type == T_OBJECT_EX && !(mp->flags & READONLY)) {
       char* addr = (char*)self + mp->offset;
       PyObject* obj = *(PyObject**)addr;
-      // NOLINTNEXTLINE(modernize-use-nullptr)
-      if (obj != NULL) {
-        // NOLINTNEXTLINE(modernize-use-nullptr)
-        *(PyObject**)addr = NULL;
+      if (obj != nullptr) {
+        *(PyObject**)addr = nullptr;
         Py_DECREF(obj);
       }
     }
@@ -1237,14 +1240,11 @@ void THPVariable_subclass_dealloc(PyObject* self) {
   // All Python defined classes have __dict__
   if (C10_LIKELY(type->tp_dictoffset)) {
     PyObject** dictptr = _PyObject_GetDictPtr(self);
-    // NOLINTNEXTLINE(modernize-use-nullptr)
-    if (dictptr != NULL) {
+    if (dictptr != nullptr) {
       PyObject* dict = *dictptr;
-      // NOLINTNEXTLINE(modernize-use-nullptr)
-      if (dict != NULL) {
+      if (dict != nullptr) {
         Py_DECREF(dict);
-        // NOLINTNEXTLINE(modernize-use-nullptr)
-        *dictptr = NULL;
+        *dictptr = nullptr;
       }
     }
   }
@@ -1319,8 +1319,7 @@ static int traverse_slots(
     if (mp->type == T_OBJECT_EX) {
       char* addr = (char*)self + mp->offset;
       PyObject* obj = *(PyObject**)addr;
-      // NOLINTNEXTLINE(modernize-use-nullptr)
-      if (obj != NULL) {
+      if (obj != nullptr) {
         int err = visit(obj, arg);
         if (err)
           return err;
@@ -1518,37 +1517,90 @@ void concrete_dispatch_fn(const c10::impl::PyInterpreter*, const c10::OperatorHa
   py::gil_scoped_acquire g;
 
   std::vector<py::handle> overloaded_args;
-  auto args = py::reinterpret_steal<py::object>(PyTuple_New(num_arguments));
-  // TODO: actually populate kwargs sometimes?  At the moment, every argument
-  // just gets passed positionally
-  py::dict kwargs;
   // For now, overloads get coalesced.  Might be easier for users if they get
   // overload resolution but is more complicated (need to expose separate
   // functions per overload)
   py::handle torch_api_function = py::module::import("torch").attr("ops").attr(ns).attr(func_name);
   std::string module_name_str = "torch.ops." + ns_str;
 
+  // About all the pointers:
+  //
+  // f(int x, int y = 0, *, int z = 0)
+  //                                  ^- arguments.size()
+  //                        ^- kwarg_only_start
+  //          ^- positional_default_start
+  //   ^- 0
+
+  // Find the split point between kwarg-only and regular.  Since most functions
+  // don't have kwarg-only arguments, it is more efficient to scan from the
+  // right (but ideally, this would just be precomputed in FunctionSchema
+  // itself).  (NB: minus one in the loop is because we're testing if the
+  // *next* argument is kwarg-only before we advance the starting index)
+  int64_t kwarg_only_start = arguments.size();
+  for (; kwarg_only_start > 0; kwarg_only_start--) {
+    const auto& arg = schema.arguments()[kwarg_only_start - 1];
+    if (!arg.kwarg_only()) {
+      break;
+    }
+  }
+
+  // Find the first positional argument that isn't defaulted
+  auto is_default = [&](int64_t idx) -> bool {
+    const auto& arg = schema.arguments()[idx];
+    if (!arg.default_value().has_value()) {
+      return false;
+    }
+    const auto& default_ivalue = *arg.default_value();
+    const auto& ivalue = arguments[idx];
+    if (default_ivalue != ivalue) {
+      return false;
+    }
+    return true;
+  };
+
+  int64_t positional_default_start = kwarg_only_start;
+  for (; positional_default_start > 0; positional_default_start--) {
+    if (!is_default(positional_default_start - 1)) {
+      break;
+    }
+  }
+
+  auto args = py::reinterpret_steal<py::object>(PyTuple_New(positional_default_start));
+  py::dict kwargs;
+
+  // Find overloaded tensors
   for (int64_t idx = 0; idx < arguments.size(); idx++) {
-    auto& ivalue = arguments[idx];
-    // Search for Tensors (as they may have the torch functions we need)
+    const auto& ivalue = arguments[idx];
     if (ivalue.isTensor()) {
       const auto& tensor = ivalue.toTensor();
       if (isPythonTensor(tensor)) {
-        overloaded_args.emplace_back(py::cast(tensor));
+        append_overloaded_arg(&overloaded_args, py::cast(tensor).ptr());
       }
     } else if (ivalue.isList()) {
       const auto& list = ivalue.toListRef();
-      for (int64_t jdx = 0; jdx < list.size(); jdx++) {
+      for (const auto jdx : c10::irange(list.size())) {
         const auto& nv = list[jdx];
         if (nv.isTensor()) {
           const auto& tensor = nv.toTensor();
           if (isPythonTensor(tensor)) {
-            overloaded_args.emplace_back(py::cast(tensor));
+            append_overloaded_arg(&overloaded_args, py::cast(tensor).ptr());
           }
         }
       }
     }
-    PyTuple_SET_ITEM(args.ptr(), idx, torch::jit::toPyObject(std::move(ivalue)).release().ptr());
+  }
+
+  // Populate positional arguments
+  for (int64_t idx = 0; idx < positional_default_start; idx++) {
+    PyTuple_SET_ITEM(args.ptr(), idx, torch::jit::toPyObject(std::move(arguments[idx])).release().ptr());
+  }
+
+  // Populate keyword arguments
+  for (int64_t idx = kwarg_only_start; idx < arguments.size(); idx++) {
+    // But don't populate default keyword arguments
+    if (is_default(idx)) continue;
+    const auto& arg = schema.arguments()[idx];
+    kwargs[py::cast(arg.name())] = torch::jit::toPyObject(std::move(arguments[idx]));
   }
 
   auto out = py::reinterpret_steal<py::object>(handle_torch_function_no_python_arg_parser(
@@ -1580,7 +1632,8 @@ c10::intrusive_ptr<TensorImpl> concrete_detach_fn(const c10::impl::PyInterpreter
   // TODO: fix the constness of target
   Tensor self_t = Tensor(c10::intrusive_ptr<c10::TensorImpl, c10::UndefinedTensorImpl>::unsafe_reclaim_from_nonowning(const_cast<c10::TensorImpl*>(self)));
   auto self_p = py::reinterpret_steal<py::object>(THPVariable_Wrap(self_t));
-  overloaded_args.emplace_back(self_p);
+  TORCH_INTERNAL_ASSERT(isPythonTensor(self_t));
+  append_overloaded_arg(&overloaded_args, self_p.ptr());
   auto args = py::reinterpret_steal<py::object>(PyTuple_New(1));
   PyTuple_SET_ITEM(args.ptr(), 0, self_p.release().ptr());
 

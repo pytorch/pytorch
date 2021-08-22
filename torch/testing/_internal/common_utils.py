@@ -23,8 +23,7 @@ import warnings
 import random
 import contextlib
 import shutil
-import datetime
-import pathlib
+from pathlib import Path
 import socket
 import subprocess
 import time
@@ -37,14 +36,14 @@ from copy import deepcopy
 from numbers import Number
 import tempfile
 import json
-from urllib.request import urlopen
 import __main__  # type: ignore[import]
 import errno
 from typing import cast, Any, Dict, Iterable, Iterator, Optional, Union
+from unittest.mock import MagicMock
 
 import numpy as np
 
-from torch.testing import floating_types_and, integral_types, complex_types
+from torch.testing import floating_types_and, integral_types, complex_types, get_all_dtypes
 import expecttest
 from .._core import \
     (_compare_tensors_internal, _compare_scalars_internal, _compare_return_type)
@@ -53,6 +52,7 @@ import torch
 import torch.cuda
 from torch._utils_internal import get_writable_path
 from torch._six import string_classes
+from torch import Tensor
 import torch.backends.cudnn
 import torch.backends.mkl
 from enum import Enum
@@ -68,6 +68,12 @@ IS_IN_CI = os.getenv('IN_CI') == '1'
 IS_SANDCASTLE = os.getenv('SANDCASTLE') == '1' or os.getenv('TW_JOB_USER') == 'sandcastle'
 IS_FBCODE = os.getenv('PYTORCH_TEST_FBCODE') == '1'
 IS_REMOTE_GPU = os.getenv('PYTORCH_TEST_REMOTE_GPU') == '1'
+
+DISABLED_TESTS_FILE = '.pytorch-disabled-tests.json'
+SLOW_TESTS_FILE = '.pytorch-slow-tests.json'
+
+slow_tests_dict: Optional[Dict[str, Any]] = None
+disabled_tests_dict: Optional[Dict[str, Any]] = None
 
 class ProfilingMode(Enum):
     LEGACY = 1
@@ -164,6 +170,8 @@ parser.add_argument('--save-xml', nargs='?', type=str,
 parser.add_argument('--discover-tests', action='store_true')
 parser.add_argument('--log-suffix', type=str, default="")
 parser.add_argument('--run-parallel', type=int, default=1)
+parser.add_argument('--import-slow-tests', type=str, nargs='?', const=SLOW_TESTS_FILE)
+parser.add_argument('--import-disabled-tests', type=str, nargs='?', const=DISABLED_TESTS_FILE)
 
 args, remaining = parser.parse_known_args()
 if args.jit_executor == 'legacy':
@@ -177,6 +185,8 @@ else:
     GRAPH_EXECUTOR = cppProfilingFlagsToProfilingMode()
 
 
+IMPORT_SLOW_TESTS = args.import_slow_tests
+IMPORT_DISABLED_TESTS = args.import_disabled_tests
 LOG_SUFFIX = args.log_suffix
 RUN_PARALLEL = args.run_parallel
 TEST_BAILOUTS = args.test_bailouts
@@ -191,7 +201,7 @@ UNITTEST_ARGS = [sys.argv[0]] + remaining
 torch.manual_seed(SEED)
 
 # CI Prefix path used only on CI environment
-CI_TEST_PREFIX = str(pathlib.Path(os.getcwd()))
+CI_TEST_PREFIX = str(Path(os.getcwd()))
 
 def wait_for_process(p):
     try:
@@ -263,6 +273,22 @@ def sanitize_test_filename(filename):
     return re.sub('/', r'.', strip_py)
 
 def run_tests(argv=UNITTEST_ARGS):
+    # import test files.
+    if IMPORT_SLOW_TESTS:
+        if os.path.exists(IMPORT_SLOW_TESTS):
+            global slow_tests_dict
+            with open(IMPORT_SLOW_TESTS, 'r') as fp:
+                slow_tests_dict = json.load(fp)
+        else:
+            print(f'[WARNING] slow test file provided but not found: {IMPORT_SLOW_TESTS}')
+    if IMPORT_DISABLED_TESTS:
+        if os.path.exists(IMPORT_DISABLED_TESTS):
+            global disabled_tests_dict
+            with open(IMPORT_DISABLED_TESTS, 'r') as fp:
+                disabled_tests_dict = json.load(fp)
+        else:
+            print(f'[WARNING] disabled test file provided but not found: {IMPORT_DISABLED_TESTS}')
+    # Determine the test launch mechanism
     if TEST_DISCOVER:
         suite = unittest.TestLoader().loadTestsFromModule(__main__)
         test_cases = discover_test_cases_recursively(suite)
@@ -314,6 +340,15 @@ IS_LINUX = sys.platform == "linux"
 IS_WINDOWS = sys.platform == "win32"
 IS_MACOS = sys.platform == "darwin"
 IS_PPC = platform.machine() == "ppc64le"
+
+def is_avx512_vnni_supported():
+    if sys.platform != 'linux':
+        return False
+    with open("/proc/cpuinfo", encoding="ascii") as f:
+        lines = f.read()
+    return "avx512vnni" in lines
+
+IS_AVX512_VNNI_SUPPORTED = is_avx512_vnni_supported()
 
 if IS_WINDOWS:
     @contextmanager
@@ -379,6 +414,7 @@ TEST_LIBROSA = _check_module_exists('librosa')
 # Python 2.7 doesn't have spawn
 NO_MULTIPROCESSING_SPAWN = os.environ.get('NO_MULTIPROCESSING_SPAWN', '0') == '1'
 TEST_WITH_ASAN = os.getenv('PYTORCH_TEST_WITH_ASAN', '0') == '1'
+TEST_WITH_DEV_DBG_ASAN = os.getenv('PYTORCH_TEST_WITH_DEV_DBG_ASAN', '0') == '1'
 TEST_WITH_TSAN = os.getenv('PYTORCH_TEST_WITH_TSAN', '0') == '1'
 TEST_WITH_UBSAN = os.getenv('PYTORCH_TEST_WITH_UBSAN', '0') == '1'
 TEST_WITH_ROCM = os.getenv('PYTORCH_TEST_WITH_ROCM', '0') == '1'
@@ -466,6 +502,21 @@ class DeterministicGuard:
 
     def __exit__(self, exception_type, exception_value, traceback):
         torch.use_deterministic_algorithms(self.deterministic_restore)
+
+# Context manager for setting cuda sync debug mode and reset it
+# to original value
+# we are not exposing it to the core because sync debug mode is
+# global and thus not thread safe
+class CudaSyncGuard:
+    def __init__(self, sync_debug_mode):
+        self.mode = sync_debug_mode
+
+    def __enter__(self):
+        self.debug_mode_restore = torch.cuda.get_sync_debug_mode()
+        torch.cuda.set_sync_debug_mode(self.mode)
+
+    def __exit__(self, exception_type, exception_value, traceback):
+        torch.cuda.set_sync_debug_mode(self.debug_mode_restore)
 
 # This decorator can be used for API tests that call
 # torch.use_deterministic_algorithms().  When the test is finished, it will
@@ -842,93 +893,16 @@ try:
 except ImportError:
     print('Fail to import hypothesis in common_utils, tests are not derandomized')
 
-
-FILE_CACHE_LIFESPAN_SECONDS = datetime.timedelta(hours=3).seconds
-
-def fetch_and_cache(name: str, url: str):
-    """
-    Some tests run in a different process so globals like `slow_test_dict` won't
-    always be filled even though the test file was already downloaded on this
-    machine, so cache it on disk
-    """
-    path = os.path.join(tempfile.gettempdir(), name)
-
-    def is_cached_file_valid():
-        # Check if the file is new enough (say 1 hour for now). A real check
-        # could make a HEAD request and check/store the file's ETag
-        fname = pathlib.Path(path)
-        now = datetime.datetime.now()
-        mtime = datetime.datetime.fromtimestamp(fname.stat().st_mtime)
-        diff = now - mtime
-        return diff.total_seconds() < FILE_CACHE_LIFESPAN_SECONDS
-
-    if os.path.exists(path) and is_cached_file_valid():
-        # Another test process already downloaded the file, so don't re-do it
-        with open(path, "r") as f:
-            return json.load(f)
-    try:
-        contents = urlopen(url, timeout=1).read().decode('utf-8')
-        with open(path, "w") as f:
-            f.write(contents)
-        return json.loads(contents)
-    except Exception as e:
-        print(f'Could not download {url} because of error {e}.')
-        return {}
-
-
-slow_tests_dict: Optional[Dict[str, float]] = None
-def check_slow_test_from_stats(test):
-    global slow_tests_dict
-    if slow_tests_dict is None:
-        if not IS_SANDCASTLE:
-            url = "https://raw.githubusercontent.com/pytorch/test-infra/master/stats/slow-tests.json"
-            slow_tests_dict = fetch_and_cache(".pytorch-slow-tests.json", url)
-        else:
-            slow_tests_dict = {}
+def check_if_enable(test: unittest.TestCase):
     test_suite = str(test.__class__).split('\'')[1]
     test_name = f'{test._testMethodName} ({test_suite})'
-
-    if test_name in slow_tests_dict:
+    if slow_tests_dict is not None and test_name in slow_tests_dict:
         getattr(test, test._testMethodName).__dict__['slow_test'] = True
         if not TEST_WITH_SLOW:
             raise unittest.SkipTest("test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test")
-
-
-disabled_test_from_issues: Optional[Dict[str, Any]] = None
-def check_disabled(test_name):
-    global disabled_test_from_issues
-    if disabled_test_from_issues is None:
-        _disabled_test_from_issues: Dict = {}
-
-        def read_and_process():
-            url = 'https://raw.githubusercontent.com/pytorch/test-infra/master/stats/disabled-tests.json'
-            the_response = fetch_and_cache(".pytorch-disabled-tests", url)
-            for item in the_response['items']:
-                title = item['title']
-                key = 'DISABLED '
-                if title.startswith(key):
-                    test_name = title[len(key):].strip()
-                    body = item['body']
-                    platforms_to_skip = []
-                    key = 'platforms:'
-                    for line in body.splitlines():
-                        line = line.lower()
-                        if line.startswith(key):
-                            pattern = re.compile(r"^\s+|\s*,\s*|\s+$")
-                            platforms_to_skip.extend([x for x in pattern.split(line[len(key):]) if x])
-                    _disabled_test_from_issues[test_name] = (item['html_url'], platforms_to_skip)
-
-        if not IS_SANDCASTLE and os.getenv("PYTORCH_RUN_DISABLED_TESTS", "0") != "1":
-            try:
-                read_and_process()
-                disabled_test_from_issues = _disabled_test_from_issues
-            except Exception:
-                print("Couldn't download test skip set, leaving all tests enabled...")
-                disabled_test_from_issues = {}
-
-    if disabled_test_from_issues is not None:
-        if test_name in disabled_test_from_issues:
-            issue_url, platforms = disabled_test_from_issues[test_name]
+    if not IS_SANDCASTLE and disabled_tests_dict is not None:
+        if test_name in disabled_tests_dict:
+            issue_url, platforms = disabled_tests_dict[test_name]
             platform_to_conditional: Dict = {
                 "mac": IS_MACOS,
                 "macos": IS_MACOS,
@@ -938,9 +912,12 @@ def check_disabled(test_name):
             if platforms == [] or any([platform_to_conditional[platform] for platform in platforms]):
                 raise unittest.SkipTest(
                     f"Test is disabled because an issue exists disabling it: {issue_url}" +
-                    f" for {'all' if platforms == [] else ''}platform(s) {', '.join(platforms)}." +
-                    " To enable, set the environment variable PYTORCH_RUN_DISABLED_TESTS=1")
-
+                    f" for {'all' if platforms == [] else ''}platform(s) {', '.join(platforms)}. " +
+                    "If you're seeing this on your local machine and would like to enable this test, " +
+                    "please make sure IN_CI is not set and you are not using the flag --import-disabled-tests.")
+    if TEST_SKIP_FAST:
+        if not getattr(test, test._testMethodName).__dict__.get('slow_test', False):
+            raise unittest.SkipTest("test is fast; we disabled it with PYTORCH_TEST_SKIP_FAST")
 
 # Acquires the comparison dtype, required since isclose
 # requires both inputs have the same dtype, and isclose is not supported
@@ -1106,12 +1083,7 @@ class TestCase(expecttest.TestCase):
             result.stop()
 
     def setUp(self):
-        check_slow_test_from_stats(self)
-        if TEST_SKIP_FAST:
-            if not getattr(self, self._testMethodName).__dict__.get('slow_test', False):
-                raise unittest.SkipTest("test is fast; we disabled it with PYTORCH_TEST_SKIP_FAST")
-        check_disabled(str(self))
-
+        check_if_enable(self)
         set_rng_seed(SEED)
 
     @staticmethod
@@ -1972,51 +1944,72 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
                 exclude_zero: bool = False) -> torch.Tensor:
     """ Creates a random tensor with the given size, device and dtype.
 
-        By default, the tensor's values are in the range [-9, 9] for most dtypes. If low
-        and/or high are specified then the values will be in the range [max(-9, low), min(9, high)].
-
-        For unsigned types the values are in the range[0, 9] and for complex types the real and imaginary
-        parts are each in the range [-9, 9].
+        Default values for low and high:
+            * boolean type: low = 0, high = 2
+            * uint8 type: low = 0, high = 9
+            * floating and integral types: low = -9 and high = 9
+            * complex types, for each real and imaginary part: low = -9, high = 9
+        If low/high are specified and within dtype limits: low = low, high = high
+        If low/high are specified but exceed the limits: low = dtype_min, high = dtype_max
+        If low is -inf and/or high is inf: low = dtype_min, high = dtype_max
+        If low is inf or nan and/or high is -inf or nan: ValueError raised
 
         If noncontiguous=True, a noncontiguous tensor with the given size will be returned unless the size
         specifies a tensor with a 1 or 0 elements in which case the noncontiguous parameter is ignored because
         it is not possible to create a noncontiguous Tensor with a single element.
 
         If exclude_zero is passed with True (default is False), all the matching values (with zero) in
-        created tensor are replaced with an epsilon value if floating type, [`eps + `eps`.j] if
-        complex type and 1 if integer/boolean type.
+        created tensor are replaced with a tiny (smallest positive representable number) value if floating type,
+        [`tiny` + `tiny`.j] if complex type and 1 if integer/boolean type.
     """
+    def _modify_low_high(low, high, lowest, highest, default_low, default_high, dtype):
+        """
+        Modifies (and raises ValueError when appropriate) low and high values given by the user (input_low, input_high) if required.
+        """
+        def clamp(a, l, h):
+            return min(max(a, l), h)
 
-    assert low is None or low < 9, "low value too high!"
-    assert high is None or high > -9, "high value too low!"
+        low = low if low is not None else default_low
+        high = high if high is not None else default_high
+
+        # Checks for error cases
+        if low != low or high != high:
+            raise ValueError("make_tensor: one of low or high was NaN!")
+        if low > high:
+            raise ValueError("make_tensor: low must be weakly less than high!")
+
+        low = clamp(low, lowest, highest)
+        high = clamp(high, lowest, highest)
+
+        if dtype in integral_types():
+            return math.floor(low), math.ceil(high)
+
+        return low, high
 
     if dtype is torch.bool:
         result = torch.randint(0, 2, size, device=device, dtype=dtype)
     elif dtype is torch.uint8:
-        low = math.floor(0 if low is None else max(low, 0))
-        high = math.ceil(10 if high is None else min(high, 10))
+        ranges = (torch.iinfo(dtype).min, torch.iinfo(dtype).max)
+        low, high = _modify_low_high(low, high, ranges[0], ranges[1], 0, 9, dtype)
         result = torch.randint(low, high, size, device=device, dtype=dtype)
     elif dtype in integral_types():
-        low = math.floor(-9 if low is None else max(low, -9))
-        high = math.ceil(10 if high is None else min(high, 10))
+        ranges = (torch.iinfo(dtype).min, torch.iinfo(dtype).max)
+        low, high = _modify_low_high(low, high, ranges[0], ranges[1], -9, 9, dtype)
         result = torch.randint(low, high, size, device=device, dtype=dtype)
     elif dtype in floating_types_and(torch.half, torch.bfloat16):
-        low = -9 if low is None else max(low, -9)
-        high = 9 if high is None else min(high, 10)
-        span = high - low
-        # Windows doesn't support torch.rand(bfloat16) on CUDA
-        if IS_WINDOWS and torch.device(device).type == 'cuda' and dtype is torch.bfloat16:
-            result = (torch.rand(size, device=device, dtype=torch.float32) * span + low).to(torch.bfloat16)
-        else:
-            result = torch.rand(size, device=device, dtype=dtype) * span + low
+        ranges_floats = (torch.finfo(dtype).min, torch.finfo(dtype).max)
+        low, high = _modify_low_high(low, high, ranges_floats[0], ranges_floats[1], -9, 9, dtype)
+        rand_val = torch.rand(size, device=device, dtype=dtype)
+        result = high * rand_val + low * (1 - rand_val)
     else:
         assert dtype in complex_types()
-        low = -9 if low is None else max(low, -9)
-        high = 9 if high is None else min(high, 10)
-        span = high - low
         float_dtype = torch.float if dtype is torch.cfloat else torch.double
-        real = torch.rand(size, device=device, dtype=float_dtype) * span + low
-        imag = torch.rand(size, device=device, dtype=float_dtype) * span + low
+        ranges_floats = (torch.finfo(float_dtype).min, torch.finfo(float_dtype).max)
+        low, high = _modify_low_high(low, high, ranges_floats[0], ranges_floats[1], -9, 9, dtype)
+        real_rand_val = torch.rand(size, device=device, dtype=float_dtype)
+        imag_rand_val = torch.rand(size, device=device, dtype=float_dtype)
+        real = high * real_rand_val + low * (1 - real_rand_val)
+        imag = high * imag_rand_val + low * (1 - imag_rand_val)
         result = torch.complex(real, imag)
 
     if noncontiguous and result.numel() > 1:
@@ -2027,12 +2020,13 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
         if dtype in integral_types() or dtype is torch.bool:
             replace_with = torch.tensor(1, device=device, dtype=dtype)
         elif dtype in floating_types_and(torch.half, torch.bfloat16):
-            replace_with = torch.tensor(torch.finfo(dtype).eps, device=device, dtype=dtype)
-        else:
-            assert dtype in complex_types()
+            replace_with = torch.tensor(torch.finfo(dtype).tiny, device=device, dtype=dtype)
+        elif dtype in complex_types():
             float_dtype = torch.float if dtype is torch.cfloat else torch.double
-            float_eps = torch.tensor(torch.finfo(float_dtype).eps, device=device, dtype=float_dtype)
+            float_eps = torch.tensor(torch.finfo(float_dtype).tiny, device=device, dtype=float_dtype)
             replace_with = torch.complex(float_eps, float_eps)
+        else:
+            raise ValueError(f"Invalid dtype passed, supported dtypes are: {get_all_dtypes()}")
         result[result == 0] = replace_with
 
     if dtype in floating_types_and(torch.half, torch.bfloat16) or\
@@ -2539,10 +2533,92 @@ def disable_gc():
     else:
         yield
 
-def has_breakpad() -> bool:
+
+def find_library_location(lib_name: str) -> Path:
+    # return the shared library file in the installed folder if exist,
+    # else the file in the build folder
+    torch_root = Path(torch.__file__).resolve().parent
+    path = torch_root / 'lib' / lib_name
+    if os.path.exists(path):
+        return path
+    torch_root = Path(__file__).resolve().parent.parent.parent
+    return torch_root / 'build' / 'lib' / lib_name
+
+def sandcastle_skip(reason):
+    """
+    Similar to unittest.skip, however in the sandcastle environment it just
+    "passes" the test instead to avoid creating tasks complaining about tests
+    skipping continuously.
+    """
+    def decorator(func):
+        if not IS_SANDCASTLE:
+            func.__unittest_skip__ = True
+            func.__unittest_skip_why__ = reason
+            return func
+
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            print(f'Skipping {func.__name__} on sandcastle for following reason: {reason}', file=sys.stderr)
+            return
+        return wrapper
+
+    return decorator
+
+def mock_wrapper(method):
+    """
+    Returns a function that calls the real implementation of a method
+    in addition to passing args to a mock object.
+    """
+    mock = MagicMock()
+
+    @wraps(method)
+    def wrapper(self, *args, **kwargs):
+        mock(*args, **kwargs)
+        return method(self, *args, **kwargs)
+    wrapper.mock = mock  # type: ignore[attr-defined]
+    return wrapper
+
+def get_tensors_from(args, kwargs):
+    """ Returns a set of all Tensor objects in the given args and kwargs. """
+    return set([arg for arg in args if isinstance(arg, Tensor)] +
+               [v for v in kwargs.values() if isinstance(v, Tensor)])
+
+
+def has_breakpad():
+    # We always build with breakpad in CI
+    if IS_IN_CI:
+        return True
+
     # If not on a special build, check that the library was actually linked in
     try:
         torch._C._get_minidump_directory()  # type: ignore[attr-defined]
         return True
     except RuntimeError as e:
+        if "Minidump handler is uninintialized" in str(e):
+            return True
         return False
+
+
+def sandcastle_skip_if(condition, reason):
+    """
+    Similar to unittest.skipIf, however in the sandcastle environment it just
+    "passes" the test instead to avoid creating tasks complaining about tests
+    skipping continuously.
+    """
+    def decorator(func):
+
+        if not IS_SANDCASTLE and condition:
+            func.__unittest_skip__ = True
+            func.__unittest_skip_why__ = reason
+            return func
+
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            if condition and IS_SANDCASTLE:
+                print(f'Skipping {func.__name__} on sandcastle for following reason: {reason}', file=sys.stderr)
+                return
+            else:
+                return func(*args, **kwargs)
+        return wrapper
+
+    return decorator

@@ -35,33 +35,33 @@ class TestAdam(hu.HypothesisTestCase):
     @staticmethod
     def ref_smart_decay_adam(param, mom1, mom2, last_seen, grad, LR, ITER,
                              beta1, beta2, epsilon):
+
+        for name in ('param', 'mom1', 'mom2', 'last_seen', 'grad',
+                     'LR', 'ITER', 'beta1', 'beta2', 'epsilon'):
+            print("{} {} {}".format(name, locals()['name'], type(locals()['name'])))
+
+
         t = ITER + 1
+        k = t - last_seen
+        k = k.flatten()[0]
 
-        k = int(np.array(t - last_seen).flatten()[0])
-        last_seen_out = t
-
-        if beta1 == 0.0:
-            mom1_out = grad
-            mom2_out = (beta2**k * mom2) + (1 - beta2) * np.square(grad)
-            grad_out = mom1_out / (np.sqrt(mom2_out) + epsilon)
-            param_out = param + LR * grad_out
-            return param_out, mom1_out, mom2_out, last_seen_out
+        last_seen_out = t * np.ones_like(last_seen)
 
         # Make up for lost minibatches.
-        else:
-            mom2_out = (beta2**k * mom2) + (1 - beta2) * np.square(grad)
-            p_out = param
-            m = mom1
-            # For catchup
-            for i in range(k - 1):
-                m *= beta1
-                update = m / (np.sqrt(mom2_out) + epsilon)
-                p_out += LR * update
-            # For the single step update
-            mom1_out = m * beta1 + grad * (1 - beta1)
-            grad_out = mom1_out / (np.sqrt(mom2_out) + epsilon)
-            param_out = p_out + LR * grad_out
-            return param_out, mom1_out, mom2_out, last_seen_out
+        mom2_out = (beta2**k * mom2) + (1 - beta2) * np.square(grad)
+        param_out = param
+        mom1_out = mom1
+
+        # For catchup
+        assert k >= 1
+        for i in range(k):
+            mom1_out *= beta1
+            if i == k - 1:
+                mom1_out += grad * (1 - beta1)
+            param_out += LR * mom1_out / (np.sqrt(mom2_out) + epsilon)
+        grad_out = mom1_out / (np.sqrt(mom2_out) + epsilon)
+
+        return param_out, mom1_out, mom2_out, last_seen_out
 
     @staticmethod
     def ref_row_wise_adam(param, mom1, mom2, grad, LR, ITER,
@@ -213,27 +213,35 @@ class TestAdam(hu.HypothesisTestCase):
             input_device_options=input_device_options)
 
     @given(inputs=hu.tensors(n=4),
-           ITER=st.integers(min_value=0, max_value=10000),
-           LR=st.floats(min_value=0.01, max_value=0.99,
+           ITER=st.integers(min_value=0, max_value=10),
+           LR=st.floats(min_value=0.000001, max_value=0.1,
                         allow_nan=False, allow_infinity=False),
-           beta1=st.floats(min_value=0.01, max_value=0.99,
+           beta1=st.floats(min_value=0.0, max_value=0.99999,
                            allow_nan=False, allow_infinity=False),
-           beta2=st.floats(min_value=0.01, max_value=0.99,
+           beta2=st.floats(min_value=0.9, max_value=0.999999,
                            allow_nan=False, allow_infinity=False),
-           epsilon=st.floats(min_value=0.01, max_value=0.99,
+           epsilon=st.floats(min_value=0.00001, max_value=0.99,
                              allow_nan=False, allow_infinity=False),
            data_strategy=st.data(),
            **hu.gcs)
     def test_smart_decay_sparse_adam(self, inputs, ITER, LR, beta1, beta2, epsilon,
                                      data_strategy, gc, dc):
         param, mom1, mom2, grad = inputs
-
         mom2 = np.absolute(mom2)
+        _iter, _lr = ITER, LR  # Keep the scalar types for reference
         ITER = np.array([ITER], dtype=np.int64)
+        LR = np.array([LR], dtype=np.float32)
+
         # Here we will define the last_seen tensor as being randomly from 0 to ITER
         # (the value of t to be tested will be ITER+1)
-        last_seen = np.random.randint(low=0, high=ITER + 1, size=param.shape, dtype=np.int64)
-        LR = np.array([LR], dtype=np.float32)
+        last_seen = data_strategy.draw(
+            hypothesis.extra.numpy.arrays(
+                dtype=np.int64,
+                shape=(param.shape[0],),
+                elements=st.integers(min_value=0, max_value=_iter),
+                unique=False,
+            )
+        )
 
         # Create an indexing array containing values which index into grad
         indices = data_strategy.draw(

@@ -49,9 +49,7 @@ void window_function_checks(
 
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(complex_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(polar_stub);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ arange ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -350,8 +348,9 @@ Tensor empty_like(
     namedinference::propagate_names(result, self.names());
   }
 
-  // never propagate Conjugate key
+  // never propagate Conjugate and Negative dispatch key
   result._set_conj(false);
+  result._set_neg(false);
   return result;
 }
 
@@ -1525,7 +1524,6 @@ Tensor rand(
 }
 
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(kaiser_window_stub);
 
 } // namespace native

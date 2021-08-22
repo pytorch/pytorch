@@ -9,10 +9,11 @@
 #include <c10/util/TypeList.h>
 #include <c10/util/Optional.h>
 
-#include <iostream>
-#include <memory>
-#include <type_traits>
 #include <array>
+#include <memory>
+#include <ostream>
+#include <sstream>
+#include <type_traits>
 
 struct ClassType;
 namespace torch {
@@ -1574,15 +1575,21 @@ inline at::ScalarType scalarTypeFromJitType(const c10::TypePtr& type) {
 // then t2 will be returned (and vice versa).
 // Two different tensortypes will return dynamic.
 // Currently we chose not to support returning a NumberType for a float & int
-// input because of a lack of operator support for NumberType
+// input because of a lack of operator support for NumberType.
+// If `type_hint` is an `InterfaceType`, then we can use that as a
+// potential supertype for `ClassType`s in the list. Otherwise, we have
+// no way to find and use some common interface type
 TORCH_API c10::optional<TypePtr> unifyTypes(
     const TypePtr& t1,
     const TypePtr& t2,
-    bool default_to_any = false);
+    bool default_to_any = false,
+    TypePtr type_hint=nullptr);
 
 TORCH_API c10::optional<TypePtr> unifyTypeList(
     at::ArrayRef<TypePtr> elements,
-    std::ostream& why_not);
+    std::ostream& why_not,
+    bool default_to_any=false,
+    TypePtr type_hint=nullptr);
 
 namespace detail {
 template <typename T>

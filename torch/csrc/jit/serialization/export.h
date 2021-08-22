@@ -180,13 +180,6 @@ TORCH_API void writeArchiveAndTensors(
 using ExportModuleExtraFilesHook = std::function<ExtraFilesMap(const Module&)>;
 TORCH_API void SetExportModuleExtraFilesHook(ExportModuleExtraFilesHook hook);
 
-using ExportModuleMobileInfoConverter =
-    std::function<c10::Dict<std::string, std::string>(
-        const Module&,
-        const std::unordered_map<std::string, std::string>&)>;
-TORCH_API void SetExportModuleMobileInfoConverter(
-    ExportModuleMobileInfoConverter converter);
-
 /**
  * Generates new bytecode for a Script module and returns what the op list
  * would be for a LiteScriptModule based off the current code base. If you

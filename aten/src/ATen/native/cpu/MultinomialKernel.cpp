@@ -44,7 +44,6 @@ void multinomial_with_replacement_apply(
     scalar_t sum = 0;
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     scalar_t val;
-    int n_zeros = 0;
     for (int64_t j = 0; j < n_categories; j++) {
       val = self_ptr[i * self_stride_0 + j * self_stride_1];
       TORCH_CHECK(val >= 0, "invalid multinomial distribution (encountering probability entry < 0)");
@@ -59,9 +58,6 @@ void multinomial_with_replacement_apply(
 #endif
 
       sum += val;
-      if (val == 0) {
-        n_zeros += 1;
-      }
       cum_dist_ptr[j * cum_dist_stride_0] = sum;
     }
 
@@ -121,7 +117,6 @@ static void multinomial_with_replacement_kernel_impl(
 }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(
     multinomial_with_replacement_stub,
     &multinomial_with_replacement_kernel_impl);

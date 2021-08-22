@@ -1,8 +1,6 @@
 import torch
 import numpy as np
-import scipy.special
 
-import unittest
 import math
 from typing import Dict, List
 import random
@@ -12,7 +10,7 @@ import warnings
 
 from torch._six import inf, nan
 from torch.testing._internal.common_utils import (
-    TestCase, run_tests, TEST_SCIPY, slowTest, torch_to_numpy_dtype_dict,
+    TestCase, run_tests, skipIfNoSciPy, slowTest, torch_to_numpy_dtype_dict,
     IS_WINDOWS, make_tensor)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCPU, dtypes, dtypesIfCUDA, dtypesIfCPU,
@@ -102,7 +100,7 @@ class TestReductions(TestCase):
             with self.assertRaisesRegex(RuntimeError, "only tensors with up to 64 dims are supported"):
                 op(x, -1)
 
-    @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
+    @skipIfNoSciPy
     def test_logsumexp(self, device):
         from scipy.special import logsumexp
         a = torch.randn(5, 4, device=device)
@@ -358,7 +356,7 @@ class TestReductions(TestCase):
                 use_integral=False)
 
     @onlyCPU
-    @unittest.skipIf(not TEST_SCIPY, 'Scipy not found')
+    @skipIfNoSciPy
     def test_logsumexp_dim(self, device):
         from scipy.special import logsumexp
         self._test_dim_ops(
@@ -669,7 +667,7 @@ class TestReductions(TestCase):
 
     @onlyOnCPUAndCUDA
     @dtypesIfCPU(torch.float, torch.double)
-    @dtypesIfCUDA(torch.half, torch.float)
+    @dtypesIfCUDA(torch.half, torch.float, torch.bfloat16)
     def test_aminmax(self, device, dtype):
 
         def _amin_wrapper(x, dim=None, keepdims=False):
@@ -1013,18 +1011,31 @@ class TestReductions(TestCase):
         test_output_dtype(torch.int32, False)
         test_output_dtype(torch.int64, True)
 
-    @dtypesIfCUDA(torch.half, torch.float, torch.double,
-                  torch.int8, torch.short, torch.int, torch.long)
-    @dtypes(torch.float, torch.double,
-            torch.int8, torch.short, torch.int, torch.long)
+    @dtypes(*torch.testing.get_all_dtypes(include_bool=False, include_complex=False))
     def test_nansum(self, device, dtype):
-        x = (torch.randn(3, 3))
-        if dtype in [torch.half, torch.float, torch.double]:
-            x[x < 0.2] = float('nan')
-        # Randomly scale the values
-        x = (x * random.randint(10, 100)).tolist()
+        args = product(
+            (True, False),  # noncontiguous
+            (0, 1, None),   # dim
+        )
+        zero = torch.zeros((), device=device, dtype=dtype)
 
-        self.compare_with_numpy(torch.nansum, np.nansum, x, device, dtype)
+        for noncontiguous, dim in args:
+            # Randomly scale the values
+            scale = random.randint(10, 100)
+            x = make_tensor((17, 17), device=device, dtype=dtype,
+                            low=-scale, high=scale, noncontiguous=noncontiguous)
+
+            if dtype.is_floating_point:
+                nan_mask = x < 0.2 * scale
+                x_nonan = torch.where(nan_mask, zero, x)
+                x[nan_mask] = np.nan
+            else:
+                x_nonan = x
+
+            dim_kwargs = {} if dim is None else {"dim": dim}
+            expect = torch.sum(x_nonan, **dim_kwargs)
+            actual = torch.nansum(x, **dim_kwargs)
+            self.assertEqual(expect, actual)
 
     def _test_reduction_function_with_numpy(self, torch_func, np_func, device, dtype,
                                             with_extremal=False, atol=None, rtol=None,
@@ -1392,7 +1403,7 @@ class TestReductions(TestCase):
         x = torch.randn(20, dtype=torch.float32, device=device)
         y = torch.randn(1, dtype=torch.float32)
 
-        err_string = "Expected all tensors to be on the same device, but found at least two devices, {0}".format(device)
+        err_string = f"Expected out tensor to have device {device}, but got cpu instead"
 
         with self.assertRaisesRegex(RuntimeError, err_string):
             torch.sum(x, dim=[0], dtype=torch.float32, out=y)
@@ -1872,6 +1883,7 @@ class TestReductions(TestCase):
 
         nan = float('nan')
         check(torch.median, nan, [], nan)
+        check(torch.median, [], [], nan)
         check(torch.nanmedian, nan, [], nan)
         check(torch.median, nan, [0], [nan, 0])
         check(torch.nanmedian, nan, [0], [nan, 0])
@@ -2625,7 +2637,9 @@ class TestReductions(TestCase):
     # there is some repetition with test_tensor_compare_ops_optional_dim_empty and test_tensor_compare_ops_empty,
     # these tests are kept separate since tests for math operators also require checking for correctness of the
     # returned data using allclose() or isinf() which does not exists in the former tests.
+    @skipIfNoSciPy
     def test_tensor_reduce_ops_empty(self, device):
+        from scipy.special import logsumexp
         shape = (2, 0, 4)
         master_input = torch.randn(shape, device=device)
         np_input = np.empty(shape)
@@ -2636,7 +2650,7 @@ class TestReductions(TestCase):
             ('mean', torch.mean, nan, np.mean),
             ('var', torch.var, nan, np.var),
             ('std', torch.std, nan, np.std),
-            ('logsumexp', torch.logsumexp, -inf, scipy.special.logsumexp),
+            ('logsumexp', torch.logsumexp, -inf, logsumexp),
         ]
 
         for name, fn, return_value, np_function in test_functions:
@@ -2650,36 +2664,38 @@ class TestReductions(TestCase):
             self.assertEqual(np_function(np_input, axis=-1), fn(master_input, dim=-1).cpu().numpy(), msg=error_msg,
                              exact_dtype=False)
 
-            self.assertEqual(torch.empty((2, 0, 1), device=device), fn(master_input, dim=2, keepdim=True), msg=error_msg)
+            self.assertEqual(torch.empty((2, 0, 1), device=device), fn(master_input, dim=2, keepdim=True),
+                             msg=error_msg)
             self.assertEqual(np_function(np_input, axis=2, keepdims=True), fn(master_input, dim=2, keepdim=True),
                              msg=error_msg, exact_dtype=False)
 
-            self.assertEqual(torch.empty((2, 0, 1), device=device), fn(master_input, dim=-1, keepdim=True), msg=error_msg)
+            self.assertEqual(torch.empty((2, 0, 1), device=device), fn(master_input, dim=-1, keepdim=True),
+                             msg=error_msg)
             self.assertEqual(np_function(np_input, axis=-1, keepdims=True), fn(master_input, dim=-1, keepdim=True),
                              msg=error_msg, exact_dtype=False)
 
-            # Check if returned data is correct.
-            check_func = (torch.testing.assert_allclose if math.isnan(return_value) or math.isinf(return_value) else
-                          self.assertEqual)
-
-            check_func(torch.full((2, 4), return_value, device=device), fn(master_input, dim=1), msg=error_msg)
-            check_func(torch.full((2, 4), return_value, device=device), fn(master_input, dim=-2), msg=error_msg)
-            check_func(torch.full((2, 1, 4), return_value, device=device), fn(master_input, dim=1, keepdim=True), msg=error_msg)
-            check_func(torch.full((2, 1, 4), return_value, device=device), fn(master_input, dim=-2, keepdim=True), msg=error_msg)
+            self.assertEqual(torch.full((2, 4), return_value, device=device), fn(master_input, dim=1), msg=error_msg)
+            self.assertEqual(torch.full((2, 4), return_value, device=device), fn(master_input, dim=-2), msg=error_msg)
+            self.assertEqual(torch.full((2, 1, 4), return_value, device=device), fn(master_input, dim=1, keepdim=True),
+                             msg=error_msg)
+            self.assertEqual(torch.full((2, 1, 4), return_value, device=device), fn(master_input, dim=-2, keepdim=True),
+                             msg=error_msg)
 
             if name != 'logsumexp':
                 # The scipy function does not work for reduction the zero dimension
-                check_func(np.float32(np_function(np_input, axis=1)), fn(master_input, dim=1).cpu().numpy(), msg=error_msg)
-                check_func(np.float32(np_function(np_input, axis=-2)), fn(master_input, dim=-2).cpu().numpy(), msg=error_msg)
-                check_func(np.float32(np_function(np_input, axis=1, keepdims=True)),
-                           fn(master_input, dim=1, keepdim=True).cpu().numpy(),
-                           msg=error_msg)
-                check_func(np.float32(np_function(np_input, axis=-2, keepdims=True)),
-                           fn(master_input, dim=-2, keepdim=True).cpu().numpy(),
-                           msg=error_msg)
+                self.assertEqual(np.float32(np_function(np_input, axis=1)), fn(master_input, dim=1).cpu().numpy(),
+                                 msg=error_msg)
+                self.assertEqual(np.float32(np_function(np_input, axis=-2)), fn(master_input, dim=-2).cpu().numpy(),
+                                 msg=error_msg)
+                self.assertEqual(np.float32(np_function(np_input, axis=1, keepdims=True)),
+                                 fn(master_input, dim=1, keepdim=True).cpu().numpy(),
+                                 msg=error_msg)
+                self.assertEqual(np.float32(np_function(np_input, axis=-2, keepdims=True)),
+                                 fn(master_input, dim=-2, keepdim=True).cpu().numpy(),
+                                 msg=error_msg)
 
                 # logsumexp throws a type error when not specifying dim so test separately.
-                check_func(torch.full((), return_value, device=device), fn(master_input), msg=error_msg)
+                self.assertEqual(torch.full((), return_value, device=device), fn(master_input), msg=error_msg)
             else:
                 self.assertRaises(TypeError, lambda: fn(master_input))
 

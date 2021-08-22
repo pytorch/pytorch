@@ -72,19 +72,20 @@ void adam_compute_smart_decay(
     //float correction,
     const float* lr,
     Context* /*context*/) {
+  float k = (float)(t - lastSeenIn[0]);
+  lastSeenOut[0] = t;
   for (auto i = 0; i < N; ++i) {
     float gi = g[i];
     // The number of steps since this param was last seen.
-    long int k = t - lastSeenIn[i];
-    lastSeenOut[i] = t;
+    // We don't need integer precision for k.  Float is fine and it's faster to convert here.
     // Same as sparse Adam except v is decayed by beta2^k rather than beta2
     // Catchup = \sum_{i=1}^{k-1}\beta_1^i = \beta_1 \left(\frac{1-\beta_1^k}{1-\beta_1}\right)
     float catchup = 0.0;
     if (k > 1) {
-        catchup = m[i] * beta1 * (1 - std::pow(beta1, k)) / (1 - beta1);
+        catchup = m[i] * beta1 * (1 - powf(beta1, k-1)) / (1 - beta1);
     }
-    float mi = nm[i] = m[i] * std::pow(beta1, k) + gi * (1 - beta1);
-    float vi = nv[i] = v[i] * std::pow(beta2, k) + gi * gi * (1 - beta2);
+    float mi = nm[i] = m[i] * powf(beta1, k) + gi * (1 - beta1);
+    float vi = nv[i] = v[i] * powf(beta2, k) + gi * gi * (1 - beta2);
     nw[i] = w[i] + (lr[0] * (mi + catchup)) / (std::sqrt(vi) + eps_hat);
   }
 }
@@ -560,7 +561,7 @@ class SmartDecaySparseAdamOp final : public Operator<Context> {
     // Enforce shapes
     CAFFE_ENFORCE_EQ(Input(PARAM).numel(), Input(MOMENT_1).numel());
     CAFFE_ENFORCE_EQ(Input(PARAM).numel(), Input(MOMENT_2).numel());
-    CAFFE_ENFORCE_EQ(Input(PARAM).numel(), Input(LAST_SEEN).numel());
+    CAFFE_ENFORCE_EQ(Input(PARAM).size(0), Input(LAST_SEEN).numel());
     CAFFE_ENFORCE_EQ(
         Input(PARAM).size_from_dim(1),
         Input(GRAD).size_from_dim(Input(INDICES).dim()));
@@ -577,10 +578,6 @@ class SmartDecaySparseAdamOp final : public Operator<Context> {
         OperatorBase::Input<Tensor>(ITER, CPU).template data<int64_t>()[0];
 
     const int64_t t = iter + 1;
-    //const auto beta1_correction = T(1.) / (T(1.) - std::pow(beta1_, t));
-    //const auto beta2_correction =
-    //    T(1.) / std::sqrt(T(1.) - std::pow(beta2_, t));
-    //const auto correction = beta1_correction / beta2_correction;
 
     auto block_size = Input(PARAM).numel() / Input(PARAM).size(0);
     auto n = Input(GRAD).numel() / block_size;
@@ -607,11 +604,11 @@ class SmartDecaySparseAdamOp final : public Operator<Context> {
             gradIn + offsetI,
             moment1In + offsetIdx,
             moment2In + offsetIdx,
-            lastSeenIn + offsetIdx,
+            lastSeenIn + idx,
             paramOut + offsetIdx,
             moment1Out + offsetIdx,
             moment2Out + offsetIdx,
-            lastSeenOut + offsetIdx,
+            lastSeenOut + idx,
             beta1_,
             beta2_,
             epsilon_,

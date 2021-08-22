@@ -38,7 +38,7 @@ TEST(Reductions, ReduceSum0D_1) {
   Tensor* c = Reduce("sum", {{M, "m"}}, Sum(), b, {});
   LoopNest loop({c});
   loop.prepareForCodegen();
-  Stmt* s = loop.root_stmt();
+  StmtPtr s = loop.root_stmt();
   s = IRSimplifier::simplify(s);
 
   SimpleIREvaluator cg(s, {b, c});
@@ -62,7 +62,7 @@ TEST(Reductions, ReduceSum0D_2) {
   Tensor* c = Reduce("sum", {}, Sum(), b, {});
   LoopNest loop({c});
   loop.prepareForCodegen();
-  Stmt* s = loop.root_stmt();
+  StmtPtr s = loop.root_stmt();
   s = IRSimplifier::simplify(s);
 
   SimpleIREvaluator cg(s, {b, c});
@@ -72,7 +72,6 @@ TEST(Reductions, ReduceSum0D_2) {
 }
 
 // Sum an array to a single value.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReduceSum1D) {
   KernelScope kernel_scope;
 
@@ -87,7 +86,7 @@ TEST(Reductions, ReduceSum1D) {
   Tensor* c = Reduce("sum", {}, Sum(), b, {{10, "m"}});
   LoopNest loop({c});
   loop.prepareForCodegen();
-  Stmt* s = loop.root_stmt();
+  StmtPtr s = loop.root_stmt();
   s = IRSimplifier::simplify(s);
 
   SimpleIREvaluator cg(s, {b, c});
@@ -96,7 +95,6 @@ TEST(Reductions, ReduceSum1D) {
   ASSERT_EQ(out[0], 45);
 }
 // Sum a 2D tensor to a 1D tensor with dynamic shapes.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReduceSum2D) {
   KernelScope kernel_scope;
 
@@ -119,7 +117,7 @@ TEST(Reductions, ReduceSum2D) {
   Tensor* c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}});
   LoopNest loop({c});
   loop.prepareForCodegen();
-  Stmt* s = loop.root_stmt();
+  StmtPtr s = loop.root_stmt();
   s = IRSimplifier::simplify(s);
 
   SimpleIREvaluator cg(s, {b, c, n, m});
@@ -139,7 +137,6 @@ TEST(Reductions, ReduceSum2D) {
 
 // Sum a 3D tensor to both a 2D and 1D tensor, then reduce the 2D tensor flat to
 // check our work.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReduceSum3D) {
   KernelScope kernel_scope;
 
@@ -151,7 +148,7 @@ TEST(Reductions, ReduceSum3D) {
   Tensor* c = Reduce("sum", {{2, "l"}, {3, "n"}}, Sum(), b, {{m, "m"}});
   LoopNest loop({c});
   loop.prepareForCodegen();
-  Stmt* s = loop.root_stmt();
+  StmtPtr s = loop.root_stmt();
   s = IRSimplifier::simplify(s);
 
   SimpleIREvaluator cg(s, {b, c, m});
@@ -181,7 +178,7 @@ TEST(Reductions, ReduceSum3D) {
   Tensor* d = Reduce("sum2", {{2, "l"}}, Sum(), b, {{3, "n"}, {m, "m"}});
   LoopNest loop2({d});
   loop2.prepareForCodegen();
-  Stmt* s2 = loop2.root_stmt();
+  StmtPtr s2 = loop2.root_stmt();
   s2 = IRSimplifier::simplify(s2);
 
   SimpleIREvaluator cg2(s2, {b, d, m});
@@ -199,7 +196,7 @@ TEST(Reductions, ReduceSum3D) {
   Tensor* e = Reduce("sum3", {{2, "l"}}, Sum(), c_buf, {{3, "m"}});
   LoopNest loop3({e});
   loop3.prepareForCodegen();
-  Stmt* s3 = loop3.root_stmt();
+  StmtPtr s3 = loop3.root_stmt();
   s3 = IRSimplifier::simplify(s3);
 
   SimpleIREvaluator cg3(s3, {c, e});
@@ -211,7 +208,6 @@ TEST(Reductions, ReduceSum3D) {
 }
 
 // Sum a large (10 D) Tensor 5 dimensions in.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReduceSum10D) {
   KernelScope kernel_scope;
 
@@ -231,7 +227,7 @@ TEST(Reductions, ReduceSum10D) {
       {{3, "f"}, {2, "g"}, {3, "h"}, {2, "i"}, {3, "j"}});
   LoopNest loop({c});
   loop.prepareForCodegen();
-  Stmt* s = loop.root_stmt();
+  StmtPtr s = loop.root_stmt();
   s = IRSimplifier::simplify(s);
 
   SimpleIREvaluator cg(s, {in_, c});
@@ -246,7 +242,6 @@ TEST(Reductions, ReduceSum10D) {
 }
 
 // Reduce via Mul rather than Add using a custom Reducer.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReduceProduct) {
   KernelScope kernel_scope;
 
@@ -269,7 +264,7 @@ TEST(Reductions, ReduceProduct) {
   Tensor* c = Reduce("product", {{M, "m"}}, product, b, {{N, "n"}});
   LoopNest loop({c});
   loop.prepareForCodegen();
-  Stmt* s = loop.root_stmt();
+  StmtPtr s = loop.root_stmt();
   s = IRSimplifier::simplify(s);
 
   SimpleIREvaluator cg(s, {b, c});
@@ -288,7 +283,6 @@ TEST(Reductions, ReduceProduct) {
 }
 
 // Maximum reductions.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReduceMax) {
   KernelScope kernel_scope;
 
@@ -304,7 +298,7 @@ TEST(Reductions, ReduceMax) {
 
   LoopNest loop({dm1});
   loop.prepareForCodegen();
-  Stmt* s = loop.root_stmt();
+  StmtPtr s = loop.root_stmt();
   s = IRSimplifier::simplify(s);
   SimpleIREvaluator cg(s, {in_, dm1});
 
@@ -330,7 +324,6 @@ TEST(Reductions, ReduceMax) {
 }
 
 // Minimum reduction, with custom initialization.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReduceMinCustomInitializer) {
   KernelScope kernel_scope;
 
@@ -352,7 +345,7 @@ TEST(Reductions, ReduceMinCustomInitializer) {
 
   LoopNest loop({min});
   loop.prepareForCodegen();
-  Stmt* s = loop.root_stmt();
+  StmtPtr s = loop.root_stmt();
   s = IRSimplifier::simplify(s);
 
   SimpleIREvaluator cg(s, {in_, min, minInit});
@@ -369,7 +362,6 @@ TEST(Reductions, ReduceMinCustomInitializer) {
 
 // Example implementation of Any/All.
 // TODO: this is very awkward without logical And/Or operators.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReduceAnyAll) {
   KernelScope kernel_scope;
 
@@ -391,7 +383,7 @@ TEST(Reductions, ReduceAnyAll) {
 
   LoopNest loop({any});
   loop.prepareForCodegen();
-  Stmt* s = loop.root_stmt();
+  StmtPtr s = loop.root_stmt();
   s = IRSimplifier::simplify(s);
 
   SimpleIREvaluator cg(s, {b, any, searchValue});
@@ -456,7 +448,6 @@ TEST(Reductions, ReduceAnyAll) {
   ASSERT_EQ(out[3], 1);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReduceMatmul2D) {
   KernelScope kernel_scope;
 
@@ -485,7 +476,7 @@ TEST(Reductions, ReduceMatmul2D) {
 
   LoopNest loop({mm});
   loop.prepareForCodegen();
-  Stmt* s = loop.root_stmt();
+  StmtPtr s = loop.root_stmt();
   s = IRSimplifier::simplify(s);
 
   SimpleIREvaluator cg(s, {tA, tB, mm});
@@ -499,7 +490,6 @@ TEST(Reductions, ReduceMatmul2D) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReduceRfactorLike) {
   KernelScope kernel_scope;
 
@@ -518,7 +508,7 @@ TEST(Reductions, ReduceRfactorLike) {
 
   LoopNest loop({l1, l2});
   loop.prepareForCodegen();
-  Stmt* s = loop.root_stmt();
+  StmtPtr s = loop.root_stmt();
   s = IRSimplifier::simplify(s);
 
   SimpleIREvaluator cg(s, {in, l1, l2});
@@ -527,7 +517,6 @@ TEST(Reductions, ReduceRfactorLike) {
   ASSERT_EQ(out[0], 99 * 50);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReduceAsProducer) {
   KernelScope kernel_scope;
 
@@ -546,7 +535,7 @@ TEST(Reductions, ReduceAsProducer) {
       });
   LoopNest loop({d}, {c, d});
   loop.prepareForCodegen();
-  Stmt* s = loop.root_stmt();
+  StmtPtr s = loop.root_stmt();
   s = IRSimplifier::simplify(s);
 
   SimpleIREvaluator cg(s, {a, b, d, m});
@@ -573,7 +562,6 @@ TEST(Reductions, ReduceAsProducer) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReduceAsConsumer) {
   KernelScope kernel_scope;
 
@@ -592,7 +580,7 @@ TEST(Reductions, ReduceAsConsumer) {
   Tensor* d = Reduce("sum", {{2, "l1"}}, Sum(), c, {{3, "n1"}, {m, "m1"}});
   LoopNest loop({d}, {c, d});
   loop.prepareForCodegen();
-  Stmt* s = loop.root_stmt();
+  StmtPtr s = loop.root_stmt();
   s = IRSimplifier::simplify(s);
 
   SimpleIREvaluator cg(s, {a, b, d, m});
@@ -625,7 +613,6 @@ TEST(Reductions, ReduceAsConsumer) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, SplitReduceAxis) {
   KernelScope kernel_scope;
 
@@ -641,12 +628,12 @@ TEST(Reductions, SplitReduceAxis) {
 
   Tensor* tensor = Reduce("sum", {{16, "m"}}, Sum(), in, {{8, "n"}});
   LoopNest l({tensor});
-  std::vector<For*> loops = l.getLoopStmtsFor(tensor);
+  std::vector<ForPtr> loops = l.getLoopStmtsFor(tensor);
   LoopNest::splitWithTail(loops[1], 2);
 
   l.prepareForCodegen();
 
-  Stmt* s = l.root_stmt();
+  StmtPtr s = l.root_stmt();
   s = IRSimplifier::simplify(s);
 
   SimpleIREvaluator cg(s, {in, tensor});
@@ -657,7 +644,6 @@ TEST(Reductions, SplitReduceAxis) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, SplitNonReduceAxis) {
   KernelScope kernel_scope;
 
@@ -672,13 +658,13 @@ TEST(Reductions, SplitNonReduceAxis) {
   std::vector<float> out(16, -1.f);
   Tensor* tensor = Reduce("sum", {{16, "m"}}, Sum(), in, {{8, "n"}});
   LoopNest l({tensor});
-  std::vector<For*> loops = l.getLoopStmtsFor(tensor);
+  std::vector<ForPtr> loops = l.getLoopStmtsFor(tensor);
   LoopNest::splitWithTail(loops[0], 2);
   LoopNest::splitWithTail(loops[0], 2);
 
   l.prepareForCodegen();
 
-  Stmt* s = l.root_stmt();
+  StmtPtr s = l.root_stmt();
   s = IRSimplifier::simplify(s);
 
   SimpleIREvaluator cg(s, {in, tensor});
@@ -689,7 +675,6 @@ TEST(Reductions, SplitNonReduceAxis) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReorderedReductionInitializer) {
   KernelScope kernel_scope;
   /* From the quip:
@@ -706,7 +691,7 @@ TEST(Reductions, ReorderedReductionInitializer) {
   LoopNest l_({tensor_});
 
   l_.prepareForCodegen();
-  Stmt* s_ = Stmt::clone(l_.root_stmt());
+  StmtPtr s_ = Stmt::clone(l_.root_stmt());
   s_ = IRSimplifier::simplify(s_);
 
   Tensor* tensor = Reduce("sum", {{1, "k"}, {12, "n"}}, Sum(), in, {{6, "m"}});
@@ -718,7 +703,7 @@ TEST(Reductions, ReorderedReductionInitializer) {
 
   LoopNest::reorderAxis(loops[1], loops[2]);
 
-  Stmt* s = l.root_stmt();
+  StmtPtr s = l.root_stmt();
   // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   s = IRSimplifier::simplify(s);
 
@@ -740,7 +725,6 @@ TEST(Reductions, ReorderedReductionInitializer) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReduceRfactor) {
   KernelScope kernel_scope;
 
@@ -759,14 +743,13 @@ TEST(Reductions, ReduceRfactor) {
 
   Tensor* c = Reduce("sum", {}, Sum(), b, {{m, "m"}, {n, "n"}});
   LoopNest loop({c});
-  std::vector<For*> loops = loop.getLoopStmtsFor(c);
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-  auto c_body = const_cast<Stmt*>(loop.getAllWritesToBuf(c->buf())[1]);
+  std::vector<ForPtr> loops = loop.getLoopStmtsFor(c);
+  auto c_body = loop.getAllWritesToBuf(c->buf())[1];
   ASSERT_TRUE(loop.rfactor(c_body, loops.at(0)));
   auto rc = NodeFinder<ReduceOp>::find(loop.root_stmt());
   ASSERT_EQ(rc.size(), 2);
   loop.prepareForCodegen();
-  Stmt* s = loop.root_stmt();
+  StmtPtr s = loop.root_stmt();
   s = IRSimplifier::simplify(s);
 
   SimpleIREvaluator cg(s, {b, c, m, n});
@@ -775,7 +758,6 @@ TEST(Reductions, ReduceRfactor) {
   ASSERT_EQ(out[0], 4950);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, Reduce3DRfactorInner) {
   KernelScope kernel_scope;
 
@@ -796,14 +778,13 @@ TEST(Reductions, Reduce3DRfactorInner) {
 
   Tensor* c = Reduce("sum", {}, Sum(), b, {{m, "m"}, {n, "n"}, {k, "k"}});
   LoopNest loop({c});
-  std::vector<For*> loops = loop.getLoopStmtsFor(c);
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-  auto c_body = const_cast<Stmt*>(loop.getAllWritesToBuf(c->buf())[1]);
+  std::vector<ForPtr> loops = loop.getLoopStmtsFor(c);
+  auto c_body = loop.getAllWritesToBuf(c->buf())[1];
   ASSERT_FALSE(loop.rfactor(c_body, loops.at(2)));
   auto rc = NodeFinder<ReduceOp>::find(loop.root_stmt());
   ASSERT_EQ(rc.size(), 1);
   loop.prepareForCodegen();
-  Stmt* s = loop.root_stmt();
+  StmtPtr s = loop.root_stmt();
   s = IRSimplifier::simplify(s);
 
   SimpleIREvaluator cg(s, {b, c, m, n, k});
@@ -812,7 +793,6 @@ TEST(Reductions, Reduce3DRfactorInner) {
   ASSERT_EQ(out[0], 499500);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, Reduce3DRfactorOuter) {
   KernelScope kernel_scope;
 
@@ -833,14 +813,13 @@ TEST(Reductions, Reduce3DRfactorOuter) {
 
   Tensor* c = Reduce("sum", {}, Sum(), b, {{m, "m"}, {n, "n"}, {k, "k"}});
   LoopNest loop({c});
-  std::vector<For*> loops = loop.getLoopStmtsFor(c);
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-  auto c_body = const_cast<Stmt*>(loop.getAllWritesToBuf(c->buf())[1]);
+  std::vector<ForPtr> loops = loop.getLoopStmtsFor(c);
+  auto c_body = loop.getAllWritesToBuf(c->buf())[1];
   ASSERT_TRUE(loop.rfactor(c_body, loops.at(0)));
   auto rc = NodeFinder<ReduceOp>::find(loop.root_stmt());
   ASSERT_EQ(rc.size(), 2);
   loop.prepareForCodegen();
-  Stmt* s = loop.root_stmt();
+  StmtPtr s = loop.root_stmt();
   s = IRSimplifier::simplify(s);
 
   SimpleIREvaluator cg(s, {b, c, m, n, k});
@@ -848,7 +827,6 @@ TEST(Reductions, Reduce3DRfactorOuter) {
   ASSERT_EQ(out[0], 499500);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReduceRepeatedInternalRfactor) {
   KernelScope kernel_scope;
 
@@ -876,18 +854,16 @@ TEST(Reductions, ReduceRepeatedInternalRfactor) {
         IRSimplifier::simplify(refloop.root_stmt()), {in_, c});
     ref_cg.call({in, ref});
 
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-    Buf* tmp_buf = const_cast<Buf*>(c->buf());
+    BufPtr tmp_buf = c->buf();
 
     for (int idx = 0; idx < rfac_number; idx++) {
-      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-      auto reduce = const_cast<Stmt*>(loop.getAllWritesToBuf(tmp_buf)[1]);
+      auto reduce = loop.getAllWritesToBuf(tmp_buf)[1];
       ASSERT_TRUE(loop.rfactor(
           reduce, loop.getLoopStmtsFor(tmp_buf).at(idx), &tmp_buf));
     }
 
     loop.prepareForCodegen();
-    Stmt* s = loop.root_stmt();
+    StmtPtr s = loop.root_stmt();
     s = IRSimplifier::simplify(s);
 
     SimpleIREvaluator cg(s, {in_, c});
@@ -898,7 +874,6 @@ TEST(Reductions, ReduceRepeatedInternalRfactor) {
 }
 
 // Split a reduction axis with a tail loop.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReduceSplitTail) {
   KernelScope kernel_scope;
 
@@ -917,11 +892,11 @@ TEST(Reductions, ReduceSplitTail) {
 
     Tensor* c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}, {K, "k"}});
     LoopNest loop({c});
-    std::vector<For*> loops = loop.getLoopStmtsFor(c);
+    std::vector<ForPtr> loops = loop.getLoopStmtsFor(c);
     LoopNest::splitWithTail(loops[i], 8);
 
     loop.prepareForCodegen();
-    Stmt* s = loop.root_stmt();
+    StmtPtr s = loop.root_stmt();
     s = IRSimplifier::simplify(s);
 
     SimpleIREvaluator cg(s, {b, c});
@@ -932,7 +907,6 @@ TEST(Reductions, ReduceSplitTail) {
 }
 
 // Split a reduction axis cleanly so there is no tail loop.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReduceSplitNoTail) {
   KernelScope kernel_scope;
 
@@ -950,11 +924,11 @@ TEST(Reductions, ReduceSplitNoTail) {
 
     Tensor* c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}, {K, "k"}});
     LoopNest loop({c});
-    std::vector<For*> loops = loop.getLoopStmtsFor(c);
+    std::vector<ForPtr> loops = loop.getLoopStmtsFor(c);
     LoopNest::splitWithTail(loops[i], 5);
 
     loop.prepareForCodegen();
-    Stmt* s = loop.root_stmt();
+    StmtPtr s = loop.root_stmt();
     s = IRSimplifier::simplify(s);
 
     SimpleIREvaluator cg(s, {b, c});
@@ -966,7 +940,6 @@ TEST(Reductions, ReduceSplitNoTail) {
 
 // Split a reduction axis with only a tail loop (the split loop will be size 0
 // and eliminated out).
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReduceOverSplitTail) {
   KernelScope kernel_scope;
 
@@ -985,11 +958,11 @@ TEST(Reductions, ReduceOverSplitTail) {
 
     Tensor* c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}, {K, "k"}});
     LoopNest loop({c});
-    std::vector<For*> loops = loop.getLoopStmtsFor(c);
+    std::vector<ForPtr> loops = loop.getLoopStmtsFor(c);
     LoopNest::splitWithTail(loops[i], 16);
 
     loop.prepareForCodegen();
-    Stmt* s = loop.root_stmt();
+    StmtPtr s = loop.root_stmt();
     s = IRSimplifier::simplify(s);
 
     SimpleIREvaluator cg(s, {b, c});
@@ -1000,7 +973,6 @@ TEST(Reductions, ReduceOverSplitTail) {
 }
 
 // Split a reduction axis with a mask.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReduceSplitMask) {
   KernelScope kernel_scope;
 
@@ -1019,11 +991,11 @@ TEST(Reductions, ReduceSplitMask) {
 
     Tensor* c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}, {K, "k"}});
     LoopNest loop({c});
-    std::vector<For*> loops = loop.getLoopStmtsFor(c);
+    std::vector<ForPtr> loops = loop.getLoopStmtsFor(c);
     LoopNest::splitWithMask(loops[i], 8);
 
     loop.prepareForCodegen();
-    Stmt* s = loop.root_stmt();
+    StmtPtr s = loop.root_stmt();
     s = IRSimplifier::simplify(s);
 
     SimpleIREvaluator cg(s, {b, c});
@@ -1034,7 +1006,6 @@ TEST(Reductions, ReduceSplitMask) {
 }
 
 // Split a reduction axis cleanly not requiring a mask.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReduceSplitNoMask) {
   KernelScope kernel_scope;
 
@@ -1052,11 +1023,11 @@ TEST(Reductions, ReduceSplitNoMask) {
 
     Tensor* c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}, {K, "k"}});
     LoopNest loop({c});
-    std::vector<For*> loops = loop.getLoopStmtsFor(c);
+    std::vector<ForPtr> loops = loop.getLoopStmtsFor(c);
     LoopNest::splitWithMask(loops[i], 5);
 
     loop.prepareForCodegen();
-    Stmt* s = loop.root_stmt();
+    StmtPtr s = loop.root_stmt();
     s = IRSimplifier::simplify(s);
 
     SimpleIREvaluator cg(s, {b, c});
@@ -1067,7 +1038,6 @@ TEST(Reductions, ReduceSplitNoMask) {
 }
 
 // Split a reduction axis with all logic in the mask.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReduceOverSplitMask) {
   KernelScope kernel_scope;
 
@@ -1086,11 +1056,11 @@ TEST(Reductions, ReduceOverSplitMask) {
 
     Tensor* c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}, {K, "k"}});
     LoopNest loop({c});
-    std::vector<For*> loops = loop.getLoopStmtsFor(c);
+    std::vector<ForPtr> loops = loop.getLoopStmtsFor(c);
     LoopNest::splitWithMask(loops[i], 16);
 
     loop.prepareForCodegen();
-    Stmt* s = loop.root_stmt();
+    StmtPtr s = loop.root_stmt();
     s = IRSimplifier::simplify(s);
 
     SimpleIREvaluator cg(s, {b, c});
@@ -1102,7 +1072,6 @@ TEST(Reductions, ReduceOverSplitMask) {
 
 // Test an rfactor when there are two ReduceOps in the graph due to a
 // splitWithTail.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReduceSplitRfactor) {
   KernelScope kernel_scope;
 
@@ -1123,11 +1092,10 @@ TEST(Reductions, ReduceSplitRfactor) {
 
   Tensor* c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}, {K, "k"}});
   LoopNest loop({c});
-  std::vector<For*> loops = loop.getLoopStmtsFor(c);
+  std::vector<ForPtr> loops = loop.getLoopStmtsFor(c);
   LoopNest::splitWithTail(loops[2], SPLIT_FACTOR);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-  auto c_body = const_cast<Stmt*>(loop.getAllWritesToBuf(c->buf())[2]);
+  auto c_body = loop.getAllWritesToBuf(c->buf())[2];
   auto all_loops = loop.getAllLoopNestsWritingToBuf(c->buf());
   ASSERT_TRUE(all_loops.size() == 3 && all_loops.at(2).size() == 3);
   LoopNest::reorderAxis(all_loops[2][1], all_loops[2][2]);
@@ -1136,7 +1104,7 @@ TEST(Reductions, ReduceSplitRfactor) {
   ASSERT_TRUE(loop.rfactor(c_body, all_loops[2][1]));
   loop.prepareForCodegen();
   loop.simplify();
-  Stmt* s = loop.root_stmt();
+  StmtPtr s = loop.root_stmt();
 
   SimpleIREvaluator cg(s, {b, c});
 
@@ -1148,7 +1116,6 @@ TEST(Reductions, ReduceSplitRfactor) {
 
 // Test an rfactor which ends up being eliminated since the total loop size is
 // smaller than the split factor.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReduceOverSplitRfactor) {
   KernelScope kernel_scope;
 
@@ -1166,22 +1133,21 @@ TEST(Reductions, ReduceOverSplitRfactor) {
 
   Tensor* c = Reduce("sum", {}, Sum(), b, {{N, "n"}, {K, "k"}});
   LoopNest loop({c});
-  std::vector<For*> loops = loop.getLoopStmtsFor(c);
+  std::vector<ForPtr> loops = loop.getLoopStmtsFor(c);
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For *i, *t;
+  ForPtr i, t;
   LoopNest::splitWithTail(loops[1], SPLIT_FACTOR, &i, &t);
   LoopNest::reorderAxis(loops[0], i);
 
   auto all_loops = loop.getAllLoopNestsWritingToBuf(c->buf());
   ASSERT_TRUE(all_loops.size() == 3 && all_loops.at(1).size() == 3);
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-  auto c_body = const_cast<Stmt*>(loop.getAllWritesToBuf(c->buf())[1]);
+  auto c_body = loop.getAllWritesToBuf(c->buf())[1];
   ASSERT_TRUE(loop.rfactor(c_body, all_loops[1][0]));
   LoopNest::reorderAxis(all_loops[1][0], all_loops[1][2]);
 
   loop.prepareForCodegen();
   loop.simplify();
-  Stmt* s = loop.root_stmt();
+  StmtPtr s = loop.root_stmt();
 
   SimpleIREvaluator cg(s, {b, c});
 
@@ -1207,7 +1173,6 @@ TEST(Reductions, ReduceOverSplitRfactor) {
   // torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReduceInlineReduction) {
   KernelScope kernel_scope;
   const int M = 4;
@@ -1241,7 +1206,6 @@ TEST(Reductions, ReduceInlineReduction) {
   ASSERT_FALSE(l1.computeInline(x->buf()));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReduceInlineConsumer) {
   KernelScope kernel_scope;
   const int M = 4;
@@ -1278,8 +1242,8 @@ TEST(Reductions, ReduceInlineConsumer) {
   l1.prepareForCodegen();
   l2.prepareForCodegen();
 
-  Stmt* stmt1 = IRSimplifier::simplify(l1.root_stmt());
-  Stmt* stmt2 = IRSimplifier::simplify(l2.root_stmt());
+  StmtPtr stmt1 = IRSimplifier::simplify(l1.root_stmt());
+  StmtPtr stmt2 = IRSimplifier::simplify(l2.root_stmt());
 
   SimpleIREvaluator eval1(stmt1, {a_buf, b_buf, y});
   SimpleIREvaluator eval2(stmt2, {a_buf, b_buf, y});
@@ -1296,7 +1260,6 @@ TEST(Reductions, ReduceInlineConsumer) {
   ASSERT_GT(oss1.str().size(), oss2.str().size());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReduceInlineReducerInternal) {
   KernelScope kernel_scope;
   const int M = 4;
@@ -1337,8 +1300,8 @@ TEST(Reductions, ReduceInlineReducerInternal) {
   l1.prepareForCodegen();
   l2.prepareForCodegen();
 
-  Stmt* stmt1 = IRSimplifier::simplify(l1.root_stmt());
-  Stmt* stmt2 = IRSimplifier::simplify(l2.root_stmt());
+  StmtPtr stmt1 = IRSimplifier::simplify(l1.root_stmt());
+  StmtPtr stmt2 = IRSimplifier::simplify(l2.root_stmt());
 
   SimpleIREvaluator eval1(stmt1, {a_buf, b_buf, y});
   SimpleIREvaluator eval2(stmt2, {a_buf, b_buf, y});
@@ -1355,7 +1318,6 @@ TEST(Reductions, ReduceInlineReducerInternal) {
   ASSERT_GT(oss1.str().size(), oss2.str().size());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReductionCacheAccessesOperatorAxis) {
   KernelScope kernel_scope;
 
@@ -1383,11 +1345,11 @@ TEST(Reductions, ReductionCacheAccessesOperatorAxis) {
   l_before.prepareForCodegen();
   SimpleIREvaluator cg_before(l_before.root_stmt(), {a, b, e});
 
-  Stmt* d_loop = l.getLoopStmtsFor(d)[0];
+  StmtPtr d_loop = l.getLoopStmtsFor(d)[0];
   l.cacheAccesses(d->buf(), "d_local", d_loop);
   l.prepareForCodegen();
 
-  Stmt* result = IRSimplifier::simplify(l.root_stmt());
+  StmtPtr result = IRSimplifier::simplify(l.root_stmt());
   SimpleIREvaluator cg_after(result, {a, b, e});
 
   std::ostringstream oss;
@@ -1433,7 +1395,6 @@ TEST(Reductions, ReductionCacheAccessesOperatorAxis) {
   ExpectAllNear(e_before, e_after, 1e-5);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReductionCacheAccessesOuterReduceAxis) {
   KernelScope kernel_scope;
 
@@ -1461,11 +1422,11 @@ TEST(Reductions, ReductionCacheAccessesOuterReduceAxis) {
   l_before.prepareForCodegen();
   SimpleIREvaluator cg_before(l_before.root_stmt(), {a, b, e});
 
-  Stmt* d_loop = l.getLoopStmtsFor(d)[1];
+  StmtPtr d_loop = l.getLoopStmtsFor(d)[1];
   l.cacheAccesses(d->buf(), "d_local", d_loop);
   l.prepareForCodegen();
 
-  Stmt* result = IRSimplifier::simplify(l.root_stmt());
+  StmtPtr result = IRSimplifier::simplify(l.root_stmt());
   SimpleIREvaluator cg_after(result, {a, b, e});
 
   std::ostringstream oss;
@@ -1509,7 +1470,6 @@ TEST(Reductions, ReductionCacheAccessesOuterReduceAxis) {
   ExpectAllNear(e_before, e_after, 1e-5);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReductionCacheAccessesInnerReduceAxis) {
   KernelScope kernel_scope;
 
@@ -1537,27 +1497,27 @@ TEST(Reductions, ReductionCacheAccessesInnerReduceAxis) {
   l_before.prepareForCodegen();
   SimpleIREvaluator cg_before(l_before.root_stmt(), {a, b, e});
 
-  Stmt* d_loop = l.getLoopStmtsFor(d)[2];
+  StmtPtr d_loop = l.getLoopStmtsFor(d)[2];
   l.cacheAccesses(d->buf(), "d_local", d_loop);
   l.prepareForCodegen();
 
-  Stmt* result = IRSimplifier::simplify(l.root_stmt());
+  StmtPtr result = IRSimplifier::simplify(l.root_stmt());
   SimpleIREvaluator cg_after(result, {a, b, e});
 
   std::ostringstream oss;
   oss << *result;
   const std::string& expected_ir =
       R"IR(
+#CHECK: Allocate(d_local); // dtype=float, dims=[1]
 #CHECK: sum[l1] = 0
 #CHECK: for (int n1
-#CHECK:   Allocate(d_local); // dtype=float, dims=[1]
 #CHECK:   d_local[0] = 0
 #CHECK:   for (int m1
 #CHECK:     d_local[0] = (d_local[0]) + (scale[
 #CHECK:   }
 #CHECK:   sum[l1] = (sum[l1]) + (d_local[0])
-#CHECK:   Free(d_local);
 #CHECK: }
+#CHECK: Free(d_local);
 #CHECK-NOT: d_local
       )IR";
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
@@ -1585,7 +1545,6 @@ TEST(Reductions, ReductionCacheAccessesInnerReduceAxis) {
   ExpectAllNear(e_before, e_after, 1e-5);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReductionCacheBodyAccess) {
   KernelScope kernel_scope;
 
@@ -1606,11 +1565,11 @@ TEST(Reductions, ReductionCacheBodyAccess) {
 
   LoopNest l({e}, {c, d, e});
 
-  Stmt* d_loop = l.getLoopStmtsFor(d)[1];
+  StmtPtr d_loop = l.getLoopStmtsFor(d)[1];
   l.cacheAccesses(c->buf(), "scale_local", d_loop);
 
   l.prepareForCodegen();
-  Stmt* result = IRSimplifier::simplify(l.root_stmt());
+  StmtPtr result = IRSimplifier::simplify(l.root_stmt());
 
   std::ostringstream oss;
   oss << *result;
@@ -1619,15 +1578,14 @@ TEST(Reductions, ReductionCacheBodyAccess) {
 #CHECK: Allocate(scale_local); // dtype=float, dims=[1, 32, 12]
 #CHECK: for (int j = 0; j < 32; j++) {
 #CHECK:   for (int k = 0; k < 12; k++) {
-#CHECK:     scale_local[k + 12 * j] = scale[(k + 384 * l1) + 12 * j];
-#CHECK: sum[l1] = (sum[l1]) + (scale_local[12 * n1_1 + m1_1]);
-#CHECK: Free(scale_local);
+#CHECK:     scale_local[k + 12 * j] = scale[(k + 12 * j) + 384 * l1];
+#CHECK: sum[l1] = (sum[l1]) + (scale_local[m1_1 + 12 * n1_1]);
 #CHECK: scale_1[l] = (b[l]) * (sum[l]);
+#CHECK: Free(scale_local);
       )IR";
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReductionCacheConsumerAccess) {
   KernelScope kernel_scope;
 
@@ -1650,18 +1608,18 @@ TEST(Reductions, ReductionCacheConsumerAccess) {
 
   LoopNest::splitWithMask(l.getLoopStmtsFor(e)[0], 4);
 
-  Stmt* e_loop = l.getLoopStmtsFor(e)[1];
+  StmtPtr e_loop = l.getLoopStmtsFor(e)[1];
   l.cacheAccesses(d->buf(), "sum_local", e_loop);
   l.prepareForCodegen();
 
-  Stmt* result = IRSimplifier::simplify(l.root_stmt());
+  StmtPtr result = IRSimplifier::simplify(l.root_stmt());
 
   std::ostringstream oss;
   oss << *result;
   const std::string& expected_ir =
       R"IR(
-#CHECK: sum[l1] = (sum[l1]) + (scale[
 #CHECK: Allocate(sum_local); // dtype=float, dims=[4]
+#CHECK: sum[l1] = (sum[l1]) + (scale[
 #CHECK: for (int i = 0; i < 4
 #CHECK:   sum_local[i] = sum[i + 4 * l_outer];
 #CHECK:   scale_1[l_inner + 4 * l_outer] = (b[l_inner + 4 * l_outer]) * (sum_local[l_inner]);
@@ -1669,7 +1627,6 @@ TEST(Reductions, ReductionCacheConsumerAccess) {
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReductionSplitCacheConsumerAccess) {
   KernelScope kernel_scope;
 
@@ -1691,7 +1648,7 @@ TEST(Reductions, ReductionSplitCacheConsumerAccess) {
   LoopNest l({e}, {c, d, e});
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For* inner;
+  ForPtr inner;
 
   // Split outer reduction axis.
   LoopNest::splitWithMask(l.getLoopStmtsFor(d)[0], 4, &inner);
@@ -1702,15 +1659,15 @@ TEST(Reductions, ReductionSplitCacheConsumerAccess) {
   l.cacheAccesses(d->buf(), "sum_local", inner);
   l.prepareForCodegen();
 
-  Stmt* result = IRSimplifier::simplify(l.root_stmt());
+  StmtPtr result = IRSimplifier::simplify(l.root_stmt());
 
   // reduction changes but cache does not.
   std::ostringstream oss;
   oss << *result;
   const std::string& expected_ir =
       R"IR(
-#CHECK: sum[l1_inner + 4 * l1_outer] = (sum[l1_inner + 4 * l1_outer]) + (scale[((12 * n1_1 + 384 * l1_inner) + m1_1) + 1536 * l1_outer]);
 #CHECK: Allocate(sum_local); // dtype=float, dims=[4]
+#CHECK: sum[l1_inner + 4 * l1_outer] = (sum[l1_inner + 4 * l1_outer]) + (scale[((m1_1 + 12 * n1_1) + 1536 * l1_outer) + 384 * l1_inner]);
 #CHECK: for (int i = 0; i < 4
 #CHECK:   sum_local[i] = sum[i + 4 * l_outer];
 #CHECK:   scale_1[l_inner + 4 * l_outer] = (b[l_inner + 4 * l_outer]) * (sum_local[l_inner]);
@@ -1718,7 +1675,6 @@ TEST(Reductions, ReductionSplitCacheConsumerAccess) {
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReductionReorderCacheConsumerAccess) {
   KernelScope kernel_scope;
 
@@ -1740,7 +1696,7 @@ TEST(Reductions, ReductionReorderCacheConsumerAccess) {
   LoopNest l({e}, {c, d, e});
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For* inner;
+  ForPtr inner;
 
   // reorder outer reduction axes.
   auto loops = l.getLoopStmtsFor(d);
@@ -1752,15 +1708,15 @@ TEST(Reductions, ReductionReorderCacheConsumerAccess) {
   l.cacheAccesses(d->buf(), "sum_local", inner);
   l.prepareForCodegen();
 
-  Stmt* result = IRSimplifier::simplify(l.root_stmt());
+  StmtPtr result = IRSimplifier::simplify(l.root_stmt());
 
   // neither reduction body not cache changes.
   std::ostringstream oss;
   oss << *result;
   const std::string& expected_ir =
       R"IR(
-#CHECK: sum[l1] = (sum[l1]) + (scale[(12 * n1_1 + m1_1) + 384 * l1]);
 #CHECK: Allocate(sum_local); // dtype=float, dims=[4]
+#CHECK: sum[l1] = (sum[l1]) + (scale[(m1_1 + 12 * n1_1) + 384 * l1]);
 #CHECK: for (int i = 0; i < 4
 #CHECK:   sum_local[i] = sum[i + 4 * l_outer];
 #CHECK: scale_1[l_inner + 4 * l_outer] = (b[l_inner + 4 * l_outer]) * (sum_local[l_inner]);
@@ -1768,7 +1724,6 @@ TEST(Reductions, ReductionReorderCacheConsumerAccess) {
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReductionRfactorCacheTempOuter) {
   KernelScope kernel_scope;
 
@@ -1790,13 +1745,12 @@ TEST(Reductions, ReductionRfactorCacheTempOuter) {
   Tensor* c = Reduce("sum", {}, Sum(), b, {{m, "a"}, {n, "b"}, {k, "c"}});
   LoopNest loop({c});
 
-  std::vector<For*> loops = loop.getLoopStmtsFor(c);
+  std::vector<ForPtr> loops = loop.getLoopStmtsFor(c);
   LoopNest::reorderAxis(loops.at(0), loops.at(1));
   loops = loop.getLoopStmtsFor(c);
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-  auto c_body = const_cast<Stmt*>(loop.getAllWritesToBuf(c->buf())[1]);
+  auto c_body = loop.getAllWritesToBuf(c->buf())[1];
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  Buf* rfac_buf;
+  BufPtr rfac_buf;
   ASSERT_TRUE(loop.rfactor(c_body, loops.at(0), &rfac_buf));
   loop.distributeLoop(loops.at(0));
 
@@ -1808,15 +1762,15 @@ TEST(Reductions, ReductionRfactorCacheTempOuter) {
   LoopNest::cacheAccesses(rfac_buf, "tmp", all_loops[1][1]);
   loop.simplify();
   loop.prepareForCodegen();
-  Stmt* s = loop.root_stmt();
+  StmtPtr s = loop.root_stmt();
 
   std::ostringstream oss;
   oss << *s;
   const std::string& expected_ir =
       R"IR(
 #CHECK: Allocate(sum_rfac); // dtype=float, dims=[n]
+#CHECK: Allocate(tmp); // dtype=float, dims=[n]
 #CHECK: for (int a = 0; a < m
-#CHECK:   Allocate(tmp); // dtype=float, dims=[n]
 #CHECK:   for (int i = 0; i < n
 #CHECK:     tmp[i] = 0
 #CHECK:   }
@@ -1839,7 +1793,6 @@ TEST(Reductions, ReductionRfactorCacheTempOuter) {
   ASSERT_EQ(out[0], 499500);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReductionRfactorCacheTempInner) {
   KernelScope kernel_scope;
 
@@ -1860,14 +1813,13 @@ TEST(Reductions, ReductionRfactorCacheTempInner) {
 
   Tensor* c = Reduce("sum", {}, Sum(), b, {{m, "a"}, {n, "b"}, {k, "c"}});
   LoopNest loop({c});
-  std::vector<For*> loops = loop.getLoopStmtsFor(c);
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-  auto c_body = const_cast<Stmt*>(loop.getAllWritesToBuf(c->buf())[1]);
+  std::vector<ForPtr> loops = loop.getLoopStmtsFor(c);
+  auto c_body = loop.getAllWritesToBuf(c->buf())[1];
 
   LoopNest::reorderAxis(loops.at(0), loops.at(1));
   loops = loop.getLoopStmtsFor(c);
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  Buf* rfac_buf;
+  BufPtr rfac_buf;
   ASSERT_TRUE(loop.rfactor(c_body, loops.at(0), &rfac_buf));
   loop.distributeLoop(loops.at(0));
   auto all_loops = loop.getAllLoopNestsWritingToBuf(rfac_buf);
@@ -1879,16 +1831,16 @@ TEST(Reductions, ReductionRfactorCacheTempInner) {
   LoopNest::cacheAccesses(rfac_buf, "tmp", all_loops[1][2]);
   loop.prepareForCodegen();
   loop.simplify();
-  Stmt* s = loop.root_stmt();
+  StmtPtr s = loop.root_stmt();
 
   std::ostringstream oss;
   oss << *s;
   const std::string& expected_ir =
       R"IR(
 #CHECK: Allocate(sum_rfac); // dtype=float, dims=[n]
+#CHECK: Allocate(tmp); // dtype=float, dims=[1]
 #CHECK: for (int a = 0; a < m
 #CHECK:   for (int b = 0; b < n
-#CHECK:     Allocate(tmp); // dtype=float, dims=[1]
 #CHECK:     tmp[0] = 0
 #CHECK:     for (int c
 #CHECK:       tmp[0] = (tmp[0]) + (B[
@@ -1905,7 +1857,6 @@ TEST(Reductions, ReductionRfactorCacheTempInner) {
   ASSERT_EQ(out[0], 499500);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReductionVectorize) {
   KernelScope kernel_scope;
 
@@ -1929,7 +1880,7 @@ TEST(Reductions, ReductionVectorize) {
 
   ASSERT_TRUE(LoopNest::vectorize(l.getLoopStmtsFor(tensor)[0]));
 
-  Stmt* s = l.root_stmt();
+  StmtPtr s = l.root_stmt();
   s = IRSimplifier::simplify(s);
 
   std::ostringstream oss;
@@ -1953,7 +1904,6 @@ TEST(Reductions, ReductionVectorize) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReductionVectorizeInner) {
   KernelScope kernel_scope;
 
@@ -1965,7 +1915,6 @@ TEST(Reductions, ReductionVectorizeInner) {
   ASSERT_FALSE(LoopNest::vectorize(l.getLoopStmtsFor(tensor)[1]));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReductionVectorizeRfactor) {
   KernelScope kernel_scope;
 
@@ -1992,12 +1941,11 @@ TEST(Reductions, ReductionVectorizeRfactor) {
 
   // But if we rfactor this so it's not a reduce axis we can vectorize that
   // loop.
-  std::vector<For*> loops = l.getLoopStmtsFor(tensor);
+  std::vector<ForPtr> loops = l.getLoopStmtsFor(tensor);
   LoopNest::reorderAxis(loops[0], loops[1]);
   loops = l.getLoopStmtsFor(tensor);
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-  auto tensor_body = const_cast<Stmt*>(l.getAllWritesToBuf(tensor->buf())[1]);
-  Buf* rfac_buf = nullptr;
+  auto tensor_body = l.getAllWritesToBuf(tensor->buf())[1];
+  BufPtr rfac_buf = nullptr;
   ASSERT_TRUE(LoopNest::rfactor(tensor_body, loops.at(0), &rfac_buf));
 
   LoopNest::distributeLoop(loops.at(0));
@@ -2006,7 +1954,7 @@ TEST(Reductions, ReductionVectorizeRfactor) {
   ASSERT_TRUE(LoopNest::vectorize(rfac_loops[1][0]));
   l.simplify();
 
-  Stmt* s = l.root_stmt();
+  StmtPtr s = l.root_stmt();
 
   std::ostringstream oss;
   oss << *s;
@@ -2034,7 +1982,6 @@ TEST(Reductions, ReductionVectorizeRfactor) {
   ASSERT_EQ(out_before[0], out_after[0]);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, InitFunction) {
   KernelScope ks;
   constexpr int M = 32;
@@ -2050,7 +1997,7 @@ TEST(Reductions, InitFunction) {
       {{M, "m"}});
   LoopNest nest({C});
   nest.prepareForCodegen();
-  Stmt* s = IRSimplifier::simplify(nest.root_stmt());
+  StmtPtr s = IRSimplifier::simplify(nest.root_stmt());
   std::ostringstream oss;
   oss << *s << "\n";
   const std::string& expected_ir =

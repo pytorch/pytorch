@@ -10,7 +10,7 @@ namespace at {
 namespace native {
 namespace {
 
-static void addcmul_cpu_kernel(TensorIterator& iter, const Scalar& value) {
+static void addcmul_cpu_kernel(TensorIteratorBase& iter, const Scalar& value) {
   ScalarType dtype = iter.dtype(0);
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX(dtype, "addcmul_cpu_out", [&] {
     scalar_t scalar_val = value.to<scalar_t>();
@@ -28,7 +28,7 @@ static void addcmul_cpu_kernel(TensorIterator& iter, const Scalar& value) {
   });
 }
 
-static void addcdiv_cpu_kernel(TensorIterator& iter, const Scalar& value) {
+static void addcdiv_cpu_kernel(TensorIteratorBase& iter, const Scalar& value) {
   ScalarType dtype = iter.dtype(0);
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX(dtype, "addcdiv_cpu_out", [&] {
     scalar_t scalar_val = value.to<scalar_t>();
@@ -143,15 +143,10 @@ static void mse_backward_cpu_kernel(TensorIterator& iter, const Scalar& value) {
 
 } // anonymous namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(addcmul_stub, &addcmul_cpu_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(addcdiv_stub, &addcdiv_cpu_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(smooth_l1_backward_stub, &smooth_l1_backward_cpu_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(huber_backward_stub, &huber_backward_cpu_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(mse_backward_stub, &mse_backward_cpu_kernel);
 
 } // namespace native

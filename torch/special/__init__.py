@@ -1,8 +1,11 @@
-import sys
-
 import torch
 from torch._C import _add_docstr, _special  # type: ignore[attr-defined]
 from torch._torch_docs import common_args, multi_dim_common
+
+__all__ = ['entr', 'psi', 'digamma', 'gammaln', 'polygamma', 'erf', 'erfc', 'erfinv',
+           'erfcx', 'logit', 'logsumexp', 'expit', 'exp2', 'expm1', 'xlog1py', 'xlogy',
+           'i0', 'i0e', 'i1', 'i1e', 'ndtr', 'ndtri', 'log1p', 'sinc', 'round', 'log_softmax',
+           'zeta', 'multigammaln']
 
 Tensor = torch.Tensor
 
@@ -91,6 +94,38 @@ Example::
     >>> torch.special.gammaln(a)
     tensor([ 0.5724,  0.0000, -0.1208])
 
+""".format(**common_args))
+
+polygamma = _add_docstr(_special.special_polygamma,
+                        r"""
+polygamma(n, input, *, out=None) -> Tensor
+
+Computes the :math:`n^{th}` derivative of the digamma function on :attr:`input`.
+:math:`n \geq 0` is called the order of the polygamma function.
+
+.. math::
+    \psi^{(n)}(x) = \frac{d^{(n)}}{dx^{(n)}} \psi(x)
+
+.. note::
+    This function is implemented only for nonnegative integers :math:`n \geq 0`.
+""" + """
+Args:
+    n (int): the order of the polygamma function
+    {input}
+
+Keyword args:
+    {out}
+
+Example::
+    >>> a = torch.tensor([1, 0.5])
+    >>> torch.special.polygamma(1, a)
+    tensor([1.64493, 4.9348])
+    >>> torch.special.polygamma(2, a)
+    tensor([ -2.4041, -16.8288])
+    >>> torch.special.polygamma(3, a)
+    tensor([ 6.4939, 97.4091])
+    >>> torch.special.polygamma(4, a)
+    tensor([ -24.8863, -771.4742])
 """.format(**common_args))
 
 erf = _add_docstr(_special.special_erf,
@@ -338,6 +373,48 @@ Example::
     tensor([2.7726, 2.1972, 1.3863])
 """.format(**common_args))
 
+xlogy = _add_docstr(_special.special_xlogy,
+                    r"""
+xlogy(input, other, *, out=None) -> Tensor
+
+Computes ``input * log(other)`` with the following cases.
+
+.. math::
+    \text{out}_{i} = \begin{cases}
+        \text{NaN} & \text{if } \text{other}_{i} = \text{NaN} \\
+        0 & \text{if } \text{input}_{i} = 0.0 \\
+        \text{input}_{i} * \log{(\text{other}_{i})} & \text{otherwise}
+    \end{cases}
+
+Similar to SciPy's `scipy.special.xlogy`.
+
+""" + r"""
+
+Args:
+    input (Number or Tensor) : Multiplier
+    other (Number or Tensor) : Argument
+
+.. note:: At least one of :attr:`input` or :attr:`other` must be a tensor.
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> x = torch.zeros(5,)
+    >>> y = torch.tensor([-1, 0, 1, float('inf'), float('nan')])
+    >>> torch.special.xlogy(x, y)
+    tensor([0., 0., 0., 0., nan])
+    >>> x = torch.tensor([1, 2, 3])
+    >>> y = torch.tensor([3, 2, 1])
+    >>> torch.special.xlogy(x, y)
+    tensor([1.0986, 1.3863, 0.0000])
+    >>> torch.special.xlogy(x, 4)
+    tensor([1.3863, 2.7726, 4.1589])
+    >>> torch.special.xlogy(2, y)
+    tensor([2.1972, 1.3863, 0.0000])
+""".format(**common_args))
+
 i0 = _add_docstr(_special.special_i0,
                  r"""
 i0(input, *, out=None) -> Tensor
@@ -512,6 +589,33 @@ round(input, *, out=None) -> Tensor
 Alias for :func:`torch.round`.
 """)
 
+log_softmax = _add_docstr(_special.special_log_softmax,
+                          r"""
+log_softmax(input, dim, *, dtype=None) -> Tensor
+Computes softmax followed by a logarithm.
+
+While mathematically equivalent to log(softmax(x)), doing these two
+operations separately is slower and numerically unstable. This function
+is computed as:
+
+.. math::
+    \text{log\_softmax}(x_{i}) = \log\left(\frac{\exp(x_i) }{ \sum_j \exp(x_j)} \right)
+""" + r"""
+
+Args:
+    input (Tensor): input
+    dim (int): A dimension along which log_softmax will be computed.
+    dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
+        If specified, the input tensor is cast to :attr:`dtype` before the operation
+        is performed. This is useful for preventing data type overflows. Default: None.
+
+Example::
+    >>> t = torch.ones(2, 2)
+    >>> torch.special.log_softmax(t, 0)
+    tensor([[-0.6931, -0.6931],
+            [-0.6931, -0.6931]])
+""")
+
 zeta = _add_docstr(_special.special_zeta,
                    r"""
 zeta(input, other, *, out=None) -> Tensor
@@ -540,4 +644,38 @@ Example::
     tensor([1.6449, 0.0823])
     >>> torch.special.zeta(2, torch.tensor([1., 2.]))
     tensor([1.6449, 0.6449])
+""".format(**common_args))
+
+multigammaln = _add_docstr(_special.special_multigammaln,
+                           r"""
+multigammaln(input, p, *, out=None) -> Tensor
+
+Computes the `multivariate log-gamma function
+<https://en.wikipedia.org/wiki/Multivariate_gamma_function>`_ with dimension
+:math:`p` element-wise, given by
+
+.. math::
+    \log(\Gamma_{p}(a)) = C + \displaystyle \sum_{i=1}^{p} \log\left(\Gamma\left(a - \frac{i - 1}{2}\right)\right)
+
+where :math:`C = \log(\pi) \times \frac{p (p - 1)}{4}` and :math:`\Gamma(\cdot)` is the Gamma function.
+
+All elements must be greater than :math:`\frac{p - 1}{2}`, otherwise an error would be thrown.
+""" + """
+
+Args:
+    input (Tensor): the tensor to compute the multivariate log-gamma function
+    p (int): the number of dimensions
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> a = torch.empty(2, 3).uniform_(1, 2)
+    >>> a
+    tensor([[1.6835, 1.8474, 1.1929],
+            [1.0475, 1.7162, 1.4180]])
+    >>> torch.special.multigammaln(a, 2)
+    tensor([[0.3928, 0.4007, 0.7586],
+            [1.0311, 0.3901, 0.5049]])
 """.format(**common_args))

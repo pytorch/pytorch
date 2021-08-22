@@ -1,5 +1,7 @@
-#include <c10d/default_comm_hooks.hpp>
 #include <c10d/reducer.hpp>
+
+#include <c10d/Utils.hpp>
+#include <c10d/default_comm_hooks.hpp>
 
 #include <functional>
 
@@ -21,9 +23,6 @@
 namespace c10d {
 namespace {
 
-inline int64_t current_time_in_nanos() {
-  return torch::autograd::profiler::getTime();
-}
 
 constexpr int kUnsetDivFactor = -1;
 
@@ -38,50 +37,22 @@ constexpr int kUnsetDivFactor = -1;
 
 } // namespace
 
-C10_DEFINE_TYPED_REGISTRY(TimerRegistry, c10::DeviceType, Timer, std::unique_ptr, c10::Device);
+C10_DEFINE_TYPED_REGISTRY( // NOLINT
+    TimerRegistry,
+    c10::DeviceType,
+    Timer,
+    std::unique_ptr,
+    c10::Device);
 
 namespace {
 
 class CpuTimer : public Timer {
- private:
-  // The timestamp of forward call start time in each iteration.
-  int64_t forward_start_time = -1;
-  // The timestamp of backward computation start and end time in each
-  // iteration.
-  int64_t backward_compute_start_time = -1;
-  int64_t backward_compute_end_time = -1;
-  // The timestamp of first communication call start time in each iteration.
-  int64_t backward_comm_start_time = -1;
-  // The timestamp of last communication call end time in each iteration.
-  int64_t backward_comm_end_time = -1;
-
-  int64_t& getTime(Event event) {
-    switch (event) {
-      case Event::kForwardStart:
-        return forward_start_time;
-      case Event::kBackwardComputeStart:
-        return backward_compute_start_time;
-      case Event::kBackwardComputeEnd:
-        return backward_compute_end_time;
-      case Event::kBackwardCommStart:
-        return backward_comm_start_time;
-      case Event::kBackwardCommEnd:
-        return backward_comm_end_time;
-      default:
-        TORCH_INTERNAL_ASSERT(false);
-    }
-  }
-
  public:
   explicit CpuTimer(c10::Device /* unused */) {}
 
-  void record(Event event) override {
-    getTime(event) = current_time_in_nanos();
-  }
-
   c10::optional<int64_t> measureDifference(Event start, Event end) override {
-    int64_t start_time = getTime(start);
-    int64_t end_time = getTime(end);
+    int64_t start_time = getTimeRef(start);
+    int64_t end_time = getTimeRef(end);
     // If cpu_end_time is not recorded in this iteration,
     // avg_time will return invalid value.
     // For some cases like DDP runs on non-sync mode, backward compute
@@ -102,12 +73,14 @@ C10_REGISTER_TYPED_CLASS(TimerRegistry, c10::kCPU, CpuTimer);
 Reducer::Reducer(
     std::vector<std::vector<at::Tensor>> replicas,
     std::vector<std::vector<size_t>> bucket_indices,
+    std::vector<size_t> per_bucket_size_limits,
     c10::intrusive_ptr<c10d::ProcessGroup> process_group,
     std::vector<std::vector<bool>> expect_sparse_gradients,
     int64_t bucket_bytes_cap,
     bool find_unused_parameters,
     bool gradient_as_bucket_view,
-    std::unordered_map<size_t, std::string> paramNames)
+    std::unordered_map<size_t, std::string> paramNames,
+    int64_t first_bucket_bytes_cap)
     : replicas_(std::move(replicas)),
       process_group_(std::move(process_group)),
       expect_sparse_gradients_(std::move(expect_sparse_gradients)),
@@ -119,22 +92,26 @@ Reducer::Reducer(
       gradient_as_bucket_view_(gradient_as_bucket_view),
       local_used_maps_reduced_(false),
       num_iterations_(0),
-      num_backward_calls_(0),
       num_buckets_ready_(0),
       has_rebuilt_bucket_(false),
       bucket_bytes_cap_(bucket_bytes_cap),
       div_factor_(kUnsetDivFactor),
       static_graph_(false),
       comm_hook_(nullptr),
-      thread_local_state_(at::ThreadLocalState()),
       ddp_debug_level_(parseDistDebugLevel()),
-      param_names_(std::move(paramNames)) {
+      param_names_(std::move(paramNames)),
+      first_bucket_bytes_cap_(first_bucket_bytes_cap) {
   C10_LOG_API_USAGE_ONCE("torch.distributed.ddp.reducer");
   TORCH_INTERNAL_ASSERT(
       replicas_.size() == 1, "Expected exactly one model replica.");
   TORCH_INTERNAL_ASSERT(
       replicas_[0].size() >= 1, "Expected at least one parameter.");
 
+  if (ddp_debug_level_ != c10d::DistributedDebugLevel::OFF) {
+    LOG(INFO) << "Reducer initialized with bucket_bytes_cap: "
+              << bucket_bytes_cap_
+              << " first_bucket_bytes_cap: " << first_bucket_bytes_cap;
+  }
   // Check whether the module is multi_device_module
   {
     std::set<int> unique_devices;
@@ -168,7 +145,8 @@ Reducer::Reducer(
   // This can be reinitialized later after capturing runtime information.
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    initialize_buckets(std::move(bucket_indices));
+    initialize_buckets(
+        std::move(bucket_indices), std::move(per_bucket_size_limits));
   }
 
   // All variables are expected to have their `grad_fn` set to the gradient
@@ -300,12 +278,17 @@ bool Reducer::dynamic_graph_find_unused() {
   return !static_graph_ && find_unused_parameters_;
 }
 
-bool Reducer::static_graph_first_bwd() {
-  return static_graph_ && num_backward_calls_ == 1;
+bool Reducer::static_graph_first_iteration() {
+  return static_graph_ && num_iterations_ == 1;
 }
 
-bool Reducer::static_graph_after_first_bwd() {
-  return static_graph_ && num_backward_calls_ > 1;
+bool Reducer::static_graph_after_first_iteration() {
+  return static_graph_ && num_iterations_ > 1;
+}
+
+bool Reducer::ddp_graph_static() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return ddp_graph_static_;
 }
 
 void Reducer::initialize_local_used_map() {
@@ -392,8 +375,10 @@ void Reducer::mark_variable_ready_dense(size_t variable_index) {
       // previous iterations, no copy is needed.
       if (!grad.is_alias_of(bucket_view)) {
         if (comm_hook_ == nullptr) {
-          auto wrapped = at::native::wrapped_scalar_tensor(double(1.) / div_factor_);
-          // Divides while copying into the bucket view to save one scan over all the input parameters.
+          auto wrapped =
+              at::native::wrapped_scalar_tensor(double(1.) / div_factor_);
+          // Divides while copying into the bucket view to save one scan over
+          // all the input parameters.
           at::mul_out(bucket_view, grad, wrapped);
         } else {
           bucket_view.copy_(grad);
@@ -415,7 +400,8 @@ void Reducer::mark_variable_ready_dense(size_t variable_index) {
       // Gradient is undefined. When find_unused_parameters=True, ensure it is
       // not marked as locally used, otherwise we will be allreducing zero's
       // instead of not touching .grad field of parameter.
-      if (this->dynamic_graph_find_unused() || this->static_graph_first_bwd()) {
+      if (this->dynamic_graph_find_unused() ||
+          this->static_graph_first_iteration()) {
         REDUCER_CHECK(
             local_used_maps_[0][variable_index].item<int>() == 0,
             logger_,
@@ -449,6 +435,12 @@ void Reducer::mark_variable_ready_sparse(size_t variable_index) {
     // struct are empty, and there is no pre-existing accumulation tensor.
     // Directly assign the sparse tensor to the `contents` field.
     replica.contents = grad;
+    // If no DDP comm hook is registered,
+    // the allreduce only sums up the value, and a separate division is
+    // required.
+    if (comm_hook_ == nullptr) {
+      replica.contents.div_(div_factor_);
+    }
     // The grad is modified in place and needs to be written back.
     return true;
   });
@@ -459,15 +451,17 @@ std::vector<c10d::GradBucket> Reducer::get_grad_buckets(
   std::lock_guard<std::mutex> lock(mutex_);
   std::vector<c10d::GradBucket> gradBuckets;
   gradBuckets.reserve(buckets_.size());
-  for (size_t i = 0; i < buckets_.size(); ++i) {
+  for (const auto i : c10::irange(buckets_.size())) {
+    auto& bucket = buckets_[i];
+    auto variables_for_bucket = get_variables_for_bucket(i, bucket);
     gradBuckets.emplace_back(
-      i,
-      return_zero_tensors ? at::zeros_like(buckets_[i].replicas[0].contents)
-                            : buckets_[i].replicas[0].contents,
-      buckets_[i].replicas[0].offsets,
-      buckets_[i].replicas[0].lengths,
-      buckets_[i].replicas[0].sizes_vec
-    );
+        i,
+        return_zero_tensors ? at::zeros_like(bucket.replicas[0].contents)
+                            : bucket.replicas[0].contents,
+        bucket.replicas[0].offsets,
+        bucket.replicas[0].lengths,
+        bucket.replicas[0].sizes_vec,
+        variables_for_bucket);
   }
   return gradBuckets;
 }
@@ -498,15 +492,6 @@ void Reducer::push_rebuilt_params_for_all_indices() {
 }
 
 void Reducer::push_rebuilt_params(const size_t& index) {
-  // NOTE: We don't check this in should_rebuild_bucket because that controls
-  // whether we should push rebuilt params and whether to actually kick off
-  // process to rebuild buckets, if we check this in should_rebuild_buckets then
-  // the latter would break.
-  if (all_rebuilt_params_pushed_) {
-    // We only enter here in the case we are calling multiple backwards with
-    // retain_graph=True in the iteration before rebuilding buckets.
-    return;
-  }
   rebuilt_params_.push_back(replicas_[0][index]);
   rebuilt_param_indices_.push_back(index);
 }
@@ -580,15 +565,6 @@ void Reducer::set_logger(std::weak_ptr<c10d::Logger> logger) {
 // This function is only to be called from the autograd thread.
 void Reducer::autograd_hook(size_t index) {
   std::lock_guard<std::mutex> lock(this->mutex_);
-  // Local modules can also fire autograd hooks if user directly invokes
-  // backward on local module. In this case, don't run autograd hooks.
-  if (!in_ddp_backwards_) {
-    return;
-  }
-  // Carry over thread local state from main thread. This allows for
-  // thread-local flags such as profiler enabled to be configure correctly.
-  at::ThreadLocalStateGuard g(thread_local_state_);
-
   // Ignore if we don't expect to be called.
   // This may be the case if the user wants to accumulate gradients
   // for number of iterations before reducing them.
@@ -596,15 +572,18 @@ void Reducer::autograd_hook(size_t index) {
     return;
   }
 
+  grad_ready_order_indices_.push_back(index);
+
   // See Note [Skip allreducing local_used_maps_dev]
-  if (dynamic_graph_find_unused() || static_graph_first_bwd()) {
+  if (dynamic_graph_find_unused() || static_graph_first_iteration()) {
     // Since it gets here, this param has been used for this iteration. We want
     // to mark it in local_used_maps_. During no_sync session, the same var can
     // be set multiple times, which is OK as does not affect correctness. As
     // long as it is used once during no_sync session, it is marked as used.
-    // Only set it as locally used if the grad is defined. Otherwise, hooks
-    // could sometimes be triggered with undefined grads, and if this happens
-    // globally, we don't want to touch the .grad field of the param.
+    // Only set it as locally used if the grad is defined. Otherwise, hooks can
+    // be fired  with undefined grads, such as when not all outputs are used in
+    // DDP when computing loss. In this case, we don't want to mark it as
+    // locally used to ensure we don't touch the parameter's .grad field.
     auto& variable = get_param_from_index(index);
     runGradCallbackForVariable(variable, [&](auto& grad) {
       if (grad.defined()) {
@@ -615,7 +594,7 @@ void Reducer::autograd_hook(size_t index) {
     });
   }
 
-  if (static_graph_first_bwd()) {
+  if (static_graph_first_iteration()) {
     numGradHooksTriggeredMap_[index] += 1;
     return;
   }
@@ -642,7 +621,7 @@ void Reducer::autograd_hook(size_t index) {
   // will be broadcasted and initialized.
   // If it is static graph, after 1st iteration, check if a variable
   // is ready for communication based on numGradHooksTriggeredMap_.
-  if (static_graph_after_first_bwd()) {
+  if (static_graph_after_first_iteration()) {
     REDUCER_CHECK(
         numGradHooksTriggeredMapPerIteration_[index] > 0,
         logger_,
@@ -720,8 +699,9 @@ at::Tensor& Reducer::get_param_from_index(size_t index) {
   const auto& bucket_index = variable_locators_[index];
   auto& bucket = buckets_[bucket_index.bucket_index];
   auto& replica = bucket.replicas[0];
-  // Cannot simply access variable via replicas_[replica_index][variable_index]
-  // as the callback does not accept const tensors.
+  // Cannot simply access variable via replicas_[0][variable_index] since return
+  // value is used in runGradCallbackForVariable which does not accept const
+  // tensors.
   auto& variable = replica.variables[bucket_index.intra_bucket_index];
   return variable;
 }
@@ -853,7 +833,7 @@ void Reducer::mark_variable_ready(size_t variable_index) {
       }
       // Check that all buckets were completed and had their work kicked off.
       TORCH_INTERNAL_ASSERT(next_bucket_ == buckets_.size());
-      if (static_graph_after_first_bwd() && should_rebuild_buckets()) {
+      if (static_graph_after_first_iteration() && should_rebuild_buckets()) {
         for (const auto& unused_index : unused_parameters_) {
           push_rebuilt_params(unused_index);
         }
@@ -888,6 +868,8 @@ void Reducer::all_reduce_bucket(Bucket& bucket) {
     //
     tensors.push_back(replica.contents);
   }
+
+  auto variables_for_bucket = get_variables_for_bucket(next_bucket_, bucket);
   GradBucket grad_bucket(
       next_bucket_,
       tensors[0],
@@ -895,8 +877,42 @@ void Reducer::all_reduce_bucket(Bucket& bucket) {
       // mode, there is always only one replica in the bucket.
       bucket.replicas[0].offsets,
       bucket.replicas[0].lengths,
-      bucket.replicas[0].sizes_vec);
+      bucket.replicas[0].sizes_vec,
+      variables_for_bucket);
   bucket.future_work = run_comm_hook(grad_bucket);
+}
+
+std::vector<at::Tensor> Reducer::get_variables_for_bucket(
+    size_t bucket_index,
+    const Bucket& bucket) const {
+  // Check if we have cached mapping previously.
+  if (has_rebuilt_bucket_ &&
+      cached_variables_for_bucket_.find(bucket_index) !=
+          cached_variables_for_bucket_.end()) {
+    return cached_variables_for_bucket_[bucket_index];
+  }
+  std::vector<at::Tensor> variables_for_bucket;
+  variables_for_bucket.reserve(bucket.variable_indices.size());
+  for (const auto& variable_index : bucket.variable_indices) {
+    auto& replica = bucket.replicas[0];
+    // Grab bucket index where gradient is located using variable_locators_.
+    auto& bucket_index_for_variable = variable_locators_[variable_index];
+    // Grab the actual model parameter.
+    auto& variable =
+        replica.variables[bucket_index_for_variable.intra_bucket_index];
+    variables_for_bucket.emplace_back(variable);
+  }
+
+  if (has_rebuilt_bucket_) {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+        cached_variables_for_bucket_.find(bucket_index) ==
+        cached_variables_for_bucket_.end());
+    cached_variables_for_bucket_.insert(
+        {bucket_index, std::move(variables_for_bucket)});
+    return cached_variables_for_bucket_[bucket_index];
+  } else {
+    return variables_for_bucket;
+  }
 }
 
 // Called when the bucket at the specified index is ready to be reduced.
@@ -924,7 +940,8 @@ void Reducer::mark_bucket_ready(size_t bucket_index) {
 }
 
 void Reducer::initialize_buckets(
-    std::vector<std::vector<size_t>> bucket_indices) {
+    std::vector<std::vector<size_t>> bucket_indices,
+    std::vector<size_t> per_bucket_sizes) {
   // If initialize_buckets is called inside DDP constructor, then
   // it does not matter rpc context ptr is nullptr or not, as grad
   // will not be mutated.
@@ -938,11 +955,9 @@ void Reducer::initialize_buckets(
   this->rpc_context_.set(ThreadLocalDistAutogradContext::getContextPtr());
 #endif
 
-  // Note that we check !require_finalize instead of !expect_autograd_hooks
-  // since the latter is set in forward pass, and the former indicates
-  // at least one gradient hook has fired and we are in autograd execution.
+  // This shouldn't be called if we're expecting autograd hooks to fire.
   REDUCER_CHECK(
-      !require_finalize_,
+      !expect_autograd_hooks_,
       logger_,
       "`initialize_buckets` must NOT be called during autograd execution.");
 
@@ -957,8 +972,10 @@ void Reducer::initialize_buckets(
   const auto bucket_count = bucket_indices.size();
   const auto replica_count = replicas_.size();
   buckets_.reserve(bucket_count);
+  TORCH_INTERNAL_ASSERT(bucket_count == per_bucket_sizes.size());
   for (const auto bucket_index : c10::irange(bucket_count)) {
     Bucket bucket;
+    bucket.bucket_size_limit = per_bucket_sizes[bucket_index];
 
     // TODO(@pietern): Validate indices.
     // Must be non-empty, unique, and unique across buckets.
@@ -982,7 +999,6 @@ void Reducer::initialize_buckets(
       }
     }
 
-    // Iterate over model replicas.
     BucketReplica replica;
     size_t replica_index = 0;
     if (bucket.expect_sparse_gradient) {
@@ -1095,10 +1111,6 @@ void Reducer::initialize_buckets(
 
     buckets_.push_back(std::move(bucket));
   }
-  // Need to reset bucket.pending and variable.pending as buckets have been
-  // re-initialized and they must be appropriately set before the next backward
-  // pass.
-  reset_bucket_counting();
 }
 
 // (see Note:  "Gradient Layout Contract" in initialize_buckets).
@@ -1176,27 +1188,12 @@ void Reducer::populate_bucket_views_out(
   }
 }
 
-void Reducer::prepare_for_forward(bool will_run_grad_reduction) {
+void Reducer::prepare_for_forward() {
   std::lock_guard<std::mutex> lock(mutex_);
-  expect_autograd_hooks_ = will_run_grad_reduction;
-  // To maintain compatibility with current version, where prepare_for_forward
-  // is not called if will_run_grad_reduction is False.
-  if (!expect_autograd_hooks_) {
-    return;
-  }
   num_iterations_++;
   if (should_collect_runtime_stats()) {
     record_forward_compute_start_time();
   }
-}
-
-void Reducer::reset_variable_counting() {
-  // Reset unused parameter accounting.
-  has_marked_unused_parameters_ = false;
-  // Reset per iteration marked ready parameters.
-  perIterationReadyParams_.clear();
-  // Reset bucket counting.
-  reset_bucket_counting();
 }
 
 void Reducer::reset_bucket_counting() {
@@ -1259,6 +1256,18 @@ void Reducer::search_unused_parameters(
     // If the accumulator function is present in the graph, we know
     // a gradient will be computed for the corresponding parameter.
     if (seen.count(it.first) == 0) {
+      if (ddp_debug_level_ == c10d::DistributedDebugLevel::DETAIL) {
+        const auto param_info = param_names_.find(it.second);
+        TORCH_INTERNAL_ASSERT(
+            param_info != param_names_.end(),
+            "Did not find variable index ",
+            it.second,
+            " in DDP parameter name mapping!");
+        const auto param_name = param_info->second;
+        LOG(INFO) << "[Rank " << process_group_->getRank() << "]: "
+                  << "Parameter " << param_name << " at index " << it.second
+                  << " is marked as unused.";
+      }
       unused_parameters_.push_back(it.second);
     }
   }
@@ -1275,17 +1284,36 @@ void Reducer::search_unused_parameters(
         "flag off. Note that this warning may be a false positive if your model "
         "has flow control causing later iterations to have unused parameters.");
   }
+  if (!static_graph_ && ddp_graph_static_) {
+    if (num_iterations_ > 1) {
+      // Graph is still static if the set of unused parameters did not change.
+      ddp_graph_static_ =
+          prev_iteration_unused_parameters_ == unused_parameters_;
+    }
+    prev_iteration_unused_parameters_ = unused_parameters_;
+  }
 }
 
 void Reducer::prepare_for_backward(
     const std::vector<torch::autograd::Variable>& outputs) {
   std::lock_guard<std::mutex> lock(mutex_);
-  in_ddp_backwards_ = true;
-  ++num_backward_calls_;
+
   backward_compute_start_time_ = current_time_in_nanos();
   if (should_collect_runtime_stats()) {
     record_backward_compute_start_time();
   }
+
+  // Reset accounting.
+  expect_autograd_hooks_ = true;
+  // Clear gradient ready order as it can be different in the next iteration.
+  grad_ready_order_indices_.clear();
+
+  reset_bucket_counting();
+
+  // Reset unused parameter accounting.
+  has_marked_unused_parameters_ = false;
+  // Reset per iteration marked ready parameters.
+  perIterationReadyParams_.clear();
 
   // If static graph is not set, search graph to detect unused parameters.
   // When static graph is set, unused_parameters_ will be detected and will
@@ -1437,23 +1465,14 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
   }
 }
 
-void Reducer::save_thread_local_state() {
-  std::lock_guard<std::mutex> guard(mutex_);
-  // Don't preserve grad_mode across thread boundaries, as we will be passing
-  // from forward pass to autograd engine hooks, and autograd engine takes care
-  // of grad mode.
-  thread_local_state_ = at::ThreadLocalState(/* keep_grad_mode */ false);
-}
-
 void Reducer::finalize_backward() {
-  // Note that we don't reset expect_autograd_hooks_ so that we can re-run
-  // backwards with retain_graph=True.
+  // No longer expect autograd hooks to fire after this function returns.
   TORCH_INTERNAL_ASSERT(expect_autograd_hooks_);
+  expect_autograd_hooks_ = false;
 
   // No longer require call to finalize after this function returns.
   TORCH_INTERNAL_ASSERT(require_finalize_);
   require_finalize_ = false;
-  in_ddp_backwards_ = false;
 
   // Wait for asynchronous reduction to complete and unflatten contents.
   for (auto& bucket : buckets_) {
@@ -1466,20 +1485,13 @@ void Reducer::finalize_backward() {
     auto future_result = comm_hook_ == nullptr
         ? detail::parseCppCommHookResult(bucket.future_work->value())
         : comm_hook_->parseHookResult(bucket.future_work->value());
-    for (const auto i : c10::irange(future_result.size())) {
-      auto& replica = bucket.replicas[i];
-      if (bucket.expect_sparse_gradient) {
-        // If no DDP comm hook is registered,
-        // the allreduce only sums up the value, and a separate division is required.
-        if (comm_hook_ == nullptr) {
-          future_result[i].div_(div_factor_);
-        }
-        replica.contents.copy_(future_result[i]);
-      } else {
-        // Reinitialize only `bucket_views_out` with the future_result by
-        // following the same logic in `initialize_buckets`.
-        populate_bucket_views_out(replica, future_result[i]);
-      }
+    auto& replica = bucket.replicas[0];
+    if (bucket.expect_sparse_gradient) {
+      replica.contents.copy_(future_result);
+    } else {
+      // Reinitialize only `bucket_views_out` with the future_result by
+      // following the same logic in `initialize_buckets`.
+      populate_bucket_views_out(replica, future_result);
     }
 
     // Unset allreduce division factor, as it may change in next backwards pass
@@ -1495,7 +1507,7 @@ void Reducer::finalize_backward() {
   }
 
   // See Note [Skip allreducing local_used_maps_dev]
-  if (dynamic_graph_find_unused() || static_graph_first_bwd()) {
+  if (dynamic_graph_find_unused() || static_graph_first_iteration()) {
     // Due to the lazy wait, it is possible that reduction of the current
     // iteration is still going when the one for next iteration gets kicked off.
     // For such case, we want to wait explicitly to make sure the reduction does
@@ -1515,15 +1527,6 @@ void Reducer::finalize_backward() {
     }
     local_used_maps_reduced_ = false;
   }
-
-  // Reset various accounting variables including bucket counting to ensure we
-  // can appropriately launch allreduce for each bucket in the next backwards.
-  reset_variable_counting();
-  // If we populated rebuilt params list in this backward call, avoid
-  // repopulating in subsequent backward calls. In particular this is needed to
-  // avoid re-pushing parameters when calling multiple backwards with
-  // retain_graph=True.
-  all_rebuilt_params_pushed_ = all_rebuilt_params_pushed_ || !rebuilt_params_.empty();
 
   if (should_collect_runtime_stats()) {
     record_backward_comm_end_time();
@@ -1661,13 +1664,43 @@ bool Reducer::rebuild_buckets() {
           rebuilt_param_indices_.size()));
   std::vector<std::vector<size_t>> rebuilt_bucket_indices;
   std::vector<size_t> bucket_size_limits;
-  bucket_size_limits.push_back(kDefaultFirstBucketBytes);
+  bucket_size_limits.push_back(first_bucket_bytes_cap_);
   bucket_size_limits.push_back(bucket_bytes_cap_);
-  rebuilt_bucket_indices = compute_bucket_assignment_by_size(
-      rebuilt_params_,
-      bucket_size_limits,
-      expect_sparse_gradients_[0],
-      rebuilt_param_indices_);
+  std::vector<size_t> per_bucket_size_limits;
+  auto ddp_set_last_bucket_as_small =
+      (parse_env("DDP_SET_LAST_BUCKET_CAP").compare("1") == 0);
+
+  if (ddp_set_last_bucket_as_small) {
+    // Reverse so that first_bucket_bytes_cap_ (smaller bucket) becomes the last
+    // bucket. We cannot simply pass in {bucket_bytes_cap_, first_bucket_bytes_cap}
+    // as the bucket order as we would immediately advance to the 2nd element
+    // after the first bucket, whereas we only want the last bucket to have
+    // a smaller size.
+    std::reverse(rebuilt_params_.begin(), rebuilt_params_.end());
+    std::reverse(rebuilt_param_indices_.begin(), rebuilt_param_indices_.end());
+  }
+  std::tie(rebuilt_bucket_indices, per_bucket_size_limits) =
+      compute_bucket_assignment_by_size(
+          rebuilt_params_,
+          bucket_size_limits,
+          expect_sparse_gradients_[0],
+          rebuilt_param_indices_);
+
+  if (ddp_set_last_bucket_as_small) {
+    // Reverse again because buckets were rebuilt in the opposite of gradient
+    // ready order.
+    std::reverse(rebuilt_bucket_indices.begin(), rebuilt_bucket_indices.end());
+    std::reverse(per_bucket_size_limits.begin(), per_bucket_size_limits.end());
+  }
+
+  if (ddp_debug_level_ != c10d::DistributedDebugLevel::OFF) {
+    TORCH_INTERNAL_ASSERT(
+        rebuilt_bucket_indices.size() == per_bucket_size_limits.size())
+    LOG(INFO) << rebuilt_bucket_indices.size()
+              << " buckets rebuilt with size limits: "
+              << c10::Join(", ", per_bucket_size_limits)
+              << " bytes.";
+  }
 
   // For rebuilt bucket indices, it needs to be synced across all ranks.
   // Broadcast the newly rebuilt bucket indices from rank 0 in default.
@@ -1678,7 +1711,9 @@ bool Reducer::rebuild_buckets() {
   rebuilt_params_.clear();
   rebuilt_param_indices_.clear();
 
-  initialize_buckets(std::move(rebuilt_bucket_indices));
+  initialize_buckets(
+      std::move(rebuilt_bucket_indices), std::move(per_bucket_size_limits));
+
   return true;
 }
 
@@ -1900,7 +1935,8 @@ inline bool operator==(const BucketKey& lhs, const BucketKey& rhs) {
 
 } // namespace
 
-std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
+std::tuple<std::vector<std::vector<size_t>>, std::vector<size_t>>
+compute_bucket_assignment_by_size(
     const std::vector<at::Tensor>& tensors,
     const std::vector<size_t>& bucket_size_limits,
     const std::vector<bool>& expect_sparse_gradient,
@@ -1911,8 +1947,13 @@ std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
       expect_sparse_gradient.empty() ||
       (tensors.size() == expect_sparse_gradient.size()));
   TORCH_INTERNAL_ASSERT(tensors.size() > 0);
-
-  std::vector<std::vector<size_t>> result;
+  // Store bucket indices and their sizes together, because we later sort the
+  // resulting indices by minimum tensor index and want to keep sizes
+  // consistent.
+  std::vector<std::tuple<std::vector<size_t>, size_t>> result;
+  // Sparse tensors go in their own bucket, so they do not have an enforced size
+  // limit.
+  size_t kNoSizeLimit = 0;
   result.reserve(tensors.size());
 
   // Keep iterator into the size_limit vector by tensor type and device.
@@ -1922,12 +1963,6 @@ std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
       std::vector<size_t>::const_iterator,
       c10::hash<BucketKey>>
       bucket_size_limit_iterators;
-
-  // Local accumulator type for a single bucket.
-  struct BucketAccumulator {
-    std::vector<size_t> indices;
-    size_t size = 0;
-  };
 
   // Keep vector of indices and size accumulator by tensor type and device.
   std::unordered_map<BucketKey, BucketAccumulator, c10::hash<BucketKey>>
@@ -1949,8 +1984,8 @@ std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
     // be grouped together with other gradients and gets its own bucket.
     if (!expect_sparse_gradient.empty() &&
         expect_sparse_gradient[tensor_index]) {
-      result.push_back({tensor_index});
-      continue;
+          result.emplace_back(std::vector<size_t>({tensor_index}), kNoSizeLimit);
+          continue;
     }
 
     auto key = BucketKey(tensor.scalar_type(), tensor.device());
@@ -1965,8 +2000,9 @@ std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
 
     auto& bucket_size_limit_iterator = bucket_size_limit_iterators[key];
     const auto bucket_size_limit = *bucket_size_limit_iterator;
+    bucket.size_limit = bucket_size_limit;
     if (bucket.size >= bucket_size_limit) {
-      result.emplace_back(std::move(bucket.indices));
+      result.emplace_back(std::move(bucket.indices), bucket.size_limit);
       bucket = BucketAccumulator();
 
       // Advance to the next bucket size limit for this type/device.
@@ -1981,7 +2017,7 @@ std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
   for (auto& it : buckets) {
     auto& bucket = it.second;
     if (!bucket.indices.empty()) {
-      result.emplace_back(std::move(bucket.indices));
+      result.emplace_back(std::move(bucket.indices), bucket.size_limit);
     }
   }
 
@@ -1996,14 +2032,29 @@ std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
     std::sort(
         result.begin(),
         result.end(),
-        [](const std::vector<size_t>& a, const std::vector<size_t>& b) {
-          const auto amin = std::min_element(a.begin(), a.end());
-          const auto bmin = std::min_element(b.begin(), b.end());
+        [](const std::tuple<std::vector<size_t>, size_t>& a,
+           const std::tuple<std::vector<size_t>, size_t>& b) {
+          auto indices_a = std::get<0>(a);
+          auto indices_b = std::get<0>(b);
+          const auto amin =
+              std::min_element(indices_a.begin(), indices_a.end());
+          const auto bmin =
+              std::min_element(indices_b.begin(), indices_b.end());
           return *amin < *bmin;
         });
   }
 
-  return result;
+  // Return bucket indices and size limits as separate entries in tuple, as some
+  // APIs only need to consume bucket indices.
+  std::vector<std::vector<size_t>> bucket_indices;
+  bucket_indices.reserve(result.size());
+  std::vector<size_t> per_bucket_size_limits;
+  per_bucket_size_limits.reserve(result.size());
+  for (const auto & bucket_indices_with_size : result) {
+    bucket_indices.emplace_back(std::get<0>(bucket_indices_with_size));
+    per_bucket_size_limits.emplace_back(std::get<1>(bucket_indices_with_size));
+  }
+  return std::make_tuple(bucket_indices, per_bucket_size_limits);
 }
 
 // Verifies corresponding params in replica 0 have the same sizes/strides

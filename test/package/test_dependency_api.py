@@ -337,5 +337,6 @@ class TestDependencyAPI(PackageTestCase):
         with self.assertRaises(NotImplementedError):
             foo2.package_a.get_something()
 
+
 if __name__ == "__main__":
     run_tests()
