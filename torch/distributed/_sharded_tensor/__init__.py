@@ -13,16 +13,15 @@ from .api import (
 )
 
 
-def empty(
-        sharding_spec: ShardingSpec,
-        *size,
-        dtype=None,
-        layout=torch.strided,
-        requires_grad=False,
-        pin_memory=False,
-        memory_format=torch.contiguous_format,
-        process_group=None,
-        init_rrefs=False):
+def empty(sharding_spec: ShardingSpec,
+          *size,
+          dtype=None,
+          layout=torch.strided,
+          requires_grad=False,
+          pin_memory=False,
+          memory_format=torch.contiguous_format,
+          process_group=None,
+          init_rrefs=False):
     """
     Creates an empty :class:`ShardedTensor`. Needs to be called on all ranks in an SPMD fashion.
 
@@ -65,16 +64,15 @@ def empty(
         init_rrefs=init_rrefs,
     )
 
-def ones(
-        sharding_spec: ShardingSpec,
-        *size,
-        dtype=None,
-        layout=torch.strided,
-        requires_grad=False,
-        pin_memory=False,
-        memory_format=torch.contiguous_format,
-        process_group=None,
-        init_rrefs=False):
+def ones(sharding_spec: ShardingSpec,
+         *size,
+         dtype=None,
+         layout=torch.strided,
+         requires_grad=False,
+         pin_memory=False,
+         memory_format=torch.contiguous_format,
+         process_group=None,
+         init_rrefs=False):
     """
     Creates a ones :class:`ShardedTensor`. Needs to be called on all ranks in an SPMD fashion.
 
@@ -115,11 +113,10 @@ def ones(
         init_rrefs=init_rrefs,
     )
 
-def init_from_local_shards(
-        local_shards: List[Shard],
-        sharded_tensor_metadata: ShardedTensorMetadata,
-        process_group=None,
-        init_rrefs=False):
+def init_from_local_shards(local_shards: List[Shard],
+                           sharded_tensor_metadata: ShardedTensorMetadata,
+                           process_group=None,
+                           init_rrefs=False):
     """
     Creates an :class:`ShardedTensor` from local shards and the global metadata.
     Needs to be called on all ranks in an SPMD fashion.

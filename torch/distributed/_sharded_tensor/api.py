@@ -82,12 +82,12 @@ class ShardedTensorMetadata(object):
     # Size of each dim of the overall Tensor.
     size: torch.Size = field(default=torch.Size([]))
 
-    tensor_properties: TensorProperties = field(default=
-        TensorProperties(dtype=torch.get_default_dtype(),
-                         layout=torch.strided,
-                         requires_grad=False,
-                         memory_format=torch.contiguous_format,
-                         pin_memory=False))
+    tensor_properties: TensorProperties = field(
+        default=TensorProperties(dtype=torch.get_default_dtype(),
+                                 layout=torch.strided,
+                                 requires_grad=False,
+                                 memory_format=torch.contiguous_format,
+                                 pin_memory=False))
 
     def __getstate__(self):
         # Since torch.memory_format cannot be pickled!
@@ -99,10 +99,9 @@ class ShardedTensorMetadata(object):
         elif memory_format == torch.preserve_format:
             mem_format_encoding = 1
         else:
-            raise RuntimeError(f'Invalid torch.memory_format: {self.memory_format}')
+            raise RuntimeError(f'Invalid torch.memory_format: {memory_format}')
 
-        # Keep the old format to ensure backward compatibility
-        # Q to Wanchao and Pritam: safe to return tensor_properties ?
+        # Keep old seriazation to ensure backward compatibility
         return (
             self.shards_metadata,
             self.size,
