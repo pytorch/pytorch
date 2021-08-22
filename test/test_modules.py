@@ -110,7 +110,7 @@ class TestModule(TestCase):
 
     @modules(module_db)
     def test_reference_fn(self, device, dtype, module_info):
-        """Check module forward pass matches its reference function."""
+        # Check module forward pass matches its reference function.
         module_cls = module_info.module_cls
         module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
                                                        requires_grad=False)
@@ -127,9 +127,9 @@ class TestModule(TestCase):
             # === Do forward pass. ===
             args, kwargs = module_input.forward_input.args, module_input.forward_input.kwargs
 
+            # === Check reference function. ===
             with freeze_rng_state():
                 output = m(*args, **kwargs)
-
             with freeze_rng_state():
                 ref_output = reference_fn(m, *args, **kwargs)
             self.assertEqual(output, ref_output)
