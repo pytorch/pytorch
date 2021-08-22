@@ -108,6 +108,32 @@ class TestModule(TestCase):
                             buffer.dtype, dtype,
                             f'Buffer {name} is of dtype {buffer.dtype} instead of the expected dtype {dtype}')
 
+    @modules(module_db)
+    def test_reference_fn(self, device, dtype, module_info):
+        """Check module forward pass matches its reference function."""
+        module_cls = module_info.module_cls
+        module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
+                                                       requires_grad=False)
+        for module_input in module_inputs:
+            reference_fn = module_input.reference_fn
+            if module_input.forward_input is None or reference_fn is None:
+                continue
+
+            # === Instantiate the module. ===
+            args, kwargs = module_input.constructor_input.args, module_input.constructor_input.kwargs
+            m = module_cls(*args, **kwargs)
+            m.to(device).to(dtype)
+
+            # === Do forward pass. ===
+            args, kwargs = module_input.forward_input.args, module_input.forward_input.kwargs
+
+            with freeze_rng_state():
+                output = m(*args, **kwargs)
+
+            with freeze_rng_state():
+                ref_output = reference_fn(m, *args, **kwargs)
+            self.assertEqual(output, ref_output)
+
 
 instantiate_device_type_tests(TestModule, globals())
 
