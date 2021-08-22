@@ -8,6 +8,7 @@ from .api import (
     ShardedTensor,
     ShardedTensorMetadata,
     TensorInitParams,
+    TensorProperties,
     load_with_process_group,
 )
 
@@ -52,9 +53,10 @@ def empty(
     Returns:
         A :class:`ShardedTensor` object on each rank
     """
-    tensor_init_params = TensorInitParams(create_op=CreateOp.EMPTY, dtype=dtype, layout=layout,
-                                          requires_grad=requires_grad,
-                                          pin_memory=pin_memory, memory_format=memory_format)
+    tensor_properties = TensorProperties(dtype=dtype, layout=layout,
+                                         requires_grad=requires_grad,
+                                         pin_memory=pin_memory, memory_format=memory_format, )
+    tensor_init_params = TensorInitParams(create_op=CreateOp.EMPTY, tensor_properties=tensor_properties, )
     return ShardedTensor(
         sharding_spec,
         *size,
@@ -101,9 +103,10 @@ def ones(
     Returns:
         A :class:`ShardedTensor` object on each rank
     """
-    tensor_init_params = TensorInitParams(create_op=CreateOp.ONES, dtype=dtype, layout=layout,
-                                          requires_grad=requires_grad,
-                                          pin_memory=pin_memory, memory_format=memory_format)
+    tensor_properties = TensorProperties(dtype=dtype, layout=layout,
+                                         requires_grad=requires_grad,
+                                         pin_memory=pin_memory, memory_format=memory_format, )
+    tensor_init_params = TensorInitParams(create_op=CreateOp.ONES, tensor_properties=tensor_properties)
     return ShardedTensor(
         sharding_spec,
         *size,
