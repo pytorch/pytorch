@@ -40,22 +40,13 @@ Tensor linalg_cross(const Tensor & input, const Tensor & other, const int64_t di
 }
 
 Tensor & linalg_cross_out(const Tensor & input, const Tensor & other, const int64_t dimension, Tensor & out) {
-  auto device1 = input.device().type();
-
   // Check for possible broadcasting
   auto input_size = input.sizes();
   auto other_size = other.sizes();
   auto out_size = infer_size(input_size, other_size);
 
-  Tensor input_broadcasted = input;
-  Tensor other_broadcasted = other;
-
-  if (not input_size.equals(out_size)){
-    input_broadcasted = input.expand(out_size);
-  }
-  if (not other_size.equals(out_size)){
-    other_broadcasted = other.expand(out_size);
-  }
+  Tensor input_broadcasted = input.expand(out_size);
+  Tensor other_broadcasted = other.expand(out_size);
 
   // default dimension=-1
   int64_t dim = maybe_wrap_dim(dimension, input.dim());
@@ -65,7 +56,7 @@ Tensor & linalg_cross_out(const Tensor & input, const Tensor & other, const int6
   // raise a warning while resizing if output has one or more elements
   at::native::resize_output(out, out_size);
 
-  cross_stub(device1, out, input_broadcasted, other_broadcasted, dim);
+  cross_stub(input.device().type(), out, input_broadcasted, other_broadcasted, dim);
   return out;
 }
 
