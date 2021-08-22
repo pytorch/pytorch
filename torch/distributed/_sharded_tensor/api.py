@@ -22,7 +22,7 @@ from torch.distributed._sharding_spec._internals import (
     check_tensor,
     validate_non_overlapping_shards_metadata
 )
-
+from torch.types import Number
 
 # Tracking for sharded tensor objects.
 _sharded_tensor_lock = threading.Lock()
@@ -127,17 +127,22 @@ def _register_remote_shards(sharded_tensor_id: int, rrefs: List[rpc.RRef[Shard]]
 
 class CreateOp(Enum):
     EMPTY = 0
-    ONES = 1
+    FULL = 1
+    ONES = 2
+    RAND = 3
+    ZEROS = 4
 
 
 @dataclass
 class TensorInitParams(object):
     """ Container for list of common params to create new local tensor. """
 
-    __slots__ = ['create_op', 'dtype', 'layout', 'requires_grad', 'pin_memory',
-                 'memory_format']
+    __slots__ = ['create_op', 'fill_value', 'dtype', 'layout', 'requires_grad',
+                 'pin_memory', 'memory_format']
 
     create_op: CreateOp
+    # needed when create_op is FULL
+    fill_value: Number
     dtype: torch.dtype
     layout: torch.layout
     requires_grad: bool
@@ -667,8 +672,22 @@ class ShardedTensor(object):
 def _create_tensor_from_params(*size, local_device, tensor_init_params: TensorInitParams):
     """ Helper to construct tensor from size, device and common params. """
 
-    if tensor_init_params.create_op == CreateOp.ONES:
+    if  tensor_init_params.create_op == CreateOp.ZEROS:
+        return torch.zeros(*size,
+                          dtype=tensor_init_params.dtype,
+                          layout=tensor_init_params.layout,
+                          device=local_device,
+                          pin_memory=tensor_init_params.pin_memory,
+                          requires_grad=tensor_init_params.requires_grad,)
+    elif tensor_init_params.create_op == CreateOp.ONES:
         return torch.ones(*size,
+                          dtype=tensor_init_params.dtype,
+                          layout=tensor_init_params.layout,
+                          device=local_device,
+                          pin_memory=tensor_init_params.pin_memory,
+                          requires_grad=tensor_init_params.requires_grad,)
+    elif tensor_init_params.create_op == CreateOp.RAND:
+        return torch.rand(*size,
                           dtype=tensor_init_params.dtype,
                           layout=tensor_init_params.layout,
                           device=local_device,
@@ -680,8 +699,16 @@ def _create_tensor_from_params(*size, local_device, tensor_init_params: TensorIn
                            layout=tensor_init_params.layout,
                            device=local_device,
                            requires_grad=tensor_init_params.requires_grad,
-                           # Note memory_format param is not accepted by torch.ones
+                           # Note memory_format is only acceptable by torch.empty
                            memory_format=tensor_init_params.memory_format,
                            pin_memory=tensor_init_params.pin_memory,)
+    elif tensor_init_params.create_op == CreateOp.FULL:
+        return torch.full(size=size,
+                          fill_value=tensor_init_params.fill_value,
+                          layout=tensor_init_params.layout,
+                          dtype=tensor_init_params.dtype,
+                          requires_grad=tensor_init_params.requires_grad,
+                          device=local_device, )
     else:
         raise ValueError(f'Unsupported create_op: {tensor_init_params.create_op}')
+        torch.rand

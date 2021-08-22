@@ -12,16 +12,15 @@ from .api import (
 )
 
 
-def empty(
-        sharding_spec: ShardingSpec,
-        *size,
-        dtype=None,
-        layout=torch.strided,
-        requires_grad=False,
-        pin_memory=False,
-        memory_format=torch.contiguous_format,
-        process_group=None,
-        init_rrefs=False):
+def empty(sharding_spec: ShardingSpec,
+          *size,
+          dtype=None,
+          layout=torch.strided,
+          requires_grad=False,
+          pin_memory=False,
+          memory_format=torch.contiguous_format,
+          process_group=None,
+          init_rrefs=False):
     """
     Creates an empty :class:`ShardedTensor`. Needs to be called on all ranks in an SPMD fashion.
 
@@ -52,7 +51,8 @@ def empty(
     Returns:
         A :class:`ShardedTensor` object on each rank
     """
-    tensor_init_params = TensorInitParams(create_op=CreateOp.EMPTY, dtype=dtype, layout=layout,
+    tensor_init_params = TensorInitParams(create_op=CreateOp.EMPTY, fill_value=None,
+                                          dtype=dtype, layout=layout,
                                           requires_grad=requires_grad,
                                           pin_memory=pin_memory, memory_format=memory_format)
     return ShardedTensor(
@@ -63,16 +63,15 @@ def empty(
         init_rrefs=init_rrefs,
     )
 
-def ones(
-        sharding_spec: ShardingSpec,
-        *size,
-        dtype=None,
-        layout=torch.strided,
-        requires_grad=False,
-        pin_memory=False,
-        memory_format=torch.contiguous_format,
-        process_group=None,
-        init_rrefs=False):
+def ones(sharding_spec: ShardingSpec,
+         *size,
+         dtype=None,
+         layout=torch.strided,
+         requires_grad=False,
+         pin_memory=False,
+         memory_format=torch.contiguous_format,
+         process_group=None,
+         init_rrefs=False):
     """
     Creates a ones :class:`ShardedTensor`. Needs to be called on all ranks in an SPMD fashion.
 
@@ -101,7 +100,8 @@ def ones(
     Returns:
         A :class:`ShardedTensor` object on each rank
     """
-    tensor_init_params = TensorInitParams(create_op=CreateOp.ONES, dtype=dtype, layout=layout,
+    tensor_init_params = TensorInitParams(create_op=CreateOp.ONES, fill_value=None,
+                                          dtype=dtype, layout=layout,
                                           requires_grad=requires_grad,
                                           pin_memory=pin_memory, memory_format=memory_format)
     return ShardedTensor(
@@ -111,6 +111,159 @@ def ones(
         process_group=process_group,
         init_rrefs=init_rrefs,
     )
+
+
+def rand(sharding_spec: ShardingSpec,
+         *size,
+         dtype=None,
+         layout=torch.strided,
+         requires_grad=False,
+         pin_memory=False,
+         memory_format=torch.contiguous_format,
+         process_group=None,
+         init_rrefs=False):
+    """
+    Creates a rand :class:`ShardedTensor`. Needs to be called on all ranks in an SPMD fashion.
+
+    Args:
+        sharding_spec (:class:`torch.distributed._sharding_spec.ShardingSpec`): The specification
+            describing how to shard the Tensor.
+        size (int...): a sequence of integers defining the shape of the output
+            tensor. Can be a variable number of arguments or a collection like a list or tuple.
+
+    Keyword args:
+        dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
+            Default: if ``None``, uses a global default (see :func:`torch.set_default_tensor_type`).
+        layout (:class:`torch.layout`, optional): the desired layout of returned Tensor.
+            Default: ``torch.strided``.
+        requires_grad (bool, optional): If autograd should record operations on the
+            returned tensor. Default: ``False``.
+        pin_memory (bool, optional): If set, returned tensor would be allocated in
+            the pinned memory. Works only for CPU tensors. Default: ``False``.
+        process_group (ProcessGroup, optional): The process group to work on. If None,
+            the default process group will be used.
+        init_rrefs (bool, optional): Whether or not to initialize
+            :class:`torch.distributed.rpc.RRef`s pointing to remote shards.
+            Need to initialize the RPC Framework if specified as ``True``.
+            Default: ``False``.
+
+    Returns:
+        A :class:`ShardedTensor` object on each rank
+    """
+    tensor_init_params = TensorInitParams(create_op=CreateOp.RAND, fill_value=None,
+                                          dtype=dtype, layout=layout,
+                                          requires_grad=requires_grad,
+                                          pin_memory=pin_memory, memory_format=memory_format)
+    return ShardedTensor(
+        sharding_spec,
+        *size,
+        tensor_init_params=tensor_init_params,
+        process_group=process_group,
+        init_rrefs=init_rrefs,
+    )
+
+
+def zeros(sharding_spec: ShardingSpec,
+          *size,
+          dtype=None,
+          layout=torch.strided,
+          requires_grad=False,
+          pin_memory=False,
+          memory_format=torch.contiguous_format,
+          process_group=None,
+          init_rrefs=False):
+    """
+    Creates a zeros :class:`ShardedTensor`. Needs to be called on all ranks in an SPMD fashion.
+
+    Args:
+        sharding_spec (:class:`torch.distributed._sharding_spec.ShardingSpec`): The specification
+            describing how to shard the Tensor.
+        size (int...): a sequence of integers defining the shape of the output
+            tensor. Can be a variable number of arguments or a collection like a list or tuple.
+
+    Keyword args:
+        dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
+            Default: if ``None``, uses a global default (see :func:`torch.set_default_tensor_type`).
+        layout (:class:`torch.layout`, optional): the desired layout of returned Tensor.
+            Default: ``torch.strided``.
+        requires_grad (bool, optional): If autograd should record operations on the
+            returned tensor. Default: ``False``.
+        pin_memory (bool, optional): If set, returned tensor would be allocated in
+            the pinned memory. Works only for CPU tensors. Default: ``False``.
+        process_group (ProcessGroup, optional): The process group to work on. If None,
+            the default process group will be used.
+        init_rrefs (bool, optional): Whether or not to initialize
+            :class:`torch.distributed.rpc.RRef`s pointing to remote shards.
+            Need to initialize the RPC Framework if specified as ``True``.
+            Default: ``False``.
+
+    Returns:
+        A :class:`ShardedTensor` object on each rank
+    """
+    tensor_init_params = TensorInitParams(create_op=CreateOp.ZEROS, fill_value=None,
+                                          dtype=dtype, layout=layout,
+                                          requires_grad=requires_grad,
+                                          pin_memory=pin_memory, memory_format=memory_format)
+    return ShardedTensor(
+        sharding_spec,
+        *size,
+        tensor_init_params=tensor_init_params,
+        process_group=process_group,
+        init_rrefs=init_rrefs,
+    )
+
+
+def full(sharding_spec: ShardingSpec,
+         size,
+         fill_value=torch.types.Number,
+         dtype=None,
+         layout=torch.strided,
+         requires_grad=False,
+         pin_memory=False,
+         memory_format=torch.contiguous_format,
+         process_group=None,
+         init_rrefs=False):
+    """
+    Creates a full :class:`ShardedTensor`. Needs to be called on all ranks in an SPMD fashion.
+
+    Args:
+        sharding_spec (:class:`torch.distributed._sharding_spec.ShardingSpec`): The specification
+            describing how to shard the Tensor.
+        size (int...):  a list, tuple, or `torch.Size` of integers defining the shape of the
+            output tensor.
+        fill_value (Scalar) – the value to fill the output tensor with.
+
+    Keyword args:
+        dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
+            Default: if ``None``, uses a global default (see :func:`torch.set_default_tensor_type`).
+        layout (:class:`torch.layout`, optional): the desired layout of returned Tensor.
+            Default: ``torch.strided``.
+        requires_grad (bool, optional): If autograd should record operations on the
+            returned tensor. Default: ``False``.
+        pin_memory (bool, optional): If set, returned tensor would be allocated in
+            the pinned memory. Works only for CPU tensors. Default: ``False``.
+        process_group (ProcessGroup, optional): The process group to work on. If None,
+            the default process group will be used.
+        init_rrefs (bool, optional): Whether or not to initialize
+            :class:`torch.distributed.rpc.RRef`s pointing to remote shards.
+            Need to initialize the RPC Framework if specified as ``True``.
+            Default: ``False``.
+
+    Returns:
+        A :class:`ShardedTensor` object on each rank
+    """
+    tensor_init_params = TensorInitParams(create_op=CreateOp.FULL, fill_value=fill_value,
+                                          dtype=dtype, layout=layout,
+                                          requires_grad=requires_grad,
+                                          pin_memory=pin_memory, memory_format=memory_format)
+    return ShardedTensor(
+        sharding_spec,
+        *size,
+        tensor_init_params=tensor_init_params,
+        process_group=process_group,
+        init_rrefs=init_rrefs,
+    )
+
 
 def init_from_local_shards(
         local_shards: List[Shard],
