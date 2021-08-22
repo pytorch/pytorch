@@ -108,6 +108,20 @@ class TestModule(TestCase):
                             buffer.dtype, dtype,
                             f'Buffer {name} is of dtype {buffer.dtype} instead of the expected dtype {dtype}')
 
+    @modules(module_db)
+    def test_repr(self, device, dtype, module_info):
+        """Test module can be represted with repr and str without errors."""
+        module_cls = module_info.module_cls
+        module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
+                                                       requires_grad=False)
+        for module_input in module_inputs:
+            args, kwargs = module_input.constructor_input.args, module_input.constructor_input.kwargs
+            m = module_cls(*args, **kwargs)
+
+            # Check that these methods do not raise errors
+            m.__repr__()
+            str(m)
+
 
 instantiate_device_type_tests(TestModule, globals())
 
