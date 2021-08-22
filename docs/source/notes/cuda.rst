@@ -573,7 +573,8 @@ and two convenience wrappers,
 captures whatever CUDA work you run in its context. :class:`~torch.cuda.graph`
 requires that you manually manage the graph's input and output memory.
 Warming up the captured workload by running a few eager iterations
-before capture is also recommended. Example::
+before capture is also recommended. Warmup should occur on a side stream.
+Example::
 
     g = torch.cuda.CUDAGraph()
 
@@ -582,8 +583,12 @@ before capture is also recommended. Example::
 
     # Warmup before capture (not essential for this simple workload,
     # but generally good practice)
-    for _ in range(3):
-        static_output = static_input * 2
+    s = torch.cuda.Stream()
+    s.wait_stream(torch.cuda.current_stream())
+    with torch.cuda.stream(s):
+        for _ in range(3):
+            static_output = static_input * 2
+    torch.cuda.current_stream().wait_stream(s)
 
     # Captures the graph
     with torch.cuda.graph(g):
@@ -601,7 +606,7 @@ before capture is also recommended. Example::
     print(static_output)  # full of 10 * 2 = 20
 
 See
-:ref:`Full-iteration capture<full-iteration-capture>`,
+:ref:`Whole-network capture<whole-network-capture>`,
 :ref:`Usage with torch.cuda.amp<graphs-with-amp>`, and
 :ref:`Usage with multiple streams<multistream-capture>`
 for realistic and advanced patterns.
@@ -649,15 +654,64 @@ Non-constraints
 
 * Once captured, the graph may be replayed on any stream.
 
-.. _full-iteration-capture:
+.. _whole-network-capture:
 
-Full-iteration capture
+Whole-network capture
 ^^^^^^^^^^^^^^^^^^^^^^
 
 If your entire network obeys the :ref:`constraints<capture-constraints>`,
 you may capture and replay an entire iteration::
 
-    fdsa
+    N, D_in, H, D_out = 640, 4096, 2048, 1024
+    model = torch.nn.Sequential(torch.nn.Linear(D_in, H),
+                                torch.nn.Dropout(p=0.2),
+                                torch.nn.Linear(H, D_out),
+                                torch.nn.Dropout(p=0.1)).cuda()
+    loss_fn = torch.nn.MSELoss()
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+
+    # Placeholders used for capture
+    static_input = torch.randn(N, D_in, device='cuda')
+    static_target = torch.randn(N, D_out, device='cuda')
+
+    # warmup
+    # Uses static_input and static_target here for convenience,
+    # but in a real setting, because the warmup includes optimizer.step()
+    # you should use a few batches of real data.
+    s = torch.cuda.Stream()
+    s.wait_stream(torch.cuda.current_stream())
+    with torch.cuda.stream(s):
+        for i in range(3):
+            optimizer.zero_grad(set_to_none=True)
+            y_pred = model(static_input)
+            loss = loss_fn(y_pred, static_target)
+            loss.backward()
+            optimizer.step()
+    torch.cuda.current_stream().wait_stream(s)
+
+    # capture
+    g = torch.cuda.CUDAGraph()
+    # set grads to None before capture, so backward() will create
+    # .grad attributes with allocations from the graph's private pool
+    optimizer.zero_grad(set_to_none=True)
+    with torch.cuda.graph(g):
+        static_y_pred = model(static_input)
+        static_loss = loss_fn(static_y_pred, static_target)
+        static_loss.backward()
+        optimizer.step()
+
+    real_inputs = [torch.rand_like(static_input) for _ in range(10)]
+    real_targets = [torch.rand_like(static_target) for _ in range(10)]
+
+    for data, target in zip(real_inputs, real_targets):
+        static_input.copy_(data)
+        static_target.copy_(target)
+        # replay() includes forward, backward, and step.
+        # You don't even need to call optimizer.zero_grad() between iterations
+        # because the captured backward refills static .grad tensors in place.
+        g.replay()
+        # Params have been updated. static_y_pred, static_loss, and .grad
+        # attributes hold values from computing on this iteration's data.
 
 .. _partial-network-capture:
 
@@ -680,7 +734,37 @@ static inputs and outputs internally as needed.  Therefore (unlike with
 
 Example::
 
-    fdsa
+    N, D_in, H, D_out = 640, 4096, 2048, 1024
+
+    model_section1 = torch.nn.Sequential(torch.nn.Linear(D_in, H),
+                                torch.nn.Dropout(p=0.2)).cuda()
+    model_section2 = torch.nn.Sequential(torch.nn.Linear(H, D_out),
+                                torch.nn.Dropout(p=0.1)).cuda()
+
+    model = torch.nn.Sequential(model_section1, model_section2)
+
+    loss_fn = torch.nn.MSELoss()
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+
+    # Sample inputs used for capture
+    # requires_grad state of sample inputs must match
+    # requires_grad state of real inputs each callable will see.
+    x = torch.randn(N, D_in, device='cuda')
+    h = torch.randn(N, H, device='cuda', requires_grad=True)
+    y = torch.randn(N, D_out, device='cuda')
+
+    model[0] = torch.cuda.make_graphed_callables(model[0], (x,))
+    model[1] = torch.cuda.make_graphed_callables(model[1], (h,))
+
+    for _ in range(10):
+        optimizer.zero_grad(set_to_none=True)
+        # model[0] and model[1] run as separate CUDA graphs
+        y_pred = model(x)
+        loss = loss_fn(y_pred, y)
+        # model[0]'s backward ops and model[1]'s backward ops
+        # run as separate CUDA graphs
+        loss.backward()
+        optimizer.step()
 
 .. _graphs-with-amp:
 
@@ -693,7 +777,41 @@ the CPU with the GPU, which is prohibited during capture. To avoid errors, eithe
 and backward are capture-safe) capture forward, loss, and backward but not the
 optimizer step::
 
-    fdsa
+    # warmup
+    # In a real setting, use a few batches of real data.
+    s = torch.cuda.Stream()
+    s.wait_stream(torch.cuda.current_stream())
+    with torch.cuda.stream(s):
+        for i in range(3):
+            optimizer.zero_grad(set_to_none=True)
+            with torch.cuda.amp.autocast():
+                y_pred = model(static_input)
+                loss = loss_fn(y_pred, static_target)
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+    torch.cuda.current_stream().wait_stream(s)
+
+    # capture
+    g = torch.cuda.CUDAGraph()
+    optimizer.zero_grad(set_to_none=True)
+    with torch.cuda.graph(g):
+        with torch.cuda.amp.autocast():
+            static_y_pred = model(static_input)
+            static_loss = loss_fn(static_y_pred, static_target)
+        scaler.scale(static_loss).backward()
+        # don't capture scaler.step(optimizer) or scaler.update()
+
+    real_inputs = [torch.rand_like(static_input) for _ in range(10)]
+    real_targets = [torch.rand_like(static_target) for _ in range(10)]
+
+    for data, target in zip(real_inputs, real_targets):
+        static_input.copy_(data)
+        static_target.copy_(target)
+        g.replay()
+        # Runs scaler.step and scaler.update eagerly
+        scaler.step(optimizer)
+        scaler.update()
 
 .. _multistream-capture:
 
@@ -782,11 +900,15 @@ separate private pool for every capture. If you capture multiple graphs,
 this conservative approach ensures graph replays never corrupt each other's values,
 but sometimes needlessly wastes memory.
 
-To economize the memory stashed in private pools, you can use
-:class:`~torch.cuda.graph`'s ``pool`` argument to hint certain captures may
-share memory. A good rule of thumb is, if you know the graphs will always
+To economize the memory stashed in private pools, :class:`torch.cuda.graph`
+and :func:`torch.cuda.make_graphed_callables` optionally allow different
+captures to share the same private pool.
+A good rule of thumb is, if you know the graphs will always
 be replayed in the same order they were captured, and never replayed concurrently,
-it's safe for them to share a private pool.  Example::
+it's safe for them to share a private pool.
+
+:class:`torch.cuda.graph`'s ``pool`` argument is a hint to use a particular private pool,
+and can be used to share memory across graphs as shown::
 
     g1 = torch.cuda.CUDAGraph()
     g2 = torch.cuda.CUDAGraph()
@@ -804,3 +926,9 @@ it's safe for them to share a private pool.  Example::
 
     g1.replay()
     g2.replay()
+
+With :func:`torch.cuda.make_graphed_callables`, if you want to graph several
+callables and you know they'll always run in the same order (and never concurrently)
+pass them as a list and set ``share_memory=True``.
+:func:`~torch.cuda.make_graphed_callables` will capture their graphs using a shared
+memory pool.
