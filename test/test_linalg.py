@@ -5076,6 +5076,14 @@ class TestLinalg(TestCase):
         torch.linalg.cross(x, y, dim=1, out=res2)
         self.assertEqual(res1, res2)
 
+        # test for broadcastable inputs
+        x = torch.rand(1, 3, 2, dtype=dtype, device=device)
+        y = torch.rand(4, 3, 1, dtype=dtype, device=device)
+        res1 = torch.linalg.cross(x, y, dim=1)
+        res2 = torch.tensor((), dtype=dtype, device=device)
+        torch.linalg.cross(x, y, dim=1, out=res2)
+        self.assertEqual(res1, res2)
+
     @onlyCPU
     @dtypes(torch.float)
     def test_cross_with_and_without_dim(self, device, dtype):
@@ -5100,10 +5108,10 @@ class TestLinalg(TestCase):
 
     def test_cross_errors(self, device):
         self.assertRaisesRegex(
-            RuntimeError, "inconsistent tensors dimensions",
+            RuntimeError, "must match the size of tensor",
             lambda: torch.cross(torch.rand(100, 3, device=device), torch.rand(100, 3, 10, device=device)))
         self.assertRaisesRegex(
-            RuntimeError, "inconsistent tensors sizes",
+            RuntimeError, "must match the size of tensor",
             lambda: torch.cross(torch.rand(5, 3, device=device), torch.rand(3, 5, device=device)))
         self.assertRaisesRegex(
             RuntimeError, "no dimension of size 3 in input",
@@ -5123,10 +5131,10 @@ class TestLinalg(TestCase):
             RuntimeError, "dimension -1 does not have size 3",
             lambda: torch.linalg.cross(torch.rand(5, 3, 4, device=device), torch.rand(5, 3, 4, device=device)))
         self.assertRaisesRegex(
-            RuntimeError, "inconsistent tensors dimensions",
+            RuntimeError, "must match the size of tensor",
             lambda: torch.linalg.cross(torch.rand(100, 3, device=device), torch.rand(100, 3, 10, device=device)))
         self.assertRaisesRegex(
-            RuntimeError, "inconsistent tensors sizes",
+            RuntimeError, "must match the size of tensor",
             lambda: torch.linalg.cross(torch.rand(5, 3, device=device), torch.rand(3, 5, device=device)))
         self.assertRaisesRegex(
             RuntimeError, "dimension 0 does not have size 3",

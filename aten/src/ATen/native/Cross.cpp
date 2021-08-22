@@ -2,6 +2,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/Resize.h>
+#include <ATen/ExpandUtils.h>
 
 #include <ATen/native/Cross.h>
 
@@ -40,18 +41,31 @@ Tensor linalg_cross(const Tensor & input, const Tensor & other, const int64_t di
 
 Tensor & linalg_cross_out(const Tensor & input, const Tensor & other, const int64_t dimension, Tensor & out) {
   auto device1 = input.device().type();
-  TORCH_CHECK(input.dim() == other.dim(), "inconsistent tensors dimensions input: ", input.dim(), " other: ", other.dim());
-  TORCH_CHECK(input.sizes() == other.sizes(), "inconsistent tensors sizes input: ", input.sizes(), " other: ", other.sizes());
+
+  // Check for possible broadcasting
+  auto input_size = input.sizes();
+  auto other_size = other.sizes();
+  auto out_size = infer_size(input_size, other_size);
+
+  Tensor input_broadcasted = input;
+  Tensor other_broadcasted = other;
+
+  if (not input_size.equals(out_size)){
+    input_broadcasted = input.expand(out_size);
+  }
+  if (not other_size.equals(out_size)){
+    other_broadcasted = other.expand(out_size);
+  }
 
   // default dimension=-1
   int64_t dim = maybe_wrap_dim(dimension, input.dim());
-  TORCH_CHECK(input.size(dim) == 3, "dimension ", dimension, " does not have size 3");
+  TORCH_CHECK(input_broadcasted.size(dim) == 3, "dimension ", dimension, " does not have size 3");
 
   // check if resizing output is required
   // raise a warning while resizing if output has one or more elements
-  at::native::resize_output(out, input.sizes());
+  at::native::resize_output(out, out_size);
 
-  cross_stub(device1, out, input, other, dim);
+  cross_stub(device1, out, input_broadcasted, other_broadcasted, dim);
   return out;
 }
 
