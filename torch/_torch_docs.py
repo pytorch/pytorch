@@ -2597,18 +2597,19 @@ cross(input, other, dim=None, *, out=None) -> Tensor
 Returns the cross product of vectors in dimension :attr:`dim` of :attr:`input`
 and :attr:`other`.
 
-:attr:`input` and :attr:`other` must have the same size, and the size of their
-:attr:`dim` dimension should be 3.
+Supports input of float, double, cfloat and cdouble dtypes. Also supports batches
+of vectors, for which it computes the product along the dimension :attr:`dim`.
+In this case, the output has the same batch dimensions as the inputs.
 
 If :attr:`dim` is not given, it defaults to the first dimension found with the
 size 3. Note that this might be unexpected.
 
 .. seealso::
-        :func:`torch.linalg.cross` which is a variant that has a slightly
-        different default behaviour, i.e dim=-1.
+        :func:`torch.linalg.cross` which has a -1 as the default dimension.
 
 .. warning:: This function may change in a future PyTorch release to match
-        the default behaviour in :func:`torch.linalg.cross`.
+        the default behaviour in :func:`torch.linalg.cross`. We recommend using
+        :func:`torch.linalg.cross`.
 
 Args:
     {input}
