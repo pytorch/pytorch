@@ -402,7 +402,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase, MultiProcessTestCase):
 
         expected_h = 2
         expected_device = torch.device(f"cuda:{self.rank}")
-        dtype=torch.double
+        dtype = torch.double
         torch.manual_seed(seed)
         expected = torch.rand(expected_h, w, device=expected_device, dtype=dtype)
         # reset seed to ensure the same random numbers are generated

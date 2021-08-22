@@ -51,7 +51,7 @@ def empty(sharding_spec: ShardingSpec,
     Returns:
         A :class:`ShardedTensor` object on each rank
     """
-    tensor_init_params = TensorInitParams(create_op=CreateOp.EMPTY, fill_value=None,
+    tensor_init_params = TensorInitParams(create_op=CreateOp.EMPTY, fill_value=0,
                                           dtype=dtype, layout=layout,
                                           requires_grad=requires_grad,
                                           pin_memory=pin_memory, memory_format=memory_format)
@@ -100,7 +100,7 @@ def ones(sharding_spec: ShardingSpec,
     Returns:
         A :class:`ShardedTensor` object on each rank
     """
-    tensor_init_params = TensorInitParams(create_op=CreateOp.ONES, fill_value=None,
+    tensor_init_params = TensorInitParams(create_op=CreateOp.ONES, fill_value=0,
                                           dtype=dtype, layout=layout,
                                           requires_grad=requires_grad,
                                           pin_memory=pin_memory, memory_format=memory_format)
@@ -150,7 +150,7 @@ def rand(sharding_spec: ShardingSpec,
     Returns:
         A :class:`ShardedTensor` object on each rank
     """
-    tensor_init_params = TensorInitParams(create_op=CreateOp.RAND, fill_value=None,
+    tensor_init_params = TensorInitParams(create_op=CreateOp.RAND, fill_value=0,
                                           dtype=dtype, layout=layout,
                                           requires_grad=requires_grad,
                                           pin_memory=pin_memory, memory_format=memory_format)
@@ -200,7 +200,7 @@ def zeros(sharding_spec: ShardingSpec,
     Returns:
         A :class:`ShardedTensor` object on each rank
     """
-    tensor_init_params = TensorInitParams(create_op=CreateOp.ZEROS, fill_value=None,
+    tensor_init_params = TensorInitParams(create_op=CreateOp.ZEROS, fill_value=0,
                                           dtype=dtype, layout=layout,
                                           requires_grad=requires_grad,
                                           pin_memory=pin_memory, memory_format=memory_format)

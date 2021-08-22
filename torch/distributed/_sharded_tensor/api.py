@@ -672,13 +672,13 @@ class ShardedTensor(object):
 def _create_tensor_from_params(*size, local_device, tensor_init_params: TensorInitParams):
     """ Helper to construct tensor from size, device and common params. """
 
-    if  tensor_init_params.create_op == CreateOp.ZEROS:
+    if tensor_init_params.create_op == CreateOp.ZEROS:
         return torch.zeros(*size,
-                          dtype=tensor_init_params.dtype,
-                          layout=tensor_init_params.layout,
-                          device=local_device,
-                          pin_memory=tensor_init_params.pin_memory,
-                          requires_grad=tensor_init_params.requires_grad,)
+                           dtype=tensor_init_params.dtype,
+                           layout=tensor_init_params.layout,
+                           device=local_device,
+                           pin_memory=tensor_init_params.pin_memory,
+                           requires_grad=tensor_init_params.requires_grad,)
     elif tensor_init_params.create_op == CreateOp.ONES:
         return torch.ones(*size,
                           dtype=tensor_init_params.dtype,
