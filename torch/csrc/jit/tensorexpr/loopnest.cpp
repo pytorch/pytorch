@@ -1306,11 +1306,10 @@ void LoopNest::sliceHead(ForPtr f, int factor, ForPtr* head, ForPtr* tail) {
   ExprPtr head_end = alloc<Min>(
       alloc<Add>(f->start(), alloc<IntImm>(factor)), f->stop(), true);
   *head = alloc<For>(f->var(), f->start(), head_end, Stmt::clone(f->body()));
-  *tail = alloc<For>(
-      f->var(), head_end, f->stop(), Stmt::clone(f->body()), f->loop_options());
+  p->insert_stmt_before(*head, f);
 
-  p->replace_stmt(f, *head);
-  p->insert_stmt_after(*tail, *head);
+  f->set_start(head_end);
+  *tail = f;
 
   if (f->loop_options().is_gpu_block_index() ||
       f->loop_options().is_gpu_thread_index()) {
@@ -1346,16 +1345,11 @@ void LoopNest::sliceTail(ForPtr f, int factor, ForPtr* head, ForPtr* tail) {
 
   ExprPtr tail_start = alloc<Max>(
       f->start(), alloc<Sub>(f->stop(), alloc<IntImm>(factor)), true);
-  *head = alloc<For>(
-      f->var(),
-      f->start(),
-      tail_start,
-      Stmt::clone(f->body()),
-      f->loop_options());
   *tail = alloc<For>(f->var(), tail_start, f->stop(), Stmt::clone(f->body()));
+  p->insert_stmt_after(*tail, f);
 
-  p->replace_stmt(f, *head);
-  p->insert_stmt_after(*tail, *head);
+  f->set_stop(tail_start);
+  *head = f;
 
   if (f->loop_options().is_gpu_block_index() ||
       f->loop_options().is_gpu_thread_index()) {
