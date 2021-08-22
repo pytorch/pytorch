@@ -40,11 +40,8 @@ Tensor linalg_cross(const Tensor & input, const Tensor & other, const int64_t di
 }
 
 Tensor & linalg_cross_out(const Tensor & input, const Tensor & other, const int64_t dimension, Tensor & out) {
-  // Check for possible broadcasting
-  auto input_size = input.sizes();
-  auto other_size = other.sizes();
-  auto out_size = infer_size(input_size, other_size);
-
+  // Broadcast inputs
+  auto out_size = infer_size(input.sizes(), other.sizes());
   Tensor input_broadcasted = input.expand(out_size);
   Tensor other_broadcasted = other.expand(out_size);
 
