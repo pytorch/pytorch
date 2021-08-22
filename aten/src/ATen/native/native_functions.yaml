@@ -9498,13 +9498,13 @@
   python_module: nn
   dispatch:
     CPU: slow_conv2d_forward_out_cpu
-    CUDA: legacy::cuda::_thnn_conv2d_forward_out
+    CUDA: slow_conv2d_forward_out_cuda
 
 - func: thnn_conv2d_forward(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias, int[2] stride, int[2] padding) -> (Tensor output, Tensor finput, Tensor fgrad_input)
   python_module: nn
   dispatch:
     CPU: slow_conv2d_forward_cpu
-    CUDA: legacy::cuda::_thnn_conv2d_forward
+    CUDA: slow_conv2d_forward_cuda
 
 - func: thnn_conv2d_backward.grad_input(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, Tensor finput, Tensor fgrad_input, *, Tensor(a!) grad_input, Tensor(b!) grad_weight, Tensor(c!) grad_bias) -> (Tensor(a!), Tensor(b!), Tensor(c!))
   python_module: nn
