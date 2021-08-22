@@ -243,6 +243,7 @@ class CMake:
             var: var for var in
             ('BLAS',
              'BUILDING_WITH_TORCH_LIBS',
+             'CUDA_NVCC_EXECUTABLE',
              'CUDA_SEPARABLE_COMPILATION',
              'CUDNN_LIBRARY',
              'CUDNN_INCLUDE_DIR',
