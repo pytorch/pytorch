@@ -112,7 +112,7 @@ class TestModule(TestCase):
 
     @modules(module_db)
     def test_pickle(self, device, dtype, module_info):
-        """Test that module can be pickled and unpickled"""
+        # Test that module can be pickled and unpickled.
         module_cls = module_info.module_cls
         module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
                                                        requires_grad=False)
@@ -132,6 +132,7 @@ class TestModule(TestCase):
                 args, kwargs = module_input.forward_input.args, module_input.forward_input.kwargs
                 output = m(*args, **kwargs)
 
+                # === Check unpickled module gives the same output. ===
                 with tempfile.TemporaryFile() as f:
                     torch.save(m, f)
                     f.seek(0)
