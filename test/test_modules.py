@@ -1,3 +1,6 @@
+from inspect import signature
+from copy import deepcopy
+
 import torch
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_modules import module_db, modules
@@ -107,6 +110,68 @@ class TestModule(TestCase):
                         self.assertEqual(
                             buffer.dtype, dtype,
                             f'Buffer {name} is of dtype {buffer.dtype} instead of the expected dtype {dtype}')
+
+    @modules(module_db)
+    def test_check_inplace(self, device, dtype, module_info):
+        # Check if the inplace variant of the module gives the same result as the out of place.
+        module_cls = module_info.module_cls
+        if 'inplace' not in signature(module_cls).parameters:
+            return
+
+        # check_inplace doesn't support multiple input tensors, since we don't have any modules
+        # that modify the inputs in-place and that accept more than one input
+        module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
+                                                       requires_grad=True)
+        for module_input in module_inputs:
+            if module_input.forward_input is None:
+                continue
+
+            input_args, input_kwargs = module_input.forward_input.args, module_input.forward_input.kwargs
+
+            # there aren't any modules that that modify that inputs in-place and accepts multiple
+            # inputs
+            if len(input_args) != 1:
+                continue
+            input = input_args[0]
+
+            # === Instantiate the module. ===
+            args, kwargs = module_input.constructor_input.args, module_input.constructor_input.kwargs
+            kwargs = deepcopy(kwargs)
+            kwargs["inplace"] = False
+            m = module_cls(*args, **kwargs)
+            m.to(device).to(dtype)
+
+            kwargs_ip = deepcopy(kwargs)
+            kwargs_ip["inplace"] = True
+            m_ip = module_cls(*args, **kwargs_ip)
+            m_ip.to(device).to(dtype)
+
+            # === Check that the module performs a inplace operation ===
+            input_version = input._version
+            with freeze_rng_state():
+                output = m(input, **input_kwargs)
+            self.assertEqual(input._version, input_version)
+
+            # === Check that the forward operation gives the same result ===
+            input_ip = deepcopy(input)
+            input_ip_clone = input_ip.clone()
+            with freeze_rng_state():
+                output_ip = m_ip(input_ip_clone, **input_kwargs)
+            self.assertNotEqual(input_ip_clone._version, input_version)
+            self.assertEqual(output, output_ip)
+
+            # === Check that the gradients are the same ===
+            grad = output.data.clone().normal_()
+            if input.grad is not None:
+                with torch.no_grad():
+                    input.grad.zero_()
+            if input_ip.grad is not None:
+                with torch.no_grad():
+                    input_ip.grad.zero_()
+
+            output.backward(grad)
+            output_ip.backward(grad)
+            self.assertEqual(input.grad, input_ip.grad)
 
 
 instantiate_device_type_tests(TestModule, globals())
