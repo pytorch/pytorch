@@ -490,6 +490,7 @@ void BytecodeDeserializer::parseMethods(
 void parseMethodsFlatbuffer(
     const void* data,
     const size_t size,
+    const std::vector<IValue>& constants, 
     const c10::optional<std::vector<IValue>>& debug_handles,
     std::shared_ptr<mobile::CompilationUnit> mcu,
     std::shared_ptr<CompilationUnit> cu
@@ -512,11 +513,9 @@ void parseMethodsFlatbuffer(
       function->append_instruction(static_cast<OpCode>(inst->op()), inst->x(), inst->n());
     }
 
-    // TODO(qihan) append constants
-    // for (const auto& constant : consts_list) {
-    //   function->append_constant(constant);
-    // }
-
+    for (const int const_index : *code_tb->constants()) {
+      function->append_constant(constants[const_index]);
+    }
 
     static const c10::QualifiedName classPrefix = "__torch__.torch.classes";
     for (const auto* t : *code_tb->types()) {
@@ -585,8 +584,18 @@ mobile::Module BytecodeDeserializer::deserialize(
 
 mobile::Module BytecodeDeserializer::deserialize(
     c10::optional<at::Device> device) {
+  auto start = std::chrono::system_clock::now();
+  auto end = std::chrono::system_clock::now();
+  std::chrono::microseconds diff;
+
+  auto des_start = std::chrono::system_clock::now();
   device_ = device;
+
+  start = std::chrono::system_clock::now();
   auto mcu = std::make_shared<mobile::CompilationUnit>();
+  end = std::chrono::system_clock::now();
+  diff = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+  std::cout << " Make mcu " << diff.count() << "us\n";
 
   // bvals can have 2 possible formats:
   //
@@ -597,33 +606,87 @@ mobile::Module BytecodeDeserializer::deserialize(
   // being a Tuple (int, table), and the integer stands for the bytecode version
   // number. The rest of the elements are the same as before.
   //
+
+  start = std::chrono::system_clock::now();
   c10::optional<std::vector<IValue>> debug_handles;
   if (reader_->hasRecord("mobile_debug_handles.pkl")) {
     debug_handles =
         readArchive("mobile_debug_handles", mcu).toTuple()->elements();
   }
+  end = std::chrono::system_clock::now();
+  diff = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+  std::cout << " Debug handles " << diff.count() << "us\n";
 
   if (reader_->hasRecord("bytecodes.flatbuffers")) {
-    std::cerr << "HAN QI: parsing flatbuffer format"  << std::endl;
-    at::DataPtr data_ptr;
-    size_t size;
+    // std::cerr << "HAN QI: parsing flatbuffer format"  << std::endl;
+    start = std::chrono::system_clock::now();
     auto record = reader_->getRecord("bytecodes.flatbuffers");
+    end = std::chrono::system_clock::now();
+    diff = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+    std::cout << "    [NEW] Get record " << diff.count() << "us\n";
+    start = std::chrono::system_clock::now();
+    auto type_resolver = [this](const c10::QualifiedName& qn) {
+      return typeResolverMobile(qn, compilation_unit_);
+    };
+
+    auto obj_loader = [&](at::StrongTypePtr type, IValue input) {
+      return objLoaderMobile(type, input, mcu);
+    };
+
+    auto constants = torch::jit::readArchiveAndTensors(
+        "constants_ivalue",
+        /*pickle_prefix=*/"",
+        /*tensor_prefix=*/
+        "constants/",
+        type_resolver,
+        obj_loader,
+        device_,
+        *reader_.get()).toTuple()->elements();
+    end = std::chrono::system_clock::now();
+    diff = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+    std::cout << "    [NEW] Load const " << diff.count() << "us\n";
+
+    start = std::chrono::system_clock::now();
     parseMethodsFlatbuffer(
       std::get<0>(record).get(), 
       std::get<1>(record), 
+      constants,
       debug_handles,
       mcu,
       compilation_unit_);
+    end = std::chrono::system_clock::now();
+    diff = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+    std::cout << "    [NEW] Parse methods ff " << diff.count() << "us\n";
   } else {
+    start = std::chrono::system_clock::now();
     auto bvals = readArchive("bytecode", mcu).toTuple()->elements();
+    end = std::chrono::system_clock::now();
+    diff = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+    std::cout << "    [OLD] Get record" << diff.count() << "us\n";
+    start = std::chrono::system_clock::now();
     parseMethods(bvals, debug_handles, *mcu);
+    end = std::chrono::system_clock::now();
+    diff = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+    std::cout << "    [OLD] parseMethods old " << diff.count() << "us\n";
   }
 
+  start = std::chrono::system_clock::now();
   auto m = mobile::Module(readArchive("data", mcu).toObject(), mcu);
+  end = std::chrono::system_clock::now();
+  diff = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+  std::cout << " Get module and data" << diff.count() << "us\n";
+  start = std::chrono::system_clock::now();
 #if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
   MobileDebugTable debug_table = MobileDebugTable(reader_, compilation_unit_);
   m.setDebugTable(std::move(debug_table));
 #endif
+  end = std::chrono::system_clock::now();
+  diff = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+  std::cout << " MobileDebugTable " << diff.count() << "us\n";
+
+  auto des_end = std::chrono::system_clock::now();
+  auto fulldiff = std::chrono::duration_cast<std::chrono::microseconds>(des_end - des_start);
+  std::cout << " Total time of deserialize: " << fulldiff.count() << "us\n";
   return m;
 }
 

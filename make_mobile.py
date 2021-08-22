@@ -1,5 +1,7 @@
+import time
 import torch
-from torch import nn
+from torch.jit.mobile import _load_for_lite_interpreter
+from torch import nn, use_deterministic_algorithms
 from torch.utils.mobile_optimizer import (LintCode,
                                           generate_mobile_module_lints,
                                           optimize_for_mobile)
@@ -43,7 +45,15 @@ print('Net is:', net)
 scripted = torch.jit.script(net)
 mobiled = optimize_for_mobile(scripted)
 print(mobiled.graph)
-mobiled._save_for_lite_interpreter('qihan_model.pt', use_flatbuffer=True)
 
+mobiled._save_for_lite_interpreter('qihan_model_false.pt', use_flatbuffer=False)
+mobiled._save_for_lite_interpreter('qihan_model_true.pt', use_flatbuffer=True)
 
 # ./build/bin/flatc --json --raw-binary torch/csrc/jit/serialization/mobile_bytecode.fbs -- flatbuffer.dat
+
+
+model2 = torch.jit.load('/data/home/qihan/pytorchmodel_2_190000.pt')
+model2.eval()
+model2m = optimize_for_mobile(model2)
+model2m._save_for_lite_interpreter('model_large_true.pt', use_flatbuffer=True)
+model2m._save_for_lite_interpreter('model_large_false.pt', use_flatbuffer=False)
