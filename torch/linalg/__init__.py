@@ -18,8 +18,7 @@ cross = _add_docstr(_linalg.linalg_cross, r"""
 linalg.cross(input, other, *, dim=-1, out=None) -> Tensor
 
 
-Returns the cross product of vectors in dimension :attr:`dim` of :attr:`input`
-and :attr:`other`.
+Computes the cross product of two 3-dimensional vectors.
 
 Supports input of float, double, cfloat and cdouble dtypes. Also supports batches
 of vectors, for which it computes the product along the dimension :attr:`dim`.
