@@ -112,9 +112,16 @@ bool Function::append_operator(
         size_t start_index = num_specified_args.value() - out_args.size();
         for (size_t i = (start_index >= 0 ? start_index : 0); i < args.size();
              ++i) {
-          if (args[i].default_value().has_value()) {
-            stack.push_back(args[i].default_value());
-          }
+          auto default_val = args[i].default_value();
+          TORCH_CHECK(
+              default_val.has_value(),
+              "Error happened at preparing for default values for the argument. The ",
+              i,
+              "th arguement ",
+              args[i].name(),
+              " does not have a specified value or default value. ");
+
+          stack.push_back(args[i].default_value());
         }
         while (!out_args.empty()) {
           stack.push_back(out_args.back());
