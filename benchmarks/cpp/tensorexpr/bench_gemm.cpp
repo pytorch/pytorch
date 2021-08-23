@@ -54,7 +54,7 @@ BENCHMARK_DEFINE_F(Gemm, TensorExprNoopt)(benchmark::State& state) {
       {{K, "K"}});
   te::LoopNest loop({CT});
   loop.prepareForCodegen();
-  te::Stmt* s = loop.root_stmt();
+  te::StmtPtr s = loop.root_stmt();
   s = te::IRSimplifier::simplify(s);
   auto cg = CreateCodeGen("llvm_codegen", s, {AP, BP, CT});
 
@@ -80,41 +80,41 @@ BENCHMARK_DEFINE_F(Gemm, TensorExprTile32x32)(benchmark::State& state) {
 
   {
     auto const& loops = loop.getLoopStmtsFor(CT);
-    te::For* m = loops[0];
+    te::ForPtr m = loops[0];
     loop.splitWithMask(m, 32);
   }
   {
     auto const& loops = loop.getLoopStmtsFor(CT);
-    te::For* n = loops[2];
+    te::ForPtr n = loops[2];
     loop.splitWithMask(n, 32);
   }
   // mo, mi, no, ni, k ->
   // mo, no, mi, ni, k
   {
     auto const& loops = loop.getLoopStmtsFor(CT);
-    te::For* mi = loops[1];
-    te::For* no = loops[2];
+    te::ForPtr mi = loops[1];
+    te::ForPtr no = loops[2];
     loop.reorderAxis(mi, no);
   }
   // mo, no, mi, ni, k ->
   // mo, no, mi, k, ni
   {
     auto const& loops = loop.getLoopStmtsFor(CT);
-    te::For* ni = loops[3];
-    te::For* k = loops[4];
+    te::ForPtr ni = loops[3];
+    te::ForPtr k = loops[4];
     loop.reorderAxis(ni, k);
   }
   // mo, no, mi, k, ni ->
   // mo, no, k, mi, ni
   {
     auto const& loops = loop.getLoopStmtsFor(CT);
-    te::For* mi = loops[2];
-    te::For* k = loops[3];
+    te::ForPtr mi = loops[2];
+    te::ForPtr k = loops[3];
     loop.reorderAxis(mi, k);
   }
 
   loop.prepareForCodegen();
-  te::Stmt* s = loop.root_stmt();
+  te::StmtPtr s = loop.root_stmt();
   s = te::IRSimplifier::simplify(s);
   auto cg = CreateCodeGen("llvm_codegen", s, {AP, BP, CT});
 
@@ -140,41 +140,41 @@ BENCHMARK_DEFINE_F(Gemm, TensorExprTile4x16)(benchmark::State& state) {
 
   {
     auto const& loops = loop.getLoopStmtsFor(CT);
-    te::For* m = loops[0];
+    te::ForPtr m = loops[0];
     loop.splitWithMask(m, 4);
   }
   {
     auto const& loops = loop.getLoopStmtsFor(CT);
-    te::For* n = loops[2];
+    te::ForPtr n = loops[2];
     loop.splitWithMask(n, 16);
   }
   // mo, mi, no, ni, k ->
   // mo, no, mi, ni, k
   {
     auto const& loops = loop.getLoopStmtsFor(CT);
-    te::For* mi = loops[1];
-    te::For* no = loops[2];
+    te::ForPtr mi = loops[1];
+    te::ForPtr no = loops[2];
     loop.reorderAxis(mi, no);
   }
   // mo, no, mi, ni, k ->
   // mo, no, mi, k, ni
   {
     auto const& loops = loop.getLoopStmtsFor(CT);
-    te::For* ni = loops[3];
-    te::For* k = loops[4];
+    te::ForPtr ni = loops[3];
+    te::ForPtr k = loops[4];
     loop.reorderAxis(ni, k);
   }
   // mo, no, mi, k, ni ->
   // mo, no, k, mi, ni
   {
     auto const& loops = loop.getLoopStmtsFor(CT);
-    te::For* mi = loops[2];
-    te::For* k = loops[3];
+    te::ForPtr mi = loops[2];
+    te::ForPtr k = loops[3];
     loop.reorderAxis(mi, k);
   }
 
   loop.prepareForCodegen();
-  te::Stmt* s = loop.root_stmt();
+  te::StmtPtr s = loop.root_stmt();
   s = te::IRSimplifier::simplify(s);
   auto cg = CreateCodeGen("llvm_codegen", s, {AP, BP, CT});
 
@@ -200,49 +200,49 @@ BENCHMARK_DEFINE_F(Gemm, TensorExprTile4x16VecUnroll)(benchmark::State& state) {
 
   {
     auto const& loops = loop.getLoopStmtsFor(CT);
-    te::For* m = loops[0];
+    te::ForPtr m = loops[0];
     loop.splitWithMask(m, 4);
   }
   {
     auto const& loops = loop.getLoopStmtsFor(CT);
-    te::For* n = loops[2];
+    te::ForPtr n = loops[2];
     loop.splitWithMask(n, 16);
   }
   // mo, mi, no, ni, k ->
   // mo, no, mi, ni, k
   {
     auto const& loops = loop.getLoopStmtsFor(CT);
-    te::For* mi = loops[1];
-    te::For* no = loops[2];
+    te::ForPtr mi = loops[1];
+    te::ForPtr no = loops[2];
     loop.reorderAxis(mi, no);
   }
   // mo, no, mi, ni, k ->
   // mo, no, mi, k, ni
   {
     auto const& loops = loop.getLoopStmtsFor(CT);
-    te::For* ni = loops[3];
-    te::For* k = loops[4];
+    te::ForPtr ni = loops[3];
+    te::ForPtr k = loops[4];
     loop.reorderAxis(ni, k);
   }
   // mo, no, mi, k, ni ->
   // mo, no, k, mi, ni
   {
     auto const& loops = loop.getLoopStmtsFor(CT);
-    te::For* mi = loops[2];
-    te::For* k = loops[3];
+    te::ForPtr mi = loops[2];
+    te::ForPtr k = loops[3];
     loop.reorderAxis(mi, k);
   }
   {
     auto const& loops = loop.getLoopStmtsFor(CT);
-    te::For* mi = loops[3];
-    te::For* ni = loops[4];
-    te::Stmt* unrolled;
+    te::ForPtr mi = loops[3];
+    te::ForPtr ni = loops[4];
+    te::StmtPtr unrolled;
     loop.vectorize(ni);
     loop.unroll(mi, &unrolled);
   }
 
   loop.prepareForCodegen();
-  te::Stmt* s = loop.root_stmt();
+  te::StmtPtr s = loop.root_stmt();
   s = te::IRSimplifier::simplify(s);
   auto cg = CreateCodeGen("llvm_codegen", s, {AP, BP, CT});
 
@@ -268,36 +268,36 @@ BENCHMARK_DEFINE_F(Gemm, TensorExprTile4x16Cache)(benchmark::State& state) {
 
   {
     auto const& loops = loop.getLoopStmtsFor(CT);
-    te::For* m = loops[0];
+    te::ForPtr m = loops[0];
     loop.splitWithMask(m, 4);
   }
   {
     auto const& loops = loop.getLoopStmtsFor(CT);
-    te::For* n = loops[2];
+    te::ForPtr n = loops[2];
     loop.splitWithMask(n, 16);
   }
   // mo, mi, no, ni, k ->
   // mo, no, mi, ni, k
   {
     auto const& loops = loop.getLoopStmtsFor(CT);
-    te::For* mi = loops[1];
-    te::For* no = loops[2];
+    te::ForPtr mi = loops[1];
+    te::ForPtr no = loops[2];
     loop.reorderAxis(mi, no);
   }
   // mo, no, mi, ni, k ->
   // mo, no, mi, k, ni
   {
     auto const& loops = loop.getLoopStmtsFor(CT);
-    te::For* ni = loops[3];
-    te::For* k = loops[4];
+    te::ForPtr ni = loops[3];
+    te::ForPtr k = loops[4];
     loop.reorderAxis(ni, k);
   }
   // mo, no, mi, k, ni ->
   // mo, no, k, mi, ni
   {
     auto const& loops = loop.getLoopStmtsFor(CT);
-    te::For* mi = loops[2];
-    te::For* k = loops[3];
+    te::ForPtr mi = loops[2];
+    te::ForPtr k = loops[3];
     loop.reorderAxis(mi, k);
   }
   {
@@ -306,7 +306,7 @@ BENCHMARK_DEFINE_F(Gemm, TensorExprTile4x16Cache)(benchmark::State& state) {
   }
 
   loop.prepareForCodegen();
-  te::Stmt* s = loop.root_stmt();
+  te::StmtPtr s = loop.root_stmt();
   s = te::IRSimplifier::simplify(s);
   auto cg = CreateCodeGen("llvm_codegen", s, {AP, BP, CT});
 
