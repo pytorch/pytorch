@@ -44,7 +44,6 @@ from torch.testing._internal.common_utils import (
     retry_on_connect_failures,
     TEST_WITH_DEV_DBG_ASAN,
     TEST_WITH_ROCM,
-    TEST_WITH_TSAN,
     sandcastle_skip,
     sandcastle_skip_if,
 )
@@ -54,13 +53,6 @@ from torch.distributed.optim import functional_optim_map
 from torch.distributed.optim.functional_sgd import _FunctionalSGD
 from torch.distributed.optim.functional_adam import _FunctionalAdam
 from torch.distributed.optim.functional_adamw import _FunctionalAdamW
-
-if TEST_WITH_TSAN:
-    print(
-        "Skip as TSAN is not fork-safe since we're forking in a multi-threaded environment",
-        file=sys.stderr,
-    )
-    sys.exit(0)
 
 if TEST_WITH_DEV_DBG_ASAN:
     print(
