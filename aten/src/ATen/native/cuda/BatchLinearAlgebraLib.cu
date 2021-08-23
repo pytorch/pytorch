@@ -15,7 +15,6 @@
 namespace at {
 namespace native {
 
-#if defined(USE_CUSOLVER) || defined(CUDART_VERSION)
 cublasOperation_t to_cublas(TransposeType trans) {
   switch (trans) {
     case TransposeType::NoTranspose: return CUBLAS_OP_N;
@@ -24,7 +23,6 @@ cublasOperation_t to_cublas(TransposeType trans) {
   }
   TORCH_INTERNAL_ASSERT(false, "Invalid transpose type");
 }
-#endif
 
 // Some cuBLAS and cuSOLVER batched routines require input to be a device array of pointers to device individual matrices
 // 'input' must be a contiguous tensor
@@ -82,9 +80,6 @@ void geqrf_batched_cublas(const Tensor& input, const Tensor& tau) {
 
 template <typename scalar_t>
 static void apply_lu_solve_batched_cublas(const Tensor& b, const Tensor& lu, const Tensor& pivots, TransposeType transpose) {
-#ifndef CUDART_VERSION
-  TORCH_CHECK(false, "lu_solve: cuBLAS backend for lu_solve is not available.")
-#else
   const auto trans = to_cublas(transpose);
 
   auto pivots_data = pivots.data_ptr<int>();
@@ -103,7 +98,6 @@ static void apply_lu_solve_batched_cublas(const Tensor& b, const Tensor& lu, con
   at::cuda::blas::getrsBatched(handle, trans, m, nrhs, lu_ptr_array_data,
     lda, pivots_data, b_ptr_array_data, lda, &info, batch_size);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info == 0);
-#endif
 }
 
 void lu_solve_batched_cublas(const Tensor& b, const Tensor& lu, const Tensor& pivots, TransposeType trans) {
@@ -114,9 +108,6 @@ void lu_solve_batched_cublas(const Tensor& b, const Tensor& lu, const Tensor& pi
 
 template <typename scalar_t>
 static void apply_triangular_solve(Tensor& A, Tensor& B, bool left, bool upper, TransposeType transpose, bool unitriangular) {
-#ifndef CUDART_VERSION
-  TORCH_CHECK(false, "triangular_solve: cuBLAS backend for triangular_solve is not available.")
-#else
   cublasFillMode_t uplo = upper ? CUBLAS_FILL_MODE_UPPER : CUBLAS_FILL_MODE_LOWER;
   const auto trans = to_cublas(transpose);
   cublasDiagType_t diag = unitriangular ? CUBLAS_DIAG_UNIT : CUBLAS_DIAG_NON_UNIT;
@@ -141,7 +132,6 @@ static void apply_triangular_solve(Tensor& A, Tensor& B, bool left, bool upper, 
     auto handle = at::cuda::getCurrentCUDABlasHandle();
     at::cuda::blas::trsm(handle, side, uplo, trans, diag, m, n, &alpha, A_working_ptr, lda, B_working_ptr, ldb);
   }
-#endif
 }
 
 void triangular_solve_cublas(Tensor& A, Tensor& B, bool left, bool upper, TransposeType transpose, bool unitriangular) {
@@ -152,9 +142,6 @@ void triangular_solve_cublas(Tensor& A, Tensor& B, bool left, bool upper, Transp
 
 template <typename scalar_t>
 static void apply_triangular_solve_batched(Tensor& A, Tensor& B, bool left, bool upper, TransposeType transpose, bool unitriangular) {
-#ifndef CUDART_VERSION
-  TORCH_CHECK(false, "triangular_solve_batched: cuBLAS backend for triangular_solve_batched is not available.")
-#else
   cublasFillMode_t uplo = upper ? CUBLAS_FILL_MODE_UPPER : CUBLAS_FILL_MODE_LOWER;
   const auto trans = to_cublas(transpose);
   cublasDiagType_t diag = unitriangular ? CUBLAS_DIAG_UNIT : CUBLAS_DIAG_NON_UNIT;
@@ -181,7 +168,6 @@ static void apply_triangular_solve_batched(Tensor& A, Tensor& B, bool left, bool
 
   auto handle = at::cuda::getCurrentCUDABlasHandle();
   at::cuda::blas::trsmBatched(handle, side, uplo, trans, diag, m, n, &alpha, A_ptr_array_data, lda, B_ptr_array_data, ldb, batch_size);
-#endif
 }
 
 void triangular_solve_batched_cublas(Tensor& A, Tensor& B, bool left, bool upper, TransposeType transpose, bool unitriangular) {
@@ -1335,9 +1321,6 @@ void lu_looped_cusolver(const Tensor& self, const Tensor& pivots, const Tensor& 
 
 void lu_solve_looped_cusolver(const Tensor& b, const Tensor& lu, const Tensor& pivots, TransposeType transpose) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(b.scalar_type(), "lu_solve_cusolver", [&] {
-#ifndef USE_CUSOLVER
-  TORCH_CHECK(false, "lu_solve: cuSolver backend for lu_solve is not available.")
-#else
     const auto trans = to_cublas(transpose);
     int n = cuda_int_cast(lu.size(-2), "n");
     int nrhs = cuda_int_cast(b.size(-1), "nrhs");
@@ -1368,7 +1351,6 @@ void lu_solve_looped_cusolver(const Tensor& b, const Tensor& lu, const Tensor& p
 
         TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info.item().toInt() == 0);
     }
-#endif
   });
 }
 
