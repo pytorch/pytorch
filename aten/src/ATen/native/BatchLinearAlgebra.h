@@ -213,7 +213,7 @@ using triangular_solve_fn = void (*)(
     Tensor& /*B*/,
     bool /*left*/,
     bool /*upper*/,
-    char /*transpose*/,
+    TransposeType /*transpose*/,
     bool /*unitriangular*/);
 DECLARE_DISPATCH(triangular_solve_fn, triangular_solve_stub);
 
@@ -234,7 +234,7 @@ using lu_solve_trans_fn = void (*)(
     const Tensor& /*b*/,
     const Tensor& /*lu*/,
     const Tensor& /*pivots*/,
-    char /*trans*/);
+    TransposeType /*trans*/);
 DECLARE_DISPATCH(lu_solve_trans_fn, lu_solve_trans_stub);
 
 

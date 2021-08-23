@@ -1053,8 +1053,8 @@ static void addmm_impl_cpu_(
       result.scalar_type(), "addmm_impl_cpu_",
       [&]{
         at::native::cpublas::gemm(
-            transpose_a ? cpublas::Transpose : cpublas::NoTranspose,
-            transpose_b ? cpublas::Transpose : cpublas::NoTranspose,
+            transpose_a ? TransposeType::Transpose : TransposeType::NoTranspose,
+            transpose_b ? TransposeType::Transpose : TransposeType::NoTranspose,
             m, n, k,
             alpha.to<scalar_t>(),
             a.data_ptr<scalar_t>(), lda,
