@@ -339,6 +339,10 @@ LaunchParams FusionExecutor::computeLaunchParams(
   std::unordered_map<ParallelType, std::vector<const kir::Val*>, TypeHash>
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       parallel_iter_extents;
+
+  std::unordered_set<const kir::Val*> warp_padded_extent_set;
+  std::unordered_map<const kir::Val*, int64_t> warp_padded_constant;
+
   for (auto tv : getUsedTVs()) {
     for (auto id : tv->domain()->domain()) {
       if (id->isThread() && !id->isBroadcast()) {
@@ -349,6 +353,19 @@ LaunchParams FusionExecutor::computeLaunchParams(
           it->second.push_back(kir_extent);
         } else {
           parallel_iter_extents[id->getParallelType()] = {kir_extent};
+        }
+
+        // Apply warp padding only when there're warp reductions in
+        //  the kernel.
+        if (kernel()->getWarpPaddedParallelInfo().has_warp_reduction) {
+          if (id->hasPaddingToMultipleOfWarp() ||
+              kernel()->isParallelTypePadded(id->getParallelType())) {
+            warp_padded_extent_set.insert(kir_extent);
+            auto padded_value = id->getMaybeSizeAfterPadding();
+            if (padded_value.has_value()) {
+              warp_padded_constant[kir_extent] = padded_value.value();
+            }
+          }
         }
       }
     }
@@ -389,12 +406,33 @@ LaunchParams FusionExecutor::computeLaunchParams(
     // Select the maxmimum value out of all the parallel extents
     int64_t maximum_value = std::numeric_limits<int64_t>::min();
     for (auto extent : parallel_extents) {
-      const auto val = expr_eval.evaluate(extent);
+      auto val = expr_eval.evaluate(extent);
       TORCH_INTERNAL_ASSERT(
           val.has_value(),
           "Tried to evaluate the extent of ",
           p_type,
           " to set launch bounds but could not.");
+
+      // apply padding to the extent if needed
+      if (warp_padded_extent_set.count(extent)) {
+        // Check if the extent has const value
+        auto padded_constant_it = warp_padded_constant.find(extent);
+
+        if (padded_constant_it != warp_padded_constant.end()) {
+          // If already specified padded to constant, need to check
+          //  runtime value not over the constant bound
+          TORCH_INTERNAL_ASSERT(*val <= padded_constant_it->second);
+          *val = padded_constant_it->second;
+        } else {
+          // If no specified constant, pad to the smallest multiple of warp
+          //  above the value.
+          auto padded_number_of_warps =
+              (*val + C10_WARP_SIZE - 1) / C10_WARP_SIZE;
+          *val = C10_WARP_SIZE * padded_number_of_warps;
+        }
+        TORCH_INTERNAL_ASSERT(
+            *val <= 1024, "padded dimension larger than max block size");
+      }
       maximum_value = std::max(maximum_value, *val);
     }
     launch_params.bind(maximum_value, p_type);

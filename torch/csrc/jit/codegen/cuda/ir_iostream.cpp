@@ -107,6 +107,9 @@ void IrPrinter::handle(const IterDomain* id) {
   os_ << "}";
   if (id->isRFactorProduct())
     os_ << "rf";
+  if (id->hasPaddingToMultipleOfWarp()) {
+    os_ << "_p";
+  }
 }
 
 void IrPrinter::handle(const Bool* b) {

@@ -187,6 +187,16 @@ void ParallelDimensionMap::populateDimensionMapWithMultipleCASet(
 
 kir::Val* ParallelDimensionMap::get(ParallelType pt) const {
   TORCH_INTERNAL_ASSERT(isParallelTypeThread(pt), "Invalid ParallelType: ", pt);
+  // Disable simplification of warp padded dimensions at
+  //  query time for now. Could extend this map to support
+  //  padded dimensions.
+  bool has_active_lower = GpuLower::current() != nullptr;
+  if (has_active_lower) {
+    auto& warp_info = GpuLower::current()->getWarpPaddedParallelInfo();
+    if (pt == ParallelType::TIDx && warp_info.is_tidx_padded) {
+      return kir::NamedScalar::getParallelDim(pt);
+    }
+  }
   auto it = dim_map_.find(pt);
   if (it == dim_map_.end()) {
     return nullptr;

@@ -67,6 +67,126 @@ static void NvFuserScheduler_Softmax(
 
 //------------------------------------------------------------------------------
 
+// Warp softmax comparison
+
+static void NvFuserScheduler_Softmax_WarpReduceReference(
+    benchmark::State& benchmark_state) {
+  auto dtype = DataType::Float;
+  std::vector<int64_t> input_shape{
+      benchmark_state.range(0), benchmark_state.range(1)};
+
+  auto fusion_ptr = std::make_unique<Fusion>();
+  auto fusion = fusion_ptr.get();
+  FusionGuard fg(fusion);
+  setupSoftmax(fusion, dtype, 1);
+
+  // inputs
+  at::manual_seed(0);
+  auto options =
+      at::TensorOptions().dtype(data_type_to_aten(dtype)).device(at::kCUDA, 0);
+  at::Tensor aten_input = at::randn(input_shape, options);
+  std::vector<c10::IValue> aten_inputs({aten_input});
+
+  // Schedule through magic scheduler:
+  auto runtime_info = SchedulerRuntimeInfo(fusion, aten_inputs, true);
+  TORCH_INTERNAL_ASSERT(SchedulerEntry::canSchedule(
+      ScheduleHeuristic::Normalization, fusion, runtime_info));
+  auto scheduler = SchedulerEntry::makeEntry(
+      ScheduleHeuristic::Normalization, fusion, runtime_info);
+  scheduler->schedule(fusion);
+
+  FusionExecutor fe;
+  fe.compileFusion(fusion);
+  auto outputs = fe.runFusion(aten_inputs);
+  fe.setMeasureKernelTimeFlag(true);
+
+  // Sync everything up before we start
+  cudaDeviceSynchronize();
+  for (auto _ : benchmark_state) {
+    auto outputs = fe.runFusion(aten_inputs);
+    benchmark_state.SetIterationTime(fe.kernelTimeMs() / 1000.0);
+    clearL2Cache();
+  }
+  // Sync everything up before we're finished, don't want to run ahead on the
+  // cpu while benchmarking.
+  cudaDeviceSynchronize();
+
+  benchmark_state.SetBytesProcessed(
+      int64_t(benchmark_state.iterations()) *
+      (2 * aten_input.numel() * int64_t(dataTypeSize(dtype))));
+}
+
+static void NvFuserScheduler_Softmax_WarpReduce(
+    benchmark::State& benchmark_state) {
+  auto dtype = DataType::Float;
+  std::vector<int64_t> input_shape{
+      benchmark_state.range(0), benchmark_state.range(1)};
+
+  auto fusion_ptr = std::make_unique<Fusion>();
+  auto fusion = fusion_ptr.get();
+  FusionGuard fg(fusion);
+  setupSoftmax(fusion, dtype, 1);
+
+  // inputs
+  at::manual_seed(0);
+  auto options =
+      at::TensorOptions().dtype(data_type_to_aten(dtype)).device(at::kCUDA, 0);
+  at::Tensor aten_input = at::randn(input_shape, options);
+  std::vector<c10::IValue> aten_inputs({aten_input});
+
+  // Schedule through magic scheduler:
+  auto runtime_info = SchedulerRuntimeInfo(fusion, aten_inputs, true);
+  TORCH_INTERNAL_ASSERT(SchedulerEntry::canSchedule(
+      ScheduleHeuristic::Normalization, fusion, runtime_info));
+  auto scheduler = SchedulerEntry::makeEntry(
+      ScheduleHeuristic::Normalization, fusion, runtime_info);
+  scheduler->schedule(fusion);
+
+  // Modify the schedule to use warp reduction
+  auto used_vals = fusion->usedMathVals();
+  for (auto tv : ir_utils::filterByType<TensorView>(used_vals)) {
+    for (IterDomain* id : tv->domain()->domain()) {
+      if (id->getParallelType() == ParallelType::TIDx) {
+        id->padToMultipleOfWarp(32);
+      }
+    }
+  }
+
+  FusionExecutor fe;
+  fe.compileFusion(fusion);
+  auto outputs = fe.runFusion(aten_inputs);
+  fe.setMeasureKernelTimeFlag(true);
+
+  // Sync everything up before we start
+  cudaDeviceSynchronize();
+  for (auto _ : benchmark_state) {
+    auto outputs = fe.runFusion(aten_inputs);
+    benchmark_state.SetIterationTime(fe.kernelTimeMs() / 1000.0);
+    clearL2Cache();
+  }
+  // Sync everything up before we're finished, don't want to run ahead on the
+  // cpu while benchmarking.
+  cudaDeviceSynchronize();
+
+  benchmark_state.SetBytesProcessed(
+      int64_t(benchmark_state.iterations()) *
+      (2 * aten_input.numel() * int64_t(dataTypeSize(dtype))));
+}
+
+BENCHMARK(NvFuserScheduler_Softmax_WarpReduce)
+    ->RangeMultiplier(2)
+    ->Ranges({{8, 8}, {16 * 197, 16 * 197}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+BENCHMARK(NvFuserScheduler_Softmax_WarpReduceReference)
+    ->RangeMultiplier(2)
+    ->Ranges({{8, 8}, {16 * 197, 16 * 197}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+//------------------------------------------------------------------------------
+
 static void Baseline_Softmax(
     benchmark::State& benchmark_state,
     DataType dtype) {

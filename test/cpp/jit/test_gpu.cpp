@@ -15446,7 +15446,7 @@ TEST(NVFuserTest, FusionWelfordOtherPersistence_CUDA) {
   }
 }
 
-TEST(NVFuserTest, TestSegmentIslands_CUDA) {
+TEST(NVFuserTest, FusionSegmentIslands_CUDA) {
   auto fusion = std::make_unique<Fusion>();
   FusionGuard fg(fusion.get());
 
@@ -15468,7 +15468,7 @@ TEST(NVFuserTest, TestSegmentIslands_CUDA) {
   fusion_executor_cache.runFusionWithInputs({t0, t1});
 }
 
-TEST(NVFuserTest, TestBackOffInnerBroadcast_CUDA) {
+TEST(NVFuserTest, FusionBackOffInnerBroadcast_CUDA) {
   auto fusion = std::make_unique<Fusion>();
   FusionGuard fg(fusion.get());
 
@@ -15504,7 +15504,7 @@ TEST(NVFuserTest, TestBackOffInnerBroadcast_CUDA) {
   TORCH_CHECK(tv8->getMaxProducerPosition() == 2);
 }
 
-TEST(NVFuserTest, TestBackOffInnerBroadcast2_CUDA) {
+TEST(NVFuserTest, FusionBackOffInnerBroadcast2_CUDA) {
   auto fusion = std::make_unique<Fusion>();
   FusionGuard fg(fusion.get());
 
@@ -15524,7 +15524,7 @@ TEST(NVFuserTest, TestBackOffInnerBroadcast2_CUDA) {
   TORCH_CHECK(tv3->getMaxProducerPosition() == 2);
 }
 
-TEST(NVFuserTest, TestBackOffInnerBroadcast3_CUDA) {
+TEST(NVFuserTest, FusionBackOffInnerBroadcast3_CUDA) {
   auto fusion = std::make_unique<Fusion>();
   FusionGuard fg(fusion.get());
 
@@ -15541,6 +15541,399 @@ TEST(NVFuserTest, TestBackOffInnerBroadcast3_CUDA) {
   tv1->computeAt(tv4, -1);
   TORCH_CHECK(tv2->getComputeAtPosition() == 2);
   TORCH_CHECK(tv3->getMaxProducerPosition() == 3);
+}
+
+TEST(NVFuserTest, FusionSimpleWarp_CUDA) {
+  auto fusion = std::make_unique<Fusion>();
+  FusionGuard fg(fusion.get());
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion->addInput(tv0);
+
+  auto tv1 = sum(tv0, {1});
+  auto tv2 = broadcast(tv1, {false, true});
+  auto tv3 = add(tv2, tv0);
+
+  fusion->addOutput(tv3);
+
+  tv1->split(1, 32);
+  auto tv1_rf = tv1->rFactor({1});
+  TransformPropagator::from(tv1_rf);
+  tv1_rf->axis(-1)->parallelize(ParallelType::TIDx);
+  tv1->axis(0)->parallelize(ParallelType::BIDx);
+  tv1->axis(-1)->parallelize(ParallelType::TIDx);
+  tv2->axis(0)->parallelize(ParallelType::BIDx);
+  tv2->axis(-1)->parallelize(ParallelType::TIDx);
+  tv3->axis(0)->parallelize(ParallelType::BIDx);
+  tv3->axis(-1)->parallelize(ParallelType::TIDx);
+  tv0->computeAt(tv3, -1, ComputeAtMode::MostInlined);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input1 = at::randn({16, 128}, options);
+
+  auto at_output = input1.sum({1}, true).add(input1);
+
+  FusionExecutor fe;
+  fe.compileFusion(fusion.get());
+  auto outputs = fe.runFusion({input1});
+
+  testValidate(
+      fusion.get(), outputs, {input1}, {at_output}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionSimpleWarpPad_CUDA) {
+  auto fusion = std::make_unique<Fusion>();
+  FusionGuard fg(fusion.get());
+
+  auto tv0 = makeSymbolicTensor(2);
+
+  fusion->addInput(tv0);
+
+  auto tv1 = sum(tv0, {1});
+  auto tv2 = broadcast(tv1, {false, true});
+  auto tv3 = add(tv2, tv0);
+
+  fusion->addOutput(tv3);
+
+  // Schedule a persistent kernel
+  auto tv0_cache = tv0->cache_after();
+  tv1->split(1, 8, false);
+  auto tv1_rf = tv1->rFactor({1});
+  tv1_rf->axis(0)->parallelize(ParallelType::BIDx);
+  tv1_rf->axis(-1)->parallelize(ParallelType::TIDx);
+  tv1_rf->axis(-1)->padToMultipleOfWarp(32);
+  tv1->axis(-1)->parallelize(ParallelType::TIDx);
+  tv1->axis(-1)->padToMultipleOfWarp(32);
+  TransformPropagator::from(tv1_rf);
+  tv0->axis(-1)->parallelize(ParallelType::TIDx);
+  tv0->axis(-1)->padToMultipleOfWarp(32);
+  tv0_cache->axis(-1)->parallelize(ParallelType::TIDx);
+  tv0_cache->axis(-1)->padToMultipleOfWarp(32);
+  tv2->axis(-1)->parallelize(ParallelType::TIDx);
+  tv2->axis(-1)->padToMultipleOfWarp(32);
+  tv3->axis(-1)->parallelize(ParallelType::TIDx);
+  tv3->axis(-1)->padToMultipleOfWarp(32);
+
+  tv0->computeAt(tv3, -1, ComputeAtMode::MostInlined);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input1 = at::randn({16, 127}, options);
+
+  auto at_output = input1.sum({1}, true).add(input1);
+
+  FusionExecutor fe;
+  fe.compileFusion(fusion.get());
+  auto outputs = fe.runFusion({input1});
+  testValidate(
+      fusion.get(), outputs, {input1}, {at_output}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionWarpPadMergeSplit_CUDA) {
+  auto fusion = std::make_unique<Fusion>();
+  FusionGuard fg(fusion.get());
+
+  auto tv0 = makeSymbolicTensor(3);
+
+  fusion->addInput(tv0);
+
+  auto tv1 = sum(tv0, {1, 2});
+  auto tv2 = broadcast(tv1, {false, true, true});
+  auto tv3 = add(tv2, tv0);
+
+  fusion->addOutput(tv3);
+
+  // Schedule a persistent kernel
+  auto tv0_cache = tv0->cache_after();
+  tv1->merge(1);
+  tv1->split(1, 8, false);
+
+  auto tv1_rf = tv1->rFactor({1});
+  tv1_rf->axis(0)->parallelize(ParallelType::BIDx);
+  tv1_rf->axis(-1)->parallelize(ParallelType::TIDx);
+  tv1->axis(-1)->parallelize(ParallelType::TIDx);
+  tv1->axis(-1)->padToMultipleOfWarp();
+  TransformPropagator::from(tv1_rf);
+  tv0->axis(-1)->parallelize(ParallelType::TIDx);
+  tv0_cache->axis(-1)->parallelize(ParallelType::TIDx);
+  tv2->axis(-1)->parallelize(ParallelType::TIDx);
+  tv3->axis(-1)->parallelize(ParallelType::TIDx);
+
+  tv0->computeAt(tv3, -1, ComputeAtMode::MostInlined);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input1 = at::randn({16, 17, 128}, options);
+
+  auto at_output = input1.sum({1, 2}, true).add(input1);
+
+  FusionExecutor fe;
+  fe.compileFusion(fusion.get());
+  auto outputs = fe.runFusion({input1});
+  testValidate(
+      fusion.get(), outputs, {input1}, {at_output}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionSerialWarpReduction_CUDA) {
+  auto fusion = std::make_unique<Fusion>();
+  FusionGuard fg(fusion.get());
+
+  auto tv0 = makeSymbolicTensor(3);
+
+  fusion->addInput(tv0);
+
+  auto tv1 = sum(tv0, {1, 2});
+  auto tv2 = broadcast(tv1, {false, true, true});
+  auto tv3 = add(tv2, tv0);
+
+  fusion->addOutput(tv3);
+
+  // Schedule a persistent kernel
+  auto tv0_cache = tv0->cache_after();
+  tv1->merge(1);
+  tv1->split(1, 8, false);
+
+  tv1->axis(-1)->parallelize(ParallelType::TIDx);
+  tv1->axis(-1)->padToMultipleOfWarp();
+  TransformPropagator::from(tv1);
+  tv0->axis(-1)->parallelize(ParallelType::TIDx);
+  tv0_cache->axis(-1)->parallelize(ParallelType::TIDx);
+  tv2->axis(-1)->parallelize(ParallelType::TIDx);
+  tv3->axis(-1)->parallelize(ParallelType::TIDx);
+
+  tv0->computeAt(tv3, -1, ComputeAtMode::MostInlined);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input1 = at::randn({16, 17, 128}, options);
+
+  auto at_output = input1.sum({1, 2}, true).add(input1);
+
+  FusionExecutor fe;
+  fe.compileFusion(fusion.get());
+  auto outputs = fe.runFusion({input1});
+  testValidate(
+      fusion.get(), outputs, {input1}, {at_output}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionTrivialWarpReduction_CUDA) {
+  auto fusion = std::make_unique<Fusion>();
+  FusionGuard fg(fusion.get());
+
+  auto tv0 = makeConcreteTensor({17, 18, 128, 1});
+
+  fusion->addInput(tv0);
+
+  auto tv1 = sum(tv0, {1, 2, 3});
+  auto tv2 = broadcast(tv1, {false, true, true, true});
+  auto tv3 = add(tv2, tv0);
+
+  fusion->addOutput(tv3);
+
+  // Schedule a persistent kernel
+  auto tv0_cache = tv0->cache_after();
+  tv1->merge(1);
+  tv1->split(1, 8, false);
+
+  auto tv1_rf = tv1->rFactor({1});
+  tv1_rf->axis(0)->parallelize(ParallelType::BIDx);
+  tv1_rf->axis(-2)->parallelize(ParallelType::TIDx);
+  tv1->axis(-2)->parallelize(ParallelType::TIDx);
+  tv1->axis(-2)->padToMultipleOfWarp();
+  TransformPropagator::from(tv1_rf);
+  tv0->axis(-2)->parallelize(ParallelType::TIDx);
+  tv0_cache->axis(-2)->parallelize(ParallelType::TIDx);
+  tv2->axis(-2)->parallelize(ParallelType::TIDx);
+  tv3->axis(-2)->parallelize(ParallelType::TIDx);
+
+  tv0->computeAt(tv3, -1, ComputeAtMode::MostInlined);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input1 = at::randn({17, 18, 128, 1}, options);
+
+  auto at_output = input1.sum({1, 2, 3}, true).add(input1);
+
+  FusionExecutor fe;
+  fe.compileFusion(fusion.get());
+  auto outputs = fe.runFusion({input1});
+  testValidate(
+      fusion.get(), outputs, {input1}, {at_output}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionMultipleDimBinding_CUDA) {
+  auto fusion = std::make_unique<Fusion>();
+  FusionGuard fg(fusion.get());
+
+  auto tv0 = makeSymbolicTensor(2);
+  auto tv_add = makeSymbolicTensor(2);
+
+  fusion->addInput(tv0);
+  fusion->addInput(tv_add);
+
+  auto tv1 = sum(tv0, {1});
+  auto tv2 = broadcast(tv1, {false, true});
+  auto tv3 = add(tv2, tv0);
+  auto tv4 = add(tv0, tv_add);
+
+  fusion->addOutput(tv3);
+  fusion->addOutput(tv4);
+
+  // Schedule a persistent kernel
+  auto tv0_cache = tv0->cache_after();
+  tv1->split(1, 8, false);
+  auto tv1_rf = tv1->rFactor({1});
+  tv1_rf->axis(0)->parallelize(ParallelType::BIDx);
+  tv1_rf->axis(-1)->parallelize(ParallelType::TIDx);
+  tv1_rf->axis(-1)->padToMultipleOfWarp(32);
+  tv1->axis(-1)->parallelize(ParallelType::TIDx);
+  tv1->axis(-1)->padToMultipleOfWarp(32);
+  TransformPropagator::from(tv1_rf);
+  tv0->axis(-1)->parallelize(ParallelType::TIDx);
+  tv0->axis(-1)->padToMultipleOfWarp(32);
+  tv0_cache->axis(-1)->parallelize(ParallelType::TIDx);
+  tv0_cache->axis(-1)->padToMultipleOfWarp(32);
+  tv2->axis(-1)->parallelize(ParallelType::TIDx);
+  tv2->axis(-1)->padToMultipleOfWarp(32);
+  tv3->axis(-1)->parallelize(ParallelType::TIDx);
+  tv3->axis(-1)->padToMultipleOfWarp(32);
+  tv4->axis(-1)->parallelize(ParallelType::TIDx);
+  tv4->axis(-1)->padToMultipleOfWarp(64);
+
+  tv0->computeAt(tv3, -1, ComputeAtMode::MostInlined);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input1 = at::randn({16, 128}, options);
+  at::Tensor input2 = at::randn({16, 128}, options);
+
+  auto at_output = input1.sum({1}, true).add(input1);
+
+  FusionExecutor fe;
+  fe.compileFusion(fusion.get());
+  auto outputs = fe.runFusion({input1, input2});
+  testValidate(
+      fusion.get(),
+      outputs,
+      {input1, input2},
+      {at_output, input1 + input2},
+      __LINE__,
+      __FILE__);
+}
+
+TEST(NVFuserTest, FusionPadNoWarpReduce_CUDA) {
+  auto fusion = std::make_unique<Fusion>();
+  FusionGuard fg(fusion.get());
+
+  auto tv0 = makeSymbolicTensor(2);
+
+  fusion->addInput(tv0);
+
+  auto tv1 = sum(tv0, {1});
+  auto tv2 = broadcast(tv1, {false, true});
+  auto tv3 = add(tv2, tv0);
+
+  fusion->addOutput(tv3);
+
+  tv1->axis(-1)->parallelize(ParallelType::TIDx);
+  tv1->axis(-1)->padToMultipleOfWarp();
+  tv2->axis(-1)->parallelize(ParallelType::TIDx);
+  tv3->axis(-1)->parallelize(ParallelType::TIDx);
+
+  tv1->axis(0)->parallelize(ParallelType::TIDy);
+  tv2->axis(0)->parallelize(ParallelType::TIDy);
+  tv3->axis(0)->parallelize(ParallelType::TIDy);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input1 = at::randn({16, 31}, options);
+
+  auto at_output = input1.sum({1}, true).add(input1);
+
+  FusionExecutor fe;
+  fe.compileFusion(fusion.get());
+  auto outputs = fe.runFusion({input1});
+  testValidate(
+      fusion.get(), outputs, {input1}, {at_output}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionWarpMutipleThreadDim_CUDA) {
+  auto fusion = std::make_unique<Fusion>();
+  FusionGuard fg(fusion.get());
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion->addInput(tv0);
+  auto tv1 = add(tv0, new Double(1));
+  auto tv2 = sum(tv1, {1});
+  fusion->addOutput(tv2);
+
+  tv2->split(1, 8);
+  auto tv2_rf = tv2->rFactor({-1});
+  tv2_rf->axis(-1)->parallelize(ParallelType::TIDx);
+  tv2_rf->axis(-1)->padToMultipleOfWarp();
+
+  TransformPropagator::from(tv2_rf);
+
+  tv0->axis(-1)->parallelize(ParallelType::TIDx);
+  tv1->axis(-1)->parallelize(ParallelType::TIDx);
+  tv2->axis(0)->parallelize(ParallelType::BIDx);
+  tv2->axis(1)->parallelize(ParallelType::TIDy);
+  tv0->computeAt(tv2, 2);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input1 = at::randn({16, 31}, options);
+
+  auto at_output = (input1 + 1).sum({1});
+
+  FusionExecutor fe;
+  fe.compileFusion(fusion.get());
+  auto outputs = fe.runFusion({input1});
+  testValidate(
+      fusion.get(), outputs, {input1}, {at_output}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionWarpReduceUnrollOuterLoop_CUDA) {
+  auto fusion = std::make_unique<Fusion>();
+  FusionGuard fg(fusion.get());
+
+  auto tv0 = makeSymbolicTensor(2);
+
+  fusion->addInput(tv0);
+
+  auto tv1 = sum(tv0, {1});
+  auto tv2 = broadcast(tv1, {false, true});
+  auto tv3 = add(tv2, tv0);
+
+  fusion->addOutput(tv3);
+
+  // Schedule a persistent kernel
+  auto tv0_cache = tv0->cache_after();
+  tv1->split(1, 8, false);
+  tv1->split(0, 4);
+  auto tv1_rf = tv1->rFactor({2});
+
+  tv1_rf->axis(0)->parallelize(ParallelType::BIDx);
+  tv1_rf->axis(1)->parallelize(ParallelType::Unroll);
+  tv1_rf->axis(-1)->parallelize(ParallelType::TIDx);
+  tv1->axis(-1)->parallelize(ParallelType::TIDx);
+  tv1->axis(-1)->padToMultipleOfWarp();
+  tv1->axis(1)->parallelize(ParallelType::Unroll);
+  TransformPropagator::from(tv1_rf);
+  tv0->axis(-1)->parallelize(ParallelType::TIDx);
+  tv0->axis(1)->parallelize(ParallelType::Unroll);
+  tv0_cache->axis(-1)->parallelize(ParallelType::TIDx);
+  tv0_cache->axis(1)->parallelize(ParallelType::Unroll);
+  tv2->axis(-1)->parallelize(ParallelType::TIDx);
+  tv2->axis(1)->parallelize(ParallelType::Unroll);
+  tv3->axis(-1)->parallelize(ParallelType::TIDx);
+  tv3->axis(1)->parallelize(ParallelType::Unroll);
+
+  tv0->computeAt(tv3, -1, ComputeAtMode::MostInlined);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input1 = at::randn({16, 128}, options);
+
+  auto at_output = input1.sum({1}, true).add(input1);
+
+  FusionExecutor fe;
+  fe.compileFusion(fusion.get());
+  auto outputs = fe.runFusion({input1});
+  testValidate(
+      fusion.get(), outputs, {input1}, {at_output}, __LINE__, __FILE__);
 }
 
 TEST(NVFuserTest, FusionSegfaultReduction_CUDA) {

@@ -39,6 +39,14 @@ void IndexReferenceReplay::handle(Split* s) {
   auto concrete_inner =
       GpuLower::current()->caIndexMap().getConcreteMappedID(s->inner());
 
+  if (concrete_outer->isParallelized()) {
+    replayed_outs.first->parallelize(concrete_outer->getParallelType());
+  }
+
+  if (concrete_inner->isParallelized()) {
+    replayed_outs.second->parallelize(concrete_inner->getParallelType());
+  }
+
   // Update leaf id set and concrete id map
   leaf_ids_.erase(mapped_in);
   leaf_ids_.emplace(replayed_outs.first);
@@ -78,6 +86,10 @@ void IndexReferenceReplay::handle(Merge* m) {
 
   auto concrete_out =
       GpuLower::current()->caIndexMap().getConcreteMappedID(m->out());
+
+  if (concrete_out->isParallelized()) {
+    replayed->parallelize(concrete_out->getParallelType());
+  }
 
   // Update leaf id set and concrete id map
   leaf_ids_.erase(mapped_in_outer);

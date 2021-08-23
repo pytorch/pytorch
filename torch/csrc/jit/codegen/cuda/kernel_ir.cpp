@@ -149,7 +149,8 @@ IterDomain::IterDomain(
       parallel_type_(iter_domain->getParallelType()),
       iter_type_(iter_domain->getIterType()),
       is_rfactor_domain_(iter_domain->isRFactorProduct()),
-      is_simple_(iter_domain->definition() == nullptr) {
+      is_simple_(iter_domain->definition() == nullptr),
+      is_padded_dimension_(iter_domain->hasPaddingToMultipleOfWarp()) {
   // preserve the fusion node's name
   setName(iter_domain->name());
 }

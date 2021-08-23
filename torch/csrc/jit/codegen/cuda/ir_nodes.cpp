@@ -680,7 +680,9 @@ IterDomain::IterDomain(const IterDomain* src, IrCloner* ir_cloner)
       extent_(ir_cloner->clone(src->extent_)),
       parallel_type_(src->parallel_type_),
       iter_type_(src->iter_type_),
-      is_rfactor_domain_(src->is_rfactor_domain_) {}
+      is_rfactor_domain_(src->is_rfactor_domain_),
+      is_padded_dimension_(src->is_padded_dimension_),
+      padded_to_size_(src->padded_to_size_) {}
 
 bool IterDomain::sameAs(const Statement* other) const {
   if (other == this) {

@@ -409,12 +409,16 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
   // Returns a new IterDomain matching properties of this
   // TODO: parallel_method->getParallelType
   IterDomain* clone() const {
-    return new IterDomain(
+    auto cloned = new IterDomain(
         start(),
         extent(),
         getParallelType(),
         getIterType(),
         isRFactorProduct());
+
+    cloned->is_padded_dimension_ = is_padded_dimension_;
+    cloned->padded_to_size_ = padded_to_size_;
+    return cloned;
   }
 
   //! Clone a vector domains
@@ -500,6 +504,43 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
     return extent_;
   }
 
+  //! Dimension padding interface:
+  //!  2 modes are currently supported:
+  //!
+  //!   - mode 1: if to_size is given as a positive number,
+  //!      the dimension will be padded to the size so that
+  //!      this iterdomain will be compile-time constant
+  //!      size and it is the scheduler's responsibility
+  //!      to ensure no input larger than the padded size
+  //!      will be observed
+  //!
+  //!   - mode 2: if no to_size is given, this dimension
+  //!      is "dynamically" padded to next smallest multiple
+  //!      of a warp size, i.e. 17 padded to 32, 33 padded to 64
+  //!      based on the given input.
+  void padToMultipleOfWarp(int64_t to_size = -1) {
+    // Currently only restricted to TIDx to generate warp reduce
+    TORCH_CHECK(
+        parallel_type_ == ParallelType::TIDx,
+        "padToMultipleOfWarp : warp padding only supported on TIDx parallel dimension");
+    is_padded_dimension_ = true;
+    if (to_size > 0) {
+      padded_to_size_ = to_size;
+    }
+  }
+
+  //! Indicates if this iterdomain had padding
+  //!  dynamical or statical
+  bool hasPaddingToMultipleOfWarp() const {
+    return is_padded_dimension_;
+  }
+
+  //! Returns a concrete value if this iterdomain
+  //!  has been padded to a statical size.
+  c10::optional<int64_t> getMaybeSizeAfterPadding() const {
+    return padded_to_size_;
+  }
+
   //! Check if IterDomain is a broadcast axis with compile-time
   //! known extent. This is the case with all size-1 IterDomains on
   //! a TensorView's root domain when the TensorView is created.
@@ -535,6 +576,8 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
   ParallelType parallel_type_ = ParallelType::Serial;
   IterType iter_type_ = IterType::Iteration;
   bool is_rfactor_domain_ = false;
+  bool is_padded_dimension_ = false;
+  c10::optional<int64_t> padded_to_size_ = c10::nullopt;
 };
 
 //! TensorDomain holds a vector of IterDomains. It holds an IterDomain for every

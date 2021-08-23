@@ -23,6 +23,7 @@
 #include <nvfuser_resources/helpers.h>
 #include <nvfuser_resources/random_numbers.h>
 #include <nvfuser_resources/tensor.h>
+#include <nvfuser_resources/warp.h>
 #include <nvfuser_resources/welford.h>
 
 #include <cuda_occupancy.h>
@@ -70,6 +71,7 @@ std::string kernelPreamble() {
   ss << nvfuser_resources::broadcast_cu;
   ss << nvfuser_resources::welford_cu;
   ss << nvfuser_resources::PhiloxCudaStateRaw_cu;
+  ss << nvfuser_resources::warp_cu;
 
   return ss.str();
 }

@@ -240,6 +240,7 @@ void Kernel::finalize(std::vector<kir::Expr*> top_level_exprs) {
   top_level_exprs_ = std::move(top_level_exprs);
   predicate_map_ = std::make_unique<ThreadPredicateMap>(
       GpuLower::current()->threadPredMap());
+  warp_padded_parallel_info_ = GpuLower::current()->getWarpPaddedParallelInfo();
   ValidateAllocation::validate(this);
   analyze();
 }

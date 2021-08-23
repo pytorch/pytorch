@@ -735,6 +735,10 @@ class TORCH_CUDA_CU_API IterDomain final : public Val {
     return is_simple_;
   }
 
+  bool hasPaddingToMultipleOfWarp() const {
+    return is_padded_dimension_;
+  }
+
  private:
   Val* const start_ = nullptr;
   Val* const extent_ = nullptr;
@@ -748,6 +752,9 @@ class TORCH_CUDA_CU_API IterDomain final : public Val {
   // TODO(kir): this feels like a hack, revisit
   //
   bool is_simple_ = true;
+
+  //! Indicates if this iterdomain is a padded parallel dimension
+  bool is_padded_dimension_ = false;
 };
 
 // TODO(kir): is this really a value?

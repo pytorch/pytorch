@@ -44,6 +44,25 @@ void insertBefore(kir::Expr* scope, kir::Expr* ref, kir::Expr* expr) {
   }
 }
 
+//! Create an **empty** Forloop and copy the metadata.
+kir::ForLoop* cloneForLoop(kir::IrBuilder& ir_builder, kir::ForLoop* for_loop) {
+  return ir_builder.create<kir::ForLoop>(
+      for_loop->iter_domain(),
+      for_loop->index(),
+      for_loop->start(),
+      for_loop->stop(),
+      for_loop->step(),
+      for_loop->vectorize(),
+      for_loop->vectorize_shift());
+}
+
+//! Create an **empty** IfThenElse and copy the metadata.
+kir::IfThenElse* cloneIfThenElse(
+    kir::IrBuilder& ir_builder,
+    kir::IfThenElse* ite) {
+  return ir_builder.create<kir::IfThenElse>(ite->predicate());
+}
+
 } // namespace scope_utils
 
 namespace ir_utils {
@@ -208,6 +227,60 @@ kir::Expr* applyReplacements(
   }
 }
 
+c10::optional<IterDomain*> getMaybeWarpReductionDim(
+    const kir::ReductionOp* node) {
+  auto kir_tv = ir_utils::getTVOutput(node);
+  if (!kir_tv) {
+    return c10::nullopt;
+  }
+  auto fuser_reduction = kir_tv->fuserTv()->definition()->as<ReductionOp>();
+  return getMaybeWarpReductionDim(fuser_reduction);
+}
+
+c10::optional<IterDomain*> getMaybeWarpReductionDim(const ReductionOp* node) {
+  auto fuser_tv_out = node->out()->as<TensorView>();
+  auto fuser_tv_in = node->in()->as<TensorView>();
+
+  // only support reducing to registers for now.
+  if (fuser_tv_in->getMemoryType() != MemoryType::Local ||
+      fuser_tv_out->getMemoryType() != MemoryType::Local) {
+    return c10::nullopt;
+  }
+
+  IterDomain* reduction_on_xdim = nullptr;
+  for (auto id : fuser_tv_out->domain()->domain()) {
+    // Currently warp reduction only allows
+    //  serial and block.x parallel reductions
+    if (id->isReduction() && id->isParallelized()) {
+      if (id->getParallelType() == ParallelType::TIDx) {
+        reduction_on_xdim = id;
+      } else if (id->isThread()) {
+        return c10::nullopt;
+      }
+    }
+  }
+  if (!reduction_on_xdim) {
+    return c10::nullopt;
+  }
+
+  if (!reduction_on_xdim->start()->isZeroInt()) {
+    return c10::nullopt;
+  }
+
+  if (reduction_on_xdim->hasPaddingToMultipleOfWarp()) {
+    return c10::optional<IterDomain*>(reduction_on_xdim);
+  }
+
+  if (reduction_on_xdim->extent()->isConstScalar()) {
+    auto extent_value = reduction_on_xdim->extent()->getInt().value();
+    if (extent_value % C10_WARP_SIZE == 0) {
+      return c10::optional<IterDomain*>(reduction_on_xdim);
+    }
+  }
+
+  return c10::nullopt;
+}
+
 } // namespace ir_utils
 
 namespace loop_utils {
@@ -277,6 +350,192 @@ std::pair<kir::ForLoop*, int64_t> getAllocPoint(
 }
 
 } // namespace loop_utils
+
+namespace {
+
+class ReplaceExprInput : public kir::MutableIrVisitor {
+ public:
+  static kir::Expr* replace(
+      kir::Expr* expr,
+      const std::unordered_map<kir::Val*, kir::Val*>& replacement_map) {
+    ReplaceExprInput replacer(expr, replacement_map);
+    TORCH_INTERNAL_ASSERT(expr != nullptr);
+    expr->accept(&replacer);
+    TORCH_INTERNAL_ASSERT(replacer.replaced_expr_ != nullptr);
+    auto ret_expr = replacer.replaced_expr_;
+
+    // Copy predicates if the original expr is predicated
+    if (ret_expr != expr) {
+      ret_expr->setPredicate(expr->predicate());
+      ret_expr->setWritePredicate(expr->writePredicate());
+    }
+    return ret_expr;
+  }
+
+  static std::vector<kir::Expr*> replace(
+      const std::vector<kir::Expr*>& scope,
+      const std::unordered_map<kir::Val*, kir::Val*>& replacement_map) {
+    std::vector<kir::Expr*> ret_expr;
+    ret_expr.reserve(scope.size());
+
+    for (auto expr : scope) {
+      ret_expr.push_back(replace(expr, replacement_map));
+    }
+
+    return ret_expr;
+  }
+
+ private:
+  ReplaceExprInput(
+      kir::Expr* expr,
+      const std::unordered_map<kir::Val*, kir::Val*>& replacement_map)
+      : gpu_lower_(GpuLower::current()),
+        ir_builder_(gpu_lower_->kernel()),
+        replacement_map_(replacement_map) {
+    replaced_expr_ = expr;
+  }
+
+  c10::optional<std::unordered_map<kir::Val*, kir::Val*>>
+  getMaybeInputReplacementMap(kir::Expr* expr) {
+    bool need_replacement = false;
+
+    std::unordered_map<kir::Val*, kir::Val*> replaced_val;
+    for (auto in : expr->inputs()) {
+      auto replace_it = replacement_map_.find(in);
+      if (replace_it != replacement_map_.end()) {
+        need_replacement = true;
+        replaced_val[in] = replace_it->second;
+      } else {
+        replaced_val[in] = in;
+      }
+    }
+    if (need_replacement) {
+      return c10::optional<std::unordered_map<kir::Val*, kir::Val*>>(
+          replaced_val);
+    } else {
+      return c10::nullopt;
+    }
+  }
+
+  // IR visitor interface
+  void visit(kir::ForLoop* for_loop) final {
+    auto new_for_loop = ir_builder_.create<kir::ForLoop>(
+        for_loop->iter_domain(),
+        for_loop->index(),
+        for_loop->start(),
+        for_loop->stop(),
+        for_loop->step(),
+        for_loop->vectorize(),
+        for_loop->vectorize_shift());
+
+    auto replaced_loop_body =
+        replace(for_loop->body().exprs(), replacement_map_);
+
+    for (auto new_expr : replaced_loop_body) {
+      new_for_loop->body().push_back(new_expr);
+    }
+    replaced_expr_ = new_for_loop;
+  }
+
+  void visit(kir::IfThenElse* ite) final {
+    auto new_ite = ir_builder_.create<kir::IfThenElse>(ite->predicate());
+    auto replaced_then_body =
+        replace(ite->thenBody().exprs(), replacement_map_);
+    for (auto new_expr : replaced_then_body) {
+      new_ite->thenBody().push_back(new_expr);
+    }
+    if (ite->hasElse()) {
+      auto replaced_else_body =
+          replace(ite->elseBody().exprs(), replacement_map_);
+      for (auto new_expr : replaced_else_body) {
+        new_ite->elseBody().push_back(new_expr);
+      }
+    }
+    replaced_expr_ = new_ite;
+  }
+
+  void visit(kir::UnaryOp* node) final {
+    auto replaced_inputs = getMaybeInputReplacementMap(node);
+    if (replaced_inputs.has_value()) {
+      replaced_expr_ = ir_builder_.create<kir::UnaryOp>(
+          node->operation(),
+          node->out(),
+          replaced_inputs.value().at(node->in()));
+    }
+  }
+  void visit(kir::BinaryOp* node) final {
+    auto replaced_inputs = getMaybeInputReplacementMap(node);
+    if (replaced_inputs.has_value()) {
+      replaced_expr_ = ir_builder_.create<kir::BinaryOp>(
+          node->operation(),
+          node->out(),
+          replaced_inputs.value().at(node->lhs()),
+          replaced_inputs.value().at(node->rhs()));
+    }
+  }
+
+  void visit(kir::TernaryOp* node) final {
+    auto replaced_inputs = getMaybeInputReplacementMap(node);
+    if (replaced_inputs.has_value()) {
+      replaced_expr_ = ir_builder_.create<kir::TernaryOp>(
+          node->operation(),
+          node->out(),
+          replaced_inputs.value().at(node->in1()),
+          replaced_inputs.value().at(node->in2()),
+          replaced_inputs.value().at(node->in3()));
+    }
+  }
+
+  void visit(kir::ReductionOp* node) final {
+    auto replaced_inputs = getMaybeInputReplacementMap(node);
+    if (replaced_inputs.has_value()) {
+      replaced_expr_ = ir_builder_.create<kir::ReductionOp>(
+          node->operation(),
+          node->init(),
+          node->out(),
+          replaced_inputs.value().at(node->in()));
+    }
+  }
+
+  void visit(kir::BroadcastOp* node) final {
+    auto replaced_inputs = getMaybeInputReplacementMap(node);
+    if (replaced_inputs.has_value()) {
+      replaced_expr_ = ir_builder_.create<kir::BroadcastOp>(
+          node->out(), replaced_inputs.value().at(node->in()));
+    }
+  }
+
+  void visit(kir::WelfordOp* node) final {
+    auto replaced_inputs = getMaybeInputReplacementMap(node);
+    if (replaced_inputs.has_value()) {
+      replaced_expr_ = ir_builder_.create<kir::WelfordOp>(
+          node->outAvg(),
+          node->outVar(),
+          node->outN(),
+          node->initAvg(),
+          node->initVar(),
+          node->initN(),
+          replaced_inputs.value().at(node->inAvg()),
+          replaced_inputs.value().at(node->inVar()),
+          replaced_inputs.value().at(node->inN()));
+    }
+  }
+
+ private:
+  GpuLower* gpu_lower_;
+  kir::IrBuilder ir_builder_;
+  kir::Expr* replaced_expr_ = nullptr;
+  const std::unordered_map<kir::Val*, kir::Val*>& replacement_map_;
+};
+
+} // namespace
+
+std::vector<kir::Expr*> replaceInputsInExpr(
+    const std::vector<kir::Expr*>& exprs,
+    const std::unordered_map<kir::Val*, kir::Val*>& replacement_map) {
+  return ReplaceExprInput::replace(exprs, replacement_map);
+}
+
 } // namespace cuda
 } // namespace fuser
 } // namespace jit

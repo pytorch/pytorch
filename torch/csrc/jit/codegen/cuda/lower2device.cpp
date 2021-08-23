@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 
+#include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
@@ -20,6 +21,7 @@
 #include <torch/csrc/jit/codegen/cuda/lower_unroll.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 #include <torch/csrc/jit/codegen/cuda/lower_validation.h>
+#include <torch/csrc/jit/codegen/cuda/lower_warp_reduce.h>
 
 #include <list>
 #include <unordered_map>
@@ -243,6 +245,55 @@ void GpuLower::replaceSymbolicSizes() {
   }
 }
 
+void GpuLower::collectPaddedParallelDims() {
+  ExpressionEvaluator ee(fusion_);
+  bool can_be_single_warp = true;
+
+  auto used_vals = fusion_->usedMathVals();
+  for (auto tv : ir_utils::filterByType<TensorView>(used_vals)) {
+    for (auto id : tv->domain()->domain()) {
+      if (tv->definition()) {
+        if (auto reduction = dynamic_cast<ReductionOp*>(tv->definition())) {
+          if (ir_utils::getMaybeWarpReductionDim(reduction).has_value()) {
+            warp_pad_info_.has_warp_reduction = true;
+          }
+        }
+      }
+
+      // Check ifi TIDx is padded in this kernel
+      if (id->hasPaddingToMultipleOfWarp()) {
+        TORCH_INTERNAL_ASSERT(
+            id->getParallelType() == ParallelType::TIDx,
+            "Padded types supported only on TIDx");
+        warp_pad_info_.is_tidx_padded = true;
+      }
+
+      // Check all possible bindings of TIDx to see
+      //  if TIDx will eventually be bound to a single warp.
+      if (id->getParallelType() == ParallelType::TIDx) {
+        auto eval_dim = ee.evaluate(id->extent());
+        auto size_after_padding = id->getMaybeSizeAfterPadding();
+        bool padding_to_single_warp = size_after_padding.has_value() &&
+            size_after_padding.value() == C10_WARP_SIZE;
+
+        if ((!eval_dim.has_value() || eval_dim.value() > C10_WARP_SIZE) &&
+            !padding_to_single_warp) {
+          // If we see any other TIDx binding that's larger than
+          //  a warp or unknown, we shouldn't lower warp reduce
+          //  to a single warp type.
+          can_be_single_warp = false;
+          warp_pad_info_.is_tidx_single_warp = false;
+        } else if (can_be_single_warp) {
+          if (padding_to_single_warp ||
+              (eval_dim.has_value() && eval_dim.value() == C10_WARP_SIZE)) {
+            warp_pad_info_.is_tidx_single_warp = true;
+          }
+        }
+      }
+    }
+  }
+}
+
 void GpuLower::lower() {
   FUSER_PERF_SCOPE("GpuLower::lower");
 
@@ -268,6 +319,7 @@ void GpuLower::lower() {
   // prepare for lowering
   validateIr(fusion_);
   replaceSymbolicSizes();
+  collectPaddedParallelDims();
   trivial_reduction_info_.build(fusion_, this);
 
   // In the future we may directly use this map, but for now it will propagate
@@ -351,8 +403,10 @@ void GpuLower::lower() {
 
   const auto indexed_loops = IndexLowering::getIndexedExprs(war_sync_exprs);
 
+  const auto exprs_with_fused_broadcast = fuseWarpReduce(indexed_loops);
+
   const auto conditional_loops =
-      generateConditionalFromPredicate(fusion_, indexed_loops);
+      generateConditionalFromPredicate(fusion_, exprs_with_fused_broadcast);
 
   // Insert fake zero updates to make sure nvrtc doesn't blow out register use
   // on index and predicate reuse

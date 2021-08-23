@@ -33,6 +33,14 @@ std::vector<kir::ForLoop*> getLoops(kir::Expr* scope);
 //!
 void insertBefore(kir::Expr* scope, kir::Expr* ref, kir::Expr* expr);
 
+//! Create an **empty** Forloop and copy the metadata.
+kir::ForLoop* cloneForLoop(kir::IrBuilder& ir_builder, kir::ForLoop* for_loop);
+
+//! Create an **empty** IfThenElse and copy the metadata.
+kir::IfThenElse* cloneIfThenElse(
+    kir::IrBuilder& ir_builder,
+    kir::IfThenElse* ite);
+
 } // namespace scope_utils
 
 namespace ir_utils {
@@ -100,6 +108,14 @@ kir::Expr* applyReplacements(
     const std::unordered_map<kir::Expr*, kir::Expr*>& expr_replacement_map,
     kir::Expr* expr);
 
+//! Returns the Fuser iterdomain that maps to the thread dimension grouped
+//!  to warps. Returns nullopt if the reduction is not to be lowered to
+//!  a warp reduction.
+c10::optional<IterDomain*> getMaybeWarpReductionDim(
+    const kir::ReductionOp* node);
+
+c10::optional<IterDomain*> getMaybeWarpReductionDim(const ReductionOp* node);
+
 } // namespace ir_utils
 
 namespace loop_utils {
@@ -125,6 +141,17 @@ std::pair<kir::ForLoop*, int64_t> getAllocPoint(
     const TensorView* tv,
     const std::vector<kir::ForLoop*>& loops);
 } // namespace loop_utils
+
+// Replace value pass on Kernel IR.
+//  Replace each use of any kir::Val* that apears in the given `replacement_map`
+//  Keeps the predicate carried by each expr
+//
+// Warning: Blindly replaces all use based on pointer
+// Warning: May invalidate indexing if replacing uses of allocated values
+std::vector<kir::Expr*> replaceInputsInExpr(
+    const std::vector<kir::Expr*>& exprs,
+    const std::unordered_map<kir::Val*, kir::Val*>& replacement_map);
+
 } // namespace cuda
 } // namespace fuser
 } // namespace jit

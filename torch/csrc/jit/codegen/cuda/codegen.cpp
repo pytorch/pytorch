@@ -639,6 +639,32 @@ class CudaKernelGenerator : private kir::IrVisitor {
     }
   }
 
+  void genWarpReductionOp(
+      const kir::ReductionOp* node,
+      const IterDomain* reduction_id) {
+    bool is_single_warp =
+        kernel_->getWarpPaddedParallelInfo().is_tidx_single_warp;
+
+    indent() << "warp::warpReduceTIDX";
+    if (is_single_warp) {
+      code_ << "<true>(\n";
+    } else {
+      code_ << "<false>(\n";
+    }
+    indent() << kTab << gen(node->out()) << ",\n";
+    indent() << kTab << gen(node->in()) << ",\n";
+    indent() << kTab << genReductionOp(node->operation(), node->out()) << ",\n";
+    indent() << kTab << "threadIdx,\n";
+    indent() << kTab << "blockDim,\n";
+    indent() << kTab << "static_cast<" << node->out()->dtype()
+             << "*>(shared_mem),\n";
+    TORCH_INTERNAL_ASSERT(
+        node->predicate() != nullptr && node->predicate()->hasValue());
+    indent() << kTab << genInline(node->predicate()) << ",\n";
+    indent() << kTab << node->out()->dtype() << "(" << genInline(node->init())
+             << "));\n";
+  }
+
   void visit(const kir::ReductionOp* node) final {
     TORCH_INTERNAL_ASSERT(node->out()->isA<kir::TensorIndex>());
 
@@ -653,6 +679,11 @@ class CudaKernelGenerator : private kir::IrVisitor {
       const auto op_type = node->operation();
       indent() << gen_out << " = "
                << genBinaryOp(op_type, out, gen_out, gen(node->in())) << ";\n";
+      return;
+    }
+
+    if (auto reduction_id = ir_utils::getMaybeWarpReductionDim(node)) {
+      genWarpReductionOp(node, reduction_id.value());
       return;
     }
 
