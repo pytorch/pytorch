@@ -223,18 +223,18 @@ std::tuple<Tensor, Tensor, Tensor> prelu_double_backward(
     const Tensor & weight_);
 Tensor as_strided_backward(Tensor grad, TensorGeometry input_geometry, IntArrayRef sizes, IntArrayRef strides, optional<int64_t> storage_offset_);
 std::tuple<Tensor, Tensor> atan2_backward(const Tensor& grad, const Tensor& self, const Tensor& other, std::array<bool, 2> output_mask);
-std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
-    const Tensor & input,
-    const c10::optional<Tensor> & gamma,
-    const Tensor & ggI,
-    const Tensor & ggG,
-    const Tensor & ggB,
-    const Tensor & gO,
-    const Tensor & save_mean,
-    const Tensor & save_invstd,
+std::tuple<Tensor, Tensor, Tensor>
+infinitely_differentiable_native_layer_norm_backward(
+    const Tensor& dY,
+    const Tensor& dmean,
+    const Tensor& drstd,
+    const Tensor& X,
+    const Tensor& mean,
+    const Tensor& rstd,
+    const c10::optional<Tensor>& gamma,
     IntArrayRef normalized_shape,
-    std::array<bool,3> output_mask);
-
+    double eps,
+    std::array<bool, 3> grad_input_mask);
 std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, const Tensor& input, const Tensor& tau);
 std::tuple<Tensor, Tensor> polar_backward(
     const Tensor& grad,
