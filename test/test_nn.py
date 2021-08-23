@@ -17066,8 +17066,8 @@ class TestNNDeviceType(NNTestCase):
 
             # construct target probablity that should have the same result as label_smoothing
             # y_k^ls = y_k * (1 - label_smoothing) + label_smoothing / n_classes
-            target_prob = torch.full_like(input, fill_value=label_smoothing/C, device=device)
-            src = torch.full(target.shape, 1 - label_smoothing + label_smoothing/C, device=device)
+            target_prob = torch.full_like(input, fill_value=label_smoothing / C, device=device)
+            src = torch.full(target.shape, 1 - label_smoothing + label_smoothing / C, device=device)
             target_prob.scatter_(1, target.unsqueeze(1), src.unsqueeze(1))
 
             loss = nn.CrossEntropyLoss(reduction=reduction)
