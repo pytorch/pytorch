@@ -78,6 +78,9 @@ def is_available() -> bool:
     # be initialized
     return torch._C._cuda_getDeviceCount() > 0
 
+def is_bf16_supported():
+    r"""Returns a bool indicating if the current CUDA device supports dtype bfloat16"""
+    return torch.cuda.get_device_properties(torch.cuda.current_device()).major >= 8 and int(torch.version.cuda.split()[0]) >= 11
 
 def _sleep(cycles):
     torch._C._cuda_sleep(cycles)
