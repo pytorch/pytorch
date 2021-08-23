@@ -31,8 +31,6 @@ using elu_backward_fn = void (*)(TensorIteratorBase&, const Scalar&, const Scala
 using leaky_relu_fn = void (*)(TensorIteratorBase&, const Scalar&);
 using leaky_relu_backward_fn = void (*)(TensorIteratorBase&, const Scalar&);
 using log_sigmoid_cpu_fn = void (*)(Tensor& , Tensor&, const Tensor& );
-using gelu_fn = void (*)(TensorIteratorBase&, bool);
-using gelu_backward_fn = void (*)(TensorIteratorBase&, bool);
 
 DECLARE_DISPATCH(elu_fn, elu_stub);
 DECLARE_DISPATCH(elu_backward_fn, elu_backward_stub);
@@ -41,8 +39,8 @@ DECLARE_DISPATCH(softplus_backward_fn, softplus_backward_stub);
 DECLARE_DISPATCH(log_sigmoid_cpu_fn, log_sigmoid_cpu_stub);
 DECLARE_DISPATCH(activation_backward_fn, log_sigmoid_backward_stub);
 DECLARE_DISPATCH(threshold_fn, threshold_stub);
-DECLARE_DISPATCH(gelu_fn, GeluKernel);
-DECLARE_DISPATCH(gelu_backward_fn, GeluBackwardKernel);
+DECLARE_DISPATCH(structured_activation_fn, GeluKernel);
+DECLARE_DISPATCH(structured_activation_backward_fn, GeluBackwardKernel);
 DECLARE_DISPATCH(hardtanh_backward_fn, hardtanh_backward_stub);
 DECLARE_DISPATCH(hardsigmoid_fn, hardsigmoid_stub);
 DECLARE_DISPATCH(hardsigmoid_backward_fn, hardsigmoid_backward_stub);

@@ -375,7 +375,7 @@ TORCH_LIBRARY_IMPL(aten, Autocast, m) {
   KERNEL(at::pow, "pow.Tensor_Tensor", Tensor (const Tensor &, const Tensor &), fp32)
   KERNEL(at::pow, "pow.Scalar", Tensor (const Scalar&, const Tensor &), fp32)
   KERNEL(at::softplus, "softplus", Tensor (const Tensor &, const Scalar&, const Scalar&), fp32)
-  KERNEL(at::gelu, "gelu", Tensor (const Tensor &, bool), fp32)
+  KERNEL(at::gelu, "gelu", Tensor (const Tensor &), fp32)
   KERNEL(at::layer_norm, "layer_norm", Tensor (const Tensor &, IntArrayRef, const c10::optional<Tensor>&, const c10::optional<Tensor>&, double, bool), fp32)
   // The macro doesn't like this one (I think it chokes on commas inside <>) so write it manually
   m.impl(TORCH_SELECTIVE_NAME("aten::native_layer_norm"),
@@ -482,7 +482,7 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
   KERNEL_CPU(at::dropout, "dropout", Tensor (const Tensor &, double, bool), fp32)
   KERNEL_CPU(at::avg_pool2d, "avg_pool2d", Tensor (const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, bool, bool, c10::optional<int64_t>), fp32)
   KERNEL_CPU(at::avg_pool3d, "avg_pool3d", Tensor (const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, bool, bool, c10::optional<int64_t>), fp32)
-  KERNEL_CPU(at::gelu, "gelu", Tensor (const Tensor &, bool), fp32)
+  KERNEL_CPU(at::gelu, "gelu", Tensor (const Tensor &), fp32)
   KERNEL_CPU(at::upsample_nearest1d, "upsample_nearest1d", Tensor (const Tensor &, IntArrayRef, c10::optional<double>), fp32)
   KERNEL_CPU(at::upsample_nearest1d, "upsample_nearest1d.vec", Tensor (const Tensor &, c10::optional<IntArrayRef>, c10::optional<ArrayRef<double>>), fp32)
   KERNEL_CPU(at::upsample_nearest2d, "upsample_nearest2d", Tensor (const Tensor &, IntArrayRef, c10::optional<double>, c10::optional<double>), fp32)

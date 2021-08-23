@@ -111,7 +111,7 @@ jobs:
           set -eu
           # This is necessary to get the same results regardless of whether the
           # PR was opened directly or from a forked repo. See: `9f890a92` for more info.
-          git remote add upstream https://github.com/csarofeen/pytorch
+          git remote add upstream https://github.com/pytorch/pytorch
           git fetch upstream "$GITHUB_BASE_REF"
 
           # only run clang-format on allowlisted files
@@ -320,7 +320,7 @@ jobs:
           fi
 
   clang-tidy:
-    runs-on: ubuntu-18.04 # linux.2xlarge doesn't run on our repo CI?
+    runs-on: linux.2xlarge
     container:
       # ubuntu20.04-cuda11.2-py3.8-tidy11
       image: ghcr.io/pytorch/cilint-clang-tidy:d8f0c777964d0dd8a147360de80aed1a13eb613a
@@ -343,7 +343,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           cd "${GITHUB_WORKSPACE}"
-          wget -O pr.diff "https://patch-diff.githubusercontent.com/raw/csarofeen/pytorch/pull/$PR_NUMBER.diff"
+          wget -O pr.diff "https://patch-diff.githubusercontent.com/raw/pytorch/pytorch/pull/$PR_NUMBER.diff"
       - name: Generate build files
         run: |
           cd "${GITHUB_WORKSPACE}"

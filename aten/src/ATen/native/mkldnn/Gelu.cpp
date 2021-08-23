@@ -7,11 +7,11 @@
 
 namespace at { namespace native {
 
-Tensor mkldnn_gelu(const Tensor& input, bool approximate) {
+Tensor mkldnn_gelu(const Tensor& input) {
   TORCH_CHECK(false, "mkldnn_gelu: ATen not compiled with MKLDNN support");
 }
 
-Tensor mkldnn_gelu_backward(const Tensor& grad_output, const Tensor& input, bool approximate) {
+Tensor mkldnn_gelu_backward(const Tensor& grad_output, const Tensor& input) {
   TORCH_CHECK(false, "mkldnn_gelu_backward: ATen not compiled with MKLDNN support");
 }
 
@@ -24,8 +24,7 @@ Tensor mkldnn_gelu_backward(const Tensor& grad_output, const Tensor& input, bool
 
 namespace at { namespace native {
 
-Tensor mkldnn_gelu(const Tensor& input, bool approximate) {
-  TORCH_CHECK(!approximate, "mkldnn_gelu does not support approximate=True");
+Tensor mkldnn_gelu(const Tensor& input) {
   if (input.scalar_type() == ScalarType::BFloat16) {
     TORCH_CHECK(mkldnn_bf16_device_check(),
         "mkldnn_gelu: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
@@ -38,8 +37,7 @@ Tensor mkldnn_gelu(const Tensor& input, bool approximate) {
                                  input.options().device_opt());
 }
 
-Tensor mkldnn_gelu_backward(const Tensor& grad_output, const Tensor& input, bool approximate) {
-  TORCH_CHECK(!approximate, "mkldnn_gelu does not support approximate=True");
+Tensor mkldnn_gelu_backward(const Tensor& grad_output, const Tensor& input) {
   const ideep::tensor& x = itensor_from_tensor(input);
   ideep::tensor grady = itensor_from_tensor(grad_output);
   ideep::tensor gradx;

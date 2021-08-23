@@ -77,7 +77,6 @@ _(aten, _expm1) \
 _(aten, _fft_with_size) \
 _(aten, _fill) \
 _(aten, _floor) \
-_(aten, _indexCopy) \
 _(aten, _fused_dropout) \
 _(aten, _indices) \
 _(aten, _ldexp) \
@@ -212,6 +211,8 @@ _(aten, avg_pool3d_forward) \
 _(aten, baddbmm) \
 _(aten, bartlett_window) \
 _(aten, batch_norm) \
+_(aten, _batch_norm_impl_index) \
+_(aten, _batch_norm_impl_index_backward) \
 _(aten, bernoulli) \
 _(aten, bilinear) \
 _(aten, binary_cross_entropy) \

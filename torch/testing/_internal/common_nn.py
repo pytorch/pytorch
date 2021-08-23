@@ -3507,16 +3507,12 @@ new_module_tests = [
     ),
     dict(
         module_name='GELU',
-        constructor_args=(False,),
-        cpp_constructor_args='torch::nn::GELUOptions().approximate(false)',
         input_size=(),
         desc='scalar',
         reference_fn=lambda x, *_: x * 0.5 * (1.0 + torch.erf(x / math.sqrt(2.0))),
     ),
     dict(
         module_name='GELU',
-        constructor_args=(False,),
-        cpp_constructor_args='torch::nn::GELUOptions().approximate(false)',
         input_size=(3, 2, 5),
         reference_fn=lambda x, *_: x * 0.5 * (1.0 + torch.erf(x / math.sqrt(2.0))),
     ),

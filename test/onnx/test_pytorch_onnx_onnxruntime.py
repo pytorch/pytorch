@@ -5892,16 +5892,7 @@ class TestONNXRuntime(unittest.TestCase):
     def test_gelu(self):
         class GeluModel(torch.nn.Module):
             def forward(self, x):
-                return torch.nn.functional.gelu(x, False)
-
-        x = torch.randn(2, 4, 5, 6, requires_grad=True)
-        self.run_test(GeluModel(), x)
-
-    @skipIfUnsupportedMinOpsetVersion(9)
-    def test_tanh_gelu(self):
-        class GeluModel(torch.nn.Module):
-            def forward(self, x):
-                return torch.nn.functional.gelu(x, True)
+                return torch.nn.functional.gelu(x)
 
         x = torch.randn(2, 4, 5, 6, requires_grad=True)
         self.run_test(GeluModel(), x)

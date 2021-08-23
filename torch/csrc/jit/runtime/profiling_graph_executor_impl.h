@@ -25,10 +25,6 @@ struct ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
     remaining_bailout_depth_.reset();
   }
 
-  bool isOptimized() const {
-    return optimized_plan_.has_value();
-  }
-
  private:
   const ExecutionPlan& getOptimizedPlanFor(
       Stack& stack,
