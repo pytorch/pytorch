@@ -1,5 +1,14 @@
 # See README.md in this directory for more guidance
 
+################################################################################
+# Reductions
+################################################################################
+
+- func: _max(Tensor self) -> Tensor
+  variants: function, method
+
+################################################################################
+
 # *********NB: _cast_* operators are DEPRECATED and will be removed
 # eventually. These were previously used before TorchScript IR supported
 # representing ScalarType's. They are now superseded by usage of
