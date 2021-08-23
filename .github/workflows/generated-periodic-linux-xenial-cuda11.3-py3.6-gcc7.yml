@@ -261,8 +261,6 @@ jobs:
       SHARD_NUMBER: ${{ matrix.shard }}
       NUM_TEST_SHARDS: ${{ matrix.num_shards }}
       PYTORCH_IGNORE_DISABLED_ISSUES: ${{ needs.generate-test-matrix.outputs.ignore-disabled-issues }}
-      BUILD_ENVIRONMENT: periodic-linux-xenial-cuda11.3-py3.6-gcc7-${{ matrix.config }}
-      PR_NUMBER: ${{ github.event.pull_request.number }}
     steps:
       - name: Log in to ECR
         run: |
@@ -319,9 +317,15 @@ jobs:
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Show env
+        env:
+          BUILD_ENVIRONMENT: periodic-linux-xenial-cuda11.3-py3.6-gcc7-${{ matrix.config }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           printenv | sort
       - name: Test PyTorch
+        env:
+          BUILD_ENVIRONMENT: periodic-linux-xenial-cuda11.3-py3.6-gcc7-${{ matrix.config }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           if [[ $TEST_CONFIG == 'multigpu' ]]; then
             TEST_COMMAND=.jenkins/pytorch/multigpu-test.sh
