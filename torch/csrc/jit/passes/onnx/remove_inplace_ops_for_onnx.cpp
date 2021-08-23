@@ -317,6 +317,7 @@ static void PrepareForRemoveMutations(MutationRemover& mr, Block* b) {
   }
 
   for (auto input : b->inputs()) {
+  restart:
     for (auto use : input->uses()) {
       Node* node = use.user;
       if (!mr.inplaceOpVariant(node)) {
@@ -335,6 +336,7 @@ static void PrepareForRemoveMutations(MutationRemover& mr, Block* b) {
         TORCH_INTERNAL_ASSERT(nullptr != newNode);
         node->replaceInput(index, newNode->output());
         input->replaceAllUsesAfterNodeWith(node, newNode->output());
+        goto restart;
       }
     }
   }

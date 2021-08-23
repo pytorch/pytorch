@@ -143,6 +143,8 @@ std::vector<IValue> getParamAttributes(
           auto attrVal = tryInsertConstant(*graph, attr);
           n->output()->replaceAllUsesWith(*attrVal);
           n->destroy();
+          // Don't scan blocks below.
+          continue;
         }
       }
     }
