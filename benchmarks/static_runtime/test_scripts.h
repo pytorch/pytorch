@@ -582,6 +582,11 @@ const auto var_cat_script = R"JIT(
    return torch.cat([inp1, inp2], dim).clone()
 )JIT";
 
+const auto var_stack_script = R"JIT(
+  def forward(self, inp1: Tensor, inp2: Tensor, dim: int):
+   return torch.stack([inp1, inp2], dim).clone()
+)JIT";
+
 const auto isinstance_int_script = R"JIT(
   def forward(self, a: Any):
       return isinstance(a, int)
