@@ -1385,6 +1385,7 @@ void testDefaultArgsPinvWithOutArg(int num_args) {
   input = input.view({N, N});
   auto ref = m.run_method("forward", input);
   TORCH_CHECK(!input.equal(torch::range(1, N * N, 1)));
+  TORCH_CHECK(input.equal(ref.toTensor()));
 }
 
 TEST(LiteInterpreterTest, DefaultArgsPinvWithOutArg) {
