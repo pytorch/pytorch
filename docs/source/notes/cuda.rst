@@ -882,8 +882,8 @@ Second, your warmup should run at least 11 DDP-enabled eager iterations before c
 
 .. _graph-memory-management:
 
-Graph memory management, and sharing memory across graphs
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Graph memory management
+^^^^^^^^^^^^^^^^^^^^^^^
 
 A captured graph acts on the same virtual addresses every time it replays.
 If PyTorch freed the memory, a later replay would hit an illegal memory access.
@@ -907,6 +907,9 @@ A good rule of thumb is, if you know the graphs will always
 be replayed in the same order they were captured, and never replayed concurrently,
 it's safe for them to share a private pool.
 
+Sharing memory across captures with torch.cuda.graph
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 :class:`torch.cuda.graph`'s ``pool`` argument is a hint to use a particular private pool,
 and can be used to share memory across graphs as shown::
 
@@ -927,8 +930,16 @@ and can be used to share memory across graphs as shown::
     g1.replay()
     g2.replay()
 
+Sharing memory across captures with torch.cuda.make_graphed_callables
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 With :func:`torch.cuda.make_graphed_callables`, if you want to graph several
 callables and you know they'll always run in the same order (and never concurrently)
-pass them as a list and set ``share_memory=True``.
+pass them as a tuple in the same order they'll run in the live workload, and
 :func:`~torch.cuda.make_graphed_callables` will capture their graphs using a shared
-memory pool.
+private pool.
+
+If, in the live workload, your callables will run in an order that occasionally changes,
+or if they'll run concurrently, passing them as a tuple to a single invocation of
+:func:`~torch.cuda.make_graphed_callables` is not allowed. Instead, you must call
+:func:`~torch.cuda.make_graphed_callables` separately for each one.

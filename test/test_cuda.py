@@ -3675,6 +3675,68 @@ torch.cuda.synchronize()
             self.assertEqual(scaler._scale, scale)
             self.assertEqual(scaler._growth_tracker, growth_tracker)
 
+    @unittest.skipIf((not TEST_CUDA) or
+                     TEST_WITH_ROCM or
+                     int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
+    def test_graph_make_graphed_callables_modules(self):
+        # N, D_in, H, D_out = 640, 4096, 2048, 1024
+
+        # models = []
+        # for _ in range(2):
+        #     model_section1 = torch.nn.Sequential(torch.nn.Linear(D_in, H),
+        #                                 torch.nn.Dropout(p=0.2)).cuda()
+        #     model_section2 = torch.nn.Sequential(torch.nn.Linear(H, D_out),
+        #                                 torch.nn.Dropout(p=0.1)).cuda()
+        #     models.append(torch.nn.Sequential(model_section1, model_section2))
+
+        # model = models[0]
+        # model_control = models[1]
+
+        # with torch.no_grad:
+        #     for p, pc in zip(model.parameters(), model_control.parameters()):
+        #         pc.copy_(p)
+
+        # loss_fn = torch.nn.MSELoss()
+
+        # optimizer = torch.optim.SGD(model.parameters(), lr = 0.1)
+        # optimizer_control = torch.optim.SGD(model_control.parameters(), lr = 0.1)
+
+        # x = torch.randn(N, D_in, device='cuda')
+        # h = torch.randn(N, H, device='cuda', requires_grad=True)
+        # y = torch.randn(N, D_out, device='cuda')
+
+        # model[0], model[1] = torch.cuda.make_graphed_callables((model[0], model[1]),
+        #                                                        ((x,), (h,)))
+
+        # real_inputs = [torch.rand_like(x) for _ in range(10)]
+        # real_targets = [torch.rand_like(y) for _ in range(10)]
+
+        # for m, opt in zip((model, model_control),
+        #                   (optimizer, optimizer_control))
+        #     # Resets RNC states before iterations for graphed and ungraphed models,
+        #     # so dropout math should be bitwise identical for both.
+        #     torch.cuda.manual_seed(5)
+        #     for data, target in zip(real_inputs, real_targets):
+        #         optimizer.zero_grad(set_to_none=True)
+        #         y_pred = model(data)
+        #         loss = loss_fn(y_pred, y)
+        #         loss.backward()
+        #         optimizer.step()
+
+        # for p, pc in zip(model.parameters(), model_control.parameters()):
+        #     self.assertEqual(p, pc)
+
+        # model.eval()
+        # model_control.eval()
+        # self.assertEqual(model(real_inputs[0]), model_control(real_inputs[0]))
+        pass
+
+    @unittest.skipIf((not TEST_CUDA) or
+                     TEST_WITH_ROCM or
+                     int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
+    def test_graph_make_graphed_callables_function(self):
+        pass
+
     def test_batch_norm_gather_stats(self):
         input = torch.randn(1, 3, 3, 3, device='cuda')
         mean, invstd = torch.batch_norm_gather_stats(
