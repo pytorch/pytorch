@@ -121,6 +121,7 @@ TypePtr resolveTypeNameMobile(
   // check today, but there is no guarantee that this is the case. The
   // real solution is to merge type parsers so we can share class
   // resolution logic.
+
   static const c10::QualifiedName torchPrefix = "__torch__";
   static const c10::QualifiedName jitPrefix = "torch.jit";
   if (torchPrefix.isPrefixOf(qn) || jitPrefix.isPrefixOf(qn)) {
@@ -509,12 +510,36 @@ void parseMethodsFlatbuffer(
     auto function = std::make_unique<mobile::Function>(c10::QualifiedName(method->qn()->str()));
     const auto* code_tb = method->code();
 
+    int j = 0;
     for (const auto* inst : *code_tb->instructions()) {
-      function->append_instruction(static_cast<OpCode>(inst->op()), inst->x(), inst->n());
+      int64_t debug_handle = method->debug_info()->debug_handle()->Get(j);
+      function->append_instruction(static_cast<OpCode>(inst->op()), inst->x(), inst->n(), debug_handle);
+      j += 1;
     }
 
     for (const int const_index : *code_tb->constants()) {
       function->append_constant(constants[const_index]);
+    }
+    
+    // insert operators
+    std::unordered_set<std::string> unsupported_op_names;
+    const int64_t model_version = 0x3L;
+    for (const auto* op : *code_tb->operators()) {
+      c10::optional<int> num_args;
+      if (op->num_args_serialized() > -1) {
+        num_args = op->num_args_serialized();
+      }
+
+      auto op_found = function->append_operator(
+          op->name()->str(),
+          op->overload_name()->str(),
+          num_args,
+          model_version,
+          operator_cache);
+      if (!op_found) {
+        unsupported_op_names.emplace(operator_str(
+          op->name()->str(), op->overload_name()->str()));
+      }
     }
 
     static const c10::QualifiedName classPrefix = "__torch__.torch.classes";
@@ -535,10 +560,10 @@ void parseMethodsFlatbuffer(
 
     function->set_register_size(code_tb->register_size());
 
-    auto parseArgList = [&cu](const auto* args_fb) {
+    auto parseArgList = [&cu, &constants](const auto* args_fb) {
       std::vector<c10::Argument> args;
       for (const auto* arg_tb: *args_fb) {
-        IValue default_value(26);  // Todo
+        IValue default_value = constants[arg_tb->default_value()];
         TypePtr type_ptr = resolveTypeNameMobile(arg_tb->type()->str(), cu);
         auto arg =
             c10::Argument(arg_tb->name()->str(), type_ptr, c10::nullopt /*N*/, default_value);

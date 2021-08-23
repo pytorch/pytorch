@@ -104,7 +104,7 @@ void CreateFBInstruction(
   instructions->clear();
   instructions->reserve(insts.size());
   for (const auto& inst : insts) {
-    instructions->push_back(CreateInstruction(fbb, inst.op, inst.X, inst.N));
+    instructions->push_back(CreateInstruction(fbb, inst.op, inst.N, inst.X));
   }
 }
 
@@ -753,7 +753,8 @@ functionToFlatbuffers(
     if (it != op_to_specified_args.end()) {
       num_args = it->second;
     }
-    CreateAndAppendOperator(fbb, opname.name, opname.overload_name, num_args, &operator_vector);
+    CreateAndAppendOperator(fbb, opname.name, opname.overload_name, 
+        num_args, &operator_vector);
   }
 
   auto operator_offsets = fbb.CreateVector(operator_vector);
