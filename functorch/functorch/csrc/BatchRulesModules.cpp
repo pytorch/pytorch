@@ -281,7 +281,6 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   m.impl("mkldnn_convolution", mkldnn_convolution_decomp);
   m.impl("cudnn_convolution_backward", cudnn_convolution_backward_plumbing);
   m.impl("cudnn_convolution", cudnn_convolution_plumbing);
-  OP_DECOMPOSE(dropout);
 
   VMAP_SUPPORT("constant_pad_nd", BASIC_UNARY_BATCH_RULE(at::constant_pad_nd));
   VMAP_SUPPORT("reflection_pad1d", EXISTING_BDIM_BATCH_RULE(at::reflection_pad1d));

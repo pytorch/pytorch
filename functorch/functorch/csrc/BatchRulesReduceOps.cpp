@@ -375,18 +375,13 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("norm.ScalarOpt_dim", norm_scalaropt_dim_batch_rule);
   VMAP_SUPPORT("prod", SINGLE_ARG(reduction_no_dim_batch_rule<decltype(&ATEN_FN(prod)), &at::prod, decltype(&prod_dim_batch_rule), &prod_dim_batch_rule, optional<ScalarType>>));
   VMAP_SUPPORT("prod.dim_int", prod_dim_batch_rule);
-  OP_DECOMPOSE(std);
-  OP_DECOMPOSE2(std, dim);
   VMAP_SUPPORT("std.correction", std_correction_batch_rule);
-  OP_DECOMPOSE2(softmax, int);
   VMAP_SUPPORT("_softmax", SINGLE_ARG(reduction_dim_batch_rule<decltype(&ATEN_FN(_softmax)), &at::_softmax, bool>));
   VMAP_SUPPORT("sort", SINGLE_ARG(reduction_dim_ret_pair_batch_rule<decltype(&ATEN_FN(sort)), &at::sort, bool>));
   VMAP_SUPPORT("sort.stable", sort_stable_batch_rule);
   VMAP_SUPPORT("sum", sum_batch_rule);
   VMAP_SUPPORT("sum.dim_IntList", sum_dim_batch_rule);
   VMAP_SUPPORT("topk", topk_batch_rule);
-  OP_DECOMPOSE(var);
-  OP_DECOMPOSE2(var, dim);
   VMAP_SUPPORT("var.correction", var_correction_batch_rule);
   VMAP_SUPPORT("_log_softmax_backward_data", _log_softmax_backward_batch_rule);
   VMAP_SUPPORT("_softmax_backward_data", _softmax_backward_batch_rule);
