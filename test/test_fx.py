@@ -2962,6 +2962,16 @@ class TestFX(JitTestCase):
         self.assertEqual(nf(**val), f(**val))
 
 
+    def test_normalized_arguments(self):
+        class Tracer(torch.fx.Tracer):
+            def is_leaf_module(self, m, module_qualified_name):
+                return False
+
+        mod = torch.nn.Linear(4, 4)
+        net = Tracer().trace(mod)
+        node = list(net.nodes)[3]
+        ret = node.normalized_arguments(mod, normalize_to_only_use_kwargs=True)
+        self.assertEqual(ret.kwargs.keys(), ["input", "weight", "bias"])
 
 
 def run_getitem_target():
