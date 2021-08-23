@@ -274,15 +274,24 @@ class LLVMCodeGenImpl : public IRVisitor {
   }
 };
 
+extern "C" {
 typedef void (*ParallelCallee)(int index, int8_t* packed_data);
-void DispatchParallel(int8_t* func, int start, int stop, int8_t* packed_data) {
+void DispatchParallel(
+    int8_t* func,
+    int start,
+    int stop,
+    int8_t* packed_data) noexcept {
   // TODO: preserve the func type.
-  ParallelCallee callee = reinterpret_cast<ParallelCallee>(func);
-  at::parallel_for(start, stop, 1, [&](int64_t f_begin, int64_t f_end) {
-    for (int index = f_begin; index < f_end; index++) {
-      callee(index, packed_data);
-    }
-  });
+  try {
+    ParallelCallee callee = reinterpret_cast<ParallelCallee>(func);
+    at::parallel_for(start, stop, 1, [&](int64_t f_begin, int64_t f_end) {
+      for (int index = f_begin; index < f_end; index++) {
+        callee(index, packed_data);
+      }
+    });
+  } catch (...) {
+  }
+}
 }
 
 } // namespace tensorexpr
@@ -1287,6 +1296,7 @@ void LLVMCodeGenImpl::processParallelFor(ForPtr v) {
       module_->getOrInsertFunction("DispatchParallel", dispatcher_fntype);
   llvm::Function* dispatcher =
       llvm::cast<llvm::Function>(dispatcher_callee.getCallee());
+  dispatcher->addFnAttr(llvm::Attribute::NoUnwind);
   irb_.CreateCall(
       dispatcher, {func_value, start, stop, packed_caller_args_ptr});
   value_ = llvm::ConstantInt::get(IntTy_, 0);
