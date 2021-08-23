@@ -242,8 +242,7 @@ into the repo directory.
 * [aten](aten) - C++ tensor library for PyTorch (no autograd support)
   * [src](aten/src) - [README](aten/src/README.md)
     * [TH](aten/src/TH)
-      [THC](aten/src/THC)
-      [THCUNN](aten/src/THCUNN) - Legacy library code from the original
+      [THC](aten/src/THC) - Legacy library code from the original
       Torch. Try not to add things here; we're slowly porting these to
       [native](aten/src/ATen/native).
       * generic - Contains actual implementations of operators,
@@ -1151,7 +1150,7 @@ formatting and semantic checking of code. We provide a pre-commit git hook for
 performing these checks, before a commit is created:
 
   ```bash
-  ln -s tools/git-pre-commit .git/hooks/pre-commit
+  ln -s ../../tools/git-pre-commit .git/hooks/pre-commit
   ```
 
 You'll need to install an appropriately configured flake8; see
