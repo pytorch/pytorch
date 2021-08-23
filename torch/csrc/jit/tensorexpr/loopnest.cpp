@@ -601,6 +601,7 @@ class FunctionInliner : public IRMutator {
       throw malformed_input(
           "Placeholder indexed access is inconsistent with its rank", v);
     }
+
     return mutate_loads(buf, v->indices());
   }
 
@@ -743,7 +744,6 @@ bool LoopNest::computeInline(BufPtr b) {
   }
 
   TORCH_INTERNAL_ASSERT(relevant_store);
-
   GRAPH_DEBUG("ComputeInline: Def: ", std::to_string(relevant_store));
   FunctionInliner inliner(relevant_store, output_bufs_);
   root_stmt_ = root_stmt_->accept_mutator(&inliner);
@@ -759,6 +759,14 @@ void LoopNest::inlineIntermediateBufs(bool allow_duplicated_work) {
   std::unordered_set<BufPtr> bufs_to_inline;
 
   auto intermediate_bufs = getIntermediateBufs();
+  for (auto it = intermediate_bufs.begin(); it != intermediate_bufs.end();) {
+    if (!(*it)->is_inline()) {
+      it = intermediate_bufs.erase(it);
+    } else {
+      it++;
+    }
+  }
+
   if (allow_duplicated_work) {
     bufs_to_inline.insert(intermediate_bufs.begin(), intermediate_bufs.end());
   } else {
@@ -798,7 +806,11 @@ void LoopNest::inlineIntermediateBufs(bool allow_duplicated_work) {
   }
 
   if (allow_duplicated_work) {
-    bufs_to_inline.insert(output_bufs_.begin(), output_bufs_.end());
+    for (auto buf : output_bufs_) {
+      if (buf->is_inline()) {
+        bufs_to_inline.insert(buf);
+      }
+    }
   }
 
   for (auto b : bufs_to_inline) {

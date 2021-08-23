@@ -246,10 +246,19 @@ class TORCH_API Buf : public ExprNode<Buf> {
     return true;
   }
 
+  void disable_inline() {
+    is_inline_ = false;
+  }
+
+  bool is_inline() const {
+    return is_inline_;
+  }
+
  private:
   VarPtr base_handle_;
   std::vector<ExprPtr> dims_;
   ExprPtr initializer_;
+  bool is_inline_{true};
 };
 
 class TORCH_API BufHandle : public ExprHandle {
