@@ -88,10 +88,13 @@ TORCH_META_FUNC(gather)
   const Tensor& result = maybe_get_output(0);
   int64_t wrapped_dim = at::maybe_wrap_dim(dim, self.dim());
 
+  if (result.defined()) {
+    at::native::resize_output(result, index.sizes());
+    at::assert_no_internal_overlap(result);
+    at::assert_no_overlap(result, self);
+    at::assert_no_partial_overlap(result, index);
+  }
   set_output(index.sizes(), self.options());
-  at::assert_no_internal_overlap(result);
-  at::assert_no_overlap(result, self);
-  at::assert_no_partial_overlap(result, index);
 
   TORCH_CHECK(
     index.scalar_type() == at::ScalarType::Long,
