@@ -530,7 +530,7 @@ class Module:
 
         return buffer
 
-    def get_extra_state(self) -> Dict[str, Any]:
+    def get_extra_state(self) -> Any:
         """
         Returns any extra state to include in the module's state_dict.
         Implement this and a corresponding :func:`set_extra_state` for your module
@@ -538,16 +538,19 @@ class Module:
         module's `state_dict()`.
 
         Note that extra state should be pickleable to ensure working serialization
-        of the module. We only provide provide backwards compatibility guarantees
+        of the state_dict. We only provide provide backwards compatibility guarantees
         for serializing Tensors; other objects may break backwards compatibility if
-        their serialized pickle form changes.
+        their serialized pickled form changes.
 
         Returns:
-            dict or OrderedDict: Any extra state to store in the module's state_dict
+            object: Any extra state to store in the module's state_dict
         """
-        raise NotImplementedError()
+        raise RuntimeError(
+            "Reached a code path in Module.get_extra_state() that should never be called. "
+            "Please file an issue at https://github.com/pytorch/pytorch/issues/new?template=bug-report.md "
+            "to report this bug.")
 
-    def set_extra_state(self, state: Dict[str, Any]):
+    def set_extra_state(self, state: Any):
         """
         This function is called from :func:`load_state_dict` to handle any extra state
         found within the `state_dict`. Implement this function and a corresponding
@@ -557,7 +560,10 @@ class Module:
         Args:
             state (dict): Extra state from the `state_dict`
         """
-        raise NotImplementedError()
+        raise RuntimeError(
+            "Reached a code path in Module.set_extra_state() that should never be called. "
+            "Please file an issue at https://github.com/pytorch/pytorch/issues/new?template=bug-report.md "
+            "to report this bug.")
 
     def _apply(self, fn):
         for module in self.children():
@@ -1261,9 +1267,7 @@ class Module:
                 destination[prefix + name] = buf if keep_vars else buf.detach()
         extra_state_key = prefix + _EXTRA_STATE_KEY_SUFFIX
         if getattr(self.__class__, "get_extra_state", Module.get_extra_state) is not Module.get_extra_state:
-            destination[extra_state_key] = OrderedDict()
-            for name, obj in self.get_extra_state().items():
-                destination[extra_state_key][name] = obj
+            destination[extra_state_key] = self.get_extra_state()
 
     # The user can pass an optional arbitrary mappable object to `state_dict`, in which case `state_dict` returns
     # back that same object. But if they pass nothing, an `OrederedDict` is created and returned.
