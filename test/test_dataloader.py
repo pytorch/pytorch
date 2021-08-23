@@ -54,7 +54,7 @@ try:
     HAS_DILL = True
 except ImportError:
     HAS_DILL = False
-skipIfNoDill = skipIf(not HAS_DILL, "no dill")
+skipIfNoDill = unittest.skipIf(not HAS_DILL, "no dill")
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
