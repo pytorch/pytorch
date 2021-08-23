@@ -273,9 +273,6 @@ at::Tensor nll_loss_backward_plumbing(
 
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   m.impl("nll_loss_forward", nll_loss_forward_plumbing);
-  OP_DECOMPOSE(nll_loss_nd);
-  OP_DECOMPOSE(nll_loss);
-  OP_DECOMPOSE(cross_entropy_loss);
   m.impl("nll_loss_backward", nll_loss_backward_plumbing);
   VMAP_SUPPORT("mse_loss", mse_loss_batch_rule);
   VMAP_SUPPORT("mse_loss_backward", mse_loss_backward_batch_rule);

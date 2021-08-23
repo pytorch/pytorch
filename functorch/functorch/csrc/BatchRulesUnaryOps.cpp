@@ -46,7 +46,6 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   UNARY_POINTWISE_ALL(ceil);
   UNARY_POINTWISE_ALL(cos);
   UNARY_POINTWISE_ALL(cosh);
-  OP_DECOMPOSE(conj);
   UNARY_POINTWISE(_conj);
   UNARY_POINTWISE_ALL(deg2rad);
   UNARY_POINTWISE_ALL(digamma);
@@ -57,7 +56,6 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   UNARY_POINTWISE_ALL(frac);
   UNARY_POINTWISE(glu);
   UNARY_POINTWISE(inverse);
-  OP_DECOMPOSE(isinf);
   UNARY_POINTWISE(isfinite);
   UNARY_POINTWISE(isnan);
   UNARY_POINTWISE_ALL(lgamma);
@@ -80,12 +78,6 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   UNARY_POINTWISE_ALL(sqrt);
   UNARY_POINTWISE_ALL(tan);
   UNARY_POINTWISE(threshold);
-  OP_DECOMPOSE2(trapezoid, x);
-  OP_DECOMPOSE2(trapezoid, dx);
-  OP_DECOMPOSE2(trapz, x);
-  OP_DECOMPOSE2(trapz, dx);
-  OP_DECOMPOSE2(true_divide, Tensor);
-  OP_DECOMPOSE2(true_divide, Scalar);
   UNARY_POINTWISE_ALL(trunc);
 
   // special-related
@@ -133,7 +125,6 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   UNARY_POINTWISE(silu);
   UNARY_POINTWISE(softplus);
   UNARY_POINTWISE(softshrink);
-  OP_DECOMPOSE(square);
   UNARY_POINTWISE_ALL(tanh);
 
 
