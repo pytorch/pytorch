@@ -426,8 +426,8 @@ Tensor conv2d_clamp_run(
 }
 
 std::tuple<IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t>
-unpack_prepacked_sizes_conv2d(
-    const c10::intrusive_ptr<xnnpack::Conv2dOpContext>& op_context) {
+unpack_prepacked_sizes_conv2d(const IValue ivalue) {
+  auto op_context = ivalue.toCustomClass<xnnpack::Conv2dOpContext>();
   const auto tuple = op_context->unpack();
   const auto bias = std::get<1>(tuple);
   return std::make_tuple(

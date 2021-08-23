@@ -13,7 +13,6 @@ std::mutex lock;
 
 const std::string shape_compute_functions =
     R"(
-      class ShapeCompute:
         ####     SHAPE COMPUTE FUNCTIONS    ###
         def broadcast(a: List[int], b: List[int]):
           dimsA = len(a)
@@ -289,7 +288,7 @@ const std::string shape_compute_functions =
           return shape
 
         def prepacked_conv2d_clamp_run(input: List[int], conv2dOpContext: Any):
-          # assert isinstance(conv2dOpContext, _torch_.torch.classes.xnnpack.Conv2dOpContext)
+# assert isinstance(conv2dOpContext, _torch_.torch.classes.xnnpack.Conv2dOpContext)
           (weight, bias, stride, padding, dilation, groups) = ops.prepacked.unpack_prepacked_sizes_conv2d(conv2dOpContext)
           return conv2d(input, weight, bias, stride, padding, dilation, groups)
     )";
@@ -335,7 +334,7 @@ static const OperatorMap<std::string>& get_schema_to_function_graph() {
       {"aten::expand_as(Tensor(a) self, Tensor other) -> Tensor(a)", "view"},
       {"aten::mean.dim(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", "mean_dim"},
       {"aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor", "addmm"},
-      {"prepacked::conv2d_clamp_run(Tensor self, Any conv2dOpContext) -> Tensor", "prepacked_conv2d_clamp_run"},
+      {"prepacked::conv2d_clamp_run(Tensor self, __torch__.torch.classes.xnnpack.Conv2dOpContext W_prepack) -> Tensor", "prepacked_conv2d_clamp_run"},
   };
   // clang-format on
   return schema_to_function_graph;
@@ -374,13 +373,16 @@ void loadModule(const CompilationUnit& module) {
 void loadFunctions() {
   auto src = std::make_shared<Source>(shape_compute_functions);
   std::vector<at::IValue> constantTable;
-  SourceImporter si = SourceImporter(
+  auto resolver = std::make_shared<SourceImporterImpl>(
       compilation_unit,
       &constantTable,
       [&](const std::string& name) -> std::shared_ptr<Source> { return src; },
       1);
-  si.loadType(QualifiedName("__torch__.ShapeCompute"));
-  //compilation_unit->define(c10::nullopt, shape_compute_functions, si, nullptr);
+  compilation_unit->define(
+      c10::nullopt,
+      shape_compute_functions,
+      resolver,
+      nullptr);
   loadModule(*compilation_unit);
 }
 } // anonymous namespace
