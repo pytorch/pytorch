@@ -928,7 +928,7 @@ class LazyTensor {
   static std::tuple<LazyTensor, LazyTensor> qr(const LazyTensor& input,
                                                bool some);
 
-  static void random_(LazyTensor& input, int64_t from, int64_t to);
+  static void random_(LazyTensor& input);
 
   static LazyTensor randperm(lazy_tensors::int64 n, const Device& device,
                              at::ScalarType scalar_type);

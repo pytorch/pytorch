@@ -8,6 +8,7 @@
 #include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensor_core/csrc/ops/as_strided.h"
 #include "lazy_tensor_core/csrc/tensor_impl.h"
+#include "lazy_tensor_core/csrc/tensor_util.h"
 #include "lazy_tensor_core/csrc/torch_util.h"
 #include "lazy_tensor_core/csrc/ts_backend/LazyNativeFunctions.h"
 #include "lazy_tensor_core/csrc/ts_backend/aten_autograd_ops_ts.h"
@@ -835,6 +836,20 @@ at::Tensor LazyNativeFunctions::permute(const at::Tensor& self,
   LazyTensor self_tensor = bridge::GetLtcTensor(self);
   return bridge::AtenFromLtcTensor(
       LazyTensor::permute(self_tensor, Helpers::I64List(dims)));
+}
+
+at::Tensor& LazyNativeFunctions::random_(at::Tensor& self,
+    c10::optional<at::Generator> generator) {
+  LTC_FN_COUNTER("lazy::");
+
+  if (generator && generator->defined()) {
+    return at::native::call_fallback_fn<&ltc_eager_fallback,
+        ATEN_OP(random_)>::call(self, generator);
+  }
+
+  auto selfTensor = bridge::GetLtcTensor(self);
+  LazyTensor::random_(selfTensor);
+  return self;
 }
 
 at::Tensor LazyNativeFunctions::relu(const at::Tensor& self) {
