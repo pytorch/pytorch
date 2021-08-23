@@ -44,6 +44,17 @@ except ImportError:
     else:
         warnings.warn(err_msg)
 
+try:
+    import dill
+    # XXX: By default, dill writes the Pickler dispatch table to inject its
+    # own logic there. This globally affects the behavior of the standard library
+    # pickler for any user who transitively depends on this module!
+    # Undo this extension to avoid altering the behavior of the pickler globally.
+    dill.extend(use_dill=False)
+    HAS_DILL = True
+except ImportError:
+    HAS_DILL = False
+skipIfNoDill = skipIf(not HAS_DILL, "no dill")
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -1950,6 +1961,7 @@ except RuntimeError as e:
     "Fails with TSAN with the following error: starting new threads after multi-threaded "
     "fork is not supported. Dying (set die_after_fork=0 to override)")
 class TestDataLoader2(TestCase):
+    @skipIfNoDill
     def test_basics(self):
         dp = IterableAsDataPipe(list(range(10)))
         dl = DataLoader(dp, batch_size=3, collate_fn=lambda x: x, num_workers=2)
