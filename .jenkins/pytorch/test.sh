@@ -10,6 +10,15 @@ COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
 # Get fully qualified path using realpath
 CUSTOM_TEST_ARTIFACT_BUILD_DIR=$(realpath "${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-${PWD}/../}")
 
+TORCH_INSTALL_DIR=$(python -c "import site; print(site.getsitepackages()[0])")/torch
+TORCH_BIN_DIR="$TORCH_INSTALL_DIR"/bin
+TORCH_LIB_DIR="$TORCH_INSTALL_DIR"/lib
+TORCH_TEST_DIR="$TORCH_INSTALL_DIR"/test
+
+BUILD_DIR="build"
+BUILD_RENAMED_DIR="build_renamed"
+BUILD_BIN_DIR="$BUILD_DIR"/bin
+
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
@@ -118,7 +127,7 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     # it to be loaded globally.  This isn't really a good idea though, because
     # it depends on a ton of dynamic libraries that most programs aren't gonna
     # have, and it applies to child processes.
-    export LD_PRELOAD=/usr/lib/llvm-5.0/lib/clang/5.0.0/lib/linux/libclang_rt.asan-x86_64.so
+    export LD_PRELOAD=/usr/lib/llvm-7/lib/clang/7.1.0/lib/linux/libclang_rt.asan-x86_64.so
     # Increase stack size, because ASAN red zones use more stack
     ulimit -s 81920
 
@@ -132,7 +141,9 @@ fi
 if [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX-* || $TEST_CONFIG == 'nogpu_NO_AVX' ]]; then
   export ATEN_CPU_CAPABILITY=default
 elif [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX2-* || $TEST_CONFIG == 'nogpu_NO_AVX2' ]]; then
-  export ATEN_CPU_CAPABILITY=avx
+  export ATEN_CPU_CAPABILITY=default
+elif [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX512-* || $TEST_CONFIG == 'nogpu_NO_AVX512' ]]; then
+  export ATEN_CPU_CAPABILITY=avx2
 fi
 
 if [ -n "$IN_PULL_REQUEST" ] && [[ "$BUILD_ENVIRONMENT" != *coverage* ]]; then
@@ -172,7 +183,18 @@ test_aten() {
   # scalar_tensor_test, basic, native_test
   if [[ "$BUILD_ENVIRONMENT" != *asan* ]] && [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
     echo "Running ATen tests with pytorch lib"
-    TORCH_LIB_PATH=$(python -c "import site; print(site.getsitepackages()[0])")/torch/lib
+
+    if [[ -n "$IN_WHEEL_TEST" ]]; then
+      echo "Running test with the install folder"
+      # Rename the build folder when running test to ensure it
+      # is not depended on the folder
+      mv "$BUILD_DIR" "$BUILD_RENAMED_DIR"
+      TEST_BASE_DIR="$TORCH_TEST_DIR"
+    else
+      echo "Running test with the build folder"
+      TEST_BASE_DIR="$BUILD_BIN_DIR"
+    fi
+
     # NB: the ATen test binaries don't have RPATH set, so it's necessary to
     # put the dynamic libraries somewhere were the dynamic linker can find them.
     # This is a bit of a hack.
@@ -180,13 +202,20 @@ test_aten() {
       SUDO=sudo
     fi
 
-    ${SUDO} ln -sf "$TORCH_LIB_PATH"/libc10* build/bin
-    ${SUDO} ln -sf "$TORCH_LIB_PATH"/libcaffe2* build/bin
-    ${SUDO} ln -sf "$TORCH_LIB_PATH"/libmkldnn* build/bin
-    ${SUDO} ln -sf "$TORCH_LIB_PATH"/libnccl* build/bin
+    ${SUDO} ln -sf "$TORCH_LIB_DIR"/libc10* "$TEST_BASE_DIR"
+    ${SUDO} ln -sf "$TORCH_LIB_DIR"/libcaffe2* "$TEST_BASE_DIR"
+    ${SUDO} ln -sf "$TORCH_LIB_DIR"/libmkldnn* "$TEST_BASE_DIR"
+    ${SUDO} ln -sf "$TORCH_LIB_DIR"/libnccl* "$TEST_BASE_DIR"
+    ${SUDO} ln -sf "$TORCH_LIB_DIR"/libtorch* "$TEST_BASE_DIR"
 
-    ls build/bin
-    aten/tools/run_tests.sh build/bin
+    ls "$TEST_BASE_DIR"
+    aten/tools/run_tests.sh "$TEST_BASE_DIR"
+
+    if [[ -n "$IN_WHEEL_TEST" ]]; then
+      # Restore the build folder to avoid any impact on other tests
+      mv "$BUILD_RENAMED_DIR" "$BUILD_DIR"
+    fi
+
     assert_git_not_dirty
   fi
 }
@@ -215,6 +244,11 @@ fi
 test_libtorch() {
   if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
     echo "Testing libtorch"
+    ln -sf "$TORCH_LIB_DIR"/libbackend_with_compiler.so "$TORCH_BIN_DIR"
+    ln -sf "$TORCH_LIB_DIR"/libjitbackend_test.so "$TORCH_BIN_DIR"
+    ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
+    ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
+    ln -sf "$TORCH_LIB_DIR"/libtbb* "$TORCH_BIN_DIR"
 
     # Start background download
     python tools/download_mnist.py --quiet -d test/cpp/api/mnist &
@@ -228,52 +262,62 @@ test_libtorch() {
     # Run JIT cpp tests
     python test/cpp/jit/tests_setup.py setup
     if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
-      build/bin/test_jit  --gtest_output=xml:$TEST_REPORTS_DIR/test_jit.xml
+      "$TORCH_BIN_DIR"/test_jit  --gtest_output=xml:$TEST_REPORTS_DIR/test_jit.xml
     else
-      build/bin/test_jit  --gtest_filter='-*CUDA' --gtest_output=xml:$TEST_REPORTS_DIR/test_jit.xml
+      "$TORCH_BIN_DIR"/test_jit  --gtest_filter='-*CUDA' --gtest_output=xml:$TEST_REPORTS_DIR/test_jit.xml
     fi
     python test/cpp/jit/tests_setup.py shutdown
     # Wait for background download to finish
     wait
-    OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" build/bin/test_api --gtest_output=xml:$TEST_REPORTS_DIR/test_api.xml
-    build/bin/test_tensorexpr --gtest_output=xml:$TEST_REPORTS_DIR/test_tensorexpr.xml
-    build/bin/test_mobile_nnc --gtest_output=xml:$TEST_REPORTS_DIR/test_mobile_nnc.xml
+    OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" "$TORCH_BIN_DIR"/test_api --gtest_output=xml:$TEST_REPORTS_DIR/test_api.xml
+    "$TORCH_BIN_DIR"/test_tensorexpr --gtest_output=xml:$TEST_REPORTS_DIR/test_tensorexpr.xml
+    "$TORCH_BIN_DIR"/test_mobile_nnc --gtest_output=xml:$TEST_REPORTS_DIR/test_mobile_nnc.xml
+    if [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-py3* ]]; then
+      if [[ "${BUILD_ENVIRONMENT}" != *android* && "${BUILD_ENVIRONMENT}" != *cuda* && "${BUILD_ENVIRONMENT}" != *asan* ]]; then
+        # TODO: Consider to run static_runtime_test from $TORCH_BIN_DIR (may need modify build script)
+        "$BUILD_BIN_DIR"/static_runtime_test --gtest_output=xml:$TEST_REPORTS_DIR/static_runtime_test.xml
+      fi
+    fi
     assert_git_not_dirty
   fi
 }
 
 test_vulkan() {
   if [[ "$BUILD_ENVIRONMENT" == *vulkan-linux* ]]; then
+    ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_TEST_DIR"
+    ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_TEST_DIR"
     export VK_ICD_FILENAMES=/var/lib/jenkins/swiftshader/build/Linux/vk_swiftshader_icd.json
     # NB: the ending test_vulkan must match the current function name for the current
     # test reporting process (in print_test_stats.py) to function as expected.
     TEST_REPORTS_DIR=test/test-reports/cpp-vulkan/test_vulkan
     mkdir -p $TEST_REPORTS_DIR
-    build/bin/vulkan_test --gtest_output=xml:$TEST_REPORTS_DIR/vulkan_test.xml
+    "$TORCH_TEST_DIR"/vulkan_test --gtest_output=xml:$TEST_REPORTS_DIR/vulkan_test.xml
   fi
 }
 
 test_distributed() {
   if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
     echo "Testing distributed C++ tests"
+    ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
+    ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
     # NB: the ending test_distributed must match the current function name for the current
     # test reporting process (in print_test_stats.py) to function as expected.
     TEST_REPORTS_DIR=test/test-reports/cpp-distributed/test_distributed
     mkdir -p $TEST_REPORTS_DIR
-    build/bin/FileStoreTest --gtest_output=xml:$TEST_REPORTS_DIR/FileStoreTest.xml
-    build/bin/HashStoreTest --gtest_output=xml:$TEST_REPORTS_DIR/HashStoreTest.xml
-    build/bin/TCPStoreTest --gtest_output=xml:$TEST_REPORTS_DIR/TCPStoreTest.xml
+    "$TORCH_BIN_DIR"/FileStoreTest --gtest_output=xml:$TEST_REPORTS_DIR/FileStoreTest.xml
+    "$TORCH_BIN_DIR"/HashStoreTest --gtest_output=xml:$TEST_REPORTS_DIR/HashStoreTest.xml
+    "$TORCH_BIN_DIR"/TCPStoreTest --gtest_output=xml:$TEST_REPORTS_DIR/TCPStoreTest.xml
 
     MPIEXEC=$(command -v mpiexec)
     # TODO: this is disabled on GitHub Actions until this issue is resolved
     # https://github.com/pytorch/pytorch/issues/60756
     if [[ -n "$MPIEXEC" ]] && [[ -z "$GITHUB_ACTIONS" ]]; then
-      MPICMD="${MPIEXEC} -np 2 build/bin/ProcessGroupMPITest"
+      MPICMD="${MPIEXEC} -np 2 $TORCH_BIN_DIR/ProcessGroupMPITest"
       eval "$MPICMD"
     fi
-    build/bin/ProcessGroupGlooTest --gtest_output=xml:$TEST_REPORTS_DIR/ProcessGroupGlooTest.xml
-    build/bin/ProcessGroupNCCLTest --gtest_output=xml:$TEST_REPORTS_DIR/ProcessGroupNCCLTest.xml
-    build/bin/ProcessGroupNCCLErrorsTest --gtest_output=xml:$TEST_REPORTS_DIR/ProcessGroupNCCLErrorsTest.xml
+    "$TORCH_BIN_DIR"/ProcessGroupGlooTest --gtest_output=xml:$TEST_REPORTS_DIR/ProcessGroupGlooTest.xml
+    "$TORCH_BIN_DIR"/ProcessGroupNCCLTest --gtest_output=xml:$TEST_REPORTS_DIR/ProcessGroupNCCLTest.xml
+    "$TORCH_BIN_DIR"/ProcessGroupNCCLErrorsTest --gtest_output=xml:$TEST_REPORTS_DIR/ProcessGroupNCCLErrorsTest.xml
   fi
 }
 
@@ -282,9 +326,12 @@ test_rpc() {
     echo "Testing RPC C++ tests"
     # NB: the ending test_rpc must match the current function name for the current
     # test reporting process (in print_test_stats.py) to function as expected.
+    ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
+    ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
+    ln -sf "$TORCH_LIB_DIR"/libtbb* "$TORCH_BIN_DIR"
     TEST_REPORTS_DIR=test/test-reports/cpp-rpc/test_rpc
     mkdir -p $TEST_REPORTS_DIR
-    build/bin/test_cpp_rpc --gtest_output=xml:$TEST_REPORTS_DIR/test_cpp_rpc.xml
+    "$TORCH_BIN_DIR"/test_cpp_rpc --gtest_output=xml:$TEST_REPORTS_DIR/test_cpp_rpc.xml
   fi
 }
 
@@ -427,7 +474,10 @@ test_vec256() {
 
 test_torch_deploy() {
   python torch/csrc/deploy/example/generate_examples.py
-  build/bin/test_deploy
+  ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
+  ln -sf "$TORCH_LIB_DIR"/libshm* "$TORCH_BIN_DIR"
+  ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
+  "$TORCH_BIN_DIR"/test_deploy
   assert_git_not_dirty
 }
 
@@ -448,7 +498,7 @@ elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   # TODO: run some C++ tests
   echo "no-op at the moment"
 elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 || "${SHARD_NUMBER}" == 1 ]]; then
-  if [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7-test1 ]]; then
+  if [[ "${BUILD_ENVIRONMENT}" == *linux-xenial-cuda11.1-cudnn8-py3-gcc7-test1* ]]; then
     test_torch_deploy
   fi
   test_without_numpy
@@ -479,7 +529,7 @@ else
   test_distributed
   test_benchmarks
   test_rpc
-  if [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-py3.6-gcc7-test || "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-py3.6-gcc5.4-test ]]; then
+  if [[ "${BUILD_ENVIRONMENT}" == *linux-xenial-py3.6-gcc7-test* || "${BUILD_ENVIRONMENT}" == *linux-xenial-py3.6-gcc5.4-test* ]]; then
     test_python_gloo_with_tls
   fi
 fi

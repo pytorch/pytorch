@@ -492,7 +492,13 @@ class {module_name}(torch.nn.Module):
         cls = type(self)
         cls.forward = _forward_from_src(self._code, python_code.globals)
 
-        cls_call = cls.__call__
+        # Determine whether this class explicitly defines a __call__ implementation
+        # to wrap. If it does, save it in order to have wrapped_call invoke it.
+        # If it does not, wrapped_call can use a dynamic call to super() instead.
+        # In most cases, super().__call__ should be torch.nn.Module.__call__.
+        # We do not want to hold a reference to Module.__call__ here; doing so will
+        # bypass patching of torch.nn.Module.__call__ done while symbolic tracing.
+        cls_call = cls.__call__ if "__call__" in vars(cls) else None
 
         # Previously, if an error occurred when valid
         # symbolically-traced code was run with an invalid input, the
@@ -523,7 +529,10 @@ class {module_name}(torch.nn.Module):
 
         def wrapped_call(self, *args, **kwargs):
             try:
-                return cls_call(self, *args, **kwargs)
+                if cls_call is not None:
+                    return cls_call(self, *args, **kwargs)
+                else:
+                    return super(type(self), self).__call__(*args, **kwargs)
             except Exception as e:
                 assert e.__traceback__
                 topmost_framesummary: traceback.FrameSummary = \

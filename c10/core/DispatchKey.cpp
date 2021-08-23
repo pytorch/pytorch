@@ -23,6 +23,8 @@ const char* toString(DispatchKey t) {
       return "MSNPU";
     case DispatchKey::XLA:
       return "XLA";
+    case DispatchKey::Lazy:
+      return "Lazy";
     case DispatchKey::MLC:
       return "MLC";
     case DispatchKey::HPU:
@@ -91,6 +93,8 @@ const char* toString(DispatchKey t) {
       return "AutogradCUDA";
     case DispatchKey::AutogradXLA:
       return "AutogradXLA";
+    case DispatchKey::AutogradLazy:
+      return "AutogradLazy";
     case DispatchKey::AutogradMLC:
       return "AutogradMLC";
     case DispatchKey::AutogradHPU:
@@ -179,6 +183,8 @@ DispatchKey getAutogradKeyFromBackend(DispatchKey t) {
       return DispatchKey::AutogradCUDA;
     case DispatchKey::XLA:
       return DispatchKey::AutogradXLA;
+    case DispatchKey::Lazy:
+      return DispatchKey::AutogradLazy;
     case DispatchKey::MLC:
       return DispatchKey::AutogradMLC;
     case DispatchKey::HPU:

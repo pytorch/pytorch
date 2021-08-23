@@ -233,18 +233,27 @@ void checkProfiledEvents(
     int expected_count,
     std::vector<std::vector<int64_t>> expected_shapes,
     bool verify_shapes = true) {
-  auto eventCount = 0;
   if (verify_shapes) {
     EXPECT_EQ(expected_count, expected_shapes.size());
   }
+  std::vector<bool> matched_shapes(expected_count);
   for (const auto& li : event_lists) {
     for (const auto& evt : li) {
       auto match = !strcmp(evt.name(), expected_profile_str);
-      eventCount += (match) ? 1 : 0;
       if (verify_shapes && match) {
         auto shapesVec = evt.shapes();
-        EXPECT_EQ(shapesVec[0], expected_shapes[eventCount-1]);
+        for (int i = 0; i < expected_count; i++) {
+          // Assumptions: no two expected shapes are the same
+          if (shapesVec[0] == expected_shapes[i]) {
+            matched_shapes[i] = true;
+          }
+        }
       }
+    }
+  }
+  if (verify_shapes) {
+    for (bool match : matched_shapes) {
+      EXPECT_TRUE(match);
     }
   }
 }

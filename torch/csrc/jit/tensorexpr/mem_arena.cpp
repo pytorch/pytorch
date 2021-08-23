@@ -9,7 +9,6 @@ namespace tensorexpr {
 namespace {
 // Define in an anonymous namespace to hide this symbol from other compilation
 // units
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local KernelArena* current_arena = nullptr;
 } // namespace
 

@@ -2,6 +2,8 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/native/cuda/Loops.cuh>
+#include <c10/cuda/CUDAGuard.h>
+
 #include <cmath>
 
 namespace at {
@@ -123,6 +125,9 @@ void _calculate_moving_average(
     const float averaging_const,
     const int64_t size,
     bool per_row_fq) {
+  at::cuda::OptionalCUDAGuard device_guard;
+  device_guard.set_index(x.get_device());
+
   at::Tensor x_min, x_max;
 
   int64_t* observer_on_data = observer_on.data_ptr<int64_t>();
@@ -176,6 +181,9 @@ void _calc_moving_avg_qparams_helper(
     bool symmetric_quant,
     const int64_t size,
     bool per_row_fq = false) {
+  at::cuda::OptionalCUDAGuard device_guard;
+  device_guard.set_index(x.get_device());
+
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
   int64_t* fake_quant_on_data = fake_quant_on.data_ptr<int64_t>();
   if (per_row_fq) {
@@ -228,7 +236,17 @@ std::tuple<at::Tensor, at::Tensor> fused_moving_avg_obs_fake_quant_cuda(
     bool per_row_fq,
     bool symmetric_quant) {
   const auto x_contig = x.contiguous();
+  // Calculate the size of the dimension we need to quantize over,
+  // For per-channel quant we default to axis 0, since it is only for
+  // weight quantization currently.
   int64_t size = per_row_fq ? x.size(0) : 1;
+  if (per_row_fq && running_min.numel() == 0) {
+    float inf = std::numeric_limits<float>::infinity();
+    running_min.resize_(size).fill_(inf);
+    running_max.resize_(size).fill_(-inf);
+    scale.resize_(size);
+    zero_point.resize_(size);
+  }
   _calculate_moving_average(
       x_contig,
       observer_on,

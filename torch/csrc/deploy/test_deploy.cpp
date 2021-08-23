@@ -1,7 +1,9 @@
 #include <ATen/Parallel.h>
 #include <gtest/gtest.h>
+#include <cstring>
 
 #include <c10/util/irange.h>
+#include <libgen.h>
 #include <torch/csrc/deploy/deploy.h>
 #include <torch/script.h>
 #include <torch/torch.h>
@@ -37,9 +39,7 @@ void compare_torchpy_jit(const char* model_filename, const char* jit_filename) {
   ASSERT_TRUE(ref_output.allclose(output, 1e-03, 1e-05));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 const char* simple = "torch/csrc/deploy/example/generated/simple";
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 const char* simple_jit = "torch/csrc/deploy/example/generated/simple_jit";
 
 const char* path(const char* envname, const char* path) {
@@ -47,7 +47,6 @@ const char* path(const char* envname, const char* path) {
   return e ? e : path;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TorchpyTest, LoadLibrary) {
   torch::deploy::InterpreterManager m(1);
   torch::deploy::Package p = m.load_package(
@@ -56,19 +55,36 @@ TEST(TorchpyTest, LoadLibrary) {
   model({});
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(TorchpyTest, InitTwice) {
+  { torch::deploy::InterpreterManager m(2); }
+  { torch::deploy::InterpreterManager m(1); }
+}
+
+TEST(TorchpyTest, DifferentInterps) {
+  torch::deploy::InterpreterManager m(2);
+  m.register_module_source("check_none", "check = id(None)\n");
+  int64_t id0, id1;
+  {
+    auto I = m.all_instances()[0].acquire_session();
+    id0 = I.global("check_none", "check").toIValue().toInt();
+  }
+  {
+    auto I = m.all_instances()[1].acquire_session();
+    id1 = I.global("check_none", "check").toIValue().toInt();
+  }
+  ASSERT_NE(id0, id1);
+}
+
 TEST(TorchpyTest, SimpleModel) {
   compare_torchpy_jit(path("SIMPLE", simple), path("SIMPLE_JIT", simple_jit));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TorchpyTest, ResNet) {
   compare_torchpy_jit(
       path("RESNET", "torch/csrc/deploy/example/generated/resnet"),
       path("RESNET_JIT", "torch/csrc/deploy/example/generated/resnet_jit"));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TorchpyTest, Movable) {
   torch::deploy::InterpreterManager m(1);
   torch::deploy::ReplicatedObj obj;
@@ -81,7 +97,6 @@ TEST(TorchpyTest, Movable) {
   obj.acquire_session();
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TorchpyTest, MultiSerialSimpleModel) {
   torch::deploy::InterpreterManager manager(3);
   torch::deploy::Package p = manager.load_package(path("SIMPLE", simple));
@@ -117,9 +132,12 @@ TEST(TorchpyTest, MultiSerialSimpleModel) {
   kwargs["input"] = input;
   auto jit_output_kwargs = model.call_kwargs(kwargs).toTensor();
   ASSERT_TRUE(ref_output.equal(jit_output_kwargs));
+
+  // test hasattr
+  ASSERT_TRUE(model.hasattr("forward"));
+  ASSERT_FALSE(model.hasattr("make_prediction"));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TorchpyTest, ThreadedSimpleModel) {
   size_t nthreads = 3;
   torch::deploy::InterpreterManager manager(nthreads);
@@ -157,7 +175,6 @@ TEST(TorchpyTest, ThreadedSimpleModel) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TorchpyTest, ThrowsSafely) {
   // See explanation in deploy.h
   torch::deploy::InterpreterManager manager(3);
@@ -173,7 +190,6 @@ TEST(TorchpyTest, ThrowsSafely) {
   EXPECT_THROW(model(at::IValue("unexpected input")), c10::Error);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TorchpyTest, AcquireMultipleSessionsInTheSamePackage) {
   torch::deploy::InterpreterManager m(1);
 
@@ -183,7 +199,6 @@ TEST(TorchpyTest, AcquireMultipleSessionsInTheSamePackage) {
   auto I1 = p.acquire_session();
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TorchpyTest, AcquireMultipleSessionsInDifferentPackages) {
   torch::deploy::InterpreterManager m(1);
 
@@ -195,7 +210,6 @@ TEST(TorchpyTest, AcquireMultipleSessionsInDifferentPackages) {
   auto I1 = p1.acquire_session();
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TorchpyTest, TensorSharingNotAllowed) {
   size_t nthreads = 2;
   torch::deploy::InterpreterManager m(nthreads);
@@ -209,7 +223,6 @@ TEST(TorchpyTest, TensorSharingNotAllowed) {
   ASSERT_THROW(I1.global("torch", "sigmoid")({t}), c10::Error);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TorchpyTest, TaggingRace) {
   // At time of writing, this takes about 7s to run on DEBUG=1.  I think
   // this is OK, but feel free to fiddle with the knobs here to reduce the
@@ -238,7 +251,6 @@ TEST(TorchpyTest, TaggingRace) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TorchpyTest, DisarmHook) {
   at::Tensor t = torch::empty(2);
   {
@@ -252,7 +264,6 @@ TEST(TorchpyTest, DisarmHook) {
   ASSERT_THROW(I.from_ivalue(t), c10::Error); // NOT a segfault
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TorchpyTest, RegisterModule) {
   torch::deploy::InterpreterManager m(2);
   m.register_module_source("foomodule", "def add1(x): return x + 1\n");
@@ -262,7 +273,6 @@ TEST(TorchpyTest, RegisterModule) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TorchpyTest, FxModule) {
   size_t nthreads = 3;
   torch::deploy::InterpreterManager manager(nthreads);
@@ -288,3 +298,70 @@ TEST(TorchpyTest, FxModule) {
     ASSERT_TRUE(ref_output.equal(outputs[i]));
   }
 }
+
+#ifdef TEST_CUSTOM_LIBRARY
+thread_local int in_another_module = 5;
+TEST(TorchpyTest, SharedLibraryLoad) {
+  torch::deploy::InterpreterManager manager(2);
+  auto no_args = at::ArrayRef<torch::deploy::Obj>();
+  for (auto& interp : manager.all_instances()) {
+    auto I = interp.acquire_session();
+
+    const char* test_lib_path = getenv("LIBTEST_DEPLOY_LIB");
+    if (!test_lib_path) {
+      I.global("sys", "path").attr("append")({"torch/csrc/deploy"});
+      I.global("test_deploy_python", "setup")({getenv("PATH")});
+    } else {
+      char buf[PATH_MAX];
+      strncpy(buf, test_lib_path, PATH_MAX);
+      dirname(buf);
+      I.global("sys", "path").attr("append")({buf});
+    }
+
+    AT_ASSERT(I.global("libtest_deploy_lib", "check_initial_state")(no_args)
+                  .toIValue()
+                  .toBool());
+    ASSERT_TRUE(
+        I.global("libtest_deploy_lib", "simple_add")({5, 4})
+            .toIValue()
+            .toInt() == 9);
+    // I.global("numpy", "array"); // force numpy to load here so it is loaded
+    //                             // twice before we run the tests
+  }
+  for (auto& interp : manager.all_instances()) {
+    auto I = interp.acquire_session();
+    // auto i =
+    //     I.global("test_deploy_python", "numpy_test")({1}).toIValue().toInt();
+    I.global("libtest_deploy_lib", "raise_and_catch_exception")({true});
+    try {
+      I.global("libtest_deploy_lib", "raise_exception")(no_args);
+      ASSERT_TRUE(false); // raise_exception did not throw?
+    } catch (std::exception& err) {
+      ASSERT_TRUE(std::string(err.what()).find("yet") != std::string::npos);
+    }
+    in_another_module = 6;
+    ASSERT_TRUE(
+        I.global("libtest_deploy_lib", "get_in_another_module")(no_args)
+            .toIValue()
+            .toInt() == 6);
+    ASSERT_TRUE(
+        I.global("libtest_deploy_lib", "get_bar")(no_args).toIValue().toInt() ==
+        14);
+    {
+      std::thread foo([&] {
+        I.global("libtest_deploy_lib", "set_bar")({13});
+        ASSERT_TRUE(
+            I.global("libtest_deploy_lib", "get_bar")(no_args)
+                .toIValue()
+                .toInt() == 13);
+      });
+      foo.join();
+    }
+    ASSERT_TRUE(
+        I.global("libtest_deploy_lib", "get_bar_destructed")(no_args)
+            .toIValue()
+            .toInt() == 1);
+    I.global("libtest_deploy_lib", "set_bar")({12});
+  }
+}
+#endif
