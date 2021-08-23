@@ -2841,6 +2841,40 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.tensor([2, 3, 5], dtype=torch.float64)
         self.run_test(ModModule(), (x, y))
 
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_empty_constant_shape(self):
+        class Zeros(torch.nn.Module):
+            def forward(self, x):
+                y = torch.zeros(())
+                y += x
+                return y
+        x = torch.tensor(42.)
+        self.run_test(Zeros(), x)
+
+        class Ones(torch.nn.Module):
+            def forward(self, x):
+                y = torch.ones(())
+                y += x
+                return y
+        x = torch.tensor(42.)
+        self.run_test(Ones(), x)
+
+        class Full(torch.nn.Module):
+            def forward(self, x):
+                y = torch.full((), 1.)
+                y += x
+                return y
+        x = torch.tensor(42.)
+        self.run_test(Full(), x)
+
+        class Empty(torch.nn.Module):
+            def forward(self, x):
+                y = torch.empty(()) * 0
+                y += x
+                return y
+        x = torch.tensor(42.)
+        self.run_test(Empty(), x)
+
     def test_std(self):
         class StandardDeviation(torch.nn.Module):
             def forward(self, input):
