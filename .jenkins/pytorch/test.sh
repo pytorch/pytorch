@@ -156,12 +156,12 @@ test_python_legacy_jit() {
 }
 
 test_python_shard1() {
-  time python test/run_test.py --exclude-jit-executor --shard 1 "$NUM_TEST_SHARDS" --verbose --determine-from="$DETERMINE_FROM"
+  time python test/run_test.py --exclude-jit-executor --shard 1 2 --verbose --determine-from="$DETERMINE_FROM"
   assert_git_not_dirty
 }
 
 test_python_shard2() {
-  time python test/run_test.py --exclude-jit-executor --shard 2 "$NUM_TEST_SHARDS" --verbose --determine-from="$DETERMINE_FROM"
+  time python test/run_test.py --exclude-jit-executor --shard 2 2 --verbose --determine-from="$DETERMINE_FROM"
   assert_git_not_dirty
 }
 
@@ -497,8 +497,6 @@ elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   # TODO: run some C++ tests
   echo "no-op at the moment"
 elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 || "${SHARD_NUMBER}" == 1 ]]; then
-  echo test1
-  exit 0
   if [[ "${BUILD_ENVIRONMENT}" == *linux-xenial-cuda11.1*-test1* ]]; then
     test_torch_deploy
   fi
@@ -507,29 +505,17 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 || "$
   test_python_shard1
   test_aten
 elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 || "${SHARD_NUMBER}" == 2 ]]; then
-  echo test2
-  exit 0
   install_torchvision
   test_python_shard2
   test_libtorch
   test_custom_script_ops
   test_custom_backend
   test_torch_function_benchmark
-elif [[ "${BUILD_ENVIRONMENT}" == *-test3 || "${JOB_BASE_NAME}" == *-test3 || "${SHARD_NUMBER}" == 3 ]]; then
-  echo not doing anything 3
-elif [[ "${BUILD_ENVIRONMENT}" == *-test4 || "${JOB_BASE_NAME}" == *-test4 || "${SHARD_NUMBER}" == 4 ]]; then
-  echo not doing anything 4
-elif [[ "${BUILD_ENVIRONMENT}" == *-test5 || "${JOB_BASE_NAME}" == *-test5 || "${SHARD_NUMBER}" == 5 ]]; then
-  echo not doing anything 5
-elif [[ "${BUILD_ENVIRONMENT}" == *-test6 || "${JOB_BASE_NAME}" == *-test6 || "${SHARD_NUMBER}" == 6 ]]; then
-  echo not doing anything 6
 elif [[ "${BUILD_ENVIRONMENT}" == *vulkan-linux* ]]; then
   test_vulkan
 elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   test_bazel
 else
-  echo other
-  exit 0
   install_torchvision
   install_monkeytype
   test_python
