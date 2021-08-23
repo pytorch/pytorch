@@ -3857,10 +3857,13 @@
   variants: function, method
 
 # softmax allows positional dtype, unlike most operators, because kwonly is BC-breaking when loading jit models.
-- func: softmax.int(Tensor self, int dim, ScalarType? dtype=None, bool _zero_if_all_neg_inf=False) -> Tensor
+- func: softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
   variants: function, method
 
-- func: softmax.Dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None, bool _zero_if_all_neg_inf=False) -> Tensor
+- func: softmax.Dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
+  variants: function, method
+
+- func: _safe_softmax_last_dim(Tensor self) -> Tensor
   variants: function, method
 
 - func: _softmax(Tensor self, int dim, bool half_to_float, bool _zero_if_all_neg_inf) -> Tensor

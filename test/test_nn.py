@@ -12873,34 +12873,15 @@ class TestNNDeviceType(NNTestCase):
         input = torch.tensor([
             [0.3, 0.7],
             [float('-inf'), float('-inf')]], device=device, dtype=dtype)
-        output_with_neg_inf = F.softmax(input, dim=-1)
+        output_with_neg_inf = input.softmax(dim=-1)
         assert torch.all(torch.isnan(output_with_neg_inf[1]))
 
         nan_mask = torch.isnan(output_with_neg_inf)
         output_with_neg_inf[nan_mask] = 0
 
         # private flag will rows with `-inf` to be 0
-        output_with_flag = F.softmax(input, dim=-1, _zero_if_all_neg_inf=True)
+        output_with_flag = input._safe_softmax_last_dim()
         self.assertEqual(output_with_flag, output_with_neg_inf)
-
-        # softmax with dim=0
-        input = torch.tensor([
-            [0.3, float('-inf')],
-            [0.7, float('-inf')]], device=device, dtype=dtype)
-        output_with_neg_inf = F.softmax(input, dim=0)
-        assert torch.all(torch.isnan(output_with_neg_inf[:, 1]))
-
-        nan_mask = torch.isnan(output_with_neg_inf)
-        output_with_neg_inf[nan_mask] = 0
-        # private flag cols with `-inf` to be 0
-        output_with_flag = F.softmax(input, dim=0, _zero_if_all_neg_inf=True)
-        self.assertEqual(output_with_flag, output_with_neg_inf)
-
-        input = torch.tensor([
-            [float('-inf')],
-            [float('-inf')]], device=device, dtype=dtype)
-        output_with_flag = F.softmax(input, dim=0, _zero_if_all_neg_inf=True)
-        self.assertEqual(output_with_flag, torch.zeros((2, 1), device=device, dtype=dtype))
 
     @dtypes(torch.float, torch.double, torch.bfloat16)
     def test_multiheadattention_complete_masked(self, device, dtype):

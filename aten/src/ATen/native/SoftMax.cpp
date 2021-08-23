@@ -28,6 +28,10 @@ TORCH_META_FUNC(_softmax)
       dim_ >= 0 && dim_ < input_dim,
       "dim must be non-negative and less than input dimensions");
 
+  TORCH_CHECK(
+    !_zero_if_all_neg_inf || dim_ == input_dim - 1,
+    "_zero_if_all_neg_inf is only support when dim is the last dimension");
+
   set_output(input.sizes(), output_options);
 }
 
@@ -255,7 +259,7 @@ TORCH_IMPL_FUNC(softmax_cpu_out)
   if (input_.ndimension() > 0 && dim_ == input_.ndimension() - 1) {
     softmax_lastdim_kernel(kCPU, output, input_, _zero_if_all_neg_inf);
   } else {
-    softmax_kernel(kCPU, output, input_, dim_, _zero_if_all_neg_inf);
+    softmax_kernel(kCPU, output, input_, dim_);
   }
 }
 
@@ -351,23 +355,33 @@ TORCH_IMPL_FUNC(log_softmax_backward_cpu_out) (
   }
 }
 
-Tensor softmax(const Tensor& input_, const int64_t dim_, bool _zero_if_all_neg_inf) {
+Tensor _safe_softmax_last_dim(const Tensor& input_) {
+  // Calls _softmax with
   auto result = [&]() {
     NoNamesGuard guard;
-    return at::_softmax(input_, dim_, false, _zero_if_all_neg_inf);
+    return at::_softmax(input_, -1, false, true /*_zero_if_all_neg_inf*/);
   }();
   namedinference::propagate_names(result, input_);
   return result;
 }
 
-Tensor softmax(const Tensor& input_, const int64_t dim_, c10::optional<ScalarType> dtype, bool _zero_if_all_neg_inf) {
+Tensor softmax(const Tensor& input_, const int64_t dim_) {
+  auto result = [&]() {
+    NoNamesGuard guard;
+    return at::_softmax(input_, dim_, false, false);
+  }();
+  namedinference::propagate_names(result, input_);
+  return result;
+}
+
+Tensor softmax(const Tensor& input_, const int64_t dim_, c10::optional<ScalarType> dtype) {
   auto result = [&]() {
     NoNamesGuard guard;
     if (input_.is_cuda() && input_.scalar_type() == ScalarType::Half && dtype == ScalarType::Float){
-        return at::_softmax(input_, dim_, true, _zero_if_all_neg_inf);
+        return at::_softmax(input_, dim_, true, false);
     } else {
         Tensor converted = dtype.has_value() ? input_.toType(dtype.value()) : input_;
-        return at::_softmax(converted, dim_, false, _zero_if_all_neg_inf);
+        return at::_softmax(converted, dim_, false, false);
     }
   }();
   namedinference::propagate_names(result, input_);
@@ -408,8 +422,8 @@ DEFINE_DISPATCH(log_softmax_backward_lastdim_kernel);
 
 DEFINE_DISPATCH(softmax_kernel);
 
-Tensor softmax(const Tensor& self, Dimname dim, optional<ScalarType> dtype, bool _zero_if_all_neg_inf) {
-  return at::softmax(self, dimname_to_position(self, dim), dtype, _zero_if_all_neg_inf);
+Tensor softmax(const Tensor& self, Dimname dim, optional<ScalarType> dtype) {
+  return at::softmax(self, dimname_to_position(self, dim), dtype);
 }
 
 Tensor log_softmax(const Tensor& self, Dimname dim, optional<ScalarType> dtype) {
