@@ -1964,7 +1964,7 @@ class TestFrozenOptimizations(JitTestCase):
                                 check_count("aten::to_dense", 1, exactly=True).run(mod.graph))
                         else:
                             FileCheck().check_count("aten::to_dense", 1, exactly=True).check("aten::layer_norm").run(mod.graph)
-                        self.assertEqual(sub_model(param[2]), mod(param[2]), 1e-04, 1e-04)
+                        self.assertEqual(sub_model(param[2]), mod(param[2]), rtol=1e-04, atol=1e-04)
 
     @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
     @skipIfNoTorchVision

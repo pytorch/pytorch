@@ -11175,7 +11175,7 @@ class TestNN(NNTestCase):
         grads1 = torch.autograd.grad(layer_norm(x).sum(), x, create_graph=False)[0]
         grads2 = torch.autograd.grad(layer_norm(x).sum(), x, create_graph=True)[0]
 
-        self.assertEqual(grads1, grads2, rtol, atol)
+        self.assertEqual(grads1, grads2, rtol=rtol, atol=atol)
 
         if TEST_CUDA:
             x = x.to('cuda')
@@ -11184,7 +11184,7 @@ class TestNN(NNTestCase):
             grads1 = torch.autograd.grad(layer_norm(x).sum(), x, create_graph=False)[0]
             grads2 = torch.autograd.grad(layer_norm(x).sum(), x, create_graph=True)[0]
 
-            self.assertEqual(grads1, grads2, rtol, atol)
+            self.assertEqual(grads1, grads2, rtol=rtol, atol=atol)
 
     def test_padding_list(self):
         # Padding can be a list, or tuple (regression test for gh-54452)

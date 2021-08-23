@@ -188,7 +188,7 @@ class ModelTest(PackageTestCase):
         loaded = torch.jit.load(f2)
 
         input = torch.rand(1, 3, 224, 224)
-        self.assertEqual((loaded(input), resnet(input)))
+        self.assertEqual(loaded(input), resnet(input))
 
 
 if __name__ == "__main__":

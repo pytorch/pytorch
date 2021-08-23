@@ -762,6 +762,9 @@ class Wrapper:
     def __int__(self):
         return self.__torch_function__(torch.Tensor.__int__, (Wrapper,), (self,))
 
+    def __len__(self):
+        return len(self._data)
+
 
 # unwrap inputs if necessary
 def unwrap(v):
@@ -782,15 +785,15 @@ class TestEinsumOverride(TestCase):
     def test_wrapper(self):
         x = Wrapper(torch.randn(5))
         y = Wrapper(torch.randn(4))
-        self.assertEqual(torch.einsum('i,j->ij', x, y),
-                         torch.ger(x, y))
+        self.assertEqual(torch.einsum('i,j->ij', x, y)._data,
+                         torch.ger(x, y)._data)
 
         # in the old einsum interface, `operands` is a list
         a = Wrapper(torch.randn(2, 3))
         b = Wrapper(torch.randn(5, 3, 7))
         c = Wrapper(torch.randn(2, 7))
-        self.assertEqual(torch.einsum('ik,jkl,il->ij', [a, b, c]),
-                         torch.nn.functional.bilinear(a, c, b))
+        self.assertEqual(torch.einsum('ik,jkl,il->ij', [a, b, c])._data,
+                         torch.nn.functional.bilinear(a, c, b)._data)
 
 class TestGradCheckOverride(TestCase):
     "Test that wrappers work with gradcheck."

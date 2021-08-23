@@ -218,9 +218,9 @@ class TestEqualizeFx(QuantizationTestCase):
             ref_zero_points = ref_zero_points - np.round(ref_min_weights_scaled / ref_scales)
 
         self.assertEqual(weight_qparams[0], torch.tensor(
-            ref_scales, dtype=weight_qparams[0].dtype), atol=0.0001)
+            ref_scales, dtype=weight_qparams[0].dtype), rtol=1e-5, atol=0.0001)
         self.assertEqual(weight_qparams[1], torch.tensor(
-            ref_zero_points, dtype=weight_qparams[1].dtype), atol=1)
+            ref_zero_points, dtype=weight_qparams[1].dtype), rtol=1e-5, atol=1)
 
     def test_input_weight_equalization_prepare(self):
         """ Tests that graphs created after prepare_fx is as expected
@@ -783,7 +783,7 @@ class TestEqualizeFx(QuantizationTestCase):
             prepared(x)
             equalized_and_quantized = convert_fx(prepared)  # Check if compile
             equalized_and_quantized_output = equalized_and_quantized(x)
-            self.assertEqual(quantized_output, equalized_and_quantized_output, atol=0.1)
+            self.assertEqual(quantized_output, equalized_and_quantized_output, rtol=1e-5, atol=0.1)
 
     @skipIfNoFBGEMM
     def test_selective_equalization(self):
