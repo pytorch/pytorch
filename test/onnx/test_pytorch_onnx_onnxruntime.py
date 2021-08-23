@@ -5087,7 +5087,7 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.randn(4, 5)
         self.run_test(model, (x, y))
 
-    @skipIfUnsupportedMinOpsetVersion(14)  # Need onnx::identity of sequence in opset 14
+    @skipIfUnsupportedMinOpsetVersion(14)  # Need onnx::Identity of sequence in opset 14
     def test_list_append_nested_2(self):
         class ListModel(torch.nn.Module):
             def forward(self, x):
@@ -5523,7 +5523,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.zeros(12,)
         self.run_test(torch.jit.script(M()), (x))
 
-    @skipIfUnsupportedMinOpsetVersion(14)  # Need onnx::identity of sequence in opset 14
+    @skipIfUnsupportedMinOpsetVersion(14)  # Need onnx::Identity of sequence in opset 14
     def test_inplace_sequence_with_loop(self):
         class M(torch.nn.Module):
             def process(self, beam_hyps: List[torch.Tensor], done: torch.Tensor, x):
@@ -6518,76 +6518,76 @@ class TestONNXRuntime(unittest.TestCase):
                       input_names=["input_1"],
                       dynamic_axes={"input_1": [0, 1]})
 
-    # ONNX::identity of sequence supported for ONNX opset >= 14
+    # onnx::Identity of sequence supported for ONNX opset >= 14
     @skipIfUnsupportedMinOpsetVersion(14)
     @skipIfONNXShapeInference(False)
     def test_uninitialized_tensorList(self):
         class UninitializedTensorListModel(torch.nn.Module):
-            def forward(self, y):
-                if y[0].shape[0] < 5:
-                    if y.size(0) == 1:
-                        y = y + 4
+            def forward(self, x):
+                if x[0].shape[0] < 5:
+                    if x.size(0) == 1:
+                        x = x + 4
                     else:
-                        return [y]
-                return [y]
+                        return [x]
+                return [x]
 
-        y = torch.ones((3, 4), dtype=torch.int)
-        self.run_test(torch.jit.script(UninitializedTensorListModel()), y)
+        x = torch.ones((3, 4), dtype=torch.int)
+        self.run_test(torch.jit.script(UninitializedTensorListModel()), x)
 
-    # ONNX::identity of sequence supported for ONNX opset >= 14
+    # onnx::Identity of sequence supported for ONNX opset >= 14
+    @skipIfUnsupportedMinOpsetVersion(14)
+    @skipIfONNXShapeInference(False)
+    def test_uninitialized_tensorList_dynamic(self):
+        class UninitializedTensorListModel(torch.nn.Module):
+            def forward(self, x):
+                if x[0].shape[0] < 5:
+                    if x.size(0) == 1:
+                        x += x
+                    else:
+                        return list(x)
+                return list(x)
+
+        x = torch.ones((3, 4), dtype=torch.double)
+        self.run_test(torch.jit.script(UninitializedTensorListModel()), x, input_names=["input_1"],
+                      dynamic_axes={"input_1": [0, 1]})
+
+    # onnx::Identity of sequence supported for ONNX opset >= 14
     @skipIfUnsupportedMinOpsetVersion(14)
     @skipIfONNXShapeInference(False)
     def test_uninitialized_intList(self):
         class UninitializedListModel(torch.nn.Module):
-            def forward(self, y):
-                z = [i for i in range(10)]
-                if z[0] < 5:
-                    if y.size(0) == 1:
-                        z[0] += 4
+            def forward(self, x):
+                y = list(range(10))
+                if y[0] < 5:
+                    # if x.size(0) != 3, ORT will throw type error.
+                    if x.size(0) == 3:
+                        y.append(10)
                     else:
-                        return z
-                return z
-
-        y = torch.ones((3, 4), dtype=torch.int)
-        self.run_test(torch.jit.script(UninitializedListModel()), y)
-
-    # ONNX::identity of sequence supported for ONNX opset >= 14
-    @skipIfUnsupportedMinOpsetVersion(14)
-    @skipIfONNXShapeInference(False)
-    def test_uninitialized_tensorList_dynamic(self):
-        class UninitializedModel(torch.nn.Module):
-            def forward(self, y):
-                if y[0].shape[1] < 5:
-                    if y.size(0) == 1:
-                        y = y + 4
-                    else:
-                        return [y]
-                return [y]
+                        return y
+                return y
 
         x = torch.ones((3, 4), dtype=torch.int)
-        y = torch.ones((6, 7), dtype=torch.int)
-        self.run_test(UninitializedModel(), x, test_with_inputs=[y],
-                      input_names=["input_1"],
+        self.run_test(torch.jit.script(UninitializedListModel()), x, input_names=["input_1"],
                       dynamic_axes={"input_1": [0, 1]})
 
-    # ONNX::identity of sequence supported for ONNX opset >= 14
+    # onnx::Identity of sequence supported for ONNX opset >= 14
     @skipIfUnsupportedMinOpsetVersion(14)
     @skipIfONNXShapeInference(False)
-    def test_uninitialized_tensorList_shape_dynamic(self):
+    def test_uninitialized_tensorList_shape(self):
         class UninitializedModel(torch.nn.Module):
-            def forward(self, y):
-                if y.shape[1] < 5:
-                    if y.size(0) == 1:
-                        y = y + 4
+            def forward(self, x):
+                if x.shape[1] < 5:
+                    if x.size(0) == 1:
+                        x = x + 4
                     else:
-                        y_list = [y]
-                        y_list.append(y)
-                        return y_list
-                return [y, y]
+                        x_list = list(x)
+                        x_list.append(x)
+                        return x_list
+                return [x, x]
 
         x = torch.ones((3, 4), dtype=torch.int)
         y = torch.ones((4, 6), dtype=torch.int)
-        self.run_test(UninitializedModel(), x, test_with_inputs=[y],
+        self.run_test(torch.jit.script(UninitializedModel()), x, test_with_inputs=[y],
                       input_names=["input_1"],
                       dynamic_axes={"input_1": [0, 1]})
 
