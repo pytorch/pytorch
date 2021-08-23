@@ -233,7 +233,7 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
         return (not self.child_buffers[instance_id] and self.main_datapipe_exhausted)
 
     def is_every_instance_exhausted(self) -> bool:
-        return all(not child_buffer for child_buffer in self.child_buffers)
+        return self.main_datapipe_exhausted and all(not child_buffer for child_buffer in self.child_buffers)
 
     def reset(self):
         self.dp = iter(self.main_datapipe)
