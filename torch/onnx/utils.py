@@ -491,6 +491,11 @@ def _model_to_graph(model, args, verbose=False,
         out_vars, desc = torch.jit._flatten(tuple(example_outputs))
         torch._C._jit_pass_onnx_assign_output_shape(graph, out_vars, desc, _onnx_shape_inference)
 
+    else:
+        flatten_args, _ = torch._C._jit_flatten(args)
+        # make sure that the param dict and the graph match each other
+        assert len(params) + len(flatten_args) == sum(1 for _ in graph.inputs())
+
     # NB: ONNX requires complete information about output types, which might be
     # erased by some optimizations, so we need to set it explicitly again.
     if torch_out is not None:
@@ -503,11 +508,6 @@ def _model_to_graph(model, args, verbose=False,
         torch._C._jit_pass_onnx_assign_output_shape(graph, output_tensors, out_desc, _onnx_shape_inference)
 
     _set_input_and_output_names(graph, input_names, output_names)
-
-    # make sure that the param dict and the graph match each other
-    flatten_args, _ = torch._C._jit_flatten(args)
-    assert len(params) + len(flatten_args) == sum(1 for _ in graph.inputs())
-
     params_dict = _get_named_param_dict(graph, params)
 
     allow_adjust_graph_inputs = (export_params and not keep_initializers_as_inputs)
