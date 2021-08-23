@@ -326,7 +326,7 @@ def load(repo_or_dir, model, *args, source='github', force_reload=False, verbose
 
     If :attr:`source` is ``'github'``, :attr:`repo_or_dir` is expected to be
     of the form ``repo_owner/repo_name[:tag_name]`` with an optional
-    tag/branch. The default branch is `master` if not specified.
+    tag/branch. The default branch is ``master`` if not specified.
 
     If :attr:`source` is ``'local'``, :attr:`repo_or_dir` is expected to be a
     path to a local directory.
