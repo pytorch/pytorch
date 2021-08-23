@@ -5,12 +5,13 @@ import torch.distributed as dist
 import torch.distributed.algorithms.quantization.quantization as quant
 from torch.distributed.algorithms.quantization.quantization import DQuantType
 from torch.testing._internal.common_distributed import (
+    MultiProcessTestCase,
     requires_gloo,
     skip_if_lt_x_gpu,
     requires_nccl,
 )
 from torch.testing._internal.distributed.distributed_test import (
-    DistributedTest, TestDistBackend, BACKEND
+    apply_hack_for_nccl, BACKEND
 )
 from torch.testing._internal.common_utils import sandcastle_skip_if
 
@@ -22,27 +23,76 @@ def _build_tensor(size, value=None, dtype=torch.float, device_id=None):
     else:
         return torch.empty(size, size, size, dtype=dtype).fill_(value).cuda(device_id)
 
-class DistQuantizationTests(TestDistBackend, DistributedTest._DistTestBase):
+class DistQuantizationTests(MultiProcessTestCase):
     def setUp(self):
-        super().setUp()
-        self._fork_processes()
+        super(DistQuantizationTests, self).setUp()
+        self._spawn_processes()
+
+    def tearDown(self):
+        super(DistQuantizationTests, self).tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
+    @property
+    def op_timeout_sec(self):
+        return 1
+
+    @property
+    def world_size(self):
+        return 2
+
+    def _init_multigpu_helper(self):
+        """Multigpu tests are designed to simulate the multi nodes with multi
+        GPUs on each node. Nccl backend requires equal #GPUs in each process.
+        On a single node, all visible GPUs are evenly
+        divided to subsets, each process only uses a subset.
+        """
+        nGPUs = torch.cuda.device_count()
+        world_size = dist.get_world_size()
+        visible_devices = range(nGPUs)
+
+        if BACKEND == "nccl":
+            apply_hack_for_nccl()
+
+        # If rank is lesser than or equal to number of available GPU's
+        # then each rank can be mapped to corresponding GPU.
+        nGPUs_per_process = 1
+        if world_size > nGPUs:
+            nGPUs_per_process = nGPUs // world_size
+        rank_to_GPU = {
+            i: list(
+                visible_devices[i * nGPUs_per_process : (i + 1) * nGPUs_per_process]
+            )
+            for i in range(world_size)
+        }
+        return rank_to_GPU
 
     @requires_gloo()
     @sandcastle_skip_if(BACKEND != "gloo", "Only gloo backend supports all_gather_fp16")
     def test_all_gather_fp16(self):
-        group, group_id, rank = self._init_global_test()
-        self._test_all_gather(group, group_id, rank, dtype=torch.float32, qtype=DQuantType.FP16)
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(store=store, rank=self.rank, world_size=self.world_size, backend='gloo')
+        device = torch.device(f"cuda:{self.rank}")
+        group_id = dist.new_group(range(self.world_size))
+        group = list(range(0, self.world_size))
+        self._test_all_gather(group, group_id, self.rank, dtype=torch.float32, qtype=DQuantType.FP16)
 
     @requires_nccl()
     @sandcastle_skip_if(BACKEND != "nccl", "Only nccl backend supports all_to_all_fp16")
     @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
     def test_all_to_all_fp16(self):
-        group, group_id, rank = self._init_global_test()
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(store=store, rank=self.rank, world_size=self.world_size, backend='nccl')
+        device = torch.device(f"cuda:{self.rank}")
+        group_id = dist.new_group(range(self.world_size))
+        group = list(range(0, self.world_size))
         rank_to_GPU = self._init_multigpu_helper()
         self._test_all_to_all(
             group,
             group_id,
-            rank,
+            self.rank,
             cuda=True,
             rank_to_GPU=rank_to_GPU,
             dtype=torch.float32,
@@ -69,8 +119,6 @@ class DistQuantizationTests(TestDistBackend, DistributedTest._DistTestBase):
 
             for t1, t2 in zip(tensors, expected_tensors):
                 self.assertEqual(t1, t2)
-
-        self._barrier()
 
     def _test_all_to_all(
         self,
@@ -108,4 +156,3 @@ class DistQuantizationTests(TestDistBackend, DistributedTest._DistTestBase):
                 dist.all_to_all(out_tensors, in_tensors, group=group_id)
             for t1, t2 in zip(out_tensors, expected_tensors):
                 self.assertEqual(t1, t2)
-        self._barrier()
