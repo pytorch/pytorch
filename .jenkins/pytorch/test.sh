@@ -511,6 +511,14 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 || "$
   test_custom_script_ops
   test_custom_backend
   test_torch_function_benchmark
+elif [[ "${BUILD_ENVIRONMENT}" == *-test3 || "${JOB_BASE_NAME}" == *-test3 || "${SHARD_NUMBER}" == 3 ]]; then
+  echo not doing anything 3
+elif [[ "${BUILD_ENVIRONMENT}" == *-test4 || "${JOB_BASE_NAME}" == *-test4 || "${SHARD_NUMBER}" == 4 ]]; then
+  echo not doing anything 4
+elif [[ "${BUILD_ENVIRONMENT}" == *-test5 || "${JOB_BASE_NAME}" == *-test5 || "${SHARD_NUMBER}" == 5 ]]; then
+  echo not doing anything 5
+elif [[ "${BUILD_ENVIRONMENT}" == *-test6 || "${JOB_BASE_NAME}" == *-test6 || "${SHARD_NUMBER}" == 6 ]]; then
+  echo not doing anything 6
 elif [[ "${BUILD_ENVIRONMENT}" == *vulkan-linux* ]]; then
   test_vulkan
 elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
