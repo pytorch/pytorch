@@ -10,6 +10,17 @@
 namespace at { namespace native {
 
 namespace {
+#if AT_BUILD_WITH_LAPACK()
+char to_lapack(TransposeType trans) {
+  switch (trans) {
+    case TransposeType::Transpose: return 't';
+    case TransposeType::NoTranspose: return 'n';
+    case TransposeType::ConjTranspose: return 'c';
+  }
+  TORCH_INTERNAL_ASSERT(false, "Invalid transpose type");
+}
+#endif
+
 
 /*
   Computes the Cholesky decomposition of matrices stored in `input`.
@@ -796,7 +807,7 @@ This is an in-place routine, content of 'B' is overwritten.
 and the actual diagonal values are not used.
 */
 template<typename scalar_t>
-void apply_triangular_solve(Tensor& A, Tensor& B, bool left, bool upper, char trans, bool unitriangular) {
+void apply_triangular_solve(Tensor& A, Tensor& B, bool left, bool upper, TransposeType transpose, bool unitriangular) {
 #if !AT_BUILD_WITH_LAPACK()
   TORCH_CHECK(
       false,
@@ -806,6 +817,7 @@ void apply_triangular_solve(Tensor& A, Tensor& B, bool left, bool upper, char tr
   char uplo = upper ? 'U' : 'L';
   char diag = unitriangular ? 'U' : 'N';
   char side = left ? 'L' : 'R';
+  const char trans = to_lapack(transpose);
 
   auto A_data = A.data_ptr<scalar_t>();
   auto B_data = B.data_ptr<scalar_t>();
@@ -829,7 +841,7 @@ void apply_triangular_solve(Tensor& A, Tensor& B, bool left, bool upper, char tr
 #endif
 }
 
-void triangular_solve_kernel(Tensor& A, Tensor& B, bool left, bool upper, char transpose, bool unitriangular) {
+void triangular_solve_kernel(Tensor& A, Tensor& B, bool left, bool upper, TransposeType transpose, bool unitriangular) {
   // right solvers are not implemented in LAPACK. The caller always calls with left=True
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(A.scalar_type(), "triangular_solve_cpu", [&]{
     apply_triangular_solve<scalar_t>(A, B, left, upper, transpose, unitriangular);
@@ -899,7 +911,7 @@ void lu_kernel(const Tensor& input, const Tensor& pivots, const Tensor& infos, b
   For further details, please see the LAPACK documentation for GETRS.
 */
 template <typename scalar_t>
-void apply_lu_solve(const Tensor& b, const Tensor& lu, const Tensor& pivots, char trans = 'N') {
+void apply_lu_solve(const Tensor& b, const Tensor& lu, const Tensor& pivots, TransposeType transpose) {
 #if !AT_BUILD_WITH_LAPACK()
   TORCH_CHECK(
       false,
@@ -908,6 +920,7 @@ void apply_lu_solve(const Tensor& b, const Tensor& lu, const Tensor& pivots, cha
 #else
   auto b_data = b.data_ptr<scalar_t>();
   auto lu_data = lu.data_ptr<scalar_t>();
+  const auto trans = to_lapack(transpose);
   auto pivots_data = pivots.data_ptr<int>();
   auto b_stride = matrixStride(b);
   auto lu_stride = matrixStride(lu);
@@ -935,22 +948,14 @@ void apply_lu_solve(const Tensor& b, const Tensor& lu, const Tensor& pivots, cha
 }
 
 // This is a type dispatching helper function for 'apply_lu_solve'
-void lu_solve_trans_kernel(const Tensor& b, const Tensor& lu, const Tensor& pivots, char trans) {
-  switch (trans) {
-    case 'N':
-    case 'T':
-    case 'C':
-      break;
-    default:
-      TORCH_INTERNAL_ASSERT(false, "lu_solve_trans_cpu: wrong value for `trans`, it must be one of 'N', 'T', 'C'");
-  }
+void lu_solve_trans_kernel(const Tensor& b, const Tensor& lu, const Tensor& pivots, TransposeType trans) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(b.scalar_type(), "lu_solve_cpu", [&]{
     apply_lu_solve<scalar_t>(b, lu, pivots, trans);
   });
 }
 
 void lu_solve_kernel(const Tensor& b, const Tensor& lu, const Tensor& pivots) {
-  lu_solve_trans_kernel(b, lu, pivots, 'N');
+  lu_solve_trans_kernel(b, lu, pivots, TransposeType::NoTranspose);
 }
 
 } // anonymous namespace
