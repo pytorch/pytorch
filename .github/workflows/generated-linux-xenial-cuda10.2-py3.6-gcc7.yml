@@ -284,6 +284,7 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
+          fetch-depth: 0 # deep clone, to allow sharding to use git rev-list
           submodules: recursive
       - name: Pull docker image
         run: |
@@ -318,12 +319,6 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Show env
-        env:
-          BUILD_ENVIRONMENT: linux-xenial-cuda10.2-py3.6-gcc7-${{ matrix.config }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          printenv | sort
       - name: Test PyTorch
         env:
           BUILD_ENVIRONMENT: linux-xenial-cuda10.2-py3.6-gcc7-${{ matrix.config }}

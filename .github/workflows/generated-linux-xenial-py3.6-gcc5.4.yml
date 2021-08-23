@@ -231,7 +231,7 @@ jobs:
       ENABLE_NOGPU_NO_AVX_TEST: ''
       ENABLE_NOGPU_NO_AVX2_TEST: ''
       ENABLE_SLOW_TEST: ''
-      NUM_TEST_SHARDS: 6
+      NUM_TEST_SHARDS: 2
       MULTIGPU_RUNNER_TYPE: linux.16xlarge.nvidia.gpu
       NOGPU_RUNNER_TYPE: linux.2xlarge
       PR_BODY: ${{ github.event.pull_request.body }}
@@ -284,6 +284,7 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
+          fetch-depth: 0 # deep clone, to allow sharding to use git rev-list
           submodules: recursive
       - name: Pull docker image
         run: |
@@ -318,12 +319,6 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Show env
-        env:
-          BUILD_ENVIRONMENT: linux-xenial-py3.6-gcc5.4-${{ matrix.config }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          printenv | sort
       - name: Test PyTorch
         env:
           BUILD_ENVIRONMENT: linux-xenial-py3.6-gcc5.4-${{ matrix.config }}
