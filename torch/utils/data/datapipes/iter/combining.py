@@ -152,9 +152,9 @@ class ChildDataPipe(IterDataPipe):
     def __iter__(self):
         if self.main_datapipe.is_instance_exhausted(self.instance_id):
             if not self.main_datapipe.is_every_instance_exhausted():
-                warnings.warn("""This child DataPipe was exhausted, while some other child DataPipes are not. 
-                                 By reading from this child DataPipe again, we are now resetting the buffer and 
-                                 each child DataPipe will read from the beginning again.""", UserWarning)
+                warnings.warn("This child DataPipe was exhausted, while some other child DataPipes are not. "
+                              "By reading from this child DataPipe again, we are now resetting the buffer and "
+                              "each child DataPipe will read from the start again.", UserWarning)
             self.main_datapipe.reset()
         yield from self.main_datapipe.get_next(self.instance_id)
 
