@@ -2862,6 +2862,7 @@ class TestQuantizeFx(QuantizationTestCase):
             if n.target == "lstm":
                 self.assertEqual(type(n.args[1]), tuple)
 
+    @skipIfNoFBGEMM
     def test_dynamic_with_fusion(self):
         """
         Tests that dynamic quantization APIs work with Linear + Relu fusion
