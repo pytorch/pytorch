@@ -214,7 +214,7 @@ std::function<void(ProcessedNode*)> getOutOfPlaceOperation(Node* n) {
 
 // Returns true if the node represents an op with variadic arguments.
 bool hasVarArgs(Node* n) {
-  if (n->kind() == prim::VarConcat) {
+  if (n->kind() == prim::VarConcat || n->kind() == prim::VarStack) {
     return true;
   }
   return false;
