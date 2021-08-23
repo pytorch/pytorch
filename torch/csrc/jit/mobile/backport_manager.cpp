@@ -187,6 +187,11 @@ std::stringstream re_emit_model(
   // to be re-emitted (refer to the comments below)
   Module torch_script = torch::jit::load(rai, c10::nullopt, extra_files);
 
+  // The RAII guard to change the flag, emitBytecodeDefaultInputs, to true, so
+  // that TS stores the default argument values in the constant table, and emits
+  // the instructions (LOADC, for example), to push the values to the stack. It
+  // restores the behavior of V5 and before. For V6, the default arg values are
+  // resolved at runtime init stage for better operator compatibility.
   std::stringstream intermediate_model_stream;
   {
     BytecodeEmitModeGuard argNumGuard(
@@ -195,7 +200,8 @@ std::stringstream re_emit_model(
         intermediate_model_stream, extra_files, hasBytecodeDebug);
   }
 
-  // Update the bytecode version (from 7 to 6)
+  // Update the bytecode version (from the input_model_stream version to
+  // ${to_version})
 
   PyTorchStreamReader reader_bytecode(&intermediate_model_stream);
   std::vector<IValue> bytecode_values = get_bytecode_ivalues(reader_bytecode);
@@ -221,7 +227,7 @@ std::stringstream re_emit_model(
   selective_copy(
       reader_bytecode, writer_bytecode, excluded_files, excluded_dirs);
 
-  update_bytecode_version(bytecode_values, kBytecodeVersionV6);
+  update_bytecode_version(bytecode_values, to_version);
   auto bytecode_tuple = c10::ivalue::Tuple::create(std::move(bytecode_values));
   SerializationStorageContext storage_context;
   write_archive_v5_to_v7(
@@ -350,8 +356,6 @@ std::stringstream backport_v5_to_v4(std::stringstream& input_model_stream) {
   writeArchiveV4(writer, kArchiveNameConstants, constants_tuple);
   return ouput_model_stream;
 }
-
-
 
 std::stringstream backport_v6_to_v5(std::stringstream& input_model_stream) {
   bool emit_default_input_instructions = true;
