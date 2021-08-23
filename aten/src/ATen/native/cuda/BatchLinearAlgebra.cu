@@ -1224,17 +1224,13 @@ void checkMagmaInternalError(magma_int_t info, const std::string& magma_function
       ", when calling ", magma_function_name);
 }
 
-magma_trans_t _get_magma_trans(char trans) {
+magma_trans_t to_magma(TransposeType trans) {
   switch (trans) {
-    case 'N':
-      return MagmaNoTrans;
-    case 'T':
-      return MagmaTrans;
-    case 'C':
-      return MagmaConjTrans;
-    default:
-      return MagmaNoTrans;
+    case TransposeType::NoTranspose: return MagmaNoTrans;
+    case TransposeType::Transpose: return MagmaTrans;
+    case TransposeType::ConjTranspose: return MagmaConjTrans;
   }
+  TORCH_INTERNAL_ASSERT(false, "Invalid transpose type");
 }
 } // anonymous namespace
 #endif // USE_MAGMA
@@ -1961,13 +1957,13 @@ REGISTER_DISPATCH(lu_stub, &apply_lu);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triangular_solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <typename scalar_t>
-static void apply_triangular_solve_batched_magma(Tensor& A, Tensor& b, bool left, bool upper, char transpose, bool unitriangular) {
+static void apply_triangular_solve_batched_magma(Tensor& A, Tensor& b, bool left, bool upper, TransposeType transpose, bool unitriangular) {
 #ifndef USE_MAGMA
 AT_ERROR("triangular_solve: MAGMA library not found in "
          "compilation. Please rebuild with MAGMA.");
 #else
   magma_uplo_t uplo = upper ? MagmaUpper : MagmaLower;
-  magma_trans_t trans = _get_magma_trans(transpose);
+  magma_trans_t trans = to_magma(transpose);
   magma_diag_t diag = unitriangular ? MagmaUnit : MagmaNonUnit;
   magma_side_t side = left ? MagmaLeft : MagmaRight;
 
@@ -2026,13 +2022,13 @@ AT_ERROR("triangular_solve: MAGMA library not found in "
 #endif
 }
 
-void triangular_solve_batched_magma(Tensor& A, Tensor& B, bool left, bool upper, char transpose, bool unitriangular) {
+void triangular_solve_batched_magma(Tensor& A, Tensor& B, bool left, bool upper, TransposeType transpose, bool unitriangular) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(A.scalar_type(), "triangular_solve_cuda", [&]{
     apply_triangular_solve_batched_magma<scalar_t>(A, B, left, upper, transpose, unitriangular);
   });
 }
 
-void triangular_solve_kernel(Tensor& A, Tensor& B, bool left, bool upper, char transpose, bool unitriangular) {
+void triangular_solve_kernel(Tensor& A, Tensor& B, bool left, bool upper, TransposeType transpose, bool unitriangular) {
   // For batches smaller than 8 and matrix sizes larger than 64x64 cuBLAS forloop is faster than batched version
   if (batchCount(A) <= 8 && A.size(-1) >= 64) {
     triangular_solve_cublas(A, B, left, upper, transpose, unitriangular);
@@ -2751,14 +2747,14 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda(const Tensor& self, bool som
   For further details, please see the MAGMA documentation for magma_dgetrs_gpu.
 */
 template <typename scalar_t>
-static void apply_lu_solve_looped_magma(const Tensor& b, const Tensor& lu, const Tensor& pivots, char lapack_trans) {
+static void apply_lu_solve_looped_magma(const Tensor& b, const Tensor& lu, const Tensor& pivots, TransposeType transpose) {
 #ifndef USE_MAGMA
   TORCH_CHECK(
       false,
       "Calling torch.lu_solve on a CUDA tensor requires compiling ",
       "PyTorch with MAGMA. lease rebuild with MAGMA.");
 #else
-  auto trans = _get_magma_trans(lapack_trans);
+  auto trans = to_magma(transpose);
   auto b_data = b.data_ptr<scalar_t>();
   auto lu_data = lu.data_ptr<scalar_t>();
 
@@ -2805,14 +2801,14 @@ static void apply_lu_solve_looped_magma(const Tensor& b, const Tensor& lu, const
   For further details, please see the MAGMA documentation for magma_dgetrs_batched.
 */
 template <typename scalar_t>
-static void apply_lu_solve_batched_magma(const Tensor& b, const Tensor& lu, const Tensor& pivots, char lapack_trans) {
+static void apply_lu_solve_batched_magma(const Tensor& b, const Tensor& lu, const Tensor& pivots, TransposeType transpose) {
 #ifndef USE_MAGMA
   TORCH_CHECK(
       false,
       "Calling torch.lu_solve on a CUDA tensor requires compiling ",
       "PyTorch with MAGMA. lease rebuild with MAGMA.");
 #else
-  auto trans = _get_magma_trans(lapack_trans);
+  auto trans = to_magma(transpose);
   auto b_data = b.data_ptr<scalar_t>();
   auto lu_data = lu.data_ptr<scalar_t>();
 
@@ -2866,20 +2862,20 @@ static void apply_lu_solve_batched_magma(const Tensor& b, const Tensor& lu, cons
 #endif
 }
 
-static void lu_solve_batched_magma(const Tensor& b, const Tensor& lu, const Tensor& pivots, char lapack_trans) {
+static void lu_solve_batched_magma(const Tensor& b, const Tensor& lu, const Tensor& pivots, TransposeType trans) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(b.scalar_type(), "lu_solve_batched_magma", [&]{
-    apply_lu_solve_batched_magma<scalar_t>(b, lu, pivots, lapack_trans);
+    apply_lu_solve_batched_magma<scalar_t>(b, lu, pivots, trans);
   });
 }
 
-static void lu_solve_looped_magma(const Tensor& b, const Tensor& lu, const Tensor& pivots, char lapack_trans) {
+static void lu_solve_looped_magma(const Tensor& b, const Tensor& lu, const Tensor& pivots, TransposeType trans) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(b.scalar_type(), "lu_solve_looped_magma", [&]{
-    apply_lu_solve_looped_magma<scalar_t>(b, lu, pivots, lapack_trans);
+    apply_lu_solve_looped_magma<scalar_t>(b, lu, pivots, trans);
   });
 }
 
 
-static void lu_solve_trans_dispatch(const Tensor& b, const Tensor& lu, const Tensor& pivots, char trans) {
+static void lu_solve_trans_dispatch(const Tensor& b, const Tensor& lu, const Tensor& pivots, TransposeType trans) {
   auto batch_size = batchCount(lu);
   auto m = lu.size(-2);
   auto b2 = b.size(-1);
@@ -2907,7 +2903,7 @@ static void lu_solve_trans_dispatch(const Tensor& b, const Tensor& lu, const Ten
 REGISTER_DISPATCH(lu_solve_trans_stub, &lu_solve_trans_dispatch);
 
 static void lu_solve_dispatch(const Tensor& b, const Tensor& lu, const Tensor& pivots) {
-  lu_solve_trans_dispatch(b, lu, pivots, 'N');
+  lu_solve_trans_dispatch(b, lu, pivots, TransposeType::NoTranspose);
 }
 
 REGISTER_DISPATCH(lu_solve_stub, &lu_solve_dispatch);
@@ -3000,7 +2996,7 @@ void linalg_lstsq_gels(const Tensor& A, const Tensor& B, const Tensor& /*infos*/
         const_cast<Tensor&>(B),
         /*left=*/true,
         /*upper=*/true,
-        /*transpose=*/'N',
+        /*transpose=*/TransposeType::NoTranspose,
         /*unitriangular=*/false);
   } else { // underdetermined case
     Tensor Ah = cloneBatchedColumnMajor(A.conj().transpose(-2, -1));
@@ -3017,12 +3013,14 @@ void linalg_lstsq_gels(const Tensor& A, const Tensor& B, const Tensor& /*infos*/
     Tensor Ah_broadcasted = is_fortran_contiguous ? Ah_expanded : cloneBatchedColumnMajor(Ah_expanded);
 
     // Step 2: R^H Z = B
+    const auto trans = Ah_broadcasted.is_complex() ? TransposeType::ConjTranspose
+                                                   : TransposeType::Transpose;
     triangular_solve_kernel(
         const_cast<Tensor&>(Ah_broadcasted),
         const_cast<Tensor&>(B),
         /*left=*/true,
         /*upper=*/true,
-        /*transpose=*/Ah_broadcasted.is_complex() ? 'C' : 'T',
+        /*transpose=*/trans,
         /*unitriangular=*/false);
 
     // B matrix has the size max(m, n) x nrhs

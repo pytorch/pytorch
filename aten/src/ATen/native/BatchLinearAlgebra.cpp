@@ -1652,7 +1652,7 @@ static std::tuple<Tensor&, Tensor&> triangular_solve_out_info(
   result.copy_(other);
   clone_input.copy_(input);
 
-  triangular_solve_stub(input.device().type(), clone_input, result, /*left=*/true, upper, transpose ? 'T' : 'N', unitriangular);
+  triangular_solve_stub(input.device().type(), clone_input, result, /*left=*/true, upper, transpose ? TransposeType::Transpose : TransposeType::NoTranspose, unitriangular);
 
   return std::tuple<Tensor&, Tensor&>(result, clone_input);
 }
@@ -3562,17 +3562,7 @@ DEFINE_DISPATCH(lu_solve_stub);
 DEFINE_DISPATCH(lu_solve_trans_stub);
 
 // Supports arbitrary batch dimensions for self and LU_data (implicitly LU_pivots also)
-Tensor _lu_solve_trans(const Tensor& self, const Tensor& LU_data, const Tensor& LU_pivots, const c10::string_view trans_str) {
-  auto trans = std::toupper(trans_str[0]);
-  switch (trans) {
-    case 'N':
-    case 'T':
-    case 'C':
-      break;
-    default:
-      TORCH_CHECK(false,
-                  "lu_solve: wrong `trans` parameter, it must be one of 'N', 'T' or 'C'");
-  }
+Tensor _lu_solve_trans(const Tensor& self, const Tensor& LU_data, const Tensor& LU_pivots, TransposeType trans) {
   TORCH_CHECK(self.dim() >= 2,
               "b should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
   TORCH_CHECK(LU_data.dim() >= 2,
@@ -3615,7 +3605,7 @@ Tensor _lu_solve_trans(const Tensor& self, const Tensor& LU_data, const Tensor& 
 }
 
 Tensor lu_solve(const Tensor& self, const Tensor& LU_data, const Tensor& LU_pivots) {
-  return at::native::_lu_solve_trans(self, LU_data, LU_pivots, "N");
+  return at::native::_lu_solve_trans(self, LU_data, LU_pivots, TransposeType::NoTranspose);
 }
 
 Tensor& lu_solve_out(const Tensor& self, const Tensor& LU_data, const Tensor& LU_pivots, Tensor& result) {
@@ -3765,7 +3755,7 @@ Tensor _det_lu_based_helper_backward_helper(
     auto lu_clone = lu.clone();
     condition_diagonal(lu_clone);
 
-    auto trans = self.is_complex() ? 'C' : 'T';
+    auto trans = self.is_complex() ? TransposeType::ConjTranspose : TransposeType::Transpose;
 
     // d is modified in-place and will contain the result
     lu_solve_trans_stub(self.device().type(), d, lu_clone, pivs, trans);
@@ -3798,7 +3788,7 @@ Tensor _det_lu_based_helper_backward_helper(
       self.device().type(), u, d,
       /*left=*/true,
       /*upper=*/false,
-      /*transpose=*/'N',
+      /*transpose=*/TransposeType::NoTranspose,
       /*unitriangular=*/false);
 
     // After this operation d will contain a row-wise permuted grad wrt to self
@@ -3807,7 +3797,7 @@ Tensor _det_lu_based_helper_backward_helper(
       self.device().type(), l, d,
       /*left=*/true,
       /*upper=*/true,
-      /*transpose=*/'N',
+      /*transpose=*/TransposeType::NoTranspose,
       /*unitriangular=*/true);
 
     // multiply by p to restore the row order
@@ -3880,8 +3870,14 @@ bool is_fortran_ready(const Tensor& t) {
           is_fortran_compatible_column_major_order(t));
 }
 
-char trans_char(const bool contig, const bool conj) {
-    return conj ? 'C' : contig ? 'N' : 'T';
+TransposeType to_transtype(const bool contig, const bool conj) {
+  if (conj) {
+    if (contig) { TORCH_INTERNAL_ASSERT(false, "Invalid transpose type"); }
+    else {      return TransposeType::ConjTranspose; }
+  } else {
+    if (contig) { return TransposeType::NoTranspose; }
+    else {      return TransposeType::Transpose; }
+  }
 }
 } // end of anonymous namespace
 
@@ -4000,7 +3996,7 @@ Tensor& linalg_solve_triangular_out(
   bool A_is_conj = A_broad.is_conj() != out_f.is_conj();
   bool A_is_neg = A_broad.is_neg() != out_f.is_neg();
   bool A_is_f_contig = (A_broad.stride(-1) == 1) == transpose_A;
-  if C10_LIKELY (is_fortran_ready(A_broad) && !((A_is_conj && !A_is_f_contig) || A_is_neg)) {
+  if C10_LIKELY (is_fortran_ready(A_broad) && !((A_is_conj && A_is_f_contig) || A_is_neg)) {
     A_f = A_broad;
   } else {
     // We choose C-contig rather than F-contig because it has better memory access in solvers
@@ -4017,13 +4013,11 @@ Tensor& linalg_solve_triangular_out(
     upper = !upper;
   }
 
-  const char transpose = trans_char(A_is_f_contig, A_is_conj);
-
   triangular_solve_stub(
     A_f.device().type(), A_f, out_f,
     /*left=*/left,
     /*upper=*/upper,
-    /*transpose*/transpose,
+    /*transpose*/to_transtype(A_is_f_contig, A_is_conj),
     /*unitriangular=*/unitriangular);
 
   if (transpose_out_f) {
