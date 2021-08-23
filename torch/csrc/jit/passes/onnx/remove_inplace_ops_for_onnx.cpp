@@ -317,28 +317,32 @@ static void PrepareForRemoveMutations(MutationRemover& mr, Block* b) {
   }
 
   for (auto input : b->inputs()) {
-  restart:
-    for (auto use : input->uses()) {
-      Node* node = use.user;
-      if (!mr.inplaceOpVariant(node)) {
-        continue;
-      }
-      auto it = std::find(node->inputs().begin(), node->inputs().end(), input);
-      if (it != node->inputs().end()) {
-        int index = std::distance(node->inputs().begin(), it);
-        std::cerr << "Warning: ONNX Preprocess - Removing mutation from node "
-                  << node->kind().toQualString() << " on block input: '"
-                  << (*it)->debugName() << "'. This changes graph semantics."
-                  << std::endl;
+    bool needsRestart = false;
+    do {
+      needsRestart = false;
+      for (auto use : input->uses()) {
+        Node* node = use.user;
+        if (!mr.inplaceOpVariant(node)) {
+          continue;
+        }
+        auto it = std::find(node->inputs().begin(), node->inputs().end(), input);
+        if (it != node->inputs().end()) {
+          int index = std::distance(node->inputs().begin(), it);
+          std::cerr << "Warning: ONNX Preprocess - Removing mutation from node "
+                    << node->kind().toQualString() << " on block input: '"
+                    << (*it)->debugName() << "'. This changes graph semantics."
+                    << std::endl;
 
-        Node* newNode =
+          Node* newNode =
             addDummyClone(b->owningGraph(), input, false, b->return_node());
-        TORCH_INTERNAL_ASSERT(nullptr != newNode);
-        node->replaceInput(index, newNode->output());
-        input->replaceAllUsesAfterNodeWith(node, newNode->output());
-        goto restart;
+          TORCH_INTERNAL_ASSERT(nullptr != newNode);
+          node->replaceInput(index, newNode->output());
+          input->replaceAllUsesAfterNodeWith(node, newNode->output());
+          needsRestart = true;
+          break;
+        }
       }
-    }
+    } while (needsRestart);
   }
 }
 
