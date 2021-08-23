@@ -9,6 +9,7 @@ import time
 import traceback
 import types
 import unittest
+import warnings
 from contextlib import contextmanager
 from datetime import timedelta
 from enum import Enum
@@ -468,6 +469,10 @@ class MultiProcessTestCase(TestCase):
             self.processes.append(process)
 
     def _fork_processes(self) -> None:
+        warnings.warn(
+            "Fork based multiprocessing is dangerous and should not"
+            " be used, for tests with ASAN consider using opt-asan",
+            DeprecationWarning)
         proc = torch.multiprocessing.get_context("fork").Process
         self._start_processes(proc)
 
@@ -525,9 +530,6 @@ class MultiProcessTestCase(TestCase):
         self.rank = rank
         self.file_name = file_name
         self.run_test(test_name, parent_pipe, signal_send_pipe, event_listener_thread)
-
-        # exit to avoid run teardown() for fork processes
-        sys.exit(0)
 
     def run_test(
         self, test_name: str, parent_pipe, signal_pipe=None, event_listener_thread=None
@@ -719,7 +721,7 @@ class MultiProcessTestCase(TestCase):
         self.assertEqual(
             first_process.exitcode,
             0,
-            msg="Expected zero exit code but got {}".format(first_process.exitcode),
+            msg="Expected zero exit code but got {} for pid: {}".format(first_process.exitcode, first_process.pid)
         )
 
     @property

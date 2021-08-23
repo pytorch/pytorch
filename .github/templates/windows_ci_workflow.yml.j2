@@ -261,12 +261,12 @@ jobs:
   # logs (like test); we can always move it back to the other one, but it
   # doesn't create the best experience
   render_test_results:
-{%- if only_build_on_pull_request %}
-    if:  ${{ github.event_name == 'push' && always() }}
-{%- else %}
-    if: always()
-{%- endif %}
     needs: [generate-test-matrix, test, !{{ ciflow_config.root_job_name }}]
+{%- if only_build_on_pull_request %}
+    if: ${{ github.event_name == 'push' && (needs.test.result != 'skipped' || failure()) }}
+{%- else %}
+    if: ${{ needs.test.result != 'skipped' || failure() }}
+{%- endif %}
     runs-on: linux.2xlarge
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.render-matrix) }}
