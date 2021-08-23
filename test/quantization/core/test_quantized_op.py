@@ -2602,7 +2602,6 @@ class TestDynamicQuantizedLinear(TestCase):
     def test_qlinear(self, batch_size, input_channels, output_channels,
                      use_bias, use_relu, use_multi_dim_input, use_channelwise, reduce_range):
         if torch.backends.quantized.engine == 'qnnpack':
-            use_relu = False
             reduce_range = False
 
         qlinear_prepack = torch.ops.quantized.linear_prepack
