@@ -320,7 +320,23 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
                     grouped_native_functions
                 )),
             })
-
-
+        # and generate IR nodes
+        for dispatch_key in [backend_dispatch_key]:  # , autograd_dispatch_key
+            fm.write_with_template(f'{dispatch_key}LazyIr.h', 'LazyIr.h', lambda: {
+                'extra_cuda_headers': '',
+                'legacy_th_headers': '',
+                'external_backend_headers': f'#include "{output_dir}/{backend_key}NativeFunctions.h"',
+                'namespaced_headers': '',
+                'DispatchKey': dispatch_key,
+                'dispatch_namespace': dispatch_key.lower(),
+                'ir_declarations': list(concatMap(
+                    dest.LazyIR(
+                        backend_indices[CODEGEN_MAGIC_NUMBER],
+                        Target.NAMESPACED_DEFINITION,
+                        selector,
+                        cpp_namespace='codegen_' + cpp_namespace),
+                    grouped_native_functions
+                )),
+            })
 if __name__ == '__main__':
     main()
