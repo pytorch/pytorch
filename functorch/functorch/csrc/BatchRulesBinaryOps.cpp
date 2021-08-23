@@ -165,12 +165,6 @@ std::tuple<Tensor,optional<int64_t>> clamp_tensor_batch_rule(
   return std::make_tuple( std::move(result), 0 );
 }
 
-std::tuple<Tensor,optional<int64_t>> pow_scalar_tensor_batch_rule(
-    const Scalar& other,
-    const Tensor& tensor, optional<int64_t> tensor_batch_dim) {
-  return std::make_tuple( at::pow(other, tensor), tensor_batch_dim );
-}
-
 std::tuple<Tensor,optional<int64_t>> _s_where_batch_rule(
     const Tensor& condition, optional<int64_t> condition_bdim,
     const Tensor& self, optional<int64_t> self_bdim, const Tensor& other, optional<int64_t> other_bdim) {
