@@ -124,8 +124,7 @@ Tensor computeSoftmax(
   if (!log_softmax) {
     auto result =
         Compute("aten_softmax", output_dims, [&](ParameterList& indices) {
-          return e.load(indices) /
-              sum.load(remove_softmax_dim_index(indices));
+          return e.load(indices) / sum.load(remove_softmax_dim_index(indices));
         });
     return Tensor(
         result.buf(),
@@ -148,11 +147,7 @@ Tensor computeSoftmax(
   return Tensor(
       result.buf(),
       alloc<tensorexpr::Block>(std::vector<StmtPtr>(
-          {max.stmt(),
-           e.stmt(),
-           sum.stmt(),
-           log_sum.stmt(),
-           result.stmt()})));
+          {max.stmt(), e.stmt(), sum.stmt(), log_sum.stmt(), result.stmt()})));
 }
 
 } // namespace tensorexpr

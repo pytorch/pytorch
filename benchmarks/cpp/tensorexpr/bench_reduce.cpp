@@ -222,7 +222,7 @@ BENCHMARK_DEFINE_F(Reduce1D, TeNaive)(benchmark::State& state) {
   int M = A.numel();
 
   te::Placeholder AP(te::BufHandle("A", {M}, te::kFloat));
-  te::Tensor* BT = te::Reduce(
+  te::Tensor BT = te::Reduce(
       "reduce_full",
       {{1, "N"}},
       te::Sum(),
@@ -233,7 +233,7 @@ BENCHMARK_DEFINE_F(Reduce1D, TeNaive)(benchmark::State& state) {
 
   te::LoopNest loop({BT});
   loop.prepareForCodegen();
-  te::Stmt* s = loop.root_stmt();
+  te::StmtPtr s = loop.root_stmt();
   s = te::IRSimplifier::simplify(s);
   auto cg = CreateCodeGen("llvm_codegen", s, {AP, BT});
 
@@ -255,7 +255,7 @@ BENCHMARK_DEFINE_F(Reduce1D, TeSplitTail)(benchmark::State& state) {
   int M = A.numel();
 
   te::Placeholder AP(te::BufHandle("A", {M}, te::kFloat));
-  te::Tensor* BT = te::Reduce(
+  te::Tensor BT = te::Reduce(
       "reduce_full",
       {{1, "N"}},
       te::Sum(),
@@ -269,12 +269,12 @@ BENCHMARK_DEFINE_F(Reduce1D, TeSplitTail)(benchmark::State& state) {
 
   {
     auto const& loops = loop.getLoopStmtsFor(BT);
-    te::For* m = loops[1];
+    te::ForPtr m = loops[1];
     loop.splitWithTail(m, kChunkSize);
   }
 
   loop.prepareForCodegen();
-  te::Stmt* s = loop.root_stmt();
+  te::StmtPtr s = loop.root_stmt();
   s = te::IRSimplifier::simplify(s);
   auto cg = CreateCodeGen("llvm_codegen", s, {AP, BT});
 
@@ -296,7 +296,7 @@ BENCHMARK_DEFINE_F(Reduce1D, TeSplitMask)(benchmark::State& state) {
   int M = A.numel();
 
   te::Placeholder AP(te::BufHandle("A", {M}, te::kFloat));
-  te::Tensor* BT = te::Reduce(
+  te::Tensor BT = te::Reduce(
       "reduce_full",
       {{1, "N"}},
       te::Sum(),
@@ -310,12 +310,12 @@ BENCHMARK_DEFINE_F(Reduce1D, TeSplitMask)(benchmark::State& state) {
 
   {
     auto const& loops = loop.getLoopStmtsFor(BT);
-    te::For* m = loops[1];
+    te::ForPtr m = loops[1];
     loop.splitWithMask(m, kChunkSize);
   }
 
   loop.prepareForCodegen();
-  te::Stmt* s = loop.root_stmt();
+  te::StmtPtr s = loop.root_stmt();
   s = te::IRSimplifier::simplify(s);
   auto cg = CreateCodeGen("llvm_codegen", s, {AP, BT});
 
@@ -339,7 +339,7 @@ BENCHMARK_DEFINE_F(Reduce1D, TeRfactorV1)(benchmark::State& state) {
   TORCH_CHECK(M % kChunkSize == 0);
 
   te::Placeholder AP(te::BufHandle("A", {M}, te::kFloat));
-  te::Tensor* BT = te::Reduce(
+  te::Tensor BT = te::Reduce(
       "reduce_full",
       {},
       te::Sum(),
@@ -349,17 +349,17 @@ BENCHMARK_DEFINE_F(Reduce1D, TeRfactorV1)(benchmark::State& state) {
       {{M, "M"}});
 
   te::LoopNest loop({BT});
-  te::Buf* rfac_buf;
+  te::BufPtr rfac_buf;
 
   auto loops = loop.getLoopStmtsFor(BT);
   TORCH_CHECK(loops.size() == 1);
-  te::For* mi;
+  te::ForPtr mi;
   loop.splitWithMask(loops.at(0), kChunkSize, &mi);
-  te::For* mo = loops.at(0);
+  te::ForPtr mo = loops.at(0);
 
   loop.reorderAxis(mo, mi);
   loops = loop.getLoopStmtsFor(BT);
-  auto bt_body = const_cast<te::Stmt*>(loop.getAllWritesToBuf(BT->buf())[1]);
+  auto bt_body = loop.getAllWritesToBuf(BT.buf())[1];
   TORCH_CHECK(loop.rfactor(bt_body, loops.at(0), &rfac_buf));
   loop.reorderAxis(loops.at(0), loops.at(1));
 
@@ -368,7 +368,7 @@ BENCHMARK_DEFINE_F(Reduce1D, TeRfactorV1)(benchmark::State& state) {
   loop.vectorize(loops.at(1));
 
   loop.prepareForCodegen();
-  te::Stmt* s = loop.root_stmt();
+  te::StmtPtr s = loop.root_stmt();
   s = te::IRSimplifier::simplify(s);
   auto cg = CreateCodeGen("llvm_codegen", s, {AP, BT});
 
@@ -390,12 +390,12 @@ BENCHMARK_DEFINE_F(Reduce1D, Op)(benchmark::State& state) {
   const int kChunkSize = 8;
 
   te::Placeholder a("A", te::kFloat, {M});
-  te::Tensor* b = te::computeSum({a.handle(), te::IntList({0}), false}, at::kFloat);
+  te::Tensor b = te::computeSum({a.handle(), te::IntList({0}), false}, at::kFloat);
   te::LoopNest nest({b});
 
   auto loops = nest.getLoopStmtsFor(b);
-  te::For *mi, *mo;
-  te::Buf *rf;
+  te::ForPtr mi, mo;
+  te::BufPtr rf;
   nest.splitWithMask(loops[0], kChunkSize, &mi);
   loops = nest.reorder({loops[0], mi}, {1, 0});
   nest.rfactor(nest.getLoopBodyFor(b), loops[0], &rf);
@@ -453,7 +453,7 @@ BENCHMARK_DEFINE_F(Reduce2DCol, OpSchedule)(benchmark::State& state) {
   te::KernelScope ks;
   constexpr int kCacheSize = 1 << 12;
   te::Placeholder a("A", te::kFloat, {M, N});
-  te::Tensor* b = te::computeSum({a.handle(), te::IntList({0}), false}, at::kFloat);
+  te::Tensor b = te::computeSum({a.handle(), te::IntList({0}), false}, at::kFloat);
   te::LoopNest nest({b});
 
   auto sch = state.range(2);
@@ -560,14 +560,14 @@ BENCHMARK_DEFINE_F(Reduce2DRow, OpSchedule)(benchmark::State& state) {
   te::KernelScope ks;
   constexpr int kChunkSize = 8;
   te::Placeholder a("A", te::kFloat, {M, N});
-  te::Tensor* b = te::computeSum({a.handle(), te::IntList({1}), false}, at::kFloat);
+  te::Tensor b = te::computeSum({a.handle(), te::IntList({1}), false}, at::kFloat);
   te::LoopNest nest({b});
 
   auto sch = state.range(2);
   if (sch == 1) {
     auto loops = nest.getLoopStmtsFor(b);
-    te::For *mi, *mo;
-    te::Buf *rf;
+    te::ForPtr mi, mo;
+    te::BufPtr rf;
     nest.splitWithMask(loops[1], kChunkSize, &mi);
     loops = nest.reorder({loops[1], mi}, {1, 0});
     TORCH_CHECK(nest.rfactor(nest.getLoopBodyFor(b), loops[0], &rf));
@@ -583,8 +583,8 @@ BENCHMARK_DEFINE_F(Reduce2DRow, OpSchedule)(benchmark::State& state) {
     nest.reorderAxis(loops[1], loops[2]);
   } else if (sch == 3) {
     auto loops = nest.getLoopStmtsFor(b);
-    te::For *mi, *mo;
-    te::Buf *rf;
+    te::ForPtr mi, mo;
+    te::BufPtr rf;
     nest.splitWithMask(loops[1], kChunkSize, &mi);
     loops = nest.reorder({loops[1], mi}, {1, 0});
     TORCH_CHECK(nest.rfactor(nest.getLoopBodyFor(b), loops[0], &rf));

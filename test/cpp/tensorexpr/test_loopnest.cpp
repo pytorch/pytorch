@@ -47,8 +47,7 @@ TEST(LoopNest, ExprSimple01) {
         return ExprHandle(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
       });
   LoopNest l({tensor});
-  std::vector<ForPtr> loops =
-      l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
 
   LoopNest::splitWithTail(loops[0], 2);
   LoopNest::splitWithTail(loops[0], 2);
@@ -75,8 +74,7 @@ TEST(LoopNest, ExprSimple02) {
   };
   Tensor tensor = Compute("f", {{26, "x"}, {5, "y"}}, func);
   LoopNest l({tensor});
-  std::vector<ForPtr> loops =
-      l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
 
   LoopNest::splitWithTail(loops[0], 4);
 
@@ -174,8 +172,7 @@ TEST(LoopNest, ExprSliceHeadWithLoopOptions) {
   ForPtr head;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ForPtr tail;
-  std::vector<ForPtr> loops =
-      l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
   loops[0]->set_gpu_block_index(LoopOptions::IDX_Y);
   LoopNest::sliceHead(loops[0], 2, &head, &tail);
 
@@ -199,8 +196,7 @@ TEST(LoopNest, ExprSliceTailWithLoopOptions) {
   ForPtr head;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ForPtr tail;
-  std::vector<ForPtr> loops =
-      l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
   LoopNest::sliceTail(loops[0], 4, &head, &tail);
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -233,8 +229,7 @@ TEST(LoopNest, ExprSliceHeadWhenFactorEqualsSize) {
   ForPtr head;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ForPtr tail;
-  std::vector<ForPtr> loops =
-      l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
   LoopNest::sliceHead(loops[0], 10, &head, &tail);
 
   ASSERT_EQ(head, loops[0]);
@@ -255,8 +250,7 @@ TEST(LoopNest, ExprSliceHeadWhenFactorLargerThanSize) {
   ForPtr head;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ForPtr tail;
-  std::vector<ForPtr> loops =
-      l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
   LoopNest::sliceHead(loops[0], 100, &head, &tail);
 
   ASSERT_EQ(head, loops[0]);
@@ -277,8 +271,7 @@ TEST(LoopNest, ExprSliceHead) {
   ForPtr head;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ForPtr tail;
-  std::vector<ForPtr> loops =
-      l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
   LoopNest::sliceHead(loops[0], 4, &head, &tail);
 
   ASSERT_NE(head, nullptr);
@@ -297,8 +290,7 @@ TEST(LoopNest, ExprSliceHeadWithNonZeroStart) {
   };
   Tensor tensor = Compute("f", {{10, "x"}}, func);
   LoopNest l({tensor});
-  std::vector<ForPtr> loops =
-      l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ForPtr head;
@@ -329,8 +321,7 @@ TEST(LoopNest, ExprSliceTailWhenFactorEqualsSize) {
   ForPtr head;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ForPtr tail;
-  std::vector<ForPtr> loops =
-      l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
   LoopNest::sliceTail(loops[0], 10, &head, &tail);
 
   ASSERT_EQ(head, nullptr);
@@ -353,8 +344,7 @@ TEST(LoopNest, ExprSliceTailWhenFactorLargerThanSize) {
   ForPtr head;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ForPtr tail;
-  std::vector<ForPtr> loops =
-      l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
   LoopNest::sliceTail(loops[0], 100, &head, &tail);
 
   ASSERT_EQ(head, nullptr);
@@ -375,8 +365,7 @@ TEST(LoopNest, ExprSliceTail) {
   ForPtr head;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ForPtr tail;
-  std::vector<ForPtr> loops =
-      l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
   LoopNest::sliceTail(loops[0], 4, &head, &tail);
 
   ASSERT_NE(head, nullptr);
@@ -403,8 +392,7 @@ TEST(LoopNest, ExprSplitAndSlice) {
   ForPtr inner;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ForPtr tail;
-  std::vector<ForPtr> loops =
-      l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
   // outer: [0, 4)
   // inner: [0, 21)
   // tail:  [84, 100)
@@ -452,8 +440,7 @@ TEST(LoopNest, ExprSliceAndNormalize) {
   };
   Tensor tensor = Compute("f", {{10, "x"}}, func);
   LoopNest l({tensor});
-  std::vector<ForPtr> loops =
-      l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ForPtr head;
@@ -523,8 +510,7 @@ TEST(LoopNest, ExprSplitWithTail) {
   };
   Tensor tensor = Compute("f", {{199, "x"}}, func);
   LoopNest l({tensor});
-  std::vector<ForPtr> loops =
-      l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   LoopNest::splitWithTail(loops[0], 17);
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
@@ -554,8 +540,7 @@ TEST(LoopNest, ExprSplitWithTailNone) {
   };
   Tensor tensor = Compute("f", {{24, "x"}, {5, "y"}}, func);
   LoopNest l({tensor});
-  std::vector<ForPtr> loops =
-      l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
   LoopNest::splitWithTail(loops[0], 4);
 
   StmtPtr stmt = l.root_stmt();
@@ -618,8 +603,7 @@ TEST(LoopNest, ExprSplitWithMask01) {
       });
 
   LoopNest l({tensor});
-  std::vector<ForPtr> loops =
-      l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
   LoopNest::splitWithMask(loops[1], 4);
 
   StmtPtr stmt = l.root_stmt();
@@ -653,8 +637,7 @@ TEST(LoopNest, ExprSplitWithMaskRepeatedNoMask) {
   });
 
   LoopNest l({tensor});
-  std::vector<ForPtr> loops =
-      l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
   LoopNest::splitWithMask(loops[0], 4);
   LoopNest::splitWithMask(loops[0], 4);
 
@@ -742,8 +725,7 @@ TEST(LoopNest, TileSimple) {
       });
 
   LoopNest l({tensor});
-  std::vector<ForPtr> loops =
-      l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   l.tile(loops[0], loops[1], 4, 8);
 
@@ -789,8 +771,7 @@ TEST(LoopNest, TileWithTails) {
       });
 
   LoopNest l({tensor});
-  std::vector<ForPtr> loops =
-      l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   l.tile(loops[0], loops[1], 5, 9);
 
@@ -1986,9 +1967,7 @@ TEST(LoopNest, LoopNestComputeAt_3) {
   Tensor B = Compute(
       "B",
       {{H + 1, "by"}, {W + 1, "bx"}},
-      [&](const VarHandle& by, const VarHandle& bx) {
-        return A.load(by, bx);
-      });
+      [&](const VarHandle& by, const VarHandle& bx) { return A.load(by, bx); });
   Tensor C = Compute(
       "C",
       {{H, "cy"}, {W, "cx"}},
@@ -4707,9 +4686,7 @@ TEST(LoopNest, OptimizeConditionalsNotNormalized) {
   ASSERT_EQ(hash_before, hash_after);
 }
 
-static std::pair<std::unique_ptr<Placeholder>, Tensor> colReduce(
-    int M,
-    int N) {
+static std::pair<std::unique_ptr<Placeholder>, Tensor> colReduce(int M, int N) {
   auto a =
       std::make_unique<Placeholder>("a", kFloat, std::vector<ExprHandle>{M, N});
   Tensor t = Reduce(

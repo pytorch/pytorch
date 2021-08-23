@@ -186,8 +186,8 @@ void initTensorExprBindings(PyObject* module) {
              const ExprHandle& val) { return self.store(args, val); })
       .def("data", [](Placeholder& self) { return BufHandle(self.data()); });
   py::class_<Tensor>(te, "Tensor")
-      .def(py::init(
-          [](BufHandle& b, StmtPtr s) { return Tensor(b.node(), s); }))
+      .def(
+          py::init([](BufHandle& b, StmtPtr s) { return Tensor(b.node(), s); }))
       .def(
           "load",
           [](Tensor& self, const std::vector<ExprHandle>& v) {
@@ -392,9 +392,7 @@ void initTensorExprBindings(PyObject* module) {
       .def("prepare_for_codegen", &LoopNest::prepareForCodegen)
       .def(
           "get_loop_body_for",
-          [](const LoopNest& self, Tensor t) {
-            return self.getLoopBodyFor(t);
-          },
+          [](const LoopNest& self, Tensor t) { return self.getLoopBodyFor(t); },
           py::return_value_policy::reference)
       .def(
           "get_loop_body_for",

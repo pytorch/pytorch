@@ -2819,8 +2819,7 @@ TEST(MemDependency, MemDependencyCheckerComputeSplit) {
 
   LoopNest l({c});
 
-  MemDependencyChecker analyzer_before(
-      {a_buf.data(), b_buf.data()}, {c.buf()});
+  MemDependencyChecker analyzer_before({a_buf.data(), b_buf.data()}, {c.buf()});
   l.root_stmt()->accept(&analyzer_before);
 
   l.splitWithTail(l.getLoopStmtsFor(c)[0], 2);
@@ -2868,8 +2867,7 @@ TEST(MemDependency, MemDependencyCheckerComputeReorder) {
 
   LoopNest l({c});
 
-  MemDependencyChecker analyzer_before(
-      {a_buf.data(), b_buf.data()}, {c.buf()});
+  MemDependencyChecker analyzer_before({a_buf.data(), b_buf.data()}, {c.buf()});
   l.root_stmt()->accept(&analyzer_before);
 
   auto loops = l.getLoopStmtsFor(c);

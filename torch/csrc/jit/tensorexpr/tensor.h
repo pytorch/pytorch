@@ -227,8 +227,7 @@ Tensor Reduce(
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ReduceOpPtr reduce_op = reducer(func_result, body, output_args, reduce_vars);
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  Tensor t =
-      Tensor(func_result, vars, reduce_dims, reduce_vars, reduce_op);
+  Tensor t = Tensor(func_result, vars, reduce_dims, reduce_vars, reduce_op);
   return t;
 }
 
