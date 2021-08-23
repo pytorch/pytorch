@@ -44,10 +44,10 @@ BENCHMARK_DEFINE_F(ParallelAdd, Simple)(benchmark::State& state) {
       });
   LoopNest loop_nest({c_tensor});
   auto const& loops = loop_nest.getLoopStmtsFor(c_tensor);
-  For* m = loops[0];
+  ForPtr m = loops[0];
   m->set_parallel();
   loop_nest.prepareForCodegen();
-  Stmt* stmt = loop_nest.root_stmt();
+  StmtPtr stmt = loop_nest.root_stmt();
   LLVMCodeGen cg(stmt, {c_tensor, a_buf, b_buf});
 
   float* a_ptr = A.data_ptr<float>();
