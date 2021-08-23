@@ -19,7 +19,6 @@ using namespace torch::jit::tensorexpr;
 // larger and fully encloses B, while ContainedOrEqual is the reverse. Equal
 // ranges are ContainedOrEqual.
 TEST(MemDependency, BoundOverlap) {
-
   using namespace analysis;
 
   auto CB = [](int s, int e) {
@@ -114,7 +113,6 @@ TEST(MemDependency, BoundOverlapSymbolic) {
 // This uses boundOverlap on each dimension and return the "lowest" kind of
 // overlap.
 TEST(MemDependency, BoundOverlapMultiDim) {
-
   using namespace analysis;
 
   auto CB = [](int s, int e) {
@@ -186,7 +184,6 @@ TEST(MemDependency, BoundOverlapMultiDim) {
 // Test the helper we use to subtract bounds: returns the regions(s) of A which
 // remain after removing the region of B.
 TEST(MemDependency, BoundSubtract) {
-
   using namespace analysis;
 
   auto CB = [](int s, int e) {
@@ -268,7 +265,6 @@ TEST(MemDependency, BoundSubtractSymbolic) {
 // Tests the helper function that does subtraction, but for multi dimensional
 // indices bounds.
 TEST(MemDependency, BoundSubtractMultiDim) {
-
   using namespace analysis;
 
   auto CB = [](int s, int e) {
@@ -2678,7 +2674,6 @@ TEST(MemDependency, MemDependencyCheckerMultiDim) {
 
 // Various tests using the external Compute/Reduce API.
 TEST(MemDependency, MemDependencyCheckerComputeAPI) {
-
   using namespace analysis;
 
   /* for (int m = 0; m < 4; m++) {
@@ -2730,7 +2725,6 @@ TEST(MemDependency, MemDependencyCheckerComputeAPI) {
 }
 
 TEST(MemDependency, MemDependencyCheckerComputeInline) {
-
   using namespace analysis;
 
   /* for (int m = 0; m < 4; m++) {
@@ -2776,7 +2770,6 @@ TEST(MemDependency, MemDependencyCheckerComputeInline) {
 }
 
 TEST(MemDependency, MemDependencyCheckerComputeSplit) {
-
   using namespace analysis;
   // Split an axis, so the number of loops != the number of dimensions.
 
@@ -2791,8 +2784,7 @@ TEST(MemDependency, MemDependencyCheckerComputeSplit) {
 
   LoopNest l({c});
 
-  MemDependencyChecker analyzer_before(
-      {a_buf.data(), b_buf.data()}, {c.buf()});
+  MemDependencyChecker analyzer_before({a_buf.data(), b_buf.data()}, {c.buf()});
   l.root_stmt()->accept(&analyzer_before);
 
   l.splitWithTail(l.getLoopStmtsFor(c)[0], 2);
@@ -2824,7 +2816,6 @@ TEST(MemDependency, MemDependencyCheckerComputeSplit) {
 }
 
 TEST(MemDependency, MemDependencyCheckerComputeReorder) {
-
   using namespace analysis;
   // Reorder an axis, so the loop order doesn't match the indexing order.
 
@@ -2839,8 +2830,7 @@ TEST(MemDependency, MemDependencyCheckerComputeReorder) {
 
   LoopNest l({c});
 
-  MemDependencyChecker analyzer_before(
-      {a_buf.data(), b_buf.data()}, {c.buf()});
+  MemDependencyChecker analyzer_before({a_buf.data(), b_buf.data()}, {c.buf()});
   l.root_stmt()->accept(&analyzer_before);
 
   auto loops = l.getLoopStmtsFor(c);
@@ -2873,7 +2863,6 @@ TEST(MemDependency, MemDependencyCheckerComputeReorder) {
 }
 
 TEST(MemDependency, MemDependencyCheckerComputeReduce) {
-
   using namespace analysis;
   /* for (int l2 = 0; l2 < 2; l2++) {
    *   for (int n1 = 0; n1 < 3; n1++) {

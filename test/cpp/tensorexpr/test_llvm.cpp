@@ -233,7 +233,6 @@ TEST(LLVM, fastLogFloat) {
 }
 
 TEST(LLVM, LetTest01) {
-
   Placeholder a(BufHandle("A", {1}, kFloat));
   std::vector<float> v = {1, 0};
   std::vector<void*> args({v.data()});
@@ -249,7 +248,6 @@ TEST(LLVM, LetTest01) {
 }
 
 TEST(LLVM, LetTest02) {
-
   Placeholder a(BufHandle("A", {1}, kFloat));
   std::vector<float> v = {1, 0};
   std::vector<void*> args({v.data()});
@@ -268,7 +266,6 @@ TEST(LLVM, LetTest02) {
 }
 
 TEST(LLVM, LetTestMultitype) {
-
   Placeholder a(BufHandle("A", {1}, kDouble));
   std::vector<double> v = {1, 0};
   std::vector<void*> args({v.data()});
@@ -347,7 +344,6 @@ TEST(LLVM, IfThenElseTest) {
 
 // if (x < 10) x = x + 1
 TEST(LLVM, CondNoFalseBlockTest) {
-
   Placeholder x(BufHandle("X", {1}, kInt));
   auto cmp = CompareSelect::make(x.load(0), 10, CompareSelectOperation::kLT);
   auto cond = Cond::make(cmp, x.store({0}, x.load(0) + 1), nullptr);
@@ -371,7 +367,6 @@ TEST(LLVM, CondNoFalseBlockTest) {
 //   x = x - 1;
 // }
 TEST(LLVM, CondTest) {
-
   Placeholder x(BufHandle("X", {1}, kInt));
   auto cmp = CompareSelect::make(x.load(0), 10, CompareSelectOperation::kLT);
   auto cond =
@@ -408,7 +403,6 @@ TEST(LLVM, CondTest) {
 //   }
 // }
 TEST(LLVM, CondNestedTest) {
-
   Placeholder x(BufHandle("X", {1}, kInt));
   auto true_cmp =
       CompareSelect::make(x.load(0), 5, CompareSelectOperation::kGT);
@@ -1376,7 +1370,6 @@ TEST(LLVM, EliminatedStmt) {
 }
 
 TEST(LLVM, SimpleReduction) {
-
   int M = 128;
   int N = 64;
   const int kTotalSize = M * N;
@@ -1414,7 +1407,6 @@ TEST(LLVM, SimpleReduction) {
 }
 
 TEST(LLVM, RFactorReduction) {
-
   int M = 128;
   int N = 64;
   const int kTotalSize = M * N;
@@ -1463,7 +1455,6 @@ TEST(LLVM, RFactorReduction) {
 }
 
 TEST(LLVM, RFactorVectorizedReduction) {
-
   int M = 128;
   int N = 64;
   const int kTotalSize = M * N;
@@ -1617,7 +1608,6 @@ TEST(LLVM, CompositeParallel) {
 }
 
 TEST(LLVM, VectorizedGEMM) {
-
   int M = 32;
   int N = 32;
   int K = 48;

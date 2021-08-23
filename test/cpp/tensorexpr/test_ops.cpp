@@ -20,7 +20,6 @@ std::unique_ptr<SimpleIREvaluator> compile(
 }
 
 TEST(Ops, Sum) {
-
   std::vector<IntList> testDims = {{0}, {1}, {0, 1}};
   for (auto const& dims : testDims) {
     constexpr int M = 8;

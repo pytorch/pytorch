@@ -223,8 +223,8 @@ int main(int argc, char* argv[]) {
         [&](const VarHandle& i, const VarHandle& j) {
           return sigmoid(X.load(i, j));
         });
-    std::cout << "Tensor computation X: " << X
-              << "Tensor computation Y: " << Y << std::endl;
+    std::cout << "Tensor computation X: " << X << "Tensor computation Y: " << Y
+              << std::endl;
     // Prints:
     // Tensor computation X: Tensor X[64, 32]:
     // for (int i = 0; i < 64; i++) {

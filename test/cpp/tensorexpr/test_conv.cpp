@@ -161,7 +161,6 @@ TEST(Conv, DepthwiseConv2DDynamicShapes) {
 #endif
 
 TEST(Conv, Conv2D) {
-
   // Input dimensions.
   constexpr int N = 1;
   constexpr int C = 3;

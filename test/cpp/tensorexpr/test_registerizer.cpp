@@ -776,7 +776,6 @@ TEST(Registerizer, RegisterizerMultiVarOverlap) {
 }
 
 TEST(Registerizer, RegisterizerAllocs) {
-
   BufHandle a("A", {2}, kInt);
   BufHandle c("C", {1}, kInt);
   VarHandle x("x", kInt);

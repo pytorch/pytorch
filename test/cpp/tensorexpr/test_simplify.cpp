@@ -395,7 +395,6 @@ TEST(Simplify, HashEquivalenceAfterFolding) {
 }
 
 TEST(Simplify, HashDifferenceTypes) {
-
   HashProvider hasher;
   std::vector<ExprPtr> immediates;
 
@@ -1944,7 +1943,6 @@ TEST(Simplify, SimplifyOpaqueTerms) {
 }
 
 TEST(Simplify, SimplifySymbolicMinMax) {
-
   {
     // Minimum with constant difference between terms.
     VarHandle x("x", kInt);
@@ -2531,7 +2529,6 @@ TEST(Simplify, SimplifyNestedMin) {
 }
 
 TEST(Simplify, SimplifyWontReorderFloat) {
-
   {
     // 3 * (3 * x) - 3 * (3 * y) => 9 * (x - y)
     // This is an expression we can simplify.
@@ -2642,7 +2639,6 @@ TEST(Simplify, SimplifyWontReorderFloat) {
 }
 
 TEST(Simplify, SimplifyRoundModPattern) {
-
   {
     // (x/y)*y + x%y => x.
     VarHandle x("x", kInt);
@@ -2824,7 +2820,6 @@ TEST(Simplify, SimplifyRoundModPattern) {
 }
 
 TEST(Simplify, SimplifyRoundModPatternFactorization) {
-
   {
     // Full factorization.
     // 2 * (x/y * y) + 2 * (x%y) => 2 * x.
@@ -2883,7 +2878,6 @@ TEST(Simplify, SimplifyRoundModPatternFactorization) {
 }
 
 TEST(Simplify, SimplifyRoundModPatternMultivar) {
-
   {
     // Multivar.
     // (x/8) * 8 + (y/5)*5 + x%8 + y%5 => x + y.
@@ -2932,7 +2926,6 @@ TEST(Simplify, SimplifyRoundModPatternMultivar) {
 }
 
 TEST(Simplify, SimplifyModRoundModPattern) {
-
   {
     // t/7 % 9 * 7 + t % 7 => t%63
     VarHandle t("t", kInt);
@@ -3019,7 +3012,6 @@ TEST(Simplify, SimplifyModRoundModPattern) {
 }
 
 TEST(Simplify, SimplifyModRoundModPatternFactorization) {
-
   {
     // 2 * (t /7 % 9 * 7) + 2 * (t % 7) => 2 * (t % 63)
     VarHandle t("t", kInt);
@@ -3087,7 +3079,6 @@ TEST(Simplify, SimplifyModRoundModPatternFactorization) {
 }
 
 TEST(Simplify, SimplifyModRoundModPatternMultivar) {
-
   {
     // t/7 % 9 * 7 + t % 7 + t => t % 63 + t
     VarHandle t("t", kInt);
@@ -3192,7 +3183,6 @@ TEST(Simplify, SimplifyModRoundModPatternMultivar) {
 }
 
 TEST(Simplify, SimplifyDivisionScalarFactorization) {
-
   {
     // Simple factorization of numerator and denominator.
     // 8x / 4y => 2x / y.
@@ -3263,7 +3253,6 @@ TEST(Simplify, SimplifyDivisionScalarFactorization) {
 }
 
 TEST(Simplify, SimplifyConstantBranches) {
-
   {
     // If the condition is constant true then take the true_value.
     // 1 ? x : y => x
@@ -3320,7 +3309,6 @@ TEST(Simplify, SimplifyConstantBranches) {
 }
 
 TEST(Simplify, SimplifyConstantCond) {
-
   {
     // If the condition is constant true then take the true_value.
     // 1 ? A[0] = 1 : B[0] = 1 => A[0] = 1
@@ -3464,7 +3452,6 @@ TEST(Simplify, SimplifyEliminateEmptyCond) {
 }
 
 TEST(Simplify, SimplifyConstantComparisons) {
-
   auto ComparisonTest =
       [](ExprHandle a, ExprHandle b, CompareSelectOperation op, int result) {
         ExprHandle body = CompareSelect::make(a, b, op);
@@ -3646,7 +3633,6 @@ TEST(Simplify, SimplifySymbolicComparisons) {
 }
 
 TEST(Simplify, SimplifyEliminateZeroLengthFor) {
-
   {
     // Will eliminate zero loop For.
     BufHandle a("A", {4}, kInt);
@@ -3705,7 +3691,6 @@ TEST(Simplify, SimplifyEliminateZeroLengthFor) {
 }
 
 TEST(Simplify, SimplifyOneLoopFor) {
-
   {
     // Will remove the loop if the body is run once.
     BufHandle a("A", {4}, kInt);
@@ -3773,7 +3758,6 @@ TEST(Simplify, SimplifyOneLoopFor) {
 }
 
 TEST(Simplify, SimplifyForWontLoseLoopOptions) {
-
   {
     // Sanity check does nothing if the condition is not met.
     BufHandle a("A", {4}, kInt);
@@ -3791,7 +3775,6 @@ TEST(Simplify, SimplifyForWontLoseLoopOptions) {
 }
 
 TEST(Simplify, SimplifyMultilevelFor) {
-
   {
     // Multiple layers of For will be simplified out.
     BufHandle a("A", {4}, kInt);
@@ -3849,7 +3832,6 @@ TEST(Simplify, SimplifyMultilevelFor) {
 }
 
 TEST(Simplify, SimplifyForCleansUp) {
-
   {
     Placeholder a("a", kFloat, {1, 12, 1});
     VarHandle x("x", kInt);
@@ -3878,7 +3860,6 @@ TEST(Simplify, SimplifyForCleansUp) {
 }
 
 TEST(Simplify, SimplifyEliminateEmptyFor) {
-
   {
     // Flatten many layers around an empty block to an empty block.
     StmtPtr last = alloc<Block>(std::vector<StmtPtr>({}));
@@ -3894,7 +3875,6 @@ TEST(Simplify, SimplifyEliminateEmptyFor) {
 }
 
 TEST(Simplify, SimplifyFlattenBlock) {
-
   {
     // Flatten multiple blocks down to one.
     // { { { stmt1, stmt2 } } } =>  { stmt1, stmt2 }
@@ -3978,7 +3958,6 @@ TEST(Simplify, SimplifyFlattenBlock) {
 }
 
 TEST(Simplify, SimplifyEliminateZeroLengthAlloc) {
-
   {
     // Simple positive case.
     BufHandle b("x", {0}, kInt);
@@ -4053,7 +4032,6 @@ TEST(Simplify, SimplifyEliminateZeroLengthAlloc) {
 }
 
 TEST(Simplify, DontSimplifyRand) {
-
   {
     // rand() + rand() = rand() + rand() NOT 2 * rand().
     ExprHandle body =

@@ -569,7 +569,6 @@ TEST(Cuda, OneBlockMultiThreadGlobalReduce1_CUDA) {
 }
 
 TEST(Cuda, NoThreadIdxWrite_1_CUDA) {
-
   // This test does the following reduction:
   //
   // for k in 0..1: // block-idx

@@ -86,7 +86,6 @@ TEST_F(Kernel, InliningIntermediates) {
 }
 
 TEST_F(Kernel, _1) {
-
   const auto graph_string = R"IR(
       graph(%0 : Float(5, 3, strides=[3, 1], device=cpu),
             %1 : Float(5, 3, strides=[3, 1], device=cpu)):
@@ -124,7 +123,6 @@ TEST_F(Kernel, _1) {
 }
 
 TEST_F(Kernel, _2) {
-
   const auto graph_string = R"IR(
       graph(%0 : Float(5, 3, strides=[3, 1], device=cpu),
             %1 : Float(5, 3, strides=[1, 5], device=cpu)):
@@ -163,7 +161,6 @@ TEST_F(Kernel, _2) {
 }
 
 TEST_F(Kernel, _3) {
-
   const auto graph_string = R"IR(
       graph(%0 : Float(5, 3, strides=[3, 1], device=cpu),
             %1 : Float(5, 3, strides=[12, 2], device=cpu)):
@@ -207,7 +204,6 @@ TEST_F(Kernel, DISABLED_Shape_Inference) {
   // Test TensorExpr shape inference capabilities: it should only require shapes
   // for the inputs
   {
-
     const auto graph_string = R"IR(
       graph(%0 : Float(5, 3, strides=[3, 1], device=cpu),
             %1 : Float(5, 3, strides=[12, 2], device=cpu)):
@@ -245,7 +241,6 @@ TEST_F(Kernel, DISABLED_Shape_Inference) {
     }
   }
   {
-
     const auto graph_string = R"IR(
       graph(%0 : Float(8, 8, strides=[8, 1], device=cpu),
             %1 : Float(8, 8, strides=[8, 1], device=cpu)):
@@ -1072,7 +1067,6 @@ TEST_F(Kernel, Softmax4D) {
 }
 
 TEST_F(Kernel, InlineProducerIntoReduction) {
-
   // Inline producer (mul) into reduction (sum).
   const auto graph_string = R"IR(
       graph(%0 : Float(5, 3, strides=[3, 1], device=cpu),
@@ -1110,7 +1104,6 @@ TEST_F(Kernel, InlineProducerIntoReduction) {
 }
 
 TEST_F(Kernel, InlineReductionIntoConsumer) {
-
   // Inline producer (mul %2) into reduction (sum %4) but DO NOT
   // inline the reduction into consumer (mul %4).
   const auto graph_string = R"IR(

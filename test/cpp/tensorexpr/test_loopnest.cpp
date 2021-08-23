@@ -46,8 +46,7 @@ TEST(LoopNest, ExprSimple01) {
         return ExprHandle(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
       });
   LoopNest l({tensor});
-  std::vector<ForPtr> loops =
-      l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
 
   LoopNest::splitWithTail(loops[0], 2);
   LoopNest::splitWithTail(loops[0], 2);
@@ -72,8 +71,7 @@ TEST(LoopNest, ExprSimple02) {
   };
   Tensor tensor = Compute("f", {{26, "x"}, {5, "y"}}, func);
   LoopNest l({tensor});
-  std::vector<ForPtr> loops =
-      l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
 
   LoopNest::splitWithTail(loops[0], 4);
 
@@ -170,8 +168,7 @@ TEST(LoopNest, ExprSliceHeadWithLoopOptions) {
   ForPtr head;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ForPtr tail;
-  std::vector<ForPtr> loops =
-      l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
   loops[0]->set_gpu_block_index(LoopOptions::IDX_Y);
   LoopNest::sliceHead(loops[0], 2, &head, &tail);
 
@@ -194,8 +191,7 @@ TEST(LoopNest, ExprSliceTailWithLoopOptions) {
   ForPtr head;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ForPtr tail;
-  std::vector<ForPtr> loops =
-      l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
   LoopNest::sliceTail(loops[0], 4, &head, &tail);
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -227,8 +223,7 @@ TEST(LoopNest, ExprSliceHeadWhenFactorEqualsSize) {
   ForPtr head;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ForPtr tail;
-  std::vector<ForPtr> loops =
-      l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
   LoopNest::sliceHead(loops[0], 10, &head, &tail);
 
   ASSERT_EQ(head, loops[0]);
@@ -248,8 +243,7 @@ TEST(LoopNest, ExprSliceHeadWhenFactorLargerThanSize) {
   ForPtr head;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ForPtr tail;
-  std::vector<ForPtr> loops =
-      l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
   LoopNest::sliceHead(loops[0], 100, &head, &tail);
 
   ASSERT_EQ(head, loops[0]);
@@ -269,8 +263,7 @@ TEST(LoopNest, ExprSliceHead) {
   ForPtr head;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ForPtr tail;
-  std::vector<ForPtr> loops =
-      l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
   LoopNest::sliceHead(loops[0], 4, &head, &tail);
 
   ASSERT_NE(head, nullptr);
@@ -288,8 +281,7 @@ TEST(LoopNest, ExprSliceHeadWithNonZeroStart) {
   };
   Tensor tensor = Compute("f", {{10, "x"}}, func);
   LoopNest l({tensor});
-  std::vector<ForPtr> loops =
-      l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ForPtr head;
@@ -319,8 +311,7 @@ TEST(LoopNest, ExprSliceTailWhenFactorEqualsSize) {
   ForPtr head;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ForPtr tail;
-  std::vector<ForPtr> loops =
-      l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
   LoopNest::sliceTail(loops[0], 10, &head, &tail);
 
   ASSERT_EQ(head, nullptr);
@@ -342,8 +333,7 @@ TEST(LoopNest, ExprSliceTailWhenFactorLargerThanSize) {
   ForPtr head;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ForPtr tail;
-  std::vector<ForPtr> loops =
-      l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
   LoopNest::sliceTail(loops[0], 100, &head, &tail);
 
   ASSERT_EQ(head, nullptr);
@@ -363,8 +353,7 @@ TEST(LoopNest, ExprSliceTail) {
   ForPtr head;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ForPtr tail;
-  std::vector<ForPtr> loops =
-      l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
   LoopNest::sliceTail(loops[0], 4, &head, &tail);
 
   ASSERT_NE(head, nullptr);
@@ -390,8 +379,7 @@ TEST(LoopNest, ExprSplitAndSlice) {
   ForPtr inner;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ForPtr tail;
-  std::vector<ForPtr> loops =
-      l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
   // outer: [0, 4)
   // inner: [0, 21)
   // tail:  [84, 100)
@@ -438,8 +426,7 @@ TEST(LoopNest, ExprSliceAndNormalize) {
   };
   Tensor tensor = Compute("f", {{10, "x"}}, func);
   LoopNest l({tensor});
-  std::vector<ForPtr> loops =
-      l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ForPtr head;
@@ -507,8 +494,7 @@ TEST(LoopNest, ExprSplitWithTail) {
   };
   Tensor tensor = Compute("f", {{199, "x"}}, func);
   LoopNest l({tensor});
-  std::vector<ForPtr> loops =
-      l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   LoopNest::splitWithTail(loops[0], 17);
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
@@ -537,8 +523,7 @@ TEST(LoopNest, ExprSplitWithTailNone) {
   };
   Tensor tensor = Compute("f", {{24, "x"}, {5, "y"}}, func);
   LoopNest l({tensor});
-  std::vector<ForPtr> loops =
-      l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
   LoopNest::splitWithTail(loops[0], 4);
 
   StmtPtr stmt = l.root_stmt();
@@ -600,8 +585,7 @@ TEST(LoopNest, ExprSplitWithMask01) {
       });
 
   LoopNest l({tensor});
-  std::vector<ForPtr> loops =
-      l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
   LoopNest::splitWithMask(loops[1], 4);
 
   StmtPtr stmt = l.root_stmt();
@@ -634,8 +618,7 @@ TEST(LoopNest, ExprSplitWithMaskRepeatedNoMask) {
   });
 
   LoopNest l({tensor});
-  std::vector<ForPtr> loops =
-      l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
   LoopNest::splitWithMask(loops[0], 4);
   LoopNest::splitWithMask(loops[0], 4);
 
@@ -653,7 +636,6 @@ TEST(LoopNest, ExprSplitWithMaskRepeatedNoMask) {
 }
 
 TEST(LoopNest, getLoopAt) {
-
   // Input IR:
   //  for (int i = 0; i < 100; i++) {
   //    for (int j = 0; j < 100; j++) {
@@ -721,8 +703,7 @@ TEST(LoopNest, TileSimple) {
       });
 
   LoopNest l({tensor});
-  std::vector<ForPtr> loops =
-      l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   l.tile(loops[0], loops[1], 4, 8);
 
@@ -767,8 +748,7 @@ TEST(LoopNest, TileWithTails) {
       });
 
   LoopNest l({tensor});
-  std::vector<ForPtr> loops =
-      l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   l.tile(loops[0], loops[1], 5, 9);
 
@@ -1935,9 +1915,7 @@ TEST(LoopNest, LoopNestComputeAt_3) {
   Tensor B = Compute(
       "B",
       {{H + 1, "by"}, {W + 1, "bx"}},
-      [&](const VarHandle& by, const VarHandle& bx) {
-        return A.load(by, bx);
-      });
+      [&](const VarHandle& by, const VarHandle& bx) { return A.load(by, bx); });
   Tensor C = Compute(
       "C",
       {{H, "cy"}, {W, "cx"}},
@@ -2026,7 +2004,6 @@ TEST(LoopNest, LoopNestComputeAt_3) {
 using Axis = const VarHandle&;
 
 TEST(LoopNest, Reduce2dComputeAt) {
-
   const int kW = 16, kH = 16;
   VarHandle W("W", kInt);
   VarHandle H("H", kInt);
@@ -2432,7 +2409,6 @@ TEST(LoopNest, LoopNestReorderExtraStatements) {
    *     Stmt 4
    */
 
-
   Tensor tensor = Compute(
       "f",
       {{2, "x"}, {3, "y"}, {4, "z"}},
@@ -2567,7 +2543,6 @@ void LoopNestReorderTestHelper(
     bool append,
     int index1,
     int index2) {
-
   Tensor c = Compute(
       "5d",
       {{2, "a"}, {3, "b"}, {2, "c"}, {3, "d"}, {2, "e"}},
@@ -2810,7 +2785,6 @@ TEST(LoopNest, OuterLoopVectorization) {
 }
 
 TEST(LoopNest, VectorizeLoopNotNormalized) {
-
   // Input IR:
   //   for (int i = 0; i < 10; i++) {
   //     for (int j = 1; j < 5; j++) {
@@ -2929,7 +2903,6 @@ TEST(LoopNest, UnrollMultipleStatements) {
 }
 
 TEST(LoopNest, UnrollNonLiteralConstantBounds) {
-
   // Input IR:
   //   for (int i = 2 - 1; i < 12 / 3; i++) {
   //     for (int j = 0; j < 4; j++) {
@@ -3027,7 +3000,6 @@ TEST(LoopNest, UnrollWithLet) {
 }
 
 TEST(LoopNest, IsNormalized) {
-
   // Input IR:
   //   for (int i = 50; i < 100; i++) {
   //     A[i] = B[i];
@@ -3050,7 +3022,6 @@ TEST(LoopNest, IsNormalized) {
 }
 
 TEST(LoopNest, NormalizeStartPositive) {
-
   // Input IR:
   //   for (int x = 50; x < 100; x++) {
   //     A[x] = B[x];
@@ -3081,7 +3052,6 @@ TEST(LoopNest, NormalizeStartPositive) {
 }
 
 TEST(LoopNest, NormalizeStartNegative) {
-
   // Input IR:
   //   for (int x = -50; x < 100; x++) {
   //     A[x + 50] = B[x + 50];
@@ -3112,7 +3082,6 @@ TEST(LoopNest, NormalizeStartNegative) {
 }
 
 TEST(LoopNest, NormalizeStartZero) {
-
   // Input IR:
   //   for (int x = 0; x < 100; x++) {
   //     A[x] = B[x];
@@ -3145,7 +3114,6 @@ TEST(LoopNest, NormalizeStartZero) {
 }
 
 TEST(LoopNest, NormalizeStartVariable) {
-
   // Input IR:
   //   for (int x = y; x < 100; x++) {
   //     A[x] = B[x];
@@ -3178,7 +3146,6 @@ TEST(LoopNest, NormalizeStartVariable) {
 }
 
 TEST(LoopNest, NormalizeOnNestedOuterLoop) {
-
   // Input IR:
   //   for (int x = 50; x < 100; x++) {
   //     for (int y = 10; y < 100; y++) {
@@ -3211,7 +3178,6 @@ TEST(LoopNest, NormalizeOnNestedOuterLoop) {
 }
 
 TEST(LoopNest, NormalizeOnNestedInnerLoop) {
-
   // Input IR:
   //   for (int x = 50; x < 100; x++) {
   //     for (int y = 10; y < 100; y++) {
@@ -3244,7 +3210,6 @@ TEST(LoopNest, NormalizeOnNestedInnerLoop) {
 }
 
 TEST(LoopNest, NormalizeAndSplitWithTail) {
-
   // Create a dummy tensor to construct LoopNest.
   ExprHandle n(100);
   Placeholder a(BufHandle("a", {n}, kFloat));
@@ -3292,7 +3257,6 @@ TEST(LoopNest, NormalizeAndSplitWithTail) {
 }
 
 TEST(LoopNest, FlattenSimpleLoopNest2D) {
-
   // Input IR:
   //   for (int i = 0; i < 10; i++) {
   //     for (int j = 0; j < 5; j++) {
@@ -3334,7 +3298,6 @@ TEST(LoopNest, FlattenSimpleLoopNest2D) {
 }
 
 TEST(LoopNest, FlattenSimpleLoopNest3D) {
-
   // Input IR:
   //   for (int i = 0; i < 10; i++) {
   //     for (int j = 0; j < 5; j++) {
@@ -3380,7 +3343,6 @@ TEST(LoopNest, FlattenSimpleLoopNest3D) {
 }
 
 TEST(LoopNest, FlattenLoopNestAfterNormalize) {
-
   // Input IR:
   //   for (int i = 2; i < 10; i++) {
   //     for (int j = 3; j < 15; j++) {
@@ -3422,7 +3384,6 @@ TEST(LoopNest, FlattenLoopNestAfterNormalize) {
 }
 
 TEST(LoopNest, FlattenLoopNestWithNonLiteralConstantBounds) {
-
   // Input IR:
   //   for (int i = 0; i < 15-5; i++) {
   //     for (int j = 0; j < 20/4; j++) {
@@ -3463,7 +3424,6 @@ TEST(LoopNest, FlattenLoopNestWithNonLiteralConstantBounds) {
 }
 
 TEST(LoopNest, FlattenImperfectLoopNest) {
-
   // Input IR:
   //   for (int i = 0; i < 10; i++) {
   //     A[i, i] = 0;
@@ -3493,7 +3453,6 @@ TEST(LoopNest, FlattenImperfectLoopNest) {
 }
 
 TEST(LoopNest, FlattenReductionLoopNest) {
-
   // Input IR:
   //   for (int i = 0; i < 10; i++) {
   //     S[i] = 0;
@@ -3544,7 +3503,6 @@ TEST(LoopNest, FlattenReductionLoopNestFromTensor) {
 }
 
 TEST(LoopNest, FlattenIncorrectLoopsAsInput) {
-
   // Input IR:
   //   for (int i = 0; i < 10; i++) {
   //     for (int j = 0; j < 5; j++) {
@@ -3600,7 +3558,6 @@ TEST(LoopNest, DetectInlineRankMismatch) {
 }
 
 TEST(LoopNest, CacheReadsSimple) {
-
   Tensor A = Compute(
       "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
         return i * j;
@@ -3667,7 +3624,6 @@ TEST(LoopNest, CacheReadsSimple) {
 }
 
 TEST(LoopNest, CacheReadsOuter) {
-
   Tensor A = Compute(
       "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
         return i * j;
@@ -3714,7 +3670,6 @@ TEST(LoopNest, CacheReadsOuter) {
 }
 
 TEST(LoopNest, CacheReadsInternal) {
-
   Tensor A = Compute(
       "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
         return i * j;
@@ -3760,7 +3715,6 @@ TEST(LoopNest, CacheReadsInternal) {
 }
 
 TEST(LoopNest, CacheReadsInner) {
-
   Tensor A = Compute(
       "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
         return i * j;
@@ -3807,7 +3761,6 @@ TEST(LoopNest, CacheReadsInner) {
 }
 
 TEST(LoopNest, CacheWritesSimple) {
-
   Tensor A = Compute(
       "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
         return i * j;
@@ -3944,7 +3897,6 @@ TEST(LoopNest, DeadStoreEliminationWithIntermediates) {
 }
 
 TEST(LoopNest, CompoundTensorSimple) {
-
   BufHandle a_buf("A", {10, 5}, kInt);
   VarHandle i("i", kInt);
   VarHandle j("j", kInt);
@@ -4003,7 +3955,6 @@ TEST(LoopNest, InlineConstantIndex) {
 }
 
 TEST(LoopNest, CompoundTensorUsed) {
-
   BufHandle a_buf("A", {10, 5}, kInt);
   VarHandle i("i", kInt);
   VarHandle j("j", kInt);
@@ -4048,7 +3999,6 @@ TEST(LoopNest, CompoundTensorUsed) {
 }
 
 TEST(LoopNest, InlineFromLoad) {
-
   constexpr int N = 1024;
   BufHandle a("A", {N}, kInt);
   BufHandle b("B", {N}, kInt);
@@ -4073,7 +4023,6 @@ TEST(LoopNest, InlineFromLoad) {
 }
 
 TEST(LoopNest, OptimizeConditionalsSimple) {
-
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
   //     A[i] = IfThenElse(i<5 ? 1 : 0, B[i], C[i-5])
@@ -4114,7 +4063,6 @@ TEST(LoopNest, OptimizeConditionalsSimple) {
 }
 
 TEST(LoopNest, OptimizeConditionalsNestedConditions) {
-
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
   //     A[i] = IfThenElse(i<10, IfThenElse(i<5, B[i], C[i-5]), D[i-10])
@@ -4162,7 +4110,6 @@ TEST(LoopNest, OptimizeConditionalsNestedConditions) {
 }
 
 TEST(LoopNest, OptimizeConditionalsMultipleStores) {
-
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
   //     A[i] = IfThenElse(i<5 ? 1 : 0, B[i], C[i-5])
@@ -4221,7 +4168,6 @@ TEST(LoopNest, OptimizeConditionalsMultipleStores) {
 }
 
 TEST(LoopNest, OptimizeConditionalsMultipleStoresInOneLoop) {
-
   // Input IR:
   //   for (int i = 0; i < 50; i++) {
   //     A[i] = IfThenElse(i<5 ? 1 : 0, B[i], C[i-5])
@@ -4274,7 +4220,6 @@ TEST(LoopNest, OptimizeConditionalsMultipleStoresInOneLoop) {
 }
 
 TEST(LoopNest, OptimizeConditionalsOuterLoopVar) {
-
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
   //     for (int j = 0; j < 100; j++) {
@@ -4318,7 +4263,6 @@ TEST(LoopNest, OptimizeConditionalsOuterLoopVar) {
 }
 
 TEST(LoopNest, OptimizeConditionalsCompValuesNotOrdered) {
-
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
   //     A[i] = IfThenElse(i<5, IfThenElse(i<10, B[i], C[i-5]), D[i-10])
@@ -4358,7 +4302,6 @@ TEST(LoopNest, OptimizeConditionalsCompValuesNotOrdered) {
 }
 
 TEST(LoopNest, OptimizeConditionalsCompValuesNotConstants) {
-
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
   //     A[i] = IfThenElse(i<N, IfThenElse(i<5, B[i], C[i-5]), D[i-10])
@@ -4399,7 +4342,6 @@ TEST(LoopNest, OptimizeConditionalsCompValuesNotConstants) {
 }
 
 TEST(LoopNest, OptimizeConditionalsInvalidCondition) {
-
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
   //     A[i] = IfThenElse(i<10, IfThenElse(i>5, B[i], C[i-5]), D[i-10])
@@ -4439,7 +4381,6 @@ TEST(LoopNest, OptimizeConditionalsInvalidCondition) {
 }
 
 TEST(LoopNest, OptimizeConditionalsInvalidCondition2) {
-
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
   //     A[i] = IfThenElse(10<i, IfThenElse(i<5, B[i], C[i-5]), D[i-10])
@@ -4480,7 +4421,6 @@ TEST(LoopNest, OptimizeConditionalsInvalidCondition2) {
 }
 
 TEST(LoopNest, OptimizeConditionalsInvalidCondition3) {
-
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
   //     A[i] = IfThenElse(i<10, IfThenElse(k<5, B[i], C[i-5]), D[i-10])
@@ -4522,7 +4462,6 @@ TEST(LoopNest, OptimizeConditionalsInvalidCondition3) {
 }
 
 TEST(LoopNest, OptimizeConditionalsInvalidCondition4) {
-
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
   //     A[i] = IfThenElse(k<10, IfThenElse(k<5, B[i], C[i-5]), D[i-10])
@@ -4564,7 +4503,6 @@ TEST(LoopNest, OptimizeConditionalsInvalidCondition4) {
 }
 
 TEST(LoopNest, OptimizeConditionalsNotNormalized) {
-
   // Input IR:
   //   for (int i = 2; i < 20; i++) {
   //     A[i] = IfThenElse(i<5 ? 1 : 0, B[i], C[i-5])
@@ -4597,9 +4535,7 @@ TEST(LoopNest, OptimizeConditionalsNotNormalized) {
   ASSERT_EQ(hash_before, hash_after);
 }
 
-static std::pair<std::unique_ptr<Placeholder>, Tensor> colReduce(
-    int M,
-    int N) {
+static std::pair<std::unique_ptr<Placeholder>, Tensor> colReduce(int M, int N) {
   auto a =
       std::make_unique<Placeholder>("a", kFloat, std::vector<ExprHandle>{M, N});
   Tensor t = Reduce(
@@ -4735,7 +4671,6 @@ TEST(LoopNest, ColReduceSplitMaskUnevenReorder) {
 }
 
 TEST(LoopNest, ReorderAxisWithMultipleConds) {
-
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
   //     if i > 5 {
@@ -4805,7 +4740,6 @@ const char* int64Loop = R"IR(
 )IR";
 
 TEST(LoopNest, Int64Direct) {
-
   constexpr int64_t N = 12;
   Placeholder a("a", kLong, {N});
   Placeholder b("b", kLong, {N});
@@ -4818,7 +4752,6 @@ TEST(LoopNest, Int64Direct) {
 }
 
 TEST(LoopNest, Int64Compute) {
-
   constexpr int64_t N = 12;
   Placeholder a("a", kLong, {N});
   Tensor b = Compute("b", {{N, "n"}}, [&](const VarHandle& n) {
@@ -4833,7 +4766,6 @@ TEST(LoopNest, Int64Compute) {
 }
 
 TEST(LoopNest, DistributeLoopWithAllStmtsAsPivots) {
-
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
   //     A[i] = 0;
@@ -4894,7 +4826,6 @@ TEST(LoopNest, DistributeLoopWithAllStmtsAsPivots) {
 }
 
 TEST(LoopNest, DistributeLoopWithOneStmtAsPivot) {
-
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
   //     A[i] = 0;
@@ -4952,7 +4883,6 @@ TEST(LoopNest, DistributeLoopWithOneStmtAsPivot) {
 }
 
 TEST(LoopNest, DistributeLoopWithoutAnyPivot) {
-
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
   //     A[i] = 0;
@@ -5013,7 +4943,6 @@ TEST(LoopNest, DistributeLoopWithoutAnyPivot) {
 }
 
 TEST(LoopNest, DistributeLoopOverInnerLoops) {
-
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
   //     A[i] = 0;
@@ -5071,7 +5000,6 @@ TEST(LoopNest, DistributeLoopOverInnerLoops) {
 }
 
 TEST(LoopNest, DistributeLoopAndParentsWithoutAnyPivot) {
-
   // Input IR:
   // for (int m = 0; m < 50; m++) {
   //   for (int i = 0; i < 20; i++) {
@@ -5181,7 +5109,6 @@ TEST(LoopNest, DistributeLoopAndParentsWithoutAnyPivot) {
 }
 
 TEST(LoopNest, fuseLoopsSimple) {
-
   // Input IR:
   //   for (int j = 0; j < 100; j++) {
   //     A[j] = 10 * j;
@@ -5216,7 +5143,6 @@ TEST(LoopNest, fuseLoopsSimple) {
 }
 
 TEST(LoopNest, fuseLoopsMultiple) {
-
   // Input IR:
   //   for (int i = 0; i < 100; i++) {
   //     A[i+100] = 20 + i;
@@ -5258,7 +5184,6 @@ TEST(LoopNest, fuseLoopsMultiple) {
 }
 
 TEST(LoopNest, fuseLoopsNested) {
-
   // Input IR:
   //   for (int m = 0; m < 20; m++) {
   //     A[m] = 0;
@@ -5319,7 +5244,6 @@ TEST(LoopNest, fuseLoopsNested) {
 }
 
 TEST(LoopNest, fuseLoopsNested2D) {
-
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
   //     for (int j = 0; j < 100; j++) {
@@ -5378,7 +5302,6 @@ TEST(LoopNest, fuseLoopsNested2D) {
 }
 
 TEST(LoopNest, fuseLoopsNested2DInner) {
-
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
   //     for (int j = 0; j < 100; j++) {
@@ -5419,7 +5342,6 @@ TEST(LoopNest, fuseLoopsNested2DInner) {
 }
 
 TEST(LoopNest, fuseLoopsDifferentStopBounds) {
-
   // Input IR:
   //   for (int j = 0; j < 100; j++) {
   //     A[j] = 10 * j;
@@ -5441,7 +5363,6 @@ TEST(LoopNest, fuseLoopsDifferentStopBounds) {
 }
 
 TEST(LoopNest, fuseLoopsDifferentStartBounds) {
-
   // Input IR:
   //   for (int j = 0; j < 100; j++) {
   //     A[j] = 10 * j;
@@ -5463,7 +5384,6 @@ TEST(LoopNest, fuseLoopsDifferentStartBounds) {
 }
 
 TEST(LoopNest, fuseLoopsNotContiguous) {
-
   // Input IR:
   //   for (int j = 0; j < 100; j++) {
   //     A[j] = 10 * j;
@@ -5487,7 +5407,6 @@ TEST(LoopNest, fuseLoopsNotContiguous) {
 }
 
 TEST(LoopNest, fuseLoopsWithDifferentParents) {
-
   // Input IR:
   //   for (int i = 0; i < 50; i++) {
   //     for (int j = 0; j < 100; j++) {
@@ -5515,7 +5434,6 @@ TEST(LoopNest, fuseLoopsWithDifferentParents) {
 }
 
 TEST(LoopNest, fuseLoopsWithVariableBounds) {
-
   // Input IR:
   //   for (int j = 0; j < N; j++) {
   //     A[j] = 10 * j;
@@ -5552,7 +5470,6 @@ TEST(LoopNest, fuseLoopsWithVariableBounds) {
 }
 
 TEST(LoopNest, fuseLoopsWithExprBounds) {
-
   // Input IR:
   //   for (int j = 0; j < M + N; j++) {
   //     A[j] = 10 * j;
@@ -5589,7 +5506,6 @@ TEST(LoopNest, fuseLoopsWithExprBounds) {
 }
 
 TEST(LoopNest, fuseLoopsWithDifferentExprBounds) {
-
   // Input IR:
   //   for (int j = M; j < N * 2; j++) {
   //     A[j] = 10 * j;
@@ -5627,7 +5543,6 @@ TEST(LoopNest, fuseLoopsWithDifferentExprBounds) {
 }
 
 TEST(LoopNest, fuseLoopsWithNonOverlappingBufferAccesses) {
-
   // Input IR:
   //   for (int j = 10; j < 100; j++) {
   //     A[j] = 10 * j;
@@ -5663,7 +5578,6 @@ TEST(LoopNest, fuseLoopsWithNonOverlappingBufferAccesses) {
 }
 
 TEST(LoopNest, fuseLoopsWithNonOverlapping2DBufferAccesses) {
-
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
   //     for (int j = 0; j < 100; j++) {
@@ -5712,7 +5626,6 @@ TEST(LoopNest, fuseLoopsWithNonOverlapping2DBufferAccesses) {
 }
 
 TEST(LoopNest, fuseLoopsWithReductions) {
-
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
   //     A[i] = 0
@@ -5759,7 +5672,6 @@ TEST(LoopNest, fuseLoopsWithReductions) {
 }
 
 TEST(LoopNest, fuseLoopsWith2DReductions) {
-
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
   //     for (int j = 0; j < 50; j++) {
@@ -5818,7 +5730,6 @@ TEST(LoopNest, fuseLoopsWith2DReductions) {
 }
 
 TEST(LoopNest, fuseLoopsWithComplexIndices) {
-
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
   //     for (int j = 0; j < 20; j++) {
@@ -5865,7 +5776,6 @@ TEST(LoopNest, fuseLoopsWithComplexIndices) {
 }
 
 TEST(LoopNest, fuseLoopsWithMixedLoopVarsAsIndices) {
-
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
   //     for (int j = 0; j < 20; j++) {
@@ -5895,7 +5805,6 @@ TEST(LoopNest, fuseLoopsWithMixedLoopVarsAsIndices) {
 }
 
 TEST(LoopNest, fuseLoopsWithTranspose) {
-
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
   //     for (int j = 0; j < 20; j++) {
@@ -5925,7 +5834,6 @@ TEST(LoopNest, fuseLoopsWithTranspose) {
 }
 
 TEST(LoopNest, fuseLoopsThatViolateDependencies1) {
-
   // Input IR:
   //   for (int j = 10; j < 100; j++) {
   //     A[j] = 10 * j;
@@ -5947,7 +5855,6 @@ TEST(LoopNest, fuseLoopsThatViolateDependencies1) {
 }
 
 TEST(LoopNest, fuseLoopsThatViolateDependencies2) {
-
   // Input IR:
   //   for (int j = 10; j < 100; j++) {
   //     A[j] = 10 * j;
@@ -5969,7 +5876,6 @@ TEST(LoopNest, fuseLoopsThatViolateDependencies2) {
 }
 
 TEST(LoopNest, fuseLoopsThatViolateDependencies3) {
-
   // Input IR:
   //   for (int m = 0; m < 20; m++) {
   //     A[m] = 0;
@@ -6013,7 +5919,6 @@ TEST(LoopNest, fuseLoopsThatViolateDependencies3) {
 }
 
 TEST(LoopNest, fuseLoopsThatViolateDependencies4) {
-
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
   //     for (int j = 0; j < 100; j++) {
@@ -6056,7 +5961,6 @@ TEST(LoopNest, fuseLoopsThatViolateDependencies4) {
 }
 
 TEST(LoopNest, fuseLoopsThatViolateDependencies5) {
-
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
   //     for (int j = 0; j < 100; j++) {
@@ -6085,7 +5989,6 @@ TEST(LoopNest, fuseLoopsThatViolateDependencies5) {
 }
 
 TEST(LoopNest, fuseLoopsThatViolateDependencies6) {
-
   // Input IR:
   //   for (int j = 0; j < 100; j++) {
   //     A[j] = 10 * j;
@@ -6112,7 +6015,6 @@ TEST(LoopNest, fuseLoopsThatViolateDependencies6) {
 }
 
 TEST(LoopNest, fuseLoopsThatViolateDependencies7) {
-
   // Input IR:
   //   for (int k = 0; k < 100; k++) {
   //     B[k] = 20 * A[99-k];
@@ -6139,7 +6041,6 @@ TEST(LoopNest, fuseLoopsThatViolateDependencies7) {
 }
 
 TEST(LoopNest, areLoopsPerfectlyNested) {
-
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
   //     for (int j = 0; j < 30; j++) {
@@ -6182,7 +6083,6 @@ TEST(LoopNest, areLoopsPerfectlyNested) {
 }
 
 TEST(LoopNest, reorderNestedLoops2D) {
-
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
   //     for (int j = 0; j < 30; j++) {
@@ -6207,7 +6107,6 @@ TEST(LoopNest, reorderNestedLoops2D) {
 }
 
 TEST(LoopNest, reorderNestedLoops3D) {
-
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
   //     for (int j = 0; j < 30; j++) {
@@ -6237,7 +6136,6 @@ TEST(LoopNest, reorderNestedLoops3D) {
 }
 
 TEST(LoopNest, reorderNestedLoops4D) {
-
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
   //     for (int j = 0; j < 30; j++) {
@@ -6275,7 +6173,6 @@ TEST(LoopNest, reorderNestedLoops4D) {
 }
 
 TEST(LoopNest, reorderTrivialPermutation) {
-
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
   //     for (int j = 0; j < 30; j++) {
@@ -6305,7 +6202,6 @@ TEST(LoopNest, reorderTrivialPermutation) {
 }
 
 TEST(LoopNest, reorderInvalidPermutations) {
-
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
   //     for (int j = 0; j < 30; j++) {
@@ -6343,7 +6239,6 @@ TEST(LoopNest, reorderInvalidPermutations) {
 }
 
 TEST(LoopNest, reorderInvalidLoopNest) {
-
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
   //     for (int j = 0; j < 30; j++) {
@@ -6385,7 +6280,6 @@ TEST(LoopNest, reorderInvalidLoopNest) {
 }
 
 TEST(LoopNest, compressBufferSimple) {
-
   // Input IR:
   // for (int i = 0; i < 100; ++i) {
   //   for (int j = 0; j < 200; ++j) {
@@ -6430,7 +6324,6 @@ TEST(LoopNest, compressBufferSimple) {
 }
 
 TEST(LoopNest, compressBufferMultipleDims) {
-
   // Input IR:
   // for (int i = 0; i < 100; ++i) {
   //   for (int j = 0; j < 200; ++j) {
@@ -6469,7 +6362,6 @@ TEST(LoopNest, compressBufferMultipleDims) {
 }
 
 TEST(LoopNest, compressBufferMultipleDims2) {
-
   // Input IR:
   // for (int i = 0; i < 100; ++i) {
   //   for (int j = 0; j < 200; ++j) {
@@ -6518,7 +6410,6 @@ TEST(LoopNest, compressBufferMultipleDims2) {
 }
 
 TEST(LoopNest, compressBufferDifferentOrderIndices) {
-
   // Input IR:
   // for (int i = 0; i < 100; ++i) {
   //   for (int j = 0; j < 200; ++j) {
@@ -6563,7 +6454,6 @@ TEST(LoopNest, compressBufferDifferentOrderIndices) {
 }
 
 TEST(LoopNest, compressBufferVariableBounds) {
-
   // Input IR:
   // for (int i = 0; i < M; ++i) {
   //   for (int j = 0; j < N; ++j) {
@@ -6611,7 +6501,6 @@ TEST(LoopNest, compressBufferVariableBounds) {
 }
 
 TEST(LoopNest, compressBufferNoCommonParentLoops) {
-
   // Input IR:
   // for (int i = 0; i < 100; ++i) {
   //   for (int j = 0; j < 200; ++j) {
@@ -6661,7 +6550,6 @@ TEST(LoopNest, compressBufferNoCommonParentLoops) {
 }
 
 TEST(LoopNest, compressBufferIndicesMixed) {
-
   // Input IR:
   // for (int i = 0; i < 100; ++i) {
   //   for (int j = 0; j < 200; ++j) {
@@ -6708,7 +6596,6 @@ TEST(LoopNest, compressBufferIndicesMixed) {
 }
 
 TEST(LoopNest, compressMultipleBuffers) {
-
   // Input IR:
   // for (int i = 0; i < 100; ++i) {
   //   for (int j = 0; j < 200; ++j) {

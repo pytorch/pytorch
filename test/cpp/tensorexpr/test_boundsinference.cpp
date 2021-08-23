@@ -495,7 +495,6 @@ TEST(BoundsInference, MultipleTopLoopStore) {
 }
 
 TEST(BoundsInference, CacheReads) {
-
   Tensor A = Compute(
       "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
         return i * j;
@@ -637,7 +636,6 @@ TEST(BoundsInference, GetPotentialHazards) {
 }
 
 TEST(BoundsInference, GetPotentialHazardsLoopNoHazard) {
-
   Tensor A = Compute(
       "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
         return i * j;
@@ -664,7 +662,6 @@ TEST(BoundsInference, GetPotentialHazardsLoopNoHazard) {
 }
 
 TEST(BoundsInference, GetPotentialHazardsLoopCall) {
-
   Tensor A = Compute(
       "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
         return i * j;
@@ -690,7 +687,6 @@ TEST(BoundsInference, GetPotentialHazardsLoopCall) {
 }
 
 TEST(BoundsInference, GetPotentialHazardsLoopSplit) {
-
   Tensor A = Compute(
       "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
         return i * j;
@@ -716,7 +712,6 @@ TEST(BoundsInference, GetPotentialHazardsLoopSplit) {
 }
 
 TEST(BoundsInference, HasConflictingOverlapSameBufferWithPartialOverlap) {
-
   // Input IR:
   //   for (int j = 10; j < 100; j++) {
   //     A[j] = 10 * j;
@@ -739,7 +734,6 @@ TEST(BoundsInference, HasConflictingOverlapSameBufferWithPartialOverlap) {
 }
 
 TEST(BoundsInference, HasConflictingOverlapSameBufferWithFullOverlap) {
-
   // Input IR:
   //   for (int j = 10; j < 100; j++) {
   //     A[j] = 10 * j;
@@ -761,7 +755,6 @@ TEST(BoundsInference, HasConflictingOverlapSameBufferWithFullOverlap) {
 }
 
 TEST(BoundsInference, HasConflictingOverlapSameBufferWithFullOverlapRAW) {
-
   // Input IR:
   //   for (int j = 10; j < 100; j++) {
   //     A[j] = 10 * j;
@@ -785,7 +778,6 @@ TEST(BoundsInference, HasConflictingOverlapSameBufferWithFullOverlapRAW) {
 }
 
 TEST(BoundsInference, HasConflictingOverlapSameBufferNotOverlapping) {
-
   // Input IR:
   //   for (int j = 10; j < 100; j++) {
   //     A[j] = 10 * j;
@@ -808,7 +800,6 @@ TEST(BoundsInference, HasConflictingOverlapSameBufferNotOverlapping) {
 }
 
 TEST(BoundsInference, HasConflictingOverlap2DBufferWithOverlap) {
-
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
   //     for (int j = 0; j < 100; j++) {
@@ -848,7 +839,6 @@ TEST(BoundsInference, HasConflictingOverlap2DBufferWithOverlap) {
 }
 
 TEST(BoundsInference, HasConflictingOverlap2DBufferWithNoOverlap) {
-
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
   //     for (int j = 0; j < 100; j++) {
@@ -888,7 +878,6 @@ TEST(BoundsInference, HasConflictingOverlap2DBufferWithNoOverlap) {
 }
 
 TEST(BoundsInference, HasConflictingOverlapDifferentBuffers) {
-
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
   //     for (int j = 0; j < 100; j++) {
@@ -927,7 +916,6 @@ TEST(BoundsInference, HasConflictingOverlapDifferentBuffers) {
 }
 
 TEST(BoundsInference, HasConflictingOverlapDueToRAWDependence) {
-
   // Input IR:
   //   for (int j = 0; j < 100; j++) {
   //     A[j] = 10 * j;
@@ -955,7 +943,6 @@ TEST(BoundsInference, HasConflictingOverlapDueToRAWDependence) {
 }
 
 TEST(BoundsInference, HasConflictingOverlapDueToWARDependence) {
-
   // Input IR:
   //   for (int k = 0; k < 100; k++) {
   //     B[k] = 20 * A[99-k];
@@ -983,7 +970,6 @@ TEST(BoundsInference, HasConflictingOverlapDueToWARDependence) {
 }
 
 TEST(BoundsInference, HasConflictingOverlapWithLoads) {
-
   // Input IR:
   //   for (int k = 10; k < 100; k++) {
   //     B[k] = 20 * A[99-k];
@@ -1016,7 +1002,6 @@ TEST(BoundsInference, HasConflictingOverlapWithLoads) {
 }
 
 TEST(BoundsInference, IsOverlapping) {
-
   // Input IR:
   //   for (int i = 0; i < 100; i++) {
   //     A[i] = i * 10;               // storeA1

@@ -71,7 +71,6 @@ TEST(Reductions, ReduceSum0D_2) {
 
 // Sum an array to a single value.
 TEST(Reductions, ReduceSum1D) {
-
   Placeholder b(BufHandle("b", {10}, kFloat));
   std::vector<float> in(10);
   for (int j = 0; j < 10; ++j) {
@@ -93,7 +92,6 @@ TEST(Reductions, ReduceSum1D) {
 }
 // Sum a 2D tensor to a 1D tensor with dynamic shapes.
 TEST(Reductions, ReduceSum2D) {
-
   const int M = 3;
   const int N = 7;
 
@@ -134,7 +132,6 @@ TEST(Reductions, ReduceSum2D) {
 // Sum a 3D tensor to both a 2D and 1D tensor, then reduce the 2D tensor flat to
 // check our work.
 TEST(Reductions, ReduceSum3D) {
-
   const int M = 10;
   VarHandle m("m", kInt);
 
@@ -204,7 +201,6 @@ TEST(Reductions, ReduceSum3D) {
 
 // Sum a large (10 D) Tensor 5 dimensions in.
 TEST(Reductions, ReduceSum10D) {
-
   Placeholder in_(BufHandle("in_", {2, 3, 2, 3, 2, 3, 2, 3, 2, 3}, kFloat));
   const int InputSize = 2 * 3 * 2 * 3 * 2 * 3 * 2 * 3 * 2 * 3;
   Placeholder out_(BufHandle("out_", {2, 3, 2, 3, 2}, kFloat));
@@ -237,7 +233,6 @@ TEST(Reductions, ReduceSum10D) {
 
 // Reduce via Mul rather than Add using a custom Reducer.
 TEST(Reductions, ReduceProduct) {
-
   const int M = 4;
   const int N = 4;
 
@@ -277,7 +272,6 @@ TEST(Reductions, ReduceProduct) {
 
 // Maximum reductions.
 TEST(Reductions, ReduceMax) {
-
   Placeholder in_(BufHandle("b", {10}, kFloat));
 
   std::vector<float> in(10);
@@ -317,7 +311,6 @@ TEST(Reductions, ReduceMax) {
 
 // Minimum reduction, with custom initialization.
 TEST(Reductions, ReduceMinCustomInitializer) {
-
   VarHandle minInit("minInit", kFloat);
   Placeholder in_(BufHandle("b", {10}, kFloat));
 
@@ -354,7 +347,6 @@ TEST(Reductions, ReduceMinCustomInitializer) {
 // Example implementation of Any/All.
 // TODO: this is very awkward without logical And/Or operators.
 TEST(Reductions, ReduceAnyAll) {
-
   VarHandle searchValue("searchValue", kInt);
   Placeholder b(BufHandle("b", {4, 10}, kInt));
 
@@ -439,7 +431,6 @@ TEST(Reductions, ReduceAnyAll) {
 }
 
 TEST(Reductions, ReduceMatmul2D) {
-
   Placeholder tA(BufHandle("tA", {3, 2}, kFloat));
   Placeholder tB(BufHandle("tB", {2, 3}, kFloat));
 
@@ -480,7 +471,6 @@ TEST(Reductions, ReduceMatmul2D) {
 }
 
 TEST(Reductions, ReduceRfactorLike) {
-
   Placeholder in(BufHandle("in", {10, 10}, kFloat));
   std::vector<float> in_(100);
   for (int i = 0; i < 100; ++i) {
@@ -506,7 +496,6 @@ TEST(Reductions, ReduceRfactorLike) {
 }
 
 TEST(Reductions, ReduceAsProducer) {
-
   const int M = 10;
   VarHandle m("m", kInt);
 
@@ -550,7 +539,6 @@ TEST(Reductions, ReduceAsProducer) {
 }
 
 TEST(Reductions, ReduceAsConsumer) {
-
   const int M = 10;
   VarHandle m("m", kInt);
 
@@ -600,7 +588,6 @@ TEST(Reductions, ReduceAsConsumer) {
 }
 
 TEST(Reductions, SplitReduceAxis) {
-
   Placeholder in(BufHandle("in", {16, 8}, kFloat));
 
   std::vector<float> in_(16 * 8);
@@ -630,7 +617,6 @@ TEST(Reductions, SplitReduceAxis) {
 }
 
 TEST(Reductions, SplitNonReduceAxis) {
-
   Placeholder in(BufHandle("in", {16, 8}, kFloat));
 
   std::vector<float> in_(16 * 8);
@@ -709,7 +695,6 @@ TEST(Reductions, ReorderedReductionInitializer) {
 }
 
 TEST(Reductions, ReduceRfactor) {
-
   const int M = 10;
   const int N = 10;
   VarHandle m("m", kInt);
@@ -741,7 +726,6 @@ TEST(Reductions, ReduceRfactor) {
 }
 
 TEST(Reductions, Reduce3DRfactorInner) {
-
   const int M = 10;
   const int N = 10;
   const int K = 10;
@@ -775,7 +759,6 @@ TEST(Reductions, Reduce3DRfactorInner) {
 }
 
 TEST(Reductions, Reduce3DRfactorOuter) {
-
   const int M = 10;
   const int N = 10;
   const int K = 10;
@@ -808,7 +791,6 @@ TEST(Reductions, Reduce3DRfactorOuter) {
 }
 
 TEST(Reductions, ReduceRepeatedInternalRfactor) {
-
   Placeholder in_(BufHandle("in_", {2, 3, 4, 5, 6}, kFloat));
   const int InputSize = 2 * 3 * 4 * 5 * 6;
 
@@ -854,7 +836,6 @@ TEST(Reductions, ReduceRepeatedInternalRfactor) {
 
 // Split a reduction axis with a tail loop.
 TEST(Reductions, ReduceSplitTail) {
-
   const int M = 10;
   const int N = 10;
   const int K = 10;
@@ -886,7 +867,6 @@ TEST(Reductions, ReduceSplitTail) {
 
 // Split a reduction axis cleanly so there is no tail loop.
 TEST(Reductions, ReduceSplitNoTail) {
-
   const int M = 10;
   const int N = 10;
   const int K = 10;
@@ -918,7 +898,6 @@ TEST(Reductions, ReduceSplitNoTail) {
 // Split a reduction axis with only a tail loop (the split loop will be size 0
 // and eliminated out).
 TEST(Reductions, ReduceOverSplitTail) {
-
   const int M = 10;
   const int N = 10;
   const int K = 10;
@@ -950,7 +929,6 @@ TEST(Reductions, ReduceOverSplitTail) {
 
 // Split a reduction axis with a mask.
 TEST(Reductions, ReduceSplitMask) {
-
   const int M = 10;
   const int N = 10;
   const int K = 10;
@@ -982,7 +960,6 @@ TEST(Reductions, ReduceSplitMask) {
 
 // Split a reduction axis cleanly not requiring a mask.
 TEST(Reductions, ReduceSplitNoMask) {
-
   const int M = 10;
   const int N = 10;
   const int K = 10;
@@ -1013,7 +990,6 @@ TEST(Reductions, ReduceSplitNoMask) {
 
 // Split a reduction axis with all logic in the mask.
 TEST(Reductions, ReduceOverSplitMask) {
-
   const int M = 10;
   const int N = 10;
   const int K = 10;
@@ -1046,7 +1022,6 @@ TEST(Reductions, ReduceOverSplitMask) {
 // Test an rfactor when there are two ReduceOps in the graph due to a
 // splitWithTail.
 TEST(Reductions, ReduceSplitRfactor) {
-
   const int M = 2;
   const int N = 10;
   const int K = 10;
@@ -1089,7 +1064,6 @@ TEST(Reductions, ReduceSplitRfactor) {
 // Test an rfactor which ends up being eliminated since the total loop size is
 // smaller than the split factor.
 TEST(Reductions, ReduceOverSplitRfactor) {
-
   const int N = 10;
   const int K = 10;
   const int SPLIT_FACTOR = 16;
@@ -1287,7 +1261,6 @@ TEST(Reductions, ReduceInlineReducerInternal) {
 }
 
 TEST(Reductions, ReductionCacheAccessesOperatorAxis) {
-
   int L = 4;
   int N = 3;
   int M = 2;
@@ -1363,7 +1336,6 @@ TEST(Reductions, ReductionCacheAccessesOperatorAxis) {
 }
 
 TEST(Reductions, ReductionCacheAccessesOuterReduceAxis) {
-
   int L = 4;
   int N = 3;
   int M = 2;
@@ -1437,7 +1409,6 @@ TEST(Reductions, ReductionCacheAccessesOuterReduceAxis) {
 }
 
 TEST(Reductions, ReductionCacheAccessesInnerReduceAxis) {
-
   int L = 4;
   int N = 3;
   int M = 2;
@@ -1511,7 +1482,6 @@ TEST(Reductions, ReductionCacheAccessesInnerReduceAxis) {
 }
 
 TEST(Reductions, ReductionCacheBodyAccess) {
-
   Placeholder a(BufHandle("a", {24, 32, 12}, kFloat));
   Placeholder b(BufHandle("b", {24, 32, 12}, kFloat));
 
@@ -1551,7 +1521,6 @@ TEST(Reductions, ReductionCacheBodyAccess) {
 }
 
 TEST(Reductions, ReductionCacheConsumerAccess) {
-
   Placeholder a(BufHandle("a", {24, 32, 12}, kFloat));
   Placeholder b(BufHandle("b", {24, 32, 12}, kFloat));
 
@@ -1591,7 +1560,6 @@ TEST(Reductions, ReductionCacheConsumerAccess) {
 }
 
 TEST(Reductions, ReductionSplitCacheConsumerAccess) {
-
   Placeholder a(BufHandle("a", {24, 32, 12}, kFloat));
   Placeholder b(BufHandle("b", {24, 32, 12}, kFloat));
 
@@ -1638,7 +1606,6 @@ TEST(Reductions, ReductionSplitCacheConsumerAccess) {
 }
 
 TEST(Reductions, ReductionReorderCacheConsumerAccess) {
-
   Placeholder a(BufHandle("a", {24, 32, 12}, kFloat));
   Placeholder b(BufHandle("b", {24, 32, 12}, kFloat));
 
@@ -1686,7 +1653,6 @@ TEST(Reductions, ReductionReorderCacheConsumerAccess) {
 }
 
 TEST(Reductions, ReductionRfactorCacheTempOuter) {
-
   const int M = 10;
   const int N = 10;
   const int K = 10;
@@ -1754,7 +1720,6 @@ TEST(Reductions, ReductionRfactorCacheTempOuter) {
 }
 
 TEST(Reductions, ReductionRfactorCacheTempInner) {
-
   const int M = 10;
   const int N = 10;
   const int K = 10;
@@ -1817,7 +1782,6 @@ TEST(Reductions, ReductionRfactorCacheTempInner) {
 }
 
 TEST(Reductions, ReductionVectorize) {
-
   std::vector<float> in_(8 * 8);
   for (int i = 0; i < 8; ++i) {
     for (int j = 0; j < 8; ++j) {
@@ -1863,7 +1827,6 @@ TEST(Reductions, ReductionVectorize) {
 }
 
 TEST(Reductions, ReductionVectorizeInner) {
-
   Placeholder in(BufHandle("in", {8, 8}, kFloat));
 
   Tensor tensor = Reduce("sum", {{8, "m"}}, Sum(), in, {{8, "n"}});
@@ -1873,7 +1836,6 @@ TEST(Reductions, ReductionVectorizeInner) {
 }
 
 TEST(Reductions, ReductionVectorizeRfactor) {
-
   std::vector<float> in_(8 * 8);
   for (int i = 0; i < 8; ++i) {
     for (int j = 0; j < 8; ++j) {
