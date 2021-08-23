@@ -56,9 +56,7 @@ class IDEEPNCHW2NHWCOp final : public IDEEPOperator {
   OUTPUT_TAGS(OUTPUT);
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(NHWC2NCHW, IDEEPNHWC2NCHWOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(NCHW2NHWC, IDEEPNCHW2NHWCOp);
 
 } // namespace

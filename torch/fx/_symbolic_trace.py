@@ -15,7 +15,7 @@ import sys
 from .node import Argument, map_aggregate, base_types
 from .graph import Graph, _PyTreeInfo
 from .graph_module import GraphModule
-from .proxy import TracerBase, Proxy
+from .proxy import TracerBase, Proxy, ParameterProxy
 
 HAS_VARSTUFF = inspect.CO_VARARGS | inspect.CO_VARKEYWORDS
 
@@ -182,7 +182,9 @@ class Tracer(TracerBase):
     process. The different behaviors that can be overridden are described
     in the docstrings of the methods on this class.
     """
-    def __init__(self, autowrap_modules: Tuple[ModuleType] = (math, ), enable_cpatching: bool = False) -> None:
+    def __init__(self, autowrap_modules: Tuple[ModuleType] = (math, ),
+                 enable_cpatching: bool = False,
+                 param_shapes_constant: bool = False) -> None:
         # This method's signature is overridden by the first line of this class'
         # docstring. If this method's signature is modified, the signature that
         # overrides it also should be modified accordingly.
@@ -205,6 +207,10 @@ class Tracer(TracerBase):
 
                 Turning this on is likely to slow down tracing by 1.5-3x.
 
+            param_shapes_constant (bool): see https://github.com/pytorch/pytorch/issues/61733. When
+            this flag is set,  calls to shape, size and a few other shape like attributes of a module's parameter
+            will be evaluted directly, rather than returning a new Proxy value for an attribute access.
+
         """
 
         super().__init__()
@@ -219,6 +225,7 @@ class Tracer(TracerBase):
         # modules we see while tracing
         self._autowrap_search: List[ModuleType] = list(autowrap_modules)
         self.enable_cpatching = enable_cpatching
+        self.param_shapes_constant = param_shapes_constant
 
         self.submodule_paths: Optional[Dict[torch.nn.Module, str]] = None
 
@@ -486,8 +493,14 @@ class Tracer(TracerBase):
             for n, p in self.root.named_parameters():
                 if attr_val is p:
                     if n not in parameter_proxy_cache:
-                        parameter_proxy_cache[n] = self.create_proxy('get_attr', n, (), {})
+                        kwargs = {}
+                        if 'proxy_factory_fn' in inspect.signature(self.create_proxy).parameters:
+                            kwargs['proxy_factory_fn'] = (None if not self.param_shapes_constant else
+                                                          lambda node : ParameterProxy(self, node, n, attr_val))
+                        val_proxy = self.create_proxy('get_attr', n, (), {}, **kwargs)  # type: ignore[arg-type]
+                        parameter_proxy_cache[n] = val_proxy
                     return parameter_proxy_cache[n]
+
         return attr_val
 
 

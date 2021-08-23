@@ -45,6 +45,7 @@ DeviceType parse_type(const std::string& device_string) {
           {"fpga", DeviceType::FPGA},
           {"msnpu", DeviceType::MSNPU},
           {"xla", DeviceType::XLA},
+          {"lazy", DeviceType::Lazy},
           {"vulkan", DeviceType::Vulkan},
           {"mlc", DeviceType::MLC},
           {"meta", DeviceType::Meta},
@@ -61,7 +62,7 @@ DeviceType parse_type(const std::string& device_string) {
   }
   TORCH_CHECK(
       false,
-      "Expected one of cpu, cuda, xpu, mkldnn, opengl, opencl, ideep, hip, ve, msnpu, mlc, xla, vulkan, meta, hpu device type at start of device string: ",
+      "Expected one of cpu, cuda, xpu, mkldnn, opengl, opencl, ideep, hip, ve, msnpu, mlc, xla, lazy, vulkan, meta, hpu device type at start of device string: ",
       device_string);
 }
 } // namespace

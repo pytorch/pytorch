@@ -667,7 +667,7 @@ class TestReductions(TestCase):
 
     @onlyOnCPUAndCUDA
     @dtypesIfCPU(torch.float, torch.double)
-    @dtypesIfCUDA(torch.half, torch.float)
+    @dtypesIfCUDA(torch.half, torch.float, torch.bfloat16)
     def test_aminmax(self, device, dtype):
 
         def _amin_wrapper(x, dim=None, keepdims=False):
@@ -1011,10 +1011,7 @@ class TestReductions(TestCase):
         test_output_dtype(torch.int32, False)
         test_output_dtype(torch.int64, True)
 
-    @dtypesIfCUDA(torch.half, torch.float, torch.double,
-                  torch.int8, torch.short, torch.int, torch.long)
-    @dtypes(torch.float, torch.double,
-            torch.int8, torch.short, torch.int, torch.long)
+    @dtypes(*torch.testing.get_all_dtypes(include_bool=False, include_complex=False))
     def test_nansum(self, device, dtype):
         args = product(
             (True, False),  # noncontiguous
@@ -1406,7 +1403,7 @@ class TestReductions(TestCase):
         x = torch.randn(20, dtype=torch.float32, device=device)
         y = torch.randn(1, dtype=torch.float32)
 
-        err_string = "Expected all tensors to be on the same device, but found at least two devices, {0}".format(device)
+        err_string = f"Expected out tensor to have device {device}, but got cpu instead"
 
         with self.assertRaisesRegex(RuntimeError, err_string):
             torch.sum(x, dim=[0], dtype=torch.float32, out=y)

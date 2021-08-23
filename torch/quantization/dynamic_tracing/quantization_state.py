@@ -4,7 +4,6 @@ import torch.nn.quantized as nnq
 import operator
 import collections
 from typing import Callable, List, Tuple, Any, Optional
-from ..observer import ObserverBase
 
 fp32_to_int8_fun_mapping = {
     torch.Tensor.add: torch.ops.quantized.add,
@@ -92,6 +91,9 @@ class AutoQuantizationState(torch.nn.Module):
         # TODO(future PR): include kwargs
         self.idx_to_seen_ops = {}
 
+    def has_at_least_one_seen_op(self) -> bool:
+        return len(self.idx_to_seen_ops) > 0
+
     def extra_repr(self) -> str:
         s = ""
         s += "(seen_ops): {\n"
@@ -99,9 +101,6 @@ class AutoQuantizationState(torch.nn.Module):
             s += f"  {k}: {v}\n"
         s += "}"
         return s
-
-    def _insert_observer(self, tensor_id: int) -> None:
-        self.tensor_id_to_observer[str(tensor_id)] = self.qconfig.activation()
 
     def _validate_and_increment(self, prev_op: Callable) -> None:
         try:
@@ -168,7 +167,8 @@ class AutoQuantizationState(torch.nn.Module):
         """
         if func in functions_supported_by_quantization:
             if first_call:
-                self._insert_observer(str(qtensor_id[0]))
+                self.tensor_id_to_observer[str(qtensor_id[0])] = \
+                    self.qconfig.activation()
 
                 # TODO(future PR): check if _qtensor_id needs to become an actual
                 # attribute of Tensor
@@ -274,6 +274,13 @@ class AutoQuantizationState(torch.nn.Module):
             return tuple(new_inputs)
 
         return args
+
+    def inference_function_after_hook(
+        self,
+        func: Callable,
+        output,
+    ) -> Any:
+        return output
 
     def inference_module_before_hook(
         self,

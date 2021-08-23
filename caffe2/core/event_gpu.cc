@@ -165,7 +165,7 @@ EventStatus EventQueryCUDA(const Event* event) {
       wrapper->status_ = EventStatus::EVENT_FAILED;
     } else {
       // ignore and clear the error if not ready
-      cudaGetLastError();
+      (void)cudaGetLastError();
     }
   }
   return static_cast<EventStatus>(wrapper->status_.load());

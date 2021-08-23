@@ -67,7 +67,6 @@ struct TORCH_API TransportRegistration {
   std::string address;
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_REGISTRY(TensorPipeTransportRegistry, TransportRegistration);
 
 struct TORCH_API ChannelRegistration {
@@ -75,7 +74,6 @@ struct TORCH_API ChannelRegistration {
   int64_t priority;
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_REGISTRY(TensorPipeChannelRegistry, ChannelRegistration);
 
 constexpr auto kDefaultNumWorkerThreads = 16;
