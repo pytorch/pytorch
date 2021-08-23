@@ -23,24 +23,25 @@ if is_available() and not torch._C._c10d_init():
 
 if is_available():
     from torch._C._distributed_c10d import (
-        Store,
-        FileStore,
-        TCPStore,
-        ProcessGroup,
-        PrefixStore,
-        Reducer,
-        Logger,
-        BuiltinCommHookType,
-        GradBucket,
-        _DEFAULT_FIRST_BUCKET_BYTES,
-        _register_comm_hook,
-        _register_builtin_comm_hook,
         _broadcast_coalesced,
         _compute_bucket_assignment_by_size,
-        _verify_model_across_ranks,
-        _test_python_store,
+        _DEFAULT_FIRST_BUCKET_BYTES,
         _DistributedDebugLevel,
         _get_debug_mode,
+        _register_builtin_comm_hook,
+        _register_comm_hook,
+        _test_python_store,
+        _verify_model_across_ranks,
+        BuiltinCommHookType,
+        FileStore,
+        GradBucket,
+        Logger,
+        PrefixStore,
+        ProcessGroup,
+        Reducer,
+        Store,
+        TCPStore,
+        Work
     )
 
     if sys.platform != "win32":
