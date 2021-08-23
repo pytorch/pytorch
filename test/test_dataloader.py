@@ -2263,6 +2263,7 @@ class TestIndividualWorkerQueue(TestCase):
             cpu_count = os.cpu_count()
             if cpu_count is not None:
                 max_num_workers = cpu_count
+
         if max_num_workers is None:
             max_num_workers = 2
 
