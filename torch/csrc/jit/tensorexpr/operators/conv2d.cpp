@@ -142,7 +142,7 @@ Tensor* conv2d_depthwise_static_schedule2(
         auto const& cb = v[4];
         return input.load(n, cc * Cblock + cb, h, w);
       });
-      input_NCHWc->buf()->disable_inline();
+  input_NCHWc->buf()->disable_inline();
 
   auto input_NCHWc_padded = Compute(
       "input_NCHWc_padded",
@@ -164,7 +164,7 @@ Tensor* conv2d_depthwise_static_schedule2(
         return ifThenElse(
             cond, 0.f, input_NCHWc->load(n, cc, h - pad, w - pad, cb));
       });
-      input_NCHWc_padded->buf()->disable_inline();
+  input_NCHWc_padded->buf()->disable_inline();
 
   // pack kernel into NCHWc8 format
   auto weight_NCHWc = Compute(
@@ -178,17 +178,18 @@ Tensor* conv2d_depthwise_static_schedule2(
         auto const& cb = v[4];
         return weight.load(cc * Cblock + cb, c, r, s);
       });
-      weight_NCHWc->buf()->disable_inline();
+  weight_NCHWc->buf()->disable_inline();
 
   // compute conv_NCHWc8
+  // TODO: if `bias` is `false`, we should switch from `init_func` to constant
+  // `0.f` for initialization which is faster.
   auto OH = (H - R + pad * 2) / stride + 1;
   auto OW = (W - S + pad * 2) / stride + 1;
   auto conv_depthwise_NCHWc = Reduce(
       "conv2d_depthwise_NCHWc",
       {{N, "n"}, {Cchunck, "cc"}, {OH, "oh"}, {OW, "ow"}, {Cblock, "cb"}},
       Sum(),
-      //[&](const std::vector<VarHandle>& v) { return init_func(v); },
-      [&](const std::vector<VarHandle>& v) { return FloatImm::make(0.f); },
+      [&](const std::vector<VarHandle>& v) { return init_func(v); },
       [&](const std::vector<VarHandle>& v) {
         auto const& n = v[0];
         auto const& cc = v[1];
@@ -203,7 +204,7 @@ Tensor* conv2d_depthwise_static_schedule2(
             weight_NCHWc->load(cc, c, r, s, cb);
       },
       {{C / groups, "c"}, {R, "r"}, {S, "s"}});
-      conv_depthwise_NCHWc->buf()->disable_inline();
+  conv_depthwise_NCHWc->buf()->disable_inline();
 
   // unpack conv from NCHWc8 to NCHW
   auto conv_depthwise = Compute(
@@ -216,7 +217,7 @@ Tensor* conv2d_depthwise_static_schedule2(
         auto const& ow = v[3];
         return conv_depthwise_NCHWc->load(n, k / Cblock, oh, ow, k % Cblock);
       });
-      conv_depthwise->buf()->disable_inline();
+  conv_depthwise->buf()->disable_inline();
 
   auto stmt = new Block(
       {input_NCHWc->stmt(),

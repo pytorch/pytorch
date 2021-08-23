@@ -269,6 +269,11 @@ bool conv2dIsSupported(
     GRAPH_DEBUG("conv2dIsSupported: not 3x3 or 5x5");
     return false;
   }
+  auto bz = input.dims[0];
+  if (KH == 5 && bz != 1) {
+    GRAPH_DEBUG("conv2dIsSupported: batch size not being 1 when 5x5");
+    return false;
+  }
   return true;
 }
 
@@ -299,18 +304,6 @@ bool conv2dIsSupportedJit(const torch::jit::Node* node) {
   auto const& input = getTensorInfoJit(node->input(0));
   auto const& weight = getTensorInfoJit(node->input(1));
   auto const& bias = getTensorInfoJit(node->input(2));
-
-  //  c10::optional<c10::IValue> stride;
-  //  if (node->input(3)->node()->kind() == prim::ListConstruct){
-  //      auto const& stride_h = toIValue(node->input(3)->node()->input(0));
-  //      auto const& stride_w = toIValue(node->input(3)->node()->input(1));
-  //      if (stride_h == stride_w){
-  //        stride = stride_h;
-  //      }
-  //  } else {
-  //      stride = toIValue(node->input(3));
-  //  }
-
   auto const& stride = toIValue(node->input(3));
   auto const& pad = toIValue(node->input(4));
   auto const& dilation = toIValue(node->input(5));

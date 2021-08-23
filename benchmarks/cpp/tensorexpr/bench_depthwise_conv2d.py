@@ -47,16 +47,15 @@ def test_depthwise_conv():
             return F.conv2d(input_image_arg, weight_arg, bias=bias_arg, stride=1, padding=2, dilation=1, groups=576)
 
     conv2d_shapes = [
-        [(16, 16, (3, 3), (2, 2), (1, 1), (1, 1), 16, False, 'zeros'),(1, 16, 112, 112), conv_2_1_16],
-        [(72, 72, (3, 3), (2, 2), (1, 1), (1, 1), 72, False, 'zeros'),(1, 72, 56, 56), conv_2_1_72],
-        [(88, 88, (3, 3), (1, 1), (1, 1), (1, 1), 88, False, 'zeros'),(1, 88, 28, 28), conv_1_1_88],
-        [(96, 96, (5, 5), (2, 2), (2, 2), (1, 1), 96, False, 'zeros'),(1, 96, 28, 28), conv_2_2_96],
-        [(240, 240, (5, 5), (1, 1), (2, 2), (1, 1), 240, False, 'zeros'),(1, 240, 14, 14), conv_1_2_240],
-        [(120, 120, (5, 5), (1, 1), (2, 2), (1, 1), 120, False, 'zeros'),(1, 120, 14, 14), conv_1_2_120],
-        [(144, 144, (5, 5), (1, 1), (2, 2), (1, 1), 144, False, 'zeros'),(1, 144, 14, 14), conv_1_2_144],
-        [(288, 288, (5, 5), (2, 2), (2, 2), (1, 1), 288, False, 'zeros'),(1, 288, 14, 14), conv_2_2_288],
-        [(576, 576, (5, 5), (1, 1), (2, 2), (1, 1), 576, False, 'zeros'),(1, 576, 7, 7), conv_1_2_576],
-      ]
+        [(16, 16, (3, 3), (2, 2), (1, 1), (1, 1), 16, False, 'zeros'), (1, 16, 112, 112), conv_2_1_16],
+        [(72, 72, (3, 3), (2, 2), (1, 1), (1, 1), 72, False, 'zeros'), (1, 72, 56, 56), conv_2_1_72],
+        [(88, 88, (3, 3), (1, 1), (1, 1), (1, 1), 88, False, 'zeros'), (1, 88, 28, 28), conv_1_1_88],
+        [(96, 96, (5, 5), (2, 2), (2, 2), (1, 1), 96, False, 'zeros'), (1, 96, 28, 28), conv_2_2_96],
+        [(240, 240, (5, 5), (1, 1), (2, 2), (1, 1), 240, False, 'zeros'), (1, 240, 14, 14), conv_1_2_240],
+        [(120, 120, (5, 5), (1, 1), (2, 2), (1, 1), 120, False, 'zeros'), (1, 120, 14, 14), conv_1_2_120],
+        [(144, 144, (5, 5), (1, 1), (2, 2), (1, 1), 144, False, 'zeros'), (1, 144, 14, 14), conv_1_2_144],
+        [(288, 288, (5, 5), (2, 2), (2, 2), (1, 1), 288, False, 'zeros'), (1, 288, 14, 14), conv_2_2_288],
+        [(576, 576, (5, 5), (1, 1), (2, 2), (1, 1), 576, False, 'zeros'), (1, 576, 7, 7), conv_1_2_576]]
 
     print("{:50s} {:20s} {:>10s} {:>10s} {:>10s}".format("op", "shape", "eager gflops", "nnc gflops", "speedup"))
     for init_args, input_shape, conv_op in conv2d_shapes:
@@ -76,8 +75,6 @@ def test_depthwise_conv():
         for _ in range(warmup_iters):
             conv_op(input_image, weight, bias)
             scripted(input_image, weight, bias)
-
-        graph=torch.jit.last_executed_optimized_graph()
 
         # Validate result.
         myconv_out = myconv_op(input_image)
