@@ -46,10 +46,6 @@ jobs:
     outputs:
       docker_image: ${{ steps.calculate-tag.outputs.docker_image }}
     steps:
-      - name: Wait until all sessions have drained
-        shell: bash
-        run: |
-          .github/scripts/display_ec2_information.sh
       - name: Log in to ECR
         run: |
           aws ecr get-login --no-include-email --region us-east-1 > /tmp/ecr-login.sh
@@ -68,6 +64,10 @@ jobs:
         with:
           # deep clone, to allow use of git merge-base
           fetch-depth: 0
+      - name: Display EC2 information
+        shell: bash
+        run: |
+          .github/scripts/display_ec2_information.sh
       - name: Calculate docker image tag
         id: calculate-tag
         run: |
@@ -144,7 +144,7 @@ jobs:
         with:
           fetch-depth: 0 # deep clone, to allow sharding to use git rev-list
           submodules: recursive
-      - name: Wait until all sessions have drained
+      - name: Display EC2 information
         shell: bash
         run: |
           .github/scripts/display_ec2_information.sh
@@ -295,7 +295,7 @@ jobs:
         with:
           fetch-depth: 0 # deep clone, to allow sharding to use git rev-list
           submodules: recursive
-      - name: Wait until all sessions have drained
+      - name: Display EC2 information
         shell: bash
         run: |
           .github/scripts/display_ec2_information.sh
@@ -432,7 +432,7 @@ jobs:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.render-matrix) }}
       fail-fast: false
     steps:
-      - name: Wait until all sessions have drained
+      - name: Display EC2 information
         shell: bash
         run: |
           .github/scripts/display_ec2_information.sh
@@ -515,7 +515,7 @@ jobs:
         with:
           fetch-depth: 0 # deep clone, to allow sharding to use git rev-list
           submodules: recursive
-      - name: Wait until all sessions have drained
+      - name: Display EC2 information
         shell: bash
         run: |
           .github/scripts/display_ec2_information.sh

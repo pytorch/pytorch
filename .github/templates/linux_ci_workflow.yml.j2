@@ -72,7 +72,6 @@ jobs:
     outputs:
       docker_image: ${{ steps.calculate-tag.outputs.docker_image }}
     steps:
-      !{{ common.display_ec2_information() }}
       - name: Log in to ECR
         run: |
           aws ecr get-login --no-include-email --region us-east-1 > /tmp/ecr-login.sh
@@ -91,6 +90,7 @@ jobs:
         with:
           # deep clone, to allow use of git merge-base
           fetch-depth: 0
+      !{{ common.display_ec2_information() }}
       - name: Calculate docker image tag
         id: calculate-tag
         run: |

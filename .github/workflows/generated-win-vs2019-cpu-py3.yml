@@ -58,7 +58,7 @@ jobs:
           path: pytorch-${{ github.run_id }}
           # deep clone, to allow use of git merge-base
           fetch-depth: 0
-      - name: Wait until all sessions have drained
+      - name: Display EC2 information
         shell: bash
         run: |
           .github/scripts/display_ec2_information.sh
@@ -151,7 +151,7 @@ jobs:
           path: pytorch-${{ github.run_id }}
           # deep clone, to allow use of git merge-base
           fetch-depth: 0
-      - name: Wait until all sessions have drained
+      - name: Display EC2 information
         shell: bash
         run: |
           .github/scripts/display_ec2_information.sh
@@ -241,7 +241,7 @@ jobs:
         with:
           # deep clone, to allow tools/stats/print_test_stats.py to use Git commands
           fetch-depth: 0
-      - name: Wait until all sessions have drained
+      - name: Display EC2 information
         shell: bash
         run: |
           .github/scripts/display_ec2_information.sh
