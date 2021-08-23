@@ -87,25 +87,19 @@ class TestTesting(TestCase):
                         "atol=1e-05 is only 1.9100000000000003e-05!")
         self.assertEqual(debug_msg, expected_msg)
 
-        # complex x complex, real difference
+        # complex x complex
         result, debug_msg = self._compareScalars(complex(1, 3), complex(3, 1))
-        expected_msg = ("Comparing the real part 1.0 and 3.0 gives a difference "
-                        "of 2.0, but the allowed difference with rtol=1.3e-06 "
-                        "and atol=1e-05 is only 1.39e-05!")
-        self.assertEqual(debug_msg, expected_msg)
-
-        # complex x complex, imaginary difference
-        result, debug_msg = self._compareScalars(complex(1, 3), complex(1, 5.5))
-        expected_msg = ("Comparing the imaginary part 3.0 and 5.5 gives a "
-                        "difference of 2.5, but the allowed difference with "
-                        "rtol=1.3e-06 and atol=1e-05 is only 1.715e-05!")
+        expected_msg = ("Comparing (1+3j) and (3+1j) gives a difference "
+                        "of 2.8284271247461903, but the allowed difference "
+                        "with rtol=1.3e-06 and atol=1e-05 is only "
+                        "1.4110960958218895e-05!")
         self.assertEqual(debug_msg, expected_msg)
 
         # complex x int
         result, debug_msg = self._compareScalars(complex(1, -2), 1)
-        expected_msg = ("Comparing the imaginary part -2.0 and 0.0 gives a "
-                        "difference of 2.0, but the allowed difference with "
-                        "rtol=1.3e-06 and atol=1e-05 is only 1e-05!")
+        expected_msg = ("Comparing (1-2j) and 1 gives a difference of 2.0, "
+                        "but the allowed difference with rtol=1.3e-06 and "
+                        "atol=1e-05 is only 1.13e-05!")
         self.assertEqual(debug_msg, expected_msg)
 
         # NaN x NaN, equal_nan=False
@@ -167,28 +161,6 @@ class TestTesting(TestCase):
         expected_msg = ("Found 1 different element(s) (out of 1), "
                         "with the greatest difference of 1 (1 vs. 0) "
                         "occuring at index 0.")
-        self.assertEqual(debug_msg, expected_msg)
-
-        # Checks complex tensor comparisons (real part)
-        a = torch.tensor((1 - 1j, 4 + 3j), device=device)
-        b = torch.tensor((1 - 1j, 1 + 3j), device=device)
-        result, debug_msg = self._compareTensors(a, b)
-        expected_msg = ("Real parts failed to compare as equal! "
-                        "With rtol=1.3e-06 and atol={0}, "
-                        "found 1 element(s) (out of 2) whose difference(s) exceeded the "
-                        "margin of error (including 0 nan comparisons). The greatest difference was "
-                        "3.0 (4.0 vs. 1.0), which occurred at index 1.").format(atol)
-        self.assertEqual(debug_msg, expected_msg)
-
-        # Checks complex tensor comparisons (imaginary part)
-        a = torch.tensor((1 - 1j, 4 + 3j), device=device)
-        b = torch.tensor((1 - 1j, 4 - 21j), device=device)
-        result, debug_msg = self._compareTensors(a, b)
-        expected_msg = ("Imaginary parts failed to compare as equal! "
-                        "With rtol=1.3e-06 and atol={0}, "
-                        "found 1 element(s) (out of 2) whose difference(s) exceeded the "
-                        "margin of error (including 0 nan comparisons). The greatest difference was "
-                        "24.0 (3.0 vs. -21.0), which occurred at index 1.").format(atol)
         self.assertEqual(debug_msg, expected_msg)
 
         # Checks size mismatch
@@ -406,7 +378,7 @@ class TestTesting(TestCase):
         tests = (
             (complex(1, -1), complex(-1, 1), False),
             (complex(1, -1), complex(2, -2), True),
-            (complex(1, 99), complex(4, 100), False),
+            (complex(1, 99), complex(4, 100), True),
         )
 
         self._comparetensors_helper(tests, device, dtype, False, atol=.5, rtol=.5)

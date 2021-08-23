@@ -1450,16 +1450,11 @@ class TestCase(expecttest.TestCase):
     def _is_dict(self, obj):
         return isinstance(obj, (dict, torch._C.ScriptDict))  # type: ignore[attr-defined]
 
-    class NonBoolEqualNan(Exception):
-        pass
-
     # Compares x and y
     # TODO: default exact_device to True
     def assertEqual(self, x, y, msg: Optional[str] = None, *,
                     atol: Optional[float] = None, rtol: Optional[float] = None,
                     equal_nan=True, exact_dtype=True, exact_device=False) -> None:
-        if not isinstance(equal_nan, bool):
-            raise self.NonBoolEqualNan(equal_nan)
 
         assert (atol is None) == (rtol is None), "If one of atol or rtol is specified, then the other must be too"
         debug_msg: Optional[str] = None
@@ -2539,13 +2534,6 @@ def disable_gc():
     else:
         yield
 
-def has_breakpad() -> bool:
-    # If not on a special build, check that the library was actually linked in
-    try:
-        torch._C._get_minidump_directory()  # type: ignore[attr-defined]
-        return True
-    except RuntimeError as e:
-        return False
 
 def find_library_location(lib_name: str) -> Path:
     # return the shared library file in the installed folder if exist,
@@ -2595,6 +2583,22 @@ def get_tensors_from(args, kwargs):
     """ Returns a set of all Tensor objects in the given args and kwargs. """
     return set([arg for arg in args if isinstance(arg, Tensor)] +
                [v for v in kwargs.values() if isinstance(v, Tensor)])
+
+
+def has_breakpad():
+    # We always build with breakpad in CI
+    if IS_IN_CI:
+        return True
+
+    # If not on a special build, check that the library was actually linked in
+    try:
+        torch._C._get_minidump_directory()  # type: ignore[attr-defined]
+        return True
+    except RuntimeError as e:
+        if "Minidump handler is uninintialized" in str(e):
+            return True
+        return False
+
 
 def sandcastle_skip_if(condition, reason):
     """
