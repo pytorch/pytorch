@@ -11,17 +11,13 @@ class LinearReLU(nnqr.Linear):
             in_features,
             out_features,
             bias=True,
-            dtype=torch.qint8):
-        super().__init__(in_features, out_features, bias, dtype)
+            weight_qparams=None):
+        super().__init__(in_features, out_features, bias, weight_qparams)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x_dequant = x.dequantize()
-        weight_dequant = self._qweight.dequantize()
-        float_result = F.linear(x_dequant, weight_dequant, self._bias)
-        float_result = F.relu(float_result, inplace=True)
-        # NEEDFIX: we don't have dtype in the Linear module APIs right now!
-        result = torch.quantize_per_tensor(
-            float_result, self.scale, self.zero_point, torch.quint8)
+        weight_dequant = self.get_weight()
+        result = F.linear(x, weight_dequant, self.bias)
+        result = F.relu(result, inplace=True)
         return result
 
     def _get_name(self):

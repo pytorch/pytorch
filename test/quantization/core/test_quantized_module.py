@@ -79,14 +79,20 @@ class TestStaticQuantizedModule(QuantizationTestCase):
                 per_channel, is_reference)
 
     def _test_linear_api_impl(self, batch_size, in_features, out_features, use_bias, use_fused, per_channel, is_reference):
+        if is_reference:
+            # skip testing reference module here for now,
+            # currently it only works with FX Graph Mode Quantization
+            # and does not make a lot of sense to be used standalone
+            # or with eager mode quantization
+            return
         if torch.backends.quantized.engine == 'qnnpack':
             per_channel = False
 
         # (use_fused, is_reference) -> quantized class
         class_map = {
-            (True, True) : nniqr.LinearReLU,
+            # (True, True) : nniqr.LinearReLU,
             (True, False) : nniq.LinearReLU,
-            (False, True) : nnqr.Linear,
+            # (False, True) : nnqr.Linear,
             (False, False) : nnq.Linear,
         }
 

@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Optional
+from .utils import quantize_and_dequantize_weight
 
 class Linear(nn.Linear):
     """ A reference quantized linear module that fits into the FX
@@ -13,19 +13,30 @@ class Linear(nn.Linear):
     """
     def __init__(self, in_features, out_features, bias_=True, weight_qparams=None):
         super().__init__(in_features, out_features, bias_)
-        assert weight_qparams is not None, "weight qparams must be provided for"
-        " reference quantized linear module"
+        if weight_qparams is None:
+            weight_qparams = {
+                "qscheme": torch.per_tensor_affine,
+                "dtype": torch.quint8,
+                "scale": 1.0,
+                "zero_point": 0
+            }
         self.weight_qscheme = weight_qparams["qscheme"]
         self.weight_dtype = weight_qparams["dtype"]
-        assert self.weight_qscheme in [None, torch.per_tensor_affine, torch.per_channel_affine],  Exception(f"qscheme: {self.weight_qscheme} is not support in reference quantized linear module")
+        assert self.weight_qscheme in [None, torch.per_tensor_affine, torch.per_channel_affine], \
+        Exception(f"qscheme: {self.weight_qscheme} is not support in reference quantized linear module")
         if self.weight_qscheme is not None:
             self.register_buffer("weight_scale", torch.tensor(weight_qparams["scale"]))
             self.register_buffer("weight_zero_point", torch.tensor(weight_qparams["zero_point"]))
             if self.weight_qscheme == torch.per_channel_affine:
                 self.register_buffer("weight_axis", torch.tensor(weight_qparams["axis"]))
-
+            else:
+                # added for TorchScriptability, not used
+                self.register_buffer("weight_axis", torch.tensor(0))
     def _get_name(self):
         return "QuantizedLinear(Reference)"
+
+    def get_weight(self):
+        return _quantize_and_dequantize_weight(weight, weight_qscheme, weight_dtype, weight_scale, weight_zero_point, weight_axis)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -38,14 +49,7 @@ class Linear(nn.Linear):
         x -- quant --- *dequant --  *F.linear --- *quant - dequant
         and the backend should be able to fuse the ops with `*` into a quantized linear
         """
-        if self.weight_qscheme == torch.quantize_per_tensor:
-            weight = torch.quantize_per_tensor(self.weight, self.weight_scale, self.weight_zero_point, self.weight_dtype)
-            weight_dequant = weight.dequantize()
-        elif self.weight_qscheme == torch.quantize_per_channel:
-            weight = torch.quantize_per_channel(self.weight, self.weight_scale, self.weight_zero_point, int(self.weight_axis), self.weight_dtype)
-            weight_dequant = weight.dequantize()
-        else:
-            weight_dequant = self.weight
+        weight_dequant = self.get_weight()
         result = F.linear(x, weight_dequant, self.bias)
         return result
 
@@ -56,7 +60,7 @@ class Linear(nn.Linear):
         if self.weight_qscheme is not None:
             destination[prefix + "weight_scale"] = self.weight_scale
             destination[prefix + "weight_zero_point"] = self.weight_zero_point
-            if self.weight_qscheme == torch.quantize_per_channel:
+            if self.weight_qscheme == torch.per_channel_affine:
                 destination[prefix + "weight_axis"] = self.weight_axis
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
