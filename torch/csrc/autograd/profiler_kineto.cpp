@@ -47,6 +47,11 @@ std::string stacksToStr(const std::vector<std::string>& stacks, const char* deli
 std::string dtypesToStr(const std::vector<std::string>& types);
 std::vector<std::string> inputTypes(const at::RecordFunction& fn);
 
+// Assumption: Total threads number will not exceed 2^16-1, and total ops will not exceed 2^48 -1.
+static inline uint64_t getForwardThreadKey(uint64_t tid, uint64_t seqNr) {
+  return (((tid) << 48) | ((seqNr) & (((uint64_t)1 << 48) - 1)));
+}
+
 struct KinetoThreadLocalState : public ProfilerThreadLocalState {
   explicit KinetoThreadLocalState(const ProfilerConfig& config)
     : ProfilerThreadLocalState(config) {
@@ -230,10 +235,6 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
     }
   }
 
-// Assumption: Total threads number will not exceed 2^16-1, and total ops will not exceed 2^48 -1.
-#define GET_FORWARD_THREAD_KEY(tid, seqNr) \
-  (((tid) << 48) | ((seqNr) & (((uint64_t)1 << 48) - 1)))
-
   void finalizeCPUTrace() {
     TORCH_INTERNAL_ASSERT(cpu_trace->activities.size() == kineto_events_.size());
     // startThreadId_seqNum to pointer of activity.
@@ -267,36 +268,41 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
         activity.addMetadata(
             "Sequence number",
             std::to_string(kineto_event.sequenceNr()));
+        generateForwardBackwardLink(kineto_event, fwd_bwd_link_id, activity, tidSeq2activity);
+      }
+    }
+  }
 
-        if (kineto_event.fwdThreadId() > 0) {
-          // act is backward op.
-          uint64_t key = GET_FORWARD_THREAD_KEY(kineto_event.fwdThreadId(), kineto_event.sequenceNr());
-          auto iter = tidSeq2activity.find(key);
-          if (iter != tidSeq2activity.end()) {
-            activity.linkedAct = iter->second;
-            iter->second->linkedAct = &activity;
-            activity.linkId = GENERATE_FORWARD_BACKWARD_LINK(fwd_bwd_link_id, LINK_FORWARD_BACKWARD_TAIL);
-            iter->second->linkId = GENERATE_FORWARD_BACKWARD_LINK(fwd_bwd_link_id, LINK_FORWARD_BACKWARD_HEAD);
-            ++fwd_bwd_link_id;
-          }
-        }
-        else if (kineto_event.startThreadId() != 0) {
-          // act is forward op.
-          uint64_t key = GET_FORWARD_THREAD_KEY(kineto_event.startThreadId(), kineto_event.sequenceNr());
-          // Assumption: Among all ops with same sequence number,
-          // the one with biggest start time is most likely launching backward op.
-          auto iter = tidSeq2activity.find(key);
-          if (iter == tidSeq2activity.end()) {          
-            tidSeq2activity[key] = &activity;
-          }
-          else {
-            // Now the sequence number is only incremented on creating a "Node" object for backward pass,
-            // by calling "at::sequence_number::get_and_increment()".
-            // Among all ops with same sequence number, the one with biggest startTime is the one launching backward op.
-            if (activity.startTime >= iter->second->startTime) {
-              tidSeq2activity[key] = &activity;
-            }
-          }
+  void generateForwardBackwardLink(const KinetoEvent &kineto_event,
+    uint64_t &fwd_bwd_link_id,
+    libkineto::GenericTraceActivity &activity,
+    std::unordered_map<uint64_t, libkineto::GenericTraceActivity*> &tidSeq2activity) {
+    if (kineto_event.fwdThreadId() > 0) {
+      // act is backward op.
+      uint64_t key = getForwardThreadKey(kineto_event.fwdThreadId(), kineto_event.sequenceNr());
+      auto iter = tidSeq2activity.find(key);
+      if (iter != tidSeq2activity.end()) {
+        activity.flow.linkedActivity = iter->second; // Only destination side set this, to distinguish with start side.
+        activity.flow.id = ((libkineto::GenericTraceActivity*)(activity.flow.linkedActivity))->flow.id = fwd_bwd_link_id;
+        activity.flow.type = ((libkineto::GenericTraceActivity*)(activity.flow.linkedActivity))->flow.type = libkineto::kLinkFwdBwd;
+        ++fwd_bwd_link_id;
+      }
+    }
+    else if (kineto_event.startThreadId() != 0) {
+      // act is forward op.
+      uint64_t key = getForwardThreadKey(kineto_event.startThreadId(), kineto_event.sequenceNr());
+      // Assumption: Among all ops with same sequence number,
+      // the one with biggest start time is most likely launching backward op.
+      auto iter = tidSeq2activity.find(key);
+      if (iter == tidSeq2activity.end()) {
+        tidSeq2activity[key] = &activity;
+      }
+      else {
+        // Now the sequence number is only incremented on creating a "Node" object for backward pass,
+        // by calling "at::sequence_number::get_and_increment()".
+        // Among all ops with same sequence number, the one with biggest startTime is the one launching backward op.
+        if (activity.startTime >= iter->second->startTime) {
+          tidSeq2activity[key] = &activity;
         }
       }
     }
