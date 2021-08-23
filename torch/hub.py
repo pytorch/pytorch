@@ -316,11 +316,8 @@ def help(github, model, force_reload=False, skip_validation=False):
     return entry.__doc__
 
 
-# Ideally this should be `def load(github, model, *args, forece_reload=False, **kwargs):`,
-# but Python2 complains syntax error for it. We have to skip force_reload in function
-# signature here but detect it in kwargs instead.
-# TODO: fix it after Python2 EOL
-def load(repo_or_dir, model, *args, **kwargs):
+def load(repo_or_dir, model, *args, source='github', force_reload=False, verbose=True, skip_validation=True,
+         **kwargs):
     r"""
     Load a model from a github repo or a local directory.
 
@@ -329,7 +326,7 @@ def load(repo_or_dir, model, *args, **kwargs):
 
     If :attr:`source` is ``'github'``, :attr:`repo_or_dir` is expected to be
     of the form ``repo_owner/repo_name[:tag_name]`` with an optional
-    tag/branch.
+    tag/branch. The default branch is `master` if not specified.
 
     If :attr:`source` is ``'local'``, :attr:`repo_or_dir` is expected to be a
     path to a local directory.
@@ -367,10 +364,7 @@ def load(repo_or_dir, model, *args, **kwargs):
         >>> path = '/some/local/path/pytorch/vision'
         >>> model = torch.hub.load(path, 'resnet50', pretrained=True)
     """
-    source = kwargs.pop('source', 'github').lower()
-    force_reload = kwargs.pop('force_reload', False)
-    verbose = kwargs.pop('verbose', True)
-    skip_validation = kwargs.pop('skip_validation', False)
+    source = source.lower()
 
     if source not in ('github', 'local'):
         raise ValueError(
