@@ -1,7 +1,7 @@
 import os
 import modulefinder
 import sys
-from typing import Dict
+from typing import Dict, Any, List, Set
 
 # These tests are slow enough that it's worth calculating whether the patch
 # touched any related files first. This list was manually generated, but for every
@@ -76,10 +76,12 @@ TARGET_DET_LIST = [
     "distributed/pipeline/sync/test_worker",
 ]
 
-_DEP_MODULES_CACHE: Dict[str, set] = {}
+_DEP_MODULES_CACHE: Dict[str, Set[str]] = {}
 
 
-def determine_target(target_det_list, test, touched_files, options):
+def determine_target(
+    target_det_list: List[str], test: str, touched_files: List[str], options: Any
+) -> bool:
     test = parse_test_module(test)
     # Some tests are faster to execute than to determine.
     if test not in target_det_list:
@@ -126,7 +128,7 @@ def determine_target(target_det_list, test, touched_files, options):
     return False
 
 
-def test_impact_of_file(filename):
+def test_impact_of_file(filename: str) -> str:
     """Determine what class of impact this file has on test runs.
 
     Possible values:
@@ -155,7 +157,7 @@ def test_impact_of_file(filename):
     return "UNKNOWN"
 
 
-def log_test_reason(file_type, filename, test, options):
+def log_test_reason(file_type: str, filename: str, test: str, options: Any) -> None:
     if options.verbose:
         print_to_stderr(
             "Determination found {} file {} -- running {}".format(
@@ -166,7 +168,7 @@ def log_test_reason(file_type, filename, test, options):
         )
 
 
-def get_dep_modules(test):
+def get_dep_modules(test: str) -> Set[str]:
     # Cache results in case of repetition
     if test in _DEP_MODULES_CACHE:
         return _DEP_MODULES_CACHE[test]
@@ -202,16 +204,16 @@ def get_dep_modules(test):
     )
     # HACK: some platforms default to ascii, so we can't just run_script :(
     with open(test_location, "r", encoding="utf-8") as fp:
-        finder.load_module("__main__", fp, test_location, ("", "r", 1))
+        finder.load_module("__main__", fp, test_location, ("", "r", str(1)))
 
     dep_modules = set(finder.modules.keys())
     _DEP_MODULES_CACHE[test] = dep_modules
     return dep_modules
 
 
-def parse_test_module(test):
+def parse_test_module(test: str) -> str:
     return test.split(".")[0]
 
 
-def print_to_stderr(message):
+def print_to_stderr(message: str) -> None:
     print(message, file=sys.stderr)
