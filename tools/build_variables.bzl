@@ -337,6 +337,7 @@ libtorch_core_sources = sorted(core_sources_common + core_sources_full + core_tr
 
 # These files are the only ones that are supported on Windows.
 libtorch_distributed_base_sources = [
+    "torch/csrc/distributed/c10d/frontend.cpp",
     "torch/csrc/distributed/c10d/comm.cpp",
     "torch/csrc/distributed/c10d/default_comm_hooks.cpp",
     "torch/csrc/distributed/c10d/FileStore.cpp",
@@ -730,7 +731,6 @@ libtorch_python_core_sources = [
 ]
 
 libtorch_python_distributed_core_sources = [
-    "torch/csrc/distributed/c10d/frontend.cpp",
     "torch/csrc/distributed/c10d/init.cpp",
     "torch/csrc/distributed/c10d/python_comm_hook.cpp",
 ]
