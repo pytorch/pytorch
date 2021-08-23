@@ -6,6 +6,7 @@ import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
 import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.quantized as nniq
+import torch.nn.intrinsic.quantized.dynamic as nniqd
 import torch.multiprocessing as mp
 
 # graph mode quantization based on fx
@@ -2862,6 +2863,9 @@ class TestQuantizeFx(QuantizationTestCase):
                 self.assertEqual(type(n.args[1]), tuple)
 
     def test_dynamic_with_fusion(self):
+        """
+        Tests that dynamic quantization APIs work with Linear + Relu fusion
+        """
         class LinearRelu(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -2872,30 +2876,41 @@ class TestQuantizeFx(QuantizationTestCase):
                 x = self.linear(x)
                 return self.relu(x)
 
+        class Linear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = torch.ones(5, 5)
+                self.b = torch.zeros(5)
+
+            def forward(self, x):
+                return torch.nn.functional.linear(x, self.w, self.b)
+
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self.mods1 = torch.nn.Sequential(LinearRelu(), LinearRelu())
-                self.mods2 = torch.nn.Linear(5, 5)
-                self.emb = torch.nn.Embedding(num_embeddings=10, embedding_dim=12)
+                self.mods2 = Linear()
+                self.relu = F.relu
 
-            def forward(self, x, indices):
+            def forward(self, x):
                 x = self.mods1(x)
                 x = self.mods2(x)
-                return x, self.emb(indices)
+                x = self.relu(x)
+                return x
 
         model = M().eval()
         qconfig = {
-            "": None,
-            "object_type": [
-                (torch.nn.Linear, default_dynamic_qconfig),
-                (torch.nn.ReLU, default_dynamic_qconfig),
-            ],
+            "": default_dynamic_qconfig,
         }
         m = prepare_fx(model, qconfig)
-        print(m)
         m = convert_fx(m)
-        print(m)
+        m(torch.rand(5, 5))
+        node_list = [
+            ns.call_module(nniqd.LinearReLU),
+            ns.call_module(nniqd.LinearReLU),
+            ns.call_function(torch.ops.quantized.linear_relu_dynamic),
+        ]
+        self.checkGraphModuleNodes(m, expected_node_list=node_list)
 
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
