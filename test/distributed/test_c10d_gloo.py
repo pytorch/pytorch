@@ -43,16 +43,8 @@ from torch.testing._internal.common_utils import (
     TestCase,
     run_tests,
     retry_on_connect_failures,
-    TEST_WITH_TSAN,
     sandcastle_skip,
 )
-
-if TEST_WITH_TSAN:
-    print(
-        "Skip as TSAN is not fork-safe since we're forking in a multi-threaded environment",
-        file=sys.stderr,
-    )
-    sys.exit(0)
 
 
 def simple_reduce_tests(rank, world_size):
@@ -218,12 +210,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
     def setUp(self):
         super(ProcessGroupGlooTest, self).setUp()
-
-        # For Windows platform, Python does not support fork, change it to spawn here.
-        if sys.platform == "win32":
-            self._spawn_processes()
-        else:
-            self._fork_processes()
+        self._spawn_processes()
 
     def opts(self, threads=2):
         opts = c10d.ProcessGroupGloo._Options()
@@ -1425,10 +1412,7 @@ class DistributedDataParallelTest(
 ):
     def setUp(self):
         super(DistributedDataParallelTest, self).setUp()
-        if sys.platform == "win32":
-            self._spawn_processes()
-        else:
-            self._fork_processes()
+        self._spawn_processes()
 
     def _test_gloo_backend(
         self, devices, device_ids, multi_device=False, gradient_as_bucket_view=False
@@ -1999,7 +1983,7 @@ class DistributedDataParallelTest(
 
         def dummy_hook(state, bucket):
             fut = torch.futures.Future()
-            fut.set_result([bucket.get_tensor()])
+            fut.set_result([bucket.buffer()])
             return fut
 
         model.register_comm_hook(None, dummy_hook)
@@ -2036,7 +2020,7 @@ class DistributedDataParallelTest(
                 return fut.wait()[0] / self.world_size
 
             # Prepare allreduced grad bucket tensors by running an async work.
-            fut = process_group.allreduce([bucket.get_tensor()]).get_future()
+            fut = process_group.allreduce([bucket.buffer()]).get_future()
             return fut.then(div_by_world_size)
 
         ddp_model.register_comm_hook(None, allreduce_hook_gloo)
@@ -2071,7 +2055,7 @@ class ReducerTest(TestCase):
         model = ReducerModule()
         parameters = list(model.parameters())
         buckets = [list(range(len(parameters)))]
-        dist.Reducer([parameters], buckets, self.process_group)
+        dist.Reducer([parameters], buckets, [dist._DEFAULT_FIRST_BUCKET_BYTES], self.process_group)
 
     def _create_mixed_precision_model(self):
         model = ReducerModule()
@@ -2088,7 +2072,12 @@ class ReducerTest(TestCase):
         with self.assertRaises(RuntimeError):
             parameters = [list(model.parameters())]
             buckets = [list(range(len(parameters[0])))]
-            dist.Reducer(parameters, buckets, self.process_group)
+            dist.Reducer(
+                parameters,
+                buckets,
+                [dist._DEFAULT_FIRST_BUCKET_BYTES],
+                self.process_group
+            )
 
     @requires_gloo()
     def test_multi_dtype_multi_bucket(self):
@@ -2098,7 +2087,12 @@ class ReducerTest(TestCase):
             range(len(parameters[0])), key=lambda i: parameters[0][i].dtype
         )
         buckets = [list(indices) for _, indices in group_by_dtype]
-        dist.Reducer(parameters, buckets, self.process_group)
+        dist.Reducer(
+            parameters,
+            buckets,
+            [dist._DEFAULT_FIRST_BUCKET_BYTES for _ in buckets],
+            self.process_group
+        )
 
     def _create_reducer_for_models(self, models, find_unused_parameters=False):
         parameters = [list(model.parameters()) for model in models]
@@ -2109,6 +2103,7 @@ class ReducerTest(TestCase):
         return dist.Reducer(
             parameters,
             buckets,
+            [dist._DEFAULT_FIRST_BUCKET_BYTES for _ in range(len(buckets))],
             self.process_group,
             find_unused_parameters=find_unused_parameters,
         )
@@ -2186,10 +2181,7 @@ class ReducerTest(TestCase):
 class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     def setUp(self):
         super(CommTest, self).setUp()
-        if sys.platform == "win32":
-            self._spawn_processes()
-        else:
-            self._fork_processes()
+        self._spawn_processes()
 
     def tearDown(self):
         super(CommTest, self).tearDown()

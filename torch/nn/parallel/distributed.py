@@ -10,9 +10,9 @@ import torch
 import torch.distributed as dist
 from torch.autograd import Function, Variable
 from torch.distributed.algorithms.join import (
-    _Join,
-    _Joinable,
-    _JoinHook,
+    Join,
+    Joinable,
+    JoinHook,
 )
 from torch.utils._pytree import tree_flatten, tree_unflatten
 
@@ -131,17 +131,26 @@ def _dump_DDP_relevant_env_vars():
 # is completed.
 class _DDPSink(Function):
     @staticmethod
-    def forward(ctx, reducer, *inputs):
+    def forward(ctx, reducer, state_dict, *inputs):
+        # set_materialize_grads(False) will ensure that None gradients stay as
+        # None and are not filled with zeros.
+        ctx.set_materialize_grads(False)
         ctx.reducer = reducer
+        ctx.state_dict = state_dict
         return inputs
 
     @staticmethod
     def backward(ctx, *grad_outputs):
-        Variable._execution_engine.queue_callback(ctx.reducer._delay_all_reduce)
-        return (None, *grad_outputs)
+        state_dict = ctx.state_dict
+        # Enqueue delay allreduce for static graph training on the first
+        # iteration.
+        if ctx.state_dict['static_graph'] and ctx.state_dict['num_iterations'] == 1:
+            Variable._execution_engine.queue_callback(ctx.reducer._delay_all_reduce)
+
+        return (None, None, *grad_outputs)
 
 
-class _DDPJoinHook(_JoinHook):
+class _DDPJoinHook(JoinHook):
     def __init__(self, ddp, divide_by_initial_world_size):
         """
         Sets config variables for internal usage.
@@ -198,7 +207,7 @@ class _DDPJoinHook(_JoinHook):
         self.ddp._sync_final_model(is_last_joiner)
 
 
-class DistributedDataParallel(Module, _Joinable):
+class DistributedDataParallel(Module, Joinable):
     r"""Implements distributed data parallelism that is based on
     ``torch.distributed`` package at the module level.
 
@@ -462,7 +471,7 @@ class DistributedDataParallel(Module, _Joinable):
     ):
 
         super(DistributedDataParallel, self).__init__()
-        _Joinable.__init__(self)
+        Joinable.__init__(self)
         self.logger = None
         if not any((p.requires_grad for p in module.parameters())):
             self._log_and_throw(
@@ -611,7 +620,7 @@ class DistributedDataParallel(Module, _Joinable):
         # that are defined first, such that their gradients don't spill into
         # a much larger bucket, adding unnecessary latency after gradient
         # computation finishes. Experiments showed 1MB is a reasonable value.
-        bucket_indices, _ = dist._compute_bucket_assignment_by_size(
+        bucket_indices, per_bucket_size_limits = dist._compute_bucket_assignment_by_size(
             parameters[0],
             [dist._DEFAULT_FIRST_BUCKET_BYTES, self.bucket_bytes_cap],
             expect_sparse_gradient[0],
@@ -623,12 +632,16 @@ class DistributedDataParallel(Module, _Joinable):
         self.reducer = dist.Reducer(
             parameters,
             list(reversed(bucket_indices)),
+            list(reversed(per_bucket_size_limits)),
             self.process_group,
             expect_sparse_gradient,
             self.bucket_bytes_cap,
             self.find_unused_parameters,
             self.gradient_as_bucket_view,
             param_to_name_mapping,
+            # User can set dist._DEFAULT_FIRST_BUCKET_BYTES to tune DDP first
+            # bucket.
+            dist._DEFAULT_FIRST_BUCKET_BYTES
         )
 
         self.logger = dist.Logger(self.reducer)
@@ -836,7 +849,6 @@ class DistributedDataParallel(Module, _Joinable):
 
     def forward(self, *inputs, **kwargs):
         with torch.autograd.profiler.record_function("DistributedDataParallel.forward"):
-            self.reducer.save_thread_local_state()
             if torch.is_grad_enabled() and self.require_backward_grad_sync:
                 self.logger.set_runtime_stats_and_log()
                 self.num_iterations += 1
@@ -844,7 +856,7 @@ class DistributedDataParallel(Module, _Joinable):
 
             # Notify the join context that this process has not joined, if
             # needed
-            work = _Join.notify_join_context(self)
+            work = Join.notify_join_context(self)
             if work:
                 self.reducer._set_forward_pass_work_handle(
                     work, self._divide_by_initial_world_size
@@ -888,12 +900,16 @@ class DistributedDataParallel(Module, _Joinable):
             else:
                 self.require_forward_param_sync = False
 
-        # TODO. Right now we add this sink for static_graph training only. once
-        # this feature is stable, we will add this sink for all cases. E.g.
-        # This sink can help capture more accuracte backward start time as well.
-        if self.static_graph and self.num_iterations == 1:
-            # Need to grab list of tensors from user output in order to pass
-            # to custom autograd function.
+        # TODO: DDPSink is currently enabled for unused parameter detection and
+        # static graph training for first iteration.
+        if (self.find_unused_parameters and not self.static_graph) or (
+            self.static_graph and self.num_iterations == 1
+        ):
+            state_dict = {
+                'static_graph': self.static_graph,
+                'num_iterations': self.num_iterations,
+            }
+
             output_tensor_list, treespec, output_is_rref = _tree_flatten_with_rref(
                 output
             )
@@ -904,7 +920,16 @@ class DistributedDataParallel(Module, _Joinable):
                 if torch.is_tensor(output) and output.grad_fn is None:
                     output_placeholders[i] = output
 
-            passthrough_tensor_list = _DDPSink.apply(self.reducer, *output_tensor_list)
+            # When find_unused_parameters=True, makes tensors which require grad
+            # run through the DDPSink backward pass. When not all outputs are
+            # used in loss, this makes those corresponding tensors receive
+            # undefined gradient which the reducer then handles to ensure
+            # param.grad field is not touched and we don't error out.
+            passthrough_tensor_list = _DDPSink.apply(
+                self.reducer,
+                state_dict,
+                *output_tensor_list,
+            )
             for i in range(len(output_placeholders)):
                 if output_placeholders[i] is None:
                     output_placeholders[i] = passthrough_tensor_list[i]
@@ -1147,14 +1172,14 @@ class DistributedDataParallel(Module, _Joinable):
             >>>     # blocking for rank 1's allreduce to complete.
             >>>     torch.cuda.synchronize(device=rank)
         """
-        return _Join(
+        return Join(
             [self],
             enable,
             throw_on_early_termination,
             divide_by_initial_world_size=divide_by_initial_world_size,
         )
 
-    def _join_hook(
+    def join_hook(
         self,
         **kwargs,
     ):
@@ -1166,7 +1191,7 @@ class DistributedDataParallel(Module, _Joinable):
         Arguments:
             kwargs (dict): a :class:`dict` containing any keyword arguments
                 to modify the behavior of the join hook at run time; all
-                :class:`_Joinable` instances sharing the same join context
+                :class:`Joinable` instances sharing the same join context
                 manager are forwarded the same value for ``kwargs``.
 
         The hook supports the following keyword arguments:
@@ -1187,11 +1212,11 @@ class DistributedDataParallel(Module, _Joinable):
         )
 
     @property
-    def _join_device(self):
+    def join_device(self):
         return self.device
 
     @property
-    def _join_process_group(self):
+    def join_process_group(self):
         return self.process_group
 
     def register_comm_hook(self, state: object, hook: callable):
@@ -1251,7 +1276,7 @@ class DistributedDataParallel(Module, _Joinable):
 
             >>> def noop(state: object, bucket: dist.GradBucket): -> torch.futures.Future[torch.Tensor]
             >>>     fut = torch.futures.Future()
-            >>>     fut.set_result(bucket.get_tensor())
+            >>>     fut.set_result(bucket.buffer())
             >>>     return fut
 
             >>> ddp.register_comm_hook(state=None, hook=noop)
@@ -1261,7 +1286,7 @@ class DistributedDataParallel(Module, _Joinable):
             allreduce, and then decoded after allreduce.
 
             >>> def encode_and_decode(state: object, bucket: dist.GradBucket): -> torch.futures.Future[torch.Tensor]
-            >>>     encoded_tensor = encode(bucket.get_tensor()) # encode gradients
+            >>>     encoded_tensor = encode(bucket.buffer()) # encode gradients
             >>>     fut = torch.distributed.all_reduce(encoded_tensor).get_future()
             >>>     # Define the then callback to decode.
             >>>     def decode(fut):
@@ -1382,6 +1407,19 @@ class DistributedDataParallel(Module, _Joinable):
                 ValueError,
                 "Communication hook: return annotation should be torch.futures.Future[torch.Tensor].",
             )
+
+        if (
+            hook.__name__ in ["bf16_compress_hook", "bf16_compress_wrapper_hook"]
+            and
+            (
+                torch.version.cuda is None
+                or int(torch.version.cuda.split('.')[0]) < 11
+                or not dist.is_available()
+                or not dist.is_nccl_available()
+                or torch.cuda.nccl.version() < (2, 9, 7)
+            )
+        ):
+            self._log_and_throw(TypeError, "BF16 all reduce communication hook required CUDA 11+ and NCCL 2.9.7+.")
 
     @property
     def _distributed_rank(self):
