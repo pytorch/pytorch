@@ -220,10 +220,6 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   BINARY_SCALAR_2(div, Tensor, Scalar);
   BINARY_SCALAR_2(div, Tensor_mode, Scalar_mode);
 
-  OP_DECOMPOSE2(float_power, Tensor_Tensor);
-  OP_DECOMPOSE2(float_power, Tensor_Scalar);
-  OP_DECOMPOSE2(float_power, Scalar);
-
   BINARY_POINTWISE(floor_divide);
   UNARY_POINTWISE2(floor_divide, Scalar);
 
@@ -252,17 +248,6 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   BINARY_SCALAR_3_Tensor(special_xlogy, other_scalar, self_scalar);
   BINARY_SCALAR_3_Tensor(special_zeta, other_scalar, self_scalar);
 
-
-  OP_DECOMPOSE(type_as);
-
-  OP_DECOMPOSE2(max, other);
-  OP_DECOMPOSE2(min, other);
-
-  OP_DECOMPOSE2(where, self);
-  OP_DECOMPOSE2(where, ScalarSelf);
-  OP_DECOMPOSE2(where, ScalarOther);
-  OP_DECOMPOSE2(where, Scalar);
-  OP_DECOMPOSE(where);
   VMAP_SUPPORT("_s_where", _s_where_batch_rule);
 
   BINARY_SCALAR_3(xlogy, Tensor, Scalar_Other, Scalar_Self);
