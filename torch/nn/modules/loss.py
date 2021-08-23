@@ -1359,7 +1359,7 @@ class MultiMarginLoss(_WeightedLoss):
         >>> y = torch.LongTensor([3])
         >>> loss(x, y)
         >>> # 0.25 * ((1-(0.8-0.1)) + (1-(0.8-0.2)) + (1-(0.8-0.4)))
-	tensor(0.3250)
+        tensor(0.3250)
     """
     __constants__ = ['p', 'margin', 'reduction']
     margin: float
