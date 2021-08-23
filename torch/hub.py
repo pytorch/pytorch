@@ -316,7 +316,7 @@ def help(github, model, force_reload=False, skip_validation=False):
     return entry.__doc__
 
 
-def load(repo_or_dir, model, *args, source='github', force_reload=False, verbose=True, skip_validation=True,
+def load(repo_or_dir, model, *args, source='github', force_reload=False, verbose=True, skip_validation=False,
          **kwargs):
     r"""
     Load a model from a github repo or a local directory.
