@@ -1,5 +1,3 @@
-
-
 #include <ATen/ATen.h>
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/DilatedConvolutionUtils.h>
@@ -273,8 +271,8 @@ void slow_conv_dilated_all_cpu_template(
             op(A) = 'n', op(B) = 'n', alpha=1, beta=1
         */
         cpublas::gemm(
-            /*transa=*/cpublas::NoTranspose,
-            /*transb=*/cpublas::NoTranspose,
+            /*transa=*/TransposeType::NoTranspose,
+            /*transb=*/TransposeType::NoTranspose,
             /*     m=*/columns.size(1),
             /*     n=*/nOutputPlane,
             /*     k=*/columns.size(0),
@@ -317,8 +315,8 @@ void slow_conv_dilated_all_cpu_template(
             op(A) = 'n', op(B) = 't', alpha=1, beta=0
          */
         cpublas::gemm(
-            /*transa=*/cpublas::NoTranspose,
-            /*transb=*/cpublas::Transpose,
+            /*transa=*/TransposeType::NoTranspose,
+            /*transb=*/TransposeType::Transpose,
             /*     m=*/columns.size(1),
             /*     n=*/columns.size(0),
             /*     k=*/nOutputPlane,
@@ -382,8 +380,8 @@ void slow_conv_dilated_all_cpu_template(
           op(B) = 'n', alpha=scale, beta=1
         */
         cpublas::gemm(
-            /*transa=*/cpublas::Transpose,
-            /*transb=*/cpublas::NoTranspose,
+            /*transa=*/TransposeType::Transpose,
+            /*transb=*/TransposeType::NoTranspose,
             /*     m=*/columns.size(0),
             /*     n=*/nOutputPlane,
             /*     k=*/columns.size(1),
