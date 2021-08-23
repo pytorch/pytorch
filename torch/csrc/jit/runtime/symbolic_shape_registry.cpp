@@ -288,7 +288,7 @@ const std::string shape_compute_functions =
           return shape
 
         def prepacked_conv2d_clamp_run(input: List[int], conv2dOpContext: Any):
-# assert isinstance(conv2dOpContext, _torch_.torch.classes.xnnpack.Conv2dOpContext)
+          assert isinstance(conv2dOpContext, __torch__.torch.classes.xnnpack.Conv2dOpContext)
           (weight, bias, stride, padding, dilation, groups) = ops.prepacked.unpack_prepacked_sizes_conv2d(conv2dOpContext)
           return conv2d(input, weight, bias, stride, padding, dilation, groups)
     )";
@@ -334,7 +334,7 @@ static const OperatorMap<std::string>& get_schema_to_function_graph() {
       {"aten::expand_as(Tensor(a) self, Tensor other) -> Tensor(a)", "view"},
       {"aten::mean.dim(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", "mean_dim"},
       {"aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor", "addmm"},
-      {"prepacked::conv2d_clamp_run(Tensor self, __torch__.torch.classes.xnnpack.Conv2dOpContext W_prepack) -> Tensor", "prepacked_conv2d_clamp_run"},
+      {"prepacked::conv2d_clamp_run(Tensor X, __torch__.torch.classes.xnnpack.Conv2dOpContext W_prepack) -> Tensor", "prepacked_conv2d_clamp_run"},
   };
   // clang-format on
   return schema_to_function_graph;
