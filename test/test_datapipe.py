@@ -586,37 +586,38 @@ class TestFunctionalIterDataPipe(TestCase):
 
         self.assertEqual(list(concat_dp), list(range(10)) + list(range(5)))
 
+
     def test_fork_datapipe(self):
         input_dp = IDP(range(10))
 
-        # Test case: one child DataPipe yields all value first
+        # Test Case: one child DataPipe yields all value first
         dp1, dp2, dp3 = input_dp.fork(num_instances=3)
         output1, output2, output3 = list(dp1), list(dp2), list(dp3)
         self.assertEqual(list(range(10)), output1)
         self.assertEqual(list(range(10)), output2)
         self.assertEqual(list(range(10)), output3)
 
-        # Test case: two child DataPipes yield value together
+        # Test Case: two child DataPipes yield value together
         dp1, dp2 = input_dp.fork(num_instances=2)
         output = []
         for n1, n2 in zip(dp1, dp2):
             output.append((n1, n2))
         self.assertEqual([(i, i) for i in range(10)], output)
 
-        # Test case: one child DataPipe yields all value first, but buffer_size = 5 being too small
+        # Test Case: one child DataPipe yields all value first, but buffer_size = 5 being too small
         dp1, dp2 = input_dp.fork(num_instances=2, buffer_size=5)
         output1, output2 = [], []
         with self.assertRaises(BufferError):
             list(dp1)
 
-        # Test case: two child DataPipes yield value together with buffer size 1
+        # Test Case: two child DataPipes yield value together with buffer size 1
         dp1, dp2 = input_dp.fork(num_instances=2, buffer_size=1)
         output = []
         for n1, n2 in zip(dp1, dp2):
             output.append((n1, n2))
         self.assertEqual([(i, i) for i in range(10)], output)
 
-        # Test case: make sure logic related to slowest_ptr is working properly
+        # Test Case: make sure logic related to slowest_ptr is working properly
         dp1, dp2, dp3 = input_dp.fork(num_instances=3)
         output1, output2 , output3 = [], [], []
         i = 0
@@ -629,6 +630,25 @@ class TestFunctionalIterDataPipe(TestCase):
         self.assertEqual(list(range(10)), output1)
         self.assertEqual(list(range(10)), output2)
         self.assertEqual(list(range(10)), output3)
+
+        # Test Case: make sure DataPipe reset even when some child DataPipes are not read
+        dp1, dp2, dp3 = input_dp.fork(num_instances=3)
+        output1, output2 = list(dp1), list(dp2)
+        self.assertEqual(list(range(10)), output1)
+        self.assertEqual(list(range(10)), output2)
+        output1, output2 = list(dp1), list(dp2)
+        self.assertEqual(list(range(10)), output1)  # Resets even though dp3 has not been read
+        i = 0
+        output3 = []
+        for n3 in dp3:
+            output3.append(n3)
+            i += 1
+            if i == 5:
+                output1 = list(dp1)  # Resets even though dp3 is only partially read
+                self.assertEqual(list(range(5)), output3)
+                self.assertEqual(list(range(10)), output1)
+                break
+        self.assertEqual(list(range(10)), list(dp3))  # dp3 has to read from the start again
 
 
     def test_map_datapipe(self):
@@ -1415,19 +1435,18 @@ class TestGraph(TestCase):
         expected: Dict[Any, Any] = {mapped_dp: {numbers_dp: {}}}
         self.assertEqual(expected, graph)
 
-    # TODO(VitalyFedyunin): This test is incorrect because of 'buffer' nature
-    # of the fork fake implementation, update fork first and fix this test too
-    # TODO: This conflicts with new .fork implementation "TypeError: cannot pickle 'generator' object"
-    # @skipIfNoDill
-    # def test_traverse_forked(self):
-    #     numbers_dp = NumbersDataset(size=50)
-    #     dp0, dp1, dp2 = numbers_dp.fork(num_instances=3)
-    #     dp0_upd = dp0.map(lambda x: x * 10)
-    #     dp1_upd = dp1.filter(lambda x: x % 3 == 1)
-    #     combined_dp = dp0_upd.mux(dp1_upd, dp2)
-    #     graph = torch.utils.data.graph.traverse(combined_dp)
-    #     expected = {combined_dp: {dp0_upd: {dp0: {}}, dp1_upd: {dp1: {}}, dp2: {}}}
-    #     self.assertEqual(expected, graph)
+    @skipIfNoDill
+    def test_traverse_forked(self):
+        numbers_dp = NumbersDataset(size=50)
+        dp0, dp1, dp2 = numbers_dp.fork(num_instances=3)
+        dp0_upd = dp0.map(lambda x: x * 10)
+        dp1_upd = dp1.filter(lambda x: x % 3 == 1)
+        combined_dp = dp0_upd.mux(dp1_upd, dp2)
+        graph = torch.utils.data.graph.traverse(combined_dp)
+        expected = {combined_dp: {dp0_upd: {dp0: {dp0.main_datapipe: {dp0.main_datapipe.main_datapipe: {}}}},
+                                  dp1_upd: {dp1: {dp1.main_datapipe: {dp1.main_datapipe.main_datapipe: {}}}},
+                                  dp2: {dp2.main_datapipe: {dp2.main_datapipe.main_datapipe: {}}}}}
+        self.assertEqual(expected, graph)
 
 
 class TestSharding(TestCase):

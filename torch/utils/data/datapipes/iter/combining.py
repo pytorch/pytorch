@@ -1,4 +1,5 @@
 import functools
+import warnings
 
 from torch.utils.data import IterDataPipe, functional_datapipe
 from typing import Any, Iterator, Optional, Sized, Tuple, TypeVar, Deque
@@ -92,7 +93,7 @@ class _ForkIterDataPipe(IterDataPipe):
         self.leading_ptr = 0
         self.end_ptr = float('inf')
 
-    def get_next(self, instance_id):
+    def get_next(self, instance_id: int):
         if not hasattr(self, "dp"):
             self.dp = iter(self.main_datapipe)
         while self.child_pointers[instance_id] < self.end_ptr:
@@ -118,6 +119,19 @@ class _ForkIterDataPipe(IterDataPipe):
                         self.buffer.popleft()
                 yield return_val
 
+    def is_instance_exhausted(self, instance_id: int) -> bool:
+        return self.end_ptr == self.child_pointers[instance_id]
+
+    def is_every_instance_exhausted(self) -> bool:
+        return all(self.end_ptr == ptr for ptr in self.child_pointers)
+
+    def reset(self):
+        self.dp = iter(self.main_datapipe)
+        self.buffer = deque()
+        self.child_pointers = [0] * self.num_instances
+        self.slowest_ptr = 0
+        self.leading_ptr = 0
+        self.end_ptr = float('inf')
 
 class ChildDataPipe(IterDataPipe):
     r""" :class:`ChildDataPipe`.
@@ -129,16 +143,21 @@ class ChildDataPipe(IterDataPipe):
             instance_id: integer identifier of this instance
     """
     def __init__(self, main_datapipe, instance_id: int):
-        get_next_op = getattr(main_datapipe, "get_next", None)
-        if not callable(get_next_op):
-            raise NotImplementedError("Main Datapipe must have method 'get_next' implemented.")
-        self.main_data_pipe = main_datapipe
+        required_attrs = ["get_next", "is_instance_exhausted", "is_every_instance_exhausted", "reset"]
+        required_ops = [getattr(main_datapipe, attr) for attr in required_attrs]
+        if any(not callable(op) for op in required_ops):
+            raise NotImplementedError(f"Main Datapipe must have methods {required_attrs} implemented.")
+        self.main_datapipe = main_datapipe
         self.instance_id = instance_id
 
     def __iter__(self):
-        # TODO: Allow repeated calls to iter() and keep producing outputs, or explicitly asks user to call .fork again
-        # Will need make a decision about how the buffer interacts with that
-        yield from self.main_data_pipe.get_next(self.instance_id)
+        if self.main_datapipe.is_instance_exhausted(self.instance_id):
+            if not self.main_datapipe.is_every_instance_exhausted():
+                warnings.warn("""This child DataPipe was exhausted, while some other child DataPipes are not. 
+                                 By reading from this child DataPipe again, we are now resetting the buffer and 
+                                 each child DataPipe will read from the beginning again.""", UserWarning)
+            self.main_datapipe.reset()
+        yield from self.main_datapipe.get_next(self.instance_id)
 
 @functional_datapipe('demux')
 class DemultiplexerIterDataPipe(IterDataPipe):
