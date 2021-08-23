@@ -190,7 +190,7 @@ jobs:
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - name: Archive artifacts into zip
         run: |
-          zip -r artifacts.zip dist/ build/ .pytorch-test-times.json
+          zip -r artifacts.zip dist/ build/lib build/bin .pytorch-test-times.json
       # Upload to github so that people can click and download artifacts
       - uses: actions/upload-artifact@v2
         # Don't fail on upload to GH since it's only for user convenience
