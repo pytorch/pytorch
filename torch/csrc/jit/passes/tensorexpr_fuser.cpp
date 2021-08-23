@@ -108,8 +108,9 @@ const OperatorSet& supported_eltwise_set() {
       "aten::log2(Tensor self) -> Tensor",
       "aten::log1p(Tensor self) -> Tensor",
       "aten::exp(Tensor self) -> Tensor",
-      "aten::erf(Tensor self) -> Tensor",
-      "aten::erfc(Tensor self) -> Tensor",
+      // TODO: These are currently slower and less accurate than aten when.
+      // "aten::erf(Tensor self) -> Tensor",
+      // "aten::erfc(Tensor self) -> Tensor",
       "aten::fmod.Scalar(Tensor self, Scalar other) -> Tensor",
       "aten::fmod.Tensor(Tensor self, Tensor other) -> Tensor",
       "aten::cos(Tensor self) -> Tensor",
