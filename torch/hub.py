@@ -431,8 +431,6 @@ def download_url_to_file(url, dst, hash_prefix=None, progress=True):
 
     """
     file_size = None
-    # We use a different API for python2 since urllib(2) doesn't recognize the CA
-    # certificates in older Python
     req = Request(url, headers={"User-Agent": "torch.hub"})
     u = urlopen(req)
     meta = u.info()
