@@ -410,21 +410,6 @@ filegroup(
 )
 
 filegroup(
-    name = "thcunn_srcs_cu",
-    srcs = [
-        "aten/src/THCUNN/BCECriterion.cu.cc",
-        "aten/src/THCUNN/ELU.cu.cc",
-        "aten/src/THCUNN/HardTanh.cu.cc",
-        "aten/src/THCUNN/LeakyReLU.cu.cc",
-        "aten/src/THCUNN/MultiMarginCriterion.cu.cc",
-        "aten/src/THCUNN/SoftMarginCriterion.cu.cc",
-        "aten/src/THCUNN/SoftPlus.cu.cc",
-        "aten/src/THCUNN/SoftShrink.cu.cc",
-        "aten/src/THCUNN/Tanh.cu.cc",
-    ],
-)
-
-filegroup(
     name = "aten_srcs_cu",
     srcs = [
         "aten/src/ATen/cuda/detail/IndexUtils.cu.cc",
@@ -573,8 +558,6 @@ cc_library(
         "aten/src/THC/**/*.cpp",
         "aten/src/THC/*.cuh",
         "aten/src/THC/generic/*.cu.cc",
-        "aten/src/THCUNN/*.cuh",
-        "aten/src/THCUNN/generic/*.cu.cc",
     ],
     exclude = [
         "aten/src/ATen/Config.h",
@@ -716,7 +699,6 @@ cu_library(
     srcs = [
         ":aten_srcs_cu",
         ":thc_srcs_cu",
-        ":thcunn_srcs_cu",
     ],
     copts = ATEN_COPTS + torch_cuda_half_options,
     visibility = ["//visibility:public"],
