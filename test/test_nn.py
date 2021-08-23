@@ -12889,9 +12889,9 @@ class TestNNDeviceType(NNTestCase):
         x = torch.rand(2, 2, 1, device=device, dtype=dtype)
         key_padding_mask = torch.tensor(
             [[False, False],
-            [True, True]], dtype=torch.bool, device=device)
-        attn_mask = torch.tensor([[ 0., float('-inf')],
-                                  [ 0., 0.]], device=device, dtype=dtype)
+             [True, True]], dtype=torch.bool, device=device)
+        attn_mask = torch.tensor([[0., float('-inf')],
+                                  [0., 0.]], device=device, dtype=dtype)
         attn = nn.MultiheadAttention(embed_dim=1, num_heads=1, dtype=dtype, device=device)
         output, scores = attn(
             x, x, x, key_padding_mask=key_padding_mask, attn_mask=attn_mask)
