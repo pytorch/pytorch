@@ -1,3 +1,5 @@
+NOTE: This README is quite outdated!
+
 Structure of CI
 ===============
 
@@ -71,12 +73,12 @@ A **binary configuration** is a collection of
 * release or nightly
     * releases are stable, nightlies are beta and built every night
 * python version
-    * linux: 3.5m, 3.6m 3.7m (mu is wide unicode or something like that. It usually doesn't matter but you should know that it exists)
-    * macos: 3.6, 3.7, 3.8
-    * windows: 3.6, 3.7, 3.8
+    * linux: 3.6m 3.7m, 3.8m, 3.9m (mu is wide unicode or something like that. It usually doesn't matter but you should know that it exists)
+    * macos: 3.6, 3.7, 3.8, 3.9
+    * windows: 3.6, 3.7, 3.8, 3.9
 * cpu version
-    * cpu, cuda 9.0, cuda 10.0
-    * The supported cuda versions occasionally change
+    * cpu, cuda 10.2, cuda 11.1, cuda 11.3
+    * The supported cuda versions change as upgrades occur
 * operating system
     * Linux - these are all built on CentOS. There haven't been any problems in the past building on CentOS and using on Ubuntu
     * MacOS
