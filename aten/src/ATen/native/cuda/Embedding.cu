@@ -224,13 +224,15 @@ __global__ void renorm_kernel(
 template<typename index_t>
 void embedding_dense_backward_cuda_scan(Tensor &sorted_indices, Tensor &count);
 
-Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indices,
+Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indices_,
                                int64_t num_weights, int64_t padding_idx,
                                bool scale_grad_by_freq) {
   auto grad_arg = TensorArg(grad_, "grad", 1);
-  auto indices_arg = TensorArg(indices, "indices", 1);
+  auto indices_arg = TensorArg(indices_, "indices", 1);
   checkScalarTypes("embedding_backward", indices_arg, {kLong, kInt});
   checkSameGPU("embedding_backward", grad_arg, indices_arg);
+
+  auto indices = indices_.contiguous();
 
   auto num_indices = indices.numel();
   auto grad = grad_.contiguous().view({num_indices, grad_.size(-1)});
@@ -274,7 +276,6 @@ Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indice
   AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "embedding_dense_backward_cuda", [&] () {
     auto range = at::arange(num_indices, indices.options());
     int64_t nbits = cuda::cub::get_num_bits(num_weights);
-    sorted_indices.fill_(123);
     cuda::cub::sort_pairs(
       indices.data_ptr<index_t>(), sorted_indices.data_ptr<index_t>(),
       range.data_ptr<index_t>(), orig_indices.data_ptr<index_t>(),
