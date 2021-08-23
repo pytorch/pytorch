@@ -1225,7 +1225,7 @@ static Tensor& logsumexp_out_impl(Tensor& result, const Tensor& self, IntArrayRe
 
 Tensor& logsumexp_out(const Tensor& self, IntArrayRef dims, bool keepdim, Tensor& result) {
   TORCH_CHECK(at::isFloatingType(result.scalar_type()),
-              "Expected floating point type for result tensor, got: ",
+              "logsumexp(): Expected floating point type for result tensor, got: ",
               result.scalar_type());
   {
     NoNamesGuard guard;
