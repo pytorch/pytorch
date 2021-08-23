@@ -93,7 +93,7 @@ if "%USE_CUDA%"=="1" (
   echo @"%SRC_DIR%\tmp_bin\randomtemp.exe" "%SRC_DIR%\tmp_bin\sccache.exe" "%CUDA_PATH%\bin\nvcc.exe" %%* > "%SRC_DIR%/tmp_bin/nvcc.bat"
   cat %SRC_DIR%/tmp_bin/nvcc.bat
   set CUDA_NVCC_EXECUTABLE=%SRC_DIR%/tmp_bin/nvcc.bat
-  set CMAKE_CUDA_COMPILER=%CUDA_PATH%/bin/nvcc.exe
+  set CMAKE_CUDA_COMPILER="%CUDA_PATH%/bin/nvcc.exe"
   set CMAKE_CUDA_COMPILER_LAUNCHER=%SRC_DIR%/tmp_bin/randomtemp.exe;%SRC_DIR%\tmp_bin\sccache.exe
 )
 
