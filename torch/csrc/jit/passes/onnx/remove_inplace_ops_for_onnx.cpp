@@ -325,7 +325,8 @@ static void PrepareForRemoveMutations(MutationRemover& mr, Block* b) {
         if (!mr.inplaceOpVariant(node)) {
           continue;
         }
-        auto it = std::find(node->inputs().begin(), node->inputs().end(), input);
+        auto it =
+            std::find(node->inputs().begin(), node->inputs().end(), input);
         if (it != node->inputs().end()) {
           int index = std::distance(node->inputs().begin(), it);
           std::cerr << "Warning: ONNX Preprocess - Removing mutation from node "
@@ -334,7 +335,7 @@ static void PrepareForRemoveMutations(MutationRemover& mr, Block* b) {
                     << std::endl;
 
           Node* newNode =
-            addDummyClone(b->owningGraph(), input, false, b->return_node());
+              addDummyClone(b->owningGraph(), input, false, b->return_node());
           TORCH_INTERNAL_ASSERT(nullptr != newNode);
           node->replaceInput(index, newNode->output());
           input->replaceAllUsesAfterNodeWith(node, newNode->output());
