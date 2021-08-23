@@ -165,6 +165,11 @@ test_python_shard2() {
   assert_git_not_dirty
 }
 
+test_python_shard() {
+  time python test/run_test.py --exclude-jit-executor --shard "$1" "$NUM_TEST_SHARDS" --verbose --determine-from="$DETERMINE_FROM"
+  assert_git_not_dirty
+}
+
 test_python() {
   time python test/run_test.py --exclude-jit-executor --verbose --determine-from="$DETERMINE_FROM"
   assert_git_not_dirty
@@ -515,14 +520,9 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 || "$
   test_custom_script_ops
   test_custom_backend
   test_torch_function_benchmark
-elif [[ "${SHARD_NUMBER}" == 3 ]]; then
-  echo not doing anything 3
-elif [[ "${SHARD_NUMBER}" == 4 ]]; then
-  echo not doing anything 4
-elif [[ "${SHARD_NUMBER}" == 5 ]]; then
-  echo not doing anything 5
-elif [[ "${SHARD_NUMBER}" == 6 ]]; then
-  echo not doing anything 6
+elif [[ "${SHARD_NUMBER}" -gt 2 ]]; then
+  # Handle arbitrary number of shards
+  test_python_shard "$SHARD_NUMBER"
 elif [[ "${BUILD_ENVIRONMENT}" == *vulkan-linux* ]]; then
   test_vulkan
 elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
