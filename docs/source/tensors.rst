@@ -223,6 +223,7 @@ Tensor class reference
     Tensor.allclose
     Tensor.amax
     Tensor.amin
+    Tensor.aminmax
     Tensor.angle
     Tensor.apply_
     Tensor.argmax
