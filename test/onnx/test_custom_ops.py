@@ -125,5 +125,37 @@ class TestCustomAutogradFunction(unittest.TestCase):
         model = MyModule()
         run_model_test(self, model, input=(x, ))
 
+class TestExportAsContribOps(unittest.TestCase):
+    opset_version = 14
+    keep_initializers_as_inputs = False
+    onnx_shape_inference = True
+
+    def test_contrib_op_with_loop(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.gelu = torch.nn.GELU()
+
+            def forward(self, x):
+                res = []
+                res2 = []
+                for i in range(x.size(0)):
+                    if len(res) > 0:
+                        res2.append(res[0])
+                    else:
+                        res2.append(self.gelu(x[0]))
+                    res.append(x[0])
+                return torch.stack(res), torch.stack(res2)
+
+        def symbolic_custom_gelu(g, input):
+            return g.op("com.microsoft::Gelu", input).setType(input.type())
+
+        from torch.onnx import register_custom_op_symbolic
+        register_custom_op_symbolic("::gelu", symbolic_custom_gelu, 1)
+
+        x = torch.randn(3, 3, 4, requires_grad=True)
+        model = torch.jit.script(M())
+        run_model_test(self, model, input=(x, ))
+
 if __name__ == "__main__":
     unittest.main()
