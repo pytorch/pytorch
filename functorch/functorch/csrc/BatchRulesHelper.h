@@ -130,8 +130,6 @@ struct ExistingBdimBatchRuleHelper<F, Func, typelist<A, T...>> {
 
 
 #define INVOKE(object,ptrToMember)  ((object).*(ptrToMember))
-#define OP_DECOMPOSE(op)  m.impl(#op, static_cast<decltype(&ATEN_FN(op))>(native::op));
-#define OP_DECOMPOSE2(op, overload)  m.impl(#op"."#overload, static_cast<decltype(&ATEN_FN2(op, overload))>(native::op));
 
 
 template <typename F, F Method, typename... ExtraArgs>
