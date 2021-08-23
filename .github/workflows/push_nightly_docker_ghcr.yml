@@ -15,6 +15,7 @@ on:
 env:
   # Should be true on cron schedule
   WITH_PUSH: ${{ github.event_name == 'schedule' }}
+  BUILD_PROGRESS: plain
 
 jobs:
   build-publish-docker:

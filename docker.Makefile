@@ -22,7 +22,7 @@ PYTHON_VERSION            = 3.7
 PYTORCH_VERSION           = $(shell git describe --tags --always)
 # Can be either official / dev
 BUILD_TYPE                = dev
-BUILD_PROGRESS            = auto
+BUILD_PROGRESS           ?= auto
 BUILD_ARGS                = --build-arg BASE_IMAGE=$(BASE_IMAGE) \
 							--build-arg PYTHON_VERSION=$(PYTHON_VERSION) \
 							--build-arg CUDA_VERSION=$(CUDA_VERSION) \
