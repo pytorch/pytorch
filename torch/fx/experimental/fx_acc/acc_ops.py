@@ -496,6 +496,12 @@ def div(*, input, other):
     return input / other
 
 
+@register_acc_op_mapping(op_and_target=("call_function", torch.pow))
+@register_acc_op
+def pow(*, input, exponent):
+    return torch.pow(input, exponent)
+
+
 @register_acc_op_mapping(op_and_target=("call_function", nn.functional.relu))
 @register_acc_op_mapping(
     op_and_target=("call_function", torch.relu),
