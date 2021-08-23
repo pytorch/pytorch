@@ -1,7 +1,7 @@
 
 r"""
 The torch package contains data structures for multi-dimensional
-tensors and defines mathematical operations over these tensors.
+tensors. It also defines mathematical operations over these tensors.
 Additionally, it provides many utilities for efficient serializing of
 Tensors and arbitrary types, and other useful utilities.
 
@@ -9,6 +9,58 @@ It has a CUDA counterpart, that enables you to run your tensor computations
 on an NVIDIA GPU with compute capability >= 3.0.
 """
 
+from math import e, nan, inf, pi
+from ._vmap_internals import vmap as vmap
+from ._lobpcg import lobpcg as lobpcg
+from torch.multiprocessing._atfork import register_after_fork
+from torch import quasirandom as quasirandom
+from torch._classes import classes
+from torch._ops import ops
+from . import _torch_docs, _tensor_docs, _storage_docs
+from torch import profiler as profiler
+from torch import __future__ as __future__
+from torch import __config__ as __config__
+import torch.utils.data
+from torch import quantization as quantization
+import torch.backends.quantized
+import torch.backends.openmp
+import torch.backends.mkldnn
+import torch.backends.mkl
+import torch.backends.cuda
+from torch import testing as testing
+from torch import distributions as distributions
+from torch import random as random
+from torch import hub as hub
+from torch import linalg as linalg
+from torch import jit as jit
+from torch import onnx as onnx
+import torch.utils.backcompat
+from torch import special as special
+from torch import sparse as sparse
+from torch import multiprocessing as multiprocessing
+import torch.optim._multi_tensor
+from torch import optim as optim
+from torch import ao as ao
+import torch.nn.quantized
+import torch.nn.quantizable
+import torch.nn.intrinsic
+from torch import nn as nn
+from torch import futures as futures
+from torch import fft as fft
+from torch.autograd import (
+    no_grad as no_grad,
+    enable_grad as enable_grad,
+    set_grad_enabled as set_grad_enabled,
+    inference_mode as inference_mode,
+)
+from torch import autograd as autograd
+from torch import cpu as cpu
+from torch import cuda as cuda
+from ._tensor_str import set_printoptions
+from .serialization import save, load
+from .random import set_rng_state, get_rng_state, manual_seed, initial_seed, seed
+from .storage import _StorageBase
+from ._tensor import Tensor
 import os
 import sys
 import platform
@@ -367,6 +419,7 @@ def set_default_dtype(d):
     """
     _C._set_default_dtype(d)
 
+
 def use_deterministic_algorithms(mode):
     r""" Sets whether PyTorch operations must use "deterministic"
     algorithms. That is, algorithms which, given the same input, and when
@@ -484,11 +537,13 @@ def use_deterministic_algorithms(mode):
     """
     _C._set_deterministic_algorithms(mode)
 
+
 def are_deterministic_algorithms_enabled():
     r"""Returns True if the global deterministic flag is turned on. Refer to
     :func:`torch.use_deterministic_algorithms` documentation for more details.
     """
     return _C._get_deterministic_algorithms()
+
 
 def set_warn_always(b):
     r"""When this flag is False (default) then some PyTorch warnings may only
@@ -502,6 +557,7 @@ def set_warn_always(b):
     """
     _C._set_warnAlways(b)
 
+
 def is_warn_always_enabled():
     r"""Returns True if the global warn_always flag is turned on. Refer to
     :func:`torch.set_warn_always` documentation for more details.
@@ -512,17 +568,14 @@ def is_warn_always_enabled():
 # Define numeric constants
 ################################################################################
 
+
 # For Python Array API (https://data-apis.org/array-api/latest/API_specification/constants.html) and
 # NumPy consistency (https://numpy.org/devdocs/reference/constants.html)
-from math import e , nan , inf , pi
 __all__.extend(['e', 'pi', 'nan', 'inf'])
 
 ################################################################################
 # Define Storage and Tensor classes
 ################################################################################
-
-from ._tensor import Tensor
-from .storage import _StorageBase
 
 
 class DoubleStorage(_C.DoubleStorageBase, _StorageBase):
@@ -564,23 +617,30 @@ class BoolStorage(_C.BoolStorageBase, _StorageBase):
 class BFloat16Storage(_C.BFloat16StorageBase, _StorageBase):
     pass
 
+
 class ComplexDoubleStorage(_C.ComplexDoubleStorageBase, _StorageBase):
     pass
+
 
 class ComplexFloatStorage(_C.ComplexFloatStorageBase, _StorageBase):
     pass
 
+
 class QUInt8Storage(_C.QUInt8StorageBase, _StorageBase):
     pass
+
 
 class QInt8Storage(_C.QInt8StorageBase, _StorageBase):
     pass
 
+
 class QInt32Storage(_C.QInt32StorageBase, _StorageBase):
     pass
 
+
 class QUInt4x2Storage(_C.QUInt4x2StorageBase, _StorageBase):
     pass
+
 
 _storage_classes = {
     DoubleStorage, FloatStorage, LongStorage, IntStorage, ShortStorage,
@@ -592,13 +652,11 @@ _storage_classes = {
 _tensor_classes: Set[Type] = set()
 
 # If you edit these imports, please update torch/__init__.py.in as well
-from .random import set_rng_state, get_rng_state, manual_seed, initial_seed, seed
-from .serialization import save, load
-from ._tensor_str import set_printoptions
 
 ################################################################################
 # Initialize extension
 ################################################################################
+
 
 def manager_path():
     if platform.system() == 'Windows' or sys.executable == 'torch_deploy':
@@ -661,6 +719,8 @@ del QUInt4x2StorageBase
 ################################################################################
 
 # needs to be before the submodule imports to avoid circular dependencies
+
+
 def _assert(condition, message):
     r"""A wrapper around Python's assert which is symbolically traceable.
     """
@@ -674,54 +734,15 @@ def _assert(condition, message):
 # Import most common subpackages
 ################################################################################
 
+
 # Use the redundant form so that type checkers know that these are a part of
 # the public API. The "regular" import lines are there solely for the runtime
 # side effect of adding to the imported module's members for other users.
-from torch import cuda as cuda
-from torch import cpu as cpu
-from torch import autograd as autograd
-from torch.autograd import (
-    no_grad as no_grad,
-    enable_grad as enable_grad,
-    set_grad_enabled as set_grad_enabled,
-    inference_mode as inference_mode,
-)
-from torch import fft as fft
-from torch import futures as futures
-from torch import nn as nn
-import torch.nn.intrinsic
-import torch.nn.quantizable
-import torch.nn.quantized
 # AO depends on nn, as well as quantized stuff -- so should be after those.
-from torch import ao as ao
-from torch import optim as optim
-import torch.optim._multi_tensor
-from torch import multiprocessing as multiprocessing
-from torch import sparse as sparse
-from torch import special as special
-import torch.utils.backcompat
-from torch import onnx as onnx
-from torch import jit as jit
-from torch import linalg as linalg
-from torch import hub as hub
-from torch import random as random
-from torch import distributions as distributions
-from torch import testing as testing
-import torch.backends.cuda
-import torch.backends.mkl
-import torch.backends.mkldnn
-import torch.backends.openmp
-import torch.backends.quantized
-from torch import quantization as quantization
-import torch.utils.data
-from torch import __config__ as __config__
-from torch import __future__ as __future__
-from torch import profiler as profiler
 
 _C._init_names(list(torch._storage_classes))
 
 # attach docstrings to torch and tensor functions
-from . import _torch_docs, _tensor_docs, _storage_docs
 del _torch_docs, _tensor_docs, _storage_docs
 
 
@@ -731,11 +752,8 @@ def compiled_with_cxx11_abi():
 
 
 # Import the ops "namespace"
-from torch._ops import ops
-from torch._classes import classes
 
 # Import the quasi random sampler
-from torch import quasirandom as quasirandom
 
 # If you are seeing this, it means that this call site was not checked if
 # the memory format could be preserved, and it was switched to old default
@@ -743,15 +761,12 @@ from torch import quasirandom as quasirandom
 legacy_contiguous_format = contiguous_format
 
 # Register fork handler to initialize OpenMP in child processes (see gh-28389)
-from torch.multiprocessing._atfork import register_after_fork
 register_after_fork(torch.get_num_threads)
 del register_after_fork
 
 # Import tools that require fully imported torch (for applying
 # torch.jit.script as a decorator, for instance):
-from ._lobpcg import lobpcg as lobpcg
 
-from ._vmap_internals import vmap as vmap
 
 # These were previously defined in native_functions.yaml and appeared on the
 # `torch` namespace, but we moved them to c10 dispatch to facilitate custom
