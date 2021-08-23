@@ -77,14 +77,14 @@ Tensor* conv2d_depthwise_static_schedule1(
   constexpr int kLoopH = 2, kLoopW = 3;
   if (R == 3 && stride == 2 && pad == 1) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    For *head, *tail;
+    ForPtr head, tail;
     auto loops = nest.getLoopStmtsFor(conv);
     nest.sliceHead(loops[kLoopW], 2, &head, &tail);
     loops = nest.getLoopStmtsFor(conv);
     nest.sliceHead(loops[kLoopH], 2, &head, &tail);
   } else if (R == 3 && stride == 1 && pad == 1) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    For *main, *peeled;
+    ForPtr main, peeled;
     auto loops = nest.getAllLoopNestsWritingToBuf(conv->buf());
     main = loops[1][kLoopW];
     nest.sliceHead(main, 1, &peeled, &main);
@@ -142,6 +142,7 @@ Tensor* conv2d_depthwise_static_schedule2(
         auto const& cb = v[4];
         return input.load(n, cc * Cblock + cb, h, w);
       });
+      input_NCHWc->buf()->disable_inline();
 
   auto input_NCHWc_padded = Compute(
       "input_NCHWc_padded",
@@ -163,6 +164,7 @@ Tensor* conv2d_depthwise_static_schedule2(
         return ifThenElse(
             cond, 0.f, input_NCHWc->load(n, cc, h - pad, w - pad, cb));
       });
+      input_NCHWc_padded->buf()->disable_inline();
 
   // pack kernel into NCHWc8 format
   auto weight_NCHWc = Compute(
@@ -176,6 +178,7 @@ Tensor* conv2d_depthwise_static_schedule2(
         auto const& cb = v[4];
         return weight.load(cc * Cblock + cb, c, r, s);
       });
+      weight_NCHWc->buf()->disable_inline();
 
   // compute conv_NCHWc8
   auto OH = (H - R + pad * 2) / stride + 1;
@@ -184,7 +187,8 @@ Tensor* conv2d_depthwise_static_schedule2(
       "conv2d_depthwise_NCHWc",
       {{N, "n"}, {Cchunck, "cc"}, {OH, "oh"}, {OW, "ow"}, {Cblock, "cb"}},
       Sum(),
-      [&](const std::vector<VarHandle>& v) { return init_func(v); },
+      //[&](const std::vector<VarHandle>& v) { return init_func(v); },
+      [&](const std::vector<VarHandle>& v) { return FloatImm::make(0.f); },
       [&](const std::vector<VarHandle>& v) {
         auto const& n = v[0];
         auto const& cc = v[1];
@@ -199,6 +203,7 @@ Tensor* conv2d_depthwise_static_schedule2(
             weight_NCHWc->load(cc, c, r, s, cb);
       },
       {{C / groups, "c"}, {R, "r"}, {S, "s"}});
+      conv_depthwise_NCHWc->buf()->disable_inline();
 
   // unpack conv from NCHWc8 to NCHW
   auto conv_depthwise = Compute(
@@ -211,6 +216,7 @@ Tensor* conv2d_depthwise_static_schedule2(
         auto const& ow = v[3];
         return conv_depthwise_NCHWc->load(n, k / Cblock, oh, ow, k % Cblock);
       });
+      conv_depthwise->buf()->disable_inline();
 
   auto stmt = new Block(
       {input_NCHWc->stmt(),
@@ -222,26 +228,33 @@ Tensor* conv2d_depthwise_static_schedule2(
   auto nest = LoopNest(stmt, {conv_depthwise->buf()});
 
   /*** scheduling ***/
-  // padded image: flatten `n`, `cc` and `h`
+  // padded image: flatten `n`, `cc` and `h` and vectorize `cb`
+  // TODO: the flattened loop should be parallelized when NNC multi-threading is
+  // enabled.
   auto loops = nest.getLoopStmtsFor(input_NCHWc_padded);
   For* flattened;
   nest.flatten({loops[0], loops[1], loops[2]}, &flattened);
-  flattened->set_parallel();
   GRAPH_DEBUG(
-      "flattened and parallelized image padding:\n",
+      "flattened image padding stmts:\n",
       std::to_string(nest.root_stmt()),
       "\n");
 
   // conv NCHWc8: cache access on `w` axis
+  // TODO: fix `cacheAccesses` to either use thread-private memory to avoid
+  // Write-after-Write data dependency or use glocal memory whose accesses
+  // through multiple threads are controlled by locking/unlocking.
   loops = nest.getLoopStmtsFor(conv_depthwise_NCHWc);
   auto cache_ref = nest.cacheAccesses(
       conv_depthwise_NCHWc->buf(), "conv_NCHWc_cache", loops[3]);
   nest.simplify();
   nest.eliminateDeadStores();
+  cache_ref.first->disable_inline();
   GRAPH_DEBUG(
       "cache access conv NCHWc8:\n", std::to_string(nest.root_stmt()), "\n");
 
   // conv: compute conv at `w` of conv NCHWc8
+  // TODO: fix `computeAt` and use it to replace
+  // `distribute->split->reorder->fuse->compressBuf`.
   loops = nest.getLoopStmtsFor(cache_ref.first);
   auto cc = loops[0], h = loops[1], w = loops[2], cb = loops[3], kh = loops[4],
        kw = loops[5];
@@ -250,6 +263,7 @@ Tensor* conv2d_depthwise_static_schedule2(
   cb = loops[1];
   kh = nest.getLoopAt(cb, {0});
   kw = nest.getLoopAt(cb, {0, 0});
+  // TODO: fix `reorder` to use `nest.reorder({cb, kh, kw}, {2, 0, 1})`
   nest.reorder({cb, kh}, {1, 0});
   nest.reorder({cb, kw}, {1, 0});
   GRAPH_DEBUG("reorder:\n", std::to_string(nest.root_stmt()), "\n");
@@ -259,6 +273,8 @@ Tensor* conv2d_depthwise_static_schedule2(
   nest.splitWithTail(loops[0], 8, &cinner, &ctail);
   nest.simplify();
   loops = nest.getLoopStmtsFor(conv_depthwise);
+  // TODO: fix `reorder` to use `nest.reorder({loops[1], loops[2], loops[3]},
+  // {2, 0, 1})`
   nest.reorder({loops[1], loops[2]}, {1, 0});
   nest.reorder({loops[1], loops[3]}, {1, 0});
   GRAPH_DEBUG("split:\n", std::to_string(nest.root_stmt()), "\n");
@@ -278,7 +294,6 @@ Tensor* conv2d_depthwise_static_schedule2(
       std::to_string(nest.root_stmt()),
       "\n");
 
-  // vectorization
   loops = nest.getLoopStmtsFor(conv_depthwise);
   // conv NCHWc8: vectorize cache initialization
   nest.vectorize(nest.getLoopAt(loops[0], {0, 0, 0}));
@@ -288,7 +303,6 @@ Tensor* conv2d_depthwise_static_schedule2(
   nest.vectorize(nest.getLoopAt(loops[0], {0, 2, 0}));
   GRAPH_DEBUG("vectorize c8:\n", std::to_string(nest.root_stmt()), "\n");
 
-  // unrolling
   // conv NCHWc8: unroll `kw` reduction axis
   nest.unroll(nest.getLoopAt(loops[0], {0, 0, 1, 0}));
   // conv: unroll `w` axis
@@ -296,13 +310,16 @@ Tensor* conv2d_depthwise_static_schedule2(
   GRAPH_DEBUG("unrolled:\n", std::to_string(nest.root_stmt()), "\n");
 
   // conv: flatten `cc` and `h`
+  // TODO: the flattened loop should be parallelized when NNC multi-threading is
+  // enabled.
   For* flattened_conv;
   nest.flatten({loops[0], loops[1]}, &flattened_conv);
-  flattened_conv->set_parallel();
-  GRAPH_DEBUG(
-      "flattened and parallelized conv:\n",
-      std::to_string(nest.root_stmt()),
-      "\n");
+  GRAPH_DEBUG("flattened conv:\n", std::to_string(nest.root_stmt()), "\n");
+
+  // padded input NCHWc8: vectorization
+  loops = nest.getLoopStmtsFor(input_NCHWc_padded);
+  nest.vectorize(loops[2]);
+  GRAPH_DEBUG("final conv stmt:\n", std::to_string(nest.root_stmt()), "\n");
 
   return new Tensor(conv_depthwise->buf(), nest.root_stmt());
 }
