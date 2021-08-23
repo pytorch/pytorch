@@ -12868,7 +12868,7 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(gy_expect, gy_actual)
 
     @dtypes(torch.float, torch.double, torch.bfloat16)
-    def test_softmax_zero_if_all_neg_inf(self, device, dtype):
+    def test_safe_softmax_last_dim(self, device, dtype):
         # softmax with dim=-1
         input = torch.tensor([
             [0.3, 0.7],
