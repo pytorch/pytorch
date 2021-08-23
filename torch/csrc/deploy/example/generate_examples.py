@@ -18,6 +18,11 @@ try:
 except ImportError:
     from fx.examples import SimpleWithLeaf
 
+try:
+    from .tensorrt_example import tensorrt_example
+except ImportError:
+    from tensorrt_example import tensorrt_example
+
 def generate_fx_example():
     name = 'simple_leaf'
     model = SimpleWithLeaf(5, 10)
@@ -79,3 +84,10 @@ if __name__ == "__main__":
         e.save_pickle("fn", "fn.pkl", load_library)
 
     generate_fx_example()
+
+    with PackageExporter(str(p / "tensorrt_import")) as e:
+        e.extern("tensorrt")
+        e.add_dependency("tensorrt")
+        e.mock("iopath.**")
+        e.intern("**")
+        e.save_pickle("model", "model.pkl", tensorrt_example)
