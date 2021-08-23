@@ -1045,10 +1045,8 @@ void CudaCodeGen::Initialize() {
   }
 
   // is call_fast() allowed? (block/threads constants except block[0])
-  const std::vector<const Expr*>& block_extents =
-      metavar_rewriter_->gpu_block_extents();
-  const std::vector<const Expr*>& thread_extents =
-      metavar_rewriter_->gpu_thread_extents();
+  auto block_extents = metavar_rewriter_->gpu_block_extents();
+  auto thread_extents = metavar_rewriter_->gpu_thread_extents();
   bool call_fast =
       !has_random_ && block_extents.size() > 0 && thread_extents.size() > 0;
   for (size_t i = 1; i < block_extents.size() && call_fast; i++) {
