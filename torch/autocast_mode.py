@@ -153,7 +153,7 @@ class autocast(object):
                 enabled = False
         if self.device == 'cuda':
             if self.fast_dtype == torch.bfloat16 and torch.cuda.get_device_properties(torch.cuda.current_device()).major < 8:
-                raise RuntimeError('Current CUDA Device does not support bfloat16. Switching fast_dtype to float16.')
+                raise RuntimeError('Current CUDA Device does not support bfloat16. Please switch fast_dtype to float16.')
         self._enabled = enabled
 
     def __enter__(self):

@@ -268,6 +268,8 @@ def typename(o):
 
     return module + class_name
 
+def is_bf16_support():
+    return torch.cuda.get_device_properties(torch.cuda.current_device()).major >= 8
 
 def is_tensor(obj):
     r"""Returns True if `obj` is a PyTorch tensor.
