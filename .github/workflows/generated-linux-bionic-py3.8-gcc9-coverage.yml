@@ -31,7 +31,7 @@ concurrency:
 jobs:
   ciflow_should_run:
     runs-on: ubuntu-18.04
-    if: ${{ (github.event_name != 'pull_request') || (github.event.action !='unassigned') || (github.event.action == 'unassigned' && contains(github.event.pull_request.labels.*.name, 'ciflow/default')) }}
+    if: ${{ (github.event_name != 'pull_request') || (github.event.action !='unassigned') || (contains(github.event.pull_request.labels.*.name, 'ciflow/coverage') || contains(github.event.pull_request.labels.*.name, 'ciflow/cpu') || contains(github.event.pull_request.labels.*.name, 'ciflow/default') || contains(github.event.pull_request.labels.*.name, 'ciflow/linux')) }}
     steps:
       - name: noop
         run: echo running ciflow_should_run
@@ -284,6 +284,7 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
+          fetch-depth: 0 # deep clone, to allow sharding to use git rev-list
           submodules: recursive
       - name: Pull docker image
         run: |
@@ -321,6 +322,7 @@ jobs:
       - name: Test PyTorch
         env:
           BUILD_ENVIRONMENT: linux-bionic-py3.8-gcc9-coverage-${{ matrix.config }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           if [[ $TEST_CONFIG == 'multigpu' ]]; then
             TEST_COMMAND=.jenkins/pytorch/multigpu-test.sh
@@ -336,6 +338,7 @@ jobs:
           docker run \
             ${GPU_FLAG:-} \
             -e BUILD_ENVIRONMENT \
+            -e PR_NUMBER \
             -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
             -e GITHUB_ACTIONS \
             -e IN_CI \
@@ -363,6 +366,10 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Report coverage
+        run: |
+          python3 -mpip install codecov
+          python3 -mcodecov
       - name: Zip test reports for upload
         if: always()
         env:

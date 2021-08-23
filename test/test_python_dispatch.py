@@ -246,6 +246,39 @@ $5 = torch._ops.aten.kl_div($0, $1, 2, log_target=True)''')
         x.data.add_(2)
         self.assertEqual(cur_vc, x._version)
 
+    def test_subclass_priority(self) -> None:
+        class ErrorA(RuntimeError):
+            pass
+
+        class ErrorB(RuntimeError):
+            pass
+
+        # The big tests for code coverage are test_precedence_semantics in
+        # test_overrides.py; this is just to make sure it is wired up at all
+        # correctly for __torch_dispatch__
+        class A(torch.Tensor):
+            @staticmethod
+            def __new__(cls, elem):
+                return torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                raise ErrorA
+
+        class B(A):
+            @staticmethod
+            def __new__(cls, elem):
+                return torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                raise ErrorB
+
+        self.assertRaises(ErrorA, lambda: torch.add(A(torch.empty(1)), A(torch.empty(1))))
+        self.assertRaises(ErrorB, lambda: torch.add(A(torch.empty(1)), B(torch.empty(1))))
+        self.assertRaises(ErrorB, lambda: torch.add(B(torch.empty(1)), A(torch.empty(1))))
+        self.assertRaises(ErrorB, lambda: torch.add(B(torch.empty(1)), B(torch.empty(1))))
+
     def test_format(self) -> None:
         x = LoggingTensor(torch.ones(1))
         s1 = str(x)
