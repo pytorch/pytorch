@@ -770,7 +770,6 @@ void ComputeAt::runPass() {
 
   // Update siblings of multi output expressions
   updateSiblings();
-
 }
 
 ComputeAt::ComputeAt(
