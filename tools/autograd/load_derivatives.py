@@ -3,6 +3,7 @@
 # Each autograd function is represented by `DifferentiabilityInfo` containing
 # a list of `Derivative`. See `tools.codegen.api.autograd` for the data models.
 from collections import defaultdict, Counter
+import dataclasses
 import re
 from typing import Sequence, Any, Tuple, List, Set, Dict, Match, Optional
 import yaml
@@ -52,21 +53,8 @@ def load_derivatives(derivatives_yaml_path: str, native_yaml_path: str) -> Seque
         # duplicated op names. This can be simplified if the first of the duplicates can be named
         # 'XyzBackward' instead of 'XyzBackward0' or unconditionally append '0' to singletons.
         op_names = create_op_names(infos)
-        res = [
-            DifferentiabilityInfo(
-                name=info.name,
-                func=info.func,
-                op=op_name,
-                derivatives=info.derivatives,
-                forward_derivatives=info.forward_derivatives,
-                all_saved_inputs=info.all_saved_inputs,
-                all_saved_outputs=info.all_saved_outputs,
-                args_with_derivatives=info.args_with_derivatives,
-                non_differentiable_arg_names=info.non_differentiable_arg_names,
-                output_differentiability=info.output_differentiability,
-                output_differentiability_conditions=info.output_differentiability_conditions,
-            )
-            for info, op_name in zip(infos, op_names)]
+        res = [dataclasses.replace(info, op=op_name)
+               for info, op_name in zip(infos, op_names)]
 
         _GLOBAL_LOAD_DERIVATIVE_CACHE[key] = res
 
