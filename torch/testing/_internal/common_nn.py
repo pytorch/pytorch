@@ -2765,6 +2765,14 @@ new_module_tests = [
         check_gradgrad=False,
     ),
     dict(
+        module_name='Embedding',
+        constructor_args=(4, 3),
+        cpp_constructor_args='torch::nn::EmbeddingOptions(4, 3)',
+        input_fn=lambda: torch.empty(1, 512, dtype=torch.long).random_(4).expand(7, 512),
+        check_gradgrad=False,
+        desc='discontiguous'
+    ),
+    dict(
         module_name='EmbeddingBag',
         constructor_args=(4, 3),
         cpp_constructor_args='torch::nn::EmbeddingBagOptions(4, 3)',
