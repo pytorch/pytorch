@@ -4119,20 +4119,13 @@ class DistributedTest:
                 grad_hook = net_with_hook.module.weight.grad
                 avg_hook = grad_hook.clone()
                 # Verify hook grad with expected.
-                # Cannot use exact match here due to a very small accuracy loss,
-                # e.g. 1e-05, for powerSGD hook case.
-                assert_func = (
-                    self.assertEqual
-                    if hook == default.allreduce_hook
-                    else torch.testing.assert_allclose
-                )
-                assert_func(
-                    avg_hook[0, 0],
+                self.assertEqual(
+                    avg_hook[0, 0].item(),
                     expected_grad,
                     msg=f"Expected hook grad of {expected_grad} but got {avg_hook[0, 0]}",
                 )
                 # Verify hook grad with vanilla allreduce
-                assert_func(
+                self.assertEqual(
                     avg_hook[0, 0],
                     avg[0, 0],
                     msg=f"Expected hook grad to be close to allreduce {avg[0, 0]}, but got {avg_hook[0, 0]}",
@@ -4937,8 +4930,8 @@ class DistributedTest:
                 model.module.running_mean,
                 model.module.running_var,
             )
-            torch.testing.assert_allclose(running_mean, all_input_var.mean(1))
-            torch.testing.assert_allclose(running_var, all_input_var.var(1))
+            torch.testing.assert_close(running_mean, all_input_var.mean(1))
+            torch.testing.assert_close(running_var, all_input_var.var(1))
 
         @sandcastle_skip_if(
             BACKEND != "nccl" and BACKEND != "gloo",
