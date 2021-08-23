@@ -6,6 +6,7 @@ from torch import nn
 import torch.nn.functional as F
 import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.quantized as nniq
+import torch.nn.intrinsic.quantized.dynamic as nniqd
 import torch.nn.intrinsic.quantized._reference as nniqr
 import torch.nn.intrinsic.qat as nniqat
 import torch.nn.quantized as nnq
@@ -122,6 +123,7 @@ DEFAULT_DYNAMIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     nn.GRU: nnqd.GRU,
     nn.LSTMCell: nnqd.LSTMCell,
     nn.RNNCell: nnqd.RNNCell,
+    nni.LinearReLU: nniqd.LinearReLU,
 }
 
 # Allowlist for propagating the qconfig

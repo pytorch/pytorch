@@ -2807,6 +2807,42 @@ class TestQuantizeFx(QuantizationTestCase):
         m = convert_fx(m, is_reference=True)
         m(torch.rand(2, 1, 5, 5))
 
+    def test_dynamic_fusion(self):
+        class LinearRelu(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(5, 5)
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                x = self.linear(x)
+                return self.relu(x)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mods1 = torch.nn.Sequential(LinearRelu(), LinearRelu())
+                self.mods2 = torch.nn.Linear(5, 5)
+                self.emb = torch.nn.Embedding(num_embeddings=10, embedding_dim=12)
+
+            def forward(self, x, indices):
+                x = self.mods1(x)
+                x = self.mods2(x)
+                return x, self.emb(indices)
+
+        model = M().eval()
+        qconfig = {
+            "": None,
+            "object_type": [
+                (torch.nn.Linear, default_dynamic_qconfig),
+                (torch.nn.ReLU, default_dynamic_qconfig),
+            ],
+        }
+        m = prepare_fx(model, qconfig)
+        print(m)
+        m = convert_fx(m)
+        print(m)
+
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
     """Unit tests for individual ops
