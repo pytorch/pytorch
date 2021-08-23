@@ -948,6 +948,14 @@ class TensorExprFuser {
       "aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor",
       "aten::matmul(Tensor self, Tensor other) -> Tensor",
     };
+    static const OperatorSet gpu_only_operator_set{
+      // On CPU, these are slower and less accurate than ATen kernels, because
+      // ATen is able to use MKL-VML, whereas the fuser currently can't.  The
+      // fuser uses sleef instead because sleef provides functions that operate
+      // on vectors, instead of large buffers.
+      "aten::erf(Tensor self) -> Tensor",
+      "aten::erfc(Tensor self) -> Tensor",
+    };
     static const OperatorSet pow{
       "aten::pow.Tensor_Scalar(Tensor self, Scalar exponent) -> Tensor",
     };
@@ -1022,6 +1030,17 @@ class TensorExprFuser {
         device = tensorexpr::pickDeviceType(node->outputs());
       }
       if (!device || !device->is_cpu()) {
+        return false;
+      }
+    }
+
+    // Operator is only supported on GPU.
+    if (node->isMemberOf(gpu_only_operator_set)) {
+      auto device = tensorexpr::pickDeviceType(node->inputs());
+      if (!device) {
+        device = tensorexpr::pickDeviceType(node->outputs());
+      }
+      if (!device || !device->is_cuda()) {
         return false;
       }
     }
