@@ -240,7 +240,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(
     grad_weight = at::empty_like(weight, at::MemoryFormat::Contiguous);
   }
   if (grad_input_mask[2]) {
-    grad_bias = at::empty_like(weight, at::MemoryFormat::Contiguous);
+    grad_bias = at::empty({input.size(1)}, input.options());
   }
 
   // since we are directly manipulating pointers in contiguous path,
@@ -416,6 +416,22 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
   const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
 
   auto num_features = input.sizes()[1];
+
+  if (input.numel() == 0) {
+    Tensor reserve = at::empty({0}, input.options().dtype(kByte));
+    auto options = input.options().dtype(
+        at::toAccumulateType(input.scalar_type(), /*is_cuda=*/input.is_cuda()));
+    auto save_mean = at::empty({num_features}, options);
+    auto save_invstd = at::empty({num_features}, options);
+
+    // don't return view of input, don't return empty tensor because it will break gradient chain
+    auto out = input.clone();
+    if (weight.defined()) out = out * weight[0];
+    if (bias.defined()) out = out + bias[0];
+    return std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t>(
+        out, save_mean, save_invstd, reserve, 0);
+  }
+
   if (running_mean.defined()) {
     check_dims_match_num_input_features("running_mean", num_features, running_mean.numel());
   } else if (!training) {
@@ -508,7 +524,29 @@ std::tuple<Tensor, Tensor, Tensor> _batch_norm_impl_index_backward(
   const Tensor& save_mean = c10::value_or_else(save_mean_opt, [] {return Tensor();});
   const Tensor& save_var_transform = c10::value_or_else(save_var_transform_opt, [] {return Tensor();});
 
+  if (input.numel() == 0) {
+    std::vector<int64_t> dims(input.dim() - 1);
+    dims[0] = 0;
+    std::iota(dims.begin() + 1, dims.end(), 2);
+
+    // don't return empty tensor because it will break gradient chain
+    Tensor grad_input;
+    Tensor grad_weight;
+    Tensor grad_bias;
+    if (output_mask[2]) {
+      grad_bias = grad_output.sum(dims);
+    }
+    if (output_mask[1]) {
+      grad_weight = (grad_output * input).sum(dims);
+    }
+    if (output_mask[0] && weight.defined()) {
+      grad_input = grad_output * weight[0];
+    }
+    return std::make_tuple(grad_input, grad_weight, grad_bias);
+  }
+
   // backward in inference mode is not supported in cudnn, fallback to native
+  // TODO: verify the same thing in miopen
   if (impl_index == 0 || (!train)) {
     return at::native_batch_norm_backward(grad_output, input, weight, running_mean, running_var, save_mean, save_var_transform, train, epsilon, output_mask);
   } else if (impl_index == 1) {
@@ -529,13 +567,6 @@ Tensor batch_norm(
   const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
   const Tensor& running_mean = c10::value_or_else(running_mean_opt, [] {return Tensor();});
   const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
-  if (input.numel()==0){
-    //don't return view of input, don't return empty tensor because it will break gradient chain
-    auto out = input.clone();
-    if (weight.defined()) out = out * weight[0];
-    if (bias.defined()) out = out + bias[0];
-    return out;
-  }
   return std::get<0>(at::_batch_norm_impl_index(input, weight, bias, running_mean, running_var,
                                                 training, momentum, eps, cudnn_enabled));
 }

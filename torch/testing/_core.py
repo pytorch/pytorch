@@ -18,13 +18,13 @@ __all__ = [
     "all_types_and_complex",
     "all_types_and_complex_and",
     "all_types_and_half",
-    "assert_allclose",
     "complex_types",
     "empty_types",
     "floating_and_complex_types",
     "floating_and_complex_types_and",
     "floating_types",
     "floating_types_and",
+    "double_types",
     "floating_types_and_half",
     "get_all_complex_dtypes",
     "get_all_dtypes",
@@ -245,30 +245,6 @@ def _compare_scalars_internal(a, b, *, rtol: float, atol: float, equal_nan: Unio
 
     return _helper(a, b, " ")
 
-def assert_allclose(actual, expected, rtol=None, atol=None, equal_nan=True, msg='') -> None:
-    if not isinstance(actual, torch.Tensor):
-        actual = torch.tensor(actual)
-    if not isinstance(expected, torch.Tensor):
-        expected = torch.tensor(expected, dtype=actual.dtype)
-    if expected.shape != actual.shape:
-        raise AssertionError("expected tensor shape {0} doesn't match with actual tensor "
-                             "shape {1}!".format(expected.shape, actual.shape))
-    if rtol is None or atol is None:
-        if rtol is not None or atol is not None:
-            raise ValueError("rtol and atol must both be specified or both be unspecified")
-        rtol, atol = _get_default_tolerance(actual, expected)
-
-    result, debug_msg = _compare_tensors_internal(actual, expected,
-                                                  rtol=rtol, atol=atol,
-                                                  equal_nan=equal_nan)
-
-    if result:
-        return
-
-    if msg is None or msg == '':
-        msg = debug_msg
-
-    raise AssertionError(msg)
 
 def make_non_contiguous(tensor: torch.Tensor) -> torch.Tensor:
     if tensor.numel() <= 1:  # can't make non-contiguous
@@ -336,6 +312,10 @@ def floating_and_complex_types():
 def floating_and_complex_types_and(*dtypes):
     return _floating_and_complex_types + _validate_dtypes(*dtypes)
 
+_double_types = _dispatch_dtypes((torch.float64, torch.complex128))
+def double_types():
+    return _double_types
+
 _integral_types = _dispatch_dtypes((torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64))
 def integral_types():
     return _integral_types
@@ -401,19 +381,3 @@ def get_all_fp_dtypes(include_half=True, include_bfloat16=True) -> List[torch.dt
 
 def get_all_device_types() -> List[str]:
     return ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
-
-# 'dtype': (rtol, atol)
-_default_tolerances = {
-    'float64': (1e-5, 1e-8),  # NumPy default
-    'float32': (1e-4, 1e-5),  # This may need to be changed
-    'float16': (1e-3, 1e-3),  # This may need to be changed
-}
-
-
-def _get_default_tolerance(a, b=None) -> Tuple[float, float]:
-    if b is None:
-        dtype = str(a.dtype).split('.')[-1]  # e.g. "float32"
-        return _default_tolerances.get(dtype, (0, 0))
-    a_tol = _get_default_tolerance(a)
-    b_tol = _get_default_tolerance(b)
-    return (max(a_tol[0], b_tol[0]), max(a_tol[1], b_tol[1]))

@@ -4,7 +4,6 @@ import sys
 import tempfile
 import threading
 import time
-import unittest
 from datetime import timedelta
 from itertools import product
 from sys import platform
@@ -29,8 +28,12 @@ from torch.testing._internal.common_utils import (
     TestCase,
     load_tests,
     run_tests,
-    TEST_WITH_TSAN,
+    TEST_WITH_DEV_DBG_ASAN,
 )
+
+if TEST_WITH_DEV_DBG_ASAN:
+    print("Multiprocessing spawn is not compatible with dev/dbg asan", file=sys.stderr)
+    sys.exit(0)
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -427,9 +430,9 @@ class AbstractDistributedDataParallelTest(object):
 
     def _simple_hook(
         self, state: object, bucket: dist.GradBucket
-    ) -> torch.futures.Future:
+    ) -> torch.futures.Future[torch.Tensor]:
         fut = torch.futures.Future()
-        fut.set_result(torch.ones_like(bucket.get_tensor()))
+        fut.set_result(torch.ones_like(bucket.buffer()))
 
         def fut_then(fut):
             # Add ones to fut's result.
@@ -439,19 +442,12 @@ class AbstractDistributedDataParallelTest(object):
         return fut.then(fut_then)
 
 
-@unittest.skipIf(
-    TEST_WITH_TSAN,
-    "TSAN is not fork-safe since we're forking in a multi-threaded environment",
-)
 class DistributedDataParallelTest(
     AbstractDistributedDataParallelTest, MultiProcessTestCase
 ):
     def setUp(self):
         super(DistributedDataParallelTest, self).setUp()
-        if sys.platform == "win32":
-            self._spawn_processes()
-        else:
-            self._fork_processes()
+        self._spawn_processes()
 
     def test_invalid_powerSGD_state(self):
         for start_powerSGD_iter, use_error_feedback, warm_start in product(
@@ -481,7 +477,10 @@ class ComputeBucketAssignmentTest(TestCase):
             torch.empty([100], dtype=torch.float),
             torch.empty([50], dtype=torch.float),
         ]
-        result = dist._compute_bucket_assignment_by_size(tensors, [400])
+        result, per_bucket_size_limits = dist._compute_bucket_assignment_by_size(
+            tensors, [400]
+        )
+        self.assertTrue(all(size_lim == 400 for size_lim in per_bucket_size_limits))
         self.assertEqual([[0], [1], [2], [3]], result)
 
     def test_single_limit_multi_dtype(self):
@@ -493,7 +492,10 @@ class ComputeBucketAssignmentTest(TestCase):
             torch.empty([50], dtype=torch.float),
             torch.empty([25], dtype=torch.double),
         ]
-        result = dist._compute_bucket_assignment_by_size(tensors, [400])
+        result, per_bucket_size_limits = dist._compute_bucket_assignment_by_size(
+            tensors, [400]
+        )
+        self.assertTrue(all(size_lim == 400 for size_lim in per_bucket_size_limits))
         self.assertEqual([[0, 2], [1, 3], [4], [5]], result)
 
     def test_multi_limit_single_dtype(self):
@@ -503,7 +505,10 @@ class ComputeBucketAssignmentTest(TestCase):
             torch.empty([10], dtype=torch.float),
             torch.empty([10], dtype=torch.float),
         ]
-        result = dist._compute_bucket_assignment_by_size(tensors, [40, 80])
+        result, per_bucket_size_limits = dist._compute_bucket_assignment_by_size(
+            tensors, [40, 80]
+        )
+        self.assertEqual(per_bucket_size_limits, [40, 80, 80])
         self.assertEqual([[0], [1, 2], [3]], result)
 
     def test_multi_limit_multi_dtype(self):
@@ -515,8 +520,11 @@ class ComputeBucketAssignmentTest(TestCase):
             torch.empty([50], dtype=torch.float),
             torch.empty([25], dtype=torch.double),
         ]
-        result = dist._compute_bucket_assignment_by_size(tensors, [200, 400])
+        result, per_bucket_size_limits = dist._compute_bucket_assignment_by_size(
+            tensors, [200, 400]
+        )
         self.assertEqual([[0], [1], [2, 4], [3, 5]], result)
+        self.assertEqual(per_bucket_size_limits, [200, 200, 400, 400])
 
 
 class AbstractCommTest(object):
@@ -646,18 +654,10 @@ class AbstractCommTest(object):
             dist.all_gather_object(obj_list, subgroup_seq, group=subgroup)
             self.assertEqual(len(set(obj_list)), 1)
 
-
-@unittest.skipIf(
-    TEST_WITH_TSAN,
-    "TSAN is not fork-safe since we're forking in a multi-threaded environment",
-)
 class CommTest(AbstractCommTest, MultiProcessTestCase):
     def setUp(self):
         super(CommTest, self).setUp()
-        if sys.platform == "win32":
-            self._spawn_processes()
-        else:
-            self._fork_processes()
+        self._spawn_processes()
 
     def tearDown(self):
         super(CommTest, self).tearDown()

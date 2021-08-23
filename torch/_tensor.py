@@ -3,6 +3,7 @@ import functools
 from numbers import Number
 from typing import Any, Dict, Optional, Tuple, Union
 import warnings
+import copyreg
 
 import torch
 import torch._C as _C
@@ -30,12 +31,41 @@ def _wrap_type_error_to_not_implemented(f):
             return NotImplemented
     return wrapped
 
+# Should not be used, this is kept only for BC of loading old serialized Tensor subclasses
 def _rebuild_from_type(func, type, args, dict):
     if type is Tensor:
         return func(*args)
 
     ret = func(*args).as_subclass(type)
     ret.__dict__ = dict
+    return ret
+
+def _rebuild_from_type_v2(func, new_type, args, state):
+    if new_type is Tensor:
+        return func(*args)
+
+    ret = func(*args).as_subclass(new_type)
+    # Tensor does define __setstate__ even though it doesn't define
+    # __getstate__. So only use __setstate__ if it is NOT the one defined
+    # on Tensor
+    if getattr(ret.__class__, "__setstate__", Tensor.__setstate__) is not Tensor.__setstate__:
+        ret.__setstate__(state)
+    else:
+        if isinstance(state, tuple):
+            if not len(state) == 2:
+                raise RuntimeError(f"Invalid serialized state: {state}")
+            dict_state = state[0]
+            slots_state = state[1]
+        else:
+            dict_state = state
+            slots_state = None
+
+        for k, v in dict_state.items():
+            setattr(ret, k, v)
+
+        if slots_state:
+            for k, v in slots_state.items():
+                setattr(ret, k, v)
     return ret
 
 
@@ -60,7 +90,7 @@ class Tensor(torch._C._TensorBase):
             # does accurate alias tracking; however, the code below
             # doesn't work because of
             # https://github.com/pytorch/pytorch/issues/47442
-            if self.is_sparse or self.device.type in ['xla', 'mlc', 'meta']:
+            if self.is_sparse or self.device.type in ['xla', 'mlc', 'ort', 'meta']:
                 new_tensor = self.clone()
             else:
                 new_storage = self.storage().__deepcopy__(memo)
@@ -100,42 +130,54 @@ class Tensor(torch._C._TensorBase):
     def __reduce_ex__(self, proto):
         if type(self) is Tensor:
             return self._reduce_ex_internal(proto)
-        relevant_args = (self,)
-        from torch.overrides import has_torch_function, handle_torch_function
-        if type(self) is not Tensor and has_torch_function(relevant_args):
-            return handle_torch_function(Tensor.__reduce_ex__, relevant_args, self, proto)
-        func, args = self._reduce_ex_internal(proto)
-        return (_rebuild_from_type, (func, type(self), args, self.__dict__))
-
-    def _reduce_ex_internal(self, proto):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__reduce_ex__, (self,), self, proto)
+        func, args = self._reduce_ex_internal(proto)
+        # Get the state of the python subclass
+        # This loosely mimicks the function on the object class but since Tensor do not inherit
+        # from it, we cannot call that function directly
+        # https://github.com/python/cpython/blob/c83919bd635f4433f1c6ae8504996a9fe3c215e5/Objects/typeobject.c#L4891
+        getstate_fn = getattr(self, "__getstate__", None)
+        if getstate_fn:
+            state = getstate_fn()
+        else:
+            slots_to_save = copyreg._slotnames(self.__class__)  # type: ignore[attr-defined]
+            if slots_to_save:
+                state = (self.__dict__, {name: getattr(self, name) for name in slots_to_save if hasattr(self, name)})
+            else:
+                state = self.__dict__
+        return (_rebuild_from_type_v2, (func, type(self), args, state))
+
+    def _reduce_ex_internal(self, proto):
         check_serializing_named_tensor(self)
         # See Note [Don't serialize hooks]
         torch.utils.hooks.warn_if_has_hooks(self)
         backward_hooks: Dict[Any, Any] = OrderedDict()
-        # Note: Numpy array is chosen to be the rebuild component for XLA Tensor.
+        # Note: Numpy array is chosen to be the rebuild component for XLA, ORT, MLC Tensors.
         # We considered a few options:
         # 1. CPU tensor can't be used here.
         #    Otherwise in torch.load CPU storage is reconstructed with randomly
-        #    initialized data, moved onto XLA device, and then storage is updated
-        #    to the serialized content. This works perfectly for CPU/CUDA but not XLA.
-        #    XLA tensor is disconnected with storage so it doesn't get the update.
+        #    initialized data, moved onto backend device, and then storage is updated
+        #    to the serialized content. This works perfectly for CPU/CUDA but not these backends;
+        #    their tensors are disconnected with storage so they don't get the update.
         # 2. Python list is not a good fit due to performance reason.
         #    `tolist()` converts every single element in the tensor into python objects
         #    and serialize them one by one.
-        if self.device.type == 'xla':
-            arg_xla = (self.cpu().numpy(),
-                       self.dtype,
-                       str(self.device),
-                       self.requires_grad)
-            return (torch._utils._rebuild_xla_tensor, arg_xla)
-        if self.device.type == 'mlc':
-            arg_mlc = (self.cpu().numpy(),
-                       self.dtype,
-                       str(self.device),
-                       self.requires_grad)
-            return (torch._utils._rebuild_mlc_tensor, arg_mlc)
+        if self.device.type in ['xla', 'ort', 'mlc']:
+            return (torch._utils._rebuild_device_tensor_from_numpy, (self.cpu().numpy(),
+                                                                     self.dtype,
+                                                                     str(self.device),
+                                                                     self.requires_grad))
+        if self.device.type == 'meta':
+            # NB: This implementation BREAKS storage sharing.  Current
+            # hypothesis is that no one cares for meta tensors.
+            arg_meta = (
+                self.dtype,
+                tuple(self.size()),
+                self.stride(),
+                self.requires_grad,
+            )
+            return (torch._utils._rebuild_meta_tensor_no_storage, arg_meta)
         if self.is_quantized:
             # quantizer_params can be different type based on torch attribute
             quantizer_params: Union[Tuple[torch.qscheme, float, int], Tuple[Any, Tensor, Tensor, int]]
@@ -403,28 +445,6 @@ class Tensor(torch._C._TensorBase):
         # If get_infos is True, then we don't need to check for errors and vice versa
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.lu, (self,), self, pivot=pivot, get_infos=get_infos)
-
-        if not torch._jit_internal.is_scripting():
-            if self.requires_grad:
-                if not (self.size(-2) == self.size(-1) and (self.dtype.is_floating_point) or self.is_complex):
-                    raise ValueError(
-                        'lu.backward works only with batches of squared full-rank matrices'
-                        ' of floating or complex types.'
-                    )
-
-                from torch._autograd_functions import _LU
-                LU, pivots, infos = _LU.apply(self, pivot, get_infos)
-                if get_infos:
-                    return LU, pivots, infos
-                else:
-                    return LU, pivots
-        else:
-            if self.requires_grad:
-                raise RuntimeError(
-                    'Script and require gradients is not supported at the moment.'
-                    'If you just want to do the forward, use .detach()'
-                    'on the input before calling the function.'
-                )
 
         LU, pivots, infos = torch._lu_with_info(self, pivot=pivot, check_errors=(not get_infos))
         if get_infos:
@@ -944,8 +964,8 @@ class Tensor(torch._C._TensorBase):
             coalesced_self = self.coalesce()
             row_indices = coalesced_self.indices()[0]
             device = coalesced_self.values().device
-            arange = torch.arange(self.shape[0] + 1, dtype=row_indices.dtype, device=device)
-            crow_indices = torch.bucketize(arange, row_indices, out_int32=row_indices.dtype == torch.int32)
+            crow_indices = torch._convert_indices_from_coo_to_csr(
+                row_indices, self.shape[0], out_int32=row_indices.dtype == torch.int32)
             return torch.sparse_csr_tensor(crow_indices,
                                            coalesced_self.indices()[1].contiguous(),
                                            coalesced_self.values(),

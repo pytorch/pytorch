@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir_printer.h>
 
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
@@ -65,7 +66,8 @@ void IrPrinter::printKernel(const Kernel* kernel) {
 }
 
 std::ostream& IrPrinter::indent() {
-  for (int i = 0; i < indent_level_; ++i) {
+  for (const auto i : c10::irange(indent_level_)) {
+    (void)i; // Suppress unused variable warning
     ir_str_ << kTab;
   }
   ir_str_ << margin_;

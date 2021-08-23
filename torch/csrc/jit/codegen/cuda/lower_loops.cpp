@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/cuda/lower_loops.h>
 
 #include <torch/csrc/jit/codegen/cuda/arith.h>

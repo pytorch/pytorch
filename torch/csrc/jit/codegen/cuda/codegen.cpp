@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/cuda/codegen.h>
 #include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
@@ -196,7 +197,8 @@ class CudaKernelGenerator : private kir::IrVisitor {
   }
 
   std::ostream& indent() {
-    for (int i = 0; i < block_nest_level_; ++i) {
+    for (const auto i : c10::irange(block_nest_level_)) {
+      (void)i; // Suppress unused variable warning
       code_ << kTab;
     }
     return code_;
