@@ -1,4 +1,5 @@
 # @generated DO NOT EDIT MANUALLY
+
 # Template is at:    .github/templates/windows_ci_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
 name: win-vs2019-cpu-py3
@@ -57,6 +58,10 @@ jobs:
           path: pytorch-${{ github.run_id }}
           # deep clone, to allow use of git merge-base
           fetch-depth: 0
+      - name: Wait until all sessions have drained
+        shell: bash
+        run: |
+          .github/scripts/display_ec2_information.sh
       - name: Install Visual Studio 2019 toolchain
         shell: powershell
         run: |
@@ -146,6 +151,10 @@ jobs:
           path: pytorch-${{ github.run_id }}
           # deep clone, to allow use of git merge-base
           fetch-depth: 0
+      - name: Wait until all sessions have drained
+        shell: bash
+        run: |
+          .github/scripts/display_ec2_information.sh
       - name: Install Visual Studio 2019 toolchain
         shell: powershell
         run: |
@@ -232,6 +241,10 @@ jobs:
         with:
           # deep clone, to allow tools/stats/print_test_stats.py to use Git commands
           fetch-depth: 0
+      - name: Wait until all sessions have drained
+        shell: bash
+        run: |
+          .github/scripts/display_ec2_information.sh
       - uses: actions/download-artifact@v2
         name: Download PyTorch Test Reports
         with:

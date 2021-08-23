@@ -1,3 +1,4 @@
+{% import 'common.yml.j2' as common %}
 {# squid_proxy is an private ELB that only available for GHA custom runners #}
 {%- set squid_proxy    = "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128" -%}
 {# squid_no_proxy is a list of common set of fixed domains or IPs that we don't need to proxy. See https://docs.aws.amazon.com/AmazonECS/latest/developerguide/http_proxy_config.html#windows-proxy #}
@@ -71,6 +72,7 @@ jobs:
     outputs:
       docker_image: ${{ steps.calculate-tag.outputs.docker_image }}
     steps:
+      !{{ common.display_ec2_information() }}
       - name: Log in to ECR
         run: |
           aws ecr get-login --no-include-email --region us-east-1 > /tmp/ecr-login.sh
@@ -165,6 +167,7 @@ jobs:
         with:
           fetch-depth: 0 # deep clone, to allow sharding to use git rev-list
           submodules: recursive
+      !{{ common.display_ec2_information() }}
       - name: Pull docker image
         run: |
           docker pull "${DOCKER_IMAGE}"
@@ -318,6 +321,7 @@ jobs:
         with:
           fetch-depth: 0 # deep clone, to allow sharding to use git rev-list
           submodules: recursive
+      !{{ common.display_ec2_information() }}
       - name: Pull docker image
         run: |
           docker pull "${DOCKER_IMAGE}"
@@ -459,6 +463,7 @@ jobs:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.render-matrix) }}
       fail-fast: false
     steps:
+      !{{ common.display_ec2_information() }}
       - name: Log in to ECR
         run: |
           aws ecr get-login --no-include-email --region us-east-1 > /tmp/ecr-login.sh
@@ -541,6 +546,7 @@ jobs:
         with:
           fetch-depth: 0 # deep clone, to allow sharding to use git rev-list
           submodules: recursive
+      !{{ common.display_ec2_information() }}
       - name: Pull docker image
         run: |
           docker pull "${DOCKER_IMAGE}"

@@ -1,0 +1,6 @@
+{%- macro display_ec2_information() -%}
+      - name: Wait until all sessions have drained
+        shell: bash
+        run: |
+          .github/scripts/display_ec2_information.sh
+{%- endmacro -%}
