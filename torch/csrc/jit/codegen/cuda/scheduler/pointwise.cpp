@@ -67,10 +67,17 @@ c10::optional<PointwiseParams> getPointwiseHeuristics(
   if (TensorDomain::noReductions(
           TensorDomain::noBroadcasts(largest_out->domain()->domain()))
           .size() == 0) {
-    if (data_cache && data_cache->isRecording()) {
-      data_cache->setVectorizableInputsOutputs(std::vector<TensorView*>());
-      data_cache->setMappedInputOutputDims(std::vector<int64_t>());
-    }
+    // Create empty entries for vectorizable inputs outputs
+    //  and mapping count
+    auto vectorizable_inputs_outputs_entry = HeuristicSummaryEntry<
+        HeuristicCompileTime::VectorizableInputsAndOutputs>(data_cache, []() {
+      return std::make_unique<std::vector<TensorView*>>();
+    });
+
+    auto mapping_count_entry =
+        HeuristicSummaryEntry<HeuristicCompileTime::MappedInputsOutputs>(
+            data_cache,
+            []() { return std::make_unique<std::vector<int64_t>>(); });
     return PointwiseParams();
   }
 
@@ -134,24 +141,14 @@ c10::optional<PointwiseParams> getPointwiseHeuristics(
   // Vectorize as much as we can
   size_t vectorize_factor = max_unroll_factor;
 
-  HeuristicCacheAccessor<std::vector<TensorView*>>
-      vectorizable_inputs_outputs_data;
+  auto vectorizable_inputs_outputs_entry =
+      HeuristicSummaryEntry<HeuristicCompileTime::VectorizableInputsAndOutputs>(
+          data_cache, [&largest_out]() {
+            return std::make_unique<std::vector<TensorView*>>(
+                scheduler_utils::getVectorizableInputsOutputs(largest_out));
+          });
 
-  // TODO: move all these boilerplate code into the accessor class
-  // (follow up)
-  if (data_cache && !data_cache->isRecording()) {
-    vectorizable_inputs_outputs_data.writeTemporary(
-        data_cache->getVectorizableInputsOutputs());
-  } else {
-    vectorizable_inputs_outputs_data.writeNew(
-        scheduler_utils::getVectorizableInputsOutputs(largest_out));
-    if (data_cache && data_cache->isRecording()) {
-      data_cache->setVectorizableInputsOutputs(
-          vectorizable_inputs_outputs_data.read());
-    }
-  }
-
-  auto& vectorizable_inputs_outputs = vectorizable_inputs_outputs_data.read();
+  auto& vectorizable_inputs_outputs = vectorizable_inputs_outputs_entry.get();
 
   for (auto tv : vectorizable_inputs_outputs) {
     const auto tv_vectorize_factor = runtime_info.getVectorizableWidth(tv);
@@ -207,21 +204,14 @@ c10::optional<PointwiseParams> getPointwiseHeuristics(
   // break point with gdimx and use gdimy for the left side of the break point.
   int64_t gdimy = 1;
 
-  HeuristicCacheAccessor<std::vector<int64_t>> mapping_count_accessor;
-  // TODO: move all these boilerplate code into the accessor class
-  // (follow up)
-  if (data_cache && !data_cache->isRecording()) {
-    mapping_count_accessor.writeTemporary(
-        data_cache->getMappedInputOutputDims());
-  } else {
-    mapping_count_accessor.writeNew(
-        scheduler_utils::mappedInputsOutputs(largest_out));
-    if (data_cache && data_cache->isRecording()) {
-      data_cache->setMappedInputOutputDims(mapping_count_accessor.read());
-    }
-  }
+  auto mapping_count_entry =
+      HeuristicSummaryEntry<HeuristicCompileTime::MappedInputsOutputs>(
+          data_cache, [&largest_out]() {
+            return std::make_unique<std::vector<int64_t>>(
+                scheduler_utils::mappedInputsOutputs(largest_out));
+          });
 
-  auto mapping_count = mapping_count_accessor.read();
+  auto& mapping_count = mapping_count_entry.get();
 
   {
     // How much would this transfer cost if it was done as a 1-D schedule

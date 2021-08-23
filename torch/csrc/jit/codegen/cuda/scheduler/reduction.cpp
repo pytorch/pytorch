@@ -624,19 +624,14 @@ TORCH_CUDA_CU_API c10::optional<ReductionParams> getReductionHeuristics(
 
   FusionGuard fg(fusion);
 
-  HeuristicCacheAccessor<std::vector<TensorView*>> reduction_tv_data;
-  // TODO: move all these boilerplate code into the accessor class
-  // (follow up)
-  if (data_cache && !data_cache->isRecording()) {
-    reduction_tv_data.writeTemporary(data_cache->getReductionTVs());
-  } else {
-    reduction_tv_data.writeNew(scheduler_utils::getReductionTvs(fusion));
-    if (data_cache && data_cache->isRecording()) {
-      data_cache->setReductionTVs(reduction_tv_data.read());
-    }
-  }
+  auto reduction_tv_entry =
+      HeuristicSummaryEntry<HeuristicCompileTime::ReductionTVs>(
+          data_cache, [&fusion]() {
+            return std::make_unique<std::vector<TensorView*>>(
+                scheduler_utils::getReductionTvs(fusion));
+          });
 
-  auto& reduction_tvs = reduction_tv_data.read();
+  auto& reduction_tvs = reduction_tv_entry.get();
 
   TORCH_INTERNAL_ASSERT(
       reduction_tvs.size() == 1, "Need reduction tensor views to schedule.");
@@ -702,8 +697,14 @@ TORCH_CUDA_CU_API c10::optional<ReductionParams> getReductionHeuristics(
       n_tensor_inputs > 0,
       "Tried to schedule a fusion with no tensor inputs, currently not supported.");
 
-  auto vectorizable_inputs_outputs =
-      scheduler_utils::getVectorizableInputsOutputs(reduction_tv);
+  auto vectorizable_inputs_outputs_entry =
+      HeuristicSummaryEntry<HeuristicCompileTime::VectorizableInputsAndOutputs>(
+          data_cache, [&reduction_tv]() {
+            return std::make_unique<std::vector<TensorView*>>(
+                scheduler_utils::getVectorizableInputsOutputs(reduction_tv));
+          });
+
+  auto& vectorizable_inputs_outputs = vectorizable_inputs_outputs_entry.get();
 
   // Vectorize as much as we can
   size_t vectorize_factor = std::numeric_limits<size_t>::max();
