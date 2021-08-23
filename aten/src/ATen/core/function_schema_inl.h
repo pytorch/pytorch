@@ -121,17 +121,40 @@ inline bool FunctionSchema::isBackwardCompatibleWith(
     }
   }
 
-  // Make sure that all the old arguments have their corresponding backward
-  // compatible arguments in this schema.
-  for (size_t i = 0; i < old.arguments().size(); ++i) {
+  // we want to test both out and default args seperately
+
+  // find the start of out args in the old schema
+  int old_out_start_idx;
+  for (old_out_start_idx = old.arguments().size() - 1; old_out_start_idx > -1;
+       old_out_start_idx--) {
+    if (!old.arguments().at(old_out_start_idx).is_out()) {
+      break;
+    }
+  }
+
+  old_out_start_idx++;
+
+  // find the start of out args in the old schema
+  int new_out_start_idx;
+  for (new_out_start_idx = arguments().size() - 1; new_out_start_idx > -1;
+       new_out_start_idx--) {
+    if (!arguments().at(new_out_start_idx).is_out()) {
+      break;
+    }
+  }
+
+  new_out_start_idx++;
+
+  // make sure among the default args, they are backward compatible
+  for (size_t i = 0; i < old_out_start_idx; i++) {
     if (!arguments().at(i).isBackwardCompatibleWith(
           old.arguments().at(i), why_not)) {
       return false;
     }
   }
 
-  // Validate that all new arguments provided a default value.
-  for (size_t i = old.arguments().size(); i < arguments().size(); ++i) {
+  // Validate that all new arguments provided a default value
+  for (size_t i = old_out_start_idx; i < new_out_start_idx; ++i) {
     if (!arguments().at(i).default_value()) {
       if (why_not) {
         *why_not
@@ -140,6 +163,15 @@ inline bool FunctionSchema::isBackwardCompatibleWith(
             << arguments().at(i).type()->str()
             << " did not provide a default value.";
       }
+      return false;
+    }
+  }
+
+  // now compare the out args
+  for (size_t i = old_out_start_idx; i < old.arguments().size(); i++) {
+    if (!arguments()
+             .at(i - old_out_start_idx + new_out_start_idx)
+             .isBackwardCompatibleWith(old.arguments().at(i), why_not)) {
       return false;
     }
   }
