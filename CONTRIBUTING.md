@@ -30,6 +30,7 @@
     - [Use Ninja](#use-ninja)
     - [Use CCache](#use-ccache)
     - [Use a faster linker](#use-a-faster-linker)
+    - [Use pre-compiled headers](#use-pre-compiled-headers)
   - [C++ frontend development tips](#c-frontend-development-tips)
   - [GDB integration](#gdb-integration)
 - [CUDA development tips](#cuda-development-tips)
@@ -464,6 +465,17 @@ of very low signal to reviewers.
 
 ## Writing documentation
 
+So you want to write some documentation and don't know where to start?
+PyTorch has two main types of documentation:
+- user-facing documentation.
+These are the docs that you see over at [our docs website](pytorch.org/docs).
+- developer facing documentation.
+Developer facing documentation is spread around our READMEs in our codebase and in
+the [PyTorch Developer Wiki](pytorch.org/wiki).
+If you're interested in adding new developer docs, please read this [page on the wiki](https://github.com/pytorch/pytorch/wiki/Where-or-how-should-I-add-documentation%3F) on our best practices for where to put it.
+
+The rest of this section is about user-facing documentation.
+
 PyTorch uses [Google style](http://sphinxcontrib-napoleon.readthedocs.io/en/latest/example_google.html)
 for formatting docstrings. Length of line inside docstrings block must be limited to 80 characters to
 fit into Jupyter documentation popups.
@@ -839,6 +851,27 @@ The easiest way to use `lld` this is download the
 ln -s /path/to/downloaded/ld.lld /usr/local/bin/ld
 ```
 
+#### Use pre-compiled headers
+
+Sometimes there's no way of getting around rebuilding lots of files, for example
+editing `native_functions.yaml` usually means 1000+ files being rebuilt. If
+you're using CMake newer than 3.16, you can enable pre-compiled headers by
+setting `USE_PRECOMPILED_HEADERS=1` either on first setup, or in the
+`CMakeCache.txt` file.
+
+```sh
+USE_PRECOMPILED_HEADERS=1 python setup.py develop
+```
+
+This adds a build step where the compiler takes `<ATen/ATen.h>` and essentially
+dumps it's internal AST to a file so the compiler can avoid repeating itself for
+every `.cpp` file.
+
+One caveat is that when enabled, this header gets included in every file by default.
+Which may change what code is legal, for example:
+- internal functions can never alias existing names in `<ATen/ATen.h>`
+- names in `<ATen/ATen.h>` will work even if you don't explicitly include it.
+
 ### C++ frontend development tips
 
 We have very extensive tests in the [test/cpp/api](test/cpp/api) folder. The
@@ -934,7 +967,7 @@ If you are working on the CUDA code, here are some useful CUDA debugging tips:
    kernel.
    ```python
    import torch
-   import time
+   from torch.utils.benchmark import Timer
    size = 128*512
    nrep = 100
    nbytes_read_write = 4 # this is number of bytes read + written by a kernel. Change this to fit your kernel.
@@ -942,20 +975,16 @@ If you are working on the CUDA code, here are some useful CUDA debugging tips:
    for i in range(10):
        a=torch.empty(size).cuda().uniform_()
        torch.cuda.synchronize()
-       start = time.time()
-       # dry run to alloc
        out = a.uniform_()
        torch.cuda.synchronize()
-       start = time.time()
-       for i in range(nrep):
-         out = a.uniform_()
-       torch.cuda.synchronize()
-       end = time.time()
-       timec = (end-start)/nrep
+       t = Timer(stmt="a.uniform_()", globals=globals())
+       res = t.blocked_autorange()
+       timec = res.median
        print("uniform, size, elements", size, "forward", timec, "bandwidth (GB/s)", size*(nbytes_read_write)*1e-9/timec)
        size *=2
    ```
 
+  See more cuda development tips [here](https://github.com/pytorch/pytorch/wiki/CUDA-basics)
 
 ## Windows development tips
 
