@@ -436,10 +436,6 @@ jobs:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.render-matrix) }}
       fail-fast: false
     steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          .github/scripts/display_ec2_information.sh
       - name: Log in to ECR
         run: |
           aws ecr get-login --no-include-email --region us-east-1 > /tmp/ecr-login.sh
@@ -457,6 +453,10 @@ jobs:
         with:
           # deep clone, to allow tools/stats/print_test_stats.py to use Git commands
           fetch-depth: 0
+      - name: Display EC2 information
+        shell: bash
+        run: |
+          .github/scripts/display_ec2_information.sh
       - uses: actions/download-artifact@v2
         name: Download PyTorch Test Reports
         with:

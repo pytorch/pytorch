@@ -463,7 +463,6 @@ jobs:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.render-matrix) }}
       fail-fast: false
     steps:
-      !{{ common.display_ec2_information() }}
       - name: Log in to ECR
         run: |
           aws ecr get-login --no-include-email --region us-east-1 > /tmp/ecr-login.sh
@@ -481,6 +480,7 @@ jobs:
         with:
           # deep clone, to allow tools/stats/print_test_stats.py to use Git commands
           fetch-depth: 0
+      !{{ common.display_ec2_information() }}
       - uses: actions/download-artifact@v2
         name: Download PyTorch Test Reports
         with:
