@@ -75,8 +75,8 @@ class DistQuantizationTests(MultiProcessTestCase):
         store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(store=store, rank=self.rank, world_size=self.world_size, backend='gloo')
         device = torch.device(f"cuda:{self.rank}")
-        group_id = dist.new_group(range(self.world_size))
         group = list(range(0, self.world_size))
+        group_id = dist.group.WORLD
         self._test_all_gather(group, group_id, self.rank, dtype=torch.float32, qtype=DQuantType.FP16)
 
     @requires_nccl()
@@ -86,8 +86,8 @@ class DistQuantizationTests(MultiProcessTestCase):
         store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(store=store, rank=self.rank, world_size=self.world_size, backend='nccl')
         device = torch.device(f"cuda:{self.rank}")
-        group_id = dist.new_group(range(self.world_size))
         group = list(range(0, self.world_size))
+        group_id = dist.group.WORLD
         rank_to_GPU = self._init_multigpu_helper()
         self._test_all_to_all(
             group,
