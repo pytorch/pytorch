@@ -294,9 +294,11 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   REDUCTION_BOXED(max.dim);
   m.impl("mean", mean_decomp);
   REDUCTION_BOXED(mean.dim);
+  REDUCTION_BOXED(median.dim);
   m.impl("min", min_decomp);
   REDUCTION_BOXED(min.dim);
   REDUCTION_BOXED(mode);
+  REDUCTION_BOXED(nanmedian.dim);
   m.impl("nansum", nansum_decomp);
   REDUCTION_BOXED(nansum.dim_IntList);
   m.impl("norm.Scalar", norm_scalar_decomp);
