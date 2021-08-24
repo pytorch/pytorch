@@ -17,9 +17,9 @@ import warnings
 
 # Normal exec loses the source code, however we can work with
 # the linecache module to recover it.
-# Using exec_with_source will add it to our local cache
+# Using _exec_with_source will add it to our local cache
 # and then tools like TorchScript will be able to get source info.
-class EvalCacheLoader(object):
+class _EvalCacheLoader(object):
     def __init__(self):
         self.eval_cache = {}
         self.next_id = 0
@@ -62,10 +62,10 @@ class EvalCacheLoader(object):
         self.next_id += 1
         return key
 
-_loader = EvalCacheLoader()
+_loader = _EvalCacheLoader()
 
 
-def exec_with_source(src: str, globals: Dict[str, Any]):
+def _exec_with_source(src: str, globals: Dict[str, Any]):
     key = _loader.cache(src, globals)
     exec(compile(src, key, 'exec'), globals)
 
@@ -73,7 +73,7 @@ def exec_with_source(src: str, globals: Dict[str, Any]):
 def _forward_from_src(src: str, globals: Dict[str, Any]):
     # avoid mutating the passed in dict
     globals_copy = globals.copy()
-    exec_with_source(src, globals_copy)
+    _exec_with_source(src, globals_copy)
     forward_fn = globals_copy['forward']
     del globals_copy['forward']
     return forward_fn
@@ -95,7 +95,7 @@ def _format_import_block(globals: Dict[str, Any], importer: Importer):
     return '\n'.join(import_strs)
 
 
-def reduce_graph_module(body: Dict[Any, Any], import_block: str) -> torch.nn.Module:
+def _reduce_graph_module(body: Dict[Any, Any], import_block: str) -> torch.nn.Module:
     # BC: attribute name was changed from `code` to `_code` to facilitate
     # making `code` into a property and adding a docstring to it
     fn_src = body.get('_code') or body['code']
@@ -103,14 +103,14 @@ def reduce_graph_module(body: Dict[Any, Any], import_block: str) -> torch.nn.Mod
     return _deserialize_graph_module(forward, body)
 
 
-def reduce_package_graph_module(
+def _reduce_package_graph_module(
     importer: PackageImporter, body: Dict[Any, Any], generated_module_name: str
 ) -> torch.nn.Module:
     forward = importer.import_module(generated_module_name).forward
     return _deserialize_graph_module(forward, body)
 
 
-def reduce_deploy_graph_module(
+def _reduce_deploy_graph_module(
     importer: PackageImporter, body: Dict[Any, Any], import_block: str
 ) -> torch.nn.Module:
     ns = dict()
@@ -232,6 +232,9 @@ class GraphModule(torch.nn.Module):
         the ``graph`` attribute itself, you must call ``recompile()`` to update the generated
         code.
 
+    Backwards Compatibility:
+
+        Backwards-compatibility for this API is guaranteed.
     """
     def __new__(cls: 'Type[GraphModule]', *args, **kwargs):
         # each instance of a graph module needs its own forward method
@@ -267,6 +270,9 @@ class GraphModule(torch.nn.Module):
                 error messages will report as originating from ``GraphModule``. It may be helpful to set this
                 to ``root``'s original name or a name that makes sense within the context of your transform.
 
+        Backwards Compatibility:
+
+            Backwards-compatibility for this API is guaranteed.
         """
         super().__init__()
         self.__class__.__name__ = class_name
@@ -319,6 +325,10 @@ class GraphModule(torch.nn.Module):
     def graph(self) -> Graph:
         """
         Return the ``Graph`` underlying this ``GraphModule``
+
+        Backwards Compatibility:
+
+            Backwards-compatibility for this API is guaranteed.
         """
         return self._graph
 
@@ -328,6 +338,10 @@ class GraphModule(torch.nn.Module):
         Set the underlying ``Graph`` for this ``GraphModule``. This will internally
         recompile the ``GraphModule`` so that the generated ``forward()`` function
         corresponds to ``g``
+
+        Backwards Compatibility:
+
+            Backwards-compatibility for this API is guaranteed.
         """
         assert isinstance(g, Graph), f'Expected a Graph instance, but got {type(g)}'
         self._graph = g
@@ -344,6 +358,11 @@ class GraphModule(torch.nn.Module):
 
             module_name (str): Top-level name to use for the ``Module`` while
                 writing out the code
+
+        Backwards Compatibility:
+
+            This API is experimental and its backwards-compatibility is *NOT*
+            guaranteed
         """
         folder = Path(folder)
         Path(folder).mkdir(exist_ok=True)
@@ -419,6 +438,9 @@ class {module_name}(torch.nn.Module):
                 or b) reference an ``nn.Module`` (not a parameter or
                 other attribute)
 
+        Backwards Compatibility:
+
+            Backwards-compatibility for this API is guaranteed.
         """
         *prefix, field = target.split('.')
         mod: torch.nn.Module = self
@@ -456,6 +478,10 @@ class {module_name}(torch.nn.Module):
                 submodule we want to delete. A return value of ``False``
                 means that the ``target`` was not a valid reference to
                 a submodule.
+
+        Backwards Compatibility:
+
+            Backwards-compatibility for this API is guaranteed.
         """
         atoms = target.split(".")
         path, target_submod = atoms[:-1], atoms[-1]
@@ -494,6 +520,10 @@ class {module_name}(torch.nn.Module):
 
         This method can be called to clean up an ``nn.Module`` without
         manually calling ``delete_submodule`` on each unused submodule.
+
+        Backwards Compatibility:
+
+            Backwards-compatibility for this API is guaranteed.
         """
         used: List[str] = []
 
@@ -530,6 +560,10 @@ class {module_name}(torch.nn.Module):
         """
         Return the Python code generated from the ``Graph`` underlying this
         ``GraphModule``.
+
+        Backwards Compatibility:
+
+            Backwards-compatibility for this API is guaranteed.
         """
         if not hasattr(self, '_code'):
             raise RuntimeError('Code has not been generated! Please report a bug to PyTorch')
@@ -540,6 +574,10 @@ class {module_name}(torch.nn.Module):
         Recompile this GraphModule from its ``graph`` attribute. This should be
         called after editing the contained ``graph``, otherwise the generated
         code of this ``GraphModule`` will be out of date.
+
+        Backwards Compatibility:
+
+            Backwards-compatibility for this API is guaranteed.
         """
         if self._graph._pytree_info is not None:
             self._in_spec = self._graph._pytree_info.in_spec
@@ -613,7 +651,7 @@ class {module_name}(torch.nn.Module):
 
         python_code = self.recompile()
         import_block = _format_import_block(python_code.globals, importer)
-        return (reduce_deploy_graph_module, (dict_without_graph, import_block))
+        return (_reduce_deploy_graph_module, (dict_without_graph, import_block))
 
     def __reduce_package__(self, exporter: PackageExporter):
         dict_without_graph = self.__dict__.copy()
@@ -625,7 +663,7 @@ class {module_name}(torch.nn.Module):
         import_block = _format_import_block(python_code.globals, exporter.importer)
         module_code = import_block + self.code
         exporter.save_source_string(generated_module_name, module_code)
-        return (reduce_package_graph_module, (dict_without_graph, generated_module_name))
+        return (_reduce_package_graph_module, (dict_without_graph, generated_module_name))
 
     def __reduce__(self):
         """
@@ -639,7 +677,7 @@ class {module_name}(torch.nn.Module):
         python_code = self.recompile()
         import_block = _format_import_block(python_code.globals, sys_importer)
         del dict_without_graph['_graph']
-        return (reduce_graph_module, (dict_without_graph, import_block))
+        return (_reduce_graph_module, (dict_without_graph, import_block))
 
     # because __reduce__ is defined for serialization,
     # we need to define deepcopy otherwise it will call __reduce__

@@ -58,6 +58,10 @@ class Interpreter:
             use within the Module's execution. This ensures optimal memory usage during
             execution. This can be disabled to, for example, examine all of the intermediate
             values in the execution by looking at the ``Interpreter.env`` attribute.
+
+    Backwards Compatibility:
+
+        Backwards-compatibility for this API is guaranteed.
     """
     def __init__(self, module : GraphModule, garbage_collect_values : bool = True):
         assert isinstance(module, GraphModule)
@@ -97,6 +101,10 @@ class Interpreter:
 
         Returns:
             Any: The value returned from executing the Module
+
+        Backwards Compatibility:
+
+            Backwards-compatibility for this API is guaranteed.
         """
         self.env = initial_env if initial_env else {}
 
@@ -135,6 +143,10 @@ class Interpreter:
 
         Returns:
             Any: The result of executing ``n``
+
+        Backwards Compatibility:
+
+            Backwards-compatibility for this API is guaranteed.
         """
         args, kwargs = self.fetch_args_kwargs_from_env(n)
         assert isinstance(args, tuple)
@@ -159,6 +171,10 @@ class Interpreter:
 
         Returns:
             Any: The argument value that was retrieved.
+
+        Backwards Compatibility:
+
+            Backwards-compatibility for this API is guaranteed.
         """
         assert isinstance(target, str)
         if target.startswith('*'):
@@ -182,6 +198,10 @@ class Interpreter:
 
         Return:
             Any: The value of the attribute that was retrieved
+
+        Backwards Compatibility:
+
+            Backwards-compatibility for this API is guaranteed.
         """
         assert isinstance(target, str)
         return self.fetch_attr(target)
@@ -199,6 +219,10 @@ class Interpreter:
 
         Return
             Any: The value returned by the function invocation
+
+        Backwards Compatibility:
+
+            Backwards-compatibility for this API is guaranteed.
         """
         assert not isinstance(target, str)
 
@@ -218,6 +242,10 @@ class Interpreter:
 
         Return
             Any: The value returned by the method invocation
+
+        Backwards Compatibility:
+
+            Backwards-compatibility for this API is guaranteed.
         """
         # args[0] is the `self` object for this method call
         self_obj, *args_tail = args
@@ -239,6 +267,10 @@ class Interpreter:
 
         Return
             Any: The value returned by the module invocation
+
+        Backwards Compatibility:
+
+            Backwards-compatibility for this API is guaranteed.
         """
         # Retrieve executed args and kwargs values from the environment
 
@@ -262,6 +294,10 @@ class Interpreter:
 
         Return:
             Any: The return value referenced by the output node
+
+        Backwards Compatibility:
+
+            Backwards-compatibility for this API is guaranteed.
         """
         return args[0]
 
@@ -276,6 +312,10 @@ class Interpreter:
 
         Return:
             Any: The value of the attribute.
+
+        Backwards Compatibility:
+
+            Backwards-compatibility for this API is guaranteed.
         """
         target_atoms = target.split('.')
         attr_itr = self.module
@@ -295,6 +335,10 @@ class Interpreter:
 
         Return:
             Tuple[Tuple, Dict]: ``args`` and ``kwargs`` with concrete values for ``n``.
+
+        Backwards Compatibility:
+
+            Backwards-compatibility for this API is guaranteed.
         """
         args = self.map_nodes_to_values(n.args, n)
         assert isinstance(args, tuple)
@@ -311,6 +355,10 @@ class Interpreter:
             args (Argument): Data structure within which to look up concrete values
 
             n (Node): Node to which ``args`` belongs. This is only used for error reporting.
+
+        Backwards Compatibility:
+
+            Backwards-compatibility for this API is guaranteed.
         """
         def load_arg(n_arg : Node) -> Any:
             if n_arg not in self.env:
@@ -356,6 +404,10 @@ class Transformer(Interpreter):
 
     Args:
         module (GraphModule): The ``Module`` to be transformed.
+
+    Backwards Compatibility:
+
+        Backwards-compatibility for this API is guaranteed.
     """
     def __init__(self, module):
         super().__init__(module)
@@ -383,6 +435,10 @@ class Transformer(Interpreter):
                 details on semantics
             args (Tuple): Tuple of positional args for this invocation
             kwargs (Dict): Dict of keyword arguments for this invocation
+
+        Backwards Compatibility:
+
+            Backwards-compatibility for this API is guaranteed.
         """
         assert isinstance(target, str)
         return Proxy(self.new_graph.placeholder(target), self.tracer)
@@ -399,6 +455,10 @@ class Transformer(Interpreter):
                 details on semantics
             args (Tuple): Tuple of positional args for this invocation
             kwargs (Dict): Dict of keyword arguments for this invocation
+
+        Backwards Compatibility:
+
+            Backwards-compatibility for this API is guaranteed.
         """
         assert isinstance(target, str)
         return Proxy(self.new_graph.get_attr(target), self.tracer)
@@ -417,6 +477,10 @@ class Transformer(Interpreter):
         """
         Transform ``self.module`` and return the transformed
         ``GraphModule``.
+
+        Backwards Compatibility:
+
+            Backwards-compatibility for this API is guaranteed.
         """
         result = super().run()
         if result is not None:

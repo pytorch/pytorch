@@ -68,6 +68,10 @@ class ProxyableClassMeta(type):
     From this example, we can see that contruction of a class (``TensorPair``)
     defined with ``ProxyableClassMeta`` as metaclass can be recorded in symbolic
     tracing.
+
+    Backwards compatiblity:
+
+        Backwards-compatibility for this API is guaranteed.
     """
     def __init__(cls, name, bases, attrs):
         _proxyable_classes.setdefault(cls)
@@ -160,6 +164,10 @@ class _CPatchManager(object):
 class PHBase(object):
     """
     Object representing an input placeholder to `concrete_args`
+
+    Backwards compatiblity:
+
+        This API is experimental and is *NOT* backward-compatible.
     """
     def __repr__(self):
         return 'PH'
@@ -181,6 +189,10 @@ class Tracer(TracerBase):
     Tracer can be subclassed to override various behaviors of the tracing
     process. The different behaviors that can be overridden are described
     in the docstrings of the methods on this class.
+
+    Backwards compatiblity:
+
+        Backwards-compatibility for this API is guaranteed.
     """
     def __init__(self, autowrap_modules: Tuple[ModuleType] = (math, ),
                  autowrap_functions: Tuple[Callable, ...] = (),
@@ -197,11 +209,19 @@ class Tracer(TracerBase):
 
             autowrap_modules (Tuple[ModuleType]): defaults to `(math, )`,
                 Python modules whose functions should be wrapped automatically
-                without needing to use fx.wrap().
+                without needing to use fx.wrap(). Backward-compatibility for
+                this parameter is guaranteed.
 
             autowrap_function (Tuple[Callable, ...]): defaults to `()`,
                 Python functions that should be wrapped automatically without
-                needing to use fx.wrap().
+                needing to use fx.wrap(). Backward compabilibility for this
+                parameter is guaranteed.
+
+            param_shapes_constant (bool): When this flag is set,  calls to shape,
+                size and a few other shape like attributes of a module's parameter
+                will be evaluted directly, rather than returning a new Proxy value
+                for an attribute access. Backward compatibility for this parameter
+                is guaranteed.
 
             enable_cpatching (bool): defaults to `False`,
                 Allows you to enable/disable monkeypatching of torch functions at the
@@ -210,12 +230,9 @@ class Tracer(TracerBase):
                 C-level monkeypatching works by directly modifying the PyCFunctionObject*
                 so that calling it returns a different function.
 
-                Turning this on is likely to slow down tracing by 1.5-3x.
-
-            param_shapes_constant (bool): see https://github.com/pytorch/pytorch/issues/61733. When
-            this flag is set,  calls to shape, size and a few other shape like attributes of a module's parameter
-            will be evaluted directly, rather than returning a new Proxy value for an attribute access.
-
+                Turning this on is likely to slow down tracing by 1.5-3x. This
+                parameter is experimental and its backward-compatibility is NOT
+                guaranteed.
         """
 
         super().__init__()
@@ -261,6 +278,10 @@ class Tracer(TracerBase):
         Returns:
 
             The value ``a`` converted into the appropriate ``Argument``
+
+        Backwards compatiblity:
+
+            Backwards-compatibility for this API is guaranteed.
         """
         # The base tracer is used to construct Graphs when there is no associated
         # module hierarchy, so it can never create parameter references.
@@ -343,6 +364,10 @@ class Tracer(TracerBase):
                 if you have a module hierarchy where submodule ``foo`` contains
                 submodule ``bar``, which contains submodule ``baz``, that module will
                 appear with the qualified name ``foo.bar.baz`` here.
+
+        Backwards compatiblity:
+
+            Backwards-compatibility for this API is guaranteed.
         """
         return m.__module__.startswith('torch.nn') and not isinstance(m, torch.nn.Sequential)
 
@@ -356,6 +381,10 @@ class Tracer(TracerBase):
         Args:
 
             mod (str): The ``Module`` to retrieve the qualified name for.
+
+        Backwards compatiblity:
+
+            Backwards-compatibility for this API is guaranteed.
         """
         # Prefer the O(1) algorithm
         if self.submodule_paths:
@@ -398,6 +427,10 @@ class Tracer(TracerBase):
             The return value from the Module call. In the case that a ``call_module``
             node was emitted, this is a ``Proxy`` value. Otherwise, it is whatever
             value was returned from the ``Module`` invocation.
+
+        Backwards compatiblity:
+
+            Backwards-compatibility for this API is guaranteed.
         """
         module_qualified_name = self.path_of_module(m)
         if not self.is_leaf_module(m, module_qualified_name):
@@ -409,6 +442,11 @@ class Tracer(TracerBase):
         Create ``placeholder`` nodes corresponding to the signature of the ``root``
         Module. This method introspects root's signature and emits those
         nodes accordingly, also supporting ``*args`` and ``**kwargs``.
+
+        Backwards compatiblity:
+
+            This API will be refactored and its backwards-compatibility is
+            *NOT* currently guaranteed.
         """
         # In some cases, a function or method has been decorated with a wrapper
         # defined via ``functools.wraps``. In this case, the outer code object
@@ -524,8 +562,11 @@ class Tracer(TracerBase):
         Args:
 
             root (Union[Module, Callable]): Either a ``Module`` or a function to be
-                traced through.
-            concrete_args (Optional[Dict[str, any]]): Concrete arguments that should not be treated as Proxies.
+                traced through. Backwards-compatibility for this parameter is
+                guaranteed.
+            concrete_args (Optional[Dict[str, any]]): Concrete arguments that should
+                not be treated as Proxies. This parameter is experimental and
+                its backwards-compatibility is *NOT* guaranteed.
 
         Returns:
 
@@ -804,6 +845,10 @@ def wrap(fn_or_name : Union[str, Callable]):
 
         fn_or_name (Union[str, Callable]): The function or name of the global function to insert into the
             graph when it's called
+
+    Backwards compatiblity:
+
+        Backwards-compatibility for this API is guaranteed.
     """
     if not callable(fn_or_name) and not isinstance(fn_or_name, str):
         raise RuntimeError('Unsupported type for global function! Must be either a callable or '
@@ -877,6 +922,9 @@ def symbolic_trace(root : Union[torch.nn.Module, Callable], concrete_args: Optio
     Returns:
         GraphModule: a Module created from the recorded operations from ``root``.
 
+    Backwards compatiblity:
+
+        Backwards-compatibility for this API is guaranteed.
     """
     tracer = Tracer(enable_cpatching=enable_cpatching)
     graph = tracer.trace(root, concrete_args)

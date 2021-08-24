@@ -2,6 +2,12 @@ from torch.fx.proxy import Proxy
 
 
 def annotate(val, type):
+    """
+    Backwards Compatibility:
+
+        This API is experimental and its backwards-compatibility is *NOT*
+        guaranteed.
+    """
     # val could be either a regular value (not tracing)
     # or fx.Proxy (tracing)
     if isinstance(val, Proxy):
