@@ -10,18 +10,6 @@
 namespace at { namespace native {
 
 namespace {
-#if AT_BUILD_WITH_LAPACK()
-char to_lapack(TransposeType trans) {
-  switch (trans) {
-    case TransposeType::Transpose: return 't';
-    case TransposeType::NoTranspose: return 'n';
-    case TransposeType::ConjTranspose: return 'c';
-  }
-  TORCH_INTERNAL_ASSERT(false, "Invalid transpose type");
-}
-#endif
-
-
 /*
   Computes the Cholesky decomposition of matrices stored in `input`.
   This is an in-place routine and the content of 'input' is overwritten with the result.
@@ -808,16 +796,16 @@ and the actual diagonal values are not used.
 */
 template<typename scalar_t>
 void apply_triangular_solve(Tensor& A, Tensor& B, bool left, bool upper, TransposeType transpose, bool unitriangular) {
-#if !AT_BUILD_WITH_LAPACK()
+#if !AT_BUILD_WITH_BLAS()
   TORCH_CHECK(
       false,
       "Calling torch.triangular_solve on a CPU tensor requires compiling ",
-      "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
+      "PyTorch with BLAS. Please use PyTorch built with BLAS support.");
 #else
   char uplo = upper ? 'U' : 'L';
   char diag = unitriangular ? 'U' : 'N';
   char side = left ? 'L' : 'R';
-  const char trans = to_lapack(transpose);
+  const char trans = to_blas(transpose);
 
   auto A_data = A.data_ptr<scalar_t>();
   auto B_data = B.data_ptr<scalar_t>();
@@ -833,16 +821,12 @@ void apply_triangular_solve(Tensor& A, Tensor& B, bool left, bool upper, Transpo
   for (const auto i : c10::irange(batch_size)) {
     scalar_t* A_working_ptr = &A_data[i * A_mat_stride];
     scalar_t* B_working_ptr = &B_data[i * B_mat_stride];
-    lapackTriangularSolve<scalar_t>(side, uplo, trans, diag, m, n, A_working_ptr, lda, B_working_ptr, ldb);
-    // The current behaviour for linear algebra functions to raise an error if something goes wrong
-    // or input doesn't satisfy some requirement
-    // therefore return early since further computations will be wasted anyway
+    blasTriangularSolve<scalar_t>(side, uplo, trans, diag, m, n, A_working_ptr, lda, B_working_ptr, ldb);
   }
 #endif
 }
 
 void triangular_solve_kernel(Tensor& A, Tensor& B, bool left, bool upper, TransposeType transpose, bool unitriangular) {
-  // right solvers are not implemented in LAPACK. The caller always calls with left=True
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(A.scalar_type(), "triangular_solve_cpu", [&]{
     apply_triangular_solve<scalar_t>(A, B, left, upper, transpose, unitriangular);
   });
@@ -920,7 +904,7 @@ void apply_lu_solve(const Tensor& b, const Tensor& lu, const Tensor& pivots, Tra
 #else
   auto b_data = b.data_ptr<scalar_t>();
   auto lu_data = lu.data_ptr<scalar_t>();
-  const auto trans = to_lapack(transpose);
+  const auto trans = to_blas(transpose);
   auto pivots_data = pivots.data_ptr<int>();
   auto b_stride = matrixStride(b);
   auto lu_stride = matrixStride(lu);

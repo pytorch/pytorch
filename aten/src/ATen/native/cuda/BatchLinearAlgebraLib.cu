@@ -80,6 +80,9 @@ void geqrf_batched_cublas(const Tensor& input, const Tensor& tau) {
 
 template <typename scalar_t>
 static void apply_lu_solve_batched_cublas(const Tensor& b, const Tensor& lu, const Tensor& pivots, TransposeType transpose) {
+#ifndef CUDART_VERSION
+  TORCH_CHECK(false, "lu_solve: cuBLAS backend for lu_solve is not available.")
+#else
   const auto trans = to_cublas(transpose);
 
   auto pivots_data = pivots.data_ptr<int>();
@@ -98,6 +101,7 @@ static void apply_lu_solve_batched_cublas(const Tensor& b, const Tensor& lu, con
   at::cuda::blas::getrsBatched(handle, trans, m, nrhs, lu_ptr_array_data,
     lda, pivots_data, b_ptr_array_data, lda, &info, batch_size);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info == 0);
+#endif
 }
 
 void lu_solve_batched_cublas(const Tensor& b, const Tensor& lu, const Tensor& pivots, TransposeType trans) {
