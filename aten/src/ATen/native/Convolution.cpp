@@ -866,7 +866,7 @@ at::Tensor _convolution(
 
       } else if (params.use_miopen(input, weight, bias.defined())){
         output = at::miopen_depthwise_convolution(
-            input.contiguous(), weight, bias,
+            input.contiguous(backend_memory_format), weight, bias,
             padding, stride, dilation, params.groups, params.benchmark, params.deterministic);
       } else {
           if (input.ndimension() == 4) {
