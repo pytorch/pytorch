@@ -119,6 +119,10 @@ libtorch_profiler_sources = [
     "torch/csrc/autograd/profiler_kineto.cpp",
 ]
 
+libtorch_edge_profiler_sources = libtorch_profiler_sources + [
+    "torch/csrc/jit/mobile/profiler_edge.cpp",
+]
+
 core_trainer_sources = [
     "torch/csrc/autograd/anomaly_mode.cpp",
     "torch/csrc/autograd/autograd.cpp",
@@ -141,14 +145,12 @@ core_trainer_sources = [
     "torch/csrc/jit/serialization/type_name_uniquer.cpp",
 ]
 
-core_sources_full_mobile = [
+core_sources_full_mobile_no_backend_interface = [
     "torch/csrc/jit/api/function_impl.cpp",
     "torch/csrc/jit/api/module.cpp",
     "torch/csrc/jit/api/object.cpp",
     "torch/csrc/jit/backends/backend_debug_handler.cpp",
-    "torch/csrc/jit/backends/backend_debug_info.cpp",
     "torch/csrc/jit/backends/backend_detail.cpp",
-    "torch/csrc/jit/backends/backend_interface.cpp",
     "torch/csrc/jit/backends/backend_resolver.cpp",
     "torch/csrc/jit/codegen/fuser/codegen.cpp",
     "torch/csrc/jit/codegen/fuser/compiler.cpp",
@@ -315,6 +317,11 @@ core_sources_full_mobile = [
     "torch/csrc/utils/tensor_flatten.cpp",
     "torch/csrc/utils/variadic.cpp",
 ] + libtorch_profiler_sources
+
+core_sources_full_mobile = core_sources_full_mobile_no_backend_interface + [
+    "torch/csrc/jit/backends/backend_debug_info.cpp",
+    "torch/csrc/jit/backends/backend_interface.cpp",
+]
 
 core_sources_full = core_sources_full_mobile + [
     "torch/csrc/jit/runtime/static/fusion.cpp",
@@ -822,6 +829,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/detail/CPUGuardImpl.cpp",
     "aten/src/ATen/detail/CUDAHooksInterface.cpp",
     "aten/src/ATen/detail/HIPHooksInterface.cpp",
+    "aten/src/ATen/detail/ORTHooksInterface.cpp",
     "aten/src/ATen/metal/Context.cpp",
     "aten/src/ATen/native/AutogradComposite.cpp",
     "aten/src/ATen/native/BatchLinearAlgebraKernel.cpp",
@@ -851,6 +859,9 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/record_function.cpp",
     "aten/src/ATen/SavedTensorHooks.cpp",
     "aten/src/ATen/vulkan/Context.cpp",
+    "aten/src/ATen/nnapi/nnapi_bind.cpp",
+    "aten/src/ATen/nnapi/nnapi_wrapper.cpp",
+    "aten/src/ATen/nnapi/nnapi_model_loader.cpp",
 ]
 
 aten_cpu_source_codegen_list = [
@@ -1112,9 +1123,7 @@ aten_native_source_non_codegen_list = [
     # Files not in native, but depends on native symbols
     # "aten/src/ATen/TensorIndexing.cpp",
     "aten/src/ATen/TensorIterator.cpp",
-    "aten/src/ATen/nnapi/nnapi_bind.cpp",
-    "aten/src/ATen/nnapi/nnapi_wrapper.cpp",
-    "aten/src/ATen/nnapi/nnapi_model_loader.cpp",
+    "aten/src/ATen/nnapi/nnapi_register.cpp",
 ]
 
 # 1. Files in ATen/native with a few exceptions
