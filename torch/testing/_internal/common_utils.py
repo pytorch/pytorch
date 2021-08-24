@@ -906,8 +906,10 @@ def check_if_enable(test: unittest.TestCase):
             platform_to_conditional: Dict = {
                 "mac": IS_MACOS,
                 "macos": IS_MACOS,
+                "win": IS_WINDOWS,
                 "windows": IS_WINDOWS,
-                "linux": IS_LINUX
+                "linux": IS_LINUX,
+                "rocm": TEST_WITH_ROCM
             }
             if platforms == [] or any([platform_to_conditional[platform] for platform in platforms]):
                 raise unittest.SkipTest(
@@ -2533,13 +2535,6 @@ def disable_gc():
     else:
         yield
 
-def has_breakpad() -> bool:
-    # If not on a special build, check that the library was actually linked in
-    try:
-        torch._C._get_minidump_directory()  # type: ignore[attr-defined]
-        return True
-    except RuntimeError as e:
-        return False
 
 def find_library_location(lib_name: str) -> Path:
     # return the shared library file in the installed folder if exist,
@@ -2589,6 +2584,22 @@ def get_tensors_from(args, kwargs):
     """ Returns a set of all Tensor objects in the given args and kwargs. """
     return set([arg for arg in args if isinstance(arg, Tensor)] +
                [v for v in kwargs.values() if isinstance(v, Tensor)])
+
+
+def has_breakpad():
+    # We always build with breakpad in CI
+    if IS_IN_CI:
+        return True
+
+    # If not on a special build, check that the library was actually linked in
+    try:
+        torch._C._get_minidump_directory()  # type: ignore[attr-defined]
+        return True
+    except RuntimeError as e:
+        if "Minidump handler is uninintialized" in str(e):
+            return True
+        return False
+
 
 def sandcastle_skip_if(condition, reason):
     """
