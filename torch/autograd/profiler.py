@@ -429,7 +429,7 @@ class record_function(ContextDecorator):
         # NOTE: type is required by jit.script. However, type hint it as
         # Optional[...] will cause it infer to be None due to delayed
         # initialization in __enter__. RecordFunction is not for public usage.
-        self.rec: List["torch.classes.profiler.RecordFunction"] = []  # type: ignore[name-defined]
+        self.rec: List["torch.classes.profiler._RecordFunction"] = []  # type: ignore[name-defined]
 
     def __enter__(self):
         self.rec.append(torch.ops.profiler._record_function_enter(self.name))
@@ -470,7 +470,14 @@ class record_function(ContextDecorator):
 
     @property
     def handle(self):
-        return self.rec[0]
+        """This property exists purely because existing tests are using this
+        internal object for their purposes.
+        """
+        if len(self.rec) == 1:
+            return self.rec[0]
+        else:
+            raise RuntimeError(
+                "Malformed record_function.handle access, this only occurs if you access handle before __enter__ or after __exit__ of this context manager.")
 
 
 class emit_nvtx(object):

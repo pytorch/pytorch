@@ -191,7 +191,7 @@ def script_fork_wait_throw(invalue):
 
 
 @torch.jit.script
-def call_rpc_with_profiling(handle: torch.classes.profiler.RecordFunction, dst_worker_name: str) -> Tensor:
+def call_rpc_with_profiling(handle: torch.classes.profiler._RecordFunction, dst_worker_name: str) -> Tensor:
     # Call rpc_async from within ScriptFunction and ensure that we can attach
     # profiling callbacks. Note that handle here is a Tensor representation of
     # RecordFunction.
@@ -207,7 +207,7 @@ def call_rpc_torchscript_with_record_function(dst_worker_name: str, block: str) 
 
 
 @torch.jit.script
-def call_fork_with_profiling(handle: torch.classes.profiler.RecordFunction) -> Tensor:
+def call_fork_with_profiling(handle: torch.classes.profiler._RecordFunction) -> Tensor:
     # Call fork from within ScriptFunction and ensure that we can attach profiling
     # callbacks to the resulting future. Note that handle here is a Tensor
     # representation of RecordFunction.

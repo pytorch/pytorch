@@ -57,7 +57,7 @@ c10::intrusive_ptr<c10::ivalue::Future> _call_end_callbacks_on_fut(
 
 // Internal only, do not use directly, use Python's record_function()
 TORCH_LIBRARY_FRAGMENT(profiler, m) {
-    m.class_<at::RecordFunction>("RecordFunction");
+    m.class_<at::RecordFunction>("_RecordFunction");
     m.def("_record_function_enter", &record_function_enter);
     m.def("_record_function_exit", &record_function_exit);
 }
@@ -69,7 +69,7 @@ c10::AliasAnalysisKind aliasAnalysisFromSchema() {
 
 jit::RegisterOperators reg_fut_ops({
     jit::Operator(
-        "profiler::_call_end_callbacks_on_jit_fut(__torch__.torch.classes.profiler.RecordFunction x, Future(t) y) -> Future(t)",
+        "profiler::_call_end_callbacks_on_jit_fut(__torch__.torch.classes.profiler._RecordFunction x, Future(t) y) -> Future(t)",
         [](jit::Stack* stack) {
           // Pop inputs, which should be a future and a tensor
           auto fut = jit::pop(stack).toFuture();
