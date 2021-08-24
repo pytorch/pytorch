@@ -10,18 +10,20 @@ set SRC_DIR=%~dp0\..
 if not exist "%SRC_DIR%\temp_build" mkdir "%SRC_DIR%\temp_build"
 
 set /a CUDA_VER=%CUDA_VERSION%
-set CUDA_VER_MAJOR=%CUDA_VERSION:~0,-1%
-set CUDA_VER_MINOR=%CUDA_VERSION:~-1,1%
-set CUDA_VERSION_STR=%CUDA_VER_MAJOR%.%CUDA_VER_MINOR%
+set CUDA_VERSION_STR=%CUDA_VERSION%
+for /f "tokens=1,2 delims=." %aa in ("%CUDA_VER%") do (
+    set CUDA_VER_MAJOR=%%a
+    set CUDA_VER_MINOR=%%b
+)
 
-if %CUDA_VER% EQU 92 goto cuda92
-if %CUDA_VER% EQU 100 goto cuda100
-if %CUDA_VER% EQU 101 goto cuda101
-if %CUDA_VER% EQU 102 goto cuda102
-if %CUDA_VER% EQU 110 goto cuda110
-if %CUDA_VER% EQU 111 goto cuda111
-if %CUDA_VER% EQU 112 goto cuda112
-if %CUDA_VER% EQU 113 goto cuda113
+if %CUDA_VER% EQU 9.2 goto cuda92
+if %CUDA_VER% EQU 10.0 goto cuda100
+if %CUDA_VER% EQU 10.1 goto cuda101
+if %CUDA_VER% EQU 10.2 goto cuda102
+if %CUDA_VER% EQU 11.0 goto cuda110
+if %CUDA_VER% EQU 11.1 goto cuda111
+if %CUDA_VER% EQU 11.2 goto cuda112
+if %CUDA_VER% EQU 11.3 goto cuda113
 
 echo CUDA %CUDA_VERSION_STR% is not supported
 exit /b 1
