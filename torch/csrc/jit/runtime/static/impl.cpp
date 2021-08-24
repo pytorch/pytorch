@@ -548,7 +548,7 @@ PrepareForStaticModule(
 StaticModule::StaticModule(
     std::shared_ptr<torch::jit::Graph> g,
     const StaticModuleOptions& opts)
-    : StaticModule(PrepareForStaticModule(g, opts), opts) {}
+    : StaticModule(PrepareForStaticModule(g->copy(), opts), opts) {}
 
 StaticModule::StaticModule(
     const torch::jit::Module& m,
