@@ -66,7 +66,7 @@ class BiasHook:
 
             # reshape bias to broadcast over output dimensions
             idx = [1] * len(output.shape)
-            idx[1] = output.shape[1]
+            idx[1] = -1
             bias = bias.reshape(idx)
 
             output += bias

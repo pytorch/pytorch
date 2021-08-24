@@ -48,7 +48,7 @@ StmtPtr Tensor::constructStmt(
   return s;
 }
 
-Tensor* Compute(
+Tensor Compute(
     const std::string& name,
     const std::vector<DimArg>& dim_args,
     const std::function<ExprHandle(const std::vector<VarHandle>&)>& body_func) {
@@ -57,10 +57,10 @@ Tensor* Compute(
   unpack_dim_args(dim_args, &dims, &args);
   ExprPtr body = body_func(VarVectorToVarHandleVector(args)).node();
   BufPtr buf = alloc<Buf>(name, dims, body->dtype());
-  return new Tensor(buf, args, body);
+  return Tensor(buf, args, body);
 }
 
-Tensor* Compute(
+Tensor Compute(
     const std::string& name,
     const std::vector<DimArg>& dim_args,
     const std::function<ExprHandle(const VarHandle&)>& body_func) {
@@ -73,10 +73,10 @@ Tensor* Compute(
   unpack_dim_args(dim_args, &dims, &args);
   ExprPtr body = body_func(VarHandle(args[0])).node();
   BufPtr buf = alloc<Buf>(name, dims, body->dtype());
-  return new Tensor(buf, args, body);
+  return Tensor(buf, args, body);
 }
 
-Tensor* Compute(
+Tensor Compute(
     const std::string& name,
     const std::vector<DimArg>& dim_args,
     const std::function<ExprHandle(const VarHandle&, const VarHandle&)>&
@@ -89,10 +89,10 @@ Tensor* Compute(
   unpack_dim_args(dim_args, &dims, &args);
   ExprPtr body = body_func(VarHandle(args[0]), VarHandle(args[1])).node();
   BufPtr buf = alloc<Buf>(name, dims, body->dtype());
-  return new Tensor(buf, args, body);
+  return Tensor(buf, args, body);
 }
 
-Tensor* Compute(
+Tensor Compute(
     const std::string& name,
     const std::vector<DimArg>& dim_args,
     const std::function<
@@ -108,10 +108,10 @@ Tensor* Compute(
       body_func(VarHandle(args[0]), VarHandle(args[1]), VarHandle(args[2]))
           .node();
   BufPtr buf = alloc<Buf>(name, dims, body->dtype());
-  return new Tensor(buf, args, body);
+  return Tensor(buf, args, body);
 }
 
-Tensor* Compute(
+Tensor Compute(
     const std::string& name,
     const std::vector<DimArg>& dim_args,
     const std::function<ExprHandle(
@@ -132,10 +132,10 @@ Tensor* Compute(
                      VarHandle(args[3]))
                      .node();
   BufPtr buf = alloc<Buf>(name, dims, body->dtype());
-  return new Tensor(buf, args, body);
+  return Tensor(buf, args, body);
 }
 
-Tensor* Reduce(
+Tensor Reduce(
     const std::string& name,
     const std::vector<DimArg>& dim_args,
     const Reducer& reducer,
@@ -149,7 +149,7 @@ Tensor* Reduce(
       reduce_args);
 }
 
-Tensor* Reduce(
+Tensor Reduce(
     const std::string& name,
     const std::vector<DimArg>& dim_args,
     const Reducer& reducer,
@@ -163,17 +163,17 @@ Tensor* Reduce(
       reduce_args);
 }
 
-Tensor* Reduce(
+Tensor Reduce(
     const std::string& name,
     const std::vector<DimArg>& dim_args,
     const Reducer& reducer,
-    Tensor* tensor,
+    Tensor tensor,
     const std::vector<DimArg>& reduce_args) {
   return Reduce(
       name,
       dim_args,
       reducer,
-      [&](ParameterList& p) { return tensor->load(p); },
+      [&](ParameterList& p) { return tensor.load(p); },
       reduce_args);
 }
 
