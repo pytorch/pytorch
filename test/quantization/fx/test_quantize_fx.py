@@ -2986,7 +2986,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         }
         quant_type_to_qlinear_relu_fun = {
             # we don't have linear_relu_dynamic
-            QuantType.DYNAMIC: ns.call_function(torch.ops.quantized.linear_dynamic),
+            QuantType.DYNAMIC: ns.call_function(torch.ops.quantized.linear_relu_dynamic),
             QuantType.STATIC: ns.call_function(torch.ops.quantized.linear_relu),
             QuantType.QAT: ns.call_function(torch.ops.quantized.linear_relu),
         }
