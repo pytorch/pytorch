@@ -627,11 +627,38 @@ class TestFunctionalIterDataPipe(TestCase):
             i += 1
             if i == 5:  # yield all of dp3 when halfway through dp1, dp2
                 output3 = list(dp3)
-        self.assertEqual(list(range(10)), output1)
-        self.assertEqual(list(range(10)), output2)
+                break
+        self.assertEqual(list(range(5)), output1)
+        self.assertEqual(list(range(5)), output2)
         self.assertEqual(list(range(10)), output3)
 
-        # Test Case: make sure DataPipe reset even when some child DataPipes are not read
+        # Test Case: DataPipe doesn't reset if this pipe hasn't been read
+        dp1, dp2 = input_dp.fork(num_instances=2)
+        i1, i2 = iter(dp1), iter(dp2)
+        output2 = []
+        i = 0
+        for n2 in i2:
+            output2.append(n2)
+            i += 1
+            if i == 5:
+                i1 = iter(dp1)  # Doesn't reset because i1 hasn't been read
+        self.assertEqual(list(range(10)), output2)
+
+        # Test Case: DataPipe reset when some of it have been read
+        dp1, dp2 = input_dp.fork(num_instances=2)
+        i1, i2 = iter(dp1), iter(dp2)
+        output1, output2 = [], []
+        i = 0
+        for n1, n2 in zip(i1, i2):
+            output1.append(n1)
+            output2.append(n2)
+            i += 1
+            if i == 5:
+                i1 = iter(dp1)  # Reset both all child DataPipe
+        self.assertEqual(list(range(5)) + list(range(10)), output1)
+        self.assertEqual(list(range(5)) + list(range(10)), output2)
+
+        # Test Case: DataPipe reset, even when some other child DataPipes are not read
         dp1, dp2, dp3 = input_dp.fork(num_instances=3)
         output1, output2 = list(dp1), list(dp2)
         self.assertEqual(list(range(10)), output1)
@@ -684,7 +711,34 @@ class TestFunctionalIterDataPipe(TestCase):
             for n in dp[0]:
                 n
 
-        # Test Case: make sure DataPipe can reset even when not all child DataPipes are exhausted
+        # Test Case: DataPipe doesn't reset when it has not been read
+        dp1, dp2 = input_dp.demux(num_instances=2, classifier_fn=lambda x: x % 2)
+        i1 = iter(dp1)
+        output2 = []
+        i = 0
+        for n2 in dp2:
+            output2.append(n2)
+            i += 1
+            if i == 5:
+                i1 = iter(dp1)
+        self.assertEqual(list(range(1, 10, 2)), output2)
+
+        # Test Case: DataPipe reset when some of it has been read
+        dp1, dp2 = input_dp.demux(num_instances=2, classifier_fn=lambda x: x % 2)
+        output1, output2 = [], []
+        for n1, n2 in zip(dp1, dp2):
+            output1.append(n1)
+            output2.append(n2)
+            if n1 == 4:
+                break
+        i1 = iter(dp1)  # Reset all child DataPipes
+        for n1, n2 in zip(dp1, dp2):
+            output1.append(n1)
+            output2.append(n2)
+        self.assertEqual([0, 2, 4] + list(range(0, 10, 2)), output1)
+        self.assertEqual([1, 3, 5] + list(range(1, 10, 2)), output2)
+
+        # Test Case: DataPipe reset, even when not all child DataPipes are exhausted
         dp1, dp2 = input_dp.demux(num_instances=2, classifier_fn=lambda x: x % 2)
         output1 = list(dp1)
         self.assertEqual(list(range(0, 10, 2)), output1)
