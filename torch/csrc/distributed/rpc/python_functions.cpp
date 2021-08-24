@@ -115,6 +115,7 @@ c10::intrusive_ptr<JitFuture> sendPythonRemoteCall(
     SerializedPyObj serializedPyObj,
     const IValue& rrefId,
     const IValue& forkId,
+    const std::vector<std::tuple<torch::Tensor, torch::Device>>& devMap,
     const float rpcTimeoutSeconds,
     const bool isAsyncExecution) {
   auto pythonRemoteCall = std::make_unique<PythonRemoteCall>(
@@ -127,6 +128,7 @@ c10::intrusive_ptr<JitFuture> sendPythonRemoteCall(
       *agent,
       dst,
       std::move(*pythonRemoteCall).toMessage(),
+      devMap,
       true /*forceGradRecording*/,
       rpcTimeoutSeconds);
 }
@@ -200,7 +202,14 @@ c10::intrusive_ptr<JitFuture> pyRpcBuiltin(
     const std::string& opName,
     const py::args& args,
     const py::kwargs& kwargs,
+    const std::vector<std::tuple<torch::Tensor, torch::Device>>& devMap,
     const float rpcTimeoutSeconds) {
+
+  // std::cout << "pyRpcBuiltin" << std::endl;
+  // for (auto t : devMap) {
+  //   std::cout << std::get<1>(t) << std::endl;
+  // }
+
   DCHECK(PyGILState_Check());
   Stack stack;
   auto op = matchBuiltinOp(opName, args, kwargs, stack);
@@ -212,6 +221,7 @@ c10::intrusive_ptr<JitFuture> pyRpcBuiltin(
       *agent,
       dst,
       std::move(*scriptCall).toMessage(),
+      devMap,
       false,
       rpcTimeoutSeconds));
 }
@@ -220,8 +230,15 @@ c10::intrusive_ptr<JitFuture> pyRpcPythonUdf(
     const WorkerInfo& dst,
     std::string& pickledPythonUDF,
     std::vector<torch::Tensor>& tensors,
+    const std::vector<std::tuple<torch::Tensor, torch::Device>>& devMap,
     const float rpcTimeoutSeconds,
     const bool isAsyncExecution) {
+
+  // std::cout << "pyRpcPythonUdf" << std::endl;
+  // for (auto t : devMap) {
+  //   std::cout << std::get<1>(t) << std::endl;
+  // }
+
   DCHECK(!PyGILState_Check());
   auto serializedPyObj =
       SerializedPyObj(std::move(pickledPythonUDF), std::move(tensors));
@@ -233,6 +250,7 @@ c10::intrusive_ptr<JitFuture> pyRpcPythonUdf(
       *agent,
       dst,
       std::move(*pythonCall).toMessage(),
+      devMap,
       true /*forceGradRecording*/,
       rpcTimeoutSeconds));
 }
@@ -242,8 +260,15 @@ c10::intrusive_ptr<JitFuture> pyRpcTorchscript(
     const std::string& qualifiedNameStr,
     const py::tuple& argsTuple,
     const py::dict& kwargsDict,
+    const std::vector<std::tuple<torch::Tensor, torch::Device>>& devMap,
     const float rpcTimeoutSeconds,
     const bool isAsyncExecution) {
+
+  // std::cout << "pyRpcTorchscript" << std::endl;
+  // for (auto t : devMap) {
+  //   std::cout << std::get<1>(t) << std::endl;
+  // }
+
   // No need to catch exception here, if function can not be found,
   // exception will be thrown in get_function() call; if args do not match
   // with function schema, exception will be thrown in
@@ -270,6 +295,7 @@ c10::intrusive_ptr<JitFuture> pyRpcTorchscript(
       qualifiedName,
       functionSchema,
       stack,
+      devMap,
       rpcTimeoutSeconds,
       isAsyncExecution);
   return fut;
@@ -278,9 +304,16 @@ c10::intrusive_ptr<JitFuture> pyRpcTorchscript(
 PyRRef pyRemoteBuiltin(
     const WorkerInfo& dst,
     const std::string& opName,
+    const std::vector<std::tuple<torch::Tensor, torch::Device>>& devMap,
     const float rpcTimeoutSeconds,
     const py::args& args,
     const py::kwargs& kwargs) {
+
+  // std::cout << "pyRemoteBuiltin" << std::endl;
+  // for (auto t : devMap) {
+  //   std::cout << std::get<1>(t) << std::endl;
+  // }
+
   DCHECK(PyGILState_Check());
   Stack stack;
   auto op = matchBuiltinOp(opName, args, kwargs, stack);
@@ -301,6 +334,7 @@ PyRRef pyRemoteBuiltin(
         *agent,
         dst,
         std::move(*scriptRemoteCall).toMessage(),
+        devMap,
         /*forceGradRecord */ false,
         /* timeout */ rpcTimeoutSeconds);
 
@@ -322,6 +356,7 @@ PyRRef pyRemoteBuiltin(
         *agent,
         dst,
         std::move(*scriptRemoteCall).toMessage(),
+        devMap,
         /* forceGradRecord */ false,
         /* timeout */ rpcTimeoutSeconds);
 
@@ -340,8 +375,15 @@ PyRRef pyRemotePythonUdf(
     const WorkerInfo& dst,
     std::string& pickledPythonUDF,
     std::vector<torch::Tensor>& tensors,
+    const std::vector<std::tuple<torch::Tensor, torch::Device>>& devMap,
     const float rpcTimeoutSeconds,
     const bool isAsyncExecution) {
+
+  // std::cout << "pyRemotePythonUdf" << std::endl;
+  // for (auto t : devMap) {
+  //   std::cout << std::get<1>(t) << std::endl;
+  // }
+
   DCHECK(!PyGILState_Check());
   auto& ctx = RRefContext::getInstance();
   auto serializedPyObj =
@@ -354,6 +396,7 @@ PyRRef pyRemotePythonUdf(
         std::move(serializedPyObj),
         userRRef->rrefId().toIValue(),
         userRRef->forkId().toIValue(),
+        devMap,
         rpcTimeoutSeconds,
         isAsyncExecution);
 
@@ -374,6 +417,7 @@ PyRRef pyRemotePythonUdf(
         std::move(serializedPyObj),
         ownerRRef->rrefId().toIValue(),
         ownerRRef->rrefId().toIValue(),
+        devMap,
         rpcTimeoutSeconds,
         isAsyncExecution);
 
@@ -394,10 +438,17 @@ PyRRef pyRemotePythonUdf(
 PyRRef pyRemoteTorchscript(
     const std::string& dstWorkerName,
     const std::string& qualifiedNameStr,
+    const std::vector<std::tuple<torch::Tensor, torch::Device>>& devMap,
     const float rpcTimeoutSeconds,
     const bool isAsyncExecution,
     const py::args& args,
     const py::kwargs& kwargs) {
+
+  // std::cout << "pyRemoteTorchscript" << std::endl;
+  // for (auto t : devMap) {
+  //   std::cout << std::get<1>(t) << std::endl;
+  // }
+
   DCHECK(!PyGILState_Check());
   auto qualifiedName = c10::QualifiedName(qualifiedNameStr);
   auto functionSchema = PythonRpcHandler::getInstance()
@@ -417,6 +468,7 @@ PyRRef pyRemoteTorchscript(
       qualifiedName,
       functionSchema,
       stack,
+      devMap,
       rpcTimeoutSeconds,
       isAsyncExecution);
   return PyRRef(rrefPtr);

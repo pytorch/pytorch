@@ -82,6 +82,7 @@ class TestE2EBase : public ::testing::Test {
         *rpcAgent,
         rpcAgent->getWorkerInfo("worker"),
         std::move(scriptRemoteCall).toMessage(),
+        {},
         false);
 
     ownerRRef->registerOwnerCreationFuture(jitFuture);
@@ -104,7 +105,8 @@ class TestE2EBase : public ::testing::Test {
     auto response = autograd::sendMessageWithAutograd(
         *rpcAgent,
         rpcAgent->getWorkerInfo("worker"),
-        std::move(scriptCall).toMessage());
+        std::move(scriptCall).toMessage(),
+        {});
     response->waitAndThrow();
 
     MessageType messageType = MessageType::FORWARD_AUTOGRAD_RESP;

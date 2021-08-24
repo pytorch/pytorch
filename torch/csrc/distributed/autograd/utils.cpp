@@ -146,6 +146,7 @@ c10::intrusive_ptr<JitFuture> sendMessageWithAutograd(
     RpcAgent& agent,
     const WorkerInfo& dst,
     c10::intrusive_ptr<torch::distributed::rpc::Message> wrappedRpcMsg,
+    const std::vector<std::tuple<torch::Tensor, torch::Device>>& devMap,
     bool forceGradRecording,
     const float rpcTimeoutSeconds,
     bool forceDisableProfiling) {
