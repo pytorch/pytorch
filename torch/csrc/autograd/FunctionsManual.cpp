@@ -3432,7 +3432,7 @@ bool any_variable_defined(const variable_list& variables) {
   return false;
 }
 
-std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, const Tensor& input, const Tensor& tau) {
+std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, const Tensor& result, const Tensor& input, const Tensor& tau) {
   if (!grad.defined()) {
     return std::tuple<Tensor, Tensor>(Tensor(), Tensor());
   }
