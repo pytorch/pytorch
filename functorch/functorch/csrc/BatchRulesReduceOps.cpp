@@ -5,7 +5,9 @@
 // LICENSE file in the root directory of this source tree.
 
 #include <functorch/csrc/BatchRulesHelper.h>
+#include <functorch/csrc/PlumbingHelper.h>
 #include <ATen/Operators.h>
+#include <ATen/core/dispatch/Dispatcher.h>
 
 namespace at { namespace functorch {
 
@@ -25,210 +27,126 @@ bool is_allowed_dim_on_scalar_tensor(int64_t dim) {
   return dim == 0 || dim == -1;
 }
 
-// Taken from https://stackoverflow.com/a/41301717
-template<typename R, typename... A>
-R ret_type(R(*)(A...));
+Tensor sum_decomp(
+    const Tensor& self, optional<ScalarType> dtype) {
+  return at::sum(self, range(0, self.dim()), false, dtype);
+}
 
-// Optional implies the weird case with 0-dim tensors i.e. torch.sum(torch.randn(()), 0)
-template <typename F, F Func, typename... ExtraArgs>
-optional<std::tuple<decltype(ret_type(Func)), optional<int64_t>>> reduction_dimarray_batch_rule_impl(    const Tensor& self, optional<int64_t> self_bdim, IntArrayRef dims, ExtraArgs... extra_args) {
+Tensor mean_decomp(
+    const Tensor& self, optional<ScalarType> dtype) {
+  return at::mean(self, range(0, self.dim()), false, dtype);
+}
+
+Tensor nansum_decomp(
+    const Tensor& self, optional<ScalarType> dtype) {
+  return at::nansum(self, range(0, self.dim()), false, dtype);
+}
+
+Tensor prod_decomp(
+    const Tensor& self, optional<ScalarType> dtype) {
+  return at::prod(self.flatten(), 0, false, dtype);
+}
+
+Tensor max_decomp(
+    const Tensor& self) {
+  return std::get<0>(at::max(self.flatten(), 0, false));
+}
+
+Tensor min_decomp(
+    const Tensor& self) {
+  return std::get<0>(at::min(self.flatten(), 0, false));
+}
+
+Tensor norm_scalar_decomp(
+    const Tensor& self, const Scalar& p) {
+  return at::norm(self, p, range(0, self.dim()), false);
+}
+enum ReductionCase { DimArray, Dim };
+
+template<int dim_arg_pos=1>
+void boxed_reduction_batch_rule(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
+  const auto& schema = op.schema();
+  const auto num_returns = schema.returns().size();
+  const auto num_arguments = schema.arguments().size();
+  auto arguments = torch::jit::pop(*stack, num_arguments);
+
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+
+  std::vector<std::pair<Tensor, optional<int64_t>>> tensor_inputs;
+  std::vector<int64_t> tensor_pos;
+
+  TORCH_INTERNAL_ASSERT(arguments[0].isTensor());
+  Tensor self;
+  optional<int64_t> self_bdim;
+  std::tie(self, self_bdim) = unwrapTensorAtLevel(arguments[0].toTensor(), cur_level);
+
   auto logical_dim = rankWithoutBatchDim(self, self_bdim);
-
-  // If the dim intlist is empty, that's equivalent to passing in a dim on all dimensions.
-  if (dims.size() == 0) {
-    dims = range(0, std::max((int64_t)1, logical_dim));
+  std::vector<int64_t> dims;
+  ReductionCase reduction_case;
+  if (arguments[dim_arg_pos].isIntList()) {
+    reduction_case = ReductionCase::DimArray;
+    dims = arguments[dim_arg_pos].toIntList().vec();
+    if (dims.size() == 0) {
+      auto all_dims = range(0, std::max((int64_t)1, logical_dim));
+      dims = std::vector<int64_t>(all_dims.begin(), all_dims.end());
+    }
+  } else if (arguments[dim_arg_pos].isInt()) {
+    reduction_case = ReductionCase::Dim;
+    dims = {arguments[dim_arg_pos].toInt()};
+  } else if (arguments[dim_arg_pos].isNone())  {
+    reduction_case = ReductionCase::DimArray;
+    auto all_dims = range(0, self.dim() - 1);
+    dims = std::vector<int64_t>(all_dims.begin(), all_dims.end());
+  } else{
+    TORCH_INTERNAL_ASSERT(false, "case not found");
+    // auto all_dims = range(0, self.dim() - 1);
+    // dims = std::vector<int64_t>(all_dims.begin(), all_dims.end());
   }
 
-  if (logical_dim == 0 && dims.size() == 1 && is_allowed_dim_on_scalar_tensor(dims[0])) {
-    return nullopt;
-  }
-  auto self_ = moveBatchDimToFront(self, self_bdim);
+  self = moveBatchDimToFront(self, self_bdim);
   VmapDimVector new_dims;
   new_dims.reserve(dims.size());
   for (auto dim: dims) {
-    new_dims.push_back(getPhysicalDim(self_, self_bdim.has_value(), dim));
+    new_dims.push_back(getPhysicalDim(self, self_bdim.has_value(), dim));
   }
-  auto result = Func(self_, new_dims, std::forward<ExtraArgs>(extra_args)...);
-  return std::make_tuple( result, 0 );
-}
-
-// For reductions that take in an array of dimensions to reduce over.
-template <typename F, F Func, typename... ExtraArgs>
-std::tuple<Tensor,optional<int64_t>> reduction_dimarray_batch_rule(
-    const Tensor& self, optional<int64_t> self_bdim, IntArrayRef dims, ExtraArgs... extra_args) {
-  auto out = reduction_dimarray_batch_rule_impl<F, Func, ExtraArgs...>(self, self_bdim, dims, std::forward<ExtraArgs>(extra_args)...);
-  if (!out) {
-    return std::make_tuple( self.clone(), 0 );
-  }
-  return *out;
-}
-
-
-// Optional implies the weird case with 0-dim tensors i.e. torch.sum(torch.randn(()), 0)
-template <typename F, F Func, typename... ExtraArgs>
-std::tuple<decltype(ret_type(Func)), optional<int64_t>, bool> reduction_dim_batch_rule_impl(const Tensor& self, optional<int64_t> self_bdim, int64_t dim, ExtraArgs... extra_args) {
-  auto logical_dim = rankWithoutBatchDim(self, self_bdim);
-  auto self_ = moveBatchDimToFront(self, self_bdim);
-  int64_t new_dim = getPhysicalDim(self, self_bdim.has_value(), dim);
-  bool is_scalar_case = logical_dim == 0 && is_allowed_dim_on_scalar_tensor(dim);
+  bool is_scalar_case = logical_dim == 0 && dims.size() == 1 && is_allowed_dim_on_scalar_tensor(dims[0]);
   if (is_scalar_case) {
-    self_ = self_.unsqueeze(-1);
-    new_dim = 1;
+    self = self.unsqueeze(-1);
+    new_dims = {1};
   }
-  auto result = Func(self_, new_dim, std::forward<ExtraArgs>(extra_args)...);
-  if (is_scalar_case) {
-    return std::make_tuple( result, 0, true);
+  arguments[0] = self;
+  if (reduction_case == ReductionCase::DimArray) {
+    arguments[dim_arg_pos] = std::vector<int64_t>(new_dims.begin(), new_dims.end());
+  } else if (reduction_case == ReductionCase::Dim) {
+    arguments[dim_arg_pos] = new_dims[0];
   }
-  return std::make_tuple( result, 0 , false);
-}
-
-// For reductions that reduce over one dimension and return a tensor
-template <typename F, F Func, typename... ExtraArgs>
-std::tuple<Tensor,optional<int64_t>> reduction_dim_batch_rule(
-    const Tensor& self, optional<int64_t> self_bdim, int64_t dim, ExtraArgs... extra_args) {
-  auto out = reduction_dim_batch_rule_impl<F, Func, ExtraArgs...>(self, self_bdim, dim, std::forward<ExtraArgs>(extra_args)...);
-  if (std::get<2>(out)) {
-    return std::make_tuple(std::get<0>(out).squeeze(-1), 0);
+  for (const auto arg_idx : c10::irange(0, num_arguments)) {
+    torch::jit::push(stack, arguments[arg_idx]);
   }
-  return std::make_tuple(std::get<0>(out), std::get<1>(out));
-}
+  op.callBoxed(stack);
 
-// For reductions that reduce over one dimension and return a pair of tensors
-template <typename F, F Func, typename... ExtraArgs>
-std::tuple<Tensor,optional<int64_t>,Tensor,optional<int64_t>> reduction_dim_ret_pair_batch_rule(
-    const Tensor& self, optional<int64_t> self_bdim, int64_t dim, ExtraArgs... extra_args) {
-  auto out = reduction_dim_batch_rule_impl<F, Func, ExtraArgs...>(self, self_bdim, dim, std::forward<ExtraArgs>(extra_args)...);
-  auto tensors = std::get<0>(out);
-  auto bdim = std::get<1>(out);
-  if (std::get<2>(out)) {
-    return std::make_tuple(std::get<0>(tensors).squeeze(-1), bdim, std::get<1>(tensors).squeeze(-1), bdim);
+  const auto returns = torch::jit::pop(*stack, num_returns);
+  for (const auto& ret : returns) {
+    if (ret.isTensor()) {
+      auto res = ret.toTensor();
+      if (is_scalar_case) {
+        res = res.squeeze(-1);
+      }
+      torch::jit::push(stack, makeBatched(res, 0, cur_level));
+    } else {
+      TORCH_INTERNAL_ASSERT(false, "This boxed batching rule does not currently support ops that return non-tensor values");
+    }
   }
-  return std::make_tuple(std::get<0>(tensors), bdim, std::get<1>(tensors), bdim);
 }
 
-// For reductions that are implicitly reducing over all dimensions.
-template <typename F, F Func, typename G, G DimRule, typename... ExtraArgs>
-std::tuple<Tensor,optional<int64_t>> reduction_no_dim_batch_rule(
-    const Tensor& self, optional<int64_t> self_bdim, ExtraArgs... extra_args) {
-  if (self.dim() == 1) {
-    return std::make_tuple(self.clone(), 0);
-  }
-  auto self_ = moveBatchDimToFront(self, self_bdim);
-  self_ = at::flatten(self_, 1);
-  auto out = DimRule(self_, /*self_bdim=*/ 0, /*dim=*/0, /*keepdim=*/false, std::forward<ExtraArgs>(extra_args)...);
-  return std::make_tuple(std::get<0>(out), std::get<1>(out));
-}
+#define REDUCTION_BOXED(op) \
+  m.impl(#op, torch::CppFunction::makeFromBoxedFunction<boxed_reduction_batch_rule>());
 
-// For now I'm not macroing these (don't see another way to do it), since I'm
-// worried about various edge cases popping up that make things more annoying.
-// Will re-evaluate after adding more reduction batching rules
-
-std::tuple<Tensor,optional<int64_t>> sum_dim_batch_rule(
-    const Tensor& self, optional<int64_t> self_bdim, IntArrayRef dims, bool keepdim, optional<ScalarType> dtype) {
-  return reduction_dimarray_batch_rule<decltype(&ATEN_FN2(sum, dim_IntList)), &at::sum, bool, optional<ScalarType>>(self, self_bdim, dims, keepdim, dtype);
-}
-
-std::tuple<Tensor,optional<int64_t>> sum_batch_rule(
-    const Tensor& self, optional<int64_t> self_bdim, optional<ScalarType> dtype) {
-  return sum_dim_batch_rule(self, self_bdim, range(0, self.dim() - 1), false, dtype);
-}
-
-std::tuple<Tensor,optional<int64_t>> mean_dim_batch_rule(
-    const Tensor& self, optional<int64_t> self_bdim, IntArrayRef dims, bool keepdim, optional<ScalarType> dtype) {
-  return reduction_dimarray_batch_rule<decltype(&ATEN_FN2(mean, dim)), &at::mean, bool, optional<ScalarType>>(self, self_bdim, dims, keepdim, dtype);
-}
-
-std::tuple<Tensor,optional<int64_t>> mean_batch_rule(
-    const Tensor& self, optional<int64_t> self_bdim, optional<ScalarType> dtype) {
-  return mean_dim_batch_rule(self, self_bdim, range(0, self.dim() - 1), false, dtype);
-}
-
-std::tuple<Tensor,optional<int64_t>> nansum_dim_batch_rule(
-    const Tensor& self, optional<int64_t> self_bdim, IntArrayRef dims, bool keepdim, optional<ScalarType> dtype) {
-  return reduction_dimarray_batch_rule<decltype(&ATEN_FN2(nansum, dim_IntList)), &at::nansum, bool, optional<ScalarType>>(self, self_bdim, dims, keepdim, dtype);
-}
-
-std::tuple<Tensor,optional<int64_t>> nansum_batch_rule(
-    const Tensor& self, optional<int64_t> self_bdim, optional<ScalarType> dtype) {
-  return nansum_dim_batch_rule(self, self_bdim, range(0, self.dim() - 1), false, dtype);
-}
-
-// Wraps so that dim is always provided
-Tensor std_correction_wrapper(const Tensor& self, IntArrayRef dim, optional<int64_t> correction, bool keepdim) {
-  return at::std(self, dim, correction, keepdim);
-}
-std::tuple<Tensor,optional<int64_t>> std_correction_batch_rule(
-    const Tensor& self, optional<int64_t> self_bdim, optional<IntArrayRef> dim, optional<int64_t> correction, bool keepdim) {
-  if (!dim.has_value()) {
-    dim = range(0, self.dim() - 1);
-  }
-  return reduction_dimarray_batch_rule<decltype(&std_correction_wrapper), &std_correction_wrapper, optional<int64_t>, bool>(self, self_bdim, *dim, correction, keepdim);
-}
-
-Tensor var_correction_wrapper(const Tensor& self, IntArrayRef dim, optional<int64_t> correction, bool keepdim) {
-  return at::var(self, dim, correction, keepdim);
-}
-std::tuple<Tensor,optional<int64_t>> var_correction_batch_rule(
-    const Tensor& self, optional<int64_t> self_bdim, optional<IntArrayRef> dim, optional<int64_t> correction, bool keepdim) {
-  if (!dim.has_value()) {
-    dim = range(0, self.dim() - 1);
-  }
-  return reduction_dimarray_batch_rule<decltype(&var_correction_wrapper), &var_correction_wrapper, optional<int64_t>, bool>(self, self_bdim, *dim, correction, keepdim);
-}
-
-std::tuple<Tensor,optional<int64_t>> prod_dim_batch_rule(
-    const Tensor& self, optional<int64_t> self_bdim, int64_t dim, bool keepdim, optional<ScalarType> dtype) {
-  return reduction_dim_batch_rule<decltype(&ATEN_FN2(prod, dim_int)), &at::prod, bool, optional<ScalarType>>(self, self_bdim, dim, keepdim, dtype);
-}
-
-std::tuple<Tensor,optional<int64_t>,Tensor,optional<int64_t>> max_dim_batch_rule(
-    const Tensor& self, optional<int64_t> self_bdim, int64_t dim, bool keepdim) {
-  return reduction_dim_ret_pair_batch_rule<decltype(&ATEN_FN2(max, dim)), &at::max, bool>(self, self_bdim, dim, keepdim);
-}
-
-std::tuple<Tensor,optional<int64_t>,Tensor,optional<int64_t>> min_dim_batch_rule(
-    const Tensor& self, optional<int64_t> self_bdim, int64_t dim, bool keepdim) {
-  return reduction_dim_ret_pair_batch_rule<decltype(&ATEN_FN2(min, dim)), &at::min, bool>(self, self_bdim, dim, keepdim);
-}
-// Wraps topk so that dim is the first argument after self (makes it work with templates)
-std::tuple<Tensor, Tensor> wrapped_topk(
-    const Tensor& self, int64_t dim, int64_t k, bool largest, bool sorted) {
-  return at::topk(self, k, dim, largest, sorted);
-}
-
-std::tuple<Tensor,optional<int64_t>,Tensor,optional<int64_t>> topk_batch_rule(
-    const Tensor& self, optional<int64_t> self_bdim, int64_t k, int64_t dim, bool largest, bool sorted) {
-  return reduction_dim_ret_pair_batch_rule<decltype(&wrapped_topk), &wrapped_topk, int64_t, bool, bool>(self, self_bdim, dim, k, largest, sorted);
-}
-
-std::tuple<Tensor, Tensor> wrapped_sort_stable(
-    const Tensor& self, int64_t dim, optional<bool> stable, bool descending) {
-  return at::sort(self, stable, dim, descending);
-}
-
-std::tuple<Tensor,optional<int64_t>,Tensor,optional<int64_t>> sort_stable_batch_rule(
-    const Tensor& self, optional<int64_t> self_bdim, optional<bool> stable, int64_t dim, bool descending) {
-  return reduction_dim_ret_pair_batch_rule<decltype(&wrapped_sort_stable), &wrapped_sort_stable, optional<bool>, bool>(self, self_bdim, dim, stable, descending);
-}
-
-Tensor wrapped_norm_scalaropt_dim(
-    const Tensor& self, IntArrayRef dim, const optional<Scalar>& p, bool keepdim) {
-  return at::norm(self, p, dim, keepdim);
-}
-
-std::tuple<Tensor, optional<int64_t>> norm_scalaropt_dim_batch_rule(
-    const Tensor& self, optional<int64_t> self_bdim, const optional<Scalar>& p, IntArrayRef dim, bool keepdim) {
-  auto out = reduction_dimarray_batch_rule_impl<decltype(&wrapped_norm_scalaropt_dim), &wrapped_norm_scalaropt_dim, const optional<Scalar>&, bool>(self, self_bdim, dim, p, keepdim);
-  if (!out.has_value()) {
-    return std::make_tuple(at::abs(self.clone()), 0);
-  }
-  return *out;
-}
-
-std::tuple<Tensor,optional<int64_t>> norm_scalar_batch_rule(
-    const Tensor& self, optional<int64_t> self_bdim, const Scalar& p) {
-  return norm_scalaropt_dim_batch_rule(self, self_bdim, p, range(0, self.dim() - 1), false);
-}
+#define REDUCTION_BOXED_ARGS(op, dim_pos) \
+  m.impl(#op, torch::CppFunction::makeFromBoxedFunction<boxed_reduction_batch_rule<dim_pos>>());
 
 // Skipping frobenius/nuclear/all/any since they don't have opinfo tests right now :P
 
@@ -354,35 +272,36 @@ std::tuple<Tensor,optional<int64_t>> _log_softmax_backward_batch_rule(
 
 
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
-  VMAP_SUPPORT("amax", SINGLE_ARG(reduction_dimarray_batch_rule<decltype(&at::amax), &at::amax, bool>));
-  VMAP_SUPPORT("amin", SINGLE_ARG(reduction_dimarray_batch_rule<decltype(&at::amin), &at::amin, bool>));
+  REDUCTION_BOXED(amax);
+  REDUCTION_BOXED(amin);
   VMAP_SUPPORT("argmax", SINGLE_ARG(argx_batch_rule<decltype(&at::argmax), &at::argmax>));
   VMAP_SUPPORT("argmin", SINGLE_ARG(argx_batch_rule<decltype(&at::argmin), &at::argmin>));
-  VMAP_SUPPORT("cumprod", SINGLE_ARG(reduction_dim_batch_rule<decltype(&ATEN_FN(cumprod)), &at::cumprod, optional<ScalarType>>));
-  VMAP_SUPPORT("cumsum", SINGLE_ARG(reduction_dim_batch_rule<decltype(&ATEN_FN(cumsum)), &at::cumsum, optional<ScalarType>>));
+  REDUCTION_BOXED(cumprod);
+  REDUCTION_BOXED(cumsum);
   m.impl("dist", dist_decomp);
-  VMAP_SUPPORT("log_softmax.int", SINGLE_ARG(reduction_dim_batch_rule<decltype(&ATEN_FN2(log_softmax, int)), &at::log_softmax, optional<ScalarType>>));
-  VMAP_SUPPORT("logsumexp", SINGLE_ARG(reduction_dimarray_batch_rule<decltype(&ATEN_FN(logsumexp)), &at::logsumexp, bool>));
-  VMAP_SUPPORT("nansum", nansum_batch_rule);
-  VMAP_SUPPORT("nansum.dim_IntList", nansum_dim_batch_rule);
-  VMAP_SUPPORT("max", SINGLE_ARG(reduction_no_dim_batch_rule<decltype(&ATEN_FN(max)), &at::max, decltype(&max_dim_batch_rule), &max_dim_batch_rule>));
-  VMAP_SUPPORT("max.dim", max_dim_batch_rule);
-  VMAP_SUPPORT("mean", mean_batch_rule);
-  VMAP_SUPPORT("mean.dim", mean_dim_batch_rule);
-  VMAP_SUPPORT("min", SINGLE_ARG(reduction_no_dim_batch_rule<decltype(&ATEN_FN(min)), &at::min, decltype(&min_dim_batch_rule), &min_dim_batch_rule>));
-  VMAP_SUPPORT("min.dim", min_dim_batch_rule);
-  VMAP_SUPPORT("mode", SINGLE_ARG(reduction_dim_ret_pair_batch_rule<decltype(&ATEN_FN(mode)), &at::mode, bool>));
-  VMAP_SUPPORT("norm.ScalarOpt_dim", norm_scalaropt_dim_batch_rule);
-  VMAP_SUPPORT("prod", SINGLE_ARG(reduction_no_dim_batch_rule<decltype(&ATEN_FN(prod)), &at::prod, decltype(&prod_dim_batch_rule), &prod_dim_batch_rule, optional<ScalarType>>));
-  VMAP_SUPPORT("prod.dim_int", prod_dim_batch_rule);
-  VMAP_SUPPORT("std.correction", std_correction_batch_rule);
-  VMAP_SUPPORT("_softmax", SINGLE_ARG(reduction_dim_batch_rule<decltype(&ATEN_FN(_softmax)), &at::_softmax, bool>));
-  VMAP_SUPPORT("sort", SINGLE_ARG(reduction_dim_ret_pair_batch_rule<decltype(&ATEN_FN(sort)), &at::sort, bool>));
-  VMAP_SUPPORT("sort.stable", sort_stable_batch_rule);
-  VMAP_SUPPORT("sum", sum_batch_rule);
-  VMAP_SUPPORT("sum.dim_IntList", sum_dim_batch_rule);
-  VMAP_SUPPORT("topk", topk_batch_rule);
-  VMAP_SUPPORT("var.correction", var_correction_batch_rule);
+  REDUCTION_BOXED(log_softmax.int);
+  REDUCTION_BOXED(logsumexp);
+  m.impl("nansum", nansum_decomp);
+  REDUCTION_BOXED(nansum.dim_IntList);
+  m.impl("max", max_decomp);
+  REDUCTION_BOXED(max.dim);
+  m.impl("mean", mean_decomp);
+  REDUCTION_BOXED(mean.dim);
+  m.impl("min", min_decomp);
+  REDUCTION_BOXED(min.dim);
+  REDUCTION_BOXED_ARGS(mode, 2);
+  m.impl("norm.Scalar", norm_scalar_decomp);
+  REDUCTION_BOXED_ARGS(norm.ScalarOpt_dim, 2);
+  m.impl("prod", prod_decomp);
+  REDUCTION_BOXED(prod.dim_int);
+  REDUCTION_BOXED(std.correction);
+  REDUCTION_BOXED(_softmax);
+  REDUCTION_BOXED(sort);
+  REDUCTION_BOXED_ARGS(sort, 2);
+  m.impl("sum", sum_decomp);
+  REDUCTION_BOXED(sum.dim_IntList);
+  REDUCTION_BOXED(topk);
+  REDUCTION_BOXED(var.correction);
   VMAP_SUPPORT("_log_softmax_backward_data", _log_softmax_backward_batch_rule);
   VMAP_SUPPORT("_softmax_backward_data", _softmax_backward_batch_rule);
 
