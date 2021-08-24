@@ -415,9 +415,7 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   llvm::FunctionType* fntype = llvm::FunctionType::get(retTy, params, false);
   fn_ = llvm::Function::Create(
       fntype, llvm::Function::PrivateLinkage, "pytorch", module_.get());
-  fn_->addAttribute(
-      llvm::AttributeList::AttrIndex::FunctionIndex,
-      llvm::Attribute::AlwaysInline);
+  fn_->addFnAttr(llvm::Attribute::AlwaysInline);
   for (const auto i : c10::irange(args.size())) {
     if (!args[i].isVar()) {
       fn_->addParamAttr(i, llvm::Attribute::NoAlias);
