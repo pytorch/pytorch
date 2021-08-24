@@ -31,6 +31,9 @@ class TestVmapAPI(TestCase):
         with self.assertRaisesRegex(ValueError, "got type <class 'int'> for return 1"):
             vmap(multiple_outputs)(torch.ones(3))
 
+    def test_segfault(self):
+        torch.bincount(input=torch.tensor([9223372036854775807]))
+
     def test_different_map_dim_size_raises(self):
         x = torch.randn(2)
         y = torch.randn(3)
