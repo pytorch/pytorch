@@ -119,8 +119,8 @@ class _ForkIterDataPipe(IterDataPipe):
                         self.buffer.popleft()
                 yield return_val
 
-    def is_instance_exhausted(self, instance_id: int) -> bool:
-        return self.end_ptr == self.child_pointers[instance_id]
+    def is_instance_started(self, instance_id: int) -> bool:
+        return self.child_pointers[instance_id] != 0
 
     def is_every_instance_exhausted(self) -> bool:
         return all(self.end_ptr == ptr for ptr in self.child_pointers)
@@ -143,7 +143,7 @@ class ChildDataPipe(IterDataPipe):
             instance_id: integer identifier of this instance
     """
     def __init__(self, main_datapipe, instance_id: int):
-        required_attrs = ["get_next", "is_instance_exhausted", "is_every_instance_exhausted", "reset"]
+        required_attrs = ["get_next", "is_instance_started", "is_every_instance_exhausted", "reset"]
         required_ops = [getattr(main_datapipe, attr) for attr in required_attrs]
         if any(not callable(op) for op in required_ops):
             raise NotImplementedError(f"Main Datapipe must have methods {required_attrs} implemented.")
@@ -151,13 +151,17 @@ class ChildDataPipe(IterDataPipe):
         self.instance_id = instance_id
 
     def __iter__(self):
-        if self.main_datapipe.is_instance_exhausted(self.instance_id):
+        if self.main_datapipe.is_instance_started(self.instance_id):  # Only reset if the DataPipe started to read
             if not self.main_datapipe.is_every_instance_exhausted():
-                warnings.warn("This child DataPipe was exhausted, while some other child DataPipes are not. "
-                              "By reading from this child DataPipe again, we are now resetting the buffer and "
-                              "each child DataPipe will read from the start again.", UserWarning)
+                warnings.warn("Some child DataPipes are not exhausted when __iter__ is called. We are resetting "
+                              "the buffer and each child DataPipe will read from the start again.", UserWarning)
             self.main_datapipe.reset()
+        # We want to separate the code for reset and yield, so that 'reset' exeutes before __next__ is called
+        return self.get_generator_by_id(self.instance_id)
+
+    def get_generator_by_id(self, instance_id: int):
         yield from self.main_datapipe.get_next(self.instance_id)
+
 
 @functional_datapipe('demux')
 class DemultiplexerIterDataPipe(IterDataPipe):
