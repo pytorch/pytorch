@@ -97,6 +97,23 @@ class TestPythonKey(TestCase):
         inp = torch.randn(3)
         self.assertEqual(jit_f(inp), f(inp))
 
+    def test_nnc_jit_warns_on_recompilation(self, device):
+        def f(x):
+            return torch.sin(x)
+
+        jit_f = nnc_jit(f)
+
+        inp = torch.randn(3)
+        jit_f(inp)
+        inp2 = torch.randn(5)
+
+        with warnings.catch_warnings(record=True) as warns:
+            warnings.simplefilter("always")
+            jit_f(inp2)
+
+        self.assertEqual(len(warns), 1)
+        self.assertTrue("Recompiling" in str(warns[-1].message))
+
     def test_nnc_scalar(self, device):
         def f(x):
             return torch.sin(x)
