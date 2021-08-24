@@ -127,6 +127,15 @@ std::tuple<Tensor,optional<int64_t>> comparison_pointwise_batch_rule(
   return std::make_tuple( std::move(result), 0 );
 }
 
+std::tuple<Tensor,optional<int64_t>> _s_where_batch_rule(
+    const Tensor& condition, optional<int64_t> condition_bdim,
+    const Tensor& self, optional<int64_t> self_bdim, const Tensor& other, optional<int64_t> other_bdim) {
+  auto condition_ = moveBatchDimToFront(condition, condition_bdim);
+  auto self_ = moveBatchDimToFront(self, self_bdim);
+  auto other_ = moveBatchDimToFront(other, other_bdim);
+  return std::make_tuple(at::where(condition_, self_, other_), 0);
+}
+
 void boxed_pointwise_batch_rule(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   const auto& schema = op.schema();
   const auto num_returns = schema.returns().size();
@@ -182,7 +191,6 @@ void boxed_pointwise_batch_rule(const c10::OperatorHandle& op, torch::jit::Stack
     }
   }
 }
-
 #define POINTWISE_FALLBACK(op) \
   m.impl(#op, torch::CppFunction::makeFromBoxedFunction<boxed_pointwise_batch_rule>());
 
