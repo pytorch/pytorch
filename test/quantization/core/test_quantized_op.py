@@ -2778,6 +2778,36 @@ class TestDynamicQuantizedLinear(TestCase):
         self.assertEqual(Y_fp32, Y_fp32_ref,
                          msg="torch.ops.quantized.fbgemm_linear_dynamic results are off")
 
+    @skipIfNoFBGEMM
+    @given(
+        batch_size=st.integers(1, 4),
+        input_channels=st.integers(16, 32),
+        output_channels=st.integers(4, 8),
+        use_bias=st.booleans(),
+        use_relu=st.booleans())
+    def test_qlinear_dynamic_fp16(self, batch_size, input_channels, output_channels, use_bias, use_relu):
+
+        qlinear_prepack = torch.ops.quantized.linear_prepack_fp16
+        if use_relu:
+            qlinear_dynamic = torch.ops.quantized.linear_relu_dynamic_fp16
+        else:
+            qlinear_dynamic = torch.ops.quantized.linear_dynamic_fp16
+
+        x = torch.randn(batch_size, input_channels)
+        w = torch.randn(output_channels, input_channels)
+        bias = torch.randn(output_channels) if use_bias else None
+
+        w_packed = qlinear_prepack(w, bias)
+        out = qlinear_dynamic(x, w_packed)
+
+        # qlinear_dynamic_fp16 uses FP32 activation tensors and FP16 weight tensors
+        # output is FP32
+        w_fp16 = w.to(torch.float16).to(torch.float32)
+        ref = F.linear(x, w_fp16, bias)
+        if use_relu:
+            ref.relu_()
+
+        self.assertEqual(out, ref)
 
 class TestDynamicQuantizedRNNOp(TestCase):
     """Tests the correctness of the dynamic quantized lstm/gru."""
