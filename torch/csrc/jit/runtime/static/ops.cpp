@@ -452,6 +452,29 @@ SROperator aten_stack(Node* n) {
 
 REGISTER_OPERATOR_FUNCTOR(aten::stack, aten_stack, aten_stack);
 
+REGISTER_OPERATOR_FUNCTOR(
+    prim::VarStack,
+    prim_VarStack,
+    [](Node* n) -> SROperator {
+      return [](ProcessedNode* p_node) {
+        const size_t num_inputs = p_node->inputs().size();
+
+        std::vector<at::Tensor> inputs(num_inputs - 1);
+        for (size_t i = 0; i < num_inputs - 1; ++i) {
+          inputs[i] = p_node->Input(i).toTensor();
+        }
+
+        const auto dim = p_node->Input(num_inputs - 1).toInt();
+        if (p_node->Output(0).isNone()) {
+          p_node->Output(0) = at::native::_stack_cpu(inputs, dim);
+        } else {
+          auto& out_t = p_node->Output(0).toTensor();
+          fastResizeToZero(out_t);
+          at::native::_stack_out_cpu(inputs, dim, out_t);
+        }
+      };
+    });
+
 REGISTER_OPERATOR_FUNCTOR(aten::leaky_relu, aten_leaky_relu, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
           "aten::leaky_relu(Tensor self, Scalar negative_slope=0.01) -> Tensor"))) {
@@ -472,10 +495,10 @@ REGISTER_OPERATOR_FUNCTOR(aten::leaky_relu, aten_leaky_relu, [](Node* n) -> SROp
 
 namespace {
 
-// Use the width of an AVX-512 vector by default; this happens to work OK for
-// AVX2 as well. Some ops benefit from using multiple AVX ports, in which case
-// they are vectorized by twice this constant.  An exception is logit, since it
-// contains FP divide, which is single-ported.
+// Use the width of an AVX-512 vector by default; this happens to work OK
+// for AVX2 as well. Some ops benefit from using multiple AVX ports, in
+// which case they are vectorized by twice this constant.  An exception is
+// logit, since it contains FP divide, which is single-ported.
 static constexpr int kVectorWidth = 16;
 
 #ifdef TORCH_ENABLE_LLVM
