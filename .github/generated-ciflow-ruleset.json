@@ -1,4 +1,5 @@
 {
+  "__comment": "@generated DO NOT EDIT MANUALLY, Generation script: .github/scripts/generate_ci_workflows.py",
   "label_rules": {
     "ciflow/all": [
       "libtorch-linux-xenial-cuda10.2-py3.6-gcc7",

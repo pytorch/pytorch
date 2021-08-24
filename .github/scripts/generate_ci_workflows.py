@@ -90,7 +90,9 @@ class CIFlowRuleset:
                 self.label_rules[label] = {workflow_name}
 
     def generate_json(self) -> None:
+        GENERATED = "generated"  # Note that please keep the variable GENERATED otherwise phabricator will hide the whole file
         output = {
+            "__comment": f"@{GENERATED} DO NOT EDIT MANUALLY, Generation script: .github/scripts/generate_ci_workflows.py",
             "version": self.version,
             "label_rules": {
                 label: sorted(list(workflows))
