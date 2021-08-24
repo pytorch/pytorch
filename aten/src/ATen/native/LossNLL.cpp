@@ -453,7 +453,7 @@ TORCH_IMPL_FUNC(nll_loss_backward_out_cpu)
 
 Tensor cross_entropy_loss_prob_target(
     const Tensor& self,
-    const Tensor& target,
+    const Tensor& target_,
     const Tensor& weight,
     int64_t reduction,
     double label_smoothing) {
@@ -466,15 +466,14 @@ Tensor cross_entropy_loss_prob_target(
       " but got weight tensor of shape: ",
       weight.sizes());
 
-  auto input_ = at::log_softmax(self, 1, self.scalar_type());
-  Tensor input;
+  auto input = at::log_softmax(self, 1, self.scalar_type());
+  Tensor target;
 
   if (label_smoothing != 0.0) {
     TORCH_CHECK(0.0 < label_smoothing && label_smoothing <= 1.0, "label_smoothing must be between 0.0 and 1.0. Got: ", label_smoothing);
-
-    input = input_ * (target * (1 - label_smoothing) + label_smoothing / n_classes);
+    target = target_ * (1 - label_smoothing) + label_smoothing / n_classes;
   } else{
-    input = input_ * target;
+    target = target_;
   }
 
   if (weight.defined()) {
@@ -486,22 +485,22 @@ Tensor cross_entropy_loss_prob_target(
 
     switch (reduction) {
       case Reduction::Mean:
-        return -(input * weight_).sum() / (input.numel() / input.size(1));
+        return -(input * target * weight_).sum() / (input.numel() / input.size(1));
       case Reduction::Sum:
-        return -(input * weight_).sum();
+        return -(input * target * weight_).sum();
       case Reduction::None:
-        return -(input * weight_).sum(1);
+        return -(input * target * weight_).sum(1);
       default:
         TORCH_CHECK(false, "Invalid reduction type encountered in cross_entropy: ", reduction);
     }
   } else {
     switch (reduction) {
       case Reduction::Mean:
-        return -input.sum() / (input.numel() / input.size(1));
+        return -(input * target).sum() / (input.numel() / input.size(1));
       case Reduction::Sum:
-        return -input.sum();
+        return -(input * target).sum();
       case Reduction::None:
-        return -input.sum(1);
+        return -(input * target).sum(1);
       default:
         TORCH_CHECK(false, "Invalid reduction type encountered in cross_entropy: ", reduction);
     }
@@ -518,6 +517,7 @@ Tensor cross_entropy_loss_label_smoothing(
 
     auto input = at::log_softmax(self, 1, self.scalar_type());
     auto nllloss = at::nll_loss_nd(input, target, weight, reduction, ignore_index);
+
     auto n_classes = input.size(1);
     auto batches = input.size(0);
 
