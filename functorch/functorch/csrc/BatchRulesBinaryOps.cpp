@@ -187,11 +187,11 @@ void boxed_pointwise_batch_rule(const c10::OperatorHandle& op, torch::jit::Stack
     if (ret.isTensor()) {
       torch::jit::push(stack, makeBatched(ret.toTensor(), 0, cur_level));
     } else {
-      TORCH_INTERNAL_ASSERT("This batched fallback does not currently support ops that return non-tensor values");
+      TORCH_INTERNAL_ASSERT(false, "This boxed batching rule does not currently support ops that return non-tensor values");
     }
   }
 }
-#define POINTWISE_FALLBACK(op) \
+#define POINTWISE_BOXED(op) \
   m.impl(#op, torch::CppFunction::makeFromBoxedFunction<boxed_pointwise_batch_rule>());
 
 
@@ -224,15 +224,15 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
 
   // Batching rule registrations start
   BINARY_SCALAR_2(add, Tensor, Scalar);
-  POINTWISE_FALLBACK(addcdiv);
-  POINTWISE_FALLBACK(addcmul);
+  POINTWISE_BOXED(addcdiv);
+  POINTWISE_BOXED(addcmul);
   BINARY_POINTWISE(atan2);
   BINARY_SCALAR_2(bitwise_and, Tensor, Scalar);
   BINARY_SCALAR_3(bitwise_left_shift, Tensor, Tensor_Scalar, Scalar_Tensor);
   BINARY_SCALAR_3(bitwise_right_shift, Tensor, Tensor_Scalar, Scalar_Tensor);
 
   UNARY_POINTWISE(clamp);
-  POINTWISE_FALLBACK(clamp.Tensor);
+  POINTWISE_BOXED(clamp.Tensor);
   BINARY_POINTWISE2(clamp_min, Tensor);
   UNARY_POINTWISE(clamp_min);
   BINARY_POINTWISE2(clamp_max, Tensor);
@@ -249,16 +249,16 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   BINARY_POINTWISE(fmax);
   BINARY_POINTWISE(fmin);
   BINARY_SCALAR_2(fmod, Tensor, Scalar);
-  POINTWISE_FALLBACK(frexp.Tensor);
+  POINTWISE_BOXED(frexp.Tensor);
   BINARY_POINTWISE(heaviside);
   BINARY_POINTWISE(hypot);
   BINARY_POINTWISE(gcd);
   BINARY_POINTWISE(igamma);
   BINARY_POINTWISE(igammac);
-  POINTWISE_FALLBACK(lerp.Scalar);
-  POINTWISE_FALLBACK(lerp.Tensor);
+  POINTWISE_BOXED(lerp.Scalar);
+  POINTWISE_BOXED(lerp.Tensor);
   BINARY_POINTWISE(lcm);
-  POINTWISE_FALLBACK(log_sigmoid_forward);
+  POINTWISE_BOXED(log_sigmoid_forward);
   BINARY_POINTWISE(maximum);
   BINARY_POINTWISE(minimum);
 
@@ -266,7 +266,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   BINARY_POINTWISE(nextafter);
   BINARY_SCALAR_3(pow, Tensor_Tensor, Tensor_Scalar, Scalar);
   BINARY_POINTWISE(polar);
-  POINTWISE_FALLBACK(polygamma);
+  POINTWISE_BOXED(polygamma);
   BINARY_SCALAR_2(sub, Tensor, Scalar);
   BINARY_SCALAR_3(remainder, Tensor, Scalar, Scalar_Tensor);
   BINARY_POINTWISE(rrelu_with_noise);
