@@ -1,4 +1,6 @@
 from functools import reduce
+
+import sympy  # type: ignore[import]
 import torch
 import operator
 from torch.fx.tensor_type import Dyn, is_consistent, TensorType, is_more_precise
@@ -9,12 +11,12 @@ from torch.nn.modules.conv import Conv2d
 from torch.fx.experimental.refinement_types import Equality
 import itertools
 
-
 from torch.fx.experimental.unification import Var  # type: ignore[attr-defined]
 
 
 _INFERENCE_RULES: Dict[Target, Callable] = {}
 _REFINEMENT_RULES: Dict[Target, Callable] = {}
+_RULES: Dict[Target, Callable] = {}
 
 
 def expand_to_tensor_dim(t, n):
@@ -84,6 +86,13 @@ def register_refinement_rule(call_target):
         return fn
     return register
 
+def register_rule(call_target):
+    def register(fn):
+        if call_target in _RULES:
+            raise RuntimeError('Rule already registered for {call_target}!')
+        _RULES[call_target] = fn
+        return fn
+    return register
 
 @register_inference_rule(torch.add)
 @register_inference_rule(operator.add)
@@ -261,7 +270,7 @@ def calculate_out_dimension(d_in, module_instance, index):
     if d_in == Dyn:
         return Dyn
 
-    elif isinstance(d_in, int):
+    elif isinstance(d_in, (int, sympy.Symbol)):
         n = d_in + 2 * padding[index] - \
             dilation[index] * \
             (kernel_size[index] - 1) - 1
@@ -269,7 +278,7 @@ def calculate_out_dimension(d_in, module_instance, index):
         return (n // stride[0]) + 1
 
     else:
-        raise TypeError(f'{d_in} in {module_instance} must be a number or Dyn')
+        raise TypeError(f'{d_in} in {module_instance} must be a number or Dyn. Received {type(d_in)}')
 
 
 def get_greatest_upper_bound(type1, type2):
@@ -552,8 +561,17 @@ class GraphTypeChecker:
 
 
 @register_refinement_rule(Conv2d)
+def conv_refinement_rule(n: Node):
+    res = []
+    assert isinstance(n.args[0], Node)
+    arg_type = n.args[0].type
+    if isinstance(arg_type, TensorType) and isinstance(n.type, TensorType):
+        res = [Equality(arg_type.__args__[0], n.type.__args__[0])]
+        return res
+
+
 @register_refinement_rule(torch.nn.Linear)
-def first_one(n: Node):
+def linear_refinement_rule(n: Node):
     res = []
     assert isinstance(n.args[0], Node)
     arg_type = n.args[0].type
@@ -636,6 +654,20 @@ def flatten_refinement_rule(n: Node):
             eq_const.append(Equality(t1, t2))
     return eq_const
 
+
+@register_rule(Conv2d)
+def conv_rule(n: Node, module_instance):
+    assert isinstance(n.args[0], Node)
+    arg_type = n.args[0].type
+    if isinstance(arg_type, TensorType) and isinstance(n.type, TensorType):
+        w_in = arg_type.__args__[3]
+        h_in = arg_type.__args__[2]
+        h_out = calculate_out_dimension(h_in, module_instance, 0)
+        w_out = calculate_out_dimension(w_in, module_instance, 1)
+        new_type = TensorType((n.type.__args__[0], n.type.__args__[1], h_out, w_out))
+        n.type = new_type
+        return new_type
+
 class Refine:
     """
     Symbolic shape inference.
@@ -658,6 +690,15 @@ class Refine:
             self.refine_node(n)
         return True
 
+    def symbolic_relations(self):
+        """
+        Infers algebraic relations
+        """
+        graph = self.traced.graph
+        for n in graph.nodes:
+            self.infer_symbolic_relations(n)
+        return True
+
     def replace_dyn_with_fresh_var(self, typ):
         """
         Replace all unknown types with fresh type variables.
@@ -672,6 +713,23 @@ class Refine:
             return [self.replace_dyn_with_fresh_var(t) for t in typ]
         elif isinstance(typ, tuple):
             return (self.replace_dyn_with_fresh_var(t) for t in typ)
+        else:
+            return typ
+
+
+    def convert_to_sympy_symbols(self, typ):
+        """
+        Replace all unknown types with fresh type variables.
+        """
+        if isinstance(typ, Var):
+            return sympy.symbols(str(typ))
+        elif isinstance(typ, TensorType):
+            new_args = [self.convert_to_sympy_symbols(a) for a in typ.__args__]
+            return TensorType(tuple(new_args))
+        elif isinstance(typ, list):
+            return [self.convert_to_sympy_symbols(t) for t in typ]
+        elif isinstance(typ, tuple):
+            return (self.convert_to_sympy_symbols(t) for t in typ)
         else:
             return typ
 
@@ -710,6 +768,29 @@ class Refine:
         else:
             pass
 
+    def infer_symbolic_relations(self, n: Node):
+        n.type = self.convert_to_sympy_symbols(n.type)
+        if n.op == 'call_function':
+            if n.target in _RULES:
+                return _RULES[n.target](n)
+            else:
+                pass
+
+        if n.op == 'call_module':
+            module_instance = self.traced.get_submodule(n.target)
+            if type(module_instance) in _RULES:
+                return _RULES[type(module_instance)](n, module_instance)
+            else:
+                pass
+
+        if n.op == 'output':
+            def get_node_type(a):
+                return a.type
+            n.type = torch.fx.node.map_arg(n.args[0], get_node_type)
+            return n.type
+
+        else:
+            pass
 
 def get_parameter(traced, target: str):
     """

@@ -9,7 +9,14 @@ from torch.fx.experimental.graph_gradual_typechecker import GraphTypeChecker, br
 from torch.fx.experimental.rewriter import RewritingTracer
 from torch.fx import GraphModule
 from torch.fx.passes.shape_prop import ShapeProp
-from torch.fx.experimental.unification import Var
+
+try:
+    import sympy
+    HAS_SYMPY = True
+except ImportError:
+    HAS_SYMPY = False
+skipIfNoSympy = unittest.skipIf(not HAS_SYMPY, "no sympy")
+
 
 try:
     from torchvision.models import resnet50
@@ -18,13 +25,6 @@ try:
 except ImportError:
     HAS_TORCHVISION = False
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
-
-# try:
-#     from unification import Var
-#     HAS_UNIFICATION = True
-# except ImportError:
-#     HAS_UNIFICATION = False
-# skipIfNoUnification = unittest.skipIf(not HAS_UNIFICATION, "no unification")
 
 def conv3x3(in_planes, out_planes, stride=1, groups=1, dilation=1):
     """3x3 convolution with padding"""
@@ -859,7 +859,7 @@ class TypeCheckerTest(unittest.TestCase):
             batch_sizes.add(n.type.__args__[0])
         assert (len(batch_sizes) == 1)
 
-
+    @skipIfNoSympy
     def test_type_check_batch_norm_symbolic(self):
         class BasicBlock(torch.nn.Module):
 
@@ -884,15 +884,15 @@ class TypeCheckerTest(unittest.TestCase):
 
         infer_symbolic_types(traced)
 
-
-        my_types = iter([TensorType[(2, 2, Var(7), 4)],
-                         TensorType[(2, 2, Var(7), 4)],
-                         TensorType[(2, 2, Var(7), 4)],
-                         TensorType[(2, 2, Var(7), 4)]])
+        my_types = iter([TensorType[(2, 2, sympy.symbols('~7'), 4)],
+                         TensorType[(2, 2, sympy.symbols('~7'), 4)],
+                         TensorType[(2, 2, sympy.symbols('~7'), 4)],
+                         TensorType[(2, 2, sympy.symbols('~7'), 4)]])
 
         for n in graph.nodes:
             assert n.type == next(my_types)
 
+    @skipIfNoSympy
     def test_symbolic_add_with_broadcast(self):
         class M(torch.nn.Module):
             def forward(self, x: TensorType((1, 2, 3, Dyn)), y: TensorType((2, 3, 4))):
@@ -911,16 +911,17 @@ class TypeCheckerTest(unittest.TestCase):
 
         infer_symbolic_types(symbolic_traced)
 
-        expected_ph_types = [TensorType((1, 2, 3, Var(0))),
+        expected_ph_types = [TensorType((1, 2, 3, sympy.symbols('~0'))),
                              TensorType((2, 3, 4)),
-                             TensorType((1, 2, 3, Var(1))),
-                             TensorType((1, 2, 3, Var(1)))]
+                             TensorType((1, 2, 3, sympy.symbols('~1'))),
+                             TensorType((1, 2, 3, sympy.symbols('~1')))]
         expected_iter = iter(expected_ph_types)
+
 
         for n in symbolic_traced.graph.nodes:
             assert n.type == next(expected_iter)
 
-
+    @skipIfNoSympy
     def test_symbolic_add_with_broadcast_2(self):
         class M(torch.nn.Module):
             def forward(self, x: TensorType((1, 2)), y: TensorType((Dyn, 2))):
@@ -934,13 +935,43 @@ class TypeCheckerTest(unittest.TestCase):
         r.refine()
 
         expected_ph_types = [TensorType((1, 2)),
-                             TensorType((Var(1), 2)),
-                             TensorType((Var(1), 2)),
-                             TensorType((Var(1), 2))]
+                             TensorType((sympy.symbols('~1'), 2)),
+                             TensorType((sympy.symbols('~1'), 2)),
+                             TensorType((sympy.symbols('~1'), 2))]
         expected_iter = iter(expected_ph_types)
 
         for n in symbolic_traced.graph.nodes:
             assert n.type == next(expected_iter)
+
+
+
+    def test_type_check_conv2D_types(self):
+        class BasicBlock(torch.nn.Module):
+            def __init__(self, inplanes, planes, stride=1, norm_layer=None):
+                super(BasicBlock, self).__init__()
+                if norm_layer is None:
+                    norm_layer = torch.nn.BatchNorm2d
+                self.conv1 = conv3x3(inplanes, planes, stride)
+                self.bn1 = norm_layer(planes)
+
+            def forward(self, x: Dyn):
+                identity = x
+                out: TensorType((2, 2, Dyn, 4)) = self.conv1(x)
+                out += identity
+                return out
+
+        B = BasicBlock(2, 2)
+        ast_rewriter = RewritingTracer()
+        graph = ast_rewriter.trace(B)
+        traced = GraphModule(ast_rewriter.root, graph, "gm")
+        tc = GraphTypeChecker({}, traced)
+        tc.type_check()
+        infer_symbolic_types(traced)
+
+        for n in traced.graph.nodes:
+            if n.op == 'call_module':
+                assert isinstance(n.type.__args__[2], sympy.floor)
+                assert isinstance(n.type.__args__[3], sympy.floor)
 
 if __name__ == '__main__':
     unittest.main()

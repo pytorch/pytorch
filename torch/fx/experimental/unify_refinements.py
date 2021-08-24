@@ -20,8 +20,16 @@ def infer_symbolic_types(traced):
     to infer all the information such as the case
     for braodcasting.
     """
-    infer_symbolic_types_single_pass(traced)
-    infer_symbolic_types_single_pass(traced)
+    r = Refine(traced)
+    r.refine()
+    mgu = unify_eq(r.constraints)
+    substitute_all_types(traced.graph, mgu)
+
+    r.refine()
+    mgu = unify_eq(r.constraints)
+    substitute_all_types(traced.graph, mgu)
+
+    r.symbolic_relations()
 
 def convert_eq(list_of_eq):
     """
