@@ -47,14 +47,14 @@ LoopNest::LoopNest(StmtPtr stmt, std::unordered_set<BufPtr> output_bufs)
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 LoopNest::LoopNest(
-    const std::vector<Tensor*>& output_tensors,
-    const std::vector<Tensor*>& tensors_to_compute) {
+    const std::vector<Tensor>& output_tensors,
+    const std::vector<Tensor>& tensors_to_compute) {
   initialize(output_tensors, tensors_to_compute);
   verify(root_stmt_);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-LoopNest::LoopNest(const std::vector<Tensor*>& output_tensors) {
+LoopNest::LoopNest(const std::vector<Tensor>& output_tensors) {
   initialize(output_tensors, output_tensors);
   verify(root_stmt_);
 }
@@ -486,15 +486,15 @@ bool LoopNest::vectorize(ForPtr f) {
 }
 
 void LoopNest::initialize(
-    const std::vector<Tensor*>& output_tensors,
-    const std::vector<Tensor*>& tensors_to_compute) {
+    const std::vector<Tensor>& output_tensors,
+    const std::vector<Tensor>& tensors_to_compute) {
   for (auto t : output_tensors) {
-    output_bufs_.insert(t->buf());
+    output_bufs_.insert(t.buf());
   }
 
   std::vector<StmtPtr> loops;
-  for (Tensor* t : tensors_to_compute) {
-    StmtPtr loop = t->stmt();
+  for (Tensor t : tensors_to_compute) {
+    StmtPtr loop = t.stmt();
     if (loop->get_parent()) {
       std::cerr << "Error: creating a loopnest from already used Tensors\n";
       loops = {};
@@ -1306,11 +1306,10 @@ void LoopNest::sliceHead(ForPtr f, int factor, ForPtr* head, ForPtr* tail) {
   ExprPtr head_end = alloc<Min>(
       alloc<Add>(f->start(), alloc<IntImm>(factor)), f->stop(), true);
   *head = alloc<For>(f->var(), f->start(), head_end, Stmt::clone(f->body()));
-  *tail = alloc<For>(
-      f->var(), head_end, f->stop(), Stmt::clone(f->body()), f->loop_options());
+  p->insert_stmt_before(*head, f);
 
-  p->replace_stmt(f, *head);
-  p->insert_stmt_after(*tail, *head);
+  f->set_start(head_end);
+  *tail = f;
 
   if (f->loop_options().is_gpu_block_index() ||
       f->loop_options().is_gpu_thread_index()) {
@@ -1346,16 +1345,11 @@ void LoopNest::sliceTail(ForPtr f, int factor, ForPtr* head, ForPtr* tail) {
 
   ExprPtr tail_start = alloc<Max>(
       f->start(), alloc<Sub>(f->stop(), alloc<IntImm>(factor)), true);
-  *head = alloc<For>(
-      f->var(),
-      f->start(),
-      tail_start,
-      Stmt::clone(f->body()),
-      f->loop_options());
   *tail = alloc<For>(f->var(), tail_start, f->stop(), Stmt::clone(f->body()));
+  p->insert_stmt_after(*tail, f);
 
-  p->replace_stmt(f, *head);
-  p->insert_stmt_after(*tail, *head);
+  f->set_stop(tail_start);
+  *head = f;
 
   if (f->loop_options().is_gpu_block_index() ||
       f->loop_options().is_gpu_thread_index()) {
@@ -2386,11 +2380,11 @@ void LoopNest::compressBuffer(BufPtr buf, StmtPtr stmt) {
 
 void LoopNest::compressAllBuffers(StmtPtr stmt) {
   for (auto buf : BufFinder::find(stmt)) {
-    compressBuffer(const_cast<BufPtr>(buf), stmt);
+    compressBuffer(buf, stmt);
   }
 }
 
-std::vector<ForPtr> LoopNest::getLoopStmtsFor(Tensor* t) const {
+std::vector<ForPtr> LoopNest::getLoopStmtsFor(Tensor t) const {
   StmtPtr cur_stmt = getLoopBodyFor(t);
   return getLoopStmtsFor(cur_stmt);
 }
@@ -2413,8 +2407,8 @@ std::vector<ForPtr> LoopNest::getLoopStmtsFor(StmtPtr s) const {
   return result;
 }
 
-StmtPtr LoopNest::getLoopBodyFor(Tensor* t) const {
-  return getLoopBodyFor(t->buf());
+StmtPtr LoopNest::getLoopBodyFor(Tensor t) const {
+  return getLoopBodyFor(t.buf());
 }
 
 StmtPtr LoopNest::getLoopBodyFor(BufPtr buf) const {
