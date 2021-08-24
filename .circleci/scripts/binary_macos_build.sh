@@ -14,7 +14,7 @@ chmod +x "$build_script"
 # Build
 cat >"$build_script" <<EOL
 export PATH="$workdir/miniconda/bin:$PATH"
-export USE_PYTORCH_METAL=1
+export USE_PYTORCH_METAL_EXPORT=1
 if [[ "$PACKAGE_TYPE" == conda ]]; then
   "$workdir/builder/conda/build_pytorch.sh"
 else
