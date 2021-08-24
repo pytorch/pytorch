@@ -469,13 +469,9 @@ def get_device_type_test_bases():
     test_bases: List[Any] = list()
 
     if IS_SANDCASTLE or IS_FBCODE:
-        if IS_REMOTE_GPU:
-            # Skip if sanitizer is enabled
-            if not TEST_WITH_ASAN and not TEST_WITH_TSAN and not TEST_WITH_UBSAN:
-                test_bases.append(CUDATestBase)
-        else:
-            test_bases.append(CPUTestBase)
-            test_bases.append(MetaTestBase)
+        # temporarily disable IS_REMOTE_GPU, see T99020845
+        test_bases.append(CPUTestBase)
+        test_bases.append(MetaTestBase)
     else:
         test_bases.append(CPUTestBase)
         if not TEST_SKIP_NOARCH:
