@@ -9,11 +9,11 @@
 #include <caffe2/core/timer.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
-#include <torch/csrc/jit/passes/concat_opt.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
+#include <torch/csrc/jit/passes/variadic_ops.h>
 #include <torch/csrc/jit/runtime/static/ops.h>
 #include <torch/csrc/jit/runtime/static/passes.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
@@ -275,11 +275,31 @@ LivenessMap GetLivenessMap(
   }
 
   for (const auto* node : graph->nodes()) {
-    for (const auto* input : node->inputs()) {
-      for (const auto* output : node->outputs()) {
+    auto inputs = node->inputs();
+    auto outputs = node->outputs();
+    for (const auto* input : inputs) {
+      for (const auto* output : outputs) {
         if (liveness_map.count(input) && liveness_map.count(output)) {
           liveness_map.at(input).insert(output);
           liveness_map.at(output).insert(input);
+        }
+      }
+    }
+    // All inputs should be alive at the same time.
+    for (size_t i = 0; i < inputs.size(); ++i) {
+      for (size_t j = 0; j < inputs.size(); ++j) {
+        if (liveness_map.count(inputs[i]) && liveness_map.count(inputs[j])) {
+          liveness_map.at(inputs[i]).insert(inputs[j]);
+          liveness_map.at(inputs[j]).insert(inputs[i]);
+        }
+      }
+    }
+    // All outputs should be alive at the same time.
+    for (size_t i = 0; i < outputs.size(); ++i) {
+      for (size_t j = 0; j < outputs.size(); ++j) {
+        if (liveness_map.count(outputs[i]) && liveness_map.count(outputs[j])) {
+          liveness_map.at(outputs[i]).insert(outputs[j]);
+          liveness_map.at(outputs[j]).insert(outputs[i]);
         }
       }
     }
@@ -528,7 +548,7 @@ PrepareForStaticModule(
 StaticModule::StaticModule(
     std::shared_ptr<torch::jit::Graph> g,
     const StaticModuleOptions& opts)
-    : StaticModule(PrepareForStaticModule(g, opts), opts) {}
+    : StaticModule(PrepareForStaticModule(g->copy(), opts), opts) {}
 
 StaticModule::StaticModule(
     const torch::jit::Module& m,
@@ -845,7 +865,8 @@ void StaticRuntime::benchmark(
     const std::vector<c10::IValue>& args,
     const std::unordered_map<std::string, c10::IValue>& kwargs,
     const int warmup_runs,
-    const int main_runs) {
+    const int main_runs,
+    bool print_per_node_time) {
   float time_per_iter = benchmark_model(args, kwargs, warmup_runs, main_runs);
   std::cout << "Static runtime ms per iter: " << time_per_iter
             << ". Iters per second: " << 1000.0 / time_per_iter << std::endl;
@@ -853,11 +874,13 @@ void StaticRuntime::benchmark(
   IndividualMetrics results =
       benchmark_individual_ops(args, kwargs, warmup_runs, main_runs);
 
-  for (const auto i : c10::irange(nodes_.size())) {
-    const Node* node = nodes_[i].node();
-    std::cout << "Node #" << i << ": " << results.time_per_node[i]
-              << " ms/iter, ";
-    node->print(std::cout, 0, nullptr, false);
+  if (print_per_node_time) {
+    for (const auto i : c10::irange(nodes_.size())) {
+      const Node* node = nodes_[i].node();
+      std::cout << "Node #" << i << ": " << results.time_per_node[i]
+                << " ms/iter, ";
+      node->print(std::cout, 0, nullptr, false);
+    }
   }
 
   std::vector<std::pair<std::string, double>> time_per_node_type_vec{
@@ -874,10 +897,12 @@ void StaticRuntime::benchmark(
     std::cout << std::setw(15) << ms << " ms. " << std::setw(10)
               << results.percent_per_node_type[kind] << "%. " << kind << " ("
               << results.instances_per_node_type[kind] << " nodes";
-    if (results.out_nodes.count(kind) == 0) {
-      std::cout << ")" << std::endl;
-    } else {
+    if (results.out_nodes.count(kind)) {
       std::cout << ", out variant)" << std::endl;
+    } else if (results.native_nodes.count(kind)) {
+      std::cout << ", native)" << std::endl;
+    } else {
+      std::cout << ")" << std::endl;
     }
   }
   std::cout << std::setw(15) << results.total_time << " ms. in Total"
@@ -1113,6 +1138,8 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
     if (nodes_[i].has_out_variant()) {
       results.out_nodes.insert(kind);
       results.out_nodes_count++;
+    } else if (nodes_[i].has_native()) {
+      results.native_nodes.insert(kind);
     }
     results.total_time += results.time_per_node[i];
   }

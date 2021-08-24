@@ -1,5 +1,5 @@
 import torch._C as C
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests, CapturedOutput
 from torch._python_dispatcher import PythonDispatcher
 
 from collections import namedtuple
@@ -785,6 +785,27 @@ schema: (none)
 CPU: registered at {}:5 :: () -> () [ boxed unboxed ]
 '''.format(extension_path),
             impls[0])
+
+    def test_dispatch_print_registrations_for_dispatch_key(self):
+        with self.assertRaisesRegex(
+                RuntimeError,
+                "could not parse dispatch key: invalid_key"):
+            C._dispatch_print_registrations_for_dispatch_key('invalid_key')
+
+        all_out = CapturedOutput()
+        with all_out:
+            C._dispatch_print_registrations_for_dispatch_key()
+
+        cpu_out = CapturedOutput()
+        with cpu_out:
+            C._dispatch_print_registrations_for_dispatch_key('CPU')
+
+        all_ops = set(all_out.capturedtext.split())
+        cpu_ops = set(cpu_out.capturedtext.split())
+        self.assertTrue(len(all_ops) > 0)
+        self.assertTrue(len(cpu_ops) > 0)
+        self.assertTrue(cpu_ops.issubset(all_ops))
+        self.assertFalse(all_ops.issubset(cpu_ops))
 
 class TestPythonDispatcher(TestCase):
     def test_basic(self):

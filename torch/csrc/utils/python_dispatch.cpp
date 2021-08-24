@@ -26,84 +26,6 @@ torch::Library::Kind parseKind(const std::string& k) {
   TORCH_CHECK(it != kind_map.end(), "could not parse ", k);
   return it->second;
 }
-
-c10::optional<c10::DispatchKey> parseDispatchKey(const std::string& k) {
-  static std::unordered_map<std::string, c10::DispatchKey> key_map = {
-    {"", c10::DispatchKey::Undefined},
-    {"CPU", c10::DispatchKey::CPU},
-    {"CUDA", c10::DispatchKey::CUDA},
-    {"HIP", c10::DispatchKey::HIP},
-    {"FPGA", c10::DispatchKey::FPGA},
-    {"MSNPU", c10::DispatchKey::MSNPU},
-    {"XLA", c10::DispatchKey::XLA},
-    {"MLC", c10::DispatchKey::MLC},
-    {"Vulkan", c10::DispatchKey::Vulkan},
-    {"Metal", c10::DispatchKey::Metal},
-    {"XPU", c10::DispatchKey::XPU},
-    {"HPU", c10::DispatchKey::HPU},
-    {"VE", c10::DispatchKey::VE},
-    {"Lazy", c10::DispatchKey::Lazy},
-    {"Meta", c10::DispatchKey::Meta},
-    {"QuantizedCPU", c10::DispatchKey::QuantizedCPU},
-    {"QuantizedCUDA", c10::DispatchKey::QuantizedCUDA},
-    {"QuantizedXPU", c10::DispatchKey::QuantizedXPU},
-    {"CustomRNGKeyId", c10::DispatchKey::CustomRNGKeyId},
-    {"MkldnnCPU", c10::DispatchKey::MkldnnCPU},
-    {"SparseCPU", c10::DispatchKey::SparseCPU},
-    {"SparseCUDA", c10::DispatchKey::SparseCUDA},
-    {"SparseHIP", c10::DispatchKey::SparseHIP},
-    {"SparseXPU", c10::DispatchKey::SparseXPU},
-    {"SparseVE", c10::DispatchKey::SparseVE},
-    {"SparseCsrCPU", c10::DispatchKey::SparseCsrCPU},
-    {"SparseCsrCUDA", c10::DispatchKey::SparseCsrCUDA},
-    {"NestedTensor", c10::DispatchKey::NestedTensor},
-    {"PrivateUse1", c10::DispatchKey::PrivateUse1},
-    {"PrivateUse2", c10::DispatchKey::PrivateUse2},
-    {"PrivateUse3", c10::DispatchKey::PrivateUse3},
-    {"BackendSelect", c10::DispatchKey::BackendSelect},
-    {"Python", c10::DispatchKey::Python},
-    {"FuncTorchPython", c10::DispatchKey::FuncTorchPython},
-    {"Named", c10::DispatchKey::Named},
-    {"Conjugate", c10::DispatchKey::Conjugate},
-    {"Negative", c10::DispatchKey::Negative},
-    {"FuncTorchDynamicLayerBackMode", c10::DispatchKey::FuncTorchDynamicLayerBackMode},
-    {"ADInplaceOrView", c10::DispatchKey::ADInplaceOrView},
-    {"AutogradOther", c10::DispatchKey::AutogradOther},
-    {"AutogradCPU", c10::DispatchKey::AutogradCPU},
-    {"AutogradCUDA", c10::DispatchKey::AutogradCUDA},
-    {"AutogradXLA", c10::DispatchKey::AutogradXLA},
-    {"AutogradLazy", c10::DispatchKey::AutogradLazy},
-    {"AutogradXPU", c10::DispatchKey::AutogradXPU},
-    {"AutogradMLC", c10::DispatchKey::AutogradMLC},
-    {"AutogradHPU", c10::DispatchKey::AutogradHPU},
-    {"AutogradNestedTensor", c10::DispatchKey::AutogradNestedTensor},
-    {"AutogradPrivateUse1", c10::DispatchKey::AutogradPrivateUse1},
-    {"AutogradPrivateUse2", c10::DispatchKey::AutogradPrivateUse2},
-    {"AutogradPrivateUse3", c10::DispatchKey::AutogradPrivateUse3},
-    {"Tracer", c10::DispatchKey::Tracer},
-    {"AutocastCPU", c10::DispatchKey::AutocastCPU},
-    {"AutocastCUDA", c10::DispatchKey::AutocastCUDA},
-    {"FuncTorchBatched", c10::DispatchKey::FuncTorchBatched},
-    {"FuncTorchVmapMode", c10::DispatchKey::FuncTorchVmapMode},
-    {"Batched", c10::DispatchKey::Batched},
-    {"VmapMode", c10::DispatchKey::VmapMode},
-    {"FuncTorchGradWrapper", c10::DispatchKey::FuncTorchGradWrapper},
-    {"FuncTorchDynamicLayerFrontMode", c10::DispatchKey::FuncTorchDynamicLayerFrontMode},
-    {"TESTING_ONLY_GenericWrapper", c10::DispatchKey::TESTING_ONLY_GenericWrapper},
-    {"TESTING_ONLY_GenericMode", c10::DispatchKey::TESTING_ONLY_GenericMode},
-    {"Autograd", c10::DispatchKey::Autograd},
-    {"CompositeImplicitAutograd", c10::DispatchKey::CompositeImplicitAutograd},
-    {"CompositeExplicitAutograd", c10::DispatchKey::CompositeExplicitAutograd},
-  };
-  auto it = key_map.find(k);
-  TORCH_CHECK(it != key_map.end(), "could not parse ", k);
-  if (it->second == c10::DispatchKey::Undefined) {
-    return c10::nullopt;
-  } else {
-    return c10::make_optional(it->second);
-  }
-}
-
 c10::AliasAnalysisKind parseAliasAnalysisKind(const std::string& k) {
   static std::unordered_map<std::string, c10::AliasAnalysisKind> key_map = {
     {"CONSERVATIVE", c10::AliasAnalysisKind::CONSERVATIVE},
@@ -119,7 +41,7 @@ c10::AliasAnalysisKind parseAliasAnalysisKind(const std::string& k) {
 
 template <typename Func>
 inline torch::CppFunction dispatch_str(const char* key, Func&& raw_f) {
-  auto mb_key = parseDispatchKey(key);
+  auto mb_key = std::string(key) == "" ? c10::nullopt : c10::make_optional(c10::parseDispatchKey(key));
   if (mb_key) {
     return torch::dispatch(*mb_key, std::forward<Func>(raw_f));
   } else {
@@ -209,7 +131,12 @@ void initDispatchBindings(PyObject* module) {
   ;
 
   m.def("_dispatch_library", [](const char* kind, std::string name, const char* dispatch) {
-    return std::make_unique<torch::Library>(parseKind(kind), std::move(name), parseDispatchKey(dispatch), "/dev/null", 0);
+    return std::make_unique<torch::Library>(
+      parseKind(kind),
+      std::move(name),
+      std::string(dispatch) == "" ? c10::nullopt : c10::make_optional(c10::parseDispatchKey(dispatch)),
+      "/dev/null",
+      0);
   });
 
   m.def("_dispatch_dump", [](const char* name) -> std::string {
@@ -254,14 +181,14 @@ void initDispatchBindings(PyObject* module) {
     return states;
   });
 
-  m.def("_dispatch_print_registrations_for_dispatch_key", [](const char* dispatch_key) {
-    auto k = parseDispatchKey(dispatch_key);
-    if (!k) {
-        std::cout << "Invalid DispatchKey: " << dispatch_key << std::endl;
-    } else {
-        c10::Dispatcher::singleton().printRegistrationsForDispatchKey(*k);
-    }
-  });
+  // Prints out the name of every operator that has a kernel registered to the Dispatcher
+  // under [dispatch_key].
+  // If no arguments are specified, it'll print out the name of every operator that the Dispatcher knows of.
+  // This can be useful to answer questions like "list all operators that do not have a CPU kernel".
+  m.def("_dispatch_print_registrations_for_dispatch_key", [](const char* dispatch_key = "") {
+    auto k = std::string(dispatch_key) == "" ? c10::nullopt : c10::make_optional(c10::parseDispatchKey(dispatch_key));
+    c10::Dispatcher::singleton().printRegistrationsForDispatchKey(k);
+  }, py::arg("dispatch_key") = static_cast<const char*>(""));
 }
 
 }}} // namespace torch::impl::dispatch

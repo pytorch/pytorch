@@ -323,10 +323,11 @@ std::vector<OperatorHandle> Dispatcher::findDanglingImpls() const {
   });
 }
 
-void Dispatcher::printRegistrationsForDispatchKey(DispatchKey k) const {
+void Dispatcher::printRegistrationsForDispatchKey(c10::optional<DispatchKey> k) const {
   operatorLookupTable_.read([&] (const ska::flat_hash_map<OperatorName, OperatorHandle>& operatorLookupTable) -> void {
     for (const auto& op : operatorLookupTable) {
-      if (op.second.hasKernelForDispatchKey(k)) {
+      // If no DispatchKey is specified, print all of the operators.
+      if (!k || op.second.hasKernelForDispatchKey(*k)) {
           std::cout << op.first << std::endl;
       }
     }

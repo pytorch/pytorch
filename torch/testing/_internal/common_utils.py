@@ -906,8 +906,10 @@ def check_if_enable(test: unittest.TestCase):
             platform_to_conditional: Dict = {
                 "mac": IS_MACOS,
                 "macos": IS_MACOS,
+                "win": IS_WINDOWS,
                 "windows": IS_WINDOWS,
-                "linux": IS_LINUX
+                "linux": IS_LINUX,
+                "rocm": TEST_WITH_ROCM
             }
             if platforms == [] or any([platform_to_conditional[platform] for platform in platforms]):
                 raise unittest.SkipTest(
@@ -2533,13 +2535,6 @@ def disable_gc():
     else:
         yield
 
-def has_breakpad() -> bool:
-    # If not on a special build, check that the library was actually linked in
-    try:
-        torch._C._get_minidump_directory()  # type: ignore[attr-defined]
-        return True
-    except RuntimeError as e:
-        return False
 
 def find_library_location(lib_name: str) -> Path:
     # return the shared library file in the installed folder if exist,
@@ -2589,6 +2584,76 @@ def get_tensors_from(args, kwargs):
     """ Returns a set of all Tensor objects in the given args and kwargs. """
     return set([arg for arg in args if isinstance(arg, Tensor)] +
                [v for v in kwargs.values() if isinstance(v, Tensor)])
+
+class CapturedOutput(object):
+    """
+    Class used to grab standard output.
+    We need this instead of contextlib.redirect_stdout() if the printed text
+    that we want to capture comes from C++.
+    The result is stored in capturedtext.
+    Pulled partially from https://www.py4u.net/discuss/66399.
+    """
+    escape_char = "\b"
+
+    def __init__(self):
+        self.origstream = sys.stdout
+        self.origstreamfd = self.origstream.fileno()
+        self.capturedtext = ""
+        # Create a pipe so the stream can be captured:
+        self.pipe_out, self.pipe_in = os.pipe()
+
+    def __enter__(self):
+        self.capturedtext = ""
+        # Save a copy of the stream:
+        self.streamfd = os.dup(self.origstreamfd)
+        # Replace the original stream with our write pipe:
+        os.dup2(self.pipe_in, self.origstreamfd)
+        return self
+
+    def __exit__(self, type, value, traceback):
+        # Print the escape character to make the readOutput method stop:
+        self.origstream.write(self.escape_char)
+        # Flush the stream to make sure all our data goes in before
+        # the escape character:
+        self.origstream.flush()
+        self.readOutput()
+        # Close the pipe:
+        os.close(self.pipe_in)
+        os.close(self.pipe_out)
+        # Restore the original stream:
+        os.dup2(self.streamfd, self.origstreamfd)
+        # Close the duplicate stream:
+        os.close(self.streamfd)
+
+    def readOutput(self):
+        """
+        Read the stream data (one byte at a time)
+        and save the text in `capturedtext`.
+        """
+        while True:
+            char = os.read(self.pipe_out, 1)
+            if not char:
+                break
+            char = char.decode("utf-8")
+            if self.escape_char in char:
+                break
+            self.capturedtext += char
+
+
+def has_breakpad():
+    # We always build with breakpad in CI
+    if IS_IN_CI:
+        return True
+
+    # If not on a special build, check that the library was actually linked in
+    try:
+        torch._C._get_minidump_directory()  # type: ignore[attr-defined]
+        return True
+    except RuntimeError as e:
+        if "Minidump handler is uninintialized" in str(e):
+            return True
+        return False
+
 
 def sandcastle_skip_if(condition, reason):
     """
