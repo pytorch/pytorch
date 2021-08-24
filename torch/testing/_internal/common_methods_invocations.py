@@ -5147,6 +5147,41 @@ def sample_inputs_grid_sample(op_info, device, dtype, requires_grad, **kwargs):
 
     return sample_inputs
 
+def sample_inputs_nll_loss(op_info, device, dtype, requires_grad, **kwargs):
+    shape_2d = (2, 3)
+
+    input_shape_and_kwargs = [
+        (shape_2d, dict()),
+        ((*shape_2d, 3, 3), dict()),
+        (shape_2d, dict(weight=True)),
+        (shape_2d, dict(ignore_index=1)),
+        (shape_2d, dict(reduction="mean")),
+        (shape_2d, dict(reduction="sum")),
+        (shape_2d, dict(reduction="none")),
+    ]
+
+    sample_inputs = []
+    for input_shape, kwargs in input_shape_and_kwargs:
+        # nll_loss requires the inputs to be log probabilities, i.e. values in the interval (-inf, 0]
+        input = make_tensor(input_shape, high=0, device=device, dtype=dtype, requires_grad=requires_grad)
+
+        batch_size, num_channels, *other_dims = input_shape
+        target = make_tensor(
+            (batch_size, *other_dims),
+            low=0,
+            high=num_channels,
+            device=device,
+            dtype=torch.long,
+            requires_grad=requires_grad
+        )
+
+        if kwargs.get("weight", False):
+            kwargs["weight"] = make_tensor((num_channels,), device=device, dtype=dtype)
+
+        sample_inputs.append(SampleInput(input, args=(target,), kwargs=kwargs))
+
+    return sample_inputs
+
 foreach_unary_op_db: List[OpInfo] = [
     ForeachFuncInfo('exp'),
     ForeachFuncInfo('acos'),
@@ -8832,6 +8867,21 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_grid_sample,
         supports_gradgrad=False,
         gradcheck_nondet_tol=1e-15,
+        skips=(
+            SkipInfo(
+                "TestJit",
+                "test_variant_consistency_jit",
+                dtypes=(torch.float32,),
+            ),
+        ),
+    ),
+    OpInfo(
+        "nn.functional.nll_loss",
+        ref=_NOTHING,
+        dtypesIfCPU=floating_types_and(torch.bfloat16),
+        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        supports_out=False,
+        sample_inputs_func=sample_inputs_nll_loss,
         skips=(
             SkipInfo(
                 "TestJit",
