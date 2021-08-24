@@ -7720,7 +7720,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            sample_inputs_func=sample_inputs_legacy_solve,
            check_batched_gradgrad=False,
-           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack]),
+           decorators=[skipCUDAIfNoMagma]),
     UnaryUfuncInfo('trunc',
                    aliases=('fix', ),
                    ref=np.trunc,
