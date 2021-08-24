@@ -377,9 +377,16 @@ void Reducer::mark_variable_ready_dense(size_t variable_index) {
         if (comm_hook_ == nullptr) {
           auto wrapped =
               at::native::wrapped_scalar_tensor(double(1.) / div_factor_);
-          // Divides while copying into the bucket view to save one scan over
-          // all the input parameters.
-          at::mul_out(bucket_view, grad, wrapped);
+          if (!grad.requires_grad()) {
+            // Divides while copying into the bucket view to save one scan over
+            // all the input parameters.
+            at::mul_out(bucket_view, grad, wrapped);
+          } else {
+            // If DDP is running with create_graph=True, gradients require_grad
+            // themselves in order to compute higher order derivatives.
+            auto div_result = at::mul(grad, wrapped);
+            bucket_view.copy_(div_result);
+          }
         } else {
           bucket_view.copy_(grad);
         }
