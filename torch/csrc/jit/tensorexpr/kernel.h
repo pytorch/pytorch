@@ -19,7 +19,7 @@ template <typename T>
 inline std::vector<int64_t> bufferSizes(const T& t) {
   std::vector<int64_t> sizes;
   for (size_t i = 0; i < t->ndim(); i++) {
-    sizes.push_back(dynamic_cast<IntImm*>(t->dim(i))->value());
+    sizes.push_back(to<IntImm>(t->dim(i))->value());
   }
   return sizes;
 }
@@ -47,7 +47,7 @@ using ArgValue = c10::variant<
     IntList,
     ArgNone>;
 
-using NNCLoweringFunction = std::function<Tensor*(
+using NNCLoweringFunction = std::function<Tensor(
     const std::vector<ArgValue>&,
     const std::vector<ExprHandle>&,
     const c10::optional<ScalarType>&,
@@ -123,7 +123,7 @@ struct TensorInfo {
   c10::ScalarType dtype;
 };
 
-TORCH_API Tensor* computeOperandValue(
+TORCH_API Tensor computeOperandValue(
     c10::Symbol op,
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
@@ -132,7 +132,7 @@ TORCH_API Tensor* computeOperandValue(
 
 class TORCH_API TensorExprKernel {
   struct ConstantDescr {
-    Buf* buf;
+    BufPtr buf;
     void* ptr;
   };
 
@@ -151,7 +151,7 @@ class TORCH_API TensorExprKernel {
     InterpreterState(code_).run(stack);
   }
 
-  Stmt* getCodeGenStmt();
+  StmtPtr getCodeGenStmt();
 
   std::string getCodeText(const std::string& attr = "") {
     return codegen_->getCodeText(attr);
@@ -196,7 +196,7 @@ class TORCH_API TensorExprKernel {
       std::vector<std::vector<ExprHandle>> shapes);
 
   ExprHandle chunk(
-      Buf* b,
+      BufPtr b,
       size_t chunkIdx,
       int64_t dim,
       int64_t chunks,
@@ -209,11 +209,11 @@ class TORCH_API TensorExprKernel {
       const torch::jit::Value* v,
       const std::vector<ExprHandle>& axes);
 
-  Tensor* computeValue(const torch::jit::Value* v);
+  Tensor computeValue(const torch::jit::Value* v);
 
   void bindConstant(const torch::jit::Value* v);
 
-  Stmt* transformLoops(BackendType backendType, Stmt* st);
+  StmtPtr transformLoops(BackendType backendType, StmtPtr st);
 
   std::string getCodeGenName(BackendType backendType);
 
@@ -222,9 +222,9 @@ class TORCH_API TensorExprKernel {
       std::vector<at::Tensor>& outputs);
   BackendType inferBackendTypeFromDevice(at::Device device);
 
-  Tensor* bindInput(const torch::jit::Value* input);
+  Tensor bindInput(const torch::jit::Value* input);
 
-  Tensor* convertOutputToCorrectStrides(torch::jit::Value* v);
+  Tensor convertOutputToCorrectStrides(torch::jit::Value* v);
 
   // Captures the information for reduction operation nodes.
   struct ReductionInfo {
@@ -260,13 +260,12 @@ class TORCH_API TensorExprKernel {
   std::vector<std::vector<int64_t>> tensorOutputSizes_;
   std::vector<std::vector<int64_t>> tensorOutputStrides_;
   std::vector<UnpackedTensorOptions> tensorOutputTensorOptions_;
-  std::unordered_set<Buf*> bufOutputs_;
-  std::unordered_map<const torch::jit::Value*, Buf*> bufs_;
+  std::unordered_set<BufPtr> bufOutputs_;
+  std::unordered_map<const torch::jit::Value*, BufPtr> bufs_;
   std::unordered_map<const torch::jit::Value*, VarHandle> scalars_;
   std::unordered_map<const torch::jit::Value*, std::string> input_name_map_;
   std::unique_ptr<CodeGen> codegen_;
   at::Device device_ = at::kCPU;
-  KernelArena kernelArena_;
   std::shared_ptr<Graph> graph_;
   Code code_;
   bool allow_fallback_{false};

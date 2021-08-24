@@ -1468,7 +1468,7 @@ class TestTensorExprFuser(BaseTestClass):
         am_s = getModule(True)
         ref = am(x, x, x)
         test = am_s(x, x, x)
-        torch.testing.assert_allclose(ref, test)
+        torch.testing.assert_close(ref, test)
 
         # Now do the aliasing
         am.a = am.b
@@ -1477,7 +1477,7 @@ class TestTensorExprFuser(BaseTestClass):
         am_s.a = am_s.b
         test = am_s(x, x, x)
 
-        torch.testing.assert_allclose(ref, test)
+        torch.testing.assert_close(ref, test)
 
     def test_alias_analysis_inputs(self):
         class AliasModule(nn.Module):
@@ -1510,7 +1510,7 @@ class TestTensorExprFuser(BaseTestClass):
         x = torch.randn(128, 128)
         test = am_s(x, x, x)
 
-        torch.testing.assert_allclose(ref, test)
+        torch.testing.assert_close(ref, test)
 
     def test_alias_analysis_input_and_module(self):
         class AliasModule(nn.Module):
@@ -1545,7 +1545,7 @@ class TestTensorExprFuser(BaseTestClass):
         am_s.b = x
         test = am_s(x, x, x)
 
-        torch.testing.assert_allclose(ref, test)
+        torch.testing.assert_close(ref, test)
 
     def test_multiple_outputs(self):
         for device in self.devices:
