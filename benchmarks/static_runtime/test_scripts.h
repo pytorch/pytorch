@@ -286,6 +286,18 @@ const auto to_script_4 = R"JIT(
       return (c)
 )JIT";
 
+const auto detach_script_0 = R"JIT(
+  def forward(self, input: Tensor):
+      a = input.detach()
+      return input is a
+)JIT";
+
+const auto detach_script_1 = R"JIT(
+  def forward(self, input: Tensor):
+      a = input.detach()
+      return a.clone()
+)JIT";
+
 const std::string embedding_bag_default = R"JIT(
   def forward(self, a: Tensor, b: Tensor, c: Tensor):
       return torch.embedding_bag(a, b, c)
@@ -707,3 +719,14 @@ const auto append_tensor_script = R"JIT(
       lst.append(a)
       return lst
 )JIT";
+
+const std::string quantize_script = R"IR(
+  graph(%input: Tensor, %weights: Tensor):
+      %scale: float = prim::Constant[value=1.]()
+      %zero_point: int = prim::Constant[value=1]()
+      %bias: None = prim::Constant()
+      %packed_params = quantized::linear_prepack(%weights, %bias)
+      %1254 = quantized::linear(%input, %packed_params, %scale, %zero_point)
+      %1249: Tensor = aten::dequantize(%1254)
+      return (%1249)
+)IR";
