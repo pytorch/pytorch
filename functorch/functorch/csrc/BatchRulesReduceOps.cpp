@@ -272,6 +272,9 @@ std::tuple<Tensor,optional<int64_t>> _log_softmax_backward_batch_rule(
 }
 
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
+  REDUCTION_BOXED(_fft_r2c);
+  REDUCTION_BOXED(_fft_c2r);
+  REDUCTION_BOXED(_fft_c2c);
   REDUCTION_BOXED(amax);
   REDUCTION_BOXED(amin);
   REDUCTION_BOXED(any.dim);
