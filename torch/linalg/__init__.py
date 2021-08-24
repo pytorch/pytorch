@@ -962,6 +962,9 @@ of the singular values of :attr:`A` as returned by :func:`torch.svd`.
 
 Args:
     A (Tensor): tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.
+    tol (float, Tensor, optional): [NumPy compatibility] the tolerance value.
+                                   If the value of :attr:`tol` is `None`
+                                   then it's equivalent to setting `rtol=tol` and `atol=tol` otherwise.
 
 Keyword args:
     atol (float, Tensor, optional): the absolute tolerance value. When `None` it's considered to be zero.
@@ -971,11 +974,6 @@ Keyword args:
     hermitian(bool): indicates whether :attr:`A` is Hermitian if complex
                      or symmetric if real. Default: `False`.
     out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
-
-Compatibility args:
-    tol (float, Tensor, optional): the tolerance value for compatibility with NumPy.
-                                   If the value of :attr:`tol` is `None`
-                                   then it's equivalent to setting `rtol=tol` and `atol=tol` otherwise.
 
 Examples::
 
@@ -1707,6 +1705,9 @@ of the singular values of :attr:`A` as returned by :func:`torch.svd`.
 
 Args:
     A (Tensor): tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.
+    rcond (float, Tensor, optional): [NumPy compatibility] the tolerance value.
+                                     If the value of :attr:`rcond` is specified then
+                                     it's equivalent to setting `rtol=rcond`.
 
 Keyword args:
     atol (float, Tensor, optional): the absolute tolerance value. When `None` it's considered to be zero.
@@ -1716,11 +1717,6 @@ Keyword args:
     hermitian(bool, optional): indicates whether :attr:`A` is Hermitian if complex
                                or symmetric if real. Default: `False`.
     out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
-
-Compatibility args:
-    rcond (float, Tensor, optional): the tolerance value for compatibility with NumPy.
-                                     If the value of :attr:`rcond` is specified then
-                                     it's equivalent to setting `rtol=rcond`.
 
 Examples::
 
