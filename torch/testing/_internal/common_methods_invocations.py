@@ -13,7 +13,7 @@ import numpy as np
 from torch._six import inf
 import collections.abc
 
-from typing import List, Sequence, Tuple, Union
+from typing import List, Sequence, Tuple, Union, Dict, Any
 
 from torch.testing import \
     (make_non_contiguous, floating_types, floating_types_and, complex_types,
@@ -5150,7 +5150,7 @@ def sample_inputs_grid_sample(op_info, device, dtype, requires_grad, **kwargs):
 def sample_inputs_nll_loss(op_info, device, dtype, requires_grad, **kwargs):
     shape_2d = (2, 3)
 
-    input_shape_and_kwargs = [
+    input_shape_and_kwargs: List[Tuple[Tuple[int, ...], Dict[str, Any]]] = [
         (shape_2d, dict()),
         ((*shape_2d, 3, 3), dict()),
         (shape_2d, dict(weight=True)),
