@@ -375,35 +375,54 @@ class JitTestCase(JitCommonTestCase):
         return _AssertRaisesRegexWithHighlightContext(self, exception, regex, highlight)
 
     def checkScriptRaisesRegex(self, script, inputs, exception, regex,
-                               outputs=None, capture_output=False, profiling=ProfilingMode.PROFILING):
+                               name="func", outputs=None, capture_output=False,
+                               frames_up=1, profiling=ProfilingMode.PROFILING):
         """
         Checks that a given function will throw the correct exception,
-        when executed with normal python, the string frontend, and the AST frontend
+        when executed with normal python, the string frontend, and the
+        AST frontend. Logic taken from `checkScript` (see comments there
+        for details)
         """
-
         with enable_profiling_mode_for_profiling_tests():
+            if isinstance(script, str):
+                frame = self.get_frame_vars(frames_up)
+                the_locals: Dict[str, Any] = {}
+                execWrapper(script, glob=frame, loc=the_locals)
+                frame.update(the_locals)
+
+                python_fn = frame[name]
+                string_frontend = script
+            else:
+                source = textwrap.dedent(inspect.getsource(script))
+
+                python_fn = script
+                string_frontend = source
+
             # normal python
             with self.assertRaisesRegex(exception, regex):
-                script(*inputs)
+                python_fn(*inputs)
+
             # string frontend
             with self.assertRaisesRegex(exception, regex):
-                source = textwrap.dedent(inspect.getsource(script))
-                cu = torch.jit.CompilationUnit(source)
-                ge = getattr(cu, script.__name__)
-                # profiling run
-                with self.assertRaisesRegex(exception, regex):
-                    ge(*inputs)
-                # optimized run
-                ge(*inputs)
-            # python AST frontend
-            with self.assertRaisesRegex(exception, regex):
-                ge = torch.jit.script(script)
+                cu = torch.jit.CompilationUnit(string_frontend)
+                ge = getattr(cu, string_frontend.__name__)
                 # profiling run
                 with self.assertRaisesRegex(exception, regex):
                     ge(*inputs)
                 # optimized run
                 ge(*inputs)
 
+            # python AST frontend
+            # If `script` was a str, we checked what compiling it
+            # would be like already (above)
+            if not isinstance(script, str):
+                with self.assertRaisesRegex(exception, regex):
+                    ge = torch.jit.script(python_fn)
+                    # profiling run
+                    with self.assertRaisesRegex(exception, regex):
+                        ge(*inputs)
+                    # optimized run
+                    ge(*inputs)
 
     def checkBailouts(self, model, inputs, expected):
         state = model.get_debug_state()
