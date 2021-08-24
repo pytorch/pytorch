@@ -9,13 +9,14 @@ from typing import Any, Callable, Optional, Tuple
 
 import torch
 
-from . import _dtype_getters
+from . import _legacy
 
 
 __all__ = [
     "rand",
     "randn",
     "assert_allclose",
+    "get_all_device_types",
 ]
 
 
@@ -88,11 +89,8 @@ def assert_allclose(
     )
 
 
-for name in _dtype_getters.__all__:
-    if name.startswith("_"):
-        continue
-
-    fn = getattr(_dtype_getters, name)
+for name in _legacy.__all_dtype_getters__:
+    fn = getattr(_legacy, name)
 
     if name == "get_all_math_dtypes":
         instructions = (
@@ -104,3 +102,7 @@ for name in _dtype_getters.__all__:
 
     globals()[name] = warn_deprecated(instructions)(fn)
     __all__.append(name)
+
+
+instructions = "The call can be replaced by ['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']"
+get_all_device_types = warn_deprecated(instructions)(_legacy.get_all_device_types)
