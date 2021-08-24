@@ -1,7 +1,10 @@
 import os
 import modulefinder
 import sys
+import pathlib
 from typing import Dict, Any, List, Set
+
+REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 
 # These tests are slow enough that it's worth calculating whether the patch
 # touched any related files first. This list was manually generated, but for every
@@ -173,8 +176,8 @@ def get_dep_modules(test: str) -> Set[str]:
     if test in _DEP_MODULES_CACHE:
         return _DEP_MODULES_CACHE[test]
 
-    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    test_location = os.path.join(repo_root, "test", test + ".py")
+    
+    test_location = REPO_ROOT / "test" / f"{test}.py"
     finder = modulefinder.ModuleFinder(
         # Ideally exclude all third party modules, to speed up calculation.
         excludes=[
@@ -204,7 +207,7 @@ def get_dep_modules(test: str) -> Set[str]:
     )
     # HACK: some platforms default to ascii, so we can't just run_script :(
     with open(test_location, "r", encoding="utf-8") as fp:
-        finder.load_module("__main__", fp, test_location, ("", "r", str(1)))
+        finder.load_module("__main__", fp, str(test_location), ("", "r", str(1)))
 
     dep_modules = set(finder.modules.keys())
     _DEP_MODULES_CACHE[test] = dep_modules
