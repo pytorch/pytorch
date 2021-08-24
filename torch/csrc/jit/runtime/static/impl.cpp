@@ -9,11 +9,11 @@
 #include <caffe2/core/timer.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
-#include <torch/csrc/jit/passes/concat_opt.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
+#include <torch/csrc/jit/passes/variadic_ops.h>
 #include <torch/csrc/jit/runtime/static/ops.h>
 #include <torch/csrc/jit/runtime/static/passes.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
@@ -548,7 +548,7 @@ PrepareForStaticModule(
 StaticModule::StaticModule(
     std::shared_ptr<torch::jit::Graph> g,
     const StaticModuleOptions& opts)
-    : StaticModule(PrepareForStaticModule(g, opts), opts) {}
+    : StaticModule(PrepareForStaticModule(g->copy(), opts), opts) {}
 
 StaticModule::StaticModule(
     const torch::jit::Module& m,
@@ -897,10 +897,12 @@ void StaticRuntime::benchmark(
     std::cout << std::setw(15) << ms << " ms. " << std::setw(10)
               << results.percent_per_node_type[kind] << "%. " << kind << " ("
               << results.instances_per_node_type[kind] << " nodes";
-    if (results.out_nodes.count(kind) == 0) {
-      std::cout << ")" << std::endl;
-    } else {
+    if (results.out_nodes.count(kind)) {
       std::cout << ", out variant)" << std::endl;
+    } else if (results.native_nodes.count(kind)) {
+      std::cout << ", native)" << std::endl;
+    } else {
+      std::cout << ")" << std::endl;
     }
   }
   std::cout << std::setw(15) << results.total_time << " ms. in Total"
@@ -1136,6 +1138,8 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
     if (nodes_[i].has_out_variant()) {
       results.out_nodes.insert(kind);
       results.out_nodes_count++;
+    } else if (nodes_[i].has_native()) {
+      results.native_nodes.insert(kind);
     }
     results.total_time += results.time_per_node[i];
   }
