@@ -579,8 +579,9 @@ REGISTER_OPERATOR_FUNCTOR(aten::logit, aten_logit, [](Node* n) -> SROperator {
         ? c10::make_optional<float>(static_cast<float>(clamp_d.value()))
         : c10::nullopt;
   }
-  auto te = clamp ? createLogit(clamp) : nullptr;
-  return [te](ProcessedNode* p_node) {
+  auto te = clamp ? createLogit() : nullptr;
+  float clamp_value = clamp ? *clamp : 0.0f;
+  return [te, clamp_value](ProcessedNode* p_node) {
     const auto& in0_t = p_node->Input(0).toTensor();
     if (p_node->Output(0).isNone()) {
       p_node->Output(0) = create_empty_from(in0_t);
@@ -594,7 +595,8 @@ REGISTER_OPERATOR_FUNCTOR(aten::logit, aten_logit, [](Node* n) -> SROperator {
     } else {
       at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
       int64_t nn = in0_t.numel();
-      te->call({out_t.data_ptr(), in0_t.data_ptr(), &nn});
+      float c = clamp_value;
+      te->call({out_t.data_ptr(), in0_t.data_ptr(), &nn, &c});
     }
   };
 });
