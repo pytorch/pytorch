@@ -2,6 +2,7 @@ import os
 import modulefinder
 import sys
 import pathlib
+import warnings
 from typing import Dict, Any, List, Set
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
@@ -82,7 +83,7 @@ TARGET_DET_LIST = [
 _DEP_MODULES_CACHE: Dict[str, Set[str]] = {}
 
 
-def determine_target(
+def should_run_test(
     target_det_list: List[str], test: str, touched_files: List[str], options: Any
 ) -> bool:
     test = parse_test_module(test)
@@ -177,6 +178,8 @@ def get_dep_modules(test: str) -> Set[str]:
         return _DEP_MODULES_CACHE[test]
 
     test_location = REPO_ROOT / "test" / f"{test}.py"
+
+    # HACK: some platforms default to ascii, so we can't just run_script :(
     finder = modulefinder.ModuleFinder(
         # Ideally exclude all third party modules, to speed up calculation.
         excludes=[
@@ -204,10 +207,10 @@ def get_dep_modules(test: str) -> Set[str]:
             "mypy",
         ],
     )
-    # HACK: some platforms default to ascii, so we can't just run_script :(
-    with open(test_location, "r", encoding="utf-8") as fp:
-        finder.load_module("__main__", fp, str(test_location), ("", "r", str(1)))
 
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        finder.run_script(str(test_location))
     dep_modules = set(finder.modules.keys())
     _DEP_MODULES_CACHE[test] = dep_modules
     return dep_modules

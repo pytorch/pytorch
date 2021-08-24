@@ -38,7 +38,7 @@ try:
         get_test_case_configs,
     )
     from tools.testing.modulefinder_determinator import (
-        determine_target,
+        should_run_test,
         TARGET_DET_LIST,
     )
 
@@ -929,7 +929,7 @@ def main():
         selected_tests = [
             test
             for test in selected_tests
-            if determine_target(
+            if should_run_test(
                 TARGET_DET_LIST + slow_tests, test, touched_files, options
             )
         ]
