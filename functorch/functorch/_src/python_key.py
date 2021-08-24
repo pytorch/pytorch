@@ -3,7 +3,7 @@
 #
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
-
+from dataclasses import dataclass
 import functools
 from typing import Any, Dict, NamedTuple, Optional, Set, Tuple, List, Callable, Union
 import torch
@@ -14,6 +14,8 @@ from torch.fx import Tracer, GraphModule
 import torch.fx as fx
 import torch.fx._pytree as fx_pytree
 from .nnc_compile import nnc_compile
+from enum import Enum
+import warnings
 
 class PythonTensor(torch.Tensor):
     elem: torch.Tensor
@@ -118,19 +120,77 @@ def make_fx(f):
 
     return wrapped
 
+@dataclass(eq=True, frozen=True)
+class TensorSpec:
+    shape: Tuple[int, ...]
+    stride: Tuple[int, ...]
+    dtype: torch.dtype
+    device: torch.device
+
+@dataclass(eq=True, frozen=True)
+class ConcreteValueSpec:
+    value: Any
+
+@dataclass(eq=True, frozen=True)
+class SpecializationKey:
+    func: Callable
+    specs: Tuple[Union[TensorSpec, ConcreteValueSpec], ...]
+
+def get_spec(arg):
+    if isinstance(arg, torch.Tensor):
+        return TensorSpec(
+            tuple(arg.shape),
+            tuple(arg.stride()),
+            arg.dtype,
+            arg.device)
+    return ValueSpec(arg)
+
+def construct_specialization_key(f, args):
+    flat_args, _ = pytree.tree_flatten(args)
+    return SpecializationKey(f, tuple(get_spec(arg) for arg in flat_args))
+
+nnc_jit_cache: Dict[Callable, Dict[SpecializationKey, Callable]] = {}
+
+class RetrievalStatus(Enum):
+    Success = 0
+    UnknownFunc = 1
+    UnknownSpecialization = 2
+
+def retrieve_from_cache(f, key):
+    if f not in nnc_jit_cache:
+        return RetrievalStatus.UnknownFunc, None
+    cache_for_f = nnc_jit_cache[f]
+    if key not in cache_for_f:
+        return RetrievalStatus.UnknownSpecialization, None
+    return RetrievalStatus.Success, cache_for_f[key]
+
+def add_to_cache(f, key, compiled_f):
+    if f not in nnc_jit_cache:
+        nnc_jit_cache[f] = {key: compiled_f}
+    else:
+        nnc_jit_cache[f][key] = compiled_f
 
 def nnc_jit(f):
     cached = None
     @functools.wraps(f)
     def compiled(*args):
-        nonlocal cached
-        if cached is not None:
-            return cached(*args)
+        key = construct_specialization_key(f, args)
+        status, compiled_f = retrieve_from_cache(f, key)
+        if status is RetrievalStatus.Success:
+            return compiled_f(*args)
+        if status is RetrievalStatus.UnknownSpecialization:
+            warnings.warn(
+                f'Recompiling kernel for {f} due to new specialization. '
+                f'We recompile when we see inputs with new sizes/strides/'
+                f'dtype/device. Frequent recompilations can be bad for '
+                f'performance.',
+                stacklevel=2)
+
         fx_model = make_fx(f)(*args)
         fx_model.graph.lint()
         compiled_f = nnc_compile(fx_model, args)
-        cached = compiled_f
-        return cached(*args)
+        add_to_cache(f, key, compiled_f)
+        return compiled_f(*args)
     return compiled
 
 def make_nnc(f):
