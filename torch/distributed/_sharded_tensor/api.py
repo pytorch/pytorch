@@ -85,7 +85,7 @@ class ShardedTensorMetadata(object):
         elif self.memory_format == torch.channels_last:
             mem_format_encoding = 1
         elif self.memory_format == torch.preserve_format:
-            mem_format_encoding = 1
+            mem_format_encoding = 2
         else:
             raise RuntimeError(f'Invalid torch.memory_format: {self.memory_format}')
 

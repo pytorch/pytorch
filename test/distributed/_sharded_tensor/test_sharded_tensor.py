@@ -1,6 +1,8 @@
 from functools import wraps
 import math
 import io
+import itertools
+import pickle
 import sys
 import torch
 import torch.distributed as dist
@@ -121,6 +123,52 @@ def with_comms(func):
         func(self)
         self.destroy_comms()
     return wrapper
+
+class TestShardedTensorMetadata(TestCase):
+    def test_serde(self):
+        shards_metadata = [
+            ShardMetadata(
+                shard_offsets=[0, 0],
+                shard_lengths=[5, 5],
+                placement="rank:0/cuda:0",
+            ),
+            ShardMetadata(
+                shard_offsets=[0, 5],
+                shard_lengths=[5, 5],
+                placement="rank:1/cuda:1",
+            ),
+            ShardMetadata(
+                shard_offsets=[5, 0],
+                shard_lengths=[5, 5],
+                placement="rank:2/cuda:2",
+            ),
+            ShardMetadata(
+                shard_offsets=[5, 5],
+                shard_lengths=[5, 5],
+                placement="rank:3/cuda:3",
+            )
+        ]
+
+        dtypes = [
+            torch.float, torch.double, torch.cfloat, torch.cdouble, torch.half,
+            torch.bfloat16, torch.uint8, torch.int8, torch.short, torch.int,
+            torch.long, torch.bool]
+
+        layouts = [torch.strided, torch.sparse_coo]
+        requires_grad = [True, False]
+        memory_format = [torch.contiguous_format, torch.channels_last, torch.preserve_format]
+        pin_memory = [True, False]
+
+        for test in itertools.product(dtypes, layouts, requires_grad, memory_format, pin_memory):
+            dtype, layout, requires_grad, memory_format, pin_memory = test
+
+            expected_st_metadata = _sharded_tensor.ShardedTensorMetadata(
+                shards_metadata, (10, 10), dtype, layout, requires_grad,
+                memory_format, pin_memory)
+
+            pickled_obj = pickle.dumps(expected_st_metadata)
+            st_metadata = pickle.loads(pickled_obj)
+            self.assertEqual(expected_st_metadata, st_metadata)
 
 class TestCreateTensorFromParams(TestCase):
     @sandcastle_skip_if(torch.cuda.device_count() < 1, 'CUDA GPU is needed')
