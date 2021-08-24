@@ -124,11 +124,7 @@ def _quantized_all_gather_handler(tensors,
     for i, t in enumerate(_dequantize_tensor_list(out_tensors, qtype, quant_loss=quant_loss)):
         tensors[i] = t
 
-dispatch = {
-    dist.all_to_all_single: _quantized_a2a_single_handler,
-    dist.all_to_all: _quantized_a2a_handler,
-    dist.all_gather: _quantized_all_gather_handler,
-}
+
 
 def auto_quantize(func, qtype, quant_loss=None):
     """
@@ -149,6 +145,12 @@ def auto_quantize(func, qtype, quant_loss=None):
     Returns:
         (callable): the same collective as func but enables automatic quantization/dequantization.
     """
+    dispatch = {
+        dist.all_to_all_single: _quantized_a2a_single_handler,
+        dist.all_to_all: _quantized_a2a_handler,
+        dist.all_gather: _quantized_all_gather_handler,
+    }
+
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
         group = kwargs.get('group', None)
