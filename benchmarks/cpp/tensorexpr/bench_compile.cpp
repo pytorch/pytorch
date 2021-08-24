@@ -33,7 +33,7 @@ static void BM_CompileSwish(benchmark::State& state) {
       nest.computeInline(tensor->buf());
     }
     nest.prepareForCodegen();
-    te::Stmt* s = te::IRSimplifier::simplify(nest.root_stmt());
+    te::StmtPtr s = te::IRSimplifier::simplify(nest.root_stmt());
     te::LLVMCodeGen cg(s, {A, sixth, n});
   }
 }
@@ -63,7 +63,7 @@ static void BM_CompileSwishLLVMOnly(benchmark::State& state) {
     nest.computeInline(tensor->buf());
   }
   nest.prepareForCodegen();
-  te::Stmt* s = te::IRSimplifier::simplify(nest.root_stmt());
+  te::StmtPtr s = te::IRSimplifier::simplify(nest.root_stmt());
   for (auto _ : state) {
     te::LLVMCodeGen cg(s, {A, sixth, n});
   }

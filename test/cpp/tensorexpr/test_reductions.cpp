@@ -533,7 +533,7 @@ TEST(Reductions, ReduceAsProducer) {
       [&](const VarHandle& l, const VarHandle& n) {
         return c->load(l, n) * a.load(l, n);
       });
-  LoopNest loop({d}, {c, d});
+  LoopNest loop(std::vector<Tensor*>({d}), {c, d});
   loop.prepareForCodegen();
   StmtPtr s = loop.root_stmt();
   s = IRSimplifier::simplify(s);
@@ -578,7 +578,7 @@ TEST(Reductions, ReduceAsConsumer) {
         return b.load(l, n, m) * a.load(l, n, m);
       });
   Tensor* d = Reduce("sum", {{2, "l1"}}, Sum(), c, {{3, "n1"}, {m, "m1"}});
-  LoopNest loop({d}, {c, d});
+  LoopNest loop(std::vector<Tensor*>({d}), {c, d});
   loop.prepareForCodegen();
   StmtPtr s = loop.root_stmt();
   s = IRSimplifier::simplify(s);
@@ -1201,7 +1201,7 @@ TEST(Reductions, ReduceInlineReduction) {
     }
   }
 
-  LoopNest l1({y}, {x, y});
+  LoopNest l1(std::vector<Tensor*>({y}), {x, y});
   // Cannot inline a reduction computation
   ASSERT_FALSE(l1.computeInline(x->buf()));
 }
@@ -1235,7 +1235,7 @@ TEST(Reductions, ReduceInlineConsumer) {
     }
   }
 
-  LoopNest l1({y}, {x, y});
+  LoopNest l1(std::vector<Tensor*>({y}), {x, y});
   LoopNest l2(l1);
   l2.computeInline(x->buf());
 
@@ -1293,7 +1293,7 @@ TEST(Reductions, ReduceInlineReducerInternal) {
     }
   }
 
-  LoopNest l1({y}, {x, y});
+  LoopNest l1(std::vector<Tensor*>({y}), {x, y});
   LoopNest l2(l1);
   l2.computeInline(x->buf());
 
@@ -1340,7 +1340,7 @@ TEST(Reductions, ReductionCacheAccessesOperatorAxis) {
     return b.load(0, 0, l) * d->load(l);
   });
 
-  LoopNest l({e}, {c, d, e});
+  LoopNest l(std::vector<Tensor*>({e}), {c, d, e});
   LoopNest l_before(l);
   l_before.prepareForCodegen();
   SimpleIREvaluator cg_before(l_before.root_stmt(), {a, b, e});
@@ -1417,7 +1417,7 @@ TEST(Reductions, ReductionCacheAccessesOuterReduceAxis) {
     return b.load(0, 0, l) * d->load(l);
   });
 
-  LoopNest l({e}, {c, d, e});
+  LoopNest l(std::vector<Tensor*>({e}), {c, d, e});
   LoopNest l_before(l);
   l_before.prepareForCodegen();
   SimpleIREvaluator cg_before(l_before.root_stmt(), {a, b, e});
@@ -1492,7 +1492,7 @@ TEST(Reductions, ReductionCacheAccessesInnerReduceAxis) {
     return b.load(0, 0, l) * d->load(l);
   });
 
-  LoopNest l({e}, {c, d, e});
+  LoopNest l(std::vector<Tensor*>({e}), {c, d, e});
   LoopNest l_before(l);
   l_before.prepareForCodegen();
   SimpleIREvaluator cg_before(l_before.root_stmt(), {a, b, e});
@@ -1563,7 +1563,7 @@ TEST(Reductions, ReductionCacheBodyAccess) {
     return b.load(0, 0, l) * d->load(l);
   });
 
-  LoopNest l({e}, {c, d, e});
+  LoopNest l(std::vector<Tensor*>({e}), {c, d, e});
 
   StmtPtr d_loop = l.getLoopStmtsFor(d)[1];
   l.cacheAccesses(c->buf(), "scale_local", d_loop);
@@ -1604,7 +1604,7 @@ TEST(Reductions, ReductionCacheConsumerAccess) {
     return b.load(0, 0, l) * d->load(l);
   });
 
-  LoopNest l({e}, {c, d, e});
+  LoopNest l(std::vector<Tensor*>({e}), {c, d, e});
 
   LoopNest::splitWithMask(l.getLoopStmtsFor(e)[0], 4);
 
@@ -1645,7 +1645,7 @@ TEST(Reductions, ReductionSplitCacheConsumerAccess) {
     return b.load(0, 0, l) * d->load(l);
   });
 
-  LoopNest l({e}, {c, d, e});
+  LoopNest l(std::vector<Tensor*>({e}), {c, d, e});
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ForPtr inner;
@@ -1693,7 +1693,7 @@ TEST(Reductions, ReductionReorderCacheConsumerAccess) {
     return b.load(0, 0, l) * d->load(l);
   });
 
-  LoopNest l({e}, {c, d, e});
+  LoopNest l(std::vector<Tensor*>({e}), {c, d, e});
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ForPtr inner;

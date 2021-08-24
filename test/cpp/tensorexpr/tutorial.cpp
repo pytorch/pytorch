@@ -256,7 +256,9 @@ int main(int argc, char* argv[]) {
     // Creating a loop nest is as quite simple, we just need to specify a list
     // of all and a list of output tensors:
     // NOLINTNEXTLINE(bugprone-argument-comment)
-    LoopNest loopnest(/*outputs=*/{Y}, /*all=*/{X, Y});
+    std::vector<Tensor*> outputs = {Y};
+    std::vector<Tensor*> all = {X, Y};
+    LoopNest loopnest(outputs, all);
 
     // An IR used in LoopNest is based on tensor statements, represented by
     // `Stmt` class. Statements are used to specify the loop nest structure, and
