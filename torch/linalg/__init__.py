@@ -946,6 +946,9 @@ and :math:`\varepsilon` is the epsilon value for the dtype of :attr:`A` (see :cl
 If :attr:`rtol` is not specified and :attr:`atol` is specified to be larger than zero then
 :attr:`rtol` is set to zero.
 
+If :attr:`atol` or :attr:`rtol` is a :class:`torch.Tensor`, its shape must be broadcastable to that
+of the singular values of :attr:`A` as returned by :func:`torch.svd`.
+
 .. note::
     This function has NumPy compatible variant `linalg.matrix_rank(A, tol, hermitian=False)`.
     However, use of the positional argument :attr:`tol` is deprecated in favor of :attr:`atol` and :attr:`rtol`.
@@ -959,9 +962,6 @@ If :attr:`rtol` is not specified and :attr:`atol` is specified to be larger than
 
 Args:
     A (Tensor): tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.
-    tol (float, Tensor, optional): the tolerance value.
-                                   If the value of :attr:`tol` is `None`
-                                   then it's equivalent to setting `rtol=tol` and `atol=tol` otherwise.
 
 Keyword args:
     atol (float, Tensor, optional): the absolute tolerance value. When `None` it's considered to be zero.
@@ -971,6 +971,11 @@ Keyword args:
     hermitian(bool): indicates whether :attr:`A` is Hermitian if complex
                      or symmetric if real. Default: `False`.
     out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
+
+Compatibility args:
+    tol (float, Tensor, optional): the tolerance value for compatibility with NumPy.
+                                   If the value of :attr:`tol` is `None`
+                                   then it's equivalent to setting `rtol=tol` and `atol=tol` otherwise.
 
 Examples::
 
@@ -1667,6 +1672,9 @@ and :math:`\varepsilon` is the epsilon value for the dtype of :attr:`A` (see :cl
 If :attr:`rtol` is not specified and :attr:`atol` is specified to be larger than zero then
 :attr:`rtol` is set to zero.
 
+If :attr:`atol` or :attr:`rtol` is a :class:`torch.Tensor`, its shape must be broadcastable to that
+of the singular values of :attr:`A` as returned by :func:`torch.svd`.
+
 .. note:: This function uses :func:`torch.linalg.svd` if :attr:`hermitian`\ `= False` and
           :func:`torch.linalg.eigh` if :attr:`hermitian`\ `= True`.
           For CUDA inputs, this function synchronizes that device with the CPU.
@@ -1699,12 +1707,6 @@ If :attr:`rtol` is not specified and :attr:`atol` is specified to be larger than
 
 Args:
     A (Tensor): tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.
-    rcond (float or Tensor, optional): the tolerance value to determine when is a singular value zero
-                                       If it is a :class:`torch.Tensor`, its shape must be
-                                       broadcastable to that of the singular values of
-                                       :attr:`A` as returned by :func:`torch.svd`.
-                                       If the value of :attr:`rcond` is specified then
-                                       it's equivalent to setting `rtol=rcond`.
 
 Keyword args:
     atol (float, Tensor, optional): the absolute tolerance value. When `None` it's considered to be zero.
@@ -1714,6 +1716,11 @@ Keyword args:
     hermitian(bool, optional): indicates whether :attr:`A` is Hermitian if complex
                                or symmetric if real. Default: `False`.
     out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
+
+Compatibility args:
+    rcond (float, Tensor, optional): the tolerance value for compatibility with NumPy.
+                                     If the value of :attr:`rcond` is specified then
+                                     it's equivalent to setting `rtol=rcond`.
 
 Examples::
 
