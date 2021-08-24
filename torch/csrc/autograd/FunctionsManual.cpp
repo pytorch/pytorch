@@ -3516,14 +3516,16 @@ std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad_, con
   auto K = result.matmul(grad.conj().transpose(-1, -2));
 
   // The algorithm updates K by multiplying it from the left/right with Householder reflectors.
-  // If only single backward is run, we modify K in-place and exploit triangularity of input.
+  // If only single backward is run, we modify K in-place and exploit triangularity of the input.
   // With higher order derivatives we cannot rewrite the storage of K, hence we use much less efficient
   // out-of-place methods.
   std::function<decltype(HouseholderReflectorEvaluator<true>::left_reflect)> left_reflect, right_reflect;
+  // if higher-order derivates are expected
   if (at::GradMode::is_enabled()) {
     left_reflect = HouseholderReflectorEvaluator</*in_place=*/false>::left_reflect;
     right_reflect = HouseholderReflectorEvaluator</*in_place=*/false>::right_reflect;
   }
+  // if only first-order derivative is expected
   else {
     left_reflect = HouseholderReflectorEvaluator</*in_place=*/true>::left_reflect;
     right_reflect = HouseholderReflectorEvaluator</*in_place=*/true>::right_reflect;
