@@ -452,7 +452,7 @@ if(NOT INTERN_BUILD_MOBILE)
   # Metal
   if(USE_PYTORCH_METAL_EXPORT)
     # Add files needed from exporting metal models(optimized_for_mobile)
-    list(APPEND INSTALL_HEADERS ${metal_h} ${metal_prepack_h}
+    list(APPEND INSTALL_HEADERS ${metal_h} ${metal_prepack_h})
   elseif(APPLE AND USE_PYTORCH_METAL)
     # Needed by Metal kernels
     list(APPEND INSTALL_HEADERS ${metal_h} ${native_metal_h})
