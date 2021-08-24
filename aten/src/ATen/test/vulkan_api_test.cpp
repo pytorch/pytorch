@@ -942,7 +942,7 @@ TEST(VulkanAPITest, hardshrink) {
   }
 
   for (const auto lambd_value : {-4.2, -1.0, -0.42, 0.0, 0.42, 1.0, 4.2, 42.42}) {
-    const auto in_cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat));
+    const auto in_cpu = (at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat)) - 0.5) * 20;  // between -10 and +10
     const auto in_vulkan = in_cpu.vulkan();
 
     const auto out_cpu = at::hardshrink(in_cpu, lambd_value);
@@ -964,7 +964,7 @@ TEST(VulkanAPITest, hardshrink_) {
   }
 
   for (const auto lambd_value : {-4.2, -1.0, -0.42, 0.0, 0.42, 1.0, 4.2, 42.42}) {
-    const auto cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat));
+    const auto cpu = (at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat)) - 0.5) * 20;  // between -10 and +10
     const auto vulkan = cpu.vulkan();
 
     cpu.hardshrink(lambd_value);
