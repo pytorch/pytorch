@@ -576,6 +576,7 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::ChunkSizes:
     case prim::AllocateStorage:
     case prim::AllocateTensor:
+    case prim::PreAllocateTensor:
     case prim::Closure:
     case prim::CreateObject:
     case prim::tolist:

@@ -427,7 +427,6 @@ using LivenessMap = std::unordered_map<const Value*, std::set<const Value*>>;
 typedef struct LiveRange {
   size_t begin;
   size_t end;
-
 } LiveRange;
 
 inline std::ostream& operator<<(std::ostream& str, LiveRange lvr) {
