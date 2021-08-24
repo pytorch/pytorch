@@ -39,13 +39,13 @@ if NO_MULTIPROCESSING_SPAWN:
     sys.exit(0)
 
 BACKEND = os.environ["BACKEND"]
-
 if BACKEND == "gloo" or BACKEND == "nccl":
     class DistQuantizationTests(MultiProcessTestCase):
 
         def setUp(self):
             super(DistQuantizationTests, self).setUp()
             self._spawn_processes()
+            # WORLD_SIZE = int(os.environ["WORLD_SIZE"])
             torch.backends.cudnn.flags(allow_tf32=False).__enter__()
 
         def tearDown(self):
@@ -61,7 +61,7 @@ if BACKEND == "gloo" or BACKEND == "nccl":
 
         @property
         def world_size(self):
-            return 2
+            return int(os.environ["WORLD_SIZE"])
 
         def _init_multigpu_helper(self):
             """Multigpu tests are designed to simulate the multi nodes with multi
@@ -70,7 +70,7 @@ if BACKEND == "gloo" or BACKEND == "nccl":
             divided to subsets, each process only uses a subset.
             """
             nGPUs = torch.cuda.device_count()
-            world_size = dist.get_world_size()
+            world_size = self.world_size
             visible_devices = range(nGPUs)
 
             if BACKEND == "nccl":
@@ -92,7 +92,7 @@ if BACKEND == "gloo" or BACKEND == "nccl":
         @requires_gloo()
         @sandcastle_skip_if(BACKEND != "gloo", "Only gloo backend supports all_gather_fp16")
         def test_all_gather_fp16(self):
-            store = dist.FileStore(self.file_name, int(self.world_size))
+            store = dist.FileStore(self.file_name, self.world_size)
             dist.init_process_group(store=store, rank=self.rank, world_size=self.world_size, backend='gloo')
             device = torch.device(f"cuda:{self.rank}")
             group = list(range(0, self.world_size))
@@ -102,7 +102,7 @@ if BACKEND == "gloo" or BACKEND == "nccl":
         @requires_gloo()
         @sandcastle_skip_if(BACKEND != "gloo", "Only gloo backend supports all_gather_fp16")
         def test_all_gather_bfp16(self):
-            store = dist.FileStore(self.file_name, int(self.world_size))
+            store = dist.FileStore(self.file_name, self.world_size)
             dist.init_process_group(store=store, rank=self.rank, world_size=self.world_size, backend='gloo')
             device = torch.device(f"cuda:{self.rank}")
             group = list(range(0, self.world_size))
@@ -114,7 +114,7 @@ if BACKEND == "gloo" or BACKEND == "nccl":
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         @skip_if_rocm
         def test_all_to_all_fp16(self):
-            store = dist.FileStore(self.file_name, int(self.world_size))
+            store = dist.FileStore(self.file_name, self.world_size)
             dist.init_process_group(store=store, rank=self.rank, world_size=self.world_size, backend='nccl')
             device = torch.device(f"cuda:{self.rank}")
             group = list(range(0, self.world_size))
@@ -134,7 +134,7 @@ if BACKEND == "gloo" or BACKEND == "nccl":
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         @skip_if_rocm
         def test_all_to_all_bfp16(self):
-            store = dist.FileStore(self.file_name, int(self.world_size))
+            store = dist.FileStore(self.file_name, self.world_size)
             dist.init_process_group(store=store, rank=self.rank, world_size=self.world_size, backend='nccl')
             device = torch.device(f"cuda:{self.rank}")
             group = list(range(0, self.world_size))
