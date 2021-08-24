@@ -317,33 +317,26 @@ static void PrepareForRemoveMutations(MutationRemover& mr, Block* b) {
   }
 
   for (auto input : b->inputs()) {
-    bool needsRestart = false;
-    do {
-      needsRestart = false;
-      for (auto use : input->uses()) {
-        Node* node = use.user;
-        if (!mr.inplaceOpVariant(node)) {
-          continue;
-        }
-        auto it =
-            std::find(node->inputs().begin(), node->inputs().end(), input);
-        if (it != node->inputs().end()) {
-          int index = std::distance(node->inputs().begin(), it);
-          std::cerr << "Warning: ONNX Preprocess - Removing mutation from node "
-                    << node->kind().toQualString() << " on block input: '"
-                    << (*it)->debugName() << "'. This changes graph semantics."
-                    << std::endl;
-
-          Node* newNode =
-              addDummyClone(b->owningGraph(), input, false, b->return_node());
-          TORCH_INTERNAL_ASSERT(nullptr != newNode);
-          node->replaceInput(index, newNode->output());
-          input->replaceAllUsesAfterNodeWith(node, newNode->output());
-          needsRestart = true;
-          break;
-        }
+    for (auto use : input->uses()) {
+      Node* node = use.user;
+      if (!mr.inplaceOpVariant(node)) {
+        continue;
       }
-    } while (needsRestart);
+      auto it = std::find(node->inputs().begin(), node->inputs().end(), input);
+      if (it != node->inputs().end()) {
+        int index = std::distance(node->inputs().begin(), it);
+        std::cerr << "Warning: ONNX Preprocess - Removing mutation from node "
+                  << node->kind().toQualString() << " on block input: '"
+                  << (*it)->debugName() << "'. This changes graph semantics."
+                  << std::endl;
+
+        Node* newNode =
+            addDummyClone(b->owningGraph(), input, false, b->return_node());
+        TORCH_INTERNAL_ASSERT(nullptr != newNode);
+        node->replaceInput(index, newNode->output());
+        input->replaceAllUsesAfterNodeWith(node, newNode->output());
+      }
+    }
   }
 }
 
