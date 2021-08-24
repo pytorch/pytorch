@@ -1,9 +1,11 @@
-#include <torch/csrc/jit/passes/memory_planning/MemoryPlanningAllocator.h>
+#include <torch/csrc/jit/passes/memory_planning.h>
 
 #include <sstream> //for std::stringstream
 
 #include <c10/util/Backtrace.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
+
+namespace c10 {
 
 static void DoNothing(void* ptr) {
   return;
@@ -16,10 +18,11 @@ inline int64_t timeSinceEpoch(
       .count();
 }
 
-MemoryPlanningAllocator::MemoryPlanningAllocator(at::DeviceType& device_type)
-    : device_type_(device_type),
+MemoryPlanningAllocator::MemoryPlanningAllocator(at::DeviceType device_type)
+    : allocator_priority_(c10::GetAllocatorPriority(device_type)),
+      device_type_(device_type),
       orig_allocator_(*c10::GetAllocator(device_type)) {
-  c10::SetAllocator(device_type, this);
+  c10::SetAllocator(device_type, this, allocator_priority_);
 };
 
 at::DataPtr MemoryPlanningAllocator::allocate(size_t nbytes) const {
@@ -56,63 +59,63 @@ std::string dataPtrAddrToStr(void* ptr) {
   return ss.str();
 }
 
-struct MemoryTracingAllocator final : at::Allocator {
-  MemoryTracingAllocator(at::DeviceType& device_type)
-      : orig_allocator_(*c10::GetAllocator(device_type)) {
-    c10::SetAllocator(device_type, this);
-  }
-
-  at::DataPtr allocate(size_t nbytes) const override {
-    auto orig_ptr = orig_allocator_.allocate(nbytes);
-
-    auto bt = c10::get_backtrace(0, 200, true);
-    TORCH_INTERNAL_ASSERT(torch::jit::currentFrameId().has_value());
-    auto frame_node_id = torch::jit::currentFrameId().value();
+at::DataPtr MemoryTracingAllocator::allocate(size_t nbytes) const {
+  auto orig_ptr = orig_allocator_.raw_allocate(nbytes);
+  auto bt = c10::get_backtrace(0, 200, true);
+  auto frame_node_id = torch::jit::currentFrameId();
+  if (frame_node_id.has_value()) {
     allocation_traces_.emplace_back(torch::jit::MemEvent{
-        frame_node_id.pc,
+        frame_node_id.value().pc,
         bt,
-        dataPtrAddrToStr(orig_ptr.get()),
-        frame_node_id.node_schema,
-        frame_node_id.node_header,
+        dataPtrAddrToStr(orig_ptr),
         nbytes,
         torch::jit::MemEvent::EventType::Allocate,
-        frame_node_id.node});
-    allocations_.insert({orig_ptr.get(), nbytes});
+        frame_node_id});
+  } else {
+    allocation_traces_.emplace_back(torch::jit::MemEvent{
+        0,
+        bt,
+        dataPtrAddrToStr(orig_ptr),
+        nbytes,
+        torch::jit::MemEvent::EventType::Allocate,
+        c10::nullopt});
+  }
+  allocations_.insert({orig_ptr, nbytes});
 
-    auto deleter = [this, &bt, &nbytes](void* ptr) {
-      auto frame_node_id = torch::jit::currentFrameId().value();
+  auto deleter = [this, nbytes = nbytes](void* ptr) {
+    auto bt = c10::get_backtrace(0, 200, true);
+    auto frame_node_id = torch::jit::currentFrameId();
+    if (frame_node_id.has_value()) {
       allocation_traces_.emplace_back(torch::jit::MemEvent{
-          frame_node_id.pc,
+          frame_node_id.value().pc,
           bt,
           dataPtrAddrToStr(ptr),
-          frame_node_id.node_schema,
-          frame_node_id.node_header,
           nbytes,
-          torch::jit::MemEvent::EventType::Free});
-      return DoNothing(ptr);
-    };
-    return c10::InefficientStdFunctionContext::makeDataPtr(
-        orig_ptr.get(), deleter, orig_ptr.device());
-  }
+          torch::jit::MemEvent::EventType::Free,
+          frame_node_id});
+    } else {
+      allocation_traces_.emplace_back(torch::jit::MemEvent{
+          std::numeric_limits<uint64_t>::max(),
+          bt,
+          dataPtrAddrToStr(ptr),
+          nbytes,
+          torch::jit::MemEvent::EventType::Free,
+          c10::nullopt});
+    }
+    orig_allocator_.raw_deallocate(ptr);
+  };
 
- private:
-  c10::Allocator& orig_allocator_;
-  mutable std::vector<torch::jit::MemEvent> allocation_traces_;
-  mutable std::map<void*, size_t> allocations_;
-  friend WithProfileAllocationsGuard;
-};
+  return c10::InefficientStdFunctionContext::makeDataPtr(
+      orig_ptr, deleter, at::Device(device_type_));
+}
 
-WithProfileAllocationsGuard::WithProfileAllocationsGuard(
-    at::DeviceType& device_type)
-    : tracer_(std::make_shared<MemoryTracingAllocator>(
-          MemoryTracingAllocator{device_type})),
-      device_type_(device_type) {}
+WithProfileTracingAllocationsGuard::WithProfileTracingAllocationsGuard(
+    at::DeviceType device_type)
+    : tracer_(MemoryTracingAllocator{device_type}), device_type_(device_type) {}
 
-std::vector<torch::jit::MemEvent> WithProfileAllocationsGuard::
+std::vector<torch::jit::MemEvent> WithProfileTracingAllocationsGuard::
     getAllocationTraces() {
-  return tracer_->allocation_traces_;
+  return tracer_.allocation_traces_;
 }
 
-WithProfileAllocationsGuard::~WithProfileAllocationsGuard() {
-  c10::SetAllocator(device_type_, &tracer_->orig_allocator_);
-}
+} // namespace c10

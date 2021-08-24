@@ -1,7 +1,10 @@
 #pragma once
 
+#include <c10/core/Allocator.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
+
+#include <utility>
 
 namespace torch {
 namespace jit {
@@ -42,28 +45,22 @@ struct TORCH_API MemEvent {
   uint64_t time;
   std::string allocation_trace;
   std::string ptr_addr;
-  std::string node_schema;
-  std::string node_header;
   uint64_t size;
   EventType type;
-  c10::optional<Node*> node;
+  c10::optional<FrameNodeId> frame_node_id;
   MemEvent(
       uint64_t t,
       std::string alloc_trace,
       std::string address,
-      std::string node_schem,
-      std::string node_head,
       uint64_t s,
       EventType e,
-      c10::optional<Node*> nod = c10::nullopt)
+      c10::optional<FrameNodeId> frame_nodeid = c10::nullopt)
       : time(t),
         allocation_trace(std::move(alloc_trace)),
         ptr_addr(std::move(address)),
-        node_schema(std::move(node_schem)),
-        node_header(std::move(node_head)),
         size(s),
         type(e),
-        node(nod) {}
+        frame_node_id(std::move(frame_nodeid)) {}
 };
 
 inline const char* toString(MemEvent::EventType me) {
@@ -82,15 +79,24 @@ inline std::ostream& operator<<(std::ostream& str, MemEvent::EventType rhs) {
 }
 
 inline std::ostream& operator<<(std::ostream& str, MemEvent rhs) {
-  return str << std::left << std::setfill(' ') << std::setw(15)
-             << "type: " << rhs.type << "\n"
-             << std::setw(15) << "t: " << rhs.time << "\n"
-             << std::setw(15) << "size: " << rhs.size << "\n"
-             << std::setw(15) << "ptr_addr: " << rhs.ptr_addr << "\n"
-             << std::setw(15) << "node_schema: " << rhs.node_schema << "\n"
-             << std::setw(15) << "node_header: " << rhs.node_header << "\n"
-             << std::setw(15)
-             << "alloc_trace: " << rhs.allocation_trace.substr(0, 20) << "...";
+  str << std::left << std::setfill(' ') << std::setw(15) << "type: " << rhs.type
+      << "\n"
+      << std::setw(15) << "t: " << rhs.time << "\n"
+      << std::setw(15) << "size: " << rhs.size << "\n"
+      << std::setw(15) << "ptr_addr: " << rhs.ptr_addr << "\n"
+      << std::setw(15) << "alloc_trace: " << rhs.allocation_trace.substr(0, 40)
+      << "..." << std::setw(15)
+      << "frame_node_id has value: " << rhs.frame_node_id.has_value() << "\n";
+  if (rhs.frame_node_id) {
+    str << "pc: " << std::setw(15) << rhs.frame_node_id.value().pc << "\n"
+        << "node_schema: " << std::setw(15)
+        << rhs.frame_node_id.value().node_schema << "\n"
+        << "node_header: " << std::setw(15)
+        << rhs.frame_node_id.value().node_header << "\n"
+        << "node addr: " << std::setw(15)
+        << std::addressof(*rhs.frame_node_id.value().node) << "\n";
+  }
+  return str;
 }
 
 inline std::ostream& operator<<(std::ostream& str, Region reg) {
@@ -167,8 +173,61 @@ TORCH_API void planMemoryWithTracing(
     std::vector<MemEvent> mem_events,
     c10::optional<at::Device> device_type);
 
-#define PRINT_CURR_ALLOC(x, y) \
-  std::cout << __LINE__ << " " << x << " " << y << "\n";
-
 } // namespace jit
 } // namespace torch
+
+namespace c10 {
+
+struct C10_API MemoryPlanningAllocator final : at::Allocator {
+  MemoryPlanningAllocator(at::DeviceType device_type);
+  at::DataPtr allocate(size_t nbytes) const override;
+  at::DeleterFnPtr raw_deleter() const override;
+  void push_allocation(
+      c10::Storage buffer,
+      size_t size,
+      size_t offset,
+      at::DeviceType device);
+
+ private:
+  uint8_t allocator_priority_;
+  at::DeviceType device_type_;
+  c10::Allocator& orig_allocator_;
+  mutable std::stack<std::pair<size_t, void*>> allocs_;
+};
+
+class C10_API WithProfileTracingAllocationsGuard;
+
+struct C10_API MemoryTracingAllocator final : at::Allocator {
+  MemoryTracingAllocator(at::DeviceType device_type)
+      : allocator_priority_(c10::GetAllocatorPriority(device_type)),
+        device_type_(device_type),
+        orig_allocator_(*c10::GetAllocator(device_type)) {
+    c10::SetAllocator(device_type, this, allocator_priority_);
+  }
+
+  at::DataPtr allocate(size_t nbytes) const override;
+
+  uint8_t allocator_priority_;
+  at::DeviceType device_type_;
+  c10::Allocator& orig_allocator_;
+  mutable std::vector<torch::jit::MemEvent> allocation_traces_;
+  mutable std::map<void*, size_t> allocations_;
+  friend WithProfileTracingAllocationsGuard;
+
+ private:
+};
+
+class C10_API WithProfileTracingAllocationsGuard {
+ public:
+  WithProfileTracingAllocationsGuard(at::DeviceType device_type);
+  std::vector<torch::jit::MemEvent> getAllocationTraces();
+  ~WithProfileTracingAllocationsGuard() {
+    c10::SetAllocator(
+        device_type_, &tracer_.orig_allocator_, tracer_.allocator_priority_);
+  }
+
+ private:
+  MemoryTracingAllocator tracer_;
+  at::DeviceType device_type_;
+};
+} // namespace c10
