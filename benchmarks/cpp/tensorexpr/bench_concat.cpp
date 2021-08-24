@@ -60,7 +60,7 @@ class ConcatBench : public benchmark::Fixture {
           {input_sizes_[i][0], input_sizes_[i][1]}));
     }
 
-    Tensor* output = Compute(
+    Tensor output = Compute(
         "aten_cat",
         {{output_size_[0], "M"}, {output_size_[1], "N"}},
         [&](const VarHandle& m, const VarHandle& n) {
@@ -147,7 +147,7 @@ class ConcatBench : public benchmark::Fixture {
       for_stmts[i] = for_st;
       cumulative_input_sizes += input_sizes_[i][1];
     }
-    auto output = new Tensor(output_buf, alloc<Block>(for_stmts));
+    auto output = Tensor(output_buf, alloc<Block>(for_stmts));
 
     LoopNest nest({output});
     nest.prepareForCodegen();

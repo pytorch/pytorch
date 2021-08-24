@@ -30,7 +30,7 @@ TEST(Conv, DepthwiseConv2D) {
   te::Placeholder input("input", te::kFloat, {N, C, H, W});
   te::Placeholder weight("weight", te::kFloat, {K, CperG, R, S});
   te::Placeholder bias("bias", te::kFloat, {K});
-  te::Tensor* output = te::conv2d_depthwise(
+  te::Tensor output = te::conv2d_depthwise(
       input.handle(), weight.handle(), bias.handle(), kStride, kPad, kGroups);
 
   te::LoopNest loop({output});
@@ -61,7 +61,7 @@ TEST(Conv, DepthwiseConv2DNoBias) {
 
   te::Placeholder input("input", te::kFloat, {N, C, H, W});
   te::Placeholder weight("weight", te::kFloat, {K, CperG, R, S});
-  te::Tensor* output = te::conv2d_depthwise(
+  te::Tensor output = te::conv2d_depthwise(
       input.handle(), weight.handle(), kStride, kPad, kGroups);
 
   te::LoopNest loop({output});
@@ -96,7 +96,7 @@ TEST(Conv, DepthwiseConv2DDynamicShapes) {
   te::Placeholder input("input", te::kFloat, {N_var, C_var, H_var, W_var});
   te::Placeholder weight(
       "weight", te::kFloat, {K_var, CperG_var, R_var, S_var});
-  te::Tensor* output = te::conv2d_depthwise(
+  te::Tensor output = te::conv2d_depthwise(
       input.handle(),
       weight.handle(),
       N_var,
@@ -195,7 +195,7 @@ TEST(Conv, Conv2D) {
   te::Placeholder inputB(te::BufHandle("input", {N, C, H, W}, te::kFloat));
   te::Placeholder filterB(te::BufHandle("filter", {K, C, R, S}, te::kFloat));
 
-  te::Tensor* conv = te::Reduce(
+  te::Tensor conv = te::Reduce(
       "conv",
       {{N, "n"}, {K, "k"}, {OH, "oh"}, {OW, "ow"}},
       te::Sum(),

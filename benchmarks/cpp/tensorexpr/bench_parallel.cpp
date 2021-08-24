@@ -38,7 +38,7 @@ BENCHMARK_DEFINE_F(ParallelAdd, Simple)(benchmark::State& state) {
   KernelScope kernel_scope;
   Placeholder a_buf("a", kFloat, {M});
   Placeholder b_buf("b", kFloat, {M});
-  Tensor* c_tensor = Compute(
+  Tensor c_tensor = Compute(
       "c", {{M, "m"}}, [&](const VarHandle& m) {
         return a_buf.load(m) + b_buf.load(m);
       });

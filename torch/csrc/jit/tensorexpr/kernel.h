@@ -47,7 +47,7 @@ using ArgValue = c10::variant<
     IntList,
     ArgNone>;
 
-using NNCLoweringFunction = std::function<Tensor*(
+using NNCLoweringFunction = std::function<Tensor(
     const std::vector<ArgValue>&,
     const std::vector<ExprHandle>&,
     const c10::optional<ScalarType>&,
@@ -123,7 +123,7 @@ struct TensorInfo {
   c10::ScalarType dtype;
 };
 
-TORCH_API Tensor* computeOperandValue(
+TORCH_API Tensor computeOperandValue(
     c10::Symbol op,
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
@@ -209,7 +209,7 @@ class TORCH_API TensorExprKernel {
       const torch::jit::Value* v,
       const std::vector<ExprHandle>& axes);
 
-  Tensor* computeValue(const torch::jit::Value* v);
+  Tensor computeValue(const torch::jit::Value* v);
 
   void bindConstant(const torch::jit::Value* v);
 
@@ -222,9 +222,9 @@ class TORCH_API TensorExprKernel {
       std::vector<at::Tensor>& outputs);
   BackendType inferBackendTypeFromDevice(at::Device device);
 
-  Tensor* bindInput(const torch::jit::Value* input);
+  Tensor bindInput(const torch::jit::Value* input);
 
-  Tensor* convertOutputToCorrectStrides(torch::jit::Value* v);
+  Tensor convertOutputToCorrectStrides(torch::jit::Value* v);
 
   // Captures the information for reduction operation nodes.
   struct ReductionInfo {

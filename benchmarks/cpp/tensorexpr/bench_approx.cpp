@@ -10,14 +10,14 @@
 using namespace torch::jit;
 using namespace torch::jit::tensorexpr;
 
-void vectorize(tensorexpr::LoopNest* ln, tensorexpr::Tensor* target, int width) {
+void vectorize(tensorexpr::LoopNest* ln, tensorexpr::Tensor target, int width) {
   auto loops = ln->getLoopStmtsFor(target);
   ForPtr inner, tail;
   ln->splitWithTail(loops[0], width, &inner, &tail);
   ln->vectorize(inner);
 }
 
-void optimizePointwise(tensorexpr::LoopNest* ln, tensorexpr::Tensor* target) {
+void optimizePointwise(tensorexpr::LoopNest* ln, tensorexpr::Tensor target) {
   std::vector<ForPtr> loops = ln->getLoopStmtsFor(target);
   ForPtr inner, tail;
   ln->splitWithTail(loops[0], 16 * 8, &inner, &tail);
@@ -33,7 +33,7 @@ static void relu_nnc(benchmark::State& state) {
   auto N = VarHandle("N", kInt);
   Placeholder A("A", kFloat, {N});
   auto clamp = 0;
-  torch::jit::tensorexpr::Tensor* B = Compute("B", {N}, [&](const VarHandle& i){
+  torch::jit::tensorexpr::Tensor B = Compute("B", {N}, [&](const VarHandle& i){
     auto A_elem = [&]() {
       auto elem = A.load(i);
       auto min = FloatImm::make(clamp);
@@ -67,7 +67,7 @@ static void log_nnc_sleef(benchmark::State& state) {
   KernelScope ks;
   auto N = VarHandle("N", kInt);
   Placeholder A("A", kFloat, {N});
-  torch::jit::tensorexpr::Tensor* B =
+  torch::jit::tensorexpr::Tensor B =
       Compute("B", {N}, [&](const VarHandle& i) {
         return log(A.load(i));
       });
@@ -97,7 +97,7 @@ static void log_nnc_fast(benchmark::State& state) {
   KernelScope ks;
   auto N = VarHandle("N", kInt);
   Placeholder A("A", kFloat, {N});
-  torch::jit::tensorexpr::Tensor* B =
+  torch::jit::tensorexpr::Tensor B =
       Compute("B", {N}, [&](const VarHandle& i) {
         return fast_log(A.load(i));
       });
@@ -127,7 +127,7 @@ static void log_nnc_vml(benchmark::State& state) {
   KernelScope ks;
   auto N = VarHandle("N", kInt);
   Placeholder A("A", kFloat, {N});
-  torch::jit::tensorexpr::Tensor* B =
+  torch::jit::tensorexpr::Tensor B =
       Compute("B", {N}, [&](const VarHandle& i) {
         return log_vml(A.load(i));
       });
@@ -168,7 +168,7 @@ static void logit_nnc_sleef(benchmark::State& state) {
   auto N = VarHandle("N", kInt);
   Placeholder A("A", kFloat, {N});
   auto clamp = 1e-6f;
-  tensorexpr::Tensor* B = Compute("B", {N}, [&](const VarHandle& i) {
+  tensorexpr::Tensor B = Compute("B", {N}, [&](const VarHandle& i) {
     auto A_elem = [&]() {
       auto elem = A.load(i);
       auto min = FloatImm::make(clamp);
@@ -205,7 +205,7 @@ static void logit_nnc_fast(benchmark::State& state) {
   auto N = VarHandle("N", kInt);
   Placeholder A("A", kFloat, {N});
   auto clamp = 1e-6f;
-  tensorexpr::Tensor* B = Compute("B", {N}, [&](const VarHandle& i) {
+  tensorexpr::Tensor B = Compute("B", {N}, [&](const VarHandle& i) {
     auto A_elem = [&]() {
       auto elem = A.load(i);
       auto min = FloatImm::make(clamp);
@@ -242,7 +242,7 @@ static void logit_nnc_vml(benchmark::State& state) {
   auto N = VarHandle("N", kInt);
   Placeholder A("A", kFloat, {N});
   auto clamp = 1e-6f;
-  tensorexpr::Tensor* B = Compute("B", {N}, [&](const VarHandle& i) {
+  tensorexpr::Tensor B = Compute("B", {N}, [&](const VarHandle& i) {
     auto A_elem = [&]() {
       auto elem = A.load(i);
       auto min = FloatImm::make(clamp);
@@ -319,7 +319,7 @@ static void tanh_nnc_fast(benchmark::State& state) {
   KernelScope ks;
   auto N = VarHandle("N", kInt);
   Placeholder A("A", kFloat, {N});
-  torch::jit::tensorexpr::Tensor* B =
+  torch::jit::tensorexpr::Tensor B =
       Compute("B", {N}, [&](const VarHandle& i) {
         return fast_tanh(A.load(i));
       });
