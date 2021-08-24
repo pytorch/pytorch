@@ -165,24 +165,6 @@ struct PeepholeOptimizeNonTensorImpl {
             changed = true;
           }
         }
-//      } else if (node->kind() == prim::isinstance) {
-//        auto typs = node->tys(attr::types);
-//        auto inp = node->input()->type();
-//        if (std::all_of(typs.begin(), typs.end(), [&](const TypePtr& type) {
-//          return inp->isSubtypeOf(type);
-//        })) {
-//          GRAPH_UPDATE("Removing", getHeader(node), " as ", node->input(), " is statically true");
-//          changed = true;
-//          WithInsertPoint guard(node);
-//          node->output()->replaceAllUsesWith(node->owningGraph()->insertConstant(true));
-//        } else if (std::none_of(typs.begin(), typs.end(), [&](const TypePtr& type) {
-//          return inp->isSubtypeOf(type);
-//        })) {
-//          GRAPH_UPDATE("Removing", getHeader(node), " as ", node->input(), " is statically false");
-//          changed = true;
-//          WithInsertPoint guard(node);
-//          node->output()->replaceAllUsesWith(node->owningGraph()->insertConstant(false));
-//        }
       } else if (
           node->kind() == prim::unchecked_unwrap_optional ||
           node->kind() == aten::_unwrap_optional) {
