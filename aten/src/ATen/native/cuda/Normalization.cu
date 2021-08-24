@@ -487,7 +487,8 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda(const Tensor& grad_o
   // save_mean and save_invstd, so it needs recalculated.
   const auto acc_type = at::toAccumulateType(input.scalar_type(), /*is_cuda=*/true);
   Tensor mean;
-  if (save_mean->defined()) {
+  TORCH_INTERNAL_ASSERT(save_mean->defined(), "save_mean should always be defined\n");
+  if (save_mean->numel() != 0) {
     mean = *save_mean;
   } else if (needs_reduction) {
     TORCH_CHECK(!train && running_mean->defined());
@@ -496,7 +497,8 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda(const Tensor& grad_o
   }
 
   Tensor invstd;
-  if (save_invstd->defined()) {
+  TORCH_INTERNAL_ASSERT(save_invstd->defined(), "save_invstd should always be defined\n");
+  if (save_invstd->numel() != 0) {
     invstd = *save_invstd;
   } else {
     TORCH_CHECK(!train && running_var->defined());

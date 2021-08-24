@@ -188,7 +188,15 @@ class _HookMixin(object):
 class BackwardCFunction(_C._FunctionBase, FunctionCtx, _HookMixin):
     def apply(self, *args):
         # _forward_cls is defined by derived class
-        return self._forward_cls.backward(self, *args)  # type: ignore[attr-defined]
+        # The user should define either backward or vjp but never both.
+        backward_fn = self._forward_cls.backward  # type: ignore[attr-defined]
+        vjp_fn = self._forward_cls.vjp  # type: ignore[attr-defined]
+        if backward_fn is not Function.backward and vjp_fn is not Function.vjp:
+            raise RuntimeError("Implementing both 'backward' and 'vjp' for a custom "
+                               "Function is not allowed. You should only implement one "
+                               "of them.")
+        user_fn = vjp_fn if vjp_fn is not Function.vjp else backward_fn
+        return user_fn(self, *args)
 
 
 class FunctionMeta(type):
@@ -271,7 +279,8 @@ class Function(with_metaclass(FunctionMeta, _C._FunctionBase, FunctionCtx, _Hook
 
     @staticmethod
     def backward(ctx: Any, *grad_outputs: Any) -> Any:
-        r"""Defines a formula for differentiating the operation.
+        r"""Defines a formula for differentiating the operation with backward mode
+        automatic differentiation.
 
         This function is to be overridden by all subclasses.
 
@@ -291,8 +300,12 @@ class Function(with_metaclass(FunctionMeta, _C._FunctionBase, FunctionCtx, _Hook
         first input to :func:`forward` needs gradient computated w.r.t. the
         output.
         """
-        raise NotImplementedError("You must implement the backward function for custom"
-                                  " autograd.Function.")
+        raise NotImplementedError("You must implement either the backward or vjp method for "
+                                  "your custom autograd.Function to use it with backward "
+                                  "mode AD.")
+
+    # vjp and backward are alias of each other
+    vjp = backward
 
 
 def once_differentiable(fn):
