@@ -6,7 +6,7 @@ namespace torch {
 namespace jit {
 
 TORCH_API bool canFuseOnCPULegacy();
-TORCH_API void overideCanFuseOnCPULegacy(bool value);
+TORCH_API void overrideCanFuseOnCPULegacy(bool value);
 
 // NB: Be sure to run DCE before fusion, because dead instructions
 // can prevent fusion opportunities from being exploited.
