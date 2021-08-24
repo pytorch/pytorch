@@ -52,6 +52,8 @@ def substitute_solution_one_type(mapping, t):
     if isinstance(t, Var):
         if t in mapping.keys():
             return mapping[t]
+        else:
+            return t
 
     elif isinstance(t, TensorType):
         new_type = []
@@ -61,6 +63,21 @@ def substitute_solution_one_type(mapping, t):
             else:
                 new_type.append(typ)
         return TensorType(tuple(new_type))
+
+    elif isinstance(t, list):
+        new_type = []
+        for typ in t:
+            new_type.append(substitute_solution_one_type(mapping, typ))
+        return new_type
+
+    elif isinstance(t, tuple):
+        new_type = []
+        for typ in t:
+            new_type.append(substitute_solution_one_type(mapping, typ))
+        return tuple(new_type)
+
+    else:
+        return t
 
 
 def substitute_all_types(graph, mapping):
