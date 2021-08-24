@@ -181,8 +181,10 @@ class CIWorkflow:
         with open(output_file_path, "w") as output_file:
             GENERATED = "generated"  # Note that please keep the variable GENERATED otherwise phabricator will hide the whole file
             output_file.writelines([f"# @{GENERATED} DO NOT EDIT MANUALLY\n"])
-            output_file.write(workflow_template.render(asdict(self)))
-            output_file.write("\n")
+            content = workflow_template.render(asdict(self))
+            output_file.write(content)
+            if content[-1] != "\n":
+                output_file.write("\n")
         print(output_file_path)
 
 
