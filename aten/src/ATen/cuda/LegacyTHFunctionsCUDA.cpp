@@ -7,7 +7,6 @@
 #include <ATen/ExpandUtils.h>
 #include <THC/THC.h>
 #include <THC/THCTensor.hpp>
-#include <THCUNN/THCUNN.h>
 #undef THNN_
 #undef THCIndexTensor_
 #include <ATen/DeviceGuard.h>
