@@ -8,7 +8,7 @@ from torch.nn.utils import parametrize
 
 from torch.nn.modules.container import ModuleDict, ModuleList
 
-from .parametrization import PruningParametrization, LinearActivationReconstruction, Conv2dActivationReconstruction
+from .parametrization import PruningParametrization, ActivationReconstruction
 
 SUPPORTED_MODULES = {
     nn.Linear,
@@ -140,13 +140,9 @@ class BasePruner(abc.ABC):
 
             assert isinstance(module.parametrizations, ModuleDict)  # make mypy happy
             assert isinstance(module.parametrizations.weight, ModuleList)
-            if isinstance(module, nn.Linear):
+            if isinstance(module, tuple(SUPPORTED_MODULES)):
                 self.activation_handles.append(module.register_forward_hook(
-                    LinearActivationReconstruction(module.parametrizations.weight[0])
-                ))
-            elif isinstance(module, nn.Conv2d):
-                self.activation_handles.append(module.register_forward_hook(
-                    Conv2dActivationReconstruction(module.parametrizations.weight[0])
+                    ActivationReconstruction(module.parametrizations.weight[0])
                 ))
             else:
                 raise NotImplementedError("This module type is not supported yet.")

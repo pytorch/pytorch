@@ -1,5 +1,6 @@
 import torch
 from torch import nn
+from typing import Any, List
 
 
 class PruningParametrization(nn.Module):
@@ -13,27 +14,25 @@ class PruningParametrization(nn.Module):
         return x[list(valid_outputs)]
 
 
-class LinearActivationReconstruction:
+class ActivationReconstruction:
     def __init__(self, parametrization):
         self.param = parametrization
 
     def __call__(self, module, input, output):
         max_outputs = self.param.original_outputs
         pruned_outputs = self.param.pruned_outputs
-        reconstructed_tensor = torch.zeros((output.shape[0], len(max_outputs)))
         valid_columns = list(max_outputs - pruned_outputs)
-        reconstructed_tensor[:, valid_columns] = output
-        return reconstructed_tensor
 
+        # get size of reconstructed output
+        sizes = list(output.shape)
+        sizes[1] = len(max_outputs)
 
-class Conv2dActivationReconstruction:
-    def __init__(self, parametrization):
-        self.param = parametrization
+        # get valid indices of reconstructed output
+        indices: List[Any] = []
+        for size in output.shape:
+            indices.append(slice(0, size, 1))
+        indices[1] = valid_columns
 
-    def __call__(self, module, input, output):
-        max_outputs = self.param.original_outputs
-        pruned_outputs = self.param.pruned_outputs
-        reconstructed_tensor = torch.zeros((output.shape[0], len(max_outputs), output.shape[2], output.shape[3]))
-        valid_columns = list(max_outputs - pruned_outputs)
-        reconstructed_tensor[:, valid_columns, :, :] = output
+        reconstructed_tensor = torch.zeros(sizes)
+        reconstructed_tensor[indices] = output
         return reconstructed_tensor
