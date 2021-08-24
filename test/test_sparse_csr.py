@@ -4,7 +4,7 @@ import unittest
 import random
 import itertools
 from torch.testing import get_all_complex_dtypes, get_all_fp_dtypes, floating_and_complex_types
-from torch.testing._internal.common_cuda import SM53OrLater, SM80OrLater
+from torch.testing._internal.common_cuda import SM53OrLater, SM80OrLater, TEST_CUSPARSE_GENERIC
 from torch.testing._internal.common_utils import \
     (IS_MACOS, IS_WINDOWS, TestCase, run_tests, load_tests, coalescedonoff, make_tensor)
 from torch.testing._internal.common_device_type import \
@@ -451,10 +451,10 @@ class TestSparseCSR(TestCase):
                     test_shape(i, j, k, i * j // 2)
         test_shape(4, 4, 4, 0)
 
-    @skipCUDAIfNoCusparseGeneric
     @dtypes(*torch.testing.floating_types())
     @dtypesIfCUDA(*get_all_complex_dtypes(),
-                  *get_all_fp_dtypes(include_half=SM53OrLater, include_bfloat16=SM80OrLater))
+                  *get_all_fp_dtypes(include_half=SM53OrLater and TEST_CUSPARSE_GENERIC,
+                                     include_bfloat16=SM80OrLater and TEST_CUSPARSE_GENERIC))
     @precisionOverride({torch.bfloat16: 1e-2, torch.float16: 1e-2})
     def test_sparse_mm(self, device, dtype):
         def test_shape(d1, d2, d3, nnz, transposed, index_dtype):
@@ -470,10 +470,10 @@ class TestSparseCSR(TestCase):
             test_shape(7, 8, 9, 20, False, index_dtype)
             test_shape(7, 8, 9, 20, True, index_dtype)
 
-    @skipCUDAIfNoCusparseGeneric
     @dtypes(*torch.testing.floating_types())
     @dtypesIfCUDA(*get_all_complex_dtypes(),
-                  *get_all_fp_dtypes(include_half=SM53OrLater, include_bfloat16=SM80OrLater))
+                  *get_all_fp_dtypes(include_half=SM53OrLater and TEST_CUSPARSE_GENERIC,
+                                     include_bfloat16=SM80OrLater and TEST_CUSPARSE_GENERIC))
     @precisionOverride({torch.bfloat16: 1e-2, torch.float16: 1e-2})
     def test_sparse_addmm(self, device, dtype):
         def test_shape(m, n, p, nnz, broadcast, index_dtype, alpha_beta=None):

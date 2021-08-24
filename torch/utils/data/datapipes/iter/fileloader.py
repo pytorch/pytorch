@@ -5,8 +5,8 @@ from torch.utils.data import IterDataPipe
 from torch.utils.data.datapipes.utils.common import get_file_binaries_from_pathnames
 
 
-class LoadFilesFromDiskIterDataPipe(IterDataPipe[Tuple[str, IOBase]]):
-    r""" :class:`LoadFilesFromDiskIterDataPipe`.
+class FileLoaderIterDataPipe(IterDataPipe[Tuple[str, IOBase]]):
+    r""" :class:`FileLoaderIterDataPipe`.
 
     Iterable Datapipe to load file streams from given pathnames,
     yield pathname and file stream in a tuple.
