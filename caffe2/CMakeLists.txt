@@ -1245,7 +1245,6 @@ elseif(USE_CUDA)
 endif()
 if(BUILD_PYTHON)
     include_torch_lib_dir(torch_python)
-    include_torch_lib_dir(torch_python_obj)
 endif()
 
 # Pass USE_DISTRIBUTED to torch_cpu, as some codes in jit/pickler.cpp and
