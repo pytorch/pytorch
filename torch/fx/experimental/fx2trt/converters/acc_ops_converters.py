@@ -764,11 +764,6 @@ def acc_ops_mul(network, target, args, kwargs, name):
         network, kwargs["input"], kwargs["other"], trt.ElementWiseOperation.PROD, name
     )
 
-@tensorrt_converter(acc_ops.pow)
-def acc_ops_pow(network, target, args, kwargs, name):
-    return add_binary_elementwise_layer(
-        network, kwargs["input"], kwargs["exponent"], trt.ElementWiseOperation.POW, name
-    )
 
 @tensorrt_converter(acc_ops.min_two_tensors_input)
 def acc_ops_min_two_tensors_input(network, target, args, kwargs, name):

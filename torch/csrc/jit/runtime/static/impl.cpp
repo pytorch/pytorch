@@ -9,11 +9,11 @@
 #include <caffe2/core/timer.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
+#include <torch/csrc/jit/passes/concat_opt.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
-#include <torch/csrc/jit/passes/variadic_ops.h>
 #include <torch/csrc/jit/runtime/static/ops.h>
 #include <torch/csrc/jit/runtime/static/passes.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
@@ -548,7 +548,7 @@ PrepareForStaticModule(
 StaticModule::StaticModule(
     std::shared_ptr<torch::jit::Graph> g,
     const StaticModuleOptions& opts)
-    : StaticModule(PrepareForStaticModule(g->copy(), opts), opts) {}
+    : StaticModule(PrepareForStaticModule(g, opts), opts) {}
 
 StaticModule::StaticModule(
     const torch::jit::Module& m,
