@@ -47,7 +47,6 @@ class ConcatBench : public benchmark::Fixture {
   }
 
   void runNNC(benchmark::State& state) {
-    KernelScope ks;
 
     size_t num_inputs = inputs_.size();
     size_t num_dims = 2;
@@ -101,7 +100,6 @@ class ConcatBench : public benchmark::Fixture {
   }
 
   void runNNCLoop(benchmark::State& state) {
-    KernelScope ks;
 
     size_t num_inputs = inputs_.size();
     size_t num_dims = 2;

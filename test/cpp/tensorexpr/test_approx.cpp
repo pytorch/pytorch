@@ -30,7 +30,6 @@ std::string diffs(const at::Tensor& a, const at::Tensor& b) {
 }
 
 TEST(Approx, log_vml) {
-  te::KernelScope ks;
   te::VarHandle N("N", te::kInt);
   te::Placeholder A("A", te::kFloat, {N});
   te::Tensor B = te::Compute(

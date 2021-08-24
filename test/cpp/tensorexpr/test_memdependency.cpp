@@ -19,8 +19,6 @@ using namespace torch::jit::tensorexpr;
 // larger and fully encloses B, while ContainedOrEqual is the reverse. Equal
 // ranges are ContainedOrEqual.
 TEST(MemDependency, BoundOverlap) {
-  KernelScope kernel_scope;
-
   using namespace analysis;
 
   auto CB = [](int s, int e) {
@@ -79,7 +77,6 @@ TEST(MemDependency, BoundOverlap) {
 }
 
 TEST(MemDependency, BoundOverlapSymbolic) {
-  KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
   VarHandle z("z", kInt);
@@ -116,8 +113,6 @@ TEST(MemDependency, BoundOverlapSymbolic) {
 // This uses boundOverlap on each dimension and return the "lowest" kind of
 // overlap.
 TEST(MemDependency, BoundOverlapMultiDim) {
-  KernelScope kernel_scope;
-
   using namespace analysis;
 
   auto CB = [](int s, int e) {
@@ -189,8 +184,6 @@ TEST(MemDependency, BoundOverlapMultiDim) {
 // Test the helper we use to subtract bounds: returns the regions(s) of A which
 // remain after removing the region of B.
 TEST(MemDependency, BoundSubtract) {
-  KernelScope kernel_scope;
-
   using namespace analysis;
 
   auto CB = [](int s, int e) {
@@ -224,7 +217,6 @@ TEST(MemDependency, BoundSubtract) {
 }
 
 TEST(MemDependency, BoundSubtractSymbolic) {
-  KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
   VarHandle z("z", kInt);
@@ -273,8 +265,6 @@ TEST(MemDependency, BoundSubtractSymbolic) {
 // Tests the helper function that does subtraction, but for multi dimensional
 // indices bounds.
 TEST(MemDependency, BoundSubtractMultiDim) {
-  KernelScope kernel_scope;
-
   using namespace analysis;
 
   auto CB = [](int s, int e) {
@@ -335,7 +325,6 @@ TEST(MemDependency, BoundSubtractMultiDim) {
 // Tests the multi dimensional subtraction code for bounds that cannot be fully
 // materialized.
 TEST(MemDependency, BoundSubtractMultiDimSymbolic) {
-  KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
 
@@ -403,7 +392,6 @@ TEST(MemDependency, BoundSubtractMultiDimSymbolic) {
 
 // Simple check that the analyzer does anything at all...
 TEST(MemDependency, MemDependencyCheckerSimple) {
-  KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   BufHandle b("B", {1}, kInt);
 
@@ -429,7 +417,6 @@ TEST(MemDependency, MemDependencyCheckerSimple) {
 
 // Check that there is a difference between direct and indirect dependence.
 TEST(MemDependency, MemDependencyCheckerMultiStmt) {
-  KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   BufHandle b("B", {1}, kInt);
   BufHandle c("C", {1}, kInt);
@@ -466,7 +453,6 @@ TEST(MemDependency, MemDependencyCheckerMultiStmt) {
 
 // Verify that we do filter writes that are totally overlapped by later writes.
 TEST(MemDependency, MemDependencyCheckerOverlap) {
-  KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   BufHandle b("B", {1}, kInt);
 
@@ -499,7 +485,6 @@ TEST(MemDependency, MemDependencyCheckerOverlap) {
 // Verify that bounds match loop iterations, and that dependencies progress
 // across loop scopes.
 TEST(MemDependency, MemDependencyCheckerLoop) {
-  KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   BufHandle b("B", {1}, kInt);
   VarHandle x("x", kInt);
@@ -541,7 +526,6 @@ TEST(MemDependency, MemDependencyCheckerLoop) {
 
 // Reductions should promote dependencies as well.
 TEST(MemDependency, MemDependencyCheckerLoopReduce) {
-  KernelScope kernel_scope;
   BufHandle a("A", {10}, kInt);
   BufHandle b("B", {10}, kInt);
   VarHandle x("x", kInt);
@@ -600,7 +584,6 @@ TEST(MemDependency, MemDependencyCheckerLoopReduce) {
 
 // Lowering a reduction doesn't affect dependency analysis.
 TEST(MemDependency, MemDependencyCheckerLoopReduceExpanded) {
-  KernelScope kernel_scope;
   BufHandle a("A", {10}, kInt);
   BufHandle b("B", {10}, kInt);
   VarHandle x("x", kInt);
@@ -654,7 +637,6 @@ TEST(MemDependency, MemDependencyCheckerLoopReduceExpanded) {
 
 // Can determine dependencies of outputs, through to inputs.
 TEST(MemDependency, MemDependencyCheckerInputsOutputs) {
-  KernelScope kernel_scope;
   BufHandle a("A", {10}, kInt);
   BufHandle b("B", {10}, kInt);
   VarHandle x("x", kInt);
@@ -707,7 +689,6 @@ TEST(MemDependency, MemDependencyCheckerInputsOutputs) {
 
 // Can tell if an output does not depend on an input.
 TEST(MemDependency, MemDependencyCheckerOutputDoesntDepend) {
-  KernelScope kernel_scope;
   BufHandle a("A", {10}, kInt);
   BufHandle b("B", {10}, kInt);
   VarHandle x("x", kInt);
@@ -746,7 +727,6 @@ TEST(MemDependency, MemDependencyCheckerOutputDoesntDepend) {
 // Verify different loop extents produce accesses with different bounds, and
 // that later accesses find dependencies that overlap their entire bound range.
 TEST(MemDependency, MemDependencyCheckerLoopBounds) {
-  KernelScope kernel_scope;
   BufHandle a("A", {10}, kInt);
   BufHandle b("B", {10}, kInt);
   BufHandle c("C", {10}, kInt);
@@ -928,7 +908,6 @@ TEST(MemDependency, MemDependencyCheckerLoopBounds) {
 
 // Verify that we can still infer bounds when the loop var is offset.
 TEST(MemDependency, MemDependencyCheckerLoopBoundsIndexShift) {
-  KernelScope kernel_scope;
   BufHandle a("A", {10}, kInt);
   BufHandle b("B", {10}, kInt);
   VarHandle x("x", kInt);
@@ -1111,7 +1090,6 @@ TEST(MemDependency, MemDependencyCheckerLoopBoundsIndexShift) {
 // iteration. This is affected by whether or not we can trust the execution
 // order of the loop.
 TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
-  KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
   BufHandle b("B", {5}, kInt);
   VarHandle x("x", kInt);
@@ -1749,7 +1727,6 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
 // TODO: actually this only works because of the size of the ranges, revist this
 // test after strided overlap is implemented.
 TEST(MemDependency, MemDependencyCheckerLoopDistinctStrides) {
-  KernelScope kernel_scope;
   BufHandle a("A", {20}, kInt);
   BufHandle b("B", {20}, kInt);
   VarHandle x("x", kInt);
@@ -1775,7 +1752,6 @@ TEST(MemDependency, MemDependencyCheckerLoopDistinctStrides) {
 
 /* TODO(nickg) - this test will fail due to the lack of stride math in Bound
 TEST(MemDependency, MemDependencyCheckerLoopDistinctStrides) {
-  KernelScope kernel_scope;
   BufHandle a("A", {20}, kInt);
   BufHandle b("B", {20}, kInt);
   BufHandle c("C", {10}, kInt);
@@ -1806,7 +1782,6 @@ TEST(MemDependency, MemDependencyCheckerLoopDistinctStrides) {
 
 // analysis on Stmts using Cond.
 TEST(MemDependency, MemDependencyCheckerLoopBoundsCond) {
-  KernelScope kernel_scope;
   BufHandle a("A", {10}, kInt);
   BufHandle b("B", {10}, kInt);
   BufHandle c("C", {10}, kInt);
@@ -2002,7 +1977,6 @@ TEST(MemDependency, MemDependencyCheckerLoopBoundsCond) {
 
 // Stmts using IfThenElse.
 TEST(MemDependency, MemDependencyCheckerIfThenElse) {
-  KernelScope kernel_scope;
   BufHandle a("A", {10}, kInt);
   BufHandle b("B", {10}, kInt);
   BufHandle c("C", {10}, kInt);
@@ -2112,7 +2086,6 @@ TEST(MemDependency, MemDependencyCheckerIfThenElse) {
 
 // Cutting a loop with single elem writes
 TEST(MemDependency, MemDependencyCheckerCutLoop) {
-  KernelScope kernel_scope;
   BufHandle a("A", {10}, kInt);
   BufHandle b("B", {10}, kInt);
   VarHandle x("x", kInt);
@@ -2194,7 +2167,6 @@ TEST(MemDependency, MemDependencyCheckerCutLoop) {
 
 // Dynamic shapes (load in indices).
 TEST(MemDependency, MemDependencyCheckerDynamicShapes) {
-  KernelScope kernel_scope;
   BufHandle a("A", {100}, kInt);
   BufHandle b("B", {100}, kInt);
   BufHandle c("C", {100}, kInt);
@@ -2436,7 +2408,6 @@ TEST(MemDependency, MemDependencyCheckerDynamicShapes) {
 
 // Verify multi dimensional bounds work.
 TEST(MemDependency, MemDependencyCheckerMultiDim) {
-  KernelScope kernel_scope;
   int M = 10, N = 9, K = 12;
   BufHandle a("A", {M, N, K}, kInt);
   BufHandle b("B", {M, N, K}, kInt);
@@ -2703,8 +2674,6 @@ TEST(MemDependency, MemDependencyCheckerMultiDim) {
 
 // Various tests using the external Compute/Reduce API.
 TEST(MemDependency, MemDependencyCheckerComputeAPI) {
-  KernelScope kernel_scope;
-
   using namespace analysis;
 
   /* for (int m = 0; m < 4; m++) {
@@ -2756,8 +2725,6 @@ TEST(MemDependency, MemDependencyCheckerComputeAPI) {
 }
 
 TEST(MemDependency, MemDependencyCheckerComputeInline) {
-  KernelScope kernel_scope;
-
   using namespace analysis;
 
   /* for (int m = 0; m < 4; m++) {
@@ -2803,8 +2770,6 @@ TEST(MemDependency, MemDependencyCheckerComputeInline) {
 }
 
 TEST(MemDependency, MemDependencyCheckerComputeSplit) {
-  KernelScope kernel_scope;
-
   using namespace analysis;
   // Split an axis, so the number of loops != the number of dimensions.
 
@@ -2851,8 +2816,6 @@ TEST(MemDependency, MemDependencyCheckerComputeSplit) {
 }
 
 TEST(MemDependency, MemDependencyCheckerComputeReorder) {
-  KernelScope kernel_scope;
-
   using namespace analysis;
   // Reorder an axis, so the loop order doesn't match the indexing order.
 
@@ -2900,8 +2863,6 @@ TEST(MemDependency, MemDependencyCheckerComputeReorder) {
 }
 
 TEST(MemDependency, MemDependencyCheckerComputeReduce) {
-  KernelScope kernel_scope;
-
   using namespace analysis;
   /* for (int l2 = 0; l2 < 2; l2++) {
    *   for (int n1 = 0; n1 < 3; n1++) {
@@ -2955,7 +2916,6 @@ TEST(MemDependency, MemDependencyCheckerComputeReduce) {
 }
 
 TEST(MemDependency, MemDependencyCheckerComputeGEMM) {
-  KernelScope kernel_scope;
   int M = 1024;
   int N = 1024;
   int K = 2048;

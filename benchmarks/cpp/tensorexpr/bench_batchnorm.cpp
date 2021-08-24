@@ -74,7 +74,6 @@ BENCHMARK_DEFINE_F(BatchNorm, ATen)(benchmark::State& state) {
 }
 
 BENCHMARK_DEFINE_F(BatchNorm, NNC)(benchmark::State& state) {
-  KernelScope ks;
 
   Placeholder input("input", kFloat, {N_, C_, H_, W_});
   Placeholder weight("weight", kFloat, {C_});
@@ -137,7 +136,6 @@ BENCHMARK_DEFINE_F(BatchNorm, ATenRelu)(benchmark::State& state) {
 }
 
 BENCHMARK_DEFINE_F(BatchNorm, NNCRelu)(benchmark::State& state) {
-  KernelScope ks;
 
   Placeholder input("input", kFloat, {N_, C_, H_, W_});
   Placeholder weight("weight", kFloat, {C_});

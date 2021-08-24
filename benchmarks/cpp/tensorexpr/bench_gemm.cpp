@@ -40,7 +40,6 @@ BENCHMARK_DEFINE_F(Gemm, Torch)(benchmark::State& state) {
 }
 
 BENCHMARK_DEFINE_F(Gemm, TensorExprNoopt)(benchmark::State& state) {
-  te::KernelScope ks;
 
   te::Placeholder AP(te::BufHandle("A", {M, K}, te::kFloat));
   te::Placeholder BP(te::BufHandle("B", {K, N}, te::kFloat));
@@ -64,7 +63,6 @@ BENCHMARK_DEFINE_F(Gemm, TensorExprNoopt)(benchmark::State& state) {
 }
 
 BENCHMARK_DEFINE_F(Gemm, TensorExprTile32x32)(benchmark::State& state) {
-  te::KernelScope ks;
 
   te::Placeholder AP(te::BufHandle("A", {M, K}, te::kFloat));
   te::Placeholder BP(te::BufHandle("B", {K, N}, te::kFloat));
@@ -124,7 +122,6 @@ BENCHMARK_DEFINE_F(Gemm, TensorExprTile32x32)(benchmark::State& state) {
 }
 
 BENCHMARK_DEFINE_F(Gemm, TensorExprTile4x16)(benchmark::State& state) {
-  te::KernelScope ks;
 
   te::Placeholder AP(te::BufHandle("A", {M, K}, te::kFloat));
   te::Placeholder BP(te::BufHandle("B", {K, N}, te::kFloat));
@@ -184,7 +181,6 @@ BENCHMARK_DEFINE_F(Gemm, TensorExprTile4x16)(benchmark::State& state) {
 }
 
 BENCHMARK_DEFINE_F(Gemm, TensorExprTile4x16VecUnroll)(benchmark::State& state) {
-  te::KernelScope ks;
 
   te::Placeholder AP(te::BufHandle("A", {M, K}, te::kFloat));
   te::Placeholder BP(te::BufHandle("B", {K, N}, te::kFloat));
@@ -252,7 +248,6 @@ BENCHMARK_DEFINE_F(Gemm, TensorExprTile4x16VecUnroll)(benchmark::State& state) {
 }
 
 BENCHMARK_DEFINE_F(Gemm, TensorExprTile4x16Cache)(benchmark::State& state) {
-  te::KernelScope ks;
 
   te::Placeholder AP(te::BufHandle("A", {M, K}, te::kFloat));
   te::Placeholder BP(te::BufHandle("B", {K, N}, te::kFloat));

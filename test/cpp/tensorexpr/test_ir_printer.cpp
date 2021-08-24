@@ -17,7 +17,6 @@ namespace jit {
 using namespace torch::jit::tensorexpr;
 
 TEST(IRPrinter, BasicValueTest) {
-  KernelScope kernel_scope;
   ExprHandle a = IntImm::make(2), b = IntImm::make(3);
   ExprHandle c = Add::make(a, b);
 
@@ -27,7 +26,6 @@ TEST(IRPrinter, BasicValueTest) {
 }
 
 TEST(IRPrinter, BasicValueTest02) {
-  KernelScope kernel_scope;
   ExprHandle a(2.0f);
   ExprHandle b(3.0f);
   ExprHandle c(4.0f);
@@ -40,7 +38,6 @@ TEST(IRPrinter, BasicValueTest02) {
 }
 
 TEST(IRPrinter, CastTest) {
-  KernelScope kernel_scope;
   VarHandle x("x", kHalf);
   VarHandle y("y", kFloat);
   ExprHandle body = ExprHandle(2.f) +
@@ -52,7 +49,6 @@ TEST(IRPrinter, CastTest) {
 }
 
 TEST(IRPrinter, FunctionName) {
-  KernelScope kernel_scope;
   int M = 4;
   int N = 20;
 

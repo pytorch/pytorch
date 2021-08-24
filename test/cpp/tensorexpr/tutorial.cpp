@@ -49,19 +49,6 @@
 using namespace torch::jit::tensorexpr;
 
 int main(int argc, char* argv[]) {
-  // Memory management for tensor expressions is currently done with memory
-  // arenas. That is, whenever an object is created it registers itself in an
-  // arena and the object is kept alive as long as the arena is alive. When the
-  // arena gets destructed, it deletes all objects registered in it.
-  //
-  // The easiest way to set up a memory arena is to use `KernelScope` class - it
-  // is a resource guard that creates a new arena on construction and restores
-  // the previously set arena on destruction.
-  //
-  // We will create a kernel scope here, and thus we'll set up a mem arena for
-  // the entire tutorial.
-  KernelScope kernel_scope;
-
   std::cout << "*** Structure of tensor expressions ***" << std::endl;
   {
     // A tensor expression is a tree of expressions. Each expression has a type,

@@ -29,7 +29,6 @@ void optimizePointwise(tensorexpr::LoopNest* ln, tensorexpr::Tensor target) {
 }
 
 static void relu_nnc(benchmark::State& state) {
-  KernelScope ks;
   auto N = VarHandle("N", kInt);
   Placeholder A("A", kFloat, {N});
   auto clamp = 0;
@@ -64,7 +63,6 @@ static void relu_nnc(benchmark::State& state) {
 }
 
 static void log_nnc_sleef(benchmark::State& state) {
-  KernelScope ks;
   auto N = VarHandle("N", kInt);
   Placeholder A("A", kFloat, {N});
   torch::jit::tensorexpr::Tensor B =
@@ -94,7 +92,6 @@ static void log_nnc_sleef(benchmark::State& state) {
 }
 
 static void log_nnc_fast(benchmark::State& state) {
-  KernelScope ks;
   auto N = VarHandle("N", kInt);
   Placeholder A("A", kFloat, {N});
   torch::jit::tensorexpr::Tensor B =
@@ -124,7 +121,6 @@ static void log_nnc_fast(benchmark::State& state) {
 }
 
 static void log_nnc_vml(benchmark::State& state) {
-  KernelScope ks;
   auto N = VarHandle("N", kInt);
   Placeholder A("A", kFloat, {N});
   torch::jit::tensorexpr::Tensor B =
@@ -164,7 +160,6 @@ static void log_aten(benchmark::State& state) {
 }
 
 static void logit_nnc_sleef(benchmark::State& state) {
-  KernelScope ks;
   auto N = VarHandle("N", kInt);
   Placeholder A("A", kFloat, {N});
   auto clamp = 1e-6f;
@@ -201,7 +196,6 @@ static void logit_nnc_sleef(benchmark::State& state) {
 }
 
 static void logit_nnc_fast(benchmark::State& state) {
-  KernelScope ks;
   auto N = VarHandle("N", kInt);
   Placeholder A("A", kFloat, {N});
   auto clamp = 1e-6f;
@@ -238,7 +232,6 @@ static void logit_nnc_fast(benchmark::State& state) {
 }
 
 static void logit_nnc_vml(benchmark::State& state) {
-  KernelScope ks;
   auto N = VarHandle("N", kInt);
   Placeholder A("A", kFloat, {N});
   auto clamp = 1e-6f;
@@ -316,7 +309,6 @@ static void logit_caffe2(benchmark::State& state) {
 }
 
 static void tanh_nnc_fast(benchmark::State& state) {
-  KernelScope ks;
   auto N = VarHandle("N", kInt);
   Placeholder A("A", kFloat, {N});
   torch::jit::tensorexpr::Tensor B =

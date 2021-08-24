@@ -266,7 +266,6 @@ class TORCH_API TensorExprKernel {
   std::unordered_map<const torch::jit::Value*, std::string> input_name_map_;
   std::unique_ptr<CodeGen> codegen_;
   at::Device device_ = at::kCPU;
-  KernelArena kernelArena_;
   std::shared_ptr<Graph> graph_;
   Code code_;
   bool allow_fallback_{false};

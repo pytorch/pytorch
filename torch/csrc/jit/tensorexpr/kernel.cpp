@@ -2909,7 +2909,6 @@ void TensorExprKernel::bindConstant(const torch::jit::Value* v) {
 }
 
 void TensorExprKernel::compile() {
-  KernelScope kernelScope(&kernelArena_);
   GRAPH_DUMP("TensorExprKernel graph:", graph_);
 
   device_ = *pickDeviceType(graph_);
@@ -3080,8 +3079,6 @@ StmtPtr TensorExprKernel::getCodeGenStmt() {
 }
 
 void TensorExprKernel::runKernel(Stack& stack) {
-  KernelScope kernelScope(&kernelArena_);
-
   // Set up arguments (inputs, then outputs) for kernel call.
   auto inputs = last(stack, nInputs_);
   std::vector<at::Tensor> outputs;
@@ -3101,8 +3098,6 @@ void TensorExprKernel::runKernel(Stack& stack) {
 void TensorExprKernel::runFast(
     const std::vector<void*>& inputs,
     const std::vector<void*>& outputs) {
-  KernelScope kernelScope(&kernelArena_);
-
   std::vector<void*> args(inputs);
   args.reserve(inputs.size() + outputs.size() + constants_.size());
   args.insert(args.end(), outputs.begin(), outputs.end());
