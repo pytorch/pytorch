@@ -451,7 +451,6 @@ class QLinearDynamicFp16 final {
     TORCH_CHECK(
         fbgemm::fbgemmSupportedCPU(), "Your CPU doesn't support FBGEMM.");
 
-    TORCH_INTERNAL_ASSERT(!ReluFused);
     auto output = packed_weight->apply_dynamic(std::move(input));
 
     // Call the relu operator here until fp16 linear dynamic in FBGEMM
