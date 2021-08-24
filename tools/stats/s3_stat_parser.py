@@ -84,17 +84,29 @@ class Version2Report(VersionedReport):
 
 Report = Union[Version1Report, VersionedReport]
 
-if HAVE_BOTO3:
-    S3_RESOURCE_READ_ONLY = boto3.resource("s3", config=botocore.config.Config(signature_version=botocore.UNSIGNED))
-    S3_RESOURCE = boto3.resource('s3')
+
+_s3_readonly_client = None
+def s3_readonly():
+    global _s3_readonly_client
+    if _s3_readonly_client is None:
+        _s3_readonly_client = boto3.resource("s3", config=botocore.config.Config(signature_version=botocore.UNSIGNED))
+    return _s3_readonly_client
+
+
+_s3_client = None
+def s3():
+    global _s3_client
+    if _s3_client is None:
+        _s3_client = boto3.resource("s3")
+    return _s3_client
 
 
 def get_S3_bucket_readonly(bucket_name: str) -> Any:
-    return S3_RESOURCE_READ_ONLY.Bucket(bucket_name)
+    return s3_readonly().Bucket(bucket_name)
 
 
 def get_S3_object_from_bucket(bucket_name: str, object: str) -> Any:
-    return S3_RESOURCE.Object(bucket_name, object)
+    return s3().Object(bucket_name, object)
 
 
 def case_status(case: Version1Case) -> Status:

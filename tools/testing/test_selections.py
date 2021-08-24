@@ -179,6 +179,10 @@ def get_shard_based_on_S3(which_shard: int, num_shards: int, tests: List[str], t
 
     shards = calculate_shards(num_shards, tests, jobs_to_times)
     _, tests_from_shard = shards[which_shard - 1]
+    print("Running shard", which_shard, "with these tests")
+    for x in tests_from_shard:
+        print("\t", x)
+    # exit(0)
     return tests_from_shard
 
 
