@@ -14,7 +14,7 @@ class autocast(torch.autocast_mode.autocast):
     ``torch.cuda.amp.autocast(args...)`` is equivalent to ``torch.autocast("cuda", args...)``
     """
     def __init__(self, enabled=True, dtype=torch.float16):
-        super().__init__("cuda", enabled=enabled, dtype=fast_dtype)
+        super().__init__("cuda", enabled=enabled, dtype=dtype)
 
 
 # Casts Tensors and containers of Tensors.  Special-cases passthroughs for strings and np.ndarrays, which
