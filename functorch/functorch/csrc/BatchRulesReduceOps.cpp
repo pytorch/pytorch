@@ -274,15 +274,19 @@ std::tuple<Tensor,optional<int64_t>> _log_softmax_backward_batch_rule(
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   REDUCTION_BOXED(amax);
   REDUCTION_BOXED(amin);
+  REDUCTION_BOXED(any.dim);
   VMAP_SUPPORT("argmax", SINGLE_ARG(argx_batch_rule<decltype(&at::argmax), &at::argmax>));
   VMAP_SUPPORT("argmin", SINGLE_ARG(argx_batch_rule<decltype(&at::argmin), &at::argmin>));
+  REDUCTION_BOXED(count_nonzero.dim_IntList);
+  REDUCTION_BOXED(cummax);
+  REDUCTION_BOXED(cummin);
   REDUCTION_BOXED(cumprod);
   REDUCTION_BOXED(cumsum);
   m.impl("dist", dist_decomp);
+  REDUCTION_BOXED_ARGS(linalg_vector_norm, 2);
   REDUCTION_BOXED(log_softmax.int);
+  REDUCTION_BOXED(logcumsumexp);
   REDUCTION_BOXED(logsumexp);
-  m.impl("nansum", nansum_decomp);
-  REDUCTION_BOXED(nansum.dim_IntList);
   m.impl("max", max_decomp);
   REDUCTION_BOXED(max.dim);
   m.impl("mean", mean_decomp);
@@ -290,6 +294,8 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   m.impl("min", min_decomp);
   REDUCTION_BOXED(min.dim);
   REDUCTION_BOXED(mode);
+  m.impl("nansum", nansum_decomp);
+  REDUCTION_BOXED(nansum.dim_IntList);
   m.impl("norm.Scalar", norm_scalar_decomp);
   REDUCTION_BOXED_ARGS(norm.ScalarOpt_dim, 2);
   m.impl("prod", prod_decomp);
