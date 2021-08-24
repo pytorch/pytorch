@@ -1,6 +1,4 @@
 from functools import reduce
-
-import sympy  # type: ignore[import]
 import torch
 import operator
 from torch.fx.tensor_type import Dyn, is_consistent, TensorType, is_more_precise
@@ -13,6 +11,10 @@ import itertools
 
 from torch.fx.experimental.unification import Var  # type: ignore[attr-defined]
 
+try:
+    import sympy # type: ignore[import]
+except ImportError:
+    pass
 
 _INFERENCE_RULES: Dict[Target, Callable] = {}
 _REFINEMENT_RULES: Dict[Target, Callable] = {}
@@ -86,7 +88,7 @@ def register_refinement_rule(call_target):
         return fn
     return register
 
-def register_rule(call_target):
+def register_algebraic_expressions_inference_rule(call_target):
     def register(fn):
         if call_target in _RULES:
             raise RuntimeError('Rule already registered for {call_target}!')
@@ -655,7 +657,7 @@ def flatten_refinement_rule(n: Node):
     return eq_const
 
 
-@register_rule(Conv2d)
+@register_algebraic_expressions_inference_rule(Conv2d)
 def conv_rule(n: Node, module_instance):
     assert isinstance(n.args[0], Node)
     arg_type = n.args[0].type

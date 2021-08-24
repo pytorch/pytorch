@@ -816,6 +816,7 @@ class TypeCheckerTest(unittest.TestCase):
                 if n.op == 'output':
                     assert is_consistent(n.type, TensorType(b.size()))
 
+    @skipIfNoSympy
     @skipIfNoTorchVision
     def test_resnet50(self):
         gm_run = symbolic_trace(resnet50())
@@ -944,7 +945,7 @@ class TypeCheckerTest(unittest.TestCase):
             assert n.type == next(expected_iter)
 
 
-
+    @skipIfNoSympy
     def test_type_check_conv2D_types(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self, inplanes, planes, stride=1, norm_layer=None):
