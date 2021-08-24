@@ -7,8 +7,8 @@ import os
 import tarfile
 import warnings
 
-class ReadFilesFromTarIterDataPipe(IterDataPipe[Tuple[str, BufferedIOBase]]):
-    r""":class:`ReadFilesFromTarIterDataPipe`.
+class TarArchiveReaderIterDataPipe(IterDataPipe[Tuple[str, BufferedIOBase]]):
+    r""" :class:`TarArchiveReaderIterDataPipe`.
 
     Iterable datapipe to extract tar binary streams from input iterable which contains tuples of
     pathname and tar binary stream, yields pathname and extracted binary stream in a tuple.

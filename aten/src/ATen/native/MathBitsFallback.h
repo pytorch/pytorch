@@ -25,28 +25,76 @@ struct MathOpFallback {
   // is generalized for ops that are not self inverse, then this must be replaced by op_inverse_inplace
   virtual Tensor& math_op_(Tensor&) = 0;
   void fallback_impl(const c10::OperatorHandle& op, DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
-    // Situations to handle:
-    //  1. Out-of-place operation.  Easy: materialize all inputs and
-    //     call it a day.
-    //  2. Inplace operation.  Desugar x.add_(2) into x.conj_().add_(2).conj_().
-    //     Materialize other inputs as in (1).
-    //  3. out= operation.  Desugar add(x, 2, out=y) into y.copy_(add(x, 2))
-    //  Materialize other inputs as in (1).
-    //
-    //  It is important to be able to tell if we READ from an argument and if we
-    //  WRITE from an argument.  Conservative approach is to assume that we always
-    //  READ from an argument, but in out-of-place operations you can skip
-    //  conjugating inputs on entry that never get used.  In current schema we
-    //  can't easily tell if inplace situation has happened, so don't do it.
+    /*
+      Situations to handle:
+        1. Out-of-place operation.  Easy: materialize all inputs and
+          call it a day.
+        2. Inplace operation.  Desugar x.add_(2) into x.conj_().add_(2).conj_().
+          Materialize other inputs as in (1).
+        3. out= operation.  Desugar add(x, 2, out=y) into y.copy_(add(x, 2))
+        Materialize other inputs as in (1).
 
+        It is important to be able to tell if we READ from an argument and if we
+        WRITE from an argument.  Conservative approach is to assume that we always
+        READ from an argument, but in out-of-place operations you can skip
+        conjugating inputs on entry that never get used.  In current schema we
+        can't easily tell if inplace situation has happened, so don't do it.
+
+      Algorithm used:
+
+      1. Scan through the input arguments
+          a. Create a vector of mutable arguments that have the math bit set to True.
+          a. Additionally, if input argument has alias_info and it's mutable, set the optional variable is_write to True, else False.
+          b. is_write is only ever set for view, in-place or out= operations.
+      2. If is_write has value, and is set to False, then the operation is a view operation.
+          a. Perform the operation and return.
+      3. Iterate through all the input arguments again.
+          a. At this time, only non-mutable arguments are considered.
+          b. If the size of mutable_arguments vector is non-zero, then we iterate through mutable_inputs to check
+            if the current arg tensor in question aliases any of the entries in mutable_inputs.
+          c. If it does and the non-mutable arg's math bit is set to False, then we clone the non-mutable tensor arg,
+             else it is a no op.
+          d. If it doesn't then just resolve the non-mutable arg as usual.
+      4. Now we look through the mutable_inputs vector (which contains only mutable input tensors with math bit set to True).
+          a. In-place materialize the bit (math_op_) for each of the entries in the vector.
+      5. Perform the actual operation.
+      6. Perform math_op_ for each of the mutable argument tensors.
+
+    */
+
+    /*
+      Different possible cases for shared memory:
+      1. Functions with no tensorlist inputs
+        a. no mutable args
+        b. one or more mutable args
+          b.1. shared memory between mutable and non-mutable args (--handled)
+          b.2. shared memory between two or more mutable args (incorrect result but this is bad
+                and users shouldn't do it anyway)
+          b.3. shared memory between two or more non-mutable args (works fine since we never modify the memory)
+          b.4. no shared memory between args (-- works fine)
+      2. Functions with tensorlist inputs
+        a. no mutable args (-- works fine)
+        b. Mutable tensor arg(s) but non-mutable tensorlist arg
+          b.1. All the possible cases listed in 1.b (-- works fine)
+          b.2. shared memory between a tensor arg and a tensorlist arg ( -- Not currently supported)
+        c. Mutable tensorlist arg(s) ( -- Not currently supported)
+          c.1. shared memory between a mutable and non-mutable tensorlist
+          c.2. shared memory between two or more mutable tensorlist args
+          c.3. shared memory between two or more non-mutable tensorlist args
+          c.4. shared memory between two or more non-mutable tensor args
+          c.5. shared memory between a tensor and tensorlist arg
+          ...
+          c.n. no shared memory between args
+    */
     const auto& arguments = op.schema().arguments();
     const auto num_arguments = arguments.size();
     const auto stack_start = stack->size() - num_arguments;
 
+    // set to True if there's one or mutable inputs
     c10::optional<bool> is_write;
+
     // Mutable inputs to be tracked separately
     std::vector<Tensor> mutable_inputs;
-    bool check_for_alias_with_mut_arg = false;
     for (const auto i : c10::irange(num_arguments)) {
       // Three possible states:
       // 1. alias_info has no value --> out-of-place operation
@@ -68,7 +116,6 @@ struct MathOpFallback {
           if (ivalue.isTensor()) {
             const auto& mut_arg_tensor = ivalue.toTensor();
             if (is_bit_set(mut_arg_tensor)) {
-              check_for_alias_with_mut_arg = true;
               mutable_inputs.emplace_back(mut_arg_tensor);
             }
           } else {
@@ -87,32 +134,8 @@ struct MathOpFallback {
       return;
     }
 
-    /*
-    Different possible cases:
-    1. Functions with no tensorlist inputs
-      a. no mutable args
-      b. one or more mutable args
-         b.1. shared memory between mutable and non-mutable args (--handled)
-         b.2. shared memory between two or more mutable args (incorrect result but this is bad
-              and users shouldn't do it anyway)
-         b.3. shared memory between two or more non-mutable args (works fine since we never modify the memory)
-         b.4. no shared memory between args (-- works fine)
-    2. Functions with tensorlist inputs
-      a. no mutable args (-- works fine)
-      b. Mutable tensor arg(s) but non-mutable tensorlist arg
-        b.1. All the possible cases listed in 1.b (-- works fine)
-        b.2. shared memory between a tensor arg and a tensorlist arg ( -- Not currently supported)
-      c. Mutable tensorlist arg(s) ( -- Not currently supported)
-        c.1. shared memory between a mutable and non-mutable tensorlist
-        c.2. shared memory between two or more mutable tensorlist args
-        c.3. shared memory between two or more non-mutable tensorlist args
-        c.4. shared memory between two or more non-mutable tensor args
-        c.5. shared memory between a tensor and tensorlist arg
-        ...
-        c.n. no shared memory between args
-    */
-
     // updates for non-mutable inputs
+    bool check_for_alias_with_mut_arg = mutable_inputs.size() != 0;
     for (const auto i : c10::irange(num_arguments)) {
       auto& ivalue = (*stack)[stack_start + i];
       if (!(ivalue.isTensor() || ivalue.isTensorList())) {
@@ -127,19 +150,25 @@ struct MathOpFallback {
       if (ivalue.isTensor()) {
         auto tensor = std::move(ivalue).toTensor();
         TORCH_CHECK_NOT_IMPLEMENTED(!tensor.is_meta(), op_name, " fallback does not support meta tensors.");
+        bool resolve_needed = true;
         if (check_for_alias_with_mut_arg) {
-          bool cloned = false;
           for (const auto& mutable_input : mutable_inputs) {
+            // check if tensor shares memory with one of the mutable tensors
+            // with math bit set to True.
+            // This check is crucial since we in-place materialize the bit for the mutable tensor(s) which
+            // might be sharing memory with one of the non-mutable tensors that could be reading into the wrong
+            // values if their math bit is not set to True.
+            // no op if tensor and mutable arg share memory and have math bit set to True
             if (tensor.is_alias_of(mutable_input)) {
-              tensor = tensor.clone();
-              cloned = true;
-              continue;
+              if (!is_bit_set(tensor)) {
+                tensor = tensor.clone();
+              }
+              resolve_needed = false;
+              break;
             }
           }
-          if (!cloned) {
-            tensor = resolve_bit(tensor);
-          }
-        } else {
+        }
+        if (resolve_needed) {
           tensor = resolve_bit(tensor);
         }
         (*stack)[stack_start + i] = std::move(tensor);
