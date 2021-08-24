@@ -1,13 +1,11 @@
 import torch
-import copy
-import operator
-import torch.fx
 from torch.fx.node import map_aggregate
 from typing import Tuple, Any
 
 from .quantization_state import (
     AutoQuantizationState,
 )
+from . import auto_trace_rewrite
 
 
 # TODO(future PR): verify correctness of this for all
@@ -51,9 +49,9 @@ def add_auto_observation(
         For each function with a `__torch_fuction__` override and a parent
         module with auto quantization enabled, this proxy does the following:
 
-        1. calls `_auto_quant_state.function_before_hook`.
+        1. calls `_auto_quant_state.func_or_mod_before_hook`.
         2. executes the original function
-        3. calls `cur_module._auto_quant_state.function_after_hook`
+        3. calls `cur_module._auto_quant_state.func_or_mod_after_hook`
         """
 
         def __torch_function__(self, func, types, args=(), kwargs=None):
@@ -62,7 +60,7 @@ def add_auto_observation(
 
             # run "before" hook
             if cur_module and cur_module in modules_to_introspect:
-                cur_module._auto_quant_state.function_before_hook(
+                cur_module._auto_quant_state.func_or_mod_before_hook(
                     func, args, kwargs, first_call, qtensor_id)
 
             output = super().__torch_function__(func, types, args, kwargs)
@@ -75,8 +73,12 @@ def add_auto_observation(
             # run "after" hook
             if cur_module and cur_module in modules_to_introspect:
                 output = \
-                    cur_module._auto_quant_state.function_after_hook(
+                    cur_module._auto_quant_state.func_or_mod_after_hook(
                         func, output, first_call, qtensor_id)
+
+            # mark completion
+            if cur_module and cur_module in modules_to_introspect:
+                cur_module._auto_quant_state.validate_and_increment(func)
 
             return output
 
@@ -107,7 +109,7 @@ def add_auto_observation(
         We override the `__call__` function to do the following for
         any `cur_module` whose parent module has quantization state:
 
-        1. calls parent module's `._auto_quant_state.module_before_hook`
+        1. calls parent module's `._auto_quant_state.func_or_mod_before_hook`
         2. executes the original module forward
         3. calls parent module's `_auto_quant_state.module_after_hook`
         """
@@ -131,7 +133,7 @@ def add_auto_observation(
 
                     # "before" hook
                     if needs_hooks:
-                        parent_module._auto_quant_state.module_before_hook(
+                        parent_module._auto_quant_state.func_or_mod_before_hook(
                             cur_module, input, kwargs, first_call, qtensor_id)
 
 
@@ -139,9 +141,17 @@ def add_auto_observation(
 
                     # "after" hook
                     if needs_hooks:
-                        output = parent_module._auto_quant_state.module_after_hook(
+                        output = parent_module._auto_quant_state.func_or_mod_after_hook(
                             cur_module, output, first_call, qtensor_id)
+
+                        # mark completion
+                        parent_module._auto_quant_state.validate_and_increment(cur_module)
+
                     return output
+                except Exception as e:
+                    # import pdb
+                    # pdb.set_trace()
+                    raise e
                 finally:
                     module_stack.pop()
                     cur_module = old_module
@@ -158,7 +168,6 @@ def add_auto_observation(
                             if not isinstance(v, AutoQuantizationState):
                                 assert hasattr(v, '_auto_quant_state')
                                 v._auto_quant_state.reset_to_new_call()
-
                 return super().__call__(*new_input, **new_kwargs)
             finally:
                 torch.nn.Module.__call__ = orig_module_call
@@ -178,54 +187,6 @@ def add_auto_observation(
     return model
 
 
-class AllModuleTracer(torch.fx.Tracer):
-    def is_leaf_module(self, m, module_qualified_name) -> bool:
-        return True
-
-    def _maybe_update_args_with_quants(self, args):
-        # insert quants for inputs, if needed
-        input_args_quant_info = self.root._auto_quant_state.get_input_args_quant_info()
-        if len(input_args_quant_info):
-            new_args = []
-            for idx, input_arg_quant_info in enumerate(input_args_quant_info):
-                if input_arg_quant_info is None:
-                    new_args.append(args[idx])
-                else:
-                    # create a quant node
-                    scale, zp = input_arg_quant_info
-                    quant = super().create_node(
-                        'call_function', torch.quantize_per_tensor,
-                        (args[idx], scale.item(), zp.item(), torch.quint8), {}, None, None)
-                    new_args.append(quant)
-            args = tuple(new_args)
-        return args
-
-    def create_node(self, kind, target, args, kwargs, name=None, type_expr=None):
-        if target == operator.add:
-            target = torch.add
-        if target == operator.mul:
-            target = torch.mul
-
-        if kind == 'call_function':
-            # insert quants for inputs, if needed
-            args = self._maybe_update_args_with_quants(args)
-            target, args, kwargs = \
-                self.root._auto_quant_state.get_inference_func_args_kwargs(
-                    target, args, kwargs, unwrap_scale_zp=True)
-
-        elif kind == 'call_module':
-            # TODO: handle fqn
-
-            # insert quants for inputs, if needed
-            args = self._maybe_update_args_with_quants(args)
-            module_instance = getattr(self.root, target)
-            self.root._auto_quant_state.get_inference_mod_args_kwargs(
-                module_instance)
-
-        out = super().create_node(kind, target, args, kwargs, name, type_expr)
-        return out
-
-
 # TODO(future PR): add serialization support
 def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
     def convert_to_dispatch_proxy(x):
@@ -242,7 +203,7 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
         For each function with a `__torch_fuction__` override and a parent
         module with auto quantization enabled, this proxy does the following:
 
-        1. calls `_auto_quant_state.inference_function_before_hook`.
+        1. calls `_auto_quant_state.inference_func_or_mod_before_hook`.
         2. calls `_auto_quant_state.get_inference_func_args_kwargs`
         3. executes the function, with target, args and kwargs possibly modified
            by (2)
@@ -262,23 +223,26 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                             quantized_arg_present = True
                     finally:
                         a.__class__ = QuantizationDispatchProxy
-            torch.fx.node.map_aggregate(args, check)
-            torch.fx.node.map_aggregate(kwargs, check)
+            map_aggregate(args, check)
+            map_aggregate(kwargs, check)
             needs_hooks = quantized_arg_present and cur_module and \
                 hasattr(cur_module, '_auto_quant_state')
 
             if needs_hooks:
-                args = cur_module._auto_quant_state.inference_function_before_hook(
+                args = cur_module._auto_quant_state.inference_func_or_mod_before_hook(
                     func, args, kwargs)
+                old_func = func
                 func, args, kwargs = \
-                    cur_module._auto_quant_state.get_inference_func_args_kwargs(
+                    cur_module._auto_quant_state.get_inference_func_or_mod_args_kwargs(
                         func, args, kwargs)
 
             output = super().__torch_function__(func, types, args, kwargs)
 
             if needs_hooks:
-                output = cur_module._auto_quant_state.inference_function_after_hook(
+                output = cur_module._auto_quant_state.inference_func_or_mod_after_hook(
                     func, output)
+
+                cur_module._auto_quant_state.validate_and_increment(old_func)
 
             return output
 
@@ -311,7 +275,7 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
         We override the `__call__` function to do the following for
         any `cur_module` whose parent module has quantization state:
 
-        1. (TODO) calls parent module's `._auto_quant_state.module_before_hook`
+        1. (TODO) calls parent module's `._auto_quant_state.func_or_mod_before_hook`
         2. executes the original module forward
         3. calls parent module's `_auto_quant_state.module_after_hook`
         """
@@ -335,8 +299,10 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                         first_call = False
                         qtensor_id = []
                         # before hook
-                        input = parent_module._auto_quant_state.inference_module_before_hook(
-                            cur_module, input)
+                        input = parent_module._auto_quant_state.inference_func_or_mod_before_hook(
+                            cur_module, input, kwargs)
+                        parent_module._auto_quant_state.get_inference_func_or_mod_args_kwargs(
+                            cur_module, input, kwargs)
 
                     # execute original module forward
                     output = orig_module_call(self, *input, **kwargs)
@@ -345,8 +311,10 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                     if needs_hooks:
                         first_call = False
                         qtensor_id = []
-                        output = parent_module._auto_quant_state.module_after_hook(
-                            cur_module, output, first_call, qtensor_id)
+                        output = parent_module._auto_quant_state.inference_func_or_mod_after_hook(
+                            cur_module, output)
+
+                        parent_module._auto_quant_state.validate_and_increment(cur_module)
 
                     return output
                 finally:
@@ -364,29 +332,13 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                     if isinstance(a, QuantizationDispatchProxy):
                         a.__class__ = torch.Tensor  # type: ignore[assignment]
                     return a
-                rv = torch.fx.node.map_aggregate(rv, unwrap_proxy)
+                rv = map_aggregate(rv, unwrap_proxy)
                 return rv
             finally:
                 torch.nn.Module.__call__ = orig_module_call
 
-        # TODO(future PR): handle cases where the module is not symbolically
-        # traceable
-        def rewrite(self):
-            def rewrite_helper(mod : torch.nn.Module):
-                copied = copy.copy(mod)
-                for name, child in mod.named_children():
-                    setattr(copied, name, rewrite_helper(child))
-
-                if hasattr(mod, '_auto_quant_state') and \
-                        mod._auto_quant_state.has_at_least_one_seen_op():  # type: ignore[union-attr, arg-type]
-                    copied._auto_quant_state.reset_to_new_call()  # type: ignore[union-attr]
-
-                    graph = AllModuleTracer().trace(copied)
-                    return torch.fx.GraphModule(copied, graph, copied.__class__.__name__)
-                else:
-                    return copied
-
-            return rewrite_helper(self)
+        def rewrite_for_scripting(self):
+            return auto_trace_rewrite.rewrite_for_scripting(self)
 
     module.__class__ = QuantizationDispatchModule
 

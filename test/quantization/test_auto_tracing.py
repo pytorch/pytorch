@@ -36,7 +36,7 @@ class TestAutoTracing(QuantizationTestCase):
         assert torch.all(traced_out.int_repr() == out_q.int_repr())
 
         # verify torch.jit.script works
-        rewritten = mq.rewrite()
+        rewritten = mq.rewrite_for_scripting()
         print(rewritten)
         rewritten_out = rewritten(*example_inputs_q)
         assert torch.all(rewritten_out.int_repr() == out_q.int_repr())
@@ -68,7 +68,7 @@ class TestAutoTracing(QuantizationTestCase):
         self._test_auto_tracing(m, (torch.randn(1, 1, 2, 2),))
 
     @skipIfNoFBGEMM
-    def test_auto_tracing_conv_relu_add(self):
+    def test_conv_relu_add(self):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -82,9 +82,7 @@ class TestAutoTracing(QuantizationTestCase):
                 x4 = x3 + x3
                 return x4
 
-        model_fp32 = M()
-
-        model_fp32.eval()
+        model_fp32 = M().eval()
 
         # model_fp32.qconfig = torch.quantization.get_default_qconfig('fbgemm')
         model_fp32.qconfig = torch.quantization.QConfig(activation=torch.quantization.MinMaxObserver.with_args(dtype=torch.quint8),

@@ -486,8 +486,8 @@ void optimizePointwise(
     tensorexpr::Tensor* target,
     int width) {
   using namespace torch::jit::tensorexpr;
-  std::vector<For*> loops = ln->getLoopStmtsFor(target);
-  For *inner, *tail;
+  std::vector<ForPtr> loops = ln->getLoopStmtsFor(target);
+  ForPtr inner, tail;
   TORCH_CHECK(loops.size() > 0, "No loops created for pointwise op");
   ln->splitWithTail(loops[0], width, &inner, &tail);
   ln->vectorize(inner);
@@ -503,7 +503,7 @@ std::shared_ptr<TEWrapper> wrapTECompute(
   LoopNest ln({out});
   optimizePointwise(&ln, out, width);
   ln.prepareForCodegen();
-  Stmt* s = ln.root_stmt();
+  StmtPtr s = ln.root_stmt();
   s = tensorexpr::IRSimplifier::simplify(s);
   std::vector<CodeGen::BufferArg> args;
   args.emplace_back(out);
@@ -1437,7 +1437,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::norm, aten_norm, [](Node* n) -> SROperator {
     const size_t num_inp = p_node->inputs().size();
     const auto in1_s = p_node->Input(1).toOptional<at::Scalar>();
     if (num_inp == 3) {
-      at::native::norm_out(
+      at::cpu::norm_outf(
           in0_t,
           in1_s,
           c10::IntArrayRef{},
@@ -1448,7 +1448,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::norm, aten_norm, [](Node* n) -> SROperator {
     }
 
     if (num_inp > 4) {
-      at::native::norm_out(
+      at::cpu::norm_outf(
           in0_t,
           in1_s,
           p_node->Input(2).toIntVector(), // dim
@@ -1457,7 +1457,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::norm, aten_norm, [](Node* n) -> SROperator {
           out_t);
       return;
     }
-    at::native::norm_out(
+    at::cpu::norm_outf(
         in0_t,
         in1_s,
         p_node->Input(2).toIntVector(), // dim
@@ -1527,6 +1527,53 @@ REGISTER_OPERATOR_FUNCTOR(quantized::linear, quantized_linear, [](Node* n) -> SR
     }
   };
 });
+
+REGISTER_OPERATOR_FUNCTOR(
+    fb::quantized_linear,
+    fb_quantized_linear,
+    [](Node* n) -> SROperator {
+      if (!n->matches(torch::schema(
+              "fb::quantized_linear(Tensor X, __torch__.torch.classes.quantized.LinearPackedParamsBase w_prepack, Tensor Y_scale_i, Tensor Y_zero_point_i) -> Tensor"))) {
+        LogAndDumpSchema(n);
+        return nullptr;
+      }
+      const auto w = toIValue(n->inputs()[1]);
+      c10::intrusive_ptr<LinearPackedParamsBase> packed_weight;
+      if (w) {
+        packed_weight = w->toCustomClass<LinearPackedParamsBase>();
+      }
+      return [packed_weight](ProcessedNode* p_node) {
+        const auto& input = p_node->Input(0).toTensor();
+        const auto output_scale = p_node->Input(2).toTensor().item().toFloat();
+        const auto output_zero_point =
+            p_node->Input(3).toTensor().item().toLong();
+
+        if (p_node->Output(0).isNone()) {
+          p_node->Output(0) = at::native::empty_affine_quantized(
+              {0},
+              c10::kQUInt8,
+              c10::nullopt,
+              c10::kCPU,
+              false,
+              output_scale,
+              output_zero_point,
+              c10::nullopt);
+        }
+        auto& out_t = p_node->Output(0).toTensor();
+        fastResizeToZero(out_t);
+
+        if (packed_weight) {
+          packed_weight->apply_out(
+              input, output_scale, output_zero_point, out_t);
+        } else {
+          // Weights could be quantized on the fly
+          auto packed_weight_tmp =
+              p_node->Input(1).toCustomClass<LinearPackedParamsBase>();
+          packed_weight_tmp->apply_out(
+              input, output_scale, output_zero_point, out_t);
+        }
+      };
+    });
 
 REGISTER_OPERATOR_FUNCTOR(aten::full, aten_full, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
