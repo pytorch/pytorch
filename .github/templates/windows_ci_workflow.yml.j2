@@ -1,3 +1,4 @@
+{% import 'common.yml.j2' as common %}
 {# squid_proxy is an private ELB that only available for GHA custom runners #}
 {%- set squid_proxy    = "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128" -%}
 {# squid_no_proxy is a list of common set of fixed domains or IPs that we don't need to proxy. See https://docs.aws.amazon.com/AmazonECS/latest/developerguide/http_proxy_config.html#windows-proxy #}
@@ -82,6 +83,7 @@ jobs:
           path: pytorch-${{ github.run_id }}
           # deep clone, to allow use of git merge-base
           fetch-depth: 0
+      !{{ common.display_ec2_information() }}
       - name: Install Visual Studio 2019 toolchain
         shell: powershell
         run: |
@@ -190,6 +192,7 @@ jobs:
           path: pytorch-${{ github.run_id }}
           # deep clone, to allow use of git merge-base
           fetch-depth: 0
+      !{{ common.display_ec2_information() }}
       - name: Install Visual Studio 2019 toolchain
         shell: powershell
         run: |
@@ -290,6 +293,7 @@ jobs:
         with:
           # deep clone, to allow tools/stats/print_test_stats.py to use Git commands
           fetch-depth: 0
+      !{{ common.display_ec2_information() }}
       - uses: actions/download-artifact@v2
         name: Download PyTorch Test Reports
         with:

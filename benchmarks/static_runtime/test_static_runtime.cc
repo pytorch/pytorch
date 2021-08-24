@@ -256,6 +256,15 @@ TEST(StaticRuntime, Addmm) {
   testStaticRuntime(addmm_script, args, args1);
 }
 
+TEST(StaticRuntime, IndividualOps_Abs) {
+  auto a = at::randn({2, 3});
+  auto b = at::randn({4, 2, 3});
+  std::vector<IValue> args{a};
+  std::vector<IValue> args2{b};
+  testStaticRuntime(abs_script, args);
+  testStaticRuntime(abs_script, args, args2);
+}
+
 TEST(StaticRuntime, IndividualOps_Binary) {
   auto a = at::randn({2, 3});
   auto b = at::ones({2, 3});
@@ -587,6 +596,17 @@ TEST(StaticRuntime, IndividualOps_to) {
   // TODO: check if fbgemm is enabled properly in this case
   // half->float, NCHW->NHWC
   test_to(at::ScalarType::Half, false, true, c10::MemoryFormat::ChannelsLast);
+}
+
+TEST(StaticRuntime, IndividualOps_Detach) {
+  auto a = at::randn({4, 3, 1, 2});
+  auto b = at::randn({3, 2, 2});
+  std::vector<IValue> args{a};
+  std::vector<IValue> args2{b};
+  testStaticRuntime(detach_script_0, args);
+  testStaticRuntime(detach_script_0, args, args2);
+  testStaticRuntime(detach_script_1, args);
+  testStaticRuntime(detach_script_1, args, args2);
 }
 
 TEST(StaticRuntime, IndividualOps_Full) {
@@ -1160,4 +1180,18 @@ TEST(StaticRuntime, IndividualOps_Append) {
 
   testStaticRuntime(append_tensor_script, args_tensor);
   testStaticRuntime(append_tensor_script, args_tensor, args_tensor_large);
+}
+
+TEST(StaticRuntime, QuantizedLinear) {
+  at::Tensor weight =
+      at::quantize_per_tensor(torch::randn({3, 2}), 2, 3, torch::kQInt8);
+  at::Tensor input =
+      at::quantize_per_tensor(torch::randn({3, 2}), 2, 3, torch::kQUInt8);
+
+  at::Tensor weight_2 =
+      at::quantize_per_tensor(torch::randn({4, 3}), 2, 3, torch::kQInt8);
+  at::Tensor input_2 =
+      at::quantize_per_tensor(torch::randn({4, 3}), 2, 3, torch::kQUInt8);
+
+  testStaticRuntime(quantize_script, {input, weight}, {input_2, weight_2});
 }
