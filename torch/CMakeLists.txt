@@ -277,6 +277,9 @@ if(USE_DEPLOY)
     if(USE_TENSORPIPE)
       list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_TENSORPIPE)
     endif()
+
+    # Set c10d-related include directories as well.
+    target_include_directories(torch_python_obj PRIVATE $<BUILD_INTERFACE:${TORCH_SRC_DIR}/csrc/distributed>)
   endif()
   add_library(torch_python_obj OBJECT ${TORCH_PYTHON_SRCS})
   target_compile_definitions(torch_python_obj PRIVATE "-DTHP_BUILD_MAIN_LIB -DUSE_DEPLOY")
