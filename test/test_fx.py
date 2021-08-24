@@ -3302,8 +3302,6 @@ class TestVisionTracing(JitTestCase):
         "retinanet_resnet50_fpn": PROXY_ITERATED,
     }
     UNSCRIPTABLE_MODELS = {
-        "googlenet": INCONSISTENT_TYPE,
-        "inception_v3": INCONSISTENT_TYPE,
     }
 
     output_transform = {
