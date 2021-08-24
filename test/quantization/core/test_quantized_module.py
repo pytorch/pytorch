@@ -2,9 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.quantized as nniq
-import torch.nn.intrinsic.quantized._reference as nniqr
 import torch.nn.quantized as nnq
-import torch.nn.quantized._reference as nnqr
 import torch.nn.quantized.dynamic as nnqd
 import torch.nn.functional as F
 import torch.quantization
