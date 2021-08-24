@@ -217,7 +217,6 @@ BENCHMARK_REGISTER_F(Reduce1D, NativeTiled)->Args({1 << 24});
 #endif // USE_AVX2
 
 BENCHMARK_DEFINE_F(Reduce1D, TeNaive)(benchmark::State& state) {
-  te::KernelScope ks;
 
   int M = A.numel();
 
@@ -250,7 +249,6 @@ BENCHMARK_DEFINE_F(Reduce1D, TeNaive)(benchmark::State& state) {
 BENCHMARK_REGISTER_F(Reduce1D, TeNaive)->Args({1 << 24});
 
 BENCHMARK_DEFINE_F(Reduce1D, TeSplitTail)(benchmark::State& state) {
-  te::KernelScope ks;
 
   int M = A.numel();
 
@@ -291,7 +289,6 @@ BENCHMARK_DEFINE_F(Reduce1D, TeSplitTail)(benchmark::State& state) {
 BENCHMARK_REGISTER_F(Reduce1D, TeSplitTail)->Args({1 << 24});
 
 BENCHMARK_DEFINE_F(Reduce1D, TeSplitMask)(benchmark::State& state) {
-  te::KernelScope ks;
 
   int M = A.numel();
 
@@ -332,7 +329,6 @@ BENCHMARK_DEFINE_F(Reduce1D, TeSplitMask)(benchmark::State& state) {
 BENCHMARK_REGISTER_F(Reduce1D, TeSplitMask)->Args({1 << 24});
 
 BENCHMARK_DEFINE_F(Reduce1D, TeRfactorV1)(benchmark::State& state) {
-  te::KernelScope ks;
 
   int M = A.numel();
   const int kChunkSize = 8;
@@ -385,7 +381,6 @@ BENCHMARK_DEFINE_F(Reduce1D, TeRfactorV1)(benchmark::State& state) {
 BENCHMARK_REGISTER_F(Reduce1D, TeRfactorV1)->Args({1 << 24});
 
 BENCHMARK_DEFINE_F(Reduce1D, Op)(benchmark::State& state) {
-  te::KernelScope ks;
   const int M = A.numel();
   const int kChunkSize = 8;
 
@@ -450,7 +445,6 @@ BENCHMARK_REGISTER_F(Reduce2DCol, Torch)
 ->Args({1 << 12, 1 << 12});
 
 BENCHMARK_DEFINE_F(Reduce2DCol, OpSchedule)(benchmark::State& state) {
-  te::KernelScope ks;
   constexpr int kCacheSize = 1 << 12;
   te::Placeholder a("A", te::kFloat, {M, N});
   te::Tensor b = te::computeSum({a.handle(), te::IntList({0}), false}, at::kFloat);
@@ -557,7 +551,6 @@ BENCHMARK_REGISTER_F(Reduce2DRow, Hand)
 ->Args({1 << 18, 1 << 6});
 
 BENCHMARK_DEFINE_F(Reduce2DRow, OpSchedule)(benchmark::State& state) {
-  te::KernelScope ks;
   constexpr int kChunkSize = 8;
   te::Placeholder a("A", te::kFloat, {M, N});
   te::Tensor b = te::computeSum({a.handle(), te::IntList({1}), false}, at::kFloat);

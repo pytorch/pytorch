@@ -9,14 +9,6 @@ import unittest
 LLVM_ENABLED = torch._C._llvm_enabled()
 
 
-class kernel_arena_scope(object):
-    def __enter__(self):
-        self.scope = torch._C._te.KernelScope()
-
-    def __exit__(self, typ, val, traceback):
-        self.scope = None
-
-
 def construct_adder(n: int, dtype=te.Dtype.Float):
     dN = te.ExprHandle.int(n)
     A = te.Placeholder('A', dtype, [dN])
@@ -36,85 +28,80 @@ def construct_adder(n: int, dtype=te.Dtype.Float):
 
 class TestTensorExprPyBind(JitTestCase):
     def test_simple_sum(self):
-        with kernel_arena_scope():
-            n = 32
-            cg = construct_adder(n)
+        n = 32
+        cg = construct_adder(n)
 
-            tA = torch.randn(n)
-            tB = torch.randn(n)
-            tC = torch.empty(n)
-            cg.call([tA, tB, tC])
-            torch.testing.assert_close(tA + tB, tC)
+        tA = torch.randn(n)
+        tB = torch.randn(n)
+        tC = torch.empty(n)
+        cg.call([tA, tB, tC])
+        torch.testing.assert_close(tA + tB, tC)
 
     def test_call_raw(self):
-        with kernel_arena_scope():
-            n = 16
-            cg = construct_adder(n, dtype=torch.float64)
+        n = 16
+        cg = construct_adder(n, dtype=torch.float64)
 
-            tA = torch.randn(n, dtype=torch.float64)
-            tB = torch.randn(n, dtype=torch.float64)
-            tC = torch.empty(n, dtype=torch.float64)
-            cg.call_raw([tA.data_ptr(), tB.data_ptr(), tC.data_ptr()])
-            torch.testing.assert_close(tA + tB, tC)
+        tA = torch.randn(n, dtype=torch.float64)
+        tB = torch.randn(n, dtype=torch.float64)
+        tC = torch.empty(n, dtype=torch.float64)
+        cg.call_raw([tA.data_ptr(), tB.data_ptr(), tC.data_ptr()])
+        torch.testing.assert_close(tA + tB, tC)
 
     def test_external_calls(self):
-        with kernel_arena_scope():
-            dtype = torch.float32
+        dtype = torch.float32
 
-            ONE = te.ExprHandle.int(1)
-            FOUR = te.ExprHandle.int(4)
-            A = te.BufHandle('A', [ONE, FOUR], dtype)
-            B = te.BufHandle('B', [FOUR, ONE], dtype)
-            C = te.BufHandle('C', [ONE, ONE], dtype)
+        ONE = te.ExprHandle.int(1)
+        FOUR = te.ExprHandle.int(4)
+        A = te.BufHandle('A', [ONE, FOUR], dtype)
+        B = te.BufHandle('B', [FOUR, ONE], dtype)
+        C = te.BufHandle('C', [ONE, ONE], dtype)
 
-            s = te.ExternalCall(C, "nnc_aten_matmul", [A, B], [])
+        s = te.ExternalCall(C, "nnc_aten_matmul", [A, B], [])
 
-            loopnest = te.LoopNest(s, [C])
-            loopnest.prepare_for_codegen()
-            codegen = te.construct_codegen('ir_eval', s, [te.BufferArg(x) for x in [A, B, C]])
+        loopnest = te.LoopNest(s, [C])
+        loopnest.prepare_for_codegen()
+        codegen = te.construct_codegen('ir_eval', s, [te.BufferArg(x) for x in [A, B, C]])
 
-            tA = torch.ones(1, 4)
-            tB = torch.ones(4, 1)
-            tC = torch.empty(1, 1)
-            codegen.call([tA, tB, tC])
-            torch.testing.assert_close(torch.matmul(tA, tB), tC)
+        tA = torch.ones(1, 4)
+        tB = torch.ones(4, 1)
+        tC = torch.empty(1, 1)
+        codegen.call([tA, tB, tC])
+        torch.testing.assert_close(torch.matmul(tA, tB), tC)
 
     def test_dynamic_shape(self):
-        with kernel_arena_scope():
-            dN = te.VarHandle(torch.int32)
-            A = te.BufHandle(torch.float64)
-            B = te.BufHandle(torch.float64)
+        dN = te.VarHandle(torch.int32)
+        A = te.BufHandle(torch.float64)
+        B = te.BufHandle(torch.float64)
 
-            def compute(i):
-                return A.load(i) - B.load(i)
+        def compute(i):
+            return A.load(i) - B.load(i)
 
-            C = te.Compute('C', [dN], compute)
+        C = te.Compute('C', [dN], compute)
 
-            loopnest = te.LoopNest([C])
-            loopnest.prepare_for_codegen()
+        loopnest = te.LoopNest([C])
+        loopnest.prepare_for_codegen()
 
-            cg = te.construct_codegen(
-                'ir_eval',
-                loopnest.simplify(),
-                [A, B, C, dN])
+        cg = te.construct_codegen(
+            'ir_eval',
+            loopnest.simplify(),
+            [A, B, C, dN])
 
-            def test_with_shape(n):
-                tA = torch.randn(n, dtype=torch.double)
-                tB = torch.randn(n, dtype=torch.double)
-                tC = torch.empty(n, dtype=torch.double)
-                cg.call([tA, tB, tC, n])
-                torch.testing.assert_close(tA - tB, tC)
+        def test_with_shape(n):
+            tA = torch.randn(n, dtype=torch.double)
+            tB = torch.randn(n, dtype=torch.double)
+            tC = torch.empty(n, dtype=torch.double)
+            cg.call([tA, tB, tC, n])
+            torch.testing.assert_close(tA - tB, tC)
 
-            test_with_shape(8)
-            test_with_shape(31)
+        test_with_shape(8)
+        test_with_shape(31)
 
     def test_dtype_error(self):
-        with kernel_arena_scope():
-            one = te.ExprHandle.int(1)
-            te.Placeholder([one], torch.float32)  # ok
-            te.Placeholder([one])  # ok
-            self.assertRaises(TypeError,
-                              lambda: te.Placeholder([one], "float55"))
+        one = te.ExprHandle.int(1)
+        te.Placeholder([one], torch.float32)  # ok
+        te.Placeholder([one])  # ok
+        self.assertRaises(TypeError,
+                          lambda: te.Placeholder([one], "float55"))
 
     @unittest.skipIf(not LLVM_ENABLED, "LLVM backend not enabled")
     def test_kernel_with_tensor_inputs(self):
@@ -396,23 +383,22 @@ graph(%a : Float(1, 3, 1, strides=[3, 1, 1], requires_grad=0, device=cpu)):
 
     @unittest.skipIf(not LLVM_ENABLED, "LLVM backend not enabled")
     def test_alloc_in_loop(self):
-        with kernel_arena_scope():
-            a, tmp, b = [
-                te.Placeholder(name, te.Dtype.Float, [te.ExprHandle.int(1)])
-                for name in ["a", "tmp", "b"]]
-            t0, t100 = [te.ExprHandle.int(n) for n in [0, 100]]
-            body = te.Block([
-                tmp.store([t0], a.load([t0])),
-                b.store([t0], tmp.load([t0]))
-            ])
-            for _ in range(4):
-                i = te.VarHandle("i", te.Dtype.Int)
-                body = te.For.make(i, t0, t100, body)
-            nest = te.LoopNest(body, [b.data()])
-            nest.prepare_for_codegen()
-            f = te.construct_codegen("llvm", nest.simplify(), [a, b])
-            ta, tb = [torch.ones(1) for _ in range(2)]
-            f.call([ta.data_ptr(), tb.data_ptr()])
+        a, tmp, b = [
+            te.Placeholder(name, te.Dtype.Float, [te.ExprHandle.int(1)])
+            for name in ["a", "tmp", "b"]]
+        t0, t100 = [te.ExprHandle.int(n) for n in [0, 100]]
+        body = te.Block([
+            tmp.store([t0], a.load([t0])),
+            b.store([t0], tmp.load([t0]))
+        ])
+        for _ in range(4):
+            i = te.VarHandle("i", te.Dtype.Int)
+            body = te.For.make(i, t0, t100, body)
+        nest = te.LoopNest(body, [b.data()])
+        nest.prepare_for_codegen()
+        f = te.construct_codegen("llvm", nest.simplify(), [a, b])
+        ta, tb = [torch.ones(1) for _ in range(2)]
+        f.call([ta.data_ptr(), tb.data_ptr()])
 
 if __name__ == '__main__':
     run_tests()

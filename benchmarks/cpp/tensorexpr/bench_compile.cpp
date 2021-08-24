@@ -10,7 +10,6 @@ namespace te = torch::jit::tensorexpr;
 static void BM_CompileSwish(benchmark::State& state) {
   for (auto _ : state) {
     constexpr int N = 512;
-    te::KernelScope ks;
     te::VarHandle n("n", te::kInt);
     te::Placeholder A(te::BufHandle("A", {N}, te::kFloat));
     te::Tensor relu = te::Compute("relu", {{n, "n"}}, [&](const te::VarHandle& i) {
@@ -40,7 +39,6 @@ static void BM_CompileSwish(benchmark::State& state) {
 
 static void BM_CompileSwishLLVMOnly(benchmark::State& state) {
   constexpr int N = 512;
-  te::KernelScope ks;
   te::VarHandle n("n", te::kInt);
   te::Placeholder A(te::BufHandle("A", {N}, te::kFloat));
   te::Tensor relu = te::Compute("relu", {{n, "n"}}, [&](const te::VarHandle& i) {

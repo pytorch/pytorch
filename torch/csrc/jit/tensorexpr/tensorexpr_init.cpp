@@ -61,7 +61,6 @@ void initTensorExprBindings(PyObject* module) {
 
   // Tensor Expr Classes
   auto te = m.def_submodule("_te");
-  py::class_<KernelScope>(te, "KernelScope").def(py::init<>());
 
   auto dtype_class =
       py::class_<Dtype>(te, "Dtype").def(py::init(&parsePythonDtype));
