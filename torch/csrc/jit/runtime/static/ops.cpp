@@ -301,6 +301,23 @@ REGISTER_OPERATOR_FUNCTOR(
       };
     });
 
+REGISTER_OPERATOR_FUNCTOR(aten::abs, aten_abs, [](Node* n) -> SROperator {
+  if (!n->matches(torch::schema("aten::abs(Tensor self) -> Tensor"))) {
+    LogAndDumpSchema(n);
+    return nullptr;
+  }
+  return [](ProcessedNode* p_node) {
+    const auto& in0_t = p_node->Input(0).toTensor();
+    if (p_node->Output(0).isNone()) {
+      p_node->Output(0) = at::native::abs(in0_t);
+    } else {
+      auto& out_t = p_node->Output(0).toTensor();
+      fastResizeToZero(out_t);
+      at::native::abs_out(in0_t, out_t);
+    }
+  };
+});
+
 REGISTER_OPERATOR_FUNCTOR(aten::mul, aten_mul, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
           "aten::mul.Tensor(Tensor self, Tensor other) -> Tensor"))) {
