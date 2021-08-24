@@ -154,5 +154,14 @@ TORCH_API at::TensorTypePtr tensorTypeInCurrentExecutionContext(
 // current (TLS) TorchScript interpreter callstack
 TORCH_API std::vector<StackEntry> currentCallstack();
 
+typedef struct TORCH_API FrameNodeId {
+  size_t pc;
+  std::string node_schema;
+  std::string node_header;
+  Node* node;
+} FrameNodeId;
+
+TORCH_API c10::optional<FrameNodeId> currentFrameId();
+
 } // namespace jit
 } // namespace torch

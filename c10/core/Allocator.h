@@ -148,6 +148,8 @@ inline bool operator!=(std::nullptr_t, const DataPtr& dp) noexcept {
 // possible, or the raw interface will incorrectly reported as unsupported,
 // when it is actually possible.
 
+C10_API uint8_t GetAllocatorPriority(at::DeviceType t);
+
 struct C10_API Allocator {
   virtual ~Allocator() = default;
 

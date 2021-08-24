@@ -24,6 +24,10 @@ C10_API at::Allocator* allocator_array[at::COMPILE_TIME_MAX_DEVICE_TYPES];
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 C10_API uint8_t allocator_priority[at::COMPILE_TIME_MAX_DEVICE_TYPES] = {0};
 
+uint8_t GetAllocatorPriority(at::DeviceType t) {
+  return allocator_priority[static_cast<int>(t)];
+}
+
 void SetAllocator(at::DeviceType t, at::Allocator* alloc, uint8_t priority) {
   if (priority >= allocator_priority[static_cast<int>(t)]) {
     allocator_array[static_cast<int>(t)] = alloc;
