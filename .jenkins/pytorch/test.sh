@@ -41,6 +41,7 @@ if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
   export PYTORCH_COLLECT_COVERAGE=1
   export COVERAGE_RCFILE="$PWD/.coveragerc" # coverage config file needed for plug-ins and settings to work
   pip install -e tools/coverage_plugins_package # allows coverage to run with JitPlugin for JIT coverage
+  pip install fastcov==1.13  # lcov compatible implementation that is way faster than lcov
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
@@ -547,6 +548,6 @@ if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
   popd
   pushd build
   echo "Generating lcov coverage report for C++ sources"
-  time lcov --capture --directory . --output-file coverage.info
+  time fastcov --lcov --search-directory . --compiler-directory build --output coverage.info --dump-statistic
   popd
 fi
