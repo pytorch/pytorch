@@ -1,6 +1,5 @@
 #pragma once
 
-#include <c10/core/AutogradState.h>
 #include <c10/core/GradMode.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/macros/Macros.h>
@@ -51,12 +50,10 @@ struct TORCH_API InferenceMode {
   //    are applicable to InferenceMode as well, e.g.
   //    `tensorTypeInCurrentExecutionContext` in interpreter.cpp.
   InferenceMode(bool enabled = true)
-      : prev_mode(AutogradState::get_tls_state()),
-        prev_keyset(c10::impl::tls_local_dispatch_key_set()) {
-    // Enabling inference mode means disabling grad mode
-    // And disabling inference mode means enabling grad mode
-    AutogradState::set_tls_state(
-        AutogradState(/* grad_mode */ !enabled, /* inference_mode */ enabled));
+      : prev_mode(InferenceMode::is_enabled()),
+        prev_keyset(c10::impl::tls_local_dispatch_key_set()),
+        grad_mode(at::AutoGradMode(!enabled)) {
+    _set_enabled(enabled);
     DispatchKeySet included = enabled
         ? prev_keyset.included_.remove(c10::DispatchKey::ADInplaceOrView)
         : prev_keyset.included_.add(c10::DispatchKey::ADInplaceOrView);
@@ -70,13 +67,17 @@ struct TORCH_API InferenceMode {
   }
 
   ~InferenceMode() {
-    AutogradState::set_tls_state(prev_mode);
+    _set_enabled(prev_mode);
     c10::impl::_force_tls_local_dispatch_key_set(prev_keyset);
   }
   static bool is_enabled();
+  // _set_enabled() is not user facing and should be only used in
+  // ThreadLocalState.cpp.
+  static void _set_enabled(bool enabled);
 
  private:
-  AutogradState prev_mode;
+  bool prev_mode;
   c10::impl::LocalDispatchKeySet prev_keyset;
+  at::AutoGradMode grad_mode;
 };
 } // namespace c10
