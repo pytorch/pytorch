@@ -17081,13 +17081,19 @@ class TestNNDeviceType(NNTestCase):
             target = torch.empty(N, *other_dims, dtype=torch.long, device=device).random_(0, C)
 
             # construct target probablity that should have the same result as label_smoothing
+            target_proba = F.one_hot(target, num_classes=C)
+            # Need to put the C dim at index 1.
+            target_proba = target_proba.permute(0, -1, *range(1, target_proba.dim() - 1))
+            target_mask = (target_proba == 1)
+            target_proba = target_proba.to(dtype=input.dtype)
+
             # y_k^ls = y_k * (1 - label_smoothing) + label_smoothing / n_classes
-            target_prob = torch.full_like(input, fill_value=label_smoothing / C, device=device)
-            src = torch.full(target.shape, 1 - label_smoothing + label_smoothing / C, device=device)
-            target_prob.scatter_(1, target.unsqueeze(1), src.unsqueeze(1))
+            # Get one-hot representation of the target.
+            target_proba.masked_fill_(target_mask, 1 - label_smoothing + label_smoothing / C)
+            target_proba.masked_fill_(~target_mask, label_smoothing / C)
 
             loss = nn.CrossEntropyLoss(reduction=reduction)
-            output_with_prob = loss(input, target_prob)
+            output_with_prob = loss(input, target_proba)
 
             loss = nn.CrossEntropyLoss(
                 reduction=reduction, label_smoothing=label_smoothing)
