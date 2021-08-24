@@ -7751,7 +7751,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            sample_inputs_func=sample_inputs_legacy_solve,
            check_batched_gradgrad=False,
-           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack]),
+           decorators=[skipCUDAIfNoMagma]),
     UnaryUfuncInfo('trunc',
                    aliases=('fix', ),
                    ref=np.trunc,
@@ -7917,8 +7917,7 @@ op_db: List[OpInfo] = [
            # linalg.solve_triangular cannot be batched over because of a call to out.copy_(result);
            check_batched_grad=False,
            check_batched_gradgrad=False,
-           supports_forward_ad=True,
-           decorators=[skipCUDAIfRocm, skipCPUIfNoLapack]),
+           supports_forward_ad=True),
     OpInfo('linalg.matrix_rank',
            aten_name='linalg_matrix_rank',
            dtypes=floating_and_complex_types(),
