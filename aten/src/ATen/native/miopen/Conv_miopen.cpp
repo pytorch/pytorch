@@ -524,7 +524,19 @@ void miopen_convolution_add_bias_(CheckedFrom c, const TensorArg& output, const 
   checkSize(c, bias, { output->size(output_channels_dim) });
 
   TensorDescriptor bdesc, odesc;
-  bdesc.set(bias->expand({1, bias->size(0)}), output->dim());
+
+  auto memory_format = output->suggest_memory_format();
+
+  std::vector<int64_t> shape( output->dim(), 1);
+  shape[1] = -1;
+  at::Tensor bias_contig =  bias->reshape(shape).contiguous(memory_format);
+  // Make sure that NC11 strides follow formula
+  bias_contig.resize_(bias_contig.sizes(), memory_format );
+
+  output->add_( bias_contig );
+   
+  /*  TODO: MIOpen does not support NHWC bias
+  // bdesc.set( bias_contig );
   odesc.set(*output);
 
   auto handle = getMiopenHandle();
@@ -534,6 +546,7 @@ void miopen_convolution_add_bias_(CheckedFrom c, const TensorArg& output, const 
 
   MIOPEN_CHECK(miopenConvolutionForwardBias(handle, &one, bdesc.desc(), bias->data_ptr(),
                                      &zero, odesc.desc(), output->data_ptr()));
+  */
 }
 
 // see NOTE [ Convolution design ] in src/Aten/native/cudnn/Conv.cpp
@@ -1186,6 +1199,10 @@ Tensor miopen_convolution_backward_bias(
 {
   TensorArg grad_output{ grad_output_t, "grad_output", 1 };
 
+  // TODO: MIOpen does not support NHWC bias
+  return at::squeeze( at::sum(grad_output_t, {0, 2, 3}, true) );
+
+/*
   auto grad_bias_t = at::empty( { grad_output->size(output_channels_dim) }, grad_output->options());
 
   TensorArg grad_bias{ grad_bias_t, "result", 0 };
@@ -1202,6 +1219,7 @@ Tensor miopen_convolution_backward_bias(
   MIOPEN_CHECK(miopenConvolutionBackwardBias(handle, &one, odesc.desc(), grad_output->data_ptr(),
                                                    &zero, bdesc.desc(), grad_bias->data_ptr()));
   return *grad_bias;
+*/
 }
 
 
