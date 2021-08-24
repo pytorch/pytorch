@@ -466,12 +466,13 @@ Tensor cross_entropy_loss_prob_target(
       " but got weight tensor of shape: ",
       weight.sizes());
 
-  auto input = at::log_softmax(self, 1, self.scalar_type());
+  auto input_ = at::log_softmax(self, 1, self.scalar_type());
+  Tensor input;
 
-  if (0 < label_smoothing && label_smoothing <= 1.0) {
-    input *= (target * (1 - label_smoothing) + label_smoothing / n_classes);
+  if (0.0 < label_smoothing && label_smoothing <= 1.0) {
+    input = input_ * (target * (1 - label_smoothing) + label_smoothing / n_classes);
   } else{
-    input *= target;
+    input = input_ * target;
   }
 
   if (weight.defined()) {
