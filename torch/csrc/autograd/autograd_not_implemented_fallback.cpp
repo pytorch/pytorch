@@ -24,18 +24,18 @@ void _foreach_tensor(
     size_t stack_start,
     size_t size) {
   // Enumerate over tensors in a stack, including ones in TensorLists
-  int idx = 0;
-  for (const auto i : c10::irange(size)) {
-    auto& ivalue = (*stack)[stack_start + i];
+  int idx_tensor = 0;
+  for (const auto idx_arg : c10::irange(size)) {
+    auto& ivalue = (*stack)[stack_start + idx_arg];
     if (ivalue.isTensor()) {  // true for optional tensor that has value
       const auto& tensor = ivalue.toTensor();
-      fn(idx, i, tensor);
-      idx++;
+      fn(idx_tensor, idx_arg, tensor);
+      idx_tensor++;
     } else if (ivalue.isTensorList()) {
       for (const auto& iv : ivalue.toListRef()) {
         const auto& tensor = iv.toTensor();
-        fn(idx, i, tensor);
-        idx++;
+        fn(idx_tensor, idx_arg, tensor);
+        idx_tensor++;
       }
     }
   }
@@ -75,14 +75,14 @@ void autogradNotImplementedFallbackImpl(const c10::OperatorHandle& op, c10::Disp
   for (const auto i : c10::irange(num_returns)) {
     const auto& alias_info = returns[i].alias_info();
     if (alias_info.has_value()) {
-      AT_ASSERT(aliased_output_idx == -1); // Assume only a single aliased output
+      TORCH_INTERNAL_ASSERT(aliased_output_idx == -1); // Assume only a single aliased output
       aliased_output_idx = i;
     }
   }
   for (const auto i : c10::irange(num_arguments)) {
     const auto& alias_info = arguments[i].alias_info();
     if (alias_info.has_value()) {
-      AT_ASSERT(aliased_input_idx == -1); // Assume only a single aliased input
+      TORCH_INTERNAL_ASSERT(aliased_input_idx == -1); // Assume only a single aliased input
       aliased_input_idx = i;
     }
   }
@@ -91,9 +91,6 @@ void autogradNotImplementedFallbackImpl(const c10::OperatorHandle& op, c10::Disp
   size_t num_tensor_inputs = 0;  // Only used for DEBUG-only checks
 
   _foreach_tensor([&](size_t _, size_t idx_arg, const at::Tensor& t) {
-    if (arguments[idx_arg].type()->kind() != c10::TypeKind::OptionalType) {
-      TORCH_CHECK(t.defined(), "Expected argument ", idx_arg, " of ", op_name, " to be defined.");
-    }
     if (grad_mode && t.requires_grad()) {
       tensors_requiring_grad_on_stack.push_back(&t);
     }
@@ -118,7 +115,7 @@ void autogradNotImplementedFallbackImpl(const c10::OperatorHandle& op, c10::Disp
 
   #ifndef NDEBUG
   // See NOTE [ TensorImpl and Storage Pointer Sanity Checks ]
-  std::vector<c10::IValue> stack_copy(*stack);
+  auto stack_args_copy = std::vector<c10::IValue>(stack->begin() + stack_start, stack->end());
   std::vector<c10::intrusive_ptr<c10::TensorImpl>> impl_saved;
   impl_saved.reserve(num_tensor_inputs);
   std::vector<c10::optional<c10::Storage>> storage_saved;
@@ -126,35 +123,35 @@ void autogradNotImplementedFallbackImpl(const c10::OperatorHandle& op, c10::Disp
   _foreach_tensor([&](size_t idx, size_t _, const at::Tensor& t) {
     storage_saved.push_back(t.has_storage() ? c10::optional<c10::Storage>(t.storage()) : c10::nullopt);
     impl_saved.push_back(t.getIntrusivePtr());
-  }, &stack_copy, stack_start, num_arguments);
+  }, &stack_args_copy, 0, num_arguments);
   #endif
   {
-    at::AutoDispatchBelowAutograd guard;
+    at::AutoDispatchBelowADInplaceOrView guard;
     op.redispatchBoxed(dispatch_keys & c10::after_autograd_keyset, stack);
   }
   #ifndef NDEBUG
   _foreach_tensor([&](size_t idx_tensor, size_t _, const at::Tensor& t) {
     if (storage_saved.at(idx_tensor).has_value())
-      AT_ASSERT(storage_saved.at(idx_tensor).value().is_alias_of(t.storage()));
+      TORCH_INTERNAL_ASSERT(storage_saved.at(idx_tensor).value().is_alias_of(t.storage()));
     if (impl_saved.at(idx_tensor))
-      AT_ASSERT(impl_saved.at(idx_tensor) == t.getIntrusivePtr());
-  }, &stack_copy, stack_start, num_arguments);
+      TORCH_INTERNAL_ASSERT(impl_saved.at(idx_tensor) == t.getIntrusivePtr());
+  }, &stack_args_copy, 0, num_arguments);
   _foreach_tensor([&](size_t idx_tensor, size_t idx_ret, const at::Tensor& t) {
     if (!is_inplace_output[idx_ret])
-      AT_ASSERT(t.use_count() <= 1);  // Okay to return undefined tensor
+      TORCH_INTERNAL_ASSERT(t.use_count() <= 1);  // Okay to return undefined tensor
     if (!is_aliased_output[idx_ret] && t.has_storage())
-      AT_ASSERT(t.storage().use_count() == 1);
+      TORCH_INTERNAL_ASSERT(t.storage().use_count() == 1);
   }, stack, stack->size() - num_returns, num_returns);
   if (aliased_input_idx != -1 && aliased_output_idx != -1) {
-    const c10::IValue& aliased_input_iv = stack_copy[stack_start + aliased_input_idx];
+    const c10::IValue& aliased_input_iv = stack_args_copy[aliased_input_idx];
     const c10::IValue& aliased_output_iv = (*stack)[stack->size() - num_returns + aliased_output_idx];
     // We do not support views embedded inside tensorlist
-    AT_ASSERT(aliased_input_iv.isTensor());
-    AT_ASSERT(aliased_output_iv.isTensor());
+    TORCH_INTERNAL_ASSERT(aliased_input_iv.isTensor());
+    TORCH_INTERNAL_ASSERT(aliased_output_iv.isTensor());
     const at::Tensor& aliased_input = aliased_input_iv.toTensor();
     const at::Tensor& aliased_output = aliased_input_iv.toTensor();
     if(is_aliased_output[aliased_input_idx] && aliased_input.has_storage())
-      AT_ASSERT(aliased_input.storage().is_alias_of(aliased_output.storage()));
+      TORCH_INTERNAL_ASSERT(aliased_input.storage().is_alias_of(aliased_output.storage()));
   }
   #endif
 
