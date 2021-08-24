@@ -8,7 +8,7 @@ namespace c10 {
 
 // Structure used to pack all the thread local boolean
 // flags used by autograd
-struct TORCH_API AutogradState {
+struct C10_API AutogradState {
   static AutogradState& get_tls_state();
   static void set_tls_state(AutogradState state);
 
