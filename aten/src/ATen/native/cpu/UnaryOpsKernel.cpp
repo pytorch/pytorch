@@ -35,18 +35,36 @@ namespace CPU_CAPABILITY {
 using namespace vec;
 
 static void sigmoid_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, iter.common_dtype(), "sigmoid_cpu", [&]() {
+  if (iter.common_dtype() == kBFloat16) {
     cpu_kernel_vec(
         iter,
-        [=](scalar_t a) -> scalar_t { return (static_cast<scalar_t>(1) / (static_cast<scalar_t>(1) + std::exp((-a)))); },
-        [=](Vectorized<scalar_t> a) {
-          a = Vectorized<scalar_t>(static_cast<scalar_t>(0)) - a;
-          a = a.exp();
-          a = Vectorized<scalar_t>(static_cast<scalar_t>(1)) + a;
-          a = a.reciprocal();
-          return a;
+        [=](BFloat16 a) -> BFloat16 {
+          float a0 = static_cast<float>(a);
+          return static_cast<float>(1) / (static_cast<float>(1) + std::exp((-a0)));
+        },
+        [=](Vectorized<BFloat16> a) {
+          Vectorized<float> a0, a1;
+          std::tie(a0, a1) = convert_bfloat16_float(a);
+          a0 = (Vectorized<float>(static_cast<float>(1)) + a0.neg().exp()).reciprocal();
+          a1 = (Vectorized<float>(static_cast<float>(1)) + a1.neg().exp()).reciprocal();
+          return convert_float_bfloat16(a0, a1);
         });
-  });
+  } else {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.common_dtype(), "sigmoid_cpu", [&]() {
+      cpu_kernel_vec(
+          iter,
+          [=](scalar_t a) -> scalar_t {
+            return (static_cast<scalar_t>(1) / (static_cast<scalar_t>(1) + std::exp((-a))));
+          },
+          [=](Vectorized<scalar_t> a) {
+            a = Vectorized<scalar_t>(static_cast<scalar_t>(0)) - a;
+            a = a.exp();
+            a = Vectorized<scalar_t>(static_cast<scalar_t>(1)) + a;
+            a = a.reciprocal();
+            return a;
+          });
+    });
+  }
 }
 
 #if AT_MKL_ENABLED()
