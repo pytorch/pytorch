@@ -167,7 +167,7 @@ else()
 endif()
 
 # Metal
-if (APPLE AND USE_PYTORCH_METAL_EXPORT)
+if(APPLE AND USE_PYTORCH_METAL_EXPORT)
    # Add files needed from optimized_for_mobile
    set(all_cpu_cpp ${all_cpu_cpp} ${metal_cpp} ${metal_prepack_cpp})
 elseif(APPLE AND USE_PYTORCH_METAL)
