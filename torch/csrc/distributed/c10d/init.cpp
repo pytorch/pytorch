@@ -42,11 +42,6 @@
 
 #include <torch/custom_class.h>
 
-#include <ATen/ATen.h>
-#include <ATen/TypeDefault.h>
-#include <ATen/core/op_registration/op_registration.h>
-#include <torch/script.h>
-
 namespace {
 
 // Wrapper to ensure GIL is released before destructing ProcessGroupGloo
@@ -1657,12 +1652,10 @@ TORCH_LIBRARY(q, m) {
     m.def("_Bfloat16QuantizedToFloat(Tensor input) -> Tensor");
     m.def("_FloatToBfloat16Quantized(Tensor input) -> Tensor");
 }
-#ifdef USE_C10D_GLOO
     TORCH_LIBRARY_IMPL(q, CPU, m) {
         m.impl("_Bfloat16QuantizedToFloat", _bfloat16_to_float_cpu);
         m.impl("_FloatToBfloat16Quantized", _float_to_bfloat16_cpu);
     }
-#endif
 
 #ifdef USE_C10D_NCCL
     #define DISPATCH_TO_CUDA(name, function) \
