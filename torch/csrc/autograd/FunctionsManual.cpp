@@ -3466,17 +3466,11 @@ std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad_, con
   input = input.tril(-1);
   input.diagonal(0, -2, -1).fill_(1.0);
 
-  Tensor sigma;
-  if (input.is_complex()) {
-    auto input_first_k_cols = input.narrow(-1, 0, k);
-    auto input_first_k_cols_norm_squared = (
-      input_first_k_cols * input_first_k_cols.conj()
-    ).sum(-2);
-    sigma = tau / (tau * input_first_k_cols_norm_squared - 1.0);
-  }
-  else {
-    sigma = tau;
-  }
+  auto input_first_k_cols = input.narrow(-1, 0, k);
+  auto input_first_k_cols_norm_squared = (
+    input_first_k_cols * input_first_k_cols.conj()
+  ).sum(-2);
+  auto sigma = tau / (tau * input_first_k_cols_norm_squared - 1.0);
 
   auto update_grad = [&m](int64_t k, const Tensor& v_full, const Tensor& t, const Tensor& K) -> std::tuple<Tensor, Tensor> {
     auto v = v_full.narrow(-1, k, m - k);
@@ -3489,17 +3483,21 @@ std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad_, con
   };
 
   auto left_reflect = [&m](int64_t k, const Tensor& v_full, const Tensor& t, Tensor& K) -> Tensor {
-    auto v = v_full.narrow(-1, k, m - k);
-    auto u = (t.unsqueeze(-1) * v).unsqueeze(-2).conj().matmul(K.narrow(-2, k, m - k));
-    K.narrow(-2, k, m - k).sub_(v.unsqueeze(-1) * u);
-    return K;
+    //auto v = v_full.narrow(-1, k, m - k);
+    //auto u = (t.unsqueeze(-1) * v).unsqueeze(-2).conj().matmul(K.narrow(-2, k, m - k));
+    //K.narrow(-2, k, m - k).sub_(v.unsqueeze(-1) * u);
+    //return K;
+    auto v = v_full;
+    return K - (t.unsqueeze(-1) * v).unsqueeze(-1) * v.unsqueeze(-2).conj().matmul(K);
   };
 
   auto right_reflect = [&m](int64_t k, const Tensor& v_full, const Tensor& t, Tensor& K) -> Tensor {
-    auto v = v_full.narrow(-1, k, m - k);
-    auto u = K.narrow(-1, k, m - k).matmul((t.unsqueeze(-1) * v).unsqueeze(-1));
-    K.narrow(-1, k, m - k).sub_(u * v.conj().unsqueeze(-2));
-    return K;
+    //auto v = v_full.narrow(-1, k, m - k);
+    //auto u = K.narrow(-1, k, m - k).matmul((t.unsqueeze(-1) * v).unsqueeze(-1));
+    //K.narrow(-1, k, m - k).sub_(u * v.conj().unsqueeze(-2));
+    //return K;
+    auto v = v_full;
+    return K - K.matmul((t.unsqueeze(-1) * v).unsqueeze(-1)) * v.unsqueeze(-2).conj();
   };
 
   auto K = result.matmul(grad.conj().transpose(-1, -2));
