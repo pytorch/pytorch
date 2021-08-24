@@ -47,6 +47,8 @@ VIEW_FUNCTIONS = {
     'unfold': 'self',
     'unsqueeze': 'self',
     'flatten': 'self',
+    'my_test_view_op_boxed': 'self',
+    'my_test_view_op': 'self',
     'view': 'self',
     'unbind': 'self',
     '_indices': 'self',
@@ -122,6 +124,10 @@ WRAPPER_REGISTRATION = CodeTemplate("""\
 m.impl("${unqual_operator_name_with_overload}",
        TORCH_FN(${class_type}::${type_wrapper_name})
 );
+""")
+
+INPLACE_OR_VIEW_NOT_IMPLEMENTED_REGISTRATION = CodeTemplate("""\
+m.impl("${unqual_operator_name_with_overload}", torch::autograd::ADInplaceOrViewFallback());
 """)
 
 AUTOGRAD_NOT_IMPLEMENTED_REGISTRATION = CodeTemplate("""\
@@ -404,6 +410,11 @@ def inplace_or_view_method_registration(fn: NativeFunctionWithDifferentiabilityI
     f = fn.func
     if get_view_info(fn) is None and (not modifies_arguments(f) or is_foreach_op(str(f.func.name))):
         return None
+    # Ideally we won't need to rely on a hardcoded list of views
+    if get_base_name(f) in ["my_test_normal_op_boxed", "my_test_view_op_boxed", "my_test_inplace_op_boxed"]:
+        return INPLACE_OR_VIEW_NOT_IMPLEMENTED_REGISTRATION.substitute(
+            unqual_operator_name_with_overload=f.func.name,
+        )
     return WRAPPER_REGISTRATION.substitute(
         unqual_operator_name_with_overload=f.func.name,
         type_wrapper_name=type_wrapper_name(f),

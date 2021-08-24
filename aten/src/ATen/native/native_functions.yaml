@@ -3801,6 +3801,36 @@
   dispatch:
     CPU, CUDA: sinh_out
 
+- func: my_test_normal_op(Tensor self, Tensor other) -> Tensor
+  variants: function
+  dispatch:
+    CPU: my_test_normal_op
+
+- func: my_test_view_op(Tensor(a) self) -> Tensor(a)
+  variants: function
+  dispatch:
+    CPU: my_test_view_op
+
+- func: my_test_inplace_op_(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  variants: function
+  dispatch:
+    CPU: my_test_inplace_op
+
+- func: my_test_normal_op_boxed(Tensor self, Tensor other) -> Tensor
+  variants: function
+  dispatch:
+    CPU: my_test_normal_op
+
+- func: my_test_view_op_boxed(Tensor(a) self) -> Tensor(a)
+  variants: function
+  dispatch:
+    CPU: my_test_view_op
+
+- func: my_test_inplace_op_boxed_(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  variants: function
+  dispatch:
+    CPU: my_test_inplace_op
+
 # Returns a copy of this `Variable` that is detached from its autograd graph.
 # This method is OK to call if the `Variable` is a view.
 #

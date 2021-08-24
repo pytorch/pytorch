@@ -413,7 +413,9 @@ def gen_variable_type_func(
                 and len(gen_differentiable_outputs(fn)) > 0 \
                 and not get_base_name(f) in DONT_ENFORCE_SAME_TENSOR_IMPL_OR_STORAGE \
                 and not get_base_name(f) in DONT_ENFORCE_STORAGE_IMPL_USE_COUNT \
-                and not get_base_name(f) in DONT_ENFORCE_TENSOR_IMPL_USE_COUNT:
+                and not get_base_name(f) in DONT_ENFORCE_TENSOR_IMPL_USE_COUNT \
+                and get_base_name(f) not in ["my_test_normal_op", "my_test_view_op", "my_test_inplace_op", "my_test_normal_op_boxed", "my_test_view_op_boxed", "my_test_inplace_op_boxed"]:
+                # Still use codegen dispatch for these - for testing purposes
             # NOTE: [ Registering AutogradNotImplemented boxed kernel ]
             #
             # When there is no derivatives.yaml entry, we register a generic boxed

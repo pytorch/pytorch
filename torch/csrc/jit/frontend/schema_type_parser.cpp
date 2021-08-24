@@ -136,7 +136,6 @@ c10::optional<AliasInfo> SchemaTypeParser::parseAliasAnnotation() {
   } else {
     return c10::nullopt;
   }
-
   return alias_info;
 }
 
@@ -371,10 +370,15 @@ std::pair<TypePtr, c10::optional<AliasInfo>> SchemaTypeParser::parseType() {
     if (L.cur().kind == '[' && L.lookahead().kind == ']') {
       L.next(); // [
       L.next(); // ]
+      // We want to support both the T[](a) and T(a)[] syntaxes
       value = ListType::create(value);
       auto container = parseAliasAnnotation();
-      if (container && alias_info) {
-        container->addContainedType(std::move(*alias_info));
+      if (alias_info) {
+        if (container) {
+          container->addContainedType(std::move(*alias_info));
+        } else {
+          container = std::move(alias_info);
+        }
       }
       alias_info = std::move(container);
     } else if (L.nextIf('?')) {

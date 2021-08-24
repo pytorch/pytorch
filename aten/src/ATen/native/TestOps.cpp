@@ -27,6 +27,19 @@ Tensor _test_optional_intlist(
   return output;
 }
 
+Tensor my_test_normal_op(const Tensor& self, const Tensor& other) {
+  return self + other;
+}
+
+Tensor my_test_view_op(const Tensor& self) {
+  return self;
+}
+
+Tensor& my_test_inplace_op(Tensor& self, const Tensor& other) {
+  return self.add_(other);
+}
+
+
 /// If addends is nullopt, return values.
 /// Else, return a new tensor containing the elementwise sums.
 Tensor _test_optional_floatlist(
