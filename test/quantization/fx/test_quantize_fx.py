@@ -3074,7 +3074,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 qlinear_fun = ns.call_function(torch.nn.functional.linear)
             else:
                 if has_relu:
-                   qlinear_fun = ns.call_function(torch.ops.quantized.linear_relu_dynamic_fp16)
+                    qlinear_fun = ns.call_function(torch.ops.quantized.linear_relu_dynamic_fp16)
                 else:
                     qlinear_fun = ns.call_function(torch.ops.quantized.linear_dynamic_fp16)
             prepare_node_occurrence = {
