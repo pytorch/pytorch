@@ -5,9 +5,9 @@ from .coverage_record import CoverageRecord
 
 class GcovCoverageParser:
     """
-        Accepts a parsed json produced by gcov --json-format -- typically,
-        representing a single C++ test and produces a list
-        of CoverageRecord(s).
+    Accepts a parsed json produced by gcov --json-format -- typically,
+    representing a single C++ test and produces a list
+    of CoverageRecord(s).
     """
 
     def __init__(self, llvm_coverage: Dict[str, Any]) -> None:
@@ -16,9 +16,9 @@ class GcovCoverageParser:
     @staticmethod
     def _skip_coverage(path: str) -> bool:
         """
-            Returns True if file path should not be processed.
-            This is repo-specific and only makes sense for the current state of
-            ovrsource.
+        Returns True if file path should not be processed.
+        This is repo-specific and only makes sense for the current state of
+        ovrsource.
         """
         if "third-party" in path:
             return True

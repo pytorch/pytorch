@@ -267,6 +267,16 @@ Tensor internal_new_from_data(
   {
     at::AutoDispatchBelowADInplaceOrView guard;  // TODO: remove
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
+    // functorch uses FuncTorchDynamicLayerBackMode as a mode key to wrap all
+    // tensors returned from operators in special TensorWrapper tensor extension
+    // The problem with this is that TensorWrapper does not have storage so
+    // accessing the data_ptr (for recursive_store) internal asserts.
+    // As a quick hack, the guard here prevents functorch from wrapping the empty
+    // tensor in a TensorWrapper and instead when `tensor.to` is called later,
+    // the tensor gets wrapped. A more long-term solution is to think about
+    // what the extensibility mechanism for this function (internal_new_from_data)
+    // looks like for mode-based dispatch keys and C++ tensor extensions.
+    c10::impl::ExcludeDispatchKeyGuard functorch_guard(c10::DispatchKey::FuncTorchDynamicLayerBackMode);
     tensor = at::empty(sizes, at::initialTensorOptions().dtype(inferred_scalar_type).pinned_memory(pin_memory));
     recursive_store(
         (char*)tensor.data_ptr(), tensor.sizes(), tensor.strides(), 0,
