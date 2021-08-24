@@ -256,6 +256,15 @@ TEST(StaticRuntime, Addmm) {
   testStaticRuntime(addmm_script, args, args1);
 }
 
+TEST(StaticRuntime, IndividualOps_Abs) {
+  auto a = at::randn({2, 3});
+  auto b = at::randn({4, 2, 3});
+  std::vector<IValue> args{a};
+  std::vector<IValue> args2{b};
+  testStaticRuntime(abs_script, args);
+  testStaticRuntime(abs_script, args, args2);
+}
+
 TEST(StaticRuntime, IndividualOps_Binary) {
   auto a = at::randn({2, 3});
   auto b = at::ones({2, 3});

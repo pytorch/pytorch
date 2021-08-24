@@ -1,4 +1,5 @@
 # @generated DO NOT EDIT MANUALLY
+
 # Template is at:    .github/templates/linux_ci_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
 name: periodic-linux-xenial-cuda11.3-py3.6-gcc7
@@ -61,6 +62,10 @@ jobs:
         with:
           # deep clone, to allow use of git merge-base
           fetch-depth: 0
+      - name: Display EC2 information
+        shell: bash
+        run: |
+          .github/scripts/display_ec2_information.sh
       - name: Calculate docker image tag
         id: calculate-tag
         run: |
@@ -137,6 +142,10 @@ jobs:
         with:
           fetch-depth: 0 # deep clone, to allow sharding to use git rev-list
           submodules: recursive
+      - name: Display EC2 information
+        shell: bash
+        run: |
+          .github/scripts/display_ec2_information.sh
       - name: Pull docker image
         run: |
           docker pull "${DOCKER_IMAGE}"
@@ -282,7 +291,12 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
+          fetch-depth: 0 # deep clone, to allow sharding to use git rev-list
           submodules: recursive
+      - name: Display EC2 information
+        shell: bash
+        run: |
+          .github/scripts/display_ec2_information.sh
       - name: Pull docker image
         run: |
           docker pull "${DOCKER_IMAGE}"
@@ -433,6 +447,10 @@ jobs:
         with:
           # deep clone, to allow tools/stats/print_test_stats.py to use Git commands
           fetch-depth: 0
+      - name: Display EC2 information
+        shell: bash
+        run: |
+          .github/scripts/display_ec2_information.sh
       - uses: actions/download-artifact@v2
         name: Download PyTorch Test Reports
         with:
