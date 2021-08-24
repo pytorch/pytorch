@@ -1058,7 +1058,7 @@ class AbstractTestCases:
             # should throw an error when out.dtype != src.dtype.
             with self.assertRaisesRegex(RuntimeError,
                                         'Expected out tensor to have dtype c10::complex<double>, but got int instead'):
-                torch.gather(src, dim, idx, out=expected.to(torch.int))
+                torch.gather(src.to(torch.complex128), dim, idx, out=expected.to(torch.int))
 
             # checks for the same dimensionality
             with self.assertRaisesRegex(RuntimeError, 'Index tensor must have the same number of dimensions as input tensor'):
