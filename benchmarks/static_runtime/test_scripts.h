@@ -26,6 +26,11 @@
  alias of the model output.
 
 */
+const auto abs_script = R"JIT(
+  def forward(self, a):
+    return a.abs().clone()
+)JIT";
+
 const auto list_construct_script = R"JIT(
   def forward(self, a, b):
     return [a, b]
