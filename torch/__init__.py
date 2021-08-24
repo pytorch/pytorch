@@ -1,7 +1,9 @@
 
 r"""
 The torch package contains data structures for multi-dimensional
-tensors and defines mathematical operations over these tensors.
+tensors and defines mathematical operations over these tensors.Tensor 
+supports basic routines for indexing, slicing, transposing, type-casting,
+ resizing, sharing storage and cloning. 
 Additionally, it provides many utilities for efficient serializing of
 Tensors and arbitrary types, and other useful utilities.
 
