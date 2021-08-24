@@ -260,6 +260,6 @@ class TORCH_PYTHON_API DistributedC10d : public torch::CustomClassHolder {
 };
 
 // Must be called to initialize Torchbind bindings for c10d.
-void initCustomClassBindings();
+TORCH_PYTHON_API void initCustomClassBindings();
 
 } // namespace c10d
