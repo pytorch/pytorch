@@ -82,6 +82,7 @@ supported:
   - addcmul
   - alias
   - tanh_backward
+  - zero_
 autograd:
   - max_pool2d
   - max_pool3d
