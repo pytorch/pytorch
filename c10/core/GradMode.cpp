@@ -1,15 +1,16 @@
-#include <c10/core/AutogradState.h>
 #include <c10/core/GradMode.h>
 
 #include <stdexcept>
 
 namespace c10 {
 
+thread_local bool GradMode_enabled = true;
+
 bool GradMode::is_enabled() {
-  return AutogradState::get_tls_state().get_grad_mode();
+  return GradMode_enabled;
 }
 
 void GradMode::set_enabled(bool enabled) {
-  AutogradState::get_tls_state().set_grad_mode(enabled);
+  GradMode_enabled = enabled;
 }
 } // namespace c10
