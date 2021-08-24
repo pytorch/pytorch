@@ -145,12 +145,6 @@ def auto_quantize(func, qtype, quant_loss=None):
     Returns:
         (callable): the same collective as func but enables automatic quantization/dequantization.
     """
-    dispatch = {
-        dist.all_to_all_single: _quantized_a2a_single_handler,
-        dist.all_to_all: _quantized_a2a_handler,
-        dist.all_gather: _quantized_all_gather_handler,
-    }
-
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
         group = kwargs.get('group', None)
@@ -164,7 +158,11 @@ def auto_quantize(func, qtype, quant_loss=None):
         out_splits = kwargs.get('out_splits', None)
         in_splits = kwargs.get('in_splits', None)
 
-
+        dispatch = {
+            dist.all_to_all_single: _quantized_a2a_single_handler,
+            dist.all_to_all: _quantized_a2a_handler,
+            dist.all_gather: _quantized_all_gather_handler,
+        }
         try:
             if (func == dist.all_to_all_single):
                 dispatch[func](tensors,
