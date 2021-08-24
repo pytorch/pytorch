@@ -4157,7 +4157,7 @@ def cross_entropy_loss_reference(input, target, weight=None, ignore_index=-100, 
     else:
         return cross_entropy_loss_indices_target_reference(
             input, target, weight=weight, reduction=reduction,
-            ignore_index=-100, label_smoothing=label_smoothing
+            ignore_index=ignore_index, label_smoothing=label_smoothing
         )
 
 
@@ -4938,17 +4938,17 @@ criterion_tests = [
             loss_reference_fns['CrossEntropyLoss'](i, t, reduction=get_reduction(m), label_smoothing=0.15),
         check_bfloat16=False,
     ),
-    dict(
-        fullname='CrossEntropyLoss_2d_prob_target_smoothing_weight',
-        constructor=lambda *args, **kwargs: nn.CrossEntropyLoss(*args, **kwargs,
-                                                                label_smoothing=0.15,
-                                                                weight=torch.randn(3)),
-        input_size=(5, 3),
-        target_fn=lambda: torch.rand(5, 3).softmax(dim=1),
-        reference_fn=lambda i, t, m:
-            loss_reference_fns['CrossEntropyLoss'](i, t, reduction=get_reduction(m), weight=get_weight(m), label_smoothing=0.15),
-        check_bfloat16=False,
-    ),
+    # dict(
+    #     fullname='CrossEntropyLoss_2d_prob_target_smoothing_weight',
+    #     constructor=lambda *args, **kwargs: nn.CrossEntropyLoss(*args, **kwargs,
+    #                                                             label_smoothing=0.15,
+    #                                                             weight=torch.randn(3)),
+    #     input_size=(5, 3),
+    #     target_fn=lambda: torch.rand(5, 3).softmax(dim=1),
+    #     reference_fn=lambda i, t, m:
+    #         loss_reference_fns['CrossEntropyLoss'](i, t, reduction=get_reduction(m), weight=get_weight(m), label_smoothing=0.15),
+    #     check_bfloat16=False,
+    # ),
     dict(
         fullname='CrossEntropyLoss_3d_prob_target_smoothing_sum_reduction',
         constructor=lambda *args, **kwargs: nn.CrossEntropyLoss(*args, **kwargs, reduction='sum',
@@ -4970,7 +4970,7 @@ criterion_tests = [
         check_bfloat16=False,
     ),
     dict(
-        fullname='CrossEntropyLoss_indicies_target_1d_smoothing',
+        fullname='CrossEntropyLoss_3d_indices_target_smoothing',
         constructor=lambda *args, **kwargs: nn.CrossEntropyLoss(*args, **kwargs,
                                                                 label_smoothing=0.15),
         input_size=(2, 3, 5),
@@ -4980,66 +4980,79 @@ criterion_tests = [
         check_bfloat16=False,
     ),
     dict(
-        fullname='CrossEntropyLoss_indicies_target_2d_smoothing_sum_reduction',
-        constructor=lambda *args, **kwargs: nn.CrossEntropyLoss(*args, **kwargs, reduction='sum',
-                                                                label_smoothing=0.15),
-        input_size=(2, 3, 5),
-        target_fn=lambda: torch.rand(2, 5).mul(3).floor().long(),
-        reference_fn=lambda i, t, m:
-            loss_reference_fns['CrossEntropyLoss'](i, t, reduction=get_reduction(m), label_smoothing=0.15),
-        check_bfloat16=False,
-    ),
-    dict(
-        fullname='CrossEntropyLoss_input_2d_indicies_target_smoothing',
-        constructor=lambda *args, **kwargs: nn.CrossEntropyLoss(*args, **kwargs,
-                                                                label_smoothing=0.15),
-        input_size=(15, 10),
-        target_fn=lambda: torch.empty(15).uniform_().mul(10).floor().long(),
-        reference_fn=lambda i, t, m:
-            loss_reference_fns['CrossEntropyLoss'](i, t, reduction=get_reduction(m), label_smoothing=0.15),
-        check_bfloat16=False,
-    ),
-    dict(
-        fullname='CrossEntropyLoss_input_2d_indicies_target_smoothing_weight',
+        fullname='CrossEntropyLoss_3d_indices_target_smoothing_ignore_index',
         constructor=lambda *args, **kwargs: nn.CrossEntropyLoss(*args, **kwargs,
                                                                 label_smoothing=0.15,
-                                                                weight=torch.randn(10)),
-        input_size=(15, 10),
-        target_fn=lambda: torch.empty(15).uniform_().mul(10).floor().long(),
+                                                                ignore_index=1),
+        input_size=(2, 3, 5),
+        target_fn=lambda: torch.rand(2, 5).mul(3).floor().long(),
         reference_fn=lambda i, t, m:
-            loss_reference_fns['CrossEntropyLoss'](i, t, reduction=get_reduction(m), weight=get_weight(m), label_smoothing=0.15),
+            loss_reference_fns['CrossEntropyLoss'](i, t, reduction=get_reduction(m), label_smoothing=0.15, ignore_index=1),
         check_bfloat16=False,
     ),
     dict(
-        fullname='CrossEntropyLoss_input_2d_indicies_target_smoothing_sum_reduction',
+        fullname='CrossEntropyLoss_3d_indices_target_smoothing_sum_reduction',
         constructor=lambda *args, **kwargs: nn.CrossEntropyLoss(*args, **kwargs, reduction='sum',
                                                                 label_smoothing=0.15),
-        input_size=(15, 10),
-        target_fn=lambda: torch.empty(15).uniform_().mul(10).floor().long(),
+        input_size=(2, 3, 5),
+        target_fn=lambda: torch.rand(2, 5).mul(3).floor().long(),
         reference_fn=lambda i, t, m:
             loss_reference_fns['CrossEntropyLoss'](i, t, reduction=get_reduction(m), label_smoothing=0.15),
         check_bfloat16=False,
     ),
     dict(
-        fullname='CrossEntropyLoss_input_3d_indicies_target_smoothing',
+        fullname='CrossEntropyLoss_3d_indices_target_smoothing_sum_reduction_ignore_index',
+        constructor=lambda *args, **kwargs: nn.CrossEntropyLoss(*args, **kwargs, reduction='sum',
+                                                                label_smoothing=0.15,
+                                                                ignore_index=1),
+        input_size=(2, 3, 5),
+        target_fn=lambda: torch.rand(2, 5).mul(3).floor().long(),
+        reference_fn=lambda i, t, m:
+            loss_reference_fns['CrossEntropyLoss'](i, t, reduction=get_reduction(m), label_smoothing=0.15, ignore_index=1),
+        check_bfloat16=False,
+    ),
+    dict(
+        fullname='CrossEntropyLoss_2d_indices_target_smoothing',
         constructor=lambda *args, **kwargs: nn.CrossEntropyLoss(*args, **kwargs,
                                                                 label_smoothing=0.15),
-        input_size=(2, 3, 5),
-        target_fn=lambda: torch.rand(2, 5).mul(3).floor().long(),
+        input_size=(15, 10),
+        target_fn=lambda: torch.empty(15).uniform_().mul(10).floor().long(),
         reference_fn=lambda i, t, m:
             loss_reference_fns['CrossEntropyLoss'](i, t, reduction=get_reduction(m), label_smoothing=0.15),
         check_bfloat16=False,
     ),
     dict(
-        fullname='CrossEntropyLoss_input_3d_indicies_target_smoothing_sum_reduction',
+        fullname='CrossEntropyLoss_2d_indices_target_smoothing_sum_reduction',
         constructor=lambda *args, **kwargs: nn.CrossEntropyLoss(*args, **kwargs, reduction='sum',
                                                                 label_smoothing=0.15),
-        input_size=(2, 3, 5),
-        target_fn=lambda: torch.rand(2, 5).mul(3).floor().long(),
+        input_size=(15, 10),
+        target_fn=lambda: torch.empty(15).uniform_().mul(10).floor().long(),
         reference_fn=lambda i, t, m:
             loss_reference_fns['CrossEntropyLoss'](i, t, reduction=get_reduction(m), label_smoothing=0.15),
         check_bfloat16=False,
     ),
+    dict(
+        fullname='CrossEntropyLoss_2d_indices_target_smoothing_ignore_index',
+        constructor=lambda *args, **kwargs: nn.CrossEntropyLoss(*args, **kwargs,
+                                                                label_smoothing=0.15,
+                                                                ignore_index=3),
+        input_size=(15, 10),
+        target_fn=lambda: torch.empty(15).uniform_().mul(10).floor().long(),
+        reference_fn=lambda i, t, m:
+            loss_reference_fns['CrossEntropyLoss'](i, t, reduction=get_reduction(m), label_smoothing=0.15, ignore_index=3),
+        check_bfloat16=False,
+    ),
+    # dict(
+    #     fullname='CrossEntropyLoss_2d_indices_target_smoothing_weight',
+    #     constructor=lambda *args, **kwargs: nn.CrossEntropyLoss(*args, **kwargs,
+    #                                                             label_smoothing=0.15,
+    #                                                             weight=torch.randn(10)),
+    #     input_size=(15, 10),
+    #     target_fn=lambda: torch.empty(15).uniform_().mul(10).floor().long(),
+    #     reference_fn=lambda i, t, m:
+    #         loss_reference_fns['CrossEntropyLoss'](i, t, reduction=get_reduction(m), weight=get_weight(m), label_smoothing=0.15),
+    #     check_bfloat16=False,
+    # ),
     dict(
         module_name='CrossEntropyLoss',
         constructor_args_fn=lambda: (torch.rand(3),),
