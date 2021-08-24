@@ -684,19 +684,35 @@ void sigmoid_backward_kernel(TensorIteratorBase& iter) {
           return a * ((one_vec - b) * b).conj();
         });
     });
+  } else if (iter.dtype() == kBFloat16) {
+    auto one_vec = Vectorized<float>((float)(1));
+    cpu_kernel_vec(
+      iter,
+      [=](BFloat16 a, BFloat16 b) -> BFloat16 {
+         float a0 = static_cast<float>(a);
+         float b0 = static_cast<float>(b);
+         return a0 * (float(1) - b0) * b0;
+      },
+      [=](Vectorized<BFloat16> a, Vectorized<BFloat16> b) {
+         Vectorized<float> a0, a1, b0, b1;
+         std::tie(a0, a1) = convert_bfloat16_float(a);
+         std::tie(b0, b1) = convert_bfloat16_float(b);
+         a0 = a0 * (one_vec - b0) * b0;
+         a1 = a1 * (one_vec - b1) * b1;
+         return convert_float_bfloat16(a0, a1);
+      });
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND2(
-        kBFloat16, kHalf, iter.dtype(), "sigmoid_backward_cpu", [&]() {
-          auto one_vec = Vectorized<scalar_t>((scalar_t)(1));
-          cpu_kernel_vec(
-              iter,
-              [=](scalar_t a, scalar_t b) -> scalar_t {
-                return a * (scalar_t(1) - b) * b;
-              },
-              [=](Vectorized<scalar_t> a, Vectorized<scalar_t> b) {
-                return a * (one_vec - b) * b;
-              });
+    AT_DISPATCH_FLOATING_TYPES_AND(kHalf, iter.dtype(), "sigmoid_backward_cpu", [&]() {
+      auto one_vec = Vectorized<scalar_t>((scalar_t)(1));
+      cpu_kernel_vec(
+        iter,
+        [=](scalar_t a, scalar_t b) -> scalar_t {
+          return a * (scalar_t(1) - b) * b;
+        },
+        [=](Vectorized<scalar_t> a, Vectorized<scalar_t> b) {
+          return a * (one_vec - b) * b;
         });
+    });
   }
 }
 
@@ -754,15 +770,32 @@ void tanh_backward_kernel(TensorIteratorBase& iter) {
   if (isComplexType(iter.dtype())) {
     AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "tanh_backward_cpu", [&]() {
       auto one_vec = Vectorized<scalar_t>(scalar_t{1});
+      cpu_kernel_vec(
+        iter,
+        [=](scalar_t a, scalar_t b) -> scalar_t {
+          return a * std::conj(scalar_t{1} - b * b);
+        },
+        [=](Vectorized<scalar_t> a, Vectorized<scalar_t> b) {
+          return a * (one_vec - b * b).conj();
+        });
+    });
+  } else if (iter.dtype() == kBFloat16) {
+    auto one_vec = Vectorized<float>(float{1});
     cpu_kernel_vec(
       iter,
-      [=](scalar_t a, scalar_t b) -> scalar_t {
-        return a * std::conj(scalar_t{1} - b * b);
+      [=](BFloat16 a, BFloat16 b) -> BFloat16 {
+        float a0 = float(a);
+        float b0 = float(b);
+        return a0 * (float{1} - b0 * b0);
       },
-      [=](Vectorized<scalar_t> a, Vectorized<scalar_t> b) {
-        return a * (one_vec - b * b).conj();
+      [=](Vectorized<BFloat16> a, Vectorized<BFloat16> b) {
+        Vectorized<float> a0, a1, b0, b1;
+        std::tie(a0, a1) = convert_bfloat16_float(a);
+        std::tie(b0, b1) = convert_bfloat16_float(b);
+        a0 = a0 * (one_vec - b0 * b0);
+        a1 = a1 * (one_vec - b1 * b1);
+        return convert_float_bfloat16(a0, a1);
       });
-  });
   } else {
     AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "tanh_backward_cpu", [&]() {
       auto one_vec = Vectorized<scalar_t>(scalar_t{1});
