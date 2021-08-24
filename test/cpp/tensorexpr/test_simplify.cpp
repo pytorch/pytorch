@@ -3932,7 +3932,7 @@ TEST(Simplify, SimplifyForCleansUp) {
   {
     Placeholder a("a", kFloat, {1, 12, 1});
     VarHandle x("x", kInt);
-    Tensor* b = Compute(
+    Tensor b = Compute(
         // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
         "x",
         {{1, "i"}, {12, "m"}, {1, "n"}},

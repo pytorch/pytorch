@@ -155,8 +155,8 @@ int main(int argc, char* argv[]) {
     ExprPtr body = alloc<Mul>(i, j);
 
     // Finally, we pass all these pieces together to Tensor constructor:
-    Tensor* X = new Tensor(buf, args, body);
-    std::cout << "Tensor computation: " << *X << std::endl;
+    Tensor X = Tensor(buf, args, body);
+    std::cout << "Tensor computation: " << X << std::endl;
     // Prints:
     // Tensor computation: Tensor X[64, 32]:
     // for (int i = 0; i < 64; i++) {
@@ -171,11 +171,11 @@ int main(int argc, char* argv[]) {
     // constructing Exprs, Tensors also have a more convenient API for
     // construction. It is based on Compute API, which takes a name,
     // dimensions, and a lambda specifying the computation body:
-    Tensor* Z = Compute(
+    Tensor Z = Compute(
         "Z",
         {{64, "i"}, {32, "j"}},
         [](const VarHandle& i, const VarHandle& j) { return i / j; });
-    std::cout << "Tensor computation: " << *Z << std::endl;
+    std::cout << "Tensor computation: " << Z << std::endl;
     // Prints:
     // Tensor computation: Tensor Z[64, 32]:
     // for (int i = 0; i < 64; i++) {
@@ -187,13 +187,13 @@ int main(int argc, char* argv[]) {
     // Tensors might access other tensors and external placeholders in their
     // expressions. It can be done like so:
     Placeholder P("P", kInt, {64, 32});
-    Tensor* R = Compute(
+    Tensor R = Compute(
         "R",
         {{64, "i"}, {32, "j"}},
         [&](const VarHandle& i, const VarHandle& j) {
-          return Z->load(i, j) * P.load(i, j);
+          return Z.load(i, j) * P.load(i, j);
         });
-    std::cout << "Tensor computation: " << *R << std::endl;
+    std::cout << "Tensor computation: " << R << std::endl;
     // Prints:
     // Tensor computation: Tensor R[64, 32]:
     // for (int i = 0; i < 64; i++) {
@@ -224,20 +224,20 @@ int main(int argc, char* argv[]) {
     // Let's create a simple tensor expression and construct a loop nest for it.
     Placeholder A("A", kFloat, {64, 32});
     Placeholder B("B", kFloat, {64, 32});
-    Tensor* X = Compute(
+    Tensor X = Compute(
         "X",
         {{64, "i"}, {32, "j"}},
         [&](const VarHandle& i, const VarHandle& j) {
           return A.load(i, j) + B.load(i, j);
         });
-    Tensor* Y = Compute(
+    Tensor Y = Compute(
         "Y",
         {{64, "i"}, {32, "j"}},
         [&](const VarHandle& i, const VarHandle& j) {
-          return sigmoid(X->load(i, j));
+          return sigmoid(X.load(i, j));
         });
-    std::cout << "Tensor computation X: " << *X
-              << "Tensor computation Y: " << *Y << std::endl;
+    std::cout << "Tensor computation X: " << X << "Tensor computation Y: " << Y
+              << std::endl;
     // Prints:
     // Tensor computation X: Tensor X[64, 32]:
     // for (int i = 0; i < 64; i++) {
@@ -256,9 +256,7 @@ int main(int argc, char* argv[]) {
     // Creating a loop nest is as quite simple, we just need to specify a list
     // of all and a list of output tensors:
     // NOLINTNEXTLINE(bugprone-argument-comment)
-    std::vector<Tensor*> outputs = {Y};
-    std::vector<Tensor*> all = {X, Y};
-    LoopNest loopnest(outputs, all);
+    LoopNest loopnest(/*outputs=*/{Y}, /*all=*/{X, Y});
 
     // An IR used in LoopNest is based on tensor statements, represented by
     // `Stmt` class. Statements are used to specify the loop nest structure, and
@@ -357,7 +355,7 @@ int main(int argc, char* argv[]) {
     // Let's start by constructing a simple computation for us to work with:
     Placeholder A("A", kInt, {64, 32});
     Placeholder B("B", kInt, {64, 32});
-    Tensor* X = Compute(
+    Tensor X = Compute(
         "X",
         {{64, "i"}, {32, "j"}},
         [&](const VarHandle& i, const VarHandle& j) {

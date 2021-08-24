@@ -545,7 +545,7 @@ std::ostream& operator<<(std::ostream& stream, const Stmt& stmt) {
 }
 
 std::ostream& operator<<(std::ostream& stream, const Tensor& t) {
-  stream << std::to_string(&t);
+  stream << std::to_string(t);
   return stream;
 }
 
@@ -568,7 +568,7 @@ void print(StmtPtr stmt) {
   }
 }
 
-void print(const Tensor* t) {
+void print(const Tensor& t) {
   std::cout << std::to_string(t);
 }
 
@@ -589,20 +589,17 @@ std::string to_string(StmtPtr stmt) {
   return oss.str();
 }
 
-std::string to_string(const Tensor* t) {
-  if (!t) {
-    return "(null tensor)\n";
-  }
+std::string to_string(const Tensor& t) {
   std::ostringstream oss;
   // TODO: move this to Buf printer
-  oss << "Tensor " << t->buf()->name_hint() << "[";
-  for (const auto i : c10::irange(t->buf()->ndim())) {
+  oss << "Tensor " << t.buf()->name_hint() << "[";
+  for (const auto i : c10::irange(t.buf()->ndim())) {
     if (i != 0) {
       oss << ", ";
     }
-    oss << *t->buf()->dim(i);
+    oss << *t.buf()->dim(i);
   }
-  oss << "]:\n" << *t->stmt() << "\n";
+  oss << "]:\n" << *t.stmt() << "\n";
   return oss.str();
 }
 } // namespace std

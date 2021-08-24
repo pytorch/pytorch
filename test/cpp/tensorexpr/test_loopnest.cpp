@@ -42,13 +42,12 @@ void checkExprIR(const ExprHandle& e, const std::string& pattern) {
 
 TEST(LoopNest, ExprSimple01) {
   KernelScope kernel_scope;
-  Tensor* tensor = Compute(
+  Tensor tensor = Compute(
       "f", {{16, "X"}, {5, "y"}}, [](const VarHandle& x, const VarHandle& y) {
         return ExprHandle(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
       });
   LoopNest l({tensor});
-  std::vector<ForPtr> loops =
-      l.getAllLoopNestsWritingToBuf(tensor->buf()).at(0);
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
 
   LoopNest::splitWithTail(loops[0], 2);
   LoopNest::splitWithTail(loops[0], 2);
@@ -56,7 +55,7 @@ TEST(LoopNest, ExprSimple01) {
 
 TEST(LoopNest, ExprLower01) {
   KernelScope kernel_scope;
-  Tensor* tensor = Compute(
+  Tensor tensor = Compute(
       "f", {{16, "x"}, {5, "y"}}, [](const VarHandle& x, const VarHandle& y) {
         return ExprHandle(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
       });
@@ -73,10 +72,9 @@ TEST(LoopNest, ExprSimple02) {
   auto func = [](const ExprHandle& x, const ExprHandle& y) {
     return ExprHandle(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
   };
-  Tensor* tensor = Compute("f", {{26, "x"}, {5, "y"}}, func);
+  Tensor tensor = Compute("f", {{26, "x"}, {5, "y"}}, func);
   LoopNest l({tensor});
-  std::vector<ForPtr> loops =
-      l.getAllLoopNestsWritingToBuf(tensor->buf()).at(0);
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
 
   LoopNest::splitWithTail(loops[0], 4);
 
@@ -168,14 +166,13 @@ TEST(LoopNest, ExprSliceHeadWithLoopOptions) {
   auto func = [](const ExprHandle& x) {
     return ExprHandle(1.0f) + cast<float>(x);
   };
-  Tensor* tensor = Compute("f", {{10, "x"}}, func);
+  Tensor tensor = Compute("f", {{10, "x"}}, func);
   LoopNest l({tensor});
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ForPtr head;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ForPtr tail;
-  std::vector<ForPtr> loops =
-      l.getAllLoopNestsWritingToBuf(tensor->buf()).at(0);
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
   loops[0]->set_gpu_block_index(LoopOptions::IDX_Y);
   LoopNest::sliceHead(loops[0], 2, &head, &tail);
 
@@ -193,14 +190,13 @@ TEST(LoopNest, ExprSliceTailWithLoopOptions) {
   auto func = [](const ExprHandle& x) {
     return ExprHandle(1.0f) + cast<float>(x);
   };
-  Tensor* tensor = Compute("f", {{10, "x"}}, func);
+  Tensor tensor = Compute("f", {{10, "x"}}, func);
   LoopNest l({tensor});
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ForPtr head;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ForPtr tail;
-  std::vector<ForPtr> loops =
-      l.getAllLoopNestsWritingToBuf(tensor->buf()).at(0);
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
   LoopNest::sliceTail(loops[0], 4, &head, &tail);
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -227,14 +223,13 @@ TEST(LoopNest, ExprSliceHeadWhenFactorEqualsSize) {
   auto func = [](const ExprHandle& x) {
     return ExprHandle(1.0f) + cast<float>(x);
   };
-  Tensor* tensor = Compute("f", {{10, "x"}}, func);
+  Tensor tensor = Compute("f", {{10, "x"}}, func);
   LoopNest l({tensor});
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ForPtr head;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ForPtr tail;
-  std::vector<ForPtr> loops =
-      l.getAllLoopNestsWritingToBuf(tensor->buf()).at(0);
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
   LoopNest::sliceHead(loops[0], 10, &head, &tail);
 
   ASSERT_EQ(head, loops[0]);
@@ -249,14 +244,13 @@ TEST(LoopNest, ExprSliceHeadWhenFactorLargerThanSize) {
   auto func = [](const ExprHandle& x) {
     return ExprHandle(1.0f) + cast<float>(x);
   };
-  Tensor* tensor = Compute("f", {{10, "x"}}, func);
+  Tensor tensor = Compute("f", {{10, "x"}}, func);
   LoopNest l({tensor});
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ForPtr head;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ForPtr tail;
-  std::vector<ForPtr> loops =
-      l.getAllLoopNestsWritingToBuf(tensor->buf()).at(0);
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
   LoopNest::sliceHead(loops[0], 100, &head, &tail);
 
   ASSERT_EQ(head, loops[0]);
@@ -271,14 +265,13 @@ TEST(LoopNest, ExprSliceHead) {
   auto func = [](const ExprHandle& x) {
     return ExprHandle(1.0f) + cast<float>(x);
   };
-  Tensor* tensor = Compute("f", {{10, "x"}}, func);
+  Tensor tensor = Compute("f", {{10, "x"}}, func);
   LoopNest l({tensor});
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ForPtr head;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ForPtr tail;
-  std::vector<ForPtr> loops =
-      l.getAllLoopNestsWritingToBuf(tensor->buf()).at(0);
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
   LoopNest::sliceHead(loops[0], 4, &head, &tail);
 
   ASSERT_NE(head, nullptr);
@@ -295,10 +288,9 @@ TEST(LoopNest, ExprSliceHeadWithNonZeroStart) {
   auto func = [](const ExprHandle& x) {
     return ExprHandle(1.0f) + cast<float>(x);
   };
-  Tensor* tensor = Compute("f", {{10, "x"}}, func);
+  Tensor tensor = Compute("f", {{10, "x"}}, func);
   LoopNest l({tensor});
-  std::vector<ForPtr> loops =
-      l.getAllLoopNestsWritingToBuf(tensor->buf()).at(0);
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ForPtr head;
@@ -323,14 +315,13 @@ TEST(LoopNest, ExprSliceTailWhenFactorEqualsSize) {
   auto func = [](const ExprHandle& x) {
     return ExprHandle(1.0f) + cast<float>(x);
   };
-  Tensor* tensor = Compute("f", {{10, "x"}}, func);
+  Tensor tensor = Compute("f", {{10, "x"}}, func);
   LoopNest l({tensor});
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ForPtr head;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ForPtr tail;
-  std::vector<ForPtr> loops =
-      l.getAllLoopNestsWritingToBuf(tensor->buf()).at(0);
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
   LoopNest::sliceTail(loops[0], 10, &head, &tail);
 
   ASSERT_EQ(head, nullptr);
@@ -347,14 +338,13 @@ TEST(LoopNest, ExprSliceTailWhenFactorLargerThanSize) {
   auto func = [](const ExprHandle& x) {
     return ExprHandle(1.0f) + cast<float>(x);
   };
-  Tensor* tensor = Compute("f", {{10, "x"}}, func);
+  Tensor tensor = Compute("f", {{10, "x"}}, func);
   LoopNest l({tensor});
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ForPtr head;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ForPtr tail;
-  std::vector<ForPtr> loops =
-      l.getAllLoopNestsWritingToBuf(tensor->buf()).at(0);
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
   LoopNest::sliceTail(loops[0], 100, &head, &tail);
 
   ASSERT_EQ(head, nullptr);
@@ -369,14 +359,13 @@ TEST(LoopNest, ExprSliceTail) {
   auto func = [](const ExprHandle& x) {
     return ExprHandle(1.0f) + cast<float>(x);
   };
-  Tensor* tensor = Compute("f", {{10, "x"}}, func);
+  Tensor tensor = Compute("f", {{10, "x"}}, func);
   LoopNest l({tensor});
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ForPtr head;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ForPtr tail;
-  std::vector<ForPtr> loops =
-      l.getAllLoopNestsWritingToBuf(tensor->buf()).at(0);
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
   LoopNest::sliceTail(loops[0], 4, &head, &tail);
 
   ASSERT_NE(head, nullptr);
@@ -396,15 +385,14 @@ TEST(LoopNest, ExprSplitAndSlice) {
   auto func = [](const ExprHandle& x) {
     return ExprHandle(1.0f) + cast<float>(x);
   };
-  Tensor* tensor = Compute("f", {{100, "x"}}, func);
+  Tensor tensor = Compute("f", {{100, "x"}}, func);
   LoopNest l({tensor});
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ForPtr inner;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ForPtr tail;
-  std::vector<ForPtr> loops =
-      l.getAllLoopNestsWritingToBuf(tensor->buf()).at(0);
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
   // outer: [0, 4)
   // inner: [0, 21)
   // tail:  [84, 100)
@@ -450,10 +438,9 @@ TEST(LoopNest, ExprSliceAndNormalize) {
   auto func = [](const ExprHandle& x) {
     return ExprHandle(1.0f) + cast<float>(x);
   };
-  Tensor* tensor = Compute("f", {{10, "x"}}, func);
+  Tensor tensor = Compute("f", {{10, "x"}}, func);
   LoopNest l({tensor});
-  std::vector<ForPtr> loops =
-      l.getAllLoopNestsWritingToBuf(tensor->buf()).at(0);
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ForPtr head;
@@ -482,11 +469,11 @@ TEST(LoopNest, ExprSliceWithVariableDimension) {
          const std::vector<std::pair<int, int>>& expected_for_ranges) {
         KernelScope kernel_scope;
         VarHandle dim("dim", kInt);
-        Tensor* tensor =
+        Tensor tensor =
             Compute("f", {{dim, "x"}}, [](const ExprHandle& x) { return x; });
         LoopNest l({tensor});
         std::vector<ForPtr> loops =
-            l.getAllLoopNestsWritingToBuf(tensor->buf()).at(0);
+            l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
 
         // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         ForPtr head;
@@ -521,10 +508,9 @@ TEST(LoopNest, ExprSplitWithTail) {
   auto func = [](const ExprHandle& x) {
     return ExprHandle(1.0f) + cast<float>(x);
   };
-  Tensor* tensor = Compute("f", {{199, "x"}}, func);
+  Tensor tensor = Compute("f", {{199, "x"}}, func);
   LoopNest l({tensor});
-  std::vector<ForPtr> loops =
-      l.getAllLoopNestsWritingToBuf(tensor->buf()).at(0);
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   LoopNest::splitWithTail(loops[0], 17);
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
@@ -552,10 +538,9 @@ TEST(LoopNest, ExprSplitWithTailNone) {
   auto func = [](const ExprHandle& x, const ExprHandle& y) {
     return ExprHandle(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
   };
-  Tensor* tensor = Compute("f", {{24, "x"}, {5, "y"}}, func);
+  Tensor tensor = Compute("f", {{24, "x"}, {5, "y"}}, func);
   LoopNest l({tensor});
-  std::vector<ForPtr> loops =
-      l.getAllLoopNestsWritingToBuf(tensor->buf()).at(0);
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
   LoopNest::splitWithTail(loops[0], 4);
 
   StmtPtr stmt = l.root_stmt();
@@ -612,14 +597,13 @@ TEST(LoopNest, ExprSplitWithMask01) {
   const int N = 5;
   Placeholder a_buf("a", kFloat, {M, N});
   Placeholder b_buf("b", kFloat, {M, N});
-  Tensor* tensor = Compute(
+  Tensor tensor = Compute(
       "f", {{M, "m"}, {N, "n"}}, [&](const ExprHandle& m, const ExprHandle& n) {
         return a_buf.load(m, n) + b_buf.load(m, n) + 1.0f;
       });
 
   LoopNest l({tensor});
-  std::vector<ForPtr> loops =
-      l.getAllLoopNestsWritingToBuf(tensor->buf()).at(0);
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
   LoopNest::splitWithMask(loops[1], 4);
 
   StmtPtr stmt = l.root_stmt();
@@ -648,13 +632,12 @@ TEST(LoopNest, ExprSplitWithMaskRepeatedNoMask) {
   const int M = 64;
   Placeholder a_buf("a", kFloat, {M});
   Placeholder b_buf("b", kFloat, {M});
-  Tensor* tensor = Compute("f", {{M, "m"}}, [&](const ExprHandle& m) {
+  Tensor tensor = Compute("f", {{M, "m"}}, [&](const ExprHandle& m) {
     return a_buf.load(m) + b_buf.load(m) + 1.0f;
   });
 
   LoopNest l({tensor});
-  std::vector<ForPtr> loops =
-      l.getAllLoopNestsWritingToBuf(tensor->buf()).at(0);
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
   LoopNest::splitWithMask(loops[0], 4);
   LoopNest::splitWithMask(loops[0], 4);
 
@@ -736,14 +719,13 @@ TEST(LoopNest, TileSimple) {
   const int M = 64, N = 64;
   Placeholder a_buf("a", kFloat, {M, N});
   Placeholder b_buf("b", kFloat, {M, N});
-  Tensor* tensor = Compute(
+  Tensor tensor = Compute(
       "f", {{M, "m"}, {N, "n"}}, [&](const ExprHandle& m, const ExprHandle& n) {
         return a_buf.load({m, n}) + b_buf.load({m, n}) + 1.0f;
       });
 
   LoopNest l({tensor});
-  std::vector<ForPtr> loops =
-      l.getAllLoopNestsWritingToBuf(tensor->buf()).at(0);
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   l.tile(loops[0], loops[1], 4, 8);
 
@@ -783,14 +765,13 @@ TEST(LoopNest, TileWithTails) {
   const int M = 64, N = 64;
   Placeholder a_buf("a", kFloat, {M, N});
   Placeholder b_buf("b", kFloat, {M, N});
-  Tensor* tensor = Compute(
+  Tensor tensor = Compute(
       "f", {{M, "m"}, {N, "n"}}, [&](const ExprHandle& m, const ExprHandle& n) {
         return a_buf.load({m, n}) + b_buf.load({m, n}) + 1.0f;
       });
 
   LoopNest l({tensor});
-  std::vector<ForPtr> loops =
-      l.getAllLoopNestsWritingToBuf(tensor->buf()).at(0);
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   l.tile(loops[0], loops[1], 5, 9);
 
@@ -831,7 +812,7 @@ TEST(LoopNest, TileInMiddle) {
   const int M = 8, N = 8, L = 8, K = 8;
   Placeholder a_buf("a", kFloat, {M, N, L, K});
   Placeholder b_buf("b", kFloat, {M, N, L, K});
-  Tensor* tensor = Compute(
+  Tensor tensor = Compute(
       "f",
       {{M, "m"}, {N, "n"}, {L, "l"}, {K, "k"}},
       [&](const ExprHandle& m,
@@ -843,7 +824,7 @@ TEST(LoopNest, TileInMiddle) {
 
   LoopNest nest({tensor});
   std::vector<ForPtr> loops =
-      nest.getAllLoopNestsWritingToBuf(tensor->buf()).at(0);
+      nest.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   nest.tile(loops[1], loops[2], 3, 3);
 
@@ -891,7 +872,7 @@ TEST(LoopNest, SplitWithTailWithLoopOptions) {
   const int M = 21;
   Placeholder a_buf("a", kFloat, {M});
   Placeholder b_buf("b", kFloat, {M});
-  Tensor* tensor = Compute("f", {{M, "m"}}, [&](const ExprHandle& m) {
+  Tensor tensor = Compute("f", {{M, "m"}}, [&](const ExprHandle& m) {
     return a_buf.load(m) + b_buf.load(m) + 1.0f;
   });
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -922,7 +903,7 @@ TEST(LoopNest, SplitWithMaskWithLoopOptions) {
   const int M = 21;
   Placeholder a_buf("a", kFloat, {M});
   Placeholder b_buf("b", kFloat, {M});
-  Tensor* tensor = Compute("f", {{M, "m"}}, [&](const ExprHandle& m) {
+  Tensor tensor = Compute("f", {{M, "m"}}, [&](const ExprHandle& m) {
     return a_buf.load(m) + b_buf.load(m) + 1.0f;
   });
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -949,7 +930,7 @@ TEST(LoopNest, ScheduleBroadcastAddBuffer) {
   const int K = 6;
   Placeholder a_buf("a", kFloat, {M, N});
   Placeholder b_buf("b", kFloat, {N, K});
-  Tensor* c = Compute(
+  Tensor c = Compute(
       "broadcast_add",
       {{M, "m"}, {N, "n"}, {K, "k"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
@@ -998,20 +979,20 @@ TEST(LoopNest, ScheduleFunctionCall01) {
   const int K = 6;
   Placeholder a_buf("a", kFloat, {M, N});
   Placeholder b_buf("b", kFloat, {N, K});
-  Tensor* c = Compute(
+  Tensor c = Compute(
       "broadcast_add",
       {{M, "m"}, {N, "n"}, {K, "k"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
         return a_buf.load(m, n) + b_buf.load(n, k);
       });
-  Tensor* d = Compute(
+  Tensor d = Compute(
       "d",
       {{M, "m"}, {N, "n"}, {K, "k"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
-        return c->load(m, n, k) + 1;
+        return c.load(m, n, k) + 1;
       });
 
-  LoopNest l(std::vector<Tensor*>({d}), {c, d});
+  LoopNest l({d}, {c, d});
   l.prepareForCodegen();
   StmtPtr stmt = l.root_stmt();
   std::ostringstream oss;
@@ -1058,22 +1039,22 @@ TEST(LoopNest, ScheduleInlineSimple) {
   Placeholder c_buf("c", kFloat, {M, N});
   Placeholder d_buf("d", kFloat, {M, K});
 
-  Tensor* x = Compute(
+  Tensor x = Compute(
       "x",
       {{M, "m1"}, {N, "n1"}, {K, "k1"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
         return a_buf.load(m, n) * b_buf.load(n, k);
       });
-  Tensor* y = Compute(
+  Tensor y = Compute(
       "y",
       {{M, "m2"}, {N, "n2"}, {K, "k2"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
-        return c_buf.load(m, n) * d_buf.load(m, k) + x->load(m, n, k);
+        return c_buf.load(m, n) * d_buf.load(m, k) + x.load(m, n, k);
       });
 
-  LoopNest l1(std::vector<Tensor*>({y}), {x, y});
+  LoopNest l1({y}, {x, y});
   LoopNest l2(l1);
-  l2.computeInline(x->buf());
+  l2.computeInline(x.buf());
 
   l1.prepareForCodegen();
   l2.prepareForCodegen();
@@ -1139,31 +1120,31 @@ void InlineFunc01Helper(const std::vector<std::string>& inline_order) {
   Placeholder c_buf("c", kFloat, {M, N});
   Placeholder d_buf("d", kFloat, {M, K});
 
-  Tensor* x = Compute(
+  Tensor x = Compute(
       "x",
       {{M, "m1"}, {N, "n1"}, {K, "k1"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
         return a_buf.load(m, n) * b_buf.load(n, k);
       });
-  Tensor* y = Compute(
+  Tensor y = Compute(
       "y",
       {{M, "m2"}, {N, "n2"}, {K, "k2"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
-        return c_buf.load(m, n) * d_buf.load(m, k) + x->load(m, n, k);
+        return c_buf.load(m, n) * d_buf.load(m, k) + x.load(m, n, k);
       });
-  Tensor* z = Compute(
+  Tensor z = Compute(
       "z",
       {{M, "m3"}, {N, "n3"}, {K, "k3"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
-        return x->load(m, n, k) + y->load(m, n, k);
+        return x.load(m, n, k) + y.load(m, n, k);
       });
 
-  LoopNest l(std::vector<Tensor*>({z}), {x, y, z});
+  LoopNest l({z}, {x, y, z});
   for (const std::string& order : inline_order) {
     if (order == "x") {
-      l.computeInline(x->buf());
+      l.computeInline(x.buf());
     } else if (order == "y") {
-      l.computeInline(y->buf());
+      l.computeInline(y.buf());
     } else {
       throw std::runtime_error("Invalid order: " + order);
     }
@@ -1218,7 +1199,7 @@ void InlineFunc01Helper(const std::vector<std::string>& inline_order) {
   }
 
   if (inline_order.size() == 2) {
-    Tensor* z2 = Compute(
+    Tensor z2 = Compute(
         "z",
         {{M, "m3"}, {N, "n3"}, {K, "k3"}},
         [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
@@ -1254,21 +1235,21 @@ TEST(LoopNest, ScheduleInlineRandom) {
   const int N = 5;
   const int K = 6;
 
-  Tensor* x = Compute(
+  Tensor x = Compute(
       "x",
       {{M, "m1"}, {N, "n1"}, {K, "k1"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
         return Mod::make(Intrinsics::make(kRand, kInt), 5);
       });
-  Tensor* y = Compute(
+  Tensor y = Compute(
       "y",
       {{M, "m2"}, {N, "n2"}, {K, "k2"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
-        return x->load(m, n, k) + x->load(m, n, k);
+        return x.load(m, n, k) + x.load(m, n, k);
       });
 
-  LoopNest l1(std::vector<Tensor*>({y}), {x, y});
-  l1.computeInline(x->buf());
+  LoopNest l1({y}, {x, y});
+  l1.computeInline(x.buf());
 
   // would normally compare results but Rand isn't implemented in the
   // SimpleIREvaluator, even if we could seed it.
@@ -1290,22 +1271,22 @@ TEST(LoopNest, ScheduleInlineRandomUnrelated) {
   const int N = 5;
   const int K = 6;
 
-  Tensor* x = Compute(
+  Tensor x = Compute(
       "x",
       {{M, "m1"}, {N, "n1"}, {K, "k1"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
         return m * n * k;
       });
-  Tensor* y = Compute(
+  Tensor y = Compute(
       "y",
       {{M, "m2"}, {N, "n2"}, {K, "k2"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
-        return x->load(m, n, k) + Intrinsics::make(kRand, kInt) +
+        return x.load(m, n, k) + Intrinsics::make(kRand, kInt) +
             Intrinsics::make(kRand, kInt);
       });
 
-  LoopNest l1(std::vector<Tensor*>({y}), {x, y});
-  l1.computeInline(x->buf());
+  LoopNest l1({y}, {x, y});
+  l1.computeInline(x.buf());
 
   // would normally compare results but Rand isn't implemented in the
   // SimpleIREvaluator, even if we could seed it.
@@ -1327,18 +1308,18 @@ TEST(LoopNest, ScheduleInlineRandomLowerDimensions) {
   const int N = 5;
   const int K = 6;
 
-  Tensor* x = Compute("x", {{M, "m1"}}, [&](const VarHandle& m) {
+  Tensor x = Compute("x", {{M, "m1"}}, [&](const VarHandle& m) {
     return Mod::make(Intrinsics::make(kRand, kInt), 5);
   });
-  Tensor* y = Compute(
+  Tensor y = Compute(
       "y",
       {{M, "m2"}, {N, "n2"}, {K, "k2"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
-        return x->load(m) + x->load(m);
+        return x.load(m) + x.load(m);
       });
 
-  LoopNest l1(std::vector<Tensor*>({y}), {x, y});
-  l1.computeInline(x->buf());
+  LoopNest l1({y}, {x, y});
+  l1.computeInline(x.buf());
 
   // would normally compare results but Rand isn't implemented in the
   // SimpleIREvaluator, even if we could seed it.
@@ -1362,17 +1343,17 @@ TEST(LoopNest, ScheduleInlineIntrinsics) {
   Placeholder a_buf("a", kFloat, {M, N});
   Placeholder b_buf("b", kFloat, {N, K});
 
-  Tensor* x = Compute(
+  Tensor x = Compute(
       "x",
       {{M, "m1"}, {N, "n1"}, {K, "k1"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
         return a_buf.load(m, n) * b_buf.load(n, k);
       });
-  Tensor* y = Compute(
+  Tensor y = Compute(
       "y",
       {{M, "m2"}, {N, "n2"}, {K, "k2"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
-        return Intrinsics::make(kSqrt, x->load(m, n, k));
+        return Intrinsics::make(kSqrt, x.load(m, n, k));
       });
 
   PaddedBuffer<float> a_v(M, N);
@@ -1389,9 +1370,9 @@ TEST(LoopNest, ScheduleInlineIntrinsics) {
     }
   }
 
-  LoopNest l1(std::vector<Tensor*>({y}), {x, y});
+  LoopNest l1({y}, {x, y});
   LoopNest l2(l1);
-  l2.computeInline(x->buf());
+  l2.computeInline(x.buf());
 
   l1.prepareForCodegen();
   l2.prepareForCodegen();
@@ -1421,21 +1402,21 @@ TEST(LoopNest, ScheduleInlineRandWithIntrinsics) {
   const int N = 5;
   const int K = 6;
 
-  Tensor* x = Compute(
+  Tensor x = Compute(
       "x",
       {{M, "m1"}, {N, "n1"}, {K, "k1"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
         return Intrinsics::make(kRand, kFloat);
       });
-  Tensor* y = Compute(
+  Tensor y = Compute(
       "y",
       {{M, "m2"}, {N, "n2"}, {K, "k2"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
-        return Intrinsics::make(kSqrt, x->load(m, n, k));
+        return Intrinsics::make(kSqrt, x.load(m, n, k));
       });
 
-  LoopNest l1(std::vector<Tensor*>({y}), {x, y});
-  l1.computeInline(x->buf());
+  LoopNest l1({y}, {x, y});
+  l1.computeInline(x.buf());
 
   StmtPtr stmt1 = IRSimplifier::simplify(l1.root_stmt());
 
@@ -1451,31 +1432,31 @@ TEST(LoopNest, ScheduleInlineRandWithIntrinsics) {
 // Split a Compute then inline it into another compute.
 TEST(LoopNest, ScheduleSplitAThenInline) {
   KernelScope kernel_scope;
-  Tensor* a =
+  Tensor a =
       Compute("a", {{18, "i"}}, [&](const VarHandle& i) { return i * i; });
-  Tensor* b = Compute("b", {{2, "j"}}, [&](const VarHandle& j) {
-    return a->load(j + ExprHandle(8));
+  Tensor b = Compute("b", {{2, "j"}}, [&](const VarHandle& j) {
+    return a.load(j + ExprHandle(8));
   });
 
-  LoopNest l(std::vector<Tensor*>({b}), {a, b});
-  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(a->buf()).at(0);
+  LoopNest l({b}, {a, b});
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(a.buf()).at(0);
   LoopNest::splitWithMask(loops[0], 4);
-  ASSERT_THROWS_WITH(l.computeInline(a->buf()), "compound indices");
+  ASSERT_THROWS_WITH(l.computeInline(a.buf()), "compound indices");
 }
 
 // Split a Compute then inline another Compute into it.
 TEST(LoopNest, ScheduleSplitBThenInline) {
   KernelScope kernel_scope;
-  Tensor* a =
+  Tensor a =
       Compute("a", {{18, "i"}}, [&](const VarHandle& i) { return i * i; });
-  Tensor* b = Compute("b", {{6, "j"}}, [&](const VarHandle& j) {
-    return a->load(j + ExprHandle(8));
+  Tensor b = Compute("b", {{6, "j"}}, [&](const VarHandle& j) {
+    return a.load(j + ExprHandle(8));
   });
 
-  LoopNest l(std::vector<Tensor*>({b}), {a, b});
-  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(b->buf()).at(0);
+  LoopNest l({b}, {a, b});
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(b.buf()).at(0);
   LoopNest::splitWithMask(loops[0], 3);
-  l.computeInline(a->buf());
+  l.computeInline(a.buf());
   l.prepareForCodegen();
   StmtPtr s = IRSimplifier::simplify(l.root_stmt());
 
@@ -1491,32 +1472,32 @@ TEST(LoopNest, ScheduleSplitBThenInline) {
 // Split a Compute twice then inline it.
 TEST(LoopNest, ScheduleSplitTwiceThenInline) {
   KernelScope kernel_scope;
-  Tensor* a =
+  Tensor a =
       Compute("a", {{18, "i"}}, [&](const VarHandle& i) { return i * i; });
-  Tensor* b = Compute("b", {{2, "j"}}, [&](const VarHandle& j) {
-    return a->load(j + ExprHandle(8));
+  Tensor b = Compute("b", {{2, "j"}}, [&](const VarHandle& j) {
+    return a.load(j + ExprHandle(8));
   });
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ForPtr i_inner;
 
-  LoopNest l(std::vector<Tensor*>({b}), {a, b});
-  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(a->buf()).at(0);
+  LoopNest l({b}, {a, b});
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(a.buf()).at(0);
   LoopNest::splitWithMask(loops[0], 4, &i_inner);
   LoopNest::splitWithMask(i_inner, 2);
-  ASSERT_THROWS_WITH(l.computeInline(a->buf()), "compound indices");
+  ASSERT_THROWS_WITH(l.computeInline(a.buf()), "compound indices");
 }
 
 // Inline a Compute, then split.
 TEST(LoopNest, ScheduleInlineThenSplit) {
   KernelScope kernel_scope;
-  Tensor* a =
+  Tensor a =
       Compute("a", {{18, "i"}}, [&](const VarHandle& i) { return i * i; });
-  Tensor* b = Compute("b", {{6, "j"}}, [&](const VarHandle& j) {
-    return a->load(j + ExprHandle(8));
+  Tensor b = Compute("b", {{6, "j"}}, [&](const VarHandle& j) {
+    return a.load(j + ExprHandle(8));
   });
 
-  LoopNest l(std::vector<Tensor*>({b}), {a, b});
-  l.computeInline(a->buf());
+  LoopNest l({b}, {a, b});
+  l.computeInline(a.buf());
 
   std::vector<ForPtr> loops = NodeFinder<For>::find(l.root_stmt());
   LoopNest::splitWithMask(loops.back(), 3);
@@ -1534,16 +1515,16 @@ TEST(LoopNest, ScheduleInlineThenSplit) {
 // Split a Compute, inline it, then split the result.
 TEST(LoopNest, ScheduleSplitInlineThenSplit) {
   KernelScope kernel_scope;
-  Tensor* a =
+  Tensor a =
       Compute("a", {{18, "i"}}, [&](const VarHandle& i) { return i * i; });
-  Tensor* b = Compute("b", {{16, "j"}}, [&](const VarHandle& j) {
-    return a->load(j + ExprHandle(8));
+  Tensor b = Compute("b", {{16, "j"}}, [&](const VarHandle& j) {
+    return a.load(j + ExprHandle(8));
   });
 
-  LoopNest l(std::vector<Tensor*>({b}), {a, b});
+  LoopNest l({b}, {a, b});
   auto loops = NodeFinder<For>::find(l.root_stmt());
   LoopNest::splitWithMask(loops.back(), 2);
-  l.computeInline(a->buf());
+  l.computeInline(a.buf());
 
   loops = NodeFinder<For>::find(l.root_stmt());
   LoopNest::splitWithMask(loops.front(), 2);
@@ -1561,35 +1542,35 @@ TEST(LoopNest, ScheduleSplitInlineThenSplit) {
 // Oversplit a loop that is simplified out after inlining.
 TEST(LoopNest, ScheduleSplitInlineSimplify) {
   KernelScope kernel_scope;
-  Tensor* a = Compute("a", {{18, "i"}}, [&](const VarHandle& i) {
+  Tensor a = Compute("a", {{18, "i"}}, [&](const VarHandle& i) {
     return ExprHandle(4) * i - ExprHandle(2) * i;
   });
-  Tensor* b = Compute("b", {{2, "j"}}, [&](const VarHandle& j) {
-    return a->load(j) - ExprHandle(1);
+  Tensor b = Compute("b", {{2, "j"}}, [&](const VarHandle& j) {
+    return a.load(j) - ExprHandle(1);
   });
 
-  LoopNest l(std::vector<Tensor*>({b}), {a, b});
-  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(a->buf()).at(0);
+  LoopNest l({b}, {a, b});
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(a.buf()).at(0);
   LoopNest::splitWithMask(loops[0], 4);
-  ASSERT_THROWS_WITH(l.computeInline(a->buf()), "compound indices");
+  ASSERT_THROWS_WITH(l.computeInline(a.buf()), "compound indices");
 }
 
 // Inline a Compute with two consumers.
 TEST(LoopNest, ScheduleInlineThreeMixedOnce) {
   KernelScope kernel_scope;
-  Tensor* a =
+  Tensor a =
       Compute("a", {{18, "i"}}, [&](const VarHandle& i) { return i * i; });
-  Tensor* b = Compute("b", {{6, "j"}}, [&](const VarHandle& j) {
-    return a->load(j + ExprHandle(8));
+  Tensor b = Compute("b", {{6, "j"}}, [&](const VarHandle& j) {
+    return a.load(j + ExprHandle(8));
   });
-  Tensor* c = Compute(
+  Tensor c = Compute(
       "c", {{4, "k"}, {3, "l"}}, [&](const VarHandle& k, const VarHandle& l) {
-        return a->load(k) * b->load(l);
+        return a.load(k) * b.load(l);
       });
 
-  LoopNest l(std::vector<Tensor*>({c}), {a, b, c});
-  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(a->buf()).at(0);
-  l.computeInline(a->buf());
+  LoopNest l({c}, {a, b, c});
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(a.buf()).at(0);
+  l.computeInline(a.buf());
   l.prepareForCodegen();
 
   StmtPtr s = IRSimplifier::simplify(l.root_stmt());
@@ -1607,20 +1588,20 @@ TEST(LoopNest, ScheduleInlineThreeMixedOnce) {
 // Inline Compute A into B, then inline B into C.
 TEST(LoopNest, ScheduleInlineThreeMixedTwice) {
   KernelScope kernel_scope;
-  Tensor* a =
+  Tensor a =
       Compute("a", {{18, "i"}}, [&](const VarHandle& i) { return i * i; });
-  Tensor* b = Compute("b", {{6, "j"}}, [&](const VarHandle& j) {
-    return a->load(j + ExprHandle(8));
+  Tensor b = Compute("b", {{6, "j"}}, [&](const VarHandle& j) {
+    return a.load(j + ExprHandle(8));
   });
-  Tensor* c = Compute(
+  Tensor c = Compute(
       "c", {{4, "k"}, {3, "l"}}, [&](const VarHandle& k, const VarHandle& l) {
-        return a->load(k) * b->load(l);
+        return a.load(k) * b.load(l);
       });
 
-  LoopNest l(std::vector<Tensor*>({c}), {a, b, c});
-  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(a->buf()).at(0);
-  l.computeInline(a->buf());
-  l.computeInline(b->buf());
+  LoopNest l({c}, {a, b, c});
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(a.buf()).at(0);
+  l.computeInline(a.buf());
+  l.computeInline(b.buf());
   l.prepareForCodegen();
 
   StmtPtr s = IRSimplifier::simplify(l.root_stmt());
@@ -1638,19 +1619,19 @@ TEST(LoopNest, ScheduleInlineThreeMixedTwice) {
 // Inline a Compute that is both a producer and consumer.
 TEST(LoopNest, ScheduleInlineThreeMixedInner) {
   KernelScope kernel_scope;
-  Tensor* a =
+  Tensor a =
       Compute("a", {{18, "i"}}, [&](const VarHandle& i) { return i * i; });
-  Tensor* b = Compute("b", {{6, "j"}}, [&](const VarHandle& j) {
-    return a->load(j + ExprHandle(8));
+  Tensor b = Compute("b", {{6, "j"}}, [&](const VarHandle& j) {
+    return a.load(j + ExprHandle(8));
   });
-  Tensor* c = Compute(
+  Tensor c = Compute(
       "c", {{4, "k"}, {3, "l"}}, [&](const VarHandle& k, const VarHandle& l) {
-        return a->load(k) * b->load(l);
+        return a.load(k) * b.load(l);
       });
 
-  LoopNest l(std::vector<Tensor*>({c}), {a, b, c});
-  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(a->buf()).at(0);
-  l.computeInline(b->buf());
+  LoopNest l({c}, {a, b, c});
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(a.buf()).at(0);
+  l.computeInline(b.buf());
   l.prepareForCodegen();
 
   StmtPtr s = IRSimplifier::simplify(l.root_stmt());
@@ -1668,25 +1649,25 @@ TEST(LoopNest, ScheduleInlineThreeMixedInner) {
 // Split 3 Computes, then inline the first two into the last.
 TEST(LoopNest, ScheduleInlineThreeMixedSplit) {
   KernelScope kernel_scope;
-  Tensor* a =
+  Tensor a =
       Compute("a", {{18, "i"}}, [&](const VarHandle& i) { return i * i; });
-  Tensor* b = Compute("b", {{6, "j"}}, [&](const VarHandle& j) {
-    return a->load(j + ExprHandle(8));
+  Tensor b = Compute("b", {{6, "j"}}, [&](const VarHandle& j) {
+    return a.load(j + ExprHandle(8));
   });
-  Tensor* c = Compute(
+  Tensor c = Compute(
       "c", {{4, "k"}, {3, "l"}}, [&](const VarHandle& k, const VarHandle& l) {
-        return a->load(k) * b->load(l);
+        return a.load(k) * b.load(l);
       });
 
-  LoopNest l(std::vector<Tensor*>({c}), {a, b, c});
-  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(a->buf()).at(0);
+  LoopNest l({c}, {a, b, c});
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(a.buf()).at(0);
   LoopNest::splitWithMask(loops[0], 4);
-  loops = l.getAllLoopNestsWritingToBuf(b->buf()).at(0);
+  loops = l.getAllLoopNestsWritingToBuf(b.buf()).at(0);
   LoopNest::splitWithMask(loops[0], 3);
-  loops = l.getAllLoopNestsWritingToBuf(c->buf()).at(0);
+  loops = l.getAllLoopNestsWritingToBuf(c.buf()).at(0);
   LoopNest::splitWithMask(loops[0], 2);
 
-  ASSERT_THROWS_WITH(l.computeInline(a->buf()), "compound indices");
+  ASSERT_THROWS_WITH(l.computeInline(a.buf()), "compound indices");
 }
 
 // Check that inlining works for output tensors too
@@ -1696,21 +1677,21 @@ TEST(LoopNest, ScheduleInlineOutputTensors) {
   const int N = 5;
   const int K = 6;
 
-  Tensor* x = Compute(
+  Tensor x = Compute(
       "x",
       {{M, "m1"}, {N, "n1"}, {K, "k1"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
         return m * n * k;
       });
-  Tensor* y = Compute(
+  Tensor y = Compute(
       "y",
       {{M, "m2"}, {N, "n2"}, {K, "k2"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
-        return x->load(m, n, k) + m;
+        return x.load(m, n, k) + m;
       });
 
   LoopNest l1({x, y});
-  l1.computeInline(x->buf());
+  l1.computeInline(x.buf());
 
   // would normally compare results but Rand isn't implemented in the
   // SimpleIREvaluator, even if we could seed it.
@@ -1736,14 +1717,14 @@ TEST(LoopNest, ScheduleFuserStyle) {
 
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
 
-  Tensor* b = Compute(
+  Tensor b = Compute(
       "f", {{kTotalSize, "i"}}, [&](const std::vector<VarHandle>& axes) {
         return a_buf.load(axes[0]) + 11.0f;
       });
 
-  Tensor* c = Compute(
+  Tensor c = Compute(
       "g", {{kTotalSize, "i"}}, [&](const std::vector<VarHandle>& axes) {
-        return b->load(axes[0]) + 1.0f;
+        return b.load(axes[0]) + 1.0f;
       });
 
   LoopNest l({b, c});
@@ -1772,17 +1753,17 @@ TEST(LoopNest, ScheduleFuserThreeArg) {
   Placeholder c(BufHandle("C", {ExprHandle(kTotalSize)}, kFloat));
   Placeholder d(BufHandle("D", {ExprHandle(kTotalSize)}, kFloat));
 
-  Tensor* e = Compute("e", {{kTotalSize, "i"}}, [&](const VarHandle& i) {
+  Tensor e = Compute("e", {{kTotalSize, "i"}}, [&](const VarHandle& i) {
     return a.load(i) + b.load(i);
   });
-  Tensor* f = Compute("f", {{kTotalSize, "i"}}, [&](const VarHandle& i) {
-    return e->load(i) + c.load(i);
+  Tensor f = Compute("f", {{kTotalSize, "i"}}, [&](const VarHandle& i) {
+    return e.load(i) + c.load(i);
   });
-  Tensor* g = Compute("g", {{kTotalSize, "i"}}, [&](const VarHandle& i) {
-    return f->load(i) + d.load(i);
+  Tensor g = Compute("g", {{kTotalSize, "i"}}, [&](const VarHandle& i) {
+    return f.load(i) + d.load(i);
   });
 
-  LoopNest l(std::vector<Tensor*>({g}), {e, f, g});
+  LoopNest l({g}, {e, f, g});
   l.computeInline(l.getLoopBodyFor(e));
   l.computeInline(l.getLoopBodyFor(f));
   l.prepareForCodegen();
@@ -1807,7 +1788,7 @@ TEST(LoopNest, ScheduleDynamicShape2D) {
     VarHandle n("n", kInt);
     Placeholder a(BufHandle("a", {m, n}, kFloat));
     Placeholder b(BufHandle("b", {m, n}, kFloat));
-    Tensor* c = Compute(
+    Tensor c = Compute(
         "c", {{m, "m"}, {n, "n"}}, [&](const VarHandle& i, const VarHandle& j) {
           return a.load(i, j) + b.load(i, j);
         });
@@ -1842,12 +1823,12 @@ TEST(LoopNest, LoopNestComputeAt_1) {
   // and the temp should be used in B.
   KernelScope kernel_scope;
   VarHandle N("N", kInt);
-  Tensor* A = Compute(
+  Tensor A = Compute(
       "A", {{N, "i_a"}}, [&](const VarHandle& i_a) { return i_a * i_a; });
-  Tensor* B = Compute(
-      "B", {{N, "i_b"}}, [&](const VarHandle& i_b) { return A->load(i_b); });
-  LoopNest l(std::vector<Tensor*>({B}), {A, B});
-  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(B->buf()).at(0);
+  Tensor B = Compute(
+      "B", {{N, "i_b"}}, [&](const VarHandle& i_b) { return A.load(i_b); });
+  LoopNest l({B}, {A, B});
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(B.buf()).at(0);
   LoopNest::computeAt(l.getLoopBodyFor(A), loops[0]);
   l.prepareForCodegen();
   StmtPtr s = l.root_stmt();
@@ -1891,16 +1872,16 @@ TEST(LoopNest, LoopNestComputeAt_2) {
   const int kW = 16, kH = 16;
   VarHandle W("W", kInt);
   VarHandle H("H", kInt);
-  Tensor* p = Compute(
+  Tensor p = Compute(
       "prod",
       {{H + 1, "py"}, {W + 1, "px"}},
       [&](const VarHandle& py, const VarHandle& px) { return px * py; });
-  Tensor* c = Compute(
+  Tensor c = Compute(
       "cons",
       {{H, "cy"}, {W, "cx"}},
       [&](const VarHandle& y, const VarHandle& x) {
-        return p->load(y, x) + p->load(y + 1, x) + p->load(y, x + 1) +
-            p->load(y + 1, x + 1);
+        return p.load(y, x) + p.load(y + 1, x) + p.load(y, x + 1) +
+            p.load(y + 1, x + 1);
       });
 
   std::vector<int> c_ref(kW * kH, 0);
@@ -1909,12 +1890,12 @@ TEST(LoopNest, LoopNestComputeAt_2) {
       c_ref[y * kW + x] = y * x + (y + 1) * x + y * (x + 1) + (y + 1) * (x + 1);
     }
   }
-  LoopNest orig_loopnest(std::vector<Tensor*>({c}), {p, c});
+  LoopNest orig_loopnest({c}, {p, c});
 
   {
     // First let's try to compute P at axis cy (the outer loop)
     LoopNest l(orig_loopnest);
-    std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(c->buf()).at(0);
+    std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(c.buf()).at(0);
     LoopNest::computeAt(l.getLoopBodyFor(p), loops[0]);
     l.prepareForCodegen();
     StmtPtr s = l.root_stmt();
@@ -1940,7 +1921,7 @@ TEST(LoopNest, LoopNestComputeAt_2) {
   {
     // Now let's try to compute P at axis cx (the inner loop)
     LoopNest l(orig_loopnest);
-    std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(c->buf()).at(0);
+    std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(c.buf()).at(0);
     LoopNest::computeAt(l.getLoopBodyFor(p), loops[1]);
     l.prepareForCodegen();
     StmtPtr s = l.root_stmt();
@@ -1979,27 +1960,25 @@ TEST(LoopNest, LoopNestComputeAt_3) {
   const int kW = 16, kH = 16;
   VarHandle W("W", kInt);
   VarHandle H("H", kInt);
-  Tensor* A = Compute(
+  Tensor A = Compute(
       "A",
       {{H + 1, "ay"}, {W + 1, "ax"}},
       [&](const VarHandle& ay, const VarHandle& ax) { return ax * ay; });
-  Tensor* B = Compute(
+  Tensor B = Compute(
       "B",
       {{H + 1, "by"}, {W + 1, "bx"}},
-      [&](const VarHandle& by, const VarHandle& bx) {
-        return A->load(by, bx);
-      });
-  Tensor* C = Compute(
+      [&](const VarHandle& by, const VarHandle& bx) { return A.load(by, bx); });
+  Tensor C = Compute(
       "C",
       {{H, "cy"}, {W, "cx"}},
       [&](const VarHandle& cy, const VarHandle& cx) {
-        return B->load(cy, cx + 1);
+        return B.load(cy, cx + 1);
       });
-  Tensor* D = Compute(
+  Tensor D = Compute(
       "D",
       {{H, "dy"}, {W, "dx"}},
       [&](const VarHandle& dy, const VarHandle& dx) {
-        return A->load(dy + 1, dx) + C->load(dy, dx);
+        return A.load(dy + 1, dx) + C.load(dy, dx);
       });
 
   std::vector<int> c_ref(kW * kH, 0);
@@ -2009,11 +1988,11 @@ TEST(LoopNest, LoopNestComputeAt_3) {
     }
   }
 
-  LoopNest orig_loopnest(std::vector<Tensor*>({D}), {A, B, C, D});
+  LoopNest orig_loopnest({D}, {A, B, C, D});
   {
     // First let's try to compute A at axis dy (the outer loop)
     LoopNest l(orig_loopnest);
-    std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(D->buf()).at(0);
+    std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(D.buf()).at(0);
     LoopNest::computeAt(l.getLoopBodyFor(A), loops[0]);
     l.prepareForCodegen();
     StmtPtr s = l.root_stmt();
@@ -2044,7 +2023,7 @@ TEST(LoopNest, LoopNestComputeAt_3) {
   {
     // Now let's try to compute A at axis dx (the inner loop)
     LoopNest l(orig_loopnest);
-    std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(D->buf()).at(0);
+    std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(D.buf()).at(0);
     LoopNest::computeAt(l.getLoopBodyFor(A), loops[1]);
     l.prepareForCodegen();
     StmtPtr s = l.root_stmt();
@@ -2083,15 +2062,15 @@ TEST(LoopNest, Reduce2dComputeAt) {
   VarHandle W("W", kInt);
   VarHandle H("H", kInt);
 
-  Tensor* p =
+  Tensor p =
       Compute("prod", {{H + 1, "py"}, {W + 1, "px"}}, [&](Axis py, Axis px) {
         return px * py;
       });
-  Tensor* c = Reduce(
+  Tensor c = Reduce(
       "cons",
       {{H, "cy"}, {W, "cx"}},
       Sum(),
-      [&](Axis y, Axis x, Axis r, Axis s) { return p->load(y + r, x + s); },
+      [&](Axis y, Axis x, Axis r, Axis s) { return p.load(y + r, x + s); },
       {{2, "r"}, {2, "s"}});
 
   std::vector<int> c_ref(kW * kH, 0);
@@ -2100,7 +2079,7 @@ TEST(LoopNest, Reduce2dComputeAt) {
       c_ref[y * kW + x] = y * x + (y + 1) * x + y * (x + 1) + (y + 1) * (x + 1);
     }
   }
-  LoopNest orig_loopnest(std::vector<Tensor*>({c}), {p, c});
+  LoopNest orig_loopnest({c}, {p, c});
   checkIR(orig_loopnest.root_stmt(), R"IR(
 # CHECK: for (int py = 0; py < H + 1; py++) {
 # CHECK:   for (int px = 0; px < W + 1; px++) {
@@ -2122,7 +2101,7 @@ TEST(LoopNest, Reduce2dComputeAt) {
   {
     // First let's try to compute P at axis cy (the outer loop)
     LoopNest l(orig_loopnest);
-    auto loops = l.getAllLoopNestsWritingToBuf(c->buf()).at(0);
+    auto loops = l.getAllLoopNestsWritingToBuf(c.buf()).at(0);
     LoopNest::computeAt(l.getLoopBodyFor(p), loops[0]);
     // FIXME: Calling simplify here breaks the IR:
     // MALFORMED INPUT: could not find base node in Load - temp[...]
@@ -2159,7 +2138,7 @@ TEST(LoopNest, Reduce2dComputeAt) {
   {
     // Now let's try to compute P at axis cx (the inner loop)
     LoopNest l(orig_loopnest);
-    std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(c->buf()).at(0);
+    std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(c.buf()).at(0);
     LoopNest::computeAt(l.getLoopBodyFor(p), loops[1]);
     l.simplify();
     l.eliminateDeadStores();
@@ -2205,17 +2184,17 @@ TEST(LoopNest, DISABLED_Conv1d_NH) {
   int Pad = 1;
   Placeholder IP("input", kFloat, {H});
 
-  Tensor* A =
+  Tensor A =
       Compute("A", {{N, "np"}, {H + 2 * Pad, "hp"}}, [&](Axis n, Axis h) {
         auto cond = CompareSelect::make(h, Pad, 1, 0, kLT);
         cond = CompareSelect::make(h, H + Pad, 1, cond, kGE);
         return ifThenElse(cond, 0.f, IP.load(n, h - Pad));
       });
-  Tensor* B = Reduce(
+  Tensor B = Reduce(
       "B",
       {{N, "n"}, {H, "h"}},
       Sum(),
-      [&](Axis n, Axis h, Axis r) { return A->load(n, h + r); },
+      [&](Axis n, Axis h, Axis r) { return A.load(n, h + r); },
       {{R, "r"}});
   LoopNest l({B});
   checkIR(l.root_stmt(), R"IR(
@@ -2233,7 +2212,7 @@ TEST(LoopNest, DISABLED_Conv1d_NH) {
 # CHECK:   }
 # CHECK: }
 )IR");
-  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(B->buf()).at(0);
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(B.buf()).at(0);
   LoopNest::computeAt(l.getLoopBodyFor(A), loops[0]);
   // FIXME: The current IR is totally broken.  The body of the inlined loop is:
 
@@ -2292,7 +2271,7 @@ class LoopOrderHelper : public IRVisitor {
 
 TEST(LoopNest, LoopNestReorderAxis1) {
   KernelScope kernel_scope;
-  Tensor* tensor = Compute(
+  Tensor tensor = Compute(
       "f", {{2, "x"}, {3, "y"}}, [](const VarHandle& x, const VarHandle& y) {
         return ExprHandle(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
       });
@@ -2303,7 +2282,7 @@ TEST(LoopNest, LoopNestReorderAxis1) {
   SimpleIREvaluator cg(stmt1, {tensor});
   cg.call({stmt1_output});
 
-  auto loops = l.getAllLoopNestsWritingToBuf(tensor->buf()).at(0);
+  auto loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
   LoopNest::reorderAxis(loops[0], loops[1]);
   StmtPtr stmt2 = Stmt::clone(l.root_stmt());
 
@@ -2324,7 +2303,7 @@ TEST(LoopNest, LoopNestReorderAxis1) {
   }
 
   // Reorder them back.
-  loops = l.getAllLoopNestsWritingToBuf(tensor->buf()).at(0);
+  loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
   LoopNest::reorderAxis(loops[0], loops[1]);
   StmtPtr stmt3 = l.root_stmt();
 
@@ -2341,7 +2320,7 @@ TEST(LoopNest, LoopNestReorderAxis1) {
 
 TEST(LoopNest, LoopNestReorderPartialAxes) {
   KernelScope kernel_scope;
-  Tensor* tensor = Compute(
+  Tensor tensor = Compute(
       "f",
       {{2, "x"}, {3, "y"}, {4, "z"}},
       [](const VarHandle& x, const VarHandle& y, const VarHandle& z) {
@@ -2358,7 +2337,7 @@ TEST(LoopNest, LoopNestReorderPartialAxes) {
   SimpleIREvaluator cg(stmt1, {tensor});
   cg.call({stmt1_output});
 
-  auto loops = l.getAllLoopNestsWritingToBuf(tensor->buf()).at(0);
+  auto loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
   LoopNest::reorderAxis(loops[0], loops[1]);
   ASSERT_EQ(loopOrderHelper.getOrder(l.root_stmt()), "y,x,z,");
 
@@ -2372,7 +2351,7 @@ TEST(LoopNest, LoopNestReorderPartialAxes) {
     ASSERT_EQ(stmt1_output[i], stmt2_output[i]);
   }
 
-  loops = l.getAllLoopNestsWritingToBuf(tensor->buf()).at(0);
+  loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
   LoopNest::reorderAxis(loops[1], loops[2]);
   ASSERT_EQ(loopOrderHelper.getOrder(l.root_stmt()), "y,z,x,");
 
@@ -2389,7 +2368,7 @@ TEST(LoopNest, LoopNestReorderPartialAxes) {
 
 TEST(LoopNest, LoopNestReorderInternalAxis) {
   KernelScope kernel_scope;
-  Tensor* tensor = Compute(
+  Tensor tensor = Compute(
       "f",
       {{1, "w"}, {2, "x"}, {3, "y"}, {4, "z"}},
       [](const VarHandle& w,
@@ -2409,7 +2388,7 @@ TEST(LoopNest, LoopNestReorderInternalAxis) {
   SimpleIREvaluator cg(stmt1, {tensor});
   cg.call({stmt1_output});
 
-  auto loops = l.getAllLoopNestsWritingToBuf(tensor->buf()).at(0);
+  auto loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
   LoopNest::reorderAxis(loops[2], loops[1]);
   ASSERT_EQ(loopOrderHelper.getOrder(l.root_stmt()), "w,y,x,z,");
 
@@ -2426,7 +2405,7 @@ TEST(LoopNest, LoopNestReorderInternalAxis) {
 
 TEST(LoopNest, LoopNestReorderEnclosingAxis) {
   KernelScope kernel_scope;
-  Tensor* tensor = Compute(
+  Tensor tensor = Compute(
       "f",
       {{1, "w"}, {2, "x"}, {3, "y"}, {4, "z"}},
       [](const VarHandle& w,
@@ -2445,7 +2424,7 @@ TEST(LoopNest, LoopNestReorderEnclosingAxis) {
   SimpleIREvaluator cg(stmt1, {tensor});
   cg.call({stmt1_output});
 
-  auto loops = l.getAllLoopNestsWritingToBuf(tensor->buf()).at(0);
+  auto loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
   LoopNest::reorderAxis(loops[0], loops[3]);
   ASSERT_EQ(loopOrderHelper.getOrder(l.root_stmt()), "z,x,y,w,");
 
@@ -2462,14 +2441,14 @@ TEST(LoopNest, LoopNestReorderEnclosingAxis) {
 
 TEST(LoopNest, LoopNestReorderSameAxis) {
   KernelScope kernel_scope;
-  Tensor* tensor = Compute(
+  Tensor tensor = Compute(
       "f", {{2, "x"}, {3, "y"}}, [](const VarHandle& x, const VarHandle& y) {
         return ExprHandle(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
       });
   LoopNest l({tensor});
   StmtPtr stmt1 = Stmt::clone(l.root_stmt());
 
-  auto loops = l.getAllLoopNestsWritingToBuf(tensor->buf()).at(0);
+  auto loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
   LoopNest::reorderAxis(loops[1], loops[1]);
   StmtPtr stmt2 = Stmt::clone(l.root_stmt());
 
@@ -2492,7 +2471,7 @@ TEST(LoopNest, LoopNestReorderExtraStatements) {
 
   KernelScope kernel_scope;
 
-  Tensor* tensor = Compute(
+  Tensor tensor = Compute(
       "f",
       {{2, "x"}, {3, "y"}, {4, "z"}},
       [](const VarHandle& x, const VarHandle& y, const VarHandle& z) {
@@ -2503,7 +2482,7 @@ TEST(LoopNest, LoopNestReorderExtraStatements) {
 
   Placeholder extra(BufHandle("res", {6, 3}, kFloat));
 
-  auto loops = l.getAllLoopNestsWritingToBuf(tensor->buf()).at(0);
+  auto loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
 
   VarHandle i = VarHandle(loops[0]->var());
 
@@ -2589,7 +2568,7 @@ TEST(LoopNest, LoopNestReorderExtraStatements) {
    *
    *
    */
-  loops = l.getAllLoopNestsWritingToBuf(tensor->buf()).at(0);
+  loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
   LoopNest::reorderAxis(loops[0], loops[2]);
   StmtPtr stmt3 = Stmt::clone(l.root_stmt());
 
@@ -2628,7 +2607,7 @@ void LoopNestReorderTestHelper(
     int index2) {
   KernelScope kernel_scope;
 
-  Tensor* c = Compute(
+  Tensor c = Compute(
       "5d",
       {{2, "a"}, {3, "b"}, {2, "c"}, {3, "d"}, {2, "e"}},
       [](const std::vector<VarHandle>&) { return -1; });
@@ -2636,7 +2615,7 @@ void LoopNestReorderTestHelper(
 
   Placeholder extra(BufHandle("extra", {5}, kInt));
 
-  auto loops = l.getAllLoopNestsWritingToBuf(c->buf()).at(0);
+  auto loops = l.getAllLoopNestsWritingToBuf(c.buf()).at(0);
   int j = 0;
   for (auto l : loops) {
     // Add an increment at each layer of the loop which counts the number of
@@ -2677,7 +2656,7 @@ void LoopNestReorderTestHelper(
     ASSERT_EQ(extra1[i], expected_loops);
   }
 
-  loops = l.getAllLoopNestsWritingToBuf(c->buf()).at(0);
+  loops = l.getAllLoopNestsWritingToBuf(c.buf()).at(0);
   LoopNest::reorderAxis(loops[index1], loops[index2]);
   StmtPtr stmt2 = Stmt::clone(l.root_stmt());
 
@@ -2752,26 +2731,26 @@ TEST(LoopNest, LoopNestReorderInternalLoopNest) {
   Placeholder c_buf("c", kFloat, {M, N});
   Placeholder d_buf("d", kFloat, {M, K});
 
-  Tensor* x = Compute(
+  Tensor x = Compute(
       "x",
       {{M, "m1"}, {N, "n1"}, {K, "k1"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
         return a_buf.load(m, n) * b_buf.load(n, k);
       });
-  Tensor* y = Compute(
+  Tensor y = Compute(
       "y",
       {{M, "m2"}, {N, "n2"}, {K, "k2"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
-        return c_buf.load(m, n) * d_buf.load(m, k) + x->load(m, n, k);
+        return c_buf.load(m, n) * d_buf.load(m, k) + x.load(m, n, k);
       });
-  Tensor* z = Compute(
+  Tensor z = Compute(
       "z",
       {{M, "m3"}, {N, "n3"}, {K, "k3"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
-        return x->load(m, n, k) + y->load(m, n, k);
+        return x.load(m, n, k) + y.load(m, n, k);
       });
 
-  LoopNest l(std::vector<Tensor*>({z}), {x, y, z});
+  LoopNest l({z}, {x, y, z});
   ForPtr a = nullptr;
   ForPtr b = nullptr;
   auto fors = NodeFinder<For>::find(l.root_stmt());
@@ -2845,14 +2824,14 @@ TEST(LoopNest, LoopNestReorderInternalLoopNest) {
 
 TEST(LoopNest, OuterLoopVectorization) {
   KernelScope kernel_scope;
-  Tensor* tensor = Compute(
+  Tensor tensor = Compute(
       "f", {{8, "X"}, {8, "y"}}, [](const VarHandle& x, const VarHandle& y) {
         return ExprHandle(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
       });
   LoopNest l({tensor});
 
   ASSERT_TRUE(
-      LoopNest::vectorize(l.getAllLoopNestsWritingToBuf(tensor->buf())[0][0]));
+      LoopNest::vectorize(l.getAllLoopNestsWritingToBuf(tensor.buf())[0][0]));
 
   StmtPtr root_stmt = l.root_stmt();
   BlockPtr outer_block = to<Block>(root_stmt);
@@ -2899,10 +2878,10 @@ namespace {
 std::string constantUpperBoundLoopIR(int upper_bound_val) {
   KernelScope kernel_scope;
   ExprHandle upper_bound(upper_bound_val);
-  Tensor* A = Compute(
+  Tensor A = Compute(
       "A", {{upper_bound, "x"}}, [&](const VarHandle& x) { return x * 2; });
   LoopNest l({A});
-  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(A->buf())[0];
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(A.buf())[0];
   StmtPtr unrolled = nullptr;
   LoopNest::unroll(loops[0], &unrolled);
   std::ostringstream oss;
@@ -2927,12 +2906,12 @@ TEST(LoopNest, UnrollOuter) {
   KernelScope kernel_scope;
   ExprHandle outer_bound(3);
   ExprHandle inner_bound(4);
-  Tensor* A = Compute(
+  Tensor A = Compute(
       "A",
       {{outer_bound, "x"}, {inner_bound, "y"}},
       [&](const VarHandle& x, const VarHandle& y) { return x + y; });
   LoopNest l({A});
-  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(A->buf())[0];
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(A.buf())[0];
   StmtPtr unrolled = nullptr;
   LoopNest::unroll(loops[0], &unrolled);
   checkIR(unrolled, R"IR(
@@ -2951,12 +2930,12 @@ TEST(LoopNest, UnrollInner) {
   KernelScope kernel_scope;
   ExprHandle outer_bound(3);
   ExprHandle inner_bound(4);
-  Tensor* A = Compute(
+  Tensor A = Compute(
       "A",
       {{outer_bound, "x"}, {inner_bound, "y"}},
       [&](const VarHandle& x, const VarHandle& y) { return x + y; });
   LoopNest l({A});
-  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(A->buf())[0];
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(A.buf())[0];
   StmtPtr unrolled = nullptr;
   LoopNest::unroll(
       static_to<For>(loops[0]->body()->stmts().front()), &unrolled);
@@ -3044,10 +3023,10 @@ TEST(LoopNest, UnrollEmpty) {
 TEST(LoopNest, NoUnroll) {
   KernelScope kernel_scope;
   VarHandle upper_bound("N", kInt);
-  Tensor* A = Compute(
+  Tensor A = Compute(
       "A", {{upper_bound, "x"}}, [&](const VarHandle& x) { return x * 2; });
   LoopNest l({A});
-  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(A->buf())[0];
+  std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(A.buf())[0];
   StmtPtr unrolled = nullptr;
   ASSERT_THROWS_WITH(
       LoopNest::unroll(loops[0], &unrolled), "non-constant loop");
@@ -3326,7 +3305,7 @@ TEST(LoopNest, NormalizeAndSplitWithTail) {
   // Create a dummy tensor to construct LoopNest.
   ExprHandle n(100);
   Placeholder a(BufHandle("a", {n}, kFloat));
-  Tensor* b =
+  Tensor b =
       Compute("b", {{n, "i"}}, [&](const VarHandle& i) { return a.load(i); });
   LoopNest l({b});
 
@@ -3615,12 +3594,12 @@ TEST(LoopNest, FlattenReductionLoopNestFromTensor) {
   VarHandle m("m", kInt);
   VarHandle n("n", kInt);
   Placeholder b(BufHandle("b", {m, n}, kFloat));
-  Tensor* c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}});
+  Tensor c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}});
   LoopNest loop({c});
   HashProvider hasher;
   auto hash_before = hasher.hash(loop.root_stmt());
 
-  auto loops = loop.getAllLoopNestsWritingToBuf(c->buf())[1];
+  auto loops = loop.getAllLoopNestsWritingToBuf(c.buf())[1];
   ForPtr flattened = nullptr;
   ASSERT_FALSE(LoopNest::flatten(loops, &flattened));
   ASSERT_EQ(flattened, nullptr);
@@ -3673,14 +3652,14 @@ TEST(LoopNest, DetectInlineRankMismatch) {
   const int kTotalSize = 8;
 
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
-  Tensor* a = Compute("a", {{kTotalSize, "i"}}, [&](const VarHandle& i) {
+  Tensor a = Compute("a", {{kTotalSize, "i"}}, [&](const VarHandle& i) {
     return a_buf.load(i);
   });
-  Tensor* reshape = Compute(
+  Tensor reshape = Compute(
       "reshape",
       {{kTotalSize / 2, "i"}, {2, "j"}},
-      [&](const VarHandle& i, const VarHandle& j) { return a->load(i, j); });
-  LoopNest l(std::vector<Tensor*>({reshape}), {a, reshape});
+      [&](const VarHandle& i, const VarHandle& j) { return a.load(i, j); });
+  LoopNest l({reshape}, {a, reshape});
   ASSERT_THROWS_WITH(
       l.computeInline(l.getLoopBodyFor(a)),
       "Placeholder indexed access is inconsistent with its rank");
@@ -3689,22 +3668,22 @@ TEST(LoopNest, DetectInlineRankMismatch) {
 TEST(LoopNest, CacheReadsSimple) {
   KernelScope kernel_scope;
 
-  Tensor* A = Compute(
+  Tensor A = Compute(
       "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
         return i * j;
       });
-  Tensor* B = Compute(
+  Tensor B = Compute(
       "B", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
-        return A->load(i + 30, j + 3);
+        return A.load(i + 30, j + 3);
       });
-  Tensor* C = Compute(
+  Tensor C = Compute(
       "C", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
-        return A->load(i + 10, j + 20) + A->load(i + 30, j + 40);
+        return A.load(i + 10, j + 20) + A.load(i + 30, j + 40);
       });
 
-  LoopNest l(std::vector<Tensor*>({B, C}), {A, B, C});
-  StmtPtr j_loop = l.getAllLoopNestsWritingToBuf(B->buf())[0][1];
-  LoopNest::cacheAccesses(A->buf(), "A_local", j_loop);
+  LoopNest l({B, C}, {A, B, C});
+  StmtPtr j_loop = l.getAllLoopNestsWritingToBuf(B.buf())[0][1];
+  LoopNest::cacheAccesses(A.buf(), "A_local", j_loop);
 
   l.prepareForCodegen();
   StmtPtr result = IRSimplifier::simplify(l.root_stmt());
@@ -3757,22 +3736,22 @@ TEST(LoopNest, CacheReadsSimple) {
 TEST(LoopNest, CacheReadsOuter) {
   KernelScope kernel_scope;
 
-  Tensor* A = Compute(
+  Tensor A = Compute(
       "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
         return i * j;
       });
-  Tensor* B = Compute(
+  Tensor B = Compute(
       "B", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
-        return A->load(i + 30, j + 40) + A->load(i + 31, j + 41);
+        return A.load(i + 30, j + 40) + A.load(i + 31, j + 41);
       });
-  Tensor* C = Compute(
+  Tensor C = Compute(
       "C", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
-        return A->load(i + 10, j + 20) + A->load(i + 30, j + 40);
+        return A.load(i + 10, j + 20) + A.load(i + 30, j + 40);
       });
 
-  LoopNest l(std::vector<Tensor*>({B, C}), {A, B, C});
-  StmtPtr i_loop = l.getAllLoopNestsWritingToBuf(B->buf())[0][0];
-  LoopNest::cacheAccesses(A->buf(), "A_local", i_loop);
+  LoopNest l({B, C}, {A, B, C});
+  StmtPtr i_loop = l.getAllLoopNestsWritingToBuf(B.buf())[0][0];
+  LoopNest::cacheAccesses(A.buf(), "A_local", i_loop);
 
   l.prepareForCodegen();
   StmtPtr result = IRSimplifier::simplify(l.root_stmt());
@@ -3805,22 +3784,22 @@ TEST(LoopNest, CacheReadsOuter) {
 TEST(LoopNest, CacheReadsInternal) {
   KernelScope kernel_scope;
 
-  Tensor* A = Compute(
+  Tensor A = Compute(
       "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
         return i * j;
       });
-  Tensor* B = Compute(
+  Tensor B = Compute(
       "B", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
-        return A->load(i + 30, j + 40) + A->load(i + 31, j + 41);
+        return A.load(i + 30, j + 40) + A.load(i + 31, j + 41);
       });
-  Tensor* C = Compute(
+  Tensor C = Compute(
       "C", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
-        return A->load(i + 10, j + 20) + A->load(i + 30, j + 40);
+        return A.load(i + 10, j + 20) + A.load(i + 30, j + 40);
       });
 
-  LoopNest l(std::vector<Tensor*>({B, C}), {A, B, C});
-  StmtPtr j_loop = l.getAllLoopNestsWritingToBuf(B->buf())[0][1];
-  LoopNest::cacheAccesses(A->buf(), "A_local", j_loop);
+  LoopNest l({B, C}, {A, B, C});
+  StmtPtr j_loop = l.getAllLoopNestsWritingToBuf(B.buf())[0][1];
+  LoopNest::cacheAccesses(A.buf(), "A_local", j_loop);
   l.prepareForCodegen();
   StmtPtr result = IRSimplifier::simplify(l.root_stmt());
 
@@ -3852,23 +3831,23 @@ TEST(LoopNest, CacheReadsInternal) {
 TEST(LoopNest, CacheReadsInner) {
   KernelScope kernel_scope;
 
-  Tensor* A = Compute(
+  Tensor A = Compute(
       "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
         return i * j;
       });
   // note im changing the offset of the first arg of the first call to A.
-  Tensor* B = Compute(
+  Tensor B = Compute(
       "B", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
-        return A->load(i + 34, j + 40) + A->load(i + 30, j + 41);
+        return A.load(i + 34, j + 40) + A.load(i + 30, j + 41);
       });
-  Tensor* C = Compute(
+  Tensor C = Compute(
       "C", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
-        return A->load(i + 10, j + 20) + A->load(i + 30, j + 40);
+        return A.load(i + 10, j + 20) + A.load(i + 30, j + 40);
       });
 
-  LoopNest l(std::vector<Tensor*>({B, C}), {A, B, C});
+  LoopNest l({B, C}, {A, B, C});
   StmtPtr body = l.getLoopBodyFor(B);
-  LoopNest::cacheAccesses(A->buf(), "A_local", body);
+  LoopNest::cacheAccesses(A.buf(), "A_local", body);
   l.prepareForCodegen();
   StmtPtr result = IRSimplifier::simplify(l.root_stmt());
 
@@ -3900,22 +3879,22 @@ TEST(LoopNest, CacheReadsInner) {
 TEST(LoopNest, CacheWritesSimple) {
   KernelScope kernel_scope;
 
-  Tensor* A = Compute(
+  Tensor A = Compute(
       "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
         return i * j;
       });
-  Tensor* B = Compute(
+  Tensor B = Compute(
       "B", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
-        return A->load(i + 30, j + 40) + A->load(i + 31, j + 41);
+        return A.load(i + 30, j + 40) + A.load(i + 31, j + 41);
       });
-  Tensor* C = Compute(
+  Tensor C = Compute(
       "C", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
-        return A->load(i + 10, j + 20) + A->load(i + 30, j + 40);
+        return A.load(i + 10, j + 20) + A.load(i + 30, j + 40);
       });
 
-  LoopNest l(std::vector<Tensor*>({B, C}), {A, B, C});
-  StmtPtr a_loop = l.getAllLoopNestsWritingToBuf(A->buf())[0][1];
-  LoopNest::cacheAccesses(A->buf(), "A_local", a_loop);
+  LoopNest l({B, C}, {A, B, C});
+  StmtPtr a_loop = l.getAllLoopNestsWritingToBuf(A.buf())[0][1];
+  LoopNest::cacheAccesses(A.buf(), "A_local", a_loop);
 
   l.prepareForCodegen();
   StmtPtr result = IRSimplifier::simplify(l.root_stmt());
@@ -4054,7 +4033,7 @@ TEST(LoopNest, CompoundTensorSimple) {
   auto outer_for2 = For::make(x, 0, 10, inner_for2);
   BlockPtr body = Block::make({outer_for1, outer_for2});
 
-  Tensor* A = new Tensor(a_buf.node(), body);
+  Tensor A = Tensor(a_buf.node(), body);
 
   LoopNest l({A});
   l.prepareForCodegen();
@@ -4080,22 +4059,22 @@ TEST(LoopNest, InlineConstantIndex) {
   KernelScope kernel_scope;
   const int N = 10;
   Placeholder x_buf("a", kFloat, {1, N, 1});
-  Tensor* y = Compute(
+  Tensor y = Compute(
       "f",
       {{1, "m"}, {N, "n"}, {1, "o"}},
       [&](const ExprHandle& m, const ExprHandle& n, const ExprHandle& o) {
         return x_buf.load(m, n, o);
       });
-  Tensor* z = Compute(
+  Tensor z = Compute(
       "f",
       {{1, "m"}, {N, "n"}, {1, "o"}},
       [&](const ExprHandle& m, const ExprHandle& n, const ExprHandle& o) {
-        return y->load(m, n, o);
+        return y.load(m, n, o);
       });
 
-  LoopNest l(std::vector<Tensor*>({z}), {y, z});
+  LoopNest l({z}, {y, z});
   l.simplify();
-  ASSERT_TRUE(l.computeInline(y->buf()));
+  ASSERT_TRUE(l.computeInline(y.buf()));
 }
 
 TEST(LoopNest, CompoundTensorUsed) {
@@ -4115,14 +4094,14 @@ TEST(LoopNest, CompoundTensorUsed) {
   auto outer_for2 = For::make(x, 0, 10, inner_for2);
   BlockPtr body = Block::make({outer_for1, outer_for2});
 
-  Tensor* A = new Tensor(a_buf.node(), body);
-  Tensor* B = Compute(
+  Tensor A = Tensor(a_buf.node(), body);
+  Tensor B = Compute(
       "B", {{10, "i"}, {3, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
-        return A->load(i, j + 1) + A->load(i, j + 2);
+        return A.load(i, j + 1) + A.load(i, j + 2);
       });
 
-  LoopNest l(std::vector<Tensor*>({B}), {A, B});
-  ASSERT_FALSE(l.computeInline(A->buf()));
+  LoopNest l({B}, {A, B});
+  ASSERT_FALSE(l.computeInline(A.buf()));
   l.prepareForCodegen();
 
   std::vector<int> a_data(50, 0);
@@ -4707,12 +4686,10 @@ TEST(LoopNest, OptimizeConditionalsNotNormalized) {
   ASSERT_EQ(hash_before, hash_after);
 }
 
-static std::pair<std::unique_ptr<Placeholder>, Tensor*> colReduce(
-    int M,
-    int N) {
+static std::pair<std::unique_ptr<Placeholder>, Tensor> colReduce(int M, int N) {
   auto a =
       std::make_unique<Placeholder>("a", kFloat, std::vector<ExprHandle>{M, N});
-  Tensor* t = Reduce(
+  Tensor t = Reduce(
       "b",
       {{N, "n"}},
       Sum(),
@@ -4721,10 +4698,10 @@ static std::pair<std::unique_ptr<Placeholder>, Tensor*> colReduce(
   return {std::move(a), t};
 }
 
-static StmtPtr splitTailReorder(Tensor* b) {
+static StmtPtr splitTailReorder(Tensor b) {
   constexpr int kVectorWidth = 8;
   LoopNest nest({b});
-  auto loops = nest.getAllLoopNestsWritingToBuf(b->buf())[0];
+  auto loops = nest.getAllLoopNestsWritingToBuf(b.buf())[0];
   nest.splitWithTail(loops[0], kVectorWidth);
   // Now the loopnests will look like:
   //
@@ -4745,24 +4722,24 @@ static StmtPtr splitTailReorder(Tensor* b) {
   // Write #2: "b[n_outer * 8 + n_inner] = ReduceOp(...)"
   // Loopnest #2: {n_outer, n_inner, m};
   // We will have to reorder n_inner and m.
-  auto loopnests = nest.getAllLoopNestsWritingToBuf(b->buf());
+  auto loopnests = nest.getAllLoopNestsWritingToBuf(b.buf());
   LoopNest::reorderAxis(loopnests[1][1], loopnests[1][2]);
   nest.prepareForCodegen();
   return nest.root_stmt();
 }
 
-static StmtPtr splitMaskReorder(Tensor* b) {
+static StmtPtr splitMaskReorder(Tensor b) {
   constexpr int kVectorWidth = 8;
   LoopNest nest({b});
-  auto loops = nest.getAllLoopNestsWritingToBuf(b->buf())[1];
+  auto loops = nest.getAllLoopNestsWritingToBuf(b.buf())[1];
   nest.splitWithMask(loops[0], kVectorWidth);
-  loops = nest.getAllLoopNestsWritingToBuf(b->buf())[1];
+  loops = nest.getAllLoopNestsWritingToBuf(b.buf())[1];
   LoopNest::reorderAxis(loops[1], loops[2]);
   nest.prepareForCodegen();
   return nest.root_stmt();
 }
 
-static void checkColReduce(StmtPtr s, Placeholder& p, Tensor* t) {
+static void checkColReduce(StmtPtr s, Placeholder& p, Tensor t) {
   int M = immediateAs<int>(p.dim(0));
   int N = immediateAs<int>(p.dim(1));
   PaddedBuffer<float> a(M, N);
@@ -4893,14 +4870,14 @@ TEST(LoopNest, VectorizeUse) {
   KernelScope kernel_scope;
   constexpr int N = 8;
   Placeholder a("a", kFloat, {N});
-  Tensor* b = Compute(
+  Tensor b = Compute(
       "b", {{N, "n"}}, [&](const VarHandle& n) { return a.load(n) + 1.0f; });
-  Tensor* c = Compute(
-      "c", {{N, "n"}}, [&](const VarHandle& n) { return b->load(n) + 2.0f; });
-  LoopNest nest(std::vector<Tensor*>({c}), {b, c});
-  auto loops = nest.getAllLoopNestsWritingToBuf(b->buf())[0];
+  Tensor c = Compute(
+      "c", {{N, "n"}}, [&](const VarHandle& n) { return b.load(n) + 2.0f; });
+  LoopNest nest({c}, {b, c});
+  auto loops = nest.getAllLoopNestsWritingToBuf(b.buf())[0];
   ASSERT_TRUE(LoopNest::vectorize(loops[0]));
-  loops = nest.getAllLoopNestsWritingToBuf(c->buf())[0];
+  loops = nest.getAllLoopNestsWritingToBuf(c.buf())[0];
   ASSERT_TRUE(LoopNest::vectorize(loops[0]));
   nest.prepareForCodegen();
   // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
@@ -4939,7 +4916,7 @@ TEST(LoopNest, Int64Compute) {
 
   constexpr int64_t N = 12;
   Placeholder a("a", kLong, {N});
-  Tensor* b = Compute("b", {{N, "n"}}, [&](const VarHandle& n) {
+  Tensor b = Compute("b", {{N, "n"}}, [&](const VarHandle& n) {
     return a.load(n) + LongImm::make(1l);
   });
   LoopNest nest({b});

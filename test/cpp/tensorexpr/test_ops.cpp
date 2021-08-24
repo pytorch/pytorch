@@ -6,7 +6,7 @@
 
 using namespace torch::jit::tensorexpr;
 
-using Tensors = std::vector<Tensor*>;
+using Tensors = std::vector<Tensor>;
 using Args = std::vector<CodeGen::BufferArg>;
 std::unique_ptr<SimpleIREvaluator> compile(
     const Args& inputs,
@@ -28,7 +28,7 @@ TEST(Ops, Sum) {
     constexpr int N = 16;
 
     Placeholder a("a", kFloat, {M, N});
-    Tensor* b = computeSum({a.handle(), dims, false}, c10::kFloat);
+    Tensor b = computeSum({a.handle(), dims, false}, c10::kFloat);
     auto cg = compile({a}, {b});
 
     auto at = at::arange(M * N, at::kFloat).view({M, N});

@@ -13,24 +13,24 @@ static void BM_CompileSwish(benchmark::State& state) {
     te::KernelScope ks;
     te::VarHandle n("n", te::kInt);
     te::Placeholder A(te::BufHandle("A", {N}, te::kFloat));
-    te::Tensor* relu = te::Compute("relu", {{n, "n"}}, [&](const te::VarHandle& i) {
+    te::Tensor relu = te::Compute("relu", {{n, "n"}}, [&](const te::VarHandle& i) {
       return te::Max::make(A.load(i), 0.f, false);
     });
-    te::Tensor* min6 = te::Compute("min6", {{n, "n"}}, [&](const te::VarHandle& i) {
-      return te::Min::make(relu->load(i), 6.f, false);
+    te::Tensor min6 = te::Compute("min6", {{n, "n"}}, [&](const te::VarHandle& i) {
+      return te::Min::make(relu.load(i), 6.f, false);
     });
-    te::Tensor* plus3 = te::Compute("plus3", {{n, "n"}}, [&](const te::VarHandle& i) {
-      return min6->load(i) + 3.f;
+    te::Tensor plus3 = te::Compute("plus3", {{n, "n"}}, [&](const te::VarHandle& i) {
+      return min6.load(i) + 3.f;
     });
-    te::Tensor* times = te::Compute("times", {{n, "n"}}, [&](const te::VarHandle& i) {
-      return A.load(i) * plus3->load(i);
+    te::Tensor times = te::Compute("times", {{n, "n"}}, [&](const te::VarHandle& i) {
+      return A.load(i) * plus3.load(i);
     });
-    te::Tensor* sixth = te::Compute("sixth", {{n, "n"}}, [&](const te::VarHandle& i) {
-      return times->load(i) * 1.f / 6.f;
+    te::Tensor sixth = te::Compute("sixth", {{n, "n"}}, [&](const te::VarHandle& i) {
+      return times.load(i) * 1.f / 6.f;
     });
     te::LoopNest nest({sixth}, {relu, min6, plus3, times, sixth});
     for (auto tensor : {relu, min6, plus3, times}) {
-      nest.computeInline(tensor->buf());
+      nest.computeInline(tensor.buf());
     }
     nest.prepareForCodegen();
     te::StmtPtr s = te::IRSimplifier::simplify(nest.root_stmt());
@@ -43,24 +43,24 @@ static void BM_CompileSwishLLVMOnly(benchmark::State& state) {
   te::KernelScope ks;
   te::VarHandle n("n", te::kInt);
   te::Placeholder A(te::BufHandle("A", {N}, te::kFloat));
-  te::Tensor* relu = te::Compute("relu", {{n, "n"}}, [&](const te::VarHandle& i) {
+  te::Tensor relu = te::Compute("relu", {{n, "n"}}, [&](const te::VarHandle& i) {
     return te::Max::make(A.load(i), 0.f, false);
   });
-  te::Tensor* min6 = te::Compute("min6", {{n, "n"}}, [&](const te::VarHandle& i) {
-    return te::Min::make(relu->load(i), 6.f, false);
+  te::Tensor min6 = te::Compute("min6", {{n, "n"}}, [&](const te::VarHandle& i) {
+    return te::Min::make(relu.load(i), 6.f, false);
   });
-  te::Tensor* plus3 = te::Compute("plus3", {{n, "n"}}, [&](const te::VarHandle& i) {
-    return min6->load(i) + 3.f;
+  te::Tensor plus3 = te::Compute("plus3", {{n, "n"}}, [&](const te::VarHandle& i) {
+    return min6.load(i) + 3.f;
   });
-  te::Tensor* times = te::Compute("times", {{n, "n"}}, [&](const te::VarHandle& i) {
-    return A.load(i) * plus3->load(i);
+  te::Tensor times = te::Compute("times", {{n, "n"}}, [&](const te::VarHandle& i) {
+    return A.load(i) * plus3.load(i);
   });
-  te::Tensor* sixth = te::Compute("sixth", {{n, "n"}}, [&](const te::VarHandle& i) {
-    return times->load(i) * 1.f / 6.f;
+  te::Tensor sixth = te::Compute("sixth", {{n, "n"}}, [&](const te::VarHandle& i) {
+    return times.load(i) * 1.f / 6.f;
   });
   te::LoopNest nest({sixth}, {relu, min6, plus3, times, sixth});
   for (auto tensor : {relu, min6, plus3, times}) {
-    nest.computeInline(tensor->buf());
+    nest.computeInline(tensor.buf());
   }
   nest.prepareForCodegen();
   te::StmtPtr s = te::IRSimplifier::simplify(nest.root_stmt());

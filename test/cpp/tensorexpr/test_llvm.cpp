@@ -593,10 +593,10 @@ TEST(LLVM, VectorizerLoadStoreTest) {
   KernelScope kernel_scope;
   Placeholder a(BufHandle("A", {1}, kInt));
 
-  Tensor* c =
+  Tensor c =
       Compute("c", {{4, "i"}}, [&](const VarHandle& i) { return a.load(i); });
 
-  Placeholder c_buf(BufHandle(c->buf()));
+  Placeholder c_buf(BufHandle(c.buf()));
   LoopNest l({c});
   StmtPtr s = l.root_stmt();
   ASSERT_TRUE(LoopNest::vectorize(to<For>(to<Block>(s)->front())));
@@ -616,11 +616,11 @@ TEST(LLVM, VectorizeBitCast) {
   KernelScope kernel_scope;
   Placeholder a(BufHandle("A", {128}, kInt));
 
-  Tensor* c = Compute("c", {{128, "i"}}, [&](const VarHandle& i) {
+  Tensor c = Compute("c", {{128, "i"}}, [&](const VarHandle& i) {
     return bitcast<float>(a.load(i));
   });
 
-  Placeholder c_buf(BufHandle(c->buf()));
+  Placeholder c_buf(BufHandle(c.buf()));
   LoopNest l({c});
   StmtPtr s = l.root_stmt();
   ASSERT_TRUE(LoopNest::vectorize(to<For>(to<Block>(s)->front())));
@@ -1217,12 +1217,12 @@ TEST(LLVM, StoreFloat) {
 TEST(LLVM, SimpleMath01) {
   KernelScope kernel_scope;
   const int N = 1024;
-  Tensor* tensor = Compute("f", {{N, "i"}}, [](const VarHandle& i) {
+  Tensor tensor = Compute("f", {{N, "i"}}, [](const VarHandle& i) {
     return cast<float>(i * i + 1);
   });
   LoopNest l({tensor});
   StmtPtr stmt = l.root_stmt();
-  Placeholder f_buf(BufHandle(tensor->buf()));
+  Placeholder f_buf(BufHandle(tensor.buf()));
   LLVMCodeGen cg(stmt, {f_buf});
 
   PaddedBuffer<float> f_v(N, "f_v");
@@ -1241,11 +1241,11 @@ TEST(LLVM, ComputeMul) {
   const int N = 1024;
   Placeholder a(BufHandle("a", {N}, kFloat));
   Placeholder b(BufHandle("b", {N}, kFloat));
-  Tensor* c = Compute("c", {{N, "i"}}, [&](const VarHandle& i) {
+  Tensor c = Compute("c", {{N, "i"}}, [&](const VarHandle& i) {
     return a.load(i) * b.load(i);
   });
 
-  Placeholder c_buf(BufHandle(c->buf()));
+  Placeholder c_buf(BufHandle(c.buf()));
   LoopNest l({c});
   StmtPtr s = l.root_stmt();
 
@@ -1265,12 +1265,12 @@ TEST(LLVM, BroadcastAdd) {
   const int N = 1024;
   Placeholder a(BufHandle("a", {M, N}, kFloat));
   Placeholder b(BufHandle("b", {N}, kFloat));
-  Tensor* c = Compute(
+  Tensor c = Compute(
       "c", {{M, "i"}, {N, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
         return a.load(i, j) + b.load(j);
       });
 
-  Placeholder c_buf(BufHandle(c->buf()));
+  Placeholder c_buf(BufHandle(c.buf()));
   LoopNest l({c});
   l.prepareForCodegen();
   StmtPtr s = l.root_stmt();
@@ -1372,7 +1372,7 @@ TEST(LLVM, TensorDynamicShapeAdd) {
     VarHandle n("n", kInt);
     Placeholder a(BufHandle("a", {n}, kFloat));
     Placeholder b(BufHandle("b", {n}, kFloat));
-    Tensor* c = Compute("c", {{n, "n"}}, [&](const VarHandle& i) {
+    Tensor c = Compute("c", {{n, "n"}}, [&](const VarHandle& i) {
       return a.load(i) + b.load(i);
     });
     LoopNest l({c});
@@ -1396,7 +1396,7 @@ TEST(LLVM, DynamicShape2D) {
     VarHandle n("n", kInt);
     Placeholder a(BufHandle("a", {m, n}, kFloat));
     Placeholder b(BufHandle("b", {m, n}, kFloat));
-    Tensor* c = Compute(
+    Tensor c = Compute(
         "c", {{m, "m"}, {n, "n"}}, [&](const VarHandle& i, const VarHandle& j) {
           return a.load(i, j) + b.load(i, j);
         });
@@ -1428,7 +1428,7 @@ TEST(LLVM, EliminatedStmt) {
   KernelScope kernel_scope;
   Placeholder a(BufHandle("a", {1}, kFloat));
 
-  Tensor* c = Compute("c", {{0, "m"}}, [&](const VarHandle& m) { return m; });
+  Tensor c = Compute("c", {{0, "m"}}, [&](const VarHandle& m) { return m; });
 
   LoopNest l({c});
   l.prepareForCodegen();
@@ -1452,7 +1452,7 @@ TEST(LLVM, SimpleReduction) {
   // TODO: why doesn't implicit vector<DimArg> work?
   std::vector<DimArg> axis = {DimArg(1)};
   std::vector<DimArg> reduce_axis = {DimArg(M), DimArg(N)};
-  Tensor* b = Reduce("sum", axis, Sum(), a, reduce_axis);
+  Tensor b = Reduce("sum", axis, Sum(), a, reduce_axis);
   LoopNest loop({b});
 
   loop.prepareForCodegen();
@@ -1491,7 +1491,7 @@ TEST(LLVM, RFactorReduction) {
   // TODO: why doesn't implicit vector<DimArg> work?
   std::vector<DimArg> axis = {DimArg(1)};
   std::vector<DimArg> reduce_axis = {DimArg(M), DimArg(N)};
-  Tensor* b = Reduce("sum", axis, Sum(), a, reduce_axis);
+  Tensor b = Reduce("sum", axis, Sum(), a, reduce_axis);
   LoopNest loop({b});
 
   std::vector<ForPtr> loops = loop.getLoopStmtsFor(b);
@@ -1502,7 +1502,7 @@ TEST(LLVM, RFactorReduction) {
   loops = loop.getLoopStmtsFor(b);
   loop_m = loops.at(2);
   loop_n = loops.at(1);
-  auto b_body = loop.getAllWritesToBuf(b->buf())[1];
+  auto b_body = loop.getAllWritesToBuf(b.buf())[1];
   ASSERT_TRUE(loop.rfactor(b_body, loop_n));
 
   loop.prepareForCodegen();
@@ -1538,13 +1538,13 @@ TEST(LLVM, RFactorVectorizedReduction) {
 
   Placeholder a("a", kFloat, {1, M, N});
 
-  Tensor* b = Reduce("sum", {{1, "K"}}, Sum(), a, {{M, "M"}, {N, "N"}});
+  Tensor b = Reduce("sum", {{1, "K"}}, Sum(), a, {{M, "M"}, {N, "N"}});
   LoopNest loopnest({b});
   std::vector<ForPtr> loops = loopnest.getLoopStmtsFor(b);
   // Reorder n and m loops
   loopnest.reorderAxis(loops.at(1), loops.at(2));
-  auto b_body = loopnest.getAllWritesToBuf(b->buf()).at(1);
-  auto all_loops = loopnest.getAllLoopNestsWritingToBuf(b->buf());
+  auto b_body = loopnest.getAllWritesToBuf(b.buf()).at(1);
+  auto all_loops = loopnest.getAllLoopNestsWritingToBuf(b.buf());
   ASSERT_TRUE(all_loops.size() == 2 && all_loops[1].size() == 3);
   ASSERT_TRUE(loopnest.rfactor(b_body, all_loops[1][1]));
   auto distributed_loops = loopnest.distributeLoop(all_loops[1][1]);
@@ -1585,7 +1585,7 @@ TEST(LLVM, SimpleParallel) {
     KernelScope kernel_scope;
     const int M = 4;
     const int N = 6;
-    Tensor* f = Compute(
+    Tensor f = Compute(
         "f", {{M, "m"}, {N, "n"}}, [](const VarHandle& m, const VarHandle& n) {
           return cast<float>(m + n);
         });
@@ -1626,23 +1626,23 @@ TEST(LLVM, CompositeParallel) {
     KernelScope kernel_scope;
     int M = 5;
     int N = 7;
-    Tensor* t1 =
+    Tensor t1 =
         Compute("t1", {{M, "M"}}, [](const VarHandle& m) { return m + 1.f; });
-    Tensor* t2 =
+    Tensor t2 =
         Compute("t2", {{N, "N"}}, [](const VarHandle& n) { return n + 2.f; });
-    Tensor* t3 = Compute(
+    Tensor t3 = Compute(
         "t3",
         {{M, "M"}, {N, "N"}},
         [=](const VarHandle& m, const VarHandle& n) {
-          return t1->load(m) * t2->load(n);
+          return t1.load(m) * t2.load(n);
         });
-    Tensor* t4 = Compute(
+    Tensor t4 = Compute(
         "t4",
         {{M, "M"}, {N, "N"}},
         [=](const VarHandle& m, const VarHandle& n) {
-          return t3->load(m, n) + m + n;
+          return t3.load(m, n) + m + n;
         });
-    LoopNest loop_nest(std::vector<Tensor*>({t4}), {t1, t2, t3, t4});
+    LoopNest loop_nest({t4}, {t1, t2, t3, t4});
     std::vector<ForPtr> loop_list;
     {
       auto const& loops = loop_nest.getLoopStmtsFor(t1);
@@ -1695,7 +1695,7 @@ TEST(LLVM, VectorizedGEMM) {
 
   Placeholder AP(BufHandle("A", {M, K}, kFloat));
   Placeholder BP(BufHandle("B", {K, N}, kFloat));
-  Tensor* CT = Reduce(
+  Tensor CT = Reduce(
       "gemm",
       {{M, "M"}, {N, "N"}},
       Sum(),
@@ -1776,7 +1776,7 @@ TEST(LLVM, CallRaw) {
   VarHandle N("N", kInt);
   Placeholder a(BufHandle("a", {M, N}, kFloat));
   Placeholder b(BufHandle("b", {N}, kFloat));
-  Tensor* c = Compute(
+  Tensor c = Compute(
       "c", {{M, "i"}, {N, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
         return a.load(i, j) + b.load(j);
       });
@@ -1793,7 +1793,7 @@ TEST(LLVM, CallRaw) {
   std::vector<float> cv(M * N_value, 0);
   std::vector<void*> args({av.data(), bv.data(), cv.data(), &N_value});
 
-  LLVMCodeGen cg(s, {a, b, BufHandle(c->buf()), N});
+  LLVMCodeGen cg(s, {a, b, BufHandle(c.buf()), N});
   cg.call_raw(args);
 
   for (int i = 0; i < M; i++) {
@@ -1802,7 +1802,7 @@ TEST(LLVM, CallRaw) {
     }
   }
 
-  SimpleIREvaluator eval(s, {a, b, BufHandle(c->buf()), N});
+  SimpleIREvaluator eval(s, {a, b, BufHandle(c.buf()), N});
   eval.call_raw(args);
 
   for (int i = 0; i < M; i++) {
@@ -1818,7 +1818,7 @@ TEST(LLVM, CustomTarget) {
   Placeholder a("a", kFloat, {M});
   Placeholder b("b", kFloat, {M});
   Placeholder c("c", kFloat, {M});
-  Tensor* d = Compute("d", {{M, "m"}}, [&](const VarHandle& m) {
+  Tensor d = Compute("d", {{M, "m"}}, [&](const VarHandle& m) {
     return a.load(m) * b.load(m) + c.load(m);
   });
   LoopNest nest({d});
