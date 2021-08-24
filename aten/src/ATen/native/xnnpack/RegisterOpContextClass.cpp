@@ -6,6 +6,8 @@
 #include <ATen/native/xnnpack/OpContext.h>
 #include <ATen/Tensor.h>
 #include <torch/custom_class.h>
+#include <torch/csrc/jit/runtime/custom_operator.h>
+#include <torch/csrc/jit/runtime/operator.h>
 
 namespace at {
 namespace native {
@@ -80,6 +82,22 @@ TORCH_LIBRARY(xnnpack, m) {
 
 }
 
+torch::jit::RegisterOperators reg(
+    {torch::jit::OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("prepacked::unpack_prepacked_sizes_conv2d(Any W_prepack) -> ((int[], int[]?, int[], int[], int[], int))"),
+          [](Stack* stack) {
+            auto inp = torch::jit::pop(stack);
+            torch::jit::push(stack, internal::convolution2d::unpack_prepacked_sizes_conv2d(inp));
+          },
+         c10::AliasAnalysisKind::FROM_SCHEMA),
+     torch::jit::OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("prepacked::unpack_prepacked_sizes_linear(Any W_prepack) -> ((int[], int[]?))"),
+          [](Stack* stack) {
+            auto inp = torch::jit::pop(stack);
+            torch::jit::push(stack, internal::linear::unpack_prepacked_sizes_linear(inp));
+          },
+         c10::AliasAnalysisKind::FROM_SCHEMA)});
+
 TORCH_LIBRARY(prepacked, m) {
   m.def(TORCH_SELECTIVE_SCHEMA("prepacked::linear_clamp_prepack(Tensor W, Tensor? B=None, Scalar? output_min=None, Scalar? output_max=None) -> __torch__.torch.classes.xnnpack.LinearOpContext"));
   m.def(TORCH_SELECTIVE_SCHEMA("prepacked::linear_clamp_run(Tensor X, __torch__.torch.classes.xnnpack.LinearOpContext W_prepack) -> Tensor Y"));
@@ -87,19 +105,19 @@ TORCH_LIBRARY(prepacked, m) {
   m.def(TORCH_SELECTIVE_SCHEMA("prepacked::conv2d_transpose_clamp_prepack(Tensor W, Tensor? B, int[2] stride, int[2] padding, int[2] output_padding, int[2] dilation, int groups, Scalar? output_min=None, Scalar? output_max=None) -> __torch__.torch.classes.xnnpack.TransposeConv2dOpContext"));
   m.def(TORCH_SELECTIVE_SCHEMA("prepacked::conv2d_clamp_run(Tensor X, __torch__.torch.classes.xnnpack.Conv2dOpContext W_prepack) -> Tensor Y"));
   m.def(TORCH_SELECTIVE_SCHEMA("prepacked::conv2d_transpose_clamp_run(Tensor X, __torch__.torch.classes.xnnpack.TransposeConv2dOpContext W_prepack) -> Tensor Y"));
-  m.def(TORCH_SELECTIVE_SCHEMA("prepacked::unpack_prepacked_sizes_conv2d(Any W_prepack) -> (int[], int[]?, int[], int[], int[], int)"));
-  m.def(TORCH_SELECTIVE_SCHEMA("prepacked::unpack_prepacked_sizes_linear(Any W_prepack) -> (int[], int[]?)"));
+  //m.def(TORCH_SELECTIVE_SCHEMA("prepacked::unpack_prepacked_sizes_conv2d(Any W_prepack) -> (int[], int[]?, int[], int[], int[], int)"));
+  //m.def(TORCH_SELECTIVE_SCHEMA("prepacked::unpack_prepacked_sizes_linear(Any W_prepack) -> (int[], int[]?)"));
 }
 
 TORCH_LIBRARY_IMPL(prepacked, CPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("prepacked::linear_clamp_prepack"), TORCH_FN(createLinearClampPrePackOpContext));
   m.impl(TORCH_SELECTIVE_NAME("prepacked::linear_clamp_run"), TORCH_FN(internal::linear::linear_clamp_run));
-  m.impl(TORCH_SELECTIVE_NAME("prepacked::unpack_prepacked_sizes_linear"), TORCH_FN(internal::linear::unpack_prepacked_sizes_linear));
+  //m.impl(TORCH_SELECTIVE_NAME("prepacked::unpack_prepacked_sizes_linear"), TORCH_FN(internal::linear::unpack_prepacked_sizes_linear));
   m.impl(TORCH_SELECTIVE_NAME("prepacked::conv2d_clamp_prepack"), TORCH_FN(createConv2dClampPrePackOpContext));
   m.impl(TORCH_SELECTIVE_NAME("prepacked::conv2d_transpose_clamp_prepack"), TORCH_FN(createConv2dTransposeClampPrePackOpContext));
   m.impl(TORCH_SELECTIVE_NAME("prepacked::conv2d_clamp_run"), TORCH_FN(internal::convolution2d::conv2d_clamp_run));
   m.impl(TORCH_SELECTIVE_NAME("prepacked::conv2d_transpose_clamp_run"), TORCH_FN(internal::convolution2d::conv2d_transpose_clamp_run));
-  m.impl(TORCH_SELECTIVE_NAME("prepacked::unpack_prepacked_sizes_conv2d"), TORCH_FN(internal::convolution2d::unpack_prepacked_sizes_conv2d));
+  //m.impl(TORCH_SELECTIVE_NAME("prepacked::unpack_prepacked_sizes_conv2d"), TORCH_FN(internal::convolution2d::unpack_prepacked_sizes_conv2d));
 }
 
 } // namespace xnnpack
