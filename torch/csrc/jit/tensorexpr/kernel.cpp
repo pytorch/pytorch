@@ -2,7 +2,6 @@
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 
 #include <ATen/ExpandUtils.h>
-#include <ATen/Parallel.h>
 #include <ATen/TensorGeometry.h>
 #include <c10/util/irange.h>
 #include <c10/util/string_utils.h>
@@ -961,7 +960,7 @@ std::vector<ExprHandle> TensorExprKernel::broadcastShapesMut(
   return res.first;
 }
 
-Tensor* computeOneOperand(
+Tensor computeOneOperand(
     const std::string& name,
     const std::vector<ArgValue>& inputValues,
     const std::vector<ExprHandle>& outputShape,
@@ -982,7 +981,7 @@ Tensor* computeOneOperand(
       });
 }
 
-Tensor* computeTwoOperand(
+Tensor computeTwoOperand(
     const std::string& name,
     const std::vector<ArgValue>& inputValues,
     const std::vector<ExprHandle>& outputShape,
@@ -1005,7 +1004,7 @@ Tensor* computeTwoOperand(
       });
 }
 
-Tensor* computeTwoOperandWithAlpha(
+Tensor computeTwoOperandWithAlpha(
     const std::string& name,
     const std::vector<ArgValue>& inputValues,
     const std::vector<ExprHandle>& outputShape,
@@ -1029,7 +1028,7 @@ Tensor* computeTwoOperandWithAlpha(
       });
 }
 
-Tensor* computeConditionWithTwoOperand(
+Tensor computeConditionWithTwoOperand(
     const std::string& name,
     const std::vector<ArgValue>& inputValues,
     const std::vector<ExprHandle>& outputShape,
@@ -1056,7 +1055,7 @@ Tensor* computeConditionWithTwoOperand(
       });
 }
 
-Tensor* computeThreeOperand(
+Tensor computeThreeOperand(
     const std::string& name,
     const std::vector<ArgValue>& inputValues,
     const std::vector<ExprHandle>& outputShape,
@@ -1084,7 +1083,7 @@ Tensor* computeThreeOperand(
         return demoteOutput(compute, outputType);
       });
 }
-Tensor* computeFourOperand(
+Tensor computeFourOperand(
     const std::string& name,
     const std::vector<ArgValue>& inputValues,
     const std::vector<ExprHandle>& outputShape,
@@ -1136,7 +1135,7 @@ std::pair<ScalarType, std::vector<BufHandle>> processCatList(
   }
   return {highType, nonEmptyInputs};
 }
-Tensor* computeCatWoConditionals(
+Tensor computeCatWoConditionals(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape) {
   // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
@@ -1165,7 +1164,7 @@ Tensor* computeCatWoConditionals(
   auto output_buf =
       alloc<Buf>("aten_cat", output_sizes_expr, ToDtype(high_type));
   if (non_empty_inputs.size() == 0) {
-    return new Tensor(
+    return Tensor(
         output_buf, alloc<tensorexpr::Block>(std::vector<StmtPtr>({})));
   }
 
@@ -1214,10 +1213,10 @@ Tensor* computeCatWoConditionals(
     concat_dim_size =
         alloc<Add>(concat_dim_size, input_dims[norm_concat_dim].node());
   }
-  return new Tensor(output_buf, IRSimplifier::simplify(block));
+  return Tensor(output_buf, IRSimplifier::simplify(block));
 }
 
-Tensor* computeCat(
+Tensor computeCat(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     at::Device device) {
@@ -1277,7 +1276,7 @@ Tensor* computeCat(
       });
 }
 
-Tensor* computeConv2d(
+Tensor computeConv2d(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const c10::optional<ScalarType>& outputType) {
@@ -1320,10 +1319,10 @@ Tensor* computeConv2d(
        dilation[0],
        dilation[1],
        groups});
-  return new Tensor(ResultBuf.node(), s);
+  return Tensor(ResultBuf.node(), s);
 }
 
-Tensor* tensorexpr::computeOperandValue(
+Tensor tensorexpr::computeOperandValue(
     c10::Symbol op,
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
@@ -2392,7 +2391,7 @@ c10::optional<ScalarType> findDtypeForValue(const torch::jit::Value* v) {
   return c10::nullopt;
 }
 
-Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
+Tensor TensorExprKernel::computeValue(const torch::jit::Value* v) {
   auto inputs = v->node()->inputs();
   auto op = v->node()->kind();
 
@@ -2488,86 +2487,6 @@ void fuseAllLoops(StmtPtr st) {
   }
 }
 
-// Compute the trip count of a loop if it is a constant.
-c10::optional<int64_t> tripCount(ForPtr loop) {
-  auto tc = IRSimplifier::simplify(
-      cast<int64_t>(ExprHandle(loop->stop()) - ExprHandle(loop->start())));
-  if (auto val = to<LongImm>(tc.node())) {
-    return val->value();
-  }
-  return c10::nullopt;
-}
-
-// Prune innermost loops until iterations satisfies a minimum grain size.
-static void pruneByGrainSize(std::vector<ForPtr>& loops) {
-  constexpr int64_t minGrainSize = 32768;
-  int64_t grainSize = 1;
-  for (int64_t i = loops.size(); i > 0; i--) {
-    auto tc = tripCount(loops[i - 1]);
-    if (!tc) {
-      break;
-    }
-    grainSize *= *tc;
-    if (grainSize < minGrainSize) {
-      loops.pop_back();
-    }
-  }
-}
-
-// Retain enough outermost loops to fill the number of threads.
-static void pruneByThreadCount(std::vector<ForPtr>& loops) {
-  int64_t trips = 1;
-  auto threads = at::get_num_threads();
-  auto it = loops.begin();
-  for (; it != loops.end(); it++) {
-    if (trips >= threads) {
-      break;
-    }
-    auto tc = tripCount(*it);
-    if (!tc) {
-      break;
-    }
-    trips *= *tc;
-  }
-  loops.erase(it, loops.end());
-}
-
-// Flatten and parallelize outer loops, subject to a minimum number of elements
-// in the inner loop, and a maximum level of thread-level parallelism in the
-// outer loops.
-template <typename Bufs>
-static void parallelizeOuterLoops(LoopNest& l, Bufs&& bufs) {
-  for (auto const& buf : bufs) {
-    auto loops = l.getLoopStmtsFor(buf);
-    pruneByGrainSize(loops);
-    pruneByThreadCount(loops);
-
-    // There are no loops to parallelize; give up.
-    if (loops.size() == 0) {
-      continue;
-    }
-    // The loop nest contains a reduction; give up.
-    auto reductions = NodeFinder<ReduceOp>::find(loops[0]);
-    if (reductions.size() > 0) {
-      continue;
-    }
-    // The loop nest has loop carried dependences; give up.
-    if (LoopNest::hasLoopCarriedDependence(loops[0])) {
-      continue;
-    }
-    // Try to flatten the outer loops and parallelize them if successful.
-    ForPtr flattened = nullptr;
-    if (loops.size() == 1) {
-      flattened = loops[0];
-    } else {
-      LoopNest::flatten(loops, &flattened);
-    }
-    if (flattened) {
-      flattened->set_parallel();
-    }
-  }
-}
-
 StmtPtr TensorExprKernel::transformLoops(BackendType backendType, StmtPtr st) {
   torch::jit::tensorexpr::LoopNest l(st, bufOutputs_);
   GRAPH_DEBUG("Original Stmt:\n", std::to_string(l.root_stmt()), "\n");
@@ -2609,8 +2528,6 @@ StmtPtr TensorExprKernel::transformLoops(BackendType backendType, StmtPtr st) {
   if (backendType == kLLVMCodeGen) {
     fuseAllLoops(l.root_stmt());
     GRAPH_DEBUG("after fuse", *l.root_stmt());
-    parallelizeOuterLoops(l, bufOutputs_);
-    GRAPH_DEBUG("after parallelize", *l.root_stmt());
   }
 
   if (backendType == kCudaCodeGen) {
@@ -2685,13 +2602,9 @@ StmtPtr TensorExprKernel::transformLoops(BackendType backendType, StmtPtr st) {
   }
 
   l.prepareForCodegen();
-  GRAPH_DEBUG("after prepareForCodegen", *l.root_stmt());
-  l.simplify();
-  GRAPH_DEBUG("after simplification", *l.root_stmt());
 
   if (backendType == kLLVMCodeGen && !hasReduction) {
     l.vectorizeInnerLoops();
-    GRAPH_DEBUG("after vectorization", *l.root_stmt());
   }
 
   StmtPtr stmt = l.root_stmt();
@@ -2790,9 +2703,9 @@ static std::vector<ExprHandle> toExprHandles(const std::vector<T>& sizes) {
   return dims;
 }
 
-Tensor* TensorExprKernel::bindInput(const torch::jit::Value* input) {
+Tensor TensorExprKernel::bindInput(const torch::jit::Value* input) {
   auto const& t = input->type();
-  Tensor* result = nullptr;
+  Tensor result(nullptr, nullptr);
   switch (t->kind()) {
     case TypeKind::TensorType: {
       auto tt = input->type()->cast<TensorType>();
@@ -2831,7 +2744,7 @@ Tensor* TensorExprKernel::bindInput(const torch::jit::Value* input) {
             }
             return inBuffer.load(idx);
           });
-      bufs_.emplace(input, result->buf());
+      bufs_.emplace(input, result.buf());
 
       bufferArgs_.emplace_back(inBuffer);
       break;
@@ -2887,7 +2800,7 @@ bool denseAndNonOverlapping(
   return (strides == at::infer_dense_strides(sizes, strides));
 }
 
-Tensor* TensorExprKernel::convertOutputToCorrectStrides(torch::jit::Value* v) {
+Tensor TensorExprKernel::convertOutputToCorrectStrides(torch::jit::Value* v) {
   const TensorTypePtr& tt = v->type()->expect<TensorType>();
   TORCH_INTERNAL_ASSERT(bufs_.count(v));
   BufPtr buf = bufs_.at(v);
@@ -2903,19 +2816,19 @@ Tensor* TensorExprKernel::convertOutputToCorrectStrides(torch::jit::Value* v) {
   auto sizes = *tt->sizes().concrete_sizes();
   std::vector<int64_t> default_strides = TensorType::contiguousStridesOf(sizes);
   if (!tt->strides().concrete_sizes()) {
-    return new Tensor(buf, nullptr);
+    return Tensor(buf, nullptr);
   }
   TORCH_INTERNAL_ASSERT(tt->strides().concrete_sizes());
   const std::vector<int64_t> strides = *tt->strides().concrete_sizes();
   // All Tensors in NNC are layed out in default, contiguous layout.
   // If the output is also default contiguous we don't need to do anything
   if (strides == default_strides) {
-    return new Tensor(buf, nullptr);
+    return Tensor(buf, nullptr);
   }
   // If the tensor is not dense or overlaps, we have
   // no way of matching the profiled striding
   if (!denseAndNonOverlapping(sizes, strides)) {
-    return new Tensor(buf, nullptr);
+    return Tensor(buf, nullptr);
   }
 
   auto dims = c10::fmap<DimArg>(sizesForValue(v));
@@ -2996,7 +2909,6 @@ void TensorExprKernel::bindConstant(const torch::jit::Value* v) {
 }
 
 void TensorExprKernel::compile() {
-  KernelScope kernelScope(&kernelArena_);
   GRAPH_DUMP("TensorExprKernel graph:", graph_);
 
   device_ = *pickDeviceType(graph_);
@@ -3009,8 +2921,9 @@ void TensorExprKernel::compile() {
   nInputs_ = graph_->inputs().size();
   genInputDebugNames();
   for (auto const& input : graph_->inputs()) {
-    if (Tensor* t = bindInput(input)) {
-      block->append_stmt(t->stmt());
+    Tensor t = bindInput(input);
+    if (t.stmt()) {
+      block->append_stmt(t.stmt());
     }
   }
 
@@ -3024,10 +2937,9 @@ void TensorExprKernel::compile() {
     } else {
       for (auto const& output : n->outputs()) {
         if (output->hasUses()) {
-          Tensor* t = computeValue(output);
-          bufs_.emplace(output, t->buf());
-          // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
-          block->append_stmt(t->stmt());
+          Tensor t = computeValue(output);
+          bufs_.emplace(output, t.buf());
+          block->append_stmt(t.stmt());
         }
       }
     }
@@ -3045,12 +2957,12 @@ void TensorExprKernel::compile() {
     // The "strided" tensor will be incorrect if used in NNC,
     // since NNC views it as contiguous. Only convert it to the right
     // strides at the end of the kernel (if already contiguous it's a no-op)
-    Tensor* properly_strided_output = convertOutputToCorrectStrides(output);
-    if (properly_strided_output->stmt()) {
-      block->append_stmt(properly_strided_output->stmt());
+    Tensor properly_strided_output = convertOutputToCorrectStrides(output);
+    if (properly_strided_output.stmt()) {
+      block->append_stmt(properly_strided_output.stmt());
     }
     // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
-    bufs_[output] = properly_strided_output->buf();
+    bufs_[output] = properly_strided_output.buf();
     const auto& tt = output->type()->expect<TensorType>();
     auto sizes = *tt->sizes().concrete_sizes();
     tensorOutputSizes_.push_back(sizes);
@@ -3167,8 +3079,6 @@ StmtPtr TensorExprKernel::getCodeGenStmt() {
 }
 
 void TensorExprKernel::runKernel(Stack& stack) {
-  KernelScope kernelScope(&kernelArena_);
-
   // Set up arguments (inputs, then outputs) for kernel call.
   auto inputs = last(stack, nInputs_);
   std::vector<at::Tensor> outputs;
@@ -3188,8 +3098,6 @@ void TensorExprKernel::runKernel(Stack& stack) {
 void TensorExprKernel::runFast(
     const std::vector<void*>& inputs,
     const std::vector<void*>& outputs) {
-  KernelScope kernelScope(&kernelArena_);
-
   std::vector<void*> args(inputs);
   args.reserve(inputs.size() + outputs.size() + constants_.size());
   args.insert(args.end(), outputs.begin(), outputs.end());
