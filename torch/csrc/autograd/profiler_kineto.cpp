@@ -80,14 +80,6 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
     op.id = ctx->correlationId;
     op.startTime = ctx->startUs;
     op.endTime = end_time;
-
-    if (jit::currentFrameId().has_value()) {
-      auto frame_id = jit::currentFrameId().value();
-      op.addMetadata("pc", std::to_string(frame_id.pc));
-      op.addMetadata("NodeSchema", "\"" + frame_id.node_schema + "\"");
-      op.addMetadata("NodeHeader", "\"" + frame_id.node_header + "\"");
-    }
-
     // optimization - postpone shapesToStr till finalizeCPUTrace
     // is called from disableProfiler
     // if (ctx->shapes && !ctx->shapes->empty()) {
