@@ -537,6 +537,27 @@ Q: Are lists of Tensors exportable to ONNX?
 
   Yes, for ``opset_version`` >= 11, since ONNX introduced the Sequence type in opset 11.
 
+Avoiding Pitfalls
+--------------------------
+
+1. In tracing mode, shape values obtained from tensor.shape are traced as tensors,
+and share the same memory. This might cause a mismatch in values of the final outputs.
+As a workaround, avoid use of inplace operations in these scenarios.
+For example, in the model::
+
+    class Model(torch.nn.Module):
+      def forward(self, states):
+          batch_size, seq_length = states.shape[:2]
+          real_seq_length = seq_length
+          real_seq_length += 2
+          return real_seq_length + seq_length
+
+``real_seq_length`` and ``seq_length`` share the same memory in tracing mode.
+This could be avoiding by rewriting the inplace operation such that::
+
+    real_seq_length = real_seq_length + 2
+
+
 Functions
 --------------------------
 .. autofunction:: export
