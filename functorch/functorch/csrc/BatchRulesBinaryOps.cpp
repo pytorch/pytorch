@@ -8,6 +8,7 @@
 #include <functorch/csrc/PlumbingHelper.h>
 #include <functorch/csrc/InPlacePlumbing.h>
 #include <ATen/Operators.h>
+#include <ATen/core/dispatch/Dispatcher.h>
 
 namespace at { namespace functorch {
 
@@ -126,53 +127,65 @@ std::tuple<Tensor,optional<int64_t>> comparison_pointwise_batch_rule(
   return std::make_tuple( std::move(result), 0 );
 }
 
-std::tuple<Tensor,optional<int64_t>> clamp_tensor_batch_rule(
-    const Tensor& self, optional<int64_t> self_bdim,
-    const optional<Tensor>& min, optional<int64_t> min_bdim, const optional<Tensor>& max, optional<int64_t> max_bdim) {
-  int64_t self_logical_rank = rankWithoutBatchDim(self, self_bdim);
-  int64_t out_logical_rank = self_logical_rank;
-  if (min.has_value()) {
-    out_logical_rank = std::max(out_logical_rank, rankWithoutBatchDim(*min, min_bdim));
+void boxed_pointwise_batch_rule(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
+  const auto& schema = op.schema();
+  const auto num_returns = schema.returns().size();
+  const auto num_arguments = schema.arguments().size();
+  const auto arguments = torch::jit::pop(*stack, num_arguments);
+
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+
+  std::vector<std::pair<Tensor, optional<int64_t>>> tensor_inputs;
+  std::vector<int64_t> tensor_pos;
+  for (const auto idx : c10::irange(0, num_arguments)) {
+    const auto& ivalue = arguments[idx];
+    if (ivalue.isTensor()) {
+      Tensor tensor_value;
+      optional<int64_t> tensor_bdim;
+      std::tie(tensor_value, tensor_bdim) = unwrapTensorAtLevel(ivalue.toTensor(), cur_level);
+      tensor_inputs.push_back(std::make_pair(tensor_value, tensor_bdim));
+      tensor_pos.push_back(idx);
+    }
   }
-  if (max.has_value()) {
-    out_logical_rank = std::max(out_logical_rank, rankWithoutBatchDim(*max, max_bdim));
+  int64_t out_logical_rank = 0;
+  for (auto& tensor_input : tensor_inputs) {
+    int64_t cur_logical_rank = rankWithoutBatchDim(tensor_input.first, tensor_input.second);
+    out_logical_rank = std::max(out_logical_rank, cur_logical_rank);
+  }
+  for (auto& tensor_input: tensor_inputs) {
+    tensor_input.first = moveBatchDimToFront(tensor_input.first, tensor_input.second);
+    tensor_input.first = maybePadToLogicalRank(tensor_input.first, tensor_input.second, out_logical_rank);
   }
 
-  c10::optional<Tensor> min_ = nullopt;
-  c10::optional<Tensor> max_ = nullopt;
-  auto self_ = moveBatchDimToFront(self, self_bdim);
-  if (min.has_value()) {
-    min_ = moveBatchDimToFront(*min, min_bdim);
+  // todo(chilli): Handle type promotion semantics.
+  int64_t tensor_idx = 0;
+  TORCH_INTERNAL_ASSERT(tensor_pos.size() > 0);
+  for (const auto arg_idx : c10::irange(0, num_arguments)) {
+    if (tensor_idx >= tensor_pos.size() || arg_idx != tensor_pos[tensor_idx]) {
+      torch::jit::push(stack, arguments[arg_idx]);
+    } else {
+      TORCH_INTERNAL_ASSERT(tensor_idx < tensor_inputs.size());
+      torch::jit::push(stack, tensor_inputs[tensor_idx].first);
+      tensor_idx++;
+    }
   }
-  if (max.has_value()) {
-    max_ = moveBatchDimToFront(*max, max_bdim);
+  op.callBoxed(stack);
+  const auto returns = torch::jit::pop(*stack, num_returns);
+  for (const auto& ret : returns) {
+    if (ret.isTensor()) {
+      torch::jit::push(stack, makeBatched(ret.toTensor(), 0, cur_level));
+    } else {
+      TORCH_INTERNAL_ASSERT("This batched fallback does not currently support ops that return non-tensor values");
+    }
   }
-  // todo(chilli): Are there weird type promotion semantics here we need to worry about?
-
-  // If the dimensions aren't aligned, we need to line them up.
-  // Tensor[B, 3] + Tensor[2, 5, 3] -> Tensor[B, 1, 1, 3] + Tensor[2, 5, 3]
-  // Note that only tensors that have a batch dim need to be modified.
-  // Tensor[B, 2, 3, 5] + Tensor[5] -> no changes needed
-  self_ = maybePadToLogicalRank(self_, self_bdim, out_logical_rank);
-  if (min_.has_value()) {
-    min_ = maybePadToLogicalRank(*min_, min_bdim, out_logical_rank);
-  }
-  if (max_.has_value()) {
-    max_ = maybePadToLogicalRank(*max_, max_bdim, out_logical_rank);
-  }
-
-  auto result = at::clamp(self_, min_, max_);
-  return std::make_tuple( std::move(result), 0 );
 }
 
-std::tuple<Tensor,optional<int64_t>> _s_where_batch_rule(
-    const Tensor& condition, optional<int64_t> condition_bdim,
-    const Tensor& self, optional<int64_t> self_bdim, const Tensor& other, optional<int64_t> other_bdim) {
-  auto condition_ = moveBatchDimToFront(condition, condition_bdim);
-  auto self_ = moveBatchDimToFront(self, self_bdim);
-  auto other_ = moveBatchDimToFront(other, other_bdim);
-  return std::make_tuple(at::where(condition_, self_, other_), 0);
-}
+#define POINTWISE_FALLBACK(op) \
+  m.impl(#op, torch::CppFunction::makeFromBoxedFunction<boxed_pointwise_batch_rule>());
+
 
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
 #define BINARY_POINTWISE2(op, overload) \
@@ -203,13 +216,15 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
 
   // Batching rule registrations start
   BINARY_SCALAR_2(add, Tensor, Scalar);
+  POINTWISE_FALLBACK(addcdiv);
+  POINTWISE_FALLBACK(addcmul);
   BINARY_POINTWISE(atan2);
   BINARY_SCALAR_2(bitwise_and, Tensor, Scalar);
   BINARY_SCALAR_3(bitwise_left_shift, Tensor, Tensor_Scalar, Scalar_Tensor);
   BINARY_SCALAR_3(bitwise_right_shift, Tensor, Tensor_Scalar, Scalar_Tensor);
 
   UNARY_POINTWISE(clamp);
-  VMAP_SUPPORT("clamp.Tensor", clamp_tensor_batch_rule);
+  POINTWISE_FALLBACK(clamp.Tensor);
   BINARY_POINTWISE2(clamp_min, Tensor);
   UNARY_POINTWISE(clamp_min);
   BINARY_POINTWISE2(clamp_max, Tensor);
@@ -226,12 +241,16 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   BINARY_POINTWISE(fmax);
   BINARY_POINTWISE(fmin);
   BINARY_SCALAR_2(fmod, Tensor, Scalar);
+  POINTWISE_FALLBACK(frexp.Tensor);
   BINARY_POINTWISE(heaviside);
   BINARY_POINTWISE(hypot);
   BINARY_POINTWISE(gcd);
   BINARY_POINTWISE(igamma);
   BINARY_POINTWISE(igammac);
+  POINTWISE_FALLBACK(lerp.Scalar);
+  POINTWISE_FALLBACK(lerp.Tensor);
   BINARY_POINTWISE(lcm);
+  POINTWISE_FALLBACK(log_sigmoid_forward);
   BINARY_POINTWISE(maximum);
   BINARY_POINTWISE(minimum);
 
@@ -239,6 +258,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   BINARY_POINTWISE(nextafter);
   BINARY_SCALAR_3(pow, Tensor_Tensor, Tensor_Scalar, Scalar);
   BINARY_POINTWISE(polar);
+  POINTWISE_FALLBACK(polygamma);
   BINARY_SCALAR_2(sub, Tensor, Scalar);
   BINARY_SCALAR_3(remainder, Tensor, Scalar, Scalar_Tensor);
   BINARY_POINTWISE(rrelu_with_noise);
