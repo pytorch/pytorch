@@ -92,11 +92,11 @@ struct ConstantTableValue : public SugaredValue {
 };
 
 SourceImporterImpl::SourceImporterImpl(
-      std::shared_ptr<CompilationUnit> cu,
-      const std::vector<at::IValue>* constant_table,
-      SourceLoader source_loader,
-      size_t version)
-      : cu_(std::move(cu)), source_loader_(std::move(source_loader)) {
+    std::shared_ptr<CompilationUnit> cu,
+    const std::vector<at::IValue>* constant_table,
+    SourceLoader source_loader,
+    size_t version)
+    : cu_(std::move(cu)), source_loader_(std::move(source_loader)) {
   env_ = {
       {"torch", std::make_shared<BuiltinModule>("aten", version)},
       {"ops", std::make_shared<OpsValue>(version)},
@@ -162,13 +162,13 @@ void SourceImporterImpl::parseSourceIfNeeded(const std::string& qualifier) {
     switch (kind) {
       case TK_CLASS_DEF: {
         auto parsed_treeref = ClassDef(p.parseClass());
-        to_be_defined_[QualifiedName(
-            qualifier, parsed_treeref.name().name())] = parsed_treeref;
+        to_be_defined_[QualifiedName(qualifier, parsed_treeref.name().name())] =
+            parsed_treeref;
       } break;
       case TK_DEF: {
         auto parsed_treeref = Def(p.parseFunction(/*is_method=*/false));
-        to_be_defined_[QualifiedName(
-            qualifier, parsed_treeref.name().name())] = parsed_treeref;
+        to_be_defined_[QualifiedName(qualifier, parsed_treeref.name().name())] =
+            parsed_treeref;
       } break;
       default:
         throw ErrorReport(L.cur().range)
@@ -223,8 +223,7 @@ std::shared_ptr<SugaredValue> SourceImporterImpl::resolveValue(
   }
   if (name == "infj") {
     return std::make_shared<SimpleValue>(graph->insertConstant(
-        c10::complex<double>(0, std::numeric_limits<double>::infinity()),
-        loc));
+        c10::complex<double>(0, std::numeric_limits<double>::infinity()), loc));
   }
   if (name == "nanj") {
     return std::make_shared<SimpleValue>(graph->insertConstant(
@@ -238,11 +237,15 @@ std::shared_ptr<SugaredValue> SourceImporterImpl::resolveValue(
   return nullptr;
 }
 
-TypePtr SourceImporterImpl::resolveType(const std::string& name, const SourceRange& loc) {
+TypePtr SourceImporterImpl::resolveType(
+    const std::string& name,
+    const SourceRange& loc) {
   return findNamedType(QualifiedName(name));
 }
 
-void SourceImporterImpl::importFunction(const std::string& qualifier, const Def& def) {
+void SourceImporterImpl::importFunction(
+    const std::string& qualifier,
+    const Def& def) {
   std::vector<Def> definitions{def};
   std::vector<ResolverPtr> resolvers{shared_from_this()};
   cu_->define(
@@ -262,8 +265,7 @@ void SourceImporterImpl::importNamedType(
   if (!class_def.superclass().present()) {
     return importClass(qualified_name, class_def, /*is_module=*/false);
   }
-  const auto& superclass_name =
-      Var(class_def.superclass().get()).name().name();
+  const auto& superclass_name = Var(class_def.superclass().get()).name().name();
   if (superclass_name == "Module") {
     importClass(qualified_name, class_def, /*is_module=*/true);
   } else if (superclass_name == "NamedTuple") {
@@ -284,9 +286,10 @@ void SourceImporterImpl::importNamedType(
   }
 }
 
-c10::optional<Assign> SourceImporterImpl::attributeAssignmentSpecialHandlingHack(
-    const QualifiedName& qualified_classname,
-    const Assign& assign) {
+c10::optional<Assign> SourceImporterImpl::
+    attributeAssignmentSpecialHandlingHack(
+        const QualifiedName& qualified_classname,
+        const Assign& assign) {
   struct AttrTypeReplacementDescr {
     std::string attr_name;
     std::string expected_type;
@@ -337,8 +340,7 @@ c10::optional<Assign> SourceImporterImpl::attributeAssignmentSpecialHandlingHack
     auto& expected_type = replacements.at(demangled_classname).expected_type;
     auto& replacement_type =
         replacements.at(demangled_classname).replacement_type;
-    if (lhs.name().name() == attr_name &&
-        type.name().name() == expected_type) {
+    if (lhs.name().name() == attr_name && type.name().name() == expected_type) {
       Parser p(std::make_shared<Source>(replacement_type));
       auto typename_expr = p.parseExp();
       auto maybe_typename =
@@ -409,8 +411,7 @@ void SourceImporterImpl::importClass(
                   is_module,
                   "Assignments in class body only "
                   "supported on modules right now");
-              const auto param_list =
-                  ListLiteral(assign.rhs().get()).inputs();
+              const auto param_list = ListLiteral(assign.rhs().get()).inputs();
               for (const auto& param : param_list) {
                 parameter_names.insert(StringLiteral(param).text());
               }
@@ -420,8 +421,7 @@ void SourceImporterImpl::importClass(
             } else if (name == "__buffers__") {
               TORCH_INTERNAL_ASSERT(
                   is_module, "Buffers only exist on modules at the moment");
-              const auto buffer_list =
-                  ListLiteral(assign.rhs().get()).inputs();
+              const auto buffer_list = ListLiteral(assign.rhs().get()).inputs();
               for (const auto& buffer : buffer_list) {
                 buffer_names.insert(StringLiteral(buffer).text());
               }
@@ -483,8 +483,7 @@ void SourceImporterImpl::importClass(
         Def def = Def(statement);
         if (pre_hook_names.find(def.name().name()) != pre_hook_names.end()) {
           pre_hook_def_map.emplace(def.name().name(), def);
-          pre_hook_resolver_map.emplace(
-              def.name().name(), shared_from_this());
+          pre_hook_resolver_map.emplace(def.name().name(), shared_from_this());
         } else if (hook_names.find(def.name().name()) != hook_names.end()) {
           hook_def_map.emplace(def.name().name(), def);
           hook_resolver_map.emplace(def.name().name(), shared_from_this());
@@ -516,8 +515,7 @@ void SourceImporterImpl::importClass(
       } break;
       case TK_SUBSCRIPT: {
         const auto name =
-            StringLiteral(Subscript(assign.lhs()).subscript_exprs()[0])
-                .text();
+            StringLiteral(Subscript(assign.lhs()).subscript_exprs()[0]).text();
         const auto type = type_parser.parseTypeFromExpr(assign.rhs().get());
         const bool is_parameter = parameter_names.count(name);
         const bool is_buffer = buffer_names.count(name);

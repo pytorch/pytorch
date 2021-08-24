@@ -2,13 +2,13 @@
 
 #include <ATen/core/ivalue_inl.h>
 #include <ATen/core/qualified_name.h>
+#include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/parser.h>
 #include <torch/csrc/jit/frontend/resolver.h>
 #include <torch/csrc/jit/frontend/script_type_parser.h>
+#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/custom_class.h>
-#include <torch/csrc/jit/api/module.h>
-#include <torch/csrc/jit/ir/ir.h>
 #include <functional>
 #include <memory>
 #include <regex>
@@ -38,14 +38,11 @@ struct SourceImporterImpl : public Resolver,
       const std::string& name,
       Function& m,
       const SourceRange& loc) override;
-  TypePtr resolveType(const std::string& name, const SourceRange& loc)
-      override;
+  TypePtr resolveType(const std::string& name, const SourceRange& loc) override;
 
  private:
   void importFunction(const std::string& qualifier, const Def& def);
-  void importNamedType(
-      const std::string& qualifier,
-      const ClassDef& class_def);
+  void importNamedType(const std::string& qualifier, const ClassDef& class_def);
   c10::optional<Assign> attributeAssignmentSpecialHandlingHack(
       const QualifiedName& qualified_classname,
       const Assign& assign);

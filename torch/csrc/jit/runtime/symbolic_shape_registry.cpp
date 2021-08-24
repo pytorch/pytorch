@@ -2,8 +2,8 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/runtime/operator.h>
-#include <torch/csrc/jit/serialization/import_source.h>
 #include <torch/csrc/jit/runtime/symbolic_shape_registry.h>
+#include <torch/csrc/jit/serialization/import_source.h>
 #include <unordered_map>
 
 namespace torch {
@@ -394,10 +394,7 @@ void loadFunctions() {
       [&](const std::string& name) -> std::shared_ptr<Source> { return src; },
       1);
   compilation_unit->define(
-      c10::nullopt,
-      shape_compute_functions,
-      resolver,
-      nullptr);
+      c10::nullopt, shape_compute_functions, resolver, nullptr);
   loadModule(*compilation_unit);
 }
 } // anonymous namespace
