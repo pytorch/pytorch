@@ -135,7 +135,7 @@ struct MathOpFallback {
     }
 
     // updates for non-mutable inputs
-    bool check_for_alias_with_mut_arg = mutable_inputs.size() != 0;
+    bool check_for_alias_with_mut_arg = !mutable_inputs.empty();
     for (const auto i : c10::irange(num_arguments)) {
       auto& ivalue = (*stack)[stack_start + i];
       if (!(ivalue.isTensor() || ivalue.isTensorList())) {
