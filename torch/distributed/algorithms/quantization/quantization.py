@@ -1,9 +1,11 @@
 import functools
 import torch
 import torch.distributed as dist
+from typing import Callable
 
 
 from enum import Enum
+from torch import Tensor
 
 
 TORCH_HALF_MIN = torch.finfo(torch.float16).min
@@ -92,7 +94,7 @@ def _quantized_a2a_single_handler(tensors,
                                   async_op=None,
                                   quant_loss=None,
                                   out_splits=None,
-                                  in_splits=None):
+                                  in_splits=None) -> Tensor:
     input_tensors = _quantize_tensor(input_tensor, qtype)
     out_tensors = _quantize_tensor(tensors, qtype)
     dist.all_to_all_single(out_tensors, input_tensors, out_splits, in_splits, group=group)
@@ -104,7 +106,7 @@ def _quantized_a2a_handler(tensors,
                            qtype,
                            group=None,
                            async_op=None,
-                           quant_loss=None):
+                           quant_loss=None) -> Tensor:
     input_tensors = _quantize_tensor_list(input_tensor, qtype)
     out_tensors = _quantize_tensor_list(tensors, qtype)
     dist.all_to_all(out_tensors, input_tensors, group=group, async_op=async_op)
@@ -116,7 +118,7 @@ def _quantized_all_gather_handler(tensors,
                                   qtype,
                                   group=None,
                                   async_op=None,
-                                  quant_loss=None):
+                                  quant_loss=None) -> Tensor:
 
     input_tensors = _quantize_tensor(input_tensor, qtype)
     out_tensors = _quantize_tensor_list(tensors, qtype)
@@ -158,7 +160,9 @@ def auto_quantize(func, qtype, quant_loss=None):
         out_splits = kwargs.get('out_splits', None)
         in_splits = kwargs.get('in_splits', None)
 
-        dispatch = {
+
+        dispatch: dict[
+            str, Callable] = {
             dist.all_to_all_single: _quantized_a2a_single_handler,
             dist.all_to_all: _quantized_a2a_handler,
             dist.all_gather: _quantized_all_gather_handler,
