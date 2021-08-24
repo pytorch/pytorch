@@ -3685,9 +3685,9 @@ torch.cuda.synchronize()
         models = []
         for _ in range(2):
             model_section1 = torch.nn.Sequential(torch.nn.Linear(D_in, H),
-                                        torch.nn.Dropout(p=0.2)).cuda()
+                                        torch.nn.Dropout(p=0.0)).cuda()
             model_section2 = torch.nn.Sequential(torch.nn.Linear(H, D_out),
-                                        torch.nn.Dropout(p=0.1)).cuda()
+                                        torch.nn.Dropout(p=0.0)).cuda()
             models.append(torch.nn.Sequential(model_section1, model_section2))
 
         model_graphed = models[0]
@@ -3707,38 +3707,39 @@ torch.cuda.synchronize()
         y = torch.randn(N, D_out, device='cuda')
 
         loss_fn_control = torch.nn.functional.mse_loss
+        relu_control = torch.nn.functional.relu
 
         # This is a good stress test. It graphs three callables: two Modules and one python function.
-        model_graphed[0], model_graphed[1], loss_fn_graphed = \
-            torch.cuda.make_graphed_callables((model_graphed[0], model_graphed[1], loss_fn_control),
-                                              ((x,), (h,), (y_pred,y)))
-        # model_graphed[0], model_graphed[1] = \
-        #     torch.cuda.make_graphed_callables((model_graphed[0], model_graphed[1]),
-        #                                       ((x,), (h,)))
-        # loss_fn_graphed = torch.nn.functional.mse_loss
+        model_graphed[0], model_graphed[1], relu_graphed, loss_fn_graphed = \
+            torch.cuda.make_graphed_callables((model_graphed[0], model_graphed[1], relu_control, loss_fn_control),
+                                              ((x,), (h,), (y_pred,), (y_pred,y)))
 
         real_inputs = [torch.rand_like(x) for _ in range(10)]
         real_targets = [torch.rand_like(y) for _ in range(10)]
 
-        for model, opt, loss_fn in zip((model_graphed, model_control),
-                                       (opt_graphed, opt_control),
-                                       (loss_fn_graphed, loss_fn_control)):
+        for m, opt, relu, loss_fn in zip((model_graphed, model_control),
+                                         (opt_graphed, opt_control),
+                                         (relu_graphed, relu_control),
+                                         (loss_fn_graphed, loss_fn_control)):
             # Resets RNC states before iterations for graphed and ungraphed models,
             # so dropout math should be bitwise identical for both.
+            torch.manual_seed(5)
             torch.cuda.manual_seed(5)
             for data, target in zip(real_inputs, real_targets):
                 opt.zero_grad(set_to_none=True)
-                y_pred = model(data)
+                y_pred = m(data)
+                # y_pred = relu(y_pred)
                 loss = loss_fn(y_pred, target)
                 loss.backward()
                 opt.step()
 
-        for p, pc in zip(model.parameters(), model_control.parameters()):
+        for p, pc in zip(model_graphed.parameters(), model_control.parameters()):
             self.assertEqual(p, pc)
 
-        # model_graphed.eval()
-        # model_control.eval()
-        # self.assertEqual(model(real_inputs[0]), model_control(real_inputs[0]))
+        # We graphed the models in training mode. Eval should still run ungraphed.
+        model_graphed.eval()
+        model_control.eval()
+        self.assertEqual(model_graphed(real_inputs[0]), model_control(real_inputs[0]))
 
     def test_batch_norm_gather_stats(self):
         input = torch.randn(1, 3, 3, 3, device='cuda')

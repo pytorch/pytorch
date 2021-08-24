@@ -71,8 +71,8 @@ Streams and events
     Stream
     Event
 
-Graphs
-------
+Graphs (prototype)
+------------------
 .. autosummary::
     :toctree: generated
     :nosignatures:

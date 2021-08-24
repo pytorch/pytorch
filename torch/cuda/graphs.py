@@ -16,7 +16,11 @@ from torch._C import (
 )
 
 class graph(object):
-    r"""Context-manager that captures CUDA work into a :class:`torch.cuda.CUDAGraph`
+    r"""
+    .. warning
+        This API is a prototype and may change in future releases.
+
+    Context-manager that captures CUDA work into a :class:`torch.cuda.CUDAGraph`
     object for later replay.
 
     See :ref:`CUDA Graphs <cuda-graph-semantics>` for a general introduction,
@@ -33,7 +37,6 @@ class graph(object):
     .. note::
         For effective memory sharing, if you pass a ``pool`` used by a previous capture and the previous capture
         used an explicit ``stream`` argument, you should pass the same ``stream`` argument to this capture.
-
     """
     default_capture_stream = None
 
@@ -76,6 +79,9 @@ def make_graphed_callables(callables,
                            sample_args,
                            autograd_aware=True):
     r"""
+    .. warning
+        This API is a prototype and may change in future releases.
+
     Accepts callables (functions or :class:`nn.Module<torch.nn.Module>`\ s)
     and returns graphed versions.
 
@@ -133,6 +139,7 @@ def make_graphed_callables(callables,
 
     with torch.cuda.stream(torch.cuda.Stream()):
         # Warmup
+        torch.cuda.synchronize()
         for func, args, static_input_surface in zip(callables,
                                                     sample_args,
                                                     per_callable_static_input_surfaces):
@@ -145,6 +152,7 @@ def make_graphed_callables(callables,
                                                   only_inputs=True,
                                                   allow_unused=False)
             del outputs, grad_inputs
+        torch.cuda.synchronize()
 
         # All captures here share a mempool. To avoid replays corrupting each other's memory,
         # the safest approach is to capture all passes in the same order they'll run:
@@ -223,7 +231,8 @@ def make_graphed_callables(callables,
                             if i.data_ptr() != arg.data_ptr():
                                 i.copy_(arg)
                     fwd_graph.replay()
-                    return static_outputs
+                    assert isinstance(static_outputs, tuple)
+                    return tuple(o.detach() for o in static_outputs)
 
                 @staticmethod
                 def backward(ctx, *grads):
@@ -241,7 +250,7 @@ def make_graphed_callables(callables,
                     # Input args that didn't require grad expect a None gradient.
                     return tuple(b.detach() if b is not None else b for b in static_grad_inputs)
 
-            def functionalized(self, *user_args):
+            def functionalized(*user_args):
                 out = Graphed.apply(*(user_args + module_params))
                 return out[0] if output_was_tensor else out
 
@@ -260,7 +269,16 @@ def make_graphed_callables(callables,
                                                      per_callable_static_grad_inputs[i])
 
             if isinstance(func, torch.nn.Module):
-                func.forward = types.MethodType(graphed, func)
+                def make_graphed_forward(func, training, graphed, orig_fwd):
+                    def new_fwd(*user_args):
+                        # If the module's training-or-eval state matches what we graphed,
+                        # run the graph, otherwise run the original forward method
+                        if func.training == training:
+                            return graphed(*user_args)
+                        else:
+                            return orig_fwd(*user_args)
+                    return new_fwd
+                func.forward = make_graphed_forward(func, func.training, graphed, func.forward)
                 ret.append(func)
             else:
                 ret.append(graphed)

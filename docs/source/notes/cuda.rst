@@ -562,7 +562,7 @@ PyTorch API
 ^^^^^^^^^^^
 
 .. warning::
-    The API is a prototype and may change in future releases.
+    This API is a prototype and may change in future releases.
 
 PyTorch exposes graphs via a raw :class:`torch.cuda.CUDAGraph` class
 and two convenience wrappers,
@@ -753,8 +753,10 @@ Example::
     h = torch.randn(N, H, device='cuda', requires_grad=True)
     y = torch.randn(N, D_out, device='cuda')
 
+    # Graphs the forward and backward passes of model[0].
+    # (In this simple network, other parts are also graph-safe.
+    # Graphing only model[0] is just a demonstration.)
     model[0] = torch.cuda.make_graphed_callables(model[0], (x,))
-    model[1] = torch.cuda.make_graphed_callables(model[1], (h,))
 
     for _ in range(10):
         optimizer.zero_grad(set_to_none=True)
