@@ -10,6 +10,18 @@
 namespace torch {
 namespace jit {
 
+std::unordered_map<LiveRange, Region, live_range_hash> naive(
+    std::unordered_map<LiveRange, uint64_t, live_range_hash>
+    managed_live_ranges) {
+  std::unordered_map<LiveRange, Region, live_range_hash> allocations;
+  int offset = 0;
+  for (const auto& item : managed_live_ranges) {
+    allocations[item.first] = {offset, item.second};
+    offset += item.second;
+  }
+  return allocations;
+}
+
 c10::optional<uint64_t> computeStorageSize(const Value& value) {
   auto ttp = value.type()->cast<TensorType>();
   if (!ttp) {
@@ -241,7 +253,8 @@ void planMemory(std::shared_ptr<Graph>& graph, Strategy strat) {
 
   switch (strat) {
     case Strategy::NAIVE: {
-      return;
+      allocations = naive(managed_live_ranges);
+      break;
     }
     case Strategy::LINEAR_SCAN: {
       allocations = linearScanHeuristic(managed_live_ranges);
