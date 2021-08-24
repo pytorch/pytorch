@@ -1,11 +1,7 @@
-#include <caffe2/operators/segment_reduction_op_gpu.cuh>
-#include <torch/csrc/distributed/c10d/quantization/quantization.h>
+#include <c10/cuda/CUDAGuard.h>
+#include <c10d/Utils.hpp>
+#include <torch/csrc/distributed/c10d/quantization/quantization_gpu.h>
 #include <torch/csrc/distributed/c10d/quantization/quantization_utils.h>
-
-namespace torch {
-namespace distributed {
-namespace c10d {
-namespace quantization {
 
 // FP32 -> BF16 kernel
 __global__ inline void _float_to_bfloat16_cuda_kernel(
@@ -50,9 +46,13 @@ __global__ inline void _bfloat16_to_float_cuda_kernel(
     }
   }
 }
-#define CUDA_1D_THREAD_BLOCK_LOOP(i, n) \
-  for (size_t i = threadIdx.x; i < (n); i += blockDim.x)
-at::Tensor _float_to_bfloat16_gpu(const at::Tensor& input) {
+
+namespace torch {
+namespace distributed {
+namespace c10d {
+namespace quantization {
+
+at::Tensor _float_to_bfloat16_cuda(const at::Tensor& input) {
   TENSOR_ON_CUDA_GPU(input);
   // Currently it supports 2D inputs
   TENSOR_NDIM_EQUALS(input, 2);
@@ -93,12 +93,12 @@ at::Tensor _float_to_bfloat16_gpu(const at::Tensor& input) {
       // TODO: replace Half by BFloat16, after BFloat16 is supported by Nvidia
       // NCCL
       reinterpret_cast<uint16_t*>(output.data_ptr<at::Half>()));
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
+  //C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   return output;
 }
 
-at::Tensor _bfloat16_to_float_gpu(const at::Tensor& input) {
+at::Tensor _bfloat16_to_float_cuda(const at::Tensor& input) {
   TENSOR_ON_CUDA_GPU(input);
   // Currently it supports 2D inputs
   TENSOR_NDIM_EQUALS(input, 2);
