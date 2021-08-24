@@ -104,7 +104,7 @@ class TORCH_API CodeGen {
 class CodeGen::BufferArg {
  public:
   BufferArg(const Placeholder& buffer) : buf_(buffer.data()) {}
-  BufferArg(Tensor* tensor) : buf_(tensor->buf()) {}
+  BufferArg(Tensor tensor) : buf_(tensor.buf()) {}
   BufferArg(const VarHandle& var) : var_(var.node()), isVar_(true) {}
   BufferArg(const BufHandle& buf) : buf_(buf.node()) {}
 
