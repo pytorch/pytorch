@@ -627,11 +627,38 @@ class TestFunctionalIterDataPipe(TestCase):
             i += 1
             if i == 5:  # yield all of dp3 when halfway through dp1, dp2
                 output3 = list(dp3)
-        self.assertEqual(list(range(10)), output1)
-        self.assertEqual(list(range(10)), output2)
+                break
+        self.assertEqual(list(range(5)), output1)
+        self.assertEqual(list(range(5)), output2)
         self.assertEqual(list(range(10)), output3)
 
-        # Test Case: make sure DataPipe reset even when some child DataPipes are not read
+        # Test Case: DataPipe doesn't reset if this pipe hasn't been read
+        dp1, dp2 = input_dp.fork(num_instances=2)
+        i1, i2 = iter(dp1), iter(dp2)
+        output2 = []
+        i = 0
+        for n2 in i2:
+            output2.append(n2)
+            i += 1
+            if i == 5:
+                i1 = iter(dp1)  # Doesn't reset because i1 hasn't been read
+        self.assertEqual(list(range(10)), output2)
+
+        # Test Case: DataPipe reset when some of it have been read
+        dp1, dp2 = input_dp.fork(num_instances=2)
+        i1, i2 = iter(dp1), iter(dp2)
+        output1, output2 = [], []
+        i = 0
+        for n1, n2 in zip(i1, i2):
+            output1.append(n1)
+            output2.append(n2)
+            i += 1
+            if i == 5:
+                i1 = iter(dp1)  # Reset both all child DataPipe
+        self.assertEqual(list(range(5)) + list(range(10)), output1)
+        self.assertEqual(list(range(5)) + list(range(10)), output2)
+
+        # Test Case: DataPipe reset, even when some other child DataPipes are not read
         dp1, dp2, dp3 = input_dp.fork(num_instances=3)
         output1, output2 = list(dp1), list(dp2)
         self.assertEqual(list(range(10)), output1)
