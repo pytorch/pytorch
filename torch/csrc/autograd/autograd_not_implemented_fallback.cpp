@@ -125,7 +125,11 @@ void autogradNotImplementedFallbackImpl(const c10::OperatorHandle& op, c10::Disp
     impl_saved.push_back(t.getIntrusivePtr());
   }, &stack_args_copy, 0, num_arguments);
   #endif
-  {
+   if (aliased_input_idx != -1 || is_inplace_output.size() > 0) {
+    at::AutoDispatchBelowAutograd guard;
+    op.redispatchBoxed(dispatch_keys & c10::after_autograd_keyset, stack);
+  } else {
+    // If neither in-place nor view
     at::AutoDispatchBelowADInplaceOrView guard;
     op.redispatchBoxed(dispatch_keys & c10::after_autograd_keyset, stack);
   }
@@ -173,5 +177,77 @@ void autogradNotImplementedFallbackImpl(const c10::OperatorHandle& op, c10::Disp
 torch::CppFunction autogradNotImplementedFallback() {
   return torch::CppFunction::makeFromBoxedFunction<&autogradNotImplementedFallbackImpl>();
 }
+
+
+  // [WIP]
+void inplaceOrViewFallbackImpl(const c10::OperatorHandle& op, c10::DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
+  const auto& schema = op.schema();
+  const auto& op_name = schema.operator_name().name;
+  const auto& arguments = schema.arguments();
+  const auto& returns = schema.returns();
+  const auto num_arguments = arguments.size();
+  const auto num_returns = returns.size();
+  const auto stack_start = stack->size() - num_arguments;
+  const bool grad_mode = GradMode::is_enabled();
+  std::vector<const at::Tensor*> tensors_to_increment_version_on_stack;
+  const at::Tensor* aliased_input = nullptr;
+
+  // There seems to be some recomputation here? Can we
+  int64_t aliased_output_idx = -1;
+  for (const auto i : c10::irange(num_returns)) {
+    const auto& alias_info = returns[i].alias_info();
+    // Is this the criteria for a view? What if we have alias, but the exact same tensor is returned (shouldn't this be caught by the)
+    // what if we have an in-place op, that returns the input as-is. The output is aliased to the input
+    if (alias_info.has_value() && !alias_info->isWrite()) {
+      AT_ASSERT(aliased_output_idx == -1, "Expected a single output to be aliased, but observed at least 2 outputs with alias info");
+      aliased_output_idx = i;
+    }
+  }
+
+  for (const auto i : c10::irange(num_arguments)) {
+    const auto& alias_info = arguments[i].alias_info();
+    if (alias_info.has_value() && !alias_info->isWrite()) {
+      AT_ASSERT(aliased_input == nullptr, "Expected a single input to be aliased, but observed at least 2 input with alias info");
+      const c10::IValue& aliased_input_iv = (*stack)[stack_start + i];
+      AT_ASSERT(aliased_input_iv.isTensor());
+      const at::Tensor* aliased_input = &(aliased_input_iv.toTensor());;
+    }
+  }
+
+  _foreach_tensor([&](size_t _, size_t i, const at::Tensor& t) {
+    const auto& alias_info = arguments[i].alias_info();
+    if (alias_info.has_value() && alias_info->isWrite()) {
+      tensors_to_increment_version_on_stack.push_back(&t);
+    }
+  }, stack, stack_start, num_arguments);
+
+  {
+    at::AutoDispatchBelowADInplaceOrView guard;
+    op.redispatchBoxed(dispatch_keys & c10::after_autograd_keyset, stack);
+  }
+
+  for (const auto i : c10::irange(tensors_to_increment_version_on_stack.size())) {
+    increment_version(*tensors_to_increment_version_on_stack[i]);
+  }
+  if (aliased_output_idx != -1) {
+    const c10::IValue& aliased_output_iv = (*stack)[stack->size() - num_returns + aliased_output_idx];
+    AT_ASSERT(aliased_output_iv.isTensor()); // We do not support views embedded inside tensorlist
+    const at::Tensor& aliased_output = aliased_output_iv.toTensor();
+    auto result = as_view(
+      /* base=*/*aliased_input,
+      /* output=*/aliased_output,
+      /* is_bw_differentiable=*/ true,
+      /* is_fw_differentiable=*/ true,
+      /* view_func=*/ nullptr, // What are the consequences of not providing this?
+      /* creation_meta=*/ InferenceMode::is_enabled() ? CreationMeta::INFERENCE_MODE : (at::GradMode::is_enabled() ? CreationMeta::DEFAULT : CreationMeta::NO_GRAD_MODE));
+  }
+}
+
+torch::CppFunction autogradInplaceOrViewFallback() {
+  return torch::CppFunction::makeFromBoxedFunction<&inplaceOrViewFallbackImpl>();
+}
+
+
+
 
 }} // namespace torch::autograd
