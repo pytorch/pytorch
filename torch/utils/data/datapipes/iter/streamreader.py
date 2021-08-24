@@ -2,8 +2,8 @@ from typing import Tuple
 from torch.utils.data import IterDataPipe
 
 
-class ToBytesIterDataPipe(IterDataPipe[Tuple[str, bytes]]):
-    r""" :class:`ToBytesIterDataPipe`
+class StreamReaderIterDataPipe(IterDataPipe[Tuple[str, bytes]]):
+    r""" :class:`StreamReaderIterDataPipe`
 
     Iterable DataPipe to load IO stream with label name,
     and to yield bytes with label name in a tuple

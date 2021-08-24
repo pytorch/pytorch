@@ -55,7 +55,7 @@ Dtype promoteTypesVec(std::vector<ExprType>& v) {
 template <class ExprType>
 Dtype promoteTypesMap(
     ExprPtr s,
-    std::unordered_map<SimplifierHashType, ExprType*>& m) {
+    std::unordered_map<SimplifierHashType, ExprType>& m) {
   Dtype t = s->dtype();
   bool first = true;
   for (auto& e : m) {
@@ -69,12 +69,12 @@ Dtype promoteTypesMap(
 }
 
 template <class ExprType>
-Dtype promoteTypesVar(ExprType* e) {
+Dtype promoteTypesVar(ExprType e) {
   return e->dtype();
 }
 
 template <class ExprType, class... Args>
-Dtype promoteTypesVar(ExprType* e, Args... es) {
+Dtype promoteTypesVar(ExprType e, Args... es) {
   Dtype lhs = e->dtype();
   Dtype rhs = promoteTypesVar(es...);
   if (e->isConstant()) {
@@ -82,42 +82,6 @@ Dtype promoteTypesVar(ExprType* e, Args... es) {
   }
 
   return promoteTypes(lhs, rhs);
-}
-
-// Creates a new Expr of the given type with the provided lhs and rhs.
-inline ExprPtr newBinaryOpOfType(
-    IRNodeType expr_type,
-    ExprPtr lhs,
-    ExprPtr rhs,
-    bool option) {
-  switch (expr_type) {
-    // NOLINTNEXTLINE(bugprone-branch-clone)
-    case IRNodeType::kAdd:
-      return alloc<Add>(lhs, rhs);
-    case IRNodeType::kSub:
-      return alloc<Sub>(lhs, rhs);
-    case IRNodeType::kMul:
-      return alloc<Mul>(lhs, rhs);
-    case IRNodeType::kDiv:
-      return alloc<Div>(lhs, rhs);
-    case IRNodeType::kMod:
-      return alloc<Mod>(lhs, rhs);
-    case IRNodeType::kMax:
-      return alloc<Max>(lhs, rhs, option);
-    case IRNodeType::kMin:
-      return alloc<Min>(lhs, rhs, option);
-    case IRNodeType::kAnd:
-      return alloc<And>(lhs, rhs);
-    case IRNodeType::kXor:
-      return alloc<Xor>(lhs, rhs);
-    case IRNodeType::kLshift:
-      return alloc<Lshift>(lhs, rhs);
-    case IRNodeType::kRshift:
-      return alloc<Rshift>(lhs, rhs);
-    default:
-      LOG(FATAL) << "unsupported expr_type: " << static_cast<int>(expr_type);
-      return nullptr;
-  }
 }
 
 // Uses the evaluator to fold an Expression with constant terms.
@@ -498,21 +462,13 @@ class TORCH_API PolynomialTransformer : public PolynomialBase {
 
   ExprPtr mutate(ModPtr v) override;
 
-  ExprPtr mutate(AndPtr v) override {
-    return mutateBinaryOp(v, this);
-  }
+  ExprPtr mutate(AndPtr v) override;
 
-  ExprPtr mutate(XorPtr v) override {
-    return mutateBinaryOp(v, this);
-  }
+  ExprPtr mutate(XorPtr v) override;
 
-  ExprPtr mutate(LshiftPtr v) override {
-    return mutateBinaryOp(v, this);
-  }
+  ExprPtr mutate(LshiftPtr v) override;
 
-  ExprPtr mutate(RshiftPtr v) override {
-    return mutateBinaryOp(v, this);
-  }
+  ExprPtr mutate(RshiftPtr v) override;
 
   ExprPtr mutate(MaxPtr v) override;
 
@@ -525,30 +481,6 @@ class TORCH_API PolynomialTransformer : public PolynomialBase {
   ExprPtr mutate(CastPtr v) override;
 
   ExprPtr mutate(IfThenElsePtr v) override;
-
-  template <typename Op>
-  static ExprPtr mutateBinaryOp(
-      BinaryOpNode<Op>* v,
-      IRMutator* mutator,
-      bool option = false) {
-    ExprPtr lhs = v->lhs();
-    ExprPtr rhs = v->rhs();
-    ExprPtr lhs_new = lhs->accept_mutator(mutator);
-    ExprPtr rhs_new = rhs->accept_mutator(mutator);
-
-    ExprPtr node = v;
-
-    if (lhs != lhs_new || rhs != rhs_new) {
-      node = newBinaryOpOfType(v->expr_type(), lhs_new, rhs_new, option);
-    }
-
-    // Can only fold if both sides are constant.
-    if (!lhs_new->isConstant() || !rhs_new->isConstant()) {
-      return node;
-    }
-
-    return evaluateOp(node);
-  }
 
   static ExprPtr simplify(ExprPtr e);
   static ExprHandle simplify(const ExprHandle& e);
