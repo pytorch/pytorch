@@ -3678,64 +3678,67 @@ torch.cuda.synchronize()
     @unittest.skipIf((not TEST_CUDA) or
                      TEST_WITH_ROCM or
                      int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
+    @skipCUDAMemoryLeakCheckIf(True)
     def test_graph_make_graphed_callables_modules(self):
-        # N, D_in, H, D_out = 640, 4096, 2048, 1024
+        N, D_in, H, D_out = 640, 4096, 2048, 1024
 
-        # models = []
-        # for _ in range(2):
-        #     model_section1 = torch.nn.Sequential(torch.nn.Linear(D_in, H),
-        #                                 torch.nn.Dropout(p=0.2)).cuda()
-        #     model_section2 = torch.nn.Sequential(torch.nn.Linear(H, D_out),
-        #                                 torch.nn.Dropout(p=0.1)).cuda()
-        #     models.append(torch.nn.Sequential(model_section1, model_section2))
+        models = []
+        for _ in range(2):
+            model_section1 = torch.nn.Sequential(torch.nn.Linear(D_in, H),
+                                        torch.nn.Dropout(p=0.2)).cuda()
+            model_section2 = torch.nn.Sequential(torch.nn.Linear(H, D_out),
+                                        torch.nn.Dropout(p=0.1)).cuda()
+            models.append(torch.nn.Sequential(model_section1, model_section2))
 
-        # model = models[0]
-        # model_control = models[1]
+        model_graphed = models[0]
+        model_control = models[1]
 
-        # with torch.no_grad:
-        #     for p, pc in zip(model.parameters(), model_control.parameters()):
-        #         pc.copy_(p)
+        with torch.no_grad():
+            for p, pc in zip(model_graphed.parameters(),
+                             model_control.parameters()):
+                pc.copy_(p)
 
-        # loss_fn = torch.nn.MSELoss()
+        opt_graphed = torch.optim.SGD(model_graphed.parameters(), lr = 0.1)
+        opt_control = torch.optim.SGD(model_control.parameters(), lr = 0.1)
 
-        # optimizer = torch.optim.SGD(model.parameters(), lr = 0.1)
-        # optimizer_control = torch.optim.SGD(model_control.parameters(), lr = 0.1)
+        x = torch.randn(N, D_in, device='cuda')
+        h = torch.randn(N, H, device='cuda', requires_grad=True)
+        y_pred = torch.randn(N, D_out, device='cuda', requires_grad=True)
+        y = torch.randn(N, D_out, device='cuda')
 
-        # x = torch.randn(N, D_in, device='cuda')
-        # h = torch.randn(N, H, device='cuda', requires_grad=True)
-        # y = torch.randn(N, D_out, device='cuda')
+        loss_fn_control = torch.nn.functional.mse_loss
 
-        # model[0], model[1] = torch.cuda.make_graphed_callables((model[0], model[1]),
-        #                                                        ((x,), (h,)))
+        # This is a good stress test. It graphs three callables: two Modules and one python function.
+        model_graphed[0], model_graphed[1], loss_fn_graphed = \
+            torch.cuda.make_graphed_callables((model_graphed[0], model_graphed[1], loss_fn_control),
+                                              ((x,), (h,), (y_pred,y)))
+        # model_graphed[0], model_graphed[1] = \
+        #     torch.cuda.make_graphed_callables((model_graphed[0], model_graphed[1]),
+        #                                       ((x,), (h,)))
+        # loss_fn_graphed = torch.nn.functional.mse_loss
 
-        # real_inputs = [torch.rand_like(x) for _ in range(10)]
-        # real_targets = [torch.rand_like(y) for _ in range(10)]
+        real_inputs = [torch.rand_like(x) for _ in range(10)]
+        real_targets = [torch.rand_like(y) for _ in range(10)]
 
-        # for m, opt in zip((model, model_control),
-        #                   (optimizer, optimizer_control))
-        #     # Resets RNC states before iterations for graphed and ungraphed models,
-        #     # so dropout math should be bitwise identical for both.
-        #     torch.cuda.manual_seed(5)
-        #     for data, target in zip(real_inputs, real_targets):
-        #         optimizer.zero_grad(set_to_none=True)
-        #         y_pred = model(data)
-        #         loss = loss_fn(y_pred, y)
-        #         loss.backward()
-        #         optimizer.step()
+        for model, opt, loss_fn in zip((model_graphed, model_control),
+                                       (opt_graphed, opt_control),
+                                       (loss_fn_graphed, loss_fn_control)):
+            # Resets RNC states before iterations for graphed and ungraphed models,
+            # so dropout math should be bitwise identical for both.
+            torch.cuda.manual_seed(5)
+            for data, target in zip(real_inputs, real_targets):
+                opt.zero_grad(set_to_none=True)
+                y_pred = model(data)
+                loss = loss_fn(y_pred, target)
+                loss.backward()
+                opt.step()
 
-        # for p, pc in zip(model.parameters(), model_control.parameters()):
-        #     self.assertEqual(p, pc)
+        for p, pc in zip(model.parameters(), model_control.parameters()):
+            self.assertEqual(p, pc)
 
-        # model.eval()
+        # model_graphed.eval()
         # model_control.eval()
         # self.assertEqual(model(real_inputs[0]), model_control(real_inputs[0]))
-        pass
-
-    @unittest.skipIf((not TEST_CUDA) or
-                     TEST_WITH_ROCM or
-                     int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
-    def test_graph_make_graphed_callables_function(self):
-        pass
 
     def test_batch_norm_gather_stats(self):
         input = torch.randn(1, 3, 3, 3, device='cuda')
