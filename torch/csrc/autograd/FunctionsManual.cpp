@@ -3731,24 +3731,23 @@ std::tuple<Tensor, Tensor> lu_solve_backward(
   // Note: When grad_input_mask[0] && !grad_input_mas[1], this could be
   // implemented with lu_solve with the conj-transpose flag on (saving the lu_unpack)
   if (grad_input_mask[0]) {
-    // Y = U^{-H}X_grad
-    const Tensor Y = at::linalg_solve_triangular(U_H, grad,
-                                                 /*left=*/true,
-                                                 /*upper=*/false,
-                                                 /*unitriangular=*/false);
-    // Z = L^{-H}U^{-H}X_grad
-    const Tensor Z = at::linalg_solve_triangular(L_H, Y,
-                                                 /*left=*/true,
-                                                 /*upper=*/true,
-                                                 /*unitriangular=*/true);
-    const Tensor X_grad = P.matmul(Z);
-    Tensor LU_data_grad;
     if (grad_input_mask[1]) {
+      // Y = U^{-H}X_grad
+      const Tensor Y = at::linalg_solve_triangular(U_H, grad,
+                                                   /*left=*/true,
+                                                   /*upper=*/false,
+                                                   /*unitriangular=*/false);
+      // Z = L^{-H}U^{-H}X_grad
+      const Tensor Z = at::linalg_solve_triangular(L_H, Y,
+                                                   /*left=*/true,
+                                                   /*upper=*/true,
+                                                   /*unitriangular=*/true);
+      const Tensor X_grad = P.matmul(Z);
       const Tensor U_grad = Y.matmul(X_H);
-      Tensor L_grad = Z.matmul(X_H).matmul(U_H);
-      LU_data_grad = -(L_grad.tril(-1) + U_grad.triu());
-    }
+      const Tensor L_grad = Z.matmul(X_H).matmul(U_H);
+      const Tensor LU_data_grad = -(L_grad.tril(-1) + U_grad.triu());
     return std::make_pair(X_grad, LU_data_grad);
+    }
   } else {
     if (grad_input_mask[1]) {
       const Tensor U_grad = at::linalg_solve_triangular(U_H, grad.matmul(X_H),
