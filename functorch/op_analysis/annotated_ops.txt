@@ -186,7 +186,7 @@ mode, misc
 mul, reduction
 multiply, alias
 mv, composite matmul
-mvlgamma, reduction
+mvlgamma, primitive pointwise
 narrow_copy, view/reshape
 narrow, view/reshape
 ones, factory
