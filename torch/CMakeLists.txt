@@ -251,6 +251,7 @@ endif()
 # WARNING- any TORCH_PYTHON_COMPILE_DEFINITIONS above this line
 #          affect both torch_python and DEPLOY interpreter.
 if(USE_DEPLOY)
+  add_library(torch_python_obj OBJECT ${TORCH_PYTHON_SRCS})
   if(USE_DISTRIBUTED)
     # Set c10d-related compile definitions. For a "normal" build of
     # libtorch_python, these are set on libtorch as PUBLIC so they are
@@ -281,7 +282,6 @@ if(USE_DEPLOY)
     # Set c10d-related include directories as well.
     target_include_directories(torch_python_obj PRIVATE $<BUILD_INTERFACE:${TORCH_SRC_DIR}/csrc/distributed>)
   endif()
-  add_library(torch_python_obj OBJECT ${TORCH_PYTHON_SRCS})
   target_compile_definitions(torch_python_obj PRIVATE "-DTHP_BUILD_MAIN_LIB -DUSE_DEPLOY")
 
   target_compile_definitions(torch_python_obj PRIVATE ${TORCH_PYTHON_COMPILE_DEFINITIONS})
