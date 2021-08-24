@@ -3795,6 +3795,28 @@ class DistributedTest:
             "Only NCCL and GLOO backend support DistributedDataParallel",
         )
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
+        def test_ddp_create_graph(self):
+            rank = self.rank
+            torch.cuda.set_device(rank)
+            net = torch.nn.parallel.DistributedDataParallel(
+                torch.nn.Linear(1, 1, bias=False).cuda(rank),
+                device_ids=[rank]
+            )
+            inp = torch.randn((2, 1), device=rank)
+            for _ in range(6):
+                loss = net(inp).sum()
+                # Verify DDP works with create_graph=True
+                loss.backward(create_graph=True)
+                # grad tensors should require grad.
+                self.assertTrue(
+                    all([param.requires_grad for param in net.parameters()])
+                )
+
+        @sandcastle_skip_if(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only NCCL and GLOO backend support DistributedDataParallel",
+        )
+        @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         @skip_if_rocm
         def test_DistributedDataParallel_non_default_stream(self):
             stream = torch.cuda.Stream(self.rank)
