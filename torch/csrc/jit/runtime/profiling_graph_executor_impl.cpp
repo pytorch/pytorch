@@ -756,7 +756,6 @@ Function* createFallbackPathFunction(
 
 void ProfilingGraphExecutorImpl::replaceFallbackGraphWithFallbackFunction(
     Block* b) {
-  GraphOptimizerEnabledGuard g(false);
   Stack s;
   for (auto it = b->nodes().begin(); it != b->nodes().end();) {
     if (it->kind() == prim::FallbackGraph) {
