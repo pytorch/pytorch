@@ -748,8 +748,6 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   STOP_DECOMPOSE(fft_fftn);
   STOP_DECOMPOSE(fft_hfft);
   STOP_DECOMPOSE(fft_ifftn);
-  STOP_DECOMPOSE(cummax);
-  STOP_DECOMPOSE(cummin);
   STOP_DECOMPOSE(linalg_cholesky);
   STOP_DECOMPOSE(linalg_cholesky_ex);
   STOP_DECOMPOSE(linalg_inv);
@@ -760,7 +758,6 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   STOP_DECOMPOSE(logical_not);
   STOP_DECOMPOSE(logical_and);
   STOP_DECOMPOSE(kthvalue);
-  STOP_DECOMPOSE(linalg_vector_norm);
   STOP_DECOMPOSE(masked_select);
   STOP_DECOMPOSE(masked_select_backward);
   STOP_DECOMPOSE(matrix_exp_backward);
