@@ -19,8 +19,8 @@ const char* toString(DispatchKey t) {
       return "FPGA";
     case DispatchKey::XPU:
       return "XPU";
-    case DispatchKey::MSNPU:
-      return "MSNPU";
+    case DispatchKey::ORT:
+      return "ORT";
     case DispatchKey::XLA:
       return "XLA";
     case DispatchKey::Lazy:
