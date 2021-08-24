@@ -32,6 +32,11 @@ from torch.testing._internal.common_utils import (TestCase, run_tests, TEST_NUMP
                                                   IS_IN_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm, slowTest,
                                                   load_tests, TEST_WITH_TSAN, IS_SANDCASTLE)
 
+import torch.utils.data.communication.eventloop as eventloop
+import torch.utils.data.communication.messages as messages
+import torch.utils.data.communication.iter as iter
+import torch.utils.data.communication.protocol as datapipes_protocol
+
 try:
     import psutil
     HAS_PSUTIL = True
@@ -1968,6 +1973,31 @@ class TestDataLoader2(TestCase):
         dl2 = DataLoader2(dp, batch_size=3, collate_fn=lambda x: x, num_workers=2)
         self.assertEquals(list(dl), list(dl2))
 
+
+@unittest.skipIf(
+    TEST_WITH_TSAN,
+    "Fails with TSAN with the following error: starting new threads after multi-threaded "
+    "fork is not supported. Dying (set die_after_fork=0 to override)")
+class TestDataLoader2_EventLoop(TestCase):
+    @skipIfNoDill
+    def test_basic_threading(self):
+        def clean_me(process, req_queue, res_queue):
+            req_queue.put(messages.TerminateRequest())
+            _ = res_queue.get()
+            process.join()
+
+        it = list(range(100))
+        numbers_dp = IterableAsDataPipe(it)
+        (process, req_queue, res_queue) = eventloop.SpawnThreadForDataPipeline(numbers_dp)
+
+        process.start()
+        local_datapipe = iter.QueueWrapper(
+            datapipes_protocol.IterDataPipeQueueProtocolClient(req_queue, res_queue))
+
+        actual = list(local_datapipe)
+        clean_me(process, req_queue, res_queue)
+
+        self.assertEquals(list(range(100)), actual)
 
 class StringDataset(Dataset):
     def __init__(self):
