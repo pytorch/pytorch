@@ -520,7 +520,6 @@ Tensor cross_entropy_loss_label_smoothing(
     auto batches = input.size(0);
 
     Tensor smooth_loss;
-
     if (weight.defined()) {
       // Expand weight to the correct number of dims for broadcasting with input / target
       auto weight_broadcast_shape = SmallBuffer<int64_t, 5>(input.dim());
@@ -528,9 +527,10 @@ Tensor cross_entropy_loss_label_smoothing(
       weight_broadcast_shape[1] = weight.size(0);
       Tensor weight_ = weight.view(weight_broadcast_shape);
 
-      input *= weight_;
+      smooth_loss = -at::sum(input * weight_, 1);
+    } else {
+      smooth_loss = -at::sum(input, 1);
     }
-    smooth_loss = -at::sum(input, 1);
 
     if (ignore_index >= 0) {
       auto ignore_mask = target.eq(ignore_index);
@@ -541,9 +541,8 @@ Tensor cross_entropy_loss_label_smoothing(
     switch (reduction) {
       case Reduction::Mean:
         if (weight.defined()) {
-          ret = at::sum(smooth_loss);
           // loss is normalized by the weights to be consistent with nll_loss_nd
-          ret /= weight.gather(0, target.flatten()).sum();
+          ret = at::sum(smooth_loss) / weight.gather(0, target.flatten()).sum();
         } else {
           ret = at::mean(smooth_loss);
         }
@@ -557,10 +556,7 @@ Tensor cross_entropy_loss_label_smoothing(
       default:
         TORCH_CHECK(false, "Invalid reduction type encountered in cross_entropy: ", reduction);
     }
-
-    ret *= label_smoothing / n_classes;
-    ret += (1 - label_smoothing) * nllloss;
-    return ret;
+    return (1 - label_smoothing) * nllloss + ret * (label_smoothing / n_classes);
 }
 
 Tensor cross_entropy_loss(
