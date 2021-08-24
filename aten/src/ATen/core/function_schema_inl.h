@@ -53,8 +53,8 @@ inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema)
 
 inline int findFirstOutArg(const std::vector<Argument>& args) {
   // find the start of out args in the schema
-  int out_start_idx;
-  for (out_start_idx = args.size() - 1; out_start_idx >= 0; out_start_idx--) {
+  for (int out_start_idx = args.size() - 1; out_start_idx >= 0;
+       out_start_idx--) {
     if (!args.at(out_start_idx).is_out()) {
       return out_start_idx + 1;
     }
