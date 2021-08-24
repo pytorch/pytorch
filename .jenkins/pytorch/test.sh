@@ -91,7 +91,7 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     export PYTORCH_TEST_WITH_ASAN=1
     export PYTORCH_TEST_WITH_UBSAN=1
     # TODO: Figure out how to avoid hard-coding these paths
-    export ASAN_SYMBOLIZER_PATH=/usr/lib/llvm-5.0/bin/llvm-symbolizer
+    export ASAN_SYMBOLIZER_PATH=/usr/lib/llvm-7/bin/llvm-symbolizer
     export TORCH_USE_RTLD_GLOBAL=1
     # NB: We load libtorch.so with RTLD_GLOBAL for UBSAN, unlike our
     # default behavior.
@@ -142,12 +142,14 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX512-* || $TEST_CONFIG == 'nogpu_NO_AVX
   export ATEN_CPU_CAPABILITY=avx2
 fi
 
-# NOTE: file_diff_from_base is currently bugged for GHA due to an issue finding a merge base for ghstack PRs
-#       see https://github.com/pytorch/pytorch/issues/60111
-#       change it back to PR_NUMBER when issue is fixed.
-if [ -n "$CIRCLE_PR_NUMBER" ] && [[ "$BUILD_ENVIRONMENT" != *coverage* ]]; then
+if [[ "$BUILD_ENVIRONMENT" != *coverage* ]]; then
+  # if PR_NUMBER exist, use it to grab PR contents.
   DETERMINE_FROM=$(mktemp)
-  file_diff_from_base "$DETERMINE_FROM"
+  if [ -n "$PR_NUMBER" ]; then
+    get_pr_change_files "$PR_NUMBER" "$DETERMINE_FROM"
+  else
+    file_diff_from_base "$DETERMINE_FROM"
+  fi
 fi
 
 test_python_legacy_jit() {
@@ -156,17 +158,17 @@ test_python_legacy_jit() {
 }
 
 test_python_shard1() {
-  time python test/run_test.py --exclude-jit-executor --shard 1 2 --verbose --determine-from="$DETERMINE_FROM"
+  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --shard 1 2 --verbose --determine-from="$DETERMINE_FROM"
   assert_git_not_dirty
 }
 
 test_python_shard2() {
-  time python test/run_test.py --exclude-jit-executor --shard 2 2 --verbose --determine-from="$DETERMINE_FROM"
+  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --shard 2 2 --verbose --determine-from="$DETERMINE_FROM"
   assert_git_not_dirty
 }
 
 test_python() {
-  time python test/run_test.py --exclude-jit-executor --verbose --determine-from="$DETERMINE_FROM"
+  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --verbose --determine-from="$DETERMINE_FROM"
   assert_git_not_dirty
 }
 
@@ -295,6 +297,10 @@ test_vulkan() {
 }
 
 test_distributed() {
+  echo "Testing distributed python tests"
+  time python test/run_test.py --distributed-tests --verbose --determine-from="$DETERMINE_FROM"
+  assert_git_not_dirty
+
   if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
     echo "Testing distributed C++ tests"
     ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
@@ -503,6 +509,7 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 || "$
   test_without_numpy
   install_torchvision
   test_python_shard1
+  test_distributed
   test_aten
 elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 || "${SHARD_NUMBER}" == 2 ]]; then
   install_torchvision
