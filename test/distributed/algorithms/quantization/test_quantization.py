@@ -29,7 +29,7 @@ def _build_tensor(size, value=None, dtype=torch.float, device_id=None):
     if device_id is None:
         return torch.empty(size, dtype=dtype).fill_(value)
     else:
-        return torch.empty(size, size, size, dtype=dtype).fill_(value).cuda(device_id)
+        return torch.empty(size, dtype=dtype).fill_(value).cuda(device_id)
 if TEST_WITH_DEV_DBG_ASAN:
     print("Skip dev-asan as torch + multiprocessing spawn have known issues", file=sys.stderr)
     sys.exit(0)
@@ -151,15 +151,11 @@ if BACKEND == "gloo" or BACKEND == "nccl":
         def _test_all_gather(
                 self, group, group_id, rank, cuda=False, rank_to_GPU=None, dtype=torch.float, qtype=None):
             for dest in group:
-                tensor = _build_tensor([dest + 1, dest + 1, dest + 1], rank, dtype=dtype)
-                tensors = [_build_tensor([dest + 1, dest + 1, dest + 1], -1, dtype=dtype) for i in group]
-                expected_tensors = [_build_tensor([dest + 1, dest + 1, dest + 1], i, dtype=dtype) for i in group]
-                if (qtype == DQuantType.BFP16):
-                    tensor = _build_tensor([dest + 1, dest + 1], rank, dtype=dtype)
-                    tensors = [_build_tensor([dest + 1, dest + 1], -1, dtype=dtype) for i in group]
-                    expected_tensors = [
-                        _build_tensor([dest + 1, dest + 1], i, dtype=dtype) for i in group
-                    ]
+                tensor = _build_tensor([dest + 1, dest + 1], rank, dtype=dtype)
+                tensors = [_build_tensor([dest + 1, dest + 1], -1, dtype=dtype) for i in group]
+                expected_tensors = [
+                    _build_tensor([dest + 1, dest + 1], i, dtype=dtype) for i in group
+                ]
                 if cuda:
                     tensor = tensor.cuda(rank_to_GPU[rank][0])
                     tensors = [t.cuda(rank_to_GPU[rank][0]) for t in tensors]
