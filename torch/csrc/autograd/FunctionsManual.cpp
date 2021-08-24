@@ -3488,28 +3488,29 @@ std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad_, con
     return std::make_tuple(v_grad.squeeze(-1), tau_grad.squeeze(-1).squeeze(-1));
   };
 
-  auto left_reflect = [&m](int64_t k, const Tensor& v_full, const Tensor& t, Tensor& K) {
+  auto left_reflect = [&m](int64_t k, const Tensor& v_full, const Tensor& t, Tensor& K) -> Tensor {
     auto v = v_full.narrow(-1, k, m - k);
     auto u = (t.unsqueeze(-1) * v).unsqueeze(-2).conj().matmul(K.narrow(-2, k, m - k));
     K.narrow(-2, k, m - k).sub_(v.unsqueeze(-1) * u);
+    return K;
   };
 
-  auto right_reflect = [&m](int64_t k, const Tensor& v_full, const Tensor& t, Tensor& K) {
+  auto right_reflect = [&m](int64_t k, const Tensor& v_full, const Tensor& t, Tensor& K) -> Tensor {
     auto v = v_full.narrow(-1, k, m - k);
     auto u = K.narrow(-1, k, m - k).matmul((t.unsqueeze(-1) * v).unsqueeze(-1));
     K.narrow(-1, k, m - k).sub_(u * v.conj().unsqueeze(-2));
+    return K;
   };
 
-
   auto K = result.matmul(grad.conj().transpose(-1, -2));
-  left_reflect(0, input.select(-1, 0), sigma.select(-1, 0), K);
+  K = left_reflect(0, input.select(-1, 0), sigma.select(-1, 0), K);
   for (int64_t i = 0; i < k - 1; ++i) {
     Tensor vi_grad, taui_grad;
     std::tie(vi_grad, taui_grad) = update_grad(i, input.select(-1, i), tau.select(-1, i), K);
     input_grad.select(-1, i).copy_(vi_grad);
     tau_grad.select(-1, i).copy_(taui_grad);
-    left_reflect(i + 1, input.select(-1, i + 1), sigma.select(-1, i + 1), K);
-    right_reflect(i, input.select(-1, i), tau.select(-1, i), K);
+    K = left_reflect(i + 1, input.select(-1, i + 1), sigma.select(-1, i + 1), K);
+    K = right_reflect(i, input.select(-1, i), tau.select(-1, i), K);
   }
 
   Tensor vi_grad, taui_grad;
