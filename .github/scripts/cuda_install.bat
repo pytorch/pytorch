@@ -11,7 +11,7 @@ if not exist "%SRC_DIR%\temp_build" mkdir "%SRC_DIR%\temp_build"
 
 set /a CUDA_VER=%CUDA_VERSION%
 set CUDA_VERSION_STR=%CUDA_VERSION%
-for /f "tokens=1,2 delims=." %a in ("%CUDA_VER%") do (
+for /f tokens=1,2 delims=. %a in ("%CUDA_VER%") do (
     set CUDA_VER_MAJOR=%a
     set CUDA_VER_MINOR=%b
 )
