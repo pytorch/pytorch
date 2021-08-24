@@ -942,7 +942,7 @@ triangular part of the matrix is used in the computations.
 
 If :attr:`rtol` is not specified and :attr:`A` is a matrix of dimensions `(m, n)`,
 the relative tolerance is set to be :math:`\text{rtol} = \max(m, n) \varepsilon`
-and :math:`\varepsilon` is the epsilon value for the dtype of :attr:`A` (see :class:`torch.finfo`).
+and :math:`\varepsilon` is the epsilon value for the dtype of :attr:`A` (see :class:`.finfo`).
 If :attr:`rtol` is not specified and :attr:`atol` is specified to be larger than zero then
 :attr:`rtol` is set to zero.
 
@@ -1666,7 +1666,7 @@ where :math:`\sigma_1` is the largest singular value (or eigenvalue).
 
 If :attr:`rtol` is not specified and :attr:`A` is a matrix of dimensions `(m, n)`,
 the relative tolerance is set to be :math:`\text{rtol} = \max(m, n) \varepsilon`
-and :math:`\varepsilon` is the epsilon value for the dtype of :attr:`A` (see :class:`torch.finfo`).
+and :math:`\varepsilon` is the epsilon value for the dtype of :attr:`A` (see :class:`.finfo`).
 If :attr:`rtol` is not specified and :attr:`atol` is specified to be larger than zero then
 :attr:`rtol` is set to zero.
 
