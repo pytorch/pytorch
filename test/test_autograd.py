@@ -3004,6 +3004,9 @@ class TestAutograd(TestCase):
         found_bwd_add = found_bwd_sum = False
         found_empty = False
         for e in p.function_events:
+            # Ignore record_function user scope.
+            if "autograd::engine::evaluate_function" in e.name:
+                continue
             if e.name == "aten::add":
                 add_seq_nr = e.sequence_nr
                 self.assertFalse(found_add)
