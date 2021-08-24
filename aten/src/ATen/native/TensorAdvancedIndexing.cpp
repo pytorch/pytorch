@@ -1135,6 +1135,7 @@ Tensor index_fill(const Tensor & self, int64_t dim, const Tensor & index, const 
 // gather_out_cpu_cuda
 TORCH_IMPL_FUNC(gather_out)
 (const Tensor& self, int64_t dim, const Tensor& index, bool sparse_grad, const Tensor& result) {
+  if (index.numel() == 0) return;
   dim = at::maybe_wrap_dim(dim, self.dim());
   gather_stub(result.device().type(), result, self, dim, index);
 }
@@ -1157,6 +1158,7 @@ void scatter_impl(
     ReduceStub& reduce_stub,
     FillStub& fill_stub,
     const c10::optional<c10::string_view> reduce = nullopt) {
+  if (index.numel() == 0) return;
   dim = at::maybe_wrap_dim(dim, self.dim());
   auto mut_out = const_cast<Tensor&>(out);
 
@@ -1178,8 +1180,6 @@ TORCH_IMPL_FUNC(scatter_src_out)
  const Tensor& index,
  const Tensor& src,
  const Tensor& out) {
-  dim = maybe_wrap_dim(dim, self.dim());
-  if (index.numel() == 0) return;
   scatter_impl(self, dim, index, src, out,
                scatter_reduce_stub,
                scatter_stub);
@@ -1191,8 +1191,6 @@ TORCH_IMPL_FUNC(scatter_value_out)
  const Tensor& index,
  const Scalar& value,
  const Tensor& out) {
-  dim = at::maybe_wrap_dim(dim, self.dim());
-  if (index.numel() == 0) return;
   scatter_impl(self, dim, index, value, out,
                scatter_scalar_reduce_stub,
                scatter_fill_stub);
@@ -1205,8 +1203,6 @@ TORCH_IMPL_FUNC(scatter_reduce_out)
  const Tensor& src,
  const c10::string_view reduce,
  const Tensor& out) {
-  dim = maybe_wrap_dim(dim, self.dim());
-  if (index.numel() == 0) return;
   scatter_impl(self, dim, index, src, out,
                scatter_reduce_stub,
                scatter_stub,
@@ -1220,8 +1216,6 @@ TORCH_IMPL_FUNC(scatter_value_reduce_out)
  const Scalar& value,
  const c10::string_view reduce,
  const Tensor& out) {
-  dim = maybe_wrap_dim(dim, self.dim());
-  if (index.numel() == 0) return;
   scatter_impl(self, dim, index, value, out,
                scatter_scalar_reduce_stub,
                scatter_fill_stub,

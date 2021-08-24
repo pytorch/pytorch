@@ -134,7 +134,6 @@ struct cuda_scatter_gather_base_kernel {
     const func_t& f
   ) {
     at::assert_no_internal_overlap(self);
-    dim = maybe_wrap_dim(dim, self.dim());
 
     auto index_sizes = ensure_nonempty_vec(index.sizes().vec());
     auto self_strides = ensure_nonempty_vec(self.strides().vec());
@@ -193,7 +192,7 @@ struct cuda_scatter_gather_base_kernel {
     const ReduceMultiply& f
   ) {
     at::assert_no_internal_overlap(self);
-    dim = maybe_wrap_dim(dim, self.dim());
+
     auto index_sizes = ensure_nonempty_vec(index.sizes().vec());
     auto self_strides = ensure_nonempty_vec(self.strides().vec());
     auto src_strides = ensure_nonempty_vec(src.strides().vec());
