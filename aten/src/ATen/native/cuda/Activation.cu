@@ -903,7 +903,7 @@ TORCH_IMPL_FUNC(gelu_out_cuda) (
 }
 
 TORCH_IMPL_FUNC(gelu_backward_out_cuda) (
-  const Tensor& grad_output, const Tensor& self, const Tensor& grad_input
+  const Tensor& grad, const Tensor& self, const Tensor& grad_input
 ) {
   GeluBackwardCUDAKernelImpl(*this);
 }
