@@ -712,7 +712,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   STOP_DECOMPOSE(zeros.names);
   STOP_DECOMPOSE(zeros.out);
 
-  // These should throw an error in our tests if we remove them
+  // These throw an error in our tests if we remove them
   STOP_DECOMPOSE(diag_embed);
   STOP_DECOMPOSE(index_add);
   STOP_DECOMPOSE(index_add.alpha);
