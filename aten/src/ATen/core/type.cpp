@@ -954,14 +954,35 @@ VaryingShape<Stride> TensorType::computeStrideProps(
   std::vector<size_t> stride_indices(sizes.size());
   std::iota(stride_indices.begin(), stride_indices.end(), 0);
 
+  // Sorting strides in ascending order
+  // Warning: A tensor that has more than one dimension of size 1 has
+  // insufficient information to recreate the contiguous order of its indices.
+  // Ties are broken based on whether one of the dimensions is of size
+  // one.  When two dimensions have the same stride, the stride
+  // associated with a dimension of size 1 is considered "smaller"
+  // as it created the condition for the second stride of the same size.
+  // Example:
+  //  Prior to sorting
+  //  Idx:     [0,   1,  2,  3]
+  //  sizes:   [8,   1, 10, 16]
+  //  Strides: [160, 1, 16,  1]
+  //  After sorting
+  //  Idx:     [1,  3,  2,   0]
+  //  sizes:   [1, 16, 10,   8]
+  //  Strides: [1,  1, 16, 160]
+
   std::sort(
       stride_indices.begin(),
       stride_indices.end(),
-      [&strides](const int& a, const int& b) {
-        // break ties in case of unsqueezed dims
-        // i.e. (1, 1, 5)
+      [&strides, &sizes](const int& a, const int& b) {
         if (strides[a] == strides[b]) {
-          return a > b;
+          // The index order is ambiguous with 2 dimensions of size 1.
+          // In this case of uncertainty, default to descending index order.
+          if (sizes[a] == sizes[b]) {
+            return a > b;
+          } else {
+            return sizes[a] == 1;
+          }
         }
         return strides[a] < strides[b];
       });
