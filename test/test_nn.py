@@ -13026,6 +13026,40 @@ class TestNNDeviceType(NNTestCase):
             with torch.backends.cudnn.flags(enabled=False):
                 self._test_module_empty_input(mod, inp)
 
+    @onlyCPU
+    @dtypes(torch.float, torch.double)
+    def test_groupnorm_nhwc(self, device, dtype):
+        def helper(self, size, groups):
+            channels = size[1]
+            input = torch.randn(size, dtype=dtype, device=device, requires_grad=True)
+            input = input.contiguous(memory_format=torch.channels_last)
+            input.retain_grad()
+            grad = torch.randn(size, dtype=dtype, device=device)
+            grad = grad.contiguous(memory_format=torch.channels_last)
+            gn = nn.GroupNorm(groups, channels).to(device).to(dtype)
+            gn.weight.data.uniform_()
+            gn.bias.data.uniform_()
+
+            ref_input = input.detach().clone().contiguous().requires_grad_(True)
+            ref_grad = grad.detach().clone().contiguous()
+            ref_gn = nn.GroupNorm(groups, channels).to(device).to(dtype)
+            ref_gn.load_state_dict(gn.state_dict())
+
+            out = gn(input)
+            out.backward(grad)
+            ref_out = ref_gn(ref_input)
+            ref_out.backward(ref_grad)
+
+            self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+            self.assertTrue(ref_out.is_contiguous())
+            self.assertEqual(out, ref_out)
+            self.assertEqual(gn.weight.grad, ref_gn.weight.grad)
+            self.assertEqual(gn.bias.grad, ref_gn.bias.grad)
+            self.assertEqual(input.grad, ref_input.grad)
+
+        helper(self, (4, 8, 10, 10), 4)
+        helper(self, (2, 30, 9, 9), 3)
+
     @onlyOnCPUAndCUDA
     def test_GroupNorm_numeric(self, device):
         def group_norm_ref(X, gamma, beta, groups, channels, eps):
@@ -13936,6 +13970,9 @@ class TestNNDeviceType(NNTestCase):
         helper(4, 8, 8, 8, 3, count_include_pad=False, padding=2, stride=2)
         helper(4, 8, 8, 8, 3, divisor_override=42)
         helper(4, 8, 8, 8, 7)
+        # ROCm 16GB MI25 hits OOM error. Clear caching allocator prior to running large subtest.
+        if TEST_WITH_ROCM and 'cuda' in device:
+            torch.cuda.empty_cache()
         helper(200, 512, 28, 28, 2)
         helper(4, 8, 7, 7, 3, stride=1)
         helper(4, 8, 7, 7, 3, padding=2, stride=1)

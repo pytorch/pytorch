@@ -47,6 +47,7 @@ from typing import Dict, List, Tuple
 import torch.backends.quantized
 import torch.testing._internal.data
 from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_is_not_fp32
+from torch.testing import get_all_device_types
 from torch.testing._internal.dtype_getters import (
     get_all_fp_dtypes, get_all_int_dtypes, get_all_math_dtypes, get_all_dtypes, get_all_complex_dtypes
 )
@@ -224,10 +225,10 @@ class AbstractTestCases:
             # TODO: add torch.* tests when we have proper namespacing on ATen functions
             # test_namespace(torch)
 
-        def test_msnpu_error(self):
+        def test_ort_error(self):
             with self.assertRaisesRegex(RuntimeError,
-                                        "Could not run 'aten::empty.memory_format' with arguments from the 'MSNPU' backend"):
-                torch.zeros(1, device=torch.device('msnpu'))
+                                        "Could not run 'aten::empty.memory_format' with arguments from the 'ORT' backend"):
+                torch.zeros(1, device=torch.device('ort'))
 
         def test_has_storage(self):
             self.assertIsNotNone(torch.tensor([]).storage())
