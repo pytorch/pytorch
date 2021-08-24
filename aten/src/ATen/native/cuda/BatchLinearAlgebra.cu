@@ -1970,7 +1970,7 @@ AT_ERROR("triangular_solve: MAGMA library not found in "
   auto A_data = A.data_ptr<scalar_t>();
   auto b_data = b.data_ptr<scalar_t>();
   // This allows to pass rectangular A and b when left = True
-  magma_int_t m = magma_int_cast(left ? A.size(-1) : b.size(-2), "m");
+  magma_int_t m = magma_int_cast(b.size(-2), "m");
   magma_int_t n = magma_int_cast(b.size(-1), "n");
   // magma returns early if m <= 0 || n <= 0 for magmaTriangularSolveBatched
   // magmaTriangularSolve is calling cuBLAS and it prints

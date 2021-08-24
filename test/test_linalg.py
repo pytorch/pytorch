@@ -4758,125 +4758,102 @@ class TestLinalg(TestCase):
         check(x, [-1], regex=r'not within the valid range \[0, 52\)', exception=ValueError)
         check(x, [52], regex=r'not within the valid range \[0, 52\)', exception=ValueError)
 
-    @skipCPUIfNoLapack
+    def _gen_shape_inputs_linalg_triangular_solve(self, shape, dtype, device, well_conditioned=False):
+        make_arg = partial(make_tensor, dtype=dtype, device=device)
+        b, n, k = shape
+        for left, uni, expand_a, tr_a, conj_a, expand_b, tr_b, conj_b in product((True, False), repeat=8):
+            if (conj_a or conj_b) and not dtype.is_complex:
+                continue
+            # We just expand on the batch size
+            if (expand_a or expand_b) and b == 1:
+                continue
+
+            size_a = (b, n, n) if left else (b, k, k)
+            size_b = (b, n, k) if not tr_b else (b, k, n)
+
+            # If expand_a or expand_b, we'll expand them to the correct size later
+            if b == 1 or expand_a:
+                size_a = size_a[1:]
+            if b == 1 or expand_b:
+                size_b = size_b[1:]
+
+            if well_conditioned:
+                PLU = torch.lu_unpack(*torch.lu(torch.randn(*size_a)))
+                if uni:
+                    # A = L from PLU
+                    A = PLU[1].transpose(-2, -1).contiguous()
+                else:
+                    # A = U from PLU
+                    A = PLU[2].contiguous()
+                    d = A.diagonal(0, -2, -1)
+                    d[d.abs() < 1e-6] = 1.
+            else:
+                A = make_arg(size_a)
+                diag = A.diagonal(0, -2, -1)
+                if uni:
+                    diag.fill_(1.)
+                else:
+                    diag[diag.abs() < 1e-6] = 1.
+                A.triu_()
+
+            B = make_arg(size_b)
+
+            if tr_a:
+                A.transpose_(-2, -1)
+            if tr_b:
+                B.transpose_(-2, -1)
+            if conj_a:
+                A = A.conj()
+            if conj_b:
+                B = B.conj()
+            if expand_a:
+                A = A.expand(b, *size_a)
+            if expand_b:
+                B = B.expand(b, n, k)
+            yield A, B, left, not tr_a, uni
+
+
+    def _test_linalg_solve_triangular(self, A, B, left, upper, uni):
+        X = torch.linalg.solve_triangular(A, B, left=left, upper=upper, unitriangular=uni)
+        if left:
+            self.assertEqual(A @ X, B)
+        else:
+            self.assertEqual(X @ A, B)
+        out = B
+        # B may be expanded
+        if not B.is_contiguous() and not B.transpose(-2, -1).is_contiguous():
+            out = B.clone()
+        torch.linalg.solve_triangular(A, B, left=left, upper=upper, unitriangular=uni, out=out)
+        self.assertEqual(X, out)
+
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     @precisionOverride({torch.float32: 1e-2, torch.complex64: 1e-2,
                         torch.float64: 1e-8, torch.complex128: 1e-8})
     def test_linalg_solve_triangular(self, device, dtype):
         # This mostly exercises the API + BLAS CPU + batched cuBLAS
-        make_arg = partial(make_tensor, dtype=dtype, device=device)
         ks = (3, 1, 0)
         ns = (5, 0)
         bs = (1, 2, 0)
 
-        def gen_inputs():
-            # We do some rather thorough testing, as the logic when calling the function is
-            # somewhat tricky
-            for b, n, k in itertools.chain(product(bs, ns, ks)):
-                for left, uni, expand_a, tr_a, conj_a, expand_b, tr_b, conj_b in product((True, False), repeat=8):
-                    if (conj_a or conj_b) and not dtype.is_complex:
-                        continue
-                    # We just expand on the batch size
-                    if (expand_a or expand_b) and b == 1:
-                        continue
-
-                    size_a = (b, n, n) if left else (b, k, k)
-                    size_b = (b, n, k) if not tr_b else (b, k, n)
-
-                    # If expand_a or expand_b, we'll expand them to the correct size later
-                    if b == 1 or expand_a:
-                        size_a = size_a[1:]
-                    if b == 1 or expand_b:
-                        size_b = size_b[1:]
-
-                    A = make_arg(size_a)
-                    B = make_arg(size_b)
-
-                    if uni:
-                        # Not really necessary, but writing it for consistency
-                        A.diagonal(0, -2, -1).fill_(1.)
-                    else:
-                        d = A.diagonal(0, -2, -1)
-                        d[d.abs() < 1e-6] = 1.
-                    A.triu_()
-                    if tr_a:
-                        A.transpose_(-2, -1)
-                    if tr_b:
-                        B.transpose_(-2, -1)
-                    if conj_a:
-                        A = A.conj()
-                    if conj_b:
-                        B = B.conj()
-                    if expand_a:
-                        A = A.expand(b, *size_a)
-                    if expand_b:
-                        B = B.expand(b, n, k)
-                    yield A, B, not tr_a, left, uni, expand_b
-
-        for A, B, upper, left, uni, expand_b in gen_inputs():
-            X = torch.linalg.solve_triangular(A, B, left=left, upper=upper, unitriangular=uni)
-            if left:
-                self.assertEqual(A @ X, B)
-            else:
-                self.assertEqual(X @ A, B)
-            out = B if not expand_b else B.clone()
-            torch.linalg.solve_triangular(A, B, left=left, upper=upper, unitriangular=uni, out=out)
-            self.assertEqual(X, out)
+        gen_inputs = self._gen_shape_inputs_linalg_triangular_solve
+        for b, n, k in itertools.chain(product(bs, ns, ks)):
+            for A, B, left, upper, uni in gen_inputs((b, n, k), dtype, device):
+                self._test_linalg_solve_triangular(A, B, left, upper, uni)
 
     @slowTest
     @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     @precisionOverride({torch.float32: 1e-2, torch.complex64: 1e-2,
                         torch.float64: 1e-8, torch.complex128: 1e-8})
     def test_linalg_solve_triangular_large(self, device, dtype):
-        make_arg = partial(torch.randn, dtype=dtype, device=device)
-
-        def plu(*size):
-            return torch.lu_unpack(*torch.lu(make_arg(*size)))
-
         # Exercise magma and cublas
         magma = (9, 513, 1)
         iterative_cublas = (2, 64, 1)
 
-        def gen_inputs():
-            for b, n, k in (magma, iterative_cublas):
-                for left, uni, tr_a, conj_a, tr_b, conj_b in product((True, False), repeat=6):
-                    if (conj_a or conj_b) and not dtype.is_complex:
-                        continue
-                    A_size = (b, n, n) if left else (b, k, k)
-                    B_size = (b, n, k) if not tr_b else (b, k, n)
-                    # Sample L or U from LU with partial pivoting to make it better conditioned
-                    if uni:
-                        A = plu(*A_size)[1].transpose(-2, -1).contiguous()
-                    else:
-                        A = plu(*A_size)[2].contiguous()
-                    B = make_arg(B_size)
-                    if uni:
-                        # Not really necessary, but writing it for consistency
-                        A.diagonal(0, -2, -1).fill_(1.)
-                    else:
-                        d = A.diagonal(0, -2, -1)
-                        d[d.abs() < 1e-6] = 1.
-                    A.triu_()
-                    if tr_a:
-                        A.transpose_(-2, -1)
-                    if tr_b:
-                        B.transpose_(-2, -1)
-                    if conj_a:
-                        A = A.conj()
-                    if conj_b:
-                        B = B.conj()
-                    yield A, B, not tr_a, left, uni
-
-        for A, B, upper, left, uni in gen_inputs():
-            X = torch.linalg.solve_triangular(A, B, left=left, upper=upper, unitriangular=uni)
-            if left:
-                self.assertEqual(A @ X, B)
-            else:
-                self.assertEqual(X @ A, B)
-            torch.linalg.solve_triangular(A, B, left=left, upper=upper, unitriangular=uni, out=B)
-            self.assertEqual(X, B)
+        gen_inputs = self._gen_shape_inputs_linalg_triangular_solve
+        for shape in (magma, iterative_cublas):
+            for A, B, left, upper, uni in gen_inputs(shape, dtype, device, well_conditioned=True):
+                self._test_linalg_solve_triangular(A, B, left, upper, uni)
 
     def triangular_solve_test_helper(self, A_dims, b_dims, upper, unitriangular,
                                      device, dtype):
