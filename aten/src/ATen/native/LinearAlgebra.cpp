@@ -206,13 +206,11 @@ std::tuple<Tensor, Tensor> get_atol_rtol(
     const c10::string_view function_name) {
   auto options = input.options().dtype(ScalarType::Double);
   auto atol = atol_opt.has_value() ? atol_opt.value() : at::zeros({}, options);
-  TORCH_CHECK(!at::isComplexType(atol.scalar_type()),
-              function_name, ": atol tensor of complex type is not supported.");
+  checkNotComplexTolerance(atol, function_name, "atol");
   Tensor rtol;
   if (rtol_opt.has_value()) {
     rtol = rtol_opt.value();
-    TORCH_CHECK(!at::isComplexType(rtol.scalar_type()),
-            function_name, ": rtol tensor of complex type is not supported.");
+    checkNotComplexTolerance(rtol, function_name, "rtol");
   } else {
     ScalarType real_dtype = toValueType(input.scalar_type());
     auto default_rtol = at::full({}, _get_epsilon(real_dtype) * std::max(input.size(-1), input.size(-2)), options);
@@ -303,8 +301,7 @@ Tensor linalg_pinv(const Tensor& input, optional<double> atol, optional<double> 
 
 Tensor linalg_pinv(const Tensor& input, const Tensor& rcond, bool hermitian) {
   // For NumPy compatibility the rcond argument is used as relative tolerance
-  TORCH_CHECK(!at::isComplexType(rcond.scalar_type()),
-              "torch.linalg.pinv: rcond tensor of complex type is not supported.");
+  checkNotComplexTolerance(rcond, "torch.linalg.pinv", "rcond");
   auto options = input.options().dtype(ScalarType::Double);
   return at::linalg_pinv(input, at::zeros({}, options), rcond, hermitian);
 }
@@ -483,10 +480,8 @@ Tensor& linalg_matrix_rank_out(
   // Matrices or batch of matrices are allowed
   TORCH_CHECK(input.dim() >= 2, "torch.linalg.matrix_rank: Expected as input a matrix or a batch of matrices, but got a tensor of size: ", input.sizes());
 
-  TORCH_CHECK(!at::isComplexType(atol.scalar_type()),
-              "torch.linalg.matrix_rank: atol tensor of complex type is not supported.");
-  TORCH_CHECK(!at::isComplexType(rtol.scalar_type()),
-              "torch.linalg.matrix_rank: rtol tensor of complex type is not supported.");
+  checkNotComplexTolerance(atol, "torch.linalg.matrix_rank", "atol");
+  checkNotComplexTolerance(rtol, "torch.linalg.matrix_rank", "rtol");
 
   // matrix_rank assigns a scalar value for each matrix in the batch so
   // result's shape is equal to input.shape[0:input.ndim-2]
