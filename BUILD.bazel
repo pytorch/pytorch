@@ -395,7 +395,6 @@ filegroup(
         "aten/src/THC/THCTensor.cu.cc",
         "aten/src/THC/THCTensorCopy.cu.cc",
         "aten/src/THC/THCTensorMath.cu.cc",
-        "aten/src/THC/THCTensorMathMagma.cu.cc",
         "aten/src/THC/THCTensorMathPairwise.cu.cc",
         "aten/src/THC/THCTensorMathScan.cu.cc",
         "aten/src/THC/THCTensorScatterGather.cu.cc",
@@ -408,22 +407,6 @@ filegroup(
         "aten/src/THC/generated/THCTensorSortInt.cu.cc",
         "aten/src/THC/generated/THCTensorSortLong.cu.cc",
         "aten/src/THC/generated/THCTensorSortShort.cu.cc",
-    ],
-)
-
-filegroup(
-    name = "thcunn_srcs_cu",
-    srcs = [
-        "aten/src/THCUNN/BCECriterion.cu.cc",
-        "aten/src/THCUNN/ELU.cu.cc",
-        "aten/src/THCUNN/HardTanh.cu.cc",
-        "aten/src/THCUNN/LeakyReLU.cu.cc",
-        "aten/src/THCUNN/MultiMarginCriterion.cu.cc",
-        "aten/src/THCUNN/SoftMarginCriterion.cu.cc",
-        "aten/src/THCUNN/SoftPlus.cu.cc",
-        "aten/src/THCUNN/SoftShrink.cu.cc",
-        "aten/src/THCUNN/SpatialConvolutionMM.cu.cc",
-        "aten/src/THCUNN/Tanh.cu.cc",
     ],
 )
 
@@ -576,8 +559,6 @@ cc_library(
         "aten/src/THC/**/*.cpp",
         "aten/src/THC/*.cuh",
         "aten/src/THC/generic/*.cu.cc",
-        "aten/src/THCUNN/*.cuh",
-        "aten/src/THCUNN/generic/*.cu.cc",
     ],
     exclude = [
         "aten/src/ATen/Config.h",
@@ -719,7 +700,6 @@ cu_library(
     srcs = [
         ":aten_srcs_cu",
         ":thc_srcs_cu",
-        ":thcunn_srcs_cu",
     ],
     copts = ATEN_COPTS + torch_cuda_half_options,
     visibility = ["//visibility:public"],
