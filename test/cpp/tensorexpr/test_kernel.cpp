@@ -199,8 +199,6 @@ TEST_F(Kernel, _3) {
 }
 
 TEST_F(Kernel, ParallelStrided) {
-  KernelScope kernel_scope;
-
   const auto graph_string = R"IR(
       graph(%0 : Float(5, 3, 40005, strides=[120015, 40005, 1], device=cpu),
             %1 : Float(5, 3, 40005, strides=[960120, 160020, 2], device=cpu)):
