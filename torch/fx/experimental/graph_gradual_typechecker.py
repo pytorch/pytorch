@@ -63,8 +63,6 @@ def broadcast_types(t1, t2):
 
         (t1, t2) = TensorType(tuple(new_t1)), TensorType(tuple(new_t2))
 
-        if not is_consistent(t1, t2):
-            raise TypeError
 
         return (t1, t2)
     else:
@@ -438,7 +436,7 @@ def adaptiveavgpool2d_inference_rule(n: Node, module_instance):
 def flatten_check(tensor_type, start_dim, end_dim):
     l = len(tensor_type.__args__)
 
-    start_dim = l if start_dim == -1 else start_dim
+    start_dim = l if start_dim == -1 else abs(start_dim)
     end_dim = l + end_dim + 1 if end_dim < 0 else end_dim + 1
 
     if 0 <= start_dim <= (l - 1) and 0 <= end_dim <= l and start_dim < end_dim:
@@ -521,7 +519,7 @@ class GraphTypeChecker:
             return n.type
 
         elif n.op == 'get_attr':
-            t = self.traced.get_parameter(n.target)
+            t = get_parameter(self.traced, n.target)  # type: ignore[arg-type]
             if isinstance(t.data, torch.Tensor):
                 n.type = TensorType(t.data.shape)
             return n.type
@@ -670,6 +668,10 @@ class Refine:
         elif isinstance(typ, TensorType):
             new_args = [self.replace_dyn_with_fresh_var(a) for a in typ.__args__]
             return TensorType(tuple(new_args))
+        elif isinstance(typ, list):
+            return [self.replace_dyn_with_fresh_var(t) for t in typ]
+        elif isinstance(typ, tuple):
+            return (self.replace_dyn_with_fresh_var(t) for t in typ)
         else:
             return typ
 
@@ -700,8 +702,44 @@ class Refine:
                 pass
 
         if n.op == 'output':
-            assert isinstance(n.args[0], Node)
-            n.type = n.args[0].type
+            def get_node_type(a):
+                return a.type
+            n.type = torch.fx.node.map_arg(n.args[0], get_node_type)
+            return n.type
 
         else:
             pass
+
+
+def get_parameter(traced, target: str):
+    """
+    Returns the parameter given by ``target`` if it exists,
+    otherwise throws an error.
+
+    See the docstring for ``get_submodule`` for a more detailed
+    explanation of this method's functionality as well as how to
+    correctly specify ``target``.
+
+    Args:
+        target: The fully-qualified string name of the Parameter
+            to look for. (See ``get_submodule`` for how to specify a
+            fully-qualified string.)
+
+    Returns:
+        torch.nn.Parameter: The Parameter referenced by ``target``
+
+    Raises:
+        AttributeError: If the target string references an invalid
+            path or resolves to something that is not an
+            ``nn.Parameter``
+    """
+    module_path, _, param_name = target.rpartition(".")
+
+    mod: torch.nn.Module = traced.get_submodule(module_path)
+
+    if not hasattr(mod, param_name):
+        raise AttributeError(mod._get_name() + " has no attribute `" + param_name + "`")
+
+    param: torch.nn.Parameter = getattr(mod, param_name)
+
+    return param
