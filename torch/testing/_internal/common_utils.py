@@ -508,6 +508,12 @@ def discover_test_cases_recursively(suite_or_case):
 def get_test_names(test_cases):
     return ['.'.join(case.id().split('.')[-2:]) for case in test_cases]
 
+def _print_test_names():
+    suite = unittest.TestLoader().loadTestsFromModule(__main__)
+    test_cases = discover_test_cases_recursively(suite)
+    for name in get_test_names(test_cases):
+        print(name)
+
 def chunk_list(lst, nchunks):
     return [lst[i::nchunks] for i in range(nchunks)]
 
@@ -537,10 +543,7 @@ def run_tests(argv=UNITTEST_ARGS):
             print(f'[WARNING] disabled test file provided but not found: {IMPORT_DISABLED_TESTS}')
     # Determine the test launch mechanism
     if TEST_DISCOVER:
-        suite = unittest.TestLoader().loadTestsFromModule(__main__)
-        test_cases = discover_test_cases_recursively(suite)
-        for name in get_test_names(test_cases):
-            print(name)
+        _print_test_names()
     elif TEST_IN_SUBPROCESS:
         suite = unittest.TestLoader().loadTestsFromModule(__main__)
         test_cases = discover_test_cases_recursively(suite)
@@ -2128,9 +2131,9 @@ class TestCase(expecttest.TestCase):
         (stdout, stderr) = popen.communicate()
         return (stdout, stderr)
 
-    # returns captured stderr
+    # returns captured stderr or stdout
     @staticmethod
-    def runWithPytorchAPIUsageStderr(code):
+    def _runWithPytorchAPIUsageOutput(code, select_stderr=True):
         env = os.environ.copy()
         env["PYTORCH_API_USAGE_STDERR"] = "1"
         # remove IN_CI flag since this is a wrapped test process.
@@ -2138,7 +2141,15 @@ class TestCase(expecttest.TestCase):
         if "IN_CI" in env.keys():
             del env["IN_CI"]
         (stdout, stderr) = TestCase.run_process_no_exception(code, env=env)
-        return stderr.decode('ascii')
+        return stderr.decode('ascii') if select_stderr else stdout.decode('ascii')
+
+    @staticmethod
+    def runWithPytorchAPIUsageStderr(code):
+        return TestCase._runWithPytorchAPIUsageOutput(code, select_stderr=True)
+
+    @staticmethod
+    def runWithPytorchAPIUsageStdout(code):
+        return TestCase._runWithPytorchAPIUsageOutput(code, select_stderr=False)
 
 
 def download_file(url, binary=True):
