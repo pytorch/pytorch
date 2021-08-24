@@ -2892,6 +2892,16 @@ class TestLinalg(TestCase):
                     # error from out_v
                     svd(a, out=(out_u, out_s, out_v))
 
+            # if input contains NaN then an error is triggered for svd
+            a = torch.full((3, 3), float('nan'), dtype=dtype, device=device)
+            a[0] = float('nan')
+            with self.assertRaisesRegex(RuntimeError, "the algorithm failed to converge"):
+                svd(a)
+            a = torch.randn(3, 33, 33, dtype=dtype, device=device)
+            a[1, 0, 0] = float('nan')
+            with self.assertRaisesRegex(RuntimeError, "For batch 1: the algorithm failed to converge"):
+                svd(a)
+
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
