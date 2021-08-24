@@ -85,6 +85,50 @@ def _dequantize_tensor_list(tensor_list, qtype, quant_loss=None):
     dequantized_tensor_list = [_dequantize_tensor(t, qtype) for t in tensor_list]
     return dequantized_tensor_list
 
+def _quantized_a2a_single_handler(tensors,
+                                 input_tensor,
+                                 qtype,
+                                 group=None,
+                                 async_op=None,
+                                 quant_loss=None,
+                                 out_splits=None,
+                                 in_splits=None):
+    input_tensors = _quantize_tensor(input_tensor, qtype)
+    out_tensors = _quantize_tensor(tensors, qtype)
+    dist.all_to_all_single(out_tensors, input_tensors, out_splits, in_splits, group=group)
+    for i, t in enumerate(_dequantize_tensor(out_tensors, qtype, quant_loss=quant_loss)):
+        tensors[i] = t
+
+def _quantized_a2a_handler(tensors,
+                          input_tensor,
+                          qtype,
+                          group=None,
+                          async_op=None,
+                          quant_loss=None):
+    input_tensors = _quantize_tensor_list(input_tensor, qtype)
+    out_tensors = _quantize_tensor_list(tensors, qtype)
+    dist.all_to_all(out_tensors, input_tensors, group=group, async_op=async_op)
+    for i, t in enumerate(_dequantize_tensor_list(out_tensors, qtype, quant_loss=quant_loss)):
+        tensors[i] = t
+
+def _quantized_all_gather_handler(tensors,
+                                 input_tensor,
+                                 qtype,
+                                 group=None,
+                                 async_op=None,
+                                 quant_loss=None):
+
+    input_tensors = _quantize_tensor(input_tensor, qtype)
+    out_tensors = _quantize_tensor_list(tensors, qtype)
+    dist.all_gather(out_tensors, input_tensors, group=group, async_op=async_op)
+    for i, t in enumerate(_dequantize_tensor_list(out_tensors, qtype, quant_loss=quant_loss)):
+        tensors[i] = t
+
+dispatch = {
+    dist.all_to_all_single: _quantized_a2a_single_handler,
+    dist.all_to_all: _quantized_a2a_handler,
+    dist.all_gather: _quantized_all_gather_handler,
+}
 
 def auto_quantize(func, qtype, quant_loss=None):
     """
@@ -113,33 +157,25 @@ def auto_quantize(func, qtype, quant_loss=None):
             raise RuntimeError(
                 'The async_op=True mode is not supported yet.'
             )
-        if (func == dist.all_gather):
-            tensors = args[0]
-            input_tensors = _quantize_tensor(args[1], qtype)
-            out_tensors = _quantize_tensor_list(tensors, qtype)
-            dist.all_gather(out_tensors, input_tensors, group=group, async_op=async_op)
-            for i, t in enumerate(_dequantize_tensor_list(out_tensors, qtype, quant_loss=quant_loss)):
-                tensors[i] = t
+        tensors = args[0]
+        input_tensor = args[1]
+        out_splits = kwargs.get('out_splits', None)
+        in_splits = kwargs.get('in_splits', None)
 
-        elif (func == dist.all_to_all):
-            tensors = args[0]
-            input_tensors = _quantize_tensor_list(args[1], qtype)
-            out_tensors = _quantize_tensor_list(tensors, qtype)
-            dist.all_to_all(out_tensors, input_tensors, group=group, async_op=async_op)
-            for i, t in enumerate(_dequantize_tensor_list(out_tensors, qtype, quant_loss=quant_loss)):
-                tensors[i] = t
 
-        elif (func == dist.all_to_all_single):
-            tensors = args[0]
-            out_splits = kwargs.get('out_splits', None)
-            in_splits = kwargs.get('in_splits', None)
-            # Quantizing the input/output tensor
-            input_tensors = _quantize_tensor(args[1], qtype)
-            out_tensors = _quantize_tensor(tensors, qtype)
-            dist.all_to_all_single(out_tensors, input_tensors, out_splits, in_splits, group=group)
-            for i, t in enumerate(_dequantize_tensor(out_tensors, qtype, quant_loss=quant_loss)):
-                tensors[i] = t
-        else:
+        try:
+            if (func == dist.all_to_all_single):
+                dispatch[func](tensors,
+                               input_tensor,
+                               qtype,
+                               group=group,
+                               async_op=async_op,
+                               quant_loss=quant_loss,
+                               out_splits=out_splits,
+                               in_splits=in_splits)
+            else:
+                dispatch[func](tensors, input_tensor, qtype, group=group, async_op=async_op, quant_loss=quant_loss)
+        except KeyError:
             raise RuntimeError(
                 f"The collective op {func} is not supported yet"
             )
