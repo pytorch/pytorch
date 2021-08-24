@@ -31,7 +31,7 @@ static void scatter_gather_dtype_check(
 }
 
 // Used for `gather`-like methods
-// self here means the input tensor
+// Note: self means the input tensor here
 // Test:
 // 1. index.size(d) <= self.size(d) for all d != dim
 // 2. index.dim() == self.dim()
