@@ -111,7 +111,6 @@ class AnnotationsTest(unittest.TestCase):
 
 class TypeCheckerTest(unittest.TestCase):
 
-    @skipIfNoSympy
     def test_type_check_add_with_broadcast(self):
         class M(torch.nn.Module):
             def forward(self, x: TensorType((1, 2, 3, Dyn)), y: TensorType((2, 3, 4))):
@@ -131,7 +130,6 @@ class TypeCheckerTest(unittest.TestCase):
                 assert n.meta['broadcast']
             assert n.type == next(expected_iter)
 
-    @skipIfNoSympy
     def test_type_check_add_with_scalar(self):
         class M(torch.nn.Module):
             def forward(self, x: int, y: TensorType((2, 3, 4))):
@@ -149,7 +147,6 @@ class TypeCheckerTest(unittest.TestCase):
         for n in symbolic_traced.graph.nodes:
             assert n.type == next(expected_iter)
 
-    @skipIfNoSympy
     def test_type_check_add_false(self):
         class M(torch.nn.Module):
             def forward(self, x: TensorType((1, 2, 3, Dyn)), y: TensorType((1, 2, 3))):
@@ -178,7 +175,6 @@ class TypeCheckerTest(unittest.TestCase):
             if n.op == 'output':
                 assert n.type == TensorType((1, 2, Dyn))
 
-    @skipIfNoSympy
     def test_type_check_reshape_true(self):
         class M(torch.nn.Module):
             def forward(self, x: TensorType((1, 6))):
@@ -199,7 +195,6 @@ class TypeCheckerTest(unittest.TestCase):
             if n.op == 'output':
                 assert n.type == TensorType((1, 2, 3))
 
-    @skipIfNoSympy
     def test_type_check_reshape_false(self):
         class M(torch.nn.Module):
             def forward(self, x: TensorType((1, 5))):
@@ -211,7 +206,6 @@ class TypeCheckerTest(unittest.TestCase):
         with self.assertRaises(TypeError):
             tc.type_check()
 
-    @skipIfNoSympy
     def test_type_check_reshape_dyn_false(self):
         class M(torch.nn.Module):
             def forward(self, x: TensorType((1, 5))):
@@ -223,7 +217,6 @@ class TypeCheckerTest(unittest.TestCase):
         with self.assertRaises(TypeError):
             tc.type_check()
 
-    @skipIfNoSympy
     def test_type_check_reshape_dyn_true(self):
         class M(torch.nn.Module):
             def forward(self, x: TensorType((1, 15))):
@@ -234,7 +227,6 @@ class TypeCheckerTest(unittest.TestCase):
         tc = GraphTypeChecker({}, symbolic_traced)
         self.assertTrue(tc.type_check())
 
-    @skipIfNoSympy
     def test_type_check_reshape_dyn_true_param_false(self):
         class M(torch.nn.Module):
             def forward(self, x: TensorType((Dyn, 5))):
@@ -246,7 +238,6 @@ class TypeCheckerTest(unittest.TestCase):
         with self.assertRaises(TypeError):
             tc.type_check()
 
-    @skipIfNoSympy
     def test_type_check_transpose_true(self):
         class M(torch.nn.Module):
             def forward(self, x: TensorType((1, 2, 3, 5))):
@@ -265,7 +256,6 @@ class TypeCheckerTest(unittest.TestCase):
             if n.op == 'x':
                 assert n.placeholder == TensorType([1, 2, 3, 5])
 
-    @skipIfNoSympy
     def test_type_check_transpose_False(self):
         class M(torch.nn.Module):
             def forward(self, x: TensorType((1, 2, 3, 5))):
@@ -277,7 +267,6 @@ class TypeCheckerTest(unittest.TestCase):
         with self.assertRaises(TypeError):
             tc.type_check()
 
-    @skipIfNoSympy
     def test_type_check_batch_norm_2D(self):
         class BasicBlock(torch.nn.Module):
 
@@ -309,7 +298,6 @@ class TypeCheckerTest(unittest.TestCase):
             if n.op == 'call_function':
                 assert n.type == TensorType((2, 2, 5, 4))
 
-    @skipIfNoSympy
     def test_type_check_batch_norm_2D_false(self):
         class BasicBlock(torch.nn.Module):
 
@@ -332,7 +320,6 @@ class TypeCheckerTest(unittest.TestCase):
         with self.assertRaises(TypeError):
             tc.type_check()
 
-    @skipIfNoSympy
     def test_type_check_batch_norm_2D_broadcast(self):
         class BasicBlock(torch.nn.Module):
 
@@ -371,7 +358,6 @@ class TypeCheckerTest(unittest.TestCase):
         with self.assertRaises(TypeError):
             tc.type_check()
 
-    @skipIfNoSympy
     def test_type_check_conv2D(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self, inplanes, planes, stride=1):
@@ -402,7 +388,6 @@ class TypeCheckerTest(unittest.TestCase):
             if n.op == 'call_module':
                 assert n.type == TensorType((2, 2, Dyn, 4))
 
-    @skipIfNoSympy
     def test_type_check_conv2D_2(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self, inplanes, planes, stride=1):
@@ -444,7 +429,6 @@ class TypeCheckerTest(unittest.TestCase):
         with self.assertRaises(TypeError):
             tc.type_check()
 
-    @skipIfNoSympy
     def test_type_check_conv2D_2_fully_static(self):
         annotation_list = [(1, 2, 3, 5), (2, 5, 6, 9), (10, 15, 13, 14),
                            (10, Dyn, 13, 14), (Dyn, Dyn, Dyn, 3)]
@@ -532,7 +516,6 @@ class TypeCheckerTest(unittest.TestCase):
                     assert n.type == TensorType(output_types[i])
                     assert is_consistent(n.type, TensorType(b.size()))
 
-    @skipIfNoSympy
     def test_typecheck_basicblock(self):
         class BasicBlock(torch.nn.Module):
             expansion = 1
@@ -586,7 +569,6 @@ class TypeCheckerTest(unittest.TestCase):
                 assert isinstance(n.type, TensorType)
                 assert torch.Size(n.type.__args__) == B.forward(torch.rand(2, 2, 4, 5)).size()
 
-    @skipIfNoSympy
     def test_type_check_conv2D_maxpool2d_flatten(self):
 
         class BasicBlock(torch.nn.Module):
@@ -626,7 +608,6 @@ class TypeCheckerTest(unittest.TestCase):
         for n in traced.graph.nodes:
             assert n.type == next(expected_iter)
 
-    @skipIfNoSympy
     def test_type_check_flatten(self):
         class M(torch.nn.Module):
             def forward(self, x: TensorType((1, 2, 3, 5, Dyn))):
@@ -640,7 +621,7 @@ class TypeCheckerTest(unittest.TestCase):
             if n.op == 'output':
                 assert n.type == TensorType((1, 6, 5, Dyn))
 
-    @skipIfNoSympy
+
     def test_type_check_flatten_2(self):
         class M(torch.nn.Module):
             def forward(self, x: TensorType((1, Dyn, 3, 5, Dyn))):
@@ -654,7 +635,6 @@ class TypeCheckerTest(unittest.TestCase):
             if n.op == 'output':
                 assert n.type == TensorType((1, Dyn, 5, Dyn))
 
-    @skipIfNoSympy
     def test_type_check_flatten3(self):
         class M(torch.nn.Module):
             def forward(self, x: TensorType((2, 3, 4, 5))):
@@ -672,7 +652,6 @@ class TypeCheckerTest(unittest.TestCase):
         c = r.constraints
         assert c == [Equality(2, 2)]
 
-    @skipIfNoSympy
     def test_type_typechecl_maxpool2d_3dinput(self):
 
         class BasicBlock(torch.nn.Module):
@@ -695,7 +674,6 @@ class TypeCheckerTest(unittest.TestCase):
             if n.target == 'output':
                 assert n.type == TensorType((64, 1, 1))
 
-    @skipIfNoSympy
     def test_type_maxpool2d_fully_static(self):
         annotation_list = [(Dyn, Dyn, 3, 5), (2, 5, 6, 9), (10, 15, 13, 14),
                            (10, Dyn, 13, 14), (Dyn, Dyn, Dyn, 10)]
@@ -782,7 +760,6 @@ class TypeCheckerTest(unittest.TestCase):
                     assert n.type == TensorType(output_types[i])
                     assert is_consistent(n.type, TensorType(b.size()))
 
-    @skipIfNoSympy
     def test_flatten_fully_static(self):
         annotation_list = [Dyn, TensorType((2, 5, 6, 9)), TensorType((10, 15, 13, 14)),
                            TensorType((10, Dyn, 13, 14)), TensorType((Dyn, Dyn, Dyn, 10))]
