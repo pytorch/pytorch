@@ -44,7 +44,6 @@ char const* toString(OpCode op);
 namespace {
 
 using mobile::serialization::CreateArg;
-using mobile::serialization::CreateInstruction;
 using mobile::serialization::CreateOperator;
 using mobile::serialization::CreateCode;
 using mobile::serialization::CreateFunction;
@@ -96,17 +95,6 @@ class InternIValue {
   std::unordered_map<const IValue*, int, IValueHash> indexes_;
   std::vector<IValue> ivalues_;
 };
-
-void CreateFBInstruction(
-    flatbuffers::FlatBufferBuilder& fbb,
-    const std::vector<Instruction>& insts,
-    std::vector<flatbuffers::Offset<mobile::serialization::Instruction>>* instructions) {
-  instructions->clear();
-  instructions->reserve(insts.size());
-  for (const auto& inst : insts) {
-    instructions->push_back(CreateInstruction(fbb, inst.op, inst.N, inst.X));
-  }
-}
 
 void CreateAndAppendOperator(
     flatbuffers::FlatBufferBuilder& fbb,
@@ -734,9 +722,11 @@ functionToFlatbuffers(
     code.get(), &instructions_copy, debug_info_recorder);
 
   // instructions
-  std::vector<flatbuffers::Offset<mobile::serialization::Instruction>> instruction_vector;
-  CreateFBInstruction(fbb, instructions_copy, &instruction_vector);
-  auto instruction_offsets = fbb.CreateVector(instruction_vector);
+  std::vector<mobile::serialization::Instruction> instruction_vector;
+  for (const auto& inst: instructions_copy) {
+    instruction_vector.emplace_back(inst.op, inst.N, inst.X);
+  }
+  auto instruction_offsets = fbb.CreateVectorOfStructs(instruction_vector);
 
   // operators
   std::vector<flatbuffers::Offset<mobile::serialization::Operator>> operator_vector;

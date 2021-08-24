@@ -41,7 +41,7 @@ table IValue2 {
   pickled:[byte];
 }
 
-table Instruction {
+struct Instruction {
   // Should op be enum instead?
   op:byte;
   n:ushort;
