@@ -17,9 +17,12 @@ from itertools import product, permutations
 from operator import mul
 from functools import reduce, partial
 
+import tools_package  # allows for importing tools below
+
 from tools.autograd import gen_autograd_functions
 from tools.autograd import load_derivatives
 import tools.codegen.model
+
 import torch
 from torch import nn
 from torch._six import inf, nan
