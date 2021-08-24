@@ -24,7 +24,7 @@ class TEWrapper {
 #endif
 };
 
-std::shared_ptr<TEWrapper> createLogit(c10::optional<float> clamp);
+std::shared_ptr<TEWrapper> createLogit();
 std::shared_ptr<TEWrapper> createRelu();
 std::shared_ptr<TEWrapper> createTanh();
 std::shared_ptr<TEWrapper> createSigmoid();
