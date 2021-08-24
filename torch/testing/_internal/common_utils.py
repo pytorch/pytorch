@@ -906,8 +906,10 @@ def check_if_enable(test: unittest.TestCase):
             platform_to_conditional: Dict = {
                 "mac": IS_MACOS,
                 "macos": IS_MACOS,
+                "win": IS_WINDOWS,
                 "windows": IS_WINDOWS,
-                "linux": IS_LINUX
+                "linux": IS_LINUX,
+                "rocm": TEST_WITH_ROCM
             }
             if platforms == [] or any([platform_to_conditional[platform] for platform in platforms]):
                 raise unittest.SkipTest(
