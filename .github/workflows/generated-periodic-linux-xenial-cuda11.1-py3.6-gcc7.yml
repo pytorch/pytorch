@@ -222,7 +222,7 @@ jobs:
     needs: [ciflow_should_run]
     env:
       TEST_RUNNER_TYPE: linux.8xlarge.nvidia.gpu
-      ENABLE_DISTRIBUTED_TEST: True
+      ENABLE_DISTRIBUTED_TEST: 1
       ENABLE_JIT_LEGACY_TEST: ''
       ENABLE_MULTIGPU_TEST: ''
       ENABLE_NOGPU_NO_AVX_TEST: ''
