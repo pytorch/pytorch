@@ -3,6 +3,7 @@
 import argparse
 import copy
 from datetime import datetime
+from distutils.util import strtobool
 import modulefinder
 import os
 import shutil
@@ -64,7 +65,6 @@ TESTS = [
     'test_dataloader',
     'test_datapipe',
     'distributed/test_data_parallel',
-    'distributed/test_distributed_fork',
     'distributed/test_distributed_spawn',
     'distributions/test_constraints',
     'distributions/test_distributions',
@@ -171,6 +171,7 @@ TESTS = [
     'distributed/elastic/utils/distributed_test',
     'distributed/elastic/multiprocessing/api_test',
     'distributed/_sharding_spec/test_sharding_spec',
+    'distributed/_sharded_tensor/test_sharded_tensor',
 ]
 
 # Tests need to be run with pytest.
@@ -210,7 +211,6 @@ WINDOWS_BLOCKLIST = [
     'distributed/rpc/test_faulty_agent',
     'distributed/rpc/test_tensorpipe_agent',
     'distributed/rpc/cuda/test_tensorpipe_agent',
-    'distributed/test_distributed_fork',
     'distributed/pipeline/sync/skip/test_api',
     'distributed/pipeline/sync/skip/test_gpipe',
     'distributed/pipeline/sync/skip/test_inspect_skip_layout',
@@ -233,9 +233,9 @@ WINDOWS_BLOCKLIST = [
     'distributed/pipeline/sync/test_stream',
     'distributed/pipeline/sync/test_transparency',
     'distributed/pipeline/sync/test_worker',
-    'distributed/optim/test_zero_redundancy_optimizer',
     "distributed/elastic/agent/server/test/api_test",
     'distributed/elastic/multiprocessing/api_test',
+    'distributed/_sharded_tensor/test_sharded_tensor',
 ]
 
 ROCM_BLOCKLIST = [
@@ -243,6 +243,7 @@ ROCM_BLOCKLIST = [
     'distributed/rpc/test_faulty_agent',
     'distributed/rpc/test_tensorpipe_agent',
     'distributed/rpc/cuda/test_tensorpipe_agent',
+    'distributed/_sharded_tensor/test_sharded_tensor',
     'test_determination',
     'test_multiprocessing',
     'test_jit_legacy',
@@ -291,7 +292,6 @@ TARGET_DET_LIST = [
     'test_testing',
     'test_view_ops',
     'distributed/nn/jit/test_instantiator',
-    'distributed/test_distributed_fork',
     'distributed/rpc/test_tensorpipe_agent',
     'distributed/rpc/cuda/test_tensorpipe_agent',
     'distributed/algorithms/ddp_comm_hooks/test_ddp_hooks',
@@ -573,7 +573,7 @@ def test_distributed(test_module, test_directory, options):
             os.environ['INIT_METHOD'] = 'env://'
             os.environ.update(env_vars)
             if with_init_file:
-                if test_module in ["test_distributed_fork", "test_distributed_spawn"]:
+                if test_module == "test_distributed_spawn":
                     init_method = f'{FILE_SCHEMA}{tmp_dir}/'
                 else:
                     init_method = f'{FILE_SCHEMA}{tmp_dir}/shared_init_file'
@@ -608,7 +608,6 @@ CUSTOM_HANDLERS = {
     'test_cuda_primary_ctx': test_cuda_primary_ctx,
     'test_cpp_extensions_aot_no_ninja': test_cpp_extensions_aot_no_ninja,
     'test_cpp_extensions_aot_ninja': test_cpp_extensions_aot_ninja,
-    'distributed/test_distributed_fork': test_distributed,
     'distributed/test_distributed_spawn': test_distributed,
 }
 
@@ -697,7 +696,8 @@ def parse_args():
     parser.add_argument(
         '--continue-through-error',
         action='store_true',
-        help='Runs the full test suite despite one of the tests failing')
+        help='Runs the full test suite despite one of the tests failing',
+        default=strtobool(os.environ.get("CONTINUE_THROUGH_ERROR", "False")))
     parser.add_argument(
         'additional_unittest_args',
         nargs='*',
