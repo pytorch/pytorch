@@ -10,14 +10,14 @@ namespace jit {
 inline std::pair<size_t, size_t> CalculateNecessaryArgs(
     const std::vector<Argument>& schema_args,
     at::ArrayRef<Value*> actual_inputs,
-    bool add_out_args) {
+    bool allow_trailing_out_args) {
   if (schema_args.size() == 0) {
     return std::make_pair(0, 0);
   }
 
   // count number of out arguments
   auto schema_idx = schema_args.size() - 1;
-  if (add_out_args) {
+  if (allow_trailing_out_args) {
     // skip over out arguments in the end.
     while (schema_idx >= 0) {
       auto current_arg = schema_args.at(schema_idx);
@@ -35,7 +35,7 @@ inline std::pair<size_t, size_t> CalculateNecessaryArgs(
   }
 
   // if it is the default args, we reset the index to the last element
-  if (!add_out_args) {
+  if (!allow_trailing_out_args) {
     schema_idx = schema_args.size() - 1;
   }
   // keeps track of trailing unnecessary args
