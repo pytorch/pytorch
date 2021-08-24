@@ -2,16 +2,6 @@ from torch.fx.experimental.graph_gradual_typechecker import Refine
 from torch.fx.tensor_type import TensorType
 from torch.fx.experimental.unification import Var, unify  # type: ignore[attr-defined]
 
-def infer_symbolic_types_single_pass(traced):
-    """
-    Generate constraints over types,
-    solve constraints with unification,
-    apply solution back to the types
-    """
-    r = Refine(traced)
-    r.refine()
-    mgu = unify_eq(r.constraints)
-    substitute_all_types(traced.graph, mgu)
 
 def infer_symbolic_types(traced):
     """

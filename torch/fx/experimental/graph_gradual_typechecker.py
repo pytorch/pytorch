@@ -12,7 +12,7 @@ import itertools
 from torch.fx.experimental.unification import Var  # type: ignore[attr-defined]
 
 try:
-    import sympy # type: ignore[import]
+    import sympy  # type: ignore[import]
 except ImportError:
     pass
 
