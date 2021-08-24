@@ -22,10 +22,12 @@ TORCH_META_FUNC(nll_loss_forward)
   TORCH_CHECK(
       self.dim() > 0 && self.dim() <= 2, "input tensor should be 1D or 2D");
   TORCH_CHECK(
-      target.dim() == 1,
-      "1D target tensor expected, multi-target not supported");
+      target.dim() <= 1,
+      "0D or 1D target tensor expected, multi-target not supported");
+
+  auto no_batch_dim = self.dim() == 1  && target.dim() == 0;
   TORCH_CHECK(
-      self.size(0) == target.size(0),
+      no_batch_dim || (self.size(0) == target.size(0)),
       "size mismatch (got input: ",
       self.sizes(),
       ", target: ",
@@ -66,10 +68,12 @@ TORCH_META_FUNC(nll_loss_backward)
   TORCH_CHECK(
       self.dim() > 0 && self.dim() <= 2, "input tensor should be 1D or 2D");
   TORCH_CHECK(
-      target.dim() == 1,
-      "1D target tensor expected, multi-target not supported");
+      target.dim() <= 1,
+      "0D or 1D target tensor expected, multi-target not supported");
+
+  auto no_batch_dim = self.dim() == 1  && target.dim() == 0;
   TORCH_CHECK(
-      self.size(0) == target.size(0),
+      no_batch_dim || (self.size(0) == target.size(0)),
       "size mismatch (got input: ",
       self.sizes(),
       ", target: ",
@@ -181,7 +185,6 @@ static void nll_loss_out_frame(
   const int64_t ndim = input.dim();
   TORCH_CHECK(ndim <= 2);
   const int64_t batch_size = ndim == 1 ? 1 : input.size(0);
-  TORCH_CHECK(target.size(0) == batch_size);
 
   constexpr int64_t cascade_sum_num_levels = 8;
   const int64_t level_power =
@@ -298,7 +301,11 @@ static void nll_loss_backward_out_frame(
   const auto n_dims = input.dim();
   const auto n_classes = input.size(-1);
 
-  auto target_acc = target.accessor<target_t, 1>();
+  auto target_ = target;
+  if (target.dim() == 0) {
+    target_ = target.unsqueeze(0);
+  }
+  auto target_acc = target_.accessor<target_t, 1>();
 
   auto weight_contiguous = optional_contiguous(weight);
   const scalar_t* weight_data = optional_data<scalar_t>(weight_contiguous);
@@ -349,7 +356,6 @@ static void nll_loss_backward_out_frame(
     auto grad_input_acc = grad_input.accessor<scalar_t, 2>();
 
     const auto batch_size = input.size(0);
-    TORCH_CHECK(target.size(0) == batch_size);
 
     for (int64_t i = 0; i < batch_size; i++) {
       const auto cur_target = target_acc[i];
@@ -621,12 +627,12 @@ Tensor nll_loss_nd(
     const c10::optional<Tensor>& weight,
     int64_t reduction,
     int64_t ignore_index) {
-  if (self.dim() < 2) {
+  if (self.dim() < 1) {
     TORCH_CHECK_VALUE(
-        false, "Expected 2 or more dimensions (got ", self.dim(), ")");
+        false, "Expected 1 or more dimensions (got ", self.dim(), ")");
   }
 
-  if (self.sizes()[0] != target.sizes()[0]) {
+  if (self.dim() != 1 && self.sizes()[0] != target.sizes()[0]) {
     TORCH_CHECK_VALUE(
         false,
         "Expected input batch_size (",
@@ -639,7 +645,7 @@ Tensor nll_loss_nd(
   Tensor ret;
   Tensor input_ = self;
   Tensor target_ = target;
-  if (input_.dim() == 2) {
+  if (input_.dim() == 1 || input_.dim() == 2) {
     ret = at::nll_loss(input_, target_, weight, reduction, ignore_index);
   } else if (input_.dim() == 4) {
     ret = at::nll_loss2d(input_, target_, weight, reduction, ignore_index);

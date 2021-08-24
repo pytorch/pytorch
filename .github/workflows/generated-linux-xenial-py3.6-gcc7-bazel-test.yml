@@ -1,4 +1,5 @@
 # @generated DO NOT EDIT MANUALLY
+
 # Template is at:    .github/templates/bazel_ci_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
 name: linux-xenial-py3.6-gcc7-bazel-test
@@ -63,6 +64,10 @@ jobs:
         with:
           # deep clone, to allow use of git merge-base
           fetch-depth: 0
+      - name: Display EC2 information
+        shell: bash
+        run: |
+          .github/scripts/display_ec2_information.sh
       - name: Calculate docker image tag
         id: calculate-tag
         run: |

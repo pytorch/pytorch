@@ -65,7 +65,6 @@ TESTS = [
     'test_dataloader',
     'test_datapipe',
     'distributed/test_data_parallel',
-    'distributed/test_distributed_fork',
     'distributed/test_distributed_spawn',
     'distributions/test_constraints',
     'distributions/test_distributions',
@@ -212,7 +211,6 @@ WINDOWS_BLOCKLIST = [
     'distributed/rpc/test_faulty_agent',
     'distributed/rpc/test_tensorpipe_agent',
     'distributed/rpc/cuda/test_tensorpipe_agent',
-    'distributed/test_distributed_fork',
     'distributed/pipeline/sync/skip/test_api',
     'distributed/pipeline/sync/skip/test_gpipe',
     'distributed/pipeline/sync/skip/test_inspect_skip_layout',
@@ -245,6 +243,7 @@ ROCM_BLOCKLIST = [
     'distributed/rpc/test_faulty_agent',
     'distributed/rpc/test_tensorpipe_agent',
     'distributed/rpc/cuda/test_tensorpipe_agent',
+    'distributed/_sharded_tensor/test_sharded_tensor',
     'test_determination',
     'test_multiprocessing',
     'test_jit_legacy',
@@ -293,7 +292,6 @@ TARGET_DET_LIST = [
     'test_testing',
     'test_view_ops',
     'distributed/nn/jit/test_instantiator',
-    'distributed/test_distributed_fork',
     'distributed/rpc/test_tensorpipe_agent',
     'distributed/rpc/cuda/test_tensorpipe_agent',
     'distributed/algorithms/ddp_comm_hooks/test_ddp_hooks',
@@ -394,6 +392,11 @@ JIT_EXECUTOR_TESTS = [
     'test_jit_profiling',
     'test_jit_legacy',
     'test_jit_fuser_legacy',
+]
+
+DISTRIBUTED_TESTS = [
+    'distributed/test_distributed_fork',
+    'distributed/test_distributed_spawn',
 ]
 
 # Dictionary matching test modules (in TESTS) to lists of test cases (within that test_module) that would be run when
@@ -575,7 +578,7 @@ def test_distributed(test_module, test_directory, options):
             os.environ['INIT_METHOD'] = 'env://'
             os.environ.update(env_vars)
             if with_init_file:
-                if test_module in ["test_distributed_fork", "test_distributed_spawn"]:
+                if test_module == "test_distributed_spawn":
                     init_method = f'{FILE_SCHEMA}{tmp_dir}/'
                 else:
                     init_method = f'{FILE_SCHEMA}{tmp_dir}/shared_init_file'
@@ -610,7 +613,6 @@ CUSTOM_HANDLERS = {
     'test_cuda_primary_ctx': test_cuda_primary_ctx,
     'test_cpp_extensions_aot_no_ninja': test_cpp_extensions_aot_no_ninja,
     'test_cpp_extensions_aot_ninja': test_cpp_extensions_aot_ninja,
-    'distributed/test_distributed_fork': test_distributed,
     'distributed/test_distributed_spawn': test_distributed,
 }
 
@@ -643,6 +645,11 @@ def parse_args():
         '--jit',
         action='store_true',
         help='run all jit tests')
+    parser.add_argument(
+        '--distributed-tests',
+        '--distributed-tests',
+        action='store_true',
+        help='run all distributed tests')
     parser.add_argument(
         '-pt', '--pytest', action='store_true',
         help='If true, use `pytest` to execute the tests. E.g., this runs '
@@ -727,6 +734,11 @@ def parse_args():
         help='exclude tests that are run for a specific jit config'
     )
     parser.add_argument(
+        '--exclude-distributed-tests',
+        action='store_true',
+        help='exclude distributed tests'
+    )
+    parser.add_argument(
         '--run-specified-test-cases',
         nargs='?',
         type=str,
@@ -803,6 +815,7 @@ def exclude_tests(exclude_list, selected_tests, exclude_message=None):
 
 
 def get_selected_tests(options):
+    # First make sure run specific test cases options are processed.
     if options.run_specified_test_cases:
         if options.use_specified_test_cases_by == 'include':
             options.include = list(SPECIFIED_TEST_CASES_DICT.keys())
@@ -811,6 +824,16 @@ def get_selected_tests(options):
 
     selected_tests = options.include
 
+    # filter if there's JIT only and distributed only test options
+    if options.jit:
+        selected_tests = list(
+            filter(lambda test_name: "jit" in test_name, selected_tests))
+
+    if options.distributed_tests:
+        selected_tests = list(
+            filter(lambda test_name: test_name in DISTRIBUTED_TESTS, selected_tests))
+
+    # process reordering
     if options.bring_to_front:
         to_front = set(options.bring_to_front)
         selected_tests = options.bring_to_front + list(filter(lambda name: name not in to_front,
@@ -824,8 +847,12 @@ def get_selected_tests(options):
         last_index = find_test_index(options.last, selected_tests, find_last_index=True)
         selected_tests = selected_tests[:last_index + 1]
 
+    # process exclusion
     if options.exclude_jit_executor:
         options.exclude.extend(JIT_EXECUTOR_TESTS)
+
+    if options.exclude_distributed_tests:
+        options.exclude.extend(DISTRIBUTED_TESTS)
 
     selected_tests = exclude_tests(options.exclude, selected_tests)
 
@@ -843,6 +870,7 @@ def get_selected_tests(options):
     elif TEST_WITH_ROCM:
         selected_tests = exclude_tests(ROCM_BLOCKLIST, selected_tests, 'on ROCm')
 
+    # sharding
     if options.shard:
         assert len(options.shard) == 2, "Unexpected shard format"
         assert min(options.shard) > 0, "Shards must be positive numbers"
@@ -1032,9 +1060,6 @@ def main():
 
     if options.coverage and not PYTORCH_COLLECT_COVERAGE:
         shell(['coverage', 'erase'])
-
-    if options.jit:
-        selected_tests = filter(lambda test_name: "jit" in test_name, TESTS)
 
     if options.determine_from is not None and os.path.exists(options.determine_from):
         slow_tests = get_slow_tests_based_on_S3(TESTS, TARGET_DET_LIST, SLOW_TEST_THRESHOLD)
