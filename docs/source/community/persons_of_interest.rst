@@ -4,50 +4,47 @@ PyTorch Governance | Persons of Interest
 General Maintainers
 -------------------
 
--  Adam Paszke (`apaszke <https://github.com/apaszke>`__)
 -  Soumith Chintala (`soumith <https://github.com/soumith>`__)
 -  Edward Yang (`ezyang <https://github.com/ezyang>`__)
 -  Greg Chanan (`gchanan <https://github.com/gchanan>`__)
 -  Dmytro Dzhulgakov (`dzhulgakov <https://github.com/dzhulgakov>`__)
--  (sunsetting) Sam Gross
-   (`colesbury <https://github.com/colesbury>`__)
+-  (emeritus) Sam Gross (`colesbury <https://github.com/colesbury>`__)
+-  (emeritus) Adam Paszke (`apaszke <https://github.com/apaszke>`__)
 
 Module-level maintainers
 ------------------------
 
-torch.*
-~~~~~~~
-
--  Greg Chanan (`gchanan <https://github.com/gchanan>`__)
--  Soumith Chintala (`soumith <https://github.com/soumith>`__)
--  [linear algebra] Vishwak Srinivasan (`vishwakftw <https://github.com/vishwakftw>`__)
-
 torch.nn
 ~~~~~~~~
 
--  Adam Paszke (`apaszke <https://github.com/apaszke>`__)
 -  Greg Chanan (`gchanan <https://github.com/gchanan>`__)
 -  Soumith Chintala (`soumith <https://github.com/soumith>`__)
--  Sam Gross (`colesbury <https://github.com/colesbury>`__)
+-  Joel Schlosser (`jbschlosser <https://github.com/jbschlosser>`__)
+-  (emeritus) Sam Gross (`colesbury <https://github.com/colesbury>`__)
+-  (emeritus) Adam Paszke (`apaszke <https://github.com/apaszke>`__)
 
 torch.optim
 ~~~~~~~~~~~
 
--  Vincent Quenneville-Belair (`vincentqb <https://github.com/vincentqb>`__)
 -  Soumith Chintala (`soumith <https://github.com/soumith>`__)
+-  Ilqar Ramazanli (`iramazanli <https://github.com/iramazanli>`__)
+-  (emeritus) Vincent Quenneville-Belair (`vincentqb <https://github.com/vincentqb>`__)
 
-Autograd Engine
-~~~~~~~~~~~~~~~
+torch.autograd
+~~~~~~~~~~~~~~
 
 -  Edward Yang (`ezyang <https://github.com/ezyang>`__)
 -  Alban Desmaison (`alband <https://github.com/alband>`__)
--  Adam Paszke (`apaszke <https://github.com/apaszke>`__)
+-  (emeritus) Adam Paszke (`apaszke <https://github.com/apaszke>`__)
 
-JIT
-~~~
+JIT / TorchScript / FZ
+~~~~~~~~~~~~~~~~~~~~~~
 
--  Zach Devito (`zdevito <https://github.com/zdevito>`__)
 -  Michael Suo (`suo <https://github.com/suo>`__)
+-  Yanan Cao (`gmagogsfm <https://github.com/gmagogsfm>`__)
+-  James Reed (`jamesr66a <https://github.com/jamesr66a>`__)
+-  (emeritus) Zach Devito (`zdevito <https://github.com/zdevito>`__)
+
 
 Distributions & RNG
 ~~~~~~~~~~~~~~~~~~~
@@ -60,39 +57,55 @@ Distributions & RNG
 Distributed
 ~~~~~~~~~~~
 
--  Pieter Noordhuis (`pietern <https://github.com/pietern>`__)
 -  Shen Li (`mrshenli <https://github.com/mrshenli>`__)
--  (proposed) Pritam Damania
-   (`pritamdamania87 <https://github.com/pritamdamania87>`__)
+-  Pritam Damania (`pritamdamania87 <https://github.com/pritamdamania87>`__)
+-  (emeritus) Pieter Noordhuis (`pietern <https://github.com/pietern>`__)
 
 Multiprocessing and DataLoaders
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 -  Vitaly Fedyunin (`VitalyFedyunin <https://github.com/VitalyFedyunin>`__)
 -  Simon Wang (`SsnL <https://github.com/SsnL>`__)
--  Adam Paszke (`apaszke <https://github.com/apaszke>`__)
+-  (emeritus) Adam Paszke (`apaszke <https://github.com/apaszke>`__)
+
+torch.linalg / Linear Algebra
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+-  Mike Ruberry (`mruberry <https://github.com/mruberry>`__)
+-  Vishwak Srinivasan (`vishwakftw <https://github.com/vishwakftw>`__)
+-  Ivan Yashchuk (`IvanYashchuk <https://github.com/IvanYashchuk>`__)
+
+torch.fft
+~~~~~~~~~
+
+-  Mike Ruberry (`mruberry <https://github.com/mruberry>`__)
+-  Peter Bell (`peterbell10 <https://github.com/peterbell10>`__) 
+
 
 CPU Performance / SIMD
 ~~~~~~~~~~~~~~~~~~~~~~
 
--  Xiaoqiang Zheng (`zheng-xq <https://github.com/zheng-xq>`__)
 -  Vitaly Fedyunin (`VitalyFedyunin <https://github.com/VitalyFedyunin>`__)
--  Sam Gross (`colesbury <https://github.com/colesbury>`__)
--  (sunsetting) Christian Puhrsch (`cpuhrsch <https://github.com/cpuhrsch>`__)
--  [threading] Ilia Cherniavskii (`ilia-cher <https://github.com/ilia-cher>`__)
+-  (emeritus) Xiaoqiang Zheng (`zheng-xq <https://github.com/zheng-xq>`__)
+-  (emeritus) Sam Gross (`colesbury <https://github.com/colesbury>`__)
+-  (emeritus) Christian Puhrsch (`cpuhrsch <https://github.com/cpuhrsch>`__)
+-  (emeritus) Ilia Cherniavskii (`ilia-cher <https://github.com/ilia-cher>`__)
 
 CUDA
 ~~~~
 
 -  Natalia Gimelshein (`ngimel <https://github.com/ngimel>`__)
 -  Edward Yang (`ezyang <https://github.com/ezyang>`__)
--  Xiaoqiang Zheng (`zheng-xq <https://github.com/zheng-xq>`__)
+-  Piotr Bialecki (`ptrblck <https://github.com/ptrblck>`__)
+-  (emeritus) Xiaoqiang Zheng (`zheng-xq <https://github.com/zheng-xq>`__)
 
 MKLDNN
 ~~~~~~
 
--  Junjie Bai (`bddppq <https://github.com/bddppq>`__)
--  Yinghai Lu (`yinghai <https://github.com/yinghai>`__)
+-  Vitaly Fedyunin (`VitalyFedyunin <https://github.com/VitalyFedyunin>`__)
+-  Jianhui Li (`Jianhui-Li <https://github.com/Jianhui-Li>`__)
+-  (emeritus) Junjie Bai (`bddppq <https://github.com/bddppq>`__)
+-  (emeritus) Yinghai Lu (`yinghai <https://github.com/yinghai>`__)
 
 AMD/ROCm/HIP
 ~~~~~~~~~~~~
@@ -100,18 +113,19 @@ AMD/ROCm/HIP
 -  Peng Sun (`sunway513 <https://github.com/sunway513>`__)
 -  Jithun Nair (`jithunnair-amd <https://github.com/jithunnair-amd>`__)
 -  Jeff Daily (`jeffdaily <https://github.com/jeffdaily>`__)
+-  (emeritus) Junjie Bai (`bddppq <https://github.com/bddppq>`__)
 
 Build + CI
 ~~~~~~~~~~
 
--  Will Feng (`yf225 <https://github.com/yf225>`__)
--  Edward Yang (`ezyang <https://github.com/ezyang>`__)
--  Soumith Chintala (`soumith <https://github.com/soumith>`__)
--  Karl Ostmo (`kostmo <https://github.com/kostmo>`__)
--  Hong Xu (`xuhdev <https://github.com/xuhdev>`__)
+-  Nikita Shulga (`malfet <https://github.com/malfet>`__)
+-  Eli Uriegas (`seemethere <https://github.com/seemethere>`__)
+-  Zhuojie Zhou (zhouzhuojie) (`zhouzhuojie <https://github.com/zhouzhuojie>`__)
+-  (emeritus) Edward Yang (`ezyang <https://github.com/ezyang>`__)
+-  (emeritus) Karl Ostmo (`kostmo <https://github.com/kostmo>`__)
 
-Benchmarks
-~~~~~~~~~~
+Performance Tools
+~~~~~~~~~~~~~~~~~
 
 -  Mingzhe Li (`mingzhe09088 <https://github.com/mingzhe09088>`__)
 
