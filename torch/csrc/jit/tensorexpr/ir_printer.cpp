@@ -28,9 +28,13 @@ void IRPrinter::print(Stmt& stmt) {
 
 // TODO: change whether to include the parenthesis to the parent expression,
 // we need to look at the operator precedence to make the output simpler.
-template <typename Op>
+template <
+    typename Op,
+    typename std::enable_if<std::is_same<
+        decltype(detail::bin_op_deducer(std::declval<Op>())),
+        void>::value>::type* = nullptr>
 void visitBinaryOp(
-    BinaryOpNode<Op>* v,
+    NodePtr<Op> v,
     const std::string& op_str,
     IRPrinter* printer,
     bool parens = true) {

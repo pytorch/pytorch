@@ -184,10 +184,7 @@ void initTensorExprBindings(PyObject* module) {
           [](Placeholder& self,
              const std::vector<ExprHandle>& args,
              const ExprHandle& val) { return self.store(args, val); })
-      .def(
-          "data",
-          [](Placeholder& self) { return BufHandle(self.data()); },
-          py::return_value_policy::reference);
+      .def("data", [](Placeholder& self) { return BufHandle(self.data()); });
   py::class_<Tensor, std::unique_ptr<Tensor, py::nodelete>>(te, "Tensor")
       .def(py::init(
           [](BufHandle& b, StmtPtr s) { return new Tensor(b.node(), s); }))
@@ -197,8 +194,9 @@ void initTensorExprBindings(PyObject* module) {
             return self.load(v);
           })
       .def("buf", [](Tensor& self) { return BufHandle(self.buf()); })
-      .def("stmt", &Tensor::stmt, py::return_value_policy::reference);
-  py::class_<Cast>(te, "Cast").def_static("make", &Cast::make);
+      .def("stmt", &Tensor::stmt);
+  py::class_<Cast, std::shared_ptr<Cast>>(te, "Cast")
+      .def_static("make", &Cast::make);
 
   py::class_<DimArg>(te, "DimArg")
       .def(py::init<const ExprHandle&>())
@@ -321,7 +319,7 @@ void initTensorExprBindings(PyObject* module) {
       },
       py::return_value_policy::reference);
 
-  py::class_<Stmt, std::unique_ptr<Stmt, py::nodelete>>(te, "Stmt")
+  py::class_<Stmt, std::shared_ptr<Stmt>>(te, "Stmt")
       .def(py::init([](const std::vector<StmtPtr>& stmts) {
         return tensorexpr::Block::make(stmts);
       }))
@@ -330,22 +328,18 @@ void initTensorExprBindings(PyObject* module) {
         ss << self;
         return ss.str();
       });
-  py::class_<Store, Stmt, std::unique_ptr<Store, py::nodelete>>(te, "Store")
+  py::class_<Store, Stmt, std::shared_ptr<Store>>(te, "Store")
       .def_static(
           "make",
           [](const BufHandle& buf,
              std::vector<ExprHandle>& indices,
              const ExprHandle& value) {
             return Store::make(buf, indices, value);
-          },
-          py::return_value_policy::reference);
+          });
 
-  py::class_<For, Stmt, std::unique_ptr<For, py::nodelete>>(te, "For")
-      .def(
-          "index_var",
-          [](For& self) { return VarHandle(self.var()); },
-          py::return_value_policy::reference)
-      .def("body", &For::body, py::return_value_policy::reference)
+  py::class_<For, Stmt, std::shared_ptr<For>>(te, "For")
+      .def("index_var", [](For& self) { return VarHandle(self.var()); })
+      .def("body", &For::body)
       .def("set_parallel", &For::set_parallel)
       .def(
           "set_gpu_block_index",
@@ -362,35 +356,28 @@ void initTensorExprBindings(PyObject* module) {
           [](const VarHandle& var,
              const ExprHandle& start,
              const ExprHandle& stop,
-             StmtPtr body) { return For::make(var, start, stop, body); },
-          py::return_value_policy::reference);
+             StmtPtr body) { return For::make(var, start, stop, body); });
 
-  py::class_<Cond, Stmt, std::unique_ptr<Cond, py::nodelete>>(te, "Cond")
+  py::class_<Cond, Stmt, std::shared_ptr<Cond>>(te, "Cond")
       .def_static(
           "make",
           [](const ExprHandle& condition,
              StmtPtr true_stmt,
              StmtPtr false_stmt) {
-            return alloc<Cond>(condition.node(), true_stmt, false_stmt);
-          },
-          py::return_value_policy::reference)
-      .def("true_stmt", &Cond::true_stmt, py::return_value_policy::reference)
-      .def("false_stmt", &Cond::false_stmt, py::return_value_policy::reference);
+            return Cond::make(condition, true_stmt, false_stmt);
+          })
+      .def("true_stmt", &Cond::true_stmt)
+      .def("false_stmt", &Cond::false_stmt);
 
-  py::class_<
-      tensorexpr::Block,
-      Stmt,
-      std::unique_ptr<tensorexpr::Block, py::nodelete>>(te, "Block")
+  py::class_<tensorexpr::Block, Stmt, std::shared_ptr<tensorexpr::Block>>(
+      te, "Block")
       .def(py::init([](const std::vector<StmtPtr>& stmts) {
         return tensorexpr::Block::make(stmts);
       }))
-      .def(
-          "stmts",
-          &tensorexpr::Block::stmts,
-          py::return_value_policy::reference);
-  py::class_<ExternalCall, Stmt, std::unique_ptr<ExternalCall, py::nodelete>>(
+      .def("stmts", &tensorexpr::Block::stmts);
+  py::class_<ExternalCall, Stmt, std::shared_ptr<ExternalCall>>(
       te, "ExternalCall")
-      .def(py::init(&ExternalCall::make), py::return_value_policy::reference);
+      .def(py::init(&ExternalCall::make));
 
   py::class_<LoopNest>(te, "LoopNest")
       .def(py::init<const std::vector<Tensor*>&>())
