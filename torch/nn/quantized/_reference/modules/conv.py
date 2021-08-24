@@ -14,7 +14,7 @@ class _ConvNd(torch.nn.modules.conv._ConvNd):
         optimization for quantized backends supported in PyTorch (fbgemm/qnnpack),
         this is useful when user want to use this module in other backends like Glow.
     """
-    __annotations__ = {"_bias": Optional[torch.Tensor]}
+    __annotations__ = {"bias": Optional[torch.Tensor]}
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         super()._save_to_state_dict(destination, prefix, keep_vars)
@@ -86,12 +86,30 @@ class Conv1d(_ConvNd, nn.Conv1d):
         """
         weight_dequant = self.get_weight()
         result = F.conv1d(
-            x, weight_dequant, self._bias, self.stride,
+            x, weight_dequant, self.bias, self.stride,
             self.padding, self.dilation, self.groups)
         return result
 
     def _get_name(self):
         return "QuantizedConv1d(Reference)"
+
+    @classmethod
+    def from_float(cls, float_conv, weight_qparams):
+        qref_conv = Conv1d(
+            float_conv.in_channels,
+            float_conv.out_channels,
+            float_conv.kernel_size,  # type: ignore[arg-type]
+            float_conv.stride,  # type: ignore[arg-type]
+            float_conv.padding,  # type: ignore[arg-type]
+            float_conv.dilation,  # type: ignore[arg-type]
+            float_conv.groups,
+            float_conv.bias is not None,
+            float_conv.padding_mode,
+            weight_qparams=weight_qparams)
+        qref_conv.weight = torch.nn.Parameter(float_conv.weight.detach())
+        if float_conv.bias is not None:
+            qref_conv.bias = torch.nn.Parameter(float_conv.bias.detach())
+        return qref_conv
 
 class Conv2d(_ConvNd, nn.Conv2d):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
@@ -116,12 +134,30 @@ class Conv2d(_ConvNd, nn.Conv2d):
         """
         weight_dequant = self.get_weight()
         result = F.conv2d(
-            x, weight_dequant, self._bias, self.stride,
+            x, weight_dequant, self.bias, self.stride,
             self.padding, self.dilation, self.groups)
         return result
 
     def _get_name(self):
         return "QuantizedConv2d(Reference)"
+
+    @classmethod
+    def from_float(cls, float_conv, weight_qparams):
+        qref_conv = Conv2d(
+            float_conv.in_channels,
+            float_conv.out_channels,
+            float_conv.kernel_size,  # type: ignore[arg-type]
+            float_conv.stride,  # type: ignore[arg-type]
+            float_conv.padding,  # type: ignore[arg-type]
+            float_conv.dilation,  # type: ignore[arg-type]
+            float_conv.groups,
+            float_conv.bias is not None,
+            float_conv.padding_mode,
+            weight_qparams=weight_qparams)
+        qref_conv.weight = torch.nn.Parameter(float_conv.weight.detach())
+        if float_conv.bias is not None:
+            qref_conv.bias = torch.nn.Parameter(float_conv.bias.detach())
+        return qref_conv
 
 class Conv3d(_ConvNd, nn.Conv3d):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
@@ -146,9 +182,27 @@ class Conv3d(_ConvNd, nn.Conv3d):
         """
         weight_dequant = self.get_weight()
         result = F.conv3d(
-            x, weight_dequant, self._bias, self.stride,
+            x, weight_dequant, self.bias, self.stride,
             self.padding, self.dilation, self.groups)
         return result
 
     def _get_name(self):
         return "QuantizedConv3d(Reference)"
+
+    @classmethod
+    def from_float(cls, float_conv, weight_qparams):
+        qref_conv = Conv3d(
+            float_conv.in_channels,
+            float_conv.out_channels,
+            float_conv.kernel_size,  # type: ignore[arg-type]
+            float_conv.stride,  # type: ignore[arg-type]
+            float_conv.padding,  # type: ignore[arg-type]
+            float_conv.dilation,  # type: ignore[arg-type]
+            float_conv.groups,
+            float_conv.bias is not None,
+            float_conv.padding_mode,
+            weight_qparams=weight_qparams)
+        qref_conv.weight = torch.nn.Parameter(float_conv.weight.detach())
+        if float_conv.bias is not None:
+            qref_conv.bias = torch.nn.Parameter(float_conv.bias.detach())
+        return qref_conv

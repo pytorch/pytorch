@@ -531,7 +531,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 Conv1d,
                 conv1d_module_args,
                 (conv1d_input,),
-                ns.call_module(nn.Conv1d if is_reference else nnq.Conv1d),
+                ns.call_module(nnqr.Conv1d if is_reference else nnq.Conv1d),
                 None
             ),
             (
@@ -539,7 +539,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 Conv2d,
                 conv2d_module_args,
                 (conv2d_input,),
-                ns.call_module(nn.Conv2d if is_reference else nnq.Conv2d),
+                ns.call_module(nnqr.Conv2d if is_reference else nnq.Conv2d),
                 None
             ),
             (
@@ -547,7 +547,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 Conv3d,
                 conv3d_module_args,
                 (conv3d_input,),
-                ns.call_module(nn.Conv3d if is_reference else nnq.Conv3d),
+                ns.call_module(nnqr.Conv3d if is_reference else nnq.Conv3d),
                 None
             ),
             (
@@ -630,11 +630,7 @@ class TestQuantizeFx(QuantizationTestCase):
             qr = result_dict["quantized_reference"]
 
             def checkWeightQParams(model):
-                for module_name in ("conv",):
-                    if hasattr(model, module_name):
-                        self.assertTrue(hasattr(qr.get_submodule(module_name), "_weight_qparams"))
-                        self.assertTrue("Reference" in qr.get_submodule(module_name)._get_name())
-                for module_name in ("linear",):
+                for module_name in ("linear", "conv"):
                     if hasattr(model, module_name):
                         self.assertTrue(hasattr(qr.get_submodule(module_name), "weight_qscheme"))
                         self.assertTrue(hasattr(qr.get_submodule(module_name), "weight_scale"))
@@ -642,19 +638,7 @@ class TestQuantizeFx(QuantizationTestCase):
                         self.assertTrue("Reference" in qr.get_submodule(module_name)._get_name())
 
             def checkSerDeser(model, is_dynamic):
-                for module_name in ("conv",):
-                    if hasattr(model, module_name):
-                        # make sure seralization works
-                        state_dict = copy.deepcopy(model.state_dict())
-                        self.assertTrue(module_name + "._weight_qparams" in state_dict)
-
-                        # check load_state_dict restores states
-                        module = getattr(model, module_name)
-                        prev_scale = module._weight_qparams["scale"]
-                        module._weight_qparams["scale"] = None
-                        model.load_state_dict(state_dict)
-                        self.assertTrue(torch.equal(prev_scale, module._weight_qparams["scale"]))
-                for module_name in ("linear",):
+                for module_name in ("linear", "conv"):
                     if hasattr(model, module_name):
                         # make sure seralization works
                         state_dict = copy.deepcopy(model.state_dict())

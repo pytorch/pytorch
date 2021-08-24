@@ -47,6 +47,7 @@ from .utils import (
 
 from ..qconfig import QConfigAny
 
+import torch.nn as nn
 import torch.nn.quantized._reference as nnqr
 
 from abc import ABC, abstractmethod
@@ -670,7 +671,17 @@ class ConvReluQuantizeHandler(QuantizeHandler):
                     # run weight observer
                     weight_post_process(float_conv.weight)
                 weight_qparams = get_qparam_dict(weight_post_process)
-                _to_reference(float_conv, weight_qparams)
+                # hardcoded for now, TODO: expose the api to user,
+                # we can have a map from module to reference module
+                # and allow user to register new ones
+                mapping = {
+                    nn.Conv1d: nnqr.Conv1d,
+                    nn.Conv2d: nnqr.Conv2d,
+                    nn.Conv3d: nnqr.Conv3d,
+                }
+                ref_conv = mapping[type(float_conv)].from_float(float_conv, weight_qparams)
+                parent_name, name = _parent_name(self.conv_node.target)
+                setattr(modules[parent_name], name, ref_conv)
                 op_out = quantized_graph.create_node(
                     'call_module',
                     self.conv_node.target,
