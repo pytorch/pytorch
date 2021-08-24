@@ -192,7 +192,6 @@ class TORCH_API Pickler {
       const std::string& class_name);
   // raw string data is appended directly to the byte stream
   void pushBytes(const std::string& string);
-  void pushTensorData(const at::Tensor& tensor);
 
   // Add a BINPUT op and return the memoization id used
   size_t pushNextBinPut();
