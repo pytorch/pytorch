@@ -89,14 +89,10 @@ jobs:
         run: |
           .\.circleci\scripts\vs_install.ps1
 {%- if cuda_version != "cpu" %}
-      - name: Install Cuda
-        shell: bash
+      - name: install cuda
+        shell: cmd
         run: |
-          .circleci/scripts/windows_cuda_install.sh
-      - name: Install Cudnn
-        shell: bash
-        run: |
-          .circleci/scripts/windows_cudnn_install.sh
+          call .github\scripts\cuda_install.bat
 {%- endif %}
       - name: Build
         shell: bash
@@ -198,14 +194,10 @@ jobs:
         run: |
           .\.circleci\scripts\vs_install.ps1
 {%- if cuda_version != "cpu" %}
-      - name: Install Cuda
-        shell: bash
+      - name: install cuda
+        shell: cmd
         run: |
-          .circleci/scripts/windows_cuda_install.sh
-      - name: Install Cudnn
-        shell: bash
-        run: |
-          .circleci/scripts/windows_cudnn_install.sh
+          call .github\scripts\cuda_install.bat
 {%- endif %}
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download PyTorch Build Artifacts
