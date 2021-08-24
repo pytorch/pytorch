@@ -157,7 +157,7 @@ class CIWorkflow:
             self.only_build_on_pull_request = False
 
         if self.distributed_test:
-            self.enable_distributed_test = True
+            self.enable_distributed_test = 1
 
         # If num_test_shards_on_pull_request is not user-defined, default to num_test_shards unless we are
         # only running smoke tests on the pull request.
