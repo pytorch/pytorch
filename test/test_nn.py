@@ -17007,51 +17007,18 @@ class TestNNDeviceType(NNTestCase):
                 output_one_hot = m(input, target_one_hot)
                 self.assertEqual(output, output_one_hot)
 
-    def test_cross_entropy_label_smoothing_manual(self, device):
-        input = torch.randn((1, 3), device=device)
-        input_log_softmax = input.log_softmax(dim=-1)[0]
-
-        weights = [torch.tensor([4.0, 3.0, 1.0], device=device),
-                   torch.ones(3, device=device), None]
-        label_smoothings = [0.05, 0.1]
-        target_vals = ignore_indices = torch.arange(0, 3, device=device)
-        for label_smoothing, target_val, weight, ignore_index in product(label_smoothings, target_vals, weights, ignore_indices):
-            ce_loss_none = nn.CrossEntropyLoss(
-                label_smoothing=label_smoothing, weight=weight, reduction='none', ignore_index=ignore_index)
-
-            target = torch.tensor([target_val], device=device)
-            output = ce_loss_none(input, target)
-
-            if weight is None:
-                # To have a uniformed way to compute the expected_value
-                weight = torch.ones(3, device=device)
-
-            if ignore_index != target_val:
-                not_target_indices_mask = (target_val != target_vals)
-                weighted_non_target = (
-                    input_log_softmax[not_target_indices_mask] * weight[not_target_indices_mask])
-
-                # y_k^ls = y_k * (1 - label_smoothing) + label_smoothing / n_classes
-                expected_value = -(
-                    weight[target_val] * (1 - label_smoothing + label_smoothing / 3) * input_log_softmax[target_val]
-                    + (label_smoothing / 3) * torch.sum(weighted_non_target)
-                )
-            else:
-                expected_value = 0.0
-            self.assertEqual(output, torch.tensor([expected_value], device=device))
-
-            # sum returns the expected_value
-            ce_loss_sum = nn.CrossEntropyLoss(
-                label_smoothing=label_smoothing, weight=weight, reduction='sum', ignore_index=ignore_index)
-            output = ce_loss_sum(input, target)
-            self.assertEqual(output, expected_value)
-
-            # mean weights the value by weight
-            ce_loss_mean = nn.CrossEntropyLoss(
-                label_smoothing=label_smoothing, weight=weight, reduction='mean', ignore_index=ignore_index)
-            output = ce_loss_mean(input, target)
-            self.assertEqual(output, expected_value / weight[target_val])
-
+    def test_cross_entropy_label_smoothing_errors(self, device):
+        N, C = 3, 4
+        input_args = [
+            (torch.randn((N, C), device=device), torch.arange(0, C, device=device)),
+            (torch.randn((N, C), device=device), torch.randn(N, C, device=device))
+        ]
+        invalid_smoothings = [-0.1, 1.2]
+        for input_arg, label_smoothing in product(input_args, invalid_smoothings):
+            loss = nn.CrossEntropyLoss(label_smoothing=label_smoothing)
+            with self.assertRaisesRegex(RuntimeError,
+                                        r"label_smoothing must be between 0\.0"):
+                loss(*input_arg)
 
     def test_cross_entropy_label_smoothing_consistent_index_target_and_probs(self, device):
         N, C = 10, 4

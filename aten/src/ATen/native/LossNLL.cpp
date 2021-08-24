@@ -469,7 +469,9 @@ Tensor cross_entropy_loss_prob_target(
   auto input_ = at::log_softmax(self, 1, self.scalar_type());
   Tensor input;
 
-  if (0.0 < label_smoothing && label_smoothing <= 1.0) {
+  if (label_smoothing != 0.0) {
+    TORCH_CHECK(0.0 < label_smoothing && label_smoothing <= 1.0, "label_smoothing must be between 0.0 and 1.0. Got: ", label_smoothing);
+
     input = input_ * (target * (1 - label_smoothing) + label_smoothing / n_classes);
   } else{
     input = input_ * target;
@@ -577,7 +579,10 @@ Tensor cross_entropy_loss(
     c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight);
     const Tensor& weight_ = *weight_maybe_owned;
     ret = cross_entropy_loss_prob_target(self, target, weight_, reduction, label_smoothing);
-  } else if (0.0 < label_smoothing && label_smoothing <= 1.0) {
+  } else if (label_smoothing != 0.0) {
+
+    TORCH_CHECK(0.0 < label_smoothing && label_smoothing <= 1.0, "label_smoothing must be between 0.0 and 1.0. Got: ", label_smoothing);
+
     // See [Note: hacky wrapper removal for optional tensor]
     c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight);
     const Tensor& weight_ = *weight_maybe_owned;
