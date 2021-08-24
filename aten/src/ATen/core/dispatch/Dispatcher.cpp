@@ -1,4 +1,5 @@
 #include <ATen/core/dispatch/Dispatcher.h>
+#include <iostream>
 #include <list>
 #include <sstream>
 
