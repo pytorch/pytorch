@@ -137,7 +137,7 @@ inline bool FunctionSchema::isBackwardCompatibleWith(
   int new_out_start_idx = findFirstOutArg(arguments());
 
   // make sure among the default args, they are backward compatible
-  for (size_t i = 0; i < old_out_start_idx; i++) {
+  for (int i = 0; i < old_out_start_idx; i++) {
     if (!arguments().at(i).isBackwardCompatibleWith(
           old.arguments().at(i), why_not)) {
       return false;
@@ -145,7 +145,7 @@ inline bool FunctionSchema::isBackwardCompatibleWith(
   }
 
   // // Validate that all new arguments provided has a default value
-  for (size_t i = old_out_start_idx; i < new_out_start_idx; ++i) {
+  for (int i = old_out_start_idx; i < new_out_start_idx; ++i) {
     if (!arguments().at(i).default_value()) {
       if (why_not) {
         *why_not
@@ -159,7 +159,7 @@ inline bool FunctionSchema::isBackwardCompatibleWith(
   }
 
   // now compare the out args
-  for (size_t i = old_out_start_idx; i < old.arguments().size(); i++) {
+  for (int i = old_out_start_idx; i < old.arguments().size(); i++) {
     if (!arguments()
              .at(i - old_out_start_idx + new_out_start_idx)
              .isBackwardCompatibleWith(old.arguments().at(i), why_not)) {
