@@ -1,0 +1,6 @@
+{%- macro display_ec2_information() -%}
+      - name: Display EC2 information
+        shell: bash
+        run: |
+          .github/scripts/display_ec2_information.sh
+{%- endmacro -%}
