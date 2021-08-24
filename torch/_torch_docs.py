@@ -6003,7 +6003,7 @@ nanmean(input, dim=None, keepdim=False, *, dtype=None, out=None) -> Tensor
 Computes the mean of all `non-NaN` elements along the specified dimensions.
 
 This function is identical to :func:`torch.mean` when there are no `NaN` values
-in the :attr:`input` tensor. In the presence of `NaN`s, :func:`torch.mean` will
+in the :attr:`input` tensor. In the presence of `NaN`, :func:`torch.mean` will
 propagate the `NaN` to the output whereas :func:`torch.nanmean` will ignore the
 `NaN` values (`torch.nanmean(a)` is equivalent to `torch.mean(a[~a.isnan()])`).
 
@@ -6020,7 +6020,7 @@ Keyword args:
 
 .. seealso::
 
-    :func:`torch.mean` compute the mean value, propagating `NaN`s.
+    :func:`torch.mean` compute the mean value, propagating `NaN`.
 
 Example::
 
