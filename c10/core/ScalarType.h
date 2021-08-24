@@ -12,7 +12,7 @@
 
 #include <complex>
 #include <cstdint>
-#include <iostream>
+#include <ostream>
 
 namespace c10 {
 

@@ -68,11 +68,11 @@ from torch.testing._internal.common_utils import (
 
 from torch.distributed.optim import functional_optim_map
 
-if not IS_WINDOWS:
-    import torch.distributed.optim.post_localSGD_optimizer as post_localSGD_optimizer
-    from torch.distributed.optim.functional_sgd import _FunctionalSGD
-    from torch.distributed.optim.functional_adam import _FunctionalAdam
-    from torch.distributed.optim.functional_adamw import _FunctionalAdamW
+from torch.distributed.optim.functional_sgd import _FunctionalSGD
+from torch.distributed.optim.functional_adam import _FunctionalAdam
+from torch.distributed.optim.functional_adamw import _FunctionalAdamW
+
+import torch.distributed.optim.post_localSGD_optimizer as post_localSGD_optimizer
 
 from torch.utils.data.distributed import DistributedSampler
 
@@ -4003,10 +4003,6 @@ class DistributedTest:
             BACKEND != "nccl" and BACKEND != "gloo",
             "Only Nccl & Gloo backend support DistributedDataParallel",
         )
-        @sandcastle_skip_if(
-            IS_WINDOWS,
-            "FunctionalAdam not yet supported with Windows, see https://github.com/pytorch/pytorch/issues/62137"
-        )
         @skip_if_lt_x_gpu(2)
         @skip_if_rocm
         def test_ddp_hook_with_optimizer_parity_adamw(self):
@@ -4029,10 +4025,6 @@ class DistributedTest:
             BACKEND != "nccl" and BACKEND != "gloo",
             "Only Nccl & Gloo backend support DistributedDataParallel",
         )
-        @sandcastle_skip_if(
-            IS_WINDOWS,
-            "FunctionalAdam not yet supported with Windows, see https://github.com/pytorch/pytorch/issues/62137"
-        )
         @skip_if_lt_x_gpu(2)
         @skip_if_rocm
         def test_ddp_hook_with_optimizer_parity_adam(self):
@@ -4054,10 +4046,6 @@ class DistributedTest:
         @sandcastle_skip_if(
             BACKEND != "nccl" and BACKEND != "gloo",
             "Only Nccl & Gloo backend support DistributedDataParallel",
-        )
-        @sandcastle_skip_if(
-            IS_WINDOWS,
-            "FunctionalSGD not yet supported with Windows, see https://github.com/pytorch/pytorch/issues/62137"
         )
         @skip_if_lt_x_gpu(2)
         @skip_if_rocm
@@ -4119,20 +4107,13 @@ class DistributedTest:
                 grad_hook = net_with_hook.module.weight.grad
                 avg_hook = grad_hook.clone()
                 # Verify hook grad with expected.
-                # Cannot use exact match here due to a very small accuracy loss,
-                # e.g. 1e-05, for powerSGD hook case.
-                assert_func = (
-                    self.assertEqual
-                    if hook == default.allreduce_hook
-                    else torch.testing.assert_allclose
-                )
-                assert_func(
-                    avg_hook[0, 0],
+                self.assertEqual(
+                    avg_hook[0, 0].item(),
                     expected_grad,
                     msg=f"Expected hook grad of {expected_grad} but got {avg_hook[0, 0]}",
                 )
                 # Verify hook grad with vanilla allreduce
-                assert_func(
+                self.assertEqual(
                     avg_hook[0, 0],
                     avg[0, 0],
                     msg=f"Expected hook grad to be close to allreduce {avg[0, 0]}, but got {avg_hook[0, 0]}",
@@ -4628,9 +4609,6 @@ class DistributedTest:
             BACKEND != "nccl" and BACKEND != "gloo",
             "Only NCCL and GLOO backend support DistributedDataParallel",
         )
-        @sandcastle_skip_if(
-            IS_WINDOWS, "PostLocalSGDOptimizer not yet supported with Windows."
-        )
         def test_post_localSGD_optimizer_parity(self, grad_is_view=False):
             learning_rate = 0.03
             period = 4
@@ -4937,8 +4915,8 @@ class DistributedTest:
                 model.module.running_mean,
                 model.module.running_var,
             )
-            torch.testing.assert_allclose(running_mean, all_input_var.mean(1))
-            torch.testing.assert_allclose(running_var, all_input_var.var(1))
+            torch.testing.assert_close(running_mean, all_input_var.mean(1))
+            torch.testing.assert_close(running_var, all_input_var.var(1))
 
         @sandcastle_skip_if(
             BACKEND != "nccl" and BACKEND != "gloo",
