@@ -1269,7 +1269,7 @@ class TestTEFuser(JitTestCase):
             lambda x: torch.threshold(x, 0, -10),
             lambda x: torch.clamp(x, -10, 10),
         ]
-        gpu_only = { torch.erf, torch.erfc }
+        gpu_only = {torch.erf, torch.erfc}
         sizes = [(1,), (2,), (4, 4)]
         for dtype, op, device, size in product(self.dtypes, unary_ops, self.devices, sizes):
             if op in gpu_only and device == "cpu":
