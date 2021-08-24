@@ -8,7 +8,6 @@
 #include <vector>
 
 #include <ATen/core/ivalue_inl.h>
-#include <ATen/ThreadLocalState.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10d/ProcessGroup.hpp>
@@ -27,11 +26,27 @@ constexpr int kDefaultFirstBucketBytes = int(1024 * 1024);
 constexpr int kDefaultBucketBytesCap = int(25 * 1024 * 1024);
 // Collect runtime stats once for every kDDPRuntimeLoggingSampleRate iterations.
 constexpr int kDDPRuntimeLoggingSampleRate = 100;
+constexpr int kUnsetTime = -1;
+
+inline int64_t current_time_in_nanos() {
+  return torch::autograd::profiler::getTime();
+}
 
 // Forward declaration
 class Logger;
 
 class TORCH_API Timer {
+  private:
+    // The timestamp of forward call start time in each iteration.
+    int64_t forward_start_time = kUnsetTime;
+    // The timestamp of backward computation start and end time in each
+    // iteration.
+    int64_t backward_compute_start_time = kUnsetTime;
+    int64_t backward_compute_end_time = kUnsetTime;
+    // The timestamp of first communication call start time in each iteration.
+    int64_t backward_comm_start_time = kUnsetTime;
+    // The timestamp of last communication call end time in each iteration.
+  int64_t backward_comm_end_time = kUnsetTime;
  public:
   enum class Event {
     kForwardStart,
@@ -41,14 +56,45 @@ class TORCH_API Timer {
     kBackwardCommEnd,
   };
 
-  // Record the current event, i.e., mark it as having occurred now.
-  virtual void record(Event event) = 0;
+  // Record the current event, i.e., mark it as having occurred now. Default
+  // CPU implementation.
+  virtual void record(Event event) {
+    getTimeRef(event) = current_time_in_nanos();
+  }
 
   // Return the difference between when two events occurred, in nanoseconds.
   // Or nullopt if one of them hasn't been recorded.
   virtual c10::optional<int64_t> measureDifference(Event start, Event end) = 0;
 
   virtual ~Timer() = default;
+
+  // Return host-side timestamp, or nullopt if it has not yet been recorded.
+  c10::optional<int64_t> getTimestamp(Event event) {
+    auto time = getTimeRef(event);
+    if (time == kUnsetTime) {
+      return c10::nullopt;
+    } else {
+      return time;
+    }
+  }
+
+  // Return host-side time member variable corresponding to the given event.
+  int64_t& getTimeRef(Event event) {
+    switch (event) {
+      case Event::kForwardStart:
+        return forward_start_time;
+      case Event::kBackwardComputeStart:
+        return backward_compute_start_time;
+      case Event::kBackwardComputeEnd:
+        return backward_compute_end_time;
+      case Event::kBackwardCommStart:
+        return backward_comm_start_time;
+      case Event::kBackwardCommEnd:
+        return backward_comm_end_time;
+      default:
+        TORCH_INTERNAL_ASSERT(false);
+    }
+  }
 };
 
 // Local accumulator type for a single bucket.
@@ -69,12 +115,14 @@ class TORCH_API Reducer {
   explicit Reducer(
       std::vector<std::vector<at::Tensor>> replicas,
       std::vector<std::vector<size_t>> bucket_indices,
+      std::vector<size_t> per_bucket_size_limits,
       c10::intrusive_ptr<c10d::ProcessGroup> process_group,
       std::vector<std::vector<bool>> expect_sparse_gradients,
       int64_t bucket_bytes_cap,
       bool find_unused_parameters,
       bool gradient_as_bucket_view,
-      std::unordered_map<size_t, std::string> paramNames);
+      std::unordered_map<size_t, std::string> paramNames,
+      int64_t first_bucket_bytes_cap);
 
   ~Reducer() noexcept(false);
 
@@ -82,7 +130,9 @@ class TORCH_API Reducer {
   // of which is specified by a list of indices in the variables list.
   // This function performs validation that the variables within a bucket
   // all live on the same device and have the same dimensionality.
-  void initialize_buckets(std::vector<std::vector<size_t>> bucket_indices);
+  void initialize_buckets(
+      std::vector<std::vector<size_t>> bucket_indices,
+      std::vector<size_t> per_bucket_sizes);
 
   // This function is called when the forward function has produced an output,
   // and the user wishes to reduce gradients in the backwards pass.
@@ -155,9 +205,6 @@ class TORCH_API Reducer {
   // each replica, it is a tensor where index i = 1 if the Variable with that
   // index has been used.
   std::vector<at::Tensor> get_local_used_maps_on_device() const;
-
-  // Saves thread local state to be used by autograd engine callbacks.
-  void save_thread_local_state();
 
   // An function for users to set sample_rate of collecting
   // runtime stats. The time stats will be recorded for the
@@ -385,6 +432,10 @@ class TORCH_API Reducer {
     // If this bucket should expect a single sparse gradient.
     // Implies: replicas[i].variables.size() == 1.
     bool expect_sparse_gradient = false;
+    // "Limit" of cumulative parameter sizes that this bucket manages. It is
+    // actually a soft limit because we don't shard parameters across buckets
+    // so a single parameter may push it over the cap.
+    size_t bucket_size_limit;
   };
 
   std::vector<Bucket> buckets_;
@@ -508,14 +559,17 @@ class TORCH_API Reducer {
 
   // comm_hook_ is used to access the DDP communication hook if registered.
   std::unique_ptr<CommHookInterface> comm_hook_;
-  // Current thread local state
-  at::ThreadLocalState thread_local_state_;
   // Debug level setting. It is parsed once when Reducer is constructed, and
   // remains the same across a single invocation of DDP training.
   DistributedDebugLevel ddp_debug_level_;
   // Mapping of variable index to fully qualified name of model to notify users
   // about errors when certain parameters do not get gradient.
   std::unordered_map<size_t, std::string> param_names_;
+  // Variable indices stored sequentially in order of when the gradient is ready
+  // for the current backwards pass.
+  std::vector<int> grad_ready_order_indices_;
+  // Bytes capacity of first bucket, can be configured by user
+  int64_t first_bucket_bytes_cap_;
   // Per iteration set of parameter indices that have been marked ready.
   std::unordered_set<size_t> perIterationReadyParams_;
   // Retrieves parameter names that have not been marked as ready as part of
@@ -527,6 +581,8 @@ class TORCH_API Reducer {
   // Raises appropriate error if mark_variable_ready is called on the same
   // variable twice, which is unexpected.
   void checkAndRaiseMarkedTwiceError(size_t curVariableIndex);
+  // Retrieves parameter corresponding to the given VariableIndex.
+  at::Tensor& get_param_from_index(size_t index);
 
   // Cached bucket index to model parameter mapping. Populated after buckets
   // are rebuilt after which this mapping is static.

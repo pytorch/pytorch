@@ -840,6 +840,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return key_set_.has(DispatchKey::XLA);
   }
 
+  bool is_lazy() const {
+    return key_set_.has(DispatchKey::Lazy);
+  }
+
   bool is_hip() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
@@ -867,6 +871,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   bool is_mlc() const {
     return key_set_.has(DispatchKey::MLC);
+  }
+
+  bool is_ort() const {
+    return key_set_.has(DispatchKey::ORT);
   }
 
   // TODO: remove this once we don't automatically enabled Autograd dispatch
