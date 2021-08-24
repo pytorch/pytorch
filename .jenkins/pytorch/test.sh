@@ -142,12 +142,14 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX512-* || $TEST_CONFIG == 'nogpu_NO_AVX
   export ATEN_CPU_CAPABILITY=avx2
 fi
 
-# NOTE: file_diff_from_base is currently bugged for GHA due to an issue finding a merge base for ghstack PRs
-#       see https://github.com/pytorch/pytorch/issues/60111
-#       change it back to PR_NUMBER when issue is fixed.
-if [ -n "$CIRCLE_PR_NUMBER" ] && [[ "$BUILD_ENVIRONMENT" != *coverage* ]]; then
+if [[ "$BUILD_ENVIRONMENT" != *coverage* ]]; then
+  # if PR_NUMBER exist, use it to grab PR contents.
   DETERMINE_FROM=$(mktemp)
-  file_diff_from_base "$DETERMINE_FROM"
+  if [ -n "$PR_NUMBER" ]; then
+    get_pr_change_files "$PR_NUMBER" "$DETERMINE_FROM"
+  else
+    file_diff_from_base "$DETERMINE_FROM"
+  fi
 fi
 
 test_python_legacy_jit() {
