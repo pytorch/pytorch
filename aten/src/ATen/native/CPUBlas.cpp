@@ -73,17 +73,6 @@ bool use_blas_gemm(
       (ldc >= std::max(int64_t{1}, m)));
 }
 
-#if AT_BUILD_WITH_BLAS()
-char to_blas(TransposeType trans) {
-  switch (trans) {
-    case TransposeType::Transpose: return 't';
-    case TransposeType::NoTranspose: return 'n';
-    case TransposeType::ConjTranspose: return 'c';
-  }
-  TORCH_INTERNAL_ASSERT(false, "Invalid transpose type");
-}
-#endif  // AT_BUILD_WITH_BLAS
-
 #ifdef USE_FBGEMM
 fbgemm::matrix_op_t to_fbgemm(TransposeType trans) {
   switch (trans) {

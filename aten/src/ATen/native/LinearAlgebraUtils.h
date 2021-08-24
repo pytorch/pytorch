@@ -12,11 +12,22 @@
 
 namespace at { namespace native {
 
+// Used as an interface between the different BLAS-like libraries
 enum class TransposeType {
   NoTranspose,
   Transpose,
   ConjTranspose,
 };
+
+// Transforms TransposeType into the BLAS / LAPACK format
+static char to_blas(TransposeType trans) {
+  switch (trans) {
+    case TransposeType::Transpose: return 'T';
+    case TransposeType::NoTranspose: return 'N';
+    case TransposeType::ConjTranspose: return 'C';
+  }
+  TORCH_INTERNAL_ASSERT(false, "Invalid transpose type");
+}
 
 /*
  * Clones a Tensor so that the following conditions hold:
@@ -285,8 +296,9 @@ static inline void checkAllSameDim(TensorList tensors, int64_t dim) {
   }
 }
 
-static inline std::tuple<Tensor,Tensor> _linalg_broadcast_batch_dims(const Tensor& arg1, const Tensor& arg2, const char* name, const bool check_errors=true) {
-  if (check_errors) {
+static inline std::tuple<Tensor,Tensor> _linalg_broadcast_batch_dims(const Tensor& arg1, const Tensor& arg2, const char* name) {
+  // If there's no name we assume we don't want to check the errors
+  if (name != nullptr) {
     linearSolveCheckInputs(arg1, arg2, name);
   }
 
