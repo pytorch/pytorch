@@ -4,6 +4,7 @@
 #include <ATen/cuda/CUDASparseDescriptors.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/sparse/cuda/SparseBlasImpl.h>
+#include <ATen/native/sparse/cuda/SparseBlasLegacy.h>
 
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/util/MaybeOwned.h>
@@ -18,14 +19,39 @@ namespace {
 
 c10::MaybeOwned<Tensor> inline prepare_dense_matrix_for_cusparse(
     const Tensor& tensor) {
-  if (tensor.is_non_overlapping_and_dense() ||
-      is_blas_compatible_row_major_order(tensor) ||
+#if defined(CUDA_VERSION) && CUDA_VERSION < 11000
+  // CUDA < 11.0 doesn't support row-major layout, return column-major in this case
+  if (is_blas_compatible_column_major_order(tensor)) {
+    return c10::MaybeOwned<Tensor>::borrowed(tensor);
+  } else {
+    return c10::MaybeOwned<Tensor>::owned(cloneBatchedColumnMajor(tensor));
+  }
+#else
+  if (is_blas_compatible_row_major_order(tensor) ||
       is_blas_compatible_column_major_order(tensor)) {
     return c10::MaybeOwned<Tensor>::borrowed(tensor);
   } else {
     return c10::MaybeOwned<Tensor>::owned(
         tensor.clone(at::MemoryFormat::Contiguous));
   }
+#endif
+}
+
+void addmm_out_legacy(
+    const at::sparse_csr::SparseCsrTensor& mat1,
+    const Tensor& mat2,
+    const Scalar& beta,
+    const Scalar& alpha,
+    const Tensor& result) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(mat1.is_sparse_csr());
+  auto nnz = mat1._nnz();
+  auto m = mat1.size(0);
+  auto k = mat1.size(1);
+  auto n = mat2.size(1);
+  auto crow_indices = mat1.crow_indices().to(kInt);
+  auto col_indices = mat1.col_indices().to(kInt);
+  auto values = mat1.values();
+  at::native::s_addmm_out_csr_sparse_dense_cuda_worker(nnz, m, n, k, result, beta, result, alpha, crow_indices, col_indices, values, mat2);
 }
 
 c10::MaybeOwned<Tensor> inline prepare_dense_vector_for_cusparse(
@@ -47,11 +73,7 @@ void addmm_out_sparse_csr(
     const Scalar& alpha,
     const Tensor& result) {
 #if !AT_USE_CUSPARSE_GENERIC_API()
-  TORCH_CHECK(
-      false,
-      "Calling addmm on a sparse GPU tensor requires compiling ",
-      "PyTorch with CUDA 10.2+ (CUDA 11+ on Windows). ",
-      "Please use PyTorch built with newer CUDA version.");
+  addmm_out_legacy(mat1, mat2, beta, alpha, result);
 #else
   c10::MaybeOwned<Tensor> result_ = prepare_dense_matrix_for_cusparse(result);
   c10::MaybeOwned<Tensor> mat2_ = prepare_dense_matrix_for_cusparse(mat2);
@@ -83,8 +105,23 @@ void addmm_out_sparse_csr(
   cusparseOperation_t opB = transpose_B ? CUSPARSE_OPERATION_TRANSPOSE
                                         : CUSPARSE_OPERATION_NON_TRANSPOSE;
 
+  // CUDA < 11.0 doesn't support 64-bit indices and doesn't raise an error about this
+  // silently returning incorrect results
+#if defined(CUDA_VERSION) && CUDA_VERSION < 11000
+  auto mat1_32 = at::native::_sparse_csr_tensor_unsafe(
+      mat1.crow_indices().to(kInt),
+      mat1.col_indices().to(kInt),
+      mat1.values(),
+      mat1.sizes(),
+      mat1.scalar_type(),
+      mat1.layout(),
+      mat1.device());
+  auto descA = at::cuda::sparse::CuSparseSpMatCsrDescriptor(mat1_32);
+#else
   // TODO: update this to support COO sparse layout
   auto descA = at::cuda::sparse::CuSparseSpMatCsrDescriptor(mat1);
+#endif
+
   auto descB = at::cuda::sparse::CuSparseDnMatDescriptor(
       transpose_B ? mat2_->transpose(-2, -1) : *mat2_);
   auto descC = at::cuda::sparse::CuSparseDnMatDescriptor(*result_);
