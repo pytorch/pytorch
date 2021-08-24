@@ -292,6 +292,7 @@ void set_default_tensor_type(PyTensorType* type) {
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   default_tensor_type = type;
   at::set_default_dtype(scalarTypeToTypeMeta(type->get_scalar_type()));
+  at::_set_default_device(at::Device(backendToDeviceType(dispatchKeyToBackend(type->get_dispatch_key()))));
 
   auto torch_module = THPObjectPtr(PyImport_ImportModule("torch"));
   if (!torch_module) throw python_error();

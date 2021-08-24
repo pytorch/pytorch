@@ -6,6 +6,7 @@ static auto default_dtype = caffe2::TypeMeta::Make<float>();
 static auto default_dtype_as_scalartype = default_dtype.toScalarType();
 static auto default_complex_dtype =
     caffe2::TypeMeta::Make<c10::complex<float>>();
+static auto default_device = c10::Device(kCPU);
 
 void set_default_dtype(caffe2::TypeMeta dtype) {
   default_dtype = dtype;
@@ -31,5 +32,12 @@ ScalarType get_default_dtype_as_scalartype() {
 }
 const caffe2::TypeMeta get_default_complex_dtype() {
   return default_complex_dtype;
+}
+
+void _set_default_device(Device device) {
+  default_device = device;
+}
+Device _get_default_device() {
+  return default_device;
 }
 } // namespace c10

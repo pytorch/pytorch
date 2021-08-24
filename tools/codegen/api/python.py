@@ -707,7 +707,7 @@ def signature(f: NativeFunction, *, method: bool = False, pyi: bool = False) -> 
         ))
         tensor_options_args.append(PythonArgument(
             name='device',
-            type=BaseType(BaseTy.Device),
+            type=Optional(BaseType(BaseTy.Device)),
             default='None',
             default_init='self.device()' if is_like_or_new_function else None,
         ))
@@ -1087,7 +1087,7 @@ def arg_parser_output_exprs(
 # argument name to type for scattered tensor options fields
 TENSOR_OPTIONS_FIELDS = {
     'dtype': 'ScalarType?',
-    'device': 'Device',
+    'device': 'Device?',
     'layout': 'Layout?',
     'pin_memory': 'bool',
     'requires_grad': 'bool',

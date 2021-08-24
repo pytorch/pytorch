@@ -38,7 +38,7 @@ inline Layout layout_or_default(c10::optional<Layout> layout) {
 }
 
 inline Device device_or_default(c10::optional<Device> device) {
-  return value_or_else(device, [] { return Device(kCPU); });
+  return value_or_else(device, [] { return _get_default_device(); });
 }
 
 inline bool pinned_memory_or_default(c10::optional<bool> pinned_memory) {
