@@ -145,13 +145,6 @@ def register_module_full_backward_hook(
         This adds global state to the `nn.module` module
         and it is only intended for debugging/profiling purposes.
 
-        The current implementation will not have the presented behavior
-        for complex :class:`Module` that perform many operations.
-        In some failure cases, :attr:`grad_input` and :attr:`grad_output` will only
-        contain the gradients for a subset of the inputs and outputs.
-        For such :class:`Module`, you should use :func:`torch.Tensor.register_hook`
-        directly on a specific input or output to get the required gradients.
-
     The hook will be called every time the gradients with respect to module
     inputs are computed. The hook should have the following signature::
 
@@ -164,6 +157,10 @@ def register_module_full_backward_hook(
     as positional arguments and all kwarg arguments will not appear in the hook. Entries
     in :attr:`grad_input` and :attr:`grad_output` will be ``None`` for all non-Tensor
     arguments.
+
+    For technical reasons, when this hook is applied to a Module, its forward function will
+    receive a view of each Tensor passed to the Module. Similarly the caller will receive a view
+    of each Tensor returned by the Module's forward function.
 
     Global hooks are called before hooks registered with `register_backward_hook`
 
@@ -764,12 +761,16 @@ class Module:
         This can be called as
 
         .. function:: to(device=None, dtype=None, non_blocking=False)
+           :noindex:
 
         .. function:: to(dtype, non_blocking=False)
+           :noindex:
 
         .. function:: to(tensor, non_blocking=False)
+           :noindex:
 
         .. function:: to(memory_format=torch.channels_last)
+           :noindex:
 
         Its signature is similar to :meth:`torch.Tensor.to`, but only accepts
         floating point or complex :attr:`dtype`\ s. In addition, this method will
@@ -902,6 +903,10 @@ class Module:
         as positional arguments and all kwarg arguments are ignored. Entries
         in :attr:`grad_input` and :attr:`grad_output` will be ``None`` for all non-Tensor
         arguments.
+
+        For technical reasons, when this hook is applied to a Module, its forward function will
+        receive a view of each Tensor passed to the Module. Similarly the caller will receive a view
+        of each Tensor returned by the Module's forward function.
 
         .. warning ::
             Modifying inputs or outputs inplace is not allowed when using backward hooks and

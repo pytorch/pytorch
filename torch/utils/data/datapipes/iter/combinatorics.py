@@ -31,8 +31,7 @@ class SamplerIterDataPipe(IterDataPipe[T_co]):
         self.sampler_args = () if sampler_args is None else sampler_args
         self.sampler_kwargs = {} if sampler_kwargs is None else sampler_kwargs
         # https://github.com/python/mypy/pull/9629 will solve
-        self.sampler = sampler(data_source=self.datapipe, *self.sampler_args,
-                               **self.sampler_kwargs)  # type: ignore[misc]
+        self.sampler = sampler(data_source=self.datapipe, *self.sampler_args, **self.sampler_kwargs)  # type: ignore[misc]
 
     def __iter__(self) -> Iterator[T_co]:
         return iter(self.sampler)
@@ -45,8 +44,8 @@ class SamplerIterDataPipe(IterDataPipe[T_co]):
 
 
 @functional_datapipe('shuffle')
-class ShuffleIterDataPipe(IterDataPipe[T_co]):
-    r""" :class:`ShuffleIterDataPipe`
+class ShufflerIterDataPipe(IterDataPipe[T_co]):
+    r""" :class:`ShufflerIterDataPipe`
 
     Iterable DataPipe to shuffle the input DataPipe with a buffer. The buffer
     with `buffer_size` is filled with elements from the datapipe first. Then,
