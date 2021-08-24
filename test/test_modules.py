@@ -110,7 +110,7 @@ class TestModule(TestCase):
 
     @modules(module_db)
     def test_repr(self, device, dtype, module_info):
-        # Test module can be represted with repr and str without errors.
+        # Test module can be represented with repr and str without errors.
         module_cls = module_info.module_cls
         module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
                                                        requires_grad=False)
