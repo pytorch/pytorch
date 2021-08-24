@@ -211,7 +211,7 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
     {"CUDA", c10::DispatchKey::CUDA},
     {"HIP", c10::DispatchKey::HIP},
     {"FPGA", c10::DispatchKey::FPGA},
-    {"MSNPU", c10::DispatchKey::MSNPU},
+    {"ORT", c10::DispatchKey::ORT},
     {"XLA", c10::DispatchKey::XLA},
     {"MLC", c10::DispatchKey::MLC},
     {"Vulkan", c10::DispatchKey::Vulkan},
