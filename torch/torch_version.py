@@ -55,8 +55,15 @@ class TorchVersion(str):
             # Fall back to regular string comparison if dealing with an invalid
             # version like 'parrot'
             return super().__gt__(cmp)
-
-
+    
+    def __lt__(self, cmp):
+        try:
+            return Version(self).__lt__(self._convert_to_version(cmp))
+        except InvalidVersion:
+            # Fall back to regular string comparison if dealing with an invalid
+            # version like 'parrot'
+            return super().__lt__(cmp)
+        
     def __eq__(self, cmp):
         try:
             return Version(self).__eq__(self._convert_to_version(cmp))
@@ -64,6 +71,22 @@ class TorchVersion(str):
             # Fall back to regular string comparison if dealing with an invalid
             # version like 'parrot'
             return super().__eq__(cmp)
+    
+    def __ge__(self, cmp):
+        try:
+            return Version(self).__ge__(self._convert_to_version(cmp))
+        except InvalidVersion:
+            # Fall back to regular string comparison if dealing with an invalid
+            # version like 'parrot'
+            return super().__ge__(cmp)
+
+    def __le__(self, cmp):
+        try:
+            return Version(self).__le__(self._convert_to_version(cmp))
+        except InvalidVersion:
+            # Fall back to regular string comparison if dealing with an invalid
+            # version like 'parrot'
+            return super().__le__(cmp)
 
 
     def __ge__(self, cmp):
