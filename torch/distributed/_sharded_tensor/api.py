@@ -154,8 +154,10 @@ class TensorInitParams(object):
     """ Container for list of common params to create new local tensor. """
 
     create_op: CreateOp
+
     # needed when create_op is FULL
     fill_value: Number = field(default=None)
+
     tensor_properties: TensorProperties = field(
         default=TensorProperties(dtype=torch.get_default_dtype(),
                                  layout=torch.strided,
