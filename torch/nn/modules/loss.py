@@ -1348,15 +1348,15 @@ class MultiMarginLoss(_WeightedLoss):
             specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
 
     Shape:
-        - Input: :math:`(N, C)` where `N` is the batch size and `C` is the number of classes.
-        - Target: :math:`(N)` where each value is :math:`0 \leq \text{targets}[i] \leq C-1`.
+        - Input: :math:`(N, C)` or :math:`(C)`, where :math:`N` is the batch size and :math:`C` is the number of classes.
+        - Target: :math:`(N)` or :math:`()`, where each value is :math:`0 \leq \text{targets}[i] \leq C-1`.
         - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(N)`.
 
     Examples::
 
         >>> loss = nn.MultiMarginLoss()
-        >>> x = torch.FloatTensor([[0.1, 0.2, 0.4, 0.8]])
-        >>> y = torch.LongTensor([3])
+        >>> x = torch.tensor([[0.1, 0.2, 0.4, 0.8]])
+        >>> y = torch.tensor([3])
         >>> loss(x, y)
         >>> # 0.25 * ((1-(0.8-0.1)) + (1-(0.8-0.2)) + (1-(0.8-0.4)))
         tensor(0.3250)
