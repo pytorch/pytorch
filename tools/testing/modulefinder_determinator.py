@@ -176,7 +176,6 @@ def get_dep_modules(test: str) -> Set[str]:
     if test in _DEP_MODULES_CACHE:
         return _DEP_MODULES_CACHE[test]
 
-    
     test_location = REPO_ROOT / "test" / f"{test}.py"
     finder = modulefinder.ModuleFinder(
         # Ideally exclude all third party modules, to speed up calculation.
