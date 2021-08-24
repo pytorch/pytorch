@@ -15,6 +15,7 @@ def infer_symbolic_types(traced):
     mgu = unify_eq(r.constraints)
     substitute_all_types(traced.graph, mgu)
 
+    r = Refine(traced)
     r.refine()
     mgu = unify_eq(r.constraints)
     substitute_all_types(traced.graph, mgu)

@@ -109,6 +109,7 @@ class AnnotationsTest(unittest.TestCase):
         t2 = TensorType((2, 3, 4))
         assert broadcast_types(t1, t2) == (TensorType((1, 2, 3, Dyn)), TensorType((1, 2, 3, 4)))
 
+@skipIfNoSympy
 class TypeCheckerTest(unittest.TestCase):
 
     def test_type_check_add_with_broadcast(self):
@@ -810,7 +811,6 @@ class TypeCheckerTest(unittest.TestCase):
                 if n.op == 'output':
                     assert is_consistent(n.type, TensorType(b.size()))
 
-    @skipIfNoSympy
     @skipIfNoTorchVision
     def test_resnet50(self):
         gm_run = symbolic_trace(resnet50())
@@ -854,7 +854,6 @@ class TypeCheckerTest(unittest.TestCase):
             batch_sizes.add(n.type.__args__[0])
         assert (len(batch_sizes) == 1)
 
-    @skipIfNoSympy
     def test_type_check_batch_norm_symbolic(self):
         class BasicBlock(torch.nn.Module):
 
@@ -886,7 +885,6 @@ class TypeCheckerTest(unittest.TestCase):
         for n in graph.nodes:
             assert n.type == next(my_types)
 
-    @skipIfNoSympy
     def test_symbolic_add_with_broadcast(self):
         class M(torch.nn.Module):
             def forward(self, x: TensorType((1, 2, 3, Dyn)), y: TensorType((2, 3, 4))):
@@ -915,7 +913,6 @@ class TypeCheckerTest(unittest.TestCase):
         for n in symbolic_traced.graph.nodes:
             assert n.type == next(expected_iter)
 
-    @skipIfNoSympy
     def test_symbolic_add_with_broadcast_2(self):
         class M(torch.nn.Module):
             def forward(self, x: TensorType((1, 2)), y: TensorType((Dyn, 2))):
@@ -938,7 +935,6 @@ class TypeCheckerTest(unittest.TestCase):
             assert n.type == next(expected_iter)
 
 
-    @skipIfNoSympy
     def test_type_check_conv2D_types(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self, inplanes, planes, stride=1):
