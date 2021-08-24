@@ -86,13 +86,13 @@ def _dequantize_tensor_list(tensor_list, qtype, quant_loss=None):
     return dequantized_tensor_list
 
 def _quantized_a2a_single_handler(tensors,
-                                 input_tensor,
-                                 qtype,
-                                 group=None,
-                                 async_op=None,
-                                 quant_loss=None,
-                                 out_splits=None,
-                                 in_splits=None):
+                                  input_tensor,
+                                  qtype,
+                                  group=None,
+                                  async_op=None,
+                                  quant_loss=None,
+                                  out_splits=None,
+                                  in_splits=None):
     input_tensors = _quantize_tensor(input_tensor, qtype)
     out_tensors = _quantize_tensor(tensors, qtype)
     dist.all_to_all_single(out_tensors, input_tensors, out_splits, in_splits, group=group)
@@ -100,11 +100,11 @@ def _quantized_a2a_single_handler(tensors,
         tensors[i] = t
 
 def _quantized_a2a_handler(tensors,
-                          input_tensor,
-                          qtype,
-                          group=None,
-                          async_op=None,
-                          quant_loss=None):
+                           input_tensor,
+                           qtype,
+                           group=None,
+                           async_op=None,
+                           quant_loss=None):
     input_tensors = _quantize_tensor_list(input_tensor, qtype)
     out_tensors = _quantize_tensor_list(tensors, qtype)
     dist.all_to_all(out_tensors, input_tensors, group=group, async_op=async_op)
@@ -112,11 +112,11 @@ def _quantized_a2a_handler(tensors,
         tensors[i] = t
 
 def _quantized_all_gather_handler(tensors,
-                                 input_tensor,
-                                 qtype,
-                                 group=None,
-                                 async_op=None,
-                                 quant_loss=None):
+                                  input_tensor,
+                                  qtype,
+                                  group=None,
+                                  async_op=None,
+                                  quant_loss=None):
 
     input_tensors = _quantize_tensor(input_tensor, qtype)
     out_tensors = _quantize_tensor_list(tensors, qtype)
