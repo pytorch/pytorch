@@ -64,8 +64,7 @@ jobs:
       - name: Clone pytorch/builder
         uses: actions/checkout@v2
         with:
-          repository: peterbell10/builder
-          ref: randomtemp-launcher
+          repository: pytorch/builder
           path: builder
       - name: Generate version string
         working-directory: pytorch/
