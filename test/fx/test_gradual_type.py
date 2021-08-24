@@ -966,5 +966,44 @@ class TypeCheckerTest(unittest.TestCase):
                 assert isinstance(n.type.__args__[2], sympy.floor)
                 assert isinstance(n.type.__args__[3], sympy.floor)
 
+
+    def test_type_check_symbolic_inferenceconv2D_maxpool2d_flatten(self):
+
+        class BasicBlock(torch.nn.Module):
+            def __init__(self):
+                super(BasicBlock, self).__init__()
+
+                self.conv1 = torch.nn.Conv2d(3, 6, 5)
+                self.pool = torch.nn.MaxPool2d(2, 2)
+                self.conv2 = torch.nn.Conv2d(6, 16, 5)
+                self.fc1 = torch.nn.Linear(5, 120)
+                self.pool2 = torch.nn.AdaptiveAvgPool2d((6, 7))
+
+            def forward(self, x : TensorType((4, 3, Dyn, Dyn))):
+                out = self.conv1(x)
+                out = self.pool(out)
+                out = self.conv2(out)
+                out = self.pool(out)
+                out = self.fc1(out)
+                out = self.pool2(out)
+                out = torch.flatten(out, 1)
+                return out
+
+        B = BasicBlock()
+        ast_rewriter = RewritingTracer()
+        traced = symbolic_trace(B)
+        tc = GraphTypeChecker({}, traced)
+        tc.type_check()
+        infer_symbolic_types(traced)
+
+        for n in traced.graph.nodes:
+            if n.target == 'conv1':
+                assert n.type == TensorType((4, 6, sympy.floor((sympy.symbols('~0') - 4)),
+                                             sympy.floor((sympy.symbols('~1') - 4))))
+
+            elif n.target == 'conv2':
+                assert n.type == TensorType((4, 16, sympy.floor((sympy.symbols('~4') - 4)),
+                                             sympy.floor((sympy.symbols('~5') - 4))))
+
 if __name__ == '__main__':
     unittest.main()

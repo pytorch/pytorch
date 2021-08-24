@@ -584,7 +584,6 @@ def linear_refinement_rule(n: Node):
 # todo needs review for addition. Is this constraint correct?
 @register_refinement_rule(BatchNorm2d)
 @register_refinement_rule(torch.nn.ReLU)
-@register_refinement_rule(torch.nn.AdaptiveAvgPool2d)
 def all_eq(n: Node):
     res = []
     assert isinstance(n.args[0], Node)
@@ -593,6 +592,18 @@ def all_eq(n: Node):
         args1 = arg_type.__args__
         args2 = n.type.__args__
         res = [Equality(args1[i], args2[i]) for i in range(len(args1))]
+    return res
+
+
+@register_refinement_rule(torch.nn.AdaptiveAvgPool2d)
+def first_two__eq(n: Node):
+    res = []
+    assert isinstance(n.args[0], Node)
+    arg_type = n.args[0].type
+    if isinstance(arg_type, TensorType) and isinstance(n.type, TensorType):
+        args1 = arg_type.__args__
+        args2 = n.type.__args__
+        res = [Equality(args1[0], args2[0]), Equality(args1[1], args2[1])]
     return res
 
 @register_refinement_rule(torch.add)
