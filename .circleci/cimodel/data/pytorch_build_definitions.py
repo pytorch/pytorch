@@ -417,6 +417,7 @@ def instantiate_configs(only_slow_gradcheck):
 
         if (
             compiler_name != "clang"
+            and not rocm_version
             and not is_libtorch
             and not is_vulkan
             and not is_pure_torch
