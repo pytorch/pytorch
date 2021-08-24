@@ -39,8 +39,7 @@ Tensor conv2d_clamp_run(
     const Tensor& input,
     const c10::intrusive_ptr<xnnpack::Conv2dOpContext>& op_context);
 
-std::tuple<IntArrayRef, c10::optional<IntArrayRef>, IntArrayRef, IntArrayRef, IntArrayRef, int64_t>
-unpack_prepacked_sizes_conv2d(const IValue ivalue);
+IValue unpack_prepacked_sizes_conv2d(const IValue ivalue);
 
 Tensor conv2d_transpose_clamp_run(
     const Tensor& input,

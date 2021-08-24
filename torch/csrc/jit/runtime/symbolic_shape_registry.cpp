@@ -37,10 +37,16 @@ const std::string shape_compute_functions =
           return expandedSizes
 
         def adaptive_avg_pool2d(self: List[int], out: List[int]):
-          # TODO: return out directly, list len refiner would need to
-          # annotate the List Type with len directly in IR
           assert len(out) == 2
-          return [out[0], out[1]]
+          assert len(self) == 3 or len(self) == 4
+          for i in range (1, len(self)):
+            assert self[i] != 0
+          shape: List[int] = []
+          for i in range(0, len(self) -2):
+            shape.append(self[i])
+          for elem in out:
+            shape.append(elem)
+          return shape
 
         # TODO: maybe make it customary that extra arguments are unused ?
         # TODO: return self directly
@@ -321,8 +327,11 @@ static const OperatorMap<std::string>& get_schema_to_function_graph() {
       {"aten::div.Scalar(Tensor self, Scalar other) -> Tensor", "unary_one_unused_input"},
       {"aten::gt.Tensor(Tensor self, Tensor other) -> Tensor", "broadcast"},
       {"aten::add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor", "broadcast_one_unused_input"},
+      {"aten::add_.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor", "broadcast_one_unused_input"},
       {"aten::add.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor", "unary_two_unused_inputs"},
       {"aten::hardtanh(Tensor self, Scalar min_val=-1, Scalar max_val=1) -> Tensor", "unary_two_unused_inputs"},
+      {"aten::hardswish_(Tensor self) -> Tensor", "unary"},
+      {"aten::hardsigmoid_(Tensor self) -> Tensor", "unary"},
       {"aten::adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor", "adaptive_avg_pool2d"},
       {"aten::mm(Tensor self, Tensor mat2) -> Tensor", "mm"},
       {"aten::dot(Tensor self, Tensor tensor) -> Tensor", "dot"},
