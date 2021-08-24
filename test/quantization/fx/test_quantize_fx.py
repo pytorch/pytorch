@@ -3073,7 +3073,10 @@ class TestQuantizeFxOps(QuantizationTestCase):
             if is_reference:
                 qlinear_fun = ns.call_function(torch.nn.functional.linear)
             else:
-                qlinear_fun = ns.call_function(torch.ops.quantized.linear_dynamic_fp16)
+                if has_relu:
+                   qlinear_fun = ns.call_function(torch.ops.quantized.linear_relu_dynamic_fp16)
+                else:
+                    qlinear_fun = ns.call_function(torch.ops.quantized.linear_dynamic_fp16)
             prepare_node_occurrence = {
                 # weight
                 ns.call_module(torch.quantization.PlaceholderObserver): 1
