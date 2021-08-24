@@ -51,9 +51,9 @@ inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema)
   return out;
 }
 
-inline int findFirstOutArg(const std::vector<Argument>& args) {
+inline size_t findFirstOutArg(const std::vector<Argument>& args) {
   // find the start of out args in the schema
-  for (int out_start_idx = args.size() - 1; out_start_idx >= 0;
+  for (size_t out_start_idx = args.size() - 1; out_start_idx >= 0;
        out_start_idx--) {
     if (!args.at(out_start_idx).is_out()) {
       return out_start_idx + 1;
@@ -133,11 +133,11 @@ inline bool FunctionSchema::isBackwardCompatibleWith(
   }
 
   // we want to test both out and default args seperately
-  int old_out_start_idx = findFirstOutArg(old.arguments());
-  int new_out_start_idx = findFirstOutArg(arguments());
+  size_t old_out_start_idx = findFirstOutArg(old.arguments());
+  size_t new_out_start_idx = findFirstOutArg(arguments());
 
   // make sure among the default args, they are backward compatible
-  for (int i = 0; i < old_out_start_idx; i++) {
+  for (size_t i = 0; i < old_out_start_idx; i++) {
     if (!arguments().at(i).isBackwardCompatibleWith(
           old.arguments().at(i), why_not)) {
       return false;
@@ -145,7 +145,7 @@ inline bool FunctionSchema::isBackwardCompatibleWith(
   }
 
   // // Validate that all new arguments provided has a default value
-  for (int i = old_out_start_idx; i < new_out_start_idx; ++i) {
+  for (size_t i = old_out_start_idx; i < new_out_start_idx; ++i) {
     if (!arguments().at(i).default_value()) {
       if (why_not) {
         *why_not
@@ -159,7 +159,7 @@ inline bool FunctionSchema::isBackwardCompatibleWith(
   }
 
   // now compare the out args
-  for (int i = old_out_start_idx; i < old.arguments().size(); i++) {
+  for (size_t i = old_out_start_idx; i < old.arguments().size(); i++) {
     if (!arguments()
              .at(i - old_out_start_idx + new_out_start_idx)
              .isBackwardCompatibleWith(old.arguments().at(i), why_not)) {
