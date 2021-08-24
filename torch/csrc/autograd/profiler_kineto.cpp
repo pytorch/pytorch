@@ -47,6 +47,7 @@ inline int64_t getTimeUs() {
 std::string shapesToStr(const std::vector<std::vector<int64_t>>& shapes);
 std::string stacksToStr(const std::vector<std::string>& stacks);
 std::string dtypesToStr(const std::vector<std::string>& types);
+std::vector<std::string> backTraceToVecStr(const std::string& bt);
 std::vector<std::string> inputTypes(const at::RecordFunction& fn);
 
 struct KinetoThreadLocalState : public ProfilerThreadLocalState {
