@@ -1141,7 +1141,6 @@ TORCH_IMPL_FUNC(gather_out)
 }
 
 Tensor gather_backward(const Tensor& grad, const Tensor& self, int64_t dim, const Tensor& index, bool sparse_grad) {
-  dim = at::maybe_wrap_dim(dim, self.dim());
   if (sparse_grad) {
     return at::_gather_sparse_backward(self, dim, index, grad);
   }
