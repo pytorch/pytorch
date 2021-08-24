@@ -45,7 +45,6 @@ if BACKEND == "gloo" or BACKEND == "nccl":
         def setUp(self):
             super(DistQuantizationTests, self).setUp()
             self._spawn_processes()
-            # WORLD_SIZE = int(os.environ["WORLD_SIZE"])
             torch.backends.cudnn.flags(allow_tf32=False).__enter__()
 
         def tearDown(self):
