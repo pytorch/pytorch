@@ -477,7 +477,10 @@ class record_function(ContextDecorator):
             return self.rec[0]
         else:
             raise RuntimeError(
-                "Malformed record_function.handle access, this only occurs if you access handle before __enter__ or after __exit__ of this context manager.")
+                "Malformed record_function.handle access, this only occurs if "
+                "you access handle before __enter__ or after __exit__ of this "
+                "context manager."
+            )
 
 
 class emit_nvtx(object):
