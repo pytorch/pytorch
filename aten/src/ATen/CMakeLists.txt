@@ -167,7 +167,7 @@ else()
 endif()
 
 # Metal
-if(APPLE AND USE_PYTORCH_METAL_EXPORT)
+if(USE_PYTORCH_METAL_EXPORT)
    # Add files needed from optimized_for_mobile
    set(all_cpu_cpp ${all_cpu_cpp} ${metal_cpp} ${metal_prepack_cpp})
 elseif(APPLE AND USE_PYTORCH_METAL)
@@ -448,16 +448,21 @@ install(FILES "${CMAKE_CURRENT_BINARY_DIR}/cmake-exports/ATenConfig.cmake"
 set(INSTALL_HEADERS ${base_h} ${ATen_CORE_HEADERS})
 if(NOT INTERN_BUILD_MOBILE)
   list(APPEND INSTALL_HEADERS ${native_h} ${native_cpu_h} ${native_ao_sparse_h} ${native_quantized_h} ${cuda_h} ${native_cuda_h} ${native_hip_h} ${cudnn_h} ${hip_h} ${miopen_h})
-  if(USE_PYTORCH_METAL_EXPORT OR USE_PYTORCH_METAL)
+  # Metal
+  if(USE_PYTORCH_METAL_EXPORT)
+    # Add files needed from exporting metal models(optimized_for_mobile)
+    list(APPEND INSTALL_HEADERS ${metal_h} ${metal_prepack_h})
+  elseif(APPLE AND USE_PYTORCH_METAL)
+    # Needed by Metal kernels
     list(APPEND INSTALL_HEADERS ${metal_h} ${native_metal_h})
+  else()
+    list(APPEND INSTALL_HEADERS ${metal_h})
   endif()
 else()
-  if(USE_PYTORCH_METAL)
-    if(IOS)
+  if(IOS AND USE_PYTORCH_METAL)
       list(APPEND INSTALL_HEADERS ${metal_h} ${native_metal_h})
-    else()
+  else()
       list(APPEND INSTALL_HEADERS ${metal_h} ${metal_prepack_h})
-    endif()
   endif()
 endif()
 
