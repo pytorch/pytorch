@@ -270,10 +270,9 @@ class TypeCheckerTest(unittest.TestCase):
     def test_type_check_batch_norm_2D(self):
         class BasicBlock(torch.nn.Module):
 
-            def __init__(self, inplanes, planes, norm_layer=None):
+            def __init__(self, inplanes, planes):
                 super(BasicBlock, self).__init__()
-                if norm_layer is None:
-                    norm_layer = torch.nn.BatchNorm2d
+                norm_layer = torch.nn.BatchNorm2d
                 self.bn1 = norm_layer(planes)
 
             def forward(self, x: TensorType((2, 2, 5, 4))):
@@ -302,10 +301,9 @@ class TypeCheckerTest(unittest.TestCase):
     def test_type_check_batch_norm_2D_false(self):
         class BasicBlock(torch.nn.Module):
 
-            def __init__(self, inplanes, planes, norm_layer=None):
+            def __init__(self, inplanes, planes):
                 super(BasicBlock, self).__init__()
-                if norm_layer is None:
-                    norm_layer = torch.nn.BatchNorm2d
+                norm_layer = torch.nn.BatchNorm2d
                 self.bn1 = norm_layer(planes)
 
             def forward(self, x: TensorType((2, 2, 5))):
@@ -325,10 +323,9 @@ class TypeCheckerTest(unittest.TestCase):
     def test_type_check_batch_norm_2D_broadcast(self):
         class BasicBlock(torch.nn.Module):
 
-            def __init__(self, inplanes, planes, norm_layer=None):
+            def __init__(self, inplanes, planes):
                 super(BasicBlock, self).__init__()
-                if norm_layer is None:
-                    norm_layer = torch.nn.BatchNorm2d
+                norm_layer = torch.nn.BatchNorm2d
                 self.bn1 = norm_layer(planes)
 
             def forward(self, x: Dyn):
@@ -363,10 +360,9 @@ class TypeCheckerTest(unittest.TestCase):
 
     def test_type_check_conv2D(self):
         class BasicBlock(torch.nn.Module):
-            def __init__(self, inplanes, planes, stride=1, norm_layer=None):
+            def __init__(self, inplanes, planes, stride=1):
                 super(BasicBlock, self).__init__()
-                if norm_layer is None:
-                    norm_layer = torch.nn.BatchNorm2d
+                norm_layer = torch.nn.BatchNorm2d
                 self.conv1 = conv3x3(inplanes, planes, stride)
                 self.bn1 = norm_layer(planes)
 
@@ -394,10 +390,9 @@ class TypeCheckerTest(unittest.TestCase):
 
     def test_type_check_conv2D_2(self):
         class BasicBlock(torch.nn.Module):
-            def __init__(self, inplanes, planes, stride=1, norm_layer=None):
+            def __init__(self, inplanes, planes, stride=1):
                 super(BasicBlock, self).__init__()
-                if norm_layer is None:
-                    norm_layer = torch.nn.BatchNorm2d
+                norm_layer = torch.nn.BatchNorm2d
                 self.conv1 = conv3x3(inplanes, planes, stride)
                 self.bn1 = norm_layer(planes)
 
@@ -528,10 +523,9 @@ class TypeCheckerTest(unittest.TestCase):
             expansion = 1
 
             def __init__(self, inplanes, planes, stride=1, downsample=None, groups=1,
-                         base_width=64, dilation=1, norm_layer=None):
+                         base_width=64, dilation=1):
                 super(BasicBlock, self).__init__()
-                if norm_layer is None:
-                    norm_layer = torch.nn.BatchNorm2d
+                norm_layer = torch.nn.BatchNorm2d
                 if groups != 1 or base_width != 64:
                     raise ValueError('BasicBlock only supports groups=1 and base_width=64')
                 if dilation > 1:
@@ -864,10 +858,9 @@ class TypeCheckerTest(unittest.TestCase):
     def test_type_check_batch_norm_symbolic(self):
         class BasicBlock(torch.nn.Module):
 
-            def __init__(self, inplanes, planes, norm_layer=None):
+            def __init__(self, inplanes, planes):
                 super(BasicBlock, self).__init__()
-                if norm_layer is None:
-                    norm_layer = torch.nn.BatchNorm2d
+                norm_layer = torch.nn.BatchNorm2d
                 self.bn1 = norm_layer(planes)
 
             def forward(self, x: Dyn):
@@ -948,10 +941,9 @@ class TypeCheckerTest(unittest.TestCase):
     @skipIfNoSympy
     def test_type_check_conv2D_types(self):
         class BasicBlock(torch.nn.Module):
-            def __init__(self, inplanes, planes, stride=1, norm_layer=None):
+            def __init__(self, inplanes, planes, stride=1):
                 super(BasicBlock, self).__init__()
-                if norm_layer is None:
-                    norm_layer = torch.nn.BatchNorm2d
+                norm_layer = torch.nn.BatchNorm2d
                 self.conv1 = conv3x3(inplanes, planes, stride)
                 self.bn1 = norm_layer(planes)
 
