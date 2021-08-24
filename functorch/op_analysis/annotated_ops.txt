@@ -144,7 +144,7 @@ isnan, composite pointwise
 isreal, composite pointwise
 kl_div, reduction
 kron, composite pointwise
-kthvalue, misc
+kthvalue, reduction
 layer_norm, reduction
 nan_to_num, composite pointwise
 linear, composite matmul
@@ -177,8 +177,8 @@ matrix_exp, linalg
 max, reduction
 amax, reduction
 mean, reduction
-median, misc
-nanmedian, misc
+median, reduction
+nanmedian, reduction
 min, reduction
 amin, reduction
 mm, composite matmul
@@ -368,8 +368,8 @@ diag, view/reshape
 cross, misc
 triu, view/reshape
 tril, view/reshape
-tril_indices, view/reshape
-triu_indices, view/reshape
+tril_indices, factory
+triu_indices, factory
 trace, reduction
 ne, composite pointwise
 not_equal, alias
