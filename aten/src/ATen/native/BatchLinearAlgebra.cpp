@@ -1567,13 +1567,10 @@ std::tuple<Tensor, Tensor, Tensor> _lu_with_info(const Tensor& self, bool comput
   Tensor lu = cloneBatchedColumnMajor(self);
   lu_stub(self.device().type(), lu, pivots_tensor, infos_tensor, compute_pivots);
 
-  if (check_errors) {
-    if (self.dim() > 2) {
-      batchCheckErrors(infos_tensor, "lu", /*allow_singular=*/true);
-    } else {
-      singleCheckErrors(infos_tensor.item<int64_t>(), "lu", /*allow_singular=*/true);
-    }
-  }
+  // check_errors does nothing since https://github.com/pytorch/pytorch/pull/28608
+  // see https://github.com/pytorch/pytorch/pull/28608/files#r339365219
+  // TODO: remove check_errors argument
+
   return std::make_tuple(lu, pivots_tensor, infos_tensor);
 }
 

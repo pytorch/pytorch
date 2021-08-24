@@ -214,61 +214,66 @@ static inline void squareCheckInputs(const Tensor& self) {
 }
 
 /*
+ * Given a info int, obtained after a single operation, this function check if the computation
+ * has been successful (info = 0) or not, and report in case of the latter.
+ */
+static inline void singleCheckErrors(int64_t info, const char* name, int64_t batch_id=-1) {
+  std::stringstream batch_ss;
+  if (batch_id >= 0) {
+    batch_ss << ": For batch " << batch_id;
+  }
+  auto batch_string = batch_ss.str();
+  if (info < 0) {
+    TORCH_CHECK(false, name, batch_string,
+        ": Argument ", -info, " has illegal value.");
+  } else if (info > 0) {
+    if (strstr(name, "inv")) {
+      // inv, inverse, cholesky_inverse, etc.
+      TORCH_CHECK(false, name, batch_string,
+          ": the diagonal element ", info, " is zero, the inversion could not be completed because the input matrix is singular.");
+    } else if (strstr(name, "solve")) {
+      // solve, linalg_solve, cholesky_solve, etc.
+      TORCH_CHECK(false, name, batch_string,
+          ": the diagonal element ", info, " is zero, the solve could not be completed because the input matrix is singular.");
+    } else if (strstr(name, "cholesky")) {
+      TORCH_CHECK(false, name, batch_string,
+          ": the factorization could not be completed because the input is not positive-definite (the leading minor of order ", info, " is not positive-definite).");
+    } else if (strstr(name, "svd")) {
+      TORCH_CHECK(false, name, batch_string,
+          ": the algorithm failed to converge because the input matrix is ill-conditioned or has too many repeated singular values (error code: ", info, ").");
+    } else if (strstr(name, "eig") || strstr(name, "syevd")) {
+      TORCH_CHECK(false, name, batch_string,
+          ": the algorithm failed to converge because the input matrix is ill-conditioned or has too many repeated eigenvalues (error code: ", info, ").");
+    } else if (strstr(name, "lstsq")) {
+      TORCH_CHECK(false, name, batch_string,
+          ": the least squares solution could not be computed because the input matrix does not have full rank (error code: ", info, ").");
+    } else {
+      TORCH_INTERNAL_ASSERT(false, name, ": Unknown error code: ", info, ".");
+    }
+  }
+}
+
+/*
  * Given a vector of int64_t infos, obtained after a batch operations,
  * this function checks if the computation over all these batches has been
  * successful (info = 0) or not, and report in case of the latter.
  */
-static inline void batchCheckErrors(std::vector<int64_t>& infos, const char* name, bool allow_singular=false) {
+static inline void batchCheckErrors(const std::vector<int64_t>& infos, const char* name) {
   for (size_t i = 0; i < infos.size(); i++) {
     auto info = infos[i];
-    if (info < 0) {
-      AT_ERROR(name, ": For batch ", i, ": Argument ", -info, " has illegal value");
-    } else if (info > 0) {
-      if (strstr(name, "svd")) {
-        AT_ERROR(name, ": the updating process of SBDSDC did not converge (error: ", info, ")");
-      } else if (strstr(name, "symeig") || strstr(name, "syevd")) {
-        AT_ERROR(name, ": For batch ", i, ": the algorithm failed to converge; ", info,
-                 " off-diagonal elements of an intermediate tridiagonal form did not converge to zero.");
-      } else if (!allow_singular) {
-        AT_ERROR(name, ": For batch ", i, ": U(", info, ",", info, ") is zero, singular U.");
-      }
-    }
+    singleCheckErrors(info, name, i);
   }
 }
 
 /*
  * This is an overloaded case of the previous function for a tensor of infos.
  */
-static inline void batchCheckErrors(const Tensor& infos, const char* name, bool allow_singular=false, int info_per_batch=1) {
-  auto batch_size = infos.numel();
+static inline void batchCheckErrors(const Tensor& infos, const char* name) {
   auto infos_cpu = infos.to(at::kCPU);
   auto infos_data = infos_cpu.data_ptr<int>();
-  for (int64_t i = 0; i < batch_size; i++) {
+  for (int64_t i = 0; i < infos.numel(); i++) {
     auto info = infos_data[i];
-    if (info < 0) {
-      AT_ERROR(name, ": For batch ", i/info_per_batch, ": Argument ", -info, " has illegal value");
-    } else if (!allow_singular && info > 0) {
-      AT_ERROR(name, ": For batch ", i/info_per_batch, ": U(", info, ",", info, ") is zero, singular U.");
-    }
-  }
-}
-
-/*
- * Given a info int, obtained after a single operation, this function check if the computation
- * has been successful (info = 0) or not, and report in case of the latter.
- */
-static inline void singleCheckErrors(int64_t info, const char* name, bool allow_singular=false) {
-  if (info < 0) {
-    AT_ERROR(name, ": Argument ", -info, " has illegal value");
-  } else if (info > 0) {
-    if (strstr(name, "svd")) {
-      AT_ERROR(name, ": the updating process of SBDSDC did not converge (error: ", info, ")");
-    } else if (strstr(name, "eig")) { // this catches both "eig" and "symeig"
-      AT_ERROR(name, ": the algorithm failed to converge; ", info,
-               " off-diagonal elements of an intermediate tridiagonal form did not converge to zero.");
-    } else if (!allow_singular) {
-      AT_ERROR(name, ": U(", info, ",", info, ") is zero, singular U.");
-    }
+    singleCheckErrors(info, name, i);
   }
 }
 
