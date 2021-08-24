@@ -1,3 +1,5 @@
+assert False
+
 import os
 import tempfile
 
