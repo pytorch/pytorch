@@ -4,10 +4,9 @@ import torch.nn.functional as F
 from typing import Optional, Dict, Any
 from torch.nn.common_types import _size_1_t
 from torch.nn.modules.utils import _single
-from .utils import _init_weight_qparams
 from .utils import _quantize_and_dequantize_weight
 from .utils import _save_weight_qparams
-from .utils import _load_weight_qparams
+from .utils import _get_weight_qparam_keys
 
 class _ConvNd(torch.nn.modules.conv._ConvNd):
     """ A reference version of nn.quantized.Conv2d
@@ -23,10 +22,34 @@ class _ConvNd(torch.nn.modules.conv._ConvNd):
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
-        _load_weight_qparams(self, state_dict)
+        for key in _get_weight_qparam_keys(state_dict, prefix):
+            setattr(self, key, state_dict[prefix + key])
+            state_dict.pop(prefix + key)
+
         super()._load_from_state_dict(
             state_dict, prefix, local_metadata, False,
             missing_keys, unexpected_keys, error_msgs)
+
+    def _init_weight_qparams(self, weight_qparams):
+        if weight_qparams is None:
+            weight_qparams = {
+                "qscheme": torch.per_tensor_affine,
+                "dtype": torch.quint8,
+                "scale": 1.0,
+                "zero_point": 0
+            }
+        self.weight_qscheme = weight_qparams["qscheme"]
+        self.weight_dtype = weight_qparams["dtype"]
+        assert self.weight_qscheme in [None, torch.per_tensor_affine, torch.per_channel_affine], \
+        Exception(f"qscheme: {self.weight_qscheme} is not support in reference quantized linear module")
+        if self.weight_qscheme is not None:
+            self.register_buffer("weight_scale", torch.tensor(weight_qparams["scale"]))
+            self.register_buffer("weight_zero_point", torch.tensor(weight_qparams["zero_point"]))
+            if self.weight_qscheme == torch.per_channel_affine:
+                self.register_buffer("weight_axis", torch.tensor(weight_qparams["axis"]))
+            else:
+                # added for TorchScriptability, not used
+                self.register_buffer("weight_axis", torch.tensor(0))
 
     def get_weight(self):
         return _quantize_and_dequantize_weight(
@@ -48,7 +71,7 @@ class Conv1d(_ConvNd, nn.Conv1d):
         nn.Conv1d.__init__(
             self, in_channels, out_channels, kernel_size, stride, padding, dilation,
             groups, bias, padding_mode)
-        _init_weight_qparams(self, weight_qparams)
+        self._init_weight_qparams(weight_qparams)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -78,6 +101,7 @@ class Conv2d(_ConvNd, nn.Conv2d):
         nn.Conv2d.__init__(
             self, in_channels, out_channels, kernel_size, stride, padding, dilation,
             groups, bias, padding_mode)
+        self._init_weight_qparams(weight_qparams)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -107,6 +131,7 @@ class Conv3d(_ConvNd, nn.Conv3d):
         nn.Conv3d.__init__(
             self, in_channels, out_channels, kernel_size, stride, padding, dilation,
             groups, bias, padding_mode)
+        self._init_weight_qparams(weight_qparams)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
