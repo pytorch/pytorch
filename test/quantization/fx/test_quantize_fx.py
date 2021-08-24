@@ -2900,18 +2900,24 @@ class TestQuantizeFx(QuantizationTestCase):
                 return x
 
         model = M().eval()
-        qconfig = {
-            "": default_dynamic_qconfig,
+
+        dynamic_quantized_ops = {
+            float16_dynamic_qconfig: torch.ops.quantized.linear_relu_dynamic_fp16,
+            default_dynamic_qconfig: torch.ops.quantized.linear_relu_dynamic
         }
-        m = prepare_fx(model, qconfig)
-        m = convert_fx(m)
-        m(torch.rand(5, 5))
-        node_list = [
-            ns.call_module(nniqd.LinearReLU),
-            ns.call_module(nniqd.LinearReLU),
-            ns.call_function(torch.ops.quantized.linear_relu_dynamic),
-        ]
-        self.checkGraphModuleNodes(m, expected_node_list=node_list)
+        for config in [float16_dynamic_qconfig, default_dynamic_qconfig]:
+            qconfig = {
+                "": config
+            }
+            m = prepare_fx(model, qconfig)
+            m = convert_fx(m)
+            m(torch.rand(5, 5))
+            node_list = [
+                ns.call_module(nniqd.LinearReLU),
+                ns.call_module(nniqd.LinearReLU),
+                ns.call_function(dynamic_quantized_ops[config]),
+            ]
+            self.checkGraphModuleNodes(m, expected_node_list=node_list)
 
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):

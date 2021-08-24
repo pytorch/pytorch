@@ -1002,8 +1002,11 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                             qlinear_op = torch.ops.quantized.linear_relu_dynamic
                         else:
                             qlinear_op = torch.ops.quantized.linear_dynamic
-                    else:  # TODO add support for fp16 + relu fusion in a later PR
-                        qlinear_op = torch.ops.quantized.linear_dynamic_fp16
+                    else:
+                        if self.relu_node:
+                            qlinear_op = torch.ops.quantized.linear_relu_dynamic_fp16
+                        else:
+                            qlinear_op = torch.ops.quantized.linear_dynamic_fp16
 
                     linear_input = load_arg(quantized=torch.float)(self.linear_node.args[0])
                     qlinear_args = (linear_input, packed_weight)  # type: ignore[assignment]
@@ -1013,8 +1016,6 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                     # TODO: may need to change the key to Node regenerate the map in each transformation,
                     # since we might not be able to rely on the name
                     node_name_to_scope[op_out.name] = node_name_to_scope[self.linear_node.name]
-                    if self.relu_node and weight_dtype is not torch.qint8:
-                        op_out = quantized_graph.create_node("call_function", torch.nn.functional.relu, (op_out,), {})
                     return op_out
                 else:
                     assert dtypes == (torch.float16, torch.float16, None)

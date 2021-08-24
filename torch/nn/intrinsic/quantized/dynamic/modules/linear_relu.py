@@ -29,10 +29,9 @@ class LinearReLU(nnqd.Linear):
             # TODO check if we should set reduce_rage = True by default here
             Y = torch.ops.quantized.linear_relu_dynamic(
                 x, self._packed_params._packed_params, reduce_range=True)
-        # TODO Support this in a later PR
-        # elif self._packed_params.dtype == torch.float16:
-        #     Y = torch.ops.quantized.linear_relu_dynamic_fp16(
-        #         x, self._packed_params._packed_params)
+        elif self._packed_params.dtype == torch.float16:
+            Y = torch.ops.quantized.linear_relu_dynamic_fp16(
+                x, self._packed_params._packed_params)
         else:
             raise RuntimeError('Unsupported dtype on dynamic quantized linear relu!')
         return Y.to(x.dtype)
