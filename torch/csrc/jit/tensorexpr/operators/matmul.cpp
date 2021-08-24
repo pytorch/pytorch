@@ -5,7 +5,7 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
-Tensor* computeMatmul(
+Tensor computeMatmul(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const c10::optional<ScalarType>& outputType) {
@@ -44,13 +44,13 @@ Tensor* computeMatmul(
         },
         {{size_a[1], "K"}});
   } else {
-    return new Tensor(
+    return Tensor(
         ResultBuf.node(),
         ExternalCall::make(ResultBuf, "nnc_aten_matmul", {a, b}, {}));
   }
 }
 
-Tensor* computeAddMM(
+Tensor computeAddMM(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const c10::optional<ScalarType>& outputType) {
@@ -59,7 +59,7 @@ Tensor* computeAddMM(
     dtype = Dtype(*outputType);
   }
   BufHandle ResultBuf("addmm", outputShape, dtype);
-  return new Tensor(
+  return Tensor(
       ResultBuf.node(),
       ExternalCall::make(
           ResultBuf,
