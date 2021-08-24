@@ -8,6 +8,7 @@ from .api import (
     ShardedTensor,
     ShardedTensorMetadata,
     TensorInitParams,
+    TensorProperties,
     load_with_process_group,
 )
 
@@ -22,7 +23,8 @@ def empty(sharding_spec: ShardingSpec,
           process_group=None,
           init_rrefs=False):
     """
-    Creates an empty :class:`ShardedTensor`. Needs to be called on all ranks in an SPMD fashion.
+    Returns a :class:`ShardedTensor` filled with uninitialized data.
+        Needs to be called on all ranks in an SPMD fashion.
 
     Args:
         sharding_spec (:class:`torch.distributed._sharding_spec.ShardingSpec`): The specification
@@ -51,10 +53,10 @@ def empty(sharding_spec: ShardingSpec,
     Returns:
         A :class:`ShardedTensor` object on each rank
     """
-    tensor_init_params = TensorInitParams(create_op=CreateOp.EMPTY, fill_value=0,
-                                          dtype=dtype, layout=layout,
-                                          requires_grad=requires_grad,
-                                          pin_memory=pin_memory, memory_format=memory_format)
+    tensor_properties = TensorProperties(dtype=dtype, layout=layout,
+                                         requires_grad=requires_grad,
+                                         pin_memory=pin_memory, memory_format=memory_format, )
+    tensor_init_params = TensorInitParams(create_op=CreateOp.EMPTY, tensor_properties=tensor_properties, )
     return ShardedTensor(
         sharding_spec,
         *size,
@@ -73,7 +75,8 @@ def ones(sharding_spec: ShardingSpec,
          process_group=None,
          init_rrefs=False):
     """
-    Creates a ones :class:`ShardedTensor`. Needs to be called on all ranks in an SPMD fashion.
+    Returns a :class:`ShardedTensor` with the scalar value 1.
+        Needs to be called on all ranks in an SPMD fashion.
 
     Args:
         sharding_spec (:class:`torch.distributed._sharding_spec.ShardingSpec`): The specification
@@ -100,10 +103,10 @@ def ones(sharding_spec: ShardingSpec,
     Returns:
         A :class:`ShardedTensor` object on each rank
     """
-    tensor_init_params = TensorInitParams(create_op=CreateOp.ONES, fill_value=0,
-                                          dtype=dtype, layout=layout,
-                                          requires_grad=requires_grad,
-                                          pin_memory=pin_memory, memory_format=memory_format)
+    tensor_properties = TensorProperties(dtype=dtype, layout=layout,
+                                         requires_grad=requires_grad,
+                                         pin_memory=pin_memory, memory_format=memory_format, )
+    tensor_init_params = TensorInitParams(create_op=CreateOp.ONES, tensor_properties=tensor_properties)
     return ShardedTensor(
         sharding_spec,
         *size,
@@ -123,7 +126,8 @@ def rand(sharding_spec: ShardingSpec,
          process_group=None,
          init_rrefs=False):
     """
-    Creates a rand :class:`ShardedTensor`. Needs to be called on all ranks in an SPMD fashion.
+    Returns a :class:`ShardedTensor` filled with random numbers from a uniform distribution on the
+        interval [0, 1)[0,1). Needs to be called on all ranks in an SPMD fashion.
 
     Args:
         sharding_spec (:class:`torch.distributed._sharding_spec.ShardingSpec`): The specification
@@ -150,10 +154,11 @@ def rand(sharding_spec: ShardingSpec,
     Returns:
         A :class:`ShardedTensor` object on each rank
     """
-    tensor_init_params = TensorInitParams(create_op=CreateOp.RAND, fill_value=0,
-                                          dtype=dtype, layout=layout,
-                                          requires_grad=requires_grad,
-                                          pin_memory=pin_memory, memory_format=memory_format)
+    tensor_properties = TensorProperties(
+        dtype=dtype, layout=layout, requires_grad=requires_grad,
+        pin_memory=pin_memory, memory_format=memory_format
+    )
+    tensor_init_params = TensorInitParams(create_op=CreateOp.RAND, tensor_properties=tensor_properties, )
     return ShardedTensor(
         sharding_spec,
         *size,
@@ -173,7 +178,8 @@ def zeros(sharding_spec: ShardingSpec,
           process_group=None,
           init_rrefs=False):
     """
-    Creates a zeros :class:`ShardedTensor`. Needs to be called on all ranks in an SPMD fashion.
+    Returns a :class:`ShardedTensor` filled with the scalar value 0.
+        Needs to be called on all ranks in an SPMD fashion.
 
     Args:
         sharding_spec (:class:`torch.distributed._sharding_spec.ShardingSpec`): The specification
@@ -200,10 +206,11 @@ def zeros(sharding_spec: ShardingSpec,
     Returns:
         A :class:`ShardedTensor` object on each rank
     """
-    tensor_init_params = TensorInitParams(create_op=CreateOp.ZEROS, fill_value=0,
-                                          dtype=dtype, layout=layout,
-                                          requires_grad=requires_grad,
-                                          pin_memory=pin_memory, memory_format=memory_format)
+    tensor_properties = TensorProperties(
+        dtype=dtype, layout=layout, requires_grad=requires_grad,
+        pin_memory=pin_memory, memory_format=memory_format,
+    )
+    tensor_init_params = TensorInitParams(reate_op=CreateOp.ZEROS, tensor_properties=tensor_properties, )
     return ShardedTensor(
         sharding_spec,
         *size,
@@ -224,7 +231,8 @@ def full(sharding_spec: ShardingSpec,
          process_group=None,
          init_rrefs=False):
     """
-    Creates a full :class:`ShardedTensor`. Needs to be called on all ranks in an SPMD fashion.
+    Creates a :class:`ShardedTensor` filled with fill_value. The tensor’s dtype
+        is inferred from fill_value. Needs to be called on all ranks in an SPMD fashion.
 
     Args:
         sharding_spec (:class:`torch.distributed._sharding_spec.ShardingSpec`): The specification
@@ -252,10 +260,12 @@ def full(sharding_spec: ShardingSpec,
     Returns:
         A :class:`ShardedTensor` object on each rank
     """
-    tensor_init_params = TensorInitParams(create_op=CreateOp.FULL, fill_value=fill_value,
-                                          dtype=dtype, layout=layout,
-                                          requires_grad=requires_grad,
-                                          pin_memory=pin_memory, memory_format=memory_format)
+    tensor_properties = TensorProperties(
+        dtype=dtype, layout=layout, requires_grad=requires_grad,
+        pin_memory=pin_memory, memory_format=memory_format,
+    )
+    tensor_init_params = TensorInitParams(
+        create_op=CreateOp.FULL, fill_value=fill_value, tensor_properties=tensor_properties)
     return ShardedTensor(
         sharding_spec,
         *size,
