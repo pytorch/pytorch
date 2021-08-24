@@ -1,26 +1,27 @@
 #pragma once
 #include <c10/core/ScalarType.h>
+#include <memory>
 
 namespace torch {
 namespace jit {
 namespace tensorexpr {
 
 template <typename Node>
-using NodePtr = Node*;
+using NodePtr = std::shared_ptr<Node>;
 
 template <typename To, typename From>
 NodePtr<To> to(NodePtr<From> x) {
-  return dynamic_cast<NodePtr<To>>(x);
+  return std::dynamic_pointer_cast<To>(x);
 }
 
 template <typename To, typename From>
 NodePtr<To> static_to(NodePtr<From> x) {
-  return static_cast<NodePtr<To>>(x);
+  return std::static_pointer_cast<To>(x);
 }
 
 template <typename Node, typename... Args>
 NodePtr<Node> alloc(Args&&... args) {
-  return new Node(std::forward<Args>(args)...);
+  return std::make_shared<Node>(std::forward<Args>(args)...);
 }
 
 class Buf;

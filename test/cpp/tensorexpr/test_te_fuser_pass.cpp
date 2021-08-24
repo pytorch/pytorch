@@ -5,7 +5,6 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
-#include <torch/csrc/jit/tensorexpr/mem_arena.h>
 #include <torch/csrc/jit/testing/file_check.h>
 #include <sstream>
 
