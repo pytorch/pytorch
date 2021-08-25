@@ -17,6 +17,7 @@ namespace jit {
 using namespace torch::jit::tensorexpr;
 
 TEST(IRVerifier, BitwiseOps) {
+  KernelScope kernel_scope;
   VarPtr X = alloc<Var>("x", kInt);
   VarPtr Y = alloc<Var>("y", kFloat);
   {
@@ -47,6 +48,7 @@ TEST(IRVerifier, BitwiseOps) {
 }
 
 TEST(IRVerifier, CompareSelect) {
+  KernelScope kernel_scope;
   ExprPtr X = alloc<IntImm>(1);
   ExprPtr Y = alloc<FloatImm>(3.14f);
   {
@@ -62,6 +64,7 @@ TEST(IRVerifier, CompareSelect) {
 }
 
 TEST(IRVerifier, Ramp) {
+  KernelScope kernel_scope;
   VarPtr I = alloc<Var>("i", kInt);
   VarPtr J = alloc<Var>("j", kFloat);
   {
@@ -72,6 +75,7 @@ TEST(IRVerifier, Ramp) {
 }
 
 TEST(IRVerifier, Load) {
+  KernelScope kernel_scope;
   VarPtr I = alloc<Var>("i", kInt);
   VarPtr J = alloc<Var>("j", kLong);
   VarPtr K = alloc<Var>("k", kFloat);
@@ -101,6 +105,7 @@ TEST(IRVerifier, Load) {
 }
 
 TEST(IRVerifier, IfThenElse) {
+  KernelScope kernel_scope;
   VarPtr I = alloc<Var>("i", kInt);
   VarPtr J = alloc<Var>("j", kLong);
   VarPtr K = alloc<Var>("k", kFloat);
@@ -125,6 +130,7 @@ TEST(IRVerifier, IfThenElse) {
 }
 
 TEST(IRVerifier, For) {
+  KernelScope kernel_scope;
   VarPtr I = alloc<Var>("i", kInt);
   VarPtr J = alloc<Var>("j", kInt);
   StmtPtr body = alloc<Block>(std::vector<StmtPtr>({}));
@@ -137,6 +143,7 @@ TEST(IRVerifier, For) {
 }
 
 TEST(IRVerifier, Block) {
+  KernelScope kernel_scope;
   VarPtr I = alloc<Var>("i", kInt);
   BufPtr B = alloc<Buf>("B", std::vector<ExprPtr>({alloc<IntImm>(10)}), kInt);
   {
@@ -153,6 +160,7 @@ TEST(IRVerifier, Block) {
 }
 
 TEST(IRVerifier, Store) {
+  KernelScope kernel_scope;
   VarPtr I = alloc<Var>("i", kInt);
   VarPtr J = alloc<Var>("j", kLong);
   VarPtr K = alloc<Var>("k", kFloat);

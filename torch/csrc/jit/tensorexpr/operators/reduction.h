@@ -6,14 +6,14 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
-TORCH_API Tensor computeSum(
+Tensor* computeSum(
     const std::vector<ArgValue>& inputs,
     const c10::optional<ScalarType>& outputType);
-TORCH_API Tensor computeMean(
+Tensor* computeMean(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const c10::optional<ScalarType>& outputType);
-TORCH_API Tensor computeAdaptiveAvgPool2d(
+Tensor* computeAdaptiveAvgPool2d(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const c10::optional<ScalarType>& outputType);

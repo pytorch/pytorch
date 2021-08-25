@@ -389,33 +389,34 @@ class AtomicAddFuser : public IRMutator {
 
   StmtPtr mutate(StorePtr v) override {
     BufPtr buf = v->buf();
+    StorePtr orig = const_cast<StorePtr>(v); // NOLINT
 
     // Thread locals never need to be atomic.
     if (thread_local_bufs_.count(buf->base_handle()) != 0) {
-      return v;
+      return orig;
     }
 
     ScalarType dtype = v->value()->dtype().scalar_type();
     if (dtype != ScalarType::Float && dtype != ScalarType::Double) {
-      return v;
+      return orig;
     }
     AddPtr add_v = to<Add>(v->value());
     if (!add_v) {
-      return v;
+      return orig;
     }
     LoadPtr load_v = to<Load>(add_v->lhs());
     if (!load_v) {
-      return v;
+      return orig;
     }
     if (v->base_handle() != load_v->base_handle()) {
-      return v;
+      return orig;
     }
     if (v->indices().empty() && load_v->indices().empty()) {
-      return v;
+      return orig;
     }
     bool index_equal = CheckEqual(v->flat_index(), load_v->flat_index());
     if (!index_equal) {
-      return v;
+      return orig;
     }
 
     // TODO: this checks that the metavars occur directly as an index, but this
@@ -430,7 +431,7 @@ class AtomicAddFuser : public IRMutator {
 
     if (vars_to_find.empty()) {
       // All metavars accounted for.
-      return v;
+      return orig;
     }
 
     return alloc<AtomicAdd>(buf, v->indices(), add_v->rhs());
@@ -608,21 +609,23 @@ class PrioritizeLoad : public IRMutator {
   }
 
   StmtPtr mutate(BlockPtr v) override {
+    BlockPtr v1 = const_cast<BlockPtr>(v); // NOLINT
+    assert(v1);
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    std::list<StmtPtr> stmts = v->stmts();
+    std::list<StmtPtr> stmts = v1->stmts();
     for (StmtPtr stmt : stmts) {
       PushList();
       StmtPtr stmt_new = stmt->accept_mutator(this);
 
-      AddMemLoadsFromList(v, stmt);
+      AddMemLoadsFromList(v1, stmt);
       PopList();
 
       if (stmt_new == stmt) {
         continue;
       }
-      v->replace_stmt(stmt, stmt_new);
+      v1->replace_stmt(stmt, stmt_new);
     }
-    return v;
+    return v1;
   }
 
   ExprPtr mutate(IfThenElsePtr v) override {
@@ -818,7 +821,7 @@ StmtPtr GPUMetaVarRewriter::mutate(BlockPtr v) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<StmtPtr> stmts;
     for (auto& v : innerSegments) {
-      for (auto s : v.stmts()) {
+      for (auto* s : v.stmts()) {
         stmts.push_back(s);
       }
     }

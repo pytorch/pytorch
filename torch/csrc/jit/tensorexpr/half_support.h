@@ -72,8 +72,7 @@ class HalfRewriter : public IRMutator {
       inserted_half_casts_.insert(new_val);
     }
 
-    v->set_value(new_val);
-    return v;
+    return alloc<Store>(v->buf(), v->indices(), new_val);
   }
 
   ExprPtr mutate(HalfImmPtr v) override {

@@ -1,6 +1,5 @@
 import torch
 from torch import nn
-from typing import Any, List
 
 
 class PruningParametrization(nn.Module):
@@ -14,47 +13,27 @@ class PruningParametrization(nn.Module):
         return x[list(valid_outputs)]
 
 
-class ActivationReconstruction:
+class LinearActivationReconstruction:
     def __init__(self, parametrization):
         self.param = parametrization
 
     def __call__(self, module, input, output):
         max_outputs = self.param.original_outputs
         pruned_outputs = self.param.pruned_outputs
+        reconstructed_tensor = torch.zeros((output.shape[0], len(max_outputs)))
         valid_columns = list(max_outputs - pruned_outputs)
-
-        # get size of reconstructed output
-        sizes = list(output.shape)
-        sizes[1] = len(max_outputs)
-
-        # get valid indices of reconstructed output
-        indices: List[Any] = []
-        for size in output.shape:
-            indices.append(slice(0, size, 1))
-        indices[1] = valid_columns
-
-        reconstructed_tensor = torch.zeros(sizes)
-        reconstructed_tensor[indices] = output
+        reconstructed_tensor[:, valid_columns] = output
         return reconstructed_tensor
 
 
-class BiasHook:
-    def __init__(self, parametrization, prune_bias):
+class Conv2dActivationReconstruction:
+    def __init__(self, parametrization):
         self.param = parametrization
-        self.prune_bias = prune_bias
 
     def __call__(self, module, input, output):
+        max_outputs = self.param.original_outputs
         pruned_outputs = self.param.pruned_outputs
-
-        if getattr(module, '_bias', None) is not None:
-            bias = module._bias.data
-            if self.prune_bias:
-                bias[list(pruned_outputs)] = 0
-
-            # reshape bias to broadcast over output dimensions
-            idx = [1] * len(output.shape)
-            idx[1] = -1
-            bias = bias.reshape(idx)
-
-            output += bias
-        return output
+        reconstructed_tensor = torch.zeros((output.shape[0], len(max_outputs), output.shape[2], output.shape[3]))
+        valid_columns = list(max_outputs - pruned_outputs)
+        reconstructed_tensor[:, valid_columns, :, :] = output
+        return reconstructed_tensor

@@ -161,7 +161,7 @@ class TestBasePruner(TestCase):
             # Assume that this is the 1st/only parametrization
             assert type(module.parametrizations.weight[0]) == PruningParametrization
 
-    def _check_pruner_mask_squashed(self, model, pruner, device):
+    def _check_pruner_converted(self, model, pruner, device):
         for g in pruner.module_groups:
             module = g['module']
             assert module.weight.device == device
@@ -184,18 +184,16 @@ class TestBasePruner(TestCase):
         self.assertRaisesRegex(TypeError, 'with abstract methods update_mask',
                                BasePruner)
         model = model.to(device)
-        pruner = SimplePruner(None)
-        pruner.prepare(model, None)
+        pruner = SimplePruner(model, None, None)
         for g in pruner.module_groups:
             module = g['module']
             assert module.weight.device == device
         assert len(pruner.module_groups) == 2
         pruner.step()
         # Can instantiate the model with configs
-        pruner = SimplePruner({'test': 3})
-        pruner.prepare(model, [model.linear])
+        pruner = SimplePruner(model, [model.linear], {'test': 3})
         assert len(pruner.module_groups) == 1
-        assert pruner.module_groups[0]['fqn'] == 'linear'
+        assert pruner.module_groups[0]['path'] == 'linear'
         assert 'test' in pruner.module_groups[0]
         assert pruner.module_groups[0]['test'] == 3
 
@@ -207,8 +205,8 @@ class TestBasePruner(TestCase):
     def _test_prepare_linear_on_device(self, model, device):
         model = model.to(device)
         x = torch.ones(128, 16)
-        pruner = SimplePruner(None)
-        pruner.prepare(model, None)
+        pruner = SimplePruner(model, None, None)
+        pruner.prepare()
         self._check_pruner_prepared(model, pruner, device)
         assert model(x).shape == (128, 16)
 
@@ -221,8 +219,8 @@ class TestBasePruner(TestCase):
     def _test_prepare_conv2d_on_device(self, model, device):
         model = model.to(device)
         x = torch.ones((1, 1, 28, 28))
-        pruner = SimplePruner(None)
-        pruner.prepare(model, None)
+        pruner = SimplePruner(model, None, None)
+        pruner.prepare()
         self._check_pruner_prepared(model, pruner, device)
         assert model(x).shape == (1, 64, 24, 24)
 
@@ -232,49 +230,51 @@ class TestBasePruner(TestCase):
             for model in models:
                 self._test_prepare_conv2d_on_device(model, torch.device(device))
 
-    def _test_squash_mask_linear_on_device(self, model, device):
+    def _test_convert_linear_on_device(self, model, device):
         model = model.to(device)
         x = torch.ones(128, 16)
-        pruner = SimplePruner(None)
-        pruner.prepare(model, None)
-        pruner.squash_mask()
-        self._check_pruner_mask_squashed(model, pruner, device)
+        pruner = SimplePruner(model, None, None)
+        pruner.prepare()
+        pruner.convert()
+        self._check_pruner_converted(model, pruner, device)
         assert model(x).shape == (128, 16)
 
-    def test_squash_mask_linear(self):
+    def test_convert_linear(self):
         models = [Linear(), LinearB()]  # without and with bias
         for device in DEVICES:
             for model in models:
-                self._test_squash_mask_linear_on_device(model, torch.device(device))
+                self._test_convert_linear_on_device(model, torch.device(device))
 
-    def _test_squash_mask_conv2d_on_device(self, model, device):
+    def _test_convert_conv2d_on_device(self, model, device):
         model = model.to(device)
         x = torch.ones((1, 1, 28, 28))
-        pruner = SimplePruner(None)
-        pruner.prepare(model, None)
-        pruner.squash_mask()
-        self._check_pruner_mask_squashed(model, pruner, device)
+        pruner = SimplePruner(model, None, None)
+        pruner.prepare()
+        pruner.convert()
+        self._check_pruner_converted(model, pruner, device)
         assert model(x).shape == (1, 64, 24, 24)
 
-    def test_squash_mask_conv2d(self):
+    def test_convert_conv2d(self):
         models = [Conv2dA(), Conv2dB(), Conv2dC()]
         for device in DEVICES:
             for model in models:
-                self._test_squash_mask_conv2d_on_device(model, torch.device(device))
+                self._test_convert_conv2d_on_device(model, torch.device(device))
 
     def _test_step_linear_on_device(self, model, is_basic, device):
         model = model.to(device)
         if is_basic:
             x = torch.ones(16, 16)
-            pruner = SimplePruner(None)
-            pruner.prepare(model, None)
+            pruner = SimplePruner(model, None, None)
+            pruner.prepare()
+            pruner.enable_mask_update = True
             self._check_pruner_valid_before_step(model, pruner, device)
             pruner.step()
             self._check_pruner_valid_after_step(model, pruner, {1}, device)
         else:
             x = torch.ones(7, 7)
-            pruner = MultiplePruner(None)
-            pruner.prepare(model, None)
+            pruner = MultiplePruner(model, None, None)
+            pruner.prepare()
+            pruner.enable_mask_update = True
             self._check_pruner_valid_before_step(model, pruner, device)
             pruner.step()
             self._check_pruner_valid_after_step(model, pruner, {1, 2}, device)
@@ -291,8 +291,9 @@ class TestBasePruner(TestCase):
     def _test_step_conv2d_on_device(self, model, device):
         model = model.to(device)
         x = torch.ones((1, 1, 28, 28))
-        pruner = SimplePruner(None)
-        pruner.prepare(model, None)
+        pruner = SimplePruner(model, None, None)
+        pruner.prepare()
+        pruner.enable_mask_update = True
         self._check_pruner_valid_before_step(model, pruner, device)
         pruner.step()
         self._check_pruner_valid_after_step(model, pruner, {1}, device)
