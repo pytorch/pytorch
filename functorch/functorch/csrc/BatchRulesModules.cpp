@@ -269,25 +269,27 @@ struct UpsampleBackwardBatchRuleHelper<F, Func, typelist<A, B, C, T...>> {
       c10::guts::function_traits<decltype(ATEN_FN2(op, overload))>::parameter_types>::apply))
 
 #define UPSAMPLE_BATCH(op) \
-  VMAP_SUPPORT(#op".vec", EXISTING_BDIM_BATCH_RULE(ATEN_FN2(op, vec))); \
-  VMAP_SUPPORT(#op, EXISTING_BDIM_BATCH_RULE(ATEN_FN(op)));
+  EXISTING_BDIM2(op, vec); \
+  EXISTING_BDIM(op);
 
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("convolution", convolution_batching_rule);
-  m.impl("conv1d", convNd_decomp);
-  m.impl("conv2d", convNd_decomp);
-  m.impl("conv3d", convNd_decomp);
   // m.impl("conv_transpose2d", convNd_transpose_decomp);
   m.impl("mkldnn_convolution", mkldnn_convolution_decomp);
   m.impl("cudnn_convolution_backward", cudnn_convolution_backward_plumbing);
   m.impl("cudnn_convolution", cudnn_convolution_plumbing);
+  m.impl("conv1d", convNd_decomp);
+  m.impl("conv2d", convNd_decomp);
+  m.impl("conv3d", convNd_decomp);
 
-  VMAP_SUPPORT("constant_pad_nd", BASIC_UNARY_BATCH_RULE(at::constant_pad_nd));
-  VMAP_SUPPORT("reflection_pad1d", EXISTING_BDIM_BATCH_RULE(at::reflection_pad1d));
-  VMAP_SUPPORT("reflection_pad2d", EXISTING_BDIM_BATCH_RULE(at::reflection_pad2d));
-  VMAP_SUPPORT("replication_pad1d", EXISTING_BDIM_BATCH_RULE(at::replication_pad1d));
-  VMAP_SUPPORT("replication_pad2d", EXISTING_BDIM_BATCH_RULE(at::replication_pad2d));
-  VMAP_SUPPORT("replication_pad3d", EXISTING_BDIM_BATCH_RULE(at::replication_pad3d));
+
+  UNARY_POINTWISE(constant_pad_nd);
+  EXISTING_BDIM(reflection_pad1d);
+  EXISTING_BDIM(reflection_pad2d);
+  EXISTING_BDIM(reflection_pad3d);
+  EXISTING_BDIM(replication_pad1d);
+  EXISTING_BDIM(replication_pad2d);
+  EXISTING_BDIM(replication_pad3d);
 
   UPSAMPLE_BATCH(upsample_bicubic2d);
   UPSAMPLE_BATCH(upsample_bilinear2d);
