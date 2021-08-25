@@ -1,5 +1,3 @@
-#include <torch/csrc/distributed/c10d/frontend_cuda.hpp>
-
 #include <c10/util/Exception.h>
 #include <torch/csrc/distributed/c10d/frontend.hpp>
 
