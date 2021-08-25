@@ -12,25 +12,6 @@ SET(AVX_CODE "
   }
 ")
 
-SET(AVX512_CODE "
-  #include <immintrin.h>
-
-  int main()
-  {
-    __m512i a = _mm512_set_epi8(0, 0, 0, 0, 0, 0, 0, 0,
-                                0, 0, 0, 0, 0, 0, 0, 0,
-                                0, 0, 0, 0, 0, 0, 0, 0,
-                                0, 0, 0, 0, 0, 0, 0, 0,
-                                0, 0, 0, 0, 0, 0, 0, 0,
-                                0, 0, 0, 0, 0, 0, 0, 0,
-                                0, 0, 0, 0, 0, 0, 0, 0,
-                                0, 0, 0, 0, 0, 0, 0, 0);
-    __m512i b = a;
-    __mmask64 equality_mask = _mm512_cmp_epi8_mask(a, b, _MM_CMPINT_EQ);
-    return 0;
-  }
-")
-
 SET(AVX2_CODE "
   #include <immintrin.h>
 
@@ -41,6 +22,37 @@ SET(AVX2_CODE "
     __m256i x;
     _mm256_extract_epi64(x, 0); // we rely on this in our AVX2 code
     return 0;
+  }
+")
+
+SET(AVX512_CODE "
+  #if defined(_MSC_VER)
+  #include <intrin.h>
+  #else
+  #include <immintrin.h>
+  #endif
+  // check avx512f
+  __m512 addConstant(__m512 arg) {
+    return _mm512_add_ps(arg, _mm512_set1_ps(1.f));
+  }
+  // check avx512dq
+  __m512 andConstant(__m512 arg) {
+    return _mm512_and_ps(arg, _mm512_set1_ps(1.f));
+  }
+  int main() {
+    __m512i a = _mm512_set1_epi32(1);
+    __m512i b = _mm512_set_epi8(1, 2, 3, 4, 5, 6, 7, 8,
+                                2, 2, 3, 4, 5, 6, 7, 8,
+                                3, 2, 3, 4, 5, 6, 7, 8,
+                                4, 2, 3, 4, 5, 6, 7, 8,
+                                5, 2, 3, 4, 5, 6, 7, 8,
+                                6, 2, 3, 4, 5, 6, 7, 8,
+                                7, 2, 3, 4, 5, 6, 7, 8,
+                                8, 2, 3, 4, 5, 6, 7, 8);
+    __m256i ymm = _mm512_extracti64x4_epi64(a, 0);
+    ymm = _mm256_abs_epi64(ymm); // check avx512vl
+    __mmask16 m = _mm512_cmp_epi32_mask(a, a, _MM_CMPINT_EQ);
+    __m512i r = _mm512_andnot_si512(a, a);
   }
 ")
 

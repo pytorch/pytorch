@@ -60,7 +60,7 @@ if(CXX_AVX2_FOUND)
        Caffe2_DEPENDENCY_WHOLE_LINK_LIBS
        "Caffe2_perfkernels_avx2_interface")
 
-  if(CAFFE2_COMPILER_SUPPORTS_AVX512_EXTENSIONS)
+  if(CXX_AVX512_FOUND)
     add_library(Caffe2_perfkernels_avx512 STATIC ${avx512_srcs})
     add_dependencies(Caffe2_perfkernels_avx512 Caffe2_PROTO)
     target_link_libraries(Caffe2_perfkernels_avx512 PRIVATE c10)

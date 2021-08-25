@@ -741,7 +741,7 @@ if(USE_FBGEMM)
   if(NOT DEFINED FBGEMM_SOURCE_DIR)
     set(FBGEMM_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/fbgemm" CACHE STRING "FBGEMM source directory")
   endif()
-  if(NOT CAFFE2_COMPILER_SUPPORTS_AVX512_EXTENSIONS)
+  if(NOT CXX_AVX512_FOUND)
     message(WARNING
       "A compiler with AVX512 support is required for FBGEMM. "
       "Not compiling with FBGEMM. "
@@ -1736,7 +1736,7 @@ if(NOT INTERN_BUILD_MOBILE)
   endif()
 
   find_package(VSX) # checks VSX
-  # checks AVX and AVX2. Already called once in MiscCheck.cmake. Called again here for clarity --
+  # checks AVX/AVX2/AVX512. Already called once in MiscCheck.cmake. Called again here for clarity --
   # cached results will be used so no extra overhead.
   find_package(AVX)
 
