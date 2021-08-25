@@ -2652,11 +2652,6 @@
     CPU: log_softmax_cpu_out
     CUDA: log_softmax_cuda_out
 
-- func: _log_softmax.out(Tensor self, int dim, bool half_to_float, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU: log_softmax_cpu_out
-    CUDA: log_softmax_cuda_out
-
 - func: _log_softmax_backward_data(Tensor grad_output, Tensor output, int dim, Tensor self) -> Tensor
   structured_delegate: _log_softmax_backward_data.out
 
