@@ -1,13 +1,13 @@
 from torch.utils.data import IterDataPipe, functional_datapipe, DataChunk
 from typing import Callable, TypeVar, Iterator, Optional, Tuple, Dict
 
-from .callable import MapIterDataPipe
+from .callable import MapperIterDataPipe
 
 T_co = TypeVar('T_co', covariant=True)
 
 
 @functional_datapipe('filter')
-class FilterIterDataPipe(MapIterDataPipe):
+class FilterIterDataPipe(MapperIterDataPipe):
     r""" :class:`FilterIterDataPipe`.
 
     Iterable DataPipe to filter elements from datapipe according to filter_fn.
