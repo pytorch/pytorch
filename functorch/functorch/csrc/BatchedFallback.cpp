@@ -30,6 +30,16 @@ void setVmapFallbackWarningEnabled(bool enabled) {
   kVmapFallbackWarningEnabled = enabled;
 }
 
+bool kVmapFallbackEnabled = true;
+
+bool isVmapFallbackEnabled() {
+  return kVmapFallbackEnabled;
+}
+
+void setVmapFallbackEnabled(bool enabled) {
+  kVmapFallbackEnabled = enabled;
+}
+
 // Given a linear index, return the actual index.
 // Example: Given linear_idx = 3, sizes = [5, 2], we would return [1, 0]
 static at::SmallVector<indexing::TensorIndex,kVmapStaticDimVecSize>
@@ -88,6 +98,8 @@ static bool isInplaceOp(const FunctionSchema& schema) {
 }
 
 static void warnFallback(const c10::FunctionSchema& schema, bool is_inplace) {
+  TORCH_CHECK(isVmapFallbackEnabled(),
+      schema.operator_name(), " hit the vmap fallback which is currently disabled");
   if (!isVmapFallbackWarningEnabled()) {
     return;
   }

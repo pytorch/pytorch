@@ -27,6 +27,7 @@ from common_utils import (
     opinfo_in_dict,
     xfail,
     skipOps,
+    check_vmap_fallback,
 )
 import types
 
@@ -2906,21 +2907,6 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         result = vmap(vjp)(gy)
         self.assertEqual(result, torch.zeros(B0, *x.shape, device=device))
 
-def assert_uses_vmap_fallback(test_case, thunk, opinfo, uses_fallback=False):
-    with warnings.catch_warnings(record=True) as wa:
-        warnings.simplefilter("always")
-        thunk()
-
-    encountered_fallback = any([bool(re.match('There is a performance drop', str(warning.message)))
-                                for warning in wa])
-    # # Use the following to print out failures
-    # if encountered_fallback != uses_fallback:
-    #     if opinfo.variant_test_name:
-    #         print(f"xfail('{opinfo.name}', '{opinfo.variant_test_name}'),")
-    #     else:
-    #         print(f"xfail('{opinfo.name}'),")
-    test_case.assertEqual(encountered_fallback, uses_fallback)
-
 class TestVmapOperatorsOpInfo(TestCase):
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestVmapOperatorsOpInfo', 'test_vmap_exhaustive', {
@@ -3047,7 +3033,7 @@ class TestVmapOperatorsOpInfo(TestCase):
                 kwarg_values = sample_input.kwargs
                 for _ in get_fallback_and_vmap_exhaustive(op.op, arg_values, kwarg_values, compute_loop_out=False):
                     pass
-        assert_uses_vmap_fallback(self, test, op)
+        check_vmap_fallback(self, test, op)
 
     def test_isnan(self, device):
         test = functools.partial(_vmap_test, check_propagates_grad=False)
