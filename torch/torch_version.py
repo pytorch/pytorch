@@ -1,4 +1,3 @@
-from functools import total_ordering
 from typing import Iterable, Union
 
 from pkg_resources import packaging  # type: ignore[attr-defined]
