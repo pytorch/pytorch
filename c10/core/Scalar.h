@@ -7,8 +7,10 @@
 #include <type_traits>
 #include <utility>
 
+#include <c10/core/OptionalRef.h>
 #include <c10/core/ScalarType.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/Exception.h>
 #include <c10/util/Half.h>
 #include <c10/util/TypeCast.h>
 
@@ -185,6 +187,8 @@ class C10_API Scalar {
     v_t() {} // default constructor
   } v;
 };
+
+using OptionalScalarRef = c10::OptionalRef<Scalar>;
 
 // define the scalar.to<int64_t>() specializations
 #define DEFINE_TO(T, name)         \

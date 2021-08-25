@@ -83,7 +83,6 @@ PyObject *THPDtype_repr(THPDtype *self)
   return THPUtils_packString("torch." + name);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyTypeObject THPDtypeType = {
   PyVarObject_HEAD_INIT(nullptr, 0)
   "torch.dtype",                         /* tp_name */

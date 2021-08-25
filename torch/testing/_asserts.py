@@ -102,23 +102,42 @@ def _check_sparse_coo_members_individually(
     """
 
     @functools.wraps(check_tensors)
-    def wrapper(actual: Tensor, expected: Tensor, **kwargs: Any) -> Optional[_TestingErrorMeta]:
+    def wrapper(
+        actual: Tensor,
+        expected: Tensor,
+        msg: Optional[Union[str, Callable[[Tensor, Tensor, Diagnostics], str]]] = None,
+        **kwargs: Any,
+    ) -> Optional[_TestingErrorMeta]:
         if not actual.is_sparse:
-            return check_tensors(actual, expected, **kwargs)
+            return check_tensors(actual, expected, msg=msg, **kwargs)
 
         if actual._nnz() != expected._nnz():
             return _TestingErrorMeta(
-                AssertionError, f"The number of specified values does not match: {actual._nnz()} != {expected._nnz()}"
+                AssertionError,
+                (
+                    f"The number of specified values in sparse COO tensors does not match: "
+                    f"{actual._nnz()} != {expected._nnz()}"
+                ),
             )
 
         kwargs_equal = dict(kwargs, rtol=0, atol=0)
-        error_meta = check_tensors(actual._indices(), expected._indices(), **kwargs_equal)
+        error_meta = check_tensors(
+            actual._indices(),
+            expected._indices(),
+            msg=msg or functools.partial(_make_mismatch_msg, identifier="Sparse COO indices"),
+            **kwargs_equal,
+        )
         if error_meta:
-            return error_meta.amend_msg(postfix="\n\nThe failure occurred for the indices.")
+            return error_meta
 
-        error_meta = check_tensors(actual._values(), expected._values(), **kwargs)
+        error_meta = check_tensors(
+            actual._values(),
+            expected._values(),
+            msg=msg or functools.partial(_make_mismatch_msg, identifier="Sparse COO values"),
+            **kwargs,
+        )
         if error_meta:
-            return error_meta.amend_msg(postfix="\n\nThe failure occurred for the values.")
+            return error_meta
 
         return None
 
@@ -138,22 +157,42 @@ def _check_sparse_csr_members_individually(
     """
 
     @functools.wraps(check_tensors)
-    def wrapper(actual: Tensor, expected: Tensor, **kwargs: Any) -> Optional[_TestingErrorMeta]:
+    def wrapper(
+        actual: Tensor,
+        expected: Tensor,
+        msg: Optional[Union[str, Callable[[Tensor, Tensor, Diagnostics], str]]] = None,
+        **kwargs: Any,
+    ) -> Optional[_TestingErrorMeta]:
         if not actual.is_sparse_csr:
-            return check_tensors(actual, expected, **kwargs)
+            return check_tensors(actual, expected, msg=msg, **kwargs)
 
         kwargs_equal = dict(kwargs, rtol=0, atol=0)
-        error_meta = check_tensors(actual.crow_indices(), expected.crow_indices(), **kwargs_equal)
+        error_meta = check_tensors(
+            actual.crow_indices(),
+            expected.crow_indices(),
+            msg=msg or functools.partial(_make_mismatch_msg, identifier="Sparse CSR crow_indices"),
+            **kwargs_equal,
+        )
         if error_meta:
-            return error_meta.amend_msg(postfix="\n\nThe failure occurred for the crow_indices.")
+            return error_meta
 
-        error_meta = check_tensors(actual.col_indices(), expected.col_indices(), **kwargs_equal)
+        error_meta = check_tensors(
+            actual.col_indices(),
+            expected.col_indices(),
+            msg=msg or functools.partial(_make_mismatch_msg, identifier="Sparse CSR col_indices"),
+            **kwargs_equal,
+        )
         if error_meta:
-            return error_meta.amend_msg(postfix="\n\nThe failure occurred for the col_indices.")
+            return error_meta
 
-        error_meta = check_tensors(actual.values(), expected.values(), **kwargs)
+        error_meta = check_tensors(
+            actual.values(),
+            expected.values(),
+            msg=msg or functools.partial(_make_mismatch_msg, identifier="Sparse CSR values"),
+            **kwargs,
+        )
         if error_meta:
-            return error_meta.amend_msg(postfix="\n\nThe failure occurred for the values.")
+            return error_meta
 
         return None
 

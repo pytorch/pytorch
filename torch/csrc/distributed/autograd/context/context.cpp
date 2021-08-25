@@ -273,7 +273,6 @@ void DistAutogradContext::runGradCallbackForVariable(
 }
 
 namespace {
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local ContextPtr tl_context_ptr;
 } // namespace
 

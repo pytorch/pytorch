@@ -61,6 +61,10 @@ RUN if [ -n "${VISION}" ]; then bash ./install_vision.sh; fi
 RUN rm install_vision.sh
 ENV INSTALLED_VISION ${VISION}
 
+ADD ./common/install_openssl.sh install_openssl.sh
+ENV OPENSSL_ROOT_DIR /opt/openssl
+RUN bash ./install_openssl.sh
+
 # Install ccache/sccache (do this last, so we get priority in PATH)
 ADD ./common/install_cache.sh install_cache.sh
 ENV PATH /opt/cache/bin:$PATH
@@ -71,11 +75,6 @@ ENV CUDA_NVCC_EXECUTABLE=/opt/cache/lib/nvcc
 ADD ./common/install_jni.sh install_jni.sh
 ADD ./java/jni.h jni.h
 RUN bash ./install_jni.sh && rm install_jni.sh
-
-# Install NCCL for when CUDA is version 10.1
-ADD ./common/install_nccl.sh install_nccl.sh
-RUN if [ "${CUDA_VERSION}" = 10.1 ]; then bash ./install_nccl.sh; fi
-RUN rm install_nccl.sh
 
 # Install Open MPI for CUDA
 ADD ./common/install_openmpi.sh install_openmpi.sh
@@ -92,10 +91,6 @@ ENV TORCH_NVCC_FLAGS "-Xfatbin -compress-all"
 
 # Install LLVM dev version (Defined in the pytorch/builder github repository)
 COPY --from=pytorch/llvm:9.0.1 /opt/llvm /opt/llvm
-
-ADD ./common/install_openssl.sh install_openssl.sh
-ENV OPENSSL_ROOT_DIR /opt/openssl
-RUN bash ./install_openssl.sh
 
 USER jenkins
 CMD ["bash"]
