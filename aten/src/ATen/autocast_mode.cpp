@@ -62,7 +62,7 @@ thread_local at::ScalarType autocast_cpu_dtype = at::kBFloat16;
 thread_local bool cache_enabled = true;
 
 // autocast_gpu_dtype is the lower_precision_fp used by AutocastGPU.
-at::ScalarType autocast_gpu_dtype = at::kHalf;
+thread_local at::ScalarType autocast_gpu_dtype = at::kHalf;
 }
 
 void clear_cache() {

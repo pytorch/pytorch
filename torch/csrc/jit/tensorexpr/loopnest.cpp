@@ -47,14 +47,14 @@ LoopNest::LoopNest(StmtPtr stmt, std::unordered_set<BufPtr> output_bufs)
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 LoopNest::LoopNest(
-    const std::vector<Tensor*>& output_tensors,
-    const std::vector<Tensor*>& tensors_to_compute) {
+    const std::vector<Tensor>& output_tensors,
+    const std::vector<Tensor>& tensors_to_compute) {
   initialize(output_tensors, tensors_to_compute);
   verify(root_stmt_);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-LoopNest::LoopNest(const std::vector<Tensor*>& output_tensors) {
+LoopNest::LoopNest(const std::vector<Tensor>& output_tensors) {
   initialize(output_tensors, output_tensors);
   verify(root_stmt_);
 }
@@ -109,12 +109,13 @@ class IndexFlattener : public IRMutator {
     ExprPtr value = v->value();
     ExprPtr new_value = value->accept_mutator(this);
     if (v->indices().size() == 1 && value == new_value) {
-      return (StmtPtr)v;
+      return v;
     }
-    return alloc<Store>(
-        v->buf(),
-        std::vector<ExprPtr>({flatten_index(v->buf()->dims(), v->indices())}),
-        new_value);
+    std::vector<ExprPtr> indices = {
+        flatten_index(v->buf()->dims(), v->indices())};
+    v->set_indices(indices);
+    v->set_value(new_value);
+    return v;
   }
 };
 
@@ -485,15 +486,15 @@ bool LoopNest::vectorize(ForPtr f) {
 }
 
 void LoopNest::initialize(
-    const std::vector<Tensor*>& output_tensors,
-    const std::vector<Tensor*>& tensors_to_compute) {
+    const std::vector<Tensor>& output_tensors,
+    const std::vector<Tensor>& tensors_to_compute) {
   for (auto t : output_tensors) {
-    output_bufs_.insert(t->buf());
+    output_bufs_.insert(t.buf());
   }
 
   std::vector<StmtPtr> loops;
-  for (Tensor* t : tensors_to_compute) {
-    StmtPtr loop = t->stmt();
+  for (Tensor t : tensors_to_compute) {
+    StmtPtr loop = t.stmt();
     if (loop->get_parent()) {
       std::cerr << "Error: creating a loopnest from already used Tensors\n";
       loops = {};
@@ -1305,11 +1306,10 @@ void LoopNest::sliceHead(ForPtr f, int factor, ForPtr* head, ForPtr* tail) {
   ExprPtr head_end = alloc<Min>(
       alloc<Add>(f->start(), alloc<IntImm>(factor)), f->stop(), true);
   *head = alloc<For>(f->var(), f->start(), head_end, Stmt::clone(f->body()));
-  *tail = alloc<For>(
-      f->var(), head_end, f->stop(), Stmt::clone(f->body()), f->loop_options());
+  p->insert_stmt_before(*head, f);
 
-  p->replace_stmt(f, *head);
-  p->insert_stmt_after(*tail, *head);
+  f->set_start(head_end);
+  *tail = f;
 
   if (f->loop_options().is_gpu_block_index() ||
       f->loop_options().is_gpu_thread_index()) {
@@ -1345,16 +1345,11 @@ void LoopNest::sliceTail(ForPtr f, int factor, ForPtr* head, ForPtr* tail) {
 
   ExprPtr tail_start = alloc<Max>(
       f->start(), alloc<Sub>(f->stop(), alloc<IntImm>(factor)), true);
-  *head = alloc<For>(
-      f->var(),
-      f->start(),
-      tail_start,
-      Stmt::clone(f->body()),
-      f->loop_options());
   *tail = alloc<For>(f->var(), tail_start, f->stop(), Stmt::clone(f->body()));
+  p->insert_stmt_after(*tail, f);
 
-  p->replace_stmt(f, *head);
-  p->insert_stmt_after(*tail, *head);
+  f->set_stop(tail_start);
+  *head = f;
 
   if (f->loop_options().is_gpu_block_index() ||
       f->loop_options().is_gpu_thread_index()) {
@@ -2385,11 +2380,11 @@ void LoopNest::compressBuffer(BufPtr buf, StmtPtr stmt) {
 
 void LoopNest::compressAllBuffers(StmtPtr stmt) {
   for (auto buf : BufFinder::find(stmt)) {
-    compressBuffer(const_cast<BufPtr>(buf), stmt);
+    compressBuffer(buf, stmt);
   }
 }
 
-std::vector<ForPtr> LoopNest::getLoopStmtsFor(Tensor* t) const {
+std::vector<ForPtr> LoopNest::getLoopStmtsFor(Tensor t) const {
   StmtPtr cur_stmt = getLoopBodyFor(t);
   return getLoopStmtsFor(cur_stmt);
 }
@@ -2412,8 +2407,8 @@ std::vector<ForPtr> LoopNest::getLoopStmtsFor(StmtPtr s) const {
   return result;
 }
 
-StmtPtr LoopNest::getLoopBodyFor(Tensor* t) const {
-  return getLoopBodyFor(t->buf());
+StmtPtr LoopNest::getLoopBodyFor(Tensor t) const {
+  return getLoopBodyFor(t.buf());
 }
 
 StmtPtr LoopNest::getLoopBodyFor(BufPtr buf) const {
@@ -2575,8 +2570,9 @@ class CacheReplacer : public IRMutator {
       ExprPtr sub = IRSimplifier::simplify(alloc<Sub>(index, offset));
       newIndices.push_back(sub);
     }
-
-    return alloc<Load>(cache_, newIndices);
+    v->set_buf(cache_);
+    v->set_indices(newIndices);
+    return v;
   }
 
   StmtPtr mutate(StorePtr v) override {
@@ -2596,8 +2592,10 @@ class CacheReplacer : public IRMutator {
       ExprPtr sub = IRSimplifier::simplify(alloc<Sub>(index, offset));
       newIndices.push_back(sub);
     }
-
-    return alloc<Store>(cache_, newIndices, newValue);
+    v->set_buf(cache_);
+    v->set_indices(newIndices);
+    v->set_value(newValue);
+    return v;
   }
 
   BufPtr buf_;
@@ -2669,21 +2667,13 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
 
   // Replace acceses to the producer in the consumer with the cache.
   CacheReplacer replacer(producer, tmp_buf, info.start);
-  // TODO: Can we reuse 'consumer' below without cloning?
-  StmtPtr new_consumer =
-      IRSimplifier::simplify(Stmt::clone(consumer)->accept_mutator(&replacer));
+  consumer->accept_mutator(&replacer);
 
   // replace the old consumer with the replaced consumer.
-  BlockPtr consumer_block = nullptr;
+  BlockPtr consumer_block = to<Block>(consumer);
+  BlockPtr parent_block = to<Block>(consumer->get_parent());
   // if the consumer is a block, we should mutate it in place.
-  if ((consumer_block = to<Block>(consumer))) {
-    consumer_block->clear();
-    consumer_block->append_stmt(new_consumer);
-  } else {
-    consumer_block = to<Block>(consumer->get_parent());
-    assert(consumer_block);
-    consumer_block->replace_stmt(consumer, new_consumer);
-  }
+  bool is_block = consumer_block != nullptr;
 
   // If there's a reduction and we are operating on the reduce axis, we need to
   // initialize the cache with 0s. Also, we can't just write the result straight
@@ -2715,7 +2705,11 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
           alloc<For>(new_loop_vars[i], alloc<IntImm>(0), tmp_dims[i], tmp_init);
     }
 
-    consumer_block->insert_stmt_before(tmp_init, new_consumer);
+    if (is_block) {
+      consumer_block->prepend_stmt(tmp_init);
+    } else {
+      parent_block->insert_stmt_before(tmp_init, consumer);
+    }
 
     // Reduce back to the original buffer:
     StmtPtr tmp_store = alloc<Store>(
@@ -2732,9 +2726,13 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
           new_loop_vars[i], alloc<IntImm>(0), tmp_dims[i], tmp_store);
     }
 
-    consumer_block->insert_stmt_after(tmp_store, new_consumer);
+    if (is_block) {
+      consumer_block->append_stmt(tmp_store);
+    } else {
+      parent_block->insert_stmt_after(tmp_store, consumer);
+    }
 
-    return std::make_pair(tmp_buf, new_consumer);
+    return std::make_pair(tmp_buf, consumer);
   }
 
   if (hasReads) {
@@ -2747,7 +2745,11 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
           new_loop_vars[i], alloc<IntImm>(0), tmp_dims[i], tmp_store);
     }
 
-    consumer_block->insert_stmt_before(tmp_store, new_consumer);
+    if (is_block) {
+      consumer_block->prepend_stmt(tmp_store);
+    } else {
+      parent_block->insert_stmt_before(tmp_store, consumer);
+    }
   }
 
   if (hasWrites) {
@@ -2760,10 +2762,14 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
           new_loop_vars[i], alloc<IntImm>(0), tmp_dims[i], tmp_store);
     }
 
-    consumer_block->insert_stmt_after(tmp_store, new_consumer);
+    if (is_block) {
+      consumer_block->append_stmt(tmp_store);
+    } else {
+      parent_block->insert_stmt_after(tmp_store, consumer);
+    }
   }
 
-  return std::make_pair(tmp_buf, new_consumer);
+  return std::make_pair(tmp_buf, consumer);
 }
 
 /*
