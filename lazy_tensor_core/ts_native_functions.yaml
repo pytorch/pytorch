@@ -58,6 +58,7 @@ supported:
   - t
   - t_
   - tanh
+  - threshold_backward
   - transpose.int
   - transpose_
   - unsqueeze

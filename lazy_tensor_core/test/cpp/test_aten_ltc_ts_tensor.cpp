@@ -5643,6 +5643,21 @@ TEST_F(AtenLtcTsTensorTest, TestThreshold) {
   });
 }
 
+TEST_F(AtenLtcTsTensorTest, TestThresholdBackward) {
+  float threshold = 0.4;
+  float value = 20;
+
+  auto testFunction = [&](const std::vector<torch::Tensor>& inputs) -> torch::Tensor {
+    return torch::threshold(inputs[0], threshold, value);
+  };
+
+  ForEachDevice([&](const torch::Device& device) {
+    TestBackward({torch::rand({2, 1, 4, 6},
+        torch::TensorOptions(torch::kFloat).requires_grad(true))},
+        device, testFunction);
+  });
+}
+
 TEST_F(AtenLtcTsTensorTest, TestThresholdInPlace) {
   torch::Tensor input =
       torch::rand({2, 1, 4, 6}, torch::TensorOptions(torch::kFloat));
