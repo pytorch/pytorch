@@ -66,7 +66,6 @@ install(FILES
           THCNumerics.cuh
           THCTensorInfo.cuh
           THCTensorTypeUtils.cuh
-          THCTensorMathMagma.h
           THCThrustAllocator.cuh
           # See Note [TH abstraction violation]
           THCTensor.hpp
@@ -88,8 +87,6 @@ install(FILES
           generic/THCTensorCopy.h
           generic/THCTensorMath.h
           generic/THCTensorMath.cu
-          generic/THCTensorMathMagma.h
-          generic/THCTensorMathMagma.cpp
           generic/THCTensorMathPairwise.h
           generic/THCTensorMathPairwise.cu
           DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/THC/generic")
