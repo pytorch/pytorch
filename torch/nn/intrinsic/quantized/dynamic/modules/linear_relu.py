@@ -4,7 +4,9 @@ import torch.nn.intrinsic as nni
 
 class LinearReLU(nnqd.Linear):
     r"""
-    A LinearReLU module fused from Linear and ReLU modules
+    A LinearReLU module fused from Linear and ReLU modules that can be used
+    for dynamic quantization.
+    Supports both, FP16 and INT8 quantization.
 
     We adopt the same interface as :class:`torch.nn.quantized.dynamic.Linear`.
 
