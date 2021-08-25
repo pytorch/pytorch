@@ -25,8 +25,8 @@ struct ListImpl final : public c10::intrusive_ptr_target {
   using list_type = std::vector<IValue>;
 
   explicit ListImpl(list_type list_, TypePtr elementType_)
-  : list(std::move(list_))
-  , elementType(std::move(elementType_)) {}
+      : list(std::move(list_))
+      , elementType(std::move(elementType_)) {}
 
   list_type list;
 
@@ -68,7 +68,7 @@ struct ListElementConstReferenceTraits<c10::optional<std::string>> {
 
 template<class T, class Iterator>
 class ListElementReference final {
-public:
+ public:
   operator T() const;
 
   ListElementReference& operator=(T&& new_value) &&;
@@ -80,9 +80,9 @@ public:
 
   friend void swap<T, Iterator>(ListElementReference&& lhs, ListElementReference&& rhs);
 
-private:
+ private:
   ListElementReference(Iterator iter)
-  : iterator_(iter) {}
+      : iterator_(iter) {}
 
   ListElementReference(const ListElementReference&) = delete;
   ListElementReference& operator=(const ListElementReference&) = delete;
@@ -104,7 +104,7 @@ private:
 // on it being the type of the underlying vector.
 template<class T, class Iterator>
 class ListIterator final : public std::iterator<std::random_access_iterator_tag, T> {
-public:
+ public:
   explicit ListIterator() = default;
   ~ListIterator() = default;
 
@@ -114,35 +114,35 @@ public:
   ListIterator& operator=(ListIterator&&) = default;
 
   ListIterator& operator++() {
-      ++iterator_;
-      return *this;
+    ++iterator_;
+    return *this;
   }
 
   ListIterator operator++(int) {
-      ListIterator copy(*this);
-      ++*this;
-      return copy;
+    ListIterator copy(*this);
+    ++*this;
+    return copy;
   }
 
   ListIterator& operator--() {
-      --iterator_;
-      return *this;
+    --iterator_;
+    return *this;
   }
 
   ListIterator operator--(int) {
-      ListIterator copy(*this);
-      --*this;
-      return copy;
+    ListIterator copy(*this);
+    --*this;
+    return copy;
   }
 
   ListIterator& operator+=(typename List<T>::size_type offset) {
-      iterator_ += offset;
-      return *this;
+    iterator_ += offset;
+    return *this;
   }
 
   ListIterator& operator-=(typename List<T>::size_type offset) {
-      iterator_ -= offset;
-      return *this;
+    iterator_ -= offset;
+    return *this;
   }
 
   ListIterator operator+(typename List<T>::size_type offset) const {
@@ -165,7 +165,7 @@ public:
     return {iterator_ + offset};
   }
 
-private:
+ private:
   explicit ListIterator(Iterator iterator): iterator_(std::move(iterator)) {}
 
   Iterator iterator_;
@@ -222,7 +222,7 @@ const IValue* ptr_to_first_element(const List<IValue>& list);
  */
 template<class T>
 class List final {
-private:
+ private:
   // This is an intrusive_ptr because List is a pointer type.
   // Invariant: This will never be a nullptr, there will always be a valid
   // ListImpl.
@@ -231,7 +231,7 @@ private:
   using internal_reference_type = impl::ListElementReference<T, typename c10::detail::ListImpl::list_type::iterator>;
   using internal_const_reference_type = typename impl::ListElementConstReferenceTraits<T>::const_reference;
 
-public:
+ public:
   using value_type = T;
   using size_type = typename c10::detail::ListImpl::list_type::size_type;
   using iterator = impl::ListIterator<T, typename c10::detail::ListImpl::list_type::iterator>;
@@ -450,7 +450,7 @@ public:
   // See [unsafe set type] for why this exists.
   void unsafeSetElementType(TypePtr t);
 
-private:
+ private:
   explicit List(c10::intrusive_ptr<c10::detail::ListImpl>&& elements);
   explicit List(const c10::intrusive_ptr<c10::detail::ListImpl>& elements);
   friend struct IValue;
@@ -474,7 +474,7 @@ inline const IValue* ptr_to_first_element(const GenericList& list) {
 }
 
 namespace torch {
-  template<class T> using List = c10::List<T>;
+template<class T> using List = c10::List<T>;
 }
 
 #include <ATen/core/List_inl.h>

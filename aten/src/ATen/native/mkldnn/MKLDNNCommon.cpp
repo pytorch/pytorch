@@ -86,6 +86,9 @@ ideep::tensor itensor_view_from_dense(const Tensor& tensor) {
   TORCH_CHECK(
       tensor.layout() == Layout::Strided,
       "itensor_view_from_dense expects dense tensor input");
+  if(!at::impl::variable_excluded_from_dispatch()) {
+    std::cout << "check here" << std::endl;
+  }
   TORCH_INTERNAL_ASSERT(at::impl::variable_excluded_from_dispatch());
   if (tensor.scalar_type() == ScalarType::Float) {
     return {{tensor.sizes().vec(),

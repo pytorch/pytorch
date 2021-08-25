@@ -9,11 +9,11 @@ set(MODEL_TRACER_DIR
   ${TORCH_ROOT}/torch/csrc/jit/mobile/model_tracer/KernelDTypeTracer.cpp
 )
 
-add_library(backend_with_compiler_runtime SHARED
-        ${TORCH_ROOT}/test/cpp/jit/test_backend_compiler_lib.cpp
-        ${TORCH_ROOT}/torch/csrc/jit/backends/backend_interface.cpp
-        )
-target_link_libraries(backend_with_compiler_runtime PRIVATE torch)
+#add_library(backend_with_compiler_runtime SHARED
+#        ${TORCH_ROOT}/test/cpp/jit/test_backend_compiler_lib.cpp
+#        ${TORCH_ROOT}/torch/csrc/jit/backends/backend_interface.cpp
+#        )
+#target_link_libraries(backend_with_compiler_runtime PRIVATE torch)
 
 add_executable(
   model_tracer
