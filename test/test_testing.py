@@ -18,7 +18,7 @@ from torch.testing._internal.common_utils import \
 from torch.testing._internal.common_device_type import \
     (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
      get_device_type_test_bases, instantiate_device_type_tests, onlyCUDA, onlyOnCPUAndCUDA,
-     deviceCountAtLeast, ops)
+     deviceCountAtLeast)
 from torch.testing._internal.common_methods_invocations import op_db
 import torch.testing._internal.opinfo_helper as opinfo_helper
 from torch.testing._internal.common_dtype import get_all_dtypes
@@ -1463,8 +1463,7 @@ class TestTestParametrization(TestCase):
                 def test_two_things_default_names(self, x, y):
                     pass
 
-            instantiate_parametrized_tests(TestParametrized)"""
-        )
+            instantiate_parametrized_tests(TestParametrized)""")
         expected_test_names = [
             'TestParametrized.test_default_names_x_0',
             'TestParametrized.test_default_names_x_1',
@@ -1494,8 +1493,7 @@ class TestTestParametrization(TestCase):
                 def test_two_things_custom_names_alternate(self, x, y):
                     pass
 
-            instantiate_parametrized_tests(TestParametrized)"""
-        )
+            instantiate_parametrized_tests(TestParametrized)""")
         expected_test_names = [
             'TestParametrized.test_custom_names_bias',
             'TestParametrized.test_custom_names_no_bias',
@@ -1527,8 +1525,7 @@ class TestTestParametrization(TestCase):
                 def test_two_things_custom_names(self, x, y):
                     pass
 
-            instantiate_parametrized_tests(TestParametrized)"""
-        )
+            instantiate_parametrized_tests(TestParametrized)""")
         expected_test_names = [
             'TestParametrized.test_custom_names_bias',
             'TestParametrized.test_custom_names_no_bias',
@@ -1552,6 +1549,7 @@ class TestTestParametrization(TestCase):
 
 class TestTestParametrizationDeviceType(TestCase):
     def test_default_names(self, device):
+        device = self.device_type
         test_names = _get_test_names_for_test_class("""
             class TestParametrized(TestCase):
                 @parametrize("x", range(5))
@@ -1562,8 +1560,7 @@ class TestTestParametrizationDeviceType(TestCase):
                 def test_two_things_default_names(self, device, x, y):
                     pass
 
-            instantiate_device_type_tests(TestParametrized, globals(), only_for='{}')""".format(device)
-        )
+            instantiate_device_type_tests(TestParametrized, globals(), only_for='{}')""".format(device))
         expected_test_names = [name.format(device.upper(), device) for name in (
             'TestParametrized{}.test_default_names_x_0_{}',
             'TestParametrized{}.test_default_names_x_1_{}',
@@ -1583,6 +1580,7 @@ class TestTestParametrizationDeviceType(TestCase):
     # breaking change will be made in a future PR.
     @unittest.expectedFailure
     def test_name_fn(self, device):
+        device = self.device_type
         test_names = _get_test_names_for_test_class("""
             class TestParametrized(TestCase):
                 @parametrize("bias", [False, True], name_fn=lambda b: 'bias' if b else 'no_bias')
@@ -1599,8 +1597,7 @@ class TestTestParametrizationDeviceType(TestCase):
                 def test_two_things_custom_names_alternate(self, device, x, y):
                     pass
 
-            instantiate_device_type_tests(TestParametrized, globals(), only_for='""" + device + "')"
-        )
+            instantiate_device_type_tests(TestParametrized, globals(), only_for='""" + device + "')")
         expected_test_names = [name.format(device.upper(), device) for name in (
             'TestParametrized{}.test_custom_names_bias_{}',
             'TestParametrized{}.test_custom_names_no_bias_{}',
@@ -1619,6 +1616,7 @@ class TestTestParametrizationDeviceType(TestCase):
         self.assertEqual(expected_test_names, test_names)
 
     def test_subtest_names(self, device):
+        device = self.device_type
         test_names = _get_test_names_for_test_class("""
             class TestParametrized(TestCase):
                 @parametrize("bias", [subtest(True, name='bias'),
@@ -1632,8 +1630,7 @@ class TestTestParametrizationDeviceType(TestCase):
                 def test_two_things_custom_names(self, device, x, y):
                     pass
 
-            instantiate_device_type_tests(TestParametrized, globals(), only_for='{}')""".format(device)
-        )
+            instantiate_device_type_tests(TestParametrized, globals(), only_for='{}')""".format(device))
         expected_test_names = [name.format(device.upper(), device) for name in (
             'TestParametrized{}.test_custom_names_bias_{}',
             'TestParametrized{}.test_custom_names_no_bias_{}',
@@ -1650,6 +1647,7 @@ class TestTestParametrizationDeviceType(TestCase):
     # breaking change will be made in a future PR.
     @unittest.expectedFailure
     def test_ops_composition_names(self, device):
+        device = self.device_type
         test_names = _get_test_names_for_test_class("""
             class TestParametrized(TestCase):
                 @ops(op_db)
@@ -1657,8 +1655,7 @@ class TestTestParametrizationDeviceType(TestCase):
                 def test_op_parametrized(self, device, dtype, op, flag):
                     pass
 
-            instantiate_device_type_tests(TestParametrized, globals(), only_for='{}')""".format(device)
-        )
+            instantiate_device_type_tests(TestParametrized, globals(), only_for='{}')""".format(device))
 
         expected_test_names = []
         for op in op_db:
