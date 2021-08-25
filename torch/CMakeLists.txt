@@ -264,6 +264,10 @@ if(USE_DEPLOY)
     endif()
     if(USE_NCCL AND USE_C10D_NCCL)
         list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10D_NCCL)
+        # Put nccl headers on the include path. We are specifically only setting
+        # include dirs here instead of linking against __caffe2_nccl wholesale
+        # to ensure we aren't accidentally replicating the nccl lib.
+        target_include_directories(torch_python_obj PRIVATE $<TARGET_PROPERTY:__caffe2_nccl,INTERFACE_INCLUDE_DIRECTORIES>)
     endif()
     if(USE_MPI AND USE_C10D_MPI)
       list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10D_MPI)
@@ -281,7 +285,6 @@ if(USE_DEPLOY)
 
     # Set c10d-related include directories as well.
     target_include_directories(torch_python_obj PRIVATE $<BUILD_INTERFACE:${TORCH_SRC_DIR}/csrc/distributed>)
-    target_include_directories(torch_python_obj PRIVATE $<TARGET_PROPERTY:__caffe2_nccl,INTERFACE_INCLUDE_DIRECTORIES>)
   endif()
   target_compile_definitions(torch_python_obj PRIVATE "-DTHP_BUILD_MAIN_LIB -DUSE_DEPLOY")
 
