@@ -101,8 +101,11 @@ void updateNNCCache(NodeKind kind, std::shared_ptr<TEWrapper> code) {
 } // namespace
 
 std::shared_ptr<TEWrapper> createLogit() {
-  // TODO: Use NNC cache for this op.
-  auto wrap = std::make_shared<TEWrapper>();
+  auto wrap = lookupNNCCache(aten::logit);
+  if (wrap) {
+    return wrap;
+  }
+  wrap = std::make_shared<TEWrapper>();
   auto N = VarHandle("N", kInt);
   auto C = VarHandle("C", kFloat);
   Placeholder A("A", kFloat, {N});
@@ -117,7 +120,9 @@ std::shared_ptr<TEWrapper> createLogit() {
     }();
     return log_vml(A_elem / (FloatImm::make(1.0f) - A_elem));
   });
-  return wrapTECompute(wrap, B, {A, N, C});
+  wrap = wrapTECompute(wrap, B, {A, N, C});
+  updateNNCCache(aten::logit, wrap);
+  return wrap;
 }
 
 std::shared_ptr<TEWrapper> createRelu() {
