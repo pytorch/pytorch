@@ -1329,7 +1329,12 @@ const std::vector<std::string> functions = {
             result = torch.add(self, other, alpha=alpha)
             self_size, other_size = AD_sizes_if_not_equal_multi_1(self, other, result)
             def backward(grad_output):
-                grad_other = (grad_output * alpha)._grad_sum_to_size(other_size)
+                temp = grad_output
+                # Conditional prevents an extra kernel in trivial cases.
+                # This was noticed with bias backward fusions.
+                if float(alpha) != 1.0 :
+                    temp *= alpha
+                grad_other = (temp)._grad_sum_to_size(other_size)
                 grad_self = (grad_output)._grad_sum_to_size(self_size)
                 return grad_self, grad_other, None
             return result, backward
