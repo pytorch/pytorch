@@ -9,9 +9,6 @@ from .quantization_patterns import (
     QuantizeHandler,
     CustomModuleQuantizeHandler,
     StandaloneModuleQuantizeHandler,
-    BinaryOpQuantizeHandler,
-    binary_op_supported_dtypes,
-    binary_reference_op_supported_dtypes,
 )
 from ..qconfig import (
     QConfigAny,
@@ -19,7 +16,6 @@ from ..qconfig import (
 from .graph_module import (
     is_observed_standalone_module,
 )
-from ..utils import get_qconfig_dtypes
 
 from typing import Any, Dict, List, Callable, Optional, Tuple, Set
 
@@ -135,60 +131,15 @@ def find_matches(
         if node.name not in match_map and node.name not in all_matched:
             for pattern, value in patterns.items():
                 if is_match(modules, node, pattern):
-                    skip_this_match = False
-                    if value is BinaryOpQuantizeHandler:
-
-                        # to properly check for dtype support, we need to
-                        # navigate to the base node of an add-relu or mul-relu
-                        # pattern
-                        base_node = node
-                        if (
-                            (node.op == 'call_function' and
-                             node.target is torch.nn.functional.relu) or
-                            (node.op == 'call_module' and
-                             isinstance(modules[node.target], torch.nn.ReLU))
-                        ):
-                            base_node = node.args[0]
-
-                        this_node_qconfig = \
-                            qconfig_map[base_node.name]
-                        if this_node_qconfig:
-                            dtypes = get_qconfig_dtypes(this_node_qconfig)
-                            # TODO(future PR): update the pattern to quantize
-                            # handler logic to take this into account.
-
-
-                            # This needs to handle 3 cases
-                            # 1) op and dtype is in either [is_ref or non-ref] list -> don't skip
-                            # 2) op is not in either list (i.e. relu) -> don't skip
-                            # 3) op is in non-ref list, but not for dtype, and op+dtype not in is_ref list -> skip
-
-                            # note: the value of is_reference is unknown at prepare, so we have to cover both cases
-                            # handle is_reference = False
-                            skip_match_not_is_reference = (
-                                (base_node.target in binary_op_supported_dtypes) and
-                                (dtypes not in binary_op_supported_dtypes[base_node.target])
-                            )
-
-                            # handle is_reference = True
-                            supported_is_reference = (
-                                (base_node.target in binary_reference_op_supported_dtypes) and
-                                (dtypes in binary_reference_op_supported_dtypes[base_node.target])
-                            )
-
-                            # only skip if not reference says skip and is_reference doesn't support
-                            skip_this_match = skip_match_not_is_reference and not supported_is_reference
-
-                    if not skip_this_match:
-                        matched: List[Any] = []
-                        record_match(pattern, node, matched)
-                        for n in matched:
-                            match_map[n.name] = (
-                                node, matched, pattern, value(node, modules),  # type: ignore[operator]
-                                qconfig_map[n.name])
-                            all_matched.add(n.name)
-                        # break after finding the first match
-                        break
+                    matched: List[Any] = []
+                    record_match(pattern, node, matched)
+                    for n in matched:
+                        match_map[n.name] = (
+                            node, matched, pattern, value(node, modules),  # type: ignore[operator]
+                            qconfig_map[n.name])
+                        all_matched.add(n.name)
+                    # break after finding the first match
+                    break
 
     # add custom module instances to the match result
     assert modules is not None

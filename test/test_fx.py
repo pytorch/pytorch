@@ -2296,6 +2296,21 @@ class TestFX(JitTestCase):
                             r"Call using an FX-traced Module, line .* of the "
                             r"traced Module's generated forward function:")
 
+    def test_graph_module_replicate_for_dp(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return torch.relu(x)
+
+        gm = torch.fx.symbolic_trace(Foo())
+
+        x = torch.randn(5, 3)
+        out = gm(x)
+
+        replica = gm._replicate_for_data_parallel()
+        out_replica = replica(x)
+
+        torch.testing.assert_allclose(out_replica, out)
+
     def test_ast_rewriter_rewrites_assert(self):
         class M(torch.nn.Module):
             def forward(self, x: torch.Tensor, y: int, z: int):
