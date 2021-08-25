@@ -80,7 +80,7 @@ class autocast(object):
         c_float32 = torch.rand((8, 8), device="cpu")
         d_float32 = torch.rand((8, 8), device="cpu")
 
-        with autocast(fast_dtype=torch.bfloat16, device_type="cpu"):
+        with autocast(dtype=torch.bfloat16, device_type="cpu"):
             # torch.mm is on autocast's list of ops that should run in bfloat16.
             # Inputs are float32, but the op runs in bfloat16 and produces bfloat16 output.
             # No manual casts are required.
@@ -125,7 +125,7 @@ class autocast(object):
     Args:
         device_type(string, required):  Whether to use 'cuda' or 'cpu' device
         enabled(bool, optional, default=True)":  Whether autocasting should be enabled in the region.
-        fast_dtype(torch_dtype, optional):  Whether to use torch.float16 or torch.bfloat16
+        dtype(torch_dtype, optional):  Whether to use torch.float16 or torch.bfloat16
     """
     def __init__(self, device_type, enabled=True, **kwargs):
         self.device = device_type
@@ -139,9 +139,9 @@ class autocast(object):
             warnings.warn('User provided device_type of \'cuda\', but CUDA is not available. Disabling')
             enabled = False
         for key, value in kwargs.items():
-            if key == 'fast_dtype':
+            if key == 'dtype':
                 self.fast_dtype = value
-            if not (key == 'fast_dtype'):
+            if not (key == 'dtype'):
                 raise RuntimeError('Unrecognized optional argument supplied to autocast context manager: ' + str(key))
 
         if self.device == 'cpu':
@@ -152,8 +152,8 @@ class autocast(object):
                 warnings.warn(error_message)
                 enabled = False
         if self.device == 'cuda':
-            if self.fast_dtype == torch.bfloat16 and torch.cuda.get_device_properties(torch.cuda.current_device()).major < 8:
-                raise RuntimeError('Current CUDA Device does not support bfloat16. Switching fast_dtype to float16.')
+            if self.fast_dtype == torch.bfloat16 and not torch.cuda.is_bf16_supported():
+                raise RuntimeError('Current CUDA Device does not support bfloat16. Please switch dtype to float16.')
         self._enabled = enabled
 
     def __enter__(self):
