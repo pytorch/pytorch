@@ -2911,6 +2911,28 @@ class TestQuantizeFx(QuantizationTestCase):
         self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
         self.checkGraphModuleNodes(m_ref, expected_node_occurrence=node_occurrence_ref)
 
+    def test_ref_linear_module(self):
+        """ Make sure the numerics for models with ref linear module
+        matches models with fbgemm/qnnpack module
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 5)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        m = M().eval()
+        m = prepare_fx(m, {"": default_qconfig})
+        m_copy = copy.deepcopy(m)
+        m = convert_fx(m, is_reference=False)
+        m_ref = convert_fx(m_copy, is_reference=True)
+        data = torch.randn(5, 10)
+        result = m(data)
+        result_ref = m_ref(data)
+        self.assertTrue(torch.equal(result, result_ref))
+
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
     """Unit tests for individual ops
