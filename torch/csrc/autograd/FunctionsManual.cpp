@@ -3436,6 +3436,7 @@ bool any_variable_defined(const variable_list& variables) {
 // so we wrap them into a struct.
 template<bool in_place>
 struct HouseholderReflectorEvaluator {
+  // computes (I - t v v^H) K
   static Tensor apply_left(int64_t k, const Tensor& v_full, const Tensor& t, Tensor& K) {
     // NOTE: v_full is a vector of dimension (..., m, 1)
     auto m = v_full.size(-2);
@@ -3450,6 +3451,7 @@ struct HouseholderReflectorEvaluator {
     }
   }
 
+  // computes K (I - t v v^H)
   static Tensor apply_right(int64_t k, const Tensor& v_full, const Tensor& t, Tensor& K) {
     // NOTE: v_full is a vector of dimension (..., m, 1)
     auto m = v_full.size(-2);
@@ -3476,6 +3478,8 @@ std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, cons
   auto m = input_.size(-2);
   auto k = tau.size(-1);
 
+  // forward operates only over the lower triangular part with the assumption
+  // that the diagonal of input is filled with 1s.
   auto input = input_.tril(-1);
   input.diagonal(0, -2, -1).fill_(1.0);
 
@@ -3514,6 +3518,7 @@ std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, cons
     return std::make_tuple(v_grad, tau_grad.squeeze(-1));
   };
 
+  // K <- H_0 @ K
   K = left_reflect(0, input.narrow(-1, 0, 1), sigma.narrow(-1, 0, 1), K);
   for (int64_t i = 0; i < k; ++i) {
     // NOTE: narrow will unsqueeze(-1)
@@ -3534,6 +3539,8 @@ std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, cons
     }
   }
 
+  // forward operates only over the lower-triangular part of the input,
+  // hence the gradient is also lower-triangular.
   input_grad.tril_(-1);
 
   return std::make_tuple(input_grad, tau_grad);
