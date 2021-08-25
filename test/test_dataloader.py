@@ -2300,10 +2300,10 @@ class TestIndividualWorkerQueue(TestCase):
                 max_num_workers = cpu_count
 
         if max_num_workers is None:
-            max_num_workers = 2
+            max_num_workers = 1
 
         for batch_size in (8, 16, 32, 64):
-            for num_workers in range(1, max_num_workers):
+            for num_workers in range(1, max_num_workers + 1):
                 self._run_ind_worker_queue_test(batch_size=batch_size, num_workers=num_workers)
 
 
