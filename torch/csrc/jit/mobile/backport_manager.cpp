@@ -160,97 +160,6 @@ void write_archive_v5_to_v7(
   writer.writeRecord(fname, data.data(), data.size());
 }
 
-std::stringstream re_emit_model(
-    std::stringstream& input_model_stream,
-    bool emit_default_input_instructions,
-    bool enable_defaults_args_with_out_args,
-    int64_t to_version) {
-  std::shared_ptr<IStreamAdapter> rai =
-      std::make_shared<IStreamAdapter>(&input_model_stream);
-  auto reader = std::make_shared<PyTorchStreamReader>(rai);
-  std::vector<IValue> constants_values =
-      readArchive(kArchiveNameConstants, *reader.get()).toTuple()->elements();
-
-  // If there are debug info files in the original model file, it should also
-  // show up in the backported model
-  bool hasBytecodeDebug = reader->hasRecord("mobile_debug_handles.pkl");
-
-  // extra_files are kept
-  auto records = reader->getAllRecords();
-  ExtraFilesMap extra_files;
-  for (const auto& record : records) {
-    std::size_t found = record.find_last_of("/\\");
-    auto path = record.substr(0, found);
-    if ("extra" == path) {
-      extra_files.emplace(record.substr(found + 1), "");
-    }
-  }
-  // Loading the TS module is required for this backport, because bytecode needs
-  // to be re-emitted (refer to the comments below)
-  Module torch_script = torch::jit::load(rai, c10::nullopt, extra_files);
-
-  // The RAII guard to change the flag, emitBytecodeDefaultInputs, to true, so
-  // that TS stores the default argument values in the constant table, and emits
-  // the instructions (LOADC, for example), to push the values to the stack. It
-  // restores the behavior of V5 and before. For V6, the default arg values are
-  // resolved at runtime init stage for better operator compatibility.
-  std::stringstream intermediate_model_stream;
-  {
-    BytecodeEmitModeGuard argNumGuard(
-        emit_default_input_instructions, enable_defaults_args_with_out_args);
-    torch_script._save_for_mobile(
-        intermediate_model_stream, extra_files, hasBytecodeDebug);
-  }
-
-  // Update the bytecode version (from the input_model_stream version to
-  // ${to_version})
-
-  PyTorchStreamReader reader_bytecode(&intermediate_model_stream);
-  std::vector<IValue> bytecode_values = get_bytecode_ivalues(reader_bytecode);
-  std::unordered_set<std::string> excluded_files{
-      "constants.pkl",
-      "bytecode.pkl",
-      "version",
-  };
-
-  std::unordered_set<std::string> excluded_dirs{
-      "constants",
-      "bytecode",
-  };
-
-  std::stringstream ouput_model_stream;
-  auto writer_func = [&](const void* buf, size_t nbytes) -> size_t {
-    ouput_model_stream.write(static_cast<const char*>(buf), nbytes);
-    return !ouput_model_stream ? 0 : nbytes;
-  };
-
-  PyTorchStreamWriter writer_bytecode(writer_func);
-
-  selective_copy(
-      reader_bytecode, writer_bytecode, excluded_files, excluded_dirs);
-
-  update_bytecode_version(bytecode_values, to_version);
-  auto bytecode_tuple = c10::ivalue::Tuple::create(std::move(bytecode_values));
-  SerializationStorageContext storage_context;
-  write_archive_v5_to_v7(
-      writer_bytecode,
-      c10::ivalue::Tuple::create(constants_values),
-      /*archive_name=*/"constants",
-      /*archive_dir=*/"",
-      /*tensor_dir=*/"constants/",
-      /*use_storage_context=*/true,
-      storage_context);
-  write_archive_v5_to_v7(
-      writer_bytecode,
-      bytecode_tuple,
-      /*archive_name=*/"bytecode",
-      /*archive_dir=*/"",
-      /*tensor_dir=*/"constants/",
-      /*use_storage_context=*/true,
-      storage_context);
-  return ouput_model_stream;
-}
-
 } // namespace
 
 /******************** backport_v{i}_to_v{i-1} Functions **********************/
@@ -418,14 +327,89 @@ Thus, the backport is necessary such that the bytecode operator table contains
 number of specified arguments.
 */
 std::stringstream backport_v6_to_v5(std::stringstream& input_model_stream) {
-  bool emit_default_input_instructions = true;
-  bool enable_defaults_args_with_out_args = false;
+  std::shared_ptr<IStreamAdapter> rai =
+      std::make_shared<IStreamAdapter>(&input_model_stream);
+  auto reader = std::make_shared<PyTorchStreamReader>(rai);
+  std::vector<IValue> constants_values =
+      readArchive(kArchiveNameConstants, *reader.get()).toTuple()->elements();
 
-  std::stringstream ouput_model_stream = re_emit_model(
-      input_model_stream,
-      emit_default_input_instructions,
-      enable_defaults_args_with_out_args,
-      kBytecodeVersionV5 /*to_version*/);
+  // If there are debug info files in the original model file, it should also
+  // show up in the backported model
+  bool hasBytecodeDebug = reader->hasRecord("mobile_debug_handles.pkl");
+
+  // extra_files are kept
+  auto records = reader->getAllRecords();
+  ExtraFilesMap extra_files;
+  for (const auto& record : records) {
+    std::size_t found = record.find_last_of("/\\");
+    auto path = record.substr(0, found);
+    if ("extra" == path) {
+      extra_files.emplace(record.substr(found + 1), "");
+    }
+  }
+  // Loading the TS module is required for this backport, because bytecode needs
+  // to be re-emitted (refer to the comments below)
+  Module torch_script = torch::jit::load(rai, c10::nullopt, extra_files);
+
+  // The RAII guard to change the flag, emitBytecodeDefaultInputs, to true, so
+  // that TS stores the default argument values in the constant table, and emits
+  // the instructions (LOADC, for example), to push the values to the stack. It
+  // restores the behavior of V5 and before. For V6, the default arg values are
+  // resolved at runtime init stage for better operator compatibility.
+  std::stringstream intermediate_model_stream;
+  {
+    BytecodeEmitModeGuard argNumGuard(
+        true /*emit_default_input_instructions*/,
+        false /*enable_defaults_args_with_out_args*/);
+    torch_script._save_for_mobile(
+        intermediate_model_stream, extra_files, hasBytecodeDebug);
+  }
+
+  // Update the bytecode version (from 6 to 5)
+
+  PyTorchStreamReader reader_bytecode(&intermediate_model_stream);
+  std::vector<IValue> bytecode_values = get_bytecode_ivalues(reader_bytecode);
+  std::unordered_set<std::string> excluded_files{
+      "constants.pkl",
+      "bytecode.pkl",
+      "version",
+  };
+
+  std::unordered_set<std::string> excluded_dirs{
+      "constants",
+      "bytecode",
+  };
+
+  std::stringstream ouput_model_stream;
+  auto writer_func = [&](const void* buf, size_t nbytes) -> size_t {
+    ouput_model_stream.write(static_cast<const char*>(buf), nbytes);
+    return !ouput_model_stream ? 0 : nbytes;
+  };
+
+  PyTorchStreamWriter writer_bytecode(writer_func);
+
+  selective_copy(
+      reader_bytecode, writer_bytecode, excluded_files, excluded_dirs);
+
+  update_bytecode_version(bytecode_values, kBytecodeVersionV5);
+  auto bytecode_tuple = c10::ivalue::Tuple::create(std::move(bytecode_values));
+  SerializationStorageContext storage_context;
+  write_archive_v5_to_v7(
+      writer_bytecode,
+      c10::ivalue::Tuple::create(constants_values),
+      /*archive_name=*/"constants",
+      /*archive_dir=*/"",
+      /*tensor_dir=*/"constants/",
+      /*use_storage_context=*/true,
+      storage_context);
+  write_archive_v5_to_v7(
+      writer_bytecode,
+      bytecode_tuple,
+      /*archive_name=*/"bytecode",
+      /*archive_dir=*/"",
+      /*tensor_dir=*/"constants/",
+      /*use_storage_context=*/true,
+      storage_context);
 
   return ouput_model_stream;
 }
@@ -452,14 +436,89 @@ push in the stack. Thus, the backport is necessary such that the bytecode
 contains all the arguments as before.
 */
 std::stringstream backport_v7_to_v6(std::stringstream& input_model_stream) {
-  bool emit_default_input_instructions = false;
-  bool enable_defaults_args_with_out_args = false;
+  std::shared_ptr<IStreamAdapter> rai =
+      std::make_shared<IStreamAdapter>(&input_model_stream);
+  auto reader = std::make_shared<PyTorchStreamReader>(rai);
+  std::vector<IValue> constants_values =
+      readArchive(kArchiveNameConstants, *reader.get()).toTuple()->elements();
 
-  std::stringstream ouput_model_stream = re_emit_model(
-      input_model_stream,
-      emit_default_input_instructions,
-      enable_defaults_args_with_out_args,
-      kBytecodeVersionV6 /*to_version*/);
+  // If there are debug info files in the original model file, it should also
+  // show up in the backported model
+  bool hasBytecodeDebug = reader->hasRecord("mobile_debug_handles.pkl");
+
+  // extra_files are kept
+  auto records = reader->getAllRecords();
+  ExtraFilesMap extra_files;
+  for (const auto& record : records) {
+    std::size_t found = record.find_last_of("/\\");
+    auto path = record.substr(0, found);
+    if ("extra" == path) {
+      extra_files.emplace(record.substr(found + 1), "");
+    }
+  }
+  // Loading the TS module is required for this backport, because bytecode needs
+  // to be re-emitted (refer to the comments below)
+  Module torch_script = torch::jit::load(rai, c10::nullopt, extra_files);
+
+  // The RAII guard to change the flag, emit_default_input_instructions, to
+  // false to keep the same behavior in bytecode version 6. Change the flag,
+  // enable_defaults_args_with_out_args, to deserialized the number of specified
+  // operators which allowing both out arguments and default arguments to
+  // #all_args, instead of (#all_args - #default_args)
+  std::stringstream intermediate_model_stream;
+  {
+    BytecodeEmitModeGuard argNumGuard(
+        false /*emit_default_input_instructions*/,
+        false /*enable_defaults_args_with_out_args*/);
+    torch_script._save_for_mobile(
+        intermediate_model_stream, extra_files, hasBytecodeDebug);
+  }
+
+  // Update the bytecode version (from 7 to 6)
+
+  PyTorchStreamReader reader_bytecode(&intermediate_model_stream);
+  std::vector<IValue> bytecode_values = get_bytecode_ivalues(reader_bytecode);
+  std::unordered_set<std::string> excluded_files{
+      "constants.pkl",
+      "bytecode.pkl",
+      "version",
+  };
+
+  std::unordered_set<std::string> excluded_dirs{
+      "constants",
+      "bytecode",
+  };
+
+  std::stringstream ouput_model_stream;
+  auto writer_func = [&](const void* buf, size_t nbytes) -> size_t {
+    ouput_model_stream.write(static_cast<const char*>(buf), nbytes);
+    return !ouput_model_stream ? 0 : nbytes;
+  };
+
+  PyTorchStreamWriter writer_bytecode(writer_func);
+
+  selective_copy(
+      reader_bytecode, writer_bytecode, excluded_files, excluded_dirs);
+
+  update_bytecode_version(bytecode_values, kBytecodeVersionV6);
+  auto bytecode_tuple = c10::ivalue::Tuple::create(std::move(bytecode_values));
+  SerializationStorageContext storage_context;
+  write_archive_v5_to_v7(
+      writer_bytecode,
+      c10::ivalue::Tuple::create(constants_values),
+      /*archive_name=*/"constants",
+      /*archive_dir=*/"",
+      /*tensor_dir=*/"constants/",
+      /*use_storage_context=*/true,
+      storage_context);
+  write_archive_v5_to_v7(
+      writer_bytecode,
+      bytecode_tuple,
+      /*archive_name=*/"bytecode",
+      /*archive_dir=*/"",
+      /*tensor_dir=*/"constants/",
+      /*use_storage_context=*/true,
+      storage_context);
 
   return ouput_model_stream;
 }
