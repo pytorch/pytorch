@@ -17,7 +17,7 @@ def _quantize_and_dequantize_weight(
     elif weight_qscheme == torch.per_channel_affine:
         weight = torch.quantize_per_channel(
             weight, weight_scale,
-            weight_zero_point, weight_axis.item(), weight_dtype)
+            weight_zero_point, weight_axis.item(), weight_dtype)  # type: ignore[arg-type]
         weight_dequant = weight.dequantize()
     else:
         weight_dequant = weight

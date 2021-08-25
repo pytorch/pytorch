@@ -52,6 +52,11 @@ class _ConvNd(torch.nn.modules.conv._ConvNd):
                 self.register_buffer("weight_axis", torch.tensor(0))
 
     def get_weight(self):
+        # supress mypy warning
+        assert isinstance(self.weight, torch.Tensor)
+        assert isinstance(self.weight_scale, torch.Tensor)
+        assert isinstance(self.weight_zero_point, torch.Tensor)
+        assert isinstance(self.weight_axis, torch.Tensor)
         return _quantize_and_dequantize_weight(
             self.weight, self.weight_qscheme,
             self.weight_dtype, self.weight_scale, self.weight_zero_point, self.weight_axis)

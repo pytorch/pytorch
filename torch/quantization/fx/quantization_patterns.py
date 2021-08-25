@@ -677,7 +677,7 @@ class ConvReluQuantizeHandler(QuantizeHandler):
                     nn.Conv2d: nnqr.Conv2d,
                     nn.Conv3d: nnqr.Conv3d,
                 }
-                ref_conv = mapping[type(float_conv)].from_float(float_conv, weight_qparams)
+                ref_conv = mapping[type(float_conv)].from_float(float_conv, weight_qparams)  # type: ignore[attr-defined]
                 parent_name, name = _parent_name(self.conv_node.target)
                 setattr(modules[parent_name], name, ref_conv)
                 op_out = quantized_graph.create_node(

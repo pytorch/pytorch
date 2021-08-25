@@ -45,6 +45,11 @@ class Linear(nn.Linear):
         return "QuantizedLinear(Reference)"
 
     def get_weight(self):
+        # supress mypy warning
+        assert isinstance(self.weight, torch.Tensor)
+        assert isinstance(self.weight_scale, torch.Tensor)
+        assert isinstance(self.weight_zero_point, torch.Tensor)
+        assert isinstance(self.weight_axis, torch.Tensor)
         return _quantize_and_dequantize_weight(
             self.weight, self.weight_qscheme, self.weight_dtype, self.weight_scale,
             self.weight_zero_point, self.weight_axis)
