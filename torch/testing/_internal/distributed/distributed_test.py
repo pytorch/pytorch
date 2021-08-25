@@ -19,6 +19,7 @@ import torch.distributed.algorithms.ddp_comm_hooks.post_localSGD_hook as post_lo
 import torch.distributed.algorithms.ddp_comm_hooks.powerSGD_hook as powerSGD
 import torch.distributed.algorithms.model_averaging.averagers as averagers
 import torch.distributed.algorithms.model_averaging.utils as model_averaging_utils
+import torch.distributed.algorithms.quantization as quant
 import torch.nn as nn
 import torch.nn.functional as F
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
@@ -28,6 +29,7 @@ from torch.distributed.algorithms.ddp_comm_hooks import default_hooks as default
 from torch.distributed.algorithms.ddp_comm_hooks import (
     quantization as quantization_hooks,
 )
+from torch.distributed.algorithms.quantization import DQuantType
 from torch.distributed.distributed_c10d import (
     get_world_size,
     _get_default_group,
@@ -66,11 +68,11 @@ from torch.testing._internal.common_utils import (
 
 from torch.distributed.optim import functional_optim_map
 
-from torch.distributed.optim.functional_sgd import _FunctionalSGD
-from torch.distributed.optim.functional_adam import _FunctionalAdam
-from torch.distributed.optim.functional_adamw import _FunctionalAdamW
-
-import torch.distributed.optim.post_localSGD_optimizer as post_localSGD_optimizer
+if not IS_WINDOWS:
+    import torch.distributed.optim.post_localSGD_optimizer as post_localSGD_optimizer
+    from torch.distributed.optim.functional_sgd import _FunctionalSGD
+    from torch.distributed.optim.functional_adam import _FunctionalAdam
+    from torch.distributed.optim.functional_adamw import _FunctionalAdamW
 
 from torch.utils.data.distributed import DistributedSampler
 
@@ -2762,12 +2764,15 @@ class DistributedTest:
 
         # ALL GATHER
         def _test_all_gather_helper(
-            self, group, group_id, rank, cuda=False, rank_to_GPU=None, dtype=torch.float
+            self, group, group_id, rank, cuda=False, rank_to_GPU=None, dtype=torch.float, qtype=None
         ):
             for dest in group:
                 tensor = _build_tensor(dest + 1, rank, dtype=dtype)
                 tensors = [_build_tensor(dest + 1, -1, dtype=dtype) for i in group]
-                allgather = dist.all_gather
+                if qtype is not None:
+                    allgather = quant.auto_quantize(dist.all_gather, qtype, quant_loss=None)
+                else:
+                    allgather = dist.all_gather
                 if cuda:
                     tensor = tensor.cuda(rank_to_GPU[rank][0])
                     tensors = [t.cuda(rank_to_GPU[rank][0]) for t in tensors]
@@ -2832,6 +2837,12 @@ class DistributedTest:
         def test_all_gather_full_group(self):
             group, group_id, rank = self._init_full_group_test()
             self._test_all_gather_helper(group, group_id, rank)
+
+        @sandcastle_skip_if(BACKEND == "nccl", "Nccl does not support CPU tensors")
+        @sandcastle_skip_if(BACKEND == "mpi", "all_gather_quantized does not support MPI")
+        def test_all_gather_quantized(self):
+            group, group_id, rank = self._init_global_test()
+            self._test_all_gather_helper(group, group_id, rank, dtype=torch.float32, qtype=DQuantType.FP16)
 
         def _run_all_gather_coalesced_and_verify(
             self, output_tensor_lists, input_tensors, expected_tensors, group_id
@@ -3035,6 +3046,7 @@ class DistributedTest:
             cuda=False,
             rank_to_GPU=None,
             dtype=torch.float,
+            qtype=None
         ):
             if group_id is not None:
                 size = len(group)
@@ -3055,7 +3067,11 @@ class DistributedTest:
                         t.cuda(rank_to_GPU[rank][0]) for t in expected_tensors
                     ]
                     out_tensors = [t.cuda(rank_to_GPU[rank][0]) for t in out_tensors]
-                dist.all_to_all(out_tensors, in_tensors, group=group_id)
+                if(qtype is not None):
+                    quantize_alltoall = quant.auto_quantize(dist.all_to_all, qtype, quant_loss=None)
+                    quantize_alltoall(out_tensors, in_tensors, group=group_id)
+                else:
+                    dist.all_to_all(out_tensors, in_tensors, group=group_id)
                 for t1, t2 in zip(out_tensors, expected_tensors):
                     self.assertEqual(t1, t2)
             self._barrier()
@@ -3137,6 +3153,20 @@ class DistributedTest:
         def test_all_to_all(self):
             group, group_id, rank = self._init_global_test()
             self._test_all_to_all_helper(group, group_id, rank)
+
+        @sandcastle_skip_if(BACKEND != "nccl", "Only NCCL supports all_to_all")
+        @skip_if_rocm
+        def test_all_to_all_quantized(self):
+            group, group_id, rank = self._init_global_test()
+            rank_to_GPU = self._init_multigpu_helper()
+            self._test_all_to_all_helper(
+                group,
+                group_id,
+                rank,
+                cuda=True,
+                rank_to_GPU=rank_to_GPU,
+                dtype=torch.float32,
+                qtype=DQuantType.FP16)
 
         @sandcastle_skip_if(BACKEND != "nccl", "Only NCCL supports CUDA all_to_all")
         @skip_if_rocm
@@ -3973,6 +4003,10 @@ class DistributedTest:
             BACKEND != "nccl" and BACKEND != "gloo",
             "Only Nccl & Gloo backend support DistributedDataParallel",
         )
+        @sandcastle_skip_if(
+            IS_WINDOWS,
+            "FunctionalAdam not yet supported with Windows, see https://github.com/pytorch/pytorch/issues/62137"
+        )
         @skip_if_lt_x_gpu(2)
         @skip_if_rocm
         def test_ddp_hook_with_optimizer_parity_adamw(self):
@@ -3995,6 +4029,10 @@ class DistributedTest:
             BACKEND != "nccl" and BACKEND != "gloo",
             "Only Nccl & Gloo backend support DistributedDataParallel",
         )
+        @sandcastle_skip_if(
+            IS_WINDOWS,
+            "FunctionalAdam not yet supported with Windows, see https://github.com/pytorch/pytorch/issues/62137"
+        )
         @skip_if_lt_x_gpu(2)
         @skip_if_rocm
         def test_ddp_hook_with_optimizer_parity_adam(self):
@@ -4016,6 +4054,10 @@ class DistributedTest:
         @sandcastle_skip_if(
             BACKEND != "nccl" and BACKEND != "gloo",
             "Only Nccl & Gloo backend support DistributedDataParallel",
+        )
+        @sandcastle_skip_if(
+            IS_WINDOWS,
+            "FunctionalSGD not yet supported with Windows, see https://github.com/pytorch/pytorch/issues/62137"
         )
         @skip_if_lt_x_gpu(2)
         @skip_if_rocm
@@ -4578,6 +4620,9 @@ class DistributedTest:
         @sandcastle_skip_if(
             BACKEND != "nccl" and BACKEND != "gloo",
             "Only NCCL and GLOO backend support DistributedDataParallel",
+        )
+        @sandcastle_skip_if(
+            IS_WINDOWS, "PostLocalSGDOptimizer not yet supported with Windows."
         )
         def test_post_localSGD_optimizer_parity(self, grad_is_view=False):
             learning_rate = 0.03
