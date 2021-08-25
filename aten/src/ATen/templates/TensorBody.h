@@ -52,7 +52,6 @@ struct Node;
 
 namespace at {
 
-class OptionalTensorRef;
 class Tensor;
 using TensorList = ArrayRef<Tensor>;
 
@@ -97,7 +96,6 @@ class TORCH_API Tensor {
   explicit Tensor(unsafe_borrow_t, const Tensor& rhs)
       : impl_(c10::intrusive_ptr<at::TensorImpl, UndefinedTensorImpl>::reclaim(rhs.impl_.get())) {}
   friend MaybeOwnedTraits<Tensor>;
-  friend OptionalTensorRef;
 
  public:
   Tensor(){};

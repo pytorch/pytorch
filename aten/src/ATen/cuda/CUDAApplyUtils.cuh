@@ -5,7 +5,7 @@
 #include <THC/THCAtomics.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/macros/Macros.h>
-#include <ATen/native/Copy.h>
+#include <ATen/LegacyTHFunctionsCUDA.h>
 
 #include <math.h>
 
@@ -453,11 +453,13 @@ inline bool CUDA_tensor_apply2(at::Tensor a,
 
   if (aType == TensorArgType::ReadWrite && detail::maybeOverlappingIndices(a)) {
     // Must perform in contiguous space
-    oldA = std::exchange(a, a.contiguous());
+    oldA = a;
+    a = a.contiguous();
   }
   if (bType == TensorArgType::ReadWrite && detail::maybeOverlappingIndices(b)) {
     // Must perform in contiguous space
-    oldB = std::exchange(b, b.contiguous());
+    oldB = b;
+    b = b.contiguous();
   }
 
   // It is possible that the tensor dimensions are able to be collapsed,
@@ -545,11 +547,17 @@ inline bool CUDA_tensor_apply2(at::Tensor a,
 #undef HANDLE_A_CASE
 
   if (oldA.defined()) {
-    at::native::copy_ignoring_overlaps(oldA, a);
+    // Ignore overlaps when copying back; if we use copy
+    // instead, it will recursively try and invoke ourselves to make
+    // oldA contiguous.
+    at::native::legacy::cuda::_th_copy_ignoring_overlaps_(oldA, a);
   }
 
   if (oldB.defined()) {
-    at::native::copy_ignoring_overlaps(oldB, b);
+    // Ignore overlaps when copying back; if we use copy
+    // instead, it will recursively try and invoke ourselves to make
+    // oldB contiguous.
+    at::native::legacy::cuda::_th_copy_ignoring_overlaps_(oldB, b);
   }
 
   return true;

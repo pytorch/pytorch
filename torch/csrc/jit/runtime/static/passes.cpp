@@ -12,9 +12,7 @@ namespace {
 bool HasInplaceOp(Block* block, const AliasDb& alias_db) {
   for (auto* node : block->nodes()) {
     for (Block* sub_block : node->blocks()) {
-      if (HasInplaceOp(sub_block, alias_db)) {
-        return true;
-      }
+      return HasInplaceOp(sub_block, alias_db);
     }
     auto inputs = node->inputs();
     // check if node modifies inputs (both inplace ops and certain out variants
