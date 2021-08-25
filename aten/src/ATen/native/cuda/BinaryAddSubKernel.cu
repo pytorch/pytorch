@@ -22,7 +22,7 @@ struct AddFunctor {
 void add_kernel_cuda(TensorIteratorBase& iter, const Scalar& alpha_scalar) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kHalf, kBool, kBFloat16, iter.common_dtype(), "add_cuda/sub_cuda", [&]() {
     using accscalar_t = at::acc_type<scalar_t, true>;
-    gpu_kernel_with_scalars(iter, AddFunctor<accscalar_t>(alpha_scalar.to<accscalar_t>()));
+    acc_gpu_kernel_with_scalars<scalar_t>(iter, AddFunctor<accscalar_t>(alpha_scalar.to<accscalar_t>()));
   });
 }
 
