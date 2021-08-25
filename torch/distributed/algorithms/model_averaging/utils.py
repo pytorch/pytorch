@@ -30,5 +30,5 @@ def average_parameters(
     offset = 0
     for p in params_it2:
         with torch.no_grad():
-            p.set_(flat_params[offset : offset + p.numel()].view_as(p).type_as(p))
+            p.set_(flat_params[offset : offset + p.numel()].view_as(p).type_as(p))  # type: ignore[call-overload]
         offset += p.numel()
