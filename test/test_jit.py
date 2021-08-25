@@ -5944,7 +5944,6 @@ a")
         self.assertEqual(test_bool_arith_not(torch.zeros(3)), 1)
         self.assertTrue(str(test_bool_arith_not.graph).count('if') == 0)
 
-
     def test_conditional_casting(self):
         def test_bool_cast_tensor(x):
             if x:

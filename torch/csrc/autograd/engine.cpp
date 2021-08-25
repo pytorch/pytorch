@@ -407,7 +407,12 @@ auto Engine::thread_main(const std::shared_ptr<GraphTask>& graph_task) -> void {
       }
 
       if (task.fn_ && !local_graph_task->has_error_.load()) {
+        // Set the ThreadLocalState before calling the function.
+        // NB: The ThreadLocalStateGuard doesn't set the grad_mode because GraphTask
+        // always saves ThreadLocalState without grad_mode.
+        at::ThreadLocalStateGuard tls_guard(local_graph_task->thread_locals_);
         AutoGradMode grad_mode(local_graph_task->grad_mode_);
+
         try {
           // The guard sets the thread_local current_graph_task on construction
           // and restores it on exit. The current_graph_task variable helps
@@ -575,6 +580,7 @@ void GraphTask::exec_post_processing() {
     // NB: The ThreadLocalStateGuard doesn't set the grad_mode because GraphTask
     // always saves ThreadLocalState without grad_mode.
     at::ThreadLocalStateGuard tls_guard(this->thread_locals_);
+    AutoGradMode grad_mode(this->grad_mode_);
 
     // WARNING: Don't use a range-for loop here because more callbacks may be
     // added in between callback calls, so iterators may become invalidated.
@@ -764,11 +770,6 @@ void Engine::evaluate_function(
     Node* func,
     InputBuffer& inputs,
     const std::shared_ptr<ReadyQueue>& cpu_ready_queue) {
-  // Set the ThreadLocalState before calling the function.
-  // NB: The ThreadLocalStateGuard doesn't set the grad_mode because GraphTask
-  // always saves ThreadLocalState without grad_mode.
-  at::ThreadLocalStateGuard tls_guard(graph_task->thread_locals_);
-
   // The InputBuffer::adds that supplied incoming grads took pains to
   // ensure they're safe to consume in the context of the present
   // func's stream (if applicable). So we guard onto that stream
