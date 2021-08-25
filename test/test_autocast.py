@@ -2,7 +2,6 @@ import collections
 import torch
 from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.testing._internal.autocast_test_lists import AutocastCPUTestLists
-from torch.testing._core import _get_default_tolerance
 
 class TestAutocastWithJit(TestCase):
     def setUp(self):
@@ -27,7 +26,7 @@ class TestAutocastWithJit(TestCase):
             with torch.cpu.amp.autocast(), torch.no_grad():
                 y = traced_model(x.clone())
                 y2 = model(x.clone())
-            torch.testing.assert_allclose(y.double(), y2.double(), rtol=1e-05, atol=_get_default_tolerance(y, y2)[1])
+            torch.testing.assert_allclose(y.double(), y2.double(), rtol=1e-03, atol=1e-03)
         for i in range(self.models.__len__()):
             test_nchw_autocast_jit_trace_model(self.models[i], self.inputs[i])
 
@@ -39,7 +38,7 @@ class TestAutocastWithJit(TestCase):
             with torch.cpu.amp.autocast(), torch.no_grad():
                 y = traced_model(x.clone().to(memory_format=torch.channels_last))
                 y2 = model(x.clone().to(memory_format=torch.channels_last))
-            torch.testing.assert_allclose(y.double(), y2.double(), rtol=1e-05, atol=_get_default_tolerance(y, y2)[1])
+            torch.testing.assert_allclose(y.double(), y2.double(), rtol=1e-03, atol=1e-03)
         for i in range(self.models.__len__()):
             if self.inputs[i].size().__len__() == 5:
                 # NHWC 3D case not support yet
