@@ -165,15 +165,15 @@ void CppPrinter::visit(BroadcastPtr v) {
 }
 
 void CppPrinter::visit(ModPtr v) {
-  dispatch_binary_op(os(), v);
+  dispatch_binary_op(os(), v.get());
 }
 
 void CppPrinter::visit(MaxPtr v) {
-  dispatch_binary_op(os(), v);
+  dispatch_binary_op(os(), v.get());
 }
 
 void CppPrinter::visit(MinPtr v) {
-  dispatch_binary_op(os(), v);
+  dispatch_binary_op(os(), v.get());
 }
 
 void CppPrinter::visit(CompareSelectPtr v) {

@@ -178,6 +178,12 @@ class BinaryOpNode : public ExprNode<Op> {
   ExprPtr rhs_;
 };
 
+namespace detail {
+template <typename T>
+void bin_op_deducer(BinaryOpNode<T>);
+bool bin_op_deducer(...);
+} // namespace detail
+
 class TORCH_API Add : public BinaryOpNode<Add> {
  public:
   Add(ExprPtr lhs, ExprPtr rhs) : BinaryOpNode(lhs, rhs, IRNodeType::kAdd) {}
