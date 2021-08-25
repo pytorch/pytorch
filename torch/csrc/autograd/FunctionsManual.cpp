@@ -3667,14 +3667,14 @@ Tensor i1e_backward(
 //
 // Let 1 = ones_like(LU),
 // 1_U = 1.triu(),
-// 1_L = 1 - 1_U (note the zero diagonal),
+// 1_L = 1.tril(-1)
 // * := the Hadamard (element-wise) product
 //
 // Forward AD:
 //
 // Let X := U^{-1} L^{-1} P^T B be the output of the function.
 // Also, the LU input of the function could be represented as
-// LU = L + U - I.
+// LU = (L - I) + U.
 //
 // Differentiating LU = L + U - I produces:
 // dLU = dL + dU.
@@ -3690,6 +3690,7 @@ Tensor i1e_backward(
 // dA A^{-1} + A dA^{-1} = 0 => dA^{-1} = -A^{-1} dA A^{-1}.
 // Inserting it back into the definition of dX gives:
 // dX = -U^{-1} dU U^{-1} L^{-1} P^T B - U^{-1} L^{-1} dL L^{-1} P^T B + U^{-1} L^{-1} P^T dB
+// dX = -U^{-1} dU X - U^{-1} L^{-1} dL U X + U^{-1} L^{-1} P^T dB
 //
 // Backward AD:
 //
@@ -3700,15 +3701,10 @@ Tensor i1e_backward(
 // hence
 // LU_grad = L_grad * 1_L + U_grad * 1_U (!!!)
 //
-// Using the definition of dX:
-// Tr(X_grad^H X) = Tr(-U^{-1} L^{-1} P^T B X_grad^H U^{-1} dU)
-//                + Tr(-L^{-1} P^T B X_grad^H U^{-1} L^{-1} dL)
-//                + Tr(X_grad^H U^{-1} L^{-1} P^T dB).
-// And we immediately get:
-// B_grad = [X_grad^H U^{-1} L^{-1} P^T]^H = [U^{-1} L^{-1} P^T]^H X_grad.
-// Let Z := L^{-1} P^T B X_grad^H U^{-1}, then
-// U_grad = [-U^{-1} Z]^H,
-// L_grad = [-Z L^{-1}]^H.
+// Then, transposing the formula for dX above we get:
+// B_grad = P L^{-H} U^{-H} X_grad = lu_solve(X_grad, LU_data, LU_pivots, /*adjoint=*/true)
+// U_grad = -U^{-H} X_grad X^H
+// L_grad = L^{-H} U_grad U^H
 // After inserting U_grad and L_grad into (!!!) we get the value for LU_grad.
 
 std::tuple<Tensor, Tensor> lu_solve_backward(
@@ -3717,21 +3713,31 @@ std::tuple<Tensor, Tensor> lu_solve_backward(
   const Tensor& LU_data,
   const Tensor& LU_pivots,
   const std::array<bool, 2>& grad_input_mask) {
-  if (!grad.defined()) {
+  if (!grad.defined() || (!grad_input_mask[0] && !grad_input_mask[1])) {
     return std::make_tuple(Tensor{}, Tensor{});
   }
 
+  // TOOD
+  // If grad_input_mask[0] && !grad_input_mask[1] the following formula is better, once
+  // we have migrated lu_solve to linalg and has a `trans` flag
+  // This avoids the instantiation of P explicitly and may have better numerical properties
+  //
+  //const auto trans = grad.is_complex() ? TransposeType::ConjTranspose : TransposeType::Transpose;
+  //const Tensor B_grad = at::_lu_solve_trans(grad, LU_data, LU_pivots, trans);
+  //return std::make_pair(B_grad, Tensor{});
+  const Tensor X_H = X.conj().transpose(-2, -1);
   Tensor P, L, U;
-  std::tie(P, L, U) = at::lu_unpack(LU_data, LU_pivots);
-
+  if (grad_input_mask[0]) {
+      std::tie(P, L, U) = at::lu_unpack(LU_data, LU_pivots);
+  } else {
+    std::tie(std::ignore, L, U) = at::lu_unpack(LU_data, LU_pivots,
+                                                /*unpack_data=*/true,
+                                                /*unpack_pivots=*/false);
+  }
   const Tensor U_H = U.conj().transpose(-2, -1);
   const Tensor L_H = L.conj().transpose(-2, -1);
-  const Tensor X_H = X.conj().transpose(-2, -1);
 
-  // Note: When grad_input_mask[0] && !grad_input_mas[1], this could be
-  // implemented with lu_solve with the conj-transpose flag on (saving the lu_unpack)
   if (grad_input_mask[0]) {
-    if (grad_input_mask[1]) {
       // Y = U^{-H}X_grad
       const Tensor Y = at::linalg_solve_triangular(U_H, grad,
                                                    /*left=*/true,
@@ -3742,32 +3748,33 @@ std::tuple<Tensor, Tensor> lu_solve_backward(
                                                    /*left=*/true,
                                                    /*upper=*/true,
                                                    /*unitriangular=*/true);
-      const Tensor X_grad = P.matmul(Z);
-      const Tensor U_grad = Y.matmul(X_H);
-      const Tensor L_grad = Z.matmul(X_H).matmul(U_H);
-      const Tensor LU_data_grad = -(L_grad.tril(-1) + U_grad.triu());
-    return std::make_pair(X_grad, LU_data_grad);
-    }
+      const Tensor B_grad = P.matmul(Z);
+      Tensor LU_data_grad;
+      if (grad_input_mask[1]) {
+        const Tensor U_grad = Y.matmul(X_H);
+        const Tensor L_grad = Z.matmul(X_H).matmul(U_H);
+        LU_data_grad = -(L_grad.tril(-1) + U_grad.triu());
+      }
+      return std::make_pair(B_grad, LU_data_grad);
   } else {
-    if (grad_input_mask[1]) {
-      const Tensor U_grad = at::linalg_solve_triangular(U_H, grad.matmul(X_H),
-                                                        /*left=*/true,
-                                                        /*upper=*/false,
-                                                        /*unitriangular=*/false
-                                                       );
-      const Tensor L_grad = at::linalg_solve_triangular(L_H, U_grad.matmul(U_H),
-                                                        /*left=*/true,
-                                                        /*upper=*/true,
-                                                        /*unitriangular=*/true
-                                                       );
+    // Since when nothing needs to be computed was handled at the start, here we have
+    // ! grad_input_mask[0] && grad_input_mask[1]
+    // U^{-H}X_grad X^H
+    const Tensor U_grad = at::linalg_solve_triangular(U_H, grad.matmul(X_H),
+                                                      /*left=*/true,
+                                                      /*upper=*/false,
+                                                      /*unitriangular=*/false
+                                                     );
+    // L^{-H}U^{-H}X_grad X^H U^H
+    const Tensor L_grad = at::linalg_solve_triangular(L_H, U_grad.matmul(U_H),
+                                                      /*left=*/true,
+                                                      /*upper=*/true,
+                                                      /*unitriangular=*/true
+                                                     );
 
-      // LU_data_grad = L_grad * 1_L + U_grad * 1_U
-      const Tensor LU_data_grad = -(L_grad.tril(-1) + U_grad.triu());
-      return std::make_pair(Tensor{}, LU_data_grad);
-    }
-    else {
-      return std::make_pair(Tensor{}, Tensor{});
-    }
+    // LU_data_grad = L_grad * 1_L + U_grad * 1_U
+    const Tensor LU_data_grad = -(L_grad.tril(-1) + U_grad.triu());
+    return std::make_pair(Tensor{}, LU_data_grad);
   }
 }
 
