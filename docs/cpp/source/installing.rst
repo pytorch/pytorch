@@ -157,9 +157,9 @@ should now merrily print the tensor (exact output subject to randomness):
 Visual Studio Extension
 -----------------------
 
-`LibTorch Template <https://marketplace.visualstudio.com/items?itemName=YiZhang.LibTorch001>`_ can help Windows developers 
+`LibTorch Project Template <https://marketplace.visualstudio.com/items?itemName=YiZhang.LibTorch001>`_ can help Windows developers 
 set all libtorch project settings and link options for debug and release.
-It's easy to use and you could check out the `demo video <https://ossci-windows.s3.us-east-1.amazonaws.com/vsextension/demo.mp4>`.
+It's easy to use and you could check out the `demo video <https://ossci-windows.s3.us-east-1.amazonaws.com/vsextension/demo.mp4>`_.
 The only prerequisite is to download the libtorch on https://pytorch.org
 
 Support
