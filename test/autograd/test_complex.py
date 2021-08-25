@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+
 import torch
 
 from torch.testing._internal.common_utils import TestCase, run_tests, gradcheck
