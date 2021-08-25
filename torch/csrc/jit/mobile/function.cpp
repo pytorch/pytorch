@@ -122,7 +122,7 @@ bool Function::append_operator(
               default_val.has_value(),
               "Error happened at preparing for default values for the argument. The ",
               i,
-              "th arguement ",
+              "th argument ",
               args[i].name(),
               " does not have a specified value or default value. ");
 
