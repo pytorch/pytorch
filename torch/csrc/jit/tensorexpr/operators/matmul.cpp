@@ -5,7 +5,7 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
-Tensor* computeMatmul(
+Tensor computeMatmul(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const c10::optional<ScalarType>& outputType) {
@@ -21,11 +21,11 @@ Tensor* computeMatmul(
   auto size_b = b.dims();
   // We currently only support rank 2 matmuls
   TORCH_INTERNAL_ASSERT(size_a.size() == 2 && size_b.size() == 2);
-  auto total_size = dynamic_cast<LongImm*>(
-      IRSimplifier::simplify(
-          cast<int64_t>(size_a[0]) * cast<int64_t>(size_a[1]) *
-          cast<int64_t>(size_b[1]))
-          .node());
+  auto total_size =
+      to<LongImm>(IRSimplifier::simplify(
+                      cast<int64_t>(size_a[0]) * cast<int64_t>(size_a[1]) *
+                      cast<int64_t>(size_b[1]))
+                      .node());
 
   // For small sizes, where N*M*K < 1000, lower matmul to a naive 3-level
   // loopnest. The number is not tuned very carefully, and in future we should
@@ -44,13 +44,13 @@ Tensor* computeMatmul(
         },
         {{size_a[1], "K"}});
   } else {
-    return new Tensor(
+    return Tensor(
         ResultBuf.node(),
         ExternalCall::make(ResultBuf, "nnc_aten_matmul", {a, b}, {}));
   }
 }
 
-Tensor* computeAddMM(
+Tensor computeAddMM(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const c10::optional<ScalarType>& outputType) {
@@ -59,7 +59,7 @@ Tensor* computeAddMM(
     dtype = Dtype(*outputType);
   }
   BufHandle ResultBuf("addmm", outputShape, dtype);
-  return new Tensor(
+  return Tensor(
       ResultBuf.node(),
       ExternalCall::make(
           ResultBuf,

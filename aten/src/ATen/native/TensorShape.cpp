@@ -609,7 +609,13 @@ std::vector<Tensor> tensor_split(const Tensor& self, const Tensor& tensor_indice
     return self.tensor_split(sections, dim);
   } else {
     auto indices_data = tensor_indices_or_sections.data_ptr<int64_t>();
-    std::vector<int64_t> indices(indices_data, indices_data + tensor_indices_or_sections.numel());
+    auto stride = tensor_indices_or_sections.stride(0);
+    auto numel = tensor_indices_or_sections.numel();
+    std::vector<int64_t> indices(numel);
+    for (size_t offset = 0; offset < numel; offset++) {
+      // indices tensor could be non-contiguous
+      indices[offset] = *(indices_data + offset * stride);
+    }
     return self.tensor_split(indices, dim);
   }
 }
@@ -1058,7 +1064,7 @@ Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
     //
     // We need to do the checks here instead of in `native_functions.yaml`
     // to preserve backwards compatibility.
-    if (! self.is_xla()) {
+    if (!self.is_xla() && !self.is_lazy()) {
       return self._reshape_alias(shape, stride.value());
     } else {
       return self.view(shape);

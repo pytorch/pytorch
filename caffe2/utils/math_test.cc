@@ -490,11 +490,17 @@ TEST_F(BroadcastTest, BroadcastFloatTest) {
   RunBroadcastTest({1}, {2}, {1.0f}, {1.0f, 1.0f});
   RunBroadcastTest({1}, {2, 2}, {1.0f}, {1.0f, 1.0f, 1.0f, 1.0f});
   RunBroadcastTest({2, 1}, {2, 2}, {1.0f, 2.0f}, {1.0f, 1.0f, 2.0f, 2.0f});
+  RunBroadcastTest({1, 2}, {2, 2}, {1.0f, 2.0f}, {1.0f, 2.0f, 1.0f, 2.0f});
   RunBroadcastTest(
       {2, 1},
       {2, 2, 2},
       {1.0f, 2.0f},
       {1.0f, 1.0f, 2.0f, 2.0f, 1.0f, 1.0f, 2.0f, 2.0f});
+  RunBroadcastTest(
+      {1, 2},
+      {2, 2, 2},
+      {1.0f, 2.0f},
+      {1.0f, 2.0f, 1.0f, 2.0f, 1.0f, 2.0f, 1.0f, 2.0f});
 }
 
 class RandFixedSumTest : public testing::Test {

@@ -221,10 +221,10 @@ class AbstractTestCases:
             # TODO: add torch.* tests when we have proper namespacing on ATen functions
             # test_namespace(torch)
 
-        def test_msnpu_error(self):
+        def test_ort_error(self):
             with self.assertRaisesRegex(RuntimeError,
-                                        "Could not run 'aten::empty.memory_format' with arguments from the 'MSNPU' backend"):
-                torch.zeros(1, device=torch.device('msnpu'))
+                                        "Could not run 'aten::empty.memory_format' with arguments from the 'ORT' backend"):
+                torch.zeros(1, device=torch.device('ort'))
 
         def test_has_storage(self):
             self.assertIsNotNone(torch.tensor([]).storage())
@@ -1566,7 +1566,7 @@ class AbstractTestCases:
             n_half = len(ref_sample) // 2
             _ = engine.draw(n=n_half)
             sample = engine.draw(n=n_half)
-            torch.testing.assert_allclose(sample, ref_sample[n_half:])
+            torch.testing.assert_close(sample, ref_sample[n_half:])
 
         def test_sobolengine_continuing_scrambled(self):
             self.test_sobolengine_continuing(scramble=True)
@@ -1578,7 +1578,7 @@ class AbstractTestCases:
             engine.reset()
             self.assertEqual(engine.num_generated, 0)
             sample = engine.draw(n=len(ref_sample))
-            torch.testing.assert_allclose(sample, ref_sample)
+            torch.testing.assert_close(sample, ref_sample)
 
         def test_sobolengine_reset_scrambled(self):
             self.test_sobolengine_reset(scramble=True)
@@ -1588,7 +1588,7 @@ class AbstractTestCases:
             engine = torch.quasirandom.SobolEngine(2, scramble=scramble, seed=123456)
             engine.fast_forward(4)
             sample = engine.draw(n=4)
-            torch.testing.assert_allclose(sample, ref_sample[4:])
+            torch.testing.assert_close(sample, ref_sample[4:])
             # alternate fast forwarding with sampling
             engine.reset()
             even_draws = []
@@ -1597,9 +1597,9 @@ class AbstractTestCases:
                     even_draws.append(engine.draw())
                 else:
                     engine.fast_forward(1)
-            torch.testing.assert_allclose(
+            torch.testing.assert_close(
                 ref_sample[[i for i in range(8) if i % 2 == 0]],
-                np.concatenate(even_draws),
+                torch.from_numpy(np.concatenate(even_draws)),
             )
 
         def test_sobolengine_fast_forward_scrambled(self):
@@ -1609,13 +1609,13 @@ class AbstractTestCases:
             d = 50
             engine = torch.quasirandom.SobolEngine(d, scramble=scramble, seed=123456)
             sample = engine.draw(1024)
-            torch.testing.assert_allclose(
+            torch.testing.assert_close(
                 torch.mean(sample, dim=0), torch.full((d,), 0.5), atol=2, rtol=2
             )
-            torch.testing.assert_allclose(
+            torch.testing.assert_close(
                 np.percentile(sample, 25, axis=0), np.repeat(0.25, d), atol=2, rtol=2
             )
-            torch.testing.assert_allclose(
+            torch.testing.assert_close(
                 np.percentile(sample, 75, axis=0), np.repeat(0.75, d), atol=2, rtol=2
             )
 
@@ -2440,7 +2440,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             actual_norm, actual_mean, actual_stdev = \
                 torch.ops._caffe2.LayerNorm(torch.tensor(X), torch.tensor(
                     weight), torch.tensor(bias), 1, epsilon, True)
-            torch.testing.assert_allclose(expected_norm, actual_norm)
+            torch.testing.assert_close(expected_norm, actual_norm)
 
         def test_memory_format(self):
             def test_helper(x, memory_format):
@@ -2961,34 +2961,6 @@ class TestTorchDeviceType(TestCase):
         for i in range(dim):
             shape.append(random.randint(min_size, max_size))
         return tuple(shape)
-
-    @onlyCPU
-    def test_set_deterministic_deprecated_warning(self, device):
-        with DeterministicGuard(torch.are_deterministic_algorithms_enabled()):
-            # Calling set_deterministic throws a warning about deprecation once
-            # per process but testing this is tricky here since we actually get
-            # two warnings: one for the deprecated use of `set_deterministic`
-            # and one for the 'beta' use of `use_deterministic_algorithms`.
-            # The assertWarnsOnceRegex cannot handle two different warnings
-            with warnings.catch_warnings(record=True) as ws:
-                warnings.simplefilter("always")  # allow any warning to be raised
-                prev = torch.is_warn_always_enabled()
-                torch.set_warn_always(True)
-                try:
-                    torch.set_deterministic(True)
-                finally:
-                    torch.set_warn_always(prev)
-                for w in ws:
-                    txt = str(w.message)
-                    assert ("torch.use_deterministic_algorithms is in beta" in txt or
-                            "torch.set_deterministic is deprecated" in txt)
-
-    @onlyCPU
-    def test_is_deterministic_deprecated_warning(self, device):
-        with DeterministicGuard(torch.are_deterministic_algorithms_enabled()):
-            # Calling is_deterministic throws a warning about deprecation once per process
-            with self.assertWarnsOnceRegex(UserWarning, "torch.is_deterministic is deprecated"):
-                torch.is_deterministic()
 
     # Validates that mathematical constants are defined properly, as required by
     # the Python Array API (https://data-apis.org/array-api/latest/API_specification/constants.html)
@@ -3975,7 +3947,7 @@ else:
         input = torch.randn(2, 3, 5, 5, device=device)
         target = torch.rand(2, 5, 5, device=device).mul(3).floor().long()
 
-        @expectedAlertNondeterministic('SpatialClassNLLCriterion_updateOutput', 'cuda')
+        @expectedAlertNondeterministic('nll_loss2d_forward_out_cuda_template', 'cuda')
         def forward_func(slf, device):
             module(input, target)
 

@@ -20,6 +20,7 @@
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
+#include <mutex>
 
 C10_DEFINE_bool(
     static_runtime_enable_fast_math,
@@ -213,7 +214,7 @@ std::function<void(ProcessedNode*)> getOutOfPlaceOperation(Node* n) {
 
 // Returns true if the node represents an op with variadic arguments.
 bool hasVarArgs(Node* n) {
-  if (n->kind() == prim::VarConcat) {
+  if (n->kind() == prim::VarConcat || n->kind() == prim::VarStack) {
     return true;
   }
   return false;
@@ -299,6 +300,23 @@ REGISTER_OPERATOR_FUNCTOR(
         p_node->Output(0) = c10::ivalue::Tuple::create(std::move(vals));
       };
     });
+
+REGISTER_OPERATOR_FUNCTOR(aten::abs, aten_abs, [](Node* n) -> SROperator {
+  if (!n->matches(torch::schema("aten::abs(Tensor self) -> Tensor"))) {
+    LogAndDumpSchema(n);
+    return nullptr;
+  }
+  return [](ProcessedNode* p_node) {
+    const auto& in0_t = p_node->Input(0).toTensor();
+    if (p_node->Output(0).isNone()) {
+      p_node->Output(0) = at::native::abs(in0_t);
+    } else {
+      auto& out_t = p_node->Output(0).toTensor();
+      fastResizeToZero(out_t);
+      at::native::abs_out(in0_t, out_t);
+    }
+  };
+});
 
 REGISTER_OPERATOR_FUNCTOR(aten::mul, aten_mul, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
@@ -434,6 +452,29 @@ SROperator aten_stack(Node* n) {
 
 REGISTER_OPERATOR_FUNCTOR(aten::stack, aten_stack, aten_stack);
 
+REGISTER_OPERATOR_FUNCTOR(
+    prim::VarStack,
+    prim_VarStack,
+    [](Node* n) -> SROperator {
+      return [](ProcessedNode* p_node) {
+        const size_t num_inputs = p_node->inputs().size();
+
+        std::vector<at::Tensor> inputs(num_inputs - 1);
+        for (size_t i = 0; i < num_inputs - 1; ++i) {
+          inputs[i] = p_node->Input(i).toTensor();
+        }
+
+        const auto dim = p_node->Input(num_inputs - 1).toInt();
+        if (p_node->Output(0).isNone()) {
+          p_node->Output(0) = at::native::_stack_cpu(inputs, dim);
+        } else {
+          auto& out_t = p_node->Output(0).toTensor();
+          fastResizeToZero(out_t);
+          at::native::_stack_out_cpu(inputs, dim, out_t);
+        }
+      };
+    });
+
 REGISTER_OPERATOR_FUNCTOR(aten::leaky_relu, aten_leaky_relu, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
           "aten::leaky_relu(Tensor self, Scalar negative_slope=0.01) -> Tensor"))) {
@@ -454,17 +495,15 @@ REGISTER_OPERATOR_FUNCTOR(aten::leaky_relu, aten_leaky_relu, [](Node* n) -> SROp
 
 namespace {
 
-// Use the width of an AVX-512 vector by default; this happens to work OK for
-// AVX2 as well. Some ops benefit from using multiple AVX ports, in which case
-// they are vectorized by twice this constant.  An exception is logit, since it
-// contains FP divide, which is single-ported.
+// Use the width of an AVX-512 vector by default; this happens to work OK
+// for AVX2 as well. Some ops benefit from using multiple AVX ports, in
+// which case they are vectorized by twice this constant.  An exception is
+// logit, since it contains FP divide, which is single-ported.
 static constexpr int kVectorWidth = 16;
 
 #ifdef TORCH_ENABLE_LLVM
 
 struct TEWrapper {
-  tensorexpr::KernelArena ka;
-  tensorexpr::KernelScope ks;
   std::unique_ptr<tensorexpr::LLVMCodeGen> cg;
   TEWrapper() = default;
   void update(std::unique_ptr<tensorexpr::LLVMCodeGen>&& cg_) {
@@ -482,11 +521,11 @@ struct TEWrapper {
 
 void optimizePointwise(
     tensorexpr::LoopNest* ln,
-    tensorexpr::Tensor* target,
+    tensorexpr::Tensor target,
     int width) {
   using namespace torch::jit::tensorexpr;
-  std::vector<For*> loops = ln->getLoopStmtsFor(target);
-  For *inner, *tail;
+  std::vector<ForPtr> loops = ln->getLoopStmtsFor(target);
+  ForPtr inner, tail;
   TORCH_CHECK(loops.size() > 0, "No loops created for pointwise op");
   ln->splitWithTail(loops[0], width, &inner, &tail);
   ln->vectorize(inner);
@@ -495,14 +534,14 @@ void optimizePointwise(
 std::shared_ptr<TEWrapper> wrapTECompute(
     std::shared_ptr<TEWrapper> wrap,
     tensorexpr::Placeholder& in,
-    tensorexpr::Tensor* out,
+    tensorexpr::Tensor out,
     tensorexpr::VarHandle& dim,
     int width = kVectorWidth) {
   using namespace torch::jit::tensorexpr;
   LoopNest ln({out});
   optimizePointwise(&ln, out, width);
   ln.prepareForCodegen();
-  Stmt* s = ln.root_stmt();
+  StmtPtr s = ln.root_stmt();
   s = tensorexpr::IRSimplifier::simplify(s);
   std::vector<CodeGen::BufferArg> args;
   args.emplace_back(out);
@@ -516,8 +555,6 @@ std::shared_ptr<TEWrapper> wrapTECompute(
 #else
 
 struct TEWrapper {
-  tensorexpr::KernelArena ka;
-  tensorexpr::KernelScope ks;
   TEWrapper() = default;
   template <typename... Ts>
   void operator()(const Ts&... ts) {
@@ -535,7 +572,7 @@ struct TEWrapper {
 std::shared_ptr<TEWrapper> wrapTECompute(
     std::shared_ptr<TEWrapper> wrap,
     tensorexpr::Placeholder& in,
-    tensorexpr::Tensor* out,
+    tensorexpr::Tensor out,
     tensorexpr::VarHandle& dim,
     int width = kVectorWidth) {
   return wrap;
@@ -543,14 +580,39 @@ std::shared_ptr<TEWrapper> wrapTECompute(
 
 #endif
 
+std::mutex& getNNCCacheMutex() {
+  static std::mutex nncCacheMutex;
+  return nncCacheMutex;
+}
+
+std::unordered_map<NodeKind, std::shared_ptr<TEWrapper>>& getNNCCache() {
+  static std::unordered_map<NodeKind, std::shared_ptr<TEWrapper>> nncCache;
+  return nncCache;
+}
+
+std::shared_ptr<TEWrapper> lookupNNCCache(NodeKind kind) {
+  std::lock_guard<std::mutex> lock(getNNCCacheMutex());
+  auto it = getNNCCache().find(kind);
+  if (it != getNNCCache().end()) {
+    return it->second;
+  }
+  return nullptr;
+}
+
+void updateNNCCache(NodeKind kind, std::shared_ptr<TEWrapper> code) {
+  std::lock_guard<std::mutex> lock(getNNCCacheMutex());
+  getNNCCache()[kind] = code;
+}
+
 } // namespace
 
 std::shared_ptr<TEWrapper> createLogit(c10::optional<float> clamp) {
   using namespace torch::jit::tensorexpr;
+  // TODO: Use NNC cache for this op.
   auto wrap = std::make_shared<TEWrapper>();
   auto N = VarHandle("N", kInt);
   Placeholder A("A", kFloat, {N});
-  tensorexpr::Tensor* B = Compute("B", {N}, [&](const VarHandle& i) {
+  tensorexpr::Tensor B = Compute("B", {N}, [&](const VarHandle& i) {
     auto A_elem = [&]() {
       if (!clamp) {
         return A.load(i);
@@ -569,40 +631,58 @@ std::shared_ptr<TEWrapper> createLogit(c10::optional<float> clamp) {
 
 std::shared_ptr<TEWrapper> createRelu() {
   using namespace torch::jit::tensorexpr;
-  auto wrap = std::make_shared<TEWrapper>();
+  auto wrap = lookupNNCCache(aten::relu);
+  if (wrap) {
+    return wrap;
+  }
+  wrap = std::make_shared<TEWrapper>();
   auto N = VarHandle("N", kInt);
   Placeholder A("A", kFloat, {N});
-  tensorexpr::Tensor* B = Compute("B", {N}, [&](const VarHandle& i) {
+  tensorexpr::Tensor B = Compute("B", {N}, [&](const VarHandle& i) {
     auto zero = FloatImm::make(0.f);
     auto a = A.load(i);
     return ifThenElse(a < zero, zero, a);
   });
-  return wrapTECompute(wrap, A, B, N);
+  wrap = wrapTECompute(wrap, A, B, N);
+  updateNNCCache(aten::relu, wrap);
+  return wrap;
 }
 
 std::shared_ptr<TEWrapper> createTanh() {
   using namespace torch::jit::tensorexpr;
-  auto wrap = std::make_shared<TEWrapper>();
+  auto wrap = lookupNNCCache(aten::tanh);
+  if (wrap) {
+    return wrap;
+  }
+  wrap = std::make_shared<TEWrapper>();
   auto N = VarHandle("N", kInt);
   Placeholder A("A", kFloat, {N});
-  tensorexpr::Tensor* B = Compute("B", {N}, [&](const VarHandle& i) {
+  tensorexpr::Tensor B = Compute("B", {N}, [&](const VarHandle& i) {
     auto a = A.load(i);
     return fast_tanh(a);
   });
-  return wrapTECompute(wrap, A, B, N);
+  wrap = wrapTECompute(wrap, A, B, N);
+  updateNNCCache(aten::tanh, wrap);
+  return wrap;
 }
 
 std::shared_ptr<TEWrapper> createSigmoid() {
   using namespace torch::jit::tensorexpr;
-  auto wrap = std::make_shared<TEWrapper>();
+  auto wrap = lookupNNCCache(aten::sigmoid);
+  if (wrap) {
+    return wrap;
+  }
+  wrap = std::make_shared<TEWrapper>();
   auto N = VarHandle("N", kInt);
   Placeholder A("A", kFloat, {N});
-  Tensor* B =
+  Tensor B =
       Compute("B", {N}, [&](const VarHandle& i) { return sigmoid(A.load(i)); });
   // NNC uses sleef for vectorizing sigmoid, which comes in an 8-wide flavor
   // (Sleef_expf8).
   constexpr int kSleefWidth = 8;
-  return wrapTECompute(wrap, A, B, N, kSleefWidth);
+  wrap = wrapTECompute(wrap, A, B, N, kSleefWidth);
+  updateNNCCache(aten::sigmoid, wrap);
+  return wrap;
 }
 
 REGISTER_OPERATOR_FUNCTOR(aten::relu, aten_relu, [](Node* n) -> SROperator {
@@ -1052,11 +1132,11 @@ REGISTER_OPERATOR_FUNCTOR(aten::sum, aten_sum, [](Node* n) -> SROperator {
     }
 
     if (p_node->Output(0).isNone()) {
-      p_node->Output(0) = at::native::sum(self, dim, keepdim, dtype);
+      p_node->Output(0) = at::cpu::sum(self, dim, keepdim, dtype);
     } else {
       auto& output = p_node->Output(0).toTensor();
       fastResizeToZero(output);
-      at::native::sum_out(self, dim, keepdim, dtype, output);
+      at::cpu::sum_out(output, self, dim, keepdim, dtype);
     }
   };
 });
@@ -1393,7 +1473,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::norm, aten_norm, [](Node* n) -> SROperator {
     const size_t num_inp = p_node->inputs().size();
     const auto in1_s = p_node->Input(1).toOptional<at::Scalar>();
     if (num_inp == 3) {
-      at::native::norm_out(
+      at::cpu::norm_outf(
           in0_t,
           in1_s,
           c10::IntArrayRef{},
@@ -1404,7 +1484,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::norm, aten_norm, [](Node* n) -> SROperator {
     }
 
     if (num_inp > 4) {
-      at::native::norm_out(
+      at::cpu::norm_outf(
           in0_t,
           in1_s,
           p_node->Input(2).toIntVector(), // dim
@@ -1413,7 +1493,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::norm, aten_norm, [](Node* n) -> SROperator {
           out_t);
       return;
     }
-    at::native::norm_out(
+    at::cpu::norm_outf(
         in0_t,
         in1_s,
         p_node->Input(2).toIntVector(), // dim
@@ -1483,6 +1563,53 @@ REGISTER_OPERATOR_FUNCTOR(quantized::linear, quantized_linear, [](Node* n) -> SR
     }
   };
 });
+
+REGISTER_OPERATOR_FUNCTOR(
+    fb::quantized_linear,
+    fb_quantized_linear,
+    [](Node* n) -> SROperator {
+      if (!n->matches(torch::schema(
+              "fb::quantized_linear(Tensor X, __torch__.torch.classes.quantized.LinearPackedParamsBase w_prepack, Tensor Y_scale_i, Tensor Y_zero_point_i) -> Tensor"))) {
+        LogAndDumpSchema(n);
+        return nullptr;
+      }
+      const auto w = toIValue(n->inputs()[1]);
+      c10::intrusive_ptr<LinearPackedParamsBase> packed_weight;
+      if (w) {
+        packed_weight = w->toCustomClass<LinearPackedParamsBase>();
+      }
+      return [packed_weight](ProcessedNode* p_node) {
+        const auto& input = p_node->Input(0).toTensor();
+        const auto output_scale = p_node->Input(2).toTensor().item().toFloat();
+        const auto output_zero_point =
+            p_node->Input(3).toTensor().item().toLong();
+
+        if (p_node->Output(0).isNone()) {
+          p_node->Output(0) = at::native::empty_affine_quantized(
+              {0},
+              c10::kQUInt8,
+              c10::nullopt,
+              c10::kCPU,
+              false,
+              output_scale,
+              output_zero_point,
+              c10::nullopt);
+        }
+        auto& out_t = p_node->Output(0).toTensor();
+        fastResizeToZero(out_t);
+
+        if (packed_weight) {
+          packed_weight->apply_out(
+              input, output_scale, output_zero_point, out_t);
+        } else {
+          // Weights could be quantized on the fly
+          auto packed_weight_tmp =
+              p_node->Input(1).toCustomClass<LinearPackedParamsBase>();
+          packed_weight_tmp->apply_out(
+              input, output_scale, output_zero_point, out_t);
+        }
+      };
+    });
 
 REGISTER_OPERATOR_FUNCTOR(aten::full, aten_full, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(

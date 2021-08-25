@@ -4,7 +4,7 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
-Tensor* computeBatchNorm(
+Tensor computeBatchNorm(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const c10::optional<ScalarType>& outputType) {

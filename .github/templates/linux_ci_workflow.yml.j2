@@ -1,3 +1,4 @@
+{% import 'common.yml.j2' as common %}
 {# squid_proxy is an private ELB that only available for GHA custom runners #}
 {%- set squid_proxy    = "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128" -%}
 {# squid_no_proxy is a list of common set of fixed domains or IPs that we don't need to proxy. See https://docs.aws.amazon.com/AmazonECS/latest/developerguide/http_proxy_config.html#windows-proxy #}
@@ -6,11 +7,10 @@
 {%- block name -%}
 # Template is at:    .github/templates/linux_ci_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
-name: Linux CI (!{{ build_environment }})
+name: !{{ build_environment }}
 {%- endblock %}
 
 on:
-  # TODO: Enable pull_request builds when we can verify capacity can be met by auto-scalers
 {%- if on_pull_request %}
   pull_request:
   {%- if ciflow_config.enabled %}
@@ -20,6 +20,8 @@ on:
     types: [opened, synchronize, reopened, !{{ ciflow_config.trigger_action }}]
     {%- endif %}
   {%- endif %}
+{%- else %}
+  # TODO: Enable pull_request builds when we can verify capacity can be met by auto-scalers
 {%- endif %}
 
 {%- if is_scheduled %}
@@ -82,11 +84,13 @@ jobs:
       - name: Clean workspace
         run: |
           rm -rf "${GITHUB_WORKSPACE:?}/*"
+          rm -f ~/.ssh/authorized_keys
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
           # deep clone, to allow use of git merge-base
           fetch-depth: 0
+      !{{ common.display_ec2_information() }}
       - name: Calculate docker image tag
         id: calculate-tag
         run: |
@@ -153,11 +157,17 @@ jobs:
       - name: Clean workspace
         run: |
           rm -rf "${GITHUB_WORKSPACE:?}/*"
+          rm -f ~/.ssh/authorized_keys
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
           fetch-depth: 0 # deep clone, to allow sharding to use git rev-list
           submodules: recursive
+      !{{ common.display_ec2_information() }}
       - name: Pull docker image
         run: |
           docker pull "${DOCKER_IMAGE}"
@@ -210,18 +220,7 @@ jobs:
       {%- if not is_libtorch %}
       - name: Archive artifacts into zip
         run: |
-          zip -r artifacts.zip dist/ build/ .pytorch-test-times.json
-      # Upload to github so that people can click and download artifacts
-      - uses: actions/upload-artifact@v2
-        # Don't fail on upload to GH since it's only for user convenience
-        continue-on-error: true
-        name: Store PyTorch Build Artifacts on Github
-        with:
-          name: ${{ env.BUILD_ENVIRONMENT }}
-          retention-days: 14
-          if-no-files-found: error
-          path:
-            artifacts.zip
+          zip -1 -r artifacts.zip dist/ build/custom_test_artifacts build/lib build/bin .pytorch-test-times.json
       - uses: seemethere/upload-artifact-s3@9d7ceb0ab39c2c88d93ef7792b27425b27d59162
         name: Store PyTorch Build Artifacts on S3
         with:
@@ -231,6 +230,10 @@ jobs:
           path:
             artifacts.zip
       {%- endif %}
+      - name: Hold runner for 2 hours or until ssh sessions have drained
+        # Always hold for active ssh sessions
+        if: always()
+        run: .github/scripts/wait_for_ssh_to_drain.sh
       - name: Clean up docker images
         if: always()
         run: |
@@ -255,9 +258,11 @@ jobs:
       NUM_TEST_SHARDS: !{{ num_test_shards }}
       MULTIGPU_RUNNER_TYPE: linux.16xlarge.nvidia.gpu
       NOGPU_RUNNER_TYPE: linux.2xlarge
+      PR_BODY: ${{ github.event.pull_request.body }}
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
       render-matrix: ${{ steps.set-matrix.outputs.render-matrix }}
+      ignore-disabled-issues: ${{ steps.set-matrix.outputs.ignore-disabled-issues }}
     container:
       image: python:3.9
     steps:
@@ -281,6 +286,7 @@ jobs:
       TEST_CONFIG: ${{ matrix.config }}
       SHARD_NUMBER: ${{ matrix.shard }}
       NUM_TEST_SHARDS: ${{ matrix.num_shards }}
+      PYTORCH_IGNORE_DISABLED_ISSUES: ${{ needs.generate-test-matrix.outputs.ignore-disabled-issues }}
     steps:
       - name: Log in to ECR
         run: |
@@ -294,10 +300,17 @@ jobs:
       - name: Clean workspace
         run: |
           rm -rf "${GITHUB_WORKSPACE:?}/*"
+          rm -f ~/.ssh/authorized_keys
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
+          fetch-depth: 0 # deep clone, to allow sharding to use git rev-list
           submodules: recursive
+      !{{ common.display_ec2_information() }}
       - name: Pull docker image
         run: |
           docker pull "${DOCKER_IMAGE}"
@@ -332,6 +345,9 @@ jobs:
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Test PyTorch
+        env:
+          BUILD_ENVIRONMENT: !{{ build_environment }}-${{ matrix.config }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           if [[ $TEST_CONFIG == 'multigpu' ]]; then
             TEST_COMMAND=.jenkins/pytorch/multigpu-test.sh
@@ -347,6 +363,7 @@ jobs:
           docker run \
             ${GPU_FLAG:-} \
             -e BUILD_ENVIRONMENT \
+            -e PR_NUMBER \
             -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
             -e GITHUB_ACTIONS \
             -e IN_CI \
@@ -355,6 +372,7 @@ jobs:
             -e JOB_BASE_NAME \
             -e TEST_CONFIG \
             -e NUM_TEST_SHARDS \
+            -e PYTORCH_IGNORE_DISABLED_ISSUES \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
             -e http_proxy="!{{squid_proxy}}" -e https_proxy="!{{squid_proxy}}" -e no_proxy="!{{squid_no_proxy}}" \
@@ -373,6 +391,12 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      {%- if is_coverage %}
+      - name: Report coverage
+        run: |
+          python3 -mpip install codecov
+          python3 -mcodecov
+      {%- endif %}
       - name: Zip test reports for upload
         if: always()
         env:
@@ -400,6 +424,10 @@ jobs:
           if-no-files-found: error
           path:
             test-reports-*.zip
+      - name: Hold runner for 2 hours or until ssh sessions have drained
+        # Always hold for active ssh sessions
+        if: always()
+        run: .github/scripts/wait_for_ssh_to_drain.sh
       - name: Clean up docker images
         if: always()
         run: |
@@ -417,8 +445,8 @@ jobs:
   # logs (like test); we can always move it back to the other one, but it
   # doesn't create the best experience
   render_test_results:
-    if: always()
     needs: [generate-test-matrix, test, !{{ ciflow_config.root_job_name }}]
+    if: ${{ needs.test.result != 'skipped' || failure() }}
     runs-on: linux.2xlarge
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.render-matrix) }}
@@ -441,6 +469,7 @@ jobs:
         with:
           # deep clone, to allow tools/stats/print_test_stats.py to use Git commands
           fetch-depth: 0
+      !{{ common.display_ec2_information() }}
       - uses: actions/download-artifact@v2
         name: Download PyTorch Test Reports
         with:
@@ -496,11 +525,17 @@ jobs:
       - name: Clean workspace
         run: |
           rm -rf "${GITHUB_WORKSPACE:?}/*"
+          rm -f ~/.ssh/authorized_keys
+      - name: "[FB EMPLOYEES] Enables SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
           fetch-depth: 0 # deep clone, to allow sharding to use git rev-list
           submodules: recursive
+      !{{ common.display_ec2_information() }}
       - name: Pull docker image
         run: |
           docker pull "${DOCKER_IMAGE}"
@@ -564,6 +599,10 @@ jobs:
           name: pytorch_github_io
           if-no-files-found: error
           path: pytorch_github_io.zip
+      - name: Hold runner for 2 hours or until ssh sessions have drained
+        # Always hold for active ssh sessions
+        if: always()
+        run: .github/scripts/wait_for_ssh_to_drain.sh
       - name: Clean up docker images
         if: always()
         run: |

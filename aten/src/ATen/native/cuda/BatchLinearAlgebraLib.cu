@@ -382,9 +382,9 @@ inline static void _apply_svd_lib_gesvdj(const Tensor& self, Tensor& U, Tensor& 
   auto S_data = S.data_ptr<value_t>();
   auto VT_data = VT.data_ptr<scalar_t>();
   auto self_stride = matrixStride(self);
-  auto U_stride = matrixStride(U);
+  auto U_stride = !compute_uv ? 1 : matrixStride(U);
   auto S_stride = S.size(-1);
-  auto VT_stride = matrixStride(VT);
+  auto VT_stride = !compute_uv ? 1 : matrixStride(VT);
 
   int batchsize = cuda_int_cast(batchCount(self), "batch size");
   int m = cuda_int_cast(self.size(-2), "m");
@@ -421,11 +421,7 @@ inline static void _apply_svd_lib_gesvdj(const Tensor& self, Tensor& U, Tensor& 
 // wrapper around _apply_svd_lib_gesvdj that handles dtype dispatch,
 // creates a working copy of the input, and creates V^H from the V returned by gesvdj
 inline static void apply_svd_lib_gesvdj(const Tensor& self, Tensor& U, Tensor& S, Tensor& VT, Tensor& infos, bool compute_uv, bool some) {
-  const int64_t m = self.size(-2);
-  const int64_t n = self.size(-1);
   Tensor self_working_copy = cloneBatchedColumnMajor(self);
-  VT = VT.transpose(-2, -1);  // gesvdj returns V instead of V^H
-
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "svd_cuda_gesvdj", [&] {
     _apply_svd_lib_gesvdj<scalar_t>(self_working_copy, U, S, VT, infos, compute_uv, some);
   });
@@ -448,7 +444,7 @@ inline static void _apply_svd_lib_gesvdjBatched(const Tensor& self, Tensor& U, T
   int m = cuda_int_cast(self.size(-2), "m");
   int n = cuda_int_cast(self.size(-1), "n");
   int lda = std::max<int>(1, m);
-  int ldvt = std::max<int>(1, n);
+  int ldvt = std::max<int>(1, VT.size(-2));
 
   TORCH_INTERNAL_ASSERT(m <= 32 && n <= 32, "gesvdjBatched requires both matrix dimensions not greater than 32, but got "
                         "m = ", m, " n = ", n);
@@ -473,11 +469,7 @@ inline static void _apply_svd_lib_gesvdjBatched(const Tensor& self, Tensor& U, T
 // wrapper around _apply_svd_lib_gesvdjBatched that handles dtype dispatch,
 // creates a working copy of the input, and creates V^H from the V returned by gesvdj
 inline static void apply_svd_lib_gesvdjBatched(const Tensor& self, Tensor& U, Tensor& S, Tensor& VT, Tensor& infos, bool compute_uv) {
-  const int64_t m = self.size(-2);
-  const int64_t n = self.size(-1);
   Tensor self_working_copy = cloneBatchedColumnMajor(self);
-  VT = VT.transpose(-2, -1);  // gesvdj returns V instead of V^H
-
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "svd_cuda_gesvdjBatched", [&] {
     _apply_svd_lib_gesvdjBatched<scalar_t>(self_working_copy, U, S, VT, infos, compute_uv);
   });
@@ -496,6 +488,11 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda_lib(const Tensor& self, bool
     _create_U_S_VT(self, some, compute_uv, /* svd_use_cusolver = */ true);
   // U, S, V working copies are already column majored now
 
+  // gesvdj computes V instead of V^H
+  if (compute_uv) {
+    VT_working_copy.transpose_(-2, -1);
+  }
+
   // heuristic for using `gesvdjBatched` over `gesvdj`
   if (m <= 32 && n <= 32 && batch_size > 1 && (!some || m == n)) {
     apply_svd_lib_gesvdjBatched(self, U_working_copy, S_working_copy, VT_working_copy, infos, compute_uv);
@@ -506,17 +503,16 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda_lib(const Tensor& self, bool
   // A device-host sync will be performed.
   batchCheckErrors(infos, "svd_cuda");
 
+  // gesvdjBatched fails with illegal memory access and
+  // gesvdj fails with CUSOLVER_STATUS_EXECUTION_FAILED
+  // if matrices for U and VT are not allocated
+  // even though the result of computation is not used we need to allocate this memory
+  // now resize the temporary tensors to 0
   if (!compute_uv) {
-    VT_working_copy.zero_();
-    U_working_copy.zero_();
+    U_working_copy.resize_({0});
+    VT_working_copy.resize_({0});
   }
 
-  if (some) {
-    VT_working_copy = VT_working_copy.narrow(-2, 0, k);
-  }
-
-  // so far we have computed VT, but torch.svd returns V instead. Adjust accordingly.
-  VT_working_copy.transpose_(-2, -1);
   return std::make_tuple(U_working_copy, S_working_copy, VT_working_copy);
 }
 
