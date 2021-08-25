@@ -38,23 +38,19 @@ void optimizePointwise(LoopNest* ln, Tensor target, int width) {
 
 std::shared_ptr<TEWrapper> wrapTECompute(
     std::shared_ptr<TEWrapper> wrap,
-    Placeholder& in,
     Tensor out,
-    VarHandle& dim,
+    std::vector<CodeGen::BufferArg> args,
     int width = kVectorWidth) {
   LoopNest ln({out});
   optimizePointwise(&ln, out, width);
   ln.prepareForCodegen();
   StmtPtr s = ln.root_stmt();
   s = IRSimplifier::simplify(s);
-  std::vector<CodeGen::BufferArg> args;
-  args.emplace_back(out);
-  args.emplace_back(in);
-  args.emplace_back(dim);
+  args.insert(args.begin(), out);
   auto cg = std::make_unique<LLVMCodeGen>(s, args);
   wrap->update(std::move(cg));
   return wrap;
-};
+}
 
 #else
 
@@ -68,12 +64,11 @@ bool TEWrapper::supports(const at::Tensor& t) {
 
 std::shared_ptr<TEWrapper> wrapTECompute(
     std::shared_ptr<TEWrapper> wrap,
-    Placeholder& in,
     Tensor out,
-    VarHandle& dim,
+    std::vector<CodeGen::BufferArg> args,
     int width = kVectorWidth) {
   return wrap;
-};
+}
 
 #endif
 
@@ -105,26 +100,24 @@ void updateNNCCache(NodeKind kind, std::shared_ptr<TEWrapper> code) {
 
 } // namespace
 
-std::shared_ptr<TEWrapper> createLogit(c10::optional<float> clamp) {
+std::shared_ptr<TEWrapper> createLogit() {
   // TODO: Use NNC cache for this op.
   auto wrap = std::make_shared<TEWrapper>();
   auto N = VarHandle("N", kInt);
+  auto C = VarHandle("C", kFloat);
   Placeholder A("A", kFloat, {N});
   Tensor B = Compute("B", {N}, [&](const VarHandle& i) {
     auto A_elem = [&]() {
-      if (!clamp) {
-        return A.load(i);
-      } else {
-        auto elem = A.load(i);
-        auto min = FloatImm::make(*clamp);
-        auto max = FloatImm::make(1.0f - *clamp);
-        elem = CompareSelect::make(elem, min, min, elem, kLT);
-        return CompareSelect::make(elem, max, max, elem, kGT);
-      }
+      auto elem = A.load(i);
+      auto one = FloatImm::make(1.0f);
+      const auto& min = C;
+      auto max = one - C;
+      elem = CompareSelect::make(elem, min, min, elem, kLT);
+      return CompareSelect::make(elem, max, max, elem, kGT);
     }();
     return log_vml(A_elem / (FloatImm::make(1.0f) - A_elem));
   });
-  return wrapTECompute(wrap, A, B, N);
+  return wrapTECompute(wrap, B, {A, N, C});
 }
 
 std::shared_ptr<TEWrapper> createRelu() {
@@ -140,7 +133,7 @@ std::shared_ptr<TEWrapper> createRelu() {
     auto a = A.load(i);
     return ifThenElse(a < zero, zero, a);
   });
-  wrap = wrapTECompute(wrap, A, B, N);
+  wrap = wrapTECompute(wrap, B, {A, N});
   updateNNCCache(aten::relu, wrap);
   return wrap;
 }
@@ -157,7 +150,7 @@ std::shared_ptr<TEWrapper> createTanh() {
     auto a = A.load(i);
     return fast_tanh(a);
   });
-  wrap = wrapTECompute(wrap, A, B, N);
+  wrap = wrapTECompute(wrap, B, {A, N});
   updateNNCCache(aten::tanh, wrap);
   return wrap;
 }
@@ -175,7 +168,7 @@ std::shared_ptr<TEWrapper> createSigmoid() {
   // NNC uses sleef for vectorizing sigmoid, which comes in an 8-wide flavor
   // (Sleef_expf8).
   constexpr int kSleefWidth = 8;
-  wrap = wrapTECompute(wrap, A, B, N, kSleefWidth);
+  wrap = wrapTECompute(wrap, B, {A, N}, kSleefWidth);
   updateNNCCache(aten::sigmoid, wrap);
   return wrap;
 }
