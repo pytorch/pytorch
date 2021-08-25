@@ -1,23 +1,27 @@
+#!/usr/bin/env python3
+
 import argparse
 import multiprocessing
-from pathlib import Path
 import os
 import subprocess
 import sys
 import shutil
 
+from pathlib import Path
+from typing import List, Any, Union, Optional
 
-def eprint(*args):
+
+def eprint(*args: Any) -> None:
     print(*args, file=sys.stderr)
 
 
-def run_cmd(cmd, **kwargs):
+def run_cmd(cmd: List[Any], **kwargs: Any) -> 'subprocess.CompletedProcess[bytes]':
     cmd = [str(x) for x in cmd]
     eprint("$", " ".join(cmd))
     return subprocess.run(cmd, **kwargs)
 
 
-def create_symbols(dump_syms_exe, pytorch_build_dir, symbols_dir):
+def create_symbols(dump_syms_exe: Path, pytorch_build_dir: Path, symbols_dir: Path) -> None:
     """
     Creates symbols directory for minidump_stackwalk as described here:
     https://chromium.googlesource.com/breakpad/breakpad/+/master/docs/linux_starter_guide.md#producing-symbols-for-your-application
@@ -30,8 +34,6 @@ def create_symbols(dump_syms_exe, pytorch_build_dir, symbols_dir):
                 - ABC123/
                     - libtorch_cpu.so.sym
     """
-    # walk the bin dir, dump_syms_exe, move to appropriate directory
-    # https://chromium.googlesource.com/chromium/chromium/+/34599b0bf7a14ab21a04483c46ecd9b5eaf86704/components/breakpad/tools/generate_breakpad_symbols.py
     # Walk the directory of torch libraries, generate symbols for each one
     for lib in (pytorch_build_dir / "lib").glob("*.so*"):
         r = run_cmd(
@@ -55,7 +57,7 @@ def create_symbols(dump_syms_exe, pytorch_build_dir, symbols_dir):
             f.write(stdout)
 
 
-def stackwalk(stackwalk_exe, crash, symbols_dir):
+def stackwalk(stackwalk_exe: Path, crash: Path, symbols_dir: Path) -> None:
     """
     Run minidump_stackwalk from breakpad and output the results
     """
@@ -68,7 +70,7 @@ def stackwalk(stackwalk_exe, crash, symbols_dir):
     print(r.stdout.decode())
 
 
-def build_breakpad(breakpad_dir):
+def build_breakpad(breakpad_dir: Path) -> None:
     """
     Clone and build breakpad
     """
@@ -91,6 +93,9 @@ def build_breakpad(breakpad_dir):
     run_cmd(["make", "-j", multiprocessing.cpu_count()], cwd=breakpad_dir, check=True)
 
 
+Exe = Union[Optional[str], Path]
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--minidump", required=True, help="minidump .dmp file")
@@ -103,8 +108,8 @@ if __name__ == "__main__":
 
     symbols_dir = Path("symbols")
 
-    dump_syms_exe = shutil.which("dump_syms")
-    minidump_stackwalk_exe = shutil.which("minidump_stackwalk")
+    dump_syms_exe: Exe = shutil.which("dump_syms")
+    minidump_stackwalk_exe: Exe = shutil.which("minidump_stackwalk")
 
     if dump_syms_exe is None or minidump_stackwalk_exe is None:
         # Binaries not found in path, check hardcoded build location
@@ -128,8 +133,8 @@ if __name__ == "__main__":
             breakpad_home / "src" / "processor" / "minidump_stackwalk"
         )
 
-    print(dump_syms_exe)
-    print(minidump_stackwalk_exe)
+    dump_syms_exe = Path(dump_syms_exe)
+    minidump_stackwalk_exe = Path(minidump_stackwalk_exe)
 
     if not symbols_dir.exists():
         eprint(f"{symbols_dir} doesn't exist, generating symbols")
