@@ -4834,6 +4834,20 @@ def _scaled_dot_product_attention(
         - Output: attention values have shape :math:`(B, Nt, E)`; attention weights
             have shape :math:`(B, Nt, Ns)`
     """
+    
+    r"""
+  - This is the function, which helps you to customize your attention in the transformer. 
+  - For example, many papers have their custom attention, so to implement it, you can just modify the attention.  
+  - Suppose, if we have this paper: https://arxiv.org/pdf/2106.11539.pdf, there are custom attentions, we could modify it right here and you are good to do.
+    
+    Implementation:
+    Suppose from the above mentioned paper, you want to create custom visual attention (Page No.4), it can be used as follows:
+    
+    
+    attn = torch.bmm(q,k.transpose(-2,-1))
+    attn = attn + torch.bmm(k,attn) + torch.bmm(q,attn) + another_attn
+
+    """
     B, Nt, E = q.shape
     q = q / math.sqrt(E)
     # (B, Nt, E) x (B, E, Ns) -> (B, Nt, Ns)
