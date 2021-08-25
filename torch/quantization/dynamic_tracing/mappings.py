@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
 import torch.nn.quantized as nnq
+import torch.nn.intrinsic as nni
+import torch.nn.intrinsic.quantized as nniq
 import operator
 
 # TODO(future PR): reuse all of these with existing quantization mappings
@@ -29,4 +31,5 @@ module_types_supported_by_quantization = set([
 # TODO(future PR): reuse existing mapping
 q_mod_to_float_mod_mapping = {
     nnq.Conv2d: nn.Conv2d,
+    nniq.ConvReLU2d: nni.ConvReLU2d,
 }

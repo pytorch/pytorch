@@ -13,12 +13,11 @@ class AllModuleTracer(torch.fx.Tracer):
     def is_leaf_module(self, m, module_qualified_name) -> bool:
         return True
 
-    def _maybe_update_args_with_quants(self, args):
+    def _maybe_update_args_with_quants(self, args, arg_quant_infos):
         # insert quants for inputs, if needed
-        input_args_quant_info = self.root._auto_quant_state.get_input_args_quant_info()
-        if len(input_args_quant_info):
+        if len(arg_quant_infos):
             new_args = []
-            for idx, input_arg_quant_info in enumerate(input_args_quant_info):
+            for idx, input_arg_quant_info in enumerate(arg_quant_infos):
                 if input_arg_quant_info is None:
                     new_args.append(args[idx])
                 else:
@@ -38,23 +37,33 @@ class AllModuleTracer(torch.fx.Tracer):
             target = torch.mul
 
         if kind == 'call_function':
-            # insert quants for inputs, if needed
-            args = self._maybe_update_args_with_quants(args)
-            old_target = target
-            target, args, kwargs = \
-                self.root._auto_quant_state.get_inference_func_or_mod_args_kwargs(
-                    target, args, kwargs, unwrap_scale_zp=True)
-            self.root._auto_quant_state.validate_and_increment(old_target)
+            if self.root._auto_quant_state.cur_op_needs_hooks(target):
+                self.root._auto_quant_state.validate_cur_op(target)
+
+                old_target = target
+                target, arg_quant_infos, additional_kwargs = \
+                    self.root._auto_quant_state.get_op_convert_info(
+                        target, unwrap_scale_zp=True)
+
+                args = self._maybe_update_args_with_quants(args, arg_quant_infos)
+                kwargs.update(**additional_kwargs)
+
+                self.root._auto_quant_state.mark_cur_op_complete(old_target)
 
         elif kind == 'call_module':
             # TODO: handle fqn
-
-            # insert quants for inputs, if needed
-            args = self._maybe_update_args_with_quants(args)
             module_instance = getattr(self.root, target)
-            _, __, ___ = self.root._auto_quant_state.get_inference_func_or_mod_args_kwargs(
-                module_instance, args, kwargs, unwrap_scale_zp=True)
-            self.root._auto_quant_state.validate_and_increment(module_instance)
+            if self.root._auto_quant_state.cur_op_needs_hooks(module_instance):
+                self.root._auto_quant_state.validate_cur_op(module_instance)
+
+                _, arg_quant_infos, additional_kwargs = \
+                    self.root._auto_quant_state.get_op_convert_info(
+                        module_instance, unwrap_scale_zp=True)
+
+                args = self._maybe_update_args_with_quants(args, arg_quant_infos)
+                kwargs.update(**additional_kwargs)
+
+                self.root._auto_quant_state.mark_cur_op_complete(module_instance)
 
         out = super().create_node(kind, target, args, kwargs, name, type_expr)
         return out

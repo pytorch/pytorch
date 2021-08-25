@@ -79,8 +79,9 @@ class TestAutoTracing(QuantizationTestCase):
                 x1 = self.conv(x)
                 x2 = self.relu(x)
                 x3 = x1 + x
-                x4 = x3 + x3
-                return x4
+                return x3
+                # x4 = x3 + x3
+                # return x4
 
         model_fp32 = M().eval()
 
@@ -89,6 +90,8 @@ class TestAutoTracing(QuantizationTestCase):
                                                         weight=torch.quantization.MinMaxObserver.with_args(dtype=torch.qint8))
 
         model_fp32_fused = torch.quantization.fuse_modules(model_fp32, [['conv', 'relu']])
+        # print(model_fp32_fused)
+        # return
         self._test_auto_tracing(model_fp32_fused, (torch.randn(1, 1, 2, 2),))
 
     # TODO(future PR): enable this test

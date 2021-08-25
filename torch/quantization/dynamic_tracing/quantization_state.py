@@ -1,17 +1,15 @@
 import torch
-from typing import Callable, List, Tuple, Any, Optional
+from typing import Callable, List, Tuple, Any, Optional, Dict
 
 from .mappings import (
     fp32_to_int8_fun_mapping,
-    functions_supported_by_quantization,
-    module_types_supported_by_quantization,
     q_mod_to_float_mod_mapping,
 )
 
 from .utils import (
     _raise_obs_not_found_error,
     _raise_obs_op_mismatch,
-    func_or_mod_needs_quantization,
+    op_needs_quantization,
     SeenOp,
     QTensorInfo,
 )
@@ -54,40 +52,67 @@ class AutoQuantizationState(torch.nn.Module):
     def _get_cur_seen_op(self):
         return self.idx_to_seen_ops[str(self.idx)]
 
-    def validate_and_increment(self, cur_func_or_mod: Callable) -> None:
-        if not func_or_mod_needs_quantization(cur_func_or_mod):
-            return
+    def cur_op_needs_hooks(self, cur_op: Callable) -> bool:
+        return op_needs_quantization(cur_op)
+
+    def validate_cur_op(self, cur_op: Callable) -> None:
+        """
+        This function is expected to be called before any new function or
+        module call. It validates that the new function or module is
+        of the expected type based on the order of execution.
+        """
+        assert self.cur_op_needs_hooks(cur_op)
         try:
             seen_op = self._get_cur_seen_op()
-            expected_func_or_mod = seen_op.type
+            expected_op = seen_op.type
         except IndexError:
-            _raise_obs_not_found_error(cur_func_or_mod)
-        if isinstance(cur_func_or_mod, torch.nn.Module):
-            cur_type = type(cur_func_or_mod)
+            _raise_obs_not_found_error(cur_op)
+        if isinstance(cur_op, torch.nn.Module):
+            cur_type = type(cur_op)
             is_related = (
-                (cur_type == expected_func_or_mod) or
+                (cur_type == expected_op) or
                 (
                     cur_type in q_mod_to_float_mod_mapping and
-                    q_mod_to_float_mod_mapping[cur_type] == expected_func_or_mod
+                    q_mod_to_float_mod_mapping[cur_type] == expected_op
                 )
             )
             if not is_related:
-                _raise_obs_op_mismatch(cur_func_or_mod, expected_func_or_mod)
+                _raise_obs_op_mismatch(cur_op, expected_op)
         else:
-            if cur_func_or_mod != expected_func_or_mod:
-                _raise_obs_op_mismatch(cur_func_or_mod, expected_func_or_mod)
-        self.idx += 1
+            if cur_op != expected_op:
+                _raise_obs_op_mismatch(cur_op, expected_op)
 
-    def func_or_mod_before_hook(
+    def mark_cur_op_complete(self, cur_op) -> None:
+        """
+        This function is expected to be called after a function or module
+        processing is complete.
+        """
+        if op_needs_quantization(cur_op):
+            self.idx += 1
+
+    def op_prepare_before_hook(
         self,
-        func_or_mod: Callable,
-        args, kwargs,
+        op: Callable,
+        args: Tuple[Any],
+        kwargs: Dict[str, Any],
         first_call: bool,
         qtensor_id: List[int],
-    ) -> None:
-        if not func_or_mod_needs_quantization(func_or_mod):
-            return
+    ) -> Tuple[Tuple[Any], Dict[str, Any]]:
+        """
+        This function is expected to be called on args and kwargs of
+        `op` directly before `op` is executed.
 
+        If `first_call` is True, we record the type of `op`
+        and the IDs of its tensor inputs. Note: we add a placeholder for IDs
+        of tensor outputs, the placeholder will be filled out during the
+        `op_prepare_after_hook`.
+
+        If `first_call` is False, we do the following:
+        * pass the inputs through observers, if needed
+
+        The function returns modified `args` and `kwargs`.
+        """
+        assert self.cur_op_needs_hooks(op)
         if first_call:
             arg_tensor_ids = []
             for arg in args:
@@ -111,12 +136,14 @@ class AutoQuantizationState(torch.nn.Module):
 
             key = str(self.idx)
             if key not in self.idx_to_seen_ops:
-                if not isinstance(func_or_mod, torch.nn.Module):
+                if not isinstance(op, torch.nn.Module):
                     self.idx_to_seen_ops[key] = SeenOp(
-                        self.idx, func_or_mod, arg_tensor_ids, [])
+                        self.idx, op, arg_tensor_ids, [])
                 else:
                     self.idx_to_seen_ops[key] = SeenOp(
-                        self.idx, type(func_or_mod), arg_tensor_ids, [])
+                        self.idx, type(op), arg_tensor_ids, [])
+
+            return args, kwargs
 
         else:
             seen_op = self._get_cur_seen_op()
@@ -127,10 +154,11 @@ class AutoQuantizationState(torch.nn.Module):
                     observer = self.tensor_id_to_observer[str(tensor_id)]
                     # TODO: return this to the caller
                     observer(args[input_arg_idx])
+            return args, kwargs
 
-    def func_or_mod_after_hook(
+    def op_prepare_after_hook(
         self,
-        func_or_mod: Callable,
+        op: Callable,
         output: Any,
         first_call: bool,
         qtensor_id: List[int],
@@ -138,9 +166,7 @@ class AutoQuantizationState(torch.nn.Module):
         """
         This function is called after a function call
         """
-        if not func_or_mod_needs_quantization(func_or_mod):
-            return
-
+        assert self.cur_op_needs_hooks(op)
         if first_call:
             self.tensor_id_to_observer[str(qtensor_id[0])] = \
                 self.qconfig.activation()
@@ -159,89 +185,138 @@ class AutoQuantizationState(torch.nn.Module):
             output = obs(output)
         return output
 
-    def inference_func_or_mod_before_hook(
+    def op_convert_before_hook(
         self,
-        func_or_mod: Callable,
+        op: Callable,
         args,
         kwargs,
-    ) -> Tuple[Any]:
-        if not func_or_mod_needs_quantization(func_or_mod):
-            return
+    ) -> Tuple[Callable, Any, Any]:
+        """
+        This function is called before executing `op` during quantized
+        inference.
 
-        seen_op = self._get_cur_seen_op()
+        For each arg in `args`, quantizes it if necessary. Returns
+        potentially modified `op, potentially modified `args`,
+        potentially modified `kwargs`.
+        """
+        assert self.cur_op_needs_hooks(op)
 
-        new_inputs = []
-        for input_arg_idx, input_arg in enumerate(seen_op.input_tensor_ids):
-            tensor_id = input_arg.id
-            # only quantize if the dtype is float and we are going to a quantized
-            # op.
-            if str(tensor_id) in self.tensor_id_to_observer and \
-                    input_arg.inf_dtype == torch.float:
-                observer = self.tensor_id_to_observer[str(tensor_id)]
-                # TODO: return this to the caller
-                scale, zp = observer.calculate_qparams()
-                quantized_input = \
-                    torch.quantize_per_tensor(args[input_arg_idx], scale, zp, torch.quint8)
-                new_inputs.append(quantized_input)
-            else:
-                new_inputs.append(args[input_arg_idx])
-        return tuple(new_inputs)
+        op, arg_quant_infos, additional_kwargs = \
+            self.get_op_convert_info(op)
 
-    def inference_func_or_mod_after_hook(
+        # potentially quantize args, based on arg_quant_infos
+        new_args = []
+        for arg_idx, arg in enumerate(args):
+            # TODO: handle non-tensor inputs
+            quant_info = arg_quant_infos[arg_idx]
+            if quant_info is not None:
+                scale, zp = quant_info
+                arg = torch.quantize_per_tensor(arg, scale, zp, torch.quint8)
+            new_args.append(arg)
+        new_args = tuple(new_args)
+
+        # potentially extend kwargs with scale and zero_point
+        kwargs.update(**additional_kwargs)
+
+        return op, new_args, kwargs
+
+    def op_convert_after_hook(
         self,
         func: Callable,
         output,
     ) -> Any:
         return output
 
-    def get_inference_func_or_mod_args_kwargs(
+    def get_op_convert_info(
         self,
-        func_or_mod: Callable,
-        args: Any,
-        kwargs: Any,
-        unwrap_scale_zp: bool = False
+        op: Callable,
+        unwrap_scale_zp: bool = False,
     ) -> Tuple[Callable, Any, Any]:
-        if func_or_mod_needs_quantization(func_or_mod):
-            if not isinstance(func_or_mod, torch.nn.Module):
-                if func_or_mod in fp32_to_int8_fun_mapping:
-                    seen_op = self._get_cur_seen_op()
-                    output_tensor_ids = seen_op.output_tensor_ids
-                    tensor_id = output_tensor_ids[0].id
-                    observer = self.tensor_id_to_observer[str(tensor_id)]
-
-                    scale, zp = observer.calculate_qparams()
-                    # TODO(future PR): remove this boolean flag
-                    if not unwrap_scale_zp:
-                        kwargs.update({'scale': scale, 'zero_point': zp})
-                    else:
-                        kwargs.update({'scale': scale.item(), 'zero_point': zp.item()})
-                    func_or_mod = fp32_to_int8_fun_mapping[func_or_mod]
-
-        return func_or_mod, args, kwargs
-
-    def get_input_args_quant_info(self) -> Tuple[Optional[Tuple[float, int]]]:
         """
-        For each input arg of the current op,
-        * if the input arg needs a quant, returns scale + zp
-        * else, returns None
+        This util function is intended to be called before executing
+        `op` in inference mode, or before creating an FX graph for
+        executing it.
+
+        Returns the information needed for any modifications to `op`,
+        `args`, `kwargs`, but does not actually modify them, leaving that to
+        the caller.
+
+        For `op`, returns either the original callable unchanged,
+        or the corresponding quantized target. Note: always returns the original
+        callable for modules, because they are quantized with module swaps.
+
+        For `args`, returns information needed to quantize each arg, if
+        applicable.
+
+        For `kwargs`, returns additional kwargs for scale and zero_point, if
+        applicable.
         """
-        seen_op = self._get_cur_seen_op()
-        new_inputs = []
-        if seen_op.type in functions_supported_by_quantization or \
-                seen_op.type in module_types_supported_by_quantization:
-            for input_arg_idx, input_arg in enumerate(seen_op.input_tensor_ids):
-                if input_arg.inf_dtype != torch.quint8:
-                    tensor_id = input_arg.id
-                    observer = self.tensor_id_to_observer[str(tensor_id)]
-                    # TODO: return this to the caller
-                    scale, zp = observer.calculate_qparams()
-                    new_inputs.append((scale, zp,))
+        assert self.cur_op_needs_hooks(op)
+
+        # calculate new op
+        new_op = op
+        if not isinstance(op, torch.nn.Module):
+            if op in fp32_to_int8_fun_mapping:
+                new_op = fp32_to_int8_fun_mapping[op]
+
+        # calculate quant infos
+        arg_quant_infos = self._get_input_args_quant_info(op)
+
+        # calculate scale and zp for output
+        # TODO: instead of always doing this if there is an observer,
+        # calculate whether this is needed based on the op and dtypes
+        additional_kwargs = {}
+        if not isinstance(op, torch.nn.Module):
+            if op in fp32_to_int8_fun_mapping:
+                seen_op = self._get_cur_seen_op()
+                output_tensor_ids = seen_op.output_tensor_ids
+                tensor_id = output_tensor_ids[0].id
+                observer = self.tensor_id_to_observer[str(tensor_id)]
+
+                scale, zp = observer.calculate_qparams()
+                # TODO(future PR): remove this boolean flag
+                if not unwrap_scale_zp:
+                    additional_kwargs.update({'scale': scale, 'zero_point': zp})
                 else:
-                    new_inputs.append(None)
-        return new_inputs
+                    additional_kwargs.update(
+                        {'scale': scale.item(), 'zero_point': zp.item()})
+
+        return new_op, arg_quant_infos, additional_kwargs
+
+    def _get_input_args_quant_info(
+        self,
+        cur_op: Callable,
+    ) -> List[Optional[Tuple[float, int]]]:
+        """
+        Returns a list of information about the tensor inputs to the current op.
+        For each tensor input:
+        * if the tensor input needs a quant, the list will contain
+          (scale, zero_point)
+        * if the tensor input does not need a quant, the list will contain None
+
+        For example, if there are two tensor inputs to the current op, and the
+        first input needs a quant, this function will return
+
+          [(scale0, zero_point0), None]
+
+        """
+        assert self.cur_op_needs_hooks(cur_op)
+        seen_op = self._get_cur_seen_op()
+        quant_infos = []
+        for input_arg_idx, input_arg in enumerate(seen_op.input_tensor_ids):
+            tensor_id = input_arg.id
+            if str(tensor_id) in self.tensor_id_to_observer and \
+                    input_arg.inf_dtype == torch.float:
+                observer = self.tensor_id_to_observer[str(tensor_id)]
+                # TODO: return this to the caller
+                scale, zp = observer.calculate_qparams()
+                quant_infos.append((scale, zp,))
+            else:
+                quant_infos.append(None)
+        return quant_infos
 
     def reset_to_new_call(self):
         """
-        Resets the internal op counter to start a new inference call
+        Resets the internal op counter to start a new top level module call
         """
         self.idx = 0

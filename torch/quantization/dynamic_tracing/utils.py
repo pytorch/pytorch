@@ -6,6 +6,7 @@ import torch
 from .mappings import (
     functions_supported_by_quantization,
     module_types_supported_by_quantization,
+    q_mod_to_float_mod_mapping,
 )
 
 def _raise_obs_not_found_error(func):
@@ -49,10 +50,12 @@ QTensorInfo = collections.namedtuple(
     ],
 )
 
-def func_or_mod_needs_quantization(func_or_mod: Callable) -> bool:
-    if func_or_mod in functions_supported_by_quantization:
+def op_needs_quantization(op: Callable) -> bool:
+    if op in functions_supported_by_quantization:
         return True
     for module_type in module_types_supported_by_quantization:
-        if isinstance(func_or_mod, module_type):
+        if isinstance(op, module_type):
             return True
+    if op in q_mod_to_float_mod_mapping:
+        return True
     return False
