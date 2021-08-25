@@ -202,7 +202,7 @@ struct TORCH_API BytecodeEmitMode {
 // false: instruction of default argument values are not emitted. Instead
 // they are fetched from operator schema.
 // default_args_before_out_args (to forward compatibile support
-// operators allowing out arguements and default arguments):
+// operators allowing out arguments and default arguments):
 // true: the number of specified arguments will deserialized to (#all_args -
 // #default_args). false: the number of specified arguments will deserialized to
 // (#all_args).

@@ -11,7 +11,6 @@
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <cstddef>
 #include <sstream>
-#include "ATen/core/interned_strings.h"
 
 namespace torch {
 namespace jit {
@@ -395,6 +394,29 @@ std::stringstream backport_v5_to_v4(std::stringstream& input_model_stream) {
   return ouput_model_stream;
 }
 
+/*
+Backport function bytecode v6 that introduced support for operators with default
+arguments in mobile. Previously, in v5, there is no number of specified
+arguments for operators in bytecode operator table. In v6, operators are aware
+of the number of specified arguments being present in the schema.
+
+The bump was needed because the v6 bytecode specifies number of specified
+arguments for operators in the schema, since the runtime code is now able to
+query the number of specified arguments and supports default arguments.
+
+For example, aten::foo's schema in v5 is
+foo(Tensor a, Tensor b) -> Tensor
+and in v6, it's
+foo(Tensor a, Tensor b, int groups=1) -> Tensor
+
+Accordingly, the operator table in v5 is:
+('operators', (('aten::foo', ''),))
+and in v6, it's
+('operators', (('aten::foo', '', 2),))
+
+Thus, the backport is necessary such that the bytecode operator table contains
+number of specified arguments.
+*/
 std::stringstream backport_v6_to_v5(std::stringstream& input_model_stream) {
   bool emit_default_input_instructions = true;
   bool enable_defaults_args_with_out_args = false;
@@ -415,17 +437,19 @@ serialization of all arguments in the schema, even when optional arguments
 were not provided (as they had default values). Currently, in v7, operators
 are aware of out arguments being present in the schema (always appended),
 allowing the serialization of only required arguments (as default values will
-be provided by the runtime). The bump was needed because the v7 bytecode
-specifies less arguments for ops with out arguments in the schema, since the
-runtime code is now able to query whether an argument is of type "out" and
-insert the necessary default values in the right order in the interpreter
-stack (i.e. before the out arguments). For example schema is: torch.add(x, h,
-alpha=1.0, out=x) So, if the program defines: torch.add(x, h, out=x)
-Previously, in v6, we serialized the bytecode to contain all 4 arguments.
-Currently, in v7, we serialize the bytecode with only 3 arguments, since
-alpha is optional and has a default value that the runtime will push in the
-stack. Thus, the backport is necessary such that the bytecode contains all
-the arguments as before.
+be provided by the runtime).
+
+The bump was needed because the v7 bytecode specifies less arguments for ops
+with out arguments in the schema, since the runtime code is now able to query
+whether an argument is of type "out" and insert the necessary default values in
+the right order in the interpreter stack (i.e. before the out arguments).
+
+For example schema is: torch.add(x, h, alpha=1.0, out=x) So, if the program
+defines: torch.add(x, h, out=x) Previously, in v6, we serialized the bytecode to
+contain all 4 arguments. Currently, in v7, we serialize the bytecode with only 3
+arguments, since alpha is optional and has a default value that the runtime will
+push in the stack. Thus, the backport is necessary such that the bytecode
+contains all the arguments as before.
 */
 std::stringstream backport_v7_to_v6(std::stringstream& input_model_stream) {
   bool emit_default_input_instructions = false;

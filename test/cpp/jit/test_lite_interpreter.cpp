@@ -726,7 +726,7 @@ TEST(LiteInterpreterTest, BackPortByteCodeModelAllVersions) {
       x2 = torch.empty_like(torch.empty(2, 2))
       x3 = torch._convolution(input, self.weight, self.bias, [1, 1], [0, 0], [1, 1], False, [0, 0], 1, False, False, True, True)
       # Add torch.add operator to cover bytecode version bump from 6 to 7
-      # for bytecode version 7, the main change is to support defaults arguements with out arguments
+      # for bytecode version 7, the main change is to support defaults arguments with out arguments
       x = 2 * torch.ones(1)
       h = torch.ones(1)
       torch.add(x, h, out=x)
