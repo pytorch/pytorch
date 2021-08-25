@@ -5,5 +5,5 @@ class autocast(torch.autocast_mode.autocast):
     See :class:`torch.autocast`.
     ``torch.cpu.amp.autocast(args...)`` is equivalent to ``torch.autocast("cpu", args...)``
     """
-    def __init__(self, enabled=True, dtype=torch.float16):
-        super().__init__("cpu", enabled=enabled, dtype=dtype)
+    def __init__(self, enabled=True, fast_dtype=torch.float16):
+        super().__init__("cpu", enabled=enabled, fast_dtype=fast_dtype)

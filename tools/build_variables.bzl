@@ -329,7 +329,6 @@ core_sources_full = core_sources_full_mobile + [
     "torch/csrc/jit/runtime/static/native_ops.cpp",
     "torch/csrc/jit/runtime/static/ops.cpp",
     "torch/csrc/jit/runtime/static/passes.cpp",
-    "torch/csrc/jit/runtime/static/te_wrapper.cpp",
     "torch/csrc/jit/tensorexpr/external_functions.cpp",
     "torch/csrc/jit/tensorexpr/external_functions_codegen.cpp",
 ]

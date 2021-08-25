@@ -88,8 +88,6 @@ if ! which conda; then
   else
     export USE_MKLDNN=0
   fi
-else
-  export CMAKE_PREFIX_PATH=/opt/conda
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *libtorch* ]]; then

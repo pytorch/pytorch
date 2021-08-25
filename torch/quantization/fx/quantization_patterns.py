@@ -155,15 +155,6 @@ class QuantizeHandler(ABC):
         """
         return qconfig.activation
 
-    def is_output_quantized(self, qconfig, is_reference):
-        """ Returns true if the output node of convert is quantized
-        when is_reference is False, we would return float node when a certain dtype
-        combination is not supported (since fbgemm/qnnpack only support certain dtype
-        combinations), so the output may be float, but when is_reference is True,
-        we support all dtype combinations so the output will always be quantized.
-        """
-        return True
-
 
     @abstractmethod
     def convert(self,
@@ -189,52 +180,34 @@ class QuantizeHandler(ABC):
 
 # tuple (activation_dtype, weight_dtype, compute_dtype)
 # these are supported types for common binary ops like add/mul etc.
-all_dtypes = [
+binary_op_all_dtypes = [
     (torch.quint8, torch.qint8, None),
     (torch.float16, torch.float16, None),
 ]
-fp16_dtypes = [
+binary_op_float16_dtypes = [
     (torch.float16, torch.float16, None)
 ]
-int8_dtypes = [
+binary_op_int8_dtypes = [
     (torch.quint8, torch.qint8, None),
 ]
 binary_op_supported_dtypes : Dict[Union[Callable, str], List[Tuple[torch.dtype, torch.dtype, None]]] = {
-    operator.add: all_dtypes,
-    torch.add: all_dtypes,
-    operator.mul: all_dtypes,
-    torch.mul: all_dtypes,
-    torch.bmm: fp16_dtypes,
-    torch.sub: fp16_dtypes,
-    operator.sub: fp16_dtypes,
-    torch.div: fp16_dtypes,
-    operator.truediv: fp16_dtypes,
+    operator.add: binary_op_all_dtypes,
+    torch.add: binary_op_all_dtypes,
+    operator.mul: binary_op_all_dtypes,
+    torch.mul: binary_op_all_dtypes,
+    torch.bmm: binary_op_float16_dtypes,
+    torch.sub: binary_op_float16_dtypes,
+    operator.sub: binary_op_float16_dtypes,
+    torch.div: binary_op_float16_dtypes,
+    operator.truediv: binary_op_float16_dtypes,
+    torch.sum: binary_op_float16_dtypes
 }
-
-default_op_supported_dtypes = {
-    torch.nn.ConvTranspose1d: int8_dtypes,
-    torch.nn.ConvTranspose2d: int8_dtypes,
-    torch.nn.ELU: int8_dtypes,
-    torch.nn.LeakyReLU: int8_dtypes,
-    torch.nn.Hardswish: int8_dtypes,
-    torch.nn.InstanceNorm1d: int8_dtypes,
-    torch.nn.InstanceNorm2d: int8_dtypes,
-    torch.nn.InstanceNorm3d: int8_dtypes,
-    torch.nn.LayerNorm: all_dtypes,
-    torch.nn.SiLU: fp16_dtypes,
-    torch.nn.Mish: fp16_dtypes,
-    torch.nn.GELU: int8_dtypes,
-    torch.nn.Softmax: int8_dtypes,
-    torch.nn.functional.elu: int8_dtypes,
-    torch.nn.functional.hardswish: int8_dtypes,
-    torch.nn.functional.instance_norm: int8_dtypes,
-    torch.nn.functional.layer_norm: all_dtypes,
-    torch.nn.functional.leaky_relu: int8_dtypes,
-    torch.nn.functional.silu: fp16_dtypes,
-    torch.nn.functional.mish: fp16_dtypes,
-    torch.nn.functional.gelu: int8_dtypes,
-    torch.nn.functional.softmax: int8_dtypes,
-    torch.sum: fp16_dtypes,
+binary_reference_op_supported_dtypes : Dict[Union[Callable, str], List[Tuple[torch.dtype, torch.dtype, None]]] = {
+    torch.bmm: binary_op_int8_dtypes,
+    operator.add: binary_op_int8_dtypes,
+    torch.add: binary_op_int8_dtypes,
+    operator.mul: binary_op_int8_dtypes,
+    torch.mul: binary_op_int8_dtypes,
 }
 
 QAT_CONV_MODULE_CLASSES = \
@@ -293,6 +266,7 @@ def _to_reference(float_module, weight_qparams):
 @register_quant_pattern(torch.sub)
 @register_quant_pattern(torch.mul)
 @register_quant_pattern(torch.div)
+@register_quant_pattern(torch.sum)
 @register_quant_pattern(torch.bmm)
 @register_quant_pattern((torch.nn.ReLU, operator.add))
 @register_quant_pattern((torch.nn.ReLU, operator.mul))
@@ -370,13 +344,6 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
         # for x + y where x and y are scalars, we do not observe anything
         return self.num_tensor_args > 0
 
-    def is_output_quantized(self, qconfig, is_reference):
-        dtypes = get_qconfig_dtypes(qconfig)
-        if not is_reference:
-            return self.binary_op in binary_op_supported_dtypes and \
-                dtypes in binary_op_supported_dtypes[self.binary_op]
-        return True
-
     def convert(self,
                 node: Node,
                 qconfig: QConfigAny,
@@ -394,14 +361,11 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
 
         dtypes = get_qconfig_dtypes(qconfig)
 
-        if is_reference:
-            act_dtype = activation_dtype(qconfig)
-            if act_dtype == torch.float:
-                return quantized_graph.node_copy(node, load_arg(quantized=torch.float))
-            else:
-                if self.num_tensor_args == 2:
-                    # make sure both inputs are quantized to act_dtype
-                    load_arg(quantized={0: act_dtype, 1: act_dtype})(self.binary_op_node.args)
+        if is_reference and self.binary_op in binary_reference_op_supported_dtypes and \
+                dtypes in binary_reference_op_supported_dtypes[self.binary_op]:
+            if dtypes in binary_op_int8_dtypes:
+                # make sure both inputs are quantized to torch.quint8
+                load_arg(quantized={0: torch.quint8, 1: torch.quint8})(self.binary_op_node.args)
                 args = load_arg(quantized=torch.float)(self.binary_op_node.args)
                 kwargs = load_arg(quantized=torch.float)(self.binary_op_node.kwargs)
                 op_out = quantized_graph.node_copy(self.binary_op_node, load_arg(quantized=torch.float))
@@ -420,6 +384,12 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
                 return quantize_node(
                     op_out, activation_post_process,
                     node, modules, quantized_graph, node_name_to_scope, is_input=False)
+            else:
+                warnings.warn(
+                    "No implementation found for dtype combination: {}"
+                    "for op {} with is_reference={} despite it being listed as supported"
+                    "this should not happen".format(dtypes, self.binary_op, is_reference))
+                return quantized_graph.node_copy(node, load_arg(quantized=torch.float))
         elif not is_reference and self.binary_op in binary_op_supported_dtypes and \
                 dtypes in binary_op_supported_dtypes[self.binary_op]:
             if dtypes in [(torch.quint8, torch.qint8, None)]:
@@ -475,10 +445,15 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
                 "dtype combination: {} is not "
                 "supported by {} for is_reference={}. "
                 "Supported non-reference dtype combinations are: {} "
+                "Supported reference dtype combinations are: {}"
                 "".format(dtypes,
                           self.binary_op,
                           is_reference,
-                          binary_op_supported_dtypes[self.binary_op]
+                          binary_op_supported_dtypes[self.binary_op],
+                          (
+                              [] if self.binary_op not in binary_reference_op_supported_dtypes.keys()
+                              else binary_reference_op_supported_dtypes[self.binary_op]
+                          )
                           )
             )
             if self.relu_node:
@@ -1251,7 +1226,6 @@ ARGS_TO_SKIP = {
 # until they receive a proper fp16 kernel. To use the reference pattern, use a custom qconfig
 # @register_quant_pattern(torch.nn.functional.gelu)
 # @register_quant_pattern(torch.nn.functional.softmax)
-@register_quant_pattern(torch.sum)
 class DefaultNodeQuantizeHandler(QuantizeHandler):
     """ Common quantized op, first input and first output will be quantized
     """
@@ -1264,13 +1238,6 @@ class DefaultNodeQuantizeHandler(QuantizeHandler):
             self.op = node.target
         elif node.op == "call_module":
             self.op = type(modules[str(node.target)])
-
-    def is_output_quantized(self, qconfig, is_reference):
-        dtypes = get_qconfig_dtypes(qconfig)
-        if not is_reference:
-            return self.op in default_op_supported_dtypes and \
-                dtypes in default_op_supported_dtypes[self.op]
-        return True
 
     def convert(self,
                 node: Node,
@@ -1289,12 +1256,46 @@ class DefaultNodeQuantizeHandler(QuantizeHandler):
             convert_custom_config_dict = {}
         additional_static_quant_mapping = convert_custom_config_dict.get("static", {})
 
+        all_dtypes = [
+            (torch.quint8, torch.qint8, None),
+            (torch.float16, torch.float16, None)
+        ]
+        int8_dtypes = [
+            (torch.quint8, torch.qint8, None)
+        ]
+        fp16_dtypes = [
+            (torch.float16, torch.float16, None)
+        ]
+        supported_dtypes = {
+            torch.nn.ConvTranspose1d: int8_dtypes,
+            torch.nn.ConvTranspose2d: int8_dtypes,
+            torch.nn.ELU: int8_dtypes,
+            torch.nn.LeakyReLU: int8_dtypes,
+            torch.nn.Hardswish: int8_dtypes,
+            torch.nn.InstanceNorm1d: int8_dtypes,
+            torch.nn.InstanceNorm2d: int8_dtypes,
+            torch.nn.InstanceNorm3d: int8_dtypes,
+            torch.nn.LayerNorm: all_dtypes,
+            torch.nn.SiLU: fp16_dtypes,
+            torch.nn.Mish: fp16_dtypes,
+            torch.nn.GELU: int8_dtypes,
+            torch.nn.Softmax: int8_dtypes,
+            torch.nn.functional.elu: int8_dtypes,
+            torch.nn.functional.hardswish: int8_dtypes,
+            torch.nn.functional.instance_norm: int8_dtypes,
+            torch.nn.functional.layer_norm: all_dtypes,
+            torch.nn.functional.leaky_relu: int8_dtypes,
+            torch.nn.functional.silu: fp16_dtypes,
+            torch.nn.functional.mish: fp16_dtypes,
+            torch.nn.functional.gelu: int8_dtypes,
+            torch.nn.functional.softmax: int8_dtypes,
+        }
         dtypes = get_qconfig_dtypes(qconfig)
-        if not is_reference and dtypes not in default_op_supported_dtypes[self.op]:
+        if not is_reference and dtypes not in supported_dtypes[self.op]:
             warnings.warn(
                 "dtype combination: {} is not "
                 "supported by {} "
-                "supported dtype combinations are: {}".format(dtypes, self.op, default_op_supported_dtypes[self.op]))
+                "supported dtype combinations are: {}".format(dtypes, self.op, supported_dtypes[self.op]))
             return quantized_graph.node_copy(node, load_arg(quantized=torch.float))
         # TODO: make helper functions for (torch.quint8, torch.qint8, None)
         if not is_reference:
@@ -1447,9 +1448,6 @@ class FixedQParamsOpQuantizeHandler(QuantizeHandler):
 @register_quant_pattern(torch.nn.AvgPool3d)
 @register_quant_pattern(torch.nn.Dropout)
 @register_quant_pattern(torch.nn.Hardtanh)
-@register_quant_pattern(torch.nn.MaxPool1d)
-@register_quant_pattern(torch.nn.MaxPool2d)
-@register_quant_pattern(torch.nn.MaxPool3d)
 @register_quant_pattern(torch.nn.ReLU)
 @register_quant_pattern(torch.nn.ReLU6)
 @register_quant_pattern(torch.adaptive_avg_pool1d)
@@ -1459,16 +1457,12 @@ class FixedQParamsOpQuantizeHandler(QuantizeHandler):
 @register_quant_pattern(torch.nn.functional.hardtanh)
 @register_quant_pattern(torch.nn.functional.hardtanh_)
 @register_quant_pattern(torch.nn.functional.interpolate)
-@register_quant_pattern(torch.nn.functional.max_pool1d)
-@register_quant_pattern(torch.nn.functional.max_pool2d)
-@register_quant_pattern(torch.nn.functional.max_pool3d)
 @register_quant_pattern(torch.nn.functional.relu)
 @register_quant_pattern(torch.nn.functional.relu6)
 @register_quant_pattern(torch.avg_pool1d)
 @register_quant_pattern(torch._C._nn.avg_pool2d)
 @register_quant_pattern(torch._C._nn.avg_pool3d)
 @register_quant_pattern(torch.clamp)
-@register_quant_pattern(torch.flatten)
 @register_quant_pattern(torch.max)
 @register_quant_pattern(torch.mean)
 @register_quant_pattern(torch.min)
@@ -1503,9 +1497,7 @@ class CopyNodeQuantizeHandler(QuantizeHandler):
                 load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
-        # always produce reference pattern for relu
-        is_relu = node.op == "call_function" and node.target == torch.nn.functional.relu
-        if is_reference or is_relu:
+        if is_reference:
             # when activation dtype is torch.float, the node does not require
             # observation
             # e.g. dynamic quantization or weight_only quantization
@@ -1563,8 +1555,15 @@ class CustomModuleQuantizeHandler(QuantizeHandler):
         # module attribute like module._QUANTIZED_INPUT_INDEXES
         return quantized_graph.node_copy(node, load_arg(quantized=None))
 
+@register_quant_pattern(torch.nn.MaxPool1d)
+@register_quant_pattern(torch.nn.MaxPool2d)
+@register_quant_pattern(torch.nn.MaxPool3d)
 @register_quant_pattern(torch.nn.Identity)
+@register_quant_pattern(torch.nn.functional.max_pool1d)
+@register_quant_pattern(torch.nn.functional.max_pool2d)
+@register_quant_pattern(torch.nn.functional.max_pool3d)
 @register_quant_pattern(torch.chunk)
+@register_quant_pattern(torch.flatten)
 @register_quant_pattern(torch.transpose)
 @register_quant_pattern(torch.repeat_interleave)
 @register_quant_pattern(torch.sort)
