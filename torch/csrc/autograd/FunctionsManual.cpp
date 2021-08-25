@@ -3503,21 +3503,25 @@ std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, cons
 
   // This method exploites that at k-th iteration vector v_k has only elements v_k[k:] which are non-zero.
   auto update_grad = [&m](int64_t k, const Tensor& v_full, const Tensor& t, const Tensor& K) -> std::tuple<Tensor, Tensor> {
-    auto v = v_full.narrow(-1, k, m - k);
-    auto vHK = v.unsqueeze(-2).conj().matmul(K.narrow(-2, k, m - k));
-    auto Kv = K.narrow(-1, k, m - k).matmul(v.unsqueeze(-1));
-    auto t_unsqueezed = t.unsqueeze(-1).unsqueeze(-1);
+    auto v = v_full.narrow(-2, k, m - k);
+    auto vHK = v.transpose(-1, -2).conj().matmul(K.narrow(-2, k, m - k));
+    auto Kv = K.narrow(-1, k, m - k).matmul(v);
+    auto t_unsqueezed = t.unsqueeze(-1);
     auto v_grad = (-t_unsqueezed * vHK).conj().squeeze(-2) - (t_unsqueezed * Kv).squeeze(-1);
-    auto tau_grad = -(vHK.narrow(-1, k, m - k).matmul(v.unsqueeze(-1))).conj();
-    return std::make_tuple(v_grad.squeeze(-1), tau_grad.squeeze(-1).squeeze(-1));
+    auto tau_grad = -(vHK.narrow(-1, k, m - k).matmul(v)).conj();
+    return std::make_tuple(v_grad, tau_grad.squeeze(-1));
   };
 
   K = left_reflect(0, input.select(-1, 0), sigma.select(-1, 0), K);
   for (int64_t i = 0; i < k; ++i) {
-    Tensor vi_grad, taui_grad;
-    std::tie(vi_grad, taui_grad) = update_grad(i, input.select(-1, i), tau.select(-1, i), K);
-    input_grad.select(-1, i).copy_(vi_grad);
-    tau_grad.select(-1, i).copy_(taui_grad);
+    // NOTE: narrow will unsqueeze(-1)
+    auto v_i = input.narrow(-1, i, 1);
+    auto t_i = tau.narrow(-1, i, 1);
+
+    Tensor v_i_grad, tau_i_grad;
+    std::tie(v_i_grad, tau_i_grad) = update_grad(i, v_i, t_i, K);
+    input_grad.select(-1, i).copy_(v_i_grad.squeeze(-1));
+    tau_grad.select(-1, i).copy_(tau_i_grad.squeeze(-1));
 
     // K <- pinv(H_{i + 1}) @ K @ H_i
     if (i < k - 1) {
