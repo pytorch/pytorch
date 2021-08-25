@@ -442,7 +442,7 @@ def fractional_max_pool2d_with_indices(
     .. _Fractional MaxPooling:
         http://arxiv.org/abs/1412.6071
     """
-    if has_torch_function_unary(input, _random_samples):
+    if has_torch_function_variadic(input, _random_samples):
         return handle_torch_function(
             fractional_max_pool2d_with_indices,
             (input, _random_samples),
@@ -473,7 +473,7 @@ def _fractional_max_pool2d(
     return_indices: bool = False,
     _random_samples: Optional[Tensor] = None
 ) -> Tensor:
-    if has_torch_function_unary(input, _random_samples):
+    if has_torch_function_variadic(input, _random_samples):
         return handle_torch_function(
             fractional_max_pool2d,
             (input, _random_samples),
@@ -537,7 +537,7 @@ def fractional_max_pool3d_with_indices(
     .. _Fractional MaxPooling:
         http://arxiv.org/abs/1412.6071
     """
-    if has_torch_function_unary(input, _random_samples):
+    if has_torch_function_variadic(input, _random_samples):
         return handle_torch_function(
             fractional_max_pool3d_with_indices,
             (input, _random_samples),
@@ -571,7 +571,7 @@ def _fractional_max_pool3d(
     return_indices: bool = False,
     _random_samples: Optional[Tensor] = None
 ) -> Tensor:
-    if has_torch_function_unary(input, _random_samples):
+    if has_torch_function_variadic(input, _random_samples):
         return handle_torch_function(
             fractional_max_pool3d,
             (input, _random_samples),
@@ -2263,7 +2263,7 @@ def batch_norm(
     See :class:`~torch.nn.BatchNorm1d`, :class:`~torch.nn.BatchNorm2d`,
     :class:`~torch.nn.BatchNorm3d` for details.
     """
-    if has_torch_function_unary(input, running_mean, running_var, weight, bias):
+    if has_torch_function_variadic(input, running_mean, running_var, weight, bias):
         return handle_torch_function(
             batch_norm,
             (input, running_mean, running_var, weight, bias),
@@ -2309,7 +2309,7 @@ def instance_norm(
     See :class:`~torch.nn.InstanceNorm1d`, :class:`~torch.nn.InstanceNorm2d`,
     :class:`~torch.nn.InstanceNorm3d` for details.
     """
-    if has_torch_function_unary(input, running_mean, running_var, weight, bias):
+    if has_torch_function_variadic(input, running_mean, running_var, weight, bias):
         return handle_torch_function(
             instance_norm,
             (input, running_mean, running_var, weight, bias),
@@ -4437,7 +4437,7 @@ def normalize(input: Tensor, p: float = 2.0, dim: int = 1, eps: float = 1e-12, o
         out (Tensor, optional): the output tensor. If :attr:`out` is used, this
                                 operation won't be differentiable.
     """
-    if has_torch_function_unary(input, out):
+    if has_torch_function_variadic(input, out):
         return handle_torch_function(normalize, (input, out), input, p=p, dim=dim, eps=eps, out=out)
     if out is None:
         denom = input.norm(p, dim, keepdim=True).clamp_min(eps).expand_as(input)
