@@ -24,9 +24,6 @@ class BaseTestClass(JitTestCase):
         torch._C._debug_set_fusion_group_inlining(False)
         self.old_te_must_use_llvm_cpu = torch._C._jit_get_te_must_use_llvm_cpu()
         torch._C._jit_set_te_must_use_llvm_cpu(False)
-        # TODO: CPU fuser currently is disabled when multithreading.
-        self.old_fuse_parallel = torch._C._jit_texpr_parallel_cpu_enabled()
-        torch._C._jit_set_texpr_parallel_cpu_enabled(True)
 
         self.devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
 
@@ -39,7 +36,6 @@ class BaseTestClass(JitTestCase):
         torch._C._jit_override_can_fuse_on_cpu(self.old_cpu_fuser_state)
         torch._C._debug_set_fusion_group_inlining(self.old_fusion_inlining)
         torch._C._jit_set_te_must_use_llvm_cpu(self.old_te_must_use_llvm_cpu)
-        torch._C._jit_set_texpr_parallel_cpu_enabled(self.old_fuse_parallel)
 
     def assertLastGraphAllFused(self):
         self.assertAllFused(torch.jit.last_executed_optimized_graph())
@@ -1468,7 +1464,7 @@ class TestTensorExprFuser(BaseTestClass):
         am_s = getModule(True)
         ref = am(x, x, x)
         test = am_s(x, x, x)
-        torch.testing.assert_allclose(ref, test)
+        torch.testing.assert_close(ref, test)
 
         # Now do the aliasing
         am.a = am.b
@@ -1477,7 +1473,7 @@ class TestTensorExprFuser(BaseTestClass):
         am_s.a = am_s.b
         test = am_s(x, x, x)
 
-        torch.testing.assert_allclose(ref, test)
+        torch.testing.assert_close(ref, test)
 
     def test_alias_analysis_inputs(self):
         class AliasModule(nn.Module):
@@ -1510,7 +1506,7 @@ class TestTensorExprFuser(BaseTestClass):
         x = torch.randn(128, 128)
         test = am_s(x, x, x)
 
-        torch.testing.assert_allclose(ref, test)
+        torch.testing.assert_close(ref, test)
 
     def test_alias_analysis_input_and_module(self):
         class AliasModule(nn.Module):
@@ -1545,7 +1541,7 @@ class TestTensorExprFuser(BaseTestClass):
         am_s.b = x
         test = am_s(x, x, x)
 
-        torch.testing.assert_allclose(ref, test)
+        torch.testing.assert_close(ref, test)
 
     def test_multiple_outputs(self):
         for device in self.devices:

@@ -137,16 +137,12 @@ bool BooleanMaskOpGradient<CPUContext>::DoRunWithType() {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(BooleanMask, BooleanMaskOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_GRADIENT_OPERATOR(
     BooleanMaskGradient,
     BooleanMaskOpGradient<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(BooleanMaskLengths, BooleanMaskLengthsOp<CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(BooleanMask)
     .NumInputs(2)
     .NumOutputs(1, 2)
@@ -211,7 +207,6 @@ masked_indices: [0 3 4]
         "masked_indices",
         "(*Tensor`<int>`*): 1D tensor of indices of the True elements in the `mask` tensor");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(BooleanMaskLengths)
     .NumInputs(2)
     .NumOutputs(1)
@@ -272,7 +267,6 @@ masked_lengths: [0 2 2]
         "masked_lengths",
         "(*Tensor`<int>`*): 1D tensor of same type as inputs that contains the sequence");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 GRADIENT_OPERATOR_SCHEMA(BooleanMaskGradient).NumInputs(2).NumOutputs(1);
 
 namespace {
@@ -287,9 +281,7 @@ class GetBooleanMaskGradient : public GradientMakerBase {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(BooleanMask, GetBooleanMaskGradient);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(BooleanMaskLengths);
 
 } // namespace
@@ -550,10 +542,8 @@ bool SequenceMaskOp<CPUContext>::DoRunWithType() {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(SequenceMask, SequenceMaskOp<CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SequenceMask)
     .NumInputs(1, 2)
     .NumOutputs(1)
@@ -648,7 +638,6 @@ class GetSequenceMaskGradient : public GradientMakerBase {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(SequenceMask, GetSequenceMaskGradient);
 
 } // namespace caffe2
