@@ -8,6 +8,10 @@ class TensorType:
         class M(torch.nn.Module):
             def forward(self, x:TensorType((1,2,3, Dyn)), y:TensorType((1,2,3, Dyn))):
                 return torch.add(x, y)
+
+    Backwards Compatibility:
+
+        This API is experimental and its backwards-compability is *NOT* guaranteed.
     """
 
     def __init__(self, dim):
@@ -59,6 +63,10 @@ def is_consistent(t1, t2):
         int ~ Dyn
         int ~ int
         TensorType((1,Dyn,3)) ~ TensorType((1,2,3))
+
+    Backwards Compatibility:
+
+        This API is experimental and its backwards-compability is *NOT* guaranteed.
     """
 
     if t1 == t2:
@@ -84,6 +92,10 @@ def is_more_precise(t1, t2):
         int >= Dyn
         int >= int
         TensorType((1,Dyn,3)) <= TensorType((1,2,3))
+
+    Backwards Compatibility:
+
+        This API is experimental and its backwards-compability is *NOT* guaranteed.
     """
     if t1 == t2:
         return True

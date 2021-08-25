@@ -243,6 +243,10 @@ def replace_pattern(gm: GraphModule, pattern: Callable, replacement: Callable) -
             add_2 = add_1 + max_2
             return add_2
 
+
+    Backwards Compatibility:
+
+        Backwards-compatibility for this API is guaranteed.
     """
     # Get the graphs for `gm`, `pattern`, `replacement`
     original_graph = gm.graph

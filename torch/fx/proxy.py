@@ -21,12 +21,15 @@ class TracerBase:
         This method can be overridden to do extra checking, validation, or
         modification of values used in node creation. For example, one might
         want to disallow in-place operations from being recorded.
+
+        Backwards Compatibility:
+
+            Backwards-compatibility for this API is guaranteed.
         """
         return self.graph.create_node(kind, target, args, kwargs, name, type_expr)
 
     def proxy(self, node: Node) -> 'Proxy':
         return Proxy(node, self)
-
 
 
     def create_proxy(self, kind: str, target: Target, args: Tuple[Any, ...], kwargs: Dict[str, Any],
@@ -40,6 +43,10 @@ class TracerBase:
         represents the parameter of a function. If we need to encode
         a default parameter, we use the ``args`` tuple. ``args`` is
         otherwise empty for ``placeholder`` Nodes.
+
+        Backwards Compatibility:
+
+            Backwards-compatibility for this API is guaranteed.
         '''
 
         args_ = self.create_arg(args)
@@ -92,6 +99,10 @@ class TracerBase:
         into Argument types that can be stored in IR.
 
         Can be override to support more trace-specific types.
+
+        Backwards Compatibility:
+
+            Backwards-compatibility for this API is guaranteed.
         """
         if not isinstance(a, Proxy) and hasattr(a, '__fx_create_arg__'):
             return a.__fx_create_arg__(self)
@@ -136,6 +147,10 @@ class TracerBase:
         when used in control flow.  Normally we don't know what to do because
         we don't know the value of the proxy, but a custom tracer can attach more
         information to the graph node using create_node and can choose to return a value.
+
+        Backwards Compatibility:
+
+            Backwards-compatibility for this API is guaranteed.
         """
         raise TraceError('symbolically traced variables cannot be used as inputs to control flow')
 
@@ -144,6 +159,10 @@ class TracerBase:
         when used in control flow.  Normally we don't know what to do because
         we don't know the value of the proxy, but a custom tracer can attach more
         information to the graph node using create_node and can choose to return an iterator.
+
+        Backwards Compatibility:
+
+            Backwards-compatibility for this API is guaranteed.
         """
         raise TraceError('Proxy object cannot be iterated. This can be '
                          'attempted when the Proxy is used in a loop or'
@@ -158,12 +177,21 @@ class TracerBase:
         """Called when a proxy object is has the keys() method called.
         This is what happens when ** is called on a proxy. This should return an
         iterator it ** is suppose to work in your custom tracer.
+
+        Backwards Compatibility:
+
+            Backwards-compatibility for this API is guaranteed.
         """
         return Attribute(obj, 'keys')()
 
 
 # used in Proxy object when just appending to the graph while not tracing.
 class GraphAppendingTracer(TracerBase):
+    """
+    Backwards Compatibility:
+
+        Backwards-compatibility for this API is guaranteed.
+    """
     def __init__(self, graph: Graph):
         super().__init__()
         self.graph = graph
@@ -199,6 +227,10 @@ class Proxy:
 
     For a more detailed description into the Proxy internals, check out
     the "Proxy" section in `torch/fx/OVERVIEW.md`
+
+    Backwards Compatibility:
+
+        Backwards-compatibility for this API is guaranteed.
     """
     def __init__(self, node: Node, tracer: 'Optional[TracerBase]' = None):
         if tracer is None:
@@ -254,6 +286,11 @@ class Proxy:
                                             name=self.tracer.graph._target_to_str(orig_method.__name__))
 
 class Attribute(Proxy):
+    """
+    Backwards Compatibility:
+
+        Backwards-compatibility for this API is guaranteed.
+    """
     def __init__(self, root: Proxy, attr: str):
         self.root = root
         self.attr = attr
@@ -274,9 +311,13 @@ class Attribute(Proxy):
 
 class ParameterProxy(Proxy):
     """
-    a special proxy which lets "shape", "size", "dim", and a few other
+    A special proxy which lets "shape", "size", "dim", and a few other
     attribute accesses pass through to the underlying  module parameter object,
     so that conditional tests on these attributes will not throw exception during tracing
+
+    Backwards Compatibility:
+
+        This API is experimental and its backwards-compability is *NOT* guaranteed.
     """
     def __init__(self, tracer: TracerBase, node: Node, name, param):
         super().__init__(node, tracer)

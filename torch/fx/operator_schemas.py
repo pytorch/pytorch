@@ -88,6 +88,11 @@ def get_signature_for_torch_op(op : Callable) -> Optional[List[inspect.Signature
     Returns:
         Optional[List[inspect.Signature]]: A list of signatures for the overloads of this
             operator, or None if the operator signatures could not be retrieved.
+
+    Backwards Compatibility:
+
+        This API is experimental and its backwards-compatibility is *NOT*
+        guaranteed.
     """
     override = _manual_overrides.get(op)
     if override:
@@ -202,6 +207,11 @@ def normalize_function(
     Returns:
 
         Returns normalized_args_and_kwargs, or `None` if not successful.
+
+    Backwards Compatibility:
+
+        This API is experimental and its backwards-compatibility is *NOT*
+        guaranteed.
     """
     if kwargs is None:
         kwargs = {}
@@ -293,6 +303,11 @@ def normalize_module(
     Returns:
 
         Returns normalized_args_and_kwargs, or `None` if not successful.
+
+    Backwards Compatibility:
+
+        This API is experimental and its backwards-compatibility is *NOT*
+        guaranteed.
     """
     try:
         submod = root.get_submodule(target)
