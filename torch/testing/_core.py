@@ -34,7 +34,7 @@ __all__ = [
     "get_all_math_dtypes",
     "integral_types",
     "integral_types_and",
-    "make_non_contiguous"
+    "make_non_contiguous",
 ]
 
 # Helper function that returns True when the dtype is an integral dtype,
