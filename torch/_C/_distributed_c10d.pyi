@@ -134,7 +134,8 @@ class TCPStore(Store):
         world_size: int = ...,
         is_master: bool = ...,
         timeout: timedelta = ...,
-        wait_for_workers: bool = ...
+        wait_for_workers: bool = ...,
+        multi_tenant: bool = ...
     ): ...
 
 class PrefixStore(Store):
