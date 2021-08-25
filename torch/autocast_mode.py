@@ -124,8 +124,9 @@ class autocast(object):
 
     Args:
         device_type(string, required):  Whether to use 'cuda' or 'cpu' device
-        enabled(bool, optional, default=True)":  Whether autocasting should be enabled in the region.
-        fast_dtype(torch_dtype, optional):  Whether to use torch.float16 or torch.bfloat16
+        enabled(bool, optional, default=True):  Whether autocasting should be enabled in the region.
+        fast_dtype(torch_dtype, optional):  Whether to use torch.float16 or torch.bfloat16.
+        cache_enabled(bool, optional, default=True):  Whether the weight cache inside autocast should be enabled.
     """
     def __init__(self, device_type, enabled=True, **kwargs):
         self.device = device_type
@@ -141,7 +142,9 @@ class autocast(object):
         for key, value in kwargs.items():
             if key == 'fast_dtype':
                 self.fast_dtype = value
-            if not (key == 'fast_dtype'):
+            if key == 'cache_enabled':
+                self._cache_enabled = value
+            if not ((key == 'fast_dtype') or (key == 'cache_enabled')):
                 raise RuntimeError('Unrecognized optional argument supplied to autocast context manager: ' + str(key))
 
         if self.device == 'cpu':
@@ -157,6 +160,7 @@ class autocast(object):
         self._enabled = enabled
 
     def __enter__(self):
+        self.prev_cache_enabled = torch.is_autocast_cache_enabled()
         if self.device == 'cpu':
             self.prev = torch.is_autocast_cpu_enabled()
             self.prev_fastdtype = torch.get_autocast_cpu_dtype()
@@ -169,6 +173,7 @@ class autocast(object):
             torch.set_autocast_gpu_dtype(self.fast_dtype)
             torch.set_autocast_enabled(self._enabled)
             torch.autocast_increment_nesting()
+        torch.set_autocast_cache_enabled(self._cache_enabled)
 
     def __exit__(self, *args):
         # Drop the cache when we exit to a nesting level that's outside any instance of autocast.
@@ -182,6 +187,7 @@ class autocast(object):
                 torch.clear_autocast_cache()
             torch.set_autocast_enabled(self.prev)
             torch.set_autocast_gpu_dtype(self.prev_fastdtype)
+        torch.set_autocast_cache_enabled(self.prev_cache_enabled)
         return False
 
     def __call__(self, func):

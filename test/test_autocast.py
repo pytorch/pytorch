@@ -14,7 +14,7 @@ class TestAutocastWithJit(TestCase):
     def test_generate_autocast_jit_trace_model(self):
         def test_generate_autocast_jit_trace_model(model, x):
             model.eval()
-            with torch.cpu.amp.autocast(), torch.no_grad():
+            with torch.cpu.amp.autocast(cache_enabled=False), torch.no_grad():
                 traced_model = torch.jit.trace(model, x)
         for i in range(self.models.__len__()):
             test_generate_autocast_jit_trace_model(self.models[i], self.inputs[i])
@@ -22,7 +22,7 @@ class TestAutocastWithJit(TestCase):
     def test_nchw_autocast_jit_trace_model(self):
         def test_nchw_autocast_jit_trace_model(model, x):
             model.eval()
-            with torch.cpu.amp.autocast(), torch.no_grad():
+            with torch.cpu.amp.autocast(cache_enabled=False), torch.no_grad():
                 traced_model = torch.jit.trace(model, x)
             with torch.cpu.amp.autocast(), torch.no_grad():
                 y = traced_model(x.clone())
@@ -34,7 +34,7 @@ class TestAutocastWithJit(TestCase):
     def test_nhwc_autocast_jit_trace_model(self):
         def test_nhwc_autocast_jit_trace_model(model, x):
             model.eval()
-            with torch.cpu.amp.autocast(), torch.no_grad():
+            with torch.cpu.amp.autocast(cache_enabled=False), torch.no_grad():
                 traced_model = torch.jit.trace(model, x.to(memory_format=torch.channels_last))
             with torch.cpu.amp.autocast(), torch.no_grad():
                 y = traced_model(x.clone().to(memory_format=torch.channels_last))
