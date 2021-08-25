@@ -15,7 +15,6 @@ from torch.fx import map_arg
 from torch.fx.passes.shape_prop import ShapeProp, TensorMetadata
 import operator
 import functools
-scope = te.KernelScope()
 
 def truncate(model, k):
     model = fx.symbolic_trace(model)
@@ -42,13 +41,6 @@ def remove_args(model: torch.nn.Module, args):
             fx_model.graph.erase_node(node)
     fx_model.recompile()
     return fx_model
-
-class kernel_arena_scope(object):
-    def __enter__(self):
-        self.scope = te.KernelScope()
-
-    def __exit__(self, typ, val, traceback):
-        self.scope = None
 
 def get_dim_args(dims):
     dim_args = []
