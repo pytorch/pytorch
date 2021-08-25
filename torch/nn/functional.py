@@ -609,8 +609,18 @@ def max_pool1d_with_indices(
     r"""Applies a 1D max pooling over an input signal composed of several input
     planes.
 
+    .. note::
+        The order of :attr:`ceil_mode` and :attr:`return_indices` is different from
+        :class:`~torch.nn.MaxPool1d`, and will change in a future release.
+
     See :class:`~torch.nn.MaxPool1d` for details.
     """
+    # See: https://github.com/pytorch/pytorch/pull/62544#issuecomment-896195121
+    # and https://github.com/pytorch/pytorch/issues/62545 for context
+    if ceil_mode != return_indices:
+        warnings.warn("Note that order of the arguments: ceil_mode and return_indices will change"
+                      "to match the args list in nn.MaxPool1d in a future release.")
+
     if has_torch_function_unary(input):
         return handle_torch_function(
             max_pool1d_with_indices,
@@ -636,6 +646,12 @@ def _max_pool1d(
     ceil_mode: bool = False,
     return_indices: bool = False
 ) -> Tensor:
+    # See: https://github.com/pytorch/pytorch/pull/62544#issuecomment-896195121
+    # and https://github.com/pytorch/pytorch/issues/62545 for context
+    if ceil_mode != return_indices:
+        warnings.warn("Note that order of the arguments: ceil_mode and return_indices will change"
+                      "to match the args list in nn.MaxPool1d in a future release.")
+
     if has_torch_function_unary(input):
         return handle_torch_function(
             max_pool1d,
@@ -675,8 +691,18 @@ def max_pool2d_with_indices(
     r"""Applies a 2D max pooling over an input signal composed of several input
     planes.
 
+    .. note::
+        The order of :attr:`ceil_mode` and :attr:`return_indices` is different from
+        :class:`~torch.nn.MaxPool2d`, and will change in a future release.
+
     See :class:`~torch.nn.MaxPool2d` for details.
     """
+    # See: https://github.com/pytorch/pytorch/pull/62544#issuecomment-896195121
+    # and https://github.com/pytorch/pytorch/issues/62545 for context
+    if ceil_mode != return_indices:
+        warnings.warn("Note that order of the arguments: ceil_mode and return_indices will change"
+                      "to match the args list in nn.MaxPool2d in a future release.")
+
     if has_torch_function_unary(input):
         return handle_torch_function(
             max_pool2d_with_indices,
@@ -702,6 +728,12 @@ def _max_pool2d(
     ceil_mode: bool = False,
     return_indices: bool = False
 ) -> Tensor:
+    # See: https://github.com/pytorch/pytorch/pull/62544#issuecomment-896195121
+    # and https://github.com/pytorch/pytorch/issues/62545 for context
+    if ceil_mode != return_indices:
+        warnings.warn("Note that order of the arguments: ceil_mode and return_indices will change"
+                      "to match the args list in nn.MaxPool2d in a future release.")
+
     if has_torch_function_unary(input):
         return handle_torch_function(
             max_pool2d,
@@ -741,8 +773,18 @@ def max_pool3d_with_indices(
     r"""Applies a 3D max pooling over an input signal composed of several input
     planes.
 
+    .. note::
+        The order of :attr:`ceil_mode` and :attr:`return_indices` is different from
+        :class:`~torch.nn.MaxPool3d`, and will change in a future release.
+
     See :class:`~torch.nn.MaxPool3d` for details.
     """
+    # See: https://github.com/pytorch/pytorch/pull/62544#issuecomment-896195121
+    # and https://github.com/pytorch/pytorch/issues/62545 for context
+    if ceil_mode != return_indices:
+        warnings.warn("Note that order of the arguments: ceil_mode and return_indices will change"
+                      "to match the args list in nn.MaxPool3d in a future release.")
+
     if has_torch_function_unary(input):
         return handle_torch_function(
             max_pool3d_with_indices,
@@ -768,6 +810,12 @@ def _max_pool3d(
     ceil_mode: bool = False,
     return_indices: bool = False
 ) -> Tensor:
+    # See: https://github.com/pytorch/pytorch/pull/62544#issuecomment-896195121
+    # and https://github.com/pytorch/pytorch/issues/62545 for context
+    if ceil_mode != return_indices:
+        warnings.warn("Note that order of the arguments: ceil_mode and return_indices will change"
+                      "to match the args list in nn.MaxPool3d in a future release.")
+
     if has_torch_function_unary(input):
         return handle_torch_function(
             max_pool3d,
