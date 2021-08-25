@@ -225,7 +225,7 @@ class BytecodeDeserializer final {
   TypePtr resolveTypeName(const c10::QualifiedName& qn);
   void parseMethods(
       const std::vector<IValue>& vals,
-      const c10::optional<std::vector<IValue>>& debug_handles,
+      const std::vector<IValue>* debug_handles,
       mobile::CompilationUnit& mcu);
   c10::IValue readArchive(
       const std::string& archive_name,
@@ -300,7 +300,7 @@ TypePtr BytecodeDeserializer::resolveTypeName(const c10::QualifiedName& qn) {
 
 void BytecodeDeserializer::parseMethods(
     const std::vector<IValue>& vals,
-    const c10::optional<std::vector<IValue>>& debug_handles,
+    const std::vector<IValue>* debug_handles,
     mobile::CompilationUnit& mcu) {
   TORCH_CHECK(vals.size() > 0, "Bytecode has no elements. ");
   // Initialized with the version number when kProducedBytecodeVersion was
@@ -325,8 +325,7 @@ void BytecodeDeserializer::parseMethods(
       "But the model version is ",
       model_version);
 
-  bool has_debug_handles = debug_handles.has_value();
-  if (has_debug_handles) {
+  if (debug_handles) {
     TORCH_CHECK(
         debug_handles->size() == vals.size(),
         "The numbers of bytecode values and debug info values do not match.");
@@ -369,7 +368,7 @@ void BytecodeDeserializer::parseMethods(
             .toInt();
 
     c10::List<int64_t> debug_handles_list;
-    if (has_debug_handles) {
+    if (debug_handles) {
       const auto& debug_handles_element = (*debug_handles)[i];
       const auto& debug_handles_m_tuple =
           debug_handles_element.toTuple()->elements();
@@ -400,7 +399,7 @@ void BytecodeDeserializer::parseMethods(
       OpCode op_code = parseOpCode(ins_item[0].toString()->string().c_str());
       int X = ins_item[1].toInt();
       int N = ins_item[2].toInt();
-      if (has_debug_handles) {
+      if (debug_handles) {
         int64_t debug_handle = debug_handles_list[j];
         function->append_instruction(op_code, X, N, debug_handle);
       } else {
@@ -515,12 +514,12 @@ mobile::Module BytecodeDeserializer::deserialize(
   // being a Tuple (int, table), and the integer stands for the bytecode version
   // number. The rest of the elements are the same as before.
   //
-  auto bvals = readArchive("bytecode", mcu).toTuple()->elements();
+  const auto& bvals = readArchive("bytecode", mcu).toTuple()->elements();
 
-  c10::optional<std::vector<IValue>> debug_handles;
+  const std::vector<IValue>* debug_handles = nullptr;
   if (reader_->hasRecord("mobile_debug_handles.pkl")) {
     debug_handles =
-        readArchive("mobile_debug_handles", mcu).toTuple()->elements();
+        &readArchive("mobile_debug_handles", mcu).toTuple()->elements();
   }
   parseMethods(bvals, debug_handles, *mcu);
   auto m = mobile::Module(readArchive("data", mcu).toObject(), mcu);
