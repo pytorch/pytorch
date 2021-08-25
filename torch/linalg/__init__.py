@@ -1660,7 +1660,7 @@ symmetric if real, but this is not checked internally. Instead, just the lower
 triangular part of the matrix is used in the computations.
 
 The singular values (or the norm of the eigenvalues when :attr:`hermitian`\ `= True`)
-that are below :math:`\max(\text{atol}, \sigma_1 * \text{rtol})` threshold are
+that are below :math:`\max(\text{atol}, \sigma_1 \cdot \text{rtol})` threshold are
 treated as zero and discarded in the computation,
 where :math:`\sigma_1` is the largest singular value (or eigenvalue).
 
