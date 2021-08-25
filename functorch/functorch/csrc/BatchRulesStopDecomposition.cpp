@@ -184,7 +184,6 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   STOP_DECOMPOSE(bitwise_left_shift_.Tensor);
   STOP_DECOMPOSE(bitwise_left_shift_.Tensor_Scalar);
   STOP_DECOMPOSE(bitwise_or.Scalar);
-  STOP_DECOMPOSE(bitwise_or.Tensor);
   STOP_DECOMPOSE(bitwise_or_.Scalar);
   STOP_DECOMPOSE(bitwise_or_.Tensor);
   STOP_DECOMPOSE(bitwise_right_shift.Tensor_Scalar_out);
@@ -192,7 +191,6 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   STOP_DECOMPOSE(bitwise_right_shift_.Tensor);
   STOP_DECOMPOSE(bitwise_right_shift_.Tensor_Scalar);
   STOP_DECOMPOSE(bitwise_xor.Scalar);
-  STOP_DECOMPOSE(bitwise_xor.Tensor);
   STOP_DECOMPOSE(bitwise_xor_.Scalar);
   STOP_DECOMPOSE(bitwise_xor_.Tensor);
   STOP_DECOMPOSE(blackman_window);
@@ -387,8 +385,6 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   STOP_DECOMPOSE(is_signed);
   STOP_DECOMPOSE(is_vulkan_available);
   STOP_DECOMPOSE(isclose);
-  STOP_DECOMPOSE(isneginf);
-  STOP_DECOMPOSE(isposinf);
   STOP_DECOMPOSE(isreal);
   STOP_DECOMPOSE(istft);
   STOP_DECOMPOSE(item);
@@ -754,7 +750,6 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   STOP_DECOMPOSE(linalg_inv_ex);
   STOP_DECOMPOSE(linalg_matrix_power);
   STOP_DECOMPOSE(linalg_matrix_rank);
-  STOP_DECOMPOSE(matrix_exp);
   STOP_DECOMPOSE(logical_not);
   STOP_DECOMPOSE(logical_and);
   STOP_DECOMPOSE(masked_select);
