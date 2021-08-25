@@ -419,7 +419,6 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         # uncomment below
         # operator.add,
         # operator.mul,
-        torch.sum,
     ])
 
     FUNS_IO_TYPE_FP16: Set[NSNodeTargetType] = set()
