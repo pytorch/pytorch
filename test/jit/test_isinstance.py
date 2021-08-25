@@ -310,3 +310,12 @@ class TestIsinstance(JitTestCase):
             x: int = 2
             fn(x)
             self.assertEqual(len(w), 0)
+
+    def test_empty_container_special_cases(self):
+        # Should not throw "Boolean value of Tensor with no values is
+        # ambiguous" error
+        torch._jit_internal.check_empty_containers(torch.Tensor([]))
+
+        # Should not throw "Boolean value of Tensor with more than
+        # one value is ambiguous" error
+        torch._jit_internal.check_empty_containers(torch.rand(2, 3))
