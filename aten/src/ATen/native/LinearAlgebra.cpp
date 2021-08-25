@@ -1351,8 +1351,18 @@ Tensor& baddbmm_out_cpu(const Tensor& self_, const Tensor& batch1, const Tensor&
   return at::native::baddbmm__cpu(result, batch1, batch2, beta, alpha);
 }
 
+Tensor& conjugate_mutable_input_if_needed(Tensor& self, bool conjugate) {
+  if (conjugate) {
+    self.conj_physical_();
+  }
+  return self;
+}
+
 Tensor& baddbmm__cpu(Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) {
-  return bmm_out_or_baddbmm_(self, batch1, batch2, beta, alpha, false);
+  bool self_is_conj = self.is_conj();
+  conjugate_mutable_input_if_needed(self, self_is_conj);
+  bmm_out_or_baddbmm_(self, batch1.resolve_conj(), batch2.resolve_conj(), beta, alpha, false);
+  return conjugate_mutable_input_if_needed(self, self_is_conj);
 }
 
 Tensor bmm_cpu(const Tensor& self, const Tensor& mat2) {
@@ -1365,7 +1375,10 @@ Tensor& bmm_out_cpu(const Tensor& batch1, const Tensor& batch2, Tensor &result) 
   Scalar alpha(1.0);
   {
   NoNamesGuard guard;
-  bmm_out_or_baddbmm_(result, batch1, batch2, beta, alpha, true);
+  bool result_is_conj = result.is_conj();
+  conjugate_mutable_input_if_needed(result, result_is_conj);
+  bmm_out_or_baddbmm_(result, batch1.resolve_conj(), batch2.resolve_conj(), beta, alpha, true);
+  conjugate_mutable_input_if_needed(result, result_is_conj);
   }
   namedinference::propagate_names_if_nonempty(
       result,

@@ -61,12 +61,21 @@ TORCH_LIBRARY_IMPL(aten, Conjugate, m) {
   m.impl("view", torch::CppFunction::makeFallthrough());
   m.impl("_unsafe_view", torch::CppFunction::makeFallthrough());
   m.impl("reshape", torch::CppFunction::makeFallthrough());
+  m.impl("dot", torch::CppFunction::makeFallthrough());
+  m.impl("vdot", torch::CppFunction::makeFallthrough());
+  m.impl("dot.out", torch::CppFunction::makeFallthrough());
+  m.impl("vdot.out", torch::CppFunction::makeFallthrough());
   m.impl("alias", torch::CppFunction::makeFallthrough());
   m.impl("mm", torch::CppFunction::makeFallthrough());
+  m.impl("mm.out", torch::CppFunction::makeFallthrough());
   m.impl("addmm", torch::CppFunction::makeFallthrough());
-  m.impl("mm.out", torch::CppFunction::makeFromBoxedFunction<&conjugateFallbackToHandleOnlyMutableInputs>());
-  m.impl("addmm_", torch::CppFunction::makeFromBoxedFunction<&conjugateFallbackToHandleOnlyMutableInputs>());
-  m.impl("addmm.out", torch::CppFunction::makeFromBoxedFunction<&conjugateFallbackToHandleOnlyMutableInputs>());
+  m.impl("addmm_", torch::CppFunction::makeFallthrough());
+  m.impl("addmm.out", torch::CppFunction::makeFallthrough());
+  m.impl("bmm", torch::CppFunction::makeFallthrough());
+  m.impl("bmm.out", torch::CppFunction::makeFallthrough());
+  m.impl("baddbmm", torch::CppFunction::makeFallthrough());
+  m.impl("baddbmm_", torch::CppFunction::makeFallthrough());
+  m.impl("baddbmm.out", torch::CppFunction::makeFallthrough());
 }
 
 } // namespace at
