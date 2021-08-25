@@ -18,7 +18,6 @@
 #include <type_traits>
 #include <utility>
 #include <thrust/pair.h>
-#include <iostream>
 
 namespace at { namespace native {
 
