@@ -58,6 +58,7 @@ void autogradNotImplementedFallbackImpl(const c10::OperatorHandle& op, c10::Disp
   // Keep track of which outputs are output of in-place modification
   // so we can rebase_history if necessary
   std::vector<bool> is_inplace_output;
+  bool any_is_inplace_output = false;
   std::vector<bool> is_aliased_output;
   is_inplace_output.reserve(num_returns);
   is_aliased_output.reserve(num_returns);
@@ -65,23 +66,31 @@ void autogradNotImplementedFallbackImpl(const c10::OperatorHandle& op, c10::Disp
   for (const auto i : c10::irange(num_returns)) {
     const auto& alias_info = returns[i].alias_info();
     is_inplace_output.push_back(alias_info.has_value() && alias_info->isWrite());
+    any_is_inplace_output |= alias_info.has_value() && alias_info->isWrite();
     is_aliased_output.push_back(alias_info.has_value());
 
   }
-
   int aliased_input_idx = -1;
   int aliased_output_idx = -1;
   for (const auto i : c10::irange(num_returns)) {
     const auto& alias_info = returns[i].alias_info();
-    if (alias_info.has_value()) {
-      TORCH_INTERNAL_ASSERT(aliased_output_idx == -1); // Assume only a single aliased output
+    if (alias_info.has_value() && !alias_info->isWrite()) {
+      AT_ASSERT(
+        aliased_output_idx == -1,
+        "Expected only a single output in the operator schema to have a non-write alias annotation (i.e., 'Tensor(a)'). "
+        "Non-composite functions where multiple outputs are aliased with inputs aren't supported."
+        "Please rewrite your function as a composite function.");
       aliased_output_idx = i;
     }
   }
   for (const auto i : c10::irange(num_arguments)) {
     const auto& alias_info = arguments[i].alias_info();
-    if (alias_info.has_value()) {
-      TORCH_INTERNAL_ASSERT(aliased_input_idx == -1); // Assume only a single aliased input
+    if (alias_info.has_value() && !alias_info->isWrite()) {
+      AT_ASSERT(
+        aliased_output_idx == -1,
+        "Expected only a single input in the operator schema to have a non-write alias annotation (i.e., 'Tensor(a)'). "
+        "Non-composite functions where multiple inputs are aliased with outputs aren't supported. "
+        "Please rewrite your function as a composite function.");
       aliased_input_idx = i;
     }
   }
@@ -123,7 +132,7 @@ void autogradNotImplementedFallbackImpl(const c10::OperatorHandle& op, c10::Disp
     impl_saved.push_back(t.getIntrusivePtr());
   }, &stack_args_copy, 0, num_arguments);
   #endif
-  if (aliased_input_idx != -1 || is_inplace_output.size() > 0) {
+  if (aliased_input_idx != -1 || any_is_inplace_output) {
     at::AutoDispatchBelowAutograd guard;
     op.redispatchBoxed(dispatch_keys & c10::after_autograd_keyset, stack);
   } else {
@@ -144,6 +153,7 @@ void autogradNotImplementedFallbackImpl(const c10::OperatorHandle& op, c10::Disp
     if (!is_aliased_output[idx_ret] && t.has_storage())
       TORCH_INTERNAL_ASSERT(t.storage().use_count() == 1);
   }, stack, stack->size() - num_returns, num_returns);
+  // There should be only a single base-view pair, make sure their storage is aliased
   if (aliased_input_idx != -1 && aliased_output_idx != -1) {
     const c10::IValue& aliased_input_iv = stack_args_copy[aliased_input_idx];
     const c10::IValue& aliased_output_iv = (*stack)[stack->size() - num_returns + aliased_output_idx];
