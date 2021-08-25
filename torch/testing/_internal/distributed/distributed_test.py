@@ -1597,9 +1597,9 @@ class DistributedTest:
                 for src in range(1, world_size):
                     requests[src - 1].wait()
                     self.assertTrue(requests[src - 1].is_completed())
-                    self.assertEqual(expected_tensors[src - 1], _build_tensor(src, 10)
+                    self.assertEqual(expected_tensors[src - 1], _build_tensor(src, 10))
             else:
-                tensor = _build_tensor(10, value=rank)
+                tensor = _build_tensor(rank, 10)
                 dist.send(tensor, 0)
 
             self._barrier()
