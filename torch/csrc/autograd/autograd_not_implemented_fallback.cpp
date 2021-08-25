@@ -125,7 +125,7 @@ void autogradNotImplementedFallbackImpl(const c10::OperatorHandle& op, c10::Disp
     impl_saved.push_back(t.getIntrusivePtr());
   }, &stack_args_copy, 0, num_arguments);
   #endif
-   if (aliased_input_idx != -1 || is_inplace_output.size() > 0) {
+  if (aliased_input_idx != -1 || is_inplace_output.size() > 0) {
     at::AutoDispatchBelowAutograd guard;
     op.redispatchBoxed(dispatch_keys & c10::after_autograd_keyset, stack);
   } else {
