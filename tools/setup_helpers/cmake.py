@@ -243,6 +243,7 @@ class CMake:
             var: var for var in
             ('BLAS',
              'BUILDING_WITH_TORCH_LIBS',
+             'CUDA_HOST_COMILER',
              'CUDA_NVCC_EXECUTABLE',
              'CUDA_SEPARABLE_COMPILATION',
              'CUDNN_LIBRARY',
@@ -269,6 +270,10 @@ class CMake:
         # Aliases which are lower priority than their canonical option
         low_priority_options = {
             'CUDA_HOST_COMPILER': 'CMAKE_CUDA_HOST_COMPILER',
+            'CUDAHOSTCXX': 'CUDA_HOST_COMPILER',
+            'CMAKE_CUDA_HOST_COMPILER': 'CUDA_HOST_COMPILER',
+            'CMAKE_CUDA_COMPILER': 'CUDA_NVCC_EXECUTABLE',
+            'CUDACXX': 'CUDA_NVCC_EXECUTABLE'
         }
 
         for var, val in my_env.items():
