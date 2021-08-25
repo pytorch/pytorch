@@ -25,12 +25,12 @@ class UCXError : public c10::Error {
 namespace c10d {
 
 // When calling UCP async operations like `ucp_tag_send_nbx`, `ucp_tag_recv_nbx`,
-// etc., UCP will create a request object and return its pointer to the user.
-// This request object is used to track the status of async operations. It is
-// the user's responsibility to free these objects with `ucp_request_free`. Here
-// we use RAII to implement this create-by-ucp-and-destroy-by-user logic. Some UCP
-// operations finishes immediately. If this is the case, then no request object
-// will be created.
+// etc., UCP will create a request object in its worker memory pool and return
+// the pointer to the user. This request object is used to track the status of
+// async operations. It is the user's responsibility to reset the values of these
+// objects and free these objects with `ucp_request_free`. Here we use RAII to
+// implement this create-by-ucp-and-destroy-by-user logic. Some UCP operations
+// finishes immediately. If this is the case, then no request object will be created.
 class UCPRequest {
 public:
   struct Data {
