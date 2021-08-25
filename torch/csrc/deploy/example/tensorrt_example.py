@@ -88,6 +88,4 @@ def tensorrt_example():
     engine = builder.build_engine(network, builder_config)
 
     mod = TestTRTModule(trt, engine, ["x"], ["output"])
-    res = mod(torch.ones(1, 2, 3).cuda())
-    print(res)
-    # print(res.shape)
+    return mod(torch.ones(1, 2, 3).cuda())
