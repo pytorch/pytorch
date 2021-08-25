@@ -335,41 +335,40 @@ LaunchParams FusionExecutor::computeLaunchParams(
 
   LaunchParams launch_params;
 
-  // Lets collect all IterDomains that are bound to a thread binding
-  std::unordered_map<ParallelType, std::vector<const kir::Val*>, TypeHash>
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      parallel_iter_extents;
+  auto data_cache = compileTimeDataCache();
 
-  std::unordered_set<const kir::Val*> warp_padded_extent_set;
-  std::unordered_map<const kir::Val*, int64_t> warp_padded_constant;
+  auto& used_tvs = getUsedTVs();
+  auto parallel_binding_ids_entry =
+      executor_utils::caching::ExecutorCompileTimeEntry<
+          executor_utils::caching::ParallelBindingIterDomains>(
+          data_cache, [&used_tvs]() {
+            return std::make_unique<std::vector<IterDomain*>>(
+                executor_utils::getParallelBindingsIterDomains(used_tvs));
+          });
+  auto& parallel_binding_ids = parallel_binding_ids_entry.get();
 
-  for (auto tv : getUsedTVs()) {
-    for (auto id : tv->domain()->domain()) {
-      if (id->isThread() && !id->isBroadcast()) {
-        // TODO(kir): we should rewrite this logic based on the Kernel object
-        auto kir_extent = lowered_.lowerValue(id->extent());
-        const auto it = parallel_iter_extents.find(id->getParallelType());
-        if (it != parallel_iter_extents.end()) {
-          it->second.push_back(kir_extent);
-        } else {
-          parallel_iter_extents[id->getParallelType()] = {kir_extent};
-        }
+  auto& lower = lowered_;
 
-        // Apply warp padding only when there're warp reductions in
-        //  the kernel.
-        if (kernel()->getWarpPaddedParallelInfo().has_warp_reduction) {
-          if (id->hasPaddingToMultipleOfWarp() ||
-              kernel()->isParallelTypePadded(id->getParallelType())) {
-            warp_padded_extent_set.insert(kir_extent);
-            auto padded_value = id->getMaybeSizeAfterPadding();
-            if (padded_value.has_value()) {
-              warp_padded_constant[kir_extent] = padded_value.value();
-            }
-          }
-        }
-      }
-    }
-  }
+  auto parallel_iter_extent_entry =
+      executor_utils::caching::ExecutorCompileTimeEntry<
+          executor_utils::caching::ParallelIterExtentMap>(
+          data_cache, [&parallel_binding_ids, &lower]() {
+            return executor_utils::getParallelIterExtents(
+                lower, parallel_binding_ids);
+          });
+  auto& parallel_iter_extents = parallel_iter_extent_entry.get();
+
+  auto warp_padded_parallel_entry =
+      executor_utils::caching::ExecutorCompileTimeEntry<
+          executor_utils::caching::WarpPaddedParallelExtents>(
+          data_cache, [&parallel_binding_ids, &lower]() {
+            return executor_utils::getWarpPaddedExtentsInfo(
+                lower, parallel_binding_ids);
+          });
+  auto& warp_padded_extent_set =
+      warp_padded_parallel_entry.get().warp_padded_extent_set;
+  auto& warp_padded_constant =
+      warp_padded_parallel_entry.get().warp_padded_constant;
 
   // If any dimension was set in launch constraints we need to run through
   // IterDomains that have been parallelized, and bind those values. Or make
@@ -632,15 +631,34 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
     launch_params = computeLaunchParams(launch_constraints, expr_eval);
 
     executor_utils::validateVectorizedTensors(
-        &fusion_, inputs, outputs, lowered_, expr_eval);
+        &fusion_, inputs, outputs, lowered_, compileTimeDataCache());
 
-    auto alias_indices = fusion_.getInputAliasIndices();
+    auto fusion = fusion_;
+
+    auto alias_indices_entry =
+        executor_utils::caching::ExecutorCompileTimeEntry<
+            executor_utils::caching::InputAliasIndices>(
+            compileTimeDataCache(), [fusion]() {
+              return std::make_unique<std::vector<std::pair<int, int>>>(
+                  fusion.getInputAliasIndices());
+            });
+
+    auto& alias_indices = alias_indices_entry.get();
 
     // ditch pre-allocated outputs if the number doesn't match.
     // NOLINTNEXTLINE(bugprone-branch-clone)
     if (outputs.empty()) {
-      allocated_outputs =
-          allocOutputs(expr_eval, fusion_.getOutputAliasIndices());
+      auto output_alias_indices_entry =
+          executor_utils::caching::ExecutorCompileTimeEntry<
+              executor_utils::caching::OutputAliasIndices>(
+              compileTimeDataCache(), [fusion]() {
+                return std::make_unique<std::unordered_set<int>>(
+                    fusion.getOutputAliasIndices());
+              });
+
+      auto& output_alias_indices = output_alias_indices_entry.get();
+
+      allocated_outputs = allocOutputs(expr_eval, output_alias_indices);
 
       for (const auto& entry : alias_indices) {
         TORCH_INTERNAL_ASSERT(
