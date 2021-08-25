@@ -353,6 +353,16 @@ class TORCH_CUDA_CPP_API CuSparseSpGEMMDescriptor
 };
 #endif
 
+class TORCH_CUDA_CPP_API CuSparseMatDescriptor
+    : public CuSparseDescriptor<cusparseMatDescr, &cusparseDestroyMatDescr> {
+ public:
+  CuSparseMatDescriptor() {
+    cusparseMatDescr_t raw_descriptor;
+    TORCH_CUDASPARSE_CHECK(cusparseCreateMatDescr(&raw_descriptor));
+    descriptor_.reset(raw_descriptor);
+  }
+};
+
 } // namespace sparse
 } // namespace cuda
 } // namespace at

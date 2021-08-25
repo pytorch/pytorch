@@ -530,6 +530,28 @@ class TestSparseCSR(TestCase):
         _test_spadd_shape(10, [100, 1])
         _test_spadd_shape(10, [1, 100])
 
+    @onlyCUDA
+    @dtypes(*torch.testing.floating_and_complex_types())
+    def test_sparse_add(self, device, dtype):
+        def run_test(m, n, index_dtype):
+            alpha = random.random()
+            nnz1 = random.randint(0, m*n)
+            nnz2 = random.randint(0, m*n)
+            nnz3 = random.randint(0, m*n)
+            S1 = self.genSparseCSRTensor([m, n], nnz1, dtype=dtype, device=device, index_dtype=index_dtype)
+            S2 = self.genSparseCSRTensor([m, n], nnz2, dtype=dtype, device=device, index_dtype=index_dtype)
+            S3 = self.genSparseCSRTensor([m, n], nnz3, dtype=dtype, device=device, index_dtype=index_dtype)
+
+            expected = torch.add(S1.to_dense(), S2.to_dense(), alpha=alpha)
+            actual = torch.add(S1, S2, alpha=alpha, out=S3)
+
+            self.assertEqual(actual.to_dense(), expected)
+            self.assertEqual(S3.to_dense(), expected)
+
+        for index_dtype in [torch.int32, torch.int64]:
+            for m, n in itertools.product([3, 5], [3, 5]):
+                run_test(m, n, index_dtype)
+
     @dtypes(*torch.testing.get_all_dtypes())
     def test_coo_csr_conversion(self, device, dtype):
         for m, n in itertools.product([5, 2, 0], [5, 2, 0]):
