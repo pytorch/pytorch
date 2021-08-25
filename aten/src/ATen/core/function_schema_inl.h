@@ -53,13 +53,12 @@ inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema)
 
 inline size_t findFirstOutArg(const std::vector<Argument>& args) {
   // find the start of out args in the schema
-  for (size_t out_start_idx = args.size() - 1; out_start_idx >= 0;
-       out_start_idx--) {
-    if (!args.at(out_start_idx).is_out()) {
-      return out_start_idx + 1;
+  for (size_t out_start_idx = 0; out_start_idx < args.size(); out_start_idx++) {
+    if (args.at(out_start_idx).is_out()) {
+      return out_start_idx;
     }
   }
-  return 0;
+  return args.size();
 }
 
 inline bool Argument::isBackwardCompatibleWith(
