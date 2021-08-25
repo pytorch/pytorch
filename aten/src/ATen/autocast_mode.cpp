@@ -8,7 +8,6 @@
 
 #include <iostream>
 #include <exception>
-#include <torch/csrc/jit/frontend/tracer.h>
 
 namespace at {
 namespace autocast {
