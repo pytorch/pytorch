@@ -1039,6 +1039,8 @@ def run_test_module(test: str, test_directory: str, options) -> Optional[str]:
 def main():
     options = parse_args()
 
+    torch.utils._crash_handler.enable_minidumps()
+
     # TODO: move this export & download function in tools/ folder
     test_times_filename = options.export_past_test_times
     if test_times_filename:
