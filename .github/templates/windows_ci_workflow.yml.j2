@@ -276,7 +276,7 @@ jobs:
             pytorch-${{ github.run_id }}/test-reports-*.zip
       !{{ wait_and_kill_ssh() }}
       !{{ common.parse_ref() }}
-      !{{ common.upload_test_statistics() }}
+      !{{ common.upload_test_statistics(build_environment) }}
       - name: Cleanup workspace
         if: always()
         shell: bash

@@ -155,7 +155,7 @@ on:
           if-no-files-found: error
           path:
             test-reports-*.zip
-      !{{ common.upload_test_statistics() }}
+      !{{ common.upload_test_statistics(build_environment) }}
       - name: Clean up docker images
         if: always()
         run: |
