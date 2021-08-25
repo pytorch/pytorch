@@ -6,7 +6,7 @@ def compatibility(is_backward_compatible : bool):
     if is_backward_compatible:
 
         def mark_back_compat(fn):
-            docstring = getattr(fn, '__doc__') or ''
+            docstring = getattr(fn, '__doc__', None) or ''
             docstring += """
 Backwards compatiblity:
 
@@ -20,7 +20,7 @@ Backwards compatiblity:
     else:
 
         def mark_not_back_compat(fn):
-            docstring = getattr(fn, '__doc__') or ''
+            docstring = getattr(fn, '__doc__', None) or ''
             docstring += """
 Backwards compatiblity:
 
