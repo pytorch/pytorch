@@ -122,8 +122,6 @@ std::shared_ptr<UCPRequest> UCPWorker::submit_p2p_request(
     r->status = status;
     if (status == UCS_OK) {
       r->info = *info;
-    } else {
-      std::cout << "Status is: " << ucs_status_string(status) << std::endl;
     }
   };
   ucs_status_ptr_t request = work(&params);

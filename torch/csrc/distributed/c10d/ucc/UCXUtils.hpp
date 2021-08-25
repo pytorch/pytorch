@@ -18,7 +18,7 @@ class UCXError : public c10::Error {
 #define TORCH_UCX_CHECK_MAYBE_INPROGRESS(st, ...)                                          \
   do {                                                                                     \
     auto _s_t_a_t_u_s = (st);                                                              \
-    auto _i_s_o_k = (_s_t_a_t_u_s == UCS_OK || _s_t_a_t_u_s == UCS_INPROGRESS);            \   
+    auto _i_s_o_k = (_s_t_a_t_u_s == UCS_OK || _s_t_a_t_u_s == UCS_INPROGRESS);            \
     TORCH_CHECK_WITH(UCXError, _i_s_o_k, __VA_ARGS__, " Error: ", ucs_status_string(st));  \
   } while(0)
 
