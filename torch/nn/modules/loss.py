@@ -1350,7 +1350,7 @@ class MultiMarginLoss(_WeightedLoss):
     Shape:
         - Input: :math:`(N, C)` or :math:`(C)`, where :math:`N` is the batch size and :math:`C` is the number of classes.
         - Target: :math:`(N)` or :math:`()`, where each value is :math:`0 \leq \text{targets}[i] \leq C-1`.
-        - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(N)`.
+        - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(*)`, same shape as the target.
 
     Examples::
 
