@@ -19,13 +19,15 @@ def get_type(type):
     """
     Helper function which converts the given type to a torchScript acceptable format.
     """
-    if inspect.getmodule(type) == typing:
+    if isinstance(type, str):
+        return type
+    elif inspect.getmodule(type) == typing:
         # If the type is a type imported from typing
         # like Tuple, List, Dict then replace `typing.`
         # with a null string. This needs to be done since
         # typing.List is not accepted by TorchScript.
         type_to_string = str(type)
-        return type_to_string.replace(type.__module__ + '.', ' ')
+        return type_to_string.replace(type.__module__ + '.', '')
     elif type.__module__.startswith('torch'):
         # If the type is a subtype of torch module, then TorchScript expects a fully qualified name
         # for the type which is obtained by combining the module name and type name.
@@ -34,25 +36,17 @@ def get_type(type):
         # For all other types use the name for the type.
         return type.__name__
 
-def get_optional_of_element_type(types: str):
+def get_optional_of_element_type(types):
     """
     Helper function to extracts the type of the element to be annotated to Optional
     from the list of consolidated types and returns `Optional[element type]`.
-
     TODO: To remove this check once Union support lands.
     """
-    elements = types.split(",")
-    elem_type = elements[0] if 'NoneType' in elements[1] else elements[1]
+    elem_type = types[1] if type(None) == types[0] else types[0]
+    elem_type = get_type(elem_type)
 
-    # If the type is from typing module, then extract the element type
-    start = elem_type.find("[")
-    end = elem_type.rfind("]")
-    if start != -1 and end != -1:
-        return elem_type[:start + 1] + 'Optional[' + elem_type[start + 1: end] + ']]'
-
-    # Else return Optional[element type]
-    if elem_type == 'Tensor':
-        elem_type = 'torch.Tensor'
+    # Optional type is internally converted to Union[type, NoneType], which
+    # is not supported yet in TorchScript. Hence, representing the optional type as string.
     return 'Optional[' + elem_type + ']'
 
 def get_qualified_name(func):
@@ -106,20 +100,15 @@ if _IS_MONKEYTYPE_INSTALLED:
             # then consolidate the type to `Any` and replace the entry
             # by type `Any`.
             for arg, types in all_args.items():
-                all_type = []
-                for type in types:
-                    all_type.append(get_type(type))
-
-                # Conctenate all the types
-                merged_type = ','.join(all_type)
-
-                if len(types) == 2 and 'NoneType' in merged_type:
+                types = list(types)
+                type_length = len(types)
+                if type_length == 2 and type(None) in types:
                     # TODO: To remove this check once Union suppport in TorchScript lands.
-                    all_args[arg] = {get_optional_of_element_type(merged_type)}
-                elif len(types) > 1:
-                    all_args[arg] = {'Any'}
-                else:
-                    all_args[arg] = {merged_type}
+                    all_args[arg] = get_optional_of_element_type(types)
+                elif type_length > 1:
+                    all_args[arg] = 'Any'
+                elif type_length == 1:
+                    all_args[arg] = get_type(types[0])
             return all_args
 
         def get_args_types(self, qualified_name: str) -> Dict:
@@ -165,7 +154,6 @@ def jit_code_filter(code: CodeType) -> bool:
     The custom CodeFilter is required while scripting a FX Traced forward calls.
     FX Traced forward calls have `code.co_filename` start with '<' which is used
     to exclude tracing of stdlib and site-packages in the default code filter.
-
     Since we need all forward calls to be traced, this custom code filter
     checks for code.co_name to be 'forward' and enables tracing for all such calls.
     The code filter is similar to default code filter for monkeytype and
