@@ -275,8 +275,10 @@ RUN_PARALLEL_BLOCKLIST = [
 
 WINDOWS_COVERAGE_BLOCKLIST = []
 
-# A subset of our TEST list encompassing the tests for "core" functionality
+# A subset of our TEST list that validates PyTorch's ops, modules, and autograd function as expected
 CORE_TEST_LIST = [
+    "test_autograd",
+    "test_modules",
     "test_nn",
     "test_ops",
     "test_torch"
@@ -708,7 +710,8 @@ def parse_args():
         "-core",
         "--core",
         action="store_true",
-        help="Only run core tests, defined by CORE_TEST_LIST."
+        help="Only run core tests, or tests that validate PyTorch's ops, modules,"
+        "and autograd. They are defined by CORE_TEST_LIST."
     )
     parser.add_argument(
         "-pt",
