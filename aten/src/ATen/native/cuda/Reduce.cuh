@@ -923,6 +923,7 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
       for (int dim = 0; dim < iter.ndim(); dim++) {
         output_memory_size = std::max(output_memory_size, iter.shape()[dim] * iter.strides(0)[dim]);
       }
+      output_memory_size /= iter.element_size(0); //iter.strides is in bytes
       owned_buf_ptr.reset(new AccumulationBuffer(sizeof(arg_t),
                                                  sizeof(out_scalar_t),
                                                  (char*) iter.data_ptr(0),
