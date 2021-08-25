@@ -145,14 +145,12 @@ core_trainer_sources = [
     "torch/csrc/jit/serialization/type_name_uniquer.cpp",
 ]
 
-core_sources_full_mobile = [
+core_sources_full_mobile_no_backend_interface = [
     "torch/csrc/jit/api/function_impl.cpp",
     "torch/csrc/jit/api/module.cpp",
     "torch/csrc/jit/api/object.cpp",
     "torch/csrc/jit/backends/backend_debug_handler.cpp",
-    "torch/csrc/jit/backends/backend_debug_info.cpp",
     "torch/csrc/jit/backends/backend_detail.cpp",
-    "torch/csrc/jit/backends/backend_interface.cpp",
     "torch/csrc/jit/backends/backend_resolver.cpp",
     "torch/csrc/jit/codegen/fuser/codegen.cpp",
     "torch/csrc/jit/codegen/fuser/compiler.cpp",
@@ -246,6 +244,7 @@ core_sources_full_mobile = [
     "torch/csrc/jit/passes/symbolic_shape_analysis.cpp",
     "torch/csrc/jit/passes/specialize_autogradzero.cpp",
     "torch/csrc/jit/passes/update_differentiable_graph_requires_grad.cpp",
+    "torch/csrc/jit/passes/variadic_ops.cpp",
     "torch/csrc/jit/passes/subgraph_rewrite.cpp",
     "torch/csrc/jit/passes/tensorexpr_fuser.cpp",
     "torch/csrc/jit/passes/utils/memory_dag.cpp",
@@ -302,7 +301,6 @@ core_sources_full_mobile = [
     "torch/csrc/jit/tensorexpr/llvm_codegen.cpp",
     "torch/csrc/jit/tensorexpr/llvm_jit.cpp",
     "torch/csrc/jit/tensorexpr/loopnest.cpp",
-    "torch/csrc/jit/tensorexpr/mem_arena.cpp",
     "torch/csrc/jit/tensorexpr/mem_dependency_checker.cpp",
     "torch/csrc/jit/tensorexpr/operators/conv2d.cpp",
     "torch/csrc/jit/tensorexpr/operators/matmul.cpp",
@@ -319,6 +317,11 @@ core_sources_full_mobile = [
     "torch/csrc/utils/tensor_flatten.cpp",
     "torch/csrc/utils/variadic.cpp",
 ] + libtorch_profiler_sources
+
+core_sources_full_mobile = core_sources_full_mobile_no_backend_interface + [
+    "torch/csrc/jit/backends/backend_debug_info.cpp",
+    "torch/csrc/jit/backends/backend_interface.cpp",
+]
 
 core_sources_full = core_sources_full_mobile + [
     "torch/csrc/jit/runtime/static/fusion.cpp",
@@ -826,6 +829,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/detail/CPUGuardImpl.cpp",
     "aten/src/ATen/detail/CUDAHooksInterface.cpp",
     "aten/src/ATen/detail/HIPHooksInterface.cpp",
+    "aten/src/ATen/detail/ORTHooksInterface.cpp",
     "aten/src/ATen/metal/Context.cpp",
     "aten/src/ATen/native/AutogradComposite.cpp",
     "aten/src/ATen/native/BatchLinearAlgebraKernel.cpp",
@@ -855,6 +859,9 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/record_function.cpp",
     "aten/src/ATen/SavedTensorHooks.cpp",
     "aten/src/ATen/vulkan/Context.cpp",
+    "aten/src/ATen/nnapi/nnapi_bind.cpp",
+    "aten/src/ATen/nnapi/nnapi_wrapper.cpp",
+    "aten/src/ATen/nnapi/nnapi_model_loader.cpp",
 ]
 
 aten_cpu_source_codegen_list = [
@@ -1117,9 +1124,6 @@ aten_native_source_non_codegen_list = [
     # "aten/src/ATen/TensorIndexing.cpp",
     "aten/src/ATen/TensorIterator.cpp",
     "aten/src/ATen/nnapi/nnapi_register.cpp",
-    "aten/src/ATen/nnapi/nnapi_bind.cpp",
-    "aten/src/ATen/nnapi/nnapi_wrapper.cpp",
-    "aten/src/ATen/nnapi/nnapi_model_loader.cpp",
 ]
 
 # 1. Files in ATen/native with a few exceptions

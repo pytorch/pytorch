@@ -26,6 +26,11 @@
  alias of the model output.
 
 */
+const auto abs_script = R"JIT(
+  def forward(self, a):
+    return a.abs().clone()
+)JIT";
+
 const auto list_construct_script = R"JIT(
   def forward(self, a, b):
     return [a, b]
@@ -131,6 +136,22 @@ const auto reshape_inplace_script = R"JIT(
       e = a + a
       f = b + b
       return (d, e, f)
+)JIT";
+
+const auto reshape_inplace_script_1 = R"JIT(
+  def forward(self, inp: Tensor, shape: List[int], flag: bool):
+    if flag:
+      a = inp + inp
+      b = a.reshape(shape)
+      c = b.sigmoid()
+    else:
+      a = inp * inp
+      b = a.sigmoid_()
+      c = b.reshape(shape)
+    d = c + c
+    e = a + a
+    f = b + b
+    return (d, e, f)
 )JIT";
 
 const auto sigmoid_inplace_script = R"JIT(
@@ -284,6 +305,18 @@ const auto to_script_4 = R"JIT(
       b = a.float()
       c = b * b
       return (c)
+)JIT";
+
+const auto detach_script_0 = R"JIT(
+  def forward(self, input: Tensor):
+      a = input.detach()
+      return input is a
+)JIT";
+
+const auto detach_script_1 = R"JIT(
+  def forward(self, input: Tensor):
+      a = input.detach()
+      return a.clone()
 )JIT";
 
 const std::string embedding_bag_default = R"JIT(
@@ -570,6 +603,11 @@ const auto var_cat_script = R"JIT(
    return torch.cat([inp1, inp2], dim).clone()
 )JIT";
 
+const auto var_stack_script = R"JIT(
+  def forward(self, inp1: Tensor, inp2: Tensor, dim: int):
+   return torch.stack([inp1, inp2], dim).clone()
+)JIT";
+
 const auto isinstance_int_script = R"JIT(
   def forward(self, a: Any):
       return isinstance(a, int)
@@ -632,22 +670,34 @@ const auto argmin_with_keep_dim_script = R"JIT(
       return torch.argmin(a, dim, True).clone()
 )JIT";
 
-const auto getitem_tensor_script = R"JIT(
+const auto getitem_dict_tensor_script = R"JIT(
   def forward(self, key: Tensor):
       d = {key: 1}
       return d[key]
 )JIT";
 
-const auto getitem_int_script = R"JIT(
+const auto getitem_dict_int_script = R"JIT(
   def forward(self, key: int):
       d = {key: 1}
       return d[key]
 )JIT";
 
-const auto getitem_str_script = R"JIT(
+const auto getitem_dict_str_script = R"JIT(
   def forward(self, key: str):
       d = {key: 1}
       return d[key]
+)JIT";
+
+const auto getitem_list_int_script = R"JIT(
+  def forward(self, idx: int):
+      lst = [1, 2, 3]
+      return lst[idx]
+)JIT";
+
+const auto getitem_list_tensor_script = R"JIT(
+  def forward(self, tensor: Tensor, idx: int):
+      lst = [tensor, tensor]
+      return lst[idx]
 )JIT";
 
 const auto transpose_script = R"JIT(
@@ -681,3 +731,28 @@ const auto three_tuple_unpack_script = R"JIT(
       a, b, c = tup
       return (a, b, c)
 )JIT";
+
+const auto append_int_script = R"JIT(
+  def forward(self, a: int):
+      lst = [1, 2, 3]
+      lst.append(a)
+      return lst
+)JIT";
+
+const auto append_tensor_script = R"JIT(
+  def forward(self, a: Tensor):
+      lst = []
+      lst.append(a)
+      return lst
+)JIT";
+
+const std::string quantize_script = R"IR(
+  graph(%input: Tensor, %weights: Tensor):
+      %scale: float = prim::Constant[value=1.]()
+      %zero_point: int = prim::Constant[value=1]()
+      %bias: None = prim::Constant()
+      %packed_params = quantized::linear_prepack(%weights, %bias)
+      %1254 = quantized::linear(%input, %packed_params, %scale, %zero_point)
+      %1249: Tensor = aten::dequantize(%1254)
+      return (%1249)
+)IR";
