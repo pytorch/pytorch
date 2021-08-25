@@ -559,8 +559,8 @@ def test_distributed(test_module, test_directory, options):
             'MPI not available -- MPI backend tests will be skipped')
     config = DISTRIBUTED_TESTS_CONFIG
     for backend, env_vars in config.items():
-        if backend != 'gloo':
-            continue
+        # if backend != 'gloo':
+        #     continue
         if sys.platform == 'win32' and backend != 'gloo':
             continue
         if backend == 'mpi' and not mpi_available:
