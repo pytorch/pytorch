@@ -113,14 +113,14 @@ TORCH_PRECOMPUTE_META_FUNC2(all, dim)(const Tensor& self, int64_t dim, bool keep
   check_all_any("all", self, maybe_get_output());
   auto out_dtype = get_result_or_bytebool_dtype(self, maybe_get_output());
   resize_reduction(*this, self, dim, keepdim, out_dtype);
-  return {maybe_wrap_dim(dim, self.dim())};
+  return TORCH_PRECOMPUTE_STRUCT2(all, dim)().set_dim(maybe_wrap_dim(dim, self.dim()));
 }
 
 TORCH_PRECOMPUTE_META_FUNC2(any, dim)(const Tensor& self, int64_t dim, bool keepdim) {
   check_all_any("any", self, maybe_get_output());
   auto out_dtype = get_result_or_bytebool_dtype(self, maybe_get_output());
   resize_reduction(*this, self, dim, keepdim, out_dtype);
-  return {maybe_wrap_dim(dim, self.dim())};
+  return TORCH_PRECOMPUTE_STRUCT2(any, dim)().set_dim(maybe_wrap_dim(dim, self.dim()));
 }
 
 void check_argmax_argmin(

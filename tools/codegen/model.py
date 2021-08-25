@@ -56,7 +56,7 @@ class DispatchKey(Enum):
     CUDA = auto()
     HIP = auto()
     FPGA = auto()
-    MSNPU = auto()
+    ORT = auto()
     XLA = auto()
     Lazy = auto()
     Vulkan = auto()
