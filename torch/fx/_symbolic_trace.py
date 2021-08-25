@@ -187,7 +187,10 @@ class Tracer(TracerBase):
     in the docstrings of the methods on this class.
     """
 
-    @compatibility(is_backward_compatible=True)
+    # Not checking BC on this API because the default value for `autowrap_modules`
+    # includes the local filepath to the `math` module, which would jitter
+    # across machines.
+    # @compatibility(is_backward_compatible=True)
     def __init__(self, autowrap_modules: Tuple[ModuleType] = (math, ),
                  autowrap_functions: Tuple[Callable, ...] = (),
                  enable_cpatching: bool = False,

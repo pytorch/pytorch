@@ -1,4 +1,3 @@
-torch.fx._symbolic_trace.Tracer.__init__(self, autowrap_modules: Tuple[module] = (<module 'math' from '/home/jamesreed/local/miniconda3/lib/python3.9/lib-dynload/math.cpython-39-x86_64-linux-gnu.so'>,), autowrap_functions: Tuple[Callable, ...] = (), enable_cpatching: bool = False, param_shapes_constant: bool = False) -> None
 torch.fx._symbolic_trace.Tracer.call_module(self, m: torch.nn.modules.module.Module, forward: Callable[..., Any], args: Tuple[Any, ...], kwargs: Dict[str, Any]) -> Any
 torch.fx._symbolic_trace.Tracer.create_arg(self, a: Any) -> 'Argument'
 torch.fx._symbolic_trace.Tracer.is_leaf_module(self, m: torch.nn.modules.module.Module, module_qualified_name: str) -> bool
@@ -18,7 +17,6 @@ torch.fx.graph.Graph.graph_copy(self, g: 'Graph', val_map: Dict[torch.fx.node.No
 torch.fx.graph.Graph.inserting_after(self, n: Optional[torch.fx.node.Node] = None)
 torch.fx.graph.Graph.inserting_before(self, n: Optional[torch.fx.node.Node] = None)
 torch.fx.graph.Graph.lint(self)
-torch.fx.graph.Graph.node_copy(self, node: torch.fx.node.Node, arg_transform: Callable[[torch.fx.node.Node], ForwardRef('Argument')] = <function Graph.<lambda> at 0x7feaee02e670>) -> torch.fx.node.Node
 torch.fx.graph.Graph.nodes(self) -> torch.fx.graph._node_list
 torch.fx.graph.Graph.output(self, result: 'Argument', type_expr: Optional[Any] = None)
 torch.fx.graph.Graph.owning_module(self)

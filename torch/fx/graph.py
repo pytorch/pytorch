@@ -710,7 +710,9 @@ class Graph:
         """
         return self.create_node('call_function', the_function, args, kwargs, type_expr=type_expr)
 
-    @compatibility(is_backward_compatible=True)
+    # Not checking BC on this API because the default lambda repr encodes a
+    # pointer, which jitters across processes
+    # @compatibility(is_backward_compatible=True)
     def node_copy(self, node: Node, arg_transform: Callable[[Node], 'Argument'] = lambda x: x) -> Node:
         """
         Copy a node from one graph into another. ``arg_transform`` needs to transform arguments from
