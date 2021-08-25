@@ -270,7 +270,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::recv(
   std::cout << "recv tag: " << std::hex << wrap_tag(srcRank, tag) << std::endl;
   auto request = worker->recv_with_tag_and_mask(
     tensor.data_ptr(), tensor.element_size() * tensor.numel(),
-    wrap_tag(srcRank, tag), complete_tag(), tensor.device().type());
+    wrap_tag(srcRank, tag), complete_tag_mask(), tensor.device().type());
   return c10::make_intrusive<ProcessGroupUCC::WorkUCP>(worker, request);
 }
 

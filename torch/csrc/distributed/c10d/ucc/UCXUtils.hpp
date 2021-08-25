@@ -121,20 +121,19 @@ public:
 
 using world_size_type = int;
 using tag_type = int;
-static_assert(
-  std::is_same<ucp_tag_t, uint64_t>::value &&
-  std::is_same<world_size_type, int>::value &&
-  std::is_same<tag_type, int>::value &&
-  sizeof(int) == 4,
-  "The implementation of UCP tag matching has unsatisfied assumptions.");
 
 union tag_union {
   ucp_tag_t raw;
-  struct {
+  struct fields_t {
     tag_type tag;
     world_size_type rank;
   } fields;
 };
+
+static_assert(
+  sizeof(tag_union) == sizeof(ucp_tag_t) &&
+  sizeof(tag_union) == sizeof(tag_union::fields_t),
+  "The implementation of UCP tag matching has unsatisfied assumptions.");
 
 constexpr ucp_tag_t wrap_tag(world_size_type rank, tag_type tag) {
   tag_union u = {
@@ -152,7 +151,7 @@ constexpr ucp_tag_t any_source_mask() {
   return wrap_tag(0, ~tag_type(0));
 }
 
-constexpr ucp_tag_t complete_tag() {
+constexpr ucp_tag_t complete_tag_mask() {
   return wrap_tag(~world_size_type(0), ~tag_type(0));
 }
 
