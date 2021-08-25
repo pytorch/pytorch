@@ -13,7 +13,6 @@ using namespace nom::repr;
     arg->set_##_type(_val);                 \
   }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DeviceTest, InsertCopies) {
   caffe2::NetDef net;
   for (auto i = 0; i < 9; ++i) {

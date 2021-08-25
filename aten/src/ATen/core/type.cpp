@@ -802,7 +802,7 @@ TupleTypePtr TupleType::createNamed(const c10::optional<c10::QualifiedName>& qua
   auto schema = std::make_shared<FunctionSchema>(
       /*name=*/qualName.value_or(c10::QualifiedName()).name(),
       /*overload_name=*/std::string(""),
-      /*arguments=*/arguments,
+      /*arguments=*/std::move(arguments),
       /*returns=*/std::vector<Argument>{});
   return std::shared_ptr<TupleType>(new TupleType(
       field_types, qualName, schema)); // NOLINT(modernize-make-shared)
@@ -988,7 +988,6 @@ VaryingShape<Stride> TensorType::computeStrideProps(
   return VaryingShape<Stride>{stride_properties};
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::atomic<size_t> ShapeSymbol::num_symbols{1};
 
 template struct VaryingShape<c10::ShapeSymbol>;

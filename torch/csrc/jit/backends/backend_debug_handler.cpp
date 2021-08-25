@@ -5,7 +5,6 @@
 namespace torch {
 namespace jit {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::atomic<DebugHandleType> BackendDebugInfoRecorder::unique_debug_handle_{0};
 
 int64_t BackendDebugInfoRecorder::getNextDebugHandle(const Node* node) {
