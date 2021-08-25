@@ -111,7 +111,7 @@ std::shared_ptr<UCPRequest> UCPWorker::submit_p2p_request(
   const std::function<ucs_status_ptr_t(const ucp_request_param_t *)> &work
 ) const {
   ucp_request_param_t params;
-  params.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK | UCP_OP_ATTR_FIELD_MEMORY_TYPE;
+  params.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK | UCP_OP_ATTR_FIELD_MEMORY_TYPE | UCP_OP_ATTR_FLAG_NO_IMM_CMPL;
   params.memory_type = getUCSMemoryType(device);
   params.cb.recv = [](void* request,
                       ucs_status_t status,

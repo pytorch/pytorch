@@ -66,6 +66,7 @@ public:
     }
 
     int sourceRank() const {
+      std::cout << "source tag = " << request->info().sender_tag << std::endl;
       return get_rank_from_tag(request->info().sender_tag);
     }
   };
