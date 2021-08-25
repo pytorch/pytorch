@@ -19,7 +19,6 @@
 #include <ATen/cuda/CUDAUtils.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 
-#include <ATen/native/sparse/cuda/SparseBlasImpl.h>
 #include <ATen/native/sparse/cuda/SparseCUDABlas.h>
 #include <ATen/native/sparse/cuda/SparseCUDATensorMath.cuh>
 
