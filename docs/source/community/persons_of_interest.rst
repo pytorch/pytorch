@@ -37,7 +37,7 @@ torch.autograd
 -  Alban Desmaison (`alband <https://github.com/alband>`__)
 -  (emeritus) Adam Paszke (`apaszke <https://github.com/apaszke>`__)
 
-JIT / TorchScript / FZ
+JIT / TorchScript / FX
 ~~~~~~~~~~~~~~~~~~~~~~
 
 -  Michael Suo (`suo <https://github.com/suo>`__)
@@ -79,7 +79,7 @@ torch.fft
 ~~~~~~~~~
 
 -  Mike Ruberry (`mruberry <https://github.com/mruberry>`__)
--  Peter Bell (`peterbell10 <https://github.com/peterbell10>`__) 
+-  Peter Bell (`peterbell10 <https://github.com/peterbell10>`__)
 
 
 CPU Performance / SIMD
@@ -158,15 +158,15 @@ ONNX <-> PyTorch
 -  (emeritus) Lara Haidar (`lara-hdr <https://github.com/lara-hdr>`__)
 -  (emeritus) Spandan Tiwari (`spandantiwari <https://github.com/spandantiwari>`__)
 
-Mobile
-~~~~~~
+Mobile / Edge
+~~~~~~~~~~~~~
 -  David Reiss (`dreiss <https://github.com/dreiss>`__)
 -  Raziel Guevara (`raziel <https://github.com/raziel>`__)
 -  Linbin Yu (`linbinyu <https://github.com/linbinyu>`__)
 -  Ivan Kobzarev (`IvanKobzarev <https://github.com/IvanKobzarev>`__)
 -  Tao Xu (`xta0 <https://github.com/xta0>`__)
 
-Model Compression & Optimization 
+Model Compression & Optimization
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 -  Raghuraman Krishnamoorthi (`raghuramank100 <https://github.com/raghuramank100>`__)
 -  Jerry Zhang (`jerryzh168 <https://github.com/jerryzh168>`__)
