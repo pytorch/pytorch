@@ -43,8 +43,6 @@ from torch.testing._internal.common_device_type import (instantiate_device_type_
                                                         deviceCountAtLeast, skipCUDAIfCudnnVersionLessThan,
                                                         skipCUDAIf, skipMeta)
 
-import autograd.test_complex
-
 load_tests = make_load_tests(imported_test_cases=set())
 
 import pickle
