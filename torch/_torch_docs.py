@@ -9703,7 +9703,8 @@ Args:
     A (Tensor): the input triangular coefficient matrix of size :math:`(*, m, m)`
                 where :math:`*` is zero or more batch dimensions
     upper (bool, optional): whether :math:`A` is upper or lower triangular. Default: ``True``.
-    transpose (bool, optional): whether to transpose :math:`A` before solving the system. Default: ``False``.
+    transpose (bool, optional): solves `op(A)X = b` where `op(A) = A^T` if this flag is ``True``,
+                                and `op(A) = A` if it is ``False``. Default: ``False``.
     unitriangular (bool, optional): whether :math:`A` is unit triangular.
         If True, the diagonal elements of :math:`A` are assumed to be
         1 and not referenced from :math:`A`. Default: ``False``.
