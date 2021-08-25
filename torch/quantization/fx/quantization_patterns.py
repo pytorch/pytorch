@@ -202,8 +202,6 @@ fp16_dtypes = [
 int8_dtypes = [
     (torch.quint8, torch.qint8, None),
 ]
-# Note: the mapping below are for fbgemm/qnnpack backend only, we'll move these
-# to a different place after we remove the `is_reference` flag
 binary_op_supported_dtypes : Dict[Union[Callable, str], List[Tuple[torch.dtype, torch.dtype, None]]] = {
     operator.add: all_dtypes,
     torch.add: all_dtypes,
