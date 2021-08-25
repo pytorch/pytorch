@@ -32,9 +32,18 @@ Pooling functions
     avg_pool1d
     avg_pool2d
     avg_pool3d
+
+.. autosummary::
+    :toctree: generated
+
     max_pool1d
     max_pool2d
     max_pool3d
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
     max_unpool1d
     max_unpool2d
     max_unpool3d
