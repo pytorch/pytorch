@@ -265,7 +265,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::recv(
     "If you updated the type of tag, please check with note [Receive from an endpoint]."
   );
   check_tensor(tensors);
-  TORCH_CHECK(srcRank < ucp_endpoints.size(), "Invalid dest rank");
+  TORCH_CHECK(srcRank < ucp_endpoints.size(), "Invalid src rank");
   auto& tensor = tensors[0];
   auto request = worker->recv_with_tag_and_mask(
     tensor.data_ptr(), tensor.element_size() * tensor.numel(),
