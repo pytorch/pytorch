@@ -326,6 +326,63 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
         if low > high:
             raise ValueError("make_tensor: low must be weakly less than high!")
 
+        low = clamp(low, lowest, highest)
+        high = clamp(high, lowest, highest)
+
+        if dtype in integral_types():
+            return math.floor(low), math.ceil(high)
+
+        return low, high
+
+    if dtype is torch.bool:
+        result = torch.randint(0, 2, size, device=device, dtype=dtype)
+    elif dtype is torch.uint8:
+        ranges = (torch.iinfo(dtype).min, torch.iinfo(dtype).max)
+        low, high = _modify_low_high(low, high, ranges[0], ranges[1], 0, 9, dtype)
+        result = torch.randint(low, high, size, device=device, dtype=dtype)
+    elif dtype in integral_types():
+        ranges = (torch.iinfo(dtype).min, torch.iinfo(dtype).max)
+        low, high = _modify_low_high(low, high, ranges[0], ranges[1], -9, 9, dtype)
+        result = torch.randint(low, high, size, device=device, dtype=dtype)
+    elif dtype in floating_types_and(torch.half, torch.bfloat16):
+        ranges_floats = (torch.finfo(dtype).min, torch.finfo(dtype).max)
+        low, high = _modify_low_high(low, high, ranges_floats[0], ranges_floats[1], -9, 9, dtype)
+        rand_val = torch.rand(size, device=device, dtype=dtype)
+        result = high * rand_val + low * (1 - rand_val)
+    else:
+        assert dtype in complex_types()
+        float_dtype = torch.float if dtype is torch.cfloat else torch.double
+        ranges_floats = (torch.finfo(float_dtype).min, torch.finfo(float_dtype).max)
+        low, high = _modify_low_high(low, high, ranges_floats[0], ranges_floats[1], -9, 9, dtype)
+        real_rand_val = torch.rand(size, device=device, dtype=float_dtype)
+        imag_rand_val = torch.rand(size, device=device, dtype=float_dtype)
+        real = high * real_rand_val + low * (1 - real_rand_val)
+        imag = high * imag_rand_val + low * (1 - imag_rand_val)
+        result = torch.complex(real, imag)
+
+    if noncontiguous and result.numel() > 1:
+        result = torch.repeat_interleave(result, 2, dim=-1)
+        result = result[..., ::2]
+
+    if exclude_zero:
+        if dtype in integral_types() or dtype is torch.bool:
+            replace_with = torch.tensor(1, device=device, dtype=dtype)
+        elif dtype in floating_types_and(torch.half, torch.bfloat16):
+            replace_with = torch.tensor(torch.finfo(dtype).tiny, device=device, dtype=dtype)
+        elif dtype in complex_types():
+            float_dtype = torch.float if dtype is torch.cfloat else torch.double
+            float_eps = torch.tensor(torch.finfo(float_dtype).tiny, device=device, dtype=float_dtype)
+            replace_with = torch.complex(float_eps, float_eps)
+        else:
+            raise ValueError(f"Invalid dtype passed, supported dtypes are: {get_all_dtypes()}")
+        result[result == 0] = replace_with
+
+    if dtype in floating_types_and(torch.half, torch.bfloat16) or\
+       dtype in complex_types():
+        result.requires_grad = requires_grad
+
+    return result
+
 
 # Functions and classes for describing the dtypes a function supports
 # NOTE: these helpers should correspond to PyTorch's C++ dispatch macros
