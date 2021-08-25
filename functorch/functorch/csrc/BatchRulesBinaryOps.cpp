@@ -228,6 +228,8 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   POINTWISE_BOXED(addcmul);
   BINARY_POINTWISE(atan2);
   BINARY_SCALAR_2(bitwise_and, Tensor, Scalar);
+  BINARY_POINTWISE2(bitwise_or, Tensor);
+  BINARY_POINTWISE2(bitwise_xor, Tensor);
   BINARY_SCALAR_3(bitwise_left_shift, Tensor, Tensor_Scalar, Scalar_Tensor);
   BINARY_SCALAR_3(bitwise_right_shift, Tensor, Tensor_Scalar, Scalar_Tensor);
 
@@ -255,6 +257,8 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   BINARY_POINTWISE(gcd);
   BINARY_POINTWISE(igamma);
   BINARY_POINTWISE(igammac);
+  BINARY_POINTWISE(logaddexp);
+  BINARY_POINTWISE(logaddexp2);
   POINTWISE_BOXED(lerp.Scalar);
   POINTWISE_BOXED(lerp.Tensor);
   BINARY_POINTWISE(lcm);

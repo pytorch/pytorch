@@ -757,7 +757,6 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   STOP_DECOMPOSE(matrix_exp);
   STOP_DECOMPOSE(logical_not);
   STOP_DECOMPOSE(logical_and);
-  STOP_DECOMPOSE(kthvalue);
   STOP_DECOMPOSE(masked_select);
   STOP_DECOMPOSE(masked_select_backward);
   STOP_DECOMPOSE(matrix_exp_backward);
