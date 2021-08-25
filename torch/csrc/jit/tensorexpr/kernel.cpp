@@ -2982,7 +2982,7 @@ void TensorExprKernel::bindConstant(const torch::jit::Value* v) {
   }
 
   BufPtr buf = alloc<Buf>(
-      "const_" + v->debugName(),
+      "const_" + sanitizeName(v->debugName()),
       ExprHandleVectorToExprVector(te_sizes),
       ToDtype(static_cast<ScalarType>(*tt->scalarType())));
 

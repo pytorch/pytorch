@@ -1195,6 +1195,43 @@ TEST_F(Kernel, SanitizeNames_CUDA) {
   ASSERT_TRUE(at::allclose(o, ref));
 }
 
+TEST_F(Kernel, SanitizeConstants_CUDA) {
+  const auto graph_string = R"IR(
+        graph(%x : Float(16, 16, strides=[16, 1], device=cuda:0)):
+          %none : NoneType = prim::Constant()
+          %size : int = prim::Constant[value=16]()
+          %sizes : int[] = prim::ListConstruct(%size, %size)
+          %30 : Device = prim::Constant[value="cuda"]()
+          %y : Float(16, 16, strides=[16, 1], device=cuda:0) = aten::ones(%sizes, %none, %none, %30, %none)
+          %z : Float(16, 16, strides=[16, 1], device=cuda:0) = aten::mul(%x, %y)
+          return (%z))IR";
+  auto graph = std::make_shared<Graph>();
+  parseIR(graph_string, &*graph);
+  // IRParser doesn't support tensor constants, so we insert a call to
+  // aten::ones and then const-prop it
+  ConstantPropagation(graph);
+
+  // We set the name of the constant to include special characters that are
+  // not allowed. This should be fixed by the sanitizer in TensorExprKernel.
+  graph->nodes().front()->output()->setDebugName("illegal.name");
+
+  // Check if we have a constant node with illegal name in the graph.
+  auto const_node = graph->nodes().front();
+  ASSERT_EQ(const_node->kind(), prim::Constant);
+  ASSERT_NE(const_node->output()->debugName().find('.'), std::string::npos);
+
+  TensorExprKernel k(graph);
+
+  auto x = at::rand({16, 16}, TensorOptions(kCUDA).dtype(at::kFloat));
+  std::vector<at::Tensor> inputs = {x};
+  std::vector<IValue> stack = fmap<IValue>(inputs);
+  k.run(stack);
+  auto o = stack[0].toTensor();
+  auto y = at::ones({16, 16}, TensorOptions(kCUDA).dtype(at::kFloat));
+  auto ref = x * y;
+  ASSERT_TRUE(at::allclose(o, ref));
+}
+
 TEST_F(Kernel, ConstantTensors) {
   const auto graph_string = R"IR(
         graph(%x : Float(16, 16, strides=[16, 1], device=cpu)):
