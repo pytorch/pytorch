@@ -2926,6 +2926,7 @@ class TestQuantizeFx(QuantizationTestCase):
             2: nn.Conv2d,
             3: nn.Conv3d,
         }
+
         class M(torch.nn.Module):
             def __init__(self, dim):
                 super().__init__()

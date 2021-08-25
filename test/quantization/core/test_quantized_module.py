@@ -4,7 +4,6 @@ import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.quantized as nniq
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
-import torch.nn.functional as F
 import torch.quantization
 
 from torch.quantization import (
@@ -210,11 +209,11 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         self.assertEqual(rqr, rqr2)
 
     def _test_conv_api_impl(
-        self, module_name, qconv_module, conv_module, batch_size,
-        in_channels_per_group, input_feature_map_size, out_channels_per_group,
-        groups, kernel_size, stride, padding, padding_mode, dilation,
-        X_scale, X_zero_point, W_scale, W_zero_point, Y_scale, Y_zero_point,
-        use_bias, use_fused, use_channelwise):
+            self, module_name, qconv_module, conv_module, batch_size,
+            in_channels_per_group, input_feature_map_size, out_channels_per_group,
+            groups, kernel_size, stride, padding, padding_mode, dilation,
+            X_scale, X_zero_point, W_scale, W_zero_point, Y_scale, Y_zero_point,
+            use_bias, use_fused, use_channelwise):
         for i in range(len(kernel_size)):
             assume(input_feature_map_size[i] + 2 * padding[i]
                    >= dilation[i] * (kernel_size[i] - 1) + 1)
