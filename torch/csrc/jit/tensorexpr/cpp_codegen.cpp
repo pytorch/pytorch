@@ -189,7 +189,7 @@ void CppPrinter::visit(IfThenElsePtr v) {
 
 void CppPrinter::visit(AllocatePtr v) {
   size_t size = v->dtype().byte_size();
-  for (auto dim : v->dims()) {
+  for (const auto& dim : v->dims()) {
     IntImmPtr d = to<IntImm>(dim);
     if (d) {
       size *= d->value();
