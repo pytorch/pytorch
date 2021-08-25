@@ -295,7 +295,7 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
     limit of the :attr:`dtype`. Following are a few conditions that are taken care of:
 
     - If :attr:`low` and/or :attr:`high` are specified and within dtype limits: the values are taken as they were.
-    - If :attr:`low` and/or :attr:`high` are specified but exceed the limits: :attr:`dtype` limits are considered instead.
+    - If :attr:`low` and/or :attr:`high` are specified but exceed the limits: :attr:`dtype` limits ar considered instead.
     - If :attr:`low` is ``-inf`` and/or :attr:`high` is ``inf``: :attr:`dtype` limits are considered instead
     - If :attr:`low` is ``inf`` or ``nan`` and/or :attr:`high` is ``-inf`` or nan: a `ValueError` is raised, since these are invalid values for the range of output tensor.
 
@@ -306,6 +306,27 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
     If :attr:`exclude_zero` is ``True`` (default is ``False``), all the values matching to zero in
     the created tensor are replaced with a ``tiny`` (smallest positive representable number) value if floating type,
     [``tiny`` + ``tiny``.j] if complex type and ``1`` if integer/boolean type.
+
+    Examples:
+        >>> import torch
+        >>> from torch.testing import make_tensor
+        >>> # Create a sample integral type (int64) tensor, default range = [-9, 9)
+        >>> make_tensor((3,), device='cuda', dtype=torch.int64)
+        tensor([-8, -7, -2], device='cuda:0')
+        >>> # Create a sample float tensor (double), with range as [0, 1)
+        >>> make_tensor((3,), device='cpu', dtype=torch.float64, low=0, high=1)
+        tensor([0.2468, 0.9723, 0.6779], dtype=torch.float64)
+        >>> # Passing low as -inf and high as inf (ranges will be clamped to dtype limits)
+        >>> make_tensor((2,), device='cpu', dtype=torch.float16, low=float('-inf'), high=float('inf'))
+        tensor([-38496., -53792.], dtype=torch.float16)
+
+        >>> # Passing low > high, will lead to ValueError
+        >>> make_tensor((2,), device='cpu', dtype=torch.float32, low=9, high=8)
+        ValueError: make_tensor: low must be weakly less than high!
+
+        >>> # Passing low or high as float('nan') will also lead to a ValueError
+        >>> make_tensor((2,), device='cpu', dtype=torch.float32, low=9, high=float('nan'))
+        ValueError: make_tensor: one of low or high was NaN!
     """
     def _modify_low_high(low, high, lowest, highest, default_low, default_high, dtype):
         """
