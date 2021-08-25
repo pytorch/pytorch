@@ -115,30 +115,13 @@ cmake_pop_check_state()
 
 # ---[ Check if the compiler has AVX/AVX2 support. We only check AVX2.
 if(NOT INTERN_BUILD_MOBILE)
-  cmake_push_check_state(RESET)
-  if(MSVC AND NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    set(CMAKE_REQUIRED_FLAGS "/arch:AVX2")
-  else()
-    set(CMAKE_REQUIRED_FLAGS "-mavx2")
-  endif()
-  CHECK_CXX_SOURCE_COMPILES(
-      "#include <immintrin.h>
-      int main() {
-        __m256i a, b;
-        a = _mm256_set1_epi8 (1);
-        b = a;
-        _mm256_add_epi8 (a,a);
-        __m256i x;
-        _mm256_extract_epi64(x, 0); // we rely on this in our AVX2 code
-        return 0;
-      }" CAFFE2_COMPILER_SUPPORTS_AVX2_EXTENSIONS)
-  if(CAFFE2_COMPILER_SUPPORTS_AVX2_EXTENSIONS)
+  find_package(AVX) # checks AVX and AVX2
+  if(CXX_AVX2_FOUND)
     message(STATUS "Current compiler supports avx2 extension. Will build perfkernels.")
     # Also see CMakeLists.txt under caffe2/perfkernels.
     set(CAFFE2_PERF_WITH_AVX 1)
     set(CAFFE2_PERF_WITH_AVX2 1)
   endif()
-  cmake_pop_check_state()
 endif()
 # ---[ Check if the compiler has AVX512 support.
 cmake_push_check_state(RESET)
@@ -195,10 +178,12 @@ endif()
 # -to add all (including unused) symbols into the dynamic symbol
 # -table. We need this to get symbols when generating backtrace at
 # -runtime.
-check_cxx_compiler_flag("-rdynamic" COMPILER_SUPPORTS_RDYNAMIC)
-if(${COMPILER_SUPPORTS_RDYNAMIC})
-  set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -rdynamic")
-  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -rdynamic")
+if(NOT MSVC)
+  check_cxx_compiler_flag("-rdynamic" COMPILER_SUPPORTS_RDYNAMIC)
+  if(${COMPILER_SUPPORTS_RDYNAMIC})
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -rdynamic")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -rdynamic")
+  endif()
 endif()
 
 # ---[ If we are using msvc, set no warning flags
@@ -275,9 +260,9 @@ if(${CMAKE_CXX_COMPILER_ID} STREQUAL "MSVC")
   add_definitions("/DNOMINMAX")
 
   set(CMAKE_SHARED_LINKER_FLAGS
-      "${CMAKE_SHARED_LINKER_FLAGS} /ignore:4049 /ignore:4217")
+      "${CMAKE_SHARED_LINKER_FLAGS} /ignore:4049 /ignore:4217 /ignore:4099")
   set(CMAKE_EXE_LINKER_FLAGS
-      "${CMAKE_EXE_LINKER_FLAGS} /ignore:4049 /ignore:4217")
+      "${CMAKE_EXE_LINKER_FLAGS} /ignore:4049 /ignore:4217 /ignore:4099")
 endif()
 
 # ---[ If we are building on ios, or building with opengl support, we will
