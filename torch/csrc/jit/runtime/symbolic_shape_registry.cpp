@@ -254,6 +254,14 @@ const std::string shape_compute_functions =
               result_size.append(self[i])
           return result_size
 
+        def embedding(weight: List[int], indices: List[int], padding_idx:int = -1, scale_grad_by_freq:bool=False, sparse: bool=False):
+          assert len(weight) == 2
+          if len(indices) == 1:
+            return index_select(weight, 0, indices)
+          size = _copy(indices)
+          size.append(weight[1])
+          return size
+
         def max_int():
           return 9223372036854775807
 
@@ -486,6 +494,14 @@ const std::string shape_compute_functions =
               assert seen_dims[i] != seen_dims[j]
           return newSizes
 
+        def embedding(weight: List[int], indices: List[int], padding_idx:int = -1, scale_grad_by_freq:bool=False, sparse: bool=False):
+          assert len(weight) == 2
+          if len(indices) == 1:
+            return index_select(weight, 0, indices)
+          size = _copy(indices)
+          size.append(weight[1])
+          return size
+
         def flatten(input: List[int], start_dim: int, end_dim: int):
           start_dim = maybe_wrap_dim(start_dim, len(input))
           end_dim = maybe_wrap_dim(end_dim, len(input))
@@ -555,6 +571,7 @@ static const OperatorMap<std::string>& get_schema_to_function_graph() {
       {"aten::layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, "
        "float eps=1e-05, bool cudnn_enable=True) -> Tensor", "unary_five_unused_inputs"},
       {"aten::softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor", "unary_two_unused_inputs"},
+      {"aten::embedding(Tensor weight, Tensor indices, int padding_idx=-1, bool scale_grad_by_freq=False, bool sparse=False) -> Tensor", "embedding"},
       {"aten::mm(Tensor self, Tensor mat2) -> Tensor", "mm"},
       {"aten::dot(Tensor self, Tensor tensor) -> Tensor", "dot"},
       {"aten::mv(Tensor self, Tensor vec) -> Tensor", "mv"},
@@ -573,6 +590,7 @@ static const OperatorMap<std::string>& get_schema_to_function_graph() {
       {"aten::expand_as(Tensor(a) self, Tensor other) -> Tensor(a)", "expand"},
       {"aten::expand(Tensor(a) self, int[] size, *, bool implicit=False) -> Tensor(a)", "expand_one_unused"},
       {"aten::mean.dim(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", "mean_dim"},
+      {"aten::embedding(Tensor weight, Tensor indices, int padding_idx=-1, bool scale_grad_by_freq=False, bool sparse=False) -> Tensor", "embedding"},
       {"aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor", "addmm"},
   };
   // clang-format on
