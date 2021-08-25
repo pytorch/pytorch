@@ -1496,7 +1496,9 @@ class CopyNodeQuantizeHandler(QuantizeHandler):
                 load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
-        if is_reference:
+        # always produce reference pattern for relu
+        is_relu = node.op == "call_function" and node.target == torch.nn.functional.relu
+        if is_reference or is_relu:
             # when activation dtype is torch.float, the node does not require
             # observation
             # e.g. dynamic quantization or weight_only quantization
