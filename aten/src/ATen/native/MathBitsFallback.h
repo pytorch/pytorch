@@ -52,7 +52,7 @@ struct MathOpFallback {
       3. Iterate through all the input arguments again.
           a. At this time, only non-mutable arguments are considered.
           b. If the size of mutable_arguments vector is non-zero, then we iterate through mutable_inputs to check
-            if the current arg tensor in question aliases any of the entries in mutable_inputs.
+            if the current arg tensor in question shares memory with any of the entries in mutable_inputs.
           c. If it does and the non-mutable arg's math bit is set to False, then we clone the non-mutable tensor arg,
              else it is a no op.
           d. If it doesn't then just resolve the non-mutable arg as usual.
@@ -155,8 +155,7 @@ struct MathOpFallback {
         bool resolve_needed = true;
         if (check_for_mem_overlap_with_mut_arg) {
           for (const auto& mutable_input : mutable_inputs) {
-            // check if tensor shares memory with one of the mutable tensors
-            // with math bit set to True.
+            // check if tensor shares memory with one of the mutable tensors whose math bit is set to True.
             // This check is crucial since we in-place materialize the bit for the mutable tensor(s) which
             // might be sharing memory with one of the non-mutable tensors that could be reading into the wrong
             // values if their math bit is not set to True.
