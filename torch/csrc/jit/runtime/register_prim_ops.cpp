@@ -693,6 +693,18 @@ static const OperatorGeneratorArgs opGenArgs[] = {
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("prim::VarStack(...) -> Tensor"),
+        [](Stack* stack) {
+          auto num_inputs = pop(stack).toInt();
+          auto dim = pop(stack).toInt();
+          std::vector<at::Tensor> inputs(num_inputs - 1);
+          for (int i = 0; i < num_inputs - 1; ++i) {
+            inputs[num_inputs - 2 - i] = pop(stack).toTensor();
+          }
+          push(stack, at::stack(inputs, dim));
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA(
             "aten::eq.enum(AnyEnumType a, AnyEnumType b) -> bool"),
         [](Stack* stack) {
@@ -2230,6 +2242,14 @@ static const OperatorGeneratorArgs opGenArgs1[] = {
           at::Tensor a;
           pop(stack, a);
           push(stack, a.is_meta());
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("prim::is_ort(Tensor a) -> bool"),
+        [](Stack* stack) {
+          at::Tensor a;
+          pop(stack, a);
+          push(stack, a.is_ort());
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
