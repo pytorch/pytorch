@@ -4,23 +4,18 @@
 
 #include <cpuinfo.h>
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(
     caffe2_threadpool_force_inline,
     false,
     "Force to always run jobs on the calling thread");
 
 // Whether or not threadpool caps apply to Android
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int(caffe2_threadpool_android_cap, true, "");
 
 // Whether or not threadpool caps apply to iOS and MacOS
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int(caffe2_threadpool_ios_cap, true, "");
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int(caffe2_threadpool_macos_cap, true, "");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int(pthreadpool_size, 0, "Override the default thread pool size.");
 
 namespace caffe2 {
@@ -92,7 +87,6 @@ size_t getDefaultNumThreads() {
 // multiple threads; the runtime value is configurable
 constexpr size_t kDefaultMinWorkSize = 1;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 size_t ThreadPool::defaultNumThreads_ = 0;
 
 std::unique_ptr<ThreadPool> ThreadPool::defaultThreadPool() {

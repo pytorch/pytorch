@@ -442,7 +442,7 @@ void LayerNormBackwardKernelImpl(
       "LayerNormBackwardKernelImpl",
       [&]() {
         LayerNormBackwardKernelImplInternal<scalar_t>(
-            dY, X, mean, rstd, gamma, M, N, dX, dgamma, dbeta);
+            dY.contiguous(), X, mean, rstd, gamma, M, N, dX, dgamma, dbeta);
       });
 }
 

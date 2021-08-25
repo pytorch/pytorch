@@ -210,9 +210,7 @@ Tensor layer_norm(
   return std::get<0>(at::native_layer_norm(input, normalized_shape, weight_opt, bias_opt, eps));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(LayerNormKernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(LayerNormBackwardKernel);
 
 // Ported from pytorch/xla repo

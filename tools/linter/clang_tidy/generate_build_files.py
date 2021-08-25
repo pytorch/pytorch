@@ -26,6 +26,8 @@ def update_submodules() -> None:
 def gen_compile_commands() -> None:
     os.environ["USE_NCCL"] = "0"
     os.environ["USE_DEPLOY"] = "1"
+    os.environ["CC"] = "clang"
+    os.environ["CXX"] = "clang++"
     run_timed_cmd([sys.executable, "setup.py", "--cmake-only", "build"])
 
 
@@ -60,3 +62,7 @@ def generate_build_files() -> None:
     update_submodules()
     gen_compile_commands()
     run_autogen()
+
+
+if __name__ == "__main__":
+    generate_build_files()
