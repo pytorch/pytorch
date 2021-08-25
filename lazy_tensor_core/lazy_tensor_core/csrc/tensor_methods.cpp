@@ -74,10 +74,10 @@
 #include "lazy_tensor_core/csrc/ops/mse_loss_backward.h"
 #include "lazy_tensor_core/csrc/ops/native_batch_norm_backward.h"
 #include "lazy_tensor_core/csrc/ops/native_batch_norm_forward.h"
-#include "lazy_tensor_core/csrc/ops/nll_loss.h"
 #include "lazy_tensor_core/csrc/ops/nll_loss2d.h"
 #include "lazy_tensor_core/csrc/ops/nll_loss2d_backward.h"
 #include "lazy_tensor_core/csrc/ops/nll_loss_backward.h"
+#include "lazy_tensor_core/csrc/ops/nll_loss_forward.h"
 #include "lazy_tensor_core/csrc/ops/nms.h"
 #include "lazy_tensor_core/csrc/ops/nonzero.h"
 #include "lazy_tensor_core/csrc/ops/normal.h"
@@ -1967,14 +1967,14 @@ LazyTensor LazyTensor::neg(const LazyTensor& input) {
   return input.CreateFrom(ir::ops::Neg(input.GetIrValue()));
 }
 
-LazyTensor LazyTensor::nll_loss(const LazyTensor& input,
-                                const LazyTensor& target,
-                                const LazyTensor& weight,
-                                lazy_tensors::int64 reduction,
-                                int ignore_index) {
-  return input.CreateFrom(ir::MakeNode<ir::ops::NllLoss>(
-      input.GetIrValue(), target.GetIrValue(), GetOptionalIrValue(weight),
-      GetReductionMode(reduction), ignore_index));
+std::tuple<LazyTensor, LazyTensor>
+LazyTensor::nll_loss_forward(const LazyTensor& input, const LazyTensor& target,
+    const LazyTensor& weight, lazy_tensors::int64 reduction, int ignore_index) {
+  auto node = ir::MakeNode<ir::ops::NllLossForward>(input.GetIrValue(),
+      target.GetIrValue(), GetOptionalIrValue(weight),
+      GetReductionMode(reduction), ignore_index);
+  return std::make_tuple(input.CreateFrom(ir::Value(node, 0)),
+      input.CreateFrom(ir::Value(node, 1)));
 }
 
 LazyTensor LazyTensor::nll_loss2d(const LazyTensor& input,
