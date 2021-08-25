@@ -59,7 +59,7 @@ void _amp_non_finite_check_and_unscale_cuda_(Tensor& scaled_grad,
       auto* found_inf_ptr = found_inf.data_ptr<float>();
       auto* inv_scale_ptr = inv_scale.data_ptr<float>();
 
-      using opmath_t = get_opmath_t<scalar_t>::opmath_t;
+      using opmath_t = at::opmath_type<scalar_t>;
 
       gpu_kernel(iter,
                  [found_inf_ptr, inv_scale_ptr] GPU_LAMBDA (scalar_t val_in) -> scalar_t {
@@ -154,7 +154,7 @@ void _amp_foreach_non_finite_check_and_unscale_cuda_(TensorList scaled_grads,
       auto* found_inf_ptr = found_inf.data_ptr<float>();
       auto* inv_scale_ptr = inv_scale.data_ptr<float>();
 
-      using opmath_t = get_opmath_t<scalar_t>::opmath_t;
+      using opmath_t = at::opmath_type<scalar_t>;
 
       // multi_tensor_apply guards onto tensor_lists[0][0], no need to guard explicitly.
       multi_tensor_apply<1>(tensor_lists,
