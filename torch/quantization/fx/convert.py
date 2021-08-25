@@ -45,6 +45,8 @@ from ..utils import (
     activation_dtype,
 )
 
+from .lower_to_fbgemm import lower_to_fbgemm
+
 # weight prepacking ops
 WEIGHT_PREPACK_OPS = {
     torch._ops.ops.quantized.linear_prepack,
@@ -535,4 +537,5 @@ def convert(model: GraphModule, is_reference: bool = False,
     model = QuantizedGraphModule(model, act_post_process_removed_graph, preserved_attributes)
     if not is_reference:
         model = fold_weight(model, node_name_to_scope)
+        model = lower_to_fbgemm(model)
     return model
