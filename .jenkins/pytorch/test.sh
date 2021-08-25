@@ -548,6 +548,6 @@ if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
   popd
   pushd build
   echo "Generating lcov coverage report for C++ sources"
-  time fastcov --lcov --search-directory . --compiler-directory build --output coverage.info --dump-statistic
+  time fastcov --lcov --search-directory . --compiler-directory . --output coverage.info --dump-statistic
   popd
 fi
