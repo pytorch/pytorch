@@ -275,6 +275,12 @@ RUN_PARALLEL_BLOCKLIST = [
 
 WINDOWS_COVERAGE_BLOCKLIST = []
 
+# A subset of our TEST list encompassing the tests for "core" functionality
+CORE_TEST_LIST = [
+    "test_nn",
+    "test_ops",
+    "test_torch"
+]
 
 # These tests are slow enough that it's worth calculating whether the patch
 # touched any related files first. This list was manually generated, but for every
@@ -699,6 +705,12 @@ def parse_args():
         help="run all distributed tests",
     )
     parser.add_argument(
+        "-core",
+        "--core",
+        action="store_true",
+        help="Only run core tests, defined by CORE_TEST_LIST."
+    )
+    parser.add_argument(
         "-pt",
         "--pytest",
         action="store_true",
@@ -897,6 +909,12 @@ def get_selected_tests(options):
     if options.distributed_tests:
         selected_tests = list(
             filter(lambda test_name: test_name in DISTRIBUTED_TESTS, selected_tests)
+        )
+
+    # Filter to only run core tests when --core option is specified
+    if options.core:
+        selected_tests = list(
+            filter(lambda test_name: test_name in CORE_TEST_LIST, selected_tests)
         )
 
     # process reordering
