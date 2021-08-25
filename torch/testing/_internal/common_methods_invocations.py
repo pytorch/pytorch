@@ -1634,8 +1634,10 @@ def sample_inputs_baddbmm(op_info, device, dtype, requires_grad, **kwargs):
                 make_tensor(shapes[2], device, dtype,
                             low=None, high=None,
                             requires_grad=requires_grad))
-        sample_inputs.append(SampleInput(args[0].transpose(-1, 1), args=(args[1].transpose(-1, 1).conj(), args[2].transpose(-1, 1).conj()),
-                                         kwargs=dict(beta=beta * (1 + 2j), alpha=alpha * (2 + 3j)),))
+        sample_inputs.append(
+            SampleInput(
+                args[0].transpose(-1, 1), args=(args[1].transpose(-1, 1).conj(), args[2].transpose(-1, 1).conj()),
+                kwargs=dict(beta=beta * (1 + 2j), alpha=alpha * (2 + 3j)),))
 
     return tuple(sample_inputs)
 
