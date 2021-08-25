@@ -7,8 +7,8 @@ For the sake of an example, let us implement an `IterDataPipe` to apply a callab
 For `MapDataPipe`, please take reference from files in [map](https://github.com/pytorch/pytorch/tree/master/torch/utils/data/datapipes/map) folder and implement the corresponding `__getitem__` method.
 
 ### Naming
-The naming convention for DataPipe is Operation-er and with suffix of `IterDataPipe` because each DataPipe behaves like a container to apply the operation to data yielded from the source DataPipe. 
-And, when importing the DataPipe into `iter` module under `datapipes`, each DataPipe will be aliased as Op-er without the suffix of `IterDataPipe`. 
+The naming convention for DataPipe is Operation-er and with suffix of `IterDataPipe` because each DataPipe behaves like a container to apply the operation to data yielded from the source DataPipe.
+And, when importing the DataPipe into `iter` module under `datapipes`, each DataPipe will be aliased as Op-er without the suffix of `IterDataPipe`.
 Please check [`__init__.py`](https://github.com/pytorch/pytorch/blob/master/torch/utils/data/datapipes/iter/__init__.py) in `iter` module for how we aliasing each DataPipe class.
 Like the example of `IterDataPipe` to map a function, we are going to name it as `MapperIterDataPipe` and alias it as `iter.Mapper` under `datapipes`.
 
@@ -35,9 +35,9 @@ class MpaaerIterDataPipe(IterDataPipe):
 ```
 
 ### Length
-`__len__` method is an optional method for `IterDataPipe`. In most cases, it can be implemented by returning the length of source DataPipe. 
-But, in some special cases, it would either return a length or raise Error depending on the inputs. 
-Then, the Error is required to be `TypeError` to support Python's utiliy functions like `list(dp)`. 
+`__len__` method is an optional method for `IterDataPipe`. In most cases, it can be implemented by returning the length of source DataPipe.
+But, in some special cases, it would either return a length or raise Error depending on the inputs.
+Then, the Error is required to be `TypeError` to support Python's utiliy functions like `list(dp)`.
 Please check NOTE [ Lack of Default `__len__` in Python Abstract Base Classes ].
 
 ### Registering DataPipe with functional API
