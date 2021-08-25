@@ -86,6 +86,7 @@ class TRTModule(torch.nn.Module):
         bindings: List[Any] = [None] * (len(self.input_names) + len(self.output_names))
 
         for i, input_name in enumerate(self.input_names):
+            assert inputs[i].is_cuda, f"{i}th input is not on cuda device."
             idx = self.engine.get_binding_index(input_name)
             bindings[idx] = contiguous_inputs[i].data_ptr()
 
