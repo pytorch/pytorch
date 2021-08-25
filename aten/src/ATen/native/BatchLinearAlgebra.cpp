@@ -202,7 +202,6 @@ extern "C" void dtrsm_(char *side, char *uplo, char *trans, char *diag, int *n, 
 extern "C" void strsm_(char *side, char *uplo, char *trans, char *diag, int *n, int *nrhs, float *alpha, float *a, int *lda, float *b, int *ldb);
 #endif
 
-
 namespace at {
 namespace native {
 
