@@ -4,6 +4,7 @@ from typing import List, NamedTuple, Iterable, Any, Optional, Tuple
 import tensorrt as trt
 import torch
 import torch.fx
+from torch.fx.node import _get_qualified_name
 
 
 # Borrowed from torch2trt
@@ -226,14 +227,15 @@ class TRTInterpreter(torch.fx.Interpreter):
         else:
             self.network = self.builder.create_network()
 
+        missing_ops = self.validate_conversion()
+        if missing_ops:
+            warnings.warn("Interpretation will fail due to missing operations \n"
+                          + "\n".join(f"{i}" for i in missing_ops))
+
         self.optimization_profiles: Optional[List] = None
         self.input_specs = input_specs
         self.input_specs_iter = 0
         self.validate_input_specs()
-        missing_ops = self.validate_conversion
-        if not missing_ops:
-            warnings.warn("Interpretation may fail due to missing operations \n"
-                          + "\n".join(f"{i}" for i in missing_ops))
         self._cur_node_name: Optional[str] = None
         self._input_names: List[str] = []
         self._output_names: List[str] = []
@@ -299,13 +301,15 @@ class TRTInterpreter(torch.fx.Interpreter):
         missing_converter = set()
 
         for node in self.module.graph.nodes:
-            if node.op in ["call_function", "call_method"] and not CONVERTERS.get(node.target):
-                missing_converter.add(f"{node.op} {node.target}")
+            if node.op == "call_function" and not CONVERTERS.get(node.target):
+                missing_converter.add(f"{node.op} {_get_qualified_name(node.target)}")
+            elif node.op == "call_method" and not CONVERTERS.get(node.target):
+                missing_converter.add(f"{node.op} torch.Tensor.{node.target}")
             elif node.op == "call_module":
                 submod = self.fetch_attr(node.target)
                 submod_type = getattr(submod, "_base_class_origin", type(submod))
                 if not CONVERTERS.get(submod_type):
-                    missing_converter.add(f"{node.op} {submod_type}")
+                    missing_converter.add(f"{node.op} {torch.typename(submod_type)}")
 
         return missing_converter
 

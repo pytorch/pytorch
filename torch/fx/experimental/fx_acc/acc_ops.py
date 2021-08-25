@@ -95,6 +95,12 @@ def avg_pool2d(
     return nn.functional.avg_pool2d(**locals())
 
 
+@register_acc_op_mapping(op_and_target=("call_function", torch.sign))
+@register_acc_op
+def sign(*, input):
+    return torch.sign(input)
+
+
 @register_acc_op
 def size(*, input):
     return input.size()

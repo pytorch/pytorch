@@ -1074,7 +1074,6 @@ def acc_ops_clamp(network, target, args, kwargs, name):
 
     return input_val
 
-
 @tensorrt_converter(acc_ops.tuple_construct)
 def acc_ops_tuple_construct(network, target, args, kwargs, name):
     return kwargs["tensors"]
