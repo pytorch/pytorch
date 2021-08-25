@@ -301,6 +301,23 @@ REGISTER_OPERATOR_FUNCTOR(
       };
     });
 
+REGISTER_OPERATOR_FUNCTOR(aten::abs, aten_abs, [](Node* n) -> SROperator {
+  if (!n->matches(torch::schema("aten::abs(Tensor self) -> Tensor"))) {
+    LogAndDumpSchema(n);
+    return nullptr;
+  }
+  return [](ProcessedNode* p_node) {
+    const auto& in0_t = p_node->Input(0).toTensor();
+    if (p_node->Output(0).isNone()) {
+      p_node->Output(0) = at::native::abs(in0_t);
+    } else {
+      auto& out_t = p_node->Output(0).toTensor();
+      fastResizeToZero(out_t);
+      at::native::abs_out(in0_t, out_t);
+    }
+  };
+});
+
 REGISTER_OPERATOR_FUNCTOR(aten::mul, aten_mul, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
           "aten::mul.Tensor(Tensor self, Tensor other) -> Tensor"))) {
@@ -464,8 +481,6 @@ static constexpr int kVectorWidth = 16;
 #ifdef TORCH_ENABLE_LLVM
 
 struct TEWrapper {
-  tensorexpr::KernelArena ka;
-  tensorexpr::KernelScope ks;
   std::unique_ptr<tensorexpr::LLVMCodeGen> cg;
   TEWrapper() = default;
   void update(std::unique_ptr<tensorexpr::LLVMCodeGen>&& cg_) {
@@ -483,7 +498,7 @@ struct TEWrapper {
 
 void optimizePointwise(
     tensorexpr::LoopNest* ln,
-    tensorexpr::Tensor* target,
+    tensorexpr::Tensor target,
     int width) {
   using namespace torch::jit::tensorexpr;
   std::vector<ForPtr> loops = ln->getLoopStmtsFor(target);
@@ -496,7 +511,7 @@ void optimizePointwise(
 std::shared_ptr<TEWrapper> wrapTECompute(
     std::shared_ptr<TEWrapper> wrap,
     tensorexpr::Placeholder& in,
-    tensorexpr::Tensor* out,
+    tensorexpr::Tensor out,
     tensorexpr::VarHandle& dim,
     int width = kVectorWidth) {
   using namespace torch::jit::tensorexpr;
@@ -517,8 +532,6 @@ std::shared_ptr<TEWrapper> wrapTECompute(
 #else
 
 struct TEWrapper {
-  tensorexpr::KernelArena ka;
-  tensorexpr::KernelScope ks;
   TEWrapper() = default;
   template <typename... Ts>
   void operator()(const Ts&... ts) {
@@ -536,7 +549,7 @@ struct TEWrapper {
 std::shared_ptr<TEWrapper> wrapTECompute(
     std::shared_ptr<TEWrapper> wrap,
     tensorexpr::Placeholder& in,
-    tensorexpr::Tensor* out,
+    tensorexpr::Tensor out,
     tensorexpr::VarHandle& dim,
     int width = kVectorWidth) {
   return wrap;
@@ -576,7 +589,7 @@ std::shared_ptr<TEWrapper> createLogit(c10::optional<float> clamp) {
   auto wrap = std::make_shared<TEWrapper>();
   auto N = VarHandle("N", kInt);
   Placeholder A("A", kFloat, {N});
-  tensorexpr::Tensor* B = Compute("B", {N}, [&](const VarHandle& i) {
+  tensorexpr::Tensor B = Compute("B", {N}, [&](const VarHandle& i) {
     auto A_elem = [&]() {
       if (!clamp) {
         return A.load(i);
@@ -602,7 +615,7 @@ std::shared_ptr<TEWrapper> createRelu() {
   wrap = std::make_shared<TEWrapper>();
   auto N = VarHandle("N", kInt);
   Placeholder A("A", kFloat, {N});
-  tensorexpr::Tensor* B = Compute("B", {N}, [&](const VarHandle& i) {
+  tensorexpr::Tensor B = Compute("B", {N}, [&](const VarHandle& i) {
     auto zero = FloatImm::make(0.f);
     auto a = A.load(i);
     return ifThenElse(a < zero, zero, a);
@@ -621,7 +634,7 @@ std::shared_ptr<TEWrapper> createTanh() {
   wrap = std::make_shared<TEWrapper>();
   auto N = VarHandle("N", kInt);
   Placeholder A("A", kFloat, {N});
-  tensorexpr::Tensor* B = Compute("B", {N}, [&](const VarHandle& i) {
+  tensorexpr::Tensor B = Compute("B", {N}, [&](const VarHandle& i) {
     auto a = A.load(i);
     return fast_tanh(a);
   });
@@ -639,7 +652,7 @@ std::shared_ptr<TEWrapper> createSigmoid() {
   wrap = std::make_shared<TEWrapper>();
   auto N = VarHandle("N", kInt);
   Placeholder A("A", kFloat, {N});
-  Tensor* B =
+  Tensor B =
       Compute("B", {N}, [&](const VarHandle& i) { return sigmoid(A.load(i)); });
   // NNC uses sleef for vectorizing sigmoid, which comes in an 8-wide flavor
   // (Sleef_expf8).
