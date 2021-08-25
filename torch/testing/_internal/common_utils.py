@@ -1950,22 +1950,20 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
 
         If :attr:`low` and :attr:`high` are not passed, following default values are considered depending on the given
         :attr:`dtype`:
-
-            * boolean type: `low` = 0, `high` = 2
-            * uint8 type: `low` = 0, `high` = 9
-            * floating and integral types: `low` = -9 and `high` = 9
-            * complex types, for each real and imaginary part: `low` = -9, `high` = 9
+            * boolean type: `low` = 0, `high` = 2.
+            * uint8 type: `low` = 0, `high` = 9.
+            * floating and integral types: `low` = -9 and `high` = 9.
+            * complex types, for each real and imaginary part: `low` = -9, `high` = 9.
 
         If :attr:`low` and :attr:`high` are passed, they are considered only if they are within the
         limit of the :attr:`dtype`. Following are a few conditions that are taken care of:
-
-            * If :attr:`low` and/or :attr:`high` are specified and within dtype limits: the values are taken as they were.
-            * If :attr:`low` and/or :attr:`high` are specified but exceed the limits:
-                :attr:`dtype` limits are considered instead
-            * If :attr:`low` is ``-inf`` and/or :attr:`high` is ``inf``:
-                :attr:`dtype` limits are considered instead
-            * If :attr:`low` is ``inf`` or ``nan`` and/or :attr:`high` is ``-inf`` or nan:
-                A `ValueError` is raised, since these are invalid values for the range of output tensor.
+            * If :attr:`low` and/or :attr:`high` are specified and within dtype limits: the values are taken as
+            they were.
+            * If :attr:`low` and/or :attr:`high` are specified but exceed the limits: :attr:`dtype` limits are
+            considered instead.
+            * If :attr:`low` is ``-inf`` and/or :attr:`high` is ``inf``: :attr:`dtype` limits are considered instead
+            * If :attr:`low` is ``inf`` or ``nan`` and/or :attr:`high` is ``-inf`` or nan: a `ValueError` is raised,
+            since these are invalid values for the range of output tensor.
 
         If :attr:`noncontiguous` is ``True``, a noncontiguous tensor with the given size will be returned unless the
         size specifies a tensor with a 1 or 0 elements in which case the noncontiguous parameter is ignored because
