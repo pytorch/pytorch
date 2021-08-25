@@ -1,6 +1,4 @@
 from libfb.py import testutil
-import sys
-import os
 
 import test_deploy_python_ext
 

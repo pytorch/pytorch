@@ -4,7 +4,6 @@
 #include <cassert>
 #include <complex>
 #include <cstdlib>
-#include <iostream>
 #include <memory>
 #include <mutex>
 #include <type_traits>
@@ -608,6 +607,13 @@ inline std::ostream& operator<<(
   EXPORT_IF_NOT_GCC uint16_t TypeMeta::_typeMetaData<T>() noexcept { \
     static const uint16_t index = addTypeMetaData<T>();              \
     return index;                                                    \
+  }
+
+#define CAFFE_KNOWN_TYPE_NOEXPORT(T)                    \
+  template <>                                           \
+  uint16_t TypeMeta::_typeMetaData<T>() noexcept {      \
+    static const uint16_t index = addTypeMetaData<T>(); \
+    return index;                                       \
   }
 
 } // namespace caffe2
