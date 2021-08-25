@@ -56,6 +56,8 @@ namespace jit {
   _(WARN, "I") /* emit a warning with line information */                      \
   _(ENTER, "EN") /* enter scope of a contextmanager */                         \
   _(EXIT, "EX") /* exit the last entered contextmanager */
+// NOTE: Don't forget to update parseOpCode in instruction.cpp when
+// adding a new line here! It does not use FORALL_OPCODES.
 
 enum OpCode : uint8_t {
 #define DEFINE_OP(op, _) op,

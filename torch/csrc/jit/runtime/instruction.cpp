@@ -56,19 +56,78 @@ std::ostream& operator<<(std::ostream& out, Instruction inst) {
   return out;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-static constexpr const char* strOpCode[] = {
-#define STR_OP(x, _) #x,
-    FORALL_OPCODES(STR_OP)
-#undef STR_OP
-};
-
 OpCode parseOpCode(const char* str) {
-  const int n = sizeof(strOpCode) / sizeof(strOpCode[0]);
-  for (const auto i : c10::irange(n)) {
-    if (strcmp(strOpCode[i], str) == 0)
-      return (OpCode)i;
+#define CHECK_OP(op) if (strcmp(str, #op) == 0) { return op; }
+  switch (str[0]) {
+    case 'C':
+      CHECK_OP(CALL);
+      CHECK_OP(CREATE_OBJECT);
+      break;
+    case 'D':
+      CHECK_OP(DROP);
+      CHECK_OP(DROPR);
+      CHECK_OP(DICT_CONSTRUCT);
+      break;
+    case 'E':
+      CHECK_OP(ENTER);
+      CHECK_OP(EXIT);
+      break;
+    case 'F':
+      CHECK_OP(FAIL_GUARD);
+      CHECK_OP(FORK);
+      break;
+    case 'G':
+      CHECK_OP(GET_ATTR);
+      CHECK_OP(GUARD);
+      break;
+    case 'I':
+      CHECK_OP(INTERFACE_CALL);
+      CHECK_OP(ISINSTANCE);
+      break;
+    case 'J':
+      CHECK_OP(JF);
+      CHECK_OP(JMP);
+      break;
+    case 'L':
+      CHECK_OP(LOAD);
+      CHECK_OP(LOADC);
+      CHECK_OP(LOOP);
+      CHECK_OP(LIST_CONSTRUCT);
+      CHECK_OP(LIST_UNPACK);
+      break;
+    case 'M':
+      CHECK_OP(MOVE);
+      break;
+    case 'N':
+      CHECK_OP(NAMED_TUPLE_CONSTRUCT);
+      break;
+    case 'O':
+      // No need to check for OP explicitly; we return it by default!
+      CHECK_OP(OPN);
+      break;
+    case 'P':
+      CHECK_OP(PROFILE_OP);
+      break;
+    case 'R':
+      CHECK_OP(RET);
+      break;
+    case 'S':
+      CHECK_OP(STORE);
+      CHECK_OP(STOREN);
+      CHECK_OP(SET_ATTR);
+      break;
+    case 'T':
+      CHECK_OP(TAIL_CALL);
+      CHECK_OP(TUPLE_CONSTRUCT);
+      CHECK_OP(TUPLE_SLICE);
+      CHECK_OP(TYPECHECK);
+      break;
+    case 'W':
+      CHECK_OP(WAIT);
+      CHECK_OP(WARN);
+      break;
   }
+  #undef CHECK_OP
   return OP;
 }
 
