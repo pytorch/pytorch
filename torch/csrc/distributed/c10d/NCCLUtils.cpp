@@ -18,9 +18,10 @@ std::string getNcclVersion() {
     if (status != ncclSuccess || version < 100) {
       versionString = "Unknown NCCL version";
     } else {
-      auto ncclMajor = version / 1000;
-      auto ncclMinor = (version % 1000) / 100;
-      auto ncclPatch = version % (ncclMajor * 1000 + ncclMinor * 100);
+      int majorDiv = (version >= 10000)? 10000 : 1000;
+      auto ncclMajor = version / majorDiv;
+      auto ncclMinor = (version % majorDiv) / 100;
+      auto ncclPatch = version % (ncclMajor * majorDiv + ncclMinor * 100);
       versionString = std::to_string(ncclMajor) + "." +
           std::to_string(ncclMinor) + "." + std::to_string(ncclPatch);
     }
