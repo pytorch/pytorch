@@ -3483,6 +3483,16 @@ std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, cons
   auto input = input_.tril(-1);
   input.diagonal(0, -2, -1).fill_(1.0);
 
+  // compute sigma such that
+  // H(sigma_i) == pinv(H(tau_i)).
+  // When tau_i * ||v_i||^2 - 1 == 0, then
+  // pinv(H(tau_i)) == H(tau_i). This follows from the eigenvalue decomposition,
+  // because (1 - tau_i * ||v_i||^2) is an eigenvalue of H(tau_i) with the
+  // corresponding eigenvector v_i / ||v_i||.
+  // TODO: it is probably worth considering this case for generic input,
+  // even though this case is very unlikely to pop up in practice.
+  // There is NO issue if the input to the torch.linalg.householder_product
+  // comes from the GEQRF routine.
   auto input_first_k_cols = input.narrow(-1, 0, k);
   auto input_first_k_cols_norm_squared = (
     input_first_k_cols * input_first_k_cols.conj()
