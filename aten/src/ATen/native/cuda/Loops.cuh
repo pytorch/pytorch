@@ -196,7 +196,8 @@ void gpu_kernel_with_scalars(TensorIteratorBase& iter, const func_t& f) {
       "gpu_kernel_with_scalars only supports two input arguments");
   using arg1_t = typename traits::template arg<0>::type;
   using arg2_t = typename traits::template arg<1>::type;
-  acc_gpu_kernel_with_scalars<arg1_t, arg2_t, func_t>(iter, f);
+  using return_t = typename traits::result_type;
+  acc_gpu_kernel_with_scalars<arg1_t, arg2_t, return_t, func_t>(iter, f);
 }
 
 namespace { // functions for `gpu_kernel_multiple_outputs`.
