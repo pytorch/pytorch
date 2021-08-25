@@ -17,9 +17,9 @@ As DataSet now constructed by a stack of DataPipe-s, each DataPipe normally take
 ```py
 class MapperIterDataPipe(IterDataPipe):
     def __init__(self, dp, fn):
-	super().__init__()
-	self.dp = dp
-	self.fn = fn
+        super().__init__()
+        self.dp = dp
+        self.fn = fn
 ```
 Note: Avoid loading data from the source DataPipe in `__init__` function, in order to support lazy data loading and save memory.
 
@@ -76,7 +76,7 @@ class CSVParser(IterDataPipe):
     def __iter__(self):
         for filename, stream in self.dp:
             reader = csv.reader(stream, **self.fmtparams)
-	    for row in reader:
+            for row in reader:
                 yield filename, row
 ```
 Then, the pipeline can be assembled as following:
