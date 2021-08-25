@@ -214,7 +214,7 @@ std::function<void(ProcessedNode*)> getOutOfPlaceOperation(Node* n) {
 
 // Returns true if the node represents an op with variadic arguments.
 bool hasVarArgs(Node* n) {
-  if (n->kind() == prim::VarConcat) {
+  if (n->kind() == prim::VarConcat || n->kind() == prim::VarStack) {
     return true;
   }
   return false;
@@ -452,6 +452,29 @@ SROperator aten_stack(Node* n) {
 
 REGISTER_OPERATOR_FUNCTOR(aten::stack, aten_stack, aten_stack);
 
+REGISTER_OPERATOR_FUNCTOR(
+    prim::VarStack,
+    prim_VarStack,
+    [](Node* n) -> SROperator {
+      return [](ProcessedNode* p_node) {
+        const size_t num_inputs = p_node->inputs().size();
+
+        std::vector<at::Tensor> inputs(num_inputs - 1);
+        for (size_t i = 0; i < num_inputs - 1; ++i) {
+          inputs[i] = p_node->Input(i).toTensor();
+        }
+
+        const auto dim = p_node->Input(num_inputs - 1).toInt();
+        if (p_node->Output(0).isNone()) {
+          p_node->Output(0) = at::native::_stack_cpu(inputs, dim);
+        } else {
+          auto& out_t = p_node->Output(0).toTensor();
+          fastResizeToZero(out_t);
+          at::native::_stack_out_cpu(inputs, dim, out_t);
+        }
+      };
+    });
+
 REGISTER_OPERATOR_FUNCTOR(aten::leaky_relu, aten_leaky_relu, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
           "aten::leaky_relu(Tensor self, Scalar negative_slope=0.01) -> Tensor"))) {
@@ -472,17 +495,15 @@ REGISTER_OPERATOR_FUNCTOR(aten::leaky_relu, aten_leaky_relu, [](Node* n) -> SROp
 
 namespace {
 
-// Use the width of an AVX-512 vector by default; this happens to work OK for
-// AVX2 as well. Some ops benefit from using multiple AVX ports, in which case
-// they are vectorized by twice this constant.  An exception is logit, since it
-// contains FP divide, which is single-ported.
+// Use the width of an AVX-512 vector by default; this happens to work OK
+// for AVX2 as well. Some ops benefit from using multiple AVX ports, in
+// which case they are vectorized by twice this constant.  An exception is
+// logit, since it contains FP divide, which is single-ported.
 static constexpr int kVectorWidth = 16;
 
 #ifdef TORCH_ENABLE_LLVM
 
 struct TEWrapper {
-  tensorexpr::KernelArena ka;
-  tensorexpr::KernelScope ks;
   std::unique_ptr<tensorexpr::LLVMCodeGen> cg;
   TEWrapper() = default;
   void update(std::unique_ptr<tensorexpr::LLVMCodeGen>&& cg_) {
@@ -500,7 +521,7 @@ struct TEWrapper {
 
 void optimizePointwise(
     tensorexpr::LoopNest* ln,
-    tensorexpr::Tensor* target,
+    tensorexpr::Tensor target,
     int width) {
   using namespace torch::jit::tensorexpr;
   std::vector<ForPtr> loops = ln->getLoopStmtsFor(target);
@@ -513,7 +534,7 @@ void optimizePointwise(
 std::shared_ptr<TEWrapper> wrapTECompute(
     std::shared_ptr<TEWrapper> wrap,
     tensorexpr::Placeholder& in,
-    tensorexpr::Tensor* out,
+    tensorexpr::Tensor out,
     tensorexpr::VarHandle& dim,
     int width = kVectorWidth) {
   using namespace torch::jit::tensorexpr;
@@ -534,8 +555,6 @@ std::shared_ptr<TEWrapper> wrapTECompute(
 #else
 
 struct TEWrapper {
-  tensorexpr::KernelArena ka;
-  tensorexpr::KernelScope ks;
   TEWrapper() = default;
   template <typename... Ts>
   void operator()(const Ts&... ts) {
@@ -553,7 +572,7 @@ struct TEWrapper {
 std::shared_ptr<TEWrapper> wrapTECompute(
     std::shared_ptr<TEWrapper> wrap,
     tensorexpr::Placeholder& in,
-    tensorexpr::Tensor* out,
+    tensorexpr::Tensor out,
     tensorexpr::VarHandle& dim,
     int width = kVectorWidth) {
   return wrap;
@@ -593,7 +612,7 @@ std::shared_ptr<TEWrapper> createLogit(c10::optional<float> clamp) {
   auto wrap = std::make_shared<TEWrapper>();
   auto N = VarHandle("N", kInt);
   Placeholder A("A", kFloat, {N});
-  tensorexpr::Tensor* B = Compute("B", {N}, [&](const VarHandle& i) {
+  tensorexpr::Tensor B = Compute("B", {N}, [&](const VarHandle& i) {
     auto A_elem = [&]() {
       if (!clamp) {
         return A.load(i);
@@ -619,7 +638,7 @@ std::shared_ptr<TEWrapper> createRelu() {
   wrap = std::make_shared<TEWrapper>();
   auto N = VarHandle("N", kInt);
   Placeholder A("A", kFloat, {N});
-  tensorexpr::Tensor* B = Compute("B", {N}, [&](const VarHandle& i) {
+  tensorexpr::Tensor B = Compute("B", {N}, [&](const VarHandle& i) {
     auto zero = FloatImm::make(0.f);
     auto a = A.load(i);
     return ifThenElse(a < zero, zero, a);
@@ -638,7 +657,7 @@ std::shared_ptr<TEWrapper> createTanh() {
   wrap = std::make_shared<TEWrapper>();
   auto N = VarHandle("N", kInt);
   Placeholder A("A", kFloat, {N});
-  tensorexpr::Tensor* B = Compute("B", {N}, [&](const VarHandle& i) {
+  tensorexpr::Tensor B = Compute("B", {N}, [&](const VarHandle& i) {
     auto a = A.load(i);
     return fast_tanh(a);
   });
@@ -656,7 +675,7 @@ std::shared_ptr<TEWrapper> createSigmoid() {
   wrap = std::make_shared<TEWrapper>();
   auto N = VarHandle("N", kInt);
   Placeholder A("A", kFloat, {N});
-  Tensor* B =
+  Tensor B =
       Compute("B", {N}, [&](const VarHandle& i) { return sigmoid(A.load(i)); });
   // NNC uses sleef for vectorizing sigmoid, which comes in an 8-wide flavor
   // (Sleef_expf8).
