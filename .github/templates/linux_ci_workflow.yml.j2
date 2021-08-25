@@ -1,3 +1,4 @@
+{% import 'common.yml.j2' as common %}
 {# squid_proxy is an private ELB that only available for GHA custom runners #}
 {%- set squid_proxy    = "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128" -%}
 {# squid_no_proxy is a list of common set of fixed domains or IPs that we don't need to proxy. See https://docs.aws.amazon.com/AmazonECS/latest/developerguide/http_proxy_config.html#windows-proxy #}
@@ -89,6 +90,7 @@ jobs:
         with:
           # deep clone, to allow use of git merge-base
           fetch-depth: 0
+      !{{ common.display_ec2_information() }}
       - name: Calculate docker image tag
         id: calculate-tag
         run: |
@@ -165,6 +167,7 @@ jobs:
         with:
           fetch-depth: 0 # deep clone, to allow sharding to use git rev-list
           submodules: recursive
+      !{{ common.display_ec2_information() }}
       - name: Pull docker image
         run: |
           docker pull "${DOCKER_IMAGE}"
@@ -217,18 +220,7 @@ jobs:
       {%- if not is_libtorch %}
       - name: Archive artifacts into zip
         run: |
-          zip -r artifacts.zip dist/ build/ .pytorch-test-times.json
-      # Upload to github so that people can click and download artifacts
-      - uses: actions/upload-artifact@v2
-        # Don't fail on upload to GH since it's only for user convenience
-        continue-on-error: true
-        name: Store PyTorch Build Artifacts on Github
-        with:
-          name: ${{ env.BUILD_ENVIRONMENT }}
-          retention-days: 14
-          if-no-files-found: error
-          path:
-            artifacts.zip
+          zip -1 -r artifacts.zip dist/ build/custom_test_artifacts build/lib build/bin .pytorch-test-times.json
       - uses: seemethere/upload-artifact-s3@9d7ceb0ab39c2c88d93ef7792b27425b27d59162
         name: Store PyTorch Build Artifacts on S3
         with:
@@ -316,7 +308,9 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
+          fetch-depth: 0 # deep clone, to allow sharding to use git rev-list
           submodules: recursive
+      !{{ common.display_ec2_information() }}
       - name: Pull docker image
         run: |
           docker pull "${DOCKER_IMAGE}"
@@ -475,6 +469,7 @@ jobs:
         with:
           # deep clone, to allow tools/stats/print_test_stats.py to use Git commands
           fetch-depth: 0
+      !{{ common.display_ec2_information() }}
       - uses: actions/download-artifact@v2
         name: Download PyTorch Test Reports
         with:
@@ -540,6 +535,7 @@ jobs:
         with:
           fetch-depth: 0 # deep clone, to allow sharding to use git rev-list
           submodules: recursive
+      !{{ common.display_ec2_information() }}
       - name: Pull docker image
         run: |
           docker pull "${DOCKER_IMAGE}"

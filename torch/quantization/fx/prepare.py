@@ -87,7 +87,7 @@ from ..utils import (
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 def is_activation_post_process_node(node: Node, modules: Dict[str, torch.nn.Module]) -> bool:
-    return node.op == "call_module" and \
+    return isinstance(node, torch.fx.Node) and node.op == "call_module" and \
         is_activation_post_process(modules[str(node.target)])
 
 def node_arg_is_weight(node: Node, arg: Any) -> bool:
@@ -772,6 +772,8 @@ def maybe_make_input_output_share_observers(
     # we need to navigate up to the first observer
     iteration_guard = 0
     while not is_activation_post_process_node(first_arg_arg, modules):
+        if not isinstance(first_arg_arg, Node):
+            return False
         # did not find an activation_post_process for the op
         if first_arg_arg.op == "placeholder":
             return False
