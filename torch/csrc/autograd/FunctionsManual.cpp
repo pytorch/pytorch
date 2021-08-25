@@ -3436,7 +3436,7 @@ bool any_variable_defined(const variable_list& variables) {
 // so we wrap them into a struct.
 template<bool in_place>
 struct HouseholderReflectorEvaluator {
-  static Tensor left_reflect(int64_t k, const Tensor& v_full, const Tensor& t, Tensor& K) {
+  static Tensor apply_left(int64_t k, const Tensor& v_full, const Tensor& t, Tensor& K) {
     auto m = v_full.size(-1);
     if (in_place) {
       auto v = v_full.narrow(-1, k, m - k);
@@ -3449,7 +3449,7 @@ struct HouseholderReflectorEvaluator {
     }
   }
 
-  static Tensor right_reflect(int64_t k, const Tensor& v_full, const Tensor& t, Tensor& K) {
+  static Tensor apply_right(int64_t k, const Tensor& v_full, const Tensor& t, Tensor& K) {
     auto m = v_full.size(-1);
     if (in_place) {
       auto v = v_full.narrow(-1, k, m - k);
@@ -3483,6 +3483,25 @@ std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, cons
   ).sum(-2);
   auto sigma = tau / (tau * input_first_k_cols_norm_squared - 1.0);
 
+  auto K = result.matmul(grad.conj().transpose(-1, -2));
+
+  // The algorithm updates K by multiplying it from the left/right with Householder reflectors.
+  // If only single backward is run, we modify K in-place and exploit triangularity of the input.
+  // With higher order derivatives we cannot rewrite the storage of K, hence we use much less efficient
+  // out-of-place methods.
+  std::function<decltype(HouseholderReflectorEvaluator<true>::apply_left)> left_reflect, right_reflect;
+  // if higher-order derivates are expected
+  if (at::GradMode::is_enabled()) {
+    left_reflect = HouseholderReflectorEvaluator</*in_place=*/false>::apply_left;
+    right_reflect = HouseholderReflectorEvaluator</*in_place=*/false>::apply_right;
+  }
+  // if only first-order derivative is expected
+  else {
+    left_reflect = HouseholderReflectorEvaluator</*in_place=*/true>::apply_left;
+    right_reflect = HouseholderReflectorEvaluator</*in_place=*/true>::apply_right;
+  }
+
+  // This method exploites that at k-th iteration vector v_k has only elements v_k[k:] which are non-zero.
   auto update_grad = [&m](int64_t k, const Tensor& v_full, const Tensor& t, const Tensor& K) -> std::tuple<Tensor, Tensor> {
     auto v = v_full.narrow(-1, k, m - k);
     auto vHK = v.unsqueeze(-2).conj().matmul(K.narrow(-2, k, m - k));
@@ -3493,38 +3512,21 @@ std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, cons
     return std::make_tuple(v_grad.squeeze(-1), tau_grad.squeeze(-1).squeeze(-1));
   };
 
-  auto K = result.matmul(grad.conj().transpose(-1, -2));
-
-  // The algorithm updates K by multiplying it from the left/right with Householder reflectors.
-  // If only single backward is run, we modify K in-place and exploit triangularity of the input.
-  // With higher order derivatives we cannot rewrite the storage of K, hence we use much less efficient
-  // out-of-place methods.
-  std::function<decltype(HouseholderReflectorEvaluator<true>::left_reflect)> left_reflect, right_reflect;
-  // if higher-order derivates are expected
-  if (at::GradMode::is_enabled()) {
-    left_reflect = HouseholderReflectorEvaluator</*in_place=*/false>::left_reflect;
-    right_reflect = HouseholderReflectorEvaluator</*in_place=*/false>::right_reflect;
-  }
-  // if only first-order derivative is expected
-  else {
-    left_reflect = HouseholderReflectorEvaluator</*in_place=*/true>::left_reflect;
-    right_reflect = HouseholderReflectorEvaluator</*in_place=*/true>::right_reflect;
-  }
-
   K = left_reflect(0, input.select(-1, 0), sigma.select(-1, 0), K);
-  for (int64_t i = 0; i < k - 1; ++i) {
+  for (int64_t i = 0; i < k; ++i) {
     Tensor vi_grad, taui_grad;
     std::tie(vi_grad, taui_grad) = update_grad(i, input.select(-1, i), tau.select(-1, i), K);
     input_grad.select(-1, i).copy_(vi_grad);
     tau_grad.select(-1, i).copy_(taui_grad);
-    K = left_reflect(i + 1, input.select(-1, i + 1), sigma.select(-1, i + 1), K);
-    K = right_reflect(i, input.select(-1, i), tau.select(-1, i), K);
-  }
 
-  Tensor vi_grad, taui_grad;
-  std::tie(vi_grad, taui_grad) = update_grad(k - 1, input.select(-1, k - 1), tau.select(-1, k - 1), K);
-  input_grad.select(-1, k - 1).copy_(vi_grad);
-  tau_grad.select(-1, k - 1).copy_(taui_grad);
+    // K <- pinv(H_{i + 1}) @ K @ H_i
+    if (i < k - 1) {
+      // K <- pinv(H_{i + 1}) @ K
+      K = left_reflect(i + 1, input.select(-1, i + 1), sigma.select(-1, i + 1), K);
+      // K <- K @ H_i
+      K = right_reflect(i, input.select(-1, i), tau.select(-1, i), K);
+    }
+  }
 
   input_grad.tril_(-1);
 
