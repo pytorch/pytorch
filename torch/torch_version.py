@@ -9,7 +9,6 @@ InvalidVersion = packaging.version.InvalidVersion
 from .version import __version__ as internal_version
 
 
-@total_ordering
 class TorchVersion(str):
     """A string with magic powers to compare to both Version and iterables!
 
