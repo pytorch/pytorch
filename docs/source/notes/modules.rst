@@ -259,8 +259,8 @@ It's also easy to move all parameters to a different device or change their prec
    : tensor([6.5166], device='cuda:0', dtype=torch.float64, grad_fn=<AddBackward0>)
 
 More generally, an arbitrary function can be applied to a module and its submodules recursively by
-using the :func:`~torch.nn.Module.apply` function. For example, to initialize parameters of a module
-and its submodules:
+using the :func:`~torch.nn.Module.apply` function. For example, to apply custom initialization to parameters
+of a module and its submodules:
 
 .. code-block:: python
 
@@ -277,8 +277,8 @@ and its submodules:
 
 These examples show how elaborate neural networks can be formed through module composition and conveniently
 manipulated. To allow for quick and easy construction of neural networks with minimal boilerplate, PyTorch
-provides a large library of performant modules within the :mod:`torch.nn` namespace that perform computation
-commonly found within neural networks, including pooling, convolutions, loss functions, etc.
+provides a large library of performant modules within the :mod:`torch.nn` namespace that perform common neural
+network operations like pooling, convolutions, loss functions, etc.
 
 In the next section, we give a full example of training a neural network.
 
@@ -311,7 +311,8 @@ Optimizers from :mod:`torch.optim`:
      loss.backward()
      optimizer.step()
 
-   # Later on, switch the module to eval mode to do inference, compute performance metrics, etc.
+   # After training, switch the module to eval mode to do inference, compute performance metrics, etc.
+   # (see discussion below for a description of training and evaluation modes)
    ...
    net.eval()
    ...
@@ -466,7 +467,7 @@ Buffers of a module can be iterated over using :func:`~torch.nn.Module.buffers` 
    for buffer in m.named_buffers():
      print(buffer)
 
-The following class demonstrates the various ways of registering the state within a module:
+The following class demonstrates the various ways of registering parameters and buffers within a module:
 
 .. code-block:: python
 
@@ -482,7 +483,6 @@ The following class demonstrates the various ways of registering the state withi
        # Registers a parameter None placeholder; this will be added to the state_dict
        # to be serialized explicitly as None.
        self.register_parameter('param3', None)
-       assert self.param3 is None
 
        # Registers a list of parameters.
        self.param_list = nn.ParameterList([nn.Parameter(torch.randn(2)) for i in range(3)])
@@ -493,16 +493,15 @@ The following class demonstrates the various ways of registering the state withi
          'bar': nn.Parameter(torch.randn(4))
        })
 
-       # Registers a persistent buffer.
+       # Registers a persistent buffer (one that appears in the module's state_dict).
        self.register_buffer('buffer1', torch.randn(4), persistent=True)
 
-       # Registers a non-persistent buffer.
+       # Registers a non-persistent buffer (one that does not appear in the module's state_dict).
        self.register_buffer('buffer2', torch.randn(5), persistent=False)
 
        # Registers a buffer None placeholder; this will be added to the state_dict
        # to be serialized explicitly as None.
        self.register_buffer('buffer3', None)
-       assert self.buffer3 is None
 
        # Adding a submodule registers its parameters as parameters of the module.
        self.linear = nn.Linear(2, 3)
@@ -518,6 +517,7 @@ The following class demonstrates the various ways of registering the state withi
    assert m_loaded.param3 is None
    assert m_loaded.buffer3 is None
 
+   # Note that non-persistent buffer buffer2 does not appear in the state_dict.
    print(m_loaded.state_dict())
    : OrderedDict([('param1', tensor([-0.0322,  0.9066])),
                   ('param2', tensor([-0.4472,  0.1409,  0.4852])),
