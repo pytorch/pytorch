@@ -383,7 +383,16 @@ void Reducer::mark_variable_ready_dense(size_t variable_index) {
             at::mul_out(bucket_view, grad, wrapped);
           } else {
             // If DDP is running with create_graph=True, gradients require_grad
-            // themselves in order to compute higher order derivatives.
+            // themselves in order to compute higher order derivatives. However,
+            // DDP will not sync up these gradients currently (see
+            // https://github.com/pytorch/pytorch/issues/63812).
+            LOG(WARNING)
+                << "Using DistributedDataParallel with create_graph=True "
+                << " is not well-supported. The higher-order gradient will "
+                << " not be synchronized across ranks, and backpropagation "
+                << " through all_reduce operations will not occur. If you require "
+                << " DDP to work with higher-order gradients for your use case, "
+                << " please ping https://github.com/pytorch/pytorch/issues/63929";
             auto div_result = at::mul(grad, wrapped);
             bucket_view.copy_(div_result);
           }
