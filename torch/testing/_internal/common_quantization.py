@@ -975,12 +975,12 @@ class QuantizationLiteTestCase(QuantizationTestCase):
 
                     mobile_module_result = mobile_module(input)
 
-                    torch.testing.assert_allclose(script_module_result, mobile_module_result)
+                    torch.testing.assert_close(script_module_result, mobile_module_result)
                     mobile_module_forward_result = mobile_module.forward(input)
-                    torch.testing.assert_allclose(script_module_result, mobile_module_forward_result)
+                    torch.testing.assert_close(script_module_result, mobile_module_forward_result)
 
                     mobile_module_run_method_result = mobile_module.run_method("forward", input)
-                    torch.testing.assert_allclose(script_module_result, mobile_module_run_method_result)
+                    torch.testing.assert_close(script_module_result, mobile_module_run_method_result)
                 except AssertionError as e:
                     if retry == max_retry:
                         raise e
