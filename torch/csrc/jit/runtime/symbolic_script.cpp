@@ -1156,15 +1156,40 @@ const std::vector<std::string> functions = {
                 return grad_input, None, grad_weight, grad_bias, None, None
             return output, backward
 
+        def AD_fused_dropout_backward(grad,
+                                      mask,
+                                      p1m: float):
+            p1r = 1. / p1m
+            grad_input = grad * (mask.type_as(grad) * p1r)
+            return grad_input
+
         def dropout(input,
                     p: float,
                     train: bool):
+            use_cuda = input.is_cuda
+            # lowering is specialized for cuda because cuda fuser can efficiently fuse those operations
+            # for cpu backend, where fusions are disabled, a different lowering that is more efficient
+            # in the absence of fusion is used
             p1m = 1. - p
-            scale = 1. / (float(p1m == 0.) + p1m)
-            res,mask = torch.native_dropout(input, p1m, scale, train)
+            if train:
+                if use_cuda:
+                    mask = torch.rand_like(input, memory_format=1) < p1m
+                    res = mask.type_as(input) * input * (1./p1m)
+                else:
+                    mask = torch.empty_like(input, memory_format=1)
+                    mask.bernoulli_(p1m)
+                    res = mask * input / p1m
+            else:
+                p1m = 1.
+                res = input
+                mask = torch.empty_like(input, memory_format=1)
 
             def backward(grad_output):
-                grad_input = torch.native_dropout_backward(grad_output, mask, scale)
+                use_cuda = grad_output.is_cuda
+                if use_cuda:
+                    grad_input = AD_fused_dropout_backward(grad_output, mask, p1m)
+                else:
+                    grad_input = grad_output * mask / p1m
                 return grad_input, None, None
             return res, backward
 
@@ -1304,12 +1329,7 @@ const std::vector<std::string> functions = {
             result = torch.add(self, other, alpha=alpha)
             self_size, other_size = AD_sizes_if_not_equal_multi_1(self, other, result)
             def backward(grad_output):
-                temp = grad_output
-                # Conditional prevents an extra kernel in trivial cases.
-                # This was noticed with bias backward fusions.
-                if float(alpha) != 1.0 :
-                    temp *= alpha
-                grad_other = (temp)._grad_sum_to_size(other_size)
+                grad_other = (grad_output * alpha)._grad_sum_to_size(other_size)
                 grad_self = (grad_output)._grad_sum_to_size(self_size)
                 return grad_self, grad_other, None
             return result, backward
