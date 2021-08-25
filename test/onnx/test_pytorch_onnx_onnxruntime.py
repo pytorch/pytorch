@@ -3545,7 +3545,6 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(GatherModel(), input=(input, indices))
 
     @disableScriptTest()  # RuntimeError: Python type cannot be used as a value
-    @skipIfUnsupportedMinOpsetVersion(11)
     def test_gather_constant_fold(self):
         class GatherModule(torch.nn.Module):
             def __init__(self):
@@ -3575,6 +3574,21 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(1, 3, 2)
         self.run_test(GatherModule(), (x,))
+
+        class GatherModule(torch.nn.Module):
+            def __init__(self):
+                super(GatherModule, self).__init__()
+                self.register_buffer("rb", torch.randn(1, 1, 3, 1, 1))
+
+            def forward(self, x):
+                x += self.rb[0]
+                return x
+
+        x = torch.randn(1, 3, 224, 224)
+        self.run_test(GatherModule(), (x,),
+                      dynamic_axes={"input": {0: "batch", 2: "height", 3: "width"},
+                                    "output": {0: "batch", 1: "class", 2: "height", 3: "width"}},
+                      input_names=['input'], output_names=['output'])
 
     @skipIfUnsupportedOpsetVersion([13])
     @skipIfUnsupportedMinOpsetVersion(9)
