@@ -27,7 +27,7 @@ from torch.utils.checkpoint import checkpoint
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (TestCase, run_tests, skipIfNoLapack,
                                                   suppress_warnings, slowTest,
-                                                  make_load_tests,
+                                                  make_load_tests, load_tests,
                                                   IS_WINDOWS, IS_MACOS, CudaMemoryLeakCheck,
                                                   TEST_WITH_ROCM, disable_gc,
                                                   gradcheck, gradgradcheck, make_tensor)
@@ -45,10 +45,12 @@ from torch.testing._internal.common_device_type import (instantiate_device_type_
 
 import autograd.test_complex
 
-load_tests = make_load_tests(
-    imported_test_cases={
-        autograd.test_complex.TestAutogradComplex,
-    })
+load_tests = load_tests
+
+# load_tests = make_load_tests(
+#     imported_test_cases={
+#         autograd.test_complex.TestAutogradComplex,
+#     })
 
 import pickle
 
