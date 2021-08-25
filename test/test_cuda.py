@@ -3687,9 +3687,9 @@ torch.cuda.synchronize()
         models = []
         for _ in range(2):
             model_section1 = torch.nn.Sequential(torch.nn.Linear(D_in, H),
-                                        torch.nn.Dropout(p=0.1)).cuda()
+                                                 torch.nn.Dropout(p=0.1)).cuda()
             model_section2 = torch.nn.Sequential(torch.nn.Linear(H, D_out),
-                                        torch.nn.Dropout(p=0.2)).cuda()
+                                                 torch.nn.Dropout(p=0.2)).cuda()
             models.append(torch.nn.Sequential(model_section1, model_section2))
 
         model_graphed = models[0]
@@ -3700,8 +3700,8 @@ torch.cuda.synchronize()
                              model_control.parameters()):
                 pc.copy_(p)
 
-        opt_graphed = torch.optim.SGD(model_graphed.parameters(), lr = 0.1)
-        opt_control = torch.optim.SGD(model_control.parameters(), lr = 0.1)
+        opt_graphed = torch.optim.SGD(model_graphed.parameters(), lr=0.1)
+        opt_control = torch.optim.SGD(model_control.parameters(), lr=0.1)
 
         x = torch.randn(N, D_in, device='cuda')
         h = torch.randn(N, H, device='cuda', requires_grad=True)
