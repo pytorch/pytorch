@@ -468,7 +468,6 @@ void nll_loss_backward_out_cuda_template(
   int64_t n_dims = input.dim();
   int64_t n_classes = input.size(-1);
   int64_t batch_size = n_dims == 1 ? 1 : input.size(0);
-  int64_t num_targets = target.size(0);
 
   auto weight_ = weight.defined() ? weight.contiguous() : weight;
 
