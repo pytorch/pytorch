@@ -3,6 +3,7 @@
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/MemoryOverlap.h>
 #include <c10/util/irange.h>
 #include <torch/library.h>
 
@@ -35,10 +36,10 @@ struct MathOpFallback {
         Materialize other inputs as in (1).
 
         It is important to be able to tell if we READ from an argument and if we
-        WRITE from an argument.  Conservative approach is to assume that we always
-        READ from an argument, but in out-of-place operations you can skip
-        conjugating inputs on entry that never get used.  In current schema we
-        can't easily tell if inplace situation has happened, so don't do it.
+        WRITE to an argument.  Conservative approach is to assume that we always
+        READ from an argument, but in out= operations you can skip
+        conjugating inputs on entry that never get used. In the current schema we
+        can't easily tell if the operation is in in-place or out= operation.
 
       Algorithm used:
 
@@ -78,6 +79,7 @@ struct MathOpFallback {
           b.1. All the possible cases listed in 1.b (-- works fine)
           b.2. shared memory between a tensor arg and a tensorlist arg ( -- Not currently supported)
         c. Mutable tensorlist arg(s) ( -- Not currently supported)
+          NOTE: a few foreach ops fall in this category
           c.1. shared memory between a mutable and non-mutable tensorlist
           c.2. shared memory between two or more mutable tensorlist args
           c.3. shared memory between two or more non-mutable tensorlist args
@@ -93,7 +95,7 @@ struct MathOpFallback {
     // set to True if there's one or mutable inputs
     c10::optional<bool> is_write;
 
-    // Mutable inputs to be tracked separately
+    // Mutable inputs with math bit set to True to be tracked separately
     std::vector<Tensor> mutable_inputs;
     for (const auto i : c10::irange(num_arguments)) {
       // Three possible states:
@@ -135,7 +137,7 @@ struct MathOpFallback {
     }
 
     // updates for non-mutable inputs
-    bool check_for_alias_with_mut_arg = !mutable_inputs.empty();
+    bool check_for_mem_overlap_with_mut_arg = !mutable_inputs.empty();
     for (const auto i : c10::irange(num_arguments)) {
       auto& ivalue = (*stack)[stack_start + i];
       if (!(ivalue.isTensor() || ivalue.isTensorList())) {
@@ -151,7 +153,7 @@ struct MathOpFallback {
         auto tensor = std::move(ivalue).toTensor();
         TORCH_CHECK_NOT_IMPLEMENTED(!tensor.is_meta(), op_name, " fallback does not support meta tensors.");
         bool resolve_needed = true;
-        if (check_for_alias_with_mut_arg) {
+        if (check_for_mem_overlap_with_mut_arg) {
           for (const auto& mutable_input : mutable_inputs) {
             // check if tensor shares memory with one of the mutable tensors
             // with math bit set to True.
@@ -159,7 +161,7 @@ struct MathOpFallback {
             // might be sharing memory with one of the non-mutable tensors that could be reading into the wrong
             // values if their math bit is not set to True.
             // no op if tensor and mutable arg share memory and have math bit set to True
-            if (tensor.is_alias_of(mutable_input)) {
+            if (get_overlap_status(tensor, mutable_input) != MemOverlapStatus::NO) {
               if (!is_bit_set(tensor)) {
                 tensor = tensor.clone();
               }
