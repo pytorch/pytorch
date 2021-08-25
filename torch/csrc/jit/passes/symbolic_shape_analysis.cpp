@@ -124,7 +124,8 @@ struct SymbolicShapeAnalyzer {
           if (!symbolic_shape_analysis_test_mode) {
             replaceWithIValue(graph_->inputs().at(i), size);
           } else {
-            node_symbolic_input_indices.emplace_back(i, c10::SymbolicShape(size));
+            node_symbolic_input_indices.emplace_back(
+                i, c10::SymbolicShape(size));
           }
           continue;
         }
