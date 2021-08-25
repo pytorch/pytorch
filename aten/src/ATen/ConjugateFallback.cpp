@@ -23,11 +23,6 @@ void conjugateFallback(const c10::OperatorHandle& op, DispatchKeySet dispatch_ke
   object.fallback_impl(op, dispatch_keys, stack);
 }
 
-void conjugateFallbackToHandleOnlyMutableInputs(const c10::OperatorHandle& op, DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
-  ConjFallback object;
-  object.linalg_fallback(op, dispatch_keys, stack);
-}
-
 TORCH_LIBRARY_IMPL(_, Conjugate, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&conjugateFallback>());
 }
