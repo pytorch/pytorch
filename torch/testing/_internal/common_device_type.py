@@ -1168,7 +1168,7 @@ def skipCUDAIfNotRocm(fn):
     return skipCUDAIf(not TEST_WITH_ROCM, "test doesn't currently work on the CUDA stack")(fn)
 
 # Skips a test on CUDA if ROCm is unavailable or its version is lower than requested.
-def skipCUDAIfRocmVersionLessThan(version : Tuple[int, int] = None):
+def skipCUDAIfRocmVersionLessThan(version = None):
 
     def dec_fn(fn):
         @wraps(fn)
