@@ -85,8 +85,8 @@ using caffe2::serialize::ReadAdapterInterface;
 
 OpCode parseOpCode(const char* str);
 
-IValue expect_field(
-    IValue tup,
+const IValue& expect_field(
+    const IValue& tup,
     const std::string& expected_name,
     size_t entry) {
   auto row = tup.toTuple()->elements().at(entry).toTuple();
@@ -340,12 +340,11 @@ void BytecodeDeserializer::parseMethods(
     const auto& element = vals[i];
     const auto& m_tuple = element.toTuple()->elements();
     const std::string& function_name = m_tuple[0].toStringRef();
-    IValue codeTable = m_tuple[1];
-    auto schemaTable = // older files do not store function schema
+    const IValue& codeTable = m_tuple[1];
+    const IValue* schemaTable = // older files do not store function schema
         (model_version > 0x4L || (model_version == 0x4L && m_tuple.size() >= 3))
-        ? at::optional<IValue>{m_tuple[2]}
-        : at::nullopt;
-
+        ? &m_tuple[2]
+        : nullptr;
     auto function =
         std::make_unique<mobile::Function>(c10::QualifiedName(function_name));
 
@@ -369,7 +368,7 @@ void BytecodeDeserializer::parseMethods(
         expect_field(codeTable, "register_size", BYTECODE_INDEX_REGISTER_SIZE)
             .toInt();
 
-    std::vector<IValue> debug_handles_list;
+    c10::List<int64_t> debug_handles_list;
     if (has_debug_handles) {
       const auto& debug_handles_element = (*debug_handles)[i];
       const auto& debug_handles_m_tuple =
@@ -379,22 +378,21 @@ void BytecodeDeserializer::parseMethods(
       TORCH_CHECK(
           debug_info_function_name == function_name,
           "The function names in the bytecode table and the debug info table do not match.");
-      IValue debug_handles_table = debug_handles_m_tuple[1];
+      const IValue& debug_handles_table = debug_handles_m_tuple[1];
       debug_handles_list = (expect_field(
                                 debug_handles_table,
                                 "function_debug_handles",
                                 BYTECODE_INDEX_MODULE_DEBUG_HANDLES)
                                 .toTuple()
                                 ->elements())[0]
-                               .toList()
-                               .vec();
+                               .toIntList();
       TORCH_CHECK(
           debug_handles_list.size() == ins_list.size(),
           "The numbers of instructions and debug handles strings do not match.");
     }
 
     for (const auto j : c10::irange(ins_list.size())) {
-      auto ins_item = ins_list[j].toTuple()->elements();
+      const auto& ins_item = ins_list[j].toTuple()->elements();
       TORCH_CHECK(
           ins_item.size() == 3,
           "There should be three parts in an instruction. The function name is ",
@@ -403,7 +401,7 @@ void BytecodeDeserializer::parseMethods(
       int X = ins_item[1].toInt();
       int N = ins_item[2].toInt();
       if (has_debug_handles) {
-        int64_t debug_handle = debug_handles_list[j].toInt();
+        int64_t debug_handle = debug_handles_list[j];
         function->append_instruction(op_code, X, N, debug_handle);
       } else {
         function->append_instruction(op_code, X, N);
@@ -451,14 +449,9 @@ void BytecodeDeserializer::parseMethods(
           const auto& type = resolveTypeName(
               (expect_field(argTable, "type", BYTECODE_INDEX_ARGUMENT_TYPE))
                   .toStringRef());
-          auto default_value = expect_field(
-                                   argTable,
-                                   "default_value",
-                                   BYTECODE_INDEX_ARGUMENT_DEFAULT_VALUE)
-                                   .toIValue();
-          auto arg =
-              c10::Argument(name, type, c10::nullopt /*N*/, default_value);
-          args.emplace_back(std::move(arg));
+          const IValue& default_value = expect_field(
+              argTable, "default_value", BYTECODE_INDEX_ARGUMENT_DEFAULT_VALUE);
+          args.emplace_back(name, type, c10::nullopt /*N*/, default_value);
         }
         return args;
       };
