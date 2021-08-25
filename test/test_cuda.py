@@ -2036,7 +2036,7 @@ torch.cuda.synchronize()
             else:
                 self.assertEqual(found_inf, 0.0)
                 for grad in grads:
-                    self.assertTrue(torch.allclose(grad, torch.ones_like(grad), atol=1e-7))
+                    self.assertEqual(grad, torch.ones_like(grad), rtol=1e-5, atol=1e-7)
 
         # When passing lists with mismatched dtypes to a raw
         # _amp_foreach_non_finite_check_and_unscale_ call,
@@ -2044,7 +2044,7 @@ torch.cuda.synchronize()
         grads = [g.clone(), g.to(dtype=torch.float16)]
         torch._amp_foreach_non_finite_check_and_unscale_(grads, found_inf, inv_scale)
         for grad in grads:
-            self.assertTrue(torch.allclose(grad, torch.ones_like(grad), atol=1e-7))
+            self.assertEqual(grad, torch.ones_like(grad), rtol=1e-5, atol=1e-7)
 
         # Passing lists with mismatched devices to a raw
         # _amp_foreach_non_finite_check_and_unscale_ call should raise errors.
@@ -2084,7 +2084,7 @@ torch.cuda.synchronize()
                 # No inf was injected, ensures unscaling worked normally.
                 self.assertTrue(sum(v.item() for v in found_inf_per_device.values()) == 0)
                 for grad in grads:
-                    self.assertTrue(torch.allclose(grad, torch.ones_like(grad), atol=1e-7))
+                    self.assertEqual(grad, torch.ones_like(grad), rtol=1e-5, atol=1e-7)
             else:
                 # inf was injected, ensures inf was found.
                 self.assertTrue(sum(v.item() for v in found_inf_per_device.values()) == 1)
@@ -2136,7 +2136,7 @@ torch.cuda.synchronize()
         found_inf.zero_()
         found_inf = scaler._unscale_grads_(opt, inv_scale, found_inf, False)[cur]
         self.assertEqual(found_inf, 0.0)
-        self.assertTrue(torch.allclose(p.grad.to_dense(), (s / 4).to_dense()))
+        self.assertEqual(p.grad.to_dense(), (s / 4).to_dense())
 
         v = torch.FloatTensor([16., 32., float('inf')])
         p.grad = torch.sparse_coo_tensor(i, v, torch.Size([2, 3]), device="cuda", dtype=dtype)
@@ -2158,7 +2158,7 @@ torch.cuda.synchronize()
         found_inf.zero_()
         found_inf = scaler._unscale_grads_(opt, inv_scale, found_inf, True)[cur]
         self.assertEqual(found_inf, 0.0)
-        self.assertTrue(torch.allclose(p.grad.to_dense(), (s.half() / 4).to_dense()))
+        self.assertEqual(p.grad.to_dense(), (s.half() / 4).to_dense())
 
         # Creates fp16 sparse tensor with duplicated indices (uncoalesced).  The uncoalesced representation
         # does not overflow in fp16, but the coalesced representation would, because 64000 + 64000 > fp16 max.
@@ -2465,7 +2465,7 @@ torch.cuda.synchronize()
 
             for c, s in zip(chain(mod_control0.parameters(), mod_control1.parameters()),
                             chain(mod_scaling0.parameters(), mod_scaling1.parameters())):
-                self.assertTrue(torch.allclose(c, s, atol=1e-7))
+                self.assertEqual(c, s, rtol=1e-5, atol=1e-7)
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_grad_scaling_multigpu(self):
@@ -2534,7 +2534,7 @@ torch.cuda.synchronize()
 
             for c, s in zip(chain(mod_control0.parameters(), mod_control1.parameters()),
                             chain(mod_scaling0.parameters(), mod_scaling1.parameters())):
-                self.assertTrue(torch.allclose(c, s, atol=1e-7))
+                self.assertEqual(c, s, rtol=1e-5, atol=1e-7)
 
     def test_cublas_multiple_threads_same_device(self):
         # Note, these parameters should be very carefully tuned
