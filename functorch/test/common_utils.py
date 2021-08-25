@@ -190,12 +190,15 @@ def get_exhaustive_batched_inputs(arg_values, kwarg_values, batch_size=3):
         yield batched_args, in_dims, kwarg_values
 
 
-def get_fallback_and_vmap_exhaustive(op, arg_values, kwarg_values):
+def get_fallback_and_vmap_exhaustive(op, arg_values, kwarg_values, compute_loop_out=True):
     out_dim = 0
     batch_size = 3
     generator = get_exhaustive_batched_inputs(arg_values, kwarg_values, batch_size)
     for batched_args, in_dims, kwarg_values in generator:
-        loop_out = loop(op, in_dims, out_dim, batch_size, *batched_args, **kwarg_values)
+        if compute_loop_out:
+            loop_out = loop(op, in_dims, out_dim, batch_size, *batched_args, **kwarg_values)
+        else:
+            loop_out = None
         # Used for debugging the resulting operations
         # from functorch import make_fx
         # def f(a):
@@ -218,7 +221,10 @@ def get_fallback_and_vmap_exhaustive(op, arg_values, kwarg_values):
 
         vmap1_dims = tuple([0] + [None] * len(in_dims))
         vmap2_dims = tuple([None] + list(in_dims))
-        loop_out = pytree.tree_map(lambda v: torch.ones(3, *v.shape, device=v.device) + v, loop_out)
+        if compute_loop_out:
+            loop_out = pytree.tree_map(lambda v: torch.ones(3, *v.shape, device=v.device) + v, loop_out)
+        else:
+            loop_out = None
         batched_out = vmap(vmap(f, in_dims=vmap1_dims), in_dims=vmap2_dims)(torch.ones(3), *batched_args, **kwarg_values)
         yield (loop_out, batched_out)
 
