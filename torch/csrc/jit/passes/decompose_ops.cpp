@@ -56,7 +56,6 @@ bool isDecomposableNorm(Node* normalize_op) {
   return false;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators reg_ops(
     {Operator(
          "aten::_ncf_unsqueeze(Tensor(a) self, int ndim) -> Tensor(a)",

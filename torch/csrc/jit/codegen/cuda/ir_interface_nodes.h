@@ -25,8 +25,7 @@ namespace cuda {
  */
 class TORCH_CUDA_CU_API Bool : public Val {
  public:
-  // NOLINTNEXTLINE(modernize-use-override)
-  ~Bool() = default;
+  ~Bool() override = default;
 
   Bool() : Val(ValType::Scalar, DataType::Bool), maybe_value_{c10::nullopt} {}
 
@@ -66,8 +65,7 @@ class TORCH_CUDA_CU_API Float : public Val {
  public:
   using ScalarType = double;
 
-  // NOLINTNEXTLINE(modernize-use-override)
-  ~Float() = default;
+  ~Float() override = default;
 
   Float() : Val(ValType::Scalar, DataType::Float), maybe_value_{c10::nullopt} {}
 
@@ -105,8 +103,7 @@ class TORCH_CUDA_CU_API Float : public Val {
  */
 class TORCH_CUDA_CU_API Half : public Val {
  public:
-  // NOLINTNEXTLINE(modernize-use-override)
-  ~Half() = default;
+  ~Half() override = default;
 
   Half() : Val(ValType::Scalar, DataType::Half), maybe_value_{c10::nullopt} {}
 
@@ -143,8 +140,7 @@ class TORCH_CUDA_CU_API Int : public Val {
  public:
   using ScalarType = int64_t;
 
-  // NOLINTNEXTLINE(modernize-use-override)
-  ~Int() = default;
+  ~Int() override = default;
 
   Int() : Val(ValType::Scalar, DataType::Int), maybe_value_{c10::nullopt} {}
 
@@ -206,8 +202,7 @@ class TVDomainGuard;
 // to be non-const is the biggest headache.
 class TORCH_CUDA_CU_API TensorView : public Val {
  public:
-  // NOLINTNEXTLINE(modernize-use-override)
-  ~TensorView() = default;
+  ~TensorView() override = default;
 
   TensorView(const TensorView& other) = delete;
   TensorView& operator=(const TensorView& other) = delete;

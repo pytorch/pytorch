@@ -273,43 +273,16 @@ __global__ void nll_loss_forward_reduce_cuda_kernel_2d(
 }
 
 void nll_loss_forward_out_cuda_template(
-    Tensor& output,
-    Tensor& total_weight,
+    const Tensor& output,
+    const Tensor& total_weight,
     const Tensor& input,
     const Tensor& target,
-    const c10::optional<Tensor>& weight_opt,
+    const Tensor& weight,
     int64_t reduction,
     int64_t ignore_index) {
-  // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weight_maybe_owned =
-      at::borrow_from_optional_tensor(weight_opt);
-  const Tensor& weight = *weight_maybe_owned;
-
-  TORCH_CHECK(
-      target.dim() == 1,
-      "1D target tensor expected, multi-target not supported");
-
   int64_t n_classes = input.size(-1);
   int64_t n_dims = input.dim();
-
-  TORCH_CHECK(n_dims > 0 && n_dims <= 2, "input tensor should be 1D or 2D");
   int64_t batch_size = n_dims == 1 ? 1 : input.size(0);
-  int64_t num_targets = target.size(0);
-  TORCH_CHECK(
-      batch_size == num_targets,
-      "size mismatch (got input: ",
-      input.sizes(),
-      ", target: ",
-      target.sizes(),
-      ")")
-
-  TORCH_CHECK(
-      !weight.defined() || (weight.dim() == 1 && weight.numel() == n_classes),
-      "weight tensor should be defined either for all ",
-      n_classes,
-      " classes or no classes"
-      " but got weight tensor of shape: ",
-      weight.sizes());
 
   auto weight_ = weight.defined() ? weight.contiguous() : weight;
 
@@ -484,40 +457,18 @@ __global__ void nll_loss_backward_reduce_cuda_kernel_2d(
 };
 
 void nll_loss_backward_out_cuda_template(
-    Tensor& grad_input,
+    const Tensor& grad_input,
     const Tensor& grad_output,
     const Tensor& input,
     const Tensor& target,
     const Tensor& total_weight,
-    const c10::optional<Tensor>& weight_opt,
+    const Tensor& weight,
     int64_t reduction,
     int64_t ignore_index) {
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
-  const Tensor& weight = *weight_maybe_owned;
-
-  TORCH_CHECK(
-      target.dim() == 1,
-      "1D target tensor expected, multi-target not supported");
   int64_t n_dims = input.dim();
-  TORCH_CHECK(
-      n_dims > 0 && n_dims <= 2, "input tensor should be 1D or 2D");
-
   int64_t n_classes = input.size(-1);
   int64_t batch_size = n_dims == 1 ? 1 : input.size(0);
-  int64_t num_targets = target.size(0);
 
-  TORCH_CHECK(
-      batch_size == num_targets,
-      "size mismatch (got input: ",
-      input.sizes(),
-      ", target: ",
-      target.sizes(),
-      ")")
-  TORCH_CHECK(
-      !weight.defined() || (weight.dim() == 1 && weight.numel() == n_classes),
-      "weight tensor should be defined either for all or no classes");
-
-  TORCH_CHECK(grad_input.is_contiguous(), "grad_input must be contiguous");
   auto weight_ = weight.defined() ? weight.contiguous() : weight;
 
   if (reduction == at::Reduction::None && n_dims == 2) {
@@ -616,42 +567,29 @@ void nll_loss_backward_out_cuda_template(
 
 } // namespace
 
-std::tuple<Tensor&, Tensor&> nll_loss_forward_out_cuda(
-    const Tensor& self,
-    const Tensor& target,
-    const c10::optional<Tensor>& weight_opt,
-    int64_t reduction,
-    int64_t ignore_index,
-    Tensor& output,
-    Tensor& total_weight) {
+TORCH_IMPL_FUNC(nll_loss_forward_out_cuda)
+(const Tensor& self,
+ const Tensor& target,
+ const OptionalTensorRef weight_opt,
+ int64_t reduction,
+ int64_t ignore_index,
+ const Tensor& output,
+ const Tensor& total_weight) {
+  const Tensor& weight = weight_opt.getTensorRef();
   nll_loss_forward_out_cuda_template(
-      output, total_weight, self, target, weight_opt, reduction, ignore_index);
-  return std::tuple<Tensor&, Tensor&>(output, total_weight);
+      output, total_weight, self, target, weight, reduction, ignore_index);
 }
 
-std::tuple<Tensor, Tensor> nll_loss_forward_cuda(
-    const Tensor& self,
-    const Tensor& target,
-    const c10::optional<Tensor>& weight_opt,
-    int64_t reduction,
-    int64_t ignore_index) {
-  auto output = at::empty({0}, self.options());
-  auto total_weight = at::empty({0}, self.options());
-  nll_loss_forward_out_cuda_template(
-      output, total_weight, self, target, weight_opt, reduction, ignore_index);
-  return std::make_tuple(output, total_weight);
-}
-
-Tensor& nll_loss_backward_out_cuda(const Tensor& grad_output,
-    const Tensor& self,
-    const Tensor& target,
-    const c10::optional<Tensor>& weight_opt,
-    int64_t reduction,
-    int64_t ignore_index,
-    const Tensor& total_weight,
-    Tensor& grad_input) {
-
-  grad_input.resize_as_(self);
+TORCH_IMPL_FUNC(nll_loss_backward_out_cuda)
+(const Tensor& grad_output,
+ const Tensor& self,
+ const Tensor& target,
+ OptionalTensorRef weight_opt,
+ int64_t reduction,
+ int64_t ignore_index,
+ const Tensor& total_weight,
+ const Tensor& grad_input) {
+  const Tensor& weight = weight_opt.getTensorRef();
   grad_input.zero_();
   nll_loss_backward_out_cuda_template(
       grad_input,
@@ -659,31 +597,8 @@ Tensor& nll_loss_backward_out_cuda(const Tensor& grad_output,
       self,
       target,
       total_weight,
-      weight_opt,
+      weight,
       reduction,
       ignore_index);
-  return grad_input;
 }
-
-Tensor nll_loss_backward_cuda(
-    const Tensor& grad_output,
-    const Tensor& self,
-    const Tensor& target, const c10::optional<Tensor>& weight_opt,
-    int64_t reduction,
-    int64_t ignore_index,
-    const Tensor& total_weight) {
-
-  auto grad_input = at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  nll_loss_backward_out_cuda_template(
-      grad_input,
-      grad_output,
-      self,
-      target,
-      total_weight,
-      weight_opt,
-      reduction,
-      ignore_index);
-  return grad_input;
-}
-
 }}  // namespace at::native

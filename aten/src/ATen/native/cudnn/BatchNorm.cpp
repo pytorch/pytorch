@@ -279,6 +279,11 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
         handle, mode, op, nullptr, idesc.desc(), &reserve_size));
     reserve = at::empty(reserve_size, input->options().dtype(kByte));
 #endif // CUDNN_VERSION >= 7400
+  } else {
+    reserve = at::empty({0}, input->options().dtype(kByte));
+    // This keeps a consistent output with native_batch_norm
+    save_mean = at::empty({0}, weight_t.options());
+    save_var = at::empty({0}, weight_t.options());
   }
 
   return cudnn_batch_norm_out(

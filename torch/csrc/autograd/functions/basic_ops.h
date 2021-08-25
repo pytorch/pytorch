@@ -41,10 +41,11 @@ struct TORCH_API NotImplemented : public Error {
 struct TORCH_API DelayedError : public Node {
   DelayedError(std::string msg, int num_inputs)
     : msg(std::move(msg)) {
-    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
-    for (const auto i : c10::irange(num_inputs))
+    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
+    for(int i = 0; i < num_inputs; i++) {
       add_input_metadata(Node::undefined_input());
     }
+  }
 
   variable_list apply(variable_list&& inputs) override;
 
