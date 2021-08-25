@@ -415,8 +415,6 @@ class TRTInterpreter(torch.fx.Interpreter):
             name = f"output{i}"
             output.name = name
             self.network.mark_output(output)
-            if self.fp16_mode:
+            if self.fp16_mode and output.dtype == trt.float32:
                 output.dtype = trt.float16
-            else:
-                output.dtype = trt.float32
             self._output_names.append(name)
