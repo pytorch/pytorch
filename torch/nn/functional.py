@@ -2953,7 +2953,7 @@ def binary_cross_entropy_with_logits(
          >>> loss = F.binary_cross_entropy_with_logits(input, target)
          >>> loss.backward()
     """
-    if has_torch_function_variadic(input, target, weight, pos_wight):
+    if has_torch_function_variadic(input, target, weight, pos_weight):
         return handle_torch_function(
             binary_cross_entropy_with_logits,
             (input, target, weight, pos_weight),
