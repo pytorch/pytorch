@@ -888,6 +888,19 @@ torch::Tensor inplace_op(const torch::Tensor& self, const torch::Tensor& other) 
   return self.add_(other);
 }
 
+std::tuple<torch::Tensor, torch::Tensor> two_arg_inplace_op(const torch::Tensor& self, const torch::Tensor& other) {
+  other.add_(self);
+  self.add_(other);
+  return std::tuple<torch::Tensor, torch::Tensor>(self, other);
+}
+
+std::tuple<torch::Tensor, torch::Tensor> two_pairs_of_view_op(const torch::Tensor& self, const torch::Tensor& other) {
+  // This is not allowed. We test below that this calling into the boxed kernel will raise an error
+  auto self_view = self.view(-1);
+  auto other_view = other.view(-1);
+  return std::tuple<torch::Tensor, torch::Tensor>(self_view, other_view);
+}
+
 int64_t ret_single_non_tensor(const torch::Tensor& self, const torch::Tensor& other) {
   return 12;
 }
@@ -929,12 +942,12 @@ torch::Tensor tensorlist_op(const torch::Tensor& self, at::TensorList other) {
   return res;
 }
 
-#define REGISTER_TEST_OP(name, schema, fn) \
-  auto m = MAKE_TORCH_LIBRARY(_test); \
-  m.def(schema); \
-  auto m_autograd = MAKE_TORCH_LIBRARY_IMPL(_test, Autograd); \
-  auto m_cpu = MAKE_TORCH_LIBRARY_IMPL(_test, CPU); \
-  m_cpu.impl(name, c10::DispatchKey::CPU, TORCH_FN(fn)); \
+#define REGISTER_TEST_OP(name, schema, fn)                                               \
+  auto m = MAKE_TORCH_LIBRARY(_test);                                                    \
+  m.def(schema);                                                                         \
+  auto m_autograd = MAKE_TORCH_LIBRARY_IMPL(_test, Autograd);                            \
+  auto m_cpu = MAKE_TORCH_LIBRARY_IMPL(_test, CPU);                                      \
+  m_cpu.impl(name, c10::DispatchKey::CPU, TORCH_FN(fn));                                 \
   m_autograd.impl(name, c10::DispatchKey::Autograd, autogradNotImplementedFallback());
 
 template <typename F>
@@ -967,6 +980,18 @@ TEST(TestAutogradNotImplementedFallback, RetSingleNonTensor) {
   auto b = torch::tensor({1.}, {torch::kFloat32});
 
   ASSERT_EQ(op(a, b), ret_single_non_tensor(a, b));
+}
+
+TEST(TestAutogradNotImplementedFallback, DoubleViewOP) {
+  REGISTER_TEST_OP("two_pairs_of_view_op", "_test::two_pairs_of_view_op(Tensor(a) self, Tensor(b) other) -> (Tensor(a), Tensor(b))", two_pairs_of_view_op);
+  auto opHandle = c10::Dispatcher::singleton().findSchemaOrThrow("_test::two_pairs_of_view_op", "");
+  auto op = [&](const torch::Tensor& _1, const torch::Tensor& _2) {
+    return callOpUnboxed<std::tuple<torch::Tensor, torch::Tensor>, const torch::Tensor&, const torch::Tensor&>(opHandle, _1, _2);
+  };
+  auto a = torch::tensor({1.}, {torch::kFloat32}).set_requires_grad(true);
+  auto b = torch::tensor({1.}, {torch::kFloat32});
+  ASSERT_THROWS_WITH(op(a, b),
+    "Expected only a single output in the operator schema to have a non-write alias annotation");
 }
 
 TEST(TestAutogradNotImplementedFallback, InplaceOp) {
@@ -1006,6 +1031,22 @@ TEST(TestAutogradNotImplementedFallback, InplaceOp) {
   // TODO: once we have InplaceOrView kernel, renable this since version counter would actually
   // be incremented
   // ASSERT_THAT(op(view, t).grad_fn()->name(), ::testing::HasSubstr("AsStridedBackward"));
+}
+
+TEST(TestAutogradNotImplementedFallback, DoubleInplaceOp) {
+  REGISTER_TEST_OP("two_arg_inplace_op", "_test::two_arg_inplace_op(Tensor(a!) self, Tensor(b!) other) -> (Tensor(a!), Tensor(b!))", two_arg_inplace_op);
+  auto opHandle = c10::Dispatcher::singleton().findSchemaOrThrow("_test::two_arg_inplace_op", "");
+  auto op = [&](const torch::Tensor& _1, const torch::Tensor& _2) {
+    return callOpUnboxed<std::tuple<torch::Tensor, torch::Tensor>, const torch::Tensor&, const torch::Tensor&>(opHandle, _1, _2);
+  };
+  auto a = torch::tensor({1.}, {torch::kFloat32}).set_requires_grad(true);
+  auto b = torch::tensor({1.}, {torch::kFloat32});
+
+  // Both are modified in-place!
+  ASSERT_THROWS_WITH(op(a, b),
+    "a leaf Variable that requires grad is being used in an in-place operation");
+  ASSERT_THROWS_WITH(op(b, a),
+    "a leaf Variable that requires grad is being used in an in-place operation");
 }
 
 TEST(TestAutogradNotImplementedFallback, OptOp) {
