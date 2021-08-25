@@ -27,13 +27,14 @@ using namespace torch::jit::tensorexpr;
 
 template <typename ctype>
 static void testCudaTestVectorAdd01_impl() {
+  KernelScope kernel_scope;
   const int num_iter = 3;
   const int block_count = 16;
   const int block_size = 128;
   Dtype dtype = ToDtype<ctype>();
   Placeholder a_buf("a", dtype, {num_iter, block_count, block_size});
   Placeholder b_buf("b", dtype, {num_iter, block_count, block_size});
-  Tensor c = Compute(
+  Tensor* c = Compute(
       "c",
       {
           {num_iter, "n"},
@@ -92,12 +93,13 @@ float sigmoid(float x) {
 }
 
 TEST(Cuda, Sigmoid_CUDA) {
+  KernelScope kernel_scope;
   const int num_iter = 3;
   const int block_count = 16;
   const int block_size = 128;
   Dtype dtype = ToDtype<float>();
   Placeholder a_buf("a", dtype, {num_iter, block_count, block_size});
-  Tensor c = Compute(
+  Tensor* c = Compute(
       "c",
       {
           {num_iter, "n"},
@@ -160,9 +162,10 @@ TEST(Cuda, TestVectorAdd01_CUDA) {
 }
 
 static void testCudaTestVectorAdd02_impl(int N, int block_size) {
+  KernelScope kernel_scope;
   Placeholder a_buf("a", kFloat, {N});
   Placeholder b_buf("b", kFloat, {N});
-  Tensor c = Compute(
+  Tensor* c = Compute(
       "c",
       {
           {N, "N"},
@@ -219,9 +222,10 @@ TEST(Cuda, TestVectorAdd02_CUDA) {
 }
 
 TEST(Cuda, HalfCast_CUDA) {
+  KernelScope ks;
   auto half = ToDtype<at::Half>();
   Placeholder a("a", half, {4});
-  Tensor b = Compute("b", {{4, "n"}}, [&](const VarHandle& i) {
+  Tensor* b = Compute("b", {{4, "n"}}, [&](const VarHandle& i) {
     return Cast::make(kFloat, a.load(i));
   });
 
@@ -257,12 +261,13 @@ TEST(Cuda, HalfCast_CUDA) {
 }
 
 TEST(Cuda, DynamicShape2D_CUDA) {
+  KernelScope kernel_scope;
   auto testWithSize = [](int32_t M, int32_t N) {
     VarHandle m("m", kInt);
     VarHandle n("n", kInt);
     Placeholder a(BufHandle("a", {m, n}, kFloat));
     Placeholder b(BufHandle("b", {m, n}, kFloat));
-    Tensor c = Compute(
+    Tensor* c = Compute(
         "c", {{m, "m"}, {n, "n"}}, [&](const VarHandle& i, const VarHandle& j) {
           return a.load(i, j) + b.load(i, j);
         });
@@ -319,10 +324,11 @@ TEST(Cuda, DynamicShape2D_CUDA) {
 }
 
 TEST(Cuda, TestRand01_CUDA) {
+  KernelScope kernel_scope;
   const int num_iter = 3;
   const int block_count = 16;
   const int block_size = 128;
-  Tensor c = Compute(
+  Tensor* c = Compute(
       "c",
       {
           {num_iter, "n"},
@@ -377,10 +383,11 @@ TEST(Cuda, TestRand01_CUDA) {
 }
 
 TEST(Cuda, DynamicShapeSplit_CUDA) {
+  KernelScope ks;
   constexpr int N = 4096;
   VarHandle n("n", kInt);
   Placeholder a(BufHandle("a", {n}, kFloat));
-  Tensor b = Compute(
+  Tensor* b = Compute(
       "b", {{n, "n"}}, [&](const VarHandle& i) { return a.load(i) * 2.0f; });
   LoopNest l({b});
   ForPtr inner;
@@ -427,6 +434,7 @@ TEST(Cuda, DynamicShapeSplit_CUDA) {
 
 TEST(Cuda, OneBlockOneThreadGlobalReduce1_CUDA) {
   const static int N = 1024;
+  KernelScope kernel_scope;
   Placeholder data_buf("data", kFloat, {N});
   Placeholder output_buf("output", kFloat, {1});
 
@@ -493,6 +501,7 @@ TEST(Cuda, OneBlockOneThreadGlobalReduce1_CUDA) {
 
 TEST(Cuda, OneBlockMultiThreadGlobalReduce1_CUDA) {
   const static int N = 1024;
+  KernelScope kernel_scope;
 
   // This test does the following reduction:
   // clang-format off
@@ -569,6 +578,8 @@ TEST(Cuda, OneBlockMultiThreadGlobalReduce1_CUDA) {
 }
 
 TEST(Cuda, NoThreadIdxWrite_1_CUDA) {
+  KernelScope kernel_scope;
+
   // This test does the following reduction:
   //
   // for k in 0..1: // block-idx
@@ -665,6 +676,7 @@ TEST(Cuda, NoThreadIdxWrite_1_CUDA) {
 
 TEST(Cuda, SharedMemReduce_1_CUDA) {
   // FIXME: this test is flaky in CI.
+  KernelScope kernel_scope;
   // This test does the following:
   //  for k in 0..1:  // block-idx
   //    alloc(c, 64)
@@ -802,6 +814,7 @@ TEST(Cuda, SharedMemReduce_1_CUDA) {
 }
 
 TEST(Cuda, LocalMemReduce_1_CUDA) {
+  KernelScope kernel_scope;
   // This test does the following:
   //  for k in 0..1:  // block-idx
   //    b(k) = 0
@@ -912,18 +925,19 @@ TEST(Cuda, LocalMemReduce_1_CUDA) {
 }
 
 TEST(Cuda, HalfSupport_CUDA) {
+  KernelScope ks;
   auto half = ToDtype<at::Half>();
   Placeholder a("a", half, {4});
-  Tensor b = Compute("b", {{4, "n"}}, [&](const VarHandle& i) {
+  Tensor* b = Compute("b", {{4, "n"}}, [&](const VarHandle& i) {
     return Cast::make(half, ExprHandle(2.0f) * a.load(i));
   });
 
-  Tensor c = Compute("c", {{4, "n"}}, [&](const VarHandle& i) {
-    return Cast::make(kFloat, Cast::make(half, ExprHandle(42)) + b.load(i));
+  Tensor* c = Compute("c", {{4, "n"}}, [&](const VarHandle& i) {
+    return Cast::make(kFloat, Cast::make(half, ExprHandle(42)) + b->load(i));
   });
 
-  Tensor d = Compute("d", {{4, "n"}}, [&](const VarHandle& i) {
-    return Cast::make(half, c.load(i));
+  Tensor* d = Compute("d", {{4, "n"}}, [&](const VarHandle& i) {
+    return Cast::make(half, c->load(i));
   });
 
   LoopNest l({b, c, d});
@@ -969,9 +983,10 @@ TEST(Cuda, HalfSupport_CUDA) {
 }
 
 TEST(Cuda, HalfPropagation_CUDA) {
+  KernelScope kernel_scope;
   auto half = ToDtype<at::Half>();
   Placeholder a("a", half, {4});
-  Tensor relu = Compute("relu", {{4, "n"}}, [&](const VarHandle& i) {
+  Tensor* relu = Compute("relu", {{4, "n"}}, [&](const VarHandle& i) {
     return Max::make(a.load(i), ExprHandle(alloc<HalfImm>(0)), true);
   });
 
@@ -1017,10 +1032,11 @@ TEST(Cuda, HalfPropagation_CUDA) {
 }
 
 TEST(Cuda, UnusedHalfArgument_CUDA) {
+  KernelScope kernel_scope;
   Placeholder a("a", kFloat, {4});
   auto half = ToDtype<at::Half>();
   Placeholder b("b", half, {4});
-  Tensor relu = Compute("relu", {{4, "n"}}, [&](const VarHandle& i) {
+  Tensor* relu = Compute("relu", {{4, "n"}}, [&](const VarHandle& i) {
     return Max::make(a.load(i), ExprHandle(alloc<FloatImm>(0)), true);
   });
 
@@ -1073,6 +1089,7 @@ TEST(Cuda, UnusedHalfArgument_CUDA) {
 }
 
 TEST(Cuda, PrioritizeDependents_CUDA) {
+  KernelScope kernel_scope;
   Placeholder a("a", kFloat, {10});
   Placeholder b("b", kFloat, {12});
   Placeholder c("c", kFloat, {12});
@@ -1146,14 +1163,15 @@ TEST(Cuda, PrioritizeDependents_CUDA) {
 /// Tests the case where there are two loops which have different extents bound
 /// to the same block dimension. We must mask the smaller extent loop body.
 TEST(Cuda, MaskBlockDim_CUDA) {
+  KernelScope kernel_scope;
   int A_SIZE = 100;
   int B_SIZE = 50;
   Placeholder a_buf("a", kFloat, {A_SIZE});
   Placeholder b_buf("b", kFloat, {B_SIZE});
-  Tensor c = Compute("c", {{A_SIZE, "i"}}, [&](const VarHandle& i) {
+  Tensor* c = Compute("c", {{A_SIZE, "i"}}, [&](const VarHandle& i) {
     return a_buf.load(i) + 10;
   });
-  Tensor d = Compute("d", {{B_SIZE, "i"}}, [&](const VarHandle& i) {
+  Tensor* d = Compute("d", {{B_SIZE, "i"}}, [&](const VarHandle& i) {
     return a_buf.load(i) + b_buf.load(i);
   });
 
@@ -1238,14 +1256,15 @@ TEST(Cuda, MaskBlockDim_CUDA) {
 /// to the same thread dimension. This is the same as the above - the smaller
 /// rank write should be masked. But this time we also need to syncthreads.
 TEST(Cuda, MaskThreadDim_CUDA) {
+  KernelScope kernel_scope;
   int A_SIZE = 50;
   int B_SIZE = 100;
   Placeholder a_buf("a", kFloat, {A_SIZE});
   Placeholder b_buf("b", kFloat, {B_SIZE});
-  Tensor c = Compute("c", {{A_SIZE, "i"}}, [&](const VarHandle& i) {
+  Tensor* c = Compute("c", {{A_SIZE, "i"}}, [&](const VarHandle& i) {
     return a_buf.load(i) + 10;
   });
-  Tensor d = Compute("d", {{B_SIZE, "i"}}, [&](const VarHandle& i) {
+  Tensor* d = Compute("d", {{B_SIZE, "i"}}, [&](const VarHandle& i) {
     return a_buf.load(i / 2) + b_buf.load(i);
   });
 
@@ -1332,14 +1351,15 @@ TEST(Cuda, MaskThreadDim_CUDA) {
 // Note: this is an extremely dumb pattern which we should never see, but is a
 // useful edge case to make sure we've got things covered.
 TEST(Cuda, MaskMultiBlockDim_CUDA) {
+  KernelScope kernel_scope;
   int A_SIZE = 100;
   int B_SIZE = 50;
   Placeholder a_buf("a", kFloat, {A_SIZE});
   Placeholder b_buf("b", kFloat, {B_SIZE});
-  Tensor c = Compute("c", {{A_SIZE, "i"}}, [&](const VarHandle& i) {
+  Tensor* c = Compute("c", {{A_SIZE, "i"}}, [&](const VarHandle& i) {
     return a_buf.load(i) + 10;
   });
-  Tensor d = Compute("d", {{B_SIZE, "i"}}, [&](const VarHandle& i) {
+  Tensor* d = Compute("d", {{B_SIZE, "i"}}, [&](const VarHandle& i) {
     return a_buf.load(i) + b_buf.load(i);
   });
 
@@ -1425,14 +1445,15 @@ TEST(Cuda, MaskMultiBlockDim_CUDA) {
 // Note: this is an extremely dumb pattern which we should never see, but is a
 // useful edge case to make sure we've got things covered.
 TEST(Cuda, MaskBlockAndThreadDim_CUDA) {
+  KernelScope kernel_scope;
   int A_SIZE = 100;
   int B_SIZE = 50;
   Placeholder a_buf("a", kFloat, {A_SIZE});
   Placeholder b_buf("b", kFloat, {B_SIZE});
-  Tensor c = Compute("c", {{A_SIZE, "i"}}, [&](const VarHandle& i) {
+  Tensor* c = Compute("c", {{A_SIZE, "i"}}, [&](const VarHandle& i) {
     return a_buf.load(i) + 10;
   });
-  Tensor d = Compute("d", {{B_SIZE, "i"}}, [&](const VarHandle& i) {
+  Tensor* d = Compute("d", {{B_SIZE, "i"}}, [&](const VarHandle& i) {
     return a_buf.load(i) + b_buf.load(i);
   });
 
@@ -1516,22 +1537,23 @@ TEST(Cuda, MaskBlockAndThreadDim_CUDA) {
 /// outer loop bound to blockDim.x and the inner loop bound to threadDim.x. In
 /// this case all writes with a rank smaller than the max should be masked.
 TEST(Cuda, MaskMultiDim_CUDA) {
+  KernelScope kernel_scope;
   int OUTER_SIZE = 10;
   int A_SIZE = 100;
   int B_SIZE = 50;
   Placeholder a_buf("a", kFloat, {OUTER_SIZE, A_SIZE});
   Placeholder b_buf("b", kFloat, {OUTER_SIZE, B_SIZE});
-  Tensor c = Compute(
+  Tensor* c = Compute(
       "C",
       {{OUTER_SIZE, "i"}, {A_SIZE, "j"}},
       [&](const VarHandle& i, const VarHandle& j) {
         return ExprHandle(2) * a_buf.load(i, j);
       });
-  Tensor d = Compute(
+  Tensor* d = Compute(
       "D",
       {{OUTER_SIZE, "i"}, {B_SIZE, "j"}},
       [&](const VarHandle& i, const VarHandle& j) {
-        return c.load(i, j * 2) + b_buf.load(i, j);
+        return c->load(i, j * 2) + b_buf.load(i, j);
       });
 
   LoopNest l({c, d});
@@ -1645,22 +1667,23 @@ TEST(Cuda, MaskMultiDim_CUDA) {
 // In this case both stores must be masked against the extent of the other loop,
 // incase it is larger.
 TEST(Cuda, MaskMultiDimSymbolic_CUDA) {
+  KernelScope kernel_scope;
   VarHandle OUTER_SIZE("OUTER_SIZE", kInt);
   VarHandle A_SIZE("A_SIZE", kInt);
   VarHandle B_SIZE("B_SIZE", kInt);
   Placeholder a_buf("a", kFloat, {OUTER_SIZE, A_SIZE});
   Placeholder b_buf("b", kFloat, {OUTER_SIZE, B_SIZE});
-  Tensor c = Compute(
+  Tensor* c = Compute(
       "C",
       {{OUTER_SIZE, "i"}, {A_SIZE, "j"}},
       [&](const VarHandle& i, const VarHandle& j) {
         return ExprHandle(2) * a_buf.load(i, j);
       });
-  Tensor d = Compute(
+  Tensor* d = Compute(
       "D",
       {{OUTER_SIZE, "i"}, {B_SIZE, "j"}},
       [&](const VarHandle& i, const VarHandle& j) {
-        return c.load(i, j * 2) + b_buf.load(i, j);
+        return c->load(i, j * 2) + b_buf.load(i, j);
       });
 
   LoopNest l({c, d});
@@ -1780,6 +1803,7 @@ TEST(Cuda, MaskMultiDimSymbolic_CUDA) {
 // extents but are bound to the same thread dimension. The smaller loop should
 // be masked.
 TEST(Cuda, MaskCompoundInnerLoop_CUDA) {
+  KernelScope kernel_scope;
   int OUTER_SIZE = 10;
   int A_SIZE = 100;
   int B_SIZE = 50;
@@ -1918,6 +1942,7 @@ TEST(Cuda, MaskCompoundInnerLoop_CUDA) {
 // the first thread dimensions. This should work just like the MaskThreadDim
 // test where the bigger loop is unmasked but the smaller is masked.
 TEST(Cuda, MaskInnerLoopOneBlock_CUDA) {
+  KernelScope kernel_scope;
   int OUTER_SIZE = 10;
   int A_SIZE = 100;
   int B_SIZE = 50;
@@ -2056,22 +2081,23 @@ TEST(Cuda, MaskInnerLoopOneBlock_CUDA) {
 // this case both bodies must be masked against the other dimension being > 0.
 // Note: this is a bit degenerate no one would actually write this for perf.
 TEST(Cuda, MaskMultiDimMultiAxis_CUDA) {
+  KernelScope kernel_scope;
   int OUTER_SIZE = 10;
   int A_SIZE = 30;
   int B_SIZE = 15;
   Placeholder a_buf("a", kFloat, {OUTER_SIZE, A_SIZE});
   Placeholder b_buf("b", kFloat, {OUTER_SIZE, B_SIZE});
-  Tensor c = Compute(
+  Tensor* c = Compute(
       "C",
       {{OUTER_SIZE, "i"}, {A_SIZE, "j"}},
       [&](const VarHandle& i, const VarHandle& j) {
         return ExprHandle(2) * a_buf.load(i, j);
       });
-  Tensor d = Compute(
+  Tensor* d = Compute(
       "D",
       {{OUTER_SIZE, "i"}, {B_SIZE, "j"}},
       [&](const VarHandle& i, const VarHandle& j) {
-        return c.load(i, j * 2) + b_buf.load(i, j);
+        return c->load(i, j * 2) + b_buf.load(i, j);
       });
 
   LoopNest l({c, d});
@@ -2185,23 +2211,24 @@ TEST(Cuda, MaskMultiDimMultiAxis_CUDA) {
 // the second loop is smaller in both cases - the second store must be masked
 // for both the block and thread dimension.
 TEST(Cuda, MaskMultiDimMultiLevel_CUDA) {
+  KernelScope kernel_scope;
   int OUTER_A_SIZE = 10;
   int OUTER_B_SIZE = 5;
   int A_SIZE = 30;
   int B_SIZE = 15;
   Placeholder a_buf("a", kFloat, {OUTER_A_SIZE, A_SIZE});
   Placeholder b_buf("b", kFloat, {OUTER_B_SIZE, B_SIZE});
-  Tensor c = Compute(
+  Tensor* c = Compute(
       "C",
       {{OUTER_A_SIZE, "i"}, {A_SIZE, "j"}},
       [&](const VarHandle& i, const VarHandle& j) {
         return ExprHandle(2) * a_buf.load(i, j);
       });
-  Tensor d = Compute(
+  Tensor* d = Compute(
       "D",
       {{OUTER_B_SIZE, "i"}, {B_SIZE, "j"}},
       [&](const VarHandle& i, const VarHandle& j) {
-        return c.load(i, j * 2) + b_buf.load(i, j);
+        return c->load(i, j * 2) + b_buf.load(i, j);
       });
 
   LoopNest l({c, d});

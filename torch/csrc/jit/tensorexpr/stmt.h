@@ -14,15 +14,14 @@ namespace tensorexpr {
 class Placeholder;
 
 // The common base between all statement node.
-class TORCH_API Stmt : public std::enable_shared_from_this<Stmt> {
+class TORCH_API Stmt : public KernelScopedObject {
  public:
   Stmt() = default;
-  virtual ~Stmt() = default;
   virtual void accept(IRVisitor* visitor) = 0;
   virtual StmtPtr accept_mutator(IRMutator* mutator) = 0;
 
   StmtPtr get_parent() const {
-    return parent_ ? parent_->getptr() : nullptr;
+    return parent_;
   }
 
   /*
@@ -35,15 +34,12 @@ class TORCH_API Stmt : public std::enable_shared_from_this<Stmt> {
   static StmtPtr clone(StmtPtr s);
 
  protected:
-  static void set_parent(StmtPtr s, Stmt* new_parent) {
+  static void set_parent(StmtPtr s, StmtPtr new_parent) {
     s->parent_ = new_parent;
-  }
-  std::shared_ptr<Stmt> getptr() {
-    return shared_from_this();
   }
 
  private:
-  Stmt* parent_ = nullptr;
+  StmtPtr parent_ = nullptr;
 };
 
 template <class Op>
@@ -51,7 +47,7 @@ class StmtNode : public Stmt {
  public:
   using StmtNodeBase = StmtNode<Op>;
   void accept(IRVisitor* visitor) override {
-    visitor->visit(static_to<Op>(getptr()));
+    visitor->visit(static_to<Op>(this));
   }
   StmtPtr accept_mutator(IRMutator* mutator) override;
   StmtNode() = default;
@@ -59,7 +55,7 @@ class StmtNode : public Stmt {
 
 template <class Op>
 StmtPtr StmtNode<Op>::accept_mutator(IRMutator* mutator) {
-  return mutator->mutate(static_to<Op>(getptr()));
+  return mutator->mutate(static_to<Op>(this));
 }
 
 // Concrete Stmt classes
@@ -197,7 +193,7 @@ class TORCH_API Block : public StmtNode<Block> {
   }
 
   void clear() {
-    for (auto s : stmts_) {
+    for (auto* s : stmts_) {
       set_parent(s, nullptr);
     }
     stmts_.clear();
@@ -285,7 +281,7 @@ class TORCH_API Block : public StmtNode<Block> {
 
   // returns the immediate child containing statement s.
   StmtPtr getEnclosedRoot(StmtPtr s) const {
-    while (s && s->get_parent().get() != this) {
+    while (s && s->get_parent() != this) {
       s = s->get_parent();
     }
     return s;

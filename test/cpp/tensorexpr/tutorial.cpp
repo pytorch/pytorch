@@ -49,6 +49,19 @@
 using namespace torch::jit::tensorexpr;
 
 int main(int argc, char* argv[]) {
+  // Memory management for tensor expressions is currently done with memory
+  // arenas. That is, whenever an object is created it registers itself in an
+  // arena and the object is kept alive as long as the arena is alive. When the
+  // arena gets destructed, it deletes all objects registered in it.
+  //
+  // The easiest way to set up a memory arena is to use `KernelScope` class - it
+  // is a resource guard that creates a new arena on construction and restores
+  // the previously set arena on destruction.
+  //
+  // We will create a kernel scope here, and thus we'll set up a mem arena for
+  // the entire tutorial.
+  KernelScope kernel_scope;
+
   std::cout << "*** Structure of tensor expressions ***" << std::endl;
   {
     // A tensor expression is a tree of expressions. Each expression has a type,
@@ -142,8 +155,8 @@ int main(int argc, char* argv[]) {
     ExprPtr body = alloc<Mul>(i, j);
 
     // Finally, we pass all these pieces together to Tensor constructor:
-    Tensor X = Tensor(buf, args, body);
-    std::cout << "Tensor computation: " << X << std::endl;
+    Tensor* X = new Tensor(buf, args, body);
+    std::cout << "Tensor computation: " << *X << std::endl;
     // Prints:
     // Tensor computation: Tensor X[64, 32]:
     // for (int i = 0; i < 64; i++) {
@@ -158,11 +171,11 @@ int main(int argc, char* argv[]) {
     // constructing Exprs, Tensors also have a more convenient API for
     // construction. It is based on Compute API, which takes a name,
     // dimensions, and a lambda specifying the computation body:
-    Tensor Z = Compute(
+    Tensor* Z = Compute(
         "Z",
         {{64, "i"}, {32, "j"}},
         [](const VarHandle& i, const VarHandle& j) { return i / j; });
-    std::cout << "Tensor computation: " << Z << std::endl;
+    std::cout << "Tensor computation: " << *Z << std::endl;
     // Prints:
     // Tensor computation: Tensor Z[64, 32]:
     // for (int i = 0; i < 64; i++) {
@@ -174,13 +187,13 @@ int main(int argc, char* argv[]) {
     // Tensors might access other tensors and external placeholders in their
     // expressions. It can be done like so:
     Placeholder P("P", kInt, {64, 32});
-    Tensor R = Compute(
+    Tensor* R = Compute(
         "R",
         {{64, "i"}, {32, "j"}},
         [&](const VarHandle& i, const VarHandle& j) {
-          return Z.load(i, j) * P.load(i, j);
+          return Z->load(i, j) * P.load(i, j);
         });
-    std::cout << "Tensor computation: " << R << std::endl;
+    std::cout << "Tensor computation: " << *R << std::endl;
     // Prints:
     // Tensor computation: Tensor R[64, 32]:
     // for (int i = 0; i < 64; i++) {
@@ -211,20 +224,20 @@ int main(int argc, char* argv[]) {
     // Let's create a simple tensor expression and construct a loop nest for it.
     Placeholder A("A", kFloat, {64, 32});
     Placeholder B("B", kFloat, {64, 32});
-    Tensor X = Compute(
+    Tensor* X = Compute(
         "X",
         {{64, "i"}, {32, "j"}},
         [&](const VarHandle& i, const VarHandle& j) {
           return A.load(i, j) + B.load(i, j);
         });
-    Tensor Y = Compute(
+    Tensor* Y = Compute(
         "Y",
         {{64, "i"}, {32, "j"}},
         [&](const VarHandle& i, const VarHandle& j) {
-          return sigmoid(X.load(i, j));
+          return sigmoid(X->load(i, j));
         });
-    std::cout << "Tensor computation X: " << X << "Tensor computation Y: " << Y
-              << std::endl;
+    std::cout << "Tensor computation X: " << *X
+              << "Tensor computation Y: " << *Y << std::endl;
     // Prints:
     // Tensor computation X: Tensor X[64, 32]:
     // for (int i = 0; i < 64; i++) {
@@ -342,7 +355,7 @@ int main(int argc, char* argv[]) {
     // Let's start by constructing a simple computation for us to work with:
     Placeholder A("A", kInt, {64, 32});
     Placeholder B("B", kInt, {64, 32});
-    Tensor X = Compute(
+    Tensor* X = Compute(
         "X",
         {{64, "i"}, {32, "j"}},
         [&](const VarHandle& i, const VarHandle& j) {

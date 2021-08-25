@@ -12,15 +12,13 @@ from .scheduler.lambda_scheduler import LambdaSL
 
 # Parametrizations
 from .sparsifier.utils import FakeSparsity
-from .sparsifier.utils import module_to_fqn
-from .sparsifier.utils import fqn_to_module
 
 # === Experimental ===
 
 # Parametrizations
 from .experimental.pruner.parametrization import PruningParametrization
-from .experimental.pruner.parametrization import ActivationReconstruction
-from .experimental.pruner.parametrization import BiasHook
+from .experimental.pruner.parametrization import LinearActivationReconstruction
+from .experimental.pruner.parametrization import Conv2dActivationReconstruction
 
 # Pruner
 from .experimental.pruner.base_pruner import BasePruner
