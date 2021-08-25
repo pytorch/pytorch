@@ -7,10 +7,7 @@ class UCPContext {
   ucp_context_h context;
 public:
   UCPContext();
-#if false
-  // Intentionally leak the context
   ~UCPContext()  { ucp_cleanup(context); }
-#endif
   ucp_context_h get() const { return context; }
 };
 
