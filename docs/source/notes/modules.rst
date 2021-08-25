@@ -464,6 +464,7 @@ Buffers of a module can be iterated over using :func:`~torch.nn.Module.buffers` 
 :func:`~torch.nn.Module.named_buffers`.
 
 .. code-block:: python
+
    for buffer in m.named_buffers():
      print(buffer)
 
