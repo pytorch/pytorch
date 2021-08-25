@@ -24,10 +24,10 @@ namespace c10d {
 
 namespace {
 
-const NCCLProcessGroupProvider stubProvider;
-constexpr const NCCLProcessGroupProvider* defaultStubProviderAddr = &stubProvider;
 // Constant initialization, so it is guaranteed to be initialized before
 // static initialization calls which may invoke registerNCCLProcessGroupProvider
+const NCCLProcessGroupProvider stubProvider;
+constexpr const NCCLProcessGroupProvider* defaultStubProviderAddr = &stubProvider;
 inline const NCCLProcessGroupProvider*& getNCCLProcessGroupProviderAddress() {
   static const NCCLProcessGroupProvider* stubs_ = defaultStubProviderAddr;
   return stubs_;

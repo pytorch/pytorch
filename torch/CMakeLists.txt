@@ -260,13 +260,13 @@ if(USE_DEPLOY)
     # libtorch, we need to set them manually here.
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_DISTRIBUTED)
     if(USE_GLOO AND USE_C10D_GLOO)
-      list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10_GLOO)
+      list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10D_GLOO)
     endif()
     if(USE_NCCL AND USE_C10D_NCCL)
-        list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10_NCCL)
+        list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10D_NCCL)
     endif()
     if(USE_MPI AND USE_C10D_MPI)
-      list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10_MPI)
+      list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10D_MPI)
     endif()
 
     # Pass USE_RPC in order to reduce use of
@@ -281,6 +281,7 @@ if(USE_DEPLOY)
 
     # Set c10d-related include directories as well.
     target_include_directories(torch_python_obj PRIVATE $<BUILD_INTERFACE:${TORCH_SRC_DIR}/csrc/distributed>)
+    target_include_directories(torch_python_obj PRIVATE $<TARGET_PROPERTY:__caffe2_nccl,INTERFACE_INCLUDE_DIRECTORIES>)
   endif()
   target_compile_definitions(torch_python_obj PRIVATE "-DTHP_BUILD_MAIN_LIB -DUSE_DEPLOY")
 
@@ -295,9 +296,6 @@ if(USE_DEPLOY)
   endif()
 
   target_include_directories(torch_python_obj PUBLIC ${TORCH_PYTHON_INCLUDE_DIRECTORIES})
-  # target_include_directories(torch_python_obj PUBLIC ${TORCH_SRC_DIR}/csrc/distributed/)
-  # target_include_directories(torch_python_obj PUBLIC ${TORCH_SRC_DIR}/csrc/distributed/rpc)
-  # target_include_directories(torch_python_obj PUBLIC ${TORCH_SRC_DIR}/csrc/distributed/rpc/testing)
   target_include_directories(torch_python_obj PRIVATE ../third_party/fmt/include)
 
   # need to specify the dependency so the generated headers exist,
