@@ -1,6 +1,5 @@
 #include <ATen/Dispatch.h>
 #include <ATen/SparseTensorUtils.h>
-#include <ATen/cuda/CUDASparse.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/sparse/cuda/SparseBlasLegacy.h>
 #include <ATen/native/sparse/cuda/SparseCUDABlas.h>
