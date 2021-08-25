@@ -8,17 +8,6 @@
 
 namespace at { namespace functorch {
 
-std::tuple<Tensor,optional<int64_t>,Tensor,optional<int64_t>>
-slogdet_batch_rule(const Tensor& self, optional<int64_t> self_bdim) {
-  // slogdet supports arbitrary dims at the front
-  auto self_ = moveBatchDimToFront(self, self_bdim);
-  auto result = at::slogdet(self_);
-  return std::make_tuple(
-    std::move(std::get<0>(result)), 0,
-    std::move(std::get<1>(result)), 0
-  );
-}
-
 // Note [Batching rules for matmul-like operators]
 // at::matmul doesn't "de-expand" arguments to get better performance (maybe
 // it should). In the batching rules for matmul-like operators (dot, mv, mm),
@@ -125,25 +114,27 @@ Tensor linear_decomp(
   return result;
 }
 
-std::tuple<Tensor,optional<int64_t>,Tensor,optional<int64_t>> linalg_eigh_batch_rule(
-    const Tensor& self, optional<int64_t> self_bdim, c10::string_view UPLO) {
-  auto self_ = moveBatchDimToFront(self, self_bdim);
-  auto result = at::linalg_eigh(self_, UPLO);
-  return std::make_tuple(std::get<0>(result), 0, std::get<1>(result), 0);
-}
-
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("bmm", bmm_batch_rule);
   VMAP_SUPPORT("dot", dot_batch_rule);
   VMAP_SUPPORT("mv", mv_batch_rule);
   VMAP_SUPPORT("mm", mm_batch_rule);
-  VMAP_SUPPORT("linalg_eigh", linalg_eigh_batch_rule);
-  VMAP_SUPPORT("slogdet", slogdet_batch_rule);
   m.impl("linear", linear_decomp);
-  VMAP_SUPPORT("cholesky", VARIADIC_BDIMS_BATCH_RULE(at::cholesky));
-  VMAP_SUPPORT("cholesky_inverse", VARIADIC_BDIMS_BATCH_RULE(at::cholesky_inverse));
-  VMAP_SUPPORT("pinverse", VARIADIC_BDIMS_BATCH_RULE(at::pinverse));
-  VMAP_SUPPORT("linalg_pinv", VARIADIC_BDIMS_BATCH_RULE(ATEN_FN(linalg_pinv)));
+
+  VARIADIC_BDIMS_BOXED(linalg_eigh);
+  VARIADIC_BDIMS(linalg_pinv);
+  VARIADIC_BDIMS_BOXED(linalg_slogdet);
+
+  VARIADIC_BDIMS(cholesky);
+  VARIADIC_BDIMS(cholesky_inverse);
+  VARIADIC_BDIMS_BOXED(geqrf);
+  VARIADIC_BDIMS(logdet);
+  VARIADIC_BDIMS(matrix_exp);
+  VARIADIC_BDIMS(pinverse);
+  VARIADIC_BDIMS_BOXED(slogdet);
+  VARIADIC_BDIMS_BOXED(solve);
+  VARIADIC_BDIMS_BOXED(symeig);
+  VARIADIC_BDIMS_BOXED(triangular_solve);
 }
 }}
 

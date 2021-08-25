@@ -313,6 +313,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   m.impl("sum", sum_decomp);
   REDUCTION_BOXED(sum.dim_IntList);
   REDUCTION_BOXED_ARGS(topk, 2);
+  // REDUCTION_BOXED_ARGS(var_mean.correction, 2);
   REDUCTION_BOXED(var.correction);
   VMAP_SUPPORT("_log_softmax_backward_data", _log_softmax_backward_batch_rule);
   VMAP_SUPPORT("_softmax_backward_data", _softmax_backward_batch_rule);
