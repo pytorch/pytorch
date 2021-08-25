@@ -528,13 +528,13 @@ void miopen_convolution_add_bias_(CheckedFrom c, const TensorArg& output, const 
   auto memory_format = output->suggest_memory_format();
 
   std::vector<int64_t> shape( output->dim(), 1);
-  shape[1] = -1;
+  shape[output_channels_dim] = -1;
   at::Tensor bias_contig =  bias->reshape(shape).contiguous(memory_format);
   // Make sure that NC11 strides follow formula
   bias_contig.resize_(bias_contig.sizes(), memory_format );
 
   output->add_( bias_contig );
-   
+
   /*  TODO: MIOpen does not support NHWC bias
   bdesc.set( bias_contig );
   odesc.set(*output);
@@ -957,7 +957,7 @@ Tensor miopen_depthwise_convolution_backward_input(
   // See #4500
   Tensor weight_contig = weight->contiguous(memory_format);
   // Make sure that NC11 strides follow formula
-  weight_contig.resize_(weight_contig.sizes(), memory_format); 
+  weight_contig.resize_(weight_contig.sizes(), memory_format);
 
   Tensor grad_output_contig = grad_output->contiguous(memory_format);
   grad_output_contig.resize_(grad_output_contig.sizes(), memory_format);
@@ -1245,7 +1245,21 @@ Tensor miopen_convolution_backward_bias(
   TensorArg grad_output{ grad_output_t, "grad_output", 1 };
 
   // TODO: MIOpen does not support NHWC bias
-  return at::squeeze( at::sum(grad_output_t, {0, 2, 3}, true) );
+  std::vector<int64_t> discard_dims;
+  for( int i = 0; i < grad_output_t.dim(); i++ ) {
+      if(i != output_channels_dim ) {
+          discard_dims.push_back(i);
+      }
+  }
+
+  Tensor outputBias = at::squeeze( at::sum(grad_output_t, discard_dims, true) );
+  if( outputBias.dim() == 0 ) {
+      // always return a tensor of shape [_]
+      return outputBias.unsqueeze(0);
+  }
+  else {
+      return outputBias;
+  }
 
 /*
   auto grad_bias_t = at::empty( { grad_output->size(output_channels_dim) }, grad_output->options());
