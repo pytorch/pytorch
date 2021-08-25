@@ -597,7 +597,11 @@ class TestNNAPI(TestCase):
             def forward(self, lhs, rhs):
                 return func.add_relu(lhs, rhs)
 
-        for (name, mod) in [("add", AddMod), ("add_relu", AddReluMod)]:
+        class MulMod(torch.nn.Module):
+            def forward(self, lhs, rhs):
+                return func.mul(lhs, rhs)
+
+        for (name, mod) in [("add", AddMod), ("add_relu", AddReluMod), ("mul", MulMod)]:
             with self.subTest(name):
                 self.check(
                     mod(),
