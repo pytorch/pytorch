@@ -522,7 +522,7 @@ def test_distributed(test_module, test_directory, options):
     for backend, env_vars in config.items():
         if backend != 'nccl':
             continue
-        if sys.platform == 'win32' and backend != 'gloo':
+        if sys.platform == "win32" and backend != "gloo":
             continue
         if backend == "mpi" and not mpi_available:
             continue
