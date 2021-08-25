@@ -89,7 +89,8 @@ class ShapeProp(torch.fx.Interpreter):
         ShapeProp(gm).propagate(sample_input)
 
         for node in gm.graph.nodes:
-            print(node.name, node.dtype, node.shape)
+            print(node.name, node.meta['tensor_meta'].dtype,
+                node.meta['tensor_meta'].shape)
 
         The output of this code is:
 

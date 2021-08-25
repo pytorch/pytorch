@@ -27,5 +27,5 @@ Docker builds are now defined with `.circleci/cimodel/data/simple/docker_definit
 ./build.sh pytorch-linux-bionic-py3.8-gcc9 -t myimage:latest
 
 # Set flags (see build.sh) and build image
-sudo bash -c 'BREAKPAD=1 ./build.sh pytorch-linux-bionic-py3.8-gcc9 -t myimage:latest
+sudo bash -c 'PROTOBUF=1 ./build.sh pytorch-linux-bionic-py3.8-gcc9 -t myimage:latest
 ```

@@ -47,18 +47,19 @@ namespace {
 // directly against incoming TensorImpl*s.
 using weakref_type = c10::weak_intrusive_ptr<TensorImpl, UndefinedTensorImpl>;
 using val_type = std::tuple<weakref_type, Tensor>;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local std::unordered_map<TensorImpl*, val_type> cached_casts;
 
 // nesting tracks the nesting depth of the Python-side context manager.
 // When the autocast context manager exits to a nesting level that's outside
 // any instance of autocast (which should occur at the end of each forward pass)
 // it calls clear_cache() to ensure cached Tensors don't leak outside the autocasting region.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local int nesting = 0;
 
 // autocast_cpu_dtype is the lower_precision_fp used by AutocastCPU.
 thread_local at::ScalarType autocast_cpu_dtype = at::kBFloat16;
+
+// autocast_gpu_dtype is the lower_precision_fp used by AutocastGPU.
+thread_local at::ScalarType autocast_gpu_dtype = at::kHalf;
 }
 
 void clear_cache() {
@@ -73,6 +74,10 @@ int decrement_nesting() {
   return --nesting;
 }
 
+at::ScalarType get_autocast_gpu_dtype() {
+  return autocast_gpu_dtype;
+}
+
 at::ScalarType get_autocast_cpu_dtype() {
   return autocast_cpu_dtype;
 }
@@ -82,6 +87,10 @@ void set_autocast_cpu_dtype(at::ScalarType dtype) {
       dtype == at::kBFloat16,
       "Currently, AutocastCPU only support Bfloat16 as the autocast_cpu_dtype");
   autocast_cpu_dtype = dtype;
+}
+
+void set_autocast_gpu_dtype(at::ScalarType dtype) {
+  autocast_gpu_dtype = dtype;
 }
 
 // Overload to catch Tensor args

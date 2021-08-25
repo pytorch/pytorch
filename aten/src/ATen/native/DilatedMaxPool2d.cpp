@@ -203,9 +203,7 @@ const Tensor& gradInput) {
       gradOutput, indices);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(max_pool2d_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(max_pool2d_backward_kernel);
 
 } // at::native

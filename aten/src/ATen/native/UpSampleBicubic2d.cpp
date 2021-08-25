@@ -219,7 +219,6 @@ Tensor upsample_bicubic2d_backward(
   return at::upsample_bicubic2d_backward(grad_output, osize, input_size, align_corners, scale_h, scale_w);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(upsample_bicubic2d_kernel);
 
 } // namespace native
