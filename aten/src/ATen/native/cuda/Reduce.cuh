@@ -18,6 +18,7 @@
 #include <type_traits>
 #include <utility>
 #include <thrust/pair.h>
+#include <iostream>
 
 namespace at { namespace native {
 
@@ -919,7 +920,7 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
     // acc_buf_ptr holds buffer used for accumulation among multiple sub_iter
     // when accumulation in output is not possible.
     if (!can_accumulate_in_output && !can_use_32bit_indexing) {
-      int64_t output_memory_size = 1;
+      int64_t output_memory_size = iter.element_size(0);
       for (int dim = 0; dim < iter.ndim(); dim++) {
         output_memory_size = std::max(output_memory_size, iter.shape()[dim] * iter.strides(0)[dim]);
       }
