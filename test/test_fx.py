@@ -3041,6 +3041,9 @@ class TestOperatorSignatures(JitTestCase):
 
 
 class TestFXAPIBackwardCompatibility(JitTestCase):
+    def setUp(self):
+        self.maxDiff = None
+
     def test_function_back_compat(self):
         """
         Test backward compatibility for function signatures with
