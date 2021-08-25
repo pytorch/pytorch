@@ -31,6 +31,7 @@ from copy import deepcopy
 from collections import namedtuple
 
 from torch.fx.proxy import TraceError
+from torch.fx._compatibility import _BACK_COMPAT_OBJECTS
 
 from fx.test_subgraph_rewriter import TestSubgraphRewriter  # noqa: F401
 from fx.test_dce_pass import TestDCE  # noqa: F401
@@ -3038,6 +3039,43 @@ class TestOperatorSignatures(JitTestCase):
         except Exception as e:
             assert op.name in known_no_schema or "nn.functional" in op.name
 
+
+class TestFXAPIBackwardCompatibility(JitTestCase):
+    def test_function_back_compat(self):
+        """
+        Test backward compatibility for function signatures with
+        @compatibility(is_backward_compatible=True). Currently this checks for
+        exact signature matches, which may lead to false positives. If this
+        becomes too annoying, we can refine this check to actually parse out
+        the saved schema strings and check if the change is truly backward-
+        incompatible.
+        """
+        signature_strs = []
+
+        for obj in _BACK_COMPAT_OBJECTS:
+            if not isinstance(obj, type):
+                signature_strs.append(f'{torch.typename(obj)}{str(inspect.signature(obj))}')
+
+        signature_strs.sort()
+
+        self.assertExpected('\n'.join(signature_strs), 'fx_backcompat_function_signatures')
+
+    def test_class_member_back_compat(self):
+        """
+        Test backward compatibility for members of classes with
+        @compatibility(is_backward_compatible=True). Currently this checks for
+        exact matches on the publicly visible members of the class.
+        """
+        class_method_strs = []
+
+        for obj in _BACK_COMPAT_OBJECTS:
+            if isinstance(obj, type):
+                public_members = [name for name in dir(obj) if not name.startswith('_')]
+                class_method_strs.append(f'{torch.typename(obj)} {sorted(public_members)}')
+
+        class_method_strs.sort()
+
+        self.assertExpected('\n'.join(class_method_strs), 'fx_backcompat_class_members')
 
 class TestFunctionalTracing(JitTestCase):
     IGNORE_FUNCS = ("has_torch_function", "has_torch_function_unary",

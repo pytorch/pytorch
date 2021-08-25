@@ -314,8 +314,8 @@ class Graph:
         """
         return self._owning_module
 
-    @compatibility(is_backward_compatible=True)
     @owning_module.setter
+    @compatibility(is_backward_compatible=True)
     def owning_module(self, mod: Optional["GraphModule"]):
         if mod:
             self._owning_module = mod if not self._owners else None
