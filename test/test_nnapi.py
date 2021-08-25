@@ -649,6 +649,18 @@ class TestNNAPI(TestCase):
         inp = qpt(torch.randn(2, 32), 0.05, 130, torch.quint8)
         self.check(mod, inp)
 
+    def test_qscalar(self):
+        func = torch.nn.quantized.QFunctional()
+
+        class AddScalarMod(torch.nn.Module):
+            def forward(self, lhs):
+                return func.add_scalar(lhs, 1.0)
+
+        self.check(
+            AddScalarMod(),
+            [qpt([[1.0, 2.0]], 0.25, 128)]
+        )
+
     def test_seblock_mul(self):
         class MulModel(torch.nn.Module):
             def forward(self, lhs, rhs):

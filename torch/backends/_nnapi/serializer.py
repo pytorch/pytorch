@@ -813,6 +813,8 @@ class _NnapiSerializer(object):
             self.add_qadd(node, NNAPI_OperationCode.ADD, NNAPI_FuseCode.FUSED_NONE),
         "quantized::add_relu": lambda self, node:
             self.add_qadd(node, NNAPI_OperationCode.ADD, NNAPI_FuseCode.FUSED_RELU),
+        "quantized::add_scalar": lambda self, node:
+            self.add_qscalar(node),
     }
 
     def add_node(self, node):
@@ -1300,6 +1302,41 @@ class _NnapiSerializer(object):
         _, zero_point = self.get_constant_value(node.inputsAt(3), "IntType")
 
         self._do_add_binary(node, opcode, fuse_code, qparams=(scale, zero_point))
+
+    def add_qscalar(self, node):
+        assert node.inputsSize() == 2
+
+        in_id, in_oper = self.get_tensor_operand_by_jitval_fixed_size(node.inputsAt(0))
+        scalar_type, scalar = self.get_constant_value(node.inputsAt(1))
+
+        tensor = torch.tensor([scalar])
+        quant = torch.quantize_per_tensor(tensor, scalar, 0, torch.quint8)
+        # if scalar_type.kind() == "IntType":
+        #     scalar_id = self.add_immediate_int_vector([scalar])
+        # elif scalar_type.kind() == "FloatType":
+        #     scalar_id = self.add_immediate_float_vector([scalar])
+        # else:
+        #     raise Exception()
+        scalar_id = self.add_tensor_operand_for_weight(quant, dim_order=DimOrder.PRESUMED_CONTIGUOUS)
+
+        # FIXME see fbcode/caffe2/aten/src/ATen/native/quantized/cpu/qadd.cpp:76 for scale & z point calculation
+        func = torch.nn.quantized.QFunctional()
+        a = torch.quantize_per_tensor(torch.zeros(1).expand(in_oper.shape), in_oper.scale, in_oper.zero_point, torch.quint8)
+        x = func.add_scalar(a, scalar)
+        out_oper = in_oper._replace(scale=x.q_scale(), zero_point=x.q_zero_point())
+        print(out_oper)
+        out_id = self.add_tensor_operand(node.outputsAt(0), out_oper)
+
+
+        inputs = [None] * 3
+        inputs[0] = in_id
+        inputs[1] = scalar_id
+        inputs[2] = self.add_immediate_int_scalar(NNAPI_FuseCode.FUSED_NONE)
+
+        outputs = [None] * 1
+        outputs[0] = out_id
+
+        self.add_operation(NNAPI_OperationCode.ADD, inputs, outputs)
 
     def add_softmax(self, node):
         assert node.inputsSize() == 3
