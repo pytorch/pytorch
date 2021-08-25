@@ -1172,21 +1172,10 @@ struct PythonPrintImpl {
           auto specified_args =
               CalculateNecessaryArgs(schema.arguments(), node->inputs(), true);
 
-          auto necessary_args = specified_args.first + specified_args.second;
+          auto num_necessary = specified_args.first;
+          auto num_out = specified_args.second;
 
-          size_t schema_idx = num_schema_args - 1;
-          while (schema_idx >= 0) {
-            auto current_arg = schema.arguments().at(schema_idx);
-            if (!current_arg.is_out()) {
-              break;
-            }
-            schema_idx--;
-          }
-
-          auto num_out = schema.arguments().size() - schema_idx - 1;
-          auto num_specified_before_out = necessary_args - num_out;
-
-          for (size_t i = 0; i < num_specified_before_out; ++i) {
+          for (size_t i = 0; i < num_necessary; ++i) {
             if (i > 0)
               stmt << ", ";
             auto v = useOf(node->inputs().at(i));
@@ -1203,17 +1192,8 @@ struct PythonPrintImpl {
             stmt << *v;
           }
 
-          // scan backwards to find the first index where out args start
-          size_t out_start = num_schema_args;
-          while (--out_start >= num_specified_before_out) {
-            auto arg = schema.arguments().at(out_start);
-            if (!arg.is_out()) {
-              break;
-            }
-          }
-
           // print out args
-          for (size_t i = out_start + 1; i < schema.arguments().size(); i++) {
+          for (size_t i = num_schema_args - num_out; i < num_schema_args; i++) {
             stmt << ", ";
             auto arg = schema.arguments().at(i);
             TORCH_INTERNAL_ASSERT(arg.is_out());
