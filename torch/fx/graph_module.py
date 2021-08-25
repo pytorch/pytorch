@@ -316,16 +316,16 @@ class GraphModule(torch.nn.Module):
     # Shouldn't be an issue since these methods shouldn't be used in TorchScript anyway
     __jit_unused_properties__ = ['graph']
 
-    @compatibility(is_backward_compatible=True)
     @property
+    @compatibility(is_backward_compatible=True)
     def graph(self) -> Graph:
         """
         Return the ``Graph`` underlying this ``GraphModule``
         """
         return self._graph
 
-    @compatibility(is_backward_compatible=True)
     @graph.setter
+    @compatibility(is_backward_compatible=True)
     def graph(self, g : Graph) -> None:
         """
         Set the underlying ``Graph`` for this ``GraphModule``. This will internally
@@ -531,8 +531,8 @@ class {module_name}(torch.nn.Module):
         for name in to_delete:
             self.delete_submodule(name)
 
-    @compatibility(is_backward_compatible=True)
     @property
+    @compatibility(is_backward_compatible=True)
     def code(self) -> str:
         """
         Return the Python code generated from the ``Graph`` underlying this

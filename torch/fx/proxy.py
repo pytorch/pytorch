@@ -274,8 +274,8 @@ class Attribute(Proxy):
         self.tracer = root.tracer
         self._node: Optional[Node] = None
 
-    @compatibility(is_backward_compatible=True)
     @property
+    @compatibility(is_backward_compatible=True)
     def node(self):
         # the node for attributes is added lazily, since most will just be method calls
         # which do not rely on the getitem call
