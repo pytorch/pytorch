@@ -69,7 +69,6 @@ void autogradNotImplementedFallbackImpl(const c10::OperatorHandle& op, c10::Disp
 
   }
 
-  #ifndef NDEBUG
   int aliased_input_idx = -1;
   int aliased_output_idx = -1;
   for (const auto i : c10::irange(num_returns)) {
@@ -86,7 +85,6 @@ void autogradNotImplementedFallbackImpl(const c10::OperatorHandle& op, c10::Disp
       aliased_input_idx = i;
     }
   }
-  #endif
 
   size_t num_tensor_inputs = 0;  // Only used for DEBUG-only checks
 
