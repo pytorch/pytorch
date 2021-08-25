@@ -10,9 +10,13 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
-template <typename Op>
+template <
+    typename Op,
+    typename std::enable_if<std::is_same<
+        decltype(detail::bin_op_deducer(std::declval<Op>())),
+        void>::value>::type* = nullptr>
 static ExprPtr mutate_binary_op(
-    NodePtr<BinaryOpNode<Op>> v,
+    NodePtr<Op> v,
     IRCloner* cloner,
     bool option = false) {
   ExprPtr lhs_new = v->lhs()->accept_mutator(cloner);
