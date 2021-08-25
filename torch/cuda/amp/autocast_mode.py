@@ -5,16 +5,57 @@ try:
     import numpy as np
     HAS_NUMPY = True
 except ModuleNotFoundError:
-    HAS_NUMPY = False
+    np = None  # type: ignore[assignment]
 from torch._six import string_classes
+from typing import Any
+
+
+def autocast_decorator(autocast_instance, func):
+    @functools.wraps(func)
+    def decorate_autocast(*args, **kwargs):
+        with autocast_instance:
+            return func(*args, **kwargs)
+    decorate_autocast.__script_unsupported = '@autocast() decorator is not supported in script mode'  # type: ignore[attr-defined]
+    return decorate_autocast
 
 class autocast(torch.autocast_mode.autocast):
     r"""
     See :class:`torch.autocast`.
     ``torch.cuda.amp.autocast(args...)`` is equivalent to ``torch.autocast("cuda", args...)``
     """
+
     def __init__(self, enabled=True, fast_dtype=torch.float16):
         super().__init__("cuda", enabled=enabled, fast_dtype=fast_dtype)
+        if torch._jit_internal.is_scripting():
+            self._enabled = enabled
+        elif enabled and not torch.cuda.is_available():
+            warnings.warn("torch.cuda.amp.autocast only affects CUDA ops, but CUDA is not available.  Disabling.")
+            self._enabled = False
+        else:
+            self._enabled = enabled
+
+    def __enter__(self):
+        if torch._jit_internal.is_scripting():
+            return self
+        self.prev = torch.is_autocast_enabled()
+        torch.set_autocast_enabled(self._enabled)
+        torch.autocast_increment_nesting()
+        return self
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any):
+        if torch._jit_internal.is_scripting():
+            return
+        # Drop the cache when we exit to a nesting level that's outside any instance of autocast.
+        if torch.autocast_decrement_nesting() == 0:
+            torch.clear_autocast_cache()
+        torch.set_autocast_enabled(self.prev)
+        return False
+
+    def __call__(self, func):
+        if torch._jit_internal.is_scripting():
+            return func
+        else:
+            return autocast_decorator(self, func)
 
 
 # Casts Tensors and containers of Tensors.  Special-cases passthroughs for strings and np.ndarrays, which

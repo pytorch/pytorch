@@ -10,6 +10,7 @@
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/passes/autocast.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/canonicalize_graph_fuser_ops.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
@@ -262,6 +263,7 @@ void initJITBindings(PyObject* module) {
             ONNXShapeTypeInference(graph, params_dict, opset_version);
           })
       .def("_jit_pass_onnx_set_dynamic_input_shape", ONNXSetDynamicInputShape)
+      .def("_jit_pass_autocast", Autocast)
       .def("_jit_pass_fuse", FuseGraph)
       .def(
           "_jit_pass_dce",
@@ -590,8 +592,6 @@ void initJITBindings(PyObject* module) {
       .def("_jit_override_can_fuse_on_gpu", &overrideCanFuseOnGPU)
       .def("_jit_can_fuse_on_cpu", &canFuseOnCPU)
       .def("_jit_can_fuse_on_gpu", &canFuseOnGPU)
-      .def("_jit_can_fuse_on_cpu_legacy", &canFuseOnCPULegacy)
-      .def("_jit_override_can_fuse_on_cpu_legacy", &overrideCanFuseOnCPULegacy)
       .def(
           "_jit_differentiate",
           [](Graph& g) {
