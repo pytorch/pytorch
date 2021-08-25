@@ -87,7 +87,7 @@ void autogradNotImplementedFallbackImpl(const c10::OperatorHandle& op, c10::Disp
     const auto& alias_info = arguments[i].alias_info();
     if (alias_info.has_value() && !alias_info->isWrite()) {
       AT_ASSERT(
-        aliased_output_idx == -1,
+        aliased_input_idx == -1,
         "Expected only a single input in the operator schema to have a non-write alias annotation (i.e., 'Tensor(a)'). "
         "Non-composite functions where multiple inputs are aliased with outputs aren't supported. "
         "Please rewrite your function as a composite function.");
