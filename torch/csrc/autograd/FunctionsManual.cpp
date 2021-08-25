@@ -3437,28 +3437,30 @@ bool any_variable_defined(const variable_list& variables) {
 template<bool in_place>
 struct HouseholderReflectorEvaluator {
   static Tensor apply_left(int64_t k, const Tensor& v_full, const Tensor& t, Tensor& K) {
-    auto m = v_full.size(-1);
+    // NOTE: v_full is a vector of dimension (..., m, 1)
+    auto m = v_full.size(-2);
     if (in_place) {
-      auto v = v_full.narrow(-1, k, m - k);
-      auto u = v.unsqueeze(-2).conj().matmul(K.narrow(-2, k, m - k));
-      K.narrow(-2, k, m - k).sub_((t.unsqueeze(-1) * v).unsqueeze(-1) * u);
+      auto v = v_full.narrow(-2, k, m - k);
+      auto u = v.transpose(-1, -2).conj().matmul(K.narrow(-2, k, m - k));
+      K.narrow(-2, k, m - k).sub_((t.unsqueeze(-1) * v) * u);
       return K;
     }
     else {
-      return K - (t.unsqueeze(-1) * v_full).unsqueeze(-1) * v_full.unsqueeze(-2).conj().matmul(K);
+      return K - (t.unsqueeze(-1) * v_full) * v_full.transpose(-1, -2).conj().matmul(K);
     }
   }
 
   static Tensor apply_right(int64_t k, const Tensor& v_full, const Tensor& t, Tensor& K) {
-    auto m = v_full.size(-1);
+    // NOTE: v_full is a vector of dimension (..., m, 1)
+    auto m = v_full.size(-2);
     if (in_place) {
-      auto v = v_full.narrow(-1, k, m - k);
-      auto u = K.narrow(-1, k, m - k).matmul((t.unsqueeze(-1) * v).unsqueeze(-1));
-      K.narrow(-1, k, m - k).sub_(u * v.conj().unsqueeze(-2));
+      auto v = v_full.narrow(-2, k, m - k);
+      auto u = K.narrow(-1, k, m - k).matmul(t.unsqueeze(-1) * v);
+      K.narrow(-1, k, m - k).sub_(u * v.conj().transpose(-1, -2));
       return K;
     }
     else {
-      return K - K.matmul((t.unsqueeze(-1) * v_full).unsqueeze(-1)) * v_full.unsqueeze(-2).conj();
+      return K - K.matmul(t.unsqueeze(-1) * v_full) * v_full.transpose(-1, -2).conj();
     }
   }
 };
@@ -3512,7 +3514,7 @@ std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, cons
     return std::make_tuple(v_grad, tau_grad.squeeze(-1));
   };
 
-  K = left_reflect(0, input.select(-1, 0), sigma.select(-1, 0), K);
+  K = left_reflect(0, input.narrow(-1, 0, 1), sigma.narrow(-1, 0, 1), K);
   for (int64_t i = 0; i < k; ++i) {
     // NOTE: narrow will unsqueeze(-1)
     auto v_i = input.narrow(-1, i, 1);
@@ -3526,9 +3528,9 @@ std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, cons
     // K <- pinv(H_{i + 1}) @ K @ H_i
     if (i < k - 1) {
       // K <- pinv(H_{i + 1}) @ K
-      K = left_reflect(i + 1, input.select(-1, i + 1), sigma.select(-1, i + 1), K);
+      K = left_reflect(i + 1, input.narrow(-1, i + 1, 1), sigma.narrow(-1, i + 1, 1), K);
       // K <- K @ H_i
-      K = right_reflect(i, input.select(-1, i), tau.select(-1, i), K);
+      K = right_reflect(i, input.narrow(-1, i, 1), tau.narrow(-1, i, 1), K);
     }
   }
 
