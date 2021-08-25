@@ -1,6 +1,6 @@
 #include <c10d/ucc/UCXUtils.hpp>
 #include <string>
-
+#include <iostream>
 namespace c10d {
 
 class UCPContext {
@@ -120,12 +120,14 @@ std::shared_ptr<UCPRequest> UCPWorker::submit_p2p_request(
     // http://openucx.github.io/ucx/api/latest/html/group___u_c_p___c_o_m_m.html#ga70e110cf7c85ed5f281bd52438488d75
     auto r = reinterpret_cast<UCPRequest::Data *>(request);
     r->status = status;
-    r->info = *info;
+    if (status == UCS_OK) {
+      r->info = *info;
+    } else {
+      std::cout << "Status is: " << ucs_status_string(status) << std::endl;
+    }
   };
   ucs_status_ptr_t request = work(&params);
-  if (UCS_PTR_STATUS(request) == UCS_OK) {
-    return std::shared_ptr<UCPRequest>(new UCPRequest(nullptr));
-  }
+  TORCH_UCX_CHECK_MAYBE_INPROGRESS(UCS_PTR_STATUS(request), "Failed to start p2p operation.");
   progress();
   return std::shared_ptr<UCPRequest>(
     new UCPRequest(reinterpret_cast<UCPRequest::Data *>(request)));
