@@ -63,13 +63,6 @@ void HashProvider::visit(ModPtr v) {
   putHash(v, hash_combine(hashOf(v->lhs()), "%", hashOf(v->rhs())));
 }
 
-void HashProvider::visit(RoundOffPtr v) {
-  CACHE_GUARD();
-  v->lhs()->accept(this);
-  v->rhs()->accept(this);
-  putHash(v, hash_combine(hashOf(v->lhs()), "rof", hashOf(v->rhs())));
-}
-
 void HashProvider::visit(MaxPtr v) {
   CACHE_GUARD();
   v->lhs()->accept(this);

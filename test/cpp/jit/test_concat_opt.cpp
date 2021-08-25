@@ -1,14 +1,44 @@
 #include <gtest/gtest.h>
 
-#include <test/cpp/jit/test_utils.h>
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/passes/concat_opt.h>
-#include <torch/csrc/jit/passes/variadic_ops.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/testing/file_check.h>
 
 namespace torch {
 namespace jit {
+
+namespace {
+
+void checkOutputs(
+    const std::vector<at::Tensor>& out1,
+    const std::vector<at::Tensor>& out2) {
+  ASSERT_EQ(out1.size(), out2.size());
+  for (size_t i = 0; i < out1.size(); ++i) {
+    ASSERT_EQ(out1[i].sizes(), out2[i].sizes());
+    float max_diff = (out1[i] - out2[i]).abs().max().item<double>();
+    ASSERT_EQ(max_diff, 0);
+  }
+}
+
+std::vector<at::Tensor> runGraph(
+    std::shared_ptr<Graph> graph,
+    const std::vector<at::Tensor> inputs) {
+  std::vector<IValue> stack = fmap<IValue>(inputs);
+  Code code(graph, "test");
+  InterpreterState(code).run(stack);
+  TORCH_INTERNAL_ASSERT(!stack.empty());
+  // Graph outputs that are handled below:
+  //   * A list of Tensors.
+  //   * 1 Tensor.
+  if (stack.front().isTensorList()) {
+    return stack.front().toTensorVector();
+  }
+  TORCH_INTERNAL_ASSERT(stack.front().isTensor());
+  return {stack.front().toTensor()};
+}
+
+} // namespace
 
 TEST(ConcatOptTest, SimpleCommonInputsEliminationPrefix) {
   auto graph = std::make_shared<Graph>();
@@ -34,7 +64,7 @@ TEST(ConcatOptTest, SimpleCommonInputsEliminationPrefix) {
   ASSERT_TRUE(EliminateConcatCommonInputs(graph));
   graph->lint();
   auto opt_outputs = runGraph(graph, inputs);
-  ASSERT_TRUE(exactlyEqual(orig_outputs, opt_outputs));
+  checkOutputs(orig_outputs, opt_outputs);
 
   // Graph after EliminateConcatCommonInputs:
   //  graph(%0 : ...,
@@ -79,7 +109,7 @@ TEST(ConcatOptTest, SimpleCommonInputsEliminationSuffix) {
   ASSERT_TRUE(EliminateConcatCommonInputs(graph));
   graph->lint();
   auto opt_outputs = runGraph(graph, inputs);
-  ASSERT_TRUE(exactlyEqual(orig_outputs, opt_outputs));
+  checkOutputs(orig_outputs, opt_outputs);
 
   // Graph after EliminateConcatCommonInputs:
   //  graph(%0 : ...,
@@ -131,7 +161,7 @@ TEST(ConcatOptTest, CommonInputsEliminationWithDifferentOrderInputs) {
   graph->lint();
   auto opt_outputs = runGraph(graph, inputs);
 
-  ASSERT_TRUE(exactlyEqual(orig_outputs, opt_outputs));
+  checkOutputs(orig_outputs, opt_outputs);
 
   // No optimizations should have happened in this case since the inputs
   // to the `cat` are in different order.
@@ -168,7 +198,7 @@ TEST(ConcatOptTest, MoreCommonInputsElimination) {
   ASSERT_TRUE(EliminateConcatCommonInputs(graph));
   graph->lint();
   auto opt_outputs = runGraph(graph, inputs);
-  ASSERT_TRUE(exactlyEqual(orig_outputs, opt_outputs));
+  checkOutputs(orig_outputs, opt_outputs);
 
   testing::FileCheck()
       .check_count("= prim::VarConcat(%0, %1, %5)", 1, /*exactly*/ true)
@@ -203,7 +233,7 @@ TEST(ConcatOptTest, ExpandConcat) {
   graph->lint();
   auto opt_outputs = runGraph(graph, inputs);
 
-  ASSERT_TRUE(exactlyEqual(orig_outputs, opt_outputs));
+  checkOutputs(orig_outputs, opt_outputs);
 
   // After full concat optimization we should have the following graph:
   //
@@ -259,7 +289,7 @@ TEST(ConcatOptTest, ConcatWithoutResultShape) {
   graph->lint();
   auto opt_outputs = runGraph(graph, inputs);
 
-  ASSERT_TRUE(exactlyEqual(orig_outputs, opt_outputs));
+  checkOutputs(orig_outputs, opt_outputs);
 
   // No optimizations should have happened in this case since the output
   // shape of `aten::cat` is not known.
@@ -294,7 +324,7 @@ TEST(ConcatOptTest, ConcatWithoutInputShape) {
   graph->lint();
   auto opt_outputs = runGraph(graph, inputs);
 
-  ASSERT_TRUE(exactlyEqual(orig_outputs, opt_outputs));
+  checkOutputs(orig_outputs, opt_outputs);
 
   // No optimizations should have happened in this case since the shape of %5,
   // which is an input to `aten::cat`, is not known.
@@ -331,7 +361,7 @@ TEST(ConcatOptTest, UseVariadicCat) {
   graph->lint();
   auto opt_outputs = runGraph(graph, inputs);
 
-  ASSERT_TRUE(exactlyEqual(orig_outputs, opt_outputs));
+  checkOutputs(orig_outputs, opt_outputs);
 
   // After replacing `aten::cat` with `prim::VarConcat` we should have the
   // following graph:
@@ -376,7 +406,7 @@ TEST(OptimizeConcatTest, UseVariadicCatReplaceMultiple) {
   graph->lint();
   auto opt_outputs = runGraph(graph, inputs);
 
-  ASSERT_TRUE(exactlyEqual(orig_outputs, opt_outputs));
+  checkOutputs(orig_outputs, opt_outputs);
 
   // After full concat optimization we should have the following graph:
   //
@@ -416,7 +446,7 @@ TEST(ConcatOptTest, UseVariadicCatWithMultipleListUses) {
   graph->lint();
   auto opt_outputs = runGraph(graph, inputs);
 
-  ASSERT_TRUE(exactlyEqual(orig_outputs, opt_outputs));
+  checkOutputs(orig_outputs, opt_outputs);
 
   // After replacing `aten::cat` with `prim::VarConcat` we should have the
   // following graph:
@@ -458,7 +488,7 @@ TEST(ConcatOptTest, UseVariadicCatWithListMutationAfterCat) {
   ASSERT_TRUE(UseVariadicCat(graph));
   graph->lint();
   auto opt_outputs = runGraph(graph, inputs);
-  ASSERT_TRUE(exactlyEqual(orig_outputs, opt_outputs));
+  checkOutputs(orig_outputs, opt_outputs);
 
   // The input list to `aten::cat` is mutated only after `aten::cat` op. So,
   // it should have been replaced with `prim::VarConcat`. The transformed graph
@@ -504,7 +534,7 @@ TEST(ConcatOptTest, UseVariadicCatWithListMutationBeforeCat) {
     ASSERT_FALSE(UseVariadicCat(graph));
     graph->lint();
     auto opt_outputs = runGraph(graph, inputs);
-    ASSERT_TRUE(exactlyEqual(orig_outputs, opt_outputs));
+    checkOutputs(orig_outputs, opt_outputs);
 
     // No transformation should have happened since the `prim::ListConstruct` is
     // mutated before `aten::cat`.
@@ -519,7 +549,7 @@ TEST(ConcatOptTest, UseVariadicCatWithListMutationBeforeCat) {
     ASSERT_TRUE(RemoveListMutationAndUseVariadicCat(graph));
     graph->lint();
     auto opt_outputs = runGraph(graph, inputs);
-    ASSERT_TRUE(exactlyEqual(orig_outputs, opt_outputs));
+    checkOutputs(orig_outputs, opt_outputs);
 
     // The mutation of the list must be removed and the `aten::cat` op must
     // be replaced with the `prim::VarConcat` op in the graph. The transformed
@@ -572,7 +602,7 @@ TEST(ConcatOptTest, UseVariadicCatWithMultipleListMutations) {
   ASSERT_TRUE(RemoveListMutationAndUseVariadicCat(graph));
   graph->lint();
   auto opt_outputs = runGraph(graph, inputs);
-  ASSERT_TRUE(exactlyEqual(orig_outputs, opt_outputs));
+  checkOutputs(orig_outputs, opt_outputs);
 
   // All the mutations of the list must be removed and the `aten::cat` ops must
   // be replaced with `prim::VarConcat` ops in the graph. The transformed graph
@@ -629,7 +659,7 @@ TEST(
   ASSERT_TRUE(EliminateConcatCommonInputs(graph));
   graph->lint();
   auto opt_outputs = runGraph(graph, inputs);
-  ASSERT_TRUE(exactlyEqual(orig_outputs, opt_outputs));
+  checkOutputs(orig_outputs, opt_outputs);
 
   // After performing:
   //     * Remove list mutation

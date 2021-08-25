@@ -9,19 +9,8 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
-namespace detail {
-template <typename T>
-void deducer(BinaryOpNode<T>);
-
-bool deducer(...);
-} // namespace detail
-
-template <
-    typename D,
-    typename std::enable_if<std::is_same<
-        decltype(detail::deducer(std::declval<D>())),
-        void>::value>::type* = nullptr>
-void verifyBitwiseOp(NodePtr<D> v, IRVerifier* verifier) {
+template <typename Op>
+void verifyBitwiseOp(const BitwiseOpNode<Op>* v, IRVerifier* verifier) {
   if (!v->lhs()->dtype().is_integral()) {
     throw unsupported_dtype();
   }

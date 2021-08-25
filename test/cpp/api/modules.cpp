@@ -2521,27 +2521,25 @@ TEST_F(ModulesTest, LeakyReLU) {
   const auto size = 3;
   for (const auto inplace : {false, true}) {
     for (const auto negative_slope : {0.0, 0.42, 1.0}) {
-      for (const auto type : {torch::kFloat, torch::kBFloat16}) {
-        LeakyReLU model {LeakyReLUOptions().negative_slope(negative_slope).inplace(inplace)};
-        auto x = torch::linspace(-10.0, 10.0, size * size * size).to(type);
-        x.resize_({size, size, size});
-        if (!inplace) {
-          x.requires_grad_(true);
-        }
-        auto x_orig = x.clone();
-        auto y = model(x);
-        torch::Tensor s = y.sum();
+      LeakyReLU model {LeakyReLUOptions().negative_slope(negative_slope).inplace(inplace)};
+      auto x = torch::linspace(-10.0, 10.0, size * size * size);
+      x.resize_({size, size, size});
+      if (!inplace) {
+        x.requires_grad_(true);
+      }
+      auto x_orig = x.clone();
+      auto y = model(x);
+      torch::Tensor s = y.sum();
 
-        ASSERT_EQ(s.ndimension(), 0);
-        ASSERT_EQ(y.ndimension(), 3);
-        ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
-        auto y_exp = (x_orig < 0) * x_orig * negative_slope + (x_orig >= 0) * x_orig;
-        ASSERT_TRUE(torch::allclose(y, y_exp));
-        if (inplace) {
-          ASSERT_TRUE(torch::allclose(x, y_exp));
-        } else {
-          s.backward();
-        }
+      ASSERT_EQ(s.ndimension(), 0);
+      ASSERT_EQ(y.ndimension(), 3);
+      ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
+      auto y_exp = (x_orig < 0) * x_orig * negative_slope + (x_orig >= 0) * x_orig;
+      ASSERT_TRUE(torch::allclose(y, y_exp));
+      if (inplace) {
+        ASSERT_TRUE(torch::allclose(x, y_exp));
+      } else {
+        s.backward();
       }
     }
   }
@@ -2742,28 +2740,26 @@ TEST_F(ModulesTest, RReLU) {
   for (const auto lower : {0.01, 0.1, 0.2}) {
     for (const auto upper : {0.3, 0.4, 0.5}) {
       for (const auto inplace : {false, true}) {
-        for (const auto type : {torch::kFloat, torch::kBFloat16}) {
-          RReLU model {RReLUOptions().lower(lower).upper(upper).inplace(inplace)};
-          auto x = torch::linspace(-10.0, 10.0, size * size * size).to(type);
-          x.resize_({size, size, size});
-          if (!inplace) {
-            x.requires_grad_(true);
-          }
-          auto x_orig = x.clone();
-          auto y = model(x);
-          torch::Tensor s = y.sum();
+        RReLU model {RReLUOptions().lower(lower).upper(upper).inplace(inplace)};
+        auto x = torch::linspace(-10.0, 10.0, size * size * size);
+        x.resize_({size, size, size});
+        if (!inplace) {
+          x.requires_grad_(true);
+        }
+        auto x_orig = x.clone();
+        auto y = model(x);
+        torch::Tensor s = y.sum();
 
-          ASSERT_EQ(s.ndimension(), 0);
-          ASSERT_EQ(y.ndimension(), 3);
-          ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
-          auto z = ((x_orig >= 0) * (x_orig == y) +
-            (x_orig < 0) * (y >= x_orig * upper) * (y <= lower * x_orig)) * 1.0;
-          ASSERT_TRUE(torch::allclose(z, torch::ones_like(z)));
-          if (inplace) {
-            ASSERT_TRUE(torch::allclose(x, y));
-          } else {
-            s.backward();
-          }
+        ASSERT_EQ(s.ndimension(), 0);
+        ASSERT_EQ(y.ndimension(), 3);
+        ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
+        auto z = ((x_orig >= 0) * (x_orig == y) +
+          (x_orig < 0) * (y >= x_orig * upper) * (y <= lower * x_orig)) * 1.0;
+        ASSERT_TRUE(torch::allclose(z, torch::ones_like(z)));
+        if (inplace) {
+          ASSERT_TRUE(torch::allclose(x, y));
+        } else {
+          s.backward();
         }
       }
     }
