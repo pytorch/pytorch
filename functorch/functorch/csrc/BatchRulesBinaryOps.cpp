@@ -136,29 +136,7 @@ std::tuple<Tensor,optional<int64_t>> _s_where_batch_rule(
   return std::make_tuple(at::where(condition_, self_, other_), 0);
 }
 
-void boxed_pointwise_batch_rule(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
-  const auto& schema = op.schema();
-  const auto num_returns = schema.returns().size();
-  const auto num_arguments = schema.arguments().size();
-  const auto arguments = torch::jit::pop(*stack, num_arguments);
-
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-
-  std::vector<std::pair<Tensor, optional<int64_t>>> tensor_inputs;
-  std::vector<int64_t> tensor_pos;
-  for (const auto idx : c10::irange(0, num_arguments)) {
-    const auto& ivalue = arguments[idx];
-    if (ivalue.isTensor()) {
-      Tensor tensor_value;
-      optional<int64_t> tensor_bdim;
-      std::tie(tensor_value, tensor_bdim) = unwrapTensorAtLevel(ivalue.toTensor(), cur_level);
-      tensor_inputs.push_back(std::make_pair(tensor_value, tensor_bdim));
-      tensor_pos.push_back(idx);
-    }
-  }
+void handle_pointwise_ops(std::vector<std::pair<Tensor, optional<int64_t>>> &tensor_inputs) {
   int64_t out_logical_rank = 0;
   for (auto& tensor_input : tensor_inputs) {
     int64_t cur_logical_rank = rankWithoutBatchDim(tensor_input.first, tensor_input.second);
@@ -168,31 +146,9 @@ void boxed_pointwise_batch_rule(const c10::OperatorHandle& op, torch::jit::Stack
     tensor_input.first = moveBatchDimToFront(tensor_input.first, tensor_input.second);
     tensor_input.first = maybePadToLogicalRank(tensor_input.first, tensor_input.second, out_logical_rank);
   }
-
-  // todo(chilli): Handle type promotion semantics.
-  int64_t tensor_idx = 0;
-  TORCH_INTERNAL_ASSERT(tensor_pos.size() > 0);
-  for (const auto arg_idx : c10::irange(0, num_arguments)) {
-    if (tensor_idx >= tensor_pos.size() || arg_idx != tensor_pos[tensor_idx]) {
-      torch::jit::push(stack, arguments[arg_idx]);
-    } else {
-      TORCH_INTERNAL_ASSERT(tensor_idx < tensor_inputs.size());
-      torch::jit::push(stack, tensor_inputs[tensor_idx].first);
-      tensor_idx++;
-    }
-  }
-  op.callBoxed(stack);
-  const auto returns = torch::jit::pop(*stack, num_returns);
-  for (const auto& ret : returns) {
-    if (ret.isTensor()) {
-      torch::jit::push(stack, makeBatched(ret.toTensor(), 0, cur_level));
-    } else {
-      TORCH_INTERNAL_ASSERT(false, "This boxed batching rule does not currently support ops that return non-tensor values");
-    }
-  }
 }
 #define POINTWISE_BOXED(op) \
-  m.impl(#op, torch::CppFunction::makeFromBoxedFunction<boxed_pointwise_batch_rule>());
+  m.impl(#op, torch::CppFunction::makeFromBoxedFunction<boxed_tensor_inputs_batch_rule<decltype(&handle_pointwise_ops), &handle_pointwise_ops>>());
 
 
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
@@ -215,12 +171,12 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
 #define BINARY_SCALAR_3(op, tensor_tensor, tensor_scalar, scalar_tensor) \
   BINARY_POINTWISE2(op, tensor_tensor);\
   UNARY_POINTWISE2(op, tensor_scalar);\
-  UNARY_SCALAR_POINTWISE2(op, scalar_tensor);
+  POINTWISE_BOXED(op.scalar_tensor);
 
 #define BINARY_SCALAR_3_Tensor(op, tensor_scalar, scalar_tensor) \
   BINARY_POINTWISE(op);\
   UNARY_POINTWISE2(op, tensor_scalar);\
-  UNARY_SCALAR_POINTWISE2(op, scalar_tensor);
+  POINTWISE_BOXED(op.scalar_tensor);
 
   // Batching rule registrations start
   BINARY_SCALAR_2(add, Tensor, Scalar);
