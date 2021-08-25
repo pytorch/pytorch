@@ -92,11 +92,11 @@ class TestFunctionSchema(TestCase):
         new_schema_same_out = parse_schema('foo(Tensor self, *, int a, int b=1, Tensor(a!) out) -> Tensor(a!)')
         new_schema_wrong_default = parse_schema('foo(Tensor self, *, int b=1, int a, Tensor(a!) out) -> Tensor(a!)')
         new_schema_more_out = parse_schema('foo(Tensor self, *, int a, int b=1, Tensor(a!) out, Tensor(b!) b) -> Tensor(a!)')
-        new_schema_more_out_wrong_pos = parse_schema('foo(Tensor self, *, int a, int b=1, Tensor(b!) b, Tensor(a!) out) -> Tensor(a!)')
+        new_schema_wrong_pos = parse_schema('foo(Tensor self, *, int a, int b=1, Tensor(b!) b, Tensor(a!) out) -> Tensor(a!)')
         self.assertTrue(new_schema_same_out.is_backward_compatible_with(old_schema))
         self.assertTrue(new_schema_more_out.is_backward_compatible_with(old_schema))
         self.assertFalse(new_schema_wrong_default.is_backward_compatible_with(old_schema))
-        self.assertFalse(new_schema_more_out_wrong_pos.is_backward_compatible_with(old_schema))
+        self.assertFalse(new_schema_wrong_pos.is_backward_compatible_with(old_schema))
 
         # cases where out arg is not provided
         old_schema_without_arg = parse_schema('foo(Tensor self, int a, int b=1) -> int')
