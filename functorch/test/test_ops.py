@@ -26,6 +26,7 @@ from common_utils import (
     opinfo_in_dict,
     xfail,
     skipOps,
+    check_vmap_fallback,
 )
 import types
 from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map
@@ -364,6 +365,163 @@ class TestOperators(TestCase):
                 self.assertEqual(loop_out, batched_out, atol=1e-4, rtol=1e-4)
 
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    @skipOps('TestOperators', 'test_vmapvjp_has_batch_rule', {
+        xfail('__getitem__'),
+        xfail('__rpow__'),
+        xfail('addbmm'),
+        xfail('addcdiv'),
+        xfail('addmv'),
+        xfail('atanh'),
+        xfail('baddbmm'),
+        xfail('cdist'),
+        xfail('cholesky'),
+        xfail('clamp'),
+        xfail('clamp', 'scalar'),
+        xfail('complex'),
+        xfail('copysign'),
+        xfail('corrcoef'),
+        xfail('cross'),
+        xfail('cummax'),
+        xfail('cummin'),
+        xfail('cumprod'),
+        xfail('cumulative_trapezoid'),
+        xfail('diag'),
+        xfail('diag_embed'),
+        xfail('diagonal'),
+        xfail('diff'),
+        xfail('dsplit'),
+        xfail('eig'),
+        xfail('einsum'),
+        xfail('fft.fftn'),
+        xfail('fft.hfft'),
+        xfail('fft.ifftn'),
+        xfail('fft.ihfft'),
+        xfail('fft.irfft'),
+        xfail('fft.irfftn'),
+        xfail('fft.rfft'),
+        xfail('fft.rfftn'),
+        xfail('fill_'),
+        xfail('float_power'),
+        xfail('fmax'),
+        xfail('fmin'),
+        xfail('gradient'),
+        xfail('hsplit'),
+        xfail('index_add'),
+        xfail('index_copy'),
+        xfail('index_fill'),
+        xfail('index_put'),
+        xfail('index_select'),
+        xfail('kthvalue'),
+        xfail('lerp'),
+        xfail('linalg.cholesky'),
+        xfail('linalg.cholesky_ex'),
+        xfail('linalg.cond'),
+        xfail('linalg.det'),
+        xfail('linalg.eig'),
+        xfail('linalg.eigh'),
+        xfail('linalg.eigvals'),
+        xfail('linalg.householder_product'),
+        xfail('linalg.inv'),
+        xfail('linalg.matrix_norm'),
+        xfail('linalg.matrix_power'),
+        xfail('linalg.norm'),
+        xfail('linalg.pinv'),
+        xfail('linalg.pinv', 'hermitian'),
+        xfail('linalg.slogdet'),
+        xfail('linalg.solve'),
+        xfail('linalg.svd'),
+        xfail('linalg.tensorinv'),
+        xfail('linalg.vector_norm'),
+        xfail('log_softmax'),
+        xfail('log_softmax', 'dtype'),
+        xfail('logcumsumexp'),
+        xfail('logdet'),
+        xfail('logit'),
+        xfail('lu'),
+        xfail('lu_solve'),
+        xfail('lu_unpack'),
+        xfail('masked_fill'),
+        xfail('masked_scatter'),
+        xfail('masked_select'),
+        xfail('matrix_exp'),
+        xfail('max', 'reduction_no_dim'),
+        xfail('max', 'reduction_with_dim'),
+        xfail('median'),
+        xfail('min', 'reduction_no_dim'),
+        xfail('min', 'reduction_with_dim'),
+        xfail('mode'),
+        xfail('msort'),
+        xfail('nanmedian'),
+        xfail('nanquantile'),
+        xfail('nansum'),
+        xfail('narrow'),
+        xfail('nn.functional.adaptive_avg_pool2d'),
+        xfail('nn.functional.avg_pool2d'),
+        xfail('nn.functional.conv_transpose2d'),
+        xfail('nn.functional.cross_entropy', 'mean'),
+        xfail('nn.functional.cross_entropy', 'none'),
+        xfail('nn.functional.cross_entropy', 'sum'),
+        xfail('nn.functional.gelu'),
+        xfail('nn.functional.grid_sample'),
+        xfail('nn.functional.interpolate', 'area'),
+        xfail('nn.functional.pad', 'circular'),
+        xfail('nn.functional.pad', 'reflect'),
+        xfail('nn.functional.pad', 'replicate'),
+        xfail('nn.functional.unfold'),
+        xfail('norm', 'fro'),
+        xfail('norm', 'inf'),
+        xfail('norm', 'nuc'),
+        xfail('pinverse'),
+        xfail('pow'),
+        xfail('prod'),
+        xfail('put'),
+        xfail('quantile'),
+        xfail('renorm'),
+        xfail('roll'),
+        xfail('rot90'),
+        xfail('scatter_add'),
+        xfail('scatter'),
+        xfail('select'),
+        xfail('solve'),
+        xfail('sort'),
+        xfail('svd'),
+        xfail('symeig'),
+        xfail('take'),
+        xfail('tensor_split'),
+        xfail('to_sparse'),
+        xfail('topk'),
+        xfail('trace'),
+        xfail('trapezoid'),
+        xfail('trapz'),
+        xfail('unfold'),
+        xfail('vdot'),
+        xfail('view_as_complex'),
+        xfail('vsplit'),
+    })
+    def test_vmapvjp_has_batch_rule(self, device, dtype, op):
+        # These are too annoying to put into the list above
+        if op.name in {'nn.functional.linear', 'nn.functional.conv2d'}:
+            self.skipTest("Skipped! ExpectedF failures")
+        if not op.supports_autograd:
+            self.skipTest("Skipped! Autograd not supported.")
+            return
+
+        samples = op.sample_inputs(device, dtype, requires_grad=True)
+
+        # TODO: test in-place
+        if is_inplace(op, op.get_op()):
+            self.skipTest("Skipped! NYI: inplace-testing not supported.")
+            return
+
+        def test():
+            for sample in samples:
+                fn, args = get_vjpfull_variant(op, sample)
+                for _ in get_fallback_and_vmap_exhaustive(fn, args, {}, compute_loop_out=False):
+                    pass
+
+        check_vmap_fallback(self, test, op, dry_run=False)
+
+    @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vjpvmap', vjp_fail.union({
         xfail('__getitem__'),
         xfail('broadcast_to'),
@@ -381,6 +539,9 @@ class TestOperators(TestCase):
         xfail('vsplit'),
     }))
     def test_vjpvmap(self, device, dtype, op):
+        # NB: there is no vjpvmap_has_batch_rule test because that is almost
+        # certainly redundant with the vmap_has_batch_rule test in test_vmap.py
+
         if not op.supports_autograd:
             # If the op doesn't support autograd, vmap(op) won't either
             self.skipTest("Skipped! Autograd not supported.")

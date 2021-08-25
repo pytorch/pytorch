@@ -30,6 +30,9 @@ void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Sta
 bool isVmapFallbackWarningEnabled();
 void setVmapFallbackWarningEnabled(bool enabled);
 
+bool isVmapFallbackEnabled();
+void setVmapFallbackEnabled(bool enabled);
+
 template <typename A> A vector_to_result(const std::vector<IValue>& buffer) {
   return buffer[0].to<A>();
 }
