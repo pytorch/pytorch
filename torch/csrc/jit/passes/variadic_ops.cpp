@@ -122,5 +122,14 @@ bool RemoveListMutationAndUseVariadicCat(const std::shared_ptr<Graph>& graph) {
   return RemoveListMutationAndUseVariadicOp(graph, aten::cat, prim::VarConcat);
 }
 
+bool UseVariadicStack(const std::shared_ptr<Graph>& graph) {
+  return UseVariadicOp(graph, aten::stack, prim::VarStack);
+}
+
+bool RemoveListMutationAndUseVariadicStack(
+    const std::shared_ptr<Graph>& graph) {
+  return RemoveListMutationAndUseVariadicOp(graph, aten::stack, prim::VarStack);
+}
+
 } // namespace jit
 } // namespace torch
