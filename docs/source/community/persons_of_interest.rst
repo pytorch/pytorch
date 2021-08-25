@@ -120,33 +120,59 @@ Build + CI
 
 -  Nikita Shulga (`malfet <https://github.com/malfet>`__)
 -  Eli Uriegas (`seemethere <https://github.com/seemethere>`__)
--  Zhuojie Zhou (zhouzhuojie) (`zhouzhuojie <https://github.com/zhouzhuojie>`__)
+-  Zhuojie Zhou (`zhouzhuojie <https://github.com/zhouzhuojie>`__)
 -  (emeritus) Edward Yang (`ezyang <https://github.com/ezyang>`__)
 -  (emeritus) Karl Ostmo (`kostmo <https://github.com/kostmo>`__)
 
 Performance Tools
 ~~~~~~~~~~~~~~~~~
 
--  Mingzhe Li (`mingzhe09088 <https://github.com/mingzhe09088>`__)
+-  Victor Bittorf (`bitfort <https://github.com/bitfort>`__)
+-  Gisle Dankel (`gdankel <https://github.com/gdankel>`__)
+-  Taylor Robie (`robieta <https://github.com/robieta>`__)
+-  Xu Zhao (`xuzhao9 <https://github.com/xuzhao9>`__)
+-  Geeta Chauhan (`chauhang <https://github.com/chauhang>`__)
+-  (emeritus) Natalia Gimelshein (`ngimel <https://github.com/ngimel>`__)
+-  (emeritus) Mingzhe Li (`mingzhe09088 <https://github.com/mingzhe09088>`__)
 
 C++ API
 ~~~~~~~
 
--  Will Feng (`yf225 <https://github.com/yf225>`__)
+-  Joel Schlosser (`jbschlosser <https://github.com/jbschlosser>`__)
+-  (emeritus) Will Feng (`yf225 <https://github.com/yf225>`__)
 
 C10 utils and operator dispatch
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
--  Sebastian Messmer (`smessmer <https://github.com/smessmer>`__)
+-  Brian Hirsh (`bdhirsh <https://github.com/bdhirsh>`__)
+-  Edward Yang (`ezyang <https://github.com/ezyang>`__)
 -  Dmytro Dzhulgakov (`dzhulgakov <https://github.com/dzhulgakov>`__)
+-  (emeritus) Sebastian Messmer (`smessmer <https://github.com/smessmer>`__)
 
 ONNX <-> PyTorch
 ~~~~~~~~~~~~~~~~
-
--  Lu Fang (`houseroad <https://github.com/houseroad>`__)
--  Lara Haidar (`lara-hdr <https://github.com/lara-hdr>`__)
--  Spandan Tiwari (`spandantiwari <https://github.com/spandantiwari>`__)
+-  Negin Raoof (`neginraoof <https://github.com/neginraoof>`__)
+-  Gary Miguel (`garymm <https://github.com/garymm>`__)
 -  Bowen Bao (`BowenBao <https://github.com/BowenBao>`__)
+-  (emeritus) Lu Fang (`houseroad <https://github.com/houseroad>`__)
+-  (emeritus) Lara Haidar (`lara-hdr <https://github.com/lara-hdr>`__)
+-  (emeritus) Spandan Tiwari (`spandantiwari <https://github.com/spandantiwari>`__)
+
+Mobile
+~~~~~~
+-  David Reiss (`dreiss <https://github.com/dreiss>`__)
+-  Raziel Guevara (`raziel <https://github.com/raziel>`__)
+-  Linbin Yu (`linbinyu <https://github.com/linbinyu>`__)
+-  Ivan Kobzarev (`IvanKobzarev <https://github.com/IvanKobzarev>`__)
+-  Tao Xu (`xta0 <https://github.com/xta0>`__)
+
+Model Compression & Optimization 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+-  Raghuraman Krishnamoorthi (`raghuramank100 <https://github.com/raghuramank100>`__)
+-  Jerry Zhang (`jerryzh168 <https://github.com/jerryzh168>`__)
+-  Zafar Takhirov (`z-a-f <https://github.com/z-a-f>`__)
+-  Supriya Rao (`supriyar <https://github.com/supriyar>`__)
+
 
 Windows
 ~~~~~~~
@@ -166,31 +192,39 @@ Library-level maintainers
 XLA
 ~~~
 
--  Ailing Zhang (`ailzhang <https://github.com/ailzhang>`__)
+-  Jack Cao (`JackCaoG <https://github.com/JackCaoG>`__)
+-  Daniel Sohn (`jysohn23 <https://github.com/jysohn23>`__)
+-  Zach Cain (`zcain117 <https://github.com/zcain117>`__)
+-  Brian Hirsch (`bdhirsh <https://github.com/bdhirsh>`__)
 -  Gregory Chanan (`gchanan <https://github.com/gchanan>`__)
--  Davide Libenzi (`dlibenzi <https://github.com/dlibenzi>`__)
--  Alex Suhan (`asuhan <https://github.com/asuhan>`__)
+-  (emeritus) Ailing Zhang (`ailzhang <https://github.com/ailzhang>`__)
+-  (emeritus) Davide Libenzi (`dlibenzi <https://github.com/dlibenzi>`__)
+-  (emeritus) Alex Suhan (`asuhan <https://github.com/asuhan>`__)
 
 TorchServe
 ~~~~~~~~~~
 
-- Geeta Chauhan (`chauhang <https://github.com/chauhang>`__)
-- Manoj Rao (`mycpuorg <https://github.com/mycpuorg>`__)
-- Vamshi Dantu (`vdantu <https://github.com/vdantu>`__)
-- Dhanasekar Karuppasamy (`dhanainme <https://github.com/dhanainme>`__)
+-  Geeta Chauhan (`chauhang <https://github.com/chauhang>`__)
+-  Manoj Rao (`mycpuorg <https://github.com/mycpuorg>`__)
+-  Vamshi Dantu (`vdantu <https://github.com/vdantu>`__)
+-  Dhanasekar Karuppasamy (`dhanainme <https://github.com/dhanainme>`__)
 
 TorchVision
 ~~~~~~~~~~~
 
-- Francisco Massa (`fmassa <https://github.com/fmassa>`__)
+-  Francisco Massa (`fmassa <https://github.com/fmassa>`__)
+-  Vasilis Vryniotis (`datumbox <https://github.com/datumbox>`__)
 
 TorchText
 ~~~~~~~~~
 
-- Guanheng George Zhang (`zhangguanheng66 <https://github.com/zhangguanheng66>`__)
-- Christian Puhrsch (`cpuhrsch <https://github.com/cpuhrsch>`__)
+-  Parmeet Singh Bhatia (`parmeet <https://github.com/parmeet>`__)
+-  Steven Liu (`hudeven <https://github.com/hudeven>`__)
+-  (emeritus) Guanheng George Zhang (`zhangguanheng66 <https://github.com/zhangguanheng66>`__)
+-  (emeritus) Christian Puhrsch (`cpuhrsch <https://github.com/cpuhrsch>`__)
 
 TorchAudio
 ~~~~~~~~~~
 
-- Vincent QB (`vincentqb <https://github.com/vincentqb>`__)
+-  Moto Hira (`mthrok <https://github.com/mthrok>`__)
+-  (emeritus) Vincent QB (`vincentqb <https://github.com/vincentqb>`__)
