@@ -5364,14 +5364,6 @@
 - func: choose_qparams_optimized(Tensor input, int numel, int n_bins, float ratio, int bit_width) -> (Tensor, Tensor)
   variants: function
 
-- func: autocast_to_fp16(Tensor(a) self) -> Tensor(a)
-  variants: method
-  device_guard: False
-
-- func: autocast_to_fp32(Tensor(a) self) -> Tensor(a)
-  variants: method
-  device_guard: False
-
 - func: _to_copy(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, bool non_blocking=False, MemoryFormat? memory_format=None) -> Tensor
   device_check: NoCheck
   device_guard: False
