@@ -1300,15 +1300,11 @@ def acc_ops_quantize_per_tensor(network, target, args, kwargs, name):
     if q_zero_point != 0:
         raise RuntimeError(f"Only support zero_point == 0, get {q_zero_point}")
 
-    # temporarily set q_scale to 1 to make sure the q_scale is different
-    # for quantize and dequantize to avoid the error
-    # TODO: follow up with nvidia TensorRT team to repro and fix the problem
-    q_scale = 1
     scale_layer = network.add_constant((1,), trt.Weights(np.ascontiguousarray([float(q_scale)], dtype=np.float32)))
     scale_layer.name = input_val.name + ".quant.scale"
     scale = scale_layer.get_output(0)
-    assert trt.__version__ > "8.0", "Explicit quantize op is only supported in "
-    "TensorRT 8.0 or above, current TensorRT version:" + trt.__version__
+    # assert trt.__version__ > "8.0", "Explicit quantize op is only supported in "
+    # "TensorRT 8.0 or above, current TensorRT version:" + trt.__version__
     layer = network.add_quantize(input=input_val, scale=scale)
     layer.axis = 0
     layer.name = input_val.name + ".quant"
@@ -1316,9 +1312,6 @@ def acc_ops_quantize_per_tensor(network, target, args, kwargs, name):
 
 @tensorrt_converter(acc_ops.dequantize)
 def acc_ops_dequantize(network, target, args, kwargs, name):
-    """
-    Currently just a no-op.
-    """
     input_val = kwargs["input"]
 
     if not isinstance(input_val, trt.tensorrt.ITensor):
@@ -1339,8 +1332,8 @@ def acc_ops_dequantize(network, target, args, kwargs, name):
     scale_layer = network.add_constant((1,), trt.Weights(np.ascontiguousarray([q_scale], dtype=np.float32)))
     scale_layer.name = input_val.name + ".dequant.scale"
     scale = scale_layer.get_output(0)
-    assert trt.__version__ > "8.0", "Explicit dequantize op is only supported in "
-    "TensorRT 8.0 or above, current TensorRT version:" + trt.__version__
+    # assert trt.__version__ > "8.0", "Explicit dequantize op is only supported in "
+    # "TensorRT 8.0 or above, current TensorRT version:" + trt.__version__
     layer = network.add_dequantize(input=input_val, scale=scale)
     layer.name = input_val.name + ".dequant"
     layer.axis = 0
