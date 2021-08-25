@@ -2861,6 +2861,28 @@ class TestQuantizeFx(QuantizationTestCase):
             if n.target == "lstm":
                 self.assertEqual(type(n.args[1]), tuple)
 
+    def test_lowering(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return torch.nn.functional.relu(x)
+
+        m = M().eval()
+        m = prepare_fx(m, {"": default_qconfig})
+        m_copy = copy.deepcopy(m)
+        m = convert_fx(m)
+        m_ref = convert_fx(m_copy, is_reference=True)
+        node_occurrence = {
+            ns.call_function(torch.quantize_per_tensor): 1,
+            ns.call_method("dequantize"): 1
+        }
+        node_occurrence_ref = {
+            ns.call_function(torch.quantize_per_tensor): 2,
+            ns.call_method("dequantize"): 2
+        }
+
+        self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
+        self.checkGraphModuleNodes(m_ref, expected_node_occurrence=node_occurrence_ref)
+
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
     """Unit tests for individual ops
