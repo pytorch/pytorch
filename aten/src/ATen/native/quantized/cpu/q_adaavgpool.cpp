@@ -14,9 +14,7 @@
 namespace at {
 namespace native {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(qadaptive_avg_pool2d_nhwc_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(qadaptive_avg_pool3d_ndhwc_stub);
 
 namespace {
