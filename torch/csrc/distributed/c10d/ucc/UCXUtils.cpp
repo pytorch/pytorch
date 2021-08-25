@@ -1,6 +1,6 @@
 #include <c10d/ucc/UCXUtils.hpp>
 #include <string>
-#include <iostream>
+
 namespace c10d {
 
 class UCPContext {
@@ -26,8 +26,14 @@ UCPContext::UCPContext() {
   params.request_size = sizeof(UCPRequest::Data);
   params.features = UCP_FEATURE_TAG;
   params.request_init = [](void* request) {
+    // This function is only invoked the very first time when
+    // a request memory is allocated. A request memory may be
+    // reused after `ucp_request_free`, if this is the case,
+    // this function will NOT be invoked. So besides this function
+    // we also need to manually reset the request memory before
+    // every `ucp_request_free`.
     auto r = reinterpret_cast<UCPRequest::Data *>(request);
-    r->status = UCS_INPROGRESS;
+    r->reset();
   };
   params.request_cleanup = [](void*) {};
   st = ucp_init(&params, config, &context);

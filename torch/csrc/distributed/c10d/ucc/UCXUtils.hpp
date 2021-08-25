@@ -36,6 +36,10 @@ public:
   struct Data {
     ucs_status_t status;
     ucp_tag_recv_info_t info;
+    void reset() {
+      status = UCS_INPROGRESS;
+      info = {};
+    }
   };
 
   ucs_status_t status() const {
@@ -50,7 +54,16 @@ public:
     return data->info;
   }
 
-  ~UCPRequest() { if (data != nullptr) { ucp_request_free(data); } }
+  ~UCPRequest() {
+    if (data != nullptr) {
+      // Requests may be reused, and when reused, the `request_init`
+      // callback function specified in the context creation will not
+      // be invoked. So we have to manually reset a request before
+      // freeing it.
+      data->reset();
+      ucp_request_free(data);
+    }
+  }
 
 private:
   // Pointer towards the real underlying request object created by UCP.
