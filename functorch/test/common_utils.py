@@ -6,11 +6,14 @@
 
 import itertools
 import torch
+import functorch
 from functorch import vmap
 import torch.utils._pytree as pytree
 from functorch_lagging_op_db import functorch_lagging_op_db
 from functorch_additional_op_db import additional_op_db
 from torch.testing._internal.common_methods_invocations import SkipInfo
+import warnings
+import re
 
 """
 Usage:
@@ -258,3 +261,22 @@ def skipOps(test_case_name, base_test_name, to_skip):
         return fn
     return wrapped
 
+class DisableVmapFallback:
+    def __enter__(self):
+        self.prev_state = functorch._C._is_vmap_fallback_enabled()
+        functorch._C._set_vmap_fallback_enabled(False)
+
+    def __exit__(self, *ignored):
+        functorch._C._set_vmap_fallback_enabled(self.prev_state)
+
+def check_vmap_fallback(test_case, thunk, opinfo, dry_run=False):
+    try:
+        with DisableVmapFallback():
+            thunk()
+    except:
+        if not dry_run:
+            raise
+        if opinfo.variant_test_name:
+            print(f"xfail('{opinfo.name}', '{opinfo.variant_test_name}'),")
+        else:
+            print(f"xfail('{opinfo.name}'),")
