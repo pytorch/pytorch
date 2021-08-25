@@ -23,6 +23,11 @@ void negationFallback(const c10::OperatorHandle& op, DispatchKeySet dispatch_key
   object.fallback_impl(op, dispatch_keys, stack);
 }
 
+void negationFallbackToHandleOnlyMutableInputs(const c10::OperatorHandle& op, DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
+  NegFallback object;
+  object.linalg_fallback(op, dispatch_keys, stack);
+}
+
 TORCH_LIBRARY_IMPL(_, Negative, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&negationFallback>());
 }
@@ -55,6 +60,8 @@ TORCH_LIBRARY_IMPL(aten, Negative, m) {
   m.impl("view", torch::CppFunction::makeFallthrough());
   m.impl("_unsafe_view", torch::CppFunction::makeFallthrough());
   m.impl("reshape", torch::CppFunction::makeFallthrough());
+  m.impl("linalg_solve_triangular", torch::CppFunction::makeFallthrough());
+  m.impl("linalg_solve_triangular.out", torch::CppFunction::makeFromBoxedFunction<&negationFallbackToHandleOnlyMutableInputs>());
 }
 
 } // namespace at
