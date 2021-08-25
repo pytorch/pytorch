@@ -5540,6 +5540,39 @@ def reference_reduction_numpy(f, supports_keepdims=True):
     return wrapper
 
 
+def reference_std_var(f):
+    """Forwards unbiased/correction kwargs as NumPy's equivalent ddof"""
+    g = reference_reduction_numpy(f)
+
+    @wraps(g)
+    def wrapper(x: np.ndarray, *args, **kwargs):
+        assert not ('unbiased' in kwargs and 'correction' in kwargs)
+
+        if 'unbiased' in kwargs:
+            kwargs['ddof'] = int(kwargs.pop('unbiased'))
+        elif 'correction' in kwargs:
+            kwargs['ddof'] = kwargs.pop('correction')
+
+        return g(x, *args, **kwargs)
+
+    return wrapper
+
+
+def generate_std_var_kwargs(t: torch.Tensor, **kwargs):
+    """Generates unbiased/correction kwargs for std/var operators"""
+    yield ((), {'unbiased': True})
+    yield ((), {'unbiased': False})
+
+    # Currently, calling std with correction is only enabled when
+    # both dim and keepdim are provided.
+    if 'dim' in kwargs and 'keepdim' in kwargs:
+        yield ((), {'correction': 0})
+        yield ((), {'correction': 1})
+
+        numel = torch.tensor(t.shape)[kwargs.get('dim')].prod()
+        yield ((), {'correction': numel // 2})
+
+
 # Operator database (sorted alphabetically)
 op_db: List[OpInfo] = [
     UnaryUfuncInfo('abs',
@@ -6924,14 +6957,6 @@ op_db: List[OpInfo] = [
                SkipInfo('TestCommon', 'test_conj_view', device_type='cpu'),
            )),
     OpInfo('max',
-           op=torch.max,
-           variant_test_name='binary',
-           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-           sample_inputs_func=sample_inputs_max_min_binary,
-           supports_forward_ad=True,
-           assert_autodiffed=True,),
-    OpInfo('max',
-           op=torch.max,
            variant_test_name='reduction_with_dim',
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            sample_inputs_func=sample_inputs_max_min_reduction_with_dim,
@@ -6940,7 +6965,6 @@ op_db: List[OpInfo] = [
                # max does not correctly warn when resizing out= inputs
                SkipInfo('TestCommon', 'test_out'),)),
     OpInfo('max',
-           op=torch.max,
            variant_test_name='reduction_no_dim',
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            supports_out=False,
@@ -7035,14 +7059,6 @@ op_db: List[OpInfo] = [
            autodiff_nonfusible_nodes=[],
            supports_forward_ad=True),
     OpInfo('min',
-           op=torch.min,
-           variant_test_name='binary',
-           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-           sample_inputs_func=sample_inputs_max_min_binary,
-           supports_forward_ad=True,
-           assert_autodiffed=True,),
-    OpInfo('min',
-           op=torch.min,
            variant_test_name='reduction_with_dim',
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            sample_inputs_func=sample_inputs_max_min_reduction_with_dim,
@@ -7052,7 +7068,6 @@ op_db: List[OpInfo] = [
                SkipInfo('TestCommon', 'test_out'),
            )),
     OpInfo('min',
-           op=torch.min,
            variant_test_name='reduction_no_dim',
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            supports_out=False,
@@ -7064,16 +7079,56 @@ op_db: List[OpInfo] = [
     OpInfo('nanquantile',
            dtypes=floating_types(),
            sample_inputs_func=sample_inputs_reduction_quantile),
-    OpInfo('maximum',
-           op=torch.maximum,
-           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-           supports_forward_ad=True,
-           sample_inputs_func=sample_inputs_max_min_binary,),
-    OpInfo('minimum',
-           op=torch.minimum,
-           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-           supports_forward_ad=True,
-           sample_inputs_func=sample_inputs_max_min_binary,),
+    BinaryUfuncInfo(
+        'max',
+        aliases=('maximum',),
+        variant_test_name='binary',
+        dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+        sample_inputs_func=sample_inputs_max_min_binary,
+        supports_forward_ad=True,
+        assert_autodiffed=True,
+        ref=np.maximum,
+        skips=(
+            # FIXME: maximum does not accept scalar inputs
+            SkipInfo('TestBinaryUfuncs', 'test_broadcast_python_scalar'),
+        ),
+    ),
+    BinaryUfuncInfo(
+        'maximum',
+        dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+        supports_forward_ad=True,
+        sample_inputs_func=sample_inputs_max_min_binary,
+        ref=np.maximum,
+        skips=(
+            # FIXME: maximum does not accept scalar inputs
+            SkipInfo('TestBinaryUfuncs', 'test_broadcast_python_scalar'),
+        ),
+    ),
+    BinaryUfuncInfo(
+        'min',
+        aliases=('minimum',),
+        variant_test_name='binary',
+        dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+        sample_inputs_func=sample_inputs_max_min_binary,
+        supports_forward_ad=True,
+        assert_autodiffed=True,
+        ref=np.minimum,
+        skips=(
+            # FIXME: min does not accept scalar inputs
+            SkipInfo('TestBinaryUfuncs', 'test_broadcast_python_scalar'),
+        ),
+    ),
+    BinaryUfuncInfo(
+        'minimum',
+        dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+        supports_forward_ad=True,
+        sample_inputs_func=sample_inputs_max_min_binary,
+        ref=np.minimum,
+        skips=(
+            # FIXME: minimum does not accept scalar inputs
+            SkipInfo('TestBinaryUfuncs', 'test_broadcast_python_scalar'),
+        ),
+    ),
     # `softmax` supports different dtypes based on whether `dtype` argument,
     # is passed or not. Hence two OpInfo entries, one with dtype and other without.
     OpInfo('softmax',
@@ -7685,16 +7740,6 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_legacy_solve,
            check_batched_gradgrad=False,
            decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack]),
-    OpInfo('std',
-           dtypes=floating_and_complex_types_and(torch.half),
-           dtypesIfCPU=floating_and_complex_types_and(torch.half, torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
-           backward_dtypesIfCPU=floating_and_complex_types_and(torch.half, torch.bfloat16),
-           sample_inputs_func=sample_inputs_std_var,
-           # TODO: std does support out in some signatures
-           supports_out=False,
-           assert_autodiffed=True,
-           ),
     UnaryUfuncInfo('tan',
                    ref=np.tan,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
@@ -8446,17 +8491,6 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            assert_autodiffed=True,
            sample_inputs_func=sample_unsqueeze),
-    OpInfo('var',
-           dtypes=floating_and_complex_types_and(torch.half),
-           dtypesIfCPU=floating_and_complex_types_and(torch.half, torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
-           backward_dtypesIfCPU=floating_and_complex_types_and(torch.half, torch.bfloat16),
-           backward_dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
-           sample_inputs_func=sample_inputs_std_var,
-           # TODO: revisit, some var signatures do support out (see std, too)
-           supports_out=False,
-           assert_autodiffed=True,
-           ),
     OpInfo('xlogy',
            aliases=('special.xlogy',),
            dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
@@ -9029,6 +9063,72 @@ op_db: List[OpInfo] = [
             # FIXME: prod does not support passing None to dim
             SkipInfo('TestReductions', 'test_dim_none'),
             SkipInfo('TestReductions', 'test_dim_none_keepdim'),
+        ),
+    ),
+    ReductionOpInfo(
+        'std',
+        nan_policy='propagate',
+        supports_out=False,
+        assert_autodiffed=True,
+        promotes_int_to_float=True,
+        dtypes=floating_and_complex_types_and(torch.half),
+        dtypesIfCPU=floating_and_complex_types_and(torch.half, torch.bfloat16),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
+        sample_inputs_func=sample_inputs_std_var,
+        ref=reference_std_var(np.std),
+        generate_args_kwargs=generate_std_var_kwargs,
+        decorators=(
+            DecorateInfo(toleranceOverride({
+                torch.float16: tol(atol=1e-03, rtol=1e-03),
+            }), 'TestReductions', 'test_ref_small_input'),
+        ),
+        skips=(
+            # FIXME: cannot specify keepdim without dim
+            SkipInfo('TestReductions', 'test_dim_default_keepdim'),
+            # FIXME: dim=None not supported
+            SkipInfo('TestReductions', 'test_dim_none'),
+            SkipInfo('TestReductions', 'test_dim_none_keepdim'),
+            # FIXME: dim=[] reduces all dimensions
+            SkipInfo('TestReductions', 'test_dim_empty'),
+            SkipInfo('TestReductions', 'test_dim_empty_keepdim'),
+            # TODO(@heitorschueroff) std return float for complex types
+            # need to find a better way to model result dtype
+            SkipInfo('TestReductions', 'test_result_dtype'),
+            # NumPy is giving NaN for this
+            SkipInfo('TestReductions', 'test_ref_large_input'),
+        ),
+    ),
+    ReductionOpInfo(
+        'var',
+        nan_policy='propagate',
+        supports_out=False,
+        assert_autodiffed=True,
+        promotes_int_to_float=True,
+        dtypes=floating_and_complex_types_and(torch.half),
+        dtypesIfCPU=floating_and_complex_types_and(torch.half, torch.bfloat16),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
+        sample_inputs_func=sample_inputs_std_var,
+        ref=reference_std_var(np.var),
+        generate_args_kwargs=generate_std_var_kwargs,
+        decorators=(
+            DecorateInfo(toleranceOverride({
+                torch.float16: tol(atol=1e-03, rtol=1e-02),
+            }), 'TestReductions', 'test_ref_small_input'),
+        ),
+        skips=(
+            # FIXME: cannot specify keepdim without dim
+            SkipInfo('TestReductions', 'test_dim_default_keepdim'),
+            # FIXME: dim=None not supported
+            SkipInfo('TestReductions', 'test_dim_none'),
+            SkipInfo('TestReductions', 'test_dim_none_keepdim'),
+            # FIXME: dim=[] reduces all dimensions
+            SkipInfo('TestReductions', 'test_dim_empty'),
+            SkipInfo('TestReductions', 'test_dim_empty_keepdim'),
+            # TODO(@heitorschueroff) std return float for complex types
+            # need to find a better way to model result dtype
+            SkipInfo('TestReductions', 'test_result_dtype'),
+            # NumPy is giving NaN for this
+            SkipInfo('TestReductions', 'test_ref_large_input'),
         ),
     ),
     ReductionOpInfo(
