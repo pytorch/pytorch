@@ -4,12 +4,12 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
-void CppPrinter::visit(const Allocate* alloc) {
+void CppPrinter::visit(AllocatePtr alloc) {
   constexpr size_t kAllocOnStackThresholdSize = 512;
 
   size_t size = 1;
   for (auto dim : alloc->dims()) {
-    const IntImm* v = dynamic_cast<const IntImm*>(dim);
+    IntImmPtr v = to<IntImm>(dim);
     if (v) {
       size *= v->value();
     } else {
@@ -30,8 +30,8 @@ void CppPrinter::visit(const Allocate* alloc) {
   }
 }
 
-void CppPrinter::visit(const Free* free) {
-  const Var* var = free->buffer_var();
+void CppPrinter::visit(FreePtr free) {
+  VarPtr var = free->buffer_var();
   if (allocated_on_heap_.count(var)) {
     emitIndent();
     os() << "free(" << name_manager()->get_unique_name(var) << ");"

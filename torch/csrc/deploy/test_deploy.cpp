@@ -63,7 +63,7 @@ TEST(TorchpyTest, InitTwice) {
 TEST(TorchpyTest, DifferentInterps) {
   torch::deploy::InterpreterManager m(2);
   m.register_module_source("check_none", "check = id(None)\n");
-  int64_t id0, id1;
+  int64_t id0 = 0, id1 = 0;
   {
     auto I = m.all_instances()[0].acquire_session();
     id0 = I.global("check_none", "check").toIValue().toInt();
@@ -132,6 +132,10 @@ TEST(TorchpyTest, MultiSerialSimpleModel) {
   kwargs["input"] = input;
   auto jit_output_kwargs = model.call_kwargs(kwargs).toTensor();
   ASSERT_TRUE(ref_output.equal(jit_output_kwargs));
+
+  // test hasattr
+  ASSERT_TRUE(model.hasattr("forward"));
+  ASSERT_FALSE(model.hasattr("make_prediction"));
 }
 
 TEST(TorchpyTest, ThreadedSimpleModel) {
@@ -308,6 +312,7 @@ TEST(TorchpyTest, SharedLibraryLoad) {
       I.global("sys", "path").attr("append")({"torch/csrc/deploy"});
       I.global("test_deploy_python", "setup")({getenv("PATH")});
     } else {
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
       char buf[PATH_MAX];
       strncpy(buf, test_lib_path, PATH_MAX);
       dirname(buf);
