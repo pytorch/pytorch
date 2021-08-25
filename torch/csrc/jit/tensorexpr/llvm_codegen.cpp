@@ -424,9 +424,7 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   llvm::FunctionType* fntype = llvm::FunctionType::get(retTy, params, false);
   fn_ = llvm::Function::Create(
       fntype, llvm::Function::PrivateLinkage, "pytorch", module_.get());
-  fn_->addAttribute(
-      llvm::AttributeList::AttrIndex::FunctionIndex,
-      llvm::Attribute::AlwaysInline);
+  fn_->addFnAttr(llvm::Attribute::AlwaysInline);
   for (const auto i : c10::irange(args.size())) {
     if (!args[i].isVar()) {
       fn_->addParamAttr(i, llvm::Attribute::NoAlias);
@@ -497,12 +495,13 @@ class LLVMIntrinsicsExpander : public GenericIntrinsicsExpander {
     if (v->op_type() == kTanh) {
       ScalarType stype = v->dtype().scalar_type();
       if (stype == ScalarType::Float) {
-        return fast_tanh(v->param(0)->accept_mutator(this)).node();
+        return fast_tanh(ExprHandle(v->param(0)->accept_mutator(this))).node();
       }
     } else if (v->op_type() == kSigmoid) {
       ScalarType stype = v->dtype().scalar_type();
       if (stype == ScalarType::Float) {
-        return fast_sigmoid(v->param(0)->accept_mutator(this)).node();
+        return fast_sigmoid(ExprHandle(v->param(0)->accept_mutator(this)))
+            .node();
       }
     }
     // TODO: fast exp

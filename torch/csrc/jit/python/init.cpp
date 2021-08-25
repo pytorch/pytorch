@@ -203,8 +203,9 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_onnx_eval_peephole",
           [](std::shared_ptr<Graph>& graph,
-             std::map<std::string, IValue>& paramsDict) {
-            EvalPeepholeONNX(graph, paramsDict);
+             std::map<std::string, IValue>& paramsDict,
+             bool isAllowedToAdjustGraphInputs) {
+            EvalPeepholeONNX(graph, paramsDict, isAllowedToAdjustGraphInputs);
             return paramsDict;
           },
           pybind11::return_value_policy::move)
@@ -590,7 +591,7 @@ void initJITBindings(PyObject* module) {
       .def("_jit_can_fuse_on_cpu", &canFuseOnCPU)
       .def("_jit_can_fuse_on_gpu", &canFuseOnGPU)
       .def("_jit_can_fuse_on_cpu_legacy", &canFuseOnCPULegacy)
-      .def("_jit_override_can_fuse_on_cpu_legacy", &canFuseOnCPULegacy)
+      .def("_jit_override_can_fuse_on_cpu_legacy", &overrideCanFuseOnCPULegacy)
       .def(
           "_jit_differentiate",
           [](Graph& g) {
