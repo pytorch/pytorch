@@ -119,8 +119,7 @@ def make_tensor(
         low, high = _modify_low_high(low, high, ranges_floats[0], ranges_floats[1], -9, 9, dtype)
         rand_val = torch.rand(size, device=device, dtype=dtype)
         result = high * rand_val + low * (1 - rand_val)
-    else:
-        assert dtype in _complex_types
+    elif dtype in _complex_types:
         float_dtype = torch.float if dtype is torch.cfloat else torch.double
         ranges_floats = (torch.finfo(float_dtype).min, torch.finfo(float_dtype).max)
         low, high = _modify_low_high(low, high, ranges_floats[0], ranges_floats[1], -9, 9, dtype)
@@ -129,6 +128,10 @@ def make_tensor(
         real = high * real_rand_val + low * (1 - real_rand_val)
         imag = high * imag_rand_val + low * (1 - imag_rand_val)
         result = torch.complex(real, imag)
+    else:
+        raise TypeError(f"Given dtype {dtype} is not supported for make_tensor, if you think"
+                        " that it should be supported, please file an issue"
+                        " here: https://github.com/pytorch/pytorch/issues")
 
     if noncontiguous and result.numel() > 1:
         result = torch.repeat_interleave(result, 2, dim=-1)
@@ -139,11 +142,14 @@ def make_tensor(
             replace_with = torch.tensor(1, device=device, dtype=dtype)
         elif dtype in _floating_types:
             replace_with = torch.tensor(torch.finfo(dtype).tiny, device=device, dtype=dtype)
-        else:
-            assert dtype in _complex_types
+        elif dtype in _complex_types:
             float_dtype = torch.float if dtype is torch.cfloat else torch.double
             float_eps = torch.tensor(torch.finfo(float_dtype).tiny, device=device, dtype=float_dtype)
             replace_with = torch.complex(float_eps, float_eps)
+        else:
+            raise TypeError(f"Given dtype {dtype} is not supported for make_tensor, if you think"
+                            " that it should be supported, please file an issue"
+                            " here: https://github.com/pytorch/pytorch/issues")
         result[result == 0] = replace_with
 
     if dtype in _floating_types or\
