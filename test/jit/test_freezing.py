@@ -8,9 +8,8 @@ from torch._C import parse_ir
 from torch.testing import FileCheck
 from torch.testing._internal.common_quantized import override_quantized_engine
 from torch.testing._internal.common_quantization import skipIfNoFBGEMM
-from torch.testing._internal.common_utils import set_default_dtype
+from torch.testing._internal.common_utils import set_default_dtype, freeze_rng_state
 from torch.utils import mkldnn as mkldnn_utils
-
 
 from torch.jit._recursive import wrap_cpp_module
 from typing import Any
@@ -163,6 +162,30 @@ class TestFreezing(JitTestCase):
         self.assertFalse(mf.sub2.hasattr('a'))  # verify a is removed in sub2
         output_f = mf.forward(input)
         self.assertEqual(output_s, output_f)
+
+    def test_freezing_sparse(self):
+        # https://github.com/pytorch/pytorch/issues/63987
+        with torch._jit_internal._disable_emit_hooks():
+            class SparseTensorModule(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.a = torch.sparse.FloatTensor()
+                    self.b = torch.sparse_coo_tensor(torch.tensor(([0], [2]), dtype=torch.int64),
+                                                     torch.tensor([1.], dtype=torch.float64))
+
+                def forward(self):
+                    return torch.rand([1, 3]) + self.b, self.a
+
+            module = SparseTensorModule()
+            scripted = torch.jit.script(module)
+            scripted.eval()
+            frozen = torch.jit.freeze(scripted)
+
+            with freeze_rng_state():
+                out_frozen = frozen()
+            with freeze_rng_state():
+                out_eager = module()
+            self.assertEqual(out_frozen, out_eager)
 
     def test_freeze_module_with_fork(self):
         class SubModule(nn.Module):
