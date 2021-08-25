@@ -46,8 +46,8 @@ env:
   no_proxy: !{{ squid_no_proxy }}
 {%- if cuda_version != "cpu" %}
   TORCH_CUDA_ARCH_LIST: "7.0"
-  USE_CUDA: 1
 {%- endif %}
+  USE_CUDA: !{{ 1 if cuda_version != "cpu" else 0 }}
 
 concurrency:
   group: !{{ build_environment }}-${{ github.event.pull_request.number || github.sha }}
