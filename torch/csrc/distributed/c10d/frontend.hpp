@@ -266,13 +266,15 @@ class TORCH_PYTHON_API DistributedC10d : public torch::CustomClassHolder {
 // something.
 struct TORCH_API NCCLProcessGroupProvider {
   virtual c10::intrusive_ptr<ProcessGroup> get(
-      c10::intrusive_ptr<PrefixStore> prefix_store,
-      int64_t rank,
-      int64_t world_size,
-      std::chrono::milliseconds timeout) const {
+      c10::intrusive_ptr<PrefixStore> /*prefix_store*/,
+      int64_t /*rank*/,
+      int64_t /*world_size*/,
+      std::chrono::milliseconds /*timeout*/) const {
     AT_ERROR(
         "Attempting to create NCCL-based process group while NCCL is either not enabled or built");
   }
+
+  virtual ~NCCLProcessGroupProvider() = default;
 };
 
 TORCH_API void registerNCCLProcessGroupProvider(
