@@ -44,8 +44,8 @@ class TestCustomOperators(TestCase):
         output.sum().backward(go, False, True)
         grad = torch.ones(5, 5)
 
-        self.assertTrue(torch.allclose(x.grad, y + grad))
-        self.assertTrue(torch.allclose(y.grad, x + grad * 2))
+        self.assertEqual(x.grad, y + grad)
+        self.assertEqual(y.grad, x + grad * 2)
 
         # Test with optional arg.
         x.grad.zero_()
@@ -56,9 +56,9 @@ class TestCustomOperators(TestCase):
 
         go = torch.ones((), requires_grad=True)
         output.sum().backward(go, False, True)
-        self.assertTrue(torch.allclose(x.grad, y + grad))
-        self.assertTrue(torch.allclose(y.grad, x + grad * 2))
-        self.assertTrue(torch.allclose(z.grad, grad))
+        self.assertEqual(x.grad, y + grad)
+        self.assertEqual(y.grad, x + grad * 2)
+        self.assertEqual(z.grad, grad)
 
     def test_calling_custom_op_with_autograd_in_nograd_mode(self):
         with torch.no_grad():

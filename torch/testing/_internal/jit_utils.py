@@ -594,7 +594,7 @@ class JitTestCase(JitCommonTestCase):
             for g2, g2_ge in zip(grads2, grads2_ge):
                 if g2 is None and g2_ge is None:
                     continue
-                self.assertTrue(torch.allclose(g2, g2_ge, atol=8e-4, rtol=8e-4))
+                self.assertEqual(g2, g2_ge, atol=8e-4, rtol=8e-4)
 
         return ge
 

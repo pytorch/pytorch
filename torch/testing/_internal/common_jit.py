@@ -136,7 +136,7 @@ def check_against_reference(self, func, reference_func, output_func, args, kwarg
         for g2, g2_test in zip(grads2, grads2_test):
             if g2 is None and g2_test is None:
                 continue
-            self.assertTrue(torch.allclose(g2, g2_test, atol=5e-4, rtol=1e-4))
+            self.assertEqual(g2, g2_test, atol=5e-4, rtol=1e-4)
 
 class JitCommonTestCase(TestCase):
     def createFunctionFromGraph(self, trace):
