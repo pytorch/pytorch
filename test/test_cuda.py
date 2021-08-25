@@ -3678,16 +3678,18 @@ torch.cuda.synchronize()
     @unittest.skipIf((not TEST_CUDA) or
                      TEST_WITH_ROCM or
                      int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
-    @skipCUDAMemoryLeakCheckIf(True)
     def test_graph_make_graphed_callables_modules(self):
+        torch.manual_seed(5)
+        torch.cuda.manual_seed(5)
+
         N, D_in, H, D_out = 640, 4096, 2048, 1024
 
         models = []
         for _ in range(2):
             model_section1 = torch.nn.Sequential(torch.nn.Linear(D_in, H),
-                                        torch.nn.Dropout(p=0.0)).cuda()
+                                        torch.nn.Dropout(p=0.1)).cuda()
             model_section2 = torch.nn.Sequential(torch.nn.Linear(H, D_out),
-                                        torch.nn.Dropout(p=0.0)).cuda()
+                                        torch.nn.Dropout(p=0.2)).cuda()
             models.append(torch.nn.Sequential(model_section1, model_section2))
 
         model_graphed = models[0]
@@ -3709,10 +3711,10 @@ torch.cuda.synchronize()
         loss_fn_control = torch.nn.functional.mse_loss
         relu_control = torch.nn.functional.relu
 
-        # This is a good stress test. It graphs three callables: two Modules and one python function.
+        # This is a good stress test. It graphs four callables: two Modules and two python functions.
         model_graphed[0], model_graphed[1], relu_graphed, loss_fn_graphed = \
             torch.cuda.make_graphed_callables((model_graphed[0], model_graphed[1], relu_control, loss_fn_control),
-                                              ((x,), (h,), (y_pred,), (y_pred,y)))
+                                              ((x,), (h,), (y_pred,), (y_pred, y)))
 
         real_inputs = [torch.rand_like(x) for _ in range(10)]
         real_targets = [torch.rand_like(y) for _ in range(10)]
@@ -3728,7 +3730,7 @@ torch.cuda.synchronize()
             for data, target in zip(real_inputs, real_targets):
                 opt.zero_grad(set_to_none=True)
                 y_pred = m(data)
-                # y_pred = relu(y_pred)
+                y_pred = relu(y_pred)
                 loss = loss_fn(y_pred, target)
                 loss.backward()
                 opt.step()

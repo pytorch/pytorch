@@ -539,7 +539,7 @@ Why CUDA Graphs?
 ^^^^^^^^^^^^^^^^
 
 Replaying a graph sacrifices the dynamic flexibility of typical eager execution in exchange for
-**greatly reduced CPU latency**. A graph's arguments and kernels are fixed, so graph replay
+**greatly reduced CPU overhead**. A graph's arguments and kernels are fixed, so a graph replay
 skips all layers of argument setup and kernel dispatch, including Python, C++, and CUDA driver
 overheads. Under the hood, a replay submits the entire graph's work to the GPU with
 a single call to `cudaGraphLaunch`_.  Kernels in a replay also execute slightly faster
@@ -571,7 +571,7 @@ and two convenience wrappers,
 
 :class:`torch.cuda.graph` is a simple, versatile context manager that
 captures whatever CUDA work you run in its context. :class:`~torch.cuda.graph`
-requires that you manually manage the graph's input and output memory.
+requires that you manually manage the graph's input and output memory. MAKE THIS CLEARER WITH COMMENTS
 Warming up the captured workload by running a few eager iterations
 before capture is also recommended. Warmup should occur on a side stream.
 Example::
@@ -626,7 +626,7 @@ Constraints listed here apply to all work in a
 :class:`torch.cuda.graph` context and all work in the forward and backward passes
 of any callable you pass to :func:`torch.cuda.make_graphed_callables`.
 
-Violating any of these will likely cause a hard error:
+Violating any of these will likely cause a runtime error:
 
 * Capture must occur on a non-default stream. (This is only a concern if you use the raw
   :meth:`CUDAGraph.capture_begin<torch.cuda.CUDAGraph.capture_begin>` and
@@ -634,7 +634,6 @@ Violating any of these will likely cause a hard error:
   :class:`~torch.cuda.graph` and
   :func:`~torch.cuda.make_graphed_callables` set a side stream for you.)
 * Ops that sychronize the CPU with the GPU (e.g., ``.item()`` calls) are prohibited.
-* Dynamic control flow (based on CPU or GPU data) is prohibited.
 * CUDA RNG ops are allowed, but must use default generators. For example, explicitly constructing a
   new :class:`torch.Generator` instance and passing it as the ``generator`` argument to an RNG function
   is prohibited.
@@ -645,6 +644,7 @@ Violating any of these will likely cause a silent error or undefined behavior:
 * No non-captured CUDA work may run in this process (on any thread) while capture is underway.
 * CPU work is not captured. If the captured ops include CPU work, that work will be elided during replay.
 * Every replay reads from and writes to the same (virtual) memory addresses.
+* Dynamic control flow (based on CPU or GPU data) is prohibited.
 * Dynamic shapes are prohibited. The graph assumes every tensor in the captured op sequence
   has the same size and layout in every replay.
 * Using multiple streams in a capture is allowed, but there are :ref:`restrictions<multistream-capture>`.
@@ -888,8 +888,8 @@ Graph memory management
 ^^^^^^^^^^^^^^^^^^^^^^^
 
 A captured graph acts on the same virtual addresses every time it replays.
-If PyTorch freed the memory, a later replay would hit an illegal memory access.
-If PyTorch reassigned the memory to new tensors, the replay could corrupt the values
+If PyTorch frees the memory, a later replay can hit an illegal memory access.
+If PyTorch reassigns the memory to new tensors, the replay can corrupt the values
 seen by those tensors.  Therefore, the virtual addresses used by the graph must be
 reserved for the graph across replays. The PyTorch caching allocator achieves this
 by detecting when capture is underway and satisfying the capture's allocations
