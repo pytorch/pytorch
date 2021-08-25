@@ -45,13 +45,28 @@ PyObject *THPFunctionClass = nullptr;
 #define THPFunction_assert(condition, ...)                                     \
   if (!(condition)) { THPUtils_setError(__VA_ARGS__); throw python_error(); }
 
-namespace torch { namespace autograd {
+// Anonymous namespace for helpful functions used in this file
+namespace {
 
-void PyNode::throw_python_error() {
+// Throw a python_error with the PyErr state persisted, so that we
+// don't lose the error state if the GIL is released when we don't
+// have a PyThreadState created beforehand, this is made so that
+// even for pure C++ thread without a pre-created PyThreadState could
+// also capture the correct error message.
+// TODO: This is a temporary approach to allow C++ thread to correctly
+// capture Python Error in autograd, remove this when c10 thread pool
+// allow to do one time initialization.
+// see discussion in https://github.com/pytorch/pytorch/pull/34845
+// Follow up issue: https://github.com/pytorch/pytorch/issues/35006
+void throw_python_error() {
   python_error err;
   err.persist();
   throw err;
 }
+
+}
+
+namespace torch { namespace autograd {
 
 // NOTE: this function is written in a way that assumes it's only called for backward;
 // it's used by engine.cpp.  This is responsible for forwarding a call from

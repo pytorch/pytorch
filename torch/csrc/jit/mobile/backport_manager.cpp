@@ -30,6 +30,8 @@ constexpr int64_t kBytecodeVersionV6 = 0x6L;
 constexpr int64_t kBytecodeVersionV7 = 0x7L;
 } // namespace
 
+/********************** Utility Functions **********************/
+
 // Utility function that can be reused by backport_vn_to_vn-1(). If any utility
 // function can be reused by other backport function, move it here.
 namespace {
@@ -98,6 +100,7 @@ void get_model_stream(PyTorchStreamReader& reader, std::stringstream& out) {
       std::unordered_set<std::string>());
 }
 
+// The writeArchive function used for bytecode version v5-v7
 void write_archive_v5_to_v7(
     PyTorchStreamWriter& writer,
     const IValue& value,
@@ -251,6 +254,8 @@ std::stringstream re_emit_model(
 
 } // namespace
 
+/******************** backport_v{i}_to_v{i-1} Functions **********************/
+
 /*
  To add next backport function, for example, backport_vn_to_vn-1, create an
  anonymous namespace with a backport_vn_to_vn-1 function + other necessary
@@ -280,7 +285,40 @@ std::stringstream re_emit_model(
 
 */
 
-// The functions needed for backport model from v5 to v4.
+/*
+The following functions needed for backport model from v5 to v4.
+Backport function bytecode v5 that deduplicate constanst table.
+Previously, in v4, constant table will be exported twice, in both archive
+bytecode and archive constants, and majority (almost all) are duplicates.
+Currently, in v5, JIT and mobile will share archive constants, and all
+constant tensors will be exported in this archive. The bump was needed
+because the v5 bytecode export the tensor storage path in the schema, since
+the runtime code is now able to query which archive this tensor is stored at
+and query the correct archive.
+For example, Previously, in v4, we deserialize tensor as without archive
+path, and mobile will always read tensor from bytecode archive:
+(torch._utils._rebuild_tensor_v2(pers.obj(('storage', torch.DoubleStorage,
+'0', 'cpu', 8),),
+   0,
+   (2, 4),
+   (4, 1),
+   False,
+   collections.OrderedDict()),
+ 1)),
+ So, if the program defines: torch.add(x, h, out=x)
+Currently, in v5, we deserialize the bytecode with the archive path, and
+mobile can read tensor from the given path:
+(torch._utils._rebuild_tensor_v2(pers.obj(('storage', torch.DoubleStorage,
+'constants/0', 'cpu', 8),),
+   0,
+   (2, 4),
+   (4, 1),
+   False,
+   collections.OrderedDict()),
+ 1)),
+Thus, the backport is necessary such that the runtime can read tensor from
+the correct archive.
+*/
 namespace {
 
 void writeArchiveV4(
@@ -370,6 +408,25 @@ std::stringstream backport_v6_to_v5(std::stringstream& input_model_stream) {
   return ouput_model_stream;
 }
 
+/*
+Backport function bytecode v7 that introduced support for operators with out
+arguments. Previously, in v6, operators with out arguments forced the
+serialization of all arguments in the schema, even when optional arguments
+were not provided (as they had default values). Currently, in v7, operators
+are aware of out arguments being present in the schema (always appended),
+allowing the serialization of only required arguments (as default values will
+be provided by the runtime). The bump was needed because the v7 bytecode
+specifies less arguments for ops with out arguments in the schema, since the
+runtime code is now able to query whether an argument is of type "out" and
+insert the necessary default values in the right order in the interpreter
+stack (i.e. before the out arguments). For example schema is: torch.add(x, h,
+alpha=1.0, out=x) So, if the program defines: torch.add(x, h, out=x)
+Previously, in v6, we serialized the bytecode to contain all 4 arguments.
+Currently, in v7, we serialize the bytecode with only 3 arguments, since
+alpha is optional and has a default value that the runtime will push in the
+stack. Thus, the backport is necessary such that the bytecode contains all
+the arguments as before.
+*/
 std::stringstream backport_v7_to_v6(std::stringstream& input_model_stream) {
   bool emit_default_input_instructions = false;
   bool enable_defaults_args_with_out_args = false;
@@ -384,6 +441,8 @@ std::stringstream backport_v7_to_v6(std::stringstream& input_model_stream) {
 }
 
 } // namespace
+
+/********************** BackportManager **********************/
 
 // A generic contract for backport logic to the previous bytecode version.
 // Args:
