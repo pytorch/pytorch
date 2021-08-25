@@ -44,8 +44,8 @@ class SamplerIterDataPipe(IterDataPipe[T_co]):
 
 
 @functional_datapipe('shuffle')
-class ShuffleIterDataPipe(IterDataPipe[T_co]):
-    r""" :class:`ShuffleIterDataPipe`
+class ShufflerIterDataPipe(IterDataPipe[T_co]):
+    r""" :class:`ShufflerIterDataPipe`
 
     Iterable DataPipe to shuffle the input DataPipe with a buffer. The buffer
     with `buffer_size` is filled with elements from the datapipe first. Then,

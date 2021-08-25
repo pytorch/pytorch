@@ -78,7 +78,7 @@ class TestNNAPI(TestCase):
                     # to get a nice message.
                     self.assertEqual(eager_output, nnapi_output, atol=0, rtol=0)
             if expected_memory_format:
-                self.assertTrue(nnapi_out.is_contiguous(memory_format=expected_memory_format))
+                self.assertTrue(nnapi_output.is_contiguous(memory_format=expected_memory_format))
 
     def float_and_quant_and_nhwc(self, inp_float, scale, zero_point):
         torch.manual_seed(29)
