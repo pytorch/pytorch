@@ -3053,9 +3053,11 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
         fn_name = torch.typename(obj)
         signature = inspect.signature(obj)
 
+        sig_str = f'{fn_name}{signature}'
+
         arg_strs = []
         for k, v in signature.parameters.items():
-            maybe_type_annotation = f': {self._annotation_type_to_stable_str(v.annotation)}'\
+            maybe_type_annotation = f': {self._annotation_type_to_stable_str(v.annotation, sig_str)}'\
                 if v.annotation is not inspect.Signature.empty else ''
             if v.default is not inspect.Signature.empty:
                 default_val_str = str(v.default) if not isinstance(v.default, str) else f"'{v.default}'"
@@ -3069,12 +3071,12 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
                 maybe_stars = '**'
             arg_strs.append(f'{maybe_stars}{k}{maybe_type_annotation}{maybe_default}')
 
-        return_annot = f' -> {self._annotation_type_to_stable_str(signature.return_annotation)}'\
+        return_annot = f' -> {self._annotation_type_to_stable_str(signature.return_annotation, sig_str)}'\
             if signature.return_annotation is not inspect.Signature.empty else ''
 
         return f'{fn_name}({", ".join(arg_strs)}){return_annot}'
 
-    def _annotation_type_to_stable_str(self, t):
+    def _annotation_type_to_stable_str(self, t, sig_str):
         import typing
         if t is inspect.Signature.empty:
             return ''
@@ -3082,9 +3084,8 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
         # Forward ref
         if isinstance(t, str):
             return f"'{t}'"
-        if isinstance(t, typing.ForwardRef):
-            assert isinstance(t.__forward_arg__, str)
-            return f"ForwardRef('{t.__forward_arg__}')"
+        if hasattr(typing, 'ForwardRef') and isinstance(t, typing.ForwardRef):
+            return t.__forward_arg__
 
         trivial_mappings = {
             str : 'str',
@@ -3117,7 +3118,7 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
         # Handle types with contained types
         contained = getattr(t, '__args__', [])
         contained = t if isinstance(t, list) else contained
-        contained_type_annots = [self._annotation_type_to_stable_str(ct) for ct in contained]
+        contained_type_annots = [self._annotation_type_to_stable_str(ct, sig_str) for ct in contained]
         contained_type_str = f'[{", ".join(contained_type_annots)}]' if len(contained_type_annots) > 0 else ''
 
         origin = getattr(t, '__origin__', None)
@@ -3127,7 +3128,7 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
             # Annoying hack to detect Optional
             if len(contained) == 2 and (contained[0] is type(None)) ^ (contained[1] is type(None)):
                 not_none_param = contained[0] if contained[0] is not type(None) else contained[1]
-                return f'Optional[{self._annotation_type_to_stable_str(not_none_param)}]'
+                return f'Optional[{self._annotation_type_to_stable_str(not_none_param, sig_str)}]'
             return f'Union{contained_type_str}'
         if origin in {dict, typing.Dict}:
             return f'Dict{contained_type_str}'
@@ -3141,7 +3142,7 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
             else:
                 return f'Callable{contained_type_str}'
 
-        raise RuntimeError(f'Unrecognized type {t} used in BC-compatible type signature. '
+        raise RuntimeError(f'Unrecognized type {t} used in BC-compatible type signature {sig_str}.'
                            f'Please add support for this type and confirm with the '
                            f'FX team that your signature change is valid.')
 
