@@ -661,6 +661,36 @@ class TestLoadSave(TestLoadSaveBase):
         )
 
 
+    def testSaveWithDBOptions(self) -> None:
+        num_elems = 1234
+        chunk_size = 32
+        expected_num_chunks = math.ceil(num_elems / chunk_size)
+
+        tmp_folder = self.make_tempdir()
+        tmp_file = str(tmp_folder / "save.output")
+
+        blobs = self.create_test_blobs(num_elems)
+
+        db_options = b"test_db_options"
+        # Saves the blobs to a local db.
+        save_op = core.CreateOperator(
+            "Save",
+            [name for name, data in blobs],
+            [],
+            absolute_path=1,
+            db=tmp_file,
+            db_type=self._db_type,
+            chunk_size=chunk_size,
+            db_options=db_options,
+        )
+        self.assertTrue(workspace.RunOperatorOnce(save_op))
+
+        self.load_and_check_blobs(blobs, [tmp_file])
+
+        blob_chunks = self._read_chunk_info(Path(tmp_file))
+        for blob_name, chunks in blob_chunks.items():
+            self.assertEqual(len(chunks), expected_num_chunks)
+
     def testSaveFloatToBfloat16(self) -> None:
         tmp_folder = self.make_tempdir()
         tmp_file = str(tmp_folder / "save.output")

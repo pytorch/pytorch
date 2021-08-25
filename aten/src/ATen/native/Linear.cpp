@@ -546,21 +546,27 @@ Tensor _trilinear(const Tensor& i1_, const Tensor& i2_, const Tensor& i3_,
   int64_t slicemul3 = (expand3[unroll_dim] ? 0 : 1);
 
   auto output = at::zeros(output_size, i1.options());
-  if (! sumdim[unroll_dim]) {
-    for (const auto k : c10::irange(unroll_size)) {
-      Tensor buf = at::native::sumproduct_pair(i1.narrow(unroll_dim, k * slicemul1, 1),
-                                               i2.narrow(unroll_dim, k * slicemul2, 1),
-                                               sum_dims_12, true);
-      buf = at::native::sumproduct_pair(buf, i3.narrow(unroll_dim, k * slicemul3, 1), sum_dims_23, true);
-      output.narrow(unroll_dim, k, 1).add_(buf);
+
+  // Three conditionals are necessary since this function is meant to work for both
+  // forward and backward, which changes the dimensions of the inputs.
+  // Note that if output has zero elems is because (at least) one of i1, i2, i3 has zero elems.
+  if (i1.numel() != 0 && i2.numel() != 0 && i3.numel() != 0) {
+    if (! sumdim[unroll_dim]) {
+      for (const auto k : c10::irange(unroll_size)) {
+        Tensor buf = at::native::sumproduct_pair(i1.narrow(unroll_dim, k * slicemul1, 1),
+                                                 i2.narrow(unroll_dim, k * slicemul2, 1),
+                                                 sum_dims_12, true);
+        buf = at::native::sumproduct_pair(buf, i3.narrow(unroll_dim, k * slicemul3, 1), sum_dims_23, true);
+        output.narrow(unroll_dim, k, 1).add_(buf);
+      }
     }
-  }
-  else {
-    for (const auto k : c10::irange(unroll_size)) {
-      Tensor buf = at::native::sumproduct_pair(i1.narrow(unroll_dim, k*slicemul1, 1),
-                                               i2.narrow(unroll_dim, k*slicemul2, 1), sum_dims_12, true);
-      buf = at::native::sumproduct_pair(buf, i3.narrow(unroll_dim, k*slicemul3, 1), sum_dims_23, true);
-      output.add_(buf);
+    else {
+      for (const auto k : c10::irange(unroll_size)) {
+        Tensor buf = at::native::sumproduct_pair(i1.narrow(unroll_dim, k*slicemul1, 1),
+                                                 i2.narrow(unroll_dim, k*slicemul2, 1), sum_dims_12, true);
+        buf = at::native::sumproduct_pair(buf, i3.narrow(unroll_dim, k*slicemul3, 1), sum_dims_23, true);
+        output.add_(buf);
+      }
     }
   }
   for (int64_t i = output.dim()-1; i >= 0; i--)

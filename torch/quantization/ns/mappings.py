@@ -419,6 +419,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         # uncomment below
         # operator.add,
         # operator.mul,
+        torch.sum,
     ])
 
     FUNS_IO_TYPE_FP16: Set[NSNodeTargetType] = set()
@@ -608,8 +609,6 @@ def get_unmatchable_types_map() -> Dict[str, Set[NSNodeTargetType]]:
     ])
 
     MODS_UNMATCHABLE: Set[NSNodeTargetType] = set([
-        torch.quantization.ObserverBase,
-        torch.quantization.FakeQuantizeBase,
         nn.Identity,
     ])
 
