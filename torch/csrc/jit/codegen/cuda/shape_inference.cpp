@@ -180,22 +180,6 @@ class NaiveTypePropagator {
         node->output()->setType(out_type);
         break;
       }
-      case aten::native_dropout: {
-        auto out_type = node->input(0)->type()->cast<TensorType>();
-        node->output(0)->setType(out_type);
-
-        auto mask_type = TensorType::create(
-            at::ScalarType::Bool, *out_type->device(), c10::nullopt, false);
-
-        node->output(1)->setType(mask_type);
-
-        break;
-      }
-      case aten::native_dropout_backward: {
-        auto out_type = node->input(0)->type()->cast<TensorType>();
-        node->output()->setType(out_type);
-        break;
-      }
       case aten::instance_norm:
       case aten::batch_norm: {
         auto out_type = node->input(0)->type()->cast<TensorType>();
@@ -417,34 +401,6 @@ class NaiveTypePropagator {
         } else {
           const auto promoted_type = binary_broadcast_type(type0, type1);
           node->output()->setType(promoted_type);
-        }
-        break;
-      }
-      case aten::autocast_to_fp16: {
-        const auto in_type = node->input(0)->type()->cast<TensorType>();
-        const auto in_scalar_type = in_type->scalarType();
-        TORCH_CHECK(
-            hasTypeAndDevice(in_type),
-            "Type and device propagation has failed, or was not provided enough information.");
-        if (in_scalar_type == at::ScalarType::Float) {
-          node->output()->setType(
-              in_type->withScalarType(at::ScalarType::Half));
-        } else {
-          node->output()->setType(in_type);
-        }
-        break;
-      }
-      case aten::autocast_to_fp32: {
-        const auto in_type = node->input(0)->type()->cast<TensorType>();
-        const auto in_scalar_type = in_type->scalarType();
-        TORCH_CHECK(
-            hasTypeAndDevice(in_type),
-            "Type and device propagation has failed, or was not provided enough information.");
-        if (in_scalar_type == at::ScalarType::Half) {
-          node->output()->setType(
-              in_type->withScalarType(at::ScalarType::Float));
-        } else {
-          node->output()->setType(in_type);
         }
         break;
       }

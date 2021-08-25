@@ -1838,27 +1838,6 @@ void decomposeLinearOps(Block* block) {
   }
 }
 
-// This is temporary to handle intermediate tensor inserted by autodiff is not
-// being profiled
-void markMissingType(Block* block) {
-  std::vector<Node*> linear_nodes;
-  static auto native_dropout_schema =
-      getOperatorForLiteral(
-          "aten::native_dropout(Tensor input, float p, float scale, bool train) -> (Tensor, Tensor)")
-          ->schema();
-  for (Node* n : block->nodes()) {
-    for (Block* b : n->blocks()) {
-      markMissingType(b);
-    }
-    // fill in the tensor type for mask output in `aten::native_dropout`
-    if (n->matches(native_dropout_schema)) {
-      n->outputs()[1]->setType(
-          n->outputs()[0]->type()->cast<c10::TensorType>()->withScalarType(
-              at::ScalarType::Bool));
-    }
-  }
-}
-
 } // anonymous namespace
 
 void CudaFuseGraph(std::shared_ptr<Graph>& graph) {
@@ -1876,9 +1855,6 @@ void CudaFuseGraph(std::shared_ptr<Graph>& graph) {
   // shamelessly use tool from NNC.
   RemoveProfileNodesAndSpecializeTypes(graph);
   GRAPH_DEBUG("After Profiling Nodes Removed: ", *graph);
-
-  markMissingType(graph->block());
-  GRAPH_DEBUG("After mark missing type: ", *graph);
 
   // TODO: separate passes into different file;
   // TODO: restore decomposition after fusion, in case we are decomposing

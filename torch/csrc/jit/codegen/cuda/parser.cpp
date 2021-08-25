@@ -564,30 +564,6 @@ class IrParser {
 
     {
       auto ptr_op = getOperatorForLiteral(
-          "aten::native_dropout(Tensor input, float p, float scale, bool train) -> (Tensor, Tensor)");
-      REGISTER_PARSE_RULE(
-          ptr_op,
-          {
-            auto input = value_map[node->input(0)->unique()]->as<TensorView>();
-            auto prob = value_map[node->input(1)->unique()];
-            auto scale = value_map[node->input(2)->unique()];
-            auto train = constant_as<bool>(node->input(3));
-
-            TORCH_INTERNAL_ASSERT(
-                train.has_value() and train.value(),
-                "Train parameter is incorrectly set to false!");
-
-            auto result = dropout(input, prob, scale);
-
-            value_map.emplace(node->output(0)->unique(), result.output);
-            value_map.emplace(node->output(1)->unique(), result.mask);
-          },
-          nullptr,
-          nullptr);
-    }
-
-    {
-      auto ptr_op = getOperatorForLiteral(
           "aten::dropout(Tensor input, float p, bool train) -> Tensor");
       REGISTER_PARSE_RULE(
           ptr_op,
@@ -605,23 +581,6 @@ class IrParser {
             } else {
               value_map.emplace(node->output()->unique(), input);
             }
-          },
-          nullptr,
-          nullptr);
-    }
-
-    {
-      auto ptr_op = getOperatorForLiteral(
-          "aten::native_dropout_backward(Tensor grad, Tensor mask, float scale) -> Tensor");
-      REGISTER_PARSE_RULE(
-          ptr_op,
-          {
-            auto grad = value_map[node->input(0)->unique()]->as<TensorView>();
-            auto mask = value_map[node->input(1)->unique()]->as<TensorView>();
-            auto scale = value_map[node->input(2)->unique()];
-
-            auto output = dropout_backward(grad, mask, scale);
-            value_map.emplace(node->output()->unique(), output);
           },
           nullptr,
           nullptr);
@@ -1333,34 +1292,6 @@ class IrParser {
       }
     }
 
-    {
-      auto ptr_op = getOperatorForLiteral(
-          "aten::autocast_to_fp16(Tensor(a) self) -> Tensor(a)");
-      REGISTER_PARSE_RULE(
-          ptr_op,
-          {
-            auto self = value_map[node->input()->unique()];
-            auto out = unaryOp(UnaryOpType::Set, self);
-            value_map.emplace(node->output()->unique(), out);
-          },
-          nullptr,
-          nullptr);
-    }
-
-    {
-      auto ptr_op = getOperatorForLiteral(
-          "aten::autocast_to_fp32(Tensor(a) self) -> Tensor(a)");
-      REGISTER_PARSE_RULE(
-          ptr_op,
-          {
-            auto self = value_map[node->input()->unique()];
-            auto out = unaryOp(UnaryOpType::Set, self);
-            value_map.emplace(node->output()->unique(), out);
-          },
-          nullptr,
-          nullptr);
-    }
-
     // Limiting aten::to implementation to only change the dtype of a tensor
     {
       auto ptr_op = getOperatorForLiteral(
@@ -1856,22 +1787,6 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
     switch (offset) {
       // argument 2: Is training?
       case 2:
-        profileBool(pr, node, offset);
-        break;
-      default:
-        return false;
-    }
-    return true;
-  }
-
-  static auto native_dropout_schema =
-      getOperatorForLiteral(
-          "aten::native_dropout(Tensor input, float p, float scale, bool train) -> (Tensor, Tensor)")
-          ->schema();
-  if (node->matches(native_dropout_schema)) {
-    switch (offset) {
-      // argument 3: Is training?
-      case 3:
         profileBool(pr, node, offset);
         break;
       default:
