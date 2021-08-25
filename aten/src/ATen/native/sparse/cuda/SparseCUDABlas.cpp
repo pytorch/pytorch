@@ -270,6 +270,7 @@ void adjustLd(char transb, int64_t m, int64_t n, int64_t k, int64_t *ldb, int64_
 
 void Scsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t nnz, const float *alpha, const float *csrvala, int *csrrowptra, int *csrcolinda, const float *b, int64_t ldb, const float *beta, float *c, int64_t ldc)
 {
+#if defined(__HIP_PLATFORM_HCC__) || (defined(CUDART_VERSION) && defined(CUDA_VERSION) && CUDA_VERSION < 11000)
   adjustLd(transb, m, n, k, &ldb, &ldc);
   cusparseOperation_t opa = convertTransToCusparseOperation(transa);
   cusparseOperation_t opb = convertTransToCusparseOperation(transb);
@@ -288,10 +289,14 @@ void Scsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t 
   cusparseCreateMatDescr(&desc);
   TORCH_CUDASPARSE_CHECK(cusparseScsrmm2(handle, opa, opb, i_m, i_n, i_k, i_nnz, alpha, desc, csrvala, csrrowptra, csrcolinda, b, i_ldb, beta, c, i_ldc));
   TORCH_CUDASPARSE_CHECK(cusparseDestroyMatDescr(desc));
+#else
+  TORCH_INTERNAL_ASSERT(false, "csrmm2 is removed from CUDA 11+")
+#endif
 }
 
 void Dcsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t nnz, const double *alpha, const double *csrvala, int *csrrowptra, int *csrcolinda, const double *b, int64_t ldb, const double *beta, double *c, int64_t ldc)
 {
+#if defined(__HIP_PLATFORM_HCC__) || (defined(CUDART_VERSION) && defined(CUDA_VERSION) && CUDA_VERSION < 11000)
   adjustLd(transb, m, n, k, &ldb, &ldc);
   cusparseOperation_t opa = convertTransToCusparseOperation(transa);
   cusparseOperation_t opb = convertTransToCusparseOperation(transb);
@@ -312,11 +317,15 @@ void Dcsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t 
   TORCH_CUDASPARSE_CHECK(cusparseDcsrmm2(handle, opa, opb, i_m, i_n, i_k, i_nnz, alpha, desc, csrvala, csrrowptra, csrcolinda, b, i_ldb, beta, c, i_ldc));
   TORCH_CUDASPARSE_CHECK(cusparseDestroyMatDescr(desc));
   // TODO: Proper fix is to create real descriptor classes
+#else
+  TORCH_INTERNAL_ASSERT(false, "csrmm2 is removed from CUDA 11+")
+#endif
 }
 
 template<class complex_target_t>
 void Ccsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t nnz, const complex_target_t *alpha, const complex_target_t *csrvala, int *csrrowptra, int *csrcolinda, const complex_target_t *b, int64_t ldb, const complex_target_t *beta, complex_target_t *c, int64_t ldc)
 {
+#if defined(__HIP_PLATFORM_HCC__) || (defined(CUDART_VERSION) && defined(CUDA_VERSION) && CUDA_VERSION < 11000)
   adjustLd(transb, m, n, k, &ldb, &ldc);
   cusparseOperation_t opa = convertTransToCusparseOperation(transa);
   cusparseOperation_t opb = convertTransToCusparseOperation(transb);
@@ -335,11 +344,15 @@ void Ccsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t 
   cusparseCreateMatDescr(&desc);
   TORCH_CUDASPARSE_CHECK(cusparseCcsrmm2(handle, opa, opb, i_m, i_n, i_k, i_nnz, alpha, desc, csrvala, csrrowptra, csrcolinda, b, i_ldb, beta, c, i_ldc));
   TORCH_CUDASPARSE_CHECK(cusparseDestroyMatDescr(desc));
+#else
+  TORCH_INTERNAL_ASSERT(false, "csrmm2 is removed from CUDA 11+")
+#endif
 }
 
 template<class complex_target_t>
 void Zcsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t nnz, const complex_target_t *alpha, const complex_target_t *csrvala, int *csrrowptra, int *csrcolinda, const complex_target_t *b, int64_t ldb, const complex_target_t *beta, complex_target_t *c, int64_t ldc)
 {
+#if defined(__HIP_PLATFORM_HCC__) || (defined(CUDART_VERSION) && defined(CUDA_VERSION) && CUDA_VERSION < 11000)
   adjustLd(transb, m, n, k, &ldb, &ldc);
   cusparseOperation_t opa = convertTransToCusparseOperation(transa);
   cusparseOperation_t opb = convertTransToCusparseOperation(transb);
@@ -359,6 +372,9 @@ void Zcsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t 
   cusparseCreateMatDescr(&desc);
   TORCH_CUDASPARSE_CHECK(cusparseZcsrmm2(handle, opa, opb, i_m, i_n, i_k, i_nnz, alpha, desc, csrvala, csrrowptra, csrcolinda, b, i_ldb, beta, c, i_ldc));
   TORCH_CUDASPARSE_CHECK(cusparseDestroyMatDescr(desc));
+#else
+  TORCH_INTERNAL_ASSERT(false, "csrmm2 is removed from CUDA 11+")
+#endif
 }
 
 // T can only be float or double
