@@ -123,6 +123,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
 
   VARIADIC_BDIMS_BOXED(linalg_eigh);
   VARIADIC_BDIMS(linalg_pinv);
+  VARIADIC_BDIMS_BOXED(linalg_qr);
   VARIADIC_BDIMS_BOXED(linalg_slogdet);
 
   VARIADIC_BDIMS(cholesky);
@@ -132,6 +133,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VARIADIC_BDIMS(matrix_exp);
   VARIADIC_BDIMS(pinverse);
   VARIADIC_BDIMS_BOXED(slogdet);
+  VARIADIC_BDIMS_BOXED(_svd_helper);
   VARIADIC_BDIMS_BOXED(solve);
   VARIADIC_BDIMS_BOXED(symeig);
   VARIADIC_BDIMS_BOXED(triangular_solve);
