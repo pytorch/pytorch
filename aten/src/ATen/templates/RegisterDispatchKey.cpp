@@ -33,7 +33,6 @@
 #include <ATen/core/op_registration/adaption.h>
 #include <torch/library.h>
 $extra_cuda_headers
-$legacy_th_headers
 $external_backend_headers
 $namespaced_headers
 

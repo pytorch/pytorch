@@ -1,9 +1,9 @@
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 
-#include <ATen/Parallel.h>
 #include <ATen/core/interned_strings.h>
 #include <ATen/record_function.h>
 #include <c10/util/FunctionRef.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/jit_log.h>
@@ -28,7 +28,6 @@ C10_DEFINE_bool(
 namespace torch {
 namespace jit {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static bool texpr_reductions_enabled = false;
 
 bool isSupportedForBlock(Node* node) {
@@ -249,18 +248,7 @@ bool isSupported(Node* node) {
 
 } // namespace tensorexpr
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static bool texpr_fuser_enabled_ = true;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-static bool texpr_parallel_cpu_enabled = false;
-
-bool texprParallelCPUEnabled() {
-  return texpr_parallel_cpu_enabled;
-}
-
-void setTexprParallelCPUEnabled(bool val) {
-  texpr_parallel_cpu_enabled = val;
-}
 
 void setTensorExprFuserEnabled(bool val) {
   texpr_fuser_enabled_ = val;
@@ -495,7 +483,7 @@ class TensorExprFuser {
     auto inputs = fusion_group->inputs();
     auto sinputs = subgraph->inputs();
     AT_ASSERT(inputs.size() == sinputs.size());
-    for (size_t i = 0; i < inputs.size(); ++i) {
+    for (const auto i : c10::irange(inputs.size())) {
       if (inputs[i]->type()->isSubtypeOf(TensorType::get())) {
         Value* soutput = graph->insert(aten::size, {inputs[i]});
         aliasDb_->createValue(soutput);
@@ -515,7 +503,7 @@ class TensorExprFuser {
     auto outputs = fusion_group->outputs();
     auto soutputs = subgraph->outputs();
     AT_ASSERT(outputs.size() == soutputs.size());
-    for (size_t i = 0; i < outputs.size(); ++i) {
+    for (const auto i : c10::irange(outputs.size())) {
       if (usedOnlyInSize(outputs[i]))
         continue;
       Value* soutput = graph->insert(aten::size, {outputs[i]});
@@ -743,7 +731,7 @@ class TensorExprFuser {
     Node* prev_fusion_group =
         initial_fusion_groups.size() ? initial_fusion_groups[0] : nullptr;
 
-    for (size_t i = 1; i < initial_fusion_groups.size(); ++i) {
+    for (const auto i : c10::irange(1, initial_fusion_groups.size())) {
       // Try merging the just created fusion group into the previous one.
       // If it did not work, then put the previous fusion group into
       // fusion_groups vector - we will not touch it anymore in this loop.
@@ -900,14 +888,7 @@ class TensorExprFuser {
       return false;
     }
     if (device->is_cpu()) {
-      // CPU fusion is only supported for single-thread.
-      if (!canFuseOnCPU()) {
-        return false;
-      }
-      if (at::get_num_threads() == 1 || texprParallelCPUEnabled()) {
-        return true;
-      }
-      return false;
+      return canFuseOnCPU();
     } else if (device->is_cuda()) {
       return canFuseOnGPU();
     } else if (device->is_xpu()) {
@@ -949,6 +930,14 @@ class TensorExprFuser {
     static const OperatorSet cpu_only_operator_set{
       "aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor",
       "aten::matmul(Tensor self, Tensor other) -> Tensor",
+    };
+    static const OperatorSet gpu_only_operator_set{
+      // On CPU, these are slower and less accurate than ATen kernels, because
+      // ATen is able to use MKL-VML, whereas the fuser currently can't.  The
+      // fuser uses sleef instead because sleef provides functions that operate
+      // on vectors, instead of large buffers.
+      "aten::erf(Tensor self) -> Tensor",
+      "aten::erfc(Tensor self) -> Tensor",
     };
     static const OperatorSet pow{
       "aten::pow.Tensor_Scalar(Tensor self, Scalar exponent) -> Tensor",
@@ -1024,6 +1013,17 @@ class TensorExprFuser {
         device = tensorexpr::pickDeviceType(node->outputs());
       }
       if (!device || !device->is_cpu()) {
+        return false;
+      }
+    }
+
+    // Operator is only supported on GPU.
+    if (node->isMemberOf(gpu_only_operator_set)) {
+      auto device = tensorexpr::pickDeviceType(node->inputs());
+      if (!device) {
+        device = tensorexpr::pickDeviceType(node->outputs());
+      }
+      if (!device || !device->is_cuda()) {
         return false;
       }
     }
@@ -1306,7 +1306,6 @@ Operation createTensorExprOp(const Node* node) {
   };
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators TensorExprOps({
     torch::jit::Operator(
         prim::TensorExprGroup,

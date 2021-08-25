@@ -16,10 +16,6 @@ namespace {
 std::pair<std::vector<StackEntry>, std::string> getStackTraceWithModuleHierarchy(
     const DebugInfoTuple& source_callstack,
     const std::string& caller_name) {
-  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
-  constexpr size_t kSourceRange = 1;
-  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
-  constexpr size_t kModuleInstanceInfo = 2;
   std::vector<StackEntry> entries;
 
   const SourceRange& range =
@@ -48,18 +44,17 @@ std::pair<std::vector<StackEntry>, std::string> getStackTraceWithModuleHierarchy
           module_info.append(".").append(module_instance_info.instance_name());
         }
       } else {
-        module_info += ".UNKNOWN_INSTANCE(UNKNOWN_TYPE)";
+        module_info.append(".UNKNOWN_INSTANCE(UNKNOWN_TYPE)");
       }
       // Now add source range info to stack
-      // When we serialize function names, those can be added here.
-      // TODO: Add function name separately
       entries.emplace_back(
           StackEntry{prev_function_name, callstack_ptr->source_range()});
-      if (callstack_ptr->function()) {
-        prev_function_name = callstack_ptr->function()->name();
-      } else {
-        prev_function_name = callstack_ptr->function_name();
-      }
+      prev_function_name = callstack_ptr->function_name();
+      // Function name appended here
+      // It is renamed to prev_function_name because for StackEntry
+      // it will be appended in the next iteration. This is the format
+      // in which format_stack_trace expects function names.
+      module_info.append("::").append(prev_function_name);
 
       if (callstack_ptr->callee()) {
         callstack_ptr = callstack_ptr->callee().value();
@@ -86,20 +81,21 @@ std::pair<std::string, std::string> getStackTraceWithModuleHierarchy(
   std::vector<StackEntry> stack_entries;
   std::string module_info =
       root_scope_string + "(" + top_module_type_name + ")";
-  std::string caller_fn_name = "FunctionName_UNKNOWN";
+  std::string caller_fn_name = "<unknown>";
+  module_info.append("::").append(caller_fn_name);
   for (const auto& debug_info : source_callstacks) {
     auto debug_info_pair =
         getStackTraceWithModuleHierarchy(debug_info, caller_fn_name);
     auto entries = std::move(debug_info_pair.first);
     stack_entries.insert(stack_entries.end(), entries.begin(), entries.end());
-    module_info += debug_info_pair.second;
+    module_info.append(debug_info_pair.second);
   }
   // Only last entry in the callstack will have a node name of interest.
   // Rest are likely CallMethod/CallFunction nodes
   auto last_entry = source_callstacks.back();
   const std::string& node_name =
       std::get<kDebugInfoTupleNodeNameIndex>(last_entry);
-  module_info += "." + node_name;
+  module_info.append(".").append(node_name);
   std::ostringstream ss;
   ss << "Module hierarchy:" << module_info << "\n";
   format_stack_trace(ss, stack_entries);

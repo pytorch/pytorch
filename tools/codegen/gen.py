@@ -1,5 +1,5 @@
 import os
-from typing import List, Dict, Optional, Tuple, Set, Callable, Any, Union, Sequence
+from typing import List, Dict, Optional, Tuple, Set, Callable, Any, Union, Sequence, TypeVar
 from typing_extensions import Literal
 import yaml
 from collections import OrderedDict, defaultdict, namedtuple
@@ -8,6 +8,7 @@ import pathlib
 import functools
 import json
 from dataclasses import dataclass
+import hashlib
 
 from tools.codegen.code_template import CodeTemplate
 from tools.codegen.model import (Argument, DispatchKey, FunctionSchema,
@@ -33,6 +34,8 @@ from tools.codegen.context import (method_with_native_function,
                                    with_native_function_and_indices,
                                    with_native_function)
 import tools.codegen.dest as dest
+
+T = TypeVar('T')
 
 # Welcome to the ATen code generator v2!  The ATen code generator is
 # responsible for parsing native_functions.yaml and then generating
@@ -212,7 +215,7 @@ class ComputeOperators:
     ]
 
     @method_with_native_function
-    def __call__(self, f: NativeFunction) -> Optional[str]:
+    def __call__(self, f: NativeFunction) -> str:
         sig = DispatcherSignature.from_schema(f.func)
         name = f.func.name.unambiguous_name()
         call_method_name = 'call'
@@ -247,7 +250,7 @@ struct TORCH_API {name} {{
   using schema = {sig.type()};
   using ptr_schema = schema*;
   // See Note [static constexpr char* members for windows NVCC]
-  STATIC_CONSTEXPR_STR_INL_EXCEPT_WIN_CUDA(name, "aten::{str(f.func.name.name)}")
+  STATIC_CONSTEXPR_STR_INL_EXCEPT_WIN_CUDA(name, "aten::{f.func.name.name}")
   STATIC_CONSTEXPR_STR_INL_EXCEPT_WIN_CUDA(overload_name, "{f.func.name.overload_name}")
   STATIC_CONSTEXPR_STR_INL_EXCEPT_WIN_CUDA(schema_str, {cpp_string(str(f.func))})
   static {sig.defn(name=call_method_name, is_redispatching_fn=False)};
@@ -255,9 +258,17 @@ struct TORCH_API {name} {{
 }};"""
         elif self.target is Target.DEFINITION:
             defns = f"""
-STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA({name}, name, "aten::{str(f.func.name)}")
+STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA({name}, name, "aten::{f.func.name.name}")
 STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA({name}, overload_name, "{f.func.name.overload_name}")
-STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA({name}, schema_str, {cpp_string(str(f.func))})"""
+STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA({name}, schema_str, {cpp_string(str(f.func))})
+
+// aten::{f.func}
+static C10_NOINLINE c10::TypedOperatorHandle<{name}::schema> create_{name}_typed_handle() {{
+  return c10::Dispatcher::singleton()
+      .findSchemaOrThrow({name}::name, {name}::overload_name)
+      .typed<{name}::schema>();
+}}
+"""
 
             for is_redispatching_fn in [False, True]:
                 if is_redispatching_fn:
@@ -272,9 +283,7 @@ STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA({name}, schema_str, {cpp_string(str(f.
                 defns += f"""
 // aten::{f.func}
 {sig.defn(name=method_name, is_redispatching_fn=is_redispatching_fn)} {{
-    static auto op = c10::Dispatcher::singleton()
-        .findSchemaOrThrow("aten::{f.func.name.name}", "{f.func.name.overload_name}")
-        .typed<{sig.type()}>();
+    static auto op = create_{name}_typed_handle();
     return op.{dispatcher_call}({dispatcher_exprs_str});
 }}
 """
@@ -790,6 +799,12 @@ def compute_registration_declarations(f: NativeFunction, backend_indices: Dict[D
 def _read_template(template_fn: str) -> CodeTemplate:
     return CodeTemplate.from_file(template_fn)
 
+
+# String hash that's stable across different executions, unlike builtin hash
+def string_stable_hash(s: str) -> int:
+    sha1 = hashlib.sha1(s.encode('latin1')).digest()
+    return int.from_bytes(sha1, byteorder='little')
+
 # A small abstraction for writing out generated files and keeping track
 # of what files have been written (so you can write out a list of output
 # files)
@@ -817,7 +832,7 @@ class FileManager:
                 f.write(contents)
 
     def write_with_template(self, filename: str, template_fn: str,
-                            env_callable: Callable[[], Union[str, Dict[str, object]]]) -> None:
+                            env_callable: Callable[[], Union[str, Dict[str, Any]]]) -> None:
         filename = '{}/{}'.format(self.install_dir, filename)
         assert filename not in self.filenames, "duplicate file write {filename}"
         self.filenames.add(filename)
@@ -837,8 +852,66 @@ class FileManager:
                 assert_never(env)
 
 
-    def write(self, filename: str, env_callable: Callable[[], Union[str, Union[str, Dict[str, object]]]]) -> None:
+    def write(self, filename: str, env_callable: Callable[[], Union[str, Union[str, Dict[str, Any]]]]) -> None:
         self.write_with_template(filename, filename, env_callable)
+
+    def write_sharded(
+            self,
+            filename: str,
+            items: List[T],
+            *,
+            key_fn: Callable[[T], str],
+            env_callable: Callable[[T], Dict[str, List[str]]],
+            num_shards: int,
+            base_env: Optional[Dict[str, Any]] = None,
+            sharded_keys: Set[str]
+    ) -> None:
+
+        everything: Dict[str, Any] = {'shard_id': 'Everything'}
+        shards: List[Dict[str, Any]] = [{'shard_id': f'_{i}'} for i in range(num_shards)]
+        all_shards = [everything] + shards
+
+        if base_env is not None:
+            for shard in all_shards:
+                shard.update(base_env)
+
+        for key in sharded_keys:
+            for shard in all_shards:
+                if key in shard:
+                    assert isinstance(shard[key], list), "sharded keys in base_env must be a list"
+                    shard[key] = shard[key].copy()
+                else:
+                    shard[key] = []
+
+
+        def merge_env(into: Dict[str, List[str]], from_: Dict[str, List[str]]) -> None:
+            for k, v in from_.items():
+                assert k in sharded_keys, f"undeclared sharded key {k}"
+                into[k] += v
+
+        for item in items:
+            key = key_fn(item)
+            sid = string_stable_hash(key) % num_shards
+            env = env_callable(item)
+
+            merge_env(shards[sid], env)
+            merge_env(everything, env)
+
+        dot_pos = filename.rfind('.')
+        if dot_pos == -1:
+            dot_pos = len(filename)
+        base_filename = filename[:dot_pos]
+        extension = filename[dot_pos:]
+
+        for shard in all_shards:
+            shard_id = shard['shard_id']
+            self.write_with_template(f"{base_filename}{shard_id}{extension}",
+                                     filename,
+                                     lambda: shard)
+
+        # filenames is used to track compiled files, but FooEverything.cpp isn't meant to be compiled
+        self.filenames.discard(
+            f"{self.install_dir}/{base_filename}Everything{extension}")
 
     def write_outputs(self, filename: str) -> None:
         """Write a file containing the list of all outputs which are
@@ -1023,9 +1096,6 @@ def main() -> None:
 
         fm.write_with_template(f'Register{dispatch_key}.cpp', 'RegisterDispatchKey.cpp', lambda: {
             'extra_cuda_headers': extra_cuda_headers if is_cuda_dispatch_key(dispatch_key) else '',
-            'legacy_th_headers':
-                '#include <ATen/LegacyTHFunctionsCUDA.h>' if dispatch_key == DispatchKey.CUDA else
-                '',
             'external_backend_headers': '',
             'namespaced_headers': f'#include <ATen/{dispatch_key}Functions.h>' if dispatch_key in functions_keys else '',
             'DispatchKey': dispatch_key,
@@ -1108,10 +1178,18 @@ def main() -> None:
         'schema_registrations': list(mapMaybe(RegisterSchema(schema_selector), native_functions)),
     })
 
-    cpu_fm.write('Operators.cpp', lambda: {
-        'definitions': list(mapMaybe(ComputeOperators(
-            Target.DEFINITION), native_functions)),
-    })
+    def key_func(fn: NativeFunction) -> str:
+        return fn.func.name.unambiguous_name()
+
+    cpu_fm.write_sharded(
+        'Operators.cpp',
+        native_functions,
+        key_fn=key_func,
+        env_callable=lambda fn: {
+            'definitions': [ComputeOperators(Target.DEFINITION)(fn)]},
+        num_shards=5,
+        sharded_keys={'definitions'}
+    )
     cpu_fm.write('Operators.h', lambda: {
         'declarations': list(mapMaybe(ComputeOperators(
             Target.DECLARATION), native_functions)),

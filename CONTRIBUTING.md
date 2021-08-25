@@ -30,6 +30,7 @@
     - [Use Ninja](#use-ninja)
     - [Use CCache](#use-ccache)
     - [Use a faster linker](#use-a-faster-linker)
+    - [Use pre-compiled headers](#use-pre-compiled-headers)
   - [C++ frontend development tips](#c-frontend-development-tips)
   - [GDB integration](#gdb-integration)
 - [CUDA development tips](#cuda-development-tips)
@@ -196,6 +197,7 @@ with `brew install cmake` if you are developing on MacOS or Linux system.
     Could not find .../pytorch/third_party/pybind11/CMakeLists.txt
     ```
     remove any `submodule.*` settings in your local git config (`.git/config` of your pytorch repo) and try again.
+* If you're a Windows contributor, please check out [Best Practices](https://github.com/pytorch/pytorch/wiki/Best-Practices-to-Edit-and-Compile-Pytorch-Source-Code-On-Windows).
 
 ## Nightly Checkout & Pull
 
@@ -241,8 +243,7 @@ into the repo directory.
 * [aten](aten) - C++ tensor library for PyTorch (no autograd support)
   * [src](aten/src) - [README](aten/src/README.md)
     * [TH](aten/src/TH)
-      [THC](aten/src/THC)
-      [THCUNN](aten/src/THCUNN) - Legacy library code from the original
+      [THC](aten/src/THC) - Legacy library code from the original
       Torch. Try not to add things here; we're slowly porting these to
       [native](aten/src/ATen/native).
       * generic - Contains actual implementations of operators,
@@ -401,6 +402,13 @@ make flake8
 make mypy
 
 make cmakelint
+
+make clang-tidy
+```
+
+To run a lint only on changes, add the `CHANGED_ONLY` option:
+```bash
+make <name of lint> CHANGED_ONLY=--changed-only
 ```
 
 ### Running `mypy`
@@ -456,6 +464,17 @@ ghstack submit
 of very low signal to reviewers.
 
 ## Writing documentation
+
+So you want to write some documentation and don't know where to start?
+PyTorch has two main types of documentation:
+- user-facing documentation.
+These are the docs that you see over at [our docs website](pytorch.org/docs).
+- developer facing documentation.
+Developer facing documentation is spread around our READMEs in our codebase and in
+the [PyTorch Developer Wiki](pytorch.org/wiki).
+If you're interested in adding new developer docs, please read this [page on the wiki](https://github.com/pytorch/pytorch/wiki/Where-or-how-should-I-add-documentation%3F) on our best practices for where to put it.
+
+The rest of this section is about user-facing documentation.
 
 PyTorch uses [Google style](http://sphinxcontrib-napoleon.readthedocs.io/en/latest/example_google.html)
 for formatting docstrings. Length of line inside docstrings block must be limited to 80 characters to
@@ -716,110 +735,46 @@ succeed.
 
 #### Use CCache
 
-Even when dependencies are tracked with file modification,
-there are many situations where files get rebuilt when a previous
-compilation was exactly the same.
+Even when dependencies are tracked with file modification, there are many
+situations where files get rebuilt when a previous compilation was exactly the
+same. Using ccache in a situation like this is a real time-saver.
 
-Using ccache in a situation like this is a real time-saver. The ccache manual
-describes [two ways to use ccache](https://ccache.samba.org/manual/latest.html#_run_modes).
-In the PyTorch project, currently only the latter method of masquerading as
-the compiler via symlinks works for CUDA compilation.
-
-Here are the instructions for installing ccache from source (tested at commit
-`3c302a7` of the `ccache` repo):
-
+Before building pytorch, install ccache from your package manager of choice:
 ```bash
-#!/bin/bash
-
-if ! ls ~/ccache/bin/ccache
-then
-    set -ex
-    sudo apt-get update
-    sudo apt-get install -y cmake
-    mkdir -p ~/ccache
-    pushd ~/ccache
-    rm -rf ccache
-    git clone https://github.com/ccache/ccache.git
-    mkdir -p ccache/build
-    pushd ccache/build
-    cmake -DCMAKE_INSTALL_PREFIX=${HOME}/ccache -DENABLE_TESTING=OFF -DZSTD_FROM_INTERNET=ON ..
-    make -j$(nproc) install
-    popd
-    popd
-
-    mkdir -p ~/ccache/lib
-    mkdir -p ~/ccache/cuda
-    ln -s ~/ccache/bin/ccache ~/ccache/lib/cc
-    ln -s ~/ccache/bin/ccache ~/ccache/lib/c++
-    ln -s ~/ccache/bin/ccache ~/ccache/lib/gcc
-    ln -s ~/ccache/bin/ccache ~/ccache/lib/g++
-    ln -s ~/ccache/bin/ccache ~/ccache/cuda/nvcc
-
-    ~/ccache/bin/ccache -M 25Gi
-fi
-
-export PATH=~/ccache/lib:$PATH
-export CUDA_NVCC_EXECUTABLE=~/ccache/cuda/nvcc
+conda install ccache -f conda-forge
+sudo apt install ccache
+sudo yum install ccache
+brew install ccache
 ```
 
-Alternatively, `ccache` provided by newer Linux distributions (e.g. Debian/sid)
-also works, but the `nvcc` symlink to `ccache` as described above is still required.
-
-Note that the original `nvcc` binary (typically at `/usr/local/cuda/bin`) must
-be on your `PATH`, otherwise `ccache` will emit the following error:
-
-    ccache: error: Could not find compiler "nvcc" in PATH
-
-For example, here is how to install/configure `ccache` on Ubuntu:
+You may also find the default cache size in ccache is too small to be useful.
+The cache sizes can be increased from the command line:
 
 ```bash
-# install ccache
-sudo apt install ccache
-
-# update symlinks and create/re-create nvcc link
-sudo /usr/sbin/update-ccache-symlinks
-sudo ln -s /usr/bin/ccache /usr/lib/ccache/nvcc
-
 # config: cache dir is ~/.ccache, conf file ~/.ccache/ccache.conf
 # max size of cache
 ccache -M 25Gi  # -M 0 for unlimited
 # unlimited number of files
 ccache -F 0
-
-# deploy (and add to ~/.bashrc for later)
-export PATH="/usr/lib/ccache:$PATH"
-```
-
-It is also possible to install `ccache` via `conda` by installing it from the
-community-maintained `conda-forge` channel. Here is how to set up `ccache` this
-way:
-
-```bash
-# install ccache
-conda install -c conda-forge ccache
-
-# set up ccache compiler symlinks
-mkdir ~/ccache
-mkdir ~/ccache/lib
-mkdir ~/ccache/cuda
-ln -s $CONDA_PREFIX/bin/ccache ~/ccache/lib/cc
-ln -s $CONDA_PREFIX/bin/ccache ~/ccache/lib/c++
-ln -s $CONDA_PREFIX/bin/ccache ~/ccache/lib/gcc
-ln -s $CONDA_PREFIX/bin/ccache ~/ccache/lib/g++
-ln -s $CONDA_PREFIX/bin/ccache ~/ccache/cuda/nvcc
-
-# update PATH to reflect symlink locations, consider
-# adding this to your .bashrc
-export PATH=~/ccache/lib:$PATH
-export CUDA_NVCC_EXECUTABLE=~/ccache/cuda/nvcc
-
-# increase ccache cache size to 25 GiB
-ccache -M 25Gi
 ```
 
 To check this is working, do two clean builds of pytorch in a row. The second
-build should be substantially and noticeably faster than the first build. If this doesn't seem to be the case, check that each of the symlinks above actually link to your installation of `ccache`. For example, if you followed the first option and installed `ccache` from source on a Linux machine, running `readlink -e $(which g++)` should return `~/ccache/bin/ccache`.
+build should be substantially and noticeably faster than the first build. If
+this doesn't seem to be the case, check the `CMAKE_<LANG>_COMPILER_LAUNCHER`
+rules in `build/CMakeCache.txt`, where `<LANG>` is `C`, `CXX` and `CUDA`.
+Each of these 3 variables should contain ccache, e.g.
+```
+//CXX compiler launcher
+CMAKE_CXX_COMPILER_LAUNCHER:STRING=/usr/bin/ccache
+```
 
+If not, you can define these variables on the command line before invoking `setup.py`.
+```bash
+export CMAKE_C_COMPILER_LAUNCHER=ccache
+export CMAKE_CXX_COMPILER_LAUNCHER=ccache
+export CMAKE_CUDA_COMPILER_LAUNCHER=ccache
+python setup.py develop
+```
 
 #### Use a faster linker
 If you are editing a single file and rebuilding in a tight loop, the time spent
@@ -831,6 +786,27 @@ The easiest way to use `lld` this is download the
 ```
 ln -s /path/to/downloaded/ld.lld /usr/local/bin/ld
 ```
+
+#### Use pre-compiled headers
+
+Sometimes there's no way of getting around rebuilding lots of files, for example
+editing `native_functions.yaml` usually means 1000+ files being rebuilt. If
+you're using CMake newer than 3.16, you can enable pre-compiled headers by
+setting `USE_PRECOMPILED_HEADERS=1` either on first setup, or in the
+`CMakeCache.txt` file.
+
+```sh
+USE_PRECOMPILED_HEADERS=1 python setup.py develop
+```
+
+This adds a build step where the compiler takes `<ATen/ATen.h>` and essentially
+dumps it's internal AST to a file so the compiler can avoid repeating itself for
+every `.cpp` file.
+
+One caveat is that when enabled, this header gets included in every file by default.
+Which may change what code is legal, for example:
+- internal functions can never alias existing names in `<ATen/ATen.h>`
+- names in `<ATen/ATen.h>` will work even if you don't explicitly include it.
 
 ### C++ frontend development tips
 
@@ -927,7 +903,7 @@ If you are working on the CUDA code, here are some useful CUDA debugging tips:
    kernel.
    ```python
    import torch
-   import time
+   from torch.utils.benchmark import Timer
    size = 128*512
    nrep = 100
    nbytes_read_write = 4 # this is number of bytes read + written by a kernel. Change this to fit your kernel.
@@ -935,20 +911,16 @@ If you are working on the CUDA code, here are some useful CUDA debugging tips:
    for i in range(10):
        a=torch.empty(size).cuda().uniform_()
        torch.cuda.synchronize()
-       start = time.time()
-       # dry run to alloc
        out = a.uniform_()
        torch.cuda.synchronize()
-       start = time.time()
-       for i in range(nrep):
-         out = a.uniform_()
-       torch.cuda.synchronize()
-       end = time.time()
-       timec = (end-start)/nrep
+       t = Timer(stmt="a.uniform_()", globals=globals())
+       res = t.blocked_autorange()
+       timec = res.median
        print("uniform, size, elements", size, "forward", timec, "bandwidth (GB/s)", size*(nbytes_read_write)*1e-9/timec)
        size *=2
    ```
 
+  See more cuda development tips [here](https://github.com/pytorch/pytorch/wiki/CUDA-basics)
 
 ## Windows development tips
 
@@ -1069,7 +1041,6 @@ static_assert(std::is_same(A*, decltype(A::singleton()))::value, "hmm");
 CUDA, MSVC, and PyTorch versions are interdependent; please install matching versions from this table:
 | CUDA version | Newest supported VS version                             | PyTorch version |
 | ------------ | ------------------------------------------------------- | --------------- |
-| 9.2          | Visual Studio 2017 Update 5 (15.5) (`_MSC_VER` <= 1912) |  0.4.1 ~ 1.5.1  |
 | 10.1         | Visual Studio 2019 (16.X) (`_MSC_VER` < 1930)           |  1.3.0 ~ 1.7.0  |
 | 10.2         | Visual Studio 2019 (16.X) (`_MSC_VER` < 1930)           |  1.5.0 ~ 1.7.0  |
 | 11.0         | Visual Studio 2019 (16.X) (`_MSC_VER` < 1930)           |      1.7.0      |
@@ -1087,27 +1058,26 @@ for the simple commands we use for this.
 
 To run clang-tidy locally, follow these steps:
 
-1. Install clang-tidy. First, check if you already have clang-tidy by simply
-writing `clang-tidy` in your terminal. If you don't yet have clang-tidy, you
-should be able to install it easily with your package manager, e.g. by writing
-`apt-get install clang-tidy` on Ubuntu. See https://apt.llvm.org for details on
-how to install the latest version. Note that newer versions of clang-tidy will
-have more checks than older versions. In our CI, we run clang-tidy-6.0.
+1. Install clang-tidy.
+We provide custom built binaries which have additional checks enabled. You can install it by running:
+```bash
+python3 -m tools.linter.install.clang_tidy
+```
+We currently only support Linux and MacOS (x86).
 
-2. Use our driver script to run clang-tidy over any changes relative to some
-   git revision (you may want to replace `HEAD~1` with `HEAD` to pick up
-   uncommitted changes). Changes are picked up based on a `git diff` with the
-   given revision:
-  ```bash
-  git diff HEAD~1 > pr.diff
-  python tools/linter/clang_tidy --paths torch/csrc --diff-file "pr.diff"
-  ```
+2. Install clang-tidy driver script dependencies
+```bash
+pip3 install -r tools/linter/clang_tidy/requirements.txt
+```
 
-Above, it is assumed you are in the PyTorch root folder. `path/to/build` should
-be the path to where you built PyTorch from source, e.g. `build` in the PyTorch
-root folder if you used `setup.py build`. You can use `-c <clang-tidy-binary>`
-to change the clang-tidy this script uses. Make sure you have PyYaml installed,
-which is in PyTorch's `requirements.txt`.
+3. Run clang-tidy
+```bash
+# Run clang-tidy on the entire codebase
+make clang-tidy
+# Run clang-tidy only on your changes
+make clang-tidy CHANGED_ONLY=--changed-only
+```
+This internally invokes our driver script and closely mimics how clang-tidy is run on CI.
 
 ## Pre-commit tidy/linting hook
 

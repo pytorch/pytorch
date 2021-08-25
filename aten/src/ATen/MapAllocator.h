@@ -18,6 +18,8 @@ enum MappedAllocatorModes {
 // the non-file descriptor constructor
 enum WithFd { WITH_FD };
 
+TORCH_API std::string NewProcessWideShmHandle();
+
 class TORCH_API MapAllocator {
  public:
   MapAllocator(std::string filename, int flags, size_t size);

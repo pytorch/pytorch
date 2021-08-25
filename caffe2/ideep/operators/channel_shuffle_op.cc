@@ -49,9 +49,7 @@ class ChannelShuffleGradientOp final : public IDEEPConvPoolOpBase {
 };
 
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(ChannelShuffle, ChannelShuffleOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(ChannelShuffleGradient, ChannelShuffleGradientOp);
 
 } // namespace

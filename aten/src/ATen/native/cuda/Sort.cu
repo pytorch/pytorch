@@ -3,7 +3,6 @@
 #include <ATen/ATen.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/WrapDimUtils.h>
-#include <ATen/LegacyTHFunctionsCUDA.h>
 #include <ATen/core/Array.h>
 #include <ATen/cuda/cub.cuh>
 #include <ATen/cuda/CUDAContext.h>
@@ -150,10 +149,14 @@ void sortKeyValueInplace(const Tensor& key,
       at::cuda::detail::TensorInfo<int64_t, unsigned int> valueInfo =
         at::cuda::detail::getTensorInfo<int64_t, unsigned int>(value);
 
-      keyInfo.reduceDim(dim);
+      auto strideKey = keyInfo.strides[dim];
+      keyInfo.sizes[dim] = 1;
       int collapseKeyDim = keyInfo.collapseDims(dim);
-      valueInfo.reduceDim(dim);
+      keyInfo.strides[collapseKeyDim] = strideKey;
+      auto strideValue = valueInfo.strides[dim];
+      valueInfo.sizes[dim]=1;
       int collapseValueDim = valueInfo.collapseDims(dim);
+      valueInfo.strides[collapseValueDim] = strideValue;
 
       if (keyInfo.isContiguous()) {
         HANDLE_SORT_CASE(unsigned int, -2);
@@ -174,10 +177,14 @@ void sortKeyValueInplace(const Tensor& key,
       at::cuda::detail::TensorInfo<int64_t, uint64_t> valueInfo =
         at::cuda::detail::getTensorInfo<int64_t, uint64_t>(value);
 
-      keyInfo.reduceDim(dim);
+      auto strideKey = keyInfo.strides[dim];
+      keyInfo.sizes[dim] = 1;
       int collapseKeyDim = keyInfo.collapseDims(dim);
-      valueInfo.reduceDim(dim);
+      keyInfo.strides[collapseKeyDim] = strideKey;
+      auto strideValue = valueInfo.strides[dim];
+      valueInfo.sizes[dim]=1;
       int collapseValueDim = valueInfo.collapseDims(dim);
+      valueInfo.strides[collapseValueDim] = strideValue;
 
       // int64_t case is rare, just instantiate the generic version
       HANDLE_SORT_CASE(uint64_t, -1);
