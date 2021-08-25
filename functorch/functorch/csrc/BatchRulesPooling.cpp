@@ -11,14 +11,6 @@
 
 namespace at { namespace functorch {
 
-std::tuple<Tensor,optional<int64_t>> adaptive_avg_pool2d_batch_rule(
-    const Tensor& tensor, optional<int64_t> batch_dim, IntArrayRef output_size) {
-  auto batch_size = tensor.size(*batch_dim);
-  auto tensor_ = reshape_dim_into(*batch_dim, 0, tensor);
-  auto result = at::adaptive_avg_pool2d(tensor_, output_size);
-  return std::make_tuple( reshape_dim_outof(0, batch_size, result), 0 );
-}
-
 std::tuple<Tensor,int64_t> max_pool2d_with_indices_backward_batch_rule(
     const Tensor & grad_output, optional<int64_t> grad_output_bdim,
     const Tensor & self, optional<int64_t> self_bdim,
@@ -72,7 +64,9 @@ Tensor max_pool2d_with_indices_backward_plumbing(const Tensor & grad_output, con
 
 
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
-  VMAP_SUPPORT("adaptive_avg_pool2d", adaptive_avg_pool2d_batch_rule);
+  EXISTING_BDIM(_adaptive_avg_pool2d);
+  EXISTING_BDIM(avg_pool2d);
+  EXISTING_BDIM(max_pool2d);
   m.impl("max_pool2d_with_indices_backward", max_pool2d_with_indices_backward_plumbing);
 }
 
