@@ -108,7 +108,7 @@ void FilterDescriptor::set(const at::Tensor &t, const at::MemoryFormat memory_fo
     size[i] = (int) 1;
   }
   if( memory_format != at::MemoryFormat::ChannelsLast ) {
-      for (int i = pad; i >= dim; --i ) { 
+      for (int i = pad; i >= dim; --i ) {
           stride[i] = 1;
       }
       for (int i = dim - 1; i >=0; --i) {
@@ -117,7 +117,7 @@ void FilterDescriptor::set(const at::Tensor &t, const at::MemoryFormat memory_fo
   }
   else {
       // ChannelsLast
-       for (int i = pad; i >= dim; --i ) { 
+       for (int i = pad; i >= dim; --i ) {
           stride[i] = 1;
       }
       for (int i = dim-1 ; i >=0; --i ) {
