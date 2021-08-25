@@ -98,6 +98,7 @@ torch::jit::RegisterOperators reg(
           },
          c10::AliasAnalysisKind::FROM_SCHEMA)});
 
+// Registration using the TORCH_LIBRARY def gives dispatching errors when there is no tensor input
 TORCH_LIBRARY(prepacked, m) {
   m.def(TORCH_SELECTIVE_SCHEMA("prepacked::linear_clamp_prepack(Tensor W, Tensor? B=None, Scalar? output_min=None, Scalar? output_max=None) -> __torch__.torch.classes.xnnpack.LinearOpContext"));
   m.def(TORCH_SELECTIVE_SCHEMA("prepacked::linear_clamp_run(Tensor X, __torch__.torch.classes.xnnpack.LinearOpContext W_prepack) -> Tensor Y"));

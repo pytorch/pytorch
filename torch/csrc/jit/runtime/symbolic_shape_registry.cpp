@@ -41,6 +41,7 @@ const std::string shape_compute_functions =
           assert len(self) == 3 or len(self) == 4
           for i in range (1, len(self)):
             assert self[i] != 0
+
           shape: List[int] = []
           for i in range(0, len(self) -2):
             shape.append(self[i])
@@ -292,7 +293,9 @@ const std::string shape_compute_functions =
           for i in range(end_dim + 1, len(input)):
             shape.append(input[i])
           return shape
-
+    )"
+#ifdef USE_XNNPACK
+    R"(
         def prepacked_conv2d_clamp_run(input: List[int], conv2dOpContext: Any):
           assert isinstance(conv2dOpContext, __torch__.torch.classes.xnnpack.Conv2dOpContext)
           (weight, bias, stride, padding, dilation, groups) = ops.prepacked.unpack_prepacked_sizes_conv2d(conv2dOpContext)
@@ -302,7 +305,9 @@ const std::string shape_compute_functions =
           assert isinstance(linearOpContext, __torch__.torch.classes.xnnpack.LinearOpContext)
           (weight, bias) = ops.prepacked.unpack_prepacked_sizes_linear(linearOpContext)
           return linear(input, weight, bias)
-    )";
+    )"
+#endif
+    ;
 
 // mapping function schema to shape compute graphs allows multiple functions to
 // share the same shape compute graph, which is memory efficient and also will
@@ -348,8 +353,10 @@ static const OperatorMap<std::string>& get_schema_to_function_graph() {
       {"aten::expand_as(Tensor(a) self, Tensor other) -> Tensor(a)", "view"},
       {"aten::mean.dim(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", "mean_dim"},
       {"aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor", "addmm"},
+#ifdef USE_XNNPACK
       {"prepacked::conv2d_clamp_run(Tensor X, __torch__.torch.classes.xnnpack.Conv2dOpContext W_prepack) -> Tensor Y", "prepacked_conv2d_clamp_run"},
       {"prepacked::linear_clamp_run(Tensor X, __torch__.torch.classes.xnnpack.LinearOpContext W_prepack) -> Tensor Y", "prepacked_linear_clamp_run"},
+#endif
   };
   // clang-format on
   return schema_to_function_graph;

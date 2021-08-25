@@ -425,6 +425,7 @@ Tensor conv2d_clamp_run(
   return op_context->run(input);
 }
 
+// Op is registered to have Any argument as we plan to reuse it for prepacked conv2d of other backends
 IValue unpack_prepacked_sizes_conv2d(const IValue ivalue) {
   auto op_context = ivalue.toCustomClass<xnnpack::Conv2dOpContext>();
   const auto tuple = op_context->unpack();
