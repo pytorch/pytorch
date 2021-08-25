@@ -321,6 +321,10 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
+      - name: Prepare crash dump folder
+        run: |
+          rm -rf pytorch_crashes
+          mkdir -p pytorch_crashes
       - name: Test PyTorch
         env:
           BUILD_ENVIRONMENT: linux-bionic-py3.8-gcc9-coverage-${{ matrix.config }}
@@ -360,6 +364,7 @@ jobs:
             --tty \
             --user jenkins \
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
+            -v "${GITHUB_WORKSPACE}/pytorch_crashes:/tmp/pytorch_crashes" \
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}" \
             sh -c 'sudo chown -R jenkins . && pip install dist/*.whl && '$TEST_COMMAND
@@ -372,6 +377,14 @@ jobs:
         run: |
           python3 -mpip install codecov
           python3 -mcodecov
+      - uses: actions/upload-artifact@v2
+        name: Upload crash reports
+        if: always()
+        with:
+          name: crash-reports-${{ matrix.config }}
+          retention-days: 14
+          path:
+            pytorch_crashes/*.dmp
       - name: Zip test reports for upload
         if: always()
         env:

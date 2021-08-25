@@ -1019,6 +1019,8 @@ class TestCase(expecttest.TestCase):
     def __init__(self, method_name='runTest'):
         super().__init__(method_name)
 
+        torch.utils._crash_handler.enable_minidumps()
+
         test_method = getattr(self, method_name, None)
         if test_method is not None:
             # Wraps the tested method if we should do CUDA memory check.
