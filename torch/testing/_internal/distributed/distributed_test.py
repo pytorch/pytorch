@@ -3,7 +3,6 @@ import itertools
 import math
 import os
 import random
-from re import S
 import sys
 import tempfile
 import time
