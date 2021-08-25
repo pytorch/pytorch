@@ -156,7 +156,8 @@ class TensorInitParams(object):
     create_op: CreateOp
 
     # needed when create_op is FULL
-    fill_value: Number = field(default=None)
+    # default set to False (not None) since None is incompatible with Number.
+    fill_value: Number = field(default=False)
 
     tensor_properties: TensorProperties = field(
         default=TensorProperties(dtype=torch.get_default_dtype(),

@@ -1,7 +1,3 @@
-from typing import List
-
-import torch
-from torch.distributed._sharding_spec import ShardingSpec
 from .api import (
     CreateOp,
     Shard,
@@ -11,6 +7,11 @@ from .api import (
     TensorProperties,
     load_with_process_group,
 )
+
+from typing import List
+
+import torch
+from torch.distributed._sharding_spec import ShardingSpec
 
 
 def empty(sharding_spec: ShardingSpec,
@@ -127,7 +128,7 @@ def rand(sharding_spec: ShardingSpec,
          init_rrefs=False):
     """
     Returns a :class:`ShardedTensor` filled with random numbers from a uniform distribution on the
-        interval [0, 1)[0,1). Needs to be called on all ranks in an SPMD fashion.
+        interval :math:`[0, 1)`. Needs to be called on all ranks in an SPMD fashion.
 
     Args:
         sharding_spec (:class:`torch.distributed._sharding_spec.ShardingSpec`): The specification
@@ -210,7 +211,7 @@ def zeros(sharding_spec: ShardingSpec,
         dtype=dtype, layout=layout, requires_grad=requires_grad,
         pin_memory=pin_memory, memory_format=memory_format,
     )
-    tensor_init_params = TensorInitParams(reate_op=CreateOp.ZEROS, tensor_properties=tensor_properties, )
+    tensor_init_params = TensorInitParams(create_op=CreateOp.ZEROS, tensor_properties=tensor_properties, )
     return ShardedTensor(
         sharding_spec,
         *size,
@@ -232,7 +233,8 @@ def full(sharding_spec: ShardingSpec,
          init_rrefs=False):
     """
     Creates a :class:`ShardedTensor` filled with fill_value. The tensor’s dtype
-        is inferred from fill_value. Needs to be called on all ranks in an SPMD fashion.
+        is inferred from fill_value. If dtype is specified, it will override the
+        inferred type from fill_value. Needs to be called on all ranks in an SPMD fashion.
 
     Args:
         sharding_spec (:class:`torch.distributed._sharding_spec.ShardingSpec`): The specification

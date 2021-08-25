@@ -220,9 +220,8 @@ class TestCreateTensorFromParams(TestCase):
         h, w = 5, 10
         local_tensor = _create_tensor_from_params(
             h, w, local_device=local_device, tensor_init_params=tensor_init_params)
-
-        print(f"=== bowangbj === \n local_tensor: {local_tensor}")
-
+        # local_tensor.dtype is inferred from fill_value (float32).
+        self.assertEqual(torch.float32, local_tensor.dtype)
         expected_tensor = torch.full((h, w), fill_value=fill_value, device=local_device)
         self.assertEqual(expected_tensor, local_tensor)
 
