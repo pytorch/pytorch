@@ -7,11 +7,9 @@ from .api import (
     TensorProperties,
     load_with_process_group,
 )
-
-from typing import List
-
-import torch
 from torch.distributed._sharding_spec import ShardingSpec
+from typing import List
+import torch
 
 
 def empty(sharding_spec: ShardingSpec,
