@@ -3044,6 +3044,108 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
     def setUp(self):
         self.maxDiff = None
 
+    def _fn_to_stable_annotation_str(self, obj):
+        """
+        Unfortunately we have to serialize function signatures manually since
+        serialization for `inspect.Signature` objects is not stable across
+        python versions
+        """
+        fn_name = torch.typename(obj)
+        signature = inspect.signature(obj)
+
+        arg_strs = []
+        for k, v in signature.parameters.items():
+            maybe_type_annotation = f': {self._annotation_type_to_stable_str(v.annotation)}'\
+                if v.annotation is not inspect.Signature.empty else ''
+            if v.default is not inspect.Signature.empty:
+                default_val_str = str(v.default) if not isinstance(v.default, str) else f"'{v.default}'"
+                maybe_default = f' = {default_val_str}'
+            else:
+                maybe_default = ''
+            maybe_stars = ''
+            if v.kind == inspect.Parameter.VAR_POSITIONAL:
+                maybe_stars = '*'
+            elif v.kind == inspect.Parameter.VAR_KEYWORD:
+                maybe_stars = '**'
+            arg_strs.append(f'{maybe_stars}{k}{maybe_type_annotation}{maybe_default}')
+
+        return_annot = f' -> {self._annotation_type_to_stable_str(signature.return_annotation)}'\
+            if signature.return_annotation is not inspect.Signature.empty else ''
+
+        return f'{fn_name}({", ".join(arg_strs)}){return_annot}'
+
+    def _annotation_type_to_stable_str(self, t):
+        import typing
+        if t is inspect.Signature.empty:
+            return ''
+
+        # Forward ref
+        if isinstance(t, str):
+            return f"'{t}'"
+        if isinstance(t, typing.ForwardRef):
+            assert isinstance(t.__forward_arg__, str)
+            return f"ForwardRef('{t.__forward_arg__}')"
+
+        trivial_mappings = {
+            str : 'str',
+            int : 'int',
+            float: 'float',
+            bool: 'bool',
+            torch.dtype: 'torch.dtype',
+            torch.Tensor: 'torch.Tensor',
+            torch.device: 'torch.device',
+            torch.memory_format: 'torch.memory_format',
+            slice: 'slice',
+            torch.nn.Module: 'torch.nn.modules.module.Module',
+            torch.fx.Graph : 'torch.fx.graph.Graph',
+            torch.fx.Node : 'torch.fx.node.Node',
+            torch.fx.Proxy : 'torch.fx.proxy.Proxy',
+            torch.fx.graph.PythonCode : 'torch.fx.graph.PythonCode',
+            torch.fx.graph_module.GraphModule: 'torch.fx.graph_module.GraphModule',
+            torch.fx.subgraph_rewriter.Match: 'torch.fx.subgraph_rewriter.Match',
+            Ellipsis : '...',
+            typing.Any: 'Any',
+            type(None): 'NoneType',
+            None: 'None',
+            typing.Iterator: 'Iterator',
+        }
+
+        mapping = trivial_mappings.get(t, None)
+        if mapping:
+            return mapping
+
+        # Handle types with contained types
+        contained = getattr(t, '__args__', [])
+        contained = t if isinstance(t, list) else contained
+        contained_type_annots = [self._annotation_type_to_stable_str(ct) for ct in contained]
+        contained_type_str = f'[{", ".join(contained_type_annots)}]' if len(contained_type_annots) > 0 else ''
+
+        origin = getattr(t, '__origin__', None)
+        if origin in {tuple, typing.Tuple}:
+            return f'Tuple{contained_type_str}'
+        if origin in {typing.Union}:
+            # Annoying hack to detect Optional
+            if len(contained) == 2 and (contained[0] is type(None)) ^ (contained[1] is type(None)):
+                not_none_param = contained[0] if contained[0] is not type(None) else contained[1]
+                return f'Optional[{self._annotation_type_to_stable_str(not_none_param)}]'
+            return f'Union{contained_type_str}'
+        if origin in {dict, typing.Dict}:
+            return f'Dict{contained_type_str}'
+        if origin in {list, typing.List}:
+            return f'List{contained_type_str}'
+        if origin in {type, typing.Type}:
+            return f'Type{contained_type_str}'
+        if isinstance(t, typing.Callable):
+            if len(contained) > 0 and contained[0] is not Ellipsis:
+                return f'Callable[[{", ".join(contained_type_annots[:-1])}], {contained_type_annots[-1]}]'
+            else:
+                return f'Callable{contained_type_str}'
+
+        raise RuntimeError(f'Unrecognized type {t} used in BC-compatible type signature. '
+                           f'Please add support for this type and confirm with the '
+                           f'FX team that your signature change is valid.')
+
+
     def test_function_back_compat(self):
         """
         Test backward compatibility for function signatures with
@@ -3058,7 +3160,7 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
 
         for obj in _BACK_COMPAT_OBJECTS:
             if not isinstance(obj, type):
-                signature_strs.append(f'{torch.typename(obj)}{str(inspect.signature(obj))}')
+                signature_strs.append(self._fn_to_stable_annotation_str(obj))
 
         signature_strs.sort()
 

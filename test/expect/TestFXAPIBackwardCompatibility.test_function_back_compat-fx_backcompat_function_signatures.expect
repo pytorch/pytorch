@@ -13,7 +13,7 @@ torch.fx.graph.Graph.create_node(self, op: str, target: 'Target', args: Optional
 torch.fx.graph.Graph.eliminate_dead_code(self)
 torch.fx.graph.Graph.erase_node(self, to_erase: torch.fx.node.Node) -> None
 torch.fx.graph.Graph.get_attr(self, qualified_name: str, type_expr: Optional[Any] = None) -> torch.fx.node.Node
-torch.fx.graph.Graph.graph_copy(self, g: 'Graph', val_map: Dict[torch.fx.node.Node, torch.fx.node.Node], return_output_node=False) -> 'Optional[Argument]'
+torch.fx.graph.Graph.graph_copy(self, g: 'Graph', val_map: Dict[torch.fx.node.Node, torch.fx.node.Node], return_output_node = False) -> 'Optional[Argument]'
 torch.fx.graph.Graph.inserting_after(self, n: Optional[torch.fx.node.Node] = None)
 torch.fx.graph.Graph.inserting_before(self, n: Optional[torch.fx.node.Node] = None)
 torch.fx.graph.Graph.lint(self)
