@@ -305,7 +305,6 @@ class Graph:
         self._pytree_info: Optional[_PyTreeInfo] = None
 
     @property
-    @compatibility(is_backward_compatible=True)
     def owning_module(self):
         """
         Return the module that owns this ``GraphModule``, if there is one,
@@ -315,14 +314,12 @@ class Graph:
         return self._owning_module
 
     @owning_module.setter
-    @compatibility(is_backward_compatible=True)
     def owning_module(self, mod: Optional["GraphModule"]):
         if mod:
             self._owning_module = mod if not self._owners else None
             self._owners += 1
 
     @property
-    @compatibility(is_backward_compatible=True)
     def nodes(self) -> _node_list:
         """
         Get the list of Nodes that constitute this Graph.

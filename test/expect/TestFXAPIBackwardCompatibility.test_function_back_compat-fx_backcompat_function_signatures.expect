@@ -17,20 +17,14 @@ torch.fx.graph.Graph.graph_copy(self, g: 'Graph', val_map: Dict[torch.fx.node.No
 torch.fx.graph.Graph.inserting_after(self, n: Optional[torch.fx.node.Node] = None)
 torch.fx.graph.Graph.inserting_before(self, n: Optional[torch.fx.node.Node] = None)
 torch.fx.graph.Graph.lint(self)
-torch.fx.graph.Graph.nodes(self) -> torch.fx.graph._node_list
 torch.fx.graph.Graph.output(self, result: 'Argument', type_expr: Optional[Any] = None)
-torch.fx.graph.Graph.owning_module(self)
-torch.fx.graph.Graph.owning_module(self, mod: Optional[ForwardRef('GraphModule')])
 torch.fx.graph.Graph.placeholder(self, name: str, type_expr: Optional[Any] = None) -> torch.fx.node.Node
 torch.fx.graph.Graph.print_tabular(self)
 torch.fx.graph.Graph.python_code(self, root_module: str) -> torch.fx.graph.PythonCode
 torch.fx.graph_module.GraphModule.__init__(self, root: Union[torch.nn.modules.module.Module, Dict[str, Any]], graph: torch.fx.graph.Graph, class_name: str = 'GraphModule')
 torch.fx.graph_module.GraphModule.add_submodule(self, target: str, m: torch.nn.modules.module.Module) -> bool
-torch.fx.graph_module.GraphModule.code(self) -> str
 torch.fx.graph_module.GraphModule.delete_all_unused_submodules(self) -> None
 torch.fx.graph_module.GraphModule.delete_submodule(self, target: str) -> bool
-torch.fx.graph_module.GraphModule.graph(self) -> torch.fx.graph.Graph
-torch.fx.graph_module.GraphModule.graph(self, g: torch.fx.graph.Graph) -> None
 torch.fx.graph_module.GraphModule.recompile(self) -> torch.fx.graph.PythonCode
 torch.fx.interpreter.Interpreter.__init__(self, module: torch.fx.graph_module.GraphModule, garbage_collect_values: bool = True)
 torch.fx.interpreter.Interpreter.call_function(self, target: 'Target', args: Tuple[Union[Tuple[Any, ...], List[Any], Dict[str, Any], slice, ForwardRef('Node'), str, int, float, bool, torch.dtype, torch.Tensor, torch.device, torch.memory_format, NoneType], ...], kwargs: Dict[str, Any]) -> Any
@@ -51,26 +45,16 @@ torch.fx.interpreter.Transformer.get_attr(self, target: 'Target', args: Tuple[Un
 torch.fx.interpreter.Transformer.placeholder(self, target: 'Target', args: Tuple[Union[Tuple[Any, ...], List[Any], Dict[str, Any], slice, ForwardRef('Node'), str, int, float, bool, torch.dtype, torch.Tensor, torch.device, torch.memory_format, NoneType], ...], kwargs: Dict[str, Any]) -> torch.fx.proxy.Proxy
 torch.fx.interpreter.Transformer.transform(self) -> torch.fx.graph_module.GraphModule
 torch.fx.node.Node.__init__(self, graph: 'Graph', name: str, op: str, target: 'Target', args: Tuple[ForwardRef('Argument'), ...], kwargs: Dict[str, ForwardRef('Argument')], type: Optional[Any] = None) -> None
-torch.fx.node.Node.all_input_nodes(self) -> List[ForwardRef('Node')]
 torch.fx.node.Node.append(self, x: 'Node') -> None
-torch.fx.node.Node.args(self) -> Tuple[Union[Tuple[Any, ...], List[Any], Dict[str, Any], slice, ForwardRef('Node'), str, int, float, bool, torch.dtype, torch.Tensor, torch.device, torch.memory_format, NoneType], ...]
-torch.fx.node.Node.args(self, a: Tuple[Union[Tuple[Any, ...], List[Any], Dict[str, Any], slice, ForwardRef('Node'), str, int, float, bool, torch.dtype, torch.Tensor, torch.device, torch.memory_format, NoneType], ...])
 torch.fx.node.Node.format_node(self, placeholder_names: List[str] = None, maybe_return_typename: List[str] = None) -> Optional[str]
-torch.fx.node.Node.kwargs(self) -> Dict[str, Union[Tuple[Any, ...], List[Any], Dict[str, Any], slice, ForwardRef('Node'), str, int, float, bool, torch.dtype, torch.Tensor, torch.device, torch.memory_format, NoneType]]
-torch.fx.node.Node.kwargs(self, k: Dict[str, Union[Tuple[Any, ...], List[Any], Dict[str, Any], slice, ForwardRef('Node'), str, int, float, bool, torch.dtype, torch.Tensor, torch.device, torch.memory_format, NoneType]])
-torch.fx.node.Node.next(self) -> 'Node'
 torch.fx.node.Node.prepend(self, x: 'Node') -> None
-torch.fx.node.Node.prev(self) -> 'Node'
 torch.fx.node.Node.replace_all_uses_with(self, replace_with: 'Node') -> List[ForwardRef('Node')]
 torch.fx.node.Node.replace_input_with(self, old_input: 'Node', new_input: 'Node')
-torch.fx.node.Node.stack_trace(self) -> Optional[str]
-torch.fx.node.Node.stack_trace(self, trace: Optional[str])
 torch.fx.node.Node.update_arg(self, idx: int, arg: Union[Tuple[Any, ...], List[Any], Dict[str, Any], slice, ForwardRef('Node'), str, int, float, bool, torch.dtype, torch.Tensor, torch.device, torch.memory_format, NoneType]) -> None
 torch.fx.node.Node.update_kwarg(self, key: str, arg: Union[Tuple[Any, ...], List[Any], Dict[str, Any], slice, ForwardRef('Node'), str, int, float, bool, torch.dtype, torch.Tensor, torch.device, torch.memory_format, NoneType]) -> None
 torch.fx.node.map_aggregate(a: Union[Tuple[Any, ...], List[Any], Dict[str, Any], slice, ForwardRef('Node'), str, int, float, bool, torch.dtype, torch.Tensor, torch.device, torch.memory_format, NoneType], fn: Callable[[Union[Tuple[Any, ...], List[Any], Dict[str, Any], slice, ForwardRef('Node'), str, int, float, bool, torch.dtype, torch.Tensor, torch.device, torch.memory_format, NoneType]], Union[Tuple[Any, ...], List[Any], Dict[str, Any], slice, ForwardRef('Node'), str, int, float, bool, torch.dtype, torch.Tensor, torch.device, torch.memory_format, NoneType]]) -> Union[Tuple[Any, ...], List[Any], Dict[str, Any], slice, ForwardRef('Node'), str, int, float, bool, torch.dtype, torch.Tensor, torch.device, torch.memory_format, NoneType]
 torch.fx.node.map_arg(a: Union[Tuple[Any, ...], List[Any], Dict[str, Any], slice, ForwardRef('Node'), str, int, float, bool, torch.dtype, torch.Tensor, torch.device, torch.memory_format, NoneType], fn: Callable[[torch.fx.node.Node], Union[Tuple[Any, ...], List[Any], Dict[str, Any], slice, ForwardRef('Node'), str, int, float, bool, torch.dtype, torch.Tensor, torch.device, torch.memory_format, NoneType]]) -> Union[Tuple[Any, ...], List[Any], Dict[str, Any], slice, ForwardRef('Node'), str, int, float, bool, torch.dtype, torch.Tensor, torch.device, torch.memory_format, NoneType]
 torch.fx.proxy.Attribute.__init__(self, root: torch.fx.proxy.Proxy, attr: str)
-torch.fx.proxy.Attribute.node(self)
 torch.fx.proxy.Proxy.__init__(self, node: torch.fx.node.Node, tracer: 'Optional[TracerBase]' = None)
 torch.fx.proxy.Proxy.keys(self)
 torch.fx.proxy.TracerBase.create_arg(self, a: Any) -> Union[Tuple[Any, ...], List[Any], Dict[str, Any], slice, ForwardRef('Node'), str, int, float, bool, torch.dtype, torch.Tensor, torch.device, torch.memory_format, NoneType]

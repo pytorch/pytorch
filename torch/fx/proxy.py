@@ -275,7 +275,6 @@ class Attribute(Proxy):
         self._node: Optional[Node] = None
 
     @property
-    @compatibility(is_backward_compatible=True)
     def node(self):
         # the node for attributes is added lazily, since most will just be method calls
         # which do not rely on the getitem call

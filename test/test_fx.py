@@ -3050,6 +3050,7 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
         the saved schema strings and check if the change is truly backward-
         incompatible.
         """
+        # TODO: support properties. Blocked by https://github.com/python/mypy/issues/1362
         signature_strs = []
 
         for obj in _BACK_COMPAT_OBJECTS:

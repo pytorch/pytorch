@@ -190,7 +190,6 @@ class Node:
         self.meta : Dict[str, Any] = {}
 
     @property
-    @compatibility(is_backward_compatible=True)
     def next(self) -> 'Node':
         """
         Returns the next ``Node`` in the linked list of Nodes.
@@ -202,7 +201,6 @@ class Node:
         return self._next
 
     @property
-    @compatibility(is_backward_compatible=True)
     def prev(self) -> 'Node':
         """
         Returns the previous ``Node`` in the linked list of Nodes.
@@ -248,7 +246,6 @@ class Node:
         p._next, n._prev = n, p
 
     @property
-    @compatibility(is_backward_compatible=True)
     def args(self) -> Tuple[Argument, ...]:
         """
         The tuple of arguments to this ``Node``. The interpretation of arguments
@@ -261,7 +258,6 @@ class Node:
         return self._args
 
     @args.setter
-    @compatibility(is_backward_compatible=True)
     def args(self, a : Tuple[Argument, ...]):
         """
         Set the tuple of arguments to this Node. The interpretation of arguments
@@ -273,7 +269,6 @@ class Node:
         self.__update_args_kwargs(map_arg(a, lambda x: x), self._kwargs)  # type: ignore[arg-type]
 
     @property
-    @compatibility(is_backward_compatible=True)
     def kwargs(self) -> Dict[str, Argument]:
         """
         The dict of keyword arguments to this ``Node``. The interpretation of arguments
@@ -286,7 +281,6 @@ class Node:
         return self._kwargs
 
     @kwargs.setter
-    @compatibility(is_backward_compatible=True)
     def kwargs(self, k : Dict[str, Argument]):
         """
         Set the dict of kwargs to this Node. The interpretation of arguments
@@ -298,7 +292,6 @@ class Node:
         self.__update_args_kwargs(self._args, map_arg(k, lambda x: x))  # type: ignore[arg-type]
 
     @property
-    @compatibility(is_backward_compatible=True)
     def all_input_nodes(self) -> List['Node']:
         """
         Return all Nodes that are inputs to this Node. This is equivalent to
@@ -343,7 +336,6 @@ class Node:
         self.kwargs = kwargs
 
     @property
-    @compatibility(is_backward_compatible=True)
     def stack_trace(self) -> Optional[str]:
         """
         Return the Python stack trace that was recorded during tracing, if any.
@@ -354,7 +346,6 @@ class Node:
         return self._stack_trace
 
     @stack_trace.setter
-    @compatibility(is_backward_compatible=True)
     def stack_trace(self, trace : Optional[str]):
         self._stack_trace = trace
 
