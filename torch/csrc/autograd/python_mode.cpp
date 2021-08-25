@@ -2,37 +2,20 @@
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <ATen/PythonModeTLS.h>
+#include <c10/core/TensorImpl.h>
 
 namespace torch { namespace autograd {
-
-PythonTorchDispatchTypeObject::PythonTorchDispatchTypeObject(
-    PyObject* torch_dispatch_type_object,
-    c10::impl::PyInterpreter* pyinterpreter) {
-  data_ = torch_dispatch_type_object;
-  pyinterpreter_ = pyinterpreter;
-  Py_INCREF(data_);
-}
-
-PythonTorchDispatchTypeObject::~PythonTorchDispatchTypeObject() {
-  Py_DECREF(data_);
-}
-
-PyObject* PythonTorchDispatchTypeObject::ptr() const {
-  return data_;
-}
-
-c10::impl::PyInterpreter* PythonTorchDispatchTypeObject::pyinterpreter() const {
-  return pyinterpreter_;
-}
 
 void PythonMode::enter(PyObject* type) {
   if (at::impl::PythonModeTLS::get_state()) {
     TORCH_CHECK(
         false,
         "python mode has already been set. We do not yet support nested python ",
-        "mode. Please reset it before setting it again.")
+        "mode. Please file us an issue and reset it before setting it again.")
   }
-  auto state = std::make_shared<PythonTorchDispatchTypeObject>(type, getPyInterpreter());
+  // TorchDispatchTypeObject steals a reference, See NOTE [What is TorchDispatchTypeObject?]
+  Py_INCREF(type);
+  auto state = std::make_shared<c10::TorchDispatchTypeObject>(type, getPyInterpreter());
   at::impl::PythonModeTLS::set_state(state);
 }
 

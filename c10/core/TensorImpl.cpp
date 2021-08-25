@@ -609,6 +609,25 @@ void TensorImpl::copy_tensor_metadata(
   }
 }
 
+TorchDispatchTypeObject::TorchDispatchTypeObject(
+    PyObject* type_object,
+    c10::impl::PyInterpreter* pyinterpreter)
+  : data_(type_object),
+    pyinterpreter_(pyinterpreter) {
+}
+
+TorchDispatchTypeObject::~TorchDispatchTypeObject() {
+  pyinterpreter_->decref(data_);
+}
+
+c10::impl::PyInterpreter* TorchDispatchTypeObject::pyinterpreter() const {
+  return pyinterpreter_;
+}
+
+PyObject* TorchDispatchTypeObject::ptr() const {
+  return data_;
+}
+
 namespace impl {
 
 namespace {

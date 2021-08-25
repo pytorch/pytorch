@@ -359,13 +359,20 @@ struct C10_API NamedTensorMetaInterface {
 // PyObject* and a PyInterpreter* that says which python interpreter the class
 // came from.
 //
-// TorchDispatchTypeObject is virtual due to the libtorch_python library
-// boundary. See PythonTorchDispatchTypeObject for more details.
-//
 // See NOTE [dispatch_fn's type argument] for more details
 struct C10_API TorchDispatchTypeObject {
-  virtual ~TorchDispatchTypeObject() = default;
-  virtual c10::impl::PyInterpreter* pyinterpreter() const = 0;
+  // Steals a reference to type_object
+  TorchDispatchTypeObject(PyObject* type_object, c10::impl::PyInterpreter* pyinterpreter);
+
+  // Releases the stolen reference to type_object
+  ~TorchDispatchTypeObject();
+
+  c10::impl::PyInterpreter* pyinterpreter() const;
+  PyObject* ptr() const;
+
+ private:
+  PyObject* data_;
+  c10::impl::PyInterpreter* pyinterpreter_;
 };
 
 // NOTE [ Version Counter Sharing ]
@@ -891,6 +898,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   bool is_mlc() const {
     return key_set_.has(DispatchKey::MLC);
+  }
+
+  bool is_ort() const {
+    return key_set_.has(DispatchKey::ORT);
   }
 
   // TODO: remove this once we don't automatically enabled Autograd dispatch
