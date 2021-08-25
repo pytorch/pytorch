@@ -2,6 +2,7 @@ from .graph_module import GraphModule
 from .graph import Graph
 from .node import Node
 from ._symbolic_trace import symbolic_trace
+from ._compatibility import compatibility
 
 import copy
 from typing import Callable, Dict, List, NamedTuple, Optional, Set
@@ -13,11 +14,11 @@ class Match(NamedTuple):
     # Maps nodes in the pattern subgraph to nodes in the larger graph
     nodes_map: Dict[Node, Node]
 
-class SubgraphMatcher:
+class _SubgraphMatcher:
     def __init__(self, pattern: Graph) -> None:
         self.pattern = pattern
         if len(pattern.nodes) == 0:
-            raise ValueError("SubgraphMatcher cannot be initialized with an "
+            raise ValueError("_SubgraphMatcher cannot be initialized with an "
                              "empty pattern")
         # `self.pattern_anchor` is the output Node in `pattern`
         self.pattern_anchor = next(iter(reversed(pattern.nodes)))
@@ -129,6 +130,7 @@ def _replace_submodules(gm: GraphModule, replacement: torch.nn.Module) -> None:
 
     gm.graph.lint()
 
+@compatibility(is_backward_compatible=True)
 def replace_pattern(gm: GraphModule, pattern: Callable, replacement: Callable) -> List[Match]:
     """
     Matches all possible non-overlapping sets of operators and their
@@ -242,11 +244,6 @@ def replace_pattern(gm: GraphModule, pattern: Callable, replacement: Callable) -
             max_2 = torch.max(sum_2)
             add_2 = add_1 + max_2
             return add_2
-
-
-    Backwards Compatibility:
-
-        Backwards-compatibility for this API is guaranteed.
     """
     # Get the graphs for `gm`, `pattern`, `replacement`
     original_graph = gm.graph
@@ -255,7 +252,7 @@ def replace_pattern(gm: GraphModule, pattern: Callable, replacement: Callable) -
 
     # Find all possible pattern matches in original_graph. Note that
     # pattern matches may overlap with each other.
-    matcher = SubgraphMatcher(pattern_graph)
+    matcher = _SubgraphMatcher(pattern_graph)
     matches: List[Match] = []
 
     # Consider each node as an "anchor" (deepest matching graph node)

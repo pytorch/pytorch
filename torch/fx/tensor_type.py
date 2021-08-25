@@ -1,6 +1,9 @@
 from torch.fx.experimental.unification import Var  # type: ignore[attr-defined]
 
+from ._compatibility import compatibility
 
+
+@compatibility(is_backward_compatible=False)
 class TensorType:
     """
     TensorType defines a type for tensors, which consists of a list of dimensions.
@@ -8,10 +11,6 @@ class TensorType:
         class M(torch.nn.Module):
             def forward(self, x:TensorType((1,2,3, Dyn)), y:TensorType((1,2,3, Dyn))):
                 return torch.add(x, y)
-
-    Backwards Compatibility:
-
-        This API is experimental and its backwards-compability is *NOT* guaranteed.
     """
 
     def __init__(self, dim):
@@ -52,7 +51,7 @@ class _DynType:
 
 Dyn = _DynType()
 
-
+@compatibility(is_backward_compatible=False)
 def is_consistent(t1, t2):
     """
     A binary relation denoted by ~ that determines if t1 is consistent with t2.
@@ -63,10 +62,6 @@ def is_consistent(t1, t2):
         int ~ Dyn
         int ~ int
         TensorType((1,Dyn,3)) ~ TensorType((1,2,3))
-
-    Backwards Compatibility:
-
-        This API is experimental and its backwards-compability is *NOT* guaranteed.
     """
 
     if t1 == t2:
@@ -82,6 +77,7 @@ def is_consistent(t1, t2):
         return False
 
 
+@compatibility(is_backward_compatible=False)
 def is_more_precise(t1, t2):
     """
     A binary relation denoted by <= that determines if t1 is more precise than t2.
@@ -92,10 +88,6 @@ def is_more_precise(t1, t2):
         int >= Dyn
         int >= int
         TensorType((1,Dyn,3)) <= TensorType((1,2,3))
-
-    Backwards Compatibility:
-
-        This API is experimental and its backwards-compability is *NOT* guaranteed.
     """
     if t1 == t2:
         return True

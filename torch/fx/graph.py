@@ -1,6 +1,7 @@
 from .node import Node, Argument, Target, map_arg, _type_repr, _get_qualified_name
 import torch.utils._pytree as pytree
 from . import _pytree as fx_pytree
+from ._compatibility import compatibility
 
 from typing import TYPE_CHECKING, Callable, Any, List, Dict, NamedTuple, Optional, Tuple, Set, FrozenSet, Type
 from dataclasses import dataclass
@@ -175,14 +176,11 @@ class _Namespace:
         return False
 
 
+@compatibility(is_backward_compatible=True)
 @dataclass
 class PythonCode:
     """
     Represents all the information necessary to exec or save a graph as Python code.
-
-    Backwards Compatibility:
-
-        Backwards-compatibility for this API is guaranteed.
     """
     # Python source code for the forward function definition.
     src: str
@@ -246,6 +244,7 @@ class _PyTreeInfo(NamedTuple):
     in_spec: pytree.TreeSpec
     out_spec: Optional[pytree.TreeSpec]
 
+@compatibility(is_backward_compatible=True)
 class Graph:
     """
     ``Graph`` is the main data structure used in the FX Intermediate Representation.
@@ -288,18 +287,12 @@ class Graph:
             return topk_1
 
     For the semantics of operations represented in the ``Graph``, please see :class:`Node`.
-
-    Backwards Compatibility:
-
-        Backwards-compatibility for this API is guaranteed.
     """
+
+    @compatibility(is_backward_compatible=True)
     def __init__(self, owning_module: Optional["GraphModule"] = None, tracer_cls: Optional[Type["Tracer"]] = None):
         """
         Construct an empty Graph.
-
-        Backwards Compatibility:
-
-            Backwards-compatibility for this API is guaranteed.
         """
         self._root : Node = Node(self, '', 'root', '', (), {})
         self._used_names : Dict[str, int] = {}  # base name -> number
@@ -311,30 +304,24 @@ class Graph:
         self._tracer_cls = tracer_cls
         self._pytree_info: Optional[_PyTreeInfo] = None
 
+    @compatibility(is_backward_compatible=True)
     @property
     def owning_module(self):
         """
         Return the module that owns this ``GraphModule``, if there is one,
         ``None`` if there is no owning module or if there are multiple owning
         modules.
-
-        Backwards Compatibility:
-
-            Backwards-compatibility for this API is guaranteed.
         """
         return self._owning_module
 
+    @compatibility(is_backward_compatible=True)
     @owning_module.setter
     def owning_module(self, mod: Optional["GraphModule"]):
-        """
-        Backwards Compatibility:
-
-            Backwards-compatibility for this API is guaranteed.
-        """
         if mod:
             self._owning_module = mod if not self._owners else None
             self._owners += 1
 
+    @compatibility(is_backward_compatible=True)
     @property
     def nodes(self) -> _node_list:
         """
@@ -347,13 +334,10 @@ class Graph:
 
             A doubly-linked list of Nodes. Note that ``reversed`` can be called on
             this list to switch iteration order.
-
-        Backwards Compatibility:
-
-            Backwards-compatibility for this API is guaranteed.
         """
         return _node_list(self)
 
+    @compatibility(is_backward_compatible=True)
     def graph_copy(self, g : 'Graph', val_map : Dict[Node, Node], return_output_node=False) -> 'Optional[Argument]':
         """
         Copy all nodes from a given graph into ``self``.
@@ -370,10 +354,6 @@ class Graph:
 
             The value in ``self`` that is now equivalent to the output value in ``g``,
             if ``g`` had an ``output`` node. ``None`` otherwise.
-
-        Backwards Compatibility:
-
-            Backwards-compatibility for this API is guaranteed.
         """
         for node in g.nodes:
             if node in val_map:
@@ -391,10 +371,6 @@ class Graph:
         in an iterative way, rather than recursive. It also populates the
         memoization table to prevent unnecessary copies (e.g. references to
         nodes or other parts of the Graph from a custom GraphModule implementation.
-
-        Backwards Compatibility:
-
-            Backwards-compatibility for this API is guaranteed.
         """
         memo = memo if memo else {}
         g = Graph(tracer_cls=self._tracer_cls)
@@ -404,6 +380,7 @@ class Graph:
         g.output(output_val, type_expr=getattr(old_output_val, 'type', None))
         return g
 
+    @compatibility(is_backward_compatible=True)
     def create_node(self, op: str, target: 'Target',
                     args: Optional[Tuple['Argument', ...]] = None,
                     kwargs: Optional[Dict[str, 'Argument']] = None,
@@ -433,10 +410,6 @@ class Graph:
         Returns:
 
             The newly-created and inserted node.
-
-        Backwards Compatibility:
-
-            Backwards-compatibility for this API is guaranteed.
         """
         assert op in ('call_function', 'call_method', 'get_attr', 'call_module', 'placeholder', 'output')
         args = () if args is None else args
@@ -454,21 +427,13 @@ class Graph:
         self._len += 1
         return n
 
+    @compatibility(is_backward_compatible=False)
     def flatten_inps(self, *args):
-        """
-        Backwards Compatibility:
-
-            Backwards-compatibility for this API is guaranteed.
-        """
         flat_args, args_spec = pytree.tree_flatten(args)
         return flat_args
 
+    @compatibility(is_backward_compatible=False)
     def unflatten_outs(self, out):
-        """
-        Backwards Compatibility:
-
-            Backwards-compatibility for this API is guaranteed.
-        """
         if self._pytree_info is None:
             return out
         if not isinstance(out, list):
@@ -476,6 +441,7 @@ class Graph:
         assert(self._pytree_info.out_spec is not None)
         return pytree.tree_unflatten(out, self._pytree_info.out_spec)
 
+    @compatibility(is_backward_compatible=True)
     def erase_node(self, to_erase : Node) -> None:
         """
         Erases a ``Node`` from the ``Graph``. Throws an exception if
@@ -484,10 +450,6 @@ class Graph:
         Args:
 
             to_erase (Node): The ``Node`` to erase from the ``Graph``.
-
-        Backwards Compatibility:
-
-            Backwards-compatibility for this API is guaranteed.
         """
         if len(to_erase.users) > 0:
             raise RuntimeError(f'Tried to erase Node {to_erase} but it still had {len(to_erase.users)} '
@@ -506,6 +468,7 @@ class Graph:
         assert isinstance(new_kwargs, dict)
         to_erase.kwargs = new_kwargs
 
+    @compatibility(is_backward_compatible=True)
     def inserting_before(self, n: Optional[Node] = None):
         """Set the point at which create_node and companion methods will insert into the graph.
         When used within a 'with' statement, this will temporary set the insert point and
@@ -522,16 +485,13 @@ class Graph:
 
         Returns:
             A resource manager that will restore the insert point on ``__exit__``.
-
-        Backwards Compatibility:
-
-            Backwards-compatibility for this API is guaranteed.
         """
         if n is None:
             return self.inserting_after(self._root)
         assert n.graph == self, "Node to insert before is not in graph."
         return _InsertPoint(self, n.prepend)
 
+    @compatibility(is_backward_compatible=True)
     def inserting_after(self, n: Optional[Node] = None):
         """Set the point at which create_node and companion methods will insert into the graph.
         When used within a 'with' statement, this will temporary set the insert point and
@@ -548,17 +508,13 @@ class Graph:
 
         Returns:
             A resource manager that will restore the insert point on ``__exit__``.
-
-        Backwards Compatibility:
-
-            Backwards-compatibility for this API is guaranteed.
         """
         if n is None:
             return self.inserting_before(self._root)
         assert n.graph == self, "Node to insert after is not in graph."
         return _InsertPoint(self, n.append)
 
-    # sugar for create_node when you know the op
+    @compatibility(is_backward_compatible=True)
     def placeholder(self, name: str, type_expr: Optional[Any] = None) -> Node:
         """
         Insert a ``placeholder`` node into the Graph. A ``placeholder`` represents
@@ -577,13 +533,10 @@ class Graph:
         .. note::
             The same insertion point and type expression rules apply for this method
             as ``Graph.create_node``.
-
-        Backwards Compatibility:
-
-            Backwards-compatibility for this API is guaranteed.
         """
         return self.create_node('placeholder', name, type_expr=type_expr)
 
+    @compatibility(is_backward_compatible=True)
     def get_attr(self, qualified_name: str, type_expr: Optional[Any] = None) -> Node:
         """
         Insert a ``get_attr`` node into the Graph. A ``get_attr`` ``Node`` represents the
@@ -607,10 +560,6 @@ class Graph:
         .. note::
             The same insertion point and type expression rules apply for this method
             as ``Graph.create_node``.
-
-        Backwards Compatibility:
-
-            Backwards-compatibility for this API is guaranteed.
         """
         def _get_attr_reference_exists(mod: torch.nn.Module, qualified_name: str) -> bool:
             module_path, _, name = qualified_name.rpartition(".")
@@ -645,6 +594,7 @@ class Graph:
                           "necessary buffer")
         return self.create_node('get_attr', qualified_name, type_expr=type_expr)
 
+    @compatibility(is_backward_compatible=True)
     def call_module(self,
                     module_name: str,
                     args: Optional[Tuple['Argument', ...]] = None,
@@ -679,10 +629,6 @@ class Graph:
         .. note::
             The same insertion point and type expression rules apply for this method
             as :meth:`Graph.create_node`.
-
-        Backwards Compatibility:
-
-            Backwards-compatibility for this API is guaranteed.
         """
         if (self.owning_module and
                 self.owning_module.get_submodule(module_name) is None):
@@ -693,6 +639,7 @@ class Graph:
                           "necessary submodule")
         return self.create_node('call_module', module_name, args, kwargs, type_expr=type_expr)
 
+    @compatibility(is_backward_compatible=True)
     def call_method(self,
                     method_name: str,
                     args: Optional[Tuple['Argument', ...]] = None,
@@ -724,13 +671,10 @@ class Graph:
         .. note::
             The same insertion point and type expression rules apply for this method
             as :meth:`Graph.create_node`.
-
-        Backwards Compatibility:
-
-            Backwards-compatibility for this API is guaranteed.
         """
         return self.create_node('call_method', method_name, args, kwargs, type_expr=type_expr)
 
+    @compatibility(is_backward_compatible=True)
     def call_function(self,
                       the_function: Callable[..., Any],
                       args: Optional[Tuple['Argument', ...]] = None,
@@ -763,13 +707,10 @@ class Graph:
         .. note::
             The same insertion point and type expression rules apply for this method
             as :meth:`Graph.create_node`.
-
-        Backwards Compatibility:
-
-            Backwards-compatibility for this API is guaranteed.
         """
         return self.create_node('call_function', the_function, args, kwargs, type_expr=type_expr)
 
+    @compatibility(is_backward_compatible=True)
     def node_copy(self, node: Node, arg_transform: Callable[[Node], 'Argument'] = lambda x: x) -> Node:
         """
         Copy a node from one graph into another. ``arg_transform`` needs to transform arguments from
@@ -791,10 +732,6 @@ class Graph:
                 equivalent argument in ``self``. In the simplest case, this should
                 retrieve a value out of a table mapping Nodes in the original
                 graph to ``self``.
-
-        Backwards Compatibility:
-
-            Backwards-compatibility for this API is guaranteed.
         """
         args = map_arg(node.args, arg_transform)
         kwargs = map_arg(node.kwargs, arg_transform)
@@ -804,6 +741,7 @@ class Graph:
         result_node.meta = copy.copy(node.meta)
         return result_node
 
+    @compatibility(is_backward_compatible=True)
     def output(self, result: 'Argument', type_expr: Optional[Any] = None):
         """
         Insert an ``output`` ``Node`` into the ``Graph``. An ``output`` node represents
@@ -821,10 +759,6 @@ class Graph:
 
             The same insertion point and type expression rules apply for this method
             as ``Graph.create_node``.
-
-        Backwards Compatibility:
-
-            Backwards-compatibility for this API is guaranteed.
         """
         return self.create_node(op='output', target='output', args=(result,), type_expr=type_expr)
 
@@ -839,6 +773,7 @@ class Graph:
         op = _snake_case(op)
         return op
 
+    @compatibility(is_backward_compatible=True)
     def python_code(self, root_module: str) -> PythonCode:
         """
         Turn this ``Graph`` into valid Python code.
@@ -853,10 +788,6 @@ class Graph:
             A PythonCode object, consisting of two fields:
                 src: the Python source code representing the object
                 globals: a dictionary of global names in `src` -> the objects that they reference.
-
-        Backwards Compatibility:
-
-            Backwards-compatibility for this API is guaranteed.
         """
         # NOTE: [Graph Namespaces]
         #
@@ -1113,15 +1044,12 @@ def forward({', '.join(orig_args)}){maybe_return_annotation[0]}:
                 s += '\n    ' + node_str
         return s
 
+    @compatibility(is_backward_compatible=True)
     def print_tabular(self):
         """
         Prints the intermediate representation of the graph in tabular
         format. Note that this API requires the ``tabulate`` module to be
         installed.
-
-        Backwards Compatibility:
-
-            Backwards-compatibility for this API is guaranteed.
         """
         try:
             from tabulate import tabulate
@@ -1134,6 +1062,7 @@ def forward({', '.join(orig_args)}){maybe_return_annotation[0]}:
         print(tabulate(node_specs,
               headers=['opcode', 'name', 'target', 'args', 'kwargs']))
 
+    @compatibility(is_backward_compatible=True)
     def lint(self):
         """
         Runs various checks on this Graph to make sure it is well-formed. In
@@ -1142,10 +1071,6 @@ def forward({', '.join(orig_args)}){maybe_return_annotation[0]}:
         - Checks Nodes appear in topological order
         - If this Graph has an owning GraphModule, checks that targets
         exist in that GraphModule
-
-        Backwards Compatibility:
-
-            Backwards-compatibility for this API is guaranteed.
         """
 
         # Check topo order
@@ -1201,6 +1126,7 @@ def forward({', '.join(orig_args)}){maybe_return_annotation[0]}:
                         else:
                             m_itr = new_m_itr
 
+    @compatibility(is_backward_compatible=True)
     def eliminate_dead_code(self):
         """
         Remove all dead code from the graph, based on each node's number of
@@ -1228,10 +1154,6 @@ def forward({', '.join(orig_args)}){maybe_return_annotation[0]}:
 
             def forward(self, x):
                 return x + self.attr_1
-
-        Backwards Compatibility:
-
-            Backwards-compatibility for this API is guaranteed.
         """
         # Lint the graph first to make sure its topologically sorted, otherwise
         # DCE below will not behave as expected.

@@ -6,6 +6,7 @@ from torch.package import PackageImporter, PackageExporter
 import linecache
 from typing import Type, Dict, List, Any, Union, Optional, Set
 from .graph import Graph, _is_from_torch, _custom_builtins, PythonCode
+from ._compatibility import compatibility
 from torch.package import Importer, sys_importer
 import copy
 import itertools
@@ -219,6 +220,7 @@ def _assign_attr(from_obj: Any, to_module: torch.nn.Module, target: str):
     else:
         setattr(to_module, field, from_obj)
 
+@compatibility(is_backward_compatible=True)
 class GraphModule(torch.nn.Module):
     """
     GraphModule is an nn.Module generated from an fx.Graph. Graphmodule has a
@@ -231,10 +233,6 @@ class GraphModule(torch.nn.Module):
         regenerated. However, if you edit the contents of the ``graph`` without reassigning
         the ``graph`` attribute itself, you must call ``recompile()`` to update the generated
         code.
-
-    Backwards Compatibility:
-
-        Backwards-compatibility for this API is guaranteed.
     """
     def __new__(cls: 'Type[GraphModule]', *args, **kwargs):
         # each instance of a graph module needs its own forward method
@@ -246,6 +244,7 @@ class GraphModule(torch.nn.Module):
             pass
         return super().__new__(GraphModuleImpl)
 
+    @compatibility(is_backward_compatible=True)
     def __init__(self,
                  root: Union[torch.nn.Module, Dict[str, Any]],
                  graph: Graph,
@@ -269,10 +268,6 @@ class GraphModule(torch.nn.Module):
             class_name (str): ``name`` denotes the name of this GraphModule for debugging purposes. If it's unset, all
                 error messages will report as originating from ``GraphModule``. It may be helpful to set this
                 to ``root``'s original name or a name that makes sense within the context of your transform.
-
-        Backwards Compatibility:
-
-            Backwards-compatibility for this API is guaranteed.
         """
         super().__init__()
         self.__class__.__name__ = class_name
@@ -321,33 +316,28 @@ class GraphModule(torch.nn.Module):
     # Shouldn't be an issue since these methods shouldn't be used in TorchScript anyway
     __jit_unused_properties__ = ['graph']
 
+    @compatibility(is_backward_compatible=True)
     @property
     def graph(self) -> Graph:
         """
         Return the ``Graph`` underlying this ``GraphModule``
-
-        Backwards Compatibility:
-
-            Backwards-compatibility for this API is guaranteed.
         """
         return self._graph
 
+    @compatibility(is_backward_compatible=True)
     @graph.setter
     def graph(self, g : Graph) -> None:
         """
         Set the underlying ``Graph`` for this ``GraphModule``. This will internally
         recompile the ``GraphModule`` so that the generated ``forward()`` function
         corresponds to ``g``
-
-        Backwards Compatibility:
-
-            Backwards-compatibility for this API is guaranteed.
         """
         assert isinstance(g, Graph), f'Expected a Graph instance, but got {type(g)}'
         self._graph = g
         g.owning_module = self
         self.recompile()
 
+    @compatibility(is_backward_compatible=False)
     def to_folder(self, folder: Union[str, os.PathLike], module_name : str = "FxModule"):
         """Dumps out module to ``folder`` with ``module_name`` so that it can be
         imported with ``from <folder> import <module_name>``
@@ -358,11 +348,6 @@ class GraphModule(torch.nn.Module):
 
             module_name (str): Top-level name to use for the ``Module`` while
                 writing out the code
-
-        Backwards Compatibility:
-
-            This API is experimental and its backwards-compatibility is *NOT*
-            guaranteed
         """
         folder = Path(folder)
         Path(folder).mkdir(exist_ok=True)
@@ -417,6 +402,7 @@ class {module_name}(torch.nn.Module):
             warnings.warn("Was not able to save the following children modules as reprs -"
                           f"saved as pickled files instead: {blobified_modules}")
 
+    @compatibility(is_backward_compatible=True)
     def add_submodule(self, target: str, m: torch.nn.Module) -> bool:
         """
         Adds the given submodule to ``self``.
@@ -437,10 +423,6 @@ class {module_name}(torch.nn.Module):
                 denoted by ``target`` must either a) not exist yet,
                 or b) reference an ``nn.Module`` (not a parameter or
                 other attribute)
-
-        Backwards Compatibility:
-
-            Backwards-compatibility for this API is guaranteed.
         """
         *prefix, field = target.split('.')
         mod: torch.nn.Module = self
@@ -461,6 +443,7 @@ class {module_name}(torch.nn.Module):
         mod.add_module(field, m)
         return True
 
+    @compatibility(is_backward_compatible=True)
     def delete_submodule(self, target: str) -> bool:
         """
         Deletes the given submodule from ``self``.
@@ -478,10 +461,6 @@ class {module_name}(torch.nn.Module):
                 submodule we want to delete. A return value of ``False``
                 means that the ``target`` was not a valid reference to
                 a submodule.
-
-        Backwards Compatibility:
-
-            Backwards-compatibility for this API is guaranteed.
         """
         atoms = target.split(".")
         path, target_submod = atoms[:-1], atoms[-1]
@@ -507,6 +486,7 @@ class {module_name}(torch.nn.Module):
         delattr(mod, target_submod)
         return True
 
+    @compatibility(is_backward_compatible=True)
     def delete_all_unused_submodules(self) -> None:
         """
         Deletes all unused submodules from ``self``.
@@ -520,10 +500,6 @@ class {module_name}(torch.nn.Module):
 
         This method can be called to clean up an ``nn.Module`` without
         manually calling ``delete_submodule`` on each unused submodule.
-
-        Backwards Compatibility:
-
-            Backwards-compatibility for this API is guaranteed.
         """
         used: List[str] = []
 
@@ -555,29 +531,23 @@ class {module_name}(torch.nn.Module):
         for name in to_delete:
             self.delete_submodule(name)
 
+    @compatibility(is_backward_compatible=True)
     @property
     def code(self) -> str:
         """
         Return the Python code generated from the ``Graph`` underlying this
         ``GraphModule``.
-
-        Backwards Compatibility:
-
-            Backwards-compatibility for this API is guaranteed.
         """
         if not hasattr(self, '_code'):
             raise RuntimeError('Code has not been generated! Please report a bug to PyTorch')
         return self._code
 
+    @compatibility(is_backward_compatible=True)
     def recompile(self) -> PythonCode:
         """
         Recompile this GraphModule from its ``graph`` attribute. This should be
         called after editing the contained ``graph``, otherwise the generated
         code of this ``GraphModule`` will be out of date.
-
-        Backwards Compatibility:
-
-            Backwards-compatibility for this API is guaranteed.
         """
         if self._graph._pytree_info is not None:
             self._in_spec = self._graph._pytree_info.in_spec

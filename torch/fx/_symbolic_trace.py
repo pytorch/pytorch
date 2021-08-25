@@ -12,6 +12,7 @@ from torch._C import ScriptObject  # type: ignore[attr-defined]
 import torch.utils._pytree as pytree
 
 import sys
+from ._compatibility import compatibility
 from .node import Argument, map_aggregate, base_types
 from .graph import Graph, _PyTreeInfo
 from .graph_module import GraphModule
@@ -25,6 +26,7 @@ _orig_module_getattr : Callable = torch.nn.Module.__getattr__
 
 _proxyable_classes : Dict[Type, None] = {}
 
+@compatibility(is_backward_compatible=True)
 class ProxyableClassMeta(type):
     """
     ProxyableClassMeta allows you to make construction of a given Python class
@@ -68,10 +70,6 @@ class ProxyableClassMeta(type):
     From this example, we can see that contruction of a class (``TensorPair``)
     defined with ``ProxyableClassMeta`` as metaclass can be recorded in symbolic
     tracing.
-
-    Backwards compatiblity:
-
-        Backwards-compatibility for this API is guaranteed.
     """
     def __init__(cls, name, bases, attrs):
         _proxyable_classes.setdefault(cls)
@@ -161,19 +159,17 @@ class _CPatchManager(object):
     def __exit__(self, type, value, tb):
         sys.setprofile(None)
 
+@compatibility(is_backward_compatible=False)
 class PHBase(object):
     """
     Object representing an input placeholder to `concrete_args`
-
-    Backwards compatiblity:
-
-        This API is experimental and is *NOT* backward-compatible.
     """
     def __repr__(self):
         return 'PH'
 
 PH = PHBase()
 
+@compatibility(is_backward_compatible=True)
 class Tracer(TracerBase):
     # Reference: https://github.com/pytorch/pytorch/issues/54354
     # The first line of this docstring overrides the one Sphinx generates for the
@@ -189,11 +185,9 @@ class Tracer(TracerBase):
     Tracer can be subclassed to override various behaviors of the tracing
     process. The different behaviors that can be overridden are described
     in the docstrings of the methods on this class.
-
-    Backwards compatiblity:
-
-        Backwards-compatibility for this API is guaranteed.
     """
+
+    @compatibility(is_backward_compatible=True)
     def __init__(self, autowrap_modules: Tuple[ModuleType] = (math, ),
                  autowrap_functions: Tuple[Callable, ...] = (),
                  enable_cpatching: bool = False,
@@ -252,6 +246,7 @@ class Tracer(TracerBase):
 
         self.submodule_paths: Optional[Dict[torch.nn.Module, str]] = None
 
+    @compatibility(is_backward_compatible=True)
     def create_arg(self, a: Any) -> 'Argument':
         """
         A method to specify the behavior of tracing when preparing values to
@@ -278,10 +273,6 @@ class Tracer(TracerBase):
         Returns:
 
             The value ``a`` converted into the appropriate ``Argument``
-
-        Backwards compatiblity:
-
-            Backwards-compatibility for this API is guaranteed.
         """
         # The base tracer is used to construct Graphs when there is no associated
         # module hierarchy, so it can never create parameter references.
@@ -346,6 +337,7 @@ class Tracer(TracerBase):
 
         return super().create_arg(a)
 
+    @compatibility(is_backward_compatible=True)
     def is_leaf_module(self, m: torch.nn.Module, module_qualified_name : str) -> bool:
         """
         A method to specify whether a given ``nn.Module`` is a "leaf" module.
@@ -364,13 +356,10 @@ class Tracer(TracerBase):
                 if you have a module hierarchy where submodule ``foo`` contains
                 submodule ``bar``, which contains submodule ``baz``, that module will
                 appear with the qualified name ``foo.bar.baz`` here.
-
-        Backwards compatiblity:
-
-            Backwards-compatibility for this API is guaranteed.
         """
         return m.__module__.startswith('torch.nn') and not isinstance(m, torch.nn.Sequential)
 
+    @compatibility(is_backward_compatible=True)
     def path_of_module(self, mod : torch.nn.Module) -> str:
         """
         Helper method to find the qualified name of ``mod`` in the Module hierarchy
@@ -381,10 +370,6 @@ class Tracer(TracerBase):
         Args:
 
             mod (str): The ``Module`` to retrieve the qualified name for.
-
-        Backwards compatiblity:
-
-            Backwards-compatibility for this API is guaranteed.
         """
         # Prefer the O(1) algorithm
         if self.submodule_paths:
@@ -401,6 +386,7 @@ class Tracer(TracerBase):
                     return n
             raise NameError('module is not installed as a submodule')
 
+    @compatibility(is_backward_compatible=True)
     def call_module(self, m: torch.nn.Module, forward: Callable[..., Any], args : Tuple[Any, ...], kwargs : Dict[str, Any]) -> Any:
         """
         Method that specifies the behavior of this ``Tracer`` when it encounters
@@ -427,26 +413,19 @@ class Tracer(TracerBase):
             The return value from the Module call. In the case that a ``call_module``
             node was emitted, this is a ``Proxy`` value. Otherwise, it is whatever
             value was returned from the ``Module`` invocation.
-
-        Backwards compatiblity:
-
-            Backwards-compatibility for this API is guaranteed.
         """
         module_qualified_name = self.path_of_module(m)
         if not self.is_leaf_module(m, module_qualified_name):
             return forward(*args, **kwargs)
         return self.create_proxy('call_module', module_qualified_name, args, kwargs)
 
+    # This method will be refactored
+    @compatibility(is_backward_compatible=False)
     def create_args_for_root(self, root_fn, is_module, concrete_args=None):
         """
         Create ``placeholder`` nodes corresponding to the signature of the ``root``
         Module. This method introspects root's signature and emits those
         nodes accordingly, also supporting ``*args`` and ``**kwargs``.
-
-        Backwards compatiblity:
-
-            This API will be refactored and its backwards-compatibility is
-            *NOT* currently guaranteed.
         """
         # In some cases, a function or method has been decorated with a wrapper
         # defined via ``functools.wraps``. In this case, the outer code object
@@ -548,6 +527,7 @@ class Tracer(TracerBase):
         return attr_val
 
 
+    @compatibility(is_backward_compatible=True)
     def trace(self, root: Union[torch.nn.Module, Callable], concrete_args: Optional[Dict[str, Any]] = None) -> Graph:
         """
         Trace ``root`` and return the corresponding FX ``Graph`` representation. ``root``
@@ -813,6 +793,7 @@ def _autowrap_check(patcher : _Patcher, frame_dict : Dict[str, Any], function_id
                 patcher.patch(frame_dict, name, _create_wrapped_func(value))
 
 
+@compatibility(is_backward_compatible=True)
 def wrap(fn_or_name : Union[str, Callable]):
     """
     This function can be called at module-level scope to register fn_or_name as a "leaf function".
@@ -845,10 +826,6 @@ def wrap(fn_or_name : Union[str, Callable]):
 
         fn_or_name (Union[str, Callable]): The function or name of the global function to insert into the
             graph when it's called
-
-    Backwards compatiblity:
-
-        Backwards-compatibility for this API is guaranteed.
     """
     if not callable(fn_or_name) and not isinstance(fn_or_name, str):
         raise RuntimeError('Unsupported type for global function! Must be either a callable or '
@@ -873,6 +850,7 @@ def wrap(fn_or_name : Union[str, Callable]):
     _wrapped_fns_to_patch.append((f.f_globals, fn_name))
     return fn_or_name
 
+@compatibility(is_backward_compatible=True)
 def symbolic_trace(root : Union[torch.nn.Module, Callable], concrete_args: Optional[Dict[str, Any]] = None,
                    enable_cpatching: bool = False) -> GraphModule:
     """Symbolic tracing API
@@ -921,10 +899,6 @@ def symbolic_trace(root : Union[torch.nn.Module, Callable], concrete_args: Optio
 
     Returns:
         GraphModule: a Module created from the recorded operations from ``root``.
-
-    Backwards compatiblity:
-
-        Backwards-compatibility for this API is guaranteed.
     """
     tracer = Tracer(enable_cpatching=enable_cpatching)
     graph = tracer.trace(root, concrete_args)

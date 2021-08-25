@@ -1,5 +1,6 @@
 # Nodes represent a definition of a value in our graph of operators.
 from typing import TYPE_CHECKING, Union, Callable, Any, Tuple, List, Optional, Dict, Set
+from ._compatibility import compatibility
 from .immutable_collections import immutable_dict, immutable_list
 import torch
 import builtins
@@ -85,6 +86,7 @@ def _format_arg(arg) -> str:
     else:
         return str(arg)
 
+@compatibility(is_backward_compatible=True)
 class Node:
     """
     ``Node`` is the data structure that represents individual operations within
@@ -111,11 +113,9 @@ class Node:
       *including the self argument*
     - ``output`` contains the output of the traced function in its ``args[0]`` attribute. This corresponds to the "return" statement
       in the Graph printout.
-
-    Backwards Compatibility:
-
-        Backwards-compatibility for this API is guaranteed.
     """
+
+    @compatibility(is_backward_compatible=True)
     def __init__(self, graph: 'Graph', name: str, op: str, target: 'Target',
                  args: Tuple['Argument', ...], kwargs: Dict[str, 'Argument'],
                  type : Optional[Any] = None) -> None:
@@ -144,10 +144,6 @@ class Node:
                 type of the output of this node. This field can be used for
                 annotation of values in the generated code or for other types
                 of analyses.
-
-        Backwards Compatibility:
-
-            Backwards-compatibility for this API is guaranteed.
         """
         self.graph = graph
         self.name = name  # unique name of value being created
@@ -193,6 +189,7 @@ class Node:
         # transformations. This metadata is preserved across node copies
         self.meta : Dict[str, Any] = {}
 
+    @compatibility(is_backward_compatible=True)
     @property
     def next(self) -> 'Node':
         """
@@ -201,13 +198,10 @@ class Node:
         Returns:
 
             The next ``Node`` in the linked list of Nodes.
-
-        Backwards Compatibility:
-
-            Backwards-compatibility for this API is guaranteed.
         """
         return self._next
 
+    @compatibility(is_backward_compatible=True)
     @property
     def prev(self) -> 'Node':
         """
@@ -216,13 +210,10 @@ class Node:
         Returns:
 
             The previous ``Node`` in the linked list of Nodes.
-
-        Backwards Compatibility:
-
-            Backwards-compatibility for this API is guaranteed.
         """
         return self._prev
 
+    @compatibility(is_backward_compatible=True)
     def prepend(self, x: 'Node') -> None:
         """
         Insert x before this node in the list of nodes in the graph. Example::
@@ -234,10 +225,6 @@ class Node:
 
         Args:
             x (Node): The node to put before this node. Must be a member of the same graph.
-
-        Backwards Compatibility:
-
-            Backwards-compatibility for this API is guaranteed.
         """
         assert self.graph == x.graph, "Attempting to move a Node into a different Graph"
         x._remove_from_list()
@@ -245,6 +232,7 @@ class Node:
         p._next, x._prev = x, p
         x._next, self._prev = self, x
 
+    @compatibility(is_backward_compatible=True)
     def append(self, x: 'Node') -> None:
         """
         Insert x after this node in the list of nodes in the graph.
@@ -252,10 +240,6 @@ class Node:
 
         Args:
             x (Node): The node to put after this node. Must be a member of the same graph.
-
-        Backwards Compatibility:
-
-            Backwards-compatibility for this API is guaranteed.
         """
         self._next.prepend(x)
 
@@ -263,6 +247,7 @@ class Node:
         p, n = self._prev, self._next
         p._next, n._prev = n, p
 
+    @compatibility(is_backward_compatible=True)
     @property
     def args(self) -> Tuple[Argument, ...]:
         """
@@ -272,28 +257,22 @@ class Node:
 
         Assignment to this property is allowed. All accounting of uses and users
         is updated automatically on assignment.
-
-        Backwards Compatibility:
-
-            Backwards-compatibility for this API is guaranteed.
         """
         return self._args
 
+    @compatibility(is_backward_compatible=True)
     @args.setter
     def args(self, a : Tuple[Argument, ...]):
         """
         Set the tuple of arguments to this Node. The interpretation of arguments
         depends on the node's opcode. See the ``fx.Graph`` docstring for more
         information.
-
-        Backwards Compatibility:
-
-            Backwards-compatibility for this API is guaranteed.
         """
         # DO NOT CALL `__update_args_kwargs` directly. The correct way to
         # set `args` is via direct assignment, i.e. `node.args = new_args`
         self.__update_args_kwargs(map_arg(a, lambda x: x), self._kwargs)  # type: ignore[arg-type]
 
+    @compatibility(is_backward_compatible=True)
     @property
     def kwargs(self) -> Dict[str, Argument]:
         """
@@ -303,28 +282,22 @@ class Node:
 
         Assignment to this property is allowed. All accounting of uses and users
         is updated automatically on assignment.
-
-        Backwards Compatibility:
-
-            Backwards-compatibility for this API is guaranteed.
         """
         return self._kwargs
 
+    @compatibility(is_backward_compatible=True)
     @kwargs.setter
     def kwargs(self, k : Dict[str, Argument]):
         """
         Set the dict of kwargs to this Node. The interpretation of arguments
         depends on the node's opcode. See the ``fx.Graph`` docstring for more
         information.
-
-        Backwards Compatibility:
-
-            Backwards-compatibility for this API is guaranteed.
         """
         # DO NOT CALL `__update_args_kwargs` directly. The correct way to
         # set `args` is via direct assignment, i.e. `node.kwargs = new_kwargs`
         self.__update_args_kwargs(self._args, map_arg(k, lambda x: x))  # type: ignore[arg-type]
 
+    @compatibility(is_backward_compatible=True)
     @property
     def all_input_nodes(self) -> List['Node']:
         """
@@ -336,13 +309,10 @@ class Node:
 
             List of ``Nodes`` that appear in the ``args`` and ``kwargs`` of this
             ``Node``, in that order.
-
-        Backwards Compatibility:
-
-            Backwards-compatibility for this API is guaranteed.
         """
         return list(self._input_nodes.keys())
 
+    @compatibility(is_backward_compatible=True)
     def update_arg(self, idx : int, arg : Argument) -> None:
         """
         Update an existing positional argument to contain the new value
@@ -352,15 +322,12 @@ class Node:
 
             idx (int): The index into ``self.args`` of the element to update
             arg (Argument): The new argument value to write into ``args``
-
-        Backwards Compatibility:
-
-            Backwards-compatibility for this API is guaranteed.
         """
         args = list(self.args)
         args[idx] = arg
         self.args = tuple(args)
 
+    @compatibility(is_backward_compatible=True)
     def update_kwarg(self, key : str, arg : Argument) -> None:
         """
         Update an existing keyword argument to contain the new value
@@ -370,15 +337,12 @@ class Node:
 
             key (str): The key in ``self.kwargs`` of the element to update
             arg (Argument): The new argument value to write into ``kwargs``
-
-        Backwards Compatibility:
-
-            Backwards-compatibility for this API is guaranteed.
         """
         kwargs = dict(self.kwargs)
         kwargs[key] = arg
         self.kwargs = kwargs
 
+    @compatibility(is_backward_compatible=True)
     @property
     def stack_trace(self) -> Optional[str]:
         """
@@ -386,13 +350,10 @@ class Node:
         This property is usually populated by `Tracer.create_proxy`. To record
         stack traces during tracing for debug purposes, set
         `record_stack_traces = True` on the `Tracer` instance.
-
-        Backwards Compatibility:
-
-            Backwards-compatibility for this API is guaranteed.
         """
         return self._stack_trace
 
+    @compatibility(is_backward_compatible=True)
     @stack_trace.setter
     def stack_trace(self, trace : Optional[str]):
         self._stack_trace = trace
@@ -441,6 +402,7 @@ class Node:
                 return f'operator.{target.__name__}'
         return _get_qualified_name(target)
 
+    @compatibility(is_backward_compatible=True)
     def format_node(self,
                     placeholder_names: List[str] = None,
                     maybe_return_typename: List[str] = None) -> Optional[str]:
@@ -471,10 +433,6 @@ class Node:
                 is a placeholder Node, return ``None``. Otherwise,
                 return a  descriptive string representation of the
                 current Node.
-
-        Backwards Compatibility:
-
-            Backwards-compatibility for this API is guaranteed.
         """
         if self.op == 'placeholder':
             assert isinstance(self.target, str)
@@ -500,6 +458,7 @@ class Node:
                    f'{self.op}[target={self._pretty_print_target(self.target)}](' \
                    f'args = {_format_arg(self.args)}, kwargs = {_format_arg(self.kwargs)})'
 
+    @compatibility(is_backward_compatible=True)
     def replace_all_uses_with(self, replace_with : 'Node') -> List['Node']:
         """
         Replace all uses of ``self`` in the Graph with the Node ``replace_with``.
@@ -511,10 +470,6 @@ class Node:
         Returns:
 
             The list of Nodes on which this change was made.
-
-        Backwards Compatibility:
-
-            Backwards-compatibility for this API is guaranteed.
         """
         to_process = list(self.users)
         for use_node in to_process:
@@ -533,6 +488,7 @@ class Node:
         assert len(self.users) == 0
         return to_process
 
+    @compatibility(is_backward_compatible=False)
     def is_impure(self):
         """
         Returns whether this op is impure, i.e. if its op is a placeholder or
@@ -541,11 +497,6 @@ class Node:
         Returns:
 
             bool: If the op is impure or not.
-
-        Backwards Compatibility:
-
-            This method is experimental and its backwards-compatibility is *NOT*
-            guaranteed.
         """
         if self.op in {"placeholder", "output"}:
             return True
@@ -567,6 +518,7 @@ class Node:
 
         return False
 
+    @compatibility(is_backward_compatible=False)
     def normalized_arguments(
             self, root : torch.nn.Module, arg_types : Optional[Tuple[Any]] = None,
             kwarg_types : Optional[Dict[str, Any]] = None,
@@ -592,11 +544,6 @@ class Node:
         Returns:
 
             Returns NamedTuple ArgsKwargsPair, or `None` if not successful.
-
-        Backwards Compatibility:
-
-            This method is experimental and its backwards-compatibility is *NOT*
-            guaranteed.
         """
         if self.op == 'call_function':
             assert callable(self.target)
@@ -607,7 +554,7 @@ class Node:
 
         return None
 
-
+    @compatibility(is_backward_compatible=True)
     def replace_input_with(self, old_input: 'Node', new_input: 'Node'):
         """
         Loop through input nodes of ``self``, and replace all instances of
@@ -617,10 +564,6 @@ class Node:
 
             old_input (Node): The old input node to be replaced.
             new_input (Node): The new input node to replace ``old_input``.
-
-        Backwards Compatibility:
-
-            Backwards-compatibility for this API is guaranteed.
         """
         def maybe_replace_node(n : Node) -> Node:
             return new_input if n == old_input else n
@@ -632,24 +575,18 @@ class Node:
         self.__update_args_kwargs(new_args, new_kwargs)
 
 
+@compatibility(is_backward_compatible=True)
 def map_arg(a: Argument, fn: Callable[[Node], Argument]) -> Argument:
     """
     Apply fn to each Node appearing arg. arg may be a list, tuple, slice, or dict with string keys.
-
-    Backwards Compatibility:
-
-        Backwards-compatibility for this API is guaranteed.
     """
     assert callable(fn), "torch.fx.map_arg(a, fn): fn must be a callable"
     return map_aggregate(a, lambda x: fn(x) if isinstance(x, Node) else x)
 
+@compatibility(is_backward_compatible=True)
 def map_aggregate(a: Argument, fn: Callable[[Argument], Argument]) -> Argument:
     """
     Apply fn to each Node appearing arg. arg may be a list, tuple, slice, or dict with string keys.
-
-    Backwards Compatibility:
-
-        Backwards-compatibility for this API is guaranteed.
     """
     if isinstance(a, tuple):
         return tuple(map_aggregate(elem, fn) for elem in a)

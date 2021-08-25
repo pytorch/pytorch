@@ -6,7 +6,9 @@ import enum
 import warnings
 from typing import Any, Callable, Dict, List, Optional, Tuple, NamedTuple, cast
 from torch._jit_internal import boolean_dispatched
+from ._compatibility import compatibility
 
+@compatibility(is_backward_compatible=False)
 class ArgsKwargsPair(NamedTuple):
     """
     Simple named tuple for wrapping args/kwargs pairs.
@@ -76,6 +78,7 @@ def _torchscript_schema_to_signature(ts_schema : torch._C.FunctionSchema) -> ins
 
     return inspect.Signature(parameters, return_annotation=return_type)
 
+@compatibility(is_backward_compatible=False)
 def get_signature_for_torch_op(op : Callable) -> Optional[List[inspect.Signature]]:
     """
     Given an operator on the `torch` namespace, return a list of `inspect.Signature`
@@ -88,11 +91,6 @@ def get_signature_for_torch_op(op : Callable) -> Optional[List[inspect.Signature
     Returns:
         Optional[List[inspect.Signature]]: A list of signatures for the overloads of this
             operator, or None if the operator signatures could not be retrieved.
-
-    Backwards Compatibility:
-
-        This API is experimental and its backwards-compatibility is *NOT*
-        guaranteed.
     """
     override = _manual_overrides.get(op)
     if override:
@@ -108,6 +106,7 @@ def get_signature_for_torch_op(op : Callable) -> Optional[List[inspect.Signature
 
     return signatures
 
+@compatibility(is_backward_compatible=False)
 def create_type_hint(x):
     try:
         if isinstance(x, list) or isinstance(x, tuple):
@@ -135,6 +134,7 @@ def create_type_hint(x):
         pass
     return x
 
+@compatibility(is_backward_compatible=False)
 def type_matches(signature_type : Any, argument_type : Any):
     sig_origin_type = getattr(signature_type, '__origin__', signature_type)
 
@@ -182,6 +182,7 @@ def type_matches(signature_type : Any, argument_type : Any):
 
     return False
 
+@compatibility(is_backward_compatible=False)
 def normalize_function(
         target: Callable, args: Tuple[Any], kwargs : Optional[Dict[str, Any]] = None, arg_types : Optional[Tuple[Any]] = None,
         kwarg_types : Optional[Dict[str, Any]] = None,
@@ -207,11 +208,6 @@ def normalize_function(
     Returns:
 
         Returns normalized_args_and_kwargs, or `None` if not successful.
-
-    Backwards Compatibility:
-
-        This API is experimental and its backwards-compatibility is *NOT*
-        guaranteed.
     """
     if kwargs is None:
         kwargs = {}
@@ -282,6 +278,7 @@ def normalize_function(
 
     return new_args_and_kwargs
 
+@compatibility(is_backward_compatible=False)
 def normalize_module(
         root: torch.nn.Module, target: str, args: Tuple[Any], kwargs : Optional[Dict[str, Any]] = None,
         normalize_to_only_use_kwargs : bool = False) -> Optional[ArgsKwargsPair]:
@@ -303,11 +300,6 @@ def normalize_module(
     Returns:
 
         Returns normalized_args_and_kwargs, or `None` if not successful.
-
-    Backwards Compatibility:
-
-        This API is experimental and its backwards-compatibility is *NOT*
-        guaranteed.
     """
     try:
         submod = root.get_submodule(target)
