@@ -122,6 +122,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   m.impl("linear", linear_decomp);
 
   VARIADIC_BDIMS_BOXED(linalg_cholesky_ex);
+  VARIADIC_BDIMS_BOXED(linalg_eig);
   VARIADIC_BDIMS_BOXED(linalg_eigh);
   VARIADIC_BDIMS_BOXED(linalg_inv_ex);
   VARIADIC_BDIMS(linalg_pinv);
