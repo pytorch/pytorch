@@ -962,9 +962,7 @@ of the singular values of :attr:`A` as returned by :func:`torch.svd`.
 
 Args:
     A (Tensor): tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.
-    tol (float, Tensor, optional): [NumPy compatibility] the tolerance value.
-                                   If the value of :attr:`tol` is `None`
-                                   then it's equivalent to setting `rtol=tol` and `atol=tol` otherwise.
+    tol (float, Tensor, optional): [NumPy Compat] Alias for :attr:`atol`. Default: `None`.
 
 Keyword args:
     atol (float, Tensor, optional): the absolute tolerance value. When `None` it's considered to be zero.
@@ -1705,9 +1703,7 @@ of the singular values of :attr:`A` as returned by :func:`torch.svd`.
 
 Args:
     A (Tensor): tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.
-    rcond (float, Tensor, optional): [NumPy compatibility] the tolerance value.
-                                     If the value of :attr:`rcond` is specified then
-                                     it's equivalent to setting `rtol=rcond`.
+    rcond (float, Tensor, optional): [NumPy Compat]. Alias for :attr:`rtol`. Default: `None`.
 
 Keyword args:
     atol (float, Tensor, optional): the absolute tolerance value. When `None` it's considered to be zero.
