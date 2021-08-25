@@ -2368,6 +2368,40 @@ def sample_inputs_adaptive_avg_pool2d(op_info, device, dtype, requires_grad, **k
 
     return list(generator())
 
+def sample_inputs_embedding(op_info, device, dtype, requires_grad, **kwargs):
+
+    def make_arg(shape, low=None, high=None):
+        return make_tensor(shape, device=device, dtype=dtype,
+                           low=low, high=high,
+                           requires_grad=requires_grad)
+
+    nn_inps = (
+        (make_arg((40,), 0, 9), torch.nn.Embedding(20, embedding_dim=64, max_norm=1.0)),
+        (make_arg((2, 4), 0, 9), torch.nn.Embedding(10, 20, sparse=True)),
+        (make_arg(()), torch.nn.Embedding(0, 0, sparse=True)),
+        (make_arg((2, 4), 0, 9), torch.nn.Embedding(10, 0, sparse=True)),
+        (make_arg((4,), 0, 21), torch.nn.Embedding(22, 5, max_norm=1.0)),
+        (make_arg((2,), 0, 1), torch.nn.Embedding.from_pretrained(torch.arange(6.).view(2, 3), max_norm=2.,
+                                                                  norm_type=.5, scale_grad_by_freq=False, sparse=True)),
+    )
+
+    def generator():
+        for inp, module in nn_inps:
+            module = module.to(device)
+            kwargs = {
+                "weight": module.weight,
+                "padding_idx": module.padding_idx,
+                "max_norm": module.max_norm,
+                "norm_type": module.norm_type,
+                "scale_grad_by_freq": module.scale_grad_by_freq,
+                "sparse": module.sparse,
+            }
+
+            yield SampleInput(inp, kwargs=kwargs)
+
+    return list(generator())
+
+
 def sample_inputs_normalize(self, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, low=-1, high=1, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -7171,6 +7205,14 @@ op_db: List[OpInfo] = [
            dtypesIfCPU=floating_types_and(torch.int64),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_avgpool2d),
+    OpInfo('nn.functional.embedding',
+           aten_name='embedding',
+           supports_autograd=True,
+           supports_out=False,
+           assert_jit_shape_analysis=True,
+           dtypesIfCPU=_dispatch_dtypes((torch.int64, torch.int32)),
+           dtypesIfCUDA=_dispatch_dtypes((torch.int64, torch.int32)),
+           sample_inputs_func=sample_inputs_embedding),
     UnaryUfuncInfo(
         'nn.functional.logsigmoid',
         aten_name="log_sigmoid",
