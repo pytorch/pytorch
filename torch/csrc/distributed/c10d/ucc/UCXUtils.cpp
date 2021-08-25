@@ -118,6 +118,7 @@ std::shared_ptr<UCPRequest> UCPWorker::submit_p2p_request(
     auto r = reinterpret_cast<UCPRequest::Data *>(request);
     r->status = status;
     if (status == UCS_OK) {
+      // The info descriptor is valid only if the status is UCS_OK.
       r->info = *info;
     }
   };
