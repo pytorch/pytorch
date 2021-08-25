@@ -23,7 +23,7 @@ REQUIRES: must be imported from a pytorch clone with tools included.
 """
 
 
-import importlib
+import importlib.util
 import pathlib
 import sys
 
