@@ -220,7 +220,7 @@ static inline void squareCheckInputs(const Tensor& self) {
 static inline void singleCheckErrors(int64_t info, const char* name, int64_t batch_id=-1) {
   std::stringstream batch_ss;
   if (batch_id >= 0) {
-    batch_ss << ": For batch " << batch_id;
+    batch_ss << ": (Batch element " << batch_id << ")";
   }
   auto batch_string = batch_ss.str();
   if (info < 0) {
@@ -230,23 +230,23 @@ static inline void singleCheckErrors(int64_t info, const char* name, int64_t bat
     if (strstr(name, "inv")) {
       // inv, inverse, cholesky_inverse, etc.
       TORCH_CHECK(false, name, batch_string,
-          ": the diagonal element ", info, " is zero, the inversion could not be completed because the input matrix is singular.");
+          ": The diagonal element ", info, " is zero, the inversion could not be completed because the input matrix is singular.");
     } else if (strstr(name, "solve")) {
       // solve, linalg_solve, cholesky_solve, etc.
       TORCH_CHECK(false, name, batch_string,
-          ": the diagonal element ", info, " is zero, the solve could not be completed because the input matrix is singular.");
+          ": The diagonal element ", info, " is zero, the solve could not be completed because the input matrix is singular.");
     } else if (strstr(name, "cholesky")) {
       TORCH_CHECK(false, name, batch_string,
-          ": the factorization could not be completed because the input is not positive-definite (the leading minor of order ", info, " is not positive-definite).");
+          ": The factorization could not be completed because the input is not positive-definite (the leading minor of order ", info, " is not positive-definite).");
     } else if (strstr(name, "svd")) {
       TORCH_CHECK(false, name, batch_string,
-          ": the algorithm failed to converge because the input matrix is ill-conditioned or has too many repeated singular values (error code: ", info, ").");
+          ": The algorithm failed to converge because the input matrix is ill-conditioned or has too many repeated singular values (error code: ", info, ").");
     } else if (strstr(name, "eig") || strstr(name, "syevd")) {
       TORCH_CHECK(false, name, batch_string,
-          ": the algorithm failed to converge because the input matrix is ill-conditioned or has too many repeated eigenvalues (error code: ", info, ").");
+          ": The algorithm failed to converge because the input matrix is ill-conditioned or has too many repeated eigenvalues (error code: ", info, ").");
     } else if (strstr(name, "lstsq")) {
       TORCH_CHECK(false, name, batch_string,
-          ": the least squares solution could not be computed because the input matrix does not have full rank (error code: ", info, ").");
+          ": The least squares solution could not be computed because the input matrix does not have full rank (error code: ", info, ").");
     } else {
       TORCH_INTERNAL_ASSERT(false, name, ": Unknown error code: ", info, ".");
     }
