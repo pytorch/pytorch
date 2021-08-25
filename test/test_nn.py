@@ -4220,6 +4220,9 @@ class TestNN(NNTestCase):
                     out1 = wrapped_m(input)
                     return out0 + out1
 
+                # Make sure we can compute gradients wrt to all the parameters in the case
+                # of double forward
+                fn(input.clone().requires_grad_()).sum().backward()
                 gradcheck(fn, (input.clone().requires_grad_(),), check_batched_grad=False)
 
                 # test removing
@@ -8929,6 +8932,25 @@ class TestNN(NNTestCase):
         helper(self, (4, 1, 9, 9))
         helper(self, (4, 9, 1, 1))
 
+    def test_batchnorm_non_contig_cpu(self):
+        input = torch.arange(6, dtype=torch.float).reshape(1, 3, 2, 1).cpu()
+        input = input.permute(0, 2, 1, 3)
+
+        bn = torch.nn.BatchNorm2d(2).cpu().float().eval()
+        bn.weight.data.uniform_()
+        bn.bias.data.uniform_()
+
+        ref_input = input.detach().clone().contiguous()
+        ref_bn = nn.BatchNorm2d(2).cpu().float().eval()
+        ref_bn.load_state_dict(bn.state_dict())
+
+        out = bn(input)
+        ref_out = ref_bn(ref_input)
+
+        self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+        self.assertTrue(ref_out.is_contiguous())
+        self.assertEqual(out, ref_out)
+
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     @skipIfRocm
@@ -13025,6 +13047,40 @@ class TestNNDeviceType(NNTestCase):
         if self.device_type == 'cuda' and self.has_cudnn():
             with torch.backends.cudnn.flags(enabled=False):
                 self._test_module_empty_input(mod, inp)
+
+    @onlyCPU
+    @dtypes(torch.float, torch.double)
+    def test_groupnorm_nhwc(self, device, dtype):
+        def helper(self, size, groups):
+            channels = size[1]
+            input = torch.randn(size, dtype=dtype, device=device, requires_grad=True)
+            input = input.contiguous(memory_format=torch.channels_last)
+            input.retain_grad()
+            grad = torch.randn(size, dtype=dtype, device=device)
+            grad = grad.contiguous(memory_format=torch.channels_last)
+            gn = nn.GroupNorm(groups, channels).to(device).to(dtype)
+            gn.weight.data.uniform_()
+            gn.bias.data.uniform_()
+
+            ref_input = input.detach().clone().contiguous().requires_grad_(True)
+            ref_grad = grad.detach().clone().contiguous()
+            ref_gn = nn.GroupNorm(groups, channels).to(device).to(dtype)
+            ref_gn.load_state_dict(gn.state_dict())
+
+            out = gn(input)
+            out.backward(grad)
+            ref_out = ref_gn(ref_input)
+            ref_out.backward(ref_grad)
+
+            self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+            self.assertTrue(ref_out.is_contiguous())
+            self.assertEqual(out, ref_out)
+            self.assertEqual(gn.weight.grad, ref_gn.weight.grad)
+            self.assertEqual(gn.bias.grad, ref_gn.bias.grad)
+            self.assertEqual(input.grad, ref_input.grad)
+
+        helper(self, (4, 8, 10, 10), 4)
+        helper(self, (2, 30, 9, 9), 3)
 
     @onlyOnCPUAndCUDA
     def test_GroupNorm_numeric(self, device):
