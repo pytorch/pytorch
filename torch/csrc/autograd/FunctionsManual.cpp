@@ -3463,8 +3463,8 @@ struct HouseholderReflectorEvaluator {
   }
 };
 
-std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad_, const Tensor& result_, const Tensor& input_, const Tensor& tau) {
-  if (!grad_.defined() || !input_.numel() || !tau.numel()) {
+std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, const Tensor& result, const Tensor& input_, const Tensor& tau) {
+  if (!grad.defined() || !input_.numel() || !tau.numel()) {
     return std::tuple<Tensor, Tensor>(Tensor(), Tensor());
   }
 
@@ -3472,29 +3472,9 @@ std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad_, con
   auto tau_grad = at::zeros_like(tau);
 
   auto m = input_.size(-2);
-  auto n = input_.size(-1);
   auto k = tau.size(-1);
 
-  Tensor grad, result, input;
-  if (m == n) {
-    grad = grad_;
-    result = result_;
-    input = input_;
-  }
-  else {
-    auto squared_shape = result_.sizes().vec();
-    squared_shape.back() = m;
-
-    grad = at::zeros(squared_shape, result_.options());
-    grad.narrow(-1, 0, n).copy_(grad_);
-
-    input = at::zeros(squared_shape, result_.options());
-    input.narrow(-1, 0, n).copy_(input_);
-
-    result = at::orgqr(input, tau);
-  }
-
-  input = input.tril(-1);
+  auto input = input_.tril(-1);
   input.diagonal(0, -2, -1).fill_(1.0);
 
   auto input_first_k_cols = input.narrow(-1, 0, k);
