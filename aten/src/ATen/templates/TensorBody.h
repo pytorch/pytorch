@@ -451,6 +451,11 @@ class TORCH_API Tensor {
     return impl_->is_xla();
   }
 
+  /// Returns if a `Tensor` has Lazy backend.
+  bool is_lazy() const {
+    return impl_->is_lazy();
+  }
+
   /// Returns if a `Tensor` has HIP backend.
   bool is_hip() const {
     // NB: this is not a native function to avoid dispatching overhead.
@@ -485,6 +490,12 @@ class TORCH_API Tensor {
   bool is_mlc() const {
     // NB: this is not a native function to avoid dispatching overhead.
     return impl_->is_mlc();
+  }
+
+  /// Returns if a `Tensor` is ort tensor.
+  bool is_ort() const {
+    // NB: this is not a native function to avoid dispatching overhead.
+    return impl_->is_ort();
   }
 
   /// Returns if a `Tensor` is vulkan tensor.

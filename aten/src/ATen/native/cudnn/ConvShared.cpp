@@ -555,7 +555,7 @@ Tensor cudnn_convolution_relu(
       /*layout=*/c10::nullopt,
       /*device=*/kCUDA,
       /*pin_memory=*/c10::nullopt,
-      /*memory_format=*/at::MemoryFormat::Contiguous);
+      /*memory_format=*/input_t.suggest_memory_format());
   at::native::cudnn_convolution_relu_out(
     input_t, weight_t, bias_t, stride, padding, dilation, groups, output_t);
   return output_t;
