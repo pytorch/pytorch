@@ -436,7 +436,7 @@ def adaptiveavgpool2d_inference_rule(n: Node, module_instance):
 def flatten_check(tensor_type, start_dim, end_dim):
     l = len(tensor_type.__args__)
 
-    start_dim = l if start_dim == -1 else start_dim
+    start_dim = l if start_dim == -1 else abs(start_dim)
     end_dim = l + end_dim + 1 if end_dim < 0 else end_dim + 1
 
     if 0 <= start_dim <= (l - 1) and 0 <= end_dim <= l and start_dim < end_dim:
@@ -668,6 +668,10 @@ class Refine:
         elif isinstance(typ, TensorType):
             new_args = [self.replace_dyn_with_fresh_var(a) for a in typ.__args__]
             return TensorType(tuple(new_args))
+        elif isinstance(typ, list):
+            return [self.replace_dyn_with_fresh_var(t) for t in typ]
+        elif isinstance(typ, tuple):
+            return (self.replace_dyn_with_fresh_var(t) for t in typ)
         else:
             return typ
 
@@ -698,8 +702,10 @@ class Refine:
                 pass
 
         if n.op == 'output':
-            assert isinstance(n.args[0], Node)
-            n.type = n.args[0].type
+            def get_node_type(a):
+                return a.type
+            n.type = torch.fx.node.map_arg(n.args[0], get_node_type)
+            return n.type
 
         else:
             pass

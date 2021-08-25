@@ -12,7 +12,7 @@ import os
 import torch
 from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, TEST_MKL, \
     skipCUDANonDefaultStreamIf, TEST_WITH_ASAN, TEST_WITH_UBSAN, TEST_WITH_TSAN, \
-    IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, DeterministicGuard, TEST_SKIP_NOARCH
+    IS_SANDCASTLE, IS_FBCODE, DeterministicGuard, TEST_SKIP_NOARCH
 from torch.testing._internal.common_cuda import _get_torch_cuda_version
 from torch.testing import \
     (get_all_dtypes)
@@ -469,13 +469,9 @@ def get_device_type_test_bases():
     test_bases: List[Any] = list()
 
     if IS_SANDCASTLE or IS_FBCODE:
-        if IS_REMOTE_GPU:
-            # Skip if sanitizer is enabled
-            if not TEST_WITH_ASAN and not TEST_WITH_TSAN and not TEST_WITH_UBSAN:
-                test_bases.append(CUDATestBase)
-        else:
-            test_bases.append(CPUTestBase)
-            test_bases.append(MetaTestBase)
+        # temporarily disable IS_REMOTE_GPU, see T99020845
+        test_bases.append(CPUTestBase)
+        test_bases.append(MetaTestBase)
     else:
         test_bases.append(CPUTestBase)
         if not TEST_SKIP_NOARCH:
