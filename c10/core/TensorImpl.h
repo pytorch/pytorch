@@ -362,7 +362,9 @@ struct C10_API NamedTensorMetaInterface {
 // See NOTE [dispatch_fn's type argument] for more details
 struct C10_API TorchDispatchTypeObject {
   // Steals a reference to type_object
-  TorchDispatchTypeObject(PyObject* type_object, c10::impl::PyInterpreter* pyinterpreter);
+  TorchDispatchTypeObject(
+      PyObject* type_object,
+      c10::impl::PyInterpreter* pyinterpreter);
 
   // Releases the stolen reference to type_object
   ~TorchDispatchTypeObject();
