@@ -1944,25 +1944,36 @@ def retry(ExceptionToCheck, tries=3, delay=3, skip_after_retries=False):
 def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, high=None,
                 requires_grad: bool = False, noncontiguous: bool = False,
                 exclude_zero: bool = False) -> torch.Tensor:
-    """ Creates a random tensor with the given size, device and dtype.
+    """ Creates a random tensor with the given :attr:`size`, :attr:`device` and :attr:`dtype`.
 
-        Default values for low and high:
-            * boolean type: low = 0, high = 2
-            * uint8 type: low = 0, high = 9
-            * floating and integral types: low = -9 and high = 9
-            * complex types, for each real and imaginary part: low = -9, high = 9
-        If low/high are specified and within dtype limits: low = low, high = high
-        If low/high are specified but exceed the limits: low = dtype_min, high = dtype_max
-        If low is -inf and/or high is inf: low = dtype_min, high = dtype_max
-        If low is inf or nan and/or high is -inf or nan: ValueError raised
+        The function comes with other optional arguments to allow random tensor generation for the user's needs.
 
-        If noncontiguous=True, a noncontiguous tensor with the given size will be returned unless the size
-        specifies a tensor with a 1 or 0 elements in which case the noncontiguous parameter is ignored because
+        If :attr:`low` and :attr:`high` are not passed, following default values are considered depending on the given
+        :attr:`dtype`:
+
+            * boolean type: `low` = 0, `high` = 2
+            * uint8 type: `low` = 0, `high` = 9
+            * floating and integral types: `low` = -9 and `high` = 9
+            * complex types, for each real and imaginary part: `low` = -9, `high` = 9
+
+        If :attr:`low` and :attr:`high` are passed, they are considered only if they are within the
+        limit of the :attr:`dtype`. Following are a few conditions that are taken care of:
+
+            * If :attr:`low` and/or :attr:`high` are specified and within dtype limits: the values are taken as they were.
+            * If :attr:`low` and/or :attr:`high` are specified but exceed the limits:
+                :attr:`dtype` limits are considered instead
+            * If :attr:`low` is ``-inf`` and/or :attr:`high` is ``inf``:
+                :attr:`dtype` limits are considered instead
+            * If :attr:`low` is ``inf`` or ``nan`` and/or :attr:`high` is ``-inf`` or nan:
+                A `ValueError` is raised, since these are invalid values for the range of output tensor.
+
+        If :attr:`noncontiguous` is ``True``, a noncontiguous tensor with the given size will be returned unless the
+        size specifies a tensor with a 1 or 0 elements in which case the noncontiguous parameter is ignored because
         it is not possible to create a noncontiguous Tensor with a single element.
 
-        If exclude_zero is passed with True (default is False), all the matching values (with zero) in
-        created tensor are replaced with a tiny (smallest positive representable number) value if floating type,
-        [`tiny` + `tiny`.j] if complex type and 1 if integer/boolean type.
+        If :attr:`exclude_zero` is ``True`` (default is ``False``), all the values matching to zero in
+        the created tensor are replaced with a ``tiny`` (smallest positive representable number) value if floating type,
+        [``tiny`` + ``tiny``.j] if complex type and ``1`` if integer/boolean type.
     """
     def _modify_low_high(low, high, lowest, highest, default_low, default_high, dtype):
         """
