@@ -249,6 +249,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::send(
   check_tensor(tensors);
   TORCH_CHECK(dstRank < ucp_endpoints.size(), "Invalid dest rank");
   auto& tensor = tensors[0];
+  std::cout << "send tag: " << std::hex << wrap_tag(rank_, tag) << std::endl;
   auto request = ucp_endpoints[dstRank]->send_with_tag(
     tensor.data_ptr(), tensor.element_size() * tensor.numel(),
     wrap_tag(rank_, tag), tensor.device().type());
@@ -266,9 +267,10 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::recv(
   check_tensor(tensors);
   TORCH_CHECK(srcRank < ucp_endpoints.size(), "Invalid src rank");
   auto& tensor = tensors[0];
+  std::cout << "recv tag: " << std::hex << wrap_tag(srcRank, tag) << std::endl;
   auto request = worker->recv_with_tag_and_mask(
     tensor.data_ptr(), tensor.element_size() * tensor.numel(),
-    wrap_tag(srcRank, tag), 0, tensor.device().type());
+    wrap_tag(srcRank, tag), complete_tag(), tensor.device().type());
   return c10::make_intrusive<ProcessGroupUCC::WorkUCP>(worker, request);
 }
 

@@ -128,32 +128,32 @@ static_assert(
   sizeof(int) == 4,
   "The implementation of UCP tag matching has unsatisfied assumptions.");
 
+union tag_union {
+  ucp_tag_t raw;
+  struct {
+    tag_type tag;
+    world_size_type rank;
+  } fields;
+};
+
+constexpr ucp_tag_t wrap_tag(world_size_type rank, tag_type tag) {
+  tag_union u = {
+    .fields = { .tag = tag, .rank = rank }
+  };
+  return u.raw;
+}
+
+constexpr world_size_type get_rank_from_tag(ucp_tag_t tag) {
+  tag_union u = { .raw = tag };
+  return u.fields.rank;
+}
+
 constexpr ucp_tag_t any_source_mask() {
-  return 0xFFFFFFFF00000000UL;
+  return wrap_tag(0, ~tag_type(0));
 }
 
-inline ucp_tag_t wrap_tag(world_size_type rank, tag_type tag) {
-  union {
-    ucp_tag_t result;
-    struct {
-      world_size_type rank;
-      tag_type tag;
-    } s;
-  } u;
-  u.s = { rank, tag };
-  return u.result;
-}
-
-inline world_size_type get_rank_from_tag(ucp_tag_t tag) {
-  union {
-    ucp_tag_t input;
-    struct {
-      world_size_type rank;
-      tag_type tag;
-    } s;
-  } u;
-  u.input = tag;
-  return u.s.rank;
+constexpr ucp_tag_t complete_tag() {
+  return wrap_tag(~world_size_type(0), ~tag_type(0));
 }
 
 } // namespace c10d
