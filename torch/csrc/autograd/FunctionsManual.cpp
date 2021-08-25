@@ -3438,7 +3438,7 @@ template<bool in_place>
 struct HouseholderReflectorEvaluator {
   // computes (I - t v v^H) K
   static Tensor apply_left(int64_t k, const Tensor& v_full, const Tensor& t, Tensor& K) {
-    // NOTE: v_full is a vector of dimension (..., m, 1)
+    // v_full is a vector of dimension (..., m, 1), t is a scalar of dimension (..., 1)
     auto m = v_full.size(-2);
     if (in_place) {
       auto v = v_full.narrow(-2, k, m - k);
@@ -3453,7 +3453,7 @@ struct HouseholderReflectorEvaluator {
 
   // computes K (I - t v v^H)
   static Tensor apply_right(int64_t k, const Tensor& v_full, const Tensor& t, Tensor& K) {
-    // NOTE: v_full is a vector of dimension (..., m, 1)
+    // v_full is a vector of dimension (..., m, 1), t is a scalar of dimension (..., 1)
     auto m = v_full.size(-2);
     if (in_place) {
       auto v = v_full.narrow(-2, k, m - k);
@@ -3509,6 +3509,7 @@ std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, cons
 
   // This method exploites that at k-th iteration vector v_k has only elements v_k[k:] which are non-zero.
   auto update_grad = [&m](int64_t k, const Tensor& v_full, const Tensor& t, const Tensor& K) -> std::tuple<Tensor, Tensor> {
+    // v_full is a vector of dimension (..., m, 1), t is a scalar of dimension (..., 1)
     auto v = v_full.narrow(-2, k, m - k);
     auto vHK = v.transpose(-1, -2).conj().matmul(K.narrow(-2, k, m - k));
     auto Kv = K.narrow(-1, k, m - k).matmul(v);
@@ -3535,7 +3536,7 @@ std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, cons
       // K <- pinv(H_{i + 1}) @ K
       K = left_reflect(i + 1, input.narrow(-1, i + 1, 1), sigma.narrow(-1, i + 1, 1), K);
       // K <- K @ H_i
-      K = right_reflect(i, input.narrow(-1, i, 1), tau.narrow(-1, i, 1), K);
+      K = right_reflect(i, v_i, t_i, K);
     }
   }
 
