@@ -1,4 +1,4 @@
-import torch.utils.data.communication.messages as messages
+from torch.utils.data import communication
 
 
 class Protocol(object):
@@ -68,37 +68,37 @@ class ProtocolServer(Protocol):
     def response_reset(self):
         if not self.have_pending_request():
             raise Exception("Attempting to reply with pending request")
-        if not isinstance(self._req_received, messages.ResetIteratorRequest):
+        if not isinstance(self._req_received, communication.messages.ResetIteratorRequest):
             raise Exception(
                 "Replaying with reset status to other type of message")
-        self.response_queue.put(messages.ResetIteratorResponse())
+        self.response_queue.put(communication.messages.ResetIteratorResponse())
         self._req_received = None
 
     def response_next(self, value):
         if not self.have_pending_request():
             raise Exception("Attempting to reply with pending request")
-        self.response_queue.put(messages.GetNextResponse(value))
+        self.response_queue.put(communication.messages.GetNextResponse(value))
         self._req_received = None
 
     def response_stop(self):
         if not self.have_pending_request():
             raise Exception("Attempting to reply with pending request")
-        self.response_queue.put(messages.StopIterationResponse())
+        self.response_queue.put(communication.messages.StopIterationResponse())
         self._req_received = None
 
     def response_invalid(self):
         if not self.have_pending_request():
             raise Exception("Attempting to reply with pending request")
-        self.response_queue.put(messages.InvalidStateResponse())
+        self.response_queue.put(communication.messages.InvalidStateResponse())
         self._req_received = None
 
     def response_terminate(self):
         if not self.have_pending_request():
             raise Exception("Attempting to reply with pending request")
-        if not isinstance(self._req_received, messages.TerminateRequest):
+        if not isinstance(self._req_received, communication.messages.TerminateRequest):
             raise Exception(
                 "Replaying with terminate status to other type of message")
-        self.response_queue.put(messages.TerminateResponse())
+        self.response_queue.put(communication.messages.TerminateResponse())
         self._req_received = None
 
 
@@ -123,7 +123,7 @@ class IterDataPipeQueueProtocolClient(ProtocolClient):
         if not self.can_take_request():
             raise Exception(
                 'Can not reset while we are still waiting response for previous request')
-        request = messages.ResetIteratorRequest()
+        request = communication.messages.ResetIteratorRequest()
         self.request_queue.put(request)
         self.request_sent(request)
 
@@ -131,7 +131,7 @@ class IterDataPipeQueueProtocolClient(ProtocolClient):
         if not self.can_take_request():
             raise Exception(
                 'Can not request next item while we are still waiting response for previous request')
-        request = messages.GetNextRequest()
+        request = communication.messages.GetNextRequest()
         self.request_queue.put(request)
         self.request_sent(request)
 
@@ -142,7 +142,7 @@ class IterDataPipeQueueProtocolClient(ProtocolClient):
             raise EmptyQueue('queue is empty')
         self.request_served(response)
 
-        if not isinstance(response, messages.ResetIteratorResponse):
+        if not isinstance(response, communication.messages.ResetIteratorResponse):
             raise Exception('Invalid response received')
 
     def get_response_next(self, block=False, timeout=None):
