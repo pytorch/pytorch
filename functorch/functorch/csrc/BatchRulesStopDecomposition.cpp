@@ -175,8 +175,6 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   STOP_DECOMPOSE(chain_matmul);
   STOP_DECOMPOSE(chain_matmul.out);
   STOP_DECOMPOSE(choose_qparams_optimized);
-  STOP_DECOMPOSE(clip);
-  STOP_DECOMPOSE(clip.Tensor);
   STOP_DECOMPOSE(clip.Tensor_out);
   STOP_DECOMPOSE(clip.out);
   STOP_DECOMPOSE(clip_);
@@ -497,7 +495,6 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   STOP_DECOMPOSE(pixel_shuffle);
   STOP_DECOMPOSE(pixel_unshuffle);
   STOP_DECOMPOSE(poisson_nll_loss);
-  STOP_DECOMPOSE(positive);
   STOP_DECOMPOSE(prod.Dimname_out);
   STOP_DECOMPOSE(prod.dim_Dimname);
   STOP_DECOMPOSE(promote_types);
@@ -705,7 +702,6 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   STOP_DECOMPOSE(linalg_inv);
   STOP_DECOMPOSE(linalg_matrix_power);
   STOP_DECOMPOSE(linalg_matrix_rank);
-  STOP_DECOMPOSE(logical_not);
   STOP_DECOMPOSE(logical_and);
   STOP_DECOMPOSE(masked_select_backward);
   STOP_DECOMPOSE(matrix_exp_backward);
@@ -713,7 +709,6 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   STOP_DECOMPOSE(slice_backward);
   STOP_DECOMPOSE(select_backward);
   STOP_DECOMPOSE(diagonal_backward);
-  STOP_DECOMPOSE(corrcoef);
   STOP_DECOMPOSE(cummaxmin_backward);
   STOP_DECOMPOSE(cumprod_backward);
   STOP_DECOMPOSE(diag_backward);
