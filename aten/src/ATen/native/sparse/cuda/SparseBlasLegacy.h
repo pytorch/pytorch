@@ -3,6 +3,12 @@
 #include <ATen/Tensor.h>
 #include <ATen/core/Scalar.h>
 
+/*
+Functions here use deprecated cuSPARSE API that was removed in CUDA 11.
+Here only 32-bit indices sparse indices are supported.
+This file will be removed eventually.
+*/
+
 namespace at {
 namespace native {
 
