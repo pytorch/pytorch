@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/kernel.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
+#include <torch/csrc/jit/codegen/cuda/lower_allocation.h>
 #include <torch/csrc/jit/codegen/cuda/lower_predicate.h>
 #include <torch/csrc/jit/codegen/cuda/lower_shift.h>
 #include <torch/csrc/jit/codegen/cuda/lower_trivial_reductions.h>
@@ -93,6 +94,10 @@ class TORCH_CUDA_CU_API GpuLower {
     return pred_elimination_;
   }
 
+  LocalAllocationInfoMap& localAllocationInfoMap() {
+    return local_allocation_info_map_;
+  }
+
   const WarpPaddedParallelInfo& getWarpPaddedParallelInfo() const {
     return warp_pad_info_;
   }
@@ -129,6 +134,7 @@ class TORCH_CUDA_CU_API GpuLower {
   ComputeAtMap ca_parallel_map_;
   TrivialReductionInfo trivial_reduction_info_;
   HaloInfo halo_info_;
+  LocalAllocationInfoMap local_allocation_info_map_;
   WarpPaddedParallelInfo warp_pad_info_;
   ParallelDimensionMap parallel_dimension_map_;
 

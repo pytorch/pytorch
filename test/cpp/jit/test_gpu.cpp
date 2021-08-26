@@ -403,7 +403,7 @@ TEST(NVFuserTest, FusionExprEvalPostLower_CUDA) {
 }
 
 // Kernel IR: Evaluate basic scalar operations with constant values
-TEST(NVFuserTest, KernelExprEvalConstants_CUDA) {
+TEST(NVFuserTest, FusionKernelExprEvalConstants_CUDA) {
   kir::Kernel kernel;
   kir::IrBuilder ir_builder(&kernel);
 
@@ -423,7 +423,7 @@ TEST(NVFuserTest, KernelExprEvalConstants_CUDA) {
 }
 
 // Kernel IR: Evaluate basic scalar operations with bound values
-TEST(NVFuserTest, KernelExprEvalBindings_CUDA) {
+TEST(NVFuserTest, FusionKernelExprEvalBindings_CUDA) {
   kir::Kernel kernel;
   kir::IrBuilder ir_builder(&kernel);
 
@@ -8502,8 +8502,6 @@ TEST(NVFuserTest, FusionMagicSchedulerBatchNormalization_CUDA) {
       "");
 }
 
-// Disabling for now because memory reuse pass needs to be fixed.
-#if 0
 TEST(NVFuserTest, FusionPersistentSoftmaxLocalSmem_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
@@ -8633,7 +8631,6 @@ TEST(NVFuserTest, FusionPersistentSoftmaxLocalSmem_CUDA) {
       __LINE__,
       __FILE__);
 }
-#endif
 
 // DISABLED. TODO: https://github.com/csarofeen/pytorch/issues/743
 TEST(NVFuserTest, FusionPersistentNormLocalShared_CUDA) {
@@ -11264,7 +11261,7 @@ TEST(NVFuserTest, FusionIssue484_CUDA) {
       &fusion, cg_outputs, {aten_input}, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, Issue329_CUDA) {
+TEST(NVFuserTest, FusionIssue329_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -11340,7 +11337,7 @@ TEST(NVFuserTest, FusionIssue382_CUDA) {
       &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, Issue507_CUDA) {
+TEST(NVFuserTest, FusionIssue507_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -11566,7 +11563,7 @@ __global__ void kernel1(Tensor<float, 1> T0, Tensor<float, 1> T1) {
   TORCH_CHECK(out_ref.allclose(out0));
 }
 
-TEST(NVFuserTest, serialWelford) {
+TEST(NVFuserTest, FusionSerialWelford_CUDA) {
   FusionExecutor fe;
   int x = 128, y = 64, z = 64;
 
@@ -11623,7 +11620,7 @@ __global__ void kernel1(
   TORCH_CHECK(in0.mean({1, 2}).allclose(out_avg, /*rtol*/ 1e-5, /*atol*/ 1e-6));
 }
 
-TEST(NVFuserTest, blockWelford) {
+TEST(NVFuserTest, FusionBlockWelford_CUDA) {
   FusionExecutor fe;
   int x = 7, y = 8, z = 9;
 
@@ -11711,7 +11708,7 @@ __global__ void kernel1(
       cat_tensor.mean({1}).allclose(out_avg, /*rtol*/ 1e-5, /*atol*/ 1e-6));
 }
 
-TEST(NVFuserTest, blockWelfordNoInit) {
+TEST(NVFuserTest, FusionBlockWelfordNoInit_CUDA) {
   FusionExecutor fe;
   int x = 7, y = 8, z = 9;
 
@@ -11777,7 +11774,7 @@ __global__ void kernel1(
   TORCH_CHECK(in0.mean({1, 2}).allclose(out_avg, /*rtol*/ 1e-5, /*atol*/ 1e-6));
 }
 
-TEST(NVFuserTest, gridWelfordNoInit) {
+TEST(NVFuserTest, FusionGridWelfordNoInit_CUDA) {
   FusionExecutor fe;
   int x = 128, y = 64, z = 128;
 
@@ -16017,7 +16014,7 @@ TEST(NVFuserTest, FusionPredicateElimination_CUDA) {
   }
 }
 
-TEST(NVFuserTest, ForceFp16Simple_CUDA) {
+TEST(NVFuserTest, FusionForceFp16Simple_CUDA) {
   std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
   auto fusion = fusion_ptr.get();
   FusionGuard fg(fusion);
@@ -16055,7 +16052,7 @@ TEST(NVFuserTest, ForceFp16Simple_CUDA) {
   }
 }
 
-TEST(NVFuserTest, ForceFp16NotAllCast_CUDA) {
+TEST(NVFuserTest, FusionForceFp16NotAllCast_CUDA) {
   std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
   auto fusion = fusion_ptr.get();
   FusionGuard fg(fusion);
@@ -16102,6 +16099,270 @@ TEST(NVFuserTest, ForceFp16NotAllCast_CUDA) {
       TORCH_CHECK(consumer->isA<ReductionOp>());
     }
   }
+}
+
+TEST(NVFuserTest, FusionBufferReuseBroadCastMultiVisit_CUDA) {
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  auto fusion = fusion_ptr.get();
+  FusionGuard fg(fusion);
+
+  auto tv0 = makeConcreteTensor({2, 2});
+  auto tv1 = makeConcreteTensor({2, 2, 2});
+
+  fusion->addInput(tv0);
+  fusion->addInput(tv1);
+
+  auto tv2 = mul(tv0, new Double(2));
+  auto tv3 = broadcast(tv2, {false, false, true});
+  auto tv4 = add(tv3, tv1);
+  auto tv5 = mul(tv4, new Double(3));
+  fusion->addOutput(tv5);
+
+  // t4 cannot inner re-use t2, because there's a broadcast
+  //  between them.
+  tv0->computeAt(tv5, 1, ComputeAtMode::BestEffort);
+  tv3->computeAt(tv5, 2, ComputeAtMode::BestEffort);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  auto in0 = at::randn({2, 2}, options);
+  auto in1 = at::randn({2, 2, 2}, options);
+
+  auto at_output = ((in0 * 2).unsqueeze(2) + in1) * 3;
+  FusionExecutor fe;
+  fe.compileFusion(fusion);
+  auto outputs = fe.runFusion({in0, in1});
+
+  testValidate(fusion, outputs, {in0, in1}, {at_output}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionBufferReuseStressTest_CUDA) {
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  auto fusion = fusion_ptr.get();
+  FusionGuard fg(fusion);
+
+  auto tv0 = makeConcreteTensor({2, 2});
+  auto tv1 = makeConcreteTensor({2, 2, 2});
+
+  fusion->addInput(tv0);
+  fusion->addInput(tv1);
+
+  auto tv2 = mul(tv0, new Double(2));
+  auto tv3 = mul(tv0, new Double(3));
+  auto tv4 = mul(tv2, tv3);
+  // Broadcast buffer can be reused through outer sharing
+  auto tv5 = broadcast(tv4, {true, false, false});
+  auto tv6 = mul(tv5, new Double(5));
+  auto tv7 = mul(tv6, tv1);
+  auto tv8 = mul(tv7, new Double(7));
+  // tv9 shouldn't alias to avoid buffer over-subscription
+  auto tv9 = broadcast(tv4, {true, false, false});
+  auto tv10 = mul(tv9, new Double(9));
+  auto tv11 = add(tv5, tv9);
+  fusion->addOutput(tv7);
+  fusion->addOutput(tv11);
+
+  tv0->computeAt(tv5, 1, ComputeAtMode::BestEffort);
+  tv0->computeAt(tv9, 1, ComputeAtMode::BestEffort);
+
+  tv5->computeAt(tv7, 1, ComputeAtMode::BestEffort);
+  tv5->computeAt(tv11, 1, ComputeAtMode::BestEffort);
+  tv9->computeAt(tv11, 1, ComputeAtMode::BestEffort);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  auto in0 = at::randn({2, 2}, options);
+  auto in1 = at::randn({2, 2, 2}, options);
+  auto t2 = in0 * 2;
+  auto t3 = in0 * 3;
+  auto t4 = t2 * t3;
+  auto t5 = t4.unsqueeze(0);
+  auto t6 = t5 * 5;
+  auto t7 = t6 * in1;
+  auto t8 = t7 * 7;
+  auto t9 = t4.unsqueeze(0);
+  auto t10 = t9 * 9;
+  auto t11 = t5 + t9;
+  FusionExecutor fe;
+  fe.compileFusion(fusion);
+
+  auto at_output = ((in0 * 2).unsqueeze(2) + in1) * 3;
+  auto outputs = fe.runFusion({in0, in1});
+
+  testValidate(fusion, outputs, {in0, in1}, {t7, t11}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionBufferReuseLargeBuffer_CUDA) {
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  auto fusion = fusion_ptr.get();
+  FusionGuard fg(fusion);
+
+  auto tv0 = makeConcreteTensor({256, 512});
+
+  fusion->addInput(tv0);
+
+  auto tv1 = mul(tv0, new Double(2));
+  auto tv2 = mul(tv1, new Double(2));
+  auto tv3 = mul(tv2, new Double(2));
+  auto tv4 = mul(tv3, new Double(2));
+  auto tv5 = mul(tv4, new Double(2));
+  auto tv6 = mul(tv5, new Double(2));
+
+  fusion->addOutput(tv6);
+
+  tv0->computeAt(tv6, 1, ComputeAtMode::BestEffort);
+  tv6->axis(0)->parallelize(ParallelType::TIDx);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  auto in0 = at::randn({256, 512}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(fusion);
+  auto outputs = fe.runFusion({in0});
+
+  auto at_out = in0.mul(2).mul(2).mul(2).mul(2).mul(2).mul(2);
+
+  testValidate(fusion, outputs, {in0}, {at_out}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionBufferReuseNo2hop_CUDA) {
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  auto fusion = fusion_ptr.get();
+  FusionGuard fg(fusion);
+
+  auto tv0 = makeConcreteTensor({2, 2});
+  auto tv1 = makeConcreteTensor({2, 2, 2});
+
+  fusion->addInput(tv0);
+  fusion->addInput(tv1);
+
+  auto tv2 = mul(tv0, new Double(2));
+  auto tv3 = broadcast(tv2, {false, false, true});
+  auto tv4 = add(tv3, tv1); // T4 to be inner aliased first, and
+                            //  shouldn't outer alias on top
+  auto tv5 = mul(tv4, new Double(3));
+  auto tv6 = mul(tv5, new Double(3));
+  fusion->addOutput(tv6);
+
+  tv0->computeAt(tv6, 1, ComputeAtMode::BestEffort);
+  tv4->computeAt(tv6, 2, ComputeAtMode::BestEffort);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  auto in0 = at::randn({2, 2}, options);
+  auto in1 = at::randn({2, 2, 2}, options);
+  FusionExecutor fe;
+  fe.compileFusion(fusion);
+  auto outputs = fe.runFusion({in0, in1});
+
+  auto at_out = (in0.mul(2.0).unsqueeze(2) + in1).mul(3.0).mul(3.0);
+
+  testValidate(fusion, outputs, {in0, in1}, {at_out}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionBufferReuseAllocationOrder_CUDA) {
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  auto fusion = fusion_ptr.get();
+  FusionGuard fg(fusion);
+
+  auto tv0 = makeConcreteTensor({3, 3, 3});
+
+  fusion->addInput(tv0);
+
+  auto tv1 = sum(tv0, {1});
+  auto tv2 = mul(tv1, new Double(2));
+  auto tv3 = mul(tv2, new Double(2));
+
+  fusion->addOutput(tv3);
+
+  // In this case tv1 "reuses" allocation of tv2
+  //  due to the switched allocation order
+  tv1->computeAt(tv2, 1, ComputeAtMode::BestEffort);
+
+  tv0->axis(0)->parallelize(ParallelType::TIDx);
+  tv1->axis(0)->parallelize(ParallelType::TIDx);
+  tv2->axis(0)->parallelize(ParallelType::TIDx);
+  tv3->axis(0)->parallelize(ParallelType::TIDx);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  auto in0 = at::randn({3, 3, 3}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(fusion);
+  auto outputs = fe.runFusion({in0});
+
+  auto at_out = in0.sum(1).mul(2).mul(2);
+
+  testValidate(fusion, outputs, {in0}, {at_out}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionBufferReuseLiveInterval_CUDA) {
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  auto fusion = fusion_ptr.get();
+  FusionGuard fg(fusion);
+
+  auto tv0 = makeConcreteTensor({16, 16});
+
+  fusion->addInput(tv0);
+
+  auto tv1 = mul(tv0, new Double(3));
+  auto tv2 = mul(tv1, new Double(2));
+  auto tv3 = mul(tv2, new Double(2));
+  // tv1 used till here, cannot be reused by tv2 or tv3
+  auto tv4 = mul(tv3, tv1);
+
+  fusion->addOutput(tv4);
+
+  tv0->computeAt(tv4, 1);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  auto in0 = at::randn({16, 16}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(fusion);
+  auto cg_outputs = fe.runFusion({in0});
+
+  auto at_t0 = in0 * 3.0;
+  auto at_out = at_t0 * 2.0 * 2.0 * at_t0;
+
+  testValidate(fusion, cg_outputs, {in0}, {at_out}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionBufferReuseNoAcrossBroadcast_CUDA) {
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  auto fusion = fusion_ptr.get();
+  FusionGuard fg(fusion);
+
+  auto tv0 = makeConcreteTensor({2, 2});
+  auto tv1 = makeConcreteTensor({2, 2, 2});
+
+  fusion->addInput(tv0);
+  fusion->addInput(tv1);
+
+  auto tv2 = mul(tv0, new Double(2));
+  auto tv3 = mul(tv0, new Double(3));
+  auto tv4 = mul(tv2, tv3);
+  auto tv5 = broadcast(tv4, {false, false, true});
+  auto tv6 = mul(tv5, tv1);
+  auto tv7 = mul(tv6, new Double(7));
+  fusion->addOutput(tv7);
+
+  // tv6 shouldn't re-use t2 or t3 because of
+  //  the broadcast in between
+  tv0->computeAt(tv4, 1, ComputeAtMode::BestEffort);
+  tv4->computeAt(tv7, 2, ComputeAtMode::BestEffort);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  auto in0 = at::randn({2, 2}, options);
+  auto in1 = at::randn({2, 2, 2}, options);
+  FusionExecutor fe;
+  fe.compileFusion(fusion);
+  auto outputs = fe.runFusion({in0, in1});
+
+  auto t2 = in0 * 2;
+  auto t3 = in0 * 3;
+  auto t4 = t2 * t3;
+  auto t5 = t4.unsqueeze(2);
+  auto t6 = t5 * in1;
+  auto t7 = t6 * 7;
+  testValidate(fusion, outputs, {in0, in1}, {t7}, __LINE__, __FILE__);
 }
 
 TEST(NVFuserTest, FusionIssue970_CUDA) {

@@ -25,6 +25,7 @@ enum class DebugDumpOption {
                       //! bandwidth
   FusionSegmentsDrawing, //!< Dump Segmented Fusion Graph
   PrintPtxasLog, //!< Print the ptxas verbose log including register usage
+  BufferReuseInfo, //!< Dump the analysis details of local/shared buffer re-use
   SchedulerDebug, //! Dump scheduler heuristic parameters
   ParallelDimensions //!< Dump known parallel dimensions
 };

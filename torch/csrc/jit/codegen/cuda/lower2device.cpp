@@ -384,21 +384,18 @@ void GpuLower::lower() {
   // Insert read after write smem syncs
   const auto raw_sync_exprs = insertRawThreadSynchronization(alloced_exprs);
 
+  // Reuse memory locations
+  const auto reuse_mem_exprs = reuseMemoryAllocations(raw_sync_exprs);
+
   // Inserts predicates after this, need to be careful in later passes when
   // inserting in loop nest structure as insertions could be on if then else
   // instead of directly on a for loop
-  const auto unrolled_loops = UnrollPass::runPass(fusion_, raw_sync_exprs);
+  const auto unrolled_loops = UnrollPass::runPass(fusion_, reuse_mem_exprs);
 
   const auto unrolled_mv_loops =
       processMisalignedVectorization(fusion_, unrolled_loops);
 
-  // Reuse memory locations
-  // TODO: Reenable once fixed.
-  // const auto reuse_mem_exprs = reuseMemoryAllocations(unrolled_mv_loops);
-
   // Insert SyncThreads at end of for-loop to avoid WAR race condition
-  // const auto war_sync_exprs =
-  // insertWarThreadSynchronization(reuse_mem_exprs);
   const auto war_sync_exprs = insertWarThreadSynchronization(unrolled_mv_loops);
 
   const auto indexed_loops = IndexLowering::getIndexedExprs(war_sync_exprs);

@@ -38,6 +38,12 @@ class AllocationInserter : public kir::MutableIrVisitor {
 
     // Initialization
     kir::Expr* init_expr = nullptr;
+
+    // Info to transfer to GPU lower
+    bool has_halo = false;
+
+    // Local Iterdomains that this allocation covers
+    std::unique_ptr<std::vector<kir::IterDomain*>> allocation_domains;
   };
 
   // Find allocation point
@@ -316,6 +322,8 @@ class AllocationInserter : public kir::MutableIrVisitor {
     bool has_halo = false;
     std::vector<IterDomain*> alloc_domains;
 
+    info.allocation_domains = std::make_unique<std::vector<kir::IterDomain*>>();
+
     for (size_t axis_i = 0; axis_i < fuser_tv->nDims(); axis_i++) {
       const auto local_id =
           gpu_lower->lowerValue(fuser_tv->axis(axis_i))->as<kir::IterDomain>();
@@ -372,11 +380,13 @@ class AllocationInserter : public kir::MutableIrVisitor {
       }
 
       alloc_dims.push_back(extent);
+      info.allocation_domains->push_back(local_id);
     }
 
     // When an axis with halo extension is detected, propagate back
     // the halo extents from leaf IDs to root IDs
     if (has_halo) {
+      info.has_halo = true;
       return getNonGlobalAllocExprWithHalo(fuser_tv, alloc_domains);
     }
 
@@ -467,8 +477,34 @@ class AllocationInserter : public kir::MutableIrVisitor {
       createAllocExpr(allocation, is_output);
       createInitExpr(allocation, init);
 
-      allocs.push_back(allocation);
+      // Write information to GPULower
+      writeInfoToGPULower(allocation);
+
+      allocs.push_back(std::move(allocation));
     }
+  }
+
+  void writeInfoToGPULower(const AllocationInformation& allocation) {
+    auto& lower_alloc_info_map = GpuLower::current()->localAllocationInfoMap();
+    if (allocation.alloc_expr == nullptr) {
+      // Skip output allocation.
+      return;
+    }
+    TORCH_INTERNAL_ASSERT(
+        !lower_alloc_info_map.count(allocation.alloc_expr),
+        "duplicated allocation info entry");
+
+    // Create info entry for GPULower
+    auto lower_alloc_info_ptr = std::make_unique<LocalAllocationInfo>();
+    lower_alloc_info_ptr->alloc_expr = allocation.alloc_expr;
+    lower_alloc_info_ptr->has_halo = allocation.has_halo;
+    if (allocation.allocation_domains) {
+      lower_alloc_info_ptr->alloc_domains = *(allocation.allocation_domains);
+    }
+
+    // Write entry to the stored map
+    lower_alloc_info_map[allocation.alloc_expr] =
+        std::move(lower_alloc_info_ptr);
   }
 
   void visit(kir::ForLoop* fl) final {
