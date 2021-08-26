@@ -116,7 +116,7 @@ bool Function::append_operator(
             out_args.size(),
             ", which is more then the number of specified arguments: ",
             num_specified_args.value());
-        for (size_t i = start_index; i < args.size(); ++i) {
+        for (size_t i = start_index; i < (args.size() - out_args.size()); ++i) {
           auto default_val = args[i].default_value();
           TORCH_CHECK(
               default_val.has_value(),
