@@ -2915,7 +2915,7 @@ class TestQuantizeFx(QuantizationTestCase):
         """ Make sure the numerics for models with ref linear module
         matches models with fbgemm/qnnpack module
         """
-        class M(torch.nn.Module):
+        class M1(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self.linear = torch.nn.Linear(10, 5)
@@ -2923,15 +2923,25 @@ class TestQuantizeFx(QuantizationTestCase):
             def forward(self, x):
                 return self.linear(x)
 
-        m = M().eval()
-        m = prepare_fx(m, {"": default_qconfig})
-        m_copy = copy.deepcopy(m)
-        m = convert_fx(m, is_reference=False)
-        m_ref = convert_fx(m_copy, is_reference=True)
-        data = torch.randn(5, 10)
-        result = m(data)
-        result_ref = m_ref(data)
-        self.assertTrue(torch.equal(result, result_ref))
+        class M2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 5)
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                return self.relu(self.linear(x))
+
+        for M in [M1, M2]:
+            m = M().eval()
+            m = prepare_fx(m, {"": default_qconfig})
+            m_copy = copy.deepcopy(m)
+            m = convert_fx(m, is_reference=False)
+            m_ref = convert_fx(m_copy, is_reference=True)
+            data = torch.randn(5, 10)
+            result = m(data)
+            result_ref = m_ref(data)
+            self.assertTrue(torch.equal(result, result_ref))
 
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
@@ -4718,7 +4728,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             m2q = torch.quantization.convert(m2p)
             q_result2 = m2q(data)
             # verify results match
-            self.assertTrue(torch.allclose(q_result1, q_result2))
+            self.assertEqual(q_result1, q_result2)
 
     @unittest.skipUnless('qnnpack' in supported_qengines,
                          "This Pytorch Build has not been built with or does not support QNNPACK")
