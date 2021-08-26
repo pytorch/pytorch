@@ -906,8 +906,10 @@ def check_if_enable(test: unittest.TestCase):
             platform_to_conditional: Dict = {
                 "mac": IS_MACOS,
                 "macos": IS_MACOS,
+                "win": IS_WINDOWS,
                 "windows": IS_WINDOWS,
-                "linux": IS_LINUX
+                "linux": IS_LINUX,
+                "rocm": TEST_WITH_ROCM
             }
             if platforms == [] or any([platform_to_conditional[platform] for platform in platforms]):
                 raise unittest.SkipTest(
@@ -1455,7 +1457,6 @@ class TestCase(expecttest.TestCase):
     def assertEqual(self, x, y, msg: Optional[str] = None, *,
                     atol: Optional[float] = None, rtol: Optional[float] = None,
                     equal_nan=True, exact_dtype=True, exact_device=False) -> None:
-
         assert (atol is None) == (rtol is None), "If one of atol or rtol is specified, then the other must be too"
         debug_msg: Optional[str] = None
 

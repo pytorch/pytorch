@@ -12,7 +12,6 @@ if not dist.is_available():
 
 from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
-    TEST_WITH_TSAN,
     TestCase,
     run_tests,
 )
@@ -23,10 +22,6 @@ def path(script):
 
 if TEST_WITH_DEV_DBG_ASAN:
     print("Skip ASAN as torch + multiprocessing spawn have known issues", file=sys.stderr)
-    sys.exit(0)
-
-if TEST_WITH_TSAN:
-    print("Skip as TSAN is not fork-safe since we're forking in a multi-threaded environment", file=sys.stderr)
     sys.exit(0)
 
 class TestDistributedLaunch(TestCase):
@@ -41,7 +36,7 @@ class TestDistributedLaunch(TestCase):
             f"--nnodes={nnodes}",
             f"--nproc_per_node={nproc_per_node}",
             "--monitor_interval=1",
-            "--start_method=fork",
+            "--start_method=spawn",
             "--master_addr=localhost",
             f"--master_port={master_port}",
             "--node_rank=0",
