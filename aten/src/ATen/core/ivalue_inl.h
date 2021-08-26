@@ -19,6 +19,7 @@
 #include <c10/core/TensorImpl.h>
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/util/intrusive_ptr.h>
+#include <c10/util/irange.h>
 #include <c10/util/hash.h>
 
 namespace torch {
@@ -249,9 +250,227 @@ struct TORCH_API ConstantString final : c10::intrusive_ptr_target {
 
 struct Future;
 
+// XXX: must add test coverage!
+struct TORCH_API TupleElements {
+ private:
+  size_t inlineSize_;
+  union {
+    std::vector<IValue> elementsVector_;
+    IValue elementsInline_[3];
+  };
+
+  void destroyInline() {
+   for (const auto ii : c10::irange(inlineSize_)) {
+     elementsInline_[ii].~IValue();
+   }
+  }
+ public:
+
+  using iterator = IValue*;
+  using const_iterator = const IValue*;
+
+  TupleElements() : inlineSize_(0) {
+    new (&elementsVector_) std::vector<IValue>();
+  }
+
+  explicit TupleElements(std::vector<IValue> elements)
+  : inlineSize_(0), elementsVector_(std::move(elements)) {}
+
+  explicit TupleElements(IValue&& e1)
+  : inlineSize_(1) {
+    new (&elementsInline_[0]) IValue(std::move(e1));
+  }
+
+  explicit TupleElements(IValue&& e1, IValue&& e2)
+  : inlineSize_(2) {
+    new (&elementsInline_[0]) IValue(std::move(e1));
+    new (&elementsInline_[1]) IValue(std::move(e2));
+  }
+
+  explicit TupleElements(IValue&& e1, IValue&& e2, IValue&& e3)
+  : inlineSize_(3) {
+    new (&elementsInline_[0]) IValue(std::move(e1));
+    new (&elementsInline_[1]) IValue(std::move(e2));
+    new (&elementsInline_[2]) IValue(std::move(e3));
+  }
+
+  ~TupleElements() {
+    if (inlineSize_) {
+      destroyInline();
+    } else {
+      elementsVector_.~vector();
+    }
+  }
+
+  // Simply not implemented; no particular reason not to implement in
+  // the future except that it seems unnecessary.
+  TupleElements(const TupleElements&) = delete;
+  TupleElements& operator=(const TupleElements&) = delete;
+
+  TupleElements(TupleElements&& rhs) noexcept
+  : inlineSize_(rhs.inlineSize_) {
+    if (inlineSize_) {
+      for (const auto ii : c10::irange(inlineSize_)) {
+        new (&elementsInline_[ii]) IValue(std::move(rhs.elementsInline_[ii]));
+      }
+    } else {
+      new (&elementsVector_) std::vector<IValue>(std::move(rhs.elementsVector_));
+    }
+  }
+
+  TupleElements& operator=(TupleElements&& rhs) noexcept {
+    if (inlineSize_) {
+      if (rhs.inlineSize_) {
+        for (const auto ii : c10::irange(std::min(inlineSize_, rhs.inlineSize_))) {
+          elementsInline_[ii] = std::move(rhs.elementsInline_[ii]);
+        }
+        if (rhs.inlineSize_ > inlineSize_) {
+          for (const auto ii : c10::irange(inlineSize_, rhs.inlineSize_)) {
+            new (&elementsInline_[ii]) IValue(std::move(rhs.elementsInline_[ii]));
+          }
+        }
+      } else {
+        destroyInline();
+        new (&elementsVector_) std::vector<IValue>(std::move(rhs.elementsVector_));
+      }
+    } else {
+      if (rhs.inlineSize_) {
+        elementsVector_.~vector();
+        for (const auto ii : c10::irange(rhs.inlineSize_)) {
+          new (&elementsInline_[ii]) IValue(std::move(rhs.elementsInline_[ii]));
+        }
+      } else {
+        elementsVector_ = std::move(rhs.elementsVector_);
+      }
+    }
+    inlineSize_ = rhs.inlineSize_;
+    return *this;
+  }
+
+  c10::ArrayRef<IValue> asArrayRef() const {
+    if (inlineSize_) {
+      return c10::ArrayRef<IValue>(elementsInline_, inlineSize_);
+    } else {
+      return elementsVector_;
+    }
+  }
+
+  void setContents(std::vector<IValue>&& contents) {
+    if (inlineSize_) {
+      for (const auto ii : c10::irange(inlineSize_)) {
+        elementsInline_[ii].~IValue();
+      }
+      new (&elementsVector_) std::vector<IValue>(std::move(contents));
+    } else {
+      elementsVector_ = std::move(contents);
+    }
+  }
+
+  size_t size() const {
+    return inlineSize_ ? inlineSize_ : elementsVector_.size();
+  }
+
+  IValue& operator[](size_t idx) {
+    if (inlineSize_) {
+      return elementsInline_[idx];
+    } else {
+      return elementsVector_[idx];
+    }
+  }
+
+  const IValue& operator[](size_t idx) const {
+    if (inlineSize_) {
+      return elementsInline_[idx];
+    } else {
+      return elementsVector_[idx];
+    }
+  }
+
+  IValue& at(size_t idx) {
+    if (inlineSize_) {
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inlineSize_ <= 3);
+      TORCH_CHECK(idx < inlineSize_, "TupleElements: invalid index Index = ", idx, "; Length = ", inlineSize_);
+      return elementsInline_[idx];
+    } else {
+      return elementsVector_.at(idx);
+    }
+  }
+
+  const IValue& at(size_t idx) const {
+    if (inlineSize_) {
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inlineSize_ <= 3);
+      TORCH_CHECK(idx < inlineSize_, "TupleElements: invalid index Index = ", idx, "; Length = ", inlineSize_);
+      return elementsInline_[idx];
+    } else {
+      return elementsVector_.at(idx);
+    }
+  }
+
+  iterator begin() {
+    if (inlineSize_) {
+      return elementsInline_;
+    } else {
+      return elementsVector_.empty() ? nullptr : &elementsVector_[0];
+    }
+  }
+
+  iterator end() {
+    if (inlineSize_) {
+      return elementsInline_ + inlineSize_;
+    } else {
+      return elementsVector_.empty() ? nullptr : &elementsVector_[elementsVector_.size()];
+    }
+  }
+
+  const_iterator begin() const {
+    if (inlineSize_) {
+      return elementsInline_;
+    } else {
+      return elementsVector_.empty() ? nullptr : &elementsVector_[0];
+    }
+  }
+
+  const_iterator end() const {
+    if (inlineSize_) {
+      return elementsInline_ + inlineSize_;
+    } else {
+      return elementsVector_.empty() ? nullptr : &elementsVector_[elementsVector_.size()];
+    }
+  }
+
+  const_iterator cbegin() const {
+    return begin();
+  }
+
+  const_iterator cend() const {
+    return end();
+  }
+
+  std::vector<IValue> vec() const & {
+    return asArrayRef().vec();
+  }
+
+  IValue& back() {
+    return *(end() - 1);
+  }
+
+  const IValue& back() const {
+    return *(end() - 1);
+  }
+
+  std::vector<IValue> vec() && {
+    std::vector<IValue> result;
+    result.reserve(size());
+    for (auto&& iv : *this) {
+      result.push_back(std::move(iv));
+    }
+    return result;
+  }
+};
+
 struct TORCH_API Tuple : c10::intrusive_ptr_target {
  private:
-  std::vector<IValue> elements_;
+  TupleElements elements_;
   mutable std::shared_ptr<TupleType>
       type_; // lazily computed for unnamed tuples
 
@@ -263,8 +482,25 @@ struct TORCH_API Tuple : c10::intrusive_ptr_target {
       std::shared_ptr<TupleType> type_) {
     return c10::make_intrusive<Tuple>(std::move(elements_), type_);
   }
+
   static c10::intrusive_ptr<Tuple> create(std::vector<IValue> elements_) {
     return c10::make_intrusive<Tuple>(std::move(elements_));
+  }
+
+  static c10::intrusive_ptr<Tuple> create(TupleElements elements_) {
+    return c10::make_intrusive<Tuple>(std::move(elements_));
+  }
+
+  static c10::intrusive_ptr<Tuple> create(IValue e1) {
+    return c10::make_intrusive<Tuple>(std::move(e1));
+  }
+
+  static c10::intrusive_ptr<Tuple> create(IValue e1, IValue e2) {
+    return c10::make_intrusive<Tuple>(std::move(e1), std::move(e2));
+  }
+
+  static c10::intrusive_ptr<Tuple> create(IValue e1, IValue e2, IValue e3) {
+    return c10::make_intrusive<Tuple>(std::move(e1), std::move(e2), std::move(e3));
   }
 
   template <typename... Args>
@@ -273,16 +509,26 @@ struct TORCH_API Tuple : c10::intrusive_ptr_target {
         std::vector<IValue>{IValue(std::forward<Args>(elements_))...});
   }
 
+  Tuple(const Tuple& rhs) = delete;
+
   c10::ArrayRef<IValue> elements() const& {
-    return elements_;
+    return elements_.asArrayRef();
   }
 
-  std::vector<IValue> elements() && {
+  TupleElements elements() && {
     return std::move(elements_);
   }
 
   void setElements(std::vector<IValue>&& elements) {
+    elements_.setContents(std::move(elements));
+  }
+
+  void setElements(TupleElements&& elements) {
     elements_ = std::move(elements);
+  }
+
+  size_t size() const {
+    return elements_.size();
   }
 
   std::shared_ptr<TupleType> type() const;
@@ -297,7 +543,19 @@ struct TORCH_API Tuple : c10::intrusive_ptr_target {
 
  private:
   Tuple(std::vector<IValue> elements, std::shared_ptr<TupleType> type = nullptr)
-      : elements_(std::move(elements)), type_(std::move(type)) {}
+    : elements_(std::move(elements)), type_(std::move(type)) {}
+
+  Tuple(TupleElements&& elements, std::shared_ptr<TupleType> type = nullptr)
+    : elements_(std::move(elements)), type_(std::move(type)) {}
+
+  explicit Tuple(IValue&& e1, std::shared_ptr<TupleType> type = nullptr)
+    : elements_(std::move(e1)), type_(std::move(type)) {}
+
+  explicit Tuple(IValue&& e1, IValue&& e2, std::shared_ptr<TupleType> type = nullptr)
+    : elements_(std::move(e1), std::move(e2)), type_(std::move(type)) {}
+
+  explicit Tuple(IValue&& e1, IValue&& e2, IValue&& e3, std::shared_ptr<TupleType> type = nullptr)
+    : elements_(std::move(e1), std::move(e2), std::move(e3)), type_(std::move(type)) {}
 
   friend class c10::intrusive_ptr<Tuple>;
 };
