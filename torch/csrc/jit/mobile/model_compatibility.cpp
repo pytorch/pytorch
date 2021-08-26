@@ -52,7 +52,7 @@ c10::IValue readArchive(
 
 std::vector<IValue> get_bytecode_ivalues(PyTorchStreamReader& reader) {
   std::vector<IValue> bytecode_values;
-  bytecode_values = readArchive("bytecode", reader).toTuple()->elements();
+  bytecode_values = std::move(*readArchive("bytecode", reader).toTuple()).elements();
   return bytecode_values;
 }
 

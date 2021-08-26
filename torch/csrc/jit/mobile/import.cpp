@@ -383,9 +383,10 @@ void BytecodeDeserializer::parseMethods(
           debug_info_function_name == function_name,
           "The function names in the bytecode table and the debug info table do not match.");
       const IValue& debug_handles_table = debug_handles_m_tuple[1];
+      auto debugHandlesElements = std::move(*std::move(debug_handles_table).toTuple()).elements();
       debug_handles_list =
           (expect_field(
-               std::move(debug_handles_table).toTuple()->elements(),
+              debugHandlesElements,
                "function_debug_handles",
                BYTECODE_INDEX_MODULE_DEBUG_HANDLES)
                .toTuple()
@@ -543,7 +544,7 @@ mobile::Module BytecodeDeserializer::deserialize(
   c10::optional<std::vector<IValue>> debug_handles;
   if (reader_->hasRecord("mobile_debug_handles.pkl")) {
     debug_handles =
-        readArchive("mobile_debug_handles", mcu).toTuple()->elements();
+      std::move(*readArchive("mobile_debug_handles", mcu).toTuple()).elements();
   }
   parseMethods(std::move(bvals), std::move(debug_handles), *mcu);
   auto m = mobile::Module(readArchive("data", mcu).toObject(), mcu);

@@ -273,17 +273,18 @@ struct TORCH_API Tuple : c10::intrusive_ptr_target {
         std::vector<IValue>{IValue(std::forward<Args>(elements_))...});
   }
 
-  const std::vector<IValue>& elements() const& {
+  c10::ArrayRef<IValue> elements() const& {
     return elements_;
   }
 
-  std::vector<IValue>& elements() & {
-    return elements_;
-  }
-
-  std::vector<IValue>&& elements() && {
+  std::vector<IValue> elements() && {
     return std::move(elements_);
   }
+
+  void setElements(std::vector<IValue>&& elements) {
+    elements_ = std::move(elements);
+  }
+
   std::shared_ptr<TupleType> type() const;
 
   static size_t hash(const Tuple& t) {
@@ -1256,7 +1257,7 @@ c10::optional<T> generic_to(IValue ivalue, _fake_type<c10::optional<T>>) {
 namespace detail {
 template <typename Tuple, std::size_t... INDEX>
 Tuple generic_to_tuple_impl(
-    const std::vector<IValue>& t,
+    c10::ArrayRef<IValue> t,
     std::index_sequence<INDEX...>) {
   return std::make_tuple(
       t[INDEX].to<typename std::tuple_element<INDEX, Tuple>::type>()...);

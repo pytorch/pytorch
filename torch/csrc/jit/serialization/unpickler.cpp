@@ -314,14 +314,14 @@ PickleOpCode Unpickler::readInstruction() {
     case PickleOpCode::TUPLE: {
       size_t start = marks_.back();
       marks_.pop_back();
-      auto tuple = c10::ivalue::Tuple::create({});
-      tuple->elements().reserve(stack_.size() - start);
+      std::vector<IValue> elements;
+      elements.reserve(stack_.size() - start);
       auto start_it = stack_.begin() + start;
       for (auto it = start_it; it != stack_.end(); ++it) {
-        tuple->elements().emplace_back(std::move(*it));
+        elements.emplace_back(std::move(*it));
       }
       stack_.erase(start_it, stack_.end());
-      stack_.emplace_back(std::move(tuple));
+      stack_.emplace_back(c10::ivalue::Tuple::create(std::move(elements)));
     } break;
     case PickleOpCode::TUPLE1: {
       stack_.emplace_back(c10::ivalue::Tuple::create(pop(stack_, 1)));
@@ -499,7 +499,7 @@ void Unpickler::readGlobal(
       });
     } else if (class_name == "restore_type_tag") {
       globals_.emplace_back([this] {
-        auto data = stack_.back().toTuple()->elements();
+        auto data = std::move(*std::move(stack_.back()).toTuple()).elements();
         auto type_str = data.at(1).toStringRef();
         stack_.pop_back();
         TypePtr type = nullptr;

@@ -221,9 +221,9 @@ ska::flat_hash_map<int64_t, DebugInfoTuple> CallStackDebugInfoUnpickler::
         const std::shared_ptr<CompilationUnit>& cu) {
   auto ival = jit::unpickle(reinterpret_cast<const char*>(data.get()), size);
   ska::flat_hash_map<int64_t, DebugInfoTuple> callstack_ptrs;
-  auto& ivalues = ival.toTuple()->elements();
+  std::vector<IValue> ivalues = std::move(*std::move(ival).toTuple()).elements();
   for (auto& val : ivalues) {
-    const auto tup_elems = val.toTuple()->elements();
+    auto tup_elems = val.toTuple()->elements();
     TORCH_CHECK(
         tup_elems.size() == 4,
         "Pickled map must have four elements: "
