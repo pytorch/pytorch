@@ -2,7 +2,7 @@
 import functools
 import time
 
-from typing import Any
+from typing import Any, List
 
 import torch.utils.data.backward_compatibility
 import torch.utils.data.sharding
@@ -28,6 +28,7 @@ class _ThreadingDataLoader2:
     def __iter__(self):
         not_available = False
         forever = True
+        exclude_datapipes: List[Any] = []
         while len(exclude_datapipes) < len(self.datapipes):
             for dp in self.datapipes:
                 if dp not in exclude_datapipes:
