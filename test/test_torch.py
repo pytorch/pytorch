@@ -4326,7 +4326,8 @@ else:
             self.assertEqual(a_with_output.dtype, y.dtype)
             self.assertEqual(a_with_output.size(), torch.Size([3, 2]))
 
-    @dtypes(*(get_all_fp_dtypes(include_half=False, include_bfloat16=False)))
+    @dtypes(*get_all_fp_dtypes(include_half=False, include_bfloat16=False))
+    @dtypesIfCPU(*(get_all_fp_dtypes(include_half=False, include_bfloat16=True)))
     @dtypesIfCUDA(*(get_all_fp_dtypes(include_bfloat16=False)))
     def test_bernoulli_p(self, device, dtype):
         for trivial_p in ([0, 1], [1, 0, 1, 1, 0, 1]):

@@ -107,6 +107,8 @@ _all_types_and_half = _all_types + (torch.half,)
 def all_types_and_half():
     return _all_types_and_half
 
+# The functions below are used for convenience in our test suite and thus have no corresponding C++ dispatch macro
+
 def get_all_dtypes(include_half=True,
                    include_bfloat16=True,
                    include_bool=True,

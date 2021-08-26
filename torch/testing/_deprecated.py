@@ -5,7 +5,7 @@ we don't internalize without warning, but still go through a deprecation cycle.
 
 import functools
 import warnings
-from typing import Any, Callable, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple, Union
 
 import torch
 
@@ -20,17 +20,18 @@ __all__ = [
 ]
 
 
-def warn_deprecated(instructions: str) -> Callable:
+def warn_deprecated(instructions: Union[str, Callable[[str, Tuple[Any, ...], Dict[str, Any], Any], str]]) -> Callable:
     def outer_wrapper(fn: Callable) -> Callable:
-        msg = (
-            f"torch.testing.{fn.__name__} is deprecated and will be removed in a future release. "
-            f"{instructions.strip()}"
-        )
+        name = fn.__name__
+        head = f"torch.testing.{name}() is deprecated and will be removed in a future release. "
 
         @functools.wraps(fn)
         def inner_wrapper(*args: Any, **kwargs: Any) -> Any:
+            return_value = fn(*args, **kwargs)
+            tail = instructions(name, args, kwargs, return_value) if callable(instructions) else instructions
+            msg = (head + tail).strip()
             warnings.warn(msg, FutureWarning)
-            return fn(*args, **kwargs)
+            return return_value
 
         return inner_wrapper
 
@@ -89,20 +90,15 @@ def assert_allclose(
     )
 
 
+# We iterate over all dtype getters and expose them here with an added deprecation warning
 for name in _legacy.__all_dtype_getters__:
     fn = getattr(_legacy, name)
-
-    if name == "get_all_math_dtypes":
-        instructions = (
-            f"For CUDA devices, the call can be replaced with {fn('cuda')}. "
-            f"For all other devices, it can be replaced with {fn('cpu')}."
-        )
-    else:
-        instructions = f"The unparametrized call can be replaced with {fn()}"
-
+    instructions = (
+        lambda name, args, kwargs, return_value: f"This call to {name}(...) can be replaced with {return_value}."
+    )
     globals()[name] = warn_deprecated(instructions)(fn)
     __all__.append(name)
 
 
-instructions = "The call can be replaced by ['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']"
+instructions = lambda name, args, kwargs, return_value: f"This call can be replaced with {return_value}."  # noqa: E731
 get_all_device_types = warn_deprecated(instructions)(_legacy.get_all_device_types)

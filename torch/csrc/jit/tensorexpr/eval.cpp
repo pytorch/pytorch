@@ -281,8 +281,12 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     return Value(result_v);
   }
 
-  template <typename Op>
-  void visit_binary_op(BinaryOpNode<Op>* v, bool option = false) {
+  template <
+      typename D,
+      typename std::enable_if<std::is_same<
+          decltype(detail::bin_op_deducer(std::declval<D>())),
+          void>::value>::type* = nullptr>
+  void visit_binary_op(NodePtr<D> v, bool option = false) {
     v->lhs()->accept(this);
     Value lhs_v = value_;
     v->rhs()->accept(this);

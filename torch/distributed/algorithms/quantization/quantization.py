@@ -86,16 +86,13 @@ def auto_quantize(func, qtype, quant_loss=None):
     """
     This is a prototype API that automatically quantize the input tensors, choose the precision types, and
     pass other necessary arguments and then dequantizes the output.
-
     Currently it only supports:
         . FP16 quantization method
         . all_gather, all_to_all collective ops
-
     Args:
         func (callable): A function representing collective operations.
         qtype (QuantType): Quantization method
         quant_loss (float, optional): This can be used to improve accuracy in the dequantization.
-
     Returns:
         (callable): the same collective as func but enables automatic quantization/dequantization.
     """
