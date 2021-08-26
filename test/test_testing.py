@@ -1447,8 +1447,9 @@ from torch.testing._internal.common_methods_invocations import op_db
 
 if __name__ == '__main__':
     _print_test_names()
-""".format(indented_code)).strip().split('\n')
-    return stdout
+""".format(indented_code)).strip()
+    test_names = [line.strip() for line in stdout.split('\n')]
+    return test_names
 
 
 class TestTestParametrization(TestCase):
