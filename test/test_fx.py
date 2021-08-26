@@ -3209,7 +3209,7 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
 
         for obj in _BACK_COMPAT_OBJECTS:
             if isinstance(obj, type):
-                public_members = [name for name in dir(obj) if not name.startswith('_')]
+                public_members = [name for name in obj.__dict__ if not name.startswith('_')]
                 class_method_strs.append(f'{torch.typename(obj)} {sorted(public_members)}')
 
         class_method_strs.sort()
