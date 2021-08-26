@@ -15,6 +15,7 @@ def make_tensor(
     shape: Tuple[int, ...],
     device: Union[str, torch.device],
     dtype: torch.dtype,
+    *,
     low: Optional[float] = None,
     high: Optional[float] = None,
     requires_grad: bool = False,
@@ -22,12 +23,12 @@ def make_tensor(
     exclude_zero: bool = False
 ) -> torch.Tensor:
     r"""Creates a tensor with the given :attr:`shape`, :attr:`device`, and :attr:`dtype`, and filled with
-    values uniformly drawn from ``[:attr:`low`, :attr:`high`)``.
+    values uniformly drawn from ``[low, high)``.
 
     If :attr:`low` or :attr:`high` are specified and are outside the range of the datatype's representable
     finite values then they are clamped to the lowest or highest representable finite value, respectively.
     A random tensor is then created with values within ``[low, high)`` range. If ``None``, then the following
-    table describes the default values for low and high, which depend on :attr:`dtype`:
+    table describes the default values for :attr:`low` and :attr:`high`, which depend on :attr:`dtype`:
 
     +---------------------------+------------+----------+
     | ``dtype``                 | ``low``    | ``high`` |
@@ -36,7 +37,7 @@ def make_tensor(
     +---------------------------+------------+----------+
     | unsigned integral type    | ``0``      | ``10``   |
     +---------------------------+------------+----------+
-    | integral types            | ``-9``     | ``10``   |
+    | signed integral types            | ``-9``     | ``10``   |
     +---------------------------+------------+----------+
     | floating types            | ``-9``     | ``9``    |
     +---------------------------+------------+----------+
@@ -54,8 +55,8 @@ def make_tensor(
             greatest representable finite value of the given dtype. When ``None`` (default) this value is
             determined based on the :attr:`dtype` (see the table above). Default: ``None``.
         requires_grad (Optional[bool]): If autograd should record operations on the returned tensor. Default: ``False``.
-        noncontiguous (Optional[bool]): If the returned tensor should be made noncontiguous. This argument is
-            ignored if the constructed tensor has fewer than two elements. Default: ``False``.
+        noncontiguous (Optional[bool]): If `True`, the returned tensor will be noncontiguous. This argument is
+            ignored if the constructed tensor has fewer than two elements.
         exclude_zero (Optional[bool]): If ``True`` then zeros are replaced with the dtype's small positive value.
             For bool and integer types zero is replaced with one. For floating point types it is replaced with the
             dtype's smallest positive normal number (the "tiny" value of the dtype's finfo object), and for complex
@@ -63,18 +64,18 @@ def make_tensor(
             normal number representable by the complex type. Default ``False``.
 
     Raises:
-        ValueError: if :attr:`low` is either ``inf`` or ``nan`` and/or :attr:`high` is either ``-inf`` or ``nan``.
+        ValueError: if :attr:`low` is either ``inf`` or ``nan`` or :attr:`high` is either ``-inf`` or ``nan``.
         TypeError: if the given :attr:`dtype` isn't supported by this function.
 
     Examples:
         >>> from torch.testing import make_tensor
         >>> # Creates a float tensor with values in [0, 1)
         >>> make_tensor((3,), device='cpu', dtype=torch.float32, low=0, high=1)
-        >>> tensor([0.7682, 0.4189, 0.2718])
+        tensor([0.7682, 0.4189, 0.2718])
         >>> # Creates a bool tensor on CUDA
         >>> make_tensor((2, 2), device='cuda', dtype=torch.bool)
-        >>> tensor([[False, False],
-                    [False, True]], device='cuda:0')
+        tensor([[False, False],
+                [False, True]], device='cuda:0')
     """
     def _modify_low_high(low, high, lowest, highest, default_low, default_high, dtype):
         """
@@ -141,13 +142,10 @@ def make_tensor(
             replace_with = torch.tensor(1, device=device, dtype=dtype)
         elif dtype in _floating_types:
             replace_with = torch.tensor(torch.finfo(dtype).tiny, device=device, dtype=dtype)
-        elif dtype in _complex_types:
+        else:  # dtype in _complex_types:
             float_dtype = torch.float if dtype is torch.cfloat else torch.double
             float_eps = torch.tensor(torch.finfo(float_dtype).tiny, device=device, dtype=float_dtype)
             replace_with = torch.complex(float_eps, float_eps)
-        else:
-            raise TypeError(f"The requested dtype '{dtype}' is not supported by torch.testing.make_tensor()."
-                            " To request support, file an issue at: https://github.com/pytorch/pytorch/issues")
         result[result == 0] = replace_with
 
     if dtype in _floating_types + _complex_types:
