@@ -523,7 +523,7 @@ struct TORCH_API CastValue : public BuiltinFunction {
           *type_ == *BoolType::get() &&
           (v->type()->isSubtypeOf(AnyListType::get()) ||
            v->type()->isSubtypeOf(StringType::get()) ||
-           v->type()->cast<DictType>())) {
+           v->type()->isSubtypeOf(AnyDictType::get()))) {
         auto len = len_op->call(loc, m, {v}, {}, 1);
         return gt_op->call(loc, m, {len->asValue(loc, m), zero}, {}, 1);
       }

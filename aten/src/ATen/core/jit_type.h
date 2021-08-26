@@ -2387,6 +2387,25 @@ private:
   : Type(TypeKind::AnyListType) {}
 };
 
+// the common supertype of all Dicts,
+// Dict[T] <: AnyDict for all T
+struct AnyDictType;
+using AnyDictTypePtr = std::shared_ptr<AnyDictType>;
+struct TORCH_API AnyDictType : public Type {
+  bool operator==(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  std::string str() const override {
+    return "Dict";
+  }
+  static const TypeKind Kind = TypeKind::AnyDictType;
+  // global singleton
+  static AnyDictTypePtr get();
+private:
+  AnyDictType()
+  : Type(TypeKind::AnyDictType) {}
+};
+
 // the common supertype of all tuples,
 // Tuple[T...] <: AnyTuple for all T
 struct AnyTupleType;

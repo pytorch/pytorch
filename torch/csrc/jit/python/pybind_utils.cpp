@@ -318,6 +318,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
     case TypeKind::VarType:
     case TypeKind::QSchemeType:
     case TypeKind::AnyListType:
+    case TypeKind::AnyDictType:
     case TypeKind::AnyTupleType:
     case TypeKind::AnyClassType:
     case TypeKind::AnyEnumType:

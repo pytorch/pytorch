@@ -77,6 +77,7 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
       case RRefType::Kind:
       case AnyType::Kind:
       case AnyListType::Kind:
+      case AnyDictType::Kind:
       case AnyTupleType::Kind:
       case AnyClassType::Kind:
       case AnyEnumType::Kind:

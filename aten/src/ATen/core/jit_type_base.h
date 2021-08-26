@@ -44,7 +44,8 @@ namespace c10 {
   _(ScalarTypeType)         \
   _(AnyListType)            \
   _(AnyTupleType)           \
-  _(AnyClassType)
+  _(AnyClassType)           \
+  _(AnyDictType)            \
 
 enum class TypeKind {
 #define DEFINE_TYPE(T) T,

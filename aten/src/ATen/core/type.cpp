@@ -250,6 +250,11 @@ AnyListTypePtr AnyListType::get() {
   return value;
 }
 
+AnyDictTypePtr AnyDictType::get() {
+  static AnyDictTypePtr value(new AnyDictType());
+  return value;
+}
+
 AnyTupleTypePtr AnyTupleType::get() {
   static AnyTupleTypePtr value(new AnyTupleType());
   return value;
@@ -869,6 +874,16 @@ bool ListType::isSubtypeOfExt(const TypePtr& rhs_, std::ostream* why_not) const 
     return true;
   }
   if (rhs_->kind() == AnyListType::Kind) {
+    return true;
+  }
+  return false;
+}
+
+bool DictType::isSubtypeOfExt(const TypePtr& rhs_, std::ostream* why_not) const {
+  if (Type::isSubtypeOfExt(rhs_, why_not)) {
+    return true;
+  }
+  if (rhs_->kind() == AnyDictType::Kind) {
     return true;
   }
   return false;

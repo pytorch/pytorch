@@ -34,6 +34,7 @@ const std::unordered_map<std::string, TypePtr>& string_to_type_lut() {
       {"Any", AnyType::get()},
       {"Capsule", CapsuleType::get()},
       {"list", AnyListType::get()},
+      {"dict", AnyDictType::get()},
       {"tuple", AnyTupleType::get()}};
   return map;
 }
