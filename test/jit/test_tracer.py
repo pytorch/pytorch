@@ -163,13 +163,13 @@ class TestTracer(JitTestCase):
         eager_out = mod(*test_inputs)
         traced_out = traced_func(*test_inputs)
         self.assertNotWarn(lambda: traced_func(*test_inputs), "Shouldn't throw slicing related warn here")
-        self.assertTrue(torch.allclose(eager_out, traced_out))
+        self.assertEqual(eager_out, traced_out)
 
         test_inputs = (torch.randint(0, 50, (50, 50)), torch.tensor(12))
         eager_out = mod(*test_inputs)
         traced_out = traced_func(*test_inputs)
         self.assertNotWarn(lambda: traced_func(*test_inputs), "Shouldn't throw slicing related warn here")
-        self.assertTrue(torch.allclose(eager_out, traced_out))
+        self.assertEqual(eager_out, traced_out)
 
 
     def test_typeas_trace_check(self):

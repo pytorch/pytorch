@@ -97,6 +97,7 @@ def get_weight(m):
 # - `test_cpp_api_parity`: if `False`, skips the C++ parity test for this test dict. Default: True.
 # - `has_parity`: if `False`, expects this test dict to fail the C++ parity test. Default: True.
 
+
 module_tests = [
     dict(
         module_name='Linear',
@@ -1308,6 +1309,7 @@ def single_batch_reference_fn(input, parameters, module):
     with freeze_rng_state():
         return module(single_batch_input).squeeze(0)
 
+
 new_module_tests = [
     poissonnllloss_no_reduce_test(),
     bceloss_no_reduce_test(),
@@ -2247,6 +2249,14 @@ new_module_tests = [
         input_size=(1, 3, 7),
     ),
     dict(
+        module_name='LPPool1d',
+        constructor_args=(2, 2, 3),
+        cpp_constructor_args='torch::nn::LPPool1dOptions(2, 2).stride(3)',
+        input_size=(3, 7),
+        reference_fn=single_batch_reference_fn,
+        desc='no_batch_dim',
+    ),
+    dict(
         module_name='LocalResponseNorm',
         constructor_args=(3, ),
         cpp_constructor_args='torch::nn::LocalResponseNormOptions(3)',
@@ -2763,6 +2773,14 @@ new_module_tests = [
         cpp_constructor_args='torch::nn::EmbeddingOptions(4, 3)',
         input_fn=lambda: torch.empty(2, 3, dtype=torch.long).random_(4),
         check_gradgrad=False,
+    ),
+    dict(
+        module_name='Embedding',
+        constructor_args=(4, 3),
+        cpp_constructor_args='torch::nn::EmbeddingOptions(4, 3)',
+        input_fn=lambda: torch.empty(1, 512, dtype=torch.long).random_(4).expand(7, 512),
+        check_gradgrad=False,
+        desc='discontiguous'
     ),
     dict(
         module_name='EmbeddingBag',
@@ -4047,6 +4065,7 @@ def kldivloss_reference(input, target, reduction='mean'):
         return result.sum() / result.size(0)
     return result
 
+
 def kldivloss_log_target_reference(input, target, reduction='mean'):
     result = torch.exp(target) * (target - input)
     if reduction == 'mean':
@@ -5174,6 +5193,7 @@ classification_criterion_no_batch = [
     ('HingeEmbeddingLoss', lambda: torch.randn(9), lambda: torch.tensor([-1, 1, 1] * 3)),
     ('MultiLabelMarginLoss', lambda: torch.randn(4), lambda: torch.tensor([3, 0, -1, 1])),
     ('SoftMarginLoss', lambda: torch.randn(9), lambda: torch.tensor([-1, 1, 1] * 3)),
+    ('NLLLoss', lambda: F.log_softmax(torch.randn(3), dim=0), lambda: torch.tensor(1)),
 ]
 classification_criterion_no_batch_extra_info: Dict[str, dict] = {
     'MultiLabelMarginLoss': {'check_gradgrad': False},
@@ -5572,6 +5592,7 @@ class ModuleTest(TestBase):
 
         self.test_noncontig(test_case, gpu_module, gpu_input_tuple)
 
+
 class InputVariableMixin(object):
     def _get_input(self):
         input = TestBase._get_input(self, False)  # type: ignore[arg-type]
@@ -5880,8 +5901,10 @@ class CriterionTest(InputVariableMixin, TestBase):  # type: ignore[misc]
         test_case.assertEqualIgnoreType(cpu_output, gpu_output,
                                         atol=1e-1 if dtype in {torch.half, torch.bfloat16} else 4e-4, rtol=0)
 
-        cpu_gradInput = test_case._backward_criterion(cpu_module, cpu_input, cpu_output, cpu_target, extra_args=extra_args)
-        gpu_gradInput = test_case._backward_criterion(gpu_module, gpu_input, gpu_output, gpu_target, extra_args=extra_args)
+        cpu_gradInput = test_case._backward_criterion(
+            cpu_module, cpu_input, cpu_output, cpu_target, extra_args=extra_args)
+        gpu_gradInput = test_case._backward_criterion(
+            gpu_module, gpu_input, gpu_output, gpu_target, extra_args=extra_args)
         # dtype used to be able to be None, so set precision in this way instead of a precision map
         # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
         test_case.assertEqualIgnoreType(cpu_gradInput, gpu_gradInput,
