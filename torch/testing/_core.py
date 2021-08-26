@@ -9,8 +9,6 @@ import cmath
 from typing import cast, Optional, Tuple, Union
 import operator
 
-from ._legacy import get_all_dtypes, get_all_complex_dtypes
-
 FileCheck = torch._C.FileCheck
 
 __all__ = [
@@ -22,9 +20,7 @@ __all__ = [
 # False otherwise.
 # TODO: implement numpy-like issubdtype
 def is_integral(dtype: torch.dtype) -> bool:
-    # Skip complex/quantized types
-    dtypes = [x for x in get_all_dtypes() if x not in get_all_complex_dtypes()]
-    return dtype in dtypes and not dtype.is_floating_point
+    return dtype in (torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
 
 def is_quantized(dtype: torch.dtype) -> bool:
     return dtype in (torch.quint8, torch.qint8, torch.qint32, torch.quint4x2)

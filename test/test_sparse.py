@@ -15,7 +15,7 @@ from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, dtypesIfCPU, onlyCPU, onlyCUDA, deviceCountAtLeast)
 from torch.testing._internal.common_methods_invocations import \
     (sparse_unary_ufuncs)
-from torch.testing._internal.dtype_getters import (
+from torch.testing._internal.common_dtype import (
     floating_and_complex_types, floating_and_complex_types_and, get_all_dtypes, get_all_int_dtypes,
 )
 

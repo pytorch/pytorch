@@ -12,7 +12,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCPU, onlyCUDA, dtypes, onlyOnCPUAndCUDA,
     dtypesIfCPU, dtypesIfCUDA, largeTensorTest)
-from torch.testing._internal.dtype_getters import get_all_dtypes
+from torch.testing._internal.common_dtype import get_all_dtypes
 
 # TODO: replace with make_tensor
 def _generate_input(shape, dtype, device, with_extremal):
