@@ -491,7 +491,7 @@ def skipIfRocm(fn):
     return wrapper
 
 # Skips a test on CUDA if ROCm is unavailable or its version is lower than requested.
-def skipIfRocmVersionLessThan(version = None):
+def skipIfRocmVersionLessThan(version=None):
     def dec_fn(fn):
         @wraps(fn)
         def wrap_fn(self, *args, **kwargs):
