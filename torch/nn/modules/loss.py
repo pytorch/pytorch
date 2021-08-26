@@ -1107,7 +1107,7 @@ class CrossEntropyLoss(_WeightedLoss):
         label_smoothing (float, optional): A float in [0.0, 1.0]. Specifies the amount
             of smoothing when computing the loss, where 0.0 means no smoothing. The targets
             become a mixture of the original ground truth and a uniform distribution as described in
-            `Rethinking the Inception Architecture for Computer Vision <https://arxiv.org/abs/1512.00567>`__. Default: :math:`0.0`.
+            `Rethinking the Inception Architecture for Computer Vision <https://arxiv.org/abs/1512.00567>`__. Default: ``None``.
 
     Shape:
         - Input: :math:`(N, C)` where `C = number of classes`, or
@@ -1138,10 +1138,10 @@ class CrossEntropyLoss(_WeightedLoss):
     """
     __constants__ = ['ignore_index', 'reduction', 'label_smoothing']
     ignore_index: int
-    label_smoothing: float
+    label_smoothing: Optional[float]
 
     def __init__(self, weight: Optional[Tensor] = None, size_average=None, ignore_index: int = -100,
-                 reduce=None, reduction: str = 'mean', label_smoothing: float = 0.0) -> None:
+                 reduce=None, reduction: str = 'mean', label_smoothing: Optional[float] = None) -> None:
         super(CrossEntropyLoss, self).__init__(weight, size_average, reduce, reduction)
         self.ignore_index = ignore_index
         self.label_smoothing = label_smoothing

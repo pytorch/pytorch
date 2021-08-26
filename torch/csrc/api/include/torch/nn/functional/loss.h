@@ -825,7 +825,7 @@ inline Tensor cross_entropy(
     const Tensor& weight,
     int64_t ignore_index,
     CrossEntropyFuncOptions::reduction_t reduction,
-    double label_smoothing) {
+    c10::optional<double> label_smoothing) {
   return torch::cross_entropy_loss(
       input,
       target,
