@@ -59,19 +59,19 @@ def EnsureNonBlockingDataPipe(validated_datapipe):
     if isinstance(validated_datapipe, NonBlocking):
         return validated_datapipe
     if not hasattr(validated_datapipe, '_as_iterator'):
-        validated_datapipe._as_iterator = None
+        validated_datapipe._as_iterator = None  # type: ignore[attr-defined]
     if not hasattr(validated_datapipe, 'nonblocking_next'):
         def nonblocking_next(self):
             if self._as_iterator is None:
                 self._as_iterator = iter(self)
             return next(self._as_iterator)
         validated_datapipe.nonblocking_next = types.MethodType(
-            nonblocking_next, validated_datapipe)
+            nonblocking_next, validated_datapipe)  # type: ignore[attr-defined]
     if not hasattr(validated_datapipe, 'reset_iterator'):
         def reset_iterator(self):
             self._as_iterator = None
         validated_datapipe.reset_iterator = types.MethodType(
-            reset_iterator, validated_datapipe)
+            reset_iterator, validated_datapipe)  # type: ignore[attr-defined]
     return validated_datapipe
 
 

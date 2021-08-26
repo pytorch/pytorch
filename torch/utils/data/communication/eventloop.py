@@ -38,4 +38,4 @@ def SpawnThreadForDataPipeline(datapipe):
 
     process = threading.Thread(target=DataPipeToQueuesLoop, args=(
         new_datapipe, req_queue, res_queue), daemon=True)
-    return process, req_queue, res_queue
+    return process, req_queue, res_queue, new_datapipe

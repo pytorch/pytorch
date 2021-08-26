@@ -3,6 +3,7 @@ import functools
 import time
 
 import torch.utils.data.backward_compatibility
+import torch.utils.data.sharding
 from torch.utils.data import DataLoader, IterDataPipe, communication
 from torch.utils.data.datapipes.iter import IterableAsDataPipe
 
@@ -10,11 +11,13 @@ from torch.utils.data.datapipes.iter import IterableAsDataPipe
 class _ThreadingDataLoader2:
     known_dataloaders = {}
 
-    def __init__(self, datapipe, num_workers=0):
+    def __init__(self, datapipe, num_workers=0, collate_fn=None):
         self.threads = []
         self.datapipes = []
-        for i in range(num_workers):
-            (thread, req_queue, res_queue) = communication.eventloop.SpawnThreadForDataPipeline(datapipe)
+        self.collate_fn = collate_fn
+        for worker_id in range(num_workers):
+            (thread, req_queue, res_queue, thread_localdatapipe) = communication.eventloop.SpawnThreadForDataPipeline(datapipe)
+            torch.utils.data.sharding.apply_sharding(thread_localdatapipe, num_workers, worker_id)
             thread.start()
             self.threads.append((thread, req_queue, res_queue))
             local_datapipe = communication.iter.QueueWrapper(
@@ -72,10 +75,10 @@ class DataLoader2:
         if isinstance(dataset, IterDataPipe):
             if batch_sampler is not None:
                 raise Exception(
-                    'batch_sampler is not yet supported for DataPipes')
+                    'batch_sampler is not yet supported by DataPipes')
             if sampler is not None:
                 raise Exception(
-                    'sampler is not yet supported for DataPipes')
+                    'sampler is not yet supported by DataPipes')
             datapipe = dataset
             if shuffle:
                 datapipe = datapipe.shuffle()
@@ -110,36 +113,28 @@ class DataLoader2:
                                          worker_init_fn=my_worker_init_fn,
                                          prefetch_factor=prefetch_factor,
                                          persistent_workers=persistent_workers)
-
-                if not batch_outside_worker:
-                    return data_loader
-                else:
-                    if collate_fn is None:
-                        collate_fn = torch.utils.data._utils.collate.default_collate
-                    datapipe = IterableAsDataPipe(data_loader).batch(
-                        batch_size, drop_last=drop_last).map(collate_fn)
-                    return datapipe
             elif parallelism_mode == 'thread':
-                return _ThreadingDataLoader2(datapipe, num_workers=num_workers)
-                # threads = []
-                # pipes = []
-                # # for i in num_workers:
-                # #     (process, req_queue, res_queue) = eventloop.SpawnThreadForDataPipeline(datapipe)
-                # #     # TODO(VitalyFedyunin): Add test to check that Spawn creates separate instance of datapipe
-                # #     threads.append((process, req_queue, res_queue))
-                # #     process.start()
-                # #     thread_datapipe = communication_iter.QueueWrapper(
-                # #         datapipes_protocol.IterDataPipeQueueProtocolClient(req_queue, res_queue))
-                # #     pipes.append(thread_datapipe)
-
-                # def clean_me(process, req_queue, res_queue):
-                #     req_queue.put(messages.TerminateRequest())
-                #     _ = res_queue.get()
-                #     process.join()
-
+                if collate_fn is not None and not batch_outside_worker:
+                    datapipe = datapipe.map(collate_fn)
+                if pin_memory:
+                    raise Exception(
+                        'pin_memory is not yet supported by DataPipes with Threading')
+                if worker_init_fn is not None:
+                    raise Exception(
+                        'worker_init_fn is not yet supported by DataPipes with Threading')
+                data_loader = _ThreadingDataLoader2(datapipe,
+                                                    num_workers=num_workers,
+                                                    collate_fn=collate_fn)
             else:
                 raise Exception('Unsupported parallelism mode', parallelism_mode)
-
+            if not batch_outside_worker:
+                return data_loader
+            else:
+                if collate_fn is None:
+                    collate_fn = torch.utils.data._utils.collate.default_collate
+                datapipe = IterableAsDataPipe(data_loader).batch(
+                    batch_size, drop_last=drop_last).map(collate_fn)
+                return datapipe
         else:
             if parallelism_mode != 'thread':
                 raise Exception(
