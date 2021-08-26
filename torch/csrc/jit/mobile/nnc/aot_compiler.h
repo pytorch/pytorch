@@ -11,7 +11,6 @@ namespace mobile {
 namespace nnc {
 
 
-// std::vector<int64_t>& ?
 TORCH_API std::unique_ptr<Function> aot_compile(
     const std::string& method_name,
     std::shared_ptr<Graph>& subgraph,

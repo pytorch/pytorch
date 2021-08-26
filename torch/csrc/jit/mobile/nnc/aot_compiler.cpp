@@ -30,7 +30,6 @@ namespace nnc {
 std::vector<int64_t> getConstSizes(const BufPtr b) {
   std::vector<int64_t> r;
   for (auto dim : b->dims()) {
-    // auto int_imm_dim = dynamic_cast<const IntImm*>(dim);
     IntImmPtr int_imm_dim = to<IntImm>(dim);
     // TODO: assert it's actually immediate
     int64_t s = int_imm_dim->value();
@@ -77,8 +76,6 @@ std::unique_ptr<Function> aot_compile(
     std::shared_ptr<Graph>& g,
     const std::vector<int64_t>& sizes,
     std::string* compiled_assembly) {
-  std::cout << "in aot compile \n";
-//   KernelScope kernel_scope;
   auto g2 = g->copy();
   std::cerr << "Input sizes: ";
   for (auto s : sizes) {
