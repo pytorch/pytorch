@@ -641,8 +641,10 @@ class ConvReluQuantizeHandler(QuantizeHandler):
                 # and qparam is a dictionary of
                 # {"qscheme": ..., "scale": ..., "zero_point": ...} for per tensor quantization or
                 # {"qscheme": ..., "scale": ..., "zero_point": ..., "axis": ...} for per channel quantization
+                float_conv = self.conv
+                fused_conv = None
                 if isinstance(
-                        self.conv,
+                        float_conv,
                         QAT_CONV_MODULE_CLASSES):
                     # case 1. converting qat conv module to
                     # a float conv module, we need to attch
@@ -654,6 +656,7 @@ class ConvReluQuantizeHandler(QuantizeHandler):
                     parent_name, name = _parent_name(self.conv_node.target)
                     setattr(modules[parent_name], name, float_conv)
                     if isinstance(float_conv, torch.nn.intrinsic._FusedModule):
+                        fused_conv = float_conv
                         float_conv = float_conv[0]
                     weight_post_process = self.conv.weight_fake_quant
                 else:
@@ -661,8 +664,8 @@ class ConvReluQuantizeHandler(QuantizeHandler):
                     # to float conv module, we need to attach
                     # weight observer to the conv module and run it
                     # with conv weight
-                    float_conv = self.conv
-                    if isinstance(self.conv, torch.nn.intrinsic._FusedModule):
+                    if isinstance(float_conv, torch.nn.intrinsic._FusedModule):
+                        fused_conv = float_conv
                         float_conv = self.conv[0]
                     assert qconfig is not None
                     weight_post_process = qconfig.weight()
@@ -672,14 +675,17 @@ class ConvReluQuantizeHandler(QuantizeHandler):
                 # hardcoded for now, TODO: expose the api to user,
                 # we can have a map from module to reference module
                 # and allow user to register new ones
-                mapping = {
-                    nn.Conv1d: nnqr.Conv1d,
-                    nn.Conv2d: nnqr.Conv2d,
-                    nn.Conv3d: nnqr.Conv3d,
-                }
-                ref_conv = mapping[type(float_conv)].from_float(float_conv, weight_qparams)  # type: ignore[attr-defined]
-                parent_name, name = _parent_name(self.conv_node.target)
-                setattr(modules[parent_name], name, ref_conv)
+                qconv_cls = get_static_quant_module_class(
+                    type(float_conv), is_reference=is_reference)
+                ref_conv = qconv_cls.from_float(float_conv, weight_qparams)  # type: ignore[attr-defined]
+                # if the parent is a fused conv (Sequential), we can replace the first
+                # item to ref conv, otherwise we can update
+                # the conv instance in the module tree
+                if fused_conv is not None:
+                    fused_conv[0] = ref_conv
+                else:
+                    parent_name, name = _parent_name(self.conv_node.target)
+                    setattr(modules[parent_name], name, ref_conv)
                 op_out = quantized_graph.create_node(
                     'call_module',
                     self.conv_node.target,
@@ -882,6 +888,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                 # Get the float linear and attach qscheme and qparams
                 # the the module
                 float_linear = self.linear
+                fused_linear = None
                 if isinstance(float_linear, (torch.nn.qat.Linear, torch.nn.intrinsic.qat.LinearReLU)):
                     float_linear = float_linear.to_float()
                     # change qat linear to linear
@@ -889,10 +896,12 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                     setattr(modules[parent_name], name, float_linear)
                     # Attach weight fake quant to the linear module
                     if isinstance(float_linear, torch.nn.intrinsic.LinearReLU):
+                        fused_linear = float_linear
                         float_linear = float_linear[0]
                     weight_post_process = self.linear.weight_fake_quant
                 else:
                     if isinstance(float_linear, torch.nn.intrinsic.LinearReLU):
+                        fused_linear = float_linear
                         float_linear = self.linear[0]  # type: ignore[index]
                     # Attach the weight observer to the module
                     weight_post_process = qconfig.weight()  # type: ignore[union-attr]
@@ -900,12 +909,21 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                     weight_post_process(float_linear.weight)  # type: ignore[operator]
 
                 weight_qparams = get_qparam_dict(weight_post_process)
-                # hardcoded for now, TODO: expose the api to user,
+                # TODO: include the configuration in backend_config_dict
                 # we can have a map from module to reference module
                 # and allow user to register new ones
-                ref_linear = nnqr.Linear.from_float(float_linear, weight_qparams)
-                parent_name, name = _parent_name(self.linear_node.target)
-                setattr(modules[parent_name], name, ref_linear)
+                qlinear_cls = get_static_quant_module_class(
+                    type(float_linear), is_reference=is_reference)
+                ref_linear = qlinear_cls.from_float(float_linear, weight_qparams)
+
+                # if the parent is a fused linear (Sequential), we can replace the first
+                # item to ref linear, otherwise we can update
+                # the linear instance in the module tree
+                if fused_linear is not None:
+                    fused_linear[0] = ref_linear
+                else:
+                    parent_name, name = _parent_name(self.linear_node.target)
+                    setattr(modules[parent_name], name, ref_linear)
                 op_out = quantized_graph.create_node(
                     'call_module',
                     self.linear_node.target,
