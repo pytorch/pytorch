@@ -158,6 +158,9 @@ INIT_METHOD = os.getenv("INIT_METHOD", "env://")
 DEFAULT_TIMEOUT = 300
 CUSTOMIZED_TIMEOUT = {"test_DistributedDataParallel": 500}
 
+skipNCCLIfNoUCC = sandcastle_skip_if(
+    BACKEND == "nccl" and not dist.is_ucc_available(), "no UCC")
+
 
 def get_profiling_event(postfix, profiler):
     event_list = (
@@ -1336,6 +1339,7 @@ class DistributedTest:
                             self.assertTrue(event.is_async)
                             self.assertTrue(event.input_shapes in expected_shapes)
 
+        @skipNCCLIfNoUCC
         def test_send_recv(self):
             self._test_send_recv(profiler_ctx=None)
 
@@ -1436,6 +1440,7 @@ class DistributedTest:
                 )
                 self._barrier()
 
+        @skipNCCLIfNoUCC
         def test_send_recv_any_source(self):
             self._test_send_recv_any_source(profiler_ctx=None)
 
@@ -1493,6 +1498,7 @@ class DistributedTest:
                             self.assertEqual(event.name, event_name)
                             self.assertEqual(event.input_shapes, [[send_recv_size] * 3])
 
+        @skipNCCLIfNoUCC
         def test_send_recv_with_tag(self):
             self._test_send_recv_with_tag(profiler_ctx=None)
 
@@ -1561,6 +1567,7 @@ class DistributedTest:
                         else:
                             self.assertEqual(event.input_shapes, expected_shapes[rank])
 
+        @skipNCCLIfNoUCC
         def test_isend(self):
             self._test_isend(profiler_ctx=None)
 
@@ -1580,6 +1587,7 @@ class DistributedTest:
             self._test_isend(profiler_ctx=torch_profiler_ctx)
 
         # IRECV
+        @skipNCCLIfNoUCC
         def test_irecv(self):
             rank = dist.get_rank()
             world_size = dist.get_world_size()
