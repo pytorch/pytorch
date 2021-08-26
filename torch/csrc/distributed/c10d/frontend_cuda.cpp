@@ -5,6 +5,8 @@
 #include <c10/util/Exception.h>
 #include <c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/frontend.hpp>
+#include <torch/csrc/distributed/c10d/quantization/quantization_gpu.h>
+#include <torch/library.h>
 
 namespace c10d {
 
@@ -123,6 +125,12 @@ struct RegisterNCCLProcessGroupProvider {
 RegisterNCCLProcessGroupProvider reg;
 
 } // namespace
+#define DISPATCH_TO_CUDA(name, function) \
+    m.impl(name, torch::dispatch(c10::DispatchKey::CUDA, TORCH_FN(function)))
+TORCH_LIBRARY_IMPL(q, CUDA, m) {
+    DISPATCH_TO_CUDA("_Bfloat16QuantizedToFloat", ::torch::distributed::c10d::quantization::_bfloat16_to_float_cuda);
+    DISPATCH_TO_CUDA("_FloatToBfloat16Quantized", ::torch::distributed::c10d::quantization::_float_to_bfloat16_cuda);
+}
 } // namespace c10d
 
 #endif // USE_C10D_NCCL

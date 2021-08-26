@@ -6,6 +6,8 @@
 #include <c10d/FileStore.hpp>
 #include <c10d/TCPStore.hpp>
 #include <c10d/Utils.hpp>
+#include <torch/csrc/distributed/c10d/quantization/quantization.h>
+#include <torch/library.h>
 
 #include <chrono>
 #include <sstream>
@@ -1257,5 +1259,14 @@ void initCustomClassBindings() {
           .def(
               "get_name_of_process_group",
               &::c10d::DistributedC10d::getNameOfProcessGroup);
+}
+
+TORCH_LIBRARY(q, m) {
+    m.def("_Bfloat16QuantizedToFloat(Tensor input) -> Tensor");
+    m.def("_FloatToBfloat16Quantized(Tensor input) -> Tensor");
+}
+TORCH_LIBRARY_IMPL(q, CPU, m) {
+    m.impl("_Bfloat16QuantizedToFloat", ::torch::distributed::c10d::quantization::_bfloat16_to_float_cpu);
+    m.impl("_FloatToBfloat16Quantized", ::torch::distributed::c10d::quantization::_float_to_bfloat16_cpu);
 }
 } // namespace c10d
