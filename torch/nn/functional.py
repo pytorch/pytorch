@@ -2772,7 +2772,7 @@ def cross_entropy(
     ignore_index: int = -100,
     reduce: Optional[bool] = None,
     reduction: str = "mean",
-    label_smoothing: Optional[float] = None,
+    label_smoothing: float = 0.0,
 ) -> Tensor:
     r"""This criterion computes the cross entropy loss between input and target.
 
@@ -2812,7 +2812,7 @@ def cross_entropy(
         label_smoothing (float, optional): A float in [0.0, 1.0]. Specifies the amount
             of smoothing when computing the loss, where 0.0 means no smoothing. The targets
             become a mixture of the original ground truth and a uniform distribution as described in
-            `Rethinking the Inception Architecture for Computer Vision <https://arxiv.org/abs/1512.00567>`__. Default: ``None``.
+            `Rethinking the Inception Architecture for Computer Vision <https://arxiv.org/abs/1512.00567>`__. Default: :math:`0.0`.
 
     Examples::
 
