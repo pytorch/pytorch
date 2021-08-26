@@ -84,6 +84,28 @@ inline bool Argument::isBackwardCompatibleWith(
     return true;
 }
 
+inline bool Argument::isForwardCompatibleWith(
+    const Argument& old,
+    std::ostream* why_not) const {
+  const Argument* lhs = this;
+  const Argument* rhs = &old;
+  if (!(lhs->name() == rhs->name() && lhs->N() == rhs->N() &&
+        lhs->alias_info() == rhs->alias_info())) {
+    return false;
+  }
+  if (lhs->kwarg_only() && !rhs->kwarg_only()) {
+    return false;
+  }
+  if (!lhs->type()->isSubtypeOfExt(rhs->type(), why_not)) {
+    return false;
+  }
+  if (lhs->default_value().has_value() &&
+      rhs->default_value() != lhs->default_value()) {
+    return false;
+  }
+  return true;
+}
+
 inline std::string FunctionSchema::formatTypeMismatchMsg(
     const Argument& expected,
     const std::string& actual_type,
@@ -162,6 +184,86 @@ inline bool FunctionSchema::isBackwardCompatibleWith(
     if (!arguments()
              .at(i - old_out_start_idx + new_out_start_idx)
              .isBackwardCompatibleWith(old.arguments().at(i), why_not)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+inline bool FunctionSchema::isForwardCompatibleWith(
+    const FunctionSchema& old,
+    std::ostream* why_not) const {
+  if (!(name() == old.name() &&
+        overload_name() == old.overload_name()
+        // we are conservative on is_vararg and is_varret,
+        // since they are only used by internal operators
+        && is_vararg() == old.is_vararg() && is_varret() == old.is_varret() &&
+        returns().size() == old.returns().size() &&
+        arguments().size() >= old.arguments().size())) {
+    return false;
+  }
+
+  // find the start of out args in the old schema
+  int old_out_start_idx;
+  for (old_out_start_idx = old.arguments().size() - 1; old_out_start_idx > -1;
+       old_out_start_idx--) {
+    if (!old.arguments().at(old_out_start_idx).is_out()) {
+      break;
+    }
+  }
+
+  old_out_start_idx++;
+
+  // find the start of out args in the old schema
+  int new_out_start_idx;
+  for (new_out_start_idx = arguments().size() - 1; new_out_start_idx > -1;
+       new_out_start_idx--) {
+    if (!arguments().at(new_out_start_idx).is_out()) {
+      break;
+    }
+  }
+
+  new_out_start_idx++;
+
+  // make sure among the default args, they are forward compatible
+  for (size_t i = 0; i < old_out_start_idx; i++) {
+    if (!arguments().at(i).isBackwardCompatibleWith(
+            old.arguments().at(i), why_not)) {
+      return false;
+    }
+  }
+
+  // Validate that all new arguments provided has a default value
+  for (size_t i = old_out_start_idx; i < new_out_start_idx; ++i) {
+    if (!arguments().at(i).default_value()) {
+      if (why_not) {
+        *why_not
+            << "Function schema not backward compatible since the new argument '"
+            << arguments().at(i).name() << "' of type "
+            << arguments().at(i).type()->str()
+            << " did not provide a default value.";
+      }
+      return false;
+    }
+
+    auto default_val = arguments().at(i).default_value().value();
+    if (default_val.isList() || default_val.isGenericDict()) {
+      if (why_not) {
+        *why_not
+            << "Function schema not forward compatible since the new argument '"
+            << arguments().at(i).name() << "' of type "
+            << arguments().at(i).type()->str() << " is a container type.";
+      }
+      return false;
+    }
+  }
+
+  // now compare the out args
+  for (size_t i = old_out_start_idx; i < old.arguments().size(); i++) {
+    if (!arguments()
+             .at(i - old_out_start_idx + new_out_start_idx)
+             .isForwardCompatibleWith(old.arguments().at(i), why_not)) {
       return false;
     }
   }

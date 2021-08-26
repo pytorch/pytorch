@@ -107,6 +107,26 @@ class TestFunctionSchema(TestCase):
         self.assertTrue(new_schema_without_arg_multiple_default.is_backward_compatible_with(old_schema_without_arg))
         self.assertFalse(new_schema_without_arg_wrong_pos.is_backward_compatible_with(old_schema_without_arg))
 
+    def test_forward_compatible_arguments_without_out(self):
+        old_schema = parse_schema('any(Tensor self, int a, int b=1) -> Tensor')
+        new_schema = parse_schema('any(Tensor self, int a, int b=1, int c=1) -> Tensor')
+        self.assertTrue(new_schema.is_forward_compatible_with(old_schema))
+        new_schema = parse_schema('any(Tensor self, int a, int b=1, int[2] c=1) -> Tensor')
+        self.assertFalse(new_schema.is_forward_compatible_with(old_schema))
+        new_schema = parse_schema('any(Tensor self, int a, int b=4) -> Tensor')
+        self.assertFalse(new_schema.is_forward_compatible_with(old_schema))
+        new_schema = parse_schema('any(Tensor self, int a, int c=1) -> Tensor')
+        self.assertFalse(new_schema.is_forward_compatible_with(old_schema))
+        new_schema = parse_schema('any(Tensor self, int a, int c=1, int b=1) -> Tensor')
+        self.assertFalse(new_schema.is_forward_compatible_with(old_schema))
+
+    def test_forward_compatible_arguments_with_out(self):
+        old_schema = parse_schema('any(Tensor self, *, int a, int b=1, Tensor(a!) out) -> Tensor(a!)')
+        new_schema = parse_schema('any(Tensor self, *, int a, int b=1, int c=1, Tensor(a!) out) -> Tensor(a!)')
+        self.assertTrue(new_schema.is_forward_compatible_with(old_schema))
+        new_schema = parse_schema('any(Tensor self, *, int a, Tensor(d!) d, int b=1, Tensor(a!) out) -> Tensor(a!)')
+        self.assertFalse(new_schema.is_forward_compatible_with(old_schema))
+
     def test_string_optional_parameter_default_value(self):
         schema_a = parse_schema("example::op(str? order=\"NCHW\") -> (Tensor)")
         schema_b = parse_schema(str(schema_a))

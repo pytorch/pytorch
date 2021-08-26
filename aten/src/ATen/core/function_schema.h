@@ -111,6 +111,10 @@ struct Argument {
       const Argument& old,
       std::ostream* why_not=nullptr) const;
 
+  bool isForwardCompatibleWith(
+      const Argument& old,
+      std::ostream* why_not = nullptr) const;
+
  private:
   std::string name_;
   TypePtr type_;
@@ -196,6 +200,10 @@ struct FunctionSchema {
   //   NOK   f_new(a, *, c, b) => f_old(a, *, b, c)
   //   OK    f_new(a, *, b, c, d=1) => f_old(a, *, b, c)
   bool isBackwardCompatibleWith(
+      const FunctionSchema& old,
+      std::ostream* why_not = nullptr) const;
+
+  bool isForwardCompatibleWith(
       const FunctionSchema& old,
       std::ostream* why_not = nullptr) const;
 
