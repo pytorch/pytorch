@@ -149,6 +149,10 @@ struct TORCH_API Module : public Object {
     _ivalue()->setAttr(name, module._ivalue());
   }
 
+  Module get_submodule(const std::string& name) {
+    return _ivalue()->getAttr(name).toModule();
+  }
+
   void apply(const std::function<void(Module&)>& fn);
 
   buffer_list buffers(bool recurse = true) const;
