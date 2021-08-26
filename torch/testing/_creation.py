@@ -160,9 +160,8 @@ def make_tensor(
             float_eps = torch.tensor(torch.finfo(float_dtype).tiny, device=device, dtype=float_dtype)
             replace_with = torch.complex(float_eps, float_eps)
         else:
-            raise TypeError(f"Given dtype {dtype} is not supported for make_tensor, if you think"
-                            " that it should be supported, please file an issue"
-                            " here: https://github.com/pytorch/pytorch/issues")
+            raise TypeError(f"The requested dtype {dtype} is not supported by torch.testing.make_tensor()."
+                            " To request support, file an issue at: https://github.com/pytorch/pytorch/issues")
         result[result == 0] = replace_with
 
     if dtype in _floating_types or\
