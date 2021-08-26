@@ -231,10 +231,10 @@ def make_graphed_callables(callables, sample_args):
                         i.copy_(arg)
                 fwd_graph.replay()
                 assert isinstance(static_outputs, tuple)
-                return static_outputs
+                return tuple(o.detach() for o in static_outputs)
 
             @staticmethod
-            @once_differentiable
+            @torch.autograd.function.once_differentiable
             def backward(ctx, *grads):
                 for g, grad in zip(static_grad_outputs, grads):
                     if g is None:
@@ -248,7 +248,7 @@ def make_graphed_callables(callables, sample_args):
 
                 # Input args that didn't require grad expect a None gradient.
                 assert isinstance(static_grad_inputs, tuple)
-                return static_grad_inputs
+                return tuple(b.detach() if b is not None else b for b in static_grad_inputs)
 
         def functionalized(*user_args):
             # Runs the autograd function with inputs == all inputs to the graph that might require grad
