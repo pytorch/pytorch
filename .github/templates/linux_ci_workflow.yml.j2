@@ -439,7 +439,7 @@ jobs:
 {% endblock %}
 {%- endif -%}
 {%- if enable_doc_jobs %}
-  pytorch_python_doc_build:
+  pytorch_doc_build:
     runs-on: linux.2xlarge
     strategy:
       matrix:
@@ -485,7 +485,7 @@ jobs:
       - name: Unzip artifacts
         run: |
           unzip -o artifacts.zip
-      - name: Build ${{ matrix.docs_type }}Docs in Docker
+      - name: Build ${{ matrix.docs_type }} docs
         run: |
           set -ex
           time docker pull "${DOCKER_IMAGE}" > /dev/null
@@ -515,12 +515,12 @@ jobs:
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - uses: seemethere/upload-artifact-s3@v3
-        if: ${{ github.event_name == 'pull_request' }}
         name: Upload Docs Preview
+        if: ${{ github.event_name == 'pull_request' }}
         with:
           retention-days: 14
           if-no-files-found: error
-          path: pytorch.github.io/docs/merge
+          path: ${{ matrix.docs_type == 'python' && 'pytorch.github.io/docs/merge' || 'cppdocs/ '}}
           s3-prefix: ${{ github.repository }}/pr-previews/${{ github.event.pull_request.number }}/${{ matrix.docs_type }}
       - name: Archive artifacts into zip
         run: |
