@@ -1,5 +1,6 @@
 #pragma once
 #include <ATen/detail/CUDAHooksInterface.h>
+#include <c10/util/env.h>
 
 namespace at { namespace native {
 
@@ -108,6 +109,8 @@ static inline bool cudnn_conv_use_channels_last(const at::Tensor& input, const a
 
 static inline bool miopen_conv_use_channels_last(const at::Tensor& input, const at::Tensor& weight) {
 
+  static c10::optional<bool> PYTORCH_MIOPEN_SUGGEST_NHWC = c10::utils::check_env("PYTORCH_MIOPEN_SUGGEST_NHWC");
+
   // disable NHWC for float64 input.
   if (!at::detail::getCUDAHooks().compiledWithMIOpen() ||
       input.scalar_type() == at::kDouble ||
@@ -120,8 +123,10 @@ static inline bool miopen_conv_use_channels_last(const at::Tensor& input, const 
 
   bool can_use_miopen_channels_last_2d = false;
 #if defined(__HIP_PLATFORM_HCC__) && (TORCH_HIP_VERSION >= 403)
-  can_use_miopen_channels_last_2d = ( (input_memory_format  == at::MemoryFormat::ChannelsLast) ||
-    (weight_memory_format == at::MemoryFormat::ChannelsLast) );
+  can_use_miopen_channels_last_2d = PYTORCH_MIOPEN_SUGGEST_NHWC &&  *PYTORCH_MIOPEN_SUGGEST_NHWC && (
+            ( (input_memory_format  == at::MemoryFormat::ChannelsLast) ||
+            (weight_memory_format == at::MemoryFormat::ChannelsLast) )
+        );
 #endif
 
   bool can_use_miopen_channels_last_3d = false;

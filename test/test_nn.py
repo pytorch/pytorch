@@ -35,7 +35,7 @@ from torch.nn.parameter import UninitializedParameter, UninitializedBuffer
 from torch.nn.parallel._functions import Broadcast
 from torch.testing import get_all_fp_dtypes
 from torch.testing._internal.common_utils import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, skipIfRocm, \
-    skipIfRocmVersionLessThan, TEST_NUMPY, TEST_SCIPY, TEST_WITH_ROCM, download_file, \
+    skipIfRocmVersionLessThan, skipIfNotMiopenSuggestNHWC, TEST_NUMPY, TEST_SCIPY, TEST_WITH_ROCM, download_file, \
     get_function_arglist, load_tests, repeat_test_for_types, ALL_TENSORTYPES, \
     ALL_TENSORTYPES2, suppress_warnings, TemporaryFileName, TEST_WITH_UBSAN, IS_PPC
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, TEST_CUDNN_VERSION
@@ -44,8 +44,8 @@ from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, Criteri
     ctcloss_reference, new_module_tests, single_batch_reference_fn
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, \
     dtypesIfCUDA, precisionOverride, skipCUDAIfNoCudnn, skipCUDAIfCudnnVersionLessThan, onlyCUDA, onlyCPU, \
-    skipCUDAIfRocm, skipCUDAIf, skipCUDAIfNotRocm, skipCUDAIfRocmVersionLessThan, onlyOnCPUAndCUDA, \
-    deviceCountAtLeast, largeTensorTest, expectedFailureMeta, skipMeta
+    skipCUDAIfRocm, skipCUDAIf, skipCUDAIfNotRocm, skipCUDAIfRocmVersionLessThan, skipCUDAIfNotMiopenSuggestNHWC, \
+    onlyOnCPUAndCUDA, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, skipMeta
 from torch.nn import MultiheadAttention
 
 from hypothesis import given
@@ -10685,6 +10685,7 @@ class TestNN(NNTestCase):
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     @skipIfRocmVersionLessThan((4, 3))
+    @skipIfNotMiopenSuggestNHWC
     def test_grouped_conv_cudnn_nhwc_support(self):
         # in order to catch the hols in grouped convolution in nhwc support for earlier cudnn version
         input = torch.randn((16, 16, 8, 8), dtype=torch.float16, device="cuda").to(memory_format=torch.channels_last)
@@ -16738,6 +16739,7 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyCUDA
     @skipCUDAIfRocmVersionLessThan((4, 3))
+    @skipCUDAIfNotMiopenSuggestNHWC
     @skipCUDAIfCudnnVersionLessThan(7603)
     @dtypes(torch.half, torch.float)
     def test_conv_cudnn_nhwc(self, device, dtype):
@@ -16881,6 +16883,7 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyCUDA
     @skipCUDAIfRocmVersionLessThan((4, 3))
+    @skipCUDAIfNotMiopenSuggestNHWC
     @skipCUDAIfCudnnVersionLessThan(7603)
     @tf32_on_and_off(0.05)
     def test_conv_cudnn_mismatch_memory_format(self, device):

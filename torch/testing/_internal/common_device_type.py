@@ -12,7 +12,8 @@ import os
 import torch
 from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, TEST_MKL, \
     skipCUDANonDefaultStreamIf, TEST_WITH_ASAN, TEST_WITH_UBSAN, TEST_WITH_TSAN, \
-    IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, DeterministicGuard, TEST_SKIP_NOARCH
+    IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, DeterministicGuard, TEST_SKIP_NOARCH, \
+    TEST_WITH_MIOPEN_SUGGEST_NHWC
 from torch.testing._internal.common_cuda import _get_torch_cuda_version
 from torch.testing import \
     (get_all_dtypes)
@@ -1189,6 +1190,9 @@ def skipCUDAIfRocmVersionLessThan(version=None):
         return wrap_fn
     return dec_fn
 
+# Skips a test on CUDA when using ROCm.
+def skipCUDAIfNotMiopenSuggestNHWC(fn):
+    return skipCUDAIf(not TEST_WITH_MIOPEN_SUGGEST_NHWC, "test doesn't currently work without MIOpen NHWC activation")(fn)
 
 # Skips a test for specified CUDA versions, given in the form of a list of [major, minor]s.
 def skipCUDAVersionIn(versions : List[Tuple[int, int]] = None):
