@@ -77,29 +77,6 @@ c10::Dict<c10::IValue, c10::IValue> create_compile_spec() {
   return compile_spec;
 }
 
-c10::Dict<c10::IValue, c10::IValue> create_compile_spec(
-    const std::string& method_name,
-    const std::string& nnc_kernel_id,
-    const std::vector<std::vector<int64_t>>& input_shapes,
-    const std::vector<std::vector<int64_t>>& output_shapes,
-    const c10::impl::GenericList& parameters,
-    const std::vector<int64_t>& buffer_sizes) {
-  c10::Dict<c10::IValue, c10::IValue> method_spec(
-      c10::StringType::get(), c10::AnyType::get());
-  method_spec.insert("nnc_kernel_id", nnc_kernel_id);
-  method_spec.insert("input_sizes", input_shapes);
-  method_spec.insert("output_sizes", output_shapes);
-
-  // For testing purpose we don't call the real NNC so pass in these directly.
-  method_spec.insert("parameters", parameters);
-  method_spec.insert("buffer_sizes", buffer_sizes);
-
-  c10::Dict<c10::IValue, c10::IValue> compile_spec(
-      c10::StringType::get(), c10::AnyType::get());
-  compile_spec.insert(method_name, method_spec);
-  return compile_spec;
-}
-
 std::vector<int64_t> get_input_sizes_for_method(
     const c10::Dict<c10::IValue, c10::IValue>& method_compile_spec,
     const std::string& method_name) {
@@ -155,7 +132,7 @@ static auto reg = torch::jit::backend_preprocess_register("nnc", preprocess);
 int main(int argc, char** argv) {
   c10::SetUsageMessage(
       "Run NNC AOT compiler for pytorch model. Example usage:\n"
-      "./nnc_aot_compiler"
+      "build/bin/aot_model_compiler"
       " --model=<model file>"
       " --model_name=<model name>"
       " --model_version=<model version>"
