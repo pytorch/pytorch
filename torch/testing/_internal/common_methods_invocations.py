@@ -5151,12 +5151,12 @@ def sample_inputs_nll_loss(op_info, device, dtype, requires_grad, **kwargs):
     shape_2d = (2, 3)
 
     input_shape_and_kwargs: List[Tuple[Tuple[int, ...], Dict[str, Any]]] = [
-        (shape_2d, dict()),
-        ((*shape_2d, 3, 3), dict()),
-        (shape_2d, dict(weight=True)),
-        (shape_2d, dict(ignore_index=1)),
-        (shape_2d, dict(reduction="mean")),
-        (shape_2d, dict(reduction="sum")),
+        # (shape_2d, dict()),
+        # ((*shape_2d, 3, 3), dict()),
+        # (shape_2d, dict(weight=True)),
+        # (shape_2d, dict(ignore_index=1)),
+        # (shape_2d, dict(reduction="mean")),
+        # (shape_2d, dict(reduction="sum")),
         (shape_2d, dict(reduction="none")),
     ]
 
