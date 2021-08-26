@@ -94,6 +94,8 @@ void boxed_reduction_batch_rule(const c10::OperatorHandle& op, torch::jit::Stack
   optional<int64_t> self_bdim;
   std::tie(self, self_bdim) = unwrapTensorAtLevel(arguments[0].toTensor(), cur_level);
 
+  self = moveBatchDimToFront(self, self_bdim);
+
   auto logical_dim = rankWithoutBatchDim(self, self_bdim);
   std::vector<int64_t> dims;
   ReductionCase reduction_case;
@@ -108,20 +110,28 @@ void boxed_reduction_batch_rule(const c10::OperatorHandle& op, torch::jit::Stack
     reduction_case = ReductionCase::Dim;
     dims = {arguments[dim_arg_pos].toInt()};
   } else if (arguments[dim_arg_pos].isNone())  {
-    reduction_case = ReductionCase::DimArray;
-    if (logical_dim == 0) {
+    auto param_type = schema.arguments()[dim_arg_pos].type()->expect<OptionalType>()->getElementType();
+    if (param_type->kind() == IntType::Kind) {
+      reduction_case = ReductionCase::Dim;
+      if (self.dim() > 1) {
+        self = self.flatten(1);
+      }
       dims = {0};
+    } else if (param_type->kind() == ListType::Kind) {
+      reduction_case = ReductionCase::DimArray;
+      if (logical_dim == 0) {
+        dims = {0};
+      } else {
+        auto all_dims = range(0, self.dim() - 1);
+        dims = std::vector<int64_t>(all_dims.begin(), all_dims.end());
+      }
     } else {
-      auto all_dims = range(0, self.dim() - 1);
-      dims = std::vector<int64_t>(all_dims.begin(), all_dims.end());
+      TORCH_INTERNAL_ASSERT(false, "Unexpected dtype found at dims");
     }
   } else{
     TORCH_INTERNAL_ASSERT(false, "Unexpected dtype found at dims");
-    // auto all_dims = range(0, self.dim() - 1);
-    // dims = std::vector<int64_t>(all_dims.begin(), all_dims.end());
   }
 
-  self = moveBatchDimToFront(self, self_bdim);
   VmapDimVector new_dims;
   new_dims.reserve(dims.size());
   for (auto dim: dims) {
@@ -290,6 +300,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   REDUCTION_BOXED(_fft_c2r);
   REDUCTION_BOXED(_fft_c2c);
   REDUCTION_BOXED(amax);
+  // REDUCTION_BOXED(aminmax); Currently fails due to inconsistent scalar semantics.
   REDUCTION_BOXED(amin);
   REDUCTION_BOXED(any.dim);
   VMAP_SUPPORT("argmax", SINGLE_ARG(argx_batch_rule<decltype(&at::argmax), &at::argmax>));
