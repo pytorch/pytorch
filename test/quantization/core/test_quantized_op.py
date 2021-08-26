@@ -3318,6 +3318,9 @@ class TestQuantizedEmbeddingOps(TestCase):
         if bit_rate == 4:
             pt_op = torch.ops.quantized.embedding_bag_4bit_rowwise_offsets
             pt_prepack_op = torch.ops.quantized.embedding_bag_4bit_prepack
+        elif bit_rate == 2:
+            pt_op = torch.ops.quantized.embedding_bag_2bit_rowwise_offsets
+            pt_prepack_op = torch.ops.quantized.embedding_bag_2bit_prepack
 
         weights = torch.from_numpy((np.random.random_sample((
             num_embeddings, embedding_dim)) + 1).astype(np.float32))
@@ -3482,6 +3485,33 @@ class TestQuantizedEmbeddingOps(TestCase):
                                                fallback_to_no_sparse,
                                                sparsity=sparsity,
                                                atol=0.1, rtol=1e-2)
+
+    """ Tests the correctness of the embedding_bag_2bit quantized operator """
+    @given(num_embeddings=st.integers(10, 100),
+           embedding_dim=st.integers(5, 50).filter(lambda x: x % 8 == 0),
+           num_offsets=st.integers(1, 20),
+           use_32bit_indices=st.booleans(),
+           use_32bit_offsets=st.booleans(),
+           enable_per_sample_weights=st.booleans(),
+           include_last_offset=st.booleans(),
+           fallback_to_no_sparse=st.booleans(),
+           sparsity=st.sampled_from([0.0, 0.5, 0.7]))
+    def test_embedding_bag_2bit(self, num_embeddings,
+                                embedding_dim, num_offsets,
+                                use_32bit_indices,
+                                use_32bit_offsets,
+                                enable_per_sample_weights,
+                                include_last_offset,
+                                fallback_to_no_sparse,
+                                sparsity):
+        self.embedding_bag_rowwise_offsets_run(2, num_embeddings,
+                                               embedding_dim, num_offsets,
+                                               use_32bit_indices, use_32bit_offsets,
+                                               enable_per_sample_weights,
+                                               include_last_offset,
+                                               fallback_to_no_sparse,
+                                               sparsity=sparsity,
+                                               atol=1.0, rtol=1e-1)
 
     """ Tests the correctness of the quantized embedding lookup operator """
     @given(num_embeddings=st.integers(10, 100),
