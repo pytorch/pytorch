@@ -883,6 +883,8 @@ which is in your home directory, **not** `/path/to/pytorch/.gdbinit`):
 add-auto-load-safe-path /path/to/pytorch/.gdbinit
 ```
 
+### C++ stacktraces
+Set `TORCH_SHOW_CPP_STACKTRACES=1` to get the C++ stacktrace when an error occurs in Python.
 
 ## CUDA development tips
 
