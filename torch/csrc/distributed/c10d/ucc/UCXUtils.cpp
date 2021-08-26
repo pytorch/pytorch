@@ -15,7 +15,7 @@ public:
   ucp_context_h get() const { return context; }
 };
 
-void request_init_callback(void* request) {
+void UCPContext::request_init_callback(void* request) {
   // This is a callback funtion used to initialize UCP context.
   // This function is only invoked the very first time when
   // a request memory is allocated. A request memory may be
