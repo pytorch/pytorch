@@ -472,7 +472,7 @@ void promoteInputs(std::vector<ExprHandle>& inputs, const int typeConstraints) {
       if (isIntegralType(highType, false) && isFloatingType(inputType)) {
         highType = c10::get_default_dtype_as_scalartype();
       } else if (highType == c10::kBool) {
-	highType = inputType;
+        highType = inputType;
       }
     } else {
       highType = promoteTypes(highType, inputType);
