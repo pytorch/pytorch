@@ -23,12 +23,14 @@
 // - Move `constexpr struct in_place_t {} in_place{}` to `c10/util/in_place.h`
 // so that it can also be used in `c10/util/variant.h`.
 // - Remove special cases for pre-c++14 compilers to make code simpler.
+// - Replace constexpr_forward and constexpr_move with std::forward and std::move
+// - Use _t variants of type_traits functions for improved readability
 
-#ifndef C10_UTIL_OPTIONAL_H_
-#define C10_UTIL_OPTIONAL_H_
+#pragma once
 
 #include <c10/macros/Macros.h>
 #include <c10/util/ArrayRef.h>
+#include <c10/util/Metaprogramming.h>
 #include <c10/util/in_place.h>
 
 #include <cassert>
@@ -39,10 +41,8 @@
 #include <type_traits>
 #include <utility>
 
-#include <c10/util/Metaprogramming.h>
-
 #define TR2_OPTIONAL_REQUIRES(...) \
-  typename std::enable_if<__VA_ARGS__::value, bool>::type = false
+  std::enable_if_t<__VA_ARGS__::value, bool> = false
 
 namespace c10 {
 
@@ -53,26 +53,6 @@ class optional;
 // 20.5.5, optional for lvalue reference types
 template <class T>
 class optional<T&>;
-
-// workaround: std utility functions aren't constexpr yet
-template <class T>
-inline constexpr T&& constexpr_forward(
-    typename std::remove_reference<T>::type& t) noexcept {
-  return static_cast<T&&>(t);
-}
-
-template <class T>
-inline constexpr T&& constexpr_forward(
-    typename std::remove_reference<T>::type&& t) noexcept {
-  static_assert(!std::is_lvalue_reference<T>::value, "!!");
-  return static_cast<T&&>(t);
-}
-
-template <class T>
-inline constexpr typename std::remove_reference<T>::type&& constexpr_move(
-    T&& t) noexcept {
-  return static_cast<typename std::remove_reference<T>::type&&>(t);
-}
 
 #if defined NDEBUG
 #define TR2_OPTIONAL_ASSERTED_EXPRESSION(CHECK, EXPR) (EXPR)
@@ -160,11 +140,10 @@ union storage_t {
   unsigned char dummy_;
   T value_;
 
-  constexpr storage_t(trivial_init_t) noexcept : dummy_(){};
+  constexpr storage_t(trivial_init_t) noexcept : dummy_() {}
 
   template <class... Args>
-  constexpr storage_t(Args&&... args)
-      : value_(constexpr_forward<Args>(args)...) {}
+  constexpr storage_t(Args&&... args) : value_(std::forward<Args>(args)...) {}
 
   ~storage_t() {}
 };
@@ -174,11 +153,11 @@ union constexpr_storage_t {
   unsigned char dummy_;
   T value_;
 
-  constexpr constexpr_storage_t(trivial_init_t) noexcept : dummy_(){};
+  constexpr constexpr_storage_t(trivial_init_t) noexcept : dummy_() {}
 
   template <class... Args>
   constexpr constexpr_storage_t(Args&&... args)
-      : value_(constexpr_forward<Args>(args)...) {}
+      : value_(std::forward<Args>(args)...) {}
 
   ~constexpr_storage_t() = default;
 };
@@ -188,7 +167,7 @@ struct optional_base {
   bool init_;
   storage_t<T> storage_;
 
-  constexpr optional_base() noexcept : init_(false), storage_(trivial_init){};
+  constexpr optional_base() noexcept : init_(false), storage_(trivial_init) {}
 
   explicit constexpr optional_base(const optional_base<T>& v)
       : init_(v.init_), storage_(trivial_init) {
@@ -196,8 +175,6 @@ struct optional_base {
       ::new (dataptr()) T(v.storage_.value_);
     }
   }
-
-  explicit constexpr optional_base(const T& v) : init_(true), storage_(v) {}
 
   explicit constexpr optional_base(optional_base<T>&& v) noexcept(
       std::is_nothrow_move_constructible<T>::value)
@@ -207,12 +184,14 @@ struct optional_base {
     }
   }
 
+  explicit constexpr optional_base(const T& v) : init_(true), storage_(v) {}
+
   explicit constexpr optional_base(T&& v)
-      : init_(true), storage_(constexpr_move(v)) {}
+      : init_(true), storage_(std::move(v)) {}
 
   template <class... Args>
   explicit optional_base(in_place_t, Args&&... args)
-      : init_(true), storage_(constexpr_forward<Args>(args)...) {}
+      : init_(true), storage_(std::forward<Args>(args)...) {}
 
   template <
       class U,
@@ -223,6 +202,11 @@ struct optional_base {
       std::initializer_list<U> il,
       Args&&... args)
       : init_(true), storage_(il, std::forward<Args>(args)...) {}
+
+  ~optional_base() {
+    if (init_)
+      storage_.value_.T::~T();
+  }
 
   optional_base& operator=(const optional_base& rhs) {
     if (init_ && !rhs.init_) {
@@ -250,11 +234,6 @@ struct optional_base {
     return *this;
   }
 
-  ~optional_base() {
-    if (init_)
-      storage_.value_.T::~T();
-  }
-
   constexpr bool initialized() const noexcept {
     return init_;
   }
@@ -264,7 +243,7 @@ struct optional_base {
   }
 
  private:
-  typename std::remove_const<T>::type* dataptr() {
+  std::remove_const_t<T>* dataptr() {
     return std::addressof(storage_.value_);
   }
 
@@ -286,7 +265,7 @@ struct constexpr_optional_base {
   constexpr_storage_t<T> storage_;
 
   constexpr constexpr_optional_base() noexcept
-      : init_(false), storage_(trivial_init){};
+      : init_(false), storage_(trivial_init) {}
 
   explicit constexpr constexpr_optional_base(
       const constexpr_optional_base<T>& v)
@@ -309,11 +288,11 @@ struct constexpr_optional_base {
       : init_(true), storage_(v) {}
 
   explicit constexpr constexpr_optional_base(T&& v)
-      : init_(true), storage_(constexpr_move(v)) {}
+      : init_(true), storage_(std::move(v)) {}
 
   template <class... Args>
   explicit constexpr constexpr_optional_base(in_place_t, Args&&... args)
-      : init_(true), storage_(constexpr_forward<Args>(args)...) {}
+      : init_(true), storage_(std::forward<Args>(args)...) {}
 
   template <
       class U,
@@ -356,12 +335,13 @@ struct constexpr_optional_base {
   constexpr bool initialized() const noexcept {
     return init_;
   }
+
   void setInitialized(bool init) noexcept {
     init_ = init;
   }
 
  private:
-  typename std::remove_const<T>::type* dataptr() {
+  std::remove_const_t<T>* dataptr() {
     return std::addressof(storage_.value_);
   }
 
@@ -389,13 +369,13 @@ struct trivially_copyable_optimization_optional_base {
       : init_(true), storage_(v) {}
 
   explicit constexpr trivially_copyable_optimization_optional_base(T&& v)
-      : init_(true), storage_(constexpr_move(v)) {}
+      : init_(true), storage_(std::move(v)) {}
 
   template <class... Args>
   explicit constexpr trivially_copyable_optimization_optional_base(
       in_place_t,
       Args&&... args)
-      : init_(true), storage_(constexpr_forward<Args>(args)...) {}
+      : init_(true), storage_(std::forward<Args>(args)...) {}
 
   template <
       class U,
@@ -412,6 +392,7 @@ struct trivially_copyable_optimization_optional_base {
   constexpr bool initialized() const noexcept {
     return init_;
   }
+
   void setInitialized(bool init) noexcept {
     init_ = init;
   }
@@ -426,37 +407,36 @@ struct trivially_copyable_optimization_optional_base {
 // section 3.2.3 of the System V ABI document
 // (https://www.uclibc.org/docs/psABI-x86_64.pdf).
 template <class ArrayRefT>
-class arrayref_optional_base {
- public:
+struct arrayref_optional_base {
+  using T = typename ArrayRefT::value_type;
+  using size_type = typename ArrayRefT::size_type;
+
   union storage {
     struct raw {
       // ArrayRef has the invariant that if Data is nullptr then
       // Length must be zero, so this is an unused bit pattern.
-      const void* p = nullptr;
-      size_t sz = 1;
-    } uninitialized_{};
+      const T* p{nullptr};
+      size_type sz{1};
+    } uninitialized_;
+
     ArrayRefT value_;
 
-    constexpr storage() noexcept : uninitialized_() {
-      setUninitialized();
-    }
+    constexpr storage() noexcept : uninitialized_() {}
 
-    constexpr void setUninitialized() noexcept {
-      uninitialized_.p = nullptr;
-      uninitialized_.sz = 1;
-    }
-
-    explicit constexpr storage(ArrayRefT& v) : value_(v) {}
+    explicit constexpr storage(const ArrayRefT& v) : value_(v) {}
 
     template <typename T>
     explicit constexpr storage(const std::initializer_list<T>& v) : value_(v) {}
 
     template <class... Args>
     explicit constexpr storage(Args&&... args)
-        : value_(constexpr_forward<Args>(args)...) {}
-  };
+        : value_(std::forward<Args>(args)...) {}
 
-  storage storage_;
+    constexpr void setUninitialized() noexcept {
+      uninitialized_.p = nullptr;
+      uninitialized_.sz = 1;
+    }
+  } storage_;
 
   constexpr arrayref_optional_base() noexcept = default;
 
@@ -464,7 +444,7 @@ class arrayref_optional_base {
 
   template <class... Args>
   explicit constexpr arrayref_optional_base(in_place_t, Args&&... args)
-      : storage_(constexpr_forward<Args>(args)...) {}
+      : storage_(std::forward<Args>(args)...) {}
 
   template <typename T>
   explicit constexpr arrayref_optional_base(
@@ -492,11 +472,13 @@ class arrayref_optional_base {
 };
 
 namespace detail_ {
+
 template <typename T>
 struct is_arrayref : std::false_type {};
 
 template <typename T>
 struct is_arrayref<c10::ArrayRef<T>> : std::true_type {};
+
 } // namespace detail_
 
 // CUDA 9.2 and below fail while trying to compile default move constructor
@@ -577,19 +559,17 @@ class optional : private OptionalBase<T> {
           optional_base<std::remove_const_t<U>>>>;
 #endif
 
-  static_assert(
-      !std::is_same<typename std::decay<T>::type, nullopt_t>::value,
-      "bad T");
-  static_assert(
-      !std::is_same<typename std::decay<T>::type, in_place_t>::value,
-      "bad T");
+  static_assert(!std::is_same<std::decay_t<T>, nullopt_t>::value, "bad T");
+  static_assert(!std::is_same<std::decay_t<T>, in_place_t>::value, "bad T");
 
   constexpr bool initialized() const noexcept {
     return OptionalBase<T>::initialized();
   }
-  typename std::remove_const<T>::type* dataptr() {
+
+  std::remove_const_t<T>* dataptr() {
     return std::addressof(OptionalBase<T>::storage_.value_);
   }
+
   constexpr const T* dataptr() const {
     return detail_::static_addressof(OptionalBase<T>::storage_.value_);
   }
@@ -597,16 +577,19 @@ class optional : private OptionalBase<T> {
   constexpr const T& contained_val() const& {
     return OptionalBase<T>::storage_.value_;
   }
+
   constexpr T&& contained_val() && {
     return std::move(OptionalBase<T>::storage_.value_);
   }
+
   constexpr T& contained_val() & {
     return OptionalBase<T>::storage_.value_;
   }
 
   void clear() noexcept {
-    if (initialized())
+    if (initialized()) {
       dataptr()->~T();
+    }
     OptionalBase<T>::setInitialized(false);
   }
 
@@ -630,8 +613,8 @@ class optional : private OptionalBase<T> {
   typedef T value_type;
 
   // 20.5.5.1, constructors
-  constexpr optional() noexcept : OptionalBase<T>(){};
-  constexpr optional(nullopt_t) noexcept : OptionalBase<T>(){};
+  constexpr optional() noexcept : OptionalBase<T>() {}
+  constexpr optional(nullopt_t) noexcept : OptionalBase<T>() {}
 
   optional(const optional& rhs) = default;
 
@@ -659,8 +642,8 @@ class optional : private OptionalBase<T> {
       typename U = T,
       TR2_OPTIONAL_REQUIRES(
           std::is_constructible<T, U&&>::value &&
-          !std::is_same<typename std::decay<U>::type, in_place_t>::value &&
-          !std::is_same<typename std::decay<U>::type, optional<T>>::value &&
+          !std::is_same<std::decay_t<U>, in_place_t>::value &&
+          !std::is_same<std::decay_t<U>, optional<T>>::value &&
           std::is_convertible<U&&, T>)>
   constexpr optional(U&& u) : OptionalBase<T>(std::forward<U>(u)) {}
 
@@ -669,14 +652,14 @@ class optional : private OptionalBase<T> {
       typename U = T,
       TR2_OPTIONAL_REQUIRES(
           std::is_constructible<T, U&&>::value &&
-          !std::is_same<typename std::decay<U>::type, in_place_t>::value &&
-          !std::is_same<typename std::decay<U>::type, optional<T>>::value &&
+          !std::is_same<std::decay_t<U>, in_place_t>::value &&
+          !std::is_same<std::decay_t<U>, optional<T>>::value &&
           !std::is_convertible<U&&, T>)>
   explicit constexpr optional(U&& u) : OptionalBase<T>(std::forward<U>(u)) {}
 
   template <class... Args>
   explicit constexpr optional(in_place_t, Args&&... args)
-      : OptionalBase<T>(in_place_t{}, constexpr_forward<Args>(args)...) {}
+      : OptionalBase<T>(in_place_t{}, std::forward<Args>(args)...) {}
 
   template <
       class U,
@@ -686,7 +669,7 @@ class optional : private OptionalBase<T> {
       in_place_t,
       std::initializer_list<U> il,
       Args&&... args)
-      : OptionalBase<T>(in_place_t{}, il, constexpr_forward<Args>(args)...) {}
+      : OptionalBase<T>(in_place_t{}, il, std::forward<Args>(args)...) {}
 
   // 20.5.4.2, Destructor
   ~optional() = default;
@@ -702,13 +685,13 @@ class optional : private OptionalBase<T> {
   optional& operator=(optional&& rhs) = default;
 
   template <class U = T>
-  auto operator=(U&& v) -> typename std::enable_if<
+  auto operator=(U&& v) -> std::enable_if_t<
       std::is_constructible<T, U>::value &&
-          !std::is_same<typename std::decay<U>::type, optional<T>>::value &&
+          !std::is_same<std::decay_t<U>, optional<T>>::value &&
           (std::is_scalar<T>::value ||
-           std::is_same<typename std::decay<U>::type, T>::value) &&
+           std::is_same<std::decay_t<U>, T>::value) &&
           std::is_assignable<T&, U>::value,
-      optional&>::type {
+      optional&> {
     if (initialized()) {
       contained_val() = std::forward<U>(v);
     } else {
@@ -750,6 +733,7 @@ class optional : private OptionalBase<T> {
   explicit constexpr operator bool() const noexcept {
     return initialized();
   }
+
   constexpr bool has_value() const noexcept {
     return initialized();
   }
@@ -774,7 +758,7 @@ class optional : private OptionalBase<T> {
 
   TR2_OPTIONAL_HOST_CONSTEXPR T&& operator*() && {
     assert(initialized());
-    return constexpr_move(contained_val());
+    return std::move(contained_val());
   }
 
   TR2_OPTIONAL_HOST_CONSTEXPR T const& value() const& {
@@ -797,14 +781,13 @@ class optional : private OptionalBase<T> {
 
   template <class V>
   constexpr T value_or(V&& v) const& {
-    return *this ? **this : detail_::convert<T>(constexpr_forward<V>(v));
+    return *this ? **this : detail_::convert<T>(std::forward<V>(v));
   }
 
   template <class V>
   constexpr T value_or(V&& v) && {
-    return *this
-        ? constexpr_move(const_cast<optional<T>&>(*this).contained_val())
-        : detail_::convert<T>(constexpr_forward<V>(v));
+    return *this ? std::move(const_cast<optional<T>&>(*this).contained_val())
+                 : detail_::convert<T>(std::forward<V>(v));
   }
 
   // 20.6.3.6, modifiers
@@ -830,7 +813,7 @@ constexpr T value_or_else(optional<T>&& v, F&& func) {
           typename guts::infer_function_traits_t<F>::return_type,
           T>::value,
       "func parameters must be a callable that returns a type convertible to the value stored in the optional");
-  return v.has_value() ? constexpr_move(std::move(v).contained_val())
+  return v.has_value() ? std::move(std::move(v).contained_val())
                        : detail_::convert<T>(std::forward<F>(func)());
 }
 
@@ -894,17 +877,17 @@ class optional<T&> {
   // }
 
   template <typename U>
-  auto operator=(U&& rhs) noexcept -> typename std::enable_if<
-      std::is_same<typename std::decay<U>::type, optional<T&>>::value,
-      optional&>::type {
+  auto operator=(U&& rhs) noexcept -> std::enable_if_t<
+      std::is_same<std::decay_t<U>, optional<T&>>::value,
+      optional&> {
     ref = rhs.ref;
     return *this;
   }
 
   template <typename U>
-  auto operator=(U&& rhs) noexcept -> typename std::enable_if<
-      !std::is_same<typename std::decay<U>::type, optional<T&>>::value,
-      optional&>::type = delete;
+  auto operator=(U&& rhs) noexcept -> std::enable_if_t<
+      !std::is_same<std::decay_t<U>, optional<T&>>::value,
+      optional&> = delete;
 
   void emplace(T& v) noexcept {
     ref = detail_::static_addressof(v);
@@ -939,10 +922,9 @@ class optional<T&> {
   }
 
   template <class V>
-  constexpr typename std::decay<T>::type value_or(V&& v) const {
+  constexpr std::decay_t<T> value_or(V&& v) const {
     return *this ? **this
-                 : detail_::convert<typename std::decay<T>::type>(
-                       constexpr_forward<V>(v));
+                 : detail_::convert<std::decay_t<T>>(std::forward<V>(v));
   }
 
   // x.x.x.x, modifiers
@@ -1238,13 +1220,13 @@ void swap(optional<T>& x, optional<T>& y) noexcept(noexcept(x.swap(y))) {
 }
 
 template <class T>
-constexpr optional<typename std::decay<T>::type> make_optional(T&& v) {
-  return optional<typename std::decay<T>::type>(constexpr_forward<T>(v));
+constexpr optional<std::decay_t<T>> make_optional(T&& v) {
+  return optional<std::decay_t<T>>(std::forward<T>(v));
 }
 
-template <class X>
-constexpr optional<X&> make_optional(std::reference_wrapper<X> v) {
-  return optional<X&>(v.get());
+template <class T>
+constexpr optional<T&> make_optional(std::reference_wrapper<T> v) {
+  return optional<T&>(v.get());
 }
 
 } // namespace c10
@@ -1274,5 +1256,3 @@ struct hash<c10::optional<T&>> {
 #undef TR2_OPTIONAL_REQUIRES
 #undef TR2_OPTIONAL_ASSERTED_EXPRESSION
 #undef TR2_OPTIONAL_HOST_CONSTEXPR
-
-#endif // C10_UTIL_OPTIONAL_H_
