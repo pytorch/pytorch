@@ -202,7 +202,7 @@ class TestCreateTensorFromParams(TestCase):
         self.assertEqual(expected_tensor, local_tensor)
 
     @sandcastle_skip_if(torch.cuda.device_count() < 1, 'CUDA GPU is needed')
-    def test_full(self):
+    def test_full_with_dtype_inferred(self):
         fill_value = 23.5
         tensor_properties = TensorProperties(
             # tensor's dtype can be inferred from fill_value
@@ -223,6 +223,30 @@ class TestCreateTensorFromParams(TestCase):
         # local_tensor.dtype is inferred from fill_value (float32).
         self.assertEqual(torch.float32, local_tensor.dtype)
         expected_tensor = torch.full((h, w), fill_value=fill_value, device=local_device)
+        self.assertEqual(expected_tensor, local_tensor)
+
+    @sandcastle_skip_if(torch.cuda.device_count() < 1, 'CUDA GPU is needed')
+    def test_full_with_dtype_overridden(self):
+        fill_value = 23.5
+        tensor_properties = TensorProperties(
+            # tensor's dtype can be inferred from fill_value
+            dtype=torch.double,
+            layout=torch.strided,
+            requires_grad=False,
+            pin_memory=False,
+            memory_format=torch.contiguous_format,
+        )
+        tensor_init_params = TensorInitParams(
+            create_op=CreateOp.FULL,
+            fill_value=fill_value,
+            tensor_properties=tensor_properties, )
+        local_device = torch.device('cuda:0')
+        h, w = 5, 10
+        local_tensor = _create_tensor_from_params(
+            h, w, local_device=local_device, tensor_init_params=tensor_init_params)
+        # local_tensor.dtype is overridden.
+        self.assertEqual(torch.double, local_tensor.dtype)
+        expected_tensor = torch.full((h, w), fill_value=fill_value, device=local_device, dtype=torch.double)
         self.assertEqual(expected_tensor, local_tensor)
 
 class TestShardedTensorChunked(ShardedTensorTestBase, MultiProcessTestCase):
@@ -453,6 +477,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase, MultiProcessTestCase):
         self.assertEqual((expected_h, w), local_shard.size())
         self.assertEqual(local_shard,
                          torch.full(size=(expected_h, w), fill_value=fill_value, dtype=torch.int32))
+
 
     @with_comms
     @skip_if_lt_x_gpu(4)
