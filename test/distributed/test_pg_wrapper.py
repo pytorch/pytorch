@@ -20,7 +20,6 @@ from torch.testing._internal.common_distributed import (
 )
 from torch.testing._internal.common_utils import (
     run_tests,
-    TEST_WITH_TSAN,
     TEST_WITH_DEV_DBG_ASAN,
 )
 
@@ -28,11 +27,7 @@ from torch.testing._internal.common_utils import (
 class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
     def setUp(self):
         super(AbstractProcessGroupWrapperTest, self).setUp()
-        # For Windows platform, Python does not support fork, change it to spawn here.
-        if sys.platform == "win32":
-            self._spawn_processes()
-        else:
-            self._fork_processes()
+        self._spawn_processes()
 
     def _validate_error(self, exception, op_type, rank, tensor):
         err = str(exception)
@@ -291,91 +286,89 @@ if not TEST_WITH_DEV_DBG_ASAN:
             self._test_collective_shape_mismatch(pg, use_cuda=True)
 
 
-# TSAN is not fork-safe since we're forking in a multi-threaded environment
-if not TEST_WITH_TSAN:
-    @requires_gloo()
-    class ProcessGroupGlooWrapperTest(AbstractProcessGroupWrapperTest):
-        def setUp(self):
-            super(ProcessGroupGlooWrapperTest, self).setUp()
+@requires_gloo()
+class ProcessGroupGlooWrapperTest(AbstractProcessGroupWrapperTest):
+    def setUp(self):
+        super(ProcessGroupGlooWrapperTest, self).setUp()
 
-        def opts(self, threads=2, timeout=10.0):
-            opts = c10d.ProcessGroupGloo._Options()
-            opts._timeout = timeout
-            opts._devices = [create_device(interface=LOOPBACK)]
-            opts._threads = threads
-            return opts
+    def opts(self, threads=2, timeout=10.0):
+        opts = c10d.ProcessGroupGloo._Options()
+        opts._timeout = timeout
+        opts._devices = [create_device(interface=LOOPBACK)]
+        opts._threads = threads
+        return opts
 
-        def _create_wrapper_pg(self, with_new_group=False, timeout=10.0):
-            store = c10d.FileStore(self.file_name, self.world_size)
-            c10d.init_process_group(
-                backend="gloo", rank=self.rank, world_size=self.world_size, store=store
+    def _create_wrapper_pg(self, with_new_group=False, timeout=10.0):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        c10d.init_process_group(
+            backend="gloo", rank=self.rank, world_size=self.world_size, store=store
+        )
+        if with_new_group:
+            pg = c10d.new_group(backend="gloo")
+        else:
+            _pg = c10d.ProcessGroupGloo(
+                store, self.rank, self.world_size, self.opts(timeout=timeout)
             )
-            if with_new_group:
-                pg = c10d.new_group(backend="gloo")
-            else:
-                _pg = c10d.ProcessGroupGloo(
-                    store, self.rank, self.world_size, self.opts(timeout=timeout)
-                )
-                pg = c10d._create_process_group_wrapper(
-                    _pg,
-                    "unused",
-                    store,
-                    self.rank,
-                    self.world_size,
-                    timeout=timeout,
-                )
-            return pg
+            pg = c10d._create_process_group_wrapper(
+                _pg,
+                "unused",
+                store,
+                self.rank,
+                self.world_size,
+                timeout=timeout,
+            )
+        return pg
 
-        def test_collective_hang(self):
-            pg = self._create_wrapper_pg(timeout=2.0)
-            self._test_collective_hang(pg)
+    def test_collective_hang(self):
+        pg = self._create_wrapper_pg(timeout=2.0)
+        self._test_collective_hang(pg)
 
-        # NOTE: these tests are separated by debug level instead of combined into
-        # one due to https://github.com/pytorch/pytorch/issues/55967, they can be
-        # combined after that is resolved.
-        @with_dist_debug_levels(levels=["DETAIL"])
-        def test_collectives_op_mismatch_debug_mode(self):
-            pg = self._create_wrapper_pg(with_new_group=True)
-            self._test_collectives_op_mismatch(pg)
+    # NOTE: these tests are separated by debug level instead of combined into
+    # one due to https://github.com/pytorch/pytorch/issues/55967, they can be
+    # combined after that is resolved.
+    @with_dist_debug_levels(levels=["DETAIL"])
+    def test_collectives_op_mismatch_debug_mode(self):
+        pg = self._create_wrapper_pg(with_new_group=True)
+        self._test_collectives_op_mismatch(pg)
 
-        @with_dist_debug_levels(levels=["OFF"])
-        def test_collectives_op_mismatch(self):
-            pg = self._create_wrapper_pg(with_new_group=False)
-            self._test_collectives_op_mismatch(pg)
+    @with_dist_debug_levels(levels=["OFF"])
+    def test_collectives_op_mismatch(self):
+        pg = self._create_wrapper_pg(with_new_group=False)
+        self._test_collectives_op_mismatch(pg)
 
-        @with_dist_debug_levels(levels=["DETAIL"])
-        def test_collective_shape_mismatch_debug_mode(self):
-            pg = self._create_wrapper_pg(with_new_group=True)
-            self._test_collective_shape_mismatch(pg)
+    @with_dist_debug_levels(levels=["DETAIL"])
+    def test_collective_shape_mismatch_debug_mode(self):
+        pg = self._create_wrapper_pg(with_new_group=True)
+        self._test_collective_shape_mismatch(pg)
 
-        @with_dist_debug_levels(levels=["OFF"])
-        def test_collective_shape_mismatch(self):
-            pg = self._create_wrapper_pg(with_new_group=False)
-            self._test_collective_shape_mismatch(pg)
+    @with_dist_debug_levels(levels=["OFF"])
+    def test_collective_shape_mismatch(self):
+        pg = self._create_wrapper_pg(with_new_group=False)
+        self._test_collective_shape_mismatch(pg)
 
-        @skip_if_lt_x_gpu(4)
-        @with_dist_debug_levels(levels=["DETAIL"])
-        def test_collectives_op_mismatch_cuda_debug_mode(self):
-            pg = self._create_wrapper_pg(with_new_group=True)
-            self._test_collectives_op_mismatch(pg, use_cuda=True)
+    @skip_if_lt_x_gpu(4)
+    @with_dist_debug_levels(levels=["DETAIL"])
+    def test_collectives_op_mismatch_cuda_debug_mode(self):
+        pg = self._create_wrapper_pg(with_new_group=True)
+        self._test_collectives_op_mismatch(pg, use_cuda=True)
 
-        @skip_if_lt_x_gpu(4)
-        @with_dist_debug_levels(levels=["OFF"])
-        def test_collectives_op_mismatch_cuda(self):
-            pg = self._create_wrapper_pg(with_new_group=False)
-            self._test_collectives_op_mismatch(pg, use_cuda=True)
+    @skip_if_lt_x_gpu(4)
+    @with_dist_debug_levels(levels=["OFF"])
+    def test_collectives_op_mismatch_cuda(self):
+        pg = self._create_wrapper_pg(with_new_group=False)
+        self._test_collectives_op_mismatch(pg, use_cuda=True)
 
-        @skip_if_lt_x_gpu(4)
-        @with_dist_debug_levels(levels=["DETAIL"])
-        def test_collective_shape_mismatch_cuda_debug_mode(self):
-            pg = self._create_wrapper_pg(with_new_group=True)
-            self._test_collective_shape_mismatch(pg, use_cuda=True)
+    @skip_if_lt_x_gpu(4)
+    @with_dist_debug_levels(levels=["DETAIL"])
+    def test_collective_shape_mismatch_cuda_debug_mode(self):
+        pg = self._create_wrapper_pg(with_new_group=True)
+        self._test_collective_shape_mismatch(pg, use_cuda=True)
 
-        @skip_if_lt_x_gpu(4)
-        @with_dist_debug_levels(levels=["OFF"])
-        def test_collective_shape_mismatch_cuda(self):
-            pg = self._create_wrapper_pg(with_new_group=False)
-            self._test_collective_shape_mismatch(pg, use_cuda=True)
+    @skip_if_lt_x_gpu(4)
+    @with_dist_debug_levels(levels=["OFF"])
+    def test_collective_shape_mismatch_cuda(self):
+        pg = self._create_wrapper_pg(with_new_group=False)
+        self._test_collective_shape_mismatch(pg, use_cuda=True)
 
 
 if __name__ == "__main__":

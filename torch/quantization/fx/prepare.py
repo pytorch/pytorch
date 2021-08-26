@@ -15,7 +15,7 @@ from torch.fx.graph import (
 )
 from torch.fx.node import Argument
 
-from ..qconfig import QConfigAny, qconfig_function_equality
+from ..qconfig import QConfigAny, qconfig_equals
 from .qconfig_utils import (
     convert_dict_to_ordered_dict,
     generate_qconfig_map,
@@ -87,7 +87,7 @@ from ..utils import (
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 def is_activation_post_process_node(node: Node, modules: Dict[str, torch.nn.Module]) -> bool:
-    return node.op == "call_module" and \
+    return isinstance(node, torch.fx.Node) and node.op == "call_module" and \
         is_activation_post_process(modules[str(node.target)])
 
 def node_arg_is_weight(node: Node, arg: Any) -> bool:
@@ -195,7 +195,7 @@ def update_qconfig_for_fusion(
                     # Raise an error if the modules in the fused module have
                     # different qconfigs specified in the qconfig_dict
                     for op in ops:
-                        if not qconfig_function_equality(object_type_dict.get(op, None), fused_qconfig):
+                        if not qconfig_equals(object_type_dict.get(op, None), fused_qconfig):
                             raise LookupError("During fusion, we need to specify the same " +
                                               f"qconfigs for both modules in {module_type}.")
 
@@ -772,6 +772,8 @@ def maybe_make_input_output_share_observers(
     # we need to navigate up to the first observer
     iteration_guard = 0
     while not is_activation_post_process_node(first_arg_arg, modules):
+        if not isinstance(first_arg_arg, Node):
+            return False
         # did not find an activation_post_process for the op
         if first_arg_arg.op == "placeholder":
             return False

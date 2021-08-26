@@ -1028,8 +1028,6 @@ if __name__ == '__main__':
                 'include/THC/*.cuh',
                 'include/THC/*.h*',
                 'include/THC/generic/*.h',
-                'include/THCUNN/*.cuh',
-                'include/THCUNN/generic/*.h',
                 'include/THH/*.cuh',
                 'include/THH/*.h*',
                 'include/THH/generic/*.h',
