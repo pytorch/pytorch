@@ -122,7 +122,7 @@ static inline bool miopen_conv_use_channels_last(const at::Tensor& input, const 
   auto weight_memory_format = weight.suggest_memory_format();
 
   bool can_use_miopen_channels_last_2d = false;
-#if defined(__HIP_PLATFORM_HCC__) && (TORCH_HIP_VERSION >= 403)
+#if defined(USE_ROCM) && (ROCM_VERSION >= 40300)
   can_use_miopen_channels_last_2d = PYTORCH_MIOPEN_SUGGEST_NHWC &&  *PYTORCH_MIOPEN_SUGGEST_NHWC && (
             ( (input_memory_format  == at::MemoryFormat::ChannelsLast) ||
             (weight_memory_format == at::MemoryFormat::ChannelsLast) )
