@@ -30,7 +30,7 @@ class DeterminationTest(unittest.TestCase):
         return [
             test
             for test in cls.TESTS
-            if run_test.should_run_test(run_test.TARGET_DET_LIST, test, changed_files, DummyOptions())
+            if run_test.determine_target(run_test.TARGET_DET_LIST, test, changed_files, DummyOptions())
         ]
 
     def test_config_change_only(self):

@@ -87,7 +87,7 @@ lazy.)
 
 
 ```bash
-conda uninstall pytorch -y
+conda -y uninstall pytorch
 yes | pip uninstall torch
 ```
 
@@ -780,8 +780,6 @@ python setup.py develop
 If you are editing a single file and rebuilding in a tight loop, the time spent
 linking will dominate. The system linker available in most Linux distributions
 (GNU `ld`) is quite slow. Use a faster linker, like [lld](https://lld.llvm.org/).
-
-People on Mac, follow [this guide](https://stackoverflow.com/questions/42730345/how-to-install-llvm-for-mac) instead.
 
 The easiest way to use `lld` this is download the
 [latest LLVM binaries](http://releases.llvm.org/download.html#8.0.0) and run:
