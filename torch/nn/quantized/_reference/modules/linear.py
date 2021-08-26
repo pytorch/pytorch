@@ -23,7 +23,6 @@ class Linear(nn.Linear):
             dtype: Optional[torch.dtype] = None,
             weight_qparams: Optional[Dict[str, Any]] = None):
         super().__init__(in_features, out_features, bias_, device, dtype)
-        factory_kwargs = {"device": device}
         if weight_qparams is None:
             weight_qparams = {
                 "qscheme": torch.per_tensor_affine,
@@ -38,21 +37,21 @@ class Linear(nn.Linear):
         if self.weight_qscheme is not None:
             self.register_buffer(
                 "weight_scale",
-                torch.tensor(weight_qparams["scale"], dtype=torch.float, **factory_kwargs))
+                torch.tensor(weight_qparams["scale"], dtype=torch.float, device=device))
             self.register_buffer(
                 "weight_zero_point",
                 torch.tensor(
                     weight_qparams["zero_point"],
-                    dtype=torch.int, **factory_kwargs))
+                    dtype=torch.int, device=device))
             if self.weight_qscheme == torch.per_channel_affine:
                 self.register_buffer(
                     "weight_axis",
-                    torch.tensor(weight_qparams["axis"], dtype=torch.int, **factory_kwargs))
+                    torch.tensor(weight_qparams["axis"], dtype=torch.int, device=device))
             else:
                 # added for TorchScriptability, not used
                 self.register_buffer(
                     "weight_axis",
-                    torch.tensor(0, dtype=torch.int, **factory_kwargs))
+                    torch.tensor(0, dtype=torch.int, device=device))
 
     def _get_name(self):
         return "QuantizedLinear(Reference)"

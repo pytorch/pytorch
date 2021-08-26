@@ -85,7 +85,7 @@ class Conv1d(_ConvNd, nn.Conv1d):
         nn.Conv1d.__init__(
             self, in_channels, out_channels, kernel_size, stride, padding, dilation,
             groups, bias, padding_mode, device, dtype)
-        self._init_weight_qparams(weight_qparams)
+        self._init_weight_qparams(weight_qparams, device)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -137,7 +137,7 @@ class Conv2d(_ConvNd, nn.Conv2d):
         nn.Conv2d.__init__(
             self, in_channels, out_channels, kernel_size, stride, padding, dilation,
             groups, bias, padding_mode, device, dtype)
-        self._init_weight_qparams(weight_qparams)
+        self._init_weight_qparams(weight_qparams, device)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -189,7 +189,7 @@ class Conv3d(_ConvNd, nn.Conv3d):
         nn.Conv3d.__init__(
             self, in_channels, out_channels, kernel_size, stride, padding, dilation,
             groups, bias, padding_mode)
-        self._init_weight_qparams(weight_qparams)
+        self._init_weight_qparams(weight_qparams, device)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
