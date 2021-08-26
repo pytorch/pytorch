@@ -607,10 +607,6 @@ def max_pool1d_with_indices(
     return_indices: bool = False
 ) -> Tuple[Tensor, Tensor]:
     r"""
-    max_pool1d(input: Tensor, kernel_size: BroadcastingList1[int], stride: Optional[BroadcastingList1[int]] = None,
-               padding: BroadcastingList1[int] = 0, dilation: BroadcastingList1[int] = 1, ceil_mode: bool = False,
-               return_indices: bool=False)
-
     Applies a 1D max pooling over an input signal composed of several input
     planes.
 
@@ -694,10 +690,6 @@ def max_pool2d_with_indices(
     return_indices: bool = False
 ) -> Tuple[Tensor, Tensor]:
     r"""
-    max_pool2d(input: Tensor, kernel_size: BroadcastingList2[int], stride: Optional[BroadcastingList2[int]] = None,
-               padding: BroadcastingList2[int] = 0, dilation: BroadcastingList2[int] = 1, ceil_mode: bool = False,
-               return_indices: bool=False)
-
     Applies a 2D max pooling over an input signal composed of several input
     planes.
 
@@ -781,10 +773,6 @@ def max_pool3d_with_indices(
     return_indices: bool = False
 ) -> Tuple[Tensor, Tensor]:
     r"""
-    max_pool3d(input: Tensor, kernel_size: BroadcastingList3[int], stride: Optional[BroadcastingList3[int]] = None,
-               padding: BroadcastingList3[int] = 0, dilation: BroadcastingList3[int] = 1, ceil_mode: bool = False,
-               return_indices: bool=False)
-
     Applies a 3D max pooling over an input signal composed of several input
     planes.
 
