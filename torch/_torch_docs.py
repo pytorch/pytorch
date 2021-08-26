@@ -10865,11 +10865,11 @@ elements :math:`{x_0, x_1, ..., x_n}`, the computation becomes
         \sum_{i = 1}^{n-1} \frac{(x_i - x_{i-1})}{2} (y_i + y_{i-1})
     \end{aligned}
 
-When :attr:`y` is two or more dimensions, this computation is performed independently
-along dimension :attr:`dim`. If :attr:`x` is also specified and is one-dimensional,
-then that dimension defines the spacing for each computation.
-If :attr:`x` is also specified and is not one-dimensional, then it is broadcast to
-the shape of :attr:`y` and the corresponding sizes are used for each computation.
+The broadcasting behavior of this function is as follows. First, for both :attr:`x`
+and :attr:`y`, the function computes the difference between consecutive elements along
+dimension :attr:`dim`. This effectively creates two tensors, `x_diff` and `y_diff`, that have
+the same shape as the original tensors except their lengths along the dimension :attr:`dim` is reduced by 1.
+After that, those two tensors are broadcasted together to compute final output as part of the trapezoidal rule.
 See the examples below for details.
 
 .. note::

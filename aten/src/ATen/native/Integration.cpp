@@ -53,6 +53,14 @@ Tensor do_cumulative_trapezoid(const Tensor& y, double dx, int64_t dim) {
     return (dx /2. * (left + right)).cumsum(dim);
 }
 
+DimVector add_padding(IntArrayRef curr_shape, int64_t target_size) {
+    DimVector new_sizes(target_size, 1);
+    for (int i = 0; i < curr_shape.size(); i++) {
+        new_sizes[target_size-i-1] = curr_shape[curr_shape.size()-i-1];
+    }
+    return new_sizes;
+}
+
 }
 
 Tensor trapezoid(const Tensor& y, const Tensor& x, int64_t dim) {
@@ -71,9 +79,15 @@ Tensor trapezoid(const Tensor& y, const Tensor& x, int64_t dim) {
         // Note: This behavior differs from numpy in that numpy tries to
         // broadcast 'dx', but this tries to broadcast 'x' to match 'y' instead.
         TORCH_CHECK(x.size(0) == y.size(dim), "trapezoid: There must be one `x` value for each sample point");
-        DimVector sizes(y.dim(), 1);
-        sizes[dim] = x.size(0);
-        x_viewed = x.view(sizes);
+        DimVector new_sizes(y.dim(), 1); // shape = [1] * y.
+        new_sizes[dim] = x.size(0); // shape[axis] = d.shape[0]
+        x_viewed = x.view(new_sizes);
+    } else if (x.dim() < y.dim()) {
+        // When 'y' has more dimension than 'x', this step takes 'x' with dimension (n_1, n_2, ...),
+        // and add '1's as dimensions in front to become (1, 1, ..., n_1, n_2), matching the dimension of 'y'.
+        // This allows the subsequent slicing operations to proceed with any 'dim' without going out of bound.
+        DimVector new_sizes = add_padding(x.sizes(), y.dim());
+        x_viewed = x.view(new_sizes);
     } else {
         x_viewed = x;
     }
@@ -110,9 +124,12 @@ Tensor cumulative_trapezoid(const Tensor& y, const Tensor& x, int64_t dim) {
     Tensor x_viewed;
     if (x.dim() == 1) {
         TORCH_CHECK(x.size(0) == y.size(dim), "cumulative_trapezoid: There must be one `x` value for each sample point");
-        DimVector sizes(y.dim(), 1); // shape = [1] * y.
-        sizes[dim] = x.size(0); // shape[axis] = d.shape[0]
-        x_viewed = x.view(sizes);
+        DimVector new_sizes(y.dim(), 1); // shape = [1] * y.
+        new_sizes[dim] = x.size(0); // shape[axis] = d.shape[0]
+        x_viewed = x.view(new_sizes);
+    } else if (x.dim() < y.dim()) {
+        DimVector new_sizes = add_padding(x.sizes(), y.dim());
+        x_viewed = x.view(new_sizes);
     } else {
         x_viewed = x;
     }
