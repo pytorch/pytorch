@@ -280,4 +280,6 @@ struct TORCH_API NCCLProcessGroupProvider {
 TORCH_API void registerNCCLProcessGroupProvider(
     NCCLProcessGroupProvider* provider);
 
+TORCH_API void initCustomClassBindings();
+
 } // namespace c10d

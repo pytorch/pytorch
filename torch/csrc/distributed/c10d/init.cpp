@@ -17,6 +17,7 @@
 
 #ifdef USE_C10D_NCCL
 #include <c10d/ProcessGroupNCCL.hpp>
+#include <torch/csrc/distributed/c10d/frontend_cuda.hpp>
 #endif
 
 #ifdef USE_C10D_MPI
@@ -229,6 +230,10 @@ void _register_builtin_comm_hook(
 
 PyObject* c10d_init(PyObject* _unused, PyObject* noargs) {
   C10_LOG_API_USAGE_ONCE("c10d.python.import");
+  ::c10d::initCustomClassBindings();
+#ifdef USE_C10D_NCCL
+  ::c10d::initCustomClassBindingsNccl();
+#endif
 
   auto c10d_module = THPObjectPtr(PyImport_ImportModule("torch.distributed"));
   if (!c10d_module) {
