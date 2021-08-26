@@ -65,13 +65,13 @@ def EnsureNonBlockingDataPipe(validated_datapipe):
             if self._as_iterator is None:
                 self._as_iterator = iter(self)
             return next(self._as_iterator)
-        validated_datapipe.nonblocking_next = types.MethodType(
-            nonblocking_next, validated_datapipe)  # type: ignore[attr-defined]
+        validated_datapipe.nonblocking_next = types.MethodType(  # type: ignore[attr-defined]
+            nonblocking_next, validated_datapipe)
     if not hasattr(validated_datapipe, 'reset_iterator'):
         def reset_iterator(self):
             self._as_iterator = None
-        validated_datapipe.reset_iterator = types.MethodType(
-            reset_iterator, validated_datapipe)  # type: ignore[attr-defined]
+        validated_datapipe.reset_iterator = types.MethodType(  # type: ignore[attr-defined]
+            reset_iterator, validated_datapipe)
     return validated_datapipe
 
 

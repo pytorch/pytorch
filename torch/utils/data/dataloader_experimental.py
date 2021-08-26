@@ -2,6 +2,8 @@
 import functools
 import time
 
+from typing import Any
+
 import torch.utils.data.backward_compatibility
 import torch.utils.data.sharding
 from torch.utils.data import DataLoader, IterDataPipe, communication
@@ -9,7 +11,6 @@ from torch.utils.data.datapipes.iter import IterableAsDataPipe
 
 
 class _ThreadingDataLoader2:
-    known_dataloaders = {}
 
     def __init__(self, datapipe, num_workers=0, collate_fn=None):
         self.threads = []
@@ -25,7 +26,6 @@ class _ThreadingDataLoader2:
             self.datapipes.append(local_datapipe)
 
     def __iter__(self):
-        exclude_datapipes = []
         not_available = False
         forever = True
         while len(exclude_datapipes) < len(self.datapipes):
@@ -73,6 +73,7 @@ class DataLoader2:
                 batch_outside_worker=False,
                 parallelism_mode='mp'):
         if isinstance(dataset, IterDataPipe):
+            data_loader: Any = None
             if batch_sampler is not None:
                 raise Exception(
                     'batch_sampler is not yet supported by DataPipes')
