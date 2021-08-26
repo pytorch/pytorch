@@ -479,7 +479,7 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
     body: List[str] = []
 
     if uses_single_grad(info):
-        body.append('auto& grad = grads[0];')
+        body.append('const auto& grad = grads[0];')
     else:
         # Generate aliases for gradients named for returned values.
         body.extend(
