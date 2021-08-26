@@ -8,7 +8,7 @@ import doctest
 import inspect
 
 from torch.testing._internal.common_utils import \
-    (TestCase, run_tests, TEST_NUMPY, TEST_LIBROSA, TEST_MKL, TEST_SCIPY)
+    (TestCase, run_tests, TEST_NUMPY, TEST_LIBROSA, TEST_MKL)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, onlyOnCPUAndCUDA,
      skipCPUIfNoFFT, deviceCountAtLeast, onlyCUDA, OpDTypes, skipIf)
@@ -25,8 +25,19 @@ if TEST_NUMPY:
 if TEST_LIBROSA:
     import librosa
 
-if TEST_SCIPY:
+has_scipy_fft = False
+try:
     import scipy.fft
+    has_scipy_fft = True
+except ModuleNotFoundError:
+    pass
+
+LooseVersion = distutils.version.LooseVersion
+REFERENCE_NORM_MODES = (
+    (None, "forward", "backward", "ortho")
+    if LooseVersion(np.__version__) >= '1.20.0' and (
+        not has_scipy_fft or LooseVersion(scipy.__version__) >= '1.6.0')
+    else (None, "ortho"))
 
 
 def _complex_stft(x, *args, **kwargs):
@@ -193,9 +204,10 @@ class TestFFT(TestCase):
     @onlyOnCPUAndCUDA
     @ops([op for op in spectral_funcs if not op.ndimensional])
     def test_reference_1d(self, device, dtype, op):
-        norm_modes = ((None, "forward", "backward", "ortho")
-                      if distutils.version.LooseVersion(np.__version__) >= '1.20.0'
-                      else (None, "ortho"))
+        if op.ref is None:
+            raise unittest.SkipTest("No reference implementation")
+
+        norm_modes = REFERENCE_NORM_MODES
         test_args = [
             *product(
                 # input
@@ -346,9 +358,10 @@ class TestFFT(TestCase):
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @ops([op for op in spectral_funcs if op.ndimensional])
     def test_reference_nd(self, device, dtype, op):
-        norm_modes = ((None, "forward", "backward", "ortho")
-                      if distutils.version.LooseVersion(np.__version__) >= '1.20.0'
-                      else (None, "ortho"))
+        if op.ref is None:
+            raise unittest.SkipTest("No reference implementation")
+
+        norm_modes = REFERENCE_NORM_MODES
 
         # input_ndim, s, dim
         transform_desc = [
@@ -517,9 +530,7 @@ class TestFFT(TestCase):
     @onlyOnCPUAndCUDA
     @dtypes(torch.double, torch.complex128)
     def test_fft2_numpy(self, device, dtype):
-        norm_modes = ((None, "forward", "backward", "ortho")
-                      if distutils.version.LooseVersion(np.__version__) >= '1.20.0'
-                      else (None, "ortho"))
+        norm_modes = REFERENCE_NORM_MODES
 
         # input_ndim, s
         transform_desc = [
@@ -536,7 +547,7 @@ class TestFFT(TestCase):
             for fname, norm in product(fft_functions, norm_modes):
                 torch_fn = getattr(torch.fft, fname)
                 if "hfft" in fname:
-                    if not TEST_SCIPY:
+                    if not has_scipy_fft:
                         continue  # Requires scipy to compare against
                     numpy_fn = getattr(scipy.fft, fname)
                 else:

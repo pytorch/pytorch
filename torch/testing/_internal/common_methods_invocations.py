@@ -39,9 +39,14 @@ import torch.testing._internal.opinfo_helper as opinfo_helper
 
 from setuptools import distutils
 
+has_scipy_fft = False
 if TEST_SCIPY:
     import scipy.special
-    import scipy.fft
+    try:
+        import scipy.fft
+        has_scipy_fft = True
+    except ModuleNotFoundError:
+        pass
 
 
 # Reasonable testing sizes for dimensions
@@ -3424,7 +3429,7 @@ class SpectralFuncInfo(OpInfo):
                          decorators=decorators,
                          sample_inputs_func=sample_inputs_func,
                          **kwargs)
-        self.ref = ref if ref is not None else _getattr_qual(np, name)
+        self.ref = ref
         self.ndimensional = ndimensional
 
 
@@ -6731,7 +6736,7 @@ op_db: List[OpInfo] = [
                      check_batched_gradgrad=False),
     SpectralFuncInfo('fft.hfftn',
                      aten_name='fft_hfftn',
-                     ref=scipy.fft.hfftn if TEST_SCIPY else None,
+                     ref=scipy.fft.hfftn if has_scipy_fft else None,
                      ndimensional=True,
                      dtypes=all_types_and_complex_and(torch.bool),
                      default_test_dtypes=floating_and_complex_types(),
@@ -6784,7 +6789,7 @@ op_db: List[OpInfo] = [
                      check_batched_grad=False),
     SpectralFuncInfo('fft.ihfftn',
                      aten_name='fft_ihfftn',
-                     ref=scipy.fft.ihfftn if TEST_SCIPY else None,
+                     ref=scipy.fft.ihfftn if has_scipy_fft else None,
                      ndimensional=True,
                      dtypes=all_types_and(torch.bool),
                      default_test_dtypes=floating_types(),
