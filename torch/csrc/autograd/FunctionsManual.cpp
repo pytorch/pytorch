@@ -3713,21 +3713,23 @@ std::tuple<Tensor, Tensor> lu_solve_backward(
   const Tensor& LU_data,
   const Tensor& LU_pivots,
   const std::array<bool, 2>& grad_input_mask) {
-  if (!grad.defined() || (!grad_input_mask[0] && !grad_input_mask[1])) {
+  const bool B_requires_grad = grad_input_mask[0];
+  const bool LU_data_requires_grad = grad_input_mask[1];
+  if (!grad.defined() || (!B_requires_grad && !LU_data_requires_grad)) {
     return std::make_tuple(Tensor{}, Tensor{});
   }
 
-  // TOOD
-  // If grad_input_mask[0] && !grad_input_mask[1] the following formula is better, once
-  // we have migrated lu_solve to linalg and has a `trans` flag
-  // This avoids the instantiation of P explicitly and may have better numerical properties
-  //
+  // TODO If just B requires grad, the following formula is better:
   //const auto trans = grad.is_complex() ? TransposeType::ConjTranspose : TransposeType::Transpose;
   //const Tensor B_grad = at::_lu_solve_trans(grad, LU_data, LU_pivots, trans);
   //return std::make_pair(B_grad, Tensor{});
+  //
+  // We'll be able to use it once we ahve migradet lu_solve to linalg and has an `adjoint` flag.
+  // This formula avoids the instantiation of P explicitly and may have better numerical properties
+
   const Tensor X_H = X.conj().transpose(-2, -1);
   Tensor P, L, U;
-  if (grad_input_mask[0]) {
+  if (B_requires_grad) {
       std::tie(P, L, U) = at::lu_unpack(LU_data, LU_pivots);
   } else {
     std::tie(std::ignore, L, U) = at::lu_unpack(LU_data, LU_pivots,
@@ -3737,7 +3739,7 @@ std::tuple<Tensor, Tensor> lu_solve_backward(
   const Tensor U_H = U.conj().transpose(-2, -1);
   const Tensor L_H = L.conj().transpose(-2, -1);
 
-  if (grad_input_mask[0]) {
+  if (B_requires_grad) {
       // Y = U^{-H}X_grad
       const Tensor Y = at::linalg_solve_triangular(U_H, grad,
                                                    /*left=*/true,
@@ -3750,7 +3752,7 @@ std::tuple<Tensor, Tensor> lu_solve_backward(
                                                    /*unitriangular=*/true);
       const Tensor B_grad = P.matmul(Z);
       Tensor LU_data_grad;
-      if (grad_input_mask[1]) {
+      if (LU_data_requires_grad) {
         const Tensor U_grad = Y.matmul(X_H);
         const Tensor L_grad = Z.matmul(X_H).matmul(U_H);
         LU_data_grad = -(L_grad.tril(-1) + U_grad.triu());
@@ -3758,7 +3760,8 @@ std::tuple<Tensor, Tensor> lu_solve_backward(
       return std::make_pair(B_grad, LU_data_grad);
   } else {
     // Since when nothing needs to be computed was handled at the start, here we have
-    // ! grad_input_mask[0] && grad_input_mask[1]
+    // the case when just LU_data requires grad
+
     // U^{-H}X_grad X^H
     const Tensor U_grad = at::linalg_solve_triangular(U_H, grad.matmul(X_H),
                                                       /*left=*/true,
