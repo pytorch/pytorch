@@ -108,14 +108,10 @@ void spmm(
   IntArrayRef result_strides = result_->strides();
   IntArrayRef mat2_strides = mat2_->strides();
   auto ndim = result_->dim();
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(ndim >= 2);
   bool is_result_row_major = (result_strides[ndim - 1] == 1);
   bool is_mat2_row_major = (mat2_strides[ndim - 1] == 1);
-  bool transpose_B = false;
-  if (!is_result_row_major && is_mat2_row_major) {
-    transpose_B = true;
-  } else if (is_result_row_major && !is_mat2_row_major) {
-    transpose_B = true;
-  }
+  bool transpose_B = (is_result_row_major ^ is_mat2_row_major);
 
   cusparseOperation_t opA = CUSPARSE_OPERATION_NON_TRANSPOSE;
   cusparseOperation_t opB = transpose_B ? CUSPARSE_OPERATION_TRANSPOSE
