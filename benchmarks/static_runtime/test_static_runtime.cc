@@ -69,6 +69,7 @@ Node* getNodeWithKind(const StaticModule& smodule, const std::string& kind) {
 
 TEST(StaticRuntime, InPlace) {
   EXPECT_TRUE(testHasInplaceOp(reshape_inplace_script));
+  EXPECT_TRUE(testHasInplaceOp(reshape_inplace_script_1));
   EXPECT_TRUE(testHasInplaceOp(sigmoid_inplace_script));
   EXPECT_FALSE(testHasInplaceOp(sigmoid_out_script));
 }
@@ -607,6 +608,17 @@ TEST(StaticRuntime, IndividualOps_Detach) {
   testStaticRuntime(detach_script_0, args, args2);
   testStaticRuntime(detach_script_1, args);
   testStaticRuntime(detach_script_1, args, args2);
+}
+
+TEST(StaticRuntime, IndividualOps_ExpandAs) {
+  auto a = at::randn({3,1});
+  auto b = at::randn({3,2});
+  auto c = at::randn({4,1});
+  auto d = at::randn({4,2});
+  std::vector<IValue> args{a, b};
+  std::vector<IValue> args2{c, d};
+  testStaticRuntime(expand_as_script, args);
+  testStaticRuntime(expand_as_script, args, args2);
 }
 
 TEST(StaticRuntime, IndividualOps_Full) {
