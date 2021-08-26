@@ -1549,6 +1549,8 @@ Tensor cholesky_inverse(const Tensor &input, bool upper) {
 
 DEFINE_DISPATCH(lu_stub);
 
+// TODO: remove check_errors argument
+// https://github.com/pytorch/pytorch/issues/64014
 std::tuple<Tensor, Tensor, Tensor> _lu_with_info(const Tensor& self, bool compute_pivots, bool check_errors) {
   TORCH_CHECK(self.dim() >= 2,
            "expected tensor with 2 or more dimensions, got size: ", self.sizes(),
@@ -1566,11 +1568,6 @@ std::tuple<Tensor, Tensor, Tensor> _lu_with_info(const Tensor& self, bool comput
   // 'lu' tensor is modified in-place and must be a copy of 'self'
   Tensor lu = cloneBatchedColumnMajor(self);
   lu_stub(self.device().type(), lu, pivots_tensor, infos_tensor, compute_pivots);
-
-  // check_errors does nothing since https://github.com/pytorch/pytorch/pull/28608
-  // see https://github.com/pytorch/pytorch/pull/28608/files#r339365219
-  // TODO: remove check_errors argument
-
   return std::make_tuple(lu, pivots_tensor, infos_tensor);
 }
 
