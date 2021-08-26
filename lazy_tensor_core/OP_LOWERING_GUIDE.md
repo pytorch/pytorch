@@ -81,3 +81,5 @@ at::Tensor & wrapper_Scalar_lerp_(at::Tensor & self, const at::Tensor & end, con
 `lerp_.Scalar` will use our `lerp.Scalar` implementation without us providing explictly lowering.
 
 For each node we need to pass an `ir::OpKind`. Here is an ([example](https://github.com/pytorch/pytorch/blob/700731c40bbc47faff14d49e77f8322ebd1c2d5b/lazy_tensor_core/lazy_tensor_core/csrc/ops/var_mean.cpp#L10)). You can find the `OpKind` definition in [aten_interned_strings.h](https://github.com/pytorch/pytorch/blob/master/aten/src/ATen/core/aten_interned_strings.h) or [interned_strings.h](https://github.com/pytorch/pytorch/blob/master/aten/src/ATen/core/interned_strings.h). If the aten symbol is missing, you can submit a PR like [this](https://github.com/pytorch/pytorch/pull/36851).
+
+It's a double edge sword to refer to the XLA's implementation as sometimes it gives good hints on how things should be lowered if the operator shares the same implementation in both the TS and XLA backends, or sometimes it shows a wrong direction if the operator has a very XLA specific implementation.
