@@ -88,6 +88,13 @@ bool checkRtol(const at::Tensor& diff, const std::vector<at::Tensor> inputs);
 bool almostEqual(const at::Tensor& a, const at::Tensor& b);
 
 bool exactlyEqual(const at::Tensor& a, const at::Tensor& b);
+bool exactlyEqual(
+    const std::vector<at::Tensor>& a,
+    const std::vector<at::Tensor>& b);
+
+std::vector<at::Tensor> runGraph(
+    std::shared_ptr<Graph> graph,
+    const std::vector<at::Tensor>& inputs);
 
 std::pair<at::Tensor, at::Tensor> lstm(
     at::Tensor input,

@@ -49,11 +49,7 @@ std::pair<std::vector<StackEntry>, std::string> getStackTraceWithModuleHierarchy
       // Now add source range info to stack
       entries.emplace_back(
           StackEntry{prev_function_name, callstack_ptr->source_range()});
-      if (callstack_ptr->function()) {
-        prev_function_name = callstack_ptr->function()->name();
-      } else {
-        prev_function_name = callstack_ptr->function_name();
-      }
+      prev_function_name = callstack_ptr->function_name();
       // Function name appended here
       // It is renamed to prev_function_name because for StackEntry
       // it will be appended in the next iteration. This is the format
