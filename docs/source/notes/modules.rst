@@ -268,7 +268,7 @@ of a module and its submodules:
    # Note that no_grad() is used here to avoid tracking this computation in the autograd graph.
    @torch.no_grad()
    def init_weights(m):
-     if type(m) == nn.Linear:
+     if isinstance(m, nn.Linear):
        nn.init.xavier_normal_(m.weight)
        m.bias.fill_(0.0)
 
@@ -345,9 +345,9 @@ value of ``l1``\ 's ``weight`` parameter shows that its values are now much clos
 
 Note that the above process is done entirely while the network module is in "training mode". Modules default to
 training mode and can be switched between training and evaluation modes using :func:`~torch.nn.Module.train` and
-:func:`~torch.nn.Module.eval`. They can behave differently depending on which mode they are in; for example, the
-:class:`~torch.nn.Dropout` module only randomly "drops out" parts of the input in training mode, and
-behaves with no-op behavior in eval mode. In general, modules should be in training mode during training
+:func:`~torch.nn.Module.eval`. They can behave differently depending on which mode they are in. For example, the
+:class:`~torch.nn.BatchNorm` module maintains a running mean and variance during training that are not updated
+when the module is in evaluation mode. In general, modules should be in training mode during training
 and only switched to evaluation mode for inference or evaluation. Below is an example of a custom module
 that behaves differently between the two modes:
 
@@ -475,14 +475,15 @@ The following class demonstrates the various ways of registering parameters and 
    class StatefulModule(nn.Module):
      def __init__(self):
        super().__init__()
-       # Creating a nn.Parameter automatically registers the tensor as a parameter of the module.
+       # Setting a nn.Parameter as an attribute of the module automatically registers the tensor
+       # as a parameter of the module.
        self.param1 = nn.Parameter(torch.randn(2))
 
        # Alternative string-based way to register a parameter.
        self.register_parameter('param2', nn.Parameter(torch.randn(3)))
 
-       # Registers a parameter None placeholder; this will be added to the state_dict
-       # to be serialized explicitly as None.
+       # Reserves the "param3" attribute as a parameter, preventing it from being set to anything
+       # except a parameter. "None" entries like this will not be present in the module's state_dict.
        self.register_parameter('param3', None)
 
        # Registers a list of parameters.
@@ -500,8 +501,8 @@ The following class demonstrates the various ways of registering parameters and 
        # Registers a non-persistent buffer (one that does not appear in the module's state_dict).
        self.register_buffer('buffer2', torch.randn(5), persistent=False)
 
-       # Registers a buffer None placeholder; this will be added to the state_dict
-       # to be serialized explicitly as None.
+       # Reserves the "buffer3" attribute as a buffer, preventing it from being set to anything
+       # except a buffer. "None" entries like this will not be present in the module's state_dict.
        self.register_buffer('buffer3', None)
 
        # Adding a submodule registers its parameters as parameters of the module.
@@ -514,11 +515,8 @@ The following class demonstrates the various ways of registering parameters and 
    m_loaded = StatefulModule()
    m_loaded.load_state_dict(torch.load('state.pt'))
 
-   # Buffer and parameter None placeholders persist through serialization.
-   assert m_loaded.param3 is None
-   assert m_loaded.buffer3 is None
-
-   # Note that non-persistent buffer buffer2 does not appear in the state_dict.
+   # Note that non-persistent buffer "buffer2" and reserved attributes "param3" and "buffer3" do
+   # not appear in the state_dict.
    print(m_loaded.state_dict())
    : OrderedDict([('param1', tensor([-0.0322,  0.9066])),
                   ('param2', tensor([-0.4472,  0.1409,  0.4852])),
@@ -538,6 +536,43 @@ For more information, check out:
 * Saving and loading: https://pytorch.org/tutorials/beginner/saving_loading_models.html
 * Serialization semantics: https://pytorch.org/docs/master/notes/serialization.html
 * What is a state dict? https://pytorch.org/tutorials/recipes/recipes/what_is_state_dict.html
+
+Module Initialization
+---------------------
+
+By default, module parameters and floating-point buffers are initialized during module instantiation as 32-bit
+floating point values on the CPU. Each module type has its own technique for initializing parameters based on
+what has performed well historically. For certain use cases, it may be desired to initialize with a different
+dtype, device (e.g. GPU), or initialization technique. All modules provided by :mod:`torch.nn` support directly
+instantiating modules with a specified device or dtype, as well as skipping parameter initialization to avoid
+unnecessary computation when a custom initialization scheme is desired.
+
+Examples:
+
+.. code-block:: python
+
+   # Initialize module directly onto GPU.
+   m = nn.Linear(5, 3, device='cuda')
+
+   # Initialize module with 16-bit floating point parameters.
+   m = nn.Linear(5, 3, dtype=torch.half)
+
+   # Skip default parameter initialization and perform custom (e.g. orthogonal) initialization.
+   m = torch.nn.utils.skip_init(nn.Linear, 5, 3)
+   nn.init.orthogonal_(m.weight)
+
+Note that the device and dtype options demonstrated above also apply to any floating-point buffers registered
+for the module:
+
+.. code-block:: python
+
+   m = nn.BatchNorm2d(3, dtype=torch.half)
+   print(m.running_mean)
+   : tensor([0., 0., 0.], dtype=torch.float16)
+
+For more information, check out:
+
+* Skipping module parameter initialization: https://pytorch.org/tutorials/prototype/skip_param_init.html
 
 Module Hooks
 ------------
@@ -575,59 +610,69 @@ Below is an example demonstrating usage of forward and backward hooks:
 
    def forward_pre_hook(m, inputs):
      # Allows for examination and modification of the input before the forward pass.
-     # Note that inputs are passed as a tuple.
+     # Note that inputs are always wrapped in a tuple.
      input = inputs[0]
      return input + 1.
 
    def forward_hook(m, inputs, output):
      # Allows for examination of inputs / outputs and modification of the outputs
-     # after the forward pass. Note that inputs are passed as a tuple.
-     return -output
+     # after the forward pass. Note that inputs are always wrapped in a tuple while outputs
+     # are passed as-is.
+
+     # Residual computation a la ResNet.
+     return output + inputs[0]
 
    def backward_hook(m, grad_inputs, grad_outputs):
      # Allows for examination of grad_inputs / grad_outputs and modification of
-     # grad_inputs after the backward pass. Note that grad_inputs and grad_outputs
-     # are passed as tuples.
+     # grad_inputs used in the rest of the backwards pass. Note that grad_inputs and
+     # grad_outputs are always wrapped in tuples.
      new_grad_inputs = [torch.ones_like(gi) * 42. for gi in grad_inputs]
      return new_grad_inputs
 
    # Create sample module & input.
-   m = nn.Linear(5, 3)
-   x = torch.randn(2, 5, requires_grad=True)
+   m = nn.Linear(3, 3)
+   x = torch.randn(2, 3, requires_grad=True)
 
    # ==== Demonstrate forward hooks. ====
    # Run input through module before and after adding hooks.
    print('output with no forward hooks: {}'.format(m(x)))
-   : output with no forward hooks: tensor([[ 0.1755, -0.3268, -0.5069],
-                                           [-0.6602,  0.2260,  0.1089]], grad_fn=<AddmmBackward>)
+   : output with no forward hooks: tensor([[-0.5059, -0.8158,  0.2390],
+                                           [-0.0043,  0.4724, -0.1714]], grad_fn=<AddmmBackward>)
 
    # Note that the modified input results in a different output.
-   m.register_forward_pre_hook(forward_pre_hook)
+   forward_pre_hook_handle = m.register_forward_pre_hook(forward_pre_hook)
    print('output with forward pre hook: {}'.format(m(x)))
-   : output with forward pre hook: tensor([[-0.0893,  0.0843, -0.4043],
-                                           [-0.9250,  0.6372,  0.2115]], grad_fn=<AddmmBackward>)
+   : output with forward pre hook: tensor([[-0.5752, -0.7421,  0.4942],
+                                           [-0.0736,  0.5461,  0.0838]], grad_fn=<AddmmBackward>)
 
-   # Note the modified (negated) output.
-   m.register_forward_hook(forward_hook)
+   # Note the modified output.
+   forward_hook_handle = m.register_forward_hook(forward_hook)
    print('output with both forward hooks: {}'.format(m(x)))
-   : output with both forward hooks: tensor([[ 0.0893, -0.0843,  0.4043],
-                                             [ 0.9250, -0.6372, -0.2115]], grad_fn=<NegBackward>)
+   : output with both forward hooks: tensor([[-1.0980,  0.6396,  0.4666],
+                                             [ 0.3634,  0.6538,  1.0256]], grad_fn=<AddBackward0>)
+
+   # Remove hooks; note that the output here matches the output before adding hooks.
+   forward_pre_hook_handle.remove()
+   forward_hook_handle.remove()
+   print('output after removing forward hooks: {}'.format(m(x)))
+   : output after removing forward hooks: tensor([[-0.5059, -0.8158,  0.2390],
+                                                  [-0.0043,  0.4724, -0.1714]], grad_fn=<AddmmBackward>)
 
    # ==== Demonstrate backward hooks. ====
    m(x).sum().backward()
    print('x.grad with no backwards hook: {}'.format(x.grad))
-   : x.grad with no backwards hook: tensor([[-0.6227,  0.2673, -0.3042, -0.0978,  0.5084],
-                                            [-0.6227,  0.2673, -0.3042, -0.0978,  0.5084]])
+   : x.grad with no backwards hook: tensor([[ 0.4497, -0.5046,  0.3146],
+                                            [ 0.4497, -0.5046,  0.3146]])
 
    # Clear gradients before running backward pass again.
    m.zero_grad()
-   x.grad.fill_(0.)
+   x.grad.zero_()
 
    m.register_full_backward_hook(backward_hook)
    m(x).sum().backward()
    print('x.grad with backwards hook: {}'.format(x.grad))
-   : x.grad with backwards hook: tensor([[42., 42., 42., 42., 42.],
-                                         [42., 42., 42., 42., 42.]])
+   : x.grad with backwards hook: tensor([[42., 42., 42.],
+                                         [42., 42., 42.]])
 
 Advanced Features
 -----------------
