@@ -47,8 +47,6 @@ from .utils import (
 
 from ..qconfig import QConfigAny
 
-import torch.nn.quantized._reference as nnqr
-
 from abc import ABC, abstractmethod
 import operator
 import warnings
