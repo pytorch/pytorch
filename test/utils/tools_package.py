@@ -1,7 +1,6 @@
 """Allows test code to reliably import from <repo-root>/tools/.
 
 Why does this exist?
-
 We want to be able to write unit tests for the tools/ code and we want
 it to work when PyTorch is installed or installed for develop.
 
