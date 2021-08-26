@@ -1,3 +1,4 @@
+{% import 'common.yml.j2' as common %}
 {# squid_proxy is an private ELB that only available for GHA custom runners #}
 {%- set squid_proxy    = "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128" -%}
 {# squid_no_proxy is a list of common set of fixed domains or IPs that we don't need to proxy. See https://docs.aws.amazon.com/AmazonECS/latest/developerguide/http_proxy_config.html#windows-proxy #}
@@ -89,6 +90,7 @@ jobs:
         with:
           # deep clone, to allow use of git merge-base
           fetch-depth: 0
+      !{{ common.display_ec2_information() }}
       - name: Calculate docker image tag
         id: calculate-tag
         run: |
@@ -165,6 +167,7 @@ jobs:
         with:
           fetch-depth: 0 # deep clone, to allow sharding to use git rev-list
           submodules: recursive
+      !{{ common.display_ec2_information() }}
       - name: Pull docker image
         run: |
           docker pull "${DOCKER_IMAGE}"
@@ -191,9 +194,7 @@ jobs:
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}" \
             sh -c 'sudo chown -R jenkins . && .jenkins/pytorch/build.sh'
-      - name: Parse ref
-        id: parse-ref
-        run: .github/scripts/parse_ref.py
+      !{{ common.parse_ref() }}
       - name: Display and upload binary build size statistics (Click Me)
         # temporary hack: set CIRCLE_* vars, until we update
         # tools/stats/print_test_stats.py to natively support GitHub Actions
@@ -217,18 +218,7 @@ jobs:
       {%- if not is_libtorch %}
       - name: Archive artifacts into zip
         run: |
-          zip -r artifacts.zip dist/ build/ .pytorch-test-times.json
-      # Upload to github so that people can click and download artifacts
-      - uses: actions/upload-artifact@v2
-        # Don't fail on upload to GH since it's only for user convenience
-        continue-on-error: true
-        name: Store PyTorch Build Artifacts on Github
-        with:
-          name: ${{ env.BUILD_ENVIRONMENT }}
-          retention-days: 14
-          if-no-files-found: error
-          path:
-            artifacts.zip
+          zip -1 -r artifacts.zip dist/ build/custom_test_artifacts build/lib build/bin .pytorch-test-times.json
       - uses: seemethere/upload-artifact-s3@9d7ceb0ab39c2c88d93ef7792b27425b27d59162
         name: Store PyTorch Build Artifacts on S3
         with:
@@ -318,6 +308,7 @@ jobs:
         with:
           fetch-depth: 0 # deep clone, to allow sharding to use git rev-list
           submodules: recursive
+      !{{ common.display_ec2_information() }}
       - name: Pull docker image
         run: |
           docker pull "${DOCKER_IMAGE}"
@@ -431,6 +422,8 @@ jobs:
           if-no-files-found: error
           path:
             test-reports-*.zip
+      !{{ common.parse_ref() }}
+      !{{ common.upload_test_statistics(build_environment) }}
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
@@ -444,75 +437,7 @@ jobs:
           docker system prune -af
 {% endblock %}
 {%- endif -%}
-{%- if not is_libtorch %}
-{% block render_test_results +%}
-  # this is a separate step from test because the log files from test are too
-  # long: basically, GitHub tries to render all of the log files when you click
-  # through an action causing extreme slowdown on actions that contain too many
-  # logs (like test); we can always move it back to the other one, but it
-  # doesn't create the best experience
-  render_test_results:
-    needs: [generate-test-matrix, test, !{{ ciflow_config.root_job_name }}]
-    if: ${{ needs.test.result != 'skipped' || failure() }}
-    runs-on: linux.2xlarge
-    strategy:
-      matrix: ${{ fromJson(needs.generate-test-matrix.outputs.render-matrix) }}
-      fail-fast: false
-    steps:
-      - name: Log in to ECR
-        run: |
-          aws ecr get-login --no-include-email --region us-east-1 > /tmp/ecr-login.sh
-          bash /tmp/ecr-login.sh
-          rm /tmp/ecr-login.sh
-      - name: Chown workspace
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)/../":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE:?}/*"
-      - name: Checkout PyTorch
-        uses: actions/checkout@v2
-        with:
-          # deep clone, to allow tools/stats/print_test_stats.py to use Git commands
-          fetch-depth: 0
-      - uses: actions/download-artifact@v2
-        name: Download PyTorch Test Reports
-        with:
-          name: test-reports-${{ matrix.config }}
-          path: .
-      - name: Unzip test reports
-        run: |
-          # Should preserve paths so reports should still be in test/test-reports
-          unzip -o 'test-reports-*.zip'
-      - name: Install dependencies
-        # boto3 version copied from .circleci/docker/common/install_conda.sh
-        run: |
-          pip3 install -r requirements.txt
-          pip3 install boto3==1.16.34 junitparser rich
-      - name: Output Test Results (Click Me)
-        run: |
-          python3 tools/render_junit.py test
-      - name: Parse ref
-        id: parse-ref
-        run: .github/scripts/parse_ref.py
-      - name: Display and upload test statistics (Click Me)
-        # temporary hack: set CIRCLE_* vars, until we update
-        # tools/stats/print_test_stats.py to natively support GitHub Actions
-        env:
-          AWS_DEFAULT_REGION: us-east-1
-          CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          JOB_BASE_NAME: !{{ build_environment }}-test
-          CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
-          CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
-          CIRCLE_TAG: ${{ steps.parse-ref.outputs.tag }}
-          CIRCLE_WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
-        run: |
-          python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
-{%- endblock %}
-{%- endif -%}
-  {%- if enable_doc_jobs %}
-
+{%- if enable_doc_jobs %}
   pytorch_python_doc_build:
     runs-on: linux.2xlarge
     needs: [calculate-docker-image, build, !{{ ciflow_config.root_job_name }}]
@@ -541,6 +466,7 @@ jobs:
         with:
           fetch-depth: 0 # deep clone, to allow sharding to use git rev-list
           submodules: recursive
+      !{{ common.display_ec2_information() }}
       - name: Pull docker image
         run: |
           docker pull "${DOCKER_IMAGE}"
@@ -613,5 +539,4 @@ jobs:
         run: |
           # Prune all of the docker images
           docker system prune -af
-
-  {%- endif -%}
+{%- endif -%}

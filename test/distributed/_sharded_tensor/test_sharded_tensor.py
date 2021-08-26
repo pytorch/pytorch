@@ -19,6 +19,7 @@ from torch.distributed._sharding_spec import (
 from torch.distributed._sharded_tensor.api import (
     CreateOp,
     TensorInitParams,
+    TensorProperties,
     _create_tensor_from_params,
 )
 from torch.testing._internal.common_distributed import (
@@ -125,13 +126,14 @@ def with_comms(func):
 class TestCreateTensorFromParams(TestCase):
     @sandcastle_skip_if(torch.cuda.device_count() < 1, 'CUDA GPU is needed')
     def test_empty(self):
-        tensor_init_params = TensorInitParams(
-            create_op=CreateOp.EMPTY,
+        tensor_properties = TensorProperties(
             dtype=torch.double,
             layout=torch.strided,
             requires_grad=False,
             pin_memory=False,
             memory_format=torch.contiguous_format, )
+        tensor_init_params = TensorInitParams(create_op=CreateOp.EMPTY,
+                                              tensor_properties=tensor_properties)
         local_device = torch.device('cuda:0')
         local_tensor = _create_tensor_from_params(
             5, 10, local_device=local_device, tensor_init_params=tensor_init_params)
@@ -142,13 +144,14 @@ class TestCreateTensorFromParams(TestCase):
 
     @sandcastle_skip_if(torch.cuda.device_count() < 1, 'CUDA GPU is needed')
     def test_ones(self):
-        tensor_init_params = TensorInitParams(
-            create_op=CreateOp.ONES,
+        tensor_properties = TensorProperties(
             dtype=torch.double,
             layout=torch.strided,
             requires_grad=False,
             pin_memory=False,
             memory_format=torch.contiguous_format, )
+        tensor_init_params = TensorInitParams(
+            create_op=CreateOp.ONES, tensor_properties=tensor_properties)
         local_device = torch.device('cuda:0')
         local_tensor = _create_tensor_from_params(
             5, 10, local_device=local_device, tensor_init_params=tensor_init_params)
@@ -1267,14 +1270,17 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase, MultiProcessTestCa
 
         local_shards = [_sharded_tensor.Shard(torch.randn(5, 5, device=f"cuda:{self.rank}"), local_shard_metadata)]
 
-        sharded_tensor_metadata = _sharded_tensor.ShardedTensorMetadata(
-            shards_metadata=shards_metadata,
-            size=torch.Size([10, 10]),
+        tensor_properties = TensorProperties(
             dtype=torch.get_default_dtype(),
             layout=torch.strided,
             requires_grad=False,
             memory_format=torch.contiguous_format,
             pin_memory=False,
+        )
+        sharded_tensor_metadata = _sharded_tensor.ShardedTensorMetadata(
+            shards_metadata=shards_metadata,
+            size=torch.Size([10, 10]),
+            tensor_properties=tensor_properties,
         )
 
         sharded_tensor = _sharded_tensor.init_from_local_shards(local_shards, sharded_tensor_metadata, init_rrefs=True)
@@ -1334,14 +1340,18 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase, MultiProcessTestCa
             local_shard_metadata = rank1_shard_metadata if self.rank == 1 else rank3_shard_metadata
             local_shards.append(_sharded_tensor.Shard(torch.randn(5, 5, device=f"cuda:{self.rank}"), local_shard_metadata))
 
-        sharded_tensor_metadata = _sharded_tensor.ShardedTensorMetadata(
-            shards_metadata=shards_metadata,
-            size=torch.Size([10, 5]),
+        tensor_properties = TensorProperties(
             dtype=torch.get_default_dtype(),
             layout=torch.strided,
             requires_grad=False,
             memory_format=torch.contiguous_format,
             pin_memory=False,
+        )
+
+        sharded_tensor_metadata = _sharded_tensor.ShardedTensorMetadata(
+            shards_metadata=shards_metadata,
+            size=torch.Size([10, 5]),
+            tensor_properties=tensor_properties
         )
         sharded_tensor = _sharded_tensor.init_from_local_shards(local_shards, sharded_tensor_metadata, new_pg, init_rrefs=True)
 
@@ -1403,14 +1413,17 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase, MultiProcessTestCa
                     placement=f"rank:{r}/cuda:{r}"
                 ))
 
-        sharded_tensor_metadata = _sharded_tensor.ShardedTensorMetadata(
-            shards_metadata=shards_metadata,
-            size=torch.Size([10, 10]),
+        tensor_properties = TensorProperties(
             dtype=torch.get_default_dtype(),
             layout=torch.strided,
             requires_grad=False,
             memory_format=torch.contiguous_format,
             pin_memory=False,
+        )
+        sharded_tensor_metadata = _sharded_tensor.ShardedTensorMetadata(
+            shards_metadata=shards_metadata,
+            size=torch.Size([10, 10]),
+            tensor_properties=tensor_properties
         )
 
         empty_local_shards = []
@@ -1435,7 +1448,7 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase, MultiProcessTestCa
         wrong_dtype_shards = [
             _sharded_tensor.Shard(torch.ones(5, 5, device=f"cuda:{self.rank}", dtype=torch.int), local_shard_metadata)
         ]
-        with self.assertRaisesRegex(ValueError, 'Local shard tensor dtype does not match with sharded_tensor_metadata'):
+        with self.assertRaisesRegex(ValueError, 'Local shard tensor dtype does not match with tensor_properties!'):
             sharded_tensor = _sharded_tensor.init_from_local_shards(wrong_dtype_shards, sharded_tensor_metadata, init_rrefs=True)
 
         indices = [[0, 1, 1], [2, 0, 2]]
@@ -1445,21 +1458,21 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase, MultiProcessTestCa
         wrong_layout_shards = [
             _sharded_tensor.Shard(sparse_tensor, local_shard_metadata)
         ]
-        with self.assertRaisesRegex(ValueError, 'Local shard tensor layout does not match with sharded_tensor_metadata'):
+        with self.assertRaisesRegex(ValueError, 'Local shard tensor layout does not match with tensor_properties!'):
             sharded_tensor = _sharded_tensor.init_from_local_shards(
                 wrong_layout_shards, sharded_tensor_metadata, init_rrefs=True)
 
         wrong_requires_grad_shards = [
             _sharded_tensor.Shard(torch.randn(5, 5, device=f"cuda:{self.rank}", requires_grad=True), local_shard_metadata)
         ]
-        with self.assertRaisesRegex(ValueError, 'Local shard tensor requires_grad does not match with sharded_tensor_metadata'):
+        with self.assertRaisesRegex(ValueError, 'Local shard tensor requires_grad does not match with tensor_properties!'):
             sharded_tensor = _sharded_tensor.init_from_local_shards(
                 wrong_requires_grad_shards, sharded_tensor_metadata, init_rrefs=True)
 
         wrong_pin_memory_shards = [
             _sharded_tensor.Shard(torch.randn(5, 5, pin_memory=True), local_shard_metadata)
         ]
-        with self.assertRaisesRegex(ValueError, 'Local shard tensor pin_memory does not match with sharded_tensor_metadata'):
+        with self.assertRaisesRegex(ValueError, 'Local shard tensor pin_memory does not match with tensor_properties!'):
             sharded_tensor = _sharded_tensor.init_from_local_shards(
                 wrong_pin_memory_shards, sharded_tensor_metadata, init_rrefs=True)
 
@@ -1492,14 +1505,17 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase, MultiProcessTestCa
                     placement=f"rank:{r}/cuda:{r}"
                 ))
 
-        sharded_tensor_metadata = _sharded_tensor.ShardedTensorMetadata(
-            shards_metadata=shards_metadata,
-            size=torch.Size([10, 10]),
+        tensor_properties = TensorProperties(
             dtype=torch.get_default_dtype(),
             layout=torch.strided,
             requires_grad=False,
             memory_format=torch.contiguous_format,
             pin_memory=False,
+        )
+        sharded_tensor_metadata = _sharded_tensor.ShardedTensorMetadata(
+            shards_metadata=shards_metadata,
+            size=torch.Size([10, 10]),
+            tensor_properties=tensor_properties
         )
 
         local_shard_size = (5, 5) if self.rank != 0 else (6, 6)
@@ -1531,14 +1547,17 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase, MultiProcessTestCa
                     placement=f"rank:{r}/cuda:{r}"
                 ))
 
-        sharded_tensor_metadata = _sharded_tensor.ShardedTensorMetadata(
-            shards_metadata=shards_metadata,
-            size=torch.Size([10, 10]),
+        tensor_properties = TensorProperties(
             dtype=torch.get_default_dtype(),
             layout=torch.strided,
             requires_grad=False,
             memory_format=torch.contiguous_format,
             pin_memory=False,
+        )
+        sharded_tensor_metadata = _sharded_tensor.ShardedTensorMetadata(
+            shards_metadata=shards_metadata,
+            size=torch.Size([10, 10]),
+            tensor_properties=tensor_properties
         )
 
         local_shard_size = (5, 5) if self.rank != 0 else (4, 4)
