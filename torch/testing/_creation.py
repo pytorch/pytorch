@@ -51,9 +51,9 @@ def make_tensor(
     If a boolean type is requested for the output tensor (through :attr:`dtype`), :attr:`low` and :attr:`high` are
     always set to ``0`` and ``2`` respectively.
 
-    If :attr:`noncontiguous` is ``True``, a non-contiguous tensor with the given size will be returned unless the
-    size specifies a tensor with a 1 or 0 elements in which case the non-contiguous parameter is ignored because
-    it is not possible to create a non-contiguous Tensor with a single element.
+    If :attr:`noncontiguous` is ``True``, a non-contiguous tensor with the given :attr:`shape` will be returned unless
+    the :attr:`shape` specifies a tensor with a 1 or 0 elements in which case the non-contiguous parameter is ignored
+    because it is not possible to create a non-contiguous Tensor with a single element.
 
     Args:
         shape (Tuple[int, ...]): A sequence of integers defining the shape of the output tensor.
