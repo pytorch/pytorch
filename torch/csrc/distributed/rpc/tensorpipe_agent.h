@@ -179,6 +179,7 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
   c10::intrusive_ptr<JitFuture> send(
       const WorkerInfo& to,
       c10::intrusive_ptr<Message> message,
+      const std::vector<std::tuple<torch::Tensor, torch::Device>>& devMap,
       const float rpcTimeoutSeconds = kUnsetRpcTimeout,
       const DeviceMap& deviceMap = {}) override;
 

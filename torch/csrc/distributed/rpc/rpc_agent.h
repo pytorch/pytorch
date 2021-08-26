@@ -163,6 +163,7 @@ class TORCH_API RpcAgent {
   virtual c10::intrusive_ptr<JitFuture> send(
       const WorkerInfo& to,
       c10::intrusive_ptr<Message> message,
+      const std::vector<std::tuple<torch::Tensor, torch::Device>>& devMap,
       const float rpcTimeoutSeconds = kUnsetRpcTimeout,
       const std::unordered_map<c10::Device, c10::Device>& deviceMap = {}) = 0;
 
@@ -181,6 +182,7 @@ class TORCH_API RpcAgent {
   c10::intrusive_ptr<JitFuture> sendWithRetries(
       const WorkerInfo& to,
       c10::intrusive_ptr<Message> message,
+      const std::vector<std::tuple<torch::Tensor, torch::Device>>& devMap,
       RpcRetryOptions retryOptions = RpcRetryOptions());
 
   // Return a reference to the ``WorkerInfo`` of this RpcAgent.

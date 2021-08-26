@@ -51,6 +51,7 @@ void RpcAgent::shutdown() {
 c10::intrusive_ptr<JitFuture> RpcAgent::sendWithRetries(
     const WorkerInfo& to,
     c10::intrusive_ptr<Message> message,
+    const std::vector<std::tuple<torch::Tensor, torch::Device>>& devMap,
     RpcRetryOptions retryOptions) {
   TORCH_CHECK(retryOptions.maxRetries >= 0, "maxRetries cannot be negative.");
   TORCH_CHECK(
@@ -70,7 +71,7 @@ c10::intrusive_ptr<JitFuture> RpcAgent::sendWithRetries(
       originalFuture,
       /* retryCount */ 0,
       retryOptions);
-  auto jitFuture = send(to, std::move(message));
+  auto jitFuture = send(to, std::move(message), devMap);
   jitFuture->addCallback([this, newTime, firstRetryRpc](JitFuture& future) {
     rpcRetryCallback(future, newTime, firstRetryRpc);
   });
@@ -127,7 +128,7 @@ void RpcAgent::retryExpiredRpcs() {
       // with an error, since this RPC never succeeded and can no longer be
       // retried.
       try {
-        jitFuture = send(earliestRpc->to_, earliestRpc->message_);
+        jitFuture = send(earliestRpc->to_, earliestRpc->message_, {});
         futures.emplace_back(jitFuture, earliestRpc);
       } catch (std::exception& e) {
         // We must store the futures and exception messages here and only mark

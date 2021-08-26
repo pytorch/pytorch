@@ -244,6 +244,7 @@ void DistAutogradContainer::sendReleaseContextRpc(
       auto cleanupFuture = agent->sendWithRetries(
           agent->getWorkerInfo(worker_id),
           CleanupAutogradContextReq(context_id).toMessage(),
+          {},
           options);
 
       cleanupFuture->addCallback(

@@ -66,12 +66,13 @@ std::unordered_map<MessageType, float, std::hash<int>> FaultyTensorPipeAgent::
 c10::intrusive_ptr<JitFuture> FaultyTensorPipeAgent::send(
     const WorkerInfo& to,
     c10::intrusive_ptr<Message> message,
+    const std::vector<std::tuple<torch::Tensor, torch::Device>>& devMap,
     const float rpcTimeoutSeconds,
     const std::unordered_map<c10::Device, c10::Device>& /* unused */) {
   // We only fail control messages that have been specified by the test case.
   // For all other messages, we just send them without any failures.
   if (!shouldFailMessage(message->type())) {
-    return TensorPipeAgent::send(to, std::move(message), rpcTimeoutSeconds);
+    return TensorPipeAgent::send(to, std::move(message), devMap, rpcTimeoutSeconds);
   }
 
   // This send function checks the failMessageCountMap_ to check whether
@@ -94,7 +95,7 @@ c10::intrusive_ptr<JitFuture> FaultyTensorPipeAgent::send(
     return jitFuture;
   } else {
     lock.unlock();
-    return TensorPipeAgent::send(to, std::move(message), rpcTimeoutSeconds);
+    return TensorPipeAgent::send(to, std::move(message), {}, rpcTimeoutSeconds);
   }
 }
 

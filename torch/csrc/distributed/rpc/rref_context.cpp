@@ -216,7 +216,8 @@ void RRefContext::delUser(
       ++numPendingFutures_;
       auto jitFuture = agent_->sendWithRetries(
           agent_->getWorkerInfo(owner),
-          RRefUserDelete(rrefId, forkId).toMessage());
+          RRefUserDelete(rrefId, forkId).toMessage(),
+          {});
 
       jitFuture->addCallback([this](JitFuture& future) {
         handleException(future);
@@ -505,7 +506,7 @@ void RRefContext::notifyOwnerAndParentOfFork(
     // with this fork ID.
     ++numPendingFutures_;
     auto jitFuture = agent_->sendWithRetries(
-        agent_->getWorkerInfo(parent), RRefChildAccept(forkId).toMessage());
+        agent_->getWorkerInfo(parent), RRefChildAccept(forkId).toMessage(), {});
     jitFuture->addCallback([this](JitFuture& future) {
       handleException(future);
       --numPendingFutures_;
@@ -514,7 +515,7 @@ void RRefContext::notifyOwnerAndParentOfFork(
     ++numPendingFutures_;
     auto jitFuture = agent_->sendWithRetries(
         agent_->getWorkerInfo(rref->owner()),
-        RRefForkRequest(rref->rrefId(), forkId).toMessage());
+        RRefForkRequest(rref->rrefId(), forkId).toMessage(), {});
 
     addPendingUser(forkId, rref);
 
@@ -703,7 +704,7 @@ void RRefContext::finishForkRequest(const ForkId& forkId, worker_id_t parent) {
   delPendingUser(forkId);
   ++numPendingFutures_;
   auto jitFuture = agent_->sendWithRetries(
-      agent_->getWorkerInfo(parent), RRefChildAccept(forkId).toMessage());
+      agent_->getWorkerInfo(parent), RRefChildAccept(forkId).toMessage(), {});
 
   jitFuture->addCallback([this](JitFuture& future) {
     handleException(future);

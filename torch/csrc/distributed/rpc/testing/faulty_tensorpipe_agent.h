@@ -52,6 +52,7 @@ class TORCH_API FaultyTensorPipeAgent : public TensorPipeAgent {
   c10::intrusive_ptr<JitFuture> send(
       const WorkerInfo& to,
       c10::intrusive_ptr<Message> message,
+      const std::vector<std::tuple<torch::Tensor, torch::Device>>& devMap,
       const float rpcTimeoutSeconds = torch::distributed::rpc::kUnsetRpcTimeout,
       const std::unordered_map<c10::Device, c10::Device>& deviceMap = {})
       override;

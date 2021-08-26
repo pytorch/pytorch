@@ -4110,6 +4110,29 @@ class RpcTest(RpcAgentTestFixture):
 
         dist.barrier()
 
+    # python test/distributed/rpc/test_tensorpipe_agent.py -k test_foos
+    @dist_init
+    def test_foo(self):
+        self_worker_info = rpc.get_worker_info()
+        self_worker_name = worker_name(self.rank)
+        t1 = torch.empty(1)
+        t2 = torch.empty(1)
+        t3 = torch.empty(1)
+        d1 = "cuda:0"
+        d2 = "cuda:1"
+        d3 = "cuda:2"
+        rpc.rpc_sync(
+            self_worker_info, zzz,
+            args=(t1, t2, t3, d1, d2, d3),
+            tensor_device_mapping={t1: d1, t2: d2, t3: d3}
+        )
+
+
+def zzz(t1, t2, t3, d1, d2, d3):
+    assert t1.device == d1
+    assert t2.device == d2
+    assert t3.device == d3
+
 
 class CudaRpcTest(RpcAgentTestFixture):
 
