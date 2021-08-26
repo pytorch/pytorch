@@ -114,29 +114,29 @@ void gpu_kernel(TensorIteratorBase& iter, const func_t& f) {
 template<typename arg1_t, typename arg2_t, typename return_t, typename func_t>
 struct AUnaryFunctor {
   using traits = function_traits<func_t>;
-  using accarg1_t = typename traits::template arg<0>::type;
+  using opmath_arg1_t = typename traits::template arg<0>::type;
   __device__ return_t operator()(arg2_t b) const {
     return f(a, b);
   }
   // NB: scalar is stored in higher precision!
-  AUnaryFunctor(func_t f_, accarg1_t a_): f(f_), a(a_) {}
+  AUnaryFunctor(func_t f_, opmath_arg1_t a_): f(f_), a(a_) {}
   private:
     func_t f;
-    accarg1_t a;
+    opmath_arg1_t a;
 };
 
 template<typename arg1_t, typename arg2_t, typename return_t, typename func_t>
 struct BUnaryFunctor {
   using traits = function_traits<func_t>;
-  using accarg2_t = typename traits::template arg<1>::type;
+  using opmath_arg2_t = typename traits::template arg<1>::type;
   __device__ return_t operator()(arg1_t a) const {
     return f(a, b);
   }
   // NB: scalar is stored in higher precision!
-  BUnaryFunctor(func_t f_, accarg2_t b_): f(f_), b(b_) {}
+  BUnaryFunctor(func_t f_, opmath_arg2_t b_): f(f_), b(b_) {}
   private:
     func_t f;
-    accarg2_t b;
+    opmath_arg2_t b;
 };
 
 // Though seemingly noop, this inserts casts from arg1_t to func_t's type
@@ -152,23 +152,23 @@ struct BinaryFunctor {
 };
 
 // Unlike gpu_kernel_with_scalars, this allows you to pass a func_t which
-// accepts inputs at higher precision (typically accscalar_t), but then
+// accepts inputs at higher precision (typically opmath_t), but then
 // ensure that we load from memory at the correct precision (scalar_t)
 // to avoid expensive loads.  For the whole sordid story see
 // https://dev-discuss.pytorch.org/t/cuda-loops-case-study-code-generation-vs-templates/302
 template <typename arg1_t, typename arg2_t = arg1_t, typename return_t = arg1_t, typename func_t>
-void acc_gpu_kernel_with_scalars(TensorIteratorBase& iter, const func_t& f) {
+void opmath_gpu_kernel_with_scalars(TensorIteratorBase& iter, const func_t& f) {
   TORCH_INTERNAL_ASSERT(iter.ntensors() == 3);
 
   using traits = function_traits<func_t>;
-  using accarg1_t = typename traits::template arg<0>::type;
-  using accarg2_t = typename traits::template arg<1>::type;
+  using opmath_arg1_t = typename traits::template arg<0>::type;
+  using opmath_arg2_t = typename traits::template arg<1>::type;
   static_assert(
       traits::arity == 2,
       "gpu_kernel_with_scalars only supports two input arguments");
 
   if (iter.is_cpu_scalar(1)) {
-    AUnaryFunctor<arg1_t, arg2_t, return_t, func_t> af(f, iter.scalar_value<accarg1_t>(1));
+    AUnaryFunctor<arg1_t, arg2_t, return_t, func_t> af(f, iter.scalar_value<opmath_arg1_t>(1));
     iter.remove_operand(1);
     // TODO: When all kernels that use gpu_kernel_with_scalars are
     // ported to structured, this device guard can be deleted.  This
@@ -178,7 +178,7 @@ void acc_gpu_kernel_with_scalars(TensorIteratorBase& iter, const func_t& f) {
     const OptionalDeviceGuard device_guard(device_of(iter.tensor(1)));
     gpu_kernel(iter, af);
   } else if (iter.is_cpu_scalar(2)) {
-    BUnaryFunctor<arg1_t, arg2_t, return_t, func_t> bf(f, iter.scalar_value<accarg2_t>(2));
+    BUnaryFunctor<arg1_t, arg2_t, return_t, func_t> bf(f, iter.scalar_value<opmath_arg2_t>(2));
     iter.remove_operand(2);
     gpu_kernel(iter, bf);
   } else {
@@ -197,7 +197,7 @@ void gpu_kernel_with_scalars(TensorIteratorBase& iter, const func_t& f) {
   using arg1_t = typename traits::template arg<0>::type;
   using arg2_t = typename traits::template arg<1>::type;
   using return_t = typename traits::result_type;
-  acc_gpu_kernel_with_scalars<arg1_t, arg2_t, return_t, func_t>(iter, f);
+  opmath_gpu_kernel_with_scalars<arg1_t, arg2_t, return_t, func_t>(iter, f);
 }
 
 namespace { // functions for `gpu_kernel_multiple_outputs`.
