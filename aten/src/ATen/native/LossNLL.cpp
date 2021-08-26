@@ -605,15 +605,6 @@ Tensor cross_entropy_loss(
   return ret;
 }
 
-Tensor cross_entropy_loss(
-    const Tensor& self,
-    const Tensor& target,
-    const c10::optional<Tensor>& weight,
-    int64_t reduction,
-    int64_t ignore_index) {
-  return at::cross_entropy_loss(self, target, weight, reduction, ignore_index, 0.0);
-}
-
 Tensor & nll_loss_out(const Tensor & self, const Tensor & target, const c10::optional<Tensor>& weight_opt, int64_t reduction, int64_t ignore_index, Tensor & output) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
