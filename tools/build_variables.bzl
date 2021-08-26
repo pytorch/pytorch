@@ -550,13 +550,14 @@ libtorch_cuda_distributed_base_sources = [
 libtorch_cuda_distributed_extra_sources = [
     "torch/csrc/distributed/c10d/NCCLUtils.cpp",
     "torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp",
-    "torch/csrc/distributed/rpc/tensorpipe_cuda.cpp",
     # TODO: if we want to use process group "nccl" on CPU-only build,
     # we need to put the file below to libtorch_cpu.so instead of
     # libtorch_cuda.so. However, this would causes linking issues,
     # so we now put it in libtorch_cuda.so. In the future, we should
     # move this to libtorch_cpu.so.
     "torch/csrc/distributed/c10d/ProcessGroupNCCLWithUCC.cpp",
+    "torch/csrc/distributed/rpc/tensorpipe_cuda.cpp",
+    "torch/csrc/distributed/c10d/quantization/quantization_gpu.cu",
 ]
 
 libtorch_cuda_distributed_sources = libtorch_cuda_distributed_base_sources + libtorch_cuda_distributed_extra_sources
@@ -743,6 +744,7 @@ libtorch_python_distributed_core_sources = [
     "torch/csrc/distributed/c10d/frontend.cpp",
     "torch/csrc/distributed/c10d/init.cpp",
     "torch/csrc/distributed/c10d/python_comm_hook.cpp",
+    "torch/csrc/distributed/c10d/quantization/quantization.cpp",
 ]
 
 libtorch_python_distributed_sources = libtorch_python_distributed_core_sources + [
