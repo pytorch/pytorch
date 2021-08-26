@@ -1253,11 +1253,7 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None,
                         obj(*examples)
                 else:
                     raise ValueError("Error: Unable to infer types. Please format the inputs to type `List[Tuple]`"
-<<<<<<< HEAD
                                      " or `Dict[Callable, List[Tuple]]` to be run with MonkeyType.")
-=======
-                                  " or `Dict[Callable, List[Tuple]]` to be run with MonkeyType.")
->>>>>>> bde157a567 (Change warning to error)
         else:
             warnings.warn("Warning: monkeytype is not installed. Please install https://github.com/Instagram/MonkeyType "
                           "to enable Profile-Directed Typing in TorchScript. Refer to "
