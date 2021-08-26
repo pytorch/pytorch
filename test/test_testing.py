@@ -18,7 +18,7 @@ from torch.testing._internal.common_device_type import \
      deviceCountAtLeast)
 from torch.testing._internal.common_methods_invocations import op_db
 import torch.testing._internal.opinfo_helper as opinfo_helper
-from torch.testing._internal.dtype_getters import get_all_dtypes
+from torch.testing._internal.common_dtype import get_all_dtypes
 
 # For testing TestCase methods and torch.testing functions
 class TestTesting(TestCase):

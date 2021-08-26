@@ -7,7 +7,7 @@ from torch.testing._internal.common_utils import \
     (TestCase, run_tests)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, onlyCPU, dtypes)
-from torch.testing._internal.dtype_getters import get_all_dtypes
+from torch.testing._internal.common_dtype import get_all_dtypes
 
 # For testing handling NumPy objects and sending tensors to / accepting
 #   arrays from NumPy.

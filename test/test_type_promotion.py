@@ -8,7 +8,7 @@ from torch.testing._internal.common_utils import (TestCase, run_tests, load_test
                                                   TEST_NUMPY, torch_to_numpy_dtype_dict)
 from torch.testing._internal.common_device_type import (instantiate_device_type_tests, onlyOnCPUAndCUDA,
                                                         dtypes, dtypesIfCUDA, onlyCPU, expectedFailureMeta)
-from torch.testing._internal.dtype_getters import (
+from torch.testing._internal.common_dtype import (
     get_all_dtypes, get_all_math_dtypes, get_all_int_dtypes, get_all_fp_dtypes
 )
 

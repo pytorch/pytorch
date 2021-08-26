@@ -21,11 +21,11 @@ from torch.testing._internal.common_device_type import \
      onlyCPU, skipCUDAIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
      skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, onlyOnCPUAndCUDA, dtypesIfCUDA,
      onlyCUDA, skipCUDAVersionIn, skipMeta, skipCUDAIfNoCusolver)
-from torch.testing._internal.common_cuda import SM53OrLater, tf32_on_and_off, CUDA11OrLater, CUDA9
-from torch.distributions.binomial import Binomial
-from torch.testing._internal.dtype_getters import (
+from torch.testing._internal.common_dtype import (
     get_all_dtypes, get_all_int_dtypes, get_all_complex_dtypes, get_all_fp_dtypes,
 )
+from torch.testing._internal.common_cuda import SM53OrLater, tf32_on_and_off, CUDA11OrLater, CUDA9
+from torch.distributions.binomial import Binomial
 
 # Protects against includes accidentally setting the default dtype
 # NOTE: jit_metaprogramming_utils sets the default dtype to double!
