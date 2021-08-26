@@ -143,9 +143,8 @@ def make_tensor(
         imag = high * imag_rand_val + low * (1 - imag_rand_val)
         result = torch.complex(real, imag)
     else:
-        raise TypeError(f"Given dtype {dtype} is not supported for make_tensor, if you think"
-                        " that it should be supported, please file an issue"
-                        " here: https://github.com/pytorch/pytorch/issues")
+        raise TypeError(f"The requested dtype {dtype} is not supported by torch.testing.make_tensor()."
+                        " To request support, file an issue at: https://github.com/pytorch/pytorch/issues")
 
     if noncontiguous and result.numel() > 1:
         result = torch.repeat_interleave(result, 2, dim=-1)
