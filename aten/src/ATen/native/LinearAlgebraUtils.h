@@ -218,11 +218,10 @@ static inline void squareCheckInputs(const Tensor& self) {
  * has been successful (info = 0) or not, and report in case of the latter.
  */
 static inline void singleCheckErrors(int64_t info, const char* name, int64_t batch_id=-1) {
-  std::stringstream batch_ss;
+  std::string batch_string{""};
   if (batch_id >= 0) {
-    batch_ss << ": (Batch element " << batch_id << ")";
+    batch_string = ": (Batch element " + std::to_string(batch_id) + ")";
   }
-  auto batch_string = batch_ss.str();
   if (info < 0) {
     TORCH_INTERNAL_ASSERT(false, name, batch_string,
         ": Argument ", -info, " has illegal value. Most certainly there is a bug in the implementation calling the backend library.");
