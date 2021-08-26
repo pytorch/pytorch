@@ -143,7 +143,7 @@ def make_tensor(
         imag = high * imag_rand_val + low * (1 - imag_rand_val)
         result = torch.complex(real, imag)
     else:
-        raise TypeError(f"The requested dtype {dtype} is not supported by torch.testing.make_tensor()."
+        raise TypeError(f"The requested dtype '{dtype}' is not supported by torch.testing.make_tensor()."
                         " To request support, file an issue at: https://github.com/pytorch/pytorch/issues")
 
     if noncontiguous and result.numel() > 1:
@@ -160,7 +160,7 @@ def make_tensor(
             float_eps = torch.tensor(torch.finfo(float_dtype).tiny, device=device, dtype=float_dtype)
             replace_with = torch.complex(float_eps, float_eps)
         else:
-            raise TypeError(f"The requested dtype {dtype} is not supported by torch.testing.make_tensor()."
+            raise TypeError(f"The requested dtype '{dtype}' is not supported by torch.testing.make_tensor()."
                             " To request support, file an issue at: https://github.com/pytorch/pytorch/issues")
         result[result == 0] = replace_with
 
