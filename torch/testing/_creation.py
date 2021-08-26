@@ -1,5 +1,5 @@
 """
-This package contains tensor creation utilities.
+This module contains tensor creation utilities.
 """
 
 import torch
@@ -7,74 +7,88 @@ from typing import Optional, Tuple, Union
 import math
 
 __all__ = [
-    "make_tensor"
+    "make_tensor",
 ]
 
 def make_tensor(
-    size: Tuple[int, ...],
-    *,
-    device: Union[str, torch.device] = "cpu",
-    dtype: torch.dtype = torch.float32,
+    shape: Tuple[int, ...],
+    device: Union[str, torch.device],
+    dtype: torch.dtype,
     low: Optional[float] = None,
     high: Optional[float] = None,
     requires_grad: bool = False,
     noncontiguous: bool = False,
     exclude_zero: bool = False
 ) -> torch.Tensor:
-    r"""Creates a random tensor with the given :attr:`size`.
+    r"""Creates a random tensor with the given :attr:`shape`, :attr:`device`, and :attr:`dtype`.
 
-    The function comes with other optional arguments to allow random tensor generation for the user's needs.
+    If :attr:`low` or :attr:`high` are outside the range of the datatype's representable finite values
+    then they are clamped to the lowest or highest representable finite value, respectively. A random
+    tensor is then created with values within ``[low, high)`` range. If not passed, following are the
+    default values for :attr:`low` and :attr:`high` depending on the :attr:`dtype`.
 
-    By default, :attr:`device` is ``cpu`` and :attr:`dtype` is ``torch.float32``, but user can pass these arguments
-    as required.
-
-    If :attr:`low` and :attr:`high` are not passed, following default values are considered depending on the given
-    :attr:`dtype`:
-
-    - boolean type: `low` = 0, `high` = 2.
-    - uint8 type: `low` = 0, `high` = 9.
-    - floating and integral types: `low` = -9 and `high` = 9.
-    - complex types, for each real and imaginary part: `low` = -9, `high` = 9.
+    +---------------------------+------------+----------+
+    | ``dtype``                 | ``low``    | ``high`` |
+    +===========================+============+==========+
+    | boolean type              | ``0``      | ``2``    |
+    +---------------------------+------------+----------+
+    | unsigned integral type    | ``0``      | ``10``   |
+    +---------------------------+------------+----------+
+    | integral types            | ``-9``     | ``10``   |
+    +---------------------------+------------+----------+
+    | floating types            | ``-9``     | ``9``    |
+    +---------------------------+------------+----------+
+    | complex types             | ``-9``     | ``9``    |
+    +---------------------------+------------+----------+
 
     If :attr:`low` and :attr:`high` are passed, they are considered only if they are within the
     limit of the :attr:`dtype`. Following are a few conditions that are taken care of:
 
     - If :attr:`low` and/or :attr:`high` are specified and within dtype limits: the values are taken as they were.
     - If :attr:`low` and/or :attr:`high` are specified but exceed the limits: :attr:`dtype` limits ar considered instead.
-    - If :attr:`low` is ``-inf`` and/or :attr:`high` is ``inf``: :attr:`dtype` limits are considered instead
-    - If :attr:`low` is ``inf`` or ``nan`` and/or :attr:`high` is ``-inf`` or nan: a `ValueError` is raised, since these are invalid values for the range of output tensor.
+    - If :attr:`low` is ``-inf`` and/or :attr:`high` is ``inf``: :attr:`dtype` limits are considered instead.
+
+    If a boolean type is requested for the output tensor (through :attr:`dtype`), :attr:`low` and :attr:`high` are
+    always set to ``0`` and ``2`` respectively.
 
     If :attr:`noncontiguous` is ``True``, a non-contiguous tensor with the given size will be returned unless the
     size specifies a tensor with a 1 or 0 elements in which case the non-contiguous parameter is ignored because
     it is not possible to create a non-contiguous Tensor with a single element.
 
-    If :attr:`exclude_zero` is ``True`` (default is ``False``), all the values matching to zero in
-    the created tensor are replaced with a ``tiny`` (smallest positive representable number) value if floating type,
-    [``tiny`` + ``tiny``.j] if complex type and ``1`` if integer/boolean type.
+    Args:
+        shape (Tuple[int, ...]): A sequence of integers defining the shape of the output tensor.
+        device (Union[str, torch.device]): The desired device of the returned tensor.
+        dtype (torch.dtype): The desired data type of the returned tensor.
+        low (Optional[float]): Sets the lower range (inclusive), considered only if they are within the limit of
+            :attr:`dtype` passed. Default: see the table above for default values.
+        high (Optional[float]): Sets the upper range (exclusive) as specified above for :attr:`low`.
+        requires_grad (Optional[bool]): If autograd should record operations on the returned tensor. Default: ``False``.
+        noncontiguous (Optional[bool]): If the returned tensor should be made noncontiguous. Default: ``False``.
+        exclude_zero (Optional[bool]): If zeros (if any) should be excluded from the returned tensor. Each value matching
+            zero (if any) is replaced with a ``tiny`` (smallest positive representable number) value if floating type,
+            [``tiny + tiny.j``] if complex type and ``1`` if integral/boolean type. Default: ``False``.
+
+    Raises:
+        ValueError: if :attr:`low` is either ``inf`` or ``nan`` and/or :attr:`high` is either ``-inf`` or ``nan``.
+        TypeError: if the given :attr:`dtype` isn't supported by this function
+            (see the table for default values of :attr:`low` above for the data types supported).
 
     Examples:
-        >>> import torch
         >>> from torch.testing import make_tensor
-        >>> # Create a sample integral type (int64) tensor, default range = [-9, 9)
-        >>> make_tensor((3,), device='cuda', dtype=torch.int64)
-        tensor([-8, -7, -2], device='cuda:0')
-        >>> # Create a sample float tensor (double), with range as [0, 1)
-        >>> make_tensor((3,), device='cpu', dtype=torch.float64, low=0, high=1)
-        tensor([0.2468, 0.9723, 0.6779], dtype=torch.float64)
-        >>> # Passing low as -inf and high as inf (ranges will be clamped to dtype limits)
-        >>> make_tensor((2,), device='cpu', dtype=torch.float16, low=float('-inf'), high=float('inf'))
-        tensor([-38496., -53792.], dtype=torch.float16)
+        >>> # Creates a float tensor with values in [0, 1)
+        >>> make_tensor((3,), device='cpu', dtype=torch.float32, low=0, high=1)
+        >>> tensor([0.7682, 0.4189, 0.2718])
+        >>> # Creates a bool tensor on CUDA
+        >>> make_tensor((2, 2), device='cuda', dtype=torch.bool)
+        >>> tensor([[False, False],
+                    [False, True]], device='cuda:0')
 
-        >>> # Passing low > high, will lead to ValueError
+        >>> # Passing low > high, will raise ValueError
         >>> make_tensor((2,), device='cpu', dtype=torch.float32, low=9, high=8)
         ValueError: make_tensor: low must be weakly less than high!
-        >>> # Passing low or high as float('nan') will also lead to a ValueError
+        >>> # Passing low or high as float('nan') will also raise a ValueError
         >>> make_tensor((2,), device='cpu', dtype=torch.float32, low=9, high=float('nan'))
         ValueError: make_tensor: one of low or high was NaN!
-
-        >>> # Create a non-contiguous tensor
-        >>> make_tensor((2, 2), device='cpu', dtype=torch.float64, noncontiguous=True).is_contiguous()
-        False
     """
     def _modify_low_high(low, high, lowest, highest, default_low, default_high, dtype):
         """
@@ -105,26 +119,26 @@ def make_tensor(
     _complex_types = [torch.cfloat, torch.cdouble]
 
     if dtype is torch.bool:
-        result = torch.randint(0, 2, size, device=device, dtype=dtype)
+        result = torch.randint(0, 2, shape, device=device, dtype=dtype)
     elif dtype is torch.uint8:
         ranges = (torch.iinfo(dtype).min, torch.iinfo(dtype).max)
         low, high = _modify_low_high(low, high, ranges[0], ranges[1], 0, 9, dtype)
-        result = torch.randint(low, high, size, device=device, dtype=dtype)
+        result = torch.randint(low, high, shape, device=device, dtype=dtype)
     elif dtype in _integral_types:
         ranges = (torch.iinfo(dtype).min, torch.iinfo(dtype).max)
         low, high = _modify_low_high(low, high, ranges[0], ranges[1], -9, 9, dtype)
-        result = torch.randint(low, high, size, device=device, dtype=dtype)
+        result = torch.randint(low, high, shape, device=device, dtype=dtype)
     elif dtype in _floating_types:
         ranges_floats = (torch.finfo(dtype).min, torch.finfo(dtype).max)
         low, high = _modify_low_high(low, high, ranges_floats[0], ranges_floats[1], -9, 9, dtype)
-        rand_val = torch.rand(size, device=device, dtype=dtype)
+        rand_val = torch.rand(shape, device=device, dtype=dtype)
         result = high * rand_val + low * (1 - rand_val)
     elif dtype in _complex_types:
         float_dtype = torch.float if dtype is torch.cfloat else torch.double
         ranges_floats = (torch.finfo(float_dtype).min, torch.finfo(float_dtype).max)
         low, high = _modify_low_high(low, high, ranges_floats[0], ranges_floats[1], -9, 9, dtype)
-        real_rand_val = torch.rand(size, device=device, dtype=float_dtype)
-        imag_rand_val = torch.rand(size, device=device, dtype=float_dtype)
+        real_rand_val = torch.rand(shape, device=device, dtype=float_dtype)
+        imag_rand_val = torch.rand(shape, device=device, dtype=float_dtype)
         real = high * real_rand_val + low * (1 - real_rand_val)
         imag = high * imag_rand_val + low * (1 - imag_rand_val)
         result = torch.complex(real, imag)
