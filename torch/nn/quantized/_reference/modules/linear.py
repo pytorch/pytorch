@@ -57,6 +57,12 @@ class Linear(nn.Linear):
         return "QuantizedLinear(Reference)"
 
     def get_weight(self):
+        """
+        Fake quantize (quantize and dequantize) the weight with
+        the quantization parameters for weight, this is used to
+        simulate the numerics for the quantized weight in a quantized
+        model
+        """
         # supress mypy warning
         assert isinstance(self.weight, torch.Tensor)
         assert isinstance(self.weight_scale, torch.Tensor)

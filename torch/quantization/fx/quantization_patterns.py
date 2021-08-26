@@ -47,9 +47,6 @@ from .utils import (
 
 from ..qconfig import QConfigAny
 
-import torch.nn as nn
-import torch.nn.quantized._reference as nnqr
-
 from abc import ABC, abstractmethod
 import operator
 import warnings
@@ -651,7 +648,7 @@ class ConvReluQuantizeHandler(QuantizeHandler):
                     # weight fake_quant to the conv module,
                     # weight fake_quant is assumed to be run during
                     # QAT so we don't need to run it again here
-                    float_conv = self.conv.to_float()
+                    float_conv = self.conv.to_float()  # type: ignore[operator]
                     # change qat conv to conv
                     parent_name, name = _parent_name(self.conv_node.target)
                     setattr(modules[parent_name], name, float_conv)
@@ -666,11 +663,11 @@ class ConvReluQuantizeHandler(QuantizeHandler):
                     # with conv weight
                     if isinstance(float_conv, torch.nn.intrinsic._FusedModule):
                         fused_conv = float_conv
-                        float_conv = self.conv[0]
+                        float_conv = float_conv[0]  # type: ignore[index]
                     assert qconfig is not None
                     weight_post_process = qconfig.weight()
                     # run weight observer
-                    weight_post_process(float_conv.weight)
+                    weight_post_process(float_conv.weight)  # type: ignore[operator]
                 weight_qparams = get_qparam_dict(weight_post_process)
                 # hardcoded for now, TODO: expose the api to user,
                 # we can have a map from module to reference module

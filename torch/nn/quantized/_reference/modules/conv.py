@@ -3,7 +3,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from typing import Optional, Dict, Any
 from torch.nn.common_types import _size_1_t
-from torch.nn.modules.utils import _single
 from .utils import _quantize_and_dequantize_weight
 from .utils import _save_weight_qparams
 from .utils import _get_weight_qparam_keys
@@ -18,7 +17,9 @@ class _ConvNd(torch.nn.modules.conv._ConvNd):
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         super()._save_to_state_dict(destination, prefix, keep_vars)
-        _save_weight_qparams(destination, prefix, self.weight_qscheme, self.weight_dtype, self.weight_scale, self.weight_zero_point, self.weight_axis)
+        _save_weight_qparams(
+            destination, prefix, self.weight_qscheme, self.weight_dtype,
+            self.weight_scale, self.weight_zero_point, self.weight_axis)
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
@@ -41,7 +42,7 @@ class _ConvNd(torch.nn.modules.conv._ConvNd):
         self.weight_qscheme = weight_qparams["qscheme"]
         self.weight_dtype = weight_qparams["dtype"]
         assert self.weight_qscheme in [None, torch.per_tensor_affine, torch.per_channel_affine], \
-        Exception(f"qscheme: {self.weight_qscheme} is not support in reference quantized linear module")
+            Exception(f"qscheme: {self.weight_qscheme} is not support in reference quantized linear module")
         if self.weight_qscheme is not None:
             self.register_buffer(
                 "weight_scale",
@@ -59,6 +60,12 @@ class _ConvNd(torch.nn.modules.conv._ConvNd):
                     "weight_axis", torch.tensor(0, dtype=torch.int, device=device))
 
     def get_weight(self):
+        """
+        Fake quantize (quantize and dequantize) the weight with
+        the quantization parameters for weight, this is used to
+        simulate the numerics for the quantized weight in a quantized
+        model
+        """
         # supress mypy warning
         assert isinstance(self.weight, torch.Tensor)
         assert isinstance(self.weight_scale, torch.Tensor)
@@ -67,6 +74,26 @@ class _ConvNd(torch.nn.modules.conv._ConvNd):
         return _quantize_and_dequantize_weight(
             self.weight, self.weight_qscheme,
             self.weight_dtype, self.weight_scale, self.weight_zero_point, self.weight_axis)
+
+    @classmethod
+    def from_float(cls, float_conv, weight_qparams):
+        qref_conv = cls(
+            float_conv.in_channels,
+            float_conv.out_channels,
+            float_conv.kernel_size,  # type: ignore[arg-type]
+            float_conv.stride,  # type: ignore[arg-type]
+            float_conv.padding,  # type: ignore[arg-type]
+            float_conv.dilation,  # type: ignore[arg-type]
+            float_conv.groups,
+            float_conv.bias is not None,
+            float_conv.padding_mode,
+            device=float_conv.weight.device,
+            dtype=float_conv.weight.dtype,
+            weight_qparams=weight_qparams)
+        qref_conv.weight = torch.nn.Parameter(float_conv.weight.detach())
+        if float_conv.bias is not None:
+            qref_conv.bias = torch.nn.Parameter(float_conv.bias.detach())
+        return qref_conv
 
 class Conv1d(_ConvNd, nn.Conv1d):
     def __init__(self,
@@ -107,26 +134,6 @@ class Conv1d(_ConvNd, nn.Conv1d):
     def _get_name(self):
         return "QuantizedConv1d(Reference)"
 
-    @classmethod
-    def from_float(cls, float_conv, weight_qparams):
-        qref_conv = Conv1d(
-            float_conv.in_channels,
-            float_conv.out_channels,
-            float_conv.kernel_size,  # type: ignore[arg-type]
-            float_conv.stride,  # type: ignore[arg-type]
-            float_conv.padding,  # type: ignore[arg-type]
-            float_conv.dilation,  # type: ignore[arg-type]
-            float_conv.groups,
-            float_conv.bias is not None,
-            float_conv.padding_mode,
-            device=float_conv.weight.device,
-            dtype=float_conv.weight.dtype,
-            weight_qparams=weight_qparams)
-        qref_conv.weight = torch.nn.Parameter(float_conv.weight.detach())
-        if float_conv.bias is not None:
-            qref_conv.bias = torch.nn.Parameter(float_conv.bias.detach())
-        return qref_conv
-
 class Conv2d(_ConvNd, nn.Conv2d):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,
@@ -159,26 +166,6 @@ class Conv2d(_ConvNd, nn.Conv2d):
     def _get_name(self):
         return "QuantizedConv2d(Reference)"
 
-    @classmethod
-    def from_float(cls, float_conv, weight_qparams):
-        qref_conv = Conv2d(
-            float_conv.in_channels,
-            float_conv.out_channels,
-            float_conv.kernel_size,  # type: ignore[arg-type]
-            float_conv.stride,  # type: ignore[arg-type]
-            float_conv.padding,  # type: ignore[arg-type]
-            float_conv.dilation,  # type: ignore[arg-type]
-            float_conv.groups,
-            float_conv.bias is not None,
-            float_conv.padding_mode,
-            device=float_conv.weight.device,
-            dtype=float_conv.weight.dtype,
-            weight_qparams=weight_qparams)
-        qref_conv.weight = torch.nn.Parameter(float_conv.weight.detach())
-        if float_conv.bias is not None:
-            qref_conv.bias = torch.nn.Parameter(float_conv.bias.detach())
-        return qref_conv
-
 class Conv3d(_ConvNd, nn.Conv3d):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,
@@ -210,23 +197,3 @@ class Conv3d(_ConvNd, nn.Conv3d):
 
     def _get_name(self):
         return "QuantizedConv3d(Reference)"
-
-    @classmethod
-    def from_float(cls, float_conv, weight_qparams):
-        qref_conv = Conv3d(
-            float_conv.in_channels,
-            float_conv.out_channels,
-            float_conv.kernel_size,  # type: ignore[arg-type]
-            float_conv.stride,  # type: ignore[arg-type]
-            float_conv.padding,  # type: ignore[arg-type]
-            float_conv.dilation,  # type: ignore[arg-type]
-            float_conv.groups,
-            float_conv.bias is not None,
-            float_conv.padding_mode,
-            device=float_conv.weight.device,
-            dtype=float_conv.weight.dtype,
-            weight_qparams=weight_qparams)
-        qref_conv.weight = torch.nn.Parameter(float_conv.weight.detach())
-        if float_conv.bias is not None:
-            qref_conv.bias = torch.nn.Parameter(float_conv.bias.detach())
-        return qref_conv
