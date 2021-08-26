@@ -1,6 +1,7 @@
 from datetime import timedelta
 from enum import Enum
 from typing import Optional, List, Any, Tuple, overload
+from xmlrpc.client import boolean
 
 from torch import Tensor
 
@@ -363,6 +364,8 @@ class ProcessGroupNCCL(ProcessGroup):
     def _group_start() -> None: ...
     @staticmethod
     def _group_end() -> None: ...
+    @staticmethod
+    def is_ucc_available() -> bool: ...
     ...
 
 class ProcessGroupMPI(ProcessGroup):
