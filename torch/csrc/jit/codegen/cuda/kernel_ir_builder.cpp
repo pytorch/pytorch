@@ -150,6 +150,61 @@ NamedScalar* IrBuilder::magicZeroVal() {
   return magic_zero_;
 }
 
+Val* SimplifyingIrBuilder::addExpr(Int* lhs, Int::ScalarType rhs) {
+  if (rhs == 0) {
+    return lhs;
+  } else if (lhs == nullptr) {
+    return IrBuilder::create<kir::Int>(rhs);
+  } else if (lhs->isConst()) {
+    return IrBuilder::create<kir::Int>(lhs->value().value() + rhs);
+  } else if (rhs > 0) {
+    return IrBuilder::addExpr(lhs, IrBuilder::create<kir::Int>(rhs));
+  } else {
+    return IrBuilder::subExpr(lhs, IrBuilder::create<kir::Int>(-rhs));
+  }
+}
+
+Val* SimplifyingIrBuilder::addExpr(Int* lhs, Int* rhs) {
+  if (rhs == nullptr) {
+    return lhs;
+  } else if (lhs == nullptr) {
+    return rhs;
+  } else if (lhs->isConst()) {
+    return addExpr(rhs, lhs->value().value());
+  } else if (rhs->isConst()) {
+    return addExpr(lhs, rhs->value().value());
+  } else {
+    return IrBuilder::addExpr(lhs, rhs);
+  }
+}
+
+Val* SimplifyingIrBuilder::addExpr(Val* lhs, Val* rhs) {
+  TORCH_INTERNAL_ASSERT(lhs != nullptr || rhs != nullptr);
+  if (lhs == nullptr || lhs->isZeroInt()) {
+    return rhs;
+  } else if (rhs == nullptr || rhs->isZeroInt()) {
+    return lhs;
+  }
+  auto lhs_int = dynamic_cast<kir::Int*>(lhs);
+  auto rhs_int = dynamic_cast<kir::Int*>(rhs);
+  if (lhs_int != nullptr && rhs_int != nullptr) {
+    return addExpr(lhs_int, rhs_int);
+  } else {
+    return IrBuilder::addExpr(lhs, rhs);
+  }
+}
+
+Val* SimplifyingIrBuilder::andExpr(Val* lhs, Val* rhs) {
+  TORCH_INTERNAL_ASSERT(!(lhs == nullptr && rhs == nullptr));
+  if (lhs == nullptr) {
+    return rhs;
+  } else if (rhs == nullptr) {
+    return lhs;
+  } else {
+    return IrBuilder::andExpr(lhs, rhs);
+  }
+}
+
 } // namespace kir
 } // namespace cuda
 } // namespace fuser

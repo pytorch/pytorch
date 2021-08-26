@@ -99,6 +99,31 @@ class TORCH_CUDA_CU_API IrBuilder {
   NamedScalar* magic_zero_ = nullptr;
 };
 
+//! A wrapper builder with static expression simplification
+//!
+//! Example:
+//! - addExpr(new Int(1), new Int(2)) -> Int(3)
+//! - addExpr(new Int(0), new NamedScalar("foo")) -> NamedScalar("foo")
+//!
+//! Designed to be used to simplify predicate and index expressions in
+//! generated code. Also, the shift validation may fail without
+//! this simplification.
+class TORCH_CUDA_CU_API SimplifyingIrBuilder : public IrBuilder {
+ public:
+  explicit SimplifyingIrBuilder(Kernel* kernel) : IrBuilder(kernel) {}
+
+  //! Same as IrBuilder::addExpr except:
+  //! - Performs possible calculations as much as possible
+  //! - When nullptr arguments are given, they are handled
+  //!   gracefully. When only one of them is nullptr, it is just
+  //!   ignored.
+  Val* addExpr(Int* lhs, Int::ScalarType rhs);
+  Val* addExpr(Int* lhs, Int* rhs);
+  Val* addExpr(Val* lhs, Val* rhs);
+
+  Val* andExpr(Val* lhs, Val* rhs);
+};
+
 } // namespace kir
 } // namespace cuda
 } // namespace fuser

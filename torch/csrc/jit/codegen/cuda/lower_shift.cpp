@@ -18,72 +18,6 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-namespace {
-
-// utility function
-kir::Bool* makeAndExpr(kir::Val* lhs, kir::Val* rhs) {
-  TORCH_INTERNAL_ASSERT(!(lhs == nullptr && rhs == nullptr));
-  if (lhs == nullptr) {
-    return rhs->as<kir::Bool>();
-  } else if (rhs == nullptr) {
-    return lhs->as<kir::Bool>();
-  } else {
-    kir::IrBuilder ir_builder(GpuLower::current()->kernel());
-    return ir_builder.andExpr(lhs, rhs)->as<kir::Bool>();
-  }
-}
-
-kir::Int* makeAddExpr(kir::Int* lhs, kir::Int::ScalarType rhs) {
-  kir::IrBuilder ir_builder(GpuLower::current()->kernel());
-  if (rhs == 0) {
-    return lhs;
-  } else if (lhs == nullptr) {
-    return ir_builder.create<kir::Int>(rhs);
-  } else if (lhs->isConst()) {
-    return ir_builder.create<kir::Int>(lhs->value().value() + rhs);
-  } else if (rhs > 0) {
-    return ir_builder.addExpr(lhs, ir_builder.create<kir::Int>(rhs))
-        ->as<kir::Int>();
-  } else {
-    return ir_builder.subExpr(lhs, ir_builder.create<kir::Int>(-rhs))
-        ->as<kir::Int>();
-  }
-}
-
-kir::Int* makeAddExpr(kir::Int* lhs, kir::Int* rhs) {
-  if (rhs == nullptr) {
-    return lhs;
-  } else if (lhs == nullptr) {
-    return rhs;
-  } else if (lhs->isConst()) {
-    return makeAddExpr(rhs, lhs->value().value());
-  } else if (rhs->isConst()) {
-    return makeAddExpr(lhs, rhs->value().value());
-  } else {
-    kir::IrBuilder ir_builder(GpuLower::current()->kernel());
-    return ir_builder.addExpr(lhs, rhs)->as<kir::Int>();
-  }
-}
-
-kir::Val* makeAddExpr(kir::Val* lhs, kir::Val* rhs) {
-  TORCH_INTERNAL_ASSERT(lhs != nullptr || rhs != nullptr);
-  if (lhs == nullptr || lhs->isZeroInt()) {
-    return rhs;
-  } else if (rhs == nullptr || rhs->isZeroInt()) {
-    return lhs;
-  }
-  auto lhs_int = dynamic_cast<kir::Int*>(lhs);
-  auto rhs_int = dynamic_cast<kir::Int*>(rhs);
-  if (lhs_int != nullptr && rhs_int != nullptr) {
-    return makeAddExpr(lhs_int, rhs_int);
-  } else {
-    kir::IrBuilder ir_builder(GpuLower::current()->kernel());
-    return ir_builder.addExpr(lhs, rhs);
-  }
-}
-
-} // namespace
-
 void ShiftPredicateInserter::insert(
     kir::Expr* expr,
     const std::vector<kir::ForLoop*>& loops,
@@ -213,7 +147,7 @@ kir::Bool* ShiftPredicateInserter::getPredicate(
     kir::Bool* thread_pred,
     bool isShiftPredicate) {
   const auto gpu_lower = GpuLower::current();
-  kir::IrBuilder ir_builder(gpu_lower->kernel());
+  kir::SimplifyingIrBuilder ir_builder(gpu_lower->kernel());
 
   TensorView* out_fuser_tv = out_tv->fuserTv();
 
@@ -273,7 +207,7 @@ kir::Bool* ShiftPredicateInserter::getPredicate(
       // limit = left halo + extent.
 
       kir::Val* left_limit = halo_info.width(0);
-      kir::Val* right_limit = makeAddExpr(
+      kir::Val* right_limit = ir_builder.addExpr(
           out_tv->domain()->rootDomain()[i]->extent(), halo_info.width(0));
 
       kir::Val* consumer_index = indices[i];
@@ -295,8 +229,11 @@ kir::Bool* ShiftPredicateInserter::getPredicate(
       // producer. This should be reivisted for performance
       // optimization (#877).
       if (shift_expr && shift_expr->offset(i) > 0) {
-        predicate = makeAndExpr(
-            predicate, ir_builder.geExpr(producer_index, left_limit));
+        predicate =
+            ir_builder
+                .andExpr(
+                    predicate, ir_builder.geExpr(producer_index, left_limit))
+                ->as<kir::Bool>();
       } else if (gather_expr) {
         // Since it's unknown if producer_index < consumer_index, we need
         // to predicate using both of the producer and consumer
@@ -305,15 +242,24 @@ kir::Bool* ShiftPredicateInserter::getPredicate(
         // problem, but in a common case where the input tensor is
         // cached at SMEM, it should be possible to remove the
         // predicate for this expression entirely.
-        predicate = makeAndExpr(
-            predicate, ir_builder.geExpr(consumer_index, left_limit));
+        predicate =
+            ir_builder
+                .andExpr(
+                    predicate, ir_builder.geExpr(consumer_index, left_limit))
+                ->as<kir::Bool>();
         if (consumer_index != producer_index) {
-          predicate = makeAndExpr(
-              predicate, ir_builder.geExpr(producer_index, left_limit));
+          predicate =
+              ir_builder
+                  .andExpr(
+                      predicate, ir_builder.geExpr(producer_index, left_limit))
+                  ->as<kir::Bool>();
         }
       } else if (!left_limit->isZeroInt()) {
-        predicate = makeAndExpr(
-            predicate, ir_builder.geExpr(consumer_index, left_limit));
+        predicate =
+            ir_builder
+                .andExpr(
+                    predicate, ir_builder.geExpr(consumer_index, left_limit))
+                ->as<kir::Bool>();
       }
 
       // If the shift offset is negative, the maximum index is extent -
@@ -321,25 +267,40 @@ kir::Bool* ShiftPredicateInserter::getPredicate(
       // extent, which can result in wrap around, add the absolute value
       // of the shift offset to the index
       if (shift_expr && shift_expr->offset(i) < 0) {
-        predicate = makeAndExpr(
-            predicate, ir_builder.ltExpr(producer_index, right_limit));
+        predicate =
+            ir_builder
+                .andExpr(
+                    predicate, ir_builder.ltExpr(producer_index, right_limit))
+                ->as<kir::Bool>();
       } else if (gather_expr) {
-        predicate = makeAndExpr(
-            predicate, ir_builder.ltExpr(consumer_index, right_limit));
+        predicate =
+            ir_builder
+                .andExpr(
+                    predicate, ir_builder.ltExpr(consumer_index, right_limit))
+                ->as<kir::Bool>();
         if (consumer_index != producer_index) {
-          predicate = makeAndExpr(
-              predicate, ir_builder.ltExpr(producer_index, right_limit));
+          predicate =
+              ir_builder
+                  .andExpr(
+                      predicate, ir_builder.ltExpr(producer_index, right_limit))
+                  ->as<kir::Bool>();
         }
       } else {
-        predicate = makeAndExpr(
-            predicate, ir_builder.ltExpr(consumer_index, right_limit));
+        predicate =
+            ir_builder
+                .andExpr(
+                    predicate, ir_builder.ltExpr(consumer_index, right_limit))
+                ->as<kir::Bool>();
       }
     } else {
-      auto padding_max_offset = makeAddExpr(
+      auto padding_max_offset = ir_builder.addExpr(
           out_tv->domain()->rootDomain()[i]->extent(), halo_info.width());
 
-      predicate = makeAndExpr(
-          predicate, ir_builder.ltExpr(indices[i], padding_max_offset));
+      predicate =
+          ir_builder
+              .andExpr(
+                  predicate, ir_builder.ltExpr(indices[i], padding_max_offset))
+              ->as<kir::Bool>();
     }
   }
 
@@ -348,7 +309,7 @@ kir::Bool* ShiftPredicateInserter::getPredicate(
       predicate = ir_builder.create<kir::Bool>(false);
     }
   } else {
-    predicate = makeAndExpr(predicate, thread_pred);
+    predicate = ir_builder.andExpr(predicate, thread_pred)->as<kir::Bool>();
   }
 
   return predicate;
@@ -363,8 +324,8 @@ AxisHaloInfo::AxisHaloInfo() {
 
 kir::Int* AxisHaloInfo::width() const {
   auto gpu_lower = GpuLower::current();
-  kir::IrBuilder ir_builder(gpu_lower->kernel());
-  return makeAddExpr(width(0), width(1));
+  kir::SimplifyingIrBuilder ir_builder(gpu_lower->kernel());
+  return ir_builder.addExpr(width(0), width(1))->as<kir::Int>();
 }
 
 kir::Int* AxisHaloInfo::width(int pos) const {
@@ -532,7 +493,7 @@ void HaloInfo::propagateRootAxisInfo(
   const auto& c_root = consumer->getRootDomain();
 
   auto gpu_lower = GpuLower::current();
-  kir::IrBuilder ir_builder(gpu_lower->kernel());
+  kir::SimplifyingIrBuilder ir_builder(gpu_lower->kernel());
 
   for (size_t i = 0; i < c_root.size(); ++i) {
     auto c_id = c_root[i];
@@ -572,7 +533,10 @@ void HaloInfo::propagateRootAxisInfo(
         p_info.merge(c_info);
       } else {
         int pos = (offset > 0) ? 0 : 1;
-        p_info.merge(pos, makeAddExpr(c_info.width(pos), std::abs(offset)));
+        p_info.merge(
+            pos,
+            ir_builder.addExpr(c_info.width(pos), std::abs(offset))
+                ->as<kir::Int>());
       }
     } else if (auto gather_op = dynamic_cast<GatherOp*>(expr)) {
       const auto window_dim =
@@ -583,15 +547,16 @@ void HaloInfo::propagateRootAxisInfo(
       }
       const auto& pad_dim = gather_op->padWidth()[i];
       const auto pad_dim0 = gpu_lower->lowerValue(pad_dim[0])->as<kir::Int>();
-      p_info.merge(0, makeAddExpr(c_info.width(0), pad_dim0));
+      p_info.merge(
+          0, ir_builder.addExpr(c_info.width(0), pad_dim0)->as<kir::Int>());
       // The right-side halo is propagated as:
       //   consumer_right_halo + (window_dim - 1 - left_padding)
       p_info.merge(
           1,
           ir_builder
               .subExpr(
-                  makeAddExpr(c_info.width(1), window_dim),
-                  makeAddExpr(pad_dim0, 1))
+                  ir_builder.addExpr(c_info.width(1), window_dim),
+                  ir_builder.addExpr(pad_dim0, 1))
               ->as<kir::Int>());
     } else {
       p_info.merge(c_info);
