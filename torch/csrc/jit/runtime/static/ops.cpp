@@ -15,6 +15,7 @@
 #include <ATen/native/quantized/cpu/qembeddingbag.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/runtime/static/impl.h>
 #include <torch/csrc/jit/runtime/static/te_wrapper.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
@@ -199,7 +200,7 @@ bool disableUnsafeMathOp(const char* op_name) {
   // not guarantee bit exactness vs the jit interpreter. Note aten::relu is not
   // included even though it uses NNC because the results of relu should always
   // match.
-  static const std::unordered_set<std::string> fast_ops{
+  static const FastSet<std::string> fast_ops{
       "aten::add", "aten::tanh", "aten::sigmoid", "aten::logit"};
   return fast_ops.count(op_name) > 0;
 }
