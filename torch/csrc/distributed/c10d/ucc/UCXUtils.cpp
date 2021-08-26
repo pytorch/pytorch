@@ -5,6 +5,7 @@ namespace c10d {
 
 class UCPContext {
   ucp_context_h context;
+  static void request_init_callback(void* request);
 public:
   UCPContext();
 #if false
@@ -12,6 +13,19 @@ public:
   ~UCPContext()  { ucp_cleanup(context); }
 #endif
   ucp_context_h get() const { return context; }
+};
+
+
+void request_init_callback(void* request) {
+  // This is a callback funtion used to initialize UCP context.
+  // This function is only invoked the very first time when
+  // a request memory is allocated. A request memory may be
+  // reused after `ucp_request_free`, if this is the case,
+  // this function will NOT be invoked. So besides this function
+  // we also need to manually reset the request memory before
+  // every `ucp_request_free`.
+  auto r = reinterpret_cast<UCPRequest::Data *>(request);
+  r->reset();
 };
 
 UCPContext::UCPContext() {
@@ -28,16 +42,7 @@ UCPContext::UCPContext() {
       UCP_PARAM_FIELD_REQUEST_INIT | UCP_PARAM_FIELD_REQUEST_CLEANUP;
   params.request_size = sizeof(UCPRequest::Data);
   params.features = UCP_FEATURE_TAG;
-  params.request_init = [](void* request) {
-    // This function is only invoked the very first time when
-    // a request memory is allocated. A request memory may be
-    // reused after `ucp_request_free`, if this is the case,
-    // this function will NOT be invoked. So besides this function
-    // we also need to manually reset the request memory before
-    // every `ucp_request_free`.
-    auto r = reinterpret_cast<UCPRequest::Data *>(request);
-    r->reset();
-  };
+  params.request_init = request_init_callback;
   params.request_cleanup = [](void*) {};
   st = ucp_init(&params, config, &context);
   ucp_config_release(config);
@@ -56,6 +61,20 @@ UCPWorker::UCPWorker() {
   ucs_status_t st = ucp_worker_create(getUCPContext(), &worker_params, &worker);
   TORCH_UCX_CHECK(st, "Failed to create UCP worker.");
 }
+
+void UCPWorker::recv_callback(
+  void* request, ucs_status_t status,
+  const ucp_tag_recv_info_t* info, void* user_data)
+{
+  // This is a callback funtion used for recv.
+  // http://openucx.github.io/ucx/api/latest/html/group___u_c_p___c_o_m_m.html#ga70e110cf7c85ed5f281bd52438488d75
+  auto r = reinterpret_cast<UCPRequest::Data *>(request);
+  r->status = status;
+  if (status == UCS_OK) {
+    // The info descriptor is valid only if the status is UCS_OK.
+    r->info = *info;
+  }
+};
 
 UCPWorker::Address UCPWorker::address() const {
   ucp_address_t* local_addr;
@@ -119,18 +138,7 @@ std::shared_ptr<UCPRequest> UCPWorker::submit_p2p_request(
   ucp_request_param_t params;
   params.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK | UCP_OP_ATTR_FIELD_MEMORY_TYPE | UCP_OP_ATTR_FLAG_NO_IMM_CMPL;
   params.memory_type = getUCSMemoryType(device);
-  params.cb.recv = [](void* request,
-                      ucs_status_t status,
-                      const ucp_tag_recv_info_t* info,
-                      void* user_data) {
-    // http://openucx.github.io/ucx/api/latest/html/group___u_c_p___c_o_m_m.html#ga70e110cf7c85ed5f281bd52438488d75
-    auto r = reinterpret_cast<UCPRequest::Data *>(request);
-    r->status = status;
-    if (status == UCS_OK) {
-      // The info descriptor is valid only if the status is UCS_OK.
-      r->info = *info;
-    }
-  };
+  params.cb.recv = recv_callback;
   ucs_status_ptr_t request = work(&params);
   TORCH_UCX_CHECK_MAYBE_INPROGRESS(UCS_PTR_STATUS(request), "Failed to start p2p operation.");
   progress();

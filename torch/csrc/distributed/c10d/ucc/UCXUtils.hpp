@@ -42,6 +42,8 @@ public:
     }
   };
 
+  static void request_init_callback(void* request);
+
   ucs_status_t status() const {
     if (data == nullptr) {
       return UCS_OK;
@@ -85,6 +87,9 @@ class UCPEndpoint;
 
 class UCPWorker: public std::enable_shared_from_this<UCPWorker> {
   ucp_worker_h worker;
+  static void recv_callback(
+    void* request, ucs_status_t status,
+    const ucp_tag_recv_info_t* info, void* user_data);
 public:
   UCPWorker();
   ucp_worker_h get() const { return worker; }
