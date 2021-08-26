@@ -9708,7 +9708,7 @@ Args:
 
 Keyword args:
     out ((Tensor, Tensor), optional): tuple of two tensors to write
-    the output to. Ignored if `None`. Default: `None`.
+        the output to. Ignored if `None`. Default: `None`.
 
 Returns:
     A namedtuple `(solution, cloned_coefficient)` where `cloned_coefficient`
