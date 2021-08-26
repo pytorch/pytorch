@@ -13,19 +13,10 @@
 #include <THC/generic/THCTensorMath.h>
 #include <THC/THCGenerateBFloat16Type.h>
 
-#include <THC/generic/THCTensorMathMagma.h>
-#include <THC/THCGenerateAllTypes.h>
-
 #include <THC/generic/THCTensorMathPairwise.h>
 #include <THC/THCGenerateAllTypes.h>
 
 #include <THC/generic/THCTensorMathPairwise.h>
-#include <THC/THCGenerateBoolType.h>
-
-#include <THC/generic/THCTensorScatterGather.h>
-#include <THC/THCGenerateAllTypes.h>
-
-#include <THC/generic/THCTensorScatterGather.h>
 #include <THC/THCGenerateBoolType.h>
 
 #endif

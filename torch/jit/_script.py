@@ -912,6 +912,8 @@ if _enabled:
         "_tracing_name",
         "eval",
         "train",
+        "get_extra_state",
+        "set_extra_state"
     }
 
     def _make_fail(name):
@@ -1336,6 +1338,10 @@ def _get_overloads(obj):
     uncompiled_overloads = _jit_internal._get_fn_overloads(qual_name)
     if uncompiled_overloads is None:
         return existing_compiled_fns
+
+    if obj in uncompiled_overloads:
+        raise RuntimeError(_jit_internal.get_overload_no_implementation_error_message(
+            'function', obj))
 
     compiled_fns = []
     for overload_fn in uncompiled_overloads:

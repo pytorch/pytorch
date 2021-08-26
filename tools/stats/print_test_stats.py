@@ -630,7 +630,6 @@ class TestFile:
 
     def append(self, test_case: TestCase, test_type: str) -> None:
         is_multi_test = self.name == 'test_cpp_extensions_aot' or \
-            self.name == 'distributed/test_distributed_fork' or \
             self.name == 'distributed/test_distributed_spawn' or \
             self.name == 'distributed/test_c10d_gloo' or \
             self.name == 'cpp'  # The caffe2 cpp tests spawn duplicate test cases as well.
@@ -781,7 +780,7 @@ def assemble_s3_object(
 
 
 def send_report_to_s3(head_report: Version2Report) -> None:
-    job = os.environ.get('JOB_BASE_NAME')
+    job = os.getenv('JOB_BASE_NAME', os.environ.get('CIRCLE_JOB'))
     sha1 = os.environ.get('CIRCLE_SHA1')
     branch = os.environ.get('CIRCLE_BRANCH', '')
     now = datetime.datetime.utcnow().isoformat()
