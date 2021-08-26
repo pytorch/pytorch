@@ -14,7 +14,9 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS, make_tensor)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCPU, dtypes, dtypesIfCUDA, dtypesIfCPU,
-    onlyOnCPUAndCUDA, onlyCUDA, largeTensorTest, precisionOverride)
+    onlyOnCPUAndCUDA, onlyCUDA, largeTensorTest, ops, precisionOverride)
+from torch.testing._internal.common_methods_invocations import (
+    ReductionOpInfo, reduction_ops)
 
 # TODO: replace with make_tensor
 def _generate_input(shape, dtype, device, with_extremal):
@@ -54,6 +56,21 @@ def _rand_shape(dim, min_size, max_size):
     return tuple(shape)
 
 class TestReductions(TestCase):
+
+    ###########################################################################
+    # ReductionOpInfo unit tests
+    ###########################################################################
+
+    @ops(reduction_ops, allowed_dtypes=[torch.float])
+    def test_dim_default(self, device, dtype, op: ReductionOpInfo):
+        """Tests that the default behavior is to reduce all dimensions."""
+        t = make_tensor((2, 3), device, dtype)
+        args, kwargs = next(op.generate_args_kwargs(t))
+        self.assertEqual(op(t, *args, **kwargs).ndim, 0)
+
+    ###########################################################################
+    # TODO: Legacy tests - port to ReductionOpInfo
+    ###########################################################################
 
     def test_var_unbiased(self, device):
         tensor = torch.randn(100, device=device)
