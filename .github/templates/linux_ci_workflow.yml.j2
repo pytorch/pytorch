@@ -521,7 +521,7 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path: ${{ matrix.docs_type == 'python' && 'pytorch.github.io/docs/merge' || 'cppdocs/ '}}
-          s3-prefix: ${{ github.repository }}/pr-previews/${{ github.event.pull_request.number }}/${{ matrix.docs_type }}
+          s3-prefix: ${{ github.repository }}/pr-previews/${{ github.event.pull_request.number }}/${{ matrix.docs_type == 'python' && '' || 'cppdocs' }}
       - name: Archive artifacts into zip
         run: |
           zip -r "docs_${DOCS_TYPE}.zip" "${GITHUB_WORKSPACE}/pytorch.github.io" "${GITHUB_WORKSPACE}/cppdocs"
