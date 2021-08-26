@@ -2843,7 +2843,6 @@ def cross_entropy(
         )
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
-    # Use _cross_entropy_loss when JIT catches up
     return torch._C._nn.cross_entropy_loss(input, target, weight, _Reduction.get_enum(reduction), ignore_index, label_smoothing)
 
 
