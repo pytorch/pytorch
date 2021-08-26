@@ -656,6 +656,11 @@ class {module_name}(torch.nn.Module):
         orig_str = super().__str__()
         return '\n'.join([orig_str, self._code])
 
+    def _replicate_for_data_parallel(self):
+        new_gm = self.__copy__()
+        new_gm._is_replica = True
+        return new_gm
+
 # workarounds for issues in __torch_function__
 
 # WAR for __torch_function__ not handling tensor lists,
