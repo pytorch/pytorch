@@ -168,9 +168,10 @@ endif()
 
 # Metal
 if(USE_PYTORCH_METAL_EXPORT)
-   # Add files needed from optimized_for_mobile
-   set(all_cpu_cpp ${all_cpu_cpp} ${metal_cpp} ${metal_prepack_cpp})
+  # Add files needed from exporting metal models(optimized_for_mobile)
+  set(all_cpu_cpp ${all_cpu_cpp} ${metal_cpp} ${metal_prepack_cpp})
 elseif(APPLE AND USE_PYTORCH_METAL)
+  # Compile Metal kernels
   set(all_cpu_cpp ${all_cpu_cpp} ${metal_cpp} ${native_metal_srcs})
 else()
   set(all_cpu_cpp ${all_cpu_cpp} ${metal_cpp})
