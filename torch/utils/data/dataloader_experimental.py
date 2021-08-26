@@ -5,10 +5,10 @@ import time
 from typing import Any, List
 
 import torch.utils.data.backward_compatibility
+
 import torch.utils.data.sharding
 from torch.utils.data import DataLoader, IterDataPipe, communication
-from torch.utils.data.datapipes.iter import IterableAsDataPipe
-
+from torch.utils.data.datapipes.iter import IterableWrapper
 
 class _ThreadingDataLoader2:
 
@@ -134,7 +134,7 @@ class DataLoader2:
             else:
                 if collate_fn is None:
                     collate_fn = torch.utils.data._utils.collate.default_collate
-                datapipe = IterableAsDataPipe(data_loader).batch(
+                datapipe = IterableWrapper(data_loader).batch(
                     batch_size, drop_last=drop_last).map(collate_fn)
                 return datapipe
         else:
