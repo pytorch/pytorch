@@ -1968,10 +1968,15 @@ except RuntimeError as e:
 class TestDataLoader2(TestCase):
     @skipIfNoDill
     def test_basics(self):
-        dp = IterableAsDataPipe(list(range(10)))
+        # TODO(VitalyFedyunin): This test will start breaking if we remove guaranteed order
+        # of traversing workers
+        dp = IterableAsDataPipe(list(range(1000)))
         dl = DataLoader(dp, batch_size=3, collate_fn=lambda x: x, num_workers=2)
         dl2 = DataLoader2(dp, batch_size=3, collate_fn=lambda x: x, num_workers=2)
+        dl2_threading = DataLoader2(dp, batch_size=3, collate_fn=lambda x: x, num_workers=2, parallelism_mode='thread')
         self.assertEquals(list(dl), list(dl2))
+        self.assertEquals(list(dl), list(dl2_threading))
+
 
 
 @unittest.skipIf(
@@ -1988,7 +1993,7 @@ class TestDataLoader2_EventLoop(TestCase):
 
         it = list(range(100))
         numbers_dp = IterableAsDataPipe(it)
-        (process, req_queue, res_queue) = eventloop.SpawnThreadForDataPipeline(numbers_dp)
+        (process, req_queue, res_queue, _thread_local_datapipe) = eventloop.SpawnThreadForDataPipeline(numbers_dp)
 
         process.start()
         local_datapipe = iter.QueueWrapper(
