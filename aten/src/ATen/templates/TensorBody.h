@@ -52,6 +52,7 @@ struct Node;
 
 namespace at {
 
+class OptionalTensorRef;
 class Tensor;
 using TensorList = ArrayRef<Tensor>;
 
@@ -96,6 +97,7 @@ class TORCH_API Tensor {
   explicit Tensor(unsafe_borrow_t, const Tensor& rhs)
       : impl_(c10::intrusive_ptr<at::TensorImpl, UndefinedTensorImpl>::reclaim(rhs.impl_.get())) {}
   friend MaybeOwnedTraits<Tensor>;
+  friend OptionalTensorRef;
 
  public:
   Tensor(){};
@@ -490,6 +492,12 @@ class TORCH_API Tensor {
   bool is_mlc() const {
     // NB: this is not a native function to avoid dispatching overhead.
     return impl_->is_mlc();
+  }
+
+  /// Returns if a `Tensor` is ort tensor.
+  bool is_ort() const {
+    // NB: this is not a native function to avoid dispatching overhead.
+    return impl_->is_ort();
   }
 
   /// Returns if a `Tensor` is vulkan tensor.
