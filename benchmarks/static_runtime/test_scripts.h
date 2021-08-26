@@ -138,6 +138,22 @@ const auto reshape_inplace_script = R"JIT(
       return (d, e, f)
 )JIT";
 
+const auto reshape_inplace_script_1 = R"JIT(
+  def forward(self, inp: Tensor, shape: List[int], flag: bool):
+    if flag:
+      a = inp + inp
+      b = a.reshape(shape)
+      c = b.sigmoid()
+    else:
+      a = inp * inp
+      b = a.sigmoid_()
+      c = b.reshape(shape)
+    d = c + c
+    e = a + a
+    f = b + b
+    return (d, e, f)
+)JIT";
+
 const auto sigmoid_inplace_script = R"JIT(
   def forward(self, inp: Tensor):
       a = torch.sigmoid(inp, out=inp).clone()
@@ -585,6 +601,11 @@ const auto if_script = R"JIT(
 const auto var_cat_script = R"JIT(
   def forward(self, inp1: Tensor, inp2: Tensor, dim: int):
    return torch.cat([inp1, inp2], dim).clone()
+)JIT";
+
+const auto var_stack_script = R"JIT(
+  def forward(self, inp1: Tensor, inp2: Tensor, dim: int):
+   return torch.stack([inp1, inp2], dim).clone()
 )JIT";
 
 const auto isinstance_int_script = R"JIT(

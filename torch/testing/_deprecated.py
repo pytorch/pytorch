@@ -5,7 +5,7 @@ we don't internalize without warning, but still go through a deprecation cycle.
 
 import functools
 import warnings
-from typing import Any, Callable, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple, Union
 
 import torch
 
@@ -19,17 +19,18 @@ __all__ = [
 ]
 
 
-def warn_deprecated(instructions: str) -> Callable:
+def warn_deprecated(instructions: Union[str, Callable[[str, Tuple[Any, ...], Dict[str, Any], Any], str]]) -> Callable:
     def outer_wrapper(fn: Callable) -> Callable:
-        msg = (
-            f"torch.testing.{fn.__name__} is deprecated and will be removed in a future release. "
-            f"{instructions.strip()}"
-        )
+        name = fn.__name__
+        head = f"torch.testing.{name}() is deprecated and will be removed in a future release. "
 
         @functools.wraps(fn)
         def inner_wrapper(*args: Any, **kwargs: Any) -> Any:
+            return_value = fn(*args, **kwargs)
+            tail = instructions(name, args, kwargs, return_value) if callable(instructions) else instructions
+            msg = (head + tail).strip()
             warnings.warn(msg, FutureWarning)
-            return fn(*args, **kwargs)
+            return return_value
 
         return inner_wrapper
 
@@ -88,19 +89,15 @@ def assert_allclose(
     )
 
 
+def _dtype_getter_instructions(name: str, args: Tuple[Any], kwargs: Dict[str, Any], return_value: Any) -> str:
+    return f"This call to {name}(...) can be replaced with {return_value}."
+
+
+# We iterate over all public dtype getters and expose them here with an added deprecation warning
 for name in _dtype_getters.__all__:
     if name.startswith("_"):
         continue
-
     fn = getattr(_dtype_getters, name)
 
-    if name == "get_all_math_dtypes":
-        instructions = (
-            f"For CUDA devices, the call can be replaced with {fn('cuda')}. "
-            f"For all other devices, it can be replaced with {fn('cpu')}."
-        )
-    else:
-        instructions = f"The unparametrized call can be replaced with {fn()}"
-
-    globals()[name] = warn_deprecated(instructions)(fn)
+    globals()[name] = warn_deprecated(_dtype_getter_instructions)(fn)
     __all__.append(name)
