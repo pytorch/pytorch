@@ -88,13 +88,18 @@ TORCH_META_FUNC(gather)
   const Tensor& result = maybe_get_output(0);
   int64_t wrapped_dim = at::maybe_wrap_dim(dim, self.dim());
 
-  if (result.defined()) {
-    at::native::resize_output(result, index.sizes());
+  // Memory overlap checks need to be done after resizing (if required) is done.
+  // But it only makes sense to do these checks when result was defined, hence
+  // the boolean variable `check_result` here.
+  // For more details, see: https://github.com/pytorch/pytorch/pull/63312#discussion_r694794832
+  // and https://github.com/pytorch/pytorch/issues/63837
+  bool check_result = result.defined();
+  set_output(index.sizes(), self.options());
+  if (check_result) {
     at::assert_no_internal_overlap(result);
     at::assert_no_overlap(result, self);
     at::assert_no_partial_overlap(result, index);
   }
-  set_output(index.sizes(), self.options());
 
   TORCH_CHECK(
     index.scalar_type() == at::ScalarType::Long,
