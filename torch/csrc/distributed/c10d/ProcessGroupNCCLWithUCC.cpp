@@ -32,12 +32,17 @@ inline bool ucc_enabled() {
 
 namespace c10d {
 
+// The UCC process group is build to a separate libucc.so.
+// This library will be loaded at runtime, and UCC will will
+// be available only if the dynamic load is successful.
+static at::DynamicLibrary libucc("libtorch_ucc.so", nullptr, true);
+
 ProcessGroupNCCLWithUCC::ProcessGroupNCCLWithUCC(
   const c10::intrusive_ptr<Store>& store,
   int rank,
   int size,
   c10::intrusive_ptr<Options> options):
-  ProcessGroup(rank, size), options_(options), libucc("libtorch_ucc.so", nullptr, true)
+  ProcessGroup(rank, size), options_(options)
 {
 #ifdef USE_C10D_NCCL
   pg_nccl = c10::make_intrusive<ProcessGroupNCCL>(store, rank, size, options);
@@ -304,6 +309,10 @@ void ProcessGroupNCCLWithUCC::groupEnd() {
 #endif
 }
 
-} // namespace c10d
+bool ProcessGroupNCCLWithUCC::is_ucc_available() {
+  return libucc.available() && ucc_enabled();
+}
 
-#endif // USE_C10D_NCCL
+#endif // defined(USE_C10D_NCCL) || defined(USE_C10D_UCC)
+
+} // namespace c10d

@@ -1427,6 +1427,8 @@ Example::
       "_group_start", []() { ::c10d::ProcessGroupNCCLWithUCC::groupStart(); });
   processGroupNCCL.def_static(
       "_group_end", []() { ::c10d::ProcessGroupNCCLWithUCC::groupEnd(); });
+  processGroupNCCL.def_static(
+      "is_ucc_available", []() { return ::c10d::ProcessGroupNCCLWithUCC::is_ucc_available(); });
 #endif
 
 #ifdef USE_C10D_MPI

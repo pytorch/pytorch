@@ -35,6 +35,7 @@ from .rendezvous import rendezvous, register_rendezvous_handler  # noqa: F401
 _MPI_AVAILABLE = True
 _NCCL_AVAILABLE = True
 _GLOO_AVAILABLE = True
+_UCC_AVAILABLE = False
 
 _pickler = pickle.Pickler
 _unpickler = pickle.Unpickler
@@ -46,6 +47,7 @@ except ImportError:
 
 try:
     from torch._C._distributed_c10d import ProcessGroupNCCL
+    _UCC_AVAILABLE = ProcessGroupNCCL.is_ucc_available()
 except ImportError:
     _NCCL_AVAILABLE = False
 
@@ -368,6 +370,13 @@ def is_nccl_available():
     Checks if the NCCL backend is available.
     """
     return _NCCL_AVAILABLE
+
+
+def is_ucc_available():
+    """
+    Checks if the UCC backend is available.
+    """
+    return _UCC_AVAILABLE
 
 
 def is_gloo_available():

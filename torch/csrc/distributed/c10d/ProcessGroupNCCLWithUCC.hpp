@@ -135,14 +135,11 @@ public:
 
   static void groupEnd();
 
+  static bool is_ucc_available();
+
 private:
   c10::intrusive_ptr<Options> options_;
   c10::intrusive_ptr<ProcessGroup> pg_nccl;
-
-  // The UCC process group is build to a separate libucc.so.
-  // This library will be loaded at runtime, and UCC will will
-  // be available only if the dynamic load is successful.
-  at::DynamicLibrary libucc;
   c10::intrusive_ptr<ProcessGroup> pg_ucc;
 };
 
