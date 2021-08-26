@@ -1,5 +1,4 @@
 import warnings
-import torch.nn as nn
 from torch.utils.data import IterDataPipe, _utils, functional_datapipe, DataChunk
 from typing import Callable, Dict, Iterator, Optional, Sized, Tuple, TypeVar
 
@@ -26,8 +25,8 @@ def default_fn(data):
 
 
 @functional_datapipe('map')
-class MapIterDataPipe(IterDataPipe[T_co]):
-    r""" :class:`MapIterDataPipe`.
+class MapperIterDataPipe(IterDataPipe[T_co]):
+    r""" :class:`MapperIterDataPipe`.
 
     Iterable DataPipe to run a function over each item from the source DataPipe.
     The function can be any regular python function or partial object. Lambda
@@ -108,8 +107,8 @@ class MapIterDataPipe(IterDataPipe[T_co]):
 
 
 @functional_datapipe('collate')
-class CollateIterDataPipe(MapIterDataPipe):
-    r""" :class:`CollateIterDataPipe`.
+class CollatorIterDataPipe(MapperIterDataPipe):
+    r""" :class:`CollatorIterDataPipe`.
 
     Iterable DataPipe to collate samples from datapipe to Tensor(s) by `util_.collate.default_collate`,
     or customized Data Structure by collate_fn.
@@ -153,35 +152,3 @@ class CollateIterDataPipe(MapIterDataPipe):
                  fn_kwargs: Optional[Dict] = None,
                  ) -> None:
         super().__init__(datapipe, fn=collate_fn, fn_args=fn_args, fn_kwargs=fn_kwargs)
-
-
-@functional_datapipe('legacy_transforms')
-class TransformsIterDataPipe(MapIterDataPipe):
-    r""" :class:`TransformsIterDataPipe`.
-
-    Iterable DataPipe to use transform(s) from torchvision or torchaudio to transform
-    data from datapipe.
-    args:
-        datapipe: Iterable DataPipe being transformed
-        transforms: A transform or a sequence of transforms from torchvision or torchaudio.
-    """
-
-    def __init__(self,
-                 datapipe: IterDataPipe,
-                 transforms: Callable,
-                 ) -> None:
-        # Type checking for transforms
-        transforms_types: Tuple = (nn.Module, )
-        try:
-            # Specific types of transforms other than `nn.Module` from torchvision
-            import torchvision.transforms as tsfm
-            transforms_types += (tsfm.Compose, tsfm.RandomChoice, tsfm.RandomOrder,
-                                 tsfm.ToPILImage, tsfm.ToTensor, tsfm.Lambda)
-        except ImportError:
-            pass
-
-        if not isinstance(transforms, transforms_types):
-            raise TypeError("`transforms` are required to be a callable from "
-                            "torchvision.transforms or torchaudio.transforms")
-
-        super().__init__(datapipe, fn=transforms)
