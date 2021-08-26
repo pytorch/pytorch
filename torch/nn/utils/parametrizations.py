@@ -28,7 +28,7 @@ def _make_orthogonal(A):
     return Q
 
 
-class OrthMaps(Enum):
+class _OrthMaps(Enum):
     matrix_exp = auto()
     cayley = auto()
     householder = auto()
@@ -39,7 +39,7 @@ class _Orthogonal(Module):
 
     def __init__(self,
                  weight,
-                 orthogonal_map: OrthMaps,
+                 orthogonal_map: _OrthMaps,
                  *,
                  use_trivialization=True) -> None:
         super().__init__()
@@ -56,7 +56,7 @@ class _Orthogonal(Module):
         # not every combination of `(A, tau)` gives a unitary matrix, meaning that if we optimise
         # them as independent tensors we would not maintain the constraint
         # An equivalent reasoning holds for rectangular matrices
-        if weight.is_complex() and orthogonal_map == OrthMaps.householder:
+        if weight.is_complex() and orthogonal_map == _OrthMaps.householder:
             raise ValueError("The householder parametrization does not support complex tensors.")
 
         self.shape = weight.shape
@@ -71,7 +71,7 @@ class _Orthogonal(Module):
             X = X.transpose(-2, -1)
             n, k = k, n
         # Here n > k and X is a tall matrix
-        if self.orthogonal_map == OrthMaps.matrix_exp or self.orthogonal_map == OrthMaps.cayley:
+        if self.orthogonal_map == _OrthMaps.matrix_exp or self.orthogonal_map == _OrthMaps.cayley:
             # We just need n x k - k(k-1)/2 parameters
             X = X.tril()
             if n != k:
@@ -79,9 +79,9 @@ class _Orthogonal(Module):
                 X = torch.cat([X, X.new_zeros(n, n - k).expand(*X.shape[:-2], -1, -1)], dim=-1)
             A = X - X.transpose(-2, -1).conj()
             # A is skew-symmetric (or skew-hermitian)
-            if self.orthogonal_map == OrthMaps.matrix_exp:
+            if self.orthogonal_map == _OrthMaps.matrix_exp:
                 Q = torch.matrix_exp(A)
-            elif self.orthogonal_map == OrthMaps.cayley:
+            elif self.orthogonal_map == _OrthMaps.cayley:
                 # Computes the Cayley retraction (I+A/2)(I-A/2)^{-1}
                 Id = torch.eye(n, dtype=A.dtype, device=A.device)
                 Q = torch.linalg.solve(torch.add(Id, A, alpha=-0.5), torch.add(Id, A, alpha=0.5))
@@ -129,11 +129,11 @@ class _Orthogonal(Module):
             # gives the original tensor. It is not clear how to do this.
             # Perhaps via some algebraic manipulation involving the QR like that of
             # Corollary 2.2 in Edelman, Arias and Smith?
-            if self.orthogonal_map == OrthMaps.cayley or self.orthogonal_map == OrthMaps.matrix_exp:
+            if self.orthogonal_map == _OrthMaps.cayley or self.orthogonal_map == _OrthMaps.matrix_exp:
                 raise NotImplementedError("It is not possible to assign to the matrix exponential "
                                           "or the Cayley parametrizations when use_trivialization=False.")
 
-            # If parametrization == OrthMaps.householder, make Q orthogonal via the QR decomposition.
+            # If parametrization == _OrthMaps.householder, make Q orthogonal via the QR decomposition.
             # Here Q is always real because we do not support householder and complex matrices.
             # See note [Householder complex]
             A, tau = torch.geqrf(Q)
@@ -193,7 +193,7 @@ def orthogonal(module: Module,
 
     If the tensor has more than two dimensions, we consider it as a batch of matrices of shape `(..., m, n)`.
 
-    The matrix :math:`Q` may be parametrized via three different ``orthogonal_map``s in terms of the original tensor:
+    The matrix :math:`Q` may be parametrized via three different ``orthogonal_map`` in terms of the original tensor:
 
     - ``"matrix_exp"``/``"cayley"``:
       the :func:`~torch.matrix_exp` :math:`Q = \exp(A)` and the `Cayley map`_
@@ -270,7 +270,7 @@ def orthogonal(module: Module,
     if orthogonal_map is None:
         orthogonal_map = "matrix_exp" if weight.size(-2) == weight.size(-1) or weight.is_complex() else "householder"
 
-    orth_enum = getattr(OrthMaps, orthogonal_map, None)
+    orth_enum = getattr(_OrthMaps, orthogonal_map, None)
     if orth_enum is None:
         raise ValueError('orthogonal_map has to be one of "matrix_exp", "cayley", "householder". '
                          f'Got: {orthogonal_map}')
