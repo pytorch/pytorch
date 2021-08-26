@@ -3122,9 +3122,17 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
 
         # Handle types with contained types
         contained = getattr(t, '__args__', None) or []
+
+        # Callables contain a bare List for arguments
         contained = t if isinstance(t, list) else contained
+
+        # Python 3.8 puts type vars into __args__ for unbound types such as Dict
+        if all(isinstance(ct, typing.TypeVar) for ct in contained):
+            contained = []
+
         contained_type_annots = [self._annotation_type_to_stable_str(ct, sig_str) for ct in contained]
         contained_type_str = f'[{", ".join(contained_type_annots)}]' if len(contained_type_annots) > 0 else ''
+
 
         origin = getattr(t, '__origin__', None)
         if origin is None:
