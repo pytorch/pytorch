@@ -529,10 +529,8 @@ class Tracer(TracerBase):
 
         return attr_val
 
-    # TODO: skipping back-compat check here. In Python 3.6, Union[torch.nn.Module, Callable]
-    # is interpreted as Callable by `inspect.signature` for some reason
-    # @compatibility(is_backward_compatible=True)
-    def trace(self, root: Union[torch.nn.Module, Callable], concrete_args: Optional[Dict[str, Any]] = None) -> Graph:
+    @compatibility(is_backward_compatible=True)
+    def trace(self, root: Union[torch.nn.Module, Callable[..., Any]], concrete_args: Optional[Dict[str, Any]] = None) -> Graph:
         """
         Trace ``root`` and return the corresponding FX ``Graph`` representation. ``root``
         can either be an ``nn.Module`` instance or a Python callable.
@@ -854,10 +852,8 @@ def wrap(fn_or_name : Union[str, Callable]):
     _wrapped_fns_to_patch.append((f.f_globals, fn_name))
     return fn_or_name
 
-# TODO: skipping back-compat check here. In Python 3.6, Union[torch.nn.Module, Callable]
-# is interpreted as Callable by `inspect.signature` for some reason
-# @compatibility(is_backward_compatible=True)
-def symbolic_trace(root : Union[torch.nn.Module, Callable], concrete_args: Optional[Dict[str, Any]] = None,
+@compatibility(is_backward_compatible=True)
+def symbolic_trace(root : Union[torch.nn.Module, Callable[..., Any]], concrete_args: Optional[Dict[str, Any]] = None,
                    enable_cpatching: bool = False) -> GraphModule:
     """Symbolic tracing API
 
