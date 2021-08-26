@@ -376,7 +376,7 @@ std::vector<Tensor> tensor_split_indices_batching_rule(const Tensor& self, IntAr
 
 // Checks if the batch dims in `bdims` appear at the front of the tensor.
 static bool areBdimsAtFrontInOrder(BatchDimsRef bdims) {
-  for (uint64_t idx = 0; idx < bdims.size(); idx++) {
+  for (int64_t idx = 0; idx < (int64_t)bdims.size(); idx++) {
     if (bdims[idx].dim() != idx) {
       return false;
     }
