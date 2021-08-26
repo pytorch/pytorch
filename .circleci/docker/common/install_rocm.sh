@@ -17,6 +17,8 @@ install_magma() {
     else
       amdgpu_targets=`rocm_agent_enumerator | grep -v gfx000 | sort -u | xargs`
     fi
+    # Override default GPU_TARGET for Magma in make.inc
+    echo 'GPU_TARGET = $(amdgpu_targets)' >> make.inc
     for arch in $amdgpu_targets; do
       echo "DEVCCFLAGS += --amdgpu-target=$arch" >> make.inc
     done
