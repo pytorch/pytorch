@@ -91,7 +91,7 @@ void get_model_stream(PyTorchStreamReader& reader, std::stringstream& out) {
 
 // The write_archive_current function is used for bytecode from version v5 to
 // v7 (the latest bytecode version). writeArchiveV4 is the export function to
-// generate bytecode for version 4. This write archvie function may change in
+// generate bytecode.pkl for version 4. This write archvie function may change in
 // export_module.cpp, however we don't have a way to keep the old export
 // function in the codebase. To be able to export the model in old format, we
 // keep a record of the export function here.
