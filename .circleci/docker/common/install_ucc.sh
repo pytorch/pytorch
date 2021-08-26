@@ -9,6 +9,9 @@ cd /tmp
 git clone https://github.com/openucx/ucx.git
 git clone https://github.com/openucx/ucc.git
 
+export CC=/usr/bin/gcc
+export CXX=/usr/bin/g++
+
 pushd ucx
 ./autogen.sh
 # ./contrib/configure-release-mt --prefix=$UCX_HOME --with-cuda=/usr/local/cuda/
