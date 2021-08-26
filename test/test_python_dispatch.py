@@ -85,7 +85,7 @@ class LoggingTensorHandler(logging.Handler):
         self.log_list.append(f'{fmt_rets} = {record.msg}({fmt_args})')
 
 def log_input(name: str, var: object):
-    logging.getLogger("LoggingTensor").info(f"input %s %s %s", (name,), {}, (var,))
+    logging.getLogger("LoggingTensor").info("input %s %s %s", (name,), {}, (var,))
 
 @contextlib.contextmanager
 def capture_logs() -> Iterator[List[str]]:
