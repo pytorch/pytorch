@@ -171,6 +171,7 @@ std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> cudnn_batch_norm_out(
         wdesc.desc(),
         nullptr,
         &workspace_size));
+    // TODO: this needs to be pulled into cudnn_batch_norm as well
     Tensor workspace = at::empty(workspace_size, input->options().dtype(kByte));
 
     size_t reserve_size = reserve.nbytes();
@@ -259,7 +260,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
       at::empty_like(*input, input->options(), input->suggest_memory_format());
 
   auto handle = getCudnnHandle();
-  auto dataType = getCudnnDataType(*input);
   TensorDescriptor idesc{*input, 4}; // input descriptor
   Tensor save_mean, save_var, reserve;
   cudnnBatchNormMode_t mode = getCudnnBatchNormMode(
@@ -272,7 +272,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
 
 #if CUDNN_VERSION >= 7400
     auto op = CUDNN_BATCHNORM_OPS_BN;
-    size_t workspace_size;
     // get the reserved size and allocate as tensor
     size_t reserve_size;
     AT_CUDNN_CHECK(cudnnGetBatchNormalizationTrainingExReserveSpaceSize(
