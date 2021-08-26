@@ -4,6 +4,7 @@ This module contains tensor creation utilities.
 
 import torch
 from typing import Optional, Tuple, Union
+from numbers import Number
 import math
 
 __all__ = [
@@ -20,12 +21,13 @@ def make_tensor(
     noncontiguous: bool = False,
     exclude_zero: bool = False
 ) -> torch.Tensor:
-    r"""Creates a random tensor with the given :attr:`shape`, :attr:`device`, and :attr:`dtype`.
+    r"""Creates a tensor with the given :attr:`shape`, :attr:`device`, and :attr:`dtype`, and filled with
+    values uniformly drawn from ``[:attr:`low`, :attr:`high`)``.
 
-    If :attr:`low` or :attr:`high` are outside the range of the datatype's representable finite values
-    then they are clamped to the lowest or highest representable finite value, respectively. A random
-    tensor is then created with values within ``[low, high)`` range. If not passed, following are the
-    default values for :attr:`low` and :attr:`high` depending on the :attr:`dtype`.
+    If :attr:`low` or :attr:`high` are specified and are outside the range of the datatype's representable
+    finite values then they are clamped to the lowest or highest representable finite value, respectively.
+    A random tensor is then created with values within ``[low, high)`` range. If ``None``, then the following
+    table describes the default values for low and high, which depend on :attr:`dtype`:
 
     +---------------------------+------------+----------+
     | ``dtype``                 | ``low``    | ``high`` |
@@ -41,37 +43,28 @@ def make_tensor(
     | complex types             | ``-9``     | ``9``    |
     +---------------------------+------------+----------+
 
-    If :attr:`low` and :attr:`high` are passed, they are considered only if they are within the
-    limit of the :attr:`dtype`. Following are a few conditions that are taken care of:
-
-    - If :attr:`low` and/or :attr:`high` are specified and within dtype limits: the values are taken as they were.
-    - If :attr:`low` and/or :attr:`high` are specified but exceed the limits: :attr:`dtype` limits are considered instead.
-    - If :attr:`low` is ``-inf`` and/or :attr:`high` is ``inf``: :attr:`dtype` limits are considered instead.
-
-    If a boolean type is requested for the output tensor (through :attr:`dtype`), :attr:`low` and :attr:`high` are
-    always set to ``0`` and ``2`` respectively.
-
-    If :attr:`noncontiguous` is ``True``, a non-contiguous tensor with the given :attr:`shape` will be returned unless
-    the :attr:`shape` specifies a tensor with a 1 or 0 elements in which case the non-contiguous parameter is ignored
-    because it is not possible to create a non-contiguous Tensor with a single element.
-
     Args:
         shape (Tuple[int, ...]): A sequence of integers defining the shape of the output tensor.
-        device (Union[str, torch.device]): The desired device of the returned tensor.
+        device (Union[str, torch.device]): The device of the returned tensor.
         dtype (torch.dtype): The desired data type of the returned tensor.
-        low (Optional[float]): Sets the lower range (inclusive), considered only if they are within the limit of
-            :attr:`dtype` passed. Default: see the table above for default values.
-        high (Optional[float]): Sets the upper range (exclusive) as specified above for :attr:`low`.
+        low (Optional[Number]): Sets the lower range (inclusive). If a number is provided it is
+            clamped to the least representable finite value of the given dtype. When ``None`` (default),
+            this value is determined based on the :attr:`dtype` (see the table above). Default: ``None``.
+        high (Optional[Number]): Sets the upper range (exclusive). If a number is provided it is clamped to the
+            greatest representable finite value of the given dtype. When ``None`` (default) this value is
+            determined based on the :attr:`dtype` (see the table above). Default: ``None``.
         requires_grad (Optional[bool]): If autograd should record operations on the returned tensor. Default: ``False``.
-        noncontiguous (Optional[bool]): If the returned tensor should be made noncontiguous. Default: ``False``.
-        exclude_zero (Optional[bool]): If zeros (if any) should be excluded from the returned tensor. Each value matching
-            zero (if any) is replaced with a ``tiny`` (smallest positive representable number) value if floating type,
-            [``tiny + tiny.j``] if complex type and ``1`` if integral/boolean type. Default: ``False``.
+        noncontiguous (Optional[bool]): If the returned tensor should be made noncontiguous. This argument is
+            ignored if the constructed tensor has fewer than two elements. Default: ``False``.
+        exclude_zero (Optional[bool]): If ``True`` then zeros are replaced with the dtype's small positive value.
+            For bool and integer types zero is replaced with one. For floating point types it is replaced with the
+            dtype's smallest positive normal number (the "tiny" value of the dtype's finfo object), and for complex
+            types it is replaced with a complex number whose real and imaginary parts are both the smallest positive
+            normal number representable by the complex type. Default ``False``.
 
     Raises:
         ValueError: if :attr:`low` is either ``inf`` or ``nan`` and/or :attr:`high` is either ``-inf`` or ``nan``.
-        TypeError: if the given :attr:`dtype` isn't supported by this function
-            (see the table for default values of :attr:`low` above for the data types supported).
+        TypeError: if the given :attr:`dtype` isn't supported by this function.
 
     Examples:
         >>> from torch.testing import make_tensor
@@ -82,13 +75,6 @@ def make_tensor(
         >>> make_tensor((2, 2), device='cuda', dtype=torch.bool)
         >>> tensor([[False, False],
                     [False, True]], device='cuda:0')
-
-        >>> # Passing low > high, will raise ValueError
-        >>> make_tensor((2,), device='cpu', dtype=torch.float32, low=9, high=8)
-        ValueError: make_tensor: low must be weakly less than high!
-        >>> # Passing low or high as float('nan') will also raise a ValueError
-        >>> make_tensor((2,), device='cpu', dtype=torch.float32, low=9, high=float('nan'))
-        ValueError: make_tensor: one of low or high was NaN!
     """
     def _modify_low_high(low, high, lowest, highest, default_low, default_high, dtype):
         """
@@ -122,11 +108,11 @@ def make_tensor(
         result = torch.randint(0, 2, shape, device=device, dtype=dtype)
     elif dtype is torch.uint8:
         ranges = (torch.iinfo(dtype).min, torch.iinfo(dtype).max)
-        low, high = _modify_low_high(low, high, ranges[0], ranges[1], 0, 9, dtype)
+        low, high = _modify_low_high(low, high, ranges[0], ranges[1], 0, 10, dtype)
         result = torch.randint(low, high, shape, device=device, dtype=dtype)
     elif dtype in _integral_types:
         ranges = (torch.iinfo(dtype).min, torch.iinfo(dtype).max)
-        low, high = _modify_low_high(low, high, ranges[0], ranges[1], -9, 9, dtype)
+        low, high = _modify_low_high(low, high, ranges[0], ranges[1], -9, 10, dtype)
         result = torch.randint(low, high, shape, device=device, dtype=dtype)
     elif dtype in _floating_types:
         ranges_floats = (torch.finfo(dtype).min, torch.finfo(dtype).max)
