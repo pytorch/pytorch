@@ -2315,6 +2315,17 @@ TEST_F(ModulesTest, CrossEntropyLoss) {
   ASSERT_TRUE(
     CrossEntropyLoss(CrossEntropyLossOptions().ignore_index(-100).reduction(torch::kMean))
       ->forward(input, target).allclose(expected, 1e-04));
+
+  loss = CrossEntropyLoss(CrossEntropyLossOptions().label_smoothing(0.15).reduction(torch::kMean));
+  input = torch::tensor({{3., 1.}, {1., 2.}}, torch::dtype(torch::kFloat).requires_grad(true));
+  target = torch::tensor({0, 1}, torch::kLong);
+  output = loss->forward(input, target);
+  expected = torch::tensor(0.3326, torch::kFloat);
+  s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected, 1e-04));
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
 TEST_F(ModulesTest, CosineSimilarity) {
