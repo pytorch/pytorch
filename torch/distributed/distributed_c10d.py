@@ -1,5 +1,6 @@
 import contextlib
 import logging
+import os
 import pickle
 import io
 import torch
@@ -15,20 +16,21 @@ from typing import Dict, Optional, Tuple, Union
 from .constants import default_pg_timeout
 from .rendezvous import rendezvous, register_rendezvous_handler  # noqa: F401
 from torch._C._distributed_c10d import (
-    AllreduceOptions,
     AllreduceCoalescedOptions,
+    AllreduceOptions,
     AllToAllOptions,
     BarrierOptions,
     BroadcastOptions,
     GatherOptions,
     PrefixStore,
     ProcessGroup,
-    ReduceOptions,
     ReduceOp,
+    ReduceOptions,
     ReduceScatterOptions,
     ScatterOptions,
     Store,
 )
+
 
 _MPI_AVAILABLE = True
 _NCCL_AVAILABLE = True
@@ -348,6 +350,18 @@ def is_initialized():
     Checking if the default process group has been initialized
     """
     return GroupMember.WORLD is not None
+
+
+def is_torchelastic_launched():
+    """
+    Checks whether this process was launched with ``torch.distributed.elastic``
+    (aka torchelastic). The existence of ``TORCHELASTIC_RUN_ID`` environment
+    variable is used as a proxy to determine whether the current process
+    was launched with torchelastic. This is a reasonable proxy since
+    ``TORCHELASTIC_RUN_ID`` maps to the rendezvous id which is always a
+    non-null value indicating the job id for peer discovery purposes..
+    """
+    return os.getenv("TORCHELASTIC_RUN_ID") is not None
 
 
 def _get_default_group():

@@ -97,9 +97,9 @@ or
     >>>    # your code to run
 
 3. In your training program, you are supposed to call the following function
-at the beginning to start the distributed backend. You need to make sure that
-the init_method uses ``env://``, which is the only supported ``init_method``
-by this module.
+at the beginning to start the distributed backend. It is strongly recommended
+that ``init_method=env://``. Other init methods (e.g. ``tcp://``) may work,
+but ``env://`` is the one that is officially supported by this module.
 
 ::
 
@@ -147,6 +147,7 @@ import warnings
 
 from torch.distributed.run import get_args_parser, run
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -181,7 +182,8 @@ def main(args=None):
         "If your script expects `--local_rank` argument to be set, please\n"
         "change it to read from `os.environ['LOCAL_RANK']` instead. See \n"
         "https://pytorch.org/docs/stable/distributed.html#launch-utility for \n"
-        "further instructions\n", FutureWarning
+        "further instructions\n",
+        FutureWarning,
     )
     args = parse_args(args)
     launch(args)
