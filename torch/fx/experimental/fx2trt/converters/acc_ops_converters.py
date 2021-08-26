@@ -414,6 +414,66 @@ def acc_ops_batch_norm(network, target, args, kwargs, name):
 
     return layer.get_output(0)
 
+@tensorrt_converter(acc_ops.layer_norm)
+def acc_ops_layer_norm(network, target, args, kwargs, name):
+    input_val = kwargs["input"]
+
+    if not isinstance(input_val, trt.tensorrt.ITensor):
+        raise RuntimeError(f"LayerNorm received input {input_val} that is not part "
+                           "of the TensorRT region!")
+
+    shape = kwargs["weight"].shape
+    broadcasted_shape = (1,) * (len(input_val.shape) - len(shape)) + shape
+    gamma = to_numpy(kwargs["weight"].reshape(*shape))
+    beta = to_numpy(kwargs["bias"].reshape(*shape))
+    eps = kwargs["eps"]
+    normalized_shape = kwargs["normalized_shape"]
+
+    axes = 0
+    for d in range(len(normalized_shape)):
+        axes |= 1 << (len(input_val.shape) - d - 1)
+
+    # E[x]
+    mean_expected_layer = network.add_reduce(input_val, trt.ReduceOperation.AVG, axes, keep_dims=True)
+    mean_expected_layer.name = f"{name}_mean_expected"
+    # X-E[x]
+    sub_trt = add_binary_elementwise_layer(
+        network, input_val, mean_expected_layer.get_output(0), trt.ElementWiseOperation.SUB, f"{name}_sub"
+    )
+    # Variance = mean(pow(x_sub_mean,2))
+    pow_tensor = network.add_constant(
+        (1,) * len(input_val.shape), trt.Weights(np.ascontiguousarray([2.0], dtype=np.float32))
+    )
+    pow_tensor.name = f"{name}_power"
+    pow_var = add_binary_elementwise_layer(
+        network, sub_trt, pow_tensor.get_output(0), trt.ElementWiseOperation.POW, f"{name}_pow_var"
+    )
+    mean_trt_layer = network.add_reduce(pow_var, trt.ReduceOperation.AVG, axes, keep_dims=True)
+    mean_trt_layer.name = f"{name}_mean"
+    # Variance + eps
+    eps_tensor = network.add_constant(
+        (1,) * len(input_val.shape), trt.Weights(np.ascontiguousarray([eps], dtype=np.float32))
+    )
+    eps_tensor.name = f"{name}_eps"
+    add_trt = add_binary_elementwise_layer(
+        network, mean_trt_layer.get_output(0), eps_tensor.get_output(0), trt.ElementWiseOperation.SUM, f"{name}_add"
+    )
+    # SQRT((Var + eps))
+    sqrt_trt = add_unary_layer(network, add_trt, trt.UnaryOperation.SQRT, f"{name}_sqrt")
+    # (x - E[x]) / sqrt((var + eps))
+    div_trt = add_binary_elementwise_layer(network, sub_trt, sqrt_trt, trt.ElementWiseOperation.DIV, f"{name}_div_trt")
+
+    gamma_tensor = network.add_constant(gamma.shape, trt.Weights(np.ascontiguousarray(gamma)))
+    gamma_tensor.name = f"{name}_gamma"
+    beta_tensor = network.add_constant(gamma.shape, trt.Weights(np.ascontiguousarray(beta)))
+    beta_tensor.name = f"{name}_beta"
+    # y * gamma + beta
+    scale_layer = add_binary_elementwise_layer(
+        network, div_trt, gamma_tensor.get_output(0), trt.ElementWiseOperation.PROD, f"{name}_scale"
+    )
+    return add_binary_elementwise_layer(
+        network, scale_layer, beta_tensor.get_output(0), trt.ElementWiseOperation.SUM, name
+    )
 
 @tensorrt_converter(acc_ops.softmax)
 def acc_ops_softmax(network, target, args, kwargs, name):
@@ -704,6 +764,11 @@ def acc_ops_mul(network, target, args, kwargs, name):
         network, kwargs["input"], kwargs["other"], trt.ElementWiseOperation.PROD, name
     )
 
+@tensorrt_converter(acc_ops.pow)
+def acc_ops_pow(network, target, args, kwargs, name):
+    return add_binary_elementwise_layer(
+        network, kwargs["input"], kwargs["exponent"], trt.ElementWiseOperation.POW, name
+    )
 
 @tensorrt_converter(acc_ops.min_two_tensors_input)
 def acc_ops_min_two_tensors_input(network, target, args, kwargs, name):
@@ -1235,15 +1300,11 @@ def acc_ops_quantize_per_tensor(network, target, args, kwargs, name):
     if q_zero_point != 0:
         raise RuntimeError(f"Only support zero_point == 0, get {q_zero_point}")
 
-    # temporarily set q_scale to 1 to make sure the q_scale is different
-    # for quantize and dequantize to avoid the error
-    # TODO: follow up with nvidia TensorRT team to repro and fix the problem
-    q_scale = 1
     scale_layer = network.add_constant((1,), trt.Weights(np.ascontiguousarray([float(q_scale)], dtype=np.float32)))
     scale_layer.name = input_val.name + ".quant.scale"
     scale = scale_layer.get_output(0)
-    assert trt.__version__ > "8.0", "Explicit quantize op is only supported in "
-    "TensorRT 8.0 or above, current TensorRT version:" + trt.__version__
+    # assert trt.__version__ > "8.0", "Explicit quantize op is only supported in "
+    # "TensorRT 8.0 or above, current TensorRT version:" + trt.__version__
     layer = network.add_quantize(input=input_val, scale=scale)
     layer.axis = 0
     layer.name = input_val.name + ".quant"
@@ -1251,9 +1312,6 @@ def acc_ops_quantize_per_tensor(network, target, args, kwargs, name):
 
 @tensorrt_converter(acc_ops.dequantize)
 def acc_ops_dequantize(network, target, args, kwargs, name):
-    """
-    Currently just a no-op.
-    """
     input_val = kwargs["input"]
 
     if not isinstance(input_val, trt.tensorrt.ITensor):
@@ -1274,8 +1332,8 @@ def acc_ops_dequantize(network, target, args, kwargs, name):
     scale_layer = network.add_constant((1,), trt.Weights(np.ascontiguousarray([q_scale], dtype=np.float32)))
     scale_layer.name = input_val.name + ".dequant.scale"
     scale = scale_layer.get_output(0)
-    assert trt.__version__ > "8.0", "Explicit dequantize op is only supported in "
-    "TensorRT 8.0 or above, current TensorRT version:" + trt.__version__
+    # assert trt.__version__ > "8.0", "Explicit dequantize op is only supported in "
+    # "TensorRT 8.0 or above, current TensorRT version:" + trt.__version__
     layer = network.add_dequantize(input=input_val, scale=scale)
     layer.name = input_val.name + ".dequant"
     layer.axis = 0

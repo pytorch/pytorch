@@ -312,13 +312,13 @@ class TestFakeQuantizeOps(TestCase):
             X1 = torch.randn(5, 5).to(torch.float16)
             Y1 = torch.fake_quantize_per_tensor_affine(X1, scale, zero, mini, maxi)
             Y1r = _fake_quantize_per_tensor_affine_reference(X1, scale, zero, mini, maxi)
-            self.assertTrue(torch.allclose(Y1, Y1r, rtol=tolerance, atol=tolerance))
+            self.assertEqual(Y1, Y1r, rtol=tolerance, atol=tolerance)
 
         # to force overflow
         X2 = torch.tensor(2**15 + .01).to(torch.float16)
         Y2 = torch.fake_quantize_per_tensor_affine(X2, scale, zero, mini, maxi)
         Y2r = _fake_quantize_per_tensor_affine_reference(X2, scale, zero, mini, maxi)
-        self.assertTrue(torch.allclose(Y2, Y2r, rtol=tolerance, atol=tolerance))
+        self.assertEqual(Y2, Y2r, rtol=tolerance, atol=tolerance)
 
         scale = 10
 
@@ -326,7 +326,7 @@ class TestFakeQuantizeOps(TestCase):
         X3 = torch.tensor(2**-24).to(torch.float16)
         Y3 = torch.fake_quantize_per_tensor_affine(X3, scale, zero, mini, maxi)
         Y3r = _fake_quantize_per_tensor_affine_reference(X3, scale, zero, mini, maxi)
-        self.assertTrue(torch.allclose(Y3, Y3r, rtol=tolerance, atol=tolerance))
+        self.assertEqual(Y3, Y3r, rtol=tolerance, atol=tolerance)
 
     def _test_forward_per_tensor_cachemask_impl(self, device):
         float_types = (torch.float32, torch.float16, torch.float64)
@@ -347,7 +347,7 @@ class TestFakeQuantizeOps(TestCase):
                 X, scale, zero_point, quant_min, quant_max)
             Y_ref = _fake_quantize_per_tensor_affine_reference(
                 X, scale, zero_point, quant_min, quant_max).to(device)
-            self.assertTrue(torch.allclose(Y_test, Y_ref, rtol=tolerance, atol=tolerance))
+            self.assertEqual(Y_test, Y_ref, rtol=tolerance, atol=tolerance)
             self.assertTrue(Y_test.dtype == float_type)
 
     def test_forward_per_tensor_cachemask_cpu(self):
@@ -380,14 +380,14 @@ class TestFakeQuantizeOps(TestCase):
                 X, scale, zero_point, quant_min, quant_max)
             Y_ref = _fake_quantize_per_tensor_affine_reference(
                 X, scale, zero_point, quant_min, quant_max).to(device)
-            self.assertTrue(torch.allclose(Y_test, Y_ref, rtol=tolerance, atol=tolerance))
+            self.assertEqual(Y_test, Y_ref, rtol=tolerance, atol=tolerance)
 
             # backward pass
             dout = torch.rand_like(X, dtype=torch.float).to(device)
             dX = _fake_quantize_per_tensor_affine_grad_reference(
                 dout, X, scale, zero_point, quant_min, quant_max)
             Y_test.backward(dout)
-            self.assertTrue(torch.allclose(dX, X.grad))
+            self.assertEqual(dX, X.grad)
             self.assertTrue(X.grad.dtype == float_type)
 
     def test_backward_per_tensor_cachemask_cpu(self):
@@ -729,14 +729,14 @@ class TestFakeQuantizeOps(TestCase):
             X1 = torch.randn(4, 5).to(torch.float16)
             Y1 = torch.fake_quantize_per_channel_affine(X1, scale, zero, axis, mini, maxi)
             Y1r = _fake_quantize_per_channel_affine_reference(X1, scale, zero, axis, mini, maxi)
-            self.assertTrue(torch.allclose(Y1, Y1r, rtol=tolerance, atol=tolerance))
+            self.assertEqual(Y1, Y1r, rtol=tolerance, atol=tolerance)
 
         # to force overflow
         X2 = torch.randn(4, 5).to(torch.float16)
         X2[0, 0] = 2**15 + .01
         Y2 = torch.fake_quantize_per_channel_affine(X2, scale, zero, axis, mini, maxi)
         Y2r = _fake_quantize_per_channel_affine_reference(X2, scale, zero, axis, mini, maxi)
-        self.assertTrue(torch.allclose(Y2, Y2r, rtol=tolerance, atol=tolerance))
+        self.assertEqual(Y2, Y2r, rtol=tolerance, atol=tolerance)
 
         scale = torch.zeros(5) + 10
 
@@ -745,7 +745,7 @@ class TestFakeQuantizeOps(TestCase):
         X3[0, 0] = 2**-24
         Y3 = torch.fake_quantize_per_channel_affine(X3, scale, zero, axis, mini, maxi)
         Y3r = _fake_quantize_per_channel_affine_reference(X3, scale, zero, axis, mini, maxi)
-        self.assertTrue(torch.allclose(Y3, Y3r, rtol=tolerance, atol=tolerance))
+        self.assertEqual(Y3, Y3r, rtol=tolerance, atol=tolerance)
 
     def _test_learnable_forward_per_channel(self, X_base, device, scale_base, zero_point_base, axis):
         r"""Tests the forward path of the learnable FakeQuantizePerTensorAffine op.
@@ -1160,7 +1160,7 @@ class TestFusedObsFakeQuant(TestCase):
 
         dX = _fake_quantize_per_tensor_affine_grad_reference(
             dout, x, x_scale, x_zero_point, 0, 255)
-        self.assertTrue(torch.allclose(dX, x.grad))
+        self.assertEqual(dX, x.grad)
         self.assertTrue(x.grad.dtype == torch.float32)
 
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),)
@@ -1206,7 +1206,7 @@ class TestFusedObsFakeQuant(TestCase):
 
         dX = _fake_quantize_per_tensor_affine_grad_reference(
             dout, x, x_scale, x_zero_point, 0, 255)
-        self.assertTrue(torch.allclose(dX, x.grad))
+        self.assertEqual(dX, x.grad)
         self.assertTrue(x.grad.dtype == torch.float32)
 
 if __name__ == '__main__':
