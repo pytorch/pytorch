@@ -1,5 +1,4 @@
 #include <ATen/core/dispatch/Dispatcher.h>
-#include <iostream>
 #include <list>
 #include <sstream>
 
@@ -324,14 +323,16 @@ std::vector<OperatorHandle> Dispatcher::findDanglingImpls() const {
   });
 }
 
-void Dispatcher::printRegistrationsForDispatchKey(c10::optional<DispatchKey> k) const {
-  operatorLookupTable_.read([&] (const ska::flat_hash_map<OperatorName, OperatorHandle>& operatorLookupTable) -> void {
+std::vector<OperatorName> Dispatcher::getRegistrationsForDispatchKey(c10::optional<DispatchKey> k) const {
+  return operatorLookupTable_.read([&] (const ska::flat_hash_map<OperatorName, OperatorHandle>& operatorLookupTable) -> std::vector<OperatorName> {
+    std::vector<OperatorName> op_names;
     for (const auto& op : operatorLookupTable) {
       // If no DispatchKey is specified, print all of the operators.
       if (!k || op.second.hasKernelForDispatchKey(*k)) {
-          std::cout << op.first << std::endl;
+          op_names.push_back(op.first);
       }
     }
+    return op_names;
   });
 }
 

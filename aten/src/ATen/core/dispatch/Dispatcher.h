@@ -254,10 +254,10 @@ public:
 
   /**
    * Useful for inspecting global Dispatcher registration state.
-   * Prints out the names of all operators with a kernel registered for the specified DispatchKey.
-   * If no DispatchKey is specified, it prints all of the operators.
+   * Returns the names of all operators with a kernel registered for the specified DispatchKey.
+   * If no DispatchKey is specified, it returns all registered operators.
    */
-  void printRegistrationsForDispatchKey(c10::optional<DispatchKey> k) const;
+  std::vector<OperatorName> getRegistrationsForDispatchKey(c10::optional<DispatchKey> k) const;
 
 private:
   Dispatcher();

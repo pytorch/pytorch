@@ -187,7 +187,10 @@ void initDispatchBindings(PyObject* module) {
   // This can be useful to answer questions like "list all operators that do not have a CPU kernel".
   m.def("_dispatch_print_registrations_for_dispatch_key", [](const char* dispatch_key = "") {
     auto k = std::string(dispatch_key) == "" ? c10::nullopt : c10::make_optional(c10::parseDispatchKey(dispatch_key));
-    c10::Dispatcher::singleton().printRegistrationsForDispatchKey(k);
+    auto op_names = c10::Dispatcher::singleton().getRegistrationsForDispatchKey(k);
+    for (auto& op : op_names) {
+        std::cout << op << std::endl;
+    }
   }, py::arg("dispatch_key") = static_cast<const char*>(""));
 }
 
