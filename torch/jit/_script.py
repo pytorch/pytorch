@@ -912,6 +912,8 @@ if _enabled:
         "_tracing_name",
         "eval",
         "train",
+        "get_extra_state",
+        "set_extra_state"
     }
 
     def _make_fail(name):
