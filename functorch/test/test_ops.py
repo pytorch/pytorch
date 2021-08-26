@@ -453,7 +453,6 @@ class TestOperators(TestCase):
         xfail('msort'),
         xfail('nanmedian'),
         xfail('nanquantile'),
-        xfail('nansum'),
         xfail('narrow'),
         xfail('nn.functional.adaptive_avg_pool2d'),
         xfail('nn.functional.avg_pool2d'),
