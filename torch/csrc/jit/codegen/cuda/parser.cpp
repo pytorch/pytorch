@@ -1392,8 +1392,7 @@ class IrParser {
     }
 
     {
-      auto ptr_op = getOperatorForLiteral(
-          "aten::gelu(Tensor self) -> Tensor");
+      auto ptr_op = getOperatorForLiteral("aten::gelu(Tensor self) -> Tensor");
       REGISTER_PARSE_RULE(
           ptr_op,
           {
