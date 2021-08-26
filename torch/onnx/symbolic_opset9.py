@@ -1184,6 +1184,11 @@ def __or_(g, input, other):
 
 
 @wrap_logical_op_with_cast_to_and_from("Bool")
+def __xor_(g, input, other):
+    return g.op("Xor", input, other)
+
+
+@wrap_logical_op_with_cast_to_and_from("Bool")
 def logical_and(g, input, other):
     return g.op("And", input, other)
 
