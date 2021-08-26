@@ -50,7 +50,7 @@ class PruningOpTest(TestCase):
         ref_pruned_weights, ref_compressed_indices_map = get_reference_result(
             embedding_weights, mask, indices_type)
 
-        torch.testing.assert_allclose(pt_pruned_weights, ref_pruned_weights)
+        torch.testing.assert_close(pt_pruned_weights, ref_pruned_weights)
         self.assertEqual(pt_compressed_indices_map, ref_compressed_indices_map)
         self.assertEqual(pt_compressed_indices_map.dtype, indices_type)
 

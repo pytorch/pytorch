@@ -36,9 +36,9 @@ APIs are provided that incorporate typical workflows of converting FP32 model
 to lower precision with minimal accuracy loss.
 
 Quantization requires users to be aware of three concepts:
-1. Quantization Config (Qconfig): Specifies how weights and activations are to be quantized. Qconfig is needed to create a quantized model.
-2. Backend: Refers to kernels that support quantization, usually with different numerics.
-3. Quantization engine (torch.backends.quantization.engine): When a quantized model is executed, the qengine specifies which
+#. Quantization Config (Qconfig): Specifies how weights and activations are to be quantized. Qconfig is needed to create a quantized model.
+#. Backend: Refers to kernels that support quantization, usually with different numerics.
+#. Quantization engine (torch.backends.quantization.engine): When a quantized model is executed, the qengine specifies which
 backed is to be used for execution. It is important to ensure that the qengine is consistent with the Qconfig.
 
 
@@ -161,34 +161,34 @@ Please see our `Introduction to Quantization on Pytorch
 for a more comprehensive overview of the tradeoffs between these quantization
 types.
 
-Operator coverage varies between dynamic and static quantization and is captured in the table below:
+Operator coverage varies between dynamic and static quantization and is captured in the table below.
+Note that for FX quantization, the corresponding functionals are also supported.
 
-+-----------------+--------------------+------------------+
-|                 |Static             |      Dynamic      |
-|                 |Quantization       | Quantization      |
-+-----------------+-------------------+-------------------+
-|nn.Linear        | Y                 | Y                 |
-|nn.Conv1d/2d/3d  | Y                 | N                 |
-+-----------------+-------------------+-------------------+
-|nn.LSTM          | N                 | Y                 |
-|nn.GRU           |                   |                   |
-+-----------------+-------------------+-------------------+
-|nn.RNNCell       | N                 | Y                 |
-|nn.GRUCell       |                   |                   |
-|nn.LSTMCell      |                   |                   |
-+-----------------+-------------------+-------------------+
-|nn.EmbeddingBag  | Y* (activations   |                   |
-|                 | are in fp32)      | Y                 |
-+-----------------+-------------------+-------------------+
-|nn.Embedding     | Y                 | N                 |
-+-----------------+-------------------+-------------------+
-|nn.MHA           |* Supported via    |                   |
-|                 | custom modules    | Not supported     |
-+-----------------+-------------------+-------------------+
-|Activations      | Broadly supported | Un-changed,       |
-|                 |                   | computations      |
-|                 |                   |stay in fp32       |
-+-----------------+-------------------+-------------------+
++---------------------+-------------------+-------------------+
+|                     |Static             |      Dynamic      |
+|                     |Quantization       | Quantization      |
++---------------------+-------------------+-------------------+
+|nn.Linear            | Y                 | Y                 |
+|nn.Conv1d/2d/3d      | Y                 | N                 |
++---------------------+-------------------+-------------------+
+|nn.LSTM              | N                 | Y                 |
+|nn.GRU               | N                 | Y                 |
++---------------------+-------------------+-------------------+
+|nn.RNNCell           | N                 | Y                 |
+|nn.GRUCell           | N                 | Y                 |
+|nn.LSTMCell          | N                 | Y                 |
++---------------------+-------------------+-------------------+
+|nn.EmbeddingBag      | Y (activations    |                   |
+|                     | are in fp32)      | Y                 |
++---------------------+-------------------+-------------------+
+|nn.Embedding         | Y                 | N                 |
++---------------------+-------------------+-------------------+
+|nn.MultiheadAttention|Not Supported      | Not supported     |
++---------------------+-------------------+-------------------+
+|Activations          |Broadly supported  | Un-changed,       |
+|                     |                   | computations      |
+|                     |                   |stay in fp32       |
++---------------------+-------------------+-------------------+
 
 
 Eager Mode Quantization
