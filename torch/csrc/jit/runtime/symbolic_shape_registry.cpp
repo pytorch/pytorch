@@ -36,17 +36,10 @@ const std::string shape_compute_functions =
           return expandedSizes
 
         def adaptive_avg_pool2d(self: List[int], out: List[int]):
+          # TODO: return out directly, list len refiner would need to
+          # annotate the List Type with len directly in IR
           assert len(out) == 2
-          assert len(self) == 3 or len(self) == 4
-          for i in range (1, len(self)):
-            assert self[i] != 0
-
-          shape: List[int] = []
-          for i in range(0, len(self) -2):
-            shape.append(self[i])
-          for elem in out:
-            shape.append(elem)
-          return shape
+          return [out[0], out[1]]
 
         # TODO: maybe make it customary that extra arguments are unused ?
         # TODO: return self directly
