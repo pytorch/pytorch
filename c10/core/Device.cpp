@@ -28,7 +28,7 @@ DeviceType parse_type(const std::string& device_string) {
           {"hip", DeviceType::HIP},
           {"ve", DeviceType::VE},
           {"fpga", DeviceType::FPGA},
-          {"msnpu", DeviceType::MSNPU},
+          {"ort", DeviceType::ORT},
           {"xla", DeviceType::XLA},
           {"lazy", DeviceType::Lazy},
           {"vulkan", DeviceType::Vulkan},
@@ -47,7 +47,7 @@ DeviceType parse_type(const std::string& device_string) {
   }
   TORCH_CHECK(
       false,
-      "Expected one of cpu, cuda, xpu, mkldnn, opengl, opencl, ideep, hip, ve, msnpu, mlc, xla, lazy, vulkan, meta, hpu device type at start of device string: ",
+      "Expected one of cpu, cuda, xpu, mkldnn, opengl, opencl, ideep, hip, ve, ort, mlc, xla, lazy, vulkan, meta, hpu device type at start of device string: ",
       device_string);
 }
 enum DeviceStringParsingState { START, INDEX_START, INDEX_REST, ERROR };
