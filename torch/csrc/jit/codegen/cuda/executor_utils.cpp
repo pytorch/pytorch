@@ -25,7 +25,9 @@
 #include <nvfuser_resources/tensor.h>
 #include <nvfuser_resources/welford.h>
 
+#ifndef USE_ROCM
 #include <cuda_occupancy.h>
+#endif
 
 #include <fstream>
 
@@ -762,6 +764,7 @@ NvrtcFunction nvrtcCompile(
     }
   }
 
+#ifndef USE_ROCM
   // keeping the string outside the loop for lifetime
   std::string max_register_usage = "--maxrregcount=";
   uint32_t max_register = 0;
@@ -796,6 +799,7 @@ NvrtcFunction nvrtcCompile(
       option_vals.push_back((void*)(intptr_t)max_register);
     }
   }
+#endif
 
   at::globalContext().getNVRTC().nvrtcAddNameExpression(
       program, func_name.c_str());
