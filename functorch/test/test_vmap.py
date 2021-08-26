@@ -7,6 +7,7 @@
 from torch.testing._internal.common_utils import TestCase, run_tests
 import torch
 import torch.nn.functional as F
+import torch.utils._pytree as pytree
 from torch import Tensor
 import functools
 import itertools
@@ -2931,16 +2932,26 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('argmax'),
         xfail('argmin'),
         xfail('unfold'),
-        xfail('linalg.svd'), # the batching rules work but svd can differ by the sign
-        xfail('svd'),        # which makes the tests fail
     })
     def test_vmap_exhaustive(self, device, dtype, op):
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
+        def check_up_to_sign(loop_out, batched_out):
+            loop_out = pytree.tree_map(torch.abs, loop_out)
+            batched_out = pytree.tree_map(torch.abs, batched_out)
+            self.assertEqual(loop_out, batched_out, atol=1e-4, rtol=1e-4);
+
+        special_correctness_checks = {
+            'linalg.svd': check_up_to_sign,
+            'svd': check_up_to_sign,
+        }
         for sample_input in sample_inputs_itr:
             arg_values = [sample_input.input] + list(sample_input.args)
             kwarg_values = sample_input.kwargs
             for loop_out, batched_out in get_fallback_and_vmap_exhaustive(op.op, arg_values, kwarg_values):
-                self.assertEqual(loop_out, batched_out, atol=1e-4, rtol=1e-4)
+                if op.name in special_correctness_checks:
+                    special_correctness_checks[op.name](loop_out, batched_out)
+                else:
+                    self.assertEqual(loop_out, batched_out, atol=1e-4, rtol=1e-4)
 
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestVmapOperatorsOpInfo', 'test_op_has_batch_rule', {
