@@ -69,8 +69,7 @@ from torch._six import PY37
 from torch.autograd import Variable
 from torch.jit.annotations import BroadcastingList2, BroadcastingList3, Any  # noqa: F401
 from torch.nn.utils.rnn import PackedSequence
-from torch.testing import FileCheck
-from torch.testing._internal.common_utils import make_tensor
+from torch.testing import FileCheck, make_tensor
 import torch.autograd.profiler
 import torch.cuda
 import torch.jit

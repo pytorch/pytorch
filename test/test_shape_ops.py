@@ -7,8 +7,9 @@ import random
 import warnings
 
 from torch._six import nan
+from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
-    TestCase, run_tests, make_tensor, torch_to_numpy_dtype_dict)
+    TestCase, run_tests, torch_to_numpy_dtype_dict)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCPU, onlyCUDA, dtypes, onlyOnCPUAndCUDA,
     dtypesIfCPU, dtypesIfCUDA, largeTensorTest)

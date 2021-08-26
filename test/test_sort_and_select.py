@@ -5,9 +5,9 @@ import random
 from torch._six import nan
 from itertools import permutations, product
 
-from torch.testing import all_types, all_types_and
+from torch.testing import all_types, all_types_and, make_tensor
 from torch.testing._internal.common_utils import \
-    (TEST_WITH_ROCM, TestCase, run_tests, make_tensor, slowTest)
+    (TEST_WITH_ROCM, TestCase, run_tests, slowTest)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, onlyOnCPUAndCUDA,
      skipCUDAIfRocm, onlyCUDA, dtypesIfCUDA, dtypesIfCPU, onlyCPU, largeTensorTest)

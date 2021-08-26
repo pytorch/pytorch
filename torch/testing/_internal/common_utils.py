@@ -43,13 +43,13 @@ from unittest.mock import MagicMock
 
 import numpy as np
 
-from torch.testing import make_tensor as _make_tensor
 import expecttest
 from .._core import \
     (_compare_tensors_internal, _compare_scalars_internal, _compare_return_type)
 
 import torch
 import torch.cuda
+from torch.testing import make_tensor
 from torch._utils_internal import get_writable_path
 from torch._six import string_classes
 from torch import Tensor
@@ -1939,13 +1939,7 @@ def retry(ExceptionToCheck, tries=3, delay=3, skip_after_retries=False):
     return deco_retry
 
 
-# Methods for matrix and tensor generation
-
-# All the args except size are keyword-only in make_tensor but internally, we used to use
-# device and dtype as positional args, hence this function
-# See: https://github.com/pytorch/pytorch/pull/63925#discussion_r695466949 for more details
-def make_tensor(size, device, dtype, **kwargs):
-    return _make_tensor(size, device=device, dtype=dtype, **kwargs)
+# Methods for matrix generation
 
 def random_square_matrix_of_rank(l, rank, dtype=torch.double, device='cpu'):
     assert rank <= l
