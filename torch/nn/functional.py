@@ -2809,6 +2809,10 @@ def cross_entropy(
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
             and :attr:`reduce` are in the process of being deprecated, and in the meantime,
             specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
+        label_smoothing (float, optional): A float in [0.0, 1.0]. Specifies the amount
+            of smoothing when computing the loss, where 0.0 means no smoothing. The targets
+            become a mixture of the original ground truth and a uniform distribution as described in
+            `Rethinking the Inception Architecture for Computer Vision <https://arxiv.org/abs/1512.00567>`__. Default: :math:`0.0`.
 
     Examples::
 
@@ -2835,6 +2839,7 @@ def cross_entropy(
             ignore_index=ignore_index,
             reduce=reduce,
             reduction=reduction,
+            label_smoothing=label_smoothing,
         )
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
