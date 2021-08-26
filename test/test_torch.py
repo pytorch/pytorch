@@ -221,10 +221,10 @@ class AbstractTestCases:
             # TODO: add torch.* tests when we have proper namespacing on ATen functions
             # test_namespace(torch)
 
-        def test_msnpu_error(self):
+        def test_ort_error(self):
             with self.assertRaisesRegex(RuntimeError,
-                                        "Could not run 'aten::empty.memory_format' with arguments from the 'MSNPU' backend"):
-                torch.zeros(1, device=torch.device('msnpu'))
+                                        "Could not run 'aten::empty.memory_format' with arguments from the 'ORT' backend"):
+                torch.zeros(1, device=torch.device('ort'))
 
         def test_has_storage(self):
             self.assertIsNotNone(torch.tensor([]).storage())
@@ -4324,6 +4324,7 @@ else:
             self.assertEqual(a_with_output.size(), torch.Size([3, 2]))
 
     @dtypes(*(torch.testing.get_all_fp_dtypes(include_half=False, include_bfloat16=False)))
+    @dtypesIfCPU(*(torch.testing.get_all_fp_dtypes(include_half=False, include_bfloat16=True)))
     @dtypesIfCUDA(*(torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
     def test_bernoulli_p(self, device, dtype):
         for trivial_p in ([0, 1], [1, 0, 1, 1, 0, 1]):

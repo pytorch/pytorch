@@ -229,7 +229,7 @@ class TestAvgPool(TestCase):
                 actual = torch.nn.functional.avg_pool2d(input[0], (i, j))
                 actual = actual.view(1, actual.numel())
                 expected = self._avg_pool2d(input, (i, j))
-                self.assertTrue(torch.allclose(actual, expected, rtol=0, atol=1e-5))
+                self.assertEqual(actual, expected, rtol=0, atol=1e-5)
 
     def test_avg_pool2d_with_zero_divisor(self):
         self.assertRaisesRegex(RuntimeError, "divisor must be not zero",
@@ -244,7 +244,7 @@ class TestAvgPool(TestCase):
                     actual = F.avg_pool2d(input[0], (i, j), divisor_override=divisor)
                     actual = actual.view(1, actual.numel())
                     expected = self._sum_pool2d(input, (i, j)) / divisor
-                    self.assertTrue(torch.allclose(actual, expected, rtol=0, atol=1e-5))
+                    self.assertEqual(actual, expected, rtol=0, atol=1e-5)
 
     def test_doubletensor_avg_pool3d(self):
         h, w, d = 5, 6, 7
@@ -255,7 +255,7 @@ class TestAvgPool(TestCase):
                     actual = torch.nn.functional.avg_pool3d(input.unsqueeze(0), (i, j, k))
                     actual = actual.view(1, actual.numel())
                     expected = self._avg_pool3d(input, (i, j, k))
-                    self.assertTrue(torch.allclose(actual, expected, rtol=0, atol=1e-5))
+                    self.assertEqual(actual, expected, rtol=0, atol=1e-5)
 
     def test_doubletensor_avg_pool3d_with_divisor(self):
         h, w, d = 6, 5, 7
@@ -267,7 +267,7 @@ class TestAvgPool(TestCase):
                         actual = torch.nn.functional.avg_pool3d(input.unsqueeze(0), (i, j, k), divisor_override=divisor)
                         actual = actual.view(1, actual.numel())
                         expected = self._sum_pool3d(input, (i, j, k)) / divisor
-                        self.assertTrue(torch.allclose(actual, expected, rtol=0, atol=1e-5))
+                        self.assertEqual(actual, expected, rtol=0, atol=1e-5)
 
     def test_avg_pool3d_with_zero_divisor(self):
         self.assertRaisesRegex(RuntimeError, "divisor must be not zero",
@@ -2260,7 +2260,7 @@ class TestNN(NNTestCase):
         self.assertNotIn("weight", model._parameters)
         # Result should be skew-symmetric
         A = model.weight
-        self.assertTrue(torch.allclose(A, -A.T))
+        self.assertEqual(A, -A.T)
         # Remove and check consistency
         parametrize.remove_parametrizations(model, "weight", leave_parametrized=False)
         self.assertFalse(hasattr(model, "parametrizations"))
@@ -2277,7 +2277,7 @@ class TestNN(NNTestCase):
         self.assertNotIn("weight", model._parameters)
         # Result should be skew-symmetric
         A = model.weight
-        self.assertTrue(torch.allclose(A, -A.T))
+        self.assertEqual(A, -A.T)
         # Remove and check consistency
         parametrize.remove_parametrizations(model, "weight", leave_parametrized=False)
         self.assertFalse(hasattr(model, "parametrizations"))
@@ -2291,7 +2291,7 @@ class TestNN(NNTestCase):
         # Result should be orthogonal
         X = model.weight
         Id = torch.eye(X.size(0), device=X.device)
-        self.assertTrue(torch.allclose(X.T @ X, Id))
+        self.assertEqual(X.T @ X, Id)
         # Structure tests
         self.assertTrue(hasattr(model, "parametrizations"))
         self.assertTrue(parametrize.is_parametrized(model))
@@ -2810,10 +2810,10 @@ class TestNN(NNTestCase):
         init_weight = model.weight.clone()
         parametrize.register_parametrization(model, "weight", RankOne())
         # Projecting a rank 1 matrix onto the matrices of rank one does not change the matrix
-        self.assertTrue(torch.allclose(init_weight, model.weight))
+        self.assertEqual(init_weight, model.weight)
         parametrize.register_parametrization(model, "weight", Double())
         # The matrix now is twice the initial matrix
-        self.assertTrue(torch.allclose(2.0 * init_weight, model.weight))
+        self.assertEqual(2.0 * init_weight, model.weight)
         # Multiplying by a scalar does not change the rank
         self.assertEqual(torch.linalg.matrix_rank(model.weight).item(), 1)
 
@@ -4220,6 +4220,9 @@ class TestNN(NNTestCase):
                     out1 = wrapped_m(input)
                     return out0 + out1
 
+                # Make sure we can compute gradients wrt to all the parameters in the case
+                # of double forward
+                fn(input.clone().requires_grad_()).sum().backward()
                 gradcheck(fn, (input.clone().requires_grad_(),), check_batched_grad=False)
 
                 # test removing
@@ -5461,6 +5464,92 @@ class TestNN(NNTestCase):
         mm.load_state_dict(state_dict)
         self.assertEqual(mm[0].param[0].item(), 10)
         self.assertEqual(mm[0].sub.weight[0, 0].item(), 555)
+
+    def test_extra_state(self):
+
+        class SubModule(torch.nn.Module):
+            def __init__(self, foo):
+                super().__init__()
+                self.foo = foo
+
+            def get_extra_state(self):
+                return {
+                    'foo': self.foo
+                }
+
+            def set_extra_state(self, state):
+                self.foo = state['foo']
+
+        class MyModule(torch.nn.Module):
+            def __init__(self, foo, bar):
+                super().__init__()
+                self.sub = SubModule(foo)
+                self.bar = bar
+
+            def get_extra_state(self):
+                return {
+                    'bar': self.bar
+                }
+
+            def set_extra_state(self, state):
+                self.bar = state['bar']
+
+        # Ensure state_dict contains the extra state by loading it into another module.
+        m = MyModule(3, 'something')
+        m2 = MyModule(5, 'something else')
+        m2.load_state_dict(m.state_dict())
+        self.assertEqual(m.state_dict(), m2.state_dict())
+        self.assertEqual(m2.bar, m.bar)
+        self.assertEqual(m2.sub.foo, m.sub.foo)
+
+    def test_extra_state_non_dict(self):
+
+        class MyModule(torch.nn.Module):
+            def __init__(self, foo):
+                super().__init__()
+                self.foo = foo
+
+            def get_extra_state(self):
+                return self.foo
+
+            def set_extra_state(self, state):
+                self.foo = state
+
+        # Test various types of extra state.
+        for state in ('something', 5, MyModule(3)):
+            m = MyModule(state)
+            m2 = MyModule('something else')
+            m2.load_state_dict(m.state_dict())
+            self.assertEqual(m.state_dict(), m2.state_dict())
+            self.assertEqual(m.foo, m2.foo)
+
+    def test_extra_state_missing_set_extra_state(self):
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def get_extra_state(self):
+                return {
+                    'foo': 5
+                }
+
+        m = MyModule()
+        with self.assertRaisesRegex(RuntimeError, 'Unexpected key'):
+            m.load_state_dict(m.state_dict())
+
+    def test_extra_state_missing_get_extra_state(self):
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def set_extra_state(self):
+                pass
+
+        m = MyModule()
+        with self.assertRaisesRegex(RuntimeError, 'Missing key'):
+            m.load_state_dict(m.state_dict())
 
     def test_parameter_assignment(self):
         l = nn.Linear(5, 5)
@@ -8929,6 +9018,25 @@ class TestNN(NNTestCase):
         helper(self, (4, 1, 9, 9))
         helper(self, (4, 9, 1, 1))
 
+    def test_batchnorm_non_contig_cpu(self):
+        input = torch.arange(6, dtype=torch.float).reshape(1, 3, 2, 1).cpu()
+        input = input.permute(0, 2, 1, 3)
+
+        bn = torch.nn.BatchNorm2d(2).cpu().float().eval()
+        bn.weight.data.uniform_()
+        bn.bias.data.uniform_()
+
+        ref_input = input.detach().clone().contiguous()
+        ref_bn = nn.BatchNorm2d(2).cpu().float().eval()
+        ref_bn.load_state_dict(bn.state_dict())
+
+        out = bn(input)
+        ref_out = ref_bn(ref_input)
+
+        self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+        self.assertTrue(ref_out.is_contiguous())
+        self.assertEqual(out, ref_out)
+
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     @skipIfRocm
@@ -11168,7 +11276,7 @@ class TestNN(NNTestCase):
         grads1 = torch.autograd.grad(layer_norm(x).sum(), x, create_graph=False)[0]
         grads2 = torch.autograd.grad(layer_norm(x).sum(), x, create_graph=True)[0]
 
-        self.assertTrue(torch.allclose(grads1, grads2, rtol, atol))
+        self.assertEqual(grads1, grads2, rtol=rtol, atol=atol)
 
         if TEST_CUDA:
             x = x.to('cuda')
@@ -11177,7 +11285,7 @@ class TestNN(NNTestCase):
             grads1 = torch.autograd.grad(layer_norm(x).sum(), x, create_graph=False)[0]
             grads2 = torch.autograd.grad(layer_norm(x).sum(), x, create_graph=True)[0]
 
-            self.assertTrue(torch.allclose(grads1, grads2, rtol, atol))
+            self.assertEqual(grads1, grads2, rtol=rtol, atol=atol)
 
     def test_padding_list(self):
         # Padding can be a list, or tuple (regression test for gh-54452)
@@ -11685,7 +11793,7 @@ class TestAddRelu(TestCase):
         relu_res = torch.relu(add_res)
         add_relu_res = torch._VF._add_relu(a, b)
 
-        self.assertTrue(torch.allclose(add_relu_res, relu_res))
+        self.assertEqual(add_relu_res, relu_res)
 
     def test_add_relu_broadcasting(self):
         a = torch.rand((1, 32))
@@ -11694,7 +11802,7 @@ class TestAddRelu(TestCase):
         res = torch._VF._add_relu(a, b)
         broadcasted_res = torch._VF._add_relu(a, b_scalar)
 
-        self.assertTrue(torch.allclose(broadcasted_res, res))
+        self.assertEqual(broadcasted_res, res)
 
 
 def add_test(test, decorator=None):
@@ -12876,7 +12984,7 @@ class TestNNDeviceType(NNTestCase):
 
         self._test_dropout_stride_mean_preserve(nn.Dropout, device)
 
-        if self.device_type == 'cuda':
+        if self.device_type == 'cuda' or self.device_type == 'cpu':
             input = input.bfloat16()
             self._test_dropout(nn.Dropout, device, input)
 
@@ -13025,6 +13133,40 @@ class TestNNDeviceType(NNTestCase):
         if self.device_type == 'cuda' and self.has_cudnn():
             with torch.backends.cudnn.flags(enabled=False):
                 self._test_module_empty_input(mod, inp)
+
+    @onlyCPU
+    @dtypes(torch.float, torch.double)
+    def test_groupnorm_nhwc(self, device, dtype):
+        def helper(self, size, groups):
+            channels = size[1]
+            input = torch.randn(size, dtype=dtype, device=device, requires_grad=True)
+            input = input.contiguous(memory_format=torch.channels_last)
+            input.retain_grad()
+            grad = torch.randn(size, dtype=dtype, device=device)
+            grad = grad.contiguous(memory_format=torch.channels_last)
+            gn = nn.GroupNorm(groups, channels).to(device).to(dtype)
+            gn.weight.data.uniform_()
+            gn.bias.data.uniform_()
+
+            ref_input = input.detach().clone().contiguous().requires_grad_(True)
+            ref_grad = grad.detach().clone().contiguous()
+            ref_gn = nn.GroupNorm(groups, channels).to(device).to(dtype)
+            ref_gn.load_state_dict(gn.state_dict())
+
+            out = gn(input)
+            out.backward(grad)
+            ref_out = ref_gn(ref_input)
+            ref_out.backward(ref_grad)
+
+            self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+            self.assertTrue(ref_out.is_contiguous())
+            self.assertEqual(out, ref_out)
+            self.assertEqual(gn.weight.grad, ref_gn.weight.grad)
+            self.assertEqual(gn.bias.grad, ref_gn.bias.grad)
+            self.assertEqual(input.grad, ref_input.grad)
+
+        helper(self, (4, 8, 10, 10), 4)
+        helper(self, (2, 30, 9, 9), 3)
 
     @onlyOnCPUAndCUDA
     def test_GroupNorm_numeric(self, device):
@@ -13928,14 +14070,17 @@ class TestNNDeviceType(NNTestCase):
 
             self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
             self.assertTrue(ref_out.is_contiguous())
-            self.assertTrue(torch.allclose(out, ref_out))
-            self.assertTrue(torch.allclose(input.grad, ref_input.grad))
+            self.assertEqual(out, ref_out)
+            self.assertEqual(input.grad, ref_input.grad)
 
         helper(4, 8, 8, 8, 3)
         helper(4, 8, 8, 8, 3, count_include_pad=False, padding=1)
         helper(4, 8, 8, 8, 3, count_include_pad=False, padding=2, stride=2)
         helper(4, 8, 8, 8, 3, divisor_override=42)
         helper(4, 8, 8, 8, 7)
+        # ROCm 16GB MI25 hits OOM error. Clear caching allocator prior to running large subtest.
+        if TEST_WITH_ROCM and 'cuda' in device:
+            torch.cuda.empty_cache()
         helper(200, 512, 28, 28, 2)
         helper(4, 8, 7, 7, 3, stride=1)
         helper(4, 8, 7, 7, 3, padding=2, stride=1)
@@ -14055,9 +14200,9 @@ class TestNNDeviceType(NNTestCase):
             self.assertTrue(ref_out.is_contiguous())
             self.assertTrue(ind.is_contiguous(memory_format=torch.channels_last))
             self.assertTrue(ref_ind.is_contiguous())
-            self.assertTrue(torch.allclose(out, ref_out))
-            self.assertTrue(torch.allclose(ind, ref_ind))
-            self.assertTrue(torch.allclose(input.grad, ref_input.grad))
+            self.assertEqual(out, ref_out)
+            self.assertEqual(ind, ref_ind)
+            self.assertEqual(input.grad, ref_input.grad)
 
         helper(4, 8, 8, 8, 7)
         helper(200, 512, 28, 28, 2)
@@ -17035,7 +17180,7 @@ class TestNNDeviceType(NNTestCase):
             shape = tuple(32 if i != dim else 256 for i in range(4))
             x = torch.randn(shape, device=device, requires_grad=True)
             F.max_pool3d(x, kernel_size=(1, 1, 1)).sum().backward()
-            self.assertTrue(torch.allclose(x.grad, torch.ones_like(x.grad)))
+            self.assertEqual(x.grad, torch.ones_like(x.grad))
 
     # Check that clip_grad_norm_ raises an error if the total norm of the
     # parameters' gradients is non-finite
@@ -17527,7 +17672,7 @@ class TestModuleGlobalHooks(TestCase):
 
         input = torch.randn(2, 2)
         output = module(input)
-        self.assertTrue(torch.allclose(torch.sigmoid(input), output))
+        self.assertEqual(torch.sigmoid(input), output)
 
         # make sure hook removal is successful
         self.assertFalse(handle.id in handle.hooks_dict_ref())
@@ -17562,7 +17707,7 @@ class TestModuleGlobalHooks(TestCase):
 
         input = torch.randn(2, 2)
         output = module(input)
-        self.assertTrue(torch.allclose(torch.sigmoid(input), output))
+        self.assertEqual(torch.sigmoid(input), output)
 
         # make sure hook removal is successful
         self.assertFalse(handle.id in handle.hooks_dict_ref())
@@ -17856,7 +18001,7 @@ class TestLazyModules(TestCase):
         module = TestModule()
         module.register_forward_pre_hook(hook_function)
         output = module(torch.zeros(2, 2))
-        self.assertTrue(torch.allclose(output, torch.ones(2, 2)))
+        self.assertEqual(output, torch.ones(2, 2))
 
     def test_lazy_forward_hook(self):
         """
@@ -17879,7 +18024,7 @@ class TestLazyModules(TestCase):
         module = TestModule()
         module.register_forward_hook(hook_function)
         output = module(torch.zeros(2, 2))
-        self.assertTrue(torch.allclose(output, torch.ones(2, 2)))
+        self.assertEqual(output, torch.ones(2, 2))
 
     @suppress_warnings
     def test_lazy_conv1d(self):
