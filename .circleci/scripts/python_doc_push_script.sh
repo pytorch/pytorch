@@ -13,16 +13,22 @@ echo "python_doc_push_script.sh: Invoked with $*"
 
 set -ex
 
+# for statements like ${1:-${DOCS_INSTALL_PATH:-docs/}}
+# the order of operations goes:
+#   1. Check if there's an argument $1
+#   2. If no argument check for environment var DOCS_INSTALL_PATH
+#   3. If no environment var fall back to default 'docs/'
+
 # Argument 1: Where to copy the built documentation to
 # (pytorch.github.io/$install_path)
-install_path="$1"
+install_path="${1:-${DOCS_INSTALL_PATH:-docs/}}"
 if [ -z "$install_path" ]; then
 echo "error: python_doc_push_script.sh: install_path (arg1) not specified"
   exit 1
 fi
 
 # Argument 2: What version of the docs we are building.
-version="$2"
+version="${2:-${DOCS_VERSION:-master}}"
 if [ -z "$version" ]; then
 echo "error: python_doc_push_script.sh: version (arg2) not specified"
   exit 1
@@ -34,7 +40,7 @@ if [ "$version" == "master" ]; then
 fi
 
 # Argument 3: The branch to push to. Usually is "site"
-branch="$3"
+branch="${3:-${DOCS_BRANCH:-site}}"
 if [ -z "$branch" ]; then
 echo "error: python_doc_push_script.sh: branch (arg3) not specified"
   exit 1
