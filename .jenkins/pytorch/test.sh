@@ -19,6 +19,11 @@ BUILD_DIR="build"
 BUILD_RENAMED_DIR="build_renamed"
 BUILD_BIN_DIR="$BUILD_DIR"/bin
 
+# GHA has test config defined for the test job, so we need to add them.
+if [[ -n "${TEST_CONFIG}" ]]; then
+    BUILD_ENVIRONMENT="${BUILD_ENVIRONMENT}-${TEST_CONFIG}"
+fi
+
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
@@ -522,6 +527,9 @@ elif [[ "${BUILD_ENVIRONMENT}" == *vulkan-linux* ]]; then
   test_vulkan
 elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   test_bazel
+elif [[ "${BUILD_ENVIRONMENT}" == *distributed* ]]; then
+  test_distributed
+  test_rpc
 else
   install_torchvision
   install_monkeytype
@@ -532,9 +540,7 @@ else
   test_custom_script_ops
   test_custom_backend
   test_torch_function_benchmark
-  test_distributed
   test_benchmarks
-  test_rpc
   if [[ "${BUILD_ENVIRONMENT}" == *linux-xenial-py3.6-gcc7-test* || "${BUILD_ENVIRONMENT}" == *linux-xenial-py3.6-gcc5.4-test* ]]; then
     test_python_gloo_with_tls
   fi
