@@ -22,6 +22,7 @@ from torch.utils.data import (
     IterableDataset,
     Subset,
     TensorDataset,
+    communication,
     _utils
 )
 from torch.utils.data._utils import MP_STATUS_CHECK_INTERVAL
@@ -32,10 +33,6 @@ from torch.testing._internal.common_utils import (TestCase, run_tests, TEST_NUMP
                                                   IS_IN_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm, slowTest,
                                                   load_tests, TEST_WITH_TSAN, IS_SANDCASTLE)
 
-import torch.utils.data.communication.eventloop as eventloop
-import torch.utils.data.communication.messages as messages
-import torch.utils.data.communication.iter as iter
-import torch.utils.data.communication.protocol as datapipes_protocol
 
 try:
     import psutil
@@ -735,7 +732,7 @@ class TestWorkerInfoDataset(SynchronizedDataset):
 
 # Should be used as worker_init_fn with TestWorkerInfoDataset.
 # See _test_get_worker_info below for usage.
-def test_worker_info_init_fn(worker_id):
+def _test_worker_info_init_fn(worker_id):
     worker_info = torch.utils.data.get_worker_info()
     assert worker_id == worker_info.id, "worker_init_fn and worker_info should have consistent id"
     assert worker_id < worker_info.num_workers, "worker_init_fn and worker_info should have valid id"
@@ -765,7 +762,7 @@ def _test_get_worker_info():
     dataset = TestWorkerInfoDataset(6, batch_size, num_workers)
     dataloader = DataLoader(dataset, batch_size=batch_size,
                             num_workers=num_workers,
-                            worker_init_fn=test_worker_info_init_fn)
+                            worker_init_fn=_test_worker_info_init_fn)
     it = iter(dataloader)
     data = []
     for d in it:
@@ -774,7 +771,7 @@ def _test_get_worker_info():
     data = torch.cat(data, 0)
     for d in data:
         # each `d` is a [worker_id, worker_pid] pair, which is set in
-        # test_worker_info_init_fn
+        # _test_worker_info_init_fn
         assert d[1] == worker_pids[d[0]]
     # get_worker_info returns None in main proc after data loading
     assert torch.utils.data.get_worker_info() is None
@@ -1974,8 +1971,8 @@ class TestDataLoader2(TestCase):
         dl = DataLoader(dp, batch_size=3, collate_fn=lambda x: x, num_workers=2)
         dl2 = DataLoader2(dp, batch_size=3, collate_fn=lambda x: x, num_workers=2)
         dl2_threading = DataLoader2(dp, batch_size=3, collate_fn=lambda x: x, num_workers=2, parallelism_mode='thread')
-        self.assertEquals(list(dl), list(dl2))
-        self.assertEquals(list(dl), list(dl2_threading))
+        self.assertEqual(list(dl), list(dl2))
+        self.assertEqual(list(dl), list(dl2_threading))
 
 
 
@@ -1987,22 +1984,22 @@ class TestDataLoader2_EventLoop(TestCase):
     @skipIfNoDill
     def test_basic_threading(self):
         def clean_me(process, req_queue, res_queue):
-            req_queue.put(messages.TerminateRequest())
+            req_queue.put(communication.messages.TerminateRequest())
             _ = res_queue.get()
             process.join()
 
         it = list(range(100))
         numbers_dp = IterableWrapper(it)
-        (process, req_queue, res_queue, _thread_local_datapipe) = eventloop.SpawnThreadForDataPipeline(numbers_dp)
+        (process, req_queue, res_queue, _thread_local_datapipe) = communication.eventloop.SpawnThreadForDataPipeline(numbers_dp)
 
         process.start()
-        local_datapipe = iter.QueueWrapper(
-            datapipes_protocol.IterDataPipeQueueProtocolClient(req_queue, res_queue))
+        local_datapipe = communication.iter.QueueWrapper(
+            communication.protocol.IterDataPipeQueueProtocolClient(req_queue, res_queue))
 
         actual = list(local_datapipe)
         clean_me(process, req_queue, res_queue)
 
-        self.assertEquals(list(range(100)), actual)
+        self.assertEqual(list(range(100)), actual)
 
 class StringDataset(Dataset):
     def __init__(self):
