@@ -135,7 +135,7 @@ const OperatorSet& supported_eltwise_set() {
       "aten::threshold(Tensor self, Scalar threshold, Scalar value) -> Tensor",
       // "aten::masked_fill.Scalar(Tensor self, Tensor mask, Scalar value) -> Tensor",
       // "aten::masked_fill.Tensor(Tensor self, Tensor mask, Tensor value) -> Tensor", TODO: requires 0-dim Tensor
-      "aten::remainder.Scalar(Tensor self, Scalar other) -> Tensor",
+      // "aten::remainder.Scalar(Tensor self, Scalar other) -> Tensor",
       "aten::remainder.Tensor(Tensor self, Tensor other) -> Tensor",
       "aten::sigmoid(Tensor self) -> Tensor",
       "aten::relu(Tensor self) -> Tensor",

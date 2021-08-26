@@ -4,6 +4,7 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorGeometry.h>
+#include <ATen/native/TypeProperties.h>
 #include <c10/util/irange.h>
 #include <c10/util/string_utils.h>
 #include <torch/csrc/jit/jit_log.h>
@@ -454,6 +455,11 @@ std::vector<ExprHandle> computeIndicesToBroadcast(
   return bcast;
 }
 
+bool isScalar(ExprHandle e) {
+  auto n = e.node();
+  return n->isConstant() || to<Var>(n);
+}
+
 void promoteInputs(std::vector<ExprHandle>& inputs, const int typeConstraints) {
   if (inputs.empty()) {
     return;
@@ -462,7 +468,14 @@ void promoteInputs(std::vector<ExprHandle>& inputs, const int typeConstraints) {
   // Find the highest type among the inputs.
   ScalarType highType = inputs[0].dtype().scalar_type();
   for (auto input : inputs) {
-    highType = promoteTypes(highType, input.dtype().scalar_type());
+    auto inputType = input.dtype().scalar_type();
+    if (isScalar(input)) {
+      if (isIntegralType(highType, false) && isFloatingType(inputType)) {
+        highType = c10::typeMetaToScalarType(c10::get_default_dtype());
+      }
+    } else {
+      highType = promoteTypes(highType, input.dtype().scalar_type());
+    }
   }
 
   if (!checkTypes(highType, typeConstraints)) {
