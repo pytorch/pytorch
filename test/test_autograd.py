@@ -2801,11 +2801,11 @@ class TestAutograd(TestCase):
 
         r1 = var1 * var1 * mean1 * mean1
         r2 = var2 * var2 * mean2 * mean2
-        self.assertTrue(torch.allclose(r1, r2, rtol=0.01, atol=0.0))
+        self.assertEqual(r1, r2, rtol=0.01, atol=0.0)
 
         torch.autograd.backward(r1, grad)
         torch.autograd.backward(r2, grad)
-        self.assertTrue(torch.allclose(input1.grad, input2.grad, rtol=0.01, atol=0.0))
+        self.assertEqual(input1.grad, input2.grad, rtol=0.01, atol=0.0)
 
     @slowTest
     @skipIfNoLapack
@@ -5159,7 +5159,7 @@ for shape in [(1,), ()]:
 
         # TODO: this is a bug!
         # once this is fixed, it should have the transpose removed:
-        # self.assertTrue(torch.allclose(non_inplace_grad, inplace_grad))
+        # self.assertEqual(non_inplace_grad, inplace_grad)
         self.assertEqual(non_inplace_grad.T, inplace_grad)
 
     def test_autograd_multiple_views_python(self):
@@ -8255,6 +8255,12 @@ class TestAutogradDeviceType(TestCase):
         b.backward(torch.ones(3, device=device))
         expected = torch.tensor([0., 0., 1.], device=device)
         self.assertEqual(a.grad, expected)
+
+        a_bf16 = torch.tensor([-2., 0., 2.], device=device, dtype=torch.bfloat16, requires_grad=True)
+        b_bf16 = torch.nn.functional.leaky_relu_(a_bf16.clone(), 0.0)
+        b_bf16.backward(torch.ones(3, device=device))
+        expected_bf16 = torch.tensor([0., 0., 1.], device=device, dtype=torch.bfloat16)
+        self.assertEqual(a_bf16.grad, expected_bf16)
 
     @onlyOnCPUAndCUDA
     def test_elu_inplace_with_neg_alpha(self, device):
