@@ -65,16 +65,16 @@ bool Function::append_operator(
   }
 
   auto jit_op = findOperatorFor(opname);
-  std::vector<c10::Argument> args;
+  const std::vector<c10::Argument>* pArgs = nullptr;
   if (jit_op) {
     fn = [jit_op](Stack& stack) { jit_op->getOperation()(&stack); };
-    args = jit_op->schema().arguments();
+    pArgs = &jit_op->schema().arguments();
   } else {
     auto op = c10::Dispatcher::singleton().findSchema(opname_c10);
     if (op.has_value()) {
       fn = [op](Stack& stack) { op->callBoxed(&stack); };
       if (op->hasSchema()) {
-        args = op->schema().arguments();
+        pArgs = &op->schema().arguments();
       } else {
         TORCH_CHECK(false, "arguments are missing for operator ", opname);
       }
@@ -83,6 +83,8 @@ bool Function::append_operator(
     }
   }
 
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(pArgs);
+  const auto& args = *pArgs;
   if (model_version == 0x3LL &&
       opname == c10::OperatorName("aten::_convolution", "")) {
     // Since byte-code versions 0x4L, convolution has an additional
@@ -101,7 +103,7 @@ bool Function::append_operator(
         num_specified_args.value() < static_cast<int64_t>(args.size())) {
       // Sanity check at load time, to save perf at runtime
       for (size_t i = num_specified_args.value(); i < args.size(); ++i) {
-        auto default_val = args[i].default_value();
+        const auto& default_val = args[i].default_value();
         TORCH_CHECK(
             default_val.has_value(),
             "Error happened at preparing for default values for the argument. The ",
