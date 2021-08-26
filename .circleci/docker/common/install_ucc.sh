@@ -9,8 +9,10 @@ cd /tmp
 git clone https://github.com/openucx/ucx.git
 git clone https://github.com/openucx/ucc.git
 
-export CC=/usr/bin/gcc
-export CXX=/usr/bin/g++
+# disable sccache
+# export CC=/usr/bin/gcc
+# export CXX=/usr/bin/g++
+export PATH="/usr/bin:$PATH"
 
 pushd ucx
 ./autogen.sh

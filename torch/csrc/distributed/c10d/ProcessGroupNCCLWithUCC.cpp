@@ -49,9 +49,11 @@ ProcessGroupNCCLWithUCC::ProcessGroupNCCLWithUCC(
 #endif
 #ifdef USE_C10D_UCC
   if (libucc.available()) {
-    CreateProcessGroupUCCType createProcessGroupUCC =
-      reinterpret_cast<CreateProcessGroupUCCType>(libucc.sym("_Z21createProcessGroupUCCRKN3c1013intrusive_ptrIN4c10d5StoreENS_6detail34intrusive_target_default_null_typeIS2_EEEEii"));
-    pg_ucc = createProcessGroupUCC(store, rank, size);
+    try {
+      CreateProcessGroupUCCType createProcessGroupUCC =
+        reinterpret_cast<CreateProcessGroupUCCType>(libucc.sym("_Z21createProcessGroupUCCRKN3c1013intrusive_ptrIN4c10d5StoreENS_6detail34intrusive_target_default_null_typeIS2_EEEEii"));
+      pg_ucc = createProcessGroupUCC(store, rank, size);
+    } catch (c10::Error &e) {}
   }
 #endif
 }
