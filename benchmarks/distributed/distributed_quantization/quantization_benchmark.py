@@ -1,7 +1,6 @@
 import torch
 import os
 import time
-# import pandas as pd
 import torch.cuda
 import torch.nn
 import torch.autograd
@@ -17,7 +16,7 @@ def run_quantize_collective(rank, size, output_tensor, input_tensor, tensorSize,
         quantize_collective = quant.auto_quantize(dist.all_gather, qtype)
     else:
         quantize_collective = quant.auto_quantize(dist.all_to_all, qtype)
-        quantize_collective(output_tensor, input_tensor, group=group, async_op=False)
+    quantize_collective(output_tensor, input_tensor, group=group, async_op=False)
 
 def run_collective(rank, size, output_tensor, input_tensor, tensorSize, qtype, collective):
     group = dist.new_group(range(size))
@@ -42,9 +41,10 @@ def _build_tensor(size, value=None, dtype=torch.float32, device_id=None):
         return torch.empty(size, dtype=dtype).fill_(value).cuda(device_id)
 
 if __name__ == "__main__":
-    world_size = 2
-    tensorSizes = [[5, 5], [10, 10], [50, 50]]
-    iterations = 10
+    world_size = 4
+    # Different tensor sizes can be added here.
+    tensorSizes = [[5, 5]]
+    iterations = 20
     mp.set_start_method("spawn")
     collectives = ['all_gather', 'all_to_all']
     qtypes = [DQuantType.FP16, DQuantType.BFP16]
@@ -53,8 +53,8 @@ if __name__ == "__main__":
     print('Collective op |Quantization Method|Tensor size     |Latency')
     for collective in collectives:
         backend = "gloo" if collective == 'all_gather' else 'nccl'
-        for qtype in qtypes:
-            for tensorSize in tensorSizes:
+        for tensorSize in tensorSizes:
+            for qtype in qtypes:
                 avg = 0
                 for _ in range(iterations):
                     processes = []
@@ -83,11 +83,8 @@ if __name__ == "__main__":
                             end = time.time()
                     avg = avg + (end - start)
                 avg = avg / iterations
-                # row.append([collective, qtype, tensorSize, avg])
                 print(collective, "  ", tensorSize, "             ", qtype.value, "      ", avg)
 
-
-        for tensorSize in tensorSizes:
             avg = 0
             for _ in range(iterations):
                 processes = []
@@ -117,7 +114,3 @@ if __name__ == "__main__":
                 avg = avg + (end - start)
             avg = avg / iterations
             print(collective, "  ", tensorSize, "             ", "None", "           ", avg)
-    #         row.append([collective, 'None', tensorSize, avg])
-    # df = pd.DataFrame(row, columns=['Collective op', 'Quantization Method', 'Tensor size', 'Latency'])
-    # print(df.keys())
-    # print(df.values)
