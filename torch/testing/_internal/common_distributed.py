@@ -9,7 +9,6 @@ import time
 import traceback
 import types
 import unittest
-import warnings
 from contextlib import contextmanager
 from datetime import timedelta
 from enum import Enum
@@ -467,14 +466,6 @@ class MultiProcessTestCase(TestCase):
             logger.info(f"Started process {rank} with pid {process.pid}")
             self.pid_to_pipe[process.pid] = parent_conn
             self.processes.append(process)
-
-    def _fork_processes(self) -> None:
-        warnings.warn(
-            "Fork based multiprocessing is dangerous and should not"
-            " be used, for tests with ASAN consider using opt-asan",
-            DeprecationWarning)
-        proc = torch.multiprocessing.get_context("fork").Process
-        self._start_processes(proc)
 
     def _spawn_processes(self) -> None:
         proc = torch.multiprocessing.get_context("spawn").Process

@@ -3,7 +3,6 @@
 #include <test/cpp/tensorexpr/test_base.h>
 
 #include <torch/csrc/jit/tensorexpr/cpp_codegen.h>
-#include <torch/csrc/jit/tensorexpr/mem_arena.h>
 #include <torch/csrc/jit/tensorexpr/stmt.h>
 #include <torch/csrc/jit/testing/file_check.h>
 
@@ -13,7 +12,6 @@ namespace jit {
 using namespace torch::jit::tensorexpr;
 
 TEST(CppPrinter, AllocateOnStackThenFree) {
-  KernelScope kernel_scope;
   std::vector<ExprPtr> dims = {alloc<IntImm>(2), alloc<IntImm>(3)};
   BufPtr buf = alloc<Buf>("x", dims, kInt);
   AllocatePtr alloc_ = alloc<Allocate>(buf);
@@ -32,7 +30,6 @@ TEST(CppPrinter, AllocateOnStackThenFree) {
 }
 
 TEST(CppPrinter, AllocateOnHeapThenFree) {
-  KernelScope kernel_scope;
   std::vector<ExprPtr> dims = {
       alloc<IntImm>(20), alloc<IntImm>(50), alloc<IntImm>(3)};
   BufPtr buf = alloc<Buf>("y", dims, kLong);

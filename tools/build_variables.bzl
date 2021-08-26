@@ -23,7 +23,9 @@ GENERATED_CPP = [
     "autograd/generated/python_fft_functions.cpp",
     "autograd/generated/python_linalg_functions.cpp",
     "autograd/generated/python_special_functions.cpp",
-    "autograd/generated/python_torch_functions.cpp",
+    "autograd/generated/python_torch_functions_0.cpp",
+    "autograd/generated/python_torch_functions_1.cpp",
+    "autograd/generated/python_torch_functions_2.cpp",
     "autograd/generated/python_variable_methods.cpp",
 ]
 
@@ -247,6 +249,7 @@ core_sources_full_mobile_no_backend_interface = [
     "torch/csrc/jit/passes/symbolic_shape_analysis.cpp",
     "torch/csrc/jit/passes/specialize_autogradzero.cpp",
     "torch/csrc/jit/passes/update_differentiable_graph_requires_grad.cpp",
+    "torch/csrc/jit/passes/variadic_ops.cpp",
     "torch/csrc/jit/passes/subgraph_rewrite.cpp",
     "torch/csrc/jit/passes/tensorexpr_fuser.cpp",
     "torch/csrc/jit/passes/utils/memory_dag.cpp",
@@ -303,7 +306,6 @@ core_sources_full_mobile_no_backend_interface = [
     "torch/csrc/jit/tensorexpr/llvm_codegen.cpp",
     "torch/csrc/jit/tensorexpr/llvm_jit.cpp",
     "torch/csrc/jit/tensorexpr/loopnest.cpp",
-    "torch/csrc/jit/tensorexpr/mem_arena.cpp",
     "torch/csrc/jit/tensorexpr/mem_dependency_checker.cpp",
     "torch/csrc/jit/tensorexpr/operators/conv2d.cpp",
     "torch/csrc/jit/tensorexpr/operators/matmul.cpp",
@@ -332,6 +334,7 @@ core_sources_full = core_sources_full_mobile + [
     "torch/csrc/jit/runtime/static/native_ops.cpp",
     "torch/csrc/jit/runtime/static/ops.cpp",
     "torch/csrc/jit/runtime/static/passes.cpp",
+    "torch/csrc/jit/runtime/static/te_wrapper.cpp",
     "torch/csrc/jit/tensorexpr/external_functions.cpp",
     "torch/csrc/jit/tensorexpr/external_functions_codegen.cpp",
 ]
@@ -573,6 +576,7 @@ libtorch_cuda_distributed_extra_sources = [
     "torch/csrc/distributed/c10d/NCCLUtils.cpp",
     "torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp",
     "torch/csrc/distributed/rpc/tensorpipe_cuda.cpp",
+    "torch/csrc/distributed/c10d/quantization/quantization_gpu.cu",
 ]
 
 libtorch_cuda_distributed_sources = libtorch_cuda_distributed_base_sources + libtorch_cuda_distributed_extra_sources
@@ -688,6 +692,7 @@ libtorch_python_core_sources = [
     "torch/csrc/autograd/python_function.cpp",
     "torch/csrc/autograd/python_hook.cpp",
     "torch/csrc/autograd/python_legacy_variable.cpp",
+    "torch/csrc/autograd/python_torch_functions_manual.cpp",
     "torch/csrc/autograd/python_variable.cpp",
     "torch/csrc/autograd/python_variable_indexing.cpp",
     "torch/csrc/jit/backends/backend_init.cpp",
@@ -758,6 +763,7 @@ libtorch_python_distributed_core_sources = [
     "torch/csrc/distributed/c10d/frontend.cpp",
     "torch/csrc/distributed/c10d/init.cpp",
     "torch/csrc/distributed/c10d/python_comm_hook.cpp",
+    "torch/csrc/distributed/c10d/quantization/quantization.cpp",
 ]
 
 libtorch_python_distributed_sources = libtorch_python_distributed_core_sources + [
@@ -784,7 +790,9 @@ def glob_libtorch_python_sources(gencode_pattern = ":generate-code[{}]"):
         "autograd/generated/python_fft_functions.cpp",
         "autograd/generated/python_linalg_functions.cpp",
         "autograd/generated/python_special_functions.cpp",
-        "autograd/generated/python_torch_functions.cpp",
+        "autograd/generated/python_torch_functions_0.cpp",
+        "autograd/generated/python_torch_functions_1.cpp",
+        "autograd/generated/python_torch_functions_2.cpp",
         "autograd/generated/python_variable_methods.cpp",
     ]]
 

@@ -397,7 +397,9 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_functions_3.cpp"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_functions_4.cpp"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_variable_methods.cpp"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_torch_functions.cpp"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_torch_functions_0.cpp"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_torch_functions_1.cpp"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_torch_functions_2.cpp"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions.cpp"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_fft_functions.cpp"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_linalg_functions.cpp"
@@ -527,11 +529,6 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     # See https://github.com/pytorch/pytorch/issues/38856
     set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_jit.cpp PROPERTIES COMPILE_FLAGS "-Wno-redundant-move -Wno-noexcept-type")
     set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_codegen.cpp PROPERTIES COMPILE_FLAGS -Wno-init-list-lifetime)
-  endif()
-
-  # Pass path to PocketFFT
-  if(AT_POCKETFFT_ENABLED)
-    set_source_files_properties(${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/mkl/SpectralOps.cpp PROPERTIES INCLUDE_DIRECTORIES "${POCKETFFT_INCLUDE_DIR}")
   endif()
 
   if(NOT INTERN_DISABLE_MOBILE_INTERP)
@@ -793,6 +790,17 @@ if(USE_PRECOMPILED_HEADERS)
       ${Caffe2_CPU_SRCS_AVX2}
       ${Caffe2_CPU_SRCS_AVX512}
       PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
+endif()
+
+# Pass path to PocketFFT
+if(AT_POCKETFFT_ENABLED)
+  if(CMAKE_VERSION VERSION_LESS "3.11")
+    target_include_directories(torch_cpu PRIVATE "${POCKETFFT_INCLUDE_DIR}")
+  else()
+    set_source_files_properties(
+        "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/mkl/SpectralOps.cpp"
+        PROPERTIES INCLUDE_DIRECTORIES "${POCKETFFT_INCLUDE_DIR}")
+  endif()
 endif()
 
 if(CMAKE_COMPILER_IS_GNUCXX AND BUILD_LIBTORCH_CPU_WITH_DEBUG)

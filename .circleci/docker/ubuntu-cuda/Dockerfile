@@ -65,6 +65,12 @@ ADD ./common/install_openssl.sh install_openssl.sh
 ENV OPENSSL_ROOT_DIR /opt/openssl
 RUN bash ./install_openssl.sh
 
+# (optional) Install non-default CMake version
+ARG CMAKE_VERSION
+ADD ./common/install_cmake.sh install_cmake.sh
+RUN if [ -n "${CMAKE_VERSION}" ]; then bash ./install_cmake.sh; fi
+RUN rm install_cmake.sh
+
 # Install ccache/sccache (do this last, so we get priority in PATH)
 ADD ./common/install_cache.sh install_cache.sh
 ENV PATH /opt/cache/bin:$PATH
