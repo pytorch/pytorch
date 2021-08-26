@@ -5,7 +5,7 @@ import random
 from torch._six import nan
 from itertools import permutations, product
 
-from torch.testing._internal.dtype_getters import (
+from torch.testing._internal.common_dtype import (
     all_types, all_types_and, floating_types_and, get_all_dtypes, get_all_int_dtypes, get_all_fp_dtypes,
 )
 from torch.testing._internal.common_utils import \
