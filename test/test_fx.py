@@ -11,6 +11,7 @@ import pickle
 import sys
 import torch
 import traceback
+import typing
 import warnings
 import unittest
 from math import sqrt
@@ -3051,6 +3052,7 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
         python versions
         """
         fn_name = torch.typename(obj)
+
         signature = inspect.signature(obj)
 
         sig_str = f'{fn_name}{signature}'
@@ -3077,7 +3079,6 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
         return f'{fn_name}({", ".join(arg_strs)}){return_annot}'
 
     def _annotation_type_to_stable_str(self, t, sig_str):
-        import typing
         if t is inspect.Signature.empty:
             return ''
 
@@ -3085,6 +3086,8 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
         if isinstance(t, str):
             return f"'{t}'"
         if hasattr(typing, 'ForwardRef') and isinstance(t, typing.ForwardRef):
+            return t.__forward_arg__
+        if hasattr(typing, '_ForwardRef') and isinstance(t, typing._ForwardRef):
             return t.__forward_arg__
 
         trivial_mappings = {
@@ -3101,6 +3104,8 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
             torch.fx.Graph : 'torch.fx.graph.Graph',
             torch.fx.Node : 'torch.fx.node.Node',
             torch.fx.Proxy : 'torch.fx.proxy.Proxy',
+            torch.fx.node.Target : 'torch.fx.node.Target',
+            torch.fx.node.Argument : 'torch.fx.node.Argument',
             torch.fx.graph.PythonCode : 'torch.fx.graph.PythonCode',
             torch.fx.graph_module.GraphModule: 'torch.fx.graph_module.GraphModule',
             torch.fx.subgraph_rewriter.Match: 'torch.fx.subgraph_rewriter.Match',
@@ -3116,12 +3121,16 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
             return mapping
 
         # Handle types with contained types
-        contained = getattr(t, '__args__', [])
+        contained = getattr(t, '__args__', None) or []
         contained = t if isinstance(t, list) else contained
         contained_type_annots = [self._annotation_type_to_stable_str(ct, sig_str) for ct in contained]
         contained_type_str = f'[{", ".join(contained_type_annots)}]' if len(contained_type_annots) > 0 else ''
 
         origin = getattr(t, '__origin__', None)
+        if origin is None:
+            # Unbound types don't have `__origin__` in some Python versions, so fix that up here.
+            origin = t if t in {typing.Tuple, typing.Union, typing.Dict, typing.List, typing.Type, typing.Callable} else origin
+
         if origin in {tuple, typing.Tuple}:
             return f'Tuple{contained_type_str}'
         if origin in {typing.Union}:
