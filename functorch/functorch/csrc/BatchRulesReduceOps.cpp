@@ -62,6 +62,16 @@ Tensor norm_scalar_decomp(
   return at::norm(self, p, range(0, self.dim()), false);
 }
 
+Tensor nanmedian_decomp(
+    const Tensor& self) {
+  return std::get<0>(at::nanmedian(self.flatten(), 0, false));
+}
+
+Tensor median_decomp(
+    const Tensor& self) {
+  return std::get<0>(at::median(self.flatten(), 0, false));
+}
+
 enum ReductionCase { DimArray, Dim };
 
 template<int dim_arg_pos=1>
@@ -299,10 +309,12 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   REDUCTION_BOXED(max.dim);
   m.impl("mean", mean_decomp);
   REDUCTION_BOXED(mean.dim);
+  m.impl("median", median_decomp);
   REDUCTION_BOXED(median.dim);
   m.impl("min", min_decomp);
   REDUCTION_BOXED(min.dim);
   REDUCTION_BOXED(mode);
+  m.impl("nanmedian", nanmedian_decomp);
   REDUCTION_BOXED(nanmedian.dim);
   m.impl("nansum", nansum_decomp);
   REDUCTION_BOXED(nansum.dim_IntList);
