@@ -323,8 +323,15 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
         # and generate IR nodes
         for dispatch_key in [backend_dispatch_key]:  # , autograd_dispatch_key
             fm.write_with_template(f'{dispatch_key}LazyIr.h', 'LazyIr.h', lambda: {
-                'extra_cuda_headers': '',
-                'legacy_th_headers': '',
+                'lazy_ir_sysinc': [f'#include <{path}>' for path in [
+                    "c10/core/ScalarType.h",
+                    "c10/util/Optional.h",
+                    "vector",
+                ]],
+                'lazy_ir_inc': [f'#include "{path}"' for path in [
+                    "lazy_tensor_core/csrc/ir.h",
+                    "lazy_tensors/types.h",
+                ]],
                 'external_backend_headers': f'#include "{output_dir}/{backend_key}NativeFunctions.h"',
                 'namespaced_headers': '',
                 'DispatchKey': dispatch_key,
@@ -338,5 +345,7 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
                     grouped_native_functions
                 )),
             })
+
+
 if __name__ == '__main__':
     main()
