@@ -103,7 +103,7 @@ bool Function::append_operator(
         num_specified_args.value() < static_cast<int64_t>(args.size())) {
       // Sanity check at load time, to save perf at runtime
       for (size_t i = num_specified_args.value(); i < args.size(); ++i) {
-        auto default_val = args[i].default_value();
+        const auto& default_val = args[i].default_value();
         TORCH_CHECK(
             default_val.has_value(),
             "Error happened at preparing for default values for the argument. The ",
