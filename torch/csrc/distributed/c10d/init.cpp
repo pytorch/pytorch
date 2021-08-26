@@ -17,6 +17,7 @@
 
 #ifdef USE_C10D_NCCL
 #include <c10d/ProcessGroupNCCL.hpp>
+#include <torch/csrc/distributed/c10d/quantization/quantization_gpu.h>
 #endif
 
 #ifdef USE_C10D_MPI
@@ -31,8 +32,10 @@
 #include <c10d/frontend.hpp>
 #include <c10d/logger.hpp>
 #include <c10d/reducer.hpp>
+
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/distributed/c10d/python_comm_hook.h>
+#include <torch/csrc/distributed/c10d/quantization/quantization.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/pybind.h>
@@ -286,7 +289,7 @@ Returns:
 )")
       .def(
           "buffer",
-          &::c10d::GradBucket::getTensor,
+          &::c10d::GradBucket::getBuffer,
           py::call_guard<py::gil_scoped_release>(),
           R"(
 Returns:
@@ -321,8 +324,8 @@ Returns:
 )")
       .def(
           "set_buffer",
-          &::c10d::GradBucket::setTensor,
-          py::arg("tensor"),
+          &::c10d::GradBucket::setBuffer,
+          py::arg("buffer"),
           py::call_guard<py::gil_scoped_release>(),
           R"(
 Replaces the tensor in the bucket with the input tensor buffer.
@@ -344,7 +347,8 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
               int64_t,
               bool,
               bool,
-              std::unordered_map<size_t, std::string>>(),
+              std::unordered_map<size_t, std::string>,
+              int64_t>(),
           py::arg("replicas"),
           py::arg("bucket_indices"),
           py::arg("per_bucket_size_limits"),
@@ -355,6 +359,7 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           py::arg("gradient_as_bucket_view") = false,
           py::arg("param_to_name_mapping") =
               std::unordered_map<size_t, std::string>(),
+          py::arg("first_bucket_bytes_cap") = ::c10d::kDefaultFirstBucketBytes,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "prepare_for_forward",
@@ -392,10 +397,6 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
       .def(
           "_get_local_used_maps",
           &::c10d::Reducer::get_local_used_maps_on_device)
-      .def(
-          "save_thread_local_state",
-          &::c10d::Reducer::save_thread_local_state,
-          py::call_guard<py::gil_scoped_release>())
       .def(
           "_set_ddp_runtime_logging_sample_rate",
           &::c10d::Reducer::set_ddp_runtime_logging_sample_rate,
@@ -1645,6 +1646,27 @@ static PyMethodDef methods[] = { // NOLINT
 PyMethodDef* python_functions() {
   return methods;
 }
+
+namespace quantization {
+TORCH_LIBRARY(q, m) {
+    m.def("_Bfloat16QuantizedToFloat(Tensor input) -> Tensor");
+    m.def("_FloatToBfloat16Quantized(Tensor input) -> Tensor");
+}
+    TORCH_LIBRARY_IMPL(q, CPU, m) {
+        m.impl("_Bfloat16QuantizedToFloat", _bfloat16_to_float_cpu);
+        m.impl("_FloatToBfloat16Quantized", _float_to_bfloat16_cpu);
+    }
+
+#ifdef USE_C10D_NCCL
+    #define DISPATCH_TO_CUDA(name, function) \
+        m.impl(name, torch::dispatch(c10::DispatchKey::CUDA, TORCH_FN(function)))
+    TORCH_LIBRARY_IMPL(q, CUDA, m) {
+        DISPATCH_TO_CUDA("_Bfloat16QuantizedToFloat", _bfloat16_to_float_cuda);
+        DISPATCH_TO_CUDA("_FloatToBfloat16Quantized", _float_to_bfloat16_cuda);
+    }
+#endif
+
+} // namespace quantization
 
 } // namespace c10d
 } // namespace distributed

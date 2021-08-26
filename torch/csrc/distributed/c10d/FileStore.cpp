@@ -40,7 +40,7 @@ int flock_(int fd, int op) {
   DWORD low = 1, high = 0;
   OVERLAPPED offset = {0, 0, 0, 0, NULL};
 
-  if (hdl < 0)
+  if ((intptr_t)hdl < 0)
     return -1;
 
   switch (op) {

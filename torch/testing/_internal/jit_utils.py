@@ -594,7 +594,7 @@ class JitTestCase(JitCommonTestCase):
             for g2, g2_ge in zip(grads2, grads2_ge):
                 if g2 is None and g2_ge is None:
                     continue
-                self.assertTrue(torch.allclose(g2, g2_ge, atol=8e-4, rtol=8e-4))
+                self.assertEqual(g2, g2_ge, atol=8e-4, rtol=8e-4)
 
         return ge
 
@@ -668,11 +668,13 @@ def _trace(*args, **kwargs):
 
 def enable_cpu_fuser(fn):
     def wrapper(*args, **kwargs):
+        torch._C._jit_override_can_fuse_on_cpu_legacy(True)
         torch._C._jit_override_can_fuse_on_cpu(True)
         torch._C._jit_set_te_must_use_llvm_cpu(False)
         try:
             fn(*args, **kwargs)
         finally:
+            torch._C._jit_override_can_fuse_on_cpu_legacy(False)
             torch._C._jit_override_can_fuse_on_cpu(False)
             torch._C._jit_set_te_must_use_llvm_cpu(True)
     return wrapper

@@ -726,7 +726,12 @@ Tensor& add_out_dense_sparse_cpu(Tensor& r, const Tensor& dense, const SparseTen
 
 Tensor mul_sparse(const Tensor& self, const Tensor& other) {
   auto commonDtype = at::result_type(self, other);
-  Tensor result = at::empty({0}, self.options().dtype(commonDtype));
+  // Arbitrary (dense, sparse) and (sparse, dense) multiplication is not
+  // currently supported, but (0dim-dense, sparse) and (sparse, 0dim-dense) is.
+  // Make sure we use the sparse exemplar for result.
+  auto result_options = self.is_sparse() ?
+    self.options().dtype(commonDtype) : other.options().dtype(commonDtype);
+  Tensor result = at::empty({0}, result_options);
   return at::mul_out(result, self, other);  // redispatch!
 }
 
@@ -745,7 +750,8 @@ SparseTensor& mul_out_sparse_cpu(const Tensor& t_, const Tensor& src_, SparseTen
   AT_ASSERT(!t_.is_cuda()); // dispatch argument
   TORCH_CHECK(!r.is_cuda(), "mul: expected 'out' to be CPU tensor, but got CUDA tensor");
   TORCH_CHECK(!src_.is_cuda(), "mul: expected 'other' to be a CPU tensor, but got a CUDA tensor");
-
+  TORCH_CHECK(src_.is_sparse(), "mul(sparse, dense) is not supported");
+  TORCH_CHECK(t_.is_sparse(), "mul(dense, sparse) is not supported");
   TORCH_CHECK(t_.sizes().equals(src_.sizes()), "mul: expected 'self' and 'other' to have same sizes, but ", t_.sizes(), " != ", src_.sizes());
 
   if (src_._nnz() == 0 || t_._nnz() == 0) {
