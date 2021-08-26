@@ -595,7 +595,7 @@ def config_from_args(args) -> Tuple[LaunchConfig, Union[Callable, str], List[str
     nproc_per_node = determine_local_world_size(args.nproc_per_node)
     if "OMP_NUM_THREADS" not in os.environ and nproc_per_node > 1:
         omp_num_threads = 1
-        print(
+        log.warning(
             f"*****************************************\n"
             f"Setting OMP_NUM_THREADS environment variable for each process to be "
             f"{omp_num_threads} in default, to avoid your system being overloaded, "

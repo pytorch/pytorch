@@ -34,16 +34,6 @@ constexpr int64_t kBytecodeVersionV7 = 0x7L;
 // Utility function that can be reused by backport_vn_to_vn-1(). If any utility
 // function can be reused by other backport function, move it here.
 namespace {
-bool update_bytecode_version(
-    std::vector<at::IValue>& bytecode_values,
-    const int64_t to_version) {
-  if (!bytecode_values.empty() && bytecode_values[0].isInt()) {
-    bytecode_values[0] = c10::IValue(to_version);
-    return true;
-  }
-  return false;
-}
-
 // Copy files from source to destination except the files and dirs
 void selective_copy(
     PyTorchStreamReader& reader,
@@ -99,8 +89,13 @@ void get_model_stream(PyTorchStreamReader& reader, std::stringstream& out) {
       std::unordered_set<std::string>());
 }
 
-// The writeArchive function used for bytecode version v5-v7
-void write_archive_v5_to_v7(
+// The write_archive_current function is used for bytecode from version v5 to
+// v7 (the latest bytecode version). writeArchiveV4 is the export function to
+// generate bytecode for version 4. This write archvie function may change in
+// export_module.cpp, however we don't have a way to keep the old export
+// function in the codebase. To be able to export the model in old format, we
+// keep a record of the export function here.
+void write_archive_current(
     PyTorchStreamWriter& writer,
     const IValue& value,
     const std::string& archive_name,
@@ -160,6 +155,90 @@ void write_archive_v5_to_v7(
   writer.writeRecord(fname, data.data(), data.size());
 }
 
+/*
+inputs: 1) bytecode tuple from bytecode.pkl 2) the output bytecode version,
+return: A boolean to indicate whether bytecode tuple is updated successfully
+*/
+bool update_bytecode_version(
+    std::vector<at::IValue>& bytecode_values,
+    const int64_t to_version) {
+  if (!bytecode_values.empty() && bytecode_values[0].isInt()) {
+    bytecode_values[0] = c10::IValue(to_version);
+    return true;
+  }
+  return false;
+}
+
+/*
+inputs: 1) input model stringstream 2) the output bytecode version,
+return: model stringstream with updated bytecode version in bytecode.pkl
+
+Example bytecode.pkl:
+(${bytecode_version},
+  ('__torch__.m.forward',
+    (('instructions',
+      (('STOREN', 1, 2),
+       ('DROPR', 1, 0),
+       ('MOVE', 2, 0),
+       ('OP', 0, 0),
+       ('RET', 0, 0))),
+     ('operators', (('aten::Int', 'Tensor'),)),
+     ('constants', ()),
+     ('types', ()),
+     ('register_size', 2))))
+*/
+std::stringstream update_bytecode_version(
+    std::stringstream& input_model,
+    const int64_t to_version) {
+  PyTorchStreamReader reader_bytecode(&input_model);
+  std::vector<IValue> constants_values =
+      readArchive(kArchiveNameConstants, reader_bytecode).toTuple()->elements();
+
+  std::vector<IValue> bytecode_values = get_bytecode_ivalues(reader_bytecode);
+  std::unordered_set<std::string> excluded_files{
+      "constants.pkl",
+      "bytecode.pkl",
+      "version",
+  };
+
+  std::unordered_set<std::string> excluded_dirs{
+      "constants",
+      "bytecode",
+  };
+
+  std::stringstream ouput_model_stream;
+  auto writer_func = [&](const void* buf, size_t nbytes) -> size_t {
+    ouput_model_stream.write(static_cast<const char*>(buf), nbytes);
+    return !ouput_model_stream ? 0 : nbytes;
+  };
+
+  PyTorchStreamWriter writer_bytecode(writer_func);
+
+  selective_copy(
+      reader_bytecode, writer_bytecode, excluded_files, excluded_dirs);
+
+  update_bytecode_version(bytecode_values, to_version);
+  auto bytecode_tuple = c10::ivalue::Tuple::create(std::move(bytecode_values));
+  SerializationStorageContext storage_context;
+  write_archive_current(
+      writer_bytecode,
+      c10::ivalue::Tuple::create(constants_values),
+      /*archive_name=*/"constants",
+      /*archive_dir=*/"",
+      /*tensor_dir=*/"constants/",
+      /*use_storage_context=*/true,
+      storage_context);
+  write_archive_current(
+      writer_bytecode,
+      bytecode_tuple,
+      /*archive_name=*/"bytecode",
+      /*archive_dir=*/"",
+      /*tensor_dir=*/"constants/",
+      /*use_storage_context=*/true,
+      storage_context);
+
+  return ouput_model_stream;
+}
 } // namespace
 
 /******************** backport_v{i}_to_v{i-1} Functions **********************/
@@ -330,8 +409,6 @@ std::stringstream backport_v6_to_v5(std::stringstream& input_model_stream) {
   std::shared_ptr<IStreamAdapter> rai =
       std::make_shared<IStreamAdapter>(&input_model_stream);
   auto reader = std::make_shared<PyTorchStreamReader>(rai);
-  std::vector<IValue> constants_values =
-      readArchive(kArchiveNameConstants, *reader.get()).toTuple()->elements();
 
   // If there are debug info files in the original model file, it should also
   // show up in the backported model
@@ -366,52 +443,9 @@ std::stringstream backport_v6_to_v5(std::stringstream& input_model_stream) {
   }
 
   // Update the bytecode version (from 6 to 5)
-
-  PyTorchStreamReader reader_bytecode(&intermediate_model_stream);
-  std::vector<IValue> bytecode_values = get_bytecode_ivalues(reader_bytecode);
-  std::unordered_set<std::string> excluded_files{
-      "constants.pkl",
-      "bytecode.pkl",
-      "version",
-  };
-
-  std::unordered_set<std::string> excluded_dirs{
-      "constants",
-      "bytecode",
-  };
-
-  std::stringstream ouput_model_stream;
-  auto writer_func = [&](const void* buf, size_t nbytes) -> size_t {
-    ouput_model_stream.write(static_cast<const char*>(buf), nbytes);
-    return !ouput_model_stream ? 0 : nbytes;
-  };
-
-  PyTorchStreamWriter writer_bytecode(writer_func);
-
-  selective_copy(
-      reader_bytecode, writer_bytecode, excluded_files, excluded_dirs);
-
-  update_bytecode_version(bytecode_values, kBytecodeVersionV5);
-  auto bytecode_tuple = c10::ivalue::Tuple::create(std::move(bytecode_values));
-  SerializationStorageContext storage_context;
-  write_archive_v5_to_v7(
-      writer_bytecode,
-      c10::ivalue::Tuple::create(constants_values),
-      /*archive_name=*/"constants",
-      /*archive_dir=*/"",
-      /*tensor_dir=*/"constants/",
-      /*use_storage_context=*/true,
-      storage_context);
-  write_archive_v5_to_v7(
-      writer_bytecode,
-      bytecode_tuple,
-      /*archive_name=*/"bytecode",
-      /*archive_dir=*/"",
-      /*tensor_dir=*/"constants/",
-      /*use_storage_context=*/true,
-      storage_context);
-
-  return ouput_model_stream;
+  std::stringstream output_model_stream =
+      update_bytecode_version(intermediate_model_stream, kBytecodeVersionV5);
+  return output_model_stream;
 }
 
 /*
@@ -475,52 +509,9 @@ std::stringstream backport_v7_to_v6(std::stringstream& input_model_stream) {
   }
 
   // Update the bytecode version (from 7 to 6)
-
-  PyTorchStreamReader reader_bytecode(&intermediate_model_stream);
-  std::vector<IValue> bytecode_values = get_bytecode_ivalues(reader_bytecode);
-  std::unordered_set<std::string> excluded_files{
-      "constants.pkl",
-      "bytecode.pkl",
-      "version",
-  };
-
-  std::unordered_set<std::string> excluded_dirs{
-      "constants",
-      "bytecode",
-  };
-
-  std::stringstream ouput_model_stream;
-  auto writer_func = [&](const void* buf, size_t nbytes) -> size_t {
-    ouput_model_stream.write(static_cast<const char*>(buf), nbytes);
-    return !ouput_model_stream ? 0 : nbytes;
-  };
-
-  PyTorchStreamWriter writer_bytecode(writer_func);
-
-  selective_copy(
-      reader_bytecode, writer_bytecode, excluded_files, excluded_dirs);
-
-  update_bytecode_version(bytecode_values, kBytecodeVersionV6);
-  auto bytecode_tuple = c10::ivalue::Tuple::create(std::move(bytecode_values));
-  SerializationStorageContext storage_context;
-  write_archive_v5_to_v7(
-      writer_bytecode,
-      c10::ivalue::Tuple::create(constants_values),
-      /*archive_name=*/"constants",
-      /*archive_dir=*/"",
-      /*tensor_dir=*/"constants/",
-      /*use_storage_context=*/true,
-      storage_context);
-  write_archive_v5_to_v7(
-      writer_bytecode,
-      bytecode_tuple,
-      /*archive_name=*/"bytecode",
-      /*archive_dir=*/"",
-      /*tensor_dir=*/"constants/",
-      /*use_storage_context=*/true,
-      storage_context);
-
-  return ouput_model_stream;
+  std::stringstream output_model_stream =
+      update_bytecode_version(intermediate_model_stream, kBytecodeVersionV6);
+  return output_model_stream;
 }
 
 } // namespace
