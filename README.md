@@ -291,9 +291,10 @@ You can refer to the [build_pytorch.bat](https://github.com/pytorch/pytorch/blob
 ```cmd
 cmd
 
-:: [Optional] If you want to build with the VS 2017 generator for old CUDA and PyTorch, please change the value in the next line to `Visual Studio 15 2017`.
-:: Note: This value is useless if Ninja is detected. However, you can force that by using `set USE_NINJA=OFF`.
-set CMAKE_GENERATOR=Visual Studio 16 2019
+:: Set the environment variables after you have downloaded and upzipped the mkl package,
+:: else CMake would throw error as `Could NOT find OpenMP`.
+set CMAKE_INCLUDE_PATH={Your directory}\mkl\include
+set LIB={Your directory}\mkl\lib;%LIB%
 
 :: Read the content in the previous section carefully before you proceed.
 :: [Optional] If you want to override the underlying toolset used by Ninja and Visual Studio with CUDA, please run the following script block.

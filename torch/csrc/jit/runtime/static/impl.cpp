@@ -66,6 +66,7 @@ void OptimizeGraph(
   EliminateDeadCode(graph);
   FuseInferenceOpsForSparseNN(graph);
   UseVariadicCat(graph);
+  UseVariadicStack(graph);
 
   // TODO: we can avoid this guard by moving operations
   // to exposed folders.
