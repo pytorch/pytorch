@@ -13571,6 +13571,32 @@ class TestNNDeviceType(NNTestCase):
             mod(inp)
 
     @onlyOnCPUAndCUDA
+    def test_MaxUnpool_zero_batch_dim(self, device):
+        pool = torch.nn.MaxPool1d(2, stride=2, return_indices=True).to(device)
+	unpool = torch.nn.MaxUnpool1d(2, stride=2).to(device)
+	inp = torch.ones(0, 10, 10, device=device)
+	output, indices = pool(input)
+	unpool(output, indices)
+
+        self._test_module_empty_inputs(unpool, [output, indices])
+
+    	pool = torch.nn.MaxPool2d(2, stride=2, return_indices=True).to(device)
+	unpool = torch.nn.MaxUnpool2d(2, stride=2).to(device)
+	input = torch.ones(0, 10, 10, 10, device=device)
+	output, indices = pool(input)
+	unpool(output, indices)
+
+        self._test_module_empty_inputs(unpool, [output, indices])
+
+    	pool = torch.nn.MaxPool3d(2, stride=2, return_indices=True).to(device)
+	unpool = torch.nn.MaxUnpool3d(2, stride=2).to(device)
+	input = torch.ones(0, 10, 10, 10, 10, device=device)
+	output, indices = pool(input)
+	unpool(output, indices)
+
+        self._test_module_empty_inputs(unpool, [output, indices])
+
+    @onlyOnCPUAndCUDA
     def test_AdaptiveMaxPool_zero_batch_dim(self, device):
         inp = torch.randn(0, 16, 50, device=device)
         mod = torch.nn.AdaptiveMaxPool1d(3).to(device)
