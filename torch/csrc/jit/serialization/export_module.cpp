@@ -14,6 +14,7 @@
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/callstack_debug_info_serialization.h>
+#include <torch/csrc/jit/serialization/ivalue_serialization.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/import_export_helpers.h>
 #include <torch/csrc/jit/serialization/pickle.h>
@@ -48,53 +49,12 @@ using mobile::serialization::CreateOperator;
 using mobile::serialization::CreateCode;
 using mobile::serialization::CreateFunction;
 using mobile::serialization::CreateDebugInfo;
-using mobile::serialization::Int;
-using mobile::serialization::Double;
-using mobile::serialization::Bool;
-using mobile::serialization::IValue_Int;
-using mobile::serialization::IValue_Bool;
-using mobile::serialization::IValue_Double;
-using mobile::serialization::IValue_Tensor;
-using mobile::serialization::CreateTensor;
-using mobile::serialization::CreateIValue2;
-using mobile::serialization::CreateInt;
-using mobile::serialization::CreateDouble;
-using mobile::serialization::CreateBool;
-using mobile::serialization::IValue2;
 using flatbuffers::FlatBufferBuilder;
 
 // Only compress these records if they're not tiny.
 // The cpu cost of generating zip datastructs and compressing isn't
 // well-spent for very small records.
 static constexpr size_t kMinToCompress = 200;
-
-struct IValueHash {
-  size_t operator()(const IValue* ivalue) const {
-    return IValue::hash2(*ivalue);
-  }
-};
-
-
-class InternIValue {
- public:
-  int intern(const IValue& ivalue) {
-    auto iter = indexes_.find(&ivalue);
-    if (iter != indexes_.end()) {
-      return iter->second;
-    }
-    int index = ivalues_.size();
-    ivalues_.push_back(ivalue);
-    indexes_[&ivalue] = index;
-    return index;
-  }
-
-  std::vector<IValue>&& getIValues() && {
-    return std::move(ivalues_);
-  }
- private:
-  std::unordered_map<const IValue*, int, IValueHash> indexes_;
-  std::vector<IValue> ivalues_;
-};
 
 void CreateAndAppendOperator(
     flatbuffers::FlatBufferBuilder& fbb,
@@ -104,66 +64,6 @@ void CreateAndAppendOperator(
     std::vector<flatbuffers::Offset<mobile::serialization::Operator>>* operators) {
   operators->push_back(CreateOperator(
       fbb, fbb.CreateString(name), fbb.CreateString(overload), num_args));
-}
-
-void CreateFBIValue(
-    flatbuffers::FlatBufferBuilder& fbb,
-    const IValue& value,
-    uint8_t* value_type,
-    flatbuffers::Offset<void>* value_value) {
-
-  if (value.isInt()) {
-    *value_type = static_cast<uint8_t>(mobile::serialization::IValue_Int);
-    *value_value = fbb.CreateStruct(CreateInt(fbb, value.toInt())).Union();
-    return;
-  }
-
-  if (value.isDouble()) {
-    *value_type = static_cast<uint8_t>(mobile::serialization::IValue_Double);
-    *value_value = fbb.CreateStruct(CreateDouble(fbb, value.toDouble())).Union();
-    return;
-  }
-
-  if (value.isBool()) {
-    *value_type = static_cast<uint8_t>(mobile::serialization::IValue_Bool);
-    *value_value = fbb.CreateStruct(CreateBool(fbb, value.toBool())).Union();
-        return;
-  }
-
-  std::cout << " Real type is " << value.tagKind() << std::endl;
-  std::cout << " ivalue is " << value << std::endl;
-  *value_type = static_cast<uint8_t>(mobile::serialization::IValue_Int);
-  *value_value = fbb.CreateStruct(CreateInt(fbb, 123)).Union();
-
-    // if (value.isTensor()) {
-    // TODO: How to serialize Tensors?
-    //   *value_type =
-    //   static_cast<uint8_t>(mobile::serialization::IValue_Tensor);
-    //   *value_value = CreateTensor(fbb, value.toTensor());
-    //   return;
-    // }
-
-  // TORCH_INTERNAL_ASSERT(false, 
-  //    "IValue tag not yet supported for flatbuffer:" + value.tagKind());
-}
-
-void CreateConstants(
-    flatbuffers::FlatBufferBuilder& fbb,
-    const std::vector<IValue>& constants,
-    std::vector<uint8_t>* constant_types,
-    std::vector<flatbuffers::Offset<void>>* constant_values) {
-  constant_types->clear();
-  constant_types->reserve(constants.size());
-  constant_values->clear();
-  constant_values->reserve(constants.size());
-
-  uint8_t const_type;
-  flatbuffers::Offset<void> const_value;
-  for (const auto& constant : constants) {
-    CreateFBIValue(fbb, constant, &const_type, &const_value);
-    constant_types->push_back(const_type);
-    constant_values->push_back(const_value);
-  }
 }
 
 flatbuffers::Offset<
@@ -179,27 +79,31 @@ flatbuffers::Offset<jit::mobile::serialization::Schema> CreateFBSchema(
     const std::vector<Argument>& args,
     const std::vector<Argument>& returns,
     c10::TypePrinter type_printer,
-    InternIValue* intern_ivalue) {
+    IValueFlatbufferSerializer* serializer) {
   std::vector<flatbuffers::Offset<jit::mobile::serialization::Arg>> arg_vec;
   arg_vec.reserve(args.size());
   std::vector<flatbuffers::Offset<jit::mobile::serialization::Arg>> return_vec;
   return_vec.reserve(returns.size());
   for (const auto& arg : args) {
-    int val_index = intern_ivalue->intern(arg.default_value());
+    mobile::serialization::IValue type;
+    flatbuffers::Offset<void> offset;
+    std::tie(type, offset) = serializer->iValueToFB(fbb, arg.default_value());
     arg_vec.emplace_back(CreateArg(
         fbb,
         fbb.CreateString(arg.name()),
         fbb.CreateString(arg.type()->annotation_str(type_printer)),
-        val_index));
+        type, offset));
   }
 
   for (const auto& ret : returns) {
-    int val_index = intern_ivalue->intern(ret.default_value());
+    mobile::serialization::IValue type;
+    flatbuffers::Offset<void> offset;
+    std::tie(type, offset) = serializer->iValueToFB(fbb, ret.default_value());
     return_vec.emplace_back(CreateArg(
         fbb,
         fbb.CreateString(ret.name()),
         fbb.CreateString(ret.type()->annotation_str(type_printer)),
-        val_index));
+        type, offset));
   }
 
   return CreateSchema(fbb, fbb.CreateVector(arg_vec), fbb.CreateVector(return_vec));
@@ -701,7 +605,7 @@ functionToFlatbuffers(
     BackendDebugInfoRecorder& debug_info_recorder,
     const std::basic_string<char>& qn,
     TypeNameUniquer& type_name_uniquer_,
-    InternIValue* intern_ivalue
+    IValueFlatbufferSerializer* serializer
 ) {
 
   auto graph = func.graph()->copy();
@@ -726,7 +630,6 @@ functionToFlatbuffers(
   for (const auto& inst: instructions_copy) {
     instruction_vector.emplace_back(inst.op, inst.N, inst.X);
   }
-  auto instruction_offsets = fbb.CreateVectorOfStructs(instruction_vector);
 
   // operators
   std::vector<flatbuffers::Offset<mobile::serialization::Operator>> operator_vector;
@@ -747,23 +650,15 @@ functionToFlatbuffers(
         num_args, &operator_vector);
   }
 
-  auto operator_offsets = fbb.CreateVector(operator_vector);
-
-  // constants
-  //
-  // Make a copy of the constants and append the method names
-  // that we emitted for the converted INTERFACE_CALL nodes above.
-  auto constants = code->constant_table();
-  std::vector<int> constant_indexes;
-  for (const IValue& ival : constants) {
-    int index = intern_ivalue->intern(ival);
-    constant_indexes.push_back(index);
-  }
-  auto constants_offsets = fbb.CreateVector(constant_indexes);
+  const auto& constants = code->constant_table();
+  std::vector<uint8_t> constant_types;
+  std::vector<flatbuffers::Offset<void>> constant_offsets;
+  std::tie(constant_types, constant_offsets) = serializer->iValueIteratorToFB(
+      fbb, constants.begin(), constants.end());
 
   // types
-  std::vector<std::string> type_strs;
-  type_strs.reserve(code->type_table().size());
+  std::vector<flatbuffers::Offset<flatbuffers::String>> type_str_offsets;
+  type_str_offsets.reserve(code->type_table().size());
   static const std::string torch_prefix("__torch__");
   static const std::string class_prefix("__torch__.torch.classes");
   for (const TypePtr& t : code->type_table()) {
@@ -776,21 +671,20 @@ functionToFlatbuffers(
           "Workaround: instead of using arbitrary class type (class Foo()), ",
           "define a pytorch class (class Foo(torch.nn.Module)).");
     }
-    type_strs.emplace_back(type_str);
+    type_str_offsets.emplace_back(fbb.CreateString(type_str));
   }
-  auto type_offsets = CreateTypes(fbb, type_strs);
 
   // since the register location is embedded into the bytecode, pass the
   // register size
   auto register_size = static_cast<int>(code->register_size());
-
-  auto code_offset = CreateCode(
-      fbb,
-      instruction_offsets,
-      operator_offsets,
-      constants_offsets,
-      type_offsets,
-      register_size);
+  auto code_offset = CreateCodeDirect(
+    fbb,
+    &instruction_vector,
+    &operator_vector,
+    &constant_types,
+    &constant_offsets,
+    &type_str_offsets,
+    register_size);
 
   // schema
   const auto& schema = func.getSchema();
@@ -811,7 +705,7 @@ functionToFlatbuffers(
       !schema.is_varret(),
       "A variable number of return values is not supported in mobile modules.");
 
-  auto schema_offset = CreateFBSchema(fbb, schema.arguments(), schema.returns(), type_printer, intern_ivalue);
+  auto schema_offset = CreateFBSchema(fbb, schema.arguments(), schema.returns(), type_printer, serializer);
   auto debug_info_offset = CreateFBDebugInfo(fbb, op_debug_handles);
 
   auto function_offset =
@@ -826,7 +720,7 @@ moduleToFlatbuffers(
     std::vector<c10::IValue>& debug_info_elements,
     BackendDebugInfoRecorder& debug_info_recorder,
     TypeNameUniquer& type_name_uniquer_,
-    InternIValue* intern_ivalue) {
+    IValueFlatbufferSerializer* serializer) {
   auto methods = module.get_methods();
   std::unordered_set<std::string> qn_cache;
   // top level methods
@@ -838,7 +732,7 @@ moduleToFlatbuffers(
       continue;
     }
     auto func_offset = functionToFlatbuffers(
-        fbb, module, method.function(), debug_info_recorder, qn, type_name_uniquer_, intern_ivalue);
+        fbb, module, method.function(), debug_info_recorder, qn, type_name_uniquer_, serializer);
     functions.push_back(func_offset);
     qn_cache.emplace(qn);
   }
@@ -1057,25 +951,20 @@ void ScriptModuleSerializer::writeByteCode(
   debug_info_elements.emplace_back(static_cast<int64_t>(version_to_write));
 
   if (use_flatbuffers) {
-    InternIValue intern_ivalue;
+    IValueFlatbufferSerializer serializer;
     flatbuffers::DetachedBuffer buffer = moduleToFlatbuffers(
         module,
         debug_info_elements,
         debug_info_recorder,
         type_name_uniquer_,
-        &intern_ivalue);
+        &serializer);
     writer_.writeRecord(
         "bytecodes.flatbuffers",
         buffer.data(),
         buffer.size(),
         buffer.size() > kMinToCompress /*compress*/);
-    auto constants = Tup(std::move(intern_ivalue).getIValues());
-    writeArchive(
-        constants,
-        /*archive_name=*/"constants_ivalue",
-        /*archive_dir=*/"",
-        /*tensor_dir=*/"constants/",
-        /*use_storage_context=*/true);
+
+    std::cerr << "HERE: " << "num of tensors: " << serializer.memoized_storage_map_.size() << std::endl;
 
   } else {
     std::vector<c10::IValue> elements;
@@ -1093,71 +982,71 @@ void ScriptModuleSerializer::writeByteCode(
         /*archive_dir=*/"",
         /*tensor_dir=*/"constants/",
         /*use_storage_context=*/true);
-  }
 
-  auto debug_info_telements = Tup(std::move(debug_info_elements));
+    auto debug_info_telements = Tup(std::move(debug_info_elements));
 
-  // At the moment keeping this feature experimental
-  // since we have not evaluated how this affect model size
-  // and we have not build any utility to strip off debug info
-  // when desired
-  // TODO: Build utility to strip off debug map. It should also do the
-  // same for debug_pkl files
-  if (save_mobile_debug_info) {
-    // Note that stripping off debug map will not strip off
-    // debug handles.
-    // The reason we save debug handles conditionally is so that
-    // we dont end up with a model that has debug handles but has not
-    // debug map to correlate debug handels with.
-    // Once we have a model with both handles and debug map, we can
-    // strip off debug map and have a lean model served to production.
-    // If exception ocurrs we have a model with debug map that can be
-    // used to symbolicate debug handles
-    writeArchive(
-        debug_info_telements,
-        /*archive_name=*/"mobile_debug_handles",
-        /*archive_dir=*/"",
-        /*tensor_dir=*/"mobile_debug_handles/");
-    static constexpr size_t kMinToCompress = 200;
-    // For delegated backends get source ranges that are in the debug info
-    // map. Since delegated backend replace original module with lowered
-    // module we will not serialize original module's code which is what would
-    // have contained source range. Since we dont have that anymore, extract
-    // source ranges out of delegated module and store in a separate archive.
-    // Note that we must do this first because in order to serialize inlined
-    // CS appropriate source_range_tags must have been generated.
-    auto backend_source_range_records = getBackendSourceRanges(module);
-    SourceRangePickler source_range_pickler;
-    updateSourceRangeTags(backend_source_range_records);
-    auto range_data = source_range_pickler.pickle(
-        backend_source_range_records, source_range_tags_);
-    std::string debugFilename = "delegated_backends.debug_pkl";
-    writer_.writeRecord(
-        debugFilename,
-        range_data.data(),
-        range_data.size(),
-        range_data.size() > kMinToCompress /*compress*/);
+    // At the moment keeping this feature experimental
+    // since we have not evaluated how this affect model size
+    // and we have not build any utility to strip off debug info
+    // when desired
+    // TODO: Build utility to strip off debug map. It should also do the
+    // same for debug_pkl files
+    if (save_mobile_debug_info) {
+      // Note that stripping off debug map will not strip off
+      // debug handles.
+      // The reason we save debug handles conditionally is so that
+      // we dont end up with a model that has debug handles but has not
+      // debug map to correlate debug handels with.
+      // Once we have a model with both handles and debug map, we can
+      // strip off debug map and have a lean model served to production.
+      // If exception ocurrs we have a model with debug map that can be
+      // used to symbolicate debug handles
+      writeArchive(
+          debug_info_telements,
+          /*archive_name=*/"mobile_debug_handles",
+          /*archive_dir=*/"",
+          /*tensor_dir=*/"mobile_debug_handles/");
+      static constexpr size_t kMinToCompress = 200;
+      // For delegated backends get source ranges that are in the debug info
+      // map. Since delegated backend replace original module with lowered
+      // module we will not serialize original module's code which is what would
+      // have contained source range. Since we dont have that anymore, extract
+      // source ranges out of delegated module and store in a separate archive.
+      // Note that we must do this first because in order to serialize inlined
+      // CS appropriate source_range_tags must have been generated.
+      auto backend_source_range_records = getBackendSourceRanges(module);
+      SourceRangePickler source_range_pickler;
+      updateSourceRangeTags(backend_source_range_records);
+      auto range_data = source_range_pickler.pickle(
+          backend_source_range_records, source_range_tags_);
+      std::string debugFilename = "delegated_backends.debug_pkl";
+      writer_.writeRecord(
+          debugFilename,
+          range_data.data(),
+          range_data.size(),
+          range_data.size() > kMinToCompress /*compress*/);
 
-    // For delegated backends get debug_info_map
-    // This is merged with other debug_info_map of other modules
-    // which were not delegated.
-    BackendDebugInfoMapType backend_debug_info_map;
-    getBackendDebugInfoMap(module, backend_debug_info_map);
-    // Now get the debug-handles-to-inlined-cs-ptr-map
-    // And serialize that in a separate archive
-    auto debug_handle_cs_ptr_map = debug_info_recorder.stopRecording();
-    debug_handle_cs_ptr_map.insert(
-        backend_debug_info_map.begin(), backend_debug_info_map.end());
-    CallStackDebugInfoPickler cs_debug_info_pickler;
-    auto cs_data = cs_debug_info_pickler.pickle(
-        debug_handle_cs_ptr_map, source_range_tags_);
-    // Write out map: [debug-handle, {source range, InlinedCallStack}]
-    std::string filename = "callstack_debug_map.pkl";
-    writer_.writeRecord(
-        filename,
-        cs_data.data(),
-        cs_data.size(),
-        cs_data.size() > kMinToCompress /*compress*/);
+      // For delegated backends get debug_info_map
+      // This is merged with other debug_info_map of other modules
+      // which were not delegated.
+      BackendDebugInfoMapType backend_debug_info_map;
+      getBackendDebugInfoMap(module, backend_debug_info_map);
+      // Now get the debug-handles-to-inlined-cs-ptr-map
+      // And serialize that in a separate archive
+      auto debug_handle_cs_ptr_map = debug_info_recorder.stopRecording();
+      debug_handle_cs_ptr_map.insert(
+          backend_debug_info_map.begin(), backend_debug_info_map.end());
+      CallStackDebugInfoPickler cs_debug_info_pickler;
+      auto cs_data = cs_debug_info_pickler.pickle(
+          debug_handle_cs_ptr_map, source_range_tags_);
+      // Write out map: [debug-handle, {source range, InlinedCallStack}]
+      std::string filename = "callstack_debug_map.pkl";
+      writer_.writeRecord(
+          filename,
+          cs_data.data(),
+          cs_data.size(),
+          cs_data.size() > kMinToCompress /*compress*/);
+    }
   }
 }
 

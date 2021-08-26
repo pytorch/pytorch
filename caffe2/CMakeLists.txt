@@ -568,6 +568,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/jit/serialization/onnx.cpp
       ${TORCH_SRC_DIR}/csrc/jit/serialization/export.cpp
       ${TORCH_SRC_DIR}/csrc/jit/serialization/export_module.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/serialization/ivalue_serialization.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/fuser/cpu/fused_kernel.cpp
       ${TORCH_SRC_DIR}/csrc/jit/api/module_save.cpp
       ${TORCH_SRC_DIR}/csrc/utils/byte_order.cpp

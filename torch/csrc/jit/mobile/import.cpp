@@ -517,9 +517,6 @@ void parseMethodsFlatbuffer(
       j += 1;
     }
 
-    for (const int const_index : *code_tb->constants()) {
-      function->append_constant(constants[const_index]);
-    }
     
     // insert operators
     std::unordered_set<std::string> unsupported_op_names;
@@ -563,7 +560,7 @@ void parseMethodsFlatbuffer(
     auto parseArgList = [&cu, &constants](const auto* args_fb) {
       std::vector<c10::Argument> args;
       for (const auto* arg_tb: *args_fb) {
-        IValue default_value = constants[arg_tb->default_value()];
+        IValue default_value(1);
         TypePtr type_ptr = resolveTypeNameMobile(arg_tb->type()->str(), cu);
         auto arg =
             c10::Argument(arg_tb->name()->str(), type_ptr, c10::nullopt /*N*/, default_value);
