@@ -183,7 +183,7 @@ Using the Tensor.data field can produce an incorrect trace and therefore an inco
 Use :func:`torch.Tensor.detach` instead. (Work is ongoing to
 `remove Tensor.data entirely <https://github.com/pytorch/pytorch/issues/30987>`_).
 
-Avoid Inplace Operations when using tensor.shape in tracing mode
+Avoid in-place operations when using tensor.shape in tracing mode
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 In tracing mode, shape values obtained from tensor.shape are traced as tensors,
@@ -199,7 +199,7 @@ For example, in the model::
           return real_seq_length + seq_length
 
 ``real_seq_length`` and ``seq_length`` share the same memory in tracing mode.
-This could be avoiding by rewriting the inplace operation such that::
+This could be avoided by rewriting the inplace operation::
 
     real_seq_length = real_seq_length + 2
 
