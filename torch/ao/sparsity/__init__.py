@@ -19,6 +19,7 @@ from .sparsifier.utils import fqn_to_module
 
 # Parametrizations
 from .experimental.pruner.parametrization import PruningParametrization
+from .experimental.pruner.parametrization import ZeroesParametrization
 from .experimental.pruner.parametrization import ActivationReconstruction
 from .experimental.pruner.parametrization import BiasHook
 

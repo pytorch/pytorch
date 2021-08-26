@@ -78,11 +78,13 @@ TRAVIS_DL_URL_PREFIX="https://s3.amazonaws.com/travis-python-archives/binaries/u
 case "$image" in
   pytorch-linux-xenial-py3.8)
     ANACONDA_PYTHON_VERSION=3.8
+    CMAKE_VERSION=3.10.3
     GCC_VERSION=7
     # Do not install PROTOBUF, DB, and VISION as a test
     ;;
   pytorch-linux-xenial-py3.6-gcc5.4)
     ANACONDA_PYTHON_VERSION=3.6
+    CMAKE_VERSION=3.10.3
     GCC_VERSION=5
     PROTOBUF=yes
     DB=yes
@@ -91,11 +93,13 @@ case "$image" in
     ;;
   pytorch-linux-xenial-py3.6-gcc7.2)
     ANACONDA_PYTHON_VERSION=3.6
+    CMAKE_VERSION=3.10.3
     GCC_VERSION=7
     # Do not install PROTOBUF, DB, and VISION as a test
     ;;
   pytorch-linux-xenial-py3.6-gcc7)
     ANACONDA_PYTHON_VERSION=3.6
+    CMAKE_VERSION=3.10.3
     GCC_VERSION=7
     PROTOBUF=yes
     DB=yes
@@ -105,6 +109,7 @@ case "$image" in
     CUDA_VERSION=10.2
     CUDNN_VERSION=7
     ANACONDA_PYTHON_VERSION=3.6
+    CMAKE_VERSION=3.10.3
     GCC_VERSION=7
     PROTOBUF=yes
     DB=yes
@@ -115,6 +120,7 @@ case "$image" in
     CUDA_VERSION=11.1
     CUDNN_VERSION=8
     ANACONDA_PYTHON_VERSION=3.6
+    CMAKE_VERSION=3.10.3
     GCC_VERSION=7
     PROTOBUF=yes
     DB=yes
@@ -125,6 +131,7 @@ case "$image" in
     CUDA_VERSION=11.3.0 # Deviating from major.minor to conform to nvidia's Docker image names
     CUDNN_VERSION=8
     ANACONDA_PYTHON_VERSION=3.6
+    CMAKE_VERSION=3.10.3
     GCC_VERSION=7
     PROTOBUF=yes
     DB=yes
@@ -134,6 +141,7 @@ case "$image" in
   pytorch-linux-xenial-py3-clang5-asan)
     ANACONDA_PYTHON_VERSION=3.6
     CLANG_VERSION=5.0
+    CMAKE_VERSION=3.10.3
     PROTOBUF=yes
     DB=yes
     VISION=yes
@@ -141,6 +149,7 @@ case "$image" in
   pytorch-linux-xenial-py3-clang7-asan)
     ANACONDA_PYTHON_VERSION=3.6
     CLANG_VERSION=7
+    CMAKE_VERSION=3.10.3
     PROTOBUF=yes
     DB=yes
     VISION=yes
@@ -148,6 +157,7 @@ case "$image" in
   pytorch-linux-xenial-py3-clang7-onnx)
     ANACONDA_PYTHON_VERSION=3.6
     CLANG_VERSION=7
+    CMAKE_VERSION=3.10.3
     PROTOBUF=yes
     DB=yes
     VISION=yes
@@ -155,16 +165,17 @@ case "$image" in
   pytorch-linux-xenial-py3-clang5-android-ndk-r19c)
     ANACONDA_PYTHON_VERSION=3.6
     CLANG_VERSION=5.0
+    CMAKE_VERSION=3.10.3
     LLVMDEV=yes
     PROTOBUF=yes
     ANDROID=yes
     ANDROID_NDK_VERSION=r19c
     GRADLE_VERSION=6.8.3
-    CMAKE_VERSION=3.7.0
     NINJA_VERSION=1.9.0
     ;;
   pytorch-linux-xenial-py3.6-clang7)
     ANACONDA_PYTHON_VERSION=3.6
+    CMAKE_VERSION=3.10.3
     CLANG_VERSION=7
     PROTOBUF=yes
     DB=yes
@@ -244,6 +255,9 @@ case "$image" in
     DB=yes
     VISION=yes
     echo "image '$image' did not match an existing build configuration"
+    if [[ "$image" == *xenial* ]]; then
+      CMAKE_VERSION=3.10.3
+    fi
     if [[ "$image" == *py* ]]; then
       extract_version_from_image_name py ANACONDA_PYTHON_VERSION
     fi
