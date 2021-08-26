@@ -23,7 +23,9 @@ GENERATED_CPP = [
     "autograd/generated/python_fft_functions.cpp",
     "autograd/generated/python_linalg_functions.cpp",
     "autograd/generated/python_special_functions.cpp",
-    "autograd/generated/python_torch_functions.cpp",
+    "autograd/generated/python_torch_functions_0.cpp",
+    "autograd/generated/python_torch_functions_1.cpp",
+    "autograd/generated/python_torch_functions_2.cpp",
     "autograd/generated/python_variable_methods.cpp",
 ]
 
@@ -329,6 +331,7 @@ core_sources_full = core_sources_full_mobile + [
     "torch/csrc/jit/runtime/static/native_ops.cpp",
     "torch/csrc/jit/runtime/static/ops.cpp",
     "torch/csrc/jit/runtime/static/passes.cpp",
+    "torch/csrc/jit/runtime/static/te_wrapper.cpp",
     "torch/csrc/jit/tensorexpr/external_functions.cpp",
     "torch/csrc/jit/tensorexpr/external_functions_codegen.cpp",
 ]
@@ -663,6 +666,7 @@ libtorch_python_core_sources = [
     "torch/csrc/autograd/python_function.cpp",
     "torch/csrc/autograd/python_hook.cpp",
     "torch/csrc/autograd/python_legacy_variable.cpp",
+    "torch/csrc/autograd/python_torch_functions_manual.cpp",
     "torch/csrc/autograd/python_variable.cpp",
     "torch/csrc/autograd/python_variable_indexing.cpp",
     "torch/csrc/jit/backends/backend_init.cpp",
@@ -759,7 +763,9 @@ def glob_libtorch_python_sources(gencode_pattern = ":generate-code[{}]"):
         "autograd/generated/python_fft_functions.cpp",
         "autograd/generated/python_linalg_functions.cpp",
         "autograd/generated/python_special_functions.cpp",
-        "autograd/generated/python_torch_functions.cpp",
+        "autograd/generated/python_torch_functions_0.cpp",
+        "autograd/generated/python_torch_functions_1.cpp",
+        "autograd/generated/python_torch_functions_2.cpp",
         "autograd/generated/python_variable_methods.cpp",
     ]]
 
