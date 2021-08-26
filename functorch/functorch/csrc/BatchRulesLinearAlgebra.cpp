@@ -99,6 +99,43 @@ static std::tuple<Tensor, optional<int64_t>> bmm_batch_rule(
   return std::make_tuple( at::matmul(self_, other_), 0 );
 }
 
+// AFAICT, nothing here can be batched. So we decompose :)
+Tensor addmv_decomp(
+  const Tensor& input, const Tensor& mat, const Tensor& vec, const Scalar& beta, const Scalar& alpha) {
+  Tensor out = at::mv(mat, vec);
+  if (!alpha.equal(1)) {
+    out = alpha * out;
+  }
+  if (!beta.equal(0)) {
+    out = beta * input + out;
+  }
+  return out;
+}
+
+Tensor addbmm_decomp(
+  const Tensor& input, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) {
+  Tensor out = at::bmm(batch1, batch2).sum(0);
+  if (!alpha.equal(1)) {
+    out = alpha * out;
+  }
+  if (!beta.equal(0)) {
+    out = beta * input + out;
+  }
+  return out;
+}
+
+Tensor baddbmm_decomp(
+  const Tensor& input, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) {
+  Tensor out = at::bmm(batch1, batch2);
+  if (!alpha.equal(1)) {
+    out = alpha * out;
+  }
+  if (!beta.equal(0)) {
+    out = beta * input + out;
+  }
+  return out;
+}
+
 Tensor linear_decomp(
     const Tensor& input, const Tensor& weight,
     const c10::optional<Tensor>& bias_opt) {
@@ -116,6 +153,9 @@ Tensor linear_decomp(
 
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("bmm", bmm_batch_rule);
+  m.impl("addmv", addmv_decomp);
+  m.impl("addbmm", addbmm_decomp);
+  m.impl("baddbmm", baddbmm_decomp);
   VMAP_SUPPORT("dot", dot_batch_rule);
   VMAP_SUPPORT("mv", mv_batch_rule);
   VMAP_SUPPORT("mm", mm_batch_rule);
