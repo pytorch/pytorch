@@ -2931,6 +2931,8 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('argmax'),
         xfail('argmin'),
         xfail('unfold'),
+        xfail('linalg.svd'), # the batching rules work but svd can differ by the sign
+        xfail('svd'),        # which makes the tests fail
     })
     def test_vmap_exhaustive(self, device, dtype, op):
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
