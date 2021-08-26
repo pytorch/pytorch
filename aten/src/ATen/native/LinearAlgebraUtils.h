@@ -224,8 +224,8 @@ static inline void singleCheckErrors(int64_t info, const char* name, int64_t bat
   }
   auto batch_string = batch_ss.str();
   if (info < 0) {
-    TORCH_CHECK(false, name, batch_string,
-        ": Argument ", -info, " has illegal value.");
+    TORCH_INTERNAL_ASSERT(false, name, batch_string,
+        ": Argument ", -info, " has illegal value. Most certainly there is a bug in the implementation calling the backend library.");
   } else if (info > 0) {
     if (strstr(name, "inv")) {
       // inv, inverse, cholesky_inverse, etc.
