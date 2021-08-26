@@ -184,7 +184,7 @@ Use :func:`torch.Tensor.detach` instead. (Work is ongoing to
 `remove Tensor.data entirely <https://github.com/pytorch/pytorch/issues/30987>`_).
 
 Avoid in-place operations when using tensor.shape in tracing mode
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 In tracing mode, shape values obtained from tensor.shape are traced as tensors,
 and share the same memory. This might cause a mismatch in values of the final outputs.
