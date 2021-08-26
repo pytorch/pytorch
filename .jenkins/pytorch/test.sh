@@ -19,6 +19,11 @@ BUILD_DIR="build"
 BUILD_RENAMED_DIR="build_renamed"
 BUILD_BIN_DIR="$BUILD_DIR"/bin
 
+# GHA has test config defined for the test job, so we need to add them.
+if [[ -n "${TEST_CONFIG}" ]]; then
+    BUILD_ENVIRONMENT="${BUILD_ENVIRONMENT}-${TEST_CONFIG}"
+fi
+
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
@@ -158,17 +163,17 @@ test_python_legacy_jit() {
 }
 
 test_python_shard1() {
-  time python test/run_test.py --exclude-jit-executor --shard 1 2 --verbose --determine-from="$DETERMINE_FROM"
+  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --shard 1 2 --verbose --determine-from="$DETERMINE_FROM"
   assert_git_not_dirty
 }
 
 test_python_shard2() {
-  time python test/run_test.py --exclude-jit-executor --shard 2 2 --verbose --determine-from="$DETERMINE_FROM"
+  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --shard 2 2 --verbose --determine-from="$DETERMINE_FROM"
   assert_git_not_dirty
 }
 
 test_python() {
-  time python test/run_test.py --exclude-jit-executor --verbose --determine-from="$DETERMINE_FROM"
+  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --verbose --determine-from="$DETERMINE_FROM"
   assert_git_not_dirty
 }
 
@@ -297,6 +302,10 @@ test_vulkan() {
 }
 
 test_distributed() {
+  echo "Testing distributed python tests"
+  time python test/run_test.py --distributed-tests --verbose --determine-from="$DETERMINE_FROM"
+  assert_git_not_dirty
+
   if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
     echo "Testing distributed C++ tests"
     ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
@@ -505,6 +514,7 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 || "$
   test_without_numpy
   install_torchvision
   test_python_shard1
+  test_distributed
   test_aten
 elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 || "${SHARD_NUMBER}" == 2 ]]; then
   install_torchvision
@@ -517,6 +527,9 @@ elif [[ "${BUILD_ENVIRONMENT}" == *vulkan-linux* ]]; then
   test_vulkan
 elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   test_bazel
+elif [[ "${BUILD_ENVIRONMENT}" == *distributed* ]]; then
+  test_distributed
+  test_rpc
 else
   install_torchvision
   install_monkeytype
@@ -527,9 +540,7 @@ else
   test_custom_script_ops
   test_custom_backend
   test_torch_function_benchmark
-  test_distributed
   test_benchmarks
-  test_rpc
   if [[ "${BUILD_ENVIRONMENT}" == *linux-xenial-py3.6-gcc7-test* || "${BUILD_ENVIRONMENT}" == *linux-xenial-py3.6-gcc5.4-test* ]]; then
     test_python_gloo_with_tls
   fi
