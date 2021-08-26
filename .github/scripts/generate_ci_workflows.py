@@ -191,10 +191,8 @@ class CIWorkflow:
         with open(output_file_path, "w") as output_file:
             GENERATED = "generated"  # Note that please keep the variable GENERATED otherwise phabricator will hide the whole file
             output_file.writelines([f"# @{GENERATED} DO NOT EDIT MANUALLY\n"])
-            content = workflow_template.render(asdict(self))
-            output_file.write(content)
-            if content[-1] != "\n":
-                output_file.write("\n")
+            output_file.write(workflow_template.render(asdict(self)))
+            output_file.write("\n")
         print(output_file_path)
 
 
@@ -506,7 +504,6 @@ if __name__ == "__main__":
     jinja_env = jinja2.Environment(
         variable_start_string="!{{",
         loader=jinja2.FileSystemLoader(str(GITHUB_DIR.joinpath("templates"))),
-        undefined=jinja2.StrictUndefined,
     )
     template_and_workflows = [
         (jinja_env.get_template("linux_ci_workflow.yml.j2"), LINUX_WORKFLOWS),

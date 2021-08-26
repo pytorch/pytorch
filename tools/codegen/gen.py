@@ -1,5 +1,5 @@
 import os
-from typing import List, Dict, Optional, Tuple, Set, Callable, Any, Union, Sequence, TypeVar, Iterable
+from typing import List, Dict, Optional, Tuple, Set, Callable, Any, Union, Sequence, TypeVar
 from typing_extensions import Literal
 import yaml
 from collections import OrderedDict, defaultdict, namedtuple
@@ -858,7 +858,7 @@ class FileManager:
     def write_sharded(
             self,
             filename: str,
-            items: Iterable[T],
+            items: List[T],
             *,
             key_fn: Callable[[T], str],
             env_callable: Callable[[T], Dict[str, List[str]]],
