@@ -5978,7 +5978,7 @@ Keyword args:
 
 .. seealso::
 
-    :func:`torch.nanmean` compute the mean value of `non-NaN` elements.
+    :func:`torch.nanmean` computes the mean value of `non-NaN` elements.
 
 Example::
 
@@ -6020,7 +6020,7 @@ Keyword args:
 
 .. seealso::
 
-    :func:`torch.mean` compute the mean value, propagating `NaN`.
+    :func:`torch.mean` computes the mean value, propagating `NaN`.
 
 Example::
 
