@@ -292,7 +292,6 @@ class TestShardedTensorChunked(ShardedTensorTestBase, MultiProcessTestCase):
         self.assertEqual((expected_h, w), local_shard.size())
         self.assertEqual(local_shard, torch.ones(expected_h, w))
 
-
     @with_comms
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
