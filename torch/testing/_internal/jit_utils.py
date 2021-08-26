@@ -375,7 +375,7 @@ class JitTestCase(JitCommonTestCase):
         return _AssertRaisesRegexWithHighlightContext(self, exception, regex, highlight)
 
     def checkScriptRaisesRegex(self, script, inputs, exception, regex,
-                               name="func", outputs=None, capture_output=False,
+                               name=None, outputs=None, capture_output=False,
                                frames_up=1, profiling=ProfilingMode.PROFILING):
         """
         Checks that a given function will throw the correct exception,
@@ -384,37 +384,36 @@ class JitTestCase(JitCommonTestCase):
         for details)
         """
         with enable_profiling_mode_for_profiling_tests():
-            if isinstance(script, str):
-                frame = self.get_frame_vars(frames_up)
-                the_locals: Dict[str, Any] = {}
-                execWrapper(script, glob=frame, loc=the_locals)
-                frame.update(the_locals)
-
-                python_fn = frame[name]
-                string_frontend = script
-            else:
-                source = textwrap.dedent(inspect.getsource(script))
-
-                python_fn = script
-                string_frontend = source
-
-            # normal python
+            # Normal Python
             with self.assertRaisesRegex(exception, regex):
+                if isinstance(script, str):
+                    frame = self.get_frame_vars(frames_up)
+                    the_locals: Dict[str, Any] = {}
+                    execWrapper(script, glob=frame, loc=the_locals)
+                    frame.update(the_locals)
+
+                    python_fn = frame[name]
+                else:
+                    python_fn = script
+
                 python_fn(*inputs)
 
-            # string frontend
+            # String frontend
             with self.assertRaisesRegex(exception, regex):
-                cu = torch.jit.CompilationUnit(string_frontend)
-                ge = getattr(cu, string_frontend.__name__)
-                # profiling run
-                with self.assertRaisesRegex(exception, regex):
-                    ge(*inputs)
-                # optimized run
-                ge(*inputs)
+                if isinstance(script, str):
+                    cu = torch.jit.CompilationUnit(script, _frames_up=frames_up)
+                    string_frontend = getattr(cu, name)
+                else:
+                    source = textwrap.dedent(inspect.getsource(script))
+                    cu = torch.jit.CompilationUnit(source, _frames_up=frames_up)
+                    string_frontend = getattr(cu, script.__name__)
 
-            # python AST frontend
-            # If `script` was a str, we checked what compiling it
-            # would be like already (above)
+                with self.assertRaisesRegex(exception, regex):
+                    string_frontend(*inputs)
+                # optimized run
+                string_frontend(*inputs)
+
+            # Python AST frontend
             if not isinstance(script, str):
                 with self.assertRaisesRegex(exception, regex):
                     ge = torch.jit.script(python_fn)
@@ -613,7 +612,7 @@ class JitTestCase(JitCommonTestCase):
             for g2, g2_ge in zip(grads2, grads2_ge):
                 if g2 is None and g2_ge is None:
                     continue
-                self.assertTrue(torch.allclose(g2, g2_ge, atol=8e-4, rtol=8e-4))
+                self.assertEqual(g2, g2_ge, atol=8e-4, rtol=8e-4)
 
         return ge
 
@@ -687,11 +686,13 @@ def _trace(*args, **kwargs):
 
 def enable_cpu_fuser(fn):
     def wrapper(*args, **kwargs):
+        torch._C._jit_override_can_fuse_on_cpu_legacy(True)
         torch._C._jit_override_can_fuse_on_cpu(True)
         torch._C._jit_set_te_must_use_llvm_cpu(False)
         try:
             fn(*args, **kwargs)
         finally:
+            torch._C._jit_override_can_fuse_on_cpu_legacy(False)
             torch._C._jit_override_can_fuse_on_cpu(False)
             torch._C._jit_set_te_must_use_llvm_cpu(True)
     return wrapper
