@@ -1056,6 +1056,8 @@ class AbstractTestCases:
                 torch.gather(src, dim, idx.to(torch.int))
 
             # should throw an error when out.dtype != src.dtype.
+            # Note that on Windows, the out tensor's dtype is returned as: struct c10::complex<double> in the error
+            # message, hence the use of .* in regex here
             with self.assertRaisesRegex(RuntimeError,
                                         'Expected out tensor to have dtype .*c10::complex<double>, but got int instead'):
                 torch.gather(src.to(torch.complex128), dim, idx, out=expected.to(torch.int))
