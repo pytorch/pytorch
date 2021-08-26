@@ -698,8 +698,8 @@ class TestTensorCreation(TestCase):
     def test_cat_out_memory_format(self, device):
         inp_size = (4, 4, 4, 4)
         expected_size = (8, 4, 4, 4)
-        a_cuda  = torch.randn(inp_size, device=device).contiguous(memory_format=torch.channels_last)
-        a_cpu  = torch.randn(inp_size, device='cpu').contiguous(memory_format=torch.channels_last)
+        a_cuda = torch.randn(inp_size, device=device).contiguous(memory_format=torch.channels_last)
+        a_cpu = torch.randn(inp_size, device='cpu').contiguous(memory_format=torch.channels_last)
         b_cuda = torch.randn(inp_size, device=device).contiguous(memory_format=torch.contiguous_format)
         b_cpu = torch.randn(inp_size, device='cpu').contiguous(memory_format=torch.contiguous_format)
         c_cuda = torch.randn(inp_size, device=device).contiguous(memory_format=torch.channels_last)
