@@ -6347,7 +6347,8 @@ TEST(NVFuserTest, FusionGridReduction1_CUDA) {
   tv1->axis(-1)->parallelize(ParallelType::TIDx);
   tv2->axis(-1)->parallelize(ParallelType::TIDx);
 
-  int numel_x = 10000;
+  // reduced shape for OOM on upstream CI
+  int numel_x = 1000;
   int numel_y = 65000;
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
@@ -6405,7 +6406,8 @@ TEST(NVFuserTest, FusionGridReduction2_CUDA) {
   tv1->axis(-1)->parallelize(ParallelType::TIDx);
   tv2->axis(-1)->parallelize(ParallelType::TIDx);
 
-  int numel_x = 10000;
+  // reduced shape for OOM on upstream CI
+  int numel_x = 1000;
   int numel_y = 65000;
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
