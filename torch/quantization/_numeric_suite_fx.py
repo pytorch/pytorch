@@ -25,6 +25,7 @@ from .ns.graph_passes import (
 from .ns.utils import (
     rekey_logger_info_on_node_name_of_model,
     maybe_add_missing_fqns,
+    get_target_type_str,
 )
 
 from .ns.ns_types import (
@@ -48,6 +49,7 @@ class OutputLogger(nn.Module):
         model_name: str,
         ref_name: str,
         prev_node_target_type: str,
+        ref_node_target_type: str,
         results_type: str,
         index_within_arg: int,
         index_of_arg: int,
@@ -82,6 +84,9 @@ class OutputLogger(nn.Module):
         self.ref_name = ref_name
         # type of the target of the node whose output this logger is logging
         self.prev_node_target_type = prev_node_target_type
+        # type of the target of the node which was respondible for adding this
+        # logger
+        self.ref_node_target_type = ref_node_target_type
         # what kind of values are inside of stats
         self.results_type = results_type
         # index of this node within the arg of the input/output node
@@ -106,6 +111,7 @@ class OutputLogger(nn.Module):
     def __repr__(self):
         return f"""OutputLogger(ref_name={self.ref_name}, model_name={self.model_name},
 prev_node_name={self.prev_node_name}, ref_node_name={self.ref_node_name},
+ref_node_target_type={self.ref_node_target_type}
 results_type={self.results_type}, index_within_arg={self.index_within_arg},
 index_of_arg={self.index_of_arg}, fqn={self.fqn})"""
 
@@ -216,20 +222,20 @@ def extract_weights(
 def _add_loggers_one_model(
     model_name: str,
     model: GraphModule,
-    nodes_and_names_to_instrument_inputs: List[Tuple[Node, str]],
-    nodes_and_names_to_instrument_outputs: List[Tuple[Node, str]],
+    nodes_and_names_to_instrument_inputs: List[Tuple[Node, str, str]],
+    nodes_and_names_to_instrument_outputs: List[Tuple[Node, str, str]],
     logger_cls: Callable,
 ) -> nn.Module:
     torch._C._log_api_usage_once("quantization_api._numeric_suite_fx._add_loggers_one_model")
 
     # TODO(future PR): do not observe nodes we do not care
     #   about (both fp32, denylist, etc)
-    node_to_instrument_inputs_to_ref_name: Dict[Node, str] = {}
-    node_to_instrument_outputs_to_ref_name: Dict[Node, str] = {}
-    for node, ref_name in nodes_and_names_to_instrument_inputs:
-        node_to_instrument_inputs_to_ref_name[node] = ref_name
-    for node, ref_name in nodes_and_names_to_instrument_outputs:
-        node_to_instrument_outputs_to_ref_name[node] = ref_name
+    node_to_instrument_inputs_to_ref_name: Dict[Node, Tuple[str, str]] = {}
+    node_to_instrument_outputs_to_ref_name: Dict[Node, Tuple[str, str]] = {}
+    for node, ref_name, ref_node_type in nodes_and_names_to_instrument_inputs:
+        node_to_instrument_inputs_to_ref_name[node] = (ref_name, ref_node_type)
+    for node, ref_name, ref_node_type in nodes_and_names_to_instrument_outputs:
+        node_to_instrument_outputs_to_ref_name[node] = (ref_name, ref_node_type)
 
     model = add_loggers_to_model(
         model, node_to_instrument_inputs_to_ref_name,
@@ -256,15 +262,21 @@ def _add_loggers_impl(
     nodes_and_names_to_instrument_outputs_a = []
     nodes_and_names_to_instrument_outputs_b = []
     for match_name, (subgraph_a, subgraph_b) in matched_subgraph_pairs.items():
+        ref_node_type_a = get_target_type_str(subgraph_a.base_op_node, gm_a)
+        ref_node_type_b = get_target_type_str(subgraph_b.base_op_node, gm_b)
         # Note: for matching inputs we use start_node, such as observing
         # the input of linear in linear-relu
         if should_log_inputs:
-            nodes_and_names_to_instrument_inputs_a.append((subgraph_a.start_node, match_name))
-            nodes_and_names_to_instrument_inputs_b.append((subgraph_b.start_node, match_name))
+            nodes_and_names_to_instrument_inputs_a.append(
+                (subgraph_a.start_node, match_name, ref_node_type_a))
+            nodes_and_names_to_instrument_inputs_b.append(
+                (subgraph_b.start_node, match_name, ref_node_type_b))
         # Note: for matching activations we always use end_node,
         # such as observing the output of relu in linear-relu
-        nodes_and_names_to_instrument_outputs_a.append((subgraph_a.end_node, match_name))
-        nodes_and_names_to_instrument_outputs_b.append((subgraph_b.end_node, match_name))
+        nodes_and_names_to_instrument_outputs_a.append(
+            (subgraph_a.end_node, match_name, ref_node_type_a))
+        nodes_and_names_to_instrument_outputs_b.append(
+            (subgraph_b.end_node, match_name, ref_node_type_b))
 
     new_model_a = _add_loggers_one_model(
         name_a, gm_a, nodes_and_names_to_instrument_inputs_a,
@@ -336,6 +348,7 @@ def _extract_logger_info_one_model(
                 'type': mod.results_type,
                 'values': stats_to_use,
                 'ref_node_name': mod.ref_node_name,
+                'ref_node_target_type': mod.ref_node_target_type,
                 'prev_node_name': mod.prev_node_name,
                 'prev_node_target_type': mod.prev_node_target_type,
                 'index_within_arg': mod.index_within_arg,

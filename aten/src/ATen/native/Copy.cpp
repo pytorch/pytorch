@@ -253,6 +253,22 @@ Tensor& copy_(Tensor& self, const Tensor& src, bool non_blocking) {
   return self;
 }
 
+void copy_ignoring_overlaps(const Tensor &dst, const Tensor &src) {
+  // Called when we are copying into an overlapping index `dst`, but we don't
+  // care which writer wins. Hacky but it works. This is only used by
+  // CUDA_tensor_apply2 in case that there are write overlaps.
+  // FIXME: really, overlapping writes should be illegal/an error in Torch
+  auto iter = TensorIteratorConfig()
+      .add_output(dst)
+      .add_input(src)
+      .resize_outputs(false)
+      .set_check_mem_overlap(false)
+      .check_all_same_dtype(true)
+      .check_all_same_device(true)
+      .build();
+  copy_stub(iter.device_type(), iter, /*non_blocking=*/false);
+}
+
 DEFINE_DISPATCH(copy_stub);
 
 } // namespace native

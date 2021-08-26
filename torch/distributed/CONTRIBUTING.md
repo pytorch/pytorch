@@ -85,16 +85,14 @@ python test/distributed/test_store.py
 python test/distributed/test_pg_wrapper.py
 
 # Run distributed tests, including tests for Distributed Data Parallel.
-python test/run_test.py --verbose -i distributed/test_distributed_fork
 python test/run_test.py --verbose -i distributed/test_distributed_spawn
 
 # Run the RPC test suite for the TensorPipeAgent.
 python test/distributed/rpc/test_tensorpipe_agent.py
 python test/distributed/rpc/cuda/test_tensorpipe_agent.py
 
-# Run the RPC test suite for the ProcessGroupAgent.
-python test/distributed/rpc/test_process_group_agent.py
-python test/distributed/rpc/cuda/test_process_group_agent.py
+# Run the RPC test suite for the FaultyAgent
+python test/distributed/rpc/test_faulty_agent.py
 
 # Run a specific test method.
 pytest -k test_self_add test/distributed/rpc/test_process_group_agent.py

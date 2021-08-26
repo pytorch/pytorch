@@ -24,7 +24,7 @@ class TORCH_API GradBucket {
       const std::vector<c10::IntArrayRef>& sizes_vec,
       const std::vector<at::Tensor>& parameters)
       : index_(index),
-        tensor_(tensor),
+        buffer_(tensor),
         offsets_(offsets),
         lengths_(lengths),
         sizes_vec_(sizes_vec),
@@ -35,18 +35,18 @@ class TORCH_API GradBucket {
     return index_;
   }
 
-  const at::Tensor& getTensor() const {
-    return tensor_;
+  const at::Tensor& getBuffer() const {
+    return buffer_;
   }
 
-  // Returns a mutable tensor compared with the above method.
-  at::Tensor& getTensorRef() {
-    return tensor_;
+  // Returns a mutable buffer compared with the above method.
+  at::Tensor& getBufferRef() {
+    return buffer_;
   }
 
-  // Overwrites the tensor at a specific index.
-  void setTensor(at::Tensor& tensor) {
-    tensor_ = tensor;
+  // Overwrites the buffer at a specific index.
+  void setBuffer(at::Tensor& buffer) {
+    buffer_ = buffer;
   }
 
   // Each tensor in the list that getGradients corresponds to a
@@ -68,9 +68,9 @@ class TORCH_API GradBucket {
 
  private:
   size_t index_;
-  at::Tensor tensor_;
+  at::Tensor buffer_;
 
-  // Per-variable info in tensor_.
+  // Per-variable info in buffer_.
   std::vector<size_t> offsets_;
   std::vector<size_t> lengths_;
   std::vector<c10::IntArrayRef> sizes_vec_;

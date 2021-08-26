@@ -29,6 +29,7 @@
 #include <ATen/core/ivalue.h>
 #include <c10/core/thread_pool.h>
 #include <c10/util/SmallVector.h>
+#include <c10/util/irange.h>
 #include <c10/util/math_compat.h>
 #include <c10/util/string_utils.h>
 
@@ -89,8 +90,7 @@ IValue tensorToListRecursive(
     at::IntArrayRef strides,
     size_t element_size);
 
-// NOLINTNEXTLINE(clang-diagnostic-unused-function)
-static int64_t floordiv(int64_t a, int64_t b) {
+static C10_UNUSED int64_t floordiv(int64_t a, int64_t b) {
   if (b == 0) {
     throw std::runtime_error("division by 0");
   }
@@ -104,19 +104,16 @@ static int64_t floordiv(int64_t a, int64_t b) {
   }
 }
 TORCH_API void checkDoubleInRange(double a);
-// NOLINTNEXTLINE(clang-diagnostic-unused-function)
-static int64_t floor(double a) {
+static C10_UNUSED int64_t floor(double a) {
   checkDoubleInRange(a);
   return std::floor(a);
 }
-// NOLINTNEXTLINE(clang-diagnostic-unused-function)
-static int64_t ceil(double a) {
+static C10_UNUSED int64_t ceil(double a) {
   checkDoubleInRange(a);
   return std::ceil(a);
 }
 
-// NOLINTNEXTLINE(clang-diagnostic-unused-function)
-static int64_t gcd(int64_t a, int64_t b) {
+static C10_UNUSED int64_t gcd(int64_t a, int64_t b) {
   while (b != 0) {
     int64_t r = a % b;
     a = b;
@@ -139,8 +136,7 @@ double degrees(double x);
 double radians(double x);
 
 // reference function THPVariable_to in python_variable_methods.cpp
-// NOLINTNEXTLINE(clang-diagnostic-unused-function)
-static at::Tensor to_dispatch(
+static C10_UNUSED at::Tensor to_dispatch(
     at::Tensor self,
     c10::optional<at::Device> device,
     c10::optional<at::ScalarType> scalarType,
@@ -195,7 +191,7 @@ void minList(Stack* stack) {
   c10::List<T> b = pop(stack).to<c10::List<T>>();
 
   size_t min_size = std::min(a.size(), b.size());
-  for (size_t i = 0; i < min_size; i++) {
+  for (const auto i : c10::irange(min_size)) {
     if (a[i] == b[i]) {
       continue;
     }
@@ -213,7 +209,7 @@ void maxList(Stack* stack) {
   c10::List<T> b = pop(stack).to<c10::List<T>>();
 
   size_t min_size = std::min(a.size(), b.size());
-  for (size_t i = 0; i < min_size; i++) {
+  for (const auto i : c10::irange(min_size)) {
     if (a[i] == b[i]) {
       continue;
     }
@@ -258,7 +254,7 @@ void listMin(Stack* stack) {
   }
 
   T min_elem = list[0];
-  for (size_t i = 1; i < list_size; ++i) {
+  for (const auto i : c10::irange(1, list_size)) {
     T elem = list[i];
     min_elem = elem < min_elem ? elem : min_elem;
   }
@@ -275,7 +271,7 @@ void listMax(Stack* stack) {
   }
 
   T max_elem = list[0];
-  for (size_t i = 1; i < list_size; ++i) {
+  for (const auto i : c10::irange(1, list_size)) {
     T elem = list[i];
     max_elem = elem > max_elem ? elem : max_elem;
   }
@@ -344,7 +340,7 @@ inline bool tensor_list_equal(
     return false;
   }
 
-  for (size_t i = 0; i < a.size(); ++i) {
+  for (const auto i : c10::irange(a.size())) {
     at::Tensor a_element = a[i];
     at::Tensor b_element = b[i];
     // This preserves Python's semantics, which uses eq() to compare two

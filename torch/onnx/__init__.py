@@ -13,7 +13,7 @@ ONNX_ARCHIVE_MODEL_PROTO_NAME = "__MODEL_PROTO"
 ir_version = _C._onnx.IR_VERSION
 producer_name = "pytorch"
 producer_version = _C._onnx.PRODUCER_VERSION
-constant_folding_opset_versions = [9, 10, 11, 12, 13]
+constant_folding_opset_versions = [9, 10, 11, 12, 13, 14]
 
 
 class ExportTypes:
@@ -30,11 +30,11 @@ def _export(*args, **kwargs):
 
 
 def export(model, args, f, export_params=True, verbose=False, training=TrainingMode.EVAL,
-           input_names=None, output_names=None, aten=False,
-           operator_export_type=None, opset_version=None, _retain_param_name=True,
-           do_constant_folding=True, example_outputs=None, strip_doc_string=True,
-           dynamic_axes=None, keep_initializers_as_inputs=None, custom_opsets=None,
-           enable_onnx_checker=True, use_external_data_format=False):
+           input_names=None, output_names=None, operator_export_type=None,
+           opset_version=None, _retain_param_name=True, do_constant_folding=True,
+           example_outputs=None, strip_doc_string=True, dynamic_axes=None,
+           keep_initializers_as_inputs=None, custom_opsets=None, enable_onnx_checker=True,
+           use_external_data_format=False):
     r"""
     Exports a model into ONNX format. If ``model`` is not a
     :class:`torch.jit.ScriptModule` nor a :class:`torch.jit.ScriptFunction`, this runs
@@ -103,11 +103,17 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
         export_params (bool, default True): if True, all parameters will
             be exported. Set this to False if you want to export an untrained model.
             In this case, the exported model will first take all of its parameters
-            as arguments, with the ordering as specified by ``model.state_dict().values()``
+            as arguments, with the ordering as specified by ``model.state_dict().values()``.
+            This helps in stripping parameters from the model which is useful for training.
+            Besides, if this is False, any optimization that may adjust graph inputs will
+            be skipped - for example, Conv and BatchNorm fusion.
         verbose (bool, default False): if True, prints a description of the
             model being exported to stdout.
         training (enum, default TrainingMode.EVAL):
-            * ``TrainingMode.EVAL``: export the model in inference mode.
+            * ``TrainingMode.EVAL``: export the model in inference mode. In this case, optimizations
+              (e.g., fusing Conv and BatchNorm ops) may adjust graph inputs by modifying model params
+              and model param names. Such adjustment could be skipped by setting export_params = False
+              or keep_initializers_as_inputs = True.
             * ``TrainingMode.PRESERVE``: export the model in inference mode if model.training is
               False and in training mode if model.training is True.
             * ``TrainingMode.TRAINING``: export the model in training mode. Disables optimizations
@@ -116,9 +122,12 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
             input nodes of the graph, in order.
         output_names (list of str, default empty list): names to assign to the
             output nodes of the graph, in order.
-        aten (bool, default False): [DEPRECATED. use operator_export_type] equivalent to
-            setting ``operator_export_type=OperatorExportTypes.ONNX_ATEN``.
-        operator_export_type (enum, default OperatorExportTypes.ONNX):
+        operator_export_type (enum, default None):
+
+            None usually means ``OperatorExportTypes.ONNX``.
+            However if PyTorch was built with ``-DPYTORCH_ONNX_CAFFE2_BUNDLE``, None means
+            ``OperatorExportTypes.ONNX_ATEN_FALLBACK``.
+
             * ``OperatorExportTypes.ONNX``: Export all ops as regular ONNX ops
               (in the default opset domain).
             * ``OperatorExportTypes.ONNX_FALLTHROUGH``: Try to convert all ops
@@ -181,6 +190,8 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
         do_constant_folding (bool, default False): Apply the constant-folding optimization.
             Constant-folding will replace some of the ops that have all constant inputs
             with pre-computed constant nodes.
+            Since this optimization adjusts model initializers, it will be disabled if
+            export_params = False or keep_initializers_as_inputs = True.
         example_outputs (T or a tuple of T, where T is Tensor or convertible to Tensor, default None):
             Must be provided when exporting a ScriptModule or ScriptFunction, ignored otherwise.
             Used to determine the type and shape of the outputs without tracing the execution of
@@ -262,9 +273,13 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
 
         keep_initializers_as_inputs (bool, default None): If True, all the
             initializers (typically corresponding to parameters) in the
-            exported graph will also be added as inputs to the graph. If False,
-            then initializers are not added as inputs to the graph, and only
-            the non-parameter inputs are added as inputs.
+            exported graph will also be added as inputs to the graph.
+
+            If False, then initializers are not added as inputs to the graph, and only
+            the non-parameter inputs are added as inputs. Meanwhile, the optimization
+            that might adjust graph inputs will be skipped (e.g., fusing Conv and
+            BatchNorm ops), even when the user export this model in inference mode.
+
             This may allow for better optimizations (e.g. constant folding) by
             backends/runtimes.
 
@@ -303,9 +318,8 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
 
     from torch.onnx import utils
     return utils.export(model, args, f, export_params, verbose, training,
-                        input_names, output_names, aten,
-                        operator_export_type, opset_version, _retain_param_name,
-                        do_constant_folding, example_outputs,
+                        input_names, output_names, operator_export_type, opset_version,
+                        _retain_param_name, do_constant_folding, example_outputs,
                         strip_doc_string, dynamic_axes, keep_initializers_as_inputs,
                         custom_opsets, enable_onnx_checker, use_external_data_format)
 
