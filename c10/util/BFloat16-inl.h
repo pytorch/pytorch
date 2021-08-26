@@ -3,6 +3,10 @@
 #include <c10/macros/Macros.h>
 #include <limits>
 
+#ifdef __SYCL_DEVICE_ONLY__
+#include <CL/sycl.hpp>
+#endif
+
 namespace c10 {
 
 /// Constructors
@@ -10,6 +14,8 @@ inline C10_HOST_DEVICE BFloat16::BFloat16(float value) {
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000 && \
     defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
   x = __bfloat16_as_ushort(__float2bfloat16(value));
+#elif defined(__SYCL_DEVICE_ONLY__) && !defined(__SYCL_NO_BFLOAT16_CONVERSIONS__)
+  x = cl::sycl::ext::intel::bfloat16(value);
 #else
   // RNE by default
   x = detail::round_to_nearest_even(value);
@@ -20,6 +26,8 @@ inline C10_HOST_DEVICE BFloat16::BFloat16(float value) {
 inline C10_HOST_DEVICE BFloat16::operator float() const {
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   return __bfloat162float(*reinterpret_cast<const __nv_bfloat16*>(&x));
+#elif defined(__SYCL_DEVICE_ONLY__) && !defined(__SYCL_NO_BFLOAT16_CONVERSIONS__)
+  return cl::sycl::ext::intel::bfloat16(x);
 #else
   return detail::f32_from_bits(x);
 #endif
