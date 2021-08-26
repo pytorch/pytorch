@@ -2316,6 +2316,7 @@ TEST_F(ModulesTest, CrossEntropyLoss) {
     CrossEntropyLoss(CrossEntropyLossOptions().ignore_index(-100).reduction(torch::kMean))
       ->forward(input, target).allclose(expected, 1e-04));
 
+  // label smoothing with class indices
   loss = CrossEntropyLoss(CrossEntropyLossOptions().label_smoothing(0.15).reduction(torch::kMean));
   input = torch::tensor({{3., 1.}, {1., 2.}}, torch::dtype(torch::kFloat).requires_grad(true));
   target = torch::tensor({0, 1}, torch::kLong);
@@ -2326,6 +2327,19 @@ TEST_F(ModulesTest, CrossEntropyLoss) {
 
   ASSERT_TRUE(output.allclose(expected, 1e-04));
   ASSERT_EQ(input.sizes(), input.grad().sizes());
+
+  // label smoothing with with target probabilities
+  loss = CrossEntropyLoss(CrossEntropyLossOptions().label_smoothing(0.2).reduction(torch::kMean));
+  input = torch::tensor({{3., 1.}, {1., 2.}}, torch::dtype(torch::kFloat).requires_grad(true));
+  target = torch::tensor({{0.8, 0.2}, {0.1, 0.9}}, torch::kFloat);
+  output = loss->forward(input, target);
+  expected = torch::tensor(0.5701, torch::kFloat);
+  s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected, 1e-04));
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+
 }
 
 TEST_F(ModulesTest, CosineSimilarity) {
