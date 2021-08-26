@@ -855,7 +855,8 @@ def wrap(fn_or_name : Union[str, Callable]):
 @compatibility(is_backward_compatible=True)
 def symbolic_trace(root : Union[torch.nn.Module, Callable[..., Any]], concrete_args: Optional[Dict[str, Any]] = None,
                    enable_cpatching: bool = False) -> GraphModule:
-    """Symbolic tracing API
+    """
+    Symbolic tracing API
 
     Given an ``nn.Module`` or function instance ``root``, this function will return a ``GraphModule``
     constructed by recording operations seen while tracing through ``root``.

@@ -9,8 +9,7 @@ def compatibility(is_backward_compatible : bool):
         def mark_back_compat(fn):
             docstring = textwrap.dedent(getattr(fn, '__doc__', None) or '')
             docstring += """
-Backwards compatiblity:
-
+.. note::
     Backwards-compatibility for this API is guaranteed.
 """
             fn.__doc__ = docstring
@@ -23,10 +22,10 @@ Backwards compatiblity:
         def mark_not_back_compat(fn):
             docstring = textwrap.dedent(getattr(fn, '__doc__', None) or '')
             docstring += """
-Backwards compatiblity:
-
+.. warning::
     This API is experimental and is *NOT* backward-compatible.
 """
+            fn.__doc__ = docstring
             return fn
 
         return mark_not_back_compat
