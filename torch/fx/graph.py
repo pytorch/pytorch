@@ -1066,8 +1066,11 @@ def forward({', '.join(orig_args)}){maybe_return_annotation[0]}:
         # Check targets are legit
         if self.owning_module:
             for node in self.nodes:
-                if node.op in ['get_attr', 'call_module']:
+                if node.op == 'call_function':
+                    assert callable(node.target)
+                else:
                     assert isinstance(node.target, str)
+                if node.op in ['get_attr', 'call_module']:
                     target_atoms = node.target.split('.')
                     m_itr = self.owning_module
                     for i, atom in enumerate(target_atoms):

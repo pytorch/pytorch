@@ -119,7 +119,9 @@ class Node:
         self.name = name  # unique name of value being created
         assert op in ['placeholder', 'call_method', 'call_module', 'call_function', 'get_attr', 'output', 'root']
         self.op = op  # the kind of operation = placeholder|call_method|call_module|call_function|get_attr
-        if op in ['call_method', 'call_module']:
+        if op == 'call_function':
+            assert callable(target)
+        else:
             assert isinstance(target, str)
         self.target = target  # for method/module/function, the name of the method/module/function/attr
         # being invoked, e.g add, layer1, or torch.add
