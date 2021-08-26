@@ -5148,35 +5148,31 @@ def sample_inputs_grid_sample(op_info, device, dtype, requires_grad, **kwargs):
     return sample_inputs
 
 def sample_inputs_nll_loss(op_info, device, dtype, requires_grad, **kwargs):
-    shape_2d = (2, 3)
+    batch_size, num_classes = shape = (2, 3)
 
     input_shape_and_kwargs: List[Tuple[Tuple[int, ...], Dict[str, Any]]] = [
-        # (shape_2d, dict()),
-        # ((*shape_2d, 3, 3), dict()),
-        # (shape_2d, dict(weight=True)),
-        # (shape_2d, dict(ignore_index=1)),
-        # (shape_2d, dict(reduction="mean")),
-        # (shape_2d, dict(reduction="sum")),
-        (shape_2d, dict(reduction="none")),
+        # (shape, dict()),
+        # ((*shape, 1), dict()),
+        # ((*shape, 1, 2), dict()),
+        # ((*shape, 1, 2, 3), dict()),
+        # (shape, dict(weight=make_tensor((num_classes,), device=device, dtype=dtype))),
+        # (shape, dict(ignore_index=num_classes // 2)),
+        # (shape, dict(reduction="sum")),
+        (shape, dict(reduction="none")),
     ]
 
     sample_inputs = []
     for input_shape, kwargs in input_shape_and_kwargs:
-        # nll_loss requires the inputs to be log probabilities, i.e. values in the interval (-inf, 0]
-        input = make_tensor(input_shape, high=0, device=device, dtype=dtype, requires_grad=requires_grad)
+        input = make_tensor(input_shape, device=device, dtype=dtype, requires_grad=requires_grad)
 
-        batch_size, num_channels, *other_dims = input_shape
         target = make_tensor(
-            (batch_size, *other_dims),
+            (batch_size, *input_shape[2:]),
             low=0,
-            high=num_channels,
+            high=num_classes,
             device=device,
             dtype=torch.long,
             requires_grad=requires_grad
         )
-
-        if kwargs.get("weight", False):
-            kwargs["weight"] = make_tensor((num_channels,), device=device, dtype=dtype)
 
         sample_inputs.append(SampleInput(input, args=(target,), kwargs=kwargs))
 
