@@ -42,6 +42,8 @@ ALLOW_LIST = [
     ("aten::irfft", datetime.date(2021, 1, 31)),
     ("aten::rfft", datetime.date(2021, 1, 31)),
     ("aten::linalg_svd", datetime.date(2021, 5, 15)),
+    ("aten::linalg_matrix_rank", datetime.date(2021, 9, 30)),
+    ("aten::linalg_pinv", datetime.date(2021, 9, 30)),
     ("aten::linalg_cholesky.out", datetime.date(2021, 8, 30)),
     ("aten::linalg_cholesky_ex", datetime.date(2021, 8, 30)),
     ("aten::linalg_cholesky_ex.L", datetime.date(2021, 8, 30)),
