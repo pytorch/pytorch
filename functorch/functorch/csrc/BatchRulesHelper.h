@@ -122,7 +122,7 @@ void boxed_tensor_inputs_batch_rule(const c10::OperatorHandle& op, torch::jit::S
   size_t tensor_idx = 0;
   TORCH_INTERNAL_ASSERT(tensor_pos.size() > 0);
   for (const auto arg_idx : c10::irange(0, num_arguments)) {
-    if (tensor_idx >= tensor_pos.size() || arg_idx != tensor_pos[tensor_idx]) {
+    if (tensor_idx >= tensor_pos.size() || (int64_t)arg_idx != tensor_pos[tensor_idx]) {
       torch::jit::push(stack, arguments[arg_idx]);
     } else {
       TORCH_INTERNAL_ASSERT(tensor_idx < tensor_inputs.size());
@@ -189,7 +189,7 @@ inline void boxed_existing_bdim_batch_rule(const c10::OperatorHandle& op, torch:
   size_t tensor_idx = 0;
   TORCH_INTERNAL_ASSERT(tensor_pos.size() > 0);
   for (const auto arg_idx : c10::irange(0, num_arguments)) {
-    if (tensor_idx >= tensor_pos.size() || arg_idx != tensor_pos[tensor_idx]) {
+    if (tensor_idx >= tensor_pos.size() || (int64_t)arg_idx != tensor_pos[tensor_idx]) {
       torch::jit::push(stack, arguments[arg_idx]);
     } else {
       TORCH_INTERNAL_ASSERT(tensor_idx < tensor_inputs.size());
