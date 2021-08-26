@@ -38,5 +38,6 @@ cc_library(
         "curand",
         "nvrtc",
         "cuda_driver",
+        "nvToolsExt",
     ]
 ]

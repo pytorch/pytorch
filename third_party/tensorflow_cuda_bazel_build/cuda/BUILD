@@ -166,12 +166,7 @@ cc_library(
     ],
 )
 
-# Used by TensorFlow
-cc_library(
-    name = "cupti_dsos",
-)
-
-# cupti .so exposed at linktime, used by cruise
+# cupti .so exposed at linktime
 cc_library(
     name = "cupti_link",
     linkopts = [
@@ -216,10 +211,11 @@ CUDA_INCLUDES_FILES = [
     "include/crt/sm_70_rt.h",
     "include/crt/sm_70_rt.hpp",
     "include/crt/storage_class.h",
-    "include/cublas_api.h",
-    "include/cublas.h",
-    "include/cublas_v2.h",
-    "include/cublasXt.h",
+    # TODO: figure out why on a CI machine with CUDA 10.2 it's not present
+    # "include/cublas_api.h",
+    # "include/cublas.h",
+    # "include/cublas_v2.h",
+    # "include/cublasXt.h",
     "include/cuComplex.h",
     "include/cuda_device_runtime_api.h",
     "include/cudaEGL.h",
@@ -306,8 +302,10 @@ CUDA_INCLUDES_FILES = [
     "include/npps_initialization.h",
     "include/npps_statistics_functions.h",
     "include/npps_support_functions.h",
-    "include/nppversion.h",
-    "include/nvblas.h",
+    # Note: CUDA 10.0 only
+    # "include/nppversion.h",
+    # TODO: figure out why on a CI machine with CUDA 10.2 it's not present
+    # "include/nvblas.h",
     "include/nvfunctional",
     "include/nvgraph.h",
     "include/nvjpeg.h",
@@ -350,7 +348,8 @@ CUDA_INCLUDES_FILES = [
     "include/sm_60_atomic_functions.hpp",
     "include/sm_61_intrinsics.h",
     "include/sm_61_intrinsics.hpp",
-    "include/sobol_direction_vectors.h",
+    # CUDA 10.0 only
+    # "include/sobol_direction_vectors.h",
     "include/surface_functions.h",
     "include/surface_functions.hpp",
     "include/surface_indirect_functions.h",
@@ -450,13 +449,3 @@ genrule(
     tags = ["no-cache"],
 )
 
-cc_library(
-    name = "cudnn_header",
-    includes = [
-        "include",
-    ],
-)
-
-cc_library(
-    name = "cublas_headers",
-)
