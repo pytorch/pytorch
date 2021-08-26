@@ -5,6 +5,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/TensorIteratorDynamicCasting.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
+#include <ATen/OpMathType.h>
 
 #include <thrust/tuple.h>
 
