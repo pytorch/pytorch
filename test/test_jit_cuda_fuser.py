@@ -204,26 +204,27 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
-    def test_reduction_dtypes(self):
+    def test_reduction_dtypes_axis(self):
 
         for op in [torch.sum, torch.mean]:
             for dtype in [torch.float16, torch.float32, torch.double]:
-                def make_func(op):
-                    def func(x: torch.Tensor):
-                        o = torch.mul(x, 1.0)
-                        o = op(o, dim=[2])
-                        return o
-                    return func
+                for axis in [-1, 2]:
+                    def make_func(op):
+                        def func(x: torch.Tensor):
+                            o = torch.mul(x, 1.0)
+                            o = op(o, dim=[axis])
+                            return o
+                        return func
 
-                x = torch.randn(8, 4, 16, dtype=dtype, device="cuda")
-                t = make_func(op)
-                t_jit = torch.jit.trace(t, x)
-                jit_o = t_jit(x)
-                jit_o = t_jit(x)
-                o = t(x)
-                self.assertEqual(o.dtype, jit_o.dtype)
-                self.assertTrue(self._compare("comparing output failed", o, jit_o, 1e-4))
-                self.assertGraphContains(t_jit.graph_for(x), FUSION_GUARD)
+                    x = torch.randn(8, 4, 16, dtype=dtype, device="cuda")
+                    t = make_func(op)
+                    t_jit = torch.jit.trace(t, x)
+                    jit_o = t_jit(x)
+                    jit_o = t_jit(x)
+                    o = t(x)
+                    self.assertEqual(o.dtype, jit_o.dtype)
+                    self.assertTrue(self._compare("comparing output failed", o, jit_o, 1e-4))
+                    self.assertGraphContains(t_jit.graph_for(x), FUSION_GUARD)
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,

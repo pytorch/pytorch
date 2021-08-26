@@ -1253,7 +1253,10 @@ class IrParser {
                 "aten::mean cannot be fused with dynamic keepdim");
             auto o_sum = sum(self, dims, keepdim.value());
             Val* num_features = new Double(1);
-            for (const auto axis : dims) {
+            for (auto axis : dims) {
+              if (axis < 0) {
+                axis += int(self->nDims());
+              }
               num_features =
                   mul(num_features, self->domain()->domain()[axis]->extent());
             }
