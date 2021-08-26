@@ -684,6 +684,7 @@ enum IntrinsicsOp {
   kFrac,
   kIsNan,
   kRand, // We need more discussions on this. Should we consider stateful?
+  kMaxIntrinsicsOp,
 };
 
 class TORCH_API Intrinsics : public ExprNode<Intrinsics> {
@@ -864,8 +865,9 @@ class TORCH_API Intrinsics : public ExprNode<Intrinsics> {
     params_ = std::move(params);
   }
 
- private:
   static int OpArgCount(IntrinsicsOp op_type);
+
+ private:
   static Dtype IntrinsicsDtype(IntrinsicsOp op_type, Dtype dt1);
   static Dtype IntrinsicsDtype(IntrinsicsOp op_type, Dtype dt1, Dtype dt2);
   static Dtype IntrinsicsDtype(
