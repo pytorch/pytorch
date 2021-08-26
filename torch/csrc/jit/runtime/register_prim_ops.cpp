@@ -79,6 +79,13 @@ c10::List<std::string> splitNoneSeparator(const std::string& string) {
   return splits;
 }
 
+template <typename T, typename U>
+auto powWrapper(T a, U b) {
+  TORCH_CHECK(
+      !(a == 0.0 && b < 0.0), "0.0 cannot be raised to a negative power")
+  return pow(a, b);
+}
+
 RegisterOperators reg(
     {OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("aten::str(t elem) -> str"),
@@ -770,6 +777,18 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("prim::VarStack(...) -> Tensor"),
+         [](Stack* stack) {
+           auto num_inputs = pop(stack).toInt();
+           auto dim = pop(stack).toInt();
+           std::vector<at::Tensor> inputs(num_inputs - 1);
+           for (int i = 0; i < num_inputs - 1; ++i) {
+             inputs[num_inputs - 2 - i] = pop(stack).toTensor();
+           }
+           push(stack, at::stack(inputs, dim));
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA(
              "aten::eq.enum(AnyEnumType a, AnyEnumType b) -> bool"),
          [](Stack* stack) {
@@ -894,13 +913,16 @@ RegisterOperators reg(
      // results
      DEFINE_GENERIC_OP_WITH_COMPLEX(
          aten::pow,
-         static_cast<double>(pow(a, b)),
-         static_cast<double>(pow(a, b)),
+         static_cast<double>(powWrapper(a, b)),
+         static_cast<double>(powWrapper(a, b)),
          static_cast<c10::complex<double>>(pow(a, b)),
          float,
          float,
          complex),
-     DEFINE_INT_FLOAT_OP(aten::pow, pow(a, b), float),
+     DEFINE_INT_FLOAT_OP(
+         aten::pow,
+         static_cast<double>(powWrapper(a, b)),
+         float),
      DEFINE_FLOAT_COMPLEX_OP(aten::pow, pow(a, b), complex),
      DEFINE_SCALAR_BINARY_OP_AVOID_COLLISION(
          aten::pow,
@@ -913,7 +935,7 @@ RegisterOperators reg(
            // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
            int64_t a, b;
            pop(stack, a, b);
-           push(stack, pow(a, b));
+           push(stack, powWrapper(a, b));
          },
          aliasAnalysisFromSchema()),
      // min and max are in prim:: because there is a difference between
@@ -2199,6 +2221,14 @@ RegisterOperators reg1(
            at::Tensor a;
            pop(stack, a);
            push(stack, a.is_meta());
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("prim::is_ort(Tensor a) -> bool"),
+         [](Stack* stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.is_ort());
          },
          aliasAnalysisFromSchema()),
      OperatorGenerator(

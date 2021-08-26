@@ -2,7 +2,7 @@ from .node import Node, Argument, Target, map_arg, _type_repr, _get_qualified_na
 import torch.utils._pytree as pytree
 from . import _pytree as fx_pytree
 
-from typing import TYPE_CHECKING, Callable, Any, List, Dict, NamedTuple, Optional, Tuple, Set, FrozenSet
+from typing import TYPE_CHECKING, Callable, Any, List, Dict, NamedTuple, Optional, Tuple, Set, FrozenSet, Type
 from dataclasses import dataclass
 from contextlib import contextmanager
 import copy
@@ -283,7 +283,7 @@ class Graph:
 
     For the semantics of operations represented in the ``Graph``, please see :class:`Node`.
     """
-    def __init__(self, owning_module: Optional["GraphModule"] = None, tracer_cls: Optional["Tracer"] = None):
+    def __init__(self, owning_module: Optional["GraphModule"] = None, tracer_cls: Optional[Type["Tracer"]] = None):
         """
         Construct an empty Graph.
         """
@@ -357,7 +357,7 @@ class Graph:
         nodes or other parts of the Graph from a custom GraphModule implementation
         """
         memo = memo if memo else {}
-        g = Graph()
+        g = Graph(tracer_cls=self._tracer_cls)
         output_vals = g.graph_copy(self, val_map=memo, return_output_node=True)
         assert isinstance(output_vals, tuple)
         output_val, old_output_val = output_vals

@@ -172,7 +172,7 @@ class Tracer(TracerBase):
     # documentation. We need it so that Sphinx doesn't leak `math`s path from the
     # build environment (e.g. `<module 'math' from '/leaked/path').
 
-    """Tracer(autowrap_modules=(math,), enable_cpatching=False)
+    """Tracer(autowrap_modules=(math,), autowrap_functions=(), enable_cpatching=False)
 
     ``Tracer`` is the class that implements the symbolic tracing functionality
     of ``torch.fx.symbolic_trace``. A call to ``symbolic_trace(m)`` is equivalent
@@ -183,6 +183,7 @@ class Tracer(TracerBase):
     in the docstrings of the methods on this class.
     """
     def __init__(self, autowrap_modules: Tuple[ModuleType] = (math, ),
+                 autowrap_functions: Tuple[Callable, ...] = (),
                  enable_cpatching: bool = False,
                  param_shapes_constant: bool = False) -> None:
         # This method's signature is overridden by the first line of this class'
@@ -194,9 +195,13 @@ class Tracer(TracerBase):
 
         Args:
 
-            autowrap_modules (List[ModuleType]): defaults to `[math]`,
+            autowrap_modules (Tuple[ModuleType]): defaults to `(math, )`,
                 Python modules whose functions should be wrapped automatically
                 without needing to use fx.wrap().
+
+            autowrap_function (Tuple[Callable, ...]): defaults to `()`,
+                Python functions that should be wrapped automatically without
+                needing to use fx.wrap().
 
             enable_cpatching (bool): defaults to `False`,
                 Allows you to enable/disable monkeypatching of torch functions at the
@@ -220,6 +225,7 @@ class Tracer(TracerBase):
         self._autowrap_function_ids: Set[int] = {
             id(value) for name, value in chain(*[m.__dict__.items() for m in autowrap_modules])
             if not name.startswith("_") and callable(value)}
+        self._autowrap_function_ids.update(set([id(f) for f in autowrap_functions]))
 
         # Python modules to apply autowrap to at the start, in addition to
         # modules we see while tracing
@@ -533,7 +539,7 @@ class Tracer(TracerBase):
             self.root = torch.nn.Module()
             fn = root
 
-        tracer_cls: Optional['Tracer'] = getattr(self, '__class__', None)
+        tracer_cls: Optional[Type['Tracer']] = getattr(self, '__class__', None)
         self.graph = Graph(tracer_cls=tracer_cls)
 
         # When we encounter a Tensor value that's not a parameter, we look if it
