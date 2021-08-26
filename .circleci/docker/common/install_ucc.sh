@@ -11,7 +11,8 @@ git clone https://github.com/openucx/ucc.git
 
 pushd ucx
 ./autogen.sh
-./contrib/configure-release-mt --prefix=$UCX_HOME --with-cuda=/usr/local/cuda/
+# ./contrib/configure-release-mt --prefix=$UCX_HOME --with-cuda=/usr/local/cuda/
+./contrib/configure --enable-mt --prefix=$UCX_HOME --with-cuda=/usr/local/cuda/
 make -j
 make install
 popd
