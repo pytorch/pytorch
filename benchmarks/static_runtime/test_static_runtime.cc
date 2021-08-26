@@ -69,6 +69,7 @@ Node* getNodeWithKind(const StaticModule& smodule, const std::string& kind) {
 
 TEST(StaticRuntime, InPlace) {
   EXPECT_TRUE(testHasInplaceOp(reshape_inplace_script));
+  EXPECT_TRUE(testHasInplaceOp(reshape_inplace_script_1));
   EXPECT_TRUE(testHasInplaceOp(sigmoid_inplace_script));
   EXPECT_FALSE(testHasInplaceOp(sigmoid_out_script));
 }
@@ -1194,4 +1195,20 @@ TEST(StaticRuntime, QuantizedLinear) {
       at::quantize_per_tensor(torch::randn({4, 3}), 2, 3, torch::kQUInt8);
 
   testStaticRuntime(quantize_script, {input, weight}, {input_2, weight_2});
+}
+
+TEST(StaticRuntime, IndividualOps_VarStack) {
+  // 2D tensors - stack dim = 0
+  std::vector<IValue> args1 = {at::randn({6, 6}), at::randn({6, 6}), 0};
+  testStaticRuntime(var_stack_script, args1);
+
+  // 3D tensors - stack dim = 1
+  std::vector<IValue> args2 = {at::randn({4, 5, 6}), at::randn({4, 5, 6}), 1};
+  testStaticRuntime(var_stack_script, args2);
+
+  // 3D tensors - stack dim = 2
+  std::vector<IValue> args3 = {at::randn({4, 5, 6}), at::randn({4, 5, 6}), 2};
+  testStaticRuntime(var_stack_script, args3);
+
+  testStaticRuntime(var_stack_script, args1, args2);
 }
