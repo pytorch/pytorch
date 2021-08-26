@@ -165,8 +165,7 @@ def make_tensor(
                             " here: https://github.com/pytorch/pytorch/issues")
         result[result == 0] = replace_with
 
-    if dtype in _floating_types or\
-       dtype in _complex_types:
+    if dtype in _floating_types + _complex_types:
         result.requires_grad = requires_grad
 
     return result
