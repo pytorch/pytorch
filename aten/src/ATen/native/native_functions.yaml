@@ -6652,7 +6652,12 @@
   device_check: NoCheck   # TensorIterator
   variants: method
 
-- func: cross_entropy_loss(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, int ignore_index=-100, float? label_smoothing=None) -> Tensor
+- func: cross_entropy_loss(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, int ignore_index=-100) -> Tensor
+  python_module: nn
+
+# To avoid ambiguity with the original signature above, the parameters here do not have
+# default values. This is to maintain FC with the JIT.
+- func: cross_entropy_loss.label_smoothing(Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index, float? label_smoothing) -> Tensor
   python_module: nn
 
 - func: lstsq.X(Tensor self, Tensor A, *, Tensor(a!) X, Tensor(b!) qr) -> (Tensor(a!) solution, Tensor(b!) QR)
