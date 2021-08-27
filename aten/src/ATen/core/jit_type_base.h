@@ -174,9 +174,6 @@ struct TORCH_API Type : std::enable_shared_from_this<Type> {
   template <typename T>
   std::shared_ptr<T> expect() {
     auto r = cast<T>();
-    if (!r) {
-      int x = 5;
-    }
     AT_ASSERT(r);
     return r;
   }
