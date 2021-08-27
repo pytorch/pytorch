@@ -981,6 +981,14 @@ if(USE_CUDA OR USE_ROCM)
 
 endif()
 
+# Build model tracer for tracing-based selective build
+if(NOT BUILD_LITE_INTERPRETER)
+  add_subdirectory(
+    ${TORCH_ROOT}/torch/csrc/jit/mobile/model_tracer
+    ${CMAKE_BINARY_DIR}/model_tracer
+  )
+endif()
+
 # Note(jiayq): when building static libraries, all PRIVATE dependencies
 # will also become interface libraries, and as a result if there are any
 # dependency libraries that are not exported, the following install export
