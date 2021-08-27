@@ -300,6 +300,8 @@ TORCH_API void annotateInputShapes(
 TORCH_API std::shared_ptr<Graph> removeUnusedSelfArgument(
     const std::shared_ptr<Graph>& graph);
 
+TORCH_API std::string buildErrorMessage(const std::string& s);
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
