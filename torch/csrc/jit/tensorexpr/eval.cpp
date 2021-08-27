@@ -10,6 +10,17 @@ namespace tensorexpr {
 
 RegisterCodeGen<SimpleIREvaluator> ir_eval_codegen_reg("simple_ir_eval");
 
+int64_t Value::intValue() const {
+#define TYPE_CASE(Type, Name)        \
+  if (dtype_ == k##Name) {           \
+    return int64_t{Name##values[0]}; \
+  }
+  AT_FORALL_INT_TYPES(TYPE_CASE);
+#undef TYPE_CASE
+  throw unsupported_dtype();
+  return 0;
+}
+
 template <typename T>
 inline typename std::enable_if<std::is_integral<T>::value, T>::type mod_value(
     T lhs,
@@ -537,15 +548,16 @@ class SimpleIREvaluatorImpl : public IRVisitor {
   TORCH_API void visit(ForPtr v) override {
     ExprPtr var_node = v->var();
     v->start()->accept(this);
-    int start = value_.as<int>();
+    auto dtype = value_.dtype();
+    auto start = value_.intValue();
     v->stop()->accept(this);
-    int stop = value_.as<int>();
+    auto stop = value_.intValue();
     if (eval_context_.count(var_node)) {
       throw malformed_input("could not find var_node in For context", v);
     }
 
-    for (int i = start; i < stop; i++) {
-      eval_context_[var_node] = Value(i);
+    for (auto i = start; i < stop; i++) {
+      eval_context_[var_node] = Value(dtype, i);
       if (v->body()) {
         v->body()->accept(this);
       }
@@ -555,9 +567,9 @@ class SimpleIREvaluatorImpl : public IRVisitor {
 
   TORCH_API void visit(RampPtr v) override {
     v->base()->accept(this);
-    int base = value().as<int>();
+    auto base = value().intValue();
     v->stride()->accept(this);
-    int stride = value().as<int>();
+    auto stride = value().intValue();
     int lanes = v->lanes();
 
     std::vector<int> values(lanes);
@@ -714,7 +726,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       buf_dtypes.push_back((int8_t)b->dtype().scalar_type());
       for (ExprPtr dim_expr : b->dims()) {
         dim_expr->accept(this);
-        buf_dims.push_back(value().as<int>());
+        buf_dims.push_back(value().intValue());
       }
     }
     for (ExprPtr a : v->args()) {
@@ -724,7 +736,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       if (value().dtype() == kLong) {
         val = value().as<int64_t>();
       } else if (value().dtype() == kInt) {
-        val = value().as<int>();
+        val = value().intValue();
       } else {
         throw malformed_input(
             "extra_args in ExternalCalls must have int64 dtype", v);
@@ -807,10 +819,10 @@ class SimpleIREvaluatorImpl : public IRVisitor {
   void visit(AllocatePtr v) override {
     BufPtr b = v->buf();
     std::vector<ExprPtr> dims = b->dims();
-    int total_byte_size = b->dtype().byte_size();
+    int64_t total_byte_size = b->dtype().byte_size();
     for (auto& dim : dims) {
       dim->accept(this);
-      total_byte_size *= value_.as<int>();
+      total_byte_size *= value_.intValue();
     }
     auto int_count = (total_byte_size + sizeof(int) - 1) / sizeof(int);
     std::unique_ptr<std::vector<int>> buffer(new std::vector<int>(int_count));
@@ -842,7 +854,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
 
   void visit(CondPtr v) override {
     v->condition()->accept(this);
-    if (value().as<int>()) {
+    if (value().intValue()) {
       if (v->true_stmt()) {
         v->true_stmt()->accept(this);
       }
