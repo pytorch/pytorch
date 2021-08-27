@@ -2277,7 +2277,7 @@ def sample_inputs_max_pool2d(op_info, device, dtype, requires_grad, **kwargs):
 
     kerneli = [[3, 2], 3]
     stridei = [[2, 2]]
-    Ni = [1, 4]
+    Ni = [1, 4, 0, None]
     Ci = [32]
     Hi = [8, 16]
     Wi = [8, 16]
@@ -2297,8 +2297,9 @@ def sample_inputs_max_pool2d(op_info, device, dtype, requires_grad, **kwargs):
                 "ceil_mode": max_pool.ceil_mode,
                 "return_indices": max_pool.return_indices,
             }
+            sample_input = make_arg((N, C, H, W)) if N is not None else (make_arg((C, H, W)))
 
-            yield SampleInput(make_arg((N, C, H, W)), kwargs=kwargs)
+            yield SampleInput(sample_input, kwargs=kwargs)
 
     return list(generator())
 
