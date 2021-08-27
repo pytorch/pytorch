@@ -69,6 +69,7 @@ Node* getNodeWithKind(const StaticModule& smodule, const std::string& kind) {
 
 TEST(StaticRuntime, InPlace) {
   EXPECT_TRUE(testHasInplaceOp(reshape_inplace_script));
+  EXPECT_TRUE(testHasInplaceOp(reshape_inplace_script_1));
   EXPECT_TRUE(testHasInplaceOp(sigmoid_inplace_script));
   EXPECT_FALSE(testHasInplaceOp(sigmoid_out_script));
 }
@@ -208,6 +209,13 @@ TEST(StaticRuntime, EmbeddingBag) {
 }
 
 TEST(StaticRuntime, LayerNorm) {
+#ifdef FBCODE_CAFFE2
+  script::Module module("module");
+  module.define(layer_norm_with_weights);
+  torch::jit::StaticModule smodule(module);
+  ASSERT_EQ(getNodeWithKind(smodule, "aten::layer_norm"), nullptr);
+  ASSERT_NE(getNodeWithKind(smodule, "static_runtime::layer_norm"), nullptr);
+#endif
   const auto a = torch::rand({1, 2, 2, 2});
   const auto b = torch::rand({3, 2, 2, 2});
   for (int normalized_size : {2, 3}) {
@@ -254,6 +262,15 @@ TEST(StaticRuntime, Addmm) {
   testStaticRuntime(addmm_script, args);
   testStaticRuntime(addmm_script, args1);
   testStaticRuntime(addmm_script, args, args1);
+}
+
+TEST(StaticRuntime, IndividualOps_Abs) {
+  auto a = at::randn({2, 3});
+  auto b = at::randn({4, 2, 3});
+  std::vector<IValue> args{a};
+  std::vector<IValue> args2{b};
+  testStaticRuntime(abs_script, args);
+  testStaticRuntime(abs_script, args, args2);
 }
 
 TEST(StaticRuntime, IndividualOps_Binary) {
@@ -598,6 +615,17 @@ TEST(StaticRuntime, IndividualOps_Detach) {
   testStaticRuntime(detach_script_0, args, args2);
   testStaticRuntime(detach_script_1, args);
   testStaticRuntime(detach_script_1, args, args2);
+}
+
+TEST(StaticRuntime, IndividualOps_ExpandAs) {
+  auto a = at::randn({3,1});
+  auto b = at::randn({3,2});
+  auto c = at::randn({4,1});
+  auto d = at::randn({4,2});
+  std::vector<IValue> args{a, b};
+  std::vector<IValue> args2{c, d};
+  testStaticRuntime(expand_as_script, args);
+  testStaticRuntime(expand_as_script, args, args2);
 }
 
 TEST(StaticRuntime, IndividualOps_Full) {
@@ -1171,4 +1199,69 @@ TEST(StaticRuntime, IndividualOps_Append) {
 
   testStaticRuntime(append_tensor_script, args_tensor);
   testStaticRuntime(append_tensor_script, args_tensor, args_tensor_large);
+}
+
+TEST(StaticRuntime, QuantizedLinear) {
+  at::Tensor weight =
+      at::quantize_per_tensor(torch::randn({3, 2}), 2, 3, torch::kQInt8);
+  at::Tensor input =
+      at::quantize_per_tensor(torch::randn({3, 2}), 2, 3, torch::kQUInt8);
+
+  at::Tensor weight_2 =
+      at::quantize_per_tensor(torch::randn({4, 3}), 2, 3, torch::kQInt8);
+  at::Tensor input_2 =
+      at::quantize_per_tensor(torch::randn({4, 3}), 2, 3, torch::kQUInt8);
+
+  testStaticRuntime(quantize_script, {input, weight}, {input_2, weight_2});
+}
+
+TEST(StaticRuntime, IndividualOps_VarStack) {
+  // 2D tensors - stack dim = 0
+  std::vector<IValue> args1 = {at::randn({6, 6}), at::randn({6, 6}), 0};
+  testStaticRuntime(var_stack_script, args1);
+
+  // 3D tensors - stack dim = 1
+  std::vector<IValue> args2 = {at::randn({4, 5, 6}), at::randn({4, 5, 6}), 1};
+  testStaticRuntime(var_stack_script, args2);
+
+  // 3D tensors - stack dim = 2
+  std::vector<IValue> args3 = {at::randn({4, 5, 6}), at::randn({4, 5, 6}), 2};
+  testStaticRuntime(var_stack_script, args3);
+
+  testStaticRuntime(var_stack_script, args1, args2);
+}
+
+TEST(StaticRuntime, IndividualOps_FmodTensor) {
+  // fmod tensor version
+  auto a = at::randn({2, 3});
+  auto b = at::randn({2, 3});
+  std::vector<IValue> args0{a, b};
+  testStaticRuntime(fmod_tensor, args0);
+
+  // check for dynamic shapes
+  auto c = at::randn({4, 3, 2});
+  auto d = at::randn({4, 3, 2});
+  std::vector<IValue> args1{c, d};
+  testStaticRuntime(fmod_tensor, args0, args1);
+}
+
+TEST(StaticRuntime, IndividualOps_FmodScalar) {
+  auto a = at::randn({2, 3});
+
+  // fmod scalar version
+  std::vector<IValue> args2{a, 3};
+  testStaticRuntime(fmod_scalar, args2);
+
+  // check for dynamic shapes
+  auto c = at::randn({4, 3, 2});
+  std::vector<IValue> args3{c, 4};
+  testStaticRuntime(fmod_scalar, args2, args3);
+}
+
+TEST(StaticRuntime, QEmbeddingBagByteUnpack) {
+  auto a = torch::randn({8, 16}, at::ScalarType::Float);
+  auto b = torch::randn({8*2, 16*2}, at::ScalarType::Float);
+
+  testStaticRuntime(embedding_bag_byte_prepack_script, {a});
+  testStaticRuntime(embedding_bag_byte_prepack_script, {a},{b});
 }
