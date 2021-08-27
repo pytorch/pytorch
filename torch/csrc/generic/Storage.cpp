@@ -89,12 +89,6 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
     return (PyObject*)self.release();
   }
 
-  // torch.Storage(view_source, [offset, [size]])
-  if (num_args < 4 && THPStorage_(Check)(first_arg)) {
-    THPUtils_setError("storage views not supported");
-    return nullptr;
-  }
-
   // torch.Storage(sequence)
   if (num_args == 1 && PySequence_Check(first_arg)) {
     Py_ssize_t length = PySequence_Length(first_arg);
@@ -128,10 +122,7 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
   THPUtils_invalidArguments(args, kwargs, THPStorageStr " constructor", 6,
           "no arguments",
           "(int size)",
-          "(Sequence data)",
-          "(" THPStorageStr " view_source)",
-          "(" THPStorageStr " view_source, int offset)",
-          "(" THPStorageStr " view_source, int offset, int size)");
+          "(Sequence data)");
   return nullptr;
   END_HANDLE_TH_ERRORS
 }
@@ -421,6 +412,14 @@ bool THPStorage_(init)(PyObject *module)
   Py_INCREF(&THPStorageType);
   PyModule_AddObject(module, THPStorageBaseStr, (PyObject *)&THPStorageType);
   THPStorage_(initCopyMethods)();
+
+#if !defined(THC_GENERIC_FILE) && !defined(THQUANTIZED)
+#if defined(TH_REAL_IS_BYTE)
+  // TODO: This is probably not the best place for this
+  return torch::initTHPTypedStorageType(module);
+#endif
+#endif
+
   return true;
 }
 

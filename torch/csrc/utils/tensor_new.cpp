@@ -264,13 +264,14 @@ Tensor internal_new_from_data(
   {
     at::AutoDispatchBelowADInplaceOrView guard;  // TODO: remove
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
+    // TODO: Is this the case that changed torch.tensor's casting behavior?
     if (isStorage(data)) {
       Storage storage = createStorage(data);
       tensor = at::empty(sizes, at::initialTensorOptions().dtype(inferred_scalar_type).pinned_memory(pin_memory).device(storage.device()));
       tensor.set_(storage);
+
     } else {
       tensor = at::empty(sizes, at::initialTensorOptions().dtype(inferred_scalar_type).pinned_memory(pin_memory));
-
       recursive_store(
           (char*)tensor.data_ptr(), tensor.sizes(), tensor.strides(), 0,
           inferred_scalar_type, tensor.dtype().itemsize(), data);

@@ -775,11 +775,11 @@ class PackageExporter:
             if isinstance(obj, torch.storage.TypedStorage):
                 # TODO: Once we decide to break serialization FC, we can
                 # remove this case
-                storage = obj.storage
+                storage = obj._storage
                 storage_type_str = obj.pickle_storage_type()
                 storage_type = getattr(torch, storage_type_str)
                 dtype = obj.dtype
-                storage_numel = obj.numel()
+                storage_numel = obj.size()
 
 
             else:

@@ -102,38 +102,48 @@ static PyObject * THPStorage_(fromBuffer)(PyObject *_unused, PyObject *args, PyO
   PyObject *obj = nullptr;
   const char* byte_order_str = nullptr;
   Py_ssize_t count = -1, offset = 0;
+  PyObject* dtype_obj = nullptr;
+  c10::ScalarType scalar_type = at::kByte;
   Py_buffer buffer = {};
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,clang-diagnostic-writable-strings)
-  static char *kwlist[] = {"buffer", "byte_order", "count", "offset", nullptr};
+  static char *kwlist[] = {"buffer", "byte_order", "count", "offset", "dtype", nullptr};
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   const char* argtypes;
-#if defined(TH_REAL_IS_BYTE) || defined(TH_REAL_IS_CHAR)
-  argtypes = "O|snn";
-#else
-  argtypes = "Os|nn";
-#endif
+  argtypes = "O|snnO";
 
   if (!PyArg_ParseTupleAndKeywords(args, keywds, argtypes, kwlist,
-        &obj, &byte_order_str, &count, &offset)) {
+        &obj, &byte_order_str, &count, &offset, &dtype_obj)) {
     return nullptr;
   }
 
-#if !(defined(TH_REAL_IS_BYTE) || defined(TH_REAL_IS_CHAR))
+  if (dtype_obj != nullptr) {
+    TORCH_CHECK(
+      THPDtype_Check(dtype_obj),
+      "argument 'dtype' must be of type torch.dtype");
+    auto dtype = reinterpret_cast<THPDtype*>(dtype_obj);
+    scalar_type = dtype->scalar_type;
+  }
+
+  TORCH_CHECK(
+    (scalar_type == at::kByte) || (scalar_type == at::kChar) || (byte_order_str != nullptr),
+    "function missing required argument 'byte_order' (pos 2)");
+
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   torch::utils::THPByteOrder byte_order;
-  if (strcmp(byte_order_str, "native") == 0) {
-    byte_order = torch::utils::THP_nativeByteOrder();
-  } else if (strcmp(byte_order_str, "big") == 0) {
-    byte_order = torch::utils::THP_BIG_ENDIAN;
-  } else if (strcmp(byte_order_str, "little") == 0) {
-    byte_order = torch::utils::THP_LITTLE_ENDIAN;
-  } else {
-    PyErr_Format(PyExc_ValueError,
-      "invalid byte_order '%s' (expected 'big', 'little', or 'native')",
-      byte_order_str);
-    return nullptr;
+  if (scalar_type != at::kByte && scalar_type != at::kChar) {
+    if (strcmp(byte_order_str, "native") == 0) {
+      byte_order = torch::utils::THP_nativeByteOrder();
+    } else if (strcmp(byte_order_str, "big") == 0) {
+      byte_order = torch::utils::THP_BIG_ENDIAN;
+    } else if (strcmp(byte_order_str, "little") == 0) {
+      byte_order = torch::utils::THP_LITTLE_ENDIAN;
+    } else {
+      PyErr_Format(PyExc_ValueError,
+        "invalid byte_order '%s' (expected 'big', 'little', or 'native')",
+        byte_order_str);
+      return nullptr;
+    }
   }
-#endif
 
   if (PyObject_GetBuffer(obj, &buffer, PyBUF_SIMPLE) < 0)
     return nullptr;
@@ -168,45 +178,54 @@ static PyObject * THPStorage_(fromBuffer)(PyObject *_unused, PyObject *args, PyO
   uint8_t* src = (uint8_t*) buffer.buf;
   THWStorage* storage = THWStorage_(newWithSize)(count);
 
-#if defined(TH_REAL_IS_BYTE) || defined(TH_REAL_IS_CHAR)
-  memcpy(THWStorage_(data)(storage), src + offset, count);
-#elif defined(TH_REAL_IS_BOOL)
-  // Because of ASAN checks, that are failing in the THStorage.cpp whenever
-  // we are trying to get a value which is not 0 or 1, we have to manually
-  // convert original values to boolean ones.
-  torch::utils::THP_decodeBoolBuffer(
-      THWStorage_(data)(storage), src + offset, byte_order, count);
-#elif defined(TH_REAL_IS_SHORT)
-  torch::utils::THP_decodeInt16Buffer(
-      THWStorage_(data)(storage), src + offset, byte_order, count);
-#elif defined(TH_REAL_IS_INT)
-  torch::utils::THP_decodeInt32Buffer(
-      THWStorage_(data)(storage), src + offset, byte_order, count);
-#elif defined(TH_REAL_IS_LONG)
-  // TODO: remove the cast
-  torch::utils::THP_decodeInt64Buffer(
-      (int64_t*)THWStorage_(data)(storage), src + offset, byte_order, count);
-#elif defined(TH_REAL_IS_HALF)
-  torch::utils::THP_decodeHalfBuffer(
-      THWStorage_(data)(storage), src + offset, byte_order, count);
-#elif defined(TH_REAL_IS_BFLOAT16)
-  torch::utils::THP_decodeBFloat16Buffer(
-      THWStorage_(data)(storage), src + offset, byte_order, count);
-#elif defined(TH_REAL_IS_FLOAT)
-  torch::utils::THP_decodeFloatBuffer(
-      THWStorage_(data)(storage), src + offset, byte_order, count);
-#elif defined(TH_REAL_IS_DOUBLE)
-  torch::utils::THP_decodeDoubleBuffer(
-      THWStorage_(data)(storage), src + offset, byte_order, count);
-#elif defined(TH_REAL_IS_COMPLEXFLOAT)
-  torch::utils::THP_decodeComplexFloatBuffer(
-      THWStorage_(data)(storage), src + offset, byte_order, count);
-#elif defined(TH_REAL_IS_COMPLEXDOUBLE)
-  torch::utils::THP_decodeComplexDoubleBuffer(
-      THWStorage_(data)(storage), src + offset, byte_order, count);
-#else
-#error "Unknown type"
-#endif
+  if (scalar_type == at::kByte || scalar_type == at::kChar) {
+    memcpy(THWStorage_(data)(storage), src + offset, count);
+  } else if (scalar_type == at::kBool) {
+    // Because of ASAN checks, that are failing in the THStorage.cpp whenever
+    // we are trying to get a value which is not 0 or 1, we have to manually
+    // convert original values to boolean ones.
+    torch::utils::THP_decodeBoolBuffer(
+        reinterpret_cast<bool*>(THWStorage_(data)(storage)),
+        src + offset, byte_order, count);
+  } else if (scalar_type == at::kShort) {
+    torch::utils::THP_decodeInt16Buffer(
+        reinterpret_cast<int16_t*>(THWStorage_(data)(storage)),
+        src + offset, byte_order, count);
+  } else if (scalar_type == at::kInt) {
+    torch::utils::THP_decodeInt32Buffer(
+        reinterpret_cast<int32_t*>(THWStorage_(data)(storage)),
+        src + offset, byte_order, count);
+  } else if (scalar_type == at::kLong) {
+    torch::utils::THP_decodeInt64Buffer(
+        reinterpret_cast<int64_t*>(THWStorage_(data)(storage)),
+        src + offset, byte_order, count);
+  } else if (scalar_type == at::kHalf) {
+    torch::utils::THP_decodeHalfBuffer(
+        reinterpret_cast<c10::Half*>(THWStorage_(data)(storage)),
+        src + offset, byte_order, count);
+  } else if (scalar_type == at::kBFloat16) {
+    torch::utils::THP_decodeBFloat16Buffer(
+        reinterpret_cast<c10::BFloat16*>(THWStorage_(data)(storage)),
+        src + offset, byte_order, count);
+  } else if (scalar_type == at::kFloat) {
+    torch::utils::THP_decodeFloatBuffer(
+        reinterpret_cast<float*>(THWStorage_(data)(storage)),
+        src + offset, byte_order, count);
+  } else if (scalar_type == at::kDouble) {
+    torch::utils::THP_decodeDoubleBuffer(
+        reinterpret_cast<double*>(THWStorage_(data)(storage)),
+        src + offset, byte_order, count);
+  } else if (scalar_type == at::kComplexFloat) {
+    torch::utils::THP_decodeComplexFloatBuffer(
+        reinterpret_cast<c10::complex<float>*>(THWStorage_(data)(storage)),
+        src + offset, byte_order, count);
+  } else if (scalar_type == at::kComplexDouble) {
+    torch::utils::THP_decodeComplexDoubleBuffer(
+        reinterpret_cast<c10::complex<double>*>(THWStorage_(data)(storage)),
+        src + offset, byte_order, count);
+  } else {
+    TORCH_CHECK(false, "Unknown type: ", scalar_type);
+  }
 
   PyBuffer_Release(&buffer);
   return (PyObject*)THPStorage_(New)(storage);

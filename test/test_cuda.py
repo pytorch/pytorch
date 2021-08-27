@@ -581,9 +581,9 @@ class TestCuda(TestCase):
         self.assertTrue(isinstance(q_copy[1], torch.cuda.IntTensor))
         self.assertTrue(isinstance(q_copy[2], torch.cuda.FloatTensor))
         self.assertTrue(isinstance(q_copy[3], torch.storage.TypedStorage))
-        self.assertTrue(isinstance(q_copy[3].storage, torch.cuda.ByteStorage))
+        self.assertTrue(isinstance(q_copy[3]._storage, torch.cuda.ByteStorage))
         q_copy[1].fill_(10)
-        self.assertEqual(q_copy[3].storage, torch.empty(10, device='cuda', dtype=torch.int).fill_(10).storage())
+        self.assertEqual(q_copy[3], torch.empty(10, device='cuda', dtype=torch.int).fill_(10).storage())
 
     def test_cublas_allow_tf32_get_set(self):
         orig = torch.backends.cuda.matmul.allow_tf32

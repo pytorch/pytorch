@@ -542,7 +542,7 @@ class _CudaBase(object):
 
     __new__ = _lazy_new
 
-from torch.storage import _StorageOverrides, TypedStorage
+from torch.storage import TypedStorage
 
 # TODO: All these <type>Storages are duplicates of those in torch/__init__.py
 #       Is it possible to avoid duplication?

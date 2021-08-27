@@ -209,7 +209,9 @@ class PackageImporter(Importer):
                 storage = loaded_storages[key]
                 # TODO: Once we decide to break serialization FC, we can
                 # stop wrapping with TypedStorage
-                return torch.storage.TypedStorage(storage, dtype)
+                return torch.storage.TypedStorage(
+                    wrap_storage=storage._untyped(),
+                    dtype=dtype)
             elif typename == "reduce_package":
                 # to fix BC breaking change, objects on this load path
                 # will be loaded multiple times erroneously

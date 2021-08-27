@@ -527,9 +527,9 @@ __all__.extend(['e', 'pi', 'nan', 'inf'])
 ################################################################################
 
 from ._tensor import Tensor
-from .storage import _StorageBase, _StorageOverrides, TypedStorage
+from .storage import _StorageBase, TypedStorage
 
-class ByteStorage(_StorageOverrides, _C.ByteStorageBase, _StorageBase):
+class ByteStorage(_C.ByteStorageBase, _StorageBase):
     pass
 
 class DoubleStorage(TypedStorage):

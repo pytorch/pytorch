@@ -122,7 +122,9 @@ def rebuild_cuda_tensor(tensor_cls, tensor_size, tensor_stride, tensor_offset,
             # We already ref counting this Storage, but producer needs new ref-counters to be released.
             storage_cls._release_ipc_counter(ref_counter_handle, ref_counter_offset)
 
-    t = torch._utils._rebuild_tensor(torch.storage.TypedStorage(storage, dtype), tensor_offset, tensor_size, tensor_stride)
+    t = torch._utils._rebuild_tensor(
+        torch.storage.TypedStorage(wrap_storage=storage, dtype=dtype),
+        tensor_offset, tensor_size, tensor_stride)
 
     if tensor_cls == torch.nn.parameter.Parameter:
         # It is crucial for integer tensors to receive
@@ -268,7 +270,11 @@ def reduce_tensor(tensor):
 
     # _backward_hooks purposely omitted here, see Note [Don't serialize hooks]
     metadata = (tensor.storage_offset(), tensor.size(), tensor.stride(), tensor.requires_grad)
-    return (rebuild_tensor, (type(tensor), torch.storage.TypedStorage(storage, tensor.dtype), metadata))
+    return (rebuild_tensor, (
+        type(tensor),
+        # TODO: Find out why `storage` is typed here
+        torch.storage.TypedStorage(wrap_storage=storage._untyped(), dtype=tensor.dtype),
+        metadata))
 
 
 def fd_id(fd):
@@ -312,10 +318,10 @@ def rebuild_storage_empty(cls):
     return cls()
 
 def rebuild_typed_storage(storage, dtype):
-    return torch.storage.TypedStorage(storage, dtype)
+    return torch.storage.TypedStorage(wrap_storage=storage, dtype=dtype)
 
 def reduce_typed_storage(storage):
-    return (rebuild_typed_storage, (storage.storage, storage.dtype))
+    return (rebuild_typed_storage, (storage._storage, storage.dtype))
 
 def reduce_storage(storage):
     from . import get_sharing_strategy

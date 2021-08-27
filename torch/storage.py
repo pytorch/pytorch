@@ -4,6 +4,7 @@ import torch
 from ._utils import _type, _cuda
 from typing import Any, TypeVar, Type
 import copy
+import collections
 
 T = TypeVar('T', bound='_StorageBase')
 class _StorageBase(object):
@@ -16,6 +17,10 @@ class _StorageBase(object):
     def __getitem__(self, idx): ...  # noqa: E704
     def copy_(self, source: T) -> T: ...  # noqa: E704
     def nbytes(self) -> int: ...  # noqa: E704
+
+    def size(self) -> int:
+        return self.nbytes()
+
     def type(self, dtype: str = None, non_blocking: bool = False) -> T: ...  # noqa: E704
     def cuda(self, device=None, non_blocking=False, **kwargs) -> T: ...  # noqa: E704
     def element_size(self) -> int: ...  # noqa: E704
@@ -72,6 +77,64 @@ class _StorageBase(object):
         """Returns a CPU copy of this storage if it's not already on the CPU"""
         return _type(self, getattr(torch, self.__class__.__name__))
 
+    def _to(self, dtype):
+        # TODO: using `torch.tensor`'s `dtype` kwarg at the moment because
+        # `torch.tensor` does not handle ByteStorage correctly--it resolves
+        # it to int64 for some reason. Need to solve that issue
+        #storage = torch.tensor(self, dtype=self.dtype).to(dtype).storage()
+        storage = torch.Tensor().to(self.dtype).to(self.device).set_(self).to(dtype).storage()
+        if storage.data_ptr() == self.data_ptr():
+            storage = storage.clone()
+        return storage
+
+    def double(self):
+        """Casts this storage to double type"""
+        return self._to(torch.double)
+
+    def float(self):
+        """Casts this storage to float type"""
+        return self._to(torch.float)
+
+    def half(self):
+        """Casts this storage to half type"""
+        return self._to(torch.half)
+
+    def long(self):
+        """Casts this storage to long type"""
+        return self._to(torch.long)
+
+    def int(self):
+        """Casts this storage to int type"""
+        return self._to(torch.int)
+
+    def short(self):
+        """Casts this storage to short type"""
+        return self._to(torch.short)
+
+    def char(self):
+        """Casts this storage to char type"""
+        return self._to(torch.int8)
+
+    def byte(self):
+        """Casts this storage to byte type"""
+        return self._to(torch.uint8)
+
+    def bool(self):
+        """Casts this storage to bool type"""
+        return self._to(torch.bool)
+
+    def bfloat16(self):
+        """Casts this storage to bfloat16 type"""
+        return self._to(torch.bfloat16)
+
+    def complex_double(self):
+        """Casts this storage to complex double type"""
+        return self._to(torch.cdouble)
+
+    def complex_float(self):
+        """Casts this storage to complex float type"""
+        return self._to(torch.cfloat)
+
     def pin_memory(self):
         """Copies the storage to pinned memory, if it's not already pinned."""
         if self.is_cuda:
@@ -112,26 +175,9 @@ class _StorageBase(object):
     def _untyped(self):
         return self
 
-# This class defines methods that both TypedStorage and ByteStorage
-# share
-class _StorageOverrides():
-    @classmethod
-    def from_buffer(cls, *args, **kwargs):
-        return _from_buffer_override(cls, *args, **kwargs)
-
-    # TODO: Add the float(), double(), etc methods and make them work correctly
-
-    #def float(self):
-    #    return self.type(type(self).__module__ + '.FloatStorage')
-
-    #def double(self):
-    #    return self.type(type(self).__module__ + '.DoubleStorage')
-
-def _from_buffer_override(cls, *args, **kwargs):
-    storage = eval(cls.__module__ + '._ByteStorage').from_buffer(*args, **kwargs)
-    storage.__class__ = cls
-    return storage
-
+    @property
+    def dtype(self):
+        return torch.uint8
 
 def _load_from_bytes(b):
     return torch.load(io.BytesIO(b))
@@ -167,18 +213,27 @@ def _pickle_storage_type_to_dtype_map():
             val: key for key, val in _dtype_to_pickle_storage_type_map().items()}
     return _pickle_storage_type_to_dtype_map.cache  # type: ignore[attr-defined]
 
-class TypedStorage(_StorageOverrides):
+class TypedStorage(torch._C.TypedStorage):
     is_sparse = False
-
-    @property
-    def is_cuda(self):
-        return self.storage.is_cuda
 
     def fill_(self, value):
         self[0:len(self)] = value
         return self
 
     def __init__(self, *args, **kwargs):
+        # TODO: This error message could definitely be formatted better.
+        #       Also, `dtype` should not appear along with `wrap_storage` if
+        #       using a derived type.
+        arg_error_msg = (
+            f'{type(self)} constructor received an invalid combination '
+            f'of arguments - got args={tuple(type(arg) for arg in args)}, '
+            f'kwargs={ {key: type(val) for key, val in kwargs.items()} }, but '
+            'expected one of:\n'
+            ' * no arguments\n'
+            ' * (int size)\n'
+            ' * (Sequence data)\n'
+            f' * (wrap_storage=<ByteStorage>, dtype=<torch.dtype>)')
+
         if 'wrap_storage' in kwargs:
             assert len(args) == 0, (
                 "No positional arguments should be given when using "
@@ -202,32 +257,47 @@ class TypedStorage(_StorageOverrides):
 
             storage = kwargs['wrap_storage']
 
-            # TODO: change `self.storage` to `self._storage`
-            if isinstance(storage, TypedStorage):
-                # TODO: Consider whether we should actually allow this or not.
-                # I think it might be useful for .float(), .double(), etc
-                # methods?
-                self.storage = storage.storage
+            if not isinstance(storage, (torch.ByteStorage, torch.cuda.ByteStorage)):
+                raise TypeError(arg_error_msg)
+            if type(self) != TypedStorage and storage.__module__ != self.__module__:
+                raise TypeError((
+                    arg_error_msg +
+                    f'\n`storage` `module {storage.__module__}` does not match '
+                    f'module of {type(self)}'))
+            self._storage = storage
 
-            else:
-                assert isinstance(storage, eval(storage.__module__ + ".ByteStorage"))
-                self.storage = storage
         else:
             assert type(self) != TypedStorage, (
                 "Calling __init__ this way is only supported in TypedStorage's "
                 "child classes. TypedStorage can only be directly instantiated "
                 "when kwargs 'wrap_storage' and 'dtype' are given.")
 
-            # TODO: Still need to override some of the constructor behavior.
-            # For instance, when we do something like
-            # `torch.FloatStorage([0, 1, 2])`, we'll end up calling
-            # `torch.ByteStorage([0, 1, 2])` here, which is not correct,
-            # since we want the storage to be filled with 3 float values
-            # [0, 1, 2]
-            self.storage = eval(self.__module__ + ".ByteStorage")(*args, **kwargs)
+            assert len(kwargs) == 0, "invalid keyword arguments"
+
+            if len(args) == 0:
+                self._storage = eval(self.__module__).ByteStorage()
+
+            elif len(args) == 1 and isinstance(args[0], int):
+                self._storage = eval(self.__module__).ByteStorage(args[0] * self.element_size())
+
+            elif len(args) == 1 and isinstance(args[0], collections.abc.Sequence):
+                # TODO: Need to fix quantized types
+                tmp_tensor = torch.tensor(
+                    args[0],
+                    dtype=self.dtype,
+                    device='cuda' if self.is_cuda else 'cpu')
+
+                self._storage = tmp_tensor.storage()._untyped()
+
+            else:
+                raise TypeError(arg_error_msg)
+
+    @property
+    def is_cuda(self):
+        return eval(self.__module__) is torch.cuda
 
     def _untyped(self):
-        return self.storage
+        return self._storage
 
     def _new_wrapped_storage(self, byte_storage):
         module = eval(byte_storage.__module__)
@@ -242,34 +312,53 @@ class TypedStorage(_StorageOverrides):
             return getattr(module, type(self).__name__)(wrap_storage=byte_storage)
 
     def __len__(self):
-        return self.storage.nbytes() // self.element_size()
+        return self._storage.nbytes() // self.element_size()
 
-    def _maybe_wrap_index(self, idx):
-        if type(idx) != int:
-            raise TypeError(
-                f"can't index a {type(self)} with {type(idx)}")
-
+    def _maybe_wrap_index(self, idx, is_stop=False):
         if idx is None:
-            return 0
+            if is_stop:
+                return self.size()
+            else:
+                return 0
 
         else:
-            if (idx >= self.size()) or (idx < -self.size()):
-                raise IndexError(
-                    f'index {idx} out of range for storage of size {self.size()}')
-            return idx % self.size()
+            if type(idx) != int:
+                raise TypeError(
+                    f"can't index a {type(self)} with {type(idx)}")
+            if is_stop:
+                if (idx > self.size()) or (idx < -self.size()):
+                    raise IndexError(
+                        f'index {idx} out of range for storage of size {self.size()}')
+                if idx > 0:
+                    return idx
+                else:
+                    return idx % self.size()
+            else:
+                if (idx >= self.size()) or (idx < -self.size()):
+                    raise IndexError(
+                        f'index {idx} out of range for storage of size {self.size()}')
+                return idx % self.size()
 
 
     def __setitem__(self, idx, value):
-        # TODO: Seems bad to use a tensor inside a storage method
-        tmp_tensor = torch.tensor(self.storage, device=self.device, dtype=self.dtype)
+        # TODO: Need to type check `value`
+
+        # TODO: Need to fix quantized types
+        if self.dtype in [torch.quint8, torch.quint4x2, torch.qint32, torch.qint8]:
+            return NotImplemented
+        tmp_tensor = torch.Tensor().to(self.dtype).to(self.device).set_(self)
         tmp_tensor[idx] = value
 
     def __getitem__(self, idx):
+        # TODO: Need to fix quantized types
+        if self.dtype in [torch.quint8, torch.quint4x2, torch.qint32, torch.qint8]:
+            return NotImplemented
         if isinstance(idx, slice):
             # Need to wrap start and stop, then multiply each slice param
             # by element_size
             start = self.element_size() * self._maybe_wrap_index(idx.start)
-            stop = self.element_size() * self._maybe_wrap_index(idx.stop)
+
+            stop = self.element_size() * self._maybe_wrap_index(idx.stop, is_stop=True)
             
             if idx.step is not None and idx.step != 1:
                 raise RuntimeError((
@@ -277,38 +366,40 @@ class TypedStorage(_StorageOverrides):
                     'only a step of 1 is supported'))
 
             byte_slice = slice(start, stop, 1)
-            byte_storage = self.storage[byte_slice]
+            byte_storage = self._storage[byte_slice]
             return self._new_wrapped_storage(byte_storage)
 
         else:
             idx_wrapped = self._maybe_wrap_index(idx)
-            # TODO: Seems bad to use a tensor inside a storage method
-            tmp_tensor = torch.tensor(self.storage, device=self.device, dtype=self.dtype)
+            tmp_tensor = torch.Tensor().to(self.dtype).to(self.device).set_(self)
             return tmp_tensor[idx_wrapped].item()
 
     def copy_(self, source: T, non_blocking=None) -> T:
         if isinstance(source, TypedStorage):
-            source = source.storage
+            source = source._storage
 
-        self.storage.copy_(source, non_blocking)
+        self._storage.copy_(source, non_blocking)
 
         return self
 
     def nbytes(self):
-        return self.storage.nbytes()
+        return self._storage.nbytes()
 
     def type(self, dtype: str = None, non_blocking: bool = False) -> T:
-        return self.storage.type(dtype, non_blocking)
+        if dtype is None:
+            return '.'.join([self.__module__, type(self).__name__])
+        else:
+            return self._storage.type(dtype, non_blocking)
 
     def cuda(self, device=None, non_blocking=False, **kwargs) -> T:
-        cuda_storage = self.storage.cuda(device, non_blocking, **kwargs)
+        cuda_storage = self._storage.cuda(device, non_blocking, **kwargs)
         return self._new_wrapped_storage(cuda_storage)
 
     def element_size(self):
         return torch._utils._element_size(self.dtype)
 
     def get_device(self) -> int:
-        return self.storage.get_device()
+        return self._storage.get_device()
 
     #def _share_filename_(self):
 
@@ -336,10 +427,10 @@ class TypedStorage(_StorageOverrides):
         return iter(map(lambda i: self[i], range(self.size())))
 
     def __copy__(self):
-        return self._new_wrapped_storage(copy.copy(self.storage))
+        return self._new_wrapped_storage(copy.copy(self._storage))
 
     def __deepcopy__(self, memo):
-        return self._new_wrapped_storage(copy.deepcopy(self.storage, memo))
+        return self._new_wrapped_storage(copy.deepcopy(self._storage, memo))
 
     #def __reduce__(self):
 
@@ -348,7 +439,7 @@ class TypedStorage(_StorageOverrides):
 
     def clone(self):
         """Returns a copy of this storage"""
-        return self._new_wrapped_storage(self.storage.clone())
+        return self._new_wrapped_storage(self._storage.clone())
 
     def tolist(self):
         """Returns a list containing the elements of this storage"""
@@ -356,11 +447,11 @@ class TypedStorage(_StorageOverrides):
 
     def cpu(self):
         """Returns a CPU copy of this storage if it's not already on the CPU"""
-        return self._new_wrapped_storage(self.storage.cpu())
+        return self._new_wrapped_storage(self._storage.cpu())
 
     def pin_memory(self):
         """Coppies the  storage to pinned memory, if it's not already pinned."""
-        return self._new_wrapped_storage(self.storage.pin_memory())
+        return self._new_wrapped_storage(self._storage.pin_memory())
     
     def share_memory_(self):
         """Moves the storage to shared memory.
@@ -371,7 +462,7 @@ class TypedStorage(_StorageOverrides):
 
         Returns: self
         """
-        self.storage.share_memory_()
+        self._storage.share_memory_()
         return self
 
     @classmethod
@@ -383,11 +474,11 @@ class TypedStorage(_StorageOverrides):
 
     @property
     def _cdata(self):
-        self.storage._cdata
+        return self._storage._cdata
 
     @property
     def device(self):
-        return self.storage.device
+        return self._storage.device
 
     def size(self):
         return len(self)
@@ -404,18 +495,121 @@ class TypedStorage(_StorageOverrides):
         return (_load_from_bytes, (b.getvalue(),))
 
     def data_ptr(self):
-        return self.storage.data_ptr()
+        return self._storage.data_ptr()
 
     def resize_(self, size):
-        self.storage.resize_(size * self.element_size())
+        self._storage.resize_(size * self.element_size())
 
-    # is_pinned
-    # _write_file
-    # _set_from_file
-    # from_buffer
-    # from_file
-    # get_device
-    # _set_cdata
+    #@property
+    #def _free_weak_ref(self):
+    #    return self._storage._free_weak_ref
+
+    def _free_weak_ref(self, *args, **kwargs):
+        return self._storage._free_weak_ref(*args, **kwargs)
+
+    @classmethod
+    def from_buffer(cls, *args, **kwargs):
+        if cls == TypedStorage:
+            raise RuntimeError(
+                'from_buffer: only supported for subclasses of TypedStorage')
+
+        if 'dtype' in kwargs or len(args) == 5:
+            raise RuntimeError(("from_buffer: 'dtype' can only be specified in "
+                "ByteStorage.from_buffer"))
+
+        kwargs['dtype'] = cls().dtype
+
+        byte_storage = eval(cls.__module__).ByteStorage.from_buffer(*args, **kwargs)
+        return cls(wrap_storage=byte_storage)
+
+    def _to(self, dtype):
+        # TODO: using `torch.tensor`'s `dtype` kwarg at the moment because
+        # `torch.tensor` does not handle ByteStorage correctly--it resolves
+        # it to int64 for some reason. Need to solve that issue
+        storage = torch.Tensor().to(self.dtype).to(self.device).set_(self).to(dtype).storage()
+        if storage.data_ptr() == self.data_ptr():
+            storage = storage.clone()
+        return storage
+
+    def double(self):
+        """Casts this storage to double type"""
+        return self._to(torch.double)
+
+    def float(self):
+        """Casts this storage to float type"""
+        return self._to(torch.float)
+
+    def half(self):
+        """Casts this storage to half type"""
+        return self._to(torch.half)
+
+    def long(self):
+        """Casts this storage to long type"""
+        return self._to(torch.long)
+
+    def int(self):
+        """Casts this storage to int type"""
+        return self._to(torch.int)
+
+    def short(self):
+        """Casts this storage to short type"""
+        return self._to(torch.short)
+
+    def char(self):
+        """Casts this storage to char type"""
+        return self._to(torch.int8)
+
+    def byte(self):
+        """Casts this storage to byte type"""
+        return self._to(torch.uint8)
+
+    def bool(self):
+        """Casts this storage to bool type"""
+        return self._to(torch.bool)
+
+    def bfloat16(self):
+        """Casts this storage to bfloat16 type"""
+        return self._to(torch.bfloat16)
+
+    def complex_double(self):
+        """Casts this storage to complex double type"""
+        return self._to(torch.cdouble)
+
+    def complex_float(self):
+        """Casts this storage to complex float type"""
+        return self._to(torch.cfloat)
+
+    @classmethod
+    def from_file(cls, filename, shared, size):
+        if cls == TypedStorage:
+            raise RuntimeError('from_file can only be called on derived classes')
+        byte_storage = eval(cls.__module__).ByteStorage.from_file(
+            filename,
+            shared,
+            # TODO: instantiation just for the purpose of getting element size
+            # is bad
+            size * cls().element_size())
+        storage = cls(wrap_storage=byte_storage)
+        return storage
+
+    @classmethod
+    def _expired(cls, *args, **kwargs):
+        return eval(cls.__module__).ByteStorage._expired(*args, **kwargs)
+
+    def is_pinned(self):
+        return self._storage.is_pinned()
+
+    def _write_file(self, *args, **kwargs):
+        return self._storage._write_file(*args, **kwargs)
+
+    def _set_from_file(self, *args, **kwargs):
+        return self._storage._set_from_file(*args, **kwargs)
+
+    def _set_cdata(self, *args, **kwargs):
+        return self._storage._set_cdata(*args, **kwargs)
+
+    def _share_cuda_(self, *args, **kwargs):
+        return self._storage._share_cuda_(*args, **kwargs)
 
 
 def _get_dtype_from_pickle_storage_type(pickle_storage_type: str):

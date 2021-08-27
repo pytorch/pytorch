@@ -411,7 +411,7 @@ def _legacy_save(obj, f, pickle_module, pickle_protocol) -> None:
             if isinstance(obj, torch.storage.TypedStorage):
                 # TODO: Once we decide to break serialization FC, this case
                 # can be deleted
-                storage = obj.storage
+                storage = obj._storage
                 storage_type_str = obj.pickle_storage_type()
                 storage_type = getattr(torch, storage_type_str)
                 dtype = obj.dtype
@@ -518,7 +518,7 @@ def _save(obj, zip_file, pickle_module, pickle_protocol):
             if isinstance(obj, torch.storage.TypedStorage):
                 # TODO: Once we decide to break serialization FC, this case
                 # can be deleted
-                storage = obj.storage
+                storage = obj._storage
                 storage_type_str = obj.pickle_storage_type()
                 storage_type = getattr(torch, storage_type_str)
                 storage_numel = obj.size()
@@ -781,7 +781,7 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
                     # TODO: Once we decide to break serialization FC, we can
                     # stop wrapping with TypedStorage
                     deserialized_objects[target_cdata] = torch.storage.TypedStorage(
-                        wrap_storage=root.storage[offset_bytes:offset_bytes + numel * element_size],
+                        wrap_storage=root._storage[offset_bytes:offset_bytes + numel * element_size],
                         dtype=root.dtype)
 
             tar.extract('tensors', path=tmpdir)
@@ -798,7 +798,7 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
                     stride = struct.unpack(f'<{ndim}q', f.read(8 * ndim))
                     storage_offset, = struct.unpack('<q', f.read(8))
                     tensor = torch.tensor([], dtype=storage.dtype).set_(
-                        storage.storage, storage_offset, numel, stride)
+                        storage._storage, storage_offset, numel, stride)
                     deserialized_objects[key] = tensor
 
             pickle_file = tar.extractfile('pickle')
@@ -844,7 +844,7 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
                     # TODO: Once we decide to break serialization FC, we can
                     # stop wrapping with TypedStorage
                     deserialized_objects[view_key] = torch.storage.TypedStorage(
-                        wrap_storage=typed_storage.storage[offset_bytes:offset_bytes + view_size_bytes],
+                        wrap_storage=typed_storage._storage[offset_bytes:offset_bytes + view_size_bytes],
                         dtype=dtype)
                 res = deserialized_objects[view_key]
 
@@ -894,7 +894,7 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
     for key in deserialized_storage_keys:
         assert key in deserialized_objects
         typed_storage = deserialized_objects[key]
-        typed_storage.storage._set_from_file(
+        typed_storage._storage._set_from_file(
             f, offset, f_should_read_directly,
             torch._utils._element_size(typed_storage.dtype))
         if offset is not None:

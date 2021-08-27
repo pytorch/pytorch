@@ -600,11 +600,11 @@ class TestPackageScript(PackageTestCase):
         importer = PackageImporter(buffer_1)
         loaded_mod_1 = importer.load_pickle("res", "mod1.pkl")
 
-        self.assertTrue(
+        self.assertEqual(
             loaded_mod_1.tensor.storage()._cdata,
             loaded_mod_1.sub_mod_0.tensor.storage()._cdata,
         )
-        self.assertTrue(
+        self.assertEqual(
             loaded_mod_1.tensor.storage()._cdata,
             loaded_mod_1.sub_mod_1.tensor.storage()._cdata,
         )
