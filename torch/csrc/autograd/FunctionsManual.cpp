@@ -3430,8 +3430,7 @@ bool any_variable_defined(const variable_list& variables) {
   return false;
 }
 
-// C++14 does not support templated functions yet,
-// so we wrap them into a struct.
+// C++14 does not support templated functions, so we wrap them into a struct.
 template<bool in_place>
 struct HouseholderReflectorEvaluator {
   // computes (I - t v v^H) K
@@ -3465,6 +3464,44 @@ struct HouseholderReflectorEvaluator {
   }
 };
 
+// Derivations for the householder_product.backward method.
+//
+// Given a sequence of vectors v_1, ..., v_n and a sequence of scalars tau_1, ..., tau_k,
+// the torch.linalg.householder_product computes the firt n columns of the following product:
+// Q = (I - tau_1 v_1 v_1^H) ... (I - tau_k v_k v_k^H).
+// Let H_i := I - tau_i v_i v_i^H;
+//     H_i(sigma) := I - sigma v_i v_i^H, so Q = H_1 ... H_k;
+//     H_i_minus = H_1 ... H_{i - 1}, with H_1_minus := I;
+//     H_i_plus = H_{i + 1} ... H_k with H_k_plus := I;
+//
+// Forward AD:
+// dQ = sum_{i = 1}^k H_i_minus (-dtau_i v_i v_i^H - tau_i dv_i v_i^H - tau_i v_i dv_i^H) H_i_plus.
+//
+// Backward AD:
+// Tr(Q_grad^H dQ) = sum_{i = 1}^k Tr(H_i_plus Q_grad^H H_i_minus (-dtau_i v_i v_i^H - tau_i dv_i v_i^H - tau_i v_i dv_i^H)).
+// Let K_i := H_i_plus Q_grad^H H_i_minus, then the gradients are
+// v_i_grad = (-tau_i v_i^H K_i)^H - tau_i K_i v_i,
+// tau_i_grad = Tr(-v_i^H K_i v_i).conj().
+// NOTE: the algorithms ignores that only n columns of Q are observed, so there is no need in
+// recomputing Q to full completion.
+//
+// Note that K_{i + 1} = pinv(H_{i + 1}) K_i H_i, so we can compute v_i_grad, tau_i_grad one by one
+// by just efficiently updating K_i if that is possible. Multiplying with H_i from the right could be
+// done with matrix-vector products, but what about the preudo-inverse pinv(H_{i + 1})?
+// Luckily, under some assumptions, pinv(H_{i + 1}) admits a representation as H_i(sigma_i) for some
+// sigma_i, so the left update is also could be done with matrix-vector and not matrix-matrix products.
+//
+// Let H(tau) := I - tau v v_^H, then if (||v||^2 tau - 1) != 0, with sigma defined as
+// sigma := tau / (||v||^2 tau - 1) we get that
+// H(tau) H(sigma) = H(sigma) H(tau) = I, so H(sigma) is a pseudo-inverse of H(tau).
+// It could be additionally shown that H(sigma) is, in fact, the Moore-Penrose inverse,
+// and hence the unique inverse that satisfies the Moore-Penrose conditions.
+//
+// Therefore, unless (||v_i||^2 tau_i - 1) is zero for some i, we can update K_{i + 1} from K_i by just
+// employing matrix-vector products. If it is zero, the update is still efficient as it could be
+// shown that H_i is its own Moore-Penrose inverse.
+// NOTE: the condition ||v_i||^2 tau_i - 1 == 0 is NEVER satisfied if v_i and tau_i are the results
+// of the GEQRF routine.
 std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, const Tensor& result, const Tensor& input_, const Tensor& tau) {
   if (!grad.defined() || !input_.numel() || !tau.numel()) {
     return std::tuple<Tensor, Tensor>(Tensor(), Tensor());
