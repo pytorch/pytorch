@@ -3,7 +3,6 @@
 #include <ATen/cuda/CUDABlas.h>
 #include <ATen/native/Resize.h>
 #include <c10/util/MaybeOwned.h>
-#include <iostream>
 
 namespace at { namespace native {
 
@@ -78,7 +77,7 @@ c10::MaybeOwned<Tensor> prepare_batch_matrix_for_cublas(const Tensor& tensor, bo
     // gemm call requires leading dimension and stride parameters to be non-zero
     bool is_stride_non_zero = tensor.strides()[1] != 0 && tensor.strides()[2] != 0;
     if (tensor.is_contiguous() && is_stride_non_zero) {
-      tensor_ = resolve_conj_if_indicated(tensor, !transpose_tensor);
+      tensor_ = resolve_conj_if_indicated(tensor, transpose_result);
     } else {
       tensor_ = c10::MaybeOwned<Tensor>::owned(tensor.clone(at::MemoryFormat::Contiguous));
     }
