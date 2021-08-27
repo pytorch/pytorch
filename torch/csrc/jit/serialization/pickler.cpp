@@ -354,30 +354,33 @@ void Pickler::pushTensor(const IValue& ivalue) {
 }
 
 void Pickler::pushLiteralSparseTensor(const at::Tensor& tensor) {
-  TORCH_INTERNAL_ASSERT(tensor.is_sparse());
-  // The arguments to this function are:
-  // size, requires_grad, pinned memory, data_type, device,
-  // indices, values, backward_hooks
-  pushGlobal("torch._utils", "_rebuild_sparse_coo_tensor");
-  // size
+  pushGlobal("torch._utils", "_rebuild_sparse_tensor");
   push<PickleOpCode>(PickleOpCode::MARK);
-  push<PickleOpCode>(PickleOpCode::MARK);
-  for (auto size : tensor.sizes()) {
-    pushInt(size);
+  // layout
+  auto layout = static_cast<int>(tensor.layout());
+  pushInt(layout);
+  switch (layout) {
+    case static_cast<int>(c10::Layout::Sparse):
+      // size
+      push<PickleOpCode>(PickleOpCode::MARK);
+      for (auto size : tensor.sizes()) {
+        pushInt(size);
+      }
+      push<PickleOpCode>(PickleOpCode::TUPLE);
+      // requires grad
+      pushIValue(tensor.requires_grad());
+      // indices
+      pushTensor(tensor._indices());
+      // values
+      pushTensor(tensor._values());
+      break;
+    default:
+      TORCH_CHECK(
+          false,
+          "Unsupported sparse tensor layout type in serialization ",
+          static_cast<c10::Layout>(layout));
+      break;
   }
-  push<PickleOpCode>(PickleOpCode::TUPLE);
-  // requires_grad
-  pushIValue(tensor.requires_grad());
-  // pinned memory
-  pushBool(tensor.options().pinned_memory());
-  // data type
-  pushInt(static_cast<uint16_t>(tensor.scalar_type()));
-  // device
-  pushString(tensor.device().str());
-  // indices
-  pushTensor(tensor._indices());
-  // values
-  pushTensor(tensor._values());
   // backward_hooks
   pushGlobal("collections", "OrderedDict");
   push<PickleOpCode>(PickleOpCode::EMPTY_TUPLE);
@@ -398,7 +401,7 @@ void Pickler::pushLiteralTensor(const IValue& ivalue) {
   // format can be found in `torch/serialization.py`.
   auto& tensor = ivalue.toTensor();
 
-  if (tensor.is_sparse()) {
+  if (tensor.is_sparse() || tensor.is_sparse_csr()) {
     pushLiteralSparseTensor(tensor);
     return;
   }

@@ -405,7 +405,9 @@ class DistAutogradTest(CommonDistAutogradTest):
 
     def _test_graph(self, fn, exec_mode, sparse):
         dst_rank = (self.rank + 1) % self.world_size
+
         initialize_pg(self.file_init_method, self.rank, self.world_size)
+
         with dist_autograd.context() as context_id:
             if sparse:
                 t1 = build_sparse_tensor()
@@ -421,9 +423,11 @@ class DistAutogradTest(CommonDistAutogradTest):
                 ).to_here()
             else:
                 raise ValueError("Unrecognized ExecMode {}".format(exec_mode))
+
             rpc.rpc_sync(
                 worker_name(dst_rank), _set_rpc_done, args=(context_id, 1)
             )
+
             # Verify graph for current context id.
             ctx = dist_autograd._current_context()
             self.assertEqual(context_id, ctx._context_id())
@@ -438,6 +442,7 @@ class DistAutogradTest(CommonDistAutogradTest):
                 t2,
                 ret,
             )
+
             # Wait for the prev rank to be done with rpc.
             self._check_rpc_done(1)
             # Verify graph for previous context id.
@@ -448,9 +453,11 @@ class DistAutogradTest(CommonDistAutogradTest):
             # this barrier is needed so one worker does not clean up their
             # autograd context before another worker tries to access it.
             dist.barrier()
+
         # autograd context should be cleaned up by now.
         with self.assertRaises(RuntimeError):
             ctx = dist_autograd._retrieve_context(context_id)
+
         # No autograd context available.
         with self.assertRaises(RuntimeError):
             ctx = dist_autograd._current_context()
@@ -490,7 +497,9 @@ class DistAutogradTest(CommonDistAutogradTest):
     # 3-layer nested calls
     def _test_graph_for_py_nested_call(self, exec_mode, sparse):
         dst_rank = (self.rank + 1) % self.world_size
+
         initialize_pg(self.file_init_method, self.rank, self.world_size)
+
         with dist_autograd.context() as context_id:
             if sparse:
                 t1 = build_sparse_tensor(requires_grad=True)
@@ -513,16 +522,20 @@ class DistAutogradTest(CommonDistAutogradTest):
                 ).to_here()
             else:
                 raise ValueError("Unrecognized ExecMode {}".format(exec_mode))
+
             # Barrier to ensure all RPCs are done.
             dist.barrier()
+
             for rd in [1, 2, 3]:
                 rpc.rpc_sync(
                     worker_name((self.rank + rd) % self.world_size),
                     _set_rpc_done,
                     args=(context_id, rd),
                 )
+
             # Barrier to ensure all set_rpc_done have completed.
             dist.barrier()
+
             # For self.rank, it has 4 graphs to verify
             # One is for current context id when this rank send first rpc call.
             # Second one is for prev context id when this rank make 1st nested
@@ -546,12 +559,15 @@ class DistAutogradTest(CommonDistAutogradTest):
                 t2,
                 ret,
             )
+
             # Verify second graph for 1st nested call.
             ctx = dist_autograd._retrieve_context(ctx_ids[1])
             self._verify_graph_for_nested_rpc_call(ctx)
+
             # Verify third graph for 2nd nested call.
             ctx = dist_autograd._retrieve_context(ctx_ids[2])
             self._verify_graph_for_nested_rpc_call(ctx)
+
             # verify last graph for rpc call execution.
             ctx = dist_autograd._retrieve_context(ctx_ids[3])
             send_functions = ctx._send_functions()
@@ -580,7 +596,9 @@ class DistAutogradTest(CommonDistAutogradTest):
     # Rank0->Rank1->Rank0
     def _test_graph_for_py_nested_call_itself(self, exec_mode, sparse):
         dst_rank = (self.rank + 1) % self.world_size
+
         initialize_pg(self.file_init_method, self.rank, self.world_size)
+
         with dist_autograd.context() as context_id:
             if sparse:
                 t1 = build_sparse_tensor(requires_grad=True)
@@ -614,11 +632,13 @@ class DistAutogradTest(CommonDistAutogradTest):
                 ).to_here()
             else:
                 raise ValueError("Unrecognized ExecMode {}".format(exec_mode))
+
             rpc.rpc_sync(
                 worker_name((self.rank + 1) % self.world_size),
                 _set_rpc_done,
                 args=(context_id, 1),
             )
+
             # For self.rank, it has 2 graphs to verify.
             # One is for current context id when this rank send first rpc
             # call and execute the torch.add() operator.
@@ -638,6 +658,7 @@ class DistAutogradTest(CommonDistAutogradTest):
                 ret,
             )
             self._verify_graph_for_rpc_call_exec(list(send_functions.values())[1])
+
             # Verify two pairs of send and recv functions for nested
             # call
             self._check_rpc_done(1)
@@ -683,14 +704,17 @@ class DistAutogradTest(CommonDistAutogradTest):
                 ).to_here()
             else:
                 raise ValueError("Unrecognized ExecMode {}".format(exec_mode))
+
             rpc.rpc_sync(
                 worker_name(dst_rank), _set_rpc_done, args=(context_id, 1)
             )
+
             ctx = dist_autograd._current_context()
             send_functions = ctx._send_functions()
             self.assertEqual(len(send_functions), 0)
             recv_functions = ctx._recv_functions()
             self.assertEqual(len(recv_functions), 0)
+
             # Wait for the prev rank to be done with rpc.
             self._check_rpc_done(1)
             # NB: RRef.to_here() always passes the autograd context to the
@@ -730,10 +754,13 @@ class DistAutogradTest(CommonDistAutogradTest):
                 ).to_here()
             else:
                 raise ValueError("Unrecognized ExecMode {}".format(exec_mode))
+
             dist_autograd.backward(context_id, [ret.sum()])
+
             rpc.rpc_sync(
                 worker_name(dst_rank), _set_rpc_done, args=(context_id, 1)
             )
+
             # Wait for the prev rank to be done with rpc.
             self._check_rpc_done(1)
             grads = dist_autograd.get_gradients(ctx_ids[1])
@@ -773,7 +800,9 @@ class DistAutogradTest(CommonDistAutogradTest):
                 ).to_here()
             else:
                 raise ValueError("Unrecognized ExecMode {}".format(exec_mode))
+
             self.assertEqual(torch.stack(tensors), ret)
+
             # Verify appropriate tensors have been attached the autograd graph.
             next_funcs = list(
                 dist_autograd._current_context()._send_functions().values()
@@ -784,6 +813,7 @@ class DistAutogradTest(CommonDistAutogradTest):
                     "torch::autograd::AccumulateGrad", next_funcs[i][0].name()
                 )
                 self.assertEqual(tensors[i], next_funcs[i][0].variable)
+
             # Verify that the worker id has been recorded in the context
             ctx = dist_autograd._current_context()
             worker_ids = ctx._known_worker_ids()
@@ -971,6 +1001,7 @@ class DistAutogradTest(CommonDistAutogradTest):
             dist_autograd.backward(context_id, [loss], retain_graph=True)
             self.assertIsNone(t1.grad)
             self.assertIsNone(t2.grad)
+
             # Now populate .grad with local autograd engine and
             # verify dist autograd doesn't mess with it.
             loss_local = torch.add(t1, t2)
@@ -981,6 +1012,7 @@ class DistAutogradTest(CommonDistAutogradTest):
             loss_local.backward()
             self.assertIsNotNone(t1.grad)
             self.assertIsNotNone(t2.grad)
+
             t1_grad_before = t1.grad
             t2_grad_before = t2.grad
             dist_autograd.backward(context_id, [loss])
@@ -1093,10 +1125,12 @@ class DistAutogradTest(CommonDistAutogradTest):
             else:
                 ret = ret.sum()
             dist_autograd.backward(context_id, [ret])
+
             # verify grads on caller
             grads = dist_autograd.get_gradients(context_id)
             self.assertIn(t2, grads)
             self.assertEqual(grads[t2], t2.grad)
+
             # verify grads on rref owner
             self.assertTrue(
                 rpc.rpc_sync(
@@ -1208,11 +1242,13 @@ class DistAutogradTest(CommonDistAutogradTest):
             torch.sparse.sum(local_ret).backward()
         else:
             local_ret.sum().backward()
+
         # create rref on self
         rref_t1 = rpc.remote(
             worker_name(self.rank),
             create_ref_fn,
             args=())
+
         # kick off forward and backward pass on three other workers (trainers)
         rank_diffs = [1, 2, 3]
         futures = []
@@ -1224,9 +1260,11 @@ class DistAutogradTest(CommonDistAutogradTest):
                     args=(rref_t1, t2, worker_name(self.rank), rank_diff, sparse),
                 )
             )
+
         # check if the trainers have done with their backward pass
         for rank_diff in rank_diffs:
             self._check_rpc_done(rank_diff)
+
         # trainers are done and holding the context for verification
         accumulate_grad_func = None
         for rank_diff in rank_diffs:
@@ -1237,8 +1275,10 @@ class DistAutogradTest(CommonDistAutogradTest):
             local_t1 = rref_t1.to_here()
             self.assertIn(local_t1, grads)
             self.assertEqual(grads[local_t1], t1.grad)
+
         # unblock trainers
         _set_rpc_done(None, 0)
+
         # wait until all trainers are done
         torch.futures.wait_all(futures)
 
@@ -1767,6 +1807,7 @@ class DistAutogradTest(CommonDistAutogradTest):
         else:
             loss = loss.sum()
         torch.autograd.backward([loss])
+
         # Now run distributed autograd.
         with dist_autograd.context() as context_id:
             loss = rpc.rpc_sync(
