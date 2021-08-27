@@ -37,6 +37,7 @@ class TORCH_API IRPrinter : public IRVisitor {
   AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_PRINT_VISIT);
 #undef IMM_PRINT_VISIT
   void visit(CastPtr v) override;
+  void visit(BitCastPtr v) override;
   void visit(VarPtr v) override;
   void visit(RampPtr v) override;
   void visit(LoadPtr v) override;
@@ -83,6 +84,8 @@ class TORCH_API IRPrinter : public IRVisitor {
   };
 
  protected:
+  std::string to_string(CompareSelectOperation op);
+
   UniqueNameManager* name_manager() {
     return &name_manager_;
   }

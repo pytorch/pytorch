@@ -116,10 +116,9 @@ bool Function::append_operator(
             out_args.size(),
             ", which is more then the number of specified arguments: ",
             num_specified_args.value());
-        for (size_t i = start_index; i < args.size(); ++i) {
-          auto default_val = args[i].default_value();
+        for (size_t i = start_index; i < (args.size() - out_args.size()); ++i) {
           TORCH_CHECK(
-              default_val.has_value(),
+              args[i].default_value().has_value(),
               "Error happened at preparing for default values for the argument. The ",
               i,
               "th argument ",
