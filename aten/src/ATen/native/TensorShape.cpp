@@ -1209,9 +1209,9 @@ Tensor index_select_sparse(const Tensor& self, int64_t dim, const Tensor& index)
 
   if (dim < sparse_dim) {
 
-    auto cpu_dim_indices = indices[dim].to(c10::kCPU);
+    auto cpu_dim_indices = indices[dim].to(c10::kCPU).contiguous();
     int64_t* cpu_dim_indices_ptr = cpu_dim_indices.data_ptr<int64_t>();
-    auto cpu_index = index.to(c10::kCPU);
+    auto cpu_index = index.to(c10::kCPU).contiguous();
     int64_t* cpu_index_ptr = cpu_index.data_ptr<int64_t>();
     std::vector<int64_t> zindices;
     std::vector<int64_t> iindices;
