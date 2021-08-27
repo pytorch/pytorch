@@ -540,12 +540,10 @@ For more information, check out:
 Module Initialization
 ---------------------
 
-By default, module parameters and floating-point buffers are initialized during module instantiation as 32-bit
-floating point values on the CPU. Each module type has its own technique for initializing parameters based on
-what has performed well historically. For certain use cases, it may be desired to initialize with a different
-dtype, device (e.g. GPU), or initialization technique. All modules provided by :mod:`torch.nn` support directly
-instantiating modules with a specified device or dtype, as well as skipping parameter initialization to avoid
-unnecessary computation when a custom initialization scheme is desired.
+By default, parameters and floating-point buffers for modules provided by :mod:`torch.nn` are initialized during
+module instantiation as 32-bit floating point values on the CPU using an initialization scheme determined to
+perform well historically for the module type. For certain use cases, it may be desired to initialize with a different
+dtype, device (e.g. GPU), or initialization technique.
 
 Examples:
 
@@ -569,6 +567,18 @@ for the module:
    m = nn.BatchNorm2d(3, dtype=torch.half)
    print(m.running_mean)
    : tensor([0., 0., 0.], dtype=torch.float16)
+
+While module writers can use any device or dtype to initialize parameters in their custom modules, good practice is
+to use ``dtype=torch.float`` and ``device='cpu'`` by default as well. Optionally, you can provide full flexibility
+in these areas for your custom module by conforming to the convention demonstrated above that all
+:mod:`torch.nn` modules follow:
+
+* Provide a ``device`` constructor kwarg that applies to any parameters / buffers registered by the module.
+* Provide a ``dtype`` constructor kwarg that applies to any parameters / floating-point buffers registered by
+  the module.
+* Only use initialization functions (i.e. functions from :mod:`torch.nn.init`) on parameters and buffers within the
+  module's constructor. Note that this is only required to use :func:`~torch.nn.utils.skip_init`; see
+  `here <https://pytorch.org/tutorials/prototype/skip_param_init.html#updating-modules-to-support-skipping-initialization>`_ for an explanation.
 
 For more information, check out:
 
