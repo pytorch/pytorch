@@ -250,7 +250,6 @@ struct TORCH_API ConstantString final : c10::intrusive_ptr_target {
 
 struct Future;
 
-// XXX: must add test coverage!
 struct TORCH_API TupleElements {
  private:
   size_t inlineSize_;
@@ -371,10 +370,9 @@ struct TORCH_API TupleElements {
 
   void setContents(std::vector<IValue>&& contents) {
     if (inlineSize_) {
-      for (const auto ii : c10::irange(inlineSize_)) {
-        elementsInline_[ii].~IValue();
-      }
+      destroyInline();
       new (&elementsVector_) std::vector<IValue>(std::move(contents));
+      inlineSize_ = 0;
     } else {
       elementsVector_ = std::move(contents);
     }
