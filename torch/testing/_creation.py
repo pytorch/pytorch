@@ -3,7 +3,7 @@ This module contains tensor creation utilities.
 """
 
 import torch
-from typing import Optional, Sequence, Tuple, Union, cast
+from typing import Optional, Tuple, Union, cast
 import math
 
 __all__ = [
@@ -11,7 +11,7 @@ __all__ = [
 ]
 
 def make_tensor(
-    shape: Sequence[int],
+    shape: Tuple[int, ...],
     device: Union[str, torch.device],
     dtype: torch.dtype,
     *,
@@ -24,7 +24,7 @@ def make_tensor(
     r"""Creates a tensor with the given :attr:`shape`, :attr:`device`, and :attr:`dtype`, and filled with
     values uniformly drawn from ``[low, high)``.
 
-    If :attr:`low` or :attr:`high` are specified and are outside the range of the datatype's representable
+    If :attr:`low` or :attr:`high` are specified and are outside the range of the :attr:`dtype`'s representable
     finite values then they are clamped to the lowest or highest representable finite value, respectively.
     If ``None``, then the following table describes the default values for :attr:`low` and :attr:`high`,
     which depend on :attr:`dtype`.
@@ -109,7 +109,7 @@ def make_tensor(
         result = torch.randint(0, 2, shape, device=device, dtype=dtype)
     elif dtype is torch.uint8:
         ranges = (torch.iinfo(dtype).min, torch.iinfo(dtype).max)
-        low, high = cast(Tuple[int, int]), _modify_low_high(low, high, ranges[0], ranges[1], 0, 10, dtype))
+        low, high = cast(Tuple[int, int], _modify_low_high(low, high, ranges[0], ranges[1], 0, 10, dtype))
         result = torch.randint(low, high, shape, device=device, dtype=dtype)
     elif dtype in _integral_types:
         ranges = (torch.iinfo(dtype).min, torch.iinfo(dtype).max)
