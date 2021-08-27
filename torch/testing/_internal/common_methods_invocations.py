@@ -9176,6 +9176,9 @@ op_db: List[OpInfo] = [
                 torch.float16: tol(atol=1e-03, rtol=1e-02),
             }), 'TestReductions', 'test_ref_small_input'),
             DecorateInfo(toleranceOverride({
+                torch.float32: tol(atol=1e-03, rtol=1e-03),
+            }), 'TestReductions', 'test_ref_large_input_64bit_indexing'),
+            DecorateInfo(toleranceOverride({
                 torch.float16: tol(atol=1e-05, rtol=1e-02),
             }), 'TestReductions', 'test_ref_duplicate_values'),
         ),
@@ -9206,6 +9209,9 @@ op_db: List[OpInfo] = [
             DecorateInfo(toleranceOverride({
                 torch.float16: tol(atol=1e-03, rtol=1e-02),
             }), 'TestReductions', 'test_ref_small_input'),
+            DecorateInfo(toleranceOverride({
+                torch.float32: tol(atol=1e-03, rtol=1e-03),
+            }), 'TestReductions', 'test_ref_large_input_64bit_indexing'),
             DecorateInfo(toleranceOverride({
                 torch.float16: tol(atol=1e-05, rtol=1e-02),
             }), 'TestReductions', 'test_ref_duplicate_values'),
