@@ -816,6 +816,8 @@ struct TORCH_API DictType : public Type {
     return false;
   }
 
+  bool isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const;
+
  private:
   DictType(TypePtr key, TypePtr value)
       : Type(TypeKind::DictType),
