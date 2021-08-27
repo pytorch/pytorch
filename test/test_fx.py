@@ -3189,7 +3189,6 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
         the saved schema strings and check if the change is truly backward-
         incompatible.
         """
-        # TODO: support properties. Blocked by https://github.com/python/mypy/issues/1362
         signature_strs = []
 
         for obj in _BACK_COMPAT_OBJECTS:
@@ -3198,7 +3197,16 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
 
         signature_strs.sort()
 
-        self.assertExpected('\n'.join(signature_strs), 'fx_backcompat_function_signatures')
+        try:
+            self.assertExpected('\n'.join(signature_strs), 'fx_backcompat_function_signatures')
+        except AssertionError as e:
+            msg = f"{e}\n****** ERROR ******\nAn FX function that has been marked " \
+                  f"as backwards-compatible has experienced a signature change. See the " \
+                  f"above exception context for more information. If this change was " \
+                  f"unintended, please revert it. If it was intended, check with the FX " \
+                  f"team to ensure that the proper deprecation protocols have been followed " \
+                  f"and subsequently --accept the change."
+            raise AssertionError(msg)
 
     def test_class_member_back_compat(self):
         """
@@ -3215,8 +3223,16 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
 
         class_method_strs.sort()
 
-        self.assertExpected('\n'.join(class_method_strs), 'fx_backcompat_class_members')
-
+        try:
+            self.assertExpected('\n'.join(class_method_strs), 'fx_backcompat_class_members')
+        except AssertionError as e:
+            msg = f"{e}\n****** ERROR ******\nAn FX class that has been marked " \
+                  f"as backwards-compatible has experienced change in its public members. See the " \
+                  f"above exception context for more information. If this change was " \
+                  f"unintended, please revert it. If it was intended, check with the FX " \
+                  f"team to ensure that the proper deprecation protocols have been followed " \
+                  f"and subsequently --accept the change."
+            raise AssertionError(msg)
 
     def test_public_api_surface(self):
         mod = torch.fx
@@ -3250,10 +3266,10 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
         non_back_compat_strs.sort()
 
         if len(non_back_compat_strs) != 0:
-            raise RuntimeError(f"Public FX API(s) {non_back_compat_strs} introduced but not given a "
-                               f"backwards-compatibility classification! Please decorate these "
-                               f"API(s) with `@torch.fx._compatibility.compatibility` to specify "
-                               f"BC guarantees.")
+            raise AssertionError(f"Public FX API(s) {non_back_compat_strs} introduced but not given a "
+                                 f"backwards-compatibility classification! Please decorate these "
+                                 f"API(s) with `@torch.fx._compatibility.compatibility` to specify "
+                                 f"BC guarantees.")
 
 class TestFunctionalTracing(JitTestCase):
     IGNORE_FUNCS = ("has_torch_function", "has_torch_function_unary",
