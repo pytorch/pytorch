@@ -601,11 +601,12 @@ REGISTER_OPERATOR_FUNCTOR(aten::logit, aten_logit, [](Node* n) -> SROperator {
   };
 });
 
+// TODO(T98923825): Uncomment this once the bug in this gets fixed.
+/*
 REGISTER_OPERATOR_FUNCTOR(aten::clone, aten_clone, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
-          "aten::clone(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor"))) {
-    LogAndDumpSchema(n);
-    return nullptr;
+          "aten::clone(Tensor self, *, MemoryFormat? memory_format=None) ->
+Tensor"))) { LogAndDumpSchema(n); return nullptr;
   }
   return [](ProcessedNode* p_node) {
     const auto& src = p_node->Input(0).toTensor();
@@ -631,6 +632,8 @@ REGISTER_OPERATOR_FUNCTOR(aten::clone, aten_clone, [](Node* n) -> SROperator {
     at::native::copy_(out_t, src, false);
   };
 });
+*/
+
 REGISTER_OPERATOR_FUNCTOR(
     quantized::embedding_bag_byte_rowwise_offsets,
     quantized_embedding_bag_byte_rowwise_offsets,
