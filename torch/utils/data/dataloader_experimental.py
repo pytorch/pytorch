@@ -3,7 +3,7 @@ import functools
 
 import torch.utils.data.backward_compatibility
 from torch.utils.data import DataLoader, IterDataPipe
-from torch.utils.data.datapipes.iter import IterableAsDataPipe
+from torch.utils.data.datapipes.iter import IterableWrapper
 
 class DataLoader2:
     def __new__(cls,
@@ -69,7 +69,7 @@ class DataLoader2:
             else:
                 if collate_fn is None:
                     collate_fn = torch.utils.data._utils.collate.default_collate
-                datapipe = IterableAsDataPipe(data_loader).batch(
+                datapipe = IterableWrapper(data_loader).batch(
                     batch_size, drop_last=drop_last).map(collate_fn)
                 return datapipe
 
