@@ -286,6 +286,7 @@ jobs:
       SHARD_NUMBER: ${{ matrix.shard }}
       NUM_TEST_SHARDS: ${{ matrix.num_shards }}
       PYTORCH_IGNORE_DISABLED_ISSUES: ${{ needs.generate-test-matrix.outputs.ignore-disabled-issues }}
+      CONTINUE_THROUGH_ERROR: ${{ github.repository_owner == 'pytorch' && (github.event_name == 'push' || github.event_name == 'schedule') }}
     steps:
       - name: Log in to ECR
         run: |
@@ -372,6 +373,7 @@ jobs:
             -e TEST_CONFIG \
             -e NUM_TEST_SHARDS \
             -e PYTORCH_IGNORE_DISABLED_ISSUES \
+            -e CONTINUE_THROUGH_ERROR \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
             -e http_proxy="!{{squid_proxy}}" -e https_proxy="!{{squid_proxy}}" -e no_proxy="!{{squid_no_proxy}}" \
