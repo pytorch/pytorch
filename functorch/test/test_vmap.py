@@ -2933,7 +2933,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('argmin'),
         xfail('unfold'),
         xfail('svd', device_type='cuda'),
-        xfail('svd', device_type='cuda'),
+        xfail('linalg.svd', device_type='cuda'),
     })
     def test_vmap_exhaustive(self, device, dtype, op):
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
