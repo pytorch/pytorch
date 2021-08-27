@@ -533,9 +533,10 @@ void miopen_convolution_add_bias_(CheckedFrom c, const TensorArg& output, const 
   // Make sure that NC11 strides follow formula
   bias_contig.resize_(bias_contig.sizes(), memory_format );
 
+  // TODO: Workaround since MIOpen does not support NHWC bias
   output->add_( bias_contig );
 
-  /*  TODO: MIOpen does not support NHWC bias
+  /* MIOpen does not support NHWC bias; Activate once support is added.
   bdesc.set( bias_contig );
   odesc.set(*output);
 
@@ -1244,7 +1245,7 @@ Tensor miopen_convolution_backward_bias(
 {
   TensorArg grad_output{ grad_output_t, "grad_output", 1 };
 
-  // TODO: MIOpen does not support NHWC bias
+  // TODO: Workaround since MIOpen does not support NHWC bias
   std::vector<int64_t> discard_dims;
   for( int i = 0; i < grad_output_t.dim(); i++ ) {
       if(i != output_channels_dim ) {
@@ -1261,7 +1262,7 @@ Tensor miopen_convolution_backward_bias(
       return outputBias;
   }
 
-/*
+/* MIOpen does not support NHWC bias. Activate once support is added.
   auto grad_bias_t = at::empty( { grad_output->size(output_channels_dim) }, grad_output->options());
 
   TensorArg grad_bias{ grad_bias_t, "result", 0 };
