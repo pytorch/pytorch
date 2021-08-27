@@ -14,7 +14,7 @@ def f(x):
 inp = torch.randn(100)
 grad_pt = grad(f)
 grad_fx = make_fx(grad_pt)(inp)
-grad_nnc = nnc_jit(grad_pt)
+grad_nnc = nnc_jit(grad_pt, skip_specialization=True)
 loopnest = make_nnc(grad_pt)(inp)
 print(loopnest)
 
