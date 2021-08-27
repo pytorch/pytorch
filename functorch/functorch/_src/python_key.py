@@ -170,10 +170,13 @@ def add_to_cache(f, key, compiled_f):
         nnc_jit_cache[f][key] = compiled_f
 
 def nnc_jit(f, static_argnums=None):
-    cached = None
+def nnc_jit(f, static_argnums=None, skip_specialization = False):
+    local_cache = None
     @functools.wraps(f)
     def compiled(*args):
-        nonlocal static_argnums
+        nonlocal local_cache, static_argnums
+        if local_cache is not None and skip_specialization:
+            return local_cache(*args)
         key = construct_specialization_key(f, args)
         status, compiled_f = retrieve_from_cache(f, key)
         if status is RetrievalStatus.Success:
@@ -198,6 +201,7 @@ def nnc_jit(f, static_argnums=None):
                 args[idx] = torch.empty(())
         args = tuple(args)
         compiled_f = nnc_compile(fx_model, args)
+        local_cache = compiled_f
         add_to_cache(f, key, compiled_f)
         return compiled_f(*args)
     return compiled
