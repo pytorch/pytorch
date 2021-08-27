@@ -293,7 +293,8 @@ Module codegen_backend_module(
         // backend_execute.
         TORCH_INTERNAL_ASSERT(default_value.has_value());
         std::stringstream def_ss, fwd_ss;
-        def_ss << name << "=";
+        // Annotate type of the arg
+        def_ss << name << ": " << arg.type()->annotation_str(nullptr) << "=";
         fwd_ss << name << "=" << name;
         default_value->repr(
             def_ss, [](std::ostream&, const IValue&) -> bool { return false; });
@@ -302,7 +303,10 @@ Module codegen_backend_module(
       } else {
         // If this is not a kwarg, it should be emitted as is in the
         // signature and the call to backend_execute.
-        def_inputs.emplace_back(name);
+        std::stringstream def_ss;
+        // Annotate type of the arg
+        def_ss << name << ": " << arg.type()->annotation_str(nullptr);
+        def_inputs.emplace_back(def_ss.str());
         fwd_inputs.emplace_back(name);
       }
     }

@@ -62,7 +62,7 @@ Here, ``intermediate`` remains live even while ``h`` is executing,
 because its scope extrudes past the end of the loop.  To free it
 earlier, you should ``del intermediate`` when you are done with it.
 
-**Don't run RNNs on sequences that are too large.**
+**Avoid running RNNs on sequences that are too large.**
 The amount of memory required to backpropagate through an RNN scales
 linearly with the length of the RNN input; thus, you will run out of memory
 if you try to feed an RNN a sequence that is too long.
@@ -81,6 +81,9 @@ scales quadratically with the number of features.  It is very easy
 to `blow through your memory <https://github.com/pytorch/pytorch/issues/958>`_
 this way (and remember that you will need at least twice the size of the
 weights, since you also need to store the gradients.)
+
+**Consider checkpointing.**
+You can trade-off memory for compute by using `checkpoint <https://pytorch.org/docs/stable/checkpoint.html>`_.
 
 My GPU memory isn't freed properly
 ----------------------------------

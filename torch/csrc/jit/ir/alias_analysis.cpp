@@ -624,6 +624,7 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::Closure:
     case prim::CreateObject:
     case prim::tolist:
+    case prim::Uninitialized:
       return analyzeCreator(node);
     case prim::TupleConstruct:
     case prim::DictConstruct:
@@ -678,9 +679,6 @@ void AliasDb::analyzeImpl(Node* node) {
       // for now we assume the worst
       // NB: update safeToChangeAliasingRelationship if changed
       return analyzeConservative(node);
-    case prim::Uninitialized:
-      giveFreshAlias(node->output());
-      return;
     case prim::Print:
     case prim::isinstance:
       // These ops do nothing
@@ -1092,7 +1090,7 @@ void AliasDb::analyzeBroadcastingChunk(Node* node) {
   auto inputs = node->inputs();
   auto outputs = node->outputs();
   auto nchunks = node->i(attr::chunks);
-  for (size_t index = 0; index < inputs.size(); ++index) {
+  for (const auto index : c10::irange(inputs.size())) {
     // Each inputs[i] is aliased by exactly `nchunks` distinct output tensors:
     // inputs[i] produces chunks outputs[i * nchunks + k] for k in [0..nchunks)
     auto output_begin = outputs.begin() + index * nchunks;

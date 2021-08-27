@@ -1,0 +1,81 @@
+/* Copy buttons */
+button.copybtn {
+    position: absolute;
+    display: flex;
+    top: .3em;
+    right: .5em;
+    width: 1.7em;
+    height: 1.7em;
+    opacity: 1;
+    transition: opacity 0.3s, border .3s, background-color .3s;
+    user-select: none;
+    padding: 0;
+    border: none;
+    outline: none;
+    border-radius: 0.4em;
+    border: #e1e1e1 1px solid;
+    background-color: rgb(245, 245, 245);
+}
+
+button.copybtn.success {
+    border-color: #22863a;
+}
+
+button.copybtn img {
+    width: 100%;
+    padding: .2em;
+}
+
+div.highlight  {
+    position: relative;
+}
+
+.highlight button.copybtn {
+    opacity: 1;
+}
+
+.highlight button.copybtn:hover {
+    background-color: rgb(235, 235, 235);
+}
+
+.highlight button.copybtn:active {
+    background-color: rgb(187, 187, 187);
+}
+
+/**
+ * A minimal CSS-only tooltip copied from:
+ *   https://codepen.io/mildrenben/pen/rVBrpK
+ *
+ * To use, write HTML like the following:
+ *
+ * <p class="o-tooltip--left" data-tooltip="Hey">Short</p>
+ */
+ .o-tooltip--left {
+  position: relative;
+ }
+
+ .o-tooltip--left:after {
+    opacity: 1;
+    visibility: visible;
+    position: absolute;
+    content: attr(data-tooltip);
+    padding: .2em;
+    font-size: .8em;
+    left: -.2em;
+    background: grey;
+    color: white;
+    white-space: nowrap;
+    z-index: 2;
+    border-radius: 2px;
+    transform: translateX(-102%) translateY(0);
+    transition: opacity 0.2s cubic-bezier(0.64, 0.09, 0.08, 1), transform 0.2s cubic-bezier(0.64, 0.09, 0.08, 1);
+}
+
+.o-tooltip--left:hover:after {
+    display: block;
+    opacity: 1;
+    visibility: visible;
+    transform: translateX(-100%) translateY(0);
+    transition: opacity 0.2s cubic-bezier(0.64, 0.09, 0.08, 1), transform 0.2s cubic-bezier(0.64, 0.09, 0.08, 1);
+    transition-delay: .5s;
+}

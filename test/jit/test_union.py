@@ -5,6 +5,7 @@ import sys
 import torch
 from torch.testing import FileCheck
 from enum import Enum
+from textwrap import dedent
 from typing import Dict, List, Optional, Tuple, Union
 
 # Make the helper files in test/ importable
@@ -656,104 +657,269 @@ class TestUnion(JitTestCase):
         self.checkScript(fn, (1,))
         self.checkScript(fn, (8,))
 
-    def test_union_with_listliteral(self):
-        def fn():
-            x: Union[List[torch.Tensor], int] = [torch.tensor(3)]
-            if torch.jit.isinstance(x, List[torch.Tensor]):
-                x.append(torch.tensor(3))
-            return x
+    def _assert_passes(self, template: str, ann: str, lhs: str):
+        code = template.format(ann=ann, lhs=lhs)
+        self.checkScript(code, (), name="fn")
 
-        scripted = torch.jit.script(fn)
-        print(scripted.graph)
-        print("\n\n")
-        print(scripted.code)
-        scripted()
-        buffer1 = io.BytesIO()
-        torch.jit.save(scripted, buffer1)
-        buffer_copy = buffer1.getvalue()
-        buffer2 = io.BytesIO(buffer_copy)
-        loaded = torch.jit.load(buffer2)
-        print(loaded.graph)
-        loaded()
-        #self.checkScript(fn, ())
+    def _assert_raises(self, template: str, ann: str, lhs: str, msg: str):
+        code = template.format(ann=ann, lhs=lhs)
+        self.checkScriptRaisesRegex(code, (), Exception, msg, name="fn", test_python=False)
 
-    def test_union_with_list_comprehension(self):
-        def fn():
-            l: List[Tensor] = [torch.tensor([2, 3])]
-            x: Union[List[torch.Tensor], int] = [t for t in l]
-            if torch.jit.isinstance(x, List[torch.Tensor]):
-                x.append(torch.tensor(3))
-            return x
+    def test_union_with_list_assignment(self):
+        template = dedent('''
+            def fn():
+                x: {ann} = {lhs}
+                if torch.jit.isinstance(x, List[torch.Tensor]):
+                    x.append(torch.tensor(3))
+                return x
+        ''')
 
-        with torch._jit_internal._disable_emit_hooks():
-            self.checkScript(fn, ())
+        lhs = {"list_literal_empty" : "[]",
 
-    def test_union_with_empty_listliteral_can_infer_list_type(self):
-        def fn():
-            x: Union[List[torch.Tensor], int] = []
-            if torch.jit.isinstance(x, List[torch.Tensor]):
-                x.append(torch.tensor(3))
-            return x
+               "list_literal_of_tensor" : "[torch.arange(3), torch.arange(5)]",
 
-        self.checkScript(fn, ())
+               "list_literal_of_str" : "[\"foo\", \"bar\", \"baz\"]",
 
-    def test_union_with_empty_listliteral_throws_when_type_cannot_be_inferred(self):
-        def fn():
-            x: Union[List[torch.Tensor], List[str], int] = []
-            if torch.jit.isinstance(x, List[torch.Tensor]):
-                x.append(torch.tensor(3))
-            return x
+               "list_literal_of_mixed" : "[torch.arange(5), 1]",
 
-        with self.assertRaisesRegex(RuntimeError, "there are multiple"
-                                    " possible List type candidates "
-                                    "in the Union annotation"):
-            torch.jit.script(fn)
+               "list_comprehension_of_tensor" :
+               "[torch.add(x, 1) for x in [torch.arange(3), torch.arange(5)]]",
 
-    def test_union_with_dictliteral(self):
-        def fn():
-            x: Union[Dict[str, torch.Tensor], int] = {"foo": torch.tensor(3)}
-            if torch.jit.isinstance(x, Dict[str, torch.Tensor]):
-                x["bar"] = torch.tensor(3)
-            return x
+               "list_comprehension_of_str" :
+               "[x + \"!\" for x in [\"foo\", \"bar\", \"baz\"]]",
 
-        self.checkScript(fn, ())
+               "list_comprehension_of_mixed" :
+               "[torch.add(1, x) for x in [torch.arange(5), 1]]"}
 
-    def test_union_with_dict_comprehension(self):
-        def fn():
-            l1: List[str] = ["foo", "bar", "baz"]
-            l2: List[torch.Tensor] = [torch.tensor(3)] * 3
-            x: Union[Dict[str, torch.Tensor], int] = {k: v for k, v in zip(l1, l2)}
-            if torch.jit.isinstance(x, Dict[str, torch.Tensor]):
-                x["bar"] = torch.tensor(3)
-            return x
+        """
+        Union[List[str], List[torch.Tensor]]
+        """
+        self._assert_raises(template,
+                            "Union[List[str], List[torch.Tensor]]",
+                            lhs["list_literal_empty"],
+                            "there are multiple possible List type "
+                            "candidates in the Union annotation")
 
-        with torch._jit_internal._disable_emit_hooks():
-            self.checkScript(fn, ())
+        self._assert_passes(template,
+                            "Union[List[str], List[torch.Tensor]]",
+                            lhs["list_literal_of_tensor"])
 
-    def test_union_with_dict_keyword(self):
-        def fn():
-            t: torch.Tensor = torch.tensor(3)
-            x: Union[Dict[str, int], float] = dict(foo=t)
-            if torch.jit.isinstance(x, Dict[str, torch.Tensor]):
-                x["bar"] = torch.tensor(3)
-            return x
+        self._assert_passes(template,
+                            "Union[List[str], List[torch.Tensor]]",
+                            lhs["list_literal_of_str"])
 
-    def test_union_with_empty_dictliteral_can_infer_dict_type(self):
-        def fn():
-            x: Union[Dict[str, torch.Tensor], int] = {}
-            if torch.jit.isinstance(x, Dict[str, torch.Tensor]):
-                x["foo"] = torch.tensor(3)
-            return x
+        self._assert_raises(template,
+                            "Union[List[str], List[torch.Tensor]]",
+                            lhs["list_literal_of_mixed"],
+                            "none of those list types can hold the "
+                            "types of the given list elements")
 
-        self.checkScript(fn, ())
+        self._assert_passes(template,
+                            "Union[List[str], List[torch.Tensor]]",
+                            lhs["list_comprehension_of_tensor"])
 
-    def test_union_with_empty_dictliteral_throws_when_type_cannot_be_inferred(self):
-        def fn():
-            x: Union[Dict[str, torch.Tensor], Dict[int, torch.Tensor], int] = {}
-            if torch.jit.isinstance(x, Dict[str, torch.Tensor]):
-                x["foo"] = torch.tensor(3)
-            return x
+        self._assert_passes(template,
+                            "Union[List[str], List[torch.Tensor]]",
+                            lhs["list_comprehension_of_str"])
 
-        with self.assertRaisesRegex(RuntimeError, "there are multiple "
-                                    "possible Dict type candidates"):
-            torch.jit.script(fn)
+        # TODO: Support mixed list comprehensions
+        self._assert_raises(template,
+                            "Union[List[str], List[torch.Tensor]]",
+                            lhs["list_comprehension_of_mixed"],
+                            "Arguments for call are not valid")
+
+        """
+        Union[int, torch.Tensor]
+        """
+        self._assert_raises(template,
+                            "Union[int, torch.Tensor]",
+                            lhs["list_literal_empty"],
+                            "Expected an Union type annotation with an "
+                            "inner List type")
+
+        self._assert_raises(template, "Union[int, torch.Tensor]",
+                            lhs["list_literal_of_tensor"],
+                            "Expected an Union type annotation with an "
+                            "inner List type")
+
+        self._assert_raises(template, "Union[int, torch.Tensor]",
+                            lhs["list_comprehension_of_tensor"],
+                            "Expected an Union type annotation with an "
+                            "inner List type")
+
+        """
+        Union[List[torch.Tensor], int]
+        """
+        self._assert_passes(template,
+                            "Union[List[torch.Tensor], int]",
+                            lhs["list_literal_empty"])
+
+        self._assert_passes(template,
+                            "Union[List[torch.Tensor], int]",
+                            lhs["list_literal_of_tensor"])
+
+        self._assert_raises(template, "Union[List[torch.Tensor], int]",
+                            lhs["list_literal_of_str"],
+                            "List type annotation `List\[Tensor\]` did "
+                            "not match the types of the given list "
+                            "elements")
+
+        self._assert_raises(template, "Union[List[torch.Tensor], int]",
+                            lhs["list_literal_of_mixed"],
+                            "List type annotation `List\[Tensor\]` did "
+                            "not match the types of the given list "
+                            "elements")
+
+        self._assert_passes(template,
+                            "Union[List[torch.Tensor], int]",
+                            lhs["list_comprehension_of_tensor"])
+
+        self._assert_raises(template,
+                            "Union[List[torch.Tensor], int]",
+                            lhs["list_comprehension_of_str"],
+                            "List type annotation `List\[Tensor\]` did "
+                            "not match the types of the given list "
+                            "elements")
+
+        # TODO: Support mixed list comprehensions
+        self._assert_raises(template,
+                            "Union[List[torch.Tensor], int]",
+                            lhs["list_comprehension_of_mixed"],
+                            "Arguments for call are not valid")
+
+    def test_union_with_dict_assignment(self):
+        template = dedent('''
+            def fn():
+                x: {ann} = {lhs}
+                if torch.jit.isinstance(x, Dict[str, torch.Tensor]):
+                    x["foo"] = torch.tensor(3)
+                return x
+        ''')
+
+        lhs = {"dict_literal_empty" : "{}",
+
+               "dict_literal_of_str_tensor" :
+               "{\"foo\" : torch.arange(3), \"bar\" : torch.arange(5)}",
+
+               "dict_literal_of_str_int" :
+               "{\"foo\" : 1, \"bar\" : 2}",
+
+               "dict_literal_of_mixed" :
+               "{\"foo\" : torch.arange(3), \"bar\" : 2}",
+
+               "dict_comprehension_of_str_tensor" :
+               "{x : torch.add(y, 1) for x, y in \
+                    zip([\"foo\", \"bar\"], [torch.arange(3), torch.arange(5)])}",
+
+               "dict_comprehension_of_str_int" :
+               "{x : torch.add(y, 1) for x, y in \
+                    zip([\"foo\", \"bar\"], [1, 2]}",
+
+               "dict_comprehension_of_mixed" :
+               "{x : torch.add(y, 1) for x, y in \
+                    zip([\"foo\", \"bar\"], [torch.arange(3), 2])}",
+
+                "dict_keyword" :
+                "dict(foo=torch.arange(3), baz=torch.arange(5))"}
+
+        """
+        Union[Dict[str, torch.Tensor], Dict[str, int]]
+        """
+        self._assert_raises(template,
+                            "Union[List[str], List[torch.Tensor]]",
+                            lhs["dict_literal_empty"],
+                            "Expected an Union type annotation with an "
+                            "inner Dict type")
+
+        self._assert_passes(template,
+                            "Union[Dict[str, torch.Tensor], Dict[str, int]]",
+                            lhs["dict_literal_of_str_tensor"])
+
+        self._assert_passes(template,
+                            "Union[Dict[str, torch.Tensor], Dict[str, int]]",
+                            lhs["dict_literal_of_str_int"])
+
+        self._assert_raises(template, "Union[Dict[str, torch.Tensor], Dict[str, int]]",
+                            lhs["dict_literal_of_mixed"],
+                            "none of those types can hold the types "
+                            "of the given dict elements")
+
+        # TODO: String frontend does not support tuple unpacking
+        # https://github.com/pytorch/pytorch/issues/64096
+        #self._assert_passes(template, "Union[Dict[str, torch.Tensor], Dict[str, int]]",
+        #              lhs["dict_comprehension_of_str_tensor"])
+
+        #self._assert_passes(template, "Union[Dict[str, torch.Tensor], Dict[str, int]]",
+        #              lhs["dict_comprehension_of_str_int"])
+
+        #self._assert_raises(template, "Union[Dict[str, torch.Tensor], Dict[str, int]]",
+        #              lhs["dict_comprehension_of_mixed"],
+        #              "foobar")
+
+        self._assert_passes(template,
+                            "Union[Dict[str, torch.Tensor], Dict[str, int]]",
+                            lhs["dict_keyword"])
+
+        """
+        Union[int, torch.Tensor]
+        """
+        self._assert_raises(template,
+                            "Union[int, torch.Tensor]",
+                            lhs["dict_literal_empty"],
+                            "Expected an Union type annotation with "
+                            "an inner Dict type")
+
+        self._assert_raises(template,
+                            "Union[int, torch.Tensor]",
+                            lhs["dict_literal_of_str_tensor"],
+                            "Expected an Union type annotation with "
+                            "an inner Dict type")
+
+        # See above--string frontend does not support tuple unpacking
+        #self._assert_raises(template, "Union[int, torch.Tensor]",
+        #              lhs["dict_comprehension_of_tensor"],
+        #              "foobar")
+
+        """
+        Union[Dict[str, torch.Tensor], int]
+        """
+        self._assert_passes(template,
+                            "Union[Dict[str, torch.Tensor], int]",
+                            lhs["dict_literal_empty"])
+
+        self._assert_passes(template,
+                            "Union[Dict[str, torch.Tensor], int]",
+                            lhs["dict_literal_of_str_tensor"])
+
+        self._assert_raises(template,
+                            "Union[Dict[str, torch.Tensor], int]",
+                            lhs["dict_literal_of_str_int"],
+                            "Type hint for dict was Dict\[str, Tensor\]"
+                            ", but the value at index 0 has type int, "
+                            "which is not a valid subtype of Tensor")
+
+        self._assert_raises(template,
+                            "Union[Dict[str, torch.Tensor], int]",
+                            lhs["dict_literal_of_mixed"],
+                            "Type hint for dict was Dict\[str, Tensor\]"
+                            ", but the value at index 1 has type int, "
+                            "which is not a valid subtype of Tensor")
+
+        # See above--string frontend does not support tuple unpacking
+        #self._assert_passes(template,
+        #                    "Union[Dict[str, torch.Tensor], int]",
+        #                    lhs["dict_comprehension_of_str_tensor"])
+
+        #self._assert_raises(template,
+        #                    "Union[Dict[str, torch.Tensor], int]",
+        #                    lhs["dict_comprehension_of_str_int"],
+        #                    "foobar")
+
+        #self._assert_raises(template,
+        #                    "Union[Dict[str, torch.Tensor], int]",
+        #                    lhs["dict_comprehension_of_mixed"],
+        #                    "foobar")
+
+        self._assert_passes(template,
+                            "Union[Dict[str, torch.Tensor], int]",
+                            lhs["dict_keyword"])
