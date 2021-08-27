@@ -3678,7 +3678,7 @@ torch.cuda.synchronize()
     @unittest.skipIf((not TEST_CUDA) or
                      TEST_WITH_ROCM or
                      int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
-    def test_graph_make_graphed_callables_modules(self):
+    def test_graph_make_graphed_callables(self):
         torch.manual_seed(5)
         torch.cuda.manual_seed(5)
 
@@ -3695,10 +3695,7 @@ torch.cuda.synchronize()
         model_graphed = models[0]
         model_control = models[1]
 
-        with torch.no_grad():
-            for p, pc in zip(model_graphed.parameters(),
-                             model_control.parameters()):
-                pc.copy_(p)
+        model_graphed.load_state_dict(model_control.state_dict())
 
         opt_graphed = torch.optim.SGD(model_graphed.parameters(), lr=0.1)
         opt_control = torch.optim.SGD(model_control.parameters(), lr=0.1)

@@ -570,16 +570,20 @@ and two convenience wrappers,
 :class:`torch.cuda.make_graphed_callables`.
 
 :class:`torch.cuda.graph` is a simple, versatile context manager that
-captures whatever CUDA work you run in its context. :class:`~torch.cuda.graph`
-requires that you manually manage the graph's input and output memory. MAKE THIS CLEARER WITH COMMENTS
-Warming up the workload to be captured by running a few eager iterations
-before capture is also required. Warmup must occur on a side stream.
+captures CUDA work in its context.
+Before capture, warm up the workload to be captured by running
+a few eager iterations. Warmup must occur on a side stream.
+Because the graph reads from and writes to the same memory addresses in every
+replay, you must maintain long-lived references to tensors that hold
+input and output data during capture.
+To run the graph on new input data, copy new data to the capture's input tensor(s),
+replay the graph, then read the new output from the capture's output tensor(s).
 Example::
 
     g = torch.cuda.CUDAGraph()
 
     # Placeholder input used for capture
-    static_input = torch.zeros((10,), device="cuda")
+    static_input = torch.empty((5,), device="cuda")
 
     # Warmup before capture
     s = torch.cuda.Stream()
@@ -594,16 +598,16 @@ Example::
     with torch.cuda.graph(g):
         static_output = static_input * 2
 
-    # Fills the graph's input memory with data to compute on
-    static_input.copy_(torch.full((10,), 3, device="cuda"))
+    # Fills the graph's input memory with new data to compute on
+    static_input.copy_(torch.full((5,), 3, device="cuda"))
     g.replay()
     # static_output holds the results
-    print(static_output)  # full of 3 * 2 = 10
+    print(static_output)  # full of 3 * 2 = 6
 
-    # Fills the graph's input memory with other data to compute on
-    static_input.copy_(torch.full((10,), 5, device="cuda"))
+    # Fills the graph's input memory with more data to compute on
+    static_input.copy_(torch.full((5,), 4, device="cuda"))
     g.replay()
-    print(static_output)  # full of 10 * 2 = 20
+    print(static_output)  # full of 4 * 2 = 8
 
 See
 :ref:`Whole-network capture<whole-network-capture>`,

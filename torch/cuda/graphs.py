@@ -116,7 +116,16 @@ def make_graphed_callables(callables, sample_args):
 
     .. warning::
         After you pass a :class:`torch.nn.Module` through :func:`~make_graphed_callables`,
-        you may not add or remove any of that Module's parameters.
+        you may not add or remove any of that Module's parameters or buffers.
+
+    .. warning::
+        :class:`torch.nn.Module`\s passed to :func:`~torch.cuda.make_graphed_callables` must not have module hooks
+        registered on them at the time they are passed. However, registering hooks on modules *after* passing them through
+        :func:`~torch.cuda.make_graphed_callables` is allowed.
+
+    .. warning::
+        When running a graphed callable, you must pass its arguments in the same order and format
+        they appeared in that callable's ``sample_args``.
     """
     just_one_callable = False
 
@@ -138,6 +147,8 @@ def make_graphed_callables(callables, sample_args):
     mempool = graph_pool_handle()
 
     # Warmup
+    # Hopefully prevents cudnn benchmarking and other lazy-initialization cuda work
+    # from ending up in any captures.
     torch.cuda.synchronize()
     with torch.cuda.stream(torch.cuda.Stream()):
         for func, args, static_input_surface in zip(callables,

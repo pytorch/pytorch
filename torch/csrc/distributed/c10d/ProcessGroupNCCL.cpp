@@ -11,6 +11,7 @@
 #include <THC/THC.h>
 
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/CUDAGraphsUtils.cuh>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/irange.h>
 #include <c10/util/Logging.h>
@@ -1078,6 +1079,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
     PostProcess post,
     OpType opType,
     const char* profilingTitle) {
+  at::cuda::errorIfCapturingNonCapturableNCCL();
 
   // Bump collective counter
   if (sequenceNum_) {
