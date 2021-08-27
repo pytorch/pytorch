@@ -280,46 +280,23 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
                 )),
             })
 
-        # duplicate the logic and hack away...
+        # generate native function impls that build IR nodes
         for dispatch_key in [backend_dispatch_key]:  # , autograd_dispatch_key
-            fm.write_with_template(f'Register{dispatch_key}Codegen.cpp', 'RegisterDispatchKeyCodegen.cpp', lambda: {
-                'extra_cuda_headers': '',
-                'legacy_th_headers': '',
-                'external_backend_headers': f'#include "{output_dir}/{backend_key}NativeFunctions.h"',
-                'namespaced_headers': '',
-                'DispatchKey': dispatch_key,
-                'dispatch_namespace': dispatch_key.lower(),
-                'dispatch_namespaced_definitions': list(concatMap(
-                    dest.RegisterDispatchKey(
-                        backend_indices[CODEGEN_MAGIC_NUMBER],
-                        Target.NAMESPACED_DEFINITION,
-                        selector,
-                        rocm=False,
-                        cpp_namespace='codegen_' + cpp_namespace,
-                        class_method_name=f'{backend_dispatch_key}NativeFunctions'),
-                    grouped_native_functions
-                )),
-                'dispatch_anonymous_definitions': list(concatMap(
-                    dest.RegisterDispatchKey(
-                        backend_indices[CODEGEN_MAGIC_NUMBER],
-                        Target.ANONYMOUS_DEFINITION,
-                        selector,
-                        rocm=False,
-                        cpp_namespace='codegen_' + cpp_namespace,
-                        class_method_name=f'{backend_dispatch_key}NativeFunctions'),
-                    grouped_native_functions
-                )),
-                'dispatch_registrations': list(concatMap(
-                    dest.RegisterDispatchKey(
-                        backend_indices[CODEGEN_MAGIC_NUMBER],
-                        Target.REGISTRATION,
-                        selector,
-                        rocm=False,
-                        cpp_namespace='codegen_' + cpp_namespace,
-                        class_method_name=f'{backend_dispatch_key}NativeFunctions'),
+            fm.write_with_template(f'{dispatch_key}NativeFunctions.cpp', 'NativeFunctions.cpp', lambda: {
+                'generated_comment' : '', 
+                'includes': [f'#include "{path}"' for path in [
+                    "lazy_tensor_core/csrc/tensor.h",
+                    "lazy_tensor_core/csrc/aten_ltc_bridge.h",
+                ]],
+                'native_functions_include': f'#include "{output_dir}/{backend_key}NativeFunctions.h"',
+                'backend_namespace': 'torch_lazy_tensors',  # this is wrong
+                'native_function_definitions': 
+                list(concatMap(
+                    lambda f: dest.compute_lazy_native_function_definition(f, backend_indices[CODEGEN_MAGIC_NUMBER]),
                     grouped_native_functions
                 )),
             })
+        
         # and generate IR nodes
         for dispatch_key in [backend_dispatch_key]:  # , autograd_dispatch_key
             fm.write_with_template(f'{dispatch_key}LazyIr.h', 'LazyIr.h', lambda: {

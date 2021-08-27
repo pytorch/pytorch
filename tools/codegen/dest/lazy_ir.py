@@ -3,7 +3,7 @@ import itertools
 from typing_extensions import Literal
 from dataclasses import dataclass
 import textwrap
-
+from tools.codegen import local
 from tools.codegen.context import method_with_native_function, native_function_manager
 from tools.codegen.utils import Target, mapMaybe
 from tools.codegen.model import (BaseType, OptionalType, DispatchKey, NativeFunction,
