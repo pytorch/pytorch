@@ -23,13 +23,13 @@
 // - Move `constexpr struct in_place_t {} in_place{}` to `c10/util/in_place.h`
 // so that it can also be used in `c10/util/variant.h`.
 // - Remove special cases for pre-c++14 compilers to make code simpler.
-// - Replace constexpr_forward and constexpr_move with std::forward and std::move
+// - Replace constexpr_forward and constexpr_move with std::forward and
+// std::move
 // - Use _t variants of type_traits functions for improved readability
 
 #pragma once
 
 #include <c10/macros/Macros.h>
-#include <c10/util/ArrayRef.h>
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/in_place.h>
 
@@ -123,16 +123,23 @@ constexpr struct trivial_init_t {
 
 // 20.5.7, Disengaged state indicator
 struct nullopt_t {
-  constexpr explicit nullopt_t(int) {}
+  enum class Construct { Token };
+
+  constexpr explicit nullopt_t(Construct) {}
 };
-constexpr nullopt_t nullopt{0};
+
+constexpr nullopt_t nullopt{nullopt_t::Construct::Token};
 
 // 20.5.8, class bad_optional_access
-class bad_optional_access : public std::logic_error {
+class bad_optional_access : public std::exception {
  public:
-  explicit bad_optional_access(const std::string& what_arg)
-      : logic_error{what_arg} {}
-  explicit bad_optional_access(const char* what_arg) : logic_error{what_arg} {}
+  bad_optional_access() = default;
+
+  virtual ~bad_optional_access() = default;
+
+  const char* what() const noexcept override {
+    return "bad optional access";
+  }
 };
 
 template <class T>
@@ -398,124 +405,34 @@ struct trivially_copyable_optimization_optional_base {
   }
 };
 
-// HACK: Optimization for ArrayRef<T>. We take advantage of an unused
-// bit pattern in ArrayRef (inspired by Arthur O'Dwyer's
-// tombstone_traits -- see https://youtu.be/MWBfmmg8-Yo?t=2466) to
-// keep the size of c10::optional::ArrayRef<T> down to 16 bytes, which
-// allows it to be passed to functions in registers instead of getting
-// passed in memory per item 5c of the classification algorithm in
-// section 3.2.3 of the System V ABI document
-// (https://www.uclibc.org/docs/psABI-x86_64.pdf).
-template <class ArrayRefT>
-struct arrayref_optional_base {
-  using T = typename ArrayRefT::value_type;
-  using size_type = typename ArrayRefT::size_type;
-
-  union storage {
-    struct raw {
-      // ArrayRef has the invariant that if Data is nullptr then
-      // Length must be zero, so this is an unused bit pattern.
-      const T* p{nullptr};
-      size_type sz{1};
-    } uninitialized_;
-
-    ArrayRefT value_;
-
-    constexpr storage() noexcept : uninitialized_() {}
-
-    explicit constexpr storage(const ArrayRefT& v) : value_(v) {}
-
-    template <typename T>
-    explicit constexpr storage(const std::initializer_list<T>& v) : value_(v) {}
-
-    template <class... Args>
-    explicit constexpr storage(Args&&... args)
-        : value_(std::forward<Args>(args)...) {}
-
-    constexpr void setUninitialized() noexcept {
-      uninitialized_.p = nullptr;
-      uninitialized_.sz = 1;
-    }
-  } storage_;
-
-  constexpr arrayref_optional_base() noexcept = default;
-
-  explicit constexpr arrayref_optional_base(const ArrayRefT& v) : storage_(v) {}
-
-  template <class... Args>
-  explicit constexpr arrayref_optional_base(in_place_t, Args&&... args)
-      : storage_(std::forward<Args>(args)...) {}
-
-  template <typename T>
-  explicit constexpr arrayref_optional_base(
-      in_place_t,
-      const std::initializer_list<T>& v)
-      : storage_(v) {}
-
-  constexpr bool initialized() const noexcept {
-    typename storage::raw repr;
-    // Cast to void* to suppress GCC's -Wclass-memaccess.
-    memcpy(
-        static_cast<void*>(&repr),
-        static_cast<const void*>(&storage_),
-        sizeof(storage_));
-    return repr.p != nullptr || repr.sz == 0;
-  }
-
-  void setInitialized(bool init) noexcept {
-    if (!init) {
-      storage_.setUninitialized();
-    } else {
-      assert(initialized());
-    }
-  }
-};
-
-namespace detail_ {
-
-template <typename T>
-struct is_arrayref : std::false_type {};
-
-template <typename T>
-struct is_arrayref<c10::ArrayRef<T>> : std::true_type {};
-
-} // namespace detail_
-
 // CUDA 9.2 and below fail while trying to compile default move constructor
 // see https://github.com/pytorch/csprng/issues/84
 #if (!defined(__CUDA_ARCH__) || !defined(CUDA_VERSION) || CUDA_VERSION > 9200)
 template <class T>
 using OptionalBase = std::conditional_t<
-    detail_::is_arrayref<T>::value,
-    arrayref_optional_base<T>,
-    std::conditional_t<
-        std::is_trivially_destructible<T>::value &&
-            C10_IS_TRIVIALLY_COPYABLE(T) &&
-            // Avoid using is_trivially_copy_{constructible,assignable}
-            // because old GCC versions don't support them. Also,
-            // is_trivially_copyable seems not to do what I expect, so check
-            // trivially_copyable_optimization_optional_base directly.
-            std::is_copy_constructible<
-                trivially_copyable_optimization_optional_base<T>>::value &&
-            std::is_copy_assignable<
-                trivially_copyable_optimization_optional_base<T>>::value,
-        trivially_copyable_optimization_optional_base<T>,
-        std::conditional_t<
-            std::is_trivially_destructible<T>::value, // if possible
-            constexpr_optional_base<std::remove_const_t<T>>, // use base with
-                                                             // trivial
-                                                             // destructor
-            optional_base<std::remove_const_t<T>>>>>;
-#else
-template <class T>
-using OptionalBase = std::conditional_t<
-    detail_::is_arrayref<T>::value,
-    arrayref_optional_base<T>,
+    std::is_trivially_destructible<T>::value && C10_IS_TRIVIALLY_COPYABLE(T) &&
+        // Avoid using is_trivially_copy_{constructible,assignable}
+        // because old GCC versions don't support them. Also,
+        // is_trivially_copyable seems not to do what I expect, so check
+        // trivially_copyable_optimization_optional_base directly.
+        std::is_copy_constructible<
+            trivially_copyable_optimization_optional_base<T>>::value &&
+        std::is_copy_assignable<
+            trivially_copyable_optimization_optional_base<T>>::value,
+    trivially_copyable_optimization_optional_base<T>,
     std::conditional_t<
         std::is_trivially_destructible<T>::value, // if possible
         constexpr_optional_base<std::remove_const_t<T>>, // use base with
-                                                         // trivial destructor
+                                                         // trivial
+                                                         // destructor
         optional_base<std::remove_const_t<T>>>>;
+#else
+template <class T>
+using OptionalBase = std::conditional_t<
+    std::is_trivially_destructible<T>::value, // if possible
+    constexpr_optional_base<std::remove_const_t<T>>, // use base with
+                                                     // trivial destructor
+    optional_base<std::remove_const_t<T>>>;
 #endif
 
 template <class T>
@@ -525,38 +442,32 @@ class optional : private OptionalBase<T> {
 #if (!defined(__CUDA_ARCH__) || !defined(CUDA_VERSION) || CUDA_VERSION > 9200)
   template <class U> // re-declaration for nvcc on Windows.
   using OptionalBase = std::conditional_t<
-      detail_::is_arrayref<U>::value,
-      arrayref_optional_base<U>,
+      std::is_trivially_destructible<U>::value &&
+          C10_IS_TRIVIALLY_COPYABLE(U) &&
+          // Avoid using is_trivially_copy_{constructible,assignable}
+          // because old GCC versions don't support them. Also,
+          // is_trivially_copyable seems not to do what I expect, so
+          // check trivially_copyable_optimization_optional_base
+          // directly.
+          std::is_copy_constructible<
+              trivially_copyable_optimization_optional_base<U>>::value &&
+          std::is_copy_assignable<
+              trivially_copyable_optimization_optional_base<U>>::value,
+      trivially_copyable_optimization_optional_base<U>,
       std::conditional_t<
-          std::is_trivially_destructible<U>::value &&
-              C10_IS_TRIVIALLY_COPYABLE(U) &&
-              // Avoid using is_trivially_copy_{constructible,assignable}
-              // because old GCC versions don't support them. Also,
-              // is_trivially_copyable seems not to do what I expect, so
-              // check trivially_copyable_optimization_optional_base
-              // directly.
-              std::is_copy_constructible<
-                  trivially_copyable_optimization_optional_base<U>>::value &&
-              std::is_copy_assignable<
-                  trivially_copyable_optimization_optional_base<U>>::value,
-          trivially_copyable_optimization_optional_base<U>,
-          std::conditional_t<
-              std::is_trivially_destructible<U>::value, // if possible
-              constexpr_optional_base<std::remove_const_t<U>>, // use base
-                                                               // with
-                                                               // trivial
-                                                               // destructor
-              optional_base<std::remove_const_t<U>>>>>;
+          std::is_trivially_destructible<U>::value, // if possible
+          constexpr_optional_base<std::remove_const_t<U>>, // use base
+                                                           // with
+                                                           // trivial
+                                                           // destructor
+          optional_base<std::remove_const_t<U>>>>;
 #else
   template <class U>
   using OptionalBase = std::conditional_t<
-      detail_::is_arrayref<U>::value,
-      arrayref_optional_base<U>,
-      std::conditional_t<
-          std::is_trivially_destructible<U>::value, // if possible
-          constexpr_optional_base<std::remove_const_t<U>>, // use base with
-                                                           // trivial destructor
-          optional_base<std::remove_const_t<U>>>>;
+      std::is_trivially_destructible<U>::value, // if possible
+      constexpr_optional_base<std::remove_const_t<U>>, // use base with
+                                                       // trivial destructor
+      optional_base<std::remove_const_t<U>>>;
 #endif
 
   static_assert(!std::is_same<std::decay_t<T>, nullopt_t>::value, "bad T");
@@ -764,18 +675,18 @@ class optional : private OptionalBase<T> {
   TR2_OPTIONAL_HOST_CONSTEXPR T const& value() const& {
     return initialized()
         ? contained_val()
-        : (throw bad_optional_access("bad optional access"), contained_val());
+        : (throw bad_optional_access(), contained_val());
   }
 
   TR2_OPTIONAL_HOST_CONSTEXPR T& value() & {
     return initialized()
         ? contained_val()
-        : (throw bad_optional_access("bad optional access"), contained_val());
+        : (throw bad_optional_access(), contained_val());
   }
 
   TR2_OPTIONAL_HOST_CONSTEXPR T&& value() && {
     if (!initialized())
-      throw bad_optional_access("bad optional access");
+      throw bad_optional_access();
     return std::move(contained_val());
   }
 
@@ -910,7 +821,7 @@ class optional<T&> {
 
   constexpr T& value() const {
     return ref ? *ref
-               : (throw bad_optional_access("bad optional access"), *ref);
+               : (throw bad_optional_access(), *ref);
   }
 
   explicit constexpr operator bool() const noexcept {
