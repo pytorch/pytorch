@@ -609,6 +609,24 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     }
   }
 
+  template <typename T>
+  std::vector<int64_t> toLongVec(T&& t) {
+    return std::vector<int64_t>{std::begin(t), std::end(t)};
+  }
+
+  std::vector<int64_t> indexVec(const Value& v) {
+    switch (v.dtype().scalar_type()) {
+#define TYPE_CASE(Type, Name) \
+  case ScalarType::Name:      \
+    return toLongVec(v.as_vec<Type>());
+      AT_FORALL_INT_TYPES(TYPE_CASE);
+#undef TYPE_CASE
+      default:
+        throw unsupported_dtype();
+    }
+    return {};
+  }
+
   TORCH_API void visit(LoadPtr v) override {
     auto iter = buffer_mapping_.find(v->buf());
     if (iter == buffer_mapping_.end()) {
@@ -618,7 +636,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
 
     ExprPtr flat_idx = flatten_index(v->buf()->dims(), v->indices());
     flat_idx->accept(this);
-    std::vector<int> index = value().as_vec<int>();
+    auto index = indexVec(value());
     ScalarType v_sdtype = v->dtype().scalar_type();
     switch (v_sdtype) {
 #define TYPE_CASE(Type, Name)                        \
@@ -647,7 +665,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
 
     ExprPtr flat_idx = flatten_index(v->buf()->dims(), v->indices());
     flat_idx->accept(this);
-    std::vector<int> index = value().as_vec<int>();
+    auto index = indexVec(value());
     ScalarType v_sdtype = v->value()->dtype().scalar_type();
 
     switch (v_sdtype) {
