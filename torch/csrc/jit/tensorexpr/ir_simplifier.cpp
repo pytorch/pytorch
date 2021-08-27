@@ -6,6 +6,70 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
+// Creates a new Expr of the given type with the provided lhs and rhs.
+inline ExprPtr newBinaryOpOfType(
+    IRNodeType expr_type,
+    ExprPtr lhs,
+    ExprPtr rhs,
+    bool option) {
+  switch (expr_type) {
+    // NOLINTNEXTLINE(bugprone-branch-clone)
+    case IRNodeType::kAdd:
+      return alloc<Add>(lhs, rhs);
+    case IRNodeType::kSub:
+      return alloc<Sub>(lhs, rhs);
+    case IRNodeType::kMul:
+      return alloc<Mul>(lhs, rhs);
+    case IRNodeType::kDiv:
+      return alloc<Div>(lhs, rhs);
+    case IRNodeType::kMod:
+      return alloc<Mod>(lhs, rhs);
+    case IRNodeType::kMax:
+      return alloc<Max>(lhs, rhs, option);
+    case IRNodeType::kMin:
+      return alloc<Min>(lhs, rhs, option);
+    case IRNodeType::kAnd:
+      return alloc<And>(lhs, rhs);
+    case IRNodeType::kXor:
+      return alloc<Xor>(lhs, rhs);
+    case IRNodeType::kLshift:
+      return alloc<Lshift>(lhs, rhs);
+    case IRNodeType::kRshift:
+      return alloc<Rshift>(lhs, rhs);
+    default:
+      LOG(FATAL) << "unsupported expr_type: " << static_cast<int>(expr_type);
+      return nullptr;
+  }
+}
+
+template <
+    typename Op,
+    typename std::enable_if<std::is_same<
+        decltype(detail::bin_op_deducer(std::declval<Op>())),
+        void>::value>::type* = nullptr>
+static ExprPtr mutateBinaryOp(
+    NodePtr<Op> v,
+    IRMutator* mutator,
+    bool option = false) {
+  ExprPtr lhs = v->lhs();
+  ExprPtr rhs = v->rhs();
+  ExprPtr lhs_new = lhs->accept_mutator(mutator);
+  ExprPtr rhs_new = rhs->accept_mutator(mutator);
+
+  ExprPtr node = v;
+
+  if (lhs != lhs_new || rhs != rhs_new) {
+    node = newBinaryOpOfType(v->expr_type(), lhs_new, rhs_new, option);
+  }
+
+  // Can only fold if both sides are constant.
+  if (!lhs_new->isConstant() || !rhs_new->isConstant()) {
+    return node;
+  }
+
+  return evaluateOp(node);
+}
+
 // Simple recursive GCD.
 template <typename T>
 T gcd(T a, T b) {
@@ -35,8 +99,15 @@ void Term::sort() {
   if (dtype().is_floating_point()) {
     throw std::logic_error("reordering FP ops");
   }
+  std::unordered_map<ExprPtr, std::string> str_repr_cache;
   std::sort(variables_.begin(), variables_.end(), [&](ExprPtr a, ExprPtr b) {
-    return hasher_.hash(a) < hasher_.hash(b);
+    if (!str_repr_cache.count(a)) {
+      str_repr_cache[a] = std::to_string(a);
+    }
+    if (!str_repr_cache.count(b)) {
+      str_repr_cache[b] = std::to_string(b);
+    }
+    return str_repr_cache.at(a) < str_repr_cache.at(b);
   });
 }
 
@@ -52,8 +123,15 @@ void Polynomial::sort() {
   if (dtype().is_floating_point()) {
     throw std::logic_error("reordering FP ops");
   }
+  std::unordered_map<ExprPtr, std::string> str_repr_cache;
   std::sort(variables_.begin(), variables_.end(), [&](ExprPtr a, ExprPtr b) {
-    return hasher_.hash(a) < hasher_.hash(b);
+    if (!str_repr_cache.count(a)) {
+      str_repr_cache[a] = std::to_string(a);
+    }
+    if (!str_repr_cache.count(b)) {
+      str_repr_cache[b] = std::to_string(b);
+    }
+    return str_repr_cache.at(a) < str_repr_cache.at(b);
   });
 }
 
@@ -66,6 +144,18 @@ void MaxTerm::uniquefy() {
         return hasher_.hash(a) == hasher_.hash(b);
       });
   variables_.resize(std::distance(variables_.begin(), it));
+
+  // Once we removed duplicates, sort terms alphabetically for stability.
+  std::unordered_map<ExprPtr, std::string> str_repr_cache;
+  std::sort(variables_.begin(), variables_.end(), [&](ExprPtr a, ExprPtr b) {
+    if (!str_repr_cache.count(a)) {
+      str_repr_cache[a] = std::to_string(a);
+    }
+    if (!str_repr_cache.count(b)) {
+      str_repr_cache[b] = std::to_string(b);
+    }
+    return str_repr_cache.at(a) < str_repr_cache.at(b);
+  });
 }
 
 void MinTerm::uniquefy() {
@@ -77,6 +167,18 @@ void MinTerm::uniquefy() {
         return hasher_.hash(a) == hasher_.hash(b);
       });
   variables_.resize(std::distance(variables_.begin(), it));
+
+  // Once we removed duplicates, sort terms alphabetically for stability.
+  std::unordered_map<ExprPtr, std::string> str_repr_cache;
+  std::sort(variables_.begin(), variables_.end(), [&](ExprPtr a, ExprPtr b) {
+    if (!str_repr_cache.count(a)) {
+      str_repr_cache[a] = std::to_string(a);
+    }
+    if (!str_repr_cache.count(b)) {
+      str_repr_cache[b] = std::to_string(b);
+    }
+    return str_repr_cache.at(a) < str_repr_cache.at(b);
+  });
 }
 
 // Handles optimization cases for Broadcast/Ramp +/- Broadcast/Ramp
@@ -1461,6 +1563,22 @@ ExprPtr PolynomialTransformer::mutate(IfThenElsePtr v) {
   return alloc<IfThenElse>(condition_new, true_value_new, false_value_new);
 }
 
+ExprPtr PolynomialTransformer::mutate(AndPtr v) {
+  return mutateBinaryOp(v, this);
+}
+
+ExprPtr PolynomialTransformer::mutate(XorPtr v) {
+  return mutateBinaryOp(v, this);
+}
+
+ExprPtr PolynomialTransformer::mutate(LshiftPtr v) {
+  return mutateBinaryOp(v, this);
+}
+
+ExprPtr PolynomialTransformer::mutate(RshiftPtr v) {
+  return mutateBinaryOp(v, this);
+}
+
 StmtPtr PolynomialBase::mutate(CondPtr v) {
   ExprPtr cond_old = v->condition();
   StmtPtr true_old = v->true_stmt();
@@ -1866,6 +1984,7 @@ c10::optional<class ModRound*> isModRound(TermPtr e) {
     scalar = getImmediateByType(multiplier->dtype(), 1);
   }
 
+  // TODO: this leaks memory!
   return new ModRound(scalar, denom, divisor, mod_divisor);
 }
 
@@ -2076,8 +2195,20 @@ ExprPtr TermExpander::mutate(PolynomialPtr v) {
   std::vector<TermPtr> addTerms;
   std::vector<TermPtr> subTerms;
 
+  auto vars = v->variables();
+  std::unordered_map<ExprPtr, std::string> str_repr_cache;
+  std::sort(vars.begin(), vars.end(), [&](ExprPtr a, ExprPtr b) {
+    if (!str_repr_cache.count(a)) {
+      str_repr_cache[a] = std::to_string(a);
+    }
+    if (!str_repr_cache.count(b)) {
+      str_repr_cache[b] = std::to_string(b);
+    }
+    return str_repr_cache.at(a) < str_repr_cache.at(b);
+  });
+
   // partition the terms into a list to add and list to subtract.
-  for (auto node : v->variables()) {
+  for (auto node : vars) {
     if (immediateIsNegative(node->scalar())) {
       subTerms.push_back(node);
     } else if (!immediateEquals(node->scalar(), 0)) {
@@ -2820,6 +2951,49 @@ bool exprEquals(ExprPtr A, ExprPtr B) {
   } catch (std::exception& e) {
     return false;
   }
+}
+
+ExprPtr IRSimplifier::simplify(ExprPtr e) {
+  GRAPH_DEBUG("(Simplifier) Original: ", std::to_string(e));
+  SimplifierUnderContext ctxsimplifier;
+  e = e->accept_mutator(&ctxsimplifier);
+
+  PolynomialTransformer simplifier;
+  e = e->accept_mutator(&simplifier);
+
+  // There may be terms left in the IR, expand them.
+  TermExpander expander(&simplifier);
+  e = e->accept_mutator(&expander);
+  // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
+  if (!expander.check_safe()) {
+    throw malformed_input("eliminated null Allocation without free");
+  }
+
+  GRAPH_DEBUG("(Simplifier) Simplified: ", std::to_string(e));
+  return e;
+}
+
+StmtPtr IRSimplifier::simplify(StmtPtr s) {
+  GRAPH_DEBUG("(Simplifier) Original: ", std::to_string(s));
+  SimplifierUnderContext ctxsimplifier;
+  s = s->accept_mutator(&ctxsimplifier);
+
+  PolynomialTransformer simplifier;
+  s = s->accept_mutator(&simplifier);
+  if (s == nullptr) {
+    GRAPH_DEBUG("(Simplifier) Simplified: NULL");
+    return nullptr;
+  }
+
+  // There may be terms left in the IR, expand them.
+  TermExpander expander(&simplifier);
+  s = s->accept_mutator(&expander);
+  if (!expander.check_safe()) {
+    throw malformed_input("eliminated null Allocation without free");
+  }
+
+  GRAPH_DEBUG("(Simplifier) Simplified: ", std::to_string(s));
+  return s;
 }
 
 } // namespace tensorexpr
