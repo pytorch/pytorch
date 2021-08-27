@@ -667,6 +667,7 @@ class MyParameterServer:
     def __init__(self, trainers):
         self.lock = Lock()
         self.trainers = trainers
+        self.iteration = 0
         self.updates = 0
         self.futures = []
         self.total = None
@@ -678,10 +679,14 @@ class MyParameterServer:
 
     @staticmethod
     @rpc.functions.async_execution
-    def average(rref, tensor):
+    def average(rref, riteration, tensor):
         self = rref.local_value()
         fut = torch.futures.Future()
         with self.lock:
+            if riteration > self.iteration:
+                self.iteration = riteration
+                self.updates = 0
+                self.futures.clear()
             self.futures.append(fut)
             if self.total is None:
                 self.total = tensor
@@ -905,6 +910,7 @@ class RpcTest(RpcAgentTestFixture):
 
     def _test_rref_proxy_tensor(self, dst):
         rref = rpc.remote(dst, my_function, args=(torch.ones(2, 2), 1, 3))
+
         expected = torch.ones(2, 2) + 1 + 3
         self.assertEqual(expected.size(), rref.rpc_sync().size())
         self.assertEqual(expected + 1, rref.rpc_async().add(1).wait())
@@ -2640,6 +2646,7 @@ class RpcTest(RpcAgentTestFixture):
         rref_b = rpc.remote(
             worker_name(dst_rank), my_function, args=(x, y, z)
         )
+
         c = rpc.rpc_sync(
             worker_name(dst_rank), my_rref_function, args=(rref_a, rref_b)
         )
@@ -2704,10 +2711,12 @@ class RpcTest(RpcAgentTestFixture):
             f,
             args=(worker_name(dst_rank2),),
         )
+
         # Say C has 2 OwnerRRefs.
         # B has 2 UserRRefs to those 2 OwnerRRefs, respectively.
         # This call is effectively A asking B to share its 2 UserRRefs.
         rrefs = rref_of_rrefs.to_here()
+
         self.assertEqual(len(rrefs), 2)
         self.assertEqual(rrefs[0].to_here(), expected1)
         self.assertEqual(rrefs[1].to_here(), expected2)
@@ -4523,11 +4532,18 @@ class RpcTest(RpcAgentTestFixture):
     def _trainer_func(self, rref, sparse):
         m = MyEmbeddingBagModel(sparse=sparse)
         loss_fn = nn.MSELoss()
-        outputs = m(torch.rand(10, 10).long())
-        loss_fn(outputs, torch.rand(10, 10)).backward()
-        gradient = list(m.parameters())[0].grad
-        fut = rref.rpc_async().average(rref, gradient)
-        return fut.wait()
+        for i in range(10):
+            outputs = m(torch.rand(10, 10).long())
+            loss_fn(outputs, torch.rand(10, 10)).backward()
+            gradient = list(m.parameters())[0].grad
+            fut = rref.rpc_async().average(rref, i, gradient)
+            gradient = fut.wait()
+            if gradient.is_sparse:
+                gradient = gradient.to_dense().double()
+            ps_gradient = rref.rpc_sync().get_gradient(rref)
+            if ps_gradient.is_sparse:
+                ps_gradient = ps_gradient.to_dense().double()
+            self.assertTrue(torch.equal(gradient, ps_gradient))
 
     def _my_parameter_server(self, sparse):
         ps_rref = RRef(MyParameterServer(self.world_size - 1))
@@ -4543,19 +4559,7 @@ class RpcTest(RpcAgentTestFixture):
                     ),
                 )
             )
-        trainer_gradient = None
-        for fut in futures:
-            result = fut.wait()
-            if result.is_sparse:
-                result = result.to_dense().double()
-            if trainer_gradient is None:
-                trainer_gradient = result
-            else:
-                self.assertTrue(torch.equal(trainer_gradient, result))
-        ps_gradient = ps_rref.rpc_sync().get_gradient(ps_rref)
-        if ps_gradient.is_sparse:
-            ps_gradient = ps_gradient.to_dense().double()
-        self.assertTrue(torch.equal(trainer_gradient, ps_gradient))
+        torch.futures.wait_all(futures)
 
     @dist_init
     def test_my_parameter_server(self):
