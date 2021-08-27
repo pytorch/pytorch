@@ -3541,7 +3541,6 @@ std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, cons
 
     // K <- pinv(H_{i + 1}) @ K @ H_i
     if (i < k - 1) {
-      // K <- pinv(H_{i + 1}) @ K @ H_i
       auto v_i_next = input.narrow(-1, i + 1, 1);
       auto s_i_next = sigma.narrow(-1, i + 1, 1);
       K = left_reflect(i + 1, v_i_next, s_i_next, K);
@@ -3549,8 +3548,8 @@ std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, cons
     }
   }
 
-  // forward operates only over the lower-triangular part of the input,
-  // hence the gradient is also lower-triangular.
+  // forward operates only over the lower-triangular part of the input
+  // excluding the main diagonal, hence the gradient is also lower-triangular.
   input_grad.tril_(-1);
 
   return std::make_tuple(input_grad, tau_grad);
