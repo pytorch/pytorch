@@ -238,7 +238,6 @@ bool guardDifferentiableGraph(Node* dnode) {
               t->requiresGrad().value_or(true));
         },
         prim::RequiresGradCheck);
-    setRequiresGradOnDiffGraph(dnode);
     return true;
   } else {
     // we inline the differentiable graph as a fallback
@@ -669,6 +668,8 @@ const ExecutionPlan& ProfilingGraphExecutorImpl::getOptimizedPlanFor(
     // before any other pass that could insert `prim::iprofile_value` node on
     // `aten::_grad_sum_to_size` input.
     InsertProfileNodesForSpecializeAutogradZero(pr_.get());
+    // `InsertProfileNodesForCUDAFuser` inserts profile node for non-tensor
+    // value
     if (RegisterCudaFuseGraph::isRegistered()) {
       torch::jit::fuser::cuda::InsertProfileNodesForCUDAFuser(pr_.get());
     }
