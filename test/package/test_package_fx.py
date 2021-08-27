@@ -36,7 +36,7 @@ class TestPackageFX(PackageTestCase):
         pi = PackageImporter(f)
         loaded_traced = pi.load_pickle("model", "model.pkl")
         input = torch.rand(2, 3)
-        self.assertTrue(torch.allclose(loaded_traced(input), traced(input)))
+        self.assertEqual(loaded_traced(input), traced(input))
 
     def test_package_then_fx(self):
         from package_a.test_module import SimpleTest
@@ -52,7 +52,7 @@ class TestPackageFX(PackageTestCase):
         loaded = pi.load_pickle("model", "model.pkl")
         traced = symbolic_trace(loaded)
         input = torch.rand(2, 3)
-        self.assertTrue(torch.allclose(loaded(input), traced(input)))
+        self.assertEqual(loaded(input), traced(input))
 
     def test_package_fx_package(self):
         from package_a.test_module import SimpleTest
@@ -87,7 +87,7 @@ class TestPackageFX(PackageTestCase):
         loaded2 = pi2.load_pickle("model", "model.pkl")
 
         input = torch.rand(2, 3)
-        self.assertTrue(torch.allclose(loaded(input), loaded2(input)))
+        self.assertEqual(loaded(input), loaded2(input))
 
     def test_package_fx_with_imports(self):
         import package_a.subpackage
@@ -158,7 +158,7 @@ class TestPackageFX(PackageTestCase):
         self.assertEqual(loaded_gm.info, "secret")
 
         input_x = torch.randn(3)
-        self.assertTrue(torch.allclose(loaded_gm(input_x), gm(input_x)))
+        self.assertEqual(loaded_gm(input_x), gm(input_x))
 
 
 if __name__ == "__main__":
