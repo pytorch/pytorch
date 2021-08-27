@@ -313,3 +313,6 @@ pr.diff
 
 # coverage files
 */**/.coverage.*
+
+# Minidumps
+.pytorch_crashes/
