@@ -13,7 +13,7 @@ namespace torch { namespace autograd {
 
 struct PySavedVariableHooks : public SavedVariableHooks {
   PySavedVariableHooks(py::function &pack_hook, py::function &unpack_hook);
-  void call_pack_hook(at::Tensor &tensor) override;
+  void call_pack_hook(const at::Tensor &tensor) override;
   at::Tensor call_unpack_hook() override;
   ~PySavedVariableHooks() override;
 
@@ -27,14 +27,6 @@ struct PyDefaultSavedVariableHooks {
   static void set_hooks(py::function &pack_hook, py::function &unpack_hook);
   static void reset_hooks();
   static std::unique_ptr<SavedVariableHooks> get_hooks();
-
-private:
-  static PyObject* pack_hook_;
-  static PyObject* unpack_hook_;
-
-  // Mutex to ensure that concurrent operations that modify default pack_hook_ and
-  // unpack_hook_ are thread-safe.
-  static std::mutex mutex_;
 };
 
 }}

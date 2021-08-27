@@ -1,3 +1,4 @@
+#include<ATen/native/ReduceOps.h>
 #include<ATen/native/ReduceAllOps.h>
 
 #include <ATen/Dispatch.h>
@@ -163,8 +164,10 @@ inline void reduce_all_impl_vec_two_outputs(
   output2.fill_(result.second);
 }
 
-static void _aminmax_all_kernel_impl(Tensor& min_result, Tensor& max_result,
-    const Tensor& input) {
+static void aminmax_allreduce_kernel(
+    const Tensor& input,
+    Tensor& min_result,
+    Tensor& max_result) {
   if (input.scalar_type() == ScalarType::Bool) {
     TensorIterator iter = TensorIteratorConfig()
       .add_input(input)
@@ -193,7 +196,7 @@ static void _aminmax_all_kernel_impl(Tensor& min_result, Tensor& max_result,
       }
     );
   } else {
-    AT_DISPATCH_ALL_TYPES_AND(kBFloat16, input.scalar_type(), "_aminmax_all_all", [&] {
+    AT_DISPATCH_ALL_TYPES_AND(kBFloat16, input.scalar_type(), "aminmax_cpu", [&] {
       using Vec = Vectorized<vec_scalar_t<scalar_t>>;
       using scalar_t_pair = std::pair<scalar_t, scalar_t>;
       reduce_all_impl_vec_two_outputs<scalar_t>(
@@ -216,6 +219,6 @@ static void _aminmax_all_kernel_impl(Tensor& min_result, Tensor& max_result,
 
 REGISTER_DISPATCH(min_all_stub, &min_all_kernel_impl);
 REGISTER_DISPATCH(max_all_stub, &max_all_kernel_impl);
-REGISTER_DISPATCH(_aminmax_all_stub, &_aminmax_all_kernel_impl);
+REGISTER_DISPATCH(aminmax_allreduce_stub, &aminmax_allreduce_kernel);
 
 }}

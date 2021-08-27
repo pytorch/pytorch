@@ -119,7 +119,7 @@ class C10_CUDA_API CUDAStream {
       C10_CUDA_CHECK(err);
     } else {
       // ignore and clear the error if not ready
-      cudaGetLastError();
+      (void)cudaGetLastError();
     }
 
     return false;
