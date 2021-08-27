@@ -2135,10 +2135,10 @@ def embedding_bag(
         tensor([[ 0.0000,  0.0000,  0.0000],
                 [-0.7082,  3.2145, -2.6251]])
     """
-    if has_torch_function_variadic(input, weight, offsets, per_sample_weight):
+    if has_torch_function_variadic(input, weight, offsets, per_sample_weights):
         return handle_torch_function(
             embedding_bag,
-            (input, weight, offsets, per_sample_weight),
+            (input, weight, offsets, per_sample_weights),
             input,
             weight,
             offsets=offsets,
