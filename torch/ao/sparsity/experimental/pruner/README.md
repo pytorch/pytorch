@@ -7,8 +7,7 @@ The Base Pruner inherits from the Base Sparsifier.
 
 Sparsifying weights allows us to skip some of the multiplications during the dot product (i.e. in the Linear layers), which ultimately translates into faster inference. With structured pruning, whole rows/columns of a tensor would be zeroed-out. This translates into model transformation (not just tensor transformation). Logically, the process of structured pruning is similar to removing some of the input/output channels in the layer completely.
 
-<!-- See: [https://pxl.cl/1NxgB](https://pxl.cl/1NxgB) -->
-![prune 1](./images/prune_1.png)
+![prune logic](./images/prune_1.png)
 
 
 # Design Choices
@@ -20,20 +19,17 @@ Sparsifying weights allows us to skip some of the multiplications during the dot
 
 Consider an example below:
 
-<!-- See: [https://pxl.cl/1NxgJ](https://pxl.cl/1NxgJ) -->
-![prune 2](./images/prune_2.png)
+![prune example](./images/prune_2.png)
 
 The dot product of the masked matrix A (weight) and matrix B (activation) produces the zeros at the sparse locations. However, if we remove the zeros, as in the example shown earlier, the result will change:
 
-<!-- [https://pxl.cl/1NxgV](https://pxl.cl/1NxgV) -->
-![prune 3](./images/prune_3.png)
+![prune result](./images/prune_3.png)
 
 The resulting matrix is of different shape (2x2 vs. 4x2).
 
 **Forward Hook - ActivationReconstruction **(aka re-inserting zeros):  To reconstruct the activation with the original shape, we will undo the sparsification before pushing that activation to the next layer. We do this with a forward hook -- forward hooks are functions that are called on the activation after the computation is complete.
 
-<!-- [https://pxl.cl/1Nxh8](https://pxl.cl/1Nxh8) -->
-![prune 4](./images/prune_4.png)
+![prune reconstruction](./images/prune_4.png)
 
 **Forward Hook - Bias**:
 
