@@ -42,10 +42,18 @@ Tensor view(
   return convert(v_output);
 }
 
+Tensor _reshape_alias(
+    const Tensor& self_arg,
+    const IntArrayRef shape,
+    const IntArrayRef strides) {
+  return view(self_arg, shape);
+}
+
 #ifdef USE_VULKAN_API
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl(TORCH_SELECTIVE_NAME("aten::view"), TORCH_FN(view));
+  m.impl(TORCH_SELECTIVE_NAME("aten::_reshape_alias"), TORCH_FN(_reshape_alias));
 }
 
 #endif /* USE_VULKAN_API */

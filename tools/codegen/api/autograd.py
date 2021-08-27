@@ -126,6 +126,14 @@ class DifferentiabilityInfo:
     # Raw data read from derivatives.yaml.
     output_differentiability: Optional[List[bool]]
 
+    # output_differentiability in derivatives.yaml can be a list of
+    # conditions that express if the output is differentiable. In this case,
+    # the number of conditions must match the number of outputs
+    # (NB: we only support one condition right now).
+    # output_differentiability gets populated with True for each condition,
+    # while output_differentiability_conditions gets populated with the conditions
+    output_differentiability_conditions: Optional[List[str]]
+
     @property
     def has_derivatives(self) -> bool:
         return len(self.args_with_derivatives) > 0
