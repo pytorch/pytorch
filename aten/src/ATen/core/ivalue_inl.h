@@ -254,6 +254,12 @@ struct Future;
 struct TORCH_API TupleElements {
  private:
   size_t inlineSize_;
+  // We represent TupleElements this way to save doing a heap
+  // allocation in the common (at least for unpickling) case where we
+  // have only 3 elements. We have our own union instead of
+  // c10::SmallVector<IValue> because c10::SmallVector<IValue> always
+  // stores the begin/end/capacity pointers, which would be a waste of
+  // space in our use case.
   union {
     std::vector<IValue> elementsVector_;
     IValue elementsInline_[3];
@@ -328,6 +334,10 @@ struct TORCH_API TupleElements {
           for (const auto ii : c10::irange(inlineSize_, rhs.inlineSize_)) {
             new (&elementsInline_[ii]) IValue(std::move(rhs.elementsInline_[ii]));
           }
+        } else {
+          for (const auto ii : c10::irange(rhs.inlineSize_, inlineSize_)) {
+            elementsInline_[ii].~IValue();
+          }
         }
       } else {
         destroyInline();
@@ -347,7 +357,7 @@ struct TORCH_API TupleElements {
     return *this;
   }
 
-  c10::ArrayRef<IValue> asArrayRef() const {
+  C10_NODISCARD c10::ArrayRef<IValue> asArrayRef() const {
     if (inlineSize_) {
       return c10::ArrayRef<IValue>(elementsInline_, inlineSize_);
     } else {
@@ -366,11 +376,11 @@ struct TORCH_API TupleElements {
     }
   }
 
-  size_t size() const {
+  C10_NODISCARD size_t size() const {
     return inlineSize_ ? inlineSize_ : elementsVector_.size();
   }
 
-  IValue& operator[](size_t idx) {
+  C10_NODISCARD IValue& operator[](size_t idx) {
     if (inlineSize_) {
       return elementsInline_[idx];
     } else {
@@ -378,7 +388,7 @@ struct TORCH_API TupleElements {
     }
   }
 
-  const IValue& operator[](size_t idx) const {
+  C10_NODISCARD const IValue& operator[](size_t idx) const {
     if (inlineSize_) {
       return elementsInline_[idx];
     } else {
@@ -386,7 +396,7 @@ struct TORCH_API TupleElements {
     }
   }
 
-  IValue& at(size_t idx) {
+  C10_NODISCARD IValue& at(size_t idx) {
     if (inlineSize_) {
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inlineSize_ <= 3);
       TORCH_CHECK(idx < inlineSize_, "TupleElements: invalid index Index = ", idx, "; Length = ", inlineSize_);
@@ -396,7 +406,7 @@ struct TORCH_API TupleElements {
     }
   }
 
-  const IValue& at(size_t idx) const {
+  C10_NODISCARD const IValue& at(size_t idx) const {
     if (inlineSize_) {
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inlineSize_ <= 3);
       TORCH_CHECK(idx < inlineSize_, "TupleElements: invalid index Index = ", idx, "; Length = ", inlineSize_);
@@ -406,59 +416,59 @@ struct TORCH_API TupleElements {
     }
   }
 
-  iterator begin() {
+  C10_NODISCARD iterator begin() {
     if (inlineSize_) {
       return elementsInline_;
     } else {
-      return elementsVector_.empty() ? nullptr : &elementsVector_[0];
+      return elementsVector_.data();
     }
   }
 
-  iterator end() {
+  C10_NODISCARD iterator end() {
     if (inlineSize_) {
       return elementsInline_ + inlineSize_;
     } else {
-      return elementsVector_.empty() ? nullptr : &elementsVector_[elementsVector_.size()];
+      return elementsVector_.data() + elementsVector_.size();
     }
   }
 
-  const_iterator begin() const {
+  C10_NODISCARD const_iterator begin() const {
     if (inlineSize_) {
       return elementsInline_;
     } else {
-      return elementsVector_.empty() ? nullptr : &elementsVector_[0];
+      return elementsVector_.data();
     }
   }
 
-  const_iterator end() const {
+  C10_NODISCARD const_iterator end() const {
     if (inlineSize_) {
       return elementsInline_ + inlineSize_;
     } else {
-      return elementsVector_.empty() ? nullptr : &elementsVector_[elementsVector_.size()];
+      return elementsVector_.data() + elementsVector_.size();
     }
   }
 
-  const_iterator cbegin() const {
+  C10_NODISCARD const_iterator cbegin() const {
     return begin();
   }
 
-  const_iterator cend() const {
+  C10_NODISCARD const_iterator cend() const {
     return end();
   }
 
-  std::vector<IValue> vec() const & {
+  C10_NODISCARD std::vector<IValue> vec() const & {
     return asArrayRef().vec();
   }
 
-  IValue& back() {
+  C10_NODISCARD IValue& back() {
     return *(end() - 1);
   }
 
-  const IValue& back() const {
+  C10_NODISCARD const IValue& back() const {
     return *(end() - 1);
   }
 
-  std::vector<IValue> vec() && {
+  C10_NODISCARD std::vector<IValue> vec() && {
     std::vector<IValue> result;
     result.reserve(size());
     for (auto&& iv : *this) {
