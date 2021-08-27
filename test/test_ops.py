@@ -785,8 +785,14 @@ class TestJit(JitCommonTestCase):
                             out = variant(get_sample(), *sample.args, **sample.kwargs)
 
                             # TODO: handle multiple outputs
-                            if isinstance(out, torch.Tensor):
-                                self.checkShapeAnalysis(out.size(), traced_fn.graph, op.assert_jit_shape_analysis)
+                            tuple_of_tensors = isinstance(out, tuple) and all([isinstance(elem, torch.Tensor) for elem in out])
+
+                            if isinstance(out, torch.Tensor) or tuple_of_tensors:
+                                if tuple_of_tensors:
+                                    sizes = [elem.size() for elem in out]
+                                else:
+                                    sizes = out.size()
+                                self.checkShapeAnalysis(sizes, traced_fn.graph, op.assert_jit_shape_analysis)
                                 checked_shape_analysis = True
                         if op.assert_jit_shape_analysis:
                             self.assertTrue(checked_shape_analysis)
