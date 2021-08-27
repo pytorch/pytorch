@@ -169,7 +169,6 @@ def add_to_cache(f, key, compiled_f):
     else:
         nnc_jit_cache[f][key] = compiled_f
 
-def nnc_jit(f, static_argnums=None):
 def nnc_jit(f, static_argnums=None, skip_specialization = False):
     local_cache = None
     @functools.wraps(f)
