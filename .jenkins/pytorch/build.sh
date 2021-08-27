@@ -88,6 +88,8 @@ if ! which conda; then
   else
     export USE_MKLDNN=0
   fi
+else
+  export CMAKE_PREFIX_PATH=/opt/conda
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *libtorch* ]]; then
@@ -130,6 +132,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
   if [[ "${BUILD_ENVIRONMENT}" == *vulkan* ]]; then
     build_args+=("-DUSE_VULKAN=ON")
   fi
+  build_args+=("-DUSE_LITE_INTERPRETER_PROFILER=OFF")
   exec ./scripts/build_android.sh "${build_args[@]}" "$@"
 fi
 
