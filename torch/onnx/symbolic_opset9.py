@@ -2058,7 +2058,7 @@ def repeat_interleave(g, self, repeats, dim=None, output_size=None):
         if not sym_help._is_tensor(repeats):
             repeats = g.op("Constant", value_t=torch.LongTensor(repeats))
         if input_sizes[dim] == 0:
-            return sym_help._onnx_opset_unsupported_detailed("repeat_interleave", 9, 11,
+            return sym_help._onnx_opset_unsupported_detailed("repeat_interleave", 9, 13,
                                                              "Unsupported along dimension with unknown input size")
         else:
             reps = input_sizes[dim]
@@ -2067,8 +2067,11 @@ def repeat_interleave(g, self, repeats, dim=None, output_size=None):
     # Cases where repeats is a 1 dim Tensor
     elif repeats_dim == 1:
         if input_sizes[dim] == 0:
-            return sym_help._onnx_opset_unsupported_detailed("repeat_interleave", 9, 11,
+            return sym_help._onnx_opset_unsupported_detailed("repeat_interleave", 9, 13,
                                                              "Unsupported along dimension with unknown input size")
+        if repeats_sizes[0] is None:
+            return sym_help._onnx_opset_unsupported_detailed("repeat_interleave", 9, 13,
+                                                             "Unsupported for cases with dynamic repeats")
         assert repeats_sizes[0] == input_sizes[dim], "repeats must have the same size as input along dim"
         reps = repeats_sizes[0]
     else:
@@ -3133,6 +3136,10 @@ def hann_window(g, window_length, periodic=True, dtype=None, layout=None, device
 
 def mv(g, self, vec):
     return matmul(g, self, vec)
+
+
+def dot(g, self, other):
+    return matmul(g, self, other)
 
 
 @parse_args('v', 'v')
