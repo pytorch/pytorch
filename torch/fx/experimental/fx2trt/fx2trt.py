@@ -86,6 +86,7 @@ class TRTModule(torch.nn.Module):
         bindings: List[Any] = [None] * (len(self.input_names) + len(self.output_names))
 
         for i, input_name in enumerate(self.input_names):
+            assert inputs[i].is_cuda, f"{i}th input is not on cuda device."
             idx = self.engine.get_binding_index(input_name)
             bindings[idx] = contiguous_inputs[i].data_ptr()
 
@@ -414,8 +415,6 @@ class TRTInterpreter(torch.fx.Interpreter):
             name = f"output{i}"
             output.name = name
             self.network.mark_output(output)
-            if self.fp16_mode:
+            if self.fp16_mode and output.dtype == trt.float32:
                 output.dtype = trt.float16
-            else:
-                output.dtype = trt.float32
             self._output_names.append(name)

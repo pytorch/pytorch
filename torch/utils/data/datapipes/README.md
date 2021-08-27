@@ -26,7 +26,7 @@ Note: Avoid loading data from the source DataPipe in `__init__` function, in ord
 ### Iterator
 For `IterDataPipe`, an `__iter__` function is needed to consume data from the source `IterDataPipe` then apply operation over the data before yield.
 ```py
-class MpaaerIterDataPipe(IterDataPipe):
+class MapperIterDataPipe(IterDataPipe):
     ...
 
     def __iter__(self):
@@ -35,10 +35,19 @@ class MpaaerIterDataPipe(IterDataPipe):
 ```
 
 ### Length
-`__len__` method is an optional method for `IterDataPipe`. In most cases, it can be implemented by returning the length of source DataPipe.
-But, in some special cases, it would either return a length or raise Error depending on the inputs.
-Then, the Error is required to be `TypeError` to support Python's utiliy functions like `list(dp)`.
-Please check NOTE [ Lack of Default `__len__` in Python Abstract Base Classes ].
+In the most common cases, as the example of `MapperIterDataPipe` above, the `__len__` method of DataPipe should return the length of source DataPipe.
+```py
+class MapperIterDataPipe(IterDataPipe):
+    ...
+
+    def __len__(self):
+        return len(self.dp)
+```
+Note that `__len__` method is optional for `IterDataPipe`.
+Like `CSVParserIterDataPipe` in the [Using DataPipe sector](#using-datapipe-sector), `__len__` is not implemented because there is no way to infer the size of each file streams before loading them.
+Besides, in some special cases, `__len__` method would either return a length or raise Error depending on the arguments of DataPipe.
+Then, the Error is required to be `TypeError` to support Python's build-in functions like `list(dp)`.
+Please check NOTE [ Lack of Default `__len__` in Python Abstract Base Classes ] for detailed reason in PyTorch.
 
 ### Registering DataPipe with functional API
 Each DataPipe can be registered to support functional API using the decorator `functional_datapipe`.
@@ -68,7 +77,7 @@ For example, we want to load data from CSV files with the following data pipelin
 To support the above pipeline, `CSVParser` is registered as `parse_csv_files` to consume file streams and expand them as rows.
 ```py
 @functional_datapipe("parse_csv_files")
-class CSVParser(IterDataPipe):
+class CSVParserIterDataPipe(IterDataPipe):
     def __init__(self, dp, **fmtparams):
         self.dp = dp
         self.fmtparams = fmtparams
