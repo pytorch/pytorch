@@ -410,21 +410,26 @@ def gen_variable_type_func(
 
         if fn.info is None and not get_base_name(f) in RESET_GRAD_ACCUMULATOR \
                 and not get_base_name(f) in DONT_REQUIRE_DERIVATIVE \
-                and len(gen_differentiable_outputs(fn)) > 0:
+                and len(gen_differentiable_outputs(fn)) > 0 \
+                and not get_base_name(f) in DONT_ENFORCE_SAME_TENSOR_IMPL_OR_STORAGE \
+                and not get_base_name(f) in DONT_ENFORCE_STORAGE_IMPL_USE_COUNT \
+                and not get_base_name(f) in DONT_ENFORCE_TENSOR_IMPL_USE_COUNT:
             # NOTE: [ Registering AutogradNotImplemented boxed kernel ]
             #
             # When there is no derivatives.yaml entry, we register a generic boxed
             # NotImplemented kernel to set grad_fn to be NotImplemented, so that forward
             # proceeds as usual but an error is properly produced on backward.
+            # TODO: it would be nice to not have these special cases
             #
-            # There are two cases where still let codegen handle it:
+            # There are several cases where still let codegen handle it:
             # 1) ops that need to reset grad accumulator (we let codegen handle this case
-            #     because) the list is (currently) only accessible in Python and there are
-            #     only 2 op.
+            #     because) the list is (currently) only accessible in Python.
             # 2) User explicitly specifies DONT_REQUIRE_DERIVATIVE. This basically makes
             #    autograd a fallthrough with NDEBUG checks. This can be useful for when all
             #    outputs are integral.
             # 3) When there are no differentiable outputs. This is similar to (2).
+            # 4) There are certain ops where we skip certain NDEBUG checks. this is similar
+            #    to (1).
             type_definition = ""
             wrapper_registration = AUTOGRAD_NOT_IMPLEMENTED_REGISTRATION.substitute(
                 unqual_operator_name_with_overload=f.func.name)
