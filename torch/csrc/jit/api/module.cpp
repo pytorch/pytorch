@@ -240,8 +240,12 @@ c10::intrusive_ptr<c10::ivalue::Future> Method::run_async(
 void Method::setArgumentNames(
     std::vector<std::string>& argumentNamesOut) const {
   TORCH_INTERNAL_ASSERT(function_);
-  argumentNamesOut.reserve(function_->getSchema().arguments().size());
-  for (auto& argument : function_->getSchema().arguments()) {
+  auto& arguments = function_->getSchema().arguments();
+  argumentNamesOut.reserve(arguments.size());
+  for (auto& argument : arguments) {
+    if (argument.name() == "self") {
+      continue;
+    }
     argumentNamesOut.push_back(argument.name());
   }
 }

@@ -246,6 +246,8 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             batch_size, in_channels_per_group, input_feature_map_size,
             out_channels_per_group, groups, kernel_size, X_scale, X_zero_point,
             W_scale, W_zero_point, use_bias, use_channelwise)
+        # Make sure the weight shape is correct
+        self.assertTrue(qconv_module.weight().shape == W_q.shape)
 
         qconv_module.set_weight_bias(W_q, b)
         qconv_module.scale = Y_scale
