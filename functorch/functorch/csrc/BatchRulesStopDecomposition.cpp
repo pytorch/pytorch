@@ -536,7 +536,6 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   STOP_DECOMPOSE(range.step);
   STOP_DECOMPOSE(ravel);
   STOP_DECOMPOSE(refine_names);
-  STOP_DECOMPOSE(relu6_);
   STOP_DECOMPOSE(rename);
   STOP_DECOMPOSE(rename_);
   STOP_DECOMPOSE(repeat_interleave.self_Tensor);
@@ -561,7 +560,6 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   STOP_DECOMPOSE(scatter.dimname_value);
   STOP_DECOMPOSE(scatter_add.dimname);
   STOP_DECOMPOSE(select.Dimname);
-  STOP_DECOMPOSE(selu_);
   STOP_DECOMPOSE(set_data);
   STOP_DECOMPOSE(silu_backward);
   STOP_DECOMPOSE(size.Dimname);
