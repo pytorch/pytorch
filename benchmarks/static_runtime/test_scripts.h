@@ -762,3 +762,13 @@ const std::string quantize_script = R"IR(
       %1249: Tensor = aten::dequantize(%1254)
       return (%1249)
 )IR";
+
+const auto fmod_tensor = R"JIT(
+  def forward(self, a: Tensor, b: Tensor):
+      return torch.fmod(a, b).clone()
+)JIT";
+
+const auto fmod_scalar = R"JIT(
+  def forward(self, a: Tensor, b: int):
+      return torch.fmod(a, b).clone()
+)JIT";
