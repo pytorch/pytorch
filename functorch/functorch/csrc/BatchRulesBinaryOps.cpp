@@ -136,21 +136,6 @@ std::tuple<Tensor,optional<int64_t>> _s_where_batch_rule(
   return std::make_tuple(at::where(condition_, self_, other_), 0);
 }
 
-void handle_pointwise_ops(std::vector<std::pair<Tensor, optional<int64_t>>> &tensor_inputs) {
-  int64_t out_logical_rank = 0;
-  for (auto& tensor_input : tensor_inputs) {
-    int64_t cur_logical_rank = rankWithoutBatchDim(tensor_input.first, tensor_input.second);
-    out_logical_rank = std::max(out_logical_rank, cur_logical_rank);
-  }
-  for (auto& tensor_input: tensor_inputs) {
-    tensor_input.first = moveBatchDimToFront(tensor_input.first, tensor_input.second);
-    tensor_input.first = maybePadToLogicalRank(tensor_input.first, tensor_input.second, out_logical_rank);
-  }
-}
-#define POINTWISE_BOXED(op) \
-  m.impl(#op, torch::CppFunction::makeFromBoxedFunction<boxed_tensor_inputs_batch_rule<decltype(&handle_pointwise_ops), &handle_pointwise_ops>>());
-
-
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
 #define BINARY_POINTWISE2(op, overload) \
   VMAP_SUPPORT(#op"."#overload, BINARY_POINTWISE_BATCH_RULE(ATEN_FN2(op, overload)));
@@ -258,9 +243,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   using TensorInplaceT = Tensor& (Tensor::*)(const Tensor&) const;
   using ScalarInplaceT = Tensor& (Tensor::*)(const Scalar&) const;
 
-  m.impl("add_.Tensor", inplacePlumbing2<
-     DECLTYPE_AUTO(&binary_pointwise_inplace_batch_rule<TensorScalarInplaceT, &Tensor::add_, const Scalar&>),
-     const Scalar&>);
+  POINTWISE_BOXED(add_.Tensor); // just testing
   m.impl("add_.Scalar", inplacePlumbing1<
      DECLTYPE_AUTO(&unary_inplace_batch_rule<ScalarScalarInplaceT, &Tensor::add_, const Scalar&, const Scalar&>),
      const Scalar&, const Scalar&>);
