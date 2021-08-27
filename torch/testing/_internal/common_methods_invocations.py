@@ -780,10 +780,10 @@ class OpInfo(object):
 
 def _generate_reduction_inputs(device, dtype, requires_grad):
     """Generates input tensors for testing reduction operators"""
-    yield make_tensor([], device, dtype, requires_grad=requires_grad)
-    yield make_tensor([2], device, dtype, requires_grad=requires_grad)
-    yield make_tensor([2, 3], device, dtype, requires_grad=requires_grad, noncontiguous=True)
-    yield make_tensor([3, 2, 1, 5], device, dtype, requires_grad=requires_grad)
+    yield make_tensor((), device, dtype, requires_grad=requires_grad)
+    yield make_tensor((2,), device, dtype, requires_grad=requires_grad)
+    yield make_tensor((2, 3), device, dtype, requires_grad=requires_grad, noncontiguous=True)
+    yield make_tensor((3, 2, 1, 5), device, dtype, requires_grad=requires_grad)
 
 
 def _generate_reduction_kwargs(ndim, supports_multiple_dims=True):

@@ -4,7 +4,6 @@ This module contains tensor creation utilities.
 
 import torch
 from typing import Optional, Tuple, Union
-from numbers import Number
 import math
 
 __all__ = [
@@ -16,8 +15,8 @@ def make_tensor(
     device: Union[str, torch.device],
     dtype: torch.dtype,
     *,
-    low: Optional[Number] = None,
-    high: Optional[Number] = None,
+    low: Optional[float] = None,
+    high: Optional[float] = None,
     requires_grad: bool = False,
     noncontiguous: bool = False,
     exclude_zero: bool = False
@@ -27,10 +26,10 @@ def make_tensor(
 
     If :attr:`low` or :attr:`high` are specified and are outside the range of the datatype's representable
     finite values then they are clamped to the lowest or highest representable finite value, respectively.
-    A random tensor is then created with values within ``[low, high)`` range. If ``None``, then the following
+    A random tensor is then created with values within ``[low, high)``. If ``None``, then the following
     table describes the default values for :attr:`low` and :attr:`high`, which depend on :attr:`dtype`. The
-    table also describes, if :attr:`exclude_zero` is ``True`` , then what values are used as replacements
-    for zeros in the generated tensor, which also depends on :attr:`dtype`.
+    table also describes the values used as replacements for zeros (if :attr:`exclude_zero` is ``True``) in
+    the generated tensor, which also depends on :attr:`dtype`.
 
     +---------------------------+------------+----------+-----------------------------------------------------------------+
     | ``dtype``                 | ``low``    | ``high`` | ``zero replacement``                                            |
@@ -63,7 +62,7 @@ def make_tensor(
             For bool and integer types zero is replaced with one. For floating point types it is replaced with the
             dtype's smallest positive normal number (the "tiny" value of the dtype's finfo object), and for complex
             types it is replaced with a complex number whose real and imaginary parts are both the smallest positive
-            normal number representable by the complex type. Default ``False``.
+            normal number representable by the complex type (also see the table above). Default ``False``.
 
     Raises:
         ValueError: If :attr:`low` is either ``inf`` or ``nan`` or :attr:`high` is either ``-inf`` or ``nan``.
@@ -71,8 +70,8 @@ def make_tensor(
 
     Examples:
         >>> from torch.testing import make_tensor
-        >>> # Creates a float tensor with values in [0, 1)
-        >>> make_tensor((3,), device='cpu', dtype=torch.float32, low=0, high=1)
+        >>> # Creates a float tensor with values in [-1, 1)
+        >>> make_tensor((3,), device='cpu', dtype=torch.float32, low=-1, high=1)
         tensor([ 0.1205, 0.2282, -0.6380])
         >>> # Creates a bool tensor on CUDA
         >>> make_tensor((2, 2), device='cuda', dtype=torch.bool)
