@@ -10,7 +10,7 @@ from torch.testing._internal.common_utils import \
     (TestCase, is_iterable_of_tensors, run_tests, IS_SANDCASTLE, clone_input_helper, make_tensor,
      gradcheck, gradgradcheck, IS_IN_CI, suppress_warnings)
 from torch.testing._internal.common_methods_invocations import \
-    (op_db, _NOTHING, UnaryUfuncInfo, SpectralFuncInfo)
+    (op_db, _NOTHING, UnaryUfuncInfo, ReductionOpInfo, SpectralFuncInfo)
 from torch.testing._internal.common_device_type import \
     (deviceCountAtLeast, instantiate_device_type_tests, ops, onlyCUDA, onlyOnCPUAndCUDA, skipCUDAIfRocm, OpDTypes)
 from torch.testing._internal.common_jit import JitCommonTestCase, check_against_reference
@@ -27,8 +27,8 @@ _variant_ops = partial(ops, dtypes=OpDTypes.supported,
 # Get names of all the operators which have ref in their entry in OpInfo (testing infra)
 #   except for Unary Ufuncs (separately implemented in test/test_unary_ufuncs.py)
 #   and Spectral Functions (separately implemented for only 1D as of now, in test/test_spectral_ops.py)
-_ref_test_ops = list(filter(lambda op: not isinstance(op, (UnaryUfuncInfo, SpectralFuncInfo)) and
-                     op.ref is not None and op.ref is not _NOTHING, op_db))
+_ref_test_ops = list(filter(lambda op: not isinstance(op, (UnaryUfuncInfo, ReductionOpInfo,
+                     SpectralFuncInfo)) and op.ref is not None and op.ref is not _NOTHING, op_db))
 
 
 # Tests that apply to all operators and aren't related to any particular
