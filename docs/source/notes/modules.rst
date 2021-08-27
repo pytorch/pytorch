@@ -578,7 +578,7 @@ in these areas for your custom module by conforming to the convention demonstrat
   the module.
 * Only use initialization functions (i.e. functions from :mod:`torch.nn.init`) on parameters and buffers within the
   module's constructor. Note that this is only required to use :func:`~torch.nn.utils.skip_init`; see
-  `here <https://pytorch.org/tutorials/prototype/skip_param_init.html#updating-modules-to-support-skipping-initialization>`_ for an explanation.
+  `this page <https://pytorch.org/tutorials/prototype/skip_param_init.html#updating-modules-to-support-skipping-initialization>`_ for an explanation.
 
 For more information, check out:
 
