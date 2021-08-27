@@ -138,6 +138,22 @@ const auto reshape_inplace_script = R"JIT(
       return (d, e, f)
 )JIT";
 
+const auto reshape_inplace_script_1 = R"JIT(
+  def forward(self, inp: Tensor, shape: List[int], flag: bool):
+    if flag:
+      a = inp + inp
+      b = a.reshape(shape)
+      c = b.sigmoid()
+    else:
+      a = inp * inp
+      b = a.sigmoid_()
+      c = b.reshape(shape)
+    d = c + c
+    e = a + a
+    f = b + b
+    return (d, e, f)
+)JIT";
+
 const auto sigmoid_inplace_script = R"JIT(
   def forward(self, inp: Tensor):
       a = torch.sigmoid(inp, out=inp).clone()
@@ -331,6 +347,12 @@ const std::string embedding_bag_mean_last_offset = R"JIT(
 const std::string embedding_bag_max_last_offset = R"JIT(
   def forward(self, a: Tensor, b: Tensor, c: Tensor):
       return torch.embedding_bag(a, b, c, False, 2, False, None, True)
+)JIT";
+
+const auto expand_as_script = R"JIT(
+  def forward(self, input: Tensor, other:Tensor):
+      a = input.expand_as(other)
+      return a.clone()
 )JIT";
 
 const auto sign_tensor = R"JIT(
