@@ -162,6 +162,7 @@ def add(*, input, other):
     return input + other
 
 
+@register_acc_op_mapping(op_and_target=("call_method", "unsqueeze"))
 @register_acc_op_mapping(op_and_target=("call_function", torch.unsqueeze))
 @register_acc_op
 def unsqueeze(*, input, dim):
@@ -220,6 +221,12 @@ def transpose(*, input, dim0, dim1):
     if input.dim() < 2:
         return input
     return torch.transpose(**locals())
+
+
+@register_acc_op_mapping(op_and_target=("call_method", "contiguous"))
+@register_acc_op
+def contiguous(*, input):
+    return input.contiguous()
 
 
 @register_acc_op_mapping(op_and_target=("call_function", torch.nn.functional.softmax))
@@ -462,10 +469,12 @@ def quantize_per_tensor(*, input, acc_out_ty=None):
     )
 
 
-@register_acc_op_mapping(op_and_target=("call_function", torch.dequantize))
-@register_acc_op_mapping(op_and_target=("call_method", "dequantize"))
 @register_acc_op
-def dequantize(*, input):
+def dequantize(*, input, input_tensor_meta):
+    """ `input_tensor_meta` contains extra argument of quantization
+    parameters, e.g. scale/zero_point and will be using for
+    lowring dequantize op to TensorRT
+    """
     return torch.dequantize(input)
 
 
@@ -487,6 +496,12 @@ def div(*, input, other):
     return input / other
 
 
+@register_acc_op_mapping(op_and_target=("call_function", torch.pow))
+@register_acc_op
+def pow(*, input, exponent):
+    return torch.pow(input, exponent)
+
+
 @register_acc_op_mapping(op_and_target=("call_function", nn.functional.relu))
 @register_acc_op_mapping(
     op_and_target=("call_function", torch.relu),
@@ -500,6 +515,21 @@ def div(*, input, other):
 def relu(*, input, inplace=False):
     return nn.functional.relu(**locals())
 
+@register_custom_acc_mapper_fn(
+    op_and_target=("call_function", torch.log1p),
+    arg_replacement_tuples=[
+        ("input", "input"),
+    ],
+)
+def torch_log1p_mapper(node: torch.fx.Node, _: torch.nn.Module) -> torch.fx.Node:
+    with node.graph.inserting_before(node):
+        add_kwargs = {"input": node.kwargs["input"], "other": 1}
+        add_node = node.graph.call_function(add, kwargs=add_kwargs)
+        add_node.meta = node.meta.copy()
+        log_kwargs = {"input": add_node}
+        log_node = node.graph.call_function(log, kwargs=log_kwargs)
+        log_node.meta = node.meta.copy()
+        return log_node
 
 @register_custom_acc_mapper_fn(
     op_and_target=("call_method", "sum"),
@@ -675,6 +705,57 @@ def batch_norm(
 def layer_norm(*, input, normalized_shape, weight, bias, eps):
     return nn.functional.layer_norm(**locals())
 
+def argmin_max_mapper_impl(node: torch.fx.Node, largest: bool) -> torch.fx.Node:
+    """
+    Map torch.argmin or torch.argmax to acc_ops.flatten (depend on dim) + acc_ops.topk
+    + acc_ops.getitem + acc_ops.squeeze (depends on keepdim).
+    """
+    input_node = node.kwargs["input"]
+    dim = node.kwargs["dim"]
+    keepdim = node.kwargs["keepdim"]
+
+    if dim is None and keepdim:
+        raise RuntimeError("We currently don't support argmin/argmax with dim=None and keepdim=True")
+
+    with node.graph.inserting_before(node):
+        if dim is None:
+            flatten_kwargs = {"input": node.kwargs["input"], "start_dim": 0, "end_dim": -1}
+            flatten_node = node.graph.call_function(flatten, kwargs=flatten_kwargs)
+            flatten_node.meta["type"] = torch.Tensor
+            input_node = flatten_node
+            dim = -1
+
+        topk_kwargs = {"input": input_node, "k": 1, "dim": dim, "largest": largest, "sorted": False}
+        topk_node = node.graph.call_function(topk, kwargs=topk_kwargs)
+        # It's actually more like NamedTuple but tuple here should be fine.
+        topk_node.meta["type"] = tuple
+
+        getitem_kwargs = {"input": topk_node, "idx": 1}
+        getitem_node = node.graph.call_function(getitem, kwargs=getitem_kwargs)
+        getitem_node.meta["type"] = torch.Tensor
+        output_node = getitem_node
+
+        if not keepdim:
+            squeeze_kwargs = {"input": getitem_node, "dim": dim}
+            output_node = node.graph.call_function(squeeze, kwargs=squeeze_kwargs)
+
+        output_node.meta = node.meta.copy()
+        return output_node
+
+@register_custom_acc_mapper_fn(
+    op_and_target=("call_function", torch.argmin),
+    arg_replacement_tuples=[
+        ("input", "input"),
+        ("dim", "dim"),
+        ("keepdim", "keepdim"),
+    ],
+)
+def torch_argmin_mapper(node: torch.fx.Node, _: torch.nn.Module) -> torch.fx.Node:
+    """
+    Map torch.argmin to acc_ops.flatten (depend on dim) + acc_ops.topk + acc_ops.getitem
+    + acc_ops.squeeze (depends on keepdim).
+    """
+    return argmin_max_mapper_impl(node, largest=False)
 
 @register_custom_acc_mapper_fn(
     op_and_target=("call_method", "split"),
@@ -864,6 +945,15 @@ def slice_tensor(*, input, dims, starts, stops, steps):
 
 @register_custom_acc_mapper_fn(
     op_and_target=("call_function", torch.narrow),
+    arg_replacement_tuples=[
+        ("input", "input"),
+        ("dim", "dim"),
+        ("start", "start"),
+        ("length", "length"),
+    ],
+)
+@register_custom_acc_mapper_fn(
+    op_and_target=("call_method", "narrow"),
     arg_replacement_tuples=[
         ("input", "input"),
         ("dim", "dim"),
@@ -1174,3 +1264,27 @@ def packed_quantized_convrelu2d_mapper(
         )
         relu_node.meta = node.meta
         return relu_node
+
+@register_custom_acc_mapper_fn(
+    op_and_target=("call_function", torch.dequantize),
+    arg_replacement_tuples=[
+        ("input", "input")
+    ]
+)
+@register_custom_acc_mapper_fn(
+    op_and_target=("call_method", "dequantize"),
+    arg_replacement_tuples=[
+        ("input", "input")
+    ]
+)
+def custom_dequantize_mapper(node: torch.fx.Node, mod: nn.Module) -> torch.fx.Node:
+    assert "tensor_meta" in node.kwargs["input"].meta
+    new_kwargs = {"input": node.kwargs["input"], "input_tensor_meta": node.kwargs["input"].meta["tensor_meta"]}
+    # `input_tensor_meta` contains quantization parameters that can be used to lower
+    # acc_ops.dequantize to TensorRT ops
+    with node.graph.inserting_before(node):
+        new_node = node.graph.create_node(
+            "call_function", dequantize, kwargs=new_kwargs, name=node.name
+        )
+        new_node.meta = node.meta
+        return new_node

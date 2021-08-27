@@ -231,6 +231,7 @@ class TORCH_API StaticRuntime {
     std::unordered_map<std::string, float> percent_per_node_type;
     std::unordered_map<std::string, int> instances_per_node_type;
     std::unordered_set<std::string> out_nodes;
+    std::unordered_set<std::string> native_nodes;
   };
 
   IndividualMetrics benchmark_individual_ops(
@@ -408,6 +409,10 @@ class TORCH_API ProcessedNode {
 
   bool has_out_variant() const {
     return static_cast<bool>(fn_);
+  }
+
+  bool has_native() const {
+    return static_cast<bool>(native_fn_);
   }
 
   bool verify_outputs_not_overlapping_with_immutable_inputs() const;
