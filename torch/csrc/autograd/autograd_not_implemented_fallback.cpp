@@ -143,13 +143,13 @@ void autogradNotImplementedFallbackImpl(const c10::OperatorHandle& op, c10::Disp
   #ifndef NDEBUG
   _foreach_tensor([&](size_t idx_tensor, size_t _, const at::Tensor& t) {
     if (storage_saved.at(idx_tensor).has_value())
-      TORCH_INTERNAL_ASSERT(storage_saved.at(idx_tensor).value().is_alias_of(t.storage()));
+      TORCH_INTERNAL_ASSERT(storage_saved.at(idx_tensor).value().is_alias_of(t.storage()), op_name);
     if (impl_saved.at(idx_tensor))
-      TORCH_INTERNAL_ASSERT(impl_saved.at(idx_tensor) == t.getIntrusivePtr());
+      TORCH_INTERNAL_ASSERT(impl_saved.at(idx_tensor) == t.getIntrusivePtr(), op_name);
   }, &stack_args_copy, 0, num_arguments);
   _foreach_tensor([&](size_t idx_tensor, size_t idx_ret, const at::Tensor& t) {
     if (!is_inplace_output[idx_ret])
-      TORCH_INTERNAL_ASSERT(t.use_count() <= 1);  // Okay to return undefined tensor
+      TORCH_INTERNAL_ASSERT(t.use_count() <= 1, op_name);  // Okay to return undefined tensor
     if (!is_aliased_output[idx_ret] && t.has_storage())
       TORCH_INTERNAL_ASSERT(t.storage().use_count() == 1);
   }, stack, stack->size() - num_returns, num_returns);
@@ -158,12 +158,12 @@ void autogradNotImplementedFallbackImpl(const c10::OperatorHandle& op, c10::Disp
     const c10::IValue& aliased_input_iv = stack_args_copy[aliased_input_idx];
     const c10::IValue& aliased_output_iv = (*stack)[stack->size() - num_returns + aliased_output_idx];
     // We do not support views embedded inside tensorlist
-    TORCH_INTERNAL_ASSERT(aliased_input_iv.isTensor());
-    TORCH_INTERNAL_ASSERT(aliased_output_iv.isTensor());
+    TORCH_INTERNAL_ASSERT(aliased_input_iv.isTensor(), op_name);
+    TORCH_INTERNAL_ASSERT(aliased_output_iv.isTensor(), op_name);
     const at::Tensor& aliased_input = aliased_input_iv.toTensor();
     const at::Tensor& aliased_output = aliased_input_iv.toTensor();
     if(is_aliased_output[aliased_input_idx] && aliased_input.has_storage())
-      TORCH_INTERNAL_ASSERT(aliased_input.storage().is_alias_of(aliased_output.storage()));
+      TORCH_INTERNAL_ASSERT(aliased_input.storage().is_alias_of(aliased_output.storage()), op_name);
   }
   #endif
 
