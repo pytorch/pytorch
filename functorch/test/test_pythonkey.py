@@ -34,6 +34,8 @@ from common_utils import (
     instantiate_parameterized_methods,
     get_fallback_and_vmap_exhaustive,
     opinfo_in_dict,
+    xfail,
+    skipOps,
 )
 
 # NB: numpy is a testing dependency!
@@ -201,31 +203,27 @@ class TestPythonKeyOperatorsOpInfo(TestCase):
 
 class TestEagerFusionOpInfo(TestCase):
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    # entries in here need don't work and need to be fixed.
+    # Each one of these is a bug (or needs to be investigated)
+    @skipOps('TestEagerFusionOpInfo', 'test_eager_compilation_exhaustive', {
+        xfail('__rmatmul__'),
+        xfail('expand_as'),
+        xfail('fmod', ''),
+        xfail('remainder', ''),
+        xfail('linalg.cholesky'),
+        xfail('linalg.cond'),
+        xfail('linalg.det'),
+        xfail('linalg.inv'),
+        xfail('matmul'),
+        xfail('nn.functional.gelu'),
+        xfail('nn.functional.linear'),
+        xfail('polar'),
+        xfail('reshape_as'),
+        xfail('special.zeta', 'grad'),
+        xfail('to_sparse'),
+        xfail('view_as')
+    })
     def test_eager_compilation_exhaustive(self, device, dtype, op):
-        # These are ops that don't make sense to test
-        op_skip = {
-        }
-        # Unsupported input types
-        if opinfo_in_dict(op, op_skip):
-            return
-        # entries in here need don't work and need to be fixed.
-        # Each one of these is a bug
-        python_fail = {
-            'var',
-            'std',
-            'sort',
-            'prod',
-            'to_sparse',
-            'rsub.rsub_scalar',
-            'linalg.matrix_power',
-            'linalg.inv',
-            'linalg.cholesky',
-            'linalg.eigvals',
-            'tensor_split',
-            'nn.functional.pad.circular',
-        }
-        if opinfo_in_dict(op, python_fail):
-            return
 
         def f(args, kwargs):
             return op.op(*args, **kwargs)
@@ -243,8 +241,10 @@ class TestEagerFusionOpInfo(TestCase):
             t = f(args, kwargs)
             if isinstance(t, tuple):
                 continue
+            # Unable to check for correctness since this currently doesn't work...
             compiled_f = compiled_function(f, lambda x,_: x, lambda x,_: x).apply
-            compiled_f(args, kwargs)
+            out = compiled_f(args, kwargs)
+
 
 only_for = ("cpu")
 instantiate_device_type_tests(
