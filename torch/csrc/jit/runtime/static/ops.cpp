@@ -14,6 +14,7 @@
 #include <ATen/native/layer_norm.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/qembeddingbag.h>
+#include <ATen/native/quantized/cpu/qembeddingbag_prepack.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
@@ -761,6 +762,7 @@ REGISTER_OPERATOR_FUNCTOR(
             include_last_offset);
       };
     });
+
 REGISTER_OPERATOR_FUNCTOR(
     quantized::embedding_bag_4bit_rowwise_offsets,
     embedding_bag_4bit_rowwise_offsets,
@@ -796,6 +798,27 @@ REGISTER_OPERATOR_FUNCTOR(
             per_sample_weights,
             compressed_indices_mapping,
             include_last_offset);
+      };
+    });
+
+REGISTER_OPERATOR_FUNCTOR(
+    quantized::embedding_bag_byte_prepack,
+    embedding_bag_byte_prepack,
+    [](Node* n) -> SROperator {
+      if (!n->matches(torch::schema(
+              "quantized::embedding_bag_byte_prepack(Tensor weight) -> Tensor"))) {
+        LogAndDumpSchema(n);
+        return nullptr;
+      }
+      return [](ProcessedNode* p_node) {
+        const auto& weight = p_node->Input(0).toTensor();
+        if (p_node->Output(0).isNone()) {
+          p_node->Output(0) = at::native::qembeddingbag_byte_prepack(weight);
+          return;
+        }
+        auto& out_t = p_node->Output(0).toTensor();
+        fastResizeToZero(out_t);
+        at::native::qembeddingbag_byte_prepack_out(out_t, weight);
       };
     });
 
