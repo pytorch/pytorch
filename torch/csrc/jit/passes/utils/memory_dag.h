@@ -1,6 +1,6 @@
 #pragma once
 
-#include <aten/src/ATen/core/jit_type.h>
+#include <ATen/core/jit_type.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Optional.h>
 #include <c10/util/flat_hash_map.h>
