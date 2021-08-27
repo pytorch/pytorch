@@ -201,7 +201,7 @@ class TestPythonKeyOperatorsOpInfo(TestCase):
 
 class TestEagerFusionOpInfo(TestCase):
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
-    def test_eager_fusion_exhaustive(self, device, dtype, op):
+    def test_eager_compilation_exhaustive(self, device, dtype, op):
         # These are ops that don't make sense to test
         op_skip = {
         }
