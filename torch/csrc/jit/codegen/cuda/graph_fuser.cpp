@@ -705,6 +705,7 @@ struct CudaGraphFuser {
     bchunk->removeInput(producer_index);
     // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
     for (const auto i : c10::irange(nchunks)) {
+      (void)i; // Suppress unused variable warning
       bchunk->eraseOutput(nchunks * producer_index);
     }
 
@@ -1511,7 +1512,6 @@ void alterBatchNormImplIndex(Node* node) {
   }
 
   if (!bn_index_out_indices.empty()) {
-    auto graph = node->owningGraph();
     // we output index to 0 so backwards go through native_batch_norm, which is
     // what we support;
     auto const_1 = node->owningGraph()->insertConstant(IValue(0));
