@@ -262,6 +262,10 @@ struct TORCH_API TupleElements {
   // space in our use case.
   union {
     std::vector<IValue> elementsVector_;
+    // Don't want to declare a std::array because the convenient
+    // iteration and size members are a footgun in this case -- the
+    // actual size of the array may be smaller than 3!
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays)
     IValue elementsInline_[3];
   };
 
