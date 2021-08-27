@@ -17187,7 +17187,8 @@ class TestNNDeviceType(NNTestCase):
                 reduction=reduction, label_smoothing=label_smoothing)
             output_with_index = loss(input, target)
 
-            self.assertEqual(output_with_prob, output_with_index)
+            self.assertEqual(output_with_prob, output_with_index,
+                             rtol=1e-07, atol=1e-05)
 
     def test_cross_entropy_label_smoothing_with_probs(self, device):
         N, C = 10, 4
