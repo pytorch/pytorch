@@ -59,8 +59,9 @@ def make_tensor(
         exclude_zero (Optional[bool]): If ``True`` then zeros are replaced with the dtype's small positive value
             depending on the :attr:`dtype`. For bool and integer types zero is replaced with one. For floating
             point types it is replaced with the dtype's smallest positive normal number (the "tiny" value of the
-            :attr:`dtype`'s :fun:`~torch.finfo` object), and for complex types it is replaced with a complex number whose real and imaginary
-            parts are both the smallest positive normal number representable by the complex type. Default ``False``.
+            :attr:`dtype`'s :fun:`~torch.finfo` object), and for complex types it is replaced with a complex number
+            whose real and imaginary parts are both the smallest positive normal number representable by the complex
+            type. Default ``False``.
 
     Raises:
         ValueError: If ``low > high``.
