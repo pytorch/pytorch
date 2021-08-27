@@ -525,7 +525,6 @@ Tensor cross_entropy_loss_label_smoothing(
     auto nllloss = at::nll_loss_nd(input, target, weight, reduction, ignore_index);
 
     auto n_classes = input.size(1);
-    auto batches = input.size(0);
 
     Tensor smooth_loss;
     if (weight.defined()) {
