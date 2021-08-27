@@ -349,6 +349,12 @@ const std::string embedding_bag_max_last_offset = R"JIT(
       return torch.embedding_bag(a, b, c, False, 2, False, None, True)
 )JIT";
 
+const auto expand_as_script = R"JIT(
+  def forward(self, input: Tensor, other:Tensor):
+      a = input.expand_as(other)
+      return a.clone()
+)JIT";
+
 const auto sign_tensor = R"JIT(
   def forward(self, input: Tensor):
       return torch.sign(input).clone()
@@ -756,3 +762,13 @@ const std::string quantize_script = R"IR(
       %1249: Tensor = aten::dequantize(%1254)
       return (%1249)
 )IR";
+
+const auto fmod_tensor = R"JIT(
+  def forward(self, a: Tensor, b: Tensor):
+      return torch.fmod(a, b).clone()
+)JIT";
+
+const auto fmod_scalar = R"JIT(
+  def forward(self, a: Tensor, b: int):
+      return torch.fmod(a, b).clone()
+)JIT";
