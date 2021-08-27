@@ -8,6 +8,7 @@ from torch.testing._internal.common_utils import TestCase, run_tests
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.utils._pytree as pytree
 import unittest
 import functools
 import itertools
@@ -157,26 +158,16 @@ class TestPythonKey(TestCase):
 
 class TestPythonKeyOperatorsOpInfo(TestCase):
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    @skipOps('TestPythonKeyOperatorsOpInfo', 'test_make_fx_exhaustive', {
+    xfail('to_sparse'),
+    xfail('rsub', 'rsub_scalar'),
+    xfail('linalg.matrix_power'),
+    xfail('linalg.inv'),
+    xfail('linalg.cholesky'),
+    xfail('linalg.eigvals'),
+    xfail('nn.functional.pad', 'circular'),
+    })
     def test_make_fx_exhaustive(self, device, dtype, op):
-        # These are ops that don't make sense to test
-        op_skip = {
-        }
-        # Unsupported input types
-        if opinfo_in_dict(op, op_skip):
-            return
-        # entries in here need don't work and need to be fixed.
-        # Each one of these is a bug
-        python_fail = {
-            'to_sparse',
-            'rsub.rsub_scalar',
-            'linalg.matrix_power',
-            'linalg.inv',
-            'linalg.cholesky',
-            'linalg.eigvals',
-            'nn.functional.pad.circular',
-        }
-        if opinfo_in_dict(op, python_fail):
-            return
 
         def f(args, kwargs):
             return op.op(*args, **kwargs)
@@ -188,7 +179,8 @@ class TestPythonKeyOperatorsOpInfo(TestCase):
             t = f(args, kwargs)
             # just since pytrees with torch.return_types doesn't work
             if isinstance(t, tuple):
-                continue
+                self.skipTest("output is a tuple that pytree doesn't work with")
+
             new_f = make_fx(f)(args, kwargs)
             for arg in args:
                 if isinstance(arg, torch.Tensor) and arg.dtype == torch.float:
@@ -221,7 +213,21 @@ class TestEagerFusionOpInfo(TestCase):
         xfail('reshape_as'),
         xfail('special.zeta', 'grad'),
         xfail('to_sparse'),
-        xfail('view_as')
+        xfail('view_as'),
+        xfail('addcdiv'),
+        xfail('atanh'),
+        xfail('addcdiv'),
+        xfail('atanh'),
+        xfail('cholesky'),
+        xfail('cumulative_trapezoid'),
+        xfail('diag_embed'),
+        xfail('linalg.householder_product'),
+        xfail('logit'),
+        xfail('matrix_exp'),
+        xfail('max', 'reduction_no_dim'),
+        xfail('min', 'reduction_no_dim'),
+        xfail('trapezoid'),
+        xfail('trapz'),
     })
     def test_eager_compilation_exhaustive(self, device, dtype, op):
 
@@ -235,15 +241,47 @@ class TestEagerFusionOpInfo(TestCase):
             args = [sample_input.input] + list(sample_input.args)
             kwargs = sample_input.kwargs
             if not all([isinstance(i, torch.Tensor) and i.dtype == torch.float for i in args]):
-                continue
+                self.skipTest("not all inputs are float tensors")
             if not all([isinstance(i, torch.Tensor) and i.dtype == torch.float for i in kwargs.values()]):
+                self.skipTest("not all inputs are float tensors")
                 continue
             t = f(args, kwargs)
             if isinstance(t, tuple):
+                self.skipTest("output is a tuple")
                 continue
-            # Unable to check for correctness since this currently doesn't work...
-            compiled_f = compiled_function(f, lambda x,_: x, lambda x,_: x).apply
-            out = compiled_f(args, kwargs)
+
+            def reset_grads():
+                def f(x):
+                    x.grad = None
+                pytree.tree_map(f, args)
+
+            def get_grads(args):
+                return pytree.tree_map(lambda x: x.grad, args)
+
+            compiled_f = compiled_function(f, lambda x,_: x, lambda x,_: x)
+
+            reset_grads()
+            compiled_f(args, kwargs).sum().backward()
+            compiled_grad = get_grads(args)
+
+            reset_grads()
+            f(args, kwargs).sum().backward()
+            orig_grad = get_grads(args)
+            self.assertEqual(orig_grad, compiled_grad)
+
+            args = pytree.tree_map(lambda x: x.detach().uniform_(0, 1), args)
+            for arg in args:
+                arg.requires_grad = True
+
+            reset_grads()
+            compiled_f(args, kwargs).sum().backward()
+            compiled_grad = get_grads(args)
+
+            reset_grads()
+            f(args, kwargs).sum().backward()
+            orig_grad = get_grads(args)
+            self.assertEqual(orig_grad, compiled_grad)
+
 
 
 only_for = ("cpu")

@@ -64,6 +64,8 @@ def partition_backwards(fx_module: fx.GraphModule):
         fwd_outputs = fwd_outputs[0]
     fw_graph.output(fwd_outputs)
     fw_module = fx.GraphModule(fx_module, fw_graph)
+    fw_module.graph.lint()
+    bw_module.graph.lint()
     return fw_module, bw_module
 
 
@@ -117,44 +119,57 @@ def compiled_function(fn, fw_compiler, bw_compiler):
     bw_module = None
     compiled_bw = None
 
-    def vjpfull(primals, tangents):
-        out, vjpfn = vjp(fn, *primals)
-        return out, vjpfn(*tangents)
+    saved_fn = None
+    def returned_function(*args, **kwargs):
+        nonlocal saved_fn
+        flattened_args, args_spec = pytree.tree_flatten((args, kwargs))
 
-    class CompiledFunction(torch.autograd.Function):
-        @staticmethod
-        def forward(ctx, *args):
-            nonlocal compiled_fw, compiled_bw, fw_module, bw_module
-            if compiled_fw is None:
-                out = fn(*args)
-                with torch.enable_grad():
-                    fx_g = make_fx(vjpfull)(args, (torch.randn_like(out),))
-                fw_module, bw_module = partition_backwards(fx_g)
+        if saved_fn is None:
+            def flat_fn(*args):
+                args, kwargs = pytree.tree_unflatten(args, args_spec)
+                return fn(*args, **kwargs)
+
+            def vjpfull(primals, tangents):
+                out, vjpfn = vjp(flat_fn, *primals)
+                return out, vjpfn(*tangents)
+
+            class CompiledFunction(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, *args):
+                    nonlocal compiled_fw, compiled_bw, fw_module, bw_module
+                    if compiled_fw is None:
+                        out = flat_fn(*args)
+                        with torch.enable_grad():
+                            fx_g = make_fx(vjpfull)(args, (torch.randn_like(out),))
+                        print(fx_g)
+                        fw_module, bw_module = partition_backwards(fx_g)
+
+                        compiled_fw = fw_compiler(fw_module, args)
+                        fw_outs = compiled_fw(*fw_module.graph.flatten_inps(args))
+
+                        if not isinstance(fw_outs, list):
+                            fw_outs = [fw_outs]
+
+                        bw_args = fw_outs[1:] + [torch.ones_like(fw_outs[0])]
+                        compiled_bw = bw_compiler(bw_module, bw_args)
+
+                    fw_outs = compiled_fw(*fw_module.graph.flatten_inps(args))
+                    if not isinstance(fw_outs, list):
+                        fw_outs = [fw_outs]
+                    ctx.activations = fw_outs[1:]
+                    return fw_outs[0]
+
+                @staticmethod
+                def backward(ctx, *args):
+                    out = compiled_bw(*ctx.activations, args[0].contiguous())
+                    if not isinstance(out, list):
+                        out = [out]
+                    return tuple(out)
+            saved_fn = CompiledFunction.apply
+        return saved_fn(*flattened_args)
 
 
-                compiled_fw = fw_compiler(fw_module, args)
-                fw_outs = compiled_fw(*fw_module.graph.flatten_inps(args))
-
-                if not isinstance(fw_outs, list):
-                    fw_outs = [fw_outs]
-
-                bw_args = fw_outs[1:] + [torch.ones_like(fw_outs[0])]
-                compiled_bw = bw_compiler(bw_module, bw_args)
-
-            fw_outs = compiled_fw(*fw_module.graph.flatten_inps(args))
-            if not isinstance(fw_outs, list):
-                fw_outs = [fw_outs]
-            ctx.activations = fw_outs[1:]
-            return fw_outs[0]
-
-        @staticmethod
-        def backward(ctx, *args):
-            out = compiled_bw(*ctx.activations, args[0].contiguous())
-            if not isinstance(out, list):
-                out = [out]
-            return tuple(out)
-
-    return CompiledFunction
+    return returned_function
 
 def tvm_function(fn, name):
     return compiled_function(fn, partial(tvm_compile, name=f'fw_{name}'), partial(tvm_compile, name=f'bw_{name}'))

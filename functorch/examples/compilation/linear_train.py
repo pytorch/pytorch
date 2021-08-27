@@ -43,7 +43,6 @@ jit_mod = torch.jit.script(mod)
 
 func_model, weights = make_functional(mod)
 lr =1.0
-optim = torch.optim.SGD(weights, lr=0.1)
 
 def functional_step(x, weights):
     weights = [weight.detach().requires_grad_() for weight in weights]
