@@ -27,11 +27,11 @@ class TORCH_API LoopNest {
  public:
   // A constructor for building a LoopNest from a list of Tensors
   LoopNest(
-      const std::vector<Tensor*>& output_tensors,
-      const std::vector<Tensor*>& tensors_to_compute);
+      const std::vector<Tensor>& output_tensors,
+      const std::vector<Tensor>& tensors_to_compute);
 
   // A convenience constructor for the case when all tensors are output tensors
-  LoopNest(const std::vector<Tensor*>& output_tensors);
+  LoopNest(const std::vector<Tensor>& output_tensors);
 
   // A constructor for building a LoopNest from an Stmt and a list of output
   // buffers.
@@ -45,10 +45,10 @@ class TORCH_API LoopNest {
     return root_stmt_;
   }
 
-  std::vector<ForPtr> getLoopStmtsFor(Tensor*) const;
+  std::vector<ForPtr> getLoopStmtsFor(Tensor) const;
   std::vector<ForPtr> getLoopStmtsFor(BufPtr) const;
   std::vector<ForPtr> getLoopStmtsFor(StmtPtr) const;
-  StmtPtr getLoopBodyFor(Tensor*) const;
+  StmtPtr getLoopBodyFor(Tensor) const;
   StmtPtr getLoopBodyFor(BufPtr) const;
 
   // Returns the For stmt indexed by 'indices' in the 'root' For stmt.
@@ -547,8 +547,8 @@ class TORCH_API LoopNest {
 
  private:
   void initialize(
-      const std::vector<Tensor*>& output_tensors,
-      const std::vector<Tensor*>& tensors_to_compute);
+      const std::vector<Tensor>& output_tensors,
+      const std::vector<Tensor>& tensors_to_compute);
   StmtPtr insertAllocFree(StmtPtr stmt);
   const std::unordered_set<BufPtr> getIntermediateBufs() const;
 
