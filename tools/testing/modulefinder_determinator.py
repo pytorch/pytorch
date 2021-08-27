@@ -181,6 +181,7 @@ def get_dep_modules(test: str) -> Set[str]:
 
     # HACK: some platforms default to ascii, so we can't just run_script :(
     finder = modulefinder.ModuleFinder(
+        path=sys.path + [os.fspath(REPO_ROOT)],
         # Ideally exclude all third party modules, to speed up calculation.
         excludes=[
             "scipy",
