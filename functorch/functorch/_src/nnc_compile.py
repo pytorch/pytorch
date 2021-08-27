@@ -343,8 +343,8 @@ def nnc_compile(fx_model: fx.GraphModule, example_inputs, get_loopnest = False) 
             # put it in our environment.
             if 'tensor_meta' in node.meta:
                 # todo: fix kwargs handling
-                if node.kwargs:
-                    raise RuntimeError("kwargs nyi")
+                # if node.kwargs:
+                #     raise RuntimeError("kwargs nyi")
                 buf, stmt = lower_function(node, node.target, lookup_env(node.args), node.args)
                 # if isinstance(stmt, list)
                 compute_stmts.extend(stmt)
