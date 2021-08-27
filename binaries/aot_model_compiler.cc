@@ -1,15 +1,15 @@
 #include <sstream>
 #include <string>
 
-#include "torch/csrc/jit/backends/backend.h"
-#include "torch/csrc/jit/backends/backend_detail.h"
-#include "torch/csrc/jit/backends/backend_preprocess.h"
-#include "torch/csrc/jit/mobile/nnc/aot_compiler.h"
-#include "torch/csrc/jit/passes/freeze_module.h"
-#include "torch/csrc/jit/passes/frozen_graph_optimizations.h"
-#include "torch/csrc/jit/serialization/export.h"
-#include "torch/csrc/jit/serialization/import.h"
-#include "torch/script.h"
+#include <torch/csrc/jit/backends/backend.h>
+#include <torch/csrc/jit/backends/backend_detail.h>
+#include <torch/csrc/jit/backends/backend_preprocess.h>
+#include <torch/csrc/jit/mobile/nnc/aot_compiler.h>
+#include <torch/csrc/jit/passes/freeze_module.h>
+#include <torch/csrc/jit/passes/frozen_graph_optimizations.h>
+#include <torch/csrc/jit/serialization/export.h>
+#include <torch/csrc/jit/serialization/import.h>
+#include <torch/script.h>
 
 
 C10_DEFINE_string(model, "", "The torch script model to optimize.");
