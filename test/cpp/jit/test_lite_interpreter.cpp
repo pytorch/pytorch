@@ -1347,9 +1347,7 @@ TEST(LiteInterpreterTest, DefaultArgsTensorinvSpecifyDefault) {
   ASSERT_EQ(arg_nums["aten::linalg_tensorinv"], 1);
   std::vector<torch::jit::IValue> inputs;
   const int N = 4;
-  auto input = torch::range(1, N * N * N * N, 1);
-  input[0] = 1; // a more stable matrix
-  input = input.view({N, N, N, N});
+  auto input = torch::rand({N, N, N, N});
   inputs.push_back(input);
   testLiteModuleCompareResultTensors(m, inputs);
 }
