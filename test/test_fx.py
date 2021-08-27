@@ -1280,6 +1280,12 @@ class TestFX(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, 'was used before it has been defined'):
             graph.lint()
 
+    def test_wrong_target_type(self):
+        graph : torch.fx.Graph = torch.fx.Graph()
+        with self.assertRaises(ValueError):
+            n = torch.fx.Node(graph=graph, name='foo', op='call_function', target='foo',
+                              args=(), kwargs={})
+
     def test_example_shape_prop(self):
         class TestCase(torch.nn.Module):
             def __init__(self):
