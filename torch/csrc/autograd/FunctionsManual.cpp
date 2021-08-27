@@ -1,5 +1,7 @@
 #include <torch/csrc/autograd/FunctionsManual.h>
 #include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/autograd/functions/utils.h>
+
 
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
@@ -42,10 +44,6 @@ const char* kCudnnDoubleBackwardMsg = "Double backwards is not supported for CuD
 
 bool isDefined(const c10::optional<Tensor>& t) {
   return t.has_value() && t->defined();
-}
-
-bool isFwGradDefined(const c10::optional<Tensor>& t) {
-  return t.has_value() && t->defined() && t->_fw_grad(/*level */ 0).defined();
 }
 
 Tensor toNonOptTensor(const c10::optional<Tensor>& t) {

@@ -1604,10 +1604,6 @@
   self: soft_margin_loss_backward(grad, self, target, reduction)
 
 - name: relu(Tensor self) -> Tensor
-  self: threshold_backward(grad, self, 0)
-
-# NB: `output` instead of `self` saves memory. It avoids saving a copy of self.
-- name: relu_(Tensor(a!) self) -> Tensor(a!)
   self: threshold_backward(grad, result, 0)
 
 - name: silu(Tensor self) -> Tensor
