@@ -10675,6 +10675,10 @@ TEST(NVFuserTest, FusionBiasGeluFwd_CUDA) {
 }
 
 TEST(NVFuserTest, FusionBiasGeluBwd_CUDA) {
+  // skipping on pre-volta device
+  if (at::cuda::getDeviceProperties(c10::cuda::current_device())->major < 7) {
+    return;
+  }
   Fusion fusion;
   FusionGuard fg(&fusion);
 
