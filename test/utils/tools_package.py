@@ -21,7 +21,7 @@ were a package.
 This is only approved for use in PyTorch tests.
 
 Example (in some test file):
-  from torchtestutils.tools_package import tools
+  from utils.tools_package import tools
 
   # Add whatever imports below tools make sense here, e.g.
   import tools.codegen.model
@@ -37,7 +37,7 @@ import sys
 def _import_tools_module():
     """Imports and returns the tools module."""
     # We expect this file to be
-    # <repo-root>/test/torchtestutils/tools_package.py, so we have to go up two
+    # <repo-root>/test/utils/tools_package.py, so we have to go up two
     # levels to find the repository root.
     PYTORCH_DIR = pathlib.Path(__file__).parent.parent.parent
 
