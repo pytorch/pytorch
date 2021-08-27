@@ -142,7 +142,7 @@ def get_spec(arg):
             tuple(arg.stride()),
             arg.dtype,
             arg.device)
-    return ValueSpec(arg)
+    return ConcreteValueSpec(arg)
 
 def construct_specialization_key(f, args):
     flat_args, _ = pytree.tree_flatten(args)
@@ -169,10 +169,11 @@ def add_to_cache(f, key, compiled_f):
     else:
         nnc_jit_cache[f][key] = compiled_f
 
-def nnc_jit(f):
+def nnc_jit(f, static_argnums=None):
     cached = None
     @functools.wraps(f)
     def compiled(*args):
+        nonlocal static_argnums
         key = construct_specialization_key(f, args)
         status, compiled_f = retrieve_from_cache(f, key)
         if status is RetrievalStatus.Success:
@@ -187,6 +188,15 @@ def nnc_jit(f):
 
         fx_model = make_fx(f)(*args)
         fx_model.graph.lint()
+        if static_argnums is None:
+            static_argnums = []
+        if isinstance(static_argnums, int):
+            static_argnums = [static_argnums]
+        args = list(args)
+        for idx in range(len(args)):
+            if idx in static_argnums:
+                args[idx] = torch.empty(())
+        args = tuple(args)
         compiled_f = nnc_compile(fx_model, args)
         add_to_cache(f, key, compiled_f)
         return compiled_f(*args)
