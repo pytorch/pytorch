@@ -198,12 +198,27 @@ bool checkRtol(const at::Tensor& diff, const std::vector<at::Tensor> inputs) {
   }
   return diff.abs().max().item<float>() < 2e-6 * maxValue;
 }
+
 bool almostEqual(const at::Tensor& a, const at::Tensor& b) {
   return checkRtol(a - b, {a, b});
 }
 
 bool exactlyEqual(const at::Tensor& a, const at::Tensor& b) {
   return (a - b).abs().max().item<float>() == 0.f;
+}
+
+bool exactlyEqual(
+    const std::vector<at::Tensor>& a,
+    const std::vector<at::Tensor>& b) {
+  if (a.size() != b.size()) {
+    return false;
+  }
+  for (size_t i = 0; i < a.size(); ++i) {
+    if (!exactlyEqual(a[i], b[i])) {
+      return false;
+    }
+  }
+  return true;
 }
 
 std::pair<at::Tensor, at::Tensor> lstm(
@@ -247,6 +262,23 @@ RegisterOperators reg({
         aliasAnalysisFromSchema()),
 });
 } // namespace
+
+std::vector<at::Tensor> runGraph(
+    std::shared_ptr<Graph> graph,
+    const std::vector<at::Tensor>& inputs) {
+  std::vector<IValue> stack = fmap<IValue>(inputs);
+  Code code(graph, "test");
+  InterpreterState(code).run(stack);
+  TORCH_INTERNAL_ASSERT(!stack.empty());
+  // Graph outputs that are handled below:
+  //   * A list of Tensors.
+  //   * 1 Tensor.
+  if (stack.front().isTensorList()) {
+    return stack.front().toTensorVector();
+  }
+  TORCH_INTERNAL_ASSERT(stack.front().isTensor());
+  return {stack.front().toTensor()};
+}
 
 } // namespace jit
 } // namespace torch

@@ -328,7 +328,7 @@ class MultiplicativeLR(_LRScheduler):
             return [group['lr'] * lmbda(self.last_epoch)
                     for lmbda, group in zip(self.lr_lambdas, self.optimizer.param_groups)]
         else:
-            return list(self.base_lrs)
+            return [group['lr'] for group in self.optimizer.param_groups]
 
 
 class StepLR(_LRScheduler):
@@ -526,7 +526,7 @@ class ExponentialLR(_LRScheduler):
                           "please use `get_last_lr()`.", UserWarning)
 
         if self.last_epoch == 0:
-            return self.base_lrs
+            return [group['lr'] for group in self.optimizer.param_groups]
         return [group['lr'] * self.gamma
                 for group in self.optimizer.param_groups]
 
@@ -586,7 +586,7 @@ class CosineAnnealingLR(_LRScheduler):
                           "please use `get_last_lr()`.", UserWarning)
 
         if self.last_epoch == 0:
-            return self.base_lrs
+            return [group['lr'] for group in self.optimizer.param_groups]
         elif (self.last_epoch - 1 - self.T_max) % (2 * self.T_max) == 0:
             return [group['lr'] + (base_lr - self.eta_min) *
                     (1 - math.cos(math.pi / self.T_max)) / 2
@@ -601,6 +601,44 @@ class CosineAnnealingLR(_LRScheduler):
         return [self.eta_min + (base_lr - self.eta_min) *
                 (1 + math.cos(math.pi * self.last_epoch / self.T_max)) / 2
                 for base_lr in self.base_lrs]
+
+
+class ChainedScheduler(_LRScheduler):
+    """Chains list of learning rate schedulers. It takes a list of chainable learning
+    rate schedulers and performs consecutive step() functions belong to them by just
+    one call.
+
+    Args:
+        schedulers (list): List of chained schedulers.
+
+    Example:
+        >>> # Assuming optimizer uses lr = 1. for all groups
+        >>> # lr = 0.09     if epoch == 0
+        >>> # lr = 0.081    if epoch == 1
+        >>> # lr = 0.729    if epoch == 2
+        >>> # lr = 0.6561   if epoch == 3
+        >>> # lr = 0.59049  if epoch >= 4
+        >>> scheduler1 = WarmUpLR(self.opt, warmup_factor=0.1, warmup_iters=2, warmup_method="constant")
+        >>> scheduler2 = ExponentialLR(self.opt, gamma=0.9)
+        >>> scheduler = ChainedScheduler([scheduler1, scheduler2])
+        >>> for epoch in range(100):
+        >>>     train(...)
+        >>>     validate(...)
+        >>>     scheduler.step()
+    """
+
+    def __init__(self, schedulers):
+        for scheduler_idx in range(1, len(schedulers)):
+            if (schedulers[scheduler_idx].optimizer != schedulers[0].optimizer):
+                raise ValueError(
+                    "ChainedScheduler expects all schedulers to belong to the same optimizer, but "
+                    "got schedulers at index {} and {} to be different".format(0, scheduler_idx)
+                )
+        self.schedulers = list(schedulers)
+
+    def step(self):
+        for scheduler in self.schedulers:
+            scheduler.step()
 
 
 class ReduceLROnPlateau(object):
