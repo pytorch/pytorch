@@ -2170,28 +2170,6 @@ def sample_inputs_take_along_dim(op_info, device, dtype, requires_grad, **kwargs
             )
 
 
-def sample_inputs_amax_amin(op_info, device, dtype, requires_grad, **kwargs):
-    # Ordered as (input shape, kwargs)
-    test_cases: Tuple[tuple, dict] = (  # type: ignore[assignment]
-        ((S, S, S), {}),
-        ((S, S, S), {'dim': 1}),
-        ((S, S, S), {'dim': (1, 2,)}),
-        ((S, S, S), {'dim': 1, 'keepdim': True}),
-        ((), {'dim': 0}),
-        ((), {}),
-        ((), {'dim': 0, 'keepdim': True}),
-    )
-
-    samples: List[SampleInput] = []
-    for shape, kwargs in test_cases:
-        samples.append(SampleInput(
-            make_tensor(shape, device, dtype, requires_grad=requires_grad),
-            kwargs=kwargs))
-
-    return samples
-
-# TODO (@heitorschueroff) Once aminmax supports multiple dims this should
-# be combined with the above test.
 def sample_inputs_aminmax(op_info, device, dtype, requires_grad, **kwargs):
     test_cases: Tuple[tuple, dict] = (  # type: ignore[assignment]
         ((S, S, S), {}),
@@ -2209,33 +2187,6 @@ def sample_inputs_aminmax(op_info, device, dtype, requires_grad, **kwargs):
             kwargs=kwargs))
 
     return samples
-
-def sample_inputs_argmax_argmin(op_info, device, dtype, requires_grad, **kwargs):
-    test_cases = (
-        ((2, 2, 2), ()),
-        ((2, 2, 2), (0,)),
-        ((2, 2, 2), (1,)),
-        ((2, 2, 2), (2,)),
-        ((2, 2, 2), (2, True,)),
-        ((2, 2, 2), (None,)),
-        ((), (0,)),
-        ((), ()),
-        ((), (None, True,)),
-        ((1,), ()),
-        ((1,), (0,)),
-        ((1,), (0, True)),
-        ((2,), ()),
-        ((2,), (0,)),
-        ((2,), (0, True)),
-        ((2, 2, 3), ()),
-        ((2, 2, 3), (0,)),
-        ((2, 2, 3), (1,)),
-        ((2, 2, 3), (None, True)),
-    )
-    return tuple(SampleInput((make_tensor(size, device, dtype,
-                                          requires_grad=requires_grad)),
-                             args=args)
-                 for size, args in test_cases)
 
 def sample_inputs_diff(op_info, device, dtype, requires_grad, **kwargs):
     test_cases = (
@@ -2633,6 +2584,14 @@ def sample_inputs_reduction_quantile(op_info, device, dtype, requires_grad):
                     inputs.append(SampleInput(t, args=(quantiles,), kwargs=kwargs))
 
     return inputs
+
+def sample_inputs_reduction_count_nonzero(*args, **kwargs):
+    """Sample inputs for count_nonzero"""
+    samples: List[SampleInput] = sample_inputs_reduction(*args, **kwargs)
+    # count_nonzero does not support keepdim yet
+    for sample in samples:
+        sample.kwargs.pop('keepdim', None)
+    return samples
 
 def sample_inputs_leaky_relu(op_info, device, dtype, requires_grad):
     N = 10
@@ -5823,22 +5782,6 @@ op_db: List[OpInfo] = [
                # TODO: update sample inputs with for_inplace_variant kwarg to support this test
                SkipInfo('TestCommon', 'test_variant_consistency_eager'),),
            sample_inputs_func=sample_inputs_addcmul_addcdiv),
-    OpInfo('amax',
-           ref=lambda a, dim=None, keepdim=False, **kwargs: np.amax(a, axis=dim, keepdims=keepdim, **kwargs),
-           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-           sample_inputs_func=sample_inputs_amax_amin,),
-    OpInfo('amin',
-           ref=lambda a, dim=None, keepdim=False, **kwargs: np.amin(a, axis=dim, keepdims=keepdim, **kwargs),
-           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-           sample_inputs_func=sample_inputs_amax_amin),
-    OpInfo('argmax',
-           dtypes=all_types_and(torch.float16, torch.bfloat16),
-           supports_autograd=False,
-           sample_inputs_func=sample_inputs_argmax_argmin,),
-    OpInfo('argmin',
-           dtypes=all_types_and(torch.float16, torch.bfloat16),
-           supports_autograd=False,
-           sample_inputs_func=sample_inputs_argmax_argmin,),
     UnaryUfuncInfo('asin',
                    aliases=('arcsin', ),
                    ref=np.arcsin,
@@ -7096,10 +7039,6 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_max_min_reduction_no_dim,),
-    OpInfo('nansum',
-           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-           supports_out=False,
-           sample_inputs_func=sample_inputs_reduction),
     # TODO(@heitorschueroff) Add test for dtype kwarg
     OpInfo('mean',
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
@@ -7458,16 +7397,6 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            skips=(
                SkipInfo('TestMathBits', 'test_conj_view', device_type='cuda'),),),
-    OpInfo('prod',
-           dtypes=all_types_and_complex_and(torch.bool),
-           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
-           skips=(
-               # prod does not support the (Tensor, *, out) overload
-               SkipInfo('TestCommon', 'test_out',
-                        dtypes=[torch.float32]),
-           ),
-           sample_inputs_func=sample_inputs_prod,
-           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
     OpInfo('qr',
            op=torch.qr,
            dtypes=floating_and_complex_types(),
@@ -8954,12 +8883,166 @@ op_db: List[OpInfo] = [
         ),
     ),
     ReductionOpInfo(
+        'all',
+        identity=True,
+        supports_multiple_dims=False,
+        supports_out=False,
+        supports_autograd=False,
+        result_dtype=torch.bool,
+        dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+        skips=(
+            # FIXME: does not support passing keepdim without dim
+            SkipInfo('TestReductions', 'test_dim_default_keepdim'),
+            # FIXME: does not support dim=None
+            SkipInfo('TestReductions', 'test_dim_none'),
+            SkipInfo('TestReductions', 'test_dim_none_keepdim'),
+            # FIXME: uint8 input returns uint8 instead of bool
+            SkipInfo('TestReductions', 'test_result_dtype', dtypes=[torch.uint8]),
+        ),
+    ),
+    ReductionOpInfo(
+        'any',
+        identity=False,
+        supports_multiple_dims=False,
+        supports_out=False,
+        supports_autograd=False,
+        result_dtype=torch.bool,
+        dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+        skips=(
+            # FIXME: does not support passing keepdim without dim
+            SkipInfo('TestReductions', 'test_dim_default_keepdim'),
+            # FIXME: does not support dim=None
+            SkipInfo('TestReductions', 'test_dim_none'),
+            SkipInfo('TestReductions', 'test_dim_none_keepdim'),
+            # FIXME: uint8 input returns uint8 instead of bool
+            SkipInfo('TestReductions', 'test_result_dtype', dtypes=[torch.uint8]),
+        ),
+    ),
+    ReductionOpInfo(
+        'amax',
+        nan_policy='propagate',
+        dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+        ref=lambda a, dim=None, keepdim=False, **kwargs: np.amax(a, axis=dim, keepdims=keepdim, **kwargs),
+        skips=(
+            # FIXME: sum reduces all dimensions when dim=[]
+            SkipInfo('TestReductions', 'test_dim_empty'),
+            SkipInfo('TestReductions', 'test_dim_empty_keepdim'),
+        ),
+    ),
+    ReductionOpInfo(
+        'amin',
+        nan_policy='propagate',
+        dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+        ref=lambda a, dim=None, keepdim=False, **kwargs: np.amin(a, axis=dim, keepdims=keepdim, **kwargs),
+        skips=(
+            # FIXME: sum reduces all dimensions when dim=[]
+            SkipInfo('TestReductions', 'test_dim_empty'),
+            SkipInfo('TestReductions', 'test_dim_empty_keepdim'),
+        ),
+    ),
+    ReductionOpInfo(
+        'argmax',
+        supports_multiple_dims=False,
+        supports_autograd=False,
+        result_dtype=torch.int64,
+        dtypes=all_types_and(torch.float16, torch.bfloat16),
+        skips=(
+            # FIXME: keepdim parameter is ignored when dim=None
+            SkipInfo('TestReductions', 'test_dim_default_keepdim'),
+            SkipInfo('TestReductions', 'test_dim_none_keepdim'),
+        ),
+    ),
+    ReductionOpInfo(
+        'argmin',
+        supports_multiple_dims=False,
+        supports_autograd=False,
+        result_dtype=torch.int64,
+        dtypes=all_types_and(torch.float16, torch.bfloat16),
+        skips=(
+            # FIXME: keepdim parameter is ignored when dim=None
+            SkipInfo('TestReductions', 'test_dim_default_keepdim'),
+            SkipInfo('TestReductions', 'test_dim_none_keepdim'),
+        ),
+    ),
+    ReductionOpInfo(
+        'count_nonzero',
+        identity=0,
+        supports_out=False,
+        supports_autograd=False,
+        result_dtype=torch.int64,
+        dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+        sample_inputs_func=sample_inputs_reduction_count_nonzero,
+        skips=(
+            # FIXME: count_nonzero does not accept keepdim kwarg
+            SkipInfo('TestReductions', 'test_dim_default_keepdim'),
+            SkipInfo('TestReductions', 'test_dim_none_keepdim'),
+            SkipInfo('TestReductions', 'test_dim_single_keepdim'),
+            SkipInfo('TestReductions', 'test_dim_empty_keepdim'),
+            SkipInfo('TestReductions', 'test_dim_multi_keepdim'),
+            SkipInfo('TestReductions', 'test_dim_multi_unsorted_keepdim'),
+            SkipInfo('TestReductions', 'test_dim_offbounds_keepdim'),
+            # FIXME: dim=[] reduces all dimensions
+            SkipInfo('TestReductions', 'test_dim_empty'),
+        ),
+    ),
+    ReductionOpInfo(
+        'prod',
+        identity=1,
+        nan_policy='propagate',
+        supports_multiple_dims=False,
+        supports_out=False,
+        promotes_int_to_int64=True,
+        gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+        dtypes=all_types_and_complex_and(torch.bool),
+        dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+        sample_inputs_func=sample_inputs_prod,
+        skips=(
+            # FIXME: prod does not support passing keepdim without passing dim
+            SkipInfo('TestReductions', 'test_dim_default_keepdim'),
+            # FIXME: prod reduces all dimensions when dim=[]
+            SkipInfo('TestReductions', 'test_dim_empty'),
+            SkipInfo('TestReductions', 'test_dim_empty_keepdim'),
+            # FIXME: prod does not support passing None to dim
+            SkipInfo('TestReductions', 'test_dim_none'),
+            SkipInfo('TestReductions', 'test_dim_none_keepdim'),
+        ),
+    ),
+    ReductionOpInfo(
         'sum',
         identity=0,
+        nan_policy='propagate',
         supports_out=False,
         supports_forward_ad=True,
         promotes_int_to_int64=True,
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+        skips=(
+            # FIXME: sum does not support passing keepdim without passing dim
+            SkipInfo('TestReductions', 'test_dim_default_keepdim'),
+            # FIXME: sum reduces all dimensions when dim=[]
+            SkipInfo('TestReductions', 'test_dim_empty'),
+            SkipInfo('TestReductions', 'test_dim_empty_keepdim'),
+            # FIXME: sum does not support passing None to dim
+            SkipInfo('TestReductions', 'test_dim_none'),
+            SkipInfo('TestReductions', 'test_dim_none_keepdim'),
+        ),
+    ),
+    ReductionOpInfo(
+        'nansum',
+        identity=0,
+        nan_policy='omit',
+        supports_out=False,
+        promotes_int_to_int64=True,
+        dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
+        skips=(
+            # FIXME: nansum does not support passing keepdim without passing dim
+            SkipInfo('TestReductions', 'test_dim_default_keepdim'),
+            # FIXME: nansum reduces all dimensions when dim=[]
+            SkipInfo('TestReductions', 'test_dim_empty'),
+            SkipInfo('TestReductions', 'test_dim_empty_keepdim'),
+            # FIXME: nansum does not support passing None to dim
+            SkipInfo('TestReductions', 'test_dim_none'),
+            SkipInfo('TestReductions', 'test_dim_none_keepdim'),
+        ),
     ),
 ]
 

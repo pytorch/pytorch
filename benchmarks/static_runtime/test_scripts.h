@@ -349,6 +349,12 @@ const std::string embedding_bag_max_last_offset = R"JIT(
       return torch.embedding_bag(a, b, c, False, 2, False, None, True)
 )JIT";
 
+const auto expand_as_script = R"JIT(
+  def forward(self, input: Tensor, other:Tensor):
+      a = input.expand_as(other)
+      return a.clone()
+)JIT";
+
 const auto sign_tensor = R"JIT(
   def forward(self, input: Tensor):
       return torch.sign(input).clone()
