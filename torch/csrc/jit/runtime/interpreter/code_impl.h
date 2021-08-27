@@ -802,7 +802,9 @@ struct MobileCodeImpl : CodeImpl {
     }
   }
 
+  // To support forward compatibility for bytecode version bump from v5 to v6
   bool emit_default_input_instructions_;
+  // To support forward compatibility for bytecode version bump from v6 to v7
   bool support_default_args_before_out_;
 };
 
