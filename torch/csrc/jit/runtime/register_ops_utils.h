@@ -35,15 +35,15 @@
 
 namespace torch {
 namespace jit {
-inline c10::AliasAnalysisKind aliasAnalysisFromSchema() {
+constexpr inline c10::AliasAnalysisKind aliasAnalysisFromSchema() {
   return c10::AliasAnalysisKind::FROM_SCHEMA;
 }
 
-inline c10::AliasAnalysisKind aliasAnalysisConservative() {
+constexpr inline c10::AliasAnalysisKind aliasAnalysisConservative() {
   return c10::AliasAnalysisKind::CONSERVATIVE;
 }
 
-inline c10::AliasAnalysisKind aliasAnalysisSpecialCase() {
+constexpr inline c10::AliasAnalysisKind aliasAnalysisSpecialCase() {
   return c10::AliasAnalysisKind::INTERNAL_SPECIAL_CASE;
 }
 
@@ -430,9 +430,46 @@ void listCopyAndSort<at::Tensor>(Stack* stack);
 
 void listSetItem(Stack* stack);
 
+struct OperatorGeneratorArgs {
+  const char* schema_str;
+  bool isOperationCreator;
+  union {
+    void (*operation)(Stack*);
+    OperationCreator operationCreator;
+  };
+  AliasAnalysisKind aliasAnalysis;
+
+  explicit constexpr OperatorGeneratorArgs(
+      torch::detail::SelectiveStr<true> schema_str,
+      void (*op)(Stack*),
+      AliasAnalysisKind aa)
+      : schema_str(schema_str),
+        isOperationCreator(false),
+        operation(op),
+        aliasAnalysis(aa) {}
+
+  explicit constexpr OperatorGeneratorArgs(
+      torch::detail::SelectiveStr<true> schema_str,
+      OperationCreator opCreator,
+      AliasAnalysisKind aa)
+      : schema_str(schema_str),
+        isOperationCreator(true),
+        operationCreator(opCreator),
+        aliasAnalysis(aa) {}
+
+  template <typename... Args>
+  explicit constexpr OperatorGeneratorArgs(
+      torch::detail::SelectiveStr<false>,
+      Args...)
+      : schema_str(nullptr),
+        isOperationCreator(false),
+        operation(nullptr),
+        aliasAnalysis(AliasAnalysisKind::INTERNAL_SPECIAL_CASE) {}
+};
+
 #define DEFINE_GENERIC_BINARY_OP(                                             \
     aten_op, op, int_float_result, complex_result)                            \
-  OperatorGenerator(                                                          \
+  OperatorGeneratorArgs(                                                      \
       TORCH_SELECTIVE_SCHEMA(#aten_op                                         \
                              ".int_int(int a, int b) -> " #int_float_result), \
       [](Stack* stack) {                                                      \
@@ -441,7 +478,7 @@ void listSetItem(Stack* stack);
         push(stack, op);                                                      \
       },                                                                      \
       aliasAnalysisFromSchema()),                                             \
-      OperatorGenerator(                                                      \
+      OperatorGeneratorArgs(                                                  \
           TORCH_SELECTIVE_SCHEMA(                                             \
               #aten_op                                                        \
               ".float_float(float a, float b) -> " #int_float_result),        \
@@ -451,7 +488,7 @@ void listSetItem(Stack* stack);
             push(stack, op);                                                  \
           },                                                                  \
           aliasAnalysisFromSchema()),                                         \
-      OperatorGenerator(                                                      \
+      OperatorGeneratorArgs(                                                  \
           TORCH_SELECTIVE_SCHEMA(                                             \
               #aten_op                                                        \
               ".complex_complex(complex a, complex b) -> " #complex_result),  \
@@ -464,7 +501,7 @@ void listSetItem(Stack* stack);
 
 // define implementations for primitive number ops
 #define DEFINE_GENERIC_OP(aten_op, int_op, float_op, int_result, float_result) \
-  OperatorGenerator(                                                           \
+  OperatorGeneratorArgs(                                                       \
       TORCH_SELECTIVE_SCHEMA(#aten_op ".int(int a, int b) -> " #int_result),   \
       [](Stack* stack) {                                                       \
         int64_t a, b;                                                          \
@@ -472,7 +509,7 @@ void listSetItem(Stack* stack);
         push(stack, int_op);                                                   \
       },                                                                       \
       aliasAnalysisFromSchema()),                                              \
-      OperatorGenerator(                                                       \
+      OperatorGeneratorArgs(                                                   \
           TORCH_SELECTIVE_SCHEMA(                                              \
               #aten_op ".float(float a, float b) -> " #float_result),          \
           [](Stack* stack) {                                                   \
@@ -483,7 +520,7 @@ void listSetItem(Stack* stack);
           aliasAnalysisFromSchema())
 
 #define DEFINE_INT_FLOAT_OP(aten_op, op, result)                            \
-  OperatorGenerator(                                                        \
+  OperatorGeneratorArgs(                                                    \
       TORCH_SELECTIVE_SCHEMA(#aten_op                                       \
                              ".int_float(int a, float b) -> " #result),     \
       [](Stack* stack) {                                                    \
@@ -493,7 +530,7 @@ void listSetItem(Stack* stack);
         push(stack, op);                                                    \
       },                                                                    \
       aliasAnalysisFromSchema()),                                           \
-      OperatorGenerator(                                                    \
+      OperatorGeneratorArgs(                                                \
           TORCH_SELECTIVE_SCHEMA(#aten_op                                   \
                                  ".float_int(float a, int b) -> " #result), \
           [](Stack* stack) {                                                \
@@ -505,7 +542,7 @@ void listSetItem(Stack* stack);
           aliasAnalysisFromSchema())
 
 #define DEFINE_INT_OP(aten_op, op)                                  \
-  OperatorGenerator(                                                \
+  OperatorGeneratorArgs(                                            \
       TORCH_SELECTIVE_SCHEMA(#aten_op ".int(int a, int b) -> int"), \
       [](Stack* stack) {                                            \
         int64_t a, b;                                               \
@@ -515,7 +552,7 @@ void listSetItem(Stack* stack);
       aliasAnalysisFromSchema())
 
 #define DEFINE_STR_CMP_OP(aten_op, op)                               \
-  OperatorGenerator(                                                 \
+  OperatorGeneratorArgs(                                             \
       TORCH_SELECTIVE_SCHEMA(#aten_op ".str(str a, str b) -> bool"), \
       [](Stack* stack) {                                             \
         auto b = pop(stack).toStringRef();                           \
@@ -530,7 +567,7 @@ void listSetItem(Stack* stack);
 // in unintended implicit conversions
 #define DEFINE_SCALAR_BINARY_OP_AVOID_COLLISION_GENERIC(          \
     aten_op, int_op, float_op, result, string_val)                \
-  OperatorGenerator(                                              \
+  OperatorGeneratorArgs(                                          \
       TORCH_SELECTIVE_SCHEMA(#aten_op string_val                  \
                              "(Scalar a, Scalar b) -> " #result), \
       [](Stack* stack) {                                          \
@@ -586,7 +623,7 @@ void listSetItem(Stack* stack);
       DEFINE_STR_CMP_OP(aten_op, op)
 
 #define DEFINE_UNARY_INT_OP(aten_op, op, result)                  \
-  OperatorGenerator(                                              \
+  OperatorGeneratorArgs(                                          \
       TORCH_SELECTIVE_SCHEMA(#aten_op ".int(int a) -> " #result), \
       [](Stack* stack) {                                          \
         int64_t a;                                                \
@@ -596,7 +633,7 @@ void listSetItem(Stack* stack);
       aliasAnalysisFromSchema())
 
 #define DEFINE_UNARY_FLOAT_OP(aten_op, op, result)                    \
-  OperatorGenerator(                                                  \
+  OperatorGeneratorArgs(                                              \
       TORCH_SELECTIVE_SCHEMA(#aten_op ".float(float a) -> " #result), \
       [](Stack* stack) {                                              \
         double a;                                                     \
@@ -608,7 +645,7 @@ void listSetItem(Stack* stack);
 #define DEFINE_UNARY_OP(aten_op, op, int_result, float_result)            \
   DEFINE_UNARY_INT_OP(aten_op, op, int_result),                           \
       DEFINE_UNARY_FLOAT_OP(aten_op, op, float_result),                   \
-      OperatorGenerator(                                                  \
+      OperatorGeneratorArgs(                                              \
           TORCH_SELECTIVE_SCHEMA(#aten_op ".Scalar(Scalar a) -> Scalar"), \
           [](Stack* stack) {                                              \
             IValue x;                                                     \
@@ -623,7 +660,7 @@ void listSetItem(Stack* stack);
           },                                                              \
           aliasAnalysisFromSchema())
 #define DEFINE_BOOL_OP(aten_op, op)                                     \
-  OperatorGenerator(                                                    \
+  OperatorGeneratorArgs(                                                \
       TORCH_SELECTIVE_SCHEMA(#aten_op ".bool(bool a, bool b) -> bool"), \
       [](Stack* stack) {                                                \
         bool a, b;                                                      \
@@ -632,7 +669,7 @@ void listSetItem(Stack* stack);
       },                                                                \
       aliasAnalysisFromSchema())
 #define DEFINE_STRING_OP(op_name, string_op, result)                    \
-  OperatorGenerator(                                                    \
+  OperatorGeneratorArgs(                                                \
       TORCH_SELECTIVE_SCHEMA(#op_name ".str(str a, str b) ->" #result), \
       [](Stack* stack) {                                                \
         auto b = pop(stack).toStringRef();                              \
@@ -646,7 +683,7 @@ void listSetItem(Stack* stack);
 //-----------------------------------------------------------------------------
 //-----------------------------------------------------------------------------
 #define DEFINE_UNARY_COMPLEX_OP(aten_op, op, result)                      \
-  OperatorGenerator(                                                      \
+  OperatorGeneratorArgs(                                                  \
       TORCH_SELECTIVE_SCHEMA(#aten_op ".complex(complex a) -> " #result), \
       [](Stack* stack) {                                                  \
         c10::complex<double> a;                                           \
@@ -670,7 +707,7 @@ void listSetItem(Stack* stack);
   DEFINE_UNARY_INT_OP(aten_op, op, int_result),                           \
       DEFINE_UNARY_FLOAT_OP(aten_op, op, float_result),                   \
       DEFINE_UNARY_COMPLEX_OP(aten_op, op, complex_result),               \
-      OperatorGenerator(                                                  \
+      OperatorGeneratorArgs(                                              \
           TORCH_SELECTIVE_SCHEMA(#aten_op ".Scalar(Scalar a) -> Scalar"), \
           [](Stack* stack) {                                              \
             IValue x;                                                     \
@@ -700,7 +737,7 @@ void listSetItem(Stack* stack);
     int_result,                                                               \
     float_result,                                                             \
     complex_result)                                                           \
-  OperatorGenerator(                                                          \
+  OperatorGeneratorArgs(                                                      \
       TORCH_SELECTIVE_SCHEMA(#aten_op ".int(int a, int b) -> " #int_result),  \
       [](Stack* stack) {                                                      \
         int64_t a, b;                                                         \
@@ -708,7 +745,7 @@ void listSetItem(Stack* stack);
         push(stack, int_op);                                                  \
       },                                                                      \
       aliasAnalysisFromSchema()),                                             \
-      OperatorGenerator(                                                      \
+      OperatorGeneratorArgs(                                                  \
           TORCH_SELECTIVE_SCHEMA(                                             \
               #aten_op ".complex(complex a, complex b) -> " #complex_result), \
           [](Stack* stack) {                                                  \
@@ -717,7 +754,7 @@ void listSetItem(Stack* stack);
             push(stack, complex_op);                                          \
           },                                                                  \
           aliasAnalysisFromSchema()),                                         \
-      OperatorGenerator(                                                      \
+      OperatorGeneratorArgs(                                                  \
           TORCH_SELECTIVE_SCHEMA(                                             \
               #aten_op ".float(float a, float b) -> " #float_result),         \
           [](Stack* stack) {                                                  \
@@ -728,7 +765,7 @@ void listSetItem(Stack* stack);
           aliasAnalysisFromSchema())
 
 #define DEFINE_INT_COMPLEX_OP(aten_op, op, result)                          \
-  OperatorGenerator(                                                        \
+  OperatorGeneratorArgs(                                                    \
       TORCH_SELECTIVE_SCHEMA(#aten_op                                       \
                              ".int_complex(int a, complex b) -> " #result), \
       [](Stack* stack) {                                                    \
@@ -738,7 +775,7 @@ void listSetItem(Stack* stack);
         push(stack, op);                                                    \
       },                                                                    \
       aliasAnalysisFromSchema()),                                           \
-      OperatorGenerator(                                                    \
+      OperatorGeneratorArgs(                                                \
           TORCH_SELECTIVE_SCHEMA(                                           \
               #aten_op ".complex_int(complex a, int b) -> " #result),       \
           [](Stack* stack) {                                                \
@@ -750,7 +787,7 @@ void listSetItem(Stack* stack);
           aliasAnalysisFromSchema())
 
 #define DEFINE_FLOAT_COMPLEX_OP(aten_op, op, result)                      \
-  OperatorGenerator(                                                      \
+  OperatorGeneratorArgs(                                                  \
       TORCH_SELECTIVE_SCHEMA(                                             \
           #aten_op ".float_complex(float a, complex b) -> " #result),     \
       [](Stack* stack) {                                                  \
@@ -760,7 +797,7 @@ void listSetItem(Stack* stack);
         push(stack, op);                                                  \
       },                                                                  \
       aliasAnalysisFromSchema()),                                         \
-      OperatorGenerator(                                                  \
+      OperatorGeneratorArgs(                                              \
           TORCH_SELECTIVE_SCHEMA(                                         \
               #aten_op ".complex_float(complex a, float b) -> " #result), \
           [](Stack* stack) {                                              \
@@ -773,7 +810,7 @@ void listSetItem(Stack* stack);
 
 #define DEFINE_SCALAR_BINARY_OP_WITH_COMPLEX_AVOID_COLLISION_GENERIC( \
     aten_op, int_op, float_op, complex_op, result, string_val)        \
-  OperatorGenerator(                                                  \
+  OperatorGeneratorArgs(                                              \
       TORCH_SELECTIVE_SCHEMA(#aten_op string_val                      \
                              "(Scalar a, Scalar b) -> " #result),     \
       [](Stack* stack) {                                              \
@@ -821,7 +858,7 @@ void listSetItem(Stack* stack);
 
 #define DEFINE_SCALAR_BINARY_OP_WITH_COMPLEX_WITHOUT_INT_COMPLEX_PAIR(     \
     aten_op, int_op, float_op, complex_op, result)                         \
-  OperatorGenerator(                                                       \
+  OperatorGeneratorArgs(                                                   \
       TORCH_SELECTIVE_SCHEMA(#aten_op "(Scalar a, Scalar b) -> " #result), \
       [](Stack* stack) {                                                   \
         IValue x, y;                                                       \

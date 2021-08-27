@@ -5746,6 +5746,7 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
         options = self.rpc_backend_options
         dst = worker_name((self.rank + 1) % self.world_size)
         options.set_device_map(dst, {1: 0})
+
         rpc.init_rpc(
             name=worker_name(self.rank),
             backend=self.rpc_backend,
@@ -5753,12 +5754,14 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
             world_size=self.world_size,
             rpc_backend_options=options,
         )
+
         rref = rpc.remote(
             dst,
             TensorPipeAgentCudaRpcTest._add_to_gpu,
             args=(x, y)
         )
         self.assertEqual(rref.to_here().device.index, 1)
+
         self.assertEqual(rref.to_here(), expected.to(1))
         rpc.shutdown()
 

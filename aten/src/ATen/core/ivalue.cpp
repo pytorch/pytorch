@@ -957,13 +957,7 @@ std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> ivalue::Future::
   if (value.isPyObject()) {
     std::vector<at::Tensor> tensors =
         value.toPyObjectHolder()->extractTensors();
-    auto numStorages = tensors.size();
-    for (const auto& tensor : tensors) {
-      if (tensor.is_sparse()) {
-        ++numStorages;
-      }
-    }
-    weakStorageImpls.reserve(numStorages);
+    weakStorageImpls.reserve(2 * tensors.size());
     for (const auto& tensor : tensors) {
       if (tensor.is_sparse()) {
         weakStorageImpls.push_back(

@@ -2715,8 +2715,10 @@ class TensorPipeCudaDistAutogradTest(RpcAgentTestFixture):
     def _device_maps_backward_pass(self, t1, t2, sparse):
         options = self.rpc_backend_options
         dst = worker_name((self.rank + 1) % self.world_size)
+
         # The reverse of this device mapping should be used for the backward pass.
         options.set_device_map(dst, {self.rank: (self.rank + 1) % self.world_size})
+
         rpc.init_rpc(
             name=worker_name(self.rank),
             backend=self.rpc_backend,
@@ -2724,6 +2726,7 @@ class TensorPipeCudaDistAutogradTest(RpcAgentTestFixture):
             world_size=self.world_size,
             rpc_backend_options=options,
         )
+
         with dist_autograd.context() as context_id:
             res = rpc.rpc_sync(dst, torch.add, args=(t1, t2))
             if sparse:
@@ -2740,6 +2743,7 @@ class TensorPipeCudaDistAutogradTest(RpcAgentTestFixture):
                 self.assertEqual(torch.ones(10), grads[t2])
             self.assertEqual(t1.device, grads[t1].device)
             self.assertEqual(t2.device, grads[t2].device)
+
         rpc.shutdown()
 
     @skip_if_lt_x_gpu(4)
@@ -2777,8 +2781,10 @@ class TensorPipeCudaDistAutogradTest(RpcAgentTestFixture):
     def _dist_autograd_sync_streams(self, sparse):
         options = self.rpc_backend_options
         dst = worker_name((self.rank + 1) % self.world_size)
+
         # The reverse of this device mapping should be used for the backward pass.
         options.set_device_map(dst, {self.rank: (self.rank + 1) % self.world_size})
+
         rpc.init_rpc(
             name=worker_name(self.rank),
             backend=self.rpc_backend,
@@ -2786,6 +2792,7 @@ class TensorPipeCudaDistAutogradTest(RpcAgentTestFixture):
             world_size=self.world_size,
             rpc_backend_options=options,
         )
+
         remote_compute = rpc.remote(dst, TensorPipeCudaDistAutogradTest.MyRemoteCompute)
         local_compute = TensorPipeCudaDistAutogradTest.MyLocalCompute(remote_compute)
         for _ in range(10):
@@ -2801,6 +2808,7 @@ class TensorPipeCudaDistAutogradTest(RpcAgentTestFixture):
             else:
                 loss = result.sum() * r
             loss.backward()
+
             # Run distributed autograd
             with dist_autograd.context() as context_id:
                 result = local_compute(input)
@@ -2809,9 +2817,11 @@ class TensorPipeCudaDistAutogradTest(RpcAgentTestFixture):
                 else:
                     loss = result.sum() * r
                 dist_autograd.backward(context_id, [loss])
+
                 # Compare grads.
                 grads = dist_autograd.get_gradients(context_id)
                 self.assertEqual(input.grad, grads[input])
+
         rpc.shutdown()
 
     @skip_if_lt_x_gpu(4)
@@ -2826,6 +2836,7 @@ class TensorPipeCudaDistAutogradTest(RpcAgentTestFixture):
         options = self.rpc_backend_options
         for peer_rank in range(self.world_size):
             options.set_device_map(worker_name(peer_rank), {self.rank: peer_rank})
+
         rpc.init_rpc(
             name=worker_name(self.rank),
             backend=self.rpc_backend,
@@ -2833,6 +2844,7 @@ class TensorPipeCudaDistAutogradTest(RpcAgentTestFixture):
             world_size=self.world_size,
             rpc_backend_options=options,
         )
+
         if self.rank == 0:
             # this is master
             if sparse:
@@ -2849,21 +2861,27 @@ class TensorPipeCudaDistAutogradTest(RpcAgentTestFixture):
                     args=(layers[rank - 1], rank)
                 ))
             x = x.to(0)
+
             # local iteration
             local_model = nn.Sequential(*local_layers)
             local_model(x).sum().backward()
+
             # remote iteration
             with dist_autograd.context() as context_id:
                 for remote_layer in remote_layers:
                     x = remote_layer.rpc_sync().forward(x)
+
                 dist_autograd.backward(context_id, [x.sum()])
+
                 futs = []
                 for remote_layer in remote_layers:
                     futs.append(remote_layer.rpc_async().gradients(context_id))
+
                 for i in range(len(futs)):
                     local_gradients = [p.grad for p in local_layers[i].parameters()]
                     for g1, g2 in zip(futs[i].wait(), local_gradients):
                         self.assertEqual(g1, g2)
+
         rpc.shutdown()
 
     @skip_if_lt_x_gpu(4)

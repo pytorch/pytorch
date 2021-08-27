@@ -48,7 +48,7 @@ std::vector<c10::Device> getDevicesForTensors(
       "Request device mapping is not available for destination ",
       remoteName);
   std::vector<c10::Device> devices;
-  devices.reserve(tensors.size());
+  devices.reserve(2 * tensors.size());
   bool hasMappedDevice = false;
   for (const auto& t : tensors) {
     if (t.device().is_cpu()) {
