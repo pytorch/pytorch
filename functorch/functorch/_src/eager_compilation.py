@@ -33,19 +33,21 @@ def partition_backwards(fx_module: fx.GraphModule):
         elif n.op == 'output':
             output_node = n
 
+    num_fwd_outputs = fx_module._out_spec.children_specs[0].num_leaves
+    num_bwd_outputs = fx_module._out_spec.children_specs[1].num_leaves
+    bw_outputs = output_node.args[0][num_fwd_outputs:]
+
     bw_graph = fx.Graph()
     value_remap = {}
     for saved_node in saved_nodes:
         value_remap[saved_node] = bw_graph.placeholder(saved_node.name)
 
     for node in fx_module.graph.nodes:
-        if node in bw_nodes:
+        if node in bw_nodes or node in bw_outputs:
             value_remap[node] = bw_graph.node_copy(node, lambda n : value_remap[n])
 
-    num_fwd_outputs = fx_module._out_spec.children_specs[0].num_leaves
-    num_bwd_outputs = fx_module._out_spec.children_specs[1].num_leaves
     assert(num_fwd_outputs + num_bwd_outputs == len(output_node.args[0]))
-    bwd_outputs = [value_remap[i] for i in output_node.args[0][num_fwd_outputs:]]
+    bwd_outputs = [value_remap[i] for i in bw_outputs]
     if len(bwd_outputs) == 1:
         bwd_outputs = bwd_outputs[0]
     bw_graph.output(bwd_outputs)
@@ -127,21 +129,19 @@ def compiled_function(fn, fw_compiler, bw_compiler):
                 out = fn(*args)
                 with torch.enable_grad():
                     fx_g = make_fx(vjpfull)(args, (torch.randn_like(out),))
-                print(args)
-                print(fx_g.code)
                 fw_module, bw_module = partition_backwards(fx_g)
 
-                fw_args = args
 
-                compiled_fw = fw_compiler(fw_module, fw_args)
-                fw_outs = compiled_fw(*fw_module.graph.flatten_inps(fw_args))
+                compiled_fw = fw_compiler(fw_module, args)
+                fw_outs = compiled_fw(*fw_module.graph.flatten_inps(args))
 
                 if not isinstance(fw_outs, list):
                     fw_outs = [fw_outs]
 
                 bw_args = fw_outs[1:] + [torch.ones_like(fw_outs[0])]
                 compiled_bw = bw_compiler(bw_module, bw_args)
-            fw_outs = compiled_fw(*fw_module.graph.flatten_inps(fw_args))
+
+            fw_outs = compiled_fw(*fw_module.graph.flatten_inps(args))
             if not isinstance(fw_outs, list):
                 fw_outs = [fw_outs]
             ctx.activations = fw_outs[1:]
