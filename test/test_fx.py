@@ -1282,7 +1282,7 @@ class TestFX(JitTestCase):
 
     def test_wrong_target_type(self):
         graph : torch.fx.Graph = torch.fx.Graph()
-        with self.assertRaises(AssertionError):
+        with self.assertRaises(ValueError):
             n = torch.fx.Node(graph=graph, name='foo', op='call_function', target='foo',
                               args=(), kwargs={})
 
