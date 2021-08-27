@@ -1949,7 +1949,6 @@ def sort(g, self, dim, descending, out=None):
         dim_size = self_sizes[dim]
     except Exception:
         dim_size = None
-
     if dim_size is None:
         return _unimplemented("Sort", "input size not accessible")
 
@@ -1963,10 +1962,8 @@ def argsort(g, self, dim, descending):
         dim_size = self_sizes[dim]
     except Exception:
         dim_size = None
-
     if dim_size is None:
         return _unimplemented("ArgSort", "input size not accessible")
-
     values, indices = g.op("TopK", self, k_i=dim_size, axis_i=dim, outputs=2)
 
     return indices
