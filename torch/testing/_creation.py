@@ -4,6 +4,7 @@ This module contains tensor creation utilities.
 
 import torch
 from typing import Optional, Tuple, Union
+from numbers import Number
 import math
 
 __all__ = [
@@ -15,8 +16,8 @@ def make_tensor(
     device: Union[str, torch.device],
     dtype: torch.dtype,
     *,
-    low: Optional[float] = None,
-    high: Optional[float] = None,
+    low: Optional[Number] = None,
+    high: Optional[Number] = None,
     requires_grad: bool = False,
     noncontiguous: bool = False,
     exclude_zero: bool = False
@@ -111,11 +112,11 @@ def make_tensor(
     elif dtype is torch.uint8:
         ranges = (torch.iinfo(dtype).min, torch.iinfo(dtype).max)
         low, high = _modify_low_high(low, high, ranges[0], ranges[1], 0, 10, dtype)
-        result = torch.randint(low, high, shape, device=device, dtype=dtype)
+        result = torch.randint(low, high, shape, device=device, dtype=dtype)  # type: ignore[call-overload]
     elif dtype in _integral_types:
         ranges = (torch.iinfo(dtype).min, torch.iinfo(dtype).max)
         low, high = _modify_low_high(low, high, ranges[0], ranges[1], -9, 10, dtype)
-        result = torch.randint(low, high, shape, device=device, dtype=dtype)
+        result = torch.randint(low, high, shape, device=device, dtype=dtype)  # type: ignore[call-overload]
     elif dtype in _floating_types:
         ranges_floats = (torch.finfo(dtype).min, torch.finfo(dtype).max)
         low, high = _modify_low_high(low, high, ranges_floats[0], ranges_floats[1], -9, 9, dtype)
