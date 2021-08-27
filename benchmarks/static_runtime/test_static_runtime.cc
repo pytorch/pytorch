@@ -1230,3 +1230,30 @@ TEST(StaticRuntime, IndividualOps_VarStack) {
 
   testStaticRuntime(var_stack_script, args1, args2);
 }
+
+TEST(StaticRuntime, IndividualOps_FmodTensor) {
+  // fmod tensor version
+  auto a = at::randn({2, 3});
+  auto b = at::randn({2, 3});
+  std::vector<IValue> args0{a, b};
+  testStaticRuntime(fmod_tensor, args0);
+
+  // check for dynamic shapes
+  auto c = at::randn({4, 3, 2});
+  auto d = at::randn({4, 3, 2});
+  std::vector<IValue> args1{c, d};
+  testStaticRuntime(fmod_tensor, args0, args1);
+}
+
+TEST(StaticRuntime, IndividualOps_FmodScalar) {
+  auto a = at::randn({2, 3});
+
+  // fmod scalar version
+  std::vector<IValue> args2{a, 3};
+  testStaticRuntime(fmod_scalar, args2);
+
+  // check for dynamic shapes
+  auto c = at::randn({4, 3, 2});
+  std::vector<IValue> args3{c, 4};
+  testStaticRuntime(fmod_scalar, args2, args3);
+}
