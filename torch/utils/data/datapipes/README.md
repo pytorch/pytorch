@@ -44,9 +44,10 @@ class MapperIterDataPipe(IterDataPipe):
         return len(self.dp)
 ```
 Note that `__len__` method is optional for `IterDataPipe`.
-Like `CSVParserIterDataPipe` in the [Using DataPipe sector](#using-datapipe-sector), `__len__` is not implemented because there is no way to infer the size of each file streams before loading them.
-Besides, in some special cases, `__len__` method would either return a length or raise Error depending on the arguments of DataPipe.
-Then, the Error is required to be `TypeError` to support Python's build-in functions like `list(dp)`.
+Like `CSVParserIterDataPipe` in the [Using DataPipe sector](#using-datapipe), `__len__` is not implemented because the size of each file streams is unknown for us before loading it.
+
+Besides, in some special cases, `__len__` method can be provided, but it would either return an integer length or raise Error depending on the arguments of DataPipe.
+And, the Error is required to be `TypeError` to support Python's build-in functions like `list(dp)`.
 Please check NOTE [ Lack of Default `__len__` in Python Abstract Base Classes ] for detailed reason in PyTorch.
 
 ### Registering DataPipe with functional API
