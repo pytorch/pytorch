@@ -18,8 +18,7 @@ std::string getNcclVersion() {
     if (status != ncclSuccess || version < 100) {
       versionString = "Unknown NCCL version";
     } else {
-      // logic reference: https://github.com/NVIDIA/nccl/blob\
-       /7e515921295adaab72adf56ea71a0fafb0ecb5f3/src/nccl.h.in#L22
+      // Ref: https://github.com/NVIDIA/nccl/blob/v2.10.3-1/src/nccl.h.in#L22
       int majorDiv = (version >= 10000)? 10000 : 1000;
       auto ncclMajor = version / majorDiv;
       auto ncclMinor = (version % majorDiv) / 100;
