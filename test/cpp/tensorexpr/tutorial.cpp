@@ -485,10 +485,11 @@ int main(int argc, char* argv[]) {
     // Prints:
     // Generated LLVM IR:
     //   %9 = bitcast float* %2 to <8 x float>*
-    //   %10 = load <8 x float>, <8 x float>* %9, align 4, !alias.scope !0,
-    //   !noalias !3 %11 = bitcast float* %5 to <8 x float>* %12 = load <8 x
-    //   float>, <8 x float>* %11, align 4, !alias.scope !6, !noalias !7 %13 =
-    //   fmul <8 x float> %10, %12 %14 = fmul <8 x float> %10, %13
+    //   %10 = load <8 x float>, <8 x float>* %9 ...
+    //   %11 = bitcast float* %5 to <8 x float>*
+    //   %12 = load <8 x float>, <8 x float>* %11 ...
+    //   %13 = fmul <8 x float> %10, %12
+    //   %14 = fmul <8 x float> %10, %13
 
     std::cout << "Generated assembly: " << std::endl;
     auto asm_str = kernel.getCodeText("asm");
