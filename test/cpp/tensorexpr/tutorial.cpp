@@ -49,19 +49,6 @@
 using namespace torch::jit::tensorexpr;
 
 int main(int argc, char* argv[]) {
-  // Memory management for tensor expressions is currently done with memory
-  // arenas. That is, whenever an object is created it registers itself in an
-  // arena and the object is kept alive as long as the arena is alive. When the
-  // arena gets destructed, it deletes all objects registered in it.
-  //
-  // The easiest way to set up a memory arena is to use `KernelScope` class - it
-  // is a resource guard that creates a new arena on construction and restores
-  // the previously set arena on destruction.
-  //
-  // We will create a kernel scope here, and thus we'll set up a mem arena for
-  // the entire tutorial.
-  KernelScope kernel_scope;
-
   std::cout << "*** Structure of tensor expressions ***" << std::endl;
   {
     // A tensor expression is a tree of expressions. Each expression has a type,
@@ -71,9 +58,9 @@ int main(int argc, char* argv[]) {
     // also be a 'Mul' or some other expression.
     //
     // Let's construct a simple TE:
-    Expr* lhs = new IntImm(5);
-    Expr* rhs = new Var("x", kInt);
-    Expr* mul = new Mul(lhs, rhs);
+    ExprPtr lhs = alloc<IntImm>(5);
+    ExprPtr rhs = alloc<Var>("x", kInt);
+    ExprPtr mul = alloc<Mul>(lhs, rhs);
     std::cout << "Tensor expression: " << *mul << std::endl;
     // Prints: Tensor expression: 5 * x
 
@@ -127,13 +114,14 @@ int main(int argc, char* argv[]) {
     // Let's start with defining a domain. We do this by creating a Buf object.
 
     // First, let's specify the sizes:
-    std::vector<const Expr*> dims = {
-        new IntImm(64), new IntImm(32)}; // IntImm stands for Integer Immediate
+    std::vector<ExprPtr> dims = {
+        alloc<IntImm>(64),
+        alloc<IntImm>(32)}; // IntImm stands for Integer Immediate
     // and represents an integer constant
 
     // Now we can create a Buf object by providing a name, dimensions, and a
     // data type of the elements:
-    const Buf* buf = new Buf("X", dims, kInt);
+    BufPtr buf = alloc<Buf>("X", dims, kInt);
 
     // Next we need to spefify the computation. We can do that by either
     // constructing a complete tensor statement for it (statements are
@@ -144,18 +132,18 @@ int main(int argc, char* argv[]) {
 
     // Let's define two variables, i and j - they will be axis in our
     // computation.
-    const Var* i = new Var("i", kInt);
-    const Var* j = new Var("j", kInt);
-    std::vector<const Var*> args = {i, j};
+    VarPtr i = alloc<Var>("i", kInt);
+    VarPtr j = alloc<Var>("j", kInt);
+    std::vector<VarPtr> args = {i, j};
 
     // Now we can define the body of the tensor computation using these
     // variables. What this means is that values in our tensor are:
     //   X[i, j] = i * j
-    Expr* body = new Mul(i, j);
+    ExprPtr body = alloc<Mul>(i, j);
 
     // Finally, we pass all these pieces together to Tensor constructor:
-    Tensor* X = new Tensor(buf, args, body);
-    std::cout << "Tensor computation: " << *X << std::endl;
+    Tensor X = Tensor(buf, args, body);
+    std::cout << "Tensor computation: " << X << std::endl;
     // Prints:
     // Tensor computation: Tensor X[64, 32]:
     // for (int i = 0; i < 64; i++) {
@@ -170,11 +158,11 @@ int main(int argc, char* argv[]) {
     // constructing Exprs, Tensors also have a more convenient API for
     // construction. It is based on Compute API, which takes a name,
     // dimensions, and a lambda specifying the computation body:
-    Tensor* Z = Compute(
+    Tensor Z = Compute(
         "Z",
         {{64, "i"}, {32, "j"}},
         [](const VarHandle& i, const VarHandle& j) { return i / j; });
-    std::cout << "Tensor computation: " << *Z << std::endl;
+    std::cout << "Tensor computation: " << Z << std::endl;
     // Prints:
     // Tensor computation: Tensor Z[64, 32]:
     // for (int i = 0; i < 64; i++) {
@@ -186,13 +174,13 @@ int main(int argc, char* argv[]) {
     // Tensors might access other tensors and external placeholders in their
     // expressions. It can be done like so:
     Placeholder P("P", kInt, {64, 32});
-    Tensor* R = Compute(
+    Tensor R = Compute(
         "R",
         {{64, "i"}, {32, "j"}},
         [&](const VarHandle& i, const VarHandle& j) {
-          return Z->load(i, j) * P.load(i, j);
+          return Z.load(i, j) * P.load(i, j);
         });
-    std::cout << "Tensor computation: " << *R << std::endl;
+    std::cout << "Tensor computation: " << R << std::endl;
     // Prints:
     // Tensor computation: Tensor R[64, 32]:
     // for (int i = 0; i < 64; i++) {
@@ -223,20 +211,20 @@ int main(int argc, char* argv[]) {
     // Let's create a simple tensor expression and construct a loop nest for it.
     Placeholder A("A", kFloat, {64, 32});
     Placeholder B("B", kFloat, {64, 32});
-    Tensor* X = Compute(
+    Tensor X = Compute(
         "X",
         {{64, "i"}, {32, "j"}},
         [&](const VarHandle& i, const VarHandle& j) {
           return A.load(i, j) + B.load(i, j);
         });
-    Tensor* Y = Compute(
+    Tensor Y = Compute(
         "Y",
         {{64, "i"}, {32, "j"}},
         [&](const VarHandle& i, const VarHandle& j) {
-          return sigmoid(X->load(i, j));
+          return sigmoid(X.load(i, j));
         });
-    std::cout << "Tensor computation X: " << *X
-              << "Tensor computation Y: " << *Y << std::endl;
+    std::cout << "Tensor computation X: " << X << "Tensor computation Y: " << Y
+              << std::endl;
     // Prints:
     // Tensor computation X: Tensor X[64, 32]:
     // for (int i = 0; i < 64; i++) {
@@ -311,11 +299,11 @@ int main(int argc, char* argv[]) {
     // Loop transformations can be composed, so we can do something else with
     // our loop nest now. Let's split the inner loop with a factor of 9, for
     // instance.
-    std::vector<For*> loops = loopnest.getLoopStmtsFor(Y);
+    std::vector<ForPtr> loops = loopnest.getLoopStmtsFor(Y);
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    For* j_inner;
+    ForPtr j_inner;
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    For* j_tail;
+    ForPtr j_tail;
     int split_factor = 9;
     loopnest.splitWithTail(
         loops[1], // loops[0] is the outer loop, loops[1] is inner
@@ -354,7 +342,7 @@ int main(int argc, char* argv[]) {
     // Let's start by constructing a simple computation for us to work with:
     Placeholder A("A", kInt, {64, 32});
     Placeholder B("B", kInt, {64, 32});
-    Tensor* X = Compute(
+    Tensor X = Compute(
         "X",
         {{64, "i"}, {32, "j"}},
         [&](const VarHandle& i, const VarHandle& j) {

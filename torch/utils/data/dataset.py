@@ -25,6 +25,24 @@ T_co = TypeVar('T_co', covariant=True)
 T = TypeVar('T')
 
 
+class DataChunk(list, Generic[T]):
+    def __init__(self, items):
+        super().__init__(items)
+        self.items = items
+
+    def as_str(self, indent=''):
+        res = indent + "[" + ", ".join([str(i) for i in iter(self)]) + "]"
+        return res
+
+    def __iter__(self) -> Iterator[T]:
+        for i in super().__iter__():
+            yield i
+
+    def raw_iterator(self):
+        for i in self.items:
+            yield i
+
+
 class Dataset(Generic[T_co]):
     r"""An abstract class representing a :class:`Dataset`.
 
