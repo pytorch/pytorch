@@ -35,7 +35,7 @@ jobs:
       - name: noop
         run: echo running ciflow_should_run
       - name: GITHUB_RUN_ID
-        run: echo "the run id is: ${GITHUB_RUN_ID}"
+        run: echo "the run id is ${GITHUB_RUN_ID}"
   calculate-docker-image:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.2xlarge
