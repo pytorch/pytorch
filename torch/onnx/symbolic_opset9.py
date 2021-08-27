@@ -1941,7 +1941,7 @@ def unsqueeze(g, self, dim):
 
 
 @parse_args("v", "i", "i", "none")
-def sort(g, self, dim, decending, out=None):
+def sort(g, self, dim, descending, out=None):
     if out is not None:
         _unimplemented("Sort", "Out parameter is not supported for sort")
     self_sizes = sym_help._get_tensor_sizes(self)
@@ -1957,7 +1957,7 @@ def sort(g, self, dim, decending, out=None):
 
 
 @parse_args("v", "i", "i")
-def argsort(g, self, dim, decending):
+def argsort(g, self, dim, descending):
     self_sizes = sym_help._get_tensor_sizes(self)
     try:
         dim_size = self_sizes[dim]

@@ -386,13 +386,13 @@ def topk(g, self, k, dim, largest, sorted, out=None):
 
 
 @parse_args("v", "i", "i", "none")
-def sort(g, self, dim, decending, out=None):
-    return sym_help._sort_helper(g, self, dim, decending=decending, out=out)
+def sort(g, self, dim, descending, out=None):
+    return sym_help._sort_helper(g, self, dim, descending=descending, out=out)
 
 
 @parse_args("v", "i", "i")
-def argsort(g, self, dim, decending):
-    values, indices = sym_help._argsort_helper(g, self, dim, decending=decending)
+def argsort(g, self, dim, descending):
+    values, indices = sym_help._argsort_helper(g, self, dim, descending=descending)
     return indices
 
 
