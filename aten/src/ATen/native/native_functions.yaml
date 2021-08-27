@@ -4920,9 +4920,10 @@
 # underscore "_" to indicate that they should be used with care. We provide:
 #
 #   + `_indices()`: returns the *raw* indices within the sparse tensor (not just
-#                   sharing storage). Any inplace operation will change the
-#                   actual indices, including t_, set_, as_strided_, resize_,
-#                   etc.
+#                   sharing storage). Any inplace operation (e.g., t_, set_,
+#                   as_strided_, resize_, etc) will change the actual indices BUT
+#                   only when we do not dispatch through _indices' ADInplaceOrView
+#                   kernel! otherwise a new TensorImpl is created)
 #   + `_values()`: returns the *raw* values within the sparse tensor. Similar
 #                  semantics as `_indices()`
 #   + `_nnz()`: returns the number of non-zero entries. This will always be
@@ -5112,6 +5113,10 @@
   device_check: NoCheck
   device_guard: False
 
+# NOTE: Modifying the output of _indices or _values in-place will not
+# affect the indices/values of the original sparse tensor if dispatch to
+# _indices/_values' InplaceOrView kernels for indices/values (e.g., if you
+# call _indices in Python, and you didn't do it in inference mode).
 - func: _indices(Tensor(a) self) -> Tensor(a)
   variants: method
   dispatch:
