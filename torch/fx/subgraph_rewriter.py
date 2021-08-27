@@ -8,6 +8,7 @@ import copy
 from typing import Callable, Dict, List, NamedTuple, Optional, Set
 import torch
 
+@compatibility(is_backward_compatible=True)
 class Match(NamedTuple):
     # Node from which the match was found
     anchor: Node

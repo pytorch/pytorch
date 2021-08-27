@@ -324,7 +324,7 @@ class ParameterProxy(Proxy):
 
 
 for method in magic_methods:
-    def scope(method):
+    def _scope(method):
         def impl(*args, **kwargs):
             tracer = args[0].tracer
             target = getattr(operator, method)
@@ -332,7 +332,7 @@ for method in magic_methods:
         impl.__name__ = method
         as_magic = f'__{method}__'
         setattr(Proxy, as_magic, impl)
-    scope(method)
+    _scope(method)
 
 def _define_reflectable(orig_method_name):
     method_name = f'__r{orig_method_name}__'
