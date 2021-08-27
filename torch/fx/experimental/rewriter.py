@@ -2,11 +2,12 @@ import ast
 import inspect
 import textwrap
 import copy
+import functools
 from types import FunctionType
 from typing import cast, Union, Callable, Dict, Optional, Any
 from torch.fx._symbolic_trace import Tracer
 from torch.fx.graph import Graph
-from torch.jit.frontend import normalize_source_lines
+from torch._sources import normalize_source_lines
 import torch
 
 class AST_Rewriter(ast.NodeTransformer):
@@ -41,8 +42,23 @@ class AST_Rewriter(ast.NodeTransformer):
         assert len(new_keys) == 1
         fn_compiled = globals_dict[new_keys[0]]
 
+        # return the compiled function with the original globals
+        def change_func_globals(f, globals):
+            """Based on https://stackoverflow.com/a/13503277/2988730 (@unutbu)"""
+            # __globals__ is a private member of the function class
+            # so we have to copy the function, f, all of its member, except f.__globals__
+            g = FunctionType(
+                f.__code__,
+                globals,
+                name=f.__name__,
+                argdefs=f.__defaults__,
+                closure=f.__closure__,
+            )
+            g = functools.update_wrapper(g, f)
+            g.__kwdefaults__ = copy.copy(f.__kwdefaults__)
+            return g
         # Return the correct FunctionType object
-        return fn_compiled
+        return change_func_globals(fn_compiled, globals=fn.__globals__)
 
     def visit_Assert(self, node):
         """

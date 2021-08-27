@@ -1,4 +1,5 @@
 from typing import NamedTuple, Callable, Any, Tuple, List, Dict, Type, cast, Optional
+from collections import namedtuple
 
 """
 Contains utility functions for working with nested python data structures.
@@ -56,14 +57,38 @@ def _tuple_flatten(d: Tuple[Any, ...]) -> Tuple[List[Any], Context]:
 def _tuple_unflatten(values: List[Any], context: Context) -> Tuple[Any, ...]:
     return tuple(values)
 
+def _namedtuple_flatten(d: NamedTuple) -> Tuple[List[Any], Context]:
+    return list(d), type(d)
+
+def _namedtuple_unflatten(values: List[Any], context: Context) -> NamedTuple:
+    return cast(NamedTuple, context(*values))
+
 _register_pytree_node(dict, _dict_flatten, _dict_unflatten)
 _register_pytree_node(list, _list_flatten, _list_unflatten)
 _register_pytree_node(tuple, _tuple_flatten, _tuple_unflatten)
+_register_pytree_node(namedtuple, _namedtuple_flatten, _namedtuple_unflatten)
 
+
+# h/t https://stackoverflow.com/questions/2166818/how-to-check-if-an-object-is-an-instance-of-a-namedtuple
+def _is_namedtuple_instance(pytree: Any) -> bool:
+    typ = type(pytree)
+    bases = typ.__bases__
+    if len(bases) != 1 or bases[0] != tuple:
+        return False
+    fields = getattr(typ, '_fields', None)
+    if not isinstance(fields, tuple):
+        return False
+    return all(type(entry) == str for entry in fields)
+
+def _get_node_type(pytree: Any) -> Any:
+    if _is_namedtuple_instance(pytree):
+        return namedtuple
+    return type(pytree)
 
 # A leaf is defined as anything that is not a Node.
 def _is_leaf(pytree: PyTree) -> bool:
-    return type(pytree) not in SUPPORTED_NODES.keys()
+    return _get_node_type(pytree) not in SUPPORTED_NODES.keys()
+
 
 # A TreeSpec represents the structure of a pytree. It holds:
 # "type": the type of root Node of the pytree
@@ -105,7 +130,8 @@ def tree_flatten(pytree: PyTree) -> Tuple[List[Any], TreeSpec]:
     if _is_leaf(pytree):
         return [pytree], LeafSpec()
 
-    flatten_fn = SUPPORTED_NODES[type(pytree)].flatten_fn
+    node_type = _get_node_type(pytree)
+    flatten_fn = SUPPORTED_NODES[node_type].flatten_fn
     child_pytrees, context = flatten_fn(pytree)
 
     # Recursively flatten the children
@@ -116,7 +142,7 @@ def tree_flatten(pytree: PyTree) -> Tuple[List[Any], TreeSpec]:
         result += flat
         children_specs.append(child_spec)
 
-    return result, TreeSpec(type(pytree), context, children_specs)
+    return result, TreeSpec(node_type, context, children_specs)
 
 
 def tree_unflatten(values: List[Any], spec: TreeSpec) -> PyTree:
@@ -167,10 +193,11 @@ def _broadcast_to_and_flatten(pytree: PyTree, spec: TreeSpec) -> Optional[List[A
         return [pytree] * spec.num_leaves
     if isinstance(spec, LeafSpec):
         return None
-    if type(pytree) != spec.type:
+    node_type = _get_node_type(pytree)
+    if node_type != spec.type:
         return None
 
-    flatten_fn = SUPPORTED_NODES[type(pytree)].flatten_fn
+    flatten_fn = SUPPORTED_NODES[node_type].flatten_fn
     child_pytrees, ctx = flatten_fn(pytree)
 
     # Check if the Node is different from the spec

@@ -65,6 +65,8 @@ class PytorchVersion:
         self.no_build_suffix = no_build_suffix
 
     def get_post_build_suffix(self) -> str:
+        if self.no_build_suffix:
+            return ""
         if self.gpu_arch_type == "cuda":
             return f"+cu{self.gpu_arch_version.replace('.', '')}"
         return f"+{self.gpu_arch_type}{self.gpu_arch_version}"
@@ -87,9 +89,9 @@ def main() -> None:
     )
     parser.add_argument(
         "--no-build-suffix",
-        type=strtobool,
+        action="store_true",
         help="Whether or not to add a build suffix typically (+cpu)",
-        default=os.environ.get("NO_BUILD_SUFFIX", False)
+        default=strtobool(os.environ.get("NO_BUILD_SUFFIX", "False"))
     )
     parser.add_argument(
         "--gpu-arch-type",

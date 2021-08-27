@@ -453,7 +453,7 @@ struct DifferentiableGraphOp {
     // ourselves.
     const int64_t stack_size = stack.size();
     const int64_t stack_offset = stack_size - num_inputs;
-    for (int64_t i = stack_offset; i < stack_size; ++i) {
+    for (const auto i : c10::irange(stack_offset, stack_size)) {
       detach(stack[i]);
     }
   }
