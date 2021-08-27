@@ -98,7 +98,11 @@ Tensor& max_unpooling2d_forward_out_cpu(const Tensor& self_,
       self_.sizes() == indices_.sizes(),
       "Shape of indices should match shape of input");
 
-  TORCH_CHECK(self_.numel() > 0, "Input must be non-empty");
+  for (int64_t i = 1; i < self_.ndimension(); ++i) {
+    TORCH_CHECK(self_.size(i) > 0, "max_unpooling2d_forward_out_cpu(): ",
+                "Expected input to have non-zero size for non-batch dimensions, but got ",
+                self_.sizes(), " with dimension ", i , " being empty.");
+  }
 
   auto self = self_.contiguous();
   auto indices = indices_.contiguous();
@@ -217,7 +221,8 @@ static void max_unpooling3d_shape_check(
     const Tensor& indices,
     IntArrayRef output_size,
     IntArrayRef stride,
-    IntArrayRef padding) {
+    IntArrayRef padding,
+    const char *fn_name) {
   int64_t oT = output_size[0];
   int64_t oH = output_size[1];
   int64_t oW = output_size[2];
@@ -241,7 +246,11 @@ static void max_unpooling3d_shape_check(
       input.sizes() == indices.sizes(),
       "Shape of indices should match shape of input");
 
-  TORCH_CHECK(input.numel() > 0, "Input must be non-empty");
+  for (int64_t i = 1; i < input.ndimension(); ++i) {
+    TORCH_CHECK(input.size(i) > 0, fn_name,
+                ": Expected input to have non-zero size for non-batch dimensions, but got ",
+                input.sizes(), " with dimension ", i , " being empty.");
+  }
 
   TORCH_CHECK(
       stride[0] > 0 && stride[1] > 0 && stride[2] > 0,
@@ -301,7 +310,7 @@ Tensor& max_unpooling3d_forward_out_cpu(const Tensor& self_,
   auto indices = indices_.contiguous();
 
   max_unpooling3d_shape_check(
-      self_, Tensor(), indices_, output_size, stride, padding);
+    self_, Tensor(), indices_, output_size, stride, padding, "max_unpooling3d_forward_out_cpu()");
 
   if (self_.ndimension() == 5) {
     output.resize_({self.size(0), self.size(1), oT, oH, oW});
@@ -558,7 +567,7 @@ Tensor& max_unpooling3d_backward_out_cpu(const Tensor& grad_output_,
   int iW;
 
   max_unpooling3d_shape_check(
-      self, grad_output_, indices_, output_size, stride, padding);
+   self, grad_output_, indices_, output_size, stride, padding, "max_unpooling3d_backward_out_cpu()");
 
   // TODO (from THNN): check gradOutput shape
   /* get contiguous gradOutput */
