@@ -24,7 +24,6 @@ using namespace torch::jit::tensorexpr;
 using SimpleIRExprEval = ExprEval<SimpleIREvaluator>;
 
 TEST(Expr, BasicValueTest) {
-  KernelScope kernel_scope;
   ExprHandle a = IntImm::make(2), b = IntImm::make(3);
   ExprHandle c = Add::make(a, b);
   SimpleIRExprEval eval(c);
@@ -32,7 +31,6 @@ TEST(Expr, BasicValueTest) {
 }
 
 TEST(Expr, BasicValueTest02) {
-  KernelScope kernel_scope;
   ExprHandle a(2.0f);
   ExprHandle b(3.0f);
   ExprHandle c(4.0f);
@@ -43,7 +41,6 @@ TEST(Expr, BasicValueTest02) {
 }
 
 TEST(Expr, LetTest01) {
-  KernelScope kernel_scope;
   VarHandle x("x", kFloat);
   ExprHandle body = ExprHandle(2.f) + (x * ExprHandle(3.f) + ExprHandle(4.f));
   SimpleIRExprEval eval(body);
@@ -52,7 +49,6 @@ TEST(Expr, LetTest01) {
 }
 
 TEST(Expr, LetTest02) {
-  KernelScope kernel_scope;
   VarHandle x("x", kFloat);
   VarHandle y("y", kFloat);
   ExprHandle body =
@@ -64,7 +60,6 @@ TEST(Expr, LetTest02) {
 }
 
 TEST(Expr, LetStmtTest01) {
-  KernelScope kernel_scope;
   Placeholder a_buf("a", kFloat, {1});
   Placeholder b_buf("b", kFloat, {1});
 
@@ -88,7 +83,6 @@ TEST(Expr, LetStmtTest01) {
 }
 
 TEST(Expr, IntTest) {
-  KernelScope kernel_scope;
   VarHandle x("x", kInt);
   ExprHandle body = ExprHandle(2) + (x * ExprHandle(3) + ExprHandle(4));
   SimpleIRExprEval eval(body);
@@ -97,7 +91,6 @@ TEST(Expr, IntTest) {
 }
 
 TEST(Expr, FloatTest) {
-  KernelScope kernel_scope;
   VarHandle x("x", kFloat);
   ExprHandle body = ExprHandle(2.f) + (x * ExprHandle(3.f) + ExprHandle(4.f));
   SimpleIRExprEval eval(body);
@@ -106,7 +99,6 @@ TEST(Expr, FloatTest) {
 }
 
 TEST(Expr, ByteTest) {
-  KernelScope kernel_scope;
   VarHandle x("x", kByte);
   ExprHandle body = ExprHandle((uint8_t)2) +
       (x * ExprHandle((uint8_t)3) + ExprHandle((uint8_t)4));
@@ -116,7 +108,6 @@ TEST(Expr, ByteTest) {
 }
 
 TEST(Expr, CharTest) {
-  KernelScope kernel_scope;
   VarHandle x("x", kChar);
   ExprHandle body = ExprHandle((int8_t)2) +
       (x * ExprHandle((int8_t)3) + ExprHandle((int8_t)4));
@@ -126,7 +117,6 @@ TEST(Expr, CharTest) {
 }
 
 TEST(Expr, ShortTest) {
-  KernelScope kernel_scope;
   VarHandle x("x", kShort);
   ExprHandle body = ExprHandle((int16_t)2) +
       (x * ExprHandle((int16_t)3) + ExprHandle((int16_t)4));
@@ -136,7 +126,6 @@ TEST(Expr, ShortTest) {
 }
 
 TEST(Expr, LongTest) {
-  KernelScope kernel_scope;
   VarHandle x("x", kLong);
   ExprHandle body = ExprHandle((int64_t)2) +
       (x * ExprHandle((int64_t)3) + ExprHandle((int64_t)4));
@@ -146,7 +135,6 @@ TEST(Expr, LongTest) {
 }
 
 TEST(Expr, HalfTest) {
-  KernelScope kernel_scope;
   VarHandle x("x", kHalf);
   ExprHandle body = ExprHandle((at::Half)2) +
       (x * ExprHandle((at::Half)3) + ExprHandle((at::Half)4));
@@ -156,7 +144,6 @@ TEST(Expr, HalfTest) {
 }
 
 TEST(Expr, DoubleTest) {
-  KernelScope kernel_scope;
   VarHandle x("x", kDouble);
   ExprHandle body = ExprHandle((double)2) +
       (x * ExprHandle((double)3) + ExprHandle((double)4));
@@ -166,7 +153,6 @@ TEST(Expr, DoubleTest) {
 }
 
 TEST(Expr, VectorAdd01) {
-  KernelScope kernel_scope;
   const int kVectorSize = 8;
   const int kVectorCount = 128;
   const int kTotalSize = kVectorSize * kVectorCount;
@@ -212,7 +198,6 @@ TEST(Expr, VectorAdd01) {
 }
 
 TEST(Expr, CompareSelectEQ) {
-  KernelScope kernel_scope;
   constexpr int N = 1024;
   Placeholder a(BufHandle("A", {N}, kInt));
   Placeholder b(BufHandle("B", {N}, kInt));
@@ -251,7 +236,6 @@ TEST(Expr, CompareSelectDtypes) {
   // This test constructs a CompareSelect expression where the input dtype is
   // different from the output dtype and verifies that it works correctly:
   //   result = ((int)lhs == (int)rhs) ? (float)retval1 : (float)retval2
-  KernelScope kernel_scope;
   constexpr int N = 1024;
   Placeholder a(BufHandle("A", {N}, kInt));
   Placeholder b(BufHandle("B", {N}, kInt));
@@ -290,7 +274,6 @@ TEST(Expr, CompareSelectDtypes) {
 }
 
 TEST(Expr, IntrinsicsDtypes) {
-  KernelScope kernel_scope;
   constexpr int N = 256;
   Placeholder a(BufHandle("A", {N}, kDouble));
   Placeholder b(BufHandle("B", {N}, kDouble));
@@ -312,7 +295,6 @@ TEST(Expr, IntrinsicsDtypes) {
 }
 
 TEST(Expr, Substitute01) {
-  KernelScope kernel_scope;
   VarPtr x = alloc<Var>("x", kFloat);
   VarPtr y = alloc<Var>("y", kFloat);
   ExprPtr e =
@@ -334,7 +316,6 @@ TEST(Expr, Substitute01) {
 }
 
 TEST(Expr, Math01) {
-  KernelScope kernel_scope;
   ExprHandle v = sin(ExprHandle(1.0f));
 
   std::ostringstream oss;
@@ -348,7 +329,6 @@ TEST(Expr, Math01) {
 }
 
 TEST(Expr, UnaryMath01) {
-  KernelScope kernel_scope;
   struct TestConfig {
     std::function<ExprHandle(const ExprHandle&)> func;
     std::function<float(float)> ref_func;
@@ -416,7 +396,6 @@ TEST(Expr, UnaryMath01) {
 }
 
 TEST(Expr, BinaryMath01) {
-  KernelScope kernel_scope;
   struct TestConfig {
     std::function<ExprHandle(const ExprHandle&, const ExprHandle&)> func;
     std::function<float(float, float)> ref_func;
@@ -440,7 +419,6 @@ TEST(Expr, BinaryMath01) {
 }
 
 TEST(Expr, LogicalOps01) {
-  KernelScope kernel_scope;
   ExprHandle a(23);
   ExprHandle b(11);
   ExprHandle c(0.72f);
@@ -473,7 +451,6 @@ TEST(Expr, LogicalOps01) {
 }
 
 TEST(Expr, LogicalOps02) {
-  KernelScope kernel_scope;
   ExprHandle a(23);
   ExprHandle b(11);
   ExprHandle c(0.72f);
@@ -492,7 +469,6 @@ TEST(Expr, LogicalOps02) {
 }
 
 TEST(Expr, LogicalOps03) {
-  KernelScope kernel_scope;
   ExprHandle a(23);
   ExprHandle b(11);
   ExprHandle c(0.72f);
@@ -550,7 +526,6 @@ TEST(Expr, LogicalOps03) {
 }
 
 TEST(Expr, BitwiseOps) {
-  KernelScope kernel_scope;
   ExprHandle a(59);
   ExprHandle b(11);
   ExprHandle c(101);
@@ -562,7 +537,6 @@ TEST(Expr, BitwiseOps) {
 }
 
 TEST(Expr, DynamicShapeAdd) {
-  KernelScope kernel_scope;
   auto testWithSize = [](int32_t size) {
     VarHandle n("n", kInt);
     Placeholder a(BufHandle("a", {n}, kFloat));
@@ -582,7 +556,6 @@ TEST(Expr, DynamicShapeAdd) {
 }
 
 void testCond01() {
-  KernelScope kernel_scope;
   const int N = 16;
   PaddedBuffer<float> a_v(N);
   Placeholder a_buf("a", kFloat, {N});
@@ -606,7 +579,6 @@ void testCond01() {
 }
 
 void testIfThenElse01() {
-  KernelScope kernel_scope;
   ExprHandle v = ifThenElse(ExprHandle(1), ExprHandle(1.0f), ExprHandle(2.0f));
 
   std::ostringstream oss;
@@ -618,7 +590,6 @@ void testIfThenElse01() {
 }
 
 void testIfThenElse02() {
-  KernelScope kernel_scope;
   ExprHandle v = ifThenElse(ExprHandle(0), ExprHandle(1.0f), ExprHandle(2.0f));
 
   std::ostringstream oss;
@@ -630,7 +601,6 @@ void testIfThenElse02() {
 }
 
 void testIfThenElse03() {
-  KernelScope kernel_scope;
   ExprHandle v =
       ifThenElse(BoolImm::make(false), ExprHandle(1.0f), ExprHandle(2.0f));
 
@@ -643,7 +613,6 @@ void testIfThenElse03() {
 }
 
 void testStmtClone() {
-  KernelScope kernel_scope;
   const int N = 16;
 
   Placeholder a_buf("a", kInt, {N});
