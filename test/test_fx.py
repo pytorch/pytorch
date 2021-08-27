@@ -3260,9 +3260,11 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
 
         non_back_compat_strs = [torch.typename(obj) for obj in non_back_compat_objects.keys()]
         # Only want objects in torch.fx
-        non_back_compat_strs = [s for s in non_back_compat_strs if s.startswith('torch.fx') and not s.startswith('torch.fx.experimental')]
+        non_back_compat_strs = [
+            s for s in non_back_compat_strs if s.startswith('torch.fx') and not s.startswith('torch.fx.experimental')]
         # Only want objects in public namespaces
-        non_back_compat_strs = [s for s in non_back_compat_strs if all(not atom.startswith('_') for atom in s.split('.'))]
+        non_back_compat_strs = [
+            s for s in non_back_compat_strs if all(not atom.startswith('_') for atom in s.split('.'))]
         non_back_compat_strs.sort()
 
         if len(non_back_compat_strs) != 0:
