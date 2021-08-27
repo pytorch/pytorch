@@ -707,9 +707,7 @@ class Graph:
         """
         return self.create_node('call_function', the_function, args, kwargs, type_expr=type_expr)
 
-    # Not checking BC on this API because the default lambda repr encodes a
-    # pointer, which jitters across processes
-    # @compatibility(is_backward_compatible=True)
+    @compatibility(is_backward_compatible=True)
     def node_copy(self, node: Node, arg_transform: Callable[[Node], 'Argument'] = lambda x: x) -> Node:
         """
         Copy a node from one graph into another. ``arg_transform`` needs to transform arguments from
@@ -1025,10 +1023,6 @@ def forward({', '.join(orig_args)}){maybe_return_annotation[0]}:
         """
         Return a human-readable (not machine-readable) string representation
         of this Graph
-
-        Backwards Compatibility:
-
-            Backwards-compatibility for this API is guaranteed.
         """
         placeholder_names : List[str] = []
         # This is a one-element array just so ``format_node`` can modify the closed
