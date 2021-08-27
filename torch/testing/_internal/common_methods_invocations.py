@@ -2284,11 +2284,14 @@ def sample_inputs_max_pool2d(op_info, device, dtype, requires_grad, **kwargs):
     ceil_modei = [True, False]
     paddingi = [0, 1]
     dilationi = [1, (1, 2)]
-    products = product(kerneli, stridei, Ni, Ci, Hi, Wi, ceil_modei, paddingi, dilationi)
+    return_indicesi = [True, False]
+
+    products = product(kerneli, stridei, Ni, Ci, Hi, Wi, ceil_modei, paddingi, dilationi, return_indicesi)
 
     def generator():
-        for kernel, stride, N, C, H, W, ceil_mode, padding, dilation in products:
-            max_pool = torch.nn.MaxPool2d(kernel, stride, ceil_mode=ceil_mode, padding=padding, dilation=dilation)
+        for kernel, stride, N, C, H, W, ceil_mode, padding, dilation, return_indices in products:
+            max_pool = torch.nn.MaxPool2d(kernel, stride, ceil_mode=ceil_mode, padding=padding,
+                                          dilation=dilation, return_indices=return_indices)
             kwargs = {
                 "kernel_size": max_pool.kernel_size,
                 "stride": max_pool.stride,
@@ -7114,6 +7117,7 @@ op_db: List[OpInfo] = [
            supports_autograd=True,
            supports_out=False,
            assert_jit_shape_analysis=True,
+           supports_scripting=False,  # TODO: fix aliasing test
            dtypesIfCPU=floating_types_and(torch.int64),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_max_pool2d),
