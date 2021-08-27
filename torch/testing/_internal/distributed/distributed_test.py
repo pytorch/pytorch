@@ -6354,6 +6354,10 @@ class DistributedTest:
                 def forward(self, x):
                     return self.net1(x)
 
+            if dist._get_debug_mode() == dist._DistributedDebugLevel.DETAIL:
+                # NCCL_BLOCKING_WAIT should also be enabled.
+                nccl_blocking_wait = os.environ.get("NCCL_BLOCKING_WAIT", None)
+                self.assertEqual("1", nccl_blocking_wait)
             ddp = torch.nn.parallel.DistributedDataParallel(
                 ToyModel().cuda(self.rank), device_ids=[self.rank]
             )

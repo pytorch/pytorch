@@ -1,6 +1,7 @@
 import contextlib
 import io
 import logging
+import os
 import pickle
 import time
 import warnings
@@ -698,10 +699,22 @@ def _new_process_group_helper(
                 pg_options.is_high_priority_stream = False
                 pg_options._timeout = timeout
 
+            debug_level = _get_debug_mode()
+            if debug_level == _DistributedDebugLevel.DETAIL:
+                # Also enable NCCL_BLOCKING_WAIT if it is not explicitly
+                # disabled.
+                nccl_blocking_wait = os.environ.get("NCCL_BLOCKING_WAIT", None)
+                if nccl_blocking_wait != "0":
+                    logger.info(
+                        "Enabling NCCL_BLOCKING_WAIT by default since "
+                        f"TORCH_DISTRIBUTED_DEBUG level is {debug_level}"
+                    )
+                    os.environ["NCCL_BLOCKING_WAIT"] = "1"
+
             pg = ProcessGroupNCCL(prefix_store, rank, world_size, pg_options)
             # In debug mode and if GLOO is available, wrap in a wrapper PG that
             # enables enhanced collective checking for debugability.
-            if _get_debug_mode() == _DistributedDebugLevel.DETAIL:
+            if debug_level == _DistributedDebugLevel.DETAIL:
                 if not _GLOO_AVAILABLE:
                     logger.info(
                         """TORCH_DISTRIBUTED_DEBUG was set to DETAIL, but
