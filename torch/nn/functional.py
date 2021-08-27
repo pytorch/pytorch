@@ -458,10 +458,11 @@ def fractional_max_pool2d_with_indices(
     if output_size is None:
         assert output_ratio is not None
         _output_ratio = _pair(output_ratio)
-        output_size = [int(input.size(2) * _output_ratio[0]), int(input.size(3) * _output_ratio[1])]
+        output_size = [int(input.size(-2) * _output_ratio[0]), int(input.size(-1) * _output_ratio[1])]
 
     if _random_samples is None:
-        _random_samples = torch.rand(input.size(0), input.size(1), 2, dtype=input.dtype, device=input.device)
+        n_batch = 1 if input.dim() == 3 else input.size(0)
+        _random_samples = torch.rand(n_batch, input.size(-3), 2, dtype=input.dtype, device=input.device)
     return torch._C._nn.fractional_max_pool2d(input, kernel_size, output_size, _random_samples)
 
 
@@ -861,7 +862,7 @@ def max_unpool1d(
         output_size = output_size + [1]
     else:
         output_size = output_size + (1,)
-    return torch._C._nn.max_unpool2d(input.unsqueeze(3), indices.unsqueeze(3), output_size).squeeze(3)
+    return torch._C._nn.max_unpool2d(input.unsqueeze(-1), indices.unsqueeze(-1), output_size).squeeze(-1)
 
 
 def max_unpool2d(
@@ -2376,6 +2377,10 @@ def local_response_norm(input: Tensor, size: int, alpha: float = 1e-4, beta: flo
                 dim
             )
         )
+
+    if input.numel() == 0:
+        return input
+
     div = input.mul(input).unsqueeze(1)
     if dim == 3:
         div = pad(div, (0, 0, size // 2, (size - 1) // 2))
@@ -2768,8 +2773,7 @@ def cross_entropy(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
 ) -> Tensor:
-    r"""This criterion combines `log_softmax` and `nll_loss` in a single
-    function.
+    r"""This criterion computes the cross entropy loss between input and target.
 
     See :class:`~torch.nn.CrossEntropyLoss` for details.
 
@@ -2778,9 +2782,10 @@ def cross_entropy(
             in case of 2D Loss, or :math:`(N, C, d_1, d_2, ..., d_K)` where :math:`K \geq 1`
             in the case of K-dimensional loss. `input` is expected to contain unnormalized scores
             (often referred to as logits).
-        target (Tensor) : :math:`(N)` where each value is :math:`0 \leq \text{targets}[i] \leq C-1`,
-            or :math:`(N, d_1, d_2, ..., d_K)` where :math:`K \geq 1` for
-            K-dimensional loss.
+        target (Tensor) : If containing class indices, shape :math:`(N)` where each value is
+            :math:`0 \leq \text{targets}[i] \leq C-1`, or :math:`(N, d_1, d_2, ..., d_K)` with
+            :math:`K \geq 1` in the case of K-dimensional loss. If containing class probabilities,
+            same shape as the input.
         weight (Tensor, optional): a manual rescaling weight given to each
             class. If given, has to be a Tensor of size `C`
         size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
@@ -2790,7 +2795,9 @@ def cross_entropy(
             when reduce is ``False``. Default: ``True``
         ignore_index (int, optional): Specifies a target value that is ignored
             and does not contribute to the input gradient. When :attr:`size_average` is
-            ``True``, the loss is averaged over non-ignored targets. Default: -100
+            ``True``, the loss is averaged over non-ignored targets. Note that
+            :attr:`ignore_index` is only applicable when the target contains class indices.
+            Default: -100
         reduce (bool, optional): Deprecated (see :attr:`reduction`). By default, the
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
@@ -2804,8 +2811,15 @@ def cross_entropy(
 
     Examples::
 
+        >>> # Example of target with class indices
         >>> input = torch.randn(3, 5, requires_grad=True)
         >>> target = torch.randint(5, (3,), dtype=torch.int64)
+        >>> loss = F.cross_entropy(input, target)
+        >>> loss.backward()
+        >>>
+        >>> # Example of target with class probabilities
+        >>> input = torch.randn(3, 5, requires_grad=True)
+        >>> target = torch.randn(3, 5).softmax(dim=1)
         >>> loss = F.cross_entropy(input, target)
         >>> loss.backward()
     """
@@ -4088,7 +4102,7 @@ def affine_grid(theta: Tensor, size: List[int], align_corners: Optional[bool] = 
     return torch.affine_grid_generator(theta, size, align_corners)
 
 
-def _pad(input: Tensor, pad: List[int], mode: str = "constant", value: float = 0) -> Tensor:
+def _pad(input: Tensor, pad: List[int], mode: str = "constant", value: float = 0.0) -> Tensor:
     r"""Pads tensor.
 
     Padding size:
@@ -4153,7 +4167,7 @@ def _pad(input: Tensor, pad: List[int], mode: str = "constant", value: float = 0
     if mode == "constant":
         return _VF.constant_pad_nd(input, pad, value)
     else:
-        assert value == 0, 'Padding mode "{}"" doesn\'t take in value argument'.format(mode)
+        assert value == 0.0, 'Padding mode "{}"" doesn\'t take in value argument'.format(mode)
         if len(pad) == 2 and (input.dim() == 2 or input.dim() == 3):
             if mode == "reflect":
                 return torch._C._nn.reflection_pad1d(input, pad)
@@ -4164,8 +4178,7 @@ def _pad(input: Tensor, pad: List[int], mode: str = "constant", value: float = 0
             else:
                 raise NotImplementedError
 
-        elif input.dim() == 4:
-            assert len(pad) == 4, "4D tensors expect 4 values for padding"
+        elif len(pad) == 4 and (input.dim() == 3 or input.dim() == 4):
             if mode == "reflect":
                 return torch._C._nn.reflection_pad2d(input, pad)
             elif mode == "replicate":
@@ -4175,8 +4188,7 @@ def _pad(input: Tensor, pad: List[int], mode: str = "constant", value: float = 0
             else:
                 raise NotImplementedError
 
-        elif input.dim() == 5:
-            assert len(pad) == 6, "5D tensors expect 6 values for padding"
+        elif len(pad) == 6 and (input.dim() == 4 or input.dim() == 5):
             if mode == "reflect":
                 return torch._C._nn.reflection_pad3d(input, pad)
             elif mode == "replicate":
@@ -4247,14 +4259,15 @@ Supports :ref:`type promotion <type-promotion-doc>`.
 
 Args:
     x1 (Tensor): First input.
-    x2 (Tensor): Second input (of size matching x1).
+    x2 (Tensor): Second input (with the same number of dimensions as x1, matching x1 size at dimension `dim`,
+        and broadcastable with x1 at other dimensions).
     dim (int, optional): Dimension of vectors. Default: 1
     eps (float, optional): Small value to avoid division by zero.
         Default: 1e-8
 
 Shape:
     - Input: :math:`(\ast_1, D, \ast_2)` where D is at position `dim`.
-    - Output: :math:`(\ast_1, \ast_2)` where 1 is at position `dim`.
+    - Output: :math:`(\ast_1, \ast_2)`
 
 Example::
 
@@ -5024,7 +5037,7 @@ def multi_head_attention_forward(
     #
     q = q.contiguous().view(tgt_len, bsz * num_heads, head_dim).transpose(0, 1)
     if static_k is None:
-        k = k.contiguous().view(-1, bsz * num_heads, head_dim).transpose(0, 1)
+        k = k.contiguous().view(k.shape[0], bsz * num_heads, head_dim).transpose(0, 1)
     else:
         # TODO finish disentangling control flow so we don't do in-projections when statics are passed
         assert static_k.size(0) == bsz * num_heads, \
@@ -5033,7 +5046,7 @@ def multi_head_attention_forward(
             f"expecting static_k.size(2) of {head_dim}, but got {static_k.size(2)}"
         k = static_k
     if static_v is None:
-        v = v.contiguous().view(-1, bsz * num_heads, head_dim).transpose(0, 1)
+        v = v.contiguous().view(v.shape[0], bsz * num_heads, head_dim).transpose(0, 1)
     else:
         # TODO finish disentangling control flow so we don't do in-projections when statics are passed
         assert static_v.size(0) == bsz * num_heads, \

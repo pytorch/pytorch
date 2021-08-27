@@ -6,10 +6,10 @@ namespace caffe2 {
 
 REGISTER_CUDA_OPERATOR(
     Add,
-    BinaryElementwiseOp<NumericTypes, CUDAContext, AddFunctor<CUDAContext>>);
+    BinaryElementwiseBroadcastOp<NumericTypes, CUDAContext, AddFunctor<CUDAContext>>);
 REGISTER_CUDA_OPERATOR(
     AddGradient,
-    BinaryElementwiseGradientOp<
+    BinaryElementwiseGradientBroadcastOp<
         NumericTypes,
         CUDAContext,
         AddFunctor<CUDAContext>>);

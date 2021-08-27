@@ -12,6 +12,10 @@
 #include <ATen/core/DistributionsHelper.h>
 
 #include <c10/util/irange.h>
+#if AT_MKLDNN_ENABLED()
+#include <ATen/native/mkldnn/MKLDNNCommon.h>
+#include <ATen/native/mkldnn/Utils.h>
+#endif
 
 namespace at {
 namespace meta {
@@ -305,16 +309,55 @@ TORCH_IMPL_FUNC(softshrink_backward_out) (
   shrink_backward_stub(device_type(), *this, lambd);
 }
 
+bool use_mkldnn(const Tensor& input) {
+#if AT_MKLDNN_ENABLED()
+  if (!at::globalContext().userEnabledMkldnn()) {
+    return false;
+  }
+  if (!input.is_contiguous() || input.numel() == 1) {
+    return false;
+  }
+  return (input.is_mkldnn()) || // input is mkldnn Tensor
+    (input.device().is_cpu() &&
+    (((input.scalar_type() == kBFloat16) && mkldnn_bf16_device_check()) ||
+    (input.scalar_type() == kFloat))); // input is dense layout and bfloat16/float32
+#endif
+  return false;
+}
+
 TORCH_IMPL_FUNC(gelu_out_cpu) (
   const Tensor& self, const Tensor& result
 ) {
+#if AT_MKLDNN_ENABLED()
+  if (use_mkldnn(self)) {
+    const ideep::tensor& x = itensor_from_tensor(self);
+    ideep::tensor y = itensor_from_tensor(result);
+    ideep::eltwise_forward::compute(
+      x, y, ideep::algorithm::eltwise_gelu_erf, ideep::prop_kind::forward_training, /*alpha*/ 0.0);
+  } else {
+    GeluKernel(kCPU, *this);
+  }
+#else
   GeluKernel(kCPU, *this);
+#endif
 }
 
 TORCH_IMPL_FUNC(gelu_backward_out_cpu) (
   const Tensor& grad, const Tensor& self, const Tensor& grad_input
 ) {
+#if AT_MKLDNN_ENABLED()
+  if (use_mkldnn(self)) {
+    const ideep::tensor& x = itensor_from_tensor(self);
+    ideep::tensor grady = itensor_from_tensor(grad);
+    ideep::tensor gradx = itensor_from_tensor(grad_input);
+    ideep::eltwise_backward::compute(x, grady, gradx,
+      ideep::algorithm::eltwise_gelu_erf, /*alpha*/ 0.0);
+  } else {
+    GeluBackwardKernel(kCPU, *this);
+  }
+#else
   GeluBackwardKernel(kCPU, *this);
+#endif
 }
 
 Tensor hardtanh(const Tensor& self, const Scalar& min, const Scalar& max) {
@@ -481,7 +524,7 @@ Tensor& rrelu_with_noise_out_cpu(const Tensor& self,
     c10::optional<Generator> generator,
     Tensor& output) {
   if (training) {
-    AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "rrelu_with_noise_out_cpu", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, self.scalar_type(), "rrelu_with_noise_out_cpu", [&] {
       _rrelu_with_noise_train<scalar_t>(output, self.contiguous(), noise, lower, upper, generator);
     });
     return output;
