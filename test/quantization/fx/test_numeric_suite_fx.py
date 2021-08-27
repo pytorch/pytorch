@@ -646,7 +646,6 @@ class TestFXGraphMatcher(QuantizationTestCase):
                 # these ops do not have quantized equivalents
                 ops_to_skip = [
                     torch.bmm,
-                    torch.sum,
                     torch.div,
                     torch.sub,
                     operator.truediv,
@@ -662,6 +661,9 @@ class TestFXGraphMatcher(QuantizationTestCase):
                 # RNNDynamicQuantizeHandler
                 pass
             elif qhandler_cls == qp.DefaultNodeQuantizeHandler:
+                # torch.sum does not have quantized equivalents
+                if base_op == torch.sum:
+                    continue
                 self.assertTrue(
                     _op_in_base_sets_of_related_ops(base_op),
                     f"{base_op} not in sets of related ops")
@@ -1832,8 +1834,8 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         mp_ns, mc_ns = add_loggers('fp32', mp, 'int8', mc, OutputLogger)
         ref_fp32_ns = mp_ns(datum)
         ref_int8_ns = mc_ns(datum)
-        self.assertTrue(torch.allclose(ref_fp32, ref_fp32_ns))
-        self.assertTrue(torch.allclose(ref_int8, ref_int8_ns))
+        self.assertEqual(ref_fp32, ref_fp32_ns)
+        self.assertEqual(ref_int8, ref_int8_ns)
 
     @skipIfNoFBGEMM
     def test_shadow_loggers_preserve_qat_numerics(self):
@@ -1850,7 +1852,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
 
         mc_shadows_mp = add_shadow_loggers('int8', mc, 'fp32', mp, OutputLogger)
         ref_shadow = mc_shadows_mp(datum)
-        self.assertTrue(torch.allclose(ref_fp32, ref_shadow))
+        self.assertEqual(ref_fp32, ref_shadow)
 
 class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
     """
