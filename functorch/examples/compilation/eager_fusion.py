@@ -11,7 +11,7 @@ def f(a):
 
 fw_compiler = partial(tvm_compile, name='fw_keops')
 bw_compiler = partial(tvm_compile, name='bw_keops')
-compiled_f = compiled_function(f, fw_compiler, bw_compiler).apply
+compiled_f = compiled_function(f, fw_compiler, bw_compiler)
 
 # fw_compiler = lambda x, _: x
 # bw_compiler = lambda x, _: x
