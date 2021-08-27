@@ -1,7 +1,7 @@
 import time
 import torch
 import torch.nn as nn
-from functorch import make_fx, grad, nnc_jit, nnc_compile, vmap, make_nnc, vjpfull
+from functorch import make_fx, grad, nnc_jit, nnc_compile, vmap, make_nnc, vjp
 from torch.fx.node import map_arg
 import torch.fx as fx
 from functools import partial
@@ -41,6 +41,7 @@ def partition_backwards(fx_module: fx.GraphModule):
     for node in fx_module.graph.nodes:
         if node in bw_nodes:
             value_remap[node] = bw_graph.node_copy(node, lambda n : value_remap[n])
+
     num_fwd_outputs = fx_module._out_spec.children_specs[0].num_leaves
     num_bwd_outputs = fx_module._out_spec.children_specs[1].num_leaves
     assert(num_fwd_outputs + num_bwd_outputs == len(output_node.args[0]))
@@ -113,6 +114,11 @@ def compiled_function(fn, fw_compiler, bw_compiler):
     compiled_fw = None
     bw_module = None
     compiled_bw = None
+
+    def vjpfull(primals, tangents):
+        out, vjpfn = vjp(fn, *primals)
+        return out, vjpfn(*tangents)
+
     class CompiledFunction(torch.autograd.Function):
         @staticmethod
         def forward(ctx, *args):
@@ -120,11 +126,12 @@ def compiled_function(fn, fw_compiler, bw_compiler):
             if compiled_fw is None:
                 out = fn(*args)
                 with torch.enable_grad():
-                    fx_g = make_fx(vjpfull)(fn, args, (torch.ones_like(out),))
+                    fx_g = make_fx(vjpfull)(args, (torch.randn_like(out),))
+                print(args)
+                print(fx_g.code)
                 fw_module, bw_module = partition_backwards(fx_g)
 
-                garbage_hack = torch.randn(())
-                fw_args = (garbage_hack,) + args
+                fw_args = args
 
                 compiled_fw = fw_compiler(fw_module, fw_args)
                 fw_outs = compiled_fw(*fw_module.graph.flatten_inps(fw_args))
@@ -134,7 +141,6 @@ def compiled_function(fn, fw_compiler, bw_compiler):
 
                 bw_args = fw_outs[1:] + [torch.ones_like(fw_outs[0])]
                 compiled_bw = bw_compiler(bw_module, bw_args)
-            garbage_hack = torch.randn(())
             fw_outs = compiled_fw(*fw_module.graph.flatten_inps(fw_args))
             if not isinstance(fw_outs, list):
                 fw_outs = [fw_outs]
