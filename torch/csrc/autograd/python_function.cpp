@@ -383,7 +383,7 @@ static void _wrap_outputs(const std::shared_ptr<PyNode>& cdata, THPFunction *sel
       if (output == Py_None) {
         results.emplace_back();
       } else {
-        TORCH_CHECK(THPVariable_Check(output), "expected Variable or None (got ", 
+        TORCH_CHECK(THPVariable_Check(output), "expected Variable or None (got ",
                     THPUtils_typename(output), ") for grad output ", i, ".")
         results.emplace_back(THPVariable_Unpack(output));
       }
