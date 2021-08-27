@@ -35,18 +35,36 @@ namespace CPU_CAPABILITY {
 using namespace vec;
 
 static void sigmoid_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, iter.common_dtype(), "sigmoid_cpu", [&]() {
+  if (iter.common_dtype() == kBFloat16) {
     cpu_kernel_vec(
         iter,
-        [=](scalar_t a) -> scalar_t { return (static_cast<scalar_t>(1) / (static_cast<scalar_t>(1) + std::exp((-a)))); },
-        [=](Vectorized<scalar_t> a) {
-          a = Vectorized<scalar_t>(static_cast<scalar_t>(0)) - a;
-          a = a.exp();
-          a = Vectorized<scalar_t>(static_cast<scalar_t>(1)) + a;
-          a = a.reciprocal();
-          return a;
+        [=](BFloat16 a) -> BFloat16 {
+          float a0 = static_cast<float>(a);
+          return static_cast<float>(1) / (static_cast<float>(1) + std::exp((-a0)));
+        },
+        [=](Vectorized<BFloat16> a) {
+          Vectorized<float> a0, a1;
+          std::tie(a0, a1) = convert_bfloat16_float(a);
+          a0 = (Vectorized<float>(static_cast<float>(1)) + a0.neg().exp()).reciprocal();
+          a1 = (Vectorized<float>(static_cast<float>(1)) + a1.neg().exp()).reciprocal();
+          return convert_float_bfloat16(a0, a1);
         });
-  });
+  } else {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.common_dtype(), "sigmoid_cpu", [&]() {
+      cpu_kernel_vec(
+          iter,
+          [=](scalar_t a) -> scalar_t {
+            return (static_cast<scalar_t>(1) / (static_cast<scalar_t>(1) + std::exp((-a))));
+          },
+          [=](Vectorized<scalar_t> a) {
+            a = Vectorized<scalar_t>(static_cast<scalar_t>(0)) - a;
+            a = a.exp();
+            a = Vectorized<scalar_t>(static_cast<scalar_t>(1)) + a;
+            a = a.reciprocal();
+            return a;
+          });
+    });
+  }
 }
 
 #if AT_MKL_ENABLED()
@@ -322,7 +340,7 @@ static void sinc_kernel(TensorIteratorBase& iter) {
 }
 
 static void sinh_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "sinh_cpu", [&]() {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, iter.dtype(), "sinh_cpu", [&]() {
     cpu_kernel_vec(
         iter,
         [=](scalar_t a) -> scalar_t { return std::sinh(a); },
@@ -331,7 +349,7 @@ static void sinh_kernel(TensorIteratorBase& iter) {
 }
 
 static void cosh_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "cosh_cpu", [&]() {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, iter.dtype(), "cosh_cpu", [&]() {
     cpu_kernel_vec(
         iter,
         [=](scalar_t a) -> scalar_t { return std::cosh(a); },
@@ -407,7 +425,7 @@ static void nan_to_num_kernel(
     c10::optional<double> nan,
     c10::optional<double> pos_inf,
     c10::optional<double> neg_inf) {
-  AT_DISPATCH_FLOATING_TYPES_AND(kHalf, iter.dtype(), "nan_to_num", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "nan_to_num", [&]() {
     scalar_t nan_replacement = static_cast<scalar_t>(nan.value_or(0.));
     scalar_t pos_inf_replacement = pos_inf.has_value()
         ? static_cast<scalar_t>(pos_inf.value())
@@ -470,7 +488,7 @@ void bernoulli_scalar_kernel(Tensor &self, double p, c10::optional<Generator> ge
     int64_t n = self.numel();
     bool contig = self.is_contiguous();
 
-    AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool, self.scalar_type(), "bernoulli_scalar_cpu_", [&] {
+    AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Bool, at::ScalarType::BFloat16, self.scalar_type(), "bernoulli_scalar_cpu_", [&] {
       at::Tensor tmp_int_tensor;
       if (std::is_same<scalar_t, int>::value && contig) {
         tmp_int_tensor = self;
@@ -586,7 +604,7 @@ static void entr_kernel(TensorIteratorBase& iter) {
 }
 
 static void frexp_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND(kHalf,
+  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf,
     // The iter.dtype() here is the dtype of mantissa output.
     // It's a floating point type and must be the same as the input's dtype.
     iter.dtype(),
