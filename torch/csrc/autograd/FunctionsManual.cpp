@@ -3470,7 +3470,7 @@ struct HouseholderReflectorEvaluator {
 // the torch.linalg.householder_product computes the firt n columns of the following product:
 // Q = (I - tau_1 v_1 v_1^H) ... (I - tau_k v_k v_k^H).
 // Let H_i := I - tau_i v_i v_i^H;
-//     H_i(sigma) := I - sigma v_i v_i^H, so Q = H_1 ... H_k;
+//     H_i(sigma) := I - sigma v_i v_i^H, so Q = (H_1 ... H_k)[:, :k];
 //     H_i_minus = H_1 ... H_{i - 1}, with H_1_minus := I;
 //     H_i_plus = H_{i + 1} ... H_k with H_k_plus := I;
 //
@@ -3485,21 +3485,19 @@ struct HouseholderReflectorEvaluator {
 // NOTE: the algorithms ignores that only n columns of Q are observed, so there is no need in
 // recomputing Q to full completion.
 //
-// Note that K_{i + 1} = pinv(H_{i + 1}) K_i H_i, so we can compute v_i_grad, tau_i_grad one by one
+// Note that K_{i + 1} = H_{i + 1}^{-1} K_i H_i, so we can compute v_i_grad, tau_i_grad one by one
 // by just efficiently updating K_i if that is possible. Multiplying with H_i from the right could be
-// done with matrix-vector products, but what about the preudo-inverse pinv(H_{i + 1})?
-// Luckily, under some assumptions, pinv(H_{i + 1}) admits a representation as H_i(sigma_i) for some
+// done with matrix-vector products, but what about the inverse H_{i + 1}^{-1} and does it even exist?
+// Luckily, under some assumptions, H_{i + 1}^{-1} exists and admits a representation as H_i(sigma_i) for some
 // sigma_i, so the left update is also could be done with matrix-vector and not matrix-matrix products.
 //
 // Let H(tau) := I - tau v v_^H, then if (||v||^2 tau - 1) != 0, with sigma defined as
 // sigma := tau / (||v||^2 tau - 1) we get that
-// H(tau) H(sigma) = H(sigma) H(tau) = I, so H(sigma) is a pseudo-inverse of H(tau).
-// It could be additionally shown that H(sigma) is, in fact, the Moore-Penrose inverse,
-// and hence the unique inverse that satisfies the Moore-Penrose conditions.
+// H(tau) H(sigma) = H(sigma) H(tau) = I, so H(sigma) is the inverse of H(tau).
 //
 // Therefore, unless (||v_i||^2 tau_i - 1) is zero for some i, we can update K_{i + 1} from K_i by just
-// employing matrix-vector products. If it is zero, the update is still efficient as it could be
-// shown that H_i is its own Moore-Penrose inverse.
+// employing matrix-vector products. If it is zero, we cannnot update K_{i + 1} from K_i efficiently and need to
+// recompute H_i_plus and H_i_minus from the householder_product.
 // NOTE: the condition ||v_i||^2 tau_i - 1 == 0 is NEVER satisfied if v_i and tau_i are the results
 // of the GEQRF routine.
 std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, const Tensor& result, const Tensor& input_, const Tensor& tau) {
@@ -3519,11 +3517,7 @@ std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, cons
   input.diagonal(0, -2, -1).fill_(1.0);
 
   // compute sigma such that
-  // H(sigma_i) == pinv(H(tau_i)).
-  // When tau_i * ||v_i||^2 - 1 == 0, then
-  // pinv(H(tau_i)) == H(tau_i). This follows from the eigenvalue decomposition,
-  // because (1 - tau_i * ||v_i||^2) is an eigenvalue of H(tau_i) with the
-  // corresponding eigenvector v_i / ||v_i||.
+  // H(sigma_i) == H(tau_i)^{-1}.
   // TODO: it is probably worth considering this case for generic input,
   // even though this case is very unlikely to pop up in practice.
   // There is NO issue if the input to the torch.linalg.householder_product
@@ -3564,7 +3558,7 @@ std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, cons
     return std::make_tuple(v_grad, tau_grad.squeeze(-1));
   };
 
-  // K <- H_0 @ K
+  // K <- H_0^{-1} @ K
   K = left_reflect(0, input.narrow(-1, 0, 1), sigma.narrow(-1, 0, 1), K);
   for (int64_t i = 0; i < k; ++i) {
     // NOTE: narrow will unsqueeze(-1)
@@ -3576,7 +3570,7 @@ std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, cons
     input_grad.select(-1, i).copy_(v_i_grad.squeeze(-1));
     tau_grad.select(-1, i).copy_(tau_i_grad.squeeze(-1));
 
-    // K <- pinv(H_{i + 1}) @ K @ H_i
+    // K <- H_{i + 1}^{-1} @ K @ H_i
     if (i < k - 1) {
       auto v_i_next = input.narrow(-1, i + 1, 1);
       auto s_i_next = sigma.narrow(-1, i + 1, 1);
