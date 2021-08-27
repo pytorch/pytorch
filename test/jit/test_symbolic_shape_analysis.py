@@ -172,6 +172,7 @@ class TestSymbolicShapeAnalysis(JitTestCase):
         # no opinfo for tensor constructors
         inps = [
             (10,),
+            (10, 10),
             (0, 10),
             (0, 1000),
             (1, -1, -1),
