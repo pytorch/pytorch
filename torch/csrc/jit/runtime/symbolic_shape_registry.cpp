@@ -167,7 +167,7 @@ const std::string shape_compute_functions =
         def max_pool2d(input: List[int], kernel_size: List[int], stride: List[int], padding: List[int], dilation: List[int], ceil_mode: bool):
           assert len(kernel_size) == 1 or len(kernel_size) == 2, "max_pool2d: kernel_size must either be a single int, or a tuple of two ints"
           kH = kernel_size[0]
-          kW = 1 if len(kernel_size) == 1 else kernel_size[1]
+          kW = kH if len(kernel_size) == 1 else kernel_size[1]
 
           assert len(stride) == 0 or len(stride) == 1 or len(stride) == 2, "max_pool2d: stride must either be omitted, a single int, or a tuple of two ints"
           dH = kH if len(stride) == 0 else stride[0]
