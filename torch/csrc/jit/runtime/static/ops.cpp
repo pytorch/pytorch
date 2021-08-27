@@ -15,11 +15,13 @@
 #include <ATen/native/quantized/cpu/qembeddingbag.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/runtime/static/te_wrapper.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
+#include <mutex>
 
 C10_DEFINE_bool(
     static_runtime_enable_fast_math,
@@ -213,7 +215,7 @@ std::function<void(ProcessedNode*)> getOutOfPlaceOperation(Node* n) {
 
 // Returns true if the node represents an op with variadic arguments.
 bool hasVarArgs(Node* n) {
-  if (n->kind() == prim::Concat) {
+  if (n->kind() == prim::VarConcat || n->kind() == prim::VarStack) {
     return true;
   }
   return false;
@@ -299,6 +301,23 @@ REGISTER_OPERATOR_FUNCTOR(
         p_node->Output(0) = c10::ivalue::Tuple::create(std::move(vals));
       };
     });
+
+REGISTER_OPERATOR_FUNCTOR(aten::abs, aten_abs, [](Node* n) -> SROperator {
+  if (!n->matches(torch::schema("aten::abs(Tensor self) -> Tensor"))) {
+    LogAndDumpSchema(n);
+    return nullptr;
+  }
+  return [](ProcessedNode* p_node) {
+    const auto& in0_t = p_node->Input(0).toTensor();
+    if (p_node->Output(0).isNone()) {
+      p_node->Output(0) = at::native::abs(in0_t);
+    } else {
+      auto& out_t = p_node->Output(0).toTensor();
+      fastResizeToZero(out_t);
+      at::native::abs_out(in0_t, out_t);
+    }
+  };
+});
 
 REGISTER_OPERATOR_FUNCTOR(aten::mul, aten_mul, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
@@ -434,6 +453,29 @@ SROperator aten_stack(Node* n) {
 
 REGISTER_OPERATOR_FUNCTOR(aten::stack, aten_stack, aten_stack);
 
+REGISTER_OPERATOR_FUNCTOR(
+    prim::VarStack,
+    prim_VarStack,
+    [](Node* n) -> SROperator {
+      return [](ProcessedNode* p_node) {
+        const size_t num_inputs = p_node->inputs().size();
+
+        std::vector<at::Tensor> inputs(num_inputs - 1);
+        for (size_t i = 0; i < num_inputs - 1; ++i) {
+          inputs[i] = p_node->Input(i).toTensor();
+        }
+
+        const auto dim = p_node->Input(num_inputs - 1).toInt();
+        if (p_node->Output(0).isNone()) {
+          p_node->Output(0) = at::native::_stack_cpu(inputs, dim);
+        } else {
+          auto& out_t = p_node->Output(0).toTensor();
+          fastResizeToZero(out_t);
+          at::native::_stack_out_cpu(inputs, dim, out_t);
+        }
+      };
+    });
+
 REGISTER_OPERATOR_FUNCTOR(aten::leaky_relu, aten_leaky_relu, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
           "aten::leaky_relu(Tensor self, Scalar negative_slope=0.01) -> Tensor"))) {
@@ -451,159 +493,6 @@ REGISTER_OPERATOR_FUNCTOR(aten::leaky_relu, aten_leaky_relu, [](Node* n) -> SROp
     }
   };
 });
-
-namespace {
-
-// Use the width of an AVX-512 vector by default; this happens to work OK for
-// AVX2 as well. Some ops benefit from using multiple AVX ports, in which case
-// they are vectorized by twice this constant.  An exception is logit, since it
-// contains FP divide, which is single-ported.
-static constexpr int kVectorWidth = 16;
-
-#ifdef TORCH_ENABLE_LLVM
-
-struct TEWrapper {
-  tensorexpr::KernelArena ka;
-  tensorexpr::KernelScope ks;
-  std::unique_ptr<tensorexpr::LLVMCodeGen> cg;
-  TEWrapper() = default;
-  void update(std::unique_ptr<tensorexpr::LLVMCodeGen>&& cg_) {
-    cg = std::move(cg_);
-  }
-
-  void call(const std::vector<void*>& args) {
-    cg->call_raw(args);
-  }
-
-  inline bool supports(const at::Tensor& t) {
-    return t.is_contiguous() && t.dtype().Match<float>();
-  }
-};
-
-void optimizePointwise(
-    tensorexpr::LoopNest* ln,
-    tensorexpr::Tensor* target,
-    int width) {
-  using namespace torch::jit::tensorexpr;
-  std::vector<For*> loops = ln->getLoopStmtsFor(target);
-  For *inner, *tail;
-  TORCH_CHECK(loops.size() > 0, "No loops created for pointwise op");
-  ln->splitWithTail(loops[0], width, &inner, &tail);
-  ln->vectorize(inner);
-}
-
-std::shared_ptr<TEWrapper> wrapTECompute(
-    std::shared_ptr<TEWrapper> wrap,
-    tensorexpr::Placeholder& in,
-    tensorexpr::Tensor* out,
-    tensorexpr::VarHandle& dim,
-    int width = kVectorWidth) {
-  using namespace torch::jit::tensorexpr;
-  LoopNest ln({out});
-  optimizePointwise(&ln, out, width);
-  ln.prepareForCodegen();
-  Stmt* s = ln.root_stmt();
-  s = tensorexpr::IRSimplifier::simplify(s);
-  std::vector<CodeGen::BufferArg> args;
-  args.emplace_back(out);
-  args.emplace_back(in);
-  args.emplace_back(dim);
-  auto cg = std::make_unique<LLVMCodeGen>(s, args);
-  wrap->update(std::move(cg));
-  return wrap;
-};
-
-#else
-
-struct TEWrapper {
-  tensorexpr::KernelArena ka;
-  tensorexpr::KernelScope ks;
-  TEWrapper() = default;
-  template <typename... Ts>
-  void operator()(const Ts&... ts) {
-    DCHECK(0 && "Invalid call");
-  }
-  void call(const std::vector<void*>& args) {
-    DCHECK(0 && "Invalid call");
-  }
-
-  inline bool supports(const at::Tensor& t) {
-    return false;
-  }
-};
-
-std::shared_ptr<TEWrapper> wrapTECompute(
-    std::shared_ptr<TEWrapper> wrap,
-    tensorexpr::Placeholder& in,
-    tensorexpr::Tensor* out,
-    tensorexpr::VarHandle& dim,
-    int width = kVectorWidth) {
-  return wrap;
-};
-
-#endif
-
-} // namespace
-
-std::shared_ptr<TEWrapper> createLogit(c10::optional<float> clamp) {
-  using namespace torch::jit::tensorexpr;
-  auto wrap = std::make_shared<TEWrapper>();
-  auto N = VarHandle("N", kInt);
-  Placeholder A("A", kFloat, {N});
-  tensorexpr::Tensor* B = Compute("B", {N}, [&](const VarHandle& i) {
-    auto A_elem = [&]() {
-      if (!clamp) {
-        return A.load(i);
-      } else {
-        auto elem = A.load(i);
-        auto min = FloatImm::make(*clamp);
-        auto max = FloatImm::make(1.0f - *clamp);
-        elem = CompareSelect::make(elem, min, min, elem, kLT);
-        return CompareSelect::make(elem, max, max, elem, kGT);
-      }
-    }();
-    return log_vml(A_elem / (FloatImm::make(1.0f) - A_elem));
-  });
-  return wrapTECompute(wrap, A, B, N);
-}
-
-std::shared_ptr<TEWrapper> createRelu() {
-  using namespace torch::jit::tensorexpr;
-  auto wrap = std::make_shared<TEWrapper>();
-  auto N = VarHandle("N", kInt);
-  Placeholder A("A", kFloat, {N});
-  tensorexpr::Tensor* B = Compute("B", {N}, [&](const VarHandle& i) {
-    auto zero = FloatImm::make(0.f);
-    auto a = A.load(i);
-    return ifThenElse(a < zero, zero, a);
-  });
-  return wrapTECompute(wrap, A, B, N);
-}
-
-std::shared_ptr<TEWrapper> createTanh() {
-  using namespace torch::jit::tensorexpr;
-  auto wrap = std::make_shared<TEWrapper>();
-  auto N = VarHandle("N", kInt);
-  Placeholder A("A", kFloat, {N});
-  tensorexpr::Tensor* B = Compute("B", {N}, [&](const VarHandle& i) {
-    auto a = A.load(i);
-    return fast_tanh(a);
-  });
-  return wrapTECompute(wrap, A, B, N);
-}
-
-std::shared_ptr<TEWrapper> createSigmoid() {
-  using namespace torch::jit::tensorexpr;
-  auto wrap = std::make_shared<TEWrapper>();
-  auto N = VarHandle("N", kInt);
-  Placeholder A("A", kFloat, {N});
-  Tensor* B =
-      Compute("B", {N}, [&](const VarHandle& i) { return sigmoid(A.load(i)); });
-  // NNC uses sleef for vectorizing sigmoid, which comes in an 8-wide flavor
-  // (Sleef_expf8).
-  constexpr int kSleefWidth = 8;
-  return wrapTECompute(wrap, A, B, N, kSleefWidth);
-}
 
 REGISTER_OPERATOR_FUNCTOR(aten::relu, aten_relu, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema("aten::relu(Tensor self) -> Tensor"))) {
@@ -690,8 +579,9 @@ REGISTER_OPERATOR_FUNCTOR(aten::logit, aten_logit, [](Node* n) -> SROperator {
         ? c10::make_optional<float>(static_cast<float>(clamp_d.value()))
         : c10::nullopt;
   }
-  auto te = clamp ? createLogit(clamp) : nullptr;
-  return [te](ProcessedNode* p_node) {
+  auto te = clamp ? createLogit() : nullptr;
+  float clamp_value = clamp ? *clamp : 0.0f;
+  return [te, clamp_value](ProcessedNode* p_node) {
     const auto& in0_t = p_node->Input(0).toTensor();
     if (p_node->Output(0).isNone()) {
       p_node->Output(0) = create_empty_from(in0_t);
@@ -705,16 +595,18 @@ REGISTER_OPERATOR_FUNCTOR(aten::logit, aten_logit, [](Node* n) -> SROperator {
     } else {
       at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
       int64_t nn = in0_t.numel();
-      te->call({out_t.data_ptr(), in0_t.data_ptr(), &nn});
+      float c = clamp_value;
+      te->call({out_t.data_ptr(), in0_t.data_ptr(), &nn, &c});
     }
   };
 });
 
+// TODO(T98923825): Uncomment this once the bug in this gets fixed.
+/*
 REGISTER_OPERATOR_FUNCTOR(aten::clone, aten_clone, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
-          "aten::clone(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor"))) {
-    LogAndDumpSchema(n);
-    return nullptr;
+          "aten::clone(Tensor self, *, MemoryFormat? memory_format=None) ->
+Tensor"))) { LogAndDumpSchema(n); return nullptr;
   }
   return [](ProcessedNode* p_node) {
     const auto& src = p_node->Input(0).toTensor();
@@ -740,6 +632,8 @@ REGISTER_OPERATOR_FUNCTOR(aten::clone, aten_clone, [](Node* n) -> SROperator {
     at::native::copy_(out_t, src, false);
   };
 });
+*/
+
 REGISTER_OPERATOR_FUNCTOR(
     quantized::embedding_bag_byte_rowwise_offsets,
     quantized_embedding_bag_byte_rowwise_offsets,
@@ -1052,11 +946,11 @@ REGISTER_OPERATOR_FUNCTOR(aten::sum, aten_sum, [](Node* n) -> SROperator {
     }
 
     if (p_node->Output(0).isNone()) {
-      p_node->Output(0) = at::native::sum(self, dim, keepdim, dtype);
+      p_node->Output(0) = at::cpu::sum(self, dim, keepdim, dtype);
     } else {
       auto& output = p_node->Output(0).toTensor();
       fastResizeToZero(output);
-      at::native::sum_out(self, dim, keepdim, dtype, output);
+      at::cpu::sum_out(output, self, dim, keepdim, dtype);
     }
   };
 });
@@ -1393,7 +1287,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::norm, aten_norm, [](Node* n) -> SROperator {
     const size_t num_inp = p_node->inputs().size();
     const auto in1_s = p_node->Input(1).toOptional<at::Scalar>();
     if (num_inp == 3) {
-      at::native::norm_out(
+      at::cpu::norm_outf(
           in0_t,
           in1_s,
           c10::IntArrayRef{},
@@ -1404,7 +1298,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::norm, aten_norm, [](Node* n) -> SROperator {
     }
 
     if (num_inp > 4) {
-      at::native::norm_out(
+      at::cpu::norm_outf(
           in0_t,
           in1_s,
           p_node->Input(2).toIntVector(), // dim
@@ -1413,7 +1307,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::norm, aten_norm, [](Node* n) -> SROperator {
           out_t);
       return;
     }
-    at::native::norm_out(
+    at::cpu::norm_outf(
         in0_t,
         in1_s,
         p_node->Input(2).toIntVector(), // dim
@@ -1484,6 +1378,76 @@ REGISTER_OPERATOR_FUNCTOR(quantized::linear, quantized_linear, [](Node* n) -> SR
   };
 });
 
+REGISTER_OPERATOR_FUNCTOR(
+    fb::quantized_linear,
+    fb_quantized_linear,
+    [](Node* n) -> SROperator {
+      if (!n->matches(torch::schema(
+              "fb::quantized_linear(Tensor X, __torch__.torch.classes.quantized.LinearPackedParamsBase w_prepack, Tensor Y_scale_i, Tensor Y_zero_point_i) -> Tensor"))) {
+        LogAndDumpSchema(n);
+        return nullptr;
+      }
+      const auto w = toIValue(n->inputs()[1]);
+      c10::intrusive_ptr<LinearPackedParamsBase> packed_weight;
+      if (w) {
+        packed_weight = w->toCustomClass<LinearPackedParamsBase>();
+      }
+      return [packed_weight](ProcessedNode* p_node) {
+        const auto& input = p_node->Input(0).toTensor();
+        const auto output_scale = p_node->Input(2).toTensor().item().toFloat();
+        const auto output_zero_point =
+            p_node->Input(3).toTensor().item().toLong();
+
+        if (p_node->Output(0).isNone()) {
+          p_node->Output(0) = at::native::empty_affine_quantized(
+              {0},
+              c10::kQUInt8,
+              c10::nullopt,
+              c10::kCPU,
+              false,
+              output_scale,
+              output_zero_point,
+              c10::nullopt);
+        }
+        auto& out_t = p_node->Output(0).toTensor();
+        fastResizeToZero(out_t);
+
+        if (packed_weight) {
+          packed_weight->apply_out(
+              input, output_scale, output_zero_point, out_t);
+        } else {
+          // Weights could be quantized on the fly
+          auto packed_weight_tmp =
+              p_node->Input(1).toCustomClass<LinearPackedParamsBase>();
+          packed_weight_tmp->apply_out(
+              input, output_scale, output_zero_point, out_t);
+        }
+      };
+    });
+
+REGISTER_OPERATOR_FUNCTOR(aten::full, aten_full, [](Node* n) -> SROperator {
+  if (!n->matches(torch::schema(
+          "aten::full(int[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor"))) {
+    LogAndDumpSchema(n);
+    return nullptr;
+  }
+  return [](ProcessedNode* p_node) {
+    const auto& size = p_node->Input(0).toIntVector();
+    const auto fill_value = p_node->Input(1).toScalar();
+    if (p_node->Output(0).isNone()) {
+      const auto dtype = p_node->Input(2).toOptional<c10::ScalarType>();
+      const auto layout = p_node->Input(3).toOptional<c10::Layout>();
+      const auto device = p_node->Input(4).toOptional<c10::Device>();
+      const auto pin_memory = p_node->Input(5).toOptional<bool>();
+      p_node->Output(0) =
+          at::native::full(size, fill_value, dtype, layout, device, pin_memory);
+    } else {
+      p_node->Output(0) =
+          at::native::full_out(size, fill_value, p_node->Output(0).toTensor());
+    }
+  };
+});
+
 REGISTER_OPERATOR_FUNCTOR(aten::full_like, aten_full_like, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
           "aten::full_like(Tensor self, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor"))) {
@@ -1547,24 +1511,28 @@ void check_cat_no_zero_dim(const std::vector<at::Tensor>& tensors) {
 
 } // namespace
 
-REGISTER_OPERATOR_FUNCTOR(prim::Concat, prim_Concat, [](Node* n) -> SROperator {
-  return [](ProcessedNode* p_node) {
-    const size_t num_inputs = p_node->inputs().size();
-    std::vector<at::Tensor> inputs(num_inputs - 1);
-    for (const auto i : c10::irange(num_inputs - 1)) {
-      inputs[i] = p_node->Input(i).toTensor();
-    }
-    auto dim = p_node->Input(num_inputs - 1).toInt();
-    if (p_node->Output(0).isNone()) {
-      p_node->Output(0) = at::cat(inputs, dim);
-    } else {
-      check_cat_no_zero_dim(inputs);
-      dim = legacy_cat_wrap_dim(dim, inputs);
-      auto& out_t = p_node->Output(0).toTensor();
-      at::native::_cat_out_cpu(inputs, dim, out_t);
-    }
-  };
-});
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_OPERATOR_FUNCTOR(
+    prim::VarConcat,
+    prim_VarConcat,
+    [](Node* n) -> SROperator {
+      return [](ProcessedNode* p_node) {
+        const size_t num_inputs = p_node->inputs().size();
+        std::vector<at::Tensor> inputs(num_inputs - 1);
+        for (const auto i : c10::irange(num_inputs - 1)) {
+          inputs[i] = p_node->Input(i).toTensor();
+        }
+        auto dim = p_node->Input(num_inputs - 1).toInt();
+        if (p_node->Output(0).isNone()) {
+          p_node->Output(0) = at::cat(inputs, dim);
+        } else {
+          check_cat_no_zero_dim(inputs);
+          dim = legacy_cat_wrap_dim(dim, inputs);
+          auto& out_t = p_node->Output(0).toTensor();
+          at::native::_cat_out_cpu(inputs, dim, out_t);
+        }
+      };
+    });
 
 } // namespace jit
 } // namespace torch

@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/mobile/import_data.h>
 
 #include <ATen/core/ivalue.h>
+#include <c10/util/irange.h>
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/mobile/observer.h>
@@ -127,7 +128,7 @@ c10::IValue BytecodeDeserializer::readArchive(
       size_t ndict = dict.size();
       auto obj = c10::ivalue::Object::create(type, ndict);
       auto it = dict.begin();
-      for (size_t i = 0; i < ndict; ++i) {
+      for (const auto i : c10::irange(ndict)) {
         std::stringstream name;
         name << it->key();
         cls->addOrCheckAttribute(name.str(), it->key().type());

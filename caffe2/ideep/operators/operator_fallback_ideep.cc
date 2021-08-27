@@ -205,15 +205,15 @@ REGISTER_IDEEP_OPERATOR(
         SignFunctor<CPUContext>>>);
 REGISTER_IDEEP_OPERATOR(
     Div,
-    IDEEPFallbackOp<BinaryElementwiseOp<
+    IDEEPFallbackOp<BinaryElementwiseBroadcastOp<
       NumericTypes, CPUContext, DivFunctor<CPUContext>>>);
 REGISTER_IDEEP_OPERATOR(
     Mul,
     IDEEPFallbackOp<
-        BinaryElementwiseOp<NumericTypes, CPUContext, MulFunctor<CPUContext>>>);
+        BinaryElementwiseBroadcastOp<NumericTypes, CPUContext, MulFunctor<CPUContext>>>);
 REGISTER_IDEEP_OPERATOR(
     Sub,
-    IDEEPFallbackOp<BinaryElementwiseOp<
+    IDEEPFallbackOp<BinaryElementwiseBroadcastOp<
       NumericTypes, CPUContext, SubFunctor<CPUContext>>>);
 REGISTER_IDEEP_OPERATOR(
     Tanh,
@@ -231,7 +231,7 @@ REGISTER_IDEEP_OPERATOR(
 
 REGISTER_IDEEP_OPERATOR(
     AddGradient,
-    IDEEPFallbackOp<BinaryElementwiseGradientOp<
+    IDEEPFallbackOp<BinaryElementwiseGradientBroadcastOp<
         NumericTypes,
         CPUContext,
         AddFunctor<CPUContext>>>);
@@ -243,7 +243,7 @@ REGISTER_IDEEP_OPERATOR(
         TanhGradientFunctor<CPUContext>>>);
 REGISTER_IDEEP_OPERATOR(
     MulGradient,
-    IDEEPFallbackOp<BinaryElementwiseGradientOp<
+    IDEEPFallbackOp<BinaryElementwiseGradientBroadcastOp<
         NumericTypes,
         CPUContext,
         MulFunctor<CPUContext>>>);
