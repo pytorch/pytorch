@@ -25,12 +25,34 @@ void IRPrinter::print(Expr& expr) {
 void IRPrinter::print(Stmt& stmt) {
   stmt.accept(this);
 }
+std::string IRPrinter::to_string(CompareSelectOperation op) {
+  switch (op) {
+    case CompareSelectOperation::kEQ:
+      return "==";
+    case CompareSelectOperation::kNE:
+      return "!=";
+    case CompareSelectOperation::kGT:
+      return ">";
+    case CompareSelectOperation::kGE:
+      return ">=";
+    case CompareSelectOperation::kLT:
+      return "<";
+    case CompareSelectOperation::kLE:
+      return "<=";
+    default:
+      throw std::runtime_error("invalid compare select operator");
+  }
+}
 
 // TODO: change whether to include the parenthesis to the parent expression,
 // we need to look at the operator precedence to make the output simpler.
-template <typename Op>
+template <
+    typename Op,
+    typename std::enable_if<std::is_same<
+        decltype(detail::bin_op_deducer(std::declval<Op>())),
+        void>::value>::type* = nullptr>
 void visitBinaryOp(
-    BinaryOpNode<Op>* v,
+    NodePtr<Op> v,
     const std::string& op_str,
     IRPrinter* printer,
     bool parens = true) {
@@ -133,28 +155,8 @@ void IRPrinter::visit(CompareSelectPtr v) {
   if (lhs_prec >= self_prec) {
     os() << ")";
   }
-  switch (cmp_op) {
-    case CompareSelectOperation::kEQ:
-      os() << "==";
-      break;
-    case CompareSelectOperation::kNE:
-      os() << "!=";
-      break;
-    case CompareSelectOperation::kGT:
-      os() << ">";
-      break;
-    case CompareSelectOperation::kGE:
-      os() << ">=";
-      break;
-    case CompareSelectOperation::kLT:
-      os() << "<";
-      break;
-    case CompareSelectOperation::kLE:
-      os() << "<=";
-      break;
-    default:
-      throw std::runtime_error("invalid compare select operator");
-  }
+
+  os() << to_string(cmp_op);
 
   if (rhs_prec >= self_prec) {
     os() << "(";
@@ -222,6 +224,13 @@ AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_PRINT_VISIT);
 void IRPrinter::visit(CastPtr v) {
   auto dtype = v->dtype();
   os() << dtypeToCppString(dtype) << "(";
+  v->src_value()->accept(this);
+  os() << ")";
+}
+
+void IRPrinter::visit(BitCastPtr v) {
+  auto dtype = v->dtype();
+  os() << "BitCast<" << dtype.ToCppString() << ">(";
   v->src_value()->accept(this);
   os() << ")";
 }
@@ -435,7 +444,7 @@ void IRPrinter::visit(FreePtr v) {
 void IRPrinter::visit(LetPtr v) {
   os() << dtypeToCppString(v->dtype()) << " " << *v->var();
   os() << " = " << *v->value();
-  os() << ";";
+  os() << ";" << std::endl;
 }
 
 void IRPrinter::visit(CondPtr v) {
@@ -541,7 +550,7 @@ std::ostream& operator<<(std::ostream& stream, const Stmt& stmt) {
 }
 
 std::ostream& operator<<(std::ostream& stream, const Tensor& t) {
-  stream << std::to_string(&t);
+  stream << std::to_string(t);
   return stream;
 }
 
@@ -564,7 +573,7 @@ void print(StmtPtr stmt) {
   }
 }
 
-void print(const Tensor* t) {
+void print(const Tensor& t) {
   std::cout << std::to_string(t);
 }
 
@@ -585,20 +594,17 @@ std::string to_string(StmtPtr stmt) {
   return oss.str();
 }
 
-std::string to_string(const Tensor* t) {
-  if (!t) {
-    return "(null tensor)\n";
-  }
+std::string to_string(const Tensor& t) {
   std::ostringstream oss;
   // TODO: move this to Buf printer
-  oss << "Tensor " << t->buf()->name_hint() << "[";
-  for (const auto i : c10::irange(t->buf()->ndim())) {
+  oss << "Tensor " << t.buf()->name_hint() << "[";
+  for (const auto i : c10::irange(t.buf()->ndim())) {
     if (i != 0) {
       oss << ", ";
     }
-    oss << *t->buf()->dim(i);
+    oss << *t.buf()->dim(i);
   }
-  oss << "]:\n" << *t->stmt() << "\n";
+  oss << "]:\n" << *t.stmt() << "\n";
   return oss.str();
 }
 } // namespace std
