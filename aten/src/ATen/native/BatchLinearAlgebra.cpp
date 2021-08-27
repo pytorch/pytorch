@@ -3854,7 +3854,7 @@ void checkInputsSolver(const Tensor& A,
               " (", A.size(-2), "x", A.size(-1), " and ", B.size(-2), "x", B.size(-1), ")");
 }
 
-bool is_fortran_ready(const Tensor& t) {
+bool is_row_or_column_contiguous(const Tensor& t) {
   // This could be made more general, similar to how it's checked in matmul, which would allow to
   // ellide the copy with strides such as (6, 12, 1, 3) or (3, 1, 9), but this is quite tricky.
   // We choose to be conservative for simplicity
@@ -3936,8 +3936,8 @@ Tensor& linalg_solve_triangular_out(
   // and B are F-ready and not A.is_neg() (which happens almost always in practice).
   // When called as f(A, B, out=B) in most practical cases it'll perform no copies.
 
-  const bool avoid_copy_A = is_fortran_ready(A_) && A_.stride(-2) == 1 && A_.is_conj();
-  if (avoid_copy_A){
+  const bool avoid_copy_A = A_.transpose(-2, -1).is_contiguous() && A_.is_conj();
+  if (avoid_copy_A) {
     // See Note: [Cloning A]
     at::native::resize_output(out, B_.sizes());
   }
@@ -3952,13 +3952,13 @@ Tensor& linalg_solve_triangular_out(
 
   Tensor out_f; // the out that will go into fortran
   // We use C10_LIKELY mostly for documentation as it helps following what's the most likely path
-  if C10_LIKELY (is_fortran_ready(out)) {
+  if C10_LIKELY (is_row_or_column_contiguous(out)) {
     out_f = out;
     if C10_LIKELY (!out.is_same(B_)) {
       out_f.copy_(B_);
     }
-  } else{
-    if (avoid_copy_A){
+  } else {
+    if (avoid_copy_A) {
       // See Note: [Cloning A]
       out_f = B_.clone(at::MemoryFormat::Contiguous);
     }
@@ -3986,7 +3986,7 @@ Tensor& linalg_solve_triangular_out(
   bool A_is_conj = A_.is_conj() != out_f.is_conj();
   bool A_is_neg = A_.is_neg() != out_f.is_neg();
   bool A_is_f_contig = (A_.stride(-1) == 1) == transpose_A;
-  if C10_LIKELY (is_fortran_ready(A_) && !((A_is_conj && A_is_f_contig) || A_is_neg)) {
+  if C10_LIKELY (is_row_or_column_contiguous(A_) && !((A_is_conj && A_is_f_contig) || A_is_neg)) {
     A_f = A_;
   } else {
     // We choose C-contig rather than F-contig because it has better memory access in solvers
