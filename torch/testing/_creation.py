@@ -3,7 +3,7 @@ This module contains tensor creation utilities.
 """
 
 import torch
-from typing import Optional, Tuple, Union
+from typing import Optional, Sequence, Tuple, Union, cast
 import math
 
 __all__ = [
@@ -11,7 +11,7 @@ __all__ = [
 ]
 
 def make_tensor(
-    shape: Tuple[int, ...],
+    shape: Sequence[int],
     device: Union[str, torch.device],
     dtype: torch.dtype,
     *,
@@ -59,11 +59,12 @@ def make_tensor(
         exclude_zero (Optional[bool]): If ``True`` then zeros are replaced with the dtype's small positive value
             depending on the :attr:`dtype`. For bool and integer types zero is replaced with one. For floating
             point types it is replaced with the dtype's smallest positive normal number (the "tiny" value of the
-            dtype's finfo object), and for complex types it is replaced with a complex number whose real and imaginary
+            :attr:`dtype`'s :fun:`~torch.finfo` object), and for complex types it is replaced with a complex number whose real and imaginary
             parts are both the smallest positive normal number representable by the complex type. Default ``False``.
 
     Raises:
-        ValueError: If :attr:`low` is either ``inf`` or ``nan`` or :attr:`high` is either ``-inf`` or ``nan``.
+        ValueError: If ``low > high``.
+        ValueError: If either :attr:`low` or :attr:`high` is ``nan``.
         TypeError: If :attr:`dtype` isn't supported by this function.
 
     Examples:
@@ -108,8 +109,8 @@ def make_tensor(
         result = torch.randint(0, 2, shape, device=device, dtype=dtype)
     elif dtype is torch.uint8:
         ranges = (torch.iinfo(dtype).min, torch.iinfo(dtype).max)
-        low, high = _modify_low_high(low, high, ranges[0], ranges[1], 0, 10, dtype)
-        result = torch.randint(low, high, shape, device=device, dtype=dtype)  # type: ignore[call-overload]
+        low, high = cast(Tuple[int, int]), _modify_low_high(low, high, ranges[0], ranges[1], 0, 10, dtype))
+        result = torch.randint(low, high, shape, device=device, dtype=dtype)
     elif dtype in _integral_types:
         ranges = (torch.iinfo(dtype).min, torch.iinfo(dtype).max)
         low, high = _modify_low_high(low, high, ranges[0], ranges[1], -9, 10, dtype)
