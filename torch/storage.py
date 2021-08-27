@@ -611,6 +611,9 @@ class TypedStorage(torch._C.TypedStorage):
     def _share_cuda_(self, *args, **kwargs):
         return self._storage._share_cuda_(*args, **kwargs)
 
+    def is_shared(self):
+        return self._storage.is_shared()
+
 
 def _get_dtype_from_pickle_storage_type(pickle_storage_type: str):
     try:

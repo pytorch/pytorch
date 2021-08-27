@@ -583,7 +583,7 @@ class TestCuda(TestCase):
         self.assertTrue(isinstance(q_copy[3], torch.storage.TypedStorage))
         self.assertTrue(isinstance(q_copy[3]._storage, torch.cuda.ByteStorage))
         q_copy[1].fill_(10)
-        self.assertEqual(q_copy[3], torch.empty(10, device='cuda', dtype=torch.int).fill_(10).storage())
+        self.assertEqual(q_copy[3], torch.cuda.IntStorage(10).fill_(10))
 
     def test_cublas_allow_tf32_get_set(self):
         orig = torch.backends.cuda.matmul.allow_tf32
@@ -607,6 +607,11 @@ class TestCuda(TestCase):
         self.assertIsInstance(x.cuda().float().cpu().int(), torch.IntTensor)
 
         y = x.storage()
+        self.assertIsInstance(y.float(), torch.FloatStorage)
+        self.assertIsInstance(y.cuda().double(), torch.cuda.DoubleStorage)
+        self.assertIsInstance(y.cuda().float(), torch.cuda.FloatStorage)
+        self.assertIsInstance(y.cuda().float().cpu(), torch.FloatStorage)
+        self.assertIsInstance(y.cuda().float().cpu().int(), torch.IntStorage)
 
     @unittest.skip("was disabled due to not enough memory, but actually it always fail")
     def test_arithmetic_large_tensor(self):
@@ -747,6 +752,8 @@ class TestCuda(TestCase):
         x = torch.randn(4, 4, device='cuda:1').storage()
         y = x.clone()
         self.assertEqual(x.get_device(), y.get_device())
+        for t in ['byte', 'char', 'short', 'int', 'long', 'half', 'double']:
+            self.assertEqual(getattr(x, t)().get_device(), x.get_device())
 
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
     def test_cuda_set_device(self):

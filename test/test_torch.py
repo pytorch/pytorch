@@ -1851,9 +1851,6 @@ class AbstractTestCases:
                 s1 = torch.FloatStorage.from_file(filename, True, size)
                 t1 = torch.FloatTensor(s1).copy_(torch.randn(size))
 
-                # TODO: The issue here is that torch.FloatTensor(s1)
-                # ends up cloning the storage. Within FloatTensor.__init__,
-                # we need to use s1._untyped()
                 self.assertEqual(s1.data_ptr(), torch.FloatTensor(s1).data_ptr())
 
                 # check mapping
@@ -1933,12 +1930,10 @@ class AbstractTestCases:
                     continue
                 if t.is_cuda and not torch.cuda.is_available():
                     continue
-                # TODO: This case needs to be fixed
-                if t in [torch.QUInt8Storage, torch.QInt8Storage, torch.QInt32Storage, torch.QUInt4x2Storage]:
-                    continue
                 if t == torch.BoolStorage or t == torch.cuda.BoolStorage:
                     obj = t(100).fill_(True)
                 else:
+                    # TODO: This fails for quantized storages
                     obj = t(100).fill_(1)
                 obj.__repr__()
                 str(obj)
@@ -3069,14 +3064,14 @@ class TestTorchDeviceType(TestCase):
     # TODO: This is failing with a CUDA leak
     # Also, we need to undo the changes to torch.tensor(), so that it
     # performs a cast instead of a reinterpretation
-    #@onlyOnCPUAndCUDA
-    #@dtypes(*torch.testing.get_all_dtypes())
-    #def test_tensor_from_storage(self, device, dtype):
-    #    a = make_tensor((4, 5, 3), device, dtype, low=-9, high=9)
-    #    a_s = a.storage()
+    @onlyOnCPUAndCUDA
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_tensor_from_storage(self, device, dtype):
+        a = make_tensor((4, 5, 3), device, dtype, low=-9, high=9)
+        a_s = a.storage()
 
-    #    b = torch.tensor(a_s, device=device, dtype=dtype).reshape(a.size())
-    #    self.assertEqual(a, b)
+        b = torch.tensor(a_s, device=device, dtype=dtype).reshape(a.size())
+        self.assertEqual(a, b)
 
     @dtypes(torch.float32, torch.complex64)
     def test_deepcopy(self, device, dtype):
@@ -7155,10 +7150,6 @@ else:
 
     def test_storage_device(self, device):
         x = torch.tensor([], device=device)
-        '''
-        self.assertEqual(x.dtype, torch.float32)
-        self.assertEqual(x.storage().device, x.device)
-        '''
         self.assertEqual(x.dtype, x.storage().dtype)
 
     @deviceCountAtLeast(2)
