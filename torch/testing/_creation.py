@@ -26,43 +26,41 @@ def make_tensor(
 
     If :attr:`low` or :attr:`high` are specified and are outside the range of the datatype's representable
     finite values then they are clamped to the lowest or highest representable finite value, respectively.
-    A random tensor is then created with values within ``[low, high)``. If ``None``, then the following
-    table describes the default values for :attr:`low` and :attr:`high`, which depend on :attr:`dtype`. The
-    table also describes the values used as replacements for zeros (if :attr:`exclude_zero` is ``True``) in
-    the generated tensor, which also depends on :attr:`dtype`.
+    If ``None``, then the following table describes the default values for :attr:`low` and :attr:`high`,
+    which depend on :attr:`dtype`.
 
-    +---------------------------+------------+----------+-----------------------------------------------------------------+
-    | ``dtype``                 | ``low``    | ``high`` | ``zero replacement``                                            |
-    +===========================+============+==========+=================================================================+
-    | boolean type              | ``0``      | ``2``    | ``1``                                                           |
-    +---------------------------+------------+----------+-----------------------------------------------------------------+
-    | unsigned integral type    | ``0``      | ``10``   | ``1``                                                           |
-    +---------------------------+------------+----------+-----------------------------------------------------------------+
-    | signed integral types     | ``-9``     | ``10``   | ``1``                                                           |
-    +---------------------------+------------+----------+-----------------------------------------------------------------+
-    | floating types            | ``-9``     | ``9``    | ``tiny`` (:class:`~torch.finfo`)                                |
-    +---------------------------+------------+----------+-----------------------------------------------------------------+
-    | complex types             | ``-9``     | ``9``    | (for both real and imaginary): ``tiny`` (:class:`~torch.finfo`) |
-    +---------------------------+------------+----------+-----------------------------------------------------------------+
+    +---------------------------+------------+----------+
+    | ``dtype``                 | ``low``    | ``high`` |
+    +===========================+============+==========+
+    | boolean type              | ``0``      | ``2``    |
+    +---------------------------+------------+----------+
+    | unsigned integral type    | ``0``      | ``10``   |
+    +---------------------------+------------+----------+
+    | signed integral types     | ``-9``     | ``10``   |
+    +---------------------------+------------+----------+
+    | floating types            | ``-9``     | ``9``    |
+    +---------------------------+------------+----------+
+    | complex types             | ``-9``     | ``9``    |
+    +---------------------------+------------+----------+
 
     Args:
         shape (Tuple[int, ...]): A sequence of integers defining the shape of the output tensor.
         device (Union[str, torch.device]): The device of the returned tensor.
-        dtype (torch.dtype): The desired data type of the returned tensor.
-        low (Optional[Number]): Sets the lower range (inclusive). If a number is provided it is
+        dtype (torch.dtype): The data type of the returned tensor.
+        low (Optional[Number]): Sets the lower limit (inclusive) of the given range. If a number is provided it is
             clamped to the least representable finite value of the given dtype. When ``None`` (default),
             this value is determined based on the :attr:`dtype` (see the table above). Default: ``None``.
-        high (Optional[Number]): Sets the upper range (exclusive). If a number is provided it is clamped to the
-            greatest representable finite value of the given dtype. When ``None`` (default) this value is
-            determined based on the :attr:`dtype` (see the table above). Default: ``None``.
+        high (Optional[Number]): Sets the upper limit (exclusive) of the given range. If a number is provided it is
+            clamped to the greatest representable finite value of the given dtype. When ``None`` (default) this value
+            is determined based on the :attr:`dtype` (see the table above). Default: ``None``.
         requires_grad (Optional[bool]): If autograd should record operations on the returned tensor. Default: ``False``.
         noncontiguous (Optional[bool]): If `True`, the returned tensor will be noncontiguous. This argument is
             ignored if the constructed tensor has fewer than two elements.
-        exclude_zero (Optional[bool]): If ``True`` then zeros are replaced with the dtype's small positive value.
-            For bool and integer types zero is replaced with one. For floating point types it is replaced with the
-            dtype's smallest positive normal number (the "tiny" value of the dtype's finfo object), and for complex
-            types it is replaced with a complex number whose real and imaginary parts are both the smallest positive
-            normal number representable by the complex type (also see the table above). Default ``False``.
+        exclude_zero (Optional[bool]): If ``True`` then zeros are replaced with the dtype's small positive value
+            depending on the :attr:`dtype`. For bool and integer types zero is replaced with one. For floating
+            point types it is replaced with the dtype's smallest positive normal number (the "tiny" value of the
+            dtype's finfo object), and for complex types it is replaced with a complex number whose real and imaginary
+            parts are both the smallest positive normal number representable by the complex type. Default ``False``.
 
     Raises:
         ValueError: If :attr:`low` is either ``inf`` or ``nan`` or :attr:`high` is either ``-inf`` or ``nan``.
