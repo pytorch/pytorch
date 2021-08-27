@@ -113,7 +113,7 @@ class TORCH_API Reducer {
   // buckets, each of which is specified as a list of indices into the
   // variables list for **a single replica** (i.e. `variables[0]`).
   explicit Reducer(
-      std::vector<std::vector<at::Tensor>> replicas,
+      std::vector<at::Tensor> replicas,
       std::vector<std::vector<size_t>> bucket_indices,
       std::vector<size_t> per_bucket_size_limits,
       c10::intrusive_ptr<c10d::ProcessGroup> process_group,
@@ -236,7 +236,7 @@ class TORCH_API Reducer {
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   mutable std::mutex mutex_;
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  const std::vector<std::vector<at::Tensor>> replicas_;
+  const std::vector<at::Tensor> replicas_;
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const c10::intrusive_ptr<::c10d::ProcessGroup> process_group_;
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
