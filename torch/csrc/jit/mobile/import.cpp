@@ -299,10 +299,8 @@ TypePtr BytecodeDeserializer::resolveTypeName(const c10::QualifiedName& qn) {
 }
 
 namespace {
-#define COUNT_OPCODE(_, _a) 1+
-constexpr size_t numOpcodes =
-    FORALL_OPCODES(COUNT_OPCODE)
-  0;
+#define COUNT_OPCODE(_, _a) 1 +
+constexpr size_t numOpcodes = FORALL_OPCODES(COUNT_OPCODE) 0;
 #undef COUNT_OPCODE
 
 // Pickled strings are memoized, so we can cache a mapping from
@@ -314,6 +312,7 @@ class OpCodeCache {
   std::array<const void*, numOpcodes> keys_;
   std::array<OpCode, numOpcodes> values_;
   size_t usedEntries_ = 0;
+
  public:
   OpCodeCache() {
     memset(keys_.data(), 0, keys_.size() * sizeof(keys_[0]));
@@ -321,9 +320,8 @@ class OpCodeCache {
 
   OpCode parse(const c10::ivalue::ConstantString& s) {
     const auto endIt = keys_.begin() + usedEntries_;
-    auto it = std::find_if(keys_.begin(), endIt, [&s](const void* k) {
-      return k == &s;
-    });
+    auto it = std::find_if(
+        keys_.begin(), endIt, [&s](const void* k) { return k == &s; });
     if (it == endIt) {
       OpCode result = parseOpCode(s.string().c_str());
       if (usedEntries_ < numOpcodes) {
@@ -332,10 +330,12 @@ class OpCodeCache {
       }
       return result;
     }
+    // NOTE: I tried implementing the transpose heuristic here to
+    // speed up the search, but it removed the benefit of this cache.
     return values_[it - keys_.begin()];
   }
 };
-}
+} // namespace
 void BytecodeDeserializer::parseMethods(
     c10::ivalue::TupleElements&& vals,
     c10::optional<c10::ivalue::TupleElements>&& debug_handles,
