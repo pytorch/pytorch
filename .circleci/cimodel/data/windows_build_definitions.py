@@ -58,7 +58,7 @@ class WindowsJob:
             self.cudnn_version = 8 if self.cuda_version.major == 11 else 7
 
         arch_env_elements = (
-            ["cuda" + str(self.cuda_version.major), "cudnn" + str(self.cudnn_version)]
+            ["cuda" + str(self.cuda_version.major) + "." + str(self.cuda_version.minor)]
             if self.cuda_version
             else ["cpu"]
         )

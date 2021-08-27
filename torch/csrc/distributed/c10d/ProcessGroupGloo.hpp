@@ -91,9 +91,13 @@ class TORCH_API ProcessGroupGloo : public ProcessGroup {
    private:
     void finishWorkGloo();
     void finishWorkGlooError(std::exception_ptr eptr);
+    inline void recordAsyncWorkProfilingInfo(
+        const char* profilingTitle,
+        const c10::optional<std::vector<at::Tensor>>& inputTensors);
 
     const std::vector<std::vector<at::Tensor>> outputTensors_;
     c10::intrusive_ptr<at::ivalue::Future> future_;
+    std::function<void()> recordFunctionBeforeCallback_;
   };
 
   // Wrap c10d store as Gloo store

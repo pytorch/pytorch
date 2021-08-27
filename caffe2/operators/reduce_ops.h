@@ -21,7 +21,8 @@ class ReduceOp final : public Operator<Context> {
   explicit ReduceOp(Args&&... args)
       : Operator<Context>(std::forward<Args>(args)...),
         axes_(this->template GetRepeatedArgument<int>("axes")),
-        OP_SINGLE_ARG(bool, "keepdims", keep_dims_, true) {}
+        OP_SINGLE_ARG(bool, "keepdims", keep_dims_, true),
+        reducer_{this->template GetSingleArgument<bool>("allow_broadcast_fastpath", false)} {}
 
   bool RunOnDevice() override {
     return DispatchHelper<InputTypes>::call(this, Input(0));
@@ -77,7 +78,7 @@ class ReduceOp final : public Operator<Context> {
  private:
   std::vector<int> axes_;
   const int keep_dims_;
-  const Reducer reducer_{};
+  const Reducer reducer_;
 };
 
 template <typename InputTypes, class Context, class Reducer>
@@ -88,7 +89,8 @@ class ReduceGradientOp final : public Operator<Context> {
   template <class... Args>
   explicit ReduceGradientOp(Args&&... args)
       : Operator<Context>(std::forward<Args>(args)...),
-        axes_(this->template GetRepeatedArgument<int>("axes")) {}
+        axes_(this->template GetRepeatedArgument<int>("axes")),
+        reducer_{this->template GetSingleArgument<bool>("allow_broadcast_fastpath", false)} {}
 
   bool RunOnDevice() override {
     return DispatchHelper<InputTypes>::call(this, Input(0));
@@ -133,11 +135,14 @@ class ReduceGradientOp final : public Operator<Context> {
 
  private:
   std::vector<int> axes_;
-  const Reducer reducer_{};
+  const Reducer reducer_;
 };
 
 template <class Context>
 struct MinReducer {
+  explicit MinReducer(bool allow_broadcast_fastpath)
+    : allow_broadcast_fastpath_(allow_broadcast_fastpath) {}
+
   template <typename T>
   bool Forward(
       const std::vector<int>& X_dims,
@@ -152,7 +157,8 @@ struct MinReducer {
         T(1),
         X_data,
         Y_data,
-        context);
+        context,
+        allow_broadcast_fastpath_);
     return true;
   }
 
@@ -165,10 +171,15 @@ struct MinReducer {
       const T* Y_data,
       T* dX_data,
       Context* context) const;
+
+  const bool allow_broadcast_fastpath_;
 };
 
 template <class Context>
 struct MaxReducer {
+  explicit MaxReducer(bool allow_broadcast_fastpath)
+    : allow_broadcast_fastpath_(allow_broadcast_fastpath) {}
+
   template <typename T>
   bool Forward(
       const std::vector<int>& X_dims,
@@ -183,7 +194,8 @@ struct MaxReducer {
         T(1),
         X_data,
         Y_data,
-        context);
+        context,
+        allow_broadcast_fastpath_);
     return true;
   }
 
@@ -196,10 +208,15 @@ struct MaxReducer {
       const T* Y_data,
       T* dX_data,
       Context* context) const;
+
+  const bool allow_broadcast_fastpath_;
 };
 
 template <class Context>
 struct SumReducer {
+  explicit SumReducer(bool allow_broadcast_fastpath)
+    : allow_broadcast_fastpath_(allow_broadcast_fastpath) {}
+
   template <typename T>
   bool Forward(
       const std::vector<int>& X_dims,
@@ -214,7 +231,8 @@ struct SumReducer {
         T(1),
         X_data,
         Y_data,
-        context);
+        context,
+        allow_broadcast_fastpath_);
     return true;
   }
 
@@ -235,13 +253,19 @@ struct SumReducer {
         T(1),
         dY_data,
         dX_data,
-        context);
+        context,
+        allow_broadcast_fastpath_);
     return true;
   }
+
+  const bool allow_broadcast_fastpath_;
 };
 
 template <class Context>
 struct MeanReducer {
+  explicit MeanReducer(bool allow_broadcast_fastpath)
+    : allow_broadcast_fastpath_(allow_broadcast_fastpath) {}
+
   template <typename T>
   bool Forward(
       const std::vector<int>& X_dims,
@@ -256,7 +280,8 @@ struct MeanReducer {
         T(1),
         X_data,
         Y_data,
-        context);
+        context,
+        allow_broadcast_fastpath_);
     return true;
   }
 
@@ -281,13 +306,19 @@ struct MeanReducer {
         static_cast<T>(dY_size) / static_cast<T>(dX_size),
         dY_data,
         dX_data,
-        context);
+        context,
+        allow_broadcast_fastpath_);
     return true;
   }
+
+  const bool allow_broadcast_fastpath_;
 };
 
 template <class Context>
 struct L1Reducer {
+  explicit L1Reducer(bool allow_broadcast_fastpath)
+    : allow_broadcast_fastpath_(allow_broadcast_fastpath) {}
+
   template <typename T>
   bool Forward(
       const std::vector<int>& X_dims,
@@ -302,7 +333,8 @@ struct L1Reducer {
         T(1),
         X_data,
         Y_data,
-        context);
+        context,
+        allow_broadcast_fastpath_);
     return true;
   }
 
@@ -315,10 +347,15 @@ struct L1Reducer {
       const T* Y_data,
       T* dX_data,
       Context* context) const;
+
+  const bool allow_broadcast_fastpath_;
 };
 
 template <class Context>
 struct L2Reducer {
+  explicit L2Reducer(bool allow_broadcast_fastpath)
+    : allow_broadcast_fastpath_(allow_broadcast_fastpath) {}
+
   template <typename T>
   bool Forward(
       const std::vector<int>& X_dims,
@@ -333,7 +370,8 @@ struct L2Reducer {
         T(1),
         X_data,
         Y_data,
-        context);
+        context,
+        allow_broadcast_fastpath_);
     return true;
   }
 
@@ -346,6 +384,8 @@ struct L2Reducer {
       const T* Y_data,
       T* dX_data,
       Context* context) const;
+
+  const bool allow_broadcast_fastpath_;
 };
 
 } // namespace caffe2

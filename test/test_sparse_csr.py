@@ -318,6 +318,11 @@ class TestSparseCSR(TestCase):
     @coalescedonoff
     @dtypes(torch.double)
     def test_coo_to_csr_convert(self, device, dtype, coalesced):
+        with self.assertRaisesRegex(RuntimeError, "Input is supposed to be a vector"):
+            torch._convert_indices_from_coo_to_csr(
+                torch.randint(100, (5, 5), device=device),
+                size=100)
+
         size = (5, 5)
         sparse_dim = 2
         nnz = 10
