@@ -3,7 +3,7 @@ This module contains tensor creation utilities.
 """
 
 import torch
-from typing import Optional, Tuple, Union, cast
+from typing import Optional, List, Tuple, Union, cast
 import math
 
 __all__ = [
@@ -11,7 +11,7 @@ __all__ = [
 ]
 
 def make_tensor(
-    shape: Tuple[int, ...],
+    shape: Union[torch.Size, List[int], Tuple[int, ...]],
     device: Union[str, torch.device],
     dtype: torch.dtype,
     *,
