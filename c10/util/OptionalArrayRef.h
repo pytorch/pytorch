@@ -42,21 +42,13 @@ class OptionalArrayRef final {
 
   constexpr OptionalArrayRef(const optional<ArrayRef<T>>& other) noexcept {
     if (other.has_value()) {
-      if (initialized()) {
-        storage.value = other.value();
-      } else {
-        ::new (&storage.value) ArrayRef<T>(other.value());
-      }
+      storage.value = other.value();
     }
   }
 
   constexpr OptionalArrayRef(optional<ArrayRef<T>>&& other) noexcept {
     if (other.has_value()) {
-      if (initialized()) {
-        storage.value = std::move(other.value());
-      } else {
-        ::new (&storage.value) ArrayRef<T>(std::move(other.value()));
-      }
+      storage.value = std::move(other.value());
       other.reset();
     }
   }
@@ -135,11 +127,7 @@ class OptionalArrayRef final {
   constexpr OptionalArrayRef& operator=(
       const optional<ArrayRef<T>>& other) noexcept {
     if (other.has_value()) {
-      if (initialized()) {
-        storage.value = other.value();
-      } else {
-        ::new (&storage.value) ArrayRef<T>(other.value());
-      }
+      storage.value = other.value();
     } else {
       reset();
     }
@@ -149,11 +137,7 @@ class OptionalArrayRef final {
   constexpr OptionalArrayRef& operator=(
       optional<ArrayRef<T>>&& other) noexcept {
     if (other.has_value()) {
-      if (initialized()) {
-        storage.value = std::move(other.value());
-      } else {
-        ::new (&storage.value) ArrayRef<T>(std::move(other.value()));
-      }
+      storage.value = std::move(other.value());
       other.reset();
     } else {
       reset();
@@ -170,11 +154,7 @@ class OptionalArrayRef final {
   operator=(U&& value) noexcept(
       std::is_nothrow_constructible<ArrayRef<T>, U&&>::value&&
           std::is_nothrow_assignable<ArrayRef<T>&, U&&>::value) {
-    if (initialized()) {
-      storage.value = std::forward<U>(value);
-    } else {
-      ::new (&storage.value) ArrayRef<T>(std::forward<U>(value));
-    }
+    storage.value = std::forward<U>(value);
     return *this;
   }
 
@@ -264,10 +244,10 @@ class OptionalArrayRef final {
     if (initialized() && other.initialized()) {
       std::swap(storage.value, other.storage.value);
     } else if (initialized()) {
-      ::new (&other.storage.value) ArrayRef<T>(std::move(storage.value));
+      other.storage.value = std::move(storage.value);
       reset();
     } else if (other.initialized()) {
-      ::new (&storage.value) ArrayRef<T>(std::move(other.storage.value));
+      storage.value = std::move(other.storage.value);
       other.reset();
     }
   }
@@ -304,8 +284,9 @@ class OptionalArrayRef final {
 
  private:
   struct Empty {
-    // ArrayRef has the invariant that if Data is nullptr then
-    // Length must be zero, so this is an unused bit pattern.
+    // ArrayRef has the invariant that if Data is nullptr then Length must be
+    // zero, so this is an unused bit pattern. We use this to represent a
+    // disengaged OptionalArrayRef.
     const T* data{nullptr};
     typename ArrayRef<T>::size_type size{1};
   };
