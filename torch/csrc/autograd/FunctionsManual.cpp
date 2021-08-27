@@ -3521,7 +3521,7 @@ std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, cons
   // compute sigma such that
   // H(sigma_i) == pinv(H(tau_i)).
   // When tau_i * ||v_i||^2 - 1 == 0, then
-  // pinv(H(tau_i)) == H(tau_i). This follows from the eigenvalue decomposition,
+  // pinv(H(tau_i)) == H(sigma_i). This follows from the eigenvalue decomposition,
   // because (1 - tau_i * ||v_i||^2) is an eigenvalue of H(tau_i) with the
   // corresponding eigenvector v_i / ||v_i||.
   // TODO: it is probably worth considering this case for generic input,
