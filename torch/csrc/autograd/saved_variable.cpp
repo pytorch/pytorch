@@ -43,6 +43,20 @@ SavedVariable::SavedVariable(const Variable& variable, bool is_output, bool is_i
     saved_version_ = version_counter.current_version();
     is_leaf_ = variable.is_leaf();
     is_output_ = is_output;
+    is_inplace_on_view_ = is_inplace_on_view;
+
+    if (is_inplace_on_view) {
+      TORCH_INTERNAL_ASSERT(!is_leaf_ && is_output);
+      weak_grad_fn_ = variable.grad_fn();
+    }
+
+    auto maybe_hooks = get_default_hooks();
+
+    if (maybe_hooks) {
+      save_metadata(variable);
+      set_hooks_and_pack_data(std::move(maybe_hooks), variable);
+      return;
+    }
 
     // If the variable is a leaf or is not an output, we can safely save the
     // original variable without running the risk of reference cycles.
@@ -55,32 +69,28 @@ SavedVariable::SavedVariable(const Variable& variable, bool is_output, bool is_i
     if (!is_output || is_leaf_) {
       saved_original_ = true;
       data_ = variable;
-      register_hooks(Engine::get_default_engine().get_default_saved_variable_hooks());
       return;
     }
 
-    // From now on, we can assume the variable is not a leaf and is an output.
+    save_metadata(variable);
 
-    is_inplace_on_view_ = is_inplace_on_view;
-
-    if(is_inplace_on_view) {
-      weak_grad_fn_ = variable.grad_fn();
-    }
-
-    save_common_metadata(variable);
-
-    // These copies are all shared_ptr copies, so slightly more expensive.
-    // Do them here instead of in the init list in case data is undefined.
+    // Only do this if we actually need to.
     data_ = variable.tensor_data();
-    register_hooks(Engine::get_default_engine().get_default_saved_variable_hooks());
   }
 }
 
-void SavedVariable::save_common_metadata(const Variable& data) {
+void SavedVariable::save_metadata(const Variable& data) {
   // Save output number, version counter and fw_grad if needed
 
   output_nr_ = data.output_nr();
   version_counter_ = impl::version_counter(data);
+
+  if (is_leaf_) {
+    grad_accumulator_ = impl::grad_accumulator(data);
+    requires_grad_ = data.requires_grad();
+  } else if (!is_output_) {
+    grad_fn_ = data.grad_fn();
+  }
 
   // TODO(albanD) This needs to be updated when moving to multiple levels
   const auto& fw_grad = data._fw_grad(/* level */ 0);
@@ -90,6 +100,9 @@ void SavedVariable::save_common_metadata(const Variable& data) {
   }
 }
 
+std::unique_ptr<SavedVariableHooks> SavedVariable::get_default_hooks() {
+  return Engine::get_default_engine().get_default_saved_variable_hooks();
+}
 
 void SavedVariable::reset_data() {
   hooks_.reset();
@@ -198,10 +211,21 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
   return var;
 }
 
+void SavedVariable::set_hooks_and_pack_data(std::unique_ptr<SavedVariableHooks>&& hooks, const Variable& data) {
+  hooks_ = std::move(hooks);
+  at::NoGradGuard guard;
+  const auto version = impl::version_counter(data).current_version();
+  hooks_->call_pack_hook(saved_original_ ? data.detach() : data);
+  TORCH_CHECK(version == impl::version_counter(data).current_version(),
+      "A saved tensor pack hook is modifying its input in place. "
+      "Tensors provided as input to pack hook can not be modified by "
+      "in-place operations as this can lead to unexpected side-effects. "
+      "Please open an issue if you need to perform in-place operations on "
+      "the input to a pack hook.");
+}
+
 void SavedVariable::register_hooks(std::unique_ptr<SavedVariableHooks>&& hooks) {
-  if (!hooks) {
-    return;
-  }
+  TORCH_INTERNAL_ASSERT(hooks);
   TORCH_CHECK(!hooks_,
     "Calling register_hooks on a saved tensor whose hooks have already been set. "
     "Hint: only one pair of hooks is allowed at a time.");
@@ -218,27 +242,11 @@ void SavedVariable::register_hooks(std::unique_ptr<SavedVariableHooks>&& hooks) 
         "Calling register_hooks on a saved tensor with value None is forbidden");
     }
   }
-  hooks_ = std::move(hooks);
-
-  // If we didn't save the original variable, we already have all we need to reconstruct it
+  // If we didn't save the original variable, we already saved metadata
   if (saved_original_) {
-    save_common_metadata(data_);
-
-    if (is_leaf_) {
-      grad_accumulator_ = impl::grad_accumulator(data_);
-      requires_grad_ = data_.requires_grad();
-    } else if (!is_output_) {
-      grad_fn_ = data_.grad_fn();
-    } else {
-      // Current code assumes that the original variable is saved if and only if (is_leaf_ || !is_output)
-      TORCH_INTERNAL_ASSERT(false);
-    }
-
-    data_ = data_.tensor_data();
+    save_metadata(data_);
   }
-
-  at::NoGradGuard guard;
-  hooks_->call_pack_hook(data_);
+  set_hooks_and_pack_data(std::move(hooks), data_);
   data_.reset();
 }
 

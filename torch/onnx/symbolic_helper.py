@@ -298,7 +298,7 @@ def _select_helper(g, self, dim, index, apply_reshape=True):
     elif index_dim is not None and apply_reshape:
         if index_dim == 0:
             # Index is a scalar. Reshape it to a size 1 tensor.
-            index = g.op("Reshape", index, g.op("Constant", value_t=torch.LongTensor([1])))
+            index = _reshape_helper(g, index, g.op("Constant", value_t=torch.LongTensor([1])))
 
     index_scalar_type = index.type().scalarType()
     if index_scalar_type is None or index_scalar_type not in ["Long", "Int"]:
@@ -313,14 +313,6 @@ def _slice_helper(g, input, axes, starts, ends, steps=None, dynamic_slice=False)
     else:
         from torch.onnx.symbolic_opset10 import _slice as _slice10
         return _slice10(g, input, axes, starts, ends, steps, dynamic_slice)
-
-def _hardtanh_helper(g, input, min_val, max_val):
-    if _export_onnx_opset_version <= 10:
-        from torch.onnx.symbolic_opset9 import hardtanh
-        return hardtanh(g, input, min_val, max_val)
-    else:
-        from torch.onnx.symbolic_opset11 import hardtanh  # type: ignore[no-redef]
-        return hardtanh(g, input, min_val, max_val)
 
 def _is_fp(value):
     if value:
@@ -375,7 +367,7 @@ def _topk_helper(g, input, k, dim, largest=True, sorted=False, out=None):
     if not _is_value(k):
         k = g.op("Constant", value_t=torch.tensor([k], dtype=torch.int64))
     else:
-        k = g.op("Reshape", k, g.op("Constant", value_t=torch.tensor([1])))
+        k = _reshape_helper(g, k, g.op("Constant", value_t=torch.tensor([1])))
     if _export_onnx_opset_version <= 10:
         if not largest:
             _unimplemented("TopK", "Ascending is not supported")
@@ -712,6 +704,48 @@ def _index_fill_reshape_helper(g, self, dim, index):
     expanded_index = expand(g, unsqueezed_index, expanded_index_shape, None)
     return expanded_index_shape, expanded_index
 
+# When using reshape helper (opset_version >= 14), if reshape has -1,
+# allowzero cannot be set to 1
+def _reshape_helper(g, input, shape, allowzero=0):
+    shape = _maybe_get_const(shape, "is")
+    if not _is_value(shape):
+        shape = g.op("Constant", value_t=torch.LongTensor(shape))
+    if _export_onnx_opset_version <= 13:
+        return g.op("Reshape", input, shape)
+    else:
+        warnings.warn("allowzero=0 by default. In order to honor zero value in shape use allowzero=1")
+        return g.op("Reshape", input, shape, allowzero_i=allowzero)
+
+def _batchnorm_helper(g, input, weight, bias, running_mean, running_var):
+    from torch.onnx.symbolic_opset9 import _var_mean
+    batch_size = _get_tensor_dim_size(input, 0)
+    channel_size = _get_tensor_dim_size(input, 1)
+
+    if weight is None or _is_none(weight):
+        if channel_size is None:
+            raise RuntimeError("Unsupported: ONNX export of batch_norm for unknown "
+                               "channel size.")
+        weight_value = torch.tensor([1.] * channel_size).type(
+            "torch." + input.type().scalarType() + "Tensor")
+        weight = g.op("Constant", value_t=weight_value)
+    if bias is None or _is_none(bias):
+        if channel_size is None:
+            raise RuntimeError("Unsupported: ONNX export of batch_norm for unknown "
+                               "channel size.")
+        bias_value = torch.tensor([0.] * channel_size).type(
+            "torch." + input.type().scalarType() + "Tensor")
+        bias = g.op("Constant", value_t=bias_value)
+    # If track_running_stats is set to False batch statistics are instead used during evaluation time
+    if running_mean is None or _is_none(running_mean) or running_var is None or _is_none(running_var):
+        assert batch_size is not None and channel_size is not None
+        reshape_in = _reshape_helper(g, input,
+                                     g.op("Constant", value_t=torch.tensor([batch_size, channel_size, -1],
+                                          dtype=torch.int64)))
+        trans_in = g.op("Transpose", reshape_in, perm_i=[0, 2, 1])
+        running_var, running_mean = _var_mean(g, trans_in,
+                                              g.op("Constant", value_t=torch.tensor([0, 1], dtype=torch.int64)),
+                                              False, False)
+    return weight, bias, running_mean, running_var
 
 def _avgpool_helper(tuple_fn, padding, kernel_size, stride, divisor_override, name):
     if divisor_override and divisor_override.node().kind() != "prim::Constant":
@@ -721,19 +755,23 @@ def _avgpool_helper(tuple_fn, padding, kernel_size, stride, divisor_override, na
     padding = tuple(tuple_fn(padding))
     return padding
 
-def assert_training_mode(op_mode, op_name):
+
+def check_training_mode(op_train_mode, op_name):
     global _training_mode
-    op_mode = True if op_mode == 1 else False
-    if op_mode != _training_mode:
-        op_mode = "training " if op_mode else "inference"
+    op_train_mode = True if op_train_mode == 1 else False
+    if _training_mode is not None and op_train_mode != _training_mode:
+        op_mode = "training " if op_train_mode else "inference"
         training_mode = "training " if _training_mode else "inference"
         # setting the model mode could result in op_mode != _training_mode
         # if the model is a FuncModule. In this case we warn the user of
-        # the state and export depending on training_mode
+        # the state and export depending on op_mode
+        # This is to support use-cases of fixing certain layer weights
+        # in training.
         warnings.warn("ONNX export mode is set to " + training_mode +
                       " mode, but operator " + op_name + " is set to " +
-                      op_mode + " mode. The model will be exported in " +
-                      training_mode + ", as specified by the export mode.")
+                      op_mode + " mode. The operators will be exported in " +
+                      op_mode + ", as specified by the functional operator.")
+
 
 def _flatten_helper(g, input, start_dim, end_dim, dim):
     input_size = g.op("Shape", input)
@@ -795,8 +833,8 @@ def _handle_reduce_dim_none(g, self, op_name):
 
 
 _default_onnx_opset_version = 9
-_onnx_main_opset = 13
-_onnx_stable_opsets = [7, 8, 9, 10, 11, 12]
+_onnx_main_opset = 14
+_onnx_stable_opsets = [7, 8, 9, 10, 11, 12, 13]
 _export_onnx_opset_version = _default_onnx_opset_version
 
 
