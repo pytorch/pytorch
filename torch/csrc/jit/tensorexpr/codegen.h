@@ -46,6 +46,10 @@ class TORCH_API CodeGen {
     stmt_ = stmt_->accept_mutator(mutator);
   }
 
+  void apply_visitor(IRVisitor* visitor) {
+    stmt_->accept(visitor);
+  }
+
   std::vector<BufferArg>& buffer_args() {
     return buffer_args_;
   }
@@ -104,7 +108,7 @@ class TORCH_API CodeGen {
 class CodeGen::BufferArg {
  public:
   BufferArg(const Placeholder& buffer) : buf_(buffer.data()) {}
-  BufferArg(Tensor* tensor) : buf_(tensor->buf()) {}
+  BufferArg(Tensor tensor) : buf_(tensor.buf()) {}
   BufferArg(const VarHandle& var) : var_(var.node()), isVar_(true) {}
   BufferArg(const BufHandle& buf) : buf_(buf.node()) {}
 
