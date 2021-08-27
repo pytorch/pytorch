@@ -28,21 +28,23 @@ def make_tensor(
     If :attr:`low` or :attr:`high` are specified and are outside the range of the datatype's representable
     finite values then they are clamped to the lowest or highest representable finite value, respectively.
     A random tensor is then created with values within ``[low, high)`` range. If ``None``, then the following
-    table describes the default values for :attr:`low` and :attr:`high`, which depend on :attr:`dtype`:
+    table describes the default values for :attr:`low` and :attr:`high`, which depend on :attr:`dtype`. The
+    table also describes, if :attr:`exclude_zero` is ``True`` , then what values are used as replacements
+    for zeros in the generated tensor, which also depends on :attr:`dtype`.
 
-    +---------------------------+------------+----------+
-    | ``dtype``                 | ``low``    | ``high`` |
-    +===========================+============+==========+
-    | boolean type              | ``0``      | ``2``    |
-    +---------------------------+------------+----------+
-    | unsigned integral type    | ``0``      | ``10``   |
-    +---------------------------+------------+----------+
-    | signed integral types            | ``-9``     | ``10``   |
-    +---------------------------+------------+----------+
-    | floating types            | ``-9``     | ``9``    |
-    +---------------------------+------------+----------+
-    | complex types             | ``-9``     | ``9``    |
-    +---------------------------+------------+----------+
+    +---------------------------+------------+----------+----------------------------------------------------------------+
+    | ``dtype``                 | ``low``    | ``high`` | ``zero replacement``                                           |
+    +===========================+============+==========+================================================================+
+    | boolean type              | ``0``      | ``2``    | ``1``                                                          |
+    +---------------------------+------------+----------+----------------------------------------------------------------+
+    | unsigned integral type    | ``0``      | ``10``   | ``1``                                                          |
+    +---------------------------+------------+----------+----------------------------------------------------------------+
+    | signed integral types     | ``-9``     | ``10``   | ``1``                                                          |
+    +---------------------------+------------+----------+----------------------------------------------------------------+
+    | floating types            | ``-9``     | ``9``    | ``tiny`` (:class:`torch.finfo`)                                |
+    +---------------------------+------------+----------+----------------------------------------------------------------+
+    | complex types             | ``-9``     | ``9``    | (for both real and imaginary): ``tiny`` (:class:`torch.finfo`) |
+    +---------------------------+------------+----------+----------------------------------------------------------------+
 
     Args:
         shape (Tuple[int, ...]): A sequence of integers defining the shape of the output tensor.
@@ -64,14 +66,14 @@ def make_tensor(
             normal number representable by the complex type. Default ``False``.
 
     Raises:
-        ValueError: if :attr:`low` is either ``inf`` or ``nan`` or :attr:`high` is either ``-inf`` or ``nan``.
-        TypeError: if the given :attr:`dtype` isn't supported by this function.
+        ValueError: If :attr:`low` is either ``inf`` or ``nan`` or :attr:`high` is either ``-inf`` or ``nan``.
+        TypeError: If :attr:`dtype` isn't supported by this function.
 
     Examples:
         >>> from torch.testing import make_tensor
         >>> # Creates a float tensor with values in [0, 1)
         >>> make_tensor((3,), device='cpu', dtype=torch.float32, low=0, high=1)
-        tensor([0.7682, 0.4189, 0.2718])
+        tensor([ 0.1205, 0.2282, -0.6380])
         >>> # Creates a bool tensor on CUDA
         >>> make_tensor((2, 2), device='cuda', dtype=torch.bool)
         tensor([[False, False],
