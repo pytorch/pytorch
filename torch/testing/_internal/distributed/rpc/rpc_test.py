@@ -2897,7 +2897,7 @@ class RpcTest(RpcAgentTestFixture):
         )
         rpc._set_rpc_timeout(10)
         # This barrier is needed to ensure that some workers do not exit before
-        # others have been brought up, for non ProcessGroupAgent backends.
+        # others have been brought up.
         initialize_pg(self.file_init_method, self.rank, self.world_size)
         dist.barrier()
         if self.rank == 1:
