@@ -781,9 +781,23 @@ TEST(TupleElementsTest, Basic) {
   validateTupleElements(large, sampleIValuesArray);
 }
 
-TEST(TupleElementsTest, Resize) {
-  std::array<TupleElements(*)(), 3> factories = {[]() { return TupleElements();}, []() { return  TupleElements(1, 2, 3);}, []() { return TupleElements(std::vector<IValue>({1, 2, 3, "hello"})); }};
+namespace {
 
+std::array<TupleElements(*)(), 3> factories = {
+  []() { return TupleElements();},
+  []() { return  TupleElements(1, 2, 3);},
+  []() { return TupleElements(std::vector<IValue>({1, 2, 3, "hello"})); }
+};
+
+std::array<std::vector<IValue>, 3> expectedContents = {
+  std::vector<IValue>(),
+  std::vector<IValue>({1, 2, 3}),
+  std::vector<IValue>({1, 2, 3, "hello"}),
+};
+
+}
+
+TEST(TupleElementsTest, Resize) {
   std::array<std::vector<IValue>, 3> newContents = {std::vector<IValue>(), std::vector<IValue>({4, 5, 6}), std::vector<IValue>({7, 8, 9, "hello"})};
 
   for (auto factory : factories) {
@@ -793,6 +807,28 @@ TEST(TupleElementsTest, Resize) {
       te.setContents(std::move(contentsCopy));
       validateTupleElements(te, contents);
     }
+  }
+}
+
+TEST(TupleElementsTest, MoveConstruct) {
+  int idx = 0;
+  for (auto fromFactory : factories) {
+    auto toMoveFrom = fromFactory();
+    TupleElements movedInto(std::move(toMoveFrom));
+    validateTupleElements(movedInto, expectedContents[idx++]);
+  }
+}
+
+TEST(TupleElementsTest, MoveAssign) {
+  int fromIdx = 0;
+  for (auto fromFactory : factories) {
+    for (auto toFactory : factories) {
+      auto from = fromFactory();
+      auto to = toFactory();
+      to = std::move(from);
+      validateTupleElements(to, expectedContents[fromIdx]);
+    }
+    fromIdx++;
   }
 }
 
