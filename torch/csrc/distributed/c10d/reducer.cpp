@@ -71,7 +71,7 @@ C10_REGISTER_TYPED_CLASS(TimerRegistry, c10::kCPU, CpuTimer);
 } // namespace
 
 Reducer::Reducer(
-    std::vector<std::vector<at::Tensor>> replicas,
+    std::vector<at::Tensor> replicas,
     std::vector<std::vector<size_t>> bucket_indices,
     std::vector<size_t> per_bucket_size_limits,
     c10::intrusive_ptr<c10d::ProcessGroup> process_group,
@@ -103,9 +103,7 @@ Reducer::Reducer(
       first_bucket_bytes_cap_(first_bucket_bytes_cap) {
   C10_LOG_API_USAGE_ONCE("torch.distributed.ddp.reducer");
   TORCH_INTERNAL_ASSERT(
-      replicas_.size() == 1, "Expected exactly one model replica.");
-  TORCH_INTERNAL_ASSERT(
-      replicas_[0].size() >= 1, "Expected at least one parameter.");
+      replicas_.size() >= 1, "Expected at least one parameter.");
 
   if (ddp_debug_level_ != c10d::DistributedDebugLevel::OFF) {
     LOG(INFO) << "Reducer initialized with bucket_bytes_cap: "
@@ -115,7 +113,7 @@ Reducer::Reducer(
   // Check whether the module is multi_device_module
   {
     std::set<int> unique_devices;
-    for (const auto& v : replicas_[0]) {
+    for (const auto& v : replicas_) {
       auto device_idx = int(v.device().index());
       if (unique_devices.find(device_idx) == unique_devices.end()) {
         unique_devices.insert(device_idx);
@@ -128,7 +126,7 @@ Reducer::Reducer(
   }
 
   // For CUDA, record events only for single device module.
-  c10::Device device = replicas_[0][0].device();
+  c10::Device device = replicas_[0].device();
   if (!(device.is_cuda() && is_multi_device_module_)) {
     timer_ = TimerRegistry()->Create(device.type(), device);
   }
@@ -137,9 +135,9 @@ Reducer::Reducer(
   // we do not expect sparse gradients for any parameter.
   if (expect_sparse_gradients_.empty()) {
     expect_sparse_gradients_ = std::vector<std::vector<bool>>(
-        replicas_.size(), std::vector<bool>(replicas_[0].size(), false));
+        1, std::vector<bool>(replicas_.size(), false));
   }
-  TORCH_INTERNAL_ASSERT(expect_sparse_gradients_.size() == replicas_.size());
+  TORCH_INTERNAL_ASSERT(expect_sparse_gradients_.size() == 1);
 
   // Initialize variable bucketing.
   // This can be reinitialized later after capturing runtime information.
@@ -155,15 +153,15 @@ Reducer::Reducer(
   // used in an autograd pass. If they are not, we know their grad tensors
   // can be marked as ready for reduction.
   {
-    const auto replica_count = replicas_.size();
+    const auto replica_count = 1;
     grad_accumulators_.resize(replica_count);
     // TODO: get rid of replica_index and nested
     // containers such as replicas_, grad_accumulators_, etc.
     size_t replica_index = 0;
-    const auto variable_count = replicas_[replica_index].size();
+    const auto variable_count = replicas_.size();
     grad_accumulators_[replica_index].resize(variable_count);
     for (const auto variable_index : c10::irange(variable_count)) {
-      auto& variable = replicas_[replica_index][variable_index];
+      auto& variable = replicas_[variable_index];
 
       // The gradient accumulator function is lazily initialized once.
       // Therefore we can use its presence in the autograd graph as
@@ -220,9 +218,9 @@ Reducer::Reducer(
 
   // Initialize backward stats vector.
   {
-    const auto replica_count = replicas_.size();
+    const auto replica_count = 1;
     backward_stats_.resize(replica_count);
-    const auto variable_count = replicas_[0].size();
+    const auto variable_count = replicas_.size();
     std::for_each(
         backward_stats_.begin(),
         backward_stats_.end(),
@@ -292,27 +290,26 @@ bool Reducer::ddp_graph_static() {
 }
 
 void Reducer::initialize_local_used_map() {
-  const auto replica_count = replicas_.size();
-  const auto variable_count = replicas_[0].size();
+  const auto replica_count = 1;
+  size_t replica_index = 0;
+  const auto variable_count = replicas_.size();
   local_used_maps_.resize(replica_count);
   local_used_maps_dev_.resize(replica_count);
 
-  for (const auto i : c10::irange(replica_count)) {
-    at::TensorOptions options;
-    options = options.dtype(at::kInt);
+  at::TensorOptions options;
+  options = options.dtype(at::kInt);
 
-    // Deliberately don't pin the memory even if local_used_maps_dev_ will
-    // be cuda. See Note [local_used_maps_ -> local_used_maps_dev copying]
-    local_used_maps_[i] =
-        at::zeros({static_cast<long>(variable_count)}, options);
+  // Deliberately don't pin the memory even if local_used_maps_dev_ will
+  // be cuda. See Note [local_used_maps_ -> local_used_maps_dev copying]
+  local_used_maps_[replica_index] =
+      at::zeros({static_cast<long>(variable_count)}, options);
 
-    // This tensor needs to be on the same device as replica because backend
-    // such as NCCL may not support CPU tensors, and hence it might not work
-    // if we always put it on CPU.
-    options = options.device(replicas_[i][0].device());
-    local_used_maps_dev_[i] =
-        at::empty({static_cast<long>(variable_count)}, options);
-  }
+  // This tensor needs to be on the same device as replica because backend
+  // such as NCCL may not support CPU tensors, and hence it might not work
+  // if we always put it on CPU.
+  options = options.device(replicas_[0].device());
+  local_used_maps_dev_[replica_index] =
+      at::empty({static_cast<long>(variable_count)}, options);
 }
 
 void Reducer::check_grad_layout(
@@ -500,15 +497,14 @@ void Reducer::push_rebuilt_params_for_all_indices() {
   if (!should_rebuild_buckets() || !rebuilt_param_indices_.empty()) {
     return;
   }
-  const auto replica_count = replicas_.size();
-  const auto variable_count = replicas_[0].size();
+  const auto variable_count = replicas_.size();
   for (const auto variable_index : c10::irange(variable_count)) {
     push_rebuilt_params(variable_index);
   }
 }
 
 void Reducer::push_rebuilt_params(const size_t& index) {
-  rebuilt_params_.push_back(replicas_[0][index]);
+  rebuilt_params_.push_back(replicas_[index]);
   rebuilt_param_indices_.push_back(index);
 }
 
@@ -547,9 +543,8 @@ void Reducer::delay_all_reduce() {
   unused_parameters_.clear();
 
   // copy all gradients to buckets
-  size_t replica_index = 0;
   for (size_t variable_index = 0;
-       variable_index < replicas_[replica_index].size();
+       variable_index < replicas_.size();
        variable_index++) {
     // set unused_parameters_
     if (numGradHooksTriggeredMap_[variable_index] == 0) {
@@ -557,7 +552,7 @@ void Reducer::delay_all_reduce() {
     }
     require_finalize_ = true;
     set_divide_factor();
-    if (expect_sparse_gradients_[replica_index][variable_index]) {
+    if (expect_sparse_gradients_[0][variable_index]) {
       mark_variable_ready_sparse(variable_index);
     } else {
       mark_variable_ready_dense(variable_index);
@@ -982,11 +977,10 @@ void Reducer::initialize_buckets(
   variable_locators_.clear();
 
   // Ensure we have a bucket index for every variable.
-  variable_locators_.resize(replicas_[0].size());
+  variable_locators_.resize(replicas_.size());
 
   // Iterate over buckets.
   const auto bucket_count = bucket_indices.size();
-  const auto replica_count = replicas_.size();
   buckets_.reserve(bucket_count);
   TORCH_INTERNAL_ASSERT(bucket_count == per_bucket_sizes.size());
   for (const auto bucket_index : c10::irange(bucket_count)) {
@@ -1016,10 +1010,9 @@ void Reducer::initialize_buckets(
     }
 
     BucketReplica replica;
-    size_t replica_index = 0;
     if (bucket.expect_sparse_gradient) {
       const auto variable_index = bucket_indices[bucket_index].front();
-      const auto& variable = replicas_[replica_index][variable_index];
+      const auto& variable = replicas_[variable_index];
       TORCH_INTERNAL_ASSERT(bucket_indices[bucket_index].size() == 1);
       replica.variables = {variable};
     } else {
@@ -1038,9 +1031,9 @@ void Reducer::initialize_buckets(
       // Iterate over bucket variables.
       for (const auto variable_index : bucket_indices[bucket_index]) {
         TORCH_INTERNAL_ASSERT(
-            variable_index < replicas_[replica_index].size(),
+            variable_index < replicas_.size(),
             "Out of range variable index specified.");
-        const auto& variable = replicas_[replica_index][variable_index];
+        const auto& variable = replicas_[variable_index];
         if (!options.has_device()) {
           options = options.device(variable.device());
         } else {
@@ -1381,7 +1374,7 @@ std::vector<std::string> Reducer::getUnmarkedParamsForIteration() {
 
 std::vector<size_t> Reducer::getUnmarkedParamIndicesForIteration() {
   std::vector<size_t> unmarked_param_indices;
-  const auto variable_count = replicas_[0].size();
+  const auto variable_count = replicas_.size();
   for (const auto variable_index : c10::irange(variable_count)) {
     if (perIterationReadyParams_.find(variable_index) ==
         perIterationReadyParams_.end()) {
@@ -1593,7 +1586,7 @@ void Reducer::sync_bucket_indices(
 
   at::TensorOptions options;
   options = options.dtype(at::kInt);
-  options = options.device(replicas_[0][0].device());
+  options = options.device(replicas_[0].device());
 
   // Group indices and num_bucket together into indices_tensor
   // Broadcast this tensor first, as its size is equal among all processes
@@ -1671,11 +1664,11 @@ bool Reducer::rebuild_buckets() {
           " versus ",
           rebuilt_param_indices_.size()));
   TORCH_INTERNAL_ASSERT(
-      replicas_[0].size() == rebuilt_param_indices_.size(),
+      replicas_.size() == rebuilt_param_indices_.size(),
       c10::str(
           "rebuilt parameter indices size is not same as original model parameters size.",
           "Original model param size is: ",
-          replicas_[0].size(),
+          replicas_.size(),
           " versus rebuilt params size of: ",
           rebuilt_param_indices_.size()));
   std::vector<std::vector<size_t>> rebuilt_bucket_indices;
