@@ -349,6 +349,12 @@ at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(at::Tensor input) {
   TORCH_INTERNAL_ASSERT(
       runStatus == pytorch_qnnp_status_success,
       "failed to run QNNPACK Linear operator");
+
+  // Call the relu operator here until qlinear dynamic in QNNPACK
+  // supports it natively.
+  if (ReluFused) {
+    output.relu_();
+  }
   return output;
 }
 
