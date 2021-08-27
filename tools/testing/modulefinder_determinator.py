@@ -14,7 +14,12 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 TARGET_DET_LIST = [
     "distributions/test_distributions",
     "test_nn",
-    "test_autograd",
+
+    # test_autograd.py is not slow, so it does not belong here. But
+    #  note that if you try to add it back it will run into
+    #  https://bugs.python.org/issue40350 because it imports files
+    #  under test/autograd/.
+
     "test_cpp_extensions_jit",
     "test_jit_legacy",
     "test_dataloader",
