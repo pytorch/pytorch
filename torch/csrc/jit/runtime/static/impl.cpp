@@ -74,6 +74,7 @@ void OptimizeGraph(
   if (opts.enable_out_variant) {
     FuseListUnpack(graph);
     ReplaceWithCopy(graph);
+    EnableStaticRuntimeLayerNorm(graph);
   }
 #endif
   ConstantPropagation(graph);
