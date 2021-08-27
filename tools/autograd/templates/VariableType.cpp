@@ -35,7 +35,7 @@ namespace torch { namespace autograd {
 
 namespace VariableType {
 namespace{
-  void reset_grad_accumulator(Variable & self) {
+  C10_UNUSED void reset_grad_accumulator(Variable & self) {
     AutogradMeta* meta = torch::autograd::impl::get_autograd_meta(self);
     if (meta != nullptr) {
       meta->grad_accumulator_.reset();

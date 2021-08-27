@@ -97,6 +97,7 @@ def get_weight(m):
 # - `test_cpp_api_parity`: if `False`, skips the C++ parity test for this test dict. Default: True.
 # - `has_parity`: if `False`, expects this test dict to fail the C++ parity test. Default: True.
 
+
 module_tests = [
     dict(
         module_name='Linear',
@@ -1214,6 +1215,56 @@ def fractional_max_pool2d_test(test_case):
             fullname='FractionalMaxPool2d_size')
 
 
+def fractional_max_pool2d_no_batch_dim_test(test_case, use_random_samples):
+    if use_random_samples:
+        # random_samples enables CPU and GPU checks to be consistent
+        random_samples = torch.empty((1, 3, 2), dtype=torch.double).uniform_()
+        if test_case == 'ratio':
+            return dict(
+                constructor=lambda: nn.FractionalMaxPool2d(
+                    2, output_ratio=0.5, _random_samples=random_samples),
+                cpp_constructor_args='''torch::nn::FractionalMaxPool2dOptions(2)
+                                        .output_ratio(0.5)
+                                        ._random_samples(random_samples)''',
+                input_size=(3, 5, 7),
+                cpp_var_map={'random_samples': random_samples},
+                reference_fn=single_batch_reference_fn,
+                fullname='FractionalMaxPool2d_ratio_no_batch_dim')
+        elif test_case == 'size':
+            return dict(
+                constructor=lambda: nn.FractionalMaxPool2d((2, 3), output_size=(
+                    4, 3), _random_samples=random_samples),
+                cpp_constructor_args='''torch::nn::FractionalMaxPool2dOptions({2, 3})
+                                        .output_size(std::vector<int64_t>({4, 3}))
+                                        ._random_samples(random_samples)''',
+                input_size=(3, 7, 6),
+                cpp_var_map={'random_samples': random_samples},
+                reference_fn=single_batch_reference_fn,
+                fullname='FractionalMaxPool2d_size_no_batch_dim')
+    else:
+        # can not check cuda because there RNG is different between cpu and cuda
+        if test_case == 'ratio':
+            return dict(
+                constructor=lambda: nn.FractionalMaxPool2d(
+                    2, output_ratio=0.5),
+                cpp_constructor_args='''torch::nn::FractionalMaxPool2dOptions(2)
+                                        .output_ratio(0.5)''',
+                input_size=(3, 5, 7),
+                reference_fn=single_batch_reference_fn,
+                test_cuda=False,
+                fullname='FractionalMaxPool2d_ratio_no_batch_dim_no_random_samples')
+        elif test_case == 'size':
+            return dict(
+                constructor=lambda: nn.FractionalMaxPool2d((2, 3), output_size=(
+                    4, 3)),
+                cpp_constructor_args='''torch::nn::FractionalMaxPool2dOptions({2, 3})
+                                        .output_size(std::vector<int64_t>({4, 3}))''',
+                input_size=(3, 7, 6),
+                reference_fn=single_batch_reference_fn,
+                test_cuda=False,
+                fullname='FractionalMaxPool2d_size_no_batch_dim_no_random_samples')
+
+
 def fractional_max_pool3d_test(test_case):
     random_samples = torch.empty((2, 4, 3), dtype=torch.double).uniform_()
     if test_case == 'ratio':
@@ -1257,6 +1308,7 @@ def single_batch_reference_fn(input, parameters, module):
     single_batch_input = input.unsqueeze(0)
     with freeze_rng_state():
         return module(single_batch_input).squeeze(0)
+
 
 new_module_tests = [
     poissonnllloss_no_reduce_test(),
@@ -1314,6 +1366,10 @@ new_module_tests = [
     fractional_max_pool3d_test('ratio'),
     fractional_max_pool3d_test('size'),
     fractional_max_pool3d_test('asymsize'),
+    fractional_max_pool2d_no_batch_dim_test('ratio', True),
+    fractional_max_pool2d_no_batch_dim_test('ratio', False),
+    fractional_max_pool2d_no_batch_dim_test('size', True),
+    fractional_max_pool2d_no_batch_dim_test('size', False),
     dict(
         module_name='BatchNorm1d',
         constructor_args=(10,),
@@ -2193,6 +2249,14 @@ new_module_tests = [
         input_size=(1, 3, 7),
     ),
     dict(
+        module_name='LPPool1d',
+        constructor_args=(2, 2, 3),
+        cpp_constructor_args='torch::nn::LPPool1dOptions(2, 2).stride(3)',
+        input_size=(3, 7),
+        reference_fn=single_batch_reference_fn,
+        desc='no_batch_dim',
+    ),
+    dict(
         module_name='LocalResponseNorm',
         constructor_args=(3, ),
         cpp_constructor_args='torch::nn::LocalResponseNormOptions(3)',
@@ -2709,6 +2773,14 @@ new_module_tests = [
         cpp_constructor_args='torch::nn::EmbeddingOptions(4, 3)',
         input_fn=lambda: torch.empty(2, 3, dtype=torch.long).random_(4),
         check_gradgrad=False,
+    ),
+    dict(
+        module_name='Embedding',
+        constructor_args=(4, 3),
+        cpp_constructor_args='torch::nn::EmbeddingOptions(4, 3)',
+        input_fn=lambda: torch.empty(1, 512, dtype=torch.long).random_(4).expand(7, 512),
+        check_gradgrad=False,
+        desc='discontiguous'
     ),
     dict(
         module_name='EmbeddingBag',
@@ -3993,6 +4065,7 @@ def kldivloss_reference(input, target, reduction='mean'):
         return result.sum() / result.size(0)
     return result
 
+
 def kldivloss_log_target_reference(input, target, reduction='mean'):
     result = torch.exp(target) * (target - input)
     if reduction == 'mean':
@@ -5100,13 +5173,12 @@ regression_criterion_no_batch = [
     'L1Loss', 'MSELoss', 'PoissonNLLLoss', 'KLDivLoss', 'HuberLoss', 'SmoothL1Loss'
 ]
 reductions = ['none', 'mean', 'sum']
-for regression_criterion, reduction in product(regression_criterion_no_batch,
-                                               reductions):
+for name, reduction in product(regression_criterion_no_batch, reductions):
     regression_test_info = dict(
-        fullname="{}_no_batch_dim_{}".format(regression_criterion, reduction),
-        constructor=lambda *args: getattr(nn, regression_criterion)(reduction=reduction),
+        fullname="{}_no_batch_dim_{}".format(name, reduction),
+        constructor=lambda *args, name=name: getattr(nn, name)(reduction=reduction),
         input_size=(3, ),
-        target_fn=lambda: torch.randn(3),
+        target_size=(3, ),
         reference_fn=single_batch_reference_criterion_fn,
         test_cpp_api_parity=False,
     )
@@ -5121,6 +5193,7 @@ classification_criterion_no_batch = [
     ('HingeEmbeddingLoss', lambda: torch.randn(9), lambda: torch.tensor([-1, 1, 1] * 3)),
     ('MultiLabelMarginLoss', lambda: torch.randn(4), lambda: torch.tensor([3, 0, -1, 1])),
     ('SoftMarginLoss', lambda: torch.randn(9), lambda: torch.tensor([-1, 1, 1] * 3)),
+    ('NLLLoss', lambda: F.log_softmax(torch.randn(3), dim=0), lambda: torch.tensor(1)),
 ]
 classification_criterion_no_batch_extra_info: Dict[str, dict] = {
     'MultiLabelMarginLoss': {'check_gradgrad': False},
@@ -5130,9 +5203,9 @@ for (name, input_fn, target_fn), reduction in product(classification_criterion_n
                                                       reductions):
     classification_test_info = dict(
         fullname="{}_no_batch_dim_{}".format(name, reduction),
-        constructor=lambda *args: getattr(nn, name)(reduction=reduction),
-        input_fn=input_fn,
-        target_fn=target_fn,
+        constructor=lambda *args, name=name: getattr(nn, name)(reduction=reduction),
+        input_fn=lambda f=input_fn: f(),
+        target_fn=lambda f=target_fn: f(),
         reference_fn=single_batch_reference_criterion_fn,
         test_cpp_api_parity=False,
     )
@@ -5519,6 +5592,7 @@ class ModuleTest(TestBase):
 
         self.test_noncontig(test_case, gpu_module, gpu_input_tuple)
 
+
 class InputVariableMixin(object):
     def _get_input(self):
         input = TestBase._get_input(self, False)  # type: ignore[arg-type]
@@ -5827,8 +5901,10 @@ class CriterionTest(InputVariableMixin, TestBase):  # type: ignore[misc]
         test_case.assertEqualIgnoreType(cpu_output, gpu_output,
                                         atol=1e-1 if dtype in {torch.half, torch.bfloat16} else 4e-4, rtol=0)
 
-        cpu_gradInput = test_case._backward_criterion(cpu_module, cpu_input, cpu_output, cpu_target, extra_args=extra_args)
-        gpu_gradInput = test_case._backward_criterion(gpu_module, gpu_input, gpu_output, gpu_target, extra_args=extra_args)
+        cpu_gradInput = test_case._backward_criterion(
+            cpu_module, cpu_input, cpu_output, cpu_target, extra_args=extra_args)
+        gpu_gradInput = test_case._backward_criterion(
+            gpu_module, gpu_input, gpu_output, gpu_target, extra_args=extra_args)
         # dtype used to be able to be None, so set precision in this way instead of a precision map
         # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
         test_case.assertEqualIgnoreType(cpu_gradInput, gpu_gradInput,
