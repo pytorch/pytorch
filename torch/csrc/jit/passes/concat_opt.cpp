@@ -46,7 +46,7 @@ class ConcatCommonInputsEliminator {
  private:
   void handleBlock(Block* block) {
     for (auto node : block->nodes()) {
-      if (node->kind() == prim::Concat) {
+      if (node->kind() == prim::VarConcat) {
         handleCat(node);
       }
       for (Block* block : node->blocks()) {
@@ -84,16 +84,17 @@ class ConcatCommonInputsEliminator {
     // the previous cat ops.
     //
     // Example:
-    //    %11 = prim::Concat(%0, %1, <dim>)
+    //    %11 = prim::VarConcat(%0, %1, <dim>)
     //    ...
-    //    %13 = prim::Concat(%0, %1, %2, <dim>) // first 2 inputs same as %11
+    //    %13 = prim::VarConcat(%0, %1, %2, <dim>) // first 2 inputs same as %11
     //    ...
     //        = %13 ... // Use %13
     //
     // After CSE opt:
-    //    %11 = prim::Concat(%0, %1, <dim>)
+    //    %11 = prim::VarConcat(%0, %1, <dim>)
     //    ...
-    //    %14 = prim::Concat(%11, %2, <dim>) // Replace first 2 inputs with %11
+    //    %14 = prim::VarConcat(%11, %2, <dim>) // Replace first 2 inputs
+    //                                          // with %11
     //    ...
     //        = %14 ... // Replace use of %13 with %14
 
@@ -114,7 +115,8 @@ class ConcatCommonInputsEliminator {
 
         std::vector<Value*> new_inputs = {
             prev->output(), curr_tensor_inputs.back(), curr_dim};
-        auto new_concat = node->owningGraph()->create(prim::Concat, new_inputs);
+        auto new_concat =
+            node->owningGraph()->create(prim::VarConcat, new_inputs);
         new_concat->output()->setType(node->output()->type());
         concats_to_replace_[node] = new_concat;
         return;
@@ -158,7 +160,8 @@ class ConcatCommonInputsEliminator {
 
         std::vector<Value*> new_inputs = {
             curr_tensor_inputs.front(), prev->output(), curr_dim};
-        auto new_concat = node->owningGraph()->create(prim::Concat, new_inputs);
+        auto new_concat =
+            node->owningGraph()->create(prim::VarConcat, new_inputs);
         new_concat->output()->setType(node->output()->type());
         concats_to_replace_[node] = new_concat;
         return;
@@ -492,96 +495,6 @@ class ConcatExpander {
 void ExpandConcatAndEliminateRedundancy(const std::shared_ptr<Graph>& graph) {
   ConcatExpander(graph).run();
   GRAPH_DUMP("After expanding Concat and eliminating redundancy", graph);
-}
-
-namespace {
-
-class VariadicCatUpdater {
- public:
-  explicit VariadicCatUpdater(std::shared_ptr<Graph> graph)
-      : graph_(std::move(graph)) {}
-
-  bool run() {
-    collectCatNodes(graph_->block());
-    bool changed = false;
-    for (auto c : cat_nodes_) {
-      changed = replaceWithVariadicCat(c) || changed;
-    }
-    return changed;
-  }
-
- private:
-  void collectCatNodes(Block* block) {
-    for (auto node : block->nodes()) {
-      if (node->kind() == aten::cat) {
-        cat_nodes_.push_back(node);
-      }
-      for (Block* b : node->blocks()) {
-        collectCatNodes(b);
-      }
-    }
-  }
-
-  bool replaceWithVariadicCat(Node* cat) {
-    if (cat->input(0)->node()->kind() != prim::ListConstruct) {
-      return false;
-    }
-    auto list = cat->input(0)->node();
-    // We do not transform cat ops whose list input can not be moved to the
-    // position before cat. This in turn implies that there is some mutation
-    // of the input list before cat.
-    if (!getOrCreateAliasDb()->couldMoveBeforeTopologically(list, cat)) {
-      return false;
-    }
-    std::vector<Value*> inputs = list->inputs().vec();
-    inputs.push_back(cat->input(1));
-    auto var_cat = cat->owningGraph()->create(prim::Concat, inputs);
-    GRAPH_UPDATE("Adding\n", *var_cat);
-    var_cat->insertBefore(cat);
-    GRAPH_UPDATE("Replacing\n", *cat, "with\n", *var_cat);
-    cat->output()->replaceAllUsesWith(var_cat->output());
-    GRAPH_UPDATE("Deleting\n", *cat);
-    cat->destroy();
-    if (!list->hasUses()) {
-      GRAPH_UPDATE("Deleting\n", *list);
-      list->destroy();
-    }
-    return true;
-  }
-
-  AliasDb* getOrCreateAliasDb() {
-    if (!aliasDb_) {
-      aliasDb_ = std::make_unique<AliasDb>(graph_);
-    }
-    return aliasDb_.get();
-  }
-
-  std::shared_ptr<Graph> graph_;
-  std::unique_ptr<AliasDb> aliasDb_ = nullptr;
-
-  std::vector<Node*> cat_nodes_;
-};
-
-} // namespace
-
-bool UseVariadicCat(const std::shared_ptr<Graph>& graph) {
-  GRAPH_DUMP("Before VariadicCat", graph);
-  bool changed = VariadicCatUpdater(graph).run();
-  if (changed) {
-    GRAPH_DUMP("After VariadicCat", graph);
-  }
-  return changed;
-}
-
-bool RemoveListMutationAndUseVariadicCat(const std::shared_ptr<Graph>& graph) {
-  bool changed_in_last_iter = true;
-  bool changed = false;
-  while (changed_in_last_iter) {
-    changed_in_last_iter = RemoveListMutation(graph);
-    changed_in_last_iter = changed_in_last_iter || UseVariadicCat(graph);
-    changed = changed || changed_in_last_iter;
-  }
-  return changed;
 }
 
 } // namespace jit

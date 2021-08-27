@@ -50,6 +50,7 @@ def _insert_logger_after_node(
     ref_node_name: str,
     model_name: str,
     ref_name: str,
+    ref_node_target_type: str,
     results_type: str,
     index_within_arg: int,
     index_of_arg: int,
@@ -72,6 +73,7 @@ def _insert_logger_after_node(
     # create the logger object
     logger_obj = logger_cls(
         ref_node_name, node.name, model_name, ref_name, target_type,
+        ref_node_target_type,
         results_type, index_within_arg, index_of_arg, fqn)
     # attach the logger object to the parent module
     setattr(gm, logger_node_name, logger_obj)
@@ -81,8 +83,8 @@ def _insert_logger_after_node(
 
 def add_loggers_to_model(
     gm: GraphModule,
-    node_to_instrument_inputs_to_ref_node_name: Dict[Node, str],
-    node_to_instrument_outputs_to_ref_node_name: Dict[Node, str],
+    node_to_instrument_inputs_to_ref_node_name: Dict[Node, Tuple[str, str]],
+    node_to_instrument_outputs_to_ref_node_name: Dict[Node, Tuple[str, str]],
     logger_cls: Callable,
     model_name: str,
 ) -> GraphModule:
@@ -111,7 +113,7 @@ def add_loggers_to_model(
             fqn = _maybe_get_fqn(node, gm)
 
             if node in node_to_instrument_inputs_to_ref_node_name:
-                ref_name = node_to_instrument_inputs_to_ref_node_name[node]
+                ref_name, ref_node_type = node_to_instrument_inputs_to_ref_node_name[node]
                 # Ops such add and mul are special because either
                 # one or two of the first two arguments can be tensors,
                 # and if one argument is a tensor it can be first or
@@ -124,7 +126,7 @@ def add_loggers_to_model(
                         prev_node = env[node_arg.name]
                         env[node_arg.name] = _insert_logger_after_node(
                             prev_node, gm, logger_cls, '_ns_logger_', node.name,
-                            model_name, ref_name,
+                            model_name, ref_name, ref_node_type,
                             NSSingleResultValuesType.NODE_INPUT.value,
                             index_within_arg=0, index_of_arg=node_arg_idx,
                             fqn=fqn)
@@ -134,7 +136,7 @@ def add_loggers_to_model(
                             prev_node = env[arg.name]
                             env[prev_node.name] = _insert_logger_after_node(
                                 prev_node, gm, logger_cls, '_ns_logger_', node.name,
-                                model_name, ref_name,
+                                model_name, ref_name, ref_node_type,
                                 NSSingleResultValuesType.NODE_INPUT.value,
                                 index_within_arg=arg_idx, index_of_arg=node_arg_idx,
                                 fqn=fqn)
@@ -146,11 +148,12 @@ def add_loggers_to_model(
             env[node.name] = new_graph.node_copy(node, load_arg)
 
             if node in node_to_instrument_outputs_to_ref_node_name:
-                ref_name = node_to_instrument_outputs_to_ref_node_name[node]
+                ref_name, ref_node_type = node_to_instrument_outputs_to_ref_node_name[node]
                 # add the logger after the base node
                 env[node.name] = _insert_logger_after_node(
                     env[node.name], gm, logger_cls, '_ns_logger_', node.name,
-                    model_name, ref_name, NSSingleResultValuesType.NODE_OUTPUT.value,
+                    model_name, ref_name, ref_node_type,
+                    NSSingleResultValuesType.NODE_OUTPUT.value,
                     index_within_arg=0, index_of_arg=0, fqn=fqn)
 
         else:
@@ -558,10 +561,12 @@ def create_a_shadows_b(
     end_node_b_to_matched_subgraph_a_and_name = {}
     for match_name, match in matched_subgraph_pairs.items():
         subgraph_a, subgraph_b = match
+        ref_node_type_a = get_target_type_str(subgraph_a.base_op_node, gm_a)
+        ref_node_type_b = get_target_type_str(subgraph_b.base_op_node, gm_b)
         start_node_b_to_matched_subgraph_a_and_name[subgraph_b.start_node] = \
-            (subgraph_a, match_name)
+            (subgraph_a, match_name, ref_node_type_a, ref_node_type_b)
         end_node_b_to_matched_subgraph_a_and_name[subgraph_b.end_node] = \
-            (subgraph_a, match_name)
+            (subgraph_a, match_name, ref_node_type_a, ref_node_type_b)
 
     for node_b in gm_b.graph.nodes:
         if node_b.op == 'output':
@@ -575,11 +580,11 @@ def create_a_shadows_b(
         if (node_b_is_start_node or node_b_is_end_node):
 
             if node_b_is_start_node:
-                subgraph_a, ref_name = \
+                subgraph_a, ref_name, ref_node_type_a, ref_node_type_b = \
                     start_node_b_to_matched_subgraph_a_and_name[node_b]
             else:
                 assert node_b_is_end_node
-                subgraph_a, ref_name = \
+                subgraph_a, ref_name, ref_node_type_a, ref_node_type_b = \
                     end_node_b_to_matched_subgraph_a_and_name[node_b]
 
             # For both start_node and end_node verify that we know how to do
@@ -634,7 +639,7 @@ def create_a_shadows_b(
                         prev_node_c = env_c[node_b.args[0].name]
                         env_c[prev_node_c.name] = _insert_logger_after_node(
                             prev_node_c, gm_b, logger_cls, '_ns_logger_b_inp_',
-                            node_b.name, name_b, ref_name,
+                            node_b.name, name_b, ref_name, ref_node_type_b,
                             NSSingleResultValuesType.NODE_INPUT.value,
                             index_within_arg=0, index_of_arg=0,
                             fqn=fqn_base_b)
@@ -648,7 +653,7 @@ def create_a_shadows_b(
                             prev_node_c = prev_node_c_list[arg_idx]
                             env_c[prev_node_c.name] = _insert_logger_after_node(
                                 prev_node_c, gm_b, logger_cls, '_ns_logger_b_inp_',
-                                node_b.name, name_b, ref_name,
+                                node_b.name, name_b, ref_name, ref_node_type_b,
                                 NSSingleResultValuesType.NODE_INPUT.value,
                                 index_within_arg=arg_idx, index_of_arg=0,
                                 fqn=fqn_base_b)
@@ -707,7 +712,7 @@ def create_a_shadows_b(
                     if isinstance(dtype_cast_node, Node):
                         dtype_cast_node = _insert_logger_after_node(
                             dtype_cast_node, gm_b, logger_cls, '_ns_logger_a_inp_',
-                            ref_node_name, name_a, ref_name,
+                            ref_node_name, name_a, ref_name, ref_node_type_a,
                             NSSingleResultValuesType.NODE_INPUT.value,
                             index_within_arg=0, index_of_arg=0,
                             fqn=fqn_base_a)
@@ -718,7 +723,7 @@ def create_a_shadows_b(
                         for dtype_cast_idx, dtype_cast_node_inner in enumerate(dtype_cast_node):
                             dtype_cast_logger = _insert_logger_after_node(
                                 dtype_cast_node_inner, gm_b, logger_cls, '_ns_logger_a_inp_',
-                                ref_node_name, name_a, ref_name,
+                                ref_node_name, name_a, ref_name, ref_node_type_a,
                                 NSSingleResultValuesType.NODE_INPUT.value,
                                 index_within_arg=dtype_cast_idx,
                                 index_of_arg=0,
@@ -777,7 +782,7 @@ def create_a_shadows_b(
                 # hook up a logger to the mod_a copy
                 env_c[node_a_shadows_c.name] = _insert_logger_after_node(
                     env_c[node_a_shadows_c.name], gm_b, logger_cls, '_ns_logger_a_',
-                    node_a_shadows_c.name, name_a, ref_name,
+                    node_a_shadows_c.name, name_a, ref_name, ref_node_type_a,
                     NSSingleResultValuesType.NODE_OUTPUT.value,
                     index_within_arg=0, index_of_arg=0,
                     fqn=fqn_base_a)
@@ -792,7 +797,7 @@ def create_a_shadows_b(
                 # hook up a logger to the mod_b copy
                 env_c[node_b.name] = _insert_logger_after_node(
                     env_c[node_b.name], gm_b, logger_cls, '_ns_logger_b_',
-                    node_b.name, name_b, ref_name,
+                    node_b.name, name_b, ref_name, ref_node_type_b,
                     NSSingleResultValuesType.NODE_OUTPUT.value,
                     index_within_arg=0, index_of_arg=0,
                     fqn=fqn_base_b)
