@@ -209,6 +209,13 @@ TEST(StaticRuntime, EmbeddingBag) {
 }
 
 TEST(StaticRuntime, LayerNorm) {
+#ifdef FBCODE_CAFFE2
+  script::Module module("module");
+  module.define(layer_norm_with_weights);
+  torch::jit::StaticModule smodule(module);
+  ASSERT_EQ(getNodeWithKind(smodule, "aten::layer_norm"), nullptr);
+  ASSERT_NE(getNodeWithKind(smodule, "static_runtime::layer_norm"), nullptr);
+#endif
   const auto a = torch::rand({1, 2, 2, 2});
   const auto b = torch::rand({3, 2, 2, 2});
   for (int normalized_size : {2, 3}) {
