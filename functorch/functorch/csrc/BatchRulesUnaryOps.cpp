@@ -10,24 +10,10 @@
 
 namespace at { namespace functorch {
 
-template <typename F, F Func>
-static Tensor& unary_inplace_func_batch_rule(Tensor& self, optional<int64_t>) {
-  Func(self);
-  return self;
-}
-
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
-#define SINGLE_ARG(...) __VA_ARGS__
-
-  using UnaryInplaceBRType = Tensor& (*)(Tensor&, optional<int64_t>);
-#define UNARY_POINTWISE_(op) \
-  m.impl(#op, inplacePlumbing1<UnaryInplaceBRType, &unary_inplace_batch_rule<decltype(&Tensor::op), &Tensor::op>>);
-#define UNARY_POINTWISE_FUNC_(op) \
-  m.impl(#op, inplacePlumbing1<UnaryInplaceBRType, &unary_inplace_func_batch_rule<decltype(&at::op), &at::op>>);
-
 
 #define UNARY_POINTWISE_ALL(op) \
-  UNARY_POINTWISE_(op ## _); \
+  POINTWISE_BOXED(op ## _); \
   VMAP_SUPPORT(#op, BASIC_UNARY_BATCH_RULE(ATEN_FN(op)));
 
   UNARY_POINTWISE(_to_copy);
@@ -64,12 +50,12 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   UNARY_POINTWISE_ALL(log1p);
   UNARY_POINTWISE_ALL(log2);
   UNARY_POINTWISE_ALL(logical_not);
-  UNARY_POINTWISE(logit);
-  UNARY_POINTWISE(mish);
-  UNARY_POINTWISE(mvlgamma);
-  UNARY_POINTWISE(nan_to_num);
+  UNARY_POINTWISE_ALL(logit);
+  UNARY_POINTWISE_ALL(mish);
+  UNARY_POINTWISE_ALL(mvlgamma);
+  UNARY_POINTWISE_ALL(nan_to_num);
   UNARY_POINTWISE_ALL(neg);
-  UNARY_POINTWISE(positive);
+  UNARY_POINTWISE_ALL(positive);
   UNARY_POINTWISE_ALL(rad2deg);
   UNARY_POINTWISE_ALL(reciprocal);
   UNARY_POINTWISE_ALL(round);
@@ -82,7 +68,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   UNARY_POINTWISE_ALL(sinh);
   UNARY_POINTWISE_ALL(sqrt);
   UNARY_POINTWISE_ALL(tan);
-  UNARY_POINTWISE(threshold);
+  UNARY_POINTWISE_ALL(threshold);
   UNARY_POINTWISE_ALL(trunc);
 
   // special-related
@@ -114,29 +100,28 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   UNARY_POINTWISE(special_sinc);
 
   // Activation functions (from https://pytorch.org/docs/stable/nn.html#non-linear-activations-weighted-sum-nonlinearity)
-  UNARY_POINTWISE(elu);
+  UNARY_POINTWISE_ALL(elu);
   UNARY_POINTWISE(hardshrink);
-  UNARY_POINTWISE(hardsigmoid);
-  UNARY_POINTWISE(hardtanh);
-  UNARY_POINTWISE(hardswish);
-  UNARY_POINTWISE(leaky_relu);
+  UNARY_POINTWISE_ALL(hardsigmoid);
+  UNARY_POINTWISE_ALL(hardtanh);
+  UNARY_POINTWISE_ALL(hardswish);
+  UNARY_POINTWISE_ALL(leaky_relu);
   UNARY_POINTWISE(log_sigmoid);
   UNARY_POINTWISE_ALL(relu);
-  UNARY_POINTWISE(relu6);
-  UNARY_POINTWISE(selu);
-  UNARY_POINTWISE(celu);
+  UNARY_POINTWISE_ALL(relu6);
+  UNARY_POINTWISE_ALL(selu);
+  UNARY_POINTWISE_ALL(celu);
   UNARY_POINTWISE(gelu);
   UNARY_POINTWISE_ALL(sigmoid);
-  UNARY_POINTWISE(silu);
+  UNARY_POINTWISE_ALL(silu);
   UNARY_POINTWISE(softplus);
   UNARY_POINTWISE(softshrink);
   UNARY_POINTWISE_ALL(tanh);
 
-
-  UNARY_POINTWISE_(zero_);
+  POINTWISE_BOXED(fill_.Scalar);
+  POINTWISE_BOXED(zero_);
 
 #undef UNARY_POINTWISE
-#undef UNARY_POINTWISE_
 #undef UNARY_POINTWISE_ALL
 
 }
