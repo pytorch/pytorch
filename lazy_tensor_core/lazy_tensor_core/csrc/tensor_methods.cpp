@@ -40,7 +40,6 @@
 #include "lazy_tensor_core/csrc/ops/cumsum.h"
 #include "lazy_tensor_core/csrc/ops/device_data.h"
 #include "lazy_tensor_core/csrc/ops/diagonal.h"
-#include "lazy_tensor_core/csrc/ops/discrete_uniform.h"
 #include "lazy_tensor_core/csrc/ops/expand.h"
 #include "lazy_tensor_core/csrc/ops/exponential.h"
 #include "lazy_tensor_core/csrc/ops/flip.h"
@@ -87,6 +86,7 @@
 #include "lazy_tensor_core/csrc/ops/prod.h"
 #include "lazy_tensor_core/csrc/ops/put.h"
 #include "lazy_tensor_core/csrc/ops/qr.h"
+#include "lazy_tensor_core/csrc/ops/random.h"
 #include "lazy_tensor_core/csrc/ops/reflection_pad2d.h"
 #include "lazy_tensor_core/csrc/ops/reflection_pad2d_backward.h"
 #include "lazy_tensor_core/csrc/ops/repeat.h"
@@ -2135,15 +2135,9 @@ std::tuple<LazyTensor, LazyTensor> LazyTensor::qr(const LazyTensor& input,
                          input.CreateFrom(ir::Value(node, 1)));
 }
 
-void LazyTensor::random_(LazyTensor& input, int64_t from, int64_t to) {
-  LTC_CHECK_LE(from, to);
-  auto input_shape = input.shape();
-  input.SetInPlaceIrValue(ir::MakeNode<ir::ops::DiscreteUniform>(
-      GetIrValueForScalar(from, lazy_tensors::PrimitiveType::S64,
-                          input.GetDevice()),
-      GetIrValueForScalar(to, lazy_tensors::PrimitiveType::S64,
-                          input.GetDevice()),
-      GetRngSeed(input.GetDevice()), input_shape));
+void LazyTensor::random_(LazyTensor& input) {
+  input.SetInPlaceIrValue(
+      ir::MakeNode<ir::ops::Random>(input.GetIrValue()));
 }
 
 LazyTensor LazyTensor::reciprocal(const LazyTensor& input) {

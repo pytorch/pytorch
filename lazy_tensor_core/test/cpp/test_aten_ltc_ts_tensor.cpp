@@ -1719,6 +1719,19 @@ TEST_F(AtenLtcTsTensorTest, TestRandomInPlaceDefaultFrom) {
   }
 }
 
+TEST_F(AtenLtcTsTensorTest, TestRandomInPlaceDefault) {
+  for (auto dtype : {torch::kFloat, torch::kDouble, torch::kByte, torch::kChar,
+                     torch::kShort, torch::kInt, torch::kLong}) {
+    auto input = torch::zeros({10}, torch::TensorOptions(dtype));
+    ForEachDevice([&](const torch::Device& device) {
+      auto lazyInput = CopyToDevice(input, device);
+      lazyInput.random_();
+      auto output = ToCpuTensor(lazyInput);
+      EXPECT_TRUE(torch::all(output.ne(input)).item<bool>());
+    });
+  }
+}
+
 TEST_F(AtenLtcTsTensorTest, TestNormGeneral) {
   torch::Tensor a =
       torch::randn({4, 3, 4}, torch::TensorOptions(torch::kFloat));

@@ -6,10 +6,9 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-class DiscreteUniform : public Node {
+class Random : public Node {
  public:
-  DiscreteUniform(const Value& from, const Value& to, const Value& seed,
-                  const lazy_tensors::Shape& rng_shape);
+  Random(const Value& input);
 
   NodePtr Clone(OpList operands) const override;
 };
