@@ -177,7 +177,7 @@ class AllreduceNCCLTest : public NCCLTest {
     // Make sure enabling profile does not make any issue. Note, in single
     // process multi-device mode we do not expect any events be populated for
     // collective operations, since profiling for that mode is not supported.
-    enableProfilerLegacy({ProfilerState::CPU});
+    enableProfilerLegacy(ProfilerConfig(ProfilerState::CPU));
     auto results = pg_->allreduce(tensors_);
     disableProfilerLegacy();
     return results;
