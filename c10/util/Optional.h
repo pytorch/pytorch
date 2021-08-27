@@ -23,7 +23,7 @@
 // - Move `constexpr struct in_place_t {} in_place{}` to `c10/util/in_place.h`
 // so that it can also be used in `c10/util/variant.h`.
 // - Remove special cases for pre-c++14 compilers to make code simpler.
-// - Replace constexpr_forward and constexpr_move with std::forward and std::move
+// - Replace constexpr_forward/constexpr_move with std::forward/std::move
 // - Use _t variants of type_traits functions for improved readability
 
 #pragma once
