@@ -1587,35 +1587,39 @@ class TestFrozenOptimizations(JitTestCase):
 
     # @unittest.skipIf(not torch._C.has_cuda, "Optimization currently only run for GPU")
     def test_linear_concat(self):
-        out_dimms = [[5, 5], [5, 10], [1, 5]]
+        out_dimms = [[5, 5]]  # , [5, 10], [1, 5]]
 
         for w1_dim, w2_dim in out_dimms:
-            @torch.no_grad()
-            def test_example(self, in_tensor):
-                w1 = torch.rand([w1_dim, 5])
-                b1 = torch.rand([w1_dim])
-                w2 = torch.rand([w2_dim, 5])
-                b2 = torch.rand([w2_dim])
+            class ModMultLinear(nn.Module):
+                def __init__(self, w1_dim, w2_dim):
+                    super(ModMultLinear, self).__init__()
+                    self.w1 = torch.rand([w1_dim, 5])
+                    self.b1 = torch.rand([w1_dim])
+                    self.w2 = torch.rand([w2_dim, 5])
+                    self.b2 = torch.rand([w2_dim])
 
-                res1 = torch.nn.functional.linear(in_tensor, w1, b1)
-                res2 = torch.nn.functional.linear(in_tensor, w2, b2)
-                return res1, res2
+                def forward(self, in_tensor1):
+                    res1 = torch._C._nn.linear(in_tensor1, self.w1, self.b1)
+                    res2 = torch._C._nn.linear(in_tensor1, self.w2, self.b2)
+                    return res1, res2
+            
+            mod_eager = ModMultLinear(w1_dim, w2_dim).eval()
+            script_mod = torch.jit.script(mod_eager)
+            op_graph = script_mod.graph
+            print(op_graph)
 
-            fn_script = torch.jit.script(test_example)
-            op_graph = fn_script.graph
-
-            FileCheck().check("aten::linear", 2, exactly=True).run(op_graph)
+            FileCheck().check_count("aten::linear", 2, exactly=True).run(op_graph)
             # successively no-ops with non-const inputs
-            self.run_pass("fold_frozen_conv_mul_or_div", op_graph)
-            FileCheck().check("aten::linear", 2, exactly=True).run(op_graph)
+            self.run_pass("concat_frozen_linear", op_graph)
+            FileCheck().check_count("aten::linear", 2, exactly=True).run(op_graph)
 
-            fn_script = torch.jit.freeze(fn_script)
-            op_graph = fn_script.graph
-            self.run_pass("fold_frozen_conv_mul_or_div", op_graph)
-            FileCheck().check("aten::linear", 1, exactly=True).run(op_graph)
+            script_mod = torch.jit.freeze(script_mod)
+            op_graph = script_mod.graph
+            self.run_pass("concat_frozen_linear", op_graph)
+            FileCheck().check_count("aten::linear", 1, exactly=True).run(op_graph)
 
-            test_val = torch.rand([50, 5])
-            self.assertEqual(test_example(test_val), fn_script(test_val))
+            test_val1 = torch.rand([50, 5])
+            self.assertEqual(mod_eager(test_val1), script_mod(test_val1))
 
     def test_linear_concat_different_input(self):
         """
@@ -1623,35 +1627,38 @@ class TestFrozenOptimizations(JitTestCase):
         due to the two input tensors being different
         """
 
-        w1_dim, w2_dim = 5, 5
+        # Freezing requires that the graph be a module
+        class ModMultLinear(nn.Module):
+            def __init__(self, w1_dim, w2_dim):
+                super(ModMultLinear, self).__init__()
+                self.w1 = torch.rand([w1_dim, 5])
+                self.b1 = torch.rand([w1_dim])
+                self.w2 = torch.rand([w2_dim, 5])
+                self.b2 = torch.rand([w2_dim])
 
-        # @torch.no_grad()
-        def test_example(self, in_tensor1, in_tensor2):
-            w1 = torch.rand([w1_dim, 5])
-            b1 = torch.rand([w1_dim])
-            w2 = torch.rand([w2_dim, 5])
-            b2 = torch.rand([w2_dim])
+            def forward(self, in_tensor1, in_tensor2):
+                res1 = torch._C._nn.linear(in_tensor1, self.w1, self.b1)
+                res2 = torch._C._nn.linear(in_tensor2, self.w2, self.b2)
+                return res1, res2
+        
+        mod_eager = ModMultLinear(5, 5).eval()
+        script_mod = torch.jit.script(mod_eager)
+        op_graph = script_mod.graph
+        print(op_graph)
 
-            res1 = torch.nn.functional.linear(in_tensor1, w1, b1)
-            res2 = torch.nn.functional.linear(in_tensor2, w2, b2)
-            return res1, res2
-
-        fn_script = torch.jit.script(test_example)
-        op_graph = fn_script.graph
-
-        FileCheck().check("aten::linear", 2, exactly=True).run(op_graph)
+        FileCheck().check_count("aten::linear", 2, exactly=True).run(op_graph)
         # successively no-ops with non-const inputs
-        self.run_pass("fold_frozen_conv_mul_or_div", op_graph)
-        FileCheck().check("aten::linear", 2, exactly=True).run(op_graph)
+        self.run_pass("concat_frozen_linear", op_graph)
+        FileCheck().check_count("aten::linear", 2, exactly=True).run(op_graph)
 
-        fn_script = torch.jit.freeze(fn_script)
-        op_graph = fn_script.graph
-        self.run_pass("fold_frozen_conv_mul_or_div", op_graph)
-        FileCheck().check("aten::linear", 2, exactly=True).run(op_graph)
+        script_mod = torch.jit.freeze(script_mod)
+        op_graph = script_mod.graph
+        self.run_pass("concat_frozen_linear", op_graph)
+        FileCheck().check_count("aten::linear", 2, exactly=True).run(op_graph)
 
         test_val1 = torch.rand([50, 5])
         test_val2 = torch.rand([50, 5])
-        self.assertEqual(test_example(test_val1, test_val2), fn_script(test_val1, test_val_2))
+        self.assertEqual(mod_eager(test_val1, test_val2), script_mod(test_val1, test_val2))
 
 
 
@@ -2118,7 +2125,6 @@ class TestFrozenOptimizations(JitTestCase):
             scripted = torch.jit.freeze(torch.jit.script(mod))
             optimized = torch.jit.optimize_for_inference(scripted)
             inp = torch.rand([20, 20])
-            print(optimized.graph)
             # a1 cant be inplaced for first use, can for second
             FileCheck().check("ScalarMul_").check("ScalarMul(").check("ScalarMul_").run(optimized.graph)
             self.assertEqual(optimized(inp), mod(inp))
