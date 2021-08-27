@@ -455,6 +455,7 @@ TEST(LiteInterpreterTest, BuiltinFunction) {
   AT_ASSERT(str == expected);
 }
 
+#if !defined FB_XPLAT_BUILD
 TEST(LiteInterpreterTest, ModuleInfoBasic) {
   Module m("M");
   m.define(R"JIT(
@@ -481,7 +482,7 @@ TEST(LiteInterpreterTest, ModuleInfoBasic) {
     }
   }
 
-  AT_ASSERT(module_debug_info_set.count("top(M).aten::mul"));
+  AT_ASSERT(module_debug_info_set.count("top(M)::<unknown>.aten::mul"));
 }
 
 TEST(LiteInterpreterTest, NotSaveModuleInfo) {
@@ -541,9 +542,11 @@ TEST(LiteInterpreterTest, OneSubmoduleModuleInfo) {
     }
   }
 
-  AT_ASSERT(module_debug_info_set.count("top(B).aten::add"));
-  AT_ASSERT(module_debug_info_set.count("top(B).A0(A).aten::add"));
-  AT_ASSERT(module_debug_info_set.count("top(B).A0(A).aten::mul"));
+  AT_ASSERT(module_debug_info_set.count("top(B)::<unknown>.aten::add"));
+  AT_ASSERT(module_debug_info_set.count(
+      "top(B)::<unknown>.A0(A)::forward.aten::add"));
+  AT_ASSERT(module_debug_info_set.count(
+      "top(B)::<unknown>.A0(A)::forward.aten::mul"));
 }
 
 TEST(LiteInterpreterTest, TwoSubmodulesModuleInfo) {
@@ -584,9 +587,11 @@ TEST(LiteInterpreterTest, TwoSubmodulesModuleInfo) {
     }
   }
 
-  AT_ASSERT(module_debug_info_set.count("top(C).aten::add"));
-  AT_ASSERT(module_debug_info_set.count("top(C).A0(A).aten::add"));
-  AT_ASSERT(module_debug_info_set.count("top(C).B0(B).aten::add"));
+  AT_ASSERT(module_debug_info_set.count("top(C)::<unknown>.aten::add"));
+  AT_ASSERT(module_debug_info_set.count(
+      "top(C)::<unknown>.A0(A)::forward.aten::add"));
+  AT_ASSERT(module_debug_info_set.count(
+      "top(C)::<unknown>.B0(B)::forward.aten::add"));
 }
 
 TEST(LiteInterpreterTest, GetRuntimeByteCodeVersion) {
@@ -596,6 +601,14 @@ TEST(LiteInterpreterTest, GetRuntimeByteCodeVersion) {
       caffe2::serialize::kMaxSupportedBytecodeVersion);
 }
 
+/**
+ * The test below is disarmed for FB internal xplat builds since
+ * BUCK requires us to pass in the script_module_v4.ptl file in
+ * as a resource dependency of the build rule for this file, and
+ * we would need to access it via the C++ Resources API instead
+ * of directly reading from disk (which is what the open source
+ * build/run does).
+ */
 TEST(LiteInterpreterTest, GetByteCodeVersion) {
   std::string filePath(__FILE__);
   auto test_model_file_v4 =
@@ -605,6 +618,7 @@ TEST(LiteInterpreterTest, GetByteCodeVersion) {
   auto version_v4 = _get_model_bytecode_version(test_model_file_v4);
   AT_ASSERT(version_v4 == 4);
 }
+#endif // !defined(FB_XPLAT_BUILD)
 
 namespace {
 
@@ -696,9 +710,9 @@ void backportAllVersionCheck(
       _backport_for_mobile(test_model_file_stream, oss, minimum_to_version - 1);
   AT_ASSERT(!backPortSuccess);
 }
-
 } // namespace
 
+#if !defined FB_XPLAT_BUILD
 TEST(LiteInterpreterTest, BackPortByteCodeModelAllVersions) {
   torch::jit::Module module("m");
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
@@ -730,6 +744,7 @@ TEST(LiteInterpreterTest, BackPortByteCodeModelAllVersions) {
       expect_result_list,
       caffe2::serialize::kProducedBytecodeVersion);
 }
+#endif // !defined(FB_XPLAT_BUILD)
 
 TEST(LiteInterpreterTest, GetRuntimeOpsAndInfo) {
   auto runtime_ops = _get_runtime_ops_and_info();
@@ -738,6 +753,50 @@ TEST(LiteInterpreterTest, GetRuntimeOpsAndInfo) {
   AT_ASSERT(runtime_ops.size() > 2900);
 }
 
+TEST(LiteInterpreterTest, isCompatibleSuccess) {
+  // test trivial success case
+  auto runtime_info = RuntimeCompatibilityInfo::get();
+  std::unordered_map<std::string, OperatorInfo> model_ops;
+  model_ops["aten::add.Scalar"] = OperatorInfo{2};
+
+  auto model_info = ModelCompatibilityInfo{
+      caffe2::serialize::kMaxSupportedBytecodeVersion, model_ops};
+
+  AT_ASSERT(
+      is_compatible(runtime_info, model_info).status ==
+      ModelCompatibilityStatus::OK);
+}
+
+TEST(LiteInterpreterTest, isCompatibleFail) {
+  // test trivial failure due to ops
+  std::unordered_map<std::string, OperatorInfo> model_ops;
+  model_ops["aten::add.Scalar"] = OperatorInfo{2};
+  auto model_info = ModelCompatibilityInfo{
+      caffe2::serialize::kMaxSupportedBytecodeVersion, model_ops};
+  std::unordered_map<std::string, OperatorInfo> runtime_ops;
+  runtime_ops["aten::add.Int"] = OperatorInfo{2};
+  auto runtime_info = RuntimeCompatibilityInfo{
+      caffe2::serialize::kMaxSupportedBytecodeVersion, runtime_ops};
+
+  auto result = is_compatible(runtime_info, model_info);
+  AT_ASSERT(result.status = ModelCompatibilityStatus::ERROR);
+  AT_ASSERT(
+      result.errors[0] ==
+      "Operator 'aten::add.Scalar' missing from runtime (not found)");
+
+  // test trivial failure due to bytecode
+  runtime_ops["aten::add.Scalar"] = OperatorInfo{2};
+  runtime_info = RuntimeCompatibilityInfo{
+      caffe2::serialize::kMaxSupportedBytecodeVersion, runtime_ops};
+  model_info.bytecode_version =
+      caffe2::serialize::kMaxSupportedBytecodeVersion + 1;
+
+  result = is_compatible(runtime_info, model_info);
+  AT_ASSERT(result.status = ModelCompatibilityStatus::ERROR);
+}
+
+#if !defined FB_XPLAT_BUILD
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteInterpreterTest, SequentialModuleInfo) {
   Module a("A");
   a.define(R"JIT(
@@ -799,9 +858,11 @@ TEST(LiteInterpreterTest, SequentialModuleInfo) {
   //   def forward(self, x):
   //     return self.A0.forward(self.B0.forward(x))
 
-  AT_ASSERT(module_debug_info_set.count("top(C).prim::Return"));
-  AT_ASSERT(module_debug_info_set.count("top(C).A0(A).aten::add"));
-  AT_ASSERT(module_debug_info_set.count("top(C).B0(B).aten::add"));
+  AT_ASSERT(module_debug_info_set.count("top(C)::<unknown>.prim::Return"));
+  AT_ASSERT(module_debug_info_set.count(
+      "top(C)::<unknown>.A0(A)::forward.aten::add"));
+  AT_ASSERT(module_debug_info_set.count(
+      "top(C)::<unknown>.B0(B)::forward.aten::add"));
 }
 
 TEST(LiteInterpreterTest, HierarchyModuleInfo) {
@@ -846,9 +907,11 @@ TEST(LiteInterpreterTest, HierarchyModuleInfo) {
   // "top(C).forward": for the add operator in top.
   // "top(C).B0(B).forward": for the add operator in B0.
   // "top(C).B0(B).forward.A0(A).forward": for the add operator in A0.
-  AT_ASSERT(module_debug_info_set.count("top(C).aten::add"));
-  AT_ASSERT(module_debug_info_set.count("top(C).B0(B).aten::add"));
-  AT_ASSERT(module_debug_info_set.count("top(C).B0(B).A0(A).aten::add"));
+  AT_ASSERT(module_debug_info_set.count("top(C)::<unknown>.aten::add"));
+  AT_ASSERT(module_debug_info_set.count(
+      "top(C)::<unknown>.B0(B)::forward.aten::add"));
+  AT_ASSERT(module_debug_info_set.count(
+      "top(C)::<unknown>.B0(B)::forward.A0(A)::forward.aten::add"));
 }
 
 TEST(LiteInterpreterTest, DuplicatedClassTypeModuleInfo) {
@@ -905,10 +968,13 @@ TEST(LiteInterpreterTest, DuplicatedClassTypeModuleInfo) {
   // "top(B).A0(A).forward": for the add operator in A0.
   // "top(B).A1(A).forward": for the add operator in A1.
 
-  AT_ASSERT(module_debug_info_set.count("top(B).aten::add"));
-  AT_ASSERT(module_debug_info_set.count("top(B).A0(A).aten::add"));
-  AT_ASSERT(module_debug_info_set.count("top(B).A1(A).aten::add"));
+  AT_ASSERT(module_debug_info_set.count("top(B)::<unknown>.aten::add"));
+  AT_ASSERT(module_debug_info_set.count(
+      "top(B)::<unknown>.A0(A)::forward.aten::add"));
+  AT_ASSERT(module_debug_info_set.count(
+      "top(B)::<unknown>.A1(A)::forward.aten::add"));
 }
+#endif // !defined(FB_XPLAT_BUILD)
 
 TEST(LiteInterpreterTest, Eval) {
   std::vector<torch::jit::IValue> inputs;
@@ -1142,15 +1208,16 @@ TEST(LiteInterpreterTest, DefaultArgsConv) {
 namespace {
 void testLiteModuleCompareResultTensors(
     Module& m,
-    const std::vector<torch::jit::IValue>& inputs) {
-  auto outputref = m.forward(inputs).toTensor();
+    const std::vector<torch::jit::IValue>& inputs,
+    const std::string& method_name = "forward") {
+  auto outputref = m.get_method(method_name)(inputs).toTensor();
 
   std::stringstream ss;
   m._save_for_mobile(ss);
   mobile::Module bc = _load_for_mobile(ss);
   IValue res;
   for (int i = 0; i < 3; ++i) {
-    res = bc.get_method("forward")(inputs);
+    res = bc.get_method(method_name)(inputs);
   }
   auto output = res.toTensor();
   AT_ASSERT(outputref.dim() == output.dim());
@@ -1186,6 +1253,7 @@ void testDefaultArgsPinv(int num_args) {
 }
 } // namespace
 
+#if !defined FB_XPLAT_BUILD
 TEST(LiteInterpreterTest, DefaultArgsPinv) {
   // Test with different number of specified arguments.
   // Arguments not specified take default value.
@@ -1313,9 +1381,9 @@ TEST(LiteInterpreterTest, TestExceptionStackWithTwoLevelModuleHierarchy) {
   c._save_for_mobile(ss, ExtraFilesMap(), true);
   auto lite_m = _load_for_mobile(ss);
   std::string error_pattern = R"(
-  Module hierarchy:top(C).B0(B).A0(A).aten::add
+  Module hierarchy:top(C)::<unknown>.B0(B)::foo.A0(A)::bar.aten::add
 Traceback of TorchScript (most recent call last):
-  File "<string>", line 3, in FunctionName_UNKNOWN
+  File "<string>", line 3, in <unknown>
 
     def forward(self, x, y):
       return self.B0.foo(x, y) + 3
@@ -1335,6 +1403,7 @@ Traceback of TorchScript (most recent call last):
   )";
   ASSERT_THROWS_WITH_MESSAGE(lite_m.forward(inputs), error_pattern);
 }
+#endif // !defined(FB_XPLAT_BUILD)
 
 namespace {
 static auto reg =
@@ -1353,6 +1422,42 @@ static auto reg =
             });
 
 } // namespace
+
+TEST(LiteInterpreterTest, OperatorCacheDifferentiatesDefaultArgs) {
+  // Create 3 methods:
+  //
+  // 1. forward() returns a tensor with dtype=torch.int64 (4)
+  // 2. forward2() returns a tensor with dtype=torch.float32 (6)
+  // 3. forward3() returns a tensor with dtype=torch.float32 but
+  //    the dtype is inferred by the input tensor's dtype
+  //
+  // If caching works correctly, then the result from the full-jit
+  // module and the lite module will be the same. Otherwise, it
+  // will be different if we don't correctly ignore the cache
+  // entry for an operator that has a different number of
+  // arguments.
+  Module m("m");
+  m.define(R"(
+    def forward(self):
+      ret1 = torch.new_empty(torch.zeros(10), [10], dtype=4)
+      return ret1.fill_(25)
+  )");
+  m.define(R"(
+    def forward2(self):
+      ret1 = torch.new_empty(torch.zeros(10), [10], dtype=6)
+      return ret1.fill_(32.0)
+  )");
+  m.define(R"(
+    def forward3(self):
+      ret1 = torch.new_empty(torch.zeros(10), [10])
+      return ret1.fill_(12.0)
+  )");
+
+  std::vector<torch::jit::IValue> inputs;
+  testLiteModuleCompareResultTensors(m, inputs, "forward");
+  testLiteModuleCompareResultTensors(m, inputs, "forward2");
+  testLiteModuleCompareResultTensors(m, inputs, "forward3");
+}
 
 } // namespace jit
 } // namespace torch

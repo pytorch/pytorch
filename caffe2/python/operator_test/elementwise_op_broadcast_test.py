@@ -6,6 +6,7 @@
 import unittest
 
 from hypothesis import given, assume, settings
+import hypothesis.strategies as st
 import numpy as np
 import operator
 
@@ -18,7 +19,7 @@ import caffe2.python.serialized_test.serialized_test_util as serial
 # TODO(jiayq): make them hypothesis tests for better coverage.
 class TestElementwiseBroadcast(serial.SerializedTestCase):
 
-    def __generate_test_cases(self):
+    def __generate_test_cases(self, allow_broadcast_fastpath: bool):
         """
         generates a set of test cases
 
@@ -34,28 +35,30 @@ class TestElementwiseBroadcast(serial.SerializedTestCase):
         # Set broadcast and no axis, i.e. broadcasting last dimensions.
         X = np.random.rand(2, 3, 4, 5).astype(np.float32)
         Y = np.random.rand(4, 5).astype(np.float32)
-        args = {"broadcast": 1}
+        args = dict(broadcast=1, allow_broadcast_fastpath=allow_broadcast_fastpath)
         yield X, Y, args, X, Y
 
         # broadcasting intermediate dimensions
         X = np.random.rand(2, 3, 4, 5).astype(np.float32)
         Y = np.random.rand(3, 4).astype(np.float32)
-        args = {"broadcast": 1, "axis": 1}
+        args = dict(broadcast=1, axis=1, allow_broadcast_fastpath=allow_broadcast_fastpath)
         yield X, Y, args, X, Y[:, :, np.newaxis]
 
         # broadcasting the first dimension
         X = np.random.rand(2, 3, 4, 5).astype(np.float32)
         Y = np.random.rand(2).astype(np.float32)
-        args = {"broadcast": 1, "axis": 0}
+        args = dict(broadcast=1, axis=0, allow_broadcast_fastpath=allow_broadcast_fastpath)
         yield X, Y, args, X, Y[:, np.newaxis, np.newaxis, np.newaxis]
 
         # broadcasting with single elem dimensions at both ends
         X = np.random.rand(2, 3, 4, 5).astype(np.float32)
         Y = np.random.rand(1, 4, 1).astype(np.float32)
-        args = {"broadcast": 1, "axis": 1}
+        args = dict(broadcast=1, axis=1, allow_broadcast_fastpath=allow_broadcast_fastpath)
         yield X, Y, args, X, Y
 
-    def __test_binary_op(self, gc, dc, caffe2_op, op_function):
+    def __test_binary_op(
+        self, gc, dc, caffe2_op, op_function, allow_broadcast_fastpath: bool = False
+    ):
         """
         Args:
             caffe2_op: A string. Name of the caffe operator to test.
@@ -64,7 +67,7 @@ class TestElementwiseBroadcast(serial.SerializedTestCase):
             where checkpoint files are are stored.
         """
 
-        for X, Y, op_args, X_out, Y_out in self.__generate_test_cases():
+        for X, Y, op_args, X_out, Y_out in self.__generate_test_cases(allow_broadcast_fastpath):
             op = core.CreateOperator(caffe2_op, ["X", "Y"], "out", **op_args)
             workspace.FeedBlob("X", X)
             workspace.FeedBlob("Y", Y)
@@ -74,20 +77,26 @@ class TestElementwiseBroadcast(serial.SerializedTestCase):
             self.assertDeviceChecks(dc, op, [X, Y], [0])
             self.assertGradientChecks(gc, op, [X, Y], 1, [0])
 
-    @given(**hu.gcs)
+    @given(allow_broadcast_fastpath=st.booleans(), **hu.gcs)
     @settings(deadline=None)
-    def test_broadcast_Add(self, gc, dc):
-        self.__test_binary_op(gc, dc, "Add", operator.add)
+    def test_broadcast_Add(self, allow_broadcast_fastpath: bool, gc, dc):
+        self.__test_binary_op(
+            gc, dc, "Add", operator.add, allow_broadcast_fastpath=allow_broadcast_fastpath
+        )
 
-    @given(**hu.gcs)
+    @given(allow_broadcast_fastpath=st.booleans(), **hu.gcs)
     @settings(deadline=None)
-    def test_broadcast_Mul(self, gc, dc):
-        self.__test_binary_op(gc, dc, "Mul", operator.mul)
+    def test_broadcast_Mul(self, allow_broadcast_fastpath: bool, gc, dc):
+        self.__test_binary_op(
+            gc, dc, "Mul", operator.mul, allow_broadcast_fastpath=allow_broadcast_fastpath
+        )
 
-    @given(**hu.gcs)
+    @given(allow_broadcast_fastpath=st.booleans(), **hu.gcs)
     @settings(deadline=None)
-    def test_broadcast_Sub(self, gc, dc):
-        self.__test_binary_op(gc, dc, "Sub", operator.sub)
+    def test_broadcast_Sub(self, allow_broadcast_fastpath: bool, gc, dc):
+        self.__test_binary_op(
+            gc, dc, "Sub", operator.sub, allow_broadcast_fastpath=allow_broadcast_fastpath
+        )
 
     @given(**hu.gcs)
     @settings(deadline=None)
@@ -194,12 +203,14 @@ class TestElementwiseBroadcast(serial.SerializedTestCase):
                                    output_to_grad="Z",
                                    grad_reference=powt_grad_mixed)
 
-    @given(**hu.gcs)
-    def test_broadcast_scalar(self, gc, dc):
+    @given(allow_broadcast_fastpath=st.booleans(), **hu.gcs)
+    def test_broadcast_scalar(self, allow_broadcast_fastpath: bool, gc, dc):
         # broadcasting constant
         X = np.random.rand(2, 3, 4, 5).astype(np.float32)
         Y = np.random.rand(1).astype(np.float32)
-        op = core.CreateOperator("Add", ["X", "Y"], "out", broadcast=1)
+        op = core.CreateOperator(
+            "Add", ["X", "Y"], "out", broadcast=1, allow_broadcast_fastpath=allow_broadcast_fastpath
+        )
         workspace.FeedBlob("X", X)
         workspace.FeedBlob("Y", Y)
         workspace.RunOperatorOnce(op)
@@ -211,7 +222,9 @@ class TestElementwiseBroadcast(serial.SerializedTestCase):
         # broadcasting scalar
         X = np.random.rand(1).astype(np.float32)
         Y = np.random.rand(1).astype(np.float32).reshape([])
-        op = core.CreateOperator("Add", ["X", "Y"], "out", broadcast=1)
+        op = core.CreateOperator(
+            "Add", ["X", "Y"], "out", broadcast=1, allow_broadcast_fastpath=allow_broadcast_fastpath
+        )
         workspace.FeedBlob("X", X)
         workspace.FeedBlob("Y", Y)
         workspace.RunOperatorOnce(op)
@@ -220,13 +233,14 @@ class TestElementwiseBroadcast(serial.SerializedTestCase):
             out, X + Y)
         self.assertDeviceChecks(dc, op, [X, Y], [0])
 
-    @given(**hu.gcs)
-    def test_semantic_broadcast(self, gc, dc):
+    @given(allow_broadcast_fastpath=st.booleans(), **hu.gcs)
+    def test_semantic_broadcast(self, allow_broadcast_fastpath: bool, gc, dc):
         # NCHW as default
         X = np.random.rand(2, 3, 4, 5).astype(np.float32)
         Y = np.random.rand(3).astype(np.float32)
         op = core.CreateOperator(
-            "Add", ["X", "Y"], "out", broadcast=1, axis_str="C")
+            "Add", ["X", "Y"], "out", broadcast=1, axis_str="C",
+            allow_broadcast_fastpath=allow_broadcast_fastpath)
         workspace.FeedBlob("X", X)
         workspace.FeedBlob("Y", Y)
         workspace.RunOperatorOnce(op)
@@ -239,7 +253,8 @@ class TestElementwiseBroadcast(serial.SerializedTestCase):
         X = np.random.rand(2, 3, 4, 5).astype(np.float32)
         Y = np.random.rand(5).astype(np.float32)
         op = core.CreateOperator(
-            "Add", ["X", "Y"], "out", broadcast=1, axis_str="C", order="NHWC")
+            "Add", ["X", "Y"], "out", broadcast=1, axis_str="C", order="NHWC",
+            allow_broadcast_fastpath=allow_broadcast_fastpath)
         workspace.FeedBlob("X", X)
         workspace.FeedBlob("Y", Y)
         workspace.RunOperatorOnce(op)
