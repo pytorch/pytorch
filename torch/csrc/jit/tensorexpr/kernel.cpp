@@ -175,11 +175,7 @@ c10::optional<at::Device> pickDeviceType(const std::shared_ptr<Graph>& graph) {
       if (auto tt = input->type()->cast<TensorType>()) {
         if (auto inputDevice = tt->device()) {
           TORCH_INTERNAL_ASSERT(
-              !device,
-              buildErrorMessage(
-                  "Device not specified for input to the fuser."));
-          TORCH_INTERNAL_ASSERT(
-              *device == *inputDevice,
+              !device || *device == *inputDevice,
               buildErrorMessage(
                   "Different devices specified for inputs to the fuser."));
           device = inputDevice;
