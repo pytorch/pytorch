@@ -34,7 +34,6 @@ from unittest import skipIf
 import numpy as np
 
 import torch
-import torch.nn as nn
 import torch.utils.data.backward_compatibility
 import torch.utils.data.datapipes as dp
 import torch.utils.data.graph
@@ -53,13 +52,6 @@ from torch.utils.data import (
 from torch.utils.data.datapipes.utils.decoder import (
     basichandlers as decoder_basichandlers,
 )
-
-try:
-    import torchvision.transforms
-    HAS_TORCHVISION = True
-except ImportError:
-    HAS_TORCHVISION = False
-skipIfNoTorchVision = skipIf(not HAS_TORCHVISION, "no torchvision")
 
 try:
     import dill
@@ -177,7 +169,7 @@ class TestIterableDataPipeBasic(TestCase):
 
     def test_listdirfiles_iterable_datapipe(self):
         temp_dir = self.temp_dir.name
-        datapipe = dp.iter.ListDirFiles(temp_dir, '')
+        datapipe = dp.iter.FileLister(temp_dir, '')
 
         count = 0
         for pathname in datapipe:
@@ -186,7 +178,7 @@ class TestIterableDataPipeBasic(TestCase):
         self.assertEqual(count, len(self.temp_files))
 
         count = 0
-        datapipe = dp.iter.ListDirFiles(temp_dir, '', recursive=True)
+        datapipe = dp.iter.FileLister(temp_dir, '', recursive=True)
         for pathname in datapipe:
             count = count + 1
             self.assertTrue((pathname in self.temp_files) or (pathname in self.temp_sub_files))
@@ -195,13 +187,13 @@ class TestIterableDataPipeBasic(TestCase):
     def test_loadfilesfromdisk_iterable_datapipe(self):
         # test import datapipe class directly
         from torch.utils.data.datapipes.iter import (
-            ListDirFiles,
-            LoadFilesFromDisk,
+            FileLister,
+            FileLoader,
         )
 
         temp_dir = self.temp_dir.name
-        datapipe1 = ListDirFiles(temp_dir, '')
-        datapipe2 = LoadFilesFromDisk(datapipe1)
+        datapipe1 = FileLister(temp_dir, '')
+        datapipe2 = FileLoader(datapipe1)
 
         count = 0
         for rec in datapipe2:
@@ -220,9 +212,9 @@ class TestIterableDataPipeBasic(TestCase):
             tar.add(self.temp_files[0])
             tar.add(self.temp_files[1])
             tar.add(self.temp_files[2])
-        datapipe1 = dp.iter.ListDirFiles(temp_dir, '*.tar')
-        datapipe2 = dp.iter.LoadFilesFromDisk(datapipe1)
-        datapipe3 = dp.iter.ReadFilesFromTar(datapipe2)
+        datapipe1 = dp.iter.FileLister(temp_dir, '*.tar')
+        datapipe2 = dp.iter.FileLoader(datapipe1)
+        datapipe3 = dp.iter.TarArchiveReader(datapipe2)
         # read extracted files before reaching the end of the tarfile
         for rec, temp_file in itertools.zip_longest(datapipe3, self.temp_files):
             self.assertTrue(rec is not None and temp_file is not None)
@@ -247,9 +239,9 @@ class TestIterableDataPipeBasic(TestCase):
             myzip.write(self.temp_files[0])
             myzip.write(self.temp_files[1])
             myzip.write(self.temp_files[2])
-        datapipe1 = dp.iter.ListDirFiles(temp_dir, '*.zip')
-        datapipe2 = dp.iter.LoadFilesFromDisk(datapipe1)
-        datapipe3 = dp.iter.ReadFilesFromZip(datapipe2)
+        datapipe1 = dp.iter.FileLister(temp_dir, '*.zip')
+        datapipe2 = dp.iter.FileLoader(datapipe1)
+        datapipe3 = dp.iter.ZipArchiveReader(datapipe2)
         # read extracted files before reaching the end of the zipfile
         for rec, temp_file in itertools.zip_longest(datapipe3, self.temp_files):
             self.assertTrue(rec is not None and temp_file is not None)
@@ -271,8 +263,8 @@ class TestIterableDataPipeBasic(TestCase):
         temp_pngfile_pathname = os.path.join(temp_dir, "test_png.png")
         png_data = np.array([[[1., 0., 0.], [1., 0., 0.]], [[1., 0., 0.], [1., 0., 0.]]], dtype=np.single)
         np.save(temp_pngfile_pathname, png_data)
-        datapipe1 = dp.iter.ListDirFiles(temp_dir, ['*.png', '*.txt'])
-        datapipe2 = dp.iter.LoadFilesFromDisk(datapipe1)
+        datapipe1 = dp.iter.FileLister(temp_dir, ['*.png', '*.txt'])
+        datapipe2 = dp.iter.FileLoader(datapipe1)
 
         def _png_decoder(extension, data):
             if extension != 'png':
@@ -321,10 +313,10 @@ class TestIterableDataPipeBasic(TestCase):
                     f.write('12345abcde')
                 tar.add(file_pathname)
 
-        datapipe1 = dp.iter.ListDirFiles(temp_dir, '*.tar')
-        datapipe2 = dp.iter.LoadFilesFromDisk(datapipe1)
-        datapipe3 = dp.iter.ReadFilesFromTar(datapipe2)
-        datapipe4 = dp.iter.GroupByKey(datapipe3, group_size=2)
+        datapipe1 = dp.iter.FileLister(temp_dir, '*.tar')
+        datapipe2 = dp.iter.FileLoader(datapipe1)
+        datapipe3 = dp.iter.TarArchiveReader(datapipe2)
+        datapipe4 = dp.iter.ByKeyGrouper(datapipe3, group_size=2)
 
         expected_result = [("a.png", "a.json"), ("c.png", "c.json"), ("b.png", "b.json"), ("d.png", "d.json"), (
             "f.png", "f.json"), ("g.png", "g.json"), ("e.png", "e.json"), ("h.json", "h.txt")]
@@ -447,13 +439,14 @@ class TestIterableDataPipeHttp(TestCase):
             create_temp_files_for_serving(tmpdir, test_file_count,
                                           test_file_size, file_url_template)
 
-            datapipe_dir_f = dp.iter.ListDirFiles(tmpdir, '*_list')
-            datapipe_f_lines = dp.iter.ReadLinesFromFile(datapipe_dir_f)
+            datapipe_dir_f = dp.iter.FileLister(tmpdir, '*_list')
+            datapipe_stream = dp.iter.FileLoader(datapipe_dir_f)
+            datapipe_f_lines = dp.iter.LineReader(datapipe_stream)
             datapipe_line_url: IterDataPipe[str] = \
-                dp.iter.Map(datapipe_f_lines, _get_data_from_tuple_fn, (1,))
+                dp.iter.Mapper(datapipe_f_lines, _get_data_from_tuple_fn, (1,))
             datapipe_http = dp.iter.HttpReader(datapipe_line_url,
                                                timeout=timeout)
-            datapipe_tob = dp.iter.ToBytes(datapipe_http, chunk=chunk)
+            datapipe_tob = dp.iter.StreamReader(datapipe_http, chunk=chunk)
 
             for (url, data) in datapipe_tob:
                 self.assertGreater(len(url), 0)
@@ -539,18 +532,18 @@ class TestFunctionalIterDataPipe(TestCase):
     def _test_picklable(self):
         arr = range(10)
         picklable_datapipes: List[Tuple[Type[IterDataPipe], IterDataPipe, Tuple, Dict[str, Any]]] = [
-            (dp.iter.Map, IDP(arr), (), {}),
-            (dp.iter.Map, IDP(arr), (_fake_fn, (0, ), {'test': True}), {}),
-            (dp.iter.Collate, IDP(arr), (), {}),
-            (dp.iter.Collate, IDP(arr), (_fake_fn, (0, ), {'test': True}), {}),
+            (dp.iter.Mapper, IDP(arr), (), {}),
+            (dp.iter.Mapper, IDP(arr), (_fake_fn, (0, ), {'test': True}), {}),
+            (dp.iter.Collator, IDP(arr), (), {}),
+            (dp.iter.Collator, IDP(arr), (_fake_fn, (0, ), {'test': True}), {}),
             (dp.iter.Filter, IDP(arr), (_fake_filter_fn, (0, ), {'test': True}), {}),
         ]
         for dpipe, input_dp, dp_args, dp_kwargs in picklable_datapipes:
             p = pickle.dumps(dpipe(input_dp, *dp_args, **dp_kwargs))  # type: ignore[call-arg]
 
         unpicklable_datapipes: List[Tuple[Type[IterDataPipe], IterDataPipe, Tuple, Dict[str, Any]]] = [
-            (dp.iter.Map, IDP(arr), (lambda x: x, ), {}),
-            (dp.iter.Collate, IDP(arr), (lambda x: x, ), {}),
+            (dp.iter.Mapper, IDP(arr), (lambda x: x, ), {}),
+            (dp.iter.Collator, IDP(arr), (lambda x: x, ), {}),
             (dp.iter.Filter, IDP(arr), (lambda x: x >= 5, ), {}),
         ]
         for dpipe, input_dp, dp_args, dp_kwargs in unpicklable_datapipes:
@@ -566,10 +559,10 @@ class TestFunctionalIterDataPipe(TestCase):
         input_dp2 = IDP(range(5))
 
         with self.assertRaisesRegex(ValueError, r"Expected at least one DataPipe"):
-            dp.iter.Concat()
+            dp.iter.Concater()
 
         with self.assertRaisesRegex(TypeError, r"Expected all inputs to be `IterDataPipe`"):
-            dp.iter.Concat(input_dp1, ())  # type: ignore[arg-type]
+            dp.iter.Concater(input_dp1, ())  # type: ignore[arg-type]
 
         concat_dp = input_dp1.concat(input_dp2)
         self.assertEqual(len(concat_dp), 15)
@@ -590,8 +583,12 @@ class TestFunctionalIterDataPipe(TestCase):
     def test_fork_datapipe(self):
         input_dp = IDP(range(10))
 
-        # Test Case: one child DataPipe yields all value first
+        # Test Case: making sure all child DataPipe shares the same reference
         dp1, dp2, dp3 = input_dp.fork(num_instances=3)
+        self.assertTrue(all(n1 is n2 for n1, n2 in zip(dp1, dp2)))
+        self.assertTrue(all(n1 is n3 for n1, n3 in zip(dp1, dp3)))
+
+        # Test Case: one child DataPipe yields all value at a time
         output1, output2, output3 = list(dp1), list(dp2), list(dp3)
         self.assertEqual(list(range(10)), output1)
         self.assertEqual(list(range(10)), output2)
@@ -606,9 +603,12 @@ class TestFunctionalIterDataPipe(TestCase):
 
         # Test Case: one child DataPipe yields all value first, but buffer_size = 5 being too small
         dp1, dp2 = input_dp.fork(num_instances=2, buffer_size=5)
-        output1, output2 = [], []
+        output1 = []
+        it1 = iter(dp1)
+        for _ in range(5):
+            next(it1)
         with self.assertRaises(BufferError):
-            list(dp1)
+            next(it1)
 
         # Test Case: two child DataPipes yield value together with buffer size 1
         dp1, dp2 = input_dp.fork(num_instances=2, buffer_size=1)
@@ -620,12 +620,10 @@ class TestFunctionalIterDataPipe(TestCase):
         # Test Case: make sure logic related to slowest_ptr is working properly
         dp1, dp2, dp3 = input_dp.fork(num_instances=3)
         output1, output2 , output3 = [], [], []
-        i = 0
-        for n1, n2 in zip(dp1, dp2):
+        for i, (n1, n2) in enumerate(zip(dp1, dp2)):
             output1.append(n1)
             output2.append(n2)
-            i += 1
-            if i == 5:  # yield all of dp3 when halfway through dp1, dp2
+            if i == 4:  # yield all of dp3 when halfway through dp1, dp2
                 output3 = list(dp3)
                 break
         self.assertEqual(list(range(5)), output1)
@@ -636,11 +634,9 @@ class TestFunctionalIterDataPipe(TestCase):
         dp1, dp2 = input_dp.fork(num_instances=2)
         i1, i2 = iter(dp1), iter(dp2)
         output2 = []
-        i = 0
-        for n2 in i2:
+        for i, n2 in enumerate(i2):
             output2.append(n2)
-            i += 1
-            if i == 5:
+            if i == 4:
                 i1 = iter(dp1)  # Doesn't reset because i1 hasn't been read
         self.assertEqual(list(range(10)), output2)
 
@@ -648,12 +644,10 @@ class TestFunctionalIterDataPipe(TestCase):
         dp1, dp2 = input_dp.fork(num_instances=2)
         i1, i2 = iter(dp1), iter(dp2)
         output1, output2 = [], []
-        i = 0
-        for n1, n2 in zip(i1, i2):
+        for i, (n1, n2) in enumerate(zip(i1, i2)):
             output1.append(n1)
             output2.append(n2)
-            i += 1
-            if i == 5:
+            if i == 4:
                 i1 = iter(dp1)  # Reset both all child DataPipe
         self.assertEqual(list(range(5)) + list(range(10)), output1)
         self.assertEqual(list(range(5)) + list(range(10)), output2)
@@ -665,17 +659,23 @@ class TestFunctionalIterDataPipe(TestCase):
         self.assertEqual(list(range(10)), output2)
         output1, output2 = list(dp1), list(dp2)
         self.assertEqual(list(range(10)), output1)  # Resets even though dp3 has not been read
-        i = 0
         output3 = []
-        for n3 in dp3:
+        for i, n3 in enumerate(dp3):
             output3.append(n3)
-            i += 1
-            if i == 5:
+            if i == 4:
                 output1 = list(dp1)  # Resets even though dp3 is only partially read
                 self.assertEqual(list(range(5)), output3)
                 self.assertEqual(list(range(10)), output1)
                 break
         self.assertEqual(list(range(10)), list(dp3))  # dp3 has to read from the start again
+
+        # Test Case: Checking for warning being raised
+        with warnings.catch_warnings(record=True) as wa:
+            dp1, dp2 = input_dp.fork(num_instances=2)
+            output1 = list(dp1)
+            output1 = list(dp1)
+            self.assertEqual(len(wa), 1)
+            self.assertRegex(str(wa[0].message), r"Some child DataPipes are not exhausted")
 
 
     def test_demux_datapipe(self):
@@ -695,9 +695,10 @@ class TestFunctionalIterDataPipe(TestCase):
         self.assertEqual([(i, i + 1) for i in range(0, 10, 2)], output)
 
         # Test Case: values of the same classification are lumped together, and buffer_size = 3 being too small
-        dp1, dp2 = input_dp.demux(num_instances=2, classifier_fn=lambda x: 0 if x >= 5 else 1, buffer_size=3)
+        dp1, dp2 = input_dp.demux(num_instances=2, classifier_fn=lambda x: 0 if x >= 5 else 1, buffer_size=4)
+        it1 = iter(dp1)
         with self.assertRaises(BufferError):
-            output1 = list(dp1)
+            next(it1)  # Buffer raises because first 5 elements all belong to the a different child
 
         # Test Case: values of the same classification are lumped together, and buffer_size = 5 is just enough
         dp1, dp2 = input_dp.demux(num_instances=2, classifier_fn=lambda x: 0 if x >= 5 else 1, buffer_size=5)
@@ -707,19 +708,19 @@ class TestFunctionalIterDataPipe(TestCase):
 
         # Test Case: classifer returns a value outside of [0, num_instance - 1]
         dp = input_dp.demux(num_instances=1, classifier_fn=lambda x: x % 2)
+        it = iter(dp[0])
         with self.assertRaises(ValueError):
-            for n in dp[0]:
-                n
+            next(it)
+            next(it)
 
         # Test Case: DataPipe doesn't reset when it has not been read
         dp1, dp2 = input_dp.demux(num_instances=2, classifier_fn=lambda x: x % 2)
         i1 = iter(dp1)
         output2 = []
         i = 0
-        for n2 in dp2:
+        for i, n2 in enumerate(dp2):
             output2.append(n2)
-            i += 1
-            if i == 5:
+            if i == 4:
                 i1 = iter(dp1)
         self.assertEqual(list(range(1, 10, 2)), output2)
 
@@ -731,7 +732,10 @@ class TestFunctionalIterDataPipe(TestCase):
             output2.append(n2)
             if n1 == 4:
                 break
-        i1 = iter(dp1)  # Reset all child DataPipes
+        with warnings.catch_warnings(record=True) as wa:
+            i1 = iter(dp1)  # Reset all child DataPipes
+            self.assertEqual(len(wa), 1)
+            self.assertRegex(str(wa[0].message), r"Some child DataPipes are not exhausted")
         for n1, n2 in zip(dp1, dp2):
             output1.append(n1)
             output2.append(n2)
@@ -742,16 +746,19 @@ class TestFunctionalIterDataPipe(TestCase):
         dp1, dp2 = input_dp.demux(num_instances=2, classifier_fn=lambda x: x % 2)
         output1 = list(dp1)
         self.assertEqual(list(range(0, 10, 2)), output1)
-        output1 = list(dp1)
-        self.assertEqual(list(range(0, 10, 2)), output1)  # Reset even when dp2 is not read
-        i = 0
+        with warnings.catch_warnings(record=True) as wa:
+            self.assertEqual(list(range(0, 10, 2)), list(dp1))  # Reset even when dp2 is not read
+            self.assertEqual(len(wa), 1)
+            self.assertRegex(str(wa[0].message), r"Some child DataPipes are not exhausted")
         output2 = []
-        for n2 in dp2:
+        for i, n2 in enumerate(dp2):
             output2.append(n2)
-            i += 1
-            if i == 2:
+            if i == 1:
                 self.assertEqual(list(range(1, 5, 2)), output2)
-                self.assertEqual(list(range(0, 10, 2)), list(dp1))  # Can reset even when dp2 is partially read
+                with warnings.catch_warnings(record=True) as wa:
+                    self.assertEqual(list(range(0, 10, 2)), list(dp1))  # Can reset even when dp2 is partially read
+                    self.assertEqual(len(wa), 1)
+                    self.assertRegex(str(wa[0].message), r"Some child DataPipes are not exhausted")
                 break
         output2 = list(dp2)  # output2 has to read from beginning again
         self.assertEqual(list(range(1, 10, 2)), output2)
@@ -1083,59 +1090,17 @@ class TestFunctionalIterDataPipe(TestCase):
         with self.assertRaisesRegex(TypeError, r"instance doesn't have valid length$"):
             len(shuffle_dp_nl)
 
-    @skipIfNoTorchVision
-    def test_transforms_datapipe(self):
-        torch.set_default_dtype(torch.float)
-        # A sequence of numpy random numbers representing 3-channel images
-        w = h = 32
-        inputs = [np.random.randint(0, 255, (h, w, 3), dtype=np.uint8) for i in range(10)]
-        tensor_inputs = [torch.tensor(x, dtype=torch.float).permute(2, 0, 1) / 255. for x in inputs]
-
-        input_dp = IDP(inputs)
-        # Raise TypeError for python function
-        with self.assertRaisesRegex(TypeError, r"`transforms` are required to be"):
-            input_dp.legacy_transforms(_fake_fn)
-
-        # transforms.Compose of several transforms
-        transforms = torchvision.transforms.Compose([
-            torchvision.transforms.ToTensor(),
-            torchvision.transforms.Pad(1, fill=1, padding_mode='constant'),
-        ])
-        tsfm_dp = input_dp.legacy_transforms(transforms)
-        self.assertEqual(len(tsfm_dp), len(input_dp))
-        for tsfm_data, input_data in zip(tsfm_dp, tensor_inputs):
-            self.assertEqual(tsfm_data[:, 1:(h + 1), 1:(w + 1)], input_data)
-
-        # nn.Sequential of several transforms (required to be instances of nn.Module)
-        input_dp = IDP(tensor_inputs)
-        transforms = nn.Sequential(
-            torchvision.transforms.Pad(1, fill=1, padding_mode='constant'),
-        )
-        tsfm_dp = input_dp.legacy_transforms(transforms)
-        self.assertEqual(len(tsfm_dp), len(input_dp))
-        for tsfm_data, input_data in zip(tsfm_dp, tensor_inputs):
-            self.assertEqual(tsfm_data[:, 1:(h + 1), 1:(w + 1)], input_data)
-
-        # Single transform
-        input_dp = IDP_NoLen(inputs)  # type: ignore[assignment]
-        transform = torchvision.transforms.ToTensor()
-        tsfm_dp = input_dp.legacy_transforms(transform)
-        with self.assertRaisesRegex(TypeError, r"instance doesn't have valid length$"):
-            len(tsfm_dp)
-        for tsfm_data, input_data in zip(tsfm_dp, tensor_inputs):
-            self.assertEqual(tsfm_data, input_data)
-
     def test_zip_datapipe(self):
         with self.assertRaises(TypeError):
-            dp.iter.Zip(IDP(range(10)), list(range(10)))  # type: ignore[arg-type]
+            dp.iter.Zipper(IDP(range(10)), list(range(10)))  # type: ignore[arg-type]
 
-        zipped_dp = dp.iter.Zip(IDP(range(10)), IDP_NoLen(range(5)))  # type: ignore[var-annotated]
+        zipped_dp = dp.iter.Zipper(IDP(range(10)), IDP_NoLen(range(5)))  # type: ignore[var-annotated]
         with self.assertRaisesRegex(TypeError, r"instance doesn't have valid length$"):
             len(zipped_dp)
         exp = list((i, i) for i in range(5))
         self.assertEqual(list(zipped_dp), exp)
 
-        zipped_dp = dp.iter.Zip(IDP(range(10)), IDP(range(5)))
+        zipped_dp = dp.iter.Zipper(IDP(range(10)), IDP(range(5)))
         self.assertEqual(len(zipped_dp), 5)
         self.assertEqual(list(zipped_dp), exp)
         # Reset
@@ -1149,8 +1114,8 @@ class TestFunctionalMapDataPipe(TestCase):
         picklable_datapipes: List[
             Tuple[Type[MapDataPipe], MapDataPipe, Tuple, Dict[str, Any]]
         ] = [
-            (dp.map.Map, MDP(arr), (), {}),
-            (dp.map.Map, MDP(arr), (_fake_fn, (0,), {'test': True}), {}),
+            (dp.map.Mapper, MDP(arr), (), {}),
+            (dp.map.Mapper, MDP(arr), (_fake_fn, (0,), {'test': True}), {}),
         ]
         for dpipe, input_dp, dp_args, dp_kwargs in picklable_datapipes:
             p = pickle.dumps(dpipe(input_dp, *dp_args, **dp_kwargs))  # type: ignore[call-arg]
@@ -1158,7 +1123,7 @@ class TestFunctionalMapDataPipe(TestCase):
         unpicklable_datapipes: List[
             Tuple[Type[MapDataPipe], MapDataPipe, Tuple, Dict[str, Any]]
         ] = [
-            (dp.map.Map, MDP(arr), (lambda x: x,), {}),
+            (dp.map.Mapper, MDP(arr), (lambda x: x,), {}),
         ]
         for dpipe, input_dp, dp_args, dp_kwargs in unpicklable_datapipes:
             with warnings.catch_warnings(record=True) as wa:
@@ -1175,10 +1140,10 @@ class TestFunctionalMapDataPipe(TestCase):
         input_dp2 = MDP(range(5))
 
         with self.assertRaisesRegex(ValueError, r"Expected at least one DataPipe"):
-            dp.map.Concat()
+            dp.map.Concater()
 
         with self.assertRaisesRegex(TypeError, r"Expected all inputs to be `MapDataPipe`"):
-            dp.map.Concat(input_dp1, ())  # type: ignore[arg-type]
+            dp.map.Concater(input_dp1, ())  # type: ignore[arg-type]
 
         concat_dp = input_dp1.concat(input_dp2)
         self.assertEqual(len(concat_dp), 15)
