@@ -14,7 +14,6 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 TARGET_DET_LIST = [
     "distributions/test_distributions",
     "test_nn",
-    "test_autograd",
     "test_cpp_extensions_jit",
     "test_jit_legacy",
     "test_dataloader",
@@ -181,7 +180,6 @@ def get_dep_modules(test: str) -> Set[str]:
 
     # HACK: some platforms default to ascii, so we can't just run_script :(
     finder = modulefinder.ModuleFinder(
-        path=sys.path + [os.fspath(REPO_ROOT)],
         # Ideally exclude all third party modules, to speed up calculation.
         excludes=[
             "scipy",
