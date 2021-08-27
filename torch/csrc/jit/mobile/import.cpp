@@ -298,6 +298,44 @@ TypePtr BytecodeDeserializer::resolveTypeName(const c10::QualifiedName& qn) {
   return resolveTypeNameMobile(qn, compilation_unit_);
 }
 
+namespace {
+#define COUNT_OPCODE(_, _a) 1+
+constexpr size_t numOpcodes =
+    FORALL_OPCODES(COUNT_OPCODE)
+  0;
+#undef COUNT_OPCODE
+
+// Pickled strings are memoized, so we can cache a mapping from
+// pointers to parsed OpCodes to speed up parsing.
+class OpCodeCache {
+ private:
+  // We store as void* to emphasize that we care only about the
+  // address and should not be dereferencing these pointers.
+  std::array<const void*, numOpcodes> keys_;
+  std::array<OpCode, numOpcodes> values_;
+  size_t usedEntries_ = 0;
+ public:
+  OpCodeCache() {
+    memset(keys_.data(), 0, keys_.size() * sizeof(keys_[0]));
+  }
+
+  OpCode parse(const c10::ivalue::ConstantString& s) {
+    const auto endIt = keys_.begin() + usedEntries_;
+    auto it = std::find_if(keys_.begin(), endIt, [&s](const void* k) {
+      return k == &s;
+    });
+    if (it == endIt) {
+      OpCode result = parseOpCode(s.string().c_str());
+      if (usedEntries_ < numOpcodes) {
+        keys_[usedEntries_] = &s;
+        values_[usedEntries_++] = result;
+      }
+      return result;
+    }
+    return values_[it - keys_.begin()];
+  }
+};
+}
 void BytecodeDeserializer::parseMethods(
     c10::ivalue::TupleElements&& vals,
     c10::optional<c10::ivalue::TupleElements>&& debug_handles,
@@ -397,6 +435,7 @@ void BytecodeDeserializer::parseMethods(
           "The numbers of instructions and debug handles strings do not match.");
     }
 
+    OpCodeCache opCodeCache;
     for (const auto j : c10::irange(ins_list.size())) {
       // Can't remove this, need to keep Tuple alive!
       auto ins_tuple = std::move(ins_list[j]).toTuple();
@@ -405,7 +444,7 @@ void BytecodeDeserializer::parseMethods(
           ins_item.size() == 3,
           "There should be three parts in an instruction. The function name is ",
           function_name);
-      OpCode op_code = parseOpCode(ins_item[0].toString()->string().c_str());
+      OpCode op_code = opCodeCache.parse(*ins_item[0].toString());
       int X = ins_item[1].toInt();
       int N = ins_item[2].toInt();
       if (debug_handles) {
