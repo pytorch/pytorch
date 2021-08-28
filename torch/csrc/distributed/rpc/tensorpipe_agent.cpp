@@ -746,8 +746,8 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
 c10::intrusive_ptr<JitFuture> TensorPipeAgent::send(
     const WorkerInfo& toWorkerInfo,
     c10::intrusive_ptr<Message> requestMessage,
-    const float rpcTimeoutSeconds,
-    const DeviceMap& deviceMap) {
+    const DeviceMap& deviceMap,
+    const float rpcTimeoutSeconds) {
   TORCH_CHECK(
       requestMessage->isRequest(),
       "TensorPipeAgent::send(..) is only for sending requests.");

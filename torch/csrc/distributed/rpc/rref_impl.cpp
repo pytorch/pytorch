@@ -126,7 +126,7 @@ const ForkId& UserRRef::forkId() const {
   return forkId_;
 }
 
-IValue UserRRef::toHere(const float timeoutSeconds) const {
+IValue UserRRef::toHere(const float timeoutSeconds, const DeviceMap& deviceMap) const {
   TORCH_CHECK(
       !getTimedOut(),
       "RRef creation via rpc.remote() timed out, and it "
@@ -175,6 +175,7 @@ IValue UserRRef::toHere(const float timeoutSeconds) const {
       *agent,
       agent->getWorkerInfo(ownerId_),
       std::move(msgToSend),
+      deviceMap,
       true /* forceGradRecording */,
       timeoutSeconds,
       true /* forceDisableProfiling */);

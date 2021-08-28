@@ -115,6 +115,7 @@ c10::intrusive_ptr<JitFuture> sendPythonRemoteCall(
     SerializedPyObj serializedPyObj,
     const IValue& rrefId,
     const IValue& forkId,
+    const DeviceMap& deviceMap,
     const float rpcTimeoutSeconds,
     const bool isAsyncExecution) {
   auto pythonRemoteCall = std::make_unique<PythonRemoteCall>(
@@ -127,6 +128,7 @@ c10::intrusive_ptr<JitFuture> sendPythonRemoteCall(
       *agent,
       dst,
       std::move(*pythonRemoteCall).toMessage(),
+      deviceMap,
       true /*forceGradRecording*/,
       rpcTimeoutSeconds);
 }
@@ -200,6 +202,7 @@ c10::intrusive_ptr<JitFuture> pyRpcBuiltin(
     const std::string& opName,
     const py::args& args,
     const py::kwargs& kwargs,
+    const DeviceMap& deviceMap,
     const float rpcTimeoutSeconds) {
   DCHECK(PyGILState_Check());
   Stack stack;
@@ -212,6 +215,7 @@ c10::intrusive_ptr<JitFuture> pyRpcBuiltin(
       *agent,
       dst,
       std::move(*scriptCall).toMessage(),
+      deviceMap,
       false,
       rpcTimeoutSeconds));
 }
@@ -220,6 +224,7 @@ c10::intrusive_ptr<JitFuture> pyRpcPythonUdf(
     const WorkerInfo& dst,
     std::string& pickledPythonUDF,
     std::vector<torch::Tensor>& tensors,
+    const DeviceMap& deviceMap,
     const float rpcTimeoutSeconds,
     const bool isAsyncExecution) {
   DCHECK(!PyGILState_Check());
@@ -233,6 +238,7 @@ c10::intrusive_ptr<JitFuture> pyRpcPythonUdf(
       *agent,
       dst,
       std::move(*pythonCall).toMessage(),
+      deviceMap,
       true /*forceGradRecording*/,
       rpcTimeoutSeconds));
 }
@@ -242,6 +248,7 @@ c10::intrusive_ptr<JitFuture> pyRpcTorchscript(
     const std::string& qualifiedNameStr,
     const py::tuple& argsTuple,
     const py::dict& kwargsDict,
+    const DeviceMap& deviceMap,
     const float rpcTimeoutSeconds,
     const bool isAsyncExecution) {
   // No need to catch exception here, if function can not be found,
@@ -270,6 +277,7 @@ c10::intrusive_ptr<JitFuture> pyRpcTorchscript(
       qualifiedName,
       functionSchema,
       stack,
+      deviceMap,
       rpcTimeoutSeconds,
       isAsyncExecution);
   return fut;
@@ -278,6 +286,7 @@ c10::intrusive_ptr<JitFuture> pyRpcTorchscript(
 PyRRef pyRemoteBuiltin(
     const WorkerInfo& dst,
     const std::string& opName,
+    const DeviceMap& deviceMap,
     const float rpcTimeoutSeconds,
     const py::args& args,
     const py::kwargs& kwargs) {
@@ -301,6 +310,7 @@ PyRRef pyRemoteBuiltin(
         *agent,
         dst,
         std::move(*scriptRemoteCall).toMessage(),
+        deviceMap,
         /*forceGradRecord */ false,
         /* timeout */ rpcTimeoutSeconds);
 
@@ -322,6 +332,7 @@ PyRRef pyRemoteBuiltin(
         *agent,
         dst,
         std::move(*scriptRemoteCall).toMessage(),
+        deviceMap,
         /* forceGradRecord */ false,
         /* timeout */ rpcTimeoutSeconds);
 
@@ -340,6 +351,7 @@ PyRRef pyRemotePythonUdf(
     const WorkerInfo& dst,
     std::string& pickledPythonUDF,
     std::vector<torch::Tensor>& tensors,
+    const DeviceMap& deviceMap,
     const float rpcTimeoutSeconds,
     const bool isAsyncExecution) {
   DCHECK(!PyGILState_Check());
@@ -354,6 +366,7 @@ PyRRef pyRemotePythonUdf(
         std::move(serializedPyObj),
         userRRef->rrefId().toIValue(),
         userRRef->forkId().toIValue(),
+        deviceMap,
         rpcTimeoutSeconds,
         isAsyncExecution);
 
@@ -374,6 +387,7 @@ PyRRef pyRemotePythonUdf(
         std::move(serializedPyObj),
         ownerRRef->rrefId().toIValue(),
         ownerRRef->rrefId().toIValue(),
+        deviceMap,
         rpcTimeoutSeconds,
         isAsyncExecution);
 
@@ -394,6 +408,7 @@ PyRRef pyRemotePythonUdf(
 PyRRef pyRemoteTorchscript(
     const std::string& dstWorkerName,
     const std::string& qualifiedNameStr,
+    const DeviceMap& deviceMap,
     const float rpcTimeoutSeconds,
     const bool isAsyncExecution,
     const py::args& args,
@@ -417,6 +432,7 @@ PyRRef pyRemoteTorchscript(
       qualifiedName,
       functionSchema,
       stack,
+      deviceMap,
       rpcTimeoutSeconds,
       isAsyncExecution);
   return PyRRef(rrefPtr);

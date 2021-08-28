@@ -180,14 +180,14 @@ std::string PyRRef::ownerName() const {
   return rref_->ownerName();
 }
 
-py::object PyRRef::toHere(const float timeoutSeconds) const {
+py::object PyRRef::toHere(const float timeoutSeconds, const DeviceMap& deviceMap) const {
   if (rref_->isOwner()) {
-    return localValue();
+    return localValue(); // TODO(pbelevich) should local value support deviceMap?
   } else {
     // toHere() calls python_rpc_handler which acquires GIL when UserRRef holds
     // a python object
     IValue value = c10::static_intrusive_pointer_cast<UserRRef>(rref_)->toHere(
-        timeoutSeconds);
+        timeoutSeconds, deviceMap);
 
     if (rref_->isPyObj()) {
       // python_rpc_handler deserialization will acquires GIL.
@@ -355,7 +355,7 @@ void PyRRef::backward(
     rpcAgent
         ->send(
             rpcAgent->getWorkerInfo(rref->owner()),
-            std::move(rrefBackwardReq).toMessage())
+            std::move(rrefBackwardReq).toMessage(), {})
         ->waitAndThrow();
   }
 }

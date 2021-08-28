@@ -251,6 +251,7 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               "to_here",
               &PyRRef::toHere,
               py::arg("timeout") = py::cast(kUnsetRpcTimeout),
+              py::arg("device_map") = DeviceMap(),
               py::call_guard<py::gil_scoped_release>(),
               R"(
                   Blocking call that copies the value of the RRef from the owner
@@ -681,11 +682,17 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
       "_invoke_rpc_builtin",
       [](const WorkerInfo& dst,
          const std::string& opName,
+         const DeviceMap& deviceMap,
          const float rpcTimeoutSeconds,
          const py::args& args,
          const py::kwargs& kwargs) {
-        return std::make_shared<jit::PythonFutureWrapper>(
-            pyRpcBuiltin(dst, opName, args, kwargs, rpcTimeoutSeconds));
+        return std::make_shared<jit::PythonFutureWrapper>(pyRpcBuiltin(
+            dst,
+            opName,
+            args,
+            kwargs,
+            deviceMap,
+            rpcTimeoutSeconds));
       },
       py::call_guard<py::gil_scoped_acquire>());
 
@@ -694,12 +701,14 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
       [](const WorkerInfo& dst,
          std::string& pickledPythonUDF,
          std::vector<torch::Tensor>& tensors,
+         const DeviceMap& deviceMap,
          const float rpcTimeoutSeconds,
          const bool isAsyncExecution) {
         return std::make_shared<jit::PythonFutureWrapper>(pyRpcPythonUdf(
             dst,
             pickledPythonUDF,
             tensors,
+            deviceMap,
             rpcTimeoutSeconds,
             isAsyncExecution));
       },
@@ -711,6 +720,7 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
          const std::string& qualifiedNameStr,
          const py::tuple& argsTuple,
          const py::dict& kwargsDict,
+         const DeviceMap& deviceMap,
          const float rpcTimeoutSeconds,
          const bool isAsyncExecution) {
         return std::make_shared<jit::PythonFutureWrapper>(pyRpcTorchscript(
@@ -718,6 +728,7 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
             qualifiedNameStr,
             argsTuple,
             kwargsDict,
+            deviceMap,
             rpcTimeoutSeconds,
             isAsyncExecution));
       },

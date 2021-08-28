@@ -146,15 +146,19 @@ c10::intrusive_ptr<JitFuture> sendMessageWithAutograd(
     RpcAgent& agent,
     const WorkerInfo& dst,
     c10::intrusive_ptr<torch::distributed::rpc::Message> wrappedRpcMsg,
+    const rpc::DeviceMap& deviceMap,
     bool forceGradRecording,
     const float rpcTimeoutSeconds,
     bool forceDisableProfiling) {
+  auto agentDeviceMap = agent.getDeviceMap(dst);
+  auto mergedMap = deviceMap;
+  mergedMap.insert(agentDeviceMap.begin(), agentDeviceMap.end());
   auto msg = getMessageWithAutograd(
       dst.id_,
       std::move(wrappedRpcMsg),
       MessageType::FORWARD_AUTOGRAD_REQ,
       forceGradRecording,
-      agent.getDeviceMap(dst));
+      mergedMap);
 
   c10::intrusive_ptr<JitFuture> fut;
   // If profiler is enabled, wrap this message with profiling metadata that will
@@ -166,9 +170,9 @@ c10::intrusive_ptr<JitFuture> sendMessageWithAutograd(
         rpc::MessageType::RUN_WITH_PROFILING_REQ,
         // NOLINTNEXTLINE(performance-move-const-arg)
         std::move(profilerConfig));
-    fut = agent.send(dst, std::move(msgWithProfiling), rpcTimeoutSeconds);
+    fut = agent.send(dst, std::move(msgWithProfiling), mergedMap, rpcTimeoutSeconds);
   } else {
-    fut = agent.send(dst, std::move(msg), rpcTimeoutSeconds);
+    fut = agent.send(dst, std::move(msg), mergedMap, rpcTimeoutSeconds);
   }
 
   return fut;
