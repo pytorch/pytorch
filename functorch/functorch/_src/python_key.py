@@ -55,13 +55,14 @@ class PythonTensor(torch.Tensor):
 
         def wrap_with_proxy(e, idx):
             return PythonTensor(e, proxy_out[idx]) if type(e) == torch.Tensor else e
-
         if isinstance(real_out, tuple):
             return tuple([wrap_with_proxy(e, idx) for idx, e in enumerate(real_out)])
         elif isinstance(real_out, list):
             return list([wrap_with_proxy(e, idx) for idx, e in enumerate(real_out)])
+        elif isinstance(real_out, torch.Tensor):
+            return PythonTensor(real_out, proxy_out)
         else:
-            return PythonTensor(real_out, proxy_out) if type(real_out) ==  torch.Tensor else real_out
+            return real_out
 
 class PythonKeyTracer(Tracer):
     def __init__(self):
@@ -79,8 +80,31 @@ class PythonKeyTracer(Tracer):
                         proxy = self.create_proxy('get_attr', n, (), {})
                         parameter_proxy_cache[n] = PythonTensor(attr_val, proxy)
                     return parameter_proxy_cache[n]
-            return attr_val.data
+            return attr_val
         return attr_val
+
+    # We need to do this so that parameters entering the `make_fx` context have
+    # a reference to them (and also have requires_grad set on them correctly
+    # I'm not actually sure if this is the right thing to do ...
+    def create_arg(self, a: Any):
+        if isinstance(a, torch.nn.Parameter):
+            for n, p in self.root.named_parameters():
+                if a is p:
+                    return self.create_node('get_attr', n, (), {})
+            qualname : Optional[str] = None
+
+            if not qualname:
+                i = 0
+                while True:
+                    qualname = f'_param_constant{i}'
+                    if not hasattr(self.root, qualname):
+                        break
+                    i += 1
+                setattr(self.root, qualname, a)
+
+            return self.create_node('get_attr', qualname, (), {})
+        return super().create_arg(a)
+
 
 def pythonkey_trace(root : Union[torch.nn.Module, Callable], concrete_args: Optional[Dict[str, Any]] = None) -> GraphModule:
     tracer = PythonKeyTracer()

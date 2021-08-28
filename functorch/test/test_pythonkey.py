@@ -39,6 +39,16 @@ from common_utils import (
     skipOps,
 )
 
+USE_TORCHVISION = False
+try:
+    import torchvision
+    USE_TORCHVISION = True
+except ImportError:
+    warnings.warn("Couldn't import torchvision. Some of our tests use it, try "
+                  "to install it with commands from pytorch.org, post-fixed with "
+                  "`--no-deps` to avoid overwriting the pytorch installation",
+                  UserWarning)
+
 # NB: numpy is a testing dependency!
 import numpy as np
 
@@ -155,6 +165,23 @@ class TestPythonKey(TestCase):
         inp = ({'a': torch.randn(3), 'b': torch.randn(3)},)
         jit_f = nnc_jit(f)
         self.assertEqual(jit_f(*inp), f(*inp))
+
+    @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
+    def test_resnet18_backward_trace(self, device):
+        mod = torchvision.models.resnet18()
+        def f(x):
+            out = mod(x)
+            out.sum().backward()
+            return [a.grad for a in mod.parameters()]
+
+        inp = torch.randn(3, 3, 250, 250, requires_grad=True)
+        grads = f(inp)
+
+        mod.zero_grad()
+        mod(inp).sum().backward()
+        grads2 = [a.grad for a in mod.parameters()]
+        self.assertEqual(grads, grads2)
+
 
 class TestPythonKeyOperatorsOpInfo(TestCase):
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
