@@ -120,12 +120,15 @@ def make_graphed_callables(callables, sample_args):
 
     .. warning::
         :class:`torch.nn.Module`\s passed to :func:`~torch.cuda.make_graphed_callables` must not have module hooks
-        registered on them at the time they are passed. However, registering hooks on modules *after* passing them through
-        :func:`~torch.cuda.make_graphed_callables` is allowed.
+        registered on them at the time they are passed. However, registering hooks on modules *after* passing them
+        through :func:`~torch.cuda.make_graphed_callables` is allowed.
 
     .. warning::
         When running a graphed callable, you must pass its arguments in the same order and format
         they appeared in that callable's ``sample_args``.
+
+    .. warning::
+        All Tensor outputs of graphed callables must require grad.
     """
     just_one_callable = False
 
@@ -133,6 +136,13 @@ def make_graphed_callables(callables, sample_args):
         just_one_callable = True
         callables = (callables,)
         sample_args = (sample_args,)
+
+    for c in callables:
+        if isinstance(c, torch.nn.Module):
+            assert len(c._backward_hooks) == 0 and len(c._forward_hooks) == 0 and len(c._forward_pre_hooks) == 0, \
+                "Modules must not have hooks registered at the time they are passed. However, registering hooks " + \
+                "on modules after passing them through make_graphed_callables is allowed."
+
 
     # If a callable is an nn.Module, its graph's full input surface is the args the user explicitly
     # passes to forward (ie, its sample_args) AND the module's parameter attributes.
@@ -195,7 +205,9 @@ def make_graphed_callables(callables, sample_args):
                 reversed(per_callable_static_outputs),
                 reversed(bwd_graphs),
                 reversed(per_callable_module_params)):
-        # Assumes all static_outputs require grad
+
+        # For now, assumes all static_outputs require grad
+        assert all(o.requires_grad for o in static_outputs), "Outputs of graphed callables must require grad."
         static_grad_outputs = tuple(torch.empty_like(o) for o in static_outputs)
 
         with torch.cuda.graph(bwd_graph, pool=mempool):
