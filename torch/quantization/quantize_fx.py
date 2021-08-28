@@ -140,8 +140,9 @@ class QuantizationTracer(Tracer):
         return node
 
 def _prepare_fx(model: torch.nn.Module, qconfig_dict: Any,
-                prepare_custom_config_dict: Dict[str, Any] = None,
-                equalization_qconfig_dict: Dict[str, Any] = None,
+                prepare_custom_config_dict: Optional[Dict[str, Any]] = None,
+                equalization_qconfig_dict: Optional[Dict[str, Any]] = None,
+                backend_config_dict: Optional[Dict[str, Any]] = None,
                 is_standalone_module: bool = False) -> ObservedGraphModule:
     r""" Internal helper function for prepare_fx
     Args:
@@ -203,7 +204,8 @@ forward graph of the parent module,
 def _prepare_standalone_module_fx(
         model: torch.nn.Module,
         qconfig_dict: Any,
-        prepare_custom_config_dict: Dict[str, Any] = None) -> GraphModule:
+        prepare_custom_config_dict: Dict[str, Any] = None,
+        backend_config_dict: Dict[str, Any] = None) -> GraphModule:
     r""" [Internal use only] Prepare a standalone module, so that it can be used when quantizing the
     parent module.
     standalone_module means it a submodule that is not inlined in parent module,
@@ -224,7 +226,7 @@ def _prepare_standalone_module_fx(
                 same as input_quantized_idxs configuration provided
                 for the standalone module
     """
-    return _prepare_fx(model, qconfig_dict, prepare_custom_config_dict, is_standalone_module=True)
+    return _prepare_fx(model, qconfig_dict, prepare_custom_config_dict, backend_config_dict, is_standalone_module=True)
 
 def fuse_fx(model: torch.nn.Module,
             fuse_custom_config_dict: Dict[str, Any] = None) -> GraphModule:
@@ -265,8 +267,9 @@ def fuse_fx(model: torch.nn.Module,
 
 def prepare_fx(
         model: torch.nn.Module, qconfig_dict: Any,
-        prepare_custom_config_dict: Dict[str, Any] = None,
-        equalization_qconfig_dict: Dict[str, Any] = None) -> ObservedGraphModule:
+        prepare_custom_config_dict: Optional[Dict[str, Any]] = None,
+        equalization_qconfig_dict: Optional[Dict[str, Any]] = None,
+        backend_config_dict: Optional[Dict[str, Any]] = None) -> ObservedGraphModule:
     r""" Prepare a model for post training static quantization
 
     Args:
@@ -420,11 +423,12 @@ def prepare_fx(
     torch._C._log_api_usage_once("quantization_api.quantize_fx.prepare_fx")
     assert not model.training, 'prepare_fx only works for models in ' + \
         'eval mode'
-    return _prepare_fx(model, qconfig_dict, prepare_custom_config_dict, equalization_qconfig_dict)
+    return _prepare_fx(model, qconfig_dict, prepare_custom_config_dict, equalization_qconfig_dict, backend_config_dict)
 
 def prepare_qat_fx(
         model: torch.nn.Module, qconfig_dict: Any,
-        prepare_custom_config_dict: Dict[str, Any] = None) -> ObservedGraphModule:
+        prepare_custom_config_dict: Optional[Dict[str, Any]] = None,
+        backend_config_dict: Optional[Dict[str, Any]] = None) -> ObservedGraphModule:
     r""" Prepare a model for quantization aware training
     Args:
       `model`: torch.nn.Module model, must be in train mode
@@ -457,7 +461,7 @@ def prepare_qat_fx(
     torch._C._log_api_usage_once("quantization_api.quantize_fx.prepare_qat_fx")
     assert model.training, 'prepare_qat_fx only works for models in  ' + \
         'train mode'
-    return _prepare_fx(model, qconfig_dict, prepare_custom_config_dict)
+    return _prepare_fx(model, qconfig_dict, prepare_custom_config_dict, backend_config_dict)
 
 def _convert_fx(
         graph_module: GraphModule, is_reference: bool,
