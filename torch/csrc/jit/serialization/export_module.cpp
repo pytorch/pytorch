@@ -46,9 +46,9 @@ namespace {
 
 using mobile::serialization::CreateArg;
 using mobile::serialization::CreateOperator;
-using mobile::serialization::CreateCode;
-using mobile::serialization::CreateFunction;
+using mobile::serialization::CreateFunctionDirect;
 using mobile::serialization::CreateDebugInfo;
+using mobile::serialization::CreateObjectTypeDirect;
 using flatbuffers::FlatBufferBuilder;
 
 // Only compress these records if they're not tiny.
@@ -107,15 +107,6 @@ flatbuffers::Offset<jit::mobile::serialization::Schema> CreateFBSchema(
   }
 
   return CreateSchema(fbb, fbb.CreateVector(arg_vec), fbb.CreateVector(return_vec));
-}
-
-flatbuffers::Offset<jit::mobile::serialization::Function> CreateFBFunction(
-  flatbuffers::FlatBufferBuilder& fbb,
-  const std::string& qualified_name,
-  flatbuffers::Offset<jit::mobile::serialization::Code> code,
-  flatbuffers::Offset<jit::mobile::serialization::Schema> schema,
-  flatbuffers::Offset<jit::mobile::serialization::DebugInfo> debug_info) {
-    return CreateFunction(fbb, fbb.CreateString(qualified_name), code, schema, debug_info);
 }
 
 flatbuffers::Offset<jit::mobile::serialization::DebugInfo> CreateFBDebugInfo(
@@ -677,14 +668,6 @@ functionToFlatbuffers(
   // since the register location is embedded into the bytecode, pass the
   // register size
   auto register_size = static_cast<int>(code->register_size());
-  auto code_offset = CreateCodeDirect(
-    fbb,
-    &instruction_vector,
-    &operator_vector,
-    &constant_types,
-    &constant_offsets,
-    &type_str_offsets,
-    register_size);
 
   // schema
   const auto& schema = func.getSchema();
@@ -708,9 +691,17 @@ functionToFlatbuffers(
   auto schema_offset = CreateFBSchema(fbb, schema.arguments(), schema.returns(), type_printer, serializer);
   auto debug_info_offset = CreateFBDebugInfo(fbb, op_debug_handles);
 
-  auto function_offset =
-      CreateFBFunction(fbb, qn, code_offset, schema_offset, debug_info_offset);
-
+  auto function_offset = CreateFunctionDirect(
+    fbb,
+    qn.c_str(),
+    &instruction_vector,
+    &operator_vector,
+    &constant_types,
+    &constant_offsets,
+    &type_str_offsets,
+    register_size,
+    schema_offset,
+    debug_info_offset);
   return function_offset;
 }
 
@@ -737,8 +728,24 @@ moduleToFlatbuffers(
     qn_cache.emplace(qn);
   }
 
+
   auto functions_offset = fbb.CreateVector(functions);
-  auto mod = CreateModule(fbb, functions_offset);
+  flatbuffers::Offset<mobile::serialization::Object> ivalue_offset = serializer->objectToFB(fbb, module._ivalue());
+
+  // at this point, serializer contains all type infos used:
+
+  std::vector<flatbuffers::Offset<mobile::serialization::ObjectType>> obj_types;
+  for (const auto& classptr : serializer->memoized_class_types_) {
+    std::vector<flatbuffers::Offset<flatbuffers::String>> attr_names(classptr->numAttributes());
+    for (size_t i = 0, n = classptr->numAttributes(); i < n; ++i) {
+      attr_names[i] = fbb.CreateString(classptr->getAttributeName(i));
+    }
+    obj_types.push_back(
+      CreateObjectTypeDirect(fbb, classptr->name()->qualifiedName().c_str(), &attr_names));
+  }
+  auto obj_types_offset = fbb.CreateVector(obj_types);
+  auto mod = CreateModule(fbb, functions_offset, obj_types_offset, ivalue_offset, 
+    serializer->tensor_data_.size());
   fbb.Finish(mod);
   return fbb.Release();
 }
@@ -756,11 +763,6 @@ void ScriptModuleSerializer::serialize(
   C10_LOG_API_USAGE_ONCE("torch.script.save");
   writeExtraFiles(module, extra_files);
   // Serialize the model object
-  writeArchive(
-      module._ivalue(),
-      /*archive_name=*/"data",
-      /*archive_dir=*/"",
-      /*tensor_dir=*/"data/");
   // Then we serialize all code info.
   convertTypes(module.type());
   writeFiles("code/");
@@ -778,6 +780,12 @@ void ScriptModuleSerializer::serialize(
 
     writeByteCode(module, save_mobile_debug_info, use_flatbuffer);
   } else {
+    std::cerr << " Why am i here " << std::endl;
+    writeArchive(
+        module._ivalue(),
+        /*archive_name=*/"data",
+        /*archive_dir=*/"",
+        /*tensor_dir=*/"data/");
     writeArchive(
         c10::ivalue::Tuple::create(ivalue_constants),
         /*archive_name=*/"constants",
@@ -966,7 +974,25 @@ void ScriptModuleSerializer::writeByteCode(
 
     std::cerr << "HERE: " << "num of tensors: " << serializer.memoized_storage_map_.size() << std::endl;
 
+    const std::string tensor_dir = "tensors_new/";
+
+    int i = 0;
+    for (const auto& td : serializer.tensor_data_) {
+      std::stringstream ss;
+      ss << tensor_dir << i;
+      WriteableTensorData writable_td = getWriteableTensorData(td);
+      writer_.writeRecord(
+          ss.str(),
+          writable_td.data(),
+          writable_td.sizeInBytes());
+      i++;
+    }
   } else {
+      writeArchive(
+      module._ivalue(),
+      /*archive_name=*/"data",
+      /*archive_dir=*/"",
+      /*tensor_dir=*/"data/");
     std::vector<c10::IValue> elements;
     elements.emplace_back(static_cast<int64_t>(version_to_write));
     moduleMethodsTuple(

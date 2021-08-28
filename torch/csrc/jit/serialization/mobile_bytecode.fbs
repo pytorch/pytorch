@@ -25,8 +25,9 @@ table TensorMetadata {
   // TODO(quantized?)
   // torch._utils _rebuild_tensor_v2
   storage_location_index:int;
+  // enum ScalarType
+  scalar_type: byte;
   storage_offset:int;
-  scalar_type:int;
   nbytes:long;
   element_size:int;
   sizes:[int];
@@ -70,13 +71,9 @@ table ObjectType {
 }
 
 table Object {
-  type: string;
-  attr_values: [IValue];
-  state: IValue;
-}
-
-table IValue2 {
-  pickled:[byte];
+  type_index: int;
+  use_setstate:bool;
+  state: IValue;  
 }
 
 struct Instruction {
@@ -90,14 +87,6 @@ table Operator {
   name:string;
   overload_name:string;
   num_args_serialized:int = -1;
-}
-
-table Code {
-  instructions:[Instruction];
-  operators:[Operator];
-  constants:[IValue];
-  types:[string];
-  register_size:int;
 }
 
 table Arg {
@@ -119,13 +108,24 @@ table DebugInfo {
 
 table Function {
   qn:string;
-  code:Code;
+  instructions:[Instruction];
+  operators:[Operator];
+  constants:[IValue];
+  types:[string];
+  register_size:int;
   schema:Schema;
   debug_info:DebugInfo;
 }
 
 table Module {
   methods:[Function];
+
+  types:[ObjectType];  // type information of objects used
+
+  // this is module._ivalue()
+  state_obj: Object;
+
+  storage_count: int;
 }
 
 root_type Module;
