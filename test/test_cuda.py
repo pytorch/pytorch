@@ -2799,7 +2799,7 @@ torch.cuda.synchronize()
                     in op or 'lstm' in op or 'fused' in op or 'gru' in op
                 if not skip_test:
                     if should_error_from_not_implemented:
-                        with self.assertRaisesRegex(RuntimeError, 'not supported for'):
+                        with self.assertRaises(RuntimeError):
                             self._run_autocast_outofplace(op, args, torch.bfloat16)
                     else:
                         if torch.cuda.is_bf16_supported():
