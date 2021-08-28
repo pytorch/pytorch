@@ -2798,7 +2798,10 @@ torch.cuda.synchronize()
                 skippable = 'conv' in op or 'prelu' in op or 'rnn' in op or 'lstm' in op or 'fused' in op
                 skip_test = True if (skippable) else skip_test
                 if not skip_test:
-                    self._run_autocast_outofplace(op, args, torch.bfloat16)
+                    try:
+                        self._run_autocast_outofplace(op, args, torch.bfloat16)
+                    except Exception:
+                        print(op, 'failed!')
 
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_autocast_torch_fp32(self):
