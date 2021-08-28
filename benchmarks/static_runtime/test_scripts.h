@@ -772,3 +772,11 @@ const auto fmod_scalar = R"JIT(
   def forward(self, a: Tensor, b: int):
       return torch.fmod(a, b).clone()
 )JIT";
+
+const std::string embedding_bag_byte_prepack_script = R"IR(
+  graph(%input: Tensor):
+      %none : None = prim::Constant()
+      %output: Tensor = quantized::embedding_bag_byte_prepack(%input)
+      %res: Tensor = aten::clone(%output, %none)
+      return (%res)
+)IR";
