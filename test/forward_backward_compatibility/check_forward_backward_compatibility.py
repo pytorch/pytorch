@@ -154,14 +154,16 @@ def dont_parse(schema_line):
             return True
     return False
 
-
-def check_bc(existing_schemas):
+def load_schemas_to_dict():
     new_schemas = torch._C._jit_get_all_schemas()
     new_schemas += torch._C._jit_get_custom_class_schemas()
     new_schema_dict = defaultdict(list)
     for s in new_schemas:
         new_schema_dict[s.name].append(s)
+    return new_schema_dict
 
+def check_bc(existing_schemas):
+    new_schema_dict = load_schemas_to_dict()
     is_bc = True
     broken_ops = []
     for existing_schema in existing_schemas:
@@ -197,6 +199,40 @@ def check_bc(existing_schemas):
         )
     return is_bc
 
+def check_fc(existing_schemas):
+    new_schema_dict = load_schemas_to_dict()
+    is_fc = True
+    broken_ops = []
+    # TODO skip allow list for now.
+    for existing_schema in existing_schemas:
+        print("processing existing schema: ", str(existing_schema))
+        matching_new_schemas = new_schema_dict.get(existing_schema.name, [])
+        found = False
+        for matching_new_schema in matching_new_schemas:
+            if matching_new_schema.is_forward_compatible_with(existing_schema):
+                found = True
+                break
+        if not found:
+            print(
+                "Can NOT find forward compatible schemas after changes "
+                "for schema {} from the following candidates:\n[\n{}\n]".format(
+                    str(existing_schema),
+                    "\n\t".join(str(s) for s in matching_new_schemas),
+                )
+            )
+            # TODO Print out more details about why candidates don't match.
+            broken_ops.append(str(existing_schema))
+            is_fc = False
+    if is_fc:
+        print("Found forward compatible schemas for all existing schemas")
+    else:
+        warnings.warn(
+            "The PR is introducing a potentially forward incompatible changes to the "
+            "operator library. Please contact PyTorch team to confirm "
+            "whether this change is wanted or not. \n\nBroken ops: "
+            "[\n\t{}\n]".format("\n\t".join(broken_ops))
+        )
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Process some integers.")
@@ -220,6 +256,10 @@ if __name__ == "__main__":
                 continue
             s = parse_schema(line.strip())
             slist.append(s)
+
+    # TODO in case there is FC breaking changes,
+    # we just warn for now until there is a policy.
+    check_fc(slist)
 
     if not check_bc(slist):
         sys.exit(1)

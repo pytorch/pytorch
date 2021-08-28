@@ -111,6 +111,15 @@ struct Argument {
       const Argument& old,
       std::ostream* why_not=nullptr) const;
 
+  // this function checks whether this Argument is forward compatible with
+  // the old one. we consider the following cases are forward compatible:
+  //   1) two arguments are equal
+  //   2) this arg's type should be subtype of old
+  //   3) this arg must provide the same default value if old arg has one,
+  bool isForwardCompatibleWith(
+      const Argument& old,
+      std::ostream* why_not = nullptr) const;
+
  private:
   std::string name_;
   TypePtr type_;
@@ -196,6 +205,28 @@ struct FunctionSchema {
   //   NOK   f_new(a, *, c, b) => f_old(a, *, b, c)
   //   OK    f_new(a, *, b, c, d=1) => f_old(a, *, b, c)
   bool isBackwardCompatibleWith(
+      const FunctionSchema& old,
+      std::ostream* why_not = nullptr) const;
+
+  // Checks whether this schema is forward compatible with the old one.
+  // The following conditions must be true:
+  // [Function structure] The new schema's name, overload-name, varargs, and
+  //      return arity are the same.
+  // [Output Narrowing] The new schema's output type must be the same class
+  //      or inherit from the old schema's output type.
+  // [Argument count] The new schema must have at least as many arguments as
+  //      the old schema (considering the list of positional and kwargs).
+  // [Arg Compatibility] Every argument in the old schema has a corresponding
+  //      argument in the new schema that:
+  //        * is at the same position.
+  //        * has the same name.
+  //        * is either positional, or kwarg and the old argument was kwarg.
+  //        * has the same type, or the old argument's type inherits from the
+  //          new argument's type.
+  // [Default Values] Every new argument must have a default value.
+  //         Each default value type should NOT be a container type.
+  //
+  bool isForwardCompatibleWith(
       const FunctionSchema& old,
       std::ostream* why_not = nullptr) const;
 

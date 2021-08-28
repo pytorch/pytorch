@@ -7153,7 +7153,7 @@ workflows:
           requires:
             - pytorch_linux_xenial_py3_6_gcc5_4_build
       - pytorch_linux_test:
-          name: pytorch_linux_backward_compatibility_check_test
+          name: pytorch_linux_forward_backward_compatibility_check_test
           requires:
             - pytorch_linux_xenial_py3_6_gcc5_4_build
           build_environment: "pytorch-linux-backward-compatibility-check-test"

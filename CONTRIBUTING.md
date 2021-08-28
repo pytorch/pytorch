@@ -1297,7 +1297,7 @@ This choice depends on several factors; here is the decision tree as of
     - pytorch_linux_xenial_py3_6_gcc5_4_build
       - pytorch_cpp_doc_build
       - pytorch_doc_test
-      - pytorch_linux_backward_compatibility_check_test
+      - pytorch_linux_forward_backward_compatibility_check_test
       - pytorch_linux_xenial_py3_6_gcc5_4_jit_legacy_test
       - pytorch_linux_xenial_py3_6_gcc5_4_test
       - pytorch_python_doc_build
