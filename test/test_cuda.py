@@ -2787,7 +2787,7 @@ torch.cuda.synchronize()
                 if not skip_test:
                     self._run_autocast_outofplace(op, args, torch.float16)
 
-    @unittest.skipIf(not TEST_BF16, 'BFloat16 operations not available')
+    @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_autocast_torch_bf16(self):
         with torch.backends.cudnn.flags(enabled=True, deterministic=True):
             for op_with_args in self.autocast_lists.torch_fp16:
@@ -2795,10 +2795,17 @@ torch.cuda.synchronize()
                 op, args = op_with_args[0], op_with_args[1]
                 if len(op_with_args) == 3:
                     skip_test = op_with_args[2]  # TEST_WITH_ROCM
-                skippable = 'conv' in op or 'prelu' in op or 'rnn' in op or 'lstm' in op or 'fused' in op or 'gru' in op
-                skip_test = True if (skippable) else skip_test
+                should_error_from_not_implemented = 'conv' in op or 'prelu' in op or 'rnn' in op or 'lstm' in op or 'fused' in op or 'gru' in op
                 if not skip_test:
-                    self._run_autocast_outofplace(op, args, torch.bfloat16)
+                    if should_error_from_not_implemented:
+                        with unittest.assertRaisesRegex(RuntimeError, 'not supported for'):
+                            self._run_autocast_outofplace(op, args, torch.bfloat16)
+                    else:
+                        if torch.cuda.is_bf16_supported():
+                            self._run_autocast_outofplace(op, args, torch.bfloat16)
+                        else:
+                            with unittest.assertRaisesRegex(RuntimeError, 'Device does not support bfloat16'):
+                                self._run_autocast_outofplace(op, args, torch.bfloat16)
 
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_autocast_torch_fp32(self):
@@ -2822,7 +2829,7 @@ torch.cuda.synchronize()
             for op, args in self.autocast_lists.nn_fp16:
                 self._run_autocast_outofplace(op, args, torch.float16, module=torch._C._nn)
 
-    @unittest.skipIf(not TEST_BF16, 'BFloat16 operations not available')
+    @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_autocast_nn_bf16(self):
         with torch.backends.cudnn.flags(enabled=True, deterministic=True):
             for op, args in self.autocast_lists.nn_fp16:
