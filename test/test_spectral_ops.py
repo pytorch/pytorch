@@ -1264,6 +1264,10 @@ class TestFFT(TestCase):
         self.assertRaises(
             RuntimeError, torch.istft, stft, n_fft=4,
             hop_length=20, win_length=1, window=torch.ones(1))
+        # A window of zeros does not meet NOLA
+        invalid_window = torch.zeros(4, device=device)
+        self.assertRaises(
+            RuntimeError, torch.istft, stft, n_fft=4, win_length=4, window=invalid_window)
         # Input cannot be empty
         self.assertRaises(RuntimeError, torch.istft, torch.zeros((3, 0, 2)), 2)
         self.assertRaises(RuntimeError, torch.istft, torch.zeros((0, 3, 2)), 2)
