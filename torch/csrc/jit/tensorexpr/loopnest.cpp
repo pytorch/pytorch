@@ -127,8 +127,8 @@ class Vectorizer : public IRMutator {
     ExprPtr start = v->start();
     ExprPtr stop = v->stop();
 
-    auto const& start_imm = intValue(start);
-    auto const& stop_imm = intValue(stop);
+    auto start_imm = intValue(start);
+    auto stop_imm = intValue(stop);
     if (!start_imm) {
       throw std::runtime_error(
           "Can't vectorize due to non-constant loop start!");
@@ -1460,10 +1460,10 @@ void LoopNest::splitWithMask(ForPtr f, int factor, ForPtr* inner) {
   ExprPtr start = IRSimplifier::simplify(f->start());
   ExprPtr stop = IRSimplifier::simplify(f->stop());
   if (start->isConstant() && stop->isConstant()) {
-    auto const& start_val = *intValue(start);
-    auto const& stop_val = *intValue(stop);
-    auto const& size_val = stop_val - start_val;
-    auto const& tail_size = size_val % factor;
+    auto start_val = *intValue(start);
+    auto stop_val = *intValue(stop);
+    auto size_val = stop_val - start_val;
+    auto tail_size = size_val % factor;
     if (tail_size == 0) {
       tail_is_needed = false;
     }
@@ -1489,7 +1489,7 @@ void LoopNest::splitWithMask(ForPtr f, int factor, ForPtr* inner) {
   // TODO: is it ok that we're doing it eagerly? In the other implementation we
   // are only materializing predicates at the last, lowering, step.
   if (tail_is_needed) {
-    auto const& start = intValue(f->start());
+    auto start = intValue(f->start());
     if (!start || *start != 0) {
       throw unimplemented_lowering();
     }
