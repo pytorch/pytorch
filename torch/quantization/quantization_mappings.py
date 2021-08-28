@@ -7,7 +7,6 @@ import torch.nn.functional as F
 import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.quantized as nniq
 import torch.nn.intrinsic.quantized.dynamic as nniqd
-import torch.nn.intrinsic.quantized._reference as nniqr
 import torch.nn.intrinsic.qat as nniqat
 import torch.nn.quantized as nnq
 import torch.nn.quantized._reference as nnqr
