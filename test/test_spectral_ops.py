@@ -658,7 +658,7 @@ class TestFFT(TestCase):
 
             # Test fftshift sorts the fftfreq output
             shifted = torch.fft.fftshift(x)
-            self.assertTrue(torch.allclose(shifted, shifted.sort().values))
+            self.assertEqual(shifted, shifted.sort().values)
             self.assertEqual(sorted_fft_freqs, shifted)
 
             # And ifftshift is the inverse
@@ -1080,6 +1080,21 @@ class TestFFT(TestCase):
         half_spectrum_copy = half_spectrum.clone()
         _ = torch.fft.irfftn(half_spectrum_copy, s=(2, 2), dim=(-2, -1))
         self.assertEqual(half_spectrum, half_spectrum_copy)
+
+    @onlyOnCPUAndCUDA
+    @skipCPUIfNoFFT
+    def test_fft_plan_repeatable(self, device):
+        # Regression test for gh-58724 and gh-63152
+        for n in [2048, 3199, 5999]:
+            a = torch.randn(n, device=device, dtype=torch.complex64)
+            res1 = torch.fft.fftn(a)
+            res2 = torch.fft.fftn(a.clone())
+            self.assertEqual(res1, res2)
+
+            a = torch.randn(n, device=device, dtype=torch.float64)
+            res1 = torch.fft.rfft(a)
+            res2 = torch.fft.rfft(a.clone())
+            self.assertEqual(res1, res2)
 
     @onlyOnCPUAndCUDA
     @skipCPUIfNoFFT

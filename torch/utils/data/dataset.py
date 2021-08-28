@@ -25,25 +25,17 @@ T_co = TypeVar('T_co', covariant=True)
 T = TypeVar('T')
 
 
-class DataChunk(List[T]):
+class DataChunk(list, Generic[T]):
     def __init__(self, items):
+        super().__init__(items)
         self.items = items
-
-    def __getitem__(self, key):
-        return self.items[key]
-
-    def __len__(self):
-        return len(self.items)
 
     def as_str(self, indent=''):
         res = indent + "[" + ", ".join([str(i) for i in iter(self)]) + "]"
         return res
 
-    def __repr__(self):
-        return self.as_str()
-
     def __iter__(self) -> Iterator[T]:
-        for i in self.items:
+        for i in super().__iter__():
             yield i
 
     def raw_iterator(self):

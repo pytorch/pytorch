@@ -1,5 +1,6 @@
-from typing import List
+from typing import List, Union
 from dataclasses import dataclass
+from torch.distributed.remote_device import _remote_device
 
 import torch
 
@@ -24,7 +25,7 @@ class ShardMetadata(object):
 
     shard_offsets: List[int]
     shard_lengths: List[int]
-    placement: torch.distributed._remote_device
+    placement: Union[str, _remote_device]
 
     def __post_init__(self):
         if isinstance(self.placement, str):
