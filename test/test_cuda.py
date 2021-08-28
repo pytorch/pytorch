@@ -2795,7 +2795,7 @@ torch.cuda.synchronize()
                 op, args = op_with_args[0], op_with_args[1]
                 if len(op_with_args) == 3:
                     skip_test = op_with_args[2]# TEST_WITH_ROCM
-                skippable = 'conv' in op or 'prelu' in op or 'rnn' in op or 'lstm' in op or 'fused' in op or '_thnn_fused_lstm_cell_cuda' == op
+                skippable = 'conv' in op or 'prelu' in op or 'rnn' in op or 'lstm' in op or 'fused' in op
                 skip_test = True if (skippable) else skip_test
                 if not skip_test:
                     try:
