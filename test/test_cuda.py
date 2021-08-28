@@ -2817,7 +2817,7 @@ torch.cuda.synchronize()
                 self._run_autocast_outofplace(op, args, torch.float16, module=torch._C._nn)
 
     @unittest.skipIf(not torch.cuda.is_bf16_supported(), 'BFloat16 operations not available')
-    def test_autocast_nn_fp16(self):
+    def test_autocast_nn_bf16(self):
         with torch.backends.cudnn.flags(enabled=True, deterministic=True):
             for op, args in self.autocast_lists.nn_fp16:
                 self._run_autocast_outofplace(op, args, torch.bfloat16, module=torch._C._nn)
