@@ -4744,8 +4744,8 @@ TEST(LoopNest, Int64Direct) {
   Placeholder a("a", kLong, {N});
   Placeholder b("b", kLong, {N});
   VarHandle n("n", kLong);
-  StmtPtr s =
-      For::make(n, 0l, N, b.store({n}, a.load({n}) + LongImm::make(1l)));
+  StmtPtr s = For::make(
+      n, LongImm::make(0l), N, b.store({n}, a.load({n}) + LongImm::make(1l)));
   s = IRSimplifier::simplify(s);
   std::ostringstream oss;
   oss << *s;
