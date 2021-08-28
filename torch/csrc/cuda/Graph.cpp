@@ -52,7 +52,7 @@ Wrapper around a CUDA graph.
 Begins capturing CUDA work on the current stream.
 
 Typically, you shouldn't call ``capture_begin`` yourself.
-Use :class:`~torch.cuda.graph` or :func:`~torch.cuda.make_graphed_callables,
+Use :class:`~torch.cuda.graph` or :func:`~torch.cuda.make_graphed_callables`,
 which call ``capture_begin`` internally.
 
 Arguments:
@@ -67,7 +67,7 @@ Ends CUDA graph capture on the current stream.
 After ``capture_end``, ``replay`` may be called on this instance.
 
 Typically, you shouldn't call ``capture_end`` yourself.
-Use :class:`~torch.cuda.graph` or :func:`~torch.cuda.make_graphed_callables,
+Use :class:`~torch.cuda.graph` or :func:`~torch.cuda.make_graphed_callables`,
 which call ``capture_end`` internally.
            )")
       .def("replay",

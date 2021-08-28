@@ -617,7 +617,7 @@ for realistic and advanced patterns.
 
 :class:`~torch.cuda.make_graphed_callables` is more sophisticated.
 :class:`~torch.cuda.make_graphed_callables` accepts Python functions and
-:class:`torch.nn.Modules`. For each passed function or Module,
+:class:`torch.nn.Module`\s. For each passed function or Module,
 it creates separate graphs of the forward-pass and backward-pass work. See
 :ref:`Partial-network capture<partial-network-capture>`.
 
@@ -626,7 +626,7 @@ it creates separate graphs of the forward-pass and backward-pass work. See
 Constraints
 ~~~~~~~~~~~
 
-A set of ops is **capturable** if it doesn't violate any of the following constraints.
+A set of ops is *capturable* if it doesn't violate any of the following constraints.
 
 Constraints apply to all work in a
 :class:`torch.cuda.graph` context and all work in the forward and backward passes
@@ -696,7 +696,7 @@ If your entire network is capturable, you can capture and replay an entire itera
 
     # capture
     g = torch.cuda.CUDAGraph()
-    # set grads to None before capture, so backward() will create
+    # Sets grads to None before capture, so backward() will create
     # .grad attributes with allocations from the graph's private pool
     optimizer.zero_grad(set_to_none=True)
     with torch.cuda.graph(g):
@@ -709,6 +709,7 @@ If your entire network is capturable, you can capture and replay an entire itera
     real_targets = [torch.rand_like(static_target) for _ in range(10)]
 
     for data, target in zip(real_inputs, real_targets):
+        # Fills the graph's input memory with new data to compute on
         static_input.copy_(data)
         static_target.copy_(target)
         # replay() includes forward, backward, and step.
@@ -732,12 +733,15 @@ By default, callables returned by :func:`~torch.cuda.make_graphed_callables`
 are autograd-aware, and can be used in the training loop as direct replacements
 for the functions or :class:`nn.Module<torch.nn.Module>`\ s you passed.
 
-:func:`~torch.cuda.make_graphed_callables` also internally creates
+:func:`~torch.cuda.make_graphed_callables` internally creates
 :class:`~torch.cuda.CUDAGraph` objects, runs warmup iterations, and maintains
-static inputs and outputs internally as needed.  Therefore (unlike with
+static inputs and outputs as needed.  Therefore (unlike with
 :class:`torch.cuda.graph`) you don't need to handle those manually.
 
-Example::
+In the following example, data-dependent dynamic control flow means the
+network isn't capturable end-to-end, but
+:func:`~torch.cuda.make_graphed_callables`
+lets us capture and run graph-safe sections as graphs regardless::
 
     N, D_in, H, D_out = 640, 4096, 2048, 1024
 
@@ -769,8 +773,6 @@ Example::
 
         tmp = module1(data)  # forward ops run as a graph
 
-        # Example of an uncapturable sequence
-        # (data-dependent dynamic control flow)
         if tmp.sum().item() > 0:
             tmp = module2(tmp)  # forward ops run as a graph
         else:
@@ -871,7 +873,7 @@ NCCL < 2.9.6
 ~~~~~~~~~~~~
 
 NCCL versions earlier than 2.9.6 don't allow collectives to be captured.
-In this case, you must use :ref:`partial-network capture<partial-network-capture>`,
+You must use :ref:`partial-network capture<partial-network-capture>`,
 which defers allreduces to happen outside graphed sections of backward.
 
 Call :func:`~torch.cuda.make_graphed_callables` on graphable network sections
@@ -881,7 +883,7 @@ NCCL >= 2.9.6
 ~~~~~~~~~~~~~
 
 NCCL versions 2.9.6 or later allow collectives in the graph.
-Approaches that capture an :ref:`entire backward pass<full-iteration-capture>`
+Approaches that capture an :ref:`entire backward pass<whole-network-capture>`
 are a viable option, but need three setup steps.
 
 1. Disable DDP's internal async error handling::
@@ -889,7 +891,7 @@ are a viable option, but need three setup steps.
     os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "0"
     torch.distributed.init_process_group(...)
 
-2. Before capture, DDP must be constructed in a side-stream context::
+2. Before full-backward capture, DDP must be constructed in a side-stream context::
 
     with torch.cuda.stream(s):
         model = DistributedDataParallel(model)
@@ -912,7 +914,7 @@ from a graph-private memory pool. The private pool stays alive until its
 go out of scope.
 
 Private pools are maintained automatically. By default, the allocator creates a
-separate private pool for every capture. If you capture multiple graphs,
+separate private pool for each capture. If you capture multiple graphs,
 this conservative approach ensures graph replays never corrupt each other's values,
 but sometimes needlessly wastes memory.
 
@@ -932,8 +934,9 @@ and can be used to share memory across graphs as shown::
     g1 = torch.cuda.CUDAGraph()
     g2 = torch.cuda.CUDAGraph()
 
-    # Create static inputs for g1 and g2, run warmups of their workloads
+    # (create static inputs for g1 and g2, run warmups of their workloads...)
 
+    # Captures g1
     with torch.cuda.graph(g1):
         static_out_1 = g1_workload(static_in_1)
 
@@ -941,8 +944,8 @@ and can be used to share memory across graphs as shown::
     with torch.cuda.graph(g2, pool=g1.pool()):
         static_out_2 = g2_workload(static_in_2)
 
-    # Fill static_in_1 and static_in_2 with real data
-
+    static_in_1.copy_(real_data_1)
+    static_in_2.copy_(real_data_2)
     g1.replay()
     g2.replay()
 

@@ -32,7 +32,7 @@ class graph(object):
             :meth:`other_Graph_instance.pool()<torch.cuda.CUDAGraph.pool>`) hinting this graph's capture
             may share memory from the specified pool. See :ref:`Graph memory management<graph-memory-management>`.
         stream (torch.cuda.Stream, optional): If supplied, will be set as the current stream in the context.
-            If not supplied, ``Graph`` sets its own internal side stream as the current stream in the context.
+            If not supplied, ``graph`` sets its own internal side stream as the current stream in the context.
 
     .. note::
         For effective memory sharing, if you pass a ``pool`` used by a previous capture and the previous capture
