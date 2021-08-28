@@ -10,6 +10,7 @@ class __PrinterOptions(object):
     edgeitems: int = 3
     linewidth: int = 80
     sci_mode: Optional[bool] = None
+    show_shape: bool = True
 
 
 PRINT_OPTS = __PrinterOptions()
@@ -22,7 +23,8 @@ def set_printoptions(
         edgeitems=None,
         linewidth=None,
         profile=None,
-        sci_mode=None
+        sci_mode=None,
+        show_shape=True
 ):
     r"""Set options for printing. Items shamelessly taken from NumPy
 
@@ -42,6 +44,7 @@ def set_printoptions(
             None (default) is specified, the value is defined by
             `torch._tensor_str._Formatter`. This value is automatically chosen
             by the framework.
+        show_shape: Print shape of the tensor. (default = True)
     """
     if profile is not None:
         if profile == "default":
@@ -69,6 +72,7 @@ def set_printoptions(
     if linewidth is not None:
         PRINT_OPTS.linewidth = linewidth
     PRINT_OPTS.sci_mode = sci_mode
+    PRINT_OPTS.show_shape = show_shape
 
 
 class _Formatter(object):
@@ -293,6 +297,10 @@ def _str_intern(inp):
     # within this function.
     # TODO(albanD) This needs to be updated when more than one level is supported
     self, tangent = torch.autograd.forward_ad.unpack_dual(inp)
+    
+    # print shape of the tensor
+    if PRINT_OPTS.show_shape:
+        suffixes.append('shape= ' + str(tuple(self.shape)))
 
     # Note [Print tensor device]:
     # A general logic here is we only print device when it doesn't match
