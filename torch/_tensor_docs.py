@@ -4043,6 +4043,13 @@ tanh_() -> Tensor
 In-place version of :meth:`~Tensor.tanh`
 """)
 
+add_docstr_all('relu',
+               r"""
+relu() -> Tensor
+
+See :func:`torch.relu`
+""")
+
 add_docstr_all('tolist',
                r"""
 tolist() -> list or number

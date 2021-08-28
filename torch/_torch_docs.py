@@ -9591,6 +9591,27 @@ Example::
     tensor([ 0.7156, -0.6218,  0.8257,  0.2553])
 """.format(**common_args))
 
+add_docstr(torch.relu,
+           r"""
+relu(input) -> Tensor
+
+Applies the rectified linear unit function element-wise:
+
+.. math::
+    \text{out}_{i} = \max(0, \text{input}_{i})
+""" + r"""
+Args:
+    {input}
+
+Example::
+
+    >>> a = torch.randn(4)
+    >>> a
+    tensor([-0.4983,  0.7875, -1.2467,  0.6094])
+    >>> torch.tanh(a)
+    tensor([0.0000,   0.7875,  0.0000,  0.6094])
+""".format(**common_args))
+
 add_docstr(torch.topk,
            r"""
 topk(input, k, dim=None, largest=True, sorted=True, *, out=None) -> (Tensor, LongTensor)
