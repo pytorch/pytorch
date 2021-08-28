@@ -2707,9 +2707,9 @@ torch.cuda.synchronize()
 
         if add_kwargs is None:
             add_kwargs = {}
-
+        fast_dtype = torch.bfloat16 if run_as_type == torch.bfloat16 else torch.float16
         self.assertFalse(torch.is_autocast_enabled())
-        with torch.autocast('cuda', ):
+        with torch.autocast('cuda', dtype=fast_dtype):
             self.assertTrue(torch.is_autocast_enabled())
 
             out_type = out_type if out_type is not None else run_as_type
@@ -2784,6 +2784,16 @@ torch.cuda.synchronize()
                 if not skip_test:
                     self._run_autocast_outofplace(op, args, torch.float16)
 
+    @unittest.skipIf(not torch.cuda.is_bf16_supported(), 'BFloat16 operations not available')
+    def test_autocast_torch_bf16(self):
+        with torch.backends.cudnn.flags(enabled=True, deterministic=True):
+            for op_with_args in self.autocast_lists.torch_fp16:
+                skip_test = False
+                op, args = op_with_args[0], op_with_args[1]
+                if len(op_with_args) == 3:
+                    skip_test = op_with_args[2]  # TEST_WITH_ROCM
+                if not skip_test:
+                    self._run_autocast_outofplace(op, args, torch.bfloat16)
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_autocast_torch_fp32(self):
         for op_with_args in self.autocast_lists.torch_fp32:
@@ -2805,6 +2815,12 @@ torch.cuda.synchronize()
         with torch.backends.cudnn.flags(enabled=True, deterministic=True):
             for op, args in self.autocast_lists.nn_fp16:
                 self._run_autocast_outofplace(op, args, torch.float16, module=torch._C._nn)
+
+    @unittest.skipIf(not torch.cuda.is_bf16_supported(), 'BFloat16 operations not available')
+    def test_autocast_nn_fp16(self):
+        with torch.backends.cudnn.flags(enabled=True, deterministic=True):
+            for op, args in self.autocast_lists.nn_fp16:
+                self._run_autocast_outofplace(op, args, torch.bfloat16, module=torch._C._nn)
 
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_autocast_nn_fp32(self):
