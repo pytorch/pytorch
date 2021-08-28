@@ -2795,11 +2795,11 @@ torch.cuda.synchronize()
                 op, args = op_with_args[0], op_with_args[1]
                 if len(op_with_args) == 3:
                     skip_test = op_with_args[2]  # TEST_WITH_ROCM
-                should_error_from_not_implemented = 'conv' in op or 'prelu' in op \
-                    or 'thnn' in op or 'fused' in op or 'gru' in op
+                should_error_from_not_implemented = ('conv' in op and not op == '_convolution') or 'prelu' in op or 'thnn' \
+                 in op or 'fused' in op or 'gru' in op
                 if not skip_test:
                     if should_error_from_not_implemented:
-                        with self.assertRaises(RuntimeError,msg=str(op) + ' not supported!'):
+                        with self.assertRaises(RuntimeError,msg=str(op) + ' not supported for bfloat16!'):
                             self._run_autocast_outofplace(op, args, torch.bfloat16)
                     else:
                         if torch.cuda.is_bf16_supported():
