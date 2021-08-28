@@ -183,7 +183,13 @@ void AutogradMeta::set_fw_grad(const Variable& new_grad_, const Variable& self, 
 }
 
 const Variable& AutogradMeta::fw_grad(uint64_t level, const Variable& self) const {
-  // Ensure that concurrent fw_grad() "reads" are thread safe
+  // TLS that disables forward AD
+  // This is only used for custom Function implementation
+  if (!c10::AutogradState::get_tls_state().get_fw_grad_mode()) {
+    return ForwardGrad::undef_grad();
+  }
+
+  // Ensure that concurent fw_grad() "reads" are thread safe
   std::lock_guard<std::mutex> lock(mutex_);
 
   const auto& direct_fw_grad = fw_grad_ ? fw_grad_->value(level) : ForwardGrad::undef_grad();
