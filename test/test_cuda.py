@@ -46,12 +46,15 @@ if not TEST_CUDA:
 TEST_LARGE_TENSOR = TEST_CUDA
 TEST_MEDIUM_TENSOR = TEST_CUDA
 TEST_CUDNN = TEST_CUDA
+TEST_BF16 = False
 if TEST_CUDA:
     torch.ones(1).cuda()  # initialize cuda context
     TEST_CUDNN = TEST_CUDA and (TEST_WITH_ROCM or
                                 torch.backends.cudnn.is_acceptable(torch.tensor(1., device=torch.device('cuda:0'))))
     TEST_LARGE_TENSOR = torch.cuda.get_device_properties(0).total_memory >= 12e9
     TEST_MEDIUM_TENSOR = torch.cuda.get_device_properties(0).total_memory >= 6e9
+    TEST_BF16 = torch.cuda.is_bf16_supported()
+
 
 types = [
     torch.FloatTensor,
@@ -2784,7 +2787,7 @@ torch.cuda.synchronize()
                 if not skip_test:
                     self._run_autocast_outofplace(op, args, torch.float16)
 
-    @unittest.skipIf((not TEST_CUDA) and (not torch.cuda.is_bf16_supported()), 'BFloat16 operations not available')
+    @unittest.skipIf(not TEST_BF16, 'BFloat16 operations not available')
     def test_autocast_torch_bf16(self):
         with torch.backends.cudnn.flags(enabled=True, deterministic=True):
             for op_with_args in self.autocast_lists.torch_fp16:
@@ -2817,7 +2820,7 @@ torch.cuda.synchronize()
             for op, args in self.autocast_lists.nn_fp16:
                 self._run_autocast_outofplace(op, args, torch.float16, module=torch._C._nn)
 
-    @unittest.skipIf((not TEST_CUDA) and (not torch.cuda.is_bf16_supported()), 'BFloat16 operations not available')
+    @unittest.skipIf(not TEST_BF16, 'BFloat16 operations not available')
     def test_autocast_nn_bf16(self):
         with torch.backends.cudnn.flags(enabled=True, deterministic=True):
             for op, args in self.autocast_lists.nn_fp16:
