@@ -208,16 +208,6 @@ std::string MobileModelRunner::get_extra_file_contents(
   return extra[extra_file_name];
 }
 
-// folly::dynamic MobileModelRunner::get_extra_file_as_json(
-//     std::string const& file_path,
-//     std::string const& extra_file_name) {
-//   std::string contents = get_extra_file_contents(file_path, extra_file_name);
-//   if (contents.size() > 1) {
-//     return folly::parseJson(contents);
-//   }
-//   return folly::dynamic::object;
-// }
-
 bool MobileModelRunner::set_has_metal_gpu_operators(
     std::set<std::string> const& op_list) {
   for (std::string const& op : op_list) {
@@ -230,35 +220,6 @@ bool MobileModelRunner::set_has_metal_gpu_operators(
   }
   return false;
 }
-
-// std::set<std::string> MobileModelRunner::get_operators_from_mobile_info_json(
-//     std::string const& file_path) {
-//   folly::dynamic mobile_info_json =
-//       get_extra_file_as_json(file_path, "mobile_info.json");
-//   TORCH_CHECK(
-//       mobile_info_json.isObject(),
-//       "Expected mobile info JSON, got: ",
-//       mobile_info_json.typeName());
-//   folly::dynamic op_list_string = mobile_info_json.at("op_list_string");
-//   TORCH_CHECK(
-//       op_list_string.isString(),
-//       "Expected op_list_string to be a string, got: ",
-//       mobile_info_json.typeName());
-//   std::string op_list_str = op_list_string.asString();
-//   op_list_str = folly::cUnescape<std::string>(op_list_str);
-
-//   folly::dynamic op_list_json = folly::parseJson(op_list_str);
-//   TORCH_CHECK(
-//       op_list_json.isArray(),
-//       "Expected Array JSON, got: ",
-//       op_list_json.typeName());
-
-//   std::set<std::string> op_list_from_mobile_info_json;
-//   for (folly::dynamic const& op : op_list_json) {
-//     op_list_from_mobile_info_json.insert(op.asString());
-//   }
-//   return op_list_from_mobile_info_json;
-// }
 
 void MobileModelRunner::for_each_tensor_in_bundled_inputs(
     std::function<void(::at::Tensor&)> const& func) {

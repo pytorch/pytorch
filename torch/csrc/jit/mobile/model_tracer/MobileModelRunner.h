@@ -9,11 +9,9 @@
 #include "torch/csrc/jit/serialization/export.h"
 #include "torch/script.h"
 
-// #include <folly/String.h>
-// #include <folly/dynamic.h>
-// #include <folly/json.h>
-
-namespace torch::jit::mobile {
+namespace torch {
+namespace jit {
+namespace mobile {
 
 class MobileModelRunner {
   std::shared_ptr<torch::jit::mobile::Module> module_;
@@ -52,24 +50,6 @@ class MobileModelRunner {
   static std::string get_extra_file_contents(
       std::string const& file_path,
       std::string const& extra_file_name);
-
-  /**
-   * Fetches the contents of the file named "extra/" + extra_file_name from the
-   * .ptl archive at location file_path. The contents are returned as a
-   * folly::dynamic.
-   *
-   * An empty folly::dynamic is returned if the file at the location
-   * "extra/" + extra_file_name does not exist or is an empty file
-   * (within the .ptl archive).
-   *
-   * An exception is thrown if the .ptl file at location file_path does not
-   * exist, or if the contents of the file are not a valid JSON object
-   * representation.
-   *
-   */
-  //   static folly::dynamic get_extra_file_as_json(
-  //       std::string const& file_path,
-  //       std::string const& extra_file_name);
 
   /**
    * Returns true if the list of operators passed in has a Metal GPU operator,
@@ -177,4 +157,6 @@ class MobileModelRunner {
   void run_argless_functions(const std::vector<std::string>& functions);
 };
 
-} // namespace torch::jit::mobile
+} // namespace mobile
+} // namespace jit
+} // namespace torch

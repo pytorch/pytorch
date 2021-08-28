@@ -1,7 +1,9 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/mobile/model_tracer/TensorUtils.h>
 
-namespace torch::jit::mobile {
+namespace torch {
+namespace jit {
+namespace mobile {
 void for_each_tensor_in_ivalue(
     c10::IValue& iv,
     std::function<void(::at::Tensor&)> const& func) {
@@ -27,13 +29,6 @@ void for_each_tensor_in_ivalue(
       c10::IValue item = l[i];
       for_each_tensor_in_ivalue(item, func);
     }
-    //    for (auto it = l.begin(); it != l.end(); it++) {
-    //      for_each_tensor_in_ivalue(it, func);
-    //    }
-    //    for (auto& e : l) {
-    //      c10::IValue val(e);
-    //      for_each_tensor_in_ivalue(val, func);
-    //    }
   } else if (iv.isGenericDict()) {
     c10::Dict<c10::IValue, c10::IValue> dict = iv.toGenericDict();
     for (auto& it : dict) {
@@ -44,4 +39,6 @@ void for_each_tensor_in_ivalue(
     AT_ERROR("Unhandled type of IValue. Got ", iv.tagKind());
   }
 }
-} // namespace torch::jit::mobile
+} // namespace mobile
+} // namespace jit
+} // namespace torch

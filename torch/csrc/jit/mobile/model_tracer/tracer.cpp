@@ -18,28 +18,18 @@
  */
 #include <exception>
 #include <fstream>
-#include <iostream>
+#include <ostream>
 #include <sstream>
 
 #include <ATen/core/dispatch/ObservedOperators.h>
-#include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/model_tracer/KernelDTypeTracer.h>
-#include <torch/csrc/jit/mobile/module.h>
-#include "ATen/ATen.h"
+#include <torch/csrc/jit/mobile/model_tracer/MobileModelRunner.h>
+#include <torch/csrc/jit/mobile/model_tracer/OperatorCallTracer.h>
+#include <torch/csrc/jit/mobile/model_tracer/TensorUtils.h>
 #include "ATen/Functions.h"
 #include "c10/core/ScalarType.h"
-// #include <torch/csrc/jit/mobile/model_tracer/TorchScriptModelRunner.h>
-#include <torch/csrc/jit/mobile/model_tracer/OperatorCallTracer.h>
-// #include "caffe2/fb/model_tracer/KernelDTypeTracer.h"
-#include <torch/csrc/jit/mobile/model_tracer/MobileModelRunner.h>
-// #include "caffe2/fb/model_tracer/OperatorCallTracer.h"
-#include <torch/csrc/jit/mobile/model_tracer/TensorUtils.h>
-//#include "caffe2/fb/model_tracer/TorchScriptModelRunner.h"
 #include "torch/csrc/autograd/grad_mode.h"
-#include "torch/csrc/jit/serialization/export.h"
 #include "torch/script.h"
-
-//#include <yaml-cpp/yaml.h>
 
 typedef std::map<std::string, std::set<std::string>> kt_type;
 
@@ -52,20 +42,6 @@ C10_DEFINE_string(
     build_yaml_path,
     "",
     "The path of the output YAML file containing traced operator information.");
-
-// C10_DEFINE_string(model_name, "", "The name of the model being traced.");
-
-// C10_DEFINE_int(model_version, -1, "The version of the model being traced.");
-
-// C10_DEFINE_string(
-//     model_asset_name,
-//     "",
-//     "The asset name within the model being traced.");
-
-// C10_DEFINE_string(
-//     model_asset_md5_hash,
-//     "",
-//     "The asset file's md5 hash within the model being traced.");
 
 const std::vector<std::string> always_included_traced_ops = {
     // The following are called from setup sections.
@@ -96,98 +72,6 @@ const std::vector<std::string> gpu_metal_operators = {
     "aten::reshape",
     "aten::flatten.using_ints",
 };
-
-// void add_model_info_to_yaml(
-//     YAML::Emitter& out,
-//     const std::string& model_name,
-//     const int version,
-//     const std::string& asset_name,
-//     const std::string& asset_md5_hash,
-//     const std::string& backend_name) {
-//   out << YAML::Key << "model";
-//   out << YAML::Value << YAML::BeginMap;
-
-//   out << YAML::Key << "name";
-//   out << YAML::Value << model_name;
-
-//   out << YAML::Key << "version";
-//   out << YAML::Value << version;
-
-//   out << YAML::Key << "asset";
-//   out << YAML::Value << asset_name;
-
-//   out << YAML::Key << "md5_hash";
-//   out << YAML::Value << asset_md5_hash;
-
-//   out << YAML::Key << "backend";
-//   out << YAML::Value << backend_name;
-
-//   out << YAML::EndMap;
-// }
-
-// void add_operators_to_yaml(
-//     YAML::Emitter& out,
-//     std::string const& key,
-//     std::set<std::string> const& ops) {
-//   out << YAML::Key << key;
-//   out << YAML::Value << YAML::BeginSeq;
-//   for (std::string const& op : ops) {
-//     out << op;
-//   }
-//   out << YAML::EndSeq;
-// }
-
-/**
- * This method adds information about the specific dtypes for which we need to
- * include code with respect to the kernel functions (implementation) for
- * PyTorch operators. We only include code for the dtypes that were triggered
- * here, and omit including code for any dtype that doesn't show up during
- * tracing.
- *
- * Typically a PyTorch Kernel (function) may have many code paths that are
- * specialized for many many Tensor dtypes, so it's not one per kernel function,
- * but there could be many per kernel function. The tag isn't a kernel function
- * name, but some fragment of the kernel function implementation itself.
- *
- */
-// void add_kernel_metadata_to_yaml(
-//     YAML::Emitter& out,
-//     std::string const& key,
-//     kt_type const& kernel_metadata) {
-//   out << YAML::Key << key;
-//   out << YAML::Value << YAML::BeginMap;
-
-//   for (auto const& kt_it : kernel_metadata) {
-//     out << kt_it.first;
-//     out << YAML::Value << YAML::BeginSeq;
-//     for (auto const& dtype : kt_it.second) {
-//       out << dtype;
-//     }
-//     out << YAML::EndSeq;
-//   }
-//   out << YAML::EndMap;
-// }
-
-/**
- * This method adds information about if this model will be used for training
- * use cases right now it uses if the string "backward" appears in any of the
- * traced operators as a heuristic
- */
-// void add_training_flag_to_yaml(
-//     YAML::Emitter& out,
-//     std::string const& key,
-//     std::set<std::string> const& ops) {
-//   bool is_training = false;
-//   for (const std::string& op : ops) {
-//     if (op.find("backward") != std::string::npos) {
-//       is_training = true;
-//       break;
-//     }
-//   }
-//   out << YAML::Key << key;
-//   out << YAML::Value << is_training;
-//   out << YAML::EndMap;
-// }
 
 #define REQUIRE_STRING_ARG(name)                            \
   if (FLAGS_##name.empty()) {                               \
@@ -254,6 +138,13 @@ void consume_tensor(at::Tensor& t) {
   c.copy_(t.cpu());
 }
 
+void printYAML(std::ostream& out, const std::set<std::string>& operator_list) {
+  std::cout << "test" << std::endl;
+  for (auto& it : operator_list) {
+    out << "- " << it << std::endl;
+  }
+}
+
 /**
  * Converts a pytorch model (full/lite) to lite interpreter model for
  * mobile, and additionally writes out a list of root and called
@@ -265,19 +156,15 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
-  //  REQUIRE_STRING_ARG(model_input_path);
-  //  REQUIRE_STRING_ARG(build_yaml_path);
-  //  REQUIRE_STRING_ARG(model_name);
-  //   REQUIRE_STRING_ARG(model_asset_name);
-  //   REQUIRE_STRING_ARG(model_asset_md5_hash);
-  //   REQUIRE_INT_ARG(model_version);
-  std::string model_input_path =
-      "/Users/chenlai/Documents/pytorch/tracing/deeplabv3_scripted_with_bundled_input.ptl";
-  //  std::string model_input_path =
-  //  "/Users/chenlai/Documents/pytorch/tracing/dummy_model_with_bundled_input.ptl";
-  const std::string input_module_path = model_input_path;
+  REQUIRE_STRING_ARG(model_input_path);
+  REQUIRE_STRING_ARG(build_yaml_path);
+
+  const std::string input_module_path = FLAGS_model_input_path;
+
+  std::ofstream yaml_out(FLAGS_build_yaml_path);
 
   std::cout << "Processing: " << input_module_path << std::endl;
+  std::cout << "Output: " << FLAGS_build_yaml_path << std::endl;
 
   at::globalContext().setQEngine(at::QEngine::QNNPACK);
   c10::ObservedOperators::getUnobservedOperatorList().clear();
@@ -393,49 +280,5 @@ int main(int argc, char* argv[]) {
   for (auto& it : traced_operators) {
     std::cout << "- " << it << std::endl;
   }
-  //   YAML::Emitter out;
-
-  //   if (traced_operators.size() <= always_included_traced_ops.size() ||
-  //       called_kernel_tags.size() == 0) {
-  //     throw std::runtime_error(folly::sformat(
-  //         "Error traced_operators size: {}, "
-  //         "Kernel_metadata size: {}, "
-  //         "Expected kernel to be > 0 and the traced operator list "
-  //         "to be bigger then the default size {}. "
-  //         "Please ensure tracer was run with "
-  //         "'buck run -c pt.disable_per_op_profiling=0 -c
-  //         pt.enable_record_kernel_dtype=1'", traced_operators.size(),
-  //         called_kernel_tags.size(),
-  //         always_included_traced_ops.size()));
-  //   }
-
-  //   out << YAML::BeginMap;
-  //   add_model_info_to_yaml(
-  //       out,
-  //       FLAGS_model_name,
-  //       FLAGS_model_version,
-  //       FLAGS_model_asset_name,
-  //       FLAGS_model_asset_md5_hash,
-  //       folly::join(",", enabled_backends));
-  //   add_operators_to_yaml(out, "root_operators", root_ops);
-  //   add_operators_to_yaml(out, "traced_operators", traced_operators);
-  //   add_kernel_metadata_to_yaml(out, "kernel_metadata", called_kernel_tags);
-  //   add_training_flag_to_yaml(out, "train", traced_operators);
-  //   out << YAML::EndMap;
-
-  //   std::ofstream yaml_out(FLAGS_build_yaml_path);
-  //   yaml_out
-  //       << "# This is an auto-generated file\n"
-  //       << "# @"
-  //       << "generated\n"
-  //       << "#\n"
-  //       << "# Please do not modify it by hand.\n"
-  //       << "# To re-generate, please run:\n"
-  //       << "# cd ~/fbsource/fbcode && buck run caffe2/torch/fb/mobile/cli:cli
-  //       -- --gen_model_config"
-  //       << " --model_name " << FLAGS_model_name << " --model_version "
-  //       << FLAGS_model_version << " --asset_name " << FLAGS_model_asset_name
-  //       << "\n"
-  //       << "#\n"
-  //       << out.c_str() << std::endl;
+  printYAML(yaml_out, traced_operators);
 }
