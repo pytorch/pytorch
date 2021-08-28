@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <aten/src/ATen/core/jit_type.h>
+#include <ATen/core/jit_type.h>
 #include <test/cpp/jit/test_utils.h>
 #include <torch/csrc/jit/ir/ir.h>
 
