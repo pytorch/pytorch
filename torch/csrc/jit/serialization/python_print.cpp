@@ -27,7 +27,7 @@ static bool isValidIdentifierChar(char c, size_t pos) {
 static bool isValidIdentifier(const std::string& name) {
   if (name.size() == 0)
     return false;
-  for (size_t i = 0; i < name.size(); ++i) {
+  for (const auto i : c10::irange(name.size())) {
     if (!isValidIdentifierChar(name[i], i))
       return false;
   }
@@ -315,7 +315,7 @@ struct PythonPrintImpl {
     // We will probably need to optimize this at some point using hashing.
     if (val.isTensor()) {
       auto& t = val.toTensor();
-      for (size_t i = 0; i < constant_table_.size(); ++i) {
+      for (const auto i : c10::irange(constant_table_.size())) {
         if (!constant_table_[i].isTensor()) {
           continue;
         }
@@ -432,7 +432,8 @@ struct PythonPrintImpl {
   size_t level = 0;
   // indent to the current indent level
   TaggedStringStream& indent() {
-    for (size_t i = 0; i < level; ++i) {
+    for (const auto i : c10::irange(level)) {
+      (void)i; // Suppress unused variable warning
       body_ << "  ";
     }
     return body_;
@@ -522,7 +523,7 @@ struct PythonPrintImpl {
   void printAnnotatedAssignment(
       at::ArrayRef<Value*> lhs,
       at::ArrayRef<Value*> rhs) {
-    for (size_t i = 0; i < lhs.size(); ++i) {
+    for (const auto i : c10::irange(lhs.size())) {
       indent();
       body_ << useOf(lhs[i]);
       if (requiresAnnotation(lhs[i], rhs[i])) {
@@ -865,8 +866,7 @@ struct PythonPrintImpl {
     auto checkSubvalue = [&hasNonASCII](const IValue& val) {
       if (val.isString()) {
         const auto maxASCII = 0x7fu;
-        for (auto& c : val.toStringRef()) {
-          // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
+        for (auto c : val.toStringRef()) {
           if (c > maxASCII) {
             hasNonASCII = true;
             return true;
@@ -1164,7 +1164,7 @@ struct PythonPrintImpl {
         // details.
         size_t necessary_args =
             CalculateNecessaryArgs(schema.arguments(), node->inputs());
-        for (size_t i = 0; i < necessary_args; ++i) {
+        for (const auto i : c10::irange(necessary_args)) {
           if (i > 0)
             stmt << ", ";
           auto v = useOf(node->inputs().at(i));
@@ -1205,7 +1205,8 @@ struct PythonPrintImpl {
   IValue createBroadList(dtype value, const int64_t& N) {
     c10::List<dtype> repeated;
     repeated.reserve(N);
-    for (int i = 0; i < N; ++i) {
+    for (const auto i : c10::irange(N)) {
+      (void)i; // Suppress unused variable warning
       repeated.push_back(value);
     }
     return repeated;
