@@ -2799,7 +2799,7 @@ torch.cuda.synchronize()
                     or 'thnn' in op or 'fused' in op or 'gru' in op
                 if not skip_test:
                     if should_error_from_not_implemented:
-                        with self.assertRaises(RuntimeError):
+                        with self.assertRaises(RuntimeError,msg=str(op) + ' not supported!'):
                             self._run_autocast_outofplace(op, args, torch.bfloat16)
                     else:
                         if torch.cuda.is_bf16_supported():
