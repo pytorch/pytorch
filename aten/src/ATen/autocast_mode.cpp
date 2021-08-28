@@ -502,16 +502,10 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
   KERNEL_CPU(ADD_NS(instance_norm), "instance_norm", Tensor (const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&, const c10::optional<Tensor>&, const c10::optional<Tensor>&, bool, double, double, bool), fp32)
   KERNEL_CPU(ADD_NS(grid_sampler), "grid_sampler", Tensor(const Tensor &, const Tensor &, int64_t, int64_t, bool), fp32)
   KERNEL_CPU(ADD_NS(polar), "polar", Tensor(const Tensor &, const Tensor &), fp32)
-  KERNEL_CPU(ADD_NS(take_along_dim), "take_along_dim", Tensor(const Tensor &, const Tensor &, c10::optional<int64_t>), fp32)
   KERNEL_CPU(ADD_NS(multinomial), "multinomial", Tensor(const Tensor &, int64_t, bool, c10::optional<at::Generator>), fp32)
   KERNEL_CPU(ADD_NS(poisson), "poisson", Tensor(const Tensor &, c10::optional<at::Generator>), fp32)
-  KERNEL_CPU(ADD_NS(cosh), "cosh", Tensor(const Tensor &), fp32)
   KERNEL_CPU(ADD_NS(fmod), "fmod.Tensor", Tensor(const Tensor &, const Tensor &), fp32)
   KERNEL_CPU(ADD_NS(fmod), "fmod.Scalar", Tensor(const Tensor &, const Scalar &), fp32)
-  KERNEL_CPU(ADD_NS(mvlgamma), "mvlgamma", Tensor(const Tensor &, int64_t), fp32)
-  KERNEL_CPU(ADD_NS(nan_to_num), "nan_to_num", Tensor(const Tensor &, c10::optional<double>, c10::optional<double>, c10::optional<double>), fp32)
-  KERNEL_CPU(ADD_NS(nextafter), "nextafter", Tensor(const Tensor &, const Tensor &), fp32)
-  KERNEL_CPU(ADD_NS(sinh), "sinh", Tensor(const Tensor &), fp32)
   KERNEL_CPU(ADD_NS(prod), "prod", Tensor(const Tensor &, c10::optional<at::ScalarType>), fp32)
   KERNEL_CPU(ADD_NS(prod), "prod.dim_int", Tensor(const Tensor &, int64_t, bool, c10::optional<at::ScalarType>), fp32)
   KERNEL_CPU(ADD_NS(prod), "prod.dim_Dimname", Tensor(const Tensor &, at::Dimname, bool, c10::optional<at::ScalarType>), fp32)
@@ -524,7 +518,6 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
   KERNEL_CPU(ADD_NS(nanquantile), "nanquantile.new", Tensor(const Tensor &, const Tensor &, c10::optional<int64_t>, bool, c10::string_view), fp32)
   KERNEL_CPU(ADD_NS(nanquantile), "nanquantile.new_scalar", Tensor(const Tensor &, double, c10::optional<int64_t>, bool, c10::string_view), fp32)
   KERNEL_CPU(ADD_NS(stft), "stft", Tensor(const Tensor &, int64_t, c10::optional<int64_t>, c10::optional<int64_t>, const c10::optional<Tensor> &, bool, c10::optional<bool>, c10::optional<bool>), fp32)
-  KERNEL_CPU(ADD_NS(istft), "istft", Tensor(const Tensor &, int64_t, c10::optional<int64_t>, c10::optional<int64_t>, const c10::optional<Tensor> &, bool, bool, c10::optional<bool>, c10::optional<int64_t>, bool), fp32)
   KERNEL_CPU(ADD_NS(cdist), "cdist", Tensor(const Tensor &, const Tensor &, double, c10::optional<int64_t>), fp32)
   KERNEL_CPU(ADD_NS(cross), "cross", Tensor(const Tensor &, const Tensor &, c10::optional<int64_t>), fp32)
   KERNEL_CPU(ADD_NS(cumprod), "cumprod", Tensor(const Tensor &, int64_t, c10::optional<at::ScalarType>), fp32)
@@ -535,7 +528,6 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
   KERNEL_CPU(ADD_NS(diagflat), "diagflat", Tensor(const Tensor &, int64_t), fp32)
   KERNEL_CPU(ADD_NS(histc), "histc", Tensor(const Tensor &, int64_t, const at::Scalar &, const at::Scalar &), fp32)
   KERNEL_CPU(ADD_NS(logcumsumexp), "logcumsumexp", Tensor(const Tensor &, int64_t), fp32)
-  KERNEL_CPU(ADD_NS(renorm), "renorm", Tensor(const Tensor &, const at::Scalar &, int64_t, const at::Scalar &), fp32)
   KERNEL_CPU(ADD_NS(searchsorted), "searchsorted.Tensor", Tensor(const Tensor &, const Tensor &, bool, bool), fp32)
   KERNEL_CPU(ADD_NS(searchsorted), "searchsorted.Scalar", Tensor(const Tensor &, const at::Scalar &, bool, bool), fp32)
   KERNEL_CPU(ADD_NS(trace), "trace", Tensor(const Tensor &), fp32)
@@ -560,6 +552,7 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
   KERNEL_CPU(ADD_NS(max_pool3d), "max_pool3d", Tensor(const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, bool), fp32)
   KERNEL_CPU(ADD_NS(max_unpool2d), "max_unpool2d", Tensor(const Tensor &, const Tensor &, IntArrayRef), fp32)
   KERNEL_CPU(ADD_NS(max_unpool3d), "max_unpool3d", Tensor(const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef), fp32)
+  KERNEL_CPU(ADD_NS(adaptive_avg_pool1d), "adaptive_avg_pool1d", Tensor(const Tensor &, IntArrayRef), fp32)
   KERNEL_CPU(ADD_NS(adaptive_avg_pool3d), "adaptive_avg_pool3d", Tensor(const Tensor &, IntArrayRef), fp32)
   KERNEL_CPU(ADD_NS(reflection_pad1d), "reflection_pad1d", Tensor(const Tensor &, IntArrayRef), fp32)
   KERNEL_CPU(ADD_NS(reflection_pad2d), "reflection_pad2d", Tensor(const Tensor &, IntArrayRef), fp32)
@@ -570,23 +563,19 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
   KERNEL_CPU(ADD_NS(hardshrink), "hardshrink", Tensor(const Tensor &, const Scalar &), fp32)
   KERNEL_CPU(ADD_NS(hardsigmoid), "hardsigmoid", Tensor(const Tensor &), fp32)
   KERNEL_CPU(ADD_NS(hardswish), "hardswish", Tensor(const Tensor &), fp32)
-  KERNEL_CPU(ADD_NS(leaky_relu), "leaky_relu", Tensor(const Tensor &, const Scalar &), fp32)
   KERNEL_CPU(ADD_NS(log_sigmoid), "log_sigmoid", Tensor(const Tensor &), fp32)
   KERNEL_CPU(ADD_NS(prelu), "prelu", Tensor(const Tensor &, const Tensor &), fp32)
-  KERNEL_CPU(ADD_NS(rrelu), "rrelu", Tensor(const Tensor &, const at::Scalar &, const at::Scalar &, bool, c10::optional<at::Generator>), fp32)
   KERNEL_CPU(ADD_NS(selu), "selu", Tensor(const Tensor &), fp32)
   KERNEL_CPU(ADD_NS(celu), "celu", Tensor(const Tensor &, const Scalar &), fp32)
   KERNEL_CPU(ADD_NS(softplus), "softplus", Tensor(const Tensor &, const Scalar &, const Scalar &), fp32)
   KERNEL_CPU(ADD_NS(softshrink), "softshrink", Tensor(const Tensor &, const Scalar &), fp32)
   KERNEL_CPU(ADD_NS(group_norm), "group_norm", Tensor(const Tensor &, int64_t, const c10::optional<Tensor> &, const c10::optional<Tensor> &, double, bool), fp32)
+  KERNEL_CPU(ADD_NS(smooth_l1_loss), "smooth_l1_loss", Tensor (const Tensor &, const Tensor &, int64_t, double), fp32)
   KERNEL_CPU(ADD_NS(mse_loss), "mse_loss", Tensor(const Tensor &, const Tensor &, int64_t), fp32)
   KERNEL_CPU(ADD_NS(ctc_loss), "ctc_loss.IntList", Tensor(const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, int64_t, int64_t, bool), fp32)
   KERNEL_CPU(ADD_NS(ctc_loss), "ctc_loss.Tensor", Tensor(const Tensor &, const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t, bool), fp32)
   KERNEL_CPU(ADD_NS(kl_div), "kl_div", Tensor(const Tensor &, const Tensor &, int64_t, bool), fp32)
-  KERNEL_CPU(ADD_NS(margin_ranking_loss), "margin_ranking_loss", Tensor(const Tensor &, const Tensor &, const Tensor &, double, int64_t), fp32)
   KERNEL_CPU(ADD_NS(multilabel_margin_loss), "multilabel_margin_loss", Tensor(const Tensor &, const Tensor &, int64_t), fp32)
-  KERNEL_CPU(ADD_NS(pixel_shuffle), "pixel_shuffle", Tensor(const Tensor &, int64_t), fp32)
-  KERNEL_CPU(ADD_NS(pixel_unshuffle), "pixel_unshuffle", Tensor(const Tensor &, int64_t), fp32)
   KERNEL_CPU(ADD_NS(fft_fft), "fft_fft", Tensor(const Tensor &, c10::optional<int64_t>, int64_t, c10::optional<c10::string_view>), fp32)
   KERNEL_CPU(ADD_NS(fft_ifft), "fft_ifft", Tensor(const Tensor &, c10::optional<int64_t>, int64_t, c10::optional<c10::string_view>), fp32)
   KERNEL_CPU(ADD_NS(fft_fft2), "fft_fft2", Tensor(const Tensor &, c10::optional<at::IntArrayRef>, at::IntArrayRef, c10::optional<c10::string_view>), fp32)
@@ -601,8 +590,6 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
   KERNEL_CPU(ADD_NS(fft_irfftn), "fft_irfftn", Tensor(const Tensor &, c10::optional<at::IntArrayRef>, c10::optional<at::IntArrayRef>, c10::optional<c10::string_view>), fp32)
   KERNEL_CPU(ADD_NS(fft_hfft), "fft_hfft", Tensor(const Tensor &, c10::optional<int64_t>, int64_t, c10::optional<c10::string_view>), fp32)
   KERNEL_CPU(ADD_NS(fft_ihfft), "fft_ihfft", Tensor(const Tensor &, c10::optional<int64_t>, int64_t, c10::optional<c10::string_view>), fp32)
-  KERNEL_CPU(ADD_NS(special_exp2), "special_exp2", Tensor(const Tensor &), fp32)
-  KERNEL_CPU(ADD_NS(special_gammaln), "special_gammaln", Tensor(const Tensor &), fp32)
   KERNEL_CPU(ADD_NS(conv_tbc), "conv_tbc", Tensor(const Tensor &, const Tensor &, const Tensor &, int64_t), fp32)
   KERNEL_CPU(ADD_NS(linalg_matrix_norm), "linalg_matrix_norm", Tensor(const Tensor &, const at::Scalar &, at::IntArrayRef, bool, c10::optional<at::ScalarType>), fp32)
   KERNEL_CPU(ADD_NS(linalg_matrix_norm), "linalg_matrix_norm.str_ord", Tensor(const Tensor &, c10::string_view, at::IntArrayRef, bool, c10::optional<at::ScalarType>), fp32)
@@ -621,18 +608,6 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
   KERNEL_CPU(ADD_NS(linalg_tensorsolve), "linalg_tensorsolve", Tensor(const Tensor &, const Tensor &, c10::optional<at::IntArrayRef>), fp32)
   KERNEL_CPU(ADD_NS(fake_quantize_per_tensor_affine), "fake_quantize_per_tensor_affine", Tensor (const Tensor &, double, int64_t, int64_t, int64_t), fp32)
   KERNEL_CPU(ADD_NS(glu), "glu", Tensor (const Tensor &, int64_t), fp32)
-
-  m.impl(TORCH_SELECTIVE_NAME("aten::frexp.Tensor"),
-         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
-                                 std::tuple<Tensor, Tensor> (const Tensor &),
-                                 std::tuple<Tensor, Tensor> (const Tensor &),
-                                 &ADD_NS(frexp)>::type::call)));
-
-  m.impl(TORCH_SELECTIVE_NAME("aten::unique_consecutive"),
-         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
-                                 std::tuple<Tensor, Tensor, Tensor> (const Tensor &, bool, bool, c10::optional<int64_t>),
-                                 std::tuple<Tensor, Tensor, Tensor> (const Tensor &, bool, bool, c10::optional<int64_t>),
-                                 &ADD_NS(unique_consecutive)>::type::call)));
 
   m.impl(TORCH_SELECTIVE_NAME("aten::cummax"),
          TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
