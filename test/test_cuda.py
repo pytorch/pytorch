@@ -2795,7 +2795,8 @@ torch.cuda.synchronize()
                 op, args = op_with_args[0], op_with_args[1]
                 if len(op_with_args) == 3:
                     skip_test = op_with_args[2]  # TEST_WITH_ROCM
-                should_error_from_not_implemented = 'conv' in op or 'prelu' in op or 'rnn' in op or 'lstm' in op or 'fused' in op or 'gru' in op
+                should_error_from_not_implemented = 'conv' in op or 'prelu' in op or 'rnn' \
+                    in op or 'lstm' in op or 'fused' in op or 'gru' in op
                 if not skip_test:
                     if should_error_from_not_implemented:
                         with unittest.assertRaisesRegex(RuntimeError, 'not supported for'):
