@@ -2,7 +2,7 @@ import timeit
 import torch
 import torch.nn.functional as F
 
-torch._C._jit_override_can_fuse_on_gpu(True)
+torch._C._jit_override_can_fuse_on_cpu(True)
 torch._C._debug_set_fusion_group_inlining(False)
 torch.set_num_threads(1)
 
@@ -49,7 +49,7 @@ unary_ops = [
 print("{:20s} {:>10s} {:>10s} {:>10s}".format("op", "eager", "nnc", "speedup"))
 
 for op in unary_ops:
-    x = torch.rand((1 << 27), device="cuda:0")
+    x = torch.rand((1024, 1024))
     traced = torch.jit.trace(lambda x: op(x), (x))
 
     # Warmup.
@@ -63,8 +63,8 @@ for op in unary_ops:
 
     # Benchmark.
     bench_iters = 100
-    teager = timeit.timeit(stmt="op(x); torch.cuda.synchronize()", globals=globals(), number=bench_iters)
-    tjit = timeit.timeit(stmt="traced(x); torch.cuda.synchronize()", globals=globals(), number=bench_iters)
+    teager = timeit.timeit(stmt="op(x)", globals=globals(), number=bench_iters)
+    tjit = timeit.timeit(stmt="traced(x)", globals=globals(), number=bench_iters)
     print(f"{op.__name__:20s} {teager:10.3f} {tjit:10.3f} {teager/tjit:10.2f}")
 
 def test_batch_norm():
@@ -82,9 +82,9 @@ def test_batch_norm():
         [5, 64, 56, 56],
         [5, 512, 7, 7]]
     for n, c, h, w in batch_norm_shapes:
-        x = torch.rand((n, c, h, w), device="cuda")
-        y = torch.rand((c), device="cuda")
-        z = torch.rand((c), device="cuda")
+        x = torch.rand((n, c, h, w))
+        y = torch.rand((c))
+        z = torch.rand((c))
         traced = torch.jit.trace(lambda x, y, z: op(x, y, z), (x, y, z))
 
         # Warmup.
