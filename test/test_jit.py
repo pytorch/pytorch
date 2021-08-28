@@ -61,6 +61,7 @@ from jit.test_convert_activation import TestFunctionalToInplaceActivation, TestI
 from jit.test_parametrization import TestParametrization  # noqa: F401
 from jit.test_attr import TestGetDefaultAttr  # noqa: F401
 from jit.test_aten_pow import TestAtenPow  # noqa: F401
+from jit.test_models import MnistNet
 
 # Torch
 from torch import Tensor
@@ -16014,9 +16015,11 @@ class TestJitGeneratedFunctional(JitTestCase):
 class TestJitAutocast(JitTestCase):
     def setUp(self):
         super(TestJitAutocast, self).setUp()
-        from jit.test_models import MnistNet
         self.models = [MnistNet()]
         self.inputs = [torch.randn(5, 1, 28, 28, device='cpu')]
+
+    def tearDown(self):
+        super(TestJitAutocast, self).tearDown()
 
     def test_generate_autocast_jit_trace_model(self):
         def test_generate_autocast_jit_trace_model(model, x):
