@@ -869,6 +869,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                 # Get the float linear and attach qscheme and qparams
                 # the the module
                 float_linear = self.linear
+                fused_linear = None
                 if isinstance(float_linear, (torch.nn.qat.Linear, torch.nn.intrinsic.qat.LinearReLU)):
                     float_linear = float_linear.to_float()
                     # change qat linear to linear
@@ -876,10 +877,12 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                     setattr(modules[parent_name], name, float_linear)
                     # Attach weight fake quant to the linear module
                     if isinstance(float_linear, torch.nn.intrinsic.LinearReLU):
+                        fused_linear = float_linear
                         float_linear = float_linear[0]
                     weight_post_process = self.linear.weight_fake_quant
                 else:
                     if isinstance(float_linear, torch.nn.intrinsic.LinearReLU):
+                        fused_linear = float_linear
                         float_linear = self.linear[0]  # type: ignore[index]
                     # Attach the weight observer to the module
                     weight_post_process = qconfig.weight()  # type: ignore[union-attr]
@@ -887,7 +890,21 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                     weight_post_process(float_linear.weight)  # type: ignore[operator]
 
                 weight_qparams = get_qparam_dict(weight_post_process)
-                _to_reference(float_linear, weight_qparams)
+                # TODO: include the configuration in backend_config_dict
+                # we can have a map from module to reference module
+                # and allow user to register new ones
+                qlinear_cls = get_static_quant_module_class(
+                    type(float_linear), is_reference=is_reference)
+                ref_linear = qlinear_cls.from_float(float_linear, weight_qparams)
+
+                # if the parent is a fused linear (Sequential), we can replace the first
+                # item to ref linear, otherwise we can update
+                # the linear instance in the module tree
+                if fused_linear is not None:
+                    fused_linear[0] = ref_linear
+                else:
+                    parent_name, name = _parent_name(self.linear_node.target)
+                    setattr(modules[parent_name], name, ref_linear)
                 op_out = quantized_graph.create_node(
                     'call_module',
                     self.linear_node.target,
