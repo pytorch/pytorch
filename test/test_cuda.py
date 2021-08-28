@@ -2799,13 +2799,13 @@ torch.cuda.synchronize()
                     in op or 'lstm' in op or 'fused' in op or 'gru' in op
                 if not skip_test:
                     if should_error_from_not_implemented:
-                        with unittest.TestCase.assertRaisesRegex(RuntimeError, 'not supported for'):
+                        with self.assertRaisesRegex(RuntimeError, 'not supported for'):
                             self._run_autocast_outofplace(op, args, torch.bfloat16)
                     else:
                         if torch.cuda.is_bf16_supported():
                             self._run_autocast_outofplace(op, args, torch.bfloat16)
                         else:
-                            with unittest.TestCase.assertRaisesRegex(RuntimeError, 'Device does not support bfloat16'):
+                            with self.assertRaisesRegex(RuntimeError, 'Device does not support bfloat16'):
                                 self._run_autocast_outofplace(op, args, torch.bfloat16)
 
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
@@ -2828,17 +2828,19 @@ torch.cuda.synchronize()
     def test_autocast_nn_fp16(self):
         with torch.backends.cudnn.flags(enabled=True, deterministic=True):
             for op, args in self.autocast_lists.nn_fp16:
-                if torch.cuda.is_bf16_supported():
-                    self._run_autocast_outofplace(op, args, torch.float16, module=torch._C._nn)
-                else:
-                    with unittest.TestCase.assertRaisesRegex(RuntimeError, 'Device does not support bfloat16'):
-                        self._run_autocast_outofplace(op, args, torch.float16, module=torch._C._nn)
+                self._run_autocast_outofplace(op, args, torch.float16, module=torch._C._nn)
+
+
 
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_autocast_nn_bf16(self):
         with torch.backends.cudnn.flags(enabled=True, deterministic=True):
             for op, args in self.autocast_lists.nn_fp16:
-                self._run_autocast_outofplace(op, args, torch.bfloat16, module=torch._C._nn)
+                if torch.cuda.is_bf16_supported():
+                    self._run_autocast_outofplace(op, args, torch.bfloat16, module=torch._C._nn)
+                else:
+                    with self.assertRaisesRegex(RuntimeError, 'Device does not support bfloat16'):
+                        self._run_autocast_outofplace(op, args, torch.bfloat16, module=torch._C._nn)
 
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_autocast_nn_fp32(self):
