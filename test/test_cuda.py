@@ -2832,7 +2832,6 @@ torch.cuda.synchronize()
                     else:
                         with unittest.assertRaisesRegex(RuntimeError, 'Device does not support bfloat16'):
                             self._run_autocast_outofplace(op, args, torch.float16, module=torch._C._nn)
-                
 
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_autocast_nn_bf16(self):
