@@ -2795,7 +2795,7 @@ torch.cuda.synchronize()
                 op, args = op_with_args[0], op_with_args[1]
                 if len(op_with_args) == 3:
                     skip_test = op_with_args[2]# TEST_WITH_ROCM
-                skip_test = True if ('conv' in op or 'prelu' in op) else skip_test
+                skip_test = True if ('conv' in op or 'prelu' in op or 'fused' in op) else skip_test
                 if not skip_test:
                     self._run_autocast_outofplace(op, args, torch.bfloat16)
 
