@@ -2794,6 +2794,7 @@ torch.cuda.synchronize()
                     skip_test = op_with_args[2]  # TEST_WITH_ROCM
                 if not skip_test:
                     self._run_autocast_outofplace(op, args, torch.bfloat16)
+
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_autocast_torch_fp32(self):
         for op_with_args in self.autocast_lists.torch_fp32:
