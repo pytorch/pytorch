@@ -4580,13 +4580,13 @@ class TestQuantizeFxOps(QuantizationTestCase):
             reference_order_check = [
                 ns.call_function(torch.quantize_per_tensor),
                 ns.call_method('dequantize'),
-                ns.call_module(nn.Conv2d),
+                ns.call_module(nnqr.Conv2d),
                 ns.call_function(torch.quantize_per_tensor),
                 ns.call_method('dequantize'),
                 ns.call_module(nn.Sigmoid),
                 ns.call_function(torch.quantize_per_tensor),
                 ns.call_method('dequantize'),
-                ns.call_module(nn.Conv2d),
+                ns.call_module(nnqr.Conv2d),
                 ns.call_function(torch.quantize_per_tensor),
                 ns.call_method('dequantize'),
             ]
