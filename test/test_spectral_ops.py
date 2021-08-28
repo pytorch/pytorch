@@ -658,7 +658,7 @@ class TestFFT(TestCase):
 
             # Test fftshift sorts the fftfreq output
             shifted = torch.fft.fftshift(x)
-            self.assertTrue(torch.allclose(shifted, shifted.sort().values))
+            self.assertEqual(shifted, shifted.sort().values)
             self.assertEqual(sorted_fft_freqs, shifted)
 
             # And ifftshift is the inverse

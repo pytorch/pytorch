@@ -138,10 +138,12 @@ class CIWorkflow:
     only_build_on_pull_request: bool = False
     only_run_smoke_tests_on_pull_request: bool = False
     num_test_shards_on_pull_request: int = -1
+    distributed_test: bool = True
 
     # The following variables will be set as environment variables,
     # so it's easier for both shell and Python scripts to consume it if false is represented as the empty string.
     enable_jit_legacy_test: YamlShellBool = "''"
+    enable_distributed_test: YamlShellBool = "''"
     enable_multigpu_test: YamlShellBool = "''"
     enable_nogpu_no_avx_test: YamlShellBool = "''"
     enable_nogpu_no_avx2_test: YamlShellBool = "''"
@@ -153,6 +155,9 @@ class CIWorkflow:
 
         if not self.on_pull_request:
             self.only_build_on_pull_request = False
+
+        if self.distributed_test:
+            self.enable_distributed_test = 1
 
         # If num_test_shards_on_pull_request is not user-defined, default to num_test_shards unless we are
         # only running smoke tests on the pull request.
@@ -191,8 +196,10 @@ class CIWorkflow:
         with open(output_file_path, "w") as output_file:
             GENERATED = "generated"  # Note that please keep the variable GENERATED otherwise phabricator will hide the whole file
             output_file.writelines([f"# @{GENERATED} DO NOT EDIT MANUALLY\n"])
-            output_file.write(workflow_template.render(asdict(self)))
-            output_file.write("\n")
+            content = workflow_template.render(asdict(self))
+            output_file.write(content)
+            if content[-1] != "\n":
+                output_file.write("\n")
         print(output_file_path)
 
 
@@ -265,18 +272,32 @@ LINUX_WORKFLOWS = [
             labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU}
         ),
     ),
-    # CIWorkflow(
-    #     arch="linux",
-    #     build_environment="paralleltbb-linux-xenial-py3.6-gcc5.4",
-    #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3.6-gcc5.4",
-    #     test_runner_type=LINUX_CPU_TEST_RUNNER,
-    # ),
-    # CIWorkflow(
-    #     arch="linux",
-    #     build_environment="parallelnative-linux-xenial-py3.6-gcc5.4",
-    #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3.6-gcc5.4",
-    #     test_runner_type=LINUX_CPU_TEST_RUNNER,
-    # ),
+    CIWorkflow(
+        arch="linux",
+        build_environment="paralleltbb-linux-xenial-py3.6-gcc5.4",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3.6-gcc5.4",
+        test_runner_type=LINUX_CPU_TEST_RUNNER,
+        # This is a master only job despit on_pull_request is set to True
+        on_pull_request=True,
+        ciflow_config=CIFlowConfig(
+            enabled=True,
+            trigger_action_only=True,
+            labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU},
+        ),
+    ),
+    CIWorkflow(
+        arch="linux",
+        build_environment="parallelnative-linux-xenial-py3.6-gcc5.4",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3.6-gcc5.4",
+        test_runner_type=LINUX_CPU_TEST_RUNNER,
+        # This is a master only job despit on_pull_request is set to True
+        on_pull_request=True,
+        ciflow_config=CIFlowConfig(
+            enabled=True,
+            trigger_action_only=True,
+            labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU},
+        ),
+    ),
     # CIWorkflow(
     #     arch="linux",
     #     build_environment="pure_torch-linux-xenial-py3.6-gcc5.4",
@@ -490,7 +511,7 @@ BAZEL_WORKFLOWS = [
     CIWorkflow(
         arch="linux",
         build_environment="linux-xenial-py3.6-gcc7-bazel-test",
-        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3.6-gcc7",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-cuda10.2-cudnn7-py3.9-gcc7",
         test_runner_type=LINUX_CPU_TEST_RUNNER,
         on_pull_request=True,
         ciflow_config=CIFlowConfig(
@@ -504,6 +525,7 @@ if __name__ == "__main__":
     jinja_env = jinja2.Environment(
         variable_start_string="!{{",
         loader=jinja2.FileSystemLoader(str(GITHUB_DIR.joinpath("templates"))),
+        undefined=jinja2.StrictUndefined,
     )
     template_and_workflows = [
         (jinja_env.get_template("linux_ci_workflow.yml.j2"), LINUX_WORKFLOWS),
