@@ -1,5 +1,4 @@
 import gc
-import types
 import torch
 
 from ._utils import _dummy_type
@@ -10,10 +9,8 @@ if not hasattr(torch._C, '_CudaStreamBase'):
     torch._C.__dict__['CUDAGraph'] = _dummy_type('CUDAGraph')
     torch._C.__dict__['graph_pool_handle'] = _dummy_type('graph_pool_handle')
 
-from torch._C import (
-    CUDAGraph,
-    graph_pool_handle
-)
+from torch._C import CUDAGraph  # noqa: F401
+from torch._C import graph_pool_handle
 
 class graph(object):
     r"""
