@@ -3,9 +3,13 @@
 #include <set>
 #include <string>
 
-namespace torch::jit::mobile {
+namespace torch {
+namespace jit {
+namespace mobile {
 KernelDTypeTracer::kernel_tags_type& KernelDTypeTracer::getCalledKernelTags() {
   static kernel_tags_type called_kernel_tags;
   return called_kernel_tags;
 }
-} // namespace torch::jit::mobile
+} // namespace mobile
+} // namespace jit
+} // namespace torch
