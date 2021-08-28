@@ -2799,13 +2799,13 @@ torch.cuda.synchronize()
                     in op or 'lstm' in op or 'fused' in op or 'gru' in op
                 if not skip_test:
                     if should_error_from_not_implemented:
-                        with unittest.assertRaisesRegex(RuntimeError, 'not supported for'):
+                        with unittest.TestCase.assertRaisesRegex(RuntimeError, 'not supported for'):
                             self._run_autocast_outofplace(op, args, torch.bfloat16)
                     else:
                         if torch.cuda.is_bf16_supported():
                             self._run_autocast_outofplace(op, args, torch.bfloat16)
                         else:
-                            with unittest.assertRaisesRegex(RuntimeError, 'Device does not support bfloat16'):
+                            with unittest.TestCase.assertRaisesRegex(RuntimeError, 'Device does not support bfloat16'):
                                 self._run_autocast_outofplace(op, args, torch.bfloat16)
 
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
@@ -2831,7 +2831,7 @@ torch.cuda.synchronize()
                 if torch.cuda.is_bf16_supported():
                     self._run_autocast_outofplace(op, args, torch.float16, module=torch._C._nn)
                 else:
-                    with unittest.assertRaisesRegex(RuntimeError, 'Device does not support bfloat16'):
+                    with unittest.TestCase.assertRaisesRegex(RuntimeError, 'Device does not support bfloat16'):
                         self._run_autocast_outofplace(op, args, torch.float16, module=torch._C._nn)
 
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
