@@ -4760,6 +4760,7 @@ class TestLinalg(TestCase):
 
     def _gen_shape_inputs_linalg_triangular_solve(self, shape, dtype, device, well_conditioned=False):
         make_arg = partial(make_tensor, dtype=dtype, device=device)
+        make_randn = partial(torch.randn, dtype=dtype, device=device)
         b, n, k = shape
         for left, uni, expand_a, tr_a, conj_a, expand_b, tr_b, conj_b in product((True, False), repeat=8):
             if (conj_a or conj_b) and not dtype.is_complex:
@@ -4778,23 +4779,22 @@ class TestLinalg(TestCase):
                 size_b = size_b[1:]
 
             if well_conditioned:
-                PLU = torch.lu_unpack(*torch.lu(torch.randn(*size_a)))
+                PLU = torch.lu_unpack(*torch.lu(make_randn(*size_a)))
                 if uni:
                     # A = L from PLU
                     A = PLU[1].transpose(-2, -1).contiguous()
                 else:
                     # A = U from PLU
                     A = PLU[2].contiguous()
-                    d = A.diagonal(0, -2, -1)
-                    d[d.abs() < 1e-6] = 1.
             else:
                 A = make_arg(size_a)
-                diag = A.diagonal(0, -2, -1)
-                if uni:
-                    diag.fill_(1.)
-                else:
-                    diag[diag.abs() < 1e-6] = 1.
                 A.triu_()
+
+            diag = A.diagonal(0, -2, -1)
+            if uni:
+                diag.fill_(1.)
+            else:
+                diag[diag.abs() < 1e-6] = 1.
 
             B = make_arg(size_b)
 
@@ -4840,6 +4840,7 @@ class TestLinalg(TestCase):
             for A, B, left, upper, uni in gen_inputs((b, n, k), dtype, device):
                 self._test_linalg_solve_triangular(A, B, left, upper, uni)
 
+    @onlyCUDA
     @skipCUDAIfNoMagma
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-2, torch.complex64: 1e-2,
