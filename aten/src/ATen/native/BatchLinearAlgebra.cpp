@@ -3804,17 +3804,6 @@ Tensor _det_lu_based_helper_backward_helper(
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ solve_triangular ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 namespace {
-void checkSameDtype(const Tensor& t1,
-                    const Tensor& t2,
-                    const char* const f_name,
-                    const char* const t1_name,
-                    const char* const t2_name) {
-  TORCH_CHECK(t1.scalar_type() == t2.scalar_type(),
-              f_name, ": Expected ", t1_name, " and ", t2_name, " to have the same dtype. ",
-              "Got ", t1_name, ".dtype = ", t1.scalar_type(),
-              " and ", t2_name, ".dtype = ", t2.scalar_type());
-}
-
 void checkIsMatrix(const Tensor& t,
                    const char* const f_name,
                    const char* const t_name) {
@@ -3837,8 +3826,6 @@ void checkInputsSolver(const Tensor& A,
                        const Tensor& out,
                        const bool left,
                        const char* const f_name) {
-  checkSameDtype(A, B, f_name, "A", "B");
-  checkSameDtype(A, out, f_name, "A", "out");
   checkIsSquareMatrix(A, f_name, "A");
   checkIsMatrix(B, f_name, "B");
   TORCH_CHECK(left ? A.size(-2) == B.size(-2) : A.size(-1) == B.size(-1),
@@ -3884,6 +3871,7 @@ Tensor& linalg_solve_triangular_out(
   std::tie(B_, A_) = _linalg_broadcast_batch_dims(B, A, /*don't check errors*/nullptr);
 
   // We'll write F-contig / F-transpose for FORTRAN contiguous / FORTRAN transpose etc
+  // We say that a matrix is F-ready if it's F-contig OR F-transpose
   // At this point, A, B have been broadcasted but may or may not be F-ready
 
   // The following algorithm minimises copies and allocations. In pseudocode:
