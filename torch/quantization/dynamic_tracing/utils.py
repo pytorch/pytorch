@@ -30,17 +30,21 @@ SeenOp = collections.namedtuple(
     [
         'idx',
         'type',
+        # Note: FQN refers to the current module for modules and to the parent
+        # module for functions
+        'fqn',
         'input_tensor_ids',
         'output_tensor_ids',
     ],
 )
 def seen_op_repr(self) -> str:
     s = f"(type): {self.type}\n"
+    s += f"     (fqn): {self.fqn}\n"
     s += f"     (input_tensor_ids): {self.input_tensor_ids}\n"
     s += f"     (output_tensor_ids): {self.output_tensor_ids}"
     return s
 
-SeenOp.__repr__ = seen_op_repr
+SeenOp.__repr__ = seen_op_repr  # type: ignore[assignment]
 
 QTensorInfo = collections.namedtuple(
     'QTensorInfo',

@@ -3,6 +3,7 @@ import operator
 
 import torch
 import torch.fx
+from .quantization_state import AutoQuantizationState
 
 class AllModuleTracer(torch.fx.Tracer):
     """
@@ -30,6 +31,15 @@ class AllModuleTracer(torch.fx.Tracer):
             args = tuple(new_args)
         return args
 
+    def _maybe_update_outputs(self, outputs, output_qtensor_infos):
+        # TODO(future PR): handle other output types
+        assert len(outputs) == 1 and len(output_qtensor_infos) == 1
+        qtensor_info = output_qtensor_infos[0]
+        if qtensor_info.inf_dtype != torch.float:
+            dequant = torch.fx.Proxy(outputs[0]).dequantize().node
+            outputs = (dequant,)
+        return outputs
+
     def create_node(self, kind, target, args, kwargs, name=None, type_expr=None):
         if target == operator.add:
             target = torch.add
@@ -37,33 +47,42 @@ class AllModuleTracer(torch.fx.Tracer):
             target = torch.mul
 
         if kind == 'call_function':
-            if self.root._auto_quant_state.cur_op_needs_hooks(target):
-                self.root._auto_quant_state.validate_cur_op(target)
+            qstate = self.root._auto_quant_state
+            assert isinstance(qstate, AutoQuantizationState)
+            if qstate.cur_op_needs_hooks(target):
+                qstate.validate_cur_op(target)
 
                 old_target = target
                 target, arg_quant_infos, additional_kwargs = \
-                    self.root._auto_quant_state.get_op_convert_info(
-                        target, unwrap_scale_zp=True)
+                    qstate.get_op_convert_info(target, unwrap_scale_zp=True)
 
                 args = self._maybe_update_args_with_quants(args, arg_quant_infos)
                 kwargs.update(**additional_kwargs)
 
-                self.root._auto_quant_state.mark_cur_op_complete(old_target)
+                qstate.mark_cur_op_complete(old_target)
 
         elif kind == 'call_module':
             # TODO: handle fqn
             module_instance = getattr(self.root, target)
-            if self.root._auto_quant_state.cur_op_needs_hooks(module_instance):
-                self.root._auto_quant_state.validate_cur_op(module_instance)
+            qstate = self.root._auto_quant_state
+            assert isinstance(qstate, AutoQuantizationState)
+            if qstate.cur_op_needs_hooks(module_instance):
+                qstate.validate_cur_op(module_instance)
 
                 _, arg_quant_infos, additional_kwargs = \
-                    self.root._auto_quant_state.get_op_convert_info(
+                    qstate.get_op_convert_info(
                         module_instance, unwrap_scale_zp=True)
 
                 args = self._maybe_update_args_with_quants(args, arg_quant_infos)
                 kwargs.update(**additional_kwargs)
 
-                self.root._auto_quant_state.mark_cur_op_complete(module_instance)
+                qstate.mark_cur_op_complete(module_instance)
+
+        elif kind == 'output':
+            qstate = self.root._auto_quant_state
+            assert isinstance(qstate, AutoQuantizationState)
+            output_qtensor_infos = qstate.get_output_qtensor_infos()
+            args = self._maybe_update_outputs(args, output_qtensor_infos)
 
         out = super().create_node(kind, target, args, kwargs, name, type_expr)
         return out
@@ -88,8 +107,8 @@ def rewrite_for_scripting(mod: torch.nn.Module) -> torch.nn.Module:
             setattr(copied, name, rewrite_helper(child))
 
         if hasattr(mod, '_auto_quant_state') and \
-                mod._auto_quant_state.has_at_least_one_seen_op():  # type: ignore[union-attr, arg-type]
-            copied._auto_quant_state.reset_to_new_call()  # type: ignore[union-attr]
+                mod._auto_quant_state.has_at_least_one_seen_op():  # type: ignore[union-attr, arg-type, operator]
+            copied._auto_quant_state.reset_to_new_call()  # type: ignore[union-attr, operator]
 
             graph = AllModuleTracer().trace(copied)
             return torch.fx.GraphModule(copied, graph, copied.__class__.__name__)

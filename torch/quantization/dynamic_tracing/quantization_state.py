@@ -33,9 +33,11 @@ class AutoQuantizationState(torch.nn.Module):
         # this is a ModuleDict in order to properly register observers
         # to be within the module hierarchy.
         self.tensor_id_to_observer = torch.nn.ModuleDict()
-
         # TODO(future PR): include kwargs
         self.idx_to_seen_ops = {}
+        # qtensor_info objects of tensor outputs of the module, specified
+        # in order of iteration through the output type
+        self.output_qtensor_infos = []
 
     def has_at_least_one_seen_op(self) -> bool:
         return len(self.idx_to_seen_ops) > 0
@@ -46,11 +48,21 @@ class AutoQuantizationState(torch.nn.Module):
         for k, v in self.idx_to_seen_ops.items():
             s += f"  {k}: {v}\n"
         s += "},\n"
-        s += "(idx): " + str(self.idx) + ","
+        s += "(idx): " + str(self.idx) + ",\n"
+        s += "(output_qtensor_infos): [\n"
+        for v in self.output_qtensor_infos:
+            s += f"  {v}\n"
+        s += "]"
         return s
 
     def _get_cur_seen_op(self):
         return self.idx_to_seen_ops[str(self.idx)]
+
+    def reset_to_new_call(self):
+        """
+        Resets the internal op counter to start a new top level module call
+        """
+        self.idx = 0
 
     def cur_op_needs_hooks(self, cur_op: Callable) -> bool:
         return op_needs_quantization(cur_op)
@@ -58,8 +70,8 @@ class AutoQuantizationState(torch.nn.Module):
     def validate_cur_op(self, cur_op: Callable) -> None:
         """
         This function is expected to be called before any new function or
-        module call. It validates that the new function or module is
-        of the expected type based on the order of execution.
+        module call which needs hooks. It validates that the new function or
+        module is of the expected type based on the order of execution.
         """
         assert self.cur_op_needs_hooks(cur_op)
         try:
@@ -82,7 +94,7 @@ class AutoQuantizationState(torch.nn.Module):
             if cur_op != expected_op:
                 _raise_obs_op_mismatch(cur_op, expected_op)
 
-    def mark_cur_op_complete(self, cur_op) -> None:
+    def mark_cur_op_complete(self, cur_op: Callable) -> None:
         """
         This function is expected to be called after a function or module
         processing is complete.
@@ -90,14 +102,63 @@ class AutoQuantizationState(torch.nn.Module):
         if op_needs_quantization(cur_op):
             self.idx += 1
 
+    def outputs_prepare_hook(
+        self,
+        outputs: Any,
+        first_call: bool,
+        qtensor_id: List[int],
+    ) -> Any:
+        """
+        This function is expected to be called on the outputs of a prepared
+        module right before they are returned to the parent.
+        """
+        if first_call:
+            if isinstance(outputs, torch.Tensor):
+                print('outputs_prepare_hook', outputs)
+                if not hasattr(outputs, '_qtensor_info'):
+                    outputs._qtensor_info = QTensorInfo(qtensor_id[0], torch.float)
+                    qtensor_id[0] += 1
+                self.output_qtensor_infos.append(outputs._qtensor_info)
+            else:
+                raise AssertionError(
+                    f'module outputs with type {type(outputs)} are not handled yet')
+
+        return outputs
+
+    def outputs_convert_hook(
+        self,
+        outputs: Any,
+    ) -> Any:
+        """
+        This function is expected to be called on the outputs of a converted
+        module right before they are returned to the parent.
+        """
+        # print('outputs_convert_hook', outputs)
+
+        if isinstance(outputs, torch.Tensor):
+            qtensor_info = self.output_qtensor_infos[0]
+            # for now, assume outputs are fp32
+            # TODO(future PR): honor the settings
+            if qtensor_info.inf_dtype != torch.float:
+                outputs = outputs.dequantize()
+
+        return outputs
+
+    def get_output_qtensor_infos(self) -> List[QTensorInfo]:
+        """
+        Used by the conversion to torch.jit.script.
+        """
+        return self.output_qtensor_infos
+
     def op_prepare_before_hook(
         self,
         op: Callable,
-        args: Tuple[Any],
+        args: Tuple[Any, ...],
         kwargs: Dict[str, Any],
         first_call: bool,
         qtensor_id: List[int],
-    ) -> Tuple[Tuple[Any], Dict[str, Any]]:
+        fqn: str,
+    ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
         """
         This function is expected to be called on args and kwargs of
         `op` directly before `op` is executed.
@@ -138,10 +199,10 @@ class AutoQuantizationState(torch.nn.Module):
             if key not in self.idx_to_seen_ops:
                 if not isinstance(op, torch.nn.Module):
                     self.idx_to_seen_ops[key] = SeenOp(
-                        self.idx, op, arg_tensor_ids, [])
+                        self.idx, op, fqn, arg_tensor_ids, [])
                 else:
                     self.idx_to_seen_ops[key] = SeenOp(
-                        self.idx, type(op), arg_tensor_ids, [])
+                        self.idx, type(op), fqn, arg_tensor_ids, [])
 
             return args, kwargs
 
@@ -164,7 +225,15 @@ class AutoQuantizationState(torch.nn.Module):
         qtensor_id: List[int],
     ) -> Any:
         """
-        This function is called after a function call
+        This function is called after an op call on a prepared model.
+
+        If `first_call` is True, we
+        * create an observer for the output, if needed, and record it in
+          `tensor_id_to_observer`
+        * amend the current seen op with the tensor ID of the output
+
+        If `first_call` is False, we
+        * observe the output, if needed
         """
         assert self.cur_op_needs_hooks(op)
         if first_call:
@@ -188,15 +257,15 @@ class AutoQuantizationState(torch.nn.Module):
     def op_convert_before_hook(
         self,
         op: Callable,
-        args,
-        kwargs,
-    ) -> Tuple[Callable, Any, Any]:
+        args: Tuple[Any, ...],
+        kwargs: Dict[str, Any],
+    ) -> Tuple[Callable, Tuple[Any, ...], Dict[str, Any]]:
         """
-        This function is called before executing `op` during quantized
-        inference.
+        This function is called before an op call in a converted model.
 
-        For each arg in `args`, quantizes it if necessary. Returns
-        potentially modified `op, potentially modified `args`,
+        For each arg in `args`, quantizes it if necessary.
+
+        Returns potentially modified `op`, potentially modified `args`,
         potentially modified `kwargs`.
         """
         assert self.cur_op_needs_hooks(op)
@@ -213,18 +282,22 @@ class AutoQuantizationState(torch.nn.Module):
                 scale, zp = quant_info
                 arg = torch.quantize_per_tensor(arg, scale, zp, torch.quint8)
             new_args.append(arg)
-        new_args = tuple(new_args)
 
         # potentially extend kwargs with scale and zero_point
         kwargs.update(**additional_kwargs)
 
-        return op, new_args, kwargs
+        return op, tuple(new_args), kwargs
 
     def op_convert_after_hook(
         self,
-        func: Callable,
+        op: Callable,
         output,
     ) -> Any:
+        """
+        This function is called aftern an op call in a converted model.
+
+        TODO: add dequant, if needed
+        """
         return output
 
     def get_op_convert_info(
@@ -233,13 +306,8 @@ class AutoQuantizationState(torch.nn.Module):
         unwrap_scale_zp: bool = False,
     ) -> Tuple[Callable, Any, Any]:
         """
-        This util function is intended to be called before executing
-        `op` in inference mode, or before creating an FX graph for
-        executing it.
-
-        Returns the information needed for any modifications to `op`,
-        `args`, `kwargs`, but does not actually modify them, leaving that to
-        the caller.
+        Returns the information needed for convert time modifications to `op`.
+        Has no side effects.
 
         For `op`, returns either the original callable unchanged,
         or the corresponding quantized target. Note: always returns the original
@@ -298,11 +366,10 @@ class AutoQuantizationState(torch.nn.Module):
         first input needs a quant, this function will return
 
           [(scale0, zero_point0), None]
-
         """
         assert self.cur_op_needs_hooks(cur_op)
         seen_op = self._get_cur_seen_op()
-        quant_infos = []
+        quant_infos: List[Optional[Tuple[float, int]]] = []
         for input_arg_idx, input_arg in enumerate(seen_op.input_tensor_ids):
             tensor_id = input_arg.id
             if str(tensor_id) in self.tensor_id_to_observer and \
@@ -314,9 +381,3 @@ class AutoQuantizationState(torch.nn.Module):
             else:
                 quant_infos.append(None)
         return quant_infos
-
-    def reset_to_new_call(self):
-        """
-        Resets the internal op counter to start a new top level module call
-        """
-        self.idx = 0

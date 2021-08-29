@@ -1,6 +1,6 @@
 import torch
 from torch.fx.node import map_aggregate
-from typing import Tuple, Any
+from typing import Tuple, Any, List
 
 from .quantization_state import (
     AutoQuantizationState,
@@ -21,9 +21,21 @@ def is_leaf(m: torch.nn.Module) -> bool:
     )
 
 
+def _trace_with_inputs(model: torch.nn.Module, example_inputs: Tuple[Any]) -> None:
+    # create the graph
+    with torch.no_grad():
+        old_training = model.training
+        model.eval()
+        model(*example_inputs)
+        if old_training:
+            model.train()
+
+
 def add_auto_observation(
     model : torch.nn.Module,
     example_inputs: Tuple[Any],
+    # input_dtypes: Any,  # must be same structure as model inputs
+    # output_dtypes: Any,  # must be same structure as model outputs
 ) -> torch.nn.Module:
     def convert_to_interception_proxy(x):
         if isinstance(x, torch.Tensor):
@@ -40,6 +52,7 @@ def add_auto_observation(
     # if op_n had a tensor output with id=1, and op_n+2 had a tensor input with
     # id=1, we know that the output of op_n is the input to op_n+2.
     qtensor_id = [0]
+    module_id_to_fqn: Dict[int, str] = {}
 
     class QuantizationInterceptionProxy(torch.Tensor):
         """
@@ -65,13 +78,16 @@ def add_auto_observation(
             can_have_hooks = cur_module and cur_module in modules_to_introspect
             needs_hooks = can_have_hooks and \
                 cur_module._auto_quant_state.cur_op_needs_hooks(func)
+            qstate = None
+            fqn = module_id_to_fqn[id(cur_module)] if cur_module else None
 
             if needs_hooks:
+                qstate = cur_module._auto_quant_state
                 if not first_call:
-                    cur_module._auto_quant_state.validate_cur_op(func)
+                    qstate.validate_cur_op(func)
                 # run "before" hook
-                args, kwargs = cur_module._auto_quant_state.op_prepare_before_hook(
-                    func, args, kwargs, first_call, qtensor_id)
+                args, kwargs = qstate.op_prepare_before_hook(
+                    func, args, kwargs, first_call, qtensor_id, fqn)
 
             output = super().__torch_function__(func, types, args, kwargs)
             # TODO: is this right? Don't really understand this
@@ -82,11 +98,10 @@ def add_auto_observation(
 
             if needs_hooks:
                 # run "after" hook
-                output = \
-                    cur_module._auto_quant_state.op_prepare_after_hook(
-                        func, output, first_call, qtensor_id)
+                output = qstate.op_prepare_after_hook(
+                    func, output, first_call, qtensor_id)
                 # mark completion
-                cur_module._auto_quant_state.mark_cur_op_complete(func)
+                qstate.mark_cur_op_complete(func)
 
             return output
 
@@ -141,36 +156,56 @@ def add_auto_observation(
                     parent_module = module_stack[-1] if len(module_stack) else None
                     module_stack.append(self)
 
+                    fqn = module_id_to_fqn[id(self)]
+
                     can_have_hooks = parent_module is not None and \
                         hasattr(parent_module, '_auto_quant_state')
                     needs_hooks = can_have_hooks and \
-                        parent_module._auto_quant_state.cur_op_needs_hooks(cur_module)
+                        parent_module._auto_quant_state.cur_op_needs_hooks(cur_module)  # type: ignore[union-attr, operator]
+                    qstate = None
 
                     if needs_hooks:
+                        assert parent_module is not None
+                        qstate = parent_module._auto_quant_state
+                        assert isinstance(qstate, AutoQuantizationState)
                         if not first_call:
-                            parent_module._auto_quant_state.validate_cur_op(cur_module)
+                            qstate.validate_cur_op(cur_module)
                         # "before" hook
-                        args, kwargs = parent_module._auto_quant_state.op_prepare_before_hook(
-                            cur_module, args, kwargs, first_call, qtensor_id)
+                        args, kwargs = qstate.op_prepare_before_hook(
+                            cur_module, args, kwargs, first_call, qtensor_id,
+                            fqn)
 
                     output = orig_module_call(self, *args, **kwargs)
 
                     if needs_hooks:
                         # "after" hook
-                        output = parent_module._auto_quant_state.op_prepare_after_hook(
+                        assert isinstance(qstate, AutoQuantizationState)
+                        output = qstate.op_prepare_after_hook(
                             cur_module, output, first_call, qtensor_id)
                         # mark completion
-                        parent_module._auto_quant_state.mark_cur_op_complete(cur_module)
+                        qstate.mark_cur_op_complete(cur_module)
 
                     return output
                 finally:
                     module_stack.pop()
                     cur_module = old_module
+
             torch.nn.Module.__call__ = record_module
             nonlocal first_call
             try:
+                # Create a list before iterating because we are adding new
+                # named modules inside the loop.
                 named_modules = list(self.named_modules())
                 for k, v in named_modules:
+
+                    # k is the global FQN, i.e. 'foo.bar.baz'
+                    # v is the module instance
+                    #
+                    # we need to associate the global FQN with SeenOp
+                    # for modules, this is the module FQN
+                    # for functions, this is the parent module FQN
+                    module_id_to_fqn[id(v)] = k
+
                     if hasattr(v, 'qconfig') and not is_leaf(v):
                         if first_call:
                             v._auto_quant_state = AutoQuantizationState(v.qconfig)
@@ -179,22 +214,35 @@ def add_auto_observation(
                             if not isinstance(v, AutoQuantizationState):
                                 assert hasattr(v, '_auto_quant_state')
                                 v._auto_quant_state.reset_to_new_call()
-                return super().__call__(*new_args, **new_kwargs)
+
+                # module_id_to_fqn[id(self)] = ''
+
+                needs_io_hooks = hasattr(self, '_auto_quant_state')
+
+                # handle module input dtype conversions
+                # TODO(future PR): instead of only happening on the top level
+                # module, the dtype conversions need to happen on all non-leaf
+                # modules
+                # TODO(implement)
+
+                output = super().__call__(*new_args, **new_kwargs)
+
+                # handle module output dtype conversions
+                if needs_io_hooks:
+                    qstate = self._auto_quant_state
+                    assert isinstance(qstate, AutoQuantizationState)
+                    output = qstate.outputs_prepare_hook(
+                        output, first_call, qtensor_id)
+
+                return output
             finally:
                 torch.nn.Module.__call__ = orig_module_call
                 first_call = False
 
 
     model.__class__ = QuantizationInterceptionModule
-
     # create the graph
-    with torch.no_grad():
-        old_training = model.training
-        model.eval()
-        model(*example_inputs)
-        if old_training:
-            model.train()
-
+    _trace_with_inputs(model, example_inputs)
     return model
 
 
@@ -243,19 +291,19 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                 hasattr(cur_module, '_auto_quant_state')
             needs_hooks = can_have_hooks and \
                 cur_module._auto_quant_state.cur_op_needs_hooks(func)
+            qstate = None
 
             if needs_hooks:
-                cur_module._auto_quant_state.validate_cur_op(func)
-                func, args, kwargs = \
-                    cur_module._auto_quant_state.op_convert_before_hook(
-                        func, args, kwargs)
+                qstate = cur_module._auto_quant_state
+                qstate.validate_cur_op(func)
+                func, args, kwargs = qstate.op_convert_before_hook(
+                    func, args, kwargs)
 
             output = super().__torch_function__(func, types, args, kwargs)
 
             if needs_hooks:
-                output = cur_module._auto_quant_state.op_convert_after_hook(
-                    func, output)
-                cur_module._auto_quant_state.mark_cur_op_complete(func)
+                output = qstate.op_convert_after_hook(func, output)
+                qstate.mark_cur_op_complete(func)
 
             return output
 
@@ -313,22 +361,22 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                         hasattr(parent_module, '_auto_quant_state')
                     needs_hooks = can_have_hooks and \
                         parent_module._auto_quant_state.cur_op_needs_hooks(cur_module)
+                    qstate = None
 
                     if needs_hooks:
-                        parent_module._auto_quant_state.validate_cur_op(cur_module)
+                        qstate = parent_module._auto_quant_state
+                        qstate.validate_cur_op(cur_module)
                         # before hook
-                        _, args, kwargs = \
-                            parent_module._auto_quant_state.op_convert_before_hook(
-                                cur_module, args, kwargs)
+                        _, args, kwargs = qstate.op_convert_before_hook(
+                            cur_module, args, kwargs)
 
                     # execute original module forward
                     output = orig_module_call(self, *args, **kwargs)
 
                     if needs_hooks:
                         # after hook
-                        output = parent_module._auto_quant_state.op_convert_after_hook(
-                            cur_module, output)
-                        parent_module._auto_quant_state.mark_cur_op_complete(cur_module)
+                        output = qstate.op_convert_after_hook(cur_module, output)
+                        qstate.mark_cur_op_complete(cur_module)
 
                     return output
                 finally:
@@ -340,14 +388,26 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                 for k, v in self.named_modules():
                     if hasattr(v, '_auto_quant_state'):
                         v._auto_quant_state.reset_to_new_call()
-                rv = super().__call__(*new_args, **new_kwargs)
+
+                needs_io_hooks = hasattr(self, '_auto_quant_state')
+
+                # handle module input dtype conversions
+                # TODO(implement)
+
+                output = super().__call__(*new_args, **new_kwargs)
+
+                # handle module output dtype conversions
+                if needs_io_hooks:
+                    qstate = self._auto_quant_state
+                    assert isinstance(qstate, AutoQuantizationState)
+                    output = qstate.outputs_convert_hook(output)
 
                 def unwrap_proxy(a):
                     if isinstance(a, QuantizationDispatchProxy):
                         a.__class__ = torch.Tensor  # type: ignore[assignment]
                     return a
-                rv = map_aggregate(rv, unwrap_proxy)
-                return rv
+                output = map_aggregate(output, unwrap_proxy)
+                return output
             finally:
                 torch.nn.Module.__call__ = orig_module_call
 
