@@ -3846,6 +3846,7 @@ new_module_tests = [
         constructor_args=(-1,),
         cpp_constructor_args='torch::nn::SoftminOptions(-1)',
         input_size=(3, 4, 10),
+        reference_fn=single_batch_reference_fn,
         desc='no_batch_dim',
     ),
     dict(
