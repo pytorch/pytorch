@@ -4763,6 +4763,7 @@ class TestLinalg(TestCase):
         make_randn = partial(torch.randn, dtype=dtype, device=device)
         b, n, k = shape
         for left, uni, expand_a, tr_a, conj_a, expand_b, tr_b, conj_b in product((True, False), repeat=8):
+            # expand means that we generate a batch of matrices with a stride of zero in the batch dimension
             if (conj_a or conj_b) and not dtype.is_complex:
                 continue
             # We just expand on the batch size
@@ -4812,7 +4813,6 @@ class TestLinalg(TestCase):
                 B = B.expand(b, n, k)
             yield A, B, left, not tr_a, uni
 
-
     def _test_linalg_solve_triangular(self, A, B, left, upper, uni):
         X = torch.linalg.solve_triangular(A, B, left=left, upper=upper, unitriangular=uni)
         if left:
@@ -4854,6 +4854,40 @@ class TestLinalg(TestCase):
         for shape in (magma, iterative_cublas):
             for A, B, left, upper, uni in gen_inputs(shape, dtype, device, well_conditioned=True):
                 self._test_linalg_solve_triangular(A, B, left, upper, uni)
+
+    @dtypes(*floating_and_complex_types())
+    @precisionOverride({torch.float32: 1e-2, torch.complex64: 1e-2,
+                        torch.float64: 1e-8, torch.complex128: 1e-8})
+    def test_linalg_solve_triangular_broadcasting(self, device, dtype):
+        make_arg = partial(make_tensor, dtype=dtype, device=device)
+
+        sizes = (((2, 1, 3, 4, 4), (2, 1, 3, 4, 6)),
+                 ((2, 1, 3, 4, 4), (4, 6)),
+                 ((4, 4), (2, 1, 3, 4, 2)),
+                 ((1, 3, 1, 4, 4), (2, 1, 3, 4, 5)))
+        for size_A, size_B in sizes:
+            for left, upper, uni in itertools.product([True, False], repeat=3):
+                A = make_arg(size_A)
+                if upper:
+                    A.triu_()
+                else:
+                    A.tril_()
+                diag = A.diagonal(0, -2, -1)
+                if uni:
+                    diag.fill_(1.)
+                else:
+                    diag[diag.abs() < 1e-6] = 1.
+                B = make_arg(size_B)
+                if not left:
+                    B.transpose_(-2, -1)
+
+                X = torch.linalg.solve_triangular(A, B, left=left, upper=upper, unitriangular=uni)
+                if left:
+                    B_other = A @ X
+                else:
+                    B_other = X @ A
+
+                self.assertEqual(*torch.broadcast_tensors(B, B_other))
 
     def triangular_solve_test_helper(self, A_dims, b_dims, upper, unitriangular,
                                      device, dtype):
