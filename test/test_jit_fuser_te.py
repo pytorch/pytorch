@@ -85,10 +85,6 @@ class TestTEFuser(JitTestCase):
         self.old_te_must_use_llvm_cpu = torch._C._jit_get_te_must_use_llvm_cpu()
         torch._C._jit_set_te_must_use_llvm_cpu(False)
 
-        # TODO: CPU fuser currently is disabled when multithreading.
-        self.old_fuse_parallel = torch._C._jit_texpr_parallel_cpu_enabled()
-        torch._C._jit_set_texpr_parallel_cpu_enabled(True)
-
         self.devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         self.int_dtypes = [
             torch.int8,
@@ -116,7 +112,6 @@ class TestTEFuser(JitTestCase):
 
         torch._C._jit_set_texpr_fuser_enabled(self.texpr_fuser_state)
         torch._C._jit_set_te_must_use_llvm_cpu(self.old_te_must_use_llvm_cpu)
-        torch._C._jit_set_texpr_parallel_cpu_enabled(self.old_fuse_parallel)
 
     def assertLastGraphAllFused(self):
         self.assertAllFused(torch.jit.last_executed_optimized_graph())
@@ -1274,8 +1269,11 @@ class TestTEFuser(JitTestCase):
             lambda x: torch.threshold(x, 0, -10),
             lambda x: torch.clamp(x, -10, 10),
         ]
+        gpu_only = {torch.erf, torch.erfc}
         sizes = [(1,), (2,), (4, 4)]
         for dtype, op, device, size in product(self.dtypes, unary_ops, self.devices, sizes):
+            if op in gpu_only and device == "cpu":
+                continue
             try:
                 x = self.data_for(dtype, device, size=size)
                 fn = apply(op)
@@ -1913,6 +1911,31 @@ class TestTEFuser(JitTestCase):
             # incorrectly-sized tensor, since size=1 has been burned in.
             x = torch.ones((8, 1))
             torch.testing.assert_close(eager(x), script(x))
+
+    def test_batch_norm(self):
+        def test(fn, args):
+            trace = torch.jit.trace(fn, args)
+            self.assertAllFused(trace.graph_for(*args))
+            torch.testing.assert_allclose(fn(*args), trace(*args))
+
+        def bn(i, x):
+            return torch.batch_norm(i, x, x, x, x, False, 0.1, 1e-4, False).relu()
+
+        def bn_no_weight(i, x):
+            return torch.batch_norm(i, None, x, x, x, False, 0.1, 1e-4, False).relu()
+
+        def bn_no_bias(i, x):
+            return torch.batch_norm(i, x, None, x, x, False, 0.1, 1e-4, False).relu()
+
+        def bn_neither(i, x):
+            return torch.batch_norm(i, None, None, x, x, False, 0.1, 1e-4, False).relu()
+
+        for device in self.devices:
+            i = torch.randn(4, 16, 32, 40, device=device)
+            x = torch.randn(16, device=device)
+            for fn in [bn, bn_no_weight, bn_no_bias, bn_neither]:
+                test(fn, (i, x))
+
 
 works_list = [
     '__radd__',
