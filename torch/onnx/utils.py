@@ -499,7 +499,7 @@ def _model_to_graph(model, args, verbose=False,
         if example_outputs is None:
             example_outputs = _get_example_outputs(model, args)
         elif isinstance(example_outputs, list):
-            # exmaple_outpus specified
+            # example_outpus specified
             example_outputs = [example_outputs]
 
         out_vars, desc = torch.jit._flatten(tuple(example_outputs))
