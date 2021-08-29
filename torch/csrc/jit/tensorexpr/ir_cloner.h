@@ -9,101 +9,54 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
-class Add;
-class Sub;
-class Mul;
-class Div;
-class Mod;
-class Max;
-class Min;
-class And;
-class Or;
-class Xor;
-class Lshift;
-class Rshift;
-class CompareSelect;
-
-#define IMM_DECLARE(Type, Name) class Name##Imm;
-AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_DECLARE);
-#undef IMM_DECLARE
-
-class Cast;
-class BitCast;
-class Var;
-class Buf;
-class Ramp;
-class Load;
-class For;
-class Block;
-class Store;
-class Broadcast;
-class IfThenElse;
-class ExprHandle;
-class Expr;
-class Intrinsics;
-class Allocate;
-class Free;
-class Let;
-class Cond;
-class Stmt;
-class Term;
-class Polynomial;
-class RoundOff;
-class MaxTerm;
-class MinTerm;
-class ReduceOp;
-class AtomicAdd;
-class SyncThreads;
-class ExternalCall;
-
 class TORCH_API IRCloner : public IRMutator {
  public:
   ~IRCloner() override = default;
-  Expr* mutate(Add* v) override;
-  Expr* mutate(Sub* v) override;
-  Expr* mutate(Mul* v) override;
-  Expr* mutate(Div* v) override;
-  Expr* mutate(Mod* v) override;
-  Expr* mutate(Max* v) override;
-  Expr* mutate(Min* v) override;
-  Expr* mutate(And* v) override;
-  Expr* mutate(Or* v) override;
-  Expr* mutate(Xor* v) override;
-  Expr* mutate(Lshift* v) override;
-  Expr* mutate(Rshift* v) override;
-  Expr* mutate(CompareSelect* v) override;
-#define IMM_MUTATE_DECLARE(Type, Name) Expr* mutate(Name##Imm* v) override;
+  ExprPtr mutate(AddPtr v) override;
+  ExprPtr mutate(SubPtr v) override;
+  ExprPtr mutate(MulPtr v) override;
+  ExprPtr mutate(DivPtr v) override;
+  ExprPtr mutate(ModPtr v) override;
+  ExprPtr mutate(MaxPtr v) override;
+  ExprPtr mutate(MinPtr v) override;
+  ExprPtr mutate(AndPtr v) override;
+  ExprPtr mutate(OrPtr v) override;
+  ExprPtr mutate(XorPtr v) override;
+  ExprPtr mutate(LshiftPtr v) override;
+  ExprPtr mutate(RshiftPtr v) override;
+  ExprPtr mutate(CompareSelectPtr v) override;
+#define IMM_MUTATE_DECLARE(Type, Name) ExprPtr mutate(Name##ImmPtr v) override;
   AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_MUTATE_DECLARE);
 #undef IMM_MUTATE_DECLARE
-  Expr* mutate(Cast* v) override;
-  Expr* mutate(BitCast* v) override;
-  Expr* mutate(Var* v) override;
-  Expr* mutate(Buf* v) override;
-  Expr* mutate(Ramp* v) override;
-  Expr* mutate(Load* v) override;
-  Expr* mutate(Broadcast* v) override;
-  Expr* mutate(IfThenElse* v) override;
-  Expr* mutate(Intrinsics* v) override;
+  ExprPtr mutate(CastPtr v) override;
+  ExprPtr mutate(BitCastPtr v) override;
+  ExprPtr mutate(VarPtr v) override;
+  ExprPtr mutate(BufPtr v) override;
+  ExprPtr mutate(RampPtr v) override;
+  ExprPtr mutate(LoadPtr v) override;
+  ExprPtr mutate(BroadcastPtr v) override;
+  ExprPtr mutate(IfThenElsePtr v) override;
+  ExprPtr mutate(IntrinsicsPtr v) override;
 
-  Expr* mutate(Term* v) override;
-  Expr* mutate(Polynomial* v) override;
-  Expr* mutate(RoundOff* v) override;
-  Expr* mutate(MaxTerm* v) override;
-  Expr* mutate(MinTerm* v) override;
+  ExprPtr mutate(TermPtr v) override;
+  ExprPtr mutate(PolynomialPtr v) override;
+  ExprPtr mutate(RoundOffPtr v) override;
+  ExprPtr mutate(MaxTermPtr v) override;
+  ExprPtr mutate(MinTermPtr v) override;
 
-  Expr* mutate(ReduceOp* v) override;
+  ExprPtr mutate(ReduceOpPtr v) override;
 
-  Stmt* mutate(For* v) override;
-  Stmt* mutate(Block* v) override;
-  Stmt* mutate(Store* v) override;
-  Stmt* mutate(AtomicAdd* v) override;
-  Stmt* mutate(SyncThreads* v) override;
-  Stmt* mutate(ExternalCall* v) override;
+  StmtPtr mutate(ForPtr v) override;
+  StmtPtr mutate(BlockPtr v) override;
+  StmtPtr mutate(StorePtr v) override;
+  StmtPtr mutate(AtomicAddPtr v) override;
+  StmtPtr mutate(SyncThreadsPtr v) override;
+  StmtPtr mutate(ExternalCallPtr v) override;
 
-  Stmt* mutate(Allocate* v) override;
-  Stmt* mutate(Free* v) override;
-  Stmt* mutate(Let* v) override;
-  Stmt* mutate(Cond* v) override;
+  StmtPtr mutate(AllocatePtr v) override;
+  StmtPtr mutate(FreePtr v) override;
+  StmtPtr mutate(LetPtr v) override;
+  StmtPtr mutate(CondPtr v) override;
 };
 
 } // namespace tensorexpr
