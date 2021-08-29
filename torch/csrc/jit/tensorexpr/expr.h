@@ -169,8 +169,12 @@ class TORCH_API Var : public ExprNode<Var> {
     return name_hint_;
   }
 
-  void set_name_hint(const std::string& name_hint) {
-    name_hint_ = name_hint;
+  void set_name_hint(const std::string& name) {
+    name_hint_ = name;
+  }
+
+  void set_name_hint(std::string&& name) {
+    name_hint_ = name;
   }
 
   Var(std::string name_hint, Dtype dtype)
@@ -315,7 +319,7 @@ class TORCH_API BufHandle : public ExprHandle {
 // object. For example: VarHandle x('x'); ExprHandle x2 = x;
 class TORCH_API VarHandle : public ExprHandle {
  public:
-  VarHandle() : ExprHandle(nullptr) {}
+  VarHandle() : ExprHandle() {}
   explicit VarHandle(Dtype dtype) : ExprHandle(Var::make(dtype)) {}
   VarHandle(const std::string& name_hint, Dtype dtype)
       : ExprHandle(Var::make(name_hint, dtype)) {}
