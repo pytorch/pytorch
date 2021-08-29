@@ -750,7 +750,6 @@ def preprocessor(
                 or f.startswith("ATen/native/quantized/cuda")
                 or f.startswith("ATen/native/sparse/cuda")
                 or f.startswith("THC/")
-                or f.startswith("THCUNN/")
                 or (f.startswith("THC") and not f.startswith("THCP"))
             ):
                 return templ.format(get_hip_file_path(m.group(1), is_pytorch_extension))

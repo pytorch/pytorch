@@ -357,7 +357,7 @@ class Graph:
         nodes or other parts of the Graph from a custom GraphModule implementation
         """
         memo = memo if memo else {}
-        g = Graph()
+        g = Graph(tracer_cls=self._tracer_cls)
         output_vals = g.graph_copy(self, val_map=memo, return_output_node=True)
         assert isinstance(output_vals, tuple)
         output_val, old_output_val = output_vals
@@ -1066,8 +1066,15 @@ def forward({', '.join(orig_args)}){maybe_return_annotation[0]}:
         # Check targets are legit
         if self.owning_module:
             for node in self.nodes:
+                if node.op == 'call_function':
+                    if not callable(node.target):
+                        raise ValueError(f'Node {node} target {node.target} has type {torch.typename(node.target)} but '
+                                         'a Callable is expected')
+                else:
+                    if not isinstance(node.target, str):
+                        raise ValueError(f'Node {node} target {node.target} has type {torch.typename(node.target)} but '
+                                         'a str is expected')
                 if node.op in ['get_attr', 'call_module']:
-                    assert isinstance(node.target, str)
                     target_atoms = node.target.split('.')
                     m_itr = self.owning_module
                     for i, atom in enumerate(target_atoms):
