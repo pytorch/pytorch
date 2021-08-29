@@ -51,6 +51,6 @@ struct KernelDTypeTracer final {
     at::removeCallback(handle_);
   }
 };
-}
+} // namespace mobile
 } // namespace jit
 } // namespace torch
