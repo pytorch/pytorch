@@ -114,7 +114,6 @@ class AutoQuantizationState(torch.nn.Module):
         """
         if first_call:
             if isinstance(outputs, torch.Tensor):
-                print('outputs_prepare_hook', outputs)
                 if not hasattr(outputs, '_qtensor_info'):
                     outputs._qtensor_info = QTensorInfo(qtensor_id[0], torch.float)
                     qtensor_id[0] += 1
@@ -133,7 +132,6 @@ class AutoQuantizationState(torch.nn.Module):
         This function is expected to be called on the outputs of a converted
         module right before they are returned to the parent.
         """
-        # print('outputs_convert_hook', outputs)
 
         if isinstance(outputs, torch.Tensor):
             qtensor_info = self.output_qtensor_infos[0]

@@ -1,6 +1,7 @@
 import unittest
 
 import torch
+import torch.nn.intrinsic as nni
 from torch.testing._internal.common_quantization import (
     skipIfNoFBGEMM,
     QuantizationTestCase,
@@ -59,7 +60,8 @@ class TestAutoTracing(QuantizationTestCase):
         m = M().eval()
         m.qconfig = torch.quantization.default_qconfig
         mp = _quantize_dynamic_tracing.prepare(m, (torch.randn(1, 1, 1, 1),))
-        print(mp)
+        # testing that the conv got fused
+        self.assertTrue(isinstance(mp.conv, nni.ConvReLU2d))
 
     @skipIfNoFBGEMM
     def test_conv(self):

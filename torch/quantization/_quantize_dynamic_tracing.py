@@ -15,15 +15,14 @@ def prepare(model, example_inputs, inplace=False, allow_list=None,
     """
     assert example_inputs is not None, 'example_inputs must be specified'
 
-    if True:
-        old_class = model.__class__
-        model = add_auto_observation(model, example_inputs)
-        module_fusion_fqns = get_module_fusion_fqns(model)
-        if len(module_fusion_fqns):
-            model = torch.quantization.fuse_modules(model, module_fusion_fqns)
-        del model._auto_quant_state
-        model.__class__ = old_class
-    print('model', model)
+    # automatically fuse modules
+    old_class = model.__class__
+    model = add_auto_observation(model, example_inputs)
+    module_fusion_fqns = get_module_fusion_fqns(model)
+    if len(module_fusion_fqns):
+        model = torch.quantization.fuse_modules(model, module_fusion_fqns)
+    del model._auto_quant_state
+    model.__class__ = old_class
 
     model = torch.quantization.prepare(
         model, inplace, allow_list, observer_non_leaf_module_list,
