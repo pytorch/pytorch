@@ -474,7 +474,7 @@ class TestFFT(TestCase):
 
         # input_ndim, s
         transform_desc = [
-            *product(range(2, 5), (None, (4, 10))),
+            *product(range(2, 5), (None, [4, 10])),
         ]
 
         fft_functions = ['fft2', 'ifft2', 'irfft2']
