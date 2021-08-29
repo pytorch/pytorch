@@ -9,6 +9,10 @@ set(MODEL_TRACER_DIR
   ${TORCH_ROOT}/torch/csrc/jit/mobile/model_tracer/KernelDTypeTracer.cpp
 )
 
+target_include_directories(
+  model_tracer PRIVATE
+  ${ATen_CPU_INCLUDE})
+
 add_executable(
   model_tracer
   ${MODEL_TRACER_DIR})

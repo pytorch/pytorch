@@ -424,8 +424,6 @@ torch_mobile_model_tracer_sources = [
     "torch/csrc/jit/mobile/model_tracer/KernelDTypeTracer.cpp",
     "torch/csrc/jit/mobile/model_tracer/OperatorCallTracer.cpp",
     "torch/csrc/jit/mobile/model_tracer/TorchScriptModelRunner.cpp",
-    "torch/csrc/jit/mobile/model_tracer/MobileModelRunner.cpp",
-    "torch/csrc/jit/mobile/model_tracer/TensorUtils.cpp",
 ]
 
 torch_mobile_core = [
