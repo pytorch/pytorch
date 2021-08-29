@@ -8,8 +8,14 @@ from torch.distributed._sharding_spec import (
 )
 from torch.distributed._sharding_spec._internals import check_tensor
 
+from torch.testing._internal.common_utils import (
+    run_tests,
+    sandcastle_skip_if,
+)
+
 class TestShardingSpec(TestCase):
 
+    @sandcastle_skip_if(torch.cuda.device_count() < 2, '2 CUDA GPUs are needed')
     def test_device_placement(self):
         # valid devices
         DevicePlacementSpec("cuda:0")
@@ -29,6 +35,7 @@ class TestShardingSpec(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Invalid device string"):
             DevicePlacementSpec("rank:0/cpu2")
 
+    @sandcastle_skip_if(torch.cuda.device_count() < 2, '2 CUDA GPUs are needed')
     def test_chunked_sharding_spec(self):
         # Test valid specs.
         ChunkShardingSpec(0, [torch.device(0), torch.device(1)])
@@ -58,6 +65,7 @@ class TestShardingSpec(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Invalid device string"):
             ChunkShardingSpec(0, ["rank:0/cuda:foo", "cuda:1"])
 
+    @sandcastle_skip_if(torch.cuda.device_count() < 2, '2 CUDA GPUs are needed')
     def test_enumerable_sharding_spec(self):
         # test valid specs
 
@@ -217,3 +225,6 @@ class TestShardingSpec(TestCase):
 
         with self.assertRaisesRegex(ValueError, 'does not match tensor volume'):
             check_tensor(spec.shards, torch.rand(10, 10).size())
+
+if __name__ == '__main__':
+    run_tests()
