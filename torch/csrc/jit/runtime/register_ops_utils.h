@@ -434,14 +434,14 @@ struct OperatorGeneratorArgs {
   const char* schema_str;
   bool isOperationCreator;
   union {
-    void (*operation)(Stack*);
+    void (*operation)(Stack&);
     OperationCreator operationCreator;
   };
   AliasAnalysisKind aliasAnalysis;
 
   explicit constexpr OperatorGeneratorArgs(
       torch::detail::SelectiveStr<true> schema_str,
-      void (*op)(Stack*),
+      void (*op)(Stack&),
       AliasAnalysisKind aa)
       : schema_str(schema_str),
         isOperationCreator(false),
