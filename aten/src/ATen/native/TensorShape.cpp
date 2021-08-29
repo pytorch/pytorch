@@ -25,6 +25,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <vector>
+#include <iostream>
 
 namespace at {
 namespace native {
@@ -1308,7 +1309,8 @@ Tensor slice_backward(const Tensor& grad, IntArrayRef input_sizes, int64_t dim, 
   return grad_input;
 }
 
-std::vector<Tensor> split(const Tensor& self, int64_t split_size, int64_t dim) {
+std::vector<Tensor> split(const Tensor& self, int64_t split_size, int64_t dim, bool drop_remainder=false) {
+  std::cout<<"split function called! (modified split)\n";
   TORCH_CHECK(self.dim() != 0, "split expects at least a 1-dimensional tensor");
   TORCH_CHECK(split_size >= 0,  "split expects split_size be non-negative, but got split_size=", split_size);
   int64_t dim_size = self.size(dim);
@@ -1325,15 +1327,24 @@ std::vector<Tensor> split(const Tensor& self, int64_t split_size, int64_t dim) {
   std::vector<Tensor> splits(num_splits);
   int64_t last_split_size = split_size - (split_size * num_splits - dim_size);
 
+  if(drop_remainder == true && last_split_size < split_size)  {
+    splits.pop_back();
+  }
+
   for (const auto i : c10::irange(num_splits)) {
-    auto length = i < num_splits - 1 ? split_size : last_split_size;
+    auto length = split_size;
+    if(i == num_splits - 1 )  {
+      if(drop_remainder == true && last_split_size < split_size)
+        break;
+      length = last_split_size;
+    }
     splits[i] = self.narrow(dim, i * split_size, length);
   }
   return splits;
 }
 
 std::vector<Tensor> unsafe_split(const Tensor& self, int64_t split_size, int64_t dim) {
-  auto result = at::native::split(self, split_size, dim);
+  auto result = at::native::split(self, split_size, dim, false);
   for (auto& t : result) {
     // TODO(Ailing): do we need to set version_counter here?
     if (!t.is_inference()) {
