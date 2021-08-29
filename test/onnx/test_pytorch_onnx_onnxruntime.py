@@ -322,7 +322,7 @@ class TestONNXRuntime(unittest.TestCase):
     def run_model_test_with_external_data(self, model, input, rtol=0.001, atol=1e-7,
                                           do_constant_folding=True, dynamic_axes=None,
                                           input_names=None, output_names=None,
-                                          ort_optim_on=True, training=None):
+                                          ort_optim_on=True, training=None, use_external_data_format=None):
         import os
         import tempfile
 
@@ -401,7 +401,7 @@ class TestONNXRuntime(unittest.TestCase):
                 return x + torch.ones(2, 1024)
 
         x = torch.randn(2, 1)
-        self.run_model_test_with_external_data(LargeModel(), x, use_external_data_format=True)
+        self.run_model_test_with_external_data(LargeModel(), x, use_external_data_format=None)
 
     @skipIfUnsupportedMinOpsetVersion(9)  # Because external data format was released with Opset 9.
     def test_largemodel_without_use_external_data_format_param(self):
@@ -422,7 +422,7 @@ class TestONNXRuntime(unittest.TestCase):
 
         model = LargeModel()
         x = torch.tensor([2], dtype=torch.long)
-        self.run_model_test_with_external_data(LargeModel(), x, use_external_data_format=True)
+        self.run_model_test_with_external_data(LargeModel(), x, use_external_data_format=None)
 
     @skipIfUnsupportedMinOpsetVersion(9)  # Because external data format was released with Opset 9.
     def test_largemodel_with_use_external_data_format_False(self):

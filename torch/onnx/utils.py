@@ -735,12 +735,12 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
                 custom_opsets = {}
 
             if export_params:
-                proto, export_map = graph._export_onnx(
+                proto, export_map, val_use_external_data_format = graph._export_onnx(
                     params_dict, opset_version, dynamic_axes, defer_weight_export,
                     operator_export_type, not verbose, val_keep_init_as_ip, custom_opsets,
                     val_add_node_names, val_use_external_data_format, model_file_location)
             else:
-                proto, export_map = graph._export_onnx(
+                proto, export_map, val_use_external_data_format = graph._export_onnx(
                     {}, opset_version, dynamic_axes, False, operator_export_type,
                     not verbose, val_keep_init_as_ip, custom_opsets, val_add_node_names,
                     val_use_external_data_format, model_file_location)

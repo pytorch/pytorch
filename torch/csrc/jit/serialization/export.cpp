@@ -231,7 +231,7 @@ class EncoderBase {
       bool use_external_data_format = false,
       const std::string& onnx_file_path = std::string());
 
-  bool HasGraphProtoOverSize(
+  unsigned long long int GetGraphProtoSize(
       onnx::GraphProto* graph_proto,
       const std::shared_ptr<Graph>& graph,
       const std::map<std::string, at::Tensor>& initializers =
@@ -439,12 +439,6 @@ void EncoderBase::EncodeGraph(
     bool add_node_names,
     bool use_external_data_format,
     const std::string& onnx_file_path) {
-  // If graph proto size exceed maximum protobuf size of 2GB, set
-  // use_external_data_format to true.
-  if (!use_external_data_format && !onnx_file_path.empty() &&
-      HasGraphProtoOverSize(graph_proto, graph, initializers)) {
-    use_external_data_format = true;
-  }
   EncodeBlock(
       graph_proto,
       graph->block(),
@@ -629,7 +623,7 @@ void EncoderBase::AddInitializersIntoGraphProto(
   }
 }
 
-bool EncoderBase::HasGraphProtoOverSize(
+unsigned long long int EncoderBase::GetGraphProtoSize(
     onnx::GraphProto* graph_proto,
     const std::shared_ptr<Graph>& graph,
     const std::map<std::string, at::Tensor>& initializers) {
@@ -655,13 +649,10 @@ bool EncoderBase::HasGraphProtoOverSize(
     tensor_proto->set_raw_data(std::string(
         static_cast<char*>(t.data_ptr()), t.element_size() * t.numel()));
     sizes += tensor_proto->ByteSizeLong();
-    if (sizes > INT_MAX) {
-      return true;
-    }
     delete graph_proto_copy;
     graph_proto_copy = nullptr;
   }
-  return false;
+  return sizes;
 }
 
 void EncoderBase::AddAttribute(
@@ -792,6 +783,10 @@ class GraphEncoder : public EncoderBase {
     return raw_data_export_map_;
   }
 
+  bool get_use_external_data_format() {
+    return use_external_data_format_;
+  }
+
  private:
   void EncodeTensor(
       onnx::TensorProto* tensor_proto,
@@ -802,6 +797,7 @@ class GraphEncoder : public EncoderBase {
 
   RawDataExportMap raw_data_export_map_;
   bool defer_weight_export_;
+  bool use_external_data_format_;
 };
 
 GraphEncoder::GraphEncoder(
@@ -820,8 +816,21 @@ GraphEncoder::GraphEncoder(
     bool use_external_data_format,
     const std::string& onnx_file_path)
     : EncoderBase(operator_export_type, strip_doc),
-      defer_weight_export_(defer_weight_export) {
+      defer_weight_export_(defer_weight_export),
+      use_external_data_format_(use_external_data_format) {
   validateGraph(graph, operator_export_type);
+  // If graph proto size exceed maximum protobuf size of 2GB, set
+  // use_external_data_format to true.
+  if (!use_external_data_format && !onnx_file_path.empty() &&
+      GetGraphProtoSize(model_proto_.mutable_graph(), graph, initializers) >
+          INT_MAX) {
+    GRAPH_DEBUG(
+        "Exporting model exceed maximum protobuf size of 2GB. Storing model parameters in external data files");
+    use_external_data_format = true;
+    // use_external_data_format_ is one of graph_encoder private variable set
+    // for return `use_external_data_format` value.
+    use_external_data_format_ = use_external_data_format;
+  }
 
   if (use_external_data_format) {
     TORCH_CHECK(
@@ -961,7 +970,8 @@ std::string pretty_print_onnx(
 std::tuple<
     std::shared_ptr<::ONNX_NAMESPACE::ModelProto>,
     RawDataExportMap,
-    SymbolDimMap>
+    SymbolDimMap,
+    bool>
 export_onnx(
     const std::shared_ptr<Graph>& graph,
     const std::map<std::string, at::Tensor>& initializers,
@@ -995,7 +1005,8 @@ export_onnx(
       std::make_shared<::ONNX_NAMESPACE::ModelProto>(
           graph_encoder.get_model_proto()),
       graph_encoder.get_raw_data_export_map(),
-      graph_encoder.get_symbol_dim_param_map());
+      graph_encoder.get_symbol_dim_param_map(),
+      graph_encoder.get_use_external_data_format());
 }
 
 std::string serialize_model_proto_to_string(
