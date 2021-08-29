@@ -38,6 +38,8 @@ from .internal import (
 
 from .constants import DEFAULT_SHUTDOWN_TIMEOUT, UNSET_RPC_TIMEOUT
 
+from .options import _to_device_map
+
 logger = logging.getLogger(__name__)
 
 # NB: Ignoring RRef leaks during shutdown. Without this, applications have to
@@ -592,7 +594,7 @@ def remote(to, func, args=None, kwargs=None, device_map=None, timeout=UNSET_RPC_
     with ctx_manager as rf:
         args = args if args else ()
         kwargs = kwargs if kwargs else {}
-        device_map = device_map if device_map else {}
+        device_map = _to_device_map(device_map if device_map else {})
 
         is_async_exec = hasattr(func, "_wrapped_async_rpc_function")
 
@@ -655,7 +657,7 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None, device_map=None, rpc
     with ctx_manager as rf:
         args = args if args else ()
         kwargs = kwargs if kwargs else {}
-        device_map = device_map if device_map else {}
+        device_map = _to_device_map(device_map if device_map else {})
 
         is_async_exec = hasattr(func, "_wrapped_async_rpc_function")
 
