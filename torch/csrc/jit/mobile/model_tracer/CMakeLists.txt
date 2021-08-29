@@ -13,6 +13,6 @@ add_executable(
   model_tracer
   ${MODEL_TRACER_DIR})
 
-target_link_libraries(model_tracer PRIVATE torch gtest)
+target_link_libraries(model_tracer PRIVATE torch)
 
 install(TARGETS model_tracer DESTINATION bin)
