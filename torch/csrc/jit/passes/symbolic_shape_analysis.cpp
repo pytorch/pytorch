@@ -95,9 +95,9 @@ struct SymbolicShapeAnalyzer {
       if (graph_->inputs().at(i)->type()->isOptional()) {
         auto opt_type = graph_->inputs().at(i)->type()->cast<UnionType>();
         // None will get handled with constant substitution later
-        if (!type->isOptional() &&
-            !NoneType::get()->isSubtypeOf(type)) {
-          graph_->inputs().at(i)->setType(opt_type->getContainedElementIfOptional());
+        if (!type->isOptional() && !NoneType::get()->isSubtypeOf(type)) {
+          graph_->inputs().at(i)->setType(
+              opt_type->getContainedElementIfOptional());
         }
       } else if (graph_->inputs().at(i)->type()->cast<NumberType>()) {
         graph_->inputs().at(i)->setType(type);

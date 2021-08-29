@@ -231,10 +231,12 @@ void ArgumentSpecCreator::specializeTypes(
       case SPECIALIZE_OPTIONAL: {
         auto is_present = spec.isPresent(optional_arg_spec_offset++);
         bool is_opt = (*input_stack.back())->isOptional();
-        TORCH_INTERNAL_ASSERT(is_opt, "Cannot use a SPECIALIZE_OPTIONAL"
-                              " instruction with the type on the top of"
-                              " the stack, which is ",
-                              (*input_stack.back())->annotation_str());
+        TORCH_INTERNAL_ASSERT(
+            is_opt,
+            "Cannot use a SPECIALIZE_OPTIONAL"
+            " instruction with the type on the top of"
+            " the stack, which is ",
+            (*input_stack.back())->annotation_str());
         auto ot = (*input_stack.back()++)->expect<UnionType>();
         if (!is_present) {
           result_stack.back().emplace_back(ot);

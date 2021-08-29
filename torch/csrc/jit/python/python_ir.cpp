@@ -873,9 +873,9 @@ void initPythonIRBindings(PyObject* module_) {
       .def(py::init([](std::vector<TypePtr> a) {
         return UnionType::create(std::move(a));
       }))
-      .def("containedTypes", [](UnionType& self) {
-        return self.containedTypes().vec();
-      })
+      .def(
+          "containedTypes",
+          [](UnionType& self) { return self.containedTypes().vec(); })
       .def_static("createOptionalOf", [](std::shared_ptr<Type>& a) {
         return UnionType::createOptionalOf(a);
       });
