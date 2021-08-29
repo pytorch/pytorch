@@ -157,7 +157,7 @@ static const OperatorGeneratorArgs opGenArgs[] = {
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("prim::TupleUnpack(Any tup) -> ..."),
-        [](Stack& stack) { tupleUnpack(*stack); },
+        [](Stack& stack) { tupleUnpack(stack); },
         aliasAnalysisSpecialCase()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("prim::unchecked_cast(t x) -> t"),
@@ -365,14 +365,14 @@ static const OperatorGeneratorArgs opGenArgs[] = {
         TORCH_SELECTIVE_SCHEMA("aten::format(str self, ...) -> str"),
         [](Stack& stack) {
           size_t num_inputs = pop(stack).toInt();
-          format(*stack, num_inputs);
+          format(stack, num_inputs);
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::einsum.sublist(Tensor a, ...) -> Tensor"),
         [](Stack& stack) {
           size_t num_inputs = pop(stack).toInt();
-          einsum(*stack, num_inputs);
+          einsum(stack, num_inputs);
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
@@ -439,7 +439,7 @@ static const OperatorGeneratorArgs opGenArgs[] = {
               norm_index > static_cast<int64_t>(tuple->elements().size())) {
             throw std::out_of_range("Tuple list index out of range");
           }
-          stack->emplace_back(tuple->elements()[norm_index]);
+          stack.emplace_back(tuple->elements()[norm_index]);
         },
         aliasAnalysisSpecialCase()),
     OperatorGeneratorArgs(
@@ -747,7 +747,7 @@ static const OperatorGeneratorArgs opGenArgs[] = {
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::dequantize.any(Any tensors) -> Any"),
-        [](Stack& stack) { dequantize(*stack); },
+        [](Stack& stack) { dequantize(stack); },
         aliasAnalysisFromSchema()),
     DEFINE_UNARY_OP_WITH_COMPLEX(aten::log, std::log(a), float, float),
     DEFINE_STRING_OP(aten::add, a + b, str),
@@ -2153,7 +2153,7 @@ static const OperatorGeneratorArgs opGenArgs1[] = {
         TORCH_SELECTIVE_SCHEMA("aten::percentFormat(str self, ...) -> str"),
         [](Stack& stack) {
           size_t num_inputs = pop(stack).toInt();
-          percentFormat(*stack, num_inputs);
+          percentFormat(stack, num_inputs);
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
@@ -2291,7 +2291,7 @@ static const OperatorGeneratorArgs opGenArgs1[] = {
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("prim::AutogradZero() -> Tensor"),
-        [](Stack& stack) { stack->emplace_back(at::Tensor()); },
+        [](Stack& stack) { stack.emplace_back(at::Tensor()); },
         aliasAnalysisSpecialCase()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA(
@@ -2367,7 +2367,7 @@ static const OperatorGeneratorArgs opGenArgs1[] = {
           for (const auto i : c10::irange(sizes.size())) {
             accessor[i] = sizes[i];
           }
-          stack->emplace_back(sizes_tensor);
+          stack.emplace_back(sizes_tensor);
         },
         aliasAnalysisSpecialCase()),
     OperatorGeneratorArgs(
@@ -2395,7 +2395,7 @@ static const OperatorGeneratorArgs opGenArgs1[] = {
             }
           }
           drop(stack, num_inputs);
-          stack->emplace_back(result);
+          stack.emplace_back(result);
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
@@ -2411,7 +2411,7 @@ static const OperatorGeneratorArgs opGenArgs1[] = {
             }
           }
           drop(stack, num_inputs);
-          stack->emplace_back(result);
+          stack.emplace_back(result);
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
@@ -2427,7 +2427,7 @@ static const OperatorGeneratorArgs opGenArgs1[] = {
             }
           }
           drop(stack, num_inputs);
-          stack->emplace_back(result);
+          stack.emplace_back(result);
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
@@ -2438,13 +2438,13 @@ static const OperatorGeneratorArgs opGenArgs1[] = {
           // NOLINTNEXTLINE(bugprone-branch-clone)
           if (!a.defined() && !b.defined()) {
             // undef + undef == undef
-            stack->emplace_back(a);
+            stack.emplace_back(a);
           } else if (!a.defined()) {
-            stack->emplace_back(b);
+            stack.emplace_back(b);
           } else if (!b.defined()) {
-            stack->emplace_back(a);
+            stack.emplace_back(a);
           } else {
-            stack->emplace_back(a + b);
+            stack.emplace_back(a + b);
           }
         },
         aliasAnalysisSpecialCase()),
