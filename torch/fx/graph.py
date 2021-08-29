@@ -2,7 +2,7 @@ from .node import Node, Argument, Target, map_arg, _type_repr, _get_qualified_na
 import torch.utils._pytree as pytree
 from . import _pytree as fx_pytree
 
-from typing import TYPE_CHECKING, Callable, Any, List, Dict, NamedTuple, Optional, Tuple, Set, FrozenSet
+from typing import TYPE_CHECKING, Callable, Any, List, Dict, NamedTuple, Optional, Tuple, Set, FrozenSet, Type
 from dataclasses import dataclass
 from contextlib import contextmanager
 import copy
@@ -16,6 +16,7 @@ import warnings
 
 if TYPE_CHECKING:
     from .graph_module import GraphModule  # noqa: F401
+    from ._symbolic_trace import Tracer   # noqa: F401
 
 
 # Mapping of builtins to their `typing` equivalent.
@@ -282,7 +283,7 @@ class Graph:
 
     For the semantics of operations represented in the ``Graph``, please see :class:`Node`.
     """
-    def __init__(self, owning_module: Optional["GraphModule"] = None):
+    def __init__(self, owning_module: Optional["GraphModule"] = None, tracer_cls: Optional[Type["Tracer"]] = None):
         """
         Construct an empty Graph.
         """
@@ -293,6 +294,7 @@ class Graph:
         self._graph_namespace = _Namespace()
         self._owners = 0
         self._owning_module = owning_module
+        self._tracer_cls = tracer_cls
         self._pytree_info: Optional[_PyTreeInfo] = None
 
     @property
@@ -355,7 +357,7 @@ class Graph:
         nodes or other parts of the Graph from a custom GraphModule implementation
         """
         memo = memo if memo else {}
-        g = Graph()
+        g = Graph(tracer_cls=self._tracer_cls)
         output_vals = g.graph_copy(self, val_map=memo, return_output_node=True)
         assert isinstance(output_vals, tuple)
         output_val, old_output_val = output_vals
@@ -1064,8 +1066,15 @@ def forward({', '.join(orig_args)}){maybe_return_annotation[0]}:
         # Check targets are legit
         if self.owning_module:
             for node in self.nodes:
+                if node.op == 'call_function':
+                    if not callable(node.target):
+                        raise ValueError(f'Node {node} target {node.target} has type {torch.typename(node.target)} but '
+                                         'a Callable is expected')
+                else:
+                    if not isinstance(node.target, str):
+                        raise ValueError(f'Node {node} target {node.target} has type {torch.typename(node.target)} but '
+                                         'a str is expected')
                 if node.op in ['get_attr', 'call_module']:
-                    assert isinstance(node.target, str)
                     target_atoms = node.target.split('.')
                     m_itr = self.owning_module
                     for i, atom in enumerate(target_atoms):

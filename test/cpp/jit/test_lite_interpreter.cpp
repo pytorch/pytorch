@@ -482,7 +482,7 @@ TEST(LiteInterpreterTest, ModuleInfoBasic) {
     }
   }
 
-  AT_ASSERT(module_debug_info_set.count("top(M).aten::mul"));
+  AT_ASSERT(module_debug_info_set.count("top(M)::<unknown>.aten::mul"));
 }
 
 TEST(LiteInterpreterTest, NotSaveModuleInfo) {
@@ -542,9 +542,11 @@ TEST(LiteInterpreterTest, OneSubmoduleModuleInfo) {
     }
   }
 
-  AT_ASSERT(module_debug_info_set.count("top(B).aten::add"));
-  AT_ASSERT(module_debug_info_set.count("top(B).A0(A).aten::add"));
-  AT_ASSERT(module_debug_info_set.count("top(B).A0(A).aten::mul"));
+  AT_ASSERT(module_debug_info_set.count("top(B)::<unknown>.aten::add"));
+  AT_ASSERT(module_debug_info_set.count(
+      "top(B)::<unknown>.A0(A)::forward.aten::add"));
+  AT_ASSERT(module_debug_info_set.count(
+      "top(B)::<unknown>.A0(A)::forward.aten::mul"));
 }
 
 TEST(LiteInterpreterTest, TwoSubmodulesModuleInfo) {
@@ -585,9 +587,11 @@ TEST(LiteInterpreterTest, TwoSubmodulesModuleInfo) {
     }
   }
 
-  AT_ASSERT(module_debug_info_set.count("top(C).aten::add"));
-  AT_ASSERT(module_debug_info_set.count("top(C).A0(A).aten::add"));
-  AT_ASSERT(module_debug_info_set.count("top(C).B0(B).aten::add"));
+  AT_ASSERT(module_debug_info_set.count("top(C)::<unknown>.aten::add"));
+  AT_ASSERT(module_debug_info_set.count(
+      "top(C)::<unknown>.A0(A)::forward.aten::add"));
+  AT_ASSERT(module_debug_info_set.count(
+      "top(C)::<unknown>.B0(B)::forward.aten::add"));
 }
 
 TEST(LiteInterpreterTest, GetRuntimeByteCodeVersion) {
@@ -854,9 +858,11 @@ TEST(LiteInterpreterTest, SequentialModuleInfo) {
   //   def forward(self, x):
   //     return self.A0.forward(self.B0.forward(x))
 
-  AT_ASSERT(module_debug_info_set.count("top(C).prim::Return"));
-  AT_ASSERT(module_debug_info_set.count("top(C).A0(A).aten::add"));
-  AT_ASSERT(module_debug_info_set.count("top(C).B0(B).aten::add"));
+  AT_ASSERT(module_debug_info_set.count("top(C)::<unknown>.prim::Return"));
+  AT_ASSERT(module_debug_info_set.count(
+      "top(C)::<unknown>.A0(A)::forward.aten::add"));
+  AT_ASSERT(module_debug_info_set.count(
+      "top(C)::<unknown>.B0(B)::forward.aten::add"));
 }
 
 TEST(LiteInterpreterTest, HierarchyModuleInfo) {
@@ -901,9 +907,11 @@ TEST(LiteInterpreterTest, HierarchyModuleInfo) {
   // "top(C).forward": for the add operator in top.
   // "top(C).B0(B).forward": for the add operator in B0.
   // "top(C).B0(B).forward.A0(A).forward": for the add operator in A0.
-  AT_ASSERT(module_debug_info_set.count("top(C).aten::add"));
-  AT_ASSERT(module_debug_info_set.count("top(C).B0(B).aten::add"));
-  AT_ASSERT(module_debug_info_set.count("top(C).B0(B).A0(A).aten::add"));
+  AT_ASSERT(module_debug_info_set.count("top(C)::<unknown>.aten::add"));
+  AT_ASSERT(module_debug_info_set.count(
+      "top(C)::<unknown>.B0(B)::forward.aten::add"));
+  AT_ASSERT(module_debug_info_set.count(
+      "top(C)::<unknown>.B0(B)::forward.A0(A)::forward.aten::add"));
 }
 
 TEST(LiteInterpreterTest, DuplicatedClassTypeModuleInfo) {
@@ -960,9 +968,11 @@ TEST(LiteInterpreterTest, DuplicatedClassTypeModuleInfo) {
   // "top(B).A0(A).forward": for the add operator in A0.
   // "top(B).A1(A).forward": for the add operator in A1.
 
-  AT_ASSERT(module_debug_info_set.count("top(B).aten::add"));
-  AT_ASSERT(module_debug_info_set.count("top(B).A0(A).aten::add"));
-  AT_ASSERT(module_debug_info_set.count("top(B).A1(A).aten::add"));
+  AT_ASSERT(module_debug_info_set.count("top(B)::<unknown>.aten::add"));
+  AT_ASSERT(module_debug_info_set.count(
+      "top(B)::<unknown>.A0(A)::forward.aten::add"));
+  AT_ASSERT(module_debug_info_set.count(
+      "top(B)::<unknown>.A1(A)::forward.aten::add"));
 }
 #endif // !defined(FB_XPLAT_BUILD)
 
@@ -1371,9 +1381,9 @@ TEST(LiteInterpreterTest, TestExceptionStackWithTwoLevelModuleHierarchy) {
   c._save_for_mobile(ss, ExtraFilesMap(), true);
   auto lite_m = _load_for_mobile(ss);
   std::string error_pattern = R"(
-  Module hierarchy:top(C).B0(B).A0(A).aten::add
+  Module hierarchy:top(C)::<unknown>.B0(B)::foo.A0(A)::bar.aten::add
 Traceback of TorchScript (most recent call last):
-  File "<string>", line 3, in FunctionName_UNKNOWN
+  File "<string>", line 3, in <unknown>
 
     def forward(self, x, y):
       return self.B0.foo(x, y) + 3
