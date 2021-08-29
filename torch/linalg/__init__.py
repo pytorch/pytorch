@@ -1838,7 +1838,7 @@ If :attr:`left`\ `= False`, the returned matrix :math:`X \in \mathbb{K}^{n \time
     XA = B\mathrlap{\qquad A \in \mathbb{K}^{k \times k}, B \in \mathbb{K}^{n \times k}.}
 
 If :attr:`upper`\ `= True` (resp. `False`) just the upper (resp. lower) triangular half of :attr:`A`
-will accessed. The opposite half will be considered to be full of zeros and will not be accessed.
+will be accessed. The other triangular half will be considered to be zero and will not be accessed.
 
 If :attr:`unitriangular`\ `= True`, the diagonal of :attr:`A` is assumed to be ones and will not be accessed.
 
@@ -1865,7 +1865,8 @@ Keyword args:
     upper (bool optional): whether :attr:`A` is an upper or lower triangular matrix. Default: `True`.
     unitriangular (bool, optional): if `True`, the diagonal elements of :attr:`A` are assumed to be
                                     all equal to `1`. Default: `False`.
-    out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
+    out (Tensor, optional): output tensor. `B` may be passed as `out` and the result is computed in-place on `B`.
+                            Ignored if `None`. Default: `None`.
 
 Examples::
 

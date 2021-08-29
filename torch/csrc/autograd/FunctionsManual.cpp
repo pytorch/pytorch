@@ -2905,6 +2905,8 @@ std::tuple<Tensor, Tensor> linalg_solve_triangular_backward(
     const bool upper,
     const bool unitriangular,
     std::array<bool, 2> output_mask) {
+  const bool A_requires_grad = output_mask[0];
+  const bool B_requires_grad = output_mask[1];
   // [Note: Forward / Backward AD solve_triangular]
   // Assume left=true for simplicity.
   // Remark: A solver computes A^{-1}B
@@ -2932,7 +2934,7 @@ std::tuple<Tensor, Tensor> linalg_solve_triangular_backward(
   // Something similar happens for `unitriangular`, only that int his case the tangent space is
   // the set of lower-triangular matrices with zeros on the diagonal.
 
-  if (!grad.defined() || (!output_mask[0] && !output_mask[1])) {
+  if (!grad.defined() || (!A_requires_grad && !B_requires_grad)) {
       return std::make_tuple(Tensor{}, Tensor{});
   }
   // We always need to comput G_B
@@ -2940,14 +2942,14 @@ std::tuple<Tensor, Tensor> linalg_solve_triangular_backward(
   // gragrad does not go through because it gets confused with this !upper
   const Tensor G_B = at::linalg_solve_triangular(A_H, grad, left, !upper, unitriangular);
 
-  if (output_mask[0]) {
+  if (A_requires_grad) {
     const Tensor X_H = X.conj().transpose(-2, -1);
     Tensor G_A = left ? -at::matmul(G_B, X_H) : -at::matmul(X_H, G_B);
     G_A = upper ? G_A.triu(static_cast<int>(unitriangular))
                 : G_A.tril(- static_cast<int>(unitriangular));
-    return std::make_tuple(G_A, output_mask[1] ? G_B : Tensor{});
+    return std::make_tuple(G_A, B_requires_grad ? G_B : Tensor{});
   } else {
-    return std::make_tuple(Tensor{}, output_mask[1] ? G_B : Tensor{});
+    return std::make_tuple(Tensor{}, G_B);
   }
 }
 
