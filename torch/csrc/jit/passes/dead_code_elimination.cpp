@@ -61,6 +61,8 @@ class DeadCodeEliminator {
         continue;
       }
       Graph& g = *node->g(attr::Subgraph);
+      // WARNING: Do not use a ranged loop. The loop bounds are changed by the
+      // loop body.
       for (size_t i = 0; i < g.inputs().size(); ++i) {
         if (!g.inputs().at(i)->hasUses()) {
           GRAPH_UPDATE(

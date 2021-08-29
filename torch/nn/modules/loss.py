@@ -164,10 +164,11 @@ class NLLLoss(_WeightedLoss):
             :attr:`reduction`. Default: ``'mean'``
 
     Shape:
-        - Input: :math:`(N, C)` where `C = number of classes`, or
+        - Input: :math:`(N, C)` or :math:`(C)`, where `C = number of classes`, or
           :math:`(N, C, d_1, d_2, ..., d_K)` with :math:`K \geq 1`
           in the case of `K`-dimensional loss.
-        - Target: :math:`(N)` where each value is :math:`0 \leq \text{targets}[i] \leq C-1`, or
+        - Target: :math:`(N)` or :math:`()`, where each value is
+          :math:`0 \leq \text{targets}[i] \leq C-1`, or
           :math:`(N, d_1, d_2, ..., d_K)` with :math:`K \geq 1` in the case of
           K-dimensional loss.
         - Output: If :attr:`reduction` is ``'none'``, shape :math:`(N)` or
@@ -1322,7 +1323,7 @@ class MultiMarginLoss(_WeightedLoss):
     The loss function then becomes:
 
     .. math::
-        \text{loss}(x, y) = \frac{\sum_i \max(0, w[y] * (\text{margin} - x[y] + x[i]))^p)}{\text{x.size}(0)}
+        \text{loss}(x, y) = \frac{\sum_i \max(0, w[y] * (\text{margin} - x[y] + x[i]))^p}{\text{x.size}(0)}
 
     Args:
         p (int, optional): Has a default value of :math:`1`. :math:`1` and :math:`2`
@@ -1346,6 +1347,20 @@ class MultiMarginLoss(_WeightedLoss):
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
             and :attr:`reduce` are in the process of being deprecated, and in the meantime,
             specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
+
+    Shape:
+        - Input: :math:`(N, C)` or :math:`(C)`, where :math:`N` is the batch size and :math:`C` is the number of classes.
+        - Target: :math:`(N)` or :math:`()`, where each value is :math:`0 \leq \text{targets}[i] \leq C-1`.
+        - Output: scalar. If :attr:`reduction` is ``'none'``, then same shape as the target.
+
+    Examples::
+
+        >>> loss = nn.MultiMarginLoss()
+        >>> x = torch.tensor([[0.1, 0.2, 0.4, 0.8]])
+        >>> y = torch.tensor([3])
+        >>> loss(x, y)
+        >>> # 0.25 * ((1-(0.8-0.1)) + (1-(0.8-0.2)) + (1-(0.8-0.4)))
+        tensor(0.3250)
     """
     __constants__ = ['p', 'margin', 'reduction']
     margin: float
