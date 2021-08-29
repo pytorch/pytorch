@@ -207,7 +207,6 @@ class AbstractTestCases:
                            'map2_',
                            'new',
                            'reinforce',
-                           'relu',
                            'relu_',
                            'prelu',
                            'resize',
