@@ -34,7 +34,7 @@ from tools.codegen.context import (method_with_native_function,
                                    with_native_function_and_indices,
                                    with_native_function)
 import tools.codegen.dest as dest
-from torch.pyops import write_pyops_cpp, gen_pyops_functions
+from torch.pyops.gen_cpp import write_pyops_cpp
 
 T = TypeVar('T')
 
@@ -96,10 +96,10 @@ def parse_native_yaml(path: str) -> ParsedYaml:
                 rs.append(func)
                 BackendIndex.grow_index(bs, m)
         # Adds functions defined by PyOps
-        generated = gen_pyops_functions(rs, bs)
-        for nf, m in generated:
-            rs.append(nf)
-            BackendIndex.grow_index(bs, m)
+        # generated = gen_pyops_functions(rs, bs)
+        # for nf, m in generated:
+        #     rs.append(nf)
+        #     BackendIndex.grow_index(bs, m)
         error_check_native_functions(rs)
         # Default dict is to prevent the codegen from barfing when we have a dispatch key that has no kernels yet.
         indices: Dict[DispatchKey, BackendIndex] = defaultdict(lambda: BackendIndex(
@@ -1018,6 +1018,10 @@ def main() -> None:
         action='store_true',
         help='force it to generate schema-only registrations for all ops, including'
              'those that are not listed on --op_registration_whitelist')
+    parser.add_argument(
+        '--pyops_cpp_dry_run',
+        action='store_true',
+        help='Only generate and print PyOps C++; for debugging.')
     options = parser.parse_args()
 
     selector = get_custom_build_selector(
@@ -1025,15 +1029,23 @@ def main() -> None:
         options.op_selection_yaml_path,
     )
 
-    # Writes operators defined in Python to PyOps.cpp
-    pyops_path = os.path.join(options.source_path, 'native/PyOps.cpp')
-    write_pyops_cpp(pyops_path)
-
     native_yaml_path = os.path.join(options.source_path, 'native/native_functions.yaml')
     parsed_yaml = parse_native_yaml(native_yaml_path)
     native_functions, backend_indices = parsed_yaml.native_functions, parsed_yaml.backend_indices
     grouped_native_functions = get_grouped_native_functions(native_functions)
     structured_native_functions = [g for g in grouped_native_functions if isinstance(g, NativeFunctionsGroup)]
+
+    # Creates generated C++ from operators defined in Python
+    pyops_cpp = write_pyops_cpp(native_functions)
+
+    # Short-circuits on dry run
+    if options.pyops_cpp_dry_run:
+        print(pyops_cpp)
+        return
+
+
+    pyops_path = os.path.join(options.source_path, 'native/PyOps.cpp')
+    # TODO: write out pyops_cpp to pyops_path
 
     template_dir = os.path.join(options.source_path, "templates")
 
