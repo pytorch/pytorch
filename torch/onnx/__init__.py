@@ -197,6 +197,7 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
             Since this optimization adjusts model initializers, it will be disabled if
             export_params = False or keep_initializers_as_inputs = True.
         example_outputs (T or a tuple of T, where T is Tensor or convertible to Tensor, default None):
+            [Deprecated and ignored. Will be removed in next PyTorch release],
             Must be provided when exporting a ScriptModule or ScriptFunction, ignored otherwise.
             Used to determine the type and shape of the outputs without tracing the execution of
             the model. A single object is treated as equivalent to a tuple of one element.
