@@ -100,13 +100,17 @@ def make_graphed_callables(callables, sample_args):
             See :ref:`Graph memory management<graph-memory-management>` for when passing a tuple of callables
             is appropriate.  If you pass a tuple of callables, their order in the tuple must be the same order
             they'll run in the live workload.
-        sample_args (tuple or tuple of tuples): Samples args for each callable. If a single callable
-            was passed, ``sample_args`` must be a single tuple. If a tuple of callables was passed,
-            ``sample_args`` must be tuple of argument tuples.
+        sample_args (tuple of Tensors, or tuple of tuples of Tensors): Samples args for each callable.
+            If a single callable was passed, ``sample_args`` must be a single tuple of argument Tensors.
+            If a tuple of callables was passed, ``sample_args`` must be tuple of tuples of argument Tensors.
 
     .. note::
         The ``requires_grad`` state of each Tensor in ``sample_args`` must match the state
         that's expected for the corresponding real input in the training loop.
+
+    .. warning::
+        ``sample_args`` for each callable must be a tuple of Tensors. Other types and keyword args
+        are not allowed.
 
     .. warning::
         Returned callables do not support higher order differentiation (e.g., double backward).
