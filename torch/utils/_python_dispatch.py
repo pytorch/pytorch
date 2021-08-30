@@ -18,6 +18,7 @@ from typing import Iterator
 # - We need a better user-facing api for torch._C._DisableTorchDispatch that
 #   is able to selectively disable __torch_dispatch__ of a particular class.
 # - It doesn't work with the tensor constructors (torch.tensor, torch.Tensor)
+# - Better name (see https://github.com/pytorch/pytorch/pull/63496#discussion_r694091694)
 @contextlib.contextmanager
 def enable_python_mode(cls) -> Iterator[None]:
     if not hasattr(cls, '__torch_dispatch__'):

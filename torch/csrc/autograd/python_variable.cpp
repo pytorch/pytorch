@@ -65,7 +65,12 @@ void concrete_decref_fn(const c10::impl::PyInterpreter* self, PyObject* pyobj) {
     return;
 
   pybind11::gil_scoped_acquire gil;
-  if (Py_REFCNT(pyobj) > 1) {
+  // Two possibilities:
+  // 1. We are decref-ing a tensor. Then we must be careful about
+  // PyObject resurrection (this only applies to Tensors, see THPVariable_clear).
+  // 2. We are decref-ing some other Python object. We don't do
+  // PyObject resurrection on non-Tensors, so we just carry on as usual
+  if (THPVariable_Check(pyobj) && Py_REFCNT(pyobj) > 1) {
     // It's still alive!  This can happen if a weak ref resurrected
     // the PyObject without flipping ownership.  At this point it is
     // too late to rescue the object, so just stub out the PyObject
