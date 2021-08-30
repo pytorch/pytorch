@@ -310,8 +310,8 @@ LINUX_WORKFLOWS = [
     # ),
     CIWorkflow(
         arch="linux",
-        build_environment="linux-bionic-cuda10.2-py3.9-gcc7",
-        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-cuda10.2-cudnn7-py3.9-gcc7",
+        build_environment="linux-focal-cuda10.2-py3.9-gcc7",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-focal-cuda10.2-cudnn7-py3.9-gcc7",
         test_runner_type=LINUX_CUDA_TEST_RUNNER,
         num_test_shards=2,
         on_pull_request=True,
@@ -407,26 +407,26 @@ LINUX_WORKFLOWS = [
     ),
     # CIWorkflow(
     #     arch="linux",
-    #     build_environment="linux-bionic-py3.6-clang9-noarch",
-    #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-py3.6-clang9",
+    #     build_environment="linux-focal-py3.6-clang9-noarch",
+    #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-focal-py3.6-clang9",
     #     test_runner_type=LINUX_CPU_TEST_RUNNER,
     # ),
     # CIWorkflow(
     #     arch="linux",
-    #     build_environment="xla-linux-bionic-py3.6-clang9",
-    #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-py3.6-clang9",
+    #     build_environment="xla-linux-focal-py3.6-clang9",
+    #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-focal-py3.6-clang9",
     #     test_runner_type=LINUX_CPU_TEST_RUNNER,
     # ),
     # CIWorkflow(
     #     arch="linux",
-    #     build_environment="vulkan-linux-bionic-py3.6-clang9",
-    #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-py3.6-clang9",
+    #     build_environment="vulkan-linux-focal-py3.6-clang9",
+    #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-focal-py3.6-clang9",
     #     test_runner_type=LINUX_CPU_TEST_RUNNER,
     # ),
     CIWorkflow(
         arch="linux",
-        build_environment="linux-bionic-py3.8-gcc9-coverage",
-        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-py3.8-gcc9",
+        build_environment="linux-focal-py3.8-gcc9-coverage",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-focal-py3.8-gcc9",
         test_runner_type=LINUX_CPU_TEST_RUNNER,
         on_pull_request=True,
         is_coverage=True,
@@ -438,8 +438,8 @@ LINUX_WORKFLOWS = [
     ),
     # CIWorkflow(
     #     arch="linux",
-    #     build_environment="linux-bionic-rocm3.9-py3.6",
-    #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-rocm3.9-py3.6",
+    #     build_environment="linux-focal-rocm3.9-py3.6",
+    #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-focal-rocm3.9-py3.6",
     #     test_runner_type=LINUX_CPU_TEST_RUNNER,
     # ),
     # CIWorkflow(
@@ -497,7 +497,7 @@ BAZEL_WORKFLOWS = [
     CIWorkflow(
         arch="linux",
         build_environment="linux-xenial-py3.6-gcc7-bazel-test",
-        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-cuda10.2-cudnn7-py3.9-gcc7",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-focal-cuda10.2-cudnn7-py3.9-gcc7",
         test_runner_type=LINUX_CPU_TEST_RUNNER,
         on_pull_request=True,
         ciflow_config=CIFlowConfig(

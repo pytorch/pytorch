@@ -2,11 +2,11 @@
 
 # Template is at:    .github/templates/linux_ci_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
-name: linux-bionic-py3.8-gcc9-coverage
+name: linux-focal-cuda10.2-py3.9-gcc7
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, unassigned]
+    types: [unassigned]
   push:
     branches:
       - master
@@ -14,8 +14,8 @@ on:
   workflow_dispatch:
 
 env:
-  BUILD_ENVIRONMENT: linux-bionic-py3.8-gcc9-coverage
-  DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-bionic-py3.8-gcc9
+  BUILD_ENVIRONMENT: linux-focal-cuda10.2-py3.9-gcc7
+  DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-focal-cuda10.2-cudnn7-py3.9-gcc7
   SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
   TORCH_CUDA_ARCH_LIST: 5.2
   IN_CI: 1
@@ -26,13 +26,13 @@ env:
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
 
 concurrency:
-  group: linux-bionic-py3.8-gcc9-coverage-${{ github.event.pull_request.number || github.sha }}
+  group: linux-focal-cuda10.2-py3.9-gcc7-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 
 jobs:
   ciflow_should_run:
     runs-on: ubuntu-18.04
-    if: ${{ (github.event_name != 'pull_request') || (github.event.action !='unassigned') || (contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/coverage') || contains(github.event.pull_request.labels.*.name, 'ciflow/cpu') || contains(github.event.pull_request.labels.*.name, 'ciflow/default') || contains(github.event.pull_request.labels.*.name, 'ciflow/linux')) }}
+    if: ${{ (github.event_name != 'pull_request') || (github.event.action !='unassigned') || (contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/cuda') || contains(github.event.pull_request.labels.*.name, 'ciflow/linux') || contains(github.event.pull_request.labels.*.name, 'ciflow/slow')) }}
     steps:
       - name: noop
         run: echo running ciflow_should_run
@@ -120,7 +120,7 @@ jobs:
     needs: [calculate-docker-image, ciflow_should_run]
     env:
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
-      JOB_BASE_NAME: linux-bionic-py3.8-gcc9-coverage-build
+      JOB_BASE_NAME: linux-focal-cuda10.2-py3.9-gcc7-build
     steps:
       - name: Log in to ECR
         run: |
@@ -223,7 +223,7 @@ jobs:
     runs-on: ubuntu-18.04
     needs: [ciflow_should_run]
     env:
-      TEST_RUNNER_TYPE: linux.2xlarge
+      TEST_RUNNER_TYPE: linux.8xlarge.nvidia.gpu
       ENABLE_DISTRIBUTED_TEST: 1
       ENABLE_JIT_LEGACY_TEST: ''
       ENABLE_MULTIGPU_TEST: ''
@@ -257,7 +257,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     env:
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
-      JOB_BASE_NAME: linux-bionic-py3.8-gcc9-coverage-test
+      JOB_BASE_NAME: linux-focal-cuda10.2-py3.9-gcc7-test
       TEST_CONFIG: ${{ matrix.config }}
       SHARD_NUMBER: ${{ matrix.shard }}
       NUM_TEST_SHARDS: ${{ matrix.num_shards }}
@@ -325,7 +325,7 @@ jobs:
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Test PyTorch
         env:
-          BUILD_ENVIRONMENT: linux-bionic-py3.8-gcc9-coverage-${{ matrix.config }}
+          BUILD_ENVIRONMENT: linux-focal-cuda10.2-py3.9-gcc7-${{ matrix.config }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           if [[ $TEST_CONFIG == 'multigpu' ]]; then
@@ -371,10 +371,6 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Report coverage
-        run: |
-          python3 -mpip install codecov
-          python3 -mcodecov
       - name: Zip test reports for upload
         if: always()
         env:
@@ -411,7 +407,7 @@ jobs:
         env:
           AWS_DEFAULT_REGION: us-east-1
           CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          JOB_BASE_NAME: linux-bionic-py3.8-gcc9-coverage-test
+          JOB_BASE_NAME: linux-focal-cuda10.2-py3.9-gcc7-test
           CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
           CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           CIRCLE_TAG: ${{ steps.parse-ref.outputs.tag }}
