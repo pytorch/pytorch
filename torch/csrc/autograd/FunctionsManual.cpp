@@ -3518,10 +3518,10 @@ std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, cons
 
   // compute sigma such that
   // H(sigma_i) == H(tau_i)^{-1}.
-  // TODO: it is probably worth considering this case for generic input,
-  // even though this case is very unlikely to pop up in practice.
-  // There is NO issue if the input to the torch.linalg.householder_product
-  // comes from the GEQRF routine.
+  // If the input to householder_product comes from GEQRF,
+  // we will never encounter ||v_i||^2 tau_i == 1, so H(tau_i) will always be invertible.
+  // This follows from the documentation https://www.netlib.org/lapack/lug/node128.html,
+  // and tau always satisfying the condition |tau|^2 ||v||^2 == 2 * Re(tau).
   auto input_first_k_cols = input.narrow(-1, 0, k);
   auto input_first_k_cols_norm_squared = (
     input_first_k_cols * input_first_k_cols.conj()
