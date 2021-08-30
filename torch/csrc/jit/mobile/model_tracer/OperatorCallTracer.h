@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ATen/record_function.h"
+#include <ATen/record_function.h>
 
 namespace torch {
 namespace jit {

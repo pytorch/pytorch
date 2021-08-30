@@ -1,6 +1,5 @@
 #include <iostream>
 #include <string>
-#include "torch/csrc/jit/mobile/import.h"
 
 /**
  * The tracer.cpp generates a binary that accepts a TorchScript model or a
@@ -21,15 +20,16 @@
 #include <ostream>
 #include <sstream>
 
+#include <ATen/Functions.h>
 #include <ATen/core/dispatch/ObservedOperators.h>
+#include <c10/core/ScalarType.h>
+#include <torch/csrc/autograd/grad_mode.h>
+#include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/model_tracer/KernelDTypeTracer.h>
 #include <torch/csrc/jit/mobile/model_tracer/MobileModelRunner.h>
 #include <torch/csrc/jit/mobile/model_tracer/OperatorCallTracer.h>
 #include <torch/csrc/jit/mobile/model_tracer/TensorUtils.h>
-#include "ATen/Functions.h"
-#include "c10/core/ScalarType.h"
-#include "torch/csrc/autograd/grad_mode.h"
-#include "torch/script.h"
+#include <torch/script.h>
 
 typedef std::map<std::string, std::set<std::string>> kt_type;
 
@@ -134,7 +134,7 @@ void call_setup_methods() {
  * in production on this Tensor.
  */
 void consume_tensor(at::Tensor& t) {
-  const at::Tensor c = t;
+  const at::Tensor& c = t;
   c.copy_(t.cpu());
 }
 

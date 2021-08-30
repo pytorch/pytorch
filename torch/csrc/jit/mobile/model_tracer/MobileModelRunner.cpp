@@ -231,7 +231,7 @@ void MobileModelRunner::for_each_tensor_in_bundled_inputs(
     for (auto& entry : bundled_inputs_mapping) {
       std::vector<std::vector<at::IValue>> bundled_inputs = entry.second;
       // Loop through inputs
-      for (std::vector<at::IValue> input : bundled_inputs) {
+      for (std::vector<at::IValue>& input : bundled_inputs) {
         // Loop through values in an input
         for (at::IValue iv : input) {
           for_each_tensor_in_ivalue(iv, func);
