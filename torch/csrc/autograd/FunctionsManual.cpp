@@ -3430,40 +3430,6 @@ bool any_variable_defined(const variable_list& variables) {
   return false;
 }
 
-// C++14 does not support templated functions, so we wrap them into a struct.
-template<bool in_place>
-struct HouseholderReflectorEvaluator {
-  // computes (I - t v v^H) K
-  static Tensor apply_left(int64_t k, const Tensor& v_full, const Tensor& t, Tensor& K) {
-    // v_full is a vector of dimension (..., m, 1), t is a scalar of dimension (..., 1)
-    auto m = v_full.size(-2);
-    if (in_place) {
-      auto v = v_full.narrow(-2, k, m - k);
-      auto u = v.transpose(-1, -2).conj().matmul(K.narrow(-2, k, m - k));
-      K.narrow(-2, k, m - k).sub_((t.unsqueeze(-1) * v) * u);
-      return K;
-    }
-    else {
-      return K - (t.unsqueeze(-1) * v_full) * v_full.transpose(-1, -2).conj().matmul(K);
-    }
-  }
-
-  // computes K (I - t v v^H)
-  static Tensor apply_right(int64_t k, const Tensor& v_full, const Tensor& t, Tensor& K) {
-    // v_full is a vector of dimension (..., m, 1), t is a scalar of dimension (..., 1)
-    auto m = v_full.size(-2);
-    if (in_place) {
-      auto v = v_full.narrow(-2, k, m - k);
-      auto u = K.narrow(-1, k, m - k).matmul(t.unsqueeze(-1) * v);
-      K.narrow(-1, k, m - k).sub_(u * v.conj().transpose(-1, -2));
-      return K;
-    }
-    else {
-      return K - K.matmul(t.unsqueeze(-1) * v_full) * v_full.transpose(-1, -2).conj();
-    }
-  }
-};
-
 // Derivations for the householder_product.backward method.
 //
 // Given a sequence of vectors v_1, ..., v_n and a sequence of scalars tau_1, ..., tau_k,
@@ -3534,16 +3500,45 @@ std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, cons
   // If only single backward is run, we modify K in-place and exploit triangularity of the input.
   // With higher order derivatives we cannot rewrite the storage of K, hence we use much less efficient
   // out-of-place methods.
-  std::function<decltype(HouseholderReflectorEvaluator<true>::apply_left)> left_reflect, right_reflect;
+  auto apply_householder_reflector = [&m](
+      int64_t k, const Tensor& v_full, const Tensor& t, Tensor& K, bool left = true, bool in_place = true) -> Tensor {
+    // v_full is a vector of dimension (..., m, 1), t is a scalar of dimension (..., 1)
+
+    // returns (I - t v v^H) K
+    if (left) {
+      if (in_place) {
+        auto v = v_full.narrow(-2, k, m - k);
+        auto u = v.transpose(-1, -2).conj().matmul(K.narrow(-2, k, m - k));
+        K.narrow(-2, k, m - k).sub_((t.unsqueeze(-1) * v) * u);
+        return K;
+      }
+      else {
+        return K - (t.unsqueeze(-1) * v_full) * v_full.transpose(-1, -2).conj().matmul(K);
+      }
+    }
+    // returns K (I - t v v^H)
+    else {
+      if (in_place) {
+        auto v = v_full.narrow(-2, k, m - k);
+        auto u = K.narrow(-1, k, m - k).matmul(t.unsqueeze(-1) * v);
+        K.narrow(-1, k, m - k).sub_(u * v.conj().transpose(-1, -2));
+        return K;
+      }
+      else {
+        return K - K.matmul(t.unsqueeze(-1) * v_full) * v_full.transpose(-1, -2).conj();
+      }
+    }
+  };
+
+  // if only first-order derivative is expected, we can modify K in-place for better performance
+  bool modify_K_in_place;
   // if higher-order derivates are expected
   if (at::GradMode::is_enabled()) {
-    left_reflect = HouseholderReflectorEvaluator</*in_place=*/false>::apply_left;
-    right_reflect = HouseholderReflectorEvaluator</*in_place=*/false>::apply_right;
+    modify_K_in_place = false;
   }
   // if only first-order derivative is expected
   else {
-    left_reflect = HouseholderReflectorEvaluator</*in_place=*/true>::apply_left;
-    right_reflect = HouseholderReflectorEvaluator</*in_place=*/true>::apply_right;
+    modify_K_in_place = true;
   }
 
   // This method exploites that at k-th iteration vector v_k has only elements v_k[k:] which are non-zero.
@@ -3559,7 +3554,10 @@ std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, cons
   };
 
   // K <- H_0^{-1} @ K
-  K = left_reflect(0, input.narrow(-1, 0, 1), sigma.narrow(-1, 0, 1), K);
+  K = apply_householder_reflector(
+    0, input.narrow(-1, 0, 1), sigma.narrow(-1, 0, 1),
+    K, /*left=*/true, modify_K_in_place
+  );
   for (int64_t i = 0; i < k; ++i) {
     // NOTE: narrow will unsqueeze(-1)
     auto v_i = input.narrow(-1, i, 1);
@@ -3574,8 +3572,14 @@ std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, cons
     if (i < k - 1) {
       auto v_i_next = input.narrow(-1, i + 1, 1);
       auto s_i_next = sigma.narrow(-1, i + 1, 1);
-      K = left_reflect(i + 1, v_i_next, s_i_next, K);
-      K = right_reflect(i, v_i, t_i, K);
+      K = apply_householder_reflector(
+        i + 1, v_i_next, s_i_next,
+        K, /*left=*/true, modify_K_in_place
+      );
+      K = apply_householder_reflector(
+        i, v_i, t_i,
+        K, /*left=*/false, modify_K_in_place
+      );
     }
   }
 
