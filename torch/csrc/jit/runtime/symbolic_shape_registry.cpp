@@ -56,6 +56,12 @@ const std::string shape_compute_functions =
             out.append(elem)
           return out
 
+        def unary_three_unused_inputs(self: List[int], inp0: Any, inp1: Any, inp2: Any):
+          out: List[int] = []
+          for elem in self:
+            out.append(elem)
+          return out
+
         def unary_one_unused_input(self: List[int], inp0: Any):
           out: List[int] = []
           for elem in self:
@@ -335,6 +341,8 @@ static const OperatorMap<std::string>& get_schema_to_function_graph() {
       {"aten::expand_as(Tensor(a) self, Tensor other) -> Tensor(a)", "view"},
       {"aten::mean.dim(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", "mean_dim"},
       {"aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor", "addmm"},
+      {"aten::quantize_per_tensor(Tensor self, float scale, int zero_point, ScalarType dtype) -> Tensor", "unary_three_unused_inputs"},
+      {"aten::dequantize(Tensor self) -> Tensor", "unary"},
   };
   // clang-format on
   return schema_to_function_graph;
