@@ -1,9 +1,14 @@
 #pragma once
 
-#include <ATen/ATen.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/Generator.h>
 #include <stdexcept>
+
+namespace at {
+class Tensor;
+struct TensorIterator;
+struct TensorIteratorBase;
+}
 
 namespace at { namespace native {
 
