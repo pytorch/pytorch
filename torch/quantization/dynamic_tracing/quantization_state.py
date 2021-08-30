@@ -173,14 +173,14 @@ class AutoQuantizationState(torch.nn.Module):
         """
         assert self.cur_op_needs_hooks(op)
         if first_call:
-            arg_tensor_ids = []
+            arg_tensor_infos = []
             for arg in args:
                 # If a tensor does not have an ID, add it. This allows
                 # us to track inputs shared by multiple quantizeable modules.
                 if not hasattr(arg, '_qtensor_info'):
                     arg._qtensor_info = QTensorInfo(qtensor_id[0], torch.float)
                     qtensor_id[0] += 1
-                arg_tensor_ids.append(arg._qtensor_info)
+                arg_tensor_infos.append(arg._qtensor_info)
 
                 # if the existing inf_dtype is not torch.quint8, add an observer
                 # which will be converted to a quant later
@@ -197,16 +197,16 @@ class AutoQuantizationState(torch.nn.Module):
             if key not in self.idx_to_seen_ops:
                 if not isinstance(op, torch.nn.Module):
                     self.idx_to_seen_ops[key] = SeenOp(
-                        self.idx, op, fqn, arg_tensor_ids, [])
+                        self.idx, op, fqn, arg_tensor_infos, [])
                 else:
                     self.idx_to_seen_ops[key] = SeenOp(
-                        self.idx, type(op), fqn, arg_tensor_ids, [])
+                        self.idx, type(op), fqn, arg_tensor_infos, [])
 
             return args, kwargs
 
         else:
             seen_op = self._get_cur_seen_op()
-            for input_arg_idx, input_arg in enumerate(seen_op.input_tensor_ids):
+            for input_arg_idx, input_arg in enumerate(seen_op.input_tensor_infos):
                 tensor_id = input_arg.id
                 # TODO: do not run this twice on input and output
                 if str(tensor_id) in self.tensor_id_to_observer:
@@ -241,13 +241,13 @@ class AutoQuantizationState(torch.nn.Module):
             # TODO(future PR): check if _qtensor_id needs to become an actual
             # attribute of Tensor
             output._qtensor_info = QTensorInfo(qtensor_id[0], torch.quint8)
-            self.idx_to_seen_ops[str(self.idx)].output_tensor_ids.append(
+            self.idx_to_seen_ops[str(self.idx)].output_tensor_infos.append(
                 output._qtensor_info)
             qtensor_id[0] += 1
         else:
             # TODO(future PR): other output types
             seen_op = self._get_cur_seen_op()
-            tensor_id = seen_op.output_tensor_ids[0].id
+            tensor_id = seen_op.output_tensor_infos[0].id
             obs = self.tensor_id_to_observer[str(tensor_id)]
             output = obs(output)
         return output
@@ -335,8 +335,8 @@ class AutoQuantizationState(torch.nn.Module):
         if not isinstance(op, torch.nn.Module):
             if op in fp32_to_int8_fun_mapping:
                 seen_op = self._get_cur_seen_op()
-                output_tensor_ids = seen_op.output_tensor_ids
-                tensor_id = output_tensor_ids[0].id
+                output_tensor_infos = seen_op.output_tensor_infos
+                tensor_id = output_tensor_infos[0].id
                 observer = self.tensor_id_to_observer[str(tensor_id)]
 
                 scale, zp = observer.calculate_qparams()
@@ -368,7 +368,7 @@ class AutoQuantizationState(torch.nn.Module):
         assert self.cur_op_needs_hooks(cur_op)
         seen_op = self._get_cur_seen_op()
         quant_infos: List[Optional[Tuple[float, int]]] = []
-        for input_arg_idx, input_arg in enumerate(seen_op.input_tensor_ids):
+        for input_arg_idx, input_arg in enumerate(seen_op.input_tensor_infos):
             tensor_id = input_arg.id
             if str(tensor_id) in self.tensor_id_to_observer and \
                     input_arg.inf_dtype == torch.float:

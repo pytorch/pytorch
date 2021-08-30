@@ -14,14 +14,14 @@ def _get_next_seen_ops(
     Input: cur_seen_op
     Output: list of all seen_ops which use the output of the cur_seen_op,
     """
-    if len(cur_seen_op.output_tensor_ids) != 1:
+    if len(cur_seen_op.output_tensor_infos) != 1:
         return []
-    output_tensor_id = cur_seen_op.output_tensor_ids[0].id
+    output_tensor_id = cur_seen_op.output_tensor_infos[0].id
     results = []
     for idx, seen_op in idx_to_seen_op.items():
-        if len(seen_op.input_tensor_ids) != 1:
+        if len(seen_op.input_tensor_infos) != 1:
             continue
-        input_tensor_id = seen_op.input_tensor_ids[0].id
+        input_tensor_id = seen_op.input_tensor_infos[0].id
         if output_tensor_id == input_tensor_id:
             results.append(seen_op)
     return results
@@ -45,6 +45,7 @@ def get_module_fusion_fqns(
     # TODO(future): reuse global mapping
     known_fusion_patterns = [
         (torch.nn.Conv2d, torch.nn.ReLU),
+        (torch.nn.Conv2d, torch.nn.BatchNorm2d),
     ]
 
     # Walk the subgraphs and record the FQNs of all known module fusions.

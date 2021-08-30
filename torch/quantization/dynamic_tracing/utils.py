@@ -28,20 +28,25 @@ def _raise_obs_op_mismatch(func, prev_op):
 SeenOp = collections.namedtuple(
     'SeenOp',
     [
+        # string
         'idx',
+        # Python type of the seen op. For modules, this is type(mod). For
+        # functions, this is the target function.
         'type',
         # Note: FQN refers to the current module for modules and to the parent
         # module for functions
         'fqn',
-        'input_tensor_ids',
-        'output_tensor_ids',
+        # Information about the input tensors, List[QTensorInfo].
+        'input_tensor_infos',
+        # Information about the output tensors, List[QTensorInfo].
+        'output_tensor_infos',
     ],
 )
 def seen_op_repr(self) -> str:
     s = f"(type): {self.type}\n"
     s += f"     (fqn): {self.fqn}\n"
-    s += f"     (input_tensor_ids): {self.input_tensor_ids}\n"
-    s += f"     (output_tensor_ids): {self.output_tensor_ids}"
+    s += f"     (input_tensor_infos): {self.input_tensor_infos}\n"
+    s += f"     (output_tensor_infos): {self.output_tensor_infos}"
     return s
 
 SeenOp.__repr__ = seen_op_repr  # type: ignore[assignment]

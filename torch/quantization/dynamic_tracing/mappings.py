@@ -26,6 +26,7 @@ module_types_supported_by_quantization = set([
     nnq.Conv2d,
     nn.intrinsic.modules.fused.ConvReLU2d,
     nn.intrinsic.quantized.modules.conv_relu.ConvReLU2d,
+    nn.BatchNorm2d,
     nn.ReLU,
 ])
 

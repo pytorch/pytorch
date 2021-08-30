@@ -1,9 +1,11 @@
 import unittest
 
 import torch
+import torch.nn as nn
 import torch.nn.intrinsic as nni
 from torch.testing._internal.common_quantization import (
     skipIfNoFBGEMM,
+    skip_if_no_torchvision,
     QuantizationTestCase,
 )
 
@@ -11,6 +13,8 @@ import torch.quantization._quantize_dynamic_tracing as _quantize_dynamic_tracing
 
 
 class TestAutoTracing(QuantizationTestCase):
+
+    # TODO(future PR): make sure observers are turned off when tracing
 
     def _test_auto_tracing(self, m, example_inputs):
         mp = _quantize_dynamic_tracing.prepare(m, example_inputs)
@@ -62,6 +66,13 @@ class TestAutoTracing(QuantizationTestCase):
         mp = _quantize_dynamic_tracing.prepare(m, (torch.randn(1, 1, 1, 1),))
         # testing that the conv got fused
         self.assertTrue(isinstance(mp.conv, nni.ConvReLU2d))
+
+    @skipIfNoFBGEMM
+    def test_child_modules(self):
+        m = nn.Sequential(nn.Sequential(nn.Conv2d(1, 1, 1))).eval()
+        m.qconfig = torch.quantization.default_qconfig
+        mp = _quantize_dynamic_tracing.prepare(m, (torch.randn(1, 1, 1, 1),))
+        print(mp)
 
     @skipIfNoFBGEMM
     def test_conv(self):
@@ -121,6 +132,18 @@ class TestAutoTracing(QuantizationTestCase):
         # print(model_fp32_fused)
         # return
         self._test_auto_tracing(model_fp32_fused, (torch.randn(1, 1, 2, 2),))
+
+    @skip_if_no_torchvision
+    @skipIfNoFBGEMM
+    @unittest.skip("TODO enable this")
+    def test_mobilenet_v2(self):
+        import torchvision
+        m = torchvision.models.__dict__['mobilenet_v2'](pretrained=False).eval().float()
+
+        print(m)
+        m.qconfig = torch.quantization.default_qconfig
+        mp = _quantize_dynamic_tracing.prepare(m, (torch.randn(1, 3, 1, 1),))
+        print(mp)
 
     # TODO(future PR): enable this test
     @unittest.skip("this is currently broken")
