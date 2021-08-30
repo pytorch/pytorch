@@ -83,5 +83,5 @@
         with:
           # deep clone, to allow use of git merge-base
           fetch-depth: 0
-          submodules: ${{ submodules }}
+          submodules: !{{ submodules }}
 {%- endmacro -%}

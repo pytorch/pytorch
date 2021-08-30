@@ -78,7 +78,7 @@ jobs:
         with:
           # deep clone, to allow use of git merge-base
           fetch-depth: 0
-          submodules: ${{ submodules }}
+          submodules: false
       - name: Calculate docker image tag
         id: calculate-tag
         run: |
@@ -164,7 +164,7 @@ jobs:
         with:
           # deep clone, to allow use of git merge-base
           fetch-depth: 0
-          submodules: ${{ submodules }}
+          submodules: recursive
       - name: Pull docker image
         run: |
           docker pull "${DOCKER_IMAGE}"

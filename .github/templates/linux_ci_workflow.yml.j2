@@ -74,7 +74,7 @@ jobs:
       docker_image: ${{ steps.calculate-tag.outputs.docker_image }}
     steps:
       !{{ common.setup_ec2_linux() }}
-      !{{ common.checkout_pytorch(false) }}
+      !{{ common.checkout_pytorch("false") }}
       - name: Calculate docker image tag
         id: calculate-tag
         run: |
