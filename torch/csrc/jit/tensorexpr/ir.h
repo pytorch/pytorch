@@ -625,10 +625,6 @@ class TORCH_API CompareSelect : public ExprNode<CompareSelect> {
       CompareSelectOperation cmp_op,
       CompareSelectBias bias = kUnbiased) {
     if (lhs.dtype() != rhs.dtype() || ret_val1.dtype() != ret_val2.dtype()) {
-      std::cout << "lhs dtype: " << lhs.dtype() << std::endl;
-      std::cout << "rhs dtype: " << rhs.dtype() << std::endl;
-      std::cout << "ret val1 dtype: " << ret_val1.dtype() << std::endl;
-      std::cout << "ret val2 dtype: " << ret_val2.dtype() << std::endl;
       throw malformed_input("bad dtype in CompareSelect");
     }
     return ExprHandle(alloc<CompareSelect>(
