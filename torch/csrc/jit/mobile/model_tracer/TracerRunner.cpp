@@ -1,15 +1,14 @@
+#include <ATen/Functions.h>
 #include <ATen/core/dispatch/ObservedOperators.h>
+#include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
+#include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/jit/mobile/model_tracer/KernelDTypeTracer.h>
 #include <torch/csrc/jit/mobile/model_tracer/MobileModelRunner.h>
 #include <torch/csrc/jit/mobile/model_tracer/OperatorCallTracer.h>
 #include <torch/csrc/jit/mobile/model_tracer/TensorUtils.h>
 #include <torch/csrc/jit/mobile/model_tracer/TracerRunner.h>
-
-#include "ATen/Functions.h"
-#include "c10/core/ScalarType.h"
-#include "torch/csrc/autograd/grad_mode.h"
-#include "torch/script.h"
+#include <torch/script.h>
 
 namespace torch {
 namespace jit {
@@ -206,18 +205,22 @@ TracerResult trace_run(const std::string& input_module_path) {
       kdtype_tracer.getCalledKernelTags().end());
   traced_operators.insert(
       always_included_traced_ops.begin(), always_included_traced_ops.end());
-  TracerResult tracer_result = {root_ops, traced_operators, called_kernel_tags, enabled_backends};
+  TracerResult tracer_result = {
+      root_ops, traced_operators, called_kernel_tags, enabled_backends};
 
-  if (tracer_result.traced_operators.size() <= always_included_traced_ops.size() ||
-    tracer_result.called_kernel_tags.size() == 0) {
+  if (tracer_result.traced_operators.size() <=
+          always_included_traced_ops.size() ||
+      tracer_result.called_kernel_tags.size() == 0) {
     throw std::runtime_error(
-        "Error traced_operators size: " + std::to_string(tracer_result.traced_operators.size()) +
-        " , Kernel_metadata size: " + std::to_string(tracer_result.called_kernel_tags.size()) +
+        "Error traced_operators size: " +
+        std::to_string(tracer_result.traced_operators.size()) +
+        " , Kernel_metadata size: " +
+        std::to_string(tracer_result.called_kernel_tags.size()) +
         ", Expected kernel to be > 0 and the traced operator list " +
-        "to be bigger then the default size " + std::to_string(always_included_traced_ops.size()) +
+        "to be bigger then the default size " +
+        std::to_string(always_included_traced_ops.size()) +
         ". Please ensure tracer was run with " +
-        "'buck run -c pt.disable_per_op_profiling=0 -c pt.enable_record_kernel_dtype=1'"
-        );
+        "'buck run -c pt.disable_per_op_profiling=0 -c pt.enable_record_kernel_dtype=1'");
   }
 
   return tracer_result;
