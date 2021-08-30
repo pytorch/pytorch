@@ -2574,7 +2574,7 @@ def sample_inputs_hardswish(self, device, dtype, requires_grad):
 
 def sample_inputs_linear(self, device, dtype, requires_grad):
     features_options = [[3, 4], [128, 128]]
-    batch_options = [
+    batch_options: List[List[int]] = [
         [],  # no batch
         [0],
         [64],
@@ -7480,7 +7480,10 @@ op_db: List[OpInfo] = [
            supports_autograd=True,
            sample_inputs_func=sample_inputs_linear,
            dtypesIfCPU=all_types_and_complex_and(torch.half, torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
+           dtypesIfROCM=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
+           backward_dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
+                                                                *[torch.bfloat16] if (SM60OrLater and CUDA11OrLater) else []),
            supports_forward_ad=True,
            supports_out=False),
     UnaryUfuncInfo(
