@@ -1598,12 +1598,6 @@ def sample_inputs_mm(op_info, device, dtype, requires_grad, **kwargs):
                     args=(make_tensor(second_shape, device, dtype,
                                       requires_grad=requires_grad),)))
 
-    sample_inputs.append(
-        SampleInput(make_tensor(24, device, dtype,
-                                requires_grad=requires_grad)[:, ::4].t(),
-                    args=(make_tensor(9, device, dtype,
-                          requires_grad=requires_grad).view(3, 3),)))
-
     if dtype.is_complex:
         sample_inputs.append(
             SampleInput(make_tensor(first_shape, device, dtype,
