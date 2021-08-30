@@ -492,6 +492,34 @@ The runtime that conumes the model needs to support the custom op. See
 or your runtime of choice's documentation.
 
 
+Discovering all unconvertible ATen ops at once
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+When export fails due to an unconvertible ATen op, there may in fact be more
+than one such op but the error message only mentions the first. To discover
+all of the unconvertible ops in one go you can:
+
+    import io
+    import onnx
+    import torch
+
+    f = io.BytesIO()
+    # prepare model and args
+    ...
+    # export
+    torch.onnx.export(model, args, f,
+                      # so that unconvertible ops don't cause failure.
+                      operator_export_type=torch.onnx.OperatorExportTypes.ONNX_FALLTHROUGH,
+                      # constant folding is not compatible with ONNX_FALLTHROUGH
+                      do_constant_folding=False)
+
+    # load model
+    f.seek(0)
+    onnx_model = onnx.load_model(f)
+    all_aten_ops = [node.op_type for node in onnx_model.graph.node
+                    if node.domain == "org.pytorch.aten"]
+    print(set(all_aten_ops))
+
 Frequently Asked Questions
 --------------------------
 Q: I have exported my LSTM model, but its input size seems to be fixed?
