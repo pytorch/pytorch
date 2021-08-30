@@ -272,32 +272,18 @@ LINUX_WORKFLOWS = [
             labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU}
         ),
     ),
-    CIWorkflow(
-        arch="linux",
-        build_environment="paralleltbb-linux-xenial-py3.6-gcc5.4",
-        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3.6-gcc5.4",
-        test_runner_type=LINUX_CPU_TEST_RUNNER,
-        # This is a master only job despit on_pull_request is set to True
-        on_pull_request=True,
-        ciflow_config=CIFlowConfig(
-            enabled=True,
-            trigger_action_only=True,
-            labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU},
-        ),
-    ),
-    CIWorkflow(
-        arch="linux",
-        build_environment="parallelnative-linux-xenial-py3.6-gcc5.4",
-        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3.6-gcc5.4",
-        test_runner_type=LINUX_CPU_TEST_RUNNER,
-        # This is a master only job despit on_pull_request is set to True
-        on_pull_request=True,
-        ciflow_config=CIFlowConfig(
-            enabled=True,
-            trigger_action_only=True,
-            labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU},
-        ),
-    ),
+    # CIWorkflow(
+    #     arch="linux",
+    #     build_environment="paralleltbb-linux-xenial-py3.6-gcc5.4",
+    #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3.6-gcc5.4",
+    #     test_runner_type=LINUX_CPU_TEST_RUNNER,
+    # ),
+    # CIWorkflow(
+    #     arch="linux",
+    #     build_environment="parallelnative-linux-xenial-py3.6-gcc5.4",
+    #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3.6-gcc5.4",
+    #     test_runner_type=LINUX_CPU_TEST_RUNNER,
+    # ),
     # CIWorkflow(
     #     arch="linux",
     #     build_environment="pure_torch-linux-xenial-py3.6-gcc5.4",
