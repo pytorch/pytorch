@@ -2982,6 +2982,45 @@ class TestFX(JitTestCase):
         nf = symbolic_trace(nf)
         self.assertEqual(nf(**val), f(**val))
 
+    def test_graph_module_eq(self):
+        class IdentityModule(torch.nn.Module):
+            def forward(self, x):
+                return x
+
+        m = IdentityModule()
+        gm = symbolic_trace(m)
+
+        self.assertTrue(gm == gm)
+
+        gm2 = deepcopy(gm)
+        self.assertTrue(gm == gm2)
+
+        gm3 = symbolic_trace(m)
+        self.assertFalse(gm == gm3)
+
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                return torch.maximum(x * x, x + x)
+
+        m = MyModule()
+        gm = symbolic_trace(m)
+
+        gm2 = deepcopy(gm)
+        self.assertTrue(gm == gm2)
+
+        # swap order of idx 1 and idx 2 nodes in nodelist
+        for i, node in enumerate(gm2.graph.nodes):
+            if i == 1:
+                node1 = node
+            elif i == 2:
+                node.append(node1)
+                break
+        self.assertFalse(gm.graph.nodes == gm2.graph.nodes)
+
+        # verify topological order is preserved
+        gm2.graph.lint()
+        self.assertTrue(gm == gm2)
+
 
 
 

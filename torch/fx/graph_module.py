@@ -661,6 +661,26 @@ class {module_name}(torch.nn.Module):
         new_gm._is_replica = True
         return new_gm
 
+    def __hash__(self) -> int:
+        return id(self)
+
+    def __eq__(self, other) -> bool:
+        """
+        Checks equality of ``GraphModule``s with `other` where equality is
+        defined as: underlying graph nodes are equal and their order in
+        the node list is topologically equivalent.
+
+        Assumes `self` and `other` graphs are valid, i.e. have topologically
+        ordered node lists.
+        """
+        # Check graphs contains same set of nodes
+        if (
+            len(self.graph.nodes) != len(other.graph.nodes)
+            or set(self.graph.nodes) != set(other.graph.nodes)
+        ):
+            return False
+        return True
+
 # workarounds for issues in __torch_function__
 
 # WAR for __torch_function__ not handling tensor lists,
