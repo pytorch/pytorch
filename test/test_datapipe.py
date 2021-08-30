@@ -782,6 +782,13 @@ class TestFunctionalIterDataPipe(TestCase):
         with self.assertRaises(ValueError):
             next(it1)
 
+        # Test Case: __len__ not implemented
+        dp1, dp2 = input_dp.demux(num_instances=2, classifier_fn=lambda x: x % 2)
+        with self.assertRaises(TypeError):
+            len(dp1)  # It is not implemented as we do not know length for each child in advance
+        with self.assertRaises(TypeError):
+            len(dp2)
+
 
     def test_map_datapipe(self):
         input_dp = IDP(range(10))
