@@ -5327,6 +5327,11 @@ else:
         y = x.as_strided([2, 1, 5], [1, 0, 2])
         self.assertEqual(y, y.clone())
 
+    def test_clone_not_memory_dense(self):
+        # github issue: https://github.com/pytorch/pytorch/issues/64176
+        x=torch.randn(10, 8).t()[::2, ::2]
+        self.assertTrue(x.stride() == (1, 4))
+
     @dtypesIfCUDA(*set(torch.testing.get_all_math_dtypes('cuda')))
     @dtypes(*set(torch.testing.get_all_math_dtypes('cpu')))
     def test_addcmul(self, device, dtype):

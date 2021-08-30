@@ -1597,6 +1597,10 @@ def sample_inputs_mm(op_info, device, dtype, requires_grad, **kwargs):
                                 requires_grad=requires_grad),
                     args=(make_tensor(second_shape, device, dtype,
                                       requires_grad=requires_grad),)))
+
+    inputs.append(SampleInput(make_tensor(24, requires_grad=requires_grad)[:, ::4].t(),
+                              args=(make_tensor(9, device, dtype,
+                                    requires_grad=requires_grad).view(3, 3),)))
     if dtype.is_complex:
         sample_inputs.append(
             SampleInput(make_tensor(first_shape, device, dtype,
@@ -1645,7 +1649,7 @@ def sample_inputs_addmm(op_info, device, dtype, requires_grad, **kwargs):
             SampleInput(make_tensor(shape, device, dtype, requires_grad=requires_grad),
                         args=(
                             make_tensor(shape, device, dtype,
-                                        requires_grad=requires_grad).transpose(0, 1).conj(),
+                                        requires_grad=requires_grad).t().conj(),
                             make_tensor(shape, device, dtype,
                                         requires_grad=requires_grad)),
                         kwargs={'alpha': alpha_val, 'beta': beta_val},))
@@ -1655,7 +1659,7 @@ def sample_inputs_addmm(op_info, device, dtype, requires_grad, **kwargs):
                             make_tensor(shape, device, dtype,
                                         requires_grad=requires_grad),
                             make_tensor(shape, device, dtype,
-                                        requires_grad=requires_grad).transpose(0, 1).conj()),
+                                        requires_grad=requires_grad).t().conj()),
                         kwargs={'alpha': alpha_val, 'beta': beta_val},))
     return sample_inputs
 
