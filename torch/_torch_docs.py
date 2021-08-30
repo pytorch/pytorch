@@ -983,9 +983,9 @@ will handle them as NumPy arrays. In other words, it will infer its dtype as if 
     :func:`torch.tensor` always copies the data from the input object.
     :func:`torch.from_numpy` creates a tensor that shares its memory with a NumPy array.
     :func:`torch.frombuffer` creates a tensor that shares its memory with an object
-           that implements the buffer protocol.
+    that implements the buffer protocol.
     :func:`torch.utils.dlpack.from_dlpack` creates a tensor that shares its memory
-           with the object represented in the dlpack.
+    with the object represented in the dlpack.
 
 Args:
     obj (object): a Python object that satisfies, at least, one of the five options
@@ -1032,14 +1032,14 @@ Example::
     >>> d
     tensor([1., 2., 3.], grad_fn=<AddBackward0>)
 
-    >>> a = numpy.array([1, 2, 3])
-    >>> # Shares memory with array 'a'
-    >>> t1 = torch.asarray(a)
-    >>> a.__array_interface__['data'][0] == t1.data_ptr()
+    >>> array = numpy.array([1, 2, 3])
+    >>> # Shares memory with array 'array'
+    >>> t1 = torch.asarray(array)
+    >>> array.__array_interface__['data'][0] == t1.data_ptr()
     True
     >>> # Copies memory due to dtype mismatch
-    >>> t2 = torch.asarray(a, dtype=torch.float32)
-    >>> a.__array_interface__['data'][0] == t1.data_ptr()
+    >>> t2 = torch.asarray(array, dtype=torch.float32)
+    >>> array.__array_interface__['data'][0] == t1.data_ptr()
     False
 """)
 
