@@ -19,7 +19,7 @@ template <typename T>
 inline std::vector<int64_t> bufferSizes(const T& t) {
   std::vector<int64_t> sizes;
   for (size_t i = 0; i < t->ndim(); i++) {
-    sizes.push_back(to<IntImm>(t->dim(i))->value());
+    sizes.push_back(*intValue(t->dim(i)));
   }
   return sizes;
 }
@@ -62,7 +62,7 @@ ExprHandle tensorOrConstant(
     const ArgValue& v,
     const std::vector<ExprHandle>& axes);
 
-size_t normalizeAndCheckIndex(int64_t idx, int64_t list_size);
+int64_t normalizeAndCheckIndex(int64_t idx, int64_t list_size);
 
 ExprHandle broadcast(BufHandle b, const std::vector<ExprHandle>& axes);
 
