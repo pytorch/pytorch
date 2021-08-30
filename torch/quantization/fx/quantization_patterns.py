@@ -24,7 +24,7 @@ from ..utils import (
     get_qparam_dict,
 )
 
-from ..quantize import (
+from torch.ao.quantization.quantize import (
     is_activation_post_process,
 )
 
@@ -869,6 +869,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                 # Get the float linear and attach qscheme and qparams
                 # the the module
                 float_linear = self.linear
+                fused_linear = None
                 if isinstance(float_linear, (torch.nn.qat.Linear, torch.nn.intrinsic.qat.LinearReLU)):
                     float_linear = float_linear.to_float()
                     # change qat linear to linear
@@ -876,10 +877,12 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                     setattr(modules[parent_name], name, float_linear)
                     # Attach weight fake quant to the linear module
                     if isinstance(float_linear, torch.nn.intrinsic.LinearReLU):
+                        fused_linear = float_linear
                         float_linear = float_linear[0]
                     weight_post_process = self.linear.weight_fake_quant
                 else:
                     if isinstance(float_linear, torch.nn.intrinsic.LinearReLU):
+                        fused_linear = float_linear
                         float_linear = self.linear[0]  # type: ignore[index]
                     # Attach the weight observer to the module
                     weight_post_process = qconfig.weight()  # type: ignore[union-attr]
@@ -887,7 +890,21 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                     weight_post_process(float_linear.weight)  # type: ignore[operator]
 
                 weight_qparams = get_qparam_dict(weight_post_process)
-                _to_reference(float_linear, weight_qparams)
+                # TODO: include the configuration in backend_config_dict
+                # we can have a map from module to reference module
+                # and allow user to register new ones
+                qlinear_cls = get_static_quant_module_class(
+                    type(float_linear), is_reference=is_reference)
+                ref_linear = qlinear_cls.from_float(float_linear, weight_qparams)
+
+                # if the parent is a fused linear (Sequential), we can replace the first
+                # item to ref linear, otherwise we can update
+                # the linear instance in the module tree
+                if fused_linear is not None:
+                    fused_linear[0] = ref_linear
+                else:
+                    parent_name, name = _parent_name(self.linear_node.target)
+                    setattr(modules[parent_name], name, ref_linear)
                 op_out = quantized_graph.create_node(
                     'call_module',
                     self.linear_node.target,
@@ -1022,9 +1039,17 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                 elif dtypes in [(torch.float32, torch.qint8, torch.quint8),
                                 (torch.float32, torch.float16, None)]:
                     # choose linear dynamic or linear dynamic fp16 op based on weight dtype
-                    qlinear_op = torch.ops.quantized.linear_dynamic \
-                        if weight_dtype == torch.qint8 \
-                        else torch.ops.quantized.linear_dynamic_fp16
+                    if weight_dtype == torch.qint8:
+                        if self.relu_node:
+                            qlinear_op = torch.ops.quantized.linear_relu_dynamic
+                        else:
+                            qlinear_op = torch.ops.quantized.linear_dynamic
+                    else:
+                        if self.relu_node:
+                            qlinear_op = torch.ops.quantized.linear_relu_dynamic_fp16
+                        else:
+                            qlinear_op = torch.ops.quantized.linear_dynamic_fp16
+
                     linear_input = load_arg(quantized=torch.float)(self.linear_node.args[0])
                     qlinear_args = (linear_input, packed_weight)  # type: ignore[assignment]
                     op_out = quantized_graph.create_node(
@@ -1033,8 +1058,6 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                     # TODO: may need to change the key to Node regenerate the map in each transformation,
                     # since we might not be able to rely on the name
                     node_name_to_scope[op_out.name] = node_name_to_scope[self.linear_node.name]
-                    if self.relu_node:
-                        op_out = quantized_graph.create_node("call_function", torch.nn.functional.relu, (op_out,), {})
                     return op_out
                 else:
                     assert dtypes == (torch.float16, torch.float16, None)
