@@ -25,16 +25,14 @@ from .utils import get_combined_dict
 
 # Default map for swapping float module to reference quantized modules
 DEFAULT_REFERENCE_STATIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
+    nn.Linear: nnqr.Linear,
     nn.Conv1d: nnqr.Conv1d,
     nn.Conv2d: nnqr.Conv2d,
     nn.Conv3d: nnqr.Conv3d,
-    nn.Linear: nnqr.Linear,
     nni.ConvReLU1d: nniqr.ConvReLU1d,
     nni.ConvReLU2d: nniqr.ConvReLU2d,
     nni.ConvReLU3d: nniqr.ConvReLU3d,
-    nni.LinearReLU: nniqr.LinearReLU,
     # QAT Modules
-    nnqat.Linear: nnqr.Linear,
     nnqat.Conv2d: nnqr.Conv2d,
     nnqat.Conv3d: nnqr.Conv3d,
     nniqat.ConvBn1d: nnqr.Conv1d,
@@ -45,7 +43,6 @@ DEFAULT_REFERENCE_STATIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     nniqat.ConvBnReLU3d: nniqr.ConvReLU3d,
     nniqat.ConvReLU2d: nniqr.ConvReLU2d,
     nniqat.ConvReLU3d: nniqr.ConvReLU3d,
-    nniqat.LinearReLU: nniqr.LinearReLU,
 }
 
 # Default map for swapping float module to quantized ones
