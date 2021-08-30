@@ -128,6 +128,7 @@ libtorch_edge_profiler_sources = libtorch_profiler_sources + [
 core_trainer_sources = [
     "torch/csrc/autograd/anomaly_mode.cpp",
     "torch/csrc/autograd/autograd.cpp",
+    "torch/csrc/autograd/autograd_not_implemented_fallback.cpp",
     "torch/csrc/autograd/cpp_hook.cpp",
     "torch/csrc/autograd/custom_function.cpp",
     "torch/csrc/autograd/engine.cpp",
@@ -906,6 +907,7 @@ aten_native_source_codegen_list = [
     "aten/src/ATen/native/cpu/LinearAlgebraKernel.cpp",
     "aten/src/ATen/native/cpu/MaxPooling.cpp",
     "aten/src/ATen/native/cpu/MaxPoolKernel.cpp",
+    "aten/src/ATen/native/cpu/MaxUnpoolKernel.cpp",
     "aten/src/ATen/native/cpu/MultinomialKernel.cpp",
     "aten/src/ATen/native/cpu/PointwiseOpsKernel.cpp",
     "aten/src/ATen/native/cpu/PowKernel.cpp",
