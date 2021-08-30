@@ -1,3 +1,4 @@
+#define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/DispatchStub.h>
@@ -41,7 +42,7 @@ void add_kernel_cuda(TensorIteratorBase& iter, const Scalar& alpha_scalar) {
       int scalar_arg = iter.is_cpu_scalar(1) ? 1 : 2;
       auto b = iter.scalar_value<accscalar_t>(scalar_arg);
       iter.remove_operand(scalar_arg);
-      const cuda::OptionalCUDAGuard device_guard(device_of(iter.tensor(1)));
+      const cuda::OptionalCUDAGuard device_guard(iter.device(1));
       if (scalar_arg == 1) {
         AddScalarFunctor<scalar_t, decltype(b), 1> f(alpha_scalar.to<accscalar_t>(), b);
         gpu_kernel(iter, f);

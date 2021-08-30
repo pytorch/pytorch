@@ -1,3 +1,4 @@
+#define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/BinaryOps.h>
@@ -189,7 +190,7 @@ void mul_kernel_cuda(TensorIteratorBase& iter) {
       int scalar_arg = iter.is_cpu_scalar(1) ? 1 : 2;
       auto b = iter.scalar_value<accscalar_t>(scalar_arg);
       iter.remove_operand(scalar_arg);
-      const cuda::OptionalCUDAGuard device_guard(device_of(iter.tensor(1)));
+      const cuda::OptionalCUDAGuard device_guard(iter.device(1));
       MulScalarFunctor<scalar_t, decltype(b)> f(b);
       gpu_kernel(iter, f);
     });
