@@ -97,6 +97,63 @@ class SignedLog1pBench : public benchmark::Fixture {
     }
   }
 
+  void runNNCLogVml(benchmark::State& state) {
+    Placeholder input_ph(
+        "input", kFloat, {input_size_int_[0], input_size_int_[1]});
+    Tensor abs_result = Compute(
+        "aten_abs",
+        {{input_size_int_[0], "M"}, {input_size_int_[1], "N"}},
+        [&](const VarHandle& m, const VarHandle& n) {
+          return abs(input_ph.load(m, n));
+        });
+    Tensor log_vml_result = Compute(
+        "aten_log1p",
+        {{input_size_int_[0], "M"}, {input_size_int_[1], "N"}},
+        [&](const VarHandle& m, const VarHandle& n) {
+          return log_vml(abs_result.load(m, n) + ExprHandle(1));
+        });
+    Tensor sign = Compute(
+        "aten_sign",
+        {{input_size_int_[0], "M"}, {input_size_int_[1], "N"}},
+        [&](const VarHandle& m, const VarHandle& n) {
+          return CompareSelect::make(
+              input_ph.load(m, n),
+              ExprHandle(0.0f),
+              ExprHandle(-1),
+              ExprHandle(1),
+              kLT);
+        });
+    Tensor output = Compute(
+        "aten_mul",
+        {{input_size_int_[0], "M"}, {input_size_int_[1], "N"}},
+        [&](const VarHandle& m, const VarHandle& n) {
+          return sign.load(m, n) * log_vml_result.load(m, n);
+        });
+    LoopNest nest({output}, {abs_result, log_vml_result, sign, output});
+    GRAPH_DEBUG("Original Stmt: ", *nest.root_stmt());
+    nest.inlineIntermediateBufs(true);
+    nest.prepareForCodegen();
+    nest.simplify();
+    nest.vectorizeInnerLoops();
+    nest.simplify();
+    GRAPH_DEBUG("Final stmt: ", *nest.root_stmt());
+
+    // StmtPtr s = IRSimplifier::simplify(nest.root_stmt());
+    std::vector<CodeGen::BufferArg> buf_args;
+    buf_args.push_back(input_ph);
+    buf_args.push_back(output);
+    LLVMCodeGen cg(nest.root_stmt(), buf_args);
+
+    std::vector<CodeGen::CallArg> call_args;
+    for (auto _ : state) {
+      output_ = at::empty_like(ref_);
+      call_args.clear();
+      call_args.push_back(input_.data_ptr<float>());
+      call_args.push_back(output_.data_ptr<float>());
+      cg.call(call_args);
+    }
+  }
+
  private:
   std::vector<long> input_size_;
   std::vector<int> input_size_int_;
@@ -115,6 +172,12 @@ BENCHMARK_DEFINE_F(SignedLog1pBench, NNC)(benchmark::State& state) {
   runNNC(state);
 }
 
+BENCHMARK_DEFINE_F(SignedLog1pBench, NNCLogVml)(benchmark::State& state) {
+  runNNC(state);
+}
+
 BENCHMARK_REGISTER_F(SignedLog1pBench, ATen)->Args({10, 1467});
 
 BENCHMARK_REGISTER_F(SignedLog1pBench, NNC)->Args({10, 1467});
+
+BENCHMARK_REGISTER_F(SignedLog1pBench, NNCLogVml)->Args({10, 1467});
