@@ -774,7 +774,6 @@ class TestFunctionalIterDataPipe(TestCase):
                                   drop_none=False)
         it1 = iter(dp1)
         with self.assertRaises(ValueError):
-            print("WE ARE HERE")
             next(it1)
 
 
