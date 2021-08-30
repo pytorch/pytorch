@@ -25,6 +25,7 @@
 #include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
 #include <mutex>
+#include <unordered_map>
 
 C10_DEFINE_bool(
     static_runtime_enable_fast_math,
@@ -312,27 +313,33 @@ bool hasVarArgs(Node* n) {
   return false;
 }
 
-// Expensive check, use sparingly.
-// This is needed to make sure that we only switch to out variants for the
-// supported overloads, which is checked in the `Generate` step in
-// `SROperatorRegistry()->Create(op_name)->Generate(n)`
-bool canReuseInputsOutputs(Node* n) {
+bool canReuseInputsOutputs(
+    Node* n,
+    const FastMap<Node*, bool>& node_has_out_variant) {
+  auto it = node_has_out_variant.find(n);
+  if (it != node_has_out_variant.end()) {
+    return it->second;
+  }
   return getOutOfPlaceOperation(n) != nullptr;
 }
 
 // returns true if the producers of the inputs
 // to this operations are out of place.
 // This means the IValues will not change run to run
-bool inputsCanRunOutOfPlace(Node* n) {
+bool inputsCanRunOutOfPlace(
+    Node* n,
+    const FastMap<Node*, bool>& node_has_out_variant) {
   for (auto* input : n->inputs()) {
-    if (!canReuseInputsOutputs(input->node())) {
+    if (!canReuseInputsOutputs(input->node(), node_has_out_variant)) {
       return false;
     }
   }
   return true;
 }
 
-bool isOptimizableContainerType(Node* n) {
+bool isOptimizableContainerType(
+    Node* n,
+    const FastMap<Node*, bool>& node_has_out_variant) {
   const auto& type = n->output()->type();
   bool is_supported_type = false;
   if (type->kind() == TypeKind::ListType) {
@@ -348,7 +355,7 @@ bool isOptimizableContainerType(Node* n) {
         });
     is_supported_type = iter != types.end();
   }
-  return is_supported_type && inputsCanRunOutOfPlace(n);
+  return is_supported_type && inputsCanRunOutOfPlace(n, node_has_out_variant);
 }
 
 REGISTER_OPERATOR_FUNCTOR(
@@ -356,7 +363,7 @@ REGISTER_OPERATOR_FUNCTOR(
     prim_ListConstruct,
     [](Node* n) -> SROperator {
       const auto& type = n->output()->type()->expectRef<ListType>();
-      bool can_optimize = isOptimizableContainerType(n);
+      bool can_optimize = isOptimizableContainerType(n, FastMap<Node*, bool>());
       return [can_optimize, &type](ProcessedNode* p_node) {
         const auto& out_l = p_node->Output(0);
         if (!out_l.isNone() && can_optimize) {
@@ -376,7 +383,7 @@ REGISTER_OPERATOR_FUNCTOR(
     prim::TupleConstruct,
     prim_TupleConstruct,
     [](Node* n) -> SROperator {
-      bool can_optimize = isOptimizableContainerType(n);
+      bool can_optimize = isOptimizableContainerType(n, FastMap<Node*, bool>());
       return [can_optimize](ProcessedNode* p_node) {
         const auto& out_l = p_node->Output(0);
         if (!out_l.isNone() && can_optimize) {
