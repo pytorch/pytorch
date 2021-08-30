@@ -138,7 +138,7 @@ std::shared_ptr<UCPRequest> UCPWorker::submit_p2p_request(
   params.memory_type = getUCSMemoryType(device);
   params.cb.recv = recv_callback;
   ucs_status_ptr_t request = work(&params);
-  TORCH_UCX_CHECK_MAYBE_INPROGRESS(UCS_PTR_STATUS(request), "Failed to start p2p operation.");
+  TORCH_UCX_CHECK_PTR(request, "Failed to start p2p operation.");
   progress();
   return std::shared_ptr<UCPRequest>(
     new UCPRequest(reinterpret_cast<UCPRequest::Data *>(request)));
