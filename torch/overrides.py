@@ -192,7 +192,6 @@ def get_ignored_functions() -> Set[Callable]:
         torch.set_autocast_gpu_dtype,
         torch.autocast_increment_nesting,
         torch.autocast_decrement_nesting,
-        torch.graph_pool_handle,
         torch.nn.functional.hardswish,
         torch.is_vulkan_available,
         torch.are_deterministic_algorithms_enabled,

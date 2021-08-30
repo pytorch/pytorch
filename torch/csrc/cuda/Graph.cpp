@@ -23,24 +23,17 @@ void THCPGraph_init(PyObject *module) {
   auto torch_C_m = py::handle(module).cast<py::module>();
 
   torch_C_m
-      .def("graph_pool_handle",
-           &::at::cuda::graph_pool_handle,
-           R"(
-.. warning
-    This API is a prototype and may change in future releases.
-
-Returns an opaque token representing the id of a graph memory pool.
-See :ref:`Graph memory management<graph-memory-management>`.
-           )");
+      .def("_graph_pool_handle",
+           &::at::cuda::graph_pool_handle);
 
   shared_ptr_class_<::at::cuda::CUDAGraph>
       (torch_C_m,
        "CUDAGraph",
        R"(
+Wrapper around a CUDA graph.
+
 .. warning
     This API is a prototype and may change in future releases.
-
-Wrapper around a CUDA graph.
        )")
       .def(py::init<>())
       // I'm not sure this is the correct order of all the arguments. Pybind11 docs

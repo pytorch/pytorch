@@ -10,13 +10,22 @@ if not hasattr(torch._C, '_CudaStreamBase'):
     torch._C.__dict__['graph_pool_handle'] = _dummy_type('graph_pool_handle')
 
 from torch._C import CUDAGraph  # noqa: F401
-from torch._C import graph_pool_handle
+from torch._C import _graph_pool_handle
+
+
+def graph_pool_handle():
+    r"""
+    Returns an opaque token representing the id of a graph memory pool.
+    See :ref:`Graph memory management<graph-memory-management>`.
+
+    .. warning
+        This API is a prototype and may change in future releases.
+    """
+    return _graph_pool_handle()
+
 
 class graph(object):
     r"""
-    .. warning
-        This API is a prototype and may change in future releases.
-
     Context-manager that captures CUDA work into a :class:`torch.cuda.CUDAGraph`
     object for later replay.
 
@@ -34,6 +43,9 @@ class graph(object):
     .. note::
         For effective memory sharing, if you pass a ``pool`` used by a previous capture and the previous capture
         used an explicit ``stream`` argument, you should pass the same ``stream`` argument to this capture.
+
+    .. warning
+        This API is a prototype and may change in future releases.
     """
     default_capture_stream = None
 
@@ -74,9 +86,6 @@ class graph(object):
 
 def make_graphed_callables(callables, sample_args):
     r"""
-    .. warning
-        This API is a prototype and may change in future releases.
-
     Accepts callables (functions or :class:`nn.Module<torch.nn.Module>`\ s)
     and returns graphed versions.
 
@@ -108,12 +117,19 @@ def make_graphed_callables(callables, sample_args):
         The ``requires_grad`` state of each Tensor in ``sample_args`` must match the state
         that's expected for the corresponding real input in the training loop.
 
+    .. warning
+        This API is a prototype and may change in future releases.
+
     .. warning::
         ``sample_args`` for each callable must be a tuple of Tensors. Other types and keyword args
         are not allowed.
 
     .. warning::
         Returned callables do not support higher order differentiation (e.g., double backward).
+
+    .. warning::
+        In any :class:`~torch.nn.Module` passed to :func:`~make_graphed_callables`, only parameters
+        may be trainable. All buffers must have ``requires_grad=False``.
 
     .. warning::
         After you pass a :class:`torch.nn.Module` through :func:`~make_graphed_callables`,
@@ -143,6 +159,9 @@ def make_graphed_callables(callables, sample_args):
             assert len(c._backward_hooks) == 0 and len(c._forward_hooks) == 0 and len(c._forward_pre_hooks) == 0, \
                 "Modules must not have hooks registered at the time they are passed. However, registering hooks " + \
                 "on modules after passing them through make_graphed_callables is allowed."
+            assert all(b.requires_grad is False for b in c.buffers()), "In any :class:`~torch.nn.Module` passed to " + \
+                ":func:`~make_graphed_callables`, only parameters may be trainable. All buffers must have " + \
+                "``requires_grad=False``."
         assert all(isinstance(arg, torch.Tensor) for arg in args), "In the prototype API, sample_args " + \
             "for each callable must be a tuple of Tensors. Other types and keyword args are not allowed."
 
