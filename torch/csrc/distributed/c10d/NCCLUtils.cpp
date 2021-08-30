@@ -1,4 +1,5 @@
 #include <c10d/NCCLUtils.hpp>
+#include <torch/csrc/cuda/nccl.h>
 
 #ifdef USE_C10D_NCCL
 
