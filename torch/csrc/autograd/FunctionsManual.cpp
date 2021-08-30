@@ -3505,13 +3505,24 @@ std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, cons
   // If only single backward is run, we modify K in-place and exploit triangularity of the input.
   // With higher order derivatives we cannot rewrite the storage of K, hence we use much less efficient
   // out-of-place methods.
-  auto apply_householder_reflector = [&m](
-      int64_t k, const Tensor& v_full, const Tensor& t, Tensor& K, bool left = true, bool in_place = true) -> Tensor {
+  //
+  // if only first-order derivative is expected, we can modify K in-place for better performance
+  bool modify_K_in_place = !at::GradMode::is_enabled();
+
+  // TODO: replace this function with calls to LARFB
+  auto apply_householder_reflector = [&m, &modify_K_in_place](
+      int64_t k, const Tensor& v_full, const Tensor& t, Tensor& K, bool left = true) -> Tensor {
     // v_full is a vector of dimension (..., m, 1), t is a scalar of dimension (..., 1)
+
+    // TODO: matrix-vector products in the code below are dispatched to matrix-matrix products.
+    // We either need to extend matmul to support batched matrix-vector products, or
+    // implement a batched variant of mv.
+    // We could enable mv for inputs which are not batched, but it is not done to eliminate
+    // the code duplication.
 
     // returns (I - t v v^H) K
     if (left) {
-      if (in_place) {
+      if (modify_K_in_place) {
         auto v = v_full.narrow(-2, k, m - k);
         auto u = v.transpose(-1, -2).conj().matmul(K.narrow(-2, k, m - k));
         K.narrow(-2, k, m - k).sub_((t.unsqueeze(-1) * v) * u);
@@ -3523,7 +3534,7 @@ std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, cons
     }
     // returns K (I - t v v^H)
     else {
-      if (in_place) {
+      if (modify_K_in_place) {
         auto v = v_full.narrow(-2, k, m - k);
         auto u = K.narrow(-1, k, m - k).matmul(t.unsqueeze(-1) * v);
         K.narrow(-1, k, m - k).sub_(u * v.conj().transpose(-1, -2));
@@ -3534,17 +3545,6 @@ std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, cons
       }
     }
   };
-
-  // if only first-order derivative is expected, we can modify K in-place for better performance
-  bool modify_K_in_place;
-  // if higher-order derivates are expected
-  if (at::GradMode::is_enabled()) {
-    modify_K_in_place = false;
-  }
-  // if only first-order derivative is expected
-  else {
-    modify_K_in_place = true;
-  }
 
   // This method exploites that at k-th iteration vector v_k has only elements v_k[k:] which are non-zero.
   auto update_grad = [&m](int64_t k, const Tensor& v_full, const Tensor& t, const Tensor& K) -> std::tuple<Tensor, Tensor> {
@@ -3561,7 +3561,7 @@ std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, cons
   // K <- H_0^{-1} @ K
   K = apply_householder_reflector(
     0, input.narrow(-1, 0, 1), sigma.narrow(-1, 0, 1),
-    K, /*left=*/true, modify_K_in_place
+    K, /*left=*/true
   );
   for (int64_t i = 0; i < k; ++i) {
     // NOTE: narrow will unsqueeze(-1)
@@ -3579,11 +3579,11 @@ std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, cons
       auto s_i_next = sigma.narrow(-1, i + 1, 1);
       K = apply_householder_reflector(
         i + 1, v_i_next, s_i_next,
-        K, /*left=*/true, modify_K_in_place
+        K, /*left=*/true
       );
       K = apply_householder_reflector(
         i, v_i, t_i,
-        K, /*left=*/false, modify_K_in_place
+        K, /*left=*/false
       );
     }
   }
