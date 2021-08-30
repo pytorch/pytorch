@@ -1,6 +1,8 @@
 #include <c10/core/CompileTimeFunctionPointer.h>
 #include <gtest/gtest.h>
-
+int add(int a, int b){
+  return a+b;
+}
 namespace test_is_compile_time_function_pointer {
 static_assert(!c10::is_compile_time_function_pointer<void()>::value, "");
 
@@ -41,9 +43,7 @@ static_assert(std::is_same<void(), decltype(dummy_ptr)::FuncType>::value, "");
 } // namespace test_access_through_value_also_works_if_specified_as_pointer
 
 namespace test_run_through_type {
-int add(int a, int b) {
-  return a + b;
-}
+
 using Add = TORCH_FN_TYPE(add);
 template <class Func>
 struct Executor {
@@ -59,9 +59,8 @@ TEST(CompileTimeFunctionPointerTest, runFunctionThroughType) {
 } // namespace test_run_through_type
 
 namespace test_run_through_value {
-int add(int a, int b) {
-  return a + b;
-}
+
+ 
 template <class Func>
 int execute(Func, int a, int b) {
   return Func::func_ptr()(a, b);
