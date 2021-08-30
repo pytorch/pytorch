@@ -74,34 +74,32 @@ def add_auto_observation(
         def __torch_function__(self, func, types, args=(), kwargs=None):
             nonlocal qtensor_id
             kwargs = kwargs if kwargs else {}
-
             can_have_op_hooks = cur_module and cur_module in modules_to_introspect
             needs_op_hooks = can_have_op_hooks and \
                 cur_module._auto_quant_state.cur_op_needs_hooks(func)
-            qstate = None
-            fqn = module_id_to_fqn[id(cur_module)] if cur_module else None
 
             if needs_op_hooks:
                 qstate = cur_module._auto_quant_state
+                fqn = module_id_to_fqn[id(cur_module)] if cur_module else None
                 if not first_call:
                     qstate.validate_cur_op(func)
                 # run "before" hook
                 args, kwargs = qstate.op_prepare_before_hook(
                     func, args, kwargs, first_call, qtensor_id, fqn)
+                # forward
+                output = super().__torch_function__(func, types, args, kwargs)
+                # run "after" hook
+                output = qstate.op_prepare_after_hook(
+                    func, output, first_call, qtensor_id)
+                qstate.mark_cur_op_complete(func)
+            else:
+                output = super().__torch_function__(func, types, args, kwargs)
 
-            output = super().__torch_function__(func, types, args, kwargs)
             # TODO: is this right? Don't really understand this
             if output is NotImplemented:
                 with torch._C.DisableTorchFunction():
                     output = func(*args, **kwargs).as_subclass(
                         QuantizationInterceptionProxy)
-
-            if needs_op_hooks:
-                # run "after" hook
-                output = qstate.op_prepare_after_hook(
-                    func, output, first_call, qtensor_id)
-                # mark completion
-                qstate.mark_cur_op_complete(func)
 
             return output
 
@@ -163,39 +161,53 @@ def add_auto_observation(
                 try:
                     parent_module = module_stack[-1] if len(module_stack) else None
                     module_stack.append(self)
-
                     fqn = module_id_to_fqn[id(self)]
-
                     can_have_op_hooks = parent_module is not None and \
                         hasattr(parent_module, '_auto_quant_state')
                     needs_op_hooks = can_have_op_hooks and \
                         parent_module._auto_quant_state.cur_op_needs_hooks(cur_module)  # type: ignore[union-attr, operator]
-                    qstate = None
-
-                    # TODO(next): move io hooks here, to ensure they are run
-                    # on parent and child modules instead of just the top level
-                    # module.
+                    # We need IO hooks if
+                    # * we are calling forward on a module (always True here)
+                    # * that module has quant state
+                    # * that module does not need op hooks for the parent
+                    needs_io_hooks = (
+                        hasattr(cur_module, '_auto_quant_state') and
+                        (not needs_op_hooks)
+                    )
 
                     if needs_op_hooks:
                         assert parent_module is not None
-                        qstate = parent_module._auto_quant_state
-                        assert isinstance(qstate, AutoQuantizationState)
+                        parent_qstate = parent_module._auto_quant_state
+                        assert isinstance(parent_qstate, AutoQuantizationState)
+                        # before hooks
                         if not first_call:
-                            qstate.validate_cur_op(cur_module)
-                        # "before" hook
-                        args, kwargs = qstate.op_prepare_before_hook(
+                            parent_qstate.validate_cur_op(cur_module)
+                        args, kwargs = parent_qstate.op_prepare_before_hook(
                             cur_module, args, kwargs, first_call, qtensor_id,
                             fqn)
 
-                    output = orig_module_call(self, *args, **kwargs)
+                        # original forward
+                        output = orig_module_call(self, *args, **kwargs)
 
-                    if needs_op_hooks:
-                        # "after" hook
-                        assert isinstance(qstate, AutoQuantizationState)
-                        output = qstate.op_prepare_after_hook(
+                        # after hooks
+                        output = parent_qstate.op_prepare_after_hook(
                             cur_module, output, first_call, qtensor_id)
-                        # mark completion
-                        qstate.mark_cur_op_complete(cur_module)
+                        parent_qstate.mark_cur_op_complete(cur_module)
+
+                    elif needs_io_hooks:
+                        # TODO(future PR): add inputs io hook
+
+                        # original forward
+                        output = orig_module_call(self, *args, **kwargs)
+
+                        # after hooks
+                        cur_qstate = cur_module._auto_quant_state
+                        assert isinstance(cur_qstate, AutoQuantizationState)
+                        output = cur_qstate.outputs_prepare_hook(
+                            output, first_call, qtensor_id)
+
+                    else:
+                        output = orig_module_call(self, *args, **kwargs)
 
                     return output
                 finally:
@@ -227,23 +239,7 @@ def add_auto_observation(
                                 assert hasattr(v, '_auto_quant_state')
                                 v._auto_quant_state.reset_to_new_call()
 
-                needs_io_hooks = hasattr(self, '_auto_quant_state')
-
-                # handle module input dtype conversions
-                # TODO(future PR): instead of only happening on the top level
-                # module, the dtype conversions need to happen on all non-leaf
-                # modules
-                # TODO(implement)
-
                 output = super().__call__(*new_args, **new_kwargs)
-
-                # handle module output dtype conversions
-                if needs_io_hooks:
-                    qstate = self._auto_quant_state
-                    assert isinstance(qstate, AutoQuantizationState)
-                    output = qstate.outputs_prepare_hook(
-                        output, first_call, qtensor_id)
-
                 return output
             finally:
                 torch.nn.Module.__call__ = orig_module_call
@@ -301,19 +297,20 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                 hasattr(cur_module, '_auto_quant_state')
             needs_op_hooks = can_have_op_hooks and \
                 cur_module._auto_quant_state.cur_op_needs_hooks(func)
-            qstate = None
 
             if needs_op_hooks:
                 qstate = cur_module._auto_quant_state
+                # before hooks
                 qstate.validate_cur_op(func)
                 func, args, kwargs = qstate.op_convert_before_hook(
                     func, args, kwargs)
-
-            output = super().__torch_function__(func, types, args, kwargs)
-
-            if needs_op_hooks:
+                # forward
+                output = super().__torch_function__(func, types, args, kwargs)
+                # after hooks
                 output = qstate.op_convert_after_hook(func, output)
                 qstate.mark_cur_op_complete(func)
+            else:
+                output = super().__torch_function__(func, types, args, kwargs)
 
             return output
 
@@ -371,22 +368,34 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                         hasattr(parent_module, '_auto_quant_state')
                     needs_op_hooks = can_have_op_hooks and \
                         parent_module._auto_quant_state.cur_op_needs_hooks(cur_module)
-                    qstate = None
+                    needs_io_hooks = (
+                        hasattr(cur_module, '_auto_quant_state') and
+                        (not needs_op_hooks)
+                    )
 
                     if needs_op_hooks:
+                        # before hooks
                         qstate = parent_module._auto_quant_state
                         qstate.validate_cur_op(cur_module)
-                        # before hook
                         _, args, kwargs = qstate.op_convert_before_hook(
                             cur_module, args, kwargs)
-
-                    # execute original module forward
-                    output = orig_module_call(self, *args, **kwargs)
-
-                    if needs_op_hooks:
-                        # after hook
+                        # forward
+                        output = orig_module_call(self, *args, **kwargs)
+                        # after hooks
                         output = qstate.op_convert_after_hook(cur_module, output)
                         qstate.mark_cur_op_complete(cur_module)
+
+                    elif needs_io_hooks:
+                        # before hooks (TODO)
+                        # forward
+                        output = orig_module_call(self, *args, **kwargs)
+                        # after hooks
+                        cur_qstate = cur_module._auto_quant_state
+                        assert isinstance(cur_qstate, AutoQuantizationState)
+                        output = cur_qstate.outputs_convert_hook(output)
+
+                    else:
+                        output = orig_module_call(self, *args, **kwargs)
 
                     return output
                 finally:

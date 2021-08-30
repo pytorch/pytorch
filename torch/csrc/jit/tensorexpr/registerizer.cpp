@@ -18,7 +18,7 @@ void AccessInfo::addStore(StorePtr store, const std::shared_ptr<Scope>& scope) {
   last_usage_ = store;
 
   store_cost_ =
-      IRSimplifier::simplify(alloc<Add>(store_cost_, alloc<IntImm>(1)));
+      IRSimplifier::simplify(alloc<Add>(store_cost_, immLike(store_cost_, 1)));
   stores_.push_back(store);
 
   conditionId_ = scope->conditionId();
@@ -34,7 +34,8 @@ void AccessInfo::addLoad(
   first_usage_ = first_usage_ ? block_->getEnclosedRoot(first_usage_) : usage;
   last_usage_ = usage;
 
-  load_cost_ = IRSimplifier::simplify(alloc<Add>(load_cost_, alloc<IntImm>(1)));
+  load_cost_ =
+      IRSimplifier::simplify(alloc<Add>(load_cost_, immLike(load_cost_, 1)));
   loads_.push_back(load);
 
   conditionId_ = scope->conditionId();
