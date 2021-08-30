@@ -22,7 +22,7 @@ void initCustomClassBindingsNccl() {
           .def(torch::init([](int64_t timeout, bool isHighPriorityStream) {
             auto opTimeout = std::chrono::milliseconds(timeout);
             auto opts =
-                ::c10d::ProcessGroupNCCL::Options::create(isHighPriorityStream);
+                ::c10d::ProcessGroupNCCLWithUCC::Options::create(isHighPriorityStream);
             opts->timeout = opTimeout;
             return opts;
           }));
@@ -52,9 +52,9 @@ void initCustomClassBindingsNccl() {
                     "Needed process group not found, ",
                     "please create a process group with name: ",
                     process_group_name);
-                c10::intrusive_ptr<::c10d::ProcessGroupNCCL>
+                c10::intrusive_ptr<::c10d::ProcessGroupNCCLWithUCC>
                     process_group_nccl = ::c10::dynamic_intrusive_pointer_cast<
-                        ::c10d::ProcessGroupNCCL>(base_process_group);
+                        ::c10d::ProcessGroupNCCLWithUCC>(base_process_group);
                 TORCH_CHECK(
                     process_group_nccl.defined(),
                     "Process group ",
