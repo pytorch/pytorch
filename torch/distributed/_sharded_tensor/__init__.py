@@ -415,13 +415,13 @@ def shard_parameter(
     local_metadata = None
     current_offsets = [0] * len(tensor.size())
     shards_metadata = []
-    sharding_dim_size = tensor.size(sharding_spec.dim)
+    sharding_dim_size = tensor.size(sharding_spec.dim)  # type: ignore[arg-type]
     split_size = get_split_size(sharding_dim_size, world_size)
     tensor_sizes = list(tensor.size())
     for idx, placement in enumerate(sharding_spec.placements):
         chunked_dim_size = get_chunked_dim_size(sharding_dim_size, split_size, idx)
         shard_size = copy.deepcopy(tensor_sizes)
-        shard_size[sharding_spec.dim] = chunked_dim_size
+        shard_size[sharding_spec.dim] = chunked_dim_size  # type: ignore[index]
 
         shard_metadata = ShardMetadata(
             shard_offsets=copy.deepcopy(current_offsets),
@@ -430,26 +430,26 @@ def shard_parameter(
         )
         shards_metadata.append(shard_metadata)
 
-        if rank == placement.rank():
+        if rank == placement.rank():  # type: ignore[union-attr]
             local_metadata = shard_metadata
 
-        current_offsets[sharding_spec.dim] += chunked_dim_size
+        current_offsets[sharding_spec.dim] += chunked_dim_size  # type: ignore[index]
 
     # Scatter the shards (use broadcast since NCCL doesn't support scatter, this is very inefficient).
     dist.broadcast(tensor, src=src_rank, group=pg)
 
     # Reshape to get shard for this rank.
     output = tensor.narrow(
-        sharding_spec.dim,
-        local_metadata.shard_offsets[sharding_spec.dim],
-        local_metadata.shard_lengths[sharding_spec.dim],
+        sharding_spec.dim,  # type: ignore[arg-type]
+        local_metadata.shard_offsets[sharding_spec.dim],  # type: ignore[union-attr, arg-type, index]
+        local_metadata.shard_lengths[sharding_spec.dim],  # type: ignore[union-attr, index]
     ).contiguous()
 
     # Create ShardedTensor based on local shards.
     local_shards = [
         Shard(
             tensor=output,
-            metadata=local_metadata,
+            metadata=local_metadata,  # type: ignore[arg-type]
         )
     ]
     sharded_tensor_metadata = ShardedTensorMetadata(

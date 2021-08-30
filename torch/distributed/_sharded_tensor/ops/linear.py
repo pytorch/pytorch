@@ -5,6 +5,7 @@ from torch.distributed._sharding_spec._internals import (
     get_split_size,
     get_chunked_dim_size,
 )
+from typing import List
 
 
 def sharded_linear(types, args, kwargs, pg):
@@ -99,7 +100,7 @@ def _handle_row_wise_sharding(input, world_size, weight, rank, local_shard_t, bi
 
     if rearrange_rows:
         # Need to re-arrange rows of input_t for all2all.
-        indices = []
+        indices: List[int] = []
         for placement in weight._sharding_spec.placements:
             sharded_dim_size = get_chunked_dim_size(input_t_size[0], split_size, placement.rank())
             input_idx = placement.rank() * split_size

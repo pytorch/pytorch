@@ -35,10 +35,6 @@ from torch.testing._internal.common_utils import (
     run_tests,
     sandcastle_skip_if,
 )
-from torch.distributed._sharding_spec._internals import (
-    get_split_size,
-    get_chunked_dim_size,
-)
 
 if TEST_WITH_DEV_DBG_ASAN:
     print("Skip dev-asan as torch + multiprocessing spawn have known issues", file=sys.stderr)
