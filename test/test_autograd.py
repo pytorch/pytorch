@@ -5514,8 +5514,8 @@ for shape in [(1,), ()]:
         flag_to_error = {
             "ok": None,
             "not_a_view": "jvp is not returning a view",
-            "not_a_view_of_inp": "jvp is not returning a view",
-            "not_a_view_of_inp_base": "jvp is not returning a view",
+            "not_a_view_of_inp": "jvp is not returning a view of the given",
+            "not_a_view_of_inp_base": "jvp is not returning a view of the same base",
         }
 
         class ViewFn(Function):

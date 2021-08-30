@@ -177,7 +177,7 @@ void _process_forward_mode_AD(const variable_list &inputs,
                           "A custom Function is returning a view but the jvp is not returning a view of the given grad input.");
             }
           } else {
-            // We have a view op where the input didn't had a forward grad but the user returned one for the output
+            // We have a view op where the input didn't have a forward grad but the user returned one for the output
             // To ensure that we maintain the view/inplace constraints, we consider this as an inplace op
             // This case CANNOT happen in codegen as all view ops are mapping from one Tensor to one Tensor and so the output
             // of the view cannot have a forward grad if the base does not.
