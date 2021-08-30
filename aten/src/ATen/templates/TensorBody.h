@@ -494,6 +494,12 @@ class TORCH_API Tensor {
     return impl_->is_mlc();
   }
 
+  /// Returns if a `Tensor` is ort tensor.
+  bool is_ort() const {
+    // NB: this is not a native function to avoid dispatching overhead.
+    return impl_->is_ort();
+  }
+
   /// Returns if a `Tensor` is vulkan tensor.
   bool is_vulkan() const {
     // NB: this is not a native function to avoid dispatching overhead.
