@@ -32,8 +32,8 @@ void Function::append_instruction(OpCode op, int X, int N, int64_t dbg_handle) {
 }
 
 bool Function::append_operator(
-    const std::string& name,
-    const std::string& overload_name,
+    const c10::ivalue::ConstantString& name,
+    const c10::ivalue::ConstantString& overload_name,
     const c10::optional<int>& num_specified_args,
     int64_t model_version, /* TODO: T90339189 deprecate all v3 when v3 models
                               are removed */
@@ -46,13 +46,12 @@ bool Function::append_operator(
   // large list of operators.
 
   // Keep the original opname in code_
-  code_->op_names_.emplace_back(name, overload_name);
+  code_->op_names_.emplace_back(name.string(), overload_name.string());
+
   const auto& opname = code_->op_names_.back();
 
-  const auto& opname_c10 = opname;
-  std::function<void(Stack&)> fn;
-
-  auto it = operator_cache.find(opname);
+  auto operatorCacheKey = std::make_pair(&name, &overload_name);
+  auto it = operator_cache.find(operatorCacheKey);
   if (it != operator_cache.end()) {
     // Operator (with fully qualified name) was found in the cache.
     if (it->second.has_same_arg_num(num_specified_args)) {
@@ -64,13 +63,15 @@ bool Function::append_operator(
     // Fall back to creating one from scratch.
   }
 
+  std::function<void(Stack&)> fn;
+
   auto jit_op = findOperatorFor(opname);
   const std::vector<c10::Argument>* pArgs = nullptr;
   if (jit_op) {
     fn = [jit_op](Stack& stack) { jit_op->getOperation()(&stack); };
     pArgs = &jit_op->schema().arguments();
   } else {
-    auto op = c10::Dispatcher::singleton().findSchema(opname_c10);
+    auto op = c10::Dispatcher::singleton().findSchema(opname);
     if (op.has_value()) {
       fn = [op](Stack& stack) { op->callBoxed(&stack); };
       if (op->hasSchema()) {
@@ -85,8 +86,8 @@ bool Function::append_operator(
 
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(pArgs);
   const auto& args = *pArgs;
-  if (model_version == 0x3LL &&
-      opname == c10::OperatorName("aten::_convolution", "")) {
+  if (model_version == 0x3LL && opname.name == "aten::_convolution" &&
+      opname.overload_name.empty()) {
     // Since byte-code versions 0x4L, convolution has an additional
     // default-value argument (allow_tf32=True, see
     // https://github.com/pytorch/pytorch/pull/40737). This wrapper handles
@@ -125,7 +126,7 @@ bool Function::append_operator(
     // We came here because the operator name wasn't found in the cache,
     // not because there was a schema mismatch. Do add into the cache.
     operator_cache.insert(std::make_pair(
-        opname, OperatorFunctionWithSchema{fn, num_specified_args}));
+        operatorCacheKey, OperatorFunctionWithSchema{fn, num_specified_args}));
   }
   return true;
 }
