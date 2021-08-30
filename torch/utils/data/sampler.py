@@ -147,7 +147,7 @@ class SubsetRandomSampler(Sampler[int]):
 
 
 class SequentialIndicesSampler(Sampler[int]):
-    r"""Samples elements sequentially from a given list of indices. 
+    r"""Samples elements sequentially from a given list of indices.
 
     Args:
         indices (sequence): a sequence of indices
