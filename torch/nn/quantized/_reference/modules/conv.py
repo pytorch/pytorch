@@ -75,7 +75,7 @@ class _ConvNd(torch.nn.modules.conv._ConvNd):
             self.weight, self.weight_qscheme,
             self.weight_dtype, self.weight_scale, self.weight_zero_point, self.weight_axis)
 
-    @classmethod
+    @staticmethod
     def from_float(cls, float_conv, weight_qparams):
         qref_conv = cls(
             float_conv.in_channels,
@@ -85,7 +85,7 @@ class _ConvNd(torch.nn.modules.conv._ConvNd):
             float_conv.padding,  # type: ignore[arg-type]
             float_conv.dilation,  # type: ignore[arg-type]
             float_conv.groups,
-            float_conv.bias is not None,
+            float_conv.bias is not None,  # type: ignore[arg-type]
             float_conv.padding_mode,
             device=float_conv.weight.device,
             dtype=float_conv.weight.dtype,
@@ -134,6 +134,10 @@ class Conv1d(_ConvNd, nn.Conv1d):
     def _get_name(self):
         return "QuantizedConv1d(Reference)"
 
+    @classmethod
+    def from_float(cls, float_conv, weight_qparams):
+        return _ConvNd.from_float(cls, float_conv, weight_qparams)
+
 class Conv2d(_ConvNd, nn.Conv2d):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,
@@ -166,6 +170,10 @@ class Conv2d(_ConvNd, nn.Conv2d):
     def _get_name(self):
         return "QuantizedConv2d(Reference)"
 
+    @classmethod
+    def from_float(cls, float_conv, weight_qparams):
+        return _ConvNd.from_float(cls, float_conv, weight_qparams)
+
 class Conv3d(_ConvNd, nn.Conv3d):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,
@@ -197,3 +205,7 @@ class Conv3d(_ConvNd, nn.Conv3d):
 
     def _get_name(self):
         return "QuantizedConv3d(Reference)"
+
+    @classmethod
+    def from_float(cls, float_conv, weight_qparams):
+        return _ConvNd.from_float(cls, float_conv, weight_qparams)
