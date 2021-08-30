@@ -317,12 +317,12 @@ void BytecodeDeserializer::parseMethods(
       caffe2::serialize::kMinSupportedBytecodeVersion <= model_version &&
           // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
           model_version <= caffe2::serialize::kMaxSupportedBytecodeVersion,
-      "Lite Interpreter verson number does not match. ",
+      "Lite Interpreter version number does not match. ",
       "The model version must be between ",
       caffe2::serialize::kMinSupportedBytecodeVersion,
       " and ",
       caffe2::serialize::kMaxSupportedBytecodeVersion,
-      "But the model version is ",
+      " but the model version is ",
       model_version);
 
   bool has_debug_handles = debug_handles.has_value();

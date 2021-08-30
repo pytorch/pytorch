@@ -4734,8 +4734,8 @@ TEST(LoopNest, VectorizeUse) {
 }
 
 const char* int64Loop = R"IR(
-# CHECK: for (int64_t n = 0; n < 12; n++) {
-# CHECK:   b[n] = (a[n]) + 1;
+# CHECK: for (int64_t n = 0ll; n < 12ll; n++) {
+# CHECK:   b[n] = (a[n]) + 1ll;
 # CHECK: }
 )IR";
 
@@ -4744,7 +4744,8 @@ TEST(LoopNest, Int64Direct) {
   Placeholder a("a", kLong, {N});
   Placeholder b("b", kLong, {N});
   VarHandle n("n", kLong);
-  StmtPtr s = For::make(n, 0, N, b.store({n}, a.load({n}) + LongImm::make(1l)));
+  StmtPtr s = For::make(
+      n, LongImm::make(0l), N, b.store({n}, a.load({n}) + LongImm::make(1l)));
   s = IRSimplifier::simplify(s);
   std::ostringstream oss;
   oss << *s;
