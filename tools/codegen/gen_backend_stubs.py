@@ -322,7 +322,41 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
                     grouped_native_functions
                 )),
             })
-
+        
+        # and TorchScript Lowerings for the IR nodes
+        for dispatch_key in [backend_dispatch_key]:  # , autograd_dispatch_key
+            fm.write_with_template(f'TSLowering.cpp', 'TSLowering.cpp', lambda: {
+                'ts_lowering_sysinc': [f'#include <{path}>' for path in [
+                    # "c10/core/ScalarType.h",
+                    # "c10/util/Optional.h",
+                    "vector",
+                ]],
+                'ts_lowering_inc': [f'#include "{path}"' for path in [
+                    "lazy_tensor_core/csrc/ir.h",
+                    "torch/csrc/jit/ir/named_value.h",
+                    "lazy_tensor_core/csrc/ts_backend/ts_lowering_context.h",
+                    # "lazy_tensors/types.h",
+                ]],
+                # 'external_backend_headers': f'#include "{output_dir}/{backend_key}NativeFunctions.h"',
+                # 'namespaced_headers': '',
+                # 'DispatchKey': dispatch_key,
+                'backend_namespace': dispatch_key.lower(),  # TODO this is not designed yet
+                'lowering_dispatches': list(concatMap(
+                    dest.TsLowering(
+                        backend_indices[CODEGEN_MAGIC_NUMBER],
+                        dest.TsLowering.TsLoweringTarget.DISPATCH,
+                        cpp_namespace='codegen_' + cpp_namespace),
+                    grouped_native_functions
+                )),
+                'lowering_definitions': list(concatMap(
+                    dest.TsLowering(
+                        backend_indices[CODEGEN_MAGIC_NUMBER],
+                        dest.TsLowering.TsLoweringTarget.LOWERING,
+                        cpp_namespace='codegen_' + cpp_namespace),
+                    grouped_native_functions
+                )),
+            })
 
 if __name__ == '__main__':
     main()
+

@@ -78,6 +78,9 @@ def process_ir_types(func: FunctionSchema) -> Tuple[List[NamedCType], List[Named
             raise AssertionError(f"unrecognized type {repr(t)}")
     return types, value_types, scalar_types
 
+def ir_node_name(func: FunctionSchema):
+    return str(func.name).lower().capitalize()
+
 @dataclass(frozen=True)
 class LazyIR:
     backend_index: BackendIndex
@@ -107,7 +110,7 @@ class LazyIR:
         # for now, we just want one IR class decl and soon after also the method defs
         # and we use the functional version not out/inplace.
         func = f.functional.func if isinstance(f, NativeFunctionsGroup) else f.func
-        class_name = str(func.name).lower().capitalize()
+        class_name = ir_node_name(func)
 
         all_types, value_types, scalar_types = process_ir_types(func)
         node_ctor_args = ", ".join([f"{i.cpp_type()} {i.name}" for i in all_types])
