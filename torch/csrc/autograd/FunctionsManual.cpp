@@ -3510,7 +3510,7 @@ std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, cons
   bool modify_K_in_place = !at::GradMode::is_enabled();
 
   // TODO: replace this function with calls to LARFB
-  auto apply_householder_reflector = [&m, &modify_K_in_place](
+  auto apply_householder_reflector = [m, modify_K_in_place](
       int64_t k, const Tensor& v_full, const Tensor& t, Tensor& K, bool left = true) -> Tensor {
     // v_full is a vector of dimension (..., m, 1), t is a scalar of dimension (..., 1)
 
