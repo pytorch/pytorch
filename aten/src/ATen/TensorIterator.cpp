@@ -48,62 +48,62 @@ inline void get_strides(int64_t* strides, ArrayRef<OperandInfo> operands, int64_
   }
 }
 
-}
-
-C10_ALWAYS_INLINE OperandInfo::OperandInfo(c10::MaybeOwned<TensorBase>&& t) {
-  static_assert(sizeof(tensor_storage_) == sizeof(OptionalTensorRef), "");
-  new (&tensor_storage_) OptionalTensorRef();
-  static_assert(sizeof(original_tensor_storage_) == sizeof(OptionalTensorRef), "");
-  new (&original_tensor_storage_) OptionalTensorRef();
-
-  tensor(std::move(t));
-  if (tensor_base_->defined()) {
-    device = tensor_base_->device();
-    target_dtype = tensor_base_->scalar_type();
-    current_dtype = target_dtype;
-    auto layout = tensor_base_->layout();
-    TORCH_CHECK(layout == kStrided, "unsupported tensor layout: ", layout);
+static OptionalTensorRef make_otr(const TensorBase &tensor) {
+  if (tensor.defined()) {
+    return OptionalTensorRef(tensor);
+  } else {
+    return OptionalTensorRef();
   }
 }
 
+template <size_t N>
+const OptionalTensorRef* dumb_tensor_data(const char (&data)[N]) {
+  static_assert(N == sizeof(OptionalTensorRef), "");
+  return reinterpret_cast<const OptionalTensorRef*>(data);
+}
+
+template <size_t N>
+OptionalTensorRef* dumb_tensor_data(char (&data)[N]) {
+  static_assert(N == sizeof(OptionalTensorRef), "");
+  return reinterpret_cast<OptionalTensorRef*>(data);
+}
+}
+
+OperandInfo::OperandInfo() {
+  new (dumb_tensor_data(tensor_storage_)) OptionalTensorRef();
+  new (dumb_tensor_data(original_tensor_storage_)) OptionalTensorRef();
+}
+
 OperandInfo::~OperandInfo() {
-  auto &t_ref = *reinterpret_cast<OptionalTensorRef*>(&tensor_storage_[0]);
-  t_ref.~OptionalTensorRef();
-  auto &ot_ref = *reinterpret_cast<OptionalTensorRef*>(&original_tensor_storage_[0]);
-  ot_ref.~OptionalTensorRef();
+  dumb_tensor_data(tensor_storage_)->~OptionalTensorRef();
+  dumb_tensor_data(original_tensor_storage_)->~OptionalTensorRef();
 }
 
 const Tensor& OperandInfo::tensor() const {
-  return reinterpret_cast<const OptionalTensorRef*>(
-      &tensor_storage_[0])->getTensorRef();
+  return dumb_tensor_data(tensor_storage_)->getTensorRef();
 }
 
 const Tensor& OperandInfo::original_tensor() const {
-  return reinterpret_cast<const OptionalTensorRef*>(
-      &original_tensor_storage_[0])->getTensorRef();
+  return dumb_tensor_data(original_tensor_storage_)->getTensorRef();
 }
 
 void OperandInfo::tensor(c10::MaybeOwned<TensorBase> &&tensor) {
   tensor_base_ = std::move(tensor);
-  auto &tref = *reinterpret_cast<OptionalTensorRef*>(&tensor_storage_[0]);
-  tref = *tensor_base_;
+  *dumb_tensor_data(tensor_storage_) = make_otr(*tensor_base_);
 }
 
 void OperandInfo::original_tensor(c10::MaybeOwned<TensorBase> &&original_tensor) {
   original_tensor_base_ = std::move(original_tensor);
-  auto &tref = *reinterpret_cast<OptionalTensorRef*>(&original_tensor_storage_[0]);
-  tref = *original_tensor_base_;
+  *dumb_tensor_data(original_tensor_storage_) = make_otr(*original_tensor_base_);
 }
 
 c10::MaybeOwned<TensorBase> OperandInfo::unsafeReleaseTensor() {
-  auto &tref = *reinterpret_cast<OptionalTensorRef*>(&tensor_storage_[0]);
-  tref = OptionalTensorRef();
+  *dumb_tensor_data(tensor_storage_) = OptionalTensorRef();
   return std::move(tensor_base_);
 }
 
 c10::MaybeOwned<TensorBase> OperandInfo::unsafeReleaseOriginalTensor() {
-  auto &tref = *reinterpret_cast<OptionalTensorRef*>(&original_tensor_storage_[0]);
-  tref = OptionalTensorRef();
+  *dumb_tensor_data(original_tensor_storage_) = OptionalTensorRef();
   return std::move(original_tensor_base_);
 }
 
