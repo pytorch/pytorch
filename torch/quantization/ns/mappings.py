@@ -8,6 +8,7 @@ toq = torch.ops.quantized
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
 import torch.nn.intrinsic.quantized as nniq
+import torch.nn.intrinsic.quantized.dynamic as nniqd
 import torch.nn.intrinsic.qat as nniqat
 import torch.nn.intrinsic as nni
 import torch.nn.qat as nnqat
@@ -70,6 +71,7 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
             nnq.Linear,
             nni.LinearReLU,
             nniq.LinearReLU,
+            nniqd.LinearReLU,
             nnqat.Linear,
             nnqd.Linear,
             nniqat.LinearReLU,
@@ -529,6 +531,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nniqat.ConvReLU2d,
         nniqat.ConvReLU3d,
         nniqat.LinearReLU,
+        nniqd.LinearReLU,
     ])
 
     MODS_IO_TYPE_INT8: Set[NSNodeTargetType] = set([
