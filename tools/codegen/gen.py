@@ -1,5 +1,5 @@
 import os
-from typing import List, Dict, Optional, Tuple, Set, Callable, Any, Union, Sequence, TypeVar
+from typing import List, Dict, Optional, Tuple, Set, Callable, Any, Union, Sequence, TypeVar, Iterable
 from typing_extensions import Literal
 import yaml
 from collections import OrderedDict, defaultdict, namedtuple
@@ -858,7 +858,7 @@ class FileManager:
     def write_sharded(
             self,
             filename: str,
-            items: List[T],
+            items: Iterable[T],
             *,
             key_fn: Callable[[T], str],
             env_callable: Callable[[T], Dict[str, List[str]]],
@@ -1100,6 +1100,7 @@ def main() -> None:
             'namespaced_headers': f'#include <ATen/{dispatch_key}Functions.h>' if dispatch_key in functions_keys else '',
             'DispatchKey': dispatch_key,
             'dispatch_namespace': dispatch_key.lower(),
+            'dispatch_helpers': dest.gen_registration_helpers(backend_indices[dispatch_key]),
             'dispatch_namespaced_definitions': list(concatMap(
                 dest.RegisterDispatchKey(
                     backend_indices[dispatch_key],
