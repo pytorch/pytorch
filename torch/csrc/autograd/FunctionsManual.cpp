@@ -3435,10 +3435,10 @@ bool any_variable_defined(const variable_list& variables) {
 // Given a sequence of vectors v_1, ..., v_n and a sequence of scalars tau_1, ..., tau_k,
 // the torch.linalg.householder_product computes the firt n columns of the following product:
 // Q = (I - tau_1 v_1 v_1^H) ... (I - tau_k v_k v_k^H).
-// Let H_i := I - tau_i v_i v_i^H;
-//     H_i(sigma) := I - sigma v_i v_i^H, so Q = (H_1 ... H_k)[:, :k];
-//     H_i_minus = H_1 ... H_{i - 1}, with H_1_minus := I;
-//     H_i_plus = H_{i + 1} ... H_k with H_k_plus := I;
+// Let
+//     H_i(sigma) := I - sigma v_i v_i^H, so Q = (H_1(sigma_1) ... H_k(sigma_k)[:, :k];
+//     H_i_minus = H_1(tau_1) ... H_{i - 1}(tau_{i - 1}), with H_1_minus := I;
+//     H_i_plus = H_{i + 1}(tau_{i + 1}) ... H_k(tau_k) with H_k_plus := I;
 //
 // Forward AD:
 // dQ = sum_{i = 1}^k H_i_minus (-dtau_i v_i v_i^H - tau_i dv_i v_i^H - tau_i v_i dv_i^H) H_i_plus.
@@ -3457,15 +3457,20 @@ bool any_variable_defined(const variable_list& variables) {
 // Luckily, under some assumptions, H_{i + 1}^{-1} exists and admits a representation as H_i(sigma_i) for some
 // sigma_i, so the left update is also could be done with matrix-vector and not matrix-matrix products.
 //
-// Let H(tau) := I - tau v v_^H, then if (||v||^2 tau - 1) != 0, with sigma defined as
+// Let H(tau) := I - tau v v^H.
+// H(tau) has eigenvalues 1 with multiplicity (m - 1) with eigenvectors orthogonal to v,
+// and an eigenvalue (1 - tau ||v||^2) with the corresponding eigenvector v / ||v||.
+// If (1 - tau ||v||^2) != 0, H(tau) is invertible.
+// If (1 - tau ||v||^2) != 0, then with sigma defined as
 // sigma := tau / (||v||^2 tau - 1) we get that
 // H(tau) H(sigma) = H(sigma) H(tau) = I, so H(sigma) is the inverse of H(tau).
 //
-// Therefore, unless (||v_i||^2 tau_i - 1) is zero for some i, we can update K_{i + 1} from K_i by just
-// employing matrix-vector products. If it is zero, we cannnot update K_{i + 1} from K_i efficiently and need to
-// recompute H_i_plus and H_i_minus from the householder_product.
-// NOTE: the condition ||v_i||^2 tau_i - 1 == 0 is NEVER satisfied if v_i and tau_i are the results
-// of the GEQRF routine.
+// WARNING: the algorithm below assumes that H_i(tau_i) are all invertible, so
+// it expects that (1 - tau_i ||v_i||^2) != 0 for all i.
+// We would like to point out that if there is H_i(tau_i) which is not invertible,
+// the householder_product is still differentiable! We will not be able to compute K_i
+// efficiently in such cases, however, as evaluating of each K_i will amount to calls
+// to ORGQR to be able to compute H_i_plus.
 std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, const Tensor& result, const Tensor& input_, const Tensor& tau) {
   if (!grad.defined() || !input_.numel() || !tau.numel()) {
     return std::tuple<Tensor, Tensor>(Tensor(), Tensor());
