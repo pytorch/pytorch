@@ -88,9 +88,7 @@ bool PercentileOp<CPUContext>::RunOnDevice() {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Percentile, PercentileOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Percentile)
     .NumInputs(3)
     .NumOutputs(1)
@@ -137,7 +135,6 @@ OPERATOR_SCHEMA(Percentile)
         "of this tensor, percentile_values[i], corresponds to the percentile calculated "
         "for original_values[i].");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(Percentile);
 
 } // namespace caffe2

@@ -7,8 +7,15 @@ on:
     workflows:
       - Lint
 
+
+concurrency:
+  group: add-annotations-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+
 jobs:
   annotate:
+    if: ${{ github.repository_owner == 'pytorch' }}
     strategy:
       fail-fast: false
       matrix:
@@ -54,7 +61,7 @@ jobs:
             echo ::set-output \
               name=sha::"$(grep -Em1 '^[[:xdigit:]]{40}$' commit-sha.txt)"
           fi
-      - if: steps.unzip.outputs.sha
+      - if: ${{ steps.unzip.outputs.sha }}
         name: Add annotations
         uses: pytorch/add-annotations-github-action@master
         env:

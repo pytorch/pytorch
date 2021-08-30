@@ -147,7 +147,7 @@ static void BM_long_static_memory_optimization(benchmark::State& state) {
   auto mod = getLongScriptModel();
   torch::jit::StaticModuleOptions opts;
   opts.optimize_memory = state.range(1);
-  torch::jit::StaticModule smod(mod, opts);
+  torch::jit::StaticModule smod(mod, false, opts);
 
   const auto N = state.range(0);
   auto a = torch::randn({N, N});

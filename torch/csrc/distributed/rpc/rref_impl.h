@@ -196,8 +196,7 @@ class TORCH_API RRef : public RRefInterface {
   explicit RRef(RRef&& other) = delete;
   RRef& operator=(RRef&& other) = delete;
 
-  // NOLINTNEXTLINE(modernize-use-override)
-  virtual ~RRef() = default;
+  ~RRef() override = default;
 
   // returns the worker id of the owner
   inline worker_id_t owner() const override {
@@ -326,8 +325,7 @@ class TORCH_API UserRRef final : public RRef {
   // https://github.com/pytorch/pytorch/blob/9116f02bebf3a5260feef5732d36c54ecb3b4033/c10/util/intrusive_ptr.h#L204
   // This is called on destructing the wrapping intrusive_ptr_target instance
   // and it's data members. We don't need to implement anything here.
-  // NOLINTNEXTLINE(modernize-use-override)
-  ~UserRRef() = default;
+  ~UserRRef() override = default;
 
  private:
   friend class RRefContext;

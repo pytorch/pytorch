@@ -4,7 +4,6 @@
 #include <torch/csrc/autograd/variable.h>
 #include <cstdint>
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 extern PyTypeObject THPSizeType;
 
 #define THPSize_Check(obj) (Py_TYPE(obj) == &THPSizeType)

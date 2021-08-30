@@ -20,7 +20,6 @@ struct InternedStringsTable {
   ska::flat_hash_map<PyObject*,at::Dimname> py_interned_string_to_dimname_;
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 InternedStringsTable kPyInternedStringToDimname;
 
 InternedStringsTable::~InternedStringsTable() {

@@ -26,13 +26,10 @@ static void defaultErrorHandlerFunction(const char *msg, void *data)
   throw std::runtime_error(msg);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static THErrorHandlerFunction defaultErrorHandler = defaultErrorHandlerFunction;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static void *defaultErrorHandlerData;
 // NOLINTNEXTLINE(modernize-use-nullptr,cppcoreguidelines-avoid-non-const-global-variables)
 static __thread THErrorHandlerFunction threadErrorHandler = NULL;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static __thread void *threadErrorHandlerData;
 
 void _THError(const char *file, const int line, const char *fmt, ...)
@@ -76,13 +73,10 @@ static void defaultArgErrorHandlerFunction(int argNumber, const char *msg, void 
   throw std::runtime_error(new_error.str());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static THArgErrorHandlerFunction defaultArgErrorHandler = defaultArgErrorHandlerFunction;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static void *defaultArgErrorHandlerData;
 // NOLINTNEXTLINE(modernize-use-nullptr,cppcoreguidelines-avoid-non-const-global-variables)
 static __thread THArgErrorHandlerFunction threadArgErrorHandler = NULL;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static __thread void *threadArgErrorHandlerData;
 
 void _THArgCheck(const char *file, int line, int condition, int argNumber, const char *fmt, ...)

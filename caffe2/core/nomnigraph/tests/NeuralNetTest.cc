@@ -13,7 +13,6 @@ using namespace nom::repr;
 using namespace nom::repr::nn;
 
 // Test for the NNGraph subgraph matching APIs.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NeuralNetGraph, ReplaceGraph) {
   NNGraph graph;
 

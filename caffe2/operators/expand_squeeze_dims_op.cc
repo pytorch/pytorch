@@ -1,12 +1,9 @@
 #include "caffe2/operators/expand_squeeze_dims_op.h"
 
 namespace caffe2 {
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(ExpandDims, ExpandDimsOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Squeeze, SqueezeOp<CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ExpandDims)
     .NumInputs(1)
     .NumOutputs(1)
@@ -104,7 +101,6 @@ expanded.shape: (1, 1, 100, 100)
         "*(type: [int])* List of dimensions of *data* to add single dimensional entry.")
     .InheritOnnxSchema();
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Squeeze)
     .NumInputs(1)
     .NumOutputs(1)
@@ -185,7 +181,6 @@ class GetSqueezeGradient : public GradientMakerBase {
         "ExpandDims", "", vector<string>{GO(0)}, vector<string>{GI(0)});
   }
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(Squeeze, GetSqueezeGradient);
 
 class GetExpandDimsGradient : public GradientMakerBase {
@@ -195,6 +190,5 @@ class GetExpandDimsGradient : public GradientMakerBase {
         "Squeeze", "", vector<string>{GO(0)}, vector<string>{GI(0)});
   }
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(ExpandDims, GetExpandDimsGradient);
 }

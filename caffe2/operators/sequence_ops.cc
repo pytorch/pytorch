@@ -260,13 +260,9 @@ bool PadEmptySamplesOp<CPUContext>::RunOnDevice() {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(AddPadding, AddPaddingOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(RemovePadding, RemovePaddingOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(GatherPadding, GatherPaddingOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(PadEmptySamples, PadEmptySamplesOp<CPUContext>);
 
 struct GetAddPaddingGradient : public GradientMakerBase {
@@ -297,7 +293,6 @@ struct GetAddPaddingGradient : public GradientMakerBase {
     return ops;
   }
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(AddPadding, GetAddPaddingGradient);
 
 struct GetRemovePaddingGradient : public GradientMakerBase {
@@ -313,10 +308,8 @@ struct GetRemovePaddingGradient : public GradientMakerBase {
     return SingleGradientDef("AddPadding", "", g_inputs, vector<string>{GI(0)});
   }
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(RemovePadding, GetRemovePaddingGradient);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(AddPadding)
     .NumInputs(1, 4)
     .NumOutputs(1, 2)
@@ -430,7 +423,6 @@ lengths_out: [5]
         "lengths_out",
         "*(type: Tensor`<int>`)* [OPTIONAL] Lengths for each padded range.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(RemovePadding)
     .NumInputs(1, 2)
     .NumOutputs(1, 2)
@@ -528,7 +520,6 @@ lengths_out_rm: [3]
         "lengths_out",
         "*(type: Tensor`<int>`)* [OPTIONAL] Lengths for each padded range.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(GatherPadding)
     .NumInputs(2)
     .NumOutputs(1, 2)
@@ -556,7 +547,6 @@ order to compute the gradients of AddPadding w.r.t the padding tensors.
         "end_padding_sum",
         "T<D1..., Dn> Sum of all end paddings, if provided.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(PadEmptySamples)
     .NumInputs(1, INT_MAX)
     .NumOutputs(1, INT_MAX)

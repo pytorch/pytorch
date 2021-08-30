@@ -71,12 +71,10 @@ class TORCH_API Dtype {
   int lanes_; // the width of the element for a vector time
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 extern TORCH_API Dtype kHandle;
 
 #define NNC_DTYPE_DECLARATION(ctype, name) extern TORCH_API Dtype k##name;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, NNC_DTYPE_DECLARATION)
 #undef NNC_DTYPE_DECLARATION
 
