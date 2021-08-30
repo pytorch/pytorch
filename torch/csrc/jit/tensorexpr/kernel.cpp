@@ -505,6 +505,24 @@ void promoteInputs(std::vector<ExprHandle>& inputs, const int typeConstraints) {
   }
 }
 
+ExprHandle promoteIntegerToDefaultType(const ExprHandle& e) {
+  auto scalarType = static_cast<c10::ScalarType>(e.dtype().scalar_type());
+  if (!c10::isIntegralType(scalarType, /*includeBool*/ true)) {
+    return e;
+  }
+
+  auto defaultType = c10::typeMetaToScalarType(c10::get_default_dtype());
+
+  // We intend to promote Integers to floating-point types
+  TORCH_INTERNAL_ASSERT(
+      !c10::isIntegralType(defaultType, /*includeBool*/ true));
+
+  return Cast::make(
+      Dtype(
+          static_cast<tensorexpr::ScalarType>(defaultType), e.dtype().lanes()),
+      e);
+}
+
 ExprHandle demoteOutput(
     const ExprHandle& e,
     const c10::optional<ScalarType> type) {
@@ -872,24 +890,6 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
       throw malformed_input(msg);
     }
   }
-}
-
-ExprHandle promoteIntegerToDefaultType(const ExprHandle& e) {
-  auto scalarType = static_cast<c10::ScalarType>(e.dtype().scalar_type());
-  if (!c10::isIntegralType(scalarType, /*includeBool*/ true)) {
-    return e;
-  }
-
-  auto defaultType = c10::typeMetaToScalarType(c10::get_default_dtype());
-
-  // We intend to promote Integers to floating-point types
-  TORCH_INTERNAL_ASSERT(
-      !c10::isIntegralType(defaultType, /*includeBool*/ true));
-
-  return Cast::make(
-      Dtype(
-          static_cast<tensorexpr::ScalarType>(defaultType), e.dtype().lanes()),
-      e);
 }
 
 ExprHandle promoteHalfToFloat(const ExprHandle& e) {
@@ -2096,25 +2096,7 @@ Tensor tensorexpr::computeOperandValue(
     } break;
 
     case aten::sign: {
-      return computeOneOperand(
-          "aten_sign",
-          inputs,
-          outputShape,
-          outputType,
-          [](const ExprHandle& a) {
-            auto inp = promoteIntegerToDefaultType(a);
-            auto v1 = CompareSelect::make(
-                inp,
-                ExprHandle(0.0f),
-                ExprHandle(-1.0f),
-                ExprHandle(1.0f),
-                kLT);
-            auto v2 = CompareSelect::make(
-                inp, ExprHandle(0.0f), ExprHandle(0.0f), v1, kEQ);
-            auto v3 = CompareSelect::make(
-                isnan(inp), ExprHandle(1), ExprHandle(0.0f), v2, kEQ);
-            return v3;
-          });
+      return computeSign(inputs, outputShape);
     } break;
 
     case aten::ceil: {

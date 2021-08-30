@@ -22,7 +22,7 @@ class SignedLog1pBench : public benchmark::Fixture {
   }
 
   void TearDown(benchmark::State& state) override {
-    TORCH_CHECK(at::allclose(ref_, output_));
+    TORCH_CHECK(at::allclose(ref_, output_, 1e-3, 1e-3));
     state.counters["GB/s"] = benchmark::Counter(
         uint64_t(state.iterations()) * 2 * output_.nbytes(),
         benchmark::Counter::kIsRate);
@@ -173,7 +173,7 @@ BENCHMARK_DEFINE_F(SignedLog1pBench, NNC)(benchmark::State& state) {
 }
 
 BENCHMARK_DEFINE_F(SignedLog1pBench, NNCLogVml)(benchmark::State& state) {
-  runNNC(state);
+  runNNCLogVml(state);
 }
 
 BENCHMARK_REGISTER_F(SignedLog1pBench, ATen)->Args({10, 1467});
