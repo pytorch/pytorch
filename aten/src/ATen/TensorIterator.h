@@ -75,8 +75,16 @@ constexpr int64_t GRAIN_SIZE = 32768;
 
 struct TORCH_API OperandInfo {
   using StrideVector = SmallVector<int64_t, 6>;
-  OperandInfo() {}
-  explicit OperandInfo(c10::MaybeOwned<TensorBase> &&t);
+  OperandInfo();
+  C10_ALWAYS_INLINE explicit OperandInfo(c10::MaybeOwned<TensorBase>&& t) : OperandInfo() {
+    if (t->defined()) {
+      device = t->device();
+      target_dtype = t->scalar_type();
+      current_dtype = target_dtype;
+    }
+    tensor(std::move(t));
+    validate();
+  }
   ~OperandInfo();
 
   /// Stride after broadcasting. The stride is in bytes, not number of elements.
@@ -109,6 +117,12 @@ struct TORCH_API OperandInfo {
   bool will_resize = false;
 
   bool is_read_write = false;
+
+  void validate() {
+    TORCH_CHECK(
+        !tensor_base_->defined() || tensor_base_->layout() == kStrided,
+        "unsupported tensor layout: ", tensor_base_->layout());
+  }
 
   /// The tensor operand. Note that the strides, data pointer, and
   /// other attributes may differ due to dimension reordering and
