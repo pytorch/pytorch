@@ -1265,3 +1265,29 @@ TEST(StaticRuntime, QEmbeddingBagByteUnpack) {
   testStaticRuntime(embedding_bag_byte_prepack_script, {a});
   testStaticRuntime(embedding_bag_byte_prepack_script, {a},{b});
 }
+
+TEST(StaticRuntime, IndividualOps_LinalgNorm_ScalarOrd) {
+  auto a = at::randn({2, 3});
+  auto dim = std::vector<int64_t>({1});
+  auto dtype = at::ScalarType::Float;
+
+  std::vector<IValue> args0{a, 4, dim, true, dtype};
+  testStaticRuntime(linalg_norm_ord_scalar, args0);
+
+  auto b = at::randn({4, 5});
+  std::vector<IValue> args1{b, 4, dim, true, dtype};
+  testStaticRuntime(linalg_norm_ord_scalar, args0, args1);
+}
+
+TEST(StaticRuntime, IndividualOps_LinalgNorm_StringOrd) {
+  auto a = at::randn({2, 3});
+  auto dim = std::vector<int64_t>({0, 1});
+  auto dtype = at::ScalarType::Float;
+
+  std::vector<IValue> args0{a, "fro", dim, true, dtype};
+  testStaticRuntime(linalg_norm_ord_str, args0);
+
+  auto b = at::randn({4, 5});
+  std::vector<IValue> args1{b, "fro", dim, true, dtype};
+  testStaticRuntime(linalg_norm_ord_str, args0, args1);
+}
