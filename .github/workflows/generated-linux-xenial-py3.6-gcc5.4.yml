@@ -429,11 +429,15 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
 
-  pytorch_python_doc_build:
+  pytorch_doc_build:
     runs-on: linux.2xlarge
+    strategy:
+      matrix:
+        docs_type: [cpp, python]
     needs: [calculate-docker-image, build, ciflow_should_run]
     env:
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
+      DOCS_TYPE: ${{ matrix.docs_type }}
     steps:
       - name: Log in to ECR
         run: |
@@ -474,7 +478,7 @@ jobs:
       - name: Unzip artifacts
         run: |
           unzip -o artifacts.zip
-      - name: Build Python Doc in Docker
+      - name: Build ${{ matrix.docs_type }} docs
         run: |
           set -ex
           time docker pull "${DOCKER_IMAGE}" > /dev/null
@@ -487,6 +491,8 @@ jobs:
             -e IN_CI \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e CIRCLE_SHA1="$GITHUB_SHA" \
+            -e DOCS_VERSION="${target}" \
+            -e DOCS_TYPE \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
@@ -496,34 +502,36 @@ jobs:
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}" \
-            bash -c "sudo chown -R jenkins . && pip install dist/*.whl && ./.circleci/scripts/python_doc_push_script.sh docs/$target $target site"
+            bash -c "sudo chown -R jenkins . && pip install dist/*.whl && ./.circleci/scripts/${DOCS_TYPE}_doc_push_script.sh"
       - name: Chown workspace
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - uses: driazati/upload-artifact-s3@21c31d0a7bcb056ca50bd6ce197ba6507c26a1be
-        if: ${{ github.event_name == 'pull_request' }}
-        name: Upload Docs Preview
+      - uses: seemethere/upload-artifact-s3@v3
+        name: Upload Python Docs Preview
+        if: ${{ github.event_name == 'pull_request' && matrix.docs_type == 'python' }}
         with:
-          name: deploy
           retention-days: 14
           if-no-files-found: error
-          path: pytorch.github.io/docs/merge
-      - name: Show Docs Preview URL (Click Me)
-        if: ${{ github.event_name == 'pull_request' }}
-        env:
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          echo "See rendered docs at https://docs-preview.pytorch.org/$PR_NUMBER/"
+          path: pytorch.github.io/docs/merge/
+          s3-prefix: ${{ github.repository }}/pr-previews/pr/${{ github.event.pull_request.number }}
+      - uses: seemethere/upload-artifact-s3@v3
+        name: Upload C++ Docs Preview
+        if: ${{ github.event_name == 'pull_request' && matrix.docs_type == 'cppdocs' }}
+        with:
+          retention-days: 14
+          if-no-files-found: error
+          path: cppdocs/
+          s3-prefix: ${{ github.repository }}/pr-previews/pr/${{ github.event.pull_request.number }}/cppdocs
       - name: Archive artifacts into zip
         run: |
-          zip -r pytorch_github_io.zip "${GITHUB_WORKSPACE}/pytorch.github.io"
+          zip -r "docs_${DOCS_TYPE}.zip" "${GITHUB_WORKSPACE}/pytorch.github.io" "${GITHUB_WORKSPACE}/cppdocs"
       - uses: actions/upload-artifact@v2
         name: Store PyTorch Build Artifacts
         with:
-          name: pytorch_github_io
+          name: docs_${{ matrix.docs_type }}
+          path: docs_${{ matrix.docs_type }}.zip
           if-no-files-found: error
-          path: pytorch_github_io.zip
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
