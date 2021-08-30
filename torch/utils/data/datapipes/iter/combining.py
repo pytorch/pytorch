@@ -89,6 +89,9 @@ class _ForkerIterDataPipe(IterDataPipe):
         self.leading_ptr = 0
         self.end_ptr: Optional[int] = None
 
+    def __len__(self):
+        return len(self.main_datapipe)
+
     def get_next_element_by_instance(self, instance_id: int):
         if self._datapipe_iterator is None:
             self._datapipe_iterator = iter(self.main_datapipe)
@@ -154,6 +157,9 @@ class _ChildDataPipe(IterDataPipe):
             self.main_datapipe.reset()
         # We want to separate the code for reset and yield, so that 'reset' exeutes before __next__ is called
         return self.get_generator_by_instance(self.instance_id)
+
+    def __len__(self):
+        return len(self.main_datapipe)
 
     def get_generator_by_instance(self, instance_id: int):
         yield from self.main_datapipe.get_next_element_by_instance(self.instance_id)
