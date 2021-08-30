@@ -361,7 +361,7 @@ void pushProfilingCallbacks() {
       },
       [](const at::RecordFunction& fn, at::ObserverContext* ctx_ptr) {
         auto state_ptr = getProfilerTLSState();
-        if (!state_ptr || state_ptr->is_waiting_ || (state_ptr->is_service_ && !ctx_ptr)) {
+        if (!state_ptr || (state_ptr->is_service_ && !ctx_ptr)) {
           return;
         }
         const auto& config = state_ptr->config();
