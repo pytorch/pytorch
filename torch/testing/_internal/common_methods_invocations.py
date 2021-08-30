@@ -3457,9 +3457,14 @@ def sample_inputs_linalg_solve_triangular(op_info, device, dtype, requires_grad=
     bs = (1, 2, 0)
     ns = (3, 0)
     ks = (1, 3, 0)
+    grad = (False,) if not requires_grad else (True, False)
 
     def gen_inputs():
-        for b, n, k in itertools.chain(product(bs, ns, ks)):
+        for b, n, k, grad_A, grad_B in product(bs, ns, ks, grad, grad):
+            # If requires_grad, at least one input needs to require grad
+            if requires_grad and not grad_A and not grad_B:
+                continue
+
             for left, upper, uni in product((True, False), repeat=3):
                 with torch.no_grad():
                     if b == 1:
@@ -3478,8 +3483,8 @@ def sample_inputs_linalg_solve_triangular(op_info, device, dtype, requires_grad=
                         A.triu_()
                     else:
                         A.tril_()
-                A.requires_grad_(requires_grad)
-                B.requires_grad_(requires_grad)
+                A.requires_grad_(grad_A)
+                B.requires_grad_(grad_B)
                 yield SampleInput(A, args=(B,), kwargs={"left": left, "upper": upper, "unitriangular": uni})
 
     return list(gen_inputs())
