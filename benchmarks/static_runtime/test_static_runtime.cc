@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
+#include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/runtime/static/fusion.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
 #include <torch/csrc/jit/runtime/static/passes.h>
@@ -1290,4 +1291,23 @@ TEST(StaticRuntime, IndividualOps_LinalgNorm_StringOrd) {
   auto b = at::randn({4, 5});
   std::vector<IValue> args1{b, "fro", dim, true, dtype};
   testStaticRuntime(linalg_norm_ord_str, args0, args1);
+}
+
+TEST(StaticRuntime, IndividualOps_Cat) {
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  parseIR(cat_script, graph.get(), vmap);
+  torch::jit::StaticModule smodule(graph);
+  ASSERT_TRUE(getNodeWithKind(smodule, "aten::cat"));
+
+  auto a = at::randn({2, 4});
+  auto b = at::randn({3, 4});
+  std::vector<IValue> args0{a, b, 0};
+
+  testStaticRuntime(cat_script, args0);
+
+  auto c = at::randn({3, 4});
+  auto d = at::randn({3, 5});
+  std::vector<IValue> args1{c, d, 1};
+  testStaticRuntime(cat_script, args0, args1);
 }
