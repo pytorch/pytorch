@@ -85,6 +85,8 @@ void UCPWorker::recv_callback(
   auto r = reinterpret_cast<UCPRequest::Data *>(request);
   r->status = status;
   if (info != nullptr) {
+    // TODO: when is info a valid pointer and when infor is not?
+    // Is it guaranteed that, if status == UCS_OK, then info is valid?
     r->info = *info;
   }
 };
