@@ -171,8 +171,6 @@ def wait_until_owners_and_forks_on_rank(
 
 def initialize_pg(init_method, rank: int, world_size: int) -> None:
     # This is for tests using `dist.barrier`.
-    # For `RpcAgent` other than `ProcessGroupAgent`,
-    # no `_default_pg` is initialized.
     if not dist.is_initialized():
         dist.init_process_group(
             backend="gloo",
