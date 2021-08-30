@@ -3,7 +3,7 @@
 #include <c10/macros/Export.h>
 
 namespace c10 {
-class TensorImpl;
+struct TensorImpl;
 }
 
 namespace at {
