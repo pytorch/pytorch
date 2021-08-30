@@ -422,7 +422,7 @@ class TestLinalg(TestCase):
         def run_test(shape, batch, contiguous):
             A = random_hermitian_pd_matrix(shape, *batch, dtype=dtype, device=device)
             if A.numel() > 0 and not contiguous:
-                A = A.transpose(-2, -1)
+                A = A.mT
                 self.assertFalse(A.is_contiguous())
             expected_L = np.linalg.cholesky(A.cpu().numpy())
             actual_L = torch.linalg.cholesky(A)
@@ -455,7 +455,7 @@ class TestLinalg(TestCase):
         self.assertEqual(expected, out)
 
         # check the upper= variant
-        expected = torch.linalg.cholesky(A).transpose(-2, -1).conj()
+        expected = torch.linalg.cholesky(A).mH
         actual = torch.linalg.cholesky(A, upper=True)
         self.assertEqual(expected, actual)
 
@@ -550,12 +550,12 @@ class TestLinalg(TestCase):
             chol_fact = torch.cholesky(A, upper=upper)
             if upper:
                 # Correctness check
-                self.assertEqual(A, chol_fact.transpose(-2, -1).matmul(chol_fact))
+                self.assertEqual(A, chol_fact.mT.matmul(chol_fact))
                 # Upper triangular check
                 self.assertEqual(chol_fact, chol_fact.triu())
             else:
                 # Correctness check
-                self.assertEqual(A, chol_fact.matmul(chol_fact.transpose(-2, -1)))
+                self.assertEqual(A, chol_fact.matmul(chol_fact.mT))
                 # Lower triangular check
                 self.assertEqual(chol_fact, chol_fact.tril())
 
@@ -631,7 +631,7 @@ class TestLinalg(TestCase):
 
         U = torch.cholesky(A_triu, upper=True)
 
-        reconstruct_A = U.conj().transpose(-2, -1) @ U
+        reconstruct_A = U.mH @ U
         self.assertEqual(A, reconstruct_A)
 
     @skipCUDAIfNoMagmaAndNoCusolver
@@ -1023,7 +1023,7 @@ class TestLinalg(TestCase):
         def run_test_permuted(shape, batch, uplo):
             # check for permuted / transposed inputs
             matrix = random_hermitian_matrix(shape, *batch, dtype=dtype, device=device)
-            matrix = matrix.transpose(-2, -1)
+            matrix = matrix.mT
             run_test(matrix, uplo)
 
         def run_test_skipped_elements(shape, batch, uplo):
@@ -1134,7 +1134,7 @@ class TestLinalg(TestCase):
         def run_test_permuted(shape, batch, uplo):
             # check for permuted / transposed inputs
             matrix = random_hermitian_matrix(shape, *batch, dtype=dtype, device=device)
-            matrix = matrix.transpose(-2, -1)
+            matrix = matrix.mT
             run_test(matrix, uplo)
 
         def run_test_skipped_elements(shape, batch, uplo):
@@ -1176,8 +1176,8 @@ class TestLinalg(TestCase):
 
         def run_test_transposed(a_shape, b_shape):
             # check for transposed case
-            a = torch.rand(a_shape, dtype=dtype, device=device).transpose(-2, -1)
-            b = torch.rand(b_shape, dtype=dtype, device=device).transpose(-2, -1)
+            a = torch.rand(a_shape, dtype=dtype, device=device).mT
+            b = torch.rand(b_shape, dtype=dtype, device=device).mT
             self.assertFalse(a.is_contiguous())
             self.assertFalse(b.is_contiguous())
 
@@ -1186,7 +1186,7 @@ class TestLinalg(TestCase):
             self.assertEqual(result, expected)
 
             # check the out= variant
-            out = torch.empty(result.transpose(-2, -1).shape, dtype=dtype, device=device).transpose(-2, -1)
+            out = torch.empty(result.mT.shape, dtype=dtype, device=device).mT
             self.assertFalse(out.is_contiguous())
             ans = torch.kron(a, b, out=out)
             self.assertEqual(ans, out)
@@ -2670,12 +2670,12 @@ class TestLinalg(TestCase):
 
             if compute_uv:
                 if some:
-                    x_recon = torch.matmul(outu, torch.matmul(outs.diag_embed(), outv.transpose(-2, -1)))
+                    x_recon = torch.matmul(outu, torch.matmul(outs.diag_embed(), outv.mT))
                     self.assertEqual(x, x_recon, atol=1e-8, rtol=0, msg='Incorrect reconstruction using U @ diag(S) @ V.T')
                 else:
                     narrow_u = outu[..., :min(*dims[-2:])]
                     narrow_v = outv[..., :min(*dims[-2:])]
-                    x_recon = torch.matmul(narrow_u, torch.matmul(outs.diag_embed(), narrow_v.transpose(-2, -1)))
+                    x_recon = torch.matmul(narrow_u, torch.matmul(outs.diag_embed(), narrow_v.mT))
                     self.assertEqual(x, x_recon, atol=1e-8, rtol=0, msg='Incorrect reconstruction using U @ diag(S) @ V.T')
             else:
                 _, singvals, _ = torch.svd(x, compute_uv=True)
@@ -2698,12 +2698,12 @@ class TestLinalg(TestCase):
                 resu, ress, resv = torch.svd(x, some=some, compute_uv=compute_uv)
                 if compute_uv:
                     if some:
-                        x_recon = torch.matmul(resu, torch.matmul(ress.diag_embed(), resv.transpose(-2, -1)))
+                        x_recon = torch.matmul(resu, torch.matmul(ress.diag_embed(), resv.mT))
                         self.assertEqual(x, x_recon, atol=1e-8, rtol=0, msg='Incorrect reconstruction using U @ diag(S) @ V.T')
                     else:
                         narrow_u = resu[..., :min(*dims[-2:])]
                         narrow_v = resv[..., :min(*dims[-2:])]
-                        x_recon = torch.matmul(narrow_u, torch.matmul(ress.diag_embed(), narrow_v.transpose(-2, -1)))
+                        x_recon = torch.matmul(narrow_u, torch.matmul(ress.diag_embed(), narrow_v.mT))
                         self.assertEqual(x, x_recon, atol=1e-8, rtol=0, msg='Incorrect reconstruction using U @ diag(S) @ V.T')
                 else:
                     _, singvals, _ = torch.svd(x, compute_uv=True)
@@ -2754,7 +2754,7 @@ class TestLinalg(TestCase):
 
             # check if u, s, v is a SVD
             u, s, v = u[..., :q], s[..., :q], v[..., :q]
-            A = u.matmul(s.diag_embed()).matmul(v.transpose(-2, -1))
+            A = u.matmul(s.diag_embed()).matmul(v.mT)
             self.assertEqual(A, a, rtol=1e-7, atol=2e-7)
 
             # check if svd_lowrank produces same singular values as torch.svd
@@ -2771,8 +2771,8 @@ class TestLinalg(TestCase):
                 # subspaces, respectively
                 u, s, v = u[..., :actual_rank], s[..., :actual_rank], v[..., :actual_rank]
                 U, S, V = U[..., :actual_rank], S[..., :actual_rank], V[..., :actual_rank]
-                self.assertEqual(u.transpose(-2, -1).matmul(U).det().abs(), torch.ones(batches, device=device, dtype=dtype))
-                self.assertEqual(v.transpose(-2, -1).matmul(V).det().abs(), torch.ones(batches, device=device, dtype=dtype))
+                self.assertEqual(u.mT.matmul(U).det().abs(), torch.ones(batches, device=device, dtype=dtype))
+                self.assertEqual(v.mT.matmul(V).det().abs(), torch.ones(batches, device=device, dtype=dtype))
 
         all_batches = [(), (1,), (3,), (2, 3)]
         for actual_rank, size, all_batches in [
@@ -3173,8 +3173,8 @@ class TestLinalg(TestCase):
             # check the out= variant
             # prepare the expected out tensor
             matrix_inverse_out = torch.empty(*batches, n, n, dtype=dtype, device=device)
-            matrix_inverse_out_t = matrix_inverse_out.transpose(-2, -1).clone(memory_format=torch.contiguous_format)
-            matrix_inverse_out = matrix_inverse_out_t.transpose(-2, -1)
+            matrix_inverse_out_t = matrix_inverse_out.mT.clone(memory_format=torch.contiguous_format)
+            matrix_inverse_out = matrix_inverse_out_t.mT
             ans = torch_inverse(matrix, out=matrix_inverse_out)
             self.assertEqual(matrix_inverse_out, ans, atol=0, rtol=0)
             self.assertEqual(matrix_inverse_out, matrix_inverse, atol=0, rtol=0)
@@ -3210,7 +3210,7 @@ class TestLinalg(TestCase):
                 run_test(torch_inverse, matrices, batches, n)
 
                 # test non-contiguous input
-                run_test(torch_inverse, matrices.transpose(-2, -1), batches, n)
+                run_test(torch_inverse, matrices.mT, batches, n)
                 if n > 0:
                     run_test(
                         torch_inverse,
@@ -3461,9 +3461,9 @@ class TestLinalg(TestCase):
         with warnings.catch_warnings(record=True) as w:
             a = torch.eye(2, dtype=dtype, device=device)
             out = torch.empty(3, 3, dtype=dtype, device=device)
-            out = out.transpose(-2, -1).clone(memory_format=torch.contiguous_format)
-            out = out.transpose(-2, -1)
-            self.assertTrue(out.transpose(-2, -1).is_contiguous())
+            out = out.mT.clone(memory_format=torch.contiguous_format)
+            out = out.mT
+            self.assertTrue(out.mT.is_contiguous())
             # Trigger warning
             torch.linalg.inv(a, out=out)
             # Check warning occurs
@@ -4052,12 +4052,12 @@ class TestLinalg(TestCase):
             a = torch.randn(*batch, shape0, shape1, dtype=dtype, device=device)
             rank_a = matrix_rank(a)
 
-            self.assertEqual(rank_a, matrix_rank(a.conj().transpose(-2, -1)))
-            aaH = torch.matmul(a, a.conj().transpose(-2, -1))
+            self.assertEqual(rank_a, matrix_rank(a.mH))
+            aaH = torch.matmul(a, a.mH)
             rank_aaH = matrix_rank(aaH)
             rank_aaH_hermitian = matrix_rank(aaH, hermitian=True)
             self.assertEqual(rank_aaH, rank_aaH_hermitian)
-            aHa = torch.matmul(a.conj().transpose(-2, -1), a)
+            aHa = torch.matmul(a.mH, a)
             self.assertEqual(matrix_rank(aHa), matrix_rank(aHa, hermitian=True))
 
             # check against NumPy
@@ -4124,14 +4124,14 @@ class TestLinalg(TestCase):
             rank_a = matrix_rank(a)
             expected = torch.zeros(batch, dtype=torch.int64, device=device)
 
-            self.assertEqual(rank_a, matrix_rank(a.conj().transpose(-2, -1)))
+            self.assertEqual(rank_a, matrix_rank(a.mH))
 
-            aaH = torch.matmul(a, a.conj().transpose(-2, -1))
+            aaH = torch.matmul(a, a.mH)
             rank_aaH = matrix_rank(aaH)
             rank_aaH_hermitian = matrix_rank(aaH, hermitian=True)
             self.assertEqual(rank_aaH, rank_aaH_hermitian)
 
-            aHa = torch.matmul(a.conj().transpose(-2, -1), a)
+            aHa = torch.matmul(a.mH, a)
             self.assertEqual(matrix_rank(aHa), matrix_rank(aHa, hermitian=True))
 
             self.assertEqual(rank_a, expected)
@@ -4764,7 +4764,7 @@ class TestLinalg(TestCase):
         b = torch.randn(*b_dims, dtype=dtype, device=device)
         A = torch.randn(*A_dims, dtype=dtype, device=device)
         # create positive definite matrix
-        A = torch.matmul(A, A.transpose(-2, -1))
+        A = torch.matmul(A, A.mT)
         A_triangular = triangle_function(A)
         if unitriangular:
             A_triangular.diagonal(dim1=-2, dim2=-1).fill_(1.)
@@ -4808,7 +4808,7 @@ class TestLinalg(TestCase):
                                            transpose=transpose)[0]  # Actual output
             self.assertEqual(x_act, x_exp)  # Equality check
             if transpose:
-                A = A.transpose(-2, -1)
+                A = A.mT
 
             Ax = np.matmul(A.cpu(), x_act.cpu())
             self.assertEqual(b, Ax)
@@ -4852,7 +4852,7 @@ class TestLinalg(TestCase):
             x, _ = torch.triangular_solve(b, A,
                                           upper=upper, transpose=transpose, unitriangular=unitriangular)
             if transpose:
-                A = A.transpose(-2, -1)
+                A = A.mT
 
             Ax = torch.matmul(A, x)
 
@@ -4865,7 +4865,7 @@ class TestLinalg(TestCase):
             x, _ = torch.triangular_solve(b, A, upper=upper, transpose=transpose,
                                           unitriangular=unitriangular)
             if transpose:
-                A = A.transpose(-2, -1)
+                A = A.mT
 
             self.assertEqual(torch.matmul(A, x), b)
 
@@ -5139,7 +5139,7 @@ class TestLinalg(TestCase):
             A = make_tensor((*batch, m, n), dtype=dtype, device=device)
             reflectors, tau = torch.geqrf(A)
             if not fortran_contiguous:
-                self.assertTrue(reflectors.transpose(-2, -1).is_contiguous())
+                self.assertTrue(reflectors.mT.is_contiguous())
                 reflectors = reflectors.contiguous()
 
             # Q is of size m x m
@@ -5155,11 +5155,11 @@ class TestLinalg(TestCase):
             actual = torch.ormqr(reflectors, tau, C_left, left=False, transpose=False)
             self.assertEqual(expected, actual)
 
-            expected = Q.transpose(-2, -1).conj() @ C_right
+            expected = Q.mH @ C_right
             actual = torch.ormqr(reflectors, tau, C_right, left=True, transpose=True)
             self.assertEqual(expected, actual)
 
-            expected = C_left @ Q.transpose(-2, -1).conj()
+            expected = C_left @ Q.mH
             actual = torch.ormqr(reflectors, tau, C_left, left=False, transpose=True)
             self.assertEqual(expected, actual)
 
@@ -7173,11 +7173,11 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         def run_test(shape, batch, upper, contiguous):
             A = random_hermitian_pd_matrix(shape, *batch, dtype=dtype, device=device)
             if A.numel() > 0 and not contiguous:
-                A = A.transpose(-2, -1)
+                A = A.mT
                 self.assertFalse(A.is_contiguous())
             L = torch.linalg.cholesky(A)
             expected_inverse = torch.inverse(A)
-            L = L.conj().transpose(-2, -1) if upper else L
+            L = L.mH if upper else L
             actual_inverse = torch.cholesky_inverse(L, upper)
             self.assertEqual(actual_inverse, expected_inverse)
 
@@ -7198,8 +7198,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
         # This test checks the first code path
         out = torch.empty_like(A)
-        out_t = out.transpose(-2, -1).clone(memory_format=torch.contiguous_format)
-        out = out_t.transpose(-2, -1)
+        out_t = out.mT.clone(memory_format=torch.contiguous_format)
+        out = out_t.mT
         ans = torch.cholesky_inverse(L, out=out)
         self.assertEqual(ans, out)
         expected = torch.inverse(A)
@@ -7668,7 +7668,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             self.assertEqual(v.shape[-1], guess_rank)
             self.assertEqual(v.shape[-2], columns)
 
-            A1 = u.matmul(s.diag_embed()).matmul(v.transpose(-2, -1))
+            A1 = u.matmul(s.diag_embed()).matmul(v.mT)
             ones_m1 = torch.ones(batches + (rows, 1), dtype=a.dtype, device=device)
             c = a.sum(axis=-2) / rows
             c = c.reshape(batches + (1, columns))

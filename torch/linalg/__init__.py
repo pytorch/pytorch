@@ -80,9 +80,9 @@ Examples::
     tensor(4.4692e-16, dtype=torch.float64)
 
     >>> A = torch.randn(3, 2, 2, dtype=torch.float64)
-    >>> A = A @ A.transpose(-2, -1) + torch.eye(2)  # batch of symmetric positive-definite matrices
+    >>> A = A @ A.mT + torch.eye(2)  # batch of symmetric positive-definite matrices
     >>> L = torch.linalg.cholesky(A)
-    >>> torch.dist(L @ L.transpose(-2, -1), A)
+    >>> torch.dist(L @ L.mT, A)
     tensor(5.8747e-16, dtype=torch.float64)
 """)
 
@@ -611,9 +611,9 @@ Examples::
     tensor(6.1062e-16, dtype=torch.float64)
 
     >>> A = torch.randn(3, 2, 2, dtype=torch.float64)
-    >>> A = A + A.transpose(-2, -1)  # creates a batch of symmetric matrices
+    >>> A = A + A.mT  # creates a batch of symmetric matrices
     >>> L, Q = torch.linalg.eigh(A)
-    >>> torch.dist(Q @ torch.diag_embed(L) @ Q.transpose(-2, -1).conj(), A)
+    >>> torch.dist(Q @ torch.diag_embed(L) @ Q.mH, A)
     tensor(1.5423e-15, dtype=torch.float64)
 """)
 
@@ -676,7 +676,7 @@ Examples::
     tensor([0.3277, 2.9415], dtype=torch.float64)
 
     >>> A = torch.randn(3, 2, 2, dtype=torch.float64)
-    >>> A = A + A.transpose(-2, -1)  # creates a batch of symmetric matrices
+    >>> A = A + A.mT  # creates a batch of symmetric matrices
     >>> torch.linalg.eigvalsh(A)
     tensor([[ 2.5797,  3.4629],
             [-4.1605,  1.3780],
@@ -2033,6 +2033,6 @@ Examples::
     >>> Q, R = torch.linalg.qr(A, mode='complete')
     >>> torch.dist(Q @ R, A)
     tensor(1.6099e-06)
-    >>> torch.dist(Q.transpose(-2, -1) @ Q, torch.eye(4))
+    >>> torch.dist(Q.mT @ Q, torch.eye(4))
     tensor(6.2158e-07)
 """)

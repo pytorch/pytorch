@@ -274,7 +274,7 @@ void linalg_eig_kernel(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos,
   // the content of eigenvalues, eigenvectors and infos is overwritten by 'apply_linalg_eig'
 
   // apply_linalg_eig modifies in-place provided input matrix, therefore we need a copy
-  Tensor input_working_copy = at::empty(input.transpose(-2, -1).sizes(), input.options());
+  Tensor input_working_copy = at::empty(input.mT().sizes(), input.options());
   input_working_copy.transpose_(-2, -1);  // make input_working_copy to have Fortran contiguous memory layout
   input_working_copy.copy_(input);
 

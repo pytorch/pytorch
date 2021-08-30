@@ -36,7 +36,7 @@ Tensor _euclidean_dist(const Tensor& x1, const Tensor& x2) {
   Tensor x2_pad = at::ones_like(x2_norm, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   Tensor x1_ = at::cat({x1.mul(-2), x1_norm, x1_pad}, -1);
   Tensor x2_ = at::cat({x2, x2_pad, x2_norm}, -1);
-  Tensor result = x1_.matmul(x2_.transpose(-2, -1));
+  Tensor result = x1_.matmul(x2_.mT());
   result.clamp_min_(0).sqrt_();
   return result;
 }

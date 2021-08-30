@@ -211,7 +211,7 @@ Tensor linalg_pinv(const Tensor& input, const Tensor& rcond, bool hermitian) {
     Tensor U, S, V;
     // TODO: replace input.svd with linalg_svd when torch/xla can work with at::linalg_svd
     std::tie(U, S, V) = input.svd();
-    return at::matmul(V * S.reciprocal().unsqueeze(-2), U.conj().transpose(-2, -1));
+    return at::matmul(V * S.reciprocal().unsqueeze(-2), U.mH());
   }
 
   // If not Hermitian use singular value decomposition, else use eigenvalue decomposition
@@ -223,7 +223,7 @@ Tensor linalg_pinv(const Tensor& input, const Tensor& rcond, bool hermitian) {
     Tensor max_val = at::narrow(S, /*dim=*/-1, /*start=*/0, /*length=*/1);  // singular values are sorted in descending order
     Tensor S_pseudoinv = at::where(S > (rcond.unsqueeze(-1) * max_val), S.reciprocal(), at::zeros({}, S.options())).to(input.dtype());
     // computes V @ diag(S_pseudoinv) @ U.conj().T
-    return at::matmul(V * S_pseudoinv.unsqueeze(-2), U.conj().transpose(-2, -1));
+    return at::matmul(V * S_pseudoinv.unsqueeze(-2), U.mH());
   } else {
     Tensor S, U;
     std::tie(S, U) = at::linalg_eigh(input);
@@ -233,7 +233,7 @@ Tensor linalg_pinv(const Tensor& input, const Tensor& rcond, bool hermitian) {
     Tensor max_val = S_abs.amax(/*dim=*/-1, /*keepdim=*/true);
     Tensor S_pseudoinv = at::where(S_abs > (rcond.unsqueeze(-1) * max_val), S.reciprocal(), at::zeros({}, S.options())).to(input.dtype());
     // computes U @ diag(S_pseudoinv) @ U.conj().T
-    return at::matmul(U * S_pseudoinv.unsqueeze(-2), U.conj().transpose(-2, -1));
+    return at::matmul(U * S_pseudoinv.unsqueeze(-2), U.mH());
   }
 }
 
@@ -2032,7 +2032,7 @@ Tensor backward_analytic_function_of_a_matrix(
     const Tensor& self, const Tensor& grad,
     const func_t& function_of_a_matrix
   ) {
-  auto self_transposed = self.transpose(-2, -1).conj();
+  auto self_transposed = self.mH();
   auto self_transposed_sizes = self_transposed.sizes().vec();
   self_transposed_sizes[self.dim() - 2] <<= 1;
   self_transposed_sizes[self.dim() - 1] <<= 1;

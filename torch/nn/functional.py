@@ -4843,7 +4843,7 @@ def _scaled_dot_product_attention(
     B, Nt, E = q.shape
     q = q / math.sqrt(E)
     # (B, Nt, E) x (B, E, Ns) -> (B, Nt, Ns)
-    attn = torch.bmm(q, k.transpose(-2, -1))
+    attn = torch.bmm(q, k.mT)
     if attn_mask is not None:
         attn += attn_mask
     attn = softmax(attn, dim=-1)
