@@ -1084,11 +1084,13 @@ Tensor asarray(
     tensor = THPVariable_Unpack(obj);
   }
 
+#ifdef USE_NUMPY
   // Check whether 'obj' is a NumPy Array
   if (is_numpy_available() && PyArray_Check(obj)) {
     tensor = tensor_from_numpy(obj, /*warn_if_not_writeable=*/false);
     should_warn_numpy_not_writable = !PyArray_ISWRITEABLE((PyArrayObject*) obj);
   }
+#endif
 
   // Check whether 'obj' is a 'DLPack' capsule
   if (!tensor.defined() && PyCapsule_IsValid(obj, "dltensor") != 0) {
