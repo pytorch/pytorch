@@ -9,7 +9,7 @@ class Scalar;
 
 namespace at {
 struct TensorIterator;
-struct Tensor;
+class Tensor;
 }
 
 namespace at { namespace native {

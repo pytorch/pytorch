@@ -17,7 +17,7 @@
 #include <ATen/core/NamedTensor.h>
 #include <ATen/core/QuantizerBase.h>
 
-namespace c10{
+namespace c10 {
 struct TensorOptions;
 class Scalar;
 }
