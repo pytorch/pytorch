@@ -67,11 +67,11 @@ TORCH_LIBRARY_IMPL(aten, Conjugate, m) {
   m.impl("addmm_", torch::CppFunction::makeFallthrough());
   m.impl("addmm.out", torch::CppFunction::makeFallthrough());
   // TODO: enable these after the cublas bug is fixed: https://github.com/pytorch/pytorch/issues/64103
-  // m.impl("bmm", torch::CppFunction::makeFallthrough());
-  // m.impl("bmm.out", torch::CppFunction::makeFallthrough());
-  // m.impl("baddbmm", torch::CppFunction::makeFallthrough());
-  // m.impl("baddbmm_", torch::CppFunction::makeFallthrough());
-  // m.impl("baddbmm.out", torch::CppFunction::makeFallthrough());
+  m.impl("bmm", torch::CppFunction::makeFallthrough());
+  m.impl("bmm.out", torch::CppFunction::makeFallthrough());
+  m.impl("baddbmm", torch::CppFunction::makeFallthrough());
+  m.impl("baddbmm_", torch::CppFunction::makeFallthrough());
+  m.impl("baddbmm.out", torch::CppFunction::makeFallthrough());
 }
 
 } // namespace at

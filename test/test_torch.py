@@ -5331,6 +5331,7 @@ else:
         # github issue: https://github.com/pytorch/pytorch/issues/64176
         x = torch.randn(10, 8).t()[::2, ::2]
         y = x.clone()
+        # should retain permutation after densification
         self.assertTrue(y.stride() == (1, 4))
 
     @dtypesIfCUDA(*set(torch.testing.get_all_math_dtypes('cuda')))
