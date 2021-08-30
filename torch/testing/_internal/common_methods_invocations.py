@@ -2486,6 +2486,39 @@ def sample_inputs_adaptive_avg_pool2d(op_info, device, dtype, requires_grad, **k
 
     return list(generator())
 
+def sample_inputs_adaptive_avg_pool1d(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    # Ordered as (input shape, output size)
+    cases = (
+        ((0, 8, 8), (5,)),
+        ((3, 8, 8), 5),
+    )
+
+    def generator():
+        for input_shape, output_size in cases:
+            yield SampleInput(make_arg(input_shape), args=(output_size,))
+
+    return list(generator())
+
+def sample_inputs_adaptive_avg_pool3d(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    # Ordered as (input shape, output size)
+    cases = (
+        ((0, 8, 8, 8, 8), (5, 7, 4)),
+        ((1, 8, 4, 3, 7), (None, None, None)),
+        ((3, 3, 8, 8, 6), (5, 7, None)),
+        ((1, 3, 8, 8, 6), (5, None, 2)),
+        ((3, 3, 8, 8, 6), (None, 3, 2)),
+    )
+
+    def generator():
+        for input_shape, output_size in cases:
+            yield SampleInput(make_arg(input_shape), args=(output_size,))
+
+    return list(generator())
+
 def sample_inputs_normalize(self, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, low=-1, high=1, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -2686,6 +2719,46 @@ def sample_inputs_avgpool2d(op_info, device, dtype, requires_grad, **kwargs):
                               args=(kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override))
         # Case with just input_shape and kernel_size
         yield SampleInput(make_arg((1, 3, 9, 9)), args=((3, 3)))
+
+    return list(generator())
+
+def sample_inputs_avgpool1d(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    # Order: input_shape, kernel_size, stride, padding, ceil_mode, count_include_pad
+    cases = (((1, 3, 9), 3, 1, 1, True, False),
+             ((1, 3, 9), (6,), (3,), (2,), True, True),
+             ((2, 3, 9), (3,), (1,), (1,), False, True),
+             ((1, 3, 9), (6,), (3,), (2,), False, False),
+             ((0, 3, 9), (6,), (3,), (2,), False, True))
+
+    def generator():
+        for input_shape, kernel_size, stride, padding, ceil_mode, count_include_pad in cases:
+            yield SampleInput(make_arg(input_shape),
+                              args=(kernel_size, stride, padding, ceil_mode, count_include_pad))
+        # Case with just input_shape and kernel_size
+        yield SampleInput(make_arg((2, 3, 9)), args=((3,)))
+
+    return list(generator())
+
+def sample_inputs_avgpool3d(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    # Order: input_shape, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override
+    cases = (((1, 3, 9, 5, 9), 3, 1, 1, True, False, 2),
+             ((1, 3, 9, 5, 9), (6, 4, 5), (3, 3, 2), (0, 2, 1), True, True, 2),
+             ((2, 3, 9, 5, 9), (3, 2, 4), (1, 1, 2), 1, False, True, 2),
+             ((1, 3, 9, 5, 9), (6, 3, 4), (3, 3, 3), (0, 1, 0), False, False, 2),
+             ((1, 1, 4, 5, 4), (2, 2, 3), (2, 2, 1), 0, False, True, -2),
+             ((1, 2, 6, 5, 6), (4, 5, 6), (2, 3, 2), 2, True, True, None),
+             ((0, 1, 4, 5, 4), (2, 3, 1), (2, 1, 2), 0, False, True, None))
+
+    def generator():
+        for input_shape, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override in cases:
+            yield SampleInput(make_arg(input_shape),
+                              args=(kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override))
+        # Case with just input_shape and kernel_size
+        yield SampleInput(make_arg((2, 3, 9, 9, 5)), args=((3, 3, 3),))
 
     return list(generator())
 
@@ -7188,6 +7261,40 @@ op_db: List[OpInfo] = [
            supports_out=False,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            sample_inputs_func=sample_inputs_adaptive_avg_pool2d),
+    OpInfo('nn.functional.adaptive_avg_pool1d',
+           dtypes=floating_types(),
+           dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+           skips=(
+               SkipInfo('TestJit', 'test_variant_consistency_jit'),
+           ),
+           supports_out=False,
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+           sample_inputs_func=sample_inputs_adaptive_avg_pool1d),
+    OpInfo('nn.functional.adaptive_avg_pool3d',
+           dtypesIfCPU=floating_types_and(torch.half),
+           dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+           skips=(
+               SkipInfo('TestJit', 'test_variant_consistency_jit'),
+           ),
+           supports_out=False,
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+           sample_inputs_func=sample_inputs_adaptive_avg_pool3d),
+    OpInfo('nn.functional.avg_pool1d',
+           aten_name='avg_pool1d',
+           supports_autograd=True,
+           supports_out=False,
+           dtypesIfCPU=floating_types_and(torch.int64),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+           sample_inputs_func=sample_inputs_avgpool1d),
+    OpInfo('nn.functional.avg_pool3d',
+           aten_name='avg_pool3d',
+           supports_autograd=True,
+           supports_out=False,
+           dtypesIfCPU=floating_types_and(torch.int64),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+           sample_inputs_func=sample_inputs_avgpool3d),
     OpInfo('nn.functional.relu',
            aten_name="relu",
            supports_autograd=True,
