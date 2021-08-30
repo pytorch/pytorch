@@ -629,12 +629,12 @@ class _SplitterBase:
 
     def starter_nodes(self) -> Tuple[NodeSet, NodeSet]:
         """
-        Finds nodes that consume module inputs or getattr nodes.
+        Finds nodes that consume module inputs or get_attr nodes.
         """
         starter_cpu_nodes: NodeSet = set()
         starter_acc_nodes: NodeSet = set()
         for node in self.module.graph.nodes:
-            if node.op not in {"placeholder", "getattr"}:
+            if node.op not in {"placeholder", "get_attr"}:
                 continue
             for user in node.users:
                 if user in self.acc_nodes:

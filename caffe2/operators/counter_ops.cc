@@ -3,14 +3,12 @@
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 const char* githubLinks = R"DOC(
   Github Links:
   - https://github.com/pytorch/pytorch/blob/master/caffe2/operators/counter_ops.cc
 
 )DOC";
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 const char* kCountExample = R"DOC(
 <details>
 
@@ -189,22 +187,15 @@ class CounterDeserializer : public BlobDeserializerBase {
 // TODO(jiayq): deprecate these ops & consolidate them with
 // IterOp/AtomicIterOp
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(CreateCounter, CreateCounterOp<int64_t, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(ResetCounter, ResetCounterOp<int64_t, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(CountDown, CountDownOp<int64_t, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     CheckCounterDone,
     CheckCounterDoneOp<int64_t, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(CountUp, CountUpOp<int64_t, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(RetrieveCount, RetrieveCountOp<int64_t, CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(CreateCounter)
     .NumInputs(0)
     .NumOutputs(1)
@@ -221,7 +212,6 @@ argument.
         "init_count",
         "*(type: int; default: 0)* Initial count for the counter, must be >= 0.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ResetCounter)
     .NumInputs(1)
     .NumOutputs(0, 1)
@@ -241,7 +231,6 @@ argument.
         "init_count",
         "*(type: int; default: 0)* Resets counter to this value, must be >= 0.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(CountDown)
     .NumInputs(1)
     .NumOutputs(1)
@@ -258,7 +247,6 @@ otherwise outputs True.
         "done",
         "*(type: bool)* False unless the internal count is zero.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(CheckCounterDone)
     .NumInputs(1)
     .NumOutputs(1)
@@ -274,7 +262,6 @@ If the internal count value <= 0, outputs true, otherwise outputs false.
         "done",
         "*(type: bool)* True if the internal count is zero or negative, otherwise False.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(CountUp)
     .NumInputs(1)
     .NumOutputs(1)
@@ -290,7 +277,6 @@ Increases count value by 1 and outputs the previous value atomically.
         "previous_count",
         "*(type: int)* Count value BEFORE this operation.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(RetrieveCount)
     .NumInputs(1)
     .NumOutputs(1)
@@ -307,23 +293,16 @@ Retrieve the current value from the counter as an integer.
         "count",
         "*(type: int)* Current count value.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(CreateCounter);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(ResetCounter);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(CountDown);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(CountUp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(RetrieveCount);
 
 CAFFE_KNOWN_TYPE(std::unique_ptr<Counter<int64_t>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_BLOB_SERIALIZER(
     (TypeMeta::Id<std::unique_ptr<Counter<int64_t>>>()),
     CounterSerializer);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_BLOB_DESERIALIZER(
     std::unique_ptr<Counter<int64_t>>,
     CounterDeserializer);

@@ -94,21 +94,17 @@ bool BatchPermutationGradientOp<float, CPUContext>::RunOnDevice() {
 }
 
 #ifdef CAFFE2_USE_MKLDNN
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(
     BatchPermutation,
     IDEEPFallbackOp<BatchPermutationOp<float, CPUContext>>);
 #endif
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(BatchPermutation, BatchPermutationOp<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     BatchPermutationGradient,
     BatchPermutationGradientOp<float, CPUContext>);
 
 // Input: X, indices; Output: Y
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(BatchPermutation)
     .NumInputs(2)
     .NumOutputs(1)
@@ -152,7 +148,6 @@ Example of batch permutation on a 3-D tensor with batch size 4:
     .Input(1, "indices", "Input indices of batch to permute")
     .Output(0, "Y", "Output permuted tensor");
 // Input: indices, dY (aka "gradOutput"); Output: dX (aka "gradInput")
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(BatchPermutationGradient).NumInputs(2).NumOutputs(1);
 
 class GetBatchPermutationGradient : public GradientMakerBase {
@@ -166,7 +161,6 @@ class GetBatchPermutationGradient : public GradientMakerBase {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(BatchPermutation, GetBatchPermutationGradient);
 
 } // namespace caffe2

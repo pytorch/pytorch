@@ -21,8 +21,14 @@ from torch.testing._internal.common_distributed import (
     requires_nccl,
     skip_if_lt_x_gpu,
 )
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import (
+    run_tests,
+    TEST_WITH_DEV_DBG_ASAN,
+)
 
+if TEST_WITH_DEV_DBG_ASAN:
+    print("Multiprocessing spawn is not compatible with dev/dbg asan", file=sys.stderr)
+    sys.exit(0)
 
 def gpus_for_rank(world_size):
     visible_devices = list(range(torch.cuda.device_count()))
@@ -57,7 +63,7 @@ class TestDdpCommHook(nn.Module):
 class DistributedDataParallelCommHookTest(MultiProcessTestCase):
     def setUp(self):
         super(DistributedDataParallelCommHookTest, self).setUp()
-        self._fork_processes()
+        self._spawn_processes()
 
     def tearDown(self):
         try:
@@ -108,8 +114,8 @@ class DistributedDataParallelCommHookTest(MultiProcessTestCase):
         This unit test verifies the ``allreduce`` hook registered case gives same result
         with no hook registered case.
         """
-        store = c10d.FileStore(self.file_name, self.world_size)
-        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+        store = dist.FileStore(self.file_name, self.world_size)
+        process_group = dist.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         # No hook registered case, get the reference grads.
         reference_grads = self._get_grads(process_group, None)
@@ -125,8 +131,8 @@ class DistributedDataParallelCommHookTest(MultiProcessTestCase):
         This unit test verifies the ``fp16 compress`` hook registered case
         gives close result with no hook registered case.
         """
-        store = c10d.FileStore(self.file_name, self.world_size)
-        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+        store = dist.FileStore(self.file_name, self.world_size)
+        process_group = dist.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         # No hook registered case, get the reference grads.
         reference_grads = self._get_grads(process_group, None)
@@ -142,8 +148,8 @@ class DistributedDataParallelCommHookTest(MultiProcessTestCase):
         This unit test verifies the ``quantize per tensor`` hook registered case
         gives close result with no hook registered case.
         """
-        store = c10d.FileStore(self.file_name, self.world_size)
-        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+        store = dist.FileStore(self.file_name, self.world_size)
+        process_group = dist.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         # No hook registered case, get the reference grads.
         reference_grads = self._get_grads(process_group, None)
@@ -159,8 +165,8 @@ class DistributedDataParallelCommHookTest(MultiProcessTestCase):
         This unit test verifies the ``quantize per channel`` hook registered case
         gives close result with no hook registered case.
         """
-        store = c10d.FileStore(self.file_name, self.world_size)
-        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+        store = dist.FileStore(self.file_name, self.world_size)
+        process_group = dist.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         # No hook registered case, get the reference grads.
         reference_grads = self._get_grads(process_group, None)

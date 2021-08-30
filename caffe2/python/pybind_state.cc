@@ -58,13 +58,10 @@ namespace py = pybind11;
 
 // gWorkspaces allows us to define and switch between multiple workspaces in
 // Python.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::map<std::string, std::unique_ptr<Workspace>> gWorkspaces;
 // gWorkspace is the pointer to the current workspace. The ownership is kept
 // by the gWorkspaces map.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static Workspace* gWorkspace = nullptr;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::string gCurrentWorkspaceName;
 
 // NOLINTNEXTLINE(modernize-use-equals-default)
@@ -72,22 +69,18 @@ BlobFetcherBase::~BlobFetcherBase() {}
 // NOLINTNEXTLINE(modernize-use-equals-default)
 BlobFeederBase::~BlobFeederBase() {}
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_TYPED_REGISTRY(
     BlobFetcherRegistry,
     TypeIdentifier,
     BlobFetcherBase,
     std::unique_ptr);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_TYPED_REGISTRY(
     BlobFeederRegistry,
     caffe2::DeviceType,
     BlobFeederBase,
     std::unique_ptr);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_BLOB_FETCHER((TypeMeta::Id<Tensor>()), TensorFetcher);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_BLOB_FEEDER(CPU, TensorFeeder<CPUContext>);
 
 Workspace* GetCurrentWorkspace() {
@@ -107,7 +100,6 @@ class StringFetcher : public BlobFetcherBase {
     return py::bytes(blob.Get<string>());
   }
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_BLOB_FETCHER((TypeMeta::Id<string>()), StringFetcher);
 
 #ifdef FBCODE_CAFFE2
@@ -208,7 +200,6 @@ using FuncRegistry = std::unordered_map<std::string, Func>;
 
 FuncRegistry& gRegistry() {
   // Always leak the objects registered here.
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static FuncRegistry* r = new FuncRegistry();
   return *r;
 }
@@ -339,29 +330,19 @@ class GetPythonGradient : public GradientMakerBase {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Python, PythonOp<CPUContext, false>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(PythonGradient, PythonGradientOp<CPUContext, false>);
 // Always allow running in-place
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Python).AllowInplace([](int, int) { return true; });
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(PythonGradient).AllowInplace([](int, int) { return true; });
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(Python, GetPythonGradient);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(PythonDLPack, PythonOp<CPUContext, true>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(PythonDLPackGradient, PythonGradientOp<CPUContext, true>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(PythonDLPack).AllowInplace([](int, int) { return true; });
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(PythonDLPackGradient).AllowInplace([](int, int) {
   return true;
 });
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(PythonDLPack, GetPythonGradient);
 
 class BackgroundPlan {
@@ -865,8 +846,7 @@ void addObjectMethods(py::module& m) {
              std::map<std::string, py::object> inputs)
               -> std::vector<py::object> {
             caffe2::Predictor::TensorMap tensors_data{};
-            // NOLINTNEXTLINE(clang-diagnostic-range-loop-construct,performance-for-range-copy)
-            for (const auto pair : inputs) {
+            for (const auto& pair : inputs) {
               const auto& name = pair.first;
               const auto& input = pair.second;
 #ifdef USE_NUMPY
@@ -1036,8 +1016,7 @@ void addObjectMethods(py::module& m) {
               -> std::vector<py::object> {
             Predictor::TensorMap tensors_data;
 #ifdef USE_NUMPY
-            // NOLINTNEXTLINE(clang-diagnostic-range-loop-construct,performance-for-range-copy)
-            for (const auto pair : inputs) {
+            for (const auto& pair : inputs) {
               const auto& name = pair.first;
               const auto& input = pair.second;
               CAFFE_ENFORCE(
@@ -1414,7 +1393,7 @@ void addGlobalMethods(py::module& m) {
           shapes.emplace_back(GetTensorShapeOfBlob(blob));
         }
         const auto c = schema->InferCost(def, shapes);
-        return std::make_tuple(c.flops, c.bytes_written);
+        return std::make_tuple(c.flops, c.bytes_written, c.bytes_read);
       });
   m.def("run_net_once", [](const py::bytes& net_def) {
     CAFFE_ENFORCE(gWorkspace);

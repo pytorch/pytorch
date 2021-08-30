@@ -2,10 +2,8 @@
 
 namespace caffe2 {
 namespace {
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(RemoveDataBlocks, RemoveDataBlocksOp<CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(RemoveDataBlocks)
     .NumInputs(2)
     .NumOutputs(1)
@@ -21,7 +19,6 @@ unique but with the range [0, blocks_size). Indices could be empty.
         "shrunk data",
         "data after removing data blocks indexed by 'indices'");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(RemoveDataBlocks);
 } // namespace
 } // namespace caffe2

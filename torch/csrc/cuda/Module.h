@@ -1,7 +1,6 @@
 #ifndef THCP_CUDA_MODULE_INC
 #define THCP_CUDA_MODULE_INC
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 extern THCState *state;
 
 void THCPModule_setDevice(int idx);

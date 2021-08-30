@@ -30,7 +30,6 @@ class GraphOpt : public ::testing::Test {
   bool old_cat_wo_conditionals_;
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(GraphOpt, OptimizeCat) {
 #ifdef TORCH_ENABLE_LLVM
   const auto graph_string = R"IR(
@@ -46,7 +45,6 @@ TEST_F(GraphOpt, OptimizeCat) {
   torch::jit::parseIR(graph_string, g.get());
   g->lint();
 
-  KernelScope kernel_scope;
   TensorExprKernel kernel(g);
 
   // The `aten::log` op must be moved to the inputs of `aten::cat`.
@@ -73,7 +71,6 @@ TEST_F(GraphOpt, OptimizeCat) {
 #endif
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(GraphOpt, OptimizeCat2) {
 #ifdef TORCH_ENABLE_LLVM
   const auto graph_string = R"IR(
@@ -90,7 +87,6 @@ TEST_F(GraphOpt, OptimizeCat2) {
   torch::jit::parseIR(graph_string, g.get());
   g->lint();
 
-  KernelScope kernel_scope;
   TensorExprKernel kernel(g);
 
   // The `aten::log` and `aten::tanh` ops must be moved to the inputs of
@@ -122,7 +118,6 @@ TEST_F(GraphOpt, OptimizeCat2) {
 #endif
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(GraphOpt, OptimizeCat3) {
 #ifdef TORCH_ENABLE_LLVM
   const auto graph_string = R"IR(
@@ -140,7 +135,6 @@ TEST_F(GraphOpt, OptimizeCat3) {
   torch::jit::parseIR(graph_string, g.get());
   g->lint();
 
-  KernelScope kernel_scope;
   TensorExprKernel kernel(g);
 
   // The `aten::tanh` op must be moved to the inputs of `aten::cat`.
@@ -171,7 +165,6 @@ TEST_F(GraphOpt, OptimizeCat3) {
 #endif
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(GraphOpt, OptimizeCatWithTypePromotionInUser) {
 #ifdef TORCH_ENABLE_LLVM
   const auto graph_string = R"IR(
@@ -187,7 +180,6 @@ TEST_F(GraphOpt, OptimizeCatWithTypePromotionInUser) {
   torch::jit::parseIR(graph_string, g.get());
   g->lint();
 
-  KernelScope kernel_scope;
   TensorExprKernel kernel(g);
 
   // The `aten::tanh` op must be moved to the inputs of `aten::cat`.
@@ -216,7 +208,6 @@ TEST_F(GraphOpt, OptimizeCatWithTypePromotionInUser) {
 #endif
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(GraphOpt, OptimizeCatWithTypePromotionInCat) {
 #ifdef TORCH_ENABLE_LLVM
   const auto graph_string = R"IR(
@@ -232,7 +223,6 @@ TEST_F(GraphOpt, OptimizeCatWithTypePromotionInCat) {
   torch::jit::parseIR(graph_string, g.get());
   g->lint();
 
-  KernelScope kernel_scope;
   TensorExprKernel kernel(g);
 
   // No transformation should have happened because the `aten::cat` op performs
@@ -246,7 +236,6 @@ TEST_F(GraphOpt, OptimizeCatWithTypePromotionInCat) {
 #endif
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(GraphOpt, OptimizeCatNoSingleTensorElementwiseOp) {
 #ifdef TORCH_ENABLE_LLVM
   const auto graph_string = R"IR(
@@ -263,7 +252,6 @@ TEST_F(GraphOpt, OptimizeCatNoSingleTensorElementwiseOp) {
   torch::jit::parseIR(graph_string, g.get());
   g->lint();
 
-  KernelScope kernel_scope;
   TensorExprKernel kernel(g);
 
   // No transformation is expected since the consumers of cat are not
@@ -277,7 +265,6 @@ TEST_F(GraphOpt, OptimizeCatNoSingleTensorElementwiseOp) {
 #endif
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(GraphOpt, OptimizeCatNoSingleTensorElementwiseOp2) {
 #ifdef TORCH_ENABLE_LLVM
   const auto graph_string = R"IR(
@@ -297,7 +284,6 @@ TEST_F(GraphOpt, OptimizeCatNoSingleTensorElementwiseOp2) {
   torch::jit::parseIR(graph_string, g.get());
   g->lint();
 
-  KernelScope kernel_scope;
   TensorExprKernel kernel(g);
 
   // No transformation is expected since the consumers of cat are not
