@@ -1912,6 +1912,31 @@ class TestTEFuser(JitTestCase):
             x = torch.ones((8, 1))
             torch.testing.assert_close(eager(x), script(x))
 
+    def test_batch_norm(self):
+        def test(fn, args):
+            trace = torch.jit.trace(fn, args)
+            self.assertAllFused(trace.graph_for(*args))
+            torch.testing.assert_allclose(fn(*args), trace(*args))
+
+        def bn(i, x):
+            return torch.batch_norm(i, x, x, x, x, False, 0.1, 1e-4, False).relu()
+
+        def bn_no_weight(i, x):
+            return torch.batch_norm(i, None, x, x, x, False, 0.1, 1e-4, False).relu()
+
+        def bn_no_bias(i, x):
+            return torch.batch_norm(i, x, None, x, x, False, 0.1, 1e-4, False).relu()
+
+        def bn_neither(i, x):
+            return torch.batch_norm(i, None, None, x, x, False, 0.1, 1e-4, False).relu()
+
+        for device in self.devices:
+            i = torch.randn(4, 16, 32, 40, device=device)
+            x = torch.randn(16, device=device)
+            for fn in [bn, bn_no_weight, bn_no_bias, bn_neither]:
+                test(fn, (i, x))
+
+
 works_list = [
     '__radd__',
     '__rdiv__',

@@ -2801,11 +2801,11 @@ class TestAutograd(TestCase):
 
         r1 = var1 * var1 * mean1 * mean1
         r2 = var2 * var2 * mean2 * mean2
-        self.assertTrue(torch.allclose(r1, r2, rtol=0.01, atol=0.0))
+        self.assertEqual(r1, r2, rtol=0.01, atol=0.0)
 
         torch.autograd.backward(r1, grad)
         torch.autograd.backward(r2, grad)
-        self.assertTrue(torch.allclose(input1.grad, input2.grad, rtol=0.01, atol=0.0))
+        self.assertEqual(input1.grad, input2.grad, rtol=0.01, atol=0.0)
 
     @slowTest
     @skipIfNoLapack
@@ -5159,7 +5159,7 @@ for shape in [(1,), ()]:
 
         # TODO: this is a bug!
         # once this is fixed, it should have the transpose removed:
-        # self.assertTrue(torch.allclose(non_inplace_grad, inplace_grad))
+        # self.assertEqual(non_inplace_grad, inplace_grad)
         self.assertEqual(non_inplace_grad.T, inplace_grad)
 
     def test_autograd_multiple_views_python(self):
