@@ -254,6 +254,7 @@ class TestPublicBindings(unittest.TestCase):
             "set_num_threads",
             "unify_type_list",
             "vitals_enabled",
+            "test_test",
 
             "wait",
         }
