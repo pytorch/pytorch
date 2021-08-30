@@ -242,6 +242,14 @@ class TORCH_API Buf : public ExprNode<Buf> {
     dims_ = dims;
   };
 
+  void set_allocated() {
+    is_allocated_ = true;
+  }
+
+  bool is_allocated() const {
+    return is_allocated_;
+  }
+
   ExprPtr initializer() const {
     return initializer_;
   };
@@ -259,6 +267,7 @@ class TORCH_API Buf : public ExprNode<Buf> {
   VarPtr base_handle_;
   std::vector<ExprPtr> dims_;
   ExprPtr initializer_;
+  bool is_allocated_{false};
 };
 
 class TORCH_API BufHandle : public ExprHandle {
