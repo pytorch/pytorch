@@ -1,5 +1,4 @@
 import contextlib
-from typing import Generator
 import warnings
 
 from torch._C import default_generator
@@ -66,7 +65,7 @@ _fork_rng_warned_already = False
 
 
 @contextlib.contextmanager
-def fork_rng(devices=None, enabled=True, _caller="fork_rng", _devices_kw="devices") -> Generator:
+def fork_rng(devices=None, enabled=True, _caller="fork_rng", _devices_kw="devices"):
     """
     Forks the RNG, so that when you return, the RNG is reset
     to the state that it was previously in.

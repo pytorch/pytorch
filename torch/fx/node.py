@@ -114,19 +114,13 @@ class Node:
     """
     def __init__(self, graph: 'Graph', name: str, op: str, target: 'Target',
                  args: Tuple['Argument', ...], kwargs: Dict[str, 'Argument'],
-                 return_type : Optional[Any] = None) -> None:
+                 type : Optional[Any] = None) -> None:
         self.graph = graph
         self.name = name  # unique name of value being created
         assert op in ['placeholder', 'call_method', 'call_module', 'call_function', 'get_attr', 'output', 'root']
         self.op = op  # the kind of operation = placeholder|call_method|call_module|call_function|get_attr
-        if op == 'call_function':
-            if not callable(target):
-                raise ValueError(f'Node [graph = {graph}, name = \'{name}\'] target {target} has type {torch.typename(target)} '
-                                 'but a Callable is expected')
-        else:
-            if not isinstance(target, str):
-                raise ValueError(f'Node [graph = {graph}, name = \'{name}\'] target {target} has type {torch.typename(target)} '
-                                 'but a str is expected')
+        if op in ['call_method', 'call_module']:
+            assert isinstance(target, str)
         self.target = target  # for method/module/function, the name of the method/module/function/attr
         # being invoked, e.g add, layer1, or torch.add
 
@@ -152,7 +146,7 @@ class Node:
         # generated function return type. (Note this is a special case. ``return``
         # does not produce a value, it's more of a notation. Thus, this value
         # describes the type of args[0] in the ``return`` node.
-        self.type : Optional[Any] = return_type
+        self.type : Optional[Any] = type
         self._prev = self
         self._next = self
         self._erased = False

@@ -50,6 +50,8 @@ class FaultyRpcAgentTestFixture(RpcAgentTestFixture):
 
     def get_shutdown_error_regex(self):
         error_regexes = [
+            "Encountered exception in ProcessGroupAgent::enqueueSend",
+            "Encountered exception in ProcessGroupAgent::listenLoop()",
             "Exception in thread pool task",
             "Connection reset by peer",
             "Connection closed by peer"

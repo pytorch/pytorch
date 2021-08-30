@@ -9,25 +9,8 @@
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/inliner.h>
 
-#ifdef FBCODE_CAFFE2
-#include <folly/container/F14Map.h>
-#include <folly/container/F14Set.h>
-#endif
-
 namespace torch {
 namespace jit {
-
-#ifdef FBCODE_CAFFE2
-template <typename Key, typename Value>
-using FastMap = folly::F14FastMap<Key, Value>;
-template <typename Key>
-using FastSet = folly::F14FastSet<Key>;
-#else
-template <typename Key, typename Value>
-using FastMap = std::unordered_map<Key, Value>;
-template <typename Key>
-using FastSet = std::unordered_set<Key>;
-#endif
 
 TORCH_API bool canEnableStaticRuntime(
     const std::shared_ptr<torch::jit::Graph>& graph);
@@ -144,7 +127,7 @@ class TORCH_API StaticModule {
   size_t num_inputs() const;
   size_t num_outputs() const;
 
-  const FastMap<int, std::vector<DefInfo>>& index_map() const {
+  const std::unordered_map<int, std::vector<DefInfo>>& index_map() const {
     return node_inputs_ssa_def_map_;
   }
 
@@ -164,12 +147,12 @@ class TORCH_API StaticModule {
     return schema_;
   }
 
-  const FastMap<const Value*, std::vector<const Value*>>&
+  const std::unordered_map<const Value*, std::vector<const Value*>>&
   values_share_same_storage() const {
     return value_to_same_storage_values_;
   }
 
-  const FastSet<const Value*>& external_values() const {
+  const std::unordered_set<const Value*>& external_values() const {
     return external_values_;
   }
 
@@ -195,14 +178,14 @@ class TORCH_API StaticModule {
   // a vector of ssa_defs corresponding to graph->outputs()
   std::vector<DefInfo> output_ssa_defs_;
   // map a node idx (in graph order) to a vector of ssa_defs for node inputs
-  FastMap<int, std::vector<DefInfo>> node_inputs_ssa_def_map_;
+  std::unordered_map<int, std::vector<DefInfo>> node_inputs_ssa_def_map_;
 
   // Bookkeeping for MemoryPlanner in StaticRuntime
   // values whose live-time exceeds that of running one inference (e.g., input,
   // output, prim::Constants, and their aliases)
-  FastSet<const Value*> external_values_;
+  std::unordered_set<const Value*> external_values_;
   // map a value to the set of values that may share the same storage with it
-  FastMap<const Value*, std::vector<const Value*>>
+  std::unordered_map<const Value*, std::vector<const Value*>>
       value_to_same_storage_values_;
 };
 
@@ -340,8 +323,8 @@ class MemoryPlanner {
  public:
   explicit MemoryPlanner(
       StaticRuntime* runtime,
-      const FastMap<const Value*, std::vector<const Value*>>&,
-      const FastSet<const Value*>& external_values,
+      const std::unordered_map<const Value*, std::vector<const Value*>>&,
+      const std::unordered_set<const Value*>& external_values,
       bool enable_out_variant,
       bool manage_graph_output_memory);
   // disable copying and moving
