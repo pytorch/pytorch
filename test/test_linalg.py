@@ -6166,6 +6166,22 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             _test_mm(n, m, p, dtype, genf)
 
     @onlyOnCPUAndCUDA
+    def test_mm_bmm_non_memory_dense(self, device):
+        A = torch.arange(24, device=device).to(dtype=torch.complex64).view(3,8)[:,:4].t().conj()
+        B = torch.arange(9, device=device).to(dtype=torch.complex64).view(3,3)
+        out = torch.empty(3, 4, device=device, dtype=torch.complex64).t()
+        Ar = A.float() #imaginary part is 0, so results of mm(Ar,Br) and mm(A,B) should be the same
+        Br = B.float()
+        self.assertEqual(torch.mm(Ar, Br).to(torch.cfloat), torch.mm(A, B, out=out))
+
+        Ab = torch.arange(24, device=device).to(dtype=torch.complex64).view(2, 2, 6)[:, :, ::2].transpose(-1, 1)
+        Bb = torch.arange(12, device=device).to(dtype=torch.complex64).view(2, 2, 3)
+        out_b = torch.empty(2, 3, 3, device=device, dtype=torch.complex64).transpose(-1, 1)
+        Abr = Ab.float()
+        Bbr = Bb.float()
+        self.assertEqual(torch.bmm(Abr, Bbr).to(torch.cfloat), torch.bmm(Ab, Bb, out=out_b))
+
+    @onlyOnCPUAndCUDA
     @dtypes(torch.float32, torch.float64)
     def test_strided_mm_bmm(self, device, dtype):
         # Tests strided view case with stride smaller than corresponding dimension size
