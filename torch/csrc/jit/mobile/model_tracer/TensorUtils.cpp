@@ -25,8 +25,8 @@ void for_each_tensor_in_ivalue(
     }
   } else if (iv.isList()) {
     c10::List<c10::IValue> l = iv.toList();
-    for (size_t i = 0; i < l.size(); i++) {
-      c10::IValue item = l[i];
+    for (auto&& i : l) {
+      c10::IValue item = i;
       for_each_tensor_in_ivalue(item, func);
     }
   } else if (iv.isGenericDict()) {
