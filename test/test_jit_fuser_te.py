@@ -95,7 +95,6 @@ class TestTEFuser(JitTestCase):
             torch.bool,
         ]
         self.fp_dtypes = [
-            # TODO: Add back when https://github.com/pytorch/pytorch/issues/55905 is closed
             torch.float16,
             torch.float32,
             torch.float64,
@@ -1791,6 +1790,7 @@ class TestTEFuser(JitTestCase):
             def eager(x, y):
                 return torch.cat((x, y.type_as(x)), dim=1)
             dtypes = self.dtypes.copy()
+            # CPU fuser doesn't support float16.
             dtypes.remove(torch.float16)
             for dtype1, dtype2 in product(dtypes, dtypes):
                 x = torch.randint(2, (1, 13,)).to(dtype1)
@@ -1959,23 +1959,6 @@ class TestTEFuser(JitTestCase):
             x = torch.randn(16, device=device)
             for fn in [bn, bn_no_weight, bn_no_bias, bn_neither]:
                 test(fn, (i, x))
-
-    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA for fp16")
-    def test_bn_half_61382(self):
-        # Repro from: https://github.com/pytorch/pytorch/issues/61382
-        class JasperBlock(nn.Module):
-            def __init__(self):
-                super(JasperBlock, self).__init__()
-                self.bn = nn.BatchNorm1d(3, eps=1e-3, momentum=0.1)
-
-            def forward(self, x):
-                return self.bn(x).relu()
-
-        m = JasperBlock().cuda().half().eval()
-        x = torch.randn(3, 3).cuda().half()
-        trace = torch.jit.trace(m, x)
-        self.assertAllFused(trace.graph_for(x))
-        torch.testing.assert_allclose(m(x), trace(x))
 
 works_list = [
     '__radd__',
