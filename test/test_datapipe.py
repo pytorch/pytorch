@@ -763,6 +763,21 @@ class TestFunctionalIterDataPipe(TestCase):
         output2 = list(dp2)  # output2 has to read from beginning again
         self.assertEqual(list(range(1, 10, 2)), output2)
 
+        # Test Case: drop_none = True
+        dp1, dp2 = input_dp.demux(num_instances=2, classifier_fn=lambda x: x % 2 if x % 5 != 0 else None,
+                                  drop_none=True)
+        self.assertEqual([2, 4, 6, 8], list(dp1))
+        self.assertEqual([1, 3, 7, 9], list(dp2))
+
+        # Test Case: drop_none = False
+        dp1, dp2 = input_dp.demux(num_instances=2, classifier_fn=lambda x: x % 2 if x % 5 != 0 else None,
+                                  drop_none=False)
+        it1 = iter(dp1)
+        with self.assertRaises(ValueError):
+            print("WE ARE HERE")
+            next(it1)
+
+
     def test_map_datapipe(self):
         input_dp = IDP(range(10))
 

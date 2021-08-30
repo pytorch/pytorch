@@ -168,13 +168,14 @@ class DemultiplexerIterDataPipe(IterDataPipe):
         args:
             datapipe: Iterable DataPipe being filtered
             num_instances: number of instances of the DataPipe to create
-            classifier_fn: a function that maps values to an integer within the range [0, num_instances - 1]
+            classifier_fn: a function that maps values to an integer within the range [0, num_instances - 1] or None
+            drop_none: defaults to False, if True, the function will skip over elements classified as None
             buffer_size: this defines the maximum number of inputs that the buffer can hold across all child
-             DataPipes while waiting for their values to be yielded
+                DataPipes while waiting for their values to be yielded
     """
     def __new__(cls, datapipe: IterDataPipe, num_instances: int,
-                classifier_fn: Callable[[T_co], int], buffer_size: int = 1000):
-        container = _DemultiplexerIterDataPipe(datapipe, num_instances, classifier_fn, buffer_size)
+                classifier_fn: Callable[[T_co], int], drop_none: bool = False, buffer_size: int = 1000):
+        container = _DemultiplexerIterDataPipe(datapipe, num_instances, classifier_fn, drop_none, buffer_size)
         return [_ChildDataPipe(container, i) for i in range(num_instances)]
 
 
@@ -187,7 +188,7 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
     """
 
     def __init__(self, datapipe: IterDataPipe[T_co], num_instances: int,
-                 classifier_fn: Callable[[T_co], int], buffer_size: int):
+                 classifier_fn: Callable[[T_co], int], drop_none: bool, buffer_size: int):
         self.main_datapipe = datapipe
         self._datapipe_iterator: Optional[Iterator[Any]] = None
         self.num_instances = num_instances
@@ -196,6 +197,7 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
         self.child_buffers: List[Deque[T_co]] = [deque() for _ in range(num_instances)]
         self.instance_started: List[bool] = [False] * num_instances
         self.classifier_fn = classifier_fn
+        self.drop_none = drop_none
         self.main_datapipe_exhausted = False
 
     def _find_next(self, instance_id: int) -> T_co:
@@ -205,7 +207,9 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
                                  "without invoking get_next_element_by_instance() first.")
             value = next(self._datapipe_iterator)
             classification = self.classifier_fn(value)
-            if classification >= self.num_instances or classification < 0:
+            if classification is None and self.drop_none:
+                continue
+            if classification is None or classification >= self.num_instances or classification < 0:
                 raise ValueError(f"Output of the classification fn should be between 0 and {self.num_instances - 1}. " +
                                  f"{classification} is returned.")
             if classification == instance_id:
