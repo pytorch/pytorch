@@ -368,6 +368,11 @@ struct TORCH_API TupleElements {
     }
   }
 
+  // Mimic implicit conversion from std::vector to ArrayRef.
+  operator c10::ArrayRef<IValue>() const {
+    return asArrayRef();
+  }
+
   void setContents(std::vector<IValue>&& contents) {
     if (inlineSize_) {
       destroyInline();
@@ -523,8 +528,8 @@ struct TORCH_API Tuple : c10::intrusive_ptr_target {
 
   Tuple(const Tuple& rhs) = delete;
 
-  c10::ArrayRef<IValue> elements() const& {
-    return elements_.asArrayRef();
+  const TupleElements& elements() const& {
+    return elements_;
   }
 
   TupleElements elements() && {
@@ -1527,7 +1532,7 @@ c10::optional<T> generic_to(IValue ivalue, _fake_type<c10::optional<T>>) {
 namespace detail {
 template <typename Tuple, std::size_t... INDEX>
 Tuple generic_to_tuple_impl(
-    c10::ArrayRef<IValue> t,
+    const std::vector<IValue>& t,
     std::index_sequence<INDEX...>) {
   return std::make_tuple(
       t[INDEX].to<typename std::tuple_element<INDEX, Tuple>::type>()...);
@@ -1543,7 +1548,7 @@ template <
             guts::negation<std::is_constructible<IValue, Args>>...>::value,
         std::nullptr_t> = nullptr>
 std::tuple<Args...> generic_to(IValue ivalue, _fake_type<std::tuple<Args...>>) {
-  auto vals = ivalue.toTuple()->elements();
+  const auto& vals = ivalue.toTuple()->elements();
   TORCH_CHECK(vals.size() == sizeof...(Args));
   return detail::generic_to_tuple_impl<std::tuple<Args...>>(vals, Indices{});
 }
