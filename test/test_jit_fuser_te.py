@@ -99,6 +99,7 @@ class TestTEFuser(JitTestCase):
             torch.float16,
             torch.float32,
             torch.float64,
+            torch.bfloat16,
         ]
         self.dtypes = self.int_dtypes + self.fp_dtypes
 
@@ -1147,7 +1148,7 @@ class TestTEFuser(JitTestCase):
         bad_dtypes = []
         for dtype, output_dtype, device, size in product(dtypes, dtypes, self.devices, sizes):
             # TODO: Add back when https://github.com/pytorch/pytorch/issues/55905 is closed
-            if dtype == torch.float16 and device == "cpu":
+            if dtype in [torch.float16, torch.bfloat16] and device == "cpu":
                 continue
             if dtype == output_dtype:
                 continue
@@ -1212,7 +1213,7 @@ class TestTEFuser(JitTestCase):
 
         for inp, device, dtype in product(inputs, self.devices, dtypes):
             # TODO: Add back when https://github.com/pytorch/pytorch/issues/55905 is closed
-            if dtype == torch.float16 and device == "cpu":
+            if dtype in [torch.float16, torch.bfloat16] and device == "cpu":
                 continue
             inp = inp.to(device=device, dtype=dtype)
             try:
@@ -1274,7 +1275,7 @@ class TestTEFuser(JitTestCase):
         sizes = [(1,), (2,), (4, 4)]
         for dtype, op, device, size in product(self.dtypes, unary_ops, self.devices, sizes):
             # TODO: Add back when https://github.com/pytorch/pytorch/issues/55905 is closed
-            if dtype == torch.float16 and device == "cpu":
+            if dtype in [torch.float16, torch.bfloat16] and device == "cpu":
                 continue
             if op in gpu_only and device == "cpu":
                 continue
@@ -1327,7 +1328,7 @@ class TestTEFuser(JitTestCase):
         ]
         devices = self.devices
         for dtype, op, device in product(self.dtypes, binary_ops, devices):
-            if dtype == torch.float16 and device == "cpu":
+            if dtype in [torch.float16, torch.bfloat16] and device == "cpu":
                 continue
             try:
                 x = self.data_for(dtype, device)
@@ -1379,7 +1380,7 @@ class TestTEFuser(JitTestCase):
                                      "[[10, 3, 4], [4, 5]]",
                                      ]
         for dtype, size, device in product(self.dtypes, sizes, devices):
-            if dtype == torch.float16 and device == "cpu":
+            if dtype in [torch.float16, torch.bfloat16] and device == "cpu":
                 continue
             try:
                 size_x, size_y = size
@@ -1425,7 +1426,7 @@ class TestTEFuser(JitTestCase):
         # only using  scalar values relevant to particular ops
         scalars = [1.5, 3, 0, -2.0, -1]
         for dtype, op, device, scalar in product(self.dtypes, binary_ops, devices, scalars):
-            if dtype == torch.float16 and device == "cpu":
+            if dtype in [torch.float16, torch.bfloat16] and device == "cpu":
                 continue
             try:
                 x = self.data_for(dtype, device)
@@ -1459,7 +1460,7 @@ class TestTEFuser(JitTestCase):
         # only using  scalar values relevant to particular ops
         scalars = [1.5, 3, -2.0, -1]  # skip 0
         for dtype, op, device, scalar in product(self.dtypes, binary_ops, devices, scalars):
-            if dtype == torch.float16 and device == "cpu":
+            if dtype in [torch.float16, torch.bfloat16] and device == "cpu":
                 continue
             try:
                 x = self.data_for(dtype, device)
@@ -1496,7 +1497,7 @@ class TestTEFuser(JitTestCase):
         # only using  scalar values relevant to particular ops
         scalars = [1.5, 3, 0, -2.0, -1]
         for dtype, op, device, scalar in product(dtypes, binary_ops, self.devices, scalars):
-            if dtype == torch.float16 and device == "cpu":
+            if dtype in [torch.float16, torch.bfloat16] and device == "cpu":
                 continue
             try:
                 x = self.data_for(dtype, device)
@@ -1526,7 +1527,7 @@ class TestTEFuser(JitTestCase):
         ]
         devices = self.devices
         for dtype, op, device in product(self.dtypes, ternary_ops, devices):
-            if dtype == torch.float16 and device == "cpu":
+            if dtype in [torch.float16, torch.bfloat16] and device == "cpu":
                 continue
             try:
                 x = self.data_for(dtype, device)
@@ -1557,7 +1558,7 @@ class TestTEFuser(JitTestCase):
         ]
         devices = self.devices
         for dtype, op, device in product(self.dtypes, ternary_ops, devices):
-            if dtype == torch.float16 and device == "cpu":
+            if dtype in [torch.float16, torch.bfloat16] and device == "cpu":
                 continue
             try:
                 x = self.data_for(dtype, device, size=[5, 3, 128, 128])
@@ -1590,7 +1591,7 @@ class TestTEFuser(JitTestCase):
             torch.cat,
         ]
         for dtype, op, device in product(self.dtypes, list_ops, devices):
-            if dtype == torch.float16 and device == "cpu":
+            if dtype in [torch.float16, torch.bfloat16] and device == "cpu":
                 continue
             try:
                 x = self.data_for(dtype, device, size=[5, 4, 1, 7])
@@ -1623,7 +1624,7 @@ class TestTEFuser(JitTestCase):
         ]
         devices = self.devices
         for dtype, op, device in product(self.dtypes, ops, devices):
-            if dtype == torch.float16 and device == "cpu":
+            if dtype in [torch.float16, torch.bfloat16] and device == "cpu":
                 continue
             try:
                 cond = self.data_for(torch.bool, device)
@@ -1652,7 +1653,6 @@ class TestTEFuser(JitTestCase):
 
             unsupported_dtypes = [
                 torch.uint8,
-                torch.bfloat16,
                 torch.complex32,
                 torch.complex64,
                 torch.complex128,
@@ -1792,6 +1792,7 @@ class TestTEFuser(JitTestCase):
                 return torch.cat((x, y.type_as(x)), dim=1)
             dtypes = self.dtypes.copy()
             dtypes.remove(torch.float16)
+            dtypes.remove(torch.bfloat16)
             for dtype1, dtype2 in product(dtypes, dtypes):
                 x = torch.randint(2, (1, 13,)).to(dtype1)
                 zero = torch.tensor([[0]]).to(dtype2)
