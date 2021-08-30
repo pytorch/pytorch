@@ -30,7 +30,6 @@
 
 #include <type_traits>
 
-#include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/core/Array.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
@@ -322,7 +321,7 @@ void gpu_kernel_impl(TensorIteratorBase& iter, const func_t& f) {
 
   at::detail::Array<ScalarType, ntensors> dtypes;
   for (int i = 0; i < ntensors; i++) {
-    dtypes[i] = iter.tensor(i).scalar_type();
+    dtypes[i] = iter.dtype(i);
   }
 
   int64_t numel = iter.numel();

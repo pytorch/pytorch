@@ -160,7 +160,7 @@ void gpu_kernel_with_scalars(TensorIteratorBase& iter, const func_t& f) {
     // works around incorrect device guard generation for pre-structured
     // kernels device guards, but structured kernels do it right and
     // we can assume the device is already set correctly
-    const OptionalDeviceGuard device_guard(device_of(iter.tensor(1)));
+    const OptionalDeviceGuard device_guard(iter.device(1));
     gpu_kernel(iter, af);
   } else if (iter.is_cpu_scalar(2)) {
     BUnaryFunctor<func_t> bf(f, iter.scalar_value<arg2_t>(2));
