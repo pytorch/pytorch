@@ -18,6 +18,7 @@
 #include <type_traits>
 #include <utility>
 #include <thrust/pair.h>
+#include <iostream>
 
 namespace at { namespace native {
 
@@ -99,10 +100,12 @@ struct ReduceConfig {
     const int max_num_threads = mnt_wrapper<T>::MAX_NUM_THREADS / output_vec_size;
     int dim0_pow2 = dim0 < max_num_threads ? static_cast<int>(last_pow2(dim0)) : max_num_threads;
     int dim1_pow2 = dim1 < max_num_threads ? static_cast<int>(last_pow2(dim1)) : max_num_threads;
+//    std::cout << "dims " << dim0 << " " << dim1 << " " << dim0_pow2 << " " << dim1_pow2 << "\n";
     block_width = std::min(dim0_pow2, int(at::cuda::warp_size()));
     block_height = std::min(dim1_pow2, int(max_num_threads / block_width));
     block_width = std::min(dim0_pow2, int(max_num_threads / block_height));
     num_threads = block_width * block_height;
+//    std::cout << "block_width " << block_width << " " << block_height << "\n";
   }
 
   int split_input(int parallelism) {
@@ -122,6 +125,8 @@ struct ReduceConfig {
   }
 
   dim3 grid() const {
+//    std::cout << "grid " << num_outputs << " " << output_vec_size << " " << step_output << " " << ctas_per_output << "\n";
+//    std::cout << div_up(num_outputs / output_vec_size, step_output) << "\n";
     return dim3(div_up(num_outputs / output_vec_size, step_output), ctas_per_output);
   }
 
@@ -207,6 +212,7 @@ struct ReduceConfig {
   }
 
   int values_per_thread() const {
+//    std::cout << "values per thread " << num_inputs/step_input << " " << step_input << " " << div_up(num_inputs, step_input) << "\n";
     return div_up(num_inputs, step_input);
   }
 };
@@ -352,6 +358,7 @@ struct ReduceOp {
     if (output_idx < config.num_outputs && input_idx < config.num_inputs) {
       const scalar_t* input_slice = (const scalar_t*)((const char*)src + base_offsets1);
       value = thread_reduce<output_vec_size>(input_slice);
+//      printf("value: %f\n", value[0]);
     }
 
     if (config.should_block_y_reduce()) {
@@ -379,7 +386,6 @@ struct ReduceOp {
       reduce_fraction(numerator, denominator);
       acc = (arg_vec_t*)((char*)acc_buf + (base_offsets[0] * numerator / denominator));
     }
-
     if (config.should_global_reduce()) {
       value = global_reduce<output_vec_size>(value, acc, shared_memory);
     } else if (config.should_store(output_idx)) {
@@ -992,6 +998,7 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
       dim0 = iter.shape()[0];
       dim1 = num_outputs;
       fastest_moving_stride = iter.strides(/*arg=*/input_index)[0];
+//      std::cout << "reduction on fastest " << dim0 << " " << dim1 << " " << fastest_moving_stride << "\n";
     } else {
       // Map block.x to the fastest non reducing dimension. It implies:
       //   1. block_x_reduce is turned off.
@@ -1040,29 +1047,45 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
   int block_width = config.block_width;
   int block_height = config.block_height;
 
+//  std::cout << "iter ndim " << iter.ndim() << " " << iter.strides(input_index) << " " << iter.shape() << "\n";
+
   if (iter.ndim() == 0 || reduction_on_fastest_striding_dimension) {
     // Split the input across lanes if the input is contiguous in the reduced
     // dimension. This will require reduction between threads using warp
     // shuffle instructions and shared memory (if block_width > warpSize).
-    config.input_mult[0] = config.split_input(block_width);
+    config.input_mult[config.BLOCK_X] = config.split_input(block_width);
   } else {
     // Otherwise split the output across lanes in a warp.
-    config.output_mult[0] = config.split_output(block_width);
+    config.output_mult[config.BLOCK_X] = config.split_output(block_width);
   }
 
   if (config.values_per_thread() >= block_height * 16 || config.values_per_thread() >= 256) {
+//    std::cout << "before adjusting " << config.values_per_thread() << "\n";
+    // if block size is too small, adjust it, here values_per_thread is guaranteed to be at least somewhat large
+    // so additional threads can be spawned to handle intra-block reduction
+    if (block_width * block_height < mnt_wrapper<scalar_t>::MAX_NUM_THREADS/4 && reduction_on_fastest_striding_dimension) {
+      int max_block_height = mnt_wrapper<scalar_t>::MAX_NUM_THREADS/block_width;
+      int vals_per_thread_pow2 = static_cast<int>(last_pow2(config.values_per_thread()));
+//      std::cout << "vals_per_thread_pow2 " << vals_per_thread_pow2 << "\n";
+      config.block_height = std::min(max_block_height, vals_per_thread_pow2);
+      block_height = config.block_height;
+      config.num_threads = block_width * block_height;
+//      std::cout << "block sizes " << config.block_height << " " << config.block_width << "\n";
+    }
     // Divide the input across warps in a thread-block, if that leaves at least
     // 16 elements to be summed by each thread. This will require inter-warp
     // reduction using shared memory.
-    config.input_mult[1] = config.split_input(block_height);
+    config.input_mult[config.BLOCK_Y] = config.split_input(block_height);
   } else {
     // Otherwise, each warp handles a separate output.
-    config.output_mult[1] = config.split_output(block_height);
+    config.output_mult[config.BLOCK_Y] = config.split_output(block_height);
   }
 
   constexpr int min_values_per_thread = 16;
   constexpr int max_values_per_thread = 256;
-  const int blocks_per_sm = at::cuda::getCurrentDeviceProperties()->maxThreadsPerMultiProcessor / (block_width * block_height);
+
+  const int blocks_per_sm = config.num_threads > 64 ? at::cuda::getCurrentDeviceProperties()->maxThreadsPerMultiProcessor /
+  config.num_threads : at::cuda::getCurrentDeviceProperties()->maxBlocksPerMultiProcessor;
   const int num_mp = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
   const int target_grid_size = num_mp * blocks_per_sm;
   int grid = config.grid().x;
