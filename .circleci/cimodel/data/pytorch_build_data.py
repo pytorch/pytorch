@@ -64,11 +64,6 @@ CONFIG_TREE_DATA = [
         ("clang", [
             ("9", [
                 ("3.6", [
-                    ("noarch", [XImportant(True)]),
-                ]),
-            ]),
-            ("9", [
-                ("3.6", [
                     ("vulkan", [XImportant(True)]),
                 ]),
             ]),
