@@ -10,7 +10,7 @@ namespace rpc {
 
 namespace {
 
-c10::ivalue::TupleElements toIValues(const Message& message, MessageType type) {
+std::vector<IValue> toIValues(const Message& message, MessageType type) {
   TORCH_INTERNAL_ASSERT(
       type == message.type(),
       "Expecting message of type ",
@@ -25,7 +25,7 @@ c10::ivalue::TupleElements toIValues(const Message& message, MessageType type) {
       payload_size,
       *RpcAgent::getCurrentRpcAgent()->getTypeResolver(),
       message.tensors());
-  return std::move(*std::move(value).toTuple()).elements();
+  return value.toTuple()->elements();
 }
 
 c10::intrusive_ptr<Message> fromIValues(
@@ -143,13 +143,13 @@ std::unique_ptr<ScriptRRefFetchRet> ScriptRRefFetchRet::fromMessage(
       values.size() == 1,
       "RRef of IValue should contain a single IValue, but got ",
       values.size());
-  return std::make_unique<ScriptRRefFetchRet>(std::move(values).vec());
+  return std::make_unique<ScriptRRefFetchRet>(std::move(values));
 }
 
 std::unique_ptr<PythonRRefFetchRet> PythonRRefFetchRet::fromMessage(
     const Message& message) {
   return std::make_unique<PythonRRefFetchRet>(
-      toIValues(message, MessageType::PYTHON_RREF_FETCH_RET).vec());
+      toIValues(message, MessageType::PYTHON_RREF_FETCH_RET));
 }
 
 std::unique_ptr<RRefUserDelete> RRefUserDelete::fromMessage(

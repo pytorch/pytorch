@@ -51,7 +51,9 @@ c10::IValue readArchive(
 }
 
 std::vector<IValue> get_bytecode_ivalues(PyTorchStreamReader& reader) {
-  return std::move(*readArchive("bytecode", reader).toTuple()).elements().vec();
+  std::vector<IValue> bytecode_values;
+  bytecode_values = readArchive("bytecode", reader).toTuple()->elements();
+  return bytecode_values;
 }
 
 /********************** Bytecode **********************/

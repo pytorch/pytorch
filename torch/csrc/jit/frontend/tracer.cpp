@@ -348,15 +348,12 @@ static IValue addInput(
     auto elem_types = tuple_type->elements();
     auto tuple = input.toTuple();
     auto elems = tuple->elements();
-    const size_t num_elems = elems.size();
+    size_t num_elems = elems.size();
     AT_ASSERT(
         elem_values.size() == num_elems && elem_types.size() == num_elems);
-    std::vector<IValue> newElems;
-    newElems.reserve(num_elems);
     for (const auto i : c10::irange(num_elems)) {
-      newElems.push_back(addInput(state, elems[i], elem_types[i], elem_values[i]));
+      elems[i] = addInput(state, elems.at(i), elem_types[i], elem_values[i]);
     }
-    tuple->setElements(std::move(newElems));
     return tuple;
   } else if (auto dict_type = type->cast<DictType>()) {
     auto dict = input.toGenericDict();
