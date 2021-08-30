@@ -41,8 +41,12 @@ TORCH_META_FUNC2(sort, stable)
       stable.has_value(),
       "sort(): c10::optional<bool> for stable has to have value.");
   maybe_wrap_dim(dim, self.dim());
-  set_output(0, self.sizes(), self.strides(), self.options(), self.names());
-  set_output(1, self.sizes(), self.strides(), self.options().dtype(kLong), self.names());
+  const auto& values = maybe_get_output(0);
+  const auto& indices = maybe_get_output(1);
+  auto value_strides = values.defined() ? values.strides() : self.strides();
+  auto indices_strides = indices.defined() ? indices.strides() : self.strides();
+  set_output(0, self.sizes(), self.options());
+  set_output(1, self.sizes(), self.options().dtype(kLong));
 }
 
 } // namespace meta
