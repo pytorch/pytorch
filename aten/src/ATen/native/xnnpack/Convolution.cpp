@@ -426,10 +426,10 @@ Tensor conv2d_clamp_run(
 }
 
 // Op is registered to have Any argument as we plan to reuse it for prepacked conv2d of other backends
-IValue unpack_prepacked_sizes_conv2d(const IValue ivalue) {
+IValue unpack_prepacked_sizes_conv2d(const IValue& ivalue) {
   auto op_context = ivalue.toCustomClass<xnnpack::Conv2dOpContext>();
   const auto tuple = op_context->unpack();
-  const auto bias = std::get<1>(tuple);
+  const auto& bias = std::get<1>(tuple);
   return IValue(std::make_tuple(
       std::get<0>(tuple).sizes(),
       (bias && bias->defined()) ? c10::optional<IntArrayRef>(bias->sizes()) : c10::nullopt,

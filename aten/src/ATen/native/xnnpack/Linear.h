@@ -21,7 +21,7 @@ c10::intrusive_ptr<xnnpack::LinearOpContext> createLinearClampPrePackOpContext(
 Tensor linear_clamp_run(const Tensor& input, const c10::intrusive_ptr<xnnpack::LinearOpContext>& op_context);
 
 std::tuple<IntArrayRef, c10::optional<IntArrayRef>>
-unpack_prepacked_sizes_linear(const IValue ivalue);
+unpack_prepacked_sizes_linear(const IValue& ivalue);
 
 ContextLinear create(
     const Tensor& weight,

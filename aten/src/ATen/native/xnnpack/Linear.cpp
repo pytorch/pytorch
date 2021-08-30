@@ -181,7 +181,7 @@ Tensor linear_clamp_run(
 }
 
 std::tuple<IntArrayRef, c10::optional<IntArrayRef>>
-unpack_prepacked_sizes_linear(const IValue ivalue) {
+unpack_prepacked_sizes_linear(const IValue& ivalue) {
   auto op_context = ivalue.toCustomClass<xnnpack::LinearOpContext>();
   const auto tuple = op_context->unpack();
   const auto bias = std::get<1>(tuple);
