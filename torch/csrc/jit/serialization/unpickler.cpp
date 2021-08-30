@@ -256,7 +256,7 @@ PickleOpCode Unpickler::readInstruction() {
     case PickleOpCode::EMPTY_TUPLE: {
       if (empty_tuple_.isNone()) {
         // we only need one object, since tuples are not mutable.
-        empty_tuple_ = c10::ivalue::Tuple::create(std::vector<IValue>());
+        empty_tuple_ = c10::ivalue::Tuple::create({});
       }
       stack_.emplace_back(empty_tuple_);
     } break;
@@ -314,30 +314,23 @@ PickleOpCode Unpickler::readInstruction() {
     case PickleOpCode::TUPLE: {
       size_t start = marks_.back();
       marks_.pop_back();
-      std::vector<IValue> elements;
-      elements.reserve(stack_.size() - start);
+      auto tuple = c10::ivalue::Tuple::create({});
+      tuple->elements().reserve(stack_.size() - start);
       auto start_it = stack_.begin() + start;
       for (auto it = start_it; it != stack_.end(); ++it) {
-        elements.emplace_back(std::move(*it));
+        tuple->elements().emplace_back(std::move(*it));
       }
       stack_.erase(start_it, stack_.end());
-      stack_.emplace_back(c10::ivalue::Tuple::create(std::move(elements)));
+      stack_.emplace_back(std::move(tuple));
     } break;
     case PickleOpCode::TUPLE1: {
-      stack_.emplace_back(c10::ivalue::Tuple::create(pop(stack_)));
+      stack_.emplace_back(c10::ivalue::Tuple::create(pop(stack_, 1)));
     } break;
     case PickleOpCode::TUPLE2: {
-      auto e2 = pop(stack_);
-      auto e1 = pop(stack_);
-      stack_.emplace_back(
-          c10::ivalue::Tuple::create(std::move(e1), std::move(e2)));
+      stack_.emplace_back(c10::ivalue::Tuple::create(pop(stack_, 2)));
     } break;
     case PickleOpCode::TUPLE3: {
-      auto e3 = pop(stack_);
-      auto e2 = pop(stack_);
-      auto e1 = pop(stack_);
-      stack_.emplace_back(c10::ivalue::Tuple::create(
-          std::move(e1), std::move(e2), std::move(e3)));
+      stack_.emplace_back(c10::ivalue::Tuple::create(pop(stack_, 3)));
     } break;
     case PickleOpCode::EMPTY_DICT:
       stack_.emplace_back(
@@ -506,7 +499,7 @@ void Unpickler::readGlobal(
       });
     } else if (class_name == "restore_type_tag") {
       globals_.emplace_back([this] {
-        auto data = std::move(*std::move(stack_.back()).toTuple()).elements();
+        auto data = stack_.back().toTuple()->elements();
         auto type_str = data.at(1).toStringRef();
         stack_.pop_back();
         TypePtr type = nullptr;
