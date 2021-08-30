@@ -780,3 +780,13 @@ const std::string embedding_bag_byte_prepack_script = R"IR(
       %res: Tensor = aten::clone(%output, %none)
       return (%res)
 )IR";
+
+const auto linalg_norm_ord_scalar = R"JIT(
+  def forward(self, a: Tensor, ord: int, dim: List[int], keepdim: bool, dtype: int):
+      return torch.linalg_norm(a, ord, dim, keepdim, dtype=dtype).clone()
+)JIT";
+
+const auto linalg_norm_ord_str = R"JIT(
+  def forward(self, a: Tensor, ord: str, dim: List[int], keepdim: bool, dtype: int):
+      return torch.linalg_norm(a, ord, dim, keepdim, dtype=dtype).clone()
+)JIT";
