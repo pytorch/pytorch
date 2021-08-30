@@ -125,7 +125,7 @@ void IRVerifier::visit(IntrinsicsPtr v) {
     }
     IRVisitor::visit(v);
     return;
-  }      
+  }
   // TODO: add a check for OpArgCount and op_type
   for (auto const& param : v->params()) {
     if (param->dtype() != v->dtype()) {
