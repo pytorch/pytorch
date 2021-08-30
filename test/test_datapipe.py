@@ -661,7 +661,7 @@ class TestFunctionalIterDataPipe(TestCase):
         self.assertEqual(list(range(10)), output2)
         output1, output2 = list(dp1), list(dp2)
         with warnings.catch_warnings(record=True) as wa:
-            self.assertEqual(list(range(10)), output1)  # Resets even though dp3 has not been read
+            self.assertEqual(list(range(10)), list(dp1))  # Resets even though dp3 has not been read
             self.assertEqual(len(wa), 1)
             self.assertRegex(str(wa[0].message), r"Some child DataPipes are not exhausted")
         output3 = []
