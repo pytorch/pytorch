@@ -55,6 +55,8 @@ def main() -> None:
         configs['distributed'] = {'num_shards': 1, 'runner': TEST_RUNNER_TYPE}
     if os.getenv('ENABLE_SLOW_TEST'):
         configs['slow'] = {'num_shards': 1, 'runner': TEST_RUNNER_TYPE}
+    if os.getenv('ENABLE_DOCS_TEST'):
+        configs['docs_test'] = {'num_shards': 1, 'runner': TEST_RUNNER_TYPE}
     matrix = {
         'include': [
             {
