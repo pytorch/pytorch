@@ -202,11 +202,11 @@ c10::optional<TensorInfo> getTensorInfoJit(torch::jit::Value* v) {
 c10::optional<TensorInfo> getTensorInfo(BufHandle b) {
   std::vector<int64_t> dims;
   for (auto dim : b.dims()) {
-    auto val = to<IntImm>(dim.node());
+    auto val = intValue(dim.node());
     if (!val) {
       return c10::nullopt;
     }
-    dims.push_back(val->value());
+    dims.push_back(*val);
   }
   return TensorInfo{dims, static_cast<at::ScalarType>(b.dtype().scalar_type())};
 }
@@ -396,7 +396,7 @@ ExprHandle tensorOrConstant(
   return constant(v);
 }
 
-size_t normalizeAndCheckIndex(int64_t idx, int64_t list_size) {
+int64_t normalizeAndCheckIndex(int64_t idx, int64_t list_size) {
   if (idx < 0) {
     // Handle negative indexing
     idx = list_size + idx;
@@ -405,7 +405,7 @@ size_t normalizeAndCheckIndex(int64_t idx, int64_t list_size) {
   if (idx < 0 || idx >= list_size) {
     AT_ERROR("Invalid index ", idx, " for list_size", list_size);
   }
-  return static_cast<size_t>(idx);
+  return idx;
 }
 
 ExprHandle broadcast(BufHandle b, const std::vector<ExprHandle>& axes) {
@@ -441,8 +441,8 @@ std::vector<ExprHandle> computeIndicesToBroadcast(
   auto axisIt = outputAxes.rbegin();
   auto sizeIt = inputSizes.rbegin();
   while (sizeIt != inputSizes.rend()) {
-    auto const& size = sizeIt->AsNode<IntImm>();
-    if (size && size->value() == 1) {
+    auto const& size = intValue(*sizeIt);
+    if (size && *size == 1) {
       bcast.emplace_back(0);
     } else {
       bcast.emplace_back(*axisIt);
@@ -525,7 +525,9 @@ static at::ScalarType tensorType(BufPtr b) {
 std::vector<int64_t> bufferSizes(BufPtr b) {
   std::vector<int64_t> sizes;
   for (size_t i = 0; i < b->ndim(); i++) {
-    sizes.push_back(to<IntImm>(b->dim(i))->value());
+    auto dim = intValue(b->dim(i));
+    TORCH_INTERNAL_ASSERT(dim);
+    sizes.push_back(*dim);
   }
   return sizes;
 }
@@ -543,7 +545,8 @@ ExprHandle TensorExprKernel::chunk(
   std::vector<ExprHandle> indices;
   for (size_t i = 0; i < axes.size(); ++i) {
     if (i == norm_dim) {
-      indices.push_back(axes[i] + IntImm::make((int)chunkIdx * (int)step));
+      indices.push_back(
+          axes[i] + ExprHandle(immLike(axes[i], chunkIdx * step)));
     } else {
       indices.push_back(axes[i]);
     }
@@ -642,7 +645,7 @@ std::vector<ExprHandle> TensorExprKernel::sizesFromVaryingShape(
     const c10::VaryingShape<int64_t>& shape) {
   std::vector<ExprHandle> dims;
   for (const auto i : c10::irange(*shape.size())) {
-    dims.push_back(IntImm::make(*shape[i]));
+    dims.push_back(*shape[i]);
   }
   return dims;
 }
@@ -664,7 +667,7 @@ std::vector<ExprHandle> TensorExprKernel::sizesForValue(
 
   if (v->type()->isSubtypeOf(FloatType::get()) ||
       v->type()->isSubtypeOf(IntType::get())) {
-    return {1};
+    return {int64_t{1}};
   }
   if (v->type()->isSubtypeOf(NoneType::get())) {
     return {};
@@ -820,7 +823,7 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
       TORCH_INTERNAL_ASSERT(n->input(1)->node()->kind() == prim::Constant);
       int64_t dim = n->input(1)->node()->i(attr::value);
       auto shape = sizesForValue(inputs[0]);
-      size_t norm_dim = normalizeAndCheckIndex(dim, shape.size());
+      auto norm_dim = normalizeAndCheckIndex(dim, shape.size());
       ExprHandle concat_dim_size = 0;
       for (auto input : inputs) {
         concat_dim_size = concat_dim_size + sizesForValue(input)[norm_dim];
@@ -889,11 +892,11 @@ ExprHandle clamp(
 }
 
 static bool isOne(ExprHandle e) {
-  auto const& n = e.AsNode<IntImm>();
+  auto const& n = intValue(e);
   if (!n) {
     return false;
   }
-  return n->value() == 1;
+  return *n == 1;
 }
 
 std::pair<std::vector<ExprHandle>, bool> broadcastShapesImpl(
@@ -1150,6 +1153,7 @@ std::pair<ScalarType, std::vector<BufHandle>> processCatList(
   }
   return {highType, nonEmptyInputs};
 }
+
 Tensor computeCatWoConditionals(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape) {
@@ -1184,8 +1188,7 @@ Tensor computeCatWoConditionals(
   }
 
   int64_t concat_dim = c10::get<int64_t>(arg_dim);
-  size_t norm_concat_dim =
-      normalizeAndCheckIndex(concat_dim, outputShape.size());
+  auto norm_concat_dim = normalizeAndCheckIndex(concat_dim, outputShape.size());
 
   auto gen_code_for_input = [&](const BufHandle& inp,
                                 size_t inp_pos,
@@ -1196,7 +1199,8 @@ Tensor computeCatWoConditionals(
     std::vector<ExprPtr> store_indices(dims.size());
     for (size_t i = 0; i < dims.size(); ++i) {
       for_vars[i] = alloc<Var>(
-          "i" + c10::to_string(inp_pos) + "_" + c10::to_string(i), kInt);
+          "i" + c10::to_string(inp_pos) + "_" + c10::to_string(i),
+          dims[i].dtype());
       load_indices[i] = for_vars[i];
       if (i == norm_concat_dim) {
         store_indices[i] = alloc<Add>(for_vars[i], concat_dim_size);
@@ -1209,8 +1213,8 @@ Tensor computeCatWoConditionals(
     auto load_promoted = promoteToDtype(ExprHandle(load_expr), high_type);
     StmtPtr st = alloc<Store>(output_buf, store_indices, load_promoted.node());
     for (size_t i = dims.size(); i > 0; --i) {
-      st =
-          alloc<For>(for_vars[i - 1], alloc<IntImm>(0), dims[i - 1].node(), st);
+      st = alloc<For>(
+          for_vars[i - 1], immLike(dims[i - 1], 0), dims[i - 1].node(), st);
     }
     return st;
   };
@@ -1221,7 +1225,7 @@ Tensor computeCatWoConditionals(
     auto input_dims =
         ExprVectorToExprHandleVector(non_empty_inputs[i].node()->dims());
     if (concat_dim_size == nullptr) {
-      concat_dim_size = alloc<IntImm>(0);
+      concat_dim_size = immLike(input_dims[norm_concat_dim], 0);
     }
     block->append_stmt(gen_code_for_input(
         non_empty_inputs[i], i, concat_dim_size, input_dims));
@@ -1253,7 +1257,7 @@ Tensor computeCat(
         }
 
         int64_t dim_ = c10::get<int64_t>(argDim);
-        size_t dim = normalizeAndCheckIndex(dim_, axes.size());
+        auto dim = normalizeAndCheckIndex(dim_, axes.size());
         // Promote input types.
         // Note that we need to consider all inputs, including empty - they
         // also affect the resultant dtype.
@@ -1273,18 +1277,18 @@ Tensor computeCat(
         std::vector<ExprHandle> newAxes(axes.begin(), axes.end());
         ExprHandle load = promoteToDtype(
             tensorOrConstant(nonEmptyInputs[0], newAxes), highType);
-        size_t offset = to<IntImm>(nonEmptyInputs[0].node()->dim(dim))->value();
-        newAxes[dim] = newAxes[dim] - IntImm::make(offset);
+        auto offset = *intValue(nonEmptyInputs[0].node()->dim(dim));
+        newAxes[dim] = newAxes[dim] - ExprHandle(immLike(newAxes[dim], offset));
 
         for (size_t ii = 1; ii < nonEmptyInputs.size(); ++ii) {
           auto input = nonEmptyInputs[ii];
           load = ifThenElse(
-              CompareSelect::make(axes[dim], IntImm::make(offset), kLT),
+              CompareSelect::make(axes[dim], offset, kLT),
               load,
               promoteToDtype(tensorOrConstant(input, newAxes), highType));
 
-          offset += to<IntImm>(input.node()->dim(dim))->value();
-          newAxes[dim] = axes[dim] - IntImm::make(offset);
+          offset += *intValue(input.node()->dim(dim));
+          newAxes[dim] = axes[dim] - ExprHandle(immLike(axes[dim], offset));
         }
 
         return load;
@@ -2334,12 +2338,12 @@ Tensor tensorexpr::computeOperandValue(
             ExprHandle cur_stride = 1;
             std::vector<ExprPtr> dims, indices;
             for (size_t idx = 0; idx < view_dims.size(); idx++) {
-              dims.push_back(alloc<IntImm>(view_dims[idx]));
+              dims.push_back(alloc<LongImm>(view_dims[idx]));
               indices.push_back(axes[idx].node());
             }
             ExprHandle flat_idx = ExprHandle(flatten_index(dims, indices));
             std::vector<ExprHandle> orig_buf_indexes(A.ndim(), ExprHandle(0));
-            ExprHandle stride = IntImm::make(1);
+            ExprHandle stride = ExprHandle(immLike(flat_idx, 1));
             for (size_t idx = 0; idx < A.ndim(); idx++) {
               size_t dim_idx = A.ndim() - idx - 1;
               // We don't need to generate mod-div for the first dimension -
@@ -2799,7 +2803,7 @@ static std::vector<ExprHandle> toExprHandles(const std::vector<T>& sizes) {
   std::vector<ExprHandle> dims;
   dims.reserve(sizes.size());
   for (auto const& size : sizes) {
-    dims.emplace_back(IntImm::make(size));
+    dims.emplace_back(size);
   }
   return dims;
 }
@@ -2831,8 +2835,7 @@ Tensor TensorExprKernel::bindInput(const torch::jit::Value* input) {
       std::vector<DimArg> inputTensorDims;
       for (size_t i = 0; i < *tt->sizes().size(); i++) {
         auto const size = *tt->sizes()[i];
-        inputTensorDims.emplace_back(
-            DimArg(IntImm::make(size), "i" + c10::to_string(i)));
+        inputTensorDims.emplace_back(DimArg(size, "i" + c10::to_string(i)));
       }
       auto const strides = tt->strides();
       result = Compute(
@@ -2841,12 +2844,11 @@ Tensor TensorExprKernel::bindInput(const torch::jit::Value* input) {
           [&](const std::vector<VarHandle>& axes) {
             ExprHandle idx = 0;
             for (size_t i = 0; i < axes.size(); i++) {
-              idx = idx + axes[i] * IntImm::make(*strides[i]);
+              idx = idx + axes[i] * *strides[i];
             }
             return inBuffer.load(idx);
           });
       bufs_.emplace(input, result.buf());
-
       bufferArgs_.emplace_back(inBuffer);
       break;
     }
@@ -2956,10 +2958,10 @@ Tensor TensorExprKernel::convertOutputToCorrectStrides(torch::jit::Value* v) {
   return Compute(
       "output_1", dims, [&](const std::vector<VarHandle>& axes_input) {
         std::vector<ExprHandle> axes(axes_input.begin(), axes_input.end());
-        auto absolute_position = IntImm::make(0);
+        auto absolute_position = ExprHandle(immLike(axes[0], 0));
         for (size_t i = 0; i < axes.size(); ++i) {
-          absolute_position =
-              absolute_position + (IntImm::make(default_strides[i]) * axes[i]);
+          absolute_position = absolute_position +
+              (ExprHandle(immLike(axes[i], default_strides[i])) * axes[i]);
         }
         std::vector<size_t> sorted_stride_indices =
             reverse_sort_indices(strides);
@@ -2967,10 +2969,11 @@ Tensor TensorExprKernel::convertOutputToCorrectStrides(torch::jit::Value* v) {
         for (size_t stride_index : sorted_stride_indices) {
           auto stride = strides[stride_index];
           auto size = sizes[stride_index];
-          auto index = Div::make(absolute_position, IntImm::make(stride));
+          auto index = absolute_position /
+              ExprHandle(immLike(absolute_position, stride));
           if (size != 1) {
-            absolute_position =
-                Mod::make(absolute_position, IntImm::make(stride));
+            absolute_position = absolute_position %
+                ExprHandle(immLike(absolute_position, stride));
           }
           new_axes[stride_index] = index;
         }
@@ -2992,7 +2995,7 @@ void TensorExprKernel::bindConstant(const torch::jit::Value* v) {
   std::vector<ExprHandle> te_sizes;
   te_sizes.reserve(sizes.size());
   for (auto s : sizes) {
-    te_sizes.push_back(IntImm::make(s));
+    te_sizes.push_back(s);
   }
 
   BufPtr buf = alloc<Buf>(
