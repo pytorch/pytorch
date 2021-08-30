@@ -603,7 +603,6 @@ class TestFunctionalIterDataPipe(TestCase):
 
         # Test Case: one child DataPipe yields all value first, but buffer_size = 5 being too small
         dp1, dp2 = input_dp.fork(num_instances=2, buffer_size=5)
-        output1 = []
         it1 = iter(dp1)
         for _ in range(5):
             next(it1)
@@ -648,7 +647,10 @@ class TestFunctionalIterDataPipe(TestCase):
             output1.append(n1)
             output2.append(n2)
             if i == 4:
-                i1 = iter(dp1)  # Reset both all child DataPipe
+                with warnings.catch_warnings(record=True) as wa:
+                    i1 = iter(dp1)  # Reset both all child DataPipe
+                    self.assertEqual(len(wa), 1)
+                    self.assertRegex(str(wa[0].message), r"Some child DataPipes are not exhausted")
         self.assertEqual(list(range(5)) + list(range(10)), output1)
         self.assertEqual(list(range(5)) + list(range(10)), output2)
 
@@ -658,24 +660,22 @@ class TestFunctionalIterDataPipe(TestCase):
         self.assertEqual(list(range(10)), output1)
         self.assertEqual(list(range(10)), output2)
         output1, output2 = list(dp1), list(dp2)
-        self.assertEqual(list(range(10)), output1)  # Resets even though dp3 has not been read
+        with warnings.catch_warnings(record=True) as wa:
+            self.assertEqual(list(range(10)), output1)  # Resets even though dp3 has not been read
+            self.assertEqual(len(wa), 1)
+            self.assertRegex(str(wa[0].message), r"Some child DataPipes are not exhausted")
         output3 = []
         for i, n3 in enumerate(dp3):
             output3.append(n3)
             if i == 4:
-                output1 = list(dp1)  # Resets even though dp3 is only partially read
+                with warnings.catch_warnings(record=True) as wa:
+                    output1 = list(dp1)  # Resets even though dp3 is only partially read
+                    self.assertEqual(len(wa), 1)
+                    self.assertRegex(str(wa[0].message), r"Some child DataPipes are not exhausted")
                 self.assertEqual(list(range(5)), output3)
                 self.assertEqual(list(range(10)), output1)
                 break
         self.assertEqual(list(range(10)), list(dp3))  # dp3 has to read from the start again
-
-        # Test Case: Checking for warning being raised
-        with warnings.catch_warnings(record=True) as wa:
-            dp1, dp2 = input_dp.fork(num_instances=2)
-            output1 = list(dp1)
-            output1 = list(dp1)
-            self.assertEqual(len(wa), 1)
-            self.assertRegex(str(wa[0].message), r"Some child DataPipes are not exhausted")
 
 
     def test_map_datapipe(self):
