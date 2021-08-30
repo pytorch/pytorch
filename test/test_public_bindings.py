@@ -117,7 +117,6 @@ class TestPublicBindings(unittest.TestCase):
             "get_num_interop_threads",
             "get_num_threads",
             "Gradient",
-            "graph_pool_handle",
             "Graph",
             "GraphExecutorState",
             "HalfStorageBase",

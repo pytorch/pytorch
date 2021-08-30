@@ -7,7 +7,7 @@ from ._utils import _dummy_type
 if not hasattr(torch._C, '_CudaStreamBase'):
     # Define dummy base classes
     torch._C.__dict__['CUDAGraph'] = _dummy_type('CUDAGraph')
-    torch._C.__dict__['graph_pool_handle'] = _dummy_type('graph_pool_handle')
+    torch._C.__dict__['_graph_pool_handle'] = _dummy_type('_graph_pool_handle')
 
 from torch._C import CUDAGraph  # noqa: F401
 from torch._C import _graph_pool_handle
