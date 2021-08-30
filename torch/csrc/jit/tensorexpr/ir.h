@@ -329,7 +329,7 @@ ExprPtr getImmediateByType(ScalarType immType, T initialVal) {
   switch (immType) {
 #define TYPE_CASE(Type, Name) \
   case ScalarType::Name:      \
-    return alloc<Name##Imm>(Type{initialVal});
+    return alloc<Name##Imm>(Type(initialVal));
     // NOLINTNEXTLINE(bugprone-branch-clone)
     AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
 #undef TYPE_CASE
