@@ -241,6 +241,9 @@ class TORCH_API TensorExprKernel {
     return custom_lowerings_;
   }
 
+  // Allocate memory for intermediate buffers at compile time.
+  void preAllocIntermediateBufs(const std::unordered_set<BufPtr> intem_bufs);
+
  private:
   struct UnpackedTensorOptions {
     c10::optional<c10::ScalarType> dtype;

@@ -2726,6 +2726,8 @@ StmtPtr TensorExprKernel::transformLoops(BackendType backendType, StmtPtr st) {
     }
   }
 
+  auto intem_bufs = l.getIntermediateBufs();
+  preAllocIntermediateBufs(intem_bufs);
   l.prepareForCodegen();
   GRAPH_DEBUG("after prepareForCodegen", *l.root_stmt());
   l.simplify();
@@ -3036,6 +3038,39 @@ void TensorExprKernel::bindConstant(const torch::jit::Value* v) {
   bufs_[v] = buf;
 }
 
+void* allocBuf(size_t size) {
+  void* bp = (void*)malloc(size);
+  return bp;
+}
+
+void TensorExprKernel::preAllocIntermediateBufs(
+    const std::unordered_set<BufPtr> intem_bufs) {
+  void* bp;
+  for (auto buf : intem_bufs) {
+    // Check if buf shape is static and compute its size if static.
+    bool is_static = true;
+    size_t size =
+        elementSize(buf->dtype().scalar_type()) * buf->dtype().lanes();
+    for (auto d : buf->dims()) {
+      if (!d->isConstant()) {
+        is_static = false;
+        break;
+      }
+      size = size * immediateAs<int>(d);
+    }
+    // Only allocate memory for static bufs.
+    if (!is_static) {
+      continue;
+    }
+    bp = allocBuf(size);
+    if (!bp) {
+      continue;
+    }
+    constants_.push_back({buf, bp});
+    buf->set_allocated();
+  }
+}
+
 void TensorExprKernel::compile() {
   GRAPH_DUMP("TensorExprKernel graph:", graph_);
 
@@ -3111,12 +3146,12 @@ void TensorExprKernel::compile() {
     bufs_.erase(output);
   }
 
+  BackendType backendType = inferBackendTypeFromDevice(device_);
+  StmtPtr stmt = transformLoops(backendType, block);
+
   for (auto c : constants_) {
     bufferArgs_.emplace_back(BufHandle(c.buf));
   }
-
-  BackendType backendType = inferBackendTypeFromDevice(device_);
-  StmtPtr stmt = transformLoops(backendType, block);
 
   // Generate code.
   codegen_ = CreateCodeGen(
