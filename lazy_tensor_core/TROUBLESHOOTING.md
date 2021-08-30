@@ -245,5 +245,5 @@ from caffe2.python import workspace
 workspace.GlobalInit(['caffe2', '--caffe2_log_level=-4'])
 ```
 
-To be noted, it is '-4' not '4' because of https://github.com/pytorch/pytorch/blob/0c3904d18061ea31c9fe1bded5893ffb07f0a4b5/c10/util/logging_is_not_google_glog.h#L106.
+To be noted, it is '-4' not '4' because of [logging_is_not_google_glog.h](https://github.com/pytorch/pytorch/blob/0c3904d18061ea31c9fe1bded5893ffb07f0a4b5/c10/util/logging_is_not_google_glog.h#L106).
 For internal FB users, you can search caffe2_common_gflags to learn more.
