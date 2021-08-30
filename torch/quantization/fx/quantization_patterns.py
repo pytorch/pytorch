@@ -1022,9 +1022,17 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                 elif dtypes in [(torch.float32, torch.qint8, torch.quint8),
                                 (torch.float32, torch.float16, None)]:
                     # choose linear dynamic or linear dynamic fp16 op based on weight dtype
-                    qlinear_op = torch.ops.quantized.linear_dynamic \
-                        if weight_dtype == torch.qint8 \
-                        else torch.ops.quantized.linear_dynamic_fp16
+                    if weight_dtype == torch.qint8:
+                        if self.relu_node:
+                            qlinear_op = torch.ops.quantized.linear_relu_dynamic
+                        else:
+                            qlinear_op = torch.ops.quantized.linear_dynamic
+                    else:
+                        if self.relu_node:
+                            qlinear_op = torch.ops.quantized.linear_relu_dynamic_fp16
+                        else:
+                            qlinear_op = torch.ops.quantized.linear_dynamic_fp16
+
                     linear_input = load_arg(quantized=torch.float)(self.linear_node.args[0])
                     qlinear_args = (linear_input, packed_weight)  # type: ignore[assignment]
                     op_out = quantized_graph.create_node(
@@ -1033,8 +1041,6 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                     # TODO: may need to change the key to Node regenerate the map in each transformation,
                     # since we might not be able to rely on the name
                     node_name_to_scope[op_out.name] = node_name_to_scope[self.linear_node.name]
-                    if self.relu_node:
-                        op_out = quantized_graph.create_node("call_function", torch.nn.functional.relu, (op_out,), {})
                     return op_out
                 else:
                     assert dtypes == (torch.float16, torch.float16, None)
@@ -1447,6 +1453,9 @@ class FixedQParamsOpQuantizeHandler(QuantizeHandler):
 @register_quant_pattern(torch.nn.AvgPool3d)
 @register_quant_pattern(torch.nn.Dropout)
 @register_quant_pattern(torch.nn.Hardtanh)
+@register_quant_pattern(torch.nn.MaxPool1d)
+@register_quant_pattern(torch.nn.MaxPool2d)
+@register_quant_pattern(torch.nn.MaxPool3d)
 @register_quant_pattern(torch.nn.ReLU)
 @register_quant_pattern(torch.nn.ReLU6)
 @register_quant_pattern(torch.adaptive_avg_pool1d)
@@ -1456,12 +1465,16 @@ class FixedQParamsOpQuantizeHandler(QuantizeHandler):
 @register_quant_pattern(torch.nn.functional.hardtanh)
 @register_quant_pattern(torch.nn.functional.hardtanh_)
 @register_quant_pattern(torch.nn.functional.interpolate)
+@register_quant_pattern(torch.nn.functional.max_pool1d)
+@register_quant_pattern(torch.nn.functional.max_pool2d)
+@register_quant_pattern(torch.nn.functional.max_pool3d)
 @register_quant_pattern(torch.nn.functional.relu)
 @register_quant_pattern(torch.nn.functional.relu6)
 @register_quant_pattern(torch.avg_pool1d)
 @register_quant_pattern(torch._C._nn.avg_pool2d)
 @register_quant_pattern(torch._C._nn.avg_pool3d)
 @register_quant_pattern(torch.clamp)
+@register_quant_pattern(torch.flatten)
 @register_quant_pattern(torch.max)
 @register_quant_pattern(torch.mean)
 @register_quant_pattern(torch.min)
@@ -1496,7 +1509,9 @@ class CopyNodeQuantizeHandler(QuantizeHandler):
                 load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
-        if is_reference:
+        # always produce reference pattern for relu
+        is_relu = node.op == "call_function" and node.target == torch.nn.functional.relu
+        if is_reference or is_relu:
             # when activation dtype is torch.float, the node does not require
             # observation
             # e.g. dynamic quantization or weight_only quantization
@@ -1554,15 +1569,8 @@ class CustomModuleQuantizeHandler(QuantizeHandler):
         # module attribute like module._QUANTIZED_INPUT_INDEXES
         return quantized_graph.node_copy(node, load_arg(quantized=None))
 
-@register_quant_pattern(torch.nn.MaxPool1d)
-@register_quant_pattern(torch.nn.MaxPool2d)
-@register_quant_pattern(torch.nn.MaxPool3d)
 @register_quant_pattern(torch.nn.Identity)
-@register_quant_pattern(torch.nn.functional.max_pool1d)
-@register_quant_pattern(torch.nn.functional.max_pool2d)
-@register_quant_pattern(torch.nn.functional.max_pool3d)
 @register_quant_pattern(torch.chunk)
-@register_quant_pattern(torch.flatten)
 @register_quant_pattern(torch.transpose)
 @register_quant_pattern(torch.repeat_interleave)
 @register_quant_pattern(torch.sort)

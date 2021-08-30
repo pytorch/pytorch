@@ -26,7 +26,7 @@ from torch.utils.data import (
 )
 from torch.utils.data._utils import MP_STATUS_CHECK_INTERVAL
 from torch.utils.data.dataset import random_split
-from torch.utils.data.datapipes.iter import IterableAsDataPipe
+from torch.utils.data.datapipes.iter import IterableWrapper
 from torch._utils import ExceptionWrapper
 from torch.testing._internal.common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS,
                                                   IS_IN_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm, slowTest,
@@ -1963,7 +1963,7 @@ except RuntimeError as e:
 class TestDataLoader2(TestCase):
     @skipIfNoDill
     def test_basics(self):
-        dp = IterableAsDataPipe(list(range(10)))
+        dp = IterableWrapper(list(range(10)))
         dl = DataLoader(dp, batch_size=3, collate_fn=lambda x: x, num_workers=2)
         dl2 = DataLoader2(dp, batch_size=3, collate_fn=lambda x: x, num_workers=2)
         self.assertEquals(list(dl), list(dl2))
