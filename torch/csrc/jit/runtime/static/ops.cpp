@@ -1713,6 +1713,26 @@ REGISTER_OPERATOR_FUNCTOR(aten::linalg_norm, aten_linalg_norm, [](Node* n) -> SR
   };
 });
 
+REGISTER_OPERATOR_FUNCTOR(aten::cat, aten_cat, [](Node* n) -> SROperator {
+  if (!n->matches(
+          torch::schema("aten::cat(Tensor[] tensors, int dim=0) -> Tensor"))) {
+    LogAndDumpSchema(n);
+    return nullptr;
+  }
+  return [](ProcessedNode* p_node) {
+    const auto inputs = p_node->Input(0).toTensorVector();
+    const auto dim = p_node->Input(1).toInt();
+    if (p_node->Output(0).isNone()) {
+      p_node->Output(0) = at::native::_cat_cpu(inputs, dim);
+      return;
+    }
+
+    auto& output = p_node->Output(0).toTensor();
+    fastResizeToZero(output);
+    at::native::_cat_out_cpu(inputs, dim, output);
+  };
+});
+
 namespace {
 
 void check_cat_no_zero_dim(const std::vector<at::Tensor>& tensors) {

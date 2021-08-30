@@ -790,3 +790,14 @@ const auto linalg_norm_ord_str = R"JIT(
   def forward(self, a: Tensor, ord: str, dim: List[int], keepdim: bool, dtype: int):
       return torch.linalg_norm(a, ord, dim, keepdim, dtype=dtype).clone()
 )JIT";
+
+const std::string cat_script = R"IR(
+  graph(%a: Tensor, %b: Tensor, %dim: int):
+      %ten_list: Tensor[] = prim::ListConstruct(%a, %b)
+      %1 : int = prim::Constant[value=0]()
+      %2 : int = prim::Constant[value=1]()
+      %3 : int = prim::Constant[value=1]()
+      %ten_list2 : Tensor[] = aten::slice(%ten_list, %1, %2, %3)
+      %ret: Tensor = aten::cat(%ten_list2, %dim)
+      return (%ret)
+)IR";
