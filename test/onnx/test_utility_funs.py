@@ -937,6 +937,47 @@ class TestUtilityFuns(TestCase):
             assert node.kind() != "prim::Constant"
         assert len(list(graph.nodes())) == 2  # onnx::Sub and onnx::Add nodes only.
 
+    def test_duplicated_output_node(self):
+        class DuplicatedOutputNet(torch.nn.Module):
+            def __init__(self, input_size, num_classes):
+                super(DuplicatedOutputNet, self).__init__()
+                self.fc1 = torch.nn.Linear(input_size, num_classes)
+
+            def forward(self, input1):
+                out = self.fc1(input1)
+                return out, out, out
+
+        N, D_in, H, D_out = 64, 784, 500, 10
+        pt_model = DuplicatedOutputNet(D_in, D_out)
+
+        f = io.BytesIO()
+        x = torch.randn(N, D_in)
+        dynamic_axes = {
+            'input0': {0: 'input0_dim0', 1: 'input0_dim1'},
+            'output-0': {0: 'output-0_dim0', 1: 'output-0_dim1'},
+            'output-1': {0: 'output-1_dim0', 1: 'output-1_dim1'},
+            'output-2': {0: 'output-2_dim0', 1: 'output-2_dim1'}}
+
+        torch.onnx.export(pt_model,
+                          x,
+                          f,
+                          input_names=['input0'],
+                          output_names=['output-0', 'output-1', 'output-2'],
+                          opset_version=12,
+                          do_constant_folding=False,
+                          training=torch.onnx.TrainingMode.TRAINING,
+                          dynamic_axes=dynamic_axes,
+                          verbose=True,
+                          export_params=False,
+                          keep_initializers_as_inputs=True)
+
+        graph = onnx.load(io.BytesIO(f.getvalue()))
+        assert graph.graph.output[0].name == "output-0"
+        assert graph.graph.output[1].name == "output-1"
+        assert graph.graph.output[2].name == "output-2"
+        assert graph.graph.node[0].op_type == "Gemm"
+        assert graph.graph.node[1].op_type == "Identity"
+        assert graph.graph.node[2].op_type == "Identity"
 
 # opset 10 tests
 TestUtilityFuns_opset10 = type(str("TestUtilityFuns_opset10"),

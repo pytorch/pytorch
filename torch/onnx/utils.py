@@ -778,9 +778,24 @@ def _set_input_and_output_names(graph, input_names, output_names):
             raise RuntimeError(
                 "number of %s names provided (%d) exceeded number of %ss (%d)"
                 % (descriptor, len(name_list), descriptor, len(node_list)))
-        for name, node in zip(name_list, node_list):
+
+        # Mark if the node DebugName is set before.
+        node_set = set()
+        for i, (name, node) in enumerate(zip(name_list, node_list)):
+            if node in node_set:
+                # Duplicated node, insert onnx::Identity to avoid the same DebugName.
+                identity_node = graph.create("onnx::Identity")
+                identity_node.insertAfter(node.node())
+                identity_node.addInput(node)
+                identity_node.output().setType(node.type())
+                graph.return_node().replaceInput(i, identity_node.output())
+                node = identity_node.output()
+            else:
+                node_set.add(node)
+
             if node.debugName() != name:
                 node.setDebugName(name)
+
     set_names(list(graph.inputs()), input_names, "input")
     set_names(list(graph.outputs()), output_names, "output")
 
