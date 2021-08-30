@@ -35,7 +35,7 @@ static void scatter_gather_dtype_check(
 // 1. index.size(d) == self.size(d) for all d != dim
 // 2. index.size(d) <= src.size(d) for all d != dim
 // 3. index.dim() == self.dim() == src.dim()
-static void gather_shape_check(const Tensor& self, int64_t dim,
+static C10_UNUSED void gather_shape_check(const Tensor& self, int64_t dim,
   const Tensor& index, const Tensor& src
 ) {
   auto self_dims = ensure_nonempty_dim(self.dim());
@@ -72,7 +72,7 @@ static void gather_shape_check(const Tensor& self, int64_t dim,
 //  1. index.size(d) <= self.size(d) for all d != dim
 //  2. index.size(d) <= src.size(d) for all d if src is a Tensor
 //  3. index.dim() == self.dim() == src.dim()
-static void scatter_shape_check(
+static C10_UNUSED void scatter_shape_check(
   const Tensor& self, int64_t dim, const Tensor& index,
   const c10::optional<Tensor>& src_opt = c10::nullopt
 ) {

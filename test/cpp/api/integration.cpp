@@ -149,7 +149,6 @@ bool test_mnist(
 
 struct IntegrationTest : torch::test::SeedingFixture {};
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(IntegrationTest, CartPole) {
   torch::manual_seed(0);
   auto model = std::make_shared<SimpleContainer>();
@@ -249,7 +248,6 @@ TEST_F(IntegrationTest, CartPole) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(IntegrationTest, MNIST_CUDA) {
   torch::manual_seed(0);
   auto model = std::make_shared<SimpleContainer>();
@@ -286,7 +284,6 @@ TEST_F(IntegrationTest, MNIST_CUDA) {
       optimizer));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(IntegrationTest, MNISTBatchNorm_CUDA) {
   torch::manual_seed(0);
   auto model = std::make_shared<SimpleContainer>();

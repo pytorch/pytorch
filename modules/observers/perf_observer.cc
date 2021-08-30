@@ -32,31 +32,26 @@ defined(TARGET_IPHONE_SIMULATOR)
 #endif
 
 #ifndef C10_MOBILE
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int64(
     aiBench_netInitSampleRate,
     0,
     "One in N sampling rate for net delay");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int64(
     aiBench_netFollowupSampleRate,
     0,
     "One in N sampling rate for net delay");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int64(
     aiBench_netFollowupSampleCount,
     0,
     "control the following c logs");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int64(
     aiBench_operatorNetSampleRatio,
     0,
     "One in N sampling rate for operator delay");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int64(
     aiBench_skipIters,
     0,
@@ -177,7 +172,6 @@ double getCpuTimeMilliseconds() {
 #endif
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CAFFE2_EARLY_INIT_FUNCTION(
     registerGlobalPerfNetObserverCreator,
     &registerGlobalPerfNetObserverCreator,

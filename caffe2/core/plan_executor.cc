@@ -11,14 +11,12 @@
 #include "caffe2/core/workspace.h"
 #include "caffe2/proto/caffe2_pb.h"
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(
     caffe2_handle_executor_threads_exceptions,
     false,
     "If used we will handle exceptions in executor threads. "
     "This avoids SIGABRT but may cause process to deadlock");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int(
     caffe2_plan_executor_exception_timeout,
     60,

@@ -22,6 +22,7 @@ class _FunctionalAdadelta(object):
         rho: float = 0.9,
         eps: float = 1e-6,
         weight_decay: float = 0.0,
+        _allow_empty_param_list: bool = False,
     ):
         self.defaults = {
             "lr": lr,
@@ -30,7 +31,7 @@ class _FunctionalAdadelta(object):
             "weight_decay": weight_decay,
         }
 
-        if len(params) == 0:
+        if len(params) == 0 and not _allow_empty_param_list:
             raise ValueError("optimizer got an empty parameter list")
 
         # NOTE: we only have one param_group and don't allow user to add additional
@@ -41,6 +42,7 @@ class _FunctionalAdadelta(object):
 
     def step(self, gradients: List[Optional[Tensor]]):
         params = self.param_group['params']
+        params_with_grad = []
         grads = []
         square_avgs = []
         acc_deltas = []
@@ -58,6 +60,7 @@ class _FunctionalAdadelta(object):
 
         for param, gradient in zip(params, gradients):
             if gradient is not None:
+                params_with_grad.append(param)
                 grads.append(gradient)
                 # Lazy state initialization
                 if param not in self.state:
@@ -72,7 +75,7 @@ class _FunctionalAdadelta(object):
                 acc_deltas.append(state['acc_delta'])
 
         with torch.no_grad():
-            F.adadelta(params,
+            F.adadelta(params_with_grad,
                        grads,
                        square_avgs,
                        acc_deltas,

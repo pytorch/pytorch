@@ -11,6 +11,7 @@
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/input_buffer.h>
+#include <torch/csrc/autograd/saved_variable_hooks.h>
 
 #include <deque>
 #include <exception>
@@ -52,9 +53,8 @@ struct GraphTask: std::enable_shared_from_this<GraphTask> {
   // true, it signals all threads to stop executing.
   std::atomic_bool has_error_{false};
   std::atomic_bool future_completed_{false};
-  // It is safe to read grad_mode_ and keep_graph_ without synchronization
+  // It is safe to read keep_graph_ without synchronization
   bool keep_graph_;
-  bool grad_mode_;
 
   // To protect reads/writes to not_ready_, dependencies_, captured_vars_,
   // has_error_, future_result_, cpu_ready_queue_, and leaf_streams.
@@ -109,8 +109,9 @@ struct GraphTask: std::enable_shared_from_this<GraphTask> {
   // out of the GraphTask and are no longer valid.
   std::vector<Variable> captured_vars_;
 
-  at::ThreadLocalState thread_locals_ =
-      at::ThreadLocalState(/* keep_grad_mode */ false);
+  // Note: this field is not ready to be used until the proper `thread_locals_.set_grad_mode()`
+  // call in the constructor.
+  at::ThreadLocalState thread_locals_ = at::ThreadLocalState();
 
   std::unordered_set<c10::Stream> leaf_streams;
 
@@ -179,12 +180,13 @@ struct GraphTask: std::enable_shared_from_this<GraphTask> {
       std::shared_ptr<ReadyQueue> cpu_ready_queue,
       bool exit_on_error = false)
       : keep_graph_(keep_graph),
-        grad_mode_(grad_mode),
         owner_(NO_DEVICE),
         reentrant_depth_(reentrant_depth),
         exit_on_error_(exit_on_error),
         cpu_ready_queue_(std::move(cpu_ready_queue)),
-        future_result_(c10::make_intrusive<at::ivalue::Future>(c10::ListType::create(c10::TensorType::get()))) {}
+        future_result_(c10::make_intrusive<at::ivalue::Future>(c10::ListType::create(c10::TensorType::get()))) {
+    thread_locals_.set_grad_mode(grad_mode);
+        }
  private:
   // run GraphTask post processing
   void exec_post_processing();
@@ -311,6 +313,10 @@ struct TORCH_API Engine {
 
   virtual std::unique_ptr<AnomalyMetadata> make_anomaly_metadata() {
     return std::make_unique<AnomalyMetadata>();
+  }
+
+  virtual std::unique_ptr<SavedVariableHooks> get_default_saved_variable_hooks() {
+    return nullptr;
   }
 
   // We pass cpu_ready_queue to evaluate_function, so that it knows

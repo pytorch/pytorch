@@ -3,12 +3,9 @@
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Slice, SliceOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_GRADIENT_OPERATOR(SliceGradient, SliceGradientOp<CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Slice)
     .NumInputs(1, 3)
     .NumOutputs(1)
@@ -117,7 +114,6 @@ Y:
     .Output(0, "Y", "(*Tensor*): sliced output tensor")
     .InheritOnnxSchema();
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 GRADIENT_OPERATOR_SCHEMA(SliceGradient)
     .TensorInferenceFunction([](const OperatorDef& /*def*/,
                                 const vector<TensorShape>& in) {
@@ -146,6 +142,5 @@ struct GetSliceGradient : public GradientMakerBase {
   }
 };
 } // namespace
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(Slice, GetSliceGradient);
 } // namespace caffe2
