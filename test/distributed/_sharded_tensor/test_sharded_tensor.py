@@ -126,8 +126,9 @@ def with_comms(func):
 class TestCreateTensorFromParams(TestCase):
     @sandcastle_skip_if(torch.cuda.device_count() < 1, 'CUDA GPU is needed')
     def test_empty(self):
+        expected_dtype = torch.double
         tensor_properties = TensorProperties(
-            dtype=torch.double,
+            dtype=expected_dtype,
             layout=torch.strided,
             requires_grad=False,
             pin_memory=False,
@@ -138,14 +139,15 @@ class TestCreateTensorFromParams(TestCase):
         local_tensor = _create_tensor_from_params(
             5, 10, local_device=local_device, tensor_init_params=tensor_init_params)
         self.assertEqual(local_device, local_tensor.device)
-        self.assertEqual(torch.double, local_tensor.dtype)
+        self.assertEqual(expected_dtype, local_tensor.dtype)
         self.assertEqual(torch.strided, local_tensor.layout)
         self.assertEqual(False, local_tensor.requires_grad)
 
     @sandcastle_skip_if(torch.cuda.device_count() < 1, 'CUDA GPU is needed')
     def test_ones(self):
+        expected_dtype = torch.double
         tensor_properties = TensorProperties(
-            dtype=torch.double,
+            dtype=expected_dtype,
             layout=torch.strided,
             requires_grad=False,
             pin_memory=False,
@@ -153,9 +155,98 @@ class TestCreateTensorFromParams(TestCase):
         tensor_init_params = TensorInitParams(
             create_op=CreateOp.ONES, tensor_properties=tensor_properties)
         local_device = torch.device('cuda:0')
+        h, w = 5, 10
         local_tensor = _create_tensor_from_params(
-            5, 10, local_device=local_device, tensor_init_params=tensor_init_params)
-        expected_tensor = torch.ones(5, 10, device=local_device, dtype=torch.double)
+            h, w, local_device=local_device, tensor_init_params=tensor_init_params)
+        expected_tensor = torch.ones(h, w, device=local_device, dtype=expected_dtype)
+        self.assertEqual(expected_tensor, local_tensor)
+
+    @sandcastle_skip_if(torch.cuda.device_count() < 1, 'CUDA GPU is needed')
+    def test_zeros(self):
+        expected_dtype = torch.int32
+        tensor_properties = TensorProperties(
+            dtype=expected_dtype,
+            layout=torch.strided,
+            requires_grad=False,
+            pin_memory=False,
+            memory_format=torch.contiguous_format,
+        )
+        tensor_init_params = TensorInitParams(create_op=CreateOp.ZEROS, tensor_properties=tensor_properties, )
+        local_device = torch.device('cuda:0')
+        h, w = 5, 10
+        local_tensor = _create_tensor_from_params(
+            h, w, local_device=local_device, tensor_init_params=tensor_init_params)
+        expected_tensor = torch.zeros(h, w, device=local_device, dtype=expected_dtype)
+        self.assertEqual(expected_tensor, local_tensor)
+
+    @sandcastle_skip_if(torch.cuda.device_count() < 1, 'CUDA GPU is needed')
+    def test_rand(self):
+        expected_dtype = torch.double
+        tensor_properties = TensorProperties(
+            dtype=expected_dtype,
+            layout=torch.strided,
+            requires_grad=False,
+            pin_memory=False,
+            memory_format=torch.contiguous_format,
+        )
+        tensor_init_params = TensorInitParams(create_op=CreateOp.RAND, tensor_properties=tensor_properties, )
+        local_device = torch.device('cuda:0')
+        h, w = 5, 10
+        seed = 13
+        torch.cuda.manual_seed(seed)
+        local_tensor = _create_tensor_from_params(
+            h, w, local_device=local_device, tensor_init_params=tensor_init_params)
+        # reset seed to ensure same random numbers are generated
+        torch.cuda.manual_seed(seed)
+        expected_tensor = torch.rand(h, w, device=local_device, dtype=expected_dtype)
+        self.assertEqual(expected_tensor, local_tensor)
+
+    @sandcastle_skip_if(torch.cuda.device_count() < 1, 'CUDA GPU is needed')
+    def test_full_with_dtype_inferred(self):
+        fill_value = 23.5
+        tensor_properties = TensorProperties(
+            # tensor's dtype can be inferred from fill_value
+            dtype=None,
+            layout=torch.strided,
+            requires_grad=False,
+            pin_memory=False,
+            memory_format=torch.contiguous_format,
+        )
+        tensor_init_params = TensorInitParams(
+            create_op=CreateOp.FULL,
+            fill_value=fill_value,
+            tensor_properties=tensor_properties, )
+        local_device = torch.device('cuda:0')
+        h, w = 5, 10
+        local_tensor = _create_tensor_from_params(
+            h, w, local_device=local_device, tensor_init_params=tensor_init_params)
+        # local_tensor.dtype is inferred from fill_value (float32).
+        self.assertEqual(torch.float32, local_tensor.dtype)
+        expected_tensor = torch.full((h, w), fill_value=fill_value, device=local_device)
+        self.assertEqual(expected_tensor, local_tensor)
+
+    @sandcastle_skip_if(torch.cuda.device_count() < 1, 'CUDA GPU is needed')
+    def test_full_with_dtype_overridden(self):
+        fill_value = 23.5
+        tensor_properties = TensorProperties(
+            # tensor's dtype can be inferred from fill_value
+            dtype=torch.double,
+            layout=torch.strided,
+            requires_grad=False,
+            pin_memory=False,
+            memory_format=torch.contiguous_format,
+        )
+        tensor_init_params = TensorInitParams(
+            create_op=CreateOp.FULL,
+            fill_value=fill_value,
+            tensor_properties=tensor_properties, )
+        local_device = torch.device('cuda:0')
+        h, w = 5, 10
+        local_tensor = _create_tensor_from_params(
+            h, w, local_device=local_device, tensor_init_params=tensor_init_params)
+        # local_tensor.dtype is overridden.
+        self.assertEqual(torch.double, local_tensor.dtype)
+        expected_tensor = torch.full((h, w), fill_value=fill_value, device=local_device, dtype=torch.double)
         self.assertEqual(expected_tensor, local_tensor)
 
 class TestShardedTensorChunked(ShardedTensorTestBase, MultiProcessTestCase):
@@ -291,6 +382,102 @@ class TestShardedTensorChunked(ShardedTensorTestBase, MultiProcessTestCase):
         expected_h = 1 if self.rank == 3 else math.ceil(h / 4)
         self.assertEqual((expected_h, w), local_shard.size())
         self.assertEqual(local_shard, torch.ones(expected_h, w))
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    @requires_nccl()
+    def test_create_sharded_tensor_with_zeros(self):
+        """ Test _sharded_tensor.zeros(...) """
+
+        spec = ChunkShardingSpec(
+            dim=0,
+            placements=[
+                "rank:0/cuda:0",
+                "rank:1/cuda:1",
+                "rank:2/cuda:2",
+                "rank:3/cuda:3",
+            ],
+        )
+        h, w = 10, 20
+        sharded_tensor = _sharded_tensor.zeros(spec, h, w)
+
+        # Validate local shard is initialized with torch.zeros
+        local_shards = sharded_tensor.local_shards()
+        self.assertEqual(1, len(local_shards))
+        local_shard = local_shards[0].tensor
+        self.assertEqual(torch.device(f"cuda:{self.rank}"), local_shard.device)
+        # The split: for rank!=3 ceil(h/4)=3  for rank=3 1
+        expected_h = 1 if self.rank == 3 else math.ceil(h / 4)
+        self.assertEqual((expected_h, w), local_shard.size())
+        self.assertEqual(local_shard, torch.zeros(expected_h, w))
+
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    @requires_nccl()
+    def test_create_sharded_tensor_with_rand(self):
+        """ Test _sharded_tensor.rand(...) """
+
+        spec = ChunkShardingSpec(
+            dim=0,
+            placements=[
+                "rank:0/cuda:0",
+                "rank:1/cuda:1",
+                "rank:2/cuda:2",
+                "rank:3/cuda:3",
+            ],
+        )
+        h, w = 8, 2
+        seed = 1234
+
+        expected_h = 2
+        expected_device = torch.device(f"cuda:{self.rank}")
+        dtype = torch.double
+        torch.manual_seed(seed)
+        expected = torch.rand(expected_h, w, device=expected_device, dtype=dtype)
+        # reset seed to ensure the same random numbers are generated
+        torch.manual_seed(seed)
+        sharded_tensor = _sharded_tensor.rand(spec, h, w, dtype=dtype)
+
+        # Validate local shard is initialized with torch.rand
+        local_shards = sharded_tensor.local_shards()
+        self.assertEqual(1, len(local_shards))
+        local_shard = local_shards[0].tensor
+        self.assertEqual(expected_device, local_shard.device)
+        self.assertEqual((expected_h, w), local_shard.size())
+        self.assertEqual(expected, local_shard)
+
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    @requires_nccl()
+    def test_create_sharded_tensor_with_full(self):
+        """ Test _sharded_tensor.full(...) """
+
+        spec = ChunkShardingSpec(
+            dim=0,
+            placements=[
+                "rank:0/cuda:0",
+                "rank:1/cuda:1",
+                "rank:2/cuda:2",
+                "rank:3/cuda:3",
+            ],
+        )
+        h, w = 10, 20
+        fill_value = 1234
+        sharded_tensor = _sharded_tensor.full(spec, size=(h, w), fill_value=fill_value, dtype=torch.int32)
+
+        # Validate local shard is initialized with torch.full
+        local_shards = sharded_tensor.local_shards()
+        self.assertEqual(1, len(local_shards))
+        local_shard = local_shards[0].tensor
+        self.assertEqual(torch.device(f"cuda:{self.rank}"), local_shard.device)
+        # The split: for rank!=3 ceil(h/4)=3  for rank=3 1
+        expected_h = 1 if self.rank == 3 else math.ceil(h / 4)
+        self.assertEqual((expected_h, w), local_shard.size())
+        self.assertEqual(local_shard,
+                         torch.full(size=(expected_h, w), fill_value=fill_value, dtype=torch.int32))
+
 
     @with_comms
     @skip_if_lt_x_gpu(4)
