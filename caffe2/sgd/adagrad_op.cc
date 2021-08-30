@@ -1,5 +1,4 @@
 #include "adagrad_op.h"
-#include "caffe2/core/types.h"
 
 namespace caffe2 {
 
@@ -24,30 +23,22 @@ static OpSchema::Cost CostInferenceForAdagrad(
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   c.flops = grad_size * 10;
 
-  auto const& moment_element_size_byte =
-      DataTypeToTypeMeta(moment.data_type()).itemsize();
-  auto const& param_element_size_byte =
-      DataTypeToTypeMeta(param.data_type()).itemsize();
-  auto const& grad_element_size_byte =
-      DataTypeToTypeMeta(grad.data_type()).itemsize();
-  auto const& lr_element_size_byte =
-      DataTypeToTypeMeta(lr.data_type()).itemsize();
   uint64_t bytes_written =
-      grad_size * param_element_size_byte + moment_element_size_byte;
+      grad_size * (sizeof(param.data_type()) + sizeof(moment.data_type()));
 
   if (output_size == 3) {
     // also need to output effective learning rate in this case
     // assume it's the same data type as lr
-    bytes_written += grad_size * lr_element_size_byte;
+    bytes_written += grad_size * sizeof(lr.data_type());
   } else if (output_size == 4) {
     // also need to output effective learning rate and updates in this case
     // assume update is the same data type as param
     bytes_written +=
-        grad_size * (lr_element_size_byte + param_element_size_byte);
+        grad_size * (sizeof(lr.data_type()) + sizeof(param.data_type()));
   }
   c.bytes_written = bytes_written;
   c.bytes_read = c.bytes_written +
-      grad_size * (grad_element_size_byte + lr_element_size_byte);
+      grad_size * (sizeof(grad.data_type()) + sizeof(lr.data_type()));
 
   return c;
 }
@@ -111,18 +102,10 @@ static OpSchema::Cost CostInferenceForSparseAdagrad(
   // (optimistically count sqrt as one flop).
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   c.flops = grad_size * 7;
-  auto const& param_element_size_byte =
-      DataTypeToTypeMeta(param.data_type()).itemsize();
-  auto const& moment_element_size_byte =
-      DataTypeToTypeMeta(moment.data_type()).itemsize();
   c.bytes_written =
-      grad_size * (param_element_size_byte + moment_element_size_byte);
-  auto const& grad_element_size_byte =
-      DataTypeToTypeMeta(grad.data_type()).itemsize();
-  auto const& indices_element_size_byte =
-      DataTypeToTypeMeta(indices.data_type()).itemsize();
-  c.bytes_read = c.bytes_written + grad_size * grad_element_size_byte +
-      n * indices_element_size_byte;
+      grad_size * (sizeof(param.data_type()) + sizeof(moment.data_type()));
+  c.bytes_read = c.bytes_written + grad_size * sizeof(grad.data_type()) +
+      n * sizeof(indices.data_type());
 
   return c;
 }
@@ -170,16 +153,6 @@ static OpSchema::Cost CostInferenceForRowWiseSparseAdagrad(
   OpSchema::Cost c;
 
   if (n > 0) {
-    auto const& param_element_size_byte =
-        DataTypeToTypeMeta(param.data_type()).itemsize();
-    auto const& moment_element_size_byte =
-        DataTypeToTypeMeta(moment.data_type()).itemsize();
-    auto const& grad_element_size_byte =
-        DataTypeToTypeMeta(grad.data_type()).itemsize();
-    auto const& indices_element_size_byte =
-        DataTypeToTypeMeta(indices.data_type()).itemsize();
-    auto const& lr_element_size_byte =
-        DataTypeToTypeMeta(lr.data_type()).itemsize();
     auto block_size = grad_size / n;
     if (block_size == 1) {
       // +2: applying weight decay and add to grads
@@ -188,22 +161,22 @@ static OpSchema::Cost CostInferenceForRowWiseSparseAdagrad(
       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       c.flops = n * 9;
       c.bytes_written =
-          n * (param_element_size_byte + moment_element_size_byte);
+          n * (sizeof(param.data_type()) + sizeof(moment.data_type()));
       c.bytes_read = c.bytes_written +
           n *
-              (grad_element_size_byte + indices_element_size_byte +
-               lr_element_size_byte);
+              (sizeof(grad.data_type()) + sizeof(indices.data_type()) +
+               sizeof(lr.data_type()));
     } else {
       // 5 per block (not counting index transforms)
       // 8 for each value of a block
       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       c.flops = n * (5 + (block_size * 8));
-      c.bytes_written = n * moment_element_size_byte +
-          n * block_size * param_element_size_byte;
+      c.bytes_written =
+          n * sizeof(moment.data_type()) + n * block_size * (param.data_type());
 
-      c.bytes_read = c.bytes_written + n * lr_element_size_byte +
+      c.bytes_read = c.bytes_written + n * (sizeof(lr.data_type())) +
           2 * n * block_size *
-              (grad_element_size_byte + param_element_size_byte);
+              (sizeof(grad.data_type()) + sizeof(param.data_type()));
     }
   }
   return c;
