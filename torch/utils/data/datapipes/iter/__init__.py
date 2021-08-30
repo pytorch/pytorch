@@ -28,20 +28,8 @@ from torch.utils.data.datapipes.iter.grouping import (
 from torch.utils.data.datapipes.iter.httpreader import (
     HTTPReaderIterDataPipe as HttpReader,
 )
-from torch.utils.data.datapipes.iter.listdirfiles import (
-    ListDirFilesIterDataPipe as ListDirFiles,
-)
-from torch.utils.data.datapipes.iter.loadfilesfromdisk import (
-    LoadFilesFromDiskIterDataPipe as LoadFilesFromDisk,
-)
-from torch.utils.data.datapipes.iter.readfilesfromtar import (
-    ReadFilesFromTarIterDataPipe as ReadFilesFromTar,
-)
-from torch.utils.data.datapipes.iter.readfilesfromzip import (
-    ReadFilesFromZipIterDataPipe as ReadFilesFromZip,
-)
-from torch.utils.data.datapipes.iter.readlinesfromfile import (
-    ReadLinesFromFileIterDataPipe as ReadLinesFromFile,
+from torch.utils.data.datapipes.iter.linereader import (
+    LineReaderIterDataPipe as LineReader,
 )
 from torch.utils.data.datapipes.iter.routeddecoder import (
     RoutedDecoderIterDataPipe as RoutedDecoder,
@@ -49,30 +37,39 @@ from torch.utils.data.datapipes.iter.routeddecoder import (
 from torch.utils.data.datapipes.iter.selecting import (
     FilterIterDataPipe as Filter,
 )
-from torch.utils.data.datapipes.iter.tobytes import (
-    ToBytesIterDataPipe as ToBytes,
+from torch.utils.data.datapipes.iter.streamreader import (
+    StreamReaderIterDataPipe as StreamReader,
+)
+from torch.utils.data.datapipes.iter.tararchivereader import (
+    TarArchiveReaderIterDataPipe as TarArchiveReader,
+)
+from torch.utils.data.datapipes.iter.ziparchivereader import (
+    ZipArchiveReaderIterDataPipe as ZipArchiveReader,
+)
+from torch.utils.data.datapipes.iter.utils import (
+    IterableWrapperIterDataPipe as IterableWrapper,
 )
 
-__all__ = ['Batch',
-           'BucketBatch',
-           'Collate',
-           'Concat',
+__all__ = ['Batcher',
+           'BucketBatcher',
+           'ByKeyGrouper',
+           'Collator',
+           'Concater',
            'DFIterDataPipe',
+           'FileLister',
+           'FileLoader',
            'Filter',
-           'GroupByKey',
            'HttpReader',
-           'ListDirFiles',
-           'LoadFilesFromDisk',
-           'Map',
-           'ReadFilesFromTar',
-           'ReadFilesFromZip',
-           'ReadLinesFromFile',
+           'IterableWrapper',
+           'LineReader',
+           'Mapper',
            'RoutedDecoder',
            'Sampler',
-           'Shuffle',
-           'ToBytes',
-           'Transforms',
-           'Zip']
+           'Shuffler',
+           'StreamReader',
+           'TarArchiveReader',
+           'ZipArchiveReader',
+           'Zipper']
 
 # Please keep this list sorted
 assert __all__ == sorted(__all__)
