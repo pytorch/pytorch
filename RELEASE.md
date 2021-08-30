@@ -131,7 +131,7 @@ A patch release is a maintenance release of PyTorch that includes fixes for regr
     * [pytorch/vision](https://github.com/pytorch/vision)
     * [pytorch/audio](https://github.com/pytorch/audio)
     * [pytorch/text](https://github.com/pytorch/text)
-2. Is there not a viable workaround?
+3. Is there not a viable workaround?
 
 ## Patch release process
 
@@ -141,7 +141,7 @@ A patch release is a maintenance release of PyTorch that includes fixes for regr
     * ![image](https://user-images.githubusercontent.com/1700823/131175980-148ff38d-44c3-4611-8a1f-cd2fd1f4c49d.png)
 3. Patch release managers should vote on a potential release date and create a cherry pick tracker with dates outlined
     * Milestone should also be updated to reflect new release date
-5. Proceed with patch release as if regular release process
+4. Proceed with patch release as if regular release process
 
 # Special Topics
 
