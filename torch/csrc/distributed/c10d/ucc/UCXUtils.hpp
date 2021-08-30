@@ -24,6 +24,8 @@ class UCXError : public c10::Error {
 
 namespace c10d {
 
+class UCPWorker;
+
 // When calling UCP async operations like `ucp_tag_send_nbx`, `ucp_tag_recv_nbx`,
 // etc., UCP will create a request object in its worker memory pool and return
 // the pointer to the user. This request object is used to track the status of
@@ -56,31 +58,25 @@ public:
     return data->info;
   }
 
-  ~UCPRequest() {
-    if (data != nullptr) {
-      // Requests may be reused, and when reused, the `request_init`
-      // callback function specified in the context creation will not
-      // be invoked. So we have to manually reset a request before
-      // freeing it.
-      data->reset();
-      ucp_request_free(data);
-    }
-  }
+  ~UCPRequest();
 
 private:
-  // Pointer towards the real underlying request object created by UCP.
-  // A nullptr represents that a request is finished immediately.
-  Data *data;
-
   // `UCPRequest` objects should only be created by `UCPEndpoint`
   // (for send/recv with an endpoint) or `UCPWorker` (for recv from any source).
   // `UCPRequest` objects are non-copyable: The underlying data should only be
   // allocated by UCP, and it should only be deallocated once.
   friend class UCPWorker;
   friend class UCPEndpoint;
-  UCPRequest(Data *data): data(data) {}
+  UCPRequest(const std::shared_ptr<const UCPWorker> &worker, Data *data)
+    :data(data), worker(worker) {}
   UCPRequest(const UCPRequest&) = delete;
   UCPRequest& operator=(const UCPRequest &) = delete;
+
+  // Pointer towards the real underlying request object created by UCP.
+  // A nullptr represents that a request is finished immediately.
+  Data *data;
+
+  std::shared_ptr<const UCPWorker> worker;
 };
 
 class UCPEndpoint;

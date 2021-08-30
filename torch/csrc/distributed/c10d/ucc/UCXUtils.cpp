@@ -53,6 +53,23 @@ ucp_context_h getUCPContext() {
   return context_wrapper.get();
 }
 
+UCPRequest::~UCPRequest() {
+  if (data != nullptr) {
+    // UCPRequest objects can only be destructed after the request
+    // is completed (succeed or fail does not matter). Because in
+    // `recv_callback`, `data` will be accessed.
+    while (data->status == UCS_INPROGRESS) {
+      worker->progress();
+    }
+    // Requests may be reused, and when reused, the `request_init`
+    // callback function specified in the context creation will not
+    // be invoked. So we have to manually reset a request before
+    // freeing it.
+    data->reset();
+    ucp_request_free(data);
+  }
+}
+
 UCPWorker::UCPWorker() {
   ucp_worker_params_t worker_params = {};
   worker_params.field_mask = UCP_WORKER_PARAM_FIELD_THREAD_MODE;
@@ -65,11 +82,9 @@ void UCPWorker::recv_callback(
   void* request, ucs_status_t status,
   const ucp_tag_recv_info_t* info, void* user_data)
 {
-  // This is a callback funtion used for recv.
-  // http://openucx.github.io/ucx/api/latest/html/group___u_c_p___c_o_m_m.html#ga70e110cf7c85ed5f281bd52438488d75
   auto r = reinterpret_cast<UCPRequest::Data *>(request);
   r->status = status;
-  if (status == UCS_OK) {
+  if (info != nullptr) {
     r->info = *info;
   }
 };
@@ -141,7 +156,7 @@ std::shared_ptr<UCPRequest> UCPWorker::submit_p2p_request(
   TORCH_UCX_CHECK_PTR(request, "Failed to start p2p operation.");
   progress();
   return std::shared_ptr<UCPRequest>(
-    new UCPRequest(reinterpret_cast<UCPRequest::Data *>(request)));
+    new UCPRequest(shared_from_this(), reinterpret_cast<UCPRequest::Data *>(request)));
 }
 
 std::shared_ptr<UCPRequest> UCPWorker::recv_with_tag_and_mask(void *data, size_t size, ucp_tag_t tag, ucp_tag_t tag_mask, c10::DeviceType device) const {
