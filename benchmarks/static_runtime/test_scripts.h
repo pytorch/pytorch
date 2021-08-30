@@ -801,3 +801,13 @@ const std::string cat_script = R"IR(
       %ret: Tensor = aten::cat(%ten_list2, %dim)
       return (%ret)
 )IR";
+
+const auto cumsum_script = R"JIT(
+   def forward(self, a: Tensor, dim: int):
+      return torch.cumsum(a, dim).clone()
+)JIT";
+
+const auto cumsum_script_dtype = R"JIT(
+   def forward(self, a: Tensor, dim: int, dtype: int):
+      return torch.cumsum(a, dim, dtype=dtype).clone()
+)JIT";
