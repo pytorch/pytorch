@@ -69,7 +69,7 @@ void UCPWorker::recv_callback(
   // http://openucx.github.io/ucx/api/latest/html/group___u_c_p___c_o_m_m.html#ga70e110cf7c85ed5f281bd52438488d75
   auto r = reinterpret_cast<UCPRequest::Data *>(request);
   r->status = status;
-  if (info != nullptr) {
+  if (status == UCS_OK) {
     r->info = *info;
   }
 };
