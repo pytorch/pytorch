@@ -3700,8 +3700,7 @@ class TestAsArray(TestCase):
     def test_alias_from_buffer(self, device, dtype):
         self._test_alias_with_cvt(to_memview, device, dtype, shape=(5,), only_with_dtype=True)
 
-    def _test_copy_with_cvt(self, cvt, device, dtype, shape=(5, 5),
-                            only_with_dtype=False, supports_different_dtypes=True):
+    def _test_copy_with_cvt(self, cvt, device, dtype, shape=(5, 5), only_with_dtype=False):
         original = make_tensor(shape, device, dtype)
 
         def check(**kwargs):
@@ -3723,7 +3722,7 @@ class TestAsArray(TestCase):
             check(same_device=False, device=other, dtype=dtype, copy=True)
 
         # Copy is forced because of different dtype
-        if supports_different_dtypes:
+        if not only_with_dtype:
             for other in get_all_dtypes():
                 if dtype != other:
                     check(same_dtype=False, dtype=other)
@@ -3747,8 +3746,7 @@ class TestAsArray(TestCase):
     @onlyCPU
     @dtypes(*torch_to_numpy_dtype_dict.keys())
     def test_copy_from_buffer(self, device, dtype):
-        self._test_copy_with_cvt(to_memview, device, dtype, shape=(5,),
-                                 only_with_dtype=True, supports_different_dtypes=False)
+        self._test_copy_with_cvt(to_memview, device, dtype, shape=(5,), only_with_dtype=True)
 
     def _test_copy_mult_devices(self, devices, dtype, cvt):
         cuda1 = devices[0]
@@ -3783,6 +3781,7 @@ class TestAsArray(TestCase):
 
         same_device = torch.device("cpu") == device
         check(same_device=same_device, device=device, dtype=dtype)
+        check(same_device=same_device, device=device, dtype=dtype, requires_grad=False)
         check(same_device=same_device, device=device, dtype=dtype, requires_grad=may_require_grad(dtype))
         check(same_device=same_device, device=device, dtype=dtype, copy=True)
 
@@ -3824,6 +3823,7 @@ class TestAsArray(TestCase):
             a = torch.asarray(cloned, **kwargs)
             requires_grad = kwargs.get("requires_grad", False)
             self.assertEqual(a.requires_grad, requires_grad)
+            # Autograd history shouldn't be retained when requires_grad is False
             self.assertEqual(a.grad_fn is None, not requires_grad)
 
         check()
