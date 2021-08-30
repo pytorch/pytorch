@@ -69,7 +69,6 @@ CONFIG_TREE_DATA = [
             ]),
             ("9", [
                 ("3.6", [
-                    ("xla", [XImportant(True)]),
                     ("vulkan", [XImportant(True)]),
                 ]),
             ]),
