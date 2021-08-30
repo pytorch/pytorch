@@ -3607,9 +3607,12 @@ class TestBufferProtocol(TestCase):
 def get_another_device(device):
     return "cuda" if torch.device(device).type == "cpu" else "cpu"
 
-def identity(tensor): return tensor
-def to_numpy(tensor): return tensor.numpy()
-def to_memview(tensor): return memoryview(to_numpy(tensor))
+def identity(tensor):
+    return tensor
+def to_numpy(tensor):
+    return tensor.numpy()
+def to_memview(tensor):
+    return memoryview(to_numpy(tensor))
 
 class TestAsArray(TestCase):
     def _check(self, original, cvt=lambda t: t, is_alias=True, same_dtype=True, same_device=True, **kwargs):
@@ -3714,7 +3717,7 @@ class TestAsArray(TestCase):
         check(device=device, dtype=dtype, copy=True)
 
         # Copy is forced because of different device
-        if  torch.cuda.is_available():
+        if torch.cuda.is_available():
             other = get_another_device(device)
             check(same_device=False, device=other, dtype=dtype)
             check(same_device=False, device=other, dtype=dtype, copy=True)
