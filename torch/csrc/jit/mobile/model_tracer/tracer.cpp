@@ -273,12 +273,5 @@ int main(int argc, char* argv[]) {
       kdtype_tracer.getCalledKernelTags().end());
   traced_operators.insert(
       always_included_traced_ops.begin(), always_included_traced_ops.end());
-  for (auto& it : called_kernel_tags) {
-    std::cout << "kernal tag, key: " << it.first << " value: " << it.second
-              << std::endl;
-  }
-  for (auto& it : traced_operators) {
-    std::cout << "- " << it << std::endl;
-  }
   printYAML(yaml_out, traced_operators);
 }
