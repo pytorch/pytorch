@@ -3,6 +3,7 @@
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/Parallel.h>
 #include <c10/util/TypeList.h>
+#include <c10/core/Scalar.h>
 
 #include <sstream>
 
@@ -258,7 +259,7 @@ void binary_kernel_reduce_vec(TensorIteratorBase& iter, func_t op, vec_func_t vo
       typename traits::arg2_t>::value,
     "all types must match");
 
-  iter.output().fill_(ident);
+  iter.output_base().fill_(ident);
   iter.parallel_reduce([&](char** data, const int64_t* strides, int64_t size0, int64_t size1) {
     int64_t outer_strides[] = { strides[2], strides[3] };
     if (is_contiguous_reduction<traits>(strides)) {
