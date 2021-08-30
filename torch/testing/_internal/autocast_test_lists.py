@@ -326,7 +326,6 @@ class AutocastCPUTestLists(object):
             ("batch_norm", dummy_bf16[2], {"weight": None, "bias": None, "running_mean": torch.rand((n), dtype=torch.float32),
                                            "running_var": torch.rand((n), dtype=torch.float32), "training": False,
                                            "momentum": 0.1, "eps": 1e-5, "cudnn_enabled": False}),
-            ("max_pool2d", dummy_bf16[2], {"kernel_size": (3, 2), "stride": (1, 1)}),
             ("dropout", dummy_bf16[2], {"p": 0.1, "train": False}),
             ("binary_cross_entropy_with_logits", mat0_bf16 + (torch.rand((n, n), device=dev, dtype=torch.bfloat16),)),
             ("instance_norm", dummy_bf16[1], {"weight": None, "bias": None, "running_mean": None,
@@ -337,7 +336,6 @@ class AutocastCPUTestLists(object):
             ("linear", mat0_fp32 + mat1_fp32),
         ]
         self.nn_fp32 = [
-            ("adaptive_avg_pool2d", dummy_bf16[2], {"output_size": (3, 2)}),
             ("avg_pool2d", dummy_bf16[2], {"kernel_size": (3, 2), "stride": (1, 1)}),
             ("avg_pool3d", dummy_bf16[3], {"kernel_size": (3, 3, 3), "stride": (1, 1, 1)}),
             ("gelu", dummy_bf16[3]),
