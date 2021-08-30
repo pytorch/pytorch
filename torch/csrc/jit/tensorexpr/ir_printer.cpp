@@ -206,11 +206,19 @@ static void formatImm(std::ostream& os, T v) {
   }
 }
 
+static void formatIntSuffix(std::ostream& os, int64_t v) {
+  os << "ll";
+}
+
+template <typename T>
+static void formatIntSuffix(std::ostream& os, T v) {}
+
 template <
     typename T,
     std::enable_if_t<!std::is_floating_point<T>::value>* = nullptr>
 static void formatImm(std::ostream& os, T v) {
   os << +v;
+  formatIntSuffix(os, v);
 }
 
 // NOLINTNEXTLINE

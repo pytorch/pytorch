@@ -29,6 +29,18 @@ class Value {
     Intvalues.push_back(0);
   }
 
+  template <typename T>
+  Value(Dtype dtype, T v) : dtype_(dtype) {
+#define TYPE_CASE(Type, Name)  \
+  if (dtype == k##Name) {      \
+    Name##values.push_back(v); \
+    return;                    \
+  }
+    AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
+#undef TYPE_CASE
+    throw unsupported_dtype();
+  }
+
 #define VALUE_CTOR(Type, Name)      \
   Value(Type v) : dtype_(k##Name) { \
     Name##values.push_back(v);      \
@@ -49,6 +61,8 @@ class Value {
 
   template <typename T>
   const std::vector<T>& as_vec() const;
+
+  int64_t intValue() const;
 
   Dtype dtype() const {
     return dtype_;
