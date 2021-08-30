@@ -73,12 +73,5 @@ int main(int argc, char* argv[]) {
   torch::jit::mobile::TracerResult tracer_result =
       torch::jit::mobile::trace_run(FLAGS_model_input_path);
 
-  for (auto& it : tracer_result.called_kernel_tags) {
-    std::cout << "kernal tag, key: " << it.first << " value: " << it.second
-              << std::endl;
-  }
-  for (auto& it : tracer_result.traced_operators) {
-    std::cout << "- " << it << std::endl;
-  }
   printYAML(yaml_out, tracer_result.traced_operators);
 }
