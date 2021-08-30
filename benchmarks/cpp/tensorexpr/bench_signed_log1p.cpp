@@ -83,16 +83,16 @@ class SignedLog1pBench : public benchmark::Fixture {
 
     // StmtPtr s = IRSimplifier::simplify(nest.root_stmt());
     std::vector<CodeGen::BufferArg> buf_args;
-    buf_args.push_back(input_ph);
-    buf_args.push_back(output);
+    buf_args.emplace_back(input_ph);
+    buf_args.emplace_back(output);
     LLVMCodeGen cg(nest.root_stmt(), buf_args);
 
     std::vector<CodeGen::CallArg> call_args;
     for (auto _ : state) {
       output_ = at::empty_like(ref_);
       call_args.clear();
-      call_args.push_back(input_.data_ptr<float>());
-      call_args.push_back(output_.data_ptr<float>());
+      call_args.emplace_back(input_.data_ptr<float>());
+      call_args.emplace_back(output_.data_ptr<float>());
       cg.call(call_args);
     }
   }
@@ -140,16 +140,16 @@ class SignedLog1pBench : public benchmark::Fixture {
 
     // StmtPtr s = IRSimplifier::simplify(nest.root_stmt());
     std::vector<CodeGen::BufferArg> buf_args;
-    buf_args.push_back(input_ph);
-    buf_args.push_back(output);
+    buf_args.emplace_back(input_ph);
+    buf_args.emplace_back(output);
     LLVMCodeGen cg(nest.root_stmt(), buf_args);
 
     std::vector<CodeGen::CallArg> call_args;
     for (auto _ : state) {
       output_ = at::empty_like(ref_);
       call_args.clear();
-      call_args.push_back(input_.data_ptr<float>());
-      call_args.push_back(output_.data_ptr<float>());
+      call_args.emplace_back(input_.data_ptr<float>());
+      call_args.emplace_back(output_.data_ptr<float>());
       cg.call(call_args);
     }
   }
