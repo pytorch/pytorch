@@ -345,6 +345,30 @@ ExprPtr getImmediateByType(Dtype dtype, T initialVal) {
 }
 
 template <typename T>
+ExprPtr immLike(ExprPtr e, T v) {
+  return getImmediateByType<T>(e->dtype(), v);
+}
+
+template <typename T>
+ExprPtr immLike(ExprHandle e, T v) {
+  return immLike(e.node(), v);
+}
+
+inline c10::optional<int64_t> intValue(ExprPtr e) {
+#define TYPE_CASE(Type, Name)      \
+  if (auto v = to<Name##Imm>(e)) { \
+    return v->value();             \
+  }
+  AT_FORALL_INT_TYPES(TYPE_CASE);
+#undef TYPE_CASE
+  return c10::nullopt;
+}
+
+inline c10::optional<int64_t> intValue(ExprHandle e) {
+  return intValue(e.node());
+}
+
+template <typename T>
 T immediateAs(ExprPtr e) {
 #define TYPE_CASE(Type, Name)                \
   if (Name##ImmPtr imm = to<Name##Imm>(e)) { \
@@ -601,6 +625,10 @@ class TORCH_API CompareSelect : public ExprNode<CompareSelect> {
       CompareSelectOperation cmp_op,
       CompareSelectBias bias = kUnbiased) {
     if (lhs.dtype() != rhs.dtype() || ret_val1.dtype() != ret_val2.dtype()) {
+      std::cout << "lhs dtype: " << lhs.dtype() << std::endl;
+      std::cout << "rhs dtype: " << rhs.dtype() << std::endl;
+      std::cout << "ret val1 dtype: " << ret_val1.dtype() << std::endl;
+      std::cout << "ret val2 dtype: " << ret_val2.dtype() << std::endl;
       throw malformed_input("bad dtype in CompareSelect");
     }
     return ExprHandle(alloc<CompareSelect>(
@@ -684,6 +712,7 @@ enum IntrinsicsOp {
   kFrac,
   kIsNan,
   kRand, // We need more discussions on this. Should we consider stateful?
+  kMaxIntrinsicsOp,
 };
 
 class TORCH_API Intrinsics : public ExprNode<Intrinsics> {
@@ -864,8 +893,9 @@ class TORCH_API Intrinsics : public ExprNode<Intrinsics> {
     params_ = std::move(params);
   }
 
- private:
   static int OpArgCount(IntrinsicsOp op_type);
+
+ private:
   static Dtype IntrinsicsDtype(IntrinsicsOp op_type, Dtype dt1);
   static Dtype IntrinsicsDtype(IntrinsicsOp op_type, Dtype dt1, Dtype dt2);
   static Dtype IntrinsicsDtype(
