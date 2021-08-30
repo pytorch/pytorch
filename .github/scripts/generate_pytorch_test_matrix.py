@@ -57,6 +57,8 @@ def main() -> None:
         configs['slow'] = {'num_shards': 1, 'runner': TEST_RUNNER_TYPE}
     if os.getenv('ENABLE_DOCS_TEST'):
         configs['docs_test'] = {'num_shards': 1, 'runner': TEST_RUNNER_TYPE}
+    if os.getenv('ENABLE_BACKWARDS_COMPAT_TEST'):
+        configs['backwards_compat'] = {'num_shards': 1, 'runner': TEST_RUNNER_TYPE}
     matrix = {
         'include': [
             {
