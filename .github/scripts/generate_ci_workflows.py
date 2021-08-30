@@ -442,6 +442,7 @@ LINUX_WORKFLOWS = [
         test_runner_type=LINUX_CPU_TEST_RUNNER,
         on_pull_request=True,
         num_test_shards=1,
+        distributed_test=False,
         ciflow_config=CIFlowConfig(
             enabled=True,
             labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU, LABEL_CIFLOW_XLA},

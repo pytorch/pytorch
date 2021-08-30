@@ -408,6 +408,7 @@ test_torch_function_benchmark() {
 }
 
 test_xla() {
+  clone_pytorch_xla
   # shellcheck disable=SC1091
   source "./xla/.circleci/common.sh"
   run_torch_xla_tests "$(pwd)" "$(pwd)/xla"
