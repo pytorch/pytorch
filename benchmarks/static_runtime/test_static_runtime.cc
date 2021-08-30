@@ -1257,3 +1257,11 @@ TEST(StaticRuntime, IndividualOps_FmodScalar) {
   std::vector<IValue> args3{c, 4};
   testStaticRuntime(fmod_scalar, args2, args3);
 }
+
+TEST(StaticRuntime, QEmbeddingBagByteUnpack) {
+  auto a = torch::randn({8, 16}, at::ScalarType::Float);
+  auto b = torch::randn({8*2, 16*2}, at::ScalarType::Float);
+
+  testStaticRuntime(embedding_bag_byte_prepack_script, {a});
+  testStaticRuntime(embedding_bag_byte_prepack_script, {a},{b});
+}
