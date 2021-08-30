@@ -1,10 +1,10 @@
 // Ternary and higher-order pointwise operations
-#include <ATen/ATen.h>
-
+#define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/Dispatch.h>
 #include <ATen/native/PointwiseOps.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
+#include <c10/core/Scalar.h>
 
 namespace at {
 namespace native {
