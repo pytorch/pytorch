@@ -231,8 +231,8 @@ def make_graphed_callables(callables, sample_args):
                 static_grad_inputs.append(grad_inputs[grad_idx])
                 grad_idx += 1
             else:
-                static_grad_inputs.append(None)
-        static_grad_inputs = tuple(static_grad_inputs)
+                static_grad_inputs.append(None)  # type: ignore[arg-type]
+        static_grad_inputs = tuple(static_grad_inputs)  # type: ignore[assignment]
 
         per_callable_static_grad_outputs.append(static_grad_outputs)
         per_callable_static_grad_inputs.append(static_grad_inputs)
@@ -311,7 +311,7 @@ def make_graphed_callables(callables, sample_args):
                     else:
                         return orig_fwd(*user_args)
                 return new_fwd
-            func.forward = make_graphed_forward(func, func.training, graphed, func.forward)
+            func.forward = make_graphed_forward(func, func.training, graphed, func.forward)  # type: ignore[assignment]
             ret.append(func)
         else:
             ret.append(graphed)
