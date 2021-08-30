@@ -383,7 +383,14 @@ def _make_mismatch_msg(
 
     return msg.strip()
 
-def _get_XXX_dtype(dtype: torch.dtype) -> torch.dtype:
+
+def _get_comparison_dtype(dtype: torch.dtype) -> torch.dtype:
+    """Selects the comparison dtype based on the input dtype.
+
+    Returns:
+        Highest precision dtype of the same dtype category as the input. :class:`torch.bool` is treated as integral
+        dtype.
+    """
     if dtype.is_complex:
         return torch.complex128
     elif dtype.is_floating_point:
@@ -418,7 +425,7 @@ def _check_values_close(
     Returns:
         (Optional[AssertionError]): If check did not pass.
     """
-    dtype = _get_XXX_dtype(actual.dtype)
+    dtype = _get_comparison_dtype(actual.dtype)
     actual = actual.to(dtype)
     expected = expected.to(dtype)
     mismatches = ~torch.isclose(actual, expected, rtol=rtol, atol=atol, equal_nan=equal_nan)

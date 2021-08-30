@@ -862,6 +862,15 @@ class TestAssertClose(TestCase):
         for fn in assert_close_with_inputs(actual, expected):
             fn(rtol=0.0, atol=eps * 2)
 
+    # TODO: the code that this test was designed for was removed in https://github.com/pytorch/pytorch/pull/56058
+    #  We need to check if this test is still needed or if this behavior is now enabled by default.
+    def test_matching_conjugate_bit(self):
+        actual = torch.tensor(complex(1, 1)).conj()
+        expected = torch.tensor(complex(1, -1))
+
+        for fn in assert_close_with_inputs(actual, expected):
+            fn()
+
     def test_matching_nan(self):
         nan = float("NaN")
 
