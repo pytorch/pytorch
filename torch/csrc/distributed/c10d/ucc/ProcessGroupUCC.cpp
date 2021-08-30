@@ -13,6 +13,55 @@ static void check_tensor(const std::vector<at::Tensor>& tensors) {
   TORCH_CHECK(!tensors[0].is_sparse(), "ProcessGroupUCC input tensor has to be dense");
 }
 
+namespace tagging {
+// Note [Receive from an endpoint]:
+// UCP does not support receiving from a specific endpoint. So we use tag
+// matching to simulate this behavior. In PyTorch, the world_size is int,
+// the tag is also int, and in UCP, the ucp_tag_t is uint64_t. So we use
+// the higher 32 bits of ucp_tag_t for rank, and use lower 32 bits for the
+// real tag. When receiving from a specified endpoint, the entire ucp_tag_t
+// should match. And when receiving from any source, tag mask is used to
+// disable the matching of the higher bits.
+
+// TODO: add test for INT_MAX tag
+
+using world_size_t = int;
+using tag_t = int;
+
+union tag_union {
+  ucp_tag_t raw;
+  struct fields_t {
+    tag_t tag;
+    world_size_t rank;
+  } fields;
+};
+
+static_assert(
+  sizeof(tag_union) == sizeof(ucp_tag_t) &&
+  sizeof(tag_union) == sizeof(tag_union::fields_t),
+  "The implementation of UCP tag matching has unsatisfied assumptions.");
+
+constexpr ucp_tag_t wrap_tag(world_size_t rank, tag_t tag) {
+  tag_union u = {
+    .fields = { .tag = tag, .rank = rank }
+  };
+  return u.raw;
+}
+
+constexpr world_size_t get_rank_from_tag(ucp_tag_t tag) {
+  tag_union u = { .raw = tag };
+  return u.fields.rank;
+}
+
+constexpr ucp_tag_t any_source_mask() {
+  return wrap_tag(0, ~tag_t(0));
+}
+
+constexpr ucp_tag_t complete_tag_mask() {
+  return wrap_tag(~world_size_t(0), ~tag_t(0));
+}
+
+} // namespace tagging
 } // namespace
 
 namespace c10d {
@@ -65,15 +114,15 @@ public:
       return true;
     }
 
-    int sourceRank() const {
-      return get_rank_from_tag(request->info().sender_tag);
+    tagging::world_size_t sourceRank() const override {
+      return tagging::get_rank_from_tag(request->info().sender_tag);
     }
   };
 
   explicit ProcessGroupUCC(
       const c10::intrusive_ptr<Store>& store,
-      int rank,
-      int size);
+      tagging::world_size_t rank,
+      tagging::world_size_t size);
 
   const std::string getBackendName() const override {
       return std::string(UCC_BACKEND_NAME);
@@ -135,17 +184,17 @@ public:
 
   c10::intrusive_ptr<ProcessGroup::Work> send(
       std::vector<at::Tensor>& tensors,
-      int dstRank,
-      int tag) override;
+      tagging::world_size_t dstRank,
+      tagging::tag_t tag) override;
 
   c10::intrusive_ptr<ProcessGroup::Work> recv(
       std::vector<at::Tensor>& tensors,
-      int srcRank,
-      int tag) override;
+      tagging::world_size_t srcRank,
+      tagging::tag_t tag) override;
 
   c10::intrusive_ptr<ProcessGroup::Work> recvAnysource(
       std::vector<at::Tensor>& tensors,
-      int tag) override;
+      tagging::tag_t tag) override;
 
   c10::intrusive_ptr<ProcessGroup::Work> barrier(
       const BarrierOptions& opts = BarrierOptions()) override;
@@ -158,11 +207,8 @@ private:
 
 ProcessGroupUCC::ProcessGroupUCC(
     const c10::intrusive_ptr<Store>& store,
-    int rank,
-    int size) : ProcessGroup(rank, size), store(store), worker(std::make_shared<UCPWorker>()) {
-  static_assert(std::is_same<decltype(size), world_size_type>::value,
-    "If you updated the type of `size`, please check with note [Receive from an endpoint]."
-  );
+    tagging::world_size_t rank,
+    tagging::world_size_t size) : ProcessGroup(rank, size), store(store), worker(std::make_shared<UCPWorker>()) {
   store->set("ucp_address:" + std::to_string(rank_), worker->address());
   for (int i = 0; i < size_; i++) {
     UCPWorker::Address peer_addr = store->get("ucp_address:" + std::to_string(i));
@@ -241,9 +287,9 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::alltoall_base(
 // See note: [Receive from an endpoint]
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::send(
     std::vector<at::Tensor>& tensors,
-    int dstRank,
-    int tag) {
-  static_assert(std::is_same<decltype(tag), tag_type>::value,
+    tagging::world_size_t dstRank,
+    tagging::tag_t tag) {
+  static_assert(std::is_same<decltype(tag), tagging::tag_t>::value,
     "If you updated the type of tag, please check with note [Receive from an endpoint]."
   );
   check_tensor(tensors);
@@ -251,16 +297,16 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::send(
   auto& tensor = tensors[0];
   auto request = ucp_endpoints[dstRank]->send_with_tag(
     tensor.data_ptr(), tensor.element_size() * tensor.numel(),
-    wrap_tag(rank_, tag), tensor.device().type());
+    tagging::wrap_tag(rank_, tag), tensor.device().type());
   return c10::make_intrusive<ProcessGroupUCC::WorkUCP>(worker, request);
 }
 
 // See note: [Receive from an endpoint]
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::recv(
     std::vector<at::Tensor>& tensors,
-    int srcRank,
-    int tag) {
-  static_assert(std::is_same<decltype(tag), tag_type>::value,
+    tagging::world_size_t srcRank,
+    tagging::tag_t tag) {
+  static_assert(std::is_same<decltype(tag), tagging::tag_t>::value,
     "If you updated the type of tag, please check with note [Receive from an endpoint]."
   );
   check_tensor(tensors);
@@ -268,22 +314,19 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::recv(
   auto& tensor = tensors[0];
   auto request = worker->recv_with_tag_and_mask(
     tensor.data_ptr(), tensor.element_size() * tensor.numel(),
-    wrap_tag(srcRank, tag), complete_tag_mask(), tensor.device().type());
+    tagging::wrap_tag(srcRank, tag), tagging::complete_tag_mask(), tensor.device().type());
   return c10::make_intrusive<ProcessGroupUCC::WorkUCP>(worker, request);
 }
 
 // See note: [Receive from an endpoint]
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::recvAnysource(
     std::vector<at::Tensor>& tensors,
-    int tag) {
-  static_assert(std::is_same<decltype(tag), tag_type>::value,
-    "If you updated the type of tag, please check with note [Receive from an endpoint]."
-  );
+    tagging::tag_t tag) {
   check_tensor(tensors);
   auto& tensor = tensors[0];
   auto request = worker->recv_with_tag_and_mask(
     tensor.data_ptr(), tensor.element_size() * tensor.numel(),
-    wrap_tag(0, tag), any_source_mask(), tensor.device().type());
+    tagging::wrap_tag(0, tag), tagging::any_source_mask(), tensor.device().type());
   return c10::make_intrusive<ProcessGroupUCC::WorkUCP>(worker, request);
 };
 
@@ -303,8 +346,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::_allgather_base(
 
 C10_EXPORT c10::intrusive_ptr<c10d::ProcessGroup> createProcessGroupUCC(
   const c10::intrusive_ptr<c10d::Store>& store,
-  int rank,
-  int size) {
+  tagging::world_size_t rank,
+  tagging::world_size_t size) {
   return c10::make_intrusive<c10d::ProcessGroupUCC>(store, rank, size);
 }
 
