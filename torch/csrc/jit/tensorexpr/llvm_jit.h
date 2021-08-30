@@ -20,8 +20,8 @@ namespace tensorexpr {
 extern "C" {
 void DispatchParallel(
     int8_t* func,
-    int start,
-    int stop,
+    int64_t start,
+    int64_t stop,
     int8_t* packed_data) noexcept;
 }
 
