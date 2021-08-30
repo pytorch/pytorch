@@ -86,9 +86,7 @@ void SumReduceDimsGradientOp<CPUContext, false, false>::Compute(
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(ReduceFrontSum, SumReduceDimsOp<CPUContext, true, false>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     ReduceFrontSumGradient,
     SumReduceDimsGradientOp<CPUContext, true, false>);
@@ -105,12 +103,9 @@ class GetReduceFrontSumGradient : public GradientMakerBase {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(ReduceFrontSum, GetReduceFrontSumGradient);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(ReduceBackSum, SumReduceDimsOp<CPUContext, false, false>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     ReduceBackSumGradient,
     SumReduceDimsGradientOp<CPUContext, false, false>);
@@ -127,7 +122,6 @@ class GetReduceBackSumGradient : public GradientMakerBase {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(ReduceBackSum, GetReduceBackSumGradient);
 
 #define REDUCTION_OP_SHAPE_INFERENCE(is_front_reducer)                      \
@@ -145,7 +139,6 @@ REGISTER_GRADIENT(ReduceBackSum, GetReduceBackSumGradient);
   return vector<TensorShape>{                                               \
       CreateTensorShape(output_shape, in[0].data_type())};
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ReduceFrontSum)
     .NumInputs(1, 2)
     .NumOutputs(1)
@@ -216,10 +209,8 @@ Y: [18. 32. 27.]
                                 const vector<TensorShape>& in) {
       REDUCTION_OP_SHAPE_INFERENCE(true)
     });
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ReduceFrontSumGradient).NumInputs(2, 3).NumOutputs(1);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ReduceBackSum)
     .NumInputs(1, 2)
     .NumOutputs(1)
@@ -291,7 +282,6 @@ Y: [[36. 40.]]
                                 const vector<TensorShape>& in) {
       REDUCTION_OP_SHAPE_INFERENCE(false)
     });
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ReduceBackSumGradient).NumInputs(2, 3).NumOutputs(1);
 
 #undef REDUCTION_OP_SHAPE_INFERENCE

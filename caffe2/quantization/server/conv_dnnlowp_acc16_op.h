@@ -46,7 +46,7 @@ class ConvDNNLowPAcc16Op final : public ConvDNNLowPOp<std::uint8_t, ReluFused> {
       const std::uint8_t* col_buffer,
       vector<std::int32_t>* Y_int32);
 
-  virtual bool Acc16() const override {
+   bool Acc16() const override {
     return !fallback_to_32_bit_accumulation_;
   }
 

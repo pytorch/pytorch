@@ -725,6 +725,26 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
   return self.copy_(args.lgamma_().sum(-1).add_(p2_sub_p * std::log(c10::pi<double>) * QUARTER));
 }
 
+Tensor& mvlgamma_out(const Tensor& self, int64_t p, Tensor& result) {
+  auto out = self.mvlgamma(p);
+  TORCH_CHECK(
+      at::can_cast(out.scalar_type(), result.scalar_type()),
+      "mvlgamma: result type ",
+      self.scalar_type(),
+      " can't be cast to the desired output type ",
+      out.scalar_type());
+  at::native::resize_output(result, out.sizes());
+  return result.copy_(out);
+}
+
+Tensor special_multigammaln(const Tensor& self, int64_t p) {
+  return self.mvlgamma(p);
+};
+
+Tensor& special_multigammaln_out(const Tensor& self, int64_t p, Tensor& result) {
+  return at::mvlgamma_out(result, self, p);
+};
+
 std::tuple<Tensor, Tensor> frexp(const Tensor& self) {
   Tensor mantissa = at::empty_like(self);
   Tensor exponent = at::empty_like(self, self.options().dtype(at::kInt));

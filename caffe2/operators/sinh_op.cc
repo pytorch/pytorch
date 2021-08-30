@@ -23,14 +23,12 @@ bool SinhGradientFunctor<CPUContext>::Forward(
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     Sinh,
     UnaryElementwiseOp<
         TensorTypes<float>,
         CPUContext,
         SinhFunctor<CPUContext>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SinhGradient,
     BinaryElementwiseOp<
@@ -38,7 +36,6 @@ REGISTER_CPU_OPERATOR(
         CPUContext,
         SinhGradientFunctor<CPUContext>>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Sinh)
     .NumInputs(1)
     .NumOutputs(1)
@@ -94,7 +91,6 @@ Y: [1.15841695 0.5541099  0.03216984 1.09924557 0.49732079]
         "element-wise")
     .InheritOnnxSchema();
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SinhGradient)
     .NumInputs(2)
     .NumOutputs(1)
@@ -115,7 +111,6 @@ class GetSinhGradient : public GradientMakerBase {
 
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(Sinh, GetSinhGradient);
 
 } // namespace caffe2

@@ -16,7 +16,6 @@ const auto testSource = R"JIT(
     an_attribute : Tensor
 )JIT";
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ClassParserTest, Basic) {
   Parser p(std::make_shared<Source>(testSource));
   std::vector<Def> definitions;

@@ -1,10 +1,8 @@
 #include "caffe2/operators/data_couple.h"
 
 namespace caffe2 {
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(DataCouple, DataCoupleOp<CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(DataCouple)
     .EnforceOneToOneInplace()
     .SetDoc(R"DOC(

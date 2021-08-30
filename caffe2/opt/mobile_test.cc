@@ -11,7 +11,6 @@
     arg->set_##_type(_val);                 \
   }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MobileTest, Convolution) {
   caffe2::NetDef net;
   for (auto i = 0; i < 10; ++i) {
