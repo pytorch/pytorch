@@ -2178,6 +2178,31 @@ Tensor numpy_T(const Tensor &self) {
   return self.permute(transpose_dims);
 }
 
+Tensor matrix_H(const Tensor &self) {
+  TORCH_CHECK(self.dim() == 2,
+      "tensor.H only supported on matrices (2-D tensors). Got ", self.dim(), "-D tensor.",
+      self.dim() > 2 ? " For batches of matrices, consider using tensor.mH" : "");
+  return self.is_complex() ? self.transpose(-2, -1).conj() : self.transpose(-2, -1);
+}
+
+Tensor mT(const Tensor &self) {
+  TORCH_CHECK(self.dim() > 1,
+      "tensor.mT only supported on matrices or batches of matrices. Got ", self.dim(), "-D tensor.");
+  return self.transpose(-2, -1);
+}
+
+Tensor mH(const Tensor &self) {
+  TORCH_CHECK(self.dim() > 1,
+      "tensor.mH only supported on matrices or batches of matrices. Got ", self.dim(), "-D tensor.");
+  return self.is_complex() ? self.transpose(-2, -1).conj() : self.transpose(-2, -1);
+}
+
+Tensor adjoint(const Tensor &self) {
+  TORCH_CHECK(self.dim() > 1,
+      "tensor.adjoint() only supported on matrices or batches of matrices. Got ", self.dim(), "-D tensor.");
+  return self.is_complex() ? self.transpose(-2, -1).conj() : self.transpose(-2, -1);
+}
+
 Tensor view(const Tensor& self,
             IntArrayRef size) {
 

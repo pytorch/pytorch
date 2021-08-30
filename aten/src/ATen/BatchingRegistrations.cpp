@@ -1047,7 +1047,10 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   // NB: static_cast because there's another variant of narrow. However, we don't
   // want to support the other variant yet bc it isn't documented...
   m.impl("narrow", static_cast<Tensor(*)(const Tensor&,int64_t,int64_t,int64_t)>(native::narrow)); // composite wrt autograd
-  m.impl("numpy_T", native::numpy_T); // composite wrt autograd
+  m.impl("numpy_T", native::numpy_T);   // composite wrt autograd
+  m.impl("matrix_H", native::matrix_H); // composite wrt autograd
+  m.impl("mT", native::mT);             // composite wrt autograd
+  m.impl("mH", native::mH);             // composite wrt autograd
   m.impl("permute", permute_batching_rule);
   m.impl("reshape", reshape_batching_rule);
   m.impl("reshape_as", native::reshape_as); // composite wrt autograd

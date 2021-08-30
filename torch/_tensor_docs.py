@@ -4845,6 +4845,49 @@ If ``n`` is the number of dimensions in ``x``,
 ``x.T`` is equivalent to ``x.permute(n-1, n-2, ..., 0)``.
 """)
 
+add_docstr_all('H',
+               r"""
+Returns a view of a matrix (2-D tensor) conjugated and transposed.
+
+``x.H`` is equivalent to ``x.transpose(0, 1).conj()`` for complex matrices and
+``x.transpose(0, 1)`` for real matrices.
+
+.. seealso::
+
+        :attr:`~.Tensor.mH`: An attribute that also works on batches of matrices.
+""")
+
+add_docstr_all('mT',
+               r"""
+Is this tensor with the last two dimensions transposed.
+
+``x.mT`` is equivalent to ``x.transpose(-2, -1)``.
+""")
+
+add_docstr_all('mH',
+               r"""
+Alias for :meth:`~Tensor.adjoint`.
+""")
+
+add_docstr_all('adjoint',
+               r"""
+adjoint(Tensor) -> Tensor
+Returns a view of the tensor conjugated and with the last two dimensions transposed.
+
+``x.adjoint()`` is equivalent to ``x.transpose(-2, -1).conj()`` for complex tensors and
+``x.transpose(-2, -1)`` for real tensors.
+
+Example::
+    >>> x = torch.arange(4, dtype=torch.float)
+    >>> A = torch.complex(x, x.flip(0)).reshape(2, 2)
+    >>> A
+    tensor([[0.+0.j, 1.+1.j],
+            [2.+2.j, 3.+3.j]])
+    >>> A.adjoint()
+    tensor([[0.-3.j, 2.-1.j],
+            [1.-2.j, 3.-0.j]])
+""")
+
 add_docstr_all('real',
                r"""
 Returns a new tensor containing real values of the :attr:`self` tensor.

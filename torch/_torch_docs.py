@@ -435,6 +435,13 @@ Example::
             [ 0.7573, -3.9555, -2.8681]])
 """.format(**common_args, **tf32_notes))
 
+add_docstr(torch.adjoint,
+           r"""
+adjoint(input) -> Tensor
+
+Alias for :meth:`~Tensor.adjoint`.
+""")
+
 add_docstr(torch.sspaddmm,
            r"""
 sspaddmm(input, mat1, mat2, *, beta=1, alpha=1, out=None) -> Tensor
