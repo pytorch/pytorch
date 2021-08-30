@@ -7658,46 +7658,38 @@ else:
 
                     exec_fn(scalar_type, dtype, condition, x, scalar_1)
 
-    # For current implementation,
-    # below are the valid `TensorDtype` and `ScalarType` combinations.
-    def _where_valid_scalar_tensor_combination(self, scalar_type, dtype):
-        if (dtype.is_floating_point):
-            return scalar_type in (int, float)
-        if dtype.is_complex:
-            return True
-        return scalar_type == int
-
-    @onlyOnCPUAndCUDA
-    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes() +
-              torch.testing.get_all_complex_dtypes()))
-    def test_where_scalar_invalid_combination_raises(self, device, dtype):
-
-        def checkRaises(scalar_type, dtype, condition, x, scalar_1):
-            if not self._where_valid_scalar_tensor_combination(scalar_type, dtype):
-                # Note: This should fail once `where` supports type promotion.
-                with self.assertRaisesRegex(RuntimeError, "where: Narrowing cast from scalar"):
-                    torch.where(condition, x, scalar_1)
-
-        self._test_where_scalar_template(device, dtype, checkRaises)
-
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes() +
               torch.testing.get_all_complex_dtypes()))
     def test_where_scalar_valid_combination(self, device, dtype):
 
         def checkResult(scalar_type, dtype, condition, x, scalar_1):
-            if self._where_valid_scalar_tensor_combination(scalar_type, dtype):
-                def x_like(scalar, without_dtype=False):
-                    return torch.tensor(scalar, dtype=dtype, device=device).expand_as(x)
+            def x_like(scalar):
+                python_torch_dtype_map = {
+                    complex: torch.complex64,
+                    float: torch.get_default_dtype(),
+                    bool: torch.bool,
+                    int: torch.long}
 
-                # X = Tensor, Y = Scalar
-                scalar_out = torch.where(condition, x, scalar_1)
-                tensor_out = torch.where(condition, x, x_like(scalar_1))
-                self.assertEqual(scalar_out, tensor_out)
+                dtype = python_torch_dtype_map[scalar_type]
+                return torch.tensor(scalar, dtype=dtype, device=device).expand_as(x)
 
-                # X = Scalar, Y = Tensor
-                scalar_out = torch.where(condition, scalar_1, x)
-                tensor_out = torch.where(condition, x_like(scalar_1), x)
-                self.assertEqual(scalar_out, tensor_out)
+            # X = Tensor, Y = Scalar
+            scalar_out = torch.where(condition, x, scalar_1)
+            scalar_t = x_like(scalar_1)
+            # Remove this type promotion shenanigan once
+            # torch.where supports tensors of different dtypes.
+            promoted_dtype = torch.result_type(x, scalar_t)
+            tensor_out = torch.where(condition, x.to(promoted_dtype), scalar_t.to(promoted_dtype))
+            self.assertEqual(scalar_out, tensor_out)
+
+            # X = Scalar, Y = Tensor
+            scalar_out = torch.where(condition, scalar_1, x)
+            scalar_t = x_like(scalar_1)
+            # Remove this type promotion shenanigan once
+            # torch.where supports tensors of different dtypes.
+            promoted_dtype = torch.result_type(x, scalar_t)
+            tensor_out = torch.where(condition, scalar_t.to(promoted_dtype), x.to(promoted_dtype))
+            self.assertEqual(scalar_out, tensor_out)
 
         self._test_where_scalar_template(device, dtype, checkResult)
 
