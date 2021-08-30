@@ -318,6 +318,11 @@ class TestSparseCSR(TestCase):
     @coalescedonoff
     @dtypes(torch.double)
     def test_coo_to_csr_convert(self, device, dtype, coalesced):
+        with self.assertRaisesRegex(RuntimeError, "Input is supposed to be a vector"):
+            torch._convert_indices_from_coo_to_csr(
+                torch.randint(100, (5, 5), device=device),
+                size=100)
+
         size = (5, 5)
         sparse_dim = 2
         nnz = 10
@@ -343,6 +348,14 @@ class TestSparseCSR(TestCase):
         csr = coo.to_sparse_csr()
 
         self.assertEqual(coo.matmul(vec), csr.matmul(vec))
+
+        col_indices = torch.tensor([
+            31, 92, 65, 50, 34, 62, 22, 56, 74, 89
+        ], dtype=torch.int64, device=device)
+        self.assertEqual(csr.col_indices(), col_indices)
+
+        values = torch.tensor([2, 1, 6, 4, 10, 3, 5, 9, 8, 7], dtype=dtype, device=device)
+        self.assertEqual(csr.values(), values)
 
     @onlyCPU
     @unittest.skipIf(IS_MACOS or IS_WINDOWS, "MKL doesn't work on windows or mac")

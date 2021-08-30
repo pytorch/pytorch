@@ -1,6 +1,7 @@
 #pragma once
 
-#include <c10/cuda/CUDAFunctions.h>
+#include <c10/cuda/CUDAMacros.h>
+#include <c10/cuda/CUDAMiscFunctions.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 #include <cuda.h>

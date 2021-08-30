@@ -292,60 +292,50 @@ bool FullyConnectedGradientFakeLowpFPOp<Q, Context, Engine, TransposeWeight>::
 }
 
 // IEEE FP16
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     FC,
     FAKE_FP16,
     FullyConnectedFakeLowpFPOp<fp32_to_fp16, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     FCGradient,
     FAKE_FP16,
     FullyConnectedGradientFakeLowpFPOp<fp32_to_fp16, CPUContext>);
 
 // BFLOAT 16
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     FC,
     FAKE_BFP_16,
     FullyConnectedFakeLowpFPOp<fp32_to_bfp16, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     FCGradient,
     FAKE_BFP_16,
     FullyConnectedGradientFakeLowpFPOp<fp32_to_bfp16, CPUContext>);
 
 // BFLOAT 24 (chop the least significant 8 bits)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     FC,
     FAKE_BFP_24,
     FullyConnectedFakeLowpFPOp<fp32_to_bfp24, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     FCGradient,
     FAKE_BFP_24,
     FullyConnectedGradientFakeLowpFPOp<fp32_to_bfp24, CPUContext>);
 
 // BFLOAT 14 (chop 2 extra bits from BFLOAT 16)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     FC,
     FAKE_BFP_14,
     FullyConnectedFakeLowpFPOp<fp32_to_bfp14, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     FCGradient,
     FAKE_BFP_14,
     FullyConnectedGradientFakeLowpFPOp<fp32_to_bfp14, CPUContext>);
 
 // BFLOAT16 with rounding
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     FC,
     FAKE_BFP_16_ROUND,
     FullyConnectedFakeLowpFPOp<fp32_to_bfp16_round, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     FCGradient,
     FAKE_BFP_16_ROUND,

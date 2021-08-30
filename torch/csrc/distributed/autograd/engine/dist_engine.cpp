@@ -26,9 +26,7 @@ using torch::autograd::ReadyQueue;
 using torch::autograd::validate_outputs;
 using torch::autograd::variable_list;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static constexpr char* kNumBackwardPasses = "num_current_backward_passes";
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static constexpr char* kNumAutogradContexts = "num_autograd_contexts";
 
 // This hook does 3 things:
@@ -144,7 +142,6 @@ DistEngine::~DistEngine() {
 
 DistEngine& DistEngine::getInstance() {
   // Leaky singleton to avoid module destructor race.
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static DistEngine* engine = new DistEngine();
   return *engine;
 }
@@ -362,7 +359,7 @@ void DistEngine::execute_graph_task_until_ready_queue_empty(
         continue;
       }
       if (task.fn_ && !local_graph_task->has_error_.load()) {
-        AutoGradMode grad_mode(local_graph_task->grad_mode_);
+        at::ThreadLocalStateGuard tls_guard(local_graph_task->thread_locals_);
         try {
           GraphTaskGuard guard(local_graph_task);
           engine_.evaluate_function(

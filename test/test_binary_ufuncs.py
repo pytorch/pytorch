@@ -17,11 +17,13 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCUDA, onlyCPU, dtypes, dtypesIfCUDA,
     dtypesIfCPU, deviceCountAtLeast, precisionOverride, onlyOnCPUAndCUDA,
-    skipCUDAIfRocm, skipIf)
+    skipCUDAIfRocm, skipIf, ops)
 from torch.testing import all_types_and_complex_and, integral_types_and
+from torch.testing._internal.common_methods_invocations import binary_ufuncs
 
 if TEST_SCIPY:
     import scipy.special
+    import scipy.integrate
 
 # TODO: remove this
 def _generate_input(shape, dtype, device, with_extremal):
@@ -88,6 +90,74 @@ def _make_tensor(shape, dtype, device, fill_ones=False) -> torch.Tensor:
 
 # TODO: update to use opinfos consistently
 class TestBinaryUfuncs(TestCase):
+    @ops(binary_ufuncs, allowed_dtypes=(torch.float32,))
+    def test_broadcasting(self, device, dtype, op):
+        for shape_lhs, shape_rhs in (
+            ((1,), ()),
+            ((2,), ()),
+            ((1,), (2,)),
+            ((2,), (2,)),
+            ((2, 1), (2,)),
+            ((1, 2), (2,)),
+            ((3, 2), (2,)),
+            ((3, 2), (3, 2)),
+            ((1, 3, 2), (2,)),
+            ((1, 3, 2), (3, 2)),
+            ((3, 1, 2), (3, 2)),
+            ((1, 3, 2), (1, 3, 2)),
+            ((2, 3, 2), ()),
+            ((2, 3, 2), (2, 3, 2)),
+            ((3, 1, 2), (1, 3, 2)),
+        ):
+            lhs = make_tensor(shape_lhs, device=device, dtype=dtype, **op.lhs_make_tensor_kwargs)
+            rhs = make_tensor(shape_rhs, device=device, dtype=dtype, **op.rhs_make_tensor_kwargs)
+
+            actual = op(lhs, rhs).shape
+            expected = torch.broadcast_shapes(shape_lhs, shape_rhs)
+
+            msg = (
+                f"On {device}, torch.{op.name} broadcasts inputs of shapes {shape_lhs} and {shape_rhs} incorrectly: "
+                f"{actual} != {expected}"
+            )
+            self.assertEqual(actual, expected, msg=msg)
+
+    @ops(binary_ufuncs, allowed_dtypes=(torch.float32,))
+    def test_broadcast_python_scalar(self, device, dtype, op):
+        for shape_lhs in ((), (1,), (2,), (1, 2, 3),):
+            lhs = make_tensor(shape_lhs, device=device, dtype=dtype, **op.lhs_make_tensor_kwargs)
+            rhs_tensor = make_tensor((), device=device, dtype=dtype, **op.rhs_make_tensor_kwargs)
+            rhs_python = rhs_tensor.item()
+
+            actual = op(lhs, rhs_python)
+            expected = op(lhs, rhs_tensor)
+
+            self.assertEqual(
+                actual.shape,
+                expected.shape,
+                msg=f"On {device}, torch.{op.name} broadcasts Python scalars different than 0d tensors.",
+            )
+
+    @ops(binary_ufuncs, allowed_dtypes=(torch.float32,))
+    def test_not_broadcastable(self, device, dtype, op):
+        for shape_lhs, shape_rhs in (
+                ((2,), (3,)),
+                ((3, 1), (2, 1)),
+                ((1, 3, 2), (3,)),
+                ((3, 1, 2), (2, 1, 2)),
+        ):
+            lhs = make_tensor(shape_lhs, device=device, dtype=dtype, **op.lhs_make_tensor_kwargs)
+            rhs = make_tensor(shape_rhs, device=device, dtype=dtype, **op.rhs_make_tensor_kwargs)
+
+            try:
+                broadcasted_shape = op(lhs, rhs).shape
+            except RuntimeError:
+                continue
+
+            msg = (
+                f"On {device}, torch.{op.name} broadcasts inputs shapes {shape_lhs} and {shape_rhs} into "
+                f"{broadcasted_shape}, although they are not broadcastable."
+            )
+            raise AssertionError(msg)
 
     def test_add_broadcast_empty(self, device):
         # empty + empty
@@ -1183,11 +1253,10 @@ class TestBinaryUfuncs(TestCase):
     # Also tests that reverse operations are equivalent to forward ops
     # NOTE: division ops are tested separately above
     def test_binary_ops_with_scalars(self, device):
-        for ops in ((operator.add, torch.add),
-                    (operator.sub, torch.sub),
-                    (operator.mul, torch.mul),
-                    (operator.truediv, torch.div)):
-            python_op, torch_op = ops
+        for python_op, torch_op in ((operator.add, torch.add),
+                                    (operator.sub, torch.sub),
+                                    (operator.mul, torch.mul),
+                                    (operator.truediv, torch.div)):
 
             for a, b in product(range(-10, 10), range(-10, 10)):
                 for op in (lambda x: x * .5, lambda x: math.floor(x)):
@@ -1798,6 +1867,49 @@ class TestBinaryUfuncs(TestCase):
         expected = np.nextafter(a.cpu().numpy(), b.cpu().numpy())
         self.assertEqual(actual, expected, atol=0, rtol=0)
 
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.bfloat16)
+    def test_nextafter_bfloat16(self, device, dtype):
+        nan = float('nan')
+        inf = float('inf')
+        cases = (
+            # (from, to, expected)
+            (0, 1, 9.183549615799121e-41),
+            (0, -1, -9.183549615799121e-41),
+            (1, -2, 0.99609375),
+            (1, 0, 0.99609375),
+            (1, 2, 1.0078125),
+            (-1, -2, -1.0078125),
+            (-1, 0, -0.99609375),
+            (2, -1, 1.9921875),
+            (2, 1, 1.9921875),
+            (20, 3000, 20.125),
+            (20, -3000, 19.875),
+            (3000, -20, 2992.0),
+            (-3000, 20, -2992.0),
+            (65536, 0, 65280.0) ,
+            (65536, inf, 66048.0),
+            (-65536, 0, -65280.0),
+            (-65536, -inf, -66048.0),
+            (nan, 0, nan),
+            (0, nan, nan),
+            (nan, nan, nan),
+            (nan, inf, nan),
+            (inf, nan, nan),
+            (inf, -inf, 3.3895313892515355e+38),
+            (-inf, inf, -3.3895313892515355e+38),
+            (inf, 0, 3.3895313892515355e+38),
+            (0, inf, 9.183549615799121e-41),
+            (-inf, 0, -3.3895313892515355e+38),
+            (0, -inf, -9.183549615799121e-41),
+        )
+
+        for from_v, to_v, expected in cases:
+            from_t = torch.tensor([from_v], device=device, dtype=dtype)
+            to_t = torch.tensor([to_v], device=device, dtype=dtype)
+            actual = torch.nextafter(from_t, to_t).item()
+            self.assertEqual(actual, expected, atol=0, rtol=0)
+
     def _test_cop(self, torchfn, mathfn, dtype, device):
         def reference_implementation(res2):
             for i, j in iter_indices(sm1):
@@ -1931,35 +2043,26 @@ class TestBinaryUfuncs(TestCase):
         self.assertEqual(a >> 1, expected_r)
         self.compare_with_numpy(lambda x: x >> 1, lambda x: np.right_shift(x, 1), a)
 
-    def test_bitwise_and(self, device):
-        for dtype in (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64):
-            a = torch.tensor([1, -2, 3], dtype=dtype, device=device)
-            b = torch.tensor([2, 1, 3], dtype=dtype, device=device)
-            expected_res = torch.tensor([0, 0, 3], dtype=dtype, device=device)
-            b_scalar = 2
-            expected_res_scalar = torch.tensor([0, 2, 2], dtype=dtype, device=device)
+    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
+    def test_bitwise_and(self, device, dtype):
+        a = torch.tensor([1, -2, 3], dtype=dtype, device=device)
+        b = torch.tensor([2, 1, 3], dtype=dtype, device=device)
 
-            # standard version
-            self.assertEqual(torch.bitwise_and(a, b), expected_res)
-            self.assertEqual(torch.bitwise_and(a, b_scalar), expected_res_scalar)
+        a_np = a.cpu().numpy()
+        b_np = b.cpu().numpy()
 
-            # out
-            c = torch.empty(0, dtype=dtype, device=device)
-            torch.bitwise_and(a, b, out=c)
-            self.assertEqual(c, expected_res)
-            torch.bitwise_and(a, b_scalar, out=c)
-            self.assertEqual(c, expected_res_scalar)
-
-            # in-place
-            a1 = a.clone()
-            a1.bitwise_and_(b)
-            self.assertEqual(a1, expected_res)
-            a.bitwise_and_(b_scalar)
-            self.assertEqual(a, expected_res_scalar)
+        # Tensor x Tensor
+        self.assertEqual(torch.bitwise_and(a, b), torch.tensor(np.bitwise_and(a_np, b_np), device=device))
+        # Tensor x int scaler
+        self.assertEqual(torch.bitwise_and(a, 2), torch.tensor(np.bitwise_and(a_np, 2), device=device))
 
         self.assertEqual(torch.tensor([False, True, False], device=device),
                          torch.bitwise_and(torch.tensor([True, True, False], device=device),
                                            torch.tensor([False, True, False], device=device)))
+
+        # type promotion
+        c = torch.zeros(2) >= 1
+        self.assertEqual(torch.bitwise_and(c, c.byte()), torch.bitwise_and(c.byte(), c))
 
     def test_bitwise_or(self, device):
         for dtype in (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64):
@@ -2536,17 +2639,17 @@ class TestBinaryUfuncs(TestCase):
             _test_atan2(1, -1, math.pi / -4 , device, dtype)
             _test_atan2(-1, 1, math.pi * 3 / 4 , device, dtype)
 
-    def test_trapz(self, device):
+    def test_trapezoid(self, device):
         def test_dx(sizes, dim, dx, device):
             t = torch.randn(sizes, device=device)
-            actual = torch.trapz(t, dx=dx, dim=dim)
+            actual = torch.trapezoid(t, dx=dx, dim=dim)
             expected = np.trapz(t.cpu().numpy(), dx=dx, axis=dim)
             self.assertEqual(expected.shape, actual.shape)
             self.assertEqual(expected, actual, exact_dtype=False)
 
         def test_x(sizes, dim, x, device):
             t = torch.randn(sizes, device=device)
-            actual = torch.trapz(t, x=torch.tensor(x, device=device), dim=dim)
+            actual = torch.trapezoid(t, x=torch.tensor(x, device=device), dim=dim)
             expected = np.trapz(t.cpu().numpy(), x=x, axis=dim)
             self.assertEqual(expected.shape, actual.shape)
             self.assertEqual(expected, actual.cpu(), exact_dtype=False)
@@ -2571,6 +2674,75 @@ class TestBinaryUfuncs(TestCase):
                 'There must be one `x` value for each sample point'):
             test_x((2, 3), 1, [1.0, 2.0], device)
             test_x((2, 3), 1, [1.0, 2.0, 3.0, 4.0], device)
+
+    @skipIf(not TEST_SCIPY, "Scipy required for the test.")
+    def test_cumulative_trapezoid(self, device):
+
+        import scipy.integrate
+
+        if hasattr(scipy.integrate, 'cumulative_trapezoid'):
+            scipy_cumulative_trapezoid = scipy.integrate.cumulative_trapezoid
+        else:  # Older version of SciPy uses a different name
+            scipy_cumulative_trapezoid = scipy.integrate.cumtrapz
+
+        def test_dx(sizes, dim, dx, device):
+            t = torch.randn(sizes, device=device)
+            y = t.cpu().numpy()
+            actual = torch.cumulative_trapezoid(t, dx=dx, dim=dim)
+            expected = scipy_cumulative_trapezoid(t.cpu().numpy(), dx=dx, axis=dim)
+            self.assertEqual(expected.shape, actual.shape)
+            self.assertEqual(expected, actual, exact_dtype=False, atol=1e-4, rtol=1e-4)
+
+        def test_x(sizes, dim, x, device):
+            t = torch.randn(sizes, device=device)
+            actual = torch.cumulative_trapezoid(t, x=torch.tensor(x, device=device), dim=dim)
+            expected = scipy_cumulative_trapezoid(t.cpu().numpy(), x=x, axis=dim)
+            self.assertEqual(expected.shape, actual.shape)
+            self.assertEqual(expected, actual.cpu(), exact_dtype=False, atol=1e-4, rtol=1e-4)
+
+        def test_empty_x(sizes, dim, x, device):
+            t = torch.randn(sizes, device=device)
+            actual = torch.cumulative_trapezoid(t, x=torch.tensor(x, device=device), dim=dim)
+            self.assertEqual(torch.empty(actual.shape), actual)
+
+        test_dx((2,), -1, 1, device)
+        test_dx((3, 3), -1, 1, device)
+        test_dx((4, 2), 0, 1, device)
+        test_dx((2, 3, 4), 1, 1, device)
+        test_dx((10, 2), 0, 0.1, device)
+        test_dx((1, 10), 0, 2.3, device)
+        test_dx((0, 2), 0, 1.0, device)
+        test_dx((0, 2), 1, 1.0, device)
+        test_dx((512, 512), 1, 1.0, device)
+        test_dx((100, 100, 100), 1, 1.0, device)
+
+        test_x((2,), -1, [100, 50], device)
+        test_x((4, 2), 0, [2, 3, 4, 5], device)
+        test_x((2, 3, 4), 1, [1.0, 2.0, 3.0], device)
+        test_x((10, 2), 0, [2.0, 3.0, 4.0, 7.0, 11.0, 14.0, 22.0, 26.0, 26.1, 30.3], device)
+        test_x((1, 10), 0, [1.0], device)
+        test_x((0, 2), 1, [1, 2], device)
+
+        test_empty_x((0, 2), 0, [], device)  # SciPy failing when x == [], but our version returns empty
+
+        with self.assertRaisesRegex(
+                IndexError,
+                'Dimension out of range'):
+            test_x((2, 3), 2, [], device)
+            test_dx((2, 3), 2, 1.0, device)
+        with self.assertRaisesRegex(
+                RuntimeError,
+                'There must be one `x` value for each sample point'):
+            test_x((2, 3), 1, [1.0, 2.0], device)
+            test_x((0, 2), 0, [1.0, 2.0], device)
+            test_x((2, 3), 1, [1.0, 2.0, 3.0, 4.0], device)
+        with self.assertRaisesRegex(
+                RuntimeError,
+                'Currently, we only support dx as a real number'):
+            test_dx((2, 2), -1, complex(1, 1) , device)
+        with self.assertRaisesRegex(
+                TypeError, 'received an invalid combination of arguments'):
+            actual = torch.cumulative_trapezoid(torch.randn((3, 3)), x=torch.randn((3, 3)), dx=3)
 
     @dtypes(torch.double)
     def test_pow_scalar_overloads_mem_overlap(self, device, dtype):

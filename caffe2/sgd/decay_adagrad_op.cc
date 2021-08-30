@@ -2,9 +2,7 @@
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(DecayAdagrad, DecayAdagradOp<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(DecayAdagrad)
     .NumInputs(6)
     .NumOutputs(3)
@@ -50,6 +48,5 @@ and returns (param_o, m1_o, m2_o)
     .Arg("bias_correction_first", "Default True");
 
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(DecayAdagrad);
 } // namespace caffe2
