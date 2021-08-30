@@ -319,11 +319,16 @@ class TORCH_API BufHandle : public ExprHandle {
 // object. For example: VarHandle x('x'); ExprHandle x2 = x;
 class TORCH_API VarHandle : public ExprHandle {
  public:
+  // Creates an empty VarHandle whose base Var is set to nullptr.
   VarHandle() : ExprHandle() {}
+
   explicit VarHandle(Dtype dtype) : ExprHandle(Var::make(dtype)) {}
+
   VarHandle(const std::string& name_hint, Dtype dtype)
       : ExprHandle(Var::make(name_hint, dtype)) {}
+
   explicit VarHandle(VarPtr node) : ExprHandle(node) {}
+
   VarPtr node() const {
     return static_to<Var>(ExprHandle::node());
   }
