@@ -13,7 +13,7 @@ import numpy as np
 from torch._six import inf
 import collections.abc
 
-from typing import Any, Callable, List, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, List, Optional, Sequence, Tuple, Union, Dict
 
 from torch.testing import \
     (make_non_contiguous, floating_types, floating_types_and, complex_types,
@@ -5221,6 +5221,36 @@ def sample_inputs_grid_sample(op_info, device, dtype, requires_grad, **kwargs):
 
     return sample_inputs
 
+def sample_inputs_nll_loss(op_info, device, dtype, requires_grad, **kwargs):
+    batch_size, num_classes = shape = (2, 3)
+
+    input_shape_and_kwargs: List[Tuple[Tuple[int, ...], Dict[str, Any]]] = [
+        ((*shape, 1), dict()),
+        ((*shape, 1, 2), dict()),
+        ((*shape, 1, 2, 3), dict()),
+        (shape, dict(weight=make_tensor((num_classes,), device=device, dtype=dtype).abs())),
+        (shape, dict(ignore_index=num_classes // 2)),
+        (shape, dict(reduction="sum")),
+        (shape, dict(reduction="mean")),
+    ]
+
+    sample_inputs = []
+    for input_shape, kwargs in input_shape_and_kwargs:
+        input = make_tensor(input_shape, device=device, dtype=dtype, requires_grad=requires_grad)
+
+        target = make_tensor(
+            (batch_size, *input_shape[2:]),
+            low=0,
+            high=num_classes,
+            device=device,
+            dtype=torch.long,
+            requires_grad=requires_grad
+        )
+
+        sample_inputs.append(SampleInput(input, args=(target,), kwargs=kwargs))
+
+    return sample_inputs
+
 foreach_unary_op_db: List[OpInfo] = [
     ForeachFuncInfo('exp'),
     ForeachFuncInfo('acos'),
@@ -9042,6 +9072,21 @@ op_db: List[OpInfo] = [
             # FIXME: nansum does not support passing None to dim
             SkipInfo('TestReductions', 'test_dim_none'),
             SkipInfo('TestReductions', 'test_dim_none_keepdim'),
+        ),
+    ),
+    OpInfo(
+        "nn.functional.nll_loss",
+        ref=_NOTHING,
+        dtypesIfCPU=floating_types_and(torch.bfloat16),
+        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        supports_out=False,
+        sample_inputs_func=sample_inputs_nll_loss,
+        skips=(
+            SkipInfo(
+                "TestJit",
+                "test_variant_consistency_jit",
+                dtypes=(torch.float32,),
+            ),
         ),
     ),
 ]
