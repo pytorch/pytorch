@@ -50,6 +50,7 @@ LABEL_CIFLOW_SCHEDULED = "ciflow/scheduled"
 LABEL_CIFLOW_SLOW = "ciflow/slow"
 LABEL_CIFLOW_WIN = "ciflow/win"
 LABEL_CIFLOW_XLA = "ciflow/xla"
+LABEL_CIFLOW_NOARCH = "ciflow/noarch"
 
 
 @dataclass
@@ -151,6 +152,8 @@ class CIWorkflow:
     enable_slow_test: YamlShellBool = "''"
     enable_docs_test: YamlShellBool = "''"
     enable_backwards_compat_test: YamlShellBool = "''"
+    enable_xla_test: YamlShellBool = "''"
+    enable_noarch_test: YamlShellBool = "''"
 
     def __post_init__(self) -> None:
         if self.is_libtorch:
@@ -410,18 +413,6 @@ LINUX_WORKFLOWS = [
             labels={LABEL_CIFLOW_SCHEDULED, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_LIBTORCH, LABEL_CIFLOW_CUDA},
         ),
     ),
-    # CIWorkflow(
-    #     arch="linux",
-    #     build_environment="linux-bionic-py3.6-clang9-noarch",
-    #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-py3.6-clang9",
-    #     test_runner_type=LINUX_CPU_TEST_RUNNER,
-    # ),
-    # CIWorkflow(
-    #     arch="linux",
-    #     build_environment="vulkan-linux-bionic-py3.6-clang9",
-    #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-py3.6-clang9",
-    #     test_runner_type=LINUX_CPU_TEST_RUNNER,
-    # ),
     CIWorkflow(
         arch="linux",
         build_environment="linux-bionic-py3.8-gcc9-coverage",
@@ -437,15 +428,17 @@ LINUX_WORKFLOWS = [
     ),
     CIWorkflow(
         arch="linux",
-        build_environment="linux-bionic-py3.6-clang9-xla",
+        build_environment="linux-bionic-py3.6-clang9",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-py3.6-clang9",
         test_runner_type=LINUX_CPU_TEST_RUNNER,
         on_pull_request=True,
-        num_test_shards=1,
+        num_test_shards=2,
         distributed_test=False,
+        enable_xla_test=1,
+        enable_noarch_test=1,
         ciflow_config=CIFlowConfig(
             enabled=True,
-            labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU, LABEL_CIFLOW_XLA},
+            labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU, LABEL_CIFLOW_XLA, LABEL_CIFLOW_NOARCH},
         ),
     ),
     # CIWorkflow(
