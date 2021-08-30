@@ -11,7 +11,7 @@ import torch.onnx
 import torch.onnx.utils
 
 from functools import wraps
-from torch._C import OptionalType
+from torch._C import UnionType, TensorType
 
 
 # Note [Edit Symbolic Files]
@@ -794,7 +794,7 @@ def _is_split_static(split_size_or_sizes, _outputs):
 
 def _optional_input_placeholder_tensor(g):
     n = g.op("prim::Constant")
-    n.setType(OptionalType.ofTensor())
+    n.setType(UnionType.createOptionalOf(TensorType.get()))
     return n
 
 def _handle_reduce_dim_none(g, self, op_name):

@@ -337,7 +337,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
     }
   }
   throw py::cast_error(c10::str(
-  "toIValue() cannot handle converting to type: ", type->repr_str()));
+      "toIValue() cannot handle converting to type: ", type->repr_str()));
 }
 
 } // namespace jit
