@@ -127,6 +127,10 @@ A patch release is a maintenance release of PyTorch that includes fixes for regr
 ## Things to consider for a patch release
 
 1. Does the regression break core functionality?
+2. Does the regression break first party domain libraries that depend on locked versions of `pytorch`?
+    * [pytorch/vision](https://github.com/pytorch/vision)
+    * [pytorch/audio](https://github.com/pytorch/audio)
+    * [pytorch/text](https://github.com/pytorch/text)
 2. Is there not a viable workaround?
 
 ## Patch release process
