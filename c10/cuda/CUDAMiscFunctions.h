@@ -6,6 +6,6 @@
 
 namespace c10 {
 namespace cuda {
-C10_CUDA_API const char* get_cuda_check_suffix() noexcept;
+C10_CUDA_API std::string get_cuda_check_suffix(cudaError_t err) noexcept;
 }
 } // namespace c10
