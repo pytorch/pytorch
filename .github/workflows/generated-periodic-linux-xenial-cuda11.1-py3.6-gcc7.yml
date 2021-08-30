@@ -229,6 +229,7 @@ jobs:
       ENABLE_NOGPU_NO_AVX2_TEST: ''
       ENABLE_SLOW_TEST: ''
       ENABLE_DOCS_TEST: ''
+      ENABLE_BACKWARDS_COMPAT_TEST: ''
       NUM_TEST_SHARDS: 2
       MULTIGPU_RUNNER_TYPE: linux.16xlarge.nvidia.gpu
       NOGPU_RUNNER_TYPE: linux.2xlarge
