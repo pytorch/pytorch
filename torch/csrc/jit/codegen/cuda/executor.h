@@ -117,6 +117,11 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
       const LaunchParams& launch_params,
       const std::vector<at::Tensor>& args);
 
+  //! Internal knob used for debugging/profiling only
+  void disableLaunchParamCache() {
+    disable_parameter_cache_ = true;
+  }
+
  private:
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   struct GlobalBuffers {
@@ -193,6 +198,9 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
 
   // The last kernel execution time, if measure_kernel_time_ is true
   float kernel_time_ms_ = 0;
+
+  // Profiling support: knob to disable caching of launch params
+  bool disable_parameter_cache_ = false;
 };
 
 } // namespace cuda

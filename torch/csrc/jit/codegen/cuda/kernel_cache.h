@@ -73,6 +73,20 @@ class TORCH_CUDA_CU_API FusionKernelRuntime {
     profiling_ = to_profile;
   }
 
+  //! Internal knob for profiling shape inference
+  void disableLaunchParamCache() {
+    for (auto& executor : executors_) {
+      executor.disableLaunchParamCache();
+    }
+  }
+
+  //! Internal knob for profiling shape inference
+  void disableKernelLaunch() {
+    for (auto& executor : executors_) {
+      executor.setExecuteKernelFlag(false);
+    }
+  }
+
   //! Returns if this runtime is segmented
   bool isSegmented() {
     return is_segmented_;
@@ -328,6 +342,24 @@ class TORCH_CUDA_CU_API FusionExecutorCache {
     for (auto& it : kernel_runtimes_) {
       for (auto& kernel_runtime : it.second) {
         kernel_runtime->profile(to_profile);
+      }
+    }
+  }
+
+  //! Internal knob for profiling shape inference
+  void disableLaunchParamCache() {
+    for (auto& it : kernel_runtimes_) {
+      for (auto& kernel_runtime : it.second) {
+        kernel_runtime->disableLaunchParamCache();
+      }
+    }
+  }
+
+  //! Internal knob for profiling shape inference
+  void disableKernelLaunch() {
+    for (auto& it : kernel_runtimes_) {
+      for (auto& kernel_runtime : it.second) {
+        kernel_runtime->disableKernelLaunch();
       }
     }
   }

@@ -5,6 +5,7 @@ add_executable(nvfuser_bench
   broadcast.cpp
   gelu_backward.cpp
   heuristic_lookup.cpp
+  shape_inference.cpp
   instance_norm.cpp
   layer_norm.cpp
   lstm_cell.cpp

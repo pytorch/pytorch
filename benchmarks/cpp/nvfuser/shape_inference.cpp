@@ -14,6 +14,8 @@
 
 using namespace torch::jit::fuser::cuda;
 
+namespace {
+
 // Make a tensor that is known to be non-contiguous of dimensionality=ndims,
 // but unknown sizes
 TensorView* makeSymbolicTensor(size_t ndims, DataType dtype = DataType::Float) {
@@ -26,6 +28,8 @@ TensorView* makeConcreteTensor(
     DataType dtype = DataType::Float) {
   return TensorViewBuilder().shape(shape).dtype(dtype).build();
 }
+
+} // namespace
 
 static auto getLayerBackwardNormRuntime(
     std::unique_ptr<Fusion> fusion_ptr,
@@ -97,8 +101,9 @@ static auto getLayerBackwardNormRuntime(
   return fec->getMostRecentKernelRuntime();
 }
 
-static void LayerNormBackward_HeuristicLookup(
-    benchmark::State& benchmark_state) {
+void LayerNormBackward_ShapeInference_Base(
+    benchmark::State& benchmark_state,
+    bool disable_launch_parameter_cache) {
   std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
   FusionGuard fg(fusion_ptr.get());
 
@@ -114,10 +119,27 @@ static void LayerNormBackward_HeuristicLookup(
   TORCH_INTERNAL_ASSERT(
       runtime->getMaybeHeuristicsFor(aten_inputs).has_value());
 
+  fec->profile(true);
+  fec->disableKernelLaunch();
+  fec->runFusionWithInputs(aten_inputs);
+  if (disable_launch_parameter_cache) {
+    fec->disableLaunchParamCache();
+  }
+
   for (auto _ : benchmark_state) {
     // Setup (not included in the measurement)
-    runtime->getMaybeHeuristicsFor(aten_inputs);
+    fec->runFusionWithInputs(aten_inputs);
   }
+}
+
+static void LayerNormBackward_ShapeInference(
+    benchmark::State& benchmark_state) {
+  LayerNormBackward_ShapeInference_Base(benchmark_state, true);
+}
+
+static void LayerNormBackward_NoShapeInferenceCachedBaseline(
+    benchmark::State& benchmark_state) {
+  LayerNormBackward_ShapeInference_Base(benchmark_state, false);
 }
 
 static auto getLayerForwardNormRuntime(
@@ -150,8 +172,9 @@ static auto getLayerForwardNormRuntime(
   return fec->getMostRecentKernelRuntime();
 }
 
-static void LayerNormForward_HeuristicLookup(
-    benchmark::State& benchmark_state) {
+void LayerNormForward_ShapeInferenceBase(
+    benchmark::State& benchmark_state,
+    bool disable_launch_param_cache) {
   std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
   FusionGuard fg(fusion_ptr.get());
 
@@ -164,14 +187,36 @@ static void LayerNormForward_HeuristicLookup(
 
   auto runtime = getLayerForwardNormRuntime(
       std::move(fusion_ptr), fec, aten_inputs, shape, norm_shape);
+
   TORCH_INTERNAL_ASSERT(
       runtime->getMaybeHeuristicsFor(aten_inputs).has_value());
 
+  fec->profile(true);
+  fec->disableKernelLaunch();
+  fec->runFusionWithInputs(aten_inputs);
+
+  if (disable_launch_param_cache) {
+    fec->disableLaunchParamCache();
+  }
+
   for (auto _ : benchmark_state) {
     // Setup (not included in the measurement)
-    runtime->getMaybeHeuristicsFor(aten_inputs);
+    fec->runFusionWithInputs(aten_inputs);
   }
 }
 
-BENCHMARK(LayerNormBackward_HeuristicLookup)->Unit(benchmark::kMicrosecond);
-BENCHMARK(LayerNormForward_HeuristicLookup)->Unit(benchmark::kMicrosecond);
+static void LayerNormForward_NoShapeInferenceCachedBaseline(
+    benchmark::State& benchmark_state) {
+  LayerNormForward_ShapeInferenceBase(benchmark_state, false);
+}
+
+static void LayerNormForward_ShapeInference(benchmark::State& benchmark_state) {
+  LayerNormForward_ShapeInferenceBase(benchmark_state, true);
+}
+
+BENCHMARK(LayerNormBackward_ShapeInference)->Unit(benchmark::kMicrosecond);
+BENCHMARK(LayerNormForward_ShapeInference)->Unit(benchmark::kMicrosecond);
+BENCHMARK(LayerNormBackward_NoShapeInferenceCachedBaseline)
+    ->Unit(benchmark::kMicrosecond);
+BENCHMARK(LayerNormForward_NoShapeInferenceCachedBaseline)
+    ->Unit(benchmark::kMicrosecond);

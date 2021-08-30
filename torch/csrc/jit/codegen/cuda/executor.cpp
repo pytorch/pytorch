@@ -569,7 +569,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
   GlobalBuffers global_buffers;
   uint64_t rand_offset = 0;
 
-  if (executor_entry && executor_entry->init) {
+  if (executor_entry && executor_entry->init && !disable_parameter_cache_) {
     {
       // context manager to disable auto grad for `empty_cuda` calls later
       at::AutoDispatchBelowADInplaceOrView non_variable_type_mode;
