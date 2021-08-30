@@ -281,8 +281,8 @@ std::unordered_set<std::string> BytecodeDeserializer::
       num_args = op_item[2].toInt();
     }
     auto op_found = function->append_operator(
-        op_item[0].toString()->string(),
-        op_item[1].toString()->string(),
+        *op_item[0].toString(),
+        *op_item[1].toString(),
         num_args,
         model_version,
         operator_cache);
