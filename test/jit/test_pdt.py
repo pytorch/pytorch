@@ -438,7 +438,6 @@ class TestPDT(JitTestCase):
         scripted_fn = torch.jit.script(pdt_model, example_inputs={pdt_model: [([10, 20, ], ), ], })
         self.assertEqual(scripted_fn([20]), pdt_model([20]))
 
-    @unittest.skipIf(True, "Temporarily skipping while landing Union PR stack")
     def test_nonetype_as_optional_of_type(self):
         def test_none(a) -> Any:
             if a is None:
