@@ -49,6 +49,7 @@ LABEL_CIFLOW_LINUX = "ciflow/linux"
 LABEL_CIFLOW_SCHEDULED = "ciflow/scheduled"
 LABEL_CIFLOW_SLOW = "ciflow/slow"
 LABEL_CIFLOW_WIN = "ciflow/win"
+LABEL_CIFLOW_XLA = "ciflow/xla"
 
 
 @dataclass
@@ -417,12 +418,6 @@ LINUX_WORKFLOWS = [
     # ),
     # CIWorkflow(
     #     arch="linux",
-    #     build_environment="xla-linux-bionic-py3.6-clang9",
-    #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-py3.6-clang9",
-    #     test_runner_type=LINUX_CPU_TEST_RUNNER,
-    # ),
-    # CIWorkflow(
-    #     arch="linux",
     #     build_environment="vulkan-linux-bionic-py3.6-clang9",
     #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-py3.6-clang9",
     #     test_runner_type=LINUX_CPU_TEST_RUNNER,
@@ -438,6 +433,18 @@ LINUX_WORKFLOWS = [
         ciflow_config=CIFlowConfig(
             enabled=True,
             labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_COVERAGE, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU},
+        ),
+    ),
+    CIWorkflow(
+        arch="linux",
+        build_environment="linux-bionic-py3.6-clang9-xla",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-py3.6-clang9",
+        test_runner_type=LINUX_CPU_TEST_RUNNER,
+        on_pull_request=True,
+        num_test_shards=1,
+        ciflow_config=CIFlowConfig(
+            enabled=True,
+            labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU, LABEL_CIFLOW_XLA},
         ),
     ),
     # CIWorkflow(
