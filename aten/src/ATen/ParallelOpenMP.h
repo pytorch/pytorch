@@ -4,6 +4,7 @@
 #include <exception>
 
 #include <c10/util/SmallVector.h>
+#include <c10/util/Exception.h>
 
 #ifdef _OPENMP
 #define INTRA_OP_PARALLEL
