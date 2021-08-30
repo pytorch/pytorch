@@ -328,14 +328,15 @@ bool is_available(TensorList tensors) {
 }
 
 std::uint64_t version() {
-#if defined(NCCL_MAJOR)
-  constexpr std::uint64_t ver = (((uint64_t) NCCL_MAJOR) << 32) |
-                                (((uint64_t) NCCL_MINOR) << 16) |
-                                ((uint64_t) NCCL_PATCH);
-  return ver;
-#elif defined(USE_NCCL)
-  // return major version "1"
-  return ((uint64_t) 1) << 32;
+// issue: https://github.com/pytorch/pytorch/issues/64060
+#ifdef USE_NCCL
+  int version;
+  ncclResult_t status = ncclGetVersion(&version);
+  if (status != ncclSuccess || version < 100) {
+    return static_cast<std::uint64_t>(-1);
+  } else {
+    return version;
+  }
 #else
   return 0;
 #endif

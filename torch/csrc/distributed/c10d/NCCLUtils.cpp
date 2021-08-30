@@ -11,11 +11,8 @@ std::string getNcclVersion() {
   static std::string versionString;
 
   std::call_once(ncclGetVersionFlag, []() {
-    int version;
-    ncclResult_t status = ncclGetVersion(&version);
-    // can't compute the version if call did not return successfully or version
-    // code < 100 (corresponding to 0.1.0)
-    if (status != ncclSuccess || version < 100) {
+    int version = torch::cuda::nccl::version();
+    if (version <= 0) {
       versionString = "Unknown NCCL version";
     } else {
       // Ref: https://github.com/NVIDIA/nccl/blob/v2.10.3-1/src/nccl.h.in#L22
