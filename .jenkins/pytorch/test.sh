@@ -59,7 +59,7 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
   export BUILD_SPLIT_CUDA=ON
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *noarch* ]]; then
+if [[ "${TEST_CONFIG}" = "noarch" ]]; then
   export PYTORCH_TEST_SKIP_NOARCH=0
 else
   export PYTORCH_TEST_SKIP_NOARCH=1
@@ -407,10 +407,20 @@ test_torch_function_benchmark() {
   assert_git_not_dirty
 }
 
+build_xla() {
+  clone_pytorch_xla
+  # shellcheck disable=SC1091
+  source "xla/.circleci/common.sh"
+  apply_patches
+  install_deps_pytorch_xla xla
+  build_torch_xla xla
+  assert_git_not_dirty
+}
+
 test_xla() {
   clone_pytorch_xla
   # shellcheck disable=SC1091
-  source "./xla/.circleci/common.sh"
+  source "xla/.circleci/common.sh"
   run_torch_xla_tests "$(pwd)" "$(pwd)/xla"
   assert_git_not_dirty
 }
@@ -509,6 +519,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *backward* ]]; then
   # Do NOT add tests after bc check tests, see its comment.
 elif [[ "${BUILD_ENVIRONMENT}" == *xla* || "${JOB_BASE_NAME}" == *xla* ]]; then
   install_torchvision
+  build_xla
   test_xla
 elif [[ "${BUILD_ENVIRONMENT}" == *jit_legacy-test || "${JOB_BASE_NAME}" == *jit_legacy-test || $TEST_CONFIG == 'jit_legacy' ]]; then
   test_python_legacy_jit

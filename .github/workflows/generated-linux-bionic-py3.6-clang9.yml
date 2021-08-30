@@ -2,7 +2,7 @@
 
 # Template is at:    .github/templates/linux_ci_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
-name: linux-bionic-py3.6-clang9-xla
+name: linux-bionic-py3.6-clang9
 
 on:
   pull_request:
@@ -14,7 +14,7 @@ on:
   workflow_dispatch:
 
 env:
-  BUILD_ENVIRONMENT: linux-bionic-py3.6-clang9-xla
+  BUILD_ENVIRONMENT: linux-bionic-py3.6-clang9
   DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-bionic-py3.6-clang9
   SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
   XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
@@ -27,13 +27,13 @@ env:
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
 
 concurrency:
-  group: linux-bionic-py3.6-clang9-xla-${{ github.event.pull_request.number || github.sha }}
+  group: linux-bionic-py3.6-clang9-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 
 jobs:
   ciflow_should_run:
     runs-on: ubuntu-18.04
-    if: ${{ (github.event_name != 'pull_request') || (github.event.action !='unassigned') || (contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/cpu') || contains(github.event.pull_request.labels.*.name, 'ciflow/default') || contains(github.event.pull_request.labels.*.name, 'ciflow/linux') || contains(github.event.pull_request.labels.*.name, 'ciflow/xla')) }}
+    if: ${{ (github.event_name != 'pull_request') || (github.event.action !='unassigned') || (contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/cpu') || contains(github.event.pull_request.labels.*.name, 'ciflow/default') || contains(github.event.pull_request.labels.*.name, 'ciflow/linux') || contains(github.event.pull_request.labels.*.name, 'ciflow/noarch') || contains(github.event.pull_request.labels.*.name, 'ciflow/xla')) }}
     steps:
       - name: noop
         run: echo running ciflow_should_run
@@ -131,7 +131,7 @@ jobs:
     needs: [calculate-docker-image, ciflow_should_run]
     env:
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
-      JOB_BASE_NAME: linux-bionic-py3.6-clang9-xla-build
+      JOB_BASE_NAME: linux-bionic-py3.6-clang9-build
     steps:
       - name: Display EC2 information
         shell: bash
@@ -265,7 +265,9 @@ jobs:
       ENABLE_SLOW_TEST: ''
       ENABLE_DOCS_TEST: ''
       ENABLE_BACKWARDS_COMPAT_TEST: ''
-      NUM_TEST_SHARDS: 1
+      ENABLE_XLA_TEST: 1
+      ENABLE_NOARCH_TEST: 1
+      NUM_TEST_SHARDS: 2
       MULTIGPU_RUNNER_TYPE: linux.16xlarge.nvidia.gpu
       NOGPU_RUNNER_TYPE: linux.2xlarge
       PR_BODY: ${{ github.event.pull_request.body }}
@@ -292,7 +294,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     env:
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
-      JOB_BASE_NAME: linux-bionic-py3.6-clang9-xla-test
+      JOB_BASE_NAME: linux-bionic-py3.6-clang9-test
       TEST_CONFIG: ${{ matrix.config }}
       SHARD_NUMBER: ${{ matrix.shard }}
       NUM_TEST_SHARDS: ${{ matrix.num_shards }}
@@ -445,7 +447,7 @@ jobs:
         env:
           AWS_DEFAULT_REGION: us-east-1
           CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          JOB_BASE_NAME: linux-bionic-py3.6-clang9-xla-test
+          JOB_BASE_NAME: linux-bionic-py3.6-clang9-test
           CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
           CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           CIRCLE_TAG: ${{ steps.parse-ref.outputs.tag }}
