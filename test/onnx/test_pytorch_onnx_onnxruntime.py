@@ -116,6 +116,7 @@ def ort_compare_with_pytorch(ort_outs, output, rtol, atol):
 
     # compare onnxruntime and PyTorch results
     assert len(outputs) == len(ort_outs), "number of outputs differ"
+
     # compare onnxruntime and PyTorch results
     [np.testing.assert_allclose(out, ort_out, rtol=rtol, atol=atol) for out, ort_out in zip(outputs, ort_outs)]
 
@@ -1795,8 +1796,6 @@ class TestONNXRuntime(unittest.TestCase):
                         torch.div(x, y, rounding_mode="floor"))
 
         modules = [TrueDivModule(), TruncDivModule(), FloorDivModule()]
-        # if self.opset_version >= 9:
-            # modules.append(FloorDivModule())
 
         x = (torch.randn(2, 3, 4) * 100).to(torch.int)
         y = torch.arange(1, 2 * 3 * 4 + 1).reshape(2, 3, 4).to(torch.int)
