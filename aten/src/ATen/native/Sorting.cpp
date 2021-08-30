@@ -43,10 +43,10 @@ TORCH_META_FUNC2(sort, stable)
   maybe_wrap_dim(dim, self.dim());
   const auto& values = maybe_get_output(0);
   const auto& indices = maybe_get_output(1);
-  auto value_strides = values.defined() ? values.strides() : self.strides();
+  auto values_strides = values.defined() ? values.strides() : self.strides();
   auto indices_strides = indices.defined() ? indices.strides() : self.strides();
-  set_output(0, self.sizes(), self.options());
-  set_output(1, self.sizes(), self.options().dtype(kLong));
+  set_output(0, self.sizes(), values_strides, self.options(), {});
+  set_output(1, self.sizes(), indices_strides, self.options().dtype(kLong), {});
 }
 
 } // namespace meta
