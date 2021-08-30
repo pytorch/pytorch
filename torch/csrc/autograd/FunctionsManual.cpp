@@ -2878,7 +2878,7 @@ std::tuple<Tensor, Tensor> triangular_solve_backward(
   return std::tuple<Tensor, Tensor>{grad_b, grad_a};
 }
 
-Tensor linalg_solve_triangular_forward(
+Tensor linalg_solve_triangular_forward_AD(
     const Tensor& A_t,
     const Tensor& B_t,
     const Tensor& A,
