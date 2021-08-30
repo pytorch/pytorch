@@ -263,32 +263,7 @@ class JitTestCase(JitCommonTestCase):
         self._compared_saved_loaded(module)
 
 
-    def getExportImportCopyWithPacking(self, m, also_test_file=True, map_location=None):
-        buffer = io.BytesIO()
-        m.apply(lambda s: s._pack() if s._c._has_method('_pack') else None)
-        torch.jit.save(m, buffer)
-        m.apply(lambda s: s._unpack() if s._c._has_method('_unpack') else None)
-        buffer.seek(0)
-        imported = torch.jit.load(buffer, map_location=map_location)
-        imported.apply(lambda s: s._unpack() if s._c._has_method('_unpack') else None)
-
-        if not also_test_file:
-            return imported
-
-        # Ideally we would like to not have to manually delete the file, but NamedTemporaryFile
-        # opens the file, and it cannot be opened multiple times in Windows. To support Windows,
-        # close the file after creation and try to remove it manually
-        f = tempfile.NamedTemporaryFile(delete=False)
-        try:
-            f.close()
-            imported.save(f.name)
-            result = torch.jit.load(f.name, map_location=map_location)
-        finally:
-            os.unlink(f.name)
-
-        result.apply(lambda s: s._unpack() if s._c._has_method('_unpack') else None)
-        return result
-
+   
     def assertGraphContains(self, graph, kind):
         self.assertTrue(any(n.kind() == kind for n in graph.nodes()))
 

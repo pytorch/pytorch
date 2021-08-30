@@ -6,86 +6,6 @@
 
 torch::class_<EmbeddingPackedParamsBase> register_embedding_params();
 
-at::Tensor PackedEmbeddingBagWeight::unpack() {
-  auto packed_weight = packed_w;
-  at::Tensor weight_origin;
-
-  if (bit_rate_ == 8 || bit_rate_ == 4) {
-    const auto input_rows = packed_weight.size(0);
-    const auto input_columns = packed_weight.size(1);
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    int scale_bias_bytes;
-    const auto num_elem_per_byte = 8 / bit_rate_;
-    if (bit_rate_ == 8) {
-      // The last 2 values are used to store the FP32 scale and zero_point
-      // values per row.
-      scale_bias_bytes = 8;
-    } else {
-      scale_bias_bytes = 4;
-    }
-
-    const auto* input = packed_weight.data_ptr<uint8_t>();
-    // Calculate the output shape, accounting for the last n bytes to be used
-    // for scale/bias rest of the entries are packed depending on the bit_width.
-    std::vector<int64_t> output_shape = {
-        input_rows,
-        static_cast<std::int64_t>(input_columns - scale_bias_bytes) *
-            num_elem_per_byte};
-
-    auto scales = at::from_blob(
-        w_scale.data(), w_scale.size(), device(c10::kCPU).dtype(c10::kFloat));
-    auto zero_points = at::from_blob(
-        w_zp.data(), w_zp.size(), device(c10::kCPU).dtype(c10::kFloat));
-
-    auto output_columns = output_shape[1];
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    uint8_t* output_data;
-
-    // Allocate output weight tensor based on the bit_width
-    if (bit_rate_ == 8) {
-      weight_origin = at::_empty_per_channel_affine_quantized(
-          output_shape,
-          scales.toType(c10::kFloat),
-          zero_points.toType(c10::kFloat),
-          0, // The output channel axis is 0
-          device(c10::kCPU).dtype(c10::kQUInt8));
-      output_data = static_cast<uint8_t*>(weight_origin.data_ptr());
-    } else {
-      // We create empty qtensor with the full output shape, and dtype set to
-      // quint4x2 This will internally allocate appropriate storage bytes to
-      // account for the packed nature of this dtype.
-      weight_origin = at::_empty_per_channel_affine_quantized(
-          output_shape,
-          scales.toType(c10::kFloat),
-          zero_points.toType(c10::kFloat),
-          0, // The output channel axis is 0
-          device(c10::kCPU).dtype(c10::kQUInt4x2));
-      output_data = static_cast<uint8_t*>(weight_origin.data_ptr());
-    }
-
-    // Copy over the data from the packed weight to the output.
-    // For sub-byte tensors this will copy the packed bytes over since the
-    // sub_byte qtensors are expected to store data in packed format.
-    at::parallel_for(0, input_rows, 1, [&](int32_t start_idx, int32_t end_idx) {
-      for (int64_t row = start_idx; row < end_idx; ++row) {
-        const std::uint8_t* input_row = input + row * input_columns;
-        uint8_t* output_row =
-            output_data + row * output_columns / num_elem_per_byte;
-
-        // output_columns
-        for (const auto col : c10::irange(output_columns / num_elem_per_byte)) {
-          output_row[col] = input_row[col];
-        }
-      }
-    });
-
-    return weight_origin;
-  }
-  TORCH_INTERNAL_ASSERT(
-      false,
-      "We currently only support 8-bit and 4-bit quantization of embedding_bag.");
-  return weight_origin;
-}
 
 namespace at {
 namespace native {
@@ -230,10 +150,7 @@ Tensor qembeddingbag_2bit_unpack(const Tensor& packed_weight) {
 
 class QEmbeddingUnpackWeights final {
  public:
-  static at::Tensor run(
-      const c10::intrusive_ptr<EmbeddingPackedParamsBase>& packed_weight) {
-    return packed_weight->unpack();
-  }
+  
 };
 
 TORCH_LIBRARY_IMPL(quantized, CPU, m) {

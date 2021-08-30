@@ -12,37 +12,7 @@ namespace vulkan {
 namespace ops {
 namespace {
 
-TORCH_LIBRARY(vulkan, m) {
-  m.class_<Conv2dOpContext>("Conv2dOpContext")
-      .def_pickle(
-          // __getstate__
-          [](const c10::intrusive_ptr<Conv2dOpContext>& context) {
-            return context->unpack();
-          },
-          // __setstate__
-          [](Conv2dOpContext::State state) {
-            return conv2d_clamp_prepack(
-                std::move(std::get<0>(state)),
-                std::move(std::get<1>(state)),
-                std::move(std::get<2>(state)),
-                std::move(std::get<3>(state)),
-                std::move(std::get<4>(state)),
-                std::move(std::get<5>(state)),
-                std::move(std::get<6>(state)),
-                std::move(std::get<7>(state)));
-          });
-  m.class_<LinearOpContext>("LinearOpContext")
-      .def_pickle(
-          // __getstate__
-          [](const c10::intrusive_ptr<LinearOpContext>& context) {
-            return context->unpack();
-          },
-          // __setstate__
-          [](LinearOpContext::State state) {
-            return linear_prepack(
-                std::move(std::get<0>(state)), std::move(std::get<1>(state)));
-          });
-}
+
 
 TORCH_LIBRARY(vulkan_prepack, m) {
   m.def(TORCH_SELECTIVE_SCHEMA(

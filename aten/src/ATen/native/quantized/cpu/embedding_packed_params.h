@@ -21,7 +21,7 @@ struct EmbeddingPackedParamsBase : public torch::jit::CustomClassHolder {
     const c10::optional<at::Tensor>& compressed_indices_mapping,
     bool include_last_offset) = 0;
 
-  virtual at::Tensor unpack() = 0;
+  
 
   virtual int64_t bit_rate() const = 0;
   virtual int64_t version() const = 0;

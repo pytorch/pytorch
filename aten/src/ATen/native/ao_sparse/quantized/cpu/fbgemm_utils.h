@@ -61,7 +61,7 @@ struct TORCH_API PackedLinearWeight
     return at::Tensor();
   }
 
-  LinearPackedSerializationType unpack() override;
+  
 
   c10::optional<at::Tensor> bias() override {
     return bias_;

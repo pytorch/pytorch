@@ -51,8 +51,6 @@ struct TORCH_API PackedLinearWeightQnnp
   at::Tensor apply_dynamic(const at::Tensor& input) override;
   at::Tensor apply_dynamic_relu(const at::Tensor& input) override;
 
-  LinearPackedSerializationType unpack() override;
-
   c10::optional<at::Tensor> bias() override {
     return orig_bias_;
   }

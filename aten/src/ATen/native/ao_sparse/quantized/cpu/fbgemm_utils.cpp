@@ -9,26 +9,7 @@
 namespace ao {
 namespace sparse {
 torch::class_<LinearPackedParamsBase> register_linear_params() {
-  static auto register_linear_params =
-      torch::class_<LinearPackedParamsBase>(
-          "sparse", "LinearPackedParamsBase")
-          .def_pickle(
-              [](const c10::intrusive_ptr<LinearPackedParamsBase>& params)
-                  -> LinearPackedSerializationType { // __getstate__
-                return params->unpack();
-              },
-              [](LinearPackedSerializationType state)
-                  -> c10::intrusive_ptr<
-                      LinearPackedParamsBase> { // __setstate__
-                at::Tensor weight;
-                c10::optional<at::Tensor> bias;
-                // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-                int64_t out_features_block_size, in_features_block_size;
-                weight = std::move(std::get<0>(state));
-                bias = std::move(std::get<1>(state));
-                out_features_block_size = std::get<2>(state)[0];
-                in_features_block_size = std::get<2>(state)[1];
-
+  
 #ifdef USE_FBGEMM
                 if (at::globalContext().qEngine() == at::QEngine::FBGEMM) {
                   if (weight.scalar_type() == at::kQInt8) {

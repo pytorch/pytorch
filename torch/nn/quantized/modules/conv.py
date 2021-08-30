@@ -404,9 +404,7 @@ class Conv2d(_ConvNd):
             self._packed_params = torch.ops.quantized.conv2d_prepack(
                 w, b, self.stride, _pair(0), self.dilation, self.groups)
 
-    def _weight_bias(self):
-        return self._packed_params.unpack()
-
+    
     def weight(self):
         return self._weight_bias()[0]
 
@@ -502,9 +500,7 @@ class Conv3d(_ConvNd):
             self._packed_params = torch.ops.quantized.conv3d_prepack(
                 w, b, self.stride, _triple(0), self.dilation, self.groups)
 
-    def _weight_bias(self):
-        return self._packed_params.unpack()
-
+    
     def weight(self):
         return self._weight_bias()[0]
 

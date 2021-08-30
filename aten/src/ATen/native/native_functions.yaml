@@ -742,13 +742,13 @@
 
 - func: bartlett_window.periodic(int window_length, bool periodic, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
-- func: batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor
+- func: batch_norm(Tensor input, Tensor? weight, Tensor?  Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor
 
-- func: quantized_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor mean, Tensor var, float eps, float output_scale, int output_zero_point) -> Tensor
+- func: quantized_batch_norm(Tensor input, Tensor? weight, Tensor?  Tensor mean, Tensor var, float eps, float output_scale, int output_zero_point) -> Tensor
   dispatch:
     QuantizedCPU: quantized_batch_norm
 
-- func: _batch_norm_impl_index(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> (Tensor, Tensor, Tensor, Tensor, int)
+- func: _batch_norm_impl_index(Tensor input, Tensor? weight, Tensor?  Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> (Tensor, Tensor, Tensor, Tensor, int)
 
 - func: _batch_norm_impl_index_backward(int impl_index, Tensor input, Tensor grad_output, Tensor? weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_var_transform, bool train, float eps, bool[3] output_mask, Tensor reservedSpace) -> (Tensor, Tensor, Tensor)
 
@@ -1172,9 +1172,9 @@
   variants: method
   manual_cpp_binding: True
 
-- func: convolution(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups) -> Tensor
+- func: convolution(Tensor input, Tensor weight, Tensor?  int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups) -> Tensor
 
-- func: convolution_overrideable(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups) -> Tensor
+- func: convolution_overrideable(Tensor input, Tensor weight, Tensor?  int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups) -> Tensor
   dispatch:
     CompositeExplicitAutograd: convolution_overrideable
 
@@ -1182,13 +1182,13 @@
   dispatch:
     CompositeExplicitAutograd: convolution_backward_overrideable
 
-- func: _convolution(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool benchmark, bool deterministic, bool cudnn_enabled, bool allow_tf32) -> Tensor
+- func: _convolution(Tensor input, Tensor weight, Tensor?  int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool benchmark, bool deterministic, bool cudnn_enabled, bool allow_tf32) -> Tensor
 
-- func: _convolution.deprecated(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool benchmark, bool deterministic, bool cudnn_enabled) -> Tensor
+- func: _convolution.deprecated(Tensor input, Tensor weight, Tensor?  int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool benchmark, bool deterministic, bool cudnn_enabled) -> Tensor
 
-- func: _convolution_mode(Tensor input, Tensor weight, Tensor? bias, int[] stride, str padding, int[] dilation, int groups) -> Tensor
+- func: _convolution_mode(Tensor input, Tensor weight, Tensor?  int[] stride, str padding, int[] dilation, int groups) -> Tensor
 
-- func: _convolution_nogroup(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding) -> Tensor
+- func: _convolution_nogroup(Tensor input, Tensor weight, Tensor?  int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding) -> Tensor
 
 - func: _convolution_double_backward(Tensor? ggI, Tensor? ggW, Tensor? ggb, Tensor gO, Tensor weight, Tensor self, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool benchmark, bool deterministic, bool cudnn_enabled, bool allow_tf32, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
 
@@ -1207,11 +1207,11 @@
 - func: conv3d.padding(Tensor input, Tensor weight, Tensor? bias=None, int[3] stride=1, str padding="valid", int[3] dilation=1, int groups=1) -> Tensor
   cpp_no_default_args: ['bias', 'stride', 'padding']
 
-- func: conv_tbc(Tensor self, Tensor weight, Tensor bias, int pad=0) -> Tensor
+- func: conv_tbc(Tensor self, Tensor weight, Tensor  int pad=0) -> Tensor
   dispatch:
     CompositeExplicitAutograd: conv_tbc
 
-- func: conv_tbc_backward(Tensor self, Tensor input, Tensor weight, Tensor bias, int pad) -> (Tensor, Tensor, Tensor)
+- func: conv_tbc_backward(Tensor self, Tensor input, Tensor weight, Tensor  int pad) -> (Tensor, Tensor, Tensor)
 
 # NB: we inherit the goofy argument order from PyTorch torch.nn.functional
 - func: conv_transpose1d(Tensor input, Tensor weight, Tensor? bias=None, int[1] stride=1, int[1] padding=0, int[1] output_padding=0, int groups=1, int[1] dilation=1) -> Tensor
@@ -1298,7 +1298,7 @@
   dispatch:
     CUDA: cudnn_affine_grid_generator_backward
 
-- func: cudnn_batch_norm(Tensor input, Tensor weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float exponential_average_factor, float epsilon) -> (Tensor, Tensor, Tensor, Tensor)
+- func: cudnn_batch_norm(Tensor input, Tensor weight, Tensor?  Tensor? running_mean, Tensor? running_var, bool training, float exponential_average_factor, float epsilon) -> (Tensor, Tensor, Tensor, Tensor)
   dispatch:
     CUDA: cudnn_batch_norm
 
@@ -1307,7 +1307,7 @@
   dispatch:
     CUDA: cudnn_batch_norm_backward
 
-- func: cudnn_convolution.deprecated(Tensor self, Tensor weight, Tensor? bias, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor
+- func: cudnn_convolution.deprecated(Tensor self, Tensor weight, Tensor?  int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor
   dispatch:
     CUDA: cudnn_convolution_deprecated
 
@@ -1331,7 +1331,7 @@
   dispatch:
     CUDA: cudnn_convolution_backward_weight
 
-- func: cudnn_convolution_transpose.deprecated(Tensor self, Tensor weight, Tensor? bias, int[] padding, int[] output_padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor
+- func: cudnn_convolution_transpose.deprecated(Tensor self, Tensor weight, Tensor?  int[] padding, int[] output_padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor
   dispatch:
     CUDA: cudnn_convolution_transpose_deprecated
 
@@ -1357,11 +1357,11 @@
   dispatch:
     CUDA: cudnn_convolution_transpose_backward_weight
 
-- func: cudnn_convolution_relu(Tensor self, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups) -> Tensor
+- func: cudnn_convolution_relu(Tensor self, Tensor weight, Tensor?  int[] stride, int[] padding, int[] dilation, int groups) -> Tensor
   dispatch:
     CUDA: cudnn_convolution_relu
 
-- func: cudnn_convolution_add_relu(Tensor self, Tensor weight, Tensor z, Scalar? alpha, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups) -> Tensor
+- func: cudnn_convolution_add_relu(Tensor self, Tensor weight, Tensor z, Scalar? alpha, Tensor?  int[] stride, int[] padding, int[] dilation, int groups) -> Tensor
   dispatch:
     CUDA: cudnn_convolution_add_relu
 
@@ -2140,7 +2140,7 @@
 
 - func: group_norm(Tensor input, int num_groups, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enabled=True) -> Tensor
 
-- func: native_group_norm(Tensor input, Tensor? weight, Tensor? bias, int N, int C, int HxW, int group, float eps) -> (Tensor, Tensor, Tensor)
+- func: native_group_norm(Tensor input, Tensor? weight, Tensor?  int N, int C, int HxW, int group, float eps) -> (Tensor, Tensor, Tensor)
   dispatch:
     CPU, CUDA: native_group_norm
     CompositeImplicitAutograd: math_group_norm
@@ -2242,7 +2242,7 @@
   dispatch:
     CPU, CUDA: _index_put_impl_
 
-- func: instance_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool use_input_stats, float momentum, float eps, bool cudnn_enabled) -> Tensor
+- func: instance_norm(Tensor input, Tensor? weight, Tensor?  Tensor? running_mean, Tensor? running_var, bool use_input_stats, float momentum, float eps, bool cudnn_enabled) -> Tensor
   variants: function
 
 - func: inverse(Tensor self) -> Tensor
@@ -2384,13 +2384,13 @@
 
 - func: layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> Tensor
 
-- func: native_layer_norm(Tensor input, int[] normalized_shape, Tensor? weight, Tensor? bias, float eps) -> (Tensor, Tensor, Tensor)
+- func: native_layer_norm(Tensor input, int[] normalized_shape, Tensor? weight, Tensor?  float eps) -> (Tensor, Tensor, Tensor)
   dispatch:
     CPU: layer_norm_cpu
     CUDA: layer_norm_cuda
     CompositeImplicitAutograd: math_native_layer_norm
 
-- func: native_layer_norm_backward(Tensor grad_out, Tensor input, int[] normalized_shape, Tensor mean, Tensor rstd, Tensor? weight, Tensor? bias, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
+- func: native_layer_norm_backward(Tensor grad_out, Tensor input, int[] normalized_shape, Tensor mean, Tensor rstd, Tensor? weight, Tensor?  bool[3] output_mask) -> (Tensor, Tensor, Tensor)
   dispatch:
     CPU: layer_norm_backward_cpu
     CUDA: layer_norm_backward_cuda
@@ -2904,7 +2904,7 @@
   dispatch:
     CPU, CUDA: amin_out
 
-- func: mkldnn_convolution(Tensor self, Tensor weight, Tensor? bias, int[] padding, int[] stride, int[] dilation, int groups) -> Tensor
+- func: mkldnn_convolution(Tensor self, Tensor weight, Tensor?  int[] padding, int[] stride, int[] dilation, int groups) -> Tensor
   dispatch:
     CompositeExplicitAutograd: mkldnn_convolution
 
@@ -2916,7 +2916,7 @@
   dispatch:
     CompositeExplicitAutograd: mkldnn_convolution_backward
 
-- func: miopen_batch_norm(Tensor input, Tensor weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float exponential_average_factor, float epsilon) -> (Tensor, Tensor, Tensor)
+- func: miopen_batch_norm(Tensor input, Tensor weight, Tensor?  Tensor? running_mean, Tensor? running_var, bool training, float exponential_average_factor, float epsilon) -> (Tensor, Tensor, Tensor)
   dispatch:
     CUDA: miopen_batch_norm
 
@@ -2924,7 +2924,7 @@
   dispatch:
     CUDA: miopen_batch_norm_backward
 
-- func: miopen_convolution(Tensor self, Tensor weight, Tensor? bias, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor
+- func: miopen_convolution(Tensor self, Tensor weight, Tensor?  int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor
   dispatch:
     CUDA: miopen_convolution
 
@@ -2944,7 +2944,7 @@
   dispatch:
     CUDA: miopen_convolution_backward_weight
 
-- func: miopen_convolution_transpose(Tensor self, Tensor weight, Tensor? bias, int[] padding, int[] output_padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor
+- func: miopen_convolution_transpose(Tensor self, Tensor weight, Tensor?  int[] padding, int[] output_padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor
   dispatch:
     CUDA: miopen_convolution_transpose
 
@@ -2962,7 +2962,7 @@
   dispatch:
     CUDA: miopen_convolution_transpose_backward_weight
 
-- func: miopen_depthwise_convolution(Tensor self, Tensor weight, Tensor? bias, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor
+- func: miopen_depthwise_convolution(Tensor self, Tensor weight, Tensor?  int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor
   dispatch:
     CUDA: miopen_depthwise_convolution
 
@@ -3127,13 +3127,13 @@
   device_check: NoCheck
   device_guard: False
 
-- func: native_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)
+- func: native_batch_norm(Tensor input, Tensor? weight, Tensor?  Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)
   dispatch:
     CPU: batch_norm_cpu
     CUDA: batch_norm_cuda
     MkldnnCPU: mkldnn_batch_norm
 
-- func: native_batch_norm.out(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, *, Tensor(a!) out, Tensor(b!) save_mean, Tensor(c!) save_invstd) -> (Tensor(a!), Tensor(b!), Tensor(c!))
+- func: native_batch_norm.out(Tensor input, Tensor? weight, Tensor?  Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, *, Tensor(a!) out, Tensor(b!) save_mean, Tensor(c!) save_invstd) -> (Tensor(a!), Tensor(b!), Tensor(c!))
   dispatch:
     CUDA: batch_norm_cuda_out
 
@@ -3141,11 +3141,11 @@
   dispatch:
     CUDA: batch_norm_stats_cuda
 
-- func: batch_norm_elemt(Tensor input, Tensor? weight, Tensor? bias, Tensor mean, Tensor invstd, float eps) -> Tensor
+- func: batch_norm_elemt(Tensor input, Tensor? weight, Tensor?  Tensor mean, Tensor invstd, float eps) -> Tensor
   dispatch:
     CUDA: batch_norm_elemt_cuda
 
-- func: batch_norm_elemt.out(Tensor input, Tensor? weight, Tensor? bias, Tensor mean, Tensor invstd, float eps, *, Tensor(a!) out) -> Tensor(a!)
+- func: batch_norm_elemt.out(Tensor input, Tensor? weight, Tensor?  Tensor mean, Tensor invstd, float eps, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CUDA: batch_norm_elemt_cuda_out
 
@@ -3181,7 +3181,7 @@
 
 - func: _nnpack_available() -> bool
 
-- func: _nnpack_spatial_convolution(Tensor input, Tensor weight, Tensor? bias, int[2] padding, int[2] stride=1) -> Tensor
+- func: _nnpack_spatial_convolution(Tensor input, Tensor weight, Tensor?  int[2] padding, int[2] stride=1) -> Tensor
   variants: function
   dispatch:
     CompositeExplicitAutograd: _nnpack_spatial_convolution
@@ -5436,7 +5436,7 @@
   dispatch:
     CUDA: _thnn_fused_lstm_cell_backward_cuda
 
-- func: _thnn_differentiable_lstm_cell_backward(Tensor? grad_hy, Tensor? grad_cy, Tensor input_gates, Tensor hidden_gates, Tensor? input_bias, Tensor? hidden_bias, Tensor cx, Tensor cy) -> (Tensor, Tensor, Tensor, Tensor, Tensor)
+- func: _thnn_differentiable_lstm_cell_backward(Tensor? grad_hy, Tensor? grad_cy, Tensor input_gates, Tensor hidden_gates, Tensor? input_ Tensor? hidden_ Tensor cx, Tensor cy) -> (Tensor, Tensor, Tensor, Tensor, Tensor)
 
 - func: _thnn_fused_gru_cell(Tensor input_gates, Tensor hidden_gates, Tensor hx, Tensor? input_bias=None, Tensor? hidden_bias=None) -> (Tensor, Tensor)
   dispatch:
@@ -5446,7 +5446,7 @@
   dispatch:
     CUDA: _thnn_fused_gru_cell_backward_cuda
 
-- func: _thnn_differentiable_gru_cell_backward(Tensor grad_hy, Tensor input_gates, Tensor hidden_gates, Tensor hx, Tensor? input_bias, Tensor? hidden_bias) -> (Tensor, Tensor, Tensor, Tensor, Tensor)
+- func: _thnn_differentiable_gru_cell_backward(Tensor grad_hy, Tensor input_gates, Tensor hidden_gates, Tensor hx, Tensor? input_ Tensor? hidden_bias) -> (Tensor, Tensor, Tensor, Tensor, Tensor)
 
 # RNN cells and layers
 - func: lstm.input(Tensor input, Tensor[] hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor, Tensor)
@@ -9496,13 +9496,13 @@
 - func: thnn_conv2d(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias=None, int[2] stride=1, int[2] padding=0) -> Tensor
   python_module: nn
 
-- func: thnn_conv2d_forward.output(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias, int[2] stride, int[2] padding, *, Tensor(a!) output, Tensor(b!) finput, Tensor(c!) fgrad_input) -> (Tensor(a!), Tensor(b!), Tensor(c!))
+- func: thnn_conv2d_forward.output(Tensor self, Tensor weight, int[2] kernel_size, Tensor?  int[2] stride, int[2] padding, *, Tensor(a!) output, Tensor(b!) finput, Tensor(c!) fgrad_input) -> (Tensor(a!), Tensor(b!), Tensor(c!))
   python_module: nn
   dispatch:
     CPU: slow_conv2d_forward_out_cpu
     CUDA: slow_conv2d_forward_out_cuda
 
-- func: thnn_conv2d_forward(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias, int[2] stride, int[2] padding) -> (Tensor output, Tensor finput, Tensor fgrad_input)
+- func: thnn_conv2d_forward(Tensor self, Tensor weight, int[2] kernel_size, Tensor?  int[2] stride, int[2] padding) -> (Tensor output, Tensor finput, Tensor fgrad_input)
   python_module: nn
   dispatch:
     CPU: slow_conv2d_forward_cpu
@@ -9520,13 +9520,13 @@
     CPU: slow_conv2d_backward_cpu
     CUDA: slow_conv2d_backward_cuda
 
-- func: _conv_depthwise2d.out(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias, int[2] stride, int[2] padding, int[2] dilation, *, Tensor(a!) out) -> Tensor(a!)
+- func: _conv_depthwise2d.out(Tensor self, Tensor weight, int[2] kernel_size, Tensor?  int[2] stride, int[2] padding, int[2] dilation, *, Tensor(a!) out) -> Tensor(a!)
   use_const_ref_for_mutable_tensors: True
   python_module: nn
   dispatch:
     CUDA: conv_depthwise2d_cuda_out
 
-- func: _conv_depthwise2d(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias, int[2] stride, int[2] padding, int[2] dilation) -> Tensor
+- func: _conv_depthwise2d(Tensor self, Tensor weight, int[2] kernel_size, Tensor?  int[2] stride, int[2] padding, int[2] dilation) -> Tensor
   python_module: nn
   dispatch:
     CUDA: conv_depthwise2d_cuda
@@ -9541,7 +9541,7 @@
   dispatch:
     CUDA: conv_depthwise2d_backward_cuda
 
-- func: conv_depthwise3d(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias, int[3] stride, int[3] padding, int[3] dilation) -> Tensor
+- func: conv_depthwise3d(Tensor self, Tensor weight, int[3] kernel_size, Tensor?  int[3] stride, int[3] padding, int[3] dilation) -> Tensor
   python_module: nn
   dispatch:
     CUDA: conv_depthwise3d_cuda
@@ -9562,12 +9562,12 @@
 - func: slow_conv3d(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias=None, int[3] stride=1, int[3] padding=0) -> Tensor
   python_module: nn
 
-- func: slow_conv3d_forward.output(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias, int[3] stride, int[3] padding, *, Tensor(a!) output, Tensor(b!) finput, Tensor(c!) fgrad_input) -> (Tensor(a!), Tensor(b!), Tensor(c!))
+- func: slow_conv3d_forward.output(Tensor self, Tensor weight, int[3] kernel_size, Tensor?  int[3] stride, int[3] padding, *, Tensor(a!) output, Tensor(b!) finput, Tensor(c!) fgrad_input) -> (Tensor(a!), Tensor(b!), Tensor(c!))
   python_module: nn
   dispatch:
     CPU: slow_conv3d_forward_out_cpu
 
-- func: slow_conv3d_forward(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias, int[3] stride, int[3] padding) -> (Tensor output, Tensor finput, Tensor fgrad_input)
+- func: slow_conv3d_forward(Tensor self, Tensor weight, int[3] kernel_size, Tensor?  int[3] stride, int[3] padding) -> (Tensor output, Tensor finput, Tensor fgrad_input)
   python_module: nn
   dispatch:
     CPU: slow_conv3d_forward_cpu

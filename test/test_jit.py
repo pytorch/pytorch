@@ -9103,8 +9103,7 @@ dedent """
         torch.testing.assert_close(m(torch.zeros(3, 4)), torch.ones(3, 4) * 6)
         m.apply(lambda s: s._pack())
         torch.testing.assert_close(m(torch.zeros(3, 4)), torch.zeros(3, 4))
-        m.apply(lambda s: s._unpack())
-        torch.testing.assert_close(m(torch.zeros(3, 4)), torch.ones(3, 4) * 6)
+       
 
     def test_torch_any(self):
         def fn(x):

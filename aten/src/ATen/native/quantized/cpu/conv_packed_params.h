@@ -14,7 +14,7 @@ struct ConvPackedParamsBase : public torch::jit::CustomClassHolder {
       double output_scale,
       int64_t output_zero_point) = 0;
 
-  virtual std::tuple<at::Tensor, c10::optional<at::Tensor>> unpack() = 0;
+  
 
   virtual torch::List<int64_t> stride() const = 0;
   virtual torch::List<int64_t> padding() const = 0;

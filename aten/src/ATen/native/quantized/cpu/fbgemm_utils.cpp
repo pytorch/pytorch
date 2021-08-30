@@ -381,13 +381,13 @@ Tensor ConvertConvWeightsToChannelLastTensor<3>(
     .def("weight", [](const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& self) {
                      at::Tensor weight;
                      c10::optional<at::Tensor> bias;
-                     std::tie(weight, bias) = self->unpack();
+                     
                      return weight;
                    })
     .def("bias", [](const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& self) {
                    at::Tensor weight;
                    c10::optional<at::Tensor> bias;
-                   std::tie(weight, bias) = self->unpack();
+                   
                    return bias;
                  })
     .def("unpack", &ConvPackedParamsBase<kSpatialDim>::unpack)
@@ -405,66 +405,6 @@ TORCH_API torch::class_<ConvPackedParamsBase<2>> register_conv_params<2>();
 template
 TORCH_API torch::class_<ConvPackedParamsBase<3>> register_conv_params<3>();
 
-torch::class_<LinearPackedParamsBase> register_linear_params() {
-  using SerializationType = std::tuple<at::Tensor, c10::optional<at::Tensor>>;
-  static auto register_linear_params =
-      torch::class_<LinearPackedParamsBase>(
-          "quantized", "LinearPackedParamsBase")
-          .def_pickle(
-              [](const c10::intrusive_ptr<LinearPackedParamsBase>& params)
-                  -> SerializationType { // __getstate__
-                at::Tensor weight;
-                c10::optional<at::Tensor> bias;
-                std::tie(weight, bias) = params->unpack();
-                return std::make_tuple(std::move(weight), std::move(bias));
-              },
-              [](SerializationType state)
-                  -> c10::intrusive_ptr<
-                      LinearPackedParamsBase> { // __setstate__
-                at::Tensor weight;
-                c10::optional<at::Tensor> bias;
-                weight = std::move(std::get<0>(state));
-                bias = std::move(std::get<1>(state));
-
-#ifdef USE_FBGEMM
-                if (at::globalContext().qEngine() == at::QEngine::FBGEMM) {
-                  if (weight.scalar_type() == at::kQInt8) {
-                    return PackedLinearWeight::prepack(
-                        std::move(weight), std::move(bias));
-                  } else if (weight.scalar_type() == at::kFloat) {
-                    // NB: fp16 weight is serialized as float
-                    return PackedLinearWeightFp16::prepack(
-                        std::move(weight), std::move(bias));
-                  } else {
-                    TORCH_CHECK(
-                        false,
-                        "Unsupported data type",
-                        c10::toString(weight.scalar_type()),
-                        " in serialized LinearPackedParams object!");
-                  }
-                }
-#endif // USE_FBGEMM
-#ifdef USE_PYTORCH_QNNPACK
-                if (at::globalContext().qEngine() == at::QEngine::QNNPACK) {
-                  TORCH_CHECK(
-                      weight.scalar_type() == at::kQInt8,
-                      "QNNPACK only supports INT8 bit width currently. Got ",
-                      c10::toString(weight.scalar_type()));
-                  return PackedLinearWeightsQnnp::prepack(
-                      std::move(weight), std::move(bias));
-                }
-#endif // USE_PYTORCH_QNNPACK
-                TORCH_CHECK(false, "Unknown qengine");
-              })
-              .def("bias", [](const c10::intrusive_ptr<LinearPackedParamsBase>& self) {
-                   at::Tensor weight;
-                   c10::optional<at::Tensor> bias;
-                   std::tie(weight, bias) = self->unpack();
-                   return bias;
-                 })
-              .def("unpack", &LinearPackedParamsBase::unpack);
-  return register_linear_params;
-}
 
 
 torch::class_<EmbeddingPackedParamsBase> register_embedding_params() {
@@ -487,7 +427,7 @@ torch::class_<EmbeddingPackedParamsBase> register_embedding_params() {
       .def_pickle(
           [](const c10::intrusive_ptr<EmbeddingPackedParamsBase>& params)
               -> EmbeddingParamsSerializationType { // __getstate__ call
-            at::Tensor weight = params->unpack();
+           
             std::vector<at::Tensor> tensors_to_serialize = {weight};
             std::vector<double> doubles_to_serialize = {};
             int64_t bit_rate = params->bit_rate();

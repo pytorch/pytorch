@@ -24,22 +24,8 @@ using at::ScalarType;
 using c10::optional;
 using c10::fmap;
 
-inline std::vector<Tensor> unpack_list(at::ArrayRef<SavedVariable> xs) {
-  // NB: we must explicitly do the conversion in the lambda, otherwise template
-  // deduction will give a Tensor of Variable which is not convertible
-  return fmap(xs, [](const SavedVariable& x) {
-    return static_cast<Tensor>(x.unpack());
-  });
-}
 
-inline c10::List<c10::optional<Tensor>> unpack_opt_list(at::ArrayRef<SavedVariable> xs) {
-  torch::List<c10::optional<Tensor>> result;
-  result.reserve(xs.size());
-  for (const SavedVariable& v : xs) {
-    result.push_back(v.unpack());
-  }
-  return result;
-}
+
 
 struct TypeAndSize {
   TypeAndSize() : options(at::TensorOptions()) {}
@@ -57,4 +43,4 @@ private:
 
 ${autograd_function_declarations}
 
-}}} // namespace torch::autograd::generated
+}}}// namespace torch::autograd::generated

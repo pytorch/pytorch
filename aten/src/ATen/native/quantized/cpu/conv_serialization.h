@@ -224,7 +224,7 @@ ConvParamsSerializationTypeV2 serialize_conv(
 
   at::Tensor weight;
   c10::optional<at::Tensor> bias;
-  std::tie(weight, bias) = params->unpack();
+  
 
   non_optional.emplace_back(std::move(params_tensor));
   non_optional.emplace_back(std::move(weight));
@@ -233,42 +233,7 @@ ConvParamsSerializationTypeV2 serialize_conv(
   return std::tie(version, non_optional, optional);
 }
 
-#elif QCONV_SERIALIZATION_VERSION == 3
-using ConvParamsSerializationType = ConvParamsSerializationTypeV3;
 
-template <uint32_t kSpatialDim>
-ConvParamsSerializationTypeV3 serialize_conv(
-    const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& params) {
-  std::vector<int64_t> config_vals;
-  config_vals.push_back(kSpatialDim);
-  auto stride = params->stride().vec();
-  config_vals.insert(config_vals.end(), stride.begin(), stride.end());
-  auto padding = params->padding().vec();
-  config_vals.insert(config_vals.end(), padding.begin(), padding.end());
-  auto dilation = params->dilation().vec();
-  config_vals.insert(config_vals.end(), dilation.begin(), dilation.end());
-  auto output_padding = params->output_padding().vec();
-  config_vals.insert(config_vals.end(), output_padding.begin(),
-                    output_padding.end());
-  config_vals.push_back(params->groups());
-  config_vals.push_back(params->transpose());
-
-  at::Tensor weight;
-  c10::optional<at::Tensor> bias;
-  std::tie(weight, bias) = params->unpack();
-
-  std::vector<c10::optional<at::Tensor>> tensors;
-  tensors.emplace_back();
-  tensors.emplace_back(weight);
-  tensors.emplace_back(bias);
-
-  int64_t version = 3;
-  return std::tie(version, config_vals, tensors);
-}
-
-#else
-#error "Invalid qconv serialization version."
-#endif
 
 template <uint32_t kSpatialDim>
 c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(

@@ -403,12 +403,6 @@ Tensor LinearOpContext::run(
   return convert(v_output);
 }
 
-LinearOpContext::State LinearOpContext::unpack() const {
-  return LinearOpContext::State{
-      unpacked_.weight,
-      unpacked_.bias,
-  };
-}
 
 c10::intrusive_ptr<LinearOpContext> linear_prepack(
     Tensor&& weight,

@@ -43,7 +43,7 @@ class Conv2dOpContext final : public torch::jit::CustomClassHolder {
       c10::optional<Scalar>>;
 
   Tensor run(const Tensor& input) const;
-  State unpack() const;
+  
 
  private:
   Conv2dOpContext(

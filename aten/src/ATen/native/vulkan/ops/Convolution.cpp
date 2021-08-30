@@ -863,18 +863,7 @@ Tensor Conv2dOpContext::run(const Tensor& input_arg) const {
   return convert(v_output);
 }
 
-Conv2dOpContext::State Conv2dOpContext::unpack() const {
-  return Conv2dOpContext::State{
-    unpacked_.weight,
-    unpacked_.bias,
-    unpacked_.stride,
-    unpacked_.padding,
-    unpacked_.dilation,
-    unpacked_.groups,
-    unpacked_.output_min,
-    unpacked_.output_max,
-  };
-}
+
 
 c10::intrusive_ptr<Conv2dOpContext> conv2d_clamp_prepack(
     Tensor&& weight,

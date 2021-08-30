@@ -30,17 +30,7 @@ class Conv2dOpContext : public torch::jit::CustomClassHolder {
   c10::optional<Scalar> output_max_;
 
  public:
-  SerializationTypeConv2dPrePack unpack() {
-    return std::make_tuple(
-        orig_weight_,
-        orig_bias_,
-        stride_,
-        padding_,
-        dilation_,
-        groups_,
-        output_min_,
-        output_max_);
-  }
+  
 
   virtual Tensor run(const Tensor& input) = 0;
 };

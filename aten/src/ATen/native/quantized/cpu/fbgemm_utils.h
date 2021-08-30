@@ -65,8 +65,7 @@ struct TORCH_API PackedLinearWeight : public LinearPackedParamsBase {
   at::Tensor apply_dynamic(at::Tensor input, bool reduce_range=false) override;
   at::Tensor apply_dynamic_relu(at::Tensor input, bool reduce_range=false) override;
 
-  std::tuple<at::Tensor, c10::optional<at::Tensor>> unpack() override;
-
+  
   c10::optional<at::Tensor> bias() override {
     return bias_;
   }
@@ -112,8 +111,7 @@ struct TORCH_API PackedLinearWeightFp16 : public LinearPackedParamsBase {
   at::Tensor apply_dynamic(at::Tensor input, bool reduce_range=false) override;
   at::Tensor apply_dynamic_relu(at::Tensor input, bool reduce_range=false) override;
 
-  std::tuple<at::Tensor, c10::optional<at::Tensor>> unpack() override;
-
+  
   c10::optional<at::Tensor> bias() override {
     return bias_;
   }
@@ -183,7 +181,7 @@ struct TORCH_API PackedConvWeight : public ConvPackedParamsBase<kSpatialDim> {
       double output_scale,
       int64_t output_zero_point) override;
 
-  std::tuple<at::Tensor, c10::optional<at::Tensor>> unpack() override;
+  
 
   static c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> prepack(
       at::Tensor weight,
@@ -346,8 +344,7 @@ struct TORCH_API PackedEmbeddingBagWeight : public EmbeddingPackedParamsBase {
   c10::QScheme q_scheme;
   int64_t version_;
 
-  at::Tensor unpack() override;
-  static c10::intrusive_ptr<EmbeddingPackedParamsBase> prepack(at::Tensor weight);
+  
 
   int64_t bit_rate() const override {
     return bit_rate_;

@@ -2409,34 +2409,8 @@ class TestQuantizeFx(QuantizationTestCase):
         m = prepare_fx(m, qconfig_dict)
         m = convert_fx(m)
         res = m(data)
-        weight, bias = m._packed_weight_0.unpack()
-        # check that random model weight/bias does not match ref weight/bias
-        self.assertNotEqual(weight, ref_weight)
-        self.assertNotEqual(bias, ref_bias)
-        self.assertNotEqual(res, ref_res)
-        m.load_state_dict(state_dict)
-
-        def checkModel(m, data, ref_weight, ref_bias, ref_res):
-            res = m(data)
-            weight, bias = m._packed_weight_0.unpack()
-            # check that weight/bias matches after load the state_dict
-            self.assertEqual(weight, ref_weight)
-            self.assertEqual(bias, ref_bias)
-            self.assertEqual(res, ref_res)
-
-        checkModel(m, data, ref_weight, ref_bias, ref_res)
-
-        # Test save to disk and load back
-        m = M2().eval()
-        m = prepare_fx(m, qconfig_dict)
-        m = convert_fx(m)
-        m.load_state_dict(state_dict)
-        with TemporaryFileName() as fname:
-            torch.save(m.state_dict(), fname)
-            m.load_state_dict(torch.load(fname))
-
-        checkModel(m, data, ref_weight, ref_bias, ref_res)
-
+     
+        
     def test_preserve_qconfig(self):
         """
         Test to make sure the temporary config option to preserve qconfig attributes

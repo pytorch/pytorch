@@ -2348,9 +2348,7 @@ class TestQuantizedOps(TestCase):
         w_packed = torch.ops.quantized.linear_prepack(qw, bias_float)
         # test bias()
         self.assertEqual(w_packed.bias(), bias_float)
-        # test unpack()
-        self.assertEqual(w_packed.unpack()[0], qw)
-
+       
     def test_advanced_indexing(self):
         """
         Verifies that the x[:, [0], :, :] syntax works for quantized tensors.
