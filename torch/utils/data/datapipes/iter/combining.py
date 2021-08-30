@@ -80,7 +80,8 @@ class MultiplexerIterDataPipe(IterDataPipe):
         Iterable DataPipe that yields one element at a time from each input Iterable DataPipe
         (i.e. one element from the 1st input DataPipe, then one element from the 2nd DataPipe in the next iteration,
         and so on). It skips over DataPipes that are exhausted, and ends when all input DataPipes are exhausted.
-        args:
+
+        Args:
             datapipes: Iterable DataPipes that will take turn to yield their elements, until they are all exhausted
     """
     def __init__(self, *datapipes):
