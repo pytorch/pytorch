@@ -235,7 +235,7 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
           const std::string& num = L.expect(TK_NUMBER).text();
           // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           std::string::size_type num_len;
-          size_t stride = c10::stoi(num, &num_len);
+          auto stride = c10::stoll(num, &num_len);
           strides.push_back(stride);
         });
         return;
@@ -260,7 +260,7 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
     const std::string& num = L.expect(TK_NUMBER).text();
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::string::size_type num_len;
-    size_t dim = c10::stoi(num, &num_len);
+    auto dim = c10::stoll(num, &num_len);
     dims.emplace_back(dim);
   });
   if (seen_strides) {
