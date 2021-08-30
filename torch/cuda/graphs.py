@@ -138,15 +138,18 @@ def make_graphed_callables(callables, sample_args):
         callables = (callables,)
         sample_args = (sample_args,)
 
-    for c in callables:
+    for c, args in zip(callables, sample_args):
         if isinstance(c, torch.nn.Module):
             assert len(c._backward_hooks) == 0 and len(c._forward_hooks) == 0 and len(c._forward_pre_hooks) == 0, \
                 "Modules must not have hooks registered at the time they are passed. However, registering hooks " + \
                 "on modules after passing them through make_graphed_callables is allowed."
+        assert all(isinstance(arg, torch.Tensor) for arg in args), "In the prototype API, sample_args " + \
+            "for each callable must be a tuple of Tensors. Other types and keyword args are not allowed."
 
 
     # If a callable is an nn.Module, its graph's full input surface is the args the user explicitly
     # passes to forward (ie, its sample_args) AND the module's parameter attributes.
+    per_callable_len_user_args = [len(args) for args in sample_args]
     per_callable_module_params = [tuple(c.parameters()) if isinstance(c, torch.nn.Module) else ()
                                   for c in callables]
     per_callable_static_input_surfaces = [sample_args[i] + per_callable_module_params[i]
@@ -242,6 +245,7 @@ def make_graphed_callables(callables, sample_args):
     def make_graphed_autograd_function(fwd_graph,
                                        bwd_graph,
                                        module_params,
+                                       len_user_args,
                                        output_was_tensor,
                                        static_input_surface,
                                        static_outputs,
@@ -250,9 +254,10 @@ def make_graphed_callables(callables, sample_args):
         class Graphed(torch.autograd.Function):
             @staticmethod
             def forward(ctx, *inputs):
-                for i, arg in zip(static_input_surface, inputs):
-                    if i.data_ptr() != arg.data_ptr():
-                        i.copy_(arg)
+                # At this stage, only the user args may (potentially) be new tensors.
+                for i in range(len_user_args):
+                    if static_input_surface[i].data_ptr() != inputs[i].data_ptr():
+                        static_input_surface[i].copy_(inputs[i])
                 fwd_graph.replay()
                 assert isinstance(static_outputs, tuple)
                 return tuple(o.detach() for o in static_outputs)
@@ -289,6 +294,7 @@ def make_graphed_callables(callables, sample_args):
         graphed = make_graphed_autograd_function(fwd_graphs[i],
                                                  bwd_graphs[i],
                                                  per_callable_module_params[i],
+                                                 per_callable_len_user_args[i],
                                                  per_callable_output_was_tensor[i],
                                                  per_callable_static_input_surfaces[i],
                                                  per_callable_static_outputs[i],
@@ -296,11 +302,11 @@ def make_graphed_callables(callables, sample_args):
                                                  per_callable_static_grad_inputs[i])
 
         if isinstance(func, torch.nn.Module):
-            def make_graphed_forward(func, training, graphed, orig_fwd):
+            def make_graphed_forward(func, graph_training_state, graphed, orig_fwd):
                 def new_fwd(*user_args):
                     # If the module's training-or-eval state matches what we graphed,
                     # run the graph, otherwise run the original forward method
-                    if func.training == training:
+                    if func.training == graph_training_state:
                         return graphed(*user_args)
                     else:
                         return orig_fwd(*user_args)
