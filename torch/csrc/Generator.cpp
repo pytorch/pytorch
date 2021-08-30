@@ -43,8 +43,10 @@ static void THPGenerator_dealloc(PyObject* _self)
   Py_TYPE(_self)->tp_free(_self);
 }
 
-static PyObject * THPGenerator_pynew(PyTypeObject *type, PyObject *args, PyObject *kwargs)
+static PyObject * THPGenerator_pynew(PyTypeObject *type, PyObject *args, PyObject *kwargs, PyObject *seed=None)
 {
+  if (seed==None)
+  {
   HANDLE_TH_ERRORS
   static torch::PythonArgParser parser({
     "Generator(Device device=None)"
@@ -71,6 +73,11 @@ static PyObject * THPGenerator_pynew(PyTypeObject *type, PyObject *args, PyObjec
 #endif
   return (PyObject*)self.release();
   END_HANDLE_TH_ERRORS
+  }
+  else
+  {
+    return THPGenerator_manualspeed(seed)
+  }
 }
 
 static PyObject * THPGenerator_getState(PyObject *_self, PyObject *noargs)
