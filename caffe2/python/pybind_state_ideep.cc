@@ -20,12 +20,9 @@ USE_IDEEP_DEF_ALIASES();
 class IDeepFetcher;
 class IDeepFeeder;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(Python, IDEEPFallbackOp<PythonOp<CPUContext, false>>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_BLOB_FETCHER((TypeMeta::Id<itensor>()), IDeepFetcher);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_BLOB_FEEDER(IDEEP, IDeepFeeder);
 
 class IDeepFetcher : public BlobFetcherBase {

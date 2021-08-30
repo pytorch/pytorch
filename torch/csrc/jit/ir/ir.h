@@ -32,6 +32,9 @@ using pyobj_list = std::vector<THPObjectPtr>;
 
 namespace torch {
 namespace jit {
+namespace utils {
+TORCH_API std::string getNodesModuleHierarchy(const Node& n);
+} // namespace utils
 class AliasDb;
 
 using ::c10::Argument;

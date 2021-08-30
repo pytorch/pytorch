@@ -10,7 +10,6 @@ namespace caffe2 {
 namespace serialize {
 namespace {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PyTorchStreamWriterAndReader, SaveAndLoad) {
   int64_t kFieldAlignment = 64L;
 
@@ -74,7 +73,6 @@ TEST(PyTorchStreamWriterAndReader, SaveAndLoad) {
   ASSERT_EQ(memcmp(the_file.c_str() + off2, data2.data(), data2.size()), 0);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PytorchStreamWriterAndReader, GetNonexistentRecordThrows) {
   std::ostringstream oss;
   // write records through writers

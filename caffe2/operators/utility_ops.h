@@ -770,7 +770,7 @@ class ScatterOp : public Operator<CPUContext> {
       : Operator<CPUContext>(std::forward<Args>(args)...),
         OP_SINGLE_ARG(int, "axis", axis_, 1) {}
 
-  virtual ~ScatterOp() noexcept override {}
+   ~ScatterOp() noexcept override {}
 
   bool RunOnDevice() override {
     TORCH_CHECK(

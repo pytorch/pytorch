@@ -16,9 +16,7 @@ std::vector<thread_event_lists> State::results() {
   return results;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 mutexType currentStateStackEntryMutex;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::shared_ptr<StateStackEntry> currentStateStackEntryPtr = nullptr;
 
 void StateStackEntry::pushRange(

@@ -5,62 +5,52 @@
 #include "caffe2/core/timer.h"
 
 // experimental support for multiple streams per worker per GPU
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int(
     caffe2_streams_per_gpu,
     1,
     "Number of streams per worker per GPU"
     " to use in GPU thread pool (experimental)");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(
     caffe2_net_async_inference_mode,
     false,
     "If set, use one single chain containing all ops");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(
     caffe2_net_async_profile_operators,
     false,
     "If set, profile operators of the net regardless of net being prof_dag.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int(
     caffe2_net_async_max_gpus,
     16,
     "Max number of GPUs allowed in net async executor");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int(
     caffe2_net_async_max_numa_nodes,
     8,
     "Max number of NUMA nodes allowed in net async executor");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int(
     caffe2_net_async_thread_pool_size,
     0,
     "Number of threads in device thread pool by default");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(
     caffe2_net_async_check_stream_status,
     false,
     "Select next non-busy stream");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(
     caffe2_net_async_use_single_pool,
     false,
     "Use single thread pool for all devices");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(
     caffe2_net_async_use_per_net_pools,
     false,
     "Use per net thread pools");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(
     caffe2_net_async_run_root_tasks_inline,
     false,
@@ -623,17 +613,14 @@ ExecutionOptions::ExecutionOptions(
 
 namespace c10 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_REGISTER_CREATOR(
     ThreadPoolRegistry,
     CPU,
     caffe2::GetAsyncNetThreadPool<TaskThreadPool, caffe2::PROTO_CPU>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_REGISTER_CREATOR(
     ThreadPoolRegistry,
     CUDA,
     caffe2::GetAsyncNetThreadPool<TaskThreadPool, caffe2::PROTO_CUDA>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_REGISTER_CREATOR(
     ThreadPoolRegistry,
     HIP,

@@ -164,19 +164,16 @@ bool SpatialBNDNNLowPOp<T, ReluFused>::RunOnDevice() {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     SpatialBN,
     DNNLOWP,
     SpatialBNDNNLowPOp<uint8_t>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Int8SpatialBN,
     DNNLOWP,
     SpatialBNDNNLowPOp<uint8_t>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Int8SpatialBNRelu,
     DNNLOWP,

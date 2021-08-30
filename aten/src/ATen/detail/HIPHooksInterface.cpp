@@ -33,7 +33,6 @@ const HIPHooksInterface& getHIPHooks() {
 }
 } // namespace detail
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_REGISTRY(HIPHooksRegistry, HIPHooksInterface, HIPHooksArgs)
 
 } // namespace at

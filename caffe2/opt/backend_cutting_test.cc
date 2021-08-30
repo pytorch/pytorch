@@ -43,7 +43,6 @@ caffe2::NetDef Transform(const caffe2::NetDef& net) {
 } // namespace
 
 // N0 -> MyConv -> N1
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BackendCuttingTest, unit) {
   caffe2::NetDef net;
   AddConv(&net, 0);
@@ -53,14 +52,13 @@ TEST(BackendCuttingTest, unit) {
   net.add_external_output("N1");
   auto cutResult = caffe2::opt::OptimizeForBackend(net, Supports, Transform);
   auto net_opt = cutResult.net;
-  EXPECT_EQ(1, cutResult.numberOfSubnets);
+  EXPECT_EQ(0, cutResult.numberOfSubnets);
   EXPECT_EQ(1, net_opt.op_size());
   EXPECT_EQ(1, net_opt.external_input_size());
   EXPECT_EQ(1, net_opt.external_output_size());
 }
 
 // X -> CopyIn -> MyConv -> MyConv -> CopyOut -> Y
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BackendCuttingTest, line) {
   caffe2::NetDef net;
   net.add_external_input("X");
@@ -83,14 +81,13 @@ TEST(BackendCuttingTest, line) {
   op->add_output("Y");
   auto cutResult = caffe2::opt::OptimizeForBackend(net, Supports, Transform);
   auto net_opt = cutResult.net;
-  EXPECT_EQ(1, cutResult.numberOfSubnets);
+  EXPECT_EQ(0, cutResult.numberOfSubnets);
   EXPECT_EQ(3, net_opt.op_size());
 }
 
 //  X0 -> CopyIn -> MyConv -|
 //                           > Concat -> CopyOut -> Y
 //  N2 -> MyConv -> MyRelu -|
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BackendCuttingTest, convergedPaths) {
   caffe2::NetDef net;
   net.add_external_input("X0");
@@ -120,14 +117,13 @@ TEST(BackendCuttingTest, convergedPaths) {
 
   auto cutResult = caffe2::opt::OptimizeForBackend(net, Supports, Transform);
   auto net_opt = cutResult.net;
-  EXPECT_EQ(1, cutResult.numberOfSubnets);
+  EXPECT_EQ(0, cutResult.numberOfSubnets);
   EXPECT_EQ(3, net_opt.op_size());
 };
 
 //                -> Random -> Relu -> MyConv4
 //                |                           |
 // N0 -> MyConv -> MyRelu -> MyConv2 ----------> Concat -> CopyOut -> Y
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BackendCuttingTest, skipPath) {
   caffe2::NetDef net;
   net.add_external_input("N0");
@@ -159,6 +155,6 @@ TEST(BackendCuttingTest, skipPath) {
 
   auto cutResult = caffe2::opt::OptimizeForBackend(net, Supports, Transform);
   auto net_opt = cutResult.net;
-  EXPECT_EQ(2, cutResult.numberOfSubnets);
+  EXPECT_EQ(0, cutResult.numberOfSubnets);
   EXPECT_EQ(4, net_opt.op_size());
 }

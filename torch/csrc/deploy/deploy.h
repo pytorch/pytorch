@@ -1,10 +1,9 @@
 #pragma once
-// NOLINTNEXTLINE(modernize-deprecated-headers)
-#include <assert.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/api/include/torch/imethod.h>
 #include <torch/csrc/deploy/interpreter/interpreter_impl.h>
 #include <torch/csrc/jit/serialization/import.h>
+#include <cassert>
 #include <fstream>
 #include <iostream>
 #include <string>
@@ -56,7 +55,7 @@ class TORCH_API Interpreter {
   std::string library_name_;
   void* handle_;
   std::unique_ptr<InterpreterImpl> pImpl_;
-
+  bool custom_loader_ = false;
   InterpreterManager* manager_; // optional if managed by one
 
  public:
@@ -201,6 +200,13 @@ struct TORCH_API ReplicatedObj {
     TORCH_DEPLOY_TRY
     auto I = acquire_session();
     return I.self.call_kwargs(std::move(kwargs)).toIValue();
+    TORCH_DEPLOY_SAFE_CATCH_RETHROW
+  }
+
+  [[nodiscard]] bool hasattr(const char* name) const {
+    TORCH_DEPLOY_TRY
+    auto I = acquire_session();
+    return I.self.hasattr(name);
     TORCH_DEPLOY_SAFE_CATCH_RETHROW
   }
 

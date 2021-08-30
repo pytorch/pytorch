@@ -244,8 +244,6 @@ class TestTesting(TestCase):
             expected = test[2]
             self.assertEqual(actual.item(), expected)
 
-    # torch.close is not implemented for bool tensors
-    # see https://github.com/pytorch/pytorch/issues/33048
     def test_isclose_comparetensors_bool(self, device):
         tests = (
             (True, True, True),
@@ -254,9 +252,7 @@ class TestTesting(TestCase):
             (False, True, False),
         )
 
-        with self.assertRaises(RuntimeError):
-            self._isclose_helper(tests, device, torch.bool, False)
-
+        self._isclose_helper(tests, device, torch.bool, False)
         self._comparetensors_helper(tests, device, torch.bool, False)
 
     @dtypes(torch.uint8,
@@ -339,8 +335,6 @@ class TestTesting(TestCase):
 
         self._comparetensors_helper(tests, device, dtype, True)
 
-    # torch.close with equal_nan=True is not implemented for complex inputs
-    # see https://github.com/numpy/numpy/issues/15959
     # Note: compareTensor will compare the real and imaginary parts of a
     # complex tensors separately, unlike isclose.
     @dtypes(torch.complex64, torch.complex128)
@@ -420,13 +414,20 @@ class TestTesting(TestCase):
         # equal_nan = True tests
         tests = (
             (complex(1, 1), complex(1, float('nan')), False),
-            (complex(float('nan'), 1), complex(1, float('nan')), False),
+            (complex(1, 1), complex(float('nan'), 1), False),
             (complex(float('nan'), 1), complex(float('nan'), 1), True),
+            (complex(float('nan'), 1), complex(1, float('nan')), True),
+            (complex(float('nan'), float('nan')), complex(float('nan'), float('nan')), True),
         )
+        self._isclose_helper(tests, device, dtype, True)
 
-        with self.assertRaises(RuntimeError):
-            self._isclose_helper(tests, device, dtype, True)
-
+        tests = (
+            (complex(1, 1), complex(1, float('nan')), False),
+            (complex(1, 1), complex(float('nan'), 1), False),
+            (complex(float('nan'), 1), complex(float('nan'), 1), True),
+            (complex(float('nan'), 1), complex(1, float('nan')), False),
+            (complex(float('nan'), float('nan')), complex(float('nan'), float('nan')), True),
+        )
         self._comparetensors_helper(tests, device, dtype, True)
 
     # Tests that isclose with rtol or atol values less than zero throws a
@@ -452,6 +453,19 @@ class TestTesting(TestCase):
         b = a + 1
 
         self.assertFalse(torch.isclose(a, b, rtol=0, atol=0))
+
+    @dtypes(torch.float16, torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_isclose_nan_equality_shortcut(self, device, dtype):
+        if dtype.is_floating_point:
+            a = b = torch.nan
+        else:
+            a = complex(torch.nan, 0)
+            b = complex(0, torch.nan)
+
+        expected = True
+        tests = [(a, b, expected)]
+
+        self._isclose_helper(tests, device, dtype, equal_nan=True, rtol=0, atol=0)
 
     @dtypes(torch.bool, torch.long, torch.float, torch.cfloat)
     def test_make_tensor(self, device, dtype):
@@ -1298,7 +1312,7 @@ class TestAssertCloseSparseCOO(TestCase):
         expected = torch.sparse_coo_tensor(expected_indices, expected_values, size=(2, 2))
 
         for fn in assert_close_with_inputs(actual, expected):
-            with self.assertRaisesRegex(AssertionError, re.escape("number of specified values")):
+            with self.assertRaisesRegex(AssertionError, re.escape("number of specified values in sparse COO tensors")):
                 fn()
 
     def test_mismatching_indices_msg(self):
@@ -1317,7 +1331,7 @@ class TestAssertCloseSparseCOO(TestCase):
         expected = torch.sparse_coo_tensor(expected_indices, expected_values, size=(2, 2))
 
         for fn in assert_close_with_inputs(actual, expected):
-            with self.assertRaisesRegex(AssertionError, re.escape("The failure occurred for the indices")):
+            with self.assertRaisesRegex(AssertionError, re.escape("Sparse COO indices")):
                 fn()
 
     def test_mismatching_values_msg(self):
@@ -1336,7 +1350,7 @@ class TestAssertCloseSparseCOO(TestCase):
         expected = torch.sparse_coo_tensor(expected_indices, expected_values, size=(2, 2))
 
         for fn in assert_close_with_inputs(actual, expected):
-            with self.assertRaisesRegex(AssertionError, re.escape("The failure occurred for the values")):
+            with self.assertRaisesRegex(AssertionError, re.escape("Sparse COO values")):
                 fn()
 
 
@@ -1367,7 +1381,7 @@ class TestAssertCloseSparseCSR(TestCase):
         expected = torch.sparse_csr_tensor(expected_crow_indices, expected_col_indices, expected_values, size=(2, 2))
 
         for fn in assert_close_with_inputs(actual, expected):
-            with self.assertRaisesRegex(AssertionError, re.escape("The failure occurred for the crow_indices")):
+            with self.assertRaisesRegex(AssertionError, re.escape("Sparse CSR crow_indices")):
                 fn()
 
     def test_mismatching_col_indices_msg(self):
@@ -1382,7 +1396,7 @@ class TestAssertCloseSparseCSR(TestCase):
         expected = torch.sparse_csr_tensor(expected_crow_indices, expected_col_indices, expected_values, size=(2, 2))
 
         for fn in assert_close_with_inputs(actual, expected):
-            with self.assertRaisesRegex(AssertionError, re.escape("The failure occurred for the col_indices")):
+            with self.assertRaisesRegex(AssertionError, re.escape("Sparse CSR col_indices")):
                 fn()
 
     def test_mismatching_values_msg(self):
@@ -1397,7 +1411,7 @@ class TestAssertCloseSparseCSR(TestCase):
         expected = torch.sparse_csr_tensor(expected_crow_indices, expected_col_indices, expected_values, size=(2, 2))
 
         for fn in assert_close_with_inputs(actual, expected):
-            with self.assertRaisesRegex(AssertionError, re.escape("The failure occurred for the values")):
+            with self.assertRaisesRegex(AssertionError, re.escape("Sparse CSR values")):
                 fn()
 
 
