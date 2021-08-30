@@ -328,7 +328,7 @@ bool is_available(TensorList tensors) {
 }
 
 std::uint64_t version() {
-// issue: https://github.com/pytorch/pytorch/issues/64060
+//issue: https://github.com/pytorch/pytorch/issues/64060
 #ifdef USE_NCCL
   int version;
   ncclResult_t status = ncclGetVersion(&version);
