@@ -20,7 +20,7 @@ namespace at { namespace native { namespace {
 using namespace vec;
 
 template <typename scalar_t, typename func_t>
-static inline void cpu_cum_base_kernel(Tensor& result,
+static inline void cpu_cum_base_kernel(const Tensor& result,
     const Tensor& self,
     int64_t dim,
     const func_t& f,
@@ -67,7 +67,7 @@ static inline void cpu_cum_base_kernel(Tensor& result,
   iter.for_each(loop);
 }
 
-static void cumsum_cpu_kernel(Tensor& result, const Tensor& self, int64_t dim) {
+static void cumsum_cpu_kernel(const Tensor& result, const Tensor& self, int64_t dim) {
   auto wrap_dim = maybe_wrap_dim(dim, self.dim());
   int64_t self_dim_size = ensure_nonempty_size(self, wrap_dim);
 
@@ -86,7 +86,7 @@ static void cumsum_cpu_kernel(Tensor& result, const Tensor& self, int64_t dim) {
   });
 }
 
-static void cumprod_cpu_kernel(Tensor& result, const Tensor& self, int64_t dim) {
+static void cumprod_cpu_kernel(const Tensor& result, const Tensor& self, int64_t dim) {
   auto wrap_dim = maybe_wrap_dim(dim, self.dim());
   int64_t self_dim_size = ensure_nonempty_size(self, wrap_dim);
 
@@ -163,24 +163,29 @@ static void std_var_kernel_impl(TensorIterator& iter, int64_t correction, bool t
 }
 
 static void prod_kernel_impl(TensorIterator& iter) {
-  // Workaround for the error: '*' in boolean context, suggest '&&' instead [-Werror=int-in-bool-context]
+  // Workaround for the error: '*' in boolean context, suggest '&&' instead
+  // [-Werror=int-in-bool-context]
   if (iter.dtype() == ScalarType::Bool) {
     using scalar_t = bool;
     binary_kernel_reduce_vec(
-      iter,
-      [=](scalar_t a, scalar_t b) -> scalar_t { return a && b; },
-      [=](Vectorized<scalar_t> a, Vectorized<scalar_t> b) { return a && b; },
-      // NOLINTNEXTLINE(bugprone-argument-comment)
-      /*identity=*/1);
+        iter,
+        [=](scalar_t a, scalar_t b)
+            __ubsan_ignore_undefined__ -> scalar_t { return a && b; },
+        [=](Vectorized<scalar_t> a, Vectorized<scalar_t> b)
+            __ubsan_ignore_undefined__ { return a && b; },
+        // NOLINTNEXTLINE(bugprone-argument-comment)
+        /*identity=*/1);
   } else {
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "prod_cpu", [&] {
       binary_kernel_reduce_vec(
-        iter,
-        [=](scalar_t a, scalar_t b) -> scalar_t { return a * b; },
-        [=](Vectorized <scalar_t> a, Vectorized <scalar_t> b) { return a * b; },
-        // NOLINTNEXTLINE(bugprone-argument-comment)
-        /*identity=*/1);
-      });
+          iter,
+          [=](scalar_t a, scalar_t b)
+              __ubsan_ignore_undefined__ -> scalar_t { return a * b; },
+          [=](Vectorized<scalar_t> a, Vectorized<scalar_t> b)
+              __ubsan_ignore_undefined__ { return a * b; },
+          // NOLINTNEXTLINE(bugprone-argument-comment)
+          /*identity=*/1);
+    });
   }
 }
 

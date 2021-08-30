@@ -199,10 +199,7 @@ TORCH_META_FUNC(slow_conv_transpose2d)
 
   Tensor input_ = input.contiguous();
 
-  bool is_batch = false;
   if (input_.dim() == 3) {
-    // Force batch
-    is_batch = true;
     input_.resize_({1, input_.size(0), input_.size(1), input_.size(2)});
   }
 

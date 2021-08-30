@@ -156,7 +156,7 @@ protected:
   PtrType data_;
   index_t sizes_[N];
   index_t strides_[N];
-  C10_HOST_DEVICE void bounds_check_(index_t i) const {
+  C10_HOST void bounds_check_(index_t i) const {
     TORCH_CHECK_INDEX(
         0 <= i && i < N,
         "Index ",
