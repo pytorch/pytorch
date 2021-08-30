@@ -4843,6 +4843,11 @@ Is this Tensor with its dimensions reversed.
 
 If ``n`` is the number of dimensions in ``x``,
 ``x.T`` is equivalent to ``x.permute(n-1, n-2, ..., 0)``.
+
+.. warning::
+    The use of :func:`Tensor.T` on tensors of dimension other than 2 is deprecated and will throw
+    an error in a future release. Consider :attr:`~.Tensor.mT` to transpose batches of matrices or
+    `x.permute(*torch.arange(x.ndim).flip(0))` to reverse the dimensions of a tensor.
 """)
 
 add_docstr_all('H',

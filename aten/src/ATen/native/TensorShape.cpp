@@ -2171,6 +2171,13 @@ std::vector<Tensor> meshgrid(TensorList tensors) {
 // with dims reversed
 Tensor numpy_T(const Tensor &self) {
   int64_t n = self.dim();
+  if (n != 2) {
+    TORCH_WARN_ONCE(
+        "The use of `x.T` on tensors of dimension other than 2 is deprecated and will throw ",
+        "an error in a future release. Consider `x.mT` to transpose batches of matrices or ",
+        "`x.permute(*torch.arange(x.ndim).flip(0))` to reverse the dimensions of a tensor."
+    );
+  }
   DimVector transpose_dims;
   for (int64_t i = n - 1; i >= 0; --i) {
     transpose_dims.push_back(i);
