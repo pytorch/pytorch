@@ -3,7 +3,6 @@ import unittest
 import contextlib
 import math
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 from torch.testing import FileCheck
 from typing import List
