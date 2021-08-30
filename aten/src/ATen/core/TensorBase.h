@@ -33,7 +33,7 @@ class Tensor;
 class TensorBase;
 
 // Convert Tensor to TensorBase without any need to include Tensor.h
-const TensorBase& get_tensor_base(const Tensor& t);
+TORCH_API const TensorBase& get_tensor_base(const Tensor& t);
 
 namespace impl {
 inline bool variable_excluded_from_dispatch() {
@@ -383,6 +383,12 @@ class TORCH_API TensorBase {
   bool is_mlc() const {
     // NB: this is not a native function to avoid dispatching overhead.
     return impl_->is_mlc();
+  }
+
+  /// Returns if a `Tensor` is ort tensor.
+  bool is_ort() const {
+    // NB: this is not a native function to avoid dispatching overhead.
+    return impl_->is_ort();
   }
 
   /// Returns if a `Tensor` is vulkan tensor.

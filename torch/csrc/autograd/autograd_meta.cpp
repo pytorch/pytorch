@@ -185,6 +185,12 @@ void AutogradMeta::set_fw_grad(const at::TensorBase& new_grad_base, const at::Te
 }
 
 const Variable& AutogradMeta::fw_grad(uint64_t level, const at::TensorBase& self) const {
+  // TLS that disables forward AD
+  // This is only used for custom Function implementation
+  if (!c10::AutogradState::get_tls_state().get_fw_grad_mode()) {
+    return ForwardGrad::undef_grad();
+  }
+
   // Ensure that concurent fw_grad() "reads" are thread safe
   std::lock_guard<std::mutex> lock(mutex_);
 
