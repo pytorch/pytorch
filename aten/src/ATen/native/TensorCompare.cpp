@@ -108,8 +108,6 @@ bool allclose(const Tensor& self, const Tensor& other, double rtol, double atol,
 //  https://github.com/numpy/numpy/issues/15959 is resolved
 Tensor isclose(const Tensor& self, const Tensor& other, double rtol, double atol, bool equal_nan) {
   TORCH_CHECK(self.scalar_type() == other.scalar_type(), self.scalar_type(), " did not match ", other.scalar_type());
-  TORCH_CHECK(!(self.is_complex() && equal_nan),
-    "isclose with equal_nan=True is not supported for complex inputs.");
   TORCH_CHECK(!(self.is_quantized() || other.is_quantized()),
     "isclose is not supported for quantized inputs.");
 
@@ -121,8 +119,8 @@ Tensor isclose(const Tensor& self, const Tensor& other, double rtol, double atol
 
   // Computes equality closeness
   Tensor close = self == other;
-  if (equal_nan && self.is_floating_point()) {
-      close.__ior__((self != self).__iand__(other != other));
+  if (equal_nan && (self.is_floating_point() || self.is_complex())) {
+      close.__ior__(self.isnan().__iand__(other.isnan()));
   }
 
   // In case of zero tolerances the closeness inequality degenerates to an equality check.

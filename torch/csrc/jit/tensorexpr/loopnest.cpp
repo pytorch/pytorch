@@ -47,14 +47,14 @@ LoopNest::LoopNest(StmtPtr stmt, std::unordered_set<BufPtr> output_bufs)
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 LoopNest::LoopNest(
-    const std::vector<Tensor*>& output_tensors,
-    const std::vector<Tensor*>& tensors_to_compute) {
+    const std::vector<Tensor>& output_tensors,
+    const std::vector<Tensor>& tensors_to_compute) {
   initialize(output_tensors, tensors_to_compute);
   verify(root_stmt_);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-LoopNest::LoopNest(const std::vector<Tensor*>& output_tensors) {
+LoopNest::LoopNest(const std::vector<Tensor>& output_tensors) {
   initialize(output_tensors, output_tensors);
   verify(root_stmt_);
 }
@@ -127,8 +127,8 @@ class Vectorizer : public IRMutator {
     ExprPtr start = v->start();
     ExprPtr stop = v->stop();
 
-    IntImmPtr start_imm = to<IntImm>(start);
-    IntImmPtr stop_imm = to<IntImm>(stop);
+    auto start_imm = intValue(start);
+    auto stop_imm = intValue(stop);
     if (!start_imm) {
       throw std::runtime_error(
           "Can't vectorize due to non-constant loop start!");
@@ -140,8 +140,8 @@ class Vectorizer : public IRMutator {
     }
 
     var_ = var;
-    start_ = start_imm;
-    lanes_ = stop_imm->value();
+    start_ = immLike(start, *start_imm);
+    lanes_ = *stop_imm;
 
     StmtPtr new_body = body->accept_mutator(this);
     if (new_body == body) {
@@ -176,6 +176,13 @@ class Vectorizer : public IRMutator {
     std::vector<ExprPtr> inputs = {v->lhs(), v->rhs()};
     return try_vectorize(v, inputs, [&]() {
       return ExprHandle(inputs[0]) / ExprHandle(inputs[1]);
+    });
+  }
+
+  ExprPtr mutate(ModPtr v) override {
+    std::vector<ExprPtr> inputs = {v->lhs(), v->rhs()};
+    return try_vectorize(v, inputs, [&]() {
+      return ExprHandle(inputs[0]) % ExprHandle(inputs[1]);
     });
   }
 
@@ -486,15 +493,15 @@ bool LoopNest::vectorize(ForPtr f) {
 }
 
 void LoopNest::initialize(
-    const std::vector<Tensor*>& output_tensors,
-    const std::vector<Tensor*>& tensors_to_compute) {
+    const std::vector<Tensor>& output_tensors,
+    const std::vector<Tensor>& tensors_to_compute) {
   for (auto t : output_tensors) {
-    output_bufs_.insert(t->buf());
+    output_bufs_.insert(t.buf());
   }
 
   std::vector<StmtPtr> loops;
-  for (Tensor* t : tensors_to_compute) {
-    StmtPtr loop = t->stmt();
+  for (Tensor t : tensors_to_compute) {
+    StmtPtr loop = t.stmt();
     if (loop->get_parent()) {
       std::cerr << "Error: creating a loopnest from already used Tensors\n";
       loops = {};
@@ -524,11 +531,11 @@ class FunctionInliner : public IRMutator {
       if (auto index_var = to<Var>(i)) {
         index_vars_.insert(index_var);
         producer_index_vars_.push_back(index_var);
-      } else if (to<IntImm>(i) != nullptr) {
+      } else if (intValue(i)) {
         // If the index can be a constant, then that dimension must have size 1
         // (since we don't support in-place writes). Resolves issue 52581.
         TORCH_INTERNAL_ASSERT(
-            to<IntImm>(i)->value() == 0,
+            *intValue(i) == 0,
             "Constant index impression should always be zero");
         producer_index_vars_.push_back(nullptr);
       } else {
@@ -546,8 +553,7 @@ class FunctionInliner : public IRMutator {
       ExprPtr func_caller_param = dims.at(i);
       if (func_callee_arg == nullptr) {
         TORCH_INTERNAL_ASSERT(
-            to<IntImm>(func_caller_param) != nullptr &&
-                to<IntImm>(func_caller_param)->value() == 0,
+            intValue(func_caller_param) && *intValue(func_caller_param) == 0,
             "We are implicitly assuming that if you have an index of 0, that must also be inlined into an index of 0");
         continue;
       }
@@ -1133,7 +1139,7 @@ bool LoopNest::optimizeConditionals() {
     // only include the RHS of the conditions in the if-then-else expressions
     // we need to start with `0` which is the initial bound, given that we
     // only handle normalized loops (check for this is done below).
-    std::vector<ExprPtr> comp_values = {alloc<IntImm>(0)};
+    std::vector<ExprPtr> comp_values;
     std::vector<ExprPtr> sub_exprs;
     auto ifthenelse_exprs = NodeFinder<IfThenElse>::find(store);
     if (ifthenelse_exprs.empty()) {
@@ -1148,6 +1154,8 @@ bool LoopNest::optimizeConditionals() {
             ifthenelse_exprs.front(), &cond_var, &comp_values, &sub_exprs)) {
       continue;
     }
+    TORCH_INTERNAL_ASSERT(comp_values.size() >= 1);
+    comp_values.insert(comp_values.begin(), immLike(comp_values[0], 0));
 
     auto fors = getLoopStmtsFor(store);
     if (cond_var != fors.back()->var()) {
@@ -1283,10 +1291,10 @@ void LoopNest::vectorizeInnerLoops() {
 }
 
 void LoopNest::sliceHead(ForPtr f, int factor, ForPtr* head, ForPtr* tail) {
-  if (to<IntImm>(f->start()) && to<IntImm>(f->stop())) {
-    int start_val = to<IntImm>(f->start())->value();
-    int stop_val = to<IntImm>(f->stop())->value();
-    int size_val = stop_val - start_val;
+  if (intValue(f->start()) && intValue(f->stop())) {
+    auto start_val = *intValue(f->start());
+    auto stop_val = *intValue(f->stop());
+    auto size_val = stop_val - start_val;
     if (factor >= size_val) {
       *head = f;
       *tail = nullptr;
@@ -1304,13 +1312,12 @@ void LoopNest::sliceHead(ForPtr f, int factor, ForPtr* head, ForPtr* tail) {
   }
 
   ExprPtr head_end = alloc<Min>(
-      alloc<Add>(f->start(), alloc<IntImm>(factor)), f->stop(), true);
+      alloc<Add>(f->start(), immLike(f->stop(), factor)), f->stop(), true);
   *head = alloc<For>(f->var(), f->start(), head_end, Stmt::clone(f->body()));
-  *tail = alloc<For>(
-      f->var(), head_end, f->stop(), Stmt::clone(f->body()), f->loop_options());
+  p->insert_stmt_before(*head, f);
 
-  p->replace_stmt(f, *head);
-  p->insert_stmt_after(*tail, *head);
+  f->set_start(head_end);
+  *tail = f;
 
   if (f->loop_options().is_gpu_block_index() ||
       f->loop_options().is_gpu_thread_index()) {
@@ -1324,10 +1331,10 @@ void LoopNest::sliceHead(ForPtr f, int factor) {
 }
 
 void LoopNest::sliceTail(ForPtr f, int factor, ForPtr* head, ForPtr* tail) {
-  if (to<IntImm>(f->start()) && to<IntImm>(f->stop())) {
-    int start_val = to<IntImm>(f->start())->value();
-    int stop_val = to<IntImm>(f->stop())->value();
-    int size_val = stop_val - start_val;
+  if (intValue(f->start()) && intValue(f->stop())) {
+    auto start_val = *intValue(f->start());
+    auto stop_val = *intValue(f->stop());
+    auto size_val = stop_val - start_val;
     if (factor >= size_val) {
       *head = nullptr;
       *tail = f;
@@ -1345,17 +1352,12 @@ void LoopNest::sliceTail(ForPtr f, int factor, ForPtr* head, ForPtr* tail) {
   }
 
   ExprPtr tail_start = alloc<Max>(
-      f->start(), alloc<Sub>(f->stop(), alloc<IntImm>(factor)), true);
-  *head = alloc<For>(
-      f->var(),
-      f->start(),
-      tail_start,
-      Stmt::clone(f->body()),
-      f->loop_options());
+      f->start(), alloc<Sub>(f->stop(), immLike(f->stop(), factor)), true);
   *tail = alloc<For>(f->var(), tail_start, f->stop(), Stmt::clone(f->body()));
+  p->insert_stmt_after(*tail, f);
 
-  p->replace_stmt(f, *head);
-  p->insert_stmt_after(*tail, *head);
+  f->set_stop(tail_start);
+  *head = f;
 
   if (f->loop_options().is_gpu_block_index() ||
       f->loop_options().is_gpu_thread_index()) {
@@ -1389,17 +1391,17 @@ void LoopNest::splitWithTail(
   }
 
   bool tail_is_needed = true;
-  if (to<IntImm>(f->start()) && to<IntImm>(f->stop())) {
-    int start_val = to<IntImm>(f->start())->value();
-    int stop_val = to<IntImm>(f->stop())->value();
-    int size_val = stop_val - start_val;
-    int tail_size = size_val % factor;
+  if (intValue(f->start()) && intValue(f->stop())) {
+    auto const start_val = *intValue(f->start());
+    auto const stop_val = *intValue(f->stop());
+    auto const size_val = stop_val - start_val;
+    auto const tail_size = size_val % factor;
     if (tail_size == 0) {
       tail_is_needed = false;
     }
   }
 
-  IntImmPtr factor_expr = alloc<IntImm>(factor);
+  ExprPtr factor_expr = immLike(f->stop(), factor);
   ExprPtr size = alloc<Sub>(f->stop(), f->start());
   ExprPtr split_count = alloc<Div>(size, factor_expr);
   ExprPtr tail_size = alloc<Mod>(size, factor_expr);
@@ -1422,7 +1424,7 @@ void LoopNest::splitWithTail(
 
     StmtPtr body_tail =
         SubstituteInClone(f->body(), {{f->var(), combined_index2}});
-    *tail = alloc<For>(i_tail, alloc<IntImm>(0), tail_size, body_tail);
+    *tail = alloc<For>(i_tail, immLike(tail_size, 0), tail_size, body_tail);
 
     p->insert_stmt_after(*tail, f);
   } else {
@@ -1432,10 +1434,11 @@ void LoopNest::splitWithTail(
   StmtPtr body_inner =
       Substitute(f->removeBody(), {{f->var(), combined_index1}});
 
-  *inner = alloc<For>(i_inner, alloc<IntImm>(0), factor_expr, body_inner);
+  *inner =
+      alloc<For>(i_inner, immLike(factor_expr, 0), factor_expr, body_inner);
   // The input loop `f` will be the outer loop after split.
   f->set_var(i_outer);
-  f->set_start(alloc<IntImm>(0));
+  f->set_start(immLike(split_count, 0));
   f->set_stop(split_count);
   f->set_body(*inner);
 }
@@ -1457,20 +1460,20 @@ void LoopNest::splitWithMask(ForPtr f, int factor, ForPtr* inner) {
   ExprPtr start = IRSimplifier::simplify(f->start());
   ExprPtr stop = IRSimplifier::simplify(f->stop());
   if (start->isConstant() && stop->isConstant()) {
-    int start_val = immediateAs<int>(start);
-    int stop_val = immediateAs<int>(stop);
-    int size_val = stop_val - start_val;
-    int tail_size = size_val % factor;
+    auto start_val = *intValue(start);
+    auto stop_val = *intValue(stop);
+    auto size_val = stop_val - start_val;
+    auto tail_size = size_val % factor;
     if (tail_size == 0) {
       tail_is_needed = false;
     }
   }
 
-  IntImmPtr factor_expr = alloc<IntImm>(factor);
+  auto factor_expr = immLike(f->stop(), factor);
   ExprPtr size = alloc<Sub>(f->stop(), f->start());
   // split_count = (size + factor - 1) / factor
   ExprPtr split_count = alloc<Div>(
-      alloc<Sub>(alloc<Add>(size, factor_expr), alloc<IntImm>(1)), factor_expr);
+      alloc<Sub>(alloc<Add>(size, factor_expr), immLike(size, 1)), factor_expr);
 
   const std::string& loop_var_name = f->var()->name_hint();
   Dtype loop_var_dtype = f->var()->dtype();
@@ -1486,8 +1489,8 @@ void LoopNest::splitWithMask(ForPtr f, int factor, ForPtr* inner) {
   // TODO: is it ok that we're doing it eagerly? In the other implementation we
   // are only materializing predicates at the last, lowering, step.
   if (tail_is_needed) {
-    IntImmPtr start = to<IntImm>(f->start());
-    if (!start || start->value() != 0) {
+    auto start = intValue(f->start());
+    if (!start || *start != 0) {
       throw unimplemented_lowering();
     }
 
@@ -1498,10 +1501,11 @@ void LoopNest::splitWithMask(ForPtr f, int factor, ForPtr* inner) {
   }
   body_inner = Substitute(body_inner, {{f->var(), combined_index}});
 
-  *inner = alloc<For>(i_inner, alloc<IntImm>(0), factor_expr, body_inner);
+  *inner =
+      alloc<For>(i_inner, immLike(factor_expr, 0), factor_expr, body_inner);
   // The input loop `f` will be the outer loop after split.
   f->set_var(i_outer);
-  f->set_start(alloc<IntImm>(0));
+  f->set_start(immLike(split_count, 0));
   f->set_stop(split_count);
   f->set_body(*inner);
 }
@@ -2176,7 +2180,7 @@ bool LoopNest::normalize(ForPtr f) {
       {{f->var(), (VarHandle(f->var()) + ExprHandle(f->start())).node()}});
   f->set_body(IRSimplifier::simplify(for_body_normalized));
   f->set_stop(IRSimplifier::simplify(alloc<Sub>(f->stop(), f->start())));
-  f->set_start(alloc<IntImm>(0));
+  f->set_start(immLike(f->stop(), 0));
   return true;
 }
 
@@ -2241,7 +2245,7 @@ bool LoopNest::flatten(const std::vector<ForPtr>& loops, ForPtr* flattened) {
       normalized_loops[0]->var()->name_hint() + "_flat",
       normalized_loops[0]->var()->dtype());
   VarMapping var_mapping;
-  ExprPtr stop = alloc<IntImm>(1);
+  ExprPtr stop = immLike(flat_var, 1);
   for (size_t i = 0; i < normalized_loops.size(); ++i) {
     size_t idx = normalized_loops.size() - i - 1;
     auto curr_loop = normalized_loops[idx];
@@ -2254,7 +2258,7 @@ bool LoopNest::flatten(const std::vector<ForPtr>& loops, ForPtr* flattened) {
       Substitute(normalized_loops.back()->removeBody(), var_mapping);
 
   normalized_loops.front()->set_var(flat_var);
-  normalized_loops.front()->set_start(alloc<IntImm>(0));
+  normalized_loops.front()->set_start(immLike(stop, 0));
   normalized_loops.front()->set_stop(stop);
   normalized_loops.front()->set_body(flattened_body);
   *flattened = normalized_loops.front();
@@ -2356,7 +2360,7 @@ void LoopNest::compressBuffer(BufPtr buf, StmtPtr stmt) {
   std::vector<ExprPtr> new_dims(buf->dims());
   for (size_t i = 0; i < dims.size(); ++i) {
     if (dims[i]) {
-      new_dims[i] = alloc<IntImm>(1);
+      new_dims[i] = immLike(buf->dims()[i], 1);
     }
   }
   buf->set_dims(new_dims);
@@ -2367,7 +2371,7 @@ void LoopNest::compressBuffer(BufPtr buf, StmtPtr stmt) {
     std::vector<ExprPtr> new_indices(indices);
     for (size_t i = 0; i < dims.size(); ++i) {
       if (dims[i]) {
-        new_indices[i] = alloc<IntImm>(0);
+        new_indices[i] = immLike(indices[i], 0);
       }
     }
     return new_indices;
@@ -2386,11 +2390,11 @@ void LoopNest::compressBuffer(BufPtr buf, StmtPtr stmt) {
 
 void LoopNest::compressAllBuffers(StmtPtr stmt) {
   for (auto buf : BufFinder::find(stmt)) {
-    compressBuffer(const_cast<BufPtr>(buf), stmt);
+    compressBuffer(buf, stmt);
   }
 }
 
-std::vector<ForPtr> LoopNest::getLoopStmtsFor(Tensor* t) const {
+std::vector<ForPtr> LoopNest::getLoopStmtsFor(Tensor t) const {
   StmtPtr cur_stmt = getLoopBodyFor(t);
   return getLoopStmtsFor(cur_stmt);
 }
@@ -2413,8 +2417,8 @@ std::vector<ForPtr> LoopNest::getLoopStmtsFor(StmtPtr s) const {
   return result;
 }
 
-StmtPtr LoopNest::getLoopBodyFor(Tensor* t) const {
-  return getLoopBodyFor(t->buf());
+StmtPtr LoopNest::getLoopBodyFor(Tensor t) const {
+  return getLoopBodyFor(t.buf());
 }
 
 StmtPtr LoopNest::getLoopBodyFor(BufPtr buf) const {
@@ -2651,12 +2655,13 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
 
   // Determine the size of the cache, and create a loop var for each dimension.
   for (size_t i = 0; i < info.start.size(); ++i) {
-    ExprPtr dim = IRSimplifier::simplify(
-        alloc<Add>(alloc<Sub>(info.stop[i], info.start[i]), alloc<IntImm>(1)));
+    ExprPtr dim = IRSimplifier::simplify(alloc<Add>(
+        alloc<Sub>(info.stop[i], info.start[i]), immLike(info.stop[i], 1)));
 
     tmp_dims.push_back(dim);
 
-    new_loop_vars.push_back(alloc<Var>(var_names[i % var_names.size()], kInt));
+    new_loop_vars.push_back(
+        alloc<Var>(var_names[i % var_names.size()], info.stop[i]->dtype()));
     new_loop_vars_expr.push_back(new_loop_vars[i]);
   }
 
@@ -2707,8 +2712,8 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
         tmp_buf, new_loop_vars_expr, getImmediateByType(tmp_buf->dtype(), 0));
 
     for (int64_t i = new_loop_vars.size() - 1; i >= 0; --i) {
-      tmp_init =
-          alloc<For>(new_loop_vars[i], alloc<IntImm>(0), tmp_dims[i], tmp_init);
+      tmp_init = alloc<For>(
+          new_loop_vars[i], immLike(tmp_dims[i], 0), tmp_dims[i], tmp_init);
     }
 
     if (is_block) {
@@ -2729,7 +2734,7 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
 
     for (int64_t i = new_loop_vars.size() - 1; i >= 0; --i) {
       tmp_store = alloc<For>(
-          new_loop_vars[i], alloc<IntImm>(0), tmp_dims[i], tmp_store);
+          new_loop_vars[i], immLike(tmp_dims[i], 0), tmp_dims[i], tmp_store);
     }
 
     if (is_block) {
@@ -2748,7 +2753,7 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
 
     for (int64_t i = new_loop_vars.size() - 1; i >= 0; --i) {
       tmp_store = alloc<For>(
-          new_loop_vars[i], alloc<IntImm>(0), tmp_dims[i], tmp_store);
+          new_loop_vars[i], immLike(tmp_dims[i], 0), tmp_dims[i], tmp_store);
     }
 
     if (is_block) {
@@ -2765,7 +2770,7 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
 
     for (int64_t i = new_loop_vars.size() - 1; i >= 0; --i) {
       tmp_store = alloc<For>(
-          new_loop_vars[i], alloc<IntImm>(0), tmp_dims[i], tmp_store);
+          new_loop_vars[i], immLike(tmp_dims[i], 0), tmp_dims[i], tmp_store);
     }
 
     if (is_block) {
@@ -2913,7 +2918,8 @@ void LoopNest::computeAt(StmtPtr s, ForPtr f) {
   std::vector<ExprPtr> temp_indices(dims.size());
   for (const auto i : c10::irange(dims.size())) {
     // TODO: Use name-hint of the producer indices instead of 'idx'
-    temp_indices[i] = alloc<Var>(std::string("idx") + c10::to_string(i), kInt);
+    temp_indices[i] =
+        alloc<Var>(std::string("idx") + c10::to_string(i), dims[i]->dtype());
   }
 
   // Prepare substitute rules for constructing the temp statement from the prod
@@ -2954,7 +2960,10 @@ void LoopNest::computeAt(StmtPtr s, ForPtr f) {
     // dimensions in reversed order.
     size_t dim_idx = dims.size() - 1 - i;
     bd = alloc<For>(
-        to<Var>(temp_indices[dim_idx]), alloc<IntImm>(0), dims[dim_idx], bd);
+        to<Var>(temp_indices[dim_idx]),
+        immLike(dims[dim_idx], 0),
+        dims[dim_idx],
+        bd);
   }
 
   // Add constructed stmts to the consumer loop

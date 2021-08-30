@@ -593,17 +593,17 @@ class TestFX(JitTestCase):
         x = torch.rand(3, 4)
         ref_out = msm(x)
         test_out = lowered(x)
-        torch.testing.assert_allclose(test_out, ref_out)
+        torch.testing.assert_close(test_out, ref_out)
 
         # Test TorchScript compilation
         scripted_lowered = torch.jit.script(lowered)
         script_out = scripted_lowered(x)
-        torch.testing.assert_allclose(script_out, ref_out)
+        torch.testing.assert_close(script_out, ref_out)
 
         # Test TorchScript ser/de
         import_copy = self.getExportImportCopy(scripted_lowered)
         imported_out = import_copy(x)
-        torch.testing.assert_allclose(imported_out, ref_out)
+        torch.testing.assert_close(imported_out, ref_out)
 
     def test_reserved_getattr(self):
         """Ensure that we do not name any nodes with a reserved builtin like `getattr`"""
@@ -1279,6 +1279,12 @@ class TestFX(JitTestCase):
         nodes[3].append(nodes[2])
         with self.assertRaisesRegex(RuntimeError, 'was used before it has been defined'):
             graph.lint()
+
+    def test_wrong_target_type(self):
+        graph : torch.fx.Graph = torch.fx.Graph()
+        with self.assertRaises(ValueError):
+            n = torch.fx.Node(graph=graph, name='foo', op='call_function', target='foo',
+                              args=(), kwargs={})
 
     def test_example_shape_prop(self):
         class TestCase(torch.nn.Module):
@@ -2295,6 +2301,21 @@ class TestFX(JitTestCase):
         self.assertNotRegex(captured,
                             r"Call using an FX-traced Module, line .* of the "
                             r"traced Module's generated forward function:")
+
+    def test_graph_module_replicate_for_dp(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return torch.relu(x)
+
+        gm = torch.fx.symbolic_trace(Foo())
+
+        x = torch.randn(5, 3)
+        out = gm(x)
+
+        replica = gm._replicate_for_data_parallel()
+        out_replica = replica(x)
+
+        torch.testing.assert_allclose(out_replica, out)
 
     def test_ast_rewriter_rewrites_assert(self):
         class M(torch.nn.Module):
