@@ -8,6 +8,7 @@ from torch.utils.data.datapipes.iter.combinatorics import (
 )
 from torch.utils.data.datapipes.iter.combining import (
     ConcaterIterDataPipe as Concater,
+    ForkerIterDataPipe as Forker,
     ZipperIterDataPipe as Zipper,
 )
 from torch.utils.data.datapipes.iter.filelister import (
