@@ -1,4 +1,3 @@
-torch.fx._symbolic_trace.Tracer.__init__(self, autowrap_modules: Tuple[Callable] = (<module math>,), autowrap_functions: Tuple[Callable, ...] = (,), enable_cpatching: bool = False, param_shapes_constant: bool = False) -> None
 torch.fx._symbolic_trace.Tracer.call_module(self, m: torch.nn.modules.module.Module, forward: Callable[..., Any], args: Tuple[Any, ...], kwargs: Dict[str, Any]) -> Any
 torch.fx._symbolic_trace.Tracer.create_arg(self, a: Any) -> 'Argument'
 torch.fx._symbolic_trace.Tracer.is_leaf_module(self, m: torch.nn.modules.module.Module, module_qualified_name: str) -> bool
@@ -18,7 +17,6 @@ torch.fx.graph.Graph.graph_copy(self, g: 'Graph', val_map: Dict[torch.fx.node.No
 torch.fx.graph.Graph.inserting_after(self, n: Optional[torch.fx.node.Node] = None)
 torch.fx.graph.Graph.inserting_before(self, n: Optional[torch.fx.node.Node] = None)
 torch.fx.graph.Graph.lint(self)
-torch.fx.graph.Graph.node_copy(self, node: torch.fx.node.Node, arg_transform: Callable[[torch.fx.node.Node], Argument] = <function <lambda>>) -> torch.fx.node.Node
 torch.fx.graph.Graph.output(self, result: 'Argument', type_expr: Optional[Any] = None)
 torch.fx.graph.Graph.placeholder(self, name: str, type_expr: Optional[Any] = None) -> torch.fx.node.Node
 torch.fx.graph.Graph.print_tabular(self)
@@ -46,7 +44,7 @@ torch.fx.interpreter.Transformer.call_module(self, target: 'Target', args: Tuple
 torch.fx.interpreter.Transformer.get_attr(self, target: 'Target', args: Tuple[torch.fx.node.Argument, ...], kwargs: Dict[str, Any]) -> torch.fx.proxy.Proxy
 torch.fx.interpreter.Transformer.placeholder(self, target: 'Target', args: Tuple[torch.fx.node.Argument, ...], kwargs: Dict[str, Any]) -> torch.fx.proxy.Proxy
 torch.fx.interpreter.Transformer.transform(self) -> torch.fx.graph_module.GraphModule
-torch.fx.node.Node.__init__(self, graph: 'Graph', name: str, op: str, target: 'Target', args: Tuple[Argument, ...], kwargs: Dict[str, Argument], return_type: Optional[Any] = None) -> None
+torch.fx.node.Node.__init__(self, graph: 'Graph', name: str, op: str, target: 'Target', args: Tuple[Argument, ...], kwargs: Dict[str, Argument], type: Optional[Any] = None) -> None
 torch.fx.node.Node.append(self, x: 'Node') -> None
 torch.fx.node.Node.format_node(self, placeholder_names: List[str] = None, maybe_return_typename: List[str] = None) -> Optional[str]
 torch.fx.node.Node.prepend(self, x: 'Node') -> None

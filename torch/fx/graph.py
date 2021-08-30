@@ -707,7 +707,9 @@ class Graph:
         """
         return self.create_node('call_function', the_function, args, kwargs, type_expr=type_expr)
 
-    @compatibility(is_backward_compatible=True)
+    # Not checking BC on this API because the default lambda repr encodes a
+    # pointer, which jitters across processes
+    # @compatibility(is_backward_compatible=True)
     def node_copy(self, node: Node, arg_transform: Callable[[Node], 'Argument'] = lambda x: x) -> Node:
         """
         Copy a node from one graph into another. ``arg_transform`` needs to transform arguments from
@@ -1023,6 +1025,10 @@ def forward({', '.join(orig_args)}){maybe_return_annotation[0]}:
         """
         Return a human-readable (not machine-readable) string representation
         of this Graph
+
+        Backwards Compatibility:
+
+            Backwards-compatibility for this API is guaranteed.
         """
         placeholder_names : List[str] = []
         # This is a one-element array just so ``format_node`` can modify the closed
@@ -1095,15 +1101,8 @@ def forward({', '.join(orig_args)}){maybe_return_annotation[0]}:
         # Check targets are legit
         if self.owning_module:
             for node in self.nodes:
-                if node.op == 'call_function':
-                    if not callable(node.target):
-                        raise ValueError(f'Node {node} target {node.target} has type {torch.typename(node.target)} but '
-                                         'a Callable is expected')
-                else:
-                    if not isinstance(node.target, str):
-                        raise ValueError(f'Node {node} target {node.target} has type {torch.typename(node.target)} but '
-                                         'a str is expected')
                 if node.op in ['get_attr', 'call_module']:
+                    assert isinstance(node.target, str)
                     target_atoms = node.target.split('.')
                     m_itr = self.owning_module
                     for i, atom in enumerate(target_atoms):

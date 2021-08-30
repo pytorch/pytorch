@@ -123,7 +123,7 @@ struct BuiltinOpFunction : public Function {
     return *this;
   }
 
-  ~BuiltinOpFunction() override {}
+  ~BuiltinOpFunction() {}
 
  private:
   c10::QualifiedName name_;

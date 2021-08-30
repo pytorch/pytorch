@@ -1283,12 +1283,6 @@ class TestFX(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, 'was used before it has been defined'):
             graph.lint()
 
-    def test_wrong_target_type(self):
-        graph : torch.fx.Graph = torch.fx.Graph()
-        with self.assertRaises(ValueError):
-            n = torch.fx.Node(graph=graph, name='foo', op='call_function', target='foo',
-                              args=(), kwargs={})
-
     def test_example_shape_prop(self):
         class TestCase(torch.nn.Module):
             def __init__(self):
@@ -3083,31 +3077,8 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
         for k, v in signature.parameters.items():
             maybe_type_annotation = f': {self._annotation_type_to_stable_str(v.annotation, sig_str)}'\
                 if v.annotation is not inspect.Signature.empty else ''
-
-            def default_val_str(val):
-                if isinstance(val, (tuple, list)):
-                    str_pieces = ['(' if isinstance(val, tuple) else '[']
-                    str_pieces.append(', '.join(default_val_str(v) for v in val))
-                    if isinstance(val, tuple) and len(str_pieces) == 2:
-                        str_pieces.append(',')
-                    str_pieces.append(')' if isinstance(val, tuple) else ']')
-                    return ''.join(str_pieces)
-
-                # Need to fix up some default value strings.
-                # First case: modules. Default module `repr` contains the FS path of the module.
-                # Don't leak that
-                if isinstance(val, types.ModuleType):
-                    return f'<module {val.__name__}>'
-
-                # Second case: callables. Callables (such as lambdas) encode their address in
-                # their string repr. Don't do that
-                if callable(val):
-                    return f'<function {val.__name__}>'
-
-                return str(val)
-
             if v.default is not inspect.Signature.empty:
-                default_val_str = default_val_str(v.default) if not isinstance(v.default, str) else f"'{v.default}'"
+                default_val_str = str(v.default) if not isinstance(v.default, str) else f"'{v.default}'"
                 maybe_default = f' = {default_val_str}'
             else:
                 maybe_default = ''
