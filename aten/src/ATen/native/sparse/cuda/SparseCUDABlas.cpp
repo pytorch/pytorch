@@ -2,7 +2,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/util/Exception.h>
 #include <ATen/cuda/Exceptions.h>
-#include <ATen/native/sparse/cuda/SparseCUDABlas.cuh>
+#include <ATen/native/sparse/cuda/SparseCUDABlas.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 
 #include <cusparse.h>
@@ -14,7 +14,7 @@
 // Using these APIs in any other systems will result in compile-time or run-time failures.
 // Their support will be extended in the next releases.
 
-#if defined(__CUDACC__) && (CUSPARSE_VERSION >= 11000 || (!defined(_MSC_VER) && CUSPARSE_VERSION >= 10301))
+#if defined(CUDART_VERSION) && (CUSPARSE_VERSION >= 11000 || (!defined(_MSC_VER) && CUSPARSE_VERSION >= 10301))
 #define IS_SPMM_AVAILABLE() 1
 #else
 #define IS_SPMM_AVAILABLE() 0
