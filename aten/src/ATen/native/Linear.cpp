@@ -43,10 +43,10 @@ Tensor linear(const Tensor& input, const Tensor& weight, const c10::optional<Ten
 
 Tensor bias(const Tensor& input, const Tensor& bias) {
   TORCH_CHECK(bias.dim() == 1,
-	      "torch.nn.functional.bias: bias must be 1D tensor");
+              "torch.nn.functional.bias: bias must be 1D tensor");
   TORCH_CHECK(input.size(-1) == bias.size(0),
-	      "torch.nn.functional.bias: bias cardinality must match "
-	      "cardinality of input's last dimension");
+             "torch.nn.functional.bias: bias cardinality must match "
+             "cardinality of input's last dimension");
   return input.add(bias);
 }
 

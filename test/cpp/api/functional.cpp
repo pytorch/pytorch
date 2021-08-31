@@ -1244,11 +1244,11 @@ TEST_F(FunctionalTest, Bias) {
 
 TEST_F(FunctionalTest, BiasBroadcast) {
   const auto input = torch::tensor({{2.0, 3.0},
-				    {5.0, 7.0}});
+                                   {5.0, 7.0}});
   const auto bias = torch::tensor({11.0, 13.0});
   const auto result = F::bias(input, bias);
   const auto expected = torch::tensor({{13.0, 16.0},
-				       {16.0, 20.0}});
+                                      {16.0, 20.0}});
   torch::test::assert_tensor_equal(result, expected);
 }
 
