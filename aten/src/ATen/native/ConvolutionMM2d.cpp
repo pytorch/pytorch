@@ -201,6 +201,7 @@ void slow_conv2d_backward_update_grad_input_frame(
     Tensor& grad_input,
     const Tensor& grad_output,
     const Tensor& weight,
+    Tensor& fgrad_input,
     int64_t kernel_height,
     int64_t kernel_width,
     int64_t stride_height,
@@ -209,7 +210,7 @@ void slow_conv2d_backward_update_grad_input_frame(
     int64_t pad_width) {
   auto grad_output_2d = grad_output.reshape(
       {grad_output.size(0), grad_output.size(1) * grad_output.size(2)});
-  auto fgrad_input = at::mm(weight, grad_output_2d);
+  at::mm_out(fgrad_input, weight, grad_output_2d);
 
   grad_input.zero_();
   unfolded2d_acc_stub(
@@ -267,6 +268,7 @@ void slow_conv2d_backward_out_cpu_template(
   at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
     NoGradGuard no_grad;
     AutoDispatchBelowADInplaceOrView non_variable_type_mode;
+    auto fgrad_input = at::empty(finput.sizes().slice(1), finput.options());
     for (int64_t t = start; t < end; t++) {
       Tensor grad_input_t = grad_input[t];
       Tensor grad_output_t = grad_output[t];
@@ -274,6 +276,7 @@ void slow_conv2d_backward_out_cpu_template(
           grad_input_t,
           grad_output_t,
           tweight,
+          fgrad_input,
           kernel_height,
           kernel_width,
           stride_height,
@@ -419,12 +422,6 @@ std::tuple<Tensor&, Tensor&> slow_conv2d_forward_out_cpu(
                   output_height * output_width});
   }
   output.resize_({batch_size, n_output_plane, output_height, output_width});
-
-  if (bias.defined()) {
-    output.copy_(bias.view({-1, 1, 1}));
-  } else {
-    output.zero_();
-  }
 
   at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
     NoGradGuard no_grad;
