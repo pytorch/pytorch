@@ -9,6 +9,11 @@ from .mappings import (
     q_mod_to_float_mod_mapping,
 )
 
+from torch.quantization import (
+    ObserverBase,
+    FakeQuantizeBase,
+)
+
 def _raise_obs_not_found_error(func):
     raise RuntimeError(
         f'Encountered arithmetic operation {torch.typename(func)} but we have '
@@ -68,3 +73,35 @@ def op_needs_quantization(op: Callable) -> bool:
     if op in q_mod_to_float_mod_mapping:
         return True
     return False
+
+# TODO: fix lint
+class ObserverWrapper(torch.nn.Identity):
+    def __init__(self, child):
+        super().__init__()
+        self.child = child
+
+def wrap_observers_in_placeholders(module: torch.nn.Module) -> None:
+    """
+    Wraps each child observer of `module` in a placeholder which prevents
+    the execution of the observer during the forward. This is useful to prevent
+    tracing the model with example inputs from contributing to calibration
+    statistics.
+    """
+    for name, child in module.named_children():
+        if isinstance(child, (ObserverBase, FakeQuantizeBase)):
+            wrapper = ObserverWrapper(child)
+            setattr(module, name, wrapper)
+        else:
+            wrap_observers_in_placeholders(child)
+
+
+def unwrap_observers_from_placeholders(module: torch.nn.Module) -> None:
+    """
+    Restores observers back to their original state.
+    """
+    for name, child in module.named_children():
+        if isinstance(child, ObserverWrapper):
+            unwrapped = child.child
+            setattr(module, name, unwrapped)
+        else:
+            unwrap_observers_from_placeholders(child)

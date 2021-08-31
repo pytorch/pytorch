@@ -234,9 +234,15 @@ class AutoQuantizationState(torch.nn.Module):
         * observe the output, if needed
         """
         assert self.cur_op_needs_hooks(op)
+        needs_obs = (
+            # for now, assume all modules are handled by Eager mode
+            not isinstance(op, torch.nn.Module)
+            # TODO(future PR): add more rules here
+        )
         if first_call:
-            self.tensor_id_to_observer[str(qtensor_id[0])] = \
-                self.qconfig.activation()
+            if needs_obs:
+                self.tensor_id_to_observer[str(qtensor_id[0])] = \
+                    self.qconfig.activation()
 
             # TODO(future PR): check if _qtensor_id needs to become an actual
             # attribute of Tensor
@@ -246,10 +252,11 @@ class AutoQuantizationState(torch.nn.Module):
             qtensor_id[0] += 1
         else:
             # TODO(future PR): other output types
-            seen_op = self._get_cur_seen_op()
-            tensor_id = seen_op.output_tensor_infos[0].id
-            obs = self.tensor_id_to_observer[str(tensor_id)]
-            output = obs(output)
+            if needs_obs:
+                seen_op = self._get_cur_seen_op()
+                tensor_id = seen_op.output_tensor_infos[0].id
+                obs = self.tensor_id_to_observer[str(tensor_id)]
+                output = obs(output)
         return output
 
     def op_convert_before_hook(
@@ -379,3 +386,9 @@ class AutoQuantizationState(torch.nn.Module):
             else:
                 quant_infos.append(None)
         return quant_infos
+
+    # This is a hack to enable nn.Sequential to properly work with
+    # this class.
+    # TODO(future): remove the hack
+    def forward(self, x):
+        return x

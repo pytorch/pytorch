@@ -5,6 +5,10 @@ from typing import Tuple, Any, List
 from .quantization_state import (
     AutoQuantizationState,
 )
+from .utils import (
+    wrap_observers_in_placeholders,
+    unwrap_observers_from_placeholders,
+)
 from . import auto_trace_rewrite
 
 
@@ -26,7 +30,9 @@ def _trace_with_inputs(model: torch.nn.Module, example_inputs: Tuple[Any]) -> No
     with torch.no_grad():
         old_training = model.training
         model.eval()
+        wrap_observers_in_placeholders(model)
         model(*example_inputs)
+        unwrap_observers_from_placeholders(model)
         if old_training:
             model.train()
 
@@ -358,6 +364,13 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
             orig_module_call = torch.nn.Module.__call__
 
             def record_module(self, *args, **kwargs):
+                # `torch.nn.Sequential` runs forward on all module children
+                # of `self`. This is a hacky workaround to terminate early in
+                # that case.
+                # TODO(future PR): fix it without hacks
+                if isinstance(self, AutoQuantizationState):
+                    return args[0]
+
                 nonlocal cur_module
                 old_module = cur_module
                 cur_module = self

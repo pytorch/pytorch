@@ -17,6 +17,9 @@ def prepare(model, example_inputs, inplace=False, allow_list=None,
 
     # automatically fuse modules
     old_class = model.__class__
+    # For now, need to propagate qconfig before observing, because
+    # AutoQuantizationState needs a qconfig to work
+    torch.quantization.propagate_qconfig_(model)
     model = add_auto_observation(model, example_inputs)
     module_fusion_fqns = get_module_fusion_fqns(model)
     if len(module_fusion_fqns):

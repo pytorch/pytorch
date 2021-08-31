@@ -4,6 +4,7 @@ import operator
 import torch
 import torch.fx
 from .quantization_state import AutoQuantizationState
+from typing import Callable, Any, Tuple, Dict
 
 class AllModuleTracer(torch.fx.Tracer):
     """
@@ -86,6 +87,14 @@ class AllModuleTracer(torch.fx.Tracer):
 
         out = super().create_node(kind, target, args, kwargs, name, type_expr)
         return out
+
+    # This is a hack to enable nn.Sequential to properly work with this
+    # class.
+    # TODO(future): remove the hack
+    def call_module(self, m: torch.nn.Module, forward: Callable[..., Any], args : Tuple[Any, ...], kwargs : Dict[str, Any]) -> Any:
+        if isinstance(m, AutoQuantizationState):
+            return args[0]
+        return super().call_module(m, forward, args, kwargs)
 
 # TODO(future PR): handle cases where the module is not symbolically
 # traceable

@@ -28,6 +28,8 @@ module_types_supported_by_quantization = set([
     nn.intrinsic.quantized.modules.conv_relu.ConvReLU2d,
     nn.BatchNorm2d,
     nn.ReLU,
+    # TODO(future PR): detect inplace modifications by torch functions
+    nn.ReLU6,
 ])
 
 # TODO(future PR): reuse existing mapping

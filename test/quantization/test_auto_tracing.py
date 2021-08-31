@@ -1,3 +1,4 @@
+import copy
 import unittest
 
 import torch
@@ -8,15 +9,25 @@ from torch.testing._internal.common_quantization import (
     skip_if_no_torchvision,
     QuantizationTestCase,
 )
+from torch.quantization import (
+    ObserverBase,
+    FakeQuantizeBase,
+)
+from torch.quantization.quantize_fx import (
+    prepare_fx,
+    convert_fx,
+)
 
 import torch.quantization._quantize_dynamic_tracing as _quantize_dynamic_tracing
 
 
 class TestAutoTracing(QuantizationTestCase):
 
-    # TODO(future PR): make sure observers are turned off when tracing
+    def _test_auto_tracing(self, m, qconfig, example_inputs):
+        m_copy = copy.deepcopy(m)
 
-    def _test_auto_tracing(self, m, example_inputs):
+        m.qconfig = qconfig
+
         mp = _quantize_dynamic_tracing.prepare(m, example_inputs)
         mp(*example_inputs)
         print(mp)
@@ -25,6 +36,17 @@ class TestAutoTracing(QuantizationTestCase):
         # verify it runs
         out_q = mq(*example_inputs)
         print(out_q)
+
+        # compare it against FX
+        m_copy_p = prepare_fx(m_copy, {'': qconfig})
+        m_copy_p(*example_inputs)
+        print(m_copy_p)
+        m_copy_q = convert_fx(m_copy_p)
+        out_q_fx = m_copy_q(*example_inputs)
+        print(m_copy_q)
+        print(out_q_fx)
+        # TODO(next): fix failure on conv_relu_add for this line
+        self.assertTrue(torch.allclose(out_q, out_q_fx))
 
         # verify torch.jit.trace works
         mq_jit_traced = torch.jit.trace(
@@ -55,24 +77,45 @@ class TestAutoTracing(QuantizationTestCase):
                 super().__init__()
                 self.conv = torch.nn.Conv2d(1, 1, 1)
                 self.relu = torch.nn.ReLU()
+                self.child = nn.Sequential(
+                    nn.Conv2d(1, 1, 1),
+                    nn.ReLU(),
+                )
 
             def forward(self, x):
                 x = self.conv(x)
                 x = self.relu(x)
+                x = self.child(x)
                 return x
 
         m = M().eval()
         m.qconfig = torch.quantization.default_qconfig
         mp = _quantize_dynamic_tracing.prepare(m, (torch.randn(1, 1, 1, 1),))
-        # testing that the conv got fused
         self.assertTrue(isinstance(mp.conv, nni.ConvReLU2d))
+        self.assertTrue(isinstance(mp.child[0], nni.ConvReLU2d))
+
+    @skipIfNoFBGEMM
+    def test_observers_not_touched_by_tracing(self):
+        """
+        Verifies that running dynamic tracing does not change any data
+        stored in observers and fake quants.
+        """
+        m = nn.Sequential(nn.Conv2d(1, 1, 1)).eval()
+        m.qconfig = torch.quantization.default_qconfig
+        mp = _quantize_dynamic_tracing.prepare(m, (torch.randn(1, 1, 1, 1),))
+        for _, mod in mp.named_modules():
+            if isinstance(mod, (ObserverBase, FakeQuantizeBase)):
+                scale, zp = mod.calculate_qparams()
+                # Assume that if scale is 1.0 and zp is 0, no calibration
+                # has happened.
+                self.assertTrue(torch.allclose(scale, torch.ones(1)))
+                self.assertTrue(torch.equal(zp, torch.zeros(1, dtype=torch.long)))
 
     @skipIfNoFBGEMM
     def test_child_modules(self):
         m = nn.Sequential(nn.Sequential(nn.Conv2d(1, 1, 1))).eval()
-        m.qconfig = torch.quantization.default_qconfig
-        mp = _quantize_dynamic_tracing.prepare(m, (torch.randn(1, 1, 1, 1),))
-        print(mp)
+        qconfig = torch.quantization.default_qconfig
+        self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),))
 
     @skipIfNoFBGEMM
     def test_conv(self):
@@ -86,8 +129,8 @@ class TestAutoTracing(QuantizationTestCase):
                 return x1
 
         m = M().eval()
-        m.qconfig = torch.quantization.default_qconfig
-        self._test_auto_tracing(m, (torch.randn(1, 1, 2, 2),))
+        qconfig = torch.quantization.default_qconfig
+        self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),))
 
     @skipIfNoFBGEMM
     def test_conv_add(self):
@@ -103,8 +146,8 @@ class TestAutoTracing(QuantizationTestCase):
                 return x2
 
         m = M().eval()
-        m.qconfig = torch.quantization.default_qconfig
-        self._test_auto_tracing(m, (torch.randn(1, 1, 2, 2),))
+        qconfig = torch.quantization.default_qconfig
+        self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),))
 
     @skipIfNoFBGEMM
     def test_conv_relu_add(self):
@@ -116,26 +159,18 @@ class TestAutoTracing(QuantizationTestCase):
 
             def forward(self, x):
                 x1 = self.conv(x)
-                x2 = self.relu(x)
+                x2 = self.relu(x1)
                 x3 = x1 + x
                 return x3
-                # x4 = x3 + x3
-                # return x4
 
         model_fp32 = M().eval()
 
-        # model_fp32.qconfig = torch.quantization.get_default_qconfig('fbgemm')
-        model_fp32.qconfig = torch.quantization.QConfig(activation=torch.quantization.MinMaxObserver.with_args(dtype=torch.quint8),
-                                                        weight=torch.quantization.MinMaxObserver.with_args(dtype=torch.qint8))
-
-        model_fp32_fused = torch.quantization.fuse_modules(model_fp32, [['conv', 'relu']])
-        # print(model_fp32_fused)
-        # return
-        self._test_auto_tracing(model_fp32_fused, (torch.randn(1, 1, 2, 2),))
+        qconfig = torch.quantization.default_qconfig
+        self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 2, 2),))
 
     @skip_if_no_torchvision
     @skipIfNoFBGEMM
-    @unittest.skip("TODO enable this")
+    # @unittest.skip("TODO enable this")
     def test_mobilenet_v2(self):
         import torchvision
         m = torchvision.models.__dict__['mobilenet_v2'](pretrained=False).eval().float()
