@@ -20,7 +20,17 @@ namespace {
   }
 }
 
-namespace at { namespace native {
+namespace at {
+namespace meta {
+
+TORCH_META_FUNC(mse_loss) (const Tensor& input, const Tensor& target, int64_t reduction) {
+  build_borrowing_binary_op(maybe_get_output(), input, target);
+}
+
+} // namespace meta
+
+
+namespace native {
 
 DEFINE_DISPATCH(smooth_l1_stub);
 DEFINE_DISPATCH(smooth_l1_backward_stub);
@@ -414,28 +424,17 @@ Tensor& huber_loss_backward_out(const Tensor& grad_output, const Tensor& input, 
   return grad_input;
 }
 
-Tensor mse_loss(const Tensor& input, const Tensor& target, int64_t reduction) {
-  Tensor loss;
-  auto iter = TensorIterator::borrowing_binary_op(loss, input, target);
-  mse_stub(iter.device_type(), iter);
-  return apply_loss_reduction(iter.output(), reduction);
-}
-
-Tensor& mse_loss_out(const Tensor& input, const Tensor& target, int64_t reduction, Tensor&result) {
-  if (reduction != Reduction::None) {
-    Tensor loss;
-    auto iter = TensorIterator::borrowing_binary_op(loss, input, target);
-    mse_stub(iter.device_type(), iter);
-    if (reduction == Reduction::Mean) {
-      at::mean_out(result, iter.output(), 0);
-    } else {
-      at::sum_out(result, iter.output(), 0);
-    }
-  } else {
-    auto iter = TensorIterator::borrowing_binary_op(result, input, target);
-    mse_stub(iter.device_type(), iter);
+TORCH_IMPL_FUNC(mse_loss_out) (
+  const Tensor& input, const Tensor& target, int64_t reduction, const Tensor& result
+) {
+  mse_stub(device_type(), *this);
+  if (reduction == Reduction::Mean) {
+    auto& result_mut = const_cast<Tensor&>(result);
+    at::mean_out(result_mut, output(), 0);
+  } else if (reduction == at::Reduction::Sum) {
+    auto& result_mut = const_cast<Tensor&>(result);
+    at::sum_out(result_mut, output(), 0);
   }
-  return result;
 }
 
 Tensor mse_loss_backward(const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction) {
