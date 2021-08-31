@@ -75,6 +75,7 @@ TESTS = [
     "distributed/test_pg_wrapper",
     "distributed/algorithms/test_join",
     "test_cuda",
+    "test_autocast",
     "test_jit_cuda_fuser",
     "test_cuda_primary_ctx",
     "test_dataloader",
@@ -103,6 +104,7 @@ TESTS = [
     "test_optim",
     "test_functional_optim",
     "test_pytree",
+    "test_python_dispatch",
     "test_mobile_optimizer",
     "test_set_default_mobile_cpu_allocator",
     "test_xnnpack_integration",
@@ -281,6 +283,14 @@ RUN_PARALLEL_BLOCKLIST = [
 
 WINDOWS_COVERAGE_BLOCKLIST = []
 
+# A subset of our TEST list that validates PyTorch's ops, modules, and autograd function as expected
+CORE_TEST_LIST = [
+    "test_autograd",
+    "test_modules",
+    "test_nn",
+    "test_ops",
+    "test_torch"
+]
 
 # the JSON file to store the S3 test stats
 TEST_TIMES_FILE = ".pytorch-test-times.json"
@@ -630,6 +640,13 @@ def parse_args():
         help="run all distributed tests",
     )
     parser.add_argument(
+        "-core",
+        "--core",
+        action="store_true",
+        help="Only run core tests, or tests that validate PyTorch's ops, modules,"
+        "and autograd. They are defined by CORE_TEST_LIST."
+    )
+    parser.add_argument(
         "-pt",
         "--pytest",
         action="store_true",
@@ -828,6 +845,12 @@ def get_selected_tests(options):
     if options.distributed_tests:
         selected_tests = list(
             filter(lambda test_name: test_name in DISTRIBUTED_TESTS, selected_tests)
+        )
+
+    # Filter to only run core tests when --core option is specified
+    if options.core:
+        selected_tests = list(
+            filter(lambda test_name: test_name in CORE_TEST_LIST, selected_tests)
         )
 
     # process reordering

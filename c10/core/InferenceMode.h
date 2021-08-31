@@ -53,10 +53,12 @@ struct TORCH_API InferenceMode {
   InferenceMode(bool enabled = true)
       : prev_mode(AutogradState::get_tls_state()),
         prev_keyset(c10::impl::tls_local_dispatch_key_set()) {
-    // Enabling inference mode means disabling grad mode
-    // And disabling inference mode means enabling grad mode
-    AutogradState::set_tls_state(
-        AutogradState(/* grad_mode */ !enabled, /* inference_mode */ enabled));
+    // Enabling inference mode means disabling grad modes
+    // And disabling inference mode means enabling grad modes
+    AutogradState::set_tls_state(AutogradState(
+        /* grad_mode */ !enabled,
+        /* inference_mode */ enabled,
+        /* fw_grad_mode */ !enabled));
     DispatchKeySet included = enabled
         ? prev_keyset.included_.remove(c10::DispatchKey::ADInplaceOrView)
         : prev_keyset.included_.add(c10::DispatchKey::ADInplaceOrView);
