@@ -455,167 +455,6 @@ TEST(LiteInterpreterTest, BuiltinFunction) {
   AT_ASSERT(str == expected);
 }
 
-#if !defined FB_XPLAT_BUILD
-TEST(LiteInterpreterTest, ModuleInfoBasic) {
-  Module m("M");
-  m.define(R"JIT(
-    def forward(self, x):
-      return 2 * x
-  )JIT");
-
-  std::stringstream ss;
-  m._save_for_mobile(ss, {}, true);
-  mobile::Module bc = _load_for_mobile(ss);
-
-  std::unordered_set<std::string> module_debug_info_set;
-  size_t pc = 0;
-  while (true) {
-    try {
-      std::string module_info = bc.get_forward_method_debug_info(pc);
-      if (!module_info.empty() &&
-          (module_info.find("debug_handle") == std::string::npos)) {
-        module_debug_info_set.insert(module_info);
-      }
-      ++pc;
-    } catch (const std::exception& e) {
-      break;
-    }
-  }
-
-  AT_ASSERT(module_debug_info_set.count("top(M).aten::mul"));
-}
-
-TEST(LiteInterpreterTest, NotSaveModuleInfo) {
-  Module m("M");
-  m.define(R"JIT(
-    def forward(self, x):
-      return x + 5
-  )JIT");
-
-  std::stringstream ss;
-  m._save_for_mobile(ss);
-  mobile::Module bc = _load_for_mobile(ss);
-
-  size_t pc = 0;
-  while (true) {
-    try {
-      std::string module_info = bc.get_forward_method_debug_info(pc);
-      AT_ASSERT(
-          module_info.empty() ||
-          (module_info.find("debug_handle") != std::string::npos));
-      ++pc;
-    } catch (const std::exception& e) {
-      break;
-    }
-  }
-}
-
-TEST(LiteInterpreterTest, OneSubmoduleModuleInfo) {
-  Module a("A");
-  a.define(R"JIT(
-    def forward(self, x):
-      return 2 * x + 5
-  )JIT");
-  Module b("B");
-  b.register_module("A0", a);
-  b.define(R"JIT(
-    def forward(self, x):
-      return self.A0.forward(x) + 1
-  )JIT");
-
-  std::stringstream ss;
-  b._save_for_mobile(ss, {}, true);
-  mobile::Module bc = _load_for_mobile(ss);
-
-  std::set<std::string> module_debug_info_set;
-  size_t pc = 0;
-  while (true) {
-    try {
-      std::string module_info = bc.get_forward_method_debug_info(pc);
-      if (!module_info.empty() &&
-          (module_info.find("debug_handle") == std::string::npos)) {
-        module_debug_info_set.insert(module_info);
-      }
-      ++pc;
-    } catch (const std::exception& e) {
-      break;
-    }
-  }
-
-  AT_ASSERT(module_debug_info_set.count("top(B).aten::add"));
-  AT_ASSERT(module_debug_info_set.count("top(B).A0(A).aten::add"));
-  AT_ASSERT(module_debug_info_set.count("top(B).A0(A).aten::mul"));
-}
-
-TEST(LiteInterpreterTest, TwoSubmodulesModuleInfo) {
-  Module a("A");
-  a.define(R"JIT(
-    def forward(self, x):
-      return x + 1
-  )JIT");
-  Module b("B");
-  b.define(R"JIT(
-    def forward(self, x):
-      return x + 2
-  )JIT");
-  Module c("C");
-  c.register_module("A0", a);
-  c.register_module("B0", b);
-  c.define(R"JIT(
-    def forward(self, x):
-      return self.A0.forward(x) + self.B0.forward(x)
-  )JIT");
-
-  std::stringstream ss;
-  c._save_for_mobile(ss, {}, true);
-  mobile::Module bc = _load_for_mobile(ss);
-
-  std::set<std::string> module_debug_info_set;
-  size_t pc = 0;
-  while (true) {
-    try {
-      std::string module_info = bc.get_forward_method_debug_info(pc);
-      if (!module_info.empty() &&
-          (module_info.find("debug_handle") == std::string::npos)) {
-        module_debug_info_set.insert(module_info);
-      }
-      ++pc;
-    } catch (const std::exception& e) {
-      break;
-    }
-  }
-
-  AT_ASSERT(module_debug_info_set.count("top(C).aten::add"));
-  AT_ASSERT(module_debug_info_set.count("top(C).A0(A).aten::add"));
-  AT_ASSERT(module_debug_info_set.count("top(C).B0(B).aten::add"));
-}
-
-TEST(LiteInterpreterTest, GetRuntimeByteCodeVersion) {
-  auto runtime_bytecode_version = _get_runtime_bytecode_version();
-  AT_ASSERT(
-      runtime_bytecode_version ==
-      caffe2::serialize::kMaxSupportedBytecodeVersion);
-}
-
-/**
- * The test below is disarmed for FB internal xplat builds since
- * BUCK requires us to pass in the script_module_v4.ptl file in
- * as a resource dependency of the build rule for this file, and
- * we would need to access it via the C++ Resources API instead
- * of directly reading from disk (which is what the open source
- * build/run does).
- */
-TEST(LiteInterpreterTest, GetByteCodeVersion) {
-  std::string filePath(__FILE__);
-  auto test_model_file_v4 =
-      filePath.substr(0, filePath.find_last_of("/\\") + 1);
-  test_model_file_v4.append("script_module_v4.ptl");
-
-  auto version_v4 = _get_model_bytecode_version(test_model_file_v4);
-  AT_ASSERT(version_v4 == 4);
-}
-#endif // !defined(FB_XPLAT_BUILD)
-
 namespace {
 
 void compareModelOutput(
@@ -751,7 +590,7 @@ TEST(LiteInterpreterTest, GetRuntimeOpsAndInfo) {
 
 TEST(LiteInterpreterTest, isCompatibleSuccess) {
   // test trivial success case
-  auto runtime_info = get_runtime_compatibility_info();
+  auto runtime_info = RuntimeCompatibilityInfo::get();
   std::unordered_map<std::string, OperatorInfo> model_ops;
   model_ops["aten::add.Scalar"] = OperatorInfo{2};
 
@@ -854,9 +693,11 @@ TEST(LiteInterpreterTest, SequentialModuleInfo) {
   //   def forward(self, x):
   //     return self.A0.forward(self.B0.forward(x))
 
-  AT_ASSERT(module_debug_info_set.count("top(C).prim::Return"));
-  AT_ASSERT(module_debug_info_set.count("top(C).A0(A).aten::add"));
-  AT_ASSERT(module_debug_info_set.count("top(C).B0(B).aten::add"));
+  AT_ASSERT(module_debug_info_set.count("top(C)::<unknown>.prim::Return"));
+  AT_ASSERT(module_debug_info_set.count(
+      "top(C)::<unknown>.A0(A)::forward.aten::add"));
+  AT_ASSERT(module_debug_info_set.count(
+      "top(C)::<unknown>.B0(B)::forward.aten::add"));
 }
 
 TEST(LiteInterpreterTest, HierarchyModuleInfo) {
@@ -901,9 +742,11 @@ TEST(LiteInterpreterTest, HierarchyModuleInfo) {
   // "top(C).forward": for the add operator in top.
   // "top(C).B0(B).forward": for the add operator in B0.
   // "top(C).B0(B).forward.A0(A).forward": for the add operator in A0.
-  AT_ASSERT(module_debug_info_set.count("top(C).aten::add"));
-  AT_ASSERT(module_debug_info_set.count("top(C).B0(B).aten::add"));
-  AT_ASSERT(module_debug_info_set.count("top(C).B0(B).A0(A).aten::add"));
+  AT_ASSERT(module_debug_info_set.count("top(C)::<unknown>.aten::add"));
+  AT_ASSERT(module_debug_info_set.count(
+      "top(C)::<unknown>.B0(B)::forward.aten::add"));
+  AT_ASSERT(module_debug_info_set.count(
+      "top(C)::<unknown>.B0(B)::forward.A0(A)::forward.aten::add"));
 }
 
 TEST(LiteInterpreterTest, DuplicatedClassTypeModuleInfo) {
@@ -960,9 +803,11 @@ TEST(LiteInterpreterTest, DuplicatedClassTypeModuleInfo) {
   // "top(B).A0(A).forward": for the add operator in A0.
   // "top(B).A1(A).forward": for the add operator in A1.
 
-  AT_ASSERT(module_debug_info_set.count("top(B).aten::add"));
-  AT_ASSERT(module_debug_info_set.count("top(B).A0(A).aten::add"));
-  AT_ASSERT(module_debug_info_set.count("top(B).A1(A).aten::add"));
+  AT_ASSERT(module_debug_info_set.count("top(B)::<unknown>.aten::add"));
+  AT_ASSERT(module_debug_info_set.count(
+      "top(B)::<unknown>.A0(A)::forward.aten::add"));
+  AT_ASSERT(module_debug_info_set.count(
+      "top(B)::<unknown>.A1(A)::forward.aten::add"));
 }
 #endif // !defined(FB_XPLAT_BUILD)
 
@@ -1371,9 +1216,9 @@ TEST(LiteInterpreterTest, TestExceptionStackWithTwoLevelModuleHierarchy) {
   c._save_for_mobile(ss, ExtraFilesMap(), true);
   auto lite_m = _load_for_mobile(ss);
   std::string error_pattern = R"(
-  Module hierarchy:top(C).B0(B).A0(A).aten::add
+  Module hierarchy:top(C)::<unknown>.B0(B)::foo.A0(A)::bar.aten::add
 Traceback of TorchScript (most recent call last):
-  File "<string>", line 3, in FunctionName_UNKNOWN
+  File "<string>", line 3, in <unknown>
 
     def forward(self, x, y):
       return self.B0.foo(x, y) + 3

@@ -78,11 +78,18 @@ InterpreterManager::InterpreterManager(size_t n_interp) : resources_(n_interp) {
   }
 
   // Pre-registered modules.
+  // Since torch::deploy::Obj.toIValue cannot infer empty list, we hack it to
+  // return None for empty list.
   // TODO(jwtan): Make the discovery of these modules easier.
   register_module_source(
       "GetArgumentNamesModule",
       "from inspect import signature\n"
-      "def getArgumentNames(function): return list(signature(function).parameters.keys())\n");
+      "from typing import Callable, Optional\n"
+      "def getArgumentNames(function: Callable) -> Optional[list]:\n"
+      "    names = list(signature(function).parameters.keys())\n"
+      "    if len(names) == 0:\n"
+      "        return None\n"
+      "    return names\n");
   TORCH_DEPLOY_SAFE_CATCH_RETHROW
 }
 
@@ -291,6 +298,10 @@ void PythonMethodWrapper::setArgumentNames(
   auto iArgumentNames =
       session.global("GetArgumentNamesModule", "getArgumentNames")({method})
           .toIValue();
+  if (iArgumentNames.isNone()) {
+    return;
+  }
+
   TORCH_INTERNAL_ASSERT(iArgumentNames.isList());
   auto argumentNames = iArgumentNames.toListRef();
 
