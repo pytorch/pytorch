@@ -97,7 +97,7 @@ class TestSymbolicShapeAnalysis(JitTestCase):
         @torch.jit.script
         def foo(i: int, z):
             x = torch.ones([2, 3, 4, 5])
-            y = z.view([i, 3, 2, i])
+            y = z.view([z.size(i), 3, 2, z.size(i)])
             if i == 4:
                 return x
             else:
