@@ -26,7 +26,7 @@ class TORCH_API IRVisitor {
 
 #define IMM_PRINT_VISIT(Type, Name) virtual void visit(Name##ImmPtr v);
 
-  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_PRINT_VISIT)
+  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_PRINT_VISIT)
 #undef IMM_PRINT_VISIT
 
   virtual void visit(CastPtr v);
