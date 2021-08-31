@@ -287,8 +287,10 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
                 'includes': [f'#include "{path}"' for path in [
                     "lazy_tensor_core/csrc/tensor.h",
                     "lazy_tensor_core/csrc/aten_ltc_bridge.h",
+                    f"{output_dir}/{backend_key}NativeFunctions.h",
+                    f"{output_dir}/{backend_key}LazyIr.h",
                 ]],
-                'native_functions_include': f'#include "{output_dir}/{backend_key}NativeFunctions.h"',
+                'native_functions_include': '',
                 'backend_namespace': 'torch_lazy_tensors',  # this is wrong
                 'native_function_definitions': 
                 list(concatMap(
@@ -335,6 +337,7 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
                     "lazy_tensor_core/csrc/ir.h",
                     "torch/csrc/jit/ir/named_value.h",
                     "lazy_tensor_core/csrc/ts_backend/ts_lowering_context.h",
+                    f"{output_dir}/{backend_key}LazyIr.h",
                     # "lazy_tensors/types.h",
                 ]],
                 # 'external_backend_headers': f'#include "{output_dir}/{backend_key}NativeFunctions.h"',

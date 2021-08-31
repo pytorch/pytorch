@@ -7,4 +7,15 @@ ${lazy_ir_inc}
 
 ${external_backend_headers}
 
+namespace torch_lazy_tensors{
+namespace ir {
+namespace ops {
+
+// Used as a hacky way to pass a same-valued null value in place of missing optional Values
+// TODO - design this properly
+static const ir::Value kNullValue = ir::Value();
 ${ir_declarations}
+
+} // namespace ops
+} // namespace ir
+} // namespace torch_lazy_tensors

@@ -1368,6 +1368,8 @@ class LazyTensor {
       ir::Value ir_value, const Device& device,
       c10::optional<at::ScalarType> logical_element_type) const;
 
+public:
+// TODO(whc) just a hack for now to get codegen to compile... need to refactor
   // Create a new lazy tensor with the same metadata of the input tensor (with
   // possible overrides), and the new IR value.
   LazyTensor CreateFrom(ir::Value ir_value) const;
@@ -1380,6 +1382,7 @@ class LazyTensor {
   LazyTensor CreateFrom(ir::Value ir_value, const Device& device,
                         at::ScalarType logical_element_type) const;
 
+private:
   // We build a graph accumulating operations, but at a given point we
   // need to force a rendering, otherwise the graph can grow without control.
   // Think:

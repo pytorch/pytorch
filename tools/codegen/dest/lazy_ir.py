@@ -16,7 +16,7 @@ from tools.codegen.api.types import (BaseTy, BaseCppType, BaseCType, OptionalCTy
                                      Binding, ConstRefCType, NamedCType,
                                      CppSignature, CppSignatureGroup,
                                      Expr, MutRefCType, kernel_signature,
-                                     DispatcherSignature)
+                                     DispatcherSignature, VectorCType, intT)
 import tools.codegen.api.meta as meta
 import tools.codegen.api.cpp as cpp
 import tools.codegen.api.structured as structured
@@ -27,6 +27,7 @@ from tools.codegen.selective_build.selector import SelectiveBuilder
 #
 valueListT = BaseCppType('at', 'ValueList') # TODO, not sure this type exists
 valueT = BaseCppType('ir', 'Value')
+intArrayT = BaseCppType('std', 'vector<int64_t>') # TODO this should probably be different
 
 def process_ir_types(func: FunctionSchema) -> Tuple[List[NamedCType], List[NamedCType], List[NamedCType]]:
     """
@@ -71,6 +72,9 @@ def process_ir_types(func: FunctionSchema) -> Tuple[List[NamedCType], List[Named
             elif str(t.elem) == 'Tensor?':
                 types.append(NamedCType(binds, ConstRefCType(ListCType(OptionalCType(BaseCType(valueT))))))
                 value_types.append(NamedCType(binds, ConstRefCType(ListCType(OptionalCType(BaseCType(valueT))))))
+            elif str(t.elem) == 'int':
+                types.append(NamedCType(binds, BaseCType(intArrayT)))
+                scalar_types.append(NamedCType(binds, BaseCType(intArrayT)))
             else:
                 types.append(cpp.argumenttype_type(t, mutable=mutable, binds=binds))
                 scalar_types.append(cpp.argumenttype_type(t, mutable=mutable, binds=binds))
@@ -115,27 +119,57 @@ class LazyIR:
         all_types, value_types, scalar_types = process_ir_types(func)
         node_ctor_args = ", ".join([f"{i.cpp_type()} {i.name}" for i in all_types])
         scalar_initializers = ",\n        ".join([f"{t.name}_({t.name})" for t in scalar_types])
-        scalar_decls = ";\n  ".join([f"{t.cpp_type()} {t.name}_" for t in scalar_types])
-        scalar_hashes = ", ".join([f.name for f in scalar_types])
+        scalar_decls = "\n  ".join([f"{t.cpp_type()} {t.name}_;" for t in scalar_types])
+        # scalar_hashes = ", ".join([f.name for f in scalar_types])
+        base_ctor_value_args = []
+        for t in value_types:
+            if isinstance(t.type.elem, BaseCType):
+                base_ctor_value_args.append(f"{t.name}")
+            elif isinstance(t.type.elem, OptionalCType):
+                base_ctor_value_args.append(f"{t.name}.has_value() ? {t.name}.value() : kNullValue")
+            else:
+                assert False, ""
+        base_ctor_value_args = ", ".join(base_ctor_value_args)
+
+        scalar_hashes = []
+        for t in scalar_types:
+            if isinstance(t.type, BaseCType):
+                scalar_hashes.append(f"{t.name}")
+            elif isinstance(t.type, OptionalCType):
+                # TODO need to find a good way to hash optionals.
+                #  
+                # scalar_hashes.append(f"{t.name}.has_value() ? {t.name}.value() : kNull{t.cpp_type()}")
+                pass
+            else:
+                assert False, ""
+        scalar_hashes = ", ".join(scalar_hashes)
+
         return [f"""\
-class {class_name} : public LazyNodeBase {{
+class {class_name} : public Node {{
  public:
   {class_name}({node_ctor_args})
-      : LazyNodeBase(ir::OpKind(at::aten::{func.name.name}),
-              {{{", ".join([f"{i.name}" for i in value_types])}}},
+      : Node(ir::OpKind(at::aten::{func.name.name}),
+              {{{base_ctor_value_args}}},
               /*num_outputs=*/{len(func.returns)},
               lazy_tensors::util::MHash({scalar_hashes})),
         {scalar_initializers}
-  {{}}
+  {{
+      throw std::runtime_error("need to hash scalars properly");
+  }}
 
   std::string ToString() const override;
 
   NodePtr Clone(OpList operands) const override;
 
- private:
-  std::vector<c10::Optional<ir::Value>> inputs;
   {scalar_decls}
 
-}}
+}};
 
 """, ]
+
+# seems like maybe wrong type for Value as inpout to node ctor?
+# Node(ir::OpKind(at::aten::convolution_overrideable),
+#            {input, weight, bias},
+#            /*num_outputs=*/1,
+#            lazy_tensors::util::MHash(stride, padding, dilation, transposed,
+#                                      output_padding, groups)),

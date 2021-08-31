@@ -1,5 +1,3 @@
-#pragma once
-
 // ${generated_comment}
 ${includes}
 ${native_functions_include}

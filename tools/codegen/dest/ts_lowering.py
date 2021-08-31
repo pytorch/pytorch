@@ -54,19 +54,18 @@ class TsLowering:
         # for now, we just want one IR class decl and soon after also the method defs
         # and we use the functional version not out/inplace.
         func = f.functional.func if isinstance(f, NativeFunctionsGroup) else f.func
-        class_name = str(func.name).lower().capitalize()
 
         if self.target == TsLowering.TsLoweringTarget.DISPATCH:
             return [f"""\
 case at::aten::{func.name}:
-    return Lower{ir_node_name(func)}(node);
+    return Lower{ir_node_name(func)}(ir::NodeCast<ir::ops::{ir_node_name(func)}>(node, ir::OpKind(at::aten::{func.name})));
 """, ]
 
 
         elif self.target == TsLowering.TsLoweringTarget.LOWERING: 
             all_types, value_types, scalar_types = process_ir_types(func)
             emplace_values = [f"loctx()->GetOutputOp(node->operand({i}))" for i in range(len(value_types))]
-            emplace_scalars = [f"node->{t.name}()" for t in scalar_types]
+            emplace_scalars = [f"node->{t.name}_" for t in scalar_types]
             emplace_arguments = "\n    ".join([f"arguments.emplace_back({a});" for a in emplace_values + emplace_scalars])
             return [f"""\
 TSOpVector Lower{ir_node_name(func)}(const ir::ops::{ir_node_name(func)}* node) {{
@@ -74,10 +73,9 @@ TSOpVector Lower{ir_node_name(func)}(const ir::ops::{ir_node_name(func)}* node) 
     arguments.reserve({len(all_types)});
     {emplace_arguments}
     TSOpVector {func.name}_out = LowerBuiltin(node, arguments);
-    LTC_CHECK_EQ({func.name}_out.size(), len(func.returns));
+    LTC_CHECK_EQ({func.name}_out.size(), {len(func.returns)});
     
-    // TODO: GenerateClone always?
-    // TODO: handle multi-return cases
-    return GenerateClone({func.name}_out.front()); 
+    // TODO: need to call GenerateClone sometimes? Or else return LowerBuiltIn() directly
+    return {func.name}_out;
 }}
 """, ]
