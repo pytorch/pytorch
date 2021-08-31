@@ -68,7 +68,7 @@ struct C10_API StorageImpl final : public c10::intrusive_ptr_target {
   StorageImpl() = delete;
   StorageImpl(StorageImpl&& other) = default;
   StorageImpl(const StorageImpl&) = delete;
-  ~StorageImpl() = default;
+  ~StorageImpl() override = default;
 
   void reset() {
     data_ptr_.clear();
