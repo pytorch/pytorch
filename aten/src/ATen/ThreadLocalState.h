@@ -6,7 +6,7 @@
 #include <c10/util/ThreadLocalDebugInfo.h>
 
 #include <ATen/record_function.h>
-#include <ATen/PythonModeTLS.h>
+#include <ATen/core/PythonModeTLS.h>
 
 namespace at {
 
