@@ -85,7 +85,7 @@ class Capture(object):
         return self.as_datapipe().__iter__()
 
     def __iter__(self):
-        return iter(self.dataframes_as_tuples())
+        return iter(self.as_datapipe())
 
     def batch(self, batch_size=10):
         dp = self.dataframes_per_row().dataframes_concat(batch_size)
@@ -291,4 +291,5 @@ class DataFrameTracer(CaptureInitial, IterDataPipe):
 
     def __init__(self, source_datapipe):
         super().__init__()
+        self._dp_contains_dataframe = True
         self.source_datapipe = source_datapipe

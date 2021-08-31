@@ -112,6 +112,15 @@ class UnBatcherIterDataPipe(IterDataPipe):
     def __init__(self, datapipe, unbatch_level: int = 1):
         self.datapipe = datapipe
         self.unbatch_level = unbatch_level
+        source_depth = getattr(datapipe, '_dp_nesting_depth', 0)
+        if source_depth is None:
+            source_depth = 0
+        if unbatch_level > 0:
+            self._dp_nesting_depth = source_depth - unbatch_level
+            if self._dp_nesting_depth < 0:
+                self._dp_nesting_depth = 0
+        else:
+            self._dp_nesting_depth = 0
 
     def __iter__(self):
         for element in self.datapipe:
