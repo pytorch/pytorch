@@ -13,6 +13,5 @@ from torch.autograd import kineto_available, _supported_activities, DeviceType
 from torch.autograd.profiler import record_function
 
 import os
-import sys
-if sys.platform != 'win32' and os.environ.get('ENABLE_PYTORCH_PROFILER_SERVICE') == 'TRUE':
+if os.environ.get('ENABLE_PYTORCH_PROFILER_SERVICE') == 'TRUE':
     from . import _service
