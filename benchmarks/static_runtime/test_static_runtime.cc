@@ -1312,7 +1312,6 @@ TEST(StaticRuntime, IndividualOps_Cat) {
   testStaticRuntime(cat_script, args0, args1);
 }
 
-
 TEST(StaticRuntime, IndividualOps_Cumsum) {
   auto a = at::randn({2, 3});
   std::vector<IValue> args0{a, 0};
@@ -1332,4 +1331,12 @@ TEST(StaticRuntime, IndividualOps_CumsumDtype) {
   auto b = at::randn({3, 4});
   std::vector<IValue> args1{b, 1, dtype};
   testStaticRuntime(cumsum_script_dtype, args0, args1);
+}
+
+TEST(StaticRuntime, IndividualOps_Nonzero) {
+  auto a = at::randint(0, 2, {2, 3});
+  testStaticRuntime(nonzero_tensor, {a});
+
+  auto b = at::randint(0, 2, {4, 3, 2});
+  testStaticRuntime(nonzero_tensor, {a}, {b});
 }
