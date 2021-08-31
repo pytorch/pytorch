@@ -577,6 +577,11 @@ void ProcessGroupNCCL::abortTimedOutCollectives(
         ncclComm->ncclCommAbort(exceptionMsg);
         abortedCommIds.emplace(buildNcclUniqueIdStr(ncclComm->getNcclId()));
       }
+      // Handle Exceptions on failed GPU operations by bringing the process
+      // down.
+      if (!terminateProcessGroup_.load()) {
+        work.handleNCCLGuard();
+      }
     }
   }
 }
