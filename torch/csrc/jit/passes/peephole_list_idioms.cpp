@@ -7,9 +7,7 @@
 #include <torch/csrc/jit/passes/peephole_list_idioms.h>
 #include <torch/csrc/jit/passes/value_refinement_utils.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
-#include <torch/csrc/jit/runtime/slice_indices_adjust.h>
 #include <torch/csrc/utils/memory.h>
-#include <limits>
 
 namespace torch {
 namespace jit {
@@ -59,7 +57,7 @@ struct ListLenRefiner {
       }
 
       auto first_input = n->input(0);
-      if (first_input->type()->castRaw<ListType>() &&
+      if (first_input->type()->cast<ListType>() &&
           !mutated_lists_.count(first_input)) {
         if (!li_with_len_use.count(first_input)) {
           li_with_len_use.insert(first_input);
@@ -174,7 +172,7 @@ struct PeepholeOptimizeListIdiomsImpl {
 
  private:
   void checkForMutatedList(Value* v) {
-    if (v->type()->castRaw<ListType>() && aliasDb_->hasWriters(v)) {
+    if (v->type()->cast<ListType>() && aliasDb_->hasWriters(v)) {
       mutated_lists_.insert(v);
     }
   }
@@ -193,43 +191,6 @@ struct PeepholeOptimizeListIdiomsImpl {
     }
   }
 
-  bool optimizeSlice(Node* slice_node, Node* list_construct_node) {
-    auto start_val = toIValue(slice_node->input(1));
-    auto end_val = toIValue(slice_node->input(2));
-    auto step_val = toIValue(slice_node->input(3));
-
-    // All args must be constant to apply this optimization.
-    if (start_val == c10::nullopt || end_val == c10::nullopt ||
-        step_val == c10::nullopt) {
-      return false;
-    }
-
-    int64_t start = start_val->isInt() ? start_val->to<int64_t>()
-                                       : std::numeric_limits<int64_t>::max();
-    int64_t end = end_val->isInt() ? end_val->to<int64_t>()
-                                   : std::numeric_limits<int64_t>::max();
-    int64_t step = step_val->isInt() ? step_val->to<int64_t>() : 1;
-
-    size_t list_size = list_construct_node->inputs().size();
-    size_t num_values = slice_indices_adjust(list_size, &start, &end, step);
-
-    WithInsertPoint guard(slice_node);
-    auto slice_list_construct =
-        graph_->insertNode(graph_->create(prim::ListConstruct));
-    slice_list_construct->output()->setType(slice_node->output()->type());
-    for (size_t i = start, j = 0; j < num_values; ++j) {
-      slice_list_construct->addInput(list_construct_node->input(i));
-      i += step;
-    }
-
-    slice_node->output()->replaceAllUsesWith(slice_list_construct->output());
-    if (mutated_lists_.count(slice_node->output())) {
-      mutated_lists_.insert(slice_list_construct->output());
-    }
-
-    return true;
-  }
-
   bool runBlock(Block* block) {
     bool changed = false;
     for (Node* node : block->nodes()) {
@@ -239,7 +200,7 @@ struct PeepholeOptimizeListIdiomsImpl {
 
       // only optimizing list ops
       if (node->inputs().size() == 0 ||
-          !node->input(0)->type()->castRaw<ListType>()) {
+          !node->input(0)->type()->cast<ListType>()) {
         continue;
       }
 
@@ -250,33 +211,36 @@ struct PeepholeOptimizeListIdiomsImpl {
         continue;
       }
 
-      auto list_creation_node = first_input->node();
-      if (list_creation_node->kind() != prim::ListConstruct) {
-        continue;
-      }
-
       if (node->kind() == aten::len) {
-        WithInsertPoint guard(node);
-        node->output()->replaceAllUsesWith(graph_->insertConstant(
-            static_cast<int64_t>(first_input->node()->inputs().size())));
-        changed = true;
+        if (first_input->node()->kind() == prim::ListConstruct) {
+          WithInsertPoint guard(node);
+          node->output()->replaceAllUsesWith(graph_->insertConstant(
+              static_cast<int64_t>(first_input->node()->inputs().size())));
+          changed = true;
+        }
       } else if (node->kind() == aten::__getitem__) {
-        if (auto index = toIValue(node->input(1))) {
-          size_t list_size = list_creation_node->inputs().size();
-          if (auto norm_index = normalizeIndex(index->toInt(), list_size)) {
-            node->output()->replaceAllUsesWith(
-                list_creation_node->input(*norm_index));
-            changed = true;
+        auto list_creation_node = first_input->node();
+        if (list_creation_node->kind() == prim::ListConstruct) {
+          if (auto index = toIValue(node->input(1))) {
+            size_t list_size = list_creation_node->inputs().size();
+            if (auto norm_index = normalizeIndex(index->toInt(), list_size)) {
+              node->output()->replaceAllUsesWith(
+                  list_creation_node->input(*norm_index));
+              changed = true;
+            }
           }
         }
       } else if (node->kind() == prim::ListUnpack) {
-        // if sizes are unequal it's a runtime error
-        if (list_creation_node->inputs().size() != node->outputs().size()) {
-          continue;
-        }
-        for (size_t i = 0; i < node->outputs().size(); ++i) {
-          node->output(i)->replaceAllUsesWith(list_creation_node->input(i));
-          changed = true;
+        auto list_creation_node = first_input->node();
+        if (list_creation_node->kind() == prim::ListConstruct) {
+          // if sizes are unequal it's a runtime error
+          if (list_creation_node->inputs().size() != node->outputs().size()) {
+            continue;
+          }
+          for (size_t i = 0; i < node->outputs().size(); ++i) {
+            node->output(i)->replaceAllUsesWith(list_creation_node->input(i));
+            changed = true;
+          }
         }
       } else if (node->kind() == aten::add) {
         if (node->inputs().size() != 2) {
@@ -287,7 +251,8 @@ struct PeepholeOptimizeListIdiomsImpl {
         if (mutated_lists_.count(second_input)) {
           continue;
         }
-        if (second_input->node()->kind() != prim::ListConstruct) {
+        if (first_input->node()->kind() != prim::ListConstruct ||
+            second_input->node()->kind() != prim::ListConstruct) {
           continue;
         }
         WithInsertPoint guard(node);
@@ -305,8 +270,6 @@ struct PeepholeOptimizeListIdiomsImpl {
           mutated_lists_.insert(list_construct->output());
         }
         changed = true;
-      } else if (node->kind() == aten::slice) {
-        changed |= optimizeSlice(node, first_input->node());
       }
     }
     return changed;

@@ -12,6 +12,7 @@ from torch._C import ScriptObject  # type: ignore[attr-defined]
 import torch.utils._pytree as pytree
 
 import sys
+from ._compatibility import compatibility
 from .node import Argument, map_aggregate, base_types
 from .graph import Graph, _PyTreeInfo
 from .graph_module import GraphModule
@@ -25,6 +26,7 @@ _orig_module_getattr : Callable = torch.nn.Module.__getattr__
 
 _proxyable_classes : Dict[Type, None] = {}
 
+@compatibility(is_backward_compatible=True)
 class ProxyableClassMeta(type):
     """
     ProxyableClassMeta allows you to make construction of a given Python class
@@ -157,6 +159,7 @@ class _CPatchManager(object):
     def __exit__(self, type, value, tb):
         sys.setprofile(None)
 
+@compatibility(is_backward_compatible=False)
 class PHBase(object):
     """
     Object representing an input placeholder to `concrete_args`
@@ -166,6 +169,7 @@ class PHBase(object):
 
 PH = PHBase()
 
+@compatibility(is_backward_compatible=True)
 class Tracer(TracerBase):
     # Reference: https://github.com/pytorch/pytorch/issues/54354
     # The first line of this docstring overrides the one Sphinx generates for the
@@ -182,6 +186,11 @@ class Tracer(TracerBase):
     process. The different behaviors that can be overridden are described
     in the docstrings of the methods on this class.
     """
+
+    # Not checking BC on this API because the default value for `autowrap_modules`
+    # includes the local filepath to the `math` module, which would jitter
+    # across machines.
+    @compatibility(is_backward_compatible=True)
     def __init__(self, autowrap_modules: Tuple[ModuleType] = (math, ),
                  autowrap_functions: Tuple[Callable, ...] = (),
                  enable_cpatching: bool = False,
@@ -197,11 +206,19 @@ class Tracer(TracerBase):
 
             autowrap_modules (Tuple[ModuleType]): defaults to `(math, )`,
                 Python modules whose functions should be wrapped automatically
-                without needing to use fx.wrap().
+                without needing to use fx.wrap(). Backward-compatibility for
+                this parameter is guaranteed.
 
             autowrap_function (Tuple[Callable, ...]): defaults to `()`,
                 Python functions that should be wrapped automatically without
-                needing to use fx.wrap().
+                needing to use fx.wrap(). Backward compabilibility for this
+                parameter is guaranteed.
+
+            param_shapes_constant (bool): When this flag is set,  calls to shape,
+                size and a few other shape like attributes of a module's parameter
+                will be evaluted directly, rather than returning a new Proxy value
+                for an attribute access. Backward compatibility for this parameter
+                is guaranteed.
 
             enable_cpatching (bool): defaults to `False`,
                 Allows you to enable/disable monkeypatching of torch functions at the
@@ -210,12 +227,9 @@ class Tracer(TracerBase):
                 C-level monkeypatching works by directly modifying the PyCFunctionObject*
                 so that calling it returns a different function.
 
-                Turning this on is likely to slow down tracing by 1.5-3x.
-
-            param_shapes_constant (bool): see https://github.com/pytorch/pytorch/issues/61733. When
-            this flag is set,  calls to shape, size and a few other shape like attributes of a module's parameter
-            will be evaluted directly, rather than returning a new Proxy value for an attribute access.
-
+                Turning this on is likely to slow down tracing by 1.5-3x. This
+                parameter is experimental and its backward-compatibility is NOT
+                guaranteed.
         """
 
         super().__init__()
@@ -235,6 +249,7 @@ class Tracer(TracerBase):
 
         self.submodule_paths: Optional[Dict[torch.nn.Module, str]] = None
 
+    @compatibility(is_backward_compatible=True)
     def create_arg(self, a: Any) -> 'Argument':
         """
         A method to specify the behavior of tracing when preparing values to
@@ -325,6 +340,7 @@ class Tracer(TracerBase):
 
         return super().create_arg(a)
 
+    @compatibility(is_backward_compatible=True)
     def is_leaf_module(self, m: torch.nn.Module, module_qualified_name : str) -> bool:
         """
         A method to specify whether a given ``nn.Module`` is a "leaf" module.
@@ -346,6 +362,7 @@ class Tracer(TracerBase):
         """
         return m.__module__.startswith('torch.nn') and not isinstance(m, torch.nn.Sequential)
 
+    @compatibility(is_backward_compatible=True)
     def path_of_module(self, mod : torch.nn.Module) -> str:
         """
         Helper method to find the qualified name of ``mod`` in the Module hierarchy
@@ -372,6 +389,7 @@ class Tracer(TracerBase):
                     return n
             raise NameError('module is not installed as a submodule')
 
+    @compatibility(is_backward_compatible=True)
     def call_module(self, m: torch.nn.Module, forward: Callable[..., Any], args : Tuple[Any, ...], kwargs : Dict[str, Any]) -> Any:
         """
         Method that specifies the behavior of this ``Tracer`` when it encounters
@@ -404,6 +422,8 @@ class Tracer(TracerBase):
             return forward(*args, **kwargs)
         return self.create_proxy('call_module', module_qualified_name, args, kwargs)
 
+    # This method will be refactored
+    @compatibility(is_backward_compatible=False)
     def create_args_for_root(self, root_fn, is_module, concrete_args=None):
         """
         Create ``placeholder`` nodes corresponding to the signature of the ``root``
@@ -509,8 +529,8 @@ class Tracer(TracerBase):
 
         return attr_val
 
-
-    def trace(self, root: Union[torch.nn.Module, Callable], concrete_args: Optional[Dict[str, Any]] = None) -> Graph:
+    @compatibility(is_backward_compatible=True)
+    def trace(self, root: Union[torch.nn.Module, Callable[..., Any]], concrete_args: Optional[Dict[str, Any]] = None) -> Graph:
         """
         Trace ``root`` and return the corresponding FX ``Graph`` representation. ``root``
         can either be an ``nn.Module`` instance or a Python callable.
@@ -524,8 +544,11 @@ class Tracer(TracerBase):
         Args:
 
             root (Union[Module, Callable]): Either a ``Module`` or a function to be
-                traced through.
-            concrete_args (Optional[Dict[str, any]]): Concrete arguments that should not be treated as Proxies.
+                traced through. Backwards-compatibility for this parameter is
+                guaranteed.
+            concrete_args (Optional[Dict[str, any]]): Concrete arguments that should
+                not be treated as Proxies. This parameter is experimental and
+                its backwards-compatibility is *NOT* guaranteed.
 
         Returns:
 
@@ -772,6 +795,7 @@ def _autowrap_check(patcher : _Patcher, frame_dict : Dict[str, Any], function_id
                 patcher.patch(frame_dict, name, _create_wrapped_func(value))
 
 
+@compatibility(is_backward_compatible=True)
 def wrap(fn_or_name : Union[str, Callable]):
     """
     This function can be called at module-level scope to register fn_or_name as a "leaf function".
@@ -828,9 +852,11 @@ def wrap(fn_or_name : Union[str, Callable]):
     _wrapped_fns_to_patch.append((f.f_globals, fn_name))
     return fn_or_name
 
-def symbolic_trace(root : Union[torch.nn.Module, Callable], concrete_args: Optional[Dict[str, Any]] = None,
+@compatibility(is_backward_compatible=True)
+def symbolic_trace(root : Union[torch.nn.Module, Callable[..., Any]], concrete_args: Optional[Dict[str, Any]] = None,
                    enable_cpatching: bool = False) -> GraphModule:
-    """Symbolic tracing API
+    """
+    Symbolic tracing API
 
     Given an ``nn.Module`` or function instance ``root``, this function will return a ``GraphModule``
     constructed by recording operations seen while tracing through ``root``.
@@ -876,7 +902,6 @@ def symbolic_trace(root : Union[torch.nn.Module, Callable], concrete_args: Optio
 
     Returns:
         GraphModule: a Module created from the recorded operations from ``root``.
-
     """
     tracer = Tracer(enable_cpatching=enable_cpatching)
     graph = tracer.trace(root, concrete_args)
