@@ -124,9 +124,6 @@ void slow_conv2d_forward(
   slow_conv2d_shape_check(
       input, {}, weight, bias, kH, kW, dH, dW, padH, padW, /*weight_nullable*/false);
 
-  TORCH_CHECK(!bias.defined() || bias.is_contiguous(),
-              "bias tensor has to be contiguous");
-
   constexpr int ndim = 4;
   constexpr int dimf = 1;
   constexpr int dimh = 2;
@@ -151,6 +148,9 @@ void slow_conv2d_forward(
       kW != 1 || kH != 1 || dW != 1 || dH != 1 || padH != 0 || padW != 0);
 
   if (bias.defined()) {
+    TORCH_CHECK(bias.scalar_type() == input.scalar_type(),
+                "Expected bias to have type ", input.scalar_type(),
+                " but got ", bias.scalar_type());
     output.copy_(bias.view({-1, 1, 1}));
   } else {
     output.zero_();
