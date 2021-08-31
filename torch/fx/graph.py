@@ -926,7 +926,8 @@ class Graph:
                 if global_name == 'getattr' and \
                    isinstance(node.args, tuple) and \
                    isinstance(node.args[1], str) and \
-                   node.args[1].isidentifier():
+                   node.args[1].isidentifier() and \
+                   len(node.args) == 2:
                     # pretty print attribute access
                     body.append(f'{repr(node)}{maybe_type_annotation} = {_format_target(repr(node.args[0]), node.args[1])}')
                     return
