@@ -56,54 +56,42 @@ static OptionalTensorRef make_otr(const TensorBase &tensor) {
   }
 }
 
-template <size_t N>
-const OptionalTensorRef* dumb_tensor_data(const char (&data)[N]) {
-  static_assert(N == sizeof(OptionalTensorRef), "");
-  return reinterpret_cast<const OptionalTensorRef*>(data);
 }
 
-template <size_t N>
-OptionalTensorRef* dumb_tensor_data(char (&data)[N]) {
-  static_assert(N == sizeof(OptionalTensorRef), "");
-  return reinterpret_cast<OptionalTensorRef*>(data);
-}
+namespace internal {
+
+OpaqueTensorRef::OpaqueTensorRef() {
+  static_assert(alignof(OptionalTensorRef) == alignof(TensorBase), "");
+  new (data_) OptionalTensorRef();
 }
 
-OperandInfo::OperandInfo() {
-  new (dumb_tensor_data(tensor_storage_)) OptionalTensorRef();
-  new (dumb_tensor_data(original_tensor_storage_)) OptionalTensorRef();
+OpaqueTensorRef::~OpaqueTensorRef() {
+  get()->~OptionalTensorRef();
 }
 
-OperandInfo::~OperandInfo() {
-  dumb_tensor_data(tensor_storage_)->~OptionalTensorRef();
-  dumb_tensor_data(original_tensor_storage_)->~OptionalTensorRef();
+const Tensor& OpaqueTensorRef::getTensor() const {
+  return get()->getTensorRef();
 }
 
-const Tensor& OperandInfo::tensor() const {
-  return dumb_tensor_data(tensor_storage_)->getTensorRef();
-}
-
-const Tensor& OperandInfo::original_tensor() const {
-  return dumb_tensor_data(original_tensor_storage_)->getTensorRef();
 }
 
 void OperandInfo::tensor(c10::MaybeOwned<TensorBase> &&tensor) {
   tensor_base_ = std::move(tensor);
-  *dumb_tensor_data(tensor_storage_) = make_otr(*tensor_base_);
+  *tensor_storage_ = make_otr(*tensor_base_);
 }
 
 void OperandInfo::original_tensor(c10::MaybeOwned<TensorBase> &&original_tensor) {
   original_tensor_base_ = std::move(original_tensor);
-  *dumb_tensor_data(original_tensor_storage_) = make_otr(*original_tensor_base_);
+  *original_tensor_storage_ = make_otr(*original_tensor_base_);
 }
 
 c10::MaybeOwned<TensorBase> OperandInfo::unsafeReleaseTensor() {
-  *dumb_tensor_data(tensor_storage_) = OptionalTensorRef();
+  *tensor_storage_ = OptionalTensorRef();
   return std::move(tensor_base_);
 }
 
 c10::MaybeOwned<TensorBase> OperandInfo::unsafeReleaseOriginalTensor() {
-  *dumb_tensor_data(original_tensor_storage_) = OptionalTensorRef();
+  *original_tensor_storage_ = OptionalTensorRef();
   return std::move(original_tensor_base_);
 }
 
