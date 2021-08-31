@@ -64,6 +64,7 @@ CONFIG_TREE_DATA = [
         ("clang", [
             ("9", [
                 ("3.6", [
+                    ("xla", [XImportant(True)]),
                     ("vulkan", [XImportant(True)]),
                 ]),
             ]),
