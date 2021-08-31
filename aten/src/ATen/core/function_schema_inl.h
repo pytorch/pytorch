@@ -84,7 +84,6 @@ inline bool Argument::isBackwardCompatibleWith(
     return true;
 }
 
-// for now, it is same as backward compatible check.
 inline bool Argument::isForwardCompatibleWith(
     const Argument& old,
     std::ostream* why_not) const {
@@ -97,7 +96,7 @@ inline bool Argument::isForwardCompatibleWith(
   if (lhs->kwarg_only() && !rhs->kwarg_only()) {
     return false;
   }
-  if (!rhs->type()->isSubtypeOfExt(lhs->type(), why_not)) {
+  if (!lhs->type()->isSubtypeOfExt(rhs->type(), why_not)) {
     return false;
   }
   if (rhs->default_value().has_value() &&
@@ -194,43 +193,37 @@ inline bool FunctionSchema::isBackwardCompatibleWith(
 
 inline bool FunctionSchema::isForwardCompatibleWith(
     const FunctionSchema& old,
-    std::ostream* why_not) const {
+    std::ostringstream& why_not) const {
   if (!(name() == old.name() &&
         overload_name() == old.overload_name()
         // we are conservative on is_vararg and is_varret,
         // since they are only used by internal operators
         && is_vararg() == old.is_vararg() && is_varret() == old.is_varret() &&
-        returns().size() == old.returns().size() &&
-        arguments().size() >= old.arguments().size())) {
+        returns().size() == old.returns().size())) {
     return false;
   }
 
-  // find the start of out args in the old schema
-  int old_out_start_idx;
-  for (old_out_start_idx = old.arguments().size() - 1; old_out_start_idx > -1;
-       old_out_start_idx--) {
-    if (!old.arguments().at(old_out_start_idx).is_out()) {
-      break;
+  // we want to test both out and default args seperately
+  size_t old_out_start_idx = findFirstOutArg(old.arguments());
+  size_t new_out_start_idx = findFirstOutArg(arguments());
+
+  if (old.arguments().size() - old_out_start_idx !=
+      arguments().size() - new_out_start_idx) {
+    if (why_not) {
+      why_not << "Function schema should have the "
+              << "same number of out arguments";
     }
+    return false;
   }
-
-  old_out_start_idx++;
-
-  // find the start of out args in the old schema
-  int new_out_start_idx;
-  for (new_out_start_idx = arguments().size() - 1; new_out_start_idx > -1;
-       new_out_start_idx--) {
-    if (!arguments().at(new_out_start_idx).is_out()) {
-      break;
-    }
-  }
-
-  new_out_start_idx++;
 
   // make sure among the default args, they are forward compatible
-  for (size_t i = 0; i < old_out_start_idx; i++) {
-    if (!arguments().at(i).isForwardCompatibleWith(
-            old.arguments().at(i), why_not)) {
+  for (size_t i = 0; i < std::min(old_out_start_idx, new_out_start_idx); i++) {
+    if (!arguments().at(i).isForwardCompatibleWith(old.arguments().at(i))) {
+      if (why_not) {
+        why_not
+            << "'" << arguments().at(i).name() << "'"
+            << " is not forward compatible with the older version of the schema";
+      }
       return false;
     }
   }
@@ -239,8 +232,8 @@ inline bool FunctionSchema::isForwardCompatibleWith(
   for (size_t i = old_out_start_idx; i < new_out_start_idx; ++i) {
     if (!arguments().at(i).default_value()) {
       if (why_not) {
-        *why_not
-            << "Function schema not backward compatible since the new argument '"
+        why_not
+            << "Function schema is not forward compatible since the new argument '"
             << arguments().at(i).name() << "' of type "
             << arguments().at(i).type()->str()
             << " did not provide a default value.";
@@ -251,10 +244,11 @@ inline bool FunctionSchema::isForwardCompatibleWith(
     auto default_val = arguments().at(i).default_value().value();
     if (default_val.isList() || default_val.isGenericDict()) {
       if (why_not) {
-        *why_not
-            << "Function schema not forward compatible since the new argument '"
+        why_not
+            << "Function schema is not forward compatible since the new argument '"
             << arguments().at(i).name() << "' of type "
-            << arguments().at(i).type()->str() << " is a container type.";
+            << arguments().at(i).type()->str() << " has a container type "
+            << "as its' default value.";
       }
       return false;
     }
@@ -264,7 +258,12 @@ inline bool FunctionSchema::isForwardCompatibleWith(
   for (size_t i = old_out_start_idx; i < old.arguments().size(); i++) {
     if (!arguments()
              .at(i - old_out_start_idx + new_out_start_idx)
-             .isForwardCompatibleWith(old.arguments().at(i), why_not)) {
+             .isForwardCompatibleWith(old.arguments().at(i))) {
+      if (why_not) {
+        why_not << "Out argument '"
+                << "'" << arguments().at(i).name()
+                << " is not FC with the older version of the schema";
+      }
       return false;
     }
   }

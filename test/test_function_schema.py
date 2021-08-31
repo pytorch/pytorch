@@ -114,29 +114,50 @@ class TestFunctionSchema(TestCase):
 
     def test_forward_compatible_arguments_without_out(self):
         old_schema = parse_schema('any(Tensor self, int a, int b=1) -> Tensor')
+        new_schema = parse_schema('any(Tensor self, int a) -> Tensor')
+        is_fc, _ = new_schema.check_forward_compatible_with(old_schema)
+        self.assertTrue(is_fc)
         new_schema = parse_schema('any(Tensor self, int a, int b=1, int c=1) -> Tensor')
-        self.assertTrue(new_schema.is_forward_compatible_with(old_schema))
+        is_fc, _ = new_schema.check_forward_compatible_with(old_schema)
+        self.assertTrue(is_fc)
         new_schema = parse_schema('any(Tensor self, int a, int b=1, int[2] c=1) -> Tensor')
-        self.assertFalse(new_schema.is_forward_compatible_with(old_schema))
+        is_fc, reason = new_schema.check_forward_compatible_with(old_schema)
+        self.assertFalse(is_fc)
+        self.assertEqual(reason, "Function schema is not forward compatible since the new argument"
+                                 " \'c\' of type int[] has a container type as its\' default value.")
         new_schema = parse_schema('any(Tensor self, int a, int b=4) -> Tensor')
-        self.assertFalse(new_schema.is_forward_compatible_with(old_schema))
+        is_fc, reason = new_schema.check_forward_compatible_with(old_schema)
+        self.assertFalse(is_fc)
+        self.assertEqual(reason, "\'b\' is not forward compatible with the older version of the schema")
         new_schema = parse_schema('any(Tensor self, int a, int c=1) -> Tensor')
-        self.assertFalse(new_schema.is_forward_compatible_with(old_schema))
+        is_fc, reason = new_schema.check_forward_compatible_with(old_schema)
+        self.assertFalse(is_fc)
+        self.assertEqual(reason, "\'c\' is not forward compatible with the older version of the schema")
         new_schema = parse_schema('any(Tensor self, int a, int c=1, int b=1) -> Tensor')
-        self.assertFalse(new_schema.is_forward_compatible_with(old_schema))
+        is_fc, reason = new_schema.check_forward_compatible_with(old_schema)
+        self.assertFalse(is_fc)
+        self.assertEqual(reason, "\'c\' is not forward compatible with the older version of the schema")
 
     def test_forward_compatible_arguments_real_use_case(self):
         # this change introduced forward incompatibility in the past
         old_slice_schema = parse_schema('slice(Tensor(a) self, int dim=0, int start=0, int end=9223372036854775807, int step=1) -> Tensor(a)')
         new_slice_schema = parse_schema('slice(Tensor(a) self, int dim=0, int? start=None, int? end=None, int step=1) -> Tensor(a)')
-        self.assertFalse(new_slice_schema.is_forward_compatible_with(old_slice_schema))
+        is_fc, reason = new_slice_schema.check_forward_compatible_with(old_slice_schema)
+        self.assertFalse(is_fc)
+        self.assertEqual(reason, "\'start\' is not forward compatible with the older version of the schema")
 
     def test_forward_compatible_arguments_with_out(self):
         old_schema = parse_schema('any(Tensor self, *, int a, int b=1, Tensor(a!) out) -> Tensor(a!)')
+        new_schema = parse_schema('any(Tensor self, *, int a, Tensor(a!) out) -> Tensor(a!)')
+        is_fc, _ = new_schema.check_forward_compatible_with(old_schema)
+        self.assertTrue(is_fc)
         new_schema = parse_schema('any(Tensor self, *, int a, int b=1, int c=1, Tensor(a!) out) -> Tensor(a!)')
-        self.assertTrue(new_schema.is_forward_compatible_with(old_schema))
+        is_fc, _ = new_schema.check_forward_compatible_with(old_schema)
+        self.assertTrue(is_fc)
         new_schema = parse_schema('any(Tensor self, *, int a, Tensor(d!) d, int b=1, Tensor(a!) out) -> Tensor(a!)')
-        self.assertFalse(new_schema.is_forward_compatible_with(old_schema))
+        is_fc, reason = new_schema.check_forward_compatible_with(old_schema)
+        self.assertFalse(is_fc)
+        self.assertEqual(reason, "Function schema should have the same number of out arguments")
 
     def test_schema_error(self):
         with self.assertRaisesRegex(RuntimeError, r"schemas with vararg \(...\) can't have default value args"):

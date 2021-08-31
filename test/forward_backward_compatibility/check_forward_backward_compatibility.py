@@ -208,10 +208,14 @@ def check_fc(existing_schemas):
         print("processing existing schema: ", str(existing_schema))
         matching_new_schemas = new_schema_dict.get(existing_schema.name, [])
         found = False
+        possible_failure_reasons = []
         for matching_new_schema in matching_new_schemas:
-            if matching_new_schema.is_forward_compatible_with(existing_schema):
+            is_fc, reason = matching_new_schema.check_forward_compatible_with(existing_schema)
+            if is_fc:
                 found = True
                 break
+            if reason != "":
+                possible_failure_reasons.append(reason)
         if not found:
             print(
                 "Can NOT find forward compatible schemas after changes "
@@ -220,7 +224,12 @@ def check_fc(existing_schemas):
                     "\n\t".join(str(s) for s in matching_new_schemas),
                 )
             )
-            # TODO Print out more details about why candidates don't match.
+            print(
+                "Refer to following reasons for failure "
+                "to find FC schema:\n[\n{}\n]".format(
+                    "\n\t".join(str(s) for r in possible_failure_reasons)
+                )
+            )
             broken_ops.append(str(existing_schema))
             is_fc = False
     if is_fc:

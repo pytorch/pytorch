@@ -228,7 +228,7 @@ struct FunctionSchema {
   //
   bool isForwardCompatibleWith(
       const FunctionSchema& old,
-      std::ostream* why_not = nullptr) const;
+      std::ostringstream& why_not) const;
 
  private:
   OperatorName name_;

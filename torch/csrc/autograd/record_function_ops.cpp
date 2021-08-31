@@ -79,7 +79,7 @@ c10::AliasAnalysisKind aliasAnalysisFromSchema() {
 jit::RegisterOperators reg_fut_ops({
     jit::Operator(
         "profiler::_call_end_callbacks_on_jit_fut(Tensor x, Future(t) y) -> Future(t)",
-        [](jit::Stack* stack) {
+        [](jit::Stack& stack) {
           // Pop inputs, which should be a future and a tensor
           auto fut = jit::pop(stack).toFuture();
           auto tensor = jit::pop(stack).toTensor();
