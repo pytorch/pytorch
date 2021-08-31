@@ -494,6 +494,10 @@ test_torch_deploy() {
   assert_git_not_dirty
 }
 
+test_docs_test() {
+  .jenkins/pytorch/docs-test.sh
+}
+
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
@@ -532,6 +536,8 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
 elif [[ "${BUILD_ENVIRONMENT}" == *distributed* ]]; then
   test_distributed
   test_rpc
+elif [[ "${TEST_CONFIG}" = docs_test ]]; then
+  test_docs_test
 else
   install_torchvision
   install_monkeytype
