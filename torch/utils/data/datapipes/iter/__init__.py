@@ -19,7 +19,8 @@ from torch.utils.data.datapipes.iter.fileloader import (
 from torch.utils.data.datapipes.iter.grouping import (
     BatcherIterDataPipe as Batcher,
     BucketBatcherIterDataPipe as BucketBatcher,
-    ByKeyGrouperIterDataPipe as ByKeyGrouper,
+    GrouperIterDataPipe as Grouper,
+    UnBatcherIterDataPipe as UnBatcher,
 )
 from torch.utils.data.datapipes.iter.httpreader import (
     HTTPReaderIterDataPipe as HttpReader,
@@ -43,19 +44,19 @@ from torch.utils.data.datapipes.iter.ziparchivereader import (
     ZipArchiveReaderIterDataPipe as ZipArchiveReader,
 )
 from torch.utils.data.datapipes.iter.utils import (
-    IterableAsDataPipeIterDataPipe as IterableAsDataPipe,
+    IterableWrapperIterDataPipe as IterableWrapper,
 )
 
 __all__ = ['Batcher',
            'BucketBatcher',
-           'ByKeyGrouper',
            'Collator',
            'Concater',
            'FileLister',
            'FileLoader',
            'Filter',
+           'Grouper',
            'HttpReader',
-           'IterableAsDataPipe',
+           'IterableWrapper',
            'LineReader',
            'Mapper',
            'RoutedDecoder',
@@ -63,6 +64,7 @@ __all__ = ['Batcher',
            'Shuffler',
            'StreamReader',
            'TarArchiveReader',
+           'UnBatcher',
            'ZipArchiveReader',
            'Zipper']
 
