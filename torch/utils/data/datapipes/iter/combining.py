@@ -61,7 +61,8 @@ class ForkerIterDataPipe(IterDataPipe):
     r""" :class:`ForkerIterDataPipe`.
 
         Iterable DataPipe to create multiple instances of the same Iterable DataPipe.
-        args:
+
+        Args:
             datapipe: Iterable DataPipe being copied
             num_instances: number of instances of the datapipe to create
             buffer_size: this restricts how far ahead the leading child DataPipe
@@ -89,6 +90,9 @@ class _ForkerIterDataPipe(IterDataPipe):
         self.slowest_ptr = 0
         self.leading_ptr = 0
         self.end_ptr: Optional[int] = None
+
+    def __len__(self):
+        return len(self.main_datapipe)
 
     def get_next_element_by_instance(self, instance_id: int):
         if self._datapipe_iterator is None:
@@ -135,7 +139,8 @@ class _ChildDataPipe(IterDataPipe):
 
         Iteratable Datapipe that is a child of a main DataPipe. The instance of this class
         will pass its instance_id to get the next value from its main DataPipe.
-        args:
+
+        Args:
             main_datapipe: Main DataPipe with a method 'get_next_element_by_instance(instance_id)'
             instance_id: integer identifier of this instance
     """
@@ -156,6 +161,9 @@ class _ChildDataPipe(IterDataPipe):
         # We want to separate the code for reset and yield, so that 'reset' exeutes before __next__ is called
         return self.get_generator_by_instance(self.instance_id)
 
+    def __len__(self):
+        return len(self.main_datapipe)
+
     def get_generator_by_instance(self, instance_id: int):
         yield from self.main_datapipe.get_next_element_by_instance(self.instance_id)
 
@@ -166,7 +174,8 @@ class DemultiplexerIterDataPipe(IterDataPipe):
 
         Iterable DataPipe to split the input DataPipe into multiple child DataPipes, using the given
         classification function. A list of the child DataPipes is returned from this operation.
-        args:
+
+        Args:
             datapipe: Iterable DataPipe being filtered
             num_instances: number of instances of the DataPipe to create
             classifier_fn: a function that maps values to an integer within the range [0, num_instances - 1] or None
