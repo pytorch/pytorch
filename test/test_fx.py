@@ -2344,6 +2344,19 @@ class TestFX(JitTestCase):
 
         traced.graph.lint()
 
+    def test_throw_out_variant(self):
+        def foo(x):
+            y = torch.rand_like(x)
+            torch.sigmoid(x, out=y)
+            return y
+
+        class MyTracer(torch.fx.Tracer):
+            check_mutable_operations = True
+
+        tracer = MyTracer()
+        with self.assertRaisesRegex(RuntimeError, 'mutable operation aten::sigmoid.out'):
+            traced_graph = tracer.trace(foo)
+
     def test_ast_rewriter_reassigns_submodules(self):
         class M(torch.nn.Module):
             def __init__(self):

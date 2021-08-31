@@ -79,7 +79,58 @@ def _torchscript_schema_to_signature(ts_schema : torch._C.FunctionSchema) -> ins
     return inspect.Signature(parameters, return_annotation=return_type)
 
 @compatibility(is_backward_compatible=False)
-def get_signature_for_torch_op(op : Callable) -> Optional[List[inspect.Signature]]:
+def check_for_mutable_operation(target : Callable, args : Tuple['Argument', ...], kwargs : Dict[str, 'Argument']):
+    signatures, schemas = get_signature_for_torch_op(target, return_schemas=True)
+
+    if signatures:
+        matched_schemas = []
+
+        # Iterate through all of the schema until we find one that matches
+        # If one matches, populate `new_args_and_kwargs` with the new args/kwargs
+        # values. If none matches, `new_args_and_kwargs` will be None
+        for candidate_signature, schema in zip(signatures, schemas):
+            try:
+                candidate_signature.bind(*args, **kwargs)
+                matched_schemas.append((candidate_signature, schema))
+            except TypeError as e:
+                continue
+
+        def throw_if_mutable(schema):
+            if schema.is_mutable:
+                raise RuntimeError(f'Tried to trace mutable operation {schema}. FX only supports functional '
+                                   f'code, so operations that mutate operands in-place (e.g. via `out` arguments) '
+                                   f'are not supported')
+
+        if len(matched_schemas) == 0:
+            # Did not match any schema. Cannot check for mutation
+            pass
+        elif len(matched_schemas) == 1:
+            # Matched exactly one schema, unambiguous
+            throw_if_mutable(schema)
+            pass
+        else:
+            if arg_types is not None or kwarg_types is not None:
+                arg_types = arg_types if arg_types else cast(Tuple[Any], ())
+                kwarg_types = kwarg_types if kwarg_types else {}
+                for candidate_signature in torch_op_schemas:
+                    sig_matches = True
+                    try:
+                        bound_types = candidate_signature.bind(*arg_types, **kwarg_types)
+                        for arg_name, arg_type in bound_types.arguments.items():
+                            param = candidate_signature.parameters[arg_name]
+                            sig_matches = sig_matches and type_matches(param.annotation, arg_type)
+                    except TypeError as e:
+                        sig_matches = False
+                    if sig_matches:
+                        throw_if_mutable(schema)
+                        break
+            else:
+                # Matched more than one schema. Since mutability checking is best effort,
+                # do nothing.
+                pass
+
+@compatibility(is_backward_compatible=False)
+def get_signature_for_torch_op(op : Callable, return_schemas : bool = False) -> Optional[List[inspect.Signature]]:
     """
     Given an operator on the `torch` namespace, return a list of `inspect.Signature`
     objects corresponding to the overloads of that op.. May return `None` if a signature
@@ -104,7 +155,7 @@ def get_signature_for_torch_op(op : Callable) -> Optional[List[inspect.Signature
     schemas = torch._C._jit_get_schemas_for_operator(aten_fn)
     signatures = [_torchscript_schema_to_signature(schema) for schema in schemas]
 
-    return signatures
+    return (signatures, schemas) if return_schemas else signatures
 
 @compatibility(is_backward_compatible=False)
 def create_type_hint(x):
