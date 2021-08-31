@@ -1249,6 +1249,26 @@ def sample_inputs_linalg_norm(op_info, device, dtype, requires_grad):
                             dim=(0, 1))))
         return inputs
 
+def sample_inputs_cosine_similarity(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    # Ordered as input_shape, dict of dim and eps
+    cases: Tuple[tuple, dict] = (  # type: ignore[assignment]
+        ((S, S), {'dim': 1}),
+        ((S, 2), {'dim': -1}),
+        ((S,), {'dim': 0, 'eps': 0.5}),
+        ((), {'dim': 0}),
+        ((S, S, M), {'dim': 2}),
+        ((S, S), {})
+    )
+
+    def generator():
+        for input_shape, kwargs in cases:
+            yield SampleInput(make_arg(input_shape), args=(make_arg(input_shape),), kwargs=kwargs)
+        # Test for Broadcasting
+        yield SampleInput(make_arg((1, 2, 3)), args=(make_arg((2, 1, 3)),), kwargs={'dim': -1})
+
+    return list(generator())
 
 def sample_inputs_nn_activation_relu(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -7175,6 +7195,13 @@ op_db: List[OpInfo] = [
                # FIXME: aminmax does not check for safe casting to output
                SkipInfo('TestCommon', 'test_out'),
            )),
+    OpInfo('nn.functional.cosine_similarity',
+           aten_name="cosine_similarity",
+           dtypes=floating_types_and(torch.bfloat16),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           supports_out=False,
+           supports_forward_ad=True,
+           sample_inputs_func=sample_inputs_cosine_similarity),
     OpInfo('nn.functional.adaptive_avg_pool2d',
            dtypes=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
