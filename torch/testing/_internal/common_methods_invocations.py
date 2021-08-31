@@ -7376,7 +7376,7 @@ op_db: List[OpInfo] = [
            dtypesIfROCM=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
            backward_dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
-                                                                *[torch.bfloat16] if (SM60OrLater and CUDA11OrLater) else []),
+                                                                *[torch.bfloat16] if CUDA11OrLater else []),
            supports_forward_ad=True,
            supports_out=False),
     UnaryUfuncInfo(
