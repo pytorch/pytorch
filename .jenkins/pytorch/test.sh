@@ -410,10 +410,10 @@ test_torch_function_benchmark() {
 build_xla() {
   clone_pytorch_xla
   # shellcheck disable=SC1091
-  set_torch_cmake_prefix_path
   source "xla/.circleci/common.sh"
   apply_patches
   install_deps_pytorch_xla xla
+  set_torch_cmake_prefix_path
   build_torch_xla xla
   assert_git_not_dirty
 }
