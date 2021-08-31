@@ -55,7 +55,7 @@ static ExprHandle promoteToDtype(ExprHandle e, ScalarType dt) {
     AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
 #undef TYPE_CASE
     default:
-      throw unsupported_dtype();
+      throw unsupported_dtype(buildErrorMessage(""));
   }
   return e;
 }
@@ -450,7 +450,8 @@ ExprHandle constant(const ArgValue& v) {
     // the operator-specific lowering code.
     return IntImm::make(0);
   } else {
-    throw unsupported_dtype("Trying to convert unsupported dtype to constant");
+    throw unsupported_dtype(
+        buildErrorMessage("Trying to convert unsupported dtype to constant"));
   }
 }
 
@@ -458,7 +459,8 @@ std::vector<ExprHandle> computeIndicesToBroadcast(
     const std::vector<ExprHandle>& outputAxes,
     const std::vector<ExprHandle>& inputSizes) {
   if (outputAxes.size() < inputSizes.size()) {
-    throw malformed_input("Cannot broadcast to a lower rank tensor");
+    throw malformed_input(
+        buildErrorMessage("Cannot broadcast to a lower rank tensor"));
   }
   std::vector<ExprHandle> bcast;
   auto axisIt = outputAxes.rbegin();
@@ -503,7 +505,7 @@ void promoteInputs(std::vector<ExprHandle>& inputs, const int typeConstraints) {
   }
 
   if (!checkTypes(highType, typeConstraints)) {
-    throw unsupported_dtype();
+    throw unsupported_dtype(buildErrorMessage(""));
   }
 
   for (ExprHandle& e : inputs) {
@@ -531,7 +533,7 @@ ExprHandle demoteOutput(
     case ScalarType::Bool:
       return cast<bool>(e);
     default:
-      throw unsupported_dtype();
+      throw unsupported_dtype(buildErrorMessage(""));
   }
 
   return e;
@@ -593,12 +595,12 @@ ExprHandle TensorExprKernel::constant(const torch::jit::Value* v) {
       // the operator-specific lowering code.
       return IntImm::make(0);
     } else {
-      throw unsupported_dtype();
+      throw unsupported_dtype(buildErrorMessage(""));
     }
   }
 
   if (!scalars_.count(v)) {
-    throw malformed_input("no scalar in Constant");
+    throw malformed_input(buildErrorMessage("no scalar in Constant"));
   }
 
   return scalars_.at(v);
@@ -636,7 +638,7 @@ ArgValue TensorExprKernel::toArg(const torch::jit::Value* v) const {
     } else if (c10::get_if<int64_t>(&vec[0])) {
       return convertVecArgValue<int64_t>(vec);
     }
-    throw unsupported_dtype();
+    throw unsupported_dtype(buildErrorMessage(""));
   }
   if (v->node()->kind() == prim::Constant) {
     auto val = toIValue(v).value();
@@ -654,12 +656,12 @@ ArgValue TensorExprKernel::toArg(const torch::jit::Value* v) const {
     } else if (val.isIntList()) {
       return val.toIntVector();
     } else {
-      throw unsupported_dtype(val.type()->str());
+      throw unsupported_dtype(buildErrorMessage(val.type()->str()));
     }
   }
 
   if (!scalars_.count(v)) {
-    throw malformed_input("no scalar in Constant");
+    throw malformed_input(buildErrorMessage("no scalar in Constant"));
   }
   return scalars_.at(v);
 }
@@ -819,7 +821,8 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
       }
       // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       if (dim < 0 || dim > shape.size()) {
-        throw std::runtime_error("Invalid 'dim' input in aten::unsqueeze");
+        throw std::runtime_error(
+            buildErrorMessage("Invalid 'dim' input in aten::unsqueeze"));
       }
 
       shape.insert(shape.begin() + dim, ExprHandle(1));
@@ -840,7 +843,8 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
       auto const& n = v->node();
       auto inputs = n->input(0)->node()->inputs();
       if (inputs.size() == 0) {
-        throw std::runtime_error("Empty input list is passed to aten::cat");
+        throw std::runtime_error(
+            buildErrorMessage("Empty input list is passed to aten::cat"));
       }
 
       TORCH_INTERNAL_ASSERT(
@@ -865,8 +869,8 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
       return sizesForValue(v->node()->input(0));
 
     case aten::slice:
-      throw std::runtime_error(
-          "Shape info is not implemented for this kind of node");
+      throw std::runtime_error(buildErrorMessage(
+          "Shape info is not implemented for this kind of node"));
 
     default: {
       GRAPH_DEBUG("Can't infer sizes for the node: ", *v->node());
@@ -874,7 +878,7 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
       std::string msg =
           std::string("Unhandled node kind (in inferSizesForValue): ") +
           v->node()->kind().toQualString();
-      throw malformed_input(msg);
+      throw malformed_input(buildErrorMessage(msg));
     }
   }
 }
@@ -1159,7 +1163,8 @@ Tensor computeFourOperand(
 std::pair<ScalarType, std::vector<BufHandle>> processCatList(
     const std::vector<BufHandle>& bufList) {
   if (bufList.size() == 0) {
-    throw std::runtime_error("Empty input list is passed to aten::cat");
+    throw std::runtime_error(
+        buildErrorMessage("Empty input list is passed to aten::cat"));
   }
   std::vector<BufHandle> bufInputs;
   std::vector<BufHandle> nonEmptyInputs;
@@ -2237,7 +2242,8 @@ Tensor tensorexpr::computeOperandValue(
             int64_t dim = c10::get<int64_t>(inputs[1]);
             if (dim < 0) {
               if (axes.size() == 0) {
-                throw malformed_input("axes are zero handling unsqueeze");
+                throw malformed_input(
+                    buildErrorMessage("axes are zero handling unsqueeze"));
               }
               dim += axes.size();
             }
@@ -2421,7 +2427,7 @@ Tensor tensorexpr::computeOperandValue(
       std::string msg =
           std::string("Unhandled node kind (in computeOperandValue): ") +
           op.toQualString();
-      throw malformed_input(msg);
+      throw malformed_input(buildErrorMessage(msg));
     }
   }
 }
@@ -2699,8 +2705,8 @@ StmtPtr TensorExprKernel::transformLoops(BackendType backendType, StmtPtr st) {
         inner->set_gpu_block_index(0);
         inner1->set_gpu_thread_index(0);
       } else {
-        throw std::runtime_error(
-            "Invalid loop-level: " + c10::to_string(loopLevels));
+        throw std::runtime_error(buildErrorMessage(
+            "Invalid loop-level: " + c10::to_string(loopLevels)));
       }
     }
   }
@@ -2760,9 +2766,9 @@ std::string TensorExprKernel::getCodeGenName(BackendType backendType) {
     case kBlockCodeGen:
       return "block_codegen";
     default:
-      throw std::runtime_error(
-          "invalid backend type: " +
-          c10::to_string(static_cast<int>(backendType)));
+      throw std::runtime_error(buildErrorMessage(
+          "Invalid backend type: " +
+          c10::to_string(static_cast<int>(backendType))));
   }
 }
 
@@ -2785,10 +2791,10 @@ TensorExprKernel::BackendType TensorExprKernel::inferBackendTypeFromDevice(
     backendType = kSimpleIREval;
 #endif
     if (getTEMustUseLLVMOnCPU() && backendType == kSimpleIREval) {
-      throw std::runtime_error("LLVM Backend not found");
+      throw std::runtime_error(buildErrorMessage("LLVM Backend not found"));
     }
   } else {
-    throw std::runtime_error("Invalid device type");
+    throw std::runtime_error(buildErrorMessage("Invalid device type"));
   }
   return backendType;
 }
@@ -2847,7 +2853,7 @@ Tensor TensorExprKernel::bindInput(const torch::jit::Value* input) {
       if (!input->isCompleteTensor()) {
         std::string msg = std::string("Shapes for input '%") +
             input->debugName() + "' are unknown";
-        throw malformed_input(msg);
+        throw malformed_input(buildErrorMessage(msg));
       }
       if (isContiguous(input)) {
         Placeholder inBuffer(
@@ -2901,7 +2907,7 @@ Tensor TensorExprKernel::bindInput(const torch::jit::Value* input) {
       break;
     }
     default: {
-      throw unsupported_dtype(t->repr_str());
+      throw unsupported_dtype(buildErrorMessage(t->repr_str()));
       break;
     }
   }
@@ -2942,7 +2948,7 @@ Tensor TensorExprKernel::convertOutputToCorrectStrides(torch::jit::Value* v) {
   if (!tt->sizes().concrete_sizes()) {
     std::string msg =
         std::string("Shapes for output '%") + v->debugName() + "' are unknown";
-    throw malformed_input(msg);
+    throw malformed_input(buildErrorMessage(msg));
   }
 
   TORCH_INTERNAL_ASSERT(tt->sizes().concrete_sizes());
@@ -3078,15 +3084,15 @@ void TensorExprKernel::compile() {
       }
     }
     if (hasRandom_ && hasBroadcast_) {
-      throw std::runtime_error(
-          "Cannot support broadcast and random within one kernel");
+      throw std::runtime_error(buildErrorMessage(
+          "Cannot support broadcast and random within one kernel"));
     }
   }
 
   // Move output operands from `bufs_` to `bufOutputs_`
   for (auto& output : graph_->outputs()) {
     if (!bufs_.count(output)) {
-      throw malformed_input("cannot find output Tensor");
+      throw malformed_input(buildErrorMessage("Cannot find output Tensor"));
     }
     // The "strided" tensor will be incorrect if used in NNC,
     // since NNC views it as contiguous. Only convert it to the right

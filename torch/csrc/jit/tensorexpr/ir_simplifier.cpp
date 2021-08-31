@@ -97,7 +97,7 @@ SimplifierHashType Term::hashVars() const {
 void Term::sort() {
   // order of ops important for float
   if (dtype().is_floating_point()) {
-    throw std::logic_error("reordering FP ops");
+    throw std::logic_error(buildErrorMessage("Reordering FP ops"));
   }
   std::unordered_map<ExprPtr, std::string> str_repr_cache;
   std::sort(variables_.begin(), variables_.end(), [&](ExprPtr a, ExprPtr b) {
@@ -121,7 +121,7 @@ SimplifierHashType Polynomial::hashVars() const {
 
 void Polynomial::sort() {
   if (dtype().is_floating_point()) {
-    throw std::logic_error("reordering FP ops");
+    throw std::logic_error(buildErrorMessage("Reordering FP ops"));
   }
   std::unordered_map<ExprPtr, std::string> str_repr_cache;
   std::sort(variables_.begin(), variables_.end(), [&](ExprPtr a, ExprPtr b) {
@@ -187,7 +187,7 @@ ExprPtr combineMultilane(ExprPtr lhs, ExprPtr rhs) {
   if (BroadcastPtr bc = to<Broadcast>(lhs)) {
     if (BroadcastPtr bcother = to<Broadcast>(rhs)) {
       if (bc->lanes() != bcother->lanes()) {
-        throw malformed_input("multilane lane mismatch");
+        throw malformed_input(buildErrorMessage("multilane lane mismatch"));
       }
 
       ExprPtr ret = alloc<Broadcast>(
@@ -197,7 +197,7 @@ ExprPtr combineMultilane(ExprPtr lhs, ExprPtr rhs) {
 
     if (RampPtr r = to<Ramp>(rhs)) {
       if (bc->lanes() != r->lanes()) {
-        throw malformed_input("multilane lane mismatch");
+        throw malformed_input(buildErrorMessage("multilane lane mismatch"));
       }
 
       ExprPtr ret = alloc<Ramp>(
@@ -207,7 +207,7 @@ ExprPtr combineMultilane(ExprPtr lhs, ExprPtr rhs) {
   } else if (RampPtr ramp = to<Ramp>(lhs)) {
     if (RampPtr rother = to<Ramp>(rhs)) {
       if (ramp->lanes() != rother->lanes()) {
-        throw malformed_input("multilane lane mismatch");
+        throw malformed_input(buildErrorMessage("multilane lane mismatch"));
       }
 
       ExprPtr ret = alloc<Ramp>(
@@ -219,7 +219,7 @@ ExprPtr combineMultilane(ExprPtr lhs, ExprPtr rhs) {
 
     if (BroadcastPtr bc = to<Broadcast>(rhs)) {
       if (ramp->lanes() != bc->lanes()) {
-        throw malformed_input("multilane lane mismatch");
+        throw malformed_input(buildErrorMessage("multilane lane mismatch"));
       }
       ExprPtr ret = alloc<Ramp>(
           alloc<Op>(ramp->base(), bc->value()), ramp->stride(), ramp->lanes());
@@ -235,7 +235,7 @@ ExprPtr mulMultilane(ExprPtr lhs, ExprPtr rhs) {
   if (BroadcastPtr bc = to<Broadcast>(lhs)) {
     if (BroadcastPtr bcother = to<Broadcast>(rhs)) {
       if (bc->lanes() != bcother->lanes()) {
-        throw malformed_input("multilane lane mismatch");
+        throw malformed_input(buildErrorMessage("multilane lane mismatch"));
       }
 
       ExprPtr ret = alloc<Broadcast>(
@@ -245,7 +245,7 @@ ExprPtr mulMultilane(ExprPtr lhs, ExprPtr rhs) {
 
     if (RampPtr r = to<Ramp>(rhs)) {
       if (bc->lanes() != r->lanes()) {
-        throw malformed_input("multilane lane mismatch");
+        throw malformed_input(buildErrorMessage("multilane lane mismatch"));
       }
 
       ExprPtr ret = alloc<Ramp>(
@@ -257,7 +257,7 @@ ExprPtr mulMultilane(ExprPtr lhs, ExprPtr rhs) {
   } else if (RampPtr ramp = to<Ramp>(lhs)) {
     if (RampPtr r = to<Ramp>(rhs)) {
       if (ramp->lanes() != r->lanes()) {
-        throw malformed_input("multilane lane mismatch");
+        throw malformed_input(buildErrorMessage("multilane lane mismatch"));
       }
 
       ExprPtr ret = alloc<Ramp>(
@@ -269,7 +269,7 @@ ExprPtr mulMultilane(ExprPtr lhs, ExprPtr rhs) {
 
     if (BroadcastPtr bc = to<Broadcast>(rhs)) {
       if (ramp->lanes() != bc->lanes()) {
-        throw malformed_input("multilane lane mismatch");
+        throw malformed_input(buildErrorMessage("multilane lane mismatch"));
       }
 
       ExprPtr ret = alloc<Ramp>(
@@ -2282,7 +2282,7 @@ ExprPtr TermExpander::mutate(MaxTermPtr v) {
     if (!v->scalar()) {
       // This case should never happen because MaxTerm will be created only
       // on valid Max expressions.
-      throw std::logic_error("empty maxterm op");
+      throw std::logic_error(buildErrorMessage("empty maxterm op"));
     }
     return v->scalar();
   }
@@ -2305,7 +2305,7 @@ ExprPtr TermExpander::mutate(MinTermPtr v) {
     if (!v->scalar()) {
       // This case should never happen because MinTerm will be created only
       // on valid Min expressions.
-      throw std::logic_error("empty minterm op");
+      throw std::logic_error(buildErrorMessage("empty minterm op"));
     }
     return v->scalar();
   }
@@ -2953,7 +2953,8 @@ ExprPtr IRSimplifier::simplify(ExprPtr e) {
   e = e->accept_mutator(&expander);
   // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
   if (!expander.check_safe()) {
-    throw malformed_input("eliminated null Allocation without free");
+    throw malformed_input(
+        buildErrorMessage("Eliminated null Allocation without free"));
   }
 
   GRAPH_DEBUG("(Simplifier) Simplified: ", std::to_string(e));
@@ -2976,7 +2977,8 @@ StmtPtr IRSimplifier::simplify(StmtPtr s) {
   TermExpander expander(&simplifier);
   s = s->accept_mutator(&expander);
   if (!expander.check_safe()) {
-    throw malformed_input("eliminated null Allocation without free");
+    throw malformed_input(
+        buildErrorMessage("Eliminated null Allocation without free"));
   }
 
   GRAPH_DEBUG("(Simplifier) Simplified: ", std::to_string(s));

@@ -98,7 +98,8 @@ inline std::string getArgValueName(const ArgValue& a) {
   } else if (c10::get_if<ArgNone>(&a)) {
     return "None";
   } else {
-    throw std::runtime_error("ArgValue type not handled in string conversion");
+    throw std::runtime_error(
+        buildErrorMessage("ArgValue type not handled in string conversion"));
   }
 }
 
@@ -110,9 +111,9 @@ std::vector<T> convertVecArgValue(const std::vector<ArgValue>& v) {
     if (val) {
       res.push_back(*val);
     } else {
-      throw std::runtime_error(
+      throw std::runtime_error(buildErrorMessage(
           "vector type not homogeneous - found " + getArgValueName(x) +
-          ", expected " + getArgValueName(v[0]));
+          ", expected " + getArgValueName(v[0])));
     }
   }
   return res;
