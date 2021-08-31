@@ -95,7 +95,7 @@ jobs:
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
-        uses: actions/checkout@v2
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           submodules: recursive
           path: pytorch-${{ github.run_id }}
@@ -177,7 +177,7 @@ jobs:
       - name: Install dependencies
         run: pip install typing-extensions
       - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
       - name: Generating test matrix
         id: set-matrix
         run: .github/scripts/generate_pytorch_test_matrix.py
@@ -206,7 +206,7 @@ jobs:
         working-directory: pytorch-${{ github.run_id }}
     steps:
       - name: Checkout PyTorch
-        uses: actions/checkout@v2
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           submodules: recursive
           path: pytorch-${{ github.run_id }}
