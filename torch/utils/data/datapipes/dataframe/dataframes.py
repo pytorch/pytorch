@@ -1,3 +1,5 @@
+from typing import Any, Dict, Optional
+
 from torch.utils.data import (
     DFIterDataPipe,
     IterDataPipe,
@@ -24,7 +26,7 @@ DATAPIPES_OPS = ['dataframes_as_tuples', 'groupby', 'dataframes_filter', 'map', 
 
 class Capture(object):
     # All operations are shared across entire InitialCapture, need to figure out what if we join two captures
-    ctx = None
+    ctx: Optional[Dict[Any, Any]] = None
 
     def __init__(self):
         self.ctx = {'operations': [], 'variables': []}

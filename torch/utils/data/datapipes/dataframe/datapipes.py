@@ -7,7 +7,8 @@ from torch.utils.data import (
 )
 
 try:
-    import pandas  # pandas used only for prototyping, will be shortly replaced with TorchArrow
+    import pandas  # type: ignore[import]
+    # pandas used only for prototyping, will be shortly replaced with TorchArrow
     WITH_PANDAS = True
 except ImportError:
     WITH_PANDAS = False

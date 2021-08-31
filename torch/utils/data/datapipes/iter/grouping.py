@@ -5,7 +5,7 @@ import warnings
 
 from collections import defaultdict
 
-from torch.utils.data import IterDataPipe, functional_datapipe, DFIterDataPipe, DataChunk
+from torch.utils.data import IterDataPipe, functional_datapipe, DataChunk
 from typing import Any, Callable, Dict, Iterator, List, Optional, Sized, Tuple, TypeVar, DefaultDict
 
 T_co = TypeVar('T_co', covariant=True)
@@ -55,7 +55,7 @@ class BatcherIterDataPipe(IterDataPipe[DataChunk[T_co]]):
                  batch_size: int,
                  drop_last: bool = False,
                  unbatch_level: int = 0,
-                 wrapper_class = DataChunk,
+                 wrapper_class=DataChunk,
                  ) -> None:
         assert batch_size > 0, "Batch size is required to be larger than 0!"
         super().__init__()
@@ -67,7 +67,7 @@ class BatcherIterDataPipe(IterDataPipe[DataChunk[T_co]]):
         self.batch_size = batch_size
         self.drop_last = drop_last
         self.length = None
-        source_depth = getattr(datapipe,'_dp_nesting_depth',0)
+        source_depth = getattr(datapipe, '_dp_nesting_depth', 0)
         if source_depth is None:
             source_depth = 0
         self._dp_nesting_depth = source_depth + 1
