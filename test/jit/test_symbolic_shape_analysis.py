@@ -4,7 +4,6 @@ import operator
 
 from torch.testing import FileCheck
 
-from typing import List
 from textwrap import dedent
 
 if __name__ == '__main__':
