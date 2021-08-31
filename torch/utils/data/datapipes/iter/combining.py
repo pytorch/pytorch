@@ -1,8 +1,7 @@
-import functools
 import warnings
 
 from torch.utils.data import IterDataPipe, functional_datapipe
-from typing import Any, Iterator, Optional, Sized, Tuple, TypeVar, Deque
+from typing import Any, Callable, Iterator, List, Optional, Sized, Tuple, TypeVar, Deque
 from collections import deque
 
 T_co = TypeVar('T_co', covariant=True)
@@ -163,14 +162,93 @@ class _ChildDataPipe(IterDataPipe):
 
 @functional_datapipe('demux')
 class DemultiplexerIterDataPipe(IterDataPipe):
+    r""" :class:`DemultiplexerIterDataPipe`.
 
-    def __new__(cls, datapipe, instances, classifier_fn):
-        result = []
-        buffer = list(datapipe)
+        Iterable DataPipe to split the input DataPipe into multiple child DataPipes, using the given
+        classification function. A list of the child DataPipes is returned from this operation.
+        args:
+            datapipe: Iterable DataPipe being filtered
+            num_instances: number of instances of the DataPipe to create
+            classifier_fn: a function that maps values to an integer within the range [0, num_instances - 1] or None
+            drop_none: defaults to False, if True, the function will skip over elements classified as None
+            buffer_size: this defines the maximum number of inputs that the buffer can hold across all child
+                DataPipes while waiting for their values to be yielded
+    """
+    def __new__(cls, datapipe: IterDataPipe, num_instances: int,
+                classifier_fn: Callable[[T_co], int], drop_none: bool = False, buffer_size: int = 1000):
+        container = _DemultiplexerIterDataPipe(datapipe, num_instances, classifier_fn, drop_none, buffer_size)
+        return [_ChildDataPipe(container, i) for i in range(num_instances)]
 
-        def filter_fn(classifier_fn, i, x):
-            return classifier_fn(x) == i
-        return [IterateBuffer(buffer).filter(functools.partial(filter_fn, classifier_fn, i)) for i in range(instances)]
+
+class _DemultiplexerIterDataPipe(IterDataPipe):
+    r""" :class:`_DemultiplexerIterDataPipe`.
+
+        Container to hold instance-specific information on behalf of DemultiplexerIterDataPipe. It tracks
+        the state of its child DataPipes, maintains the buffer, classifies and yields the next correct value
+        as requested by the child DataPipes.
+    """
+
+    def __init__(self, datapipe: IterDataPipe[T_co], num_instances: int,
+                 classifier_fn: Callable[[T_co], int], drop_none: bool, buffer_size: int):
+        self.main_datapipe = datapipe
+        self._datapipe_iterator: Optional[Iterator[Any]] = None
+        self.num_instances = num_instances
+        self.max_buffer_size = buffer_size
+        self.current_buffer_usage = 0
+        self.child_buffers: List[Deque[T_co]] = [deque() for _ in range(num_instances)]
+        self.instance_started: List[bool] = [False] * num_instances
+        self.classifier_fn = classifier_fn
+        self.drop_none = drop_none
+        self.main_datapipe_exhausted = False
+
+    def _find_next(self, instance_id: int) -> T_co:
+        while True:
+            if self._datapipe_iterator is None:
+                raise ValueError("_datapipe_iterator has not been set, likely because this private method is called directly "
+                                 "without invoking get_next_element_by_instance() first.")
+            value = next(self._datapipe_iterator)
+            classification = self.classifier_fn(value)
+            if classification is None and self.drop_none:
+                continue
+            if classification is None or classification >= self.num_instances or classification < 0:
+                raise ValueError(f"Output of the classification fn should be between 0 and {self.num_instances - 1}. " +
+                                 f"{classification} is returned.")
+            if classification == instance_id:
+                return value
+            self.child_buffers[classification].append(value)
+            self.current_buffer_usage += 1
+            if self.current_buffer_usage > self.max_buffer_size:
+                raise BufferError(
+                    f"DemultiplexerIterDataPipe buffer overflow, buffer size {self.max_buffer_size} is insufficient.")
+
+    def get_next_element_by_instance(self, instance_id: int):
+        if self._datapipe_iterator is None:
+            self._datapipe_iterator = iter(self.main_datapipe)
+        stop = False
+        self.instance_started[instance_id] = True
+        while not stop:
+            if self.child_buffers[instance_id]:
+                self.current_buffer_usage -= 1
+                yield self.child_buffers[instance_id].popleft()
+            else:
+                try:
+                    yield self._find_next(instance_id)
+                except StopIteration:
+                    stop = True
+                    self.main_datapipe_exhausted = True
+
+    def is_instance_started(self, instance_id: int) -> bool:
+        return self.instance_started[instance_id]
+
+    def is_every_instance_exhausted(self) -> bool:
+        return self.main_datapipe_exhausted and all(not child_buffer for child_buffer in self.child_buffers)
+
+    def reset(self):
+        self._datapipe_iterator = iter(self.main_datapipe)
+        self.current_buffer_usage = 0
+        self.child_buffers = [deque() for _ in range(self.num_instances)]
+        self.instance_started = [False] * self.num_instances
+        self.main_datapipe_exhausted = False
 
 @functional_datapipe('mux')
 class MultiplexerIterDataPipe(IterDataPipe):
