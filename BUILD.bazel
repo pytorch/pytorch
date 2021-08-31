@@ -420,7 +420,6 @@ filegroup(
         "aten/src/THCUNN/SoftMarginCriterion.cu.cc",
         "aten/src/THCUNN/SoftPlus.cu.cc",
         "aten/src/THCUNN/SoftShrink.cu.cc",
-        "aten/src/THCUNN/SpatialConvolutionMM.cu.cc",
         "aten/src/THCUNN/Tanh.cu.cc",
     ],
 )

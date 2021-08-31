@@ -497,7 +497,7 @@ class TestJit(JitTestCase):
         FileCheck().check_not("aten::relu(") \
             .check("aten::_add_relu(") \
             .run(m.graph)
-        torch.testing.assert_allclose(orig_res, new_res)
+        torch.testing.assert_close(orig_res, new_res)
 
         # add, relu_
         a = torch.rand((7, 11))
@@ -516,7 +516,7 @@ class TestJit(JitTestCase):
         FileCheck().check_not("aten::relu_(") \
             .check("aten::_add_relu(") \
             .run(m.graph)
-        torch.testing.assert_allclose(orig_res, new_res)
+        torch.testing.assert_close(orig_res, new_res)
 
         class Madd_(torch.nn.Module):
             def __init__(self, relu_op):
@@ -547,10 +547,10 @@ class TestJit(JitTestCase):
             .check_not("aten::relu_(") \
             .check("aten::_add_relu_(") \
             .run(m.graph)
-        torch.testing.assert_allclose(orig_res, new_res)
+        torch.testing.assert_close(orig_res, new_res)
         # Since _add_relu_ does inplace mutation ensure
         # a_copy is modified
-        torch.testing.assert_allclose(orig_res, a_copy)
+        torch.testing.assert_close(orig_res, a_copy)
 
         class Madd_out(torch.nn.Module):
             def __init__(self, relu_op):
@@ -585,10 +585,10 @@ class TestJit(JitTestCase):
             .check_not("aten::relu_(") \
             .check("aten::_add_relu(") \
             .run(m.graph)
-        torch.testing.assert_allclose(orig_res, new_res)
+        torch.testing.assert_close(orig_res, new_res)
         # Since _add_relu_ with out=a does inplace mutation ensure
         # a_copy is modified
-        torch.testing.assert_allclose(orig_res, a_copy)
+        torch.testing.assert_close(orig_res, a_copy)
 
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "Simple executor doesn't have shape information")
     def test_peephole_optimize_shape_ops(self):
@@ -8888,7 +8888,7 @@ dedent """
     def test_pack_unpack_state(self):
         sm = TestScript.DerivedStateModule()
         x = torch.rand(3, 4, dtype=torch.float)
-        torch.testing.assert_allclose(sm(x), x + torch.neg(torch.ones(3, 4, dtype=torch.float)))
+        torch.testing.assert_close(sm(x), x + torch.neg(torch.ones(3, 4, dtype=torch.float)))
 
         # Test save path
         self.assertFalse(sm.pack_called.item())
@@ -8899,11 +8899,11 @@ dedent """
         # ensure unpack was called after serialization so as to leave the module in an initialized state
         self.assertTrue(sm.unpack_called.item())
 
-        torch.testing.assert_allclose(sm.derived, torch.neg(sm.param))
+        torch.testing.assert_close(sm.derived, torch.neg(sm.param))
 
         # Test load paths
         self.assertTrue(imported.unpack_called.item())
-        torch.testing.assert_allclose(imported(x), x + torch.neg(torch.ones(3, 4, dtype=torch.float)))
+        torch.testing.assert_close(imported(x), x + torch.neg(torch.ones(3, 4, dtype=torch.float)))
 
     @unittest.skipIf(not TEST_MKL, "PyTorch is built without MKL support")
     def test_torch_functional(self):
@@ -9101,11 +9101,11 @@ dedent """
                 return self.submod(x + self.buf)
 
         m = Mod()
-        torch.testing.assert_allclose(m(torch.zeros(3, 4)), torch.ones(3, 4) * 6)
+        torch.testing.assert_close(m(torch.zeros(3, 4)), torch.ones(3, 4) * 6)
         m.apply(lambda s: s._pack())
-        torch.testing.assert_allclose(m(torch.zeros(3, 4)), torch.zeros(3, 4))
+        torch.testing.assert_close(m(torch.zeros(3, 4)), torch.zeros(3, 4))
         m.apply(lambda s: s._unpack())
-        torch.testing.assert_allclose(m(torch.zeros(3, 4)), torch.ones(3, 4) * 6)
+        torch.testing.assert_close(m(torch.zeros(3, 4)), torch.ones(3, 4) * 6)
 
     def test_torch_any(self):
         def fn(x):
@@ -10774,6 +10774,68 @@ dedent """
         self.assertEqual(w.grad, w_ref.grad)
         self.assertEqual(b.grad, b_ref.grad)
 
+    @unittest.skipIf(not RUN_CUDA, "running tests on cuda to verify cudnn fix")
+    def test_batch_norm_inference_backward_cuda(self):
+        with enable_profiling_mode_for_profiling_tests():
+            class MyBatchNorm(torch.nn.Module):
+                def __init__(self, num_features, affine, track_running_stats):
+                    super(MyBatchNorm, self).__init__()
+                    self.bn = torch.nn.BatchNorm2d(
+                        num_features, 1e-5, affine=affine, track_running_stats=track_running_stats).float()
+
+                def forward(self, x: torch.Tensor):
+                    o = self.bn(x)
+                    o = torch.nn.functional.relu(o)
+                    return o
+
+            batch = 4
+            c = 2
+            hw = 3
+            # Initialize param and input values
+            x_init = torch.randn(batch, c, hw, hw, dtype=torch.float).cuda()
+            grad = torch.randn(batch, c, hw, hw, dtype=torch.float).cuda()
+
+            training = False
+            affine = True
+            track_running_stats = True
+
+            module = torch.jit.script(MyBatchNorm(c, affine, track_running_stats)).cuda()
+            ref_module = MyBatchNorm(c, affine, track_running_stats).cuda()
+            module.eval()
+            ref_module.eval()
+
+            jit_module = torch.jit.script(module)
+            ref_module.load_state_dict(module.state_dict())
+
+            x = x_init.detach().clone()
+            x.requires_grad_()
+            x_ref = x_init.detach().clone()
+            x_ref.requires_grad_()
+
+            # Test symbolic differentiation
+            # Run Forward and Backward thrice to trigger autodiff graph
+            for i in range(0, 3):
+                y = jit_module(x)
+                y.backward(grad)
+            x.grad.zero_()
+
+            module.bn.running_mean.zero_()
+            module.bn.running_var.fill_(1.0)
+            ref_module.bn.running_mean.zero_()
+            ref_module.bn.running_var.fill_(1.0)
+
+            # run jitted module
+            y = jit_module(x)
+            y.backward(grad)
+            # reference computation
+            y_ref = ref_module(x_ref)
+            y_ref.backward(grad)
+
+            self.assertEqual(y_ref, y)
+            self.assertEqual(x.grad, x_ref.grad)
+            self.assertEqual(module.bn.running_mean, ref_module.bn.running_mean)
+            self.assertEqual(module.bn.running_var, ref_module.bn.running_var)
+
     def test_zeros(self):
         class M(torch.jit.ScriptModule):
             __constants__ = ['d']
@@ -10958,7 +11020,7 @@ dedent """
         torch._C._jit_pass_remove_dropout(m._c)
         res = m(data)
         FileCheck().check_not("aten::dropout").run(str(m.graph))
-        torch.testing.assert_allclose(ref_res, res, rtol=1e-2, atol=1e-3)
+        torch.testing.assert_close(ref_res, res, rtol=1e-2, atol=1e-3)
 
     def test_unfold_zero_dim(self):
         def fn(x):

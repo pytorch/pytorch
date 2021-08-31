@@ -15,7 +15,7 @@ namespace at {
 namespace native {
 namespace {
 template <typename T, typename IndexType, int Dim, bool Order>
-C10_LAUNCH_BOUNDS_1(512)
+C10_LAUNCH_BOUNDS_1(1024)
 __global__ void gatherTopK(at::cuda::detail::TensorInfo<T, IndexType> input,
                            IndexType inputSliceSize,
                            IndexType outputSliceSize, // aka `k`
@@ -255,7 +255,7 @@ TORCH_IMPL_FUNC(topk_out_cuda)
     dim3 grid;                                                            \
     TORCH_INTERNAL_ASSERT(getGridFromTiles(inputSlices, grid), "Too many slices to sort"); \
                                                                           \
-    dim3 block(std::min(at::cuda::ATenCeilDiv(sliceSize, (int64_t) C10_WARP_SIZE)*(int64_t) C10_WARP_SIZE, (int64_t) 512)); \
+    dim3 block(std::min(at::cuda::ATenCeilDiv(sliceSize, (int64_t) C10_WARP_SIZE)*(int64_t) C10_WARP_SIZE, (int64_t) 1024)); \
                                                                           \
     /* This is used as a template parameter to calculate indices. */      \
     /* We only specialize it if all collapsed dim sizes are the */        \

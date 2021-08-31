@@ -88,7 +88,6 @@ case "$image" in
     DB=yes
     VISION=yes
     KATEX=yes
-    BREAKPAD=yes
     ;;
   pytorch-linux-xenial-py3.6-gcc7.2)
     ANACONDA_PYTHON_VERSION=3.6
@@ -101,7 +100,6 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    BREAKPAD=yes
     ;;
   pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7)
     CUDA_VERSION=10.2
@@ -112,7 +110,6 @@ case "$image" in
     DB=yes
     VISION=yes
     KATEX=yes
-    BREAKPAD=yes
     ;;
   pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7)
     CUDA_VERSION=11.1
@@ -123,7 +120,6 @@ case "$image" in
     DB=yes
     VISION=yes
     KATEX=yes
-    BREAKPAD=yes
     ;;
   pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7)
     CUDA_VERSION=11.3.0 # Deviating from major.minor to conform to nvidia's Docker image names
@@ -134,7 +130,6 @@ case "$image" in
     DB=yes
     VISION=yes
     KATEX=yes
-    BREAKPAD=yes
     ;;
   pytorch-linux-xenial-py3-clang5-asan)
     ANACONDA_PYTHON_VERSION=3.6
@@ -142,7 +137,6 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    BREAKPAD=yes
     ;;
   pytorch-linux-xenial-py3-clang7-asan)
     ANACONDA_PYTHON_VERSION=3.6
@@ -150,7 +144,6 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    BREAKPAD=yes
     ;;
   pytorch-linux-xenial-py3-clang7-onnx)
     ANACONDA_PYTHON_VERSION=3.6
@@ -158,7 +151,6 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    BREAKPAD=yes
     ;;
   pytorch-linux-xenial-py3-clang5-android-ndk-r19c)
     ANACONDA_PYTHON_VERSION=3.6
@@ -177,7 +169,6 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    BREAKPAD=yes
     ;;
   pytorch-linux-bionic-py3.6-clang9)
     ANACONDA_PYTHON_VERSION=3.6
@@ -185,7 +176,6 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    BREAKPAD=yes
     VULKAN_SDK_VERSION=1.2.162.1
     SWIFTSHADER=yes
     ;;
@@ -195,8 +185,6 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    BREAKPAD=yes
-    BREAKPAD=yes
     ;;
   pytorch-linux-bionic-cuda10.2-cudnn7-py3.6-clang9)
     CUDA_VERSION=10.2
@@ -206,7 +194,6 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    BREAKPAD=yes
     ;;
   pytorch-linux-bionic-cuda10.2-cudnn7-py3.9-gcc7)
     CUDA_VERSION=10.2
@@ -216,7 +203,6 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    BREAKPAD=yes
     ;;
   pytorch-linux-bionic-cuda11.0-cudnn8-py3.6-gcc9)
     CUDA_VERSION=11.0
@@ -226,7 +212,6 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    BREAKPAD=yes
     ROCM_VERSION=3.9
     ;;
   pytorch-linux-bionic-rocm4.0.1-py3.6)
@@ -235,7 +220,6 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    BREAKPAD=yes
     ROCM_VERSION=4.0.1
     ;;
   pytorch-linux-bionic-rocm4.1-py3.6)
@@ -244,7 +228,6 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    BREAKPAD=yes
     ROCM_VERSION=4.1
     ;;
   pytorch-linux-bionic-rocm4.2-py3.6)
@@ -253,7 +236,6 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    BREAKPAD=yes
     ROCM_VERSION=4.2
     ;;
   *)
@@ -261,7 +243,6 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    BREAKPAD=yes
     echo "image '$image' did not match an existing build configuration"
     if [[ "$image" == *py* ]]; then
       extract_version_from_image_name py ANACONDA_PYTHON_VERSION
@@ -325,7 +306,6 @@ docker build \
        --build-arg "GCC_VERSION=${GCC_VERSION}" \
        --build-arg "CUDA_VERSION=${CUDA_VERSION}" \
        --build-arg "CUDNN_VERSION=${CUDNN_VERSION}" \
-       --build-arg "BREAKPAD=${BREAKPAD}" \
        --build-arg "ANDROID=${ANDROID}" \
        --build-arg "ANDROID_NDK=${ANDROID_NDK_VERSION}" \
        --build-arg "GRADLE_VERSION=${GRADLE_VERSION}" \

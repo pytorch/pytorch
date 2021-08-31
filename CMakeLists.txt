@@ -202,6 +202,7 @@ cmake_dependent_option(
     "USE_CUDNN" OFF)
 option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" ON)
 option(USE_KINETO "Use Kineto profiling library" ON)
+option(USE_BREAKPAD "Use breakpad crash dump library" ON)
 option(USE_CUPTI_SO "Use CUPTI as a shared library" OFF)
 option(USE_FAKELOWP "Use FakeLowp operators" OFF)
 option(USE_FFMPEG "Use ffmpeg" OFF)
@@ -262,6 +263,10 @@ if(NOT DEFINED USE_VULKAN)
   cmake_dependent_option(
       USE_VULKAN "Use Vulkan GPU backend" ON
       "ANDROID" OFF)
+endif()
+
+if(IOS)
+  set(USE_BREAKPAD OFF)
 endif()
 
 option(USE_SOURCE_DEBUG_ON_MOBILE "Enable " ON)

@@ -322,7 +322,7 @@ static void sinc_kernel(TensorIteratorBase& iter) {
 }
 
 static void sinh_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "sinh_cpu", [&]() {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, iter.dtype(), "sinh_cpu", [&]() {
     cpu_kernel_vec(
         iter,
         [=](scalar_t a) -> scalar_t { return std::sinh(a); },
@@ -331,7 +331,7 @@ static void sinh_kernel(TensorIteratorBase& iter) {
 }
 
 static void cosh_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "cosh_cpu", [&]() {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, iter.dtype(), "cosh_cpu", [&]() {
     cpu_kernel_vec(
         iter,
         [=](scalar_t a) -> scalar_t { return std::cosh(a); },
@@ -407,7 +407,7 @@ static void nan_to_num_kernel(
     c10::optional<double> nan,
     c10::optional<double> pos_inf,
     c10::optional<double> neg_inf) {
-  AT_DISPATCH_FLOATING_TYPES_AND(kHalf, iter.dtype(), "nan_to_num", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "nan_to_num", [&]() {
     scalar_t nan_replacement = static_cast<scalar_t>(nan.value_or(0.));
     scalar_t pos_inf_replacement = pos_inf.has_value()
         ? static_cast<scalar_t>(pos_inf.value())
@@ -586,7 +586,7 @@ static void entr_kernel(TensorIteratorBase& iter) {
 }
 
 static void frexp_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND(kHalf,
+  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf,
     // The iter.dtype() here is the dtype of mantissa output.
     // It's a floating point type and must be the same as the input's dtype.
     iter.dtype(),
