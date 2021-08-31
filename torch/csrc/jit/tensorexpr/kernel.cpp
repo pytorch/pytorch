@@ -52,7 +52,7 @@ static ExprHandle promoteToDtype(ExprHandle e, ScalarType dt) {
   case ScalarType::Name:      \
     e = cast<Type>(e);        \
     break;
-    AT_FORALL_SCALAR_TYPES_AND2(Half, Bool, TYPE_CASE);
+    AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
 #undef TYPE_CASE
     default:
       throw unsupported_dtype();
@@ -520,7 +520,7 @@ ExprHandle demoteOutput(
 #define TYPE_CASE(Type, Name) \
   case ScalarType::Name:      \
     return cast<Type>(e);
-    AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
+    AT_FORALL_SCALAR_TYPES_AND2(Half, BFloat16, TYPE_CASE);
 #undef TYPE_CASE
     case ScalarType::Bool:
       return cast<bool>(e);
