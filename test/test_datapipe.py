@@ -65,6 +65,13 @@ except ImportError:
     HAS_DILL = False
 skipIfNoDill = skipIf(not HAS_DILL, "no dill")
 
+try:
+    import pandas  # noqa
+    HAS_PANDAS = True
+except ImportError:
+    HAS_PANDAS = False
+skipIfNoDataFrames = skipIf(not HAS_PANDAS, "no dataframes (pandas)")
+
 T_co = TypeVar("T_co", covariant=True)
 
 
@@ -356,13 +363,14 @@ class TestDataFramesPipes(TestCase):
                 columns=['i', 'j'],
                 dataframe_size=dataframe_size)
 
+    @skipIfNoDataFrames
     def test_capture(self):
         dp_numbers = self._get_datapipe().map(lambda x: (x[0], x[1], x[1] + 3 * x[0]))
         df_numbers = self._get_dataframes_pipe()
         df_numbers['k'] = df_numbers['j'] + df_numbers.i * 3
         self.assertEqual(list(dp_numbers), list(df_numbers))
-        pass
 
+    @skipIfNoDataFrames
     def test_shuffle(self):
         #  With non-zero (but extremely low) probability (when shuffle do nothing),
         #  this test fails, so feel free to restart
@@ -372,6 +380,7 @@ class TestDataFramesPipes(TestCase):
         self.assertNotEqual(list(dp_numbers), df_result)
         self.assertEqual(list(dp_numbers), sorted(df_result))
 
+    @skipIfNoDataFrames
     def test_batch(self):
         df_numbers = self._get_dataframes_pipe(range=100).batch(8)
         df_numbers_list = list(df_numbers)
@@ -380,11 +389,13 @@ class TestDataFramesPipes(TestCase):
         unpacked_batch = [tuple(row) for row in last_batch]
         self.assertEqual([(96, 0), (97, 1), (98, 2), (99, 0)], unpacked_batch)
 
+    @skipIfNoDataFrames
     def test_unbatch(self):
         df_numbers = self._get_dataframes_pipe(range=100).batch(8).batch(3)
         dp_numbers = self._get_datapipe(range=100)
         self.assertEqual(list(dp_numbers), list(df_numbers.unbatch(2)))
 
+    @skipIfNoDataFrames
     def test_filter(self):
         df_numbers = self._get_dataframes_pipe(range=10).filter(lambda x: x.i > 5)
         self.assertEqual([(6, 0), (7, 1), (8, 2), (9, 0)], list(df_numbers))
