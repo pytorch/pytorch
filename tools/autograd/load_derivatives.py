@@ -409,12 +409,11 @@ def create_differentiability_info(
     derivatives, forward_derivatives, args_with_derivatives, non_differentiable_arg_names = set_up_derivatives(canonical)
 
     # only assign an op name if we are actually going to calculate a derivative
+    op = None
     if args_with_derivatives:
         op_prefix = _create_op_prefix(defn_name)
         op = f'{op_prefix}{op_prefixes[op_prefix]}'
         op_prefixes[op_prefix] += 1
-    else:
-        op = None
 
     return DifferentiabilityInfo(
         name=defn_name,
