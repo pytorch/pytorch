@@ -7,6 +7,7 @@ import torch.fx as fx
 from functools import partial
 import os
 import torch.utils._pytree as pytree
+import torch.utils.dlpack
 
 def partition_backwards(fx_module: fx.GraphModule):
     bw_nodes = set()
@@ -90,7 +91,7 @@ def tvm_compile(fx_module, example_inputs, name = None):
         tuner = auto_scheduler.TaskScheduler(tasks, task_weights)
         if not os.path.exists(log_file):
             tune_option = auto_scheduler.TuningOptions(
-                num_measure_trials=100,  # change this to 20000 to achieve the best performance
+                num_measure_trials=10000,  # change this to 20000 to achieve the best performance
                 measure_callbacks=[auto_scheduler.RecordToFile(log_file)],
                 # early_stopping=1000,
                 # verbose=2,
@@ -104,12 +105,12 @@ def tvm_compile(fx_module, example_inputs, name = None):
     dtype = "float32"
     m = graph_executor.GraphModule(lib["default"](dev))
     def exec_tvm(*args):
-        begin = time.time()
         for idx, arg in enumerate(args, 0):
             if arg.dim() != 0:
-                m.set_input(f"inp_{idx}", arg)
+
+                m.set_input(f"inp_{idx}", tvm.nd.from_dlpack(torch.utils.dlpack.to_dlpack(arg)))
         m.run()
-        outs = [torch.from_numpy(m.get_output(i).numpy()) for i in range(m.get_num_outputs())]
+        outs = [torch.utils.dlpack.from_dlpack(m.get_output(i).to_dlpack()) for i in range(m.get_num_outputs())]
         return outs
     return exec_tvm
 
@@ -141,8 +142,8 @@ def compiled_function(fn, fw_compiler, bw_compiler):
                         out = flat_fn(*args)
                         with torch.enable_grad():
                             fx_g = make_fx(vjpfull)(args, (torch.randn_like(out),))
-                        print(fx_g)
                         fw_module, bw_module = partition_backwards(fx_g)
+                        print(fw_module, bw_module)
 
                         compiled_fw = fw_compiler(fw_module, args)
                         fw_outs = compiled_fw(*fw_module.graph.flatten_inps(args))
