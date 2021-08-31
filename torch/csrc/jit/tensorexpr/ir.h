@@ -178,6 +178,12 @@ class BinaryOpNode : public ExprNode<Op> {
   ExprPtr rhs_;
 };
 
+namespace detail {
+template <typename T>
+void bin_op_deducer(BinaryOpNode<T>);
+bool bin_op_deducer(...);
+} // namespace detail
+
 class TORCH_API Add : public BinaryOpNode<Add> {
  public:
   Add(ExprPtr lhs, ExprPtr rhs) : BinaryOpNode(lhs, rhs, IRNodeType::kAdd) {}
@@ -336,6 +342,30 @@ ExprPtr getImmediateByType(ScalarType immType, T initialVal) {
 template <typename T>
 ExprPtr getImmediateByType(Dtype dtype, T initialVal) {
   return getImmediateByType<T>(dtype.scalar_type(), initialVal);
+}
+
+template <typename T>
+ExprPtr immLike(ExprPtr e, T v) {
+  return getImmediateByType<T>(e->dtype(), v);
+}
+
+template <typename T>
+ExprPtr immLike(ExprHandle e, T v) {
+  return immLike(e.node(), v);
+}
+
+inline c10::optional<int64_t> intValue(ExprPtr e) {
+#define TYPE_CASE(Type, Name)      \
+  if (auto v = to<Name##Imm>(e)) { \
+    return v->value();             \
+  }
+  AT_FORALL_INT_TYPES(TYPE_CASE);
+#undef TYPE_CASE
+  return c10::nullopt;
+}
+
+inline c10::optional<int64_t> intValue(ExprHandle e) {
+  return intValue(e.node());
 }
 
 template <typename T>
@@ -678,6 +708,7 @@ enum IntrinsicsOp {
   kFrac,
   kIsNan,
   kRand, // We need more discussions on this. Should we consider stateful?
+  kMaxIntrinsicsOp,
 };
 
 class TORCH_API Intrinsics : public ExprNode<Intrinsics> {
@@ -858,8 +889,9 @@ class TORCH_API Intrinsics : public ExprNode<Intrinsics> {
     params_ = std::move(params);
   }
 
- private:
   static int OpArgCount(IntrinsicsOp op_type);
+
+ private:
   static Dtype IntrinsicsDtype(IntrinsicsOp op_type, Dtype dt1);
   static Dtype IntrinsicsDtype(IntrinsicsOp op_type, Dtype dt1, Dtype dt2);
   static Dtype IntrinsicsDtype(

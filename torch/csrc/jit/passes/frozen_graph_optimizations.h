@@ -13,6 +13,10 @@
 namespace torch {
 namespace jit {
 
+bool nonConstantParameters(Node* n);
+// Checks if the parameters, not including the
+// first param are all constants.
+
 TORCH_API void OptimizeFrozenGraph(
     std::shared_ptr<Graph>& graph,
     bool optimize_numerics = true);
