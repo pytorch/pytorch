@@ -30,26 +30,27 @@ class ShardingFilterIterDataPipe(IterDataPipe):
 
 
 @functional_datapipe('batch')
-class BatcherIterDataPipe(IterDataPipe[DataChunk[T_co]]):
+class BatcherIterDataPipe(IterDataPipe[DataChunk]):
     r""" :class:`BatcherIterDataPipe`.
 
     Iterable DataPipe to create mini-batches of data. An outer dimension will be added as
     `batch_size` if `drop_last` is set to `True`, or `length % batch_size` for the
     last batch if `drop_last` is set to `False`.
-    args:
+
+    Args:
         datapipe: Iterable DataPipe being batched
         batch_size: The size of each batch
         drop_last: Option to drop the last batch if it's not full
         unbatch_level: Specifies if it necessary to unbatch source data before
             applying new batching rule
     """
-    datapipe: IterDataPipe[T_co]
+    datapipe: IterDataPipe
     batch_size: int
     drop_last: bool
     length: Optional[int]
 
     def __init__(self,
-                 datapipe: IterDataPipe[T_co],
+                 datapipe: IterDataPipe,
                  batch_size: int,
                  drop_last: bool = False,
                  unbatch_level: int = 0,
@@ -66,8 +67,8 @@ class BatcherIterDataPipe(IterDataPipe[DataChunk[T_co]]):
         self.length = None
         self.wrapper_class = DataChunk
 
-    def __iter__(self) -> Iterator[DataChunk[T_co]]:
-        batch: List[T_co] = []
+    def __iter__(self) -> Iterator[DataChunk]:
+        batch: List = []
         for x in self.datapipe:
             batch.append(x)
             if len(batch) == self.batch_size:
@@ -96,13 +97,16 @@ class UnBatcherIterDataPipe(IterDataPipe):
 
     Iterable DataPipe to undo batching of data. In other words, it flattens the data up to the specified level
     within a batched DataPipe.
-    args:
+
+    Args:
         datapipe: Iterable DataPipe being un-batched
         unbatch_level: Defaults to `1` (only flattening the top level). If set to `2`, it will flatten the top 2 levels,
-        and `-1` will flatten the entire DataPipe.
+            and `-1` will flatten the entire DataPipe.
     """
 
-    def __init__(self, datapipe, unbatch_level: int = 1):
+    def __init__(self,
+                 datapipe: IterDataPipe,
+                 unbatch_level: int = 1):
         self.datapipe = datapipe
         self.unbatch_level = unbatch_level
 
@@ -143,7 +147,8 @@ class BucketBatcherIterDataPipe(IterDataPipe[DataChunk[T_co]]):
     Iterable DataPipe to create mini-batches of data from sorted bucket. An outer
     dimension will be added as `batch_size` if `drop_last` is set to `True`,
     or `length % batch_size` for the last batch if `drop_last` is set to `False`.
-        args:
+
+    Args:
         datapipe: Iterable DataPipe being batched
         batch_size: The size of each batch
         drop_last: Option to drop the last batch if it's not full
@@ -224,8 +229,21 @@ class BucketBatcherIterDataPipe(IterDataPipe[DataChunk[T_co]]):
 
 
 @functional_datapipe('groupby')
-class GrouperIterDataPipe(IterDataPipe):
-    # TODO(VtalyFedyunin): Add inline docs and tests (they are partially available in notebooks)
+class GrouperIterDataPipe(IterDataPipe[DataChunk]):
+    r""":class:`GrouperIterDataPipe`.
+
+    Iterable datapipe to group data from input IterDataPipe by keys which are generated from `group_key_fn`,
+    and yield a DataChunk with size ranging from `guaranteed_group_size` to `group_size`.
+
+    Args:
+        datapipe: Iterable datapipe to be grouped
+        group_key_fn: Function used to generate group key from the data of the source datapipe
+        buffer_size: The size of buffer for ungrouped data
+        group_size: The size of each group
+        unbatch_level: Specifies if it necessary to unbatch source data before grouping
+        guaranteed_group_size: The guaranteed minimum group size
+        drop_remaining: Specifies if the group smaller than `guaranteed_group_size` will be dropped from buffer
+    """
     def __init__(self,
                  datapipe: IterDataPipe[T_co],
                  group_key_fn: Callable,
