@@ -326,7 +326,9 @@ c10::optional<Assign> SourceImporterImpl::
        {"_packed_params",
         "Tensor",
         "__torch__.torch.classes.quantized.Conv3dPackedParamsBase"}}};
+  // NOLINTNEXTLINE
   static std::regex mangle_re("\\.___torch_mangle_\\d+");
+  // NOLINTNEXTLINE
   auto demangled_classname =
       std::regex_replace(qualified_classname.qualifiedName(), mangle_re, "");
   if (replacements.count(demangled_classname)) {
