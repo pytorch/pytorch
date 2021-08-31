@@ -19,7 +19,7 @@ def graph_pool_handle():
     Returns an opaque token representing the id of a graph memory pool.
     See :ref:`Graph memory management<graph-memory-management>`.
 
-    .. warning
+    .. warning::
         This API is a prototype and may change in future releases.
     """
     return _graph_pool_handle()
@@ -30,7 +30,7 @@ class CUDAGraph(torch._C._CUDAGraph):
     r"""
     Wrapper around a CUDA graph.
 
-    .. warning
+    .. warning::
         This API is a prototype and may change in future releases.
     """
     def __new__(cls):
@@ -111,7 +111,7 @@ class graph(object):
         For effective memory sharing, if you pass a ``pool`` used by a previous capture and the previous capture
         used an explicit ``stream`` argument, you should pass the same ``stream`` argument to this capture.
 
-    .. warning
+    .. warning::
         This API is a prototype and may change in future releases.
     """
     default_capture_stream = None
@@ -184,7 +184,7 @@ def make_graphed_callables(callables, sample_args):
         The ``requires_grad`` state of each Tensor in ``sample_args`` must match the state
         that's expected for the corresponding real input in the training loop.
 
-    .. warning
+    .. warning::
         This API is a prototype and may change in future releases.
 
     .. warning::
@@ -196,7 +196,7 @@ def make_graphed_callables(callables, sample_args):
 
     .. warning::
         In any :class:`~torch.nn.Module` passed to :func:`~make_graphed_callables`, only parameters
-        may be trainable. All buffers must have ``requires_grad=False``.
+        may be trainable. Buffers must have ``requires_grad=False``.
 
     .. warning::
         After you pass a :class:`torch.nn.Module` through :func:`~make_graphed_callables`,
