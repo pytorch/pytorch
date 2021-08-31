@@ -1,4 +1,4 @@
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List
 
 from torch.utils.data import (
     DFIterDataPipe,
@@ -26,7 +26,7 @@ DATAPIPES_OPS = ['dataframes_as_tuples', 'groupby', 'dataframes_filter', 'map', 
 
 class Capture(object):
     # All operations are shared across entire InitialCapture, need to figure out what if we join two captures
-    ctx: Optional[Dict[Any, Any]] = None
+    ctx: Dict[str, List[Any]]
 
     def __init__(self):
         self.ctx = {'operations': [], 'variables': []}
@@ -171,7 +171,7 @@ class CaptureVariable(Capture):
 class CaptureInitial(CaptureVariable):
 
     def __init__(self):
-        new_ctx = {'operations': [], 'variables': []}
+        new_ctx: Dict[str, List[Any]] = {'operations': [], 'variables': []}
         super().__init__(None, new_ctx)
         self.name = 'input_%s' % self.name
 
@@ -261,7 +261,7 @@ class CaptureSub(Capture):
 
 class CaptureGetAttr(Capture):
     source = None
-    name = None
+    name: str
 
     def __init__(self, src, name, ctx):
         self.ctx = ctx
