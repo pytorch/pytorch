@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
+#include <torch/csrc/jit/tensorexpr/operators/operators.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 #include <torch/torch.h>
 
@@ -55,24 +56,15 @@ class SignedLog1pBench : public benchmark::Fixture {
         [&](const VarHandle& m, const VarHandle& n) {
           return log1p(abs_result.load(m, n));
         });
-    Tensor sign = Compute(
-        "aten_sign",
-        {{input_size_int_[0], "M"}, {input_size_int_[1], "N"}},
-        [&](const VarHandle& m, const VarHandle& n) {
-          return CompareSelect::make(
-              input_ph.load(m, n),
-              ExprHandle(0.0f),
-              ExprHandle(-1),
-              ExprHandle(1),
-              kLT);
-        });
+    Tensor sign_result = computeSign(
+        {input_ph.handle()}, {input_size_int_[0], input_size_int_[1]});
     Tensor output = Compute(
         "aten_mul",
         {{input_size_int_[0], "M"}, {input_size_int_[1], "N"}},
         [&](const VarHandle& m, const VarHandle& n) {
-          return sign.load(m, n) * log1p_result.load(m, n);
+          return sign_result.load(m, n) * log1p_result.load(m, n);
         });
-    LoopNest nest({output}, {abs_result, log1p_result, sign, output});
+    LoopNest nest({output}, {abs_result, log1p_result, sign_result, output});
     GRAPH_DEBUG("Original Stmt: ", *nest.root_stmt());
     nest.inlineIntermediateBufs(true);
     nest.prepareForCodegen();
@@ -112,24 +104,15 @@ class SignedLog1pBench : public benchmark::Fixture {
         [&](const VarHandle& m, const VarHandle& n) {
           return log_vml(abs_result.load(m, n) + ExprHandle(1));
         });
-    Tensor sign = Compute(
-        "aten_sign",
-        {{input_size_int_[0], "M"}, {input_size_int_[1], "N"}},
-        [&](const VarHandle& m, const VarHandle& n) {
-          return CompareSelect::make(
-              input_ph.load(m, n),
-              ExprHandle(0.0f),
-              ExprHandle(-1),
-              ExprHandle(1),
-              kLT);
-        });
+    Tensor sign_result = computeSign(
+        {input_ph.handle()}, {input_size_int_[0], input_size_int_[1]});
     Tensor output = Compute(
         "aten_mul",
         {{input_size_int_[0], "M"}, {input_size_int_[1], "N"}},
         [&](const VarHandle& m, const VarHandle& n) {
-          return sign.load(m, n) * log_vml_result.load(m, n);
+          return sign_result.load(m, n) * log_vml_result.load(m, n);
         });
-    LoopNest nest({output}, {abs_result, log_vml_result, sign, output});
+    LoopNest nest({output}, {abs_result, log_vml_result, sign_result, output});
     GRAPH_DEBUG("Original Stmt: ", *nest.root_stmt());
     nest.inlineIntermediateBufs(true);
     nest.prepareForCodegen();

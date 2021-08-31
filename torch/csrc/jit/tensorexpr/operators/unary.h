@@ -6,7 +6,7 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
-Tensor computeSign(
+TORCH_API Tensor computeSign(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape);
 
