@@ -208,6 +208,9 @@ def discover_tests(
     cwd = pathlib.Path(__file__).resolve().parent
     all_py_files = list(cwd.glob('**/test_*.py'))
     rc = [str(fname.relative_to(cwd))[:-3] for fname in all_py_files]
+    # Invert slashes on Windows
+    if sys.platform == "win32":
+        rc = [name.replace('\\', '/') for name in rc]
     rc = [test for test in rc if not skip_test_p(test)]
     if extra_tests is not None:
         rc += extra_tests
