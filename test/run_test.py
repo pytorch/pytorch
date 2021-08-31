@@ -191,73 +191,82 @@ OLD_TESTS = [
 ]
 
 def discover_tests(
-        blocklisted_patterns: List[str] = [],
-        blocklisted_tests: List[str] = [],
-        extra_tests: List[str] = []) -> List[str]:
+        blocklisted_patterns: Optional[List[str]] = None,
+        blocklisted_tests: Optional[List[str]] = None,
+        extra_tests: Optional[List[str]] = None) -> List[str]:
     """
     Searches for all python files starting with test_ excluding one specified by patterns
     """
+    def skip_test_p(name: str) -> bool:
+        rc = False
+        if blocklisted_patterns is not None:
+            rc |= any(name.startswith(pattern) for pattern in blocklisted_patterns)
+        if blocklisted_tests is not None:
+            rc |= name in blocklisted_tests
+        return rc
+
     cwd = pathlib.Path(__file__).resolve().parent
     all_py_files = list(cwd.glob('**/test_*.py'))
     rc = [str(fname.relative_to(cwd))[:-3] for fname in all_py_files]
-    def skip_test_p(name: str) -> bool:
-        return any(name.startswith(pattern) for pattern in blocklisted_patterns) or name in blocklisted_tests
-    return sorted([test for test in rc if not skip_test_p(test)] + extra_tests)
+    rc = [test for test in rc if not skip_test_p(test)]
+    if extra_tests is not None:
+        rc += extra_tests
+    return sorted(rc)
 
 
 TESTS = discover_tests(
-        blocklisted_patterns = [
-            'ao',
-            'bottleneck_test',
-            'custom_backend',
-            'custom_operator',
-            'fx',        # executed by test_fx.py
-            'jit',      # executed by test_jit.py
-            'mobile',
-            'onnx',
-            'package',  # executed by test_package.py
-            'quantization',  # executed by test_quantization.py
-            ],
-        blocklisted_tests = [
-            'test_bundled_images',
-            'test_cpp_extensions_aot',
-            'test_gen_backend_stubs',
-            'test_jit_fuser',
-            'test_jit_simple',
-            'test_jit_string',
-            'test_kernel_launch_checks',
-            'test_metal',
-            'test_nnapi',
-            'test_segment_reductions',
-            'test_static_runtime',
-            'test_throughput_benchmark',
-            'test_typing',
-            "distributed/algorithms/ddp_comm_hooks/test_ddp_hooks",
-            "distributed/algorithms/quantization/test_quantization",
-            "distributed/bin/test_script",
-            "distributed/elastic/multiprocessing/bin/test_script",
-            "distributed/launcher/bin/test_script",
-            "distributed/launcher/bin/test_script_init_method",
-            "distributed/launcher/bin/test_script_is_torchelastic_launched",
-            "distributed/launcher/bin/test_script_local_rank",
-            "distributed/test_c10d_spawn",
-            'distributions/test_transforms',
-            'distributions/test_utils',
-            ],
-        extra_tests = [
-            "test_cpp_extensions_aot_ninja",
-            "test_cpp_extensions_aot_no_ninja",
-            "distributed/elastic/timer/api_test",
-            "distributed/elastic/timer/local_timer_example",
-            "distributed/elastic/timer/local_timer_test",
-            "distributed/elastic/events/lib_test",
-            "distributed/elastic/metrics/api_test",
-            "distributed/elastic/utils/logging_test",
-            "distributed/elastic/utils/util_test",
-            "distributed/elastic/utils/distributed_test",
-            "distributed/elastic/multiprocessing/api_test",
-            ]
-        )
+    blocklisted_patterns=[
+        'ao',
+        'bottleneck_test',
+        'custom_backend',
+        'custom_operator',
+        'fx',        # executed by test_fx.py
+        'jit',      # executed by test_jit.py
+        'mobile',
+        'onnx',
+        'package',  # executed by test_package.py
+        'quantization',  # executed by test_quantization.py
+    ],
+    blocklisted_tests=[
+        'test_bundled_images',
+        'test_cpp_extensions_aot',
+        'test_gen_backend_stubs',
+        'test_jit_fuser',
+        'test_jit_simple',
+        'test_jit_string',
+        'test_kernel_launch_checks',
+        'test_metal',
+        'test_nnapi',
+        'test_segment_reductions',
+        'test_static_runtime',
+        'test_throughput_benchmark',
+        'test_typing',
+        "distributed/algorithms/ddp_comm_hooks/test_ddp_hooks",
+        "distributed/algorithms/quantization/test_quantization",
+        "distributed/bin/test_script",
+        "distributed/elastic/multiprocessing/bin/test_script",
+        "distributed/launcher/bin/test_script",
+        "distributed/launcher/bin/test_script_init_method",
+        "distributed/launcher/bin/test_script_is_torchelastic_launched",
+        "distributed/launcher/bin/test_script_local_rank",
+        "distributed/test_c10d_spawn",
+        'distributions/test_transforms',
+        'distributions/test_utils',
+    ],
+    extra_tests=[
+        "test_cpp_extensions_aot_ninja",
+        "test_cpp_extensions_aot_no_ninja",
+        "distributed/elastic/timer/api_test",
+        "distributed/elastic/timer/local_timer_example",
+        "distributed/elastic/timer/local_timer_test",
+        "distributed/elastic/events/lib_test",
+        "distributed/elastic/metrics/api_test",
+        "distributed/elastic/utils/logging_test",
+        "distributed/elastic/utils/util_test",
+        "distributed/elastic/utils/distributed_test",
+        "distributed/elastic/multiprocessing/api_test",
+    ]
+)
 
 # Tests need to be run with pytest.
 USE_PYTEST_LIST = [
