@@ -9,10 +9,11 @@
 #include <c10/util/TypeList.h>
 #include <c10/util/Optional.h>
 
-#include <iostream>
-#include <memory>
-#include <type_traits>
 #include <array>
+#include <memory>
+#include <ostream>
+#include <sstream>
+#include <type_traits>
 
 struct ClassType;
 namespace torch {
@@ -1869,7 +1870,7 @@ struct TORCH_API ClassAttribute {
  * User Defined Types
  */
 
-struct TORCH_API ClassType;
+struct ClassType;
 using ClassTypePtr = std::shared_ptr<ClassType>;
 using ::torch::jit::CompilationUnit;
 

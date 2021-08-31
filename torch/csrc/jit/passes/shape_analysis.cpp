@@ -41,7 +41,6 @@ bool mergeTypes(
   return changed;
 }
 
-
 namespace prim {
 using namespace ::c10::prim;
 }

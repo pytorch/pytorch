@@ -35,8 +35,15 @@ void Term::sort() {
   if (dtype().is_floating_point()) {
     throw std::logic_error("reordering FP ops");
   }
+  std::unordered_map<ExprPtr, std::string> str_repr_cache;
   std::sort(variables_.begin(), variables_.end(), [&](ExprPtr a, ExprPtr b) {
-    return hasher_.hash(a) < hasher_.hash(b);
+    if (!str_repr_cache.count(a)) {
+      str_repr_cache[a] = std::to_string(a);
+    }
+    if (!str_repr_cache.count(b)) {
+      str_repr_cache[b] = std::to_string(b);
+    }
+    return str_repr_cache.at(a) < str_repr_cache.at(b);
   });
 }
 
@@ -52,8 +59,15 @@ void Polynomial::sort() {
   if (dtype().is_floating_point()) {
     throw std::logic_error("reordering FP ops");
   }
+  std::unordered_map<ExprPtr, std::string> str_repr_cache;
   std::sort(variables_.begin(), variables_.end(), [&](ExprPtr a, ExprPtr b) {
-    return hasher_.hash(a) < hasher_.hash(b);
+    if (!str_repr_cache.count(a)) {
+      str_repr_cache[a] = std::to_string(a);
+    }
+    if (!str_repr_cache.count(b)) {
+      str_repr_cache[b] = std::to_string(b);
+    }
+    return str_repr_cache.at(a) < str_repr_cache.at(b);
   });
 }
 
@@ -66,6 +80,18 @@ void MaxTerm::uniquefy() {
         return hasher_.hash(a) == hasher_.hash(b);
       });
   variables_.resize(std::distance(variables_.begin(), it));
+
+  // Once we removed duplicates, sort terms alphabetically for stability.
+  std::unordered_map<ExprPtr, std::string> str_repr_cache;
+  std::sort(variables_.begin(), variables_.end(), [&](ExprPtr a, ExprPtr b) {
+    if (!str_repr_cache.count(a)) {
+      str_repr_cache[a] = std::to_string(a);
+    }
+    if (!str_repr_cache.count(b)) {
+      str_repr_cache[b] = std::to_string(b);
+    }
+    return str_repr_cache.at(a) < str_repr_cache.at(b);
+  });
 }
 
 void MinTerm::uniquefy() {
@@ -77,6 +103,18 @@ void MinTerm::uniquefy() {
         return hasher_.hash(a) == hasher_.hash(b);
       });
   variables_.resize(std::distance(variables_.begin(), it));
+
+  // Once we removed duplicates, sort terms alphabetically for stability.
+  std::unordered_map<ExprPtr, std::string> str_repr_cache;
+  std::sort(variables_.begin(), variables_.end(), [&](ExprPtr a, ExprPtr b) {
+    if (!str_repr_cache.count(a)) {
+      str_repr_cache[a] = std::to_string(a);
+    }
+    if (!str_repr_cache.count(b)) {
+      str_repr_cache[b] = std::to_string(b);
+    }
+    return str_repr_cache.at(a) < str_repr_cache.at(b);
+  });
 }
 
 // Handles optimization cases for Broadcast/Ramp +/- Broadcast/Ramp
@@ -2076,8 +2114,20 @@ ExprPtr TermExpander::mutate(PolynomialPtr v) {
   std::vector<TermPtr> addTerms;
   std::vector<TermPtr> subTerms;
 
+  auto vars = v->variables();
+  std::unordered_map<ExprPtr, std::string> str_repr_cache;
+  std::sort(vars.begin(), vars.end(), [&](ExprPtr a, ExprPtr b) {
+    if (!str_repr_cache.count(a)) {
+      str_repr_cache[a] = std::to_string(a);
+    }
+    if (!str_repr_cache.count(b)) {
+      str_repr_cache[b] = std::to_string(b);
+    }
+    return str_repr_cache.at(a) < str_repr_cache.at(b);
+  });
+
   // partition the terms into a list to add and list to subtract.
-  for (auto node : v->variables()) {
+  for (auto node : vars) {
     if (immediateIsNegative(node->scalar())) {
       subTerms.push_back(node);
     } else if (!immediateEquals(node->scalar(), 0)) {
@@ -2820,6 +2870,49 @@ bool exprEquals(ExprPtr A, ExprPtr B) {
   } catch (std::exception& e) {
     return false;
   }
+}
+
+ExprPtr IRSimplifier::simplify(ExprPtr e) {
+  GRAPH_DEBUG("(Simplifier) Original: ", std::to_string(e));
+  SimplifierUnderContext ctxsimplifier;
+  e = e->accept_mutator(&ctxsimplifier);
+
+  PolynomialTransformer simplifier;
+  e = e->accept_mutator(&simplifier);
+
+  // There may be terms left in the IR, expand them.
+  TermExpander expander(&simplifier);
+  e = e->accept_mutator(&expander);
+  // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
+  if (!expander.check_safe()) {
+    throw malformed_input("eliminated null Allocation without free");
+  }
+
+  GRAPH_DEBUG("(Simplifier) Simplified: ", std::to_string(e));
+  return e;
+}
+
+StmtPtr IRSimplifier::simplify(StmtPtr s) {
+  GRAPH_DEBUG("(Simplifier) Original: ", std::to_string(s));
+  SimplifierUnderContext ctxsimplifier;
+  s = s->accept_mutator(&ctxsimplifier);
+
+  PolynomialTransformer simplifier;
+  s = s->accept_mutator(&simplifier);
+  if (s == nullptr) {
+    GRAPH_DEBUG("(Simplifier) Simplified: NULL");
+    return nullptr;
+  }
+
+  // There may be terms left in the IR, expand them.
+  TermExpander expander(&simplifier);
+  s = s->accept_mutator(&expander);
+  if (!expander.check_safe()) {
+    throw malformed_input("eliminated null Allocation without free");
+  }
+
+  GRAPH_DEBUG("(Simplifier) Simplified: ", std::to_string(s));
+  return s;
 }
 
 } // namespace tensorexpr

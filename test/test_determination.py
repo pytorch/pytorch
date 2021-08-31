@@ -16,7 +16,6 @@ class DeterminationTest(unittest.TestCase):
         "test_jit_profiling",
         "test_jit",
         "test_torch",
-        "distributed/test_distributed_fork",
         "distributed/test_distributed_spawn",
         "test_cpp_extensions_aot_ninja",
         "test_cpp_extensions_aot_no_ninja",
@@ -104,7 +103,6 @@ class DeterminationTest(unittest.TestCase):
         self.assertEqual(
             self.determined_tests(["torch/utils/cpp_extension.py"]),
             [
-                "distributed/test_distributed_fork",
                 "test_cpp_extensions_aot_ninja",
                 "test_cpp_extensions_aot_no_ninja",
                 "test_utils",

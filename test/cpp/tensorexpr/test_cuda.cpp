@@ -1575,10 +1575,10 @@ TEST(Cuda, MaskMultiDim_CUDA) {
   const std::string& verification_pattern =
       R"IR(
 # CHECK-NOT: if (
-# CHECK: C[100 * blockIdx.x + threadIdx.x] =
+# CHECK: C[threadIdx.x + 100 * blockIdx.x] =
 # CHECK: __syncthreads();
 # CHECK: if (threadIdx.x<50
-# CHECK:   D[50 * blockIdx.x + threadIdx.x] =)IR";
+# CHECK:   D[threadIdx.x + 50 * blockIdx.x] =)IR";
 
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
@@ -1705,10 +1705,10 @@ TEST(Cuda, MaskMultiDimSymbolic_CUDA) {
   const std::string& verification_pattern =
       R"IR(
 # CHECK: if (threadIdx.x<A_SIZE
-# CHECK:   C[threadIdx.x + A_SIZE * blockIdx.x] =
+# CHECK:   C[A_SIZE * blockIdx.x + threadIdx.x] =
 # CHECK: __syncthreads();
 # CHECK: if (threadIdx.x<B_SIZE
-# CHECK:   D[threadIdx.x + B_SIZE * blockIdx.x] =)IR";
+# CHECK:   D[B_SIZE * blockIdx.x + threadIdx.x] =)IR";
 
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
@@ -1852,10 +1852,10 @@ TEST(Cuda, MaskCompoundInnerLoop_CUDA) {
   const std::string& verification_pattern =
       R"IR(
 # CHECK-NOT: if (
-# CHECK: c[100 * blockIdx.x + threadIdx.x] =
+# CHECK: c[threadIdx.x + 100 * blockIdx.x] =
 # CHECK: __syncthreads();
 # CHECK: if (threadIdx.x<50
-# CHECK:   d[50 * blockIdx.x + threadIdx.x] =)IR";
+# CHECK:   d[threadIdx.x + 50 * blockIdx.x] =)IR";
 
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
@@ -1991,10 +1991,10 @@ TEST(Cuda, MaskInnerLoopOneBlock_CUDA) {
       R"IR(
 # CHECK: for (int i = 0; i < 10
 # CHECK-NOT: if (
-# CHECK: c[100 * i + threadIdx.x] =
+# CHECK: c[threadIdx.x + 100 * i] =
 # CHECK: __syncthreads();
 # CHECK: if (threadIdx.x<50
-# CHECK:   d[50 * i + threadIdx.x] =)IR";
+# CHECK:   d[threadIdx.x + 50 * i] =)IR";
 
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
@@ -2119,7 +2119,7 @@ TEST(Cuda, MaskMultiDimMultiAxis_CUDA) {
   const std::string& verification_pattern =
       R"IR(
 # CHECK: if (threadIdx.y<1
-# CHECK:   C[30 * blockIdx.x + threadIdx.x] =
+# CHECK:   C[threadIdx.x + 30 * blockIdx.x] =
 # CHECK: __syncthreads();
 # CHECK: if (threadIdx.x<1
 # CHECK:   D[threadIdx.y + 15 * blockIdx.x] =)IR";
@@ -2250,7 +2250,7 @@ TEST(Cuda, MaskMultiDimMultiLevel_CUDA) {
   const std::string& verification_pattern =
       R"IR(
 # CHECK-NOT: if (
-# CHECK: C[30 * blockIdx.x + threadIdx.x] =
+# CHECK: C[threadIdx.x + 30 * blockIdx.x] =
 # CHECK: __syncthreads();
 # CHECK: if (blockIdx.x<5
 # CHECK:   if (threadIdx.x<15

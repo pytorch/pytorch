@@ -649,12 +649,12 @@ TEST(Simplify, SimplifyMultiVar) {
   ASSERT_NE(lhs, nullptr);
   VarPtr varX = to<Var>(lhs->rhs());
   ASSERT_NE(varX, nullptr);
-  ASSERT_EQ(varX->name_hint(), "y");
+  ASSERT_EQ(varX->name_hint(), "x");
   MulPtr rhs = to<Mul>(root->rhs());
   ASSERT_NE(rhs, nullptr);
   VarPtr varY = to<Var>(rhs->rhs());
   ASSERT_NE(varY, nullptr);
-  ASSERT_EQ(varY->name_hint(), "x");
+  ASSERT_EQ(varY->name_hint(), "y");
 }
 
 // x + 2 + y => x + y + 2
@@ -698,8 +698,8 @@ TEST(Simplify, SimplifyAdds) {
     IS_NODE_WITH_NAME(Mul, simplified.node(), root);
     IS_IMM_WITH_VAL(Int, root->lhs(), 2);
     IS_NODE_WITH_NAME(Add, root->rhs(), add);
-    IS_VAR_WITH_NAME(add->lhs(), "y");
-    IS_VAR_WITH_NAME(add->rhs(), "x");
+    IS_VAR_WITH_NAME(add->lhs(), "x");
+    IS_VAR_WITH_NAME(add->rhs(), "y");
   }
 
   {
@@ -770,11 +770,11 @@ TEST(Simplify, SimplifyMuls) {
 
     IS_NODE_WITH_NAME(Mul, simplified.node(), mul);
     IS_NODE_WITH_NAME(Add, mul->lhs(), lhs);
-    IS_VAR_WITH_NAME(lhs->lhs(), "y");
-    IS_VAR_WITH_NAME(lhs->rhs(), "x");
+    IS_VAR_WITH_NAME(lhs->lhs(), "x");
+    IS_VAR_WITH_NAME(lhs->rhs(), "y");
     IS_NODE_WITH_NAME(Add, mul->rhs(), rhs);
-    IS_VAR_WITH_NAME(rhs->lhs(), "y");
-    IS_VAR_WITH_NAME(rhs->rhs(), "x");
+    IS_VAR_WITH_NAME(rhs->lhs(), "x");
+    IS_VAR_WITH_NAME(rhs->rhs(), "y");
   }
 
   {
@@ -867,8 +867,8 @@ TEST(Simplify, SimplifyMuls) {
     ExprHandle simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Mul, simplified.node(), mul);
     IS_NODE_WITH_NAME(Add, mul->lhs(), lhs);
-    IS_VAR_WITH_NAME(lhs->lhs(), "y");
-    IS_VAR_WITH_NAME(lhs->rhs(), "x");
+    IS_VAR_WITH_NAME(lhs->lhs(), "x");
+    IS_VAR_WITH_NAME(lhs->rhs(), "y");
     IS_NODE_WITH_NAME(Sub, mul->rhs(), rhs);
     IS_VAR_WITH_NAME(rhs->lhs(), "x");
     IS_VAR_WITH_NAME(rhs->rhs(), "y");
@@ -1654,14 +1654,14 @@ TEST(Simplify, SimplifyMultiOp) {
   }
 
   {
-    // (x + y) - (x * y) => x + y - (x * y)
-    ExprHandle body = (x + y) - (x * y);
+    // (x + y) - x * y => (x + y) - x * y
+    ExprHandle body = (x + y) - x * y;
     ExprHandle simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Sub, simplified.node(), sub);
     IS_NODE_WITH_NAME(Add, sub->lhs(), add);
     IS_NODE_WITH_NAME(Mul, sub->rhs(), mul);
-    IS_VAR_WITH_NAME(add->lhs(), "y");
-    IS_VAR_WITH_NAME(add->rhs(), "x");
+    IS_VAR_WITH_NAME(add->lhs(), "x");
+    IS_VAR_WITH_NAME(add->rhs(), "y");
     IS_VAR_WITH_NAME(mul->lhs(), "x");
     IS_VAR_WITH_NAME(mul->rhs(), "y");
   }
@@ -1709,19 +1709,19 @@ TEST(Simplify, SimplifyManyOps) {
   VarHandle y("y", kInt);
 
   {
-    // x + y + x + x + y + y + x + y + x = 5 * x + 4 * y
+    // x + y + x + x + y + y + x + y + x = 4 * y + 5 * x
     ExprHandle body = x + y + x + x + y + y + x + y + x;
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     IS_NODE_WITH_NAME(Add, simplified.node(), add);
 
     IS_NODE_WITH_NAME(Mul, add->lhs(), lhs);
-    IS_IMM_WITH_VAL(Int, lhs->lhs(), 5);
-    IS_VAR_WITH_NAME(lhs->rhs(), "x");
+    IS_IMM_WITH_VAL(Int, lhs->lhs(), 4);
+    IS_VAR_WITH_NAME(lhs->rhs(), "y");
 
     IS_NODE_WITH_NAME(Mul, add->rhs(), rhs);
-    IS_IMM_WITH_VAL(Int, rhs->lhs(), 4);
-    IS_VAR_WITH_NAME(rhs->rhs(), "y");
+    IS_IMM_WITH_VAL(Int, rhs->lhs(), 5);
+    IS_VAR_WITH_NAME(rhs->rhs(), "x");
   }
 
   {
@@ -1765,8 +1765,8 @@ TEST(Simplify, SimplifyFactorization) {
     IS_IMM_WITH_VAL(Int, mul->lhs(), 2);
 
     IS_NODE_WITH_NAME(Add, mul->rhs(), add);
-    IS_VAR_WITH_NAME(add->lhs(), "y");
-    IS_VAR_WITH_NAME(add->rhs(), "x");
+    IS_VAR_WITH_NAME(add->lhs(), "x");
+    IS_VAR_WITH_NAME(add->rhs(), "y");
   }
 
   {
@@ -1794,12 +1794,12 @@ TEST(Simplify, SimplifyFactorization) {
     IS_NODE_WITH_NAME(Add, simplified.node(), add);
 
     IS_NODE_WITH_NAME(Mul, add->lhs(), lhs);
-    IS_IMM_WITH_VAL(Int, lhs->lhs(), 5);
-    IS_VAR_WITH_NAME(lhs->rhs(), "y");
+    IS_IMM_WITH_VAL(Int, lhs->lhs(), 2);
+    IS_VAR_WITH_NAME(lhs->rhs(), "x");
 
     IS_NODE_WITH_NAME(Mul, add->rhs(), rhs);
-    IS_IMM_WITH_VAL(Int, rhs->lhs(), 2);
-    IS_VAR_WITH_NAME(rhs->rhs(), "x");
+    IS_IMM_WITH_VAL(Int, rhs->lhs(), 5);
+    IS_VAR_WITH_NAME(rhs->rhs(), "y");
   }
 
   {
@@ -1813,8 +1813,8 @@ TEST(Simplify, SimplifyFactorization) {
     IS_IMM_WITH_VAL(Int, mul->lhs(), 10);
 
     IS_NODE_WITH_NAME(Add, mul->rhs(), add);
-    IS_VAR_WITH_NAME(add->lhs(), "y");
-    IS_VAR_WITH_NAME(add->rhs(), "x");
+    IS_VAR_WITH_NAME(add->lhs(), "x");
+    IS_VAR_WITH_NAME(add->rhs(), "y");
   }
 
   {
@@ -1863,18 +1863,12 @@ TEST(Simplify, SimplifyFactorization) {
     VarHandle g("g", kInt);
     VarHandle h("h", kInt);
 
-    ExprHandle body = ExprHandle(0) + (ExprHandle(1024) * a) +
-        (ExprHandle(-1) * b) + (ExprHandle(-1) * c) + (ExprHandle(1) * d) +
-        (ExprHandle(1) * e) + (ExprHandle(32) * f) + (ExprHandle(-1024) * g) +
-        (ExprHandle(-32) * h);
+    ExprHandle body = a * 1024 + 0 + b * (-1) + c * (-1) + d * 1 + e * 1 +
+        f * 32 + g * (-1024) + h * (-32);
     ExprHandle simplified = IRSimplifier::simplify(body);
-
-    // We only check for the top level nodes here, since the main purpose
-    // here is ensure that this simplification completes.
-    IS_NODE_WITH_NAME(Sub, simplified.node(), sub);
-    IS_NODE_WITH_NAME(Mul, sub->rhs(), mul);
-    IS_IMM_WITH_VAL(Int, mul->lhs(), 1024);
-    IS_VAR_WITH_NAME(mul->rhs(), "g");
+    checkExprIR(
+        simplified,
+        "((((((d + e) + 1024 * a) + 32 * f) - b) - c) - 1024 * g) - 32 * h");
   }
 }
 
@@ -1904,7 +1898,7 @@ TEST(Simplify, SimplifyFactorizeUneven) {
   IS_VAR_WITH_NAME(zmul->rhs(), "z");
 }
 
-// (x * y) + (2 * x) * (x + y) => 3 * (x * y) + 2 * (x * x)
+// (x * y) + (2 * x) * (x + y) => 2 * (x * x) + 3 * (x * y)
 // This is kind of a placeholder test for variable factorization.
 TEST(Simplify, SimplifyDeeperTerms) {
   KernelScope kernel_scope;
@@ -1916,16 +1910,16 @@ TEST(Simplify, SimplifyDeeperTerms) {
   IS_NODE_WITH_NAME(Add, simplified.node(), add);
 
   IS_NODE_WITH_NAME(Mul, add->lhs(), lhs);
-  IS_IMM_WITH_VAL(Int, lhs->lhs(), 3);
-  IS_NODE_WITH_NAME(Mul, lhs->rhs(), xyTerm);
-  IS_VAR_WITH_NAME(xyTerm->lhs(), "x");
-  IS_VAR_WITH_NAME(xyTerm->rhs(), "y");
+  IS_IMM_WITH_VAL(Int, lhs->lhs(), 2);
+  IS_NODE_WITH_NAME(Mul, lhs->rhs(), xxTerm);
+  IS_VAR_WITH_NAME(xxTerm->lhs(), "x");
+  IS_VAR_WITH_NAME(xxTerm->rhs(), "x");
 
   IS_NODE_WITH_NAME(Mul, add->rhs(), rhs);
-  IS_IMM_WITH_VAL(Int, rhs->lhs(), 2);
-  IS_NODE_WITH_NAME(Mul, rhs->rhs(), xxTerm);
-  IS_VAR_WITH_NAME(xxTerm->rhs(), "x");
-  IS_VAR_WITH_NAME(xxTerm->rhs(), "x");
+  IS_IMM_WITH_VAL(Int, rhs->lhs(), 3);
+  IS_NODE_WITH_NAME(Mul, rhs->rhs(), xyTerm);
+  IS_VAR_WITH_NAME(xyTerm->lhs(), "x");
+  IS_VAR_WITH_NAME(xyTerm->rhs(), "y");
 }
 
 // Tests the difference between two less trivial expressions.
@@ -1987,15 +1981,15 @@ TEST(Simplify, SimplifyOpaqueTerms) {
   VarHandle y("y", kInt);
 
   {
-    // 2 * x/y * x - x/y * y => y * x/y
+    // 2 * x/y * y - x/y * y => x/y * y
     ExprHandle body = ((ExprHandle(2)) * (x / y) * y) - ((x / y) * y);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     IS_NODE_WITH_NAME(Mul, simplified.node(), mul);
-    IS_VAR_WITH_NAME(mul->lhs(), "y");
-    IS_NODE_WITH_NAME(Div, mul->rhs(), div);
+    IS_NODE_WITH_NAME(Div, mul->lhs(), div);
     IS_VAR_WITH_NAME(div->lhs(), "x");
     IS_VAR_WITH_NAME(div->rhs(), "y");
+    IS_VAR_WITH_NAME(mul->rhs(), "y");
   }
 
   {
@@ -2055,46 +2049,46 @@ TEST(Simplify, SimplifyNestedMax) {
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
-    IS_BINOP_W_VARS(Add, simplified.node(), add, "y", "x");
+    IS_BINOP_W_VARS(Add, simplified.node(), add, "x", "y");
   }
 
   {
-    // Max(x + y, Max(x + y, z)) => Max(y + x, z)
+    // Max(x + y, Max(x + y, z)) => Max(x + y, z)
     ExprHandle body = Max::make(x + y, Max::make(x + y, z, true), true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     IS_NODE_WITH_NAME(Max, simplified.node(), max);
-    IS_BINOP_W_VARS(Add, max->lhs(), add, "y", "x");
+    IS_BINOP_W_VARS(Add, max->lhs(), add, "x", "y");
     IS_VAR_WITH_NAME(max->rhs(), "z");
   }
 
   {
-    // Max(x + y, Max(z, x + y)) => Max(y + x, z)
+    // Max(x + y, Max(z, x + y)) => Max(x + y, z)
     ExprHandle body = Max::make(x + y, Max::make(z, x + y, true), true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     IS_NODE_WITH_NAME(Max, simplified.node(), max);
-    IS_BINOP_W_VARS(Add, max->lhs(), add, "y", "x");
+    IS_BINOP_W_VARS(Add, max->lhs(), add, "x", "y");
     IS_VAR_WITH_NAME(max->rhs(), "z");
   }
 
   {
-    // Max(Max(x + y, z), x + y) => Max(y + x, z)
+    // Max(Max(x + y, z), x + y) => Max(x + y, z)
     ExprHandle body = Max::make(Max::make(x + y, z, true), x + y, true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     IS_NODE_WITH_NAME(Max, simplified.node(), max);
-    IS_BINOP_W_VARS(Add, max->lhs(), add, "y", "x");
+    IS_BINOP_W_VARS(Add, max->lhs(), add, "x", "y");
     IS_VAR_WITH_NAME(max->rhs(), "z");
   }
 
   {
-    // Max(Max(z, x + y), x + y) => Max(y + x, z)
+    // Max(Max(z, x + y), x + y) => Max(x + y, z)
     ExprHandle body = Max::make(Max::make(z, x + y, true), x + y, true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     IS_NODE_WITH_NAME(Max, simplified.node(), max);
-    IS_BINOP_W_VARS(Add, max->lhs(), add, "y", "x");
+    IS_BINOP_W_VARS(Add, max->lhs(), add, "x", "y");
     IS_VAR_WITH_NAME(max->rhs(), "z");
   }
 
@@ -2112,55 +2106,39 @@ TEST(Simplify, SimplifyNestedMax) {
   }
 
   {
-    // Max(Min(x, y), Min(x, z)) => Min(x, Max(y, z))
+    // Max(Min(x, y), Min(x, z)) => Min(Max(y, z), x)
     ExprHandle body =
         Max::make(Min::make(x, y, true), Min::make(x, z, true), true);
     ExprHandle simplified = IRSimplifier::simplify(body);
-
-    IS_NODE_WITH_NAME(Min, simplified.node(), min);
-    IS_VAR_WITH_NAME(min->lhs(), "x");
-    IS_BINOP_W_VARS(Max, min->rhs(), max, "y", "z");
-    ASSERT_TRUE(max->propagate_nans());
+    checkExprIR(simplified, "Min(Max(y, z, 1), x, 1)");
   }
 
   {
-    // Max(Min(x, y), Min(z, x)) => Min(x, Max(y, z))
+    // Max(Min(x, y), Min(z, x)) => Min(Max(y, z), x)
     ExprHandle body =
         Max::make(Min::make(x, y, true), Min::make(z, x, true), true);
     ExprHandle simplified = IRSimplifier::simplify(body);
-
-    IS_NODE_WITH_NAME(Min, simplified.node(), min);
-    IS_VAR_WITH_NAME(min->lhs(), "x");
-    IS_BINOP_W_VARS(Max, min->rhs(), max, "y", "z");
-    ASSERT_TRUE(max->propagate_nans());
+    checkExprIR(simplified, "Min(Max(y, z, 1), x, 1)");
   }
 
   {
-    // Max(Min(y, x), Min(x, z)) => Min(x, Max(y, z))
+    // Max(Min(y, x), Min(x, z)) => Min(Max(y, z), x)
     ExprHandle body =
         Max::make(Min::make(y, x, true), Min::make(x, z, true), true);
     ExprHandle simplified = IRSimplifier::simplify(body);
-
-    IS_NODE_WITH_NAME(Min, simplified.node(), min);
-    IS_VAR_WITH_NAME(min->lhs(), "x");
-    IS_BINOP_W_VARS(Max, min->rhs(), max, "y", "z");
-    ASSERT_TRUE(max->propagate_nans());
+    checkExprIR(simplified, "Min(Max(y, z, 1), x, 1)");
   }
 
   {
-    // Max(Min(y, x), Min(z, x)) => Min(x, Max(y, z))
+    // Max(Min(y, x), Min(z, x)) => Min(Max(y, z), x)
     ExprHandle body =
         Max::make(Min::make(y, x, true), Min::make(z, x, true), true);
     ExprHandle simplified = IRSimplifier::simplify(body);
-
-    IS_NODE_WITH_NAME(Min, simplified.node(), min);
-    IS_VAR_WITH_NAME(min->lhs(), "x");
-    IS_BINOP_W_VARS(Max, min->rhs(), max, "y", "z");
-    ASSERT_TRUE(max->propagate_nans());
+    checkExprIR(simplified, "Min(Max(y, z, 1), x, 1)");
   }
 
   {
-    // Max(Min(y, x), Min(z, x)) => Max(Min(x, z), Min(x, y))
+    // Max(Min(y, x), Min(z, x)) => Max(Min(x, y), Min(x, z))
     // When all the ops in the pattern do not have the same propagate_nans,
     // it should not be simplified.
     ExprHandle body =
@@ -2168,10 +2146,10 @@ TEST(Simplify, SimplifyNestedMax) {
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     IS_NODE_WITH_NAME(Max, simplified.node(), max);
-    IS_BINOP_W_VARS(Min, max->lhs(), min1, "x", "z");
-    ASSERT_FALSE(min1->propagate_nans());
-    IS_BINOP_W_VARS(Min, max->rhs(), min2, "x", "y");
-    ASSERT_TRUE(min2->propagate_nans());
+    IS_BINOP_W_VARS(Min, max->lhs(), min1, "x", "y");
+    ASSERT_TRUE(min1->propagate_nans());
+    IS_BINOP_W_VARS(Min, max->rhs(), min2, "x", "z");
+    ASSERT_FALSE(min2->propagate_nans());
     ASSERT_TRUE(max->propagate_nans());
   }
 
@@ -2304,18 +2282,7 @@ TEST(Simplify, SimplifyNestedMax) {
         8,
         false);
     ExprHandle simplified = IRSimplifier::simplify(body);
-
-    IS_NODE_WITH_NAME(Max, simplified.node(), max1);
-    IS_NODE_WITH_NAME(Max, max1->lhs(), max2);
-    IS_VAR_WITH_NAME(max2->lhs(), "x");
-    IS_NODE_WITH_NAME(Max, max2->rhs(), max3);
-    IS_BINOP_W_CONST(Max, max3->lhs(), max4, "z", 5);
-    ASSERT_TRUE(max4->propagate_nans());
-    IS_VAR_WITH_NAME(max3->rhs(), "y");
-    ASSERT_FALSE(max3->propagate_nans());
-    ASSERT_TRUE(max2->propagate_nans());
-    IS_IMM_WITH_VAL(Int, max1->rhs(), 8);
-    ASSERT_FALSE(max1->propagate_nans());
+    checkExprIR(simplified, "Max(Max(Max(Max(z, 5, 1), y, 0), x, 1), 8, 0)");
   }
 
   {
@@ -2359,46 +2326,46 @@ TEST(Simplify, SimplifyNestedMin) {
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
-    IS_BINOP_W_VARS(Add, simplified.node(), add, "y", "x");
+    IS_BINOP_W_VARS(Add, simplified.node(), add, "x", "y");
   }
 
   {
-    // Min(x + y, Min(x + y, z)) => Min(y + x, z)
+    // Min(x + y, Min(x + y, z)) => Min(x + y, z)
     ExprHandle body = Min::make(x + y, Min::make(x + y, z, true), true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     IS_NODE_WITH_NAME(Min, simplified.node(), min);
-    IS_BINOP_W_VARS(Add, min->lhs(), add, "y", "x");
+    IS_BINOP_W_VARS(Add, min->lhs(), add, "x", "y");
     IS_VAR_WITH_NAME(min->rhs(), "z");
   }
 
   {
-    // Min(x + y, Min(z, x + y)) => Min(y + x, z)
+    // Min(x + y, Min(z, x + y)) => Min(x + y, z)
     ExprHandle body = Min::make(x + y, Min::make(z, x + y, true), true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     IS_NODE_WITH_NAME(Min, simplified.node(), min);
-    IS_BINOP_W_VARS(Add, min->lhs(), add, "y", "x");
+    IS_BINOP_W_VARS(Add, min->lhs(), add, "x", "y");
     IS_VAR_WITH_NAME(min->rhs(), "z");
   }
 
   {
-    // Min(Min(x + y, z), x + y) => Min(y + x, z)
+    // Min(Min(x + y, z), x + y) => Min(x + y, z)
     ExprHandle body = Min::make(Min::make(x + y, z, true), x + y, true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     IS_NODE_WITH_NAME(Min, simplified.node(), min);
-    IS_BINOP_W_VARS(Add, min->lhs(), add, "y", "x");
+    IS_BINOP_W_VARS(Add, min->lhs(), add, "x", "y");
     IS_VAR_WITH_NAME(min->rhs(), "z");
   }
 
   {
-    // Min(Min(z, x + y), x + y) => Min(y + x, z)
+    // Min(Min(z, x + y), x + y) => Min(x + y, z)
     ExprHandle body = Min::make(Min::make(z, x + y, true), x + y, true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     IS_NODE_WITH_NAME(Min, simplified.node(), min);
-    IS_BINOP_W_VARS(Add, min->lhs(), add, "y", "x");
+    IS_BINOP_W_VARS(Add, min->lhs(), add, "x", "y");
     IS_VAR_WITH_NAME(min->rhs(), "z");
   }
 
@@ -2416,55 +2383,39 @@ TEST(Simplify, SimplifyNestedMin) {
   }
 
   {
-    // Min(Max(x, y), Max(x, z)) => Max(x, Min(y, z))
+    // Min(Max(x, y), Max(x, z)) => Max(Min(y, z), x)
     ExprHandle body =
         Min::make(Max::make(x, y, true), Max::make(x, z, true), true);
     ExprHandle simplified = IRSimplifier::simplify(body);
-
-    IS_NODE_WITH_NAME(Max, simplified.node(), max);
-    IS_VAR_WITH_NAME(max->lhs(), "x");
-    IS_BINOP_W_VARS(Min, max->rhs(), min, "y", "z");
-    ASSERT_TRUE(min->propagate_nans());
+    checkExprIR(simplified, "Max(Min(y, z, 1), x, 1)");
   }
 
   {
-    // Min(Max(x, y), Max(z, x)) => Max(x, Min(y, z))
+    // Min(Max(x, y), Max(z, x)) => Max(Min(y, z), x)
     ExprHandle body =
         Min::make(Max::make(x, y, true), Max::make(z, x, true), true);
     ExprHandle simplified = IRSimplifier::simplify(body);
-
-    IS_NODE_WITH_NAME(Max, simplified.node(), max);
-    IS_VAR_WITH_NAME(max->lhs(), "x");
-    IS_BINOP_W_VARS(Min, max->rhs(), min, "y", "z");
-    ASSERT_TRUE(min->propagate_nans());
+    checkExprIR(simplified, "Max(Min(y, z, 1), x, 1)");
   }
 
   {
-    // Min(Max(y, x), Max(x, z)) => Max(x, Min(y, z))
+    // Min(Max(y, x), Max(x, z)) => Max(Min(y, z), x)
     ExprHandle body =
         Min::make(Max::make(y, x, true), Max::make(x, z, true), true);
     ExprHandle simplified = IRSimplifier::simplify(body);
-
-    IS_NODE_WITH_NAME(Max, simplified.node(), max);
-    IS_VAR_WITH_NAME(max->lhs(), "x");
-    IS_BINOP_W_VARS(Min, max->rhs(), min, "y", "z");
-    ASSERT_TRUE(min->propagate_nans());
+    checkExprIR(simplified, "Max(Min(y, z, 1), x, 1)");
   }
 
   {
-    // Min(Max(y, x), Max(z, x)) => Max(x, Min(y, z))
+    // Min(Max(y, x), Max(z, x)) => Max(Min(y, z), x)
     ExprHandle body =
         Min::make(Max::make(y, x, true), Max::make(z, x, true), true);
     ExprHandle simplified = IRSimplifier::simplify(body);
-
-    IS_NODE_WITH_NAME(Max, simplified.node(), max);
-    IS_VAR_WITH_NAME(max->lhs(), "x");
-    IS_BINOP_W_VARS(Min, max->rhs(), min, "y", "z");
-    ASSERT_TRUE(min->propagate_nans());
+    checkExprIR(simplified, "Max(Min(y, z, 1), x, 1)");
   }
 
   {
-    // Min(Max(y, x), Max(z, x)) => Min(Max(x, z), Max(x, y))
+    // Min(Max(y, x), Max(z, x)) => Min(Max(x, y), Max(x, z))
     // When all the ops in the pattern do not have the same propagate_nans,
     // it should not be simplified.
     ExprHandle body =
@@ -2472,10 +2423,10 @@ TEST(Simplify, SimplifyNestedMin) {
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     IS_NODE_WITH_NAME(Min, simplified.node(), min);
-    IS_BINOP_W_VARS(Max, min->lhs(), max1, "x", "z");
-    ASSERT_FALSE(max1->propagate_nans());
-    IS_BINOP_W_VARS(Max, min->rhs(), max2, "x", "y");
-    ASSERT_TRUE(max2->propagate_nans());
+    IS_BINOP_W_VARS(Max, min->lhs(), max1, "x", "y");
+    ASSERT_TRUE(max1->propagate_nans());
+    IS_BINOP_W_VARS(Max, min->rhs(), max2, "x", "z");
+    ASSERT_FALSE(max2->propagate_nans());
     ASSERT_TRUE(min->propagate_nans());
   }
 
@@ -2600,7 +2551,7 @@ TEST(Simplify, SimplifyNestedMin) {
   }
 
   {
-    // Min(Min(Min(Min(z, 5), y), x), 8) => Min(Min(x, Min(Min(z, 5), y)), 8)
+    // Min(Min(Min(Min(z, 5), y), x), 8) => Min(Min(Min(Min(z, 5), y), x), 8)
     // Do not simplify when all the Min ops do not have the same
     // propagate_nans.
     ExprHandle body = Min::make(
@@ -2608,18 +2559,7 @@ TEST(Simplify, SimplifyNestedMin) {
         8,
         false);
     ExprHandle simplified = IRSimplifier::simplify(body);
-
-    IS_NODE_WITH_NAME(Min, simplified.node(), min1);
-    IS_NODE_WITH_NAME(Min, min1->lhs(), min2);
-    IS_VAR_WITH_NAME(min2->lhs(), "x");
-    IS_NODE_WITH_NAME(Min, min2->rhs(), min3);
-    IS_BINOP_W_CONST(Min, min3->lhs(), min4, "z", 5);
-    ASSERT_TRUE(min4->propagate_nans());
-    IS_VAR_WITH_NAME(min3->rhs(), "y");
-    ASSERT_FALSE(min3->propagate_nans());
-    ASSERT_TRUE(min2->propagate_nans());
-    IS_IMM_WITH_VAL(Int, min1->rhs(), 8);
-    ASSERT_FALSE(min1->propagate_nans());
+    checkExprIR(simplified, "Min(Min(Min(Min(z, 5, 1), y, 0), x, 1), 8, 0)");
   }
 
   {
@@ -2922,16 +2862,7 @@ TEST(Simplify, SimplifyRoundModPattern) {
     VarHandle z("z", kInt);
     ExprHandle body = ((x / y) * y) + (x % z);
     ExprHandle simplified = IRSimplifier::simplify(body);
-
-    IS_NODE_WITH_NAME(Add, simplified.node(), add);
-    IS_NODE_WITH_NAME(Mul, add->lhs(), roundMul);
-    IS_VAR_WITH_NAME(roundMul->lhs(), "y");
-    IS_NODE_WITH_NAME(Div, roundMul->rhs(), roundDiv);
-    IS_VAR_WITH_NAME(roundDiv->lhs(), "x");
-    IS_VAR_WITH_NAME(roundDiv->rhs(), "y");
-    IS_NODE_WITH_NAME(Mod, add->rhs(), mod);
-    IS_VAR_WITH_NAME(mod->lhs(), "x");
-    IS_VAR_WITH_NAME(mod->rhs(), "z");
+    checkExprIR(simplified, "(x / y) * y + x % z");
   }
 
   {
@@ -2941,15 +2872,7 @@ TEST(Simplify, SimplifyRoundModPattern) {
     VarHandle z("z", kInt);
     ExprHandle body = (y * (x / z)) + (x % y);
     ExprHandle simplified = IRSimplifier::simplify(body);
-    IS_NODE_WITH_NAME(Add, simplified.node(), add);
-    IS_NODE_WITH_NAME(Mul, add->lhs(), roundMul);
-    IS_VAR_WITH_NAME(roundMul->lhs(), "y");
-    IS_NODE_WITH_NAME(Div, roundMul->rhs(), roundDiv);
-    IS_VAR_WITH_NAME(roundDiv->lhs(), "x");
-    IS_VAR_WITH_NAME(roundDiv->rhs(), "z");
-    IS_NODE_WITH_NAME(Mod, add->rhs(), mod);
-    IS_VAR_WITH_NAME(mod->lhs(), "x");
-    IS_VAR_WITH_NAME(mod->rhs(), "y");
+    checkExprIR(simplified, "x % y + (x / z) * y");
   }
 
   {
@@ -2959,15 +2882,7 @@ TEST(Simplify, SimplifyRoundModPattern) {
     VarHandle z("z", kInt);
     ExprHandle body = ((x / y) * z) + (x % y);
     ExprHandle simplified = IRSimplifier::simplify(body);
-    IS_NODE_WITH_NAME(Add, simplified.node(), add);
-    IS_NODE_WITH_NAME(Mul, add->lhs(), roundMul);
-    IS_VAR_WITH_NAME(roundMul->lhs(), "z");
-    IS_NODE_WITH_NAME(Div, roundMul->rhs(), roundDiv);
-    IS_VAR_WITH_NAME(roundDiv->lhs(), "x");
-    IS_VAR_WITH_NAME(roundDiv->rhs(), "y");
-    IS_NODE_WITH_NAME(Mod, add->rhs(), mod);
-    IS_VAR_WITH_NAME(mod->lhs(), "x");
-    IS_VAR_WITH_NAME(mod->rhs(), "y");
+    checkExprIR(simplified, "x % y + (x / y) * z");
   }
 }
 
@@ -3036,20 +2951,20 @@ TEST(Simplify, SimplifyRoundModPatternMultivar) {
 
   {
     // Multivar.
-    // (x/8) * 8 + (y/5)*5 + x%8 + y%5 => y + x.
+    // (x/8) * 8 + (y/5)*5 + x%8 + y%5 => x + y.
     VarHandle x("x", kInt);
     VarHandle y("y", kInt);
     ExprHandle body = (x / ExprHandle(8) * ExprHandle(8)) +
         (y / ExprHandle(5) * ExprHandle(5)) + (x % 8) + (y % 5);
     ExprHandle simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Add, simplified.node(), add);
-    IS_VAR_WITH_NAME(add->lhs(), "y");
-    IS_VAR_WITH_NAME(add->rhs(), "x");
+    IS_VAR_WITH_NAME(add->lhs(), "x");
+    IS_VAR_WITH_NAME(add->rhs(), "y");
   }
 
   {
     // Find the right var.
-    // (y/8) * 8  x%8 + y%8 + z%8 => z%8 + x%8 + y
+    // (y/8) * 8  x%8 + y%8 + z%8 => x%8 + y + z%8
     VarHandle x("x", kInt);
     VarHandle y("y", kInt);
     VarHandle z("z", kInt);
@@ -3075,16 +2990,9 @@ TEST(Simplify, SimplifyRoundModPatternMultivar) {
     VarHandle y("y", kInt);
     VarHandle z("z", kInt);
 
-    ExprHandle body = x + (z + ExprHandle(512) * y) % ExprHandle(16) +
-        ExprHandle(16) * ((z + ExprHandle(512) * y) / ExprHandle(16));
+    ExprHandle body = x + (z + y * 512) % 16 + ((z + y * 512) / 16 * 16);
     ExprHandle simplified = IRSimplifier::simplify(body);
-    IS_NODE_WITH_NAME(Add, simplified.node(), add);
-    IS_VAR_WITH_NAME(add->rhs(), "x");
-    IS_NODE_WITH_NAME(Add, add->lhs(), add2);
-    IS_VAR_WITH_NAME(add2->lhs(), "z");
-    IS_NODE_WITH_NAME(Mul, add2->rhs(), mul);
-    IS_IMM_WITH_VAL(Int, mul->lhs(), 512);
-    IS_VAR_WITH_NAME(mul->rhs(), "y");
+    checkExprIR(simplified, "x + (z + 512 * y)");
   }
 }
 
@@ -3135,13 +3043,7 @@ TEST(Simplify, SimplifyModRoundModPattern) {
     VarHandle k("k", kInt);
     ExprHandle body = (k * t / x % y) * x + k * t % x;
     ExprHandle simplified = IRSimplifier::simplify(body);
-    IS_NODE_WITH_NAME(Mod, simplified.node(), mod);
-    IS_NODE_WITH_NAME(Mul, mod->lhs(), mul1);
-    IS_VAR_WITH_NAME(mul1->lhs(), "t");
-    IS_VAR_WITH_NAME(mul1->rhs(), "k");
-    IS_NODE_WITH_NAME(Mul, mod->rhs(), mul2);
-    IS_VAR_WITH_NAME(mul2->lhs(), "x");
-    IS_VAR_WITH_NAME(mul2->rhs(), "y");
+    checkExprIR(simplified, "(k * t) % (x * y)");
   }
 
   {
@@ -3259,11 +3161,7 @@ TEST(Simplify, SimplifyModRoundModPatternMultivar) {
     VarHandle t("t", kInt);
     ExprHandle body = (t / 7 % 9) * 7 + t % 7 + t;
     ExprHandle simplified = IRSimplifier::simplify(body);
-    IS_NODE_WITH_NAME(Add, simplified.node(), add);
-    IS_NODE_WITH_NAME(Mod, add->rhs(), mod);
-    IS_VAR_WITH_NAME(mod->lhs(), "t");
-    IS_IMM_WITH_VAL(Int, mod->rhs(), 63);
-    IS_VAR_WITH_NAME(add->lhs(), "t");
+    checkExprIR(simplified, "t % 63 + t");
   }
 
   {
@@ -3306,19 +3204,7 @@ TEST(Simplify, SimplifyModRoundModPatternMultivar) {
     VarHandle k("k", kInt);
     ExprHandle body = (t / x % y) * x + t % x + (t / k / x % y) * x + t / k % x;
     ExprHandle simplified = IRSimplifier::simplify(body);
-    IS_NODE_WITH_NAME(Add, simplified.node(), add);
-    IS_NODE_WITH_NAME(Mod, add->lhs(), mod);
-    IS_VAR_WITH_NAME(mod->lhs(), "t");
-    IS_NODE_WITH_NAME(Mul, mod->rhs(), mul);
-    IS_VAR_WITH_NAME(mul->lhs(), "x");
-    IS_VAR_WITH_NAME(mul->rhs(), "y");
-    IS_NODE_WITH_NAME(Mod, add->rhs(), mod2);
-    IS_NODE_WITH_NAME(Div, mod2->lhs(), div);
-    IS_VAR_WITH_NAME(div->lhs(), "t");
-    IS_VAR_WITH_NAME(div->rhs(), "k");
-    IS_NODE_WITH_NAME(Mul, mod2->rhs(), mul2);
-    IS_VAR_WITH_NAME(mul2->lhs(), "x");
-    IS_VAR_WITH_NAME(mul2->rhs(), "y");
+    checkExprIR(simplified, "(t / k) % (x * y) + t % (x * y)");
   }
 
   {
@@ -3971,7 +3857,7 @@ TEST(Simplify, SimplifyForWontLoseLoopOptions) {
     BufHandle c("C", {4}, kInt);
     VarHandle i("i", kInt);
     LoopOptions options;
-    options.set_gpu_block_index(12);
+    options.set_gpu_block_index(LoopOptions::IDX_W);
     auto body =
         For::make(i, 0, 1, Store::make(c, {i}, Load::make(a, {i})), options);
     StmtPtr simplified = IRSimplifier::simplify(body);

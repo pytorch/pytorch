@@ -2212,6 +2212,14 @@ RegisterOperators reg1(
          },
          aliasAnalysisFromSchema()),
      OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("prim::is_ort(Tensor a) -> bool"),
+         [](Stack* stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.is_ort());
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("prim::name(Tensor a) -> str?"),
          [](Stack* stack) {
            at::Tensor a;
