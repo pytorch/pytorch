@@ -42,6 +42,7 @@ Quantization requires users to be aware of three concepts:
 #. Quantization engine (torch.backends.quantization.engine): When a quantized model is executed, the qengine specifies which
   backend is to be used for execution. It is important to ensure that the qengine is consistent with the Qconfig.
 
+
 Natively supported backends
 ---------------------------
 
