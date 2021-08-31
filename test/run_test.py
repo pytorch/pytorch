@@ -345,7 +345,6 @@ JIT_EXECUTOR_TESTS = [
 ]
 
 DISTRIBUTED_TESTS = [
-    "distributed/test_distributed_fork",
     "distributed/test_distributed_spawn",
 ]
 
