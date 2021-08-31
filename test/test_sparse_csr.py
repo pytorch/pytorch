@@ -3,8 +3,10 @@ import warnings
 import unittest
 import random
 import itertools
+
+from torch.testing import make_tensor
 from torch.testing._internal.common_utils import \
-    (IS_MACOS, IS_WINDOWS, TestCase, run_tests, load_tests, coalescedonoff, make_tensor)
+    (IS_MACOS, IS_WINDOWS, TestCase, run_tests, load_tests, coalescedonoff)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, onlyCPU, onlyCUDA)
 
@@ -318,6 +320,11 @@ class TestSparseCSR(TestCase):
     @coalescedonoff
     @dtypes(torch.double)
     def test_coo_to_csr_convert(self, device, dtype, coalesced):
+        with self.assertRaisesRegex(RuntimeError, "Input is supposed to be a vector"):
+            torch._convert_indices_from_coo_to_csr(
+                torch.randint(100, (5, 5), device=device),
+                size=100)
+
         size = (5, 5)
         sparse_dim = 2
         nnz = 10
