@@ -8,6 +8,7 @@ namespace at { namespace native {
 
 namespace {
 
+// TODO: https://github.com/pytorch/pytorch/pull/59380#pullrequestreview-725310492
 c10::MaybeOwned<Tensor> inline resolve_conj_if_indicated(const Tensor& tensor, bool resolve_conj) {
   if (resolve_conj && tensor.is_conj()) {
     return c10::MaybeOwned<Tensor>::owned(tensor.resolve_conj());
