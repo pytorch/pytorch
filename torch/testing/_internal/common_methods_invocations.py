@@ -2509,7 +2509,7 @@ def sample_inputs_max_pool2d(op_info, device, dtype, requires_grad, **kwargs):
 
     kerneli = [[3, 2], 3]
     stridei = [[2, 2]]
-    Ni = [1, 4, 0, None]
+    Ni = [1, 4, None]
     Ci = [32]
     Hi = [8, 16]
     Wi = [8, 16]
@@ -7429,8 +7429,9 @@ op_db: List[OpInfo] = [
            supports_autograd=True,
            supports_out=False,
            assert_jit_shape_analysis=True,
-           dtypesIfCPU=floating_types_and(torch.int64),
-           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           dtypesIfCPU=floating_types(),
+           dtypesIfCUDA=floating_types(),
+           supports_scripting=False,  # TODO: fix aliasing test
            sample_inputs_func=sample_inputs_max_pool2d),
     UnaryUfuncInfo(
         'nn.functional.logsigmoid',
@@ -8451,6 +8452,7 @@ op_db: List[OpInfo] = [
            supports_inplace_autograd=False,
            supports_scripting=False,
            op=torch.Tensor.__getitem__,
+           skips=(SkipInfo('TestJit', 'test_variant_consistency_jit', device_type='cuda')),
            assert_jit_shape_analysis=False,  # TODO: support index.Tensor()
            sample_inputs_func=sample_inputs_getitem,),
     OpInfo('index_put',
