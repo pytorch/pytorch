@@ -400,7 +400,11 @@ def _reduce_with_dtype(onnx_op, name, allow_multi_dim_support=True):
         @parse_args("v", "none")
         def reduce_nodim(g, self, dtype):
             if dtype.node().kind() != "prim::Constant":
-                return _unimplemented(name, "dtype")
+                if dtype.node().kind() == "onnx::Constant":
+                    dtype = sym_help._get_const(dtype, "i", "dtype")
+                    self = g.op("Cast", self, to_i=sym_help.scalar_type_to_onnx[dtype])
+                else:    
+                    return _unimplemented(name, "dtype")
             return symbolic(g, self)
 
         dim_desc = "is" if allow_multi_dim_support else "i"
@@ -408,7 +412,11 @@ def _reduce_with_dtype(onnx_op, name, allow_multi_dim_support=True):
         @parse_args("v", dim_desc, "i", "none")
         def reduce_dim(g, self, dim, keepdim, dtype):
             if dtype.node().kind() != "prim::Constant":
-                return _unimplemented(name, "dtype")
+                if dtype.node().kind() == "onnx::Constant":
+                    dtype = sym_help._get_const(dtype, "i", "dtype")
+                    self = g.op("Cast", self, to_i=sym_help.scalar_type_to_onnx[dtype])
+                else:    
+                    return _unimplemented(name, "dtype")
             return symbolic(g, self, dim, keepdim)
         return reduce_nodim, reduce_dim
     return reduce
