@@ -2,6 +2,7 @@
 
 #include <ATen/CPUFunctions.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/runtime/static/impl.h>
 
 namespace torch {
 namespace jit {
@@ -79,8 +80,8 @@ std::mutex& getNNCCacheMutex() {
   return nncCacheMutex;
 }
 
-std::unordered_map<NodeKind, std::shared_ptr<TEWrapper>>& getNNCCache() {
-  static std::unordered_map<NodeKind, std::shared_ptr<TEWrapper>> nncCache;
+FastMap<NodeKind, std::shared_ptr<TEWrapper>>& getNNCCache() {
+  static FastMap<NodeKind, std::shared_ptr<TEWrapper>> nncCache;
   return nncCache;
 }
 

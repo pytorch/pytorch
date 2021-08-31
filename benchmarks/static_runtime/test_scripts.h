@@ -762,3 +762,52 @@ const std::string quantize_script = R"IR(
       %1249: Tensor = aten::dequantize(%1254)
       return (%1249)
 )IR";
+
+const auto fmod_tensor = R"JIT(
+  def forward(self, a: Tensor, b: Tensor):
+      return torch.fmod(a, b).clone()
+)JIT";
+
+const auto fmod_scalar = R"JIT(
+  def forward(self, a: Tensor, b: int):
+      return torch.fmod(a, b).clone()
+)JIT";
+
+const std::string embedding_bag_byte_prepack_script = R"IR(
+  graph(%input: Tensor):
+      %none : None = prim::Constant()
+      %output: Tensor = quantized::embedding_bag_byte_prepack(%input)
+      %res: Tensor = aten::clone(%output, %none)
+      return (%res)
+)IR";
+
+const auto linalg_norm_ord_scalar = R"JIT(
+  def forward(self, a: Tensor, ord: int, dim: List[int], keepdim: bool, dtype: int):
+      return torch.linalg_norm(a, ord, dim, keepdim, dtype=dtype).clone()
+)JIT";
+
+const auto linalg_norm_ord_str = R"JIT(
+  def forward(self, a: Tensor, ord: str, dim: List[int], keepdim: bool, dtype: int):
+      return torch.linalg_norm(a, ord, dim, keepdim, dtype=dtype).clone()
+)JIT";
+
+const std::string cat_script = R"IR(
+  graph(%a: Tensor, %b: Tensor, %dim: int):
+      %ten_list: Tensor[] = prim::ListConstruct(%a, %b)
+      %1 : int = prim::Constant[value=0]()
+      %2 : int = prim::Constant[value=1]()
+      %3 : int = prim::Constant[value=1]()
+      %ten_list2 : Tensor[] = aten::slice(%ten_list, %1, %2, %3)
+      %ret: Tensor = aten::cat(%ten_list2, %dim)
+      return (%ret)
+)IR";
+
+const auto cumsum_script = R"JIT(
+   def forward(self, a: Tensor, dim: int):
+      return torch.cumsum(a, dim).clone()
+)JIT";
+
+const auto cumsum_script_dtype = R"JIT(
+   def forward(self, a: Tensor, dim: int, dtype: int):
+      return torch.cumsum(a, dim, dtype=dtype).clone()
+)JIT";
