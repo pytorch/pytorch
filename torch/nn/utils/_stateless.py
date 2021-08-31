@@ -1,37 +1,56 @@
-def _replicate_submodules(top_module):
-    for name, module in top_module.named_modules():
-        if module is top_module:
-            continue
-        empty_submodule = module._replicate_empty()
-        top_module._modules[name] = empty_submodule
-        _replicate_submodules(empty_submodule)
+import contextlib
+
+import torch
 
 
-def _set_param_in_submodule(module, path, parameter):
+def _get_module_parameters_and_buffers(module):
+    """Helper function that returns a dictionary
+    with only parameters and buffers, we don't use state_dict as it might
+    be polluted with module attributes.
+    """
+    parameters_and_buffers = dict(module.named_parameters())
+    parameters_and_buffers.update(dict(module.named_buffers))
+    # TODO: clean entries that are already parameterized?
+    # params with weight norm/spectral norm applied
+    return parameters_and_buffers
+
+@contextlib.contextmanager
+def reparametrize_module(module, parameters_and_buffers):
+    # Parametrization does not support to change submodules directly
+    for name, tensor in parameters_and_buffers.items():
+        _reparametrize_in_submodule(module, name.split("."), tensor)
+    yield
+    for name in parameters_and_buffers:
+        _remove_reparametrize_in_submodule(module, name.split("."))
+
+class _ReparametrizedTensor(torch.nn.Module):
+    def __init__(self, tensor):
+        super().__init__()
+        self._tensor = tensor
+
+    def forward(self, original):
+        return self._tensor
+
+def _reparametrize_in_submodule(module, path, tensor):
     if len(path) == 1:
-        module._parameters[path[0]] = parameter
+        # We should be careful as the current API does not allow to reparametrize
+        # already reparametrized parameters
+        torch.nn.utils.parametrize.register_parametrization(
+            module, path[0], _ReparametrizedTensor(tensor))
     else:
-        _set_param_in_submodule(module._modules[path[0]], path[1:], parameter)
+        _reparametrize_in_submodule(module._modules[path[0]], path[1:], tensor)
 
-
-def _set_buffer_in_submodule(module, path, buffer):
+def _remove_reparametrize_in_submodule(module, path):
     if len(path) == 1:
-        module._buffers[path[0]] = buffer
+        torch.nn.utils.parametrize.remove_parametrizations(
+            module, path[0], False)
     else:
-        _set_buffer_in_submodule(module._modules[path[0]], path[1:], buffer)
+        _remove_reparametrize_in_submodule(
+            module._modules[path[0]], path[1:])
 
 
-def functional_call(module, named_parameters, named_buffers, *inputs, **kwargs):
-    # We create a replica without parameters/buffers so we avoid modifying the
-    # actual module state
-    empty_replica = module._replicate_empty()
-    _replicate_submodules(empty_replica)
-
-    # Sets the parameters and buffers to the module
-    for name, parameter in named_parameters.items():
-        _set_param_in_submodule(empty_replica, name.split("."), parameter)
-    for name, buffer in named_buffers.items():
-        _set_buffer_in_submodule(empty_replica, name.split("."), buffer)
-    # The replica module will be automatically destroyed
-    # So we don't need to touch the real module state
-    return empty_replica(*inputs, **kwargs)
+def functional_call(module, parameters_and_buffers, *inputs, **kwargs):
+    # TODO allow kwargs such as unsafe and others for parametrization
+    with reparametrize_module(module, parameters_and_buffers):
+        out = module(*inputs, **kwargs)
+    return out
