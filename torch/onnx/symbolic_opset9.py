@@ -1128,10 +1128,10 @@ def wrap_logical_op_with_negation(func):
 
 
 def __not_(g, self):
-    if inp.type().scalarType() != "Bool":
+    if self.type().scalarType() != "Bool":
         raise NotImplementedError("ONNX export does NOT support exporting bitwise Not " +
                                   "for non-boolean input values")
-    return g.op("Not", inp)
+    return g.op("Not", self)
 
 
 def eq(g, self, other):
