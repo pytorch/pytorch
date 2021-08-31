@@ -17,7 +17,7 @@ int64_t Value::intValue() const {
   }
   AT_FORALL_INT_TYPES(TYPE_CASE);
 #undef TYPE_CASE
-  throw unsupported_dtype();
+  throw unsupported_dtype(buildErrorMessage(""));
   return 0;
 }
 
@@ -35,7 +35,8 @@ mod_value(T lhs, T rhs) {
 }
 
 inline bool mod_value(bool lhs, bool rhs) {
-  throw std::runtime_error("Attempted modulus of bool");
+  throw std::runtime_error(
+      buildErrorMessage("Eval: Attempted modulus of bool."));
 }
 
 template <typename T>
@@ -196,7 +197,8 @@ class SimpleIREvaluatorImpl : public IRVisitor {
           break;
         default:
           // TODO: change to a proper error report
-          throw std::runtime_error("invalid operator type");
+          throw std::runtime_error(
+              buildErrorMessage("Eval: Invalid operator type."));
       }
     }
     return Value(result_v);
@@ -223,7 +225,8 @@ class SimpleIREvaluatorImpl : public IRVisitor {
           break;
         default:
           // TODO: change to a proper error report
-          throw std::runtime_error("invalid operator type");
+          throw std::runtime_error(
+              buildErrorMessage("Eval: Invalid operator type."));
       }
     }
     return Value(result_v);
@@ -250,7 +253,8 @@ class SimpleIREvaluatorImpl : public IRVisitor {
           break;
         default:
           // TODO: change to a proper error report
-          throw std::runtime_error("invalid operator type");
+          throw std::runtime_error(
+              buildErrorMessage("Eval: Invalid operator type."));
       }
     }
     return Value(result_v);
@@ -290,7 +294,8 @@ class SimpleIREvaluatorImpl : public IRVisitor {
           break;
         default:
           // TODO: change to a proper error report
-          throw std::runtime_error("invalid operator type");
+          throw std::runtime_error(
+              buildErrorMessage("Eval: Invalid operator type."));
       }
     }
     return Value(result_v);
@@ -307,7 +312,8 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     v->rhs()->accept(this);
     Value rhs_v = value_;
     if (lhs_v.dtype() != rhs_v.dtype()) {
-      throw malformed_input("bad dtype in binary op", v);
+      throw malformed_input(buildErrorMessage(
+          "Eval: bad dtype in binary op " + std::to_string(v)));
     }
 
     IRNodeType expr_type = v->expr_type();
@@ -324,7 +330,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
           value_ = bitwise_binary_op<unsigned char>(lhs_v, rhs_v, expr_type);
           break;
         default:
-          throw unsupported_dtype();
+          throw unsupported_dtype(buildErrorMessage(""));
       }
       return;
     }
@@ -341,7 +347,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
           value_ = shift_binary_op<unsigned char>(lhs_v, rhs_v, expr_type);
           break;
         default:
-          throw unsupported_dtype();
+          throw unsupported_dtype(buildErrorMessage(""));
       }
       return;
     }
@@ -357,7 +363,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
         value_ = binary_op<unsigned char>(lhs_v, rhs_v, expr_type);
         break;
       default:
-        throw unsupported_dtype();
+        throw unsupported_dtype(buildErrorMessage(""));
     }
   }
 
@@ -377,7 +383,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
 #undef TYPE_CASE
       default:
-        throw unsupported_dtype();
+        throw unsupported_dtype(buildErrorMessage(""));
     }
 
     return value;
@@ -397,7 +403,8 @@ class SimpleIREvaluatorImpl : public IRVisitor {
 
     if (lhs_v.dtype() != rhs_v.dtype() ||
         ret_val1_v.dtype() != ret_val2_v.dtype()) {
-      throw malformed_input("bad dtype in CompareSelect", v);
+      throw malformed_input(buildErrorMessage(
+          "Eval: bad dtype in CompareSelect" + std::to_string(v)));
     }
 
     switch (lhs_v.dtype().scalar_type()) {
@@ -409,7 +416,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
 #undef TYPE_CASE
       default:
-        throw unsupported_dtype();
+        throw unsupported_dtype(buildErrorMessage(""));
     }
   }
 
@@ -441,7 +448,8 @@ class SimpleIREvaluatorImpl : public IRVisitor {
   TORCH_API void visit(VarPtr v) override {
     auto iter = eval_context_.find(v);
     if (iter == eval_context_.end()) {
-      throw malformed_input("could not find Var in context", v);
+      throw malformed_input(buildErrorMessage(
+          "Eval: could not find Var in context" + std::to_string(v)));
     }
 
     value_ = iter->second;
@@ -471,7 +479,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, DST_TYPE_CASE);
 #undef DST_TYPE_CASE
       default:
-        throw unsupported_dtype();
+        throw unsupported_dtype(buildErrorMessage(""));
     }
   }
 
@@ -481,7 +489,8 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     Dtype dst_dtype = v->dtype();
     Dtype src_dtype = src_value->dtype();
     if (src_dtype.lanes() != dst_dtype.lanes()) {
-      throw malformed_input("lane mismatch in Cast", v);
+      throw malformed_input(
+          buildErrorMessage("Eval: lane mismatch in Cast" + std::to_string(v)));
     }
 
     if (src_dtype != dst_dtype) {
@@ -493,7 +502,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
         AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, SRC_TYPE_CASE);
 #undef SRC_TYPE_CASE
         default:
-          throw unsupported_dtype();
+          throw unsupported_dtype(buildErrorMessage(""));
       }
     }
   }
@@ -522,7 +531,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       AT_FORALL_SCALAR_TYPES(DST_TYPE_CASE);
 #undef DST_TYPE_CASE
       default:
-        throw unsupported_dtype();
+        throw unsupported_dtype(buildErrorMessage(""));
     }
   }
 
@@ -532,7 +541,8 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     Dtype dst_dtype = v->dtype();
     Dtype src_dtype = src_value->dtype();
     if (src_dtype.byte_size() != dst_dtype.byte_size()) {
-      throw malformed_input("lane mismatch in Cast", v);
+      throw malformed_input(
+          buildErrorMessage("Eval: lane mismatch in Cast" + std::to_string(v)));
     }
     if (src_dtype != dst_dtype) {
       switch (src_dtype.scalar_type()) {
@@ -544,7 +554,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
         AT_FORALL_SCALAR_TYPES(SRC_TYPE_CASE);
 #undef SRC_TYPE_CASE
         default:
-          throw unsupported_dtype();
+          throw unsupported_dtype(buildErrorMessage(""));
       }
     }
   }
@@ -557,7 +567,8 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     v->stop()->accept(this);
     auto stop = value_.intValue();
     if (eval_context_.count(var_node)) {
-      throw malformed_input("could not find var_node in For context", v);
+      throw malformed_input(buildErrorMessage(
+          "Eval: could not find var_node in For context" + std::to_string(v)));
     }
 
     for (auto i = start; i < stop; i++) {
@@ -597,7 +608,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
 #undef TYPE_CASE
       default:
-        throw unsupported_dtype();
+        throw unsupported_dtype(buildErrorMessage(""));
     }
   }
 
@@ -613,12 +624,13 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       AT_FORALL_SCALAR_TYPES_AND(Bool, TYPE_CASE);
 #undef TYPE_CASE
       case ScalarType::Half:
-        throw unsupported_dtype("IfThenElse condition can't have Half dtype");
+        throw unsupported_dtype(buildErrorMessage(
+            "Eval: IfThenElse condition can't have Half dtype."));
       case ScalarType::BFloat16:
-        throw unsupported_dtype(
-            "IfThenElse condition can't have BFloat16 dtype");
+        throw unsupported_dtype(buildErrorMessage(
+            "Eval: IfThenElse condition can't have BFloat16 dtype."));
       default:
-        throw unsupported_dtype();
+        throw unsupported_dtype(buildErrorMessage(""));
     }
 
     if (cond_v) {
@@ -641,7 +653,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       AT_FORALL_INT_TYPES(TYPE_CASE);
 #undef TYPE_CASE
       default:
-        throw unsupported_dtype();
+        throw unsupported_dtype(buildErrorMessage(""));
     }
     return {};
   }
@@ -649,7 +661,8 @@ class SimpleIREvaluatorImpl : public IRVisitor {
   TORCH_API void visit(LoadPtr v) override {
     auto iter = buffer_mapping_.find(v->buf());
     if (iter == buffer_mapping_.end()) {
-      throw malformed_input("could not find base node in Load", v);
+      throw malformed_input(buildErrorMessage(
+          "Eval: could not find base node in Load" + std::to_string(v)));
     }
     void* ptr = iter->second;
 
@@ -670,14 +683,15 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
 #undef TYPE_CASE
       default:
-        throw unsupported_dtype();
+        throw unsupported_dtype(buildErrorMessage(""));
     }
   }
 
   TORCH_API void visit(StorePtr v) override {
     auto iter = buffer_mapping_.find(v->buf());
     if (iter == buffer_mapping_.end()) {
-      throw malformed_input("could not find base node in Store", v);
+      throw malformed_input(buildErrorMessage(
+          "Eval: could not find base node in Store" + std::to_string(v)));
     }
 
     void* ptr = iter->second;
@@ -688,29 +702,30 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     ScalarType v_sdtype = v->value()->dtype().scalar_type();
 
     switch (v_sdtype) {
-#define TYPE_CASE(Type, Name)                                   \
-  case ScalarType::Name: {                                      \
-    v->value()->accept(this);                                   \
-    std::vector<Type> value = this->value().as_vec<Type>();     \
-    if (index.size() != value.size()) {                         \
-      throw malformed_input("value size mismatch in Store", v); \
-    }                                                           \
-    Type* ptr##Name = static_cast<Type*>(ptr);                  \
-    for (const auto i : c10::irange(index.size())) {            \
-      ptr##Name[index[i]] = value[i];                           \
-    }                                                           \
+#define TYPE_CASE(Type, Name)                                         \
+  case ScalarType::Name: {                                            \
+    v->value()->accept(this);                                         \
+    std::vector<Type> value = this->value().as_vec<Type>();           \
+    if (index.size() != value.size()) {                               \
+      throw malformed_input(buildErrorMessage(                        \
+          "Eval: value size mismatch in Store" + std::to_string(v))); \
+    }                                                                 \
+    Type* ptr##Name = static_cast<Type*>(ptr);                        \
+    for (const auto i : c10::irange(index.size())) {                  \
+      ptr##Name[index[i]] = value[i];                                 \
+    }                                                                 \
   } break;
       AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
 #undef TYPE_CASE
       default:
-        throw unsupported_dtype();
+        throw unsupported_dtype(buildErrorMessage(""));
     }
   }
 
   void visit(ExternalCallPtr v) override {
     auto& func_registry = getNNCFunctionRegistry();
     if (!func_registry.count(v->func_name())) {
-      throw unimplemented_lowering(v);
+      throw unimplemented_lowering(buildErrorMessage(std::to_string(v)));
     }
 
     std::vector<BufPtr> bufs(v->buf_args());
@@ -725,7 +740,8 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     for (BufPtr b : bufs) {
       auto iter = buffer_mapping_.find(b);
       if (iter == buffer_mapping_.end()) {
-        throw malformed_input("could not find buf", v);
+        throw malformed_input(
+            buildErrorMessage("Eval: could not find buf" + std::to_string(v)));
       }
 
       buf_ptrs.push_back(iter->second);
@@ -745,8 +761,9 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       } else if (value().dtype() == kInt) {
         val = value().intValue();
       } else {
-        throw malformed_input(
-            "extra_args in ExternalCalls must have int64 dtype", v);
+        throw malformed_input(buildErrorMessage(
+            "Eval: extra_args in ExternalCalls must have int64 dtype" +
+            std::to_string(v)));
       }
       extra_args.push_back(val);
     }
@@ -777,12 +794,13 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     if (values.size() >= 2ULL) {
       v2 = values[1].as_vec<TInput>();
       if (v1.size() != v2.size()) {
-        throw malformed_input("value size mismatch in Intrinsics", v);
+        throw malformed_input(buildErrorMessage(
+            "Eval: value size mismatch in Intrinsics" + std::to_string(v)));
       }
     }
 
     if (values.size() > 2) {
-      throw unimplemented_lowering(v);
+      throw unimplemented_lowering(buildErrorMessage(std::to_string(v)));
     }
 
     std::vector<TReturn> result(v1.size(), -1);
@@ -837,9 +855,9 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     std::unique_ptr<std::vector<int>> buffer(new std::vector<int>(int_count));
     auto iter = buffer_mapping_.find(b);
     if (iter != buffer_mapping_.end() && iter->second != nullptr) {
-      throw std::runtime_error(
-          "Allocate a buffer that has already been allocated: " +
-          v->buffer_var()->name_hint());
+      throw std::runtime_error(buildErrorMessage(
+          "Allocating a buffer that has already been allocated: " +
+          v->buffer_var()->name_hint()));
     }
     buffer_mapping_[b] = buffer->data();
     internal_buffers_.insert(std::make_pair(b, std::move(buffer)));
@@ -849,9 +867,9 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     BufPtr b = v->buf();
     int count = internal_buffers_.erase(b);
     if (count == 0) {
-      throw std::runtime_error(
-          "Free a buffer that is not currently bound: " +
-          v->buffer_var()->name_hint());
+      throw std::runtime_error(buildErrorMessage(
+          "Freeing a buffer that is not currently bound: " +
+          v->buffer_var()->name_hint()));
     }
     buffer_mapping_.erase(b);
   }
@@ -942,7 +960,8 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       case kIsNan:
         return std::isnan(v);
       default:
-        throw std::runtime_error("Invalid op_type: " + c10::to_string(op_type));
+        throw std::runtime_error(buildErrorMessage(
+            "Eval: Invalid op_type: " + c10::to_string(op_type)));
     }
   }
 
@@ -961,8 +980,8 @@ class SimpleIREvaluatorImpl : public IRVisitor {
                                                : std::abs(static_cast<X>(v));
       }
       default:
-        throw std::runtime_error(
-            "Invalid integral op_type: " + c10::to_string(op_type));
+        throw std::runtime_error(buildErrorMessage(
+            "Eval: Invalid integral op_type: " + c10::to_string(op_type)));
     }
   }
 
@@ -972,7 +991,8 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       case kIsNan:
         return std::isnan(v);
       default:
-        throw std::runtime_error("Invalid op_type: " + c10::to_string(op_type));
+        throw std::runtime_error(buildErrorMessage(
+            "Eval: Invalid op_type: " + c10::to_string(op_type)));
     }
   }
 
@@ -988,7 +1008,8 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       case kAtan2:
         return std::atan2(v1, v2);
       default:
-        throw std::runtime_error("Invalid op_type: " + c10::to_string(op_type));
+        throw std::runtime_error(buildErrorMessage(
+            "Eval: Invalid op_type: " + c10::to_string(op_type)));
     }
   }
 
@@ -1025,7 +1046,8 @@ void SimpleIREvaluator::call(const std::vector<CallArg>& args) {
 
 void SimpleIREvaluator::call_raw(const std::vector<void*>& args) {
   if (args.size() != buffer_args().size()) {
-    throw malformed_input("bad args in IREvaluator call");
+    throw malformed_input(
+        buildErrorMessage("Eval: bad args in IREvaluator call"));
   }
   for (const auto i : c10::irange(args.size())) {
     bindArg(buffer_args()[i], args[i]);
@@ -1051,7 +1073,7 @@ void SimpleIREvaluator::bindArg(const BufferArg& bufArg, void* data) {
     AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
 #undef TYPE_CASE
     default:
-      throw unsupported_dtype();
+      throw unsupported_dtype(buildErrorMessage(""));
   }
 }
 

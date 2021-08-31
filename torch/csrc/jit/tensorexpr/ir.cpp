@@ -85,7 +85,8 @@ ExprPtr flatten_index(
 
   size_t ndim = dims.size();
   if (ndim != indices.size()) {
-    throw malformed_input("dimensions mismatch in flatten_index");
+    throw malformed_input(
+        buildErrorMessage("Dimensions mismatch in flatten_index"));
   }
   if (ndim == 0) {
     return alloc<LongImm>(0);
@@ -124,7 +125,7 @@ Dtype Intrinsics::IntrinsicsDtype(
   // TODO: check the op_type and make a real decision
   // Doesnt this fail with kRand?
   if (params.size() == 0) {
-    throw malformed_input("invalid params in Intrinsics");
+    throw malformed_input(buildErrorMessage("Invalid params in Intrinsics"));
   } else if (params.size() == 1) {
     return IntrinsicsDtype(op_type, params[0]->dtype());
   } else if (params.size() == 2) {
@@ -172,7 +173,8 @@ int Intrinsics::OpArgCount(IntrinsicsOp op_type) {
     case kRemainder:
       return 2;
     default:
-      throw std::runtime_error("invalid op_type: " + c10::to_string(op_type));
+      throw std::runtime_error(
+          buildErrorMessage("Invalid op_type: " + c10::to_string(op_type)));
   }
 }
 

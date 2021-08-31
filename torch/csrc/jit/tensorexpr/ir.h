@@ -217,10 +217,10 @@ class BitwiseOpNode : public BinaryOpNode<Op> {
 
   static ExprHandle make(const ExprHandle& lhs, const ExprHandle& rhs) {
     if (!lhs.dtype().is_integral()) {
-      throw unsupported_dtype();
+      throw unsupported_dtype(buildErrorMessage(""));
     }
     if (lhs.dtype() != rhs.dtype()) {
-      throw malformed_input("lhs/rhs dtype mismatch");
+      throw malformed_input(buildErrorMessage("lhs/rhs dtype mismatch"));
     }
     return BinaryOpNode<Op>::make(lhs, rhs);
   }
@@ -334,7 +334,7 @@ ExprPtr getImmediateByType(ScalarType immType, T initialVal) {
     AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
 #undef TYPE_CASE
     default:
-      throw unsupported_dtype();
+      throw unsupported_dtype(buildErrorMessage(""));
   }
   return nullptr;
 }
@@ -376,7 +376,7 @@ T immediateAs(ExprPtr e) {
   }
   AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
 #undef TYPE_CASE
-  throw unsupported_dtype();
+  throw unsupported_dtype(buildErrorMessage(""));
   return 0;
 }
 
@@ -393,7 +393,7 @@ bool immediateEquals(ExprPtr e, T val) {
   }
   AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
 #undef TYPE_CASE
-  throw unsupported_dtype();
+  throw unsupported_dtype(buildErrorMessage(""));
   return false;
 }
 
@@ -423,7 +423,7 @@ class TORCH_API Ramp : public ExprNode<Ramp> {
       const ExprHandle& stride,
       int lanes) {
     if (stride.dtype() != base.dtype()) {
-      throw malformed_input("Bad stride in Ramp");
+      throw malformed_input(buildErrorMessage("Bad stride in Ramp"));
     }
     return ExprHandle(alloc<Ramp>(base.node(), stride.node(), lanes));
   }
@@ -542,13 +542,13 @@ class TORCH_API IfThenElse : public ExprNode<IfThenElse> {
       const ExprHandle& t,
       const ExprHandle& f) {
     if (!c.dtype().is_integral()) {
-      throw unsupported_dtype();
+      throw unsupported_dtype(buildErrorMessage(""));
     }
     if (c.dtype().lanes() != 1) {
-      throw unsupported_dtype();
+      throw unsupported_dtype(buildErrorMessage(""));
     }
     if (t.dtype() != f.dtype()) {
-      throw malformed_input("Bad dtype in IfThenElse");
+      throw malformed_input(buildErrorMessage("Bad dtype in IfThenElse"));
     }
     return ExprHandle(alloc<IfThenElse>(c.node(), t.node(), f.node()));
   }
@@ -606,7 +606,7 @@ class TORCH_API CompareSelect : public ExprNode<CompareSelect> {
       CompareSelectOperation cmp_op,
       CompareSelectBias bias = kUnbiased) {
     if (lhs.dtype() != rhs.dtype()) {
-      throw malformed_input("bad dtype in CompareSelect");
+      throw malformed_input(buildErrorMessage("Bad dtype in CompareSelect"));
     }
     return ExprHandle(alloc<CompareSelect>(
         lhs.node(),
@@ -625,7 +625,7 @@ class TORCH_API CompareSelect : public ExprNode<CompareSelect> {
       CompareSelectOperation cmp_op,
       CompareSelectBias bias = kUnbiased) {
     if (lhs.dtype() != rhs.dtype() || ret_val1.dtype() != ret_val2.dtype()) {
-      throw malformed_input("bad dtype in CompareSelect");
+      throw malformed_input(buildErrorMessage("Bad dtype in CompareSelect"));
     }
     return ExprHandle(alloc<CompareSelect>(
         lhs.node(),
@@ -813,7 +813,7 @@ class TORCH_API Intrinsics : public ExprNode<Intrinsics> {
         return "isnan";
       default:
         throw std::runtime_error(
-            "invalid op_type: " + c10::to_string(op_type()));
+            buildErrorMessage("Invalid op_type: " + c10::to_string(op_type())));
     }
   }
 
@@ -823,7 +823,7 @@ class TORCH_API Intrinsics : public ExprNode<Intrinsics> {
         params_({}),
         op_type_(op_type) {
     if (OpArgCount(op_type) != 0) {
-      throw malformed_input("bad arg count in Intrinsics");
+      throw malformed_input(buildErrorMessage("Bad arg count in Intrinsics"));
     }
   }
 
@@ -833,7 +833,7 @@ class TORCH_API Intrinsics : public ExprNode<Intrinsics> {
         params_({v1}),
         op_type_(op_type) {
     if (OpArgCount(op_type) != 1) {
-      throw malformed_input("bad arg count in Intrinsics");
+      throw malformed_input(buildErrorMessage("Bad arg count in Intrinsics"));
     }
   }
 
@@ -843,7 +843,7 @@ class TORCH_API Intrinsics : public ExprNode<Intrinsics> {
         params_({v1, v2}),
         op_type_(op_type) {
     if (OpArgCount(op_type) != 2) {
-      throw malformed_input("bad arg count in Intrinsics");
+      throw malformed_input(buildErrorMessage("Bad arg count in Intrinsics"));
     }
   }
 
@@ -853,7 +853,7 @@ class TORCH_API Intrinsics : public ExprNode<Intrinsics> {
         params_(params),
         op_type_(op_type) {
     if (OpArgCount(op_type) != nparams()) {
-      throw malformed_input("bad arg count in Intrinsics");
+      throw malformed_input(buildErrorMessage("Bad arg count in Intrinsics"));
     }
   }
 
@@ -866,7 +866,7 @@ class TORCH_API Intrinsics : public ExprNode<Intrinsics> {
         params_(params),
         op_type_(op_type) {
     if (OpArgCount(op_type) != nparams()) {
-      throw malformed_input("bad arg count in Intrinsics");
+      throw malformed_input(buildErrorMessage("Bad arg count in Intrinsics"));
     }
   }
 

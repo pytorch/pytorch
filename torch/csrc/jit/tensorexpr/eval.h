@@ -38,7 +38,7 @@ class Value {
   }
     AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
 #undef TYPE_CASE
-    throw unsupported_dtype();
+    throw unsupported_dtype(buildErrorMessage(""));
   }
 
 #define VALUE_CTOR(Type, Name)      \
@@ -77,13 +77,13 @@ class Value {
   void* ptr;
 };
 
-#define VALUE_AS_DISPATCH(Type, Name)   \
-  template <>                           \
-  inline Type Value::as<Type>() const { \
-    if (dtype_ != k##Name) {            \
-      throw unsupported_dtype();        \
-    }                                   \
-    return Name##values[0];             \
+#define VALUE_AS_DISPATCH(Type, Name)                 \
+  template <>                                         \
+  inline Type Value::as<Type>() const {               \
+    if (dtype_ != k##Name) {                          \
+      throw unsupported_dtype(buildErrorMessage("")); \
+    }                                                 \
+    return Name##values[0];                           \
   }
 AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, VALUE_AS_DISPATCH);
 #undef VALUE_AS_DISPATCH
@@ -92,7 +92,7 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, VALUE_AS_DISPATCH);
   template <>                                                   \
   inline const std::vector<Type>& Value::as_vec<Type>() const { \
     if (dtype_.scalar_type() != ScalarType::Name) {             \
-      throw unsupported_dtype();                                \
+      throw unsupported_dtype(buildErrorMessage(""));           \
     }                                                           \
     return Name##values;                                        \
   }
@@ -216,7 +216,7 @@ class ExprEval {
         ret_value_ = Value((bool)ret_val_arg[0]);
       } break;
       default:
-        throw unsupported_dtype();
+        throw unsupported_dtype(buildErrorMessage(""));
     }
   }
 
@@ -241,7 +241,7 @@ class ExprEval {
         ret_value_ = Value((bool)ret_val_arg[0]);
       } break;
       default:
-        throw unsupported_dtype();
+        throw unsupported_dtype(buildErrorMessage(""));
     }
   }
 

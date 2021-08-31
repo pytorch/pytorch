@@ -52,7 +52,7 @@ ExprHandle ExprHandle::operator<=(const ExprHandle& other) const {
 
 ExprHandle ExprHandle::operator&&(const ExprHandle& other) const {
   if (!this->node()->dtype().is_integral()) {
-    throw unsupported_dtype();
+    throw unsupported_dtype(buildErrorMessage(""));
   }
   return IfThenElse::make(
       *this, other, ExprHandle(getImmediateByType(other.dtype(), 0)));
@@ -60,7 +60,7 @@ ExprHandle ExprHandle::operator&&(const ExprHandle& other) const {
 
 ExprHandle ExprHandle::operator||(const ExprHandle& other) const {
   if (!this->node()->dtype().is_integral()) {
-    throw unsupported_dtype();
+    throw unsupported_dtype(buildErrorMessage(""));
   }
   return IfThenElse::make(
       *this, ExprHandle(getImmediateByType(other.dtype(), 1)), other);

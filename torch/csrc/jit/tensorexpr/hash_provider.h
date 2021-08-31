@@ -191,14 +191,14 @@ class TORCH_API HashProvider : public IRVisitor {
     auto res = exprToHash_.emplace(e, h);
     if (res.second == false) {
       // This is always a logic bug since we should check the cache first.
-      throw std::runtime_error("hash collision");
+      throw std::runtime_error(buildErrorMessage("hash collision"));
     }
   }
   void putHash(StmtPtr s, SimplifierHashType h) {
     auto res = stmtToHash_.emplace(s, h);
     if (res.second == false) {
       // This is always a logic bug since we should check the cache first.
-      throw std::runtime_error("hash collision");
+      throw std::runtime_error(buildErrorMessage("hash collision"));
     }
   }
 

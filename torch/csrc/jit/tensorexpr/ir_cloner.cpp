@@ -48,7 +48,7 @@ static ExprPtr mutate_binary_op(
     case IRNodeType::kRshift:
       return alloc<Rshift>(lhs_new, rhs_new);
     default:
-      throw unimplemented_lowering(v);
+      throw unimplemented_lowering(buildErrorMessage(std::to_string(v)));
   }
 }
 

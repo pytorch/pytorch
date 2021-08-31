@@ -231,7 +231,7 @@ class TORCH_API Buf : public ExprNode<Buf> {
   }
   ExprPtr dim(size_t index) const {
     if (index >= ndim()) {
-      throw out_of_range_index();
+      throw out_of_range_index(buildErrorMessage(""));
     }
     return dims_[index];
   }
