@@ -725,6 +725,7 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
     case aten::sinh:
     case aten::atan:
     case aten::tanh:
+    case aten::tanhshrink:
     case aten::hardtanh:
     case aten::hardsigmoid:
     case aten::hardswish:
@@ -1999,6 +2000,17 @@ Tensor tensorexpr::computeOperandValue(
           outputType,
           [](const ExprHandle& a) {
             return tanh(promoteIntegerToDefaultType(a));
+          });
+    } break;
+
+    case aten::tanhshrink: {
+      return computeOneOperand(
+          "aten_tanhshrink",
+          inputs,
+          outputShape,
+          outputType,
+          [](const ExprHandle& a) {
+            return a - tanh(promoteIntegerToDefaultType(a));
           });
     } break;
 

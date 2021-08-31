@@ -691,6 +691,7 @@ _(aten, take_along_dim) \
 _(aten, tan) \
 _(aten, tanh) \
 _(aten, tanh_) \
+_(aten, tanhshrink) \
 _(aten, tensor) \
 _(aten, tensordot) \
 _(aten, tensor_split) \
