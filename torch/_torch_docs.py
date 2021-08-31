@@ -9679,7 +9679,7 @@ See also :func:`torch.t`.
 
 add_docstr(torch.triangular_solve,
            r"""
-triangular_solve(b, A, upper=True, transpose=False, unitriangular=False) -> (Tensor, Tensor)
+triangular_solve(b, A, upper=True, transpose=False, unitriangular=False, *, out=None) -> (Tensor, Tensor)
 
 Solves a system of equations with a triangular coefficient matrix :math:`A`
 and multiple right-hand sides :math:`b`.
@@ -9705,6 +9705,10 @@ Args:
     unitriangular (bool, optional): whether :math:`A` is unit triangular.
         If True, the diagonal elements of :math:`A` are assumed to be
         1 and not referenced from :math:`A`. Default: ``False``.
+
+Keyword args:
+    out ((Tensor, Tensor), optional): tuple of two tensors to write
+        the output to. Ignored if `None`. Default: `None`.
 
 Returns:
     A namedtuple `(solution, cloned_coefficient)` where `cloned_coefficient`
