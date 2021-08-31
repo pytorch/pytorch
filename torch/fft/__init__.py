@@ -819,7 +819,7 @@ Args:
     input (Tensor): the input tensor
     s (Tuple[int], optional): Signal size in the transformed dimensions.
         If given, each dimension ``dim[i]`` will either be zero-padded or
-        trimmed to the length ``s[i]`` before computing the hermitian FFT.
+        trimmed to the length ``s[i]`` before computing the Hermitian FFT.
         If a length ``-1`` is specified, no padding is done in that dimension.
         Defaults to even output in the last dimension:
         ``s[-1] = 2*(input.size(dim[-1]) - 1)``.
@@ -831,7 +831,7 @@ Args:
 
         * ``"forward"`` - normalize by ``1/n``
         * ``"backward"`` - no normalization
-        * ``"ortho"`` - normalize by ``1/sqrt(n)`` (making the hermitian FFT orthonormal)
+        * ``"ortho"`` - normalize by ``1/sqrt(n)`` (making the Hermitian FFT orthonormal)
 
         Where ``n = prod(s)`` is the logical FFT size.
         Calling the backward transform (:func:`~torch.fft.ihfft2`) with the same
@@ -879,7 +879,7 @@ Args:
     input (Tensor): the input tensor
     s (Tuple[int], optional): Signal size in the transformed dimensions.
         If given, each dimension ``dim[i]`` will either be zero-padded or
-        trimmed to the length ``s[i]`` before computing the hermitian IFFT.
+        trimmed to the length ``s[i]`` before computing the Hermitian IFFT.
         If a length ``-1`` is specified, no padding is done in that dimension.
         Default: ``s = [input.size(d) for d in dim]``
     dim (Tuple[int], optional): Dimensions to be transformed.
@@ -889,7 +889,7 @@ Args:
 
         * ``"forward"`` - no normalization
         * ``"backward"`` - normalize by ``1/n``
-        * ``"ortho"`` - normalize by ``1/sqrt(n)`` (making the hermitian IFFT orthonormal)
+        * ``"ortho"`` - normalize by ``1/sqrt(n)`` (making the Hermitian IFFT orthonormal)
 
         Where ``n = prod(s)`` is the logical IFFT size.
         Calling the forward transform (:func:`~torch.fft.hfft2`) with the same
@@ -910,7 +910,7 @@ Example:
     torch.Size([10, 6])
 
     Compared against the full output from :func:`~torch.fft.ifft2`, the
-    hermitian time-space signal takes up only half the space.
+    Hermitian time-space signal takes up only half the space.
 
     >>> fftn = torch.fft.ifft2(t)
     >>> torch.allclose(fftn[..., :6], rfftn)
@@ -922,6 +922,7 @@ Example:
 
     >>> two_ffts = torch.fft.ifft(torch.fft.ihfft(t, dim=1), dim=0)
     >>> torch.allclose(t, two_ffts)
+    True
 
 """.format(**common_args))
 
@@ -954,7 +955,7 @@ Note:
     the original data, as given by :attr:`s`. This is because each input shape
     could correspond to either an odd or even length signal. By default, the
     signal is assumed to be even length and odd signals will not round-trip
-    properly. So, it is recommended to always pass the signal shape :attr:`s`.
+    properly. It is recommended to always pass the signal shape :attr:`s`.
 
 Args:
     input (Tensor): the input tensor
@@ -972,7 +973,7 @@ Args:
 
         * ``"forward"`` - normalize by ``1/n``
         * ``"backward"`` - no normalization
-        * ``"ortho"`` - normalize by ``1/sqrt(n)`` (making the hermitian FFT orthonormal)
+        * ``"ortho"`` - normalize by ``1/sqrt(n)`` (making the Hermitian FFT orthonormal)
 
         Where ``n = prod(s)`` is the logical FFT size.
         Calling the backward transform (:func:`~torch.fft.ihfftn`) with the same
@@ -1025,7 +1026,7 @@ Args:
     input (Tensor): the input tensor
     s (Tuple[int], optional): Signal size in the transformed dimensions.
         If given, each dimension ``dim[i]`` will either be zero-padded or
-        trimmed to the length ``s[i]`` before computing the hermitian IFFT.
+        trimmed to the length ``s[i]`` before computing the Hermitian IFFT.
         If a length ``-1`` is specified, no padding is done in that dimension.
         Default: ``s = [input.size(d) for d in dim]``
     dim (Tuple[int], optional): Dimensions to be transformed.
@@ -1035,7 +1036,7 @@ Args:
 
         * ``"forward"`` - no normalization
         * ``"backward"`` - normalize by ``1/n``
-        * ``"ortho"`` - normalize by ``1/sqrt(n)`` (making the hermitian IFFT orthonormal)
+        * ``"ortho"`` - normalize by ``1/sqrt(n)`` (making the Hermitian IFFT orthonormal)
 
         Where ``n = prod(s)`` is the logical IFFT size.
         Calling the forward transform (:func:`~torch.fft.hfftn`) with the same
@@ -1050,24 +1051,25 @@ Keyword args:
 
 Example:
 
-    >>> t = torch.rand(10, 10)
-    >>> rfftn = torch.fft.rfftn(t)
-    >>> rfftn.size()
+    >>> T = torch.rand(10, 10)
+    >>> ihfftn = torch.fft.ihfftn(T)
+    >>> ihfftn.size()
     torch.Size([10, 6])
 
-    Compared against the full output from :func:`~torch.fft.fftn`, we have all
+    Compared against the full output from :func:`~torch.fft.ifftn`, we have all
     elements up to the Nyquist frequency.
 
-    >>> fftn = torch.fft.fftn(t)
-    >>> torch.allclose(fftn[..., :6], rfftn)
+    >>> ifftn = torch.fft.ifftn(t)
+    >>> torch.allclose(ifftn[..., :6], ihfftn)
     True
 
-    The discrete Fourier transform is separable, so :func:`~torch.fft.rfftn`
-    here is equivalent to a combination of :func:`~torch.fft.fft` and
-    :func:`~torch.fft.rfft`:
+    The discrete Fourier transform is separable, so :func:`~torch.fft.ihfftn`
+    here is equivalent to a combination of :func:`~torch.fft.ihfft` and
+    :func:`~torch.fft.ifft`:
 
-    >>> two_ffts = torch.fft.fft(torch.fft.rfft(t, dim=1), dim=0)
-    >>> torch.allclose(rfftn, two_ffts)
+    >>> two_iffts = torch.fft.ifft(torch.fft.ihfft(t, dim=1), dim=0)
+    >>> torch.allclose(ihfftn, two_iffts)
+    True
 
 """.format(**common_args))
 
