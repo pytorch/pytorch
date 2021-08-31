@@ -4213,39 +4213,53 @@ def sample_inputs_to_sparse(op_info, device, dtype, requires_grad, **kwargs):
     return (SampleInput(make_arg((S, S)), args=(), output_process_fn_grad=lambda x: x.to_dense()),
             SampleInput(make_arg((S, S)), args=(1,), output_process_fn_grad=lambda x: x.to_dense()),)
 
+def sample_inputs_cross_entropy(op_info, device, dtype, requires_grad, **kwargs):
+    batch_size, num_classes = shape = (2, 3)
 
-def sample_inputs_cross_entropy(op_info, device, dtype, requires_grad):
-    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
-    make_arg_without_requires_grad = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
-    make_arg_integral = partial(make_tensor, device=device, dtype=torch.int64, requires_grad=requires_grad)
+    input_shape_and_kwargs: List[Tuple[Tuple[int, ...], Dict[str, Any]]] = [
+        (shape, dict()),
+        ((*shape, 1), dict()),
+        ((*shape, 1, 2), dict()),
+        ((*shape, 1, 2, 3), dict()),
+        (shape, dict(weight=make_tensor((num_classes,), device=device, dtype=dtype))),
+        (shape, dict(ignore_index=1)),
+        (shape, dict(reduction="sum")),
+        (shape, dict(reduction="none")),
+    ]
 
-    # Ordered as input shape (N, C, d1, d2, ...)
-    cases = (
-        ((2, 1)),
-        ((2, 1, 10)),  # 1-D Loss
-        ((3, 3, 10, 2)),  # 2-D Loss
-        ((3, 2, 10, 2, 3)),  # 3-D Loss
-    )
+    sample_inputs = []
+    for (input_shape, kwargs), probabilities_target in itertools.product(input_shape_and_kwargs, (False, True)):
+        # FIXME:
+        if "weight" in kwargs and not probabilities_target:
+            continue
 
-    # Note:
-    # There are two cases for `target` arg:
-    # * Class indices (of shape (N,) or (N, d1, d2, ...)), values lying between [0, C-1] where C is input_shape[1]
-    # * Class probabilities (of shape same as that of input), values lying between [0, 1]
-    def generator():
-        for reduction in ['mean', 'sum', 'none']:
-            for input_shape in cases:
-                target_class_prob = make_arg(input_shape, low=0, high=1)
-                target_class_indices = make_arg_integral((input_shape[0], *input_shape[2:],), low=0, high=input_shape[1])
-                weight = make_arg_without_requires_grad(input_shape[1])
+        input = make_tensor(input_shape, device=device, dtype=dtype, requires_grad=requires_grad)
 
-                # For weight as an optional arg (and reduction), and when weight is passed as None
-                yield SampleInput(make_arg(input_shape), args=(target_class_prob,))
-                yield SampleInput(make_arg(input_shape), args=(target_class_indices, None,), kwargs={'reduction': reduction})
-                # For target as class probabilities and indices
-                yield SampleInput(make_arg(input_shape), args=(target_class_prob, weight), kwargs={'reduction': reduction})
-                yield SampleInput(make_arg(input_shape), args=(target_class_indices, weight,), kwargs={'reduction': reduction})
+        if probabilities_target:
+            # ignore_index is not supported for probabilities target
+            if "ignore_index" in kwargs:
+                continue
 
-    return list(generator())
+            target = make_tensor(
+                input_shape,
+                low=0,
+                high=1,
+                device=device,
+                dtype=dtype,
+                requires_grad=requires_grad,
+            )
+        else:
+            target = make_tensor(
+                (batch_size, *input_shape[2:]),
+                low=0,
+                high=num_classes,
+                device=device,
+                dtype=torch.long,
+            )
+
+        sample_inputs.append(SampleInput(input, args=(target,), kwargs=kwargs))
+
+    return sample_inputs
 
 # Used for both log_softmax and softmax
 def sample_inputs_softmax_variant(op_info, device, dtype, requires_grad, with_dtype=False, **kwargs):
@@ -7187,12 +7201,21 @@ op_db: List[OpInfo] = [
            sample_inputs_func=partial(sample_inputs_softmax_variant, with_dtype=True),
            assert_autodiffed=True,
            supports_out=False),
-    OpInfo('nn.functional.cross_entropy',
-           aten_name='cross_entropy_loss',
-           dtypes=floating_types_and(torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
-           sample_inputs_func=sample_inputs_cross_entropy,
-           supports_out=False,),
+    OpInfo(
+        "nn.functional.cross_entropy",
+        dtypes=floating_types_and(torch.bfloat16),
+        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        sample_inputs_func=sample_inputs_cross_entropy,
+        supports_out=False,
+        gradcheck_fast_mode=False,
+        skips=(
+            SkipInfo(
+                "TestJit",
+                "test_variant_consistency_jit",
+                dtypes=(torch.float32,),
+            ),
+        ),
+    ),
     OpInfo('nn.functional.normalize',
            dtypesIfCPU=floating_and_complex_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
