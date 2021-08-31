@@ -214,8 +214,6 @@ struct FunctionSchema {
   //      return arity are the same.
   // [Output Narrowing] The new schema's output type must be the same class
   //      or inherit from the old schema's output type.
-  // [Argument count] The new schema must have at least as many arguments as
-  //      the old schema (considering the list of positional and kwargs).
   // [Arg Compatibility] Every argument in the old schema has a corresponding
   //      argument in the new schema that:
   //        * is at the same position.
@@ -225,7 +223,9 @@ struct FunctionSchema {
   //          new argument's type.
   // [Default Values] Every new argument must have a default value.
   //         Each default value type should NOT be a container type.
-  //
+  // [Positioning] All defaults arguments MUST go after either old
+  //         default arguments or the end of positional arguments
+  //         and right BEFORE all out arguments
   bool isForwardCompatibleWith(
       const FunctionSchema& old,
       std::ostringstream& why_not) const;

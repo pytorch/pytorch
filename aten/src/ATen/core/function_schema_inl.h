@@ -61,6 +61,16 @@ inline size_t findFirstOutArg(const std::vector<Argument>& args) {
   return args.size();
 }
 
+inline size_t findFirstDefaultArg(const std::vector<Argument>& args) {
+  // find the start of out args in the schema
+  for (size_t def_start_idx = 0; def_start_idx < args.size(); def_start_idx++) {
+    if (args.at(def_start_idx).is_out()) {
+      return def_start_idx;
+    }
+  }
+  return args.size();
+}
+
 inline bool Argument::isBackwardCompatibleWith(
       const Argument& old,
       std::ostream* why_not) const {
@@ -101,6 +111,9 @@ inline bool Argument::isForwardCompatibleWith(
   }
   if (rhs->default_value().has_value() &&
       lhs->default_value() != rhs->default_value()) {
+    return false;
+  }
+  if (lhs->default_value().has_value() && !rhs->default_value().has_value()) {
     return false;
   }
   return true;
@@ -165,7 +178,7 @@ inline bool FunctionSchema::isBackwardCompatibleWith(
     }
   }
 
-  // // Validate that all new arguments provided has a default value
+  // Validate that all new arguments provided has a default value
   for (size_t i = old_out_start_idx; i < new_out_start_idx; ++i) {
     if (!arguments().at(i).default_value()) {
       if (why_not) {
@@ -248,7 +261,7 @@ inline bool FunctionSchema::isForwardCompatibleWith(
             << "Function schema is not forward compatible since the new argument '"
             << arguments().at(i).name() << "' of type "
             << arguments().at(i).type()->str() << " has a container type "
-            << "as its' default value.";
+            << "as its default value.";
       }
       return false;
     }
