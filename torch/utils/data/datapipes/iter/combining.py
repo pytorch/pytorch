@@ -11,7 +11,8 @@ class ConcaterIterDataPipe(IterDataPipe):
     r""" :class:`ConcaterIterDataPipe`.
 
     Iterable DataPipe to concatenate multiple Iterable DataPipes.
-    args:
+
+    Args:
         datapipes: Iterable DataPipes being concatenated
     """
     datapipes: Tuple[IterDataPipe]
@@ -97,12 +98,13 @@ class MultiplexerIterDataPipe(IterDataPipe):
 
 @functional_datapipe('zip')
 class ZipperIterDataPipe(IterDataPipe[Tuple[T_co]]):
-    r""" :class:`ZipIterDataPipe`.
+    r""" :class:`ZipperIterDataPipe`.
 
     Iterable DataPipe aggregates elements into a tuple from each of
     the input DataPipe. The output DataPipe is stopped when the
     shortest input DataPipe is exhausted.
-    args:
+
+    Args:
         *datapipes: Iterable DataPipes being aggregated
     """
     datapipes: Tuple[IterDataPipe]
