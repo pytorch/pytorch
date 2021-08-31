@@ -141,8 +141,6 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
             c10::nullopt /* pin_memory */));
   }
 
-  std::cout << ">>>>> CUDA MATMUL\n";
-
   // TODO: is it possible to combine the dispatch code?
   if (isIntegralType(scalar_type, false)) {
     AT_DISPATCH_INDEX_TYPES(scalar_type, "addmm_cuda_int", [&] {
