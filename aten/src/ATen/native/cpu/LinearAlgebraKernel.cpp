@@ -39,7 +39,7 @@ void addr_kernel(TensorIterator &iter,
 
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf,
     iter.dtype(), "addr_cpu", [&]() {
-      using Vec = Vec256<scalar_t>;
+      using Vec = Vectorized<scalar_t>;
 
       auto beta_val = beta.to<scalar_t>();
       auto alpha_val = alpha.to<scalar_t>();
@@ -158,11 +158,8 @@ void unpack_pivots_cpu_kernel(
 
 } // anonymous namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(addr_stub, &addr_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(linalg_vector_norm_stub, &linalg_vector_norm_kernel_cpu);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(unpack_pivots_stub, &unpack_pivots_cpu_kernel);
 
 }} // namespace at::native

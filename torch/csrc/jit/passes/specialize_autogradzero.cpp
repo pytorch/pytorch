@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/runtime/profiling_record.h>
 
 #include <ATen/core/interned_strings.h>
+#include <c10/util/irange.h>
 
 namespace torch {
 namespace jit {
@@ -25,7 +26,7 @@ void insertProfileNodesForSpecializeAutogradZero(
     ProfilingRecord* pr) {
   for (auto it = block->nodes().begin(); it != block->nodes().end(); ++it) {
     auto n = *it;
-    for (size_t offset = 0; offset < n->inputs().size(); offset++) {
+    for (const auto offset : c10::irange(n->inputs().size())) {
       auto i = n->input(offset);
       if (i->type()->cast<OptionalType>() && hasGradSumToSizeUses(i)) {
         // here we are profile the definition instead of the use,
@@ -119,10 +120,10 @@ struct AutogradZeroSpecializer {
   void replaceBlockInputsWithGraphInputs(Block* b) {
     TORCH_INTERNAL_ASSERT(graph_->inputs().size() == b->inputs().size());
     size_t num_inputs = graph_->inputs().size();
-    for (size_t i = 0; i < num_inputs; ++i) {
+    for (const auto i : c10::irange(num_inputs)) {
       b->inputs().at(i)->replaceAllUsesWith(graph_->inputs().at(i));
     }
-    for (size_t i = 0; i < num_inputs; ++i) {
+    for (const auto i : c10::irange(num_inputs)) {
       b->eraseInput(num_inputs - (1 + i));
     }
   }
@@ -293,7 +294,7 @@ struct AutogradZeroSpecializer {
     graph_->insertNode(versioning_if);
 
     auto ret = graph_->return_node();
-    for (size_t i = 0; i < ret->inputs().size(); i++) {
+    for (const auto i : c10::irange(ret->inputs().size())) {
       auto ogo = ret->input(i);
       auto ngo = versioning_if->output(i);
       ngo->copyMetadata(ogo);

@@ -8,6 +8,7 @@ toq = torch.ops.quantized
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
 import torch.nn.intrinsic.quantized as nniq
+import torch.nn.intrinsic.quantized.dynamic as nniqd
 import torch.nn.intrinsic.qat as nniqat
 import torch.nn.intrinsic as nni
 import torch.nn.qat as nnqat
@@ -70,10 +71,11 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
             nnq.Linear,
             nni.LinearReLU,
             nniq.LinearReLU,
+            nniqd.LinearReLU,
             nnqat.Linear,
             nnqd.Linear,
             nniqat.LinearReLU,
-            nn.modules.linear._LinearWithBias,
+            nn.modules.linear.NonDynamicallyQuantizableLinear,
         ]),
         # linear functionals
         set([
@@ -271,6 +273,11 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
             nn.SiLU,
             F.silu,
         ]),
+        # F.mish
+        set([
+            nn.Mish,
+            F.mish,
+        ]),
         # F.tanh
         set([
             nn.Tanh,
@@ -409,10 +416,12 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         F.layer_norm,
         F.leaky_relu,
         F.silu,
+        F.mish,
         # TODO(future PR): implement shadowing for binary ops and
         # uncomment below
         # operator.add,
         # operator.mul,
+        torch.sum,
     ])
 
     FUNS_IO_TYPE_FP16: Set[NSNodeTargetType] = set()
@@ -479,7 +488,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nn.Linear,
         nnqat.Linear,
         nnqd.Linear,
-        torch.nn.modules.linear._LinearWithBias,
+        torch.nn.modules.linear.NonDynamicallyQuantizableLinear,
         nn.Conv1d,
         nn.Conv2d,
         nn.Conv3d,
@@ -503,6 +512,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nn.LeakyReLU,
         nn.ReLU6,
         nn.SiLU,
+        nn.Mish,
         nni.BNReLU2d,
         nni.BNReLU3d,
         nni.ConvReLU1d,
@@ -521,6 +531,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nniqat.ConvReLU2d,
         nniqat.ConvReLU3d,
         nniqat.LinearReLU,
+        nniqd.LinearReLU,
     ])
 
     MODS_IO_TYPE_INT8: Set[NSNodeTargetType] = set([
@@ -601,8 +612,6 @@ def get_unmatchable_types_map() -> Dict[str, Set[NSNodeTargetType]]:
     ])
 
     MODS_UNMATCHABLE: Set[NSNodeTargetType] = set([
-        torch.quantization.ObserverBase,
-        torch.quantization.FakeQuantizeBase,
         nn.Identity,
     ])
 

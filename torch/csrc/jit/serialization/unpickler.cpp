@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/mobile/type_parser.h>
 #include <torch/csrc/jit/serialization/pickler.h>
+#include <torch/csrc/jit/serialization/storage_context.h>
 #include <torch/csrc/jit/serialization/unpickler.h>
 #include <string>
 
@@ -317,7 +318,7 @@ PickleOpCode Unpickler::readInstruction() {
       tuple->elements().reserve(stack_.size() - start);
       auto start_it = stack_.begin() + start;
       for (auto it = start_it; it != stack_.end(); ++it) {
-        tuple->elements().emplace_back(*it);
+        tuple->elements().emplace_back(std::move(*it));
       }
       stack_.erase(start_it, stack_.end());
       stack_.emplace_back(std::move(tuple));
@@ -402,22 +403,33 @@ PickleOpCode Unpickler::readInstruction() {
           args.at(0).toStringRef());
       at::ScalarType type = args.at(1).toScalarType();
       const std::string& key = args.at(2).toStringRef();
+
       at::Device device(args.at(3).toStringRef());
       if (device_) {
         device = *device_;
       }
-      at::DataPtr storage_ptr = read_record_(key);
-      int64_t numel = args.at(4).toInt();
-      caffe2::TypeMeta dtype = at::CPU(type).typeMeta();
-      at::Storage storage(
-          c10::Storage::use_byte_size_t(),
-          numel * dtype.itemsize(),
-          std::move(storage_ptr),
-          /*allocator=*/nullptr,
-          /*resizable=*/false); // NB: we didn't set any allocator for the
-                                // tensor
-      auto options = at::CPU(type).options();
 
+      at::Storage storage;
+      if (storage_context_ != nullptr && storage_context_->hasStorage(key)) {
+        // for torch.package logic where storage may be loaded already
+        storage = storage_context_->getStorage(key);
+      } else {
+        at::DataPtr storage_ptr = read_record_(key);
+        int64_t numel = args.at(4).toInt();
+        caffe2::TypeMeta dtype = at::CPU(type).typeMeta();
+        storage = at::Storage(
+            c10::Storage::use_byte_size_t(),
+            numel * dtype.itemsize(),
+            std::move(storage_ptr),
+            /*allocator=*/nullptr,
+            /*resizable=*/false); // NB: we didn't set any allocator for the
+                                  // tensor
+        if (storage_context_ != nullptr) {
+          storage_context_->addStorage(key, storage);
+        }
+      }
+
+      auto options = at::CPU(type).options();
       if (use_storage_device_) {
         options = options.device(storage.device());
         device = storage.device();
@@ -538,6 +550,9 @@ void Unpickler::readGlobal(
     // Unpickle a tensor
     bool quantized = class_name == "_rebuild_qtensor";
     rebuildTensor(quantized);
+  } else if (
+      module_name == "torch._utils" && class_name == "_rebuild_sparse_tensor") {
+    rebuildSparseTensor();
   } else if (module_name == "builtins" && class_name == "complex") {
     globals_.emplace_back([this] {
       auto elems = pop(stack_).toTuple()->elements();
@@ -633,6 +648,38 @@ void Unpickler::readGlobal(
     }
   }
   stack_.emplace_back(int64_t(globals_.size() - 1));
+}
+
+void Unpickler::rebuildSparseTensor() {
+  globals_.emplace_back([this] {
+    auto tup = pop(stack_).toTuple();
+    const auto& elements = tup->elements();
+    size_t idx = 0;
+    auto layout = elements.at(idx++).toInt();
+    at::Tensor result;
+    switch (layout) {
+      case static_cast<int>(c10::Layout::Sparse): {
+        std::vector<int64_t> size = tupleToIntList(elements.at(idx++));
+        bool requires_grad = elements.at(idx++).toBool();
+        auto& indices_tensor = elements.at(idx++).toTensor();
+        auto& values_tensor = elements.at(idx++).toTensor();
+        auto options = values_tensor.options()
+                           .layout(c10::Layout::Sparse)
+                           .requires_grad(requires_grad);
+        result = at::_sparse_coo_tensor_unsafe(
+            indices_tensor, values_tensor, size, options);
+        result = autograd::make_variable(result, options.requires_grad());
+        break;
+      }
+      default:
+        TORCH_CHECK(
+            false,
+            "Unsupported sparse tensor layout type in serialization ",
+            static_cast<c10::Layout>(layout));
+        break;
+    }
+    stack_.emplace_back(std::move(result));
+  });
 }
 
 void Unpickler::rebuildTensor(bool quantized) {

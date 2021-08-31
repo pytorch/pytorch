@@ -21,20 +21,17 @@
 #include "im2col_dnnlowp.h"
 #include "mmio.h"
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(
     caffe2_dnnlowp_shared_int32_buffer,
     false,
     "Share intermediate int32 buffer across DNNLOWP Conv ops");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(
     caffe2_dnnlowp_dump_tensors,
     false,
     "Dump quantized input and weight tensors used in Conv and FC operators "
     "during the first iteration");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_bool(caffe2_dnnlowp_force_slow_path);
 
 namespace caffe2 {
@@ -167,7 +164,7 @@ bool ConvDNNLowPOp<T, ReluFused>::TakeGConvFastPath_() {
   const Tensor& X = InputTensorCPU_(INPUT);
   if (this->order_ != StorageOrder::NHWC || !is_same<T, uint8_t>::value ||
       !X.template IsType<T>() ||
-      (this->kernel_.size() != 2 && this->kernel_.size() != 3)) {
+      (this->kernel_.size() != 2 && this->kernel_.size() != 3) || Acc16()) {
     return false;
   }
 
@@ -1774,31 +1771,25 @@ template class ConvDNNLowPOp<uint8_t, true>;
 template class ConvDNNLowPOp<uint16_t, false>;
 template class ConvDNNLowPOp<uint16_t, true>;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(Conv, DNNLOWP, ConvDNNLowPOp<uint8_t, false>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     ConvRelu,
     DNNLOWP,
     ConvDNNLowPOp<uint8_t, true>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Int8Conv,
     DNNLOWP,
     ConvDNNLowPOp<uint8_t, false>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Int8ConvRelu,
     DNNLOWP,
     ConvDNNLowPOp<uint8_t, true>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Conv,
     DNNLOWP_16,
     ConvDNNLowPOp<uint16_t, false>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     ConvRelu,
     DNNLOWP_16,

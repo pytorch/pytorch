@@ -88,9 +88,16 @@ def tensorboard_trace_handler(dir_name: str, worker_name: Optional[str] = None, 
 
 def supported_activities():
     """
-    Returns a set of supported profiler activities
+    Returns a set of supported profiler tracing activities.
+
+    Note: profiler uses CUPTI library to trace on-device CUDA kernels.
+    In case when CUDA is enabled but CUPTI is not available, passing
+    ``ProfilerActivity.CUDA`` to profiler results in using the legacy CUDA
+    profiling code (same as in the legacy ``torch.autograd.profiler``).
+    This, in turn, results in including CUDA time in the profiler table output,
+    but not in the JSON trace.
     """
-    return torch.autograd.supported_kineto_activities()
+    return torch.autograd._supported_activities()
 
 
 class profile(object):
@@ -107,8 +114,14 @@ class profile(object):
         record_shapes (bool): save information about operator's input shapes.
         profile_memory (bool): track tensor memory allocation/deallocation.
         with_stack (bool): record source information (file and line number) for the ops.
-        with_flops (bool): use formula to estimate the FLOPS of specific operators
+        with_flops (bool): use formula to estimate the FLOPs (floating point operations) of specific operators
             (matrix multiplication and 2D convolution).
+        with_modules (bool): record module hierarchy (including function names)
+            corresponding to the callstack of the op. e.g. If module A's forward call's
+            module B's forward which contains an aten::add op,
+            then aten::add's module hierarchy is A.B
+            Note that this support exist, at the moment, only for TorchScript models
+            and not eager mode models.
         use_cuda (bool):
             .. deprecated:: 1.8.1
                 use ``activities`` instead.
@@ -136,6 +149,9 @@ class profile(object):
 
     .. note::
         Enabling shape and stack tracing results in additional overhead.
+        When record_shapes=True is specified, profiler will temporarily hold references to the tensors;
+        that may further prevent certain optimizations that depend on the reference count and introduce
+        extra tensor copies.
 
     Examples:
 
@@ -200,6 +216,7 @@ class profile(object):
             profile_memory: bool = False,
             with_stack: bool = False,
             with_flops: bool = False,
+            with_modules: bool = False,
             # deprecated:
             use_cuda: Optional[bool] = None):
         if activities:
@@ -214,10 +231,6 @@ class profile(object):
             elif ProfilerActivity.CUDA in self.activities:
                 self.activities.remove(ProfilerActivity.CUDA)
 
-        for activity in self.activities:
-            if activity not in supported_activities():
-                warn("Unsupported profiler activity specified (" + str(activity) + ")")
-        self.activities = self.activities.intersection(supported_activities())
         assert len(self.activities) > 0, "No valid profiler activities found"
 
         if schedule:
@@ -232,19 +245,26 @@ class profile(object):
         self.with_flops = with_flops
         self.profile_memory = profile_memory
         self.with_stack = with_stack
+        self.with_modules = with_modules
         self.step_num = 0
         self.current_action = self.schedule(self.step_num)
         self.profiler: Optional[prof.profile] = None
         self.step_rec_fn: Optional[prof.record_function] = None
 
     def __enter__(self):
+        self.start()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.stop()
+
+    def start(self):
         self._enter_actions()
         if self.record_steps:
             self.step_rec_fn = prof.record_function("ProfilerStep#" + str(self.step_num))
             self.step_rec_fn.__enter__()
-        return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def stop(self):
         if self.record_steps and self.step_rec_fn:
             self.step_rec_fn.__exit__(None, None, None)
         self._exit_actions()
@@ -364,9 +384,18 @@ class profile(object):
 
     def add_metadata(self, key: str, value: str):
         """
-        Adds a user defined key/value metadata into the trace file
+        Adds a user defined metadata with a string key and a string value
+        into the trace file
         """
-        torch.autograd._add_metadata(key, value)
+        wrapped_value = "\"" + value.replace('"', '\\"') + "\""
+        torch.autograd._add_metadata_json(key, wrapped_value)
+
+    def add_metadata_json(self, key: str, value: str):
+        """
+        Adds a user defined metadata with a string key and a valid json value
+        into the trace file
+        """
+        torch.autograd._add_metadata_json(key, value)
 
     def _get_distributed_info(self):
         import torch.distributed as dist
@@ -405,6 +434,7 @@ class profile(object):
             with_flops=self.with_flops,
             profile_memory=self.profile_memory,
             with_stack=self.with_stack,
+            with_modules=self.with_modules,
             use_kineto=True,
         )
         self.profiler._prepare_trace()
@@ -416,7 +446,7 @@ class profile(object):
         if kineto_available():
             dist_info = self._get_distributed_info()
             if dist_info:
-                self.add_metadata("distributedInfo", json.dumps(dist_info).replace('"', '\\"'))
+                self.add_metadata_json("distributedInfo", json.dumps(dist_info))
 
     def _stop_trace(self):
         assert self.profiler is not None

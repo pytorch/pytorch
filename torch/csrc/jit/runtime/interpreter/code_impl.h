@@ -3,6 +3,7 @@
 #include <memory>
 #include <vector>
 
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/jit_log.h>
@@ -104,6 +105,8 @@ struct CodeImpl {
   // This is because for all usages, at most 3 args are used.
   std::unordered_map<std::string, size_t> op_to_num_specified_args_;
 
+  std::unordered_map<std::string, size_t> op_to_num_out_args_;
+
   // running count of uses as we emit. When we reach use_count_[v] =
   // v.uses().size() we know it is the final use and we can move rather than
   // load.
@@ -162,8 +165,7 @@ struct CodeImpl {
 
   void request_bailout(size_t index) {
     auto count = index;
-    for (size_t instr_index = 0; instr_index < instructions_.size();
-         instr_index++) {
+    for (const auto instr_index : c10::irange(instructions_.size())) {
       if (instructions_[instr_index].op == GUARD ||
           instructions_[instr_index].op == FAIL_GUARD) {
         if (count-- == 0) {
@@ -292,6 +294,12 @@ struct CodeImpl {
     }
   }
 
+  void emitLoadInputs(at::ArrayRef<Value*> inputs, size_t start, size_t end) {
+    for (size_t i = start; i < end; i++) {
+      emitUse(inputs[i], false);
+    }
+  }
+
   virtual void emitOperator(Node* node) {
     emitLoadInputs(node->inputs());
     const Operator& op = node->getOperator();
@@ -405,7 +413,7 @@ struct CodeImpl {
     // Emit the expected type.
     size_t types_start = type_table_.size();
     auto types = node->tys(attr::types);
-    for (size_t i = 0; i < num_inputs; i++) {
+    for (const auto i : c10::irange(num_inputs)) {
       emitType(types[i]);
     }
     insertInstruction(TYPECHECK, types_start, num_inputs);
@@ -702,7 +710,7 @@ struct CodeImpl {
 
   void dump(std::ostream& out) const {
     out << *graph_ << "\n";
-    for (size_t i = 0; i < instructions_.size(); ++i) {
+    for (const auto i : c10::irange(instructions_.size())) {
       dump(out, i);
     }
   }
@@ -737,13 +745,19 @@ struct MobileCodeImpl : CodeImpl {
         auto op_schema = node->getOperator().schema();
         // skip if schema has vararg
         if (!op_schema.is_vararg()) {
-          auto numInclude =
-              CalculateNecessaryArgs(op_schema.arguments(), node->inputs());
+          auto specifiedArgs = CalculateNecessaryArgs(
+              op_schema.arguments(), node->inputs(), false);
+          // preserving the old behavior
+          auto numInclude = specifiedArgs.first;
+          // TODO uncomment this
+          // auto numInclude = specifiedArgs.first + specifiedArgs.second;
           auto unique_name = op_schema.overload_name() != ""
               ? op_schema.name() + "." + op_schema.overload_name()
               : op_schema.name();
           auto it = op_to_num_specified_args_.insert(
               std::pair<std::string, size_t>(unique_name, 0));
+          op_to_num_out_args_.insert(std::pair<std::string, size_t>(
+              unique_name, specifiedArgs.second));
           auto prev_value = it.first->second;
           it.first->second = std::max(numInclude, prev_value);
         }
@@ -752,34 +766,36 @@ struct MobileCodeImpl : CodeImpl {
     }
   }
 
+ private:
   void emitOperator(Node* node) override {
-    if (!emit_default_input_instructions_) {
+    if (emit_default_input_instructions_) {
+      CodeImpl::emitOperator(node);
+    } else {
       const Operator& op = node->getOperator();
       if (op.hasOperation() && op.schema().is_vararg()) {
         emitLoadInputs(node->inputs());
         insertInstruction(OPN, operator_table_.size(), node->inputs().size());
       } else {
-        auto unique_op_name = op.schema().overload_name() != ""
-            ? op.schema().name() + "." + op.schema().overload_name()
-            : op.schema().name();
+        auto unique_op_name = c10::toString(op.schema().operator_name());
         auto num_include = node->inputs().size();
-        // make sure we only do this for mobile code
-        if (op_to_num_specified_args_.find(unique_op_name) !=
-            op_to_num_specified_args_.end()) {
-          num_include = op_to_num_specified_args_[unique_op_name];
+        auto it = op_to_num_specified_args_.find(unique_op_name);
+        if (it != op_to_num_specified_args_.end()) {
+          num_include = it->second;
         }
         emitLoadInputs(node->inputs(), num_include);
+        // TODO: uncomment this
+        // auto num_out = op_to_num_out_args_.find(unique_op_name)->second;
+        // auto num_specified_before_out = num_include - num_out;
+        // emitLoadInputs(node->inputs(), 0, num_specified_before_out);
+        // emitLoadInputs(node->inputs(), node->inputs().size() - num_out,
+        // node->inputs().size());
+
         insertInstruction(OP, operator_table_.size());
       }
-
       operator_table_.emplace_back(op.getOperation(node));
-
-    } else {
-      CodeImpl::emitOperator(node);
     }
   }
 
- private:
   bool emit_default_input_instructions_;
 };
 

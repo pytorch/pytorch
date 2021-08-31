@@ -38,8 +38,8 @@ endif()
 message(STATUS "Caffe2: CUDA detected: " ${CUDA_VERSION})
 message(STATUS "Caffe2: CUDA nvcc is: " ${CUDA_NVCC_EXECUTABLE})
 message(STATUS "Caffe2: CUDA toolkit directory: " ${CUDA_TOOLKIT_ROOT_DIR})
-if(CUDA_VERSION VERSION_LESS 9.0)
-  message(FATAL_ERROR "PyTorch requires CUDA 9.0 and above.")
+if(CUDA_VERSION VERSION_LESS 9.2)
+  message(FATAL_ERROR "PyTorch requires CUDA 9.2 or above.")
 endif()
 
 if(CUDA_FOUND)
@@ -64,31 +64,33 @@ if(CUDA_FOUND)
     "  return 0;\n"
     "}\n"
     )
-  try_run(run_result compile_result ${PROJECT_RANDOM_BINARY_DIR} ${file}
-    CMAKE_FLAGS "-DINCLUDE_DIRECTORIES=${CUDA_INCLUDE_DIRS}"
-    LINK_LIBRARIES ${CUDA_LIBRARIES}
-    RUN_OUTPUT_VARIABLE cuda_version_from_header
-    COMPILE_OUTPUT_VARIABLE output_var
-    )
-  if(NOT compile_result)
-    message(FATAL_ERROR "Caffe2: Couldn't determine version from header: " ${output_var})
-  endif()
-  message(STATUS "Caffe2: Header version is: " ${cuda_version_from_header})
-  if(NOT cuda_version_from_header STREQUAL ${CUDA_VERSION_STRING})
-    # Force CUDA to be processed for again next time
-    # TODO: I'm not sure if this counts as an implementation detail of
-    # FindCUDA
-    set(${cuda_version_from_findcuda} ${CUDA_VERSION_STRING})
-    unset(CUDA_TOOLKIT_ROOT_DIR_INTERNAL CACHE)
-    # Not strictly necessary, but for good luck.
-    unset(CUDA_VERSION CACHE)
-    # Error out
-    message(FATAL_ERROR "FindCUDA says CUDA version is ${cuda_version_from_findcuda} (usually determined by nvcc), "
-      "but the CUDA headers say the version is ${cuda_version_from_header}.  This often occurs "
-      "when you set both CUDA_HOME and CUDA_NVCC_EXECUTABLE to "
-      "non-standard locations, without also setting PATH to point to the correct nvcc.  "
-      "Perhaps, try re-running this command again with PATH=${CUDA_TOOLKIT_ROOT_DIR}/bin:$PATH.  "
-      "See above log messages for more diagnostics, and see https://github.com/pytorch/pytorch/issues/8092 for more details.")
+  if(NOT CMAKE_CROSSCOMPILING)
+    try_run(run_result compile_result ${PROJECT_RANDOM_BINARY_DIR} ${file}
+      CMAKE_FLAGS "-DINCLUDE_DIRECTORIES=${CUDA_INCLUDE_DIRS}"
+      LINK_LIBRARIES ${CUDA_LIBRARIES}
+      RUN_OUTPUT_VARIABLE cuda_version_from_header
+      COMPILE_OUTPUT_VARIABLE output_var
+      )
+    if(NOT compile_result)
+      message(FATAL_ERROR "Caffe2: Couldn't determine version from header: " ${output_var})
+    endif()
+    message(STATUS "Caffe2: Header version is: " ${cuda_version_from_header})
+    if(NOT cuda_version_from_header STREQUAL ${CUDA_VERSION_STRING})
+      # Force CUDA to be processed for again next time
+      # TODO: I'm not sure if this counts as an implementation detail of
+      # FindCUDA
+      set(${cuda_version_from_findcuda} ${CUDA_VERSION_STRING})
+      unset(CUDA_TOOLKIT_ROOT_DIR_INTERNAL CACHE)
+      # Not strictly necessary, but for good luck.
+      unset(CUDA_VERSION CACHE)
+      # Error out
+      message(FATAL_ERROR "FindCUDA says CUDA version is ${cuda_version_from_findcuda} (usually determined by nvcc), "
+        "but the CUDA headers say the version is ${cuda_version_from_header}.  This often occurs "
+        "when you set both CUDA_HOME and CUDA_NVCC_EXECUTABLE to "
+        "non-standard locations, without also setting PATH to point to the correct nvcc.  "
+        "Perhaps, try re-running this command again with PATH=${CUDA_TOOLKIT_ROOT_DIR}/bin:$PATH.  "
+        "See above log messages for more diagnostics, and see https://github.com/pytorch/pytorch/issues/8092 for more details.")
+    endif()
   endif()
 endif()
 
@@ -272,20 +274,66 @@ else()
       ${LIBNVTOOLSEXT})
 endif()
 
-# cudnn
-# static linking is handled by USE_STATIC_CUDNN environment variable
-if(CAFFE2_USE_CUDNN)
-  add_library(caffe2::cudnn UNKNOWN IMPORTED)
-  set_property(
-      TARGET caffe2::cudnn PROPERTY IMPORTED_LOCATION
-      ${CUDNN_LIBRARY_PATH})
-  set_property(
-      TARGET caffe2::cudnn PROPERTY INTERFACE_INCLUDE_DIRECTORIES
-      ${CUDNN_INCLUDE_PATH})
-  if(CUDNN_STATIC AND NOT WIN32)
+# cublas. CUDA_CUBLAS_LIBRARIES is actually a list, so we will make an
+# interface library similar to cudart.
+add_library(caffe2::cublas INTERFACE IMPORTED)
+if(CAFFE2_STATIC_LINK_CUDA AND NOT WIN32)
     set_property(
-        TARGET caffe2::cudnn PROPERTY INTERFACE_LINK_LIBRARIES
-        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a" dl)
+        TARGET caffe2::cublas PROPERTY INTERFACE_LINK_LIBRARIES
+        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcublas_static.a")
+    if(CUDA_VERSION VERSION_GREATER_EQUAL 10.1)
+      set_property(
+        TARGET caffe2::cublas APPEND PROPERTY INTERFACE_LINK_LIBRARIES
+        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcublasLt_static.a")
+      # Add explicit dependency to cudart_static to fix
+      # libcublasLt_static.a.o): undefined reference to symbol 'cudaStreamWaitEvent'
+      # error adding symbols: DSO missing from command line
+      set_property(
+        TARGET caffe2::cublas APPEND PROPERTY INTERFACE_LINK_LIBRARIES
+        "${CUDA_cudart_static_LIBRARY}" rt dl)
+    endif()
+else()
+    set_property(
+        TARGET caffe2::cublas PROPERTY INTERFACE_LINK_LIBRARIES
+        ${CUDA_CUBLAS_LIBRARIES})
+endif()
+set_property(
+    TARGET caffe2::cublas PROPERTY INTERFACE_INCLUDE_DIRECTORIES
+    ${CUDA_INCLUDE_DIRS})
+
+# cudnn public and private interfaces
+# static linking is handled by USE_STATIC_CUDNN environment variable
+# If library is linked dynamically, than private interface is no-op
+# If library is linked statically:
+#  - public interface would only reference headers
+#  - private interface will contain the actual link instructions
+if(CAFFE2_USE_CUDNN)
+  add_library(caffe2::cudnn-public INTERFACE IMPORTED)
+  set_property(
+    TARGET caffe2::cudnn-public PROPERTY INTERFACE_INCLUDE_DIRECTORIES
+    ${CUDNN_INCLUDE_PATH})
+  add_library(caffe2::cudnn-private INTERFACE IMPORTED)
+  set_property(
+    TARGET caffe2::cudnn-private PROPERTY INTERFACE_INCLUDE_DIRECTORIES
+    ${CUDNN_INCLUDE_PATH})
+  if(CUDNN_STATIC AND NOT WIN32)
+    if(USE_WHOLE_CUDNN)
+      set_property(
+        TARGET caffe2::cudnn-private PROPERTY INTERFACE_LINK_LIBRARIES
+        "-Wl,--whole-archive,\"${CUDNN_LIBRARY_PATH}\" -Wl,--no-whole-archive")
+    else()
+      set_property(
+        TARGET caffe2::cudnn-private PROPERTY INTERFACE_LINK_LIBRARIES
+        ${CUDNN_LIBRARY_PATH})
+    endif()
+    set_property(
+      TARGET caffe2::cudnn-private APPEND PROPERTY INTERFACE_LINK_LIBRARIES
+      "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a" dl)
+    # Add explicit dependency on cublas to cudnn
+    get_target_property(__tmp caffe2::cublas INTERFACE_LINK_LIBRARIES)
+    set_property(
+      TARGET caffe2::cudnn-private APPEND PROPERTY INTERFACE_LINK_LIBRARIES
+      "${__tmp}")
     # Lines below use target_link_libraries because we support cmake 3.5+.
     # For cmake 3.13+, target_link_options to set INTERFACE_LINK_OPTIONS would be better.
     # https://cmake.org/cmake/help/v3.5/command/target_link_libraries.html warns
@@ -295,8 +343,12 @@ if(CAFFE2_USE_CUDNN)
     #  link items that will not propagate to dependents."
     # Propagating to a dependent (torch_cuda) is exactly what we want here, so we are
     # flouting the warning, but I can't think of a better (3.5+ compatible) way.
-    target_link_libraries(caffe2::cudnn INTERFACE
+    target_link_libraries(caffe2::cudnn-private INTERFACE
         "-Wl,--exclude-libs,libcudnn_static.a")
+  else()
+  set_property(
+    TARGET caffe2::cudnn-public PROPERTY INTERFACE_LINK_LIBRARIES
+    ${CUDNN_LIBRARY_PATH})
   endif()
 endif()
 
@@ -345,33 +397,6 @@ if(CAFFE2_USE_TENSORRT)
       TARGET caffe2::tensorrt PROPERTY INTERFACE_INCLUDE_DIRECTORIES
       ${TENSORRT_INCLUDE_DIR})
 endif()
-
-# cublas. CUDA_CUBLAS_LIBRARIES is actually a list, so we will make an
-# interface library similar to cudart.
-add_library(caffe2::cublas INTERFACE IMPORTED)
-if(CAFFE2_STATIC_LINK_CUDA AND NOT WIN32)
-    set_property(
-        TARGET caffe2::cublas PROPERTY INTERFACE_LINK_LIBRARIES
-        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcublas_static.a")
-    if(CUDA_VERSION VERSION_GREATER_EQUAL 10.1)
-      set_property(
-        TARGET caffe2::cublas APPEND PROPERTY INTERFACE_LINK_LIBRARIES
-        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcublasLt_static.a")
-      # Add explicit dependency to cudart_static to fix
-      # libcublasLt_static.a.o): undefined reference to symbol 'cudaStreamWaitEvent'
-      # error adding symbols: DSO missing from command line
-      set_property(
-        TARGET caffe2::cublas APPEND PROPERTY INTERFACE_LINK_LIBRARIES
-        "${CUDA_cudart_static_LIBRARY}" rt dl)
-    endif()
-else()
-    set_property(
-        TARGET caffe2::cublas PROPERTY INTERFACE_LINK_LIBRARIES
-        ${CUDA_CUBLAS_LIBRARIES})
-endif()
-set_property(
-    TARGET caffe2::cublas PROPERTY INTERFACE_INCLUDE_DIRECTORIES
-    ${CUDA_INCLUDE_DIRS})
 
 # nvrtc
 add_library(caffe2::nvrtc UNKNOWN IMPORTED)

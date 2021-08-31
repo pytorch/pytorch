@@ -93,6 +93,9 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
       return true;
     } else if (err != cudaErrorNotReady) {
       C10_CUDA_CHECK(err);
+    } else {
+      // ignore and clear the error if not ready
+      cudaGetLastError();
     }
 
     return false;
@@ -163,7 +166,7 @@ private:
   bool is_created_ = false;
   bool was_recorded_ = false;
   DeviceIndex device_index_ = -1;
-  cudaEvent_t event_;
+  cudaEvent_t event_{};
 
   void createEvent(DeviceIndex device_index) {
     device_index_ = device_index;

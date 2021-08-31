@@ -24,19 +24,26 @@ struct TensorDims {
   index_t sizes[MAX_DIMS];
 };
 
-template<typename index_t>
-__global__ void write_indices(int64_t * inp, TensorDims<index_t> dims, int ndim, index_t n){
-    CUDA_KERNEL_LOOP(index, n) { // this assumed int (not int64_t) index
-      index_t div = 1;
-      int64_t idx_flat = inp[index];
-      for (int dim = ndim-1; dim >= 0; dim--){
-        auto dim_size = dims.sizes[dim];
-        inp[index + dim*n] = (idx_flat/div) % dim_size;
-        div *= dim_size;
-      }
+template <typename index_t>
+__global__ void write_indices(
+    int64_t* inp,
+    TensorDims<index_t> dims,
+    int ndim,
+    index_t n) {
+  auto index = threadIdx.x + blockIdx.x * blockDim.x;
+  if (index < n) {
+    index_t div = 1;
+    int64_t idx_flat = inp[index];
+#pragma unroll
+    for (int dim = MAX_DIMS; dim >= 0; dim--) {
+      if (dim > ndim - 1)
+        continue;
+      auto dim_size = dims.sizes[dim];
+      inp[index + dim * n] = (idx_flat / div) % dim_size;
+      div *= dim_size;
     }
+  }
 }
-
 
 } //anonymous namespace
 
@@ -54,9 +61,7 @@ void nonzero_cuda_out_impl(const Tensor& self, Tensor& out){
   auto temp_storage = allocator.allocate(temp_storage_bytes);
   cub::DeviceReduce::Sum(temp_storage.get(), temp_storage_bytes, itr, (int*)num_nonzeros.get(), N, stream);
   int num_nonzeros_h;
-  C10_CUDA_CHECK(cudaMemcpyAsync(&num_nonzeros_h, num_nonzeros.get(), sizeof(int), cudaMemcpyDeviceToHost, stream));
-  //need to synchronize to make sure data is available on the host
-  C10_CUDA_CHECK(cudaStreamSynchronize(stream));
+  at::cuda::memcpy_and_sync(&num_nonzeros_h, num_nonzeros.get(), sizeof(int), cudaMemcpyDeviceToHost, stream);
   //expected output size is num_nonzeros x ndim
   //we are producing output with size {num_nonzeros, ndim} and strides {num_nonzeros, 1} (that is, transposed ndim x num_nonzeros output)
   //we are able to directly use passed output with this size and strides, and we can also (per contract)

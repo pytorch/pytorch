@@ -29,3 +29,7 @@ jobs:
           make setup_lint
       - name: Run tests
         run: python -m unittest discover -vs tools/test -p 'test_*.py'
+
+concurrency:
+  group: test-tools-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true

@@ -2,7 +2,8 @@
 
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
-
+#include <c10/cuda/CUDAException.h>
+#include <ATen/cuda/NumericLimits.cuh>
 #include <cuda.h>
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
@@ -23,6 +24,7 @@ __global__ void kernel(){
 
 void launch_function(){
   kernel<<<1, 1>>>();
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 // half common math functions tests in device

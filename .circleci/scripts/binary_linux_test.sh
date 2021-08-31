@@ -9,10 +9,6 @@ python_nodot="\$(echo $DESIRED_PYTHON | tr -d m.u)"
 
 # Set up Python
 if [[ "$PACKAGE_TYPE" == conda ]]; then
-  # There was a bug that was introduced in conda-package-handling >= 1.6.1 that makes archives
-  # above a certain size fail out when attempting to extract
-  # see: https://github.com/conda/conda-package-handling/issues/71
-  conda install -y conda-package-handling=1.6.0
   retry conda create -qyn testenv python="$DESIRED_PYTHON"
   source activate testenv >/dev/null
 elif [[ "$PACKAGE_TYPE" != libtorch ]]; then
@@ -37,6 +33,10 @@ fi
 if [[ "$DESIRED_CUDA" == "cu112" ]]; then
   EXTRA_CONDA_FLAGS="-c=conda-forge"
 fi
+
+# Move debug wheels out of the the package dir so they don't get installed
+mkdir -p /tmp/debug_final_pkgs
+mv /final_pkgs/debug-*.zip /tmp/debug_final_pkgs || echo "no debug packages to move"
 
 # Install the package
 # These network calls should not have 'retry's because they are installing

@@ -13,7 +13,6 @@ using namespace torch::test;
 
 struct ParameterListTest : torch::test::SeedingFixture {};
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ParameterListTest, ConstructsFromSharedPointer) {
   torch::Tensor ta = torch::randn({1, 2}, torch::requires_grad(true));
   torch::Tensor tb = torch::randn({1, 2}, torch::requires_grad(false));
@@ -24,7 +23,6 @@ TEST_F(ParameterListTest, ConstructsFromSharedPointer) {
   ASSERT_EQ(list->size(), 3);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ParameterListTest, isEmpty) {
   torch::Tensor ta = torch::randn({1, 2}, torch::requires_grad(true));
   ParameterList list;
@@ -34,7 +32,6 @@ TEST_F(ParameterListTest, isEmpty) {
   ASSERT_EQ(list->size(), 1);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ParameterListTest, PushBackAddsAnElement) {
   ParameterList list;
   torch::Tensor ta = torch::randn({1, 2}, torch::requires_grad(true));
@@ -52,7 +49,6 @@ TEST_F(ParameterListTest, PushBackAddsAnElement) {
   list->append(td);
   ASSERT_EQ(list->size(), 4);
 }
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ParameterListTest, ForEachLoop) {
   torch::Tensor ta = torch::randn({1, 2}, torch::requires_grad(true));
   torch::Tensor tb = torch::randn({1, 2}, torch::requires_grad(false));
@@ -68,7 +64,6 @@ TEST_F(ParameterListTest, ForEachLoop) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ParameterListTest, AccessWithAt) {
   torch::Tensor ta = torch::randn({1, 2}, torch::requires_grad(true));
   torch::Tensor tb = torch::randn({1, 2}, torch::requires_grad(false));
@@ -97,7 +92,6 @@ TEST_F(ParameterListTest, AccessWithAt) {
   ASSERT_THROWS_WITH(list[params.size() + 1], "Index out of range");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ParameterListTest, ExtendPushesParametersFromOtherParameterList) {
   torch::Tensor ta = torch::randn({1, 2}, torch::requires_grad(true));
   torch::Tensor tb = torch::randn({1, 2}, torch::requires_grad(false));
@@ -129,7 +123,6 @@ TEST_F(ParameterListTest, ExtendPushesParametersFromOtherParameterList) {
   ASSERT_TRUE(torch::all(torch::eq(b[3], tf)).item<bool>());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ParameterListTest, PrettyPrintParameterList) {
   torch::Tensor ta = torch::randn({1, 2}, torch::requires_grad(true));
   torch::Tensor tb = torch::randn({1, 2}, torch::requires_grad(false));
@@ -144,7 +137,6 @@ TEST_F(ParameterListTest, PrettyPrintParameterList) {
       ")");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ParameterListTest, IncrementAdd) {
   torch::Tensor ta = torch::randn({1, 2}, torch::requires_grad(true));
   torch::Tensor tb = torch::randn({1, 2}, torch::requires_grad(false));

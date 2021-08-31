@@ -1,6 +1,6 @@
 #include <ATen/ATen.h>
 #include <torch/library.h>
-#include <ATen/cpu/vec256/vec256.h>
+#include <ATen/cpu/vec/vec.h>
 #include <ATen/native/SortingUtils.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
@@ -58,7 +58,6 @@ std::tuple<Tensor, Tensor> topk_quantized_cpu(
   return quantized_topk_out_cpu(values, indices, self, k, dim, largest, sorted);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(qtopk_stub);
 
 }}  // namespace at::native

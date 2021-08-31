@@ -2,7 +2,7 @@ import os
 import shutil
 import sys
 import time
-from typing import Any, Optional
+from typing import Any, NoReturn, Optional
 
 from .setting import (
     LOG_DIR,
@@ -71,7 +71,7 @@ def convert_to_relative_path(whole_path: str, base_path: str) -> str:
     return whole_path[len(base_path) + 1 :]
 
 
-def replace_extension(filename, ext):
+def replace_extension(filename: str, ext: str) -> str:
     return filename[: filename.rfind(".")] + ext
 
 
@@ -89,11 +89,11 @@ def get_raw_profiles_folder() -> str:
 
 def detect_compiler_type(platform: TestPlatform) -> CompilerType:
     if platform == TestPlatform.OSS:
-        from package.oss.utils import detect_compiler_type
+        from package.oss.utils import detect_compiler_type  # type: ignore[misc]
 
-        cov_type = detect_compiler_type()
+        cov_type = detect_compiler_type()  # type: ignore[call-arg]
     else:
-        from caffe2.fb.code_coverage.tool.package.fbcode.utils import (
+        from caffe2.fb.code_coverage.tool.package.fbcode.utils import (  # type: ignore[import]
             detect_compiler_type,
         )
 
@@ -138,7 +138,9 @@ def check_test_type(test_type: str, target: str) -> None:
     )
 
 
-def raise_no_test_found_exception(cpp_binary_folder: str, python_binary_folder: str):
+def raise_no_test_found_exception(
+    cpp_binary_folder: str, python_binary_folder: str
+) -> NoReturn:
     raise RuntimeError(
         f"No cpp and python tests found in folder **{cpp_binary_folder} and **{python_binary_folder}**"
     )

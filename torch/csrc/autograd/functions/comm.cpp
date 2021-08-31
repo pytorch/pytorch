@@ -16,6 +16,7 @@
 
 namespace torch {
 namespace autograd {
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 Scatter::Scatter(
     std::vector<at::Device> devices,
     // NOLINTNEXTLINE(modernize-pass-by-value)
@@ -30,8 +31,7 @@ Scatter::Scatter(
       streams_(streams),
       unsqueeze_scalars_(unsqueeze_scalars) {}
 
-// NOLINTNEXTLINE(modernize-use-equals-default)
-Scatter::~Scatter() {}
+Scatter::~Scatter() = default;
 
 variable_list Scatter::apply(variable_list&& inputs) {
   AT_ASSERT(inputs.size() == 1);
@@ -73,8 +73,7 @@ variable_list Scatter::apply(variable_list&& inputs) {
 Gather::Gather(const at::Device& destination_device, int64_t dim)
     : destination_device_(destination_device), dim_(dim) {}
 
-// NOLINTNEXTLINE(modernize-use-equals-default)
-Gather::~Gather() {}
+Gather::~Gather() = default;
 
 variable_list Gather::apply(variable_list&& inputs) {
   bool all_are_zero_dim = true;
@@ -99,7 +98,9 @@ variable_list Gather::apply(variable_list&& inputs) {
   std::shared_ptr<Node> grad_fn;
   // compute this before moving variables from `inputs`
   if (compute_requires_grad(inputs)) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<at::Device> source_devices;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<int64_t> input_sizes;
     for (auto& input : inputs) {
       source_devices.push_back(input.device());
@@ -114,6 +115,7 @@ variable_list Gather::apply(variable_list&& inputs) {
     grad_fn->set_next_edges(collect_next_edges(inputs));
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<at::Tensor> tensors;
   tensors.reserve(inputs.size());
   for (auto& variable : inputs) {

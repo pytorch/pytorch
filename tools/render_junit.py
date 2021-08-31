@@ -16,8 +16,8 @@ try:
 except ImportError:
     print("rich not found, for color output use 'pip install rich'")
 
-def parse_junit_reports(path_to_reports: str) -> List[TestCase]:
-    def parse_file(path: str) -> List[TestCase]:
+def parse_junit_reports(path_to_reports: str) -> List[TestCase]:  # type: ignore[no-any-unimported]
+    def parse_file(path: str) -> List[TestCase]:  # type: ignore[no-any-unimported]
         try:
             return convert_junit_to_testcases(JUnitXml.fromfile(path))
         except Exception as err:
@@ -37,7 +37,7 @@ def parse_junit_reports(path_to_reports: str) -> List[TestCase]:
     return ret_xml
 
 
-def convert_junit_to_testcases(xml: Union[JUnitXml, TestSuite]) -> List[TestCase]:
+def convert_junit_to_testcases(xml: Union[JUnitXml, TestSuite]) -> List[TestCase]:  # type: ignore[no-any-unimported]
     testcases = []
     for item in xml:
         if isinstance(item, TestSuite):
@@ -46,7 +46,7 @@ def convert_junit_to_testcases(xml: Union[JUnitXml, TestSuite]) -> List[TestCase
             testcases.append(item)
     return testcases
 
-def render_tests(testcases: List[TestCase]) -> None:
+def render_tests(testcases: List[TestCase]) -> None:  # type: ignore[no-any-unimported]
     num_passed = 0
     num_skipped = 0
     num_failed = 0

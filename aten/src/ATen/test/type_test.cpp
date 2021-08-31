@@ -7,7 +7,6 @@
 
 namespace c10 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TypeCustomPrinter, Basic) {
   TypePrinter printer =
       [](const ConstTypePtr& t) -> c10::optional<std::string> {
@@ -28,7 +27,6 @@ TEST(TypeCustomPrinter, Basic) {
   EXPECT_EQ(intType->annotation_str(printer), intType->annotation_str());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TypeCustomPrinter, ContainedTypes) {
   TypePrinter printer =
       [](const ConstTypePtr& t) -> c10::optional<std::string> {
@@ -53,12 +51,11 @@ TEST(TypeCustomPrinter, ContainedTypes) {
       "List[Tuple[CustomTensor, int, CustomTensor]]");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TypeCustomPrinter, NamedTuples) {
   TypePrinter printer =
       [](const ConstTypePtr& t) -> c10::optional<std::string> {
     if (auto tupleType = t->cast<TupleType>()) {
-      // Rewrite only namedtuples
+      // Rewrite only NamedTuples
       if (tupleType->name()) {
         return "Rewritten";
       }
@@ -68,8 +65,9 @@ TEST(TypeCustomPrinter, NamedTuples) {
   torch::Tensor iv = torch::rand({2, 3});
   const auto type = TensorType::create(iv);
 
+  std::vector<std::string> field_names = {"foo", "bar"};
   const auto namedTupleType = TupleType::createNamed(
-      "my.named.tuple", {"foo", "bar"}, {type, IntType::get()});
+      "my.named.tuple", field_names, {type, IntType::get()});
   EXPECT_EQ(namedTupleType->annotation_str(printer), "Rewritten");
 
   // Put it inside another tuple, should still work
@@ -93,7 +91,6 @@ static TypePtr importType(
   return si.loadType(qual_name);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TypeEquality, ClassBasic) {
   // Even if classes have the same name across two compilation units, they
   // should not compare equal.
@@ -110,7 +107,6 @@ class First:
   EXPECT_EQ(*classType, *classType2);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TypeEquality, ClassInequality) {
   // Even if classes have the same name across two compilation units, they
   // should not compare equal.
@@ -134,7 +130,6 @@ class First:
   EXPECT_NE(*classType, *classType2);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TypeEquality, InterfaceEquality) {
   // Interfaces defined anywhere should compare equal, provided they share a
   // name and interface
@@ -154,7 +149,6 @@ class OneForward(Interface):
   EXPECT_EQ(*interfaceType, *interfaceType2);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TypeEquality, InterfaceInequality) {
   // Interfaces must match for them to compare equal, even if they share a name
   auto cu = std::make_shared<CompilationUnit>();
@@ -180,7 +174,6 @@ class OneForward(Interface):
   EXPECT_NE(*interfaceType, *interfaceType2);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TypeEquality, TupleEquality) {
   // Tuples should be structurally typed
   auto type = TupleType::create({IntType::get(), TensorType::get(), FloatType::get(), ComplexType::get()});
@@ -189,7 +182,6 @@ TEST(TypeEquality, TupleEquality) {
   EXPECT_EQ(*type, *type2);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TypeEquality, NamedTupleEquality) {
   // Named tuples should compare equal if they share a name and field names
   auto type = TupleType::createNamed(

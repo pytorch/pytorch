@@ -12,7 +12,7 @@
 
 #include <complex>
 #include <cstdint>
-#include <iostream>
+#include <ostream>
 
 namespace c10 {
 
@@ -130,31 +130,31 @@ AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SPECIALIZE_CppTypeToScalarType)
   _(float, Float)                 \
   _(double, Double)
 
-#define AT_FORALL_SCALAR_TYPES_AND(SCALARTYPE, _)                            \
-  _(uint8_t, Byte)                                                           \
-  _(int8_t, Char)                                                            \
-  _(int16_t, Short)                                                          \
-  _(int, Int)                                                                \
-  _(int64_t, Long)                                                           \
-  _(float, Float)                                                            \
-  _(double, Double)                                                          \
-  _(decltype(                                                                \
-        ::c10::impl::ScalarTypeToCPPType<::c10::ScalarType::SCALARTYPE>::t), \
+#define AT_FORALL_SCALAR_TYPES_AND(SCALARTYPE, _) \
+  _(uint8_t, Byte)                                \
+  _(int8_t, Char)                                 \
+  _(int16_t, Short)                               \
+  _(int, Int)                                     \
+  _(int64_t, Long)                                \
+  _(float, Float)                                 \
+  _(double, Double)                               \
+  _(decltype(::c10::impl::ScalarTypeToCPPType<    \
+             ::c10::ScalarType::SCALARTYPE>::t),  \
     SCALARTYPE)
 
-#define AT_FORALL_SCALAR_TYPES_AND2(SCALARTYPE1, SCALARTYPE2, _)              \
-  _(uint8_t, Byte)                                                            \
-  _(int8_t, Char)                                                             \
-  _(int16_t, Short)                                                           \
-  _(int, Int)                                                                 \
-  _(int64_t, Long)                                                            \
-  _(float, Float)                                                             \
-  _(double, Double)                                                           \
-  _(decltype(                                                                 \
-        ::c10::impl::ScalarTypeToCPPType<::c10::ScalarType::SCALARTYPE1>::t), \
-    SCALARTYPE1)                                                              \
-  _(decltype(                                                                 \
-        ::c10::impl::ScalarTypeToCPPType<::c10::ScalarType::SCALARTYPE2>::t), \
+#define AT_FORALL_SCALAR_TYPES_AND2(SCALARTYPE1, SCALARTYPE2, _) \
+  _(uint8_t, Byte)                                               \
+  _(int8_t, Char)                                                \
+  _(int16_t, Short)                                              \
+  _(int, Int)                                                    \
+  _(int64_t, Long)                                               \
+  _(float, Float)                                                \
+  _(double, Double)                                              \
+  _(decltype(::c10::impl::ScalarTypeToCPPType<                   \
+             ::c10::ScalarType::SCALARTYPE1>::t),                \
+    SCALARTYPE1)                                                 \
+  _(decltype(::c10::impl::ScalarTypeToCPPType<                   \
+             ::c10::ScalarType::SCALARTYPE2>::t),                \
     SCALARTYPE2)
 
 #define AT_FORALL_SCALAR_TYPES_AND3(SCALARTYPE1, SCALARTYPE2, SCALARTYPE3, _) \
@@ -165,14 +165,14 @@ AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SPECIALIZE_CppTypeToScalarType)
   _(int64_t, Long)                                                            \
   _(float, Float)                                                             \
   _(double, Double)                                                           \
-  _(decltype(                                                                 \
-        ::c10::impl::ScalarTypeToCPPType<::c10::ScalarType::SCALARTYPE1>::t), \
+  _(decltype(::c10::impl::ScalarTypeToCPPType<                                \
+             ::c10::ScalarType::SCALARTYPE1>::t),                             \
     SCALARTYPE1)                                                              \
-  _(decltype(                                                                 \
-        ::c10::impl::ScalarTypeToCPPType<::c10::ScalarType::SCALARTYPE2>::t), \
+  _(decltype(::c10::impl::ScalarTypeToCPPType<                                \
+             ::c10::ScalarType::SCALARTYPE2>::t),                             \
     SCALARTYPE2)                                                              \
-  _(decltype(                                                                 \
-        ::c10::impl::ScalarTypeToCPPType<::c10::ScalarType::SCALARTYPE3>::t), \
+  _(decltype(::c10::impl::ScalarTypeToCPPType<                                \
+             ::c10::ScalarType::SCALARTYPE3>::t),                             \
     SCALARTYPE3)
 
 #define AT_FORALL_QINT_TYPES(_) \
@@ -427,5 +427,9 @@ inline std::ostream& operator<<(
     at::ScalarType scalar_type) {
   return stream << toString(scalar_type);
 }
+
+#define AT_FORAUTOCAST_SCALAR_TYPES(_) \
+  _(half, Half) /* 0 */                \
+  _(bfloat16, BFloat16) /* 1 */
 
 } // namespace c10

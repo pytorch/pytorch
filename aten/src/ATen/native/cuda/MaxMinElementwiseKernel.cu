@@ -62,7 +62,7 @@ void minimum_kernel_cuda(TensorIteratorBase& iter) {
   }
 }
 
-void fmax_kernel_cuda(TensorIterator& iter) {
+void fmax_kernel_cuda(TensorIteratorBase& iter) {
   if (isFloatingType(iter.common_dtype())) {
     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "fmax_cuda", [&]() {
       gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
@@ -74,7 +74,7 @@ void fmax_kernel_cuda(TensorIterator& iter) {
   }
 }
 
-void fmin_kernel_cuda(TensorIterator& iter) {
+void fmin_kernel_cuda(TensorIteratorBase& iter) {
   if (isFloatingType(iter.common_dtype())) {
     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "fmin_cuda", [&]() {
       gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {

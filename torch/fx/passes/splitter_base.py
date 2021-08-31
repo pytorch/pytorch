@@ -343,7 +343,7 @@ class _SplitterBase:
 
         def get_dtype(arg):
             tensor_meta = arg.meta.get("tensor_meta")
-            return tensor_meta.dtype if tensor_meta else None
+            return getattr(tensor_meta, "dtype", None)
 
         for node in self.module.graph.nodes:
             if node.op not in CALLABLE_NODE_OPS:
@@ -629,12 +629,12 @@ class _SplitterBase:
 
     def starter_nodes(self) -> Tuple[NodeSet, NodeSet]:
         """
-        Finds nodes that consume module inputs or getattr nodes.
+        Finds nodes that consume module inputs or get_attr nodes.
         """
         starter_cpu_nodes: NodeSet = set()
         starter_acc_nodes: NodeSet = set()
         for node in self.module.graph.nodes:
-            if node.op not in {"placeholder", "getattr"}:
+            if node.op not in {"placeholder", "get_attr"}:
                 continue
             for user in node.users:
                 if user in self.acc_nodes:

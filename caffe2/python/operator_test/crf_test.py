@@ -15,7 +15,7 @@ class TestCRFOp(hu.HypothesisTestCase):
 
     @given(num_tags=st.integers(2, 4),
            num_words=st.integers(2, 15))
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_crf_with_loss_op(self, num_tags, num_words):
         model = ModelHelper(name='external')
         embeddings_dim = 200

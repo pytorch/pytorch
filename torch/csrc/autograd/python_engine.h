@@ -27,12 +27,13 @@ struct PythonEngine : public Engine {
       bool accumulate_grad,
       const edge_list& outputs = {}) override;
 
-  std::shared_ptr<at::ivalue::Future> execute_with_graph_task(
+  c10::intrusive_ptr<at::ivalue::Future> execute_with_graph_task(
       const std::shared_ptr<GraphTask>& graph_task,
       std::shared_ptr<Node> graph_root,
       InputBuffer&& input_buffer) override;
 
   std::unique_ptr<AnomalyMetadata> make_anomaly_metadata() override;
+  std::unique_ptr<SavedVariableHooks> get_default_saved_variable_hooks() override;
   private:
     PythonEngine();
 };

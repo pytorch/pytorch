@@ -21,6 +21,7 @@ void clear_computation_cache();
 namespace {
 // Number of threads set by the user
 std::atomic<int> num_threads{-1};
+thread_local int this_thread_id{0};
 
 } // namespace
 
@@ -48,7 +49,7 @@ void set_num_threads(int nthreads) {
   omp_set_num_threads(nthreads);
 #endif
 #ifdef TH_BLAS_MKL
-  mkl_set_num_threads(nthreads);
+  mkl_set_num_threads_local(nthreads);
 
   // because PyTorch uses OpenMP outside of MKL invocations
   // as well, we want this flag to be false, so that
@@ -74,6 +75,7 @@ void set_num_threads(int nthreads) {
 // consistent size of parallel region in different threads
 int get_num_threads() {
 #ifdef _OPENMP
+  at::internal::lazy_init_num_threads();
   return omp_get_max_threads();
 #else
   return 1;
@@ -81,11 +83,13 @@ int get_num_threads() {
 }
 
 int get_thread_num() {
-#ifdef _OPENMP
-  return omp_get_thread_num();
-#else
-  return 0;
-#endif
+  return this_thread_id;
+}
+
+namespace internal {
+void set_thread_num(int id) {
+  this_thread_id = id;
+}
 }
 
 bool in_parallel_region() {
@@ -101,10 +105,10 @@ void intraop_launch(std::function<void()> func) {
   func();
 }
 
-std::shared_ptr<c10::ivalue::Future> intraop_launch_future(
+c10::intrusive_ptr<c10::ivalue::Future> intraop_launch_future(
     std::function<void()> func) {
   func();
-  auto future = std::make_shared<c10::ivalue::Future>(NoneType::get());
+  auto future = c10::make_intrusive<c10::ivalue::Future>(NoneType::get());
   future->markCompleted();
   return future;
 }
