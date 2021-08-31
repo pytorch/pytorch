@@ -34,6 +34,9 @@ std::string ncclGetErrorWithVersion(ncclResult_t error) {
       getNcclVersion();
 }
 
+void c10d_nccl_check_wrapper(ncclResult_t cmd, c10::optional<std::string> failureReason) {
+  C10D_NCCL_CHECK(cmd, failureReason);
+}
 } // namespace c10d
 
 #endif // USE_C10D_NCCL
