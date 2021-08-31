@@ -48,7 +48,9 @@ class CUDAGraph(torch._C._CUDAGraph):
         which call ``capture_begin`` internally.
 
         Arguments:
-            pool (optional): Token (returned by :func:`~torch.cuda.graph_pool_handle` or :meth:`other_Graph_instance.pool()<torch.cuda.CUDAGraph.pool>`) that hints this graph may share memory with the indicated pool.  See :ref:`Graph memory management<graph-memory-management>`.
+            pool (optional): Token (returned by :func:`~torch.cuda.graph_pool_handle` or
+                :meth:`other_Graph_instance.pool()<torch.cuda.CUDAGraph.pool>`) that hints this graph may share memory
+                with the indicated pool.  See :ref:`Graph memory management<graph-memory-management>`.
         """
         # I'm not sure if pybind11 converts a None arg to the default defined on the C++ side,
         # so I'm not taking any chances.
