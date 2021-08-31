@@ -301,80 +301,75 @@ static void nll_loss_backward_out_frame(
   const auto n_dims = input.dim();
   const auto n_classes = input.size(-1);
 
-  auto target_ = target;
-  if (target.dim() == 0) {
-    target_ = target.unsqueeze(0);
-  }
+  // grad_input will be sparse in general
+  grad_input.zero_();
+
+  auto target_ = target.dim() == 0 ? target.unsqueeze(0) : target;
   auto target_acc = target_.accessor<target_t, 1>();
 
   auto weight_contiguous = optional_contiguous(weight);
-  const scalar_t* weight_data = optional_data<scalar_t>(weight_contiguous);
+  const scalar_t* const weight_data = optional_data<scalar_t>(weight_contiguous);
 
-  if (reduction == Reduction::None && n_dims == 2) {
-    const auto batch_size = input.size(0);
-    auto grad_input_acc = grad_input.accessor<scalar_t, 2>();
-    auto grad_output_acc = grad_output.accessor<scalar_t, 1>();
-    at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
-      for (auto i = start; i < end; i++) {
-        auto cur_target = target_acc[i];
-        if (cur_target == ignore_index) {
-          continue;
-        }
-        const scalar_t w =
-            weight_data ? weight_data[cur_target] : static_cast<scalar_t>(1);
-        grad_input_acc[i][cur_target] = -w * grad_output_acc[i];
-      }
-    });
-    return;
-  }
-
-  const scalar_t total_weight_value = *total_weight.data_ptr<scalar_t>();
-  if (total_weight_value <= 0) {
-    return;
-  }
-
-  const scalar_t grad_output_value = *grad_output.data_ptr<scalar_t>();
-
-  if (input.dim() == 1) {
+  // TODO Implement with TensorIterator for speed
+  if (n_dims == 1) {
+    const scalar_t total_weight_value = *total_weight.data_ptr<scalar_t>();
     auto grad_input_acc = grad_input.accessor<scalar_t, 1>();
-
+    const scalar_t grad_output_value = *grad_output.data_ptr<scalar_t>();
     const auto cur_target = target_acc[0];
     if (cur_target != ignore_index) {
-      TORCH_CHECK_INDEX(
-          cur_target >= 0 && cur_target < n_classes,
-          "Target ",
-          cur_target,
-          " is out of bounds.");
+      TORCH_CHECK_INDEX(cur_target >= 0 && cur_target < n_classes,
+          "Target ", cur_target, " is out of bounds.");
 
-      grad_input_acc[cur_target] =
-          (reduction != Reduction::Mean && weight_data != nullptr)
-          ? -weight_data[cur_target]
-          : static_cast<scalar_t>(-1);
-      grad_input_acc[cur_target] *= grad_output_value;
-    }
-  } else if (input.dim() == 2) {
-    auto grad_input_acc = grad_input.accessor<scalar_t, 2>();
-
-    const auto batch_size = input.size(0);
-
-    for (int64_t i = 0; i < batch_size; i++) {
-      const auto cur_target = target_acc[i];
-
-      if (cur_target != ignore_index) {
-        TORCH_CHECK_INDEX(
-            cur_target >= 0 && cur_target < n_classes,
-            "Target ",
-            cur_target,
-            " is out of bounds.");
-
-        const scalar_t w = weight_data != nullptr ? weight_data[cur_target]
-                                                  : static_cast<scalar_t>(1);
-        grad_input_acc[i][cur_target] = -w * grad_output_value;
-
-        if (reduction == Reduction::Mean) {
-          grad_input_acc[i][cur_target] /= total_weight_value;
-        }
+      auto grad = -grad_output_value;
+      if (weight_data != nullptr) {
+        grad *= weight_data[cur_target];
       }
+      if (reduction == Reduction::Mean) {
+        grad /= total_weight_value;
+      }
+      grad_input_acc[cur_target] = grad;
+    }
+  } else { // n_dims == 2
+    const auto batch_size = input.size(0);
+    auto grad_input_acc = grad_input.accessor<scalar_t, 2>();
+    if (reduction == Reduction::None) {
+      auto grad_output_acc = grad_output.accessor<scalar_t, 1>();
+      at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
+        for (auto i = start; i < end; i++) {
+          auto cur_target = target_acc[i];
+          if (cur_target == ignore_index) {
+            continue;
+          }
+          TORCH_CHECK_INDEX(cur_target >= 0 && cur_target < n_classes,
+              "Target ", cur_target, " is out of bounds.");
+          auto grad = -grad_output_acc[i];
+          if (weight_data != nullptr) {
+            grad *= weight_data[cur_target];
+          }
+          grad_input_acc[i][cur_target] = grad;
+        }
+      });
+    } else {
+      const scalar_t total_weight_value = *total_weight.data_ptr<scalar_t>();
+      const scalar_t grad_output_value = *grad_output.data_ptr<scalar_t>();
+      at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
+        for (auto i = start; i < end; i++) {
+          auto cur_target = target_acc[i];
+          if (cur_target == ignore_index) {
+            continue;
+          }
+          TORCH_CHECK_INDEX(cur_target >= 0 && cur_target < n_classes,
+              "Target ", cur_target, " is out of bounds.");
+          auto grad = -grad_output_value;
+          if (weight_data != nullptr) {
+            grad *= weight_data[cur_target];
+          }
+          if (reduction == Reduction::Mean) {
+            grad /= total_weight_value;
+          }
+          grad_input_acc[i][cur_target] = grad;
+        }
+      });
     }
   }
 }
@@ -388,7 +383,6 @@ void nll_loss_backward_out_cpu_template(
     int64_t reduction,
     int64_t ignore_index,
     const Tensor& total_weight) {
-  grad_input.zero_();
 
   AT_DISPATCH_FLOATING_TYPES_AND(
       ScalarType::BFloat16,
