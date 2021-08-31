@@ -4176,18 +4176,6 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.randint(0, 2, (5, 5), dtype=torch.bool)
         self.run_test(MyModel(), input=(x, y))
 
-        x = torch.randint(0, 2, (5, 5), dtype=torch.int32)
-        y = torch.randint(0, 2, (5, 5), dtype=torch.int32)
-        self.run_test(MyModel(), input=(x, y))
-
-        x = torch.randint(0, 2, (5, 5), dtype=torch.long)
-        y = torch.randint(0, 2, (5, 5), dtype=torch.long)
-        self.run_test(MyModel(), input=(x, y))
-
-        x = torch.randint(0, 2, (5, 5), dtype=torch.int32)
-        y = torch.randint(0, 2, (5, 5), dtype=torch.int64)
-        self.run_test(MyModel(), input=(x, y))
-
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_logical_and(self):
         class AndModel(torch.nn.Module):
