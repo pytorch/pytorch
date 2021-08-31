@@ -689,6 +689,12 @@ class TestFunctionalIterDataPipe(TestCase):
                 break
         self.assertEqual(list(range(10)), list(dp3))  # dp3 has to read from the start again
 
+        # Test Case: Each DataPipe inherits the source datapipe's length
+        dp1, dp2, dp3 = input_dp.fork(num_instances=3)
+        self.assertEqual(len(input_dp), len(dp1))
+        self.assertEqual(len(input_dp), len(dp2))
+        self.assertEqual(len(input_dp), len(dp3))
+
 
     def test_demux_datapipe(self):
         input_dp = IDP(range(10))
@@ -787,6 +793,13 @@ class TestFunctionalIterDataPipe(TestCase):
         it1 = iter(dp1)
         with self.assertRaises(ValueError):
             next(it1)
+
+        # Test Case: __len__ not implemented
+        dp1, dp2 = input_dp.demux(num_instances=2, classifier_fn=lambda x: x % 2)
+        with self.assertRaises(TypeError):
+            len(dp1)  # It is not implemented as we do not know length for each child in advance
+        with self.assertRaises(TypeError):
+            len(dp2)
 
 
     def test_map_datapipe(self):
