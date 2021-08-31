@@ -6,13 +6,14 @@ from ._utils import _dummy_type
 
 if not hasattr(torch._C, '_CudaStreamBase'):
     # Define dummy base classes
-    torch._C.__dict__['CUDAGraph'] = _dummy_type('CUDAGraph')
+    torch._C.__dict__['_CUDAGraph'] = _dummy_type('_CUDAGraph')
     torch._C.__dict__['_graph_pool_handle'] = _dummy_type('_graph_pool_handle')
 
-from torch._C import CUDAGraph  # noqa: F401
+from torch._C import _CUDAGraph  # noqa: F401
 from torch._C import _graph_pool_handle
 
 
+# Python shim helps Sphinx process docstrings more reliably.
 def graph_pool_handle():
     r"""
     Returns an opaque token representing the id of a graph memory pool.
@@ -22,6 +23,71 @@ def graph_pool_handle():
         This API is a prototype and may change in future releases.
     """
     return _graph_pool_handle()
+
+
+# Python shim helps Sphinx process docstrings more reliably.
+class CUDAGraph(torch._C._CUDAGraph):
+    r"""
+    Wrapper around a CUDA graph.
+
+    .. warning
+        This API is a prototype and may change in future releases.
+    """
+    def __new__(cls):
+        return super(CUDAGraph, cls).__new__(cls)
+
+    def __init__(self):
+        super(CUDAGraph, self).__init__()
+
+    def capture_begin(self, pool=None):
+        r"""
+        Begins capturing CUDA work on the current stream.
+
+        Typically, you shouldn't call ``capture_begin`` yourself.
+        Use :class:`~torch.cuda.graph` or :func:`~torch.cuda.make_graphed_callables`,
+        which call ``capture_begin`` internally.
+
+        Arguments:
+            pool (optional): Token (returned by :func:`~torch.cuda.graph_pool_handle` or :meth:`other_Graph_instance.pool()<torch.cuda.CUDAGraph.pool>`) that hints this graph may share memory with the indicated pool.  See :ref:`Graph memory management<graph-memory-management>`.
+        """
+        # I'm not sure if pybind11 converts a None arg to the default defined on the C++ side,
+        # so I'm not taking any chances.
+        if pool is None:
+            print("pool was None")
+            super(CUDAGraph, self).capture_begin()
+        else:
+            super(CUDAGraph, self).capture_begin(pool)
+
+    def capture_end(self):
+        r"""
+        Ends CUDA graph capture on the current stream.
+        After ``capture_end``, ``replay`` may be called on this instance.
+
+        Typically, you shouldn't call ``capture_end`` yourself.
+        Use :class:`~torch.cuda.graph` or :func:`~torch.cuda.make_graphed_callables`,
+        which call ``capture_end`` internally.
+        """
+        super(CUDAGraph, self).capture_end()
+
+    def replay(self):
+        r"""
+        Replays the CUDA work captured by this graph.
+        """
+        super(CUDAGraph, self).replay()
+
+    def reset(self):
+        r"""
+        Deletes the graph currently held by this instance.
+        """
+        super(CUDAGraph, self).reset()
+
+    def pool(self):
+        r"""
+        Returns an opaque token representing the id of this graph's memory pool.
+        This id can optionally be passed to another graph's ``capture_begin``,
+        which hints the other graph may share the same memory pool.
+        """
+        return super(CUDAGraph, self).pool()
 
 
 class graph(object):

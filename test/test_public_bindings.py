@@ -88,7 +88,6 @@ class TestPublicBindings(unittest.TestCase):
             "CudaShortStorageBase",
             "CudaShortTensorBase",
             "CudaShortTensorBase",
-            "CUDAGraph",
             "DeepCopyMemoTable",
             "default_generator",
             "DeserializationStorageContext",
