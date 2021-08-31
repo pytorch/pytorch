@@ -27,15 +27,15 @@ class ConcatLinearLayers : public torch::jit::OptimizationPass {
     // one only needs to move arguments forward to be a valid move, not
     // backwards.
     std::unordered_map<Value*, std::list<Node*>> tensorUsers;
+
     for (Node* n : b->nodes()) {
-      // Grouping together all linear layers that use the same
-      // Tensor for input, so that we can do a first pass on
-      // which linear layers should be compatible for jjoining
+      // Grouping together all linear layers that use the same Tensor for input
       if (n->kind() != aten::linear) {
         continue;
       }
       
       // Punting on support for non-constant params for now.
+      // We really just need to know that the shape of the weights and biases are constant.
       if(nonConstantParameters(n)){
         continue;
       }
@@ -44,8 +44,6 @@ class ConcatLinearLayers : public torch::jit::OptimizationPass {
       auto weight = n->namedInput("weight");
       auto bias = n->namedInput("bias");
 
-      // make sure that weights can be cast as tensors and are not just opaque
-      // pointers
       if (!constant_as<Tensor>(weight).has_value() ||
           !constant_as<Tensor>(bias).has_value()) {
         continue;
@@ -61,7 +59,7 @@ class ConcatLinearLayers : public torch::jit::OptimizationPass {
       tensorUsers.find(op_value)->second.push_back(n);
     }
 
-    // Find a valid group of nodes to concat together
+    // Check the uses of a tensor to find ones that can be combined
     for (auto& kv : tensorUsers) {
       Value* op_value = kv.first;
       auto& uses = kv.second;
@@ -71,8 +69,8 @@ class ConcatLinearLayers : public torch::jit::OptimizationPass {
         Node* base_node = *it_first;
         uses.erase(it_first);
 
-        auto weight_type = base_node->namedInput("weight")->type();
-        auto bias_type = base_node->namedInput("bias")->type();
+        auto weight_type = constant_as<Tensor>(base_node->namedInput("weight"))->dtype();
+        auto bias_type = constant_as<Tensor>(base_node->namedInput("bias"))->dtype();
         std::vector<Node*> matching_nodes;
         matching_nodes.push_back(base_node);
 
@@ -80,21 +78,18 @@ class ConcatLinearLayers : public torch::jit::OptimizationPass {
         // see if there is anything that we can coaleasce with.
         for (auto it = uses.begin(); it != uses.end();) {
           auto candidate_node = *it;
-          auto candidate_weight_t =
-              candidate_node->namedInput("weight")->type();
-          auto candidate_bias_t = candidate_node->namedInput("bias")->type();
+          auto candidate_weight = constant_as<Tensor>(candidate_node->namedInput("weight"));
+          auto candidate_weight_type = candidate_weight->dtype();
+          auto candidate_bias = constant_as<Tensor>(candidate_node->namedInput("bias"));
+          auto candidate_bias_type = candidate_bias->dtype();
 
           // For now we will just keep it simple and require matching types
           // Type promotion mgiht cause performance to actually decrease.
-          if (*candidate_weight_t != *weight_type ||
-              *candidate_bias_t != *bias_type) {
+          if (weight_type != candidate_weight_type || bias_type != candidate_bias_type) {          
             it++;
             continue;
           }
-          // Now use AliasDB to check that the weights and the biases, and the
-          // node can be moved topologically. Need to check against all
-          // candidate nodes, because there could be a weird weight of candidate
-          // 3 depends on the output of candidate 2
+
           bool can_move_before_all = true;
           for (auto n : matching_nodes) {
             can_move_before_all &=
@@ -115,6 +110,7 @@ class ConcatLinearLayers : public torch::jit::OptimizationPass {
           // Found no other compatible linear layers, do nothing.
           continue;
         }
+        graph_modified = true;
 
         for (auto n : matching_nodes) {
           if (n == base_node) {
@@ -124,8 +120,9 @@ class ConcatLinearLayers : public torch::jit::OptimizationPass {
         }
 
         // Now actually merge the candidate nodes
+        graph_->setInsertPoint(base_node);
         Value* zero = graph_->insertConstant(0);
-        Value* one = graph_->insertConstant(1);
+
         auto weight_list = c10::fmap(
             matching_nodes, [](Node* n) { return n->namedInput("weight"); });
         auto weight_with_dim(weight_list);
@@ -135,8 +132,6 @@ class ConcatLinearLayers : public torch::jit::OptimizationPass {
             matching_nodes, [](Node* n) { return n->namedInput("bias"); });
         bias_with_dim.push_back(zero);
 
-        // auto weight_list_n = graph_->createList(weight_type, weight_list);
-        // weight_list_n->insertBefore(base_node);
         auto weight_cat = graph_->create(prim::VarConcat, weight_with_dim);
         weight_cat->insertBefore(base_node);
         auto bias_cat = graph_->create(prim::VarConcat, bias_with_dim);
@@ -148,26 +143,28 @@ class ConcatLinearLayers : public torch::jit::OptimizationPass {
         auto linear_node = graph_->create(aten::linear, linear_in);
         linear_node->insertBefore(base_node);
 
-        // Edit the outputs
+        // Update the outputs of the nodes
+        graph_->setInsertPoint(linear_node);
+        Value* neg1 = graph_->insertConstant(-1);
+        Value* one = graph_->insertConstant(1);
+
         long long cur_loc = 0;
         Value* cur_val = zero;
+
         for (auto& orig_node : matching_nodes) {
-          // Tensor out_tensor = constant_as<Tensor>(orig_node->output()).value();
-          // long long next_loc = cur_loc + out_tensor.size(0);
           Tensor weight_tensor = constant_as<Tensor>(orig_node->namedInput("weight")).value();
-          long long next_loc = cur_loc + weight_tensor.size(1);
-
+          long long next_loc = cur_loc + weight_tensor.size(0);
           Value* next_val = graph_->insertConstant(next_loc);
-
+            
           auto slice = graph_->create(
               aten::slice,
-              {linear_node->output(), zero, cur_val, next_val, one});
+              {linear_node->output(), neg1, cur_val, next_val, one});
           slice->insertAfter(linear_node);
+          orig_node->replaceAllUsesWith(slice);
+          orig_node->destroy();
 
           cur_loc = next_loc;
           cur_val = next_val;
-          orig_node->replaceAllUsesWith(slice);
-          orig_node->destroy();
         }
       }
     }
