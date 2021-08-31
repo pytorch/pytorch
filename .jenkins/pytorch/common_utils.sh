@@ -103,3 +103,8 @@ function clone_pytorch_xla() {
     git clone --recursive https://github.com/pytorch/xla.git
   fi
 }
+
+function set_torch_cmake_prefix_path() {
+  SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
+  export CMAKE_PREFIX_PATH="${SITE_PACKAGES}/torch"
+}

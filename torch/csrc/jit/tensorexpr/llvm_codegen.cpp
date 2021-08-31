@@ -231,7 +231,7 @@ class LLVMCodeGenImpl : public IRVisitor {
   void visit(CompareSelectPtr v) override;
 
 #define IMM_VISIT_DECLARE(_1, Name) void visit(Name##ImmPtr v) override;
-  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_VISIT_DECLARE);
+  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_VISIT_DECLARE);
 #undef IMM_VISIT_DECLARE
 
   void visit(CastPtr v) override;
@@ -900,6 +900,10 @@ AT_FORALL_SCALAR_TYPES(IMM_VISIT_DECLARE);
 
 void LLVMCodeGenImpl::visit(HalfImmPtr v) {
   value_ = llvm::ConstantFP::get(HalfTy_, v->value());
+}
+
+void LLVMCodeGenImpl::visit(BFloat16ImmPtr v) {
+  TORCH_INTERNAL_ASSERT(false, "llvm codegen does not support bfloat16");
 }
 
 void LLVMCodeGenImpl::visit(BoolImmPtr v) {
