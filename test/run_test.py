@@ -104,7 +104,6 @@ TESTS = [
     "test_optim",
     "test_functional_optim",
     "test_pytree",
-    "test_python_dispatch",
     "test_mobile_optimizer",
     "test_set_default_mobile_cpu_allocator",
     "test_xnnpack_integration",
@@ -345,7 +344,6 @@ JIT_EXECUTOR_TESTS = [
 ]
 
 DISTRIBUTED_TESTS = [
-    "distributed/test_distributed_fork",
     "distributed/test_distributed_spawn",
 ]
 
