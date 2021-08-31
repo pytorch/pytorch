@@ -82,7 +82,7 @@ def _torchscript_schema_to_signature(ts_schema : torch._C.FunctionSchema) -> ins
 def check_for_mutable_operation(target : Callable, args : Tuple['Argument', ...], kwargs : Dict[str, 'Argument']):
     signatures, schemas = get_signature_for_torch_op(target, return_schemas=True)
 
-    if signatures:
+    if signatures and schemas:
         matched_schemas = []
 
         # Iterate through all of the schema until we find one that matches
@@ -106,28 +106,13 @@ def check_for_mutable_operation(target : Callable, args : Tuple['Argument', ...]
             pass
         elif len(matched_schemas) == 1:
             # Matched exactly one schema, unambiguous
-            throw_if_mutable(schema)
+            _, schema_to_check = matched_schemas[0]
+            throw_if_mutable(schema_to_check)
             pass
         else:
-            if arg_types is not None or kwarg_types is not None:
-                arg_types = arg_types if arg_types else cast(Tuple[Any], ())
-                kwarg_types = kwarg_types if kwarg_types else {}
-                for candidate_signature in torch_op_schemas:
-                    sig_matches = True
-                    try:
-                        bound_types = candidate_signature.bind(*arg_types, **kwarg_types)
-                        for arg_name, arg_type in bound_types.arguments.items():
-                            param = candidate_signature.parameters[arg_name]
-                            sig_matches = sig_matches and type_matches(param.annotation, arg_type)
-                    except TypeError as e:
-                        sig_matches = False
-                    if sig_matches:
-                        throw_if_mutable(schema)
-                        break
-            else:
-                # Matched more than one schema. Since mutability checking is best effort,
-                # do nothing.
-                pass
+            # Ambiguous schema match. Since mutability checking is best effort,
+            # do nothing.
+            pass
 
 @compatibility(is_backward_compatible=False)
 def get_signature_for_torch_op(op : Callable, return_schemas : bool = False) -> Optional[List[inspect.Signature]]:
@@ -145,12 +130,12 @@ def get_signature_for_torch_op(op : Callable, return_schemas : bool = False) -> 
     """
     override = _manual_overrides.get(op)
     if override:
-        return override
+        return (override, None) if return_schemas else None
 
     aten_fn = torch.jit._builtins._find_builtin(op)
 
     if aten_fn is None:
-        return None
+        return (None, None) if return_schemas else None
 
     schemas = torch._C._jit_get_schemas_for_operator(aten_fn)
     signatures = [_torchscript_schema_to_signature(schema) for schema in schemas]

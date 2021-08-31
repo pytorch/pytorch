@@ -15,6 +15,7 @@ class TracerBase:
     graph: Graph
     record_stack_traces : bool = False
     # Feature flag for mutable schema checking
+    # Enableby default in 1.12
     check_mutable_operations : bool = False
 
     @compatibility(is_backward_compatible=True)

@@ -135,6 +135,14 @@ class TestFX(JitTestCase):
         lib_file_path = find_library_location('libtorchbind_test.so')
         torch.ops.load_library(str(lib_file_path))
 
+        # Checking for mutable operations whil tracing is feature flagged
+        # Enable it in testing but not by default
+        self.orig_tracer_mutable_flag = torch.fx.proxy.TracerBase.check_mutable_operations
+        torch.fx.proxy.TracerBase.check_mutable_operations = True
+
+    def tearDown(self):
+        torch.fx.proxy.TracerBase.check_mutable_operations = self.orig_tracer_mutable_flag
+
     def checkGraphModule(self, m: torch.nn.Module, args, kwargs=None):
         """Check that an nn.Module's results match the GraphModule version
         for a given set of args/kwargs.
@@ -3011,6 +3019,15 @@ def run_getitem_target():
 
 
 class TestOperatorSignatures(JitTestCase):
+    def setUp(self):
+        # Checking for mutable operations whil tracing is feature flagged
+        # Enable it in testing but not by default
+        self.orig_tracer_mutable_flag = torch.fx.proxy.TracerBase.check_mutable_operations
+        torch.fx.proxy.TracerBase.check_mutable_operations = True
+
+    def tearDown(self):
+        torch.fx.proxy.TracerBase.check_mutable_operations = self.orig_tracer_mutable_flag
+
     @onlyCPU
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_get_torch_func_signature_exhaustive(self, device, dtype, op):
@@ -3079,6 +3096,15 @@ class TestOperatorSignatures(JitTestCase):
 class TestFXAPIBackwardCompatibility(JitTestCase):
     def setUp(self):
         self.maxDiff = None
+
+        # Checking for mutable operations whil tracing is feature flagged
+        # Enable it in testing but not by default
+        self.orig_tracer_mutable_flag = torch.fx.proxy.TracerBase.check_mutable_operations
+        torch.fx.proxy.TracerBase.check_mutable_operations = True
+
+    def tearDown(self):
+        torch.fx.proxy.TracerBase.check_mutable_operations = self.orig_tracer_mutable_flag
+
 
     def _fn_to_stable_annotation_str(self, obj):
         """
@@ -3316,6 +3342,15 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
                                  f"BC guarantees.")
 
 class TestFunctionalTracing(JitTestCase):
+    def setUp(self):
+        # Checking for mutable operations whil tracing is feature flagged
+        # Enable it in testing but not by default
+        self.orig_tracer_mutable_flag = torch.fx.proxy.TracerBase.check_mutable_operations
+        torch.fx.proxy.TracerBase.check_mutable_operations = True
+
+    def tearDown(self):
+        torch.fx.proxy.TracerBase.check_mutable_operations = self.orig_tracer_mutable_flag
+
     IGNORE_FUNCS = ("has_torch_function", "has_torch_function_unary",
                     "has_torch_function_variadic", "handle_torch_function",
                     "boolean_dispatch")
@@ -3330,6 +3365,7 @@ class TestFunctionalTracing(JitTestCase):
     ARG_TYPE_MISMATCH = (TypeError, r", not Proxy$")
     CONTROL_FLOW = (TraceError, r"symbolically traced variables cannot be used as inputs to control flow")
     INTERPOLATE_ARGS_CONFLICT = (ValueError, r"only one of size or scale_factor should be defined")
+    MUTABLE = (RuntimeError, r"Tried to trace mutable operation")
 
     UNTRACEABLE_FUNCTIONALS = {
         "adaptive_avg_pool1d": BUILT_IN_FUNC,
@@ -3449,6 +3485,8 @@ class TestFunctionalTracing(JitTestCase):
 
         "upsample_bilinear": INTERPOLATE_ARGS_CONFLICT,
         "upsample_nearest": INTERPOLATE_ARGS_CONFLICT,
+
+        "normalize" : MUTABLE,
     }
 
     # List of nn.functionals with Tensor inputs but not with type annotation
@@ -3563,6 +3601,15 @@ instantiate_device_type_tests(TestOperatorSignatures, globals())
 
 @skipIfNoTorchVision
 class TestVisionTracing(JitTestCase):
+    def setUp(self):
+        # Checking for mutable operations whil tracing is feature flagged
+        # Enable it in testing but not by default
+        self.orig_tracer_mutable_flag = torch.fx.proxy.TracerBase.check_mutable_operations
+        torch.fx.proxy.TracerBase.check_mutable_operations = True
+
+    def tearDown(self):
+        torch.fx.proxy.TracerBase.check_mutable_operations = self.orig_tracer_mutable_flag
+
     PROXY_ITERATED = (TraceError, r"Proxy object cannot be iterated")
     INCONSISTENT_TYPE = (
         RuntimeError,
