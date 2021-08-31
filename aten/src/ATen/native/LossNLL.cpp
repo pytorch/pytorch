@@ -304,8 +304,8 @@ static void nll_loss_backward_out_frame(
   // grad_input will be sparse in general
   grad_input.zero_();
 
-  auto target_ = target.dim() == 0 ? target.unsqueeze(0) : target;
-  auto target_acc = target_.accessor<target_t, 1>();
+  const auto target_ = target.dim() == 0 ? target.unsqueeze(0) : target;
+  const auto target_acc = target_.accessor<target_t, 1>();
 
   auto weight_contiguous = optional_contiguous(weight);
   const scalar_t* const weight_data = optional_data<scalar_t>(weight_contiguous);
@@ -336,7 +336,7 @@ static void nll_loss_backward_out_frame(
       auto grad_output_acc = grad_output.accessor<scalar_t, 1>();
       at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
         for (auto i = start; i < end; i++) {
-          auto cur_target = target_acc[i];
+          const auto cur_target = target_acc[i];
           if (cur_target == ignore_index) {
             continue;
           }
@@ -354,7 +354,7 @@ static void nll_loss_backward_out_frame(
       const scalar_t grad_output_value = *grad_output.data_ptr<scalar_t>();
       at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
         for (auto i = start; i < end; i++) {
-          auto cur_target = target_acc[i];
+          const auto cur_target = target_acc[i];
           if (cur_target == ignore_index) {
             continue;
           }
