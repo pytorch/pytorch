@@ -69,6 +69,7 @@
 #include <functional>
 #include <numeric>
 #include <vector>
+#include <iostream>
 
 namespace at {
 namespace meta {
@@ -1720,6 +1721,10 @@ std::vector<Tensor> nonzero_numpy(const Tensor& self) {
   }
 
   return self.nonzero().unbind(1);
+}
+
+Tensor argwhere(const Tensor& self) {
+  return self.nonzero();
 }
 
 Tensor & masked_scatter__cpu(Tensor& self, const Tensor & mask, const Tensor & source) {
