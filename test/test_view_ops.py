@@ -6,8 +6,9 @@ from itertools import product, permutations, combinations
 from functools import partial
 import random
 
+from torch.testing import make_tensor
 from torch.testing._internal.common_utils import \
-    (TestCase, run_tests, suppress_warnings, make_tensor)
+    (TestCase, run_tests, suppress_warnings)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, onlyCPU, dtypes, onlyOnCPUAndCUDA)
 

@@ -1209,12 +1209,15 @@ Tensor index_select_sparse(const Tensor& self, int64_t dim, const Tensor& index)
 
   if (dim < sparse_dim) {
 
-    auto dim_indices = indices[dim];
+    auto cpu_dim_indices = indices[dim].to(c10::kCPU).contiguous();
+    int64_t* cpu_dim_indices_ptr = cpu_dim_indices.data_ptr<int64_t>();
+    auto cpu_index = index.to(c10::kCPU).contiguous();
+    int64_t* cpu_index_ptr = cpu_index.data_ptr<int64_t>();
     std::vector<int64_t> zindices;
     std::vector<int64_t> iindices;
     int64_t new_nnz = 0;
-    for (const auto i : c10::irange(new_sizes[dim])) {
-      auto idx = index[i].item<int64_t>();
+    for (int64_t i = 0; i < new_sizes[dim]; i++) {
+      int64_t idx = cpu_index_ptr[i];
       if (idx < -size || idx >= size) {
         TORCH_CHECK_INDEX(false, "index_select(): index contains ", idx, " that is out of range for tensor of size ",
                    self.sizes(), " at dimension ", dim);
@@ -1222,8 +1225,8 @@ Tensor index_select_sparse(const Tensor& self, int64_t dim, const Tensor& index)
       if (idx < 0) {
         idx += size;
       }
-      for (const auto j : c10::irange(nnz)) {
-        auto jdx = dim_indices[j].item<int64_t>();
+      for (int64_t j = 0; j < nnz; j++) {
+        int64_t jdx = cpu_dim_indices_ptr[j];
         if (idx == jdx) {
           new_nnz++;
           iindices.push_back(i);
