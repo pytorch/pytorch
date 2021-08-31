@@ -6168,7 +6168,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @onlyOnCPUAndCUDA
     def test_mm_bmm_non_memory_dense(self, device):
         def _slice(tensor, fn):
-            return fn(tensor)[:, ::2]
+            return fn(tensor)[..., ::2]
         A = torch.randn(3, 6, dtype=torch.cfloat, device=device)
         B = torch.randn(3, 3, dtype=torch.cfloat, device=device)
         out = torch.empty(3, 3, device=device, dtype=torch.complex64).t()
@@ -6179,19 +6179,16 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         self.assertEqual(torch.mm(A_conj, B, out=out), torch.mm(A_conj_physical, B, out=out))
         self.assertEqual(torch.mm(A_conj.t(), B, out=out), torch.mm(A_conj_physical.t(), B, out=out))
 
-        def _slice_batch_tensor(tensor, fn):
-            return fn(tensor)[:, :, ::2]
-
         Ab = torch.randn(2, 3, 6, dtype=torch.cfloat, device=device)
         Bb = torch.randn(2, 3, 3, dtype=torch.cfloat, device=device)
         Bb_ = torch.randn(1, 3, 3, dtype=torch.cfloat, device=device).expand(2, 3, 3)
-        out_b = torch.empty(2, 3, 3, device=device, dtype=torch.complex64).transpose(-1, 1)
+        out_b = torch.empty(2, 3, 3, device=device, dtype=torch.complex64).transpose(-1, -2)
 
-        Ab_conj = _slice_batch_tensor(Ab, torch.conj)
-        Ab_conj_physical = _slice_batch_tensor(Ab, torch.conj_physical)
+        Ab_conj = _slice(Ab, torch.conj)
+        Ab_conj_physical = _slice(Ab, torch.conj_physical)
 
         def t_b(tensor):
-            return tensor.transpose(-1, 1)
+            return tensor.transpose(-1, -2)
 
         self.assertEqual(torch.bmm(Ab_conj, Bb, out=out_b), torch.bmm(Ab_conj_physical, Bb, out=out_b))
         self.assertEqual(torch.bmm(t_b(Ab_conj), Bb, out=out_b), torch.bmm(t_b(Ab_conj_physical), Bb, out=out_b))
