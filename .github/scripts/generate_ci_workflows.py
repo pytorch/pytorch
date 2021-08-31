@@ -148,6 +148,8 @@ class CIWorkflow:
     enable_nogpu_no_avx_test: YamlShellBool = "''"
     enable_nogpu_no_avx2_test: YamlShellBool = "''"
     enable_slow_test: YamlShellBool = "''"
+    enable_docs_test: YamlShellBool = "''"
+    enable_backwards_compat_test: YamlShellBool = "''"
 
     def __post_init__(self) -> None:
         if self.is_libtorch:
@@ -266,6 +268,8 @@ LINUX_WORKFLOWS = [
         test_runner_type=LINUX_CPU_TEST_RUNNER,
         on_pull_request=True,
         enable_doc_jobs=True,
+        enable_docs_test=1,
+        enable_backwards_compat_test=1,
         num_test_shards=2,
         ciflow_config=CIFlowConfig(
             enabled=True,
@@ -497,7 +501,7 @@ BAZEL_WORKFLOWS = [
     CIWorkflow(
         arch="linux",
         build_environment="linux-xenial-py3.6-gcc7-bazel-test",
-        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3.6-gcc7",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-cuda10.2-cudnn7-py3.9-gcc7",
         test_runner_type=LINUX_CPU_TEST_RUNNER,
         on_pull_request=True,
         ciflow_config=CIFlowConfig(
