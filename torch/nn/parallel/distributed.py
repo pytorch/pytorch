@@ -575,7 +575,7 @@ class DistributedDataParallel(Module, Joinable):
         # Build parameters for reducer.
         parameters, expect_sparse_gradient = self._build_params_for_reducer()
         # Verify model equivalence.
-        dist._verify_model_across_ranks(self.process_group, parameters)
+        dist._verify_params_across_processes(self.process_group, parameters)
         # Sync params and buffers. Ensures all DDP models start off at the same value.
         self._sync_params_and_buffers(authoritative_rank=0)
         # In debug mode, build a mapping of parameter index -> parameter.

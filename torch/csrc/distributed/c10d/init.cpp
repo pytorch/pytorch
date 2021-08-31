@@ -1552,7 +1552,7 @@ Example::
       py::call_guard<py::gil_scoped_release>());
 
   module.def(
-      "_verify_model_across_ranks",
+      "_verify_params_across_processes",
       &::c10d::verify_params_across_processes,
       py::arg("process_group"),
       py::arg("model_replica"),
