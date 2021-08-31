@@ -135,7 +135,7 @@ const OperatorSet& supported_eltwise_set() {
       "aten::threshold(Tensor self, Scalar threshold, Scalar value) -> Tensor",
       // "aten::masked_fill.Scalar(Tensor self, Tensor mask, Scalar value) -> Tensor",
       // "aten::masked_fill.Tensor(Tensor self, Tensor mask, Tensor value) -> Tensor", TODO: requires 0-dim Tensor
-      "aten::remainder.Scalar(Tensor self, Scalar other) -> Tensor",
+      // "aten::remainder.Scalar(Tensor self, Scalar other) -> Tensor",
       "aten::remainder.Tensor(Tensor self, Tensor other) -> Tensor",
       "aten::sigmoid(Tensor self) -> Tensor",
       "aten::relu(Tensor self) -> Tensor",
@@ -966,7 +966,9 @@ class TensorExprFuser {
         // but on top of that Float16 has a few kinks on LLVM.  Thus, on CPU we
         // additionally disable it until we either move to a more stable version
         // or find workarounds.
-        if (*st == c10::ScalarType::Half) {
+        if ((*st == c10::ScalarType::Half ||
+             *st == c10::ScalarType::BFloat16) &&
+            *device == c10::kCPU) {
           return false;
         }
 
@@ -1098,8 +1100,7 @@ class TensorExprFuser {
           // All tensor types should be known.
           return false;
         }
-        if (c10::isComplexType(*st) || c10::isQIntType(*st) ||
-            *st == c10::ScalarType::BFloat16) {
+        if (c10::isComplexType(*st) || c10::isQIntType(*st)) {
           return false;
         }
       }
@@ -1299,9 +1300,9 @@ void FuseTensorExprs(
 Operation createTensorExprOp(const Node* node) {
   auto kernel =
       std::make_shared<tensorexpr::TensorExprKernel>(node->g(attr::Subgraph));
-  return [kernel](Stack* stack) {
+  return [kernel](Stack& stack) {
     RECORD_FUNCTION("TensorExpr", std::vector<c10::IValue>());
-    kernel->run(*stack);
+    kernel->run(stack);
     return 0;
   };
 }
