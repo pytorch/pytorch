@@ -37,7 +37,7 @@ __global__ void RowwiseMomentsCUDAKernel(
 
   __shared__
       typename std::aligned_storage<sizeof(WelfordType), alignof(WelfordType)>::
-          type val_shared[C10_WARP_SIZE];
+          type val_shared[warpSize];
   WelfordType* val_shared_ptr = reinterpret_cast<WelfordType*>(val_shared);
 
   const int64_t i = blockIdx.x;
@@ -95,8 +95,8 @@ __global__ void ComputeInternalGradientsCUDAKernel(
     acc_type<T, true>* ds,
     acc_type<T, true>* db) {
   using T_ACC = acc_type<T, true>;
-  __shared__ T_ACC ds_shared[C10_WARP_SIZE];
-  __shared__ T_ACC db_shared[C10_WARP_SIZE];
+  __shared__ T_ACC ds_shared[warpSize];
+  __shared__ T_ACC db_shared[warpSize];
   const int64_t i = blockIdx.x;
   T_ACC sum1 = 0;
   T_ACC sum2 = 0;

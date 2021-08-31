@@ -207,9 +207,9 @@ conv_depthwise3d_cuda_backward_weight_kernel(
     return;
   }
 
-  const int laneid = threadIdx.x % C10_WARP_SIZE;
-  const int warpid = threadIdx.x / C10_WARP_SIZE;
-  const int nwarps = blockDim.x / C10_WARP_SIZE;
+  const int laneid = threadIdx.x % warpSize;
+  const int warpid = threadIdx.x / warpSize;
+  const int nwarps = blockDim.x / warpSize;
 
   accscalar_t grad = 0;
   int batch = warpid / oT;
@@ -232,7 +232,7 @@ conv_depthwise3d_cuda_backward_weight_kernel(
 
     for (; gout_row < oH; ) {
       const accscalar_t op1 = *(gout_ptr);
-      gout_ptr += C10_WARP_SIZE;
+      gout_ptr += warpSize;
 
       const int in_col = (gout_col * strideW) + (k_col * dilationW) - paddingW;
       const int in_row = (gout_row * strideH) + (k_row * dilationH) - paddingH;
@@ -243,7 +243,7 @@ conv_depthwise3d_cuda_backward_weight_kernel(
         op2 = *(input_ptr + in_pos);
       }
 
-      gout_col += C10_WARP_SIZE;
+      gout_col += warpSize;
       while (gout_col >= oW) {
         gout_col -= oW; gout_row ++;
       }
@@ -596,9 +596,9 @@ std::tuple<Tensor&, Tensor&, Tensor&> _depthwise_3d_backward_cuda_out(
             TORCH_CHECK(padding[i] * 2 + input.size(i + 2) <= int_max,
                         "Padded input tensor is too large.");
           }
-          TORCH_CHECK(grad_output_.size(0) * grad_output_.size(2) < int_max - block / C10_WARP_SIZE &&
-                      grad_output_.size(3) <= int_max - C10_WARP_SIZE &&
-                      grad_output_.size(4) <= int_max - C10_WARP_SIZE,
+          TORCH_CHECK(grad_output_.size(0) * grad_output_.size(2) < int_max - block / warpSize &&
+                      grad_output_.size(3) <= int_max - warpSize &&
+                      grad_output_.size(4) <= int_max - warpSize,
                       "Output size is too large.");
 
           DWCONV3D_BACKWARD_WEIGHT_DISPATCH_SPECIALIZATION(1, 1)

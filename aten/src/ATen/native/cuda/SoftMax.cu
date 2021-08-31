@@ -5,7 +5,6 @@
 #include <ATen/WrapDimUtils.h>
 #include <THC/THCTensorMathReduce.cuh>
 #include <THC/THCThrustAllocator.cuh>
-#include <c10/macros/Macros.h>
 
 #include <ATen/AccumulateType.h>
 #include <ATen/cuda/NumericLimits.cuh>
@@ -155,7 +154,7 @@ inline dim3 SoftMax_getBlockSize(int ILP, uint64_t dim_size) {
 
   while (block_size < (max_block_size)) block_size *= 2;
   // Launch at least a single warp - the kernel assumes that.
-  block_size = std::max(block_size, static_cast<uint64_t>(C10_WARP_SIZE));
+  block_size = std::max(block_size, static_cast<uint64_t>(warpSize));
   return dim3(block_size);
 }
 
@@ -351,13 +350,13 @@ blockReduce(AccumT* smem, AccumT val,
   AccumT warpVal = defaultVal;
 
   // First warp will perform per-warp reductions for the remaining warps
-  uint32_t mask = (((uint64_t)1) << (blockDim.x / C10_WARP_SIZE)) - 1;
-  if (threadIdx.x < C10_WARP_SIZE) {
-    int lane = threadIdx.x % C10_WARP_SIZE;
-    if (lane < blockDim.x / C10_WARP_SIZE) {
+  uint32_t mask = (((uint64_t)1) << (blockDim.x / warpSize)) - 1;
+  if (threadIdx.x < warpSize) {
+    int lane = threadIdx.x % warpSize;
+    if (lane < blockDim.x / warpSize) {
 #pragma unroll
-      for (int i = 0; i < C10_WARP_SIZE; ++i) {
-        warpVal = r(warpVal, smem[lane * C10_WARP_SIZE + i]);
+      for (int i = 0; i < warpSize; ++i) {
+        warpVal = r(warpVal, smem[lane * warpSize + i]);
       }
 #ifndef __HIP_PLATFORM_HCC__
       __syncwarp(mask);
@@ -372,7 +371,7 @@ blockReduce(AccumT* smem, AccumT val,
   AccumT blockVal = defaultVal;
 
   if (threadIdx.x == 0) {
-    for (int i = 0; i < blockDim.x / C10_WARP_SIZE; ++i) {
+    for (int i = 0; i < blockDim.x / warpSize; ++i) {
       blockVal = r(blockVal, smem[i]);
     }
     smem[0] = blockVal;

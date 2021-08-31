@@ -19,8 +19,6 @@
 #include <ATen/native/cuda/EmbeddingBackwardKernel.cuh>
 #include <ATen/native/cuda/KernelUtils.cuh>
 
-#include <c10/macros/Macros.h>
-
 namespace at {
 namespace native {
 
@@ -455,7 +453,7 @@ Tensor _embedding_bag_dense_backward_cuda(const Tensor &grad_, const Tensor &ind
 template <typename scalar_t>
 __inline__ __device__
 static scalar_t warpReduceSum(scalar_t val) {
-  for (int offset = C10_WARP_SIZE/2; offset > 0; offset /= 2)
+  for (int offset = warpSize/2; offset > 0; offset /= 2)
     val += WARP_SHFL_DOWN(val, offset);
   return val;
 }
@@ -472,9 +470,9 @@ __global__ static void _embedding_bag_per_sample_weights_backward_kernel(
     index_t padding_idx) {
   using accscalar_t = acc_type<scalar_t, true>;
   const int idx = threadIdx.x + blockIdx.x * blockDim.x;
-  const int warp = idx / C10_WARP_SIZE;
-  const int thread_in_warp = idx % C10_WARP_SIZE;
-  const int num_warps = blockDim.x * gridDim.x / C10_WARP_SIZE;
+  const int warp = idx / warpSize;
+  const int thread_in_warp = idx % warpSize;
+  const int num_warps = blockDim.x * gridDim.x / warpSize;
 
   // Each warp is responsible for the accumulation of one sample.
   // This involves doing one dot product between grad[bag_idx] and weight[embedding_idx].
@@ -484,7 +482,7 @@ __global__ static void _embedding_bag_per_sample_weights_backward_kernel(
     const int embedding_idx = (int)indices[sample_idx];
     if (embedding_idx != padding_idx) {
       for (int feature_idx = thread_in_warp; feature_idx < embedding_features;
-          feature_idx += C10_WARP_SIZE) {
+          feature_idx += warpSize) {
         result +=
             grad[grad_stride0 * bag_idx + grad_stride1 * feature_idx] *
             weight[weight_stride0 * embedding_idx + weight_stride1 * feature_idx];
@@ -521,7 +519,7 @@ Tensor _embedding_bag_per_sample_weights_backward_cuda(
   AT_ASSERT(weight.size(1) == embedding_features);
 
   const int threads_per_block = 512;
-  const int warps_per_block = threads_per_block / C10_WARP_SIZE;
+  const int warps_per_block = threads_per_block / warpSize;
 
   dim3 block(threads_per_block);
   dim3 grid((num_samples + warps_per_block - 1) / warps_per_block);

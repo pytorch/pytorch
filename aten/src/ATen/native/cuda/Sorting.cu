@@ -1,7 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/native/SortingUtils.h>
-#include <c10/macros/Macros.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <ATen/native/cuda/SortingCommon.cuh>
@@ -33,7 +32,7 @@ __global__ void gatherKthValue(
     cuda::detail::TensorInfo<int64_t, index_t> indices) {
   // Indices are limited to integer fp precision, so counts can fit in
   // int32, regardless of index_t
-  __shared__ int smem[C10_WARP_SIZE]; // one per each warp, up to warp limit
+  __shared__ int smem[warpSize]; // one per each warp, up to warp limit
 
   index_t slice = getLinearBlockId<index_t>();
   if (slice >= numInputSlices) {
@@ -103,7 +102,7 @@ __global__ void gatherMedian(
     bool ignore_nan) {
   // Shared memory for the subroutine RadixSelect. Note that RadixSelect converts the
   // floating point type to int with the same relative ordering.
-  __shared__ int smem[C10_WARP_SIZE]; // one per each warp, up to warp limit
+  __shared__ int smem[warpSize]; // one per each warp, up to warp limit
 
   index_t slice = getLinearBlockId<index_t>();
   if (slice >= numInputSlices) {
@@ -194,7 +193,7 @@ struct KthValueLauncher {
     }
 
     dim3 block(std::min(
-        THCRoundUp(slice_size, (int64_t)C10_WARP_SIZE), (int64_t)1024));
+        THCRoundUp(slice_size, (int64_t)warpSize), (int64_t)1024));
     auto stream = at::cuda::getCurrentCUDAStream();
     gatherKthValue<scalar_t, index_t, all_dims><<<grid, block, 0, stream>>>(
         self_info,
@@ -231,7 +230,7 @@ struct MedianLauncher {
     }
 
     dim3 block(std::min(
-        THCRoundUp(slice_size, (int64_t)C10_WARP_SIZE), (int64_t)1024));
+        THCRoundUp(slice_size, (int64_t)warpSize), (int64_t)1024));
     auto stream = at::cuda::getCurrentCUDAStream();
     gatherMedian<scalar_t, index_t, all_dims><<<grid, block, 0, stream>>>(
         values_info,

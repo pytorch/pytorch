@@ -5,7 +5,6 @@
 #include <limits>
 #include <stdint.h>
 #include <cuda_fp16.h>
-#include <c10/macros/Macros.h>
 
 #include <ATen/cuda/DeviceUtils.cuh>
 
@@ -49,7 +48,7 @@ __device__ __forceinline__ void warp_reduce(acc_t* sum) {
 // The template arguments have the following meaning:
 // One "WARP" works on one "BATCH". One "BATCH" contains "WARP_BATCH" samples.
 // WARP_BATCH is equal to 1 when element_count is large, and > 1 when element_count is small.
-// A "WARP" contains "C10_WARPS_SIZE" threads, these treads are guaranteed to belong to the same warp.
+// A "WARP" contains "warpSize" threads, these treads are guaranteed to belong to the same warp.
 // This is important because it means only __shfl_ instructions are required for reductions.
 // Note that this means WARP_SIZE must be a power of two and <= architecture warp size.
 // CUDA warp size is 32 for all existing GPU architectures, but there is no guarantee this will not change for future arch.
@@ -67,7 +66,7 @@ __global__ void softmax_warp_forward(output_t *dst, const input_t *src, int batc
 {
     // WARP_SIZE and WARP_BATCH must match the return values batches_per_warp and warp_size of method warp_softmax_forward_kernel.
     constexpr int next_power_of_two = 1 << log2_elements;
-    constexpr int WARP_SIZE = (next_power_of_two < C10_WARP_SIZE) ? next_power_of_two : C10_WARP_SIZE;
+    constexpr int WARP_SIZE = (next_power_of_two < warpSize) ? next_power_of_two : warpSize;
     constexpr int WARP_ITERATIONS = next_power_of_two / WARP_SIZE;
     constexpr int WARP_BATCH = (next_power_of_two <= 128) ? 2 : 1;
 
@@ -158,7 +157,7 @@ __global__ void softmax_warp_backward(output_t *gradInput, const input_t *grad, 
 {
     // WARP_SIZE and WARP_BATCH must match the return values batches_per_warp and warp_size of method warp_softmax_backward_kernel.
     constexpr int next_power_of_two = 1 << log2_elements;
-    constexpr int WARP_SIZE = (next_power_of_two < C10_WARP_SIZE) ? next_power_of_two : C10_WARP_SIZE;
+    constexpr int WARP_SIZE = (next_power_of_two < warpSize) ? next_power_of_two : warpSize;
     constexpr int WARP_ITERATIONS = next_power_of_two / WARP_SIZE;
     constexpr int WARP_BATCH = (next_power_of_two <= 128) ? 2 : 1;
 
@@ -245,7 +244,7 @@ void dispatch_softmax_forward(output_t *dst, const input_t *src, int softmax_ele
         const int next_power_of_two = 1 << log2_elements;
 
         // This value must match the WARP_SIZE constexpr value computed inside softmax_warp_forward.
-        int warp_size = (next_power_of_two < C10_WARP_SIZE) ? next_power_of_two : C10_WARP_SIZE;
+        int warp_size = (next_power_of_two < warpSize) ? next_power_of_two : warpSize;
 
         // This value must match the WARP_BATCH constexpr value computed inside softmax_warp_forward.
         int batches_per_warp = (next_power_of_two <= 128) ? 2 : 1;
@@ -294,7 +293,7 @@ void dispatch_softmax_backward(output_t *grad_input, const input_t *grad, const 
         const int next_power_of_two = 1 << log2_elements;
 
         // This value must match the WARP_SIZE constexpr value computed inside softmax_warp_backward.
-        int warp_size = (next_power_of_two < C10_WARP_SIZE) ? next_power_of_two : C10_WARP_SIZE;
+        int warp_size = (next_power_of_two < warpSize) ? next_power_of_two : warpSize;
 
         // This value must match the WARP_BATCH constexpr value computed inside softmax_warp_backward.
         int batches_per_warp = (next_power_of_two <= 128) ? 2 : 1;

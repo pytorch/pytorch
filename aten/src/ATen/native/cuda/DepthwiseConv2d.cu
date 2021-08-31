@@ -194,9 +194,9 @@ __global__ void conv_depthwise2d_grad_weight_kernel(
 
   acc_t grad(0);
 
-  const int laneId = threadIdx.x % C10_WARP_SIZE;
-  const int batch = threadIdx.x / C10_WARP_SIZE;
-  const int nwarps = blockDim.x / C10_WARP_SIZE;
+  const int laneId = threadIdx.x % warpSize;
+  const int batch = threadIdx.x / warpSize;
+  const int nwarps = blockDim.x / warpSize;
   const int imageElements = outputWidth * outputHeight;
   // Use warp per item.  In the original kernel, a threadblock was used to sum over NHW.
   // Here, we use a warp to sum values over HW dimension, and if batchSize is larger than the
@@ -208,7 +208,7 @@ __global__ void conv_depthwise2d_grad_weight_kernel(
   // bring a nice speed-up.
   for (int batchIdx = batch; batchIdx < batchSize; batchIdx += nwarps){
     // Warp-stride loop over elements in a batch item
-    for (index_t idx = laneId; idx < imageElements; idx += C10_WARP_SIZE) {
+    for (index_t idx = laneId; idx < imageElements; idx += warpSize) {
     // Need to calculate the following: batch position, and offset into the grad_output
     // in height, and width. We can intuit the corresponding position in the input from
     // the other parameters we have
@@ -442,7 +442,7 @@ void conv_depthwise2d_backward_out(
 int getGradParamsNumThreads(int batchSize) {
   //warp per item in a batch, up to a maximum
   constexpr int MAX_BLOCK_SIZE = 256;
-  return std::min(batchSize * C10_WARP_SIZE, MAX_BLOCK_SIZE);
+  return std::min(batchSize * warpSize, MAX_BLOCK_SIZE);
 }
 
 void conv_depthwise2d_grad_weight_out(
@@ -498,8 +498,8 @@ void conv_depthwise2d_grad_weight_out(
     const auto input_a = input.packed_accessor32<scalar_t, 4>();
     const auto grad_weight_a = grad_weight.packed_accessor32<scalar_t, 4>();
     using acc_t = at::acc_type<scalar_t, true>;
-    TORCH_INTERNAL_ASSERT(block.x % C10_WARP_SIZE == 0);
-    int smem = (block.x  / C10_WARP_SIZE) * sizeof(acc_t);
+    TORCH_INTERNAL_ASSERT(block.x % warpSize == 0);
+    int smem = (block.x  / warpSize) * sizeof(acc_t);
     conv_depthwise2d_grad_weight_kernel<<<grid, block, smem, stream>>>(
         grad_output_a, input_a, grad_weight_a, batchSize, inputChannels, outputChannels, depthwiseMultiplier,
         width, height, outputWidth, outputHeight, kW, kH, dW, dH, padW, padH, dilationW, dilationH);

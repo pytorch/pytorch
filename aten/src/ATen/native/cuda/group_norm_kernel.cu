@@ -43,14 +43,14 @@ __global__ void RowwiseMomentsCUDAKernel(
     const int64_t index = i * N + j;
     val = welford_op.reduce(val, static_cast<T_ACC>(X[index]), index);
   }
-  if (blockDim.x <= C10_WARP_SIZE) {
+  if (blockDim.x <= warpSize) {
     val = cuda_utils::WarpReduce(val, welford_op);
   } else {
     // There will be a warning if we declare a __shared__ WelfordType array.
     // https://github.com/pytorch/pytorch/pull/13967
     __shared__ typename std::aligned_storage<
         sizeof(WelfordType),
-        alignof(WelfordType)>::type val_shared[C10_WARP_SIZE];
+        alignof(WelfordType)>::type val_shared[warpSize];
     WelfordType* val_shared_ptr = reinterpret_cast<WelfordType*>(val_shared);
     val = cuda_utils::BlockReduce(
         val,
@@ -119,12 +119,12 @@ __global__ void Compute1dBackwardFusedParamsCUDAKernel(
     sum1 += dY[index] * X[index] * gamma_v;
     sum2 += dY[index] * gamma_v;
   }
-  if (blockDim.x <= C10_WARP_SIZE) {
+  if (blockDim.x <= warpSize) {
     sum1 = cuda_utils::WarpReduceSum<T_ACC>(sum1);
     sum2 = cuda_utils::WarpReduceSum<T_ACC>(sum2);
   } else {
-    __shared__ T_ACC ds_shared[C10_WARP_SIZE];
-    __shared__ T_ACC db_shared[C10_WARP_SIZE];
+    __shared__ T_ACC ds_shared[warpSize];
+    __shared__ T_ACC db_shared[warpSize];
     sum1 = cuda_utils::BlockReduceSum<T_ACC>(sum1, ds_shared);
     sum2 = cuda_utils::BlockReduceSum<T_ACC>(sum2, db_shared);
   }
@@ -286,12 +286,12 @@ __global__ void ComputeInternalGradientsCUDAKernel(
     sum1 += static_cast<T_ACC>(dY[index]) * static_cast<T_ACC>(X[index]);
     sum2 += static_cast<T_ACC>(dY[index]);
   }
-  if (blockDim.x <= C10_WARP_SIZE) {
+  if (blockDim.x <= warpSize) {
     sum1 = cuda_utils::WarpReduceSum<T_ACC>(sum1);
     sum2 = cuda_utils::WarpReduceSum<T_ACC>(sum2);
   } else {
-    __shared__ T_ACC ds_shared[C10_WARP_SIZE];
-    __shared__ T_ACC db_shared[C10_WARP_SIZE];
+    __shared__ T_ACC ds_shared[warpSize];
+    __shared__ T_ACC db_shared[warpSize];
     sum1 = cuda_utils::BlockReduceSum<T_ACC>(sum1, ds_shared);
     sum2 = cuda_utils::BlockReduceSum<T_ACC>(sum2, db_shared);
   }
@@ -329,12 +329,12 @@ __global__ void ComputeBackwardFusedParamsCUDAKernel(
     sum1 += ds[index] * gamma_v;
     sum2 += db[index] * gamma_v;
   }
-  if (blockDim.x <= C10_WARP_SIZE) {
+  if (blockDim.x <= warpSize) {
     sum1 = cuda_utils::WarpReduceSum<T_ACC>(sum1);
     sum2 = cuda_utils::WarpReduceSum<T_ACC>(sum2);
   } else {
-    __shared__ T_ACC ds_shared[C10_WARP_SIZE];
-    __shared__ T_ACC db_shared[C10_WARP_SIZE];
+    __shared__ T_ACC ds_shared[warpSize];
+    __shared__ T_ACC db_shared[warpSize];
     sum1 = cuda_utils::BlockReduceSum<T_ACC>(sum1, ds_shared);
     sum2 = cuda_utils::BlockReduceSum<T_ACC>(sum2, db_shared);
   }
@@ -575,7 +575,7 @@ void GroupNormKernelImplInternal(
 
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
   const int64_t num_threads = D * HxW < cuda_utils::kCUDABlockReduceNumThreads
-      ? C10_WARP_SIZE
+      ? warpSize
       : cuda_utils::kCUDABlockReduceNumThreads;
   RowwiseMomentsCUDAKernel<T><<<N * G, num_threads, 0, cuda_stream>>>(
       D * HxW, eps, X_data, mean_data, rstd_data);
@@ -696,7 +696,7 @@ void GroupNorm1dBackward(
     T_ACC* c2_data = c2.data_ptr<T_ACC>();
     T_ACC* c3_data = c3.data_ptr<T_ACC>();
     const int64_t num_threads = (C / G) < cuda_utils::kCUDABlockReduceNumThreads
-        ? C10_WARP_SIZE
+        ? warpSize
         : cuda_utils::kCUDABlockReduceNumThreads;
     Compute1dBackwardFusedParamsCUDAKernel<T>
         <<<dim3(N, G), num_threads, 0, cuda_stream>>>(
@@ -844,7 +844,7 @@ void GroupNormBackwardKernelImplInternal(
   }
 
   int64_t num_threads = HxW < cuda_utils::kCUDABlockReduceNumThreads
-      ? C10_WARP_SIZE
+      ? warpSize
       : cuda_utils::kCUDABlockReduceNumThreads;
   ComputeInternalGradientsCUDAKernel<T><<<N * C, num_threads, 0, cuda_stream>>>(
       HxW, dY_data, X_data, ds_data, db_data);
@@ -870,7 +870,7 @@ void GroupNormBackwardKernelImplInternal(
     }
 
     num_threads = (C / G) < cuda_utils::kCUDABlockReduceNumThreads
-        ? C10_WARP_SIZE
+        ? warpSize
         : cuda_utils::kCUDABlockReduceNumThreads;
     ComputeBackwardFusedParamsCUDAKernel<T>
         <<<dim3(N, G), num_threads, 0, cuda_stream>>>(

@@ -2,7 +2,6 @@
 
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
-#include <c10/macros/Macros.h>
 
 namespace at { namespace native {
 
@@ -297,7 +296,7 @@ __global__ void indexSparseIntersectionKernel(
 // }
 
 template <typename Dtype, typename Acctype>
-C10_LAUNCH_BOUNDS_1(C10_WARP_SIZE*4)
+C10_LAUNCH_BOUNDS_1(warpSize*4)
 __global__ void coalesceValuesKernel(
   int64_t *segment_offsets, int64_t *value_indices,
   Dtype *values, Dtype *newValues,
@@ -325,7 +324,7 @@ __global__ void coalesceValuesKernel(
       #pragma unroll
       for (int ii = 0; ii < SZ; ii++)
       {
-        int featureDim = startFeature + ii * C10_WARP_SIZE;
+        int featureDim = startFeature + ii * warpSize;
         if (featureDim < stride)
         {
           tmp[ii] += static_cast<Acctype>(values[valueRow + featureDim]);
@@ -335,7 +334,7 @@ __global__ void coalesceValuesKernel(
     #pragma unroll
     for (int ii = 0; ii < SZ; ii++)
     {
-      int featureDim = startFeature + ii * C10_WARP_SIZE;
+      int featureDim = startFeature + ii * warpSize;
       if (featureDim < stride)
       {
         newValues[newValueRow + featureDim] = static_cast<Dtype>(tmp[ii]);

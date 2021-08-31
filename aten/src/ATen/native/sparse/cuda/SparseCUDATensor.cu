@@ -6,7 +6,6 @@
 #include <ATen/native/cuda/SortingCommon.cuh>
 #include <ATen/NativeFunctions.h>
 #include <ATen/SparseTensorUtils.h>
-#include <c10/macros/Macros.h>
 #include <c10/util/accumulate.h>
 #include <THC/THCThrustAllocator.cuh>
 
@@ -22,7 +21,6 @@
 #include <thrust/unique.h>
 #include <thrust/system/cuda/execution_policy.h>
 #include <thrust/binary_search.h>
-#include <c10/macros/Macros.h>
 
 namespace at { namespace native {
 
@@ -130,8 +128,8 @@ SparseTensor _coalesce_sparse_cuda(const SparseTensor& self) {
     const int SZ = 4;
     values = values.contiguous();
     int64_t stride = c10::multiply_integers(values.sizes().slice(1));
-    dim3 grid(THCCeilDiv(newNnz, (int64_t) SZ), THCCeilDiv(stride, (int64_t) C10_WARP_SIZE*SZ));
-    dim3 block(C10_WARP_SIZE, SZ);
+    dim3 grid(THCCeilDiv(newNnz, (int64_t) SZ), THCCeilDiv(stride, (int64_t) warpSize*SZ));
+    dim3 block(warpSize, SZ);
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
       at::ScalarType::Half, at::ScalarType::BFloat16, values.scalar_type(), "coalesce_sparse_cuda", [&] {
         using cuda_accscalar_t = acc_type<scalar_t, /* is_cuda */ true>;

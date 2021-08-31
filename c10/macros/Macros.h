@@ -301,12 +301,6 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 #define C10_HIP_HOST_DEVICE
 #endif
 
-#ifdef __HIP_PLATFORM_HCC__
-#define C10_WARP_SIZE 64
-#else
-#define C10_WARP_SIZE 32
-#endif
-
 #if defined(_MSC_VER) && _MSC_VER <= 1900
 #define __func__ __FUNCTION__
 #endif

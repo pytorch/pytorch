@@ -15,8 +15,6 @@
 #include <thrust/execution_policy.h>
 #include <thrust/unique.h>
 
-#include <c10/macros/Macros.h>
-
 namespace at {
 namespace native {
 
@@ -264,7 +262,7 @@ Tensor embedding_backward_cuda_kernel(
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
 
-    const int stride_warped = ceil_div(stride, C10_WARP_SIZE)*C10_WARP_SIZE;
+    const int stride_warped = ceil_div(stride, warpSize)*warpSize;
     const int block = std::min(stride_warped, MAX_BLOCK_SIZE);
     const int grid = ceil_div(num_of_partial_segments*stride_warped, block);
 
