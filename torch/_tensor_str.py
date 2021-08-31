@@ -297,10 +297,9 @@ def _str_intern(inp):
     # within this function.
     # TODO(albanD) This needs to be updated when more than one level is supported
     self, tangent = torch.autograd.forward_ad.unpack_dual(inp)
-    
     # print shape of the tensor
     if PRINT_OPTS.show_shape:
-        suffixes.append('shape= ' + str(tuple(self.shape)))
+        suffixes.append('shape=' + str(tuple(self.shape)))
 
     # Note [Print tensor device]:
     # A general logic here is we only print device when it doesn't match
