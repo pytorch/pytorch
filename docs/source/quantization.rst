@@ -39,8 +39,8 @@ Quantization requires users to be aware of three concepts:
 
 #. Quantization Config (Qconfig): Specifies how weights and activations are to be quantized. Qconfig is needed to create a quantized model.
 #. Backend: Refers to kernels that support quantization, usually with different numerics.
-#. Quantization engine (torch.backends.quantization.engine): When a quantized model is executed, the qengine specifies which
-backed is to be used for execution. It is important to ensure that the qengine is consistent with the Qconfig.
+#. Quantization engine (torch.backends.quantization.engine): When a quantized model is executed, the qengine specifies which backend
+  is to be used for execution. It is important to ensure that the qengine is consistent with the Qconfig.
 
 
 Natively supported backends
@@ -164,6 +164,7 @@ types.
 
 Operator coverage varies between dynamic and static quantization and is captured in the table below.
 Note that for FX quantization, the corresponding functionals are also supported.
+
 +---------------------------+-------------------+--------------------+
 |                           |Static             | Dynamic            |
 |                           |Quantization       | Quantization       |
