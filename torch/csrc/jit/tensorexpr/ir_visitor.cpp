@@ -11,8 +11,12 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
-template <typename Op>
-static void visit_binary_op(BinaryOpNode<Op>* v, IRVisitor* visitor) {
+template <
+    typename Op,
+    typename std::enable_if<std::is_same<
+        decltype(detail::bin_op_deducer(std::declval<Op>())),
+        void>::value>::type* = nullptr>
+static void visit_binary_op(NodePtr<Op> v, IRVisitor* visitor) {
   v->lhs()->accept(visitor);
   v->rhs()->accept(visitor);
 }
@@ -75,7 +79,7 @@ void IRVisitor::visit(CompareSelectPtr v) {
 // NOLINTNEXTLINE
 #define IMM_VISIT(Type, Name) \
   void IRVisitor::visit(Name##ImmPtr v) {}
-AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_VISIT);
+AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_VISIT);
 #undef IMM_VISIT
 
 void IRVisitor::visit(CastPtr v) {
