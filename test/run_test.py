@@ -341,6 +341,7 @@ JIT_EXECUTOR_TESTS = [
     "test_jit_legacy",
     "test_jit_fuser_legacy",
 ]
+
 DISTRIBUTED_TESTS = [
     "distributed/test_data_parallel",
     "distributed/test_launcher",
