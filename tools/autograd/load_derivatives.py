@@ -2,9 +2,9 @@
 #
 # Each autograd function is represented by `DifferentiabilityInfo` containing
 # a list of `Derivative`. See `tools.codegen.api.autograd` for the data models.
-from collections import defaultdict, Counter
+from collections import defaultdict
 import re
-from typing import Sequence, Any, Tuple, List, Set, Dict, Match, Optional
+from typing import Counter, Sequence, Any, Tuple, List, Set, Dict, Match, Optional
 import yaml
 
 from tools.codegen.api.autograd import (Derivative, DifferentiabilityInfo,
