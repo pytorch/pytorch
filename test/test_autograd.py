@@ -24,13 +24,14 @@ from torch.autograd.profiler import (profile, record_function, emit_nvtx)
 from torch.autograd.profiler_util import (_format_time, EventList, FunctionEvent, FunctionEventAvg)
 import torch.autograd.functional as autogradF
 from torch.utils.checkpoint import checkpoint
+from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (TestCase, run_tests, skipIfNoLapack,
                                                   suppress_warnings, slowTest,
                                                   load_tests,
                                                   IS_WINDOWS, IS_MACOS, CudaMemoryLeakCheck,
                                                   TEST_WITH_ROCM, disable_gc,
-                                                  gradcheck, gradgradcheck, make_tensor)
+                                                  gradcheck, gradgradcheck)
 from torch.autograd import Variable, Function, detect_anomaly, kineto_available
 from torch.autograd.function import InplaceFunction
 import torch.autograd.forward_ad as fwAD
@@ -2801,11 +2802,11 @@ class TestAutograd(TestCase):
 
         r1 = var1 * var1 * mean1 * mean1
         r2 = var2 * var2 * mean2 * mean2
-        self.assertTrue(torch.allclose(r1, r2, rtol=0.01, atol=0.0))
+        self.assertEqual(r1, r2, rtol=0.01, atol=0.0)
 
         torch.autograd.backward(r1, grad)
         torch.autograd.backward(r2, grad)
-        self.assertTrue(torch.allclose(input1.grad, input2.grad, rtol=0.01, atol=0.0))
+        self.assertEqual(input1.grad, input2.grad, rtol=0.01, atol=0.0)
 
     @slowTest
     @skipIfNoLapack
@@ -5159,7 +5160,7 @@ for shape in [(1,), ()]:
 
         # TODO: this is a bug!
         # once this is fixed, it should have the transpose removed:
-        # self.assertTrue(torch.allclose(non_inplace_grad, inplace_grad))
+        # self.assertEqual(non_inplace_grad, inplace_grad)
         self.assertEqual(non_inplace_grad.T, inplace_grad)
 
     def test_autograd_multiple_views_python(self):
@@ -5477,12 +5478,28 @@ for shape in [(1,), ()]:
             def forward(ctx, foo):
                 return foo.clone()
 
+        class BadBw2(Function):
+            @staticmethod
+            def forward(ctx, foo):
+                return foo.clone()
+
+            @staticmethod
+            def backward(ctx, foo):
+                return foo
+
+            @staticmethod
+            def vjp(ctx, foo):
+                return foo
+
         inp = torch.rand(1, requires_grad=True)
         with self.assertRaisesRegex(NotImplementedError, "must implement the forward"):
             BadFw.apply(inp)
 
-        with self.assertRaisesRegex(RuntimeError, "must implement the backward"):
+        with self.assertRaisesRegex(RuntimeError, "must implement either the backward"):
             BadBw.apply(inp).sum().backward()
+
+        with self.assertRaisesRegex(RuntimeError, "Implementing both 'backward' and 'vjp'"):
+            BadBw2.apply(inp).sum().backward()
 
     def test_custom_function_local_inplace(self):
         class MyFn(torch.autograd.Function):
@@ -8240,6 +8257,12 @@ class TestAutogradDeviceType(TestCase):
         expected = torch.tensor([0., 0., 1.], device=device)
         self.assertEqual(a.grad, expected)
 
+        a_bf16 = torch.tensor([-2., 0., 2.], device=device, dtype=torch.bfloat16, requires_grad=True)
+        b_bf16 = torch.nn.functional.leaky_relu_(a_bf16.clone(), 0.0)
+        b_bf16.backward(torch.ones(3, device=device))
+        expected_bf16 = torch.tensor([0., 0., 1.], device=device, dtype=torch.bfloat16)
+        self.assertEqual(a_bf16.grad, expected_bf16)
+
     @onlyOnCPUAndCUDA
     def test_elu_inplace_with_neg_alpha(self, device):
         a = torch.tensor([-1., 1.], device=device, requires_grad=True)
@@ -9373,7 +9396,7 @@ class TestMultithreadAutograd(TestCase):
                     else:
                         # DataParallel only uses one thread
                         # so hooks should be called here
-                        _self.assertEqual(len(w), 2)
+                        _self.assertGreater(len(w), 0)
 
         x = torch.ones(5, 5, requires_grad=True)
         model = torch.nn.DataParallel(Model())
@@ -9383,7 +9406,7 @@ class TestMultithreadAutograd(TestCase):
             with warnings.catch_warnings(record=True) as w:
                 y = x * x
                 # hooks should be called here
-                _self.assertEqual(len(w), 2)
+                _self.assertGreater(len(w), 0)
 
     def test_python_thread_in_middle(self):
         # User might write a network that starts on one CPU thread, then runs its second half

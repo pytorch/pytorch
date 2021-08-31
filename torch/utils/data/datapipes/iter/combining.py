@@ -7,11 +7,12 @@ T_co = TypeVar('T_co', covariant=True)
 
 
 @functional_datapipe('concat')
-class ConcatIterDataPipe(IterDataPipe):
-    r""" :class:`ConcatIterDataPipe`.
+class ConcaterIterDataPipe(IterDataPipe):
+    r""" :class:`ConcaterIterDataPipe`.
 
     Iterable DataPipe to concatenate multiple Iterable DataPipes.
-    args:
+
+    Args:
         datapipes: Iterable DataPipes being concatenated
     """
     datapipes: Tuple[IterDataPipe]
@@ -54,7 +55,7 @@ class IterateBuffer(IterDataPipe):
 
 
 @functional_datapipe('fork')
-class ForkIterDataPipe(IterDataPipe):
+class ForkerIterDataPipe(IterDataPipe):
 
     def __new__(cls, datapipe, instances):
         result = []
@@ -96,13 +97,14 @@ class MultiplexerIterDataPipe(IterDataPipe):
 
 
 @functional_datapipe('zip')
-class ZipIterDataPipe(IterDataPipe[Tuple[T_co]]):
-    r""" :class:`ZipIterDataPipe`.
+class ZipperIterDataPipe(IterDataPipe[Tuple[T_co]]):
+    r""" :class:`ZipperIterDataPipe`.
 
     Iterable DataPipe aggregates elements into a tuple from each of
     the input DataPipe. The output DataPipe is stopped when the
     shortest input DataPipe is exhausted.
-    args:
+
+    Args:
         *datapipes: Iterable DataPipes being aggregated
     """
     datapipes: Tuple[IterDataPipe]

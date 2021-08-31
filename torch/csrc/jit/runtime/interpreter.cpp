@@ -297,13 +297,13 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           }
           case INST(OP): {
             INST_GUARD;
-            frame.function->operator_table_[inst.X](&stack);
+            frame.function->operator_table_[inst.X](stack);
           }
             INST_NEXT;
           case INST(OPN): {
             INST_GUARD;
             stack.push_back(inst.N);
-            frame.function->operator_table_[inst.X](&stack);
+            frame.function->operator_table_[inst.X](stack);
           }
             INST_NEXT;
           case INST(LOAD): {
@@ -720,7 +720,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
       }
       if (FLAGS_torch_jit_enable_rethrow_caught_exception) {
         if (future_) {
-          future_->setError(std::make_exception_ptr(e));
+          future_->setError(std::current_exception());
+          return false;
         }
         throw;
       }
