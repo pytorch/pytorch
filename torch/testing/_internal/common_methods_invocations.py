@@ -5093,12 +5093,13 @@ def reference_mse_loss(input, target, reduction="mean"):
         return se
 
 
-def gradcheck_wrapper_set_seed(op, input, *args, **kwargs):
-    """Gradcheck wrapper to set seed manually for some functions like dropout
+def wrapper_set_seed(op, input, *args, **kwargs):
+    """Wrapper to set seed manually for some functions like dropout
     See: https://github.com/pytorch/pytorch/pull/62315#issuecomment-896143189 for more details.
     """
     torch.manual_seed(42)
     return op(input, *args, **kwargs)
+
 
 def gradcheck_wrapper_hermitian_input(op, input, *args, **kwargs):
     """Gradcheck wrapper for functions that take Hermitian matrices as input.
@@ -8305,13 +8306,28 @@ op_db: List[OpInfo] = [
                    safe_casts_outputs=True),
     OpInfo(
         "nn.functional.dropout",
+        op=lambda input, *args, **kwargs:
+            wrapper_set_seed(torch.nn.functional.dropout, input, *args, **kwargs),
         ref=_NOTHING,
-        supports_out=False,
         dtypes=floating_types(),
-        sample_inputs_func=sample_inputs_dropout,
-        gradcheck_wrapper=gradcheck_wrapper_set_seed,
+        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        skips=(
+            # Probably because we have used lambda for the op here
+            # AssertionError: JIT Test does not execute any logic
+            SkipInfo('TestJit', 'test_variant_consistency_jit'),
+            # inplace variant dispatches to dropout kernel, while on CUDA
+            # the op dispatches to _fused_dropout (with a few more conditions)
+            # hence, different values and this skip here
+            SkipInfo('TestMathBits', 'test_neg_view', device_type='cuda'),
+            # On CUDA, the op is dispatched (and a few more conditions) to
+            # _fused_dropout, which doesn't support forward AD
+            SkipInfo('TestGradients', 'test_forward_mode_AD', device_type='cuda'),),
+        gradcheck_wrapper=wrapper_set_seed,
         supports_forward_ad=True,
-        inplace_variant=partial(torch.nn.functional.dropout, inplace=True)),
+        supports_out=False,
+        sample_inputs_func=sample_inputs_dropout,
+        inplace_variant=lambda input, *args, **kwargs:
+            wrapper_set_seed(torch.nn.functional.dropout, input, *args, **kwargs, inplace=True)),
     OpInfo(
         "nn.functional.one_hot",
         ref=reference_one_hot,
