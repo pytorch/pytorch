@@ -26,15 +26,16 @@ from ._src.eager_compilation import compiled_function, tvm_compile
 _old_cross_entropy = torch.nn.functional.cross_entropy
 
 
+# **kwargs to handle the new label_smoothing arg
 def cross_entropy(input, target, weight=None, size_average=None,
-                  ignore_index=-100, reduce=None, reduction='mean'):
+                  ignore_index=-100, reduce=None, reduction='mean', **kwargs):
     if input.dim() == 1 and target.dim() == 0:
         input = input.unsqueeze(0)
         target = target.unsqueeze(0)
 
     result = _old_cross_entropy(
             input, target, weight, size_average,
-            ignore_index, reduce, reduction)
+            ignore_index, reduce, reduction, **kwargs)
     if reduction == 'none':
         return result.squeeze(0)
     return result
