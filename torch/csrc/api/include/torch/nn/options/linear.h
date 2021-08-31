@@ -8,11 +8,11 @@
 namespace torch {
 namespace nn {
 
-/// Options for the `Linear` module.
+/// Options for the `Bias` module.
 ///
 /// Example:
 /// ```
-/// Linear model(LinearOptions(5, 2).bias(false));
+/// Bias model(BiasOptions(5));
 /// ```
 struct TORCH_API BiasOptions {
   explicit BiasOptions(int64_t num_features);

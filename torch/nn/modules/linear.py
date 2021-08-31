@@ -109,39 +109,32 @@ class Linear(Module):
 
 
 class Bias(Module):
-    r"""Applies a linear transformation to the incoming data: :math:`y = xA^T + b`
+    r"""Adds the bias to the incoming data.
 
     This module supports :ref:`TensorFloat32<tf32_on_ampere>`.
 
     Args:
-        in_features: size of each input sample
-        out_features: size of each output sample
-        bias: If set to ``False``, the layer will not learn an additive bias.
-            Default: ``True``
+        num_features: size of each sample
 
     Shape:
-        - Input: :math:`(*, H_{in})` where :math:`*` means any number of
-          dimensions including none and :math:`H_{in} = \text{in\_features}`.
-        - Output: :math:`(*, H_{out})` where all but the last dimension
-          are the same shape as the input and :math:`H_{out} = \text{out\_features}`.
+        - Input: :math:`(*, H_{n})` where :math:`*` means any number of
+          dimensions including none and :math:`H_{n} = \text{num\_features}`.
+        - Output: :math:`(*, H_{n})` where all but the last dimension
+          are the same shape as the input and :math:`H_{n} = \text{num\_features}`.
 
     Attributes:
-        weight: the learnable weights of the module of shape
-            :math:`(\text{out\_features}, \text{in\_features})`. The values are
-            initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`, where
-            :math:`k = \frac{1}{\text{in\_features}}`
-        bias:   the learnable bias of the module of shape :math:`(\text{out\_features})`.
-                If :attr:`bias` is ``True``, the values are initialized from
+        bias:   the learnable bias of the module of shape :math:`(\text{num\_features})`.
+                The values are initialized from
                 :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-                :math:`k = \frac{1}{\text{in\_features}}`
+                :math:`k = \frac{1}{\text{num\_features}}`
 
     Examples::
 
-        >>> m = nn.Linear(20, 30)
+        >>> m = nn.Bias(20)
         >>> input = torch.randn(128, 20)
         >>> output = m(input)
         >>> print(output.size())
-        torch.Size([128, 30])
+        torch.Size([128, 20])
     """
     __constants__ = ['num_features']
     num_features: int
