@@ -19,7 +19,15 @@ struct PerTensorAffineSchema {
   q_scale:double;
   q_zero_point:int;
 }
-union QSchema {}
+
+table QuantizedSchema {
+  qscheme:byte;
+  scale: double;
+  zero_point: int;
+  scales:TensorMetadata;
+  zero_points:TensorMetadata;
+  axis:int;
+}
 
 table TensorMetadata {
   // TODO(quantized?)
@@ -33,6 +41,9 @@ table TensorMetadata {
   sizes:[int];
   strides:[int];
   requires_grad:bool;
+
+  // only set for quantized tensors
+  quantized_schema:QuantizedSchema;
 }
 
 table String {
@@ -73,7 +84,7 @@ table ObjectType {
 table Object {
   type_index: int;
   use_setstate:bool;
-  state: IValue;  
+  state: IValue;
 }
 
 struct Instruction {
@@ -117,6 +128,10 @@ table Function {
   debug_info:DebugInfo;
 }
 
+table StorageData {
+  data: [byte];
+}
+
 table Module {
   methods:[Function];
 
@@ -125,7 +140,9 @@ table Module {
   // this is module._ivalue()
   state_obj: Object;
 
-  storage_count: int;
+  storage_data: [StorageData];
+
+  storage_data_size:int;  // number of storage data;
 }
 
 root_type Module;

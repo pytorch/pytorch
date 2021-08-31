@@ -138,8 +138,8 @@ IValueFlatbufferSerializer::objectToFB(flatbuffers::FlatBufferBuilder& fbb, cons
     memoized_class_map_[type] = type_index;
   }
 
-  mobile::serialization::IValue state_type;  
-  flatbuffers::Offset<void> state_offset;  
+  mobile::serialization::IValue state_type;
+  flatbuffers::Offset<void> state_offset;
   bool setstate = false;
 
   if (ValidSetGetState(type)) {
@@ -147,6 +147,7 @@ IValueFlatbufferSerializer::objectToFB(flatbuffers::FlatBufferBuilder& fbb, cons
     auto state = getstate({obj});
     std::tie(state_type, state_offset) = iValueToFB(fbb, state);
     setstate = true;
+    std::cerr << "setstate == true; type = " << type->name()->qualifiedName() << std::endl;
   } else {
     size_t num_attr = type->numAttributes();
     std::vector<IValue> ivalues;
@@ -165,7 +166,32 @@ IValueFlatbufferSerializer::IValueFlatbufferSerializer::tensorToFB(flatbuffers::
   auto& tensor = ivalue.toTensor();
   bool quantized = tensor.is_quantized();
   const at::Storage& storage = tensor.storage();
-  AT_ASSERT(!quantized);
+
+  flatbuffers::Offset<mobile::serialization::QuantizedSchema> qschema_offset = 0;
+  if (quantized) {
+    mobile::serialization::QuantizedSchemaBuilder builder(fbb);
+    builder.add_qscheme(static_cast<int8_t>(tensor.qscheme()));
+    std::cerr << "qscheme is " << toString(tensor.qscheme()) << std::endl;
+    switch (tensor.qscheme()) {
+      case at::kPerTensorAffine:
+        builder.add_scale(tensor.q_scale());
+        builder.add_zero_point(tensor.q_zero_point());
+        break;
+      case at::kPerChannelAffineFloatQParams:
+      case at::kPerChannelAffine: {
+        builder.add_scales(tensorToFB(fbb, tensor.q_per_channel_scales()));
+        builder.add_zero_points(tensorToFB(fbb, tensor.q_per_channel_zero_points()));
+        builder.add_axis(tensor.q_per_channel_axis());
+      } break;
+      default:
+        TORCH_CHECK(
+            false,
+            "Unsupported tensor quantization type in serialization ",
+            toString(tensor.qscheme()));
+        break;
+    }
+    qschema_offset = builder.Finish();
+  }
 
   void* addr = storage.unsafeGetStorageImpl();
   uint32_t storage_index;
@@ -190,14 +216,15 @@ IValueFlatbufferSerializer::IValueFlatbufferSerializer::tensorToFB(flatbuffers::
     /* int32_t element_size */ tensor.element_size(),
     /* sizes */ &sizes,
     /* strides */ &strides,
-    /* bool requires_grad */ false);
+    /* bool requires_grad */ false,
+    /* qschema */ qschema_offset);
 
 }
 
 
 
 std::tuple<
-    mobile::serialization::IValue, 
+    mobile::serialization::IValue,
     flatbuffers::Offset<void>>
 IValueFlatbufferSerializer::iValueToFB(flatbuffers::FlatBufferBuilder& fbb, const IValue& ivalue) {
   mobile::serialization::IValue ivalue_type;
@@ -220,7 +247,7 @@ IValueFlatbufferSerializer::iValueToFB(flatbuffers::FlatBufferBuilder& fbb, cons
     offset = fbb.CreateStruct(mobile::serialization::Bool(ivalue.toBool())).Union();
   } else if (ivalue.isString()) {
     ivalue_type = mobile::serialization::IValue_String;
-    offset = mobile::serialization::CreateString(fbb, 
+    offset = mobile::serialization::CreateString(fbb,
       fbb.CreateString(ivalue.toString()->string())).Union();
   } else if (ivalue.isGenericDict()) {
     ivalue_type = mobile::serialization::IValue_Dict;
@@ -260,10 +287,44 @@ IValue IValueDeserializer::parseTensor(const mobile::serialization::TensorMetada
 
   at::ScalarType type = static_cast<at::ScalarType>(tensor_md->scalar_type());
   auto options = at::CPU(type).options();
-  at::Tensor tensor = at::empty({0}, options);
+  at::Tensor tensor;
+  if (tensor_md->quantized_schema() != nullptr) {
+    // is quantized
+    const auto* schema = tensor_md->quantized_schema();
+    auto qscheme_type = static_cast<at::QScheme>(schema->qscheme());
+    switch (qscheme_type) {
+      case at::kPerTensorAffine: {
+        tensor = at::_empty_affine_quantized(
+            {0}, options, schema->scale(), schema->zero_point());
+      } break;
+      case at::kPerChannelAffineFloatQParams:
+      case at::kPerChannelAffine: {
+        at::Tensor scales = parseTensor(schema->scales()).toTensor();
+        at::Tensor zero_points = parseTensor(schema->zero_points()).toTensor();
+        tensor = at::_empty_per_channel_affine_quantized(
+          {0}, scales, zero_points, schema->axis(), options);
+      } break;
+      default:
+        TORCH_CHECK(
+            false,
+            "Unsupported tensor quantization type in serialization ",
+            toString(qscheme_type));
+        break;
+    }
+  } else {
+    tensor = at::empty({0}, options);
+  }
   // requires_grad?
   at::TensorImpl* impl = tensor.unsafeGetTensorImpl();
-  impl->set_storage_keep_dtype(tensor_data_->at(tensor_md->storage_location_index()));
+
+  c10::Storage storage;
+  if (tensor_data_ == nullptr) {
+    storage = tensor_loader_(tensor_md->storage_location_index());
+  } else {
+    storage = tensor_data_->at(tensor_md->storage_location_index());
+
+  }
+  impl->set_storage_keep_dtype(storage);
   impl->set_storage_offset(tensor_md->storage_offset());
 
   std::vector<int64_t> size{tensor_md->sizes()->begin(), tensor_md->sizes()->end()};
@@ -308,10 +369,9 @@ IValue IValueDeserializer::parseObject(const mobile::serialization::Object* obje
   IValue state = parseIValue(object->state_type(), object->state());
   auto type_ptr = types_->at(object->type_index());
   if (object->use_setstate()) {
-    std::cerr << "TODO setstate\n";
-    return IValue();
+    return object_loader_(type_ptr, state);
   } else {
-    const auto& elements = state.toTuple()->elements(); 
+    const auto& elements = state.toTuple()->elements();
     size_t ndict = elements.size();
     auto obj = c10::ivalue::Object::create(type_ptr, ndict);
     //auto obj = c10::ivalue::Object::create(type, elements.size());

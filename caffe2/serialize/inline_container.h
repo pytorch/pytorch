@@ -110,6 +110,8 @@ class TORCH_API PyTorchStreamReader final {
     return version_;
   }
 
+  const std::string& archiveName() { return archive_name_; }
+
  private:
   void init();
   size_t read(uint64_t pos, char* buf, size_t n);
