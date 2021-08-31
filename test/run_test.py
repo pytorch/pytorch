@@ -51,6 +51,7 @@ except ImportError:
 
 
 def discover_tests(
+        base_dir: Optional[pathlib.Path] = None,
         blocklisted_patterns: Optional[List[str]] = None,
         blocklisted_tests: Optional[List[str]] = None,
         extra_tests: Optional[List[str]] = None) -> List[str]:
@@ -64,8 +65,7 @@ def discover_tests(
         if blocklisted_tests is not None:
             rc |= name in blocklisted_tests
         return rc
-
-    cwd = pathlib.Path(__file__).resolve().parent
+    cwd = pathlib.Path(__file__).resolve().parent if base_dir is None else base_dir
     all_py_files = list(cwd.glob('**/test_*.py'))
     rc = [str(fname.relative_to(cwd))[:-3] for fname in all_py_files]
     # Invert slashes on Windows
