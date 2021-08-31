@@ -5180,6 +5180,19 @@ def sample_inputs_expand(op_info, device, dtype, requires_grad, **kwargs):
 
     return list(generator())
 
+def sample_inputs_conversion(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device)
+
+    cases = ((),
+             (2, 3))
+    memory_format_options = [None, torch.preserve_format, torch.contiguous_format]
+
+    def generator():
+        for shape, memory_format in itertools.product(cases, memory_format_options):
+            yield(SampleInput(make_arg(shape, requires_grad=requires_grad),
+                              kwargs={'memory_format': memory_format} if memory_format else {}))
+
+    return list(generator())
 
 def sample_inputs_expand_as(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device)
@@ -8556,6 +8569,99 @@ op_db: List[OpInfo] = [
     OpInfo('scatter',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_scatter,),
+    OpInfo('Tensor.bfloat16',
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           supports_out=False,
+           sample_inputs_func=sample_inputs_conversion,
+           # The autograd test runner cannot handle functions that change dtype
+           supports_autograd=False,
+           skips=(
+               # This method not supported by TorchScript
+               SkipInfo('TestJit', 'test_variant_consistency_jit'),
+           )),
+    OpInfo('Tensor.bool',
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           supports_out=False,
+           sample_inputs_func=sample_inputs_conversion,
+           supports_autograd=False,
+           skips=(
+               # This method not supported by TorchScript
+               SkipInfo('TestJit', 'test_variant_consistency_jit'),
+           )),
+    OpInfo('Tensor.byte',
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           supports_out=False,
+           sample_inputs_func=sample_inputs_conversion,
+           supports_autograd=False,
+           skips=(
+               # This method not supported by TorchScript
+               SkipInfo('TestJit', 'test_variant_consistency_jit'),
+           )),
+    OpInfo('Tensor.char',
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           supports_out=False,
+           sample_inputs_func=sample_inputs_conversion,
+           supports_autograd=False,
+           skips=(
+               # This method not supported by TorchScript
+               SkipInfo('TestJit', 'test_variant_consistency_jit'),
+           )),
+    OpInfo('Tensor.double',
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           supports_out=False,
+           sample_inputs_func=sample_inputs_conversion,
+           supports_forward_ad=True,
+           skips=(
+               # This method not supported by TorchScript
+               SkipInfo('TestJit', 'test_variant_consistency_jit'),
+           )),
+    OpInfo('Tensor.float',
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           supports_out=False,
+           sample_inputs_func=sample_inputs_conversion,
+           # The autograd test runner cannot handle functions that change dtype
+           supports_autograd=False,
+           skips=(
+               # This method not supported by TorchScript
+               SkipInfo('TestJit', 'test_variant_consistency_jit'),
+           )),
+    OpInfo('Tensor.half',
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           supports_out=False,
+           sample_inputs_func=sample_inputs_conversion,
+           # The autograd test runner cannot handle functions that change dtype
+           supports_autograd=False,
+           skips=(
+               # This method not supported by TorchScript
+               SkipInfo('TestJit', 'test_variant_consistency_jit'),
+           )),
+    OpInfo('Tensor.int',
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           supports_out=False,
+           sample_inputs_func=sample_inputs_conversion,
+           supports_autograd=False,
+           skips=(
+               # This method not supported by TorchScript
+               SkipInfo('TestJit', 'test_variant_consistency_jit'),
+           )),
+    OpInfo('Tensor.long',
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           supports_out=False,
+           sample_inputs_func=sample_inputs_conversion,
+           supports_autograd=False,
+           skips=(
+               # This method not supported by TorchScript
+               SkipInfo('TestJit', 'test_variant_consistency_jit'),
+           )),
+    OpInfo('Tensor.short',
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           supports_out=False,
+           sample_inputs_func=sample_inputs_conversion,
+           supports_autograd=False,
+           skips=(
+               # This method not supported by TorchScript
+               SkipInfo('TestJit', 'test_variant_consistency_jit'),
+           )),
     OpInfo('scatter_add',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_scatter_add,
