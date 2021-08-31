@@ -67,7 +67,7 @@ void* CodeGen::argToPtr(const BufferArg& bufferArg, const CallArg& callArg) {
   case ScalarType::Name:    \
     return callArg.Name##Ptr();
 
-    AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
+    AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
 #undef TYPE_CASE
 
     default:

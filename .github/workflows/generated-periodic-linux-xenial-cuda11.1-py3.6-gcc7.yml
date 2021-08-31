@@ -228,6 +228,8 @@ jobs:
       ENABLE_NOGPU_NO_AVX_TEST: ''
       ENABLE_NOGPU_NO_AVX2_TEST: ''
       ENABLE_SLOW_TEST: ''
+      ENABLE_DOCS_TEST: ''
+      ENABLE_BACKWARDS_COMPAT_TEST: ''
       NUM_TEST_SHARDS: 2
       MULTIGPU_RUNNER_TYPE: linux.16xlarge.nvidia.gpu
       NOGPU_RUNNER_TYPE: linux.2xlarge
@@ -260,6 +262,7 @@ jobs:
       SHARD_NUMBER: ${{ matrix.shard }}
       NUM_TEST_SHARDS: ${{ matrix.num_shards }}
       PYTORCH_IGNORE_DISABLED_ISSUES: ${{ needs.generate-test-matrix.outputs.ignore-disabled-issues }}
+      CONTINUE_THROUGH_ERROR: ${{ github.repository_owner == 'pytorch' && (github.event_name == 'push' || github.event_name == 'schedule') }}
     steps:
       - name: Log in to ECR
         run: |
@@ -322,7 +325,6 @@ jobs:
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Test PyTorch
         env:
-          BUILD_ENVIRONMENT: periodic-linux-xenial-cuda11.1-py3.6-gcc7-${{ matrix.config }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           if [[ $TEST_CONFIG == 'multigpu' ]]; then
@@ -349,6 +351,7 @@ jobs:
             -e TEST_CONFIG \
             -e NUM_TEST_SHARDS \
             -e PYTORCH_IGNORE_DISABLED_ISSUES \
+            -e CONTINUE_THROUGH_ERROR \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
             -e http_proxy="http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128" -e https_proxy="http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128" -e no_proxy="localhost,127.0.0.1,amazonaws.com,s3.amazonaws.com,169.254.169.254,169.254.170.2,/var/run/docker.sock" \
