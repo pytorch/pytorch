@@ -18,17 +18,23 @@ class HalfChecker : public IRVisitor {
     }
   }
 
-  bool hasHalf() {
+  bool hasHalf() const {
     return hasHalf_;
+  }
+
+  bool hasBFloat16() const {
+    return hasBFloat16_;
   }
 
   void visit(LoadPtr v) override {
     hasHalf_ |= v->dtype().scalar_type() == ScalarType::Half;
+    hasBFloat16_ |= v->dtype().scalar_type() == ScalarType::BFloat16;
     IRVisitor::visit(v);
   }
 
   void visit(StorePtr v) override {
     hasHalf_ |= v->buf()->dtype().scalar_type() == ScalarType::Half;
+    hasBFloat16_ |= v->buf()->dtype().scalar_type() == ScalarType::BFloat16;
     IRVisitor::visit(v);
   }
 
@@ -36,20 +42,26 @@ class HalfChecker : public IRVisitor {
     hasHalf_ = true;
   }
 
+  void visit(BFloat16ImmPtr v) override {
+    hasBFloat16_ = true;
+  }
+
   void visit(CastPtr v) override {
     hasHalf_ |= v->dtype().scalar_type() == ScalarType::Half;
+    hasBFloat16_ |= v->dtype().scalar_type() == ScalarType::BFloat16;
     IRVisitor::visit(v);
   }
 
  private:
   bool hasHalf_{false};
+  bool hasBFloat16_{false};
 };
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class HalfRewriter : public IRMutator {
   ExprPtr mutate(LoadPtr v) override {
     ExprPtr child = IRMutator::mutate(v);
-    if (child->dtype().scalar_type() != ScalarType::Half) {
+    if (!isHalf(child)) {
       return child;
     }
 
@@ -63,12 +75,11 @@ class HalfRewriter : public IRMutator {
   StmtPtr mutate(StorePtr v) override {
     // Since mutation changes the `value()` expression in-place, we need to
     // get the dtype of the `value()` before that is mutated.
-    Dtype newType = v->value()->dtype();
+    auto newType = v->value()->dtype();
     ExprPtr new_val = v->value()->accept_mutator(this);
 
-    if (newType.scalar_type() == ScalarType::Half) {
-      new_val =
-          alloc<Cast>(newType.cloneWithScalarType(ScalarType::Half), new_val);
+    if (isHalf(newType.scalar_type())) {
+      new_val = alloc<Cast>(newType, new_val);
       inserted_half_casts_.insert(new_val);
     }
 
@@ -80,11 +91,15 @@ class HalfRewriter : public IRMutator {
     return alloc<Cast>(kFloat, v);
   }
 
+  ExprPtr mutate(BFloat16ImmPtr v) override {
+    return alloc<Cast>(kFloat, v);
+  }
+
   ExprPtr mutate(CastPtr v) override {
     ExprPtr child = v->src_value()->accept_mutator(this);
 
     // just don't allow half casts we didn't insert.
-    if (v->dtype().scalar_type() == ScalarType::Half) {
+    if (isHalf(v)) {
       if (inserted_half_casts_.count(v) < 1) {
         return child;
       }
@@ -105,8 +120,9 @@ class HalfRewriter : public IRMutator {
 
     return alloc<Cast>(v->dtype(), child);
   }
+
   StmtPtr mutate(LetPtr v) override {
-    if (v->dtype().scalar_type() == ScalarType::Half) {
+    if (isHalf(v->dtype().scalar_type())) {
       VarPtr load_new_var = alloc<Var>(v->var()->name_hint(), kFloat);
       ExprPtr new_value = alloc<Cast>(
           v->dtype().cloneWithScalarType(ScalarType::Float),
@@ -128,7 +144,55 @@ class HalfRewriter : public IRMutator {
     return v;
   }
 
+  template <typename T>
+  ExprPtr mutateArithmetic(T v) {
+    IRMutator::mutate(v);
+    if (isHalf(v)) {
+      v->set_dtype(v->dtype().cloneWithScalarType(c10::kFloat));
+    }
+    return v;
+  }
+
+  ExprPtr mutate(AddPtr v) override {
+    return mutateArithmetic(v);
+  }
+  ExprPtr mutate(SubPtr v) override {
+    return mutateArithmetic(v);
+  }
+  ExprPtr mutate(MulPtr v) override {
+    return mutateArithmetic(v);
+  }
+  ExprPtr mutate(DivPtr v) override {
+    return mutateArithmetic(v);
+  }
+  ExprPtr mutate(MaxPtr v) override {
+    return mutateArithmetic(v);
+  }
+  ExprPtr mutate(MinPtr v) override {
+    return mutateArithmetic(v);
+  }
+  ExprPtr mutate(CompareSelectPtr v) override {
+    return mutateArithmetic(v);
+  }
+  ExprPtr mutate(BroadcastPtr v) override {
+    return mutateArithmetic(v);
+  }
+  ExprPtr mutate(IfThenElsePtr v) override {
+    return mutateArithmetic(v);
+  }
+  ExprPtr mutate(IntrinsicsPtr v) override {
+    return mutateArithmetic(v);
+  }
+
  private:
+  static bool isHalf(ScalarType st) {
+    return st == ScalarType::Half || st == ScalarType::BFloat16;
+  }
+
+  static bool isHalf(ExprPtr v) {
+    return isHalf(v->dtype().scalar_type());
+  }
+
   std::unordered_set<ExprPtr> inserted_half_casts_;
   std::unordered_map<VarPtr, VarPtr> var_map;
 };
