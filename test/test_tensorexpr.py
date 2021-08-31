@@ -1222,7 +1222,6 @@ class TestTensorExprFuser(BaseTestClass):
             x = warmup_and_run_forward(traced, a, b)
             self.assertLastGraphAllFused()
 
-    @unittest.skip("float16 is not supported yet.")
     def test_half_bn_relu(self):
         devices = ["cuda"] if torch.cuda.is_available() else []
 
