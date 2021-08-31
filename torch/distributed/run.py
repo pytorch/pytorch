@@ -7,7 +7,7 @@
 # LICENSE file in the root directory of this source tree.
 
 """
-``torch.distributed.run`` provides a superset of the functionality as ``torch.distributed.launch``
+``torchrun`` provides a superset of the functionality as ``torch.distributed.launch``
 with the following additional functionalities:
 
 1. Worker failures are handled gracefully by restarting all workers.
@@ -18,33 +18,33 @@ with the following additional functionalities:
 
 
 
-Transitioning from torch.distributed.launch to torch.distributed.run
+Transitioning from torch.distributed.launch to torchrun
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
-``torch.distributed.run`` supports the same arguments as ``torch.distributed.launch`` **except**
+``torchrun`` supports the same arguments as ``torch.distributed.launch`` **except**
 for ``--use_env`` which is now deprecated. To migrate from ``torch.distributed.launch``
-to ``torch.distributed.run`` follow these steps:
+to ``torchrun`` follow these steps:
 
 1.  If your training script is already reading ``local_rank`` from the ``LOCAL_RANK`` environment variable.
     Then you need simply omit the ``--use_env`` flag, e.g.:
 
-    +--------------------------------------------------------------------+------------------------------------------------------+
-    |         ``torch.distributed.launch``                               |            ``torch.distributed.run``                 |
-    +====================================================================+======================================================+
-    |                                                                    |                                                      |
-    | .. code-block:: shell-session                                      | .. code-block:: shell-session                        |
-    |                                                                    |                                                      |
-    |    $ python -m torch.distributed.launch --use_env train_script.py  |    $ python -m torch.distributed.run train_script.py |
-    |                                                                    |                                                      |
-    +--------------------------------------------------------------------+------------------------------------------------------+
+    +--------------------------------------------------------------------+--------------------------------------------+
+    |         ``torch.distributed.launch``                               |                ``torchrun``                |
+    +====================================================================+============================================+
+    |                                                                    |                                            |
+    | .. code-block:: shell-session                                      | .. code-block:: shell-session              |
+    |                                                                    |                                            |
+    |    $ python -m torch.distributed.launch --use_env train_script.py  |    $ torchrun train_script.py              |
+    |                                                                    |                                            |
+    +--------------------------------------------------------------------+--------------------------------------------+
 
 2.  If your training script reads local rank from a ``--local_rank`` cmd argument.
     Change your training script to read from the ``LOCAL_RANK`` environment variable as
     demonstrated by the following code snippet:
 
     +-------------------------------------------------------+----------------------------------------------------+
-    |         ``torch.distributed.launch``                  |            ``torch.distributed.run``               |
+    |         ``torch.distributed.launch``                  |                    ``torchrun``                    |
     +=======================================================+====================================================+
     |                                                       |                                                    |
     | .. code-block:: python                                | .. code-block:: python                             |
@@ -59,12 +59,12 @@ to ``torch.distributed.run`` follow these steps:
     |                                                       |                                                    |
     +-------------------------------------------------------+----------------------------------------------------+
 
-The aformentioned changes suffice to migrate from ``torch.distributed.launch`` to ``torch.distributed.run``.
-To take advantage of new features such as elasticity, fault-tolerance, and error reporting of ``torch.distributed.run``
+The aformentioned changes suffice to migrate from ``torch.distributed.launch`` to ``torchrun``.
+To take advantage of new features such as elasticity, fault-tolerance, and error reporting of ``torchrun``
 please refer to:
 
-* :ref:`elastic_train_script` for more information on authoring training scripts that are ``torch.distributed.run`` compliant.
-* the rest of this page for more information on the features of ``torch.distributed.run``.
+* :ref:`elastic_train_script` for more information on authoring training scripts that are ``torchrun`` compliant.
+* the rest of this page for more information on the features of ``torchrun``.
 
 
 
@@ -75,7 +75,7 @@ Usage
 
 ::
 
-    >>> python -m torch.distributed.run
+    >>> torchrun
         --standalone
         --nnodes=1
         --nproc_per_node=$NUM_TRAINERS
@@ -85,7 +85,7 @@ Usage
 
 ::
 
-    >>> python -m torch.distributed.run
+    >>> torchrun
         --nnodes=$NUM_NODES
         --nproc_per_node=$NUM_TRAINERS
         --rdzv_id=$JOB_ID
@@ -104,7 +104,7 @@ node in your training cluster, but ideally you should pick a node that has a hig
 
 ::
 
-    >>> python -m torch.distributed.run
+    >>> torchrun
         --nnodes=1:4
         --nproc_per_node=$NUM_TRAINERS
         --rdzv_id=$JOB_ID
@@ -186,7 +186,7 @@ The following environment variables are made available to you in your script:
    of the worker is specified in the ``WorkerSpec``.
 
 5. ``LOCAL_WORLD_SIZE`` - The local world size (e.g. number of workers running locally); equals to
-   ``--nproc_per_node`` specified on ``torch.distributed.run``.
+   ``--nproc_per_node`` specified on ``torchrun``.
 
 6. ``WORLD_SIZE`` - The world size (total number of workers in the job).
 

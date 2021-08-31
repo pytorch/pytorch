@@ -550,6 +550,9 @@ void Unpickler::readGlobal(
     // Unpickle a tensor
     bool quantized = class_name == "_rebuild_qtensor";
     rebuildTensor(quantized);
+  } else if (
+      module_name == "torch._utils" && class_name == "_rebuild_sparse_tensor") {
+    rebuildSparseTensor();
   } else if (module_name == "builtins" && class_name == "complex") {
     globals_.emplace_back([this] {
       auto elems = pop(stack_).toTuple()->elements();
@@ -645,6 +648,38 @@ void Unpickler::readGlobal(
     }
   }
   stack_.emplace_back(int64_t(globals_.size() - 1));
+}
+
+void Unpickler::rebuildSparseTensor() {
+  globals_.emplace_back([this] {
+    auto tup = pop(stack_).toTuple();
+    const auto& elements = tup->elements();
+    size_t idx = 0;
+    auto layout = elements.at(idx++).toInt();
+    at::Tensor result;
+    switch (layout) {
+      case static_cast<int>(c10::Layout::Sparse): {
+        std::vector<int64_t> size = tupleToIntList(elements.at(idx++));
+        bool requires_grad = elements.at(idx++).toBool();
+        auto& indices_tensor = elements.at(idx++).toTensor();
+        auto& values_tensor = elements.at(idx++).toTensor();
+        auto options = values_tensor.options()
+                           .layout(c10::Layout::Sparse)
+                           .requires_grad(requires_grad);
+        result = at::_sparse_coo_tensor_unsafe(
+            indices_tensor, values_tensor, size, options);
+        result = autograd::make_variable(result, options.requires_grad());
+        break;
+      }
+      default:
+        TORCH_CHECK(
+            false,
+            "Unsupported sparse tensor layout type in serialization ",
+            static_cast<c10::Layout>(layout));
+        break;
+    }
+    stack_.emplace_back(std::move(result));
+  });
 }
 
 void Unpickler::rebuildTensor(bool quantized) {

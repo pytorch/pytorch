@@ -67,7 +67,7 @@ bool Function::append_operator(
   auto jit_op = findOperatorFor(opname);
   const std::vector<c10::Argument>* pArgs = nullptr;
   if (jit_op) {
-    fn = [jit_op](Stack& stack) { jit_op->getOperation()(&stack); };
+    fn = [jit_op](Stack& stack) { jit_op->getOperation()(stack); };
     pArgs = &jit_op->schema().arguments();
   } else {
     auto op = c10::Dispatcher::singleton().findSchema(opname_c10);
