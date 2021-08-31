@@ -42,6 +42,7 @@ from torch.testing._internal.common_quantization import (
     EmbeddingBagModule,
     EmbeddingModule,
     EmbeddingWithLinear,
+    LinearReluLinearModel,
     SparseNNModel
 )
 
