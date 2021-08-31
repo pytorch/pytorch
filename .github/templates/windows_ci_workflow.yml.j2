@@ -75,6 +75,11 @@ jobs:
     steps:
       - name: noop
         run: echo running !{{ ciflow_config.root_job_name }}
+      - name: List previous workflow runs on the same commit
+        shell: python
+        run: |
+          workflow_run_id=$GITHUB_RUN_ID
+
 {%- endif %}
   build:
     if: ${{ github.repository_owner == 'pytorch' }}
