@@ -10,9 +10,6 @@ from torch.utils.data.datapipes.iter.combining import (
     ConcaterIterDataPipe as Concater,
     ZipperIterDataPipe as Zipper,
 )
-from torch.utils.data.datapipes.iter.dataframes import (
-    DFIterDataPipe,
-)
 from torch.utils.data.datapipes.iter.filelister import (
     FileListerIterDataPipe as FileLister,
 )

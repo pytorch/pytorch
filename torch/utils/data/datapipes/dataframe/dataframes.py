@@ -1,38 +1,12 @@
 from torch.utils.data import (
-    DataChunk,
     DFIterDataPipe,
     IterDataPipe,
     functional_datapipe,
 )
 
-try:
-    import pandas  # pandas used only for prototyping, will be shortly replaced with TorchArrow
-    WITH_PANDAS = True
-except ImportError:
-    WITH_PANDAS = False
-import random
+from torch.utils.data.datapipes.dataframe.structures import DataChunkDF
 
 # TODO(VitalyFedyunin): Add error when two different traces get combined
-
-
-class DataChunkDF(DataChunk):
-    """
-        DataChunkDF iterating over individual items inside of DataFrame containers,
-        to access DataFrames user `raw_iterator`
-    """
-
-    def __iter__(self):
-        for df in self.items:
-            for record in df.to_records(index=False):
-                yield record
-
-    def __len__(self):
-        total_len = 0
-        for df in self.items:
-            total_len += len(df)
-        return total_len
-
-
 class DataFrameTracedOps(DFIterDataPipe):
     def __init__(self, source_datapipe, output_var):
         self.source_datapipe = source_datapipe
@@ -43,129 +17,7 @@ class DataFrameTracedOps(DFIterDataPipe):
             yield self.output_var.calculate_me(item)
 
 
-@functional_datapipe('dataframes_as_tuples')
-class DataFramesAsTuplesPipe(IterDataPipe):
-    def __init__(self, source_datapipe):
-        self.source_datapipe = source_datapipe
-
-    def __iter__(self):
-        for df in self.source_datapipe:
-            for record in df.to_records(index=False):
-                yield record
-
-
-@functional_datapipe('dataframes_per_row', enable_df_api_tracing=True)
-class PerRowDataFramesPipe(DFIterDataPipe):
-    def __init__(self, source_datapipe):
-        self.source_datapipe = source_datapipe
-
-    def __iter__(self):
-        for df in self.source_datapipe:
-            for i in range(len(df.index)):
-                yield df[i:i + 1]
-
-
-@functional_datapipe('dataframes_concat', enable_df_api_tracing=True)
-class ConcatDataFramesPipe(DFIterDataPipe):
-    def __init__(self, source_datapipe, batch=3):
-        self.source_datapipe = source_datapipe
-        self.batch = batch
-        if not WITH_PANDAS:
-            Exception('DataFrames prototype requires pandas to function')
-
-    def __iter__(self):
-        buffer = []
-        for df in self.source_datapipe:
-            buffer.append(df)
-            if len(buffer) == self.batch:
-                yield pandas.concat(buffer)
-                buffer = []
-        if len(buffer):
-            yield pandas.concat(buffer)
-
-
-@functional_datapipe('dataframes_shuffle', enable_df_api_tracing=True)
-class ShuffleDataFramesPipe(DFIterDataPipe):
-    def __init__(self, source_datapipe):
-        self.source_datapipe = source_datapipe
-        if not WITH_PANDAS:
-            Exception('DataFrames prototype requires pandas to function')
-
-    def __iter__(self):
-        size = None
-        all_buffer = []
-        for df in self.source_datapipe:
-            if size is None:
-                size = len(df.index)
-            for i in range(len(df.index)):
-                all_buffer.append(df[i:i + 1])
-        random.shuffle(all_buffer)
-        buffer = []
-        for df in all_buffer:
-            buffer.append(df)
-            if len(buffer) == size:
-                yield pandas.concat(buffer)
-                buffer = []
-        if len(buffer):
-            yield pandas.concat(buffer)
-
-
-@functional_datapipe('dataframes_filter', enable_df_api_tracing=True)
-class FilterDataFramesPipe(DFIterDataPipe):
-    def __init__(self, source_datapipe, filter_fn):
-        self.source_datapipe = source_datapipe
-        self.filter_fn = filter_fn
-        if not WITH_PANDAS:
-            Exception('DataFrames prototype requires pandas to function')
-
-    def __iter__(self):
-        size = None
-        all_buffer = []
-        filter_res = []
-        for df in self.source_datapipe:
-            if size is None:
-                size = len(df.index)
-            for i in range(len(df.index)):
-                all_buffer.append(df[i:i + 1])
-                filter_res.append(self.filter_fn(df.iloc[i]))
-
-        buffer = []
-        for df, res in zip(all_buffer, filter_res):
-            if res:
-                buffer.append(df)
-                if len(buffer) == size:
-                    yield pandas.concat(buffer)
-                    buffer = []
-        if len(buffer):
-            yield pandas.concat(buffer)
-
-
-@functional_datapipe('to_dataframes_pipe', enable_df_api_tracing=True)
-class ExampleAggregateAsDataFrames(DFIterDataPipe):
-    def __init__(self, source_datapipe, dataframe_size=10, columns=None):
-        self.source_datapipe = source_datapipe
-        self.columns = columns
-        self.dataframe_size = dataframe_size
-        if not WITH_PANDAS:
-            Exception('DataFrames prototype requires pandas to function')
-
-    def _as_list(self, item):
-        try:
-            return list(item)
-        except Exception:  # TODO(VitalyFedyunin): Replace with better iterable exception
-            return [item]
-
-    def __iter__(self):
-        aggregate = []
-        for item in self.source_datapipe:
-            aggregate.append(self._as_list(item))
-            if len(aggregate) == self.dataframe_size:
-                yield pandas.DataFrame(aggregate, columns=self.columns)
-                aggregate = []
-        if len(aggregate) > 0:
-            yield pandas.DataFrame(aggregate, columns=self.columns)
-
-
+#  TODO(VitalyFedyunin): Extract this list from the DFIterDataPipe registred functions
 DATAPIPES_OPS = ['dataframes_as_tuples', 'groupby', 'dataframes_filter', 'map', 'to_datapipe',
                  'shuffle', 'concat', 'batch', 'dataframes_per_row', 'dataframes_concat', 'dataframes_shuffle']
 
