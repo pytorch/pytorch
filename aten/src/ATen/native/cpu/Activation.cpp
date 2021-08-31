@@ -519,7 +519,7 @@ void softplus_backward_kernel(TensorIteratorBase& iter, const Scalar& beta_, con
   });
 }
 
-void glu_kernel(TensorIterator& iter) {
+void glu_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "glu_cpu", [&] {
     using Vec = Vectorized<scalar_t>;
     const scalar_t one_val(1);

@@ -44,52 +44,6 @@ def _get_default_rtol_and_atol(actual: Tensor, expected: Tensor) -> Tuple[float,
     return max(actual_rtol, expected_rtol), max(actual_atol, expected_atol)
 
 
-def _check_complex_components_individually(
-    check_tensors: Callable[..., Optional[_TestingErrorMeta]]
-) -> Callable[..., Optional[_TestingErrorMeta]]:
-    """Decorates real-valued tensor check functions to handle complex components individually.
-
-    If the inputs are not complex, this decorator is a no-op.
-
-    Args:
-        check_tensors (Callable[[Tensor, Tensor], Optional[_TestingErrorMeta]]): Tensor check function for real-valued
-        tensors.
-    """
-
-    @functools.wraps(check_tensors)
-    def wrapper(
-        actual: Tensor, expected: Tensor, *, equal_nan: Union[str, bool], **kwargs: Any
-    ) -> Optional[_TestingErrorMeta]:
-        if equal_nan == "relaxed":
-            relaxed_complex_nan = True
-            equal_nan = True
-        else:
-            relaxed_complex_nan = False
-
-        if actual.dtype not in (torch.complex32, torch.complex64, torch.complex128):
-            return check_tensors(actual, expected, equal_nan=equal_nan, **kwargs)
-
-        if relaxed_complex_nan:
-            actual, expected = [
-                t.clone().masked_fill(
-                    t.real.isnan() | t.imag.isnan(), complex(float("NaN"), float("NaN"))  # type: ignore[call-overload]
-                )
-                for t in (actual, expected)
-            ]
-
-        error_meta = check_tensors(actual.real, expected.real, equal_nan=equal_nan, **kwargs)
-        if error_meta:
-            return error_meta
-
-        error_meta = check_tensors(actual.imag, expected.imag, equal_nan=equal_nan, **kwargs)
-        if error_meta:
-            return error_meta
-
-        return None
-
-    return wrapper
-
-
 def _check_sparse_coo_members_individually(
     check_tensors: Callable[..., Optional[_TestingErrorMeta]]
 ) -> Callable[..., Optional[_TestingErrorMeta]]:
@@ -430,10 +384,24 @@ def _make_mismatch_msg(
     return msg.strip()
 
 
+def _get_comparison_dtype(dtype: torch.dtype) -> torch.dtype:
+    """Selects the comparison dtype based on the input dtype.
+
+    Returns:
+        Highest precision dtype of the same dtype category as the input. :class:`torch.bool` is treated as integral
+        dtype.
+    """
+    if dtype.is_complex:
+        return torch.complex128
+    elif dtype.is_floating_point:
+        return torch.float64
+    else:
+        return torch.int64
+
+
 @_check_quantized
 @_check_sparse_coo_members_individually
 @_check_sparse_csr_members_individually
-@_check_complex_components_individually
 def _check_values_close(
     actual: Tensor,
     expected: Tensor,
@@ -457,7 +425,7 @@ def _check_values_close(
     Returns:
         (Optional[AssertionError]): If check did not pass.
     """
-    dtype = torch.float64 if actual.dtype.is_floating_point else torch.int64
+    dtype = _get_comparison_dtype(actual.dtype)
     actual = actual.to(dtype)
     expected = expected.to(dtype)
     mismatches = ~torch.isclose(actual, expected, rtol=rtol, atol=atol, equal_nan=equal_nan)
@@ -740,7 +708,7 @@ def assert_close(
     allow_subclasses: bool = True,
     rtol: Optional[float] = None,
     atol: Optional[float] = None,
-    equal_nan: Union[bool, str] = False,
+    equal_nan: bool = False,
     check_device: bool = True,
     check_dtype: bool = True,
     check_stride: bool = False,
@@ -760,9 +728,6 @@ def assert_close(
     :attr:`check_dtype` is ``True``), and the same stride (if :attr:`check_stride` is ``True``). Non-finite values
     (``-inf`` and ``inf``) are only considered close if and only if they are equal. ``NaN``'s are only considered equal
     to each other if :attr:`equal_nan` is ``True``.
-
-    If :attr:`actual` and :attr:`expected` are complex-valued, they are considered close if both their real and
-    imaginary components are considered close according to the definition above.
 
     If :attr:`actual` and :attr:`expected` are sparse (either having COO or CSR layout), their strided members are
     checked individually. Indices, namely ``indices`` for COO or ``crow_indices``  and ``col_indices`` for CSR layout,
@@ -795,8 +760,7 @@ def assert_close(
             default values based on the :attr:`~torch.Tensor.dtype` are selected with the below table.
         atol (Optional[float]): Absolute tolerance. If specified :attr:`rtol` must also be specified. If omitted,
             default values based on the :attr:`~torch.Tensor.dtype` are selected with the below table.
-        equal_nan (Union[bool, str]): If ``True``, two ``NaN`` values will be considered equal. If ``"relaxed"``,
-            complex values are considered as ``NaN`` if either the real **or** imaginary component is ``NaN``.
+        equal_nan (Union[bool, str]): If ``True``, two ``NaN`` values will be considered equal.
         check_device (bool): If ``True`` (default), asserts that corresponding tensors are on the same
             :attr:`~torch.Tensor.device`. If this check is disabled, tensors on different
             :attr:`~torch.Tensor.device`'s are moved to the CPU before being compared.
@@ -955,20 +919,6 @@ def assert_close(
         Absolute difference: nan (up to 1e-05 allowed)
         Relative difference: nan (up to 1.3e-06 allowed)
         >>> torch.testing.assert_close(actual, expected, equal_nan=True)
-
-        >>> # If equal_nan=True, the real and imaginary NaN's of complex inputs have to match.
-        >>> expected = torch.tensor(complex(float("NaN"), 0))
-        >>> actual = torch.tensor(complex(0, float("NaN")))
-        >>> torch.testing.assert_close(actual, expected, equal_nan=True)
-        Traceback (most recent call last):
-        ...
-        AssertionError: Scalars are not close!
-        <BLANKLINE>
-        Absolute difference: nan (up to 1e-05 allowed)
-        Relative difference: nan (up to 1.3e-06 allowed)
-        >>> # If equal_nan="relaxed", however, then complex numbers are treated as NaN if any
-        >>> # of the real or imaginary components is NaN.
-        >>> torch.testing.assert_close(actual, expected, equal_nan="relaxed")
 
         >>> expected = torch.tensor([1.0, 2.0, 3.0])
         >>> actual = torch.tensor([1.0, 4.0, 5.0])
