@@ -198,6 +198,22 @@ TEST_F(Kernel, _3) {
   }
 }
 
+TEST_F(Kernel, Huge) {
+  const auto graph_string = R"IR(
+      graph(%x.1 : Float(4000000000, strides=[1], requires_grad=0, device=cpu)):
+        %1 : int = prim::Constant[value=0]()
+        %2 : Float(1, 4000000000, strides=[4000000000, 1], requires_grad=0, device=cpu) = aten::unsqueeze(%x.1, %1)
+        %3 : Float(1, 4000000000, strides=[4000000000, 1], requires_grad=0, device=cpu) = aten::relu(%2)
+        return (%3))IR";
+  auto graph = std::make_shared<Graph>();
+  parseIR(graph_string, &*graph);
+  TensorExprKernel k(graph);
+  std::ostringstream oss;
+  oss << *k.getCodeGenStmt();
+  const std::string& verification_pattern = "# CHECK: 4000000000";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
 TEST_F(Kernel, ParallelStrided) {
   const auto graph_string = R"IR(
       graph(%0 : Float(5, 3, 40005, strides=[120015, 40005, 1], device=cpu),
@@ -786,9 +802,9 @@ TEST_F(Kernel, SumOneAxis) {
         // Check the IR we produced
         const std::string& verification_pattern =
             R"IR(
-# CHECK: for (int v = 0; v <
+# CHECK: for (int64_t v = 0ll; v <
 # CHECK-NEXT: sum
-# CHECK-NEXT: for (int v_1 = 0; v_1 <
+# CHECK-NEXT: for (int64_t v_1 = 0ll; v_1 <
 # CHECK-NEXT:   sum)IR";
         torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
@@ -847,10 +863,10 @@ TEST_F(Kernel, SumMultipleAxes) {
         // Check the IR we produced
         const std::string& verification_pattern =
             R"IR(
-# CHECK: int v = 0
-# CHECK: int v_1 = 0
-# CHECK: int v_2 = 0
-# CHECK: int v_3 = 0
+# CHECK: int64_t v = 0
+# CHECK: int64_t v_1 = 0
+# CHECK: int64_t v_2 = 0
+# CHECK: int64_t v_3 = 0
 # CHECK: sum)IR";
         torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
@@ -1115,8 +1131,8 @@ TEST_F(Kernel, InlineProducerIntoReduction) {
   // We should have only one loop in the end.
   const std::string& verification_pattern =
       R"IR(
-        # CHECK: for (int v = 0; v < 5;
-        # CHECK-NEXT: for (int v_1 = 0; v_1 < 3;
+        # CHECK: for (int64_t v = 0ll; v < 5
+        # CHECK-NEXT: for (int64_t v_1 = 0ll; v_1 < 3
         # CHECK-NEXT:   sum
         # CHECK-NOT: for)IR";
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
@@ -1154,11 +1170,11 @@ TEST_F(Kernel, InlineReductionIntoConsumer) {
   // We should have two loops in the end.
   const std::string& verification_pattern =
       R"IR(
-        # CHECK: for (int v = 0; v < 5;
-        # CHECK-NEXT: for (int v_1 = 0; v_1 < 3;
+        # CHECK: for (int64_t v = 0ll; v < 5
+        # CHECK-NEXT: for (int64_t v_1 = 0ll; v_1 < 3
         # CHECK-NEXT:   sum
-        # CHECK: for (int v_2 = 0; v_2 < 5;
-        # CHECK-NEXT: for (int v_3 = 0; v_3 < 3;
+        # CHECK: for (int64_t v_2 = 0ll; v_2 < 5
+        # CHECK-NEXT: for (int64_t v_3 = 0ll; v_3 < 3
         # CHECK-NEXT:   aten_mul
         # CHECK-NOT: for)IR";
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
@@ -1192,6 +1208,43 @@ TEST_F(Kernel, SanitizeNames_CUDA) {
   std::vector<IValue> stack = fmap<IValue>(inputs);
   k.run(stack);
   auto o = stack[0].toTensor();
+  ASSERT_TRUE(at::allclose(o, ref));
+}
+
+TEST_F(Kernel, SanitizeConstants_CUDA) {
+  const auto graph_string = R"IR(
+        graph(%x : Float(16, 16, strides=[16, 1], device=cuda:0)):
+          %none : NoneType = prim::Constant()
+          %size : int = prim::Constant[value=16]()
+          %sizes : int[] = prim::ListConstruct(%size, %size)
+          %30 : Device = prim::Constant[value="cuda"]()
+          %y : Float(16, 16, strides=[16, 1], device=cuda:0) = aten::ones(%sizes, %none, %none, %30, %none)
+          %z : Float(16, 16, strides=[16, 1], device=cuda:0) = aten::mul(%x, %y)
+          return (%z))IR";
+  auto graph = std::make_shared<Graph>();
+  parseIR(graph_string, &*graph);
+  // IRParser doesn't support tensor constants, so we insert a call to
+  // aten::ones and then const-prop it
+  ConstantPropagation(graph);
+
+  // We set the name of the constant to include special characters that are
+  // not allowed. This should be fixed by the sanitizer in TensorExprKernel.
+  graph->nodes().front()->output()->setDebugName("illegal.name");
+
+  // Check if we have a constant node with illegal name in the graph.
+  auto const_node = graph->nodes().front();
+  ASSERT_EQ(const_node->kind(), prim::Constant);
+  ASSERT_NE(const_node->output()->debugName().find('.'), std::string::npos);
+
+  TensorExprKernel k(graph);
+
+  auto x = at::rand({16, 16}, TensorOptions(kCUDA).dtype(at::kFloat));
+  std::vector<at::Tensor> inputs = {x};
+  std::vector<IValue> stack = fmap<IValue>(inputs);
+  k.run(stack);
+  auto o = stack[0].toTensor();
+  auto y = at::ones({16, 16}, TensorOptions(kCUDA).dtype(at::kFloat));
+  auto ref = x * y;
   ASSERT_TRUE(at::allclose(o, ref));
 }
 
