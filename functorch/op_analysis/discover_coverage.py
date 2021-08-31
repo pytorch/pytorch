@@ -61,6 +61,28 @@ def get_public_overridable_outplace_ops():
     return results
 
 def get_public_overridable_outplace_we_care_about():
+    denylist = {
+        'torch.Tensor.data_ptr',
+        'torch.Tensor.dim',
+        'torch.Tensor.element_size',
+        'torch.Tensor.backward',
+        'torch.Tensor.as_strided',
+        'torch.Tensor.register_hook',
+        'torch.Tensor.record_stream',
+        'torch.Tensor.qscheme',
+        'torch.Tensor.ndimension',
+        'torch.Tensor.smm',
+        'torch.Tensor.sspaddmm',
+        'torch.Tensor.retain_grad',
+        'torch.Tensor.sparse_mask',
+        'torch.Tensor.sparse_dim',
+        'torch.Tensor.dense_dim',
+        'torch.Tensor.values'
+        'torch.Tensor.indices',
+        'torch.Tensor.numel',
+        'torch.Tensor.size',
+        'torch.Tensor.nelement',
+    }
     results = get_public_overridable_outplace_ops()
     cpy = copy.deepcopy(results)
     for key, _ in cpy.items():
@@ -71,13 +93,28 @@ def get_public_overridable_outplace_we_care_about():
         # is_cpu, etc. It doesn't make sense to have OpInfos for these
         if '.is_' in key:
             del results[key]
+
+        if key in denylist:
+            del results[key]
     return results
+
+# e.g. nn.functional.softmax
+def get_op(dotted_name):
+    names = dotted_name.split('.')
+    mod = torch
+    for name in names:
+        if not hasattr(mod, name):
+            return None
+        mod = getattr(mod, name)
+    return mod
 
 # Maps function -> OpInfo
 def get_ops_covered_by_opinfos():
     ops = {}
     for opinfo in op_db:
-        ops[opinfo.op] = opinfo
+        func_op = get_op(opinfo.name)
+        if func_op:
+            ops[func_op] = opinfo
         if opinfo.method_variant:
             ops[opinfo.method_variant] = opinfo
         if opinfo.inplace_variant:
@@ -140,22 +177,28 @@ def transpose_statuses():
     return result
 
 overridable_apis = get_public_overridable_apis()
-print(f'Overridable public APIs: {len(overridable_apis)}')
 
 overridable_ops = get_public_overridable_ops()
-print(f'Overridable public ops: {len(overridable_ops)}')
 
 overridable_outplace_ops = get_public_overridable_outplace_ops()
-print(f'Overridable public outplace ops: {len(overridable_outplace_ops)}')
 
 overridable_outplace_we_care_about = get_public_overridable_outplace_we_care_about()
-print(f'Overridable public outplace ops we care about: {len(overridable_outplace_we_care_about)}')
 
 tested_overridable_outplace_ops = get_covered_ops(overridable_outplace_we_care_about)
+untested_overridable_outplace_ops = get_covered_ops(overridable_outplace_we_care_about, invert=True)
+
+print("List of OpInfos we need:")
+for key in untested_overridable_outplace_ops.keys():
+    print(key)
+print("-" * 80)
+print("")
+
+print(f'Overridable public APIs: {len(overridable_apis)}')
+print(f'Overridable public ops: {len(overridable_ops)}')
+print(f'Overridable public outplace ops: {len(overridable_outplace_ops)}')
+print(f'Overridable public outplace ops we care about: {len(overridable_outplace_we_care_about)}')
 print(f'OpInfo-tested overridable public outplace ops: {len(tested_overridable_outplace_ops)}')
 
-untested_overridable_outplace_ops = get_covered_ops(overridable_outplace_we_care_about, invert=True)
-# print(untested_overridable_outplace_ops.keys())
 
 statuses = transpose_statuses()
 for test in tests:
