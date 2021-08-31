@@ -53,3 +53,15 @@ TEST(TorchDeployGPUTest, SimpleModel) {
 
   ASSERT_TRUE(ref_output.allclose(output, 1e-03, 1e-05));
 }
+
+TEST(TorchDeployGPUTest, UsesDistributed) {
+  const auto model_filename = path(
+      "USES_DISTRIBUTED",
+      "torch/csrc/deploy/example/generated/uses_distributed");
+  torch::deploy::InterpreterManager m(1);
+  torch::deploy::Package p = m.load_package(model_filename);
+  {
+    auto I = p.acquire_session();
+    I.self.attr("import_module")({"uses_distributed"});
+  }
+}
