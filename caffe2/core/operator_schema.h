@@ -6,13 +6,12 @@
 #include <initializer_list>
 #include <ostream>
 #include <set>
-#include <unordered_map>
 #include <vector>
+#include <unordered_map>
 
 #include "c10/util/Registry.h"
 #include "caffe2/core/common.h"
 #include "caffe2/core/logging.h"
-#include "caffe2/core/types.h"
 #include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/filler.h"
 #include "caffe2/utils/proto_utils.h"
@@ -274,8 +273,8 @@ class TORCH_API OpSchema {
   OpSchema&
   Arg(const char* name, const char* description, bool required = false);
 
-#define DECLARE_STANDARD_ARG(name, str) \
-  static const char* Arg_##name;        \
+#define DECLARE_STANDARD_ARG(name, str)     \
+  static const char* Arg_##name; \
   OpSchema& Arg##name(const char* description);
 
   DECLARE_STANDARD_ARG(IsTest, is_test)
@@ -340,9 +339,7 @@ class TORCH_API OpSchema {
     return inplace_enforced_(x, y);
   }
 
-  TORCH_API friend std::ostream& operator<<(
-      std::ostream& out,
-      const OpSchema& schema);
+  TORCH_API friend std::ostream& operator<<(std::ostream& out, const OpSchema& schema);
 
   const std::vector<Argument>& args() const {
     return args_;
@@ -565,10 +562,8 @@ OpSchema::Cost PointwiseCostInference(
   }
 
   c.flops = nElemX * OpsPerPoint;
-  auto const& X_element_size_byte =
-      DataTypeToTypeMeta(X.data_type()).itemsize();
-  c.bytes_read = nElemRead * X_element_size_byte;
-  c.bytes_written = nElemX * X_element_size_byte;
+  c.bytes_read = nElemRead * sizeof(X.data_type());
+  c.bytes_written = nElemX * sizeof(X.data_type());
   return c;
 }
 
