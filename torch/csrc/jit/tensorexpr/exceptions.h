@@ -44,6 +44,8 @@ class unimplemented_lowering : public std::runtime_error {
  public:
   explicit unimplemented_lowering()
       : std::runtime_error("UNIMPLEMENTED LOWERING") {}
+  explicit unimplemented_lowering(const std::string& err)
+      : std::runtime_error("UNIMPLEMENTED LOWERING: " + err) {}
   explicit unimplemented_lowering(ExprPtr expr)
       : std::runtime_error("UNIMPLEMENTED LOWERING: " + std::to_string(expr)) {}
   explicit unimplemented_lowering(StmtPtr stmt)
@@ -83,6 +85,8 @@ class malformed_ir : public std::runtime_error {
       : std::runtime_error(
             "MALFORMED IR: " + err + " - " + std::to_string(stmt)) {}
 };
+
+TORCH_API std::string buildErrorMessage(const std::string& s);
 
 } // namespace tensorexpr
 } // namespace jit

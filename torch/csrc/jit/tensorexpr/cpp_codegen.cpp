@@ -138,7 +138,7 @@ void visit_binary_op(
       visit_min<T>(os, lhs, rhs);
       break;
     default:
-      throw std::runtime_error("invalid op type");
+      throw std::runtime_error(buildErrorMessage("Invalid op type."));
   }
 }
 
@@ -152,7 +152,7 @@ void dispatch_binary_op(std::ostream& os, const BinaryOpNode<Op>* v) {
     AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
 #undef TYPE_CASE
     default:
-      throw unsupported_dtype();
+      throw unsupported_dtype(buildErrorMessage(""));
   }
 }
 
@@ -194,7 +194,8 @@ void CppPrinter::visit(AllocatePtr v) {
     if (d) {
       size *= d->value();
     } else {
-      throw std::runtime_error("Only IntImm dimensions are supported for now");
+      throw std::runtime_error(buildErrorMessage(
+          "Only IntImm dimensions are supported in CppPrinter."));
     }
   }
 
@@ -237,7 +238,8 @@ void CppPrinter::visit(BitCastPtr v) {
 
 void CppPrinter::visit(IntrinsicsPtr v) {
   if (v->op_type() == kRand || v->op_type() == kSigmoid) {
-    throw std::runtime_error("kRand and kSigmoid are not supported");
+    throw std::runtime_error(buildErrorMessage(
+        "kRand and kSigmoid are not supported in CppPrinter."));
   }
 
   os() << "std::" << v->func_name() << "(";
@@ -256,7 +258,7 @@ void CppPrinter::visit(ExternalCallPtr v) {
 
   auto& func_registry = getNNCFunctionRegistry();
   if (!func_registry.count(v->func_name())) {
-    throw unimplemented_lowering(v);
+    throw unimplemented_lowering(buildErrorMessage(std::to_string(v)));
   }
 
   std::vector<BufPtr> bufs(v->buf_args());

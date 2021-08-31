@@ -25,7 +25,8 @@ class ScopedVarName {
       : mapping_(mapping), var_(var) {
     auto iter = mapping->find(var);
     if (iter != mapping->end()) {
-      throw std::runtime_error("Duplicate var entry: " + var->name_hint());
+      throw std::runtime_error(
+          buildErrorMessage("Duplicate var entry: " + var->name_hint() + "."));
     }
     mapping->insert(std::make_pair(var, name));
   }
@@ -116,7 +117,8 @@ std::string CudaPrinter::dtypeToCppString(const Dtype& dtype) {
 void CudaAnalysis::visit(FreePtr v) {
   if (thread_local_bufs_.count(v->buffer_var()) == 0 &&
       cross_block_bufs_.count(v->buffer_var()) == 0) {
-    throw std::runtime_error("Global free not supported yet");
+    throw std::runtime_error(
+        buildErrorMessage("Global free not supported in Cuda backend."));
   }
 }
 
@@ -138,7 +140,8 @@ void CudaAnalysis::visit(AllocatePtr v) {
     }
     p = p->get_parent();
   }
-  throw std::runtime_error("Global alloc not supported yet");
+  throw std::runtime_error(
+      buildErrorMessage("Global alloc not supported in Cuda backend."));
 }
 
 void CudaAnalysis::visit(ForPtr v) {
@@ -149,7 +152,8 @@ void CudaAnalysis::visit(ForPtr v) {
   if (loop_options.is_gpu_block_index()) {
     int gpu_block_index = loop_options.gpu_block_index();
     if (gpu_block_index >= 3) {
-      throw std::runtime_error("support only 3D gpu_block_index");
+      throw std::runtime_error(
+          buildErrorMessage("Cuda backend only supports 3D gpu_block_index."));
     }
     ExprPtr prev = nullptr;
     // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
@@ -160,9 +164,9 @@ void CudaAnalysis::visit(ForPtr v) {
       prev = gpu_block_extents_[gpu_block_index];
     }
     if (!is_zero(v->start())) {
-      throw std::runtime_error(
-          "start must be zero for gpu_block_index: " +
-          std::to_string(v->start()));
+      throw std::runtime_error(buildErrorMessage(
+          "Cuda backend requires that start is zero for gpu_block_index: " +
+          std::to_string(v->start()) + "."));
     }
 
     // NOLINTNEXTLINE(bugprone-branch-clone)
@@ -179,7 +183,7 @@ void CudaAnalysis::visit(ForPtr v) {
   } else if (loop_options.is_gpu_thread_index()) {
     int gpu_thread_index = loop_options.gpu_thread_index();
     if (gpu_thread_index >= 3) {
-      throw std::runtime_error("support only 3D gpu_thread_index");
+      throw std::runtime_error(buildErrorMessage("Cuda backend only supports 3D gpu_thread_index");
     }
     ExprPtr prev = nullptr;
     // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
@@ -190,9 +194,9 @@ void CudaAnalysis::visit(ForPtr v) {
       prev = gpu_thread_extents_[gpu_thread_index];
     }
     if (!is_zero(v->start())) {
-      throw std::runtime_error(
-          "start must be zero for gpu_thread_index: " +
-          std::to_string(v->start()));
+      throw std::runtime_error(buildErrorMessage(
+          "Cuda backend requires that start is zero for gpu_thread_index: " +
+          std::to_string(v->start()) + "."));
     }
 
     // NOLINTNEXTLINE(bugprone-branch-clone)
@@ -219,7 +223,8 @@ void CudaPrinter::print_flat_alloc(AllocatePtr alloc) {
     if (dim_i) {
       flat_size *= *dim_i;
     } else {
-      throw std::runtime_error("Only integer dimensions are supported for now");
+      throw std::runtime_error(
+          buildErrorMessage("Cuda backend only supports integer dimensions."));
     }
   }
   os() << dtypeToCppString(alloc->dtype()) << " " << (*alloc->buffer_var())
@@ -241,7 +246,8 @@ void CudaPrinter::visit(AllocatePtr v) {
     return;
   }
 
-  throw std::runtime_error("Encountered Alloc not local to block or thread");
+  throw std::runtime_error(
+      buildErrorMessage("Encountered Alloc not local to block or thread."));
 }
 
 void CudaPrinter::visit(FreePtr v) {
@@ -303,7 +309,7 @@ void CudaPrinter::visit(IntrinsicsPtr v) {
 }
 
 void CudaPrinter::visit(ExternalCallPtr v) {
-  throw unimplemented_lowering(v);
+  throw unimplemented_lowering(buildErrorMessage(std::to_string(v)));
 }
 
 void CudaPrinter::visit(LoadPtr v) {
@@ -704,7 +710,8 @@ StmtPtr GPUMetaVarRewriter::mutate(ForPtr v) {
   if (loop_options.is_gpu_block_index()) {
     int gpu_block_index = loop_options.gpu_block_index();
     if (gpu_block_index >= 3) {
-      throw std::runtime_error("support only 3D gpu_block_index");
+      throw std::runtime_error(
+          buildErrorMessage("Cuda backend only supports 3D gpu_block_index."));
     }
     old_reach = current_block_reach_[gpu_block_index];
 
@@ -723,7 +730,8 @@ StmtPtr GPUMetaVarRewriter::mutate(ForPtr v) {
   } else if (loop_options.is_gpu_thread_index()) {
     int gpu_thread_index = loop_options.gpu_thread_index();
     if (gpu_thread_index >= 3) {
-      throw std::runtime_error("support only 3D gpu_thread_index");
+      throw std::runtime_error(
+          buildErrorMessage("Cuda backend only supports 3D gpu_thread_index."));
     }
     old_reach = current_thread_reach_[gpu_thread_index];
 
@@ -1029,7 +1037,8 @@ void CudaCodeGen::Initialize() {
       metavar_rewriter_->gpu_block_extents();
   for (size_t i = 0; i < gpu_block_extents.size(); i++) {
     if (!gpu_block_extents[i]) {
-      throw std::runtime_error("Missing gpu_block_index: " + std::to_string(i));
+      throw std::runtime_error(
+          buildErrorMessage("Missing gpu_block_index: " + std::to_string(i)));
     }
   }
 
@@ -1056,8 +1065,8 @@ void CudaCodeGen::call_raw(const std::vector<void*>& raw_args) {
   const std::vector<ExprPtr>& gpu_thread_extents =
       metavar_rewriter_->gpu_thread_extents();
   if (gpu_block_extents.size() > 3 || gpu_thread_extents.size() > 3) {
-    throw malformed_input(
-        "cuda_codegen: block or thread extent greater than 3D");
+    throw malformed_input(buildErrorMessage(
+        "Cuda backend does not support block or thread extent greater than 3D."));
   }
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -1158,7 +1167,8 @@ void CudaCodeGen::call_raw(const std::vector<void*>& raw_args) {
 
 void CudaCodeGen::call(const std::vector<CallArg>& args) {
   if (args.size() != buffer_args().size()) {
-    throw malformed_input("cuda_codegen: wrong number of args in call");
+    throw malformed_input(
+        buildErrorMessage("Cuda backend: wrong number of args in call."));
   }
 
   auto const& buffer_args = this->buffer_args();
@@ -1255,7 +1265,7 @@ void CudaCodeGen::CompileToNVRTC(
     cu << log.data() << std::endl;
     cu << "nvrtc compilation failed: " << std::endl;
     cu << code << std::endl;
-    throw std::runtime_error(cu.str());
+    throw std::runtime_error(buildErrorMessage(cu.str()));
   }
   ResourceGuard holdProgram(
       [&] { AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcDestroyProgram(&program)); });

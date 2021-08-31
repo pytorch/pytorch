@@ -255,7 +255,8 @@ class TORCH_CUDA_CU_API CudaCodeGen : public CodeGen {
 
   UniqueNameManager* name_manager() {
     if (!printer_) {
-      throw std::runtime_error("Null IRPrinter is not expected");
+      throw std::runtime_error(
+          buildErrorMessage("Unexpected Null IRPrinter during Cuda codegen."));
     }
     return printer_->name_manager();
   }

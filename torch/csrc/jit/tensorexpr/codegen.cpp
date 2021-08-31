@@ -1,5 +1,7 @@
 #include <torch/csrc/jit/tensorexpr/codegen.h>
 
+#include <torch/csrc/jit/tensorexpr/exceptions.h>
+
 #include <sstream>
 
 namespace torch {
@@ -22,7 +24,7 @@ RegisterCodeGenList::StmtFactoryMethod RegisterCodeGenList::
       index++;
     }
     oss << "]";
-    throw std::runtime_error(oss.str());
+    throw std::runtime_error(buildErrorMessage(oss.str()));
   }
   return iter->second;
 }
@@ -71,7 +73,7 @@ void* CodeGen::argToPtr(const BufferArg& bufferArg, const CallArg& callArg) {
 #undef TYPE_CASE
 
     default:
-      throw unsupported_dtype();
+      throw unsupported_dtype(buildErrorMessage(""));
   }
   return nullptr;
 }
