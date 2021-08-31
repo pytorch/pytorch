@@ -161,6 +161,9 @@ struct C10_API AutogradMetaInterface {
   virtual ~AutogradMetaInterface();
 };
 
+// forward declared
+struct TorchDispatchTypeObject;
+
 namespace impl {
 
 // Unfortunately, the definition of AutogradMeta lives in a separate
@@ -255,7 +258,8 @@ struct C10_API PyInterpreter {
   using dispatch_sig = void(
       const PyInterpreter*,
       const c10::OperatorHandle&,
-      torch::jit::Stack* stack);
+      torch::jit::Stack* stack,
+      const std::shared_ptr<TorchDispatchTypeObject>& type);
 
   PyInterpreter(
       name_sig* name_fn,
@@ -299,8 +303,9 @@ struct C10_API PyInterpreter {
   // Invoke the Python boxed fallback dispatch to go back into Python
   __ubsan_ignore_function__ void dispatch(
       const c10::OperatorHandle& op,
-      torch::jit::Stack* stack) const {
-    return (*dispatch_fn_)(this, op, stack);
+      torch::jit::Stack* stack,
+      const std::shared_ptr<TorchDispatchTypeObject>& type) const {
+    return (*dispatch_fn_)(this, op, stack, type);
   }
 
   // Disarm this PyInterpreter, making all of its methods noops.
@@ -346,6 +351,30 @@ struct C10_API NamedTensorMetaInterface {
     TORCH_INTERNAL_ASSERT(
         false, "Not implemented: NamedTensorMetaInterface::slow_dim");
   };
+};
+
+// NOTE [What is TorchDispatchTypeObject?]
+// A TorchDispatchTypeObject represents the type of a Tensor subclass that has
+// a __torch_dispatch__ classmethod. Concretely, it holds the class as a
+// PyObject* and a PyInterpreter* that says which python interpreter the class
+// came from.
+//
+// See NOTE [dispatch_fn's type argument] for more details
+struct C10_API TorchDispatchTypeObject {
+  // Steals a reference to type_object
+  TorchDispatchTypeObject(
+      PyObject* type_object,
+      c10::impl::PyInterpreter* pyinterpreter);
+
+  // Releases the stolen reference to type_object
+  ~TorchDispatchTypeObject();
+
+  c10::impl::PyInterpreter* pyinterpreter() const;
+  PyObject* ptr() const;
+
+ private:
+  PyObject* data_;
+  c10::impl::PyInterpreter* pyinterpreter_;
 };
 
 // NOTE [ Version Counter Sharing ]
