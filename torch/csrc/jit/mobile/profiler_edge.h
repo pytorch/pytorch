@@ -2,7 +2,6 @@
 #include <torch/csrc/autograd/profiler_kineto.h>
 #include <torch/csrc/jit/mobile/module.h>
 
-namespace profiler = torch::autograd::profiler;
 namespace torch {
 namespace jit {
 namespace mobile {
@@ -54,9 +53,6 @@ class TORCH_API KinetoEdgeCPUProfiler {
       const bool with_flops = false,
       const bool with_modules = false);
 
-  const std::unique_ptr<profiler::ProfilerResult>& disableProfiler();
-  const std::unique_ptr<profiler::ProfilerResult>& getProfilerResult();
-
   ~KinetoEdgeCPUProfiler();
 
  private:
@@ -66,7 +62,6 @@ class TORCH_API KinetoEdgeCPUProfiler {
    */
   const mobile::Module& m_;
   std::string trace_file_name_;
-  std::unique_ptr<profiler::ProfilerResult> profiler_result_;
 };
 } // namespace mobile
 } // namespace jit

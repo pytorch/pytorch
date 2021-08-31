@@ -455,6 +455,171 @@ TEST(LiteInterpreterTest, BuiltinFunction) {
   AT_ASSERT(str == expected);
 }
 
+#if !defined FB_XPLAT_BUILD
+TEST(LiteInterpreterTest, ModuleInfoBasic) {
+  Module m("M");
+  m.define(R"JIT(
+    def forward(self, x):
+      return 2 * x
+  )JIT");
+
+  std::stringstream ss;
+  m._save_for_mobile(ss, {}, true);
+  mobile::Module bc = _load_for_mobile(ss);
+
+  std::unordered_set<std::string> module_debug_info_set;
+  size_t pc = 0;
+  while (true) {
+    try {
+      std::string module_info = bc.get_forward_method_debug_info(pc);
+      if (!module_info.empty() &&
+          (module_info.find("debug_handle") == std::string::npos)) {
+        module_debug_info_set.insert(module_info);
+      }
+      ++pc;
+    } catch (const std::exception& e) {
+      break;
+    }
+  }
+
+  AT_ASSERT(module_debug_info_set.count("top(M)::<unknown>.aten::mul"));
+}
+
+TEST(LiteInterpreterTest, NotSaveModuleInfo) {
+  Module m("M");
+  m.define(R"JIT(
+    def forward(self, x):
+      return x + 5
+  )JIT");
+
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+
+  size_t pc = 0;
+  while (true) {
+    try {
+      std::string module_info = bc.get_forward_method_debug_info(pc);
+      AT_ASSERT(
+          module_info.empty() ||
+          (module_info.find("debug_handle") != std::string::npos));
+      ++pc;
+    } catch (const std::exception& e) {
+      break;
+    }
+  }
+}
+
+TEST(LiteInterpreterTest, OneSubmoduleModuleInfo) {
+  Module a("A");
+  a.define(R"JIT(
+    def forward(self, x):
+      return 2 * x + 5
+  )JIT");
+  Module b("B");
+  b.register_module("A0", a);
+  b.define(R"JIT(
+    def forward(self, x):
+      return self.A0.forward(x) + 1
+  )JIT");
+
+  std::stringstream ss;
+  b._save_for_mobile(ss, {}, true);
+  mobile::Module bc = _load_for_mobile(ss);
+
+  std::set<std::string> module_debug_info_set;
+  size_t pc = 0;
+  while (true) {
+    try {
+      std::string module_info = bc.get_forward_method_debug_info(pc);
+      if (!module_info.empty() &&
+          (module_info.find("debug_handle") == std::string::npos)) {
+        module_debug_info_set.insert(module_info);
+      }
+      ++pc;
+    } catch (const std::exception& e) {
+      break;
+    }
+  }
+
+  AT_ASSERT(module_debug_info_set.count("top(B)::<unknown>.aten::add"));
+  AT_ASSERT(module_debug_info_set.count(
+      "top(B)::<unknown>.A0(A)::forward.aten::add"));
+  AT_ASSERT(module_debug_info_set.count(
+      "top(B)::<unknown>.A0(A)::forward.aten::mul"));
+}
+
+TEST(LiteInterpreterTest, TwoSubmodulesModuleInfo) {
+  Module a("A");
+  a.define(R"JIT(
+    def forward(self, x):
+      return x + 1
+  )JIT");
+  Module b("B");
+  b.define(R"JIT(
+    def forward(self, x):
+      return x + 2
+  )JIT");
+  Module c("C");
+  c.register_module("A0", a);
+  c.register_module("B0", b);
+  c.define(R"JIT(
+    def forward(self, x):
+      return self.A0.forward(x) + self.B0.forward(x)
+  )JIT");
+
+  std::stringstream ss;
+  c._save_for_mobile(ss, {}, true);
+  mobile::Module bc = _load_for_mobile(ss);
+
+  std::set<std::string> module_debug_info_set;
+  size_t pc = 0;
+  while (true) {
+    try {
+      std::string module_info = bc.get_forward_method_debug_info(pc);
+      if (!module_info.empty() &&
+          (module_info.find("debug_handle") == std::string::npos)) {
+        module_debug_info_set.insert(module_info);
+      }
+      ++pc;
+    } catch (const std::exception& e) {
+      break;
+    }
+  }
+
+  AT_ASSERT(module_debug_info_set.count("top(C)::<unknown>.aten::add"));
+  AT_ASSERT(module_debug_info_set.count(
+      "top(C)::<unknown>.A0(A)::forward.aten::add"));
+  AT_ASSERT(module_debug_info_set.count(
+      "top(C)::<unknown>.B0(B)::forward.aten::add"));
+}
+
+TEST(LiteInterpreterTest, GetRuntimeByteCodeVersion) {
+  auto runtime_bytecode_version = _get_runtime_bytecode_version();
+  AT_ASSERT(
+      runtime_bytecode_version ==
+      caffe2::serialize::kMaxSupportedBytecodeVersion);
+}
+
+/**
+ * The test below is disarmed for FB internal xplat builds since
+ * BUCK requires us to pass in the script_module_v4.ptl file in
+ * as a resource dependency of the build rule for this file, and
+ * we would need to access it via the C++ Resources API instead
+ * of directly reading from disk (which is what the open source
+ * build/run does).
+ */
+TEST(LiteInterpreterTest, GetByteCodeVersion) {
+  std::string filePath(__FILE__);
+  auto test_model_file_v4 =
+      filePath.substr(0, filePath.find_last_of("/\\") + 1);
+  test_model_file_v4.append("script_module_v4.ptl");
+
+  auto version_v4 = _get_model_bytecode_version(test_model_file_v4);
+  AT_ASSERT(version_v4 == 4);
+}
+#endif // !defined(FB_XPLAT_BUILD)
+
 namespace {
 
 void compareModelOutput(
