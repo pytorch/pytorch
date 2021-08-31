@@ -225,6 +225,21 @@ CREATE_COMPARISON_SCALAR_TENSOR_META_FUNC(le);
 CREATE_COMPARISON_SCALAR_TENSOR_META_FUNC(gt);
 CREATE_COMPARISON_SCALAR_TENSOR_META_FUNC(ge);
 
+TORCH_META_FUNC(logical_and) (const Tensor& self, const Tensor& other) {
+  comparison_op_check(self, other);
+  build_comparison_op(maybe_get_output(), self, other);
+}
+
+TORCH_META_FUNC(logical_or) (const Tensor& self, const Tensor& other) {
+  comparison_op_check(self, other);
+  build_comparison_op(maybe_get_output(), self, other);
+}
+
+TORCH_META_FUNC(logical_xor) (const Tensor& self, const Tensor& other) {
+  comparison_op_check(self, other);
+  build_comparison_op(maybe_get_output(), self, other);
+}
+
 } // namespace meta
 
 
@@ -354,6 +369,9 @@ CREATE_BINARY_TORCH_IMPL_FUNC(igammac_out, igammac_stub);
 CREATE_BINARY_TORCH_IMPL_FUNC(nextafter_out, nextafter_stub);
 CREATE_BINARY_TORCH_IMPL_FUNC(remainder_out, remainder_stub);
 CREATE_BINARY_TORCH_IMPL_FUNC(xlogy_out, xlogy_stub);
+CREATE_BINARY_TORCH_IMPL_FUNC(logical_and_out, logical_and_stub);
+CREATE_BINARY_TORCH_IMPL_FUNC(logical_or_out, logical_or_stub);
+CREATE_BINARY_TORCH_IMPL_FUNC(logical_xor_out, logical_xor_stub);
 
 Tensor special_xlog1py(const Scalar& x, const Tensor& y) {
   return at::special_xlog1py(wrapped_scalar_tensor(x), y);
@@ -867,58 +885,6 @@ Tensor bitwise_right_shift(const Scalar& self, const Tensor& other) {
   return at::bitwise_right_shift(wrapped_scalar_tensor(self).toType(other.scalar_type()), other);
 }
 
-template <typename Stub>
-Tensor& comparison_op_out(Tensor& result, const Tensor& self, const Tensor& other, Stub& stub) {
-  // Validate that is possible to convert zero-dim tensor's dtype to other dtype without overflow
-  if (self.scalar_type() != other.scalar_type()) {
-    if (self.dim() != 0 && other.dim() == 0) {
-      check_convert(other.item(), self.scalar_type());
-    } else if (self.dim() == 0 && other.dim() != 0) {
-      check_convert(self.item(), other.scalar_type());
-    }
-  }
-  auto iter = TensorIterator::comparison_op(result, self, other);
-  stub(iter.device_type(), iter);
-  return result;
-}
-
-template <typename OutImpl>
-Tensor comparison_op(const Tensor& self, const Tensor& other, OutImpl& out_impl) {
-  Tensor result = at::empty({0}, self.options().dtype(kBool));
-  return out_impl(result, self, other);
-}
-
-// To avoid overflow during type promotion we will check that both dtypes of self and other are same
-template <typename OutImpl>
-Tensor& comparison_op_(Tensor& self, const Tensor& other, OutImpl& out_impl) {
-  TORCH_CHECK(self.dtype() == other.dtype(),
-              "Expected object of scalar type ", self.dtype(), " but got scalar type ",
-              other.dtype(), " for argument 'other'");
-  return out_impl(self, self, other);
-}
-
-// validates that is possible to convert Scalar other to self's dtype without overflow.
-// This behavior is unique to comparison ops; arithmetic operations don't do this.
-// In the future, we should reconsider this inconsistency and decide if we want to add the same check to arithmetic ops.
-template <typename OutImpl>
-Tensor& comparison_op_out(Tensor& result, const Tensor& self, const Scalar& other, OutImpl& out_impl) {
-  return out_impl(result, self, wrapped_scalar_tensor_and_check_convert(other, self));
-}
-
-template <typename OutImpl>
-Tensor comparison_op(const Tensor& self, const Scalar& other, OutImpl& out_impl) {
-  return comparison_op(self, wrapped_scalar_tensor_and_check_convert(other, self), out_impl);
-}
-
-template <typename OutImpl>
-Tensor& comparison_op_(Tensor& self, const Scalar& other, OutImpl& out_impl) {
-  return out_impl(self, self, wrapped_scalar_tensor_and_check_convert(other, self));
-}
-
-// We need explicit cast to OutFunc because each *_out func is overloaded twice. Without An explicit cast, merely
-// referring to *_out function is ambiguious.
-using OutFunc = std::add_const<Tensor&(&)(Tensor&, const Tensor&, const Tensor&)>::type;
-
 // less, alias for torch.lt
 Tensor& less_out(const Tensor& self, const Tensor& other, Tensor& result) { return at::lt_out(result, self, other); }
 Tensor less(const Tensor& self, const Tensor& other) { return self.lt(other); }
@@ -977,26 +943,6 @@ Tensor& not_equal_out(const Tensor& self, const Scalar& other, Tensor& result) {
 Tensor not_equal(const Tensor& self, const Scalar& other) { return self.ne(other); }
 Tensor& not_equal_(Tensor& self, const Scalar& other) { return self.ne_(other); }
 
-Tensor& logical_and_out(const Tensor& self, const Tensor& other, Tensor& result) { return comparison_op_out(result, self, other, logical_and_stub); }
-Tensor logical_and(const Tensor& self, const Tensor& other) { return comparison_op(self, other, static_cast<OutFunc>(at::logical_and_out)); }
-Tensor& logical_and_(Tensor& self, const Tensor& other) { return comparison_op_(self, other, static_cast<OutFunc>(at::logical_and_out)); }
-Tensor& logical_and_out(Tensor& result, const Tensor& self, const Scalar& other) { return comparison_op_out(result, self, other, static_cast<OutFunc>(at::logical_and_out)); }
-Tensor logical_and(const Tensor& self, const Scalar& other) { return comparison_op(self, other, static_cast<OutFunc>(at::logical_and_out)); }
-Tensor& logical_and_(Tensor& self, const Scalar& other) { return comparison_op_(self, other, static_cast<OutFunc>(at::logical_and_out)); }
-
-Tensor& logical_or_out(const Tensor& self, const Tensor& other, Tensor& result) { return comparison_op_out(result, self, other, logical_or_stub); }
-Tensor logical_or(const Tensor& self, const Tensor& other) { return comparison_op(self, other, static_cast<OutFunc>(at::logical_or_out)); }
-Tensor& logical_or_(Tensor& self, const Tensor& other) { return comparison_op_(self, other, static_cast<OutFunc>(at::logical_or_out)); }
-Tensor& logical_or_out(Tensor& result, const Tensor& self, const Scalar& other) { return comparison_op_out(result, self, other, static_cast<OutFunc>(at::logical_or_out)); }
-Tensor logical_or(const Tensor& self, const Scalar& other) { return comparison_op(self, other, static_cast<OutFunc>(at::logical_or_out)); }
-Tensor& logical_or_(Tensor& self, const Scalar& other) { return comparison_op_(self, other, static_cast<OutFunc>(at::logical_or_out)); }
-
-Tensor& logical_xor_out(const Tensor& self, const Tensor& other, Tensor& result) { return comparison_op_out(result, self, other, logical_xor_stub); }
-Tensor logical_xor(const Tensor& self, const Tensor& other) { return comparison_op(self, other, static_cast<OutFunc>(at::logical_xor_out)); }
-Tensor& logical_xor_(Tensor& self, const Tensor& other) { return comparison_op_(self, other, static_cast<OutFunc>(at::logical_xor_out)); }
-Tensor& logical_xor_out(Tensor& result, const Tensor& self, const Scalar& other) { return comparison_op_out(result, self, other, static_cast<OutFunc>(at::logical_xor_out)); }
-Tensor logical_xor(const Tensor& self, const Scalar& other) { return comparison_op(self, other, static_cast<OutFunc>(at::logical_xor_out)); }
-Tensor& logical_xor_(Tensor& self, const Scalar& other) { return comparison_op_(self, other, static_cast<OutFunc>(at::logical_xor_out)); }
 
 // binary max, alias for maximum
 Tensor& max_out(const Tensor& self, const Tensor& other, Tensor& result) {

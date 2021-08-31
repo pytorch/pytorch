@@ -9,7 +9,7 @@
 
 namespace at { namespace native {
 
-void logical_and_kernel_cuda(TensorIterator& iter) {
+void logical_and_kernel_cuda(TensorIteratorBase& iter) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kHalf, kBool, ScalarType::BFloat16,
                                          iter.common_dtype(), "logical_and_cuda", [&]() {
     gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> bool {
@@ -18,7 +18,7 @@ void logical_and_kernel_cuda(TensorIterator& iter) {
   });
 }
 
-void logical_or_kernel_cuda(TensorIterator& iter) {
+void logical_or_kernel_cuda(TensorIteratorBase& iter) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kHalf, kBool, ScalarType::BFloat16,
                                          iter.common_dtype(), "logical_or_cuda", [&]() {
     gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> bool {
@@ -27,7 +27,7 @@ void logical_or_kernel_cuda(TensorIterator& iter) {
   });
 }
 
-void logical_xor_kernel_cuda(TensorIterator& iter) {
+void logical_xor_kernel_cuda(TensorIteratorBase& iter) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kHalf, kBool, ScalarType::BFloat16,
                                          iter.common_dtype(), "logical_xor_cuda", [&]() {
     gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> bool {

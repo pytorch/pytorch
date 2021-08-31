@@ -328,7 +328,7 @@ void lshift_kernel(TensorIteratorBase& iter) {
   }
 }
 
-void logical_and_kernel(TensorIterator& iter) {
+void logical_and_kernel(TensorIteratorBase& iter) {
   // See Note [special-case bool outputs]
   if (iter.dtype() == ScalarType::Bool) {
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kBFloat16, kHalf, iter.common_dtype(), "logical_and_cpu", [&]() {
@@ -347,7 +347,7 @@ void logical_and_kernel(TensorIterator& iter) {
   }
 }
 
-void logical_or_kernel(TensorIterator& iter) {
+void logical_or_kernel(TensorIteratorBase& iter) {
   // See Note [special-case bool outputs]
   if (iter.dtype() == ScalarType::Bool) {
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kBFloat16, kHalf, iter.common_dtype(), "logical_or_cpu", [&]() {
@@ -366,7 +366,7 @@ void logical_or_kernel(TensorIterator& iter) {
   }
 }
 
-void logical_xor_kernel(TensorIterator& iter) {
+void logical_xor_kernel(TensorIteratorBase& iter) {
   // See Note [special-case bool outputs]
   if (iter.dtype() == ScalarType::Bool) {
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kBFloat16, kHalf, iter.common_dtype(), "logical_xor_cpu", [&]() {
