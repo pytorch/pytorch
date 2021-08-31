@@ -177,8 +177,8 @@ class CaptureInitial(CaptureVariable):
 
 
 class CaptureGetItem(Capture):
-    left = None
-    key = None
+    left : Capture
+    key : Any
 
     def __init__(self, left, key, ctx):
         self.ctx = ctx
@@ -193,9 +193,9 @@ class CaptureGetItem(Capture):
 
 
 class CaptureSetItem(Capture):
-    left = None
-    key = None
-    value = None
+    left : Capture
+    key : Any
+    value : Capture
 
     def __init__(self, left, key, value, ctx):
         self.ctx = ctx
