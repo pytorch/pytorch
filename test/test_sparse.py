@@ -1562,7 +1562,7 @@ class TestSparse(TestCase):
         self.assertEqual(self.safeToDense(y1), expected)
         self.assertEqual(self.safeToDense(y2), expected)
 
-        with self.assertWarnsOnceRegex(UserWarning, 'floor_divide'):
+        with self.assertWarnsOnceRegex(UserWarning, '__floordiv__'):
             y1 = x1 // 37.5
         y2 = x1.clone()
         with self.assertWarnsOnceRegex(UserWarning, 'floor_divide'):
@@ -2915,7 +2915,7 @@ class TestSparse(TestCase):
                                / torch.tensor(1., device=device).to_sparse())
 
     def test_floor_divide_by_sparse_error(self, device):
-        self.assertRaisesRegex(RuntimeError, 'Sparse floor division requires',
+        self.assertRaisesRegex(RuntimeError, 'Sparse division requires',
                                lambda: torch.tensor(1., device=device).to_sparse()
                                // torch.tensor(1., device=device).to_sparse())
 
