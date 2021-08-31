@@ -163,20 +163,19 @@ types.
 
 Operator coverage varies between dynamic and static quantization and is captured in the table below.
 Note that for FX quantization, the corresponding functionals are also supported.
-
 +---------------------------+-------------------+--------------------+
 |                           |Static             | Dynamic            |
 |                           |Quantization       | Quantization       |
 +---------------------------+-------------------+--------------------+
-| |nn.Linear                | |Y                | |Y                 |
-| |nn.Conv1d/2d/3d          | |Y                | |N                 |
+| | nn.Linear               | | Y               | | Y                |
+| | nn.Conv1d/2d/3d         | | Y               | | N                |
 +---------------------------+-------------------+--------------------+
-| |nn.LSTM                  | |N                | |Y                 |
-| |nn.GRU                   | |N                | |Y                 |
+| | nn.LSTM                 | | N               | | Y                |
+| | nn.GRU                  | | N               | | Y                |
 +---------------------------+-------------------+--------------------+
-| |nn.RNNCell               | |N                | |Y                 |
-| |nn.GRUCell               | |N                | |Y                 |
-| |nn.LSTMCell              | |N                | |Y                 |
+| | nn.RNNCell              | | N               | | Y                |
+| | nn.GRUCell              | | N               | | Y                |
+| | nn.LSTMCell             | | N               | | Y                |
 +---------------------------+-------------------+--------------------+
 |nn.EmbeddingBag            | Y (activations    |                    |
 |                           | are in fp32)      | Y                  |
@@ -185,9 +184,9 @@ Note that for FX quantization, the corresponding functionals are also supported.
 +---------------------------+-------------------+--------------------+
 |nn.MultiheadAttention      |Not Supported      | Not supported      |
 +---------------------------+-------------------+--------------------+
-|Activations                |Broadly supported  | |Un-changed,       |
+|Activations                |Broadly supported  | Un-changed,        |
 |                           |                   | computations       |
-|                           |                   | |stay in fp32      |
+|                           |                   | stay in fp32       |
 +---------------------------+-------------------+--------------------+
 
 
