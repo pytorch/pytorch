@@ -18,7 +18,7 @@ void initCustomClassBindingsNccl() {
   // TODO: make this binding the same as pybind11
   static const auto ProcessGroupNCCLWithUCCOptionsTorchBind =
       torch::class_<::c10d::ProcessGroupNCCLWithUCC::Options>(
-          "dist_c10d", "ProcessGroupNCCLWithUCCOptions")
+          "dist_c10d", "ProcessGroupNCCLOptions")
           .def(torch::init([](int64_t timeout, bool isHighPriorityStream) {
             auto opTimeout = std::chrono::milliseconds(timeout);
             auto opts =
