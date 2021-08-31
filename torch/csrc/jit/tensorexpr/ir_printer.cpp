@@ -25,6 +25,24 @@ void IRPrinter::print(Expr& expr) {
 void IRPrinter::print(Stmt& stmt) {
   stmt.accept(this);
 }
+std::string IRPrinter::to_string(CompareSelectOperation op) {
+  switch (op) {
+    case CompareSelectOperation::kEQ:
+      return "==";
+    case CompareSelectOperation::kNE:
+      return "!=";
+    case CompareSelectOperation::kGT:
+      return ">";
+    case CompareSelectOperation::kGE:
+      return ">=";
+    case CompareSelectOperation::kLT:
+      return "<";
+    case CompareSelectOperation::kLE:
+      return "<=";
+    default:
+      throw std::runtime_error("invalid compare select operator");
+  }
+}
 
 // TODO: change whether to include the parenthesis to the parent expression,
 // we need to look at the operator precedence to make the output simpler.
@@ -137,28 +155,8 @@ void IRPrinter::visit(CompareSelectPtr v) {
   if (lhs_prec >= self_prec) {
     os() << ")";
   }
-  switch (cmp_op) {
-    case CompareSelectOperation::kEQ:
-      os() << "==";
-      break;
-    case CompareSelectOperation::kNE:
-      os() << "!=";
-      break;
-    case CompareSelectOperation::kGT:
-      os() << ">";
-      break;
-    case CompareSelectOperation::kGE:
-      os() << ">=";
-      break;
-    case CompareSelectOperation::kLT:
-      os() << "<";
-      break;
-    case CompareSelectOperation::kLE:
-      os() << "<=";
-      break;
-    default:
-      throw std::runtime_error("invalid compare select operator");
-  }
+
+  os() << to_string(cmp_op);
 
   if (rhs_prec >= self_prec) {
     os() << "(";
@@ -208,11 +206,19 @@ static void formatImm(std::ostream& os, T v) {
   }
 }
 
+static void formatIntSuffix(std::ostream& os, int64_t v) {
+  os << "ll";
+}
+
+template <typename T>
+static void formatIntSuffix(std::ostream& os, T v) {}
+
 template <
     typename T,
     std::enable_if_t<!std::is_floating_point<T>::value>* = nullptr>
 static void formatImm(std::ostream& os, T v) {
   os << +v;
+  formatIntSuffix(os, v);
 }
 
 // NOLINTNEXTLINE
@@ -220,12 +226,19 @@ static void formatImm(std::ostream& os, T v) {
   void IRPrinter::visit(Name##ImmPtr v) { \
     formatImm(os(), v->value());          \
   }
-AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_PRINT_VISIT);
+AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_PRINT_VISIT);
 #undef IMM_PRINT_VISIT
 
 void IRPrinter::visit(CastPtr v) {
   auto dtype = v->dtype();
   os() << dtypeToCppString(dtype) << "(";
+  v->src_value()->accept(this);
+  os() << ")";
+}
+
+void IRPrinter::visit(BitCastPtr v) {
+  auto dtype = v->dtype();
+  os() << "BitCast<" << dtype.ToCppString() << ">(";
   v->src_value()->accept(this);
   os() << ")";
 }
@@ -439,7 +452,7 @@ void IRPrinter::visit(FreePtr v) {
 void IRPrinter::visit(LetPtr v) {
   os() << dtypeToCppString(v->dtype()) << " " << *v->var();
   os() << " = " << *v->value();
-  os() << ";";
+  os() << ";" << std::endl;
 }
 
 void IRPrinter::visit(CondPtr v) {
