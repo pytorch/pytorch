@@ -517,15 +517,12 @@ mobile::Module BytecodeDeserializer::deserialize(
   auto bvals = std::move(*readArchive("bytecode", mcu).toTuple()).elements();
 
   c10::optional<std::vector<IValue>> debug_handles;
-  bool has_debug_handles{false};
   if (reader_->hasRecord("mobile_debug_handles.pkl")) {
     debug_handles =
         readArchive("mobile_debug_handles", mcu).toTuple()->elements();
-    has_debug_handles = true;
   }
   parseMethods(bvals, debug_handles, *mcu);
   auto m = mobile::Module(readArchive("data", mcu).toObject(), mcu);
-  m.setHasDebugHandles(has_debug_handles);
 #if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
   MobileDebugTable debug_table = MobileDebugTable(reader_, compilation_unit_);
   m.setDebugTable(std::move(debug_table));

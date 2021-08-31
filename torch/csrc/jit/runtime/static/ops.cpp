@@ -1755,6 +1755,27 @@ REGISTER_OPERATOR_FUNCTOR(aten::cumsum, aten_cumsum, [](Node* n) -> SROperator {
   };
 });
 
+REGISTER_OPERATOR_FUNCTOR(
+    aten::nonzero,
+    aten_nonzero,
+    [](Node* n) -> SROperator {
+      if (!n->matches(torch::schema("aten::nonzero(Tensor self) -> Tensor"))) {
+        LogAndDumpSchema(n);
+        return nullptr;
+      }
+      return [](ProcessedNode* p_node) {
+        const auto& input = p_node->Input(0).toTensor();
+        if (p_node->Output(0).isNone()) {
+          p_node->Output(0) = at::native::nonzero_cpu(input);
+          return;
+        }
+
+        auto& output = p_node->Output(0).toTensor();
+        fastResizeToZero(output);
+        at::native::nonzero_out_cpu(input, output);
+      };
+    });
+
 namespace {
 
 void check_cat_no_zero_dim(const std::vector<at::Tensor>& tensors) {
