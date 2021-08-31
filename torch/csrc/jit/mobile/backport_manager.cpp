@@ -43,7 +43,7 @@ void selective_copy(
   auto records = reader.getAllRecords();
   for (const auto& record : records) {
     // Don't copy archive in excluded_files, usually archive `version` and
-    // `bytecode`. Archvie `version` will be written when PyTorchStreamWriter is
+    // `bytecode`. Archive `version` will be written when PyTorchStreamWriter is
     // going to finalize and run writeEndOfFile()
 
     // records is the list of all files names in the zip file, and each record
@@ -90,11 +90,10 @@ void get_model_stream(PyTorchStreamReader& reader, std::stringstream& out) {
 }
 
 // The write_archive_current function is used for bytecode from version v5 to
-// v7 (the latest bytecode version). writeArchiveV4 is the export function to
-// generate bytecode.pkl for version 4. This write archvie function may change
-// in export_module.cpp, however we don't have a way to keep the old export
-// function in the codebase. To be able to export the model in old format, we
-// keep a record of the export function here.
+// v7 (the latest bytecode version). pre-v5 we serialized things differently.
+// This write archive function may change in export_module.cpp, however we don't
+// have a way to keep the old export function in the codebase. To be able to
+// export the model in old format, we keep a record of the export function here.
 void write_archive_current(
     PyTorchStreamWriter& writer,
     const IValue& value,
@@ -272,6 +271,8 @@ std::stringstream update_bytecode_version(
 
 */
 
+namespace {
+
 /*
 The following functions needed for backport model from v5 to v4.
 Backport function bytecode v5 that deduplicate constanst table.
@@ -306,38 +307,6 @@ mobile can read tensor from the given path:
 Thus, the backport is necessary such that the runtime can read tensor from
 the correct archive.
 */
-namespace {
-
-void writeArchiveV4(
-    PyTorchStreamWriter& writer,
-    const std::string& archive_name,
-    const c10::IValue& value) {
-  std::vector<char> data;
-
-  // Vector to capture the run-time class types during pickling the IValues
-  std::vector<c10::ClassTypePtr> memoizedClassTypes;
-  Pickler data_pickle(
-      [&](const char* buf, size_t size) {
-        data.insert(data.end(), buf, buf + size);
-      },
-      nullptr,
-      nullptr,
-      &memoizedClassTypes);
-  data_pickle.protocol();
-  data_pickle.pushIValue(value);
-  data_pickle.stop();
-  size_t i = 0;
-  std::string prefix = archive_name + "/";
-
-  for (const auto& td : data_pickle.tensorData()) {
-    WriteableTensorData writable_td = getWriteableTensorData(td);
-    std::string fname = prefix + c10::to_string(i++);
-    writer.writeRecord(fname, writable_td.data(), writable_td.sizeInBytes());
-  }
-  std::string fname = archive_name + ".pkl";
-  writer.writeRecord(fname, data.data(), data.size());
-}
-
 std::stringstream backport_v5_to_v4(std::stringstream& input_model_stream) {
   // 1) read from archive `bytecode` archive
   PyTorchStreamReader reader(&input_model_stream);
@@ -373,6 +342,39 @@ std::stringstream backport_v5_to_v4(std::stringstream& input_model_stream) {
   update_bytecode_version(bytecode_values, kBytecodeVersionV4);
   // Construct the list of ivalues to a big tuple
   auto bytecode_tuple = c10::ivalue::Tuple::create(std::move(bytecode_values));
+
+  // The export function to generate bytecode.pkl for version 4. After bytecode
+  // version bump, the old export function doesn't exist anymore, so keep a copy
+  // here for backport pupose.
+  auto writeArchiveV4 = [](PyTorchStreamWriter& writer,
+                           const std::string& archive_name,
+                           const c10::IValue& value) {
+    std::vector<char> data;
+
+    // Vector to capture the run-time class types during pickling the IValues
+    std::vector<c10::ClassTypePtr> memoizedClassTypes;
+    Pickler data_pickle(
+        [&](const char* buf, size_t size) {
+          data.insert(data.end(), buf, buf + size);
+        },
+        nullptr,
+        nullptr,
+        &memoizedClassTypes);
+    data_pickle.protocol();
+    data_pickle.pushIValue(value);
+    data_pickle.stop();
+    size_t i = 0;
+    std::string prefix = archive_name + "/";
+
+    for (const auto& td : data_pickle.tensorData()) {
+      WriteableTensorData writable_td = getWriteableTensorData(td);
+      std::string fname = prefix + c10::to_string(i++);
+      writer.writeRecord(fname, writable_td.data(), writable_td.sizeInBytes());
+    }
+    std::string fname = archive_name + ".pkl";
+    writer.writeRecord(fname, data.data(), data.size());
+  };
+
   // write `bytecode` archive
   writeArchiveV4(writer, kArchiveNameBytecode, bytecode_tuple);
   // write `constants` archive
