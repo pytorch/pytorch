@@ -314,7 +314,7 @@ class TORCH_API UserRRef final : public RRef {
   IValue toHere(
       const float timeoutSeconds =
           torch::distributed::rpc::kUnsetRpcTimeout,
-      const DeviceMap& deviceMap = {}) const;
+      DeviceMap deviceMap = {}) const;
 
   void tryDel() override;
 

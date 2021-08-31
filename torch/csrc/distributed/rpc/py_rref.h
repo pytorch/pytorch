@@ -27,7 +27,7 @@ class PYBIND11_EXPORT PyRRef {
   py::object toHere(
       const float timeoutSeconds =
           torch::distributed::rpc::kUnsetRpcTimeout,
-      const DeviceMap& deviceMap = {}) const;
+      DeviceMap deviceMap = {}) const;
   py::object localValue() const;
   std::string str() const;
   py::tuple pickle() const;

@@ -146,12 +146,11 @@ c10::intrusive_ptr<JitFuture> sendMessageWithAutograd(
     RpcAgent& agent,
     const WorkerInfo& dst,
     c10::intrusive_ptr<torch::distributed::rpc::Message> wrappedRpcMsg,
-    const rpc::DeviceMap& deviceMap,
     bool forceGradRecording,
     const float rpcTimeoutSeconds,
     bool forceDisableProfiling) {
   auto agentDeviceMap = agent.getDeviceMap(dst);
-  auto mergedMap = deviceMap;
+  auto mergedMap = wrappedRpcMsg->getDeviceMap();
   mergedMap.insert(agentDeviceMap.begin(), agentDeviceMap.end());
   auto msg = getMessageWithAutograd(
       dst.id_,

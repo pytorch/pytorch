@@ -19,7 +19,7 @@ c10::intrusive_ptr<JitFuture> rpcTorchscript(
     const c10::QualifiedName& qualifiedName,
     const c10::FunctionSchema& functionSchema,
     std::vector<c10::IValue>& stack,
-    const DeviceMap& deviceMap,
+    DeviceMap deviceMap,
     const float rpcTimeoutSeconds,
     const bool isAsyncExecution) {
   // This dummy tensor holds an at::RecordFunction when profiling is enabled.
@@ -42,13 +42,12 @@ c10::intrusive_ptr<JitFuture> rpcTorchscript(
     remoteProfilerManager.setCurrentKey(rpcAsyncJitKey);
   }
   auto scriptCall = std::make_unique<ScriptCall>(
-      qualifiedName, std::move(stack), isAsyncExecution);
+      qualifiedName, std::move(stack), isAsyncExecution, std::move(deviceMap));
   auto rpcAgentPtr = RpcAgent::getCurrentRpcAgent();
   auto jitFuture = autograd::sendMessageWithAutograd(
       *rpcAgentPtr,
       rpcAgentPtr->getWorkerInfo(dstWorkerName),
       std::move(*scriptCall).toMessage(),
-      deviceMap,
       true /*forceGradRecording*/,
       rpcTimeoutSeconds);
 
@@ -88,7 +87,7 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
     const c10::QualifiedName& qualifiedName,
     const c10::FunctionSchema& functionSchema,
     std::vector<c10::IValue>& stack,
-    const DeviceMap& deviceMap,
+    DeviceMap deviceMap,
     const float rpcTimeoutSeconds,
     const bool isAsyncExecution) {
   auto rpcAgentPtr = RpcAgent::getCurrentRpcAgent();
@@ -113,13 +112,13 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
         std::move(stack),
         userRRefPtr->rrefId(),
         userRRefPtr->forkId(),
-        isAsyncExecution);
+        isAsyncExecution,
+        std::move(deviceMap));
 
     auto jitFuture = torch::distributed::autograd::sendMessageWithAutograd(
         *rpcAgentPtr,
         dstWorkerInfo,
         std::move(*scriptRemoteCall).toMessage(),
-        deviceMap,
         true /*forceGradRecording*/,
         rpcTimeoutSeconds /* timeout */);
 
@@ -141,13 +140,13 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
         std::move(stack),
         ownerRRefPtr->rrefId(),
         ownerRRefPtr->rrefId(),
-        isAsyncExecution);
+        isAsyncExecution,
+        std::move(deviceMap));
 
     auto jitFuture = torch::distributed::autograd::sendMessageWithAutograd(
         *rpcAgentPtr,
         dstWorkerInfo,
         std::move(*scriptRemoteCall).toMessage(),
-        deviceMap,
         true /*forceGradRecording*/,
         rpcTimeoutSeconds /* timeout */);
 

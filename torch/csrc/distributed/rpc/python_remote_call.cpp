@@ -10,17 +10,26 @@ PythonRemoteCall::PythonRemoteCall(
     SerializedPyObj&& serializedPyObj,
     at::IValue retRRefId,
     at::IValue retForkId,
-    const bool isAsyncExecution)
+    const bool isAsyncExecution,
+    DeviceMap&& deviceMap)
     : serializedPyObj_(std::move(serializedPyObj)),
       retRRefId_(std::move(retRRefId)),
       retForkId_(std::move(retForkId)),
-      isAsyncExecution_(isAsyncExecution) {}
+      isAsyncExecution_(isAsyncExecution),
+      deviceMap_(std::move(deviceMap)) {}
 
 c10::intrusive_ptr<Message> PythonRemoteCall::toMessageImpl() && {
   std::vector<IValue> ivalues = std::move(serializedPyObj_).toIValues();
   ivalues.emplace_back(retRRefId_);
   ivalues.emplace_back(retForkId_);
   ivalues.emplace_back(isAsyncExecution_);
+
+  // Convert deviceMap to c10::Dict for serialization.
+  c10::Dict<std::string, std::string> deviceMap;
+  for (const auto& mapEntry : deviceMap_) {
+    deviceMap.insert(mapEntry.first.str(), mapEntry.second.str());
+  }
+  ivalues.emplace_back(deviceMap);
 
   std::vector<torch::Tensor> tensor_table;
   auto payload =
@@ -29,7 +38,8 @@ c10::intrusive_ptr<Message> PythonRemoteCall::toMessageImpl() && {
   return c10::make_intrusive<Message>(
       std::move(payload),
       std::move(tensor_table),
-      MessageType::PYTHON_REMOTE_CALL);
+      MessageType::PYTHON_REMOTE_CALL,
+      std::move(deviceMap_));
 }
 
 std::unique_ptr<PythonRemoteCall> PythonRemoteCall::fromMessage(
@@ -49,6 +59,15 @@ std::unique_ptr<PythonRemoteCall> PythonRemoteCall::fromMessage(
       values.size() >= 3,
       "Expect at least 3 elements in the unpickled values, but got ",
       values.size());
+
+  auto c10DeviceMap = values.back().to<c10::Dict<std::string, std::string>>();
+  // Convert to regular map.
+  std::unordered_map<c10::Device, c10::Device> deviceMap;
+  for (const auto& mapEntry : c10DeviceMap) {
+    deviceMap.insert({mapEntry.key(), mapEntry.value()});
+  }
+  values.pop_back();
+
   bool isAsyncExecution = values.back().toBool();
   values.pop_back();
   auto retForkId = std::move(values.back());
@@ -61,7 +80,8 @@ std::unique_ptr<PythonRemoteCall> PythonRemoteCall::fromMessage(
       std::move(serializedPyObj),
       std::move(retRRefId),
       std::move(retForkId),
-      isAsyncExecution);
+      isAsyncExecution,
+      std::move(deviceMap));
 }
 
 } // namespace rpc

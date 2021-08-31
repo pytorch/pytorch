@@ -126,7 +126,7 @@ const ForkId& UserRRef::forkId() const {
   return forkId_;
 }
 
-IValue UserRRef::toHere(const float timeoutSeconds, const DeviceMap& deviceMap) const {
+IValue UserRRef::toHere(const float timeoutSeconds, DeviceMap deviceMap) const {
   TORCH_CHECK(
       !getTimedOut(),
       "RRef creation via rpc.remote() timed out, and it "
@@ -163,9 +163,9 @@ IValue UserRRef::toHere(const float timeoutSeconds, const DeviceMap& deviceMap) 
   c10::intrusive_ptr<Message> msgToSend;
 
   if (isPyObj()) {
-    msgToSend = PythonRRefFetchCall(ownerId_, rrefId()).toMessage();
+    msgToSend = PythonRRefFetchCall(ownerId_, rrefId(), std::move(deviceMap)).toMessage();
   } else {
-    msgToSend = ScriptRRefFetchCall(ownerId_, rrefId()).toMessage();
+    msgToSend = ScriptRRefFetchCall(ownerId_, rrefId(), std::move(deviceMap)).toMessage();
   }
 
   // toHere is profiled as a blocking call, and does not execute operations on
@@ -175,7 +175,6 @@ IValue UserRRef::toHere(const float timeoutSeconds, const DeviceMap& deviceMap) 
       *agent,
       agent->getWorkerInfo(ownerId_),
       std::move(msgToSend),
-      deviceMap,
       true /* forceGradRecording */,
       timeoutSeconds,
       true /* forceDisableProfiling */);

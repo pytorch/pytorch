@@ -115,11 +115,11 @@ c10::intrusive_ptr<JitFuture> sendPythonRemoteCall(
     SerializedPyObj serializedPyObj,
     const IValue& rrefId,
     const IValue& forkId,
-    const DeviceMap& deviceMap,
+    DeviceMap deviceMap,
     const float rpcTimeoutSeconds,
     const bool isAsyncExecution) {
   auto pythonRemoteCall = std::make_unique<PythonRemoteCall>(
-      std::move(serializedPyObj), rrefId, forkId, isAsyncExecution);
+      std::move(serializedPyObj), rrefId, forkId, isAsyncExecution, std::move(deviceMap));
 
   // set forceGradRecording to true as even if the args does not contain any
   // tensor, the return value might still contain tensors.
@@ -128,7 +128,6 @@ c10::intrusive_ptr<JitFuture> sendPythonRemoteCall(
       *agent,
       dst,
       std::move(*pythonRemoteCall).toMessage(),
-      deviceMap,
       true /*forceGradRecording*/,
       rpcTimeoutSeconds);
 }
@@ -202,20 +201,19 @@ c10::intrusive_ptr<JitFuture> pyRpcBuiltin(
     const std::string& opName,
     const py::args& args,
     const py::kwargs& kwargs,
-    const DeviceMap& deviceMap,
+    DeviceMap deviceMap,
     const float rpcTimeoutSeconds) {
   DCHECK(PyGILState_Check());
   Stack stack;
   auto op = matchBuiltinOp(opName, args, kwargs, stack);
   // Release GIL since args and kwargs processing is done.
   py::gil_scoped_release release;
-  auto scriptCall = std::make_unique<ScriptCall>(op, std::move(stack));
+  auto scriptCall = std::make_unique<ScriptCall>(op, std::move(stack), std::move(deviceMap));
   auto agent = RpcAgent::getCurrentRpcAgent();
   return toPyJitFuture(sendMessageWithAutograd(
       *agent,
       dst,
       std::move(*scriptCall).toMessage(),
-      deviceMap,
       false,
       rpcTimeoutSeconds));
 }
@@ -224,21 +222,20 @@ c10::intrusive_ptr<JitFuture> pyRpcPythonUdf(
     const WorkerInfo& dst,
     std::string& pickledPythonUDF,
     std::vector<torch::Tensor>& tensors,
-    const DeviceMap& deviceMap,
+    DeviceMap deviceMap,
     const float rpcTimeoutSeconds,
     const bool isAsyncExecution) {
   DCHECK(!PyGILState_Check());
   auto serializedPyObj =
       SerializedPyObj(std::move(pickledPythonUDF), std::move(tensors));
   auto pythonCall = std::make_unique<PythonCall>(
-      std::move(serializedPyObj), isAsyncExecution);
+      std::move(serializedPyObj), isAsyncExecution, std::move(deviceMap));
 
   auto agent = RpcAgent::getCurrentRpcAgent();
   return toPyJitFuture(sendMessageWithAutograd(
       *agent,
       dst,
       std::move(*pythonCall).toMessage(),
-      deviceMap,
       true /*forceGradRecording*/,
       rpcTimeoutSeconds));
 }
@@ -248,7 +245,7 @@ c10::intrusive_ptr<JitFuture> pyRpcTorchscript(
     const std::string& qualifiedNameStr,
     const py::tuple& argsTuple,
     const py::dict& kwargsDict,
-    const DeviceMap& deviceMap,
+    DeviceMap deviceMap,
     const float rpcTimeoutSeconds,
     const bool isAsyncExecution) {
   // No need to catch exception here, if function can not be found,
@@ -286,7 +283,7 @@ c10::intrusive_ptr<JitFuture> pyRpcTorchscript(
 PyRRef pyRemoteBuiltin(
     const WorkerInfo& dst,
     const std::string& opName,
-    const DeviceMap& deviceMap,
+    DeviceMap deviceMap,
     const float rpcTimeoutSeconds,
     const py::args& args,
     const py::kwargs& kwargs) {
@@ -304,13 +301,12 @@ PyRRef pyRemoteBuiltin(
     auto userRRef = ctx.createUserRRef(dst.id_, returnType);
 
     auto scriptRemoteCall = std::make_unique<ScriptRemoteCall>(
-        op, std::move(stack), userRRef->rrefId(), userRRef->forkId());
+        op, std::move(stack), userRRef->rrefId(), userRRef->forkId(), std::move(deviceMap));
 
     auto jitFuture = sendMessageWithAutograd(
         *agent,
         dst,
         std::move(*scriptRemoteCall).toMessage(),
-        deviceMap,
         /*forceGradRecord */ false,
         /* timeout */ rpcTimeoutSeconds);
 
@@ -327,12 +323,11 @@ PyRRef pyRemoteBuiltin(
     ctx.addSelfAsFork(ownerRRef);
 
     auto scriptRemoteCall = std::make_unique<ScriptRemoteCall>(
-        op, std::move(stack), ownerRRef->rrefId(), ownerRRef->rrefId());
+        op, std::move(stack), ownerRRef->rrefId(), ownerRRef->rrefId(), std::move(deviceMap));
     auto jitFuture = sendMessageWithAutograd(
         *agent,
         dst,
         std::move(*scriptRemoteCall).toMessage(),
-        deviceMap,
         /* forceGradRecord */ false,
         /* timeout */ rpcTimeoutSeconds);
 
@@ -351,7 +346,7 @@ PyRRef pyRemotePythonUdf(
     const WorkerInfo& dst,
     std::string& pickledPythonUDF,
     std::vector<torch::Tensor>& tensors,
-    const DeviceMap& deviceMap,
+    DeviceMap deviceMap,
     const float rpcTimeoutSeconds,
     const bool isAsyncExecution) {
   DCHECK(!PyGILState_Check());
@@ -408,7 +403,7 @@ PyRRef pyRemotePythonUdf(
 PyRRef pyRemoteTorchscript(
     const std::string& dstWorkerName,
     const std::string& qualifiedNameStr,
-    const DeviceMap& deviceMap,
+    DeviceMap deviceMap,
     const float rpcTimeoutSeconds,
     const bool isAsyncExecution,
     const py::args& args,

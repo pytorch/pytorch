@@ -66,11 +66,18 @@ c10::intrusive_ptr<Message> RpcWithAutograd::toMessageImpl() && {
     deviceMap.insert(mapEntry.first.str(), mapEntry.second.str());
   }
 
+  // Convert deviceMap to c10::Dict for serialization.
+  c10::Dict<std::string, std::string> wrappedDeviceMap;
+  for (const auto& mapEntry : wrappedMessage_->getDeviceMap()) {
+    wrappedDeviceMap.insert(mapEntry.first.str(), mapEntry.second.str());
+  }
+
   std::vector<at::IValue> ivalues{wrappedMessageType,
                                   autogradMetadata_.autogradContextId,
                                   autogradMetadata_.autogradMessageId,
                                   fromWorkerId_,
-                                  deviceMap};
+                                  deviceMap,
+                                  wrappedDeviceMap};
 
   // Now pickle using JIT pickler.
   std::vector<torch::Tensor> tensorTable;
@@ -103,7 +110,7 @@ std::unique_ptr<RpcWithAutograd> RpcWithAutograd::fromMessage(
   auto tupleElements = rpc::readWrappedPayload(payload, message);
 
   // Gather all the fields.
-  TORCH_INTERNAL_ASSERT(tupleElements.size() == 5);
+  TORCH_INTERNAL_ASSERT(tupleElements.size() == 6);
   MessageType wrappedMessageType =
       static_cast<MessageType>(tupleElements[0].toInt());
   AutogradMetadata autogradMetadata(
@@ -117,9 +124,16 @@ std::unique_ptr<RpcWithAutograd> RpcWithAutograd::fromMessage(
     deviceMap.insert({mapEntry.key(), mapEntry.value()});
   }
 
+  auto c10WrappedDeviceMap = tupleElements[5].to<c10::Dict<std::string, std::string>>();
+  // Convert to regular map.
+  std::unordered_map<c10::Device, c10::Device> wrappedDeviceMap;
+  for (const auto& mapEntry : c10WrappedDeviceMap) {
+    wrappedDeviceMap.insert({mapEntry.key(), mapEntry.value()});
+  }
+
   // Create new message type and build wrapped RPC.
   auto wrappedMessage = c10::make_intrusive<Message>(
-      std::move(payload), std::move(tensors), wrappedMessageType, messageId);
+      std::move(payload), std::move(tensors), wrappedMessageType, messageId, std::move(wrappedDeviceMap));
 
   std::unique_ptr<RpcCommandBase> wrappedRpc;
   if (originalMessageType == MessageType::FORWARD_AUTOGRAD_REQ) {

@@ -46,19 +46,23 @@ const RRefId& RRefMessageBase::rrefId() {
   return rrefId_;
 }
 
-c10::intrusive_ptr<Message> RRefMessageBase::toMessageImpl() && {
-  return fromIValues({rrefId_.toIValue()}, type_);
+DeviceMap&& RRefMessageBase::moveDeviceMap() && {
+  return std::move(deviceMap_);
 }
 
-at::IValue RRefMessageBase::fromMessage(
-    const Message& message,
-    MessageType type) {
-  auto values = toIValues(message, type);
+// c10::intrusive_ptr<Message> RRefMessageBase::toMessageImpl() && {
+//   return fromIValues({rrefId_.toIValue()}, type_);
+// }
 
-  TORCH_INTERNAL_ASSERT(
-      values.size() == 1, "ScriptUserDelete expects 1 IValue from message.");
-  return std::move(values.back());
-}
+// at::IValue RRefMessageBase::fromMessage(
+//     const Message& message,
+//     MessageType type) {
+//   auto values = toIValues(message, type);
+
+//   TORCH_INTERNAL_ASSERT(
+//       values.size() == 1, "ScriptUserDelete expects 1 IValue from message.");
+//   return std::move(values.back());
+// }
 
 /////////////////////////// ForkMessageBase //////////////////////////////////
 
@@ -86,9 +90,17 @@ std::pair<RRefId, ForkId> ForkMessageBase::fromMessage(
 
 c10::intrusive_ptr<Message> ScriptRRefFetchCall::toMessageImpl() && {
   std::vector<at::IValue> ivalues;
-  ivalues.reserve(2);
+  ivalues.reserve(3);
   ivalues.emplace_back(rrefId_.toIValue());
   ivalues.emplace_back(fromWorkerId_);
+
+  // Convert deviceMap to c10::Dict for serialization.
+  c10::Dict<std::string, std::string> deviceMap;
+  for (const auto& mapEntry : deviceMap_) {
+    deviceMap.insert(mapEntry.first.str(), mapEntry.second.str());
+  }
+  ivalues.emplace_back(deviceMap);
+
   return fromIValues(std::move(ivalues), MessageType::SCRIPT_RREF_FETCH_CALL);
 }
 
@@ -96,21 +108,37 @@ std::unique_ptr<ScriptRRefFetchCall> ScriptRRefFetchCall::fromMessage(
     const Message& message) {
   auto values = toIValues(message, MessageType::SCRIPT_RREF_FETCH_CALL);
   TORCH_INTERNAL_ASSERT(
-      values.size() == 2, "ScriptRRefFetchCall expects 2 IValues from message");
+      values.size() == 3, "ScriptRRefFetchCall expects 3 IValues from message");
+  
+  auto c10DeviceMap = values[2].to<c10::Dict<std::string, std::string>>();
+  // Convert to regular map.
+  std::unordered_map<c10::Device, c10::Device> deviceMap;
+  for (const auto& mapEntry : c10DeviceMap) {
+    deviceMap.insert({mapEntry.key(), mapEntry.value()});
+  }
+
   auto id = values[1].toInt();
   TORCH_INTERNAL_ASSERT(
       id >= std::numeric_limits<worker_id_t>::min() &&
           id <= std::numeric_limits<worker_id_t>::max(),
       "ScriptRRefFetchCall fromWorkerId exceeds worker_id_t limit.")
   return std::make_unique<ScriptRRefFetchCall>(
-      worker_id_t(id), RRefId::fromIValue(values[0]));
+      worker_id_t(id), RRefId::fromIValue(values[0]), std::move(deviceMap));
 }
 
 c10::intrusive_ptr<Message> PythonRRefFetchCall::toMessageImpl() && {
   std::vector<at::IValue> ivalues;
-  ivalues.reserve(2);
+  ivalues.reserve(3);
   ivalues.emplace_back(rrefId_.toIValue());
   ivalues.emplace_back(fromWorkerId_);
+
+  // Convert deviceMap to c10::Dict for serialization.
+  c10::Dict<std::string, std::string> deviceMap;
+  for (const auto& mapEntry : deviceMap_) {
+    deviceMap.insert(mapEntry.first.str(), mapEntry.second.str());
+  }
+  ivalues.emplace_back(deviceMap);
+
   return fromIValues(std::move(ivalues), MessageType::PYTHON_RREF_FETCH_CALL);
 }
 
@@ -118,14 +146,22 @@ std::unique_ptr<PythonRRefFetchCall> PythonRRefFetchCall::fromMessage(
     const Message& message) {
   auto values = toIValues(message, MessageType::PYTHON_RREF_FETCH_CALL);
   TORCH_INTERNAL_ASSERT(
-      values.size() == 2, "PythonRRefFetchCall expects 2 IValues from message");
+      values.size() == 3, "PythonRRefFetchCall expects 3 IValues from message");
+
+  auto c10DeviceMap = values[2].to<c10::Dict<std::string, std::string>>();
+  // Convert to regular map.
+  std::unordered_map<c10::Device, c10::Device> deviceMap;
+  for (const auto& mapEntry : c10DeviceMap) {
+    deviceMap.insert({mapEntry.key(), mapEntry.value()});
+  }
+
   auto id = values[1].toInt();
   TORCH_INTERNAL_ASSERT(
       id >= std::numeric_limits<worker_id_t>::min() &&
           id <= std::numeric_limits<worker_id_t>::max(),
       "PythonRRefFetchCall fromWorkerId exceeds worker_id_t limit.")
   return std::make_unique<PythonRRefFetchCall>(
-      worker_id_t(id), RRefId::fromIValue(values[0]));
+      worker_id_t(id), RRefId::fromIValue(values[0]), std::move(deviceMap));
 }
 
 const std::vector<at::IValue>& RRefFetchRet::values() {
@@ -136,6 +172,12 @@ c10::intrusive_ptr<Message> RRefFetchRet::toMessageImpl() && {
   return fromIValues(values_, type_);
 }
 
+c10::intrusive_ptr<Message> ScriptRRefFetchRet::toMessageImpl() && {
+  auto res = fromIValues(values_, type_);
+  res->setDeviceMap(std::move(deviceMap_));
+  return res;
+}
+
 std::unique_ptr<ScriptRRefFetchRet> ScriptRRefFetchRet::fromMessage(
     const Message& message) {
   auto values = toIValues(message, MessageType::SCRIPT_RREF_FETCH_RET);
@@ -143,13 +185,13 @@ std::unique_ptr<ScriptRRefFetchRet> ScriptRRefFetchRet::fromMessage(
       values.size() == 1,
       "RRef of IValue should contain a single IValue, but got ",
       values.size());
-  return std::make_unique<ScriptRRefFetchRet>(std::move(values));
+  return std::make_unique<ScriptRRefFetchRet>(std::move(values), DeviceMap());
 }
 
 std::unique_ptr<PythonRRefFetchRet> PythonRRefFetchRet::fromMessage(
     const Message& message) {
   return std::make_unique<PythonRRefFetchRet>(
-      toIValues(message, MessageType::PYTHON_RREF_FETCH_RET));
+      toIValues(message, MessageType::PYTHON_RREF_FETCH_RET), DeviceMap());
 }
 
 std::unique_ptr<RRefUserDelete> RRefUserDelete::fromMessage(

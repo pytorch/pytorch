@@ -16,7 +16,8 @@ class TORCH_API PythonRemoteCall : public RpcCommandBase {
       SerializedPyObj&& serializedPyObj,
       at::IValue retRRefId,
       at::IValue retForkId,
-      const bool isAsyncExecution);
+      const bool isAsyncExecution,
+      DeviceMap&& deviceMap);
 
   inline const SerializedPyObj& serializedPyObj() const {
     return serializedPyObj_;
@@ -42,6 +43,7 @@ class TORCH_API PythonRemoteCall : public RpcCommandBase {
   const at::IValue retRRefId_;
   const at::IValue retForkId_;
   const bool isAsyncExecution_;
+  DeviceMap deviceMap_;
 };
 
 } // namespace rpc

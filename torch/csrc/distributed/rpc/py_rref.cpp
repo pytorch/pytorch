@@ -180,7 +180,7 @@ std::string PyRRef::ownerName() const {
   return rref_->ownerName();
 }
 
-py::object PyRRef::toHere(const float timeoutSeconds, const DeviceMap& deviceMap) const {
+py::object PyRRef::toHere(const float timeoutSeconds, DeviceMap deviceMap) const {
   if (rref_->isOwner()) {
     return localValue(); // TODO(pbelevich) should local value support deviceMap?
   } else {

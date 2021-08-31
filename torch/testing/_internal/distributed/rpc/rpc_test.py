@@ -6549,32 +6549,35 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
 
         rpc.shutdown()
 
-    # @skip_if_lt_x_gpu(3)
-    # def test_device_map_rpc_to_here(self):
-    #     dst = worker_name((self.rank + 1) % self.world_size)
-    #     options = self.rpc_backend_options
-    #     if self.rank == 0:
-    #         options.set_device_map(dst, {"cuda:0": "cuda:1"})
-    #     elif self.rank == 1:
-    #         options.set_devices(["cuda:1", "cuda:2"])
-    #     rpc.init_rpc(
-    #         name=worker_name(self.rank),
-    #         backend=self.rpc_backend,
-    #         rank=self.rank,
-    #         world_size=self.world_size,
-    #         rpc_backend_options=options,
-    #     )
+    @skip_if_lt_x_gpu(3)
+    def test_device_map_rpc_to_here(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        options = self.rpc_backend_options
+        if self.rank == 0:
+            options.set_device_map(dst, {"cuda:0": "cuda:1"})
+            options.set_devices(["cuda:0", "cuda:2"])
+        elif self.rank == 1:
+            options.set_device_map(dst, {"cuda:1": "cuda:0"})
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=options,
+        )
 
-    #     if self.rank == 0:
-    #         self.assertEqual(
-    #             rpc.remote(
-    #                 dst, torch.empty, args=((1,),), kwargs={"device": "cuda:1"}
-    #             ).to_here().device, torch.device("cuda:0")
-    #         )
-    #         self.assertEqual(
-    #             rpc.remote(
-    #                 dst, torch.empty, args=((1,),), kwargs={"device": "cuda:1"}
-    #             ).to_here(device_map={torch.device(2): torch.device(1)}).device, torch.device("cuda:2")
-    #         )
+        if self.rank == 0:
+            self.assertEqual(
+                rpc.remote(
+                    dst, torch.empty, args=((1,),), kwargs={"device": "cuda:1"}
+                ).to_here().device,
+                torch.device("cuda:0")
+            )
+            self.assertEqual(
+                rpc.remote(
+                    dst, torch.empty, args=((1,),), kwargs={"device": "cuda:1"}
+                ).to_here(device_map={torch.device(1): torch.device(2)}).device,
+                torch.device("cuda:2")
+            )
 
-    #     rpc.shutdown()
+        rpc.shutdown()
