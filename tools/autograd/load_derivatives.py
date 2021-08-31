@@ -2,9 +2,9 @@
 #
 # Each autograd function is represented by `DifferentiabilityInfo` containing
 # a list of `Derivative`. See `tools.codegen.api.autograd` for the data models.
-from collections import defaultdict, Counter
+from collections import defaultdict
 import re
-from typing import Sequence, Any, Tuple, List, Set, Dict, Iterable, Match, Optional
+from typing import Sequence, Any, Tuple, List, Set, Counter, Dict, Iterable, Match, Optional
 import yaml
 
 from tools.codegen.api.autograd import (Derivative, DifferentiabilityInfo,
@@ -45,6 +45,14 @@ def load_derivatives(derivatives_yaml_path: str, native_yaml_path: str) -> Seque
 
         # These are possible op names: they will only be used if the
         # function has differentiable arguments.
+        #
+        # To keep it as close to byte-for-byte compatible with the old
+        # codegen, we assign op names as a separate step. We only
+        # assign op names to those with differentiable args, and only
+        # append suffix to duplicated op names. This can be simplified
+        # if the first of the duplicates can be named 'XyzBackward'
+        # instead of 'XyzBackward0' or unconditionally append '0' to
+        # singletons.
         op_names = list(_create_candidate_op_names(definitions))
         assert len(definitions) == len(op_names)
 
