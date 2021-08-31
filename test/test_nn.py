@@ -17438,14 +17438,30 @@ class TestNNDeviceType(NNTestCase):
             m(input)
 
     def test_fold(self, device):
+        def test_dtype(fn, input, dtype):
+            input = input.detach().clone().to(dtype=dtype).requires_grad_(True)
+            input2 = input.detach().clone().float().requires_grad_(True)
+            out = fn(input)
+            out.sum().backward()
+            out2 = fn(input2)
+            out2.sum().backward()
+            self.assertEqual(out.dtype, dtype)
+            self.assertEqual(input.grad.dtype, dtype)
+            self.assertEqual(out, out2.to(dtype=dtype), atol=0.05, rtol=0)
+            self.assertEqual(input.grad, input2.grad.to(dtype=dtype))
+
         def func(x):
             return F.fold(x, output_size=(4, 5), kernel_size=(2, 2))
+
         seeds = (44, 83, 71, 25, 999)
         for sd in seeds:
             torch.manual_seed(sd)
             x = torch.randn(1, 12, 12, device=device, requires_grad=True)
             gradcheck(func, [x])
             gradgradcheck(func, [x])
+            if device == 'cpu':
+                test_dtype(func, x, torch.bfloat16)
+
 
     def test_logsigmoid_out(self, device):
         # this isn't actually documented, but was broken previously:
