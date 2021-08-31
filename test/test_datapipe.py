@@ -299,7 +299,7 @@ class TestIterableDataPipeBasic(TestCase):
         _helper(cached, datapipe4, channel_first=True)
 
     # TODO(VitalyFedyunin): Generates unclosed buffer warning, need to investigate
-    def test_groupbykey_iterable_datapipe(self):
+    def test_groupby_iterable_datapipe(self):
         temp_dir = self.temp_dir.name
         temp_tarfile_pathname = os.path.join(temp_dir, "test_tar.tar")
         file_list = [
@@ -316,13 +316,25 @@ class TestIterableDataPipeBasic(TestCase):
         datapipe1 = dp.iter.FileLister(temp_dir, '*.tar')
         datapipe2 = dp.iter.FileLoader(datapipe1)
         datapipe3 = dp.iter.TarArchiveReader(datapipe2)
-        datapipe4 = dp.iter.ByKeyGrouper(datapipe3, group_size=2)
 
-        expected_result = [("a.png", "a.json"), ("c.png", "c.json"), ("b.png", "b.json"), ("d.png", "d.json"), (
-            "f.png", "f.json"), ("g.png", "g.json"), ("e.png", "e.json"), ("h.json", "h.txt")]
+        def group_fn(data):
+            filepath, _ = data
+            return os.path.basename(filepath).split(".")[0]
+
+        datapipe4 = dp.iter.Grouper(datapipe3, group_key_fn=group_fn, group_size=2)
+
+        def order_fn(data):
+            data.sort(key=lambda f: f[0], reverse=True)
+            return data
+
+        datapipe5 = dp.iter.Mapper(datapipe4, fn=order_fn)  # type: ignore[var-annotated]
+
+        expected_result = [
+            ("a.png", "a.json"), ("c.png", "c.json"), ("b.png", "b.json"), ("d.png", "d.json"),
+            ("f.png", "f.json"), ("g.png", "g.json"), ("e.png", "e.json"), ("h.txt", "h.json")]
 
         count = 0
-        for rec, expected in zip(datapipe4, expected_result):
+        for rec, expected in zip(datapipe5, expected_result):
             count = count + 1
             self.assertEqual(os.path.basename(rec[0][0]), expected[0])
             self.assertEqual(os.path.basename(rec[1][0]), expected[1])
