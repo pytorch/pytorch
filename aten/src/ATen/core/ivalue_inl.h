@@ -264,7 +264,7 @@ struct TORCH_API TupleElements {
     // Don't want to declare a std::array because the convenient
     // iteration and size members are a footgun in this case -- the
     // actual size of the array may be smaller than 3!
-    // NOLINTNEXTLINE(modernize-avoid-c-arrays)
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays)
     IValue elementsInline_[3];
   };
 
@@ -371,6 +371,10 @@ struct TORCH_API TupleElements {
   // Mimic implicit conversion from std::vector to ArrayRef.
   operator c10::ArrayRef<IValue>() const {
     return asArrayRef();
+  }
+
+  static size_t hash(const TupleElements& v) {
+    return c10::hash<c10::ArrayRef<IValue>>()(v.asArrayRef());
   }
 
   void setContents(std::vector<IValue>&& contents) {
@@ -559,10 +563,10 @@ struct TORCH_API Tuple : c10::intrusive_ptr_target {
       const ivalue::Tuple& rhs);
 
  private:
-  Tuple(std::vector<IValue> elements, std::shared_ptr<TupleType> type = nullptr)
+  explicit Tuple(std::vector<IValue> elements, std::shared_ptr<TupleType> type = nullptr)
     : elements_(std::move(elements)), type_(std::move(type)) {}
 
-  Tuple(TupleElements&& elements, std::shared_ptr<TupleType> type = nullptr)
+  explicit Tuple(TupleElements&& elements, std::shared_ptr<TupleType> type = nullptr)
     : elements_(std::move(elements)), type_(std::move(type)) {}
 
   explicit Tuple(IValue&& e1, std::shared_ptr<TupleType> type = nullptr)
@@ -1532,7 +1536,7 @@ c10::optional<T> generic_to(IValue ivalue, _fake_type<c10::optional<T>>) {
 namespace detail {
 template <typename Tuple, std::size_t... INDEX>
 Tuple generic_to_tuple_impl(
-    const std::vector<IValue>& t,
+    const ivalue::TupleElements& t,
     std::index_sequence<INDEX...>) {
   return std::make_tuple(
       t[INDEX].to<typename std::tuple_element<INDEX, Tuple>::type>()...);

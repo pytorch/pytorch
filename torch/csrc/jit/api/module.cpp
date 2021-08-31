@@ -256,7 +256,7 @@ IValue Module::operator()(std::vector<IValue> inputs) {
 
   // call forward pre_hooks
   for (const auto& pre_hook : pre_forward_hooks) {
-    auto tuple_input = c10::ivalue::Tuple::create(std::move(inputs));
+    auto tuple_input = c10::ivalue::Tuple::create(inputs);
     IValue result = Method(_ivalue(), pre_hook)({tuple_input});
     if (!result.isNone()) {
       if (result.isTuple()) {

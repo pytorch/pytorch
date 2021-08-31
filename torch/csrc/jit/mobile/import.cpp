@@ -355,12 +355,12 @@ void BytecodeDeserializer::parseMethods(
       caffe2::serialize::kMinSupportedBytecodeVersion <= model_version &&
           // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
           model_version <= caffe2::serialize::kMaxSupportedBytecodeVersion,
-      "Lite Interpreter verson number does not match. ",
+      "Lite Interpreter version number does not match. ",
       "The model version must be between ",
       caffe2::serialize::kMinSupportedBytecodeVersion,
       " and ",
       caffe2::serialize::kMaxSupportedBytecodeVersion,
-      "But the model version is ",
+      " but the model version is ",
       model_version);
 
   if (debug_handles) {
@@ -420,7 +420,7 @@ void BytecodeDeserializer::parseMethods(
       TORCH_CHECK(
           debug_info_function_name == function_name,
           "The function names in the bytecode table and the debug info table do not match.");
-      const IValue& debug_handles_table = debug_handles_m_tuple[1];
+      IValue& debug_handles_table = debug_handles_m_tuple[1];
       auto debugHandlesElements =
           std::move(*std::move(debug_handles_table).toTuple()).elements();
       debug_handles_list = (expect_field(
@@ -580,13 +580,16 @@ mobile::Module BytecodeDeserializer::deserialize(
   auto bvals = std::move(*readArchive("bytecode", mcu).toTuple()).elements();
 
   c10::optional<c10::ivalue::TupleElements> debug_handles;
+  bool has_debug_handles{false};
   if (reader_->hasRecord("mobile_debug_handles.pkl")) {
     debug_handles =
         std::move(*readArchive("mobile_debug_handles", mcu).toTuple())
             .elements();
+    has_debug_handles = true;
   }
   parseMethods(std::move(bvals), std::move(debug_handles), *mcu);
   auto m = mobile::Module(readArchive("data", mcu).toObject(), mcu);
+  m.setHasDebugHandles(has_debug_handles);
 #if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
   MobileDebugTable debug_table = MobileDebugTable(reader_, compilation_unit_);
   m.setDebugTable(std::move(debug_table));

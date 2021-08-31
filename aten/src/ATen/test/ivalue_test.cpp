@@ -801,7 +801,7 @@ TEST(TupleElementsTest, Resize) {
   std::array<std::vector<IValue>, 3> newContents = {std::vector<IValue>(), std::vector<IValue>({4, 5, 6}), std::vector<IValue>({7, 8, 9, "hello"})};
 
   for (auto factory : factories) {
-    for (auto contents: newContents) {
+    for (const auto& contents : newContents) {
       auto te = factory();
       auto contentsCopy = contents;
       te.setContents(std::move(contentsCopy));
