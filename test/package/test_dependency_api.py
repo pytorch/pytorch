@@ -39,12 +39,12 @@ class TestDependencyAPI(PackageTestCase):
         pdb.set_trace()
 
         # subpackage_0 should be interned, subpackage_1 should not.
-        # self.assertIsNot(package_b.subpackage_0, foo.subpackage_0)
+        self.assertIsNot(package_b.subpackage_0, foo.subpackage_0)
         self.assertIs(package_b.subpackage_1, foo.subpackage_1)
 
         # Check that attribute access still works on selectively interned module.
         self.assertEqual(foo.subpackage_0.result, package_b.subpackage_0.result)
-        self.assertIsNot(foo.subpackage_0.result, package_b.subpackage_0.result)
+        # self.assertIsNot(foo.subpackage_0.result, package_b.subpackage_0.result)
         self.assertEqual(foo.subpackage_1.result, package_b.subpackage_1.result)
         self.assertIs(foo.subpackage_0.result, package_b.subpackage_0.result)
 
