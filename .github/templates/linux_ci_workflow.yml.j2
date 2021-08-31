@@ -53,9 +53,13 @@ jobs:
   !{{ ciflow_config.root_job_name }}:
     runs-on: ubuntu-18.04
     if: ${{ !{{ ciflow_config.root_job_condition }} }}
+    env:
+      LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
     steps:
       - name: noop
         run: echo running !{{ ciflow_config.root_job_name }}
+      - name: print labels
+        run: echo "${LABELS}"
 {%- endif %}
   calculate-docker-image:
     if: ${{ github.repository_owner == 'pytorch' }}
