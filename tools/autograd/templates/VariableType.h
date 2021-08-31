@@ -7,6 +7,7 @@
 #include <c10/util/intrusive_ptr.h>
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/autograd/autograd_not_implemented_fallback.h>
 
 #include <cstdint> // for size_t
 #include <functional> // for function
