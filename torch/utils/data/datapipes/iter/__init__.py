@@ -1,29 +1,28 @@
 from torch.utils.data.datapipes.iter.callable import (
-    CollateIterDataPipe as Collate,
-)
-from torch.utils.data.datapipes.iter.callable import MapIterDataPipe as Map
-from torch.utils.data.datapipes.iter.callable import (
-    TransformsIterDataPipe as Transforms,
+    CollatorIterDataPipe as Collator,
+    MapperIterDataPipe as Mapper,
 )
 from torch.utils.data.datapipes.iter.combinatorics import (
     SamplerIterDataPipe as Sampler,
-)
-from torch.utils.data.datapipes.iter.combinatorics import (
-    ShuffleIterDataPipe as Shuffle,
+    ShufflerIterDataPipe as Shuffler,
 )
 from torch.utils.data.datapipes.iter.combining import (
-    ConcatIterDataPipe as Concat,
+    ConcaterIterDataPipe as Concater,
+    ZipperIterDataPipe as Zipper,
 )
-from torch.utils.data.datapipes.iter.combining import ZipIterDataPipe as Zip
 from torch.utils.data.datapipes.iter.dataframes import (
-    DFIterDataPipe as DFIterDataPipe,
+    DFIterDataPipe,
 )
-from torch.utils.data.datapipes.iter.grouping import BatchIterDataPipe as Batch
-from torch.utils.data.datapipes.iter.grouping import (
-    BucketBatchIterDataPipe as BucketBatch,
+from torch.utils.data.datapipes.iter.filelister import (
+    FileListerIterDataPipe as FileLister,
+)
+from torch.utils.data.datapipes.iter.fileloader import (
+    FileLoaderIterDataPipe as FileLoader,
 )
 from torch.utils.data.datapipes.iter.grouping import (
-    GroupByKeyIterDataPipe as GroupByKey,
+    BatcherIterDataPipe as Batcher,
+    BucketBatcherIterDataPipe as BucketBatcher,
+    ByKeyGrouperIterDataPipe as ByKeyGrouper,
 )
 from torch.utils.data.datapipes.iter.httpreader import (
     HTTPReaderIterDataPipe as HttpReader,

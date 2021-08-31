@@ -6,7 +6,7 @@ from torch.utils.data import (
 )
 
 try:
-    import pandas
+    import pandas  # pandas used only for prototyping, will be shortly replaced with TorchArrow
     WITH_PANDAS = True
 except ImportError:
     WITH_PANDAS = False
@@ -25,6 +25,12 @@ class DataChunkDF(DataChunk):
         for df in self.items:
             for record in df.to_records(index=False):
                 yield record
+
+    def __len__(self):
+        total_len = 0
+        for df in self.items:
+            total_len += len(df)
+        return total_len
 
 
 class DataFrameTracedOps(DFIterDataPipe):
@@ -48,7 +54,7 @@ class DataFramesAsTuplesPipe(IterDataPipe):
                 yield record
 
 
-@functional_datapipe('dataframes_per_row', is_df=True)
+@functional_datapipe('dataframes_per_row', enable_df_api_tracing=True)
 class PerRowDataFramesPipe(DFIterDataPipe):
     def __init__(self, source_datapipe):
         self.source_datapipe = source_datapipe
@@ -59,7 +65,7 @@ class PerRowDataFramesPipe(DFIterDataPipe):
                 yield df[i:i + 1]
 
 
-@functional_datapipe('dataframes_concat', is_df=True)
+@functional_datapipe('dataframes_concat', enable_df_api_tracing=True)
 class ConcatDataFramesPipe(DFIterDataPipe):
     def __init__(self, source_datapipe, batch=3):
         self.source_datapipe = source_datapipe
@@ -78,7 +84,7 @@ class ConcatDataFramesPipe(DFIterDataPipe):
             yield pandas.concat(buffer)
 
 
-@functional_datapipe('dataframes_shuffle', is_df=True)
+@functional_datapipe('dataframes_shuffle', enable_df_api_tracing=True)
 class ShuffleDataFramesPipe(DFIterDataPipe):
     def __init__(self, source_datapipe):
         self.source_datapipe = source_datapipe
@@ -104,7 +110,7 @@ class ShuffleDataFramesPipe(DFIterDataPipe):
             yield pandas.concat(buffer)
 
 
-@functional_datapipe('dataframes_filter', is_df=True)
+@functional_datapipe('dataframes_filter', enable_df_api_tracing=True)
 class FilterDataFramesPipe(DFIterDataPipe):
     def __init__(self, source_datapipe, filter_fn):
         self.source_datapipe = source_datapipe
@@ -134,7 +140,7 @@ class FilterDataFramesPipe(DFIterDataPipe):
             yield pandas.concat(buffer)
 
 
-@functional_datapipe('to_dataframes_pipe', is_df=True)
+@functional_datapipe('to_dataframes_pipe', enable_df_api_tracing=True)
 class ExampleAggregateAsDataFrames(DFIterDataPipe):
     def __init__(self, source_datapipe, dataframe_size=10, columns=None):
         self.source_datapipe = source_datapipe

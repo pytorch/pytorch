@@ -5,7 +5,7 @@ from torch.utils.data import DataChunk, IterDataPipe, functional_datapipe
 from .callable import MapperIterDataPipe
 
 try:
-    import pandas
+    import pandas  # pandas used only for prototyping, will be shortly replaced with TorchArrow
     WITH_PANDAS = True
 except ImportError:
     WITH_PANDAS = False
@@ -86,7 +86,7 @@ class FilterIterDataPipe(MapperIterDataPipe):
                     return None
 
         if not isinstance(condition, bool):
-            raise ValueError("Boolean output is required for `filter_fn` of FilterIterDataPipe", type(condition))
+            raise ValueError("Boolean output is required for `filter_fn` of FilterIterDataPipe, got", type(condition))
         if condition:
             return data
 
