@@ -75,10 +75,12 @@ Elaborating Further:
 
 If you use NumPy, then you have used Tensors (a.k.a. ndarray).
 
+
 ![Tensor illustration](./docs/source/_static/img/tensor_illustration.png)
 
 PyTorch provides Tensors that can live either on the CPU or the GPU and accelerates the
 computation by a huge amount.
+
 
 We provide a wide variety of tensor routines to accelerate and fit your scientific computation needs
 such as slicing, indexing, math operations, linear algebra, reductions.
@@ -98,6 +100,7 @@ from several research papers on this topic, as well as current and past work suc
 [torch-autograd](https://github.com/twitter/torch-autograd),
 [autograd](https://github.com/HIPS/autograd),
 [Chainer](https://chainer.org), etc.
+
 
 While this technique is not unique to PyTorch, it's one of the fastest implementations of it to date.
 You get the best of speed and flexibility for your crazy research.
@@ -120,6 +123,7 @@ When you execute a line of code, it gets executed. There isn't an asynchronous v
 When you drop into a debugger or receive error messages and stack traces, understanding them is straightforward.
 The stack trace points to exactly where your code was defined.
 We hope you never spend hours debugging your code because of bad stack traces or asynchronous and opaque execution engines.
+
 
 ### Fast and Lean
 
