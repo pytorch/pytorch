@@ -5,6 +5,8 @@
 #include <ATen/native/Pool.h>
 #include <ATen/native/cpu/utils.h>
 
+#include <iostream>
+
 namespace at { namespace native {
 
 namespace {

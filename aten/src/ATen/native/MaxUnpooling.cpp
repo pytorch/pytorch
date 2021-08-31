@@ -45,7 +45,10 @@ Tensor& max_unpooling2d_forward_out_cpu(
   }
   output.zero_();
 
-  max_unpool2d_kernel(kCPU, output, self, indices);
+  if (output.numel() != 0) {
+    max_unpool2d_kernel(kCPU, output, self, indices);
+  }
+
   return output;
 };
 
@@ -161,8 +164,10 @@ Tensor& max_unpooling3d_forward_out_cpu(const Tensor& self_,
     output.resize_({self.size(0), oT, oH, oW});
   }
   output.zero_();
+  if (output.numel() != 0) {
+    max_unpool3d_kernel(kCPU, output, self, indices);
+  }
 
-  max_unpool3d_kernel(kCPU, output, self, indices);
   return output;
 }
 
@@ -216,7 +221,10 @@ Tensor& max_unpooling2d_backward_out_cpu(const Tensor& grad_output_,
         grad_output.size(dimw));
   }
 
-  max_unpool2d_backward_kernel(kCPU, grad_input, grad_output, indices);
+  if (grad_input.numel() != 0) {
+    max_unpool2d_backward_kernel(kCPU, grad_input, grad_output, indices);
+  }
+
   return grad_input;
 }
 
@@ -275,7 +283,10 @@ Tensor& max_unpooling3d_backward_out_cpu(
         grad_output.size(dimw));
   }
 
-  max_unpool3d_backward_kernel(kCPU, grad_input, grad_output, indices);
+  if (grad_input.numel() != 0) {
+    max_unpool3d_backward_kernel(kCPU, grad_input, grad_output, indices);
+  }
+
   return grad_input;
 }
 

@@ -13793,25 +13793,26 @@ class TestNNDeviceType(NNTestCase):
         unpool_out = unpool(output, indices)
         unpool_out.sum().backward()
 
-        self.assertEqual(output, torch.zeros_like(output))
-        print(unpool_out)
+        self.assertEqual(inp.grad, torch.zeros_like(inp))
 
         pool = torch.nn.MaxPool2d(2, stride=2, return_indices=True).to(device)
         unpool = torch.nn.MaxUnpool2d(2, stride=2).to(device)
         inp = torch.randn(0, 10, 10, 10, requires_grad=True, device=device)
         output, indices = pool(inp)
-        unpool(output, indices).sum().backward()
+        unpool_out = unpool(output, indices)
+        unpool_out.sum().backward()
 
-        self.assertEqual(output, torch.zeros_like(output))
+        self.assertEqual(inp.grad, torch.zeros_like(inp))
 
         pool = torch.nn.MaxPool3d(2, stride=2, return_indices=True).to(device)
         unpool = torch.nn.MaxUnpool3d(2, stride=2).to(device)
         inp = torch.randn(0, 10, 10, 10, 10, requires_grad=True, device=device)
         output, indices = pool(inp)
         output.requires_grad_(True)
-        unpool(output, indices).sum().backward()
+        unpool_out = unpool(output, indices)
+        unpool_out.sum().backward()
 
-        self.assertEqual(output, torch.zeros_like(output))
+        self.assertEqual(inp.grad, torch.zeros_like(inp))
 
     @onlyOnCPUAndCUDA
     def test_AdaptiveMaxPool_zero_batch_dim(self, device):
