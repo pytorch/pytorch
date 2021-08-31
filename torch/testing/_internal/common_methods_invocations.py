@@ -5059,10 +5059,17 @@ def sample_inputs_where(op_info, device, dtype, requires_grad, **kwargs):
              ((M, 1, M), (), (M, M, 1), True),
              ((), (M, M), (), True),)
 
+    cases_scalar = (((S, S), (S, S), 0.5, False),
+                    ((S, 1, S), (S, S), 0.5, True),
+                    ((), (), 0.5, False),
+                    ((S, 1, S), (), 0.5, True),
+                    ((), (S, S), 0.2, True),)
+
     def generator():
-        for shape, mask_shape, other_shape, broadcasts_input in cases:
+        for shape, mask_shape, other_shape_or_val, broadcasts_input in cases + cases_scalar:
+            other = other_shape_or_val if isinstance(other_shape_or_val, float) else make_arg(other_shape_or_val)
             yield SampleInput(make_arg(shape),
-                              args=(make_bool_mask(mask_shape), make_arg(other_shape)),
+                              args=(make_bool_mask(mask_shape), other),
                               broadcasts_input=broadcasts_input)
 
     return list(generator())
