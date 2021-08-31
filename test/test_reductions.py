@@ -10,10 +10,10 @@ import warnings
 
 from torch._six import inf, nan
 from torch.testing import (
-    integral_types_and, floating_and_complex_types_and, get_all_dtypes)
+    integral_types_and, floating_and_complex_types_and, get_all_dtypes, make_tensor)
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, skipIfNoSciPy, slowTest, torch_to_numpy_dtype_dict,
-    IS_WINDOWS, make_tensor)
+    IS_WINDOWS)
 from torch.testing._internal.common_device_type import (
     OpDTypes, instantiate_device_type_tests, onlyCPU, dtypes, dtypesIfCUDA, dtypesIfCPU,
     onlyOnCPUAndCUDA, onlyCUDA, largeTensorTest, ops, precisionOverride)

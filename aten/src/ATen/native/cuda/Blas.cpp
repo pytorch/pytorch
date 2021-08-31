@@ -66,12 +66,12 @@ c10::MaybeOwned<Tensor> prepare_batch_matrix_for_cublas(const Tensor& tensor, bo
     (tensor_strides[leading_dim] >= std::max<int64_t>(1, m))) {
     transpose_tensor = false;
     tensor_ = resolve_conj_if_indicated(tensor, true);
-    ld_tensor = tensor_strides[leading_dim];
+    ld_tensor = tensor_->strides()[leading_dim];
   } else if ((tensor_strides[leading_dim] == 1) &&
     (tensor_strides[fast_dim] >= std::max<int64_t>(1, n))) {
     transpose_tensor = true;
     tensor_ = resolve_conj_if_indicated(tensor, false);
-    ld_tensor = tensor_strides[fast_dim];
+    ld_tensor = tensor_->strides()[fast_dim];
   } else {
     transpose_tensor = !transpose_result;
     // gemm call requires leading dimension and stride parameters to be non-zero

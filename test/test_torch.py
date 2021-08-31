@@ -27,13 +27,14 @@ from torch._six import inf, nan, string_classes
 from itertools import product, combinations, permutations
 from functools import partial
 from torch import multiprocessing as mp
+from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
     TestCase, TEST_WITH_ROCM, run_tests,
     IS_WINDOWS, IS_FILESYSTEM_UTF8_ENCODING, NO_MULTIPROCESSING_SPAWN,
     do_test_dtypes, IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, load_tests, slowTest,
     skipCUDAMemoryLeakCheckIf, BytesIOContext, noarchTest,
     skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
-    wrapDeterministicFlagAPITest, DeterministicGuard, CudaSyncGuard, make_tensor)
+    wrapDeterministicFlagAPITest, DeterministicGuard, CudaSyncGuard)
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -6019,9 +6020,9 @@ else:
             out_dc = torch.empty(size * size, device=device)[::2]
             for v, m in product(vals_list, mask_list):
                 if m.is_contiguous():
-                    expected = v[:, ::2].clone().view(-1)
+                    expected = v[:, ::2].clone().reshape((-1, ))
                 else:
-                    expected = v[::2].clone().view(-1)
+                    expected = v[::2].clone().reshape((-1, ))
                 out = torch.masked_select(v, m)
                 self.assertEqual(out, expected, atol=0, rtol=0)
                 torch.masked_select(v, m, out=out_dc)
