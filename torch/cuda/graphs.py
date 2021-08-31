@@ -53,7 +53,6 @@ class CUDAGraph(torch._C._CUDAGraph):
         # I'm not sure if pybind11 converts a None arg to the default defined on the C++ side,
         # so I'm not taking any chances.
         if pool is None:
-            print("pool was None")
             super(CUDAGraph, self).capture_begin()
         else:
             super(CUDAGraph, self).capture_begin(pool)
