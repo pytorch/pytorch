@@ -175,11 +175,11 @@ parser.add_argument('--import-slow-tests', type=str, nargs='?', const=SLOW_TESTS
 parser.add_argument('--import-disabled-tests', type=str, nargs='?', const=DISABLED_TESTS_FILE)
 
 # Only run when -h or --help flag is active to display both unittest and parser help messages.
-def run_help_main(argv):
+def run_unittest_help(argv):
     unittest.main(argv=argv)
 
 if '-h' in sys.argv or '--help' in sys.argv:
-    help_thread = threading.Thread(target=run_help_main, args=(sys.argv,))
+    help_thread = threading.Thread(target=run_unittest_help, args=(sys.argv,))
     help_thread.start()
     help_thread.join()
 
