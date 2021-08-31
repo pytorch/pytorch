@@ -1,5 +1,5 @@
 import os
-from typing import List, Dict, Optional, Tuple, Set, Callable, Any, Union, Sequence, TypeVar
+from typing import List, Dict, Optional, Tuple, Set, Callable, Any, Union, Sequence, TypeVar, Iterable
 from typing_extensions import Literal
 import yaml
 from collections import OrderedDict, defaultdict, namedtuple
@@ -464,7 +464,7 @@ def compute_meta_function_declaration(g: NativeFunctionsGroup) -> Optional[str]:
             # precomputed element. Each parameter is true if the corresponding (in
             # terms of position) precomputed element has been set.
             precomputed_elements = [elem for replace_list in precomputed.replace.values() for elem in replace_list]
-            precomputed_template_parameters = [chr(ord('A') + i) for i in range(len(precomputed_elements))]
+            precomputed_template_parameters = [elem.name.upper() for elem in precomputed_elements]
             precomputed_template_params_str = ", ".join(f"bool {param} = false" for param in precomputed_template_parameters)
             precompute_template_decl = f"template <{precomputed_template_params_str}>"
 
@@ -500,7 +500,8 @@ def compute_meta_function_declaration(g: NativeFunctionsGroup) -> Optional[str]:
                 # element that is set by this method is false on the
                 # class corresponding to the object that `this` points to.
                 # This ensures that each element can be set only once.
-                assert_stmt = f"TORCH_INTERNAL_ASSERT({precomputed_template_parameters[i]} == false);"
+                assert_msg = f"\"{precomputed_elements[i].name} already set\""
+                assert_stmt = f"static_assert({precomputed_template_parameters[i]} == false && {assert_msg});"
 
                 # Generate the new object construction block. All state
                 # except the element that this method sets is copied from the
@@ -946,7 +947,7 @@ class FileManager:
     def write_sharded(
             self,
             filename: str,
-            items: List[T],
+            items: Iterable[T],
             *,
             key_fn: Callable[[T], str],
             env_callable: Callable[[T], Dict[str, List[str]]],
@@ -1184,13 +1185,11 @@ def main() -> None:
 
         fm.write_with_template(f'Register{dispatch_key}.cpp', 'RegisterDispatchKey.cpp', lambda: {
             'extra_cuda_headers': extra_cuda_headers if is_cuda_dispatch_key(dispatch_key) else '',
-            'legacy_th_headers':
-                '#include <ATen/LegacyTHFunctionsCUDA.h>' if dispatch_key == DispatchKey.CUDA else
-                '',
             'external_backend_headers': '',
             'namespaced_headers': f'#include <ATen/{dispatch_key}Functions.h>' if dispatch_key in functions_keys else '',
             'DispatchKey': dispatch_key,
             'dispatch_namespace': dispatch_key.lower(),
+            'dispatch_helpers': dest.gen_registration_helpers(backend_indices[dispatch_key]),
             'dispatch_namespaced_definitions': list(concatMap(
                 dest.RegisterDispatchKey(
                     backend_indices[dispatch_key],

@@ -185,13 +185,13 @@ void AccessInfo::dumpDOT(std::ostream& os) const {
     if (bounds_.size() > 0) {
       for (size_t i = 0; i < bounds_.size() - 1; ++i) {
         os << *IRSimplifier::simplify(
-                  alloc<Add>(bounds_[i].end, alloc<IntImm>(1)))
+                  alloc<Add>(bounds_[i].end, immLike(bounds_[i].end, 1)))
            << ", ";
       }
 
       size_t i = bounds_.size() - 1;
       os << *IRSimplifier::simplify(
-          alloc<Add>(bounds_[i].end, alloc<IntImm>(1)));
+          alloc<Add>(bounds_[i].end, immLike(bounds_[i].end, 1)));
       os << "]\"\n ";
     }
     if (isWrite()) {
@@ -632,7 +632,7 @@ bool executionSafetyCheck(
     // Invert the startDiff so mod works.
     if (diffNegative != strideNegative) {
       startDiff =
-          IRSimplifier::simplify(alloc<Sub>(alloc<IntImm>(0), startDiff));
+          IRSimplifier::simplify(alloc<Sub>(immLike(startDiff, 0), startDiff));
     }
 
     // If both accesses have the same stride, and the difference in start
@@ -650,7 +650,7 @@ bool executionSafetyCheck(
     CompareSelectOperation op = strideNegative ? kLT : kGT;
 
     ExprPtr check = IRSimplifier::simplify(
-        alloc<CompareSelect>(startDiff, alloc<IntImm>(0), op));
+        alloc<CompareSelect>(startDiff, immLike(startDiff, 0), op));
 
     // If the start difference modulo the minimum stride is offset from that
     // stride, then the ranges have distinct strides.
@@ -731,7 +731,7 @@ void MemDependencyChecker::visit(ForPtr v) {
     for (const auto i : c10::irange(indices.size())) {
       VarFinder vf;
       if (vf.find(indices[i]).count(var) == 0) {
-        loopIndicesStride[i] = alloc<IntImm>(0);
+        loopIndicesStride[i] = immLike(indices[i], 0);
       } else {
         // If we've previously swapped the start and end of this bound, we
         // should apply the substitution to the reverse of the bounds.
@@ -740,19 +740,19 @@ void MemDependencyChecker::visit(ForPtr v) {
               SubstituteInClone(info->bounds()[i].end, {{var, v->start()}}));
           info->bounds()[i].start = IRSimplifier::simplify(SubstituteInClone(
               info->bounds()[i].start,
-              {{var, alloc<Sub>(v->stop(), alloc<IntImm>(1))}}));
+              {{var, alloc<Sub>(v->stop(), immLike(v->stop(), 1))}}));
 
         } else {
           info->bounds()[i].start = IRSimplifier::simplify(
               SubstituteInClone(info->bounds()[i].start, {{var, v->start()}}));
           info->bounds()[i].end = IRSimplifier::simplify(SubstituteInClone(
               info->bounds()[i].end,
-              {{var, alloc<Sub>(v->stop(), alloc<IntImm>(1))}}));
+              {{var, alloc<Sub>(v->stop(), immLike(v->stop(), 1))}}));
         }
 
         ExprPtr zeroStep = indices[i];
         ExprPtr oneStep = SubstituteInClone(
-            indices[i], {{var, alloc<Add>(var, alloc<IntImm>(1))}});
+            indices[i], {{var, alloc<Add>(var, immLike(var, 1))}});
         loopIndicesStride[i] =
             IRSimplifier::simplify(alloc<Sub>(oneStep, zeroStep));
 
@@ -785,7 +785,7 @@ void MemDependencyChecker::visit(ForPtr v) {
         bound.start = IRSimplifier::simplify(
             SubstituteInClone(bound.start, {{var, v->start()}}));
         bound.end = IRSimplifier::simplify(SubstituteInClone(
-            bound.end, {{var, alloc<Sub>(v->stop(), alloc<IntImm>(1))}}));
+            bound.end, {{var, alloc<Sub>(v->stop(), immLike(v->stop(), 1))}}));
 
         // If the start < end then swap the order of the bound.
         ExprPtr diff =
@@ -1037,8 +1037,8 @@ void MemDependencyChecker::insertBuffers(
     IndexBounds bounds;
     for (auto d : b->dims()) {
       bounds.push_back(
-          {alloc<IntImm>(0),
-           IRSimplifier::simplify(alloc<Sub>(d, alloc<IntImm>(1)))});
+          {immLike(d, 0),
+           IRSimplifier::simplify(alloc<Sub>(d, immLike(d, 1)))});
     }
     auto info =
         std::make_shared<AccessInfo>(nextAccess_++, type, nullptr, var, bounds);
@@ -1126,8 +1126,9 @@ void MemDependencyChecker::visit(AllocatePtr v) {
   // avoid failing the bound check. But this is not the correct approach and
   // should be fixed.
   ExprPtr flat_size = buf_flat_size(v->buf());
-  flat_size = IRSimplifier::simplify(alloc<Sub>(flat_size, alloc<IntImm>(1)));
-  bounds.push_back({alloc<IntImm>(0), flat_size});
+  flat_size =
+      IRSimplifier::simplify(alloc<Sub>(flat_size, immLike(flat_size, 1)));
+  bounds.push_back({immLike(flat_size, 0), flat_size});
 
   auto info = std::make_shared<AccessInfo>(
       nextAccess_++, AccessType::Alloc, nullptr, var, bounds);
