@@ -752,6 +752,12 @@ const auto append_tensor_script = R"JIT(
       return lst
 )JIT";
 
+const auto nonzero_tensor = R"JIT(
+  def forward(self, input: Tensor):
+      a = torch.nonzero(input).clone()
+      return (a)
+)JIT";
+
 const std::string quantize_script = R"IR(
   graph(%input: Tensor, %weights: Tensor):
       %scale: float = prim::Constant[value=1.]()
