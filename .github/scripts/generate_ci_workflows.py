@@ -434,7 +434,6 @@ LINUX_WORKFLOWS = [
         on_pull_request=True,
         num_test_shards=2,
         distributed_test=False,
-        enable_xla_test=1,
         enable_noarch_test=1,
         ciflow_config=CIFlowConfig(
             enabled=True,
