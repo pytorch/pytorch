@@ -393,31 +393,32 @@ kernel void clamp(texture2d_array<half, access::read> in_arr[[texture(0), functi
     }
 }
 
-kernel void hardswish(texture2d_array<half, access::read> in[[texture(0)]],
-                      texture2d_array<half, access::write> out[[texture(1)]],
+constant bool hardswish_is_arr = (ushort_arg_0 > 1 || ushort_arg_1 > 4);
+constant bool hardswish_is_tex = !hardswish_is_arr;
+kernel void hardswish(texture2d_array<half, access::read> in_arr[[texture(0), function_constant(hardswish_is_arr)]],
+                      texture2d<half, access::read> in_tex[[texture(0), function_constant(hardswish_is_tex)]],
+                      texture2d_array<half, access::write> out_arr[[texture(1), function_constant(hardswish_is_arr)]],
+                      texture2d<half, access::write> out_tex[[texture(1), function_constant(hardswish_is_tex)]],
                       ushort3 gid[[thread_position_in_grid]]) {
-    if (gid.x >= out.get_width() || gid.y >= out.get_height()) {
+    const ushort oH = ushort_arg_2;
+    const ushort oW = ushort_arg_3;
+    if (gid.x >= oW || gid.y >= oH) {
         return;
     }
     ushort2 gid_ = gid.xy;
-    half4 value = in.read(gid_, gid.z);
-    half4 mask1 = half4(value < 3.0);
-    half4 mask2 = half4(value > -3.0);
-    half4 outval = mask2*(mask1*(value*(value + 3.0)/6.0) + (1 - mask1)*value);
-    out.write(outval, gid_, gid.z);
-}
-
-kernel void hardswish_nonarray(texture2d<half, access::read> in[[texture(0)]],
-                               texture2d<half, access::write> out[[texture(1)]],
-                               ushort2 gid[[thread_position_in_grid]]) {
-    if (gid.x >= out.get_width() || gid.y >= out.get_height()) {
-        return;
+    if (hardswish_is_arr) {
+      half4 value = in_arr.read(gid_, gid.z);
+      half4 mask1 = half4(value < 3.0);
+      half4 mask2 = half4(value > -3.0);
+      half4 outval = mask2*(mask1*(value*(value + 3.0)/6.0) + (1 - mask1)*value);
+      out_arr.write(outval, gid_, gid.z);
+    } else {
+      half4 value = in_tex.read(gid_);
+      half4 mask1 = half4(value < 3);
+      half4 mask2 = half4(value > -3.0);
+      half4 outval = mask2*(mask1*(value*(value + 3.0)/6.0) + (1 - mask1)*value);
+      out_tex.write(outval, gid_);
     }
-    half4 value = in.read(gid);
-    half4 mask1 = half4(value < 3);
-    half4 mask2 = half4(value > -3.0);
-    half4 outval = mask2*(mask1*(value*(value + 3.0)/6.0) + (1 - mask1)*value);
-    out.write(outval, gid);
 }
 
 constant bool out_is_arr = (ushort_arg_3 > 1 || ushort_arg_2 > 4);
