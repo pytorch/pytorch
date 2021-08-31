@@ -14,6 +14,20 @@ namespace nn {
 /// ```
 /// Linear model(LinearOptions(5, 2).bias(false));
 /// ```
+struct TORCH_API BiasOptions {
+  explicit BiasOptions(int64_t num_features);
+  /// size of each input sample
+  TORCH_ARG(int64_t, num_features);
+};
+
+// ============================================================================
+
+/// Options for the `Linear` module.
+///
+/// Example:
+/// ```
+/// Linear model(LinearOptions(5, 2).bias(false));
+/// ```
 struct TORCH_API LinearOptions {
   LinearOptions(int64_t in_features, int64_t out_features);
   /// size of each input sample

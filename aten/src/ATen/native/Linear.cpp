@@ -41,6 +41,15 @@ Tensor linear(const Tensor& input, const Tensor& weight, const c10::optional<Ten
   return output;
 }
 
+Tensor bias(const Tensor& input, const Tensor& bias) {
+  TORCH_CHECK(bias.dim() == 1,
+	      "torch.nn.functional.bias: bias must be 1D tensor");
+  TORCH_CHECK(input.size(-1) == bias.size(0),
+	      "torch.nn.functional.bias: bias cardinality must match "
+	      "cardinality of input's last dimension");
+  return input.add(bias);
+}
+
 // sumproduct_pair computes `(left*right).sum(sumdims)` by means of permutation and
 // batch matrix multiplication
 // its main purpose is to provide a pairwise reduction for einsum

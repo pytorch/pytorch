@@ -13348,6 +13348,27 @@ class TestNNDeviceType(NNTestCase):
             out.backward(g)
             self.assertEqual(x.grad[:, :, 1:-1, 1:-1, 1:-1], g[:, :, pf + 1 : -pbk - 1, pt + 1 : -pbt - 1, pl + 1 : -pr - 1])
 
+    def test_bias(self, device):
+        m = nn.Bias(5, device=device)
+        inp = torch.randn(2, 3, 5, device=device)
+        expected = inp + m.bias
+        self.assertEqual(expected, m(inp))
+
+    def test_bias_empty(self, device):
+        m = nn.Bias(0, device=device)
+        inp = torch.randn(2, 3, 0, device=device)
+        expected = inp + m.bias
+        self.assertEqual(expected, m(inp))
+
+    def test_bias_dimension_mismatch(self, device):
+        m = nn.Bias(4, device=device)
+        inp = torch.randn(2, 3, 5,  # uh-oh, last dimension ought to be 4
+                          device=device)
+
+        with self.assertRaisesRegex(RuntimeError,
+                                    'bias cardinality must match'):
+            m(inp)
+
     @onlyOnCPUAndCUDA
     def test_Bilinear_empty(self, device):
         mod = torch.nn.Bilinear(20, 30, 40).to(device)

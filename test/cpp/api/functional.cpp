@@ -1234,6 +1234,24 @@ TEST_F(FunctionalTest, LocalResponseNorm) {
   ASSERT_TRUE(torch::allclose(y, y_exp, 1e-4, 1e-7));
 }
 
+TEST_F(FunctionalTest, Bias) {
+  const auto input = torch::tensor({2.0, 3.0});
+  const auto bias = torch::tensor({5.0, 7.0});
+  const auto result = F::bias(input, bias);
+  const auto expected = torch::tensor({7.0, 10.0});
+  torch::test::assert_tensor_equal(result, expected);
+}
+
+TEST_F(FunctionalTest, BiasBroadcast) {
+  const auto input = torch::tensor({{2.0, 3.0},
+				    {5.0, 7.0}});
+  const auto bias = torch::tensor({11.0, 13.0});
+  const auto result = F::bias(input, bias);
+  const auto expected = torch::tensor({{13.0, 16.0},
+				       {16.0, 20.0}});
+  torch::test::assert_tensor_equal(result, expected);
+}
+
 TEST_F(FunctionalTest, Linear) {
   {
     const auto x = torch::arange(100., 118).resize_({3, 3, 2});

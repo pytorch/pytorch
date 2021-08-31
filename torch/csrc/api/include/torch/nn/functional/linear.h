@@ -12,6 +12,12 @@ inline Tensor bilinear(const Tensor& input1, const Tensor& input2, const Tensor&
 
 // ============================================================================
 
+inline Tensor bias(const Tensor& input, const Tensor& bias) {
+  return torch::bias(input, bias);
+}
+
+// ============================================================================
+
 inline Tensor linear(const Tensor& input, const Tensor& weight,
                      const Tensor& bias = {}) {
   if (input.dim() == 2 && bias.defined()) {

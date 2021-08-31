@@ -100,6 +100,15 @@ def get_weight(m):
 
 module_tests = [
     dict(
+        module_name='Bias',
+        constructor_args=(10,),
+        cpp_constructor_args='torch::nn::BiasOptions(10)',
+        input_size=(4, 10),
+        reference_fn=lambda i, p, _: i + p[0],  # p[0] is bias
+        with_tf32=True,
+        tf32_precision=0.005,
+    ),
+    dict(
         module_name='Linear',
         constructor_args=(10, 8),
         cpp_constructor_args='torch::nn::LinearOptions(10, 8)',

@@ -4642,6 +4642,22 @@ def sample_inputs_atan2(op_info, device, dtype, requires_grad, **kwargs):
     return list(generator())
 
 
+def sample_inputs_bias(op_info, device, dtype, requires_grad) -> List[SampleInput]:
+    def generator():
+        SHAPES = [(S,), (S, S), (S, S, S), (S, S, S, S), (L, M, S), (S, M, L)]
+
+        make_arg = partial(make_tensor, device=device, dtype=dtype,
+                           requires_grad=requires_grad)
+
+        for shape in SHAPES:
+            bias_shape = (shape[-1],)
+            input = make_arg(shape)
+            bias = make_arg(bias_shape)
+            yield SampleInput(input, args=(bias,))
+
+    return list(generator())
+
+
 def sample_inputs_split(op_info, device, dtype, requires_grad, *, list_args=False, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -7074,6 +7090,17 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_max_min_binary,),
+    OpInfo('nn.functional.bias',
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           sample_inputs_func=sample_inputs_bias,
+           skips=(
+               # RuntimeError: aliasOp != torch::jit::getOperatorAliasMap().end()
+               # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":159,
+               # please report a bug to PyTorch.
+               SkipInfo('TestJit', 'test_variant_consistency_jit'),
+           ),
+           supports_out=False,
+           supports_forward_ad=True),
     # `softmax` supports different dtypes based on whether `dtype` argument,
     # is passed or not. Hence two OpInfo entries, one with dtype and other without.
     OpInfo('softmax',

@@ -3,6 +3,9 @@
 namespace torch {
 namespace nn {
 
+BiasOptions::BiasOptions(int64_t num_features)
+ : num_features_(num_features) {}
+
 LinearOptions::LinearOptions(int64_t in_features, int64_t out_features)
  : in_features_(in_features), out_features_(out_features) {}
 

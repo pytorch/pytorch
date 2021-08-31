@@ -35,6 +35,52 @@ class TORCH_API IdentityImpl : public Cloneable<IdentityImpl> {
 /// module storage semantics.
 TORCH_MODULE(Identity);
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Bias ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies a linear transformation with optional bias.
+/// See https://pytorch.org/docs/master/generated/torch.nn.Linear.html to learn
+/// about the exact behavior of this module.
+///
+/// See the documentation for `torch::nn::LinearOptions` class to learn what
+/// constructor arguments are supported for this module.
+///
+/// Example:
+/// ```
+/// Linear model(LinearOptions(5, 2).bias(false));
+/// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
+class TORCH_API BiasImpl final : public Cloneable<BiasImpl> {
+ public:
+  explicit BiasImpl(int64_t num_features)
+    : BiasImpl(BiasOptions(num_features)) {}
+  explicit BiasImpl(BiasOptions options_);
+
+  void reset() final;
+
+  void reset_parameters();
+
+  /// Pretty prints the module into the given `stream`.
+  void pretty_print(std::ostream& stream) const final;
+
+  /// Transforms the `input` tensor by multiplying with the `weight` and
+  /// optionally adding the `bias`, if `with_bias` is true in the options.
+  Tensor forward(const Tensor& input);
+
+  /// The options used to configure this module.
+  BiasOptions options;
+
+  /// The learned bias. If `bias` is false in the `options`, this tensor is
+  /// undefined.
+  Tensor bias;
+};
+
+/// A `ModuleHolder` subclass for `LinearImpl`.
+/// See the documentation for `LinearImpl` class to learn what methods it
+/// provides, and examples of how to use `Linear` with `torch::nn::LinearOptions`.
+/// See the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
+TORCH_MODULE(Bias);
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Linear ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies a linear transformation with optional bias.

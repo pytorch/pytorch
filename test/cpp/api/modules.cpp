@@ -1,3 +1,4 @@
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include <torch/torch.h>
@@ -1058,6 +1059,22 @@ TEST_F(ModulesTest, MaxPool3d_MaxUnpool3d) {
   std::tie(output, indices) = pool->forward_with_indices(input);
   auto unpooled_output = unpool(output, indices);
   ASSERT_EQ(unpooled_output.sizes(), std::vector<int64_t>({20, 16, 51, 33, 15}));
+}
+
+TEST_F(ModulesTest, Bias) {
+  Bias model(2);
+  auto input = torch::randn({2}, torch::requires_grad());
+  auto output = model(input);
+  torch::Tensor s = output.sum();
+
+  s.backward();
+  ASSERT_THAT(output.sizes(), testing::ElementsAre(2));
+  ASSERT_EQ(s.ndimension(), 0);
+
+  ASSERT_EQ(model->bias.grad().numel(), 2);
+
+  auto output_exp = input + model->bias;
+  ASSERT_TRUE(torch::allclose(output, output_exp));
 }
 
 TEST_F(ModulesTest, Linear) {
