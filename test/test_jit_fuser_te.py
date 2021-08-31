@@ -1264,7 +1264,8 @@ class TestTEFuser(JitTestCase):
             torch.round,
             torch.trunc,
             torch.frac,
-            F.hardshrink,
+            # TODO: Broken on ROCm?
+            # F.hardshrink,
             F.leaky_relu,
             lambda x: torch.threshold(x, 0, -10),
             lambda x: torch.clamp(x, -10, 10),
