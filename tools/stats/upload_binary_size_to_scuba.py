@@ -10,7 +10,12 @@ import time
 import zipfile
 
 from typing import Any, Dict, Generator, List
-from tools.stats.scribe import send_to_scribe
+from tools.stats.scribe import (
+    send_to_scribe,
+    rds_write,
+    register_rds_table,
+    schema_from_sample,
+)
 
 
 def get_size(file_dir: str) -> int:
@@ -23,12 +28,25 @@ def get_size(file_dir: str) -> int:
         return 0
 
 
+def base_data() -> Dict[str, Any]:
+    build_env_split = os.environ.get("BUILD_ENVIRONMENT", "").split()
+    build_environment = build_env_split[0]
+
+    return {
+        "build_environment": build_environment,
+        "run_duration_seconds": int(
+            time.time() - os.path.getmtime(os.path.realpath(__file__))
+        ),
+    }
+
+
 def build_message(size: int) -> Dict[str, Any]:
     build_env_split: List[Any] = os.environ.get("BUILD_ENVIRONMENT", "").split()
     pkg_type, py_ver, cu_ver, *_ = build_env_split + [None, None, None]
     os_name = os.uname()[0].lower()
     if os_name == "darwin":
         os_name = "macos"
+
     return {
         "normal": {
             "os": os_name,
@@ -45,7 +63,9 @@ def build_message(size: int) -> Dict[str, Any]:
             "time": int(time.time()),
             "size": size,
             "commit_time": int(os.environ.get("COMMIT_TIME", "0")),
-            "run_duration": int(time.time() - os.path.getmtime(os.path.realpath(__file__))),
+            "run_duration": int(
+                time.time() - os.path.getmtime(os.path.realpath(__file__))
+            ),
         },
     }
 
@@ -109,7 +129,9 @@ def report_android_sizes(file_dir: str) -> None:
                 "int": {
                     "time": int(time.time()),
                     "commit_time": int(os.environ.get("COMMIT_TIME", "0")),
-                    "run_duration": int(time.time() - os.path.getmtime(os.path.realpath(__file__))),
+                    "run_duration": int(
+                        time.time() - os.path.getmtime(os.path.realpath(__file__))
+                    ),
                     "size": comp_size,
                     "raw_size": uncomp_size,
                 },
@@ -124,14 +146,40 @@ if __name__ == "__main__":
     )
     if len(sys.argv) == 2:
         file_dir = sys.argv[1]
-    print("checking dir: " + file_dir)
+
+    sample_lib = {
+        "library": "abcd",
+        "size": 1234,
+    }
+    sample_data = {
+        **base_data(),
+        **sample_lib,
+    }
+    register_rds_table("binary_size", schema_from_sample(sample_data))
 
     if "-android" in os.environ.get("BUILD_ENVIRONMENT", ""):
         report_android_sizes(file_dir)
     else:
-        size = get_size(file_dir)
-        # Sending the message anyway if no size info is collected.
-        try:
-            send_message([build_message(size)])
-        except Exception:
-            logging.exception("can't send message")
+        if os.getenv("IS_GHA", "0") == "1":
+            build_path = pathlib.Path("build") / "lib"
+            libraries = [
+                (path.name, os.stat(path).st_size) for path in build_path.glob("*")
+            ]
+            data = []
+            for name, size in libraries:
+                if name.strip() == "":
+                    continue
+                library_data = {
+                    "library": name,
+                    "size": size,
+                }
+                data.append({**base_data(), **library_data})
+            rds_write("binary_size", data)
+        else:
+            print("checking dir: " + file_dir)
+            size = get_size(file_dir)
+            # Sending the message anyway if no size info is collected.
+            try:
+                send_message([build_message(size)])
+            except Exception:
+                logging.exception("can't send message")

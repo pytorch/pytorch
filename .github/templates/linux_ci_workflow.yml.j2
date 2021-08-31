@@ -74,6 +74,23 @@ jobs:
     steps:
       !{{ common.setup_ec2_linux() }}
       !{{ common.checkout_pytorch("false") }}
+      - name: CHECK THE STUFF
+        env:
+          AWS_DEFAULT_REGION: us-east-1
+          IS_GHA: 1
+          SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
+          CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
+          CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
+          CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+          CIRCLE_TAG: ${{ steps.parse-ref.outputs.tag }}
+          CIRCLE_WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
+        run: |
+          COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
+          export COMMIT_TIME
+          pip3 install -r requirements.txt
+          pip3 install requests boto3==1.16.34
+          python3 tools/stats/scribe.py
+          exit 1
       - name: Calculate docker image tag
         id: calculate-tag
         run: |
@@ -164,6 +181,7 @@ jobs:
         # tools/stats/print_test_stats.py to natively support GitHub Actions
         env:
           AWS_DEFAULT_REGION: us-east-1
+          IS_GHA: 1
           SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
           CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
           CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -173,7 +191,11 @@ jobs:
         run: |
           COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
           export COMMIT_TIME
+<<<<<<< HEAD
           pip3 install requests==2.26
+=======
+          pip3 install requests boto3==1.16.34
+>>>>>>> 2853327bbe8 ([wip] Check RDS proxy)
           python3 -m tools.stats.upload_binary_size_to_scuba || exit 0
       - name: Chown workspace
         run: |
