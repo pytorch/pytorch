@@ -4,7 +4,7 @@
 # a list of `Derivative`. See `tools.codegen.api.autograd` for the data models.
 from collections import defaultdict, Counter
 import re
-from typing import Sequence, Any, Tuple, List, Set, Dict, Match, Optional
+from typing import Sequence, Any, Tuple, List, Set, Dict, Iterable, Match, Optional
 import yaml
 
 from tools.codegen.api.autograd import (Derivative, DifferentiabilityInfo,
@@ -43,32 +43,16 @@ def load_derivatives(derivatives_yaml_path: str, native_yaml_path: str) -> Seque
             assert str(function.func) not in functions_by_schema
             functions_by_schema[str(function.func)] = function
 
+        # These are possible op names: they will only be used if the
+        # function has differentiable arguments.
+        op_names = list(_create_candidate_op_names(definitions))
+        assert len(definitions) == len(op_names)
+
         infos = [
-            create_differentiability_info(defn, functions_by_signature, functions_by_schema)
-            for defn in definitions]
+            create_differentiability_info(op_name, defn, functions_by_signature, functions_by_schema)
+            for op_name, defn in zip(op_names, definitions)]
 
-        # To keep it byte-for-byte compatible with the old codegen, we assign op names as a separate
-        # step. We only assign op names to those with differentiable args, and only append suffix to
-        # duplicated op names. This can be simplified if the first of the duplicates can be named
-        # 'XyzBackward' instead of 'XyzBackward0' or unconditionally append '0' to singletons.
-        op_names = create_op_names(infos)
-        res = [
-            DifferentiabilityInfo(
-                name=info.name,
-                func=info.func,
-                op=op_name,
-                derivatives=info.derivatives,
-                forward_derivatives=info.forward_derivatives,
-                all_saved_inputs=info.all_saved_inputs,
-                all_saved_outputs=info.all_saved_outputs,
-                args_with_derivatives=info.args_with_derivatives,
-                non_differentiable_arg_names=info.non_differentiable_arg_names,
-                output_differentiability=info.output_differentiability,
-                output_differentiability_conditions=info.output_differentiability_conditions,
-            )
-            for info, op_name in zip(infos, op_names)]
-
-        _GLOBAL_LOAD_DERIVATIVE_CACHE[key] = res
+        _GLOBAL_LOAD_DERIVATIVE_CACHE[key] = infos
 
     return _GLOBAL_LOAD_DERIVATIVE_CACHE[key]
 
@@ -276,6 +260,7 @@ def is_forward_derivative_definition(all_arg_names: List[str], names: Tuple[str,
         return False
 
 def create_differentiability_info(
+    op_name: str,
     defn: Dict[Any, Any],
     functions_by_signature: Dict[FunctionSchema, List[NativeFunction]],
     functions_by_schema: Dict[str, NativeFunction],
@@ -427,7 +412,7 @@ def create_differentiability_info(
     return DifferentiabilityInfo(
         name=defn_name,
         func=canonical,
-        op=None,
+        op=op_name if args_with_derivatives else None,
         derivatives=derivatives,
         forward_derivatives=forward_derivatives,
         all_saved_inputs=dedup_vars([v for d in derivatives for v in d.saved_inputs]),
@@ -566,16 +551,18 @@ def saved_variables(
 
     return formula, tuple(saved)
 
-def create_op_name(info: DifferentiabilityInfo) -> Optional[str]:
-    # only assign an op name if we are actually going to calculate a derivative
-    if not info.args_with_derivatives:
-        return None
-    name = info.name
+
+def create_candidate_op_name(schema: str) -> str:
+    """Creates the candidate op name from the function schema."""
+    name = _extract_name_from_schema(schema)
     camel_case = ''.join([p.title() for p in name.split('_')])
     return (camel_case + 'Backward').replace('ForwardBackward', 'Backward')
 
-def create_op_names(infos: Sequence[DifferentiabilityInfo]) -> Sequence[Optional[str]]:
-    names = list(map(create_op_name, infos))
+
+def _create_candidate_op_names(
+        definitions: Iterable[Dict[str, Any]]) -> Iterable[str]:
+    """Creates the candidate op names for the derivative definitions."""
+    names = [create_candidate_op_name(defn['name']) for defn in definitions]
     dups = set(item for item, count in Counter(names).items() if count > 1)
 
     # de-duplicate operation names
@@ -583,18 +570,30 @@ def create_op_names(infos: Sequence[DifferentiabilityInfo]) -> Sequence[Optional
     #   AddBackward0
     #   AddBackward1
     # one for each overload
-    counter: Dict[str, int] = Counter()
-    dedup: List[Optional[str]] = []
+    counter = Counter[str]()
     for name in names:
-        if name is None:
-            # Keep a placeholder
-            dedup.append(None)
-        elif name in dups:
-            dedup.append(f'{name}{counter[name]}')
-            counter[name] += 1
+        if name in dups:
+            # Functions with this name are overloaded, use increasing
+            # suffixes to distinguish op names.
+            suffix = counter[name]
+            yield f'{name}{suffix}'
         else:
-            dedup.append(name)
-    return dedup
+            # No need for suffixes: this is the only variant.
+            assert name not in counter
+            yield name
+        counter[name] += 1
+
+
+def _extract_name_from_schema(schema: str) -> str:
+    """Extracts the name of a function from its schema.
+
+    Example::
+       >>> _extract_name_from_schema('transpose.variant(Tensor t) -> Tensor')
+       'transpose'
+    """
+    name, _ = split_name_params(schema)
+    return name
+
 
 def dedup_vars(vars: Sequence[SavedAttribute]) -> Sequence[SavedAttribute]:
     seen: Set[str] = set()
