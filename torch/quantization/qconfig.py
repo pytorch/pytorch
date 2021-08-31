@@ -7,7 +7,8 @@ from .observer import (HistogramObserver, MovingAverageMinMaxObserver,
                        default_placeholder_observer, default_weight_observer)
 from .fake_quantize import (FakeQuantize, default_fake_quant,
                             default_per_channel_weight_fake_quant,
-                            default_weight_fake_quant)
+                            default_weight_fake_quant, default_fused_act_fake_quant, default_fused_wt_fake_quant,
+                            FusedMovingAvgObsFakeQuantize, default_fused_per_channel_wt_fake_quant)
 import torch
 import torch.nn as nn
 
@@ -71,8 +72,8 @@ class QConfigDynamic(namedtuple('QConfigDynamic', ['activation', 'weight'])):
         return super(QConfigDynamic, cls).__new__(cls, activation, weight)
 
 default_dynamic_qconfig = QConfigDynamic(activation=default_dynamic_quant_observer,
-                                             weight=default_weight_observer)
-float16_dynamic_qconfig = QConfigDynamic(activation=PlaceholderObserver.with_args(dtype=torch.float16),
+                                         weight=default_weight_observer)
+float16_dynamic_qconfig = QConfigDynamic(activation=PlaceholderObserver.with_args(dtype=torch.float32),
                                          weight=PlaceholderObserver.with_args(dtype=torch.float16))
 float16_static_qconfig = QConfigDynamic(activation=PlaceholderObserver.with_args(dtype=torch.float16),
                                         weight=PlaceholderObserver.with_args(dtype=torch.float16))
@@ -91,6 +92,10 @@ default_weight_only_qconfig = QConfig(activation=torch.nn.Identity,
                                       weight=default_weight_fake_quant)
 default_activation_only_qconfig = QConfig(activation=default_fake_quant,
                                           weight=torch.nn.Identity)
+
+# QAT config that uses a fused observer + fake quant modules for optimized training performance.
+# to modify the activation/weight observers, the default entries in fake_quantize.py can be modified.
+default_qat_qconfig_v2 = QConfig(activation=default_fused_act_fake_quant, weight=default_fused_wt_fake_quant)
 
 def get_default_dynamic_qconfig(dtype, version=1):
     if dtype not in [torch.qint8, torch.quint8, torch.float16]:
@@ -128,22 +133,39 @@ def get_default_qconfig(backend='fbgemm'):
         qconfig = default_qconfig
     return qconfig
 
-def get_default_qat_qconfig(backend='fbgemm'):
+def get_default_qat_qconfig(backend='fbgemm', version=1):
     # Histogram observer is too slow for quantization aware training
-    if backend == 'fbgemm':
-        qconfig = QConfig(activation=FakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
-                                                            quant_min=0,
-                                                            quant_max=255,
-                                                            reduce_range=True),
-                          weight=default_per_channel_weight_fake_quant)
-    elif backend == 'qnnpack':
-        qconfig = QConfig(activation=FakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
-                                                            quant_min=0,
-                                                            quant_max=255,
-                                                            reduce_range=False),
-                          weight=default_weight_fake_quant)
-    else:
-        qconfig = default_qat_qconfig
+    if version is None:
+        if backend == 'fbgemm':
+            qconfig = QConfig(activation=FakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
+                                                                quant_min=0,
+                                                                quant_max=255,
+                                                                reduce_range=True),
+                              weight=default_per_channel_weight_fake_quant)
+        elif backend == 'qnnpack':
+            qconfig = QConfig(activation=FakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
+                                                                quant_min=0,
+                                                                quant_max=255,
+                                                                reduce_range=False),
+                              weight=default_weight_fake_quant)
+        else:
+            qconfig = default_qat_qconfig
+    # Use the fused observer + fake_quant modules for doing QAT.
+    if version == 1:
+        if backend == 'fbgemm':
+            qconfig = QConfig(activation=FusedMovingAvgObsFakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
+                                                                                 quant_min=0,
+                                                                                 quant_max=255,
+                                                                                 reduce_range=True),
+                              weight=default_fused_per_channel_wt_fake_quant)
+        elif backend == 'qnnpack':
+            qconfig = QConfig(activation=FusedMovingAvgObsFakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
+                                                                                 quant_min=0,
+                                                                                 quant_max=255,
+                                                                                 reduce_range=False),
+                              weight=default_fused_wt_fake_quant)
+        else:
+            qconfig = default_qat_qconfig_v2
     return qconfig
 
 def assert_valid_qconfig(qconfig: Optional[Union[QConfig, QConfigDynamic]],
@@ -211,3 +233,20 @@ def add_module_to_qconfig_obs_ctr(
         return QConfig(activation, weight)
     else:
         return QConfigDynamic(activation, weight)
+
+
+def qconfig_equals(q1: QConfigAny, q2: QConfigAny):
+    # functools.partial has no __eq__ operator defined so '==' defaults to 'is'
+    def partial_equals(p1, p2):
+        same = p1.func == p2.func
+        same = same and p1.args == p2.args
+        return same and p1.keywords == p2.keywords
+
+    if q1 is None or q2 is None:
+        return q1 == q2
+    else:
+        assert q1 is not None and q2 is not None
+        try:
+            return partial_equals(q1.activation.p, q2.activation.p) and partial_equals(q1.weight.p, q2.weight.p)
+        except AttributeError:
+            return q1 == q2

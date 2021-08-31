@@ -802,7 +802,7 @@ class TestPostTrainingDynamic(QuantizationTestCase):
         q_model = quantize_dynamic(model, dtype=torch.qint8)
         # First load state dict only for linear layers
         q_model.dense_top.load_state_dict(state_dict_linear_v0)
-         # Also check that version=0 functions as before
+        # Also check that version=0 functions as before
 
         self.checkDynamicQuantizedLinear(q_model.dense_top.dense_mlp[0], torch.qint8, torch.per_tensor_affine)
         self.checkDynamicQuantizedLinear(q_model.dense_top.top_mlp[0], torch.qint8, torch.per_tensor_affine)
@@ -1039,6 +1039,23 @@ class TestPostTrainingDynamic(QuantizationTestCase):
         checkQuantized(model)
         # test one line API
         model = quantize_dynamic(NestedModel().eval(), qconfig_dict)
+        checkQuantized(model)
+
+    def test_linear_relu_fusion(self):
+        dtype = torch.qint8
+        model = LinearReluLinearModel().eval()
+        qconfig = default_dynamic_qconfig
+        qconfig_dict = {'' : qconfig}
+        torch.quantization.fuse_modules(model, [['fc1', 'relu']], inplace=True)
+        prepare_dynamic(model, qconfig_dict)
+        convert_dynamic(model)
+
+        def checkQuantized(model):
+            self.checkDynamicQuantizedLinearRelu(model.fc1, dtype)
+            self.checkDynamicQuantizedLinear(model.fc2, dtype)
+            self.checkScriptable(model, self.calib_data, check_save_load=True)
+            self.checkNoQconfig(model)
+
         checkQuantized(model)
 
     @given(qconfig=st.sampled_from([per_channel_dynamic_qconfig, default_dynamic_qconfig]),
