@@ -607,9 +607,14 @@ PyObject* THPFunction_name(PyObject *self, PyObject* noargs) {
 PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
 {
   HANDLE_TH_ERRORS
+  auto info_pair = unpack_input<false>(inputs);
+  auto iv_inputs = std::vector<c10::IValue>();
+  for (auto i : info_pair.first.input_vars) {
+     iv_inputs.push_back(c10::IValue(i));
+  }
   RECORD_FUNCTION(
     ((PyTypeObject*)cls)->tp_name,
-    std::vector<c10::IValue>(),
+    iv_inputs,
     at::sequence_number::peek());
 
   THPObjectPtr backward_cls(PyObject_GetAttrString(cls, "_backward_cls"));
@@ -622,7 +627,6 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
   ctx->cdata = cdata;
 
   // Prepare inputs and allocate context (grad fn)
-  auto info_pair = unpack_input<false>(inputs);
   UnpackedInput& unpacked_input = info_pair.first;
   InputFlags& input_info = info_pair.second;
 

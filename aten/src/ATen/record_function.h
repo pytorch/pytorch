@@ -213,6 +213,9 @@ struct TORCH_API RecordFunction {
       return;
     }
     state_->inputs_ = args.vec();
+    if (std::is_same<F, std::string>::value || std::is_same<F, const char*>::value) {
+      state_->op_input_size = state_->inputs_.size();
+    }
     before(fn, current_sequence_nr);
   }
 
@@ -223,6 +226,9 @@ struct TORCH_API RecordFunction {
       int64_t current_sequence_nr = -1) {
     if (!isActive()) {
       return;
+    }
+    if (std::is_same<F, std::string>::value || std::is_same<F, const char*>::value) {
+      state_->op_input_size = state_->inputs_.size();
     }
     state_->inputs_ = std::move(args);
     before(fn, current_sequence_nr);
