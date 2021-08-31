@@ -9,10 +9,12 @@
 #include <ATen/core/TensorBase.h>
 #include <ATen/TensorMeta.h>
 
+#include <cstddef>
 #include <bitset>
 
 namespace at {
 class Tensor;
+class OptionalTensorRef;
 using NameVector = SmallVector<Dimname, kDimVectorStaticSize>;
 }
 
@@ -71,12 +73,34 @@ namespace internal {
 // no parallel algorithm (such as parallel_reduce) should split work into
 // smaller than GRAIN_SIZE chunks.
 constexpr int64_t GRAIN_SIZE = 32768;
+
+// Storage for a non-owning Tensor, without needing to include Tensor.h
+class TORCH_API OpaqueTensorRef {
+  alignas(alignof(TensorBase)) char data_[sizeof(TensorBase)];
+public:
+  OpaqueTensorRef();
+  ~OpaqueTensorRef();
+
+  OptionalTensorRef* get() {
+    return reinterpret_cast<OptionalTensorRef*>(&data_[0]);
+  }
+  const OptionalTensorRef* get() const {
+    return reinterpret_cast<const OptionalTensorRef*>(&data_[0]);
+  }
+
+  OptionalTensorRef& operator*() { return *get(); }
+  const OptionalTensorRef& operator*() const { return *get(); }
+  OptionalTensorRef* operator->() { return get(); }
+  const OptionalTensorRef* operator->() const { return get(); }
+
+  const Tensor& getTensor() const;
+};
 } // namespace internal
 
 struct TORCH_API OperandInfo {
   using StrideVector = SmallVector<int64_t, 6>;
-  OperandInfo();
-  C10_ALWAYS_INLINE explicit OperandInfo(c10::MaybeOwned<TensorBase>&& t) : OperandInfo() {
+  OperandInfo() = default;
+  C10_ALWAYS_INLINE explicit OperandInfo(c10::MaybeOwned<TensorBase>&& t) {
     if (t->defined()) {
       device = t->device();
       target_dtype = t->scalar_type();
@@ -85,7 +109,8 @@ struct TORCH_API OperandInfo {
     tensor(std::move(t));
     validate();
   }
-  ~OperandInfo();
+
+  C10_ALWAYS_INLINE ~OperandInfo() = default;
 
   /// Stride after broadcasting. The stride is in bytes, not number of elements.
   StrideVector stride_bytes;
@@ -127,19 +152,22 @@ struct TORCH_API OperandInfo {
   /// The tensor operand. Note that the strides, data pointer, and
   /// other attributes may differ due to dimension reordering and
   /// coalescing.
-  const Tensor& tensor() const;
+  const Tensor& tensor() const {
+    return tensor_storage_.getTensor();
+  }
   const TensorBase& tensor_base() const {
     return *tensor_base_;
   }
+  void tensor(c10::MaybeOwned<TensorBase> &&tensor);
 
   // Save the original tensor operand in cases when an output is modified
   // (e.g. if dtype is changed)
-  const Tensor& original_tensor() const;
+  const Tensor& original_tensor() const {
+    return original_tensor_storage_.getTensor();
+  }
   const TensorBase& original_tensor_base() const {
     return *original_tensor_base_;
   }
-
-  void tensor(c10::MaybeOwned<TensorBase> &&tensor);
   void original_tensor(c10::MaybeOwned<TensorBase> &&tensor);
 
   c10::MaybeOwned<TensorBase> unsafeReleaseTensor();
@@ -150,12 +178,12 @@ private:
   c10::MaybeOwned<TensorBase> original_tensor_base_ =
       c10::MaybeOwned<TensorBase>::owned(c10::in_place);
 
-  // We store TensorBase visibly in the header to allow inline access
-  // without including Tensor.h. However, we sometimes need a genuine
-  // `const Tensor &` for the TensorIterator API. So, we also store a
-  // non-owning `Tensor` object in these `_storage_` variables.
-  char tensor_storage_[sizeof(TensorBase)];
-  char original_tensor_storage_[sizeof(TensorBase)];
+  // We store TensorBase visibly in the header to allow inline access.
+  // However, we sometimes need a genuine `const Tensor &` for the
+  // TensorIterator API. So, we also store a non-owning `Tensor`
+  // object in these `_storage_` variables.
+  internal::OpaqueTensorRef tensor_storage_;
+  internal::OpaqueTensorRef original_tensor_storage_;
 };
 
 struct SplitUntil32Bit;
