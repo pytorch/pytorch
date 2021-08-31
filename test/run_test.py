@@ -103,6 +103,7 @@ TESTS = [
     "test_optim",
     "test_functional_optim",
     "test_pytree",
+    "test_python_dispatch",
     "test_mobile_optimizer",
     "test_set_default_mobile_cpu_allocator",
     "test_xnnpack_integration",
