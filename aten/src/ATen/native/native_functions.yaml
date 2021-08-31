@@ -6657,7 +6657,7 @@
   device_check: NoCheck   # TensorIterator
   variants: method
 
-- func: cross_entropy_loss(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, int ignore_index=-100) -> Tensor
+- func: cross_entropy_loss(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, int ignore_index=-100, float label_smoothing=0.0) -> Tensor
   python_module: nn
 
 - func: lstsq.X(Tensor self, Tensor A, *, Tensor(a!) X, Tensor(b!) qr) -> (Tensor(a!) solution, Tensor(b!) QR)
@@ -8467,14 +8467,16 @@
     CompositeExplicitAutograd: elu_
 
 - func: glu.out(Tensor self, int dim=-1, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   python_module: nn
   dispatch:
     CPU, CUDA: glu_out
 
 - func: glu(Tensor self, int dim=-1) -> Tensor
+  structured_delegate: glu.out
+  device_check: NoCheck   # TensorIterator
   python_module: nn
-  dispatch:
-    CPU, CUDA: glu
 
 - func: glu_backward.grad_input(Tensor grad_output, Tensor self, int dim, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
