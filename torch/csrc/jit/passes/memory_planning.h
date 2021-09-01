@@ -80,7 +80,7 @@ inline bool operator==(MemAllocation lhs, MemAllocation rhs) {
   return lhs.lvr == rhs.lvr && lhs.reg == rhs.reg;
 }
 
-c10::optional<int64_t> computeStorageSize(const Value& value);
+c10::optional<size_t> computeStorageSize(const Value& value);
 
 bool hasOutVariant(Node* node);
 
