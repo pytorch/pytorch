@@ -7,16 +7,16 @@ Automatic Mixed Precision package - torch.cuda.amp
 .. automodule:: torch.cuda.amp
 .. currentmodule:: torch.cuda.amp
 
-``torch.cuda.amp`` provides convenience methods for mixed precision,
+:class:`torch.cuda.amp` and :class:`torch` provide convenience methods for mixed precision,
 where some operations use the ``torch.float32`` (``float``) datatype and other operations
 use ``torch.float16`` (``half``). Some ops, like linear layers and convolutions,
 are much faster in ``float16``. Other ops, like reductions, often require the dynamic
 range of ``float32``.  Mixed precision tries to match each op to its appropriate datatype.
 
-Ordinarily, "automatic mixed precision training" uses :class:`torch.cuda.amp.autocast` and
+Ordinarily, "automatic mixed precision training" uses :class:`torch.autocast` and
 :class:`torch.cuda.amp.GradScaler` together, as shown in the :ref:`Automatic Mixed Precision examples<amp-examples>`
 and `Automatic Mixed Precision recipe <https://pytorch.org/tutorials/recipes/recipes/amp_recipe.html>`_.
-However, :class:`autocast` and :class:`GradScaler` are modular, and may be used separately if desired.
+However, :class:`torch.autocast` and :class:`GradScaler` are modular, and may be used separately if desired.
 
 .. contents:: :local:
 
@@ -24,6 +24,12 @@ However, :class:`autocast` and :class:`GradScaler` are modular, and may be used 
 
 Autocasting
 ^^^^^^^^^^^
+.. currentmodule:: torch
+
+.. autoclass:: autocast
+    :members:
+
+.. currentmodule:: torch.cuda.amp
 
 .. autoclass:: autocast
     :members:
