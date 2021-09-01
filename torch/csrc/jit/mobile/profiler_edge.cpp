@@ -1,3 +1,4 @@
+#include <c10/util/Exception.h>
 #include <torch/csrc/jit/mobile/profiler_edge.h>
 #include <string>
 #include <vector>
@@ -5,6 +6,8 @@
 namespace torch {
 namespace jit {
 namespace mobile {
+
+thread_local KinetoEdgeCPUProfiler* tls_edge_profiler{nullptr};
 
 KinetoEdgeCPUProfiler::KinetoEdgeCPUProfiler(
     const torch::jit::mobile::Module& m,
@@ -61,6 +64,24 @@ KinetoEdgeCPUProfiler::KinetoEdgeCPUProfiler(
         {at::RecordScope::LITE_INTERPRETER});
   }
   trace_file_name_ = fname;
+  TORCH_CHECK(
+      tls_edge_profiler == nullptr, "Edge profiler is already profiling.")
+  tls_edge_profiler = this;
+}
+
+void KinetoEdgeCPUProfiler::recordBackendEvent(
+    const int64_t start_time_us,
+    const int64_t end_time_us,
+    const int64_t debug_handle,
+    const std::string& event_name,
+    const std::string& backend_name) {
+  profiler::reportBackendEventToActiveKinetoProfiler(
+      start_time_us,
+      end_time_us,
+      debug_handle,
+      at::RecordScope::LITE_INTERPRETER,
+      event_name,
+      backend_name);
 }
 
 const std::unique_ptr<profiler::ProfilerResult>& KinetoEdgeCPUProfiler::
@@ -90,7 +111,13 @@ KinetoEdgeCPUProfiler::~KinetoEdgeCPUProfiler() {
       profiler::disableProfiler()->save(trace_file_name_);
     }
   }
+  tls_edge_profiler = nullptr;
 }
+
+KinetoEdgeCPUProfiler* getCurrentEdgeProfiler() {
+  return tls_edge_profiler;
+}
+
 } // namespace mobile
 } // namespace jit
 } // namespace torch

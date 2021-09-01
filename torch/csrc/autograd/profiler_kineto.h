@@ -1,5 +1,6 @@
 #pragma once
 
+#include "c10/macros/Export.h"
 #include <torch/csrc/autograd/profiler_legacy.h>
 #include <vector>
 
@@ -34,6 +35,7 @@ enum class C10_API_ENUM ActivityType {
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct KinetoObserverContext : public at::ObserverContext {
   int64_t startUs;
+  int64_t endUS;
   uint64_t correlationId;
   uint64_t startThreadId;
   uint64_t endThreadId;
@@ -266,6 +268,15 @@ struct TORCH_API KinetoEvent {
     return *this;
   }
 
+  std::string backend() const {
+    return backend_;
+  }
+
+  KinetoEvent& backend(const std::string& backend) {
+    backend_ = backend;
+    return *this;
+  }
+
   int64_t cudaElapsedUs() const;
 
   uint64_t start_thread_id_ = 0;
@@ -292,6 +303,7 @@ struct TORCH_API KinetoEvent {
   int64_t nbytes_ = 0;
   bool is_async_{false};
   int64_t debug_handle_{-1};
+  std::string backend_;
 
   CUDAEventStub cuda_event_start_ = nullptr;
   CUDAEventStub cuda_event_end_ = nullptr;
@@ -332,6 +344,14 @@ struct TORCH_API ProfilerResult {
   bool saved_ = false;
 #endif // USE_KINETO
 };
+
+TORCH_API void reportBackendEventToActiveKinetoProfiler(
+    const int64_t start_time_us,
+    const int64_t end_time_us,
+    const int64_t debug_handle,
+    const at::RecordScope scope,
+    const std::string& event_name,
+    const std::string& backend_name);
 
 TORCH_API void enableProfiler(
     const ProfilerConfig& config,
