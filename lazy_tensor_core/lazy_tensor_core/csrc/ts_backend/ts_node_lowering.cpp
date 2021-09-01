@@ -186,7 +186,6 @@ class TSNodeLowering : public NodeLowering {
 
 
   TSOpVector LowerToTS(const ir::Node* node) {
-
     // Desirable to have a way to do some ops via codegen and others by hand, 
     // at least for now
     auto codegen_lowering = LowerToTSCodegen(function_, loctx(), node);
