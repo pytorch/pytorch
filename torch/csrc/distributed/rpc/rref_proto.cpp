@@ -46,20 +46,6 @@ const RRefId& RRefMessageBase::rrefId() {
   return rrefId_;
 }
 
-c10::intrusive_ptr<Message> RRefMessageBase::toMessageImpl() && {
-  return fromIValues({rrefId_.toIValue()}, type_);
-}
-
-at::IValue RRefMessageBase::fromMessage(
-    const Message& message,
-    MessageType type) {
-  auto values = toIValues(message, type);
-
-  TORCH_INTERNAL_ASSERT(
-      values.size() == 1, "ScriptUserDelete expects 1 IValue from message.");
-  return std::move(values.back());
-}
-
 /////////////////////////// ForkMessageBase //////////////////////////////////
 
 const ForkId& ForkMessageBase::forkId() {
@@ -76,7 +62,7 @@ std::pair<RRefId, ForkId> ForkMessageBase::fromMessage(
   auto ivalues = toIValues(message, type);
 
   TORCH_INTERNAL_ASSERT(
-      ivalues.size() == 2, "ScriptUserDelete expects 2 IValue from message.");
+      ivalues.size() == 2, "ForkMessageBase expects 2 IValue from message.");
 
   return std::make_pair(
       RRefId::fromIValue(ivalues[0]), ForkId::fromIValue(ivalues[1]));

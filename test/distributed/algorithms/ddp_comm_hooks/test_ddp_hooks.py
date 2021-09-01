@@ -177,6 +177,36 @@ class DistributedDataParallelCommHookTest(MultiProcessTestCase):
 
         np.testing.assert_allclose(hook_grads, reference_grads, rtol=1e-5, atol=1e-4)
 
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_is_last_hook(self):
+
+        store = dist.FileStore(self.file_name, self.world_size)
+        process_group = dist.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        def hook(flags, bucket):
+            flags.append(bucket.is_last())
+            fut = torch.futures.Future()
+            fut.set_result(bucket.buffer())
+            return fut
+
+        flags = []
+        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        model = nn.Sequential(
+            nn.Linear(2, 4000, bias=False),
+            *[nn.Linear(4000, 4000, bias=False) for _ in range(10)]
+        )
+        gpu_model = DistributedDataParallel(
+            model.to(device_id),
+            device_ids=[device_id],
+            process_group=process_group,
+        )
+        gpu_model.register_comm_hook(state=flags, hook=hook)
+        input = torch.randn(10, 2)
+        gpu_model(input).sum().backward()
+        self.assertTrue(flags[-1])
+        self.assertFalse(any(flags[:-1]))
+
 
 if __name__ == "__main__":
     assert (
