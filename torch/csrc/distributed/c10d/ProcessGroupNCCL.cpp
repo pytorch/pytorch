@@ -20,6 +20,8 @@
 #include <torch/csrc/cuda/nccl.h>
 
 #include <c10d/Utils.hpp>
+#include <fmt/format.h>
+
 namespace c10d {
 
 constexpr const char* const kNCCLAbortedCommStoreKey = "NCCLABORTEDCOMM";
