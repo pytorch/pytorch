@@ -688,6 +688,7 @@ class TestHub(TestCase):
             torch.hub.set_dir(dirname)
             self.assertEqual(torch.hub.get_dir(), dirname)
 
+    @retry(URLError, tries=3, skip_after_retries=True)
     def test_hub_parse_repo_info(self):
         # If the branch is specified we just parse the input and return
         self.assertEqual(torch.hub._parse_repo_info('a/b:c'),
