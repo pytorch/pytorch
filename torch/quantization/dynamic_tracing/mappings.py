@@ -30,6 +30,8 @@ module_types_supported_by_quantization = set([
     nn.ReLU,
     # TODO(future PR): detect inplace modifications by torch functions
     nn.ReLU6,
+    nn.Linear,
+    nnq.Linear,
 ])
 
 # TODO(future PR): reuse existing mapping
@@ -37,4 +39,5 @@ q_mod_to_float_mod_mapping = {
     nnq.Conv2d: nn.Conv2d,
     nniq.ConvReLU2d: nni.ConvReLU2d,
     nnq.ReLU6: nn.ReLU6,
+    nnq.Linear: nn.Linear,
 }

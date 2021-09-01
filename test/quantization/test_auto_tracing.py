@@ -32,10 +32,10 @@ class TestAutoTracing(QuantizationTestCase):
         out_p = mp(*example_inputs)
         print(mp)
         mq = _quantize_dynamic_tracing.convert(mp)
-        # print(mq)
+        print(mq)
         # verify it runs
         out_q = mq(*example_inputs)
-        print(out_q)
+        # print(out_q)
 
         # compare it against FX
         m_copy_p = prepare_fx(m_copy, {'': qconfig})
@@ -44,6 +44,8 @@ class TestAutoTracing(QuantizationTestCase):
         m_copy_q = convert_fx(m_copy_p)
         out_q_fx = m_copy_q(*example_inputs)
         self.assertTrue(torch.allclose(out_p, out_m_copy_p))
+        print(1, out_q)
+        print(2, out_q_fx)
         self.assertTrue(torch.allclose(out_q, out_q_fx))
 
         # verify torch.jit.trace works
@@ -126,6 +128,14 @@ class TestAutoTracing(QuantizationTestCase):
         qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),))
 
+    # TODO(next): fix this test
+    # solution is here: https://github.com/pytorch/pytorch/pull/56154/files
+    @skipIfNoFBGEMM
+    def test_linear(self):
+        m = nn.Sequential(nn.Linear(1, 1)).eval()
+        qconfig = torch.quantization.default_qconfig
+        self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 1, 1),))
+
     @skipIfNoFBGEMM
     def test_conv(self):
         class M(torch.nn.Module):
@@ -185,14 +195,16 @@ class TestAutoTracing(QuantizationTestCase):
         m = torchvision.models.__dict__['mobilenet_v2'](pretrained=False).eval().float()
 
         print(m)
-        m.qconfig = torch.quantization.default_qconfig
-        mp = _quantize_dynamic_tracing.prepare(m, (torch.randn(1, 3, 1, 1),))
-        mp(torch.randn(1, 3, 1, 1))
-        print(mp)
-        mq = _quantize_dynamic_tracing.convert(mp)
-        print(mq)
-        out = mq(torch.randn(1, 3, 1, 1))
-        print(out)
+        qconfig = torch.quantization.default_qconfig
+        self._test_auto_tracing(m, qconfig, (torch.randn(1, 3, 1, 1),))
+        if False:
+            mp = _quantize_dynamic_tracing.prepare(m, (torch.randn(1, 3, 1, 1),))
+            mp(torch.randn(1, 3, 1, 1))
+            print(mp)
+            mq = _quantize_dynamic_tracing.convert(mp)
+            print(mq)
+            out = mq(torch.randn(1, 3, 1, 1))
+            print(out)
 
     # TODO(future PR): enable this test
     @unittest.skip("this is currently broken")
