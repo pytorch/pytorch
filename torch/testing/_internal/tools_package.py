@@ -37,9 +37,9 @@ import sys
 def _import_tools_module():
     """Imports and returns the tools module."""
     # We expect this file to be
-    # <repo-root>/test/utils/tools_package.py, so we have to go up two
-    # levels to find the repository root.
-    PYTORCH_DIR = pathlib.Path(__file__).parent.parent.parent
+    # <repo-root>/torch/testing/_internal/tools_package.py, so we have
+    # to go up four levels to find the repository root.
+    PYTORCH_DIR = pathlib.Path(__file__).parent.parent.parent.parent
 
     # The tools/ "package" is right below the root.
     TOOLS_DIR = PYTORCH_DIR / 'tools/'
