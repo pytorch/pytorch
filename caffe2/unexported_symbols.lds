@@ -1,2 +1,1 @@
-__ZN4llvm*
-__ZNK4llvm*
+*4llvm*

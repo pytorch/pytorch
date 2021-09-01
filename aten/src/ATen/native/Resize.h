@@ -20,6 +20,8 @@ namespace at { namespace native {
 // Returns a bool saying whether or not the resize actually happened or not
 TORCH_API bool resize_output(const Tensor& output, IntArrayRef shape);
 
+TORCH_API bool resize_output_check(const Tensor& output, IntArrayRef shape);
+
 TORCH_API void resize_bytes_cpu(StorageImpl* storage, size_t size_bytes);
 
 static inline void maybe_resize_storage_cpu(TensorImpl* self, uint64_t new_size) {
