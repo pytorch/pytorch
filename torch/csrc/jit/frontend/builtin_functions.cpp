@@ -52,9 +52,9 @@ def T(a : Tensor) -> Tensor:
 def H(a : Tensor) -> Tensor:
   return a.matrix_H()
 def mT(a : Tensor) -> Tensor:
-  return a.mT()
+  return a.mT
 def mH(a : Tensor) -> Tensor:
-  return a.mH()
+  return a.mH
 def shape(a : Tensor) -> List[int]:
   return a.size()
 )SCRIPT";
