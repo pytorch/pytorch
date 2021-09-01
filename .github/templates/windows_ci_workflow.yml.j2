@@ -95,7 +95,7 @@ jobs:
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
-        uses: actions/checkout@v2
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           submodules: recursive
           path: pytorch-${{ github.run_id }}
@@ -177,7 +177,7 @@ jobs:
       - name: Install dependencies
         run: pip install typing-extensions
       - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
       - name: Generating test matrix
         id: set-matrix
         run: .github/scripts/generate_pytorch_test_matrix.py
@@ -195,6 +195,7 @@ jobs:
       https_proxy: "!{{ squid_proxy }}"
       RUN_SMOKE_TESTS_ONLY_ON_PR: !{{ only_run_smoke_tests_on_pull_request }}
       PYTORCH_IGNORE_DISABLED_ISSUES: ${{ needs.generate-test-matrix.outputs.ignore-disabled-issues }}
+      CONTINUE_THROUGH_ERROR: ${{ github.repository_owner == 'pytorch' && (github.event_name == 'push' || github.event_name == 'schedule') }}
     needs: [build, generate-test-matrix, !{{ ciflow_config.root_job_name }}]
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
@@ -205,7 +206,7 @@ jobs:
         working-directory: pytorch-${{ github.run_id }}
     steps:
       - name: Checkout PyTorch
-        uses: actions/checkout@v2
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           submodules: recursive
           path: pytorch-${{ github.run_id }}
