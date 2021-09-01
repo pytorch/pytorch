@@ -103,8 +103,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         zero_point = 3
         qlinear = class_map[use_fused](in_features, out_features)
 
-        qlinear_copy = qlinear  # deepcopy does not work right now
-        # qlinear_copy = copy.deepcopy(qlinear)
+        qlinear_copy = copy.deepcopy(qlinear)
         self.checkScriptable(qlinear_copy, [[X_q]], check_save_load=True)
         # Run module with default-initialized parameters.
         # This tests that the constructor is correct.
@@ -155,15 +154,21 @@ class TestStaticQuantizedModule(QuantizationTestCase):
                          linear_unpack(loaded_qlinear._packed_params._packed_params))
         self.assertEqual(qlinear.scale, loaded_qlinear.scale)
         self.assertEqual(qlinear.zero_point, loaded_qlinear.zero_point)
-        # make sure loaded_qlinear has the same dir as qlinear since
-        # scripting the module will add __overloads__ to __dict__
         self.checkScriptable(loaded_qlinear, [[X_q]], check_save_load=True)
-        self.assertTrue(dir(qlinear) == dir(loaded_qlinear))
+
+        # make sure loaded_qlinear has the same dir as qlinear
+        # since scripting the module will add __overloads__ to __dict__,
+        # we filter this item from the check.
+        dir_qlinear_modified = [x for x in dir(qlinear) if x != '__overloads__']
+        dir_loaded_qlinear_modified = [x for x in dir(loaded_qlinear) if x != '__overloads__']
+        self.assertTrue(dir_qlinear_modified == dir_loaded_qlinear_modified)
+
         self.assertEqual(qlinear._weight_bias(), loaded_qlinear._weight_bias())
         self.assertEqual(qlinear._weight_bias(), torch.ops.quantized.linear_unpack(qlinear._packed_params._packed_params))
         Z_q2 = loaded_qlinear(X_q)
         self.assertEqual(Z_q, Z_q2)
 
+        # Test serialization
         b = io.BytesIO()
         torch.save(qlinear, b)
         b.seek(0)
@@ -171,6 +176,25 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         self.assertEqual(qlinear.weight(), loaded.weight())
         self.assertEqual(qlinear.scale, loaded.scale)
         self.assertEqual(qlinear.zero_point, loaded.zero_point)
+
+        # Test copy and deepcopy
+        copied_linear = copy.copy(qlinear)
+        self.assertEqual(copied_linear.bias(), qlinear.bias())
+        self.assertEqual(copied_linear.scale, qlinear.scale)
+        self.assertEqual(copied_linear.zero_point,
+                         qlinear.zero_point)
+        Y_copied = copied_linear(X_q)
+        np.testing.assert_array_almost_equal(
+            Z_q.int_repr().numpy(), Y_copied.int_repr().numpy(), decimal=0)
+
+        deepcopied_linear = copy.deepcopy(qlinear)
+        self.assertEqual(deepcopied_linear.bias(), qlinear.bias())
+        self.assertEqual(deepcopied_linear.scale, qlinear.scale)
+        self.assertEqual(deepcopied_linear.zero_point,
+                         qlinear.zero_point)
+        Y_deepcopied = copied_linear(X_q)
+        np.testing.assert_array_almost_equal(
+            Z_q.int_repr().numpy(), Y_deepcopied.int_repr().numpy(), decimal=0)
 
         # Test JIT
         self.checkScriptable(qlinear, [[X_q]], check_save_load=True)
