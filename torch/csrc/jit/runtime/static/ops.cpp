@@ -15,6 +15,7 @@
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/qembeddingbag.h>
 #include <ATen/native/quantized/cpu/qembeddingbag_prepack.h>
+#include <c10/core/ScalarType.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
@@ -1334,6 +1335,29 @@ REGISTER_OPERATOR_FUNCTOR(aten::argmin, aten_argmin, [](Node* n) -> SROperator {
         return;
       }
       at::cpu::argmin_out(out_t, in0_t, dim, keepdim);
+    }
+  };
+});
+
+REGISTER_OPERATOR_FUNCTOR(aten::softmax, aten_softmax, [](Node* n) -> SROperator {
+  if (!n->matches(torch::schema(
+          "aten::softmax(Tensor self, int dim, ScalarType? dtype=None) -> Tensor"))) {
+    LogAndDumpSchema(n);
+    return nullptr;
+  }
+  return [](ProcessedNode* p_node) {
+    const auto& in_t = p_node->Input(0).toTensor();
+    const auto& dim = p_node->Input(1).toInt();
+    const auto& dtype = p_node->Input(2).toOptional<c10::ScalarType>();
+    if (p_node->Output(0).isNone()) {
+      p_node->Output(0) = at::native::softmax(in_t, dim, dtype);
+    } else {
+      auto& out_t = p_node->Output(0).toTensor();
+      fastResizeToZero(out_t);
+
+      auto half_to_float = in_t.scalar_type() == at::ScalarType::Half &&
+          dtype == at::ScalarType::Float;
+      at::cpu::_softmax_out(out_t, in_t, dim, half_to_float);
     }
   };
 });
