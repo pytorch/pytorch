@@ -26,7 +26,7 @@ env:
   PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
 
 concurrency:
-  group: libtorch-linux-xenial-cuda10.2-py3.6-gcc7-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name }}
+  group: libtorch-linux-xenial-cuda10.2-py3.6-gcc7-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
 jobs:

@@ -26,7 +26,7 @@ env:
   PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
 
 concurrency:
-  group: linux-xenial-py3.6-gcc7-bazel-test-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name }}
+  group: linux-xenial-py3.6-gcc7-bazel-test-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
 jobs:
