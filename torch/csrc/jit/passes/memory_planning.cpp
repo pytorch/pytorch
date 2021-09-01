@@ -7,20 +7,39 @@
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/runtime/static/ops.h>
+#include <limits>
 
 namespace torch {
 namespace jit {
+
+bool valid_add(int64_t a, int64_t b) {
+  static constexpr int64_t max = std::numeric_limits<int64_t>::max();
+  static constexpr int64_t min = std::numeric_limits<int64_t>::min();
+
+  if (((b > 0) && (a > max - b)) || ((b < 0) && (a < min - b)))
+    return false;
+  return true;
+}
+
+bool valid_sub(int64_t a, int64_t b) {
+  static constexpr int64_t max = std::numeric_limits<int64_t>::max();
+  static constexpr int64_t min = std::numeric_limits<int64_t>::min();
+
+  if (((b < 0) && (a > max + b)) || ((b > 0) && (a < min + b)))
+    return false;
+  return true;
+}
 
 int intersectArea(int64_t a, int64_t b, int64_t c, int64_t d) {
   TORCH_INTERNAL_ASSERT(a <= b);
   TORCH_INTERNAL_ASSERT(c <= d);
   int64_t outer = std::max(b, d) - std::min(a, c);
   int64_t l1 = (b - a), l2 = (d - c);
-  int64_t test = 0;
-  if (__builtin_saddll_overflow(l1, l2, &test)) {
+
+  if (!valid_add(l1, l2)) {
     // sum areas larger than possible outer area (thus overlap)
     return -1;
-  } else if (__builtin_ssubll_overflow(outer, l1 + l2, &test)) {
+  } else if (!valid_sub(outer, l1 + l2)) {
     // multipoint overlap (sum areas larger than outer area)
     return -1;
   } else if (outer - (l1 + l2) > 0) {
@@ -61,7 +80,7 @@ std::vector<MemAllocation> naive(
   return allocations;
 }
 
-c10::optional<int64_t> computeStorageSize(const Value& value) {
+c10::optional<size_t> computeStorageSize(const Value& value) {
   auto ttp = value.type()->cast<TensorType>();
   if (!ttp) {
     TORCH_WARN("out isn't a tensortype ", *value.type());
@@ -311,7 +330,6 @@ std::ostream& printAllocation(
     auto alloced_reg = allocations_map[lvr];
     out << val->debugName() << ": " << lvr << " " << alloced_reg << "\n";
   }
-
   return out;
 }
 
