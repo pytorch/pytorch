@@ -411,9 +411,9 @@ def gen_variable_type_func(
         if fn.info is None and not get_base_name(f) in RESET_GRAD_ACCUMULATOR \
                 and not get_base_name(f) in DONT_REQUIRE_DERIVATIVE \
                 and len(gen_differentiable_outputs(fn)) > 0 \
-                and not get_base_name(f) in DONT_ENFORCE_SAME_TENSOR_IMPL_OR_STORAGE \
-                and not get_base_name(f) in DONT_ENFORCE_STORAGE_IMPL_USE_COUNT \
-                and not get_base_name(f) in DONT_ENFORCE_TENSOR_IMPL_USE_COUNT:
+                and not cpp.name(f.func) in DONT_ENFORCE_SAME_TENSOR_IMPL_OR_STORAGE \
+                and not type_wrapper_name(f) in DONT_ENFORCE_STORAGE_IMPL_USE_COUNT \
+                and not type_wrapper_name(f) in DONT_ENFORCE_TENSOR_IMPL_USE_COUNT:
             # NOTE: [ Registering AutogradNotImplemented boxed kernel ]
             #
             # When there is no derivatives.yaml entry, we register a generic boxed
