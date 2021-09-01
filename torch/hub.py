@@ -266,9 +266,9 @@ def list(github, force_reload=False, skip_validation=False):
         force_reload (bool, optional): whether to discard the existing cache and force a fresh download.
             Default is ``False``.
         skip_validation (bool, optional): if ``False``, torchhub will check that the branch or commit
-            specified by the ``github`` argument properly exists. This will make requests to the GitHub
-            API; you can specify a non-default GitHub token by setting the ``ENV_GITHUB_TOKEN``
-            environment variable. Default is ``False``.
+            specified by the ``github`` argument properly belongs to the repo owner. This will make
+            requests to the GitHub API; you can specify a non-default GitHub token by setting the
+            ``GITHUB_TOKEN`` environment variable. Default is ``False``.
     Returns:
         list: The available callables entrypoint
 
@@ -301,9 +301,9 @@ def help(github, model, force_reload=False, skip_validation=False):
         force_reload (bool, optional): whether to discard the existing cache and force a fresh download.
             Default is ``False``.
         skip_validation (bool, optional): if ``False``, torchhub will check that the branch or commit
-            specified by the ``github`` argument properly exists. This will make requests to the GitHub
-            API; you can specify a non-default GitHub token by setting the ``ENV_GITHUB_TOKEN``
-            environment variable. Default is ``False``.
+            specified by the ``github`` argument properly belongs to the repo owner. This will make
+            requests to the GitHub API; you can specify a non-default GitHub token by setting the
+            ``GITHUB_TOKEN`` environment variable. Default is ``False``.
     Example:
         >>> print(torch.hub.help('pytorch/vision', 'resnet18', force_reload=True))
     """
@@ -355,9 +355,9 @@ def load(repo_or_dir, model, *args, **kwargs):
             muted. Does not have any effect if ``source = 'local'``.
             Default is ``True``.
         skip_validation (bool, optional): if ``False``, torchhub will check that the branch or commit
-            specified by the ``github`` argument properly exists. This will make requests to the GitHub
-            API; you can specify a non-default GitHub token by setting the ``ENV_GITHUB_TOKEN``
-            environment variable. Default is ``False``.
+            specified by the ``github`` argument properly belongs to the repo owner. This will make
+            requests to the GitHub API; you can specify a non-default GitHub token by setting the
+            ``GITHUB_TOKEN`` environment variable. Default is ``False``.
         **kwargs (optional): the corresponding kwargs for callable ``model``.
 
     Returns:
