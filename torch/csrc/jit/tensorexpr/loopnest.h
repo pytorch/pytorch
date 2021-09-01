@@ -538,19 +538,24 @@ class TORCH_API LoopNest {
   void vectorizeInnerLoops();
 
   void eliminateDeadStores();
-  void prepareForCodegen();
+  void prepareForCodegen(
+      const c10::optional<std::unordered_set<BufPtr>>& interm_bufs =
+          c10::nullopt);
 
   const std::unordered_set<BufPtr> getInputBufs() const;
   const std::unordered_set<BufPtr> getOutputBufs() const {
     return output_bufs_;
   }
+  std::unordered_set<BufPtr> getIntermediateBufs() const;
 
  private:
   void initialize(
       const std::vector<Tensor>& output_tensors,
       const std::vector<Tensor>& tensors_to_compute);
-  StmtPtr insertAllocFree(StmtPtr stmt);
-  const std::unordered_set<BufPtr> getIntermediateBufs() const;
+  StmtPtr insertAllocFree(
+      StmtPtr stmt,
+      const c10::optional<std::unordered_set<BufPtr>>& interm_bufs =
+          c10::nullopt);
 
   StmtPtr root_stmt_;
 
