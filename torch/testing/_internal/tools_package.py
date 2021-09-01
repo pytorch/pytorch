@@ -56,7 +56,7 @@ def _import_tools_module():
     tools = importlib.util.module_from_spec(spec)
     sys.modules['tools'] = tools
     # Execute the module, in case it executes any code upon import.
-    if spec.loader is not None:
+    if spec.loader is None:
         raise RuntimeError('Unexpected problem. Spec does not have a loader.')
     spec.loader.exec_module(tools)
 
