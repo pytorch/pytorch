@@ -70,6 +70,13 @@ class TensorProperties(object):
     memory_format: torch.memory_format = field(default=torch.contiguous_format)
     pin_memory: bool = False
 
+
+class MEM_FORMAT_ENCODING(Enum):
+    TORCH_CONTIGUOUS_FORMAT = 0
+    TORCH_CHANNELS_LAST = 1
+    TORCH_PRESERVE_FORMAT = 2
+
+
 @dataclass
 class ShardedTensorMetadata(object):
     """
@@ -93,11 +100,11 @@ class ShardedTensorMetadata(object):
         # Since torch.memory_format cannot be pickled!
         memory_format = self.tensor_properties.memory_format
         if memory_format == torch.contiguous_format:
-            mem_format_encoding = 0
+            mem_format_encoding = MEM_FORMAT_ENCODING.TORCH_CONTIGUOUS_FORMAT
         elif memory_format == torch.channels_last:
-            mem_format_encoding = 1
+            mem_format_encoding = MEM_FORMAT_ENCODING.TORCH_CHANNELS_LAST
         elif memory_format == torch.preserve_format:
-            mem_format_encoding = 1
+            mem_format_encoding = MEM_FORMAT_ENCODING.TORCH_PRESERVE_FORMAT
         else:
             raise RuntimeError(f'Invalid torch.memory_format: {memory_format}')
 
@@ -118,11 +125,11 @@ class ShardedTensorMetadata(object):
     ):
         (self.shards_metadata, self.size, dtype, layout, requires_grad, mem_format_encoding, pin_memory) = state
 
-        if mem_format_encoding == 0:
+        if mem_format_encoding == MEM_FORMAT_ENCODING.TORCH_CONTIGUOUS_FORMAT:
             memory_format = torch.contiguous_format
-        elif mem_format_encoding == 1:
+        elif mem_format_encoding == MEM_FORMAT_ENCODING.TORCH_CHANNELS_LAST:
             memory_format = torch.channels_last
-        elif mem_format_encoding == 2:
+        elif mem_format_encoding == MEM_FORMAT_ENCODING.TORCH_PRESERVE_FORMAT:
             memory_format = torch.preserve_format
         else:
             raise RuntimeError(f'Invalid torch.memory_format encoding: {mem_format_encoding}')
