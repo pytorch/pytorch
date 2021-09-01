@@ -784,7 +784,8 @@ class TestJit(JitCommonTestCase):
                         if supports_tracing:
                             out = variant(get_sample(), *sample.args, **sample.kwargs)
 
-                            # TODO: handle multiple outputs
+                            # right now, tuple of outputs and tensor output supported
+                            # TODO: list of tensor outputs
                             tuple_of_tensors = isinstance(out, tuple) and all([isinstance(elem, torch.Tensor) for elem in out])
 
                             if isinstance(out, torch.Tensor) or tuple_of_tensors:

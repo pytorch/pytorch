@@ -142,18 +142,6 @@ bool isListOfInts(const TypePtr& type) {
       type->cast<ListType>()->getElementType()->cast<IntType>();
 }
 
-TupleTypePtr mapTensorTupleType(
-    const TupleTypePtr& tt,
-    const std::vector<c10::SymbolicShape>& tensor_shapes) {
-  std::vector<TypePtr> types;
-  for (size_t i = 0; i < tensor_shapes.size(); ++i) {
-    auto existing_type = tt->elements().at(i);
-    types.push_back(existing_type->expect<TensorType>()->withSymbolicShapes(
-        tensor_shapes[i]));
-  }
-  return TupleType::create(types);
-}
-
 c10::optional<size_t> normIndex(int64_t index, size_t len) {
   if (index < 0) {
     index = index + len;
@@ -478,12 +466,12 @@ struct SymbolicShapeAnalyzer {
       auto int_list = toIValue(list)->toIntVector();
       return c10::SymbolicShape(int_list);
     }
+    // We need a list construct or a constant output
+    // that is not written to in order to analyze the output shape
     if (list->node()->kind() != prim::ListConstruct || db.hasWriters(list)) {
       GRAPH_DEBUG("Could not extract shape ", getHeader(node_));
       return c10::SymbolicShape();
     }
-    // If it is not a single list construct or constant, bail,
-    // otherwise we cannot analyze its output and it might be modified
     Node* list_construct = list->node();
     std::vector<c10::optional<int64_t>> output_shape;
     for (Value* input : list_construct->inputs()) {
