@@ -1,5 +1,6 @@
 from inspect import signature
 from copy import deepcopy
+import tempfile
 
 import torch
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
@@ -110,6 +111,41 @@ class TestModule(TestCase):
                         self.assertEqual(
                             buffer.dtype, dtype,
                             f'Buffer {name} is of dtype {buffer.dtype} instead of the expected dtype {dtype}')
+
+    @modules(module_db)
+    def test_check_inplace(self, device, dtype, module_info):
+        # Check if the inplace variant of the module gives the same result as the out of place.
+        module_cls = module_info.module_cls
+        if 'inplace' not in signature(module_cls).parameters:
+            return
+
+        # check_inplace doesn't support multiple input tensors, since we don't have any modules
+        # that modify the inputs in-place and that accept more than one input
+        module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
+                                                       requires_grad=True)
+        for module_input in module_inputs:
+            if module_input.forward_input is None:
+                continue
+
+            args, kwargs = module_input.constructor_input.args, module_input.constructor_input.kwargs
+
+            with freeze_rng_state():
+                # === Instantiate the module. ===
+                args, kwargs = module_input.constructor_input.args, module_input.constructor_input.kwargs
+                m = module_cls(*args, **kwargs)
+                m.to(device).to(dtype)
+
+                # === Do forward pass. ===
+                args, kwargs = module_input.forward_input.args, module_input.forward_input.kwargs
+                output = m(*args, **kwargs)
+
+                # === Check unpickled module gives the same output. ===
+                with tempfile.TemporaryFile() as f:
+                    torch.save(m, f)
+                    f.seek(0)
+                    m_copy = torch.load(f)
+                    output_from_copy = m_copy(*args, **kwargs)
+                    self.assertEqual(output, output_from_copy)
 
     @modules(module_db)
     def test_check_inplace(self, device, dtype, module_info):
