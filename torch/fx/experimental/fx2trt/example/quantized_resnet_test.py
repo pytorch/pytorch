@@ -12,7 +12,7 @@ rn18 = models.resnet18().eval()
 def build_fp16_trt(rn18):
     rn18 = copy.deepcopy(rn18)
     rn18 = acc_tracer.trace(rn18, [torch.randn(1, 3, 224, 224)])  # type: ignore[attr-defined]
-    interp = TRTInterpreter(rn18, [InputTensorSpec(torch.Size([3, 224, 224]), torch.float, has_batch_dim=False)])
+    interp = TRTInterpreter(rn18, [InputTensorSpec(torch.Size([3, 224, 224]), torch.float, has_batch_dim=False)], explicit_precision=True)
     engine, input_names, output_names = interp.run(fp16_mode=True)
     return TRTModule(engine, input_names, output_names)
 
@@ -32,12 +32,16 @@ def build_int8_trt(rn18):
     for _ in range(10):
         prepared(data)
     quantized_rn18 = convert_fx(prepared, is_reference=True)
+    ref_res = quantized_rn18(data)
     print("quantized model:", quantized_rn18)
 
     quantized_rn18 = acc_tracer.trace(quantized_rn18, [data])  # type: ignore[attr-defined]
-    interp = TRTInterpreter(quantized_rn18, [InputTensorSpec(data.shape[1:], torch.float, has_batch_dim=False)])
+    interp = TRTInterpreter(quantized_rn18, [InputTensorSpec(data.shape, torch.float, has_batch_dim=True)], explicit_batch_dimension = True, explicit_precision=True)
     engine, input_names, output_names = interp.run(fp16_mode=False, int8_mode=True)
-    return TRTModule(engine, input_names, output_names)
+    trt_mod = TRTModule(engine, input_names, output_names)
+    trt_res = trt_mod(data.cuda())
+    print("result diff", ref_res - trt_res.cpu())
+    return trt_mod
 
 @torch.no_grad()
 def build_int8_trt_implicit_quant(rn18):
@@ -54,14 +58,19 @@ def build_int8_trt_implicit_quant(rn18):
     for _ in range(10):
         prepared(data)
     quantized_rn18 = convert_fx(prepared, is_reference=True)
+    ref_res = quantized_rn18(data)
 
     # Build trt int8 model
     traced_rn18 = torch.fx.symbolic_trace(quantized_rn18)
     shape_prop.ShapeProp(traced_rn18).propagate(data)
     traced_rn18 = NormalizeArgs(traced_rn18).transform()
+    print("interpreter run")
     interp = TRTInterpreter(traced_rn18, InputTensorSpec.from_tensors([data]))
     engine, input_names, output_names = interp.run(fp16_mode=False, int8_mode=True, strict_type_constraints=True)
+    print("construct TRTModule")
     trt_mod = TRTModule(engine, input_names, output_names)
+    trt_res = trt_mod(data.cuda())
+    print("result equal?", torch.equal(ref_res, trt_res))
     return trt_mod
 
 class M(torch.nn.Module):
@@ -73,27 +82,29 @@ class M(torch.nn.Module):
         out = self.conv(x)
         # out = torch.nn.functional.relu(out)
         out += x
-        out += out
+        # out += out
         out = torch.nn.functional.relu(out)
         return out
 
-# rn18 = M().eval()
+rn18 = M().eval()
 # rn18 = rn18.layer1
+print("building int8 graph")
 int8_trt = build_int8_trt(rn18)
-implicit_int8_trt = build_int8_trt_implicit_quant(rn18)
-fp16_trt = build_fp16_trt(rn18)
+# implicit_int8_trt = build_int8_trt_implicit_quant(rn18)
+# fp16_trt = build_fp16_trt(rn18)
 x = torch.randn(5, 3, 224, 224, device="cuda")
 rn18 = rn18.cuda()
 
+print("benchmarking")
 import time
 NITER = 100
 
-torch.cuda.synchronize()
-s = time.time()
-for _ in range(NITER):
-    fp16_trt(x)
-    torch.cuda.synchronize()
-print('trt fp16 time (ms/iter)', (time.time() - s) / NITER * 1000)
+# torch.cuda.synchronize()
+# s = time.time()
+# for _ in range(NITER):
+#     fp16_trt(x)
+#     torch.cuda.synchronize()
+# print('trt fp16 time (ms/iter)', (time.time() - s) / NITER * 1000)
 
 torch.cuda.synchronize()
 s = time.time()
@@ -102,12 +113,12 @@ for _ in range(NITER):
     torch.cuda.synchronize()
 print('trt int8 time (ms/iter)', (time.time() - s) / NITER * 1000)
 
-torch.cuda.synchronize()
-s = time.time()
-for _ in range(NITER):
-    implicit_int8_trt(x)
-    torch.cuda.synchronize()
-print('trt implicit int8 time (ms/iter)', (time.time() - s) / NITER * 1000)
+# torch.cuda.synchronize()
+# s = time.time()
+# for _ in range(NITER):
+#     implicit_int8_trt(x)
+#     torch.cuda.synchronize()
+# print('trt implicit int8 time (ms/iter)', (time.time() - s) / NITER * 1000)
 
 torch.cuda.synchronize()
 s = time.time()

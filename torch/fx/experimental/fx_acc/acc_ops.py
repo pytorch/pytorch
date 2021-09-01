@@ -1161,6 +1161,50 @@ def packed_quantized_linear_mapper(
         new_node.meta = node.meta
         return new_node
 
+@register_custom_acc_mapper_fn(
+    op_and_target=("call_module", nn.quantized._reference.Linear),
+    arg_replacement_tuples=[
+        ("input", "input"),
+    ],
+)
+def reference_quantized_linear_mapper(
+    node: torch.fx.Node, mod: nn.Module
+) -> torch.fx.Node:
+    """
+    Mapping from quantized_linear module to acc_op.linear. We unpack weight and bias
+    in this mapper and pass them directly to linear node.
+    """
+    linear_module = dict(mod.named_modules())[node.target]
+    prefix = node.target.replace(".", "_")
+    weight_name = f"{prefix}_weight"
+    bias_name = f"{prefix}_bias"
+
+    # Store weight and bias in the main module
+    mod.register_buffer(weight_name, linear_module.weight)
+    if linear_module.bias is not None:
+        mod.register_buffer(bias_name, linear_module.bias)
+
+    with node.graph.inserting_before(node):
+        # Insert get_attr nodes for weight and bias
+        get_weight = node.graph.get_attr(weight_name)
+        get_weight.meta["tensor_meta"] = extract_tensor_metadata(linear_module.weight)
+
+        get_bias = None
+        if linear_module.bias is not None:
+            get_bias = node.graph.get_attr(bias_name)
+            get_bias.meta["tensor_meta"] = extract_tensor_metadata(linear_module.bias)
+
+        # Create kwargs for acc_op.quantized_linear
+        kwargs = {
+            "input": node.kwargs["input"],
+            "weight": get_weight,
+            "bias": get_bias,
+            "acc_out_ty": acc_utils.build_raw_tensor_meta(),
+        }
+
+        new_node = node.graph.call_function(linear, kwargs=kwargs)
+        new_node.meta = node.meta
+        return new_node
 
 @register_custom_acc_mapper_fn(
     op_and_target=("call_module", nn.quantized.Conv2d),
@@ -1214,6 +1258,55 @@ def packed_quantized_conv2d_mapper(
         new_node.meta = node.meta
         return new_node
 
+@register_custom_acc_mapper_fn(
+    op_and_target=("call_module", nn.quantized._reference.Conv2d),
+    arg_replacement_tuples=[
+        ("input", "input"),
+    ],
+)
+def reference_quantized_conv2d_mapper(
+    node: torch.fx.Node, mod: nn.Module
+) -> torch.fx.Node:
+    """
+    Mapping from quantized reference Conv2d module to acc_op.conv. We unpack all the parameters
+    in this mapper and pass them directly to conv2d node.
+    """
+    conv_module = dict(mod.named_modules())[node.target]
+    prefix = node.target.replace(".", "_")
+    weight_name = f"{prefix}_weight"
+    bias_name = f"{prefix}_bias"
+
+    # Store weight and bias in the main module
+    mod.register_buffer(weight_name, conv_module.weight)
+    if conv_module.bias is not None:
+        mod.register_buffer(bias_name, conv_module.bias)
+
+    with node.graph.inserting_before(node):
+        # Insert get_attr nodes for weight and bias
+        get_weight = node.graph.get_attr(weight_name)
+        get_weight.meta["tensor_meta"] = extract_tensor_metadata(conv_module.weight)
+
+        get_bias = None
+        if conv_module.bias is not None:
+            get_bias = node.graph.get_attr(bias_name)
+            get_bias.meta["tensor_meta"] = extract_tensor_metadata(conv_module.bias)
+
+        # Create kwargs for acc_op.conv
+        kwargs = {
+            "input": node.kwargs["input"],
+            "weight": get_weight,
+            "bias": get_bias,
+            "stride": conv_module.stride,
+            "padding": conv_module.padding,
+            "dilation": conv_module.dilation,
+            "groups": conv_module.groups,
+            "padding_mode": conv_module.padding_mode,
+            "acc_out_ty": acc_utils.build_raw_tensor_meta(),
+        }
+
+        new_node = node.graph.call_function(conv2d, kwargs=kwargs)
+        new_node.meta = node.meta
+        return new_node
 
 @register_custom_acc_mapper_fn(
     op_and_target=("call_function", torch.ops.quantized.add_relu),

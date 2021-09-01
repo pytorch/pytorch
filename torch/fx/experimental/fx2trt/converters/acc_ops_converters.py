@@ -241,16 +241,26 @@ def acc_ops_conv2d(network, target, args, kwargs, name):
     if has_dynamic_shape(input_val.shape):
         assert input_val.shape[1] != -1, "Channel dim can't be dynamic for convolution."
 
-    kernel = to_numpy(kwargs["weight"])
+    weight = get_trt_tensor(network, kwargs["weight"], f"{name}_weight")
+    print("acc ops conv2d")
+    print("weight:", weight.shape)
+    print("weight:", dir(weight.shape))
+    print("weight:", weight)
+    dummy_weight = to_numpy(torch.empty(tuple(weight.shape)))
+    # TODO: assert bias is Tensor
     bias = to_numpy(kwargs["bias"])
 
     layer = network.add_convolution(
         input=input_val,
-        num_output_maps=kernel.shape[0],
-        kernel_shape=kernel.shape[2:],
-        kernel=kernel,
+        num_output_maps=dummy_weight.shape[0],
+        kernel_shape=dummy_weight.shape[2:],
+        kernel=dummy_weight,
         bias=bias,
     )
+
+    print("layer dir:", dir(layer))
+    layer.set_input(1, weight)
+    print("after set input call")
 
     layer.name = name
     layer.stride = kwargs["stride"]
@@ -1307,7 +1317,9 @@ def acc_ops_permute(network, target, args, kwargs, name):
 
 @tensorrt_converter(acc_ops.quantize_per_tensor)
 def acc_ops_quantize_per_tensor(network, target, args, kwargs, name):
-    input_val = kwargs["input"]
+    # input_val = kwargs["input"]
+    input_val = get_trt_tensor(network, kwargs["input"], f"{name}_input")
+
 
     if not isinstance(input_val, trt.tensorrt.ITensor):
         raise RuntimeError(f"{name} received input {input_val} that is not part "
