@@ -29,6 +29,11 @@ struct TORCH_API SparseTensorImpl : public TensorImpl {
   // because many algorithms proceed by merging two sorted lists (of indices).
   bool coalesced_ = false;
 
+  // compute_numel with integer multiplication overflow check, see gh-57542
+  void refresh_numel() {
+    TensorImpl::safe_refresh_numel();
+  }
+
 public:
   // Public for now...
   explicit SparseTensorImpl(at::DispatchKeySet, const caffe2::TypeMeta);

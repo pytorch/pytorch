@@ -18,14 +18,18 @@ RESOURCES = [
 ]
 
 
-def report_download_progress(chunk_number, chunk_size, file_size):
+def report_download_progress(
+    chunk_number: int,
+    chunk_size: int,
+    file_size: int,
+) -> None:
     if file_size != -1:
         percent = min(1, (chunk_number * chunk_size) / file_size)
         bar = '#' * int(64 * percent)
         sys.stdout.write('\r0% |{:<64}| {}%'.format(bar, int(percent * 100)))
 
 
-def download(destination_path, resource, quiet):
+def download(destination_path: str, resource: str, quiet: bool) -> None:
     if os.path.exists(destination_path):
         if not quiet:
             print('{} already exists, skipping ...'.format(destination_path))
@@ -36,7 +40,7 @@ def download(destination_path, resource, quiet):
             try:
                 hook = None if quiet else report_download_progress
                 urlretrieve(url, destination_path, reporthook=hook)
-            except URLError as e:
+            except (URLError, ConnectionError) as e:
                 print('Failed to download (trying next):\n{}'.format(e))
                 continue
             finally:
@@ -48,7 +52,7 @@ def download(destination_path, resource, quiet):
             raise RuntimeError('Error downloading resource!')
 
 
-def unzip(zipped_path, quiet):
+def unzip(zipped_path: str, quiet: bool) -> None:
     unzipped_path = os.path.splitext(zipped_path)[0]
     if os.path.exists(unzipped_path):
         if not quiet:
@@ -61,7 +65,7 @@ def unzip(zipped_path, quiet):
                 print('Unzipped {} ...'.format(zipped_path))
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         description='Download the MNIST dataset from the internet')
     parser.add_argument(

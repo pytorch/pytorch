@@ -25,37 +25,56 @@ namespace jit {
 
 namespace {
 bool validate_debug_info(
-    const DebugInfoPair& pre_serialize,
-    const DebugInfoPair& post_serialize) {
-  auto sr1 = pre_serialize.first;
-  auto sr2 = post_serialize.first;
+    const DebugInfoTuple& pre_serialize,
+    const DebugInfoTuple& post_serialize) {
+  auto sr1 = std::get<kDebugInfoTupleSourceRangeIndex>(pre_serialize);
+  auto sr2 = std::get<kDebugInfoTupleSourceRangeIndex>(post_serialize);
   if (sr1 != sr2) {
     return false;
   }
-  if (!pre_serialize.second.defined()) {
-    return !post_serialize.second.defined();
+  auto csptr1 = std::get<kDebugInfoTupleInlinedCSIndex>(pre_serialize);
+  auto csptr2 = std::get<kDebugInfoTupleInlinedCSIndex>(post_serialize);
+  if (!csptr1.defined()) {
+    return !csptr2.defined();
   }
-  if (!post_serialize.second.defined()) {
+  if (!csptr2.defined()) {
     return false;
   }
-  auto vec1 = pre_serialize.second->vec();
-  auto vec2 = post_serialize.second->vec();
+  auto vec1 = csptr1->vec();
+  auto vec2 = csptr2->vec();
   if (vec1.size() != vec2.size()) {
     return false;
   }
-  for (size_t i = 0; i < vec1.size(); i++) {
-    auto rhs_sr = std::get<1>(vec1[i]);
-    auto lhs_sr = std::get<1>(vec2[i]);
-    auto rhs_module = std::get<2>(vec1[i]);
-    auto lhs_module = std::get<2>(vec2[i]);
+  while (csptr1) {
+    auto rhs_sr = csptr1->source_range();
+    auto lhs_sr = csptr2->source_range();
+    auto rhs_module = csptr1->module_instance();
+    auto lhs_module = csptr2->module_instance();
+    std::string rhs_fn_name, lhs_fn_name;
+    if (csptr1->function()) {
+      rhs_fn_name = csptr1->function()->name();
+    } else {
+      rhs_fn_name = csptr1->function_name();
+    }
+    if (csptr2->function()) {
+      lhs_fn_name = csptr2->function()->name();
+    } else {
+      lhs_fn_name = csptr2->function_name();
+    }
     if (!((rhs_module.has_value() == lhs_module.has_value()) &&
           (rhs_module.has_value() &&
            (rhs_module.value().class_type()->name().value() ==
             lhs_module.value().class_type()->name().value()) &&
            (rhs_module.value().instance_name() ==
             lhs_module.value().instance_name())) &&
-          (rhs_sr == lhs_sr))) {
+          (rhs_fn_name == lhs_fn_name) && (rhs_sr == lhs_sr))) {
       return false;
+    }
+    if (csptr1->callee()) {
+      csptr1 = csptr1->callee().value();
+      csptr2 = csptr2->callee().value();
+    } else {
+      csptr1 = c10::intrusive_ptr<InlinedCallStack>();
     }
   }
   return true;
@@ -81,7 +100,7 @@ TEST(CSDebugInfoSerializaitionTest, TwoSubmodules) {
       return self.A0.forward(x) + self.B0.forward(x)
   )JIT");
 
-  BackendDebugHandleManager debug_handle_manager;
+  BackendDebugInfoRecorder debug_info_recorder;
   auto graph = c.get_method("forward").graph();
   Inline(*graph);
   std::stack<Block*> blocks_to_visit;
@@ -100,7 +119,7 @@ TEST(CSDebugInfoSerializaitionTest, TwoSubmodules) {
       source_range_tags[n->sourceRange()] = source_range_tag;
       source_range_map[source_range_tag] = n->sourceRange();
       source_range_tag++;
-      debug_handle_manager.getNextDebugHandleForInlinedCallStackPtr(n);
+      debug_info_recorder.getNextDebugHandle(n);
       if (n->callstack().has_value()) {
         for (const auto& e : n->callstack().value()->vec()) {
           auto sr = std::get<1>(e);
@@ -111,7 +130,7 @@ TEST(CSDebugInfoSerializaitionTest, TwoSubmodules) {
       }
     }
   }
-  auto debug_handle_cs_ptr_map = debug_handle_manager.getCallStackPtrMap();
+  auto debug_handle_cs_ptr_map = debug_info_recorder.stopRecording();
   CallStackDebugInfoPickler cs_debug_info_pickler;
   auto cs_data =
       cs_debug_info_pickler.pickle(debug_handle_cs_ptr_map, source_range_tags);

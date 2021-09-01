@@ -4,7 +4,6 @@
 #include <cassert>
 #include <complex>
 #include <cstdlib>
-#include <iostream>
 #include <memory>
 #include <mutex>
 #include <type_traits>
@@ -469,7 +468,7 @@ class C10_API TypeMeta final {
    * convert ScalarType enum values to TypeMeta handles
    */
   static inline caffe2::TypeMeta fromScalarType(ScalarType scalar_type) {
-    const size_t index = static_cast<uint16_t>(scalar_type);
+    const auto index = static_cast<uint16_t>(scalar_type);
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
         index < NumScalarTypes,
         "Unrecognized Scalartype ",
@@ -608,6 +607,13 @@ inline std::ostream& operator<<(
   EXPORT_IF_NOT_GCC uint16_t TypeMeta::_typeMetaData<T>() noexcept { \
     static const uint16_t index = addTypeMetaData<T>();              \
     return index;                                                    \
+  }
+
+#define CAFFE_KNOWN_TYPE_NOEXPORT(T)                    \
+  template <>                                           \
+  uint16_t TypeMeta::_typeMetaData<T>() noexcept {      \
+    static const uint16_t index = addTypeMetaData<T>(); \
+    return index;                                       \
   }
 
 } // namespace caffe2

@@ -10,6 +10,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorUtils.h>
+#include <ATen/native/Fill.h>
 
 #include <numeric>
 #include <type_traits>
@@ -215,18 +216,37 @@ Tensor ctc_loss_backward_cpu_template(const Tensor& grad_out, const Tensor& log_
   auto grad_a_global = gp.accessor<scalar_t, 3>();
   auto targets_data = targets.data_ptr<target_t>();
 
+  auto create_fill_iterator = [](const Tensor& tensor, IntArrayRef squash_dims) {
+    return TensorIteratorConfig()
+        .set_check_mem_overlap(false)  // Fill is idempotent, so overlap is okay
+        .check_all_same_dtype(false)
+        .add_output(tensor)
+        .resize_outputs(false)
+        .declare_static_shape(tensor.sizes(), squash_dims)
+        .build();
+  };
+  const auto fill_iter = create_fill_iterator(grad, /*squash_dims=*/1);
+  const auto fill_1d_iter = create_fill_iterator(grad, /*squash_dims=*/{0, 1});
+  const auto fill_log_beta_1d_iter = create_fill_iterator(log_beta, /*squash_dims=*/{0, 1});
+
   at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
+    TensorIterator fill_iter_local(fill_iter);
+    TensorIterator fill_1d_iter_local(fill_1d_iter);
+    TensorIterator fill_log_beta_1d_iter_local(fill_log_beta_1d_iter);
+
     for (int64_t b = start; b < end; b++) {
       scalar_t nll = neg_log_likelihood.accessor<scalar_t, 1>()[b];
-      if (zero_infinity &&  nll == std::numeric_limits<scalar_t>::infinity()) {
-        grad.narrow(1, b, 1).zero_();
+      auto grad_a = grad_a_global[b];
+      if (zero_infinity && nll == std::numeric_limits<scalar_t>::infinity()) {
+        // grad_batch.zero_();
+        fill_iter_local.unsafe_replace_operand(0, grad_a.data());
+        fill_stub(kCPU, fill_iter_local, 0);
         continue;
       }
 
       auto log_probs_a = log_probs_a_global[b];
       auto log_alpha_a = log_alpha_a_global[b];
       auto log_beta_a = log_beta_a_global[b];
-      auto grad_a = grad_a_global[b];
       int64_t input_length = input_lengths[b];
       int64_t target_length = target_lengths[b];
       int64_t tg_batch_offset = tg_batch_offsets[b];
@@ -235,7 +255,11 @@ Tensor ctc_loss_backward_cpu_template(const Tensor& grad_out, const Tensor& log_
       // here we do the fill for each batch item separately, as the input lengths will differ, so the t in which
       // we start varies
       if (input_length > 0) {
-        log_beta.narrow(0, b, 1).narrow(1, input_length-1, 1).fill_(neginf);
+        // log_beta.select(0, b).select(1, input_length-1).fill_(neginf);
+        fill_log_beta_1d_iter_local.unsafe_replace_operand(
+            0, log_beta_a[input_length - 1].data());
+        fill_stub(kCPU, fill_log_beta_1d_iter_local, neginf);
+
         log_beta_a[input_length-1][2*target_length] = log_probs_a[input_length-1][BLANK];
         grad_a[input_length-1][BLANK] = log_alpha_a[input_length-1][2*target_length] + log_beta_a[input_length-1][2*target_length];
 
@@ -297,7 +321,7 @@ Tensor ctc_loss_backward_cpu_template(const Tensor& grad_out, const Tensor& log_
       // now we wrap up the calculation by adding in the remaining items of eq (16)
       // this could be a great target for further vectorization.
       // grad is the output gradient, nll is the loss. Note that the likelihood -nll is the Z of eq (16)
-      scalar_t gr =  grad_out.accessor<scalar_t, 1>()[b];
+      scalar_t gr = grad_out.accessor<scalar_t, 1>()[b];
       for (int64_t t = 0; t < input_length; t++) { // or go for the full thing?
         for (int64_t c = 0; c < num_labels; c++) {
           scalar_t& res = grad_a[t][c];
@@ -305,9 +329,12 @@ Tensor ctc_loss_backward_cpu_template(const Tensor& grad_out, const Tensor& log_
           res = (std::exp(lp)-std::exp(res + nll - lp)) * gr;
         }
       }
+
       // zero the remainder
-      if (input_length < max_input_length) {
-        grad.narrow(0, input_length, max_input_length - input_length).narrow(1, b, 1).zero_();
+      for (auto l : c10::irange(input_length, max_input_length)) {
+        // grad_batch.select(0, l).zero_();
+        fill_1d_iter_local.unsafe_replace_operand(0, grad_a[l].data());
+        fill_stub(kCPU, fill_1d_iter_local, 0);
       }
     }
   });

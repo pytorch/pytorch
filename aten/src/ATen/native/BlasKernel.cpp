@@ -2,7 +2,6 @@
 #include <algorithm>
 #include <ATen/ATen.h>
 #include <ATen/Config.h>
-#include <TH/THGeneral.h>
 
 #if AT_BUILD_WITH_BLAS()
 extern "C" double ddot_(int *n, double *x, int *incx, double *y, int *incy);
@@ -11,13 +10,13 @@ extern "C" void sscal_(int *n, float *a, float *x, int *incx);
 extern "C" void dgemv_(char *trans, int *m, int *n, double *alpha, double *a, int *lda, double *x, int *incx, double *beta, double *y, int *incy);
 extern "C" void sgemv_(char *trans, int *m, int *n, float *alpha, float *a, int *lda, float *x, int *incx, float *beta, float *y, int *incy);
 
-#ifdef BLAS_F2C
+#if AT_BLAS_F2C()
 # define ffloat double
 #else
 # define ffloat float
 #endif
 
-#ifdef BLAS_USE_CBLAS_DOT
+#if AT_BLAS_USE_CBLAS_DOT()
   extern "C" float cblas_sdot(const int n, const float *x, const int incx, const float *y, const int incy);
   extern "C" void cblas_cdotu_sub(const int n, const void *x, const int incx, const void *y, const int incy, void *dotu);
   extern "C" void cblas_zdotu_sub(const int n, const void *x, const int incx, const void *y, const int incy, void *dotu);
@@ -51,7 +50,7 @@ extern "C" void sgemv_(char *trans, int *m, int *n, float *alpha, float *a, int 
   extern "C" void zdotu_(std::complex<double> *res, int *n, std::complex<double> *x, int *incx, std::complex<double> *y, int *incy);
   extern "C" void cdotc_(std::complex<float> *res, int *n, std::complex<float> *x, int *incx, std::complex<float> *y, int *incy);
   extern "C" void zdotc_(std::complex<double> *res, int *n, std::complex<double> *x, int *incx, std::complex<double> *y, int *incy);
-#endif // BLAS_USE_CBLAS_DOT
+#endif // AT_BLAS_USE_CBLAS_DOT
 #endif // AT_BUILD_WITH_BLAS
 
 namespace at { namespace native {

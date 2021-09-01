@@ -120,6 +120,8 @@ class SpectralNorm:
 
         fn = SpectralNorm(name, n_power_iterations, dim, eps)
         weight = module._parameters[name]
+        if weight is None:
+            raise ValueError(f'`SpectralNorm` cannot be applied as parameter `{name}` is None')
         if isinstance(weight, torch.nn.parameter.UninitializedParameter):
             raise ValueError(
                 'The module passed to `SpectralNorm` can\'t have uninitialized parameters. '
@@ -250,6 +252,14 @@ def spectral_norm(module: T_module,
 
     Returns:
         The original module with the spectral norm hook
+
+    .. note::
+        This function has been reimplemented as
+        :func:`torch.nn.utils.parametrizations.spectral_norm` using the new
+        parametrization functionality in
+        :func:`torch.nn.utils.parametrize.register_parametrization`. Please use
+        the newer version. This function will be deprecated in a future version
+        of PyTorch.
 
     Example::
 

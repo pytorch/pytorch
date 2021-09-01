@@ -677,8 +677,8 @@ inline constexpr auto invoke(F&& f, Args&&... args) MPARK_RETURN(
       void_t<decltype(lib::invoke(std::declval<F>(), std::declval<Args>()...))>,
       F,
       Args...>
-      : identity<decltype(
-            lib::invoke(std::declval<F>(), std::declval<Args>()...))> {};
+      : identity<decltype(lib::invoke(
+            std::declval<F>(), std::declval<Args>()...))> {};
 
 } // namespace detail_
 
@@ -933,7 +933,7 @@ namespace c10 {
 
 class bad_variant_access : public std::exception {
  public:
-  virtual const char* what() const noexcept override {
+  const char* what() const noexcept override {
     return "bad_variant_access";
   }
 };
@@ -2226,7 +2226,7 @@ class impl : public copy_assignment<traits<Ts...>> {
 
  public:
   MPARK_INHERITING_CTOR(impl, super)
-  using super::operator=;
+  impl& operator=(const impl& other) = default;
 
   template <std::size_t I, typename Arg>
   inline void assign(Arg&& arg) {

@@ -1,5 +1,5 @@
-import math
 import torch
+from . import _functional as F
 from ..optimizer import Optimizer
 from collections import defaultdict
 
@@ -69,27 +69,14 @@ class ASGD(Optimizer):
                     state['step'] += 1
                     states.append(state)
 
-            if group['weight_decay'] != 0:
-                torch._foreach_add_(grads, params_with_grad, alpha=group['weight_decay'])
-
-            # decay term
-            torch._foreach_mul_(params_with_grad, 1 - group['lambd'] * state['eta'])
-
-            # update parameter
-            torch._foreach_add_(params_with_grad, grads, alpha=-state['eta'])
-
-            # averaging
-            for i in range(len(states)):
-                if states[i]['mu'] != 1:
-                    states[i]['ax'].add_(params_with_grad[i].sub(states[i]['ax']).mul(states[i]['mu']))
-                else:
-                    states[i]['ax'].copy_(params_with_grad[i])
-
-            # update eta and mu
-            for state in states:
-                state['eta'] = (group['lr'] /
-                                math.pow((1 + group['lambd'] * group['lr'] * state['step']), group['alpha']))
-                state['mu'] = 1 / max(1, state['step'] - group['t0'])
+            F.asgd(params_with_grad,
+                   grads,
+                   states,
+                   lambd=group['lambd'],
+                   lr=group['lr'],
+                   t0=group['t0'],
+                   alpha=group['alpha'],
+                   weight_decay=group['weight_decay'])
 
         return loss
 

@@ -20,11 +20,11 @@ Source Code: [ProcessGroup.cpp](../lib/c10d/ProcessGroup.cpp) and  [ProcessGroup
 
 #### Process Group Backends
 
-We currently offer three backends for Process Groups: [ProcessGroupGloo.hpp](../lib/c10d/ProcessGroupGloo.hpp), [ProcessGroupMPI.hpp](../lib/c10d/ProcessGroupMPI.hpp) and [ProcessGroupNCCL.hpp](../torch/lib/c10d/ProcessGroupNCCL.hpp)
+We currently offer three backends for Process Groups: [ProcessGroupGloo.hpp](../lib/c10d/ProcessGroupGloo.hpp), [ProcessGroupMPI.hpp](../lib/c10d/ProcessGroupMPI.hpp) and [ProcessGroupNCCL.hpp](../lib/c10d/ProcessGroupNCCL.hpp)
 
 #### Store
 
-Processes discover each other through a rendezvous process on a common Store (See [Store.hpp](../torch/lib/c10d/Store.hpp) for the interface and [FileStore.hpp](../torch/lib/c10d/FileStore.hpp), [TCPStore.hpp](../torch/lib/c10d/TCPStore.hpp) and [PrefixStore.hpp](../torch/lib/c10d/PrefixStore.hpp) for implementations.)
+Processes discover each other through a rendezvous process on a common Store (See [Store.hpp](../lib/c10d/Store.hpp) for the interface and [FileStore.hpp](../lib/c10d/FileStore.hpp), [TCPStore.hpp](../lib/c10d/TCPStore.hpp) and [PrefixStore.hpp](../lib/c10d/PrefixStore.hpp) for implementations.)
 
 ### Distributed Data Parallel
 
@@ -52,7 +52,7 @@ The core C++ interface of the RPC framework can be found in [rpc_agent.h](../csr
 
 ### Remote Reference (RRef)
 
-Most of the APIs for RRefs can be found in [rpc/api.py](rpc/api.py). The C++ interface can be found in [rref_interface.h](../../aten/src/ATen/core/rref_interface.h) and implementations in [rref_impl.h](../torch/csrc/distributed/rpc/rref_impl.h) and [rref_context.h](../torch/csrc/distributed/rpc/rref_context.h).
+Most of the APIs for RRefs can be found in [rpc/api.py](rpc/api.py). The C++ interface can be found in [rref_interface.h](../../aten/src/ATen/core/rref_interface.h) and implementations in [rref_impl.h](../csrc/distributed/rpc/rref_impl.h) and [rref_context.h](../csrc/distributed/rpc/rref_context.h).
 
 ### Distributed Autograd
 
@@ -73,22 +73,26 @@ A list of onboarding tasks can be found [here](https://github.com/pytorch/pytorc
 All the unit tests can be found under the [test/distributed](../../test/distributed) directory and RPC tests in particular are under [test/distributed/rpc](../../test/distributed/rpc). A few examples on how to run unit tests:
 
 ```
-# Run the c10d unit test.
+# Run the c10d unit tests.
 python test/distributed/test_c10d_common.py
 python test/distributed/test_c10d_gloo.py
 python test/distributed/test_c10d_nccl.py
 
-# Run distributed tests, including tests for Distributed Data Parallel
-python test/run_test.py --verbose -i distributed/test_distributed_fork
+# Run the Store tests.
+python test/distributed/test_store.py
+
+# Run Process Group Wrapper tests.
+python test/distributed/test_pg_wrapper.py
+
+# Run distributed tests, including tests for Distributed Data Parallel.
 python test/run_test.py --verbose -i distributed/test_distributed_spawn
 
 # Run the RPC test suite for the TensorPipeAgent.
 python test/distributed/rpc/test_tensorpipe_agent.py
 python test/distributed/rpc/cuda/test_tensorpipe_agent.py
 
-# Run the RPC test suite for the ProcessGroupAgent.
-python test/distributed/rpc/test_process_group_agent.py
-python test/distributed/rpc/cuda/test_process_group_agent.py
+# Run the RPC test suite for the FaultyAgent
+python test/distributed/rpc/test_faulty_agent.py
 
 # Run a specific test method.
 pytest -k test_self_add test/distributed/rpc/test_process_group_agent.py

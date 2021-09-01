@@ -322,7 +322,7 @@ class TestLayerNormOp(serial.SerializedTestCase):
            eps=st.floats(1e-5, 1e-3),
            elementwise_affine=st.booleans(),
            **hu.gcs)
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_layer_norm_op_jit(self, X, eps, elementwise_affine, gc, dc):
         @torch.jit.script
         def jit_layer_norm(

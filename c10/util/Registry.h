@@ -270,6 +270,10 @@ class Registerer {
   C10_DEFINE_TYPED_REGISTRY(                               \
       RegistryName, std::string, ObjectType, std::unique_ptr, ##__VA_ARGS__)
 
+#define C10_DEFINE_REGISTRY_WITHOUT_WARNING(RegistryName, ObjectType, ...) \
+  C10_DEFINE_TYPED_REGISTRY_WITHOUT_WARNING(                               \
+      RegistryName, std::string, ObjectType, std::unique_ptr, ##__VA_ARGS__)
+
 #define C10_DECLARE_SHARED_REGISTRY(RegistryName, ObjectType, ...) \
   C10_DECLARE_TYPED_REGISTRY(                                      \
       RegistryName, std::string, ObjectType, std::shared_ptr, ##__VA_ARGS__)

@@ -9,7 +9,6 @@
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/runtime/variable_tensor_list.h>
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_bool(torch_jit_enable_new_executor);
 
 namespace torch {
@@ -38,6 +37,7 @@ struct ExecutionPlan {
 // They is only valid only right after you call getDebugState() and should never
 // be used again once another GraphExecutor function is called.
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct GraphExecutorState {
   const Graph* graph = nullptr;
   ExecutionPlan fallback; // XXX: members of this field are optional

@@ -300,8 +300,10 @@ const Tensor& indices) {
   TensorArg indices_arg{ indices, "indices", 2 };
   TensorArg input_arg{ input_, "input_", 3 };
 
-  checkAllSameGPU("max_pool2d_with_indices_out_cuda",
-                  {output_arg, indices_arg, input_arg});
+  checkAllSameGPU(__func__, {output_arg, indices_arg, input_arg});
+  if (output.numel() == 0) {
+    return;
+  }
 
   const int kH = safe_downcast<int, int64_t>(kernel_size[0]);
   const int kW = kernel_size.size() == 1 ? kH : safe_downcast<int, int64_t>(kernel_size[1]);
@@ -317,13 +319,6 @@ const Tensor& indices) {
   const int dilationW = dilation.size() == 1 ? dilationH : safe_downcast<int, int64_t>(dilation[1]);
 
   const auto memory_format = input_.suggest_memory_format();
-  if (memory_format == at::MemoryFormat::ChannelsLast) {
-    TORCH_CHECK(input_.ndimension() == 4,
-      "non-empty 4D (batch mode) tensor expected for input with channels_last layout");
-  } else {
-    TORCH_CHECK((input_.ndimension() == 3 || input_.ndimension() == 4),
-      "non-empty 3D or 4D (batch mode) tensor expected for input");
-  }
 
   const int64_t nbatch = input_.ndimension() == 4 ? input_.size(-4) : 1;
   const int64_t nInputPlane = input_.size(-3);
@@ -413,57 +408,44 @@ const Tensor& indices) {
   );
 }
 
-void max_pool2d_with_indices_backward_out_cuda_template(
-           Tensor& gradInput,
-           const Tensor& gradOutput_,
-           const Tensor& input_,
-           const Tensor& indices,
-           IntArrayRef kernel_size,
-           IntArrayRef stride,
-           IntArrayRef padding,
-           IntArrayRef dilation,
-           bool ceil_mode)
-{
+TORCH_IMPL_FUNC(max_pool2d_with_indices_backward_out_cuda)
+(const Tensor& gradOutput_,
+const Tensor& input_,
+IntArrayRef kernel_size,
+IntArrayRef stride,
+IntArrayRef padding,
+IntArrayRef dilation,
+bool ceil_mode,
+const Tensor& indices,
+const Tensor& gradInput) {
+  NoNamesGuard guard;
+
   TensorArg gradInput_arg{ gradInput, "gradInput", 1 };
   TensorArg gradOutput_arg{ gradOutput_, "gradOutput_", 2 };
   TensorArg input_arg{ input_, "input_", 3 };
   TensorArg indices_arg{ indices, "indices", 4 };
 
-  checkAllSameGPU("max_pool2d_with_indices_out_cuda",
+  checkAllSameGPU(__func__,
                   {gradInput_arg, gradOutput_arg, input_arg, indices_arg});
+  if (gradOutput_.numel() == 0) {
+    return;
+  }
 
-  // #20866, #22032: Guarantee this for the official C++ API?
-  TORCH_CHECK(kernel_size.size() == 1 || kernel_size.size() == 2,
-    "max_pool2d: kernel_size must either be a single int, or a tuple of two ints")
   const int kH = safe_downcast<int, int64_t>(kernel_size[0]);
   const int kW = kernel_size.size() == 1 ? kH : safe_downcast<int, int64_t>(kernel_size[1]);
 
-  // NB: stride default is not expressible as an integer constant, so we accept
-  // empty stride for this case
-  TORCH_CHECK(stride.size() == 0 || stride.size() == 1 || stride.size() == 2,
-    "max_pool2d: stride must either be omitted, a single int, or a tuple of two ints")
   const int dH = stride.empty() ? kH : safe_downcast<int, int64_t>(stride[0]);
   const int dW = stride.empty() ? kW :
                  stride.size() == 1 ? dH : safe_downcast<int, int64_t>(stride[1]);
 
-  TORCH_CHECK(padding.size() == 1 || padding.size() == 2,
-    "max_pool2d: padding must be either be a single int, or a tuple of two ints");
   const int padH = safe_downcast<int, int64_t>(padding[0]);
   const int padW = padding.size() == 1 ? padH : safe_downcast<int, int64_t>(padding[1]);
 
-  TORCH_CHECK(dilation.size() == 1 || dilation.size() == 2,
-    "max_pool2d: dilation must be either a single int, or a tuple of two ints");
   const int dilationH = safe_downcast<int, int64_t>(dilation[0]);
   const int dilationW = dilation.size() == 1 ? dilationH : safe_downcast<int, int64_t>(dilation[1]);
 
   const auto memory_format = input_.suggest_memory_format();
-  if (memory_format == at::MemoryFormat::ChannelsLast) {
-    TORCH_CHECK(input_.ndimension() == 4,
-      "non-empty 4D (batch mode) tensor expected for input with channels_last layout");
-  } else {
-    TORCH_CHECK((input_.ndimension() == 3 || input_.ndimension() == 4),
-      "non-empty 3D or 4D (batch mode) tensor expected for input");
-  }
+
   const Tensor input = input_.contiguous(memory_format);
 
   const int64_t nbatch = input.ndimension() == 4 ? input.size(-4) : 1;
@@ -476,28 +458,16 @@ void max_pool2d_with_indices_backward_out_cuda_template(
   const int64_t in_stride_h = input.stride(-2);
   const int64_t in_stride_w = input.stride(-1);
 
-  const int64_t outputHeight = pooling_output_shape<int64_t>(inputHeight, kH, padH, dH, dilationH, ceil_mode);
-  const int64_t outputWidth = pooling_output_shape<int64_t>(inputWidth, kW, padW, dW, dilationW, ceil_mode);
-
-  max_pool2d_backward_shape_check(
-    input_,
-    gradOutput_,
-    indices,
-    nbatch,
-    kH, kW, dH, dW, padH, padW, dilationH, dilationW,
-    nInputPlane,
-    inputHeight, inputWidth,
-    outputHeight, outputWidth, memory_format,
-    /*cuda=*/ true);
-
   const Tensor gradOutput = gradOutput_.contiguous(memory_format);
+
+  const int64_t outputHeight = gradOutput.size(-2);
+  const int64_t outputWidth = gradOutput.size(-1);
 
   const int64_t out_stride_c = gradOutput.stride(-3);
   const int64_t out_stride_h = gradOutput.stride(-2);
   const int64_t out_stride_w = gradOutput.stride(-1);
 
-  gradInput.resize_as_(input);
-  gradInput.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
+  gradInput.zero_();
 
   int64_t count = input.numel();
 
@@ -588,53 +558,6 @@ void max_pool2d_with_indices_backward_out_cuda_template(
       }
     }
   );
-}
-
-Tensor& max_pool2d_with_indices_backward_out_cuda(const Tensor& gradOutput_,
-  const Tensor& input,
-  IntArrayRef kernel_size,
-  IntArrayRef stride,
-  IntArrayRef padding,
-  IntArrayRef dilation,
-  bool ceil_mode,
-  const Tensor& indices,
-  Tensor& gradInput)
-{
-  max_pool2d_with_indices_backward_out_cuda_template(
-    gradInput,
-    gradOutput_,
-    input,
-    indices,
-    kernel_size,
-    stride,
-    padding,
-    dilation,
-    ceil_mode);
-  return gradInput;
-}
-
-Tensor max_pool2d_with_indices_backward_cuda(
-  const Tensor& gradOutput_,
-  const Tensor& input,
-  IntArrayRef kernel_size,
-  IntArrayRef stride,
-  IntArrayRef padding,
-  IntArrayRef dilation,
-  bool ceil_mode,
-  const Tensor& indices)
-{
-  auto gradInput = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  max_pool2d_with_indices_backward_out_cuda_template(
-    gradInput,
-    gradOutput_,
-    input,
-    indices,
-    kernel_size,
-    stride,
-    padding,
-    dilation,
-    ceil_mode);
-  return gradInput;
 }
 
 } // at::native

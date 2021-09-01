@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/runtime/profiling_graph_executor_impl.h>
 
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/bailout_graph.h>
 #include <torch/csrc/jit/passes/batch_mm.h>
@@ -33,13 +34,11 @@
 #include <torch/csrc/jit/passes/update_differentiable_graph_requires_grad.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(
     torch_jit_enable_new_executor,
     true,
     "If this flag is set to false TorchScript will be using the legacy/original executor");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(
     torch_jit_disable_warning_prints,
     false,
@@ -48,12 +47,10 @@ C10_DEFINE_bool(
 constexpr size_t kDefaultNumProfiledRuns = 1;
 constexpr size_t kDefaultBailoutDepth = 20;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int64(
     torch_jit_num_profiled_runs,
     kDefaultNumProfiledRuns,
     "Number of profiling runs");
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int64(
     torch_jit_bailout_depth,
     kDefaultBailoutDepth,
@@ -63,20 +60,14 @@ namespace torch {
 namespace jit {
 
 #if defined(C10_MOBILE)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::atomic<bool> executor_mode{true};
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::atomic<bool> profiling_mode{false};
 #else
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::atomic<bool> executor_mode{true};
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::atomic<bool> profiling_mode{true};
 #endif
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::atomic<size_t> num_profiled_runs{kDefaultNumProfiledRuns};
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::atomic<size_t> bailout_depth{kDefaultBailoutDepth};
 
 std::atomic<bool>& getProfilingMode() {
@@ -129,10 +120,83 @@ static bool needsGradientInProfilingMode(Block* b) {
   return false;
 }
 
+// `prim::RequiresGradCheck` guarantees that requires_grad properties
+// of input tensors will match the profiled, otherwise a fallback path
+// will be triggered. This allow us to prune off gradients in backward
+// graph for inputs that don't need gradients. We transfer requires_grad
+// properties from inputs to the `prim::DifferentiableGraph` onto inputs to the
+// differentiable graph. Autodiff will inspect these properties and prune
+// off gradients that aren't required
+// `requires_grad` properties from `dnode->outputs()` will also be transferred
+static C10_UNUSED void setRequiresGradOnDiffGraph(Node* dnode) {
+  auto gi = dnode->g(attr::Subgraph)->inputs();
+  for (size_t i = 0; i < dnode->inputs().size(); i++) {
+    if (auto ty = dnode->input(i)->type()->cast<TensorType>()) {
+      auto gi_ty = gi[i]->type()->expect<TensorType>();
+      gi[i]->setType(gi_ty->withRequiresGrad(ty->requires_grad()));
+      GRAPH_DEBUG(
+          "Setting ",
+          *gi_ty->withRequiresGrad(ty->requires_grad()),
+          " on ",
+          gi[i],
+          " ",
+          gi[i]->debugName());
+    }
+  }
+
+  // We also need to put requires_grad on outputs within subgraph, so autodiff
+  // can  set df_input_vjps and DifferentiableGraphOp can set `requires_grad=`
+  // properly
+  auto go = dnode->g(attr::Subgraph)->outputs();
+  auto set_requires_grad = [](const TensorTypePtr& t, Value* val) -> bool {
+    if (t && t->requiresGrad().has_value()) {
+      GRAPH_DEBUG("setting type ", *t);
+      val->setType(t);
+      return true;
+    }
+    return false;
+  };
+
+  for (const auto i : c10::irange(go.size())) {
+    auto ty = go[i]->type()->cast<TensorType>();
+    if (ty) {
+      auto n = go[i]->node();
+      auto dno = dnode->outputs().at(i);
+      for (auto dno_use : dno->uses()) {
+        GRAPH_DEBUG("found user of ", i, " as ", *dno_use.user);
+        if (n->kind() == prim::profile) {
+          if (set_requires_grad(
+                  n->ty(attr::profiled_type)->expect<TensorType>(), go[i])) {
+            break;
+          }
+        } else if (dno_use.user->kind() == prim::profile) {
+          if (set_requires_grad(
+                  dno_use.user->ty(attr::profiled_type)->expect<TensorType>(),
+                  go[i])) {
+            break;
+          }
+        } else if (dno_use.user->kind() == prim::DifferentiableGraph) {
+          Value* o =
+              dno_use.user->g(attr::Subgraph)->inputs().at(dno_use.offset);
+          // Is it safe to not check other uses, because we are inside a
+          // DifferentiableGraph?
+          auto nn = o->uses().at(0).user;
+          if (nn->kind() == prim::profile) {
+            if (set_requires_grad(
+                    nn->ty(attr::profiled_type)->expect<TensorType>(), go[i])) {
+              break;
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
 bool guardDifferentiableGraph(Node* dnode) {
   auto gi = dnode->g(attr::Subgraph)->inputs();
   bool all_inputs_seen = true;
-  for (size_t i = 0; i < gi.size(); i++) {
+  for (const auto i : c10::irange(gi.size())) {
     auto ty = gi[i]->type()->cast<TensorType>();
     if (ty) {
       auto n = gi[i]->uses().at(0).user;
@@ -706,7 +770,7 @@ void ProfilingGraphExecutorImpl::replaceFallbackGraphWithFallbackFunction(
       WithInsertPoint wip{*it};
       auto function_call = insertFallbackFunctionCall(
           b->owningGraph(), fallback_func, it->inputs());
-      for (size_t i = 0; i < function_call->outputs().size(); i++) {
+      for (const auto i : c10::irange(function_call->outputs().size())) {
         it->output(i)->replaceAllUsesWith(function_call->output(i));
       }
       it.destroyCurrent();

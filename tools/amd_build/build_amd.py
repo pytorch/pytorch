@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 
 import os
@@ -12,7 +12,7 @@ sys.path.append(os.path.realpath(os.path.join(
     'torch',
     'utils')))
 
-from hipify import hipify_python
+from hipify import hipify_python  # type: ignore[import]
 
 parser = argparse.ArgumentParser(description='Top-level script for HIPifying, filling in most common parameters')
 parser.add_argument(
@@ -81,12 +81,10 @@ includes = [
     "aten/src/ATen/native/sparse/cuda/*",
     "aten/src/ATen/native/quantized/cuda/*",
     "aten/src/THC/*",
-    "aten/src/THCUNN/*",
     "aten/src/ATen/test/*",
     # CMakeLists.txt isn't processed by default, but there are a few
     # we do want to handle, so explicitly specify them
     "aten/src/THC/CMakeLists.txt",
-    "aten/src/THCUNN/CMakeLists.txt",
     "torch/*",
     "tools/autograd/templates/python_variable_methods.cpp",
 ]
@@ -103,13 +101,19 @@ ignores = [
     '*/hip/*',
     # These files are compatible with both cuda and hip
     "aten/src/ATen/core/*",
+    "torch/csrc/jit/codegen/cuda/codegen.cpp",
+    "torch/csrc/jit/codegen/cuda/runtime/block_reduction.cu",
+    "torch/csrc/jit/codegen/cuda/runtime/broadcast.cu",
+    "torch/csrc/jit/codegen/cuda/runtime/grid_reduction.cu",
+    "torch/csrc/jit/codegen/fuser/cuda/resource_strings.h",
+    "torch/csrc/jit/tensorexpr/ir_printer.cpp",
     # generated files we shouldn't frob
     "torch/lib/tmp_install/*",
     "torch/include/*",
 ]
 
 # Check if the compiler is hip-clang.
-def is_hip_clang():
+def is_hip_clang() -> bool:
     try:
         hip_path = os.getenv('HIP_PATH', '/opt/rocm/hip')
         return 'HIP_COMPILER=clang' in open(hip_path + '/lib/.hipInfo').read()

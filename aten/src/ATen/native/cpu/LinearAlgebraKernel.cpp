@@ -39,7 +39,7 @@ void addr_kernel(TensorIterator &iter,
 
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf,
     iter.dtype(), "addr_cpu", [&]() {
-      using Vec = Vec256<scalar_t>;
+      using Vec = Vectorized<scalar_t>;
 
       auto beta_val = beta.to<scalar_t>();
       auto alpha_val = alpha.to<scalar_t>();
@@ -123,11 +123,43 @@ static void linalg_vector_norm_kernel_cpu(TensorIterator& iter, Scalar ord) {
   });
 }
 
+void unpack_pivots_cpu_kernel(
+  TensorIterator& iter,
+  int64_t dim_size
+) {
+  if (iter.numel() == 0) {
+    return;
+  }
+
+  auto loop = [&](char** data, const int64_t* strides, int64_t nelems) {
+    auto* unpacked_pivots_ptr = data[0];
+    const auto* pivots_ptr = data[1];
+
+    for (int64_t elem = 0; elem < nelems; ++elem) {
+      // WARNING: torch.lu returns int32 pivots,
+      // this behavior could change in the future.
+      auto* unpacked_pivots_data = reinterpret_cast<int32_t*>(unpacked_pivots_ptr);
+      auto* pivots_data = reinterpret_cast<const int32_t*>(pivots_ptr);
+
+      for (int64_t i = 0; i < dim_size; ++i) {
+        std::swap(
+          unpacked_pivots_data[i],
+          unpacked_pivots_data[pivots_data[i]]
+        );
+      }
+
+      unpacked_pivots_ptr += strides[0];
+      pivots_ptr += strides[1];
+    }
+  };
+
+  iter.for_each(loop);
+}
+
 } // anonymous namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(addr_stub, &addr_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(linalg_vector_norm_stub, &linalg_vector_norm_kernel_cpu);
+REGISTER_DISPATCH(unpack_pivots_stub, &unpack_pivots_cpu_kernel);
 
 }} // namespace at::native

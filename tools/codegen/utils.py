@@ -4,6 +4,19 @@ from enum import Enum
 import contextlib
 import textwrap
 
+# Safely load fast C Yaml loader/dumper if they are available
+try:
+    from yaml import CSafeLoader as Loader
+except ImportError:
+    from yaml import SafeLoader as Loader  # type: ignore[misc]
+YamlLoader = Loader
+
+try:
+    from yaml import CSafeDumper as Dumper
+except ImportError:
+    from yaml import SafeDumper as Dumper  # type: ignore[misc]
+YamlDumper = Dumper
+
 # Many of these functions share logic for defining both the definition
 # and declaration (for example, the function signature is the same), so
 # we organize them into one function that takes a Target to say which
@@ -60,11 +73,12 @@ def concatMap(func: Callable[[T], Sequence[S]], xs: Iterable[T]) -> Iterator[S]:
 # easily say that an error occurred while processing a specific
 # context.
 @contextlib.contextmanager
-def context(msg: str) -> Iterator[None]:
+def context(msg_fn: Callable[[], str]) -> Iterator[None]:
     try:
         yield
     except Exception as e:
         # TODO: this does the wrong thing with KeyError
+        msg = msg_fn()
         msg = textwrap.indent(msg, '  ')
         msg = f'{e.args[0]}\n{msg}' if e.args else msg
         e.args = (msg,) + e.args[1:]

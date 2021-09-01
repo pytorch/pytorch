@@ -463,13 +463,9 @@ class _PositiveDefinite(Constraint):
     event_dim = 2
 
     def check(self, value):
-        matrix_shape = value.shape[-2:]
-        batch_shape = value.unsqueeze(0).shape[:-2]
-        # TODO: replace with batched linear algebra routine when one becomes available
-        # note that `symeig()` returns eigenvalues in ascending order
-        flattened_value = value.reshape((-1,) + matrix_shape)
-        return torch.stack([v.symeig(eigenvectors=False)[0][:1] > 0.0
-                            for v in flattened_value]).view(batch_shape)
+        # Assumes that the matrix or batch of matrices in value are symmetric
+        # info == 0 means no error, that is, it's SPD
+        return torch.linalg.cholesky_ex(value).info.eq(0).unsqueeze(0)
 
 
 class _Cat(Constraint):
@@ -549,6 +545,7 @@ integer_interval = _IntegerInterval
 real = _Real()
 real_vector = independent(real, 1)
 positive = _GreaterThan(0.)
+nonnegative = _GreaterThanEq(0.)
 greater_than = _GreaterThan
 greater_than_eq = _GreaterThanEq
 less_than = _LessThan

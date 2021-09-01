@@ -17,7 +17,7 @@
 #endif
 
 
-#define NNAPI_CHECK(res) CAFFE_ENFORCE(res == ANEURALNETWORKS_NO_ERROR)
+#define NNAPI_CHECK(res) CAFFE_ENFORCE(res == ANEURALNETWORKS_NO_ERROR, "NNAPI returned error: ", res)
 
 
 namespace caffe2 {

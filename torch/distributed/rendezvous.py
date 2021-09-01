@@ -1,16 +1,21 @@
 try:
     from urllib.parse import urlparse, urlunparse
 except ImportError:
-    raise ImportError("urllib cannot be found, urlparse from python2 is no longer supported.")
+    raise ImportError(
+        "urllib cannot be found, urlparse from python2 is no longer supported."
+    )
 
-import torch._six as six
 import numbers
 import os
 import sys
 from datetime import timedelta
-from typing import Optional, Dict, Union
-from torch.distributed import FileStore, TCPStore, PrefixStore
+from typing import Dict, Optional, Union
+
+import torch._six as six
+from torch.distributed import FileStore, PrefixStore, Store, TCPStore
+
 from .constants import default_pg_timeout
+
 
 _rendezvous_handlers = {}
 
@@ -60,8 +65,7 @@ def rendezvous(url: str, rank: int = -1, world_size: int = -1, **kwargs):
     result = urlparse(url)
     if rank != -1 or world_size != -1:
         query_dict: Dict[str, Union[int, str]] = dict(
-            # mypy doesn't allow dict() to accept List of values (#257)
-            pair.split("=") for pair in filter(None, result.query.split("&"))  # type: ignore[arg-type, misc]
+            pair.split("=") for pair in filter(None, result.query.split("&"))
         )
         assert (
             "rank" not in query_dict and "world_size" not in query_dict
@@ -74,7 +78,9 @@ def rendezvous(url: str, rank: int = -1, world_size: int = -1, **kwargs):
             query_dict["world_size"] = world_size
 
         result = result._replace(
-            query="{}".format("&".join(["{}={}".format(k, v) for k, v in query_dict.items()]))
+            query="{}".format(
+                "&".join(["{}={}".format(k, v) for k, v in query_dict.items()])
+            )
         )
         url = urlunparse(result)
 
@@ -93,8 +99,9 @@ def _file_rendezvous_handler(url: str, **kwargs):
 
     result = urlparse(url)
     path = result.path
-    if sys.platform == 'win32':
+    if sys.platform == "win32":
         import urllib.request
+
         full_path = result.netloc + result.path
         path = urllib.request.url2pathname(full_path)
         if path:
@@ -120,7 +127,41 @@ def _file_rendezvous_handler(url: str, **kwargs):
     raise RuntimeError("Unable to perform rerendezvous using file:// method")
 
 
-def _tcp_rendezvous_handler(url: str, timeout: timedelta = default_pg_timeout, **kwargs):
+def _torchelastic_use_agent_store() -> bool:
+    return os.environ.get("TORCHELASTIC_USE_AGENT_STORE", None) == str(True)
+
+
+def _create_c10d_store(hostname, port, rank, world_size, timeout) -> Store:
+    """
+    Smartly creates a c10d Store object on ``rank`` based on whether
+    we need to re-use agent store. The TCPStore server is assumed to be hosted
+    on ``hostname:port``.
+
+    If ``torchelastic_use_agent_store()`` is ``True``, then it is assumed that
+    the agent leader (node rank 0) hosts the TCPStore server (for which the
+    endpoint is specified by the given ``hostname:port``). Hence
+    ALL ranks will create and return a TCPStore client (e.g. ``start_daemon=False``).
+
+    If ``torchelastic_use_agent_store()`` is ``False``, then rank 0 will host
+    the TCPStore (with multi-tenancy) and it is assumed that rank 0's hostname
+    and port are correctly passed via ``hostname`` and ``port``. All
+    non-zero ranks will create and return a TCPStore client.
+    """
+
+    if _torchelastic_use_agent_store():
+        attempt = os.environ["TORCHELASTIC_RESTART_COUNT"]
+        tcp_store = TCPStore(hostname, port, world_size, False, timeout)
+        return PrefixStore(f"/worker/attempt_{attempt}", tcp_store)
+    else:
+        start_daemon = rank == 0
+        return TCPStore(
+            hostname, port, world_size, start_daemon, timeout, multi_tenant=True
+        )
+
+
+def _tcp_rendezvous_handler(
+    url: str, timeout: timedelta = default_pg_timeout, **kwargs
+):
     def _error(msg):
         return _rendezvous_error("tcp:// rendezvous: " + msg)
 
@@ -137,16 +178,19 @@ def _tcp_rendezvous_handler(url: str, timeout: timedelta = default_pg_timeout, *
 
     rank = int(query["rank"])
     world_size = int(query["world_size"])
-    start_daemon = rank == 0
     assert result.hostname is not None
-    store = TCPStore(result.hostname, result.port, world_size, start_daemon, timeout)
+
+    store = _create_c10d_store(result.hostname, result.port, rank, world_size, timeout)
+
     yield (store, rank, world_size)
 
     # If this configuration is invalidated, there is nothing we can do about it
-    raise RuntimeError("Unable to perform rerendezvous using tcp:// method")
+    raise RuntimeError("Unable to perform re-rendezvous using tcp:// method")
 
 
-def _env_rendezvous_handler(url: str, timeout: timedelta = default_pg_timeout, **kwargs):
+def _env_rendezvous_handler(
+    url: str, timeout: timedelta = default_pg_timeout, **kwargs
+):
     def _error(msg):
         return _rendezvous_error("env:// rendezvous: " + msg)
 
@@ -182,26 +226,13 @@ def _env_rendezvous_handler(url: str, timeout: timedelta = default_pg_timeout, *
     master_addr = _get_env_or_raise("MASTER_ADDR")
     master_port = int(_get_env_or_raise("MASTER_PORT"))
 
+    store = _create_c10d_store(master_addr, master_port, rank, world_size, timeout)
 
-    use_torchelastic_store = os.environ.get("TORCHELASTIC_USE_AGENT_STORE", None)
-
-    if use_torchelastic_store == str(True):
-        worker_process_prefix = "/worker"
-        # When TORCHELASTIC_USE_AGENT_STORE is set up, the worker process is assumed
-        # to be invoked by the torchelastic agent. Torchelastic agent creates a tcp daemon thread
-        # on the GROUP_RANK=0, as a result all user worker processes should create store with: daemon=False
-        tcp_store = TCPStore(master_addr, master_port, world_size, False, timeout)
-        # Each if-else condition returns due to: https://github.com/python/mypy/issues/1191
-        yield (PrefixStore(worker_process_prefix, tcp_store), rank, world_size)
-    else:
-        # Start the TCP store daemon on the rank 0
-        start_daemon = rank == 0
-        store = TCPStore(master_addr, master_port, world_size, start_daemon, timeout)
-        # Each if-else condition returns due to: https://github.com/python/mypy/issues/1191
-        yield (store, rank, world_size)
+    yield (store, rank, world_size)
 
     # If this configuration is invalidated, there is nothing we can do about it
-    raise RuntimeError("Unable to perform rerendezvous using env:// method")
+    raise RuntimeError("Unable to perform re-rendezvous using env:// method")
+
 
 register_rendezvous_handler("tcp", _tcp_rendezvous_handler)
 register_rendezvous_handler("env", _env_rendezvous_handler)

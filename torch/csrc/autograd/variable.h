@@ -256,6 +256,7 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
 
   void set_fw_grad(const Variable& new_grad, const Variable& self, uint64_t level, bool is_inplace_op) override;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   AutogradMeta(at::TensorImpl* self_impl = nullptr, bool requires_grad = false, Edge gradient_edge = Edge() ) {
     grad_fn_ = std::move(gradient_edge.function);
     requires_grad_ = false;
@@ -494,15 +495,10 @@ struct TORCH_API ViewInfo {
 /// - NO_GRAD_MODE should be set when a view in created when GradMode is disabled
 /// - MULTI_OUTPUT_NODE should be set when a Node created by codegen code returns
 ///   multiple differentiable views
-/// - MULTI_OUTPUT_SAFE should be set when a view was returned by a function
-///   that returns multiple views, and unsafe_* version of that function
-///   exists. These are note considered as views for now for the view+inplace
-///   logic! The graph won't be rewritten when an inplace is done, only a
-///   warning will be thrown.
 /// - Inference_MODE should be set when a view of normal tensor is created in InferenceMode.
 /// - DEFAULT is for all other cases
 enum class CreationMeta: uint8_t { DEFAULT, IN_CUSTOM_FUNCTION, MULTI_OUTPUT_NODE,
-                                   NO_GRAD_MODE, MULTI_OUTPUT_SAFE, INFERENCE_MODE};
+                                   NO_GRAD_MODE, INFERENCE_MODE};
 
 /// Handles correctly propagating CreationMeta when a new view is created from a previous view.
 /// In general, we don't want the new view to be _less_ restrictive than the previous view
@@ -646,6 +642,7 @@ inline Variable make_variable_differentiable_view(
       shared_view_info, creation_meta));
       return data;
     } else {
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       c10::intrusive_ptr<at::TensorImpl> data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
         /*version_counter=*/0,
         /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
@@ -694,6 +691,7 @@ inline Variable make_variable(
     if (data.getIntrusivePtr().use_count() == 1 && data.getIntrusivePtr()->unique_version()) {
       auto data_impl = data.unsafeReleaseIntrusivePtr();
       data_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
+      // NOLINTNEXTLINE(bugprone-branch-clone)
       if (requires_grad) {
         data_impl->set_autograd_meta(std::make_unique<AutogradMeta>(data_impl.get(), requires_grad));
       } else {
@@ -704,6 +702,7 @@ inline Variable make_variable(
       auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
         /*version_counter=*/0,
         /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
+      // NOLINTNEXTLINE(bugprone-branch-clone)
       if (requires_grad) {
         data_impl_copy->set_autograd_meta(std::make_unique<AutogradMeta>(
           data_impl_copy.get(), requires_grad));

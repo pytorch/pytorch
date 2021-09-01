@@ -3,12 +3,13 @@
 #include <c10/core/TensorOptions.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/jit/api/module.h>
-#include <torch/csrc/jit/mobile/export_data.h>
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/import_data.h>
 #include <torch/csrc/jit/mobile/module.h>
-#include <torch/csrc/jit/mobile/optim/sgd.h>
-#include <torch/csrc/jit/mobile/sequential.h>
+#include <torch/csrc/jit/mobile/train/export_data.h>
+#include <torch/csrc/jit/mobile/train/optim/sgd.h>
+#include <torch/csrc/jit/mobile/train/random.h>
+#include <torch/csrc/jit/mobile/train/sequential.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/data/dataloader.h>
 #include <torch/torch.h>
@@ -17,7 +18,6 @@
 namespace torch {
 namespace jit {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteTrainerTest, Params) {
   Module m("m");
   m.register_parameter("foo", torch::ones({1}, at::requires_grad()), false);
@@ -135,7 +135,6 @@ TEST(MobileTest, SaveLoadParameters) {
 }
 */
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MobileTest, SaveLoadParametersEmpty) {
   Module m("m");
   m.define(R"(
@@ -159,7 +158,6 @@ TEST(MobileTest, SaveLoadParametersEmpty) {
   AT_ASSERT(mobile_params.size() == 0);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteTrainerTest, SGD) {
   Module m("m");
   m.register_parameter("foo", torch::ones({1}, at::requires_grad()), false);
@@ -234,13 +232,11 @@ struct DummyDataset : torch::data::datasets::Dataset<DummyDataset, int> {
 };
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteTrainerTest, SequentialSampler) {
   // test that sampler can be used with dataloader
   const int kBatchSize = 10;
-  auto data_loader =
-      torch::data::make_data_loader<torch::data::samplers::SequentialSampler>(
-          DummyDataset(25), kBatchSize);
+  auto data_loader = torch::data::make_data_loader<mobile::SequentialSampler>(
+      DummyDataset(25), kBatchSize);
   int i = 1;
   for (const auto& batch : *data_loader) {
     for (const auto& example : batch) {
@@ -248,6 +244,58 @@ TEST(LiteTrainerTest, SequentialSampler) {
       i++;
     }
   }
+}
+
+TEST(LiteTrainerTest, RandomSamplerReturnsIndicesInCorrectRange) {
+  mobile::RandomSampler sampler(10);
+
+  std::vector<size_t> indices = sampler.next(3).value();
+  for (auto i : indices) {
+    AT_ASSERT(i >= 0);
+    AT_ASSERT(i < 10);
+  }
+
+  indices = sampler.next(5).value();
+  for (auto i : indices) {
+    AT_ASSERT(i >= 0);
+    AT_ASSERT(i < 10);
+  }
+
+  indices = sampler.next(2).value();
+  for (auto i : indices) {
+    AT_ASSERT(i >= 0);
+    AT_ASSERT(i < 10);
+  }
+
+  AT_ASSERT(sampler.next(10).has_value() == false);
+}
+
+TEST(LiteTrainerTest, RandomSamplerReturnsLessValuesForLastBatch) {
+  mobile::RandomSampler sampler(5);
+  AT_ASSERT(sampler.next(3).value().size() == 3);
+  AT_ASSERT(sampler.next(100).value().size() == 2);
+  AT_ASSERT(sampler.next(2).has_value() == false);
+}
+
+TEST(LiteTrainerTest, RandomSamplerResetsWell) {
+  mobile::RandomSampler sampler(5);
+  AT_ASSERT(sampler.next(5).value().size() == 5);
+  AT_ASSERT(sampler.next(2).has_value() == false);
+  sampler.reset();
+  AT_ASSERT(sampler.next(5).value().size() == 5);
+  AT_ASSERT(sampler.next(2).has_value() == false);
+}
+
+TEST(LiteTrainerTest, RandomSamplerResetsWithNewSizeWell) {
+  mobile::RandomSampler sampler(5);
+  AT_ASSERT(sampler.next(5).value().size() == 5);
+  AT_ASSERT(sampler.next(2).has_value() == false);
+  sampler.reset(7);
+  AT_ASSERT(sampler.next(7).value().size() == 7);
+  AT_ASSERT(sampler.next(2).has_value() == false);
+  sampler.reset(3);
+  AT_ASSERT(sampler.next(3).value().size() == 3);
+  AT_ASSERT(sampler.next(2).has_value() == false);
 }
 
 } // namespace jit

@@ -360,7 +360,7 @@ void DumpGraph(NNGraph* g, const std::string& fname) {
   }
 }
 
-caffe2::NetDef OptimizeForBackend(
+CutResult OptimizeForBackend(
     caffe2::NetDef& net,
     std::function<bool(const caffe2::OperatorDef&)> supports,
     std::function<caffe2::NetDef(const caffe2::NetDef&)> transform_func,
@@ -419,6 +419,8 @@ caffe2::NetDef OptimizeForBackend(
   }
 
   // Transform needed subgraphs one by one
+  CutResult cutResult;
+  cutResult.numberOfSubnets = 0;
   std::vector<caffe2::NetDef> opt_subnets;
   opt_subnets.reserve(subs.size());
   for (auto& g : subs) {
@@ -429,7 +431,9 @@ caffe2::NetDef OptimizeForBackend(
     // Transform the subgraph protobuf def, note that we can have less external
     // inputs/outputs but not more
     opt_subnets.emplace_back(transform_func(subnet));
-
+    if (opt_subnets.back().op_size() > 0 && opt_subnets.back().op(0).type() == "Onnxifi") {
+      cutResult.numberOfSubnets++;
+    }
     ReplaceSubgraph(g, opt_subnets.back(), &dfg);
   }
 
@@ -443,7 +447,8 @@ caffe2::NetDef OptimizeForBackend(
 
   auto new_net = convertToCaffe2Proto(nn);
   new_net.set_name(net.name() + "_opt");
-  return new_net;
+  cutResult.net = std::move(new_net);
+  return cutResult;
 }
 
 } // namespace opt

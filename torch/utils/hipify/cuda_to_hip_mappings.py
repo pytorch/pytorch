@@ -7745,6 +7745,7 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
         ("cub::Max", ("hipcub::Max", CONV_SPECIAL_FUNC, API_RUNTIME)),
         ("cub::Min", ("hipcub::Min", CONV_SPECIAL_FUNC, API_RUNTIME)),
         ("cub::Sum", ("hipcub::Sum", CONV_SPECIAL_FUNC, API_RUNTIME)),
+        ("cub::ArgIndexInputIterator", ("hipcub::ArgIndexInputIterator", CONV_SPECIAL_FUNC, API_RUNTIME)),
         ("cub::TransformInputIterator", ("hipcub::TransformInputIterator", CONV_SPECIAL_FUNC, API_RUNTIME)),
         ("cub::WarpReduce", ("hipcub::WarpReduce", CONV_SPECIAL_FUNC, API_RUNTIME)),
         ("nvtxMark", ("roctxMark", CONV_OTHER, API_ROCTX)),
@@ -7893,7 +7894,7 @@ CUDA_SPARSE_MAP = collections.OrderedDict(
 PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict(
     [
         ("USE_CUDA", ("USE_ROCM", API_PYTORCH)),
-        ("CUDA_VERSION", ("HIP_VERSION", API_PYTORCH)),
+        ("CUDA_VERSION", ("TORCH_HIP_VERSION", API_PYTORCH)),
         ("cudaHostAllocator", ("hipHostAllocator", API_PYTORCH)),
         ("cudaDeviceAllocator", ("hipDeviceAllocator", API_PYTORCH)),
         ("define MAX_NUM_BLOCKS 200", ("define MAX_NUM_BLOCKS 64", API_PYTORCH)),
@@ -7956,6 +7957,15 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict(
             ("hip::getStreamFromPoolMasqueradingAsCUDA", API_PYTORCH),
         ),
         ("getStreamFromPool", ("getStreamFromPoolMasqueradingAsCUDA", API_PYTORCH)),
+        (
+            "cuda::getDefaultCUDAStream",
+            ("hip::getDefaultHIPStreamMasqueradingAsCUDA", API_PYTORCH),
+        ),
+        (
+            "cuda::getStreamFromExternal",
+            ("hip::getStreamFromExternalMasqueradingAsCUDA", API_PYTORCH),
+        ),
+        ("getStreamFromExternal", ("getStreamFromExternalMasqueradingAsCUDA", API_PYTORCH)),
         (
             "cuda::getDefaultCUDAStream",
             ("hip::getDefaultHIPStreamMasqueradingAsCUDA", API_PYTORCH),
@@ -8052,6 +8062,7 @@ CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict(
         ("/THCCachingAllocator_gpu", ("/hip/THCCachingAllocator_gpu", API_CAFFE2)),
         ("/top_k_heap_selection", ("/hip/top_k_heap_selection", API_CAFFE2)),
         ("/top_k_radix_selection", ("/hip/top_k_radix_selection", API_CAFFE2)),
+        ("/GpuAtomics", ("/hip/GpuAtomics", API_CAFFE2)),
         ("/GpuDefs", ("/hip/GpuDefs", API_CAFFE2)),
         ("/GpuScanUtils", ("/hip/GpuScanUtils", API_CAFFE2)),
         ("/GpuBitonicSort", ("/hip/GpuBitonicSort", API_CAFFE2)),
@@ -8078,6 +8089,7 @@ CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict(
         # the ordered dict guarantees this pattern will match first, before "CUDA"
         ("CUDA_KERNEL_ASSERT", ("CUDA_KERNEL_ASSERT", API_CAFFE2)),
         ("lazyInitCUDA", ("lazyInitCUDA", API_CAFFE2)),
+        ("CUDA_VERSION", ("TORCH_HIP_VERSION", API_CAFFE2)),
         ("CUDA", ("HIP", API_CAFFE2)),
         ("Cuda", ("Hip", API_CAFFE2)),
         ("cuda_", ("hip_", API_CAFFE2)),
@@ -8112,6 +8124,7 @@ C10_MAPPINGS = collections.OrderedDict(
         ("c10/cuda/CUDAMacros.h", ("c10/hip/HIPMacros.h", API_C10)),
         ("c10/cuda/CUDAMathCompat.h", ("c10/hip/HIPMathCompat.h", API_C10)),
         ("c10/cuda/CUDAFunctions.h", ("c10/hip/HIPFunctions.h", API_C10)),
+        ("c10/cuda/CUDAMiscFunctions.h", ("c10/hip/HIPMiscFunctions.h", API_C10)),
         ("c10/cuda/CUDAStream.h", ("c10/hip/HIPStream.h", API_C10)),
         ("c10/cuda/CUDAGraphsC10Utils.h", ("c10/hip/HIPGraphsC10Utils.h", API_C10)),
         ("c10/cuda/CUDACachingAllocator.h", ("c10/hip/HIPCachingAllocator.h", API_C10)),

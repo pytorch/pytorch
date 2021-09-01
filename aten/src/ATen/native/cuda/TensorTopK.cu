@@ -1,7 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
-#include <ATen/LegacyTHFunctionsCUDA.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/cuda/SortingCommon.cuh>
 #include <ATen/native/cuda/SortingRadixSelect.cuh>
@@ -150,32 +149,26 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<T, IndexType> input,
 
 } // namespace
 
-std::tuple<Tensor&, Tensor&> topk_out_cuda(const Tensor& self,
-              int64_t k, int64_t dim, bool largest, bool sorted,
-              Tensor& values,
-              Tensor& indices) {
+TORCH_IMPL_FUNC(topk_out_cuda)
+  (const Tensor& self,
+   int64_t k, int64_t dim, bool largest, bool sorted,
+   const Tensor& values,
+   const Tensor& indices) {
   TensorArg topK_arg{values, "topK", 1}, indices_arg{indices, "indices", 2}, input_arg{self, "self", 3};
-  checkAllSameGPU("topk_out_cuda", {topK_arg, indices_arg, input_arg});
-  TORCH_CHECK(self.dtype() == values.dtype(), "expected input to match values dtype");
-  TORCH_CHECK(indices.dtype() == at::kLong, "expected indices to be of type ", at::kLong);
+  checkAllSameGPU(__func__, {topK_arg, indices_arg, input_arg});
   dim = at::maybe_wrap_dim(dim, self);
+
   int numDims = self.dim();
   numDims = numDims == 0 ? 1 : numDims;
   TORCH_CHECK(numDims <= MAX_DIMS, "input tensor has too many dimensions");
-  TORCH_CHECK(dim >= 0 && dim < numDims, "dim not in range");
-
   int64_t sliceSize = self.dim() == 0 ? 1 : self.size(dim);
-  TORCH_CHECK(k >= 0 && k <= sliceSize, "k not in range for dimension");
+
   Tensor input = self.contiguous();
 
-  // Build the output size, which is the dim being selected set to
-  // size k
-  std::vector<int64_t> topKSize = input.sizes().vec();
-  if (topKSize.size() > 0) {
-    topKSize[dim] = k;
+  // If k is 0 the result is an empty tensor, so we don't need to launch a kernel.
+  if (k == 0) {
+    return;
   }
-  at::native::resize_output(values, topKSize);
-  at::native::resize_output(indices, topKSize);
   // static_cast is required to ensure that the correct type (INDEX_T)
   // is provided to the kernel for the arguments.
 
@@ -239,10 +232,16 @@ std::tuple<Tensor&, Tensor&> topk_out_cuda(const Tensor& self,
     inputInfo.sizes[dim] = 1;                                             \
     topKInfo.sizes[dim] = 1;                                              \
     indicesInfo.sizes[dim] = 1;                                           \
+    /* stash the stride of dim because it can be accidentally collapsed */ \
+    auto strideTopK = topKInfo.strides[dim];                              \
+    auto strideIndices = indicesInfo.strides[dim];                        \
     /* Collapse all other dims */                                         \
     int collapseInputDim = inputInfo.collapseDims(dim);                   \
     int collapseTopKDim = topKInfo.collapseDims(dim);                     \
     int collapseIndicesDim = indicesInfo.collapseDims(dim);               \
+    /* restore stride in case it was collapsed */                         \
+    topKInfo.strides[collapseTopKDim] = strideTopK;                       \
+    indicesInfo.strides[collapseIndicesDim] = strideIndices;              \
     int64_t inputSlices = 1;                                              \
     for (int i = 0; i < inputInfo.dims; ++i) {                            \
       inputSlices *= inputInfo.sizes[i];                                  \
@@ -306,18 +305,12 @@ std::tuple<Tensor&, Tensor&> topk_out_cuda(const Tensor& self,
       // allocated tensors to receive the results.
 
       Tensor sortedIndices = at::empty_like(indices);
-      sort_out_cuda(values, dim, largest, values, sortedIndices);
+      Tensor sortedValues = at::empty_like(values);
+      sort_out_cuda(values, dim, largest, sortedValues, sortedIndices);
       indices.copy_(indices.gather(dim, sortedIndices));
+      values.copy_(sortedValues);
     }
   }
-  return std::forward_as_tuple(values, indices);
-}
-
-std::tuple<Tensor, Tensor> topk_cuda(const Tensor& self,
-          int64_t k, int64_t dim, bool largest, bool sorted) {
-  Tensor values = at::empty({0}, self.options());
-  Tensor indices = at::empty({0}, self.options().dtype(kLong));
-  return at::topk_out(values, indices, self, k, dim, largest, sorted);
 }
 
 } // at::native

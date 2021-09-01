@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/frontend/sugared_value.h>
 
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/frontend/tree_views.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -117,6 +118,8 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
            {"is_leaf", "aten"},       {"requires_grad", "prim"},
            {"layout", "prim"},        {"T", "prim"},
            {"ndim", "prim"},          {"name", "prim"},
+           {"real", "aten"},          {"imag", "aten"},
+           {"retains_grad", "aten"},  {"is_ort", "prim"},
        }},
       {TypeKind::DeviceObjType, {{"type", "prim"}, {"index", "prim"}}}};
   auto kind = value_->type()->kind();
@@ -136,7 +139,7 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
   if (auto tuple_type = value_->type()->cast<TupleType>()) {
     if (tuple_type->schema()) {
       auto attrs = tuple_type->schema()->arguments();
-      for (size_t i = 0; i < attrs.size(); i++) {
+      for (const auto i : c10::irange(attrs.size())) {
         if (attrs[i].name() == field) {
           auto idx = m.graph()->insertConstant(IValue(static_cast<int64_t>(i)));
           auto out_type = tuple_type->elements().at(i);
@@ -465,7 +468,7 @@ RangeValue::RangeValue(
     Function& m,
     std::vector<Value*> inputs,
     c10::optional<int64_t> static_len) {
-  for (size_t i = 0; i < inputs.size(); ++i) {
+  for (const auto i : c10::irange(inputs.size())) {
     auto typ = inputs[i]->type();
     if (!typ->cast<IntType>()) {
       throw ErrorReport(loc)
@@ -533,8 +536,7 @@ SugaredValuePtr RangeValue::getitem(
 std::vector<SugaredValuePtr> IterableTree::get_base_iterables() {
   std::vector<SugaredValuePtr> base_iters{};
 
-  // NOLINTNEXTLINE(performance-for-range-copy)
-  for (SugaredValuePtr sv : children_) {
+  for (SugaredValuePtr& sv : children_) {
     if (auto iv = std::dynamic_pointer_cast<IterableTree>(sv)) {
       std::vector<SugaredValuePtr> child_iters = iv->get_base_iterables();
       // merge child iters with the base_iters

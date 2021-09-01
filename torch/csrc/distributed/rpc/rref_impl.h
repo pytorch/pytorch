@@ -196,8 +196,7 @@ class TORCH_API RRef : public RRefInterface {
   explicit RRef(RRef&& other) = delete;
   RRef& operator=(RRef&& other) = delete;
 
-  // NOLINTNEXTLINE(modernize-use-override)
-  virtual ~RRef() = default;
+  ~RRef() override = default;
 
   // returns the worker id of the owner
   inline worker_id_t owner() const override {
@@ -326,8 +325,7 @@ class TORCH_API UserRRef final : public RRef {
   // https://github.com/pytorch/pytorch/blob/9116f02bebf3a5260feef5732d36c54ecb3b4033/c10/util/intrusive_ptr.h#L204
   // This is called on destructing the wrapping intrusive_ptr_target instance
   // and it's data members. We don't need to implement anything here.
-  // NOLINTNEXTLINE(modernize-use-override)
-  ~UserRRef() = default;
+  ~UserRRef() override = default;
 
  private:
   friend class RRefContext;
@@ -401,19 +399,6 @@ class TORCH_API OwnerRRef final : public RRef {
   friend class RRefContext;
 
   c10::intrusive_ptr<JitFuture> future_;
-
- public:
-  // Records an event per each stream in the context and stores them in
-  // the current OwnerRRef instance.
-  void recordAllStreams(const std::shared_ptr<LazyStreamContext>& ctx);
-
-  // Blocks all streams in the context on all events previously stored in
-  // the current OwnerRRef instance.
-  void blockAllStreams(std::shared_ptr<LazyStreamContext>& ctx);
-
- private:
-  // a storage for device events for synchronization.
-  std::vector<c10::Event> events_;
 };
 
 TORCH_API std::ostream& operator<<(std::ostream& os, const RRef& rref);

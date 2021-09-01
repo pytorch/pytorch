@@ -21,7 +21,7 @@ class TestResources(PackageTestCase):
     def test_resource_reader(self):
         """Test compliance with the get_resource_reader importlib API."""
         buffer = BytesIO()
-        with PackageExporter(buffer, verbose=False) as pe:
+        with PackageExporter(buffer) as pe:
             # Layout looks like:
             #    package
             #    ├── one/
@@ -89,7 +89,7 @@ class TestResources(PackageTestCase):
             """
         )
         buffer = BytesIO()
-        with PackageExporter(buffer, verbose=False) as pe:
+        with PackageExporter(buffer) as pe:
             pe.save_source_string("foo.bar", mod_src)
             pe.save_text("my_cool_resources", "sekrit.txt", "my sekrit plays")
 
@@ -101,7 +101,7 @@ class TestResources(PackageTestCase):
 
     def test_importer_access(self):
         buffer = BytesIO()
-        with PackageExporter(buffer, verbose=False) as he:
+        with PackageExporter(buffer) as he:
             he.save_text("main", "main", "my string")
             he.save_binary("main", "main_binary", "my string".encode("utf-8"))
             src = dedent(
@@ -119,6 +119,29 @@ class TestResources(PackageTestCase):
         m = hi.import_module("main")
         self.assertEqual(m.t, "my string")
         self.assertEqual(m.b, "my string".encode("utf-8"))
+
+    def test_resource_access_by_path(self):
+        """
+        Tests that packaged code can used importlib.resources.path.
+        """
+        buffer = BytesIO()
+        with PackageExporter(buffer) as he:
+            he.save_binary("string_module", "my_string", "my string".encode("utf-8"))
+            src = dedent(
+                """\
+                import importlib.resources
+                import string_module
+
+                with importlib.resources.path(string_module, 'my_string') as path:
+                    with open(path, mode='r', encoding='utf-8') as f:
+                        s = f.read()
+                """
+            )
+            he.save_source_string("main", src, is_package=True)
+        buffer.seek(0)
+        hi = PackageImporter(buffer)
+        m = hi.import_module("main")
+        self.assertEqual(m.s, "my string")
 
 
 if __name__ == "__main__":

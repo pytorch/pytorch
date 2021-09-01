@@ -1,7 +1,7 @@
 #import <ATen/Tensor.h>
 #import <ATen/native/metal/MetalCommandBuffer.h>
 #import <ATen/native/metal/MetalTensorImpl.h>
-#import <ATen/native/metal/MetalUtils.h>
+#import <ATen/native/metal/MetalTensorUtils.h>
 
 #import <MetalPerformanceShaders/MetalPerformanceShaders.h>
 
@@ -9,15 +9,8 @@ namespace at {
 namespace native {
 namespace metal {
 
-MPSImage* createStaticImage(const std::vector<int64_t>& sizes);
-MPSImage* createStaticImage(
-    const fp16_t* src,
-    const std::vector<int64_t>& sizes);
-MPSImage* createStaticImage(
-    const float* src,
-    const std::vector<int64_t>& sizes);
-MPSImage* createStaticImage(const at::Tensor& tensor);
-MPSImage* createStaticImage(MPSImage* image);
+MPSImage* createStaticImage(IntArrayRef sizes);
+MPSImage* createStaticImage(const float* src, const IntArrayRef sizes);
 MPSImage* createStaticImage(
     MPSTemporaryImage* image,
     MetalCommandBuffer* buffer,
@@ -25,20 +18,21 @@ MPSImage* createStaticImage(
 
 MPSTemporaryImage* createTemporaryImage(
     MetalCommandBuffer* buffer,
-    const std::vector<int64_t>& sizes);
+    const IntArrayRef sizes);
 MPSTemporaryImage* createTemporaryImage(
     MetalCommandBuffer* buffer,
-    const std::vector<int64_t>& sizes,
+    const IntArrayRef sizes,
     const float* src);
 MPSTemporaryImage* createTemporaryImage(
     MetalCommandBuffer* buffer,
     MPSImage* image);
 
-void copyToHost(float* dst, MPSImage* image);
-void copyToMetalBuffer(MetalCommandBuffer* buffer, id<MTLBuffer> dst, MPSImage* image);
+void copyImageToFloatBuffer(float* dst, MPSImage* image);
 
-std::vector<fp16_t> staticImageToFp16Array(MPSImage* image);
-at::Tensor staticImageToTensor(MPSImage* image);
+void copyImageToMetalBuffer(
+    MetalCommandBuffer* buffer,
+    id<MTLBuffer> dst,
+    MPSImage* image);
 
 static inline MPSImage* imageFromTensor(const Tensor& tensor) {
   TORCH_CHECK(tensor.is_metal());
@@ -63,9 +57,9 @@ static inline std::vector<int64_t> computeImageSize(IntArrayRef sizes) {
   std::vector<int64_t> imageSize(4, 1);
   int64_t index = 3;
   int64_t batch = 1;
-  for (int i = sizes.size() - 1; i >= 0; i--) {
+  for (int64_t i = sizes.size() - 1; i >= 0; i--) {
     if (index != 0) {
-        imageSize[index] = sizes[i];
+      imageSize[index] = sizes[i];
       index--;
       continue;
     }

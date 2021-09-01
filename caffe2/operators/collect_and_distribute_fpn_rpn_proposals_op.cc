@@ -384,18 +384,14 @@ bool DistributeFpnProposalsOp<CPUContext>::RunOnDevice() {
 
 namespace {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     CollectAndDistributeFpnRpnProposals,
     CollectAndDistributeFpnRpnProposalsOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(CollectRpnProposals, CollectRpnProposalsOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     DistributeFpnProposals,
     DistributeFpnProposalsOp<CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(CollectAndDistributeFpnRpnProposals)
     .NumInputs(2, INT_MAX)
     .NumOutputs(3, INT_MAX)
@@ -506,10 +502,8 @@ will change.
         "rois_fpni, i=min...max, such that when applied the RPN RoIs are "
         "restored to their original order in the input blobs.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(CollectAndDistributeFpnRpnProposals);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(CollectRpnProposals)
     .NumInputs(2, INT_MAX)
     .NumOutputs(1)
@@ -580,10 +574,8 @@ OPERATOR_SCHEMA(CollectRpnProposals)
         "Top proposals limited to rpn_post_nms_topN total, "
         "format (image_index, x1, y1, x2, y2)");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(CollectRpnProposals);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(DistributeFpnProposals)
     .NumInputs(1)
     .NumOutputs(2, INT_MAX)
@@ -626,7 +618,6 @@ OPERATOR_SCHEMA(DistributeFpnProposals)
         "rois_fpni, i=min...max, such that when applied the RPN RoIs are "
         "restored to their original order in the input blobs.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(DistributeFpnProposals);
 
 } // namespace

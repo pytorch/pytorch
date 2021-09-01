@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/autograd/custom_function.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/autograd.h>
@@ -25,17 +26,13 @@ Variable VariableInfo::zeros(at::OptionalDeviceGuard& device_guard) const {
   }
 }
 
-std::vector<c10::optional<Variable>> _wrap_outputs(const variable_list &input_vars,
+optional_variable_list _process_backward_mode_ad(
+  const std::unordered_set<at::TensorImpl*> &inputs_set,
   const std::unordered_set<at::TensorImpl*> &non_differentiable,
   const std::unordered_set<at::TensorImpl*> &dirty_inputs,
   const at::ArrayRef<c10::optional<Variable>> raw_outputs,
   const std::shared_ptr<Node> &cdata) {
 
-  std::unordered_set<at::TensorImpl*> inputs;
-  inputs.reserve(input_vars.size());
-  for (auto& var : input_vars) {
-    inputs.emplace(var.unsafeGetTensorImpl());
-  }
 
   int num_outputs = raw_outputs.size();
 
@@ -62,7 +59,7 @@ std::vector<c10::optional<Variable>> _wrap_outputs(const variable_list &input_va
       // Here, `y` requires_grad (!).
     } else if (is_modified) {
       if (var.is_leaf() && var.requires_grad()) {
-        throw std::runtime_error("a leaf Variable that requires grad has been used in an in-place operation.");
+        TORCH_CHECK(false, "a leaf Variable that requires grad has been used in an in-place operation.");
       }
       // No need to mark as modified Tensors that are not inputs.
       if (!is_input) {
@@ -104,13 +101,13 @@ std::vector<c10::optional<Variable>> _wrap_outputs(const variable_list &input_va
     }
   };
 
-  std::vector<c10::optional<Variable>> outputs;
+  optional_variable_list outputs;
   std::unordered_set<at::TensorImpl*> outputs_impl; // For dirty_inputs check
   outputs.reserve(num_outputs);
   int num_diff_outputs = 0;
 
 
-  for (auto i = 0; i < num_outputs; ++i) {
+  for (const auto i : c10::irange(num_outputs)) {
     // For outputs that are not tensors, put a placeholder undefined input.
     if (!raw_outputs[i].has_value()) {
       if (cdata) {
@@ -124,7 +121,7 @@ std::vector<c10::optional<Variable>> _wrap_outputs(const variable_list &input_va
     Variable var = raw_outputs[i].value();
 
     auto out_tensor_impl = var.unsafeGetTensorImpl();
-    bool is_input = inputs.count(out_tensor_impl) > 0;
+    bool is_input = inputs_set.count(out_tensor_impl) > 0;
     bool is_modified = dirty_inputs.count(out_tensor_impl) > 0;
     bool is_differentiable = cdata && non_differentiable.count(out_tensor_impl) == 0
                               && isDifferentiableType(var.scalar_type());
@@ -172,6 +169,26 @@ std::vector<c10::optional<Variable>> _wrap_outputs(const variable_list &input_va
                 "Some elements marked as dirty during the forward method were not returned as output. The"
                 " inputs that are modified inplace must all be outputs of the Function.");
   }
+
+  return outputs;
+}
+
+
+
+optional_variable_list _wrap_outputs(const variable_list &input_vars,
+  const std::unordered_set<at::TensorImpl*> &non_differentiable,
+  const std::unordered_set<at::TensorImpl*> &dirty_inputs,
+  const at::ArrayRef<c10::optional<Variable>> raw_outputs,
+  const std::shared_ptr<Node> &cdata) {
+
+  std::unordered_set<at::TensorImpl*> inputs_set;
+  inputs_set.reserve(input_vars.size());
+  for (auto& var : input_vars) {
+    inputs_set.emplace(var.unsafeGetTensorImpl());
+  }
+
+  auto outputs = _process_backward_mode_ad(inputs_set, non_differentiable, dirty_inputs, raw_outputs, cdata);
+
 
   return outputs;
 }

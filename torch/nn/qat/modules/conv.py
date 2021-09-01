@@ -1,3 +1,4 @@
+import torch
 import torch.nn as nn
 from torch.nn.intrinsic import ConvReLU2d, ConvReLU3d
 
@@ -57,6 +58,21 @@ class Conv2d(nn.Conv2d):
         qat_conv.bias = mod.bias
         return qat_conv
 
+    def to_float(self):
+        conv = torch.nn.Conv2d(
+            self.in_channels,
+            self.out_channels,
+            self.kernel_size,  # type: ignore[arg-type]
+            self.stride,  # type: ignore[arg-type]
+            self.padding,  # type: ignore[arg-type]
+            self.dilation,  # type: ignore[arg-type]
+            self.groups,
+            self.bias is not None,
+            self.padding_mode)
+        conv.weight = torch.nn.Parameter(self.weight.detach())
+        if self.bias is not None:
+            conv.bias = torch.nn.Parameter(self.bias.detach())
+        return conv
 
 class Conv3d(nn.Conv3d):
     r"""
@@ -143,3 +159,19 @@ class Conv3d(nn.Conv3d):
         qat_conv.weight = mod.weight
         qat_conv.bias = mod.bias
         return qat_conv
+
+    def to_float(self):
+        conv = torch.nn.Conv3d(
+            self.in_channels,
+            self.out_channels,
+            self.kernel_size,  # type: ignore[arg-type]
+            self.stride,  # type: ignore[arg-type]
+            self.padding,  # type: ignore[arg-type]
+            self.dilation,  # type: ignore[arg-type]
+            self.groups,
+            self.bias is not None,
+            self.padding_mode)
+        conv.weight = torch.nn.Parameter(self.weight.detach())
+        if self.bias is not None:
+            conv.bias = torch.nn.Parameter(self.bias.detach())
+        return conv

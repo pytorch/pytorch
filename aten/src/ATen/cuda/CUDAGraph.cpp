@@ -165,21 +165,29 @@ void CUDAGraph::replay() {
   TORCH_CHECK(has_graph_exec_,
               "Called CUDAGraph::replay without a preceding successful capture.");
 
+  c10::OptionalDeviceGuard device_guard{capture_stream_.device()};
+
+  // Just like any RNG consumer kernel!
+  auto* gen = get_generator_or_default<CUDAGeneratorImpl>(
+      c10::nullopt, cuda::detail::getDefaultCUDAGenerator());
+  PhiloxCudaState rng_engine_inputs;
   {
-    c10::OptionalDeviceGuard device_guard{capture_stream_.device()};
+    std::lock_guard<std::mutex> lock(gen->mutex_);
+    rng_engine_inputs = gen->philox_cuda_state(wholegraph_increment_);
+  }
+  offset_extragraph_.fill_(int64_t(rng_engine_inputs.offset_.val));
 
-    // Just like any RNG consumer kernel!
-    auto* gen = get_generator_or_default<CUDAGeneratorImpl>(
-        c10::nullopt, cuda::detail::getDefaultCUDAGenerator());
-    PhiloxCudaState rng_engine_inputs;
-    {
-      std::lock_guard<std::mutex> lock(gen->mutex_);
-      rng_engine_inputs = gen->philox_cuda_state(wholegraph_increment_);
-    }
-    offset_extragraph_.fill_(int64_t(rng_engine_inputs.offset_.val));
+  // graph_exec_ may be replayed in any stream.
+  AT_CUDA_CHECK(cudaGraphLaunch(graph_exec_, at::cuda::getCurrentCUDAStream()));
 
-    // graph_exec_ may be replayed in any stream.
-    AT_CUDA_CHECK(cudaGraphLaunch(graph_exec_, at::cuda::getCurrentCUDAStream()));
+  int version;
+  AT_CUDA_CHECK(cudaDriverGetVersion(&version));
+  if (version < 11040) {
+    // Workaround for bug in libcuda.so that causes replayed graphs with
+    // certain topologies to be corrupted (kernels elided, internal syncs
+    // ignored) when replayed back to back without a sync in between.
+    // The bug is fixed in CUDA 11.4+.
+    cudaDeviceSynchronize();
   }
 #else
   TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0");

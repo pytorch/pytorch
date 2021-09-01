@@ -1,12 +1,9 @@
 import copy
 import os
-import random
 import sys
 import tempfile
 import threading
 import time
-import traceback
-import unittest
 from datetime import timedelta
 from itertools import product
 from sys import platform
@@ -20,27 +17,23 @@ if not c10d.is_available():
 
 import torch.distributed as dist
 import torch.distributed.algorithms.ddp_comm_hooks.powerSGD_hook as powerSGD
-import torch.multiprocessing as mp
 import torch.nn.functional as F
 import torch.testing._internal.common_utils as common
 from torch import nn
-from torch._six import string_classes
 from torch.nn.parallel import DistributedDataParallel
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
-    skip_if_win32,
-    create_tcp_store
 )
 from torch.testing._internal.common_utils import (
     TestCase,
     load_tests,
     run_tests,
-    retry_on_connect_failures,
-    ADDRESS_IN_USE,
-    CONNECT_TIMEOUT,
-    TEST_WITH_TSAN,
-    IS_WINDOWS,
+    TEST_WITH_DEV_DBG_ASAN,
 )
+
+if TEST_WITH_DEV_DBG_ASAN:
+    print("Multiprocessing spawn is not compatible with dev/dbg asan", file=sys.stderr)
+    sys.exit(0)
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -51,7 +44,7 @@ if platform == "darwin":
 else:
     LOOPBACK = "lo"
 
-DEFAULT_HOSTNAME = "localhost"
+torch.backends.cuda.matmul.allow_tf32 = False
 
 
 def gpus_for_rank(world_size):
@@ -65,362 +58,9 @@ def gpus_for_rank(world_size):
     gpus_for_rank = []
     for rank in range(world_size):
         gpus_for_rank.append(
-            visible_devices[rank * gpus_per_process: (rank + 1) * gpus_per_process]
+            visible_devices[rank * gpus_per_process : (rank + 1) * gpus_per_process]
         )
     return gpus_for_rank
-
-
-class StoreTestBase(object):
-    def _create_store(self, i):
-        raise RuntimeError("not implemented")
-
-    def _test_set_get(self, fs):
-        fs.add("key", 1)
-        fs.add("key", 2)
-        fs.add("key", 3)
-        fs.set("key0", "value0")
-        fs.add("key3", 1)
-        fs.set("key1", "value1")
-        fs.add("key3", 2)
-        fs.set("key2", "value2")
-        fs.add("key3", 3)
-        fs.add("key3", 4)
-        fs.add("key3", 5)
-        fs.add("key3", 6)
-        self.assertEqual(fs.num_keys(), self.num_keys_total)
-        self.assertEqual(b"6", fs.get("key"))
-        self.assertEqual(b"value0", fs.get("key0"))
-        self.assertEqual(b"value1", fs.get("key1"))
-        self.assertEqual(b"value2", fs.get("key2"))
-        self.assertEqual(b"21", fs.get("key3"))
-
-    def test_set_get(self):
-        self._test_set_get(self._create_store())
-
-    def _test_compare_set(self, store):
-        missing_key_result = store.compare_set("cs_key0", "wrong_old_value", "new_value0")
-        self.assertEqual(b"wrong_old_value", missing_key_result)
-
-        store.set("cs_key0", "value0")
-        self.assertEqual(b"value0", store.get("cs_key0"))
-        old_value_result = store.compare_set("cs_key0", "wrong_old_value", "new_value0")
-        self.assertEqual(b"value0", old_value_result)
-        self.assertEqual(b"value0", store.get("cs_key0"))
-        new_value_result = store.compare_set("cs_key0", "value0", "new_value0")
-        self.assertEqual(b"new_value0", new_value_result)
-        self.assertEqual(b"new_value0", store.get("cs_key0"))
-        empty_old_value_result = store.compare_set("cs_key1", "", "new_value1")
-        self.assertEqual(b"new_value1", empty_old_value_result)
-        self.assertEqual(b"new_value1", store.get("cs_key1"))
-
-    def test_compare_set(self):
-        self._test_compare_set(self._create_store())
-
-    # This is the number of keys used in test_set_get. Adding this as a class
-    # property instead of hardcoding in the test since some Store
-    # implementations will have differing number of keys. In the base case,
-    # there will be 5 keys: key, key0, key1, key2, key3.
-    @property
-    def num_keys_total(self):
-        return 5
-
-
-class FileStoreTest(TestCase, StoreTestBase):
-    def setUp(self):
-        super(FileStoreTest, self).setUp()
-        self.file = tempfile.NamedTemporaryFile(delete=False)
-
-    def _create_store(self):
-        store = c10d.FileStore(self.file.name, 1)
-        store.set_timeout(timedelta(seconds=300))
-        return store
-
-
-@skip_if_win32()
-class HashStoreTest(TestCase, StoreTestBase):
-    def setUp(self):
-        super(HashStoreTest, self).setUp()
-
-    def _create_store(self):
-        store = c10d.HashStore()
-        store.set_timeout(timedelta(seconds=300))
-        return store
-
-
-class PrefixFileStoreTest(TestCase, StoreTestBase):
-    def setUp(self):
-        super(PrefixFileStoreTest, self).setUp()
-        self.file = tempfile.NamedTemporaryFile(delete=False)
-        self.filestore = c10d.FileStore(self.file.name, 1)
-        self.prefix = "test_prefix"
-        self.filestore.set_timeout(timedelta(seconds=300))
-
-    def _create_store(self):
-        return c10d.PrefixStore(self.prefix, self.filestore)
-
-
-class TCPStoreTest(TestCase, StoreTestBase):
-    def _create_store(self):
-        store = create_tcp_store()
-        store.set_timeout(timedelta(seconds=300))
-        return store
-
-    def test_address_already_in_use(self):
-        if sys.platform == "win32":
-            err_msg_reg = "Only one usage of each socket address*"
-        else:
-            err_msg_reg = "^Address already in use$"
-        with self.assertRaisesRegex(RuntimeError, err_msg_reg):
-            addr = DEFAULT_HOSTNAME
-            port = common.find_free_port()
-
-            # Use noqa to silence flake8.
-            # Need to store in an unused variable here to ensure the first
-            # object is not destroyed before the second object is created.
-            store1 = c10d.TCPStore(addr, port, 1, True)  # noqa: F841
-            store2 = c10d.TCPStore(addr, port, 1, True)  # noqa: F841
-
-    # The TCPStore has 6 keys in test_set_get. It contains the 5 keys added by
-    # the user and one additional key used for coordinate all the workers.
-    @property
-    def num_keys_total(self):
-        return 6
-
-    def _test_numkeys_delkeys(self, fs):
-        # We start off with one init key in the store to coordinate workers
-        self.assertEqual(fs.num_keys(), 1)
-        fs.add("key", 1)
-        fs.add("key", 2)
-        fs.add("key", 3)
-        fs.set("key0", "value0")
-        fs.add("key3", 1)
-        fs.set("key1", "value1")
-        self.assertEqual(fs.num_keys(), 5)
-        fs.delete_key("key")
-        self.assertEqual(fs.num_keys(), 4)
-        fs.set_timeout(timedelta(seconds=2))
-        with self.assertRaises(RuntimeError):
-            fs.get("key")
-        fs.delete_key("key0")
-        fs.delete_key("key3")
-        self.assertEqual(fs.num_keys(), 2)
-        fs.set("key4", "value2")
-        self.assertEqual(fs.num_keys(), 3)
-        self.assertEqual(b"value1", fs.get("key1"))
-        self.assertEqual(b"value2", fs.get("key4"))
-
-    def test_numkeys_delkeys(self):
-        self._test_numkeys_delkeys(self._create_store())
-
-    def _create_client(self, index, addr, port, world_size, messages):
-        try:
-            client_store = dist.TCPStore(addr, port, world_size, timeout=timedelta(seconds=10))
-            self.assertEqual("value".encode(), client_store.get("key"))
-            client_store.set(f"new_key{index}", f"new_value{index}")
-            self.assertEqual(f"next_value{index}".encode(),
-                             client_store.compare_set(f"new_key{index}", f"new_value{index}", f"next_value{index}"))
-        except Exception:
-            messages.put('Caught exception: \n{}exiting process with exit code: {}'
-                         .format(traceback.format_exc(), MultiProcessTestCase.TEST_ERROR_EXIT_CODE))
-            sys.exit(MultiProcessTestCase.TEST_ERROR_EXIT_CODE)
-
-    def _multi_worker_helper(self, world_size):
-        addr = DEFAULT_HOSTNAME
-        server_store = create_tcp_store(addr, world_size, wait_for_workers=False)
-        server_store.set("key", "value")
-        port = server_store.port
-        messages = mp.Queue()
-        processes = []
-        num_proccesses = random.randint(3, 5) if world_size == -1 else world_size
-        for i in range(num_proccesses):
-            p = mp.Process(target=self._create_client, args=(i, addr, port, world_size, messages))
-            processes.append(p)
-            p.start()
-        for p in processes:
-            p.join()
-        error_message = ""
-        while not messages.empty():
-            error_message += messages.get() + "\n"
-        if any([p.exitcode != 0 for p in processes]):
-            raise RuntimeError(error_message)
-
-    @unittest.skipIf(
-        IS_WINDOWS, "Skip test for windows due to multiprocessing library error when using windows spawn"
-    )
-    def test_multi_worker_with_fixed_world_size(self):
-        self._multi_worker_helper(5)
-
-    @unittest.skipIf(
-        IS_WINDOWS, "Skip test for windows due to multiprocessing library error when using windows spawn"
-    )
-    def test_multi_worker_with_nonfixed_world_size(self):
-        self._multi_worker_helper(-1)
-
-
-class PrefixTCPStoreTest(TestCase, StoreTestBase):
-    def setUp(self):
-        super(PrefixTCPStoreTest, self).setUp()
-        self.tcpstore = create_tcp_store()
-        self.prefix = "test_prefix"
-        self.tcpstore.set_timeout(timedelta(seconds=300))
-
-    def _create_store(self):
-        return c10d.PrefixStore(self.prefix, self.tcpstore)
-
-    # The PrefixTCPStore has 6 keys in test_set_get. It contains the 5 keys
-    # added by the user and one additional key used for coordinate all the
-    # workers.
-    @property
-    def num_keys_total(self):
-        return 6
-
-
-class MyPythonStore(c10d.Store):
-    def __init__(self):
-        super(MyPythonStore, self).__init__()
-        self.store = dict()
-
-    def set(self, key, value):
-        if not isinstance(key, string_classes):
-            raise AssertionError("Expected set to be called with string key")
-        if type(value) is not bytes:
-            raise AssertionError("Expected set to be called with bytes value")
-        self.store[key] = value
-
-    def get(self, key):
-        value = self.store.get(key, b"")
-        if type(value) is not bytes:
-            raise AssertionError("Expected get to return bytes value")
-        return value
-
-    def add(self, key, value):
-        new = int(self.store.get(key, 0)) + value
-        self.set(key, bytes(str(new).encode("utf-8")))
-        return new
-
-
-class PythonStoreTest(TestCase):
-    def setUp(self):
-        super(PythonStoreTest, self).setUp()
-
-    def test_set_get(self):
-        # If we were to inherit from StoreTestBase and try to use
-        # its test_set_get function, we would exercise the Python
-        # API directly, instead of going through the C++ trampoline.
-        # We care about testing the C++ trampoline, so run the
-        # equivalent of StoreTestBase.test_set_get from C++.
-        # See `torch/csrc/distributed/c10d/init.cpp` for the definition
-        # of this test function.
-        c10d._test_python_store(MyPythonStore())
-
-
-class RendezvousTest(TestCase):
-    def test_unknown_handler(self):
-        with self.assertRaisesRegex(RuntimeError, "^No rendezvous handler"):
-            c10d.rendezvous("invalid://")
-
-
-class RendezvousEnvTest(TestCase):
-    @retry_on_connect_failures
-    def test_nominal(self):
-        os.environ["WORLD_SIZE"] = "1"
-        os.environ["MASTER_ADDR"] = "127.0.0.1"
-        os.environ["MASTER_PORT"] = str(common.find_free_port())
-
-        # Single rank
-        os.environ["RANK"] = "0"
-        gen0 = c10d.rendezvous("env://")
-        store0, rank0, size0 = next(gen0)
-        self.assertEqual(0, rank0)
-        self.assertEqual(1, size0)
-
-        store0.set("key0", "value0")
-
-        # check with get
-        self.assertEqual(b"value0", store0.get("key0"))
-
-
-class RendezvousFileTest(TestCase):
-    def test_common_errors(self):
-        with self.assertRaisesRegex(ValueError, "path missing"):
-            gen = c10d.rendezvous("file://?rank=0&world_size=1")
-            next(gen)
-        with self.assertRaisesRegex(ValueError, "rank parameter missing"):
-            gen = c10d.rendezvous("file:///tmp/foo?world_size=1")
-            next(gen)
-        with self.assertRaisesRegex(ValueError, "size parameter missing"):
-            gen = c10d.rendezvous("file:///tmp/foo?rank=0")
-            next(gen)
-
-    def test_nominal(self):
-        with tempfile.NamedTemporaryFile(delete=False) as file:
-            url = f'file:///{file.name.replace(os.path.sep, "/")}?world_size=2'
-            gen0 = c10d.rendezvous(url + "&rank=0")
-            store0, rank0, size0 = next(gen0)
-            self.assertEqual(0, rank0)
-            self.assertEqual(2, size0)
-            gen1 = c10d.rendezvous(url + "&rank=1")
-            store1, rank1, size1 = next(gen1)
-            self.assertEqual(1, rank1)
-            self.assertEqual(2, size1)
-
-            # Set value on both stores
-            store0.set("key0", "value0")
-            store1.set("key1", "value1")
-
-            # Cross check with get
-            self.assertEqual(b"value0", store1.get("key0"))
-            self.assertEqual(b"value1", store0.get("key1"))
-
-
-@skip_if_win32()
-class RendezvousTCPTest(TestCase):
-    def create_tcp_url(self):
-        addr = DEFAULT_HOSTNAME
-        port = common.find_free_port()
-        url = "tcp://%s:%d?world_size=%d" % (addr, port, 1)
-        return url
-
-    def test_common_errors(self):
-        with self.assertRaisesRegex(ValueError, "port number missing"):
-            gen = c10d.rendezvous("tcp://127.0.0.1?rank=0&world_size=1")
-            next(gen)
-        with self.assertRaisesRegex(ValueError, "rank parameter missing"):
-            gen = c10d.rendezvous("tcp://127.0.0.1:23456?world_size=1")
-            next(gen)
-        with self.assertRaisesRegex(ValueError, "size parameter missing"):
-            gen = c10d.rendezvous("tcp://127.0.0.1:23456?rank=0")
-            next(gen)
-
-    @retry_on_connect_failures
-    def test_nominal(self):
-        url = self.create_tcp_url()
-        gen0 = c10d.rendezvous(url + "&rank=0")
-        store0, rank0, size0 = next(gen0)
-        self.assertEqual(0, rank0)
-        self.assertEqual(1, size0)
-
-        # Set value on the single store
-        store0.set("key0", "value0")
-
-        # check with get
-        self.assertEqual(b"value0", store0.get("key0"))
-
-    @retry_on_connect_failures(connect_errors=(CONNECT_TIMEOUT, ADDRESS_IN_USE))
-    def test_tcp_store_timeout_set(self):
-        url = self.create_tcp_url()
-        test_store_timeout = timedelta(seconds=10)
-        gen0 = c10d.rendezvous(url + "&rank=0", timeout=test_store_timeout)
-        store0, rank0, size0 = next(gen0)
-        # this should time out in 10s. If the timeout passed into rendezvous was
-        # not respected, it will take much longer to timeout.
-        start = time.time()
-        with self.assertRaisesRegex(RuntimeError, "Timeout"):
-            store0.get("nonexistant key")
-
-        end = time.time()
-        time_diff = end - start
-        self.assertGreater(test_store_timeout.seconds * 10, time_diff)
 
 
 class AbstractTimeoutTest(object):
@@ -611,12 +251,12 @@ class AbstractDistributedDataParallelTest(object):
         return 2
 
     def _prepare_single_device_module(
-            self,
-            process_group,
-            devices,
-            device_ids,
-            global_batch_size,
-            gradient_as_bucket_view=False,
+        self,
+        process_group,
+        devices,
+        device_ids,
+        global_batch_size,
+        gradient_as_bucket_view=False,
     ):
         model = Net()
         device = devices[0] if devices else torch.device("cuda:%d" % self.rank)
@@ -636,12 +276,12 @@ class AbstractDistributedDataParallelTest(object):
         return model, ddp_model, input, target
 
     def _prepare_multi_device_module(
-            self,
-            process_group,
-            devices,
-            device_ids,
-            global_batch_size,
-            gradient_as_bucket_view=False,
+        self,
+        process_group,
+        devices,
+        device_ids,
+        global_batch_size,
+        gradient_as_bucket_view=False,
     ):
         self.assertTrue(
             len(devices) == 2 or len(devices) == 4,
@@ -666,12 +306,12 @@ class AbstractDistributedDataParallelTest(object):
         return model, ddp_model, input, target
 
     def _test_ddp_with_process_group(
-            self,
-            process_group,
-            devices,
-            device_ids,
-            multi_device=False,
-            gradient_as_bucket_view=False,
+        self,
+        process_group,
+        devices,
+        device_ids,
+        multi_device=False,
+        gradient_as_bucket_view=False,
     ):
         """
         Note: we pass down `device_ids` all the way to DistributedDataParallel
@@ -691,7 +331,7 @@ class AbstractDistributedDataParallelTest(object):
                 global_batch_size,
                 gradient_as_bucket_view,
             )
-            ddp_logging_data = ddp_model.get_ddp_logging_data()
+            ddp_logging_data = ddp_model._get_ddp_logging_data()
             self.assertTrue(ddp_logging_data.get("is_multi_device_module"))
         else:
             model, ddp_model, input, target = self._prepare_single_device_module(
@@ -701,7 +341,7 @@ class AbstractDistributedDataParallelTest(object):
                 global_batch_size,
                 gradient_as_bucket_view,
             )
-            ddp_logging_data = ddp_model.get_ddp_logging_data()
+            ddp_logging_data = ddp_model._get_ddp_logging_data()
             self.assertFalse(ddp_logging_data.get("is_multi_device_module"))
 
         def step_model(model, input, target):
@@ -725,10 +365,10 @@ class AbstractDistributedDataParallelTest(object):
             step_model(
                 ddp_model,
                 input[
-                    self.rank * local_batch_size: (self.rank + 1) * local_batch_size
+                    self.rank * local_batch_size : (self.rank + 1) * local_batch_size
                 ],
                 target[
-                    self.rank * local_batch_size: (self.rank + 1) * local_batch_size
+                    self.rank * local_batch_size : (self.rank + 1) * local_batch_size
                 ],
             )
 
@@ -739,14 +379,14 @@ class AbstractDistributedDataParallelTest(object):
                 len(list(model.parameters())), len(list(ddp_model.parameters()))
             )
             for i, j in zip(model.parameters(), ddp_model.parameters()):
-                self.assertEqual(i, j)
+                self.assertEqual(i, j, rtol=1.3e-06, atol=5e-5)
 
             # Shuffle the input so that DDP input is different
             torch.manual_seed(1337 + iteration)
             input = input[torch.randperm(global_batch_size)]
 
     def _gpu_model_with_ddp_comm_hook(
-            self, process_group, hook=None, gradient_as_bucket_view=False, state=None
+        self, process_group, hook=None, gradient_as_bucket_view=False, state=None
     ):
         device_id = gpus_for_rank(self.world_size)[self.rank][0]
         gpu_model = DistributedDataParallel(
@@ -763,7 +403,7 @@ class AbstractDistributedDataParallelTest(object):
         return gpu_model
 
     def _gpu_model_with_builtin_ddp_comm_hook(
-            self, process_group, hook=None, gradient_as_bucket_view=False
+        self, process_group, hook=None, gradient_as_bucket_view=False
     ):
         device_id = gpus_for_rank(self.world_size)[self.rank][0]
         gpu_model = DistributedDataParallel(
@@ -789,41 +429,36 @@ class AbstractDistributedDataParallelTest(object):
         [self.assertEqual(p.grad, expected_grad) for p in model.parameters()]
 
     def _simple_hook(
-            self, state: object, bucket: dist.GradBucket
-    ) -> torch.futures.Future:
+        self, state: object, bucket: dist.GradBucket
+    ) -> torch.futures.Future[torch.Tensor]:
         fut = torch.futures.Future()
-        fut.set_result([torch.ones_like(bucket.get_tensor())])
+        fut.set_result(torch.ones_like(bucket.buffer()))
 
         def fut_then(fut):
             # Add ones to fut's result.
-            return [t + torch.ones_like(t) for t in fut.value()]
+            t = fut.value()
+            return t + torch.ones_like(t)
 
         return fut.then(fut_then)
 
 
-@unittest.skipIf(
-    TEST_WITH_TSAN,
-    "TSAN is not fork-safe since we're forking in a multi-threaded environment",
-)
-class DistributedDataParallelTest(AbstractDistributedDataParallelTest, MultiProcessTestCase):
-
+class DistributedDataParallelTest(
+    AbstractDistributedDataParallelTest, MultiProcessTestCase
+):
     def setUp(self):
         super(DistributedDataParallelTest, self).setUp()
-        if sys.platform == "win32":
-            self._spawn_processes()
-        else:
-            self._fork_processes()
+        self._spawn_processes()
 
     def test_invalid_powerSGD_state(self):
         for start_powerSGD_iter, use_error_feedback, warm_start in product(
-                [0, 1], [True, False], [True, False]
+            [0, 1], [True, False], [True, False]
         ):
             if not use_error_feedback and not warm_start:
                 continue
             with self.assertRaisesRegex(
-                    ValueError,
-                    "Expect `start_powerSGD_iter` > 1 if `use_error_feedback` or `warm_start` is enabled, "
-                    "because PowerSGD can only be applied after the first two iterations in DDP.",
+                ValueError,
+                "Expect `start_powerSGD_iter` > 1 if `use_error_feedback` or `warm_start` is enabled, "
+                "because PowerSGD can only be applied after the first two iterations in DDP.",
             ):
                 state = powerSGD.PowerSGDState(
                     process_group=None,
@@ -842,7 +477,10 @@ class ComputeBucketAssignmentTest(TestCase):
             torch.empty([100], dtype=torch.float),
             torch.empty([50], dtype=torch.float),
         ]
-        result = dist._compute_bucket_assignment_by_size(tensors, [400])
+        result, per_bucket_size_limits = dist._compute_bucket_assignment_by_size(
+            tensors, [400]
+        )
+        self.assertTrue(all(size_lim == 400 for size_lim in per_bucket_size_limits))
         self.assertEqual([[0], [1], [2], [3]], result)
 
     def test_single_limit_multi_dtype(self):
@@ -854,7 +492,10 @@ class ComputeBucketAssignmentTest(TestCase):
             torch.empty([50], dtype=torch.float),
             torch.empty([25], dtype=torch.double),
         ]
-        result = dist._compute_bucket_assignment_by_size(tensors, [400])
+        result, per_bucket_size_limits = dist._compute_bucket_assignment_by_size(
+            tensors, [400]
+        )
+        self.assertTrue(all(size_lim == 400 for size_lim in per_bucket_size_limits))
         self.assertEqual([[0, 2], [1, 3], [4], [5]], result)
 
     def test_multi_limit_single_dtype(self):
@@ -864,7 +505,10 @@ class ComputeBucketAssignmentTest(TestCase):
             torch.empty([10], dtype=torch.float),
             torch.empty([10], dtype=torch.float),
         ]
-        result = dist._compute_bucket_assignment_by_size(tensors, [40, 80])
+        result, per_bucket_size_limits = dist._compute_bucket_assignment_by_size(
+            tensors, [40, 80]
+        )
+        self.assertEqual(per_bucket_size_limits, [40, 80, 80])
         self.assertEqual([[0], [1, 2], [3]], result)
 
     def test_multi_limit_multi_dtype(self):
@@ -876,12 +520,14 @@ class ComputeBucketAssignmentTest(TestCase):
             torch.empty([50], dtype=torch.float),
             torch.empty([25], dtype=torch.double),
         ]
-        result = dist._compute_bucket_assignment_by_size(tensors, [200, 400])
+        result, per_bucket_size_limits = dist._compute_bucket_assignment_by_size(
+            tensors, [200, 400]
+        )
         self.assertEqual([[0], [1], [2, 4], [3, 5]], result)
+        self.assertEqual(per_bucket_size_limits, [200, 200, 400, 400])
 
 
 class AbstractCommTest(object):
-
     @property
     def op_timeout_sec(self):
         return 1
@@ -1008,19 +654,10 @@ class AbstractCommTest(object):
             dist.all_gather_object(obj_list, subgroup_seq, group=subgroup)
             self.assertEqual(len(set(obj_list)), 1)
 
-
-@unittest.skipIf(
-    TEST_WITH_TSAN,
-    "TSAN is not fork-safe since we're forking in a multi-threaded environment",
-)
 class CommTest(AbstractCommTest, MultiProcessTestCase):
-
     def setUp(self):
         super(CommTest, self).setUp()
-        if sys.platform == "win32":
-            self._spawn_processes()
-        else:
-            self._fork_processes()
+        self._spawn_processes()
 
     def tearDown(self):
         super(CommTest, self).tearDown()

@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """ The Python Hipify script.
 ##
 # Copyright (c) 2015-2016 Advanced Micro Devices, Inc. All rights reserved.
@@ -750,7 +750,6 @@ def preprocessor(
                 or f.startswith("ATen/native/quantized/cuda")
                 or f.startswith("ATen/native/sparse/cuda")
                 or f.startswith("THC/")
-                or f.startswith("THCUNN/")
                 or (f.startswith("THC") and not f.startswith("THCP"))
             ):
                 return templ.format(get_hip_file_path(m.group(1), is_pytorch_extension))

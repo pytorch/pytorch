@@ -28,7 +28,6 @@ class Kernel : public ::testing::Test {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(Kernel, InliningIntermediates) {
   // here, each mul has only one use, so it should be completely inlined
   {
@@ -40,7 +39,6 @@ TEST_F(Kernel, InliningIntermediates) {
           %4 : Float(5, 3, strides=[3, 1]) = aten::mul(%0, %2)
           %5: Float(5, 3, strides=[3, 1]) = aten::add(%4, %1, %one)
           return (%5))IR";
-    KernelScope kernel_scope;
     auto graph = std::make_shared<Graph>();
     parseIR(graph_string, &*graph);
     TensorExprKernel k(graph);
@@ -64,7 +62,6 @@ TEST_F(Kernel, InliningIntermediates) {
         continue;
       }
 
-      KernelScope kernel_scope;
       TemplateEnv env;
       env.s("device", use_cuda ? "cuda:0" : "cpu");
       const auto graph_string = format(graph_template, env);
@@ -88,10 +85,7 @@ TEST_F(Kernel, InliningIntermediates) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(Kernel, _1) {
-  KernelScope kernel_scope;
-
   const auto graph_string = R"IR(
       graph(%0 : Float(5, 3, strides=[3, 1], device=cpu),
             %1 : Float(5, 3, strides=[3, 1], device=cpu)):
@@ -107,7 +101,7 @@ TEST_F(Kernel, _1) {
   auto ref = a * (a * b);
   TensorExprKernel k(graph);
   std::vector<at::Tensor> inputs = {a, b};
-  Stmt* s = k.getCodeGenStmt();
+  StmtPtr s = k.getCodeGenStmt();
 
   std::ostringstream oss;
   oss << *s;
@@ -128,10 +122,7 @@ TEST_F(Kernel, _1) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(Kernel, _2) {
-  KernelScope kernel_scope;
-
   const auto graph_string = R"IR(
       graph(%0 : Float(5, 3, strides=[3, 1], device=cpu),
             %1 : Float(5, 3, strides=[1, 5], device=cpu)):
@@ -148,7 +139,7 @@ TEST_F(Kernel, _2) {
   auto ref = a * (a * b);
   TensorExprKernel k(graph);
   std::vector<at::Tensor> inputs = {a, b};
-  Stmt* s = k.getCodeGenStmt();
+  StmtPtr s = k.getCodeGenStmt();
 
   std::ostringstream oss;
   oss << *s;
@@ -169,10 +160,7 @@ TEST_F(Kernel, _2) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(Kernel, _3) {
-  KernelScope kernel_scope;
-
   const auto graph_string = R"IR(
       graph(%0 : Float(5, 3, strides=[3, 1], device=cpu),
             %1 : Float(5, 3, strides=[12, 2], device=cpu)):
@@ -189,7 +177,7 @@ TEST_F(Kernel, _3) {
   auto ref = a * (a * b);
   TensorExprKernel k(graph);
   std::vector<at::Tensor> inputs = {a, b};
-  Stmt* s = k.getCodeGenStmt();
+  StmtPtr s = k.getCodeGenStmt();
 
   std::ostringstream oss;
   oss << *s;
@@ -210,15 +198,56 @@ TEST_F(Kernel, _3) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST_F(Kernel, Huge) {
+  const auto graph_string = R"IR(
+      graph(%x.1 : Float(4000000000, strides=[1], requires_grad=0, device=cpu)):
+        %1 : int = prim::Constant[value=0]()
+        %2 : Float(1, 4000000000, strides=[4000000000, 1], requires_grad=0, device=cpu) = aten::unsqueeze(%x.1, %1)
+        %3 : Float(1, 4000000000, strides=[4000000000, 1], requires_grad=0, device=cpu) = aten::relu(%2)
+        return (%3))IR";
+  auto graph = std::make_shared<Graph>();
+  parseIR(graph_string, &*graph);
+  TensorExprKernel k(graph);
+  std::ostringstream oss;
+  oss << *k.getCodeGenStmt();
+  const std::string& verification_pattern = "# CHECK: 4000000000";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+TEST_F(Kernel, ParallelStrided) {
+  const auto graph_string = R"IR(
+      graph(%0 : Float(5, 3, 40005, strides=[120015, 40005, 1], device=cpu),
+            %1 : Float(5, 3, 40005, strides=[960120, 160020, 2], device=cpu)):
+        %2 : Float(5, 3, 40005, strides=[120015, 40005, 1]) = aten::mul(%0, %1)
+        %3 : Float(5, 3, 40005, strides=[120015, 40005, 1]) = aten::mul(%0, %2)
+        return (%3))IR";
+  auto graph = std::make_shared<Graph>();
+  parseIR(graph_string, &*graph);
+
+  auto a = at::rand({5, 3, 40005}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto b = at::rand({10, 6, 80010}, TensorOptions(kCPU).dtype(at::kFloat))
+               .index(
+                   {Slice(None, None, 2),
+                    Slice(None, None, 2),
+                    Slice(None, None, 2)});
+  auto ref = a * (a * b);
+  auto o = at::zeros_like(ref);
+  TensorExprKernel k(graph);
+  std::vector<at::Tensor> inputs = {a, b};
+  std::vector<IValue> stack = fmap<IValue>(inputs);
+  k.run(stack);
+  o = stack[0].toTensor();
+  for (size_t i = 0; i < 5 * 3; i++) {
+    CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
+  }
+}
+
 TEST_F(Kernel, DISABLED_Shape_Inference) {
   // disabled: doesn't do stride propagation, and isn't being used currently
 
   // Test TensorExpr shape inference capabilities: it should only require shapes
   // for the inputs
   {
-    KernelScope kernel_scope;
-
     const auto graph_string = R"IR(
       graph(%0 : Float(5, 3, strides=[3, 1], device=cpu),
             %1 : Float(5, 3, strides=[12, 2], device=cpu)):
@@ -235,7 +264,7 @@ TEST_F(Kernel, DISABLED_Shape_Inference) {
     auto ref = a * (a * b);
     TensorExprKernel k(graph);
     std::vector<at::Tensor> inputs = {a, b};
-    Stmt* s = k.getCodeGenStmt();
+    StmtPtr s = k.getCodeGenStmt();
 
     std::ostringstream oss;
     oss << *s;
@@ -256,8 +285,6 @@ TEST_F(Kernel, DISABLED_Shape_Inference) {
     }
   }
   {
-    KernelScope kernel_scope;
-
     const auto graph_string = R"IR(
       graph(%0 : Float(8, 8, strides=[8, 1], device=cpu),
             %1 : Float(8, 8, strides=[8, 1], device=cpu)):
@@ -275,7 +302,7 @@ TEST_F(Kernel, DISABLED_Shape_Inference) {
     auto ref = t[0] * t[1];
     TensorExprKernel k(graph);
     std::vector<at::Tensor> inputs = {a, b};
-    Stmt* s = k.getCodeGenStmt();
+    StmtPtr s = k.getCodeGenStmt();
 
     std::ostringstream oss;
     oss << *s;
@@ -297,7 +324,6 @@ TEST_F(Kernel, DISABLED_Shape_Inference) {
   }
   {
     // Test that shape inference handles aten::unsqueeze
-    KernelScope kernel_scope;
 
     const auto graph_string = R"IR(
       graph(%a : Float(4, 2, strides=[2, 1], device=cpu),
@@ -326,7 +352,7 @@ TEST_F(Kernel, DISABLED_Shape_Inference) {
 
     TensorExprKernel k(graph);
     std::vector<at::Tensor> inputs = {a, b, c};
-    Stmt* s = k.getCodeGenStmt();
+    StmtPtr s = k.getCodeGenStmt();
 
     std::ostringstream oss;
     oss << *s;
@@ -360,7 +386,6 @@ TEST_F(Kernel, DISABLED_Shape_Inference) {
   }
   {
     // Test that shape inference handles aten::cat
-    KernelScope kernel_scope;
 
     const auto graph_string = R"IR(
       graph(%a : Float(5, 3, 2, strides=[6, 2, 1], device=cpu),
@@ -381,7 +406,7 @@ TEST_F(Kernel, DISABLED_Shape_Inference) {
 
     TensorExprKernel k(graph);
     std::vector<at::Tensor> inputs = {a, b, c};
-    Stmt* s = k.getCodeGenStmt();
+    StmtPtr s = k.getCodeGenStmt();
 
     std::ostringstream oss;
     oss << *s;
@@ -414,7 +439,6 @@ TEST_F(Kernel, DISABLED_Shape_Inference) {
   }
   {
     // Test that we throw an error when input list for aten::cat is empty
-    KernelScope kernel_scope;
 
     const auto graph_string = R"IR(
       graph():
@@ -432,7 +456,6 @@ TEST_F(Kernel, DISABLED_Shape_Inference) {
   }
   {
     // Test that we throw an error when 'dim' passed to aten::cat is invalid
-    KernelScope kernel_scope;
 
     const auto ir_dim_99 = R"IR(
       graph(%a : Float(5, 3, 2, strides=[6, 2, 1], device=cpu),
@@ -460,11 +483,9 @@ TEST_F(Kernel, DISABLED_Shape_Inference) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(Kernel, CatInputTypesPromotion) {
   {
     // Test that we properly promote input types for aten::cat
-    KernelScope kernel_scope;
 
     const auto graph_string = R"IR(
       graph(%a : Float(5, 3, 2, strides=[6, 2, 1], device=cpu),
@@ -484,7 +505,7 @@ TEST_F(Kernel, CatInputTypesPromotion) {
 
     TensorExprKernel k(graph);
     std::vector<at::Tensor> inputs = {a, b, c};
-    Stmt* s = k.getCodeGenStmt();
+    StmtPtr s = k.getCodeGenStmt();
 
     std::ostringstream oss;
     oss << *s;
@@ -518,7 +539,6 @@ TEST_F(Kernel, CatInputTypesPromotion) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(Kernel, CatWoConditionals) {
   getCatWoConditionals() = true;
   const auto graph_string = R"IR(
@@ -534,7 +554,7 @@ TEST_F(Kernel, CatWoConditionals) {
   parseIR(graph_string, &*graph);
 
   TensorExprKernel k(graph);
-  Stmt* s = k.getCodeGenStmt();
+  StmtPtr s = k.getCodeGenStmt();
   std::ostringstream oss;
   oss << *s;
 
@@ -577,6 +597,73 @@ TEST_F(Kernel, CatWoConditionals) {
   for (size_t i = 0; i < num_el; i++) {
     CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
   }
+  getCatWoConditionals() = false;
+}
+
+TEST_F(Kernel, OptimizeConditionals) {
+  bool old_cat_wo_conditionals = getCatWoConditionals();
+  bool old_opt_conditionals = getOptConditionals();
+  getCatWoConditionals() = false;
+  getOptConditionals() = true;
+  const auto graph_string = R"IR(
+      graph(%a : Float(5, 3, strides=[3, 1], device=cpu),
+            %b : Float(5, 7, strides=[7, 1], device=cpu),
+            %c : Float(5, 9, strides=[9, 1], device=cpu)):
+        %dim : int = prim::Constant[value=1]()
+        %inputs : Tensor[] = prim::ListConstruct(%a, %b, %c)
+        %r : Float(5, 19, strides=[19, 1]) = aten::cat(%inputs, %dim)
+        %t : Float(5, 19, strides=[19, 1]) = aten::relu(%r)
+        return (%t))IR";
+
+  auto graph = std::make_shared<Graph>();
+  parseIR(graph_string, &*graph);
+
+  TensorExprKernel k(graph);
+  StmtPtr s = k.getCodeGenStmt();
+  std::ostringstream oss;
+  oss << *s;
+
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for
+# CHECK-NEXT: for
+# CHECK-NEXT: aten_relu
+# CHECK: for
+# CHECK-NEXT: aten_relu
+# CHECK: for
+# CHECK-NEXT: aten_relu
+# CHECK-NOT: Allocate
+# CHECK-NOT: Free)IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto a = at::rand({5, 3}, TensorOptions(kCPU).dtype(at::kFloat));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto b = at::rand({5, 7}, TensorOptions(kCPU).dtype(at::kFloat));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto c = at::rand({5, 9}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto ref = at::relu(at::cat({a, b, c}, 1));
+
+  std::vector<at::Tensor> inputs = {a, b, c};
+  std::vector<IValue> stack = fmap<IValue>(inputs);
+  k.run(stack);
+  auto o = stack[0].toTensor();
+
+  // Check sizes
+  CHECK_EQ(o.sizes().size(), ref.sizes().size());
+  CHECK_EQ(o.dtype(), ref.dtype());
+  size_t num_el = 1;
+  for (size_t idx = 0; idx < ref.sizes().size(); idx++) {
+    CHECK_EQ(o.sizes()[idx], ref.sizes()[idx]);
+    num_el *= ref.sizes()[idx];
+  }
+
+  // Check the contents
+  for (size_t i = 0; i < num_el; i++) {
+    CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
+  }
+  getOptConditionals() = old_opt_conditionals;
+  getCatWoConditionals() = old_cat_wo_conditionals;
 }
 
 namespace {
@@ -606,25 +693,23 @@ at::Tensor iotaTensor(IntArrayRef sizes, const at::TensorOptions& options) {
 
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST_F(Kernel, DISABLED_SumAllAxes) {
-  // [zero-dim tensors]
-  // NNC does not yet handle zero-dim tensors. aten::sum with no axis
-  // input returns a zero-dim tensors, so these tests must be disabled
-  // until we add support for zero-dim tensors.
-
+TEST_F(Kernel, SumAllAxes) {
   // Test lowering of sum on all axes.
   const auto graph_template = R"IR(
       graph(%0 : Float(5, 3, strides=[3, 1], device=cpu)):
         %1 : ${dtype}
-        %2 : Tensor = aten::sum(%0, %1)
+        %2 : ${out_dtype}(requires_grad=0, device=cpu) = aten::sum(%0, %1)
         return (%2))IR";
   auto a = iotaTensor({5, 3}, TensorOptions(kCPU).dtype(at::kFloat));
 
   for (auto scalar_type : {ScalarType::Undefined, ScalarType::Double}) {
-    KernelScope kernel_scope;
     TemplateEnv env;
     env.s("dtype", dtypeConstant(scalar_type));
+    if (scalar_type == ScalarType::Undefined) {
+      env.s("out_dtype", "Float");
+    } else {
+      env.s("out_dtype", "Double");
+    }
     const auto graph_string = format(graph_template, env);
 
     auto graph = std::make_shared<Graph>();
@@ -638,7 +723,7 @@ TEST_F(Kernel, DISABLED_SumAllAxes) {
     auto ref = a.sum(/*dtype=*/dtype);
     TensorExprKernel k(graph);
     std::vector<at::Tensor> inputs = {a};
-    Stmt* s = k.getCodeGenStmt();
+    StmtPtr s = k.getCodeGenStmt();
 
     std::ostringstream oss;
     oss << *s;
@@ -672,7 +757,6 @@ std::string li_to_str(at::ArrayRef<int64_t> li) {
   return out.str();
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(Kernel, SumOneAxis) {
   // Test lowering of sum on one axis.
   const auto graph_template = R"IR(
@@ -687,7 +771,6 @@ TEST_F(Kernel, SumOneAxis) {
   for (int dim = -a.dim(); dim < a.dim(); ++dim) {
     for (bool keepdim : {false, true}) {
       for (auto scalar_type : {ScalarType::Undefined, ScalarType::Double}) {
-        KernelScope kernel_scope;
         TemplateEnv env;
         env.d("dim", dim);
         env.d("keepdim", keepdim);
@@ -711,7 +794,7 @@ TEST_F(Kernel, SumOneAxis) {
         auto o = at::empty({}, TensorOptions(kCPU));
         TensorExprKernel k(graph);
         std::vector<at::Tensor> inputs = {a};
-        Stmt* s = k.getCodeGenStmt();
+        StmtPtr s = k.getCodeGenStmt();
 
         std::ostringstream oss;
         oss << *s;
@@ -719,9 +802,9 @@ TEST_F(Kernel, SumOneAxis) {
         // Check the IR we produced
         const std::string& verification_pattern =
             R"IR(
-# CHECK: for (int v = 0; v <
+# CHECK: for (int64_t v = 0ll; v <
 # CHECK-NEXT: sum
-# CHECK-NEXT: for (int v_1 = 0; v_1 <
+# CHECK-NEXT: for (int64_t v_1 = 0ll; v_1 <
 # CHECK-NEXT:   sum)IR";
         torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
@@ -736,17 +819,16 @@ TEST_F(Kernel, SumOneAxis) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(Kernel, SumMultipleAxes) {
   // Test lowering of sum on multiple axes.
   const auto graph_template = R"IR(
-      graph(%0 : Float(2, 3, 2, 3, strides=[18, 6, 3, 1], device=cpu)):
+      graph(%0 : Float(2, 3, 2, 3, strides=[18, 6, 3, 1], requires_grad=0, device=cpu)):
         %1 : int = prim::Constant[value=${dim1}]()
         %2 : int = prim::Constant[value=${dim2}]()
         %3 : int[] = prim::ListConstruct(%1, %2)
         %4 : bool = prim::Constant[value=${keepdim}]()
         %5 : ${dtype}
-        %6 : Float(${size}, strides=[${strides}]) = aten::sum(%0, %3, %4, %5)
+        %6 : Float(${size}, strides=[${strides}], requires_grad=0, device=cpu) = aten::sum(%0, %3, %4, %5)
         return (%6))IR";
   auto a = iotaTensor({2, 3, 2, 3}, TensorOptions(kCPU).dtype(at::kFloat));
 
@@ -755,7 +837,6 @@ TEST_F(Kernel, SumMultipleAxes) {
   for (int dim1 = 0; dim1 < a.dim(); ++dim1) {
     for (int dim2 = dim1 + 1; dim2 < a.dim(); ++dim2) {
       for (bool keepdim : {false, true}) {
-        KernelScope kernel_scope;
         TemplateEnv env;
         env.d("dim1", dim1);
         env.d("dim2", dim2);
@@ -774,7 +855,7 @@ TEST_F(Kernel, SumMultipleAxes) {
 
         TensorExprKernel k(graph);
         std::vector<at::Tensor> inputs = {a};
-        Stmt* s = k.getCodeGenStmt();
+        StmtPtr s = k.getCodeGenStmt();
 
         std::ostringstream oss;
         oss << *s;
@@ -782,10 +863,10 @@ TEST_F(Kernel, SumMultipleAxes) {
         // Check the IR we produced
         const std::string& verification_pattern =
             R"IR(
-# CHECK: int v = 0
-# CHECK: int v_1 = 0
-# CHECK: int v_2 = 0
-# CHECK: int v_3 = 0
+# CHECK: int64_t v = 0
+# CHECK: int64_t v_1 = 0
+# CHECK: int64_t v_2 = 0
+# CHECK: int64_t v_3 = 0
 # CHECK: sum)IR";
         torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
@@ -803,7 +884,6 @@ TEST_F(Kernel, SumMultipleAxes) {
 // This test and the following ones testing Softmax only tests with dim set
 // to one of the valid input dimensions. It does not test with dim=None
 // because that is supposed to be deprecated.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(Kernel, Softmax2D) {
   const auto graph_template = R"IR(
       graph(%0 : Float(5, 3, strides=[3, 1], device=cpu)):
@@ -832,7 +912,6 @@ TEST_F(Kernel, Softmax2D) {
       auto other_dim = (softmax_dim + 1) % a.dim();
       auto ref =
           log_softmax ? a.log_softmax(softmax_dim) : a.softmax(softmax_dim);
-      KernelScope kernel_scope;
       TemplateEnv env;
       env.d("dim", softmax_dim);
       env.s("op", log_softmax ? "log_softmax" : "softmax");
@@ -846,7 +925,7 @@ TEST_F(Kernel, Softmax2D) {
 
       TensorExprKernel k(graph);
       std::vector<at::Tensor> inputs = {a};
-      Stmt* s = k.getCodeGenStmt();
+      StmtPtr s = k.getCodeGenStmt();
 
       std::ostringstream oss;
       oss << *s;
@@ -871,7 +950,6 @@ TEST_F(Kernel, Softmax2D) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(Kernel, Softmax3D) {
   const auto graph_template = R"IR(
       graph(%0 : Float(3, 4, 5, strides=[20, 5, 1], device=cpu)):
@@ -909,7 +987,6 @@ TEST_F(Kernel, Softmax3D) {
       auto ref =
           log_softmax ? a.log_softmax(softmax_dim) : a.softmax(softmax_dim);
 
-      KernelScope kernel_scope;
       TemplateEnv env;
       env.d("dim", softmax_dim);
       env.s("op", log_softmax ? "log_softmax" : "softmax");
@@ -923,7 +1000,7 @@ TEST_F(Kernel, Softmax3D) {
 
       TensorExprKernel k(graph);
       std::vector<at::Tensor> inputs = {a};
-      Stmt* s = k.getCodeGenStmt();
+      StmtPtr s = k.getCodeGenStmt();
 
       std::ostringstream oss;
       oss << *s;
@@ -951,7 +1028,6 @@ TEST_F(Kernel, Softmax3D) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(Kernel, Softmax4D) {
   const auto graph_template = R"IR(
       graph(%0 : Float(2, 3, 2, 3, strides=[18, 6, 3, 1], device=cpu)):
@@ -992,7 +1068,6 @@ TEST_F(Kernel, Softmax4D) {
       auto ref =
           log_softmax ? a.log_softmax(softmax_dim) : a.softmax(softmax_dim);
 
-      KernelScope kernel_scope;
       TemplateEnv env;
       env.d("dim", softmax_dim);
       env.s("op", log_softmax ? "log_softmax" : "softmax");
@@ -1006,7 +1081,7 @@ TEST_F(Kernel, Softmax4D) {
 
       TensorExprKernel k(graph);
       std::vector<at::Tensor> inputs = {a};
-      Stmt* s = k.getCodeGenStmt();
+      StmtPtr s = k.getCodeGenStmt();
 
       std::ostringstream oss;
       oss << *s;
@@ -1035,24 +1110,20 @@ TEST_F(Kernel, Softmax4D) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST_F(Kernel, DISABLED_InlineProducerIntoReduction) {
-  // see : [zero-dim tensors]
-  KernelScope kernel_scope;
-
+TEST_F(Kernel, InlineProducerIntoReduction) {
   // Inline producer (mul) into reduction (sum).
   const auto graph_string = R"IR(
       graph(%0 : Float(5, 3, strides=[3, 1], device=cpu),
             %1 : Float(5, 3, strides=[3, 1], device=cpu)):
-        %2 : Float(5, 3, strides=[3, 1]) = aten::mul(%0, %1)
+        %2 : Float(5, 3, strides=[3, 1], device=cpu) = aten::mul(%0, %1)
         %3 : int = prim::Constant[value=7]()
-        %4 : Float(5, 3, strides=[3, 1]) = aten::sum(%2, %3)
+        %4 : Double(device=cpu) = aten::sum(%2, %3)
         return (%4))IR";
   auto graph = std::make_shared<Graph>();
   parseIR(graph_string, &*graph);
 
   TensorExprKernel k(graph);
-  Stmt* s = k.getCodeGenStmt();
+  StmtPtr s = k.getCodeGenStmt();
   std::ostringstream oss;
   oss << *s;
 
@@ -1060,8 +1131,8 @@ TEST_F(Kernel, DISABLED_InlineProducerIntoReduction) {
   // We should have only one loop in the end.
   const std::string& verification_pattern =
       R"IR(
-        # CHECK: for (int v = 0; v < 5;
-        # CHECK-NEXT: for (int v_1 = 0; v_1 < 3;
+        # CHECK: for (int64_t v = 0ll; v < 5
+        # CHECK-NEXT: for (int64_t v_1 = 0ll; v_1 < 3
         # CHECK-NEXT:   sum
         # CHECK-NOT: for)IR";
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
@@ -1076,12 +1147,7 @@ TEST_F(Kernel, DISABLED_InlineProducerIntoReduction) {
   ASSERT_TRUE(at::allclose(o, ref));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST_F(Kernel, DISABLED_InlineReductionIntoConsumer) {
-  // see : [zero-dim tensors]
-
-  KernelScope kernel_scope;
-
+TEST_F(Kernel, InlineReductionIntoConsumer) {
   // Inline producer (mul %2) into reduction (sum %4) but DO NOT
   // inline the reduction into consumer (mul %4).
   const auto graph_string = R"IR(
@@ -1089,14 +1155,14 @@ TEST_F(Kernel, DISABLED_InlineReductionIntoConsumer) {
             %1 : Float(5, 3, strides=[3, 1], device=cpu)):
         %2 : Float(5, 3, strides=[3, 1]) = aten::mul(%0, %1)
         %3 : int = prim::Constant[value=6]()
-        %4 : Float(5, 3, strides=[3, 1]) = aten::sum(%2, %3)
-        %5 : Float(5, 3, strides=[3, 1]) = aten::mul(%2, %4)
+        %4 : Float(device=cpu) = aten::sum(%2, %3)
+        %5 : Float(5, 3, strides=[3, 1], device=cpu) = aten::mul(%2, %4)
         return (%5))IR";
   auto graph = std::make_shared<Graph>();
   parseIR(graph_string, &*graph);
 
   TensorExprKernel k(graph);
-  Stmt* s = k.getCodeGenStmt();
+  StmtPtr s = k.getCodeGenStmt();
   std::ostringstream oss;
   oss << *s;
 
@@ -1104,11 +1170,11 @@ TEST_F(Kernel, DISABLED_InlineReductionIntoConsumer) {
   // We should have two loops in the end.
   const std::string& verification_pattern =
       R"IR(
-        # CHECK: for (int v = 0; v < 5;
-        # CHECK-NEXT: for (int v_1 = 0; v_1 < 3;
+        # CHECK: for (int64_t v = 0ll; v < 5
+        # CHECK-NEXT: for (int64_t v_1 = 0ll; v_1 < 3
         # CHECK-NEXT:   sum
-        # CHECK: for (int v_2 = 0; v_2 < 5;
-        # CHECK-NEXT: for (int v_3 = 0; v_3 < 3;
+        # CHECK: for (int64_t v_2 = 0ll; v_2 < 5
+        # CHECK-NEXT: for (int64_t v_3 = 0ll; v_3 < 3
         # CHECK-NEXT:   aten_mul
         # CHECK-NOT: for)IR";
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
@@ -1123,7 +1189,6 @@ TEST_F(Kernel, DISABLED_InlineReductionIntoConsumer) {
   ASSERT_TRUE(at::allclose(o, ref));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(Kernel, SanitizeNames_CUDA) {
   const auto graph_string = R"IR(
       graph(%0 : Float(5, 3, strides=[3, 1], device=cuda:0),
@@ -1131,7 +1196,6 @@ TEST_F(Kernel, SanitizeNames_CUDA) {
         %2 : Float(5, 3, strides=[3, 1]) = aten::mul(%0, %1)
         %4 : Float(5, 3, strides=[3, 1]) = aten::mul(%0, %2)
         return (%4))IR";
-  KernelScope kernel_scope;
   auto graph = std::make_shared<Graph>();
   parseIR(graph_string, &*graph);
   graph->inputs().at(0)->setDebugName("aten::add:");
@@ -1147,7 +1211,43 @@ TEST_F(Kernel, SanitizeNames_CUDA) {
   ASSERT_TRUE(at::allclose(o, ref));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST_F(Kernel, SanitizeConstants_CUDA) {
+  const auto graph_string = R"IR(
+        graph(%x : Float(16, 16, strides=[16, 1], device=cuda:0)):
+          %none : NoneType = prim::Constant()
+          %size : int = prim::Constant[value=16]()
+          %sizes : int[] = prim::ListConstruct(%size, %size)
+          %30 : Device = prim::Constant[value="cuda"]()
+          %y : Float(16, 16, strides=[16, 1], device=cuda:0) = aten::ones(%sizes, %none, %none, %30, %none)
+          %z : Float(16, 16, strides=[16, 1], device=cuda:0) = aten::mul(%x, %y)
+          return (%z))IR";
+  auto graph = std::make_shared<Graph>();
+  parseIR(graph_string, &*graph);
+  // IRParser doesn't support tensor constants, so we insert a call to
+  // aten::ones and then const-prop it
+  ConstantPropagation(graph);
+
+  // We set the name of the constant to include special characters that are
+  // not allowed. This should be fixed by the sanitizer in TensorExprKernel.
+  graph->nodes().front()->output()->setDebugName("illegal.name");
+
+  // Check if we have a constant node with illegal name in the graph.
+  auto const_node = graph->nodes().front();
+  ASSERT_EQ(const_node->kind(), prim::Constant);
+  ASSERT_NE(const_node->output()->debugName().find('.'), std::string::npos);
+
+  TensorExprKernel k(graph);
+
+  auto x = at::rand({16, 16}, TensorOptions(kCUDA).dtype(at::kFloat));
+  std::vector<at::Tensor> inputs = {x};
+  std::vector<IValue> stack = fmap<IValue>(inputs);
+  k.run(stack);
+  auto o = stack[0].toTensor();
+  auto y = at::ones({16, 16}, TensorOptions(kCUDA).dtype(at::kFloat));
+  auto ref = x * y;
+  ASSERT_TRUE(at::allclose(o, ref));
+}
+
 TEST_F(Kernel, ConstantTensors) {
   const auto graph_string = R"IR(
         graph(%x : Float(16, 16, strides=[16, 1], device=cpu)):
@@ -1157,7 +1257,6 @@ TEST_F(Kernel, ConstantTensors) {
           %y : Float(16, 16, strides=[16, 1], device=cpu) = aten::ones(%sizes, %none, %none, %none, %none)
           %z : Float(16, 16, strides=[16, 1], device=cpu) = aten::mul(%x, %y)
           return (%z))IR";
-  KernelScope kernel_scope;
   auto graph = std::make_shared<Graph>();
   parseIR(graph_string, &*graph);
   // IRParser doesn't support tensor constants, so we insert a call to
@@ -1176,7 +1275,6 @@ TEST_F(Kernel, ConstantTensors) {
   ASSERT_TRUE(at::allclose(o, ref));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(Kernel, ConstantTensorsNonContiguous) {
   const auto graph_string = R"IR(
         graph(%x : Float(16, 16, strides=[16, 1], device=cpu)):
@@ -1191,7 +1289,6 @@ TEST_F(Kernel, ConstantTensorsNonContiguous) {
           %y : Tensor = aten::t(%y_t)
           %z : Float(16, 16, strides=[16, 1], device=cpu) = aten::mul(%x, %y)
           return (%z))IR";
-  KernelScope kernel_scope;
   auto graph = std::make_shared<Graph>();
   parseIR(graph_string, &*graph);
   // IRParser doesn't support tensor constants, so we generate several aten
@@ -1215,7 +1312,6 @@ TEST_F(Kernel, ConstantTensorsNonContiguous) {
 TEST_F(Kernel, RunFast) {
 #ifdef TORCH_ENABLE_LLVM
   // TODO: Implement call_raw in IREval and remove the ifdef
-  KernelScope kernel_scope;
 
   const auto graph_string = R"IR(
       graph(%0 : Float(5, 3, strides=[3, 1], device=cpu),
@@ -1255,7 +1351,6 @@ TEST_F(Kernel, CodegenInspection) {
           %y : Tensor = aten::t(%y_t)
           %z : Float(16, 16, strides=[16, 1], device=cpu) = aten::mul(%x, %y)
           return (%z))IR";
-  KernelScope kernel_scope;
   auto graph = std::make_shared<Graph>();
   parseIR(graph_string, &*graph);
   // IRParser doesn't support tensor constants, so we generate several aten
@@ -1281,6 +1376,46 @@ TEST_F(Kernel, CodegenInspection) {
   ASSERT_TRUE(
       !buf_args[0].isVar() && !buf_args[1].isVar() && !buf_args[2].isVar());
 #endif
+}
+
+Tensor lowerNanToNum(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType,
+    at::Device device) {
+  auto input_buf = c10::get<BufHandle>(inputs[0]);
+  auto e = Compute(
+      "custom_nan_to_num",
+      c10::fmap<DimArg>(outputShape),
+      [&](const std::vector<VarHandle>& axes) {
+        std::vector<ExprHandle> indices(axes.begin(), axes.end());
+        auto load = input_buf.load(indices);
+        return IfThenElse::make(Cast::make(kBool, isnan(load)), 0.0f, load);
+      });
+  return e;
+}
+
+TEST_F(Kernel, CustomLowering) {
+  const auto graph_string = R"IR(
+      graph(%x : Float(2, 2, strides=[2, 1], requires_grad=0, device=cpu)):
+          %none : NoneType = prim::Constant()
+          %y : Float(2, 2, strides=[2, 1], requires_grad=0, device=cpu) = aten::nan_to_num(%x, %none, %none, %none)
+          return (%y)
+)IR";
+  auto graph = std::make_shared<Graph>();
+  parseIR(graph_string, &*graph);
+
+  std::unordered_map<c10::Symbol, NNCLoweringFunction> lowerings = {
+      {aten::nan_to_num, lowerNanToNum}};
+  TensorExprKernel k(graph, lowerings);
+
+  auto stmt = k.getCodeGenStmt();
+  std::ostringstream oss;
+  oss << *stmt;
+
+  // Check that our custom lowering is actually used
+  torch::jit::testing::FileCheck().check("custom_nan_to_num")->run(oss.str());
+  torch::jit::testing::FileCheck().check("isnan")->run(oss.str());
 }
 
 } // namespace jit
