@@ -2198,10 +2198,10 @@ Tensor _adjoint(const Tensor &self, const bool transpose, const char* const name
   const auto ndim = self.dim();
   TORCH_CHECK(ndim != 1,
       "tensor.", name, " only supported on matrices or batches of matrices. Got 1-D tensor.");
-  if (!transpose && self.is_complex()) {
-    return ndim == 0 ? self.conj() : self.transpose(-2, -1).conj();
-  } else {
+  if (transpose || !self.is_complex()) {
     return ndim == 0 ? self : self.transpose(-2, -1);
+  } else {
+    return ndim == 0 ? self.conj() : self.transpose(-2, -1).conj();
   }
 }
 } // anonymous namespace
