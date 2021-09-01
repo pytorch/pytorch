@@ -8,6 +8,9 @@ namespace jit {
 enum class Strategy {
   NAIVE = 0,
   LINEAR_SCAN,
+  GREEDY_BY_SIZE,
+  GREEDY_BY_SIZE_WITH_FIRST_GAP,
+  GREEDY_BY_LONGEST_AND_SIZE
 };
 
 inline const char* toString(Strategy s) {
@@ -16,6 +19,12 @@ inline const char* toString(Strategy s) {
       return "NAIVE";
     case Strategy::LINEAR_SCAN:
       return "LINEAR_SCAN";
+    case Strategy::GREEDY_BY_SIZE:
+      return "GREEDY_BY_SIZE";
+    case Strategy::GREEDY_BY_SIZE_WITH_FIRST_GAP:
+      return "GREEDY_BY_SIZE_WITH_FIRST_GAP";
+    case Strategy::GREEDY_BY_LONGEST_AND_SIZE:
+      return "GREEDY_BY_LONGEST_AND_SIZE";
     default:
       return "UNKNOWN STRATEGY";
   }
@@ -76,9 +85,6 @@ c10::optional<int64_t> computeStorageSize(const Value& value);
 bool hasOutVariant(Node* node);
 
 TORCH_API void planMemory(std::shared_ptr<Graph>&, Strategy);
-
-#define PRINT_CURR_ALLOC(x, y) \
-  std::cout << __LINE__ << " " << x << " " << y << "\n";
 
 } // namespace jit
 } // namespace torch

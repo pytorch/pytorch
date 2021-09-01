@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/memory_planning.h>
+#include <torch/csrc/jit/passes/memory_planning/greedy_by_size.h>
 #include <torch/csrc/jit/passes/memory_planning/linear_scan.h>
 
 #include <jit/tensorexpr/kernel.h>
@@ -46,9 +47,8 @@ bool intersectMemRegion(MemRegion reg1, MemRegion reg2) {
 std::vector<MemAllocation> naive(
     std::unordered_map<LiveRange, int64_t, live_range_hash>
         managed_live_ranges) {
-  std::map<LiveRange, int64_t, live_range_start_cmp>
-      sorted_managed_live_ranges(
-          managed_live_ranges.begin(), managed_live_ranges.end());
+  std::map<LiveRange, int64_t, live_range_start_cmp> sorted_managed_live_ranges(
+      managed_live_ranges.begin(), managed_live_ranges.end());
   std::vector<MemAllocation> allocations;
   allocations.reserve(managed_live_ranges.size());
   int64_t offset = 0;
@@ -272,7 +272,7 @@ int64_t getTotalAllocationSize(std::vector<MemAllocation> allocations) {
 
 bool intersectAllocs(MemAllocation m1, MemAllocation m2) {
   return intersectLiveRange(m1.lvr, m2.lvr) &&
-         intersectMemRegion(m1.reg, m2.reg);
+      intersectMemRegion(m1.reg, m2.reg);
 }
 
 bool validateAllocations(std::vector<MemAllocation> allocations) {
@@ -290,11 +290,11 @@ bool validateAllocations(std::vector<MemAllocation> allocations) {
   return true;
 }
 
-void printAllocation(
+std::ostream& printAllocation(
+    std::ostream& out,
     std::vector<MemAllocation> allocations,
     std::map<LiveRange, const Value*, live_range_start_cmp> managed_ranges) {
-  std::unordered_map<LiveRange, MemRegion, live_range_hash> allocations_map;
-  allocations_map.reserve(allocations.size());
+  std::map<LiveRange, MemRegion, live_range_start_cmp> allocations_map;
   for (const auto& item : allocations) {
     allocations_map[item.lvr] = item.reg;
   }
@@ -303,8 +303,10 @@ void printAllocation(
     auto lvr = item.first;
     auto val = item.second;
     auto alloced_reg = allocations_map[lvr];
-    std::cout << val->debugName() << ": " << lvr << " " << alloced_reg << "\n";
+    out << val->debugName() << ": " << lvr << " " << alloced_reg << "\n";
   }
+
+  return out;
 }
 
 void planMemory(std::shared_ptr<Graph>& graph, Strategy strat) {
@@ -330,6 +332,18 @@ void planMemory(std::shared_ptr<Graph>& graph, Strategy strat) {
       allocations = linearScanHeuristic(managed_live_ranges);
       break;
     };
+    case Strategy::GREEDY_BY_SIZE: {
+      allocations = greedyBySize(managed_live_ranges);
+      break;
+    }
+    case Strategy::GREEDY_BY_SIZE_WITH_FIRST_GAP: {
+      allocations = greedyBySizeWithFirstGap(managed_live_ranges);
+      break;
+    }
+    case Strategy::GREEDY_BY_LONGEST_AND_SIZE: {
+      allocations = greedyBySizeAndLongestWithFirstGap(managed_live_ranges);
+      break;
+    }
     default:
       return;
   }
@@ -350,6 +364,10 @@ void planMemory(std::shared_ptr<Graph>& graph, Strategy strat) {
     }
     managed_range_values.insert({item.second, item.first});
   }
+
+  std::stringstream allocs_str;
+  printAllocation(allocs_str, allocations, managed_range_values);
+  GRAPH_DEBUG("\nallocs\n", allocs_str.str());
 
   GRAPH_DEBUG("\ngraph before inserting storage node\n", *graph);
 
