@@ -41,7 +41,20 @@ static bool checkTypes(const ScalarType highType, const int typeConstraints) {
   return false;
 }
 
-static ExprHandle promoteToDtype(ExprHandle e, ScalarType dt) {
+} // namespace
+
+namespace torch {
+namespace jit {
+namespace tensorexpr {
+
+std::string buildErrorMessage(const std::string& s) {
+  // TODO: Update this generic error message to include details regarding
+  // turning off the fuser.
+  static const std::string generic_error_message = "";
+  return s + " " + generic_error_message;
+}
+
+ExprHandle promoteToDtype(ExprHandle e, ScalarType dt) {
   if (e.dtype().scalar_type() == dt) {
     return e;
   }
@@ -58,19 +71,6 @@ static ExprHandle promoteToDtype(ExprHandle e, ScalarType dt) {
       throw unsupported_dtype();
   }
   return e;
-}
-
-} // namespace
-
-namespace torch {
-namespace jit {
-namespace tensorexpr {
-
-std::string buildErrorMessage(const std::string& s) {
-  // TODO: Update this generic error message to include details regarding
-  // turning off the fuser.
-  static const std::string generic_error_message = "";
-  return s + " " + generic_error_message;
 }
 
 static int te_cuda_pointwise_loop_levels = -1;
