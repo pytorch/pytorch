@@ -8674,7 +8674,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
            supports_out=False,
            supports_forward_ad=True,
-           skips=(# Fails due to the lambda wrapper
+           skips=(  # Fails due to the lambda wrapper
                SkipInfo("TestJit", "test_variant_consistency_jit" ),),
            sample_inputs_func=sample_inputs_T),
     OpInfo('H',
@@ -8683,7 +8683,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
            supports_out=False,
            supports_forward_ad=True,
-           skips=(# Fails due to the lambda wrapper
+           skips=(  # Fails due to the lambda wrapper
                SkipInfo("TestJit", "test_variant_consistency_jit" ),),
            sample_inputs_func=sample_inputs_T),
     OpInfo('mT',
@@ -8692,7 +8692,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
            supports_out=False,
            supports_forward_ad=True,
-           skips=(# Fails due to the lambda wrapper
+           skips=(  # Fails due to the lambda wrapper
                SkipInfo("TestJit", "test_variant_consistency_jit" ),),
            sample_inputs_func=sample_inputs_adjoint),
     OpInfo('mH',
@@ -8702,7 +8702,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
            supports_out=False,
            supports_forward_ad=True,
-           skips=(# Fails due to the lambda wrapper
+           skips=(  # Fails due to the lambda wrapper
                SkipInfo("TestJit", "test_variant_consistency_jit" ),),
            sample_inputs_func=sample_inputs_adjoint),
     OpInfo('tril',
