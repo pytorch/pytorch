@@ -43,9 +43,7 @@ Tensor lerp_cpu_scalar(const Tensor& self, const Tensor& end, const Scalar& weig
   return result;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(lerp_kernel_scalar_weight);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(lerp_kernel_tensor_weight);
 
 } // namespace native

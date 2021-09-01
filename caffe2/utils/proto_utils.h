@@ -7,7 +7,8 @@
 #include <google/protobuf/message.h>
 #endif  // !CAFFE2_USE_LITE_PROTO
 
-#include "caffe2/core/logging.h"
+#include <c10/util/Logging.h>
+
 #include "caffe2/utils/proto_wrap.h"
 #include "caffe2/proto/caffe2_pb.h"
 
@@ -221,7 +222,7 @@ class C10_EXPORT ArgumentHelper {
   }
 
   template <typename Def, typename T>
-  static vector<T> GetRepeatedArgument(
+  static std::vector<T> GetRepeatedArgument(
       const Def& def,
       const string& name,
       const std::vector<T>& default_value = std::vector<T>()) {
@@ -234,7 +235,7 @@ class C10_EXPORT ArgumentHelper {
   }
 
   template <typename Def, typename MessageType>
-  static vector<MessageType> GetRepeatedMessageArgument(
+  static std::vector<MessageType> GetRepeatedMessageArgument(
       const Def& def,
       const string& name) {
     return ArgumentHelper(def).GetRepeatedMessageArgument<MessageType>(name);
@@ -261,7 +262,7 @@ class C10_EXPORT ArgumentHelper {
   template <typename T>
   bool HasSingleArgumentOfType(const string& name) const;
   template <typename T>
-  vector<T> GetRepeatedArgument(
+  std::vector<T> GetRepeatedArgument(
       const string& name,
       const std::vector<T>& default_value = std::vector<T>()) const;
 
@@ -280,9 +281,9 @@ class C10_EXPORT ArgumentHelper {
   }
 
   template <typename MessageType>
-  vector<MessageType> GetRepeatedMessageArgument(const string& name) const {
+  std::vector<MessageType> GetRepeatedMessageArgument(const string& name) const {
     CAFFE_ENFORCE(arg_map_.count(name), "Cannot find parameter named ", name);
-    vector<MessageType> messages(arg_map_.at(name).strings_size());
+    std::vector<MessageType> messages(arg_map_.at(name).strings_size());
     for (int i = 0; i < messages.size(); ++i) {
       CAFFE_ENFORCE(
           messages[i].ParseFromString(arg_map_.at(name).strings(i)),
@@ -292,7 +293,7 @@ class C10_EXPORT ArgumentHelper {
   }
 
  private:
-  CaffeMap<string, Argument> arg_map_;
+  std::map<string, Argument> arg_map_;
 };
 
 // **** Arguments Utils *****

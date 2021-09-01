@@ -20,10 +20,8 @@ void LarsOp<float, CPUContext>::ComputeLearningRate(
   *lr_rescaled = fmaxf(fminf(val, *lr_max), lr_min);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Lars, LarsOp<float, CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Lars)
     .NumInputs(5)
     .NumOutputs(1)
@@ -53,6 +51,5 @@ local_lr = min(local_lr, lr_max) and local_lr = max(local_lr, lr_min)
     .Arg("offset", "rescaling offset parameter")
     .Arg("lr_min", "minimum learning rate for clipping");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(Lars);
 } // namespace caffe2

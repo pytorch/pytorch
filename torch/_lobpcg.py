@@ -273,7 +273,7 @@ class LOBPCGAutogradFunction(torch.autograd.Function):
                 tol: Optional[float] = None,
                 largest: Optional[bool] = None,
                 method: Optional[str] = None,
-                tracker: Optional[None] = None,
+                tracker: None = None,
                 ortho_iparams: Optional[Dict[str, int]] = None,
                 ortho_fparams: Optional[Dict[str, float]] = None,
                 ortho_bparams: Optional[Dict[str, bool]] = None
@@ -345,7 +345,7 @@ def lobpcg(A: Tensor,
            tol: Optional[float] = None,
            largest: Optional[bool] = None,
            method: Optional[str] = None,
-           tracker: Optional[None] = None,
+           tracker: None = None,
            ortho_iparams: Optional[Dict[str, int]] = None,
            ortho_fparams: Optional[Dict[str, float]] = None,
            ortho_bparams: Optional[Dict[str, bool]] = None
@@ -545,7 +545,7 @@ def _lobpcg(A: Tensor,
             tol: Optional[float] = None,
             largest: Optional[bool] = None,
             method: Optional[str] = None,
-            tracker: Optional[None] = None,
+            tracker: None = None,
             ortho_iparams: Optional[Dict[str, int]] = None,
             ortho_fparams: Optional[Dict[str, float]] = None,
             ortho_bparams: Optional[Dict[str, bool]] = None
@@ -658,7 +658,7 @@ class LOBPCG(object):
                  fparams,  # type: Dict[str, float]
                  bparams,  # type: Dict[str, bool]
                  method,   # type: str
-                 tracker   # type: Optional[None]
+                 tracker   # type: None
                  ):
         # type: (...) -> None
 
@@ -998,7 +998,7 @@ class LOBPCG(object):
         # The original algorithm 4 from [DuerschPhD2015].
         d_col = (d ** -0.5).reshape(d.shape[0], 1)
         DUBUD = (UBU * d_col) * _utils.transpose(d_col)
-        E, Z = _utils.symeig(DUBUD, eigenvectors=True)
+        E, Z = _utils.symeig(DUBUD)
         t = tau * abs(E).max()
         if drop:
             keep = torch.where(E > t)

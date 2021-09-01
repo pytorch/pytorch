@@ -18,12 +18,9 @@
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(RoIPoolF, RoIPoolFOp<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(RoIPoolFGradient, RoIPoolFGradientOp<float, CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(RoIPoolF)
     .NumInputs(2)
     .NumOutputs(2)
@@ -62,7 +59,6 @@ Region of Interest (RoI) pooling operation as used in Fast R-CNN.
         "4D output of shape (R, C, pooled_h, pooled_w). Same as Y, except it "
         "records the argmax indices rather than the max pooled values.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(RoIPoolFGradient)
     .NumInputs(4)
     .NumOutputs(1)
@@ -98,7 +94,6 @@ class GetRoIPoolFGradient : public GradientMakerBase {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(RoIPoolF, GetRoIPoolFGradient);
 
 } // namespace caffe2

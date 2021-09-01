@@ -32,7 +32,6 @@ at::Tensor run_with_control_flow(
   return output;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CPUAllocationPlanTest, with_control_flow) {
   at::Tensor a = at::rand({23, 16, 16, 16});
   at::Tensor conv_weight = at::rand({16, 16, 3, 3});
@@ -82,7 +81,6 @@ TEST(CPUAllocationPlanTest, with_control_flow) {
   ASSERT_TRUE(validate_allocation_plan(false, false));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CPUAllocationPlanTest, with_profiling_alloc) {
   at::Tensor a = at::rand({23, 16, 16, 16});
   at::Tensor conv_weight = at::rand({16, 16, 3, 3});

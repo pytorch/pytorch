@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/backends/backend.h>
+#include <torch/csrc/jit/backends/backend_debug_handler.h>
 #include <torch/csrc/jit/backends/backend_preprocess.h>
 
 namespace torch {
@@ -72,22 +73,19 @@ class TestBackend : public PyTorchBackendInterface {
 namespace {
 c10::IValue preprocess(
     const Module& mod,
-    const c10::Dict<IValue, IValue>& method_compile_spec) {
+    const c10::Dict<IValue, IValue>& method_compile_spec,
+    const BackendDebugHandleGenerator& generate_debug_handles) {
   return mod._ivalue();
 }
 
 constexpr auto backend_name = "test_backend";
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto cls_available =
     torch::jit::backend<TestBackend<true>>(backend_name);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto pre_reg = backend_preprocess_register(backend_name, preprocess);
 
 constexpr auto backend_unavailable_name = "test_backend_unavailable";
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto cls_unavailable =
     torch::jit::backend<TestBackend<false>>(backend_unavailable_name);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto pre_reg_unavailable =
     backend_preprocess_register(backend_unavailable_name, preprocess);
 

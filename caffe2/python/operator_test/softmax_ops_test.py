@@ -143,7 +143,7 @@ class TestSoftmaxOps(serial.SerializedTestCase):
 
     @given(n=st.integers(2, 10), D=st.integers(4, 16),
            only_loss=st.booleans(), **hu.gcs)
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_softmax_with_loss(self, n, D, gc, only_loss, dc):
         # n = number of examples, D = |labels|
         # Initialize X and add 1e-2 for numerical stability
@@ -301,7 +301,7 @@ class TestSoftmaxOps(serial.SerializedTestCase):
                 )
 
     @given(n=st.integers(2, 10), D=st.integers(4, 16), **hu.gcs)
-    @settings(deadline=1000)
+    @settings(deadline=None)
     def test_softmax_with_loss_label_prob(self, n, D, gc, dc):
         # n = number of examples, D = |labels|
         # Initialize X and add 1e-2 for numerical stability
@@ -358,7 +358,7 @@ class TestSoftmaxOps(serial.SerializedTestCase):
         D=st.integers(4, 16),
         only_loss=st.booleans(),
         **hu.gcs)
-    @settings(deadline=1000)
+    @settings(deadline=None)
     def test_softmax_with_loss_weighted(self, n, D, only_loss, gc, dc):
         # n = number of examples, D = |labels|
         # Initialize X and add 1e-2 for numerical stability
@@ -407,7 +407,7 @@ class TestSoftmaxOps(serial.SerializedTestCase):
             gc, op, [X, label, weights], 0, [1], stepsize=1e-4, threshold=1e-2)
 
     @given(n=st.integers(2, 10), D=st.integers(4, 16), **hu.gcs)
-    @settings(deadline=1000)
+    @settings(deadline=None)
     def test_softmax_with_loss_label_prob_weighted(self, n, D, gc, dc):
         # n = number of examples, D = |labels|
         # Initialize X and add 1e-2 for numerical stability

@@ -16,17 +16,13 @@ CONFIG_TREE_DATA = [
             ("7", [X("3.6")]),
         ]),
         ("clang", [
-            ("5", [
+            ("7", [
                 ("3.6", [
                     ("asan", [
                         (True, [
                             ("shard_test", [XImportant(True)]),
                         ]),
                     ]),
-                ]),
-            ]),
-            ("7", [
-                ("3.6", [
                     ("onnx", [XImportant(True)]),
                 ]),
             ]),
@@ -35,21 +31,20 @@ CONFIG_TREE_DATA = [
             ("10.2", [
                 ("3.6", [
                     ("shard_test", [X(True)]),
-                    ("libtorch", [
+                    ("slow_gradcheck", [
+                        # If you update this slow gradcheck, you should
+                        # also update docker_definitions.py to make sure
+                        # the docker image match the config used here
                         (True, [
-                            ('build_only', [X(True)]),
+                            ('shard_test', [XImportant(True)]),
                         ]),
                     ]),
-                ]),
-            ]),
-            ("11.1", [
-                ("3.8", [
-                    ("shard_test", [XImportant(True)]),
-                    ("libtorch", [
-                        (True, [
-                            ('build_only', [XImportant(True)]),
-                        ]),
-                    ]),
+                    # UNCOMMENT THE BELOW TO REENABLE LIBTORCH
+                    # ("libtorch", [
+                    #     (True, [
+                    #         ('build_only', [X(True)]),
+                    #     ]),
+                    # ]),
                 ]),
             ]),
         ]),
@@ -65,24 +60,6 @@ CONFIG_TREE_DATA = [
                 ("3.6", [
                     ("xla", [XImportant(True)]),
                     ("vulkan", [XImportant(True)]),
-                ]),
-            ]),
-        ]),
-        ("cuda", [
-            ("10.2", [
-                ("3.9", [
-                    ("shard_test", [XImportant(True)]),
-                ]),
-            ]),
-        ]),
-        ("gcc", [
-            ("9", [
-                ("3.8", [
-                    ("coverage", [
-                        (True, [
-                            ("shard_test", [XImportant(True)]),
-                        ]),
-                    ]),
                 ]),
             ]),
         ]),
@@ -176,9 +153,17 @@ class ExperimentalFeatureConfigNode(TreeConfigNode):
             "cuda_gcc_override": CudaGccOverrideConfigNode,
             "coverage": CoverageConfigNode,
             "pure_torch": PureTorchConfigNode,
+            "slow_gradcheck": SlowGradcheckConfigNode,
         }
         return next_nodes[experimental_feature]
 
+
+class SlowGradcheckConfigNode(TreeConfigNode):
+    def init2(self, node_name):
+        self.props["is_slow_gradcheck"] = True
+
+    def child_constructor(self):
+        return ExperimentalFeatureConfigNode
 
 class PureTorchConfigNode(TreeConfigNode):
     def modify_label(self, label):

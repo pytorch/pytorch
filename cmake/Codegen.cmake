@@ -63,16 +63,8 @@ if(INTERN_BUILD_ATEN_OPS)
     endif()
   endif(MSVC)
 
-  if(C_AVX_FOUND)
-    if(MSVC)
-      set_source_files_properties(${CMAKE_CURRENT_LIST_DIR}/../aten/src/TH/vector/AVX.cpp PROPERTIES COMPILE_FLAGS "${OPT_FLAG}/arch:AVX ${CXX_AVX_FLAGS}")
-    else(MSVC)
-      set_source_files_properties(${CMAKE_CURRENT_LIST_DIR}/../aten/src/TH/vector/AVX.cpp PROPERTIES COMPILE_FLAGS "${OPT_FLAG} ${CXX_AVX_FLAGS}")
-    endif(MSVC)
-  endif(C_AVX_FOUND)
-
   if(NOT MSVC AND NOT "${CMAKE_C_COMPILER_ID}" MATCHES "Clang")
-    set_source_files_properties(${CMAKE_CURRENT_LIST_DIR}/../aten/src/TH/THAllocator.cpp PROPERTIES COMPILE_FLAGS "-fno-openmp")
+    set_source_files_properties(${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/MapAllocator.cpp PROPERTIES COMPILE_FLAGS "-fno-openmp")
   endif()
 
   file(GLOB cpu_kernel_cpp_in "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cpu/*.cpp" "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/quantized/cpu/kernels/*.cpp")
@@ -80,15 +72,16 @@ if(INTERN_BUILD_ATEN_OPS)
   list(APPEND CPU_CAPABILITY_NAMES "DEFAULT")
   list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG}")
 
-  if(CXX_AVX_FOUND)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DHAVE_AVX_CPU_DEFINITION")
-    list(APPEND CPU_CAPABILITY_NAMES "AVX")
+
+  if(CXX_AVX512_FOUND)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DHAVE_AVX512_CPU_DEFINITION")
+    list(APPEND CPU_CAPABILITY_NAMES "AVX512")
     if(MSVC)
-      list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG}/arch:AVX")
+      list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG}/arch:AVX512")
     else(MSVC)
-      list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG} -mavx")
+      list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG} -mavx512f -mavx512bw -mavx512vl -mavx512dq -mfma")
     endif(MSVC)
-  endif(CXX_AVX_FOUND)
+  endif(CXX_AVX512_FOUND)
 
   if(CXX_AVX2_FOUND)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DHAVE_AVX2_CPU_DEFINITION")
@@ -103,11 +96,24 @@ if(INTERN_BUILD_ATEN_OPS)
     endif(COMPILER_SUPPORTS_NO_AVX256_SPLIT)
 
     list(APPEND CPU_CAPABILITY_NAMES "AVX2")
-    if(MSVC)
-      list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG}/arch:AVX2")
-    else(MSVC)
-      list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG} -mavx2 -mfma ${CPU_NO_AVX256_SPLIT_FLAGS}")
-    endif(MSVC)
+    if(DEFINED ENV{ATEN_AVX512_256})
+      if($ENV{ATEN_AVX512_256} MATCHES "TRUE")
+        if(CXX_AVX512_FOUND)
+          message("-- ATen AVX2 kernels will use 32 ymm registers")
+          if(MSVC)
+            list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG}/arch:AVX512")
+          else(MSVC)
+            list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG} -march=native ${CPU_NO_AVX256_SPLIT_FLAGS}")
+          endif(MSVC)
+        endif(CXX_AVX512_FOUND)
+      endif()
+    else()
+      if(MSVC)
+        list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG}/arch:AVX2")
+      else(MSVC)
+        list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG} -mavx2 -mfma ${CPU_NO_AVX256_SPLIT_FLAGS}")
+      endif(MSVC)
+    endif()
   endif(CXX_AVX2_FOUND)
 
   if(CXX_VSX_FOUND)
@@ -166,31 +172,40 @@ if(INTERN_BUILD_ATEN_OPS)
     endif()
   endif()
 
-  if(STATIC_DISPATCH_BACKEND)
-    message(STATUS "Custom build with static dispatch backend: ${STATIC_DISPATCH_BACKEND}")
-    list(APPEND CUSTOM_BUILD_FLAGS
-      --static_dispatch_backend ${STATIC_DISPATCH_BACKEND})
-  endif()
-
   if(SELECTED_OP_LIST)
     # With static dispatch we can omit the OP_DEPENDENCY flag. It will not calculate the transitive closure
     # of used ops. It only needs to register used root ops.
     if(NOT STATIC_DISPATCH_BACKEND AND NOT OP_DEPENDENCY)
-      message(INFO "Use default op dependency graph .yaml file for custom build with dynamic dispatch.")
-      set(OP_DEPENDENCY ${CMAKE_CURRENT_LIST_DIR}/../tools/code_analyzer/default_op_deps.yaml)
+      message(WARNING
+        "For custom build with dynamic dispatch you have to provide the dependency graph of PyTorch operators.\n"
+        "Switching to STATIC_DISPATCH_BACKEND=CPU. If you run into problems with static dispatch and still want"
+        " to use selective build with dynamic dispatch, please try:\n"
+        "1. Run the static analysis tool to generate the dependency graph, e.g.:\n"
+        "   LLVM_DIR=/usr ANALYZE_TORCH=1 tools/code_analyzer/build.sh\n"
+        "2. Run the custom build with the OP_DEPENDENCY option pointing to the generated dependency graph, e.g.:\n"
+        "   scripts/build_android.sh -DSELECTED_OP_LIST=<op_list.yaml> -DOP_DEPENDENCY=<dependency_graph.yaml>\n"
+      )
+      set(STATIC_DISPATCH_BACKEND CPU)
+    else()
+      execute_process(
+        COMMAND
+        "${PYTHON_EXECUTABLE}" ${CMAKE_CURRENT_LIST_DIR}/../tools/code_analyzer/gen_op_registration_allowlist.py
+        --op-dependency "${OP_DEPENDENCY}"
+        --root-ops "${SELECTED_OP_LIST}"
+        OUTPUT_VARIABLE OP_REGISTRATION_WHITELIST
+      )
+      separate_arguments(OP_REGISTRATION_WHITELIST)
+      message(STATUS "Custom build with op registration whitelist: ${OP_REGISTRATION_WHITELIST}")
+      list(APPEND CUSTOM_BUILD_FLAGS
+        --force_schema_registration
+        --op_registration_whitelist ${OP_REGISTRATION_WHITELIST})
     endif()
-    execute_process(
-      COMMAND
-      "${PYTHON_EXECUTABLE}" ${CMAKE_CURRENT_LIST_DIR}/../tools/code_analyzer/gen_op_registration_allowlist.py
-      --op-dependency "${OP_DEPENDENCY}"
-      --root-ops "${SELECTED_OP_LIST}"
-      OUTPUT_VARIABLE OP_REGISTRATION_WHITELIST
-    )
-    separate_arguments(OP_REGISTRATION_WHITELIST)
-    message(STATUS "Custom build with op registration whitelist: ${OP_REGISTRATION_WHITELIST}")
+  endif()
+
+  if(STATIC_DISPATCH_BACKEND)
+    message(STATUS "Custom build with static dispatch backend: ${STATIC_DISPATCH_BACKEND}")
     list(APPEND CUSTOM_BUILD_FLAGS
-      --force_schema_registration
-      --op_registration_whitelist ${OP_REGISTRATION_WHITELIST})
+      --static_dispatch_backend ${STATIC_DISPATCH_BACKEND})
   endif()
 
   set(GEN_COMMAND

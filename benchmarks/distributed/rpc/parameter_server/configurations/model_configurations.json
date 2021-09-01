@@ -2,20 +2,22 @@
     "DummyModel": {
         "model_class": "DummyModel",
         "configurations": {
-            "num_embeddings": 100,
-            "embedding_dim": 100,
-            "dense_input_size": 100,
-            "dense_output_size": 100,
+            "num_embeddings": 1024,
+            "embedding_dim": 1024,
+            "dense_input_size": 1024,
+            "dense_output_size": 1024,
+            "dense_layers_count": 8,
             "sparse": false
         }
     },
     "DummyModelSparse": {
         "model_class": "DummyModel",
         "configurations": {
-            "num_embeddings": 100,
-            "embedding_dim": 100,
-            "dense_input_size": 100,
-            "dense_output_size": 100,
+            "num_embeddings": 1024,
+            "embedding_dim": 1024,
+            "dense_input_size": 1024,
+            "dense_output_size": 1024,
+            "dense_layers_count": 8,
             "sparse": true
         }
     }

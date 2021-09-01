@@ -6,7 +6,9 @@ import enum
 import warnings
 from typing import Any, Callable, Dict, List, Optional, Tuple, NamedTuple, cast
 from torch._jit_internal import boolean_dispatched
+from ._compatibility import compatibility
 
+@compatibility(is_backward_compatible=False)
 class ArgsKwargsPair(NamedTuple):
     """
     Simple named tuple for wrapping args/kwargs pairs.
@@ -76,6 +78,7 @@ def _torchscript_schema_to_signature(ts_schema : torch._C.FunctionSchema) -> ins
 
     return inspect.Signature(parameters, return_annotation=return_type)
 
+@compatibility(is_backward_compatible=False)
 def get_signature_for_torch_op(op : Callable) -> Optional[List[inspect.Signature]]:
     """
     Given an operator on the `torch` namespace, return a list of `inspect.Signature`
@@ -103,28 +106,35 @@ def get_signature_for_torch_op(op : Callable) -> Optional[List[inspect.Signature
 
     return signatures
 
+@compatibility(is_backward_compatible=False)
 def create_type_hint(x):
-    if isinstance(x, list) or isinstance(x, tuple):
-        # todo(chilli): Figure out the right way for mypy to handle this
-        if isinstance(x, list):
-            def ret_type(x):
-                return List[x]  # type: ignore[valid-type]
-        else:
-            def ret_type(x):
-                return Tuple[x, ...]
-        if len(x) == 0:
-            return ret_type(Any)
-        base_type = x[0]
-        for t in x:
-            if issubclass(t, base_type):
-                continue
-            elif issubclass(base_type, t):
-                base_type = t
+    try:
+        if isinstance(x, list) or isinstance(x, tuple):
+            # todo(chilli): Figure out the right way for mypy to handle this
+            if isinstance(x, list):
+                def ret_type(x):
+                    return List[x]  # type: ignore[valid-type]
             else:
+                def ret_type(x):
+                    return Tuple[x, ...]
+            if len(x) == 0:
                 return ret_type(Any)
-        return ret_type(base_type)
+            base_type = x[0]
+            for t in x:
+                if issubclass(t, base_type):
+                    continue
+                elif issubclass(base_type, t):
+                    base_type = t
+                else:
+                    return ret_type(Any)
+            return ret_type(base_type)
+    except Exception as e:
+        # We tried to create a type hint for list but failed.
+        torch.warnings.warn(f"We were not able to successfully create type hint from the type {x}")
+        pass
     return x
 
+@compatibility(is_backward_compatible=False)
 def type_matches(signature_type : Any, argument_type : Any):
     sig_origin_type = getattr(signature_type, '__origin__', signature_type)
 
@@ -172,6 +182,7 @@ def type_matches(signature_type : Any, argument_type : Any):
 
     return False
 
+@compatibility(is_backward_compatible=False)
 def normalize_function(
         target: Callable, args: Tuple[Any], kwargs : Optional[Dict[str, Any]] = None, arg_types : Optional[Tuple[Any]] = None,
         kwarg_types : Optional[Dict[str, Any]] = None,
@@ -267,6 +278,7 @@ def normalize_function(
 
     return new_args_and_kwargs
 
+@compatibility(is_backward_compatible=False)
 def normalize_module(
         root: torch.nn.Module, target: str, args: Tuple[Any], kwargs : Optional[Dict[str, Any]] = None,
         normalize_to_only_use_kwargs : bool = False) -> Optional[ArgsKwargsPair]:
@@ -317,7 +329,7 @@ def _args_kwargs_to_normalized_args_kwargs(sig : inspect.Signature, args : Tuple
 
         target (inspect.Signature): Signature object for the target
         args (Tuple): Arguments that appear at the callsite for `target`
-        kwargs (Dict): Keyword arugments that appear at the callsite for `target`
+        kwargs (Dict): Keyword arguments that appear at the callsite for `target`
         normalize_to_only_use_kwargs (bool): Whether to normalize to only use kwargs.
 
     Returns:

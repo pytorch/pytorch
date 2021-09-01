@@ -52,6 +52,7 @@ void codegenOutputQuery(
   } else if (nvrtc_major <= 8 && prop->major > 6) { // 8 supports 2-6.x
     major = 6;
     minor = 0;
+    // NOLINTNEXTLINE(bugprone-branch-clone)
   } else if (nvrtc_major <= 9 && prop->major >= 7) { // 9 supports 3-7.2
     major = 7;
     minor = (prop->major == 7 && prop->minor <= 2) ? prop->minor : 0;
@@ -90,14 +91,12 @@ FusedKernelCUDA::FusedKernelCUDA(
           has_random),
       device_(device) {
   // Initializes driver's API context (if necessary)
-  // NOLINTNEXTLINE(modernize-use-nullptr)
-  CUcontext pctx = 0;
+  CUcontext pctx = nullptr;
   AT_CUDA_DRIVER_CHECK(nvrtc().cuCtxGetCurrent(&pctx));
   if (!pctx) {
     std::unique_lock<std::mutex> cudaFreeMutexLock(
         *(c10::cuda::CUDACachingAllocator::getFreeMutex()));
-    // NOLINTNEXTLINE(modernize-use-nullptr)
-    cudaFree(0);
+    cudaFree(nullptr);
   }
 
   // Note: hacked at::DeviceGuard since at::DeviceGuard was failing to work
@@ -139,6 +138,7 @@ FusedKernelCUDA::FusedKernelCUDA(
       "compute_" +
 #endif
       std::to_string(major) + std::to_string(minor);
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   const std::vector<const char*> args = {
       "--std=c++14", compute.c_str(), "-default-device"};
 #endif
@@ -148,6 +148,7 @@ FusedKernelCUDA::FusedKernelCUDA(
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     size_t logsize;
     AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcGetProgramLogSize(program, &logsize));
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<char> log(logsize);
     AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcGetProgramLog(program, log.data()));
     std::stringstream cu;
@@ -181,7 +182,7 @@ FusedKernelCUDA::FusedKernelCUDA(
       nvrtc().cuModuleGetFunction(&function_, module_, name_.c_str()));
 
   // Computes max blocks
-#if defined(__HIP_PLATFORM_HCC__) && HIP_VERSION < 305
+#if defined(__HIP_PLATFORM_HCC__) && TORCH_HIP_VERSION < 305
   // HIP function signature is not compatible yet
   uint32_t max_blocks;
   AT_CUDA_DRIVER_CHECK(nvrtc().hipOccupancyMaxActiveBlocksPerMultiprocessor(

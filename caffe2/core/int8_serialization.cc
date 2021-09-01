@@ -100,11 +100,9 @@ class Int8TensorCPUDeserializer : public TensorDeserializer {
 } // namespace int8
 
 namespace {
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_BLOB_SERIALIZER(
     (TypeMeta::Id<int8::Int8TensorCPU>()),
     int8::Int8TensorCPUSerializer);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_BLOB_DESERIALIZER(Int8TensorCPU, int8::Int8TensorCPUDeserializer);
 } // namespace
 

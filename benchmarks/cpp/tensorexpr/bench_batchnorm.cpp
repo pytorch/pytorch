@@ -74,7 +74,6 @@ BENCHMARK_DEFINE_F(BatchNorm, ATen)(benchmark::State& state) {
 }
 
 BENCHMARK_DEFINE_F(BatchNorm, NNC)(benchmark::State& state) {
-  KernelScope ks;
 
   Placeholder input("input", kFloat, {N_, C_, H_, W_});
   Placeholder weight("weight", kFloat, {C_});
@@ -84,7 +83,7 @@ BENCHMARK_DEFINE_F(BatchNorm, NNC)(benchmark::State& state) {
   VarHandle eps("eps", kFloat);
 
   using axis = const VarHandle&;
-  Tensor* output = Compute(
+  Tensor output = Compute(
       "output",
       {{N_, "N"}, {C_, "C"}, {H_, "H"}, {W_, "W"}},
       [&](axis n, axis c, axis h, axis w) {
@@ -98,8 +97,14 @@ BENCHMARK_DEFINE_F(BatchNorm, NNC)(benchmark::State& state) {
         return input.load(n, c, h, w) * alpha + beta;
       });
   LoopNest nest({output});
+  auto loops = nest.getLoopStmtsFor(output);
+  LoopNest::flatten({loops[2], loops[3]});
+  loops = nest.getLoopStmtsFor(output);
+  LoopNest::flatten({loops[0], loops[1]});
+  loops = nest.getLoopStmtsFor(output);
+  loops[0]->set_parallel();
   nest.prepareForCodegen();
-  Stmt* s = IRSimplifier::simplify(nest.root_stmt());
+  StmtPtr s = IRSimplifier::simplify(nest.root_stmt());
   LLVMCodeGen cg(s, {input, weight, bias, mean, var, output, eps});
 
   std::vector<CodeGen::CallArg> args;
@@ -131,7 +136,6 @@ BENCHMARK_DEFINE_F(BatchNorm, ATenRelu)(benchmark::State& state) {
 }
 
 BENCHMARK_DEFINE_F(BatchNorm, NNCRelu)(benchmark::State& state) {
-  KernelScope ks;
 
   Placeholder input("input", kFloat, {N_, C_, H_, W_});
   Placeholder weight("weight", kFloat, {C_});
@@ -141,7 +145,7 @@ BENCHMARK_DEFINE_F(BatchNorm, NNCRelu)(benchmark::State& state) {
   VarHandle eps("eps", kFloat);
 
   using axis = const VarHandle&;
-  Tensor* output = Compute(
+  Tensor output = Compute(
       "output",
       {{N_, "N"}, {C_, "C"}, {H_, "H"}, {W_, "W"}},
       [&](axis n, axis c, axis h, axis w) {
@@ -157,7 +161,7 @@ BENCHMARK_DEFINE_F(BatchNorm, NNCRelu)(benchmark::State& state) {
       });
   LoopNest nest({output});
   nest.prepareForCodegen();
-  Stmt* s = IRSimplifier::simplify(nest.root_stmt());
+  StmtPtr s = IRSimplifier::simplify(nest.root_stmt());
   LLVMCodeGen cg(s, {input, weight, bias, mean, var, output, eps});
 
   std::vector<CodeGen::CallArg> args;

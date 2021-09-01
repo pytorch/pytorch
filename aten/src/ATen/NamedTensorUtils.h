@@ -140,8 +140,7 @@ TORCH_API TensorImpl* propagate_names(
 TORCH_API void propagate_names(TensorImpl* result, /*const */TensorImpl* src);
 
 // result = m1 @ m2 + bias
-TORCH_API void propagate_names_for_addmm(
-    Tensor& result,
+TORCH_API std::vector<Dimname> propagate_names_for_addmm(
     const Tensor& m1,
     const Tensor& m2,
     const Tensor& bias);

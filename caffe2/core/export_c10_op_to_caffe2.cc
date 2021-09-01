@@ -2,7 +2,6 @@
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_REGISTRY(
     C10OperatorRegistry,
     OperatorBase,

@@ -2,6 +2,7 @@
 
 #include <ATen/core/ivalue.h>
 #include <c10/util/ScopeExit.h>
+#include <c10/util/irange.h>
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
@@ -84,8 +85,8 @@ using caffe2::serialize::ReadAdapterInterface;
 
 OpCode parseOpCode(const char* str);
 
-IValue expect_field(
-    IValue tup,
+const IValue& expect_field(
+    const IValue& tup,
     const std::string& expected_name,
     size_t entry) {
   auto row = tup.toTuple()->elements().at(entry).toTuple();
@@ -169,7 +170,7 @@ c10::intrusive_ptr<c10::ivalue::Object> objLoaderMobile(
     size_t ndict = dict.size();
     auto obj = c10::ivalue::Object::create(type, ndict);
     auto it = dict.begin();
-    for (size_t i = 0; i < ndict; ++i) {
+    for (const auto i : c10::irange(ndict)) {
       std::stringstream name;
       name << it->key();
       cls->addOrCheckAttribute(name.str(), it->key().type());
@@ -178,6 +179,17 @@ c10::intrusive_ptr<c10::ivalue::Object> objLoaderMobile(
     }
     return obj;
   }
+}
+
+bool isTensorInBytecodeArchive(
+    caffe2::serialize::PyTorchStreamReader& stream_reader) {
+  auto records = stream_reader.getAllRecords();
+  for (const auto& record : records) {
+    if (record.find("bytecode/") != std::string::npos) {
+      return true;
+    }
+  }
+  return false;
 }
 
 namespace {
@@ -205,8 +217,6 @@ class BytecodeDeserializer final {
   mobile::Module deserialize(
       c10::optional<at::Device> device,
       ExtraFilesMap& extra_files);
-  std::unordered_map<std::string, std::string> deserializeMetadata(
-      c10::optional<at::Device> device);
   void deserialize_only_extra(
       c10::optional<at::Device> device,
       ExtraFilesMap& extra_files);
@@ -220,17 +230,22 @@ class BytecodeDeserializer final {
   c10::IValue readArchive(
       const std::string& archive_name,
       std::shared_ptr<mobile::CompilationUnit> mcu);
-  std::unordered_map<std::string, std::string> readMobileMetadata(
-      std::shared_ptr<mobile::CompilationUnit> mcu);
   /**
    * Loads operators by looking them up in the Dispatcher and returns
    * the set of operator names (with overload) that are not supported
    * by the current runtime.
+   *
+   * Accepts an operator_cache, which allows you to cache operator
+   * functions for the entire model. This is keyed on
+   * c10::OperatorName. The value may not be what you're looking for
+   * even if the key is the same. You need to call has_same_arg_num()
+   * on the value to ensure that the number of arguments are the same.
    */
   std::unordered_set<std::string> load_and_find_unsupported_operator_names(
       const std::vector<IValue>& ops_list,
       mobile::Function* function,
-      int64_t model_version) const;
+      int64_t model_version,
+      mobile::Function::OperatorCacheType& operator_cache) const;
   std::shared_ptr<CompilationUnit> compilation_unit_;
   std::unordered_set<std::string> imported_libs_;
   std::unique_ptr<PyTorchStreamReader> reader_{};
@@ -249,18 +264,28 @@ std::unordered_set<std::string> BytecodeDeserializer::
     load_and_find_unsupported_operator_names(
         const std::vector<IValue>& ops_list,
         mobile::Function* function,
-        int64_t model_version) const {
+        int64_t model_version,
+        mobile::Function::OperatorCacheType& operator_cache) const {
   std::unordered_set<std::string> unsupported_op_names;
   // ops_list is the list of operator names that were read in from
   // bytecode.plk for the method that is currently being processed.
   for (const auto& op : ops_list) {
     auto op_item = op.toTuple()->elements();
     TORCH_CHECK(
-        op_item.size() == 2, "There should be two parts in an operator name.");
+        op_item.size() >= 2,
+        "There should be either two parts (name and overload name), ",
+        "or three parts (name, overload name and number of specified args) ",
+        "for an operator");
+    c10::optional<int> num_args;
+    if (op_item.size() > 2) {
+      num_args = op_item[2].toInt();
+    }
     auto op_found = function->append_operator(
         op_item[0].toString()->string(),
         op_item[1].toString()->string(),
-        model_version);
+        num_args,
+        model_version,
+        operator_cache);
     if (!op_found) {
       unsupported_op_names.emplace(operator_str(
           op_item[0].toString()->string(), op_item[1].toString()->string()));
@@ -291,36 +316,36 @@ void BytecodeDeserializer::parseMethods(
       // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       caffe2::serialize::kMinSupportedBytecodeVersion <= model_version &&
           // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-          model_version <= caffe2::serialize::kProducedBytecodeVersion,
-      "Lite Interpreter verson number does not match. ",
+          model_version <= caffe2::serialize::kMaxSupportedBytecodeVersion,
+      "Lite Interpreter version number does not match. ",
       "The model version must be between ",
       caffe2::serialize::kMinSupportedBytecodeVersion,
       " and ",
-      caffe2::serialize::kProducedBytecodeVersion,
-      "But the model version is ",
+      caffe2::serialize::kMaxSupportedBytecodeVersion,
+      " but the model version is ",
       model_version);
 
-  bool has_debug_handles = debug_handles.has_value();
-  if (has_debug_handles) {
+  if (debug_handles) {
     TORCH_CHECK(
         debug_handles->size() == vals.size(),
         "The numbers of bytecode values and debug info values do not match.");
   }
 
+  // A Global Cache for Operator functions across all methods in the model.
+  mobile::Function::OperatorCacheType operator_cache;
+
   // Process all methods in this mobile module.
-  for (size_t i = method_i_start; i < vals.size(); ++i) {
+  for (const auto i : c10::irange(method_i_start, vals.size())) {
     const auto& element = vals[i];
     const auto& m_tuple = element.toTuple()->elements();
     const std::string& function_name = m_tuple[0].toStringRef();
-    IValue codeTable = m_tuple[1];
-    auto schemaTable = // older files do not store function schema
+    const IValue& codeTable = m_tuple[1];
+    const IValue* schemaTable = // older files do not store function schema
         (model_version > 0x4L || (model_version == 0x4L && m_tuple.size() >= 3))
-        ? at::optional<IValue>{m_tuple[2]}
-        : at::nullopt;
-
-    // NOLINTNEXTLINE(modernize-make-unique)
-    auto function = std::unique_ptr<mobile::Function>(
-        new mobile::Function(c10::QualifiedName(function_name)));
+        ? &m_tuple[2]
+        : nullptr;
+    auto function =
+        std::make_unique<mobile::Function>(c10::QualifiedName(function_name));
 
     const auto& ins_list =
         expect_field(codeTable, "instructions", BYTECODE_INDEX_INSTRUCTION)
@@ -342,8 +367,8 @@ void BytecodeDeserializer::parseMethods(
         expect_field(codeTable, "register_size", BYTECODE_INDEX_REGISTER_SIZE)
             .toInt();
 
-    std::vector<IValue> debug_handles_list;
-    if (has_debug_handles) {
+    c10::List<int64_t> debug_handles_list;
+    if (debug_handles) {
       const auto& debug_handles_element = (*debug_handles)[i];
       const auto& debug_handles_m_tuple =
           debug_handles_element.toTuple()->elements();
@@ -352,22 +377,21 @@ void BytecodeDeserializer::parseMethods(
       TORCH_CHECK(
           debug_info_function_name == function_name,
           "The function names in the bytecode table and the debug info table do not match.");
-      IValue debug_handles_table = debug_handles_m_tuple[1];
+      const IValue& debug_handles_table = debug_handles_m_tuple[1];
       debug_handles_list = (expect_field(
                                 debug_handles_table,
                                 "function_debug_handles",
                                 BYTECODE_INDEX_MODULE_DEBUG_HANDLES)
                                 .toTuple()
                                 ->elements())[0]
-                               .toList()
-                               .vec();
+                               .toIntList();
       TORCH_CHECK(
           debug_handles_list.size() == ins_list.size(),
           "The numbers of instructions and debug handles strings do not match.");
     }
 
-    for (size_t i = 0; i < ins_list.size(); ++i) {
-      auto ins_item = ins_list[i].toTuple()->elements();
+    for (const auto j : c10::irange(ins_list.size())) {
+      const auto& ins_item = ins_list[j].toTuple()->elements();
       TORCH_CHECK(
           ins_item.size() == 3,
           "There should be three parts in an instruction. The function name is ",
@@ -375,8 +399,8 @@ void BytecodeDeserializer::parseMethods(
       OpCode op_code = parseOpCode(ins_item[0].toString()->string().c_str());
       int X = ins_item[1].toInt();
       int N = ins_item[2].toInt();
-      if (has_debug_handles) {
-        int64_t debug_handle = debug_handles_list[i].toInt();
+      if (debug_handles) {
+        int64_t debug_handle = debug_handles_list[j];
         function->append_instruction(op_code, X, N, debug_handle);
       } else {
         function->append_instruction(op_code, X, N);
@@ -385,7 +409,7 @@ void BytecodeDeserializer::parseMethods(
 
     std::unordered_set<std::string> unsupported_op_names =
         load_and_find_unsupported_operator_names(
-            ops_list, function.get(), model_version);
+            ops_list, function.get(), model_version, operator_cache);
     if ((module_load_options_ & MobileModuleLoadOptions::OPERATOR_CHECK) &&
         !unsupported_op_names.empty()) {
       print_unsupported_ops_and_throw(unsupported_op_names);
@@ -424,14 +448,9 @@ void BytecodeDeserializer::parseMethods(
           const auto& type = resolveTypeName(
               (expect_field(argTable, "type", BYTECODE_INDEX_ARGUMENT_TYPE))
                   .toStringRef());
-          auto default_value = expect_field(
-                                   argTable,
-                                   "default_value",
-                                   BYTECODE_INDEX_ARGUMENT_DEFAULT_VALUE)
-                                   .toIValue();
-          auto arg =
-              c10::Argument(name, type, c10::nullopt /*N*/, default_value);
-          args.emplace_back(std::move(arg));
+          const IValue& default_value = expect_field(
+              argTable, "default_value", BYTECODE_INDEX_ARGUMENT_DEFAULT_VALUE);
+          args.emplace_back(name, type, c10::nullopt /*N*/, default_value);
         }
         return args;
       };
@@ -456,13 +475,6 @@ void BytecodeDeserializer::parseMethods(
 
     mcu.register_function(std::move(function));
   }
-}
-
-std::unordered_map<std::string, std::string> BytecodeDeserializer::
-    deserializeMetadata(c10::optional<at::Device> device) {
-  device_ = device;
-  auto mcu = std::make_shared<mobile::CompilationUnit>();
-  return readMobileMetadata(mcu);
 }
 
 void BytecodeDeserializer::deserialize_only_extra(
@@ -502,7 +514,7 @@ mobile::Module BytecodeDeserializer::deserialize(
   // being a Tuple (int, table), and the integer stands for the bytecode version
   // number. The rest of the elements are the same as before.
   //
-  auto bvals = readArchive("bytecode", mcu).toTuple()->elements();
+  auto bvals = std::move(*readArchive("bytecode", mcu).toTuple()).elements();
 
   c10::optional<std::vector<IValue>> debug_handles;
   if (reader_->hasRecord("mobile_debug_handles.pkl")) {
@@ -510,28 +522,12 @@ mobile::Module BytecodeDeserializer::deserialize(
         readArchive("mobile_debug_handles", mcu).toTuple()->elements();
   }
   parseMethods(bvals, debug_handles, *mcu);
-  auto meta_dict = readMobileMetadata(mcu);
-  auto m = mobile::Module(readArchive("data", mcu).toObject(), meta_dict, mcu);
+  auto m = mobile::Module(readArchive("data", mcu).toObject(), mcu);
 #if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
   MobileDebugTable debug_table = MobileDebugTable(reader_, compilation_unit_);
   m.setDebugTable(std::move(debug_table));
 #endif
   return m;
-}
-
-std::unordered_map<std::string, std::string> BytecodeDeserializer::
-    readMobileMetadata(std::shared_ptr<mobile::CompilationUnit> mcu) {
-  std::unordered_map<std::string, std::string> res;
-  if (!reader_->hasRecord("metadata.pkl")) {
-    return res;
-  }
-  auto ivalue_dict = readArchive("metadata", mcu).toGenericDict();
-  for (const auto& it : ivalue_dict) {
-    const auto key = it.key().toString()->string();
-    const auto value = it.value().toString()->string();
-    res[key] = value;
-  }
-  return res;
 }
 
 c10::IValue BytecodeDeserializer::readArchive(
@@ -545,8 +541,19 @@ c10::IValue BytecodeDeserializer::readArchive(
     return objLoaderMobile(type, input, mcu);
   };
 
+  bool bytecode_tensor_in_constants_archive =
+      (archive_name == "bytecode" &&
+       !isTensorInBytecodeArchive(*reader_.get()));
+
   auto ivalues = torch::jit::readArchiveAndTensors(
-      archive_name, type_resolver, obj_loader, device_, *reader_.get());
+      archive_name,
+      /*pickle_prefix=*/"",
+      /*tensor_prefix=*/
+      bytecode_tensor_in_constants_archive ? "constants/" : "",
+      type_resolver,
+      obj_loader,
+      device_,
+      *reader_.get());
   return ivalues;
 }
 
@@ -627,35 +634,47 @@ mobile::Module _load_for_mobile_impl(
   auto observer = torch::observerConfig().getModuleObserver();
   // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.rand)
   auto instance_key = std::rand();
+
+  std::unordered_map<std::string, std::string> metadata_map;
   if (observer) {
     observer->onEnterLoadModel(instance_key);
+    auto defaultExtraFileList = observer->getDefaultExtraFiles();
+    // Add files in defaultExtraFileList to fail_extra_files and extra_files
+    for (const auto& fileName : defaultExtraFileList) {
+      extra_files.insert(std::make_pair(fileName, ""));
+    }
   }
+
   const size_t model_size = rai != nullptr ? rai->size() : 0;
   auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
   BytecodeDeserializer deserializer(std::move(reader), module_load_options);
+
   std::string error_message;
   auto guard = c10::make_scope_exit([&]() {
     if (!observer) {
       return;
     }
+    deserializer.deserialize_only_extra(device, extra_files);
+
+    metadata_map = observer->processMetadataFromExtra(extra_files);
 
     observer->onFailLoadModel(
         instance_key,
         error_message.empty() ? "Unknown exception" : error_message.c_str(),
-        deserializer.deserializeMetadata(device));
+        metadata_map);
   });
 
   try {
     mobile::Module result = deserializer.deserialize(device, extra_files);
-    std::unordered_map<std::string, std::string> copied_metadata =
-        result.metadata();
-    if (result.metadata().find("model_name") == result.metadata().end()) {
-      copied_metadata["model_name"] = result.name();
-    }
-    copied_metadata["model_size"] = c10::guts::to_string(model_size);
     if (observer) {
-      observer->onExitLoadModel(instance_key, copied_metadata);
+      // Add model_name and model_size to metadata_map
+      extra_files.insert(std::make_pair("model_name", result.name()));
+      extra_files.insert(
+          std::make_pair("model_size", c10::guts::to_string(model_size)));
+      metadata_map = observer->processMetadataFromExtra(extra_files);
+      observer->onExitLoadModel(instance_key, metadata_map);
     }
+    result.setMetadata(metadata_map);
     guard.release();
     return result;
   } catch (c10::Error& error) {

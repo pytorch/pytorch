@@ -63,7 +63,7 @@ list(APPEND Caffe2_CPU_SRCS
   #"${CMAKE_CURRENT_SOURCE_DIR}/sigmoid_test.cc")
   #"${CMAKE_CURRENT_SOURCE_DIR}/tanh_test.cc")
 
-if(CAFFE2_COMPILER_SUPPORTS_AVX2_EXTENSIONS)
+if(CXX_AVX2_FOUND)
   add_library(caffe2_dnnlowp_avx2_ops OBJECT ${caffe2_dnnlowp_avx2_ops_SRCS})
   add_dependencies(caffe2_dnnlowp_avx2_ops fbgemm Caffe2_PROTO c10)
   target_include_directories(caffe2_dnnlowp_avx2_ops BEFORE

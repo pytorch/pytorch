@@ -4,6 +4,7 @@
 #include "caffe2/core/common_gpu.h"
 #include "caffe2/utils/GpuDefs.cuh"
 #include "caffe2/utils/GpuScanUtils.cuh"
+#include "caffe2/utils/GpuAtomics.cuh"
 #include "caffe2/utils/math.h"
 #include <cuda_runtime.h>
 
@@ -181,7 +182,7 @@ __device__ void countRadixUsingMask(CountType counts[RadixSize],
   if (getLaneId() == 0) {
 #pragma unroll
     for (unsigned int i = 0; i < RadixSize; ++i) {
-      atomicAdd(&smem[i], counts[i]);
+      gpu_atomic_add(&smem[i], counts[i]);
     }
   }
 

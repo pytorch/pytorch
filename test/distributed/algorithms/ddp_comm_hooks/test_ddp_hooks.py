@@ -21,8 +21,14 @@ from torch.testing._internal.common_distributed import (
     requires_nccl,
     skip_if_lt_x_gpu,
 )
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import (
+    run_tests,
+    TEST_WITH_DEV_DBG_ASAN,
+)
 
+if TEST_WITH_DEV_DBG_ASAN:
+    print("Multiprocessing spawn is not compatible with dev/dbg asan", file=sys.stderr)
+    sys.exit(0)
 
 def gpus_for_rank(world_size):
     visible_devices = list(range(torch.cuda.device_count()))
@@ -57,7 +63,7 @@ class TestDdpCommHook(nn.Module):
 class DistributedDataParallelCommHookTest(MultiProcessTestCase):
     def setUp(self):
         super(DistributedDataParallelCommHookTest, self).setUp()
-        self._fork_processes()
+        self._spawn_processes()
 
     def tearDown(self):
         try:
@@ -108,8 +114,8 @@ class DistributedDataParallelCommHookTest(MultiProcessTestCase):
         This unit test verifies the ``allreduce`` hook registered case gives same result
         with no hook registered case.
         """
-        store = c10d.FileStore(self.file_name, self.world_size)
-        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+        store = dist.FileStore(self.file_name, self.world_size)
+        process_group = dist.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         # No hook registered case, get the reference grads.
         reference_grads = self._get_grads(process_group, None)
@@ -125,8 +131,8 @@ class DistributedDataParallelCommHookTest(MultiProcessTestCase):
         This unit test verifies the ``fp16 compress`` hook registered case
         gives close result with no hook registered case.
         """
-        store = c10d.FileStore(self.file_name, self.world_size)
-        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+        store = dist.FileStore(self.file_name, self.world_size)
+        process_group = dist.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         # No hook registered case, get the reference grads.
         reference_grads = self._get_grads(process_group, None)
@@ -142,8 +148,8 @@ class DistributedDataParallelCommHookTest(MultiProcessTestCase):
         This unit test verifies the ``quantize per tensor`` hook registered case
         gives close result with no hook registered case.
         """
-        store = c10d.FileStore(self.file_name, self.world_size)
-        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+        store = dist.FileStore(self.file_name, self.world_size)
+        process_group = dist.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         # No hook registered case, get the reference grads.
         reference_grads = self._get_grads(process_group, None)
@@ -159,8 +165,8 @@ class DistributedDataParallelCommHookTest(MultiProcessTestCase):
         This unit test verifies the ``quantize per channel`` hook registered case
         gives close result with no hook registered case.
         """
-        store = c10d.FileStore(self.file_name, self.world_size)
-        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+        store = dist.FileStore(self.file_name, self.world_size)
+        process_group = dist.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         # No hook registered case, get the reference grads.
         reference_grads = self._get_grads(process_group, None)
@@ -170,6 +176,36 @@ class DistributedDataParallelCommHookTest(MultiProcessTestCase):
         )
 
         np.testing.assert_allclose(hook_grads, reference_grads, rtol=1e-5, atol=1e-4)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_is_last_hook(self):
+
+        store = dist.FileStore(self.file_name, self.world_size)
+        process_group = dist.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        def hook(flags, bucket):
+            flags.append(bucket.is_last())
+            fut = torch.futures.Future()
+            fut.set_result(bucket.buffer())
+            return fut
+
+        flags = []
+        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        model = nn.Sequential(
+            nn.Linear(2, 4000, bias=False),
+            *[nn.Linear(4000, 4000, bias=False) for _ in range(10)]
+        )
+        gpu_model = DistributedDataParallel(
+            model.to(device_id),
+            device_ids=[device_id],
+            process_group=process_group,
+        )
+        gpu_model.register_comm_hook(state=flags, hook=hook)
+        input = torch.randn(10, 2)
+        gpu_model(input).sum().backward()
+        self.assertTrue(flags[-1])
+        self.assertFalse(any(flags[:-1]))
 
 
 if __name__ == "__main__":

@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/autograd/variable.h>
 
 namespace torch {
@@ -76,7 +77,7 @@ namespace {
     if (base.dim() != other.dim()) {
       return false;
     }
-    for (int64_t i=0; i<base.dim(); ++i) {
+    for (const auto i : c10::irange(base.dim())) {
       if (base.sizes()[i] != other.sizes()[i]) {
         return false;
       }
@@ -182,6 +183,12 @@ void AutogradMeta::set_fw_grad(const Variable& new_grad_, const Variable& self, 
 }
 
 const Variable& AutogradMeta::fw_grad(uint64_t level, const Variable& self) const {
+  // TLS that disables forward AD
+  // This is only used for custom Function implementation
+  if (!c10::AutogradState::get_tls_state().get_fw_grad_mode()) {
+    return ForwardGrad::undef_grad();
+  }
+
   // Ensure that concurent fw_grad() "reads" are thread safe
   std::lock_guard<std::mutex> lock(mutex_);
 

@@ -50,6 +50,10 @@ you can use it as ``functional.jacobian(lambda x: f(x, constant, flag=flag), inp
 Locally disabling gradient computation
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+See :ref:`locally-disable-grad-doc` for more information on the differences
+between no-grad and inference mode as well as other related mechanisms that
+may be confused with the two.
+
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -57,6 +61,7 @@ Locally disabling gradient computation
     no_grad
     enable_grad
     set_grad_enabled
+    inference_mode
 
 .. _default-grad-layouts:
 
@@ -184,10 +189,10 @@ When creating a new :class:`Function`, the following methods are available to `c
     :toctree: generated
     :nosignatures:
 
-    function._ContextMethodMixin.mark_dirty
-    function._ContextMethodMixin.mark_non_differentiable
-    function._ContextMethodMixin.save_for_backward
-    function._ContextMethodMixin.set_materialize_grads
+    function.FunctionCtx.mark_dirty
+    function.FunctionCtx.mark_non_differentiable
+    function.FunctionCtx.save_for_backward
+    function.FunctionCtx.set_materialize_grads
 
 .. _grad-check:
 
@@ -236,3 +241,19 @@ Anomaly detection
 .. autoclass:: detect_anomaly
 
 .. autoclass:: set_detect_anomaly
+
+
+Saved tensors default hooks
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Some operations need intermediary results to be saved during the forward pass
+in order to execute the backward pass.
+You can define how these saved tensors should be packed / unpacked using hooks.
+A common application is to trade compute for memory by saving those intermediary results
+to disk or to CPU instead of leaving them on the GPU. This is especially useful if you
+notice your model fits on GPU during evaluation, but not training.
+Also see :ref:`saved-tensors-hooks-doc`.
+
+.. autoclass:: torch.autograd.graph.saved_tensors_hooks
+
+.. autoclass:: torch.autograd.graph.save_on_cpu

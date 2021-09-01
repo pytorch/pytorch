@@ -8,10 +8,20 @@
 
 namespace torch {
 namespace jit {
+
+using DebugHandleType = int64_t;
+
+using NodeToDebugHandle = std::unordered_map<Node*, DebugHandleType>;
+
+using BackendDebugHandleGenerator =
+    std::function<NodeToDebugHandle(const std::shared_ptr<Graph>&)>;
+
 namespace detail {
 
-using BackendPreprocessFunction =
-    std::function<c10::IValue(const Module&, const c10::Dict<IValue, IValue>&)>;
+using BackendPreprocessFunction = std::function<c10::IValue(
+    const Module&,
+    const c10::Dict<IValue, IValue>&,
+    const BackendDebugHandleGenerator& generate_debug_handles)>;
 
 TORCH_API void registerBackendPreprocessFunction(
     const std::string& name,

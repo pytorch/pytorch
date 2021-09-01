@@ -7,7 +7,6 @@
 
 #include <THC/THCDeviceUtils.cuh>
 #include <THC/THCTensorMathReduce.cuh>
-#include <THC/THCTensorSort.cuh>
 #include <THC/THCThrustAllocator.cuh>
 #include <THC/THCAtomics.cuh>
 
@@ -16,7 +15,9 @@
 #include <thrust/iterator/constant_iterator.h>
 #include <thrust/device_vector.h>
 
+#include <ATen/native/cuda/SortingCommon.cuh>
 #include <ATen/native/cuda/EmbeddingBackwardKernel.cuh>
+#include <ATen/native/cuda/KernelUtils.cuh>
 
 #include <c10/macros/Macros.h>
 
@@ -197,7 +198,7 @@ Tensor embedding_bag_backward_cuda_sum_avg(
       // Sort; a stable sort is not required
       auto sorted_data = device_ptr(sorted_indices.data_ptr<index_t>());
       thrust::sort_by_key(policy, sorted_data, sorted_data + numel, orig_data,
-                          ThrustLTOp<index_t>());
+                          LTOp<index_t>());
     }
 
     if (scale_grad_by_freq) {
@@ -235,7 +236,7 @@ template <typename scalar_t, typename index_t>
 __global__ void EmbeddingBag_accGradParametersKernel_max(
     index_t *max_indices, scalar_t *gradOutput,
     scalar_t *gradWeight, int64_t stride, int64_t numBags,
-    index_t padding_idx) {
+    index_t padding_idx, const index_t numel) {
 
   using accscalar_t = acc_type<scalar_t, true>;
 
@@ -252,8 +253,9 @@ __global__ void EmbeddingBag_accGradParametersKernel_max(
       index_t word_idx = max_indices[bag * stride + featureDim];
       if (word_idx >= 0 && word_idx != padding_idx) {
         // If bag is empty, we have max_indices[idx] set to -1 in forward.
-        gpuAtomicAdd(&(gradWeight[word_idx * stride + featureDim]),
-                gradOutput[bag * stride + featureDim]);
+        fastAtomicAdd(
+            gradWeight, static_cast<index_t>(word_idx * stride + featureDim),
+            numel, gradOutput[bag * stride + featureDim], true);
       }
     }
   }
@@ -289,7 +291,7 @@ Tensor embedding_bag_backward_cuda_max(const Tensor &grad,
               scalar_t, index_t><<<grid, block, 0, stream>>>(
               max_indices.data_ptr<index_t>(), grad.data_ptr<scalar_t>(),
               grad_weight.data_ptr<scalar_t>(), stride, numBags,
-              padding_idx);
+              padding_idx, grad_weight.numel());
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
   });
@@ -389,6 +391,7 @@ _embedding_bag_cuda(const Tensor &weight, const Tensor &indices_,
             weight.stride(0), weight.stride(1), bag_size.data_ptr<index_t>(),
             max_indices.data_ptr<index_t>(),
             padding_idx);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       } else {
         EmbeddingBag_updateOutputKernel_sum_mean<scalar_t, index_t><<<grid, block, 0, stream>>>(
             indices.data_ptr<index_t>(), offsets.data_ptr<index_t>(),
@@ -398,8 +401,8 @@ _embedding_bag_cuda(const Tensor &weight, const Tensor &indices_,
             per_sample_weights.defined() ? per_sample_weights.data_ptr<scalar_t>() : NULL,
             per_sample_weights.defined() ? per_sample_weights.stride(0) : 0,
             padding_idx);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       }
-      C10_CUDA_KERNEL_LAUNCH_CHECK();
     });
   });
 

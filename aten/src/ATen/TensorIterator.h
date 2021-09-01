@@ -37,9 +37,9 @@
 // Note [Order of Construction]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // When setting up the tensor iterator configuration, the output Tensors
-// have to be added first via TensorIteratorConfig::add_output(at::Tensor).
+// have to be added first via TensorIteratorConfig::add_owned_output(at::Tensor).
 // After adding all outputs, the inputs can be added via
-// TensorIteratorConfig::add_input(at::Tensor).
+// TensorIteratorConfig::add_owned_input(at::Tensor).
 // Adding another output after inputs have been added will rise an exception.
 //
 // Note [Common Dtype Computation]
@@ -65,19 +65,6 @@ namespace internal {
 // smaller than GRAIN_SIZE chunks.
 constexpr int64_t GRAIN_SIZE = 32768;
 } // namespace internal
-
-struct DimCounter {
-  DimCounter(IntArrayRef shape, Range range);
-
-  void increment(const std::array<int64_t, 2>& step);
-  bool is_done() const;
-  std::array<int64_t, 2> max_2d_step() const;
-
-  IntArrayRef shape;
-  Range range;
-  DimVector values;
-  int64_t offset;
-};
 
 struct TORCH_API OperandInfo {
   using StrideVector = SmallVector<int64_t, 6>;
@@ -310,8 +297,11 @@ public:
   StrideVector get_dim_strides(int dim) const;
   StrideVector get_strides() const;
   StrideVector get_inner_strides() const { return get_dim_strides(0); }
-  PtrVector get_data_ptrs(ArrayRef<char*> base, IntArrayRef counter) const;
   PtrVector get_base_ptrs() const;
+
+  // Helper functions for advanced stride manipulations (e.g. torch.flip)
+  void _unsafe_set_arg_strides(const int arg, IntArrayRef strides) { operands_[arg].stride_bytes = std::move(strides); }
+  void _unsafe_set_arg_data(const int arg, void* data) { operands_[arg].data = data; }
 
   /// true if the stride computation can use 32-bit arithmetic. Used by GPU kernels
   bool can_use_32bit_indexing() const;
@@ -341,12 +331,30 @@ public:
 
   void set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides, TensorOptions options, DimnameList names) override;
 
+#define TORCH_DISALLOW_TEMPORARIES_IMPL(methodname, maybestatic)                               \
+  maybestatic void methodname(Tensor&& out, const Tensor& a, const Tensor& b) = delete; \
+  maybestatic void methodname(const Tensor& out, Tensor&& a, const Tensor& b) = delete; \
+  maybestatic void methodname(const Tensor& out, const Tensor& a, Tensor&& b) = delete; \
+  maybestatic void methodname(Tensor&& out, Tensor&& a, const Tensor& b) = delete; \
+  maybestatic void methodname(Tensor&& out, const Tensor& a, Tensor&& b) = delete; \
+  maybestatic void methodname(const Tensor& out, Tensor&& a, Tensor&& b) = delete; \
+  maybestatic void methodname(Tensor&& out, Tensor&& a, Tensor&& b) = delete;
+
+#define TORCH_DISALLOW_TEMPORARIES(methodname) TORCH_DISALLOW_TEMPORARIES_IMPL(methodname,)
+
   void build_binary_float_op(const Tensor& out, const Tensor& a, const Tensor& b);
+  void build_borrowing_binary_float_op(const Tensor& out, const Tensor& a, const Tensor& b);
+  TORCH_DISALLOW_TEMPORARIES(build_borrowing_binary_float_op)
   void build_binary_op(const Tensor& out, const Tensor& a, const Tensor& b);
   void build_borrowing_binary_op(const Tensor& out, const Tensor& a, const Tensor& b);
+  TORCH_DISALLOW_TEMPORARIES(build_borrowing_binary_op)
   void build_unary_float_op(const Tensor& out, const Tensor& a);
   void build_unary_op(const Tensor& out, const Tensor& a);
+  void build_unary_force_boolean_op(const Tensor& out, const Tensor& a);
+  void build_comparison_op(const Tensor& out, const Tensor& a, const Tensor& b);
+  void build_ternary_op(const Tensor& out, const Tensor& a, const Tensor& b, const Tensor& c);
 
+#undef TORCH_DISALLOW_TEMPORARIES
 protected:
   // Mutable reference as it moves tensors out of TensorIteratorConfig
   void populate_operands(TensorIteratorConfig&);
@@ -411,6 +419,10 @@ protected:
   /// been called?  This is SOLELY used to check validity of perm_.
   bool has_coalesced_dimensions_ = false;
 
+  /// Whether iteration must be fixed. This disables dimension permuting and also
+  /// changes how for_each divides work among threads.
+  bool enforce_linear_iteration_ = false;
+
   /// The index offsets into the original tensors for each dimension.
   /// This is only non-zero when you narrow() a TensorIterator (e.g.,
   /// when you make sub-TensorIterators).
@@ -463,14 +475,23 @@ struct TORCH_API TensorIterator final : public TensorIteratorBase {
   // Slicing is OK, TensorIterator guaranteed NOT to have any fields
   TensorIterator(const TensorIteratorBase& iter) : TensorIteratorBase(iter) {}
 
+#define TORCH_DISALLOW_TEMPORARIES(methodname) TORCH_DISALLOW_TEMPORARIES_IMPL(methodname, static)
+
   static TensorIterator binary_float_op(Tensor& out, const Tensor& a, const Tensor& b);
   static TensorIterator binary_op(Tensor& out, const Tensor& a, const Tensor& b);
+  static TensorIterator borrowing_binary_op(const Tensor& out, const Tensor& a, const Tensor& b);
+  TORCH_DISALLOW_TEMPORARIES(borrowing_binary_op)
   static TensorIterator comparison_op(Tensor& out, const Tensor& a, const Tensor& b);
   static TensorIterator unary_op(Tensor& out, const Tensor& a);
   static TensorIterator unary_float_op(Tensor& out, const Tensor& a);
   static TensorIterator nullary_op(Tensor& out);
+  static TensorIterator unary_force_boolean_op(const Tensor& out, const Tensor& a);
+  static TensorIterator borrowing_nullary_op(const Tensor& out);
+  static TensorIterator borrowing_nullary_op(Tensor&& out) = delete;
   static TensorIterator reduce_op(Tensor& out, const Tensor& a);
   static TensorIterator reduce_op(Tensor& out1, Tensor& out2, const Tensor& a);
+#undef TORCH_DISALLOW_TEMPORARIES
+#undef TORCH_DISALLOW_TEMPORARIES_IMPL
 
   const Tensor& maybe_get_output(int64_t output_idx) override;
   void set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides, TensorOptions options, DimnameList names) override;
@@ -486,10 +507,25 @@ public:
   C10_DISABLE_COPY_AND_ASSIGN(TensorIteratorConfig);
 
   /// Construction
-  // Stores input/output Tensors while incrementing the reference count.
+  // Stores input/output Tensors without incrementing the reference count.
   // Important: the outputs have to be added before the inputs.
-  TensorIteratorConfig& add_output(const Tensor& output);
-  TensorIteratorConfig& add_input(const Tensor& input);
+  TensorIteratorConfig& add_output(const Tensor& output) {
+    return add_borrowed_output(output);
+  }
+  TensorIteratorConfig& add_input(const Tensor& input) {
+    return add_borrowed_input(input);
+  }
+
+  // Borrowing from temporaries is unlikely to go well.
+  TensorIteratorConfig& add_output(Tensor&& output) = delete;
+  TensorIteratorConfig& add_input(Tensor&& input) = delete;
+
+  // Stores input/output Tensors while incrementing the reference count.
+  // Note that add_{in,out}put are nearly always what you
+  // want, and the exception (adding an unnamed temporary) won't
+  // compile.
+  TensorIteratorConfig& add_owned_output(const Tensor& output);
+  TensorIteratorConfig& add_owned_input(const Tensor& input);
 
   // Advanced API: stores input/output Tensors without incrementing
   // the reference count. The caller must ensure that these Tensors
@@ -498,6 +534,10 @@ public:
   // Important: the outputs have to be added before the inputs.
   TensorIteratorConfig& add_borrowed_output(const Tensor& output);
   TensorIteratorConfig& add_borrowed_input(const Tensor& input);
+
+  // Borrowing from temporaries is unlikely to go well.
+  TensorIteratorConfig& add_borrowed_output(Tensor&& output) = delete;
+  TensorIteratorConfig& add_borrowed_input(Tensor&& input) = delete;
 
   // Sets the check_mem_overlap_ flag, which is true by default.
   // If true, inputs are checked for partial overlap with the outputs and
@@ -538,6 +578,17 @@ public:
   //   canCast(common dtype, output dtype) must be true for all outputs.
   TensorIteratorConfig& enforce_safe_casting_to_output(const bool _enforce_safe_casting_to_output) {
     enforce_safe_casting_to_output_ = _enforce_safe_casting_to_output;
+    return *this;
+  }
+
+  // Sets the enforce_linear_iteration_ flag, which is false by default.
+  // If true, iteration goes in the same order as a C-contiguous tensor
+  // is layed out in memory. i.e. last dimension iterates fastest.
+  //
+  // This iteration order can be less efficient and may even prevent vectorization.
+  // So only use if the correctness of your kernel depends on it.
+  TensorIteratorConfig& enforce_linear_iteration(const bool _enforce_linear_iteration = true) {
+    enforce_linear_iteration_ = _enforce_linear_iteration;
     return *this;
   }
 
@@ -622,6 +673,7 @@ private:
   bool check_all_same_dtype_ = true;
   bool check_all_same_device_ = true;
   bool enforce_safe_casting_to_output_ = false;
+  bool enforce_linear_iteration_ = false;
   bool promote_inputs_to_common_dtype_ = false;
   bool promote_integer_inputs_to_float_ = false;
   bool cast_common_dtype_to_outputs_ = false;

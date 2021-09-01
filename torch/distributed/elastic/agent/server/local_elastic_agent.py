@@ -9,6 +9,7 @@
 
 import os
 import shutil
+import signal
 import tempfile
 from typing import Any, Dict, Optional, Tuple
 
@@ -183,9 +184,9 @@ class LocalElasticAgent(SimpleElasticAgent):
 
         return self._pcontext.pids()
 
-    def _shutdown(self) -> None:
+    def _shutdown(self, death_sig: signal.Signals = signal.SIGTERM) -> None:
         if self._pcontext:
-            self._pcontext.close()
+            self._pcontext.close(death_sig)
 
     # pyre-fixme[56]: Pyre was not able to infer the type of the decorator
     #  `torch.distributed.elastic.metrics.prof`.
@@ -205,7 +206,6 @@ class LocalElasticAgent(SimpleElasticAgent):
         result = self._pcontext.wait(0)
         if result:
             if result.is_failed():
-                log.error(f"[{role}] Worker group failed")
                 # map local rank failure to global rank
                 worker_failures = {}
                 for local_rank, failure in result.failures.items():

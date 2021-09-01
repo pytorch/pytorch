@@ -344,6 +344,10 @@ public:
     c10::Dispatcher::singleton().callBoxed(*this, stack);
   }
 
+  void callBoxed(Stack& stack) const {
+    callBoxed(&stack);
+  }
+
   void redispatchBoxed(DispatchKeySet ks, Stack* stack) const {
     c10::Dispatcher::singleton().redispatchBoxed(*this, ks, stack);
   }
@@ -509,10 +513,7 @@ template<class Return, class... Args>
 C10_DISPATCHER_INLINE_UNLESS_MOBILE Return Dispatcher::call(const TypedOperatorHandle<Return(Args...)>& op, Args... args) const {
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
   auto dispatchKeySet = op.operatorDef_->op.dispatchKeyExtractor()
-    .template getDispatchKeySetUnboxed<Args...>(
-      DispatchKeySet::FULL,
-      args...
-    );
+    .template getDispatchKeySetUnboxed<Args...>(args...);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!c10::isAliasDispatchKey(dispatchKeySet.highestPriorityTypeId()));
   const KernelFunction& kernel = op.operatorDef_->op.lookup(dispatchKeySet.highestPriorityTypeId());
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING

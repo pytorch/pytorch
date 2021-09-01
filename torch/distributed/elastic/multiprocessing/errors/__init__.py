@@ -134,7 +134,7 @@ class ProcessFailure:
     def _get_error_data(self, error_file_data: Dict[str, Any]) -> Tuple[str, int]:
         message = error_file_data["message"]
         if isinstance(message, str):
-            timestamp = error_file_data.get("timestamp", 0)
+            timestamp = int(error_file_data.get("timestamp", 0))
         else:
             timestamp = int(message["extraInfo"]["timestamp"])
         return (message, timestamp)
@@ -165,7 +165,7 @@ _FAILURE_FORMAT_TEMPLATE = """[${idx}]:
   rank: ${rank} (local_rank: ${local_rank})
   exitcode: ${exitcode} (pid: ${pid})
   error_file: ${error_file}
-  msg: \"${message}\""""
+  msg: ${message}"""
 
 # extra new lines before and after are intentional
 _MSG_FORMAT_TEMPLATE = """
@@ -244,6 +244,9 @@ class ChildFailedError(Exception):
             else:
                 other_failures_fmt.append(fmt)
 
+        # upper boundary on width
+        width = min(width, 250)
+
         return Template(_MSG_FORMAT_TEMPLATE).substitute(
             boarder=boarder_delim * width,
             title=title.center(width),
@@ -255,6 +258,19 @@ class ChildFailedError(Exception):
     def _format_failure(
         self, idx: int, rank: int, failure: ProcessFailure
     ) -> Tuple[str, int]:
+        if isinstance(failure.message, str):
+            msg = '"' + failure.message + '"'
+        else:
+            try:
+                dmp = json.dumps(failure.message, indent=2)
+            except ValueError:
+                msg = failure.message
+            else:
+                msg = os.linesep
+                # Indent by 4 chars.
+                for l in dmp.splitlines():
+                    msg += f"    {l}{os.linesep}"
+
         fmt = Template(_FAILURE_FORMAT_TEMPLATE).substitute(
             idx=idx,
             time=failure.timestamp_isoformat(),
@@ -263,7 +279,7 @@ class ChildFailedError(Exception):
             exitcode=failure.exitcode,
             pid=failure.pid,
             error_file=failure.error_file,
-            message=failure.message,
+            message=msg,
         )
         width = 0
         for line in fmt.split("\n"):

@@ -10,7 +10,7 @@ if [ ! -f setup.py ]; then
 fi
 
 # shellcheck disable=SC2034
-COMPACT_JOB_NAME=pytorch-win-ws2019-cuda10-cudnn7-py3-build
+COMPACT_JOB_NAME=pytorch-win-ws2019-cuda10.1-py3-build
 
 SCRIPT_PARENT_DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 # shellcheck source=./common.sh
@@ -26,7 +26,7 @@ fi
 export TMP_DIR="${PWD}/build/win_tmp"
 TMP_DIR_WIN=$(cygpath -w "${TMP_DIR}")
 export TMP_DIR_WIN
-export PYTORCH_FINAL_PACKAGE_DIR="/c/w/build-results"
+export PYTORCH_FINAL_PACKAGE_DIR=${PYTORCH_FINAL_PACKAGE_DIR:-/c/w/build-results}
 if [[ -n "$PYTORCH_FINAL_PACKAGE_DIR" ]]; then
     mkdir -p "$PYTORCH_FINAL_PACKAGE_DIR" || true
 fi

@@ -12,23 +12,28 @@ constexpr DispatchKeySet backend_dispatch_keyset = autogradother_backends |
         DispatchKey::CPU,
         DispatchKey::CUDA,
         DispatchKey::XLA,
+        DispatchKey::Lazy,
         DispatchKey::XPU,
         DispatchKey::PrivateUse1,
         DispatchKey::PrivateUse2,
         DispatchKey::PrivateUse3,
         DispatchKey::MLC,
+        DispatchKey::HPU,
+        DispatchKey::ORT,
         DispatchKey::Meta,
     });
 
 bool isBackendDispatchKey(DispatchKey t) {
-  return t != DispatchKey::Undefined && backend_dispatch_keyset.has(t);
+  return t != DispatchKey::Undefined
+      // See Note [No Alias Keys in DispatchKeySet]
+      && !isAliasDispatchKey(t) && backend_dispatch_keyset.has(t);
 }
 
 // math_dispatch_keyset contains all keys in backend_dispatch_keyset and
 // autograd_dispatch_keyset Alias key DispatchKey::CompositeImplicitAutograd
 // maps to math_dispatch_keyset.
-constexpr DispatchKeySet math_dispatch_keyset =
-    backend_dispatch_keyset | autograd_dispatch_keyset;
+constexpr DispatchKeySet math_dispatch_keyset = backend_dispatch_keyset |
+    autograd_dispatch_keyset | DispatchKeySet({DispatchKey::FuncTorchBatched});
 
 DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t) {
   TORCH_INTERNAL_ASSERT(t != DispatchKey::Undefined);
@@ -54,8 +59,12 @@ DispatchKeySet getBackendKeySetFromAutograd(DispatchKey t) {
       return DispatchKeySet(DispatchKey::CUDA);
     case DispatchKey::AutogradXLA:
       return DispatchKeySet(DispatchKey::XLA);
+    case DispatchKey::AutogradLazy:
+      return DispatchKeySet(DispatchKey::Lazy);
     case DispatchKey::AutogradMLC:
       return DispatchKeySet(DispatchKey::MLC);
+    case DispatchKey::AutogradHPU:
+      return DispatchKeySet(DispatchKey::HPU);
     case DispatchKey::AutogradNestedTensor:
       return DispatchKeySet(DispatchKey::NestedTensor);
     case DispatchKey::AutogradXPU:
@@ -75,9 +84,10 @@ DispatchKeySet getBackendKeySetFromAutograd(DispatchKey t) {
 
 DispatchKeySet getAutocastRelatedKeySetFromBackend(DispatchKey t) {
   switch (t) {
-    // case DispatchKey::CPU:
-    //  return DispatchKeySet(DispatchKey::AutocastCPU);
+    case DispatchKey::CPU:
+      return DispatchKeySet(DispatchKey::AutocastCPU);
     case DispatchKey::CUDA:
+    case DispatchKey::XLA:
       return DispatchKeySet(DispatchKey::AutocastCUDA);
     default:
       return DispatchKeySet();

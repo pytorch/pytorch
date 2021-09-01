@@ -1,5 +1,6 @@
 import torch
 import torch.nn.quantized as nnq
+import torch.nn.intrinsic as nni
 from torch.nn.quantized.modules.utils import _quantize_weight
 
 class Linear(nnq.Linear):
@@ -79,11 +80,15 @@ class Linear(nnq.Linear):
             mod (Module): a float module, either produced by torch.quantization
                           utilities or provided by the user
         """
-        float_modules = [torch.nn.Linear, torch.nn.modules.linear._LinearWithBias]
+        float_modules = [torch.nn.Linear, torch.nn.modules.linear.NonDynamicallyQuantizableLinear,
+                         torch.nn.intrinsic.modules.fused.LinearReLU]
+
         assert type(mod) in float_modules, \
             'nn.quantized.dynamic.Linear.from_float only works for one of' + \
             str([float_mod.__name__ for float_mod in float_modules])
         assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
+        if type(mod) == nni.LinearReLU:
+            mod = mod[0]
         if mod.qconfig is not None and mod.qconfig.weight is not None:
             weight_observer = mod.qconfig.weight()
         else:
@@ -102,6 +107,6 @@ class Linear(nnq.Linear):
             qweight = mod.weight.float()
         else:
             raise RuntimeError('Unsupported dtype specified for dynamic quantized Linear!')
-        qlinear = Linear(mod.in_features, mod.out_features, dtype=dtype)
+        qlinear = cls(mod.in_features, mod.out_features, dtype=dtype)
         qlinear.set_weight_bias(qweight, mod.bias)
         return qlinear

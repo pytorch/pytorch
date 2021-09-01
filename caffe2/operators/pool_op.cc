@@ -1041,12 +1041,10 @@ std::function<void(OpSchema&)> MaxPoolDocGenerator(const char* dim) {
     */
   };
 }
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     AveragePool,
     PoolOp<float, CPUContext, AveragePoolFunctor<CPUContext>>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(AveragePool)
     .NumInputs(1)
     .NumOutputs(1)
@@ -1054,12 +1052,10 @@ OPERATOR_SCHEMA(AveragePool)
     .FillUsing(AveragePoolDocGenerator(""))
     .InheritOnnxSchema();
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     AveragePool1D,
     PoolOp<float, CPUContext, AveragePoolFunctor<CPUContext>>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(AveragePool1D)
     .NumInputs(1)
     .NumOutputs(1)
@@ -1067,12 +1063,10 @@ OPERATOR_SCHEMA(AveragePool1D)
     .FillUsing(AveragePoolDocGenerator("1D"))
     .InheritOnnxSchema("AveragePool");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     AveragePool2D,
     PoolOp<float, CPUContext, AveragePoolFunctor<CPUContext>>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(AveragePool2D)
     .NumInputs(1)
     .NumOutputs(1)
@@ -1080,12 +1074,10 @@ OPERATOR_SCHEMA(AveragePool2D)
     .FillUsing(AveragePoolDocGenerator("2D"))
     .InheritOnnxSchema("AveragePool");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     AveragePool3D,
     PoolOp<float, CPUContext, AveragePoolFunctor<CPUContext>>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(AveragePool3D)
     .NumInputs(1)
     .NumOutputs(1)
@@ -1093,12 +1085,10 @@ OPERATOR_SCHEMA(AveragePool3D)
     .FillUsing(AveragePoolDocGenerator("3D"))
     .InheritOnnxSchema("AveragePool");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     MaxPool,
     PoolOp<float, CPUContext, MaxPoolFunctor<CPUContext>>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(MaxPool)
     .NumInputs(1)
     .NumOutputs(1)
@@ -1106,12 +1096,10 @@ OPERATOR_SCHEMA(MaxPool)
     .FillUsing(MaxPoolDocGenerator(""))
     .InheritOnnxSchema();
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     MaxPool1D,
     PoolOp<float, CPUContext, MaxPoolFunctor<CPUContext>>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(MaxPool1D)
     .NumInputs(1)
     .NumOutputs(1)
@@ -1119,12 +1107,10 @@ OPERATOR_SCHEMA(MaxPool1D)
     .FillUsing(MaxPoolDocGenerator("1D"))
     .InheritOnnxSchema("MaxPool");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     MaxPool2D,
     PoolOp<float, CPUContext, MaxPoolFunctor<CPUContext>>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(MaxPool2D)
     .NumInputs(1)
     .NumOutputs(1)
@@ -1132,12 +1118,10 @@ OPERATOR_SCHEMA(MaxPool2D)
     .FillUsing(MaxPoolDocGenerator("2D"))
     .InheritOnnxSchema("MaxPool");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     MaxPool3D,
     PoolOp<float, CPUContext, MaxPoolFunctor<CPUContext>>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(MaxPool3D)
     .NumInputs(1)
     .NumOutputs(1)

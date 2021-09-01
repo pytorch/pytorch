@@ -19,7 +19,7 @@ import torch.utils.cpp_extension
 import torch.hub as hub
 from torch.autograd._functions.utils import check_onnx_broadcast
 from torch.onnx.symbolic_opset9 import _prepare_onnx_paddings
-from torch.testing._internal.common_utils import load_tests, retry, IS_SANDCASTLE, IS_WINDOWS
+from torch.testing._internal.common_utils import has_breakpad, load_tests, retry, IS_SANDCASTLE, IS_WINDOWS, TEST_WITH_ASAN
 from urllib.error import URLError
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
@@ -27,15 +27,6 @@ from urllib.error import URLError
 load_tests = load_tests
 
 HAS_CUDA = torch.cuda.is_available()
-
-def check_breakpad():
-    try:
-        torch._C._get_minidump_directory()  # type: ignore[attr-defined]
-        return True
-    except RuntimeError as e:
-        return "Minidump handler is uninintialized, make sure to call" in str(e)
-
-HAS_BREAKPAD = check_breakpad()
 
 
 from torch.testing._internal.common_utils import TestCase, run_tests
@@ -743,15 +734,17 @@ class TestAssert(TestCase):
         # data can be passed without errors
         x = torch.randn(4, 4).fill_(1.0)
         ms(x)
-        with self.assertRaisesRegex(torch.jit.Error, "foo"):  # type: ignore[type-var]
+        with self.assertRaisesRegex(torch.jit.Error, "foo"):
             ms(torch.tensor([False], dtype=torch.bool))
 
 
 class TestCrashHandler(TestCase):
-    @unittest.skipIf(not HAS_BREAKPAD, "Crash handler lib was not linked in")
+    @unittest.skipIf(TEST_WITH_ASAN, "ASAN disables the crash handler's signal handler")
+    @unittest.skipIf(not has_breakpad(), "Built without breakpad")
     def test_python_exception_writing(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            torch.utils._crash_handler.enable_minidump_collection(temp_dir)
+            torch.utils._crash_handler.enable_minidumps(temp_dir)
+            torch.utils._crash_handler.enable_minidumps_on_exceptions()
 
             files = os.listdir(temp_dir)
             self.assertEqual(len(files), 0)
@@ -768,7 +761,7 @@ class TestCrashHandler(TestCase):
             files = os.listdir(temp_dir)
             self.assertEqual(len(files), 1)
             self.assertTrue(files[0].endswith(".dmp"))
-            torch.utils._crash_handler.disable_minidump_collection()
+            torch.utils._crash_handler.disable_minidumps()
 
 
 @unittest.skipIf(IS_SANDCASTLE, "cpp_extension is OSS only")
@@ -822,6 +815,34 @@ class TestStandaloneCPPJIT(TestCase):
 
         finally:
             shutil.rmtree(build_dir)
+
+
+class DummyXPUModule(object):
+    @staticmethod
+    def is_available():
+        return True
+
+
+class TestExtensionUtils(TestCase):
+    def test_external_module_register(self):
+        # Built-in module
+        with self.assertRaisesRegex(RuntimeError, "The runtime module of"):
+            torch._register_device_module('cuda', torch.cuda)
+
+        # Wrong device type
+        with self.assertRaisesRegex(RuntimeError, "Expected one of cpu"):
+            torch._register_device_module('dummmy', DummyXPUModule)
+
+        with self.assertRaises(AttributeError):
+            torch.xpu.is_available()  # type: ignore[attr-defined]
+
+        torch._register_device_module('xpu', DummyXPUModule)
+
+        torch.xpu.is_available()  # type: ignore[attr-defined]
+
+        # No supporting for override
+        with self.assertRaisesRegex(RuntimeError, "The runtime module of"):
+            torch._register_device_module('xpu', DummyXPUModule)
 
 
 if __name__ == '__main__':

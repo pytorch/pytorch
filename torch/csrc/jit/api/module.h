@@ -18,6 +18,7 @@
 #include <ATen/core/qualified_name.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Optional.h>
+#include <c10/util/irange.h>
 
 #include <functional>
 #include <memory>
@@ -25,6 +26,7 @@
 #include <ostream>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -109,8 +111,8 @@ struct TORCH_API Module : public Object {
     return true;
   }
 
-  IValue forward(std::vector<IValue> inputs) {
-    return get_method("forward")(std::move(inputs));
+  IValue forward(std::vector<IValue> inputs, const Kwargs& kwargs = Kwargs()) {
+    return get_method("forward")(std::move(inputs), kwargs);
   }
 
   // In script modules, buffers are Tensors attribute that are _not_ registered
@@ -239,6 +241,16 @@ struct TORCH_API Module : public Object {
   // will be preserved as well
   Module clone(bool inplace = false) const;
 
+  // Clones both the underlying `ClassType` and the module instance(data), this
+  // function creates a new `ClassType` and returns a new instance that has the
+  // same data as the current instance but with the new type, shared ClassType
+  // will be preserved as well. Also allows the caller to specify a set of
+  // method and attribute names to not clone.
+  Module clone(
+      bool inplace,
+      const std::unordered_set<std::string>& ignored_method,
+      const std::unordered_set<std::string>& ignored_attributes) const;
+
   void clone_method(const Module& orig, const std::string& name);
 
   IValue operator()(std::vector<IValue> inputs);
@@ -258,7 +270,9 @@ struct TORCH_API Module : public Object {
   Module clone_impl(
       std::unordered_map<TypePtr, TypePtr>& type_remap,
       bool inplace,
-      IValue::HashAliasedIValueMap memo) const;
+      IValue::HashAliasedIValueMap memo,
+      const std::unordered_set<std::string>& ignored_methods,
+      const std::unordered_set<std::string>& ignored_attributes) const;
 
   void clone_method(
       const Module& orig,
@@ -281,6 +295,10 @@ TORCH_API Module freeze(
     const Module& module,
     c10::optional<std::vector<std::string>> preserved_attrs = c10::nullopt,
     bool optimize_numerics = true);
+
+// C++ equivalent api of `torch.jit.optimize_for_inference`. See documentation
+// there for details.
+TORCH_API Module optimize_for_inference(Module& module);
 
 namespace detail {
 
@@ -443,6 +461,7 @@ struct slot_list_impl {
       size_ = size_t(0);
       // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
       for (const value_type& s : *(this)) {
+        (void)s; // Suppress unused variable warning
         ++*size_;
       }
     }
@@ -549,7 +568,7 @@ struct NamedPolicy {
       name = (cursors.back().i_ == -1) ? "" : nameFragment(cursors.back());
     } else {
       std::ostringstream ss;
-      for (size_t i = 0; i < cursors.size(); ++i) {
+      for (const auto i : c10::irange(cursors.size())) {
         if (i > 0) {
           ss << ".";
         }

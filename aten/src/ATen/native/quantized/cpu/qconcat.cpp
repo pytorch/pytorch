@@ -1,9 +1,10 @@
 #include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
-#include <torch/library.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/NativeFunctions.h>
+#include <c10/util/irange.h>
+#include <torch/library.h>
 
 #include <algorithm>
 #include <vector>
@@ -11,9 +12,7 @@
 namespace at {
 namespace native {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(qcat_nhwc_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(qcat_relu_nhwc_stub);
 
 namespace {
@@ -36,8 +35,7 @@ bool is_valid_quantization_scheme(const Tensor& t) {
 
 bool all_inputs_sharing_qparams(TensorList qxs) {
   bool is_valid = true;
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  for (int i = 1; i < qxs.size(); ++i) {
+  for (const auto i : c10::irange(1, qxs.size())) {
     is_valid |= qxs[0].is_quantized();
     is_valid |= qxs[i].is_quantized() == qxs[0].is_quantized();
     is_valid |= qxs[i].qscheme() == qxs[0].qscheme();

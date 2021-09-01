@@ -76,6 +76,10 @@ void Tensor::retain_grad() const {
   impl::GetVariableHooks()->retain_grad(*this);
 }
 
+bool Tensor::retains_grad() const {
+  return impl::GetVariableHooks()->retains_grad(*this);
+}
+
 void Tensor::_backward(TensorList inputs,
         const c10::optional<Tensor>& gradient,
         c10::optional<bool> keep_graph,

@@ -17,7 +17,7 @@ struct CompareLTFunctor {
   }
 };
 
-void lt_kernel_cuda(TensorIterator& iter) {
+void lt_kernel_cuda(TensorIteratorBase& iter) {
   AT_DISPATCH_ALL_TYPES_AND3(kHalf, kBFloat16, kBool, iter.common_dtype(), "lt_cuda", [&]() {
     gpu_kernel_with_scalars(iter, CompareLTFunctor<scalar_t>());
   });

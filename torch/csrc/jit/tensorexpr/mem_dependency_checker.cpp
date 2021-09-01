@@ -1,4 +1,7 @@
 #include <torch/csrc/jit/tensorexpr/mem_dependency_checker.h>
+
+#include <c10/util/irange.h>
+
 #include <fstream>
 
 namespace torch {
@@ -56,15 +59,15 @@ void getDependentsChain(
 
 // AccessInfo
 
-std::vector<const Expr*> AccessInfo::getIndices() const {
-  std::vector<const Expr*> indices;
+std::vector<ExprPtr> AccessInfo::getIndices() const {
+  std::vector<ExprPtr> indices;
 
   if (expr_) {
-    if (auto* load = dynamic_cast<const Load*>(expr_)) {
+    if (auto load = to<Load>(expr_)) {
       indices = load->indices();
     }
   } else {
-    if (auto* store = dynamic_cast<const Store*>(stmt_)) {
+    if (auto store = to<Store>(stmt_)) {
       indices = store->indices();
     }
   }
@@ -73,12 +76,16 @@ std::vector<const Expr*> AccessInfo::getIndices() const {
 
 void AccessInfo::addDependency(const std::shared_ptr<AccessInfo>& write) {
   auto res = dependencies_.emplace(write->id(), write);
-  TORCH_INTERNAL_ASSERT(res.second);
+  TORCH_INTERNAL_ASSERT(
+      res.second,
+      buildErrorMessage("Duplicate entry in mem dep checker in the fuser."));
 }
 
 void AccessInfo::addDependent(const std::shared_ptr<AccessInfo>& read) {
   auto res = dependents_.emplace(read->id(), read);
-  TORCH_INTERNAL_ASSERT(res.second);
+  TORCH_INTERNAL_ASSERT(
+      res.second,
+      buildErrorMessage("Duplicate entry in mem dep checker in the fuser."));
 }
 
 bool AccessInfo::hasDependency(const std::shared_ptr<AccessInfo>& info) const {
@@ -181,12 +188,14 @@ void AccessInfo::dumpDOT(std::ostream& os) const {
     os << "label = \"" << AccessToString(type_) << "\\n " << *var_ << "[";
     if (bounds_.size() > 0) {
       for (size_t i = 0; i < bounds_.size() - 1; ++i) {
-        os << *IRSimplifier::simplify(new Add(bounds_[i].end, new IntImm(1)))
+        os << *IRSimplifier::simplify(
+                  alloc<Add>(bounds_[i].end, immLike(bounds_[i].end, 1)))
            << ", ";
       }
 
       size_t i = bounds_.size() - 1;
-      os << *IRSimplifier::simplify(new Add(bounds_[i].end, new IntImm(1)));
+      os << *IRSimplifier::simplify(
+          alloc<Add>(bounds_[i].end, immLike(bounds_[i].end, 1)));
       os << "]\"\n ";
     }
     if (isWrite()) {
@@ -252,12 +261,12 @@ MemDependencyChecker::MemDependencyChecker() {
 }
 
 MemDependencyChecker::MemDependencyChecker(
-    const std::unordered_set<const Buf*>& inputs,
-    const std::unordered_set<const Buf*>& outputs) {
-  for (auto* s : inputs) {
+    const std::unordered_set<BufPtr>& inputs,
+    const std::unordered_set<BufPtr>& outputs) {
+  for (auto s : inputs) {
     inputs_[s] = nullptr;
   }
-  for (auto* s : outputs) {
+  for (auto s : outputs) {
     outputs_[s] = nullptr;
   }
 
@@ -317,15 +326,15 @@ DependencySet MemDependencyChecker::getAllWriteDependencies(
   return writes;
 }
 
-bool MemDependencyChecker::dependsDirectly(const Expr* A, const Stmt* B) {
+bool MemDependencyChecker::dependsDirectly(ExprPtr A, StmtPtr B) {
   return dependsDirectlyHelper(A, B);
 }
 
-bool MemDependencyChecker::dependsDirectly(const Stmt* A, const Stmt* B) {
+bool MemDependencyChecker::dependsDirectly(StmtPtr A, StmtPtr B) {
   return dependsDirectlyHelper(A, B);
 }
 
-bool MemDependencyChecker::dependsDirectly(const Buf* O, const Stmt* B) {
+bool MemDependencyChecker::dependsDirectly(BufPtr O, StmtPtr B) {
   auto outputAccess = output(O);
   auto bWrites = getAllWritesWithin(B);
 
@@ -338,7 +347,7 @@ bool MemDependencyChecker::dependsDirectly(const Buf* O, const Stmt* B) {
   return false;
 }
 
-bool MemDependencyChecker::dependsDirectly(const Stmt* A, const Buf* I) {
+bool MemDependencyChecker::dependsDirectly(StmtPtr A, BufPtr I) {
   auto aReads = getAllReadsWithin(A);
   auto inputAccess = input(I);
 
@@ -351,7 +360,7 @@ bool MemDependencyChecker::dependsDirectly(const Stmt* A, const Buf* I) {
   return false;
 }
 
-bool MemDependencyChecker::dependsDirectly(const Expr* A, const Buf* I) {
+bool MemDependencyChecker::dependsDirectly(ExprPtr A, BufPtr I) {
   auto aReads = getAllReadsWithin(A);
   auto inputAccess = input(I);
 
@@ -370,15 +379,15 @@ bool MemDependencyChecker::dependsDirectly(
   return A->hasDependency(B) && B->isWrite();
 }
 
-bool MemDependencyChecker::dependsIndirectly(const Expr* A, const Stmt* B) {
+bool MemDependencyChecker::dependsIndirectly(ExprPtr A, StmtPtr B) {
   return dependsIndirectlyHelper(A, B);
 }
 
-bool MemDependencyChecker::dependsIndirectly(const Stmt* A, const Stmt* B) {
+bool MemDependencyChecker::dependsIndirectly(StmtPtr A, StmtPtr B) {
   return dependsIndirectlyHelper(A, B);
 }
 
-bool MemDependencyChecker::dependsIndirectly(const Buf* O, const Stmt* B) {
+bool MemDependencyChecker::dependsIndirectly(BufPtr O, StmtPtr B) {
   auto outputAccess = output(O);
 
   DependencySet dependencies;
@@ -394,7 +403,7 @@ bool MemDependencyChecker::dependsIndirectly(const Buf* O, const Stmt* B) {
   return false;
 }
 
-bool MemDependencyChecker::dependsIndirectly(const Stmt* A, const Buf* I) {
+bool MemDependencyChecker::dependsIndirectly(StmtPtr A, BufPtr I) {
   auto aReads = getAllReadsWithin(A);
   auto inputAccess = input(I);
 
@@ -403,7 +412,7 @@ bool MemDependencyChecker::dependsIndirectly(const Stmt* A, const Buf* I) {
   return aDeps.count(inputAccess) != 0;
 }
 
-bool MemDependencyChecker::dependsIndirectly(const Expr* A, const Buf* I) {
+bool MemDependencyChecker::dependsIndirectly(ExprPtr A, BufPtr I) {
   auto aReads = getAllReadsWithin(A);
   auto inputAccess = input(I);
 
@@ -412,7 +421,7 @@ bool MemDependencyChecker::dependsIndirectly(const Expr* A, const Buf* I) {
   return aDeps.count(inputAccess) != 0;
 }
 
-bool MemDependencyChecker::dependsIndirectly(const Buf* O, const Buf* I) {
+bool MemDependencyChecker::dependsIndirectly(BufPtr O, BufPtr I) {
   auto outputAccess = output(O);
   auto inputAccess = input(I);
 
@@ -435,8 +444,7 @@ bool MemDependencyChecker::dependsIndirectly(
   return true;
 }
 
-std::shared_ptr<AccessInfo> MemDependencyChecker::accessFor(
-    const Stmt* A) const {
+std::shared_ptr<AccessInfo> MemDependencyChecker::accessFor(StmtPtr A) const {
   auto bound = stmtToAccess_.equal_range(A);
   for (auto it = bound.first; it != bound.second; ++it) {
     if (it->second->expr() == nullptr) {
@@ -446,8 +454,7 @@ std::shared_ptr<AccessInfo> MemDependencyChecker::accessFor(
   return nullptr;
 }
 
-std::shared_ptr<AccessInfo> MemDependencyChecker::accessFor(
-    const Expr* A) const {
+std::shared_ptr<AccessInfo> MemDependencyChecker::accessFor(ExprPtr A) const {
   // TODO exprs can have multiple accesses... we're returning the first but that
   // isn't great. Can't do much here.
   auto bound = exprToAccess_.equal_range(A);
@@ -459,7 +466,7 @@ std::shared_ptr<AccessInfo> MemDependencyChecker::accessFor(
 }
 
 std::unordered_set<std::shared_ptr<AccessInfo>> MemDependencyChecker::
-    accessesWithin(const Stmt* A) const {
+    accessesWithin(StmtPtr A) const {
   auto it = scopeToAccesses_.find(A);
   if (it != scopeToAccesses_.end()) {
     return std::unordered_set<std::shared_ptr<AccessInfo>>(
@@ -475,11 +482,11 @@ std::unordered_set<std::shared_ptr<AccessInfo>> MemDependencyChecker::
 }
 
 std::unordered_set<std::shared_ptr<AccessInfo>> MemDependencyChecker::
-    accessesWithin(const Expr* A) const {
+    accessesWithin(ExprPtr A) const {
   return {accessFor(A)};
 }
 
-std::shared_ptr<AccessInfo> MemDependencyChecker::input(const Buf* b) const {
+std::shared_ptr<AccessInfo> MemDependencyChecker::input(BufPtr b) const {
   auto it = inputs_.find(b);
   if (it == inputs_.end()) {
     return nullptr;
@@ -487,7 +494,7 @@ std::shared_ptr<AccessInfo> MemDependencyChecker::input(const Buf* b) const {
   return it->second;
 }
 
-std::shared_ptr<AccessInfo> MemDependencyChecker::output(const Buf* b) const {
+std::shared_ptr<AccessInfo> MemDependencyChecker::output(BufPtr b) const {
   auto it = outputs_.find(b);
   if (it == outputs_.end()) {
     return nullptr;
@@ -497,18 +504,18 @@ std::shared_ptr<AccessInfo> MemDependencyChecker::output(const Buf* b) const {
 
 // Node visitors:
 
-void MemDependencyChecker::visit(const Store* v) {
-  const Stmt* last = lastStmt_;
+void MemDependencyChecker::visit(StorePtr v) {
+  StmtPtr last = lastStmt_;
   lastStmt_ = v;
   v->value()->accept(this);
 
-  for (const Expr* ind : v->indices()) {
+  for (ExprPtr ind : v->indices()) {
     ind->accept(this);
   }
   lastStmt_ = last;
 
   // Create a new AccessInfo for the store.
-  const Var* var = v->buf()->base_handle();
+  VarPtr var = v->buf()->base_handle();
   auto info = std::make_shared<AccessInfo>(
       nextAccess_++, AccessType::Store, v, var, getIndicesBounds(v->indices()));
 
@@ -529,19 +536,19 @@ void MemDependencyChecker::visit(const Store* v) {
   currentScope_->accesses_.push_back(info);
 }
 
-void MemDependencyChecker::visit(const Load* v) {
+void MemDependencyChecker::visit(LoadPtr v) {
   // Create a temporary scope to hold any loads that occur within the indices of
   // this load.
   auto indicesScope =
       std::make_shared<Scope>(currentScope_->block, currentScope_);
   currentScope_ = indicesScope;
 
-  for (const Expr* ind : v->indices()) {
+  for (ExprPtr ind : v->indices()) {
     ind->accept(this);
   }
 
   // Create a new AccessInfo for the load.
-  const Var* var = v->buf()->base_handle();
+  VarPtr var = v->buf()->base_handle();
   auto load = std::make_shared<AccessInfo>(
       nextAccess_++,
       AccessType::Load,
@@ -581,33 +588,35 @@ void MemDependencyChecker::visit(const Load* v) {
 bool executionSafetyCheck(
     const std::shared_ptr<AccessInfo>& info,
     const std::shared_ptr<AccessInfo>& other,
-    const std::vector<const Expr*>& aStrides,
-    const std::vector<const Expr*>& oStrides,
+    const std::vector<ExprPtr>& aStrides,
+    const std::vector<ExprPtr>& oStrides,
     bool parallelized) {
   if (aStrides.empty() || oStrides.empty()) {
     return false;
   }
-  TORCH_INTERNAL_ASSERT(info->bounds().size() == other->bounds().size());
+  TORCH_INTERNAL_ASSERT(
+      info->bounds().size() == other->bounds().size(),
+      buildErrorMessage(
+          "Dimension mismatch for two accesses in mem dep checker in the fuser."));
   for (size_t b = 0; b < info->bounds().size(); ++b) {
-    const Expr* aIndexStride = aStrides[b];
-    const Expr* oIndexStride = oStrides[b];
+    ExprPtr aIndexStride = aStrides[b];
+    ExprPtr oIndexStride = oStrides[b];
     // can't be safe on this index if we can't determine stride.
     if (!aIndexStride->isConstant() || !oIndexStride->isConstant()) {
       continue;
     }
 
-    const Expr* minStride =
-        IRSimplifier::simplify(new Min(aIndexStride, oIndexStride, true));
-    const Expr* maxStride =
-        IRSimplifier::simplify(new Max(aIndexStride, oIndexStride, true));
+    ExprPtr minStride =
+        IRSimplifier::simplify(alloc<Min>(aIndexStride, oIndexStride, true));
+    ExprPtr maxStride =
+        IRSimplifier::simplify(alloc<Max>(aIndexStride, oIndexStride, true));
 
     // If the first access has no stride don't apply safety).
     if (immediateEquals(minStride, 0)) {
       continue;
     }
 
-    const Expr* modCheck =
-        IRSimplifier::simplify(new Mod(maxStride, minStride));
+    ExprPtr modCheck = IRSimplifier::simplify(alloc<Mod>(maxStride, minStride));
 
     // if the strides can't have easily inferable distinct offsets, they're not
     // safe.
@@ -621,33 +630,34 @@ bool executionSafetyCheck(
     // axis is the same sign as the common stride, then they will not
     // overlap.
 
-    const Expr* startDiff = IRSimplifier::simplify(
-        new Sub(info->bounds()[b].start, other->bounds()[b].start));
+    ExprPtr startDiff = IRSimplifier::simplify(
+        alloc<Sub>(info->bounds()[b].start, other->bounds()[b].start));
 
     bool diffNegative = immediateIsNegative(startDiff);
     bool strideNegative = immediateIsNegative(minStride);
 
     // Invert the startDiff so mod works.
     if (diffNegative != strideNegative) {
-      startDiff = IRSimplifier::simplify(new Sub(new IntImm(0), startDiff));
+      startDiff =
+          IRSimplifier::simplify(alloc<Sub>(immLike(startDiff, 0), startDiff));
     }
 
     // If both accesses have the same stride, and the difference in start
     // element is smaller than this stride then the entire range is distinct.
     if (exprEquals(minStride, maxStride)) {
-      const Expr* check1 =
-          IRSimplifier::simplify(new CompareSelect(startDiff, minStride, kLT));
+      ExprPtr check1 = IRSimplifier::simplify(
+          alloc<CompareSelect>(startDiff, minStride, kLT));
       if (check1->isConstant() && immediateEquals(check1, 1)) {
         return true;
       }
     }
 
-    startDiff = IRSimplifier::simplify(new Mod(startDiff, minStride));
+    startDiff = IRSimplifier::simplify(alloc<Mod>(startDiff, minStride));
 
     CompareSelectOperation op = strideNegative ? kLT : kGT;
 
-    const Expr* check =
-        IRSimplifier::simplify(new CompareSelect(startDiff, new IntImm(0), op));
+    ExprPtr check = IRSimplifier::simplify(
+        alloc<CompareSelect>(startDiff, immLike(startDiff, 0), op));
 
     // If the start difference modulo the minimum stride is offset from that
     // stride, then the ranges have distinct strides.
@@ -667,10 +677,10 @@ bool executionSafetyCheck(
   return false;
 }
 
-void MemDependencyChecker::visit(const For* v) {
-  const Var* var = v->var();
+void MemDependencyChecker::visit(ForPtr v) {
+  VarPtr var = v->var();
 
-  const Stmt* last = lastStmt_;
+  StmtPtr last = lastStmt_;
   lastStmt_ = v;
 
   v->var()->accept(this);
@@ -713,49 +723,49 @@ void MemDependencyChecker::visit(const For* v) {
   // access, which we do via substituting the loop var with (var+1) into the
   // indices expr.
 
-  std::vector<std::vector<const Expr*>> loopStrides;
+  std::vector<std::vector<ExprPtr>> loopStrides;
   loopStrides.resize(currentScope_->accesses_.size());
 
   for (size_t a = 0; a < currentScope_->accesses_.size(); ++a) {
     auto& info = currentScope_->accesses_[a];
 
-    std::vector<const Expr*> indices = info->getIndices();
+    std::vector<ExprPtr> indices = info->getIndices();
 
-    std::vector<const Expr*>& loopIndicesStride = loopStrides[a];
+    std::vector<ExprPtr>& loopIndicesStride = loopStrides[a];
     loopIndicesStride.resize(indices.size());
 
     // index expr must depend on the loop var in some way to have a stride.
-    for (size_t i = 0; i < indices.size(); i++) {
+    for (const auto i : c10::irange(indices.size())) {
       VarFinder vf;
       if (vf.find(indices[i]).count(var) == 0) {
-        loopIndicesStride[i] = new IntImm(0);
+        loopIndicesStride[i] = immLike(indices[i], 0);
       } else {
         // If we've previously swapped the start and end of this bound, we
         // should apply the substitution to the reverse of the bounds.
         if (info->bounds()[i].swapped) {
           info->bounds()[i].end = IRSimplifier::simplify(
-              Substitute(info->bounds()[i].end, {{var, v->start()}}));
-          info->bounds()[i].start = IRSimplifier::simplify(Substitute(
+              SubstituteInClone(info->bounds()[i].end, {{var, v->start()}}));
+          info->bounds()[i].start = IRSimplifier::simplify(SubstituteInClone(
               info->bounds()[i].start,
-              {{var, new Sub(v->stop(), new IntImm(1))}}));
+              {{var, alloc<Sub>(v->stop(), immLike(v->stop(), 1))}}));
 
         } else {
           info->bounds()[i].start = IRSimplifier::simplify(
-              Substitute(info->bounds()[i].start, {{var, v->start()}}));
-          info->bounds()[i].end = IRSimplifier::simplify(Substitute(
+              SubstituteInClone(info->bounds()[i].start, {{var, v->start()}}));
+          info->bounds()[i].end = IRSimplifier::simplify(SubstituteInClone(
               info->bounds()[i].end,
-              {{var, new Sub(v->stop(), new IntImm(1))}}));
+              {{var, alloc<Sub>(v->stop(), immLike(v->stop(), 1))}}));
         }
 
-        const Expr* zeroStep = indices[i];
-        const Expr* oneStep =
-            Substitute(indices[i], {{var, new Add(var, new IntImm(1))}});
+        ExprPtr zeroStep = indices[i];
+        ExprPtr oneStep = SubstituteInClone(
+            indices[i], {{var, alloc<Add>(var, immLike(var, 1))}});
         loopIndicesStride[i] =
-            IRSimplifier::simplify(new Sub(oneStep, zeroStep));
+            IRSimplifier::simplify(alloc<Sub>(oneStep, zeroStep));
 
         // If the start < end then swap the order of the bound.
-        const Expr* diff = IRSimplifier::simplify(
-            new Sub(info->bounds()[i].end, info->bounds()[i].start));
+        ExprPtr diff = IRSimplifier::simplify(
+            alloc<Sub>(info->bounds()[i].end, info->bounds()[i].start));
         if (diff->isConstant() && immediateIsNegative(diff)) {
           info->bounds()[i].swap();
         }
@@ -780,13 +790,13 @@ void MemDependencyChecker::visit(const For* v) {
       // does nothing.
       for (auto& bound : bounds) {
         bound.start = IRSimplifier::simplify(
-            Substitute(bound.start, {{var, v->start()}}));
-        bound.end = IRSimplifier::simplify(
-            Substitute(bound.end, {{var, new Sub(v->stop(), new IntImm(1))}}));
+            SubstituteInClone(bound.start, {{var, v->start()}}));
+        bound.end = IRSimplifier::simplify(SubstituteInClone(
+            bound.end, {{var, alloc<Sub>(v->stop(), immLike(v->stop(), 1))}}));
 
         // If the start < end then swap the order of the bound.
-        const Expr* diff =
-            IRSimplifier::simplify(new Sub(bound.end, bound.start));
+        ExprPtr diff =
+            IRSimplifier::simplify(alloc<Sub>(bound.end, bound.start));
         if (diff->isConstant() && immediateIsNegative(diff)) {
           bound.swap();
         }
@@ -799,7 +809,7 @@ void MemDependencyChecker::visit(const For* v) {
       v->loop_options().is_gpu_thread_index();
 
   // Store buffers allocated at this scope.
-  std::unordered_set<const Var*> local_intermediates;
+  std::unordered_set<VarPtr> local_intermediates;
 
   // Scanning from the top of the loop, we look for accesses which may depend
   // on a previous or parallel loop iteration.
@@ -902,8 +912,8 @@ void MemDependencyChecker::visit(const For* v) {
   currentScope_ = currentScope_->parent;
 }
 
-void MemDependencyChecker::visit(const Cond* v) {
-  const Stmt* last = lastStmt_;
+void MemDependencyChecker::visit(CondPtr v) {
+  StmtPtr last = lastStmt_;
   lastStmt_ = v;
 
   auto enclosingScope =
@@ -912,8 +922,8 @@ void MemDependencyChecker::visit(const Cond* v) {
   // condition is in enclosing scope.
   v->condition()->accept(this);
 
-  Block* true_stmt = v->true_stmt();
-  Block* false_stmt = v->false_stmt();
+  BlockPtr true_stmt = v->true_stmt();
+  BlockPtr false_stmt = v->false_stmt();
 
   // Create scopes so the Block visitor doesn't create and merge a new scope.
   auto trueScope = std::make_shared<Scope>(true_stmt, enclosingScope);
@@ -951,12 +961,12 @@ void MemDependencyChecker::visit(const Cond* v) {
   lastStmt_ = last;
 }
 
-void MemDependencyChecker::visit(const IfThenElse* v) {
+void MemDependencyChecker::visit(IfThenElsePtr v) {
   // condition is in enclosing scope.
   v->condition()->accept(this);
 
-  const Expr* true_value = v->true_value();
-  const Expr* false_value = v->false_value();
+  ExprPtr true_value = v->true_value();
+  ExprPtr false_value = v->false_value();
 
   auto enclosingScope = currentScope_;
 
@@ -987,13 +997,13 @@ void MemDependencyChecker::visit(const IfThenElse* v) {
   currentScope_ = enclosingScope;
 }
 
-void MemDependencyChecker::visit(const CompareSelect* v) {
+void MemDependencyChecker::visit(CompareSelectPtr v) {
   // condition is in enclosing scope.
   v->lhs()->accept(this);
   v->rhs()->accept(this);
 
-  const Expr* true_value = v->ret_val1();
-  const Expr* false_value = v->ret_val2();
+  ExprPtr true_value = v->ret_val1();
+  ExprPtr false_value = v->ret_val2();
 
   auto enclosingScope = currentScope_;
 
@@ -1026,15 +1036,16 @@ void MemDependencyChecker::visit(const CompareSelect* v) {
 
 // Inserts accesses for a map of buffers (ie. for inputs and outputs).
 void MemDependencyChecker::insertBuffers(
-    std::unordered_map<const Buf*, std::shared_ptr<AccessInfo>>& bufs,
+    std::unordered_map<BufPtr, std::shared_ptr<AccessInfo>>& bufs,
     AccessType type) {
   for (auto& pair : bufs) {
-    const Buf* b = pair.first;
-    const Var* var = b->base_handle();
+    BufPtr b = pair.first;
+    VarPtr var = b->base_handle();
     IndexBounds bounds;
-    for (auto* d : b->dims()) {
+    for (auto d : b->dims()) {
       bounds.push_back(
-          {new IntImm(0), IRSimplifier::simplify(new Sub(d, new IntImm(1)))});
+          {immLike(d, 0),
+           IRSimplifier::simplify(alloc<Sub>(d, immLike(d, 1)))});
     }
     auto info =
         std::make_shared<AccessInfo>(nextAccess_++, type, nullptr, var, bounds);
@@ -1047,7 +1058,7 @@ void MemDependencyChecker::insertBuffers(
   }
 }
 
-void MemDependencyChecker::visit(const Block* v) {
+void MemDependencyChecker::visit(BlockPtr v) {
   auto prev_scope = currentScope_;
 
   // handle kernel inputs.
@@ -1056,14 +1067,14 @@ void MemDependencyChecker::visit(const Block* v) {
   }
 
   if (currentScope_->block != v) {
-    currentScope_ = std::make_shared<Scope>((Block*)v, prev_scope);
+    currentScope_ = std::make_shared<Scope>((BlockPtr)v, prev_scope);
   }
 
-  for (auto* s : *v) {
+  for (auto s : *v) {
     s->accept(this);
   }
 
-  for (auto* v : currentScope_->localVars) {
+  for (auto v : currentScope_->localVars) {
     knownVarBounds_.erase(v);
   }
   for (auto& pair : currentScope_->shadowedVarBounds) {
@@ -1083,15 +1094,15 @@ void MemDependencyChecker::visit(const Block* v) {
   }
 }
 
-void MemDependencyChecker::visit(const Let* v) {
-  const Stmt* last = lastStmt_;
+void MemDependencyChecker::visit(LetPtr v) {
+  StmtPtr last = lastStmt_;
   lastStmt_ = v;
 
   IRVisitor::visit(v);
 
   lastStmt_ = last;
 
-  const Var* var = v->var();
+  VarPtr var = v->var();
   if (knownVarBounds_.count(var) != 0) {
     currentScope_->shadowedVarBounds[var] = knownVarBounds_[var];
   }
@@ -1102,17 +1113,17 @@ void MemDependencyChecker::visit(const Let* v) {
 
 // Don't support AtomicAdd yet, it's a bit more complex since it's both a read
 // and a write. It's only inserted during Cuda codegen so this should be okay.
-void MemDependencyChecker::visit(const AtomicAdd* v) {
+void MemDependencyChecker::visit(AtomicAddPtr v) {
   throw std::runtime_error("MemDependencyChecker AtomicAdd unimplemented");
 }
 
-void MemDependencyChecker::visit(const Allocate* v) {
-  const Stmt* last = lastStmt_;
+void MemDependencyChecker::visit(AllocatePtr v) {
+  StmtPtr last = lastStmt_;
   lastStmt_ = v;
 
   IRVisitor::visit(v);
 
-  const Var* var = v->buffer_var();
+  VarPtr var = v->buffer_var();
   IndexBounds bounds;
   // TODO: remove the "buf_flat_size" process below and extend the buf bound
   // check to support N-d indices access and 1-d index access.
@@ -1121,9 +1132,10 @@ void MemDependencyChecker::visit(const Allocate* v) {
   // identify 1-d index access for N-d bufs. Thus we flatten N-d bufs here to
   // avoid failing the bound check. But this is not the correct approach and
   // should be fixed.
-  const Expr* flat_size = buf_flat_size(v->buf());
-  flat_size = IRSimplifier::simplify(new Sub(flat_size, new IntImm(1)));
-  bounds.push_back({new IntImm(0), flat_size});
+  ExprPtr flat_size = buf_flat_size(v->buf());
+  flat_size =
+      IRSimplifier::simplify(alloc<Sub>(flat_size, immLike(flat_size, 1)));
+  bounds.push_back({immLike(flat_size, 0), flat_size});
 
   auto info = std::make_shared<AccessInfo>(
       nextAccess_++, AccessType::Alloc, nullptr, var, bounds);
@@ -1137,15 +1149,19 @@ void MemDependencyChecker::visit(const Allocate* v) {
   lastStmt_ = last;
 }
 
-void MemDependencyChecker::visit(const Free* v) {
-  const Stmt* last = lastStmt_;
+void MemDependencyChecker::visit(FreePtr v) {
+  StmtPtr last = lastStmt_;
   lastStmt_ = v;
 
   IRVisitor::visit(v);
 
-  const Var* var = v->buffer_var();
+  VarPtr var = v->buffer_var();
   auto it = intermediates_.find(var);
-  TORCH_INTERNAL_ASSERT(it != intermediates_.end());
+  TORCH_INTERNAL_ASSERT(
+      it != intermediates_.end(),
+      buildErrorMessage(
+          "Expected to find '" + var->name_hint() +
+          "' in intermediate vars in mem dep checker in the fuser."));
 
   IndexBounds bounds = it->second->bounds();
   auto info = std::make_shared<AccessInfo>(
@@ -1244,7 +1260,7 @@ void MemDependencyChecker::mergeScope(
 
   // Copy open writes up.
   for (auto& pair : child->openWrites_) {
-    const Var* var = pair.first;
+    VarPtr var = pair.first;
 
     // Intentionally using operator[], we want it to be created if it does not
     // exist.
@@ -1267,7 +1283,7 @@ class VarBoundBinder : public IRVisitor {
  public:
   VarBoundBinder(const VarBoundMap& vars) : vars_(vars) {}
 
-  Bound getBounds(const Expr* e) {
+  Bound getBounds(ExprPtr e) {
     min_ = e;
     max_ = e;
     e->accept(this);
@@ -1277,27 +1293,27 @@ class VarBoundBinder : public IRVisitor {
   }
 
  private:
-  void visit(const Var* v) override {
+  void visit(VarPtr v) override {
     auto it = vars_.find(v);
     if (it == vars_.end()) {
       return;
     }
 
-    min_ = Substitute(min_, {{v, it->second.start}});
-    max_ = Substitute(max_, {{v, it->second.end}});
+    min_ = SubstituteInClone(min_, {{v, it->second.start}});
+    max_ = SubstituteInClone(max_, {{v, it->second.end}});
   }
 
-  const Expr* min_{nullptr};
-  const Expr* max_{nullptr};
+  ExprPtr min_{nullptr};
+  ExprPtr max_{nullptr};
   const VarBoundMap& vars_;
 };
 
 std::vector<Bound> MemDependencyChecker::getIndicesBounds(
-    const std::vector<const Expr*>& indices) {
+    const std::vector<ExprPtr>& indices) {
   std::vector<Bound> bounds;
   bounds.reserve(indices.size());
   VarBoundBinder binder(knownVarBounds_);
-  for (auto* s : indices) {
+  for (auto s : indices) {
     bounds.push_back(binder.getBounds(s));
   }
   return bounds;

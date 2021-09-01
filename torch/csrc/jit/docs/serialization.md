@@ -374,7 +374,7 @@ object around in C++, all its code will stay around and methods will be
 invokable.
 
 **`Module`**: A view over a `ClassType` and the `Object` that holds its state.
-Also responsible for turning unqualified names (e.g. `foward()`) into
+Also responsible for turning unqualified names (e.g. `forward()`) into
 qualified ones for lookup in the owning `CompilationUnit` (e.g.
 `__torch__.MyModule.forward`). Owns the `Object`, which transitively owns the
 `CompilationUnit`.

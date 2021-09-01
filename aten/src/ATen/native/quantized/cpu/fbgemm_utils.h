@@ -50,6 +50,18 @@ struct TORCH_API PackedLinearWeight : public LinearPackedParamsBase {
       double output_scale,
       int64_t output_zero_point) override;
 
+  at::Tensor& apply_out(
+      const at::Tensor& input,
+      double output_scale,
+      int64_t output_zero_point,
+      at::Tensor& output) override;
+
+  at::Tensor& apply_relu_out(
+      const at::Tensor& input,
+      double output_scale,
+      int64_t output_zero_point,
+      at::Tensor& output) override;
+
   at::Tensor apply_dynamic(at::Tensor input, bool reduce_range=false) override;
   at::Tensor apply_dynamic_relu(at::Tensor input, bool reduce_range=false) override;
 
@@ -65,10 +77,11 @@ struct TORCH_API PackedLinearWeight : public LinearPackedParamsBase {
 
  private:
   template <bool ReluFused>
-  at::Tensor apply_impl(
-      at::Tensor input,
+  at::Tensor& apply_impl(
+      const at::Tensor& input,
       double output_scale,
-      int64_t output_zero_point);
+      int64_t output_zero_point,
+      at::Tensor& output);
 
   template <bool ReluFused>
   at::Tensor apply_dynamic_impl(at::Tensor input, bool reduce_range=false);

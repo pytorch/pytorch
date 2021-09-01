@@ -15,6 +15,7 @@
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <torch/csrc/jit/passes/vulkan_rewrite.h>
+#include <torch/csrc/jit/runtime/graph_executor_impl.h>
 
 namespace torch {
 namespace jit {
@@ -213,6 +214,14 @@ void vulkanRemoveMutation(script::Module& module) {
   RemoveTensorMutation(graph);
 }
 
+void vulkanRunCanonicalOptimizations(script::Module& module) {
+  auto graph = module.get_method("forward").graph();
+  for (const auto& method : module.get_methods()) {
+    auto graph = method.graph();
+    runOptimization(graph, false /* no loop unrolling */);
+  }
+}
+
 script::Module vulkanOptimizeForMobile(
     const script::Module& m,
     const std::vector<std::string>& preserved_methods) {
@@ -225,6 +234,9 @@ script::Module vulkanOptimizeForMobile(
   vulkanFoldPrePackingOps(cloned_module);
   removeDropout(cloned_module);
   vulkanRemoveMutation(cloned_module);
+  // remove duplicated constants
+  vulkanRunCanonicalOptimizations(cloned_module);
+
   cloned_module.register_attribute(
       "optimized_for_vulkan", BoolType::get(), true);
   return cloned_module;
@@ -234,28 +246,29 @@ script::Module vulkanOptimizeForMobile(
 
 void vulkanInsertPrePackedOps(std::shared_ptr<Graph>& graph) {
   TORCH_INTERNAL_ASSERT(
-      "Vulkan is not enabled. Please build with USE_VULKAN=1");
+      false, "Vulkan is not enabled. Please build with USE_VULKAN=1");
 }
 
 void vulkanInsertPrePackedOps(script::Module& module) {
   TORCH_INTERNAL_ASSERT(
-      "Vulkan is not enabled. Please build with USE_VULKAN=1");
+      false, "Vulkan is not enabled. Please build with USE_VULKAN=1");
 }
 
 void vulkanFusePrePackedConvWithClamp(script::Module& module) {
   TORCH_INTERNAL_ASSERT(
-      "Vulkan is not enabled. Please build with USE_VULKAN=1");
+      false, "Vulkan is not enabled. Please build with USE_VULKAN=1");
 }
 
 void vulkanFoldPrePackingOps(script::Module& m) {
   TORCH_INTERNAL_ASSERT(
-      "Vulkan is not enabled. Please build with USE_VULKAN=1");
+      false, "Vulkan is not enabled. Please build with USE_VULKAN=1");
 }
 
 script::Module vulkanOptimizeForMobile(
     const script::Module& module,
     const std::vector<std::string>& preserved_methods) {
   TORCH_INTERNAL_ASSERT(
+      false,
       "Mobile optimizaiton only available with Vulkan at the moment. "
       "Vulkan is not enabled. Please build with USE_VULKAN=1");
   return module;
