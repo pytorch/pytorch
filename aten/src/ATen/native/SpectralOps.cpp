@@ -938,7 +938,7 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
   // zero padding if the given lengthOpt is longer than expected
   if(end > expected_output_signal_len) {
     TORCH_WARN_ONCE(
-      "The length of signal is shorter than the length parameter. Pad zeros to the tail. "
+      "The length of signal is shorter than the length parameter. Result is being padded with zeros in the tail. "
       "Please check your center and hop_length settings."
     );
     y = at::constant_pad_nd(y, {0, end - expected_output_signal_len}, 0);
