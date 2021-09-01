@@ -385,13 +385,15 @@ struct SymbolicShapeAnalyzer {
               int64_t symbolic_index = shape_symbol.value();
               symbolic_shape_map[symbolic_index].push_back(use.user->output());
             }
-            for (const auto& sym_uses: use.user->output()->uses()) {
+            for (const auto& sym_uses : use.user->output()->uses()) {
               auto k = sym_uses.user->kind();
-              if (k != aten::ge && k != aten::le && k != aten::ne && k != aten::eq && k != aten::lt && k != aten::gt) {
+              if (k != aten::ge && k != aten::le && k != aten::ne &&
+                  k != aten::eq && k != aten::lt && k != aten::gt) {
                 break;
               }
               auto other_index = 1 - sym_uses.offset;
-              auto other_value = constant_as<int64_t>(sym_uses.user->input(other_index));
+              auto other_value =
+                  constant_as<int64_t>(sym_uses.user->input(other_index));
               if (!other_value) {
                 continue;
               }
@@ -420,7 +422,9 @@ struct SymbolicShapeAnalyzer {
                 // True if:
                 // -2 <= / < {Positive}
                 // {Positive} >= / > {-2}
-                bool true_val = ((other_index == 0 && (k == aten::le || k == aten::lt)) || (other_index == 1 && (k == aten::ge || k == aten::gt)));
+                bool true_val =
+                    ((other_index == 0 && (k == aten::le || k == aten::lt)) ||
+                     (other_index == 1 && (k == aten::ge || k == aten::gt)));
                 replaceWithIValue(sym_uses.user->output(), true_val);
               }
             }
