@@ -582,11 +582,21 @@ class Tensor(torch._C._TensorBase):
 
     @_wrap_type_error_to_not_implemented
     def __floordiv__(self, other):
-        return torch.floor_divide(self, other)
+        warnings.warn("__floordiv__ is deprecated, and its behavior will change in a future version of pytorch. "
+                      "It currently rounds toward 0 (like the 'trunc' function NOT 'floor'). "
+                      "This results in incorrect rounding for negative values. "
+                      "To keep the current behavior, use torch.div(a, b, rounding_mode='trunc'), "
+                      "or for actual floor division, use torch.div(a, b, rounding_mode='floor').", stacklevel=3)
+        return torch.div(self, other, rounding_mode='trunc')
 
     @_wrap_type_error_to_not_implemented
     def __rfloordiv__(self, other):
-        return torch.floor_divide(other, self)
+        warnings.warn("__rfloordiv__ is deprecated, and its behavior will change in a future version of pytorch. "
+                      "It currently rounds toward 0 (like the 'trunc' function NOT 'floor'). "
+                      "This results in incorrect rounding for negative values. "
+                      "To keep the current behavior, use torch.div(a, b, rounding_mode='trunc'), "
+                      "or for actual floor division, use torch.div(a, b, rounding_mode='floor').", stacklevel=3)
+        return torch.div(other, self, rounding_mode='trunc')
 
     @_wrap_type_error_to_not_implemented
     def __rlshift__(self, other):
