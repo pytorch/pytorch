@@ -43,10 +43,10 @@ TORCH_META_FUNC2(sort, stable)
   maybe_wrap_dim(dim, self.dim());
   const auto& values = maybe_get_output(0);
   const auto& indices = maybe_get_output(1);
-  auto values_strides = values.defined() ? values.strides() : self.strides();
-  auto indices_strides = indices.defined() ? indices.strides() : self.strides();
-  set_output(0, self.sizes(), values_strides, self.options(), {});
-  set_output(1, self.sizes(), indices_strides, self.options().dtype(kLong), {});
+  // 'set_output' will only modify the strides, if the output was resized.
+  // Which means that we can ignore the output's strides here.
+  set_output(0, self.sizes(), self.strides(), self.options(), {});
+  set_output(1, self.sizes(), self.strides(), self.options().dtype(kLong), {});
 }
 
 } // namespace meta
