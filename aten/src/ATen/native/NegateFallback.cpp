@@ -49,12 +49,43 @@ TORCH_LIBRARY_IMPL(aten, Negative, m) {
   m.impl("size.Dimname", torch::CppFunction::makeFallthrough());
   m.impl("is_complex", torch::CppFunction::makeFallthrough());
   m.impl("is_floating_point", torch::CppFunction::makeFallthrough());
-  m.impl("view_as_real", torch::CppFunction::makeFallthrough());
-  m.impl("imag", torch::CppFunction::makeFallthrough());
-  m.impl("real", torch::CppFunction::makeFallthrough());
-  m.impl("view", torch::CppFunction::makeFallthrough());
   m.impl("_unsafe_view", torch::CppFunction::makeFallthrough());
+  m.impl("as_strided", torch::CppFunction::makeFallthrough());
+  m.impl("as_strided_", torch::CppFunction::makeFallthrough());
+  m.impl("detach", torch::CppFunction::makeFallthrough());
+  m.impl("detach_", torch::CppFunction::makeFallthrough());
+  m.impl("diagonal", torch::CppFunction::makeFallthrough());
+  m.impl("expand", torch::CppFunction::makeFallthrough());
+  m.impl("expand_as", torch::CppFunction::makeFallthrough());
+  m.impl("movedim", torch::CppFunction::makeFallthrough());
+  m.impl("narrow", torch::CppFunction::makeFallthrough());
+  m.impl("permute", torch::CppFunction::makeFallthrough());
+  m.impl("select", torch::CppFunction::makeFallthrough());
+  m.impl("squeeze", torch::CppFunction::makeFallthrough());
+  m.impl("squeeze_", torch::CppFunction::makeFallthrough());
+  m.impl("transpose", torch::CppFunction::makeFallthrough());
+  m.impl("transpose_", torch::CppFunction::makeFallthrough());
+  m.impl("t", torch::CppFunction::makeFallthrough());
+  m.impl("t_", torch::CppFunction::makeFallthrough());
+  m.impl("real", torch::CppFunction::makeFallthrough());
+  m.impl("imag", torch::CppFunction::makeFallthrough());
+  m.impl("view_as_real", torch::CppFunction::makeFallthrough());
+  m.impl("unflatten", torch::CppFunction::makeFallthrough());
+  m.impl("unfold", torch::CppFunction::makeFallthrough());
+  m.impl("unsqueeze", torch::CppFunction::makeFallthrough());
+  m.impl("unsqueeze_", torch::CppFunction::makeFallthrough());
+  m.impl("view", torch::CppFunction::makeFallthrough());
+  m.impl("view_as", torch::CppFunction::makeFallthrough());
+  m.impl("unbind", torch::CppFunction::makeFallthrough());
+  m.impl("split", torch::CppFunction::makeFallthrough());
+  m.impl("split_with_sizes", torch::CppFunction::makeFallthrough());
+  m.impl("swapaxes", torch::CppFunction::makeFallthrough());
+  m.impl("swapdims", torch::CppFunction::makeFallthrough());
+  m.impl("chunk", torch::CppFunction::makeFallthrough());
   m.impl("reshape", torch::CppFunction::makeFallthrough());
+  m.impl("hsplit", torch::CppFunction::makeFallthrough());
+  m.impl("dsplit", torch::CppFunction::makeFallthrough());
+
 }
 
 } // namespace at
