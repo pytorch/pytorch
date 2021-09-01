@@ -9617,25 +9617,6 @@ class TestNN(NNTestCase):
         test_huber_loss_zero_delta()
 
     def test_cosine_similarity(self):
-        input1 = torch.randn(4, 4, requires_grad=True)
-        input2 = torch.randn(4, 4, requires_grad=True)
-        self.assertTrue(gradcheck(lambda x, y: F.cosine_similarity(x, y), (input1, input2)))
-
-        input1 = torch.randn(4, 5, 6, requires_grad=True)
-        input2 = torch.randn(4, 5, 6, requires_grad=True)
-        self.assertTrue(gradcheck(lambda x, y: F.cosine_similarity(x, y, dim=0), (input1, input2)))
-        self.assertTrue(gradcheck(lambda x, y: F.cosine_similarity(x, y, dim=-1), (input1, input2)))
-
-        input1 = torch.randn((), requires_grad=True)
-        input2 = torch.randn((), requires_grad=True)
-        self.assertTrue(gradcheck(lambda x, y: F.cosine_similarity(x, y, dim=0), (input1, input2)))
-        self.assertTrue(gradcheck(lambda x, y: F.cosine_similarity(x, y, dim=-1), (input1, input2)))
-
-        # Check broadcasting
-        input1 = torch.randn(2, 1, 3, requires_grad=True)
-        input2 = torch.randn(1, 2, 3, requires_grad=True)
-        self.assertTrue(gradcheck(lambda x, y: F.cosine_similarity(x, y, dim=-1), (input1, input2)))
-
         # Check cosine_similarity input/output shapes
         input_size = (1, 3, 2, 1)
         expected_size = (1, 2, 1)
@@ -9661,7 +9642,6 @@ class TestNN(NNTestCase):
         input2 = torch.randn(2, 1, 3)
         with self.assertRaises(RuntimeError):
             F.cosine_similarity(input1, input2)
-
 
         # Check type promotion, issue #61454
         input = torch.tensor(12.)
@@ -13300,32 +13280,6 @@ class TestNNDeviceType(NNTestCase):
 
         if self.device_type == 'cuda':
             self._test_LayerNorm_cuda_half(device)
-
-    @onlyOnCPUAndCUDA
-    def test_LayerNorm_numeric(self, device):
-        def layer_norm_ref(X, gamma, beta, normalized_shape, eps):
-            feature_size = np.prod(normalized_shape)
-            X_view = X.view(-1, feature_size)
-            mean = X_view.mean(dim=-1, keepdim=True)
-            var = X_view.var(dim=-1, unbiased=False, keepdim=True)
-            Y = (X_view - mean) / torch.sqrt(var + eps)
-            Y = Y * gamma.view(-1) + beta.view(-1)
-            return Y.view(*X.size())
-
-        normalized_shape = [256, 256, 144]
-        layer_norm = nn.LayerNorm(normalized_shape).float().to(device)
-        X = torch.rand(2, *normalized_shape, dtype=torch.float32,
-                       device=device)
-
-        Y = layer_norm(X)
-        Y_ref = layer_norm_ref(X, layer_norm.weight.data, layer_norm.bias.data,
-                               normalized_shape, layer_norm.eps)
-        self.assertEqual(Y, Y_ref, rtol=0, atol=1e-5)
-
-        if self.device_type == 'cuda':
-            layer_norm.cpu()
-            Y_cpu = layer_norm(X.cpu())
-            self.assertEqual(Y_cpu, Y, rtol=0, atol=1e-5)
 
     @onlyOnCPUAndCUDA
     def test_GroupNorm_general(self, device):
@@ -17438,14 +17392,30 @@ class TestNNDeviceType(NNTestCase):
             m(input)
 
     def test_fold(self, device):
+        def test_dtype(fn, input, dtype):
+            input = input.detach().clone().to(dtype=dtype).requires_grad_(True)
+            input2 = input.detach().clone().float().requires_grad_(True)
+            out = fn(input)
+            out.sum().backward()
+            out2 = fn(input2)
+            out2.sum().backward()
+            self.assertEqual(out.dtype, dtype)
+            self.assertEqual(input.grad.dtype, dtype)
+            self.assertEqual(out, out2.to(dtype=dtype), atol=0.05, rtol=0)
+            self.assertEqual(input.grad, input2.grad.to(dtype=dtype))
+
         def func(x):
             return F.fold(x, output_size=(4, 5), kernel_size=(2, 2))
+
         seeds = (44, 83, 71, 25, 999)
         for sd in seeds:
             torch.manual_seed(sd)
             x = torch.randn(1, 12, 12, device=device, requires_grad=True)
             gradcheck(func, [x])
             gradgradcheck(func, [x])
+            if device == 'cpu':
+                test_dtype(func, x, torch.bfloat16)
+
 
     def test_logsigmoid_out(self, device):
         # this isn't actually documented, but was broken previously:
