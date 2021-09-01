@@ -372,7 +372,10 @@ class TestIterableDataPipeBasic(TestCase):
 
 
 class TestDataFramesPipes(TestCase):
-
+    """
+        Most of test will fail if pandas instaled, but no dill available.
+        Need to rework them to avoid multiple skips.
+    """
     def _get_datapipe(self, range=10, dataframe_size=7):
         return NumbersDataset(range) \
             .map(lambda i: (i, i % 3))
@@ -385,6 +388,7 @@ class TestDataFramesPipes(TestCase):
                 dataframe_size=dataframe_size)
 
     @skipIfNoDataFrames
+    @skipIfNoDill  # TODO(VitalyFedyunin): Decouple tests from dill by avoiding lambdas in map
     def test_capture(self):
         dp_numbers = self._get_datapipe().map(lambda x: (x[0], x[1], x[1] + 3 * x[0]))
         df_numbers = self._get_dataframes_pipe()
@@ -392,6 +396,7 @@ class TestDataFramesPipes(TestCase):
         self.assertEqual(list(dp_numbers), list(df_numbers))
 
     @skipIfNoDataFrames
+    @skipIfNoDill
     def test_shuffle(self):
         #  With non-zero (but extremely low) probability (when shuffle do nothing),
         #  this test fails, so feel free to restart
@@ -402,6 +407,7 @@ class TestDataFramesPipes(TestCase):
         self.assertEqual(list(dp_numbers), sorted(df_result))
 
     @skipIfNoDataFrames
+    @skipIfNoDill
     def test_batch(self):
         df_numbers = self._get_dataframes_pipe(range=100).batch(8)
         df_numbers_list = list(df_numbers)
@@ -411,6 +417,7 @@ class TestDataFramesPipes(TestCase):
         self.assertEqual([(96, 0), (97, 1), (98, 2), (99, 0)], unpacked_batch)
 
     @skipIfNoDataFrames
+    @skipIfNoDill
     def test_unbatch(self):
         df_numbers = self._get_dataframes_pipe(range=100).batch(8).batch(3)
         dp_numbers = self._get_datapipe(range=100)
@@ -418,6 +425,7 @@ class TestDataFramesPipes(TestCase):
         self.assertEqual(list(dp_numbers), list(df_numbers))
 
     @skipIfNoDataFrames
+    @skipIfNoDill
     def test_filter(self):
         df_numbers = self._get_dataframes_pipe(range=10).filter(lambda x: x.i > 5)
         self.assertEqual([(6, 0), (7, 1), (8, 2), (9, 0)], list(df_numbers))
