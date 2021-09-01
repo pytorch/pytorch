@@ -20,7 +20,7 @@ def noop_hook(_: Any, bucket: dist.GradBucket) -> torch.futures.Future[torch.Ten
     Example::
         >>> ddp_model.register_comm_hook(None, noop_hook)
     """
-    fut = torch.futures.Future()
+    fut: torch.futures.Future[torch.Tensor] = torch.futures.Future()
     fut.set_result(bucket.buffer())
 
     return fut
