@@ -32,7 +32,7 @@ class TORCH_API Dtype {
   Dtype(Dtype type, int lanes)
       : scalar_type_(type.scalar_type_), lanes_(lanes) {
     if (type.lanes() != 1) {
-      throw malformed_input("dtype lanes dont match");
+      throw malformed_input(buildErrorMessage("dtype lanes dont match"));
     }
   }
   int lanes() const {
@@ -93,7 +93,8 @@ TORCH_API Dtype ToDtype(ScalarType type);
 
 inline Dtype promoteTypes(Dtype a, Dtype b) {
   if (a.lanes() != b.lanes()) {
-    throw malformed_input("promoting types with different lanes");
+    throw malformed_input(
+        buildErrorMessage("promoting types with different lanes"));
   }
   return Dtype(
       static_cast<ScalarType>(c10::promoteTypes(
@@ -115,13 +116,13 @@ inline Dtype BinaryOpDtype(
   }
 
   if (op1_dtype.lanes() != op2_dtype.lanes()) {
-    throw malformed_input("lanes dont match");
+    throw malformed_input(buildErrorMessage("lanes dont match"));
   }
   int lanes = op1_dtype.lanes();
 
   Dtype resultType = promoteTypes(op1_dtype, op2_dtype);
   if (resultType.scalar_type() == ScalarType::Undefined) {
-    throw malformed_input("scalar type doesn't match");
+    throw malformed_input(buildErrorMessage("scalar type doesn't match"));
   }
 
   if (lanes == 1) {

@@ -183,8 +183,8 @@ void RegisterizerAnalysis::closeAccessIntoScope(
 void RegisterizerAnalysis::visit(ForPtr v) {
   if (v->loop_options().is_gpu_block_index() ||
       v->loop_options().is_gpu_thread_index()) {
-    throw malformed_input(
-        "Registerization must occur after parallelism flattening");
+    throw malformed_input(buildErrorMessage(
+        "Registerization must occur after parallelism flattening"));
   }
 
   auto parent = currentScope_;

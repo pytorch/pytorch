@@ -65,7 +65,8 @@ class Placeholder {
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Placeholder(const BufHandle& data) : data_(data.node()) {
     if (data_->base_handle()->dtype() != kHandle) {
-      throw malformed_input("Placeholder dtype must be Handle");
+      throw malformed_input(
+          buildErrorMessage("Placeholder dtype must be Handle"));
     }
 
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)

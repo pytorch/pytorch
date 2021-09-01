@@ -89,7 +89,8 @@ class TORCH_API Block : public StmtNode<Block> {
 
   void prepend_stmt(StmtPtr s) {
     if (s->get_parent()) {
-      throw malformed_input("Block prepend Stmt with existing parent", s);
+      throw malformed_input(buildErrorMessage(
+          "Block prepend Stmt with existing parent" + std::to_string(s)));
     }
 
     stmts_.push_front(s);
@@ -97,7 +98,8 @@ class TORCH_API Block : public StmtNode<Block> {
   }
   void append_stmt(StmtPtr s) {
     if (s->get_parent()) {
-      throw malformed_input("Block append Stmt with existing parent", s);
+      throw malformed_input(buildErrorMessage(
+          "Block append Stmt with existing parent" + std::to_string(s)));
     }
 
     stmts_.push_back(s);
@@ -106,13 +108,15 @@ class TORCH_API Block : public StmtNode<Block> {
 
   void insert_stmt_before(StmtPtr s, StmtPtr before) {
     if (s->get_parent()) {
-      throw malformed_input("Block append Stmt with existing parent", s);
+      throw malformed_input(buildErrorMessage(
+          "Block append Stmt with existing parent" + std::to_string(s)));
     }
 
     auto pos = std::find(stmts_.begin(), stmts_.end(), before);
     if (pos == stmts_.end()) {
-      throw malformed_input(
-          "Inserting after statement that is not in block", s);
+      throw malformed_input(buildErrorMessage(
+          "Inserting after statement that is not in block" +
+          std::to_string(s)));
     }
 
     stmts_.insert(pos, s);
@@ -121,13 +125,15 @@ class TORCH_API Block : public StmtNode<Block> {
 
   void insert_stmt_after(StmtPtr s, StmtPtr after) {
     if (s->get_parent()) {
-      throw malformed_input("Block append Stmt with existing parent", s);
+      throw malformed_input(buildErrorMessage(
+          "Block append Stmt with existing parent" + std::to_string(s)));
     }
 
     auto pos = std::find(stmts_.begin(), stmts_.end(), after);
     if (pos == stmts_.end()) {
-      throw malformed_input(
-          "Inserting after statement that is not in block", s);
+      throw malformed_input(buildErrorMessage(
+          "Inserting after statement that is not in block" +
+          std::to_string(s)));
     }
 
     ++pos;
@@ -138,8 +144,9 @@ class TORCH_API Block : public StmtNode<Block> {
 
   bool replace_stmt(StmtPtr old_stmt, StmtPtr new_stmt) {
     if (new_stmt->get_parent()) {
-      throw malformed_input(
-          "Block replace Stmt with existing parent", new_stmt);
+      throw malformed_input(buildErrorMessage(
+          "Block replace Stmt with existing parent" +
+          std::to_string(new_stmt)));
     }
 
     auto pos = std::find(stmts_.begin(), stmts_.end(), old_stmt);
@@ -158,8 +165,9 @@ class TORCH_API Block : public StmtNode<Block> {
   // in `this` block. If the `old_stmt` is not found, it will return `nullptr`.
   BlockPtr clone_and_replace(StmtPtr old_stmt, StmtPtr new_stmt) {
     if (new_stmt->get_parent()) {
-      throw malformed_input(
-          "Block replace Stmt with existing parent", new_stmt);
+      throw malformed_input(buildErrorMessage(
+          "Block replace Stmt with existing parent" +
+          std::to_string(new_stmt)));
     }
 
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -537,7 +545,7 @@ class TORCH_API LoopOptions {
 
   std::string gpu_block_index_str() const {
     if (!is_gpu_block_index()) {
-      throw malformed_input("Has no GPU block index");
+      throw malformed_input(buildErrorMessage("Has no GPU block index"));
     }
 
     // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
@@ -549,7 +557,7 @@ class TORCH_API LoopOptions {
     };
 
     if (gpu_block_index_ < IDX_X || gpu_block_index_ > IDX_MAX) {
-      throw malformed_input("invalid GPU block index");
+      throw malformed_input(buildErrorMessage("Invalid GPU block index"));
     }
 
     return kBlockIndexNames[gpu_block_index_];
@@ -561,10 +569,12 @@ class TORCH_API LoopOptions {
     }
 
     if (is_gpu_thread_index()) {
-      throw std::runtime_error("Cannot set both gpu block and thread index");
+      throw std::runtime_error(
+          buildErrorMessage("Cannot set both gpu block and thread index"));
     }
     if (is_gpu_block_index() && gpu_block_index() != index) {
-      throw std::runtime_error("Cannot set a previously set block index");
+      throw std::runtime_error(
+          buildErrorMessage("Cannot set a previously set block index"));
     }
     gpu_block_index_ = index;
   }
@@ -580,7 +590,7 @@ class TORCH_API LoopOptions {
 
   std::string gpu_thread_index_str() const {
     if (!is_gpu_thread_index()) {
-      throw malformed_input("has no GPU thread index");
+      throw malformed_input(buildErrorMessage("No GPU thread index found"));
     }
 
     // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
@@ -588,7 +598,7 @@ class TORCH_API LoopOptions {
         "threadIdx.x", "threadIdx.y", "threadIdx.z", "threadIdx.w"};
 
     if (gpu_thread_index_ < IDX_X || gpu_thread_index_ > IDX_MAX) {
-      throw malformed_input("invalid GPU thread index");
+      throw malformed_input(buildErrorMessage("Invalid GPU thread index"));
     }
 
     return kThreadIndexNames[gpu_thread_index_];
@@ -600,10 +610,12 @@ class TORCH_API LoopOptions {
     }
 
     if (is_gpu_block_index()) {
-      throw std::runtime_error("Cannot set both gpu thread and block index");
+      throw std::runtime_error(
+          buildErrorMessage("Cannot set both gpu thread and block index"));
     }
     if (is_gpu_thread_index() && gpu_thread_index() != index) {
-      throw std::runtime_error("Cannot set a previously set thread index");
+      throw std::runtime_error(
+          buildErrorMessage("Cannot set a previously set thread index"));
     }
     gpu_thread_index_ = index;
   }
@@ -707,13 +719,17 @@ class TORCH_API For : public StmtNode<For> {
         stop_(stop),
         loop_options_(std::move(loop_options)) {
     if (!var) {
-      throw malformed_input("invalid Var in For loop", var);
+      throw malformed_input(
+          buildErrorMessage("Invalid Var in For loop" + std::to_string(var)));
     } else if (!start) {
-      throw malformed_input("invalid Start in For loop", start);
+      throw malformed_input(buildErrorMessage(
+          "Invalid Start in For loop" + std::to_string(start)));
     } else if (!stop) {
-      throw malformed_input("invalid Stop in For loop", stop);
+      throw malformed_input(
+          buildErrorMessage("Invalid Stop in For loop" + std::to_string(stop)));
     } else if (!body || body->get_parent()) {
-      throw malformed_input("invalid Body in For loop", body);
+      throw malformed_input(
+          buildErrorMessage("Invalid Body in For loop" + std::to_string(body)));
     }
 
     BlockPtr b = to<Block>(body);

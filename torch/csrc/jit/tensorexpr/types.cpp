@@ -34,7 +34,7 @@ Dtype ToDtype(ScalarType type) {
     case ScalarType::Undefined:
       return kHandle;
     default:
-      throw unsupported_dtype();
+      throw unsupported_dtype(buildErrorMessage(""));
   }
 }
 
@@ -59,8 +59,8 @@ int Dtype::byte_size() const {
     AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
 #undef TYPE_CASE
     default:
-      throw std::runtime_error(
-          "invalid scalar type; " + std::to_string(scalar_type_));
+      throw std::runtime_error(buildErrorMessage(
+          "Invalid scalar type; " + std::to_string(scalar_type_)));
   }
   return scalar_size * lanes();
 }
@@ -80,7 +80,7 @@ std::string Dtype::ToCppString() const {
     case ScalarType::BFloat16:
       return "__nv_bfloat16";
     default:
-      throw unsupported_dtype();
+      throw unsupported_dtype(buildErrorMessage(""));
   }
   return "invalid";
 }

@@ -23,7 +23,8 @@ class VarSubMutator : public IRMutator {
       VarPtr key_var = entry.first;
       ExprPtr value = entry.second;
       if (!key_var) {
-        throw malformed_input("missing key in VarSubMutator");
+        throw malformed_input(
+            buildErrorMessage("missing key in VarSubMutator"));
       }
       var_mapping_[key_var] = value;
     }
