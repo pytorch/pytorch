@@ -66,10 +66,6 @@ class BatcherIterDataPipe(IterDataPipe[DataChunk]):
         self.batch_size = batch_size
         self.drop_last = drop_last
         self.length = None
-        source_depth = getattr(datapipe, '_dp_nesting_depth', 0)
-        if source_depth is None:
-            source_depth = 0
-        self._dp_nesting_depth = source_depth + 1
         self.wrapper_class = wrapper_class
 
     def __iter__(self) -> Iterator[DataChunk]:

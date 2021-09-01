@@ -107,8 +107,6 @@ class Capture(object):
             dp = self._dataframes_per_row()
         dp = dp.as_datapipe().groupby(group_key_fn, buffer_size=buffer_size, group_size=group_size,
                                       guaranteed_group_size=guaranteed_group_size, drop_remaining=drop_remaining)
-        dp._dp_contains_dataframe = True
-        dp._dp_nesting_depth = 1
         return dp
 
     def shuffle(self, *args, **kwargs):
