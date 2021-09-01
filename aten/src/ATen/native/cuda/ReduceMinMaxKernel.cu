@@ -76,6 +76,8 @@ void argmax_kernel_cuda(TensorIterator& iter) {
     argmax_kernel_cuda_impl<at::Half, float>(iter);
   } else if (iter.dtype(1) == kBFloat16) {
     argmax_kernel_cuda_impl<at::BFloat16, float>(iter);
+  } else if (iter.dtype(1) == kBool) {
+    argmax_kernel_cuda_impl<at::kBool, float>(iter);
   } else {
     AT_DISPATCH_ALL_TYPES(iter.dtype(1), "argmax_cuda", [&]() {
       argmax_kernel_cuda_impl<scalar_t>(iter);
@@ -90,6 +92,8 @@ void argmin_kernel_cuda(TensorIterator& iter) {
     argmin_kernel_cuda_impl<at::Half, float>(iter);
   } else if (iter.dtype(1) == kBFloat16) {
     argmin_kernel_cuda_impl<at::BFloat16, float>(iter);
+  } else if (iter.dtype(1) == kBool) {
+    argmin_kernel_cuda_impl<at::kBool, float>(iter);
   } else {
     AT_DISPATCH_ALL_TYPES(iter.dtype(1), "argmin_cuda", [&]() {
       argmin_kernel_cuda_impl<scalar_t>(iter);

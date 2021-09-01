@@ -7927,8 +7927,8 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_nextafter),
     OpInfo('topk',
            dtypes=all_types(),
-           dtypesIfCPU=all_types_and(torch.bfloat16),
-           dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
+           dtypesIfCPU=all_types_and(torch.bfloat16, torch.bool),
+           dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16, torch.bool),
            sample_inputs_func=sample_inputs_topk,
            skips=(
                # Topk is not raising a warning when the out is resized
@@ -9750,7 +9750,7 @@ op_db: List[OpInfo] = [
         supports_multiple_dims=False,
         supports_autograd=False,
         result_dtype=torch.int64,
-        dtypes=all_types_and(torch.float16, torch.bfloat16),
+        dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
         ref=reference_reduction_numpy(np.argmax, supports_keepdims=False),
         skips=(
             # FIXME: keepdim parameter is ignored when dim=None
@@ -9763,7 +9763,7 @@ op_db: List[OpInfo] = [
         supports_multiple_dims=False,
         supports_autograd=False,
         result_dtype=torch.int64,
-        dtypes=all_types_and(torch.float16, torch.bfloat16),
+        dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
         ref=reference_reduction_numpy(np.argmin, supports_keepdims=False),
         skips=(
             # FIXME: keepdim parameter is ignored when dim=None

@@ -381,7 +381,7 @@ static void max_values_kernel_impl(TensorIterator& iter) {
 }
 
 static void argmax_kernel_impl(TensorIterator &iter) {
-  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.dtype(1), "argmax_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND3(kBFloat16, kHalf, kBool, iter.dtype(1), "argmax_cpu", [&] {
     binary_kernel_reduce(
       iter,
       ArgMaxOps<scalar_t>{},
@@ -390,7 +390,7 @@ static void argmax_kernel_impl(TensorIterator &iter) {
 }
 
 static void argmin_kernel_impl(TensorIterator &iter) {
-  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.dtype(1), "argmin_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND3(kBFloat16, kHalf, kBool, iter.dtype(1), "argmin_cpu", [&] {
     binary_kernel_reduce(
       iter,
       ArgMinOps<scalar_t>{},
