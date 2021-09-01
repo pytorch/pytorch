@@ -75,6 +75,7 @@ TESTS = [
     "distributed/test_pg_wrapper",
     "distributed/algorithms/test_join",
     "test_cuda",
+    "test_autocast",
     "test_jit_cuda_fuser",
     "test_cuda_primary_ctx",
     "test_dataloader",
@@ -103,6 +104,7 @@ TESTS = [
     "test_optim",
     "test_functional_optim",
     "test_pytree",
+    "test_python_dispatch",
     "test_mobile_optimizer",
     "test_set_default_mobile_cpu_allocator",
     "test_xnnpack_integration",
@@ -343,7 +345,6 @@ JIT_EXECUTOR_TESTS = [
 ]
 
 DISTRIBUTED_TESTS = [
-    "distributed/test_distributed_fork",
     "distributed/test_distributed_spawn",
 ]
 
