@@ -391,11 +391,6 @@ class TestJit(JitTestCase):
         self.assertFalse(m2.p0.is_cuda)
         self.assertFalse(m2.b0.is_cuda)
 
-    def test_model_save_error(self):
-        with TemporaryFileName() as fname:
-            with self.assertRaisesRegex(pickle.PickleError, "not supported"):
-                torch.save(FooToPickle(), fname)
-
     @unittest.skipIf(not RUN_CUDA, "restore device requires CUDA")
     def test_restore_device_cuda(self):
         class MyModule(torch.jit.ScriptModule):
