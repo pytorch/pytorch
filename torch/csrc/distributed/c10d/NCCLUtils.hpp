@@ -17,6 +17,8 @@ namespace {
 // Provides additional detail into NCCL error codes based on when these are
 // thrown in the NCCL codebase.
 const inline char* getNcclErrorDetailStr(ncclResult_t error, c10::optional<std::string> processGroupFailureReason = c10::nullopt) {
+  // Prioritize failure reason provided by PG NCCL first, as it can abort
+  // communicators when it encounters collective timeouts, etc.
   if (processGroupFailureReason != c10::nullopt) {
     return (*processGroupFailureReason).c_str();
   }
@@ -158,6 +160,7 @@ class NCCLComm {
   }
 
   ncclComm_t getNcclComm() {
+    std::unique_lock<std::mutex> lock(mutex_);
     if (aborted_) {
       auto abortMsgTemplate = "NCCL communicator was aborted on rank {}.{}";
       auto commFailureMsg = commFailureReason_ != c10::nullopt
