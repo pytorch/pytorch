@@ -45,10 +45,10 @@ def load_derivatives(derivatives_yaml_path: str, native_yaml_path: str) -> Seque
 
         # Keep track of how many of which ops we've seen so we can
         # disambiguate them with a numeric suffix.
-        op_prefixes = Counter[str]()
+        op_counter = Counter[str]()
 
         infos = [
-            create_differentiability_info(defn, functions_by_signature, functions_by_schema, op_prefixes)
+            create_differentiability_info(defn, functions_by_signature, functions_by_schema, op_counter)
             for defn in definitions]
 
         _GLOBAL_LOAD_DERIVATIVE_CACHE[key] = infos
@@ -262,7 +262,7 @@ def create_differentiability_info(
     defn: Dict[Any, Any],
     functions_by_signature: Dict[FunctionSchema, List[NativeFunction]],
     functions_by_schema: Dict[str, NativeFunction],
-    op_prefixes: Counter[str],
+    op_counter: Counter[str],
 ) -> DifferentiabilityInfo:
     """Processes a single entry `defn` in derivatives.yaml"""
 
@@ -412,8 +412,8 @@ def create_differentiability_info(
     op = None
     if args_with_derivatives:
         op_prefix = _create_op_prefix(defn_name)
-        op = f'{op_prefix}{op_prefixes[op_prefix]}'
-        op_prefixes[op_prefix] += 1
+        op = f'{op_prefix}{op_counter[op_prefix]}'
+        op_counter[op_prefix] += 1
 
     return DifferentiabilityInfo(
         name=defn_name,
