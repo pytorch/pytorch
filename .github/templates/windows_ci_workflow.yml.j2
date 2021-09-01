@@ -51,6 +51,7 @@ env:
   IN_CI: 1
   INSTALL_WINDOWS_SDK: 1
   PYTHON_VERSION: "3.8"
+  PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
   SCCACHE_BUCKET: "ossci-compiler-cache"
   VC_PRODUCT: "BuildTools"
   VC_VERSION: ""
@@ -90,6 +91,8 @@ jobs:
       http_proxy: "!{{ squid_proxy }}"
       https_proxy: "!{{ squid_proxy }}"
     steps:
+      - name: print labels
+        run: echo "${PR_LABELS}"
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
         uses: seemethere/add-github-ssh-key@v1
         with:
