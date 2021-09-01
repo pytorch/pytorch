@@ -317,12 +317,14 @@ def quantize(model, run_fn, run_args, mapping=None, inplace=False):
 
 def quantize_dynamic(model, qconfig_spec=None, dtype=torch.qint8,
                      mapping=None, inplace=False, version=1):
-    r"""Converts a float model to dynamic (i.e. weights-only) quantized model.
+    r"""
+    Converts a float model to dynamic (i.e. weights-only) quantized model.
     Replaces specified modules with dynamic weight-only quantized versions and output the quantized model.
     For simplest usage provide `dtype` argument that can be float16 or qint8. Weight-only quantization
     by default is performed for layers with large weights size - i.e. Linear and RNN variants.
     Fine grained control is possible with `qconfig` and `mapping` that act similarly to `quantize()`.
-    If `qconfig` is provided, the `dtype` argument is ignored.
+    If `qconfig` is provided, the `dtype` and version arguments are ignored.
+
     Args:
         model: input model
         qconfig_spec: Either:
@@ -333,9 +335,11 @@ def quantize_dynamic(model, qconfig_spec=None, dtype=torch.qint8,
               need to be QConfigDynamic instances.
             - A set of types and/or submodule names to apply dynamic quantization to,
               in which case the `dtype` argument is used to specify the bit-width
-        inplace: carry out model transformations in-place, the original module is mutated
         mapping: maps type of a submodule to a type of corresponding dynamically quantized version
             with which the submodule needs to be replaced
+        inplace: carry out model transformations in-place, the original module is mutated
+        version: version used for selecting the qconfig to be used. Version=1 provides improved
+            quantization accuracy by switching to per-channel quantization.
     """
     torch._C._log_api_usage_once("quantization_api.quantize.quantize_dynamic")
     if qconfig_spec is None:
