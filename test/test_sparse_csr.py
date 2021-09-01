@@ -530,7 +530,6 @@ class TestSparseCSR(TestCase):
         _test_spadd_shape(10, [100, 1])
         _test_spadd_shape(10, [1, 100])
 
-    @onlyCUDA
     @dtypes(*torch.testing.floating_and_complex_types())
     def test_sparse_add(self, device, dtype):
         def run_test(m, n, index_dtype):
