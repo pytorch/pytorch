@@ -27,7 +27,6 @@ class PythonTensor(torch.Tensor):
         # The wrapping tensor (PythonTensor) is just a meta tensor, so it
         # doesn't hold any memory (meta tensor is generally the preferred type
         # of tensor you want to make a subclass from)...
-        r = torch.Tensor._make_subclass(cls, elem.to('meta'), elem.requires_grad)
         meta = elem.new_empty((0,))
         meta.set_(meta.storage(), 0, elem.size(), elem.stride())
         r = torch.Tensor._make_subclass(cls, meta, elem.requires_grad)
