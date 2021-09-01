@@ -1437,52 +1437,50 @@ Tensor matmul(
   } else if (dim_tensor1 == 2 && dim_tensor2 == 1) {
     return has_out ? at::mv_out(out, tensor1, tensor2) : tensor1.mv(tensor2);
   } else if (dim_tensor1 == 1 && dim_tensor2 == 2) {
-    return has_out ? at::mm_out(out, tensor1.unsqueeze(0), tensor2).squeeze_(0)
-                   : tensor1.unsqueeze(0).mm(tensor2).squeeze_(0);
+    // optimization: use mv instead of mm by calling mv with swaped (and transposed) args
+    return has_out ? at::mv_out(out, tensor2.t(), tensor1) : tensor2.t().mv(tensor1);
   } else if (dim_tensor1 == 2 && dim_tensor2 == 2) {
     return has_out ? at::mm_out(out, tensor1, tensor2) : tensor1.mm(tensor2);
   } else if (dim_tensor1 >= 3 && (dim_tensor2 == 1 || dim_tensor2 == 2)) {
     // optimization: use mm instead of bmm by folding tensor1's batch into
     // its leading matrix dimension.
-
-    Tensor t2 = dim_tensor2 == 1 ? tensor2.unsqueeze(-1) : tensor2;
-    auto size1 = tensor1.sizes();
-    auto size2 = t2.sizes();
-    std::vector<int64_t> output_size;
-    output_size.insert(output_size.end(), size1.begin(), size1.end() - 1);
-    if (dim_tensor2 > 1) {
-      output_size.push_back(size2[dim_tensor2 - 1]);
-    }
+    const auto sizes_1 = tensor1.sizes();
+    auto output_size = DimVector((size_t *) sizes_1.begin(), (size_t *) sizes_1.end() - 1);
 
     // fold the batch into the first dimension
-    // Why not tensor1.view(-1, size1[size1.size() -1])?
+    // Why not tensor1.view(-1, sizes_1[sizes_1.size() -1])?
     // If the last dim is 0, then view(-1, 0) won't work because the -1 becomes ambiguous.
     // This can happen in e.g. [3, 5, 0] @ [0, 0].
     // So we manually compute the folding as a result.
-    const auto dim1_size = c10::multiply_integers(size1.begin(), size1.end() - 1);
-    auto t1 = tensor1.expect_contiguous()->view({dim1_size, size1[size1.size() - 1]});
-    Tensor output = has_out ? at::_unsafe_view(at::mm_out(out, t1, t2), output_size)
-                            : at::_unsafe_view(t1.mm(t2), output_size);
+    const auto dim1_size = c10::multiply_integers(output_size);
+    const bool is_tensor2_matrix = dim_tensor2 == 2;
+    if (is_tensor2_matrix) {
+      output_size.push_back(tensor2.sizes()[1]);
+    }
+    auto t1 = tensor1.expect_contiguous()->view({dim1_size, sizes_1.back()});
+    Tensor output = has_out ? at::_unsafe_view(at::mm_out(out, t1,
+                                                          is_tensor2_matrix ? tensor2 : tensor2.unsqueeze(1)), output_size)
+                            : at::_unsafe_view(t1.mm(is_tensor2_matrix ? tensor2 : tensor2.unsqueeze(1)), output_size);
+
     return has_out ? out.set_(output) : output;
   } else if ((dim_tensor1 == 1 || dim_tensor1 == 2) && dim_tensor2 >= 3) {
     // optimization: transpose the inner dimensions of the arguments, call
     // matmul on the swapped arguments, then transpose the inner dimensions
     // of the result.
-    const int64_t n = dim_tensor1 == 2 ? tensor1.size(-2) : 1;
-    const int64_t m = tensor1.size(-1);
-    const int64_t p = tensor2.size(-1);
+    const bool is_tensor1_matrix = dim_tensor1 == 2;
 
     const Tensor t2_T = tensor2.transpose(-1, -2);
-    const Tensor t1_T = dim_tensor1 == 2 ? tensor1.t() : tensor1.reshape({n, m}).t();
-    const Tensor res_T = matmul(out_opt, t2_T, t1_T);
+    const Tensor res_T = matmul(out_opt, t2_T, is_tensor1_matrix ? tensor1.t() : tensor1);
 
-    if (dim_tensor1 == 2) {
+    if (is_tensor1_matrix) {
       Tensor res = res_T.transpose(-1, -2).contiguous();
       return has_out ? out.set_(res) : res;
     }
     else {
-      std::vector<int64_t> shape = tensor2.sizes().slice(0, dim_tensor2 - 2).vec();
-      shape.push_back(p);
+      // Remove the penultimate element of the size of tensor2
+      const auto sizes_2 = tensor2.sizes();
+      DimVector shape((size_t *) sizes_2.begin(), (size_t *) (sizes_2.end() - 2));
+      shape.push_back(sizes_2.back());
 
       Tensor res = res_T.reshape(shape).contiguous();
       return has_out ? out.set_(res) : res;
@@ -1490,41 +1488,38 @@ Tensor matmul(
   } else if ((dim_tensor1 >= 1 && dim_tensor2 >= 1) && (dim_tensor1 >= 3 || dim_tensor2 >= 3)) {
     // We are multiplying b1 x n x m1 by x2 x m2 x p (where b1 can be a list);
     // we track m1 vs m2 separately even though they must match for nicer error messages
-    int64_t n = dim_tensor1 > 1 ? tensor1.size(-2) : 1;
-    int64_t m1 = tensor1.size(-1);
-    IntArrayRef batch_tensor1(tensor1.sizes().data(), std::max<int64_t>(dim_tensor1 - 2, 0));
-    int64_t m2 = dim_tensor2 > 1 ? tensor2.size(-2) : 1;
-    int64_t p = tensor2.size(-1);
-    IntArrayRef batch_tensor2(tensor2.sizes().data(), std::max<int64_t>(dim_tensor2 - 2, 0));
+    const auto sizes_1 = tensor1.sizes();
+    const int64_t n = dim_tensor1 > 1 ? sizes_1.end()[-2] : 1;
+    const int64_t m1 = sizes_1.back();
+    const IntArrayRef batch_tensor1(sizes_1.data(), std::max<int64_t>(dim_tensor1 - 2, 0));
+    const auto sizes_2 = tensor2.sizes();
+    const int64_t m2 = dim_tensor2 > 1 ? sizes_2.end()[-2] : 1;
+    const int64_t p = sizes_2.back();
+    const IntArrayRef batch_tensor2(sizes_2.data(), std::max<int64_t>(dim_tensor2 - 2, 0));
 
     // expand the batch portion (i.e. cut off matrix dimensions and expand rest)
-    std::vector<int64_t> expand_batch_portion = infer_size(batch_tensor1, batch_tensor2);
+    DimVector output_shape = infer_size_dimvector(batch_tensor1, batch_tensor2);
+    DimVector tensor1_expand_size(output_shape);
+    DimVector tensor2_expand_size(output_shape);
 
-    std::vector<int64_t> tensor1_expand_size(expand_batch_portion);
-    tensor1_expand_size.insert(tensor1_expand_size.end(), {n, m1});
+    tensor1_expand_size.append({n, m1});
+    tensor2_expand_size.append({m2, p});
 
-    std::vector<int64_t> tensor2_expand_size(expand_batch_portion);
-    tensor2_expand_size.insert(tensor2_expand_size.end(), {m2, p});
-
-    const int64_t expand_batch_product =
-        c10::multiply_integers(expand_batch_portion);
-
-    std::vector<int64_t> tensor1_bmm_view({expand_batch_product});
-    tensor1_bmm_view.insert(tensor1_bmm_view.end(), {n, m1});
-
-    std::vector<int64_t> tensor2_bmm_view({expand_batch_product});
-    tensor2_bmm_view.insert(tensor2_bmm_view.end(), {m2, p});
+    const int64_t expand_batch_product = c10::multiply_integers(output_shape);
 
     // flatten expanded batches
-    Tensor tensor1_expanded = tensor1.expand(tensor1_expand_size).reshape(tensor1_bmm_view);
-    Tensor tensor2_expanded = tensor2.expand(tensor2_expand_size).reshape(tensor2_bmm_view);
+    Tensor tensor1_expanded = tensor1.expand(tensor1_expand_size).reshape({expand_batch_product, n, m1});
+    Tensor tensor2_expanded = tensor2.expand(tensor2_expand_size).reshape({expand_batch_product, m2, p});
 
     // reshape batches back into result
-    std::vector<int64_t> output_shape(expand_batch_portion);
-    if (dim_tensor1 > 1) {
-      output_shape.push_back(n);
-    }
-    if (dim_tensor2 > 1) {
+    // we make the most likely path explicit
+    if C10_LIKELY (dim_tensor1 > 1) {
+      if C10_LIKELY (dim_tensor2 > 1) {
+        output_shape.append({n, p});
+      } else {
+        output_shape.push_back(n);
+      }
+    } else if (dim_tensor2 > 1) {
       output_shape.push_back(p);
     }
 
