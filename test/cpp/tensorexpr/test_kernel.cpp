@@ -1129,8 +1129,8 @@ TEST_F(Kernel, SignTest) {
         env.s("dtype", "Float");
         options = options.dtype(at::kFloat);
         std::vector<float> input_float = {
-            0.0,
-            -0.0,
+            0.0f,
+            -0.0f,
             std::numeric_limits<float>::infinity(),
             -std::numeric_limits<float>::infinity(),
             std::nanf("1"),
