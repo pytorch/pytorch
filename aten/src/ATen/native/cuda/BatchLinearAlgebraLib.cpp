@@ -143,10 +143,6 @@ static void apply_triangular_solve_batched(Tensor& A, Tensor& B, bool upper, boo
   cublasDiagType_t diag = unitriangular ? CUBLAS_DIAG_UNIT : CUBLAS_DIAG_NON_UNIT;
   cublasSideMode_t side = CUBLAS_SIDE_LEFT;
 
-  auto A_data = A.data_ptr<scalar_t>();
-  auto B_data = B.data_ptr<scalar_t>();
-  auto A_mat_stride = matrixStride(A);
-  auto B_mat_stride = matrixStride(B);
   auto batch_size = cuda_int_cast(batchCount(A), "batch_size");
   auto m = cuda_int_cast(A.size(-2), "m");
   auto n = cuda_int_cast(A.size(-1), "n");
@@ -329,8 +325,6 @@ Tensor& _linalg_inv_out_helper_cuda_lib(Tensor& result, Tensor& infos_getrf, Ten
   result.zero_();
   result.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).fill_(1);
 
-  const int batch_size = cuda_int_cast(batchCount(result), "batchCount");
-
   if (result.dim() > 2) {
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "linalg_inv_out_cuda", [&]{
       apply_batched_inverse_lib<scalar_t>(
@@ -435,10 +429,6 @@ inline static void _apply_svd_lib_gesvdjBatched(const Tensor& self, Tensor& U, T
   auto U_data = U.data_ptr<scalar_t>();
   auto S_data = S.data_ptr<value_t>();
   auto VT_data = VT.data_ptr<scalar_t>();
-  auto self_stride = matrixStride(self);
-  auto U_stride = matrixStride(U);
-  auto S_stride = S.size(-1);
-  auto VT_stride = matrixStride(VT);
 
   int batchsize = cuda_int_cast(batchCount(self), "batch size");
   int m = cuda_int_cast(self.size(-2), "m");
@@ -481,7 +471,6 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda_lib(const Tensor& self, bool
   at::Tensor infos = at::zeros({batch_size}, self.options().dtype(at::kInt));
   const int64_t m = self.size(-2);
   const int64_t n = self.size(-1);
-  const int64_t k = std::min(m, n);
 
   Tensor U_working_copy, S_working_copy, VT_working_copy;
   std::tie(U_working_copy, S_working_copy, VT_working_copy) = \
@@ -686,11 +675,7 @@ inline static void apply_cholesky_cusolver_potrsBatched(Tensor& self_working_cop
   const int64_t nrhs = self_working_copy.size(-1);
   const int64_t lda = std::max<int64_t>(1, n);
   const int64_t batch_size = batchCount(self_working_copy);
-  const int64_t self_matrix_stride = matrixStride(self_working_copy);
-  scalar_t* self_working_copy_ptr = self_working_copy.data_ptr<scalar_t>();
 
-  const scalar_t* A_ptr = A_column_major_copy.data_ptr<scalar_t>();
-  const int64_t A_matrix_stride = matrixStride(A_column_major_copy);
   const int64_t ldb = std::max<int64_t>(1, A_column_major_copy.size(-1));
 
   int* infos_ptr = infos.data_ptr<int>();
@@ -882,8 +867,6 @@ void geqrf_cusolver(const Tensor& input, const Tensor& tau) {
 */
 template <typename scalar_t>
 static void apply_ormqr(const Tensor& input, const Tensor& tau, const Tensor& other, bool left, bool transpose) {
-  using value_t = typename c10::scalar_value_type<scalar_t>::type;
-
   auto side = left ? CUBLAS_SIDE_LEFT : CUBLAS_SIDE_RIGHT;
   auto trans = transpose ? (input.is_complex() ? CUBLAS_OP_C : CUBLAS_OP_T) : CUBLAS_OP_N;
 
@@ -957,7 +940,6 @@ void ormqr_cusolver(const Tensor& input, const Tensor& tau, const Tensor& other,
 */
 template <typename scalar_t>
 inline static void apply_orgqr(Tensor& self, const Tensor& tau) {
-  using value_t = typename c10::scalar_value_type<scalar_t>::type;
   auto self_data = self.data_ptr<scalar_t>();
   auto tau_data = tau.data_ptr<scalar_t>();
   auto self_matrix_stride = matrixStride(self);

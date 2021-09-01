@@ -43,13 +43,13 @@ from unittest.mock import MagicMock
 
 import numpy as np
 
-from torch.testing import floating_types_and, integral_types, complex_types, get_all_dtypes
 import expecttest
 from .._core import \
     (_compare_tensors_internal, _compare_scalars_internal, _compare_return_type)
 
 import torch
 import torch.cuda
+from torch.testing import make_tensor
 from torch._utils_internal import get_writable_path
 from torch._six import string_classes
 from torch import Tensor
@@ -1939,103 +1939,7 @@ def retry(ExceptionToCheck, tries=3, delay=3, skip_after_retries=False):
     return deco_retry
 
 
-# Methods for matrix and tensor generation
-
-def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, high=None,
-                requires_grad: bool = False, noncontiguous: bool = False,
-                exclude_zero: bool = False) -> torch.Tensor:
-    """ Creates a random tensor with the given size, device and dtype.
-
-        Default values for low and high:
-            * boolean type: low = 0, high = 2
-            * uint8 type: low = 0, high = 9
-            * floating and integral types: low = -9 and high = 9
-            * complex types, for each real and imaginary part: low = -9, high = 9
-        If low/high are specified and within dtype limits: low = low, high = high
-        If low/high are specified but exceed the limits: low = dtype_min, high = dtype_max
-        If low is -inf and/or high is inf: low = dtype_min, high = dtype_max
-        If low is inf or nan and/or high is -inf or nan: ValueError raised
-
-        If noncontiguous=True, a noncontiguous tensor with the given size will be returned unless the size
-        specifies a tensor with a 1 or 0 elements in which case the noncontiguous parameter is ignored because
-        it is not possible to create a noncontiguous Tensor with a single element.
-
-        If exclude_zero is passed with True (default is False), all the matching values (with zero) in
-        created tensor are replaced with a tiny (smallest positive representable number) value if floating type,
-        [`tiny` + `tiny`.j] if complex type and 1 if integer/boolean type.
-    """
-    def _modify_low_high(low, high, lowest, highest, default_low, default_high, dtype):
-        """
-        Modifies (and raises ValueError when appropriate) low and high values given by the user (input_low, input_high) if required.
-        """
-        def clamp(a, l, h):
-            return min(max(a, l), h)
-
-        low = low if low is not None else default_low
-        high = high if high is not None else default_high
-
-        # Checks for error cases
-        if low != low or high != high:
-            raise ValueError("make_tensor: one of low or high was NaN!")
-        if low > high:
-            raise ValueError("make_tensor: low must be weakly less than high!")
-
-        low = clamp(low, lowest, highest)
-        high = clamp(high, lowest, highest)
-
-        if dtype in integral_types():
-            return math.floor(low), math.ceil(high)
-
-        return low, high
-
-    if dtype is torch.bool:
-        result = torch.randint(0, 2, size, device=device, dtype=dtype)
-    elif dtype is torch.uint8:
-        ranges = (torch.iinfo(dtype).min, torch.iinfo(dtype).max)
-        low, high = _modify_low_high(low, high, ranges[0], ranges[1], 0, 9, dtype)
-        result = torch.randint(low, high, size, device=device, dtype=dtype)
-    elif dtype in integral_types():
-        ranges = (torch.iinfo(dtype).min, torch.iinfo(dtype).max)
-        low, high = _modify_low_high(low, high, ranges[0], ranges[1], -9, 9, dtype)
-        result = torch.randint(low, high, size, device=device, dtype=dtype)
-    elif dtype in floating_types_and(torch.half, torch.bfloat16):
-        ranges_floats = (torch.finfo(dtype).min, torch.finfo(dtype).max)
-        low, high = _modify_low_high(low, high, ranges_floats[0], ranges_floats[1], -9, 9, dtype)
-        rand_val = torch.rand(size, device=device, dtype=dtype)
-        result = high * rand_val + low * (1 - rand_val)
-    else:
-        assert dtype in complex_types()
-        float_dtype = torch.float if dtype is torch.cfloat else torch.double
-        ranges_floats = (torch.finfo(float_dtype).min, torch.finfo(float_dtype).max)
-        low, high = _modify_low_high(low, high, ranges_floats[0], ranges_floats[1], -9, 9, dtype)
-        real_rand_val = torch.rand(size, device=device, dtype=float_dtype)
-        imag_rand_val = torch.rand(size, device=device, dtype=float_dtype)
-        real = high * real_rand_val + low * (1 - real_rand_val)
-        imag = high * imag_rand_val + low * (1 - imag_rand_val)
-        result = torch.complex(real, imag)
-
-    if noncontiguous and result.numel() > 1:
-        result = torch.repeat_interleave(result, 2, dim=-1)
-        result = result[..., ::2]
-
-    if exclude_zero:
-        if dtype in integral_types() or dtype is torch.bool:
-            replace_with = torch.tensor(1, device=device, dtype=dtype)
-        elif dtype in floating_types_and(torch.half, torch.bfloat16):
-            replace_with = torch.tensor(torch.finfo(dtype).tiny, device=device, dtype=dtype)
-        elif dtype in complex_types():
-            float_dtype = torch.float if dtype is torch.cfloat else torch.double
-            float_eps = torch.tensor(torch.finfo(float_dtype).tiny, device=device, dtype=float_dtype)
-            replace_with = torch.complex(float_eps, float_eps)
-        else:
-            raise ValueError(f"Invalid dtype passed, supported dtypes are: {get_all_dtypes()}")
-        result[result == 0] = replace_with
-
-    if dtype in floating_types_and(torch.half, torch.bfloat16) or\
-       dtype in complex_types():
-        result.requires_grad = requires_grad
-
-    return result
+# Methods for matrix generation
 
 def random_square_matrix_of_rank(l, rank, dtype=torch.double, device='cpu'):
     assert rank <= l

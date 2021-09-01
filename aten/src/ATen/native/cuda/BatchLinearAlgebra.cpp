@@ -1701,7 +1701,7 @@ static void cholesky_kernel(const Tensor& input, const Tensor& info, bool upper)
 #endif // USE_CUSOLVER
 }
 
-REGISTER_DISPATCH(cholesky_stub, &cholesky_kernel)
+REGISTER_CUDA_DISPATCH(cholesky_stub, &cholesky_kernel)
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ cholesky_inverse ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -1773,7 +1773,7 @@ Tensor& cholesky_inverse_kernel_impl(Tensor &result, Tensor& infos, bool upper) 
 
 }
 
-REGISTER_DISPATCH(cholesky_inverse_stub, &cholesky_inverse_kernel_impl);
+REGISTER_CUDA_DISPATCH(cholesky_inverse_stub, &cholesky_inverse_kernel_impl);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ lu ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -1945,7 +1945,7 @@ static void apply_lu(const Tensor& input, const Tensor& pivots, const Tensor& in
   }
 }
 
-REGISTER_DISPATCH(lu_stub, &apply_lu);
+REGISTER_CUDA_DISPATCH(lu_stub, &apply_lu);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triangular_solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -2039,7 +2039,7 @@ void triangular_solve_kernel(Tensor& A, Tensor& B, Tensor& infos, bool upper, bo
   }
 }
 
-REGISTER_DISPATCH(triangular_solve_stub, &triangular_solve_kernel);
+REGISTER_CUDA_DISPATCH(triangular_solve_stub, &triangular_solve_kernel);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ orgqr ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -2057,7 +2057,7 @@ Tensor& orgqr_kernel_impl(Tensor& result, const Tensor& tau) {
   #endif
 }
 
-REGISTER_DISPATCH(orgqr_stub, &orgqr_kernel_impl);
+REGISTER_CUDA_DISPATCH(orgqr_stub, &orgqr_kernel_impl);
 
 void ormqr_kernel(const Tensor& input, const Tensor& tau, const Tensor& other, bool left, bool transpose) {
 #if defined(USE_CUSOLVER)
@@ -2069,7 +2069,7 @@ void ormqr_kernel(const Tensor& input, const Tensor& tau, const Tensor& other, b
 #endif
 }
 
-REGISTER_DISPATCH(ormqr_stub, &ormqr_kernel);
+REGISTER_CUDA_DISPATCH(ormqr_stub, &ormqr_kernel);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ qr ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -2148,7 +2148,7 @@ void geqrf_kernel(const Tensor& input, const Tensor& tau) {
   }
 }
 
-REGISTER_DISPATCH(geqrf_stub, &geqrf_kernel);
+REGISTER_CUDA_DISPATCH(geqrf_stub, &geqrf_kernel);
 
 template <typename scalar_t>
 static void apply_qr(Tensor& Q, Tensor& R, int64_t q_size_minus_2, int64_t r_size_minus_1, int64_t n_columns,
@@ -2423,7 +2423,7 @@ void linalg_eigh_kernel(const Tensor& eigenvalues, const Tensor& eigenvectors, c
 #endif
 }
 
-REGISTER_DISPATCH(linalg_eigh_stub, &linalg_eigh_kernel);
+REGISTER_CUDA_DISPATCH(linalg_eigh_stub, &linalg_eigh_kernel);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ eig ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -2513,7 +2513,7 @@ std::tuple<Tensor, Tensor> eig_kernel_impl(const Tensor& self, bool& eigenvector
   return std::tuple<Tensor, Tensor>(out_eigvals, out_eigvecs);
 }
 
-REGISTER_DISPATCH(eig_stub, &eig_kernel_impl);
+REGISTER_CUDA_DISPATCH(eig_stub, &eig_kernel_impl);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ linalg_eig ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -2599,7 +2599,7 @@ void linalg_eig_kernel(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos,
   });
 }
 
-REGISTER_DISPATCH(linalg_eig_stub, &linalg_eig_kernel);
+REGISTER_CUDA_DISPATCH(linalg_eig_stub, &linalg_eig_kernel);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ svd ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -2671,8 +2671,7 @@ AT_ERROR("svd: MAGMA library not found in "
 
 std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda_legacy(const Tensor& self, bool some, bool compute_uv) {
   std::vector<int64_t> infos(batchCount(self), 0);
-  int64_t m = self.size(-2), n = self.size(-1);
-  int64_t k = std::min(m, n);
+  int64_t m = self.size(-2);
 
   char jobchar = compute_uv ? (some ? 'S' : 'A') : 'N';
 
@@ -2922,13 +2921,13 @@ static void lu_solve_trans_dispatch(const Tensor& b, const Tensor& lu, const Ten
   }
 }
 
-REGISTER_DISPATCH(lu_solve_trans_stub, &lu_solve_trans_dispatch);
+REGISTER_CUDA_DISPATCH(lu_solve_trans_stub, &lu_solve_trans_dispatch);
 
 static void lu_solve_dispatch(const Tensor& b, const Tensor& lu, const Tensor& pivots) {
   lu_solve_trans_dispatch(b, lu, pivots, 'N');
 }
 
-REGISTER_DISPATCH(lu_solve_stub, &lu_solve_dispatch);
+REGISTER_CUDA_DISPATCH(lu_solve_stub, &lu_solve_dispatch);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ lstsq ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -3112,7 +3111,7 @@ void lstsq_kernel(const Tensor& a, Tensor& b, Tensor& /*rank*/, Tensor& /*singul
   }
 }
 
-REGISTER_DISPATCH(lstsq_stub, &lstsq_kernel);
+REGISTER_CUDA_DISPATCH(lstsq_stub, &lstsq_kernel);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ legacy_lstsq ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
