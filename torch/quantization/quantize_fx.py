@@ -395,6 +395,11 @@ def prepare_fx(
       with a similar structure as qconfig_dict except it will contain
       configurations specific to equalization techniques such as input-weight
       equalization.
+      `backend_config_dict`: a dictionary that specifies how operators are quantized
+       in a backend, this includes how the operaetors are observed,
+       supported fusion patterns, how quantize/dequantize ops are
+       inserted, supported dtypes etc. The structure of the dictionary is still WIP
+       and will change in the future, please don't use right now.
 
 
     Return:
@@ -434,6 +439,7 @@ def prepare_qat_fx(
       `model`: torch.nn.Module model, must be in train mode
       `qconfig_dict`: see :func:`~torch.quantization.prepare_fx`
       `prepare_custom_config_dict`: see :func:`~torch.quantization.prepare_fx`
+      `backend_config_dict`: see :func:`~torch.quantization.prepare_fx`
 
     Return:
       A GraphModule with fake quant modules (configured by qconfig_dict), ready for

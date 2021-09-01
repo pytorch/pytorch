@@ -42,7 +42,6 @@ from .graph_module import (
 
 from .pattern_utils import (
     MatchResult,
-    get_default_quant_patterns,
     get_default_output_activation_post_process_map,
 )
 

@@ -231,7 +231,7 @@ bool immediateIsNegative(ExprPtr e) {
   if (Name##ImmPtr imm = to<Name##Imm>(e)) { \
     return imm->value() < 0;                 \
   }
-  AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
+  AT_FORALL_SCALAR_TYPES_AND2(Half, BFloat16, TYPE_CASE);
 #undef TYPE_CASE
   return false;
 }
