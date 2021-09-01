@@ -79,7 +79,9 @@ class Tensor(torch._C._TensorBase):
                     # TODO: Once we decide to break serialization FC, no longer
                     # need to wrap with TypedStorage
                     new_tensor = torch._utils._rebuild_qtensor(
-                        torch.storage.TypedStorage(new_storage._untyped(), self.dtype),
+                        torch.storage.TypedStorage(
+                            wrap_storage=new_storage._untyped(),
+                            dtype=self.dtype),
                         self.storage_offset(),
                         self.size(),
                         self.stride(),
@@ -154,6 +156,9 @@ class Tensor(torch._C._TensorBase):
 
         Returns the underlying storage.
         """
+        if self.dtype == torch.complex32:
+            raise RuntimeError('unsupported Storage type')
+
         storage = self._storage()
 
         if self.dtype != torch.uint8:
@@ -223,7 +228,9 @@ class Tensor(torch._C._TensorBase):
                 raise RuntimeError(f"Serialization is not supported for tensors of type {self.qscheme()}")
             # TODO: Once we decide to break serialization FC, no longer
             # need to wrap with TypedStorage
-            args_qtensor = (torch.storage.TypedStorage(self.storage()._untyped(), self.dtype),
+            args_qtensor = (torch.storage.TypedStorage(
+                                wrap_storage=self.storage()._untyped(),
+                                dtype=self.dtype),
                             self.storage_offset(),
                             tuple(self.size()),
                             self.stride(),

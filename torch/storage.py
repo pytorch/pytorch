@@ -42,7 +42,7 @@ class _StorageBase(object):
         return str(self)
 
     def __iter__(self):
-        return iter(map(lambda i: self[i], range(self.nbytes())))
+        return iter(map(lambda i: self[i], range(self.size())))
 
     def __copy__(self):
         return self.clone()
@@ -61,7 +61,7 @@ class _StorageBase(object):
         return (_load_from_bytes, (b.getvalue(),))
 
     def __sizeof__(self):
-        return super(_StorageBase, self).__sizeof__() + self.nbytes()
+        return super(_StorageBase, self).__sizeof__() + self.size()
 
     def clone(self):
         """Returns a copy of this storage"""
@@ -78,10 +78,6 @@ class _StorageBase(object):
         return _type(self, getattr(torch, self.__class__.__name__))
 
     def _to(self, dtype):
-        # TODO: using `torch.tensor`'s `dtype` kwarg at the moment because
-        # `torch.tensor` does not handle ByteStorage correctly--it resolves
-        # it to int64 for some reason. Need to solve that issue
-        #storage = torch.tensor(self, dtype=self.dtype).to(dtype).storage()
         storage = torch.Tensor().to(self.dtype).to(self.device).set_(self).to(dtype).storage()
         if storage.data_ptr() == self.data_ptr():
             storage = storage.clone()
@@ -141,7 +137,7 @@ class _StorageBase(object):
             raise TypeError(f"cannot pin '{self.type()}' only CPU memory can be pinned")
         import torch.cuda
         allocator = torch.cuda._host_allocator()  # type: ignore[attr-defined]
-        return type(self)(self.nbytes(), allocator=allocator).copy_(self)
+        return type(self)(self.size(), allocator=allocator).copy_(self)
 
     def share_memory_(self):
         """Moves the storage to shared memory.
@@ -162,15 +158,15 @@ class _StorageBase(object):
         return self
 
     @classmethod
-    def _new_shared(cls, *, nbytes):
+    def _new_shared(cls, size):
         """Creates a new storage in shared memory with the same data type"""
         from torch.multiprocessing import get_sharing_strategy
         if cls.is_cuda:
-            return cls(nbytes)
+            return cls(size)
         elif get_sharing_strategy() == 'file_system':
-            return cls._new_using_filename(nbytes)
+            return cls._new_using_filename(size)
         else:
-            return cls._new_using_fd(nbytes)
+            return cls._new_using_fd(size)
 
     def _untyped(self):
         return self
@@ -281,11 +277,24 @@ class TypedStorage(torch._C.TypedStorage):
                 self._storage = eval(self.__module__).ByteStorage(args[0] * self.element_size())
 
             elif len(args) == 1 and isinstance(args[0], collections.abc.Sequence):
-                # TODO: Need to fix quantized types
-                tmp_tensor = torch.tensor(
-                    args[0],
-                    dtype=self.dtype,
-                    device='cuda' if self.is_cuda else 'cpu')
+                if self.dtype in [torch.quint8, torch.quint4x2, torch.qint32, torch.qint8]:
+                    # TODO: Need to properly test this
+                    interpret_dtypes = {
+                        torch.quint8: torch.uint8,
+                        torch.quint4x2: torch.uint8,
+                        torch.qint32: torch.int32,
+                        torch.qint8: torch.int8
+                    }
+                    tmp_tensor = torch.tensor(
+                        args[0],
+                        dtype=interpret_dtypes[self.dtype],
+                        device='cuda' if self.is_cuda else 'cpu')
+
+                else:
+                    tmp_tensor = torch.tensor(
+                        args[0],
+                        dtype=self.dtype,
+                        device='cuda' if self.is_cuda else 'cpu')
 
                 self._storage = tmp_tensor.storage()._untyped()
 
@@ -350,29 +359,25 @@ class TypedStorage(torch._C.TypedStorage):
         tmp_tensor[idx] = value
 
     def __getitem__(self, idx):
-        # TODO: Need to fix quantized types
-        if self.dtype in [torch.quint8, torch.quint4x2, torch.qint32, torch.qint8]:
-            return NotImplemented
         if isinstance(idx, slice):
-            # Need to wrap start and stop, then multiply each slice param
-            # by element_size
-            start = self.element_size() * self._maybe_wrap_index(idx.start)
+            raise RuntimeError('slices are only supported in ByteStorage.__getitem__')
 
-            stop = self.element_size() * self._maybe_wrap_index(idx.stop, is_stop=True)
-            
-            if idx.step is not None and idx.step != 1:
-                raise RuntimeError((
-                    f'Trying to slice with a step of {idx.step}, but '
-                    'only a step of 1 is supported'))
+        if self.dtype in [torch.quint8, torch.quint4x2, torch.qint32, torch.qint8]:
+            # TODO: Need to properly test this
+            interpret_dtypes = {
+                torch.quint8: torch.uint8,
+                torch.quint4x2: torch.uint8,
+                torch.qint32: torch.int32,
+                torch.qint8: torch.int8
+            }
 
-            byte_slice = slice(start, stop, 1)
-            byte_storage = self._storage[byte_slice]
-            return self._new_wrapped_storage(byte_storage)
+            return TypedStorage(
+                wrap_storage=self._storage,
+                dtype=interpret_dtypes[self.dtype])[idx]
 
-        else:
-            idx_wrapped = self._maybe_wrap_index(idx)
-            tmp_tensor = torch.Tensor().to(self.dtype).to(self.device).set_(self)
-            return tmp_tensor[idx_wrapped].item()
+        idx_wrapped = self._maybe_wrap_index(idx)
+        tmp_tensor = torch.Tensor().to(self.dtype).to(self.device).set_(self)
+        return tmp_tensor[idx_wrapped].item()
 
     def copy_(self, source: T, non_blocking=None) -> T:
         if isinstance(source, TypedStorage):
@@ -400,16 +405,6 @@ class TypedStorage(torch._C.TypedStorage):
 
     def get_device(self) -> int:
         return self._storage.get_device()
-
-    #def _share_filename_(self):
-
-    #def _share_fd_(self):
-
-    #@classmethod
-    #def _new_using_filename(cls: Type[T], size:int) -> T:
-
-    #@classmethod
-    #def _new_using_fd(cls: Type[T], size:int) -> T:
 
     def __str__(self):
         data_str = ' ' + '\n '.join(str(self[i]) for i in range(self.size()))
@@ -466,10 +461,10 @@ class TypedStorage(torch._C.TypedStorage):
         return self
 
     @classmethod
-    def _new_shared(cls, *, nbytes):
+    def _new_shared(cls, size):
         """Creates a new storage in shared memory with the same data type"""
         module = eval(cls.__module__)
-        byte_storage = module.ByteStorage._new_shared(nbytes=nbytes)
+        byte_storage = module.ByteStorage._new_shared(size * cls().element_size())
         return cls(wrap_storage=byte_storage)
 
     @property
@@ -500,12 +495,16 @@ class TypedStorage(torch._C.TypedStorage):
     def resize_(self, size):
         self._storage.resize_(size * self.element_size())
 
-    #@property
-    #def _free_weak_ref(self):
-    #    return self._storage._free_weak_ref
+    @property
+    def _free_weak_ref(self):
+        return self._storage._free_weak_ref
 
-    def _free_weak_ref(self, *args, **kwargs):
-        return self._storage._free_weak_ref(*args, **kwargs)
+    @classmethod
+    def _free_weak_ref(cls, *args, **kwargs):
+        return eval(cls.__module__).ByteStorage._free_weak_ref(*args, **kwargs)
+
+    def _weak_ref(self, *args, **kwargs):
+        return self._storage._weak_ref(*args, **kwargs)
 
     @classmethod
     def from_buffer(cls, *args, **kwargs):
@@ -614,6 +613,28 @@ class TypedStorage(torch._C.TypedStorage):
     def is_shared(self):
         return self._storage.is_shared()
 
+    @classmethod
+    def _new_shared_cuda(cls, *args, **kwargs):
+        return eval(cls.__module__).ByteStorage._new_shared_cuda(*args, **kwargs)
+
+    @classmethod
+    def _new_with_weak_ptr(cls, *args, **kwargs):
+        return eval(cls.__module__).ByteStorage._new_with_weak_ptr(*args, **kwargs)
+
+    def _share_filename_(self, *args, **kwargs):
+        manager_handle, storage_handle, size = self._storage._share_filename_(*args, **kwargs)
+        return manager_handle, storage_handle, size // self.element_size()
+
+    @classmethod
+    def _release_ipc_counter(cls, *args, **kwargs):
+        return eval(cls.__module__).ByteStorage._release_ipc_counter(*args, **kwargs)
+
+    def _shared_incref(self, *args, **kwargs):
+        return self._storage._shared_incref(*args, **kwargs)
+
+    def _share_fd_(self, *args, **kwargs):
+        fd, size = self._storage._share_fd_(*args, **kwargs)
+        return fd, size // self.element_size()
 
 def _get_dtype_from_pickle_storage_type(pickle_storage_type: str):
     try:

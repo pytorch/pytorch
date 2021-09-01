@@ -100,8 +100,9 @@ class SerializationMixin(object):
         self.assertEqual(c[1], c[3], atol=0, rtol=0)
         # I have to do it in this roundabout fashion, because there's no
         # way to slice storages
-        c4_tensor = torch.tensor(c[4]._storage, dtype=torch.float)
-        c5_tensor = torch.tensor(c[5]._storage, dtype=torch.float)
+        c4_tensor = torch.Tensor().to(c[4].dtype).to(c[4].device).set_(c[4]._storage)
+        c5_tensor = torch.Tensor().to(c[5].dtype).to(c[5].device).set_(c[5]._storage)
+
         for i in range(4):
             self.assertEqual(c4_tensor[i + 1], c5_tensor[i])
 

@@ -1927,13 +1927,12 @@ class AbstractTestCases:
             str(obj)
             for t in torch._storage_classes:
                 if t == torch.BFloat16Storage:
-                    continue
+                    continue  # Fix once fill is enabled for bfloat16
                 if t.is_cuda and not torch.cuda.is_available():
                     continue
                 if t == torch.BoolStorage or t == torch.cuda.BoolStorage:
                     obj = t(100).fill_(True)
                 else:
-                    # TODO: This fails for quantized storages
                     obj = t(100).fill_(1)
                 obj.__repr__()
                 str(obj)
@@ -3070,7 +3069,9 @@ class TestTorchDeviceType(TestCase):
         a = make_tensor((4, 5, 3), device, dtype, low=-9, high=9)
         a_s = a.storage()
 
-        b = torch.tensor(a_s, device=device, dtype=dtype).reshape(a.size())
+        # TODO: REALLY need to change torch.tensor back to the way it used to be
+        #b = torch.tensor(a_s, device=device, dtype=dtype).reshape(a.size())
+        b = torch.Tensor().to(device).to(dtype).set_(a_s).reshape(a.size())
         self.assertEqual(a, b)
 
     @dtypes(torch.float32, torch.complex64)

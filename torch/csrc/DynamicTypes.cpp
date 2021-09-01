@@ -162,13 +162,14 @@ bool isStorage(PyObject* obj)
   return false;
 }
 
-at::Storage createStorage(PyObject* obj)
+at::Storage createStorageGetType(PyObject* obj, at::ScalarType& scalar_type)
 {
   auto obj_type = Py_TYPE(obj);
   for (auto const& item : py_storage_type_to_attype) {
     auto const& storage_type = item.first;
     if (obj_type == storage_type) {
       auto& type = *item.second;
+      scalar_type = at::kByte;
       return type.unsafeStorageFromTH(((THPVoidStorage*)obj)->cdata, true);
     }
     // Check for TypedStorage, which has a `storage` attribute that matches
@@ -182,11 +183,21 @@ at::Storage createStorage(PyObject* obj)
       if (maybe_storage && (Py_TYPE(maybe_storage) == storage_type)) {
         auto& type = *item.second;
         auto ret = type.unsafeStorageFromTH(((THPVoidStorage*)maybe_storage)->cdata, true);
+        // TODO: Should have proper error checking here if dtype attr doesn't
+        // exist or is not a THPDtype
+        PyObject* dtype_obj = PyObject_GetAttrString(obj, "dtype");
+        scalar_type = reinterpret_cast<THPDtype*>(dtype_obj)->scalar_type;
         return ret;
       }
     }
   }
   throw TypeError("not a storage '%s'", Py_TYPE(obj)->tp_name);
 }
+
+at::Storage createStorage(PyObject* obj) {
+  at::ScalarType scalar_type;
+  return createStorageGetType(obj, scalar_type);
+}
+
 
 }  // namespace

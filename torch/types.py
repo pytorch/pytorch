@@ -40,7 +40,7 @@ class Storage(object):
     def __deepcopy__(self, memo) -> 'Storage':
         ...
 
-    def _new_shared(self, *, nbytes=int) -> 'Storage':
+    def _new_shared(self, int) -> 'Storage':
         ...
 
     def _write_file(self, f: Any, is_real_file: _bool, save_size: _bool, element_size: int) -> None:
