@@ -39,21 +39,32 @@ def _import_tools_module():
     # We expect this file to be
     # <repo-root>/torch/testing/_internal/tools_package.py, so we have
     # to go up four levels to find the repository root.
-    PYTORCH_DIR = pathlib.Path(__file__).parent.parent.parent.parent
+    pytorch_dir = pathlib.Path(__file__).parent.parent.parent.parent
 
     # The tools/ "package" is right below the root.
-    TOOLS_DIR = PYTORCH_DIR / 'tools/'
-    if not TOOLS_DIR.is_dir():
+    tools_dir = pytorch_dir / 'tools/'
+    if not tools_dir.is_dir():
         raise FileNotFoundError(
             'We did not successfully locate the tools/ directory. This is most '
             'likely because this PyTorch clone does not contain this directory '
             'or files were moved around. Read the comments on the function that '
             'raised this assertion for more information.')
 
+    tools_module_path = tools_dir / '__init__.py'
+    if not tools_module_path.is_file():
+        raise FileNotFoundError(
+            'We did not successfully locate the tools module despite finding '
+            'the tools directory. This is most likely because files were moved '
+            'around. Read the comments on the function that raised this '
+            'assertion for more information.')
+
     # This recipe comes from
     # https://docs.python.org/3/library/importlib.html#importing-a-source-file-directly
-    spec = importlib.util.spec_from_file_location('tools',
-                                                  TOOLS_DIR / '__init__.py')
+    spec = importlib.util.spec_from_file_location('tools', tools_module_path)
+    if spec is None:
+        raise RuntimeError(
+            'Unexpected problem. Failed to get the module spec despite the '
+            'finding the tools module file.')
     tools = importlib.util.module_from_spec(spec)
     sys.modules['tools'] = tools
     # Execute the module, in case it executes any code upon import.
