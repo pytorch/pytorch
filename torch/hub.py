@@ -10,6 +10,7 @@ import torch
 import warnings
 import zipfile
 
+from urllib.error import HTTPError
 from urllib.request import urlopen, Request
 from urllib.parse import urlparse  # noqa: F401
 
@@ -55,7 +56,6 @@ except ImportError:
 # matches bfd8deac from resnet18-bfd8deac.pth
 HASH_REGEX = re.compile(r'-([a-f0-9]*)\.')
 
-MASTER_BRANCH = 'master'
 ENV_GITHUB_TOKEN = 'GITHUB_TOKEN'
 ENV_TORCH_HOME = 'TORCH_HOME'
 ENV_XDG_CACHE_HOME = 'XDG_CACHE_HOME'
@@ -105,12 +105,24 @@ def _get_torch_home():
 
 
 def _parse_repo_info(github):
-    branch = MASTER_BRANCH
     if ':' in github:
         repo_info, branch = github.split(':')
     else:
-        repo_info = github
+        repo_info, branch = github, None
     repo_owner, repo_name = repo_info.split('/')
+
+    if branch is None:
+        # The branch wasn't specified by the user, so we need to figure out the
+        # default branch: main or master. Our assumption is that if main exists
+        # then it's the default branch, otherwise it's master.
+        try:
+            urlopen(f"https://github.com/{repo_owner}/{repo_name}/tree/main/")
+            branch = 'main'
+        except HTTPError as e:
+            if e.code == 404:
+                branch = 'master'
+            else:
+                raise
     return repo_owner, repo_name, branch
 
 
@@ -261,8 +273,9 @@ def list(github, force_reload=False, skip_validation=False):
 
     Args:
         github (string): a string with format "repo_owner/repo_name[:tag_name]" with an optional
-            tag/branch. The default branch is `master` if not specified.
-            Example: 'pytorch/vision[:hub]'
+            tag/branch. If `tag_name` is not specified, the default branch is assumed to be `main` if
+            it exists, and otherwise `master`.
+            Example: 'pytorch/vision:0.10'
         force_reload (bool, optional): whether to discard the existing cache and force a fresh download.
             Default is `False`.
         skip_validation (bool, optional): whether to check package validity against github.
@@ -293,8 +306,9 @@ def help(github, model, force_reload=False, skip_validation=False):
 
     Args:
         github (string): a string with format <repo_owner/repo_name[:tag_name]> with an optional
-            tag/branch. The default branch is `master` if not specified.
-            Example: 'pytorch/vision[:hub]'
+            tag/branch. If `tag_name` is not specified, the default branch is assumed to be `main` if
+            it exists, and otherwise `master`.
+            Example: 'pytorch/vision:0.10'
         model (string): a string of entrypoint name defined in repo's hubconf.py
         force_reload (bool, optional): whether to discard the existing cache and force a fresh download.
             Default is `False`.
