@@ -240,6 +240,14 @@ class GraphModule(torch.nn.Module):
         # it is a subclass of the user-defined class, the only difference
         # is an extra layer to install the forward method
 
+        # address issue described at https://github.com/pytorch/pytorch/issues/63883
+        # in other words, traverse class hierarchy to fix the redundant class definition problem
+        for t in cls.__mro__:
+            c = t.__qualname__.split('.')[-1]
+            if c != 'GraphModuleImpl':
+                cls = t
+                break
+
         class GraphModuleImpl(cls):  # type: ignore[misc, valid-type]
             pass
         return super().__new__(GraphModuleImpl)
