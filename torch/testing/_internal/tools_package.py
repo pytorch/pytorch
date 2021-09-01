@@ -61,7 +61,7 @@ def _import_tools_module():
     # mypy doesn't think that there's an exec_module on the loader
     # object. Ignore it, this recipe comes straight from the official
     # Python docs.
-    spec.loader.exec_module(tools)  # type: ignore
+    spec.loader.exec_module(tools)  # type: ignore[attr-defined]
 
     return tools
 
