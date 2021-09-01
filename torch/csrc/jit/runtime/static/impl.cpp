@@ -1116,7 +1116,7 @@ MemoryPlanner::MemoryPlanner(
 
 // Don't change the size if it is already aligned, otherwise increase the size
 // to make it aligned.
-size_t MemoryPlanner::compute_aligned_tensor_size(size_t nbytes) {
+size_t MemoryPlanner::computeAlignedTensorSize(size_t nbytes) {
   // Note: everything below is size_t
   return (nbytes + c10::gAlignment - 1) & (~(c10::gAlignment - 1));
 }
@@ -1308,7 +1308,7 @@ std::pair<LivenessMap, LiveRangesMap> GetLiveness(
   return std::make_pair(liveness_map, live_ranges);
 }
 
-at::DataPtr MemoryPlanner::allocate_buffer(
+at::DataPtr MemoryPlanner::allocateBuffer(
     size_t size,
     at::DeviceType deviceType) {
   at::Allocator* allocator;
@@ -1324,7 +1324,7 @@ void MemoryPlanner::allocate() {
   if (managed_bytes_ == 0) {
     return;
   }
-  buffer_ = allocate_buffer(managed_bytes_);
+  buffer_ = allocateBuffer(managed_bytes_);
 
   size_t offset = 0;
   uint8_t* start = static_cast<uint8_t*>(buffer_.get());
@@ -1362,7 +1362,7 @@ void MemoryPlanner::deallocate() {
     size_t max = ms.first;
     for (auto& tensor : tensors) {
       size_t current_size =
-          compute_aligned_tensor_size(tensor->storage().nbytes());
+          computeAlignedTensorSize(tensor->storage().nbytes());
       tensor->storage().unsafeGetStorageImpl()->reset();
       max = std::max(max, current_size);
     }
