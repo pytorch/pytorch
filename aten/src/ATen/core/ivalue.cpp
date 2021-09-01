@@ -799,7 +799,7 @@ IValue IValue::deepcopy(
   IValue copy;
   switch(tag) {
     case IValue::Tag::Tensor:
-      copy = IValue(toTensor().clone());
+      copy = IValue(toTensor().clone().detach());
       break;
     case IValue::Tag::Tuple: {
       std::vector<IValue> copied_tuple;
