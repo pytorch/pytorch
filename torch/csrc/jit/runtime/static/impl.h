@@ -114,7 +114,7 @@ class TORCH_API StaticModule {
  private:
   explicit StaticModule(
       std::pair<std::shared_ptr<torch::jit::Graph>, std::shared_ptr<Module>>
-          graph_and_module,
+      graph_and_module,
       const StaticModuleOptions& opts);
 
   // for <kind, idx>
@@ -457,7 +457,7 @@ class TORCH_API ProcessedNode {
 };
 
 //  Map each value to all values that are alive at the same time.
-using LivenessMap = std::unordered_map<const Value*, std::set<const Value*>>;
+using LivenessMap = FastMap<const Value*, std::set<const Value*>>;
 
 typedef struct LiveRange {
   size_t begin;
@@ -504,7 +504,7 @@ TORCH_API std::unordered_set<const Value*> GetAlwaysAliveValues(
 
 TORCH_API std::pair<LivenessMap, LiveRangesMap> GetLiveness(
     const std::shared_ptr<torch::jit::Graph>& graph,
-    const std::unordered_set<const Value*>& always_alive,
+    const FastSet<const Value*>& always_alive,
     AliasDb& db);
 
 } // namespace jit
