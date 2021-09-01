@@ -24,7 +24,12 @@ class AutoQuantizationState(torch.nn.Module):
 
     idx : int
 
-    def __init__(self, qconfig):
+    def __init__(
+        self,
+        qconfig,
+        input_dtypes: Any = None,
+        output_dtypes: Any = None,
+    ):
         super().__init__()
         self.idx = 0
         # TODO(future PR): change this to the subset of qconfig_dict
@@ -38,20 +43,25 @@ class AutoQuantizationState(torch.nn.Module):
         # qtensor_info objects of tensor outputs of the module, specified
         # in order of iteration through the output type
         self.output_qtensor_infos = []
+        self.input_dtypes = input_dtypes
+        self.output_dtypes = output_dtypes
 
     def has_at_least_one_seen_op(self) -> bool:
         return len(self.idx_to_seen_ops) > 0
 
     def extra_repr(self) -> str:
         s = ""
-        s += "(seen_ops): {\n"
-        for k, v in self.idx_to_seen_ops.items():
-            s += f"  {k}: {v}\n"
-        s += "},\n"
+        if len(self.idx_to_seen_ops):
+            s += "(seen_ops): {\n"
+            for k, v in self.idx_to_seen_ops.items():
+                s += f"  {k}: {v}\n"
+            s += "}\n"
+        else:
+            s += "(seen_ops): {}\n"
         s += "(idx): " + str(self.idx) + ",\n"
-        s += "(output_qtensor_infos): [\n"
+        s += "(output_qtensor_infos): ["
         for v in self.output_qtensor_infos:
-            s += f"  {v}\n"
+            s += f"{v}"
         s += "]"
         return s
 
@@ -118,6 +128,7 @@ class AutoQuantizationState(torch.nn.Module):
                     outputs._qtensor_info = QTensorInfo(qtensor_id[0], torch.float)
                     qtensor_id[0] += 1
                 self.output_qtensor_infos.append(outputs._qtensor_info)
+                # TODO(future PR): add an observer if needed
             else:
                 raise AssertionError(
                     f'module outputs with type {type(outputs)} are not handled yet')
@@ -135,10 +146,16 @@ class AutoQuantizationState(torch.nn.Module):
 
         if isinstance(outputs, torch.Tensor):
             qtensor_info = self.output_qtensor_infos[0]
-            # for now, assume outputs are fp32
-            # TODO(future PR): honor the settings
-            if qtensor_info.inf_dtype != torch.float:
-                outputs = outputs.dequantize()
+            if self.output_dtypes is not None:
+                # check the output dtype, and do the conversion if needed
+                output_dtype = self.output_dtypes[0]
+                if qtensor_info.inf_dtype != output_dtype:
+                    assert output_dtype is torch.float, \
+                        'non-float output dtypes not handled yet'
+                    outputs = outputs.dequantize()
+            else:
+                # if no output dtype was specified, do nothing
+                pass
 
         return outputs
 
@@ -147,6 +164,12 @@ class AutoQuantizationState(torch.nn.Module):
         Used by the conversion to torch.jit.script.
         """
         return self.output_qtensor_infos
+
+    def get_output_dtypes(self) -> Any:
+        """
+        Used by the conversion to torch.jit.script.
+        """
+        return self.output_dtypes
 
     def op_prepare_before_hook(
         self,

@@ -36,4 +36,5 @@ module_types_supported_by_quantization = set([
 q_mod_to_float_mod_mapping = {
     nnq.Conv2d: nn.Conv2d,
     nniq.ConvReLU2d: nni.ConvReLU2d,
+    nnq.ReLU6: nn.ReLU6,
 }

@@ -29,23 +29,21 @@ class TestAutoTracing(QuantizationTestCase):
         m.qconfig = qconfig
 
         mp = _quantize_dynamic_tracing.prepare(m, example_inputs)
-        mp(*example_inputs)
+        out_p = mp(*example_inputs)
         print(mp)
         mq = _quantize_dynamic_tracing.convert(mp)
-        print(mq)
+        # print(mq)
         # verify it runs
         out_q = mq(*example_inputs)
         print(out_q)
 
         # compare it against FX
         m_copy_p = prepare_fx(m_copy, {'': qconfig})
-        m_copy_p(*example_inputs)
-        print(m_copy_p)
+        out_m_copy_p = m_copy_p(*example_inputs)
+        # print(m_copy_p)
         m_copy_q = convert_fx(m_copy_p)
         out_q_fx = m_copy_q(*example_inputs)
-        print(m_copy_q)
-        print(out_q_fx)
-        # TODO(next): fix failure on conv_relu_add for this line
+        self.assertTrue(torch.allclose(out_p, out_m_copy_p))
         self.assertTrue(torch.allclose(out_q, out_q_fx))
 
         # verify torch.jit.trace works
@@ -57,12 +55,14 @@ class TestAutoTracing(QuantizationTestCase):
 
         # verify torch.jit.script works
         rewritten = mq.rewrite_for_scripting()
-        print(rewritten)
         rewritten_out = rewritten(*example_inputs)
+        # print(rewritten)
         self.assertTrue(torch.allclose(rewritten_out, out_q))
 
         scripted_rewritten = torch.jit.script(rewritten)
+        # print(scripted_rewritten.graph)
         scripted_rewritten_out = scripted_rewritten(*example_inputs)
+        # print('scripted_rewritten_out', scripted_rewritten_out)
         self.assertTrue(torch.allclose(scripted_rewritten_out, out_q))
 
         traced_rewritten = torch.jit.trace(
@@ -110,6 +110,15 @@ class TestAutoTracing(QuantizationTestCase):
                 # has happened.
                 self.assertTrue(torch.allclose(scale, torch.ones(1)))
                 self.assertTrue(torch.equal(zp, torch.zeros(1, dtype=torch.long)))
+
+    @skipIfNoFBGEMM
+    def test_multiple_modules(self):
+        m = nn.Sequential(
+            nn.Sequential(nn.Conv2d(1, 1, 1)),
+            nn.Sequential(nn.Conv2d(1, 1, 1)),
+        ).eval()
+        qconfig = torch.quantization.default_qconfig
+        self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),))
 
     @skipIfNoFBGEMM
     def test_child_modules(self):
@@ -178,7 +187,12 @@ class TestAutoTracing(QuantizationTestCase):
         print(m)
         m.qconfig = torch.quantization.default_qconfig
         mp = _quantize_dynamic_tracing.prepare(m, (torch.randn(1, 3, 1, 1),))
+        mp(torch.randn(1, 3, 1, 1))
         print(mp)
+        mq = _quantize_dynamic_tracing.convert(mp)
+        print(mq)
+        out = mq(torch.randn(1, 3, 1, 1))
+        print(out)
 
     # TODO(future PR): enable this test
     @unittest.skip("this is currently broken")

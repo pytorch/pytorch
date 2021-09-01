@@ -19,11 +19,9 @@ def _get_next_seen_ops(
     output_tensor_id = cur_seen_op.output_tensor_infos[0].id
     results = []
     for idx, seen_op in idx_to_seen_op.items():
-        if len(seen_op.input_tensor_infos) != 1:
-            continue
-        input_tensor_id = seen_op.input_tensor_infos[0].id
-        if output_tensor_id == input_tensor_id:
-            results.append(seen_op)
+        for input_tensor_info in seen_op.input_tensor_infos:
+            if output_tensor_id == input_tensor_info.id:
+                results.append(seen_op)
     return results
 
 def get_module_fusion_fqns(

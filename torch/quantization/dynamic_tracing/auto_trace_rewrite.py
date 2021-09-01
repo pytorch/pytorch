@@ -32,13 +32,18 @@ class AllModuleTracer(torch.fx.Tracer):
             args = tuple(new_args)
         return args
 
-    def _maybe_update_outputs(self, outputs, output_qtensor_infos):
+    def _maybe_update_outputs(self, outputs, output_qtensor_infos, output_dtypes):
         # TODO(future PR): handle other output types
         assert len(outputs) == 1 and len(output_qtensor_infos) == 1
-        qtensor_info = output_qtensor_infos[0]
-        if qtensor_info.inf_dtype != torch.float:
-            dequant = torch.fx.Proxy(outputs[0]).dequantize().node
-            outputs = (dequant,)
+        if output_dtypes is not None:
+            assert len(output_dtypes) == 1
+            output_dtype = output_dtypes[0]
+            qtensor_info = output_qtensor_infos[0]
+            if qtensor_info.inf_dtype != output_dtype:
+                assert output_dtype is torch.float, \
+                    'non-float dtypes not handled yet'
+                dequant = torch.fx.Proxy(outputs[0]).dequantize().node
+                outputs = (dequant,)
         return outputs
 
     def create_node(self, kind, target, args, kwargs, name=None, type_expr=None):
@@ -83,7 +88,9 @@ class AllModuleTracer(torch.fx.Tracer):
             qstate = self.root._auto_quant_state
             assert isinstance(qstate, AutoQuantizationState)
             output_qtensor_infos = qstate.get_output_qtensor_infos()
-            args = self._maybe_update_outputs(args, output_qtensor_infos)
+            output_dtypes = qstate.get_output_dtypes()
+            args = self._maybe_update_outputs(
+                args, output_qtensor_infos, output_dtypes)
 
         out = super().create_node(kind, target, args, kwargs, name, type_expr)
         return out
@@ -115,8 +122,10 @@ def rewrite_for_scripting(mod: torch.nn.Module) -> torch.nn.Module:
         for name, child in mod.named_children():
             setattr(copied, name, rewrite_helper(child))
 
-        if hasattr(mod, '_auto_quant_state') and \
-                mod._auto_quant_state.has_at_least_one_seen_op():  # type: ignore[union-attr, arg-type, operator]
+        if hasattr(mod, '_auto_quant_state') and (
+            mod._auto_quant_state.has_at_least_one_seen_op() or
+            (mod._auto_quant_state.get_output_dtypes() is not None)
+        ):  # type: ignore[union-attr, arg-type, operator]
             copied._auto_quant_state.reset_to_new_call()  # type: ignore[union-attr, operator]
 
             graph = AllModuleTracer().trace(copied)

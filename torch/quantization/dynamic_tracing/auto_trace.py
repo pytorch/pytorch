@@ -40,8 +40,8 @@ def _trace_with_inputs(model: torch.nn.Module, example_inputs: Tuple[Any]) -> No
 def add_auto_observation(
     model : torch.nn.Module,
     example_inputs: Tuple[Any],
-    # input_dtypes: Any,  # must be same structure as model inputs
-    # output_dtypes: Any,  # must be same structure as model outputs
+    input_dtypes: Any = (torch.float,),  # must be same structure as model inputs
+    output_dtypes: Any = (torch.float,),  # must be same structure as model outputs
 ) -> torch.nn.Module:
     def convert_to_interception_proxy(x):
         if isinstance(x, torch.Tensor):
@@ -238,7 +238,15 @@ def add_auto_observation(
 
                     if hasattr(v, 'qconfig') and not is_leaf(v):
                         if first_call:
-                            v._auto_quant_state = AutoQuantizationState(v.qconfig)
+                            if v is self:
+                                # for the top level module only, specify input
+                                # and output dtypes
+                                v._auto_quant_state = AutoQuantizationState(
+                                    v.qconfig, input_dtypes, output_dtypes)
+                                pass
+                            else:
+                                v._auto_quant_state = AutoQuantizationState(
+                                    v.qconfig)
                             modules_to_introspect.add(v)
                         else:
                             if not isinstance(v, AutoQuantizationState):
