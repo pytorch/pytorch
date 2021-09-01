@@ -318,7 +318,7 @@ PickleOpCode Unpickler::readInstruction() {
       tuple->elements().reserve(stack_.size() - start);
       auto start_it = stack_.begin() + start;
       for (auto it = start_it; it != stack_.end(); ++it) {
-        tuple->elements().emplace_back(*it);
+        tuple->elements().emplace_back(std::move(*it));
       }
       stack_.erase(start_it, stack_.end());
       stack_.emplace_back(std::move(tuple));
