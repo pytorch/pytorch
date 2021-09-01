@@ -2548,6 +2548,42 @@ def sample_inputs_conv_transpose2d(op_info, device, dtype, requires_grad, **kwar
 
     return list(generator())
 
+def sample_inputs_layer_norm(opinfo, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    # Ordered as input shape, normalized_shape and a kwarg dict for eps
+    cases: Tuple[Tuple[int], Tuple[int], dict] = (  # type: ignore[assignment]
+        ((1, 2, 3), (1, 2, 3), {'eps': 0.5}),
+        ((2, 2, 3), (2, 3), {'eps': -0.5}),
+        ((1,), (1,), {}),
+        ((1, 2), (2,), {}),
+        ((0, 1), (1,), {}),
+    )
+
+    def generator():
+        for input_shape, normalized_shape, kwargs in cases:
+            # Shape of weight and bias should be the same as normalized_shape
+            weight = make_arg(normalized_shape)
+            bias = make_arg(normalized_shape)
+            yield SampleInput(
+                make_arg(input_shape),
+                args=(normalized_shape, weight, bias),
+                kwargs=kwargs
+            )
+        # Without any optional args
+        yield SampleInput(make_arg((1, 2)), args=((2,),))
+
+        # TODO: @krshrimali, once to_numpy method in SampleInput class is modified to take None inputs,
+        # enable these inputs; see https://github.com/pytorch/pytorch/pull/63276#discussion_r691950400
+
+        # With weight and a `None` bias
+        # yield SampleInput(make_arg((1, 2)), args=((2,), make_arg((2,)), None))
+
+        # With `None` weight and bias (tests failing for this, see the link above)
+        # yield SampleInput(make_arg((1, 2)), args=((2,), None, make_arg((2,))))
+
+    return list(generator())
+
 def sample_inputs_hardswish(self, device, dtype, requires_grad):
     N = 5
     # make sure we are testing -3 -> 3 range. default is -10 -> 10 so maybe unnecessary ?
@@ -5595,6 +5631,21 @@ def reference_mse_loss(input, target, reduction="mean"):
         return se
 
 
+def reference_layer_norm(inp: np.ndarray, normalized_shape: Tuple[int], weight=None, bias=None, eps=1e-5):
+    feature_size = np.prod(normalized_shape)
+    inp_view = inp.reshape(-1, feature_size)  # type: ignore[call-overload]
+    mean = inp_view.mean(axis=-1, keepdims=True)
+    var = inp_view.var(axis=-1, ddof=0, keepdims=True)
+    Y = (inp_view - mean) / np.sqrt(var + eps)
+    if weight is None and bias is not None:
+        Y = Y + bias.reshape(-1)
+    elif weight is not None and bias is None:
+        Y = Y * weight.reshape(-1)
+    elif weight is not None and bias is not None:
+        Y = Y * weight.reshape(-1) + bias.reshape(-1)
+    return Y.reshape(*inp.shape)
+
+
 def gradcheck_wrapper_hermitian_input(op, input, *args, **kwargs):
     """Gradcheck wrapper for functions that take Hermitian matrices as input.
 
@@ -7235,6 +7286,20 @@ op_db: List[OpInfo] = [
                SkipInfo('TestJit', 'test_variant_consistency_jit'),
            ),
            supports_out=False,),
+    OpInfo('nn.functional.layer_norm',
+           aten_name='layer_norm',
+           aliases=('layer_norm',),
+           ref=reference_layer_norm,
+           dtypes=floating_types_and(torch.bfloat16),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           supports_out=False,
+           decorators=[
+               DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=1e-05, rtol=1e-03)}),
+                   'TestCommon', 'test_reference_testing'
+               ),
+           ],
+           sample_inputs_func=sample_inputs_layer_norm,),
     OpInfo('nn.functional.pad',
            variant_test_name='constant',
            aten_name='constant_pad_nd',
