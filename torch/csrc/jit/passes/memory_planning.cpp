@@ -224,8 +224,8 @@ std::vector<Node*> insertPreAllocTensorNodes(
       alloc->insertBefore(node);
       alloc->addInput(storage->output());
 
-      alloc->ui_(attr::size, region.size);
-      alloc->ui_(attr::offset, region.offset);
+      alloc->i_(attr::size, region.size);
+      alloc->i_(attr::offset, region.offset);
       alloc->i_(attr::device, storage->i(attr::device));
     }
   }
@@ -383,12 +383,12 @@ collectLiveRangesPerNode(
 }
 
 std::pair<
-    std::unordered_map<LiveRange, uint64_t, live_range_hash>,
+    std::unordered_map<LiveRange, int64_t, live_range_hash>,
     std::vector<std::pair<LiveRange, FrameNodeId>>>
 getManagedLiveRangesFromMemEvents(
     std::vector<MemEvent> mem_events,
     const std::shared_ptr<Graph> graph) {
-  std::unordered_map<LiveRange, uint64_t, live_range_hash> managed_live_ranges;
+  std::unordered_map<LiveRange, int64_t, live_range_hash> managed_live_ranges;
   std::vector<std::pair<LiveRange, FrameNodeId>> live_range_node_header;
 
   std::unordered_map<std::string, MemEvent> allocs;
@@ -463,7 +463,7 @@ void planMemoryWithTracing(
     std::vector<MemEvent> mem_events,
     c10::optional<at::Device> device_type) {
   TORCH_INTERNAL_ASSERT(!mem_events.empty());
-  std::unordered_map<LiveRange, uint64_t, live_range_hash> managed_live_ranges;
+  std::unordered_map<LiveRange, int64_t, live_range_hash> managed_live_ranges;
   std::vector<std::pair<LiveRange, FrameNodeId>> live_range_node_header;
   std::tie(managed_live_ranges, live_range_node_header) =
       getManagedLiveRangesFromMemEvents(mem_events, graph);
@@ -488,7 +488,7 @@ void planMemoryWithTracing(
   GRAPH_DEBUG("\nnumber of allocations\n", allocations.size());
   auto total_size = getTotalAllocationSize(allocations);
   GRAPH_DEBUG("\ngraph before inserting storage node\n", *graph);
-  auto storage_node = insertAllocStorageNode(graph, total_size, device_type);
+  auto storage_node = insertAllocStorageNode(graph, total_size);
   GRAPH_DEBUG("\ngraph after inserting storage node\n", *graph);
 
   auto collected_node_live_ranges =

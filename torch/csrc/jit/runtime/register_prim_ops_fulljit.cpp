@@ -174,8 +174,8 @@ RegisterOperators reg(
      Operator(
          prim::PreAllocateTensor,
          [](const Node* node) -> Operation {
-           size_t size = node->i(attr::size);
-           size_t offset = node->i(attr::offset);
+           int64_t size = node->i(attr::size);
+           int64_t offset = node->i(attr::offset);
            auto device_type = static_cast<DeviceType>(node->i(attr::device));
            return [offset, size, device_type](Stack* stack) {
              c10::Storage buffer;
