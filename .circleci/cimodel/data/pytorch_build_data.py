@@ -47,17 +47,6 @@ CONFIG_TREE_DATA = [
                     # ]),
                 ]),
             ]),
-            ("11.1", [
-                ("3.8", [
-                    ("shard_test", [XImportant(True)]),
-                    # UNCOMMENT THE BELOW TO REENABLE LIBTORCH
-                    # ("libtorch", [
-                    #     (True, [
-                    #         ('build_only', [X(True)]),
-                    #     ]),
-                    # ]),
-                ]),
-            ]),
         ]),
     ]),
     ("bionic", [
@@ -71,13 +60,6 @@ CONFIG_TREE_DATA = [
                 ("3.6", [
                     ("xla", [XImportant(True)]),
                     ("vulkan", [XImportant(True)]),
-                ]),
-            ]),
-        ]),
-        ("cuda", [
-            ("10.2", [
-                ("3.9", [
-                    ("shard_test", [XImportant(True)]),
                 ]),
             ]),
         ]),
