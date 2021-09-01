@@ -212,8 +212,13 @@ getManagedValues(
   std::unordered_set<const Value*> leaked_values;
   std::vector<const Node*> out_nodes;
 
+  FastMap<Node*, bool> node_has_out_variant;
+  for (auto* node : graph->nodes()) {
+    node_has_out_variant.insert({node, hasOutVariant(node)});
+  }
+
   for (auto node : graph->nodes()) {
-    if (!hasOutVariant(node)) {
+    if (!node_has_out_variant[node]) {
       continue;
     }
     out_nodes.emplace_back(node);
@@ -224,7 +229,7 @@ getManagedValues(
       auto size = computeStorageSize(*out_v);
       if (size.has_value() && size.value() > 0) {
         managed_tensor_values.insert({out_v, size.value()});
-      } else if (isOptimizableContainerType(node)) {
+      } else if (isOptimizableContainerType(node, node_has_out_variant)) {
         leaked_values.insert(out_v);
       } else {
         TORCH_WARN(
@@ -290,11 +295,11 @@ bool validateAllocations(std::vector<MemAllocation> allocations) {
   return true;
 }
 
-void printAllocation(
+std::ostream& printAllocation(
+    std::ostream& out,
     std::vector<MemAllocation> allocations,
     std::map<LiveRange, const Value*, live_range_start_cmp> managed_ranges) {
-  std::unordered_map<LiveRange, MemRegion, live_range_hash> allocations_map;
-  allocations_map.reserve(allocations.size());
+  std::map<LiveRange, MemRegion, live_range_start_cmp> allocations_map;
   for (const auto& item : allocations) {
     allocations_map[item.lvr] = item.reg;
   }
@@ -303,7 +308,7 @@ void printAllocation(
     auto lvr = item.first;
     auto val = item.second;
     auto alloced_reg = allocations_map[lvr];
-    std::cout << val->debugName() << ": " << lvr << " " << alloced_reg << "\n";
+    out << val->debugName() << ": " << lvr << " " << alloced_reg << "\n";
   }
 }
 
