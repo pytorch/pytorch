@@ -67,10 +67,16 @@ namespace jit {
 namespace tensorexpr {
 
 std::string buildErrorMessage(const std::string& s) {
-  // TODO: Update this generic error message to include details regarding
-  // turning off the fuser.
-  static const std::string generic_error_message = "";
-  return s + " " + generic_error_message;
+  static const std::string generic_error_message =
+      "This error occured in the fuser. You can turn off the fuser with "
+      "torch._C._jit_override_can_fuse_on_cpu(False)";
+  if (s.empty()) {
+    return generic_error_message;
+  }
+  if (s.back() == '.') {
+    return s + " " + generic_error_message;
+  }
+  return s + ". " + generic_error_message;
 }
 
 static int te_cuda_pointwise_loop_levels = -1;
