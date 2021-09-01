@@ -44,11 +44,13 @@ The input ``bucket`` is a :class:`torch.distributed.GradBucket` object.
 .. currentmodule:: torch.distributed.algorithms.ddp_comm_hooks.default_hooks
 .. autofunction:: allreduce_hook
 .. autofunction:: fp16_compress_hook
+.. autofunction:: bf16_compress_hook
 
-Additionally, a communication hook wraper is provided to support :meth:`~fp16_compress_hook` as a wrapper,
+Additionally, a communication hook wraper is provided to support :meth:`~fp16_compress_hook` or :meth:`~bf16_compress_hook` as a wrapper,
 which can be combined with other communication hooks.
 
 .. autofunction:: fp16_compress_wrapper
+.. autofunction:: bf16_compress_wrapper
 
 PowerSGD Communication Hook
 ---------------------------
