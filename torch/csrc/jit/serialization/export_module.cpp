@@ -63,7 +63,7 @@ void CreateAndAppendOperator(
     int num_args,
     std::vector<flatbuffers::Offset<mobile::serialization::Operator>>* operators) {
   operators->push_back(CreateOperator(
-      fbb, fbb.CreateString(name), fbb.CreateString(overload), num_args));
+      fbb, fbb.CreateSharedString(name), fbb.CreateSharedString(overload), num_args));
 }
 
 flatbuffers::Offset<
@@ -90,8 +90,8 @@ flatbuffers::Offset<jit::mobile::serialization::Schema> CreateFBSchema(
     std::tie(type, offset) = serializer->iValueToFB(fbb, arg.default_value());
     arg_vec.emplace_back(CreateArg(
         fbb,
-        fbb.CreateString(arg.name()),
-        fbb.CreateString(arg.type()->annotation_str(type_printer)),
+        fbb.CreateSharedString(arg.name()),
+        fbb.CreateSharedString(arg.type()->annotation_str(type_printer)),
         type, offset));
   }
 
@@ -101,8 +101,8 @@ flatbuffers::Offset<jit::mobile::serialization::Schema> CreateFBSchema(
     std::tie(type, offset) = serializer->iValueToFB(fbb, ret.default_value());
     return_vec.emplace_back(CreateArg(
         fbb,
-        fbb.CreateString(ret.name()),
-        fbb.CreateString(ret.type()->annotation_str(type_printer)),
+        fbb.CreateSharedString(ret.name()),
+        fbb.CreateSharedString(ret.type()->annotation_str(type_printer)),
         type, offset));
   }
 
@@ -662,7 +662,7 @@ functionToFlatbuffers(
           "Workaround: instead of using arbitrary class type (class Foo()), ",
           "define a pytorch class (class Foo(torch.nn.Module)).");
     }
-    type_str_offsets.emplace_back(fbb.CreateString(type_str));
+    type_str_offsets.emplace_back(fbb.CreateSharedString(type_str));
   }
 
   // since the register location is embedded into the bytecode, pass the
@@ -742,7 +742,7 @@ moduleToFlatbuffers(
   for (const auto& classptr : serializer->memoized_class_types_) {
     std::vector<flatbuffers::Offset<flatbuffers::String>> attr_names(classptr->numAttributes());
     for (size_t i = 0, n = classptr->numAttributes(); i < n; ++i) {
-      attr_names[i] = fbb.CreateString(classptr->getAttributeName(i));
+      attr_names[i] = fbb.CreateSharedString(classptr->getAttributeName(i));
     }
     flatbuffers::Offset<mobile::serialization::Function> setattr_offset = 0;
     if (checkHasValidSetGetState(classptr)) {

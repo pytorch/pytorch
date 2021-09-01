@@ -252,7 +252,7 @@ IValueFlatbufferSerializer::iValueToFB(flatbuffers::FlatBufferBuilder& fbb, cons
   } else if (ivalue.isString()) {
     ivalue_type = mobile::serialization::IValue_String;
     offset = mobile::serialization::CreateString(fbb,
-      fbb.CreateString(ivalue.toString()->string())).Union();
+      fbb.CreateSharedString(ivalue.toString()->string())).Union();
   } else if (ivalue.isGenericDict()) {
     ivalue_type = mobile::serialization::IValue_Dict;
     offset = dictToFB(fbb, ivalue).Union();
