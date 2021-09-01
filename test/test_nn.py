@@ -4518,6 +4518,139 @@ class TestNN(NNTestCase):
         m = pickle.loads(pickle.dumps(m))
         self.assertIsInstance(m, nn.Linear)
 
+    def test_orthogonal_parametrization(self):
+        # Orthogonal implements 6 algorithms (3x parametrizations times 2 options of use_trivialization)
+
+        def assert_is_orthogonal(X):
+            n, k = X.size(-2), X.size(-1)
+            if n < k:
+                X = X.transpose(-2, -1)
+                n, k = k, n
+            Id = torch.eye(k, dtype=X.dtype, device=X.device).expand(*(X.size()[:-2]), k, k)
+            eps = 10 * n * torch.finfo(X.dtype).eps
+            torch.testing.assert_allclose(X.transpose(-2, -1).conj() @ X, Id, atol=eps, rtol=0.)
+
+
+        def assert_weight_allclose_Q(weight, W):
+            # Test that weight is equal to the Q part of the QR decomposition of W
+            # (or of its transpose if the matrix is wide)
+            wide_matrix = W.size(-2) < W.size(-1)
+            if wide_matrix:
+                W = W.transpose(-2, -1)
+            Q, R = torch.linalg.qr(W)
+            Q *= R.diagonal(dim1=-2, dim2=-1).sgn().unsqueeze(-2)
+            if wide_matrix:
+                Q = Q.transpose(-2, -1)
+            torch.testing.assert_allclose(Q, weight, atol=1e-5, rtol=0.)
+
+
+        for shape, dtype, use_linear in product(((4, 4), (5, 3), (3, 5)),  # square/ tall / wide
+                                                (torch.float32, torch.complex64),
+                                                (True, False)):
+            # Conv2d does not support complex yet
+            if not use_linear and dtype.is_complex:
+                continue
+
+            if use_linear:
+                input = torch.randn(3, shape[0], dtype=dtype)
+            else:
+                input = torch.randn(2, 2, shape[0] + 2, shape[1] + 1, dtype=dtype)
+
+            for parametrization, use_trivialization in product(("matrix_exp", "cayley", "householder"),
+                                                               (False, True)):
+                # right_inverse for Cayley and matrix_exp not implemented for use_trivialization=False
+                # See Note [right_inverse expm cayley]
+                can_initialize = use_trivialization or parametrization == "householder"
+
+                # We generate them every time to always start with fresh weights
+                if use_linear:
+                    m = nn.Linear(*shape, dtype=dtype)
+                else:
+                    m = nn.Conv2d(2, 3, shape, dtype=dtype)
+
+                # We do not support householder for complex inputs
+                # See Note [Householder complex]
+                w_init = m.weight.clone()
+                if parametrization == "householder" and m.weight.is_complex():
+                    msg = "householder parametrization does not support complex tensors"
+                    with self.assertRaisesRegex(ValueError, msg):
+                        torch.nn.utils.parametrizations.orthogonal(m,
+                                                                   "weight",
+                                                                   parametrization,
+                                                                   use_trivialization=use_trivialization)
+                    continue
+
+                wide_matrix = w_init.size(-2) < w_init.size(-1)
+                torch.nn.utils.parametrizations.orthogonal(m,
+                                                           "weight",
+                                                           parametrization,
+                                                           use_trivialization=use_trivialization)
+                # Forwards works as expected
+                self.assertEqual(w_init.shape, m.weight.shape)
+                assert_is_orthogonal(m.weight)
+                if can_initialize:
+                    assert_weight_allclose_Q(m.weight, w_init)
+
+                # Intializing with a given orthogonal matrix works
+                X = torch.randn_like(m.weight)
+                if wide_matrix:
+                    X = X.transpose(-2, -1)
+                w_new = torch.linalg.qr(X).Q
+                if wide_matrix:
+                    w_new = w_new.transpose(-2, -1)
+                if can_initialize:
+                    m.weight = w_new
+                    torch.testing.assert_allclose(w_new, m.weight, atol=1e-5, rtol=0.)
+                else:
+                    msg = "assign to the matrix exponential or the Cayley parametrization"
+                    with self.assertRaisesRegex(NotImplementedError, msg):
+                        m.weight = w_new
+
+                # Intializing with a non-orthogonal matrix makes m.weight be the Q part of the given matrix
+                w_new = torch.randn_like(m.weight)
+                if can_initialize:
+                    m.weight = w_new
+                    assert_weight_allclose_Q(m.weight, w_new)
+                else:
+                    msg = "assign to the matrix exponential or the Cayley parametrization"
+                    with self.assertRaisesRegex(NotImplementedError, msg):
+                        m.weight = w_new
+
+                opt = torch.optim.SGD(m.parameters(), lr=0.1)
+                for _ in range(2):
+                    opt.zero_grad()
+                    m(input).norm().backward()
+                    grad = m.parametrizations.weight.original.grad
+                    self.assertIsNotNone(grad)
+                    # We do not update the upper triangular part of the matrix if tall tril if wide
+                    if grad.size(-2) >= grad.size(-1):
+                        zeros_grad = grad.triu(1)
+                    else:
+                        zeros_grad = grad.tril(-1)
+                    self.assertEqual(zeros_grad, torch.zeros_like(zeros_grad))
+                    # The gradient in the diagonal can only be imaginary because a skew-Hermitian
+                    # matrix has imaginary diagonal
+                    diag_grad = grad.diagonal(dim1=-2, dim2=-1)
+                    if grad.is_complex():
+                        diag_grad = diag_grad.real
+                    self.assertEqual(diag_grad, torch.zeros_like(diag_grad))
+                    opt.step()
+                    assert_is_orthogonal(m.weight)
+
+    def test_orthogonal_errors(self):
+        m = nn.Linear(3, 4)
+        with self.assertRaisesRegex(ValueError, "has to be one of"):
+            torch.nn.utils.parametrizations.orthogonal(m, "weight", "foo")
+
+        with self.assertRaisesRegex(ValueError, "Expected a matrix"):
+            torch.nn.utils.parametrizations.orthogonal(m, "bias")
+
+        torch.nn.utils.parametrizations.orthogonal(m, "weight")
+        with self.assertRaisesRegex(ValueError, "matrices of shape"):
+            m.weight = torch.randn(5, 5)
+        torch.nn.utils.parametrize.remove_parametrizations(m, "weight")
+
+
     def test_threshold_int(self):
         x = torch.tensor([-3, -2, -1, 0, 1, 2, 3])
         expected = torch.tensor([99, 99, 99, 99, 1, 2, 3])
@@ -6185,6 +6318,37 @@ class TestNN(NNTestCase):
                     mu(output_small, indices_small, output_size=size)
                 else:
                     self.assertRaises(ValueError, lambda: mu(output_small, indices_small, (h, w)))
+
+    def test_max_unpool2d_nhwc_cpu(self):
+        input = torch.randn(2, 10, 9, 9).float().cpu()
+        input = input.contiguous(memory_format=torch.channels_last)
+        ref_input = input.clone().contiguous()
+
+        pool = nn.MaxPool2d(3, stride=2, return_indices=True).cpu()
+        ref_pool = nn.MaxPool2d(3, stride=2, return_indices=True).cpu()
+
+        out, ind = pool(input)
+        ref_out, ref_ind = ref_pool(ref_input)
+        out.requires_grad_()
+        ref_out.requires_grad_()
+
+        unpool = nn.MaxUnpool2d(3, stride=2).cpu()
+        ref_unpool = nn.MaxUnpool2d(3, stride=2).cpu()
+
+        upout = unpool(out, ind)
+        ref_upout = ref_unpool(ref_out, ref_ind)
+
+        grad = torch.randn(upout.size()).float().cpu()
+        grad = grad.contiguous(memory_format=torch.channels_last)
+        ref_grad = grad.clone().contiguous()
+
+        upout.backward(grad)
+        ref_upout.backward(ref_grad)
+
+        self.assertTrue(upout.is_contiguous(memory_format=torch.channels_last))
+        self.assertTrue(ref_upout.is_contiguous())
+        self.assertTrue(torch.allclose(upout, ref_upout))
+        self.assertTrue(torch.allclose(out.grad, ref_out.grad))
 
     def test_container_copy(self):
         class Model(nn.Module):
@@ -9453,25 +9617,6 @@ class TestNN(NNTestCase):
         test_huber_loss_zero_delta()
 
     def test_cosine_similarity(self):
-        input1 = torch.randn(4, 4, requires_grad=True)
-        input2 = torch.randn(4, 4, requires_grad=True)
-        self.assertTrue(gradcheck(lambda x, y: F.cosine_similarity(x, y), (input1, input2)))
-
-        input1 = torch.randn(4, 5, 6, requires_grad=True)
-        input2 = torch.randn(4, 5, 6, requires_grad=True)
-        self.assertTrue(gradcheck(lambda x, y: F.cosine_similarity(x, y, dim=0), (input1, input2)))
-        self.assertTrue(gradcheck(lambda x, y: F.cosine_similarity(x, y, dim=-1), (input1, input2)))
-
-        input1 = torch.randn((), requires_grad=True)
-        input2 = torch.randn((), requires_grad=True)
-        self.assertTrue(gradcheck(lambda x, y: F.cosine_similarity(x, y, dim=0), (input1, input2)))
-        self.assertTrue(gradcheck(lambda x, y: F.cosine_similarity(x, y, dim=-1), (input1, input2)))
-
-        # Check broadcasting
-        input1 = torch.randn(2, 1, 3, requires_grad=True)
-        input2 = torch.randn(1, 2, 3, requires_grad=True)
-        self.assertTrue(gradcheck(lambda x, y: F.cosine_similarity(x, y, dim=-1), (input1, input2)))
-
         # Check cosine_similarity input/output shapes
         input_size = (1, 3, 2, 1)
         expected_size = (1, 2, 1)
@@ -9497,7 +9642,6 @@ class TestNN(NNTestCase):
         input2 = torch.randn(2, 1, 3)
         with self.assertRaises(RuntimeError):
             F.cosine_similarity(input1, input2)
-
 
         # Check type promotion, issue #61454
         input = torch.tensor(12.)
@@ -10475,6 +10619,13 @@ class TestNN(NNTestCase):
             out_t_5 = m(in_t_9[:, :, :5, :5, :5])
         self.assertEqual(out_t_9[:, :, :15, :15, :15], out_t_5)
 
+    def test_upsampling_small_scale(self):
+        m = torch.nn.Upsample(scale_factor=0.5, mode="bilinear")
+        in_t = torch.arange(1, 5, dtype=torch.float64).reshape(1, 1, 2, 2)
+        out_t = m(in_t)
+        expected_out_t = torch.tensor([[[[2.5]]]])
+        self.assertEqual(expected_out_t, out_t)
+
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_interpolate_illegal_memory_access(self):
         in_s = 45
@@ -11153,6 +11304,48 @@ class TestNN(NNTestCase):
             for key in layer.state_dict().keys():
                 self.assertEqual(layer.state_dict()[key].device, converted_layer.state_dict()[key].device)
                 self.assertEqual(layer.state_dict()[key], converted_layer.state_dict()[key])
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    def test_sync_batchnorm_backward_elemt(self):
+        device = 'cuda'
+        saved_input = torch.rand(2, 3, 2, 1, device=device)
+        grad_output = torch.rand(2, 3, 2, 1, device=device)
+        mean = torch.rand(3, device=device)
+        invstd = torch.rand(3, device=device)
+        weight = torch.rand(3, device=device)
+        sum_dy = torch.rand(3, device=device)
+        sum_dy_xmu = torch.rand(3, device=device)
+        count_tensor = torch.tensor([5, 5, 5], dtype=torch.int32, device=device)
+
+        gI_contiguous = torch.batch_norm_backward_elemt(
+            grad_output,
+            saved_input,
+            mean,
+            invstd,
+            weight,
+            sum_dy,
+            sum_dy_xmu,
+            count_tensor
+        )
+
+        # Test batch_norm_backward_elemt gives the same answer for all
+        # combinations of contiguous as channels_last input
+        for a, b in [
+                (torch.channels_last, torch.contiguous_format),
+                (torch.contiguous_format, torch.channels_last),
+                (torch.channels_last, torch.channels_last),
+        ]:
+            gI_actual = torch.batch_norm_backward_elemt(
+                grad_output.contiguous(memory_format=a),
+                saved_input.contiguous(memory_format=b),
+                mean,
+                invstd,
+                weight,
+                sum_dy,
+                sum_dy_xmu,
+                count_tensor
+            )
+            self.assertEqual(gI_actual, gI_contiguous)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     def test_sync_batchnorm_accuracy_cuda(self):
@@ -13087,32 +13280,6 @@ class TestNNDeviceType(NNTestCase):
 
         if self.device_type == 'cuda':
             self._test_LayerNorm_cuda_half(device)
-
-    @onlyOnCPUAndCUDA
-    def test_LayerNorm_numeric(self, device):
-        def layer_norm_ref(X, gamma, beta, normalized_shape, eps):
-            feature_size = np.prod(normalized_shape)
-            X_view = X.view(-1, feature_size)
-            mean = X_view.mean(dim=-1, keepdim=True)
-            var = X_view.var(dim=-1, unbiased=False, keepdim=True)
-            Y = (X_view - mean) / torch.sqrt(var + eps)
-            Y = Y * gamma.view(-1) + beta.view(-1)
-            return Y.view(*X.size())
-
-        normalized_shape = [256, 256, 144]
-        layer_norm = nn.LayerNorm(normalized_shape).float().to(device)
-        X = torch.rand(2, *normalized_shape, dtype=torch.float32,
-                       device=device)
-
-        Y = layer_norm(X)
-        Y_ref = layer_norm_ref(X, layer_norm.weight.data, layer_norm.bias.data,
-                               normalized_shape, layer_norm.eps)
-        self.assertEqual(Y, Y_ref, rtol=0, atol=1e-5)
-
-        if self.device_type == 'cuda':
-            layer_norm.cpu()
-            Y_cpu = layer_norm(X.cpu())
-            self.assertEqual(Y_cpu, Y, rtol=0, atol=1e-5)
 
     @onlyOnCPUAndCUDA
     def test_GroupNorm_general(self, device):
@@ -17145,6 +17312,78 @@ class TestNNDeviceType(NNTestCase):
                 output_one_hot = m(input, target_one_hot)
                 self.assertEqual(output, output_one_hot)
 
+    def test_cross_entropy_label_smoothing_errors(self, device):
+        N, C = 3, 4
+        input_args = [
+            (torch.randn((N, C), device=device), torch.arange(0, C, device=device)),
+            (torch.randn((N, C), device=device), torch.randn(N, C, device=device))
+        ]
+        for input_arg in input_args:
+            loss = nn.CrossEntropyLoss(label_smoothing=1.2)
+            with self.assertRaisesRegex(RuntimeError,
+                                        r"label_smoothing must be between 0\.0"):
+                loss(*input_arg)
+
+    def test_cross_entropy_label_smoothing_consistent_index_target_and_probs(self, device):
+        N, C = 10, 4
+        ks = range(5)
+        reductions = ['none', 'mean', 'sum']
+        label_smoothings = [0.05, 0.15]
+
+        for k, reduction, label_smoothing in product(ks, reductions, label_smoothings):
+            other_dims = [torch.randint(2, 5, size=(1,)).item() for _ in range(k)]
+            input = torch.randn(N, C, *other_dims, device=device, requires_grad=True)
+            target = torch.empty(N, *other_dims, dtype=torch.long, device=device).random_(0, C)
+
+            # construct target probablity that should have the same result as label_smoothing
+            target_proba = F.one_hot(target, num_classes=C)
+            # Need to put the C dim at index 1.
+            target_proba = target_proba.permute(0, -1, *range(1, target_proba.dim() - 1))
+            target_mask = (target_proba == 1)
+            target_proba = target_proba.to(dtype=input.dtype)
+
+            # y_k^ls = y_k * (1 - label_smoothing) + label_smoothing / n_classes
+            # Get one-hot representation of the target.
+            target_proba.masked_fill_(target_mask, 1 - label_smoothing + label_smoothing / C)
+            target_proba.masked_fill_(~target_mask, label_smoothing / C)
+
+            loss = nn.CrossEntropyLoss(reduction=reduction)
+            output_with_prob = loss(input, target_proba)
+
+            loss = nn.CrossEntropyLoss(
+                reduction=reduction, label_smoothing=label_smoothing)
+            output_with_index = loss(input, target)
+
+            self.assertEqual(output_with_prob, output_with_index,
+                             rtol=1e-07, atol=1e-05)
+
+    def test_cross_entropy_label_smoothing_with_probs(self, device):
+        N, C = 10, 4
+        ks = range(5)
+        reductions = ['none', 'mean', 'sum']
+        label_smoothings = [0.05, 0.15]
+
+        # Test with k-dimensional loss.
+        for k, label_smoothing in product(ks, label_smoothings):
+            other_dims = [torch.randint(2, 5, size=(1,)).item() for _ in range(k)]
+            input = torch.randn(N, C, *other_dims, device=device, requires_grad=True)
+            target = F.log_softmax(torch.randn(N, C, *other_dims, device=device), dim=1)
+
+            for reduction in reductions:
+                # use with label_smoothing
+                loss = nn.CrossEntropyLoss(reduction=reduction, label_smoothing=label_smoothing)
+                output_with_smoothing = loss(input, target)
+
+                # manually smoothing target
+                # class_proba^ls = class_proba * (1 - label_smoothing) +
+                #                  label_smoothing / n_classes
+                target_with_smoothing = target * (1 - label_smoothing) + label_smoothing / C
+                loss = nn.CrossEntropyLoss(reduction=reduction)
+                output_with_manual_smoothing = loss(input, target_with_smoothing)
+
+                self.assertEqual(output_with_smoothing, output_with_manual_smoothing)
+
+
     def test_softshrink_negative(self, device):
         input = torch.randn(5, device=device, requires_grad=True)
         m = torch.nn.Softshrink(-1)
@@ -17153,14 +17392,30 @@ class TestNNDeviceType(NNTestCase):
             m(input)
 
     def test_fold(self, device):
+        def test_dtype(fn, input, dtype):
+            input = input.detach().clone().to(dtype=dtype).requires_grad_(True)
+            input2 = input.detach().clone().float().requires_grad_(True)
+            out = fn(input)
+            out.sum().backward()
+            out2 = fn(input2)
+            out2.sum().backward()
+            self.assertEqual(out.dtype, dtype)
+            self.assertEqual(input.grad.dtype, dtype)
+            self.assertEqual(out, out2.to(dtype=dtype), atol=0.05, rtol=0)
+            self.assertEqual(input.grad, input2.grad.to(dtype=dtype))
+
         def func(x):
             return F.fold(x, output_size=(4, 5), kernel_size=(2, 2))
+
         seeds = (44, 83, 71, 25, 999)
         for sd in seeds:
             torch.manual_seed(sd)
             x = torch.randn(1, 12, 12, device=device, requires_grad=True)
             gradcheck(func, [x])
             gradgradcheck(func, [x])
+            if device == 'cpu':
+                test_dtype(func, x, torch.bfloat16)
+
 
     def test_logsigmoid_out(self, device):
         # this isn't actually documented, but was broken previously:
