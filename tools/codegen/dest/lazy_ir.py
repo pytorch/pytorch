@@ -120,7 +120,7 @@ class LazyIR:
         node_ctor_args = ", ".join([f"{i.cpp_type()} {i.name}" for i in all_types])
         scalar_initializers = ",\n        ".join([f"{t.name}_({t.name})" for t in scalar_types])
         scalar_decls = "\n  ".join([f"{t.cpp_type()} {t.name}_;" for t in scalar_types])
-        # scalar_hashes = ", ".join([f.name for f in scalar_types])
+        scalar_hashes = ", ".join([f.name for f in scalar_types])
         base_ctor_value_args = []
         for t in value_types:
             if isinstance(t.type.elem, BaseCType):
@@ -130,19 +130,6 @@ class LazyIR:
             else:
                 assert False, ""
         base_ctor_value_args = ", ".join(base_ctor_value_args)
-
-        scalar_hashes = []
-        for t in scalar_types:
-            if isinstance(t.type, BaseCType):
-                scalar_hashes.append(f"{t.name}")
-            elif isinstance(t.type, OptionalCType):
-                # TODO need to find a good way to hash optionals.
-                #  
-                # scalar_hashes.append(f"{t.name}.has_value() ? {t.name}.value() : kNull{t.cpp_type()}")
-                pass
-            else:
-                assert False, ""
-        scalar_hashes = ", ".join(scalar_hashes)
 
         return [f"""\
 class {class_name} : public Node {{
@@ -157,19 +144,15 @@ class {class_name} : public Node {{
       throw std::runtime_error("need to hash scalars properly");
   }}
 
-  std::string ToString() const override;
+  std::string ToString() const override {{
+    std::stringstream ss;
+    ss << Node::ToString();
+    return ss.str();
+  }}
 
-  NodePtr Clone(OpList operands) const override;
 
   {scalar_decls}
 
 }};
 
 """, ]
-
-# seems like maybe wrong type for Value as inpout to node ctor?
-# Node(ir::OpKind(at::aten::convolution_overrideable),
-#            {input, weight, bias},
-#            /*num_outputs=*/1,
-#            lazy_tensors::util::MHash(stride, padding, dilation, transposed,
-#                                      output_padding, groups)),
