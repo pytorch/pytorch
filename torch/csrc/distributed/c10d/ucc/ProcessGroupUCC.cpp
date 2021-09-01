@@ -94,8 +94,13 @@ public:
     std::shared_ptr<UCPRequest> request;
     std::shared_ptr<UCPWorker> worker;
   public:
-    WorkUCP(const std::shared_ptr<UCPWorker> &worker, const std::shared_ptr<UCPRequest> &request)
-      : request(request), worker(worker) {}
+    WorkUCP(
+      const std::shared_ptr<UCPWorker> &worker,
+      const std::shared_ptr<UCPRequest> &request,
+      int rank, OpType opType,
+      const char* profilingTitle = nullptr,
+      const c10::optional<std::vector<at::Tensor>>& inputs = c10::nullopt)
+      : Work(rank, opType, profilingTitle, inputs), request(request), worker(worker) {}
 
     bool isCompleted() override {
       // TODO: progress worker in a side thread for true async
@@ -298,7 +303,9 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::send(
   auto request = ucp_endpoints[dstRank]->send_with_tag(
     tensor.data_ptr(), tensor.element_size() * tensor.numel(),
     tagging::wrap_tag(rank_, tag), tensor.device().type());
-  return c10::make_intrusive<ProcessGroupUCC::WorkUCP>(worker, request);
+  std::cout << "send" << std::endl;//
+  return c10::make_intrusive<ProcessGroupUCC::WorkUCP>(
+    worker, request, getRank(), OpType::SEND, "ucc:send", tensors);
 }
 
 // See note: [Receive from an endpoint]
@@ -315,7 +322,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::recv(
   auto request = worker->recv_with_tag_and_mask(
     tensor.data_ptr(), tensor.element_size() * tensor.numel(),
     tagging::wrap_tag(srcRank, tag), tagging::complete_tag_mask(), tensor.device().type());
-  return c10::make_intrusive<ProcessGroupUCC::WorkUCP>(worker, request);
+  return c10::make_intrusive<ProcessGroupUCC::WorkUCP>(
+    worker, request, getRank(), OpType::RECV, "ucc:recv", tensors);
 }
 
 // See note: [Receive from an endpoint]
@@ -327,7 +335,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::recvAnysource(
   auto request = worker->recv_with_tag_and_mask(
     tensor.data_ptr(), tensor.element_size() * tensor.numel(),
     tagging::wrap_tag(0, tag), tagging::any_source_mask(), tensor.device().type());
-  return c10::make_intrusive<ProcessGroupUCC::WorkUCP>(worker, request);
+  return c10::make_intrusive<ProcessGroupUCC::WorkUCP>(
+    worker, request, getRank(), OpType::RECVANYSOURCE, "ucc:recvAnysource", tensors);
 };
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::barrier(

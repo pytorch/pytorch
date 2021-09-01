@@ -171,6 +171,15 @@ def get_profiling_event(postfix, profiler):
     return [event for event in event_list if event.name.endswith(postfix)]
 
 
+def get_profiling_event_debug(postfix, profiler):
+    event_list = (
+        profiler.events()
+        if isinstance(profiler, torch.profiler.profile)
+        else profiler.function_events
+    )
+    return event_list
+
+
 # Base error message substring on unfinished reductions.
 ddp_prev_reduction_unfinished_str = (
     "Expected to have finished reduction in the prior iteration"
@@ -1324,6 +1333,10 @@ class DistributedTest:
             if profiler_ctx is not None:
                 backend = dist.get_backend()
                 if backend in SEND_RECV_PROFILING_SUPPORTED_BACKENDS:
+                    if backend == "nccl":
+                        # NCCL process group for CPU tensors is supported via
+                        # UCC. And when profiling, "ucc" is shown in the name.
+                        backend = "ucc"
                     for event_name in [f"{backend}:send", f"{backend}:recv"]:
                         events = get_profiling_event(event_name, prof)
                         # Each rank sends/recvs from all other ranks.
@@ -1343,16 +1356,12 @@ class DistributedTest:
         def test_send_recv(self):
             self._test_send_recv(profiler_ctx=None)
 
-        @sandcastle_skip_if(
-            BACKEND == "nccl", "NCCL send/recv tested by test_send_recv_nccl"
-        )
+        @skipNCCLIfNoUCC
         def test_send_recv_autograd_profiler(self):
             autograd_profiler_ctx = _create_autograd_profiler()
             self._test_send_recv(profiler_ctx=autograd_profiler_ctx)
 
-        @sandcastle_skip_if(
-            BACKEND == "nccl", "NCCL send/recv tested by test_send_recv_nccl"
-        )
+        @skipNCCLIfNoUCC
         @sandcastle_skip_if(IS_FBCODE, "Kineto in fbcode causes hang")
         @sandcastle_skip_if(
             IS_MACOS or IS_WINDOWS,
@@ -1403,6 +1412,10 @@ class DistributedTest:
             if profiler_ctx is not None:
                 backend = dist.get_backend()
                 if backend in SEND_RECV_PROFILING_SUPPORTED_BACKENDS:
+                    if backend == "nccl":
+                        # NCCL process group for CPU tensors is supported via
+                        # UCC. And when profiling, "ucc" is shown in the name.
+                        backend = "ucc"
                     for event_name in [f"{backend}:send", f"{backend}:recvAnySource"]:
                         events = get_profiling_event(event_name, prof)
                         # Each rank sends/recvs from other rank twice.
@@ -1444,16 +1457,12 @@ class DistributedTest:
         def test_send_recv_any_source(self):
             self._test_send_recv_any_source(profiler_ctx=None)
 
-        @sandcastle_skip_if(
-            BACKEND == "nccl", "Nccl does not support send/recv from any source"
-        )
+        @skipNCCLIfNoUCC
         def test_send_recv_any_source_autograd_profiler(self):
             autograd_profiler_ctx = _create_autograd_profiler()
             self._test_send_recv_any_source(profiler_ctx=autograd_profiler_ctx)
 
-        @sandcastle_skip_if(
-            BACKEND == "nccl", "Nccl does not support send/recv from any source"
-        )
+        @skipNCCLIfNoUCC
         @sandcastle_skip_if(IS_FBCODE, "Kineto in fbcode code causes hang")
         @sandcastle_skip_if(
             IS_MACOS or IS_WINDOWS,
@@ -1487,6 +1496,10 @@ class DistributedTest:
             if profiler_ctx is not None:
                 backend = dist.get_backend()
                 if backend in SEND_RECV_PROFILING_SUPPORTED_BACKENDS:
+                    if backend == "nccl":
+                        # NCCL process group for CPU tensors is supported via
+                        # UCC. And when profiling, "ucc" is shown in the name.
+                        backend = "ucc"
                     for event_name in [f"{backend}:send", f"{backend}:recv"]:
                         events = get_profiling_event(event_name, prof)
                         # Each rank sends/recvs from all other ranks
@@ -1502,16 +1515,12 @@ class DistributedTest:
         def test_send_recv_with_tag(self):
             self._test_send_recv_with_tag(profiler_ctx=None)
 
-        @sandcastle_skip_if(
-            BACKEND == "nccl", "NCCL send/recv tested by test_send_recv_nccl"
-        )
+        @skipNCCLIfNoUCC
         def test_send_recv_with_tag_autograd_profiler(self):
             autograd_profiler_ctx = _create_autograd_profiler()
             return self._test_send_recv_with_tag(profiler_ctx=autograd_profiler_ctx)
 
-        @sandcastle_skip_if(
-            BACKEND == "nccl", "NCCL send/recv tested by test_send_recv_nccl"
-        )
+        @skipNCCLIfNoUCC
         @sandcastle_skip_if(IS_FBCODE, "Kineto in fbcode code causes hang")
         @sandcastle_skip_if(
             IS_MACOS or IS_WINDOWS,
@@ -1545,10 +1554,15 @@ class DistributedTest:
             if profiler_ctx is not None:
                 backend = dist.get_backend()
                 if backend in SEND_RECV_PROFILING_SUPPORTED_BACKENDS:
+                    if backend == "nccl":
+                        # NCCL process group for CPU tensors is supported via
+                        # UCC. And when profiling, "ucc" is shown in the name.
+                        backend = "ucc"
                     expected_event_name = (
                         f"{backend}:send" if rank == 0 else f"{backend}:recv"
                     )
-                    events = get_profiling_event(expected_event_name, prof)
+                    events = get_profiling_event_debug(expected_event_name, prof)
+                    print(rank, events)
                     event_count = sum(e.count for e in events)
                     expected_count = dist.get_world_size() - 1 if rank == 0 else 1
                     self.assertEqual(expected_count, event_count)
@@ -1571,12 +1585,12 @@ class DistributedTest:
         def test_isend(self):
             self._test_isend(profiler_ctx=None)
 
-        @sandcastle_skip_if(BACKEND == "nccl", "Nccl does not support isend")
+        @skipNCCLIfNoUCC
         def test_isend_autograd_profiler(self):
             autograd_profiler_ctx = _create_autograd_profiler()
             self._test_isend(profiler_ctx=autograd_profiler_ctx)
 
-        @sandcastle_skip_if(BACKEND == "nccl", "Nccl does not support isend")
+        @skipNCCLIfNoUCC
         @sandcastle_skip_if(IS_FBCODE, "Kineto in fbcode code causes hang")
         @sandcastle_skip_if(
             IS_MACOS or IS_WINDOWS,
