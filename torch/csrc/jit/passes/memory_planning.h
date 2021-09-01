@@ -10,7 +10,8 @@ enum class Strategy {
   LINEAR_SCAN,
   GREEDY_BY_SIZE,
   GREEDY_BY_SIZE_WITH_FIRST_GAP,
-  GREEDY_BY_LONGEST_AND_SIZE
+  GREEDY_BY_LONGEST_AND_SIZE,
+  GREEDY_BY_BREADTH,
 };
 
 inline const char* toString(Strategy s) {
@@ -25,6 +26,8 @@ inline const char* toString(Strategy s) {
       return "GREEDY_BY_SIZE_WITH_FIRST_GAP";
     case Strategy::GREEDY_BY_LONGEST_AND_SIZE:
       return "GREEDY_BY_LONGEST_AND_SIZE";
+    case Strategy::GREEDY_BY_BREADTH:
+      return "GREEDY_BY_BREADTH";
     default:
       return "UNKNOWN STRATEGY";
   }

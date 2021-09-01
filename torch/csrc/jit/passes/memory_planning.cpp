@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/passes/memory_planning.h>
-#include <torch/csrc/jit/passes/memory_planning/greedy_by_size.h>
 #include <torch/csrc/jit/passes/memory_planning/linear_scan.h>
+#include <torch/csrc/jit/passes/memory_planning/greedy_by_size.h>
+#include <torch/csrc/jit/passes/memory_planning/greedy_by_breadth.h>
 
 #include <jit/tensorexpr/kernel.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
@@ -272,7 +273,7 @@ int64_t getTotalAllocationSize(std::vector<MemAllocation> allocations) {
 
 bool intersectAllocs(MemAllocation m1, MemAllocation m2) {
   return intersectLiveRange(m1.lvr, m2.lvr) &&
-      intersectMemRegion(m1.reg, m2.reg);
+         intersectMemRegion(m1.reg, m2.reg);
 }
 
 bool validateAllocations(std::vector<MemAllocation> allocations) {
@@ -342,6 +343,11 @@ void planMemory(std::shared_ptr<Graph>& graph, Strategy strat) {
     }
     case Strategy::GREEDY_BY_LONGEST_AND_SIZE: {
       allocations = greedyBySizeAndLongestWithFirstGap(managed_live_ranges);
+      break;
+    }
+    case Strategy::GREEDY_BY_BREADTH: {
+      allocations = greedyByOperatorBreadth(
+          managed_value_sizes, managed_value_ranges, out_nodes);
       break;
     }
     default:
