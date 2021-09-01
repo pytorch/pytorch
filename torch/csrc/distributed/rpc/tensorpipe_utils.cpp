@@ -311,9 +311,9 @@ c10::intrusive_ptr<Message> tensorpipeDeserialize(
     tensors.emplace_back(std::move(t));
   }
 
-  size_t tpDescriptorPos = 0;
+  size_t tpDescriptorIndex = 0;
   for (size_t i; i < tensors.size(); i++) {
-    auto& tensor = tpDescriptor.tensors[tpDescriptorPos];
+    auto& tensor = tpDescriptor.tensors[tpDescriptorIndex];
     if (tensor.targetDevice.has_value() &&
         tensor.targetDevice->type == tensorpipe::kCudaDeviceType) {
       TORCH_INTERNAL_ASSERT(
