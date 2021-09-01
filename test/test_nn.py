@@ -9617,25 +9617,6 @@ class TestNN(NNTestCase):
         test_huber_loss_zero_delta()
 
     def test_cosine_similarity(self):
-        input1 = torch.randn(4, 4, requires_grad=True)
-        input2 = torch.randn(4, 4, requires_grad=True)
-        self.assertTrue(gradcheck(lambda x, y: F.cosine_similarity(x, y), (input1, input2)))
-
-        input1 = torch.randn(4, 5, 6, requires_grad=True)
-        input2 = torch.randn(4, 5, 6, requires_grad=True)
-        self.assertTrue(gradcheck(lambda x, y: F.cosine_similarity(x, y, dim=0), (input1, input2)))
-        self.assertTrue(gradcheck(lambda x, y: F.cosine_similarity(x, y, dim=-1), (input1, input2)))
-
-        input1 = torch.randn((), requires_grad=True)
-        input2 = torch.randn((), requires_grad=True)
-        self.assertTrue(gradcheck(lambda x, y: F.cosine_similarity(x, y, dim=0), (input1, input2)))
-        self.assertTrue(gradcheck(lambda x, y: F.cosine_similarity(x, y, dim=-1), (input1, input2)))
-
-        # Check broadcasting
-        input1 = torch.randn(2, 1, 3, requires_grad=True)
-        input2 = torch.randn(1, 2, 3, requires_grad=True)
-        self.assertTrue(gradcheck(lambda x, y: F.cosine_similarity(x, y, dim=-1), (input1, input2)))
-
         # Check cosine_similarity input/output shapes
         input_size = (1, 3, 2, 1)
         expected_size = (1, 2, 1)
@@ -9661,7 +9642,6 @@ class TestNN(NNTestCase):
         input2 = torch.randn(2, 1, 3)
         with self.assertRaises(RuntimeError):
             F.cosine_similarity(input1, input2)
-
 
         # Check type promotion, issue #61454
         input = torch.tensor(12.)
@@ -17438,14 +17418,30 @@ class TestNNDeviceType(NNTestCase):
             m(input)
 
     def test_fold(self, device):
+        def test_dtype(fn, input, dtype):
+            input = input.detach().clone().to(dtype=dtype).requires_grad_(True)
+            input2 = input.detach().clone().float().requires_grad_(True)
+            out = fn(input)
+            out.sum().backward()
+            out2 = fn(input2)
+            out2.sum().backward()
+            self.assertEqual(out.dtype, dtype)
+            self.assertEqual(input.grad.dtype, dtype)
+            self.assertEqual(out, out2.to(dtype=dtype), atol=0.05, rtol=0)
+            self.assertEqual(input.grad, input2.grad.to(dtype=dtype))
+
         def func(x):
             return F.fold(x, output_size=(4, 5), kernel_size=(2, 2))
+
         seeds = (44, 83, 71, 25, 999)
         for sd in seeds:
             torch.manual_seed(sd)
             x = torch.randn(1, 12, 12, device=device, requires_grad=True)
             gradcheck(func, [x])
             gradgradcheck(func, [x])
+            if device == 'cpu':
+                test_dtype(func, x, torch.bfloat16)
+
 
     def test_logsigmoid_out(self, device):
         # this isn't actually documented, but was broken previously:
