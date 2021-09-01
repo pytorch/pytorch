@@ -53,60 +53,65 @@ class Polynomial;
 class TORCH_API HashProvider : public IRVisitor {
  public:
   template <class T>
-  SimplifierHashType hash(T* e) {
+  SimplifierHashType hash(T e) {
     // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
     e->accept(this);
     return hashOf(e);
   }
 
-  bool cachedHash(const KernelScopedObject* e) {
+  bool cachedHash(ExprPtr e) {
     return exprToHash_.find(e) != exprToHash_.end();
+  }
+  bool cachedHash(StmtPtr s) {
+    return stmtToHash_.find(s) != stmtToHash_.end();
   }
 
   void clearCache() {
     exprToHash_.clear();
+    stmtToHash_.clear();
   }
 
-  void visit(Add* v) override;
-  void visit(Sub* v) override;
-  void visit(Mul* v) override;
-  void visit(Div* v) override;
-  void visit(Mod* v) override;
-  void visit(Max* v) override;
-  void visit(Min* v) override;
-  void visit(And* v) override;
-  void visit(Or* v) override;
-  void visit(Xor* v) override;
-  void visit(Lshift* v) override;
-  void visit(Rshift* v) override;
-  void visit(CompareSelect* v) override;
+  void visit(AddPtr v) override;
+  void visit(SubPtr v) override;
+  void visit(MulPtr v) override;
+  void visit(DivPtr v) override;
+  void visit(ModPtr v) override;
+  void visit(RoundOffPtr v) override;
+  void visit(MaxPtr v) override;
+  void visit(MinPtr v) override;
+  void visit(AndPtr v) override;
+  void visit(OrPtr v) override;
+  void visit(XorPtr v) override;
+  void visit(LshiftPtr v) override;
+  void visit(RshiftPtr v) override;
+  void visit(CompareSelectPtr v) override;
 
 // NOLINTNEXTLINE
 #define IMM_VISIT(Type, Name)                    \
-  void visit(Name##Imm* v) override {            \
+  void visit(Name##ImmPtr v) override {          \
     CACHE_GUARD();                               \
     putHash(v, hash_combine(#Name, v->value())); \
   }
-  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_VISIT);
+  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_VISIT);
 #undef IMM_VISIT
 
-  void visit(Cast* v) override;
-  void visit(Var* v) override;
-  void visit(Ramp* v) override;
-  void visit(Load* v) override;
-  void visit(Store* v) override;
-  void visit(Block* v) override;
-  void visit(For* v) override;
-  void visit(Broadcast* v) override;
-  void visit(IfThenElse* v) override;
-  void visit(Intrinsics* v) override;
-  void visit(Allocate* v) override;
-  void visit(Free* v) override;
-  void visit(Cond* v) override;
-  void visit(Term* v) override;
-  void visit(Polynomial* v) override;
-  void visit(MaxTerm* v) override;
-  void visit(MinTerm* v) override;
+  void visit(CastPtr v) override;
+  void visit(VarPtr v) override;
+  void visit(RampPtr v) override;
+  void visit(LoadPtr v) override;
+  void visit(StorePtr v) override;
+  void visit(BlockPtr v) override;
+  void visit(ForPtr v) override;
+  void visit(BroadcastPtr v) override;
+  void visit(IfThenElsePtr v) override;
+  void visit(IntrinsicsPtr v) override;
+  void visit(AllocatePtr v) override;
+  void visit(FreePtr v) override;
+  void visit(CondPtr v) override;
+  void visit(TermPtr v) override;
+  void visit(PolynomialPtr v) override;
+  void visit(MaxTermPtr v) override;
+  void visit(MinTermPtr v) override;
 
   template <typename... Types>
   SimplifierHashType hash_combine(const Types&... args) {
@@ -116,7 +121,7 @@ class TORCH_API HashProvider : public IRVisitor {
   }
 
  private:
-  SimplifierHashType hashOf(Expr* e) {
+  SimplifierHashType hashOf(ExprPtr e) {
     auto it = exprToHash_.find(e);
     if (it != exprToHash_.end()) {
       return it->second;
@@ -132,9 +137,9 @@ class TORCH_API HashProvider : public IRVisitor {
     return hash;
   }
 
-  SimplifierHashType hashOf(Stmt* s) {
-    auto it = exprToHash_.find(s);
-    if (it != exprToHash_.end()) {
+  SimplifierHashType hashOf(StmtPtr s) {
+    auto it = stmtToHash_.find(s);
+    if (it != stmtToHash_.end()) {
       return it->second;
     }
 
@@ -169,7 +174,7 @@ class TORCH_API HashProvider : public IRVisitor {
         (seed._h >> 4);
   }
 
-  void _hash_combine(SimplifierHashType& seed, Expr* e) {
+  void _hash_combine(SimplifierHashType& seed, ExprPtr e) {
     _hash_combine(seed, hash(e));
   }
 
@@ -182,15 +187,23 @@ class TORCH_API HashProvider : public IRVisitor {
     _hash_combine(seed, args...);
   }
 
-  void putHash(const KernelScopedObject* e, SimplifierHashType h) {
+  void putHash(ExprPtr e, SimplifierHashType h) {
     auto res = exprToHash_.emplace(e, h);
     if (res.second == false) {
       // This is always a logic bug since we should check the cache first.
       throw std::runtime_error("hash collision");
     }
   }
+  void putHash(StmtPtr s, SimplifierHashType h) {
+    auto res = stmtToHash_.emplace(s, h);
+    if (res.second == false) {
+      // This is always a logic bug since we should check the cache first.
+      throw std::runtime_error("hash collision");
+    }
+  }
 
-  std::unordered_map<const KernelScopedObject*, SimplifierHashType> exprToHash_;
+  std::unordered_map<ExprPtr, SimplifierHashType> exprToHash_;
+  std::unordered_map<StmtPtr, SimplifierHashType> stmtToHash_;
   UniqueNameManager name_manager_;
 
   size_t te_hash(SimplifierHashType val) {
@@ -268,6 +281,14 @@ class TORCH_API HashProvider : public IRVisitor {
   }
 
   size_t te_hash(at::Half d) {
+    // memcpy as type punning. Should be optimized out.
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    int16_t n;
+    std::memcpy(&n, &d, sizeof d);
+    return te_hash(n);
+  }
+
+  size_t te_hash(at::BFloat16 d) {
     // memcpy as type punning. Should be optimized out.
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int16_t n;
