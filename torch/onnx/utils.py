@@ -79,7 +79,7 @@ def export(model, args, f, export_params=True, verbose=False, training=None,
            opset_version=None, _retain_param_name=None, do_constant_folding=True,
            example_outputs=None, strip_doc_string=None, dynamic_axes=None,
            keep_initializers_as_inputs=None, custom_opsets=None,
-           enable_onnx_checker=True, use_external_data_format=None):
+           enable_onnx_checker=None, use_external_data_format=None):
     if operator_export_type is None:
         if torch.onnx.PYTORCH_ONNX_CAFFE2_BUNDLE:
             operator_export_type = OperatorExportTypes.ONNX_ATEN_FALLBACK
@@ -672,8 +672,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
             opset_version=None, do_constant_folding=True,
             dynamic_axes=None, keep_initializers_as_inputs=None,
             fixed_batch_size=False, custom_opsets=None, add_node_names=True,
-            enable_onnx_checker=True, use_external_data_format=None,
-            onnx_shape_inference=True):
+            use_external_data_format=None, onnx_shape_inference=True):
 
     if isinstance(model, torch.nn.DataParallel):
         raise ValueError("torch.nn.DataParallel is not supported by ONNX "
