@@ -55,21 +55,21 @@ class TsLowering:
         if self.target == TsLowering.TsLoweringTarget.DISPATCH:
             return [f"""\
 case at::aten::{func.name}:
-    return Lower{ir_node_name(func)}(ir::NodeCast<ir::ops::{ir_node_name(func)}>(node, ir::OpKind(at::aten::{func.name})));
+    return Lower{ir_node_name(func)}(function, loctx, ir::NodeCast<ir::ops::{ir_node_name(func)}>(node, ir::OpKind(at::aten::{func.name})));
 """, ]
 
 
         elif self.target == TsLowering.TsLoweringTarget.LOWERING: 
             all_types, value_types, scalar_types = process_ir_types(func)
-            emplace_values = [f"loctx()->GetOutputOp(node->operand({i}))" for i in range(len(value_types))]
+            emplace_values = [f"loctx->GetOutputOp(node->operand({i}))" for i in range(len(value_types))]
             emplace_scalars = [f"node->{t.name}_" for t in scalar_types]
             emplace_arguments = "\n    ".join([f"arguments.emplace_back({a});" for a in emplace_values + emplace_scalars])
             return [f"""\
-TSOpVector Lower{ir_node_name(func)}(const ir::ops::{ir_node_name(func)}* node) {{
+TSOpVector Lower{ir_node_name(func)}(std::shared_ptr<torch::jit::GraphFunction> function, ts_backend::TSLoweringContext* loctx, const ir::ops::{ir_node_name(func)}* node) {{
     std::vector<torch::jit::NamedValue> arguments;
     arguments.reserve({len(all_types)});
     {emplace_arguments}
-    TSOpVector {func.name}_out = LowerBuiltin(node, arguments);
+    TSOpVector {func.name}_out = LowerBuiltin(function, node, arguments);
     LTC_CHECK_EQ({func.name}_out.size(), {len(func.returns)});
     
     // TODO: need to call GenerateClone sometimes? Or else return LowerBuiltIn() directly

@@ -330,6 +330,7 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
                 'ts_lowering_inc': [f'#include "{path}"' for path in [
                     "lazy_tensor_core/csrc/ir.h",
                     "torch/csrc/jit/ir/named_value.h",
+                    "torch/csrc/jit/frontend/sugared_value.h",
                     "lazy_tensor_core/csrc/ts_backend/ts_lowering_context.h",
                     f"{output_dir}/{backend_key}LazyIr.h",
                 ]],

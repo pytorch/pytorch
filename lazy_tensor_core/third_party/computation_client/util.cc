@@ -6,10 +6,6 @@ namespace lazy_tensors {
 namespace util {
 namespace {
 
-hash_t Hash(const c10::ScalarType& value) {
-  return DataHash(&value, sizeof(value));
-}
-
 hash_t LoadHash(const uint8** data, const uint8* top) {
   std::ptrdiff_t size = top - (*data);
   if (size >= sizeof(hash_t)) {
@@ -30,6 +26,10 @@ hash_t LoadHash(const uint8** data, const uint8* top) {
 }
 
 }  // namespace
+
+hash_t Hash(const c10::ScalarType& value) {
+  return DataHash(&value, sizeof(value));
+}
 
 hash_t HashBlock(const void* data, size_t n, const hash_t& seed) {
   const hash_t m = 0xc6a4a7935bd1e995;

@@ -46,6 +46,11 @@
 namespace torch_lazy_tensors {
 namespace compiler {
 
+// Forward decl of method that is codegenned and has no header
+TSOpVector LowerToTSCodegen(std::shared_ptr<torch::jit::GraphFunction> function,
+                            ts_backend::TSLoweringContext* loctx, 
+                            const ir::Node* node);
+
 class TSNodeLowering : public NodeLowering {
  public:
   TSNodeLowering(const std::string& name, ts_backend::TSLoweringContext* loctx)
@@ -179,7 +184,16 @@ class TSNodeLowering : public NodeLowering {
     }
   }
 
+
   TSOpVector LowerToTS(const ir::Node* node) {
+
+    // Desirable to have a way to do some ops via codegen and others by hand, 
+    // at least for now
+    auto codegen_lowering = LowerToTSCodegen(function_, loctx(), node);
+    if (codegen_lowering.size() > 0){
+      return codegen_lowering;
+    }
+
     if (node->op().op == at::aten::as_strided) {
       return LowerAsStrided(ir::NodeCast<ir::ops::AsStrided>(
           node, ir::OpKind(at::aten::as_strided)));
