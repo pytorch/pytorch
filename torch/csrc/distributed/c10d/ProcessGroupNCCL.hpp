@@ -22,7 +22,6 @@
 #include <c10/cuda/CUDAStream.h>
 
 #include <torch/custom_class.h>
-#include <fmt/format.h>
 
 namespace c10d {
 
