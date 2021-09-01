@@ -181,6 +181,9 @@ class AbstractTestCases:
                     if name in ['real', 'imag']:
                         y = torch.randn(1, dtype=torch.cfloat)
                         var = getattr(y, name)
+                    elif name in ["H", "mT", "mH"]:
+                        y = torch.randn(1, 1)
+                        var = getattr(y, name)
                     else:
                         var = getattr(ns, name)
                     if not isinstance(var, checked_types):
