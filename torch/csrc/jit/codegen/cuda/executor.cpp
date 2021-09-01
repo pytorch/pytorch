@@ -633,12 +633,12 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
     executor_utils::validateVectorizedTensors(
         &fusion_, inputs, outputs, lowered_, compileTimeDataCache());
 
-    auto fusion = fusion_;
+    auto& fusion = fusion_;
 
     auto alias_indices_entry =
         executor_utils::caching::ExecutorCompileTimeEntry<
             executor_utils::caching::InputAliasIndices>(
-            compileTimeDataCache(), [fusion]() {
+            compileTimeDataCache(), [&fusion]() {
               return std::make_unique<std::vector<std::pair<int, int>>>(
                   fusion.getInputAliasIndices());
             });
@@ -651,7 +651,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
       auto output_alias_indices_entry =
           executor_utils::caching::ExecutorCompileTimeEntry<
               executor_utils::caching::OutputAliasIndices>(
-              compileTimeDataCache(), [fusion]() {
+              compileTimeDataCache(), [&fusion]() {
                 return std::make_unique<std::unordered_set<int>>(
                     fusion.getOutputAliasIndices());
               });
