@@ -1626,7 +1626,6 @@ class TestSharding(TestCase):
 
         self.assertEqual(sorted(all_items), sorted(items))
 
-    @skipIfNoDill
     def test_sharding_length(self):
         numbers_dp = IDP(range(13))
         sharded_dp0 = numbers_dp.sharding_filter()
