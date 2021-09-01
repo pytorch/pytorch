@@ -1,6 +1,3 @@
-#include "ATen/record_function.h"
-#include <bits/stdint-intn.h>
-#include <bits/stdint-uintn.h>
 #include <c10/util/irange.h>
 #include <limits>
 #include <torch/csrc/autograd/profiler_kineto.h>

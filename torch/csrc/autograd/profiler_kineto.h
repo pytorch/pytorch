@@ -1,6 +1,5 @@
 #pragma once
 
-#include "c10/macros/Export.h"
 #include <torch/csrc/autograd/profiler_legacy.h>
 #include <vector>
 

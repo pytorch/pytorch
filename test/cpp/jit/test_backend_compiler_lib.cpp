@@ -1,5 +1,3 @@
-#include <bits/stdint-intn.h>
-#include <netdb.h>
 #include <torch/csrc/jit/backends/backend.h>
 #include <torch/csrc/jit/backends/backend_exception.h>
 #include <torch/csrc/jit/mobile/profiler_edge.h>
