@@ -154,15 +154,10 @@ class TestStaticQuantizedModule(QuantizationTestCase):
                          linear_unpack(loaded_qlinear._packed_params._packed_params))
         self.assertEqual(qlinear.scale, loaded_qlinear.scale)
         self.assertEqual(qlinear.zero_point, loaded_qlinear.zero_point)
-        self.checkScriptable(loaded_qlinear, [[X_q]], check_save_load=True)
-
-        # make sure loaded_qlinear has the same dir as qlinear
-        # since scripting the module will add __overloads__ to __dict__,
-        # we filter this item from the check.
-        dir_qlinear_modified = [x for x in dir(qlinear) if x != '__overloads__']
-        dir_loaded_qlinear_modified = [x for x in dir(loaded_qlinear) if x != '__overloads__']
-        self.assertTrue(dir_qlinear_modified == dir_loaded_qlinear_modified)
-
+        # scripting will add __overloads__ to __dict__, which is why we script a copy
+        # to be able to do the check in the next line
+        self.checkScriptable(copy.deepcopy(loaded_qlinear), [[X_q]], check_save_load=True)
+        self.assertTrue(dir(qlinear) == dir(loaded_qlinear))
         self.assertEqual(qlinear._weight_bias(), loaded_qlinear._weight_bias())
         self.assertEqual(qlinear._weight_bias(), torch.ops.quantized.linear_unpack(qlinear._packed_params._packed_params))
         Z_q2 = loaded_qlinear(X_q)
