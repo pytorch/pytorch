@@ -5,6 +5,7 @@
 #include <ATen/core/operator_name.h>
 #include <torch/csrc/jit/mobile/function.h>
 #include <torch/csrc/jit/runtime/jit_exception.h>
+#include <torch/csrc/jit/runtime/register_ops_utils.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 
 #include <ATen/record_function.h>
@@ -206,6 +207,102 @@ bool InterpreterState::run(Stack& stack) {
         } break;
         case TUPLE_SLICE: {
           tupleSlice(stack, inst.X, inst.X + inst.N);
+          ++pc;
+        } break;
+        case TUPLE_INDEX: {
+          tupleIndex(stack);
+          ++pc;
+        } break;
+        case GETITEM_T: {
+          listSelect(stack);
+          ++pc;
+        } break;
+        case LEN_T: {
+          listLen(stack);
+          ++pc;
+        } break;
+        case TUPLE_UNPACK: {
+          tupleUnpack(stack);
+          ++pc;
+        } break;
+        case RAISE_EXCEPTION: {
+          raiseException(stack);
+          ++pc;
+        } break;
+        case UNCHECKED_CAST: {
+          noop(stack);
+          ++pc;
+        } break;
+        case __IS__: {
+          is(stack);
+          ++pc;
+        } break;
+        case UN_INITIALIZED: {
+          unInitialized(stack);
+          ++pc;
+        } break;
+        case __ISNOT__: {
+          isNot(stack);
+          ++pc;
+        } break;
+        case FORMAT: {
+          format(stack);
+          ++pc;
+        } break;
+        case SIZE: {
+          size(stack);
+          ++pc;
+        } break;
+        case DEVICE: {
+          device(stack);
+          ++pc;
+        } break;
+        case DTYPE: {
+          dtype(stack);
+          ++pc;
+        } break;
+        case TO_PRIM_DTYPE: {
+          toPrimDType(stack);
+          ++pc;
+        } break;
+        case APPEND_T: {
+          listAppend(stack);
+          ++pc;
+        } break;
+        case DIM: {
+          dim(stack);
+          ++pc;
+        } break;
+        case EXTEND_T: {
+          listExtend(stack);
+          ++pc;
+        } break;
+        case __NOT__: {
+          _not(stack);
+          ++pc;
+        } break;
+        case BOOL_TENSOR: {
+          boolTensor(stack);
+          ++pc;
+        } break;
+        case SLICE_T: {
+          listSlice(stack);
+          ++pc;
+        } break;
+        case TO_LIST: {
+          toList(stack);
+          ++pc;
+        } break;
+        case NUM_TO_TENSOR_SCALAR: {
+          numToTensorScalar(stack);
+          ++pc;
+        } break;
+        case IS_CUDA: {
+          isCuda(stack);
+          ++pc;
+        } break;
+        case NUM_TO_TENSOR_BOOL: {
+          numToTensorBool(stack);
           ++pc;
         } break;
         case DICT_CONSTRUCT: {

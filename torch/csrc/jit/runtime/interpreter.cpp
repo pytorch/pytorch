@@ -23,6 +23,7 @@
 #include <torch/csrc/jit/runtime/jit_exception.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/profiling_record.h>
+#include <torch/csrc/jit/runtime/register_ops_utils.h>
 #include <torch/csrc/jit/runtime/script_profile.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 #include <string>
@@ -644,6 +645,126 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                 &(frame.function->type_table_[inst.X]),
                 &(frame.function->type_table_[inst.X + inst.N]));
             isinstance(stack, types);
+          }
+            INST_NEXT;
+          case INST(TUPLE_INDEX): {
+            INST_GUARD;
+            tupleIndex(stack);
+          }
+            INST_NEXT;
+          case INST(GETITEM_T): {
+            INST_GUARD;
+            listSelect(stack);
+          }
+            INST_NEXT;
+          case INST(LEN_T): {
+            INST_GUARD;
+            listLen(stack);
+          }
+            INST_NEXT;
+          case INST(TUPLE_UNPACK): {
+            INST_GUARD;
+            tupleUnpack(stack);
+          }
+            INST_NEXT;
+          case INST(RAISE_EXCEPTION): {
+            INST_GUARD;
+            raiseException(stack);
+          }
+            INST_NEXT;
+          case INST(UNCHECKED_CAST): {
+            INST_GUARD;
+            noop(stack);
+          }
+            INST_NEXT;
+          case INST(__IS__): {
+            INST_GUARD;
+            is(stack);
+          }
+            INST_NEXT;
+          case INST(UN_INITIALIZED): {
+            INST_GUARD;
+            unInitialized(stack);
+          }
+            INST_NEXT;
+          case INST(__ISNOT__): {
+            INST_GUARD;
+            isNot(stack);
+          }
+            INST_NEXT;
+          case INST(FORMAT): {
+            INST_GUARD;
+            format(stack);
+          }
+            INST_NEXT;
+          case INST(SIZE): {
+            INST_GUARD;
+            size(stack);
+          }
+            INST_NEXT;
+          case INST(DEVICE): {
+            INST_GUARD;
+            device(stack);
+          }
+            INST_NEXT;
+          case INST(DTYPE): {
+            INST_GUARD;
+            dtype(stack);
+          }
+            INST_NEXT;
+          case INST(TO_PRIM_DTYPE): {
+            INST_GUARD;
+            toPrimDType(stack);
+          }
+            INST_NEXT;
+          case INST(APPEND_T): {
+            INST_GUARD;
+            listAppend(stack);
+          }
+            INST_NEXT;
+          case INST(DIM): {
+            INST_GUARD;
+            dim(stack);
+          }
+            INST_NEXT;
+          case INST(EXTEND_T): {
+            INST_GUARD;
+            listExtend(stack);
+          }
+            INST_NEXT;
+          case INST(__NOT__): {
+            INST_GUARD;
+            _not(stack);
+          }
+            INST_NEXT;
+          case INST(BOOL_TENSOR): {
+            INST_GUARD;
+            boolTensor(stack);
+          }
+            INST_NEXT;
+          case INST(SLICE_T): {
+            INST_GUARD;
+            listSlice(stack);
+          }
+            INST_NEXT;
+          case INST(TO_LIST): {
+            INST_GUARD;
+            toList(stack);
+          }
+            INST_NEXT;
+          case INST(NUM_TO_TENSOR_SCALAR): {
+            INST_GUARD;
+            numToTensorScalar(stack);
+          }
+            INST_NEXT;
+          case INST(IS_CUDA): {
+            INST_GUARD;
+            isCuda(stack);
+          }
+            INST_NEXT;
+          case INST(NUM_TO_TENSOR_BOOL): {
+            INST_GUARD;
+            numToTensorBool(stack);
           }
             INST_NEXT;
           case INST(FORK): {
