@@ -203,7 +203,6 @@ def get_dep_modules(test: str) -> Set[str]:
             "mpl_toolkits",
             "google",
             "onnx",
-            "utils",  # REPO_ROOT/test/utils
             # Triggers RecursionError
             "mypy",
         ],
