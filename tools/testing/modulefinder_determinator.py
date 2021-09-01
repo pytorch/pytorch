@@ -1,10 +1,9 @@
-import difflib
 import os
 import modulefinder
 import sys
 import pathlib
 import warnings
-from typing import Dict, Any, List, Sequence, Set
+from typing import Dict, Any, List, Set
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 
@@ -83,19 +82,6 @@ TARGET_DET_LIST = [
     "test_utils",
     "test_view_ops",
 ]
-
-
-def assert_is_sorted(seq: Sequence[str], name: str) -> None:
-    diff = '\n'.join(difflib.unified_diff(seq, sorted(seq)))
-    if len(diff) != 0:
-        raise AssertionError(f'{name} is not sorted:\n{diff}')
-
-
-# We keep TARGET_DET_LIST sorted to minimize merge conflicts but most
-# importantly to allow us to comment on the absence of a test. It
-# would be very difficult to add a file right next to a comment that
-# says to keep it out of the list.
-assert_is_sorted(TARGET_DET_LIST, 'TARGET_DET_LIST')
 
 
 _DEP_MODULES_CACHE: Dict[str, Set[str]] = {}
