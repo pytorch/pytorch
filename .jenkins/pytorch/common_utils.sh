@@ -104,6 +104,17 @@ function clone_pytorch_xla() {
   fi
 }
 
+build_xla() {
+  clone_pytorch_xla
+  # shellcheck disable=SC1091
+  source "xla/.circleci/common.sh"
+  apply_patches
+  install_deps_pytorch_xla xla
+  set_torch_cmake_prefix_path
+  build_torch_xla xla
+  assert_git_not_dirty
+}
+
 function set_torch_cmake_prefix_path() {
   SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
   export CMAKE_PREFIX_PATH="${SITE_PACKAGES}/torch"
