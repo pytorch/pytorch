@@ -35,12 +35,12 @@ struct AutoNcclGroup {
   AutoNcclGroup() {
     (c10::cuda::CUDACachingAllocator::getFreeMutex())->lock();
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
-    c10d_nccl_check_wrapper(ncclGroupStart());
+    C10D_NCCL_CHECK(ncclGroupStart(), c10::nullopt);
 #endif
   }
   ~AutoNcclGroup() noexcept(false) {
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
-    c10d_nccl_check_wrapper(ncclGroupEnd());
+    C10D_NCCL_CHECK(ncclGroupEnd(), c10::nullopt);
 #endif
     (c10::cuda::CUDACachingAllocator::getFreeMutex())->unlock();
   }
@@ -368,10 +368,14 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
         // if throwing timed out excepiton without aborting nccl communicators
         // here, it was observed that CUDA GPU will have 100% utilization and
         // can not run new events successfully.
+
+        // WorkNCCL operator << does not work with fmt::format directly.
         std::stringstream ss;
-        ss << "Work: " << *this << " timed out in call to wait().";
+        ss << *this;
+        auto timeoutErrorMsg =
+            fmt::format("Work: {} timed out in call to wait().", ss.str());
         for (const auto& ncclComm : ncclComms_) {
-          ncclComm->ncclCommAbort(ss.str());
+          ncclComm->ncclCommAbort(timeoutErrorMsg);
           const auto& storeKey = getNcclAbortedCommStoreKey(
               buildNcclUniqueIdStr(ncclComm->getNcclId()));
           auto rankStr = std::to_string(rank_);
@@ -537,7 +541,7 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
 
       for (const auto& ncclComm : ncclComms) {
         std::string abortReason =
-            c10::str("Process Group destroyed on rank ", rank_);
+            fmt::format("Process Group destroyed on rank {}", rank_);
         ncclComm->ncclCommAbort(abortReason);
       }
     }
@@ -778,6 +782,19 @@ std::exception_ptr ProcessGroupNCCL::checkForNCCLErrors(
 std::exception_ptr ProcessGroupNCCL::checkForNCCLErrorsInternal(
     const std::vector<std::shared_ptr<NCCLComm>>& ncclComms) {
   for (const auto& ncclComm : ncclComms) {
+    // Prioritize commFailureReason over checkForNcclError() result if
+    // commFailureReason is set.
+    auto commFailureReason = ncclComm->getNcclCommFailureReason();
+    if (commFailureReason != c10::nullopt) {
+        return std::make_exception_ptr(
+          std::runtime_error(
+            fmt::format(
+              "NCCL communicator encountered error set by ProcessGroupNCCL: {}",
+               *commFailureReason
+            )
+          )
+        );
+    }
     ncclResult_t ncclAsyncErr = ncclComm->checkForNcclError();
     if (ncclAsyncErr != ncclSuccess) {
       return std::make_exception_ptr(std::runtime_error(
@@ -860,7 +877,7 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
 
   // For point-to-point communication, lower rank of the two will get unique id.
   if (rank_ == 0 || (isP2POp(opType) && p2pRank == 0)) {
-    c10d_nccl_check_wrapper(ncclGetUniqueId(&ncclID));
+    C10D_NCCL_CHECK(ncclGetUniqueId(&ncclID), c10::nullopt);
   }
 
   // For point-to-point communication on the same process, don't need broadcast.
@@ -891,11 +908,11 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
   // created before encountering any communication calls. This is why we need
   // the following for loop.
   for (const auto i : c10::irange(ncclActiveGroupCounter_)) {
-    c10d_nccl_check_wrapper(ncclGroupEnd());
+    C10D_NCCL_CHECK(ncclGroupEnd(), c10::nullopt);
   }
 
   // [Note 1] Create the NCCL communicators for each GPU
-  c10d_nccl_check_wrapper(ncclGroupStart());
+  C10D_NCCL_CHECK(ncclGroupStart(), c10::nullopt);
 
   for (const auto i : c10::irange(devices.size())) {
     // GPU world size and GPU rank
@@ -926,11 +943,11 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
   }
 
   // [Note 2 ]
-  c10d_nccl_check_wrapper(ncclGroupEnd());
+  C10D_NCCL_CHECK(ncclGroupEnd(), c10::nullopt);
 
   // See [Group Start/End Note]
   for (const auto i : c10::irange(ncclActiveGroupCounter_)) {
-    c10d_nccl_check_wrapper(ncclGroupStart());
+    C10D_NCCL_CHECK(ncclGroupStart(), c10::nullopt);
   }
 
   ncclStreams_.emplace(devicesKey, std::move(streamVal));
@@ -1145,7 +1162,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
     for (const auto i : c10::irange(inputs.size())) {
       gpuGuard.set_index(devices[i].index());
       at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
-      c10d_nccl_check_wrapper(
+      C10D_NCCL_CHECK(
           fn(inputs[i], outputs[i], ncclComms[i]->getNcclComm(), ncclStream), ncclComms[i]->getNcclCommFailureReason());
     }
   }
@@ -1246,7 +1263,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
       // For point-to-point communication, NCCL ranks can only
       // be 0 or 1.
       int p2pTargetRank = isSendRecvSelf ? 0 : 1 - p2pRank;
-      c10d_nccl_check_wrapper(fn(
+      C10D_NCCL_CHECK(fn(
           tensors[i], ncclComms[i]->getNcclComm(), ncclStream, p2pTargetRank), ncclComms[i]->getNcclCommFailureReason());
     }
   }
@@ -1868,14 +1885,14 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::recv(
 
 void ProcessGroupNCCL::groupStart() {
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
-  c10d_nccl_check_wrapper(ncclGroupStart());
+  C10D_NCCL_CHECK(ncclGroupStart(), c10::nullopt);
 #endif
   ++ncclActiveGroupCounter_;
 }
 
 void ProcessGroupNCCL::groupEnd() {
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
-  c10d_nccl_check_wrapper(ncclGroupEnd());
+  C10D_NCCL_CHECK(ncclGroupEnd(), c10::nullopt);
 #endif
   --ncclActiveGroupCounter_;
 }

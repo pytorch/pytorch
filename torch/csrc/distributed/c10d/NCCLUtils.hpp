@@ -11,6 +11,7 @@
 #include <nccl.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
+#include <fmt/format.h>
 
 namespace {
 // Provides additional detail into NCCL error codes based on when these are
@@ -95,9 +96,6 @@ namespace c10d {
 
 std::string getNcclVersion();
 std::string ncclGetErrorWithVersion(ncclResult_t error);
-// Need this wrapper because ProcessGroupNCCL calls needs to call into C10D_NCCL_CHECK
-// with failureReason as an optional argument.
-void c10d_nccl_check_wrapper(ncclResult_t cmd, c10::optional<std::string> failureReason = c10::nullopt);
 
 // RAII wrapper for NCCL communicator
 class NCCLComm {
@@ -161,11 +159,12 @@ class NCCLComm {
 
   ncclComm_t getNcclComm() {
     if (aborted_) {
-      std::string abortMsg = "NCCL communicator was aborted on rank " + std::to_string(rank_) + ".";
-      if (commFailureReason_ != c10::nullopt) {
-        abortMsg += " . Original reason for failure was: " + *commFailureReason_;
-      }
-      TORCH_CHECK(false, abortMsg);
+      auto abortMsgTemplate = "NCCL communicator was aborted on rank {}.{}";
+      auto commFailureMsg = commFailureReason_ != c10::nullopt
+          ? fmt::format(
+                " Original reason for failure was: {}", *commFailureReason_)
+          : "";
+      TORCH_CHECK(false, fmt::format(abortMsgTemplate, rank_, commFailureMsg));
     }
     return ncclComm_;
   }
@@ -184,14 +183,13 @@ class NCCLComm {
       return;
     }
 
+    // Set true failure reason if provided by ProcessGroupNCCL (e.g. work
+    // timeout)
+    commFailureReason_ = commFailureReason;
+
     C10D_NCCL_CHECK(::ncclCommAbort(ncclComm_), commFailureReason_);
     aborted_ = true;
     ncclComm_ = nullptr;
-    // Set true failure reason if provided by ProcessGroupNCCL (e.g. work
-    // timeout)
-    if (commFailureReason != c10::nullopt) {
-      commFailureReason_ = commFailureReason;
-    }
 
     // Set an appropriate error so that we avoid using the communicator.
     if (ncclAsyncErr_ == ncclSuccess) {
