@@ -83,7 +83,7 @@ PowerSGD Hooks
 .. autofunction:: batched_powerSGD_hook
 
 Debugging Communication Hooks
----------------------------
+-----------------------------
 
 As the name implies, debugging communication hooks are **only** used for debugging purpose.
 
