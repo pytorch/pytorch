@@ -309,6 +309,7 @@ fi
 # Test XLA build
 if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
   XLA_DIR=xla
+  clone_pytorch_xla
   # These functions are defined in .circleci/common.sh in pytorch/xla repo
   install_deps_pytorch_xla $XLA_DIR
   build_torch_xla $XLA_DIR
