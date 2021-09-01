@@ -68,8 +68,8 @@ namespace tensorexpr {
 
 std::string buildErrorMessage(const std::string& s) {
   static const std::string generic_error_message =
-      "This error occured in the fuser. You can turn off the fuser by setting "
-      "torch._C._jit_override_can_fuse_on_cpu to false";
+      "This error occured in the fuser. You can turn off the fuser with "
+      "torch._C._jit_override_can_fuse_on_cpu(False)";
   if (s.empty()) {
     return generic_error_message;
   }
