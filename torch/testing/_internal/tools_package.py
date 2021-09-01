@@ -50,24 +50,14 @@ def _import_tools_module():
             'or files were moved around. Read the comments on the function that '
             'raised this assertion for more information.')
 
-    tools_module_path = tools_dir / '__init__.py'
-    if not tools_module_path.is_file():
-        raise FileNotFoundError(
-            'We did not successfully locate the tools module despite finding '
-            'the tools directory. This is most likely because files were moved '
-            'around. Read the comments on the function that raised this '
-            'assertion for more information.')
-
     # This recipe comes from
     # https://docs.python.org/3/library/importlib.html#importing-a-source-file-directly
-    spec = importlib.util.spec_from_file_location('tools', tools_module_path)
-    if spec is None:
-        raise RuntimeError(
-            'Unexpected problem. Failed to get the module spec despite the '
-            'finding the tools module file.')
+    spec = importlib.util.spec_from_file_location('tools', tools_dir / '__init__.py')
     tools = importlib.util.module_from_spec(spec)
     sys.modules['tools'] = tools
     # Execute the module, in case it executes any code upon import.
+    if spec.loader is not None:
+        raise RuntimeError('Unexpected problem. Spec does not have a loader.')
     spec.loader.exec_module(tools)
 
     return tools
