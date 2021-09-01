@@ -101,9 +101,6 @@ struct ShapeArg
 };
 
 struct ShapeArguments {
-  using MaybeSymbolicShapeOrInt =
-      std::pair<c10::optional<c10::ShapeSymbol>, c10::optional<int64_t>>;
-
   ShapeArguments(const c10::SymbolicShape& ss) {
     TORCH_INTERNAL_ASSERT(ss.rank())
     for (size_t i = 0; i < *ss.rank(); ++i) {

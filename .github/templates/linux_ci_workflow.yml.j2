@@ -72,25 +72,8 @@ jobs:
     outputs:
       docker_image: ${{ steps.calculate-tag.outputs.docker_image }}
     steps:
-      - name: Log in to ECR
-        run: |
-          aws ecr get-login --no-include-email --region us-east-1 > /tmp/ecr-login.sh
-          bash /tmp/ecr-login.sh
-          rm /tmp/ecr-login.sh
-      - name: Chown workspace
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE:?}/*"
-          rm -f ~/.ssh/authorized_keys
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-        with:
-          # deep clone, to allow use of git merge-base
-          fetch-depth: 0
-      !{{ common.display_ec2_information() }}
+      !{{ common.setup_ec2_linux() }}
+      !{{ common.checkout_pytorch("false") }}
       - name: Calculate docker image tag
         id: calculate-tag
         run: |
@@ -145,35 +128,11 @@ jobs:
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
       JOB_BASE_NAME: !{{ build_environment }}-build
     steps:
-      - name: Log in to ECR
-        run: |
-          aws ecr get-login --no-include-email --region us-east-1 > /tmp/ecr-login.sh
-          bash /tmp/ecr-login.sh
-          rm /tmp/ecr-login.sh
-      - name: Chown workspace
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE:?}/*"
-          rm -f ~/.ssh/authorized_keys
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
-        with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-        with:
-          fetch-depth: 0 # deep clone, to allow sharding to use git rev-list
-          submodules: recursive
-      !{{ common.display_ec2_information() }}
+      !{{ common.setup_ec2_linux() }}
+      !{{ common.checkout_pytorch("recursive") }}
       - name: Pull docker image
         run: |
           docker pull "${DOCKER_IMAGE}"
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Build PyTorch
         run: |
           docker run \
@@ -228,6 +187,7 @@ jobs:
           path:
             artifacts.zip
       {%- endif %}
+      !{{ common.teardown_ec2_linux() }}
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
@@ -290,29 +250,8 @@ jobs:
       PYTORCH_IGNORE_DISABLED_ISSUES: ${{ needs.generate-test-matrix.outputs.ignore-disabled-issues }}
       CONTINUE_THROUGH_ERROR: ${{ github.repository_owner == 'pytorch' && (github.event_name == 'push' || github.event_name == 'schedule') }}
     steps:
-      - name: Log in to ECR
-        run: |
-          aws ecr get-login --no-include-email --region us-east-1 > /tmp/ecr-login.sh
-          bash /tmp/ecr-login.sh
-          rm /tmp/ecr-login.sh
-      - name: Chown workspace
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)/../":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE:?}/*"
-          rm -f ~/.ssh/authorized_keys
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
-        with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-        with:
-          fetch-depth: 0 # deep clone, to allow sharding to use git rev-list
-          submodules: recursive
-      !{{ common.display_ec2_information() }}
+      !{{ common.setup_ec2_linux() }}
+      !{{ common.checkout_pytorch("recursive") }}
       - name: Pull docker image
         run: |
           docker pull "${DOCKER_IMAGE}"
@@ -343,9 +282,6 @@ jobs:
       - name: Output disk space left
         run: |
           sudo df -H
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Test PyTorch
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -428,17 +364,7 @@ jobs:
             test-reports-*.zip
       !{{ common.parse_ref() }}
       !{{ common.upload_test_statistics(build_environment) }}
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Clean up docker images
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-          # Prune all of the docker images
-          docker system prune -af
+      !{{ common.teardown_ec2_linux() }}
 {% endblock %}
 {%- endif -%}
 {%- if enable_doc_jobs %}
@@ -452,35 +378,11 @@ jobs:
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
       DOCS_TYPE: ${{ matrix.docs_type }}
     steps:
-      - name: Log in to ECR
-        run: |
-          aws ecr get-login --no-include-email --region us-east-1 > /tmp/ecr-login.sh
-          bash /tmp/ecr-login.sh
-          rm /tmp/ecr-login.sh
-      - name: Chown workspace
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE:?}/*"
-          rm -f ~/.ssh/authorized_keys
-      - name: "[FB EMPLOYEES] Enables SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
-        with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-        with:
-          fetch-depth: 0 # deep clone, to allow sharding to use git rev-list
-          submodules: recursive
-      !{{ common.display_ec2_information() }}
+      !{{ common.setup_ec2_linux() }}
+      !{{ common.checkout_pytorch("recursive") }}
       - name: Pull docker image
         run: |
           docker pull "${DOCKER_IMAGE}"
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download PyTorch Build Artifacts
         with:
@@ -542,13 +444,5 @@ jobs:
           name: docs_${{ matrix.docs_type }}
           path: docs_${{ matrix.docs_type }}.zip
           if-no-files-found: error
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Clean up docker images
-        if: always()
-        run: |
-          # Prune all of the docker images
-          docker system prune -af
+      !{{ common.teardown_ec2_linux() }}
 {%- endif -%}
