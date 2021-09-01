@@ -91,7 +91,7 @@ class Dataset(Generic[T_co]):
         if function_name in cls.functions:
             raise Exception("Unable to add DataPipe function name {} as it is already taken".format(function_name))
 
-        def class_function(cls, source_dp, *args, **kwargs):
+        def class_function(cls, enable_df_api_tracing, source_dp, *args, **kwargs):
             result_pipe = cls(source_dp, *args, **kwargs)
             if isinstance(result_pipe, Dataset):
                 if enable_df_api_tracing or isinstance(source_dp, DFIterDataPipe):
@@ -108,7 +108,7 @@ class Dataset(Generic[T_co]):
 
             return result_pipe
 
-        function = functools.partial(class_function, cls_to_register)
+        function = functools.partial(class_function, cls_to_register, enable_df_api_tracing)
         cls.functions[function_name] = function
 
 
@@ -293,9 +293,8 @@ class ConcatDataset(Dataset[T_co]):
 
     def __init__(self, datasets: Iterable[Dataset]) -> None:
         super(ConcatDataset, self).__init__()
-        # Cannot verify that datasets is Sized
-        assert len(datasets) > 0, 'datasets should not be an empty iterable'  # type: ignore[arg-type]
         self.datasets = list(datasets)
+        assert len(self.datasets) > 0, 'datasets should not be an empty iterable'  # type: ignore[arg-type]
         for d in self.datasets:
             assert not isinstance(d, IterableDataset), "ConcatDataset does not support IterableDataset"
         self.cumulative_sizes = self.cumsum(self.datasets)
