@@ -3,6 +3,7 @@ import math
 from torch.nn import Module
 from copy import deepcopy
 from torch.optim.lr_scheduler import _LRScheduler
+import warnings
 
 
 class AveragedModel(Module):
