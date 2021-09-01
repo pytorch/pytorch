@@ -1,3 +1,4 @@
+#include <c10/core/ScalarType.h>
 #include <gtest/gtest.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/irparser.h>
@@ -1083,6 +1084,21 @@ TEST(StaticRuntime, IndividualOps_Argmin) {
   testStaticRuntime(argmin_with_keep_dim_script, args_a, args_b);
 }
 
+TEST(StaticRuntime, IndividualOps_Softmax) {
+  auto a = at::randn({2, 3});
+  auto b = at::randn({3, 3, 3});
+
+  testStaticRuntime(softmax_script, {a, 0});
+  testStaticRuntime(softmax_script, {a, 1});
+
+  testStaticRuntime(softmax_script, {b, 0});
+  testStaticRuntime(softmax_script, {b, 1});
+  testStaticRuntime(softmax_script, {b, 2});
+
+  testStaticRuntime(softmax_script_with_dtype, {a, 1, at::ScalarType::Float});
+  testStaticRuntime(softmax_script_with_dtype, {b, 1, at::ScalarType::Float});
+}
+
 TEST(StaticRuntime, IndividualOps_GetItem_Dict) {
   int int_key = 0;
   std::string str_key = "str";
@@ -1312,7 +1328,6 @@ TEST(StaticRuntime, IndividualOps_Cat) {
   testStaticRuntime(cat_script, args0, args1);
 }
 
-
 TEST(StaticRuntime, IndividualOps_Cumsum) {
   auto a = at::randn({2, 3});
   std::vector<IValue> args0{a, 0};
@@ -1332,4 +1347,12 @@ TEST(StaticRuntime, IndividualOps_CumsumDtype) {
   auto b = at::randn({3, 4});
   std::vector<IValue> args1{b, 1, dtype};
   testStaticRuntime(cumsum_script_dtype, args0, args1);
+}
+
+TEST(StaticRuntime, IndividualOps_Nonzero) {
+  auto a = at::randint(0, 2, {2, 3});
+  testStaticRuntime(nonzero_tensor, {a});
+
+  auto b = at::randint(0, 2, {4, 3, 2});
+  testStaticRuntime(nonzero_tensor, {a}, {b});
 }
