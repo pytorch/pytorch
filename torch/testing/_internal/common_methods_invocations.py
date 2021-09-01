@@ -5270,7 +5270,9 @@ def sample_inputs_nll_loss(op_info, device, dtype, requires_grad, **kwargs):
         ((*shape, 1), dict()),
         ((*shape, 1, 2), dict()),
         ((*shape, 1, 2, 3), dict()),
+        # positive negative and mixed weights should work
         (shape, dict(weight=make_tensor((num_classes,), low=0, device=device, dtype=dtype))),
+        (shape, dict(weight=make_tensor((num_classes,), device=device, dtype=dtype))),
         (shape, dict(weight=make_tensor((num_classes,), high=0, device=device, dtype=dtype))),
         (shape, dict(ignore_index=num_classes // 2)),
         (shape, dict(reduction="sum")),
