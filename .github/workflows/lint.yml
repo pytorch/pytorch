@@ -16,7 +16,7 @@ jobs:
           python-version: 3.x
           architecture: x64
       - name: Checkout PyTorch
-        uses: actions/checkout@v2
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
       - name: Install requirements
         id: requirements
         run: pip3 install -r requirements.txt --user
@@ -101,7 +101,7 @@ jobs:
           python-version: 3.x
           architecture: x64
       - name: Fetch PyTorch
-        uses: actions/checkout@v2
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           fetch-depth: 0 # deep clone, to allow us to use git merge-base
       - name: Run clang-format
@@ -140,7 +140,7 @@ jobs:
           python-version: 2.x
           architecture: x64
       - name: Checkout PyTorch
-        uses: actions/checkout@v2
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
       - name: Attempt to run setup.py
         run: |
           if ! python2 setup.py | grep -q "Python 2 has reached end-of-life and is no longer supported by PyTorch."; then
@@ -159,7 +159,7 @@ jobs:
           python-version: 3.x
           architecture: x64
       - name: Checkout PyTorch
-        uses: actions/checkout@v2
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
       - name: Install requirements
         id: requirements
         run: |
@@ -168,7 +168,7 @@ jobs:
         run: |
           pip3 install Jinja2==3.0.1 --user
       - name: Checkout PyTorch
-        uses: actions/checkout@v2
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
       - name: Regenerate workflows
         id: generate_workflows
         run: .github/scripts/generate_ci_workflows.py
@@ -238,7 +238,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v2
       - name: Checkout PyTorch
-        uses: actions/checkout@v2
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
       - name: Install markdown-toc
         run: npm install -g markdown-toc
       - name: Regenerate ToCs and check that they didn't change
@@ -274,7 +274,7 @@ jobs:
           python-version: 3.x
           architecture: x64
       - name: Fetch PyTorch
-        uses: actions/checkout@v2
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           fetch-depth: 2 # to allow us to use github.event.pull_request.head.sha
       - name: Prepare output dir with HEAD commit SHA
@@ -326,7 +326,7 @@ jobs:
       image: ghcr.io/pytorch/cilint-clang-tidy:d8f0c777964d0dd8a147360de80aed1a13eb613a
     steps:
       - name: Checkout PyTorch
-        uses: actions/checkout@v2
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           fetch-depth: 0 # to allow tools/linter/clang_tidy.py to do its thing
       - name: Prepare output dir with HEAD commit SHA
@@ -412,7 +412,7 @@ jobs:
           python-version: 3.x
           architecture: x64
       - name: Fetch PyTorch
-        uses: actions/checkout@v2
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
       - name: Install dependencies
         run: |
           set -eux
@@ -434,7 +434,7 @@ jobs:
           python-version: 3.8
           architecture: x64
       - name: Fetch PyTorch
-        uses: actions/checkout@v2
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
       - name: Install dependencies
         run: |
           set -eux

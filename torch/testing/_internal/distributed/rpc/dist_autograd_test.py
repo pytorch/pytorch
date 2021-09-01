@@ -1783,8 +1783,7 @@ class DistAutogradTest(CommonDistAutogradTest):
                     dist_autograd.backward(context_id, [res.sum()])
 
                 # Mark rank 0 is done in the store, since the RPC framework on
-                # some nodes might be broken at this point (listenLoop() in
-                # ProcessGroupAgent might've exited).
+                # some nodes might be broken at this point.
                 store.set('test_backward_node_failure_python_udf_rank0_done', "True")
             else:
                 # Wait for backward to finish on rank 0.
