@@ -114,7 +114,7 @@ class TORCH_API StaticModule {
  private:
   explicit StaticModule(
       std::pair<std::shared_ptr<torch::jit::Graph>, std::shared_ptr<Module>>
-          graph_and_module,
+      graph_and_module,
       const StaticModuleOptions& opts);
 
   // for <kind, idx>
@@ -347,7 +347,7 @@ class TORCH_API StaticRuntime {
 /// List/Tuple/Dict of Tensors. Complex output types such as List of Lists are
 /// not supported.
 
-class MemoryPlanner {
+class TORCH_API MemoryPlanner {
  public:
   explicit MemoryPlanner(
       StaticRuntime* runtime,
@@ -371,6 +371,11 @@ class MemoryPlanner {
     return reused_tensors_;
   }
 
+  static size_t computeAlignedTensorSize(size_t nbytes);
+  static at::DataPtr allocateBuffer(
+      size_t size,
+      at::DeviceType deviceType = at::kCPU);
+
  private:
   // ivalues created in one run but not managed by MemoryPlanner
   std::vector<IValue*> unmanaged_ivalues_;
@@ -390,9 +395,6 @@ class MemoryPlanner {
   // size_t managed_output_bytes_{0};
   // size_t reused_output_tensors_{0};
   // at::DataPtr output_buffer_; // allocated each time we call Run()
-
-  static size_t compute_aligned_tensor_size(size_t nbytes);
-  static at::DataPtr allocate_buffer(size_t size);
 };
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
@@ -453,6 +455,58 @@ class TORCH_API ProcessedNode {
   std::vector<const IValue*> inputs_; // unowned
   std::vector<IValue> outputs_;
 };
+
+//  Map each value to all values that are alive at the same time.
+using LivenessMap = FastMap<const Value*, std::set<const Value*>>;
+
+typedef struct LiveRange {
+  size_t begin;
+  size_t end;
+
+} LiveRange;
+
+inline std::ostream& operator<<(std::ostream& str, LiveRange lvr) {
+  return str << "[" << lvr.begin << ", " << lvr.end << "]";
+}
+
+struct live_range_start_cmp {
+  bool operator()(LiveRange const& lvr1, LiveRange const& lvr2) const {
+    return lvr1.begin == lvr2.begin ? lvr1.end < lvr2.end
+                                    : lvr1.begin < lvr2.begin;
+  }
+};
+
+struct live_range_end_cmp {
+  bool operator()(LiveRange const& lvr1, LiveRange const& lvr2) const {
+    return lvr1.end == lvr2.end ? lvr1.begin < lvr2.begin : lvr1.end < lvr2.end;
+  }
+};
+
+struct live_range_hash {
+  size_t operator()(LiveRange const& range) const {
+    return std::hash<size_t>()(range.begin) ^
+        (std::hash<size_t>()(range.end) << 1);
+  }
+};
+
+inline bool operator==(const LiveRange& lhs, const LiveRange& rhs) {
+  return lhs.begin == rhs.begin && lhs.end == rhs.end;
+}
+
+inline bool operator!=(const LiveRange& lhs, const LiveRange& rhs) {
+  return !(lhs == rhs);
+}
+
+using LiveRangesMap = std::unordered_map<const Value*, LiveRange>;
+
+TORCH_API std::unordered_set<const Value*> GetAlwaysAliveValues(
+    const std::shared_ptr<torch::jit::Graph>& graph,
+    AliasDb& db);
+
+TORCH_API std::pair<LivenessMap, LiveRangesMap> GetLiveness(
+    const std::shared_ptr<torch::jit::Graph>& graph,
+    const FastSet<const Value*>& always_alive,
+    AliasDb& db);
 
 } // namespace jit
 } // namespace torch
