@@ -14,7 +14,7 @@ def _is_orthogonal(Q, eps=None):
     Id = torch.eye(k, dtype=Q.dtype, device=Q.device)
     # A reasonable eps, but not too large
     eps = 10. * n * torch.finfo(Q.dtype).eps
-    return torch.allclose(Q.transpose(-2, -1).conj() @ Q, Id, atol=eps)
+    return torch.allclose(Q.mH @ Q, Id, atol=eps)
 
 
 def _make_orthogonal(A):
@@ -77,7 +77,7 @@ class _Orthogonal(Module):
             if n != k:
                 # Embed into a square matrix
                 X = torch.cat([X, X.new_zeros(n, n - k).expand(*X.shape[:-2], -1, -1)], dim=-1)
-            A = X - X.transpose(-2, -1).conj()
+            A = X - X.mH
             # A is skew-symmetric (or skew-hermitian)
             if self.orthogonal_map == _OrthMaps.matrix_exp:
                 Q = torch.matrix_exp(A)
@@ -124,7 +124,7 @@ class _Orthogonal(Module):
             # map for the Householder. To see why, think that for the Cayley map,
             # we would need to find the matrix X \in R^{n x k} such that:
             # Y = torch.cat([X.tril(), X.new_zeros(n, n - k).expand(*X.shape[:-2], -1, -1)], dim=-1)
-            # A = Y - Y.transpose(-2, -1).conj()
+            # A = Y - Y.mH
             # cayley(A)[:, :k]
             # gives the original tensor. It is not clear how to do this.
             # Perhaps via some algebraic manipulation involving the QR like that of

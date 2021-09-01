@@ -528,10 +528,10 @@ class TestLinalg(TestCase):
         # Check that the gradient is Hermitian (or symmetric)
         def run_test(shape):
             root = torch.rand(*shape, dtype=dtype, device=device)
-            root = torch.matmul(root, root.transpose(-1, -2).conj())
+            root = torch.matmul(root, root.mH)
             root.requires_grad_()
             chol = torch.linalg.cholesky(root).sum().backward()
-            self.assertEqual(root.grad, root.grad.transpose(-1, -2).conj())
+            self.assertEqual(root.grad, root.grad.mH)
 
         shapes = ((3, 3), (1, 1, 3, 3))
         for shape in shapes:
@@ -709,7 +709,7 @@ class TestLinalg(TestCase):
     @dtypes(torch.float64, torch.complex128)
     def test_old_cholesky_autograd(self, device, dtype):
         def func(root, upper):
-            x = 0.5 * (root + root.transpose(-1, -2).conj())
+            x = 0.5 * (root + root.mH)
             return torch.cholesky(x, upper)
 
         def run_test(upper, dims):
@@ -720,10 +720,10 @@ class TestLinalg(TestCase):
             gradgradcheck(func, [root, upper])
 
             root = torch.rand(*dims, dtype=dtype, device=device)
-            root = torch.matmul(root, root.transpose(-1, -2).conj())
+            root = torch.matmul(root, root.mH)
             root.requires_grad_()
             chol = root.cholesky().sum().backward()
-            self.assertEqual(root.grad, root.grad.transpose(-1, -2).conj())  # Check the gradient is hermitian
+            self.assertEqual(root.grad, root.grad.mH)  # Check the gradient is hermitian
 
         for upper, dims in itertools.product([True, False], [(3, 3), (4, 3, 2, 2)]):
             run_test(upper, dims)
@@ -1049,7 +1049,7 @@ class TestLinalg(TestCase):
             x = random_hermitian_matrix(dims[-1], *dims[:-2]).requires_grad_()
             w, v = torch.linalg.eigh(x)
             (w.sum() + abs(v).sum()).backward()
-            self.assertEqual(x.grad, x.grad.conj().transpose(-1, -2))  # Check the gradient is Hermitian
+            self.assertEqual(x.grad, x.grad.mH)  # Check the gradient is Hermitian
 
         for dims, uplo in itertools.product([(3, 3), (1, 1, 3, 3)], ["L", "U"]):
             run_test(dims, uplo)
@@ -2597,7 +2597,7 @@ class TestLinalg(TestCase):
                     check_single_nuclear_norm(x, axes)
 
                     # 2d, inner dimensions Fortran
-                    x = torch.randn(m, n, device=device).transpose(-1, -2)
+                    x = torch.randn(m, n, device=device).mT
                     check_single_nuclear_norm(x, axes)
 
                     # 2d, inner dimensions non-contiguous
@@ -2615,7 +2615,7 @@ class TestLinalg(TestCase):
                         check_single_nuclear_norm(x, axes)
 
                         # 3d, inner dimensions Fortran
-                        x = torch.randn(o, m, n, device=device).transpose(-1, -2)
+                        x = torch.randn(o, m, n, device=device).mT
                         check_single_nuclear_norm(x, axes)
 
                         # 3d, inner dimensions non-contiguous
@@ -2633,7 +2633,7 @@ class TestLinalg(TestCase):
                             check_single_nuclear_norm(x, axes)
 
                             # 4d, inner dimensions Fortran
-                            x = torch.randn(r, o, n, m, device=device).transpose(-1, -2)
+                            x = torch.randn(r, o, n, m, device=device).mT
                             check_single_nuclear_norm(x, axes)
 
                             # 4d, inner dimensions non-contiguous
@@ -4986,7 +4986,7 @@ class TestLinalg(TestCase):
 
                     # 1d, 3d, inner dimensions Fortran
                     x = torch.arange(m, device=device)
-                    y = torch.arange(o * p * m, device=device).reshape(o, p, m).transpose(-1, -2)
+                    y = torch.arange(o * p * m, device=device).reshape(o, p, m).mT
                     self.check_single_matmul(x, y, (o, n, p))
 
                     # 1d, 3d, inner dimensions non-contiguous
@@ -5002,7 +5002,7 @@ class TestLinalg(TestCase):
 
                         # 1d, 4d, inner dimensions Fortran
                         x = torch.arange(m)
-                        y = torch.arange(r * o * p * m, device=device).reshape(r, o, p, m).transpose(-1, -2)
+                        y = torch.arange(r * o * p * m, device=device).reshape(r, o, p, m).mT
                         self.check_single_matmul(x, y, (r, o, n, p))
 
                         # 1d, 4d, inner dimensions non-contiguous
@@ -5024,8 +5024,8 @@ class TestLinalg(TestCase):
                         self.check_single_matmul(x, y, (o, n, p))
 
                         # 2d, 3d, inner dimensions Fortran
-                        x = torch.arange(m * n, device=device).reshape(m, n).transpose(-1, -2)
-                        y = torch.arange(o * p * m, device=device).reshape(o, p, m).transpose(-1, -2)
+                        x = torch.arange(m * n, device=device).reshape(m, n).mT
+                        y = torch.arange(o * p * m, device=device).reshape(o, p, m).mT
                         self.check_single_matmul(x, y, (o, n, p))
 
                         # 2d, 3d, inner dimensions non-contiguous
@@ -5040,8 +5040,8 @@ class TestLinalg(TestCase):
                             self.check_single_matmul(x, y, (r, o, n, p))
 
                             # 2d, 4d, inner dimensions Fortran
-                            x = torch.arange(m * n, device=device).reshape(m, n).transpose(-1, -2)
-                            y = torch.arange(r * o * p * m, device=device).reshape(r, o, p, m).transpose(-1, -2)
+                            x = torch.arange(m * n, device=device).reshape(m, n).mT
+                            y = torch.arange(r * o * p * m, device=device).reshape(r, o, p, m).mT
                             self.check_single_matmul(x, y, (r, o, n, p))
 
                             # 2d, 4d, inner dimensions non-contiguous
@@ -5591,7 +5591,7 @@ class TestLinalg(TestCase):
         with self.assertRaisesRegex(RuntimeError, "torch.int32 dtype"):
             torch.lu_unpack(lu_data, lu_pivots.long())
         with self.assertRaisesRegex(RuntimeError, "contiguous tensor"):
-            torch.lu_unpack(lu_data, lu_pivots.transpose(-1, -2))
+            torch.lu_unpack(lu_data, lu_pivots.mT)
 
         # check that onces flags are unset, Nones are returned
         p, l, u = torch.lu_unpack(lu_data, lu_pivots, unpack_data=False)
