@@ -11,9 +11,13 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
-template <typename Op>
+template <
+    typename Op,
+    typename std::enable_if<std::is_same<
+        decltype(detail::bin_op_deducer(std::declval<Op>())),
+        void>::value>::type* = nullptr>
 static ExprPtr mutate_binary_op(
-    BinaryOpNode<Op>* v,
+    NodePtr<Op> v,
     IRMutator* mutator,
     bool option = false) {
   ExprPtr lhs = v->lhs();
@@ -111,7 +115,7 @@ ExprPtr IRMutator::mutate(CompareSelectPtr v) {
   ExprPtr IRMutator::mutate(Name##ImmPtr v) { \
     return v;                                 \
   }
-AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_MUTATE_DEFINE);
+AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_MUTATE_DEFINE);
 #undef IMM_MUTATE_DEFINE
 
 ExprPtr IRMutator::mutate(CastPtr v) {
