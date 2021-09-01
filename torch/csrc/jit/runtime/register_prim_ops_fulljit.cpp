@@ -2,6 +2,7 @@
 
 #include <ATen/core/ivalue.h>
 #include <c10/util/irange.h>
+#include <torch/csrc/jit/runtime/static/impl.h>
 
 #include <algorithm>
 #include <bitset>
@@ -124,6 +125,48 @@ RegisterOperators reg(
                  stack->emplace_back();
                }
              }
+           };
+         },
+         aliasAnalysisSpecialCase()),
+     Operator(
+         prim::AllocateStorage, /*size, device*/
+         [](const Node* node) -> Operation {
+           int64_t total_size = node->i(attr::total_size);
+           auto device_type = static_cast<DeviceType>(node->i(attr::device));
+           return [total_size, device_type](Stack* stack) {
+             at::DataPtr buffer =
+                 MemoryPlanner::allocateBuffer(total_size, device_type);
+             auto storage = c10::Storage(
+                 c10::Storage::use_byte_size_t(),
+                 total_size,
+                 std::move(buffer),
+                 /*allocator=*/nullptr,
+                 /*resizable=*/false);
+             push(stack, std::move(storage));
+           };
+         },
+         aliasAnalysisSpecialCase()),
+     Operator(
+         prim::AllocateTensor, /*size, sizes, offset, strides, dtype, device*/
+         [](const Node* node) -> Operation {
+           int64_t size = node->i(attr::size);
+           int64_t offset = node->i(attr::offset);
+           const auto& strides = node->is(attr::stride);
+           const auto& sizes = node->is(attr::sizes);
+           at::ScalarType dtype =
+               static_cast<at::ScalarType>(node->i(attr::dtype));
+           auto device_type = static_cast<DeviceType>(node->i(attr::device));
+
+           return [offset, size, sizes, strides, dtype, device_type](Stack* stack) {
+             c10::Storage buffer;
+             pop(stack, buffer);
+
+             uint8_t* start = static_cast<uint8_t*>(buffer.data());
+             void* src = static_cast<void*>(start + offset);
+             at::Tensor sub_tensor = at::from_blob(
+                 src, sizes, strides, at::TensorOptions(device_type).dtype(dtype));
+             sub_tensor.storage().set_nbytes(size);
+             push(stack, std::move(sub_tensor));
            };
          },
          aliasAnalysisSpecialCase()),
