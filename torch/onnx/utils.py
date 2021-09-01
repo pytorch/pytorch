@@ -71,15 +71,12 @@ def select_model_mode_for_export(model, mode):
 
 
 def export(model, args, f, export_params=True, verbose=False, training=None,
-           input_names=None, output_names=None, aten=False,
-           operator_export_type=None, opset_version=None, _retain_param_name=True,
-           do_constant_folding=True, example_outputs=None, strip_doc_string=True,
-           dynamic_axes=None, keep_initializers_as_inputs=None, custom_opsets=None,
+           input_names=None, output_names=None, operator_export_type=None,
+           opset_version=None, _retain_param_name=True, do_constant_folding=True,
+           example_outputs=None, strip_doc_string=True, dynamic_axes=None,
+           keep_initializers_as_inputs=None, custom_opsets=None,
            enable_onnx_checker=True, use_external_data_format=False):
-    if aten:
-        assert operator_export_type is None
-        operator_export_type = OperatorExportTypes.ONNX_ATEN
-    elif operator_export_type is None:
+    if operator_export_type is None:
         if torch.onnx.PYTORCH_ONNX_CAFFE2_BUNDLE:
             operator_export_type = OperatorExportTypes.ONNX_ATEN_FALLBACK
         else:
@@ -529,18 +526,11 @@ def _model_to_graph(model, args, verbose=False,
 
 
 def export_to_pretty_string(model, args, f, export_params=True, verbose=False, training=None,
-                            input_names=None, output_names=None, aten=False,
-                            operator_export_type=None, export_type=ExportTypes.PROTOBUF_FILE,
-                            example_outputs=None, google_printer=False,
-                            opset_version=None, _retain_param_name=True,
+                            input_names=None, output_names=None, operator_export_type=OperatorExportTypes.ONNX,
+                            export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None,
+                            google_printer=False, opset_version=None, _retain_param_name=True,
                             keep_initializers_as_inputs=None, custom_opsets=None, add_node_names=True,
                             do_constant_folding=True):
-    if aten:
-        assert operator_export_type is None
-        assert aten
-        operator_export_type = OperatorExportTypes.ONNX_ATEN
-    elif operator_export_type is None:
-        operator_export_type = OperatorExportTypes.ONNX
     return _export_to_pretty_string(model, args, f, export_params, verbose, training,
                                     input_names, output_names, operator_export_type,
                                     export_type, example_outputs, google_printer,
