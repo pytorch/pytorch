@@ -66,7 +66,7 @@ except ImportError:
 skipIfNoDill = skipIf(not HAS_DILL, "no dill")
 
 try:
-    import pandas  # noqa
+    import pandas  # noqa: import
     HAS_PANDAS = True
 except ImportError:
     HAS_PANDAS = False
@@ -359,7 +359,7 @@ class TestDataFramesPipes(TestCase):
     def _get_dataframes_pipe(self, range=10, dataframe_size=7):
         return NumbersDataset(range) \
             .map(lambda i: (i, i % 3)) \
-            .to_dataframes_pipe(
+            ._to_dataframes_pipe(
                 columns=['i', 'j'],
                 dataframe_size=dataframe_size)
 

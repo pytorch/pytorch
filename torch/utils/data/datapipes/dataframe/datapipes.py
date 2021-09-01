@@ -14,7 +14,7 @@ except ImportError:
     WITH_PANDAS = False
 
 
-@functional_datapipe('dataframes_as_tuples')
+@functional_datapipe('_dataframes_as_tuples')
 class DataFramesAsTuplesPipe(IterDataPipe):
     def __init__(self, source_datapipe):
         self.source_datapipe = source_datapipe
@@ -26,7 +26,7 @@ class DataFramesAsTuplesPipe(IterDataPipe):
                 yield record
 
 
-@functional_datapipe('dataframes_per_row', enable_df_api_tracing=True)
+@functional_datapipe('_dataframes_per_row', enable_df_api_tracing=True)
 class PerRowDataFramesPipe(DFIterDataPipe):
     def __init__(self, source_datapipe):
         self.source_datapipe = source_datapipe
@@ -37,7 +37,7 @@ class PerRowDataFramesPipe(DFIterDataPipe):
                 yield df[i:i + 1]
 
 
-@functional_datapipe('dataframes_concat', enable_df_api_tracing=True)
+@functional_datapipe('_dataframes_concat', enable_df_api_tracing=True)
 class ConcatDataFramesPipe(DFIterDataPipe):
     def __init__(self, source_datapipe, batch=3):
         self.source_datapipe = source_datapipe
@@ -56,7 +56,7 @@ class ConcatDataFramesPipe(DFIterDataPipe):
             yield pandas.concat(buffer)
 
 
-@functional_datapipe('dataframes_shuffle', enable_df_api_tracing=True)
+@functional_datapipe('_dataframes_shuffle', enable_df_api_tracing=True)
 class ShuffleDataFramesPipe(DFIterDataPipe):
     def __init__(self, source_datapipe):
         self.source_datapipe = source_datapipe
@@ -82,7 +82,7 @@ class ShuffleDataFramesPipe(DFIterDataPipe):
             yield pandas.concat(buffer)
 
 
-@functional_datapipe('dataframes_filter', enable_df_api_tracing=True)
+@functional_datapipe('_dataframes_filter', enable_df_api_tracing=True)
 class FilterDataFramesPipe(DFIterDataPipe):
     def __init__(self, source_datapipe, filter_fn):
         self.source_datapipe = source_datapipe
@@ -112,7 +112,7 @@ class FilterDataFramesPipe(DFIterDataPipe):
             yield pandas.concat(buffer)
 
 
-@functional_datapipe('to_dataframes_pipe', enable_df_api_tracing=True)
+@functional_datapipe('_to_dataframes_pipe', enable_df_api_tracing=True)
 class ExampleAggregateAsDataFrames(DFIterDataPipe):
     def __init__(self, source_datapipe, dataframe_size=10, columns=None):
         self.source_datapipe = source_datapipe

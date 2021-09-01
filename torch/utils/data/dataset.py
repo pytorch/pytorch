@@ -26,7 +26,7 @@ T = TypeVar('T')
 
 UNTRACABLE_DATAFRAME_PIPES = ['batch',  # As it returns DataChunks
                               'groupby',   # As it returns DataChunks
-                              'dataframes_as_tuples',  # As it unpacks DF
+                              '_dataframes_as_tuples',  # As it unpacks DF
                               'trace_as_dataframe',  # As it used to mark DF for tracing
                               ]
 
@@ -89,13 +89,12 @@ class Dataset(Generic[T_co]):
     @classmethod
     def register_datapipe_as_function(cls, function_name, cls_to_register, enable_df_api_tracing=False):
         if function_name in cls.functions:
-            print(cls.functions)
             raise Exception("Unable to add DataPipe function name {} as it is already taken".format(function_name))
 
         def class_function(cls, source_dp, *args, **kwargs):
             result_pipe = cls(source_dp, *args, **kwargs)
             if isinstance(result_pipe, Dataset):
-                if (enable_df_api_tracing or isinstance(source_dp, DFIterDataPipe)):
+                if enable_df_api_tracing or isinstance(source_dp, DFIterDataPipe):
                     if function_name not in UNTRACABLE_DATAFRAME_PIPES:
                         result_pipe = result_pipe.trace_as_dataframe()
                         result_pipe._dp_contains_dataframe = True
@@ -106,12 +105,6 @@ class Dataset(Generic[T_co]):
                         if getattr(result_pipe, '_dp_nesting_depth', 0) == 0:
                             result_pipe = result_pipe.trace_as_dataframe()
                             result_pipe._dp_contains_dataframe = True
-
-                if getattr(result_pipe, '_dp_nesting_depth', None) is None:
-                    result_pipe._dp_nesting_depth = getattr(source_dp, '_dp_nesting_depth', None)
-
-                if getattr(result_pipe, '_dp_contains_dataframe', None) is None:
-                    result_pipe._dp_contains_dataframe = getattr(source_dp, '_dp_contains_dataframe', None)
 
             return result_pipe
 
