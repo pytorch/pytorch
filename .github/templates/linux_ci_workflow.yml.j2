@@ -45,7 +45,7 @@ env:
   PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
 
 concurrency:
-  group: !{{ build_environment }}-${{ github.event.pull_request.number || github.sha }}
+  group: !{{ build_environment }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name }}
   cancel-in-progress: true
 
 jobs:
