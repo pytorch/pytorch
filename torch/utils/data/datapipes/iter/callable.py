@@ -31,14 +31,15 @@ class MapperIterDataPipe(IterDataPipe[T_co]):
     Iterable DataPipe to run a function over each item from the source DataPipe.
     The function can be any regular python function or partial object. Lambda
     function is not recommended as it is not supported by pickle.
-    args:
+
+    Args:
         datapipe: Source Iterable DataPipe
         fn: Function called over each item
         fn_args: Positional arguments for `fn`
         fn_kwargs: Keyword arguments for `fn`
-        nesting_level: Determines which level the fn gets applied to, by default it applies to the top level (= 0)
-        This also accepts -1 as input to apply the function to the lowest nesting level. It currently doesn't support
-        argument < -1.
+        nesting_level: Determines which level the fn gets applied to, by default it applies to the top level (= 0).
+            This also accepts -1 as input to apply the function to the lowest nesting level. It currently doesn't support
+            argument < -1.
     """
     datapipe: IterDataPipe
     fn: Callable
@@ -112,10 +113,11 @@ class CollatorIterDataPipe(MapperIterDataPipe):
 
     Iterable DataPipe to collate samples from datapipe to Tensor(s) by `util_.collate.default_collate`,
     or customized Data Structure by collate_fn.
-    args:
+
+    Args:
         datapipe: Iterable DataPipe being collated
         collate_fn: Customized collate function to collect and combine data or a batch of data.
-                    Default function collates to Tensor(s) based on data type.
+            Default function collates to Tensor(s) based on data type.
         fn_args: Positional arguments for `collate_fn`
         fn_kwargs: Keyword arguments for `collate_fn`
 
