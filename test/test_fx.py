@@ -98,6 +98,8 @@ wrap(a_lifted_leaf2)
 
 wrap('len')
 
+wrap('getattr')
+
 @wrap
 def wrapped_via_decorator(a):
     return a + 1
@@ -941,6 +943,14 @@ class TestFX(JitTestCase):
         inp = torch.rand(3, 4)
         self.assertEqual(traced2(inp), inp + 3.0)
         self.assertIs(len, builtins.len)
+
+    def test_torch_fx_getattr(self):
+        class FXGetattrTest(torch.nn.Module):
+            def forward(self, x):
+                return getattr(x, 'nonexistent_attr', torch.Tensor([2, 3]))
+
+        traced = symbolic_trace(FXGetattrTest())
+        self.assertEqual(traced(torch.rand(3, 4)), torch.Tensor([2, 3]))
 
     def test_sqrt(self):
         class Sqrt1(torch.nn.Module):
