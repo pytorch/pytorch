@@ -676,6 +676,16 @@ const auto argmin_with_keep_dim_script = R"JIT(
       return torch.argmin(a, dim, True).clone()
 )JIT";
 
+const auto softmax_script = R"JIT(
+  def forward(self, a: Tensor, dim: int):
+      return torch.softmax(a, dim).clone()
+)JIT";
+
+const auto softmax_script_with_dtype = R"JIT(
+  def forward(self, a: Tensor, dim: int, dtype: int):
+      return torch.softmax(a, dim, dtype=dtype).clone()
+)JIT";
+
 const auto getitem_dict_tensor_script = R"JIT(
   def forward(self, key: Tensor):
       d = {key: 1}
@@ -750,6 +760,12 @@ const auto append_tensor_script = R"JIT(
       lst = []
       lst.append(a)
       return lst
+)JIT";
+
+const auto nonzero_tensor = R"JIT(
+  def forward(self, input: Tensor):
+      a = torch.nonzero(input).clone()
+      return (a)
 )JIT";
 
 const std::string quantize_script = R"IR(
