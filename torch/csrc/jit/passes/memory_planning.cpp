@@ -213,8 +213,13 @@ getManagedValues(
   std::unordered_set<const Value*> leaked_values;
   std::vector<const Node*> out_nodes;
 
+  FastMap<Node*, bool> node_has_out_variant;
+  for (auto* node : graph->nodes()) {
+    node_has_out_variant.insert({node, hasOutVariant(node)});
+  }
+
   for (auto node : graph->nodes()) {
-    if (!hasOutVariant(node)) {
+    if (!node_has_out_variant[node]) {
       continue;
     }
     out_nodes.emplace_back(node);
@@ -225,7 +230,7 @@ getManagedValues(
       auto size = computeStorageSize(*out_v);
       if (size.has_value() && size.value() > 0) {
         managed_tensor_values.insert({out_v, size.value()});
-      } else if (isOptimizableContainerType(node)) {
+      } else if (isOptimizableContainerType(node, node_has_out_variant)) {
         leaked_values.insert(out_v);
       } else {
         TORCH_WARN(

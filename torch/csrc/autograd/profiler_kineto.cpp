@@ -151,7 +151,7 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
 
       if (config_.with_stack) {
         auto bt = c10::get_backtrace(1, 200, true);
-        act.addMetadata("Call stack", stacksToStr(backTraceToVecStr(bt)));
+        act.addMetadata("Call stack", stacksToStr(backTraceToVecStr(bt), ";"));
       }
       act.startTime = start_time;
       if (jit::currentFrameId().has_value()) {
@@ -161,7 +161,7 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
         act.addMetadata("NodeHeader", "\"" + frame_id.node_header + "\"");
       } else {
         auto bt = c10::get_backtrace(1, 200, true);
-        act.addMetadata("Call stack", stacksToStr(backTraceToVecStr(bt)));
+        act.addMetadata("Call stack", stacksToStr(backTraceToVecStr(bt), ";"));
       }
       act.endTime = getTimeUs();
 
