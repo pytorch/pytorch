@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/util/string_view.h>
+#include <c10/util/Optional.h>
 
 #include <algorithm>
 #include <iterator>
@@ -9,6 +10,7 @@
 #include <vector>
 
 namespace lazy_tensors {
+
 
 template <typename Range>
 std::string StrJoin(const Range& range, c10::string_view separator) {
@@ -28,6 +30,28 @@ std::string StrJoin(const Range& range, c10::string_view separator) {
             std::ostream_iterator<std::string>(joined, separator.data()));
   joined << str_tokens.back();
   return joined.str();
+}
+
+// TODO - is is_scalar the right thing here?
+// I mainly wanted to make sure it wasn't ambiguous for vector<T> 
+template <typename T, typename std::enable_if<
+                          std::is_scalar<T>::value>::type* = nullptr>
+void ToString(std::string name, T val, std::ostream& ss){
+  ss << std::string(", ") << name << std::string("=(") << val << std::string(")");
+}
+
+template <typename T>
+void ToString(std::string name, std::vector<T> val, std::ostream& ss){
+  ss << std::string(", ") << name << std::string("=(") << StrJoin(val, ", ") << std::string(")");
+}
+
+template <typename T>
+void ToString(std::string name, c10::optional<T> val, std::ostream& ss){
+  if (val.has_value()){
+    ToString(name, val.value(), ss);
+  } else {
+    ss << std::string(", ") << name << std::string("=(nullopt)");
+  }
 }
 
 }  // namespace lazy_tensors

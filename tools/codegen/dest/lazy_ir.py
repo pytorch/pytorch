@@ -130,7 +130,7 @@ class LazyIR:
             else:
                 assert False, ""
         base_ctor_value_args = ", ".join(base_ctor_value_args)
-
+        members_to_string = "\n    ".join([f'lazy_tensors::ToString("{t.name}", {t.name}_, ss);' for t in scalar_types])
         return [f"""\
 class {class_name} : public Node {{
  public:
@@ -147,9 +147,9 @@ class {class_name} : public Node {{
   std::string ToString() const override {{
     std::stringstream ss;
     ss << Node::ToString();
+    {members_to_string}
     return ss.str();
   }}
-
 
   {scalar_decls}
 
