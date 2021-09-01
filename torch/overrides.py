@@ -668,6 +668,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
                                          count_include_pad=True, divisor_override=None: -1),
         torch.nn.functional.batch_norm: (lambda input, running_mean, running_var, weight=None, bias=None, training=False,
                                          momentum=0.1, eps=1e-05: -1),
+        torch.nn.functional.bias: lambda input, bias: -1,
         torch.nn.functional.bilinear: lambda input1, input2, weight, bias=None: -1,
         torch.nn.functional.binary_cross_entropy: (lambda input, target, weight=None, size_average=None, reduce=None,
                                                    reduction="mean": -1),
