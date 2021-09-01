@@ -609,8 +609,11 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
   HANDLE_TH_ERRORS
   auto info_pair = unpack_input<false>(inputs);
   auto iv_inputs = std::vector<c10::IValue>();
-  for (auto i : info_pair.first.input_vars) {
-     iv_inputs.push_back(c10::IValue(i));
+  bool record = false;
+  if (C10_UNLIKELY(at::shouldRunRecordFunction(&record))) {
+    for (auto i : info_pair.first.input_vars) {
+       iv_inputs.push_back(c10::IValue(i));
+    }
   }
   RECORD_FUNCTION(
     ((PyTypeObject*)cls)->tp_name,

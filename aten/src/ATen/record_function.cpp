@@ -517,6 +517,7 @@ void RecordFunction::before(const char* name, int64_t sequence_nr) {
   if (!isActive()) {
     return;
   }
+  state_->op_input_size = state_->inputs_.size();
   state_->name_ = StringView(name);
   state_->sequence_nr_ = sequence_nr;
   state_->thread_id_ = currentThreadId();
@@ -529,6 +530,7 @@ void RecordFunction::before(std::string name, int64_t sequence_nr) {
   if (!isActive()) {
     return;
   }
+  state_->op_input_size = state_->inputs_.size();
   state_->name_ = StringView(std::move(name));
   state_->sequence_nr_ = sequence_nr;
   state_->thread_id_ = currentThreadId();
