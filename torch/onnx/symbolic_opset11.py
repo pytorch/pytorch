@@ -437,6 +437,8 @@ def unbind(g, self, dim=0, _outputs=None):
 #          The order is dim_n_begin, dim_n_end, dim_n-1_begin, dim_n-1_end, ..., dim_m_begin, dim_m_end,
 #          where m is in range [0, n].
 def _prepare_onnx_paddings(g, dim, pad):
+    if not sym_help._is_packed_list(pad) and sym_help._is_list(pad) and sym_help._is_scalar_list(pad):
+        pad = g.op("ConcatFromSequence", pad, axis_i=0, new_axis_i=1)
     # The desired order of paddings is
     # dim_0_begin, dim_1_begin, ... , dim_0_end, ..., dim_n_end.
     # n is the dimension of input.
