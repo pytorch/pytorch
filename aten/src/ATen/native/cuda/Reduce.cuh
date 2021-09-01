@@ -989,14 +989,14 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
       // Map block.x to the fastest reducing dimension. It implies:
       //   1. block_x_reduce is required.
       //   2. block.y now max out to num_outputs.
-      dim0 = iter.shape()[0];
+      dim0 = inputs_per_output;
       dim1 = num_outputs;
       fastest_moving_stride = iter.strides(/*arg=*/input_index)[0];
     } else {
       // Map block.x to the fastest non reducing dimension. It implies:
       //   1. block_x_reduce is turned off.
       //   2. block.y now max out to inputs_per_output.
-      dim0 = iter.shape()[iter.num_reduce_dims()];
+      dim0 = num_outputs;
       dim1 = inputs_per_output;
       fastest_moving_stride = iter.strides(/*arg=*/input_index)[iter.num_reduce_dims()];
     }
