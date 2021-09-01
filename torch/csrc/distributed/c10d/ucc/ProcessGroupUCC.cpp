@@ -337,7 +337,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::recvAnysource(
     tensor.data_ptr(), tensor.element_size() * tensor.numel(),
     tagging::wrap_tag(0, tag), tagging::any_source_mask(), tensor.device().type());
   return c10::make_intrusive<ProcessGroupUCC::WorkUCP>(
-    worker, request, getRank(), OpType::RECVANYSOURCE, "ucc:recvAnysource", tensors);
+    worker, request, getRank(), OpType::RECVANYSOURCE, "ucc:recvAnySource", tensors);
 };
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::barrier(

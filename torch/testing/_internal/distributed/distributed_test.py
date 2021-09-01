@@ -1418,6 +1418,11 @@ class DistributedTest:
                             self.assertTrue(event.is_async)
                             self.assertEqual(event.input_shapes, [[send_recv_size] * 3])
 
+                if backend == "ucc":
+                    # UCC backend does not support all_gather, so the following
+                    # part of the test can must be skiped for now.
+                    # TODO: add support for all_gather and remove this branch
+                    return
                 # Each rank would have 2 * (world_size - 1) sends, verify that
                 # globally we receive the same amount on the other end.
                 recv_ranks_tensor = torch.cat(
