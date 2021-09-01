@@ -785,13 +785,6 @@ if _enabled:
                 # It's fairly trivial to save enough info to warn in this case.
                 return super(RecursiveScriptModule, self).__setattr__(attr, value)
 
-        def __getstate__(self):
-            raise pickle.PickleError(
-                "ScriptModules cannot be deepcopied using copy.deepcopy or saved using torch.save. "
-                + "Mixed serialization of script and non-script modules is not supported. "
-                + "For purely script modules use my_script_module.save(<filename>) instead."
-            )
-
         def __copy__(self):
             return torch.jit._recursive.wrap_cpp_module(copy.copy(self._c))
 

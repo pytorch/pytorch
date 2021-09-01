@@ -101,9 +101,6 @@ struct ShapeArg
 };
 
 struct ShapeArguments {
-  using MaybeSymbolicShapeOrInt =
-      std::pair<c10::optional<c10::ShapeSymbol>, c10::optional<int64_t>>;
-
   ShapeArguments(const c10::SymbolicShape& ss) {
     TORCH_INTERNAL_ASSERT(ss.rank())
     for (size_t i = 0; i < *ss.rank(); ++i) {
@@ -369,31 +366,40 @@ struct SymbolicShapeAnalyzer {
             }
             for (const auto& sym_uses: use.user->output()->uses()) {
               auto k = sym_uses.user->kind();
-              if (k != aten::ge && k != aten::le && k != aten::ne && k != aten::eq) {
+              if (k != aten::ge && k != aten::le && k != aten::ne && k != aten::eq && k != aten::lt && k != aten::gt) {
                 break;
               }
-              // check for dim >= 0
-              if (k == aten::ge) {
-                auto sec_input = constant_as<int64_t>(sym_uses.user->input(1));
-                if (sym_uses.offset == 0 && sec_input && sec_input == 0) {
-                  replaceWithIValue(sym_uses.user->output(), true);
-                  continue;
-                }
-              }
-              // check for dim comparisons to negative number
               auto other_index = 1 - sym_uses.offset;
               auto other_value = constant_as<int64_t>(sym_uses.user->input(other_index));
-              if (!other_value || *other_value >= 0) {
+              if (!other_value) {
+                continue;
+              }
+
+              // check for dim >= 0, 0 <= dim
+              // dim >= 0
+              if (k == aten::ge && *other_value == 0 && other_index == 1) {
+                replaceWithIValue(sym_uses.user->output(), true);
+                continue;
+              }
+              // 0 <= dim
+              if (k == aten::le && *other_value == 0 && other_index == 0) {
+                replaceWithIValue(sym_uses.user->output(), true);
+                continue;
+              }
+
+              // check for dim comparisons to negative number
+              if (*other_value >= 0) {
                 continue;
               }
               if (k == aten::eq || k == aten::ne) {
-                // True if -2 != {Positive}
+                // True if:
+                // -2 != {Positive}
                 replaceWithIValue(sym_uses.user->output(), k == aten::ne);
               } else {
                 // True if:
-                // -2 <= {Positive}
-                // {Positive} >= {-2}
-                bool true_val = ((other_index == 0 && k == aten::le) || (other_index == 1 && k == aten::ge));
+                // -2 <= / < {Positive}
+                // {Positive} >= / > {-2}
+                bool true_val = ((other_index == 0 && (k == aten::le || k == aten::lt)) || (other_index == 1 && (k == aten::ge || k == aten::gt)));
                 replaceWithIValue(sym_uses.user->output(), true_val);
               }
             }
