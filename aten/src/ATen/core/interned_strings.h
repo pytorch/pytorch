@@ -86,6 +86,7 @@ namespace c10 {
   _(prim, NumToTensor)               \
   _(prim, Uninitialized)             \
   _(prim, VarConcat)                 \
+  _(prim, VarStack)                  \
   _(prim, With)                      \
   _(prim, Enter)                     \
   _(prim, Exit)                      \
@@ -468,7 +469,8 @@ namespace c10 {
   _(attr, keepdims)                  \
   _(attr, cache_id)                  \
   _(attr, new_axis)                  \
-  _(attr, warn_id)
+  _(attr, warn_id)                   \
+  _(attr, allowzero)
 
 // 'prim' symbols are synthetic operators that occur only in the IR
 // and don't have corresponding implementations in ATen.
