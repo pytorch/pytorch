@@ -27,3 +27,28 @@ pkg_tar(name = "content", srcs = glob(["**"]))
         path = path,
     )
     _patched_rule(name = name, **kwargs)
+
+def _new_empty_repository_impl(repo_ctx):
+    build_file = repo_ctx.attr.build_file
+    build_file_content = repo_ctx.attr.build_file_content
+    if not (bool(build_file) != bool(build_file_content)):
+        fail("Exactly one of 'build_file' or 'build_file_content' is required")
+
+    if build_file_content:
+        repo_ctx.file("BUILD", build_file_content)
+    elif build_file:
+        repo_ctx.template("BUILD", repo_ctx.attr.build_file, {})
+
+new_empty_repository = repository_rule(
+    attrs = {
+        "build_file": attr.label(allow_files = True),
+        "build_file_content": attr.string(),
+    },
+    implementation = _new_empty_repository_impl,
+)
+
+"""Create an empty repository with the supplied BUILD file.
+
+This is mostly useful to create wrappers for specific target that we want
+to be used with the '@' syntax.
+"""
