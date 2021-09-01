@@ -1338,14 +1338,14 @@ Tensor computeQuantizePerTensor(
 
   auto qscale = constant(inputs[1]);
   auto qzero = constant(inputs[2]);
-  ExprHandle exprHandle = (tensorOrConstant(inputs[0], indices) - qzero) / qscale;
+  //TODO: handle inputs[3] argument as dtype, asserts qint8, quint8
+  auto dtype = Dtype(ScalarType::Byte);
+  ExprHandle exprHandle = promoteToDtype((tensorOrConstant(inputs[0], indices) - qzero) / qscale, dtype.scalar_type());
 
   std::cout << "XXX " << __FUNCTION__ << std::endl;
   for (const auto& arg : inputs) {
     std::cout << "XXX " << getArgValueName(arg) << std::endl;
   }
-  //TODO: handle inputs[3] argument as dtype, asserts qint8, quint8
-  auto dtype = Dtype(ScalarType::Byte);
   BufPtr buf = alloc<Buf>(
       "quantize_per_tensor",
       output_sizes_expr,
@@ -1367,6 +1367,8 @@ Tensor computeDequantize(
   auto qbuf = c10::get<BufHandle>(inputs[0]);
   auto qscale = qbuf.node()->qscale();
   auto qzero = qbuf.node()->qzero();
+  //TODO: Use default dtype?
+  auto dtype = Dtype(ScalarType::Float);
   std::cout << "XXX qscale:" << qscale << std::endl;
   std::cout << "XXX qzero:" << qzero << std::endl;
   std::vector<VarPtr> vars;
@@ -1375,9 +1377,8 @@ Tensor computeDequantize(
   }
   auto axes = VarVectorToVarHandleVector(vars);
   std::vector<ExprHandle> indices(axes.begin(), axes.end());
-  ExprHandle exprHandle = tensorOrConstant(inputs[0], indices) * ExprHandle(qscale) + ExprHandle(qzero);
+  ExprHandle exprHandle = promoteToDtype(tensorOrConstant(inputs[0], indices) * ExprHandle(qscale) + ExprHandle(qzero), dtype.scalar_type());
   auto output_sizes_expr = ExprHandleVectorToExprVector(outputShape);
-  auto dtype = Dtype(ScalarType::Float);
   BufPtr buf = alloc<Buf>("dequantize", output_sizes_expr, dtype);
   return Tensor(buf, vars, exprHandle.node());
 }
