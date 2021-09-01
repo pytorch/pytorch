@@ -4,18 +4,16 @@
 
 #include <ATen/native/Cross.h>
 
-namespace at { namespace native {
+namespace at {
+namespace meta {
 
 DEFINE_DISPATCH(cross_stub);
 
-Tensor cross(const Tensor & input, const Tensor & other, const c10::optional<int64_t> dimension) {
-  Tensor out = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  native::cross_out(input, other, dimension, out);
-  return out;
-}
-
-Tensor & cross_out(const Tensor & input, const Tensor & other, const c10::optional<int64_t> dimension, Tensor & out) {
-  auto device_res = input.device().type();
+TORCH_META_FUNC(cross)
+(const Tensor & input, const Tensor & other, const c10::optional<int64_t> dimension) {
+  const Tensor& out = maybe_get_output(0);
+  
+  auto device_res = out.device().type();
   TORCH_CHECK(device_res == kCPU || device_res == kCUDA, "cross only supports CPU and CUDA devices, out got: ", device_res);
   auto device1 = input.device().type();
   TORCH_CHECK(device1 == kCPU || device1 == kCUDA, "cross only supports CPU and CUDA devices, input got: ", device1);
@@ -42,12 +40,27 @@ Tensor & cross_out(const Tensor & input, const Tensor & other, const c10::option
     TORCH_CHECK(input.size(dim) == 3, "dimension ", dimension.value(), " does not have size 3");
   }
 
-  if (out.sizes() != input.sizes()) {
-    out.resize_as_(input);
+  set_output(input.sizes(), input.options());
+
+  return out;
+}
+
+TORCH_IMPL_FUNC(gather_out)
+(const Tensor & input, const Tensor & other, const c10::optional<int64_t> dimension, const Tensor & out) {
+  int64_t dim = -1;
+  if(!dimension.has_value()) {
+    for(int64_t i = 0; i < input.dim(); i++) {
+      if(input.size(i) == 3) {
+        dim = i;
+        break;
+      }
+    }
+  } else {
+    dim = maybe_wrap_dim(dimension.value(), input.dim());
   }
 
   cross_stub(device1, out, input, other, dim);
   return out;
 }
 
-}} // namespace at::native
+}} // namespace at::meta
