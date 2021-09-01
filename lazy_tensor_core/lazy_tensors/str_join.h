@@ -2,6 +2,7 @@
 
 #include <c10/util/string_view.h>
 #include <c10/util/Optional.h>
+#include <c10/core/Scalar.h>
 
 #include <algorithm>
 #include <iterator>
@@ -39,6 +40,7 @@ template <typename T, typename std::enable_if<
 void ToString(std::string name, T val, std::ostream& ss){
   ss << std::string(", ") << name << std::string("=(") << val << std::string(")");
 }
+void ToString(std::string name, const c10::Scalar& val, std::ostream& ss);
 
 template <typename T>
 void ToString(std::string name, std::vector<T> val, std::ostream& ss){
