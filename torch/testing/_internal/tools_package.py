@@ -58,7 +58,10 @@ def _import_tools_module():
     # Execute the module, in case it executes any code upon import.
     if spec.loader is None:
         raise RuntimeError('Unexpected problem. Spec does not have a loader.')
-    spec.loader.exec_module(tools)
+    # mypy doesn't think that there's an exec_module on the loader
+    # object. Ignore it, this recipe comes straight from the official
+    # Python docs.
+    spec.loader.exec_module(tools)  # type: ignore
 
     return tools
 
