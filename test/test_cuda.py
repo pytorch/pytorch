@@ -3683,8 +3683,13 @@ torch.cuda.synchronize()
         static_grad = torch.ones_like(weight)
 
         # warmup
-        loss = (weight.half() * static_input).sum()
-        scaler.scale(loss).backward()
+        s = torch.cuda.Stream()
+        s.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(s):
+            loss = (weight.half() * static_input).sum()
+            scaler.scale(loss).backward()
+        torch.cuda.current_stream().wait_stream(s)
+
         opt.zero_grad(set_to_none=True)
 
         # capture
