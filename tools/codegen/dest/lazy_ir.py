@@ -89,19 +89,6 @@ def ir_node_name(func: FunctionSchema):
 class LazyIR:
     backend_index: BackendIndex
 
-    target: Union[
-        Literal[Target.DEFINITION],
-        Literal[Target.DECLARATION],
-    ]
-
-    # TODO(whc) probably use selector instead of building a separate index for ops to codegen
-    # Selector object to determine which operators to generate
-    # registration code for.
-    selector: SelectiveBuilder
-
-    # The namespace that the kernels are written in. This is just `at::native` for in-tree kernels.
-    cpp_namespace: str
-
     @method_with_native_function
     def __call__(self, f: Union[NativeFunctionsGroup, NativeFunction]) -> List[str]:
         func = f.functional.func if isinstance(f, NativeFunctionsGroup) else f.func

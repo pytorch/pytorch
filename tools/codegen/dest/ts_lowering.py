@@ -39,9 +39,6 @@ class TsLowering:
         Literal[TsLoweringTarget.LOWERING],
     ]
 
-    # The namespace that the kernels are written in. This is just `at::native` for in-tree kernels.
-    cpp_namespace: str
-
     @method_with_native_function
     def __call__(self, f: Union[NativeFunctionsGroup, NativeFunction]) -> List[str]:
         func = f.functional.func if isinstance(f, NativeFunctionsGroup) else f.func
