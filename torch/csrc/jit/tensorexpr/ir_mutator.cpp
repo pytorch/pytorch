@@ -115,7 +115,7 @@ ExprPtr IRMutator::mutate(CompareSelectPtr v) {
   ExprPtr IRMutator::mutate(Name##ImmPtr v) { \
     return v;                                 \
   }
-AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_MUTATE_DEFINE);
+AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_MUTATE_DEFINE);
 #undef IMM_MUTATE_DEFINE
 
 ExprPtr IRMutator::mutate(CastPtr v) {

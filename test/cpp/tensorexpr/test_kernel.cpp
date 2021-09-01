@@ -107,6 +107,10 @@ graph(%a.1 : Float(8, 8, strides=[8, 1], requires_grad=0, device=cpu),
   std::ostringstream oss;
   oss << *stmt;
 
+  // Check whether the intermediate buffer has been added to constants
+  auto constants = k.getConstantDescriptors();
+  ASSERT_EQ(constants.size(), 1);
+
   // Check the IR we produced
   torch::jit::testing::FileCheck().check_not("Alloc")->run(oss.str());
   torch::jit::testing::FileCheck().check_not("Free")->run(oss.str());
@@ -115,9 +119,7 @@ graph(%a.1 : Float(8, 8, strides=[8, 1], requires_grad=0, device=cpu),
   std::vector<IValue> stack = fmap<IValue>(inputs);
   k.run(stack);
   o = stack[0].toTensor();
-  for (size_t i = 0; i < 8 * 8; i++) {
-    CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
-  }
+  ASSERT_TRUE(at::allclose(o, ref));
 }
 
 TEST_F(Kernel, _1) {

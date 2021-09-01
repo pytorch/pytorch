@@ -242,7 +242,10 @@ class TORCH_API TensorExprKernel {
   }
 
   // Allocate memory for intermediate buffers at compile time.
-  void preAllocIntermediateBufs(const std::unordered_set<BufPtr> intem_bufs);
+  // Specifically, we pre-allocate memory for intermediate buffers with static
+  // size and manage these buffers in the way we manage JIT constant tensors:
+  // push the buf args into the stack so NNC IR can access them at runtime.
+  void preAllocIntermediateBufs(std::unordered_set<BufPtr>& interm_bufs);
 
  private:
   struct UnpackedTensorOptions {
@@ -302,8 +305,6 @@ TORCH_API void annotateInputShapes(
     const std::vector<c10::optional<at::Tensor>>& example_inputs);
 TORCH_API std::shared_ptr<Graph> removeUnusedSelfArgument(
     const std::shared_ptr<Graph>& graph);
-
-TORCH_API std::string buildErrorMessage(const std::string& s);
 
 } // namespace tensorexpr
 } // namespace jit
