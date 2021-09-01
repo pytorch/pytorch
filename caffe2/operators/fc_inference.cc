@@ -1,5 +1,4 @@
 #include "caffe2/operators/fc_inference.h"
-#include "caffe2/core/types.h"
 
 namespace caffe2 {
 std::vector<TensorShape> FCShapeInference(
@@ -52,12 +51,11 @@ OpSchema::Cost CostInferenceForFC(
       ? size_from_dim_(canonical_axis_w, GetDimsVector(in[1]))
       : size_to_dim_(canonical_axis_w, GetDimsVector(in[1]));
 
-  auto const& X_element_size_byte =
-      DataTypeToTypeMeta(in[0].data_type()).itemsize();
+  const auto& X = in[0];
   c.flops = M * N * (2 * K + 1);
-  c.bytes_read = (K * (M + N) + N) * X_element_size_byte;
-  c.bytes_written = M * N * X_element_size_byte;
-  c.params_bytes = (K * N + N) * X_element_size_byte;
+  c.bytes_read = (K * (M + N) + N) * sizeof(X.data_type());
+  c.bytes_written = M * N * sizeof(X.data_type());
+  c.params_bytes = (K * N + N) * sizeof(X.data_type());
   return c;
 }
 
@@ -96,11 +94,7 @@ OpSchema::Cost CostInferenceForFCGradient(
 
   CAFFE_ENFORCE_LT(0, out.size());
   const TensorShape dW = out[0];
-  auto const& dW_element_size_byte =
-      DataTypeToTypeMeta(dW.data_type()).itemsize();
   const TensorShape db = out[1];
-  auto const& db_element_size_byte =
-      DataTypeToTypeMeta(db.data_type()).itemsize();
 
   auto axis = helper.GetSingleArgument<int32_t>("axis", 1);
   const auto canonical_axis = canonical_axis_index_(axis, in[0].dims().size());
@@ -117,17 +111,15 @@ OpSchema::Cost CostInferenceForFCGradient(
   uint64_t size_db = nElemFromDim(db);
 
   c.flops = M * N * (2 * K + 1);
-  c.bytes_written =
-      size_dW * dW_element_size_byte + size_db * db_element_size_byte;
+  c.bytes_written = (size_dW + size_db) * sizeof(float);
   c.params_bytes = (K * N + N) * sizeof(float);
 
   if (out.size() == 3) {
     const TensorShape dX = out[2];
     uint64_t size_dX = nElemFromDim(dX);
-    auto const& dX_element_size_byte =
-        DataTypeToTypeMeta(dX.data_type()).itemsize();
+
     c.flops += 2 * M * N * K;
-    c.bytes_written += size_dX * dX_element_size_byte;
+    c.bytes_written += size_dX * sizeof(float);
   }
   return c;
 }
