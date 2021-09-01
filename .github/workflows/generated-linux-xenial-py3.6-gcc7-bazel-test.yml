@@ -37,8 +37,6 @@ jobs:
     steps:
       - name: noop
         run: echo running ciflow_should_run
-      - name: print pull request labels
-        run: echo "${PR_LABELS}"
   calculate-docker-image:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.2xlarge

@@ -60,8 +60,6 @@ jobs:
     steps:
       - name: noop
         run: echo running !{{ ciflow_config.root_job_name }}
-      - name: print pull request labels
-        run: echo "${PR_LABELS}"
 {%- endif %}
   calculate-docker-image:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -131,8 +129,6 @@ jobs:
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
       JOB_BASE_NAME: !{{ build_environment }}-build
     steps:
-      - name: print pull request labels
-        run: echo "${PR_LABELS}"
       !{{ common.setup_ec2_linux() }}
       !{{ common.checkout_pytorch("recursive") }}
       - name: Pull docker image
