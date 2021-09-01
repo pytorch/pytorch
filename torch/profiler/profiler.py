@@ -114,7 +114,7 @@ class profile(object):
         record_shapes (bool): save information about operator's input shapes.
         profile_memory (bool): track tensor memory allocation/deallocation.
         with_stack (bool): record source information (file and line number) for the ops.
-        with_flops (bool): use formula to estimate the FLOPS of specific operators
+        with_flops (bool): use formula to estimate the FLOPs (floating point operations) of specific operators
             (matrix multiplication and 2D convolution).
         with_modules (bool): record module hierarchy (including function names)
             corresponding to the callstack of the op. e.g. If module A's forward call's
