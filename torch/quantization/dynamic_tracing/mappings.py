@@ -18,7 +18,14 @@ fp32_to_int8_fun_mapping = {
 }
 
 functions_supported_by_quantization = set([
-    torch.Tensor.add, torch.Tensor.mul, torch.add, torch.mul, torch.cat,
+    torch.Tensor.add,
+    torch.Tensor.mul,
+    torch.add,
+    torch.mul,
+    torch.cat,
+    # adding for MobileNetV2, will need a better place for these
+    torch.nn.functional.adaptive_avg_pool2d,
+    torch.flatten,
 ])
 
 module_types_supported_by_quantization = set([

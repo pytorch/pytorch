@@ -42,8 +42,10 @@ SeenOp = collections.namedtuple(
         # module for functions
         'fqn',
         # Information about the input tensors, List[QTensorInfo].
+        # Non-tensor inputs are represented with None.
         'input_tensor_infos',
         # Information about the output tensors, List[QTensorInfo].
+        # Non-tensor outputs are represented with None.
         'output_tensor_infos',
     ],
 )

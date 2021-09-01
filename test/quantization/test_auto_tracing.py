@@ -44,8 +44,6 @@ class TestAutoTracing(QuantizationTestCase):
         m_copy_q = convert_fx(m_copy_p)
         out_q_fx = m_copy_q(*example_inputs)
         self.assertTrue(torch.allclose(out_p, out_m_copy_p))
-        print(1, out_q)
-        print(2, out_q_fx)
         self.assertTrue(torch.allclose(out_q, out_q_fx))
 
         # verify torch.jit.trace works
@@ -128,14 +126,6 @@ class TestAutoTracing(QuantizationTestCase):
         qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),))
 
-    # TODO(next): fix this test
-    # solution is here: https://github.com/pytorch/pytorch/pull/56154/files
-    @skipIfNoFBGEMM
-    def test_linear(self):
-        m = nn.Sequential(nn.Linear(1, 1)).eval()
-        qconfig = torch.quantization.default_qconfig
-        self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 1, 1),))
-
     @skipIfNoFBGEMM
     def test_conv(self):
         class M(torch.nn.Module):
@@ -150,6 +140,27 @@ class TestAutoTracing(QuantizationTestCase):
         m = M().eval()
         qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),))
+
+    @skipIfNoFBGEMM
+    def test_conv_flatten_linear(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 1, 1)
+                self.linear = torch.nn.Linear(1, 1)
+
+            def forward(self, x):
+                x1 = self.conv(x)
+                # TODO(future PR): unbreak this
+                # x1 = torch.nn.functional.adaptive_avg_pool2d(x, (1, 1))
+                x1 = torch.nn.functional.adaptive_avg_pool2d(x1, (1, 1))
+                x2 = torch.flatten(x1, 1)
+                x3 = self.linear(x2)
+                return x3
+
+        m = M().eval()
+        qconfig = torch.quantization.default_qconfig
+        self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 1, 1),))
 
     @skipIfNoFBGEMM
     def test_conv_add(self):

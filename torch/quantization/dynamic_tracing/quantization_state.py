@@ -198,6 +198,10 @@ class AutoQuantizationState(torch.nn.Module):
         if first_call:
             arg_tensor_infos = []
             for arg in args:
+                if not isinstance(arg, torch.Tensor):
+                    arg_tensor_infos.append(None)
+                    continue
+
                 # If a tensor does not have an ID, add it. This allows
                 # us to track inputs shared by multiple quantizeable modules.
                 if not hasattr(arg, '_qtensor_info'):
@@ -230,12 +234,13 @@ class AutoQuantizationState(torch.nn.Module):
         else:
             seen_op = self._get_cur_seen_op()
             for input_arg_idx, input_arg in enumerate(seen_op.input_tensor_infos):
-                tensor_id = input_arg.id
-                # TODO: do not run this twice on input and output
-                if str(tensor_id) in self.tensor_id_to_observer:
-                    observer = self.tensor_id_to_observer[str(tensor_id)]
-                    # TODO: return this to the caller
-                    observer(args[input_arg_idx])
+                if input_arg is not None:
+                    tensor_id = input_arg.id
+                    # TODO: do not run this twice on input and output
+                    if str(tensor_id) in self.tensor_id_to_observer:
+                        observer = self.tensor_id_to_observer[str(tensor_id)]
+                        # TODO: return this to the caller
+                        observer(args[input_arg_idx])
             return args, kwargs
 
     def op_prepare_after_hook(
@@ -269,6 +274,7 @@ class AutoQuantizationState(torch.nn.Module):
 
             # TODO(future PR): check if _qtensor_id needs to become an actual
             # attribute of Tensor
+            # TODO(future PR): handle non-tensor outputs
             output._qtensor_info = QTensorInfo(qtensor_id[0], torch.quint8)
             self.idx_to_seen_ops[str(self.idx)].output_tensor_infos.append(
                 output._qtensor_info)
@@ -303,13 +309,18 @@ class AutoQuantizationState(torch.nn.Module):
 
         # potentially quantize args, based on arg_quant_infos
         new_args = []
-        for arg_idx, arg in enumerate(args):
+        tensor_arg_idx = 0
+        for arg in args:
+            if not isinstance(arg, torch.Tensor):
+                new_args.append(arg)
+                continue
             # TODO: handle non-tensor inputs
-            quant_info = arg_quant_infos[arg_idx]
+            quant_info = arg_quant_infos[tensor_arg_idx]
             if quant_info is not None:
                 scale, zp = quant_info
                 arg = torch.quantize_per_tensor(arg, scale, zp, torch.quint8)
             new_args.append(arg)
+            tensor_arg_idx += 1
 
         # potentially extend kwargs with scale and zero_point
         kwargs.update(**additional_kwargs)
@@ -399,13 +410,16 @@ class AutoQuantizationState(torch.nn.Module):
         seen_op = self._get_cur_seen_op()
         quant_infos: List[Optional[Tuple[float, int]]] = []
         for input_arg_idx, input_arg in enumerate(seen_op.input_tensor_infos):
-            tensor_id = input_arg.id
-            if str(tensor_id) in self.tensor_id_to_observer and \
-                    input_arg.inf_dtype == torch.float:
-                observer = self.tensor_id_to_observer[str(tensor_id)]
-                # TODO: return this to the caller
-                scale, zp = observer.calculate_qparams()
-                quant_infos.append((scale, zp,))
+            if input_arg is not None:
+                tensor_id = input_arg.id
+                if str(tensor_id) in self.tensor_id_to_observer and \
+                        input_arg.inf_dtype == torch.float:
+                    observer = self.tensor_id_to_observer[str(tensor_id)]
+                    # TODO: return this to the caller
+                    scale, zp = observer.calculate_qparams()
+                    quant_infos.append((scale, zp,))
+                else:
+                    quant_infos.append(None)
             else:
                 quant_infos.append(None)
         return quant_infos
