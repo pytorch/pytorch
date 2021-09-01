@@ -1,5 +1,5 @@
 from io import IOBase
-from typing import Tuple
+from typing import Sized, Tuple
 from urllib.error import HTTPError, URLError
 import urllib.request as urllib
 from torch.utils.data import IterDataPipe
