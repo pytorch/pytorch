@@ -2,6 +2,8 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
+#include <cstddef>
+#include <stack>
 
 namespace torch {
 namespace jit {
@@ -164,7 +166,7 @@ inline bool operator==(const FrameNodeId& lhs, const FrameNodeId& rhs) {
       lhs.node_header == rhs.node_header;
 }
 
-c10::optional<int64_t> computeStorageSize(const Value& value);
+c10::optional<size_t> computeStorageSize(const Value& value);
 
 bool hasOutVariant(Node* node);
 
