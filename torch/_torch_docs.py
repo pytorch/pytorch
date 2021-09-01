@@ -9679,7 +9679,7 @@ See also :func:`torch.t`.
 
 add_docstr(torch.triangular_solve,
            r"""
-triangular_solve(b, A, upper=True, transpose=False, unitriangular=False) -> (Tensor, Tensor)
+triangular_solve(b, A, upper=True, transpose=False, unitriangular=False, *, out=None) -> (Tensor, Tensor)
 
 Solves a system of equations with a triangular coefficient matrix :math:`A`
 and multiple right-hand sides :math:`b`.
@@ -9705,6 +9705,10 @@ Args:
     unitriangular (bool, optional): whether :math:`A` is unit triangular.
         If True, the diagonal elements of :math:`A` are assumed to be
         1 and not referenced from :math:`A`. Default: ``False``.
+
+Keyword args:
+    out ((Tensor, Tensor), optional): tuple of two tensors to write
+        the output to. Ignored if `None`. Default: `None`.
 
 Returns:
     A namedtuple `(solution, cloned_coefficient)` where `cloned_coefficient`
@@ -10865,11 +10869,12 @@ elements :math:`{x_0, x_1, ..., x_n}`, the computation becomes
         \sum_{i = 1}^{n-1} \frac{(x_i - x_{i-1})}{2} (y_i + y_{i-1})
     \end{aligned}
 
-The broadcasting behavior of this function is as follows. First, for both :attr:`x`
+When :attr:`x` and :attr:`y` have the same size, the computation is as described above and no broadcasting is needed.
+The broadcasting behavior of this function is as follows when their sizes are different. For both :attr:`x`
 and :attr:`y`, the function computes the difference between consecutive elements along
 dimension :attr:`dim`. This effectively creates two tensors, `x_diff` and `y_diff`, that have
 the same shape as the original tensors except their lengths along the dimension :attr:`dim` is reduced by 1.
-After that, those two tensors are broadcasted together to compute final output as part of the trapezoidal rule.
+After that, those two tensors are broadcast together to compute final output as part of the trapezoidal rule.
 See the examples below for details.
 
 .. note::
