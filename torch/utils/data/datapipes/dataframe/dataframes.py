@@ -20,8 +20,8 @@ class DataFrameTracedOps(DFIterDataPipe):
 
 
 #  TODO(VitalyFedyunin): Extract this list from the DFIterDataPipe registred functions
-DATAPIPES_OPS = ['dataframes_as_tuples', 'groupby', 'dataframes_filter', 'map', 'to_datapipe',
-                 'shuffle', 'concat', 'batch', 'dataframes_per_row', 'dataframes_concat', 'dataframes_shuffle']
+DATAPIPES_OPS = ['_dataframes_as_tuples', 'groupby', '_dataframes_filter', 'map', 'to_datapipe',
+                 'shuffle', 'concat', 'batch', '_dataframes_per_row', '_dataframes_concat', '_dataframes_shuffle']
 
 
 class Capture(object):
@@ -85,10 +85,10 @@ class Capture(object):
         return self.as_datapipe().__iter__()
 
     def __iter__(self):
-        return iter(self.dataframes_as_tuples())
+        return iter(self._dataframes_as_tuples())
 
     def batch(self, batch_size=10):
-        dp = self.dataframes_per_row().dataframes_concat(batch_size)
+        dp = self._dataframes_per_row()._dataframes_concat(batch_size)
         dp = dp.as_datapipe().batch(1, wrapper_class=DataChunkDF)
         dp._dp_contains_dataframe = True
         return dp
@@ -102,9 +102,9 @@ class Capture(object):
                 guaranteed_group_size=None,
                 drop_remaining=False):
         if unbatch_level != 0:
-            dp = self.unbatch(unbatch_level).dataframes_per_row()
+            dp = self.unbatch(unbatch_level)._dataframes_per_row()
         else:
-            dp = self.dataframes_per_row()
+            dp = self._dataframes_per_row()
         dp = dp.as_datapipe().groupby(group_key_fn, buffer_size=buffer_size, group_size=group_size,
                                       guaranteed_group_size=guaranteed_group_size, drop_remaining=drop_remaining)
         dp._dp_contains_dataframe = True
@@ -112,10 +112,10 @@ class Capture(object):
         return dp
 
     def shuffle(self, *args, **kwargs):
-        return self.dataframes_shuffle(*args, **kwargs)
+        return self._dataframes_shuffle(*args, **kwargs)
 
     def filter(self, *args, **kwargs):
-        return self.dataframes_filter(*args, **kwargs)
+        return self._dataframes_filter(*args, **kwargs)
 
 
 class CaptureF(Capture):
