@@ -32,15 +32,11 @@ VIEW_FUNCTIONS_WITH_METADATA_CHANGE = [
     'view_as_complex',
     'view_as_real',
     '_conj',
-    '_neg_view',
-    'matrix_H',
-    'mH',
-    'adjoint'
+    '_neg_view'
 ]
 
 VIEW_FUNCTIONS = {
     'numpy_T': 'self',
-    'mT': 'self',
     'alias': 'self',
     'as_strided': 'self',
     'diagonal': 'self',
