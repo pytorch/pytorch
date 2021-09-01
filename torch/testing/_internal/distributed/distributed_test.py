@@ -3776,7 +3776,9 @@ class DistributedTest:
             model = Model()
             ddp_model = torch.nn.parallel.DistributedDataParallel(model)
             for _ in range(6):
-                # Verify DDP works with create_graph=True
+                # Verify DDP doesn't throw when ran with create_graph=True.
+                # Although we do warn about potential issues, please see
+                # https://github.com/pytorch/pytorch/issues/63929 for details.
                 ddp_model().backward(create_graph=True)
                 # grad tensors should require grad.
                 self.assertTrue(
