@@ -328,9 +328,9 @@ c10::intrusive_ptr<Message> tensorpipeDeserialize(
           tensors[i].device());
     }
     if (tensors[i].is_sparse()) {
-      tpDescriptorPos += 2;
+      tpDescriptorIndex += 2;
     } else {
-      tpDescriptorPos += 1;
+      tpDescriptorIndex += 1;
     }
   }
 
