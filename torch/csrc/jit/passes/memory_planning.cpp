@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/memory_planning.h>
+#include <torch/csrc/jit/passes/memory_planning/linear_scan.h>
 
 #include <jit/tensorexpr/kernel.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
@@ -45,8 +46,9 @@ bool intersectMemRegion(MemRegion reg1, MemRegion reg2) {
 std::vector<MemAllocation> naive(
     std::unordered_map<LiveRange, int64_t, live_range_hash>
         managed_live_ranges) {
-  std::map<LiveRange, int64_t, live_range_start_cmp> sorted_managed_live_ranges(
-      managed_live_ranges.begin(), managed_live_ranges.end());
+  std::map<LiveRange, int64_t, live_range_start_cmp>
+      sorted_managed_live_ranges(
+          managed_live_ranges.begin(), managed_live_ranges.end());
   std::vector<MemAllocation> allocations;
   allocations.reserve(managed_live_ranges.size());
   int64_t offset = 0;
@@ -270,7 +272,7 @@ int64_t getTotalAllocationSize(std::vector<MemAllocation> allocations) {
 
 bool intersectAllocs(MemAllocation m1, MemAllocation m2) {
   return intersectLiveRange(m1.lvr, m2.lvr) &&
-      intersectMemRegion(m1.reg, m2.reg);
+         intersectMemRegion(m1.reg, m2.reg);
 }
 
 bool validateAllocations(std::vector<MemAllocation> allocations) {
@@ -322,6 +324,10 @@ void planMemory(std::shared_ptr<Graph>& graph, Strategy strat) {
   switch (strat) {
     case Strategy::NAIVE: {
       allocations = naive(managed_live_ranges);
+      break;
+    }
+    case Strategy::LINEAR_SCAN: {
+      allocations = linearScanHeuristic(managed_live_ranges);
       break;
     };
     default:

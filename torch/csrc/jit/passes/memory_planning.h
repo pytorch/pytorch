@@ -7,12 +7,15 @@ namespace torch {
 namespace jit {
 enum class Strategy {
   NAIVE = 0,
+  LINEAR_SCAN,
 };
 
 inline const char* toString(Strategy s) {
   switch (s) {
     case Strategy::NAIVE:
       return "NAIVE";
+    case Strategy::LINEAR_SCAN:
+      return "LINEAR_SCAN";
     default:
       return "UNKNOWN STRATEGY";
   }
