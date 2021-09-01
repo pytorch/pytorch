@@ -85,7 +85,7 @@ PowerSGD Hooks
 Debugging Communication Hooks
 -----------------------------
 
-As the name implies, debugging communication hooks are **only** used for debugging purpose.
+As the name implies, debugging communication hooks are **only** used for debugging and performance optimization purpose.
 
 .. currentmodule:: torch.distributed.algorithms.ddp_comm_hooks.debugging_hooks
 
