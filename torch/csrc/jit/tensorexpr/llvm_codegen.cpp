@@ -79,7 +79,7 @@ llvm::CmpInst::Predicate llvm_comparison_predicate(
                                      : llvm::ICmpInst::ICMP_ULE;
     default:
       // TODO: change to a proper error report
-      throw std::runtime_error("invalid operator type");
+      throw std::runtime_error(buildErrorMessage("Invalid operator type"));
   }
 }
 
@@ -100,7 +100,7 @@ llvm::CmpInst::Predicate llvm_fp_comparison_predicate(
       return llvm::FCmpInst::FCMP_OLE;
     default:
       // TODO: change to a proper error report
-      throw std::runtime_error("invalid operator type");
+      throw std::runtime_error(buildErrorMessage("Invalid operator type"));
   }
 }
 
@@ -323,7 +323,7 @@ void LLVMCodeGen::call_raw(const std::vector<void*>& args) {
 void LLVMCodeGen::call(const std::vector<CallArg>& args) {
   auto& buf_args = buffer_args();
   if (args.size() != buf_args.size()) {
-    throw malformed_input("wrong number of args in call");
+    throw malformed_input(buildErrorMessage("wrong number of args in call"));
   }
 
   constexpr unsigned nargs = 8;
@@ -453,7 +453,7 @@ llvm::Type* LLVMCodeGenImpl::dtypeToLLVM(Dtype dtype) {
     AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
     default:
-      throw unsupported_dtype();
+      throw unsupported_dtype(buildErrorMessage(""));
   }
   return nullptr;
 }
@@ -547,7 +547,7 @@ void LLVMCodeGenImpl::emitKernel(
       "\nLLVM module before optimizations\n\n", asmStream.str().str(), "\n");
 
   if (llvm::verifyFunction(*fn_, &llvm::outs())) {
-    throw std::runtime_error("Function verification failed");
+    throw std::runtime_error(buildErrorMessage("Function verification failed"));
   }
 
   optimize(*module_);
@@ -592,7 +592,8 @@ void LLVMCodeGenImpl::visit(AddPtr v) {
   } else if (!lfp && !rfp) {
     value_ = irb_.CreateAdd(lhs, rhs);
   } else {
-    throw malformed_input("llvm_codgen: bad type in Add", v);
+    throw malformed_input(
+        buildErrorMessage("llvm_codgen: bad type in Add" + std::to_string(v)));
   }
 }
 
@@ -610,7 +611,8 @@ void LLVMCodeGenImpl::visit(SubPtr v) {
   } else if (!lfp && !rfp) {
     value_ = irb_.CreateSub(lhs, rhs);
   } else {
-    throw malformed_input("llvm_codgen: bad type in Sub", v);
+    throw malformed_input(
+        buildErrorMessage("llvm_codgen: bad type in Sub" + std::to_string(v)));
   }
 }
 
@@ -628,7 +630,8 @@ void LLVMCodeGenImpl::visit(MulPtr v) {
   } else if (!lfp && !rfp) {
     value_ = irb_.CreateMul(lhs, rhs);
   } else {
-    throw malformed_input("llvm_codgen: bad type in Mul", v);
+    throw malformed_input(
+        buildErrorMessage("llvm_codgen: bad type in Mul" + std::to_string(v)));
   }
 }
 
@@ -646,7 +649,8 @@ void LLVMCodeGenImpl::visit(DivPtr v) {
   } else if (!lfp && !rfp) {
     value_ = irb_.CreateSDiv(lhs, rhs);
   } else {
-    throw malformed_input("llvm_codgen: bad type in Div", v);
+    throw malformed_input(
+        buildErrorMessage("llvm_codgen: bad type in Div" + std::to_string(v)));
   }
 }
 
@@ -661,7 +665,8 @@ void LLVMCodeGenImpl::visit(AndPtr v) {
   if (!lfp && !rfp) {
     value_ = irb_.CreateAnd(lhs, rhs);
   } else {
-    throw malformed_input("llvm_codgen: bad type in And", v);
+    throw malformed_input(
+        buildErrorMessage("llvm_codgen: bad type in And" + std::to_string(v)));
   }
 }
 
@@ -676,7 +681,8 @@ void LLVMCodeGenImpl::visit(OrPtr v) {
   if (!lfp && !rfp) {
     value_ = irb_.CreateOr(lhs, rhs);
   } else {
-    throw malformed_input("llvm_codgen: bad type in Or", v);
+    throw malformed_input(
+        buildErrorMessage("llvm_codgen: bad type in Or" + std::to_string(v)));
   }
 }
 
@@ -691,7 +697,8 @@ void LLVMCodeGenImpl::visit(XorPtr v) {
   if (!lfp && !rfp) {
     value_ = irb_.CreateXor(lhs, rhs);
   } else {
-    throw malformed_input("llvm_codgen: bad type in Xor", v);
+    throw malformed_input(
+        buildErrorMessage("llvm_codgen: bad type in Xor" + std::to_string(v)));
   }
 }
 
@@ -706,7 +713,8 @@ void LLVMCodeGenImpl::visit(LshiftPtr v) {
   if (!lfp && !rfp) {
     value_ = irb_.CreateShl(lhs, rhs);
   } else {
-    throw malformed_input("llvm_codgen: bad type in Lshift", v);
+    throw malformed_input(buildErrorMessage(
+        "llvm_codgen: bad type in Lshift" + std::to_string(v)));
   }
 }
 
@@ -725,7 +733,8 @@ void LLVMCodeGenImpl::visit(RshiftPtr v) {
       value_ = irb_.CreateLShr(lhs, rhs);
     }
   } else {
-    throw malformed_input("llvm_codgen: bad type in Rshift", v);
+    throw malformed_input(buildErrorMessage(
+        "llvm_codgen: bad type in Rshift" + std::to_string(v)));
   }
 }
 
@@ -740,7 +749,8 @@ void LLVMCodeGenImpl::visit(ModPtr v) {
   if (!lfp && !rfp) {
     value_ = irb_.CreateSRem(lhs, rhs);
   } else {
-    throw malformed_input("llvm_codgen: bad type in Mod", v);
+    throw malformed_input(
+        buildErrorMessage("llvm_codgen: bad type in Mod" + std::to_string(v)));
   }
 }
 
@@ -811,7 +821,8 @@ void LLVMCodeGenImpl::visit(CompareSelectPtr v) {
     } else if (c10::isFloatingType(type_used)) {
       cmp_ = irb_.CreateFCmp(llvm_fp_comparison_predicate(cmp_op_), lhs, rhs);
     } else {
-      throw std::runtime_error("invalid type for CompareSelect");
+      throw std::runtime_error(
+          buildErrorMessage("Invalid type for CompareSelect"));
     }
 
     return irb_.CreateSelect(cmp_, retval1, retval2);
@@ -833,7 +844,8 @@ void LLVMCodeGenImpl::visit(CompareSelectPtr v) {
     } else if (c10::isFloatingType(cmp_type)) {
       cmp = irb_.CreateFCmp(llvm_fp_comparison_predicate(cmp_op), lhs, rhs);
     } else {
-      throw std::runtime_error("invalid type for CompareSelect");
+      throw std::runtime_error(
+          buildErrorMessage("Invalid type for CompareSelect"));
     }
 
     auto lanes = v->lhs()->dtype().lanes();
@@ -963,12 +975,12 @@ void LLVMCodeGenImpl::visit(CastPtr v) {
         value_ = irb_.CreateFPToSI(value_, dstType);
       }
     } else {
-      throw unimplemented_lowering(v);
+      throw unimplemented_lowering(buildErrorMessage(std::to_string(v)));
     }
     return;
   }
   if (!srcType->isIntOrIntVectorTy()) {
-    throw unimplemented_lowering(v);
+    throw unimplemented_lowering(buildErrorMessage(std::to_string(v)));
   }
   if (dstType->isFPOrFPVectorTy()) {
     if (destUnsigned) {
@@ -986,7 +998,7 @@ void LLVMCodeGenImpl::visit(CastPtr v) {
     }
     value_ = irb_.CreateIntCast(value_, dstType, !destUnsigned);
   } else {
-    throw unimplemented_lowering(v);
+    throw unimplemented_lowering(buildErrorMessage(std::to_string(v)));
   }
 }
 
@@ -1072,7 +1084,7 @@ void LLVMCodeGenImpl::visit(RampPtr v) {
     AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
     default:
-      throw std::runtime_error("invalid dtype in Ramp");
+      throw std::runtime_error(buildErrorMessage("Invalid dtype in Ramp"));
   }
 
   value_ = llvm::UndefValue::get(vecType);
@@ -1139,7 +1151,7 @@ void LLVMCodeGenImpl::visit(LoadPtr v) {
     AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
     default:
-      throw std::runtime_error("invalid dtype in Load");
+      throw std::runtime_error(buildErrorMessage("Invalid dtype in Load"));
   }
 
   // Detect whether the vector mask is all true
@@ -1335,7 +1347,7 @@ void LLVMCodeGenImpl::visit(ForPtr v) {
   if (!varToVal_.count(v->var())) {
     varToVal_.emplace(v->var(), idx);
   } else {
-    throw std::runtime_error("var should not exist before");
+    throw std::runtime_error(buildErrorMessage("var should not exist before"));
   }
 
   // Create the body and exit blocks.
@@ -1381,7 +1393,8 @@ void LLVMCodeGenImpl::visit(BlockPtr v) {
   if (it != scopeToVar_.end()) {
     for (VarPtr e : it->second) {
       if (varToVal_.erase(e) != 1) {
-        throw std::runtime_error("erasing var that doesn't exist");
+        throw std::runtime_error(
+            buildErrorMessage("erasing var that doesn't exist"));
       }
     }
   }
@@ -1675,7 +1688,7 @@ void LLVMCodeGenImpl::visit(IntrinsicsPtr v) {
       } break;
 
       default: {
-        throw unimplemented_lowering(v);
+        throw unimplemented_lowering(buildErrorMessage(std::to_string(v)));
       } break;
     }
 
@@ -1744,7 +1757,7 @@ void LLVMCodeGenImpl::visit(IntrinsicsPtr v) {
       } break;
 
       default: {
-        throw unimplemented_lowering(v);
+        throw unimplemented_lowering(buildErrorMessage(std::to_string(v)));
       } break;
     }
   } else if (v->dtype().is_integral() && v->op_type() == kAbs) {
@@ -1798,7 +1811,7 @@ void LLVMCodeGenImpl::visit(ExternalCallPtr v) {
 
   auto& func_registry = getNNCFunctionRegistry();
   if (!func_registry.count(v->func_name())) {
-    throw unimplemented_lowering(v);
+    throw unimplemented_lowering(buildErrorMessage(std::to_string(v)));
   }
 
   // Prepare a vector of bufs that we need to pass to the external function.
@@ -1952,7 +1965,7 @@ void LLVMCodeGenImpl::visit(LetPtr v) {
     varToVal_.emplace(v->var(), value_);
     scopeToVar_[scope_].push_back(v->var());
   } else {
-    throw std::runtime_error("var should not exist before");
+    throw std::runtime_error(buildErrorMessage("var should not exist before"));
   }
 }
 

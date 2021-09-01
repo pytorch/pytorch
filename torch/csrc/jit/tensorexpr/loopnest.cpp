@@ -539,7 +539,8 @@ class FunctionInliner : public IRMutator {
             "Constant index impression should always be zero");
         producer_index_vars_.push_back(nullptr);
       } else {
-        throw std::logic_error("cannot inline Buf with compound indices");
+        throw std::logic_error(
+            buildErrorMessage("cannot inline Buf with compound indices"));
       }
     }
   }
@@ -561,8 +562,8 @@ class FunctionInliner : public IRMutator {
         continue;
       auto iter = inline_mapping_.find(func_callee_arg);
       if (iter != inline_mapping_.end()) {
-        throw std::runtime_error(
-            "Duplicated variables: " + func_callee_arg->name_hint());
+        throw std::runtime_error(buildErrorMessage(
+            "Duplicated variables: " + func_callee_arg->name_hint()));
       }
       // Add a mapping for each function parameter to it's source name.
       inline_mapping_[func_callee_arg] = func_caller_param;
@@ -604,8 +605,9 @@ class FunctionInliner : public IRMutator {
     }
 
     if (v->indices().size() != buf->ndim()) {
-      throw malformed_input(
-          "Placeholder indexed access is inconsistent with its rank", v);
+      throw malformed_input(buildErrorMessage(
+          "Placeholder indexed access is inconsistent with its rank" +
+          std::to_string(v)));
     }
     return mutate_loads(buf, v->indices());
   }
@@ -715,7 +717,8 @@ class FunctionInliner : public IRMutator {
 bool LoopNest::computeInline(StmtPtr s) {
   auto s_store = to<Store>(s);
   if (s_store == nullptr) {
-    throw std::logic_error("Could not find buffer producer to inline");
+    throw std::logic_error(
+        buildErrorMessage("Could not find buffer producer to inline"));
   }
   return computeInline(s_store->buf());
 }
@@ -1303,12 +1306,14 @@ void LoopNest::sliceHead(ForPtr f, int factor, ForPtr* head, ForPtr* tail) {
   }
 
   if (!f) {
-    throw malformed_input("sliceHead attempted on null loop", f);
+    throw malformed_input(buildErrorMessage(
+        "sliceHead attempted on null loop" + std::to_string(f)));
   }
 
   BlockPtr p = to<Block>(f->get_parent());
   if (!p) {
-    throw malformed_input("sliceHead attempted on loop with no parent", p);
+    throw malformed_input(buildErrorMessage(
+        "sliceHead attempted on loop with no parent" + std::to_string(p)));
   }
 
   ExprPtr head_end = alloc<Min>(
@@ -1343,12 +1348,14 @@ void LoopNest::sliceTail(ForPtr f, int factor, ForPtr* head, ForPtr* tail) {
   }
 
   if (!f) {
-    throw malformed_input("sliceTail attempted on null loop", f);
+    throw malformed_input(buildErrorMessage(
+        "sliceTail attempted on null loop" + std::to_string(f)));
   }
 
   BlockPtr p = to<Block>(f->get_parent());
   if (!p) {
-    throw malformed_input("sliceTail attempted on loop with no parent", p);
+    throw malformed_input(buildErrorMessage(
+        "sliceTail attempted on loop with no parent" + std::to_string(p)));
   }
 
   ExprPtr tail_start = alloc<Max>(
@@ -1382,12 +1389,14 @@ void LoopNest::splitWithTail(
     ForPtr* inner,
     ForPtr* tail) {
   if (!f) {
-    throw malformed_input("splitWithTail attempted on null loop", f);
+    throw malformed_input(buildErrorMessage(
+        "splitWithTail attempted on null loop" + std::to_string(f)));
   }
 
   BlockPtr p = to<Block>(f->get_parent());
   if (!p) {
-    throw malformed_input("splitWithTail attempted on loop with no parent", p);
+    throw malformed_input(buildErrorMessage(
+        "splitWithTail attempted on loop with no parent" + std::to_string(p)));
   }
 
   bool tail_is_needed = true;
@@ -1491,7 +1500,7 @@ void LoopNest::splitWithMask(ForPtr f, int factor, ForPtr* inner) {
   if (tail_is_needed) {
     auto start = intValue(f->start());
     if (!start || *start != 0) {
-      throw unimplemented_lowering();
+      throw unimplemented_lowering(buildErrorMessage(""));
     }
 
     ExprPtr predicate =
@@ -1516,12 +1525,14 @@ std::vector<ForPtr> LoopNest::distributeLoop(
   TORCH_INTERNAL_ASSERT(loop);
   auto root = loop->get_parent();
   if (root == nullptr) {
-    throw malformed_input("Loop without parent: ", loop);
+    throw malformed_input(
+        buildErrorMessage("Loop without parent: " + std::to_string(loop)));
   }
   auto root_block = to<Block>(root);
   if (root_block == nullptr) {
-    throw malformed_input(
-        "Loop's parent must be a Block, instead found ", root);
+    throw malformed_input(buildErrorMessage(
+        "Loop's parent must be a Block, instead found " +
+        std::to_string(root)));
   }
 
   // Extract bodies for all the loops after distribution.
@@ -1861,7 +1872,8 @@ void LoopNest::reorderAxis(ForPtr a, ForPtr b) {
   // find inner and outer.
   ForPtr outer = findOuterFor(a, b);
   if (outer == nullptr) {
-    throw std::runtime_error("Reordered a loop not in LoopNest");
+    throw std::runtime_error(
+        buildErrorMessage("Reordered a loop not in LoopNest"));
   }
 
   ForPtr inner = a == outer ? b : a;
@@ -1997,24 +2009,26 @@ std::vector<ForPtr> LoopNest::reorder(
     const std::vector<ForPtr>& loops,
     const std::vector<size_t>& permutation) {
   if (loops.size() != permutation.size()) {
-    throw malformed_input("invalid permutation size");
+    throw malformed_input(buildErrorMessage("Invalid permutation size"));
   }
   if (isTrivialPermutation(permutation)) {
     return loops;
   }
   if (!isValidPermutation(permutation)) {
-    throw malformed_input("invalid permutation for reorder");
+    throw malformed_input(buildErrorMessage("Invalid permutation for reorder"));
   }
   if (loops.size() < 2) {
     return loops;
   }
   if (!areLoopsPerfectlyNested(loops)) {
-    throw malformed_input("reorder is only allowed on perfectly nested loops");
+    throw malformed_input(
+        buildErrorMessage("Reorder is only allowed on perfectly nested loops"));
   }
 
   auto parent = to<Block>(loops.front()->get_parent());
   if (parent == nullptr) {
-    throw malformed_input("parent of the loops must be a Block");
+    throw malformed_input(
+        buildErrorMessage("Parent of the loops must be a Block"));
   }
 
   // Reorder the loops according to the permutation.
@@ -2050,7 +2064,7 @@ ForPtr LoopNest::getLoopAt(ForPtr root, const std::vector<int>& indices) const {
     return root;
   }
   if (root == nullptr) {
-    throw malformed_input("root loop is null");
+    throw malformed_input(buildErrorMessage("root loop cannot be null"));
   }
 
   ForPtr curr = root;
@@ -2072,10 +2086,12 @@ ForPtr LoopNest::getLoopAt(ForPtr root, const std::vector<int>& indices) const {
 ForPtr LoopNest::tile(ForPtr x, ForPtr y, int x_factor, int y_factor) {
   auto parent = to<Block>(x->get_parent());
   if (parent == nullptr) {
-    throw malformed_input("parent of the loops must be a Block");
+    throw malformed_input(
+        buildErrorMessage("Parent of the loops must be a Block"));
   }
   if (!areLoopsPerfectlyNested({x, y})) {
-    throw malformed_input("two loops must be perfectly nested");
+    throw malformed_input(
+        buildErrorMessage("The loops to be tiled must be perfectly nested"));
   }
 
   // Split x, y axes by x_factor and y_factor
@@ -2123,18 +2139,21 @@ bool LoopNest::areLoopsPerfectlyNested(const std::vector<ForPtr>& loops) {
 void LoopNest::unroll(ForPtr f, StmtPtr* unrolled) {
   BlockPtr p = to<Block>(f->get_parent());
   if (!f) {
-    throw malformed_input("unroll attempted on null loop");
+    throw malformed_input(buildErrorMessage("unroll attempted on null loop"));
   } else if (!p) {
-    throw malformed_input("unroll attempted on loop with no parent");
+    throw malformed_input(
+        buildErrorMessage("unroll attempted on loop with no parent"));
   }
 
   auto start_expr = IRSimplifier::simplify(f->start());
   auto stop_expr = IRSimplifier::simplify(f->stop());
   if (!start_expr->isConstant()) {
-    throw std::runtime_error("Can't unroll due to non-constant loop start!");
+    throw std::runtime_error(
+        buildErrorMessage("Can't unroll due to non-constant loop start!"));
   }
   if (!stop_expr->isConstant()) {
-    throw std::runtime_error("Can't unroll due to non-constant loop stop!");
+    throw std::runtime_error(
+        buildErrorMessage("Can't unroll due to non-constant loop stop!"));
   }
 
   std::vector<StmtPtr> unrolled_stmts;
@@ -2167,7 +2186,8 @@ bool LoopNest::isNormalized(ForPtr f) {
 
 bool LoopNest::normalize(ForPtr f) {
   if (!f) {
-    throw malformed_input("normalize attempted on null loop");
+    throw malformed_input(
+        buildErrorMessage("normalize attempted on null loop"));
   }
 
   if (isNormalized(f)) {
@@ -2201,11 +2221,13 @@ std::vector<ForPtr> LoopNest::getLoopStmtsInLoopNest(ForPtr f, size_t num) {
 
 bool LoopNest::flatten(const std::vector<ForPtr>& loops, ForPtr* flattened) {
   if (loops.empty()) {
-    throw malformed_input("flatten attempted on empty set of loops");
+    throw malformed_input(
+        buildErrorMessage("flatten attempted on empty set of loops"));
   }
   BlockPtr p = to<Block>(loops[0]->get_parent());
   if (!p) {
-    throw malformed_input("flatten attempted on loops with no parent");
+    throw malformed_input(
+        buildErrorMessage("flatten attempted on loops with no parent"));
   }
 
   if (loops.size() == 1) {
@@ -2626,8 +2648,8 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
       }
 
       if (reduceOp) {
-        throw std::runtime_error(
-            "can only cache accesses used by at most a single reduceOp");
+        throw std::runtime_error(buildErrorMessage(
+            "can only cache accesses used by at most a single reduceOp"));
         return {nullptr, nullptr};
       }
 
@@ -2639,7 +2661,8 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
   auto consumer_bounds_info = inferBounds(consumer, false);
   auto bounds_it = consumer_bounds_info.find(producer);
   if (bounds_it == consumer_bounds_info.end()) {
-    throw std::runtime_error("consumer does not use the Tensor produced");
+    throw std::runtime_error(
+        buildErrorMessage("consumer does not use the Tensor produced"));
     return {nullptr, nullptr};
   }
 
