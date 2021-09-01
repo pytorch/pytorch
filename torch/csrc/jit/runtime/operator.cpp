@@ -2,6 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/core/alias_info.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/frontend/edit_distance.h>
 
 #include <queue>
@@ -412,7 +413,7 @@ std::string canonicalSchemaString(const FunctionSchema& schema) {
   out.push_back('(');
 
   bool seen_kwarg_only = false;
-  for (size_t i = 0; i < schema.arguments().size(); ++i) {
+  for (const auto i : c10::irange(schema.arguments().size())) {
     if (i > 0) {
       out += ", ";
     }
@@ -431,7 +432,7 @@ std::string canonicalSchemaString(const FunctionSchema& schema) {
     out += schema.returns().at(0).type()->str();
   } else if (schema.returns().size() > 1) {
     out.push_back('(');
-    for (size_t i = 0; i < schema.returns().size(); ++i) {
+    for (const auto i : c10::irange(schema.returns().size())) {
       if (i > 0) {
         out += ", ";
       }

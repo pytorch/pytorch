@@ -580,6 +580,7 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::Closure:
     case prim::CreateObject:
     case prim::tolist:
+    case prim::Uninitialized:
       return analyzeCreator(node);
     case prim::TupleConstruct:
     case prim::DictConstruct:
@@ -634,9 +635,6 @@ void AliasDb::analyzeImpl(Node* node) {
       // for now we assume the worst
       // NB: update safeToChangeAliasingRelationship if changed
       return analyzeConservative(node);
-    case prim::Uninitialized:
-      giveFreshAlias(node->output());
-      return;
     case prim::Print:
     case prim::isinstance:
       // These ops do nothing
