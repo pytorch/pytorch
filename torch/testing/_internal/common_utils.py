@@ -23,6 +23,7 @@ import warnings
 import random
 import contextlib
 import shutil
+import threading
 from pathlib import Path
 import socket
 import subprocess
@@ -156,7 +157,7 @@ def _get_test_report_path():
     return os.path.join('test-reports', test_source)
 
 
-parser = argparse.ArgumentParser(add_help=False)
+parser = argparse.ArgumentParser()
 parser.add_argument('--subprocess', action='store_true',
                     help='whether to run each test in a subprocess')
 parser.add_argument('--seed', type=int, default=1234)
@@ -172,6 +173,15 @@ parser.add_argument('--log-suffix', type=str, default="")
 parser.add_argument('--run-parallel', type=int, default=1)
 parser.add_argument('--import-slow-tests', type=str, nargs='?', const=SLOW_TESTS_FILE)
 parser.add_argument('--import-disabled-tests', type=str, nargs='?', const=DISABLED_TESTS_FILE)
+
+# Only run when -h or --help flag is active to display both unittest and parser help messages.
+def run_unittest_help(argv):
+    unittest.main(argv=argv)
+
+if '-h' in sys.argv or '--help' in sys.argv:
+    help_thread = threading.Thread(target=run_unittest_help, args=(sys.argv,))
+    help_thread.start()
+    help_thread.join()
 
 args, remaining = parser.parse_known_args()
 if args.jit_executor == 'legacy':
