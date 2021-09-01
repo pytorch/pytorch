@@ -117,9 +117,11 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
            {"is_vulkan", "prim"},     {"is_meta", "prim"},
            {"is_leaf", "aten"},       {"requires_grad", "prim"},
            {"layout", "prim"},        {"T", "prim"},
+           {"H", "prim"},             {"mT", "aten"},
+           {"mH", "aten"},            {"is_ort", "prim"},
            {"ndim", "prim"},          {"name", "prim"},
            {"real", "aten"},          {"imag", "aten"},
-           {"retains_grad", "aten"},  {"is_ort", "prim"},
+           {"retains_grad", "aten"},
        }},
       {TypeKind::DeviceObjType, {{"type", "prim"}, {"index", "prim"}}}};
   auto kind = value_->type()->kind();
