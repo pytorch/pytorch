@@ -20,7 +20,7 @@ from .anomaly_mode import detect_anomaly, set_detect_anomaly
 from ..overrides import has_torch_function, handle_torch_function
 from . import functional
 from . import forward_ad
-from . import saved_variable_default_hooks as graph
+from . import graph
 
 __all__ = ['Variable', 'Function', 'backward', 'grad_mode']
 
@@ -173,16 +173,17 @@ def grad(
     gradients w.r.t. each of the outputs. If an output doesn't require_grad,
     then the gradient can be ``None``).
 
-    If ``only_inputs`` is ``True``, the function will only return a list of gradients
-    w.r.t the specified inputs. If it's ``False``, then gradient w.r.t. all remaining
-    leaves will still be computed, and will be accumulated into their ``.grad``
-    attribute.
-
     .. note::
 
         If you run any forward ops, create ``grad_outputs``, and/or call ``grad``
         in a user-specified CUDA stream context, see
         :ref:`Stream semantics of backward passes<bwd-cuda-stream-semantics>`.
+
+    .. note::
+
+        ``only_inputs`` argument is deprecated and is ignored now (defaults to ``True``).
+        To accumulate gradient for other parts of the graph, please use
+        ``torch.autograd.backward``.
 
     Args:
         outputs (sequence of Tensor): outputs of the differentiated function.
@@ -264,7 +265,7 @@ from torch._C._autograd import (DeviceType, ProfilerActivity, ProfilerState, Pro
                                 _enable_profiler_legacy, _disable_profiler_legacy, _profiler_enabled,
                                 _enable_record_function, _set_empty_test_observer, kineto_available,
                                 _supported_activities, _add_metadata_json, SavedTensor,
-                                _register_default_hooks, _reset_default_hooks)
+                                _register_saved_tensors_default_hooks, _reset_saved_tensors_default_hooks)
 
 from torch._C._autograd import (_ProfilerResult, _KinetoEvent,
                                 _prepare_profiler, _enable_profiler, _disable_profiler)
