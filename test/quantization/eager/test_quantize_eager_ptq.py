@@ -67,6 +67,7 @@ import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
 
 # Standard library
+import sys
 from typing import Tuple
 import io
 import unittest
