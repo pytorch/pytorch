@@ -188,6 +188,19 @@ class TestFX(JitTestCase):
         t = T()
         symbolic_trace(t)
 
+        # test for issue described at https://github.com/pytorch/pytorch/issues/63883
+        class M3(torch.nn.Module):
+            def forward(self, x):
+                return torch.relu(x)
+
+        m3 = M3()
+        gm3 = symbolic_trace(m3)
+        new_instance = gm3.__new__(type(gm3))
+        new_instance.__init__(gm3, gm3.graph)
+
+        x = torch.randn(5, 3)
+        torch.testing.assert_allclose(new_instance(x), torch.relu(x))
+
     def test_custom_import(self):
         graph = torch.fx.Graph()
         a = graph.placeholder('x')
