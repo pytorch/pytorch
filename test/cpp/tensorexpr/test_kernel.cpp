@@ -1111,53 +1111,68 @@ TEST_F(Kernel, Softmax4D) {
 }
 
 TEST_F(Kernel, SignTest) {
-  auto options = at::TensorOptions()
-                     .dtype(at::kFloat)
-                     .layout(at::kStrided)
-                     .device(at::kCPU)
-                     .requires_grad(false);
-  std::vector<float> input_data = {
-      0.7,
-      2.3,
-      -0.89,
-      -1.2,
-      4,
-      -5,
-      0.0,
-      -0.0,
-      0,
-      -0,
-      std::numeric_limits<float>::infinity(),
-      -std::numeric_limits<float>::infinity(),
-      std::numeric_limits<double>::infinity(),
-      -std::numeric_limits<double>::infinity(),
-      std::nan("1"),
-      -std::nan("1"),
-      std::nanf("1"),
-      -std::nanf("1"),
-      std::nanl("1"),
-      -std::nanl("1")};
-  auto input = at::from_blob(input_data.data(), {input_data.size()}, options);
-  auto ref = at::sign(input);
-
   const auto graph_template = R"IR(
-      graph(%0 : Float(${size}, strides=[1], device=cpu)):
-        %2 : Float(${size}, strides=[1]) = aten::sign(%0)
+      graph(%0 : ${dtype}(${size}, strides=[1], device=cpu)):
+        %2 : ${dtype}(${size}, strides=[1]) = aten::sign(%0)
         return (%2))IR";
-  TemplateEnv env;
-  env.d("size", input_data.size());
-  const auto graph_string = format(graph_template, env);
-  auto graph = std::make_shared<Graph>();
-  parseIR(graph_string, &*graph);
+  auto common_options = at::TensorOptions()
+                            .layout(at::kStrided)
+                            .device(at::kCPU)
+                            .requires_grad(false);
+  int default_input_size = 100;
+  for (auto scalar_type : {ScalarType::Float, ScalarType::Double}) {
+    at::Tensor corner_case_inputs;
+    TemplateEnv env;
+    auto options = common_options;
+    switch (scalar_type) {
+      case ScalarType::Float: {
+        env.s("dtype", "Float");
+        options = options.dtype(at::kFloat);
+        std::vector<float> input_float = {
+            0.0,
+            -0.0,
+            std::numeric_limits<float>::infinity(),
+            -std::numeric_limits<float>::infinity(),
+            std::nanf("1"),
+            -std::nanf("1")};
+        corner_case_inputs =
+            at::from_blob(input_float.data(), {input_float.size()}, options);
+        break;
+      }
+      case ScalarType::Double: {
+        env.s("dtype", "Double");
+        options = options.dtype(at::kDouble);
+        std::vector<double> input_double = {
+            0.0,
+            -0.0,
+            std::numeric_limits<double>::infinity(),
+            -std::numeric_limits<double>::infinity(),
+            std::nan("1"),
+            -std::nan("1")};
+        corner_case_inputs =
+            at::from_blob(input_double.data(), {input_double.size()}, options);
+        break;
+      }
+      default:
+        throw unsupported_dtype();
+    }
+    auto rand_input = at::rand({default_input_size}, options);
+    auto input = at::cat({rand_input, corner_case_inputs});
+    env.d("size", at::numel(input));
+    const auto graph_string = format(graph_template, env);
+    auto graph = std::make_shared<Graph>();
+    parseIR(graph_string, &*graph);
 
-  TensorExprKernel k(graph);
-  StmtPtr s = k.getCodeGenStmt();
+    TensorExprKernel k(graph);
+    StmtPtr s = k.getCodeGenStmt();
 
-  std::vector<at::Tensor> inputs = {input};
-  std::vector<IValue> stack = fmap<IValue>(inputs);
-  k.run(stack);
-  auto o = stack[0].toTensor();
-  ASSERT_TRUE(at::allclose(o, ref));
+    std::vector<at::Tensor> inputs = {input};
+    std::vector<IValue> stack = fmap<IValue>(inputs);
+    k.run(stack);
+    auto o = stack[0].toTensor();
+    auto ref = at::sign(input);
+    ASSERT_TRUE(at::allclose(o, ref));
+  }
 }
 
 TEST_F(Kernel, InlineProducerIntoReduction) {
