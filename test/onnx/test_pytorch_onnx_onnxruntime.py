@@ -2861,7 +2861,7 @@ class TestONNXRuntime(unittest.TestCase):
 
         class Empty(torch.nn.Module):
             def forward(self, x):
-                y = torch.empty(()) * 0
+                y = torch.empty(()).fill_(0)
                 y += x
                 return y
         x = torch.tensor(42.)
