@@ -11,7 +11,6 @@
 #include <nccl.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
-#include <fmt/format.h>
 
 namespace {
 // Provides additional detail into NCCL error codes based on when these are
@@ -159,18 +158,9 @@ class NCCLComm {
     std::swap(ncclAsyncErr_, other.ncclAsyncErr_);
   }
 
-  ncclComm_t getNcclComm() {
-    std::unique_lock<std::mutex> lock(mutex_);
-    if (aborted_) {
-      auto abortMsgTemplate = "NCCL communicator was aborted on rank {}.{}";
-      auto commFailureMsg = commFailureReason_ != c10::nullopt
-          ? fmt::format(
-                " Original reason for failure was: {}", *commFailureReason_)
-          : "";
-      TORCH_CHECK(false, fmt::format(abortMsgTemplate, rank_, commFailureMsg));
-    }
-    return ncclComm_;
-  }
+  // Implemented in NCCLUtils.cpp because header files run into issues including
+  // <fmt/format.h>
+  ncclComm_t getNcclComm();
 
   c10::optional<std::string> getNcclCommFailureReason() const {
     std::unique_lock<std::mutex> lock(mutex_);

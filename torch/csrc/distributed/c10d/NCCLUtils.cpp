@@ -3,8 +3,23 @@
 #ifdef USE_C10D_NCCL
 
 #include <mutex>
+#include <fmt/format.h>
 
 namespace c10d {
+
+
+ncclComm_t NCCLComm::getNcclComm() {
+  std::unique_lock<std::mutex> lock(mutex_);
+  if (aborted_) {
+    auto abortMsgTemplate = "NCCL communicator was aborted on rank {}.{}";
+    auto commFailureMsg = commFailureReason_ != c10::nullopt
+        ? fmt::format(
+              " Original reason for failure was: {}", *commFailureReason_)
+        : "";
+    TORCH_CHECK(false, fmt::format(abortMsgTemplate, rank_, commFailureMsg));
+  }
+  return ncclComm_;
+}
 
 std::string getNcclVersion() {
   static std::once_flag ncclGetVersionFlag;
