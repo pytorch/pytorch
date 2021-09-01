@@ -68,6 +68,7 @@ struct Instruction {
   uint8_t unused;
   uint16_t N;
   int32_t X;
+  Instruction() {}
   // TODO: check for overflow
   Instruction(OpCode op, int32_t X, uint16_t N)
       : op(op), unused(0), N(N), X(X) {}

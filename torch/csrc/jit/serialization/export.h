@@ -91,6 +91,13 @@ class TORCH_API ScriptModuleSerializer {
       bool use_storage_context = false);
   void updateSourceRangeTags(const SourceRangeRecords& ranges);
 
+  void writeBytecodeZip(
+      const Module& module,
+      bool save_mobile_debug_info,
+    bool use_compact_inst,
+    const std::string& file_suffix
+  );
+
   caffe2::serialize::PyTorchStreamWriter& writer_;
   std::vector<at::IValue> constant_table_;
 

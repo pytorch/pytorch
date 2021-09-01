@@ -245,7 +245,8 @@ class BytecodeDeserializer final {
   void parseMethods(
       const std::vector<IValue>& vals,
       const c10::optional<std::vector<IValue>>& debug_handles,
-      mobile::CompilationUnit& mcu);
+      mobile::CompilationUnit& mcu,
+      bool compact_inst);
   c10::IValue readArchive(
       const std::string& archive_name,
       std::shared_ptr<mobile::CompilationUnit> mcu);
@@ -321,7 +322,8 @@ TypePtr BytecodeDeserializer::resolveTypeName(const c10::QualifiedName& qn) {
 void BytecodeDeserializer::parseMethods(
     const std::vector<IValue>& vals,
     const c10::optional<std::vector<IValue>>& debug_handles,
-    mobile::CompilationUnit& mcu) {
+    mobile::CompilationUnit& mcu,
+    bool compact_inst) {
   TORCH_CHECK(vals.size() > 0, "Bytecode has no elements. ");
   // Initialized with the version number when kProducedBytecodeVersion was
   // introduced. The old models (some of them already in production) without
@@ -369,10 +371,6 @@ void BytecodeDeserializer::parseMethods(
     auto function =
         std::make_unique<mobile::Function>(c10::QualifiedName(function_name));
 
-    const auto& ins_list =
-        expect_field(codeTable, "instructions", BYTECODE_INDEX_INSTRUCTION)
-            .toTuple()
-            ->elements();
     const auto& ops_list =
         expect_field(codeTable, "operators", BYTECODE_INDEX_OPERATOR)
             .toTuple()
@@ -408,25 +406,49 @@ void BytecodeDeserializer::parseMethods(
                                 ->elements())[0]
                                .toList()
                                .vec();
-      TORCH_CHECK(
-          debug_handles_list.size() == ins_list.size(),
-          "The numbers of instructions and debug handles strings do not match.");
+      // TORCH_CHECK(
+          // debug_handles_list.size() == ins_list.size(),
+          // "The numbers of instructions and debug handles strings do not match.");
     }
 
-    for (const auto j : c10::irange(ins_list.size())) {
-      auto ins_item = ins_list[j].toTuple()->elements();
-      TORCH_CHECK(
-          ins_item.size() == 3,
-          "There should be three parts in an instruction. The function name is ",
-          function_name);
-      OpCode op_code = parseOpCode(ins_item[0].toString()->string().c_str());
-      int X = ins_item[1].toInt();
-      int N = ins_item[2].toInt();
-      if (has_debug_handles) {
-        int64_t debug_handle = debug_handles_list[j].toInt();
-        function->append_instruction(op_code, X, N, debug_handle);
-      } else {
-        function->append_instruction(op_code, X, N);
+    std::cerr << " READING: " << compact_inst << std::endl;
+    if (compact_inst) {
+      auto& inst_bytes = expect_field(codeTable, "instructions_bytes", 0).toString()->string();
+      int64_t inst_size = expect_field(codeTable, "instructions_size", 5).toInt();
+      std::vector<Instruction> inst_vec(inst_size);
+      memcpy(&inst_vec[0], &inst_bytes[0], inst_size * sizeof(Instruction));
+      int j = 0;
+      for (const auto& inst : inst_vec) {
+        if (has_debug_handles) {
+          int64_t debug_handle = debug_handles_list[j].toInt();
+          function->append_instruction(inst.op, inst.X, inst.N, debug_handle);
+        } else {
+          function->append_instruction(inst.op, inst.X, inst.N);
+        }
+        j++;
+      }
+
+    } else {
+      const auto& ins_list =
+          expect_field(codeTable, "instructions", BYTECODE_INDEX_INSTRUCTION)
+              .toTuple()
+              ->elements();
+
+      for (const auto j : c10::irange(ins_list.size())) {
+        auto ins_item = ins_list[j].toTuple()->elements();
+        TORCH_CHECK(
+            ins_item.size() == 3,
+            "There should be three parts in an instruction. The function name is ",
+            function_name);
+        OpCode op_code = parseOpCode(ins_item[0].toString()->string().c_str());
+        int X = ins_item[1].toInt();
+        int N = ins_item[2].toInt();
+        if (has_debug_handles) {
+          int64_t debug_handle = debug_handles_list[j].toInt();
+          function->append_instruction(op_code, X, N, debug_handle);
+        } else {
+          function->append_instruction(op_code, X, N);
+        }
       }
     }
 
@@ -854,12 +876,19 @@ mobile::Module BytecodeDeserializer::deserialize(
     std::cout << "    [NEW] Parse methods ff " << diff.count() << "us\n";
   } else {
     start = std::chrono::system_clock::now();
-    auto bvals = readArchive("bytecode", mcu).toTuple()->elements();
+    IValue bytecode_vars;
+    bool compact_inst = false;
+    if (reader_->hasRecord("bytecode.pkl")) {
+      bytecode_vars = readArchive("bytecode", mcu);
+    } else {
+      bytecode_vars = readArchive("bytecode_compact", mcu);
+      compact_inst = true;
+    }
     end = std::chrono::system_clock::now();
     diff = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
     std::cout << "    [OLD] Get record" << diff.count() << "us\n";
     start = std::chrono::system_clock::now();
-    parseMethods(bvals, debug_handles, *mcu);
+    parseMethods(bytecode_vars.toTuple()->elements(), debug_handles, *mcu, compact_inst);
     end = std::chrono::system_clock::now();
     diff = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
     std::cout << "    [OLD] parseMethods old " << diff.count() << "us\n";

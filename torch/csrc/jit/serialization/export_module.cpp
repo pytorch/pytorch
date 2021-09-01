@@ -140,7 +140,8 @@ std::pair<IValue, IValue> getFunctionTuple(
     const Function& func,
     BackendDebugInfoRecorder& debug_info_recorder,
     const std::basic_string<char>& qn,
-    TypeNameUniquer& type_name_uniquer_) {
+    TypeNameUniquer& type_name_uniquer_,
+    bool use_compact_inst) {
         auto graph = func.graph()->copy();
 
   Inline(*graph);
@@ -284,13 +285,30 @@ std::pair<IValue, IValue> getFunctionTuple(
   // since the register location is embedded into the bytecode, pass the
   // register size
   auto register_size = static_cast<int>(code->register_size());
+  IValue codeTable;
+  if (use_compact_inst) {
+    std::cerr << " USES compact inst" << std::endl;
+    size_t inst_size = instructions_copy.size() * sizeof(Instruction);
+    std::string inst_bytes(inst_size, '\0');
+    memcpy(&inst_bytes[0], &instructions_copy[0], inst_size);
 
-  auto codeTable = Table(
-      {{"instructions", Tup(instructions)},
-       {"operators", Tup(operators)},
-       {"constants", Tup(constants)},
-       {"types", Tup(types)},
-       {"register_size", register_size}});
+    codeTable = Table(
+        {
+          {"instructions_bytes", inst_bytes},
+          {"operators", Tup(operators)},
+          {"constants", Tup(constants)},
+          {"types", Tup(types)},
+          {"register_size", register_size},
+          {"instructions_size", (int64_t)instructions_copy.size()},
+        });
+  } else {
+    codeTable = Table(
+        {{"instructions", Tup(instructions)},
+        {"operators", Tup(operators)},
+        {"constants", Tup(constants)},
+        {"types", Tup(types)},
+        {"register_size", register_size}});
+  }
 
   // schema
   const auto& schema = func.getSchema();
@@ -366,7 +384,8 @@ void setstateTuple(
     std::unordered_set<std::string>& qn_cache,
     std::vector<c10::IValue>& debug_info_elements,
     BackendDebugInfoRecorder& debug_info_recorder,
-    TypeNameUniquer& type_name_uniquer_) {
+    TypeNameUniquer& type_name_uniquer_,
+    bool use_compact_inst) {
   if (!ivalue.isObject())
     return;
   auto obj = ivalue.toObject();
@@ -381,7 +400,7 @@ void setstateTuple(
     }
     if (setstate.isGraphFunction()) {
       auto func_tuple = getFunctionTuple(
-          module, setstate, debug_info_recorder, qn, type_name_uniquer_);
+          module, setstate, debug_info_recorder, qn, type_name_uniquer_, use_compact_inst);
       elements.push_back(func_tuple.first);
       qn_cache.emplace(qn);
       debug_info_elements.push_back(func_tuple.second);
@@ -395,7 +414,8 @@ void setstateTuple(
           qn_cache,
           debug_info_elements,
           debug_info_recorder,
-          type_name_uniquer_);
+          type_name_uniquer_,
+          use_compact_inst);
     }
   }
 }
@@ -480,7 +500,8 @@ void moduleMethodsTuple(
     std::vector<c10::IValue>& elements, // note: appended to in-place
     std::vector<c10::IValue>& debug_info_elements,
     BackendDebugInfoRecorder& debug_info_recorder,
-    TypeNameUniquer& type_name_uniquer_) {
+    TypeNameUniquer& type_name_uniquer_,
+    bool use_compact_inst) {
   auto methods = module.get_methods();
   std::unordered_set<std::string> qn_cache;
   // top level methods
@@ -490,7 +511,7 @@ void moduleMethodsTuple(
       continue;
     }
     auto func_tuple = getFunctionTuple(
-        module, method.function(), debug_info_recorder, qn, type_name_uniquer_);
+        module, method.function(), debug_info_recorder, qn, type_name_uniquer_, use_compact_inst);
     elements.push_back(func_tuple.first);
     qn_cache.emplace(qn);
     debug_info_elements.push_back(func_tuple.second);
@@ -504,7 +525,7 @@ void moduleMethodsTuple(
       qn_cache,
       debug_info_elements,
       debug_info_recorder,
-      type_name_uniquer_);
+      type_name_uniquer_, use_compact_inst);
 }
 
 std::tuple<
@@ -978,57 +999,24 @@ void ScriptModuleSerializer::writeFiles(const std::string& code_dir) {
 }
 
 
-void ScriptModuleSerializer::writeByteCode(
-    const Module& module,
-    const bool save_mobile_debug_info,
-    const bool use_flatbuffers) {
+void ScriptModuleSerializer::writeBytecodeZip(
+  const Module& module,
+  bool save_mobile_debug_info,
+  bool use_compact_inst,
+  const std::string& file_suffix
+) {
   BackendDebugInfoRecorder debug_info_recorder;
   int64_t version_to_write = caffe2::serialize::kProducedBytecodeVersion;
   std::vector<c10::IValue> debug_info_elements;
   // Always save debug handles
   debug_info_elements.emplace_back(static_cast<int64_t>(version_to_write));
 
-  if (use_flatbuffers) {
-    IValueFlatbufferSerializer serializer;
-    flatbuffers::DetachedBuffer buffer = moduleToFlatbuffers(
-        module,
-        debug_info_elements,
-        debug_info_recorder,
-        type_name_uniquer_,
-        true,
-        &serializer);
-    std::fstream outfile( writer_.archiveName() + ".ff", std::ios::out | std::ios::binary);
-    outfile.write((char*)buffer.data(), buffer.size());
-    outfile.close();
-
-    IValueFlatbufferSerializer serializer2;
-    flatbuffers::DetachedBuffer buffer2 = moduleToFlatbuffers(
-        module,
-        debug_info_elements,
-        debug_info_recorder,
-        type_name_uniquer_,
-        false,
-        &serializer2);
-    writer_.writeRecord(
-      "bytecodes.flatbuffers", buffer2.data(), buffer2.size(), false
-    );
-    int tensor_i = 0;
-    for (const auto& td : serializer2.tensor_data_) {
-      std::stringstream ss;
-      ss << "tensors_new/" << tensor_i;
-      WriteableTensorData writable_td = getWriteableTensorData(td);
-      writer_.writeRecord(
-          ss.str(),
-          writable_td.data(),
-          writable_td.sizeInBytes());
-      tensor_i++;
-    }
-  } else {
     writeArchive(
       module._ivalue(),
       /*archive_name=*/"data",
       /*archive_dir=*/"",
       /*tensor_dir=*/"data/");
+
     std::vector<c10::IValue> elements;
     elements.emplace_back(static_cast<int64_t>(version_to_write));
     moduleMethodsTuple(
@@ -1036,11 +1024,12 @@ void ScriptModuleSerializer::writeByteCode(
         elements,
         debug_info_elements,
         debug_info_recorder,
-        type_name_uniquer_);
+        type_name_uniquer_,
+        use_compact_inst);
     auto telements = Tup(std::move(elements));
     writeArchive(
         telements,
-        /*archive_name=*/"bytecode",
+        /*archive_name=*/"bytecode" + file_suffix,
         /*archive_dir=*/"",
         /*tensor_dir=*/"constants/",
         /*use_storage_context=*/true);
@@ -1109,6 +1098,53 @@ void ScriptModuleSerializer::writeByteCode(
           cs_data.size(),
           cs_data.size() > kMinToCompress /*compress*/);
     }
+
+}
+
+
+void ScriptModuleSerializer::writeByteCode(
+    const Module& module,
+    const bool save_mobile_debug_info,
+    const bool use_flatbuffers) {
+  if (use_flatbuffers) {
+    BackendDebugInfoRecorder debug_info_recorder;
+    std::vector<c10::IValue> debug_info_elements;
+    IValueFlatbufferSerializer serializer;
+    flatbuffers::DetachedBuffer buffer = moduleToFlatbuffers(
+        module,
+        debug_info_elements,
+        debug_info_recorder,
+        type_name_uniquer_,
+        true,
+        &serializer);
+    std::fstream outfile( writer_.archiveName() + ".ff", std::ios::out | std::ios::binary);
+    outfile.write((char*)buffer.data(), buffer.size());
+    outfile.close();
+
+    IValueFlatbufferSerializer serializer2;
+    flatbuffers::DetachedBuffer buffer2 = moduleToFlatbuffers(
+        module,
+        debug_info_elements,
+        debug_info_recorder,
+        type_name_uniquer_,
+        false,
+        &serializer2);
+    writer_.writeRecord(
+      "bytecodes.flatbuffers", buffer2.data(), buffer2.size(), false
+    );
+    int tensor_i = 0;
+    for (const auto& td : serializer2.tensor_data_) {
+      std::stringstream ss;
+      ss << "tensors_new/" << tensor_i;
+      WriteableTensorData writable_td = getWriteableTensorData(td);
+      writer_.writeRecord(
+          ss.str(),
+          writable_td.data(),
+          writable_td.sizeInBytes());
+      tensor_i++;
+    }
+  } else {
+    writeBytecodeZip(module, save_mobile_debug_info, true, "_compact");
   }
 }
 
@@ -1225,7 +1261,7 @@ void export_opnames(const script::Module& m, std::set<std::string>& opnames) {
   std::vector<c10::IValue> debug_info_elements;
   BackendDebugInfoRecorder dummy;
   TypeNameUniquer dummy_uniquer = TypeNameUniquer();
-  moduleMethodsTuple(m, elements, debug_info_elements, dummy, dummy_uniquer);
+  moduleMethodsTuple(m, elements, debug_info_elements, dummy, dummy_uniquer, false);
   for (const auto& element : elements) {
     auto table = element.toTuple()->elements()[1];
     auto row =
