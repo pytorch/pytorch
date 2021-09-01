@@ -60,5 +60,6 @@ model2m._save_for_lite_interpreter('model_large_false.pt', use_flatbuffer=False)
 
 model3 = torch.jit.load('model_25.pt')
 model3.eval()
-model3 = optimize_for_mobile(model3)
+# model3 = optimize_for_mobile(model3)
+model3._save_for_lite_interpreter('model_25_false.pt', use_flatbuffer=False)
 model3._save_for_lite_interpreter('model_25_true.pt', use_flatbuffer=True)

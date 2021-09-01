@@ -4,7 +4,7 @@
 namespace torch.jit.mobile.serialization;
 
 struct Int {
-  int_val:int;
+  int_val:long;
 }
 
 struct Bool {
@@ -61,10 +61,25 @@ union IValue {
   Tuple,
   Dict,
   Object,
+  IntList,
+  DoubleList,
+  BoolList
 }
 
 table List {
   items: [IValue];
+}
+
+table IntList {
+  items: [long];
+}
+
+table DoubleList {
+  items: [double];
+}
+
+table BoolList {
+  items: [bool];
 }
 
 table Tuple {
@@ -79,10 +94,12 @@ table Dict {
 table ObjectType {
   type_name:string;
   attr_names:[string];
+  setattr: Function;
 }
 
 table Object {
   type_index: int;
+  attr_names:[string];
   use_setstate:bool;
   state: IValue;
 }

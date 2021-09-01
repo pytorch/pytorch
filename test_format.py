@@ -6,7 +6,9 @@ import time
 inp = torch.randn(1, 28*28)
 
 start = time.time()
-m2 = _load_for_lite_interpreter(sys.argv[1])
+m1 = _load_for_lite_interpreter(sys.argv[1])
+m2 = _load_for_lite_interpreter(sys.argv[2])
+print(m1(inp))
 print(m2(inp))
 end = time.time()
 print('time :', end - start)

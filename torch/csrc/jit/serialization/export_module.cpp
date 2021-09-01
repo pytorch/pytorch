@@ -688,7 +688,8 @@ functionToFlatbuffers(
       !schema.is_varret(),
       "A variable number of return values is not supported in mobile modules.");
 
-  auto schema_offset = CreateFBSchema(fbb, schema.arguments(), schema.returns(), type_printer, serializer);
+  auto schema_offset = CreateFBSchema(
+    fbb, schema.arguments(), schema.returns(), type_printer, serializer);
   auto debug_info_offset = CreateFBDebugInfo(fbb, op_debug_handles);
 
   auto function_offset = CreateFunctionDirect(
@@ -724,7 +725,9 @@ moduleToFlatbuffers(
       continue;
     }
     auto func_offset = functionToFlatbuffers(
-        fbb, module, method.function(), debug_info_recorder, qn, type_name_uniquer_, serializer);
+        fbb, module, method.function(),
+        debug_info_recorder,
+        qn, type_name_uniquer_, serializer);
     functions.push_back(func_offset);
     qn_cache.emplace(qn);
   }
@@ -741,8 +744,18 @@ moduleToFlatbuffers(
     for (size_t i = 0, n = classptr->numAttributes(); i < n; ++i) {
       attr_names[i] = fbb.CreateString(classptr->getAttributeName(i));
     }
+    flatbuffers::Offset<mobile::serialization::Function> setattr_offset = 0;
+    if (checkHasValidSetGetState(classptr)) {
+      Function& setstate = classptr->getMethod("__setstate__");
+      const auto qn = classptr->name()->qualifiedName() + ".__setstate__";
+      if (setstate.isGraphFunction()) {
+        setattr_offset = functionToFlatbuffers(
+            fbb, module, setstate,
+            debug_info_recorder, qn, type_name_uniquer_, serializer);
+      }
+    }
     obj_types.push_back(
-      CreateObjectTypeDirect(fbb, classptr->name()->qualifiedName().c_str(), &attr_names));
+      CreateObjectTypeDirect(fbb, classptr->name()->qualifiedName().c_str(), &attr_names, setattr_offset));
   }
   auto obj_types_offset = fbb.CreateVector(obj_types);
 
@@ -1000,7 +1013,7 @@ void ScriptModuleSerializer::writeByteCode(
       "bytecodes.flatbuffers", buffer2.data(), buffer2.size(), false
     );
     int tensor_i = 0;
-    for (const auto& td : serializer.tensor_data_) {
+    for (const auto& td : serializer2.tensor_data_) {
       std::stringstream ss;
       ss << "tensors_new/" << tensor_i;
       WriteableTensorData writable_td = getWriteableTensorData(td);
@@ -1011,7 +1024,7 @@ void ScriptModuleSerializer::writeByteCode(
       tensor_i++;
     }
   } else {
-      writeArchive(
+    writeArchive(
       module._ivalue(),
       /*archive_name=*/"data",
       /*archive_dir=*/"",

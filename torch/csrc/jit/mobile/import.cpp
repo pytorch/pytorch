@@ -438,9 +438,13 @@ void BytecodeDeserializer::parseMethods(
       print_unsupported_ops_and_throw(unsupported_op_names);
     }
 
+    int j = 0;
     for (const auto& constant : consts_list) {
+      std::cerr << function_name << " - " << j << "  " << constant.tagKind() << " "<< constant << std::endl;
       function->append_constant(constant);
+      j++;
     }
+
 
     static const c10::QualifiedName classPrefix = "__torch__.torch.classes";
     for (const auto& t : types_list) {
@@ -523,99 +527,96 @@ std::vector<c10::Storage> readStorage(PyTorchStreamReader* reader, int storage_c
   return storages;
 }
 
-void parseMethodsFlatbuffer(
-    const mobile::serialization::Module* module_ptr,
+std::unique_ptr<mobile::Function> parseFunctionFlatbuffer(
+    const mobile::serialization::Function* method,
     IValueDeserializer* deserializer,
     std::shared_ptr<mobile::CompilationUnit> mcu,
     std::shared_ptr<CompilationUnit> cu
 ) {
-  auto methods = module_ptr->methods();
   bool has_debug_handles = false; //debug_handles.has_value();
 
   // A Global Cache for Operator functions across all methods in the model.
   mobile::Function::OperatorCacheType operator_cache;
 
-  for (int i = 0; i < methods->size(); i++) {
-    const auto* method = methods->Get(i);
+  auto function = std::make_unique<mobile::Function>(c10::QualifiedName(method->qn()->str()));
 
-    auto function = std::make_unique<mobile::Function>(c10::QualifiedName(method->qn()->str()));
-
-    int j = 0;
-    const auto* debug_handle = method->debug_info()->debug_handle();
-    for (const auto* inst : *method->instructions()) {
-      function->append_instruction(static_cast<OpCode>(inst->op()), inst->x(), inst->n(), debug_handle->Get(j));
-      j += 1;
-    }
-
-    for (int j = 0; j < method->constants_type()->size(); j++) {
-      mobile::serialization::IValue const_type = static_cast<mobile::serialization::IValue>(method->constants_type()->Get(j));
-      const void* const_data = method->constants()->Get(j);
-      IValue const_ivalue = deserializer->parseIValue(const_type, const_data);
-      function->append_constant(std::move(const_ivalue));
-    }
-
-
-    // insert operators
-    std::unordered_set<std::string> unsupported_op_names;
-    const int64_t model_version = 0x3L;
-    for (const auto* op : *method->operators()) {
-      c10::optional<int> num_args;
-      if (op->num_args_serialized() > -1) {
-        num_args = op->num_args_serialized();
-      }
-
-      auto op_found = function->append_operator(
-          op->name()->str(),
-          op->overload_name()->str(),
-          num_args,
-          model_version,
-          operator_cache);
-      if (!op_found) {
-        unsupported_op_names.emplace(operator_str(
-          op->name()->str(), op->overload_name()->str()));
-      }
-    }
-
-    static const c10::QualifiedName classPrefix = "__torch__.torch.classes";
-    for (const auto* t : *method->types()) {
-      c10::QualifiedName qn(t->str());
-      if (classPrefix.isPrefixOf(qn)) {
-        auto classType = getCustomClass(qn.qualifiedName());
-        TORCH_CHECK(
-            classType,
-            "The implementation of class ",
-            qn.qualifiedName(),
-            " cannot be found.");
-        function->append_type(classType);
-      } else {
-        function->append_type(c10::parseType(t->str()));
-      }
-    }
-
-    function->set_register_size(method->register_size());
-
-    auto parseArgList = [&cu](const auto* args_fb) {
-      std::vector<c10::Argument> args;
-      for (const auto* arg_tb: *args_fb) {
-        IValue default_value(1);
-        TypePtr type_ptr = resolveTypeNameMobile(arg_tb->type()->str(), cu);
-        auto arg =
-            c10::Argument(arg_tb->name()->str(), type_ptr, c10::nullopt /*N*/, default_value);
-        args.emplace_back(std::move(arg));
-      }
-      return args;
-    };
-    c10::FunctionSchema schema(
-        method->qn()->str(),
-        "" /*overload_name*/,
-        parseArgList(method->schema()->arguments()),
-        parseArgList(method->schema()->returns()),
-        false /*is_varargs*/,
-        false /*is_varret*/);
-    function->setSchema(std::move(schema));
-
-    mcu->register_function(std::move(function));
+  int j = 0;
+  const auto* debug_handle = method->debug_info()->debug_handle();
+  for (const auto* inst : *method->instructions()) {
+    function->append_instruction(static_cast<OpCode>(inst->op()), inst->x(), inst->n(), debug_handle->Get(j));
+    j += 1;
   }
+
+  for (int j = 0; j < method->constants_type()->size(); j++) {
+    mobile::serialization::IValue
+        const_type = static_cast<mobile::serialization::IValue>(
+          method->constants_type()->Get(j));
+    const void* const_data = method->constants()->Get(j);
+    IValue const_ivalue = deserializer->parseIValue(const_type, const_data);
+    std::cerr << method->qn()->str() << " - " << j << "  " << const_ivalue.tagKind() << " " << const_ivalue << std::endl;
+    function->append_constant(std::move(const_ivalue));
+  }
+
+
+  // insert operators
+  std::unordered_set<std::string> unsupported_op_names;
+  const int64_t model_version = 0x3L;
+  for (const auto* op : *method->operators()) {
+    c10::optional<int> num_args;
+    if (op->num_args_serialized() > -1) {
+      num_args = op->num_args_serialized();
+    }
+
+    auto op_found = function->append_operator(
+        op->name()->str(),
+        op->overload_name()->str(),
+        num_args,
+        model_version,
+        operator_cache);
+    if (!op_found) {
+      unsupported_op_names.emplace(operator_str(
+        op->name()->str(), op->overload_name()->str()));
+    }
+  }
+
+  static const c10::QualifiedName classPrefix = "__torch__.torch.classes";
+  for (const auto* t : *method->types()) {
+    c10::QualifiedName qn(t->str());
+    if (classPrefix.isPrefixOf(qn)) {
+      auto classType = getCustomClass(qn.qualifiedName());
+      TORCH_CHECK(
+          classType,
+          "The implementation of class ",
+          qn.qualifiedName(),
+          " cannot be found.");
+      function->append_type(classType);
+    } else {
+      function->append_type(c10::parseType(t->str()));
+    }
+  }
+
+  function->set_register_size(method->register_size());
+
+  auto parseArgList = [&cu, deserializer](const auto* args_fb) {
+    std::vector<c10::Argument> args;
+    for (const auto* arg_tb: *args_fb) {
+      IValue default_value = deserializer->parseIValue(arg_tb->default_value_type(), arg_tb->default_value());
+      TypePtr type_ptr = resolveTypeNameMobile(arg_tb->type()->str(), cu);
+      auto arg =
+          c10::Argument(arg_tb->name()->str(), type_ptr, c10::nullopt /*N*/, default_value);
+      args.emplace_back(std::move(arg));
+    }
+    return args;
+  };
+  c10::FunctionSchema schema(
+      method->qn()->str(),
+      "" /*overload_name*/,
+      parseArgList(method->schema()->arguments()),
+      parseArgList(method->schema()->returns()),
+      false /*is_varargs*/,
+      false /*is_varret*/);
+  function->setSchema(std::move(schema));
+  return function;
 }
 
 
@@ -628,14 +629,43 @@ mobile::Module parseModuleFlatbuffer(
 ) {
 
   auto start = std::chrono::system_clock::now();
+  const auto& obj_types = *module_ptr->types();
   std::vector<c10::StrongTypePtr> object_types;
-  for (const auto* type : *module_ptr->types()) {
+  object_types.reserve(obj_types.size());
+  for (const auto* type : obj_types) {
     auto obj_type = resolveTypeNameMobile(c10::QualifiedName(type->type_name()->str()), cu);
     object_types.emplace_back(cu, obj_type);
   }
 
-  auto obj_loader = [&](c10::StrongTypePtr type, IValue input) {
-    return objLoaderMobile(type, input, mcu);
+  std::vector<mobile::Function*> setattr_functions;
+  setattr_functions.reserve(obj_types.size());
+  {
+    auto obj_loader_dummy = [&](int _, IValue input) {
+      std::cerr << " I am dummy";
+      return IValue();
+    };
+    IValueDeserializer deserializer_dummy(tensor_loader, object_types, obj_loader_dummy);
+    int i = 0;
+    for (const auto* type : obj_types) {
+      if (type->setattr() != nullptr) {
+        auto setattr = parseFunctionFlatbuffer(type->setattr(), &deserializer_dummy, mcu, cu);
+        setattr_functions.push_back(setattr.get());
+        mcu->register_function(std::move(setattr));
+      } else {
+        setattr_functions.push_back(nullptr);
+      }
+      i++;
+    }
+  }
+
+  auto obj_loader = [&](int i, IValue input) -> c10::IValue {
+    if (setattr_functions[i] != nullptr) {
+      auto obj = c10::ivalue::Object::create(object_types[i], 0);
+      Stack stack({obj, input});
+      setattr_functions[i]->run(stack);
+      return obj;
+    }
+    return objLoaderMobile(object_types[i], input, mcu);
   };
 
   auto end = std::chrono::system_clock::now();
@@ -644,7 +674,11 @@ mobile::Module parseModuleFlatbuffer(
 
   start = std::chrono::system_clock::now();
   IValueDeserializer deserializer(tensor_loader, object_types, obj_loader);
-  parseMethodsFlatbuffer(module_ptr, &deserializer, mcu, cu);
+  for (const auto* method : *module_ptr->methods()) {
+    auto function = parseFunctionFlatbuffer(method, &deserializer, mcu, cu);
+    mcu->register_function(std::move(function));
+  }
+
   end = std::chrono::system_clock::now();
   diff = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
   std::cout << "      parse bytecode " << diff.count() << "us\n";

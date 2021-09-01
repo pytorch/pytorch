@@ -142,6 +142,7 @@ IValueFlatbufferSerializer::objectToFB(flatbuffers::FlatBufferBuilder& fbb, cons
   flatbuffers::Offset<void> state_offset;
   bool setstate = false;
 
+  flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<flatbuffers::String>>> names_offset = 0;
   if (ValidSetGetState(type)) {
     Function& getstate = type->getMethod("__getstate__");
     auto state = getstate({obj});
@@ -151,14 +152,17 @@ IValueFlatbufferSerializer::objectToFB(flatbuffers::FlatBufferBuilder& fbb, cons
   } else {
     size_t num_attr = type->numAttributes();
     std::vector<IValue> ivalues;
+    std::vector<flatbuffers::Offset<flatbuffers::String>> names;
     for (size_t i = 0; i < num_attr; ++i) {
+      names.push_back(fbb.CreateSharedString(type->getAttributeName(i)));
       ivalues.push_back(obj->getSlot(i));
     }
+    names_offset = fbb.CreateVector(names);
     IValue state = c10::ivalue::Tuple::create(std::move(ivalues));
     std::tie(state_type, state_offset) = iValueToFB(fbb, state);
   }
   return CreateObject(
-    fbb, type_index, setstate, state_type, state_offset);
+    fbb, type_index, names_offset, setstate, state_type, state_offset);
 }
 
 flatbuffers::Offset<mobile::serialization::TensorMetadata>
@@ -199,7 +203,7 @@ IValueFlatbufferSerializer::IValueFlatbufferSerializer::tensorToFB(flatbuffers::
   if (it != memoized_storage_map_.end()) {
     storage_index = it->second;
   } else {
-    storage_index = memoized_storage_map_.size();
+    storage_index = tensor_data_.size();
     memoized_storage_map_[addr] = storage_index;
     tensor_data_.push_back(tensor);
   }
@@ -216,7 +220,7 @@ IValueFlatbufferSerializer::IValueFlatbufferSerializer::tensorToFB(flatbuffers::
     /* int32_t element_size */ tensor.element_size(),
     /* sizes */ &sizes,
     /* strides */ &strides,
-    /* bool requires_grad */ false,
+    /* bool requires_grad */ tensor.requires_grad(),
     /* qschema */ qschema_offset);
 
 }
@@ -255,10 +259,17 @@ IValueFlatbufferSerializer::iValueToFB(flatbuffers::FlatBufferBuilder& fbb, cons
   } else if (ivalue.isNone()) {
     ivalue_type = mobile::serialization::IValue_NONE;
     offset = 0;
-  /*}  else if (ivalue.isIntList()) {
-  } else if (ivalue.isTensorList()) {
+  } else if (ivalue.isIntList()) {
+    ivalue_type = mobile::serialization::IValue_IntList;
+    offset = mobile::serialization::CreateIntList(fbb, fbb.CreateVector(ivalue.toIntVector())).Union();
   } else if (ivalue.isDoubleList()) {
-  } else if (ivalue.isBoolList()) { */
+    ivalue_type = mobile::serialization::IValue_DoubleList;
+    offset = mobile::serialization::CreateDoubleList(fbb, fbb.CreateVector(ivalue.toDoubleVector())).Union();
+  } else if (ivalue.isBoolList()) {
+    ivalue_type = mobile::serialization::IValue_BoolList;
+    auto boollist = ivalue.toBoolList();
+    std::vector<uint8_t> bool_vec(boollist.begin(), boollist.end());
+    offset = mobile::serialization::CreateBoolListDirect(fbb, &bool_vec).Union();
   } else if (ivalue.isList()) {
     ivalue_type = mobile::serialization::IValue_List;
     offset = listToFB(fbb, ivalue).Union();
@@ -284,7 +295,6 @@ IValueFlatbufferSerializer::iValueToFB(flatbuffers::FlatBufferBuilder& fbb, cons
 }
 
 IValue IValueDeserializer::parseTensor(const mobile::serialization::TensorMetadata* tensor_md) {
-
   at::ScalarType type = static_cast<at::ScalarType>(tensor_md->scalar_type());
   auto options = at::CPU(type).options();
   at::Tensor tensor;
@@ -314,7 +324,6 @@ IValue IValueDeserializer::parseTensor(const mobile::serialization::TensorMetada
   } else {
     tensor = at::empty({0}, options);
   }
-  // requires_grad?
   at::TensorImpl* impl = tensor.unsafeGetTensorImpl();
 
   c10::Storage storage;
@@ -322,7 +331,6 @@ IValue IValueDeserializer::parseTensor(const mobile::serialization::TensorMetada
     storage = tensor_loader_(tensor_md->storage_location_index());
   } else {
     storage = tensor_data_->at(tensor_md->storage_location_index());
-
   }
   impl->set_storage_keep_dtype(storage);
   impl->set_storage_offset(tensor_md->storage_offset());
@@ -330,7 +338,7 @@ IValue IValueDeserializer::parseTensor(const mobile::serialization::TensorMetada
   std::vector<int64_t> size{tensor_md->sizes()->begin(), tensor_md->sizes()->end()};
   std::vector<int64_t> stride{tensor_md->strides()->begin(), tensor_md->strides()->end()};
   impl->set_sizes_and_strides(size, stride);
-
+  tensor = autograd::make_variable(tensor, tensor_md->requires_grad());
   return tensor;
 }
 IValue IValueDeserializer::parseList(const mobile::serialization::List* list) {
@@ -369,20 +377,27 @@ IValue IValueDeserializer::parseObject(const mobile::serialization::Object* obje
   IValue state = parseIValue(object->state_type(), object->state());
   auto type_ptr = types_->at(object->type_index());
   if (object->use_setstate()) {
-    return object_loader_(type_ptr, state);
+    return object_loader_(object->type_index(), state);
   } else {
     const auto& elements = state.toTuple()->elements();
     size_t ndict = elements.size();
     auto obj = c10::ivalue::Object::create(type_ptr, ndict);
     //auto obj = c10::ivalue::Object::create(type, elements.size());
     size_t i = 0;
+    auto cls = type_ptr.type_->expect<at::ClassType>();
     for (const auto& ival : elements) {
+      cls->addOrCheckAttribute(object->attr_names()->Get(i)->str(), ival.type());
       obj->setSlot(i, ival);
       ++i;
     }
     return obj;
   }
   return IValue();
+}
+
+template <typename T, typename U>
+std::vector<T> parseListNative(const U* list) {
+  return {list->items()->begin(), list->items()->end()};
 }
 
 IValue IValueDeserializer::parseIValue(const mobile::serialization::IValue ivalue_type, const void* ivalue_data) {
@@ -401,6 +416,19 @@ IValue IValueDeserializer::parseIValue(const mobile::serialization::IValue ivalu
       return static_cast<const mobile::serialization::String*>(ivalue_data)->data()->str();
     case mobile::serialization::IValue_List:
       return parseList(static_cast<const mobile::serialization::List*>(ivalue_data));
+    case mobile::serialization::IValue_IntList:
+      return parseListNative<int64_t>(static_cast<const mobile::serialization::IntList*>(ivalue_data));
+    case mobile::serialization::IValue_DoubleList:
+      return parseListNative<double>(static_cast<const mobile::serialization::DoubleList*>(ivalue_data));
+    case mobile::serialization::IValue_BoolList: {
+      std::vector<uint8_t> res = parseListNative<uint8_t>(
+        static_cast<const mobile::serialization::BoolList*>(ivalue_data));
+      c10::List<bool> boollist;
+      for (auto x : res) {
+        boollist.push_back(x);
+      }
+      return boollist;
+    }
     case mobile::serialization::IValue_Tuple:
       return parseTuple(static_cast<const mobile::serialization::Tuple*>(ivalue_data));
     case mobile::serialization::IValue_Dict:
