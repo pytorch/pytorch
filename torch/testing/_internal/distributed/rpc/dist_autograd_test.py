@@ -1093,7 +1093,7 @@ class DistAutogradTest(CommonDistAutogradTest):
     # tensor lives on the rref owner.
     def _backward_rref(self, callee, rref_owner, t1, t2, local_grads, sparse):
         local_ret = torch.add(t1, t2)
-        local_ret = my_sum(local_ret) 
+        local_ret = my_sum(local_ret)
         local_ret.backward()
         with dist_autograd.context() as context_id:
             if sparse:
