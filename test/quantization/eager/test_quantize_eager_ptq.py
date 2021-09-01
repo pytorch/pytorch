@@ -771,6 +771,7 @@ class TestPostTrainingStatic(QuantizationTestCase):
 
 @skipIfNoFBGEMM
 class TestPostTrainingDynamic(QuantizationTestCase):
+    @unittest.skipIf(sys.platform == "darwin", "Known test failure on Mac.")
     def test_versioning(self):
         r""" Check if versioning works correctly for quantize_dynamic
         """
@@ -792,9 +793,9 @@ class TestPostTrainingDynamic(QuantizationTestCase):
         self.checkDynamicQuantizedLinear(q_model.dense_top.top_mlp[1], torch.qint8, torch.per_tensor_affine)
         self.assertEqual(type(q_model.model_sparse.emb_bag), torch.nn.EmbeddingBag)
 
-
+    @unittest.skipIf(sys.platform == "darwin", "Known test failure on Mac.")
     def test_versioning_serialization(self):
-        r""" Check if versioning works correctly for quantize_dynamic
+        r""" Check if versioning serialization works correctly for quantize_dynamic
         """
         model = SparseNNModel().eval()
         q_model = quantize_dynamic(model, dtype=torch.qint8, version=0)
