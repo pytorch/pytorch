@@ -691,15 +691,15 @@ class TestHub(TestCase):
     def test_hub_parse_repo_info(self):
         # If the branch is specified we just parse the input and return
         self.assertEqual(torch.hub._parse_repo_info('a/b:c'),
-                            ('a', 'b', 'c'))
+                         ('a', 'b', 'c'))
         # For torchvision, the default branch is main
         self.assertEqual(torch.hub._parse_repo_info('pytorch/vision'),
-                            ('pytorch', 'vision', 'main'))
+                         ('pytorch', 'vision', 'main'))
         # For linux, the default branch is still master and main doesn't exist
         # If they ever switch to main we'll have to find another repo that uses
         # master
         self.assertEqual(torch.hub._parse_repo_info('torvalds/linux'),
-                            ('torvalds', 'linux', 'master'))
+                         ('torvalds', 'linux', 'master'))
 
     @retry(URLError, tries=3, skip_after_retries=True)
     def test_load_state_dict_from_url_with_name(self):
