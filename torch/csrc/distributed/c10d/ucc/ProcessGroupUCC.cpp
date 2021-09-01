@@ -105,12 +105,14 @@ public:
     bool isCompleted() override {
       // TODO: progress worker in a side thread for true async
       worker->progress();
-      return request->status() != UCS_INPROGRESS;
+      bool is_finished = (request->status() != UCS_INPROGRESS);
+      if (is_finished) {
+        finish();
+      }
+      return is_finished;
     }
 
     bool isSuccess() const override {
-      // TODO: progress worker in a side thread for true async
-      worker->progress();
       return request->status() == UCS_OK;
     }
 
@@ -303,7 +305,6 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::send(
   auto request = ucp_endpoints[dstRank]->send_with_tag(
     tensor.data_ptr(), tensor.element_size() * tensor.numel(),
     tagging::wrap_tag(rank_, tag), tensor.device().type());
-  std::cout << "send" << std::endl;//
   return c10::make_intrusive<ProcessGroupUCC::WorkUCP>(
     worker, request, getRank(), OpType::SEND, "ucc:send", tensors);
 }

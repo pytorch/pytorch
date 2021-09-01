@@ -171,15 +171,6 @@ def get_profiling_event(postfix, profiler):
     return [event for event in event_list if event.name.endswith(postfix)]
 
 
-def get_profiling_event_debug(postfix, profiler):
-    event_list = (
-        profiler.events()
-        if isinstance(profiler, torch.profiler.profile)
-        else profiler.function_events
-    )
-    return event_list
-
-
 # Base error message substring on unfinished reductions.
 ddp_prev_reduction_unfinished_str = (
     "Expected to have finished reduction in the prior iteration"
@@ -1561,8 +1552,7 @@ class DistributedTest:
                     expected_event_name = (
                         f"{backend}:send" if rank == 0 else f"{backend}:recv"
                     )
-                    events = get_profiling_event_debug(expected_event_name, prof)
-                    print(rank, events)
+                    events = get_profiling_event(expected_event_name, prof)
                     event_count = sum(e.count for e in events)
                     expected_count = dist.get_world_size() - 1 if rank == 0 else 1
                     self.assertEqual(expected_count, event_count)
