@@ -66,7 +66,7 @@ except ImportError:
 skipIfNoDill = skipIf(not HAS_DILL, "no dill")
 
 try:
-    import pandas  # noqa: import
+    import pandas  # noqa: F401
     HAS_PANDAS = True
 except ImportError:
     HAS_PANDAS = False
