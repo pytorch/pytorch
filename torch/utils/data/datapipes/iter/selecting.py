@@ -76,3 +76,6 @@ class FilterIterDataPipe(MapperIterDataPipe):
         r = data is not None and \
             not (isinstance(data, list) and len(data) == 0 and self.drop_empty_batches)
         return r
+
+    def __len__(self):
+        raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
