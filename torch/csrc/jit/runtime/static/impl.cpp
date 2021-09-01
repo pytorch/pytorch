@@ -121,6 +121,214 @@ bool mayContainAlias(
   }
   return db.mayContainAlias(as, bs);
 }
+}
+
+// Get set of all inputs/outputs/constants (always alive) and their aliases
+FastSet<const Value*> GetAlwaysAliveValues(
+    const std::shared_ptr<torch::jit::Graph>& graph,
+    AliasDb& db) {
+  // a set of Values whose live-range exceed current inference
+  FastSet<const Value*> always_alive;
+
+  // mark inputs, constants, outputs as always_alive
+  for (const auto* input : graph->inputs()) {
+    always_alive.insert(input);
+  }
+  for (const auto* output : graph->outputs()) {
+    always_alive.insert(output);
+  }
+  for (const auto* node : graph->nodes()) {
+    if (node->kind() == prim::Constant) {
+      for (const auto* output : node->outputs()) {
+        always_alive.insert(output);
+      }
+    }
+  }
+
+  // insert aliases of always live Values
+  for (const auto* node : graph->nodes()) {
+    // constants are already in the always_alive set
+    if (node->kind() != prim::Constant) {
+      for (const auto* v : node->outputs()) {
+        if (mayContainAlias(db, {v}, always_alive)) {
+          always_alive.insert(v);
+        }
+      }
+    }
+  }
+  return always_alive;
+}
+
+//  The algorithm does a traversal of the execution graph
+//  while keeping track of the live values.
+std::pair<LivenessMap, LiveRangesMap> GetLiveness(
+    const std::shared_ptr<torch::jit::Graph>& graph,
+    const FastSet<const Value*>& always_alive,
+    AliasDb& db) {
+  // map a Value to a set of Values that overlap live-ranges with the Value's
+  FastMap<const Value*, std::set<const Value*>> liveness_map;
+
+  // map Values to its creation order in graph (Note: only traverse top-level
+  // nodes such that nodes under control-flows are represented by top-level
+  // block nodes)
+  int idx = 1;
+  std::vector<const Value*> values_in_creation_order;
+  FastMap<const Value*, size_t> values_to_idx_in_creation_order;
+  std::unordered_map<const Node*, size_t> nodes_to_idx_in_topo_order;
+  for (const auto* node : graph->nodes()) {
+    nodes_to_idx_in_topo_order[node] = idx++;
+    for (const auto* v : node->outputs()) {
+      values_to_idx_in_creation_order[v] = values_in_creation_order.size();
+      values_in_creation_order.emplace_back(v);
+    }
+  }
+
+  std::unordered_map<const Value*, size_t> value_creation_topo_idx;
+  std::unordered_map<const Value*, std::unordered_set<size_t>>
+      value_use_topo_idxs;
+
+  // presence of a Value in live_values_use_chain means the Value alive
+  // Value mapped to set of Nodes that may use the Value (i.e., use-chain of
+  // Value)
+  FastMap<const Value*, std::set<const Node*>> live_values_use_chain;
+  // Node mapped to set of Values that the Node may use (i.e., def-chain of node
+  // inputs)
+  FastMap<const Node*, std::set<const Value*>> live_nodes_def_chain;
+
+  // add v to the current liveness_map
+  std::function<void(const Value* v)> add_live_value_fn = [&](const Value* v) {
+    if (liveness_map.count(v)) {
+      return;
+    }
+    liveness_map[v] = {};
+
+    for (const auto& live_v : live_values_use_chain) {
+      liveness_map.at(v).insert(live_v.first);
+      liveness_map.at(live_v.first).insert(v);
+    }
+
+    // only add values to the live set if they
+    // have deps, otherwise they die immediately
+    if (v->uses().size()) {
+      live_values_use_chain[v] = {};
+    }
+
+    // record the relationship between v (Value) and its uses (Node)
+    for (const auto& u : v->uses()) {
+      const auto* node = u.user;
+      live_values_use_chain.at(v).insert(node);
+      live_nodes_def_chain[node].insert(v);
+      value_use_topo_idxs[v].insert(nodes_to_idx_in_topo_order[node]);
+    }
+
+    // FIXME(penguin): the following alias refinement seems to assume
+    // that `v` refers to a new  tensor created by the node that defines
+    // v, thus other Values "before" the node that defines `v` cannot
+    // possibly be aliased to `v`.
+    // TODO(penguin): Is it a limitation of TS alias analysis
+    // so that we need to do such refinement? If so, better improve
+    // alias analysis so that we dont need this special handling here
+    //
+    // Refine aliases of v by include only those created after v
+    std::vector<const Value*> refined_aliases;
+    auto idx = values_to_idx_in_creation_order[v];
+    for (; idx < values_in_creation_order.size(); ++idx) {
+      auto* alias_v = values_in_creation_order[idx];
+      if (mayContainAlias(db, v, alias_v)) {
+        refined_aliases.emplace_back(alias_v);
+      }
+    }
+    // for all the values in the alias set,
+    // we set them "alive"
+    for (auto* aliased_v : refined_aliases) {
+      add_live_value_fn(aliased_v);
+      for (const auto& u : aliased_v->uses()) {
+        const auto* node = u.user;
+        // track deps of the aliased values is if they
+        // are our own
+        live_values_use_chain.at(v).insert(node);
+        live_nodes_def_chain[node].insert(v);
+        value_use_topo_idxs[v].insert(nodes_to_idx_in_topo_order[node]);
+      }
+      value_creation_topo_idx[aliased_v] = value_creation_topo_idx[v];
+    }
+  };
+
+  auto traverse_node_fn = [&](const Node* node,
+                              std::vector<const Value*>& dead) {
+    if (live_nodes_def_chain.count(node)) {
+      for (const auto* v : live_nodes_def_chain.at(node)) {
+        live_values_use_chain.at(v).erase(node);
+        if (!live_values_use_chain.at(v).size()) {
+          dead.emplace_back(v);
+        }
+      }
+    }
+  };
+
+  for (const auto* node : graph->nodes()) {
+    for (const auto* v : node->outputs()) {
+      if (always_alive.count(v) == 0) {
+        add_live_value_fn(v);
+        value_creation_topo_idx[v] = nodes_to_idx_in_topo_order[node];
+      }
+    }
+
+    std::vector<const Value*> dead;
+    traverse_node_fn(node, dead);
+    for (const auto* dead_value : dead) {
+      live_values_use_chain.erase(dead_value);
+    }
+  }
+
+  for (const auto& v : live_values_use_chain) {
+    TORCH_CHECK(always_alive.count(v.first));
+  }
+
+  for (const auto* node : graph->nodes()) {
+    auto inputs = node->inputs();
+    auto outputs = node->outputs();
+    for (const auto* input : inputs) {
+      for (const auto* output : outputs) {
+        if (liveness_map.count(input) && liveness_map.count(output)) {
+          liveness_map.at(input).insert(output);
+          liveness_map.at(output).insert(input);
+        }
+      }
+    }
+    // All inputs should be alive at the same time.
+    for (size_t i = 0; i < inputs.size(); ++i) {
+      for (size_t j = 0; j < inputs.size(); ++j) {
+        if (liveness_map.count(inputs[i]) && liveness_map.count(inputs[j])) {
+          liveness_map.at(inputs[i]).insert(inputs[j]);
+          liveness_map.at(inputs[j]).insert(inputs[i]);
+        }
+      }
+    }
+    // All outputs should be alive at the same time.
+    for (size_t i = 0; i < outputs.size(); ++i) {
+      for (size_t j = 0; j < outputs.size(); ++j) {
+        if (liveness_map.count(outputs[i]) && liveness_map.count(outputs[j])) {
+          liveness_map.at(outputs[i]).insert(outputs[j]);
+          liveness_map.at(outputs[j]).insert(outputs[i]);
+        }
+      }
+    }
+  }
+
+  LiveRangesMap live_ranges;
+  for (const auto& item : value_use_topo_idxs) {
+    auto value = item.first;
+    auto idxs = item.second;
+
+    live_ranges[value] = {
+        value_creation_topo_idx[value], *std::max_element(begin(idxs), end(idxs))};
+  }
+
+  return std::make_pair(liveness_map, live_ranges);
+}
+
+namespace {
 
 // Collect the set of Values that are candidates for memory planning:
 //   - Values that are used in in-place operators (i.e., _out variants), and
@@ -359,211 +567,6 @@ PrepareForStaticModule(
 }
 
 } // namespace
-
-// Get set of all inputs/outputs/constants (always alive) and their aliases
-FastSet<const Value*> GetAlwaysAliveValues(
-    const std::shared_ptr<torch::jit::Graph>& graph,
-    AliasDb& db) {
-  // a set of Values whose live-range exceed current inference
-  FastSet<const Value*> always_alive;
-
-  // mark inputs, constants, outputs as always_alive
-  for (const auto* input : graph->inputs()) {
-    always_alive.insert(input);
-  }
-  for (const auto* output : graph->outputs()) {
-    always_alive.insert(output);
-  }
-  for (const auto* node : graph->nodes()) {
-    if (node->kind() == prim::Constant) {
-      for (const auto* output : node->outputs()) {
-        always_alive.insert(output);
-      }
-    }
-  }
-
-  // insert aliases of always live Values
-  for (const auto* node : graph->nodes()) {
-    // constants are already in the always_alive set
-    if (node->kind() != prim::Constant) {
-      for (const auto* v : node->outputs()) {
-        if (mayContainAlias(db, {v}, always_alive)) {
-          always_alive.insert(v);
-        }
-      }
-    }
-  }
-  return always_alive;
-}
-
-//  The algorithm does a traversal of the execution graph
-//  while keeping track of the live values.
-std::pair<LivenessMap, LiveRangesMap> GetLiveness(
-    const std::shared_ptr<torch::jit::Graph>& graph,
-    const FastSet<const Value*>& always_alive,
-    AliasDb& db) {
-  // map a Value to a set of Values that overlap live-ranges with the Value's
-  FastMap<const Value*, std::set<const Value*>> liveness_map;
-
-  // map Values to its creation order in graph (Note: only traverse top-level
-  // nodes such that nodes under control-flows are represented by top-level
-  // block nodes)
-  int idx = 1;
-  std::vector<const Value*> values_in_creation_order;
-  FastMap<const Value*, size_t> values_to_idx_in_creation_order;
-  std::unordered_map<const Node*, size_t> nodes_to_idx_in_topo_order;
-  for (const auto* node : graph->nodes()) {
-    nodes_to_idx_in_topo_order[node] = idx++;
-    for (const auto* v : node->outputs()) {
-      values_to_idx_in_creation_order[v] = values_in_creation_order.size();
-      values_in_creation_order.emplace_back(v);
-    }
-  }
-
-  std::unordered_map<const Value*, size_t> value_creation_topo_idx;
-  std::unordered_map<const Value*, std::unordered_set<size_t>>
-      value_use_topo_idxs;
-
-  // presence of a Value in live_values_use_chain means the Value alive
-  // Value mapped to set of Nodes that may use the Value (i.e., use-chain of
-  // Value)
-  FastMap<const Value*, std::set<const Node*>> live_values_use_chain;
-  // Node mapped to set of Values that the Node may use (i.e., def-chain of node
-  // inputs)
-  FastMap<const Node*, std::set<const Value*>> live_nodes_def_chain;
-
-  // add v to the current liveness_map
-  std::function<void(const Value* v)> add_live_value_fn = [&](const Value* v) {
-    if (liveness_map.count(v)) {
-      return;
-    }
-    liveness_map[v] = {};
-
-    for (const auto& live_v : live_values_use_chain) {
-      liveness_map.at(v).insert(live_v.first);
-      liveness_map.at(live_v.first).insert(v);
-    }
-
-    // only add values to the live set if they
-    // have deps, otherwise they die immediately
-    if (v->uses().size()) {
-      live_values_use_chain[v] = {};
-    }
-
-    // record the relationship between v (Value) and its uses (Node)
-    for (const auto& u : v->uses()) {
-      const auto* node = u.user;
-      live_values_use_chain.at(v).insert(node);
-      live_nodes_def_chain[node].insert(v);
-      value_use_topo_idxs[v].insert(nodes_to_idx_in_topo_order[node]);
-    }
-
-    // FIXME(penguin): the following alias refinement seems to assume
-    // that `v` refers to a new  tensor created by the node that defines
-    // v, thus other Values "before" the node that defines `v` cannot
-    // possibly be aliased to `v`.
-    // TODO(penguin): Is it a limitation of TS alias analysis
-    // so that we need to do such refinement? If so, better improve
-    // alias analysis so that we dont need this special handling here
-    //
-    // Refine aliases of v by include only those created after v
-    std::vector<const Value*> refined_aliases;
-    auto idx = values_to_idx_in_creation_order[v];
-    for (; idx < values_in_creation_order.size(); ++idx) {
-      auto* alias_v = values_in_creation_order[idx];
-      if (mayContainAlias(db, v, alias_v)) {
-        refined_aliases.emplace_back(alias_v);
-      }
-    }
-    // for all the values in the alias set,
-    // we set them "alive"
-    for (auto* aliased_v : refined_aliases) {
-      add_live_value_fn(aliased_v);
-      for (const auto& u : aliased_v->uses()) {
-        const auto* node = u.user;
-        // track deps of the aliased values is if they
-        // are our own
-        live_values_use_chain.at(v).insert(node);
-        live_nodes_def_chain[node].insert(v);
-        value_use_topo_idxs[v].insert(nodes_to_idx_in_topo_order[node]);
-      }
-      value_creation_topo_idx[aliased_v] = value_creation_topo_idx[v];
-    }
-  };
-
-  auto traverse_node_fn = [&](const Node* node,
-                              std::vector<const Value*>& dead) {
-    if (live_nodes_def_chain.count(node)) {
-      for (const auto* v : live_nodes_def_chain.at(node)) {
-        live_values_use_chain.at(v).erase(node);
-        if (!live_values_use_chain.at(v).size()) {
-          dead.emplace_back(v);
-        }
-      }
-    }
-  };
-
-  for (const auto* node : graph->nodes()) {
-    for (const auto* v : node->outputs()) {
-      if (always_alive.count(v) == 0) {
-        add_live_value_fn(v);
-        value_creation_topo_idx[v] = nodes_to_idx_in_topo_order[node];
-      }
-    }
-
-    std::vector<const Value*> dead;
-    traverse_node_fn(node, dead);
-    for (const auto* dead_value : dead) {
-      live_values_use_chain.erase(dead_value);
-    }
-  }
-
-  for (const auto& v : live_values_use_chain) {
-    TORCH_CHECK(always_alive.count(v.first));
-  }
-
-  for (const auto* node : graph->nodes()) {
-    auto inputs = node->inputs();
-    auto outputs = node->outputs();
-    for (const auto* input : inputs) {
-      for (const auto* output : outputs) {
-        if (liveness_map.count(input) && liveness_map.count(output)) {
-          liveness_map.at(input).insert(output);
-          liveness_map.at(output).insert(input);
-        }
-      }
-    }
-    // All inputs should be alive at the same time.
-    for (size_t i = 0; i < inputs.size(); ++i) {
-      for (size_t j = 0; j < inputs.size(); ++j) {
-        if (liveness_map.count(inputs[i]) && liveness_map.count(inputs[j])) {
-          liveness_map.at(inputs[i]).insert(inputs[j]);
-          liveness_map.at(inputs[j]).insert(inputs[i]);
-        }
-      }
-    }
-    // All outputs should be alive at the same time.
-    for (size_t i = 0; i < outputs.size(); ++i) {
-      for (size_t j = 0; j < outputs.size(); ++j) {
-        if (liveness_map.count(outputs[i]) && liveness_map.count(outputs[j])) {
-          liveness_map.at(outputs[i]).insert(outputs[j]);
-          liveness_map.at(outputs[j]).insert(outputs[i]);
-        }
-      }
-    }
-  }
-
-  LiveRangesMap live_ranges;
-  for (const auto& item : value_use_topo_idxs) {
-    auto value = item.first;
-    auto idxs = item.second;
-
-    live_ranges[value] = {
-        value_creation_topo_idx[value], *std::max_element(begin(idxs), end(idxs))};
-  }
-
-  return std::make_pair(liveness_map, live_ranges);
-}
 
 StaticModule::StaticModule(
     std::shared_ptr<torch::jit::Graph> g,
