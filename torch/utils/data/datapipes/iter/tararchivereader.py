@@ -12,9 +12,11 @@ class TarArchiveReaderIterDataPipe(IterDataPipe[Tuple[str, BufferedIOBase]]):
 
     Iterable datapipe to extract tar binary streams from input iterable which contains tuples of
     pathname and tar binary stream, yields pathname and extracted binary stream in a tuple.
-    args:
+
+    Args:
         datapipe: Iterable datapipe that provides pathname and tar binary stream in tuples
-        mode: File mode used by `tarfile.open` to read file object. Mode has to be a string of the form 'filemode[:compression]'
+        mode: File mode used by `tarfile.open` to read file object.
+            Mode has to be a string of the form 'filemode[:compression]'
         length: a nominal length of the datapipe
 
     Note:
@@ -24,13 +26,13 @@ class TarArchiveReaderIterDataPipe(IterDataPipe[Tuple[str, BufferedIOBase]]):
     """
     def __init__(
         self,
-        datapipe : Iterable[Tuple[str, BufferedIOBase]],
+        datapipe: Iterable[Tuple[str, BufferedIOBase]],
         mode: str = "r:*",
-        length : int = -1
+        length: int = -1
     ):
         super().__init__()
         self.datapipe: Iterable[Tuple[str, BufferedIOBase]] = datapipe
-        self.mode = mode
+        self.mode: str = mode
         self.length: int = length
 
     def __iter__(self) -> Iterator[Tuple[str, BufferedIOBase]]:

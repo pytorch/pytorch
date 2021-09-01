@@ -26,6 +26,7 @@ constexpr const char* const kNCCLAbortedCommStoreKey = "NCCLABORTEDCOMM";
 
 namespace {
 
+const char* handleNCCLGuardLogStr = "ProcessGroupNCCL::WorkNCCL::handleNCCLGuard";
 constexpr int kBytes = 8;
 
 // RAII helper class to manage NCCL group API and CUDA free mutex.
@@ -321,6 +322,8 @@ void ProcessGroupNCCL::WorkNCCL::handleNCCLGuard() {
   std::lock_guard<std::mutex> lock(mutex_);
   if (exception_) {
     auto exceptionMsg = c10::str(
+        handleNCCLGuardLogStr,
+        ": ",
         "Some NCCL operations have failed or timed out. Due to the ",
         "asynchronous nature of CUDA kernels, subsequent GPU operations ",
         "might run on corrupted/incomplete data. To avoid this inconsistency, ",
@@ -593,9 +596,16 @@ void ProcessGroupNCCL::ncclCommWatchdog() {
     LOG(INFO) << "[Rank " << rank_
               << "] NCCL watchdog thread terminated normally";
   } catch (std::exception& e) {
+    auto err = e.what();
     LOG(INFO) << "[Rank " << rank_
               << "] NCCL watchdog thread terminated with exception: "
-              << e.what();
+              << err;
+    // Errors containing handleNCCLGuardLogStr indicate that the
+    // process is unhealthy and needs to be taken down.
+    if (strstr(err, handleNCCLGuardLogStr) != nullptr) {
+        throw;
+    }
+
   } catch (...) {
     LOG(INFO) << "[Rank " << rank_
               << "] NCCL watchdog thread terminated with unknown exception";
