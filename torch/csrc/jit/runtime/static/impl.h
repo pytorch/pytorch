@@ -186,7 +186,7 @@ class TORCH_API StaticModule {
   std::unordered_set<const Value*> external_values_;
   // map a value to the set of values that may share the same storage with it
   std::unordered_map<const Value*, std::vector<const Value*>>
-  value_to_same_storage_values_;
+      value_to_same_storage_values_;
 };
 
 class TORCH_API StaticRuntime {
@@ -341,8 +341,8 @@ class TORCH_API MemoryPlanner {
     return reused_tensors_;
   }
 
-  static size_t compute_aligned_tensor_size(size_t nbytes);
-  static at::DataPtr allocate_buffer(
+  static size_t computeAlignedTensorSize(size_t nbytes);
+  static at::DataPtr allocateBuffer(
       size_t size,
       at::DeviceType deviceType = at::kCPU);
 
@@ -424,6 +424,7 @@ class TORCH_API ProcessedNode {
 
 //  Map each value to all values that are alive at the same time.
 using LivenessMap = std::unordered_map<const Value*, std::set<const Value*>>;
+
 typedef struct LiveRange {
   size_t begin;
   size_t end;
@@ -431,6 +432,34 @@ typedef struct LiveRange {
 
 inline std::ostream& operator<<(std::ostream& str, LiveRange lvr) {
   return str << "[" << lvr.begin << ", " << lvr.end << "]";
+}
+
+struct live_range_start_cmp {
+  bool operator()(LiveRange const& lvr1, LiveRange const& lvr2) const {
+    return lvr1.begin == lvr2.begin ? lvr1.end < lvr2.end
+                                    : lvr1.begin < lvr2.begin;
+  }
+};
+
+struct live_range_end_cmp {
+  bool operator()(LiveRange const& lvr1, LiveRange const& lvr2) const {
+    return lvr1.end == lvr2.end ? lvr1.begin < lvr2.begin : lvr1.end < lvr2.end;
+  }
+};
+
+struct live_range_hash {
+  size_t operator()(LiveRange const& range) const {
+    return std::hash<size_t>()(range.begin) ^
+        (std::hash<size_t>()(range.end) << 1);
+  }
+};
+
+inline bool operator==(const LiveRange& lhs, const LiveRange& rhs) {
+  return lhs.begin == rhs.begin && lhs.end == rhs.end;
+}
+
+inline bool operator!=(const LiveRange& lhs, const LiveRange& rhs) {
+  return !(lhs == rhs);
 }
 
 using LiveRangesMap = std::unordered_map<const Value*, LiveRange>;

@@ -3,17 +3,10 @@
 namespace torch {
 namespace jit {
 
-void coalesce_avail(std::set<Region, region_size_cmp>& avail_regions) {
-  std::vector<Region> offset_sorted_avail_regions(
+void coalesce_avail(std::set<MemRegion, region_size_cmp>& avail_regions) {
+  std::vector<MemRegion> coalesced;
+  std::set<MemRegion, region_offset_cmp> offset_sorted_avail_regions(
       avail_regions.begin(), avail_regions.end());
-  std::sort(
-      offset_sorted_avail_regions.begin(),
-      offset_sorted_avail_regions.end(),
-      [](Region const& reg1, Region const& reg2) {
-        return reg1.offset < reg2.offset;
-      });
-
-  std::vector<Region> coalesced;
   for (auto& offset_sorted_avail_region : offset_sorted_avail_regions) {
     if (!coalesced.empty() &&
         coalesced.back().offset + coalesced.back().size ==
@@ -30,23 +23,29 @@ void coalesce_avail(std::set<Region, region_size_cmp>& avail_regions) {
 };
 
 // https://www.usenix.org/legacy/events/vee05/full_papers/p132-wimmer.pdf
-std::unordered_map<LiveRange, Region, live_range_hash> linearScanHeuristic(
-    std::unordered_map<LiveRange, uint64_t, live_range_hash>
+std::vector<MemAllocation> linearScanHeuristic(
+    std::unordered_map<LiveRange, int64_t, live_range_hash>
         managed_live_ranges) {
-  auto cmp = [](LiveRange& lvr1, LiveRange& lvr2) {
-    return lvr1.begin < lvr2.begin;
-  };
   std::vector<LiveRange> sorted_start_live_ranges;
+  std::transform(
+      managed_live_ranges.begin(),
+      managed_live_ranges.end(),
+      std::back_inserter(sorted_start_live_ranges),
+      [](auto item) { return item.first; });
   std::sort(
-      sorted_start_live_ranges.begin(), sorted_start_live_ranges.end(), cmp);
+      sorted_start_live_ranges.begin(),
+      sorted_start_live_ranges.end(),
+      live_range_start_cmp());
 
-  int curr_end_reg = 0;
+  int64_t curr_end_reg = 0;
+
   std::set<LiveRange, live_range_end_cmp> active;
-  std::map<LiveRange, Region, live_range_start_cmp> alloced_regions;
-  std::map<LiveRange, Region, live_range_start_cmp> currently_alloced_regions;
-  std::set<Region, region_size_cmp> avail_regions;
+  std::map<LiveRange, MemRegion, live_range_start_cmp> alloced_regions;
+  std::map<LiveRange, MemRegion, live_range_start_cmp>
+      currently_alloced_regions;
+  std::set<MemRegion, region_size_cmp> avail_regions;
 
-  auto expire_old_intervals = [&](LiveRange& curr_range) {
+  auto expire_old_intervals = [&](LiveRange curr_range) {
     for (auto& dead_range : sorted_start_live_ranges) {
       if (dead_range.end >= curr_range.begin) {
         break;
@@ -66,11 +65,9 @@ std::unordered_map<LiveRange, Region, live_range_hash> linearScanHeuristic(
     expire_old_intervals(curr_range);
 
     auto curr_size = managed_live_ranges[curr_range];
-    auto aligned_curr_size =
-        MemoryPlanner::compute_aligned_tensor_size(curr_size);
-
+    auto aligned_curr_size = MemoryPlanner::computeAlignedTensorSize(curr_size);
     // check avail regions
-    const Region* reg = nullptr;
+    const MemRegion* reg = nullptr;
     coalesce_avail(avail_regions);
     for (auto& avail_reg : avail_regions) {
       if (avail_reg.size >= aligned_curr_size) {
@@ -80,21 +77,24 @@ std::unordered_map<LiveRange, Region, live_range_hash> linearScanHeuristic(
     }
 
     if (reg != nullptr) {
+      int64_t swap_offset = reg->offset;
+      int64_t swap_size = reg->size;
+
       avail_regions.erase(*reg);
-      currently_alloced_regions[curr_range] = {reg->offset, aligned_curr_size};
+      currently_alloced_regions[curr_range] = {swap_offset, aligned_curr_size};
       // split region (potentially)
-      if (reg->size - aligned_curr_size > 0) {
-        avail_regions.insert(
-            {reg->offset + aligned_curr_size, reg->size - aligned_curr_size});
+      if (swap_size - aligned_curr_size > 0) {
+        avail_regions.insert(MemRegion{
+          swap_offset + aligned_curr_size, swap_size - aligned_curr_size});
       }
     } else {
       // if possible spill smallest farthest out alloc
       const LiveRange* swap_lvr = nullptr;
       if (!active.empty()) {
-        for (auto lv = active.end(); *lv != curr_range; lv--) {
-          auto alloced_reg = currently_alloced_regions[*lv];
-          if (alloced_reg.size >= aligned_curr_size) {
-            reg = &alloced_reg;
+        for (auto lv = active.rbegin();  lv != active.rend(); lv++) {
+          if (*lv == curr_range) break;
+          if (currently_alloced_regions[*lv].size >= aligned_curr_size) {
+            reg = &currently_alloced_regions[*lv];
             swap_lvr = &*lv;
           } else {
             break;
@@ -103,16 +103,22 @@ std::unordered_map<LiveRange, Region, live_range_hash> linearScanHeuristic(
       }
 
       // swap i.e. put new alloc in old spot and malloc old alloc
-      if (reg != nullptr) {
+      if (swap_lvr != nullptr) {
+        TORCH_INTERNAL_ASSERT(reg != nullptr);
+        // grab these now because *reg will be invalidated as soon
+        // as we insert into currently_alloced_regions
+        int64_t swap_offset = reg->offset;
+        int64_t swap_size = reg->size;
+
         // put new alloc at base of old region
         currently_alloced_regions[curr_range] = {
-            reg->offset, aligned_curr_size};
+            swap_offset, aligned_curr_size};
         // split region (potentially)
-        if (reg->size - aligned_curr_size > 0) {
-          avail_regions.insert(
-              {reg->offset + aligned_curr_size, reg->size - aligned_curr_size});
+        if (swap_size - aligned_curr_size > 0) {
+          avail_regions.insert(MemRegion{
+              swap_offset + aligned_curr_size, swap_size - aligned_curr_size});
         }
-        auto spill_size = currently_alloced_regions[*swap_lvr].size;
+        int64_t spill_size = currently_alloced_regions[*swap_lvr].size;
         currently_alloced_regions[*swap_lvr] = {curr_end_reg, spill_size};
         curr_end_reg += spill_size;
       } else {
@@ -126,11 +132,15 @@ std::unordered_map<LiveRange, Region, live_range_hash> linearScanHeuristic(
     active.insert(curr_range);
   }
 
-  // last interval doesn't come back around to the top of the loop
-  expire_old_intervals(sorted_start_live_ranges.back());
+  // expire any remaining intervals
+  expire_old_intervals(
+      {std::numeric_limits<size_t>::max(), std::numeric_limits<size_t>::max()});
 
-  std::unordered_map<LiveRange, Region, live_range_hash> allocations(
-      alloced_regions.begin(), alloced_regions.end());
+  std::vector<MemAllocation> allocations;
+  allocations.reserve(alloced_regions.size());
+  for (const auto& item : alloced_regions) {
+    allocations.push_back({item.first, item.second});
+  }
   return allocations;
 }
 

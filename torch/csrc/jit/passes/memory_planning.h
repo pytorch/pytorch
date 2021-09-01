@@ -1,30 +1,33 @@
 #pragma once
 
-#include <c10/core/Allocator.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
-
-#include <utility>
 
 namespace torch {
 namespace jit {
 enum class Strategy {
   NAIVE = 0,
-  GREEDY_BY_SIZE,
-  GREEDY_BY_BREADTH,
   LINEAR_SCAN,
+  GREEDY_BY_SIZE,
+  GREEDY_BY_SIZE_WITH_FIRST_GAP,
+  GREEDY_BY_LONGEST_AND_SIZE,
+  GREEDY_BY_BREADTH,
 };
 
 inline const char* toString(Strategy s) {
   switch (s) {
     case Strategy::NAIVE:
       return "NAIVE";
-    case Strategy::GREEDY_BY_SIZE:
-      return "GREEDY_BY_SIZE";
-    case Strategy::GREEDY_BY_BREADTH:
-      return "GREEDY_BY_BREADTH";
     case Strategy::LINEAR_SCAN:
       return "LINEAR_SCAN";
+    case Strategy::GREEDY_BY_SIZE:
+      return "GREEDY_BY_SIZE";
+    case Strategy::GREEDY_BY_SIZE_WITH_FIRST_GAP:
+      return "GREEDY_BY_SIZE_WITH_FIRST_GAP";
+    case Strategy::GREEDY_BY_LONGEST_AND_SIZE:
+      return "GREEDY_BY_LONGEST_AND_SIZE";
+    case Strategy::GREEDY_BY_BREADTH:
+      return "GREEDY_BY_BREADTH";
     default:
       return "UNKNOWN STRATEGY";
   }
@@ -34,10 +37,51 @@ inline std::ostream& operator<<(std::ostream& str, Strategy rhs) {
   return str << toString(rhs);
 }
 
-typedef struct Region {
-  uint64_t offset;
-  uint64_t size;
+typedef struct MemRegion {
+  int64_t offset;
+  int64_t size;
 } Region;
+
+inline std::ostream& operator<<(std::ostream& str, MemRegion reg) {
+  return str << "{offset: " << reg.offset << ", size: " << reg.size << "}";
+}
+
+inline bool operator==(const MemRegion& lhs, const MemRegion& rhs) {
+  return lhs.offset == rhs.offset && lhs.size == rhs.size;
+}
+
+struct region_size_cmp {
+  bool operator()(MemRegion const& reg1, MemRegion const& reg2) const {
+    return reg1.size == reg2.size ? reg1.offset < reg2.offset
+                                  : reg1.size < reg2.size;
+  }
+};
+
+struct region_offset_cmp {
+  bool operator()(const MemRegion& reg1, const MemRegion& reg2) const {
+    return reg1.offset == reg2.offset ? reg1.size < reg2.size
+                                      : reg1.offset < reg2.offset;
+  }
+};
+
+bool intersectLiveRange(LiveRange lvr1, LiveRange lvr2);
+
+bool intersectMemRegion(MemRegion reg1, MemRegion reg2);
+
+int intersectArea(int64_t a, int64_t b, int64_t c, int64_t d);
+
+struct TORCH_API MemAllocation {
+  LiveRange lvr;
+  MemRegion reg;
+};
+
+inline std::ostream& operator<<(std::ostream& str, MemAllocation rhs) {
+  return str << rhs.lvr << ", " << rhs.reg;
+}
+
+inline bool operator==(MemAllocation lhs, MemAllocation rhs) {
+  return lhs.lvr == rhs.lvr && lhs.reg == rhs.reg;
+}
 
 struct TORCH_API MemEvent {
   enum class EventType { Allocate = 0, Free };
@@ -45,14 +89,14 @@ struct TORCH_API MemEvent {
   uint64_t time;
   std::string allocation_trace;
   std::string ptr_addr;
-  uint64_t size;
+  int64_t size;
   EventType type;
   c10::optional<FrameNodeId> frame_node_id;
   MemEvent(
-      uint64_t t,
+      int64_t t,
       std::string alloc_trace,
       std::string address,
-      uint64_t s,
+      int64_t s,
       EventType e,
       c10::optional<FrameNodeId> frame_nodeid = c10::nullopt)
       : time(t),
@@ -99,48 +143,6 @@ inline std::ostream& operator<<(std::ostream& str, MemEvent rhs) {
   return str;
 }
 
-inline std::ostream& operator<<(std::ostream& str, Region reg) {
-  return str << "{offset: " << reg.offset << ", size: " << reg.size << "}";
-}
-
-inline bool operator==(const LiveRange& lhs, const LiveRange& rhs) {
-  return lhs.begin == rhs.begin && lhs.end == rhs.end;
-}
-inline bool operator!=(const LiveRange& lhs, const LiveRange& rhs) {
-  return !(lhs == rhs);
-}
-
-struct live_range_start_cmp {
-  bool operator()(LiveRange const& range1, LiveRange const& range2) const {
-    return range1.begin < range2.begin;
-  }
-};
-
-struct live_range_end_cmp {
-  bool operator()(LiveRange const& range1, LiveRange const& range2) const {
-    return range1.end < range2.end;
-  }
-};
-
-struct live_range_hash {
-  size_t operator()(LiveRange const& range) const {
-    return std::hash<size_t>()(range.begin) ^
-        (std::hash<size_t>()(range.end) << 1);
-  }
-};
-
-struct region_size_cmp {
-  bool operator()(Region const& reg1, Region const& reg2) const {
-    return reg1.size < reg2.size;
-  }
-};
-
-struct region_offset_cmp {
-  bool operator()(const Region& reg1, const Region& reg2) const {
-    return reg1.offset < reg2.offset;
-  }
-};
-
 struct frame_node_id_hash {
   size_t operator()(FrameNodeId const& frame_node_id) const {
     return std::hash<size_t>()(frame_node_id.pc) ^
@@ -162,7 +164,7 @@ inline bool operator==(const FrameNodeId& lhs, const FrameNodeId& rhs) {
       lhs.node_header == rhs.node_header;
 }
 
-c10::optional<uint64_t> computeStorageSize(const Value& value);
+c10::optional<int64_t> computeStorageSize(const Value& value);
 
 bool hasOutVariant(Node* node);
 

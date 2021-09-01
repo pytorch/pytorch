@@ -155,6 +155,9 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
         act.addMetadata("pc", std::to_string(frame_id.pc));
         act.addMetadata("NodeSchema", "\"" + frame_id.node_schema + "\"");
         act.addMetadata("NodeHeader", "\"" + frame_id.node_header + "\"");
+      } else {
+        auto bt = c10::get_backtrace(1, 200, true);
+        act.addMetadata("Call stack", stacksToStr(backTraceToVecStr(bt)));
       }
       act.endTime = getTimeUs();
 

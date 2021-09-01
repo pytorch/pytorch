@@ -132,11 +132,11 @@ RegisterOperators reg(
      Operator(
          prim::AllocateStorage, /*size, device*/
          [](const Node* node) -> Operation {
-           size_t total_size = node->i(attr::total_size);
-           auto device = static_cast<DeviceType>(node->i(attr::device));
-           return [total_size, device](Stack* stack) {
+           int64_t total_size = node->i(attr::total_size);
+           auto device_type = static_cast<DeviceType>(node->i(attr::device));
+           return [total_size, device_type](Stack* stack) {
              at::DataPtr buffer =
-                 MemoryPlanner::allocate_buffer(total_size, device);
+                 MemoryPlanner::allocateBuffer(total_size, device_type);
              auto storage = c10::Storage(
                  c10::Storage::use_byte_size_t(),
                  total_size,
@@ -150,22 +150,22 @@ RegisterOperators reg(
      Operator(
          prim::AllocateTensor, /*size, sizes, offset, strides, dtype, device*/
          [](const Node* node) -> Operation {
-           size_t size = node->i(attr::size);
-           size_t offset = node->i(attr::offset);
-           auto strides = node->is(attr::stride);
-           auto sizes = node->is(attr::sizes);
+           int64_t size = node->i(attr::size);
+           int64_t offset = node->i(attr::offset);
+           const auto& strides = node->is(attr::stride);
+           const auto& sizes = node->is(attr::sizes);
            at::ScalarType dtype =
                static_cast<at::ScalarType>(node->i(attr::dtype));
-           auto device = static_cast<DeviceType>(node->i(attr::device));
+           auto device_type = static_cast<DeviceType>(node->i(attr::device));
 
-           return [offset, size, sizes, strides, dtype, device](Stack* stack) {
+           return [offset, size, sizes, strides, dtype, device_type](Stack* stack) {
              c10::Storage buffer;
              pop(stack, buffer);
 
              uint8_t* start = static_cast<uint8_t*>(buffer.data());
              void* src = static_cast<void*>(start + offset);
              at::Tensor sub_tensor = at::from_blob(
-                 src, sizes, strides, at::TensorOptions(device).dtype(dtype));
+                 src, sizes, strides, at::TensorOptions(device_type).dtype(dtype));
              sub_tensor.storage().set_nbytes(size);
              push(stack, std::move(sub_tensor));
            };
