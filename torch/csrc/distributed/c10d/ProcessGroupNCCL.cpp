@@ -196,7 +196,7 @@ inline void errorIfCapturingNonCapturableNCCL() {
   static const uint64_t min_version = (((uint64_t)2) << 32) + (((uint64_t)9) << 16) + ((uint64_t)6);
   static const uint64_t cur_version = torch::cuda::nccl::version();
   if (cur_version < min_version) {
-    TORCH_CHECK(status == CaptureStatus::None,
+    TORCH_CHECK(status == c10::cuda::CaptureStatus::None,
                 "Capturing NCCL collectives is only allowed with NCCL >= 2.9.6");
   }
 }
