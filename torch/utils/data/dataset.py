@@ -246,7 +246,8 @@ class IterableDataset(Dataset[T_co], metaclass=_DataPipeMeta):
         IterableDataset.reduce_ex_hook = hook_fn
 
 class DFIterDataPipe(IterableDataset):
-    pass
+    def _is_dfpipe(self):
+        return True
 
 class TensorDataset(Dataset[Tuple[Tensor, ...]]):
     r"""Dataset wrapping tensors.
