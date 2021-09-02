@@ -98,6 +98,8 @@ wrap(a_lifted_leaf2)
 
 wrap('len')
 
+wrap('getattr')
+
 @wrap
 def wrapped_via_decorator(a):
     return a + 1
@@ -187,6 +189,19 @@ class TestFX(JitTestCase):
 
         t = T()
         symbolic_trace(t)
+
+        # test for issue described at https://github.com/pytorch/pytorch/issues/63883
+        class M3(torch.nn.Module):
+            def forward(self, x):
+                return torch.relu(x)
+
+        m3 = M3()
+        gm3 = symbolic_trace(m3)
+        new_instance = gm3.__new__(type(gm3))
+        new_instance.__init__(gm3, gm3.graph)
+
+        x = torch.randn(5, 3)
+        torch.testing.assert_allclose(new_instance(x), torch.relu(x))
 
     def test_custom_import(self):
         graph = torch.fx.Graph()
@@ -928,6 +943,14 @@ class TestFX(JitTestCase):
         inp = torch.rand(3, 4)
         self.assertEqual(traced2(inp), inp + 3.0)
         self.assertIs(len, builtins.len)
+
+    def test_torch_fx_getattr(self):
+        class FXGetattrTest(torch.nn.Module):
+            def forward(self, x):
+                return getattr(x, 'nonexistent_attr', torch.Tensor([2, 3]))
+
+        traced = symbolic_trace(FXGetattrTest())
+        self.assertEqual(traced(torch.rand(3, 4)), torch.Tensor([2, 3]))
 
     def test_sqrt(self):
         class Sqrt1(torch.nn.Module):
