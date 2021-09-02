@@ -1,5 +1,4 @@
 # encoding: utf-8
-# type: ignore[]
 import operator
 
 import torch  # isort:skip
