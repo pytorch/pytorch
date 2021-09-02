@@ -8,9 +8,10 @@ import warnings
 import math
 from math import inf, nan, isnan
 import random
+import operator
 from random import randrange
 from itertools import product
-from functools import reduce
+from functools import reduce, partial
 
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_SCIPY, IS_MACOS, IS_WINDOWS, slowTest,
@@ -19,7 +20,7 @@ from torch.testing._internal.common_utils import \
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes,
      onlyCPU, skipCUDAIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
-     skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, onlyOnCPUAndCUDA, dtypesIfCUDA,
+     skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, onlyOnCPUAndCUDA, dtypesIfCUDA, dtypesIfCPU,
      onlyCUDA, skipCUDAVersionIn, skipMeta, skipCUDAIfNoCusolver)
 from torch.testing import floating_and_complex_types, floating_types, all_types, make_tensor
 from torch.testing._internal.common_cuda import SM53OrLater, tf32_on_and_off, CUDA11OrLater, CUDA9
@@ -4956,98 +4957,110 @@ class TestLinalg(TestCase):
             self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
             self.assertTrue("An output with one or more elements was resized" in str(w[-2].message))
 
-    def check_single_matmul(self, x, y, shape):
-        a = np.array(x, copy=False)
-        b = np.array(y, copy=False)
-        expected = np.matmul(a, b)
+    def check_single_matmul(self, x, y):
+        # test x @ y
+        expected = np.matmul(x.cpu().numpy(), y.cpu().numpy())
+        def assertEqual(answer, expected):
+            ans_numpy = ans.cpu().numpy()
+            if x.dtype.is_floating_point or x.dtype.is_complex:
+                print(np.absolute(ans_numpy - expected))
+                if ans.numel() > 0:
+                    print(np.absolute(ans_numpy - expected).max())
+                k = x.shape[-1]  # Scale the atol with the size of the matrix
+                if k == 0:
+                    k = 1
+                self.assertTrue(np.allclose(ans_numpy, expected, atol=k * 5e-6))
+            else:
+                self.assertTrue(np.array_equal(ans_numpy, expected))
 
         ans = torch.matmul(x, y)
         self.assertTrue(ans.is_contiguous())
-        self.assertTrue(np.array_equal(ans, expected))
+        assertEqual(ans, expected)
 
-        out = torch.zeros(*shape, dtype=torch.int64).to(x.device)
+        out = torch.empty((0,), dtype=x.dtype, device=x.device)
         ans = torch.matmul(x, y, out=out)
         self.assertIs(ans, out)
         self.assertTrue(ans.is_contiguous())
-        self.assertTrue(np.array_equal(ans, expected))
+        assertEqual(ans, expected)
 
-    # TODO: update to run on CUDA, too
-    @onlyCPU
-    def test_matmul_small_brute_force_1d_Nd(self, device):
-        # Issue #20452: range(0, 10) does not work.
-        n = 1
-        for m in range(1, 8):
-            for p in range(1, 8):
-                for o in range(1, 5):
-                    # 1d, 3d, inner dimensions C
-                    x = torch.arange(m, device=device)
-                    y = torch.arange(o * m * p, device=device).reshape(o, m, p)
-                    self.check_single_matmul(x, y, (o, n, p))
+        # test y.mT @ x.mT
+        xt = x.transpose(-2, -1) if x.ndim > 1 else x
+        yt = y.transpose(-2, -1) if y.ndim > 1 else y
+        expected = np.matmul(yt.cpu().numpy(), xt.cpu().numpy())
 
-                    # 1d, 3d, inner dimensions Fortran
-                    x = torch.arange(m, device=device)
-                    y = torch.arange(o * p * m, device=device).reshape(o, p, m).transpose(-1, -2)
-                    self.check_single_matmul(x, y, (o, n, p))
+        ans = torch.matmul(yt, xt)
+        self.assertTrue(ans.is_contiguous())
+        assertEqual(ans, expected)
 
-                    # 1d, 3d, inner dimensions non-contiguous
-                    x = torch.arange(2 * m, device=device)[::2]
-                    y = torch.arange(o * m * 2 * p, device=device).reshape(o, m, 2 * p)[:, :, ::2]
-                    self.check_single_matmul(x, y, (o, n, p))
+        out = torch.empty((0,), dtype=x.dtype, device=x.device)
+        ans = torch.matmul(yt, xt, out=out)
+        self.assertIs(ans, out)
+        self.assertTrue(ans.is_contiguous())
+        assertEqual(ans, expected)
 
-                    for r in range(1, 5):
-                        # 1d, 4d, inner dimensions C
-                        x = torch.arange(m)
-                        y = torch.arange(r * o * m * p, device=device).reshape(r, o, m, p)
-                        self.check_single_matmul(x, y, (r, o, n, p))
+    def gen_sizes_matmul(self, x_dim, y_dim=4, matrix_size=8, batch_size=5):
+        """
+        Generates sequences of tuples (x, y) of with size(x) = x_dim and
+        size(y) <= y_dim that are compatible wrt. matmul
+        """
+        assert x_dim >= 1
+        assert y_dim >= 2
+        for by, mn in product(product(range(batch_size), repeat=y_dim - 2),
+                              product(range(matrix_size), repeat=2)):
+            if x_dim == 1:
+                size_x = mn[:1]
+                size_y = by + mn
+                yield size_x, size_y
+            else:
+                for bx, k in product(product(range(batch_size), repeat=x_dim - 2),
+                                     range(matrix_size)):
+                    size_x = bx + (k,) + mn[:1]
+                    size_y = by + mn
+                    yield size_x, size_y
 
-                        # 1d, 4d, inner dimensions Fortran
-                        x = torch.arange(m)
-                        y = torch.arange(r * o * p * m, device=device).reshape(r, o, p, m).transpose(-1, -2)
-                        self.check_single_matmul(x, y, (r, o, n, p))
+    @dtypesIfCUDA(torch.float, torch.complex64)  # Integer matmul just supported on CPU
+    @dtypes(torch.int64, torch.float, torch.complex64)
+    def test_matmul_small_brute_force_1d_Nd(self, device, dtype):
+        make_arg = partial(make_tensor, device=device, dtype=dtype)
 
-                        # 1d, 4d, inner dimensions non-contiguous
-                        x = torch.arange(2 * m, device=device)[::2]
-                        y = torch.arange(r * o * m * 2 * p, device=device).reshape(r, o, m, 2 * p)[:, :, :, ::2]
-                        self.check_single_matmul(x, y, (r, o, n, p))
+        for shape_x, shape_y in self.gen_sizes_matmul(1):
+            # 1d, nd, inner dimensions C
+            self.check_single_matmul(make_arg(shape_x),
+                                     make_arg(shape_y))
 
-    # TODO: update to run on CUDA, too
-    @onlyCPU
-    def test_matmul_small_brute_force_2d_Nd(self, device):
-        # Issue #20452: range(0, 10) does not work.
-        for n in range(1, 5):
-            for m in range(1, 5):
-                for p in range(1, 5):
-                    for o in range(1, 3):
-                        # 2d, 3d, inner dimensions C
-                        x = torch.arange(n * m, device=device).reshape(n, m)
-                        y = torch.arange(o * m * p, device=device).reshape(o, m, p)
-                        self.check_single_matmul(x, y, (o, n, p))
+            # 1d, nd, inner dimensions non-contiguous
+            self.check_single_matmul(make_arg(shape_x),
+                                     make_arg(shape_y, noncontiguous=True))
 
-                        # 2d, 3d, inner dimensions Fortran
-                        x = torch.arange(m * n, device=device).reshape(m, n).transpose(-1, -2)
-                        y = torch.arange(o * p * m, device=device).reshape(o, p, m).transpose(-1, -2)
-                        self.check_single_matmul(x, y, (o, n, p))
+            # 1d, nd, inner dimensions non-contiguous
+            self.check_single_matmul(make_arg(shape_x, noncontiguous=True),
+                                     make_arg(shape_y))
 
-                        # 2d, 3d, inner dimensions non-contiguous
-                        x = torch.arange(n * 2 * m, device=device).reshape(n, 2 * m)[:, ::2]
-                        y = torch.arange(o * m * 2 * p, device=device).reshape(o, m, 2 * p)[:, :, ::2]
-                        self.check_single_matmul(x, y, (o, n, p))
+            # 1d, nd, inner dimensions non-contiguous
+            self.check_single_matmul(make_arg(shape_x, noncontiguous=True),
+                                     make_arg(shape_y, noncontiguous=True))
 
-                        for r in range(1, 2):
-                            # 2d, 4d, inner dimensions C
-                            x = torch.arange(n * m, device=device).reshape(n, m)
-                            y = torch.arange(r * o * m * p, device=device).reshape(r, o, m, p)
-                            self.check_single_matmul(x, y, (r, o, n, p))
+    @dtypesIfCUDA(torch.float, torch.complex64)  # Integer matmul just supported on CPU
+    @dtypes(torch.int64, torch.float, torch.complex64)
+    def test_matmul_small_brute_force_2d_Nd(self, device, dtype):
+        make_arg = partial(make_tensor, device=device, dtype=dtype)
 
-                            # 2d, 4d, inner dimensions Fortran
-                            x = torch.arange(m * n, device=device).reshape(m, n).transpose(-1, -2)
-                            y = torch.arange(r * o * p * m, device=device).reshape(r, o, p, m).transpose(-1, -2)
-                            self.check_single_matmul(x, y, (r, o, n, p))
+        for shape_x, shape_y in self.gen_sizes_matmul(2, matrix_size=6, batch_size=4):
+            # 1d, nd, inner dimensions C
+            self.check_single_matmul(make_arg(shape_x),
+                                     make_arg(shape_y))
 
-                            # 2d, 4d, inner dimensions non-contiguous
-                            x = torch.arange(n * 2 * m, device=device).reshape(n, 2 * m)[:, ::2]
-                            y = torch.arange(r * o * m * 2 * p, device=device).reshape(r, o, m, 2 * p)[:, :, :, ::2]
-                            self.check_single_matmul(x, y, (r, o, n, p))
+            # 1d, nd, inner dimensions non-contiguous
+            self.check_single_matmul(make_arg(shape_x),
+                                     make_arg(shape_y, noncontiguous=True))
+
+            # 1d, nd, inner dimensions non-contiguous
+            self.check_single_matmul(make_arg(shape_x, noncontiguous=True),
+                                     make_arg(shape_y))
+
+            # 1d, nd, inner dimensions non-contiguous
+            self.check_single_matmul(make_arg(shape_x, noncontiguous=True),
+                                     make_arg(shape_y, noncontiguous=True))
 
     def test_linear_algebra_scalar_raises(self, device) -> None:
         m = torch.randn(5, 5, device=device)
