@@ -89,6 +89,7 @@ struct SymbolicShapeAnalyzer {
       std::shared_ptr<Graph> shape_compute_graph,
       const AliasDb& db)
       : graph_(shape_compute_graph->copy()), node_(n) {
+    std::cout << "XXX node kind:" << n->kind().toQualString() << std::endl;
     for (size_t i = 0; i < node_->inputs().size(); i++) {
       auto type = node_->input(i)->type();
 
@@ -211,6 +212,7 @@ struct SymbolicShapeAnalyzer {
     std::unordered_map<Value*, int64_t> symbolic_shape_values;
     substituteInputTensorProperties(&symbolic_shape_values);
     GRAPH_DUMP("Done with partial evaluation", graph_);
+    std::cout << "XXX graph:" << *graph_ << std::endl;
 
     return extractOutputShape(symbolic_shape_values);
   }
@@ -348,7 +350,10 @@ struct SymbolicShapeAnalyzer {
         output_shape.push_back(constant_as<int64_t>(input));
       }
     }
-    return c10::SymbolicShape(output_shape);
+    auto ret = c10::SymbolicShape(output_shape);
+    std::cout << "XXX output_shape:" << ret << std::endl;
+    //return c10::SymbolicShape(output_shape);
+    return ret;
   }
 
   // node input indices that are TensorType and we need to iteratively
