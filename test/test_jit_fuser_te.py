@@ -2068,7 +2068,7 @@ def get_name(op):
 class TestNNCOpInfo(TestCase):
     def te_compile(self, device, dtype, op):
         # If adding new OpInfo tests cause this test to fail, add it into here
-        skip_ops = []
+        skip_ops = ['view', 'reshape']
         if op.name in skip_ops:
             return
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
