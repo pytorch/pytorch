@@ -10,7 +10,7 @@ from torch.fx.experimental.fx_acc.acc_normalizer import (
     register_acc_op_mapping,
     register_custom_acc_mapper_fn,
 )
-from torch.fx.passes.shape_prop import extract_tensor_metadata
+from torch.fx.passes.shape_prop import _extract_tensor_metadata
 
 this_arg_is_optional = True
 
@@ -1134,12 +1134,12 @@ def packed_quantized_linear_mapper(
     with node.graph.inserting_before(node):
         # Insert get_attr nodes for weight and bias
         get_weight = node.graph.get_attr(weight_name)
-        get_weight.meta["tensor_meta"] = extract_tensor_metadata(linear_module.weight())
+        get_weight.meta["tensor_meta"] = _extract_tensor_metadata(linear_module.weight())
 
         get_bias = None
         if linear_module.bias() is not None:
             get_bias = node.graph.get_attr(bias_name)
-            get_bias.meta["tensor_meta"] = extract_tensor_metadata(linear_module.bias())
+            get_bias.meta["tensor_meta"] = _extract_tensor_metadata(linear_module.bias())
 
         # Create kwargs for acc_op.quantized_linear
         kwargs = {
@@ -1182,12 +1182,12 @@ def packed_quantized_conv2d_mapper(
     with node.graph.inserting_before(node):
         # Insert get_attr nodes for weight and bias
         get_weight = node.graph.get_attr(weight_name)
-        get_weight.meta["tensor_meta"] = extract_tensor_metadata(conv_module.weight())
+        get_weight.meta["tensor_meta"] = _extract_tensor_metadata(conv_module.weight())
 
         get_bias = None
         if conv_module.bias() is not None:
             get_bias = node.graph.get_attr(bias_name)
-            get_bias.meta["tensor_meta"] = extract_tensor_metadata(conv_module.bias())
+            get_bias.meta["tensor_meta"] = _extract_tensor_metadata(conv_module.bias())
 
         # Create kwargs for acc_op.conv
         kwargs = {
