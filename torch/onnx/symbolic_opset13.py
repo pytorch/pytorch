@@ -4,9 +4,10 @@
 # This file exports ONNX ops for opset 13
 import torch
 import torch.onnx.symbolic_helper as sym_help
-from torch.onnx.symbolic_helper import parse_args, _unimplemented
-from torch.onnx.symbolic_opset9 import overload_by_arg_count, _maybe_cast_reduce_op_input, nonzero, expand
-from torch.onnx.symbolic_opset11 import unsqueeze
+from torch.onnx.symbolic_helper import _squeeze_helper, parse_args, _unimplemented
+from torch.onnx.symbolic_opset9 import (overload_by_arg_count, _maybe_cast_reduce_op_input,
+                                        nonzero, expand, zeros, ones, size, max, min)
+from torch.onnx.symbolic_opset11 import cumsum, unsqueeze
 from torch.onnx.utils import _add_block, _add_input_to_block, _add_output_to_block
 
 
@@ -312,3 +313,62 @@ def repeat_interleave(g, self, repeats, dim=None, output_size=None):
     loop_out = loop.node().output()
     loop_out = g.op("ConcatFromSequence", loop_out, axis_i=dim)
     return loop_out
+
+
+@parse_args("v", "i", "i", "i")
+def diagonal(g, self, offset, dim1, dim2):
+    dim1_size = size(g, self, dim=g.op("Constant", value_t=torch.LongTensor([dim1])))
+    dim2_size = size(g, self, dim=g.op("Constant", value_t=torch.LongTensor([dim2])))
+
+    # Create appropriate mask
+    mask_shape = [dim1_size, dim2_size]
+    mask_shape = g.op("Concat", *mask_shape, axis_i=0)
+    mask = zeros(g, mask_shape, None, None, None)
+    mask = g.op("EyeLike", mask, k_i=offset)
+
+    # dim1 and dim2 appended as a dimension at the end of the shape
+    rank = sym_help._get_tensor_rank(self)
+    if rank is not None:
+        axes = list(range(rank))
+        axes.remove(dim1)
+        axes.remove(dim2)
+        self = g.op("Transpose", self, perm_i=axes + [dim1, dim2])
+    else:
+        return _unimplemented("diagonal", "negative axis with unknown input rank")
+
+    # Update mask
+    axes = list(range(rank))
+    mask_shape = [size(g, self, 
+                       dim=g.op("Constant", value_t=torch.LongTensor([axis]))) for axis in axes[:-2]]
+    mask_shape.append(g.op("Constant", value_t=torch.LongTensor([-1])))
+    mask_shape.append(g.op("Constant", value_t=torch.LongTensor([-1])))
+    mask_shape = g.op("Concat", *mask_shape, axis_i=0)
+    mask = expand(g, mask, mask_shape, None)
+    
+    # Multiply input and mask
+    result = g.op("Mul", self, mask)
+    result = sym_help._reducesum_helper(g, result, axes_i=[-1], keepdims_i=0)
+
+    # Calculate gather indices based on offset and dims
+    _offset = g.op("Constant", value_t=torch.LongTensor([offset]))
+    if offset >= 0:
+        diag_size = g.op("Max", g.op("Min", dim1_size, g.op("Sub", dim2_size, _offset)),
+                         g.op("Constant", value_t=torch.LongTensor([0])))
+    else:
+        diag_size = g.op("Max", g.op("Min", g.op("Add", dim1_size, _offset), dim2_size),
+                         g.op("Constant", value_t=torch.LongTensor([0])))
+
+    gather_indices = ones(g, g.op("Concat", *[diag_size], axis_i=0), 4, None, None)
+    gather_indices = g.op("CumSum", gather_indices, g.op("Constant", value_t=torch.LongTensor([0])))
+    gather_indices = g.op("Add", gather_indices, g.op("Constant", value_t=torch.LongTensor([abs(offset) - 1])))
+
+    gather_shape = [size(g, result, 
+                         dim=g.op("Constant", value_t=torch.LongTensor([axis]))) for axis in axes[:-2]]
+    gather_shape.append(g.op("Constant", value_t=torch.LongTensor([-1])))
+    gather_shape = g.op("Concat", *gather_shape, axis_i=0)
+
+    gather_indices = expand(g, gather_indices, gather_shape, None)
+    gather_indices = sym_help._unsqueeze_helper(g, gather_indices, [rank - 1])
+    
+    # Perform gather operation
+    return g.op("GatherND", result, gather_indices, batch_dims_i=rank - 2)
