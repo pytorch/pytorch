@@ -13,12 +13,12 @@ from functools import partial
 from torch._six import inf, nan
 from torch.testing._internal.common_utils import (
     TestCase, iter_indices, TEST_WITH_ASAN, run_tests,
-    torch_to_numpy_dtype_dict, make_tensor, TEST_SCIPY, set_default_dtype)
+    torch_to_numpy_dtype_dict, TEST_SCIPY, set_default_dtype)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCUDA, onlyCPU, dtypes, dtypesIfCUDA,
     dtypesIfCPU, deviceCountAtLeast, precisionOverride, onlyOnCPUAndCUDA,
     skipCUDAIfRocm, skipIf, ops)
-from torch.testing import all_types_and_complex_and, integral_types_and
+from torch.testing import all_types_and_complex_and, integral_types_and, make_tensor
 from torch.testing._internal.common_methods_invocations import binary_ufuncs
 
 if TEST_SCIPY:
@@ -1622,7 +1622,7 @@ class TestBinaryUfuncs(TestCase):
         x = torch.randn(10, device=device).mul(30).to(dtype)
         y = torch.arange(1, 11, dtype=dtype, device=device)
 
-        with self.assertWarnsOnceRegex(UserWarning, "floor_divide"):
+        with self.assertWarnsOnceRegex(UserWarning, "__floordiv__"):
             z = x // y
         z_alt = torch.trunc(x.double() / y.double()).to(dtype)
 
@@ -1634,7 +1634,7 @@ class TestBinaryUfuncs(TestCase):
     def test_floor_divide_scalar(self, device, dtype):
         x = torch.randn(100, device=device).mul(10).to(dtype)
 
-        with self.assertWarnsOnceRegex(UserWarning, "floor_divide"):
+        with self.assertWarnsOnceRegex(UserWarning, "__floordiv__"):
             z = x // 3
         z_alt = torch.tensor([math.trunc(v.item() / 3.) for v in x], dtype=x.dtype, device=device)
 
