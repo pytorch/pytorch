@@ -352,6 +352,7 @@ class PackageImporter(Importer):
             if isinstance(cur, _ExternNode):
                 module = self.modules[name] = importlib.import_module(name)
                 return module
+
         return self._make_module(name, cur.source_file, isinstance(cur, (_SelectiveInternNode, _PackageNode)), parent)  # type: ignore[attr-defined]
 
     def _compile_source(self, fullpath: str, mangled_filename: str):
@@ -540,7 +541,7 @@ class PackageImporter(Importer):
 
     def _get_or_create_package(
         self, atoms: List[str]
-    ) -> "Union[_PackageNode, _ExternNode]":
+    ) -> "Union[_PackageNode, _ExternNode, _SelectiveInternNode]":
         cur = self.root
         if len(atoms) == 1 and atoms[0] in self.selective_intern_packages and atoms[0] not in cur.children:
             node = cur.children[atoms[0]] = _SelectiveInternNode()
@@ -567,6 +568,7 @@ class PackageImporter(Importer):
         Args:
             filename (str): the name of the file inside of the package archive to be added
         """
+
         *prefix, last = filename.split("/")
         if len(prefix) > 1 and prefix[0] == ".data":
             return

@@ -43,10 +43,12 @@ class TestDependencyAPI(PackageTestCase):
         self.assertIs(package_b.subpackage_1, foo.subpackage_1)
 
         # Check that attribute access still works on selectively interned module.
-        self.assertEqual(foo.subpackage_0.result, package_b.subpackage_0.result)
-        # self.assertIsNot(foo.subpackage_0.result, package_b.subpackage_0.result)
-        self.assertEqual(foo.subpackage_1.result, package_b.subpackage_1.result)
-        self.assertIs(foo.subpackage_0.result, package_b.subpackage_0.result)
+        self.assertEqual(foo.subpackage_0.subpackage_0_li[0], package_b.subpackage_0.subpackage_0_li[0])
+        self.assertIsNot(foo.subpackage_0.subpackage_0_li, package_b.subpackage_0.subpackage_0_li)
+        self.assertIs(foo.subpackage_1.subpackage_1_li, package_b.subpackage_1.subpackage_1_li)
+
+        # Check that attribute access works correctly on the shim.
+        self.assertIs(foo.package_b.package_b_li, package_b.package_b_li)
 
     def test_extern(self):
         buffer = BytesIO()
