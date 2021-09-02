@@ -28,6 +28,9 @@ TEST(IMethodTest, CallMethod) {
   auto pyModel = package.load_pickle("model", "model.pkl");
   torch::deploy::PythonMethodWrapper pyMethod(pyModel, "forward");
 
+  EXPECT_EQ(scriptMethod.name(), "forward");
+  EXPECT_EQ(pyMethod.name(), "forward");
+
   auto input = torch::ones({10, 20});
   auto outputPy = pyMethod({input});
   auto outputScript = scriptMethod({input});
