@@ -8,7 +8,6 @@ import warnings
 import math
 from math import inf, nan, isnan
 import random
-import operator
 from random import randrange
 from itertools import product
 from functools import reduce, partial
@@ -20,7 +19,7 @@ from torch.testing._internal.common_utils import \
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes,
      onlyCPU, skipCUDAIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
-     skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, onlyOnCPUAndCUDA, dtypesIfCUDA, dtypesIfCPU,
+     skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, onlyOnCPUAndCUDA, dtypesIfCUDA,
      onlyCUDA, skipCUDAVersionIn, skipMeta, skipCUDAIfNoCusolver)
 from torch.testing import floating_and_complex_types, floating_types, all_types, make_tensor
 from torch.testing._internal.common_cuda import SM53OrLater, tf32_on_and_off, CUDA11OrLater, CUDA9
@@ -4960,6 +4959,7 @@ class TestLinalg(TestCase):
     def check_single_matmul(self, x, y):
         # test x @ y
         expected = np.matmul(x.cpu().numpy(), y.cpu().numpy())
+
         def assertEqual(answer, expected):
             ans_numpy = ans.cpu().numpy()
             if x.dtype.is_floating_point or x.dtype.is_complex:
