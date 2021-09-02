@@ -49,12 +49,17 @@ from torch.utils.data.datapipes.iter.ziparchivereader import (
 from torch.utils.data.datapipes.iter.utils import (
     IterableWrapperIterDataPipe as IterableWrapper,
 )
+from torch.utils.data.datapipes.iter.sampling.undersampler import (
+    ProportionUnderSamplerIterDataPipe as ProportionUnderSampler,
+    DistributionUnderSamplerIterDataPipe as DistributionUnderSampler,
+)
 
 __all__ = ['Batcher',
            'BucketBatcher',
            'Collator',
            'Concater',
            'Demultiplexer',
+           'DistributionUnderSampler',
            'FileLister',
            'FileLoader',
            'Filter',
@@ -65,6 +70,7 @@ __all__ = ['Batcher',
            'LineReader',
            'Mapper',
            'Multiplexer',
+           'ProportionUnderSampler',
            'RoutedDecoder',
            'Sampler',
            'Shuffler',

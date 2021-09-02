@@ -52,6 +52,7 @@ from torch.utils.data import (
 from torch.utils.data.datapipes.utils.decoder import (
     basichandlers as decoder_basichandlers,
 )
+from torch.utils.data.datapipes.iter import DistributionUnderSampler, ProportionUnderSampler
 
 try:
     import dill
@@ -1639,6 +1640,70 @@ class TestSharding(TestCase):
             items.append(i)
 
         self.assertEqual(sorted(expected), sorted(items))
+
+class TestUnderSampler(TestCase):
+    def test_proportion_undersampler(self) -> None:
+        n = 20
+        idp = IDP_NoLen(range(n))
+        self.assertTrue(
+            all(
+                i % 2 == 1
+                for i in ProportionUnderSampler(idp, lambda x: x % 2, {0: 0.0, 1: 0.5})
+            )
+        )
+
+    def test_proportion_undersampler_errors(self) -> None:
+        n = 20
+        idp = IDP_NoLen(range(n))
+        with self.assertRaisesRegex(
+            ValueError, "All proportions must be within 0 and 1."
+        ):
+            ProportionUnderSampler(idp, lambda x: x % 2, {0: 1.1})
+
+    def test_distribution_undersampler(self) -> None:
+        n = 20
+        idp = IDP_NoLen(range(n))
+        self.assertTrue(
+            all(
+                i % 2 == 1
+                for i in DistributionUnderSampler(
+                    idp, lambda x: x % 2, {0: 0.0, 1: 1.0}
+                )
+            )
+        )
+
+    def test_distribution_undersampler_known_input_dist(self) -> None:
+        n = 20
+        idp = IDP_NoLen(range(n))
+        self.assertTrue(
+            all(
+                i % 2 == 1
+                for i in DistributionUnderSampler(
+                    idp, lambda x: x % 2, {0: 0.0, 1: 1.0}, {0: 0.5, 1: 0.5}
+                )
+            )
+        )
+
+    def test_distribution_undersampler_errors(self) -> None:
+        n = 20
+        idp = IDP_NoLen(range(n))
+        with self.assertRaisesRegex(
+            ValueError, "Only non-negative values are allowed in output_dist."
+        ):
+            DistributionUnderSampler(idp, lambda x: x % 2, {0: 0.0, 1: -1.0})
+        with self.assertRaisesRegex(
+            ValueError, "Only positive values are allowed in input_dist."
+        ):
+            DistributionUnderSampler(
+                idp, lambda x: x % 2, {0: 0.0, 1: 1.0}, {0: 0.5, 1: 0.5, 2: 0.0}
+            )
+        with self.assertRaisesRegex(
+            ValueError, "All keys in output_dist must be present in input_dist."
+        ):
+            DistributionUnderSampler(
+                idp, lambda x: x % 2, {0: 0.0, 1: 0.9, 2: 0.1}, {0: 0.5, 1: 0.5}
+            )
+
 
 
 if __name__ == '__main__':
