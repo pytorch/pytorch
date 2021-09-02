@@ -6240,7 +6240,7 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.randint(10, (5, ))
         self.run_test(MatmulModel(), (x, y))
 
-    @disableScriptTest()  # SpectralNorm not TorchScript compatible.
+    @skipScriptTest()  # SpectralNorm not TorchScript compatible.
     def test_spectral_norm(self):
         m = torch.nn.utils.spectral_norm(torch.nn.Linear(2, 4))
 
