@@ -81,6 +81,7 @@ def tensorboard_trace_handler(dir_name: str, worker_name: Optional[str] = None, 
         if not worker_name:
             worker_name = "{}_{}".format(socket.gethostname(), str(os.getpid()))
         file_name = "{}.{}.pt.trace.json".format(worker_name, int(time.time() * 1000))
+        prof.file_name = file_name
         if use_gzip:
             file_name = file_name + '.gz'
         prof.export_chrome_trace(os.path.join(dir_name, file_name))
@@ -242,6 +243,7 @@ class profile(object):
         self.current_action = self.schedule(self.step_num)
         self.profiler: Optional[prof.profile] = None
         self.step_rec_fn: Optional[prof.record_function] = None
+        self.file_name = None
 
     def __enter__(self):
         self.start()
