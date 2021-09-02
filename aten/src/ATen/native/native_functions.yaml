@@ -6601,14 +6601,13 @@
   variants: method, function
 
 - func: gather.out(Tensor self, int dim, Tensor index, *, bool sparse_grad=False, Tensor(a!) out) -> Tensor(a!)
+  structured: True
   dispatch:
-    CPU: gather_out_cpu_cuda
-    CUDA: gather_out_cpu_cuda
+    CPU, CUDA: gather_out
 
 - func: gather(Tensor self, int dim, Tensor index, *, bool sparse_grad=False) -> Tensor
   variants: method, function
-  dispatch:
-    CPU, CUDA: gather
+  structured_delegate: gather.out
 
 - func: gather_backward(Tensor grad, Tensor self, int dim, Tensor index, bool sparse_grad) -> Tensor
   variants: function
