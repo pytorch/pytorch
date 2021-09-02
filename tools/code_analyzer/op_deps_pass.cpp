@@ -770,6 +770,12 @@ private:
 
   static void extractStringValue(
       Value* V, const std::function<void(const std::string&)>& CB) {
+    if (isa<UndefValue>(V)) {
+      // UndefValue inherits from ConstantValue, but don't contain any data
+      // See: https://llvm.org/docs/LangRef.html#undefined-values
+      return;
+    }
+
     if (auto array = dyn_cast<ConstantDataArray>(V)) {
       // Normal case for c-style string literal and "std::basic_string".
       if (array->isCString()) {
