@@ -1,4 +1,5 @@
 import torch.testing._internal.common_utils as common
+from torch.testing import make_tensor
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     dtypes
@@ -23,7 +24,7 @@ class TestBufferProtocol(common.TestCase):
         if offset is None:
             offset = first * get_dtype_size(dtype)
 
-        numpy_original = common.make_tensor(shape, torch.device("cpu"), dtype).numpy()
+        numpy_original = make_tensor(shape, torch.device("cpu"), dtype).numpy()
         original = memoryview(numpy_original)
         # First call PyTorch's version in case of errors.
         # If this call exits successfully, the NumPy version must also do so.
@@ -125,7 +126,7 @@ class TestBufferProtocol(common.TestCase):
 
     @dtypes(*common.torch_to_numpy_dtype_dict.keys())
     def test_shared_buffer(self, device, dtype):
-        x = common.make_tensor((1,), device, dtype)
+        x = make_tensor((1,), device, dtype)
         # Modify the whole tensor
         arr, tensor = self._run_test(SHAPE, dtype)
         tensor[:] = x
@@ -158,7 +159,7 @@ class TestBufferProtocol(common.TestCase):
 
     @dtypes(*common.torch_to_numpy_dtype_dict.keys())
     def test_non_writable_buffer(self, device, dtype):
-        numpy_arr = common.make_tensor((1,), device, dtype).numpy()
+        numpy_arr = make_tensor((1,), device, dtype).numpy()
         byte_arr = numpy_arr.tobytes()
         with self.assertWarnsOnceRegex(UserWarning,
                                        r"The given buffer is not writable."):
