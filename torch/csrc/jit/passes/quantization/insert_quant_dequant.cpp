@@ -5,7 +5,6 @@
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
-#include <torch/csrc/jit/passes/fuse_linear.h>
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/quantization/helper.h>
@@ -17,6 +16,8 @@ namespace torch {
 namespace jit {
 
 namespace {
+using graph_rewrite_helper::getFuncName;
+using graph_rewrite_helper::getValue;
 using graph_rewrite_helper::PatternInfo;
 
 // dynamic quantization ops for activation: choose_qparams, quant, dequant
@@ -395,7 +396,8 @@ Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
     WithInsertPoint ins(embedding_bag_float_op);
     g->insertNode(qembedding_bag);
     // Verify that the outputs (apart from index 0) have no uses in the graph.
-    for (auto i : c10::irange(1, embedding_bag_float_op->outputs().size())) {
+    for (const auto i :
+         c10::irange(1, embedding_bag_float_op->outputs().size())) {
       TORCH_CHECK(
           !embedding_bag_float_op->output(i)->hasUses(),
           "Expected aten::embedding_bag to only have use for its first output.");
@@ -1464,6 +1466,38 @@ void InsertQuantDeQuantHelper::propagateQuantizationOps(Module& module) {
 
 } // namespace
 
+void SwapFunctionalLinear(Module& module) {
+  for (auto& method : module.get_methods()) {
+    std::shared_ptr<Graph> g = method.graph();
+    SwapFunctionalLinear(g);
+  }
+  for (Module m : module.children()) {
+    SwapFunctionalLinear(m);
+  }
+}
+
+void SwapFunctionalLinear(std::shared_ptr<Graph>& graph) {
+  std::string functional_linear = R"(
+graph(%linear, %input, %weight, %bias):
+  %r = prim::CallFunction(%linear, %input, %weight, %bias)
+  return (%r) )";
+  std::string aten_linear = R"(
+graph(%linear, %input, %weight, %bias):
+  %r = aten::linear(%input, %weight, %bias)
+  return (%r) )";
+  auto filter = [](const Match& match,
+                   const std::unordered_map<std::string, Value*>& vmap) {
+    const auto& match_vmap = match.values_map;
+    auto linear = getValue("linear", match_vmap, vmap);
+    auto func_name = getFuncName(linear);
+    return func_name == "linear";
+  };
+  SubgraphRewriter rewriter;
+  rewriter.RegisterRewritePattern(functional_linear, aten_linear);
+  // TODO: runOnGraph takes const ref?
+  rewriter.runOnGraph(graph, filter);
+}
+
 void ReplicateQuant(std::shared_ptr<Graph>& graph) {
   std::stack<Block*> blocks_to_visit;
   std::vector<Node*> quant_nodes_to_rewrite;
@@ -1487,7 +1521,7 @@ void ReplicateQuant(std::shared_ptr<Graph>& graph) {
     Node* if_node = n->input(0)->node();
     // move the nodes that produces the quantization parameters before
     // prim::If
-    for (auto i : c10::irange(1, n->inputs().size())) {
+    for (const auto i : c10::irange(1, n->inputs().size())) {
       n->input(i)->node()->moveBefore(if_node);
     }
     // replace all uses of the quantized node with the output of if node
