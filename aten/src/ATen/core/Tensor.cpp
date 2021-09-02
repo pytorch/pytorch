@@ -1,6 +1,8 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/core/Formatting.h>
 #include <ATen/core/VariableHooksInterface.h>
+#include <ATen/core/LegacyTypeDispatch.h>
+#include <ATen/FunctionalTensorWrapper.h>
 
 #include <iostream>
 
@@ -92,7 +94,7 @@ const Tensor& Tensor::requires_grad_(bool _requires_grad) const {
   return *this;
 }
 
-// View Variables
+// View Methods
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 bool Tensor::is_view() const {

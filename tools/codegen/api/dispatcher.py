@@ -40,12 +40,12 @@ def returns_type(rs: Sequence[Return]) -> CType:
     # At present, there is no difference. But there could be!
     return cpp.returns_type(rs)
 
-def jit_arguments(func: FunctionSchema) -> List[Argument]:
+def jit_arguments(func: FunctionSchema, *, skip_self: bool = False) -> List[Argument]:
     def to_argument(a: Union[Argument, TensorOptionsArguments, SelfArgument]) -> List[Argument]:
         if isinstance(a, Argument):
             return [a]
         elif isinstance(a, SelfArgument):
-            return [a.argument]
+            return [] if skip_self else [a.argument]
         elif isinstance(a, TensorOptionsArguments):
             return [a.dtype, a.layout, a.device, a.pin_memory]
         else:
@@ -55,10 +55,12 @@ def jit_arguments(func: FunctionSchema) -> List[Argument]:
         func.arguments.kwarg_only,
         func.arguments.out)))
 
-def arguments(func: FunctionSchema) -> List[Binding]:
-    return [
-        Binding(
-            nctype=argument_type(a, binds=a.name),
-            name=a.name,
-            argument=a,
-        ) for a in jit_arguments(func)]
+def argument(a: Argument) -> Binding:
+    return Binding(
+        nctype=argument_type(a, binds=a.name),
+        name=a.name,
+        argument=a
+    )
+
+def arguments(func: FunctionSchema, skip_self: bool = False) -> List[Binding]:
+    return [argument(a) for a in jit_arguments(func, skip_self=skip_self)]

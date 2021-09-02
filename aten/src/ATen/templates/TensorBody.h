@@ -366,7 +366,7 @@ class TORCH_API Tensor {
   const Storage& storage() const {
     return impl_->storage();
   }
-  bool is_alias_of(const at::Tensor& other) const{
+  bool is_alias_of(const at::Tensor& other) const {
     return impl_->storage().is_alias_of(other.storage());
   }
 

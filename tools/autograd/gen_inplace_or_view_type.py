@@ -63,16 +63,76 @@ VIEW_FUNCTIONS = {
 for key in VIEW_FUNCTIONS_WITH_METADATA_CHANGE:
     VIEW_FUNCTIONS[key] = 'self'
 
+
+# The full set of composite view ops, including overloads.
+COMPOSITE_VIEW_FULL_NAMES = set([
+    'chunk',
+    'contiguous',
+    'reshape',
+    'reshape_as',
+    'expand_as',
+    'view_as',
+    'real',
+    'imag',
+    'narrow',
+    'narrow.Tensor',
+    'movedim.intlist',
+    'movedim.int',
+    'moveaxis.intlist',
+    'moveaxis.int',
+    'tensor_split.sections',
+    'tensor_split.indices',
+    'tensor_split.tensor_indices_or_sections',
+    'swapdims',
+    'swapaxes',
+    'diagonal.Dimname',
+    'flatten.using_ints',
+    'flatten.named_out_dim',
+    'flatten.using_names',
+    'flatten.DimnameList',
+    'select.Dimname',
+    'squeeze.dimname',
+    'transpose.Dimname',
+    'unbind.Dimname',
+    'numpy_T',
+    # inplace-view composites
+    'squeeze_.dimname',
+    'swapaxes_',
+    'swapdims_',
+])
+
+# This is the set of composite view ops currently used by gen_inplace_or_view_type.py
+# TODO: the existing list of composite ops used by gen_inplace_or_view_type.py is wrong
+# We should rationalize these differences.
+COMPOSITE_VIEWS = set([x.partition('.')[0] for x in COMPOSITE_VIEW_FULL_NAMES]) - set([
+    # Not sure why these aren't marked as composite?
+    'moveaxis',
+    'numpy_T',
+    # inplace-view composites aren't included either... should they be?
+    'squeeze_.dimname',
+    'swapaxes_',
+    'swapdims_',
+    # For everything below here, there are multiple overloads of the listed op, where one is composite and the other is not.
+    # the list used by gen_inplace_or_viewtype can't use them because it only uses the base name of the op
+    # so it can't distinguish between the overloads.
+    # Maybe this codegen should just use the full base.overload name?
+    'select',
+    'diagonal',
+    'transpose',
+    'unbind',
+    'flatten',
+    'squeeze',
+]) | set([
+    # detach is listed as composite, even though it's not... it's CompositeExplicitAutograd.
+    'detach'
+])
+
 # note: some VIEW_FUNCTIONS are just compositions of the view functions above
 # this list contains both the root view functions and any that are purely composed
 # of viewing functions, and is used by the JIT to determine when an operator
 # may return a view of its inputs; however they may sometimes return a copy.
 # (e.g. `contiguous`)
-RETURNS_VIEWS_OF_INPUT = set(VIEW_FUNCTIONS.keys()).union({
-    'chunk', 'detach', 'contiguous', 'reshape', 'reshape_as',
-    'expand_as', 'view_as', 'real', 'imag', 'narrow', 'movedim',
-    'tensor_split', 'swapdims', 'swapaxes'
-})
+RETURNS_VIEWS_OF_INPUT = set(VIEW_FUNCTIONS.keys()).union(COMPOSITE_VIEWS)
 
 # These are the functions we consider views for the purposes of validating
 # StorageImpl and TensorImpl in gen_variable_type.
@@ -207,8 +267,7 @@ def unpack_args(f: NativeFunction) -> Tuple[List[str], List[Binding]]:
 def get_base_name(f: NativeFunction) -> str:
     return f.func.name.name.base  # TODO: should be str(f.func.name.name)?
 
-def get_view_info(fn: NativeFunctionWithDifferentiabilityInfo) -> Optional[str]:
-    f = fn.func
+def get_view_info(f: NativeFunction) -> Optional[str]:
     base_name = get_base_name(f)
     view_info = VIEW_FUNCTIONS.get(base_name, None)
     if view_info is None and base_name in RETURNS_VIEWS_OF_INPUT:
@@ -286,7 +345,7 @@ def emit_view_body(fn: NativeFunctionWithDifferentiabilityInfo, var: str) -> Tup
     # See NOTE [ Autograd View Variables ] in variable.h for details.
     f = fn.func
     base_name = get_base_name(f)
-    view_info = get_view_info(fn)
+    view_info = get_view_info(f)
     call = ''
     differentiable_outputs = gen_differentiable_outputs(fn)
     differentiable_output_vars = {r.name for r in differentiable_outputs}
@@ -331,7 +390,12 @@ def emit_view_body(fn: NativeFunctionWithDifferentiabilityInfo, var: str) -> Tup
     return call, rhs_value
 
 def modifies_arguments(f: NativeFunction) -> bool:
-    return f.func.kind() in [SchemaKind.inplace, SchemaKind.out]
+    # See Note [Functionalization: Mutation Removal]
+    # replace_() is a special operator that's only used by the functionalization pass,
+    # and should always call its composite kernel implementation.
+    # The only reason it goes through the dispatcher is to show up in python traces.
+    return f.func.kind() in [SchemaKind.inplace, SchemaKind.out] \
+        and str(f.func.name) != 'replace_'
 
 @with_native_function_with_differentiability_info
 def emit_inplace_or_view_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
@@ -361,7 +425,7 @@ def emit_inplace_or_view_body(fn: NativeFunctionWithDifferentiabilityInfo) -> Li
         for r in cpp.return_names(f):
             inplace_view_body.append(f'increment_version({r});')
     else:
-        assert(get_view_info(fn) is not None)
+        assert(get_view_info(f) is not None)
         inplace_view_body.append(VIEW_REDISPATCH.substitute(
             assign_return_values='auto ' + TMP_VAR + ' = ',
             api_name=api_name,
@@ -389,7 +453,7 @@ def gen_formals(f: NativeFunction) -> str:
 @with_native_function_with_differentiability_info
 def inplace_or_view_method_definition(fn: NativeFunctionWithDifferentiabilityInfo) -> Optional[str]:
     f = fn.func
-    if get_view_info(fn) is None and (not modifies_arguments(f) or is_foreach_op(str(f.func.name))):
+    if get_view_info(f) is None and (not modifies_arguments(f) or is_foreach_op(str(f.func.name))):
         return None
     return METHOD_DEFINITION.substitute(
         return_type=cpp.returns_type(f.func.returns).cpp_type(),
@@ -401,7 +465,7 @@ def inplace_or_view_method_definition(fn: NativeFunctionWithDifferentiabilityInf
 @with_native_function_with_differentiability_info
 def inplace_or_view_method_registration(fn: NativeFunctionWithDifferentiabilityInfo) -> Optional[str]:
     f = fn.func
-    if get_view_info(fn) is None and (not modifies_arguments(f) or is_foreach_op(str(f.func.name))):
+    if get_view_info(f) is None and (not modifies_arguments(f) or is_foreach_op(str(f.func.name))):
         return None
     return WRAPPER_REGISTRATION.substitute(
         unqual_operator_name_with_overload=f.func.name,

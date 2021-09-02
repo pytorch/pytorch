@@ -1213,6 +1213,14 @@ class Arguments:
         return ret
 
     @property
+    def flat_all(self) -> Sequence[Argument]:
+        ret: List[Argument] = []
+        ret.extend(self.flat_positional)
+        ret.extend(self.flat_kwarg_only)
+        ret.extend(self.out)
+        return ret
+
+    @property
     def non_out(self) -> Sequence[Union[Argument, SelfArgument, TensorOptionsArguments]]:
         ret: List[Union[Argument, SelfArgument, TensorOptionsArguments]] = []
         ret.extend(self.positional)
@@ -1235,6 +1243,14 @@ class Arguments:
         if self.tensor_options is not None:
             ret.append(self.tensor_options)
         ret.extend(self.post_tensor_options_kwarg_only)
+        return ret
+
+    @property
+    def all(self) -> Sequence[Union[Argument, SelfArgument, TensorOptionsArguments]]:
+        ret: List[Union[Argument, SelfArgument, TensorOptionsArguments]] = []
+        ret.extend(self.positional)
+        ret.extend(self.kwarg_only)
+        ret.extend(self.out)
         return ret
 
     def signature(self, *, strip_default: bool = False) -> 'Arguments':

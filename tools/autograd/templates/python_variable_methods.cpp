@@ -35,6 +35,7 @@
 #include "torch/csrc/utils/structseq.h"
 
 #include <ATen/ATen.h>
+#include <ATen/FunctionalTensorWrapper.h>
 #include "c10/util/Optional.h"
 #include "c10/core/Stream.h"
 
@@ -64,6 +65,25 @@ static PyObject * THPVariable__is_view(PyObject *self, PyObject* args)
   } else {
     Py_RETURN_FALSE;
   }
+  END_HANDLE_TH_ERRORS
+}
+
+// If the tensor is part of the functionalization pass,
+// syncs the tensor with any mutations that happened to its alias.
+static PyObject * THPVariable_sync_(PyObject* self, PyObject* arg)
+{
+  HANDLE_TH_ERRORS
+  if (check_has_torch_function(self)) {
+    auto args = py::make_tuple(py::handle(arg));
+    return handle_torch_function(self, "sync_", args.ptr());
+  }
+  auto& self_ = THPVariable_Unpack(self);
+
+  // Only tensors that are opted into the functionalization pass can be synced
+  TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(self_));
+  auto functional_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(self_);
+  functional_impl->sync_();
+  Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
@@ -1190,6 +1210,7 @@ PyMethodDef variable_methods[] = {
   {"__invert__", THPVariable_invert, METH_NOARGS, NULL},
   {"__matmul__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_matmul>), METH_VARARGS | METH_KEYWORDS, NULL},
   {"_is_view", THPVariable__is_view, METH_NOARGS, NULL},
+  {"sync_", THPVariable_sync_, METH_NOARGS, NULL},
   {"apply_", THPVariable_apply_, METH_O, NULL},
   {"bfloat16", castPyCFunctionWithKeywords(THPVariable_bfloat16), METH_VARARGS | METH_KEYWORDS, NULL},
   {"byte", castPyCFunctionWithKeywords(THPVariable_byte), METH_VARARGS | METH_KEYWORDS, NULL},

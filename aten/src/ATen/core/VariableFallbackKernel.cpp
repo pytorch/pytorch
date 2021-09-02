@@ -1,5 +1,6 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/LegacyTypeDispatch.h>
+#include <ATen/FunctionalTensorWrapper.h>
 #include <torch/library.h>
 
 /*
@@ -60,9 +61,71 @@ TORCH_LIBRARY_IMPL(_, AutogradMLC, m) {
   m.fallback(torch::CppFunction::makeFallthrough());
 }
 
+namespace {
+  void functionalizeFallback(const c10::OperatorHandle& op, c10::DispatchKeySet dispatchKeySet, torch::jit::Stack* stack) {
+    const auto& schema = op.schema();
+    const auto num_arguments = schema.arguments().size();
+    const auto arguments_begin = stack->size() - num_arguments;
+    auto arguments = torch::jit::last(stack, num_arguments);
+
+    for (int64_t idx = 0; idx < num_arguments; ++idx) {
+      const auto& ivalue = arguments[idx];
+      if (ivalue.isTensor()) {
+        at::Tensor t = ivalue.toTensor();
+        at::functionalization::impl::sync(t);
+        auto t_new = c10::IValue(at::functionalization::impl::unwrapFunctionalTensor(t));
+        (*stack)[arguments_begin + idx] = t_new;
+      } else if (ivalue.isTensorList()) {
+        auto tensors = ivalue.toTensorList();
+        at::functionalization::impl::sync(tensors);
+        auto t_new = c10::IValue(at::functionalization::impl::unwrapFunctionalTensor(tensors));
+        (*stack)[arguments_begin + idx] = t_new;
+      }
+    }
+    {
+      at::AutoDispatchBelowFunctionalize guard;
+      op.redispatchBoxed(dispatchKeySet & c10::after_func_keyset, stack);
+    }
+    const auto num_returns = schema.returns().size();
+    const auto returns_begin = stack->size() - num_returns;
+    auto returns = torch::jit::last(stack, num_returns);
+
+    for (int64_t idx = 0; idx < num_returns; ++idx) {
+      const auto& ivalue = returns[idx];
+      if (ivalue.isTensor()) {
+        at::Tensor t = ivalue.toTensor();
+        auto t_new = c10::IValue(at::functionalization::impl::wrapFunctionalTensor(t));
+        (*stack)[returns_begin + idx] = t_new;
+      } else if (ivalue.isTensorList()) {
+        auto tensors = ivalue.toTensorList();
+        auto t_new = c10::IValue(at::functionalization::impl::wrapFunctionalTensor(tensors));
+        (*stack)[returns_begin + idx] = t_new;
+      }
+    }
+  }
+}
+
+at::Tensor& replace_(at::Tensor& self, const at::Tensor& other) {
+  TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(self));
+  TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(other));
+  auto self_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(self);
+  self_impl->replace_(other);
+  return self;
+}
+
+TORCH_LIBRARY_IMPL(_, Functionalize, m) {
+  m.fallback(torch::CppFunction::makeFromBoxedFunction<&functionalizeFallback>());
+}
+
 // see Note [ADInplaceOrView key]
 TORCH_LIBRARY_IMPL(_, ADInplaceOrView, m) {
       m.fallback(torch::CppFunction::makeFallthrough());
+}
+
+TORCH_LIBRARY_IMPL(aten, Functionalize, m) {
+  // We need this for the functionalization pass: These are all operators used by
+  // the functionalization machinery, which themselves shouldn't call into the functionalization pass.
+  m.impl("replace_", TORCH_FN(replace_));
 }
 
 }

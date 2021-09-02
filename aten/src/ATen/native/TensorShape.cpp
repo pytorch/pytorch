@@ -2456,6 +2456,12 @@ std::vector<Tensor> unflatten_dense_tensors(const Tensor& flat, TensorList tenso
   return outputs;
 }
 
+// See Note [Functionalization: Mutation Removal]
+Tensor& replace_(Tensor& self, const Tensor& other) {
+  TORCH_INTERNAL_ASSERT(false, "Found a call to replace_(). It is only expected to be called by the functionalization pass");
+  return self;
+}
+
 at::Tensor slice_scatter(const at::Tensor& base, const at::Tensor& mutated_view, int64_t dim, c10::optional<int64_t> start, c10::optional<int64_t> end, int64_t step) {
     auto output = base.clone();
     output.slice(dim, start, end, step).copy_(mutated_view);
