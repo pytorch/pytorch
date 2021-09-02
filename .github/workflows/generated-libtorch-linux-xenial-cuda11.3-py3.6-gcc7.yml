@@ -16,6 +16,7 @@ env:
   BUILD_ENVIRONMENT: libtorch-linux-xenial-cuda11.3-py3.6-gcc7
   DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7
   SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
+  XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
   TORCH_CUDA_ARCH_LIST: 5.2
   IN_CI: 1
   # This is used for the phase of adding wheel tests only, will be removed once completed
@@ -192,6 +193,7 @@ jobs:
             -e JOB_BASE_NAME \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
+            -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
             -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
             -e SKIP_SCCACHE_INITIALIZATION=1 \
             -e TORCH_CUDA_ARCH_LIST \
