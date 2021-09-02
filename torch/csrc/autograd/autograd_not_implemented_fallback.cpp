@@ -182,12 +182,13 @@ void autogradNotImplementedFallbackImpl(const c10::OperatorHandle& op, c10::Disp
   }
 }
 
+
+
 torch::CppFunction autogradNotImplementedFallback() {
   return torch::CppFunction::makeFromBoxedFunction<&autogradNotImplementedFallbackImpl>();
 }
 
 // Unfortunately we have to do this lookup...
-static const std::vector<std::string> NEEDS_METADATA_CHANGE = {"aten::view_as_complex", "aten::view_as_real", "aten::_conj", "aten::_neg_view"};
 
 // [WIP] What about in-place views
 void ADInplaceOrViewFallbackImpl(const c10::OperatorHandle& op, c10::DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
@@ -233,10 +234,10 @@ void ADInplaceOrViewFallbackImpl(const c10::OperatorHandle& op, c10::DispatchKey
     }
   }
   TORCH_INTERNAL_ASSERT((aliased_input_idx == -1 && aliased_output_idx == -1) ||
-    (aliased_input_idx != -1 && aliased_output_idx != -1))
+    (aliased_input_idx == 0 && aliased_output_idx == 0))
   const bool is_view = aliased_input_idx != -1;
   const bool need_view_func = is_view
-                         && (std::find(NEEDS_METADATA_CHANGE.begin(), NEEDS_METADATA_CHANGE.end(), op_name) != NEEDS_METADATA_CHANGE.end()
+                         && (std::find(detail::NEEDS_METADATA_CHANGE.begin(), detail::NEEDS_METADATA_CHANGE.end(), op_name) != detail::NEEDS_METADATA_CHANGE.end()
                              || !aliased_input.unsafeGetTensorImpl()->support_as_strided());
   std::function<at::Tensor(const at::Tensor&)> view_func = nullptr;
   std::vector<c10::IValue> stack_args_copy;
