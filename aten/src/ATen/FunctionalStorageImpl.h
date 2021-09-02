@@ -56,4 +56,3 @@ struct C10_API FunctionalStorageImpl : public c10::StorageImpl {
 
 } // namespace functionalization
 } // namespace at
-

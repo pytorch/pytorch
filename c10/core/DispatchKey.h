@@ -275,7 +275,8 @@ enum class DispatchKey : uint8_t {
 
   FuncTorchGradWrapper, // See Note [Out-of-tree vmap+grad prototype]
   // Alias and mutation removal.
-  // If some backends want to opt into only alias removal or only mutation removal,
+  // If some backends want to opt into only alias removal or only mutation
+  // removal,
   // we can consider adding separate keys dedicated to those individual passes.
   // See Note [Functionalization Pass In Core] for details.
   Functionalize,

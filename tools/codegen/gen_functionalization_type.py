@@ -225,7 +225,7 @@ def emit_registration(f: NativeFunction, native_api_name: Optional[str]) -> str:
         # CompositeImplicitAutograd kernels, because we can just decompose them into their base operators.
         # We can't just opt the entire Functionalization dispatch key into the composite keyset though,
         # because we don't want to decompose non-view ops that are composite, like `at::ones`.
-        registration_str = f'TORCH_FN(static_cast<{sig.ptr_type()}>(at::native::{native_api_name}))'
+        registration_str = f'static_cast<{sig.ptr_type()}>(at::native::{native_api_name})'
     else :
         registration_str = f'TORCH_FN(functionalization::{type_wrapper_name(f)})'
 

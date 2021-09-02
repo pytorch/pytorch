@@ -24,7 +24,7 @@ void Alias::add_update(const at::Tensor& updated_val, std::vector<ViewMeta> meta
 }
 
 // Note [Functionalization: Alias Removal Part 2]
-// See Note [Functionalization: Alias Removal Part 1] for more details.
+// See Note [Functionalization: Alias Removal] for more details.
 // This function applies a single update from one of the views to the Alias object.
 // We start out with <original_base> and <mutated_view>, and our goal is to end up with <mutated_base>.
 void Alias::apply_update(const Update& update) {
