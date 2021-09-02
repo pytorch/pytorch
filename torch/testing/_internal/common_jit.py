@@ -293,7 +293,6 @@ class JitCommonTestCase(TestCase):
             if constant_prop:
                 torch._C._jit_pass_constant_propagation(traced_graph)
             torch._C._jit_pass_propagate_shapes_on_graph(traced_graph)
-            print(traced_graph)
             # Add sizes to default tensor type to avoid checking something out of scope
             # and difficulties with tracer leaving in other parts of tensor type
             output = next(traced_graph.outputs()).type()
