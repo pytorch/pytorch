@@ -102,6 +102,8 @@ class Dataset(Generic[T_co]):
                         warnings.warn("Results %s of calling %s over %s got promoted to DF %s %s" %
                                       (type(result_pipe), function_name, type(source_dp),
                                        enable_df_api_tracing, isinstance(source_dp, DFIterDataPipe)))
+                        if isinstance(source_dp, DFIterDataPipe):
+                            warnings.warn("isinstance(source_dp, DFIterDataPipe) %s" % source_dp._is_dfpipe())
                         result_pipe = result_pipe.trace_as_dataframe()
 
             return result_pipe
