@@ -60,16 +60,17 @@ static OptionalTensorRef make_otr(const TensorBase &tensor) {
 
 namespace internal {
 
-OpaqueTensorRef::OpaqueTensorRef() {
-  static_assert(alignof(OptionalTensorRef) == alignof(TensorBase), "");
+OpaqueOptionalTensorRef::OpaqueOptionalTensorRef() {
+  static_assert(alignof(OptionalTensorRef) == alignof(data_), "");
+  static_assert(sizeof(OptionalTensorRef) == sizeof(data_), "");
   new (data_) OptionalTensorRef();
 }
 
-OpaqueTensorRef::~OpaqueTensorRef() {
+OpaqueOptionalTensorRef::~OpaqueOptionalTensorRef() {
   get()->~OptionalTensorRef();
 }
 
-const Tensor& OpaqueTensorRef::getTensor() const {
+const Tensor& OpaqueOptionalTensorRef::getTensor() const {
   return get()->getTensorRef();
 }
 
@@ -80,19 +81,16 @@ void OperandInfo::tensor(c10::MaybeOwned<TensorBase> &&tensor) {
   *tensor_storage_ = make_otr(*tensor_base_);
 }
 
-void OperandInfo::original_tensor(c10::MaybeOwned<TensorBase> &&original_tensor) {
-  original_tensor_base_ = std::move(original_tensor);
-  *original_tensor_storage_ = make_otr(*original_tensor_base_);
+void OperandInfo::exchange_tensor(c10::MaybeOwned<TensorBase> &&new_tensor) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!original_tensor_base_->defined());
+  original_tensor_base_ = std::exchange(tensor_base_, new_tensor);
+  *original_tensor_storage_ = std::exchange(*tensor_storage_, make_otr(*tensor_base_));
 }
 
-c10::MaybeOwned<TensorBase> OperandInfo::unsafeReleaseTensor() {
-  *tensor_storage_ = OptionalTensorRef();
-  return std::move(tensor_base_);
-}
-
-c10::MaybeOwned<TensorBase> OperandInfo::unsafeReleaseOriginalTensor() {
-  *original_tensor_storage_ = OptionalTensorRef();
-  return std::move(original_tensor_base_);
+void OperandInfo::restore_original_tensor() {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(original_tensor_base_->defined());
+  tensor_base_ = std::move(original_tensor_base_);
+  *tensor_storage_ = std::exchange(*original_tensor_storage_, OptionalTensorRef{});
 }
 
 /// Construction
@@ -466,7 +464,6 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
       if (config.cast_common_dtype_to_outputs_ && op.is_output && op.current_dtype != common_dtype_ && !is_meta_) {
         TORCH_INTERNAL_ASSERT(op.tensor_base().defined());
         // Marker [Output original_tensor is set]
-        op.original_tensor(op.unsafeReleaseTensor());
         // NB: do NOT use set_output here, as the temporary is NOT a true output;
         // op.tensor is the true output and it was pre-provided for us.
         // TODO: The logic for cast_outputs will need to be handled by the
@@ -475,9 +472,9 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
         // then after calling the out kernel, do the conversion (which
         // is cast_outputs here), but integrating this with existing
         // TensorIterator will take a little doing
-        op.tensor(c10::MaybeOwned<TensorBase>::owned(
-            at::empty_like(op.original_tensor(),
-                           op.original_tensor_base().options().dtype(common_dtype_),
+        op.exchange_tensor(c10::MaybeOwned<TensorBase>::owned(
+            at::empty_like(op.tensor(),
+                           op.tensor_base().options().dtype(common_dtype_),
                            LEGACY_CONTIGUOUS_MEMORY_FORMAT)));
         if (!names_.empty()) {
           namedinference::propagate_names(op.tensor_base(), names_);
@@ -488,8 +485,7 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
 
       // Promotes inputs by creating temporaries of the correct dtype
       if (config.promote_inputs_to_common_dtype_ && !op.is_output && op.current_dtype != common_dtype_) {
-        op.original_tensor(op.unsafeReleaseTensor());
-        op.tensor(c10::MaybeOwned<TensorBase>::owned(op.original_tensor().to(common_dtype_)));
+        op.exchange_tensor(c10::MaybeOwned<TensorBase>::owned(op.tensor().to(common_dtype_)));
         op.current_dtype = common_dtype_;
         op.target_dtype = common_dtype_;
       }
@@ -788,7 +784,7 @@ void TensorIteratorBase::cast_outputs() {
         original_tensor.resize_as_(tensor).as_strided_(tensor.sizes(), tensor.strides());
       }
       original_tensor.copy_(tensor);
-      op.tensor(op.unsafeReleaseOriginalTensor());
+      op.restore_original_tensor();
     }
   }
 }
