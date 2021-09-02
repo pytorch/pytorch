@@ -48,7 +48,10 @@ TARGET_DET_LIST = [
     "distributed/test_pg_wrapper",
     "distributed/test_store",
     "distributions/test_distributions",
-    "test_autograd",
+    # test_autograd.py is not slow, so it does not belong here. But
+    # note that if you try to add it back it will run into
+    # https://bugs.python.org/issue40350 because it imports files
+    # under test/autograd/.
     "test_binary_ufuncs",
     "test_cpp_extensions_aot_ninja",
     "test_cpp_extensions_aot_no_ninja",
