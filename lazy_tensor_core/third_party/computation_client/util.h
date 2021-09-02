@@ -19,6 +19,7 @@
 #include "lazy_tensors/span.h"
 #include "lazy_tensors/status.h"
 #include "c10/core/ScalarType.h"
+#include "c10/core/Scalar.h"
 
 namespace lazy_tensors {
 namespace util {
@@ -247,6 +248,14 @@ static inline hash_t StringHash(const char* data) {
 template <typename T, typename std::enable_if<
                           std::is_arithmetic<T>::value>::type* = nullptr>
 hash_t Hash(const T& value) {
+  return DataHash(&value, sizeof(value));
+}
+
+static inline hash_t Hash(const c10::ScalarType& value) {
+  return DataHash(&value, sizeof(value));
+}
+
+static inline hash_t Hash(const c10::Scalar& value) {
   return DataHash(&value, sizeof(value));
 }
 
