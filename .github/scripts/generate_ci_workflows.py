@@ -148,6 +148,8 @@ class CIWorkflow:
     enable_nogpu_no_avx_test: YamlShellBool = "''"
     enable_nogpu_no_avx2_test: YamlShellBool = "''"
     enable_slow_test: YamlShellBool = "''"
+    enable_docs_test: YamlShellBool = "''"
+    enable_backwards_compat_test: YamlShellBool = "''"
 
     def __post_init__(self) -> None:
         if self.is_libtorch:
@@ -266,6 +268,8 @@ LINUX_WORKFLOWS = [
         test_runner_type=LINUX_CPU_TEST_RUNNER,
         on_pull_request=True,
         enable_doc_jobs=True,
+        enable_docs_test=1,
+        enable_backwards_compat_test=1,
         num_test_shards=2,
         ciflow_config=CIFlowConfig(
             enabled=True,
