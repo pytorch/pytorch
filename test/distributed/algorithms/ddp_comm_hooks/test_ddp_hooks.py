@@ -114,6 +114,7 @@ class DistributedDataParallelCommHookTest(MultiProcessTestCase):
         This unit test verifies the ``allreduce`` hook registered case gives same result
         with no hook registered case.
         """
+        raise ValueError("foo")
         store = dist.FileStore(self.file_name, self.world_size)
         process_group = dist.ProcessGroupNCCL(store, self.rank, self.world_size)
 

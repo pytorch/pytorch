@@ -101,6 +101,7 @@ if BACKEND == "gloo" or BACKEND == "nccl":
         @requires_gloo()
         @sandcastle_skip_if(BACKEND != "gloo", "Only gloo backend supports all_gather_fp16")
         def test_all_gather_bfp16(self):
+            raise ValueError("foo")
             store = dist.FileStore(self.file_name, self.world_size)
             dist.init_process_group(store=store, rank=self.rank, world_size=self.world_size, backend='gloo')
             device = torch.device(f"cuda:{self.rank}")
