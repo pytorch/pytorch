@@ -407,7 +407,20 @@ test_torch_function_benchmark() {
   assert_git_not_dirty
 }
 
+build_xla() {
+  XLA_DIR=xla
+  clone_pytorch_xla
+  # shellcheck disable=SC1091
+  source "xla/.circleci/common.sh"
+  apply_patches
+  # These functions are defined in .circleci/common.sh in pytorch/xla repo
+  install_deps_pytorch_xla $XLA_DIR
+  build_torch_xla $XLA_DIR
+  assert_git_not_dirty
+}
+
 test_xla() {
+  clone_pytorch_xla
   # shellcheck disable=SC1091
   source "./xla/.circleci/common.sh"
   run_torch_xla_tests "$(pwd)" "$(pwd)/xla"
@@ -508,6 +521,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *backward* ]]; then
   # Do NOT add tests after bc check tests, see its comment.
 elif [[ "${BUILD_ENVIRONMENT}" == *xla* || "${JOB_BASE_NAME}" == *xla* ]]; then
   install_torchvision
+  build_xla
   test_xla
 elif [[ "${BUILD_ENVIRONMENT}" == *jit_legacy-test || "${JOB_BASE_NAME}" == *jit_legacy-test || $TEST_CONFIG == 'jit_legacy' ]]; then
   test_python_legacy_jit
