@@ -49,7 +49,7 @@ class TorchVersion(str):
             raise InvalidVersion(inp)
 
     def __gt__(self, cmp):
-        try:
+		try:
             return Version(self).__gt__(self._convert_to_version(cmp))
         except InvalidVersion:
             # Fall back to regular string comparison if dealing with an invalid
