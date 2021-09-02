@@ -311,12 +311,14 @@ Tensor & embedding_renorm_cuda_(Tensor & self, const Tensor & indices,
     );
 
     dim3 grid = num_unique_indices.item<int64_t>();
-    dim3 block = 128;
+    constexpr int num_threads = 128;
     int dim = self.stride(0);
 
     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "embedding_backward", [&] {
       using accscalar_t = acc_type<scalar_t, true>;
-      renorm_kernel<<<grid, block, (block.x / C10_WARP_SIZE) * sizeof(accscalar_t), stream>>>(
+      static_assert(num_threads % C10_WARP_SIZE == 0,
+                    "BlockReduceSum requires all warps be active");
+      renorm_kernel<<<grid, num_threads, (num_threads / C10_WARP_SIZE) * sizeof(accscalar_t), stream>>>(
         self.data_ptr<scalar_t>(),
         unique_indices.data_ptr<index_t>(),
         static_cast<accscalar_t>(max_norm),
