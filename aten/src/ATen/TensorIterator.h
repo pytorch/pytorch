@@ -9,7 +9,6 @@
 #include <ATen/core/TensorBase.h>
 #include <ATen/TensorMeta.h>
 
-#include <cstddef>
 #include <bitset>
 
 namespace at {
@@ -75,11 +74,11 @@ namespace internal {
 constexpr int64_t GRAIN_SIZE = 32768;
 
 // Storage for a non-owning Tensor, without needing to include Tensor.h
-class TORCH_API OpaqueTensorRef {
+class TORCH_API OpaqueOptionalTensorRef {
   alignas(alignof(TensorBase)) char data_[sizeof(TensorBase)];
 public:
-  OpaqueTensorRef();
-  ~OpaqueTensorRef();
+  OpaqueOptionalTensorRef();
+  ~OpaqueOptionalTensorRef();
 
   OptionalTensorRef* get() {
     return reinterpret_cast<OptionalTensorRef*>(&data_[0]);
@@ -168,10 +167,13 @@ struct TORCH_API OperandInfo {
   const TensorBase& original_tensor_base() const {
     return *original_tensor_base_;
   }
-  void original_tensor(c10::MaybeOwned<TensorBase> &&tensor);
 
-  c10::MaybeOwned<TensorBase> unsafeReleaseTensor();
-  c10::MaybeOwned<TensorBase> unsafeReleaseOriginalTensor();
+  // Set tensor to a new value, and store the old tensor value in original_tensor
+  // Should only ever be called once for the lifetime of an operand
+  void exchange_tensor(c10::MaybeOwned<TensorBase> &&new_tensor);
+
+  // Move original_tensor back into tensor, exchange_tensor must have been called before
+  void restore_original_tensor();
 
 private:
   c10::MaybeOwned<TensorBase> tensor_base_;
@@ -182,8 +184,8 @@ private:
   // However, we sometimes need a genuine `const Tensor &` for the
   // TensorIterator API. So, we also store a non-owning `Tensor`
   // object in these `_storage_` variables.
-  internal::OpaqueTensorRef tensor_storage_;
-  internal::OpaqueTensorRef original_tensor_storage_;
+  internal::OpaqueOptionalTensorRef tensor_storage_;
+  internal::OpaqueOptionalTensorRef original_tensor_storage_;
 };
 
 struct SplitUntil32Bit;

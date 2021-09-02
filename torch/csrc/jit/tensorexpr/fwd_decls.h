@@ -113,7 +113,7 @@ using SyncThreadsPtr = NodePtr<SyncThreads>;
 #define IMM_DECLARE(Type, Name) \
   class Name##Imm;              \
   using Name##ImmPtr = NodePtr<Name##Imm>;
-AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_DECLARE);
+AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_DECLARE);
 #undef IMM_DECLARE
 
 } // namespace tensorexpr
