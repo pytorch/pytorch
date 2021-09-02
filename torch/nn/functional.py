@@ -1833,6 +1833,8 @@ Applies a linear transformation to the incoming data: :math:`y = xA^T + b`.
 
 This operator supports :ref:`TensorFloat32<tf32_on_ampere>`.
 
+Shape:
+
     - Input: :math:`(N, *, in\_features)` N is the batch size, `*` means any number of
       additional dimensions
     - Weight: :math:`(out\_features, in\_features)`
@@ -1848,6 +1850,8 @@ bilinear(input1, input2, weight, bias=None) -> Tensor
 
 Applies a bilinear transformation to the incoming data:
 :math:`y = x_1^T A x_2 + b`
+
+Shape:
 
     - input1: :math:`(N, *, H_{in1})` where :math:`H_{in1}=\text{in1\_features}`
       and :math:`*` means any number of additional dimensions.
