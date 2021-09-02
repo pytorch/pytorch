@@ -206,11 +206,19 @@ static void formatImm(std::ostream& os, T v) {
   }
 }
 
+static void formatIntSuffix(std::ostream& os, int64_t v) {
+  os << "ll";
+}
+
+template <typename T>
+static void formatIntSuffix(std::ostream& os, T v) {}
+
 template <
     typename T,
     std::enable_if_t<!std::is_floating_point<T>::value>* = nullptr>
 static void formatImm(std::ostream& os, T v) {
   os << +v;
+  formatIntSuffix(os, v);
 }
 
 // NOLINTNEXTLINE
@@ -218,7 +226,7 @@ static void formatImm(std::ostream& os, T v) {
   void IRPrinter::visit(Name##ImmPtr v) { \
     formatImm(os(), v->value());          \
   }
-AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_PRINT_VISIT);
+AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_PRINT_VISIT);
 #undef IMM_PRINT_VISIT
 
 void IRPrinter::visit(CastPtr v) {
