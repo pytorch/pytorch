@@ -910,7 +910,7 @@ class TestONNXRuntime(unittest.TestCase):
         y = (torch.randn(4, 5), (torch.randn(1, 5), torch.randn(4, 1)))
         self.run_test(NestedTupleModel(), input=(x, y))
 
-    @disableScriptTest()
+    @disableScriptTest([7, 8, 9, 10, 11, 12, 13, 14])
     def test_optional_inputs_with_no_optionals(self):
         class NoOptionalModel(torch.nn.Module):
             def forward(self, input):
@@ -926,7 +926,29 @@ class TestONNXRuntime(unittest.TestCase):
     @disableScriptTest()  # ScriptModule could not be exported without the Input Descriptor for optional inputs
     def test_optional_inputs_with_mixed_optionals(self):
         class MixedModel(torch.nn.Module):
-            def forward(self, x, y=None, z=None):
+            def forward(self, x, y:Optional[Tensor]=None, z:Optional[Tensor]=None):
+                if y is not None:
+                    return x + y
+                if z is not None:
+                    return x + z
+                return x
+
+        x = torch.randn(2, 3)
+        y = torch.randn(2, 3)
+        z = torch.randn(2, 3)
+        # Without optional arguments dictionary
+        self.run_test(MixedModel(), (x, y, None))
+        self.run_test(MixedModel(), (x, None, z))
+        # With optional arguments dictionary
+        self.run_test(MixedModel(), (x, {"y": y, "z": None}))
+        self.run_test(MixedModel(), (x, {"y": None, "z": z}))
+        self.run_test(MixedModel(), (x, {"z": z}))
+        self.run_test(MixedModel(), (x, {"y": y}))
+
+    @disableScriptTest([7, 8, 9, 10, 11, 12, 13, 14])
+    def test_optional_inputs_with_mixed_optionals_script(self):
+        class MixedModel(torch.nn.Module):
+            def forward(self, x, y:Optional[Tensor]=torch.ones(2, 3), z:Optional[Tensor]=torch.zeros(2, 3)):
                 if y is not None:
                     return x + y
                 if z is not None:
@@ -948,7 +970,7 @@ class TestONNXRuntime(unittest.TestCase):
     @disableScriptTest()  # ScriptModule could not be exported without the Input Descriptor for optional inputs
     def test_optional_inputs_with_all_optionals(self):
         class AllOptionalModel(torch.nn.Module):
-            def forward(self, y=None, z=None):
+            def forward(self, y: Optional[Tensor]=None, z: Optional[Tensor]=None):
                 if y is not None:
                     return y
                 if z is not None:
@@ -960,7 +982,24 @@ class TestONNXRuntime(unittest.TestCase):
         # With optional arguments dictionary
         self.run_test(AllOptionalModel(), {"y": y, "z": None})
 
-    @disableScriptTest()
+    @disableScriptTest([7, 8, 9, 10, 11, 12, 13, 14])
+    def test_optional_inputs_with_all_optionals_script(self):
+        class AllOptionalModel(torch.nn.Module):
+            def forward(self, y: Optional[Tensor] = torch.ones(2, 3), z: Optional[Tensor] = torch.zeros(2, 3)):
+                if y is not None:
+                    return y
+                elif z is not None:
+                    return z
+                else:
+                    return torch.tensor(-1)
+
+        y = torch.randn(2, 3)
+        # Without optional arguments dictionary
+        self.run_test(AllOptionalModel(), (y, None))
+        # With optional arguments dictionary
+        self.run_test(AllOptionalModel(), {"y": y, "z": None})
+
+    @disableScriptTest()  # ScriptModule could not be exported without the Input Descriptor for optional inputs
     def test_input_names_with_optional_args(self):
         class NoOptionalModel(torch.nn.Module):
             def forward(self, input):
@@ -974,7 +1013,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(NoOptionalModel(), (y, {}))
 
         class MixedModel(torch.nn.Module):
-            def forward(self, x, y=None, z=None):
+            def forward(self, x, y:Optional[Tensor]=None, z:Optional[Tensor]=None):
                 if y is not None:
                     return x + y
                 if z is not None:
@@ -993,11 +1032,61 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(MixedModel(), (x, {"y": None, "z": z}), input_names=["input_x", "input_z"])
 
         class AllOptionalModel(torch.nn.Module):
-            def forward(self, y=None, z=None):
+            def forward(self, y:Optional[Tensor]=None, z:Optional[Tensor]=None):
                 if y is not None:
                     return y
                 if z is not None:
                     return z
+
+        y = torch.randn(2, 3)
+        z = torch.randn(2, 3)
+        # Without optional arguments dictionary
+        self.run_test(AllOptionalModel(), (y, None), input_names=["input_y"])
+        self.run_test(AllOptionalModel(), (None, z), input_names=["input_z"])
+        # With optional arguments dictionary
+        self.run_test(AllOptionalModel(), {"y": y, "z": None}, input_names=["input_y"])
+        self.run_test(AllOptionalModel(), {"y": None, "z": z}, input_names=["input_z"])
+
+    @disableScriptTest([7, 8, 9, 10, 11, 12, 13, 14])
+    def test_input_names_with_optional_args_script(self):
+        class NoOptionalModel(torch.nn.Module):
+            def forward(self, input):
+                return input
+
+        # Without empty optional arguments dictionary
+        x = torch.randn(2, 3)
+        self.run_test(NoOptionalModel(), (x,), input_names=["input_x"])
+        # With empty optional arguments dictionary
+        y = torch.randn(2, 3)
+        self.run_test(NoOptionalModel(), (y, {}))
+
+        class MixedModel(torch.nn.Module):
+            def forward(self, x, y:Optional[Tensor]=torch.ones(2, 3), z:Optional[Tensor]=torch.zeros(2, 3)):
+                if y is not None:
+                    return x + y
+                if z is not None:
+                    return x + z
+                return x
+
+        x = torch.randn(2, 3)
+        y = torch.randn(2, 3)
+        z = torch.randn(2, 3)
+        # Without optional arguments dictionary
+        self.run_test(MixedModel(), (x, y, None), input_names=["input_x", "input_y"])
+        self.run_test(MixedModel(), (x, None, z), input_names=["input_x", "input_z"])
+
+        # With optional arguments dictionary
+        self.run_test(MixedModel(), (x, {"y": y, "z": None}), input_names=["input_x", "input_y"])
+        self.run_test(MixedModel(), (x, {"y": None, "z": z}), input_names=["input_x", "input_z"])
+
+        class AllOptionalModel(torch.nn.Module):
+            def forward(self, y:Optional[Tensor]=torch.ones(2, 3), z:Optional[Tensor]=torch.zeros(2, 3)):
+                if y is not None:
+                    return y
+                if z is not None:
+                    return z
+                else:
+                    return torch.tensor(-1)
 
         y = torch.randn(2, 3)
         z = torch.randn(2, 3)
@@ -1017,10 +1106,21 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.randn(3, 4)
         self.run_test(Model(), (x, y), input_names=["x", "y"], output_names=["x_out", "y_out"])
 
-    @disableScriptTest()
+    @disableScriptTest()  # ScriptModule could not be exported without the Input Descriptor for optional inputs
     def test_none_as_input(self):
         class Model(torch.nn.Module):
-            def forward(self, x, y):
+            def forward(self, x, y:Optional[Tensor]):
+                if y is not None:
+                    return x + y
+                return x
+
+        x = torch.randn(2, 3)
+        self.run_test(Model(), (x, None))
+
+    @disableScriptTest([7, 8, 9, 10, 11, 12, 13, 14])
+    def test_none_as_input_script(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, y:Optional[Tensor]=torch.ones(2, 3)):
                 if y is not None:
                     return x + y
                 return x
@@ -1031,7 +1131,7 @@ class TestONNXRuntime(unittest.TestCase):
     @disableScriptTest()  # ScriptModule could not be exported without the Input Descriptor for optional inputs
     def test_none_as_tuple_input(self):
         class Model(torch.nn.Module):
-            def forward(self, x, y):
+            def forward(self, x, y:Tuple[Optional[Tensor], Optional[Tensor]]):
                 if y[0] is not None:
                     return x + y[0]
                 if y[1] is not None:
@@ -1042,10 +1142,39 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.randn(2, 3)
         self.run_test(Model(), (x, (None, y)))
 
+    @disableScriptTest([7, 8, 9, 10, 11, 12, 13, 14])
+    def test_none_as_tuple_input_scripting(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, y:Tuple[Optional[Tensor], Optional[Tensor]]=(torch.zeros(2, 3), torch.zeros(2, 3))):
+                u, v = y
+                if u is not None:
+                    return x + u
+                if v is not None:
+                    return x + v
+                return x
+
+        x = torch.randn(2, 3)
+        y = torch.randn(2, 3)
+        self.run_test(Model(), (x, (None, y)))
+
     @disableScriptTest()  # ScriptModule could not be exported without the Input Descriptor for optional inputs
     def test_none_as_named_input(self):
         class Model(torch.nn.Module):
             def forward(self, x, y=None, z=None):
+                if y is not None:
+                    return x + y
+                if z is not None:
+                    return x + z
+                return x
+
+        x = torch.randn(2, 3)
+        z = torch.randn(2, 3)
+        self.run_test(Model(), (x, None, z))
+
+    @disableScriptTest([7, 8, 9, 10, 11, 12, 13, 14])
+    def test_none_as_named_input_scripting(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, y:Optional[Tensor]=torch.ones(2, 3), z:Optional[Tensor]=torch.zeros(2, 3)):
                 if y is not None:
                     return x + y
                 if z is not None:
@@ -1585,7 +1714,7 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(2, 3, 4)
         self.run_test(FloatingPoint(), x, input_names=["x"], dynamic_axes={"x": [0, 1, 2]})
-        self.run_test(FloatingPoint(), x, remained_onnx_input_idx=[])
+        self.run_test(FloatingPoint(), x, remained_onnx_input_idx=None)
 
         class FloatingPoint(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -10296,6 +10425,13 @@ TestONNXRuntime_opset13 = type(str("TestONNXRuntime_opset13"),
 TestONNXRuntime_opset14 = type(str("TestONNXRuntime_opset14"),
                                (unittest.TestCase,),
                                dict(TestONNXRuntime.__dict__, opset_version=14,
+                                    keep_initializers_as_inputs=False,
+                                    onnx_shape_inference=True))
+
+# opset 15 tests
+TestONNXRuntime_opset15 = type(str("TestONNXRuntime_opset15"),
+                               (unittest.TestCase,),
+                               dict(TestONNXRuntime.__dict__, opset_version=15,
                                     keep_initializers_as_inputs=False,
                                     onnx_shape_inference=True))
 
