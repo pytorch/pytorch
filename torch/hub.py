@@ -261,7 +261,7 @@ def list(github, force_reload=False, skip_validation=False):
 
     Args:
         github (string): a string with format "repo_owner/repo_name[:tag_name]" with an optional
-            tag/branch. The default branch is `master` if not specified.
+            tag/branch. The default branch is ``master`` if not specified.
             Example: 'pytorch/vision[:hub]'
         force_reload (bool, optional): whether to discard the existing cache and force a fresh download.
             Default is ``False``.
