@@ -47,13 +47,14 @@ for namespace in MODULE_NAMESPACES:
 class modules(_TestParametrizer):
     """ PROTOTYPE: Decorator for specifying a list of modules over which to run a test. """
 
-    def __init__(self, module_info_list):
+    def __init__(self, module_info_list, dtypes=floating_types()):
         self.module_info_list = module_info_list
+        self.dtypes = dtypes
 
     def _parametrize_test(self, test, generic_cls, device_cls):
         for module_info in self.module_info_list:
             # TODO: Factor some of this out since it's similar to OpInfo.
-            for dtype in floating_types():
+            for dtype in self.dtypes:
                 # Construct the test name.
                 test_name = '{}_{}_{}{}'.format(test.__name__,
                                                 module_info.name.replace('.', '_'),
@@ -158,7 +159,7 @@ def module_inputs_torch_nn_Linear(module_info, device, dtype, requires_grad, **k
 
     module_inputs = [
         ModuleInput(constructor_input=FunctionInput(10, 8),
-                    forward_input=FunctionInput(make_input((4, 10))),
+                    forward_input=FunctionInput(input=make_input((4, 10))),
                     reference_fn=lambda m, p, i: torch.mm(i, p[0].t()) + p[1].view(1, -1).expand(4, 8)),
         ModuleInput(constructor_input=FunctionInput(10, 8, bias=False),
                     forward_input=FunctionInput(make_input((4, 10))),
@@ -175,13 +176,14 @@ def module_inputs_torch_nn_Linear(module_info, device, dtype, requires_grad, **k
 
 def module_inputs_torch_nn_NLLLoss(module_info, device, dtype, requires_grad, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_weight = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
 
     cases: List[Tuple[str, dict]] = [
         ('', {}),
         ('ignore_index', {'ignore_index': 2}),
-        ('weights', {'weight': make_input(10)}),
-        ('weights_ignore_index', {'weight': make_input(10), 'ignore_index': 2}),
-        ('weights_ignore_index_neg', {'weight': make_input(10), 'ignore_index': -1})
+        ('weights', {'weight': make_weight(10).abs()}),
+        ('weights_ignore_index', {'weight': make_weight(10).abs(), 'ignore_index': 2}),
+        ('weights_ignore_index_neg', {'weight': make_weight(10).abs(), 'ignore_index': -1})
     ]
     module_inputs = []
     for desc, constructor_kwargs in cases:

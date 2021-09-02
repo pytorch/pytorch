@@ -4,7 +4,7 @@ import torch
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import (
-    TestCase, run_tests, freeze_rng_state, mock_wrapper, get_tensors_from)
+    TestCase, run_tests, freeze_rng_state, mock_wrapper, get_tensors_from, gradcheck, gradgradcheck)
 from unittest.mock import patch
 
 
@@ -139,6 +139,57 @@ class TestModule(TestCase):
                     m_copy = torch.load(f)
                     output_from_copy = m_copy(*args, **kwargs)
                     self.assertEqual(output, output_from_copy)
+
+
+    @modules(module_db, dtypes=[torch.double])
+    def test_gradients(self, device, dtype, module_info):
+        # Check gradients
+        module_cls = module_info.module_cls
+        module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
+                                                       requires_grad=True)
+
+        for module_input in module_inputs:
+            if module_input.forward_input is None:
+                continue
+
+            # === Instantiate the module. ===
+            args, kwargs = module_input.constructor_input.args, module_input.constructor_input.kwargs
+            m = module_cls(*args, **kwargs)
+            m.to(device).to(dtype)
+
+            params = tuple(m.parameters())
+
+            # === Perform gradient check on the input_args ===
+            input_args, input_kwargs = module_input.forward_input.args, module_input.forward_input.kwargs
+
+            # Convert kwargs into positional arguments for gradcheck
+            non_tensor_kwargs = {}
+            tensor_in_kwargs = []
+            for name, obj in input_kwargs.items():
+                if isinstance(obj, torch.Tensor) and obj.requires_grad:
+                    tensor_in_kwargs.append((name, obj))
+                else:
+                    non_tensor_kwargs[name] = obj
+
+            all_input_args = input_args + tuple(t for _, t in tensor_in_kwargs) + params
+
+            def fn_to_gradcheck(*input_and_params):
+                new_input_args = input_and_params[:len(input_args)]
+
+                # Convert position arguments back into kwargs
+                new_tensor_kwargs = {
+                    name: obj
+                    for obj, (name, _) in
+                    zip(input_and_params[len(input_args):-len(params)], tensor_in_kwargs)
+                }
+
+                with freeze_rng_state():
+                    return m(*new_input_args, **new_tensor_kwargs, **non_tensor_kwargs)
+
+            self.assertTrue(gradcheck(fn_to_gradcheck, all_input_args,
+                                      check_batched_grad=True))
+            self.assertTrue(gradgradcheck(fn_to_gradcheck, all_input_args,
+                                      check_batched_grad=True))
 
 
 instantiate_device_type_tests(TestModule, globals())
