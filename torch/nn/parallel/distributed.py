@@ -623,7 +623,7 @@ class DistributedDataParallel(Module, Joinable):
         bucket_indices, per_bucket_size_limits = dist._compute_bucket_assignment_by_size(
             parameters,
             [dist._DEFAULT_FIRST_BUCKET_BYTES, self.bucket_bytes_cap],
-            expect_sparse_gradient[0],
+            expect_sparse_gradient,
         )
 
         # Note: reverse list of buckets because we want to approximate the
@@ -707,15 +707,12 @@ class DistributedDataParallel(Module, Joinable):
         modules_and_parameters = [
             # "p not in memo" is the deduplication check.
             # "not memo.add(p)" is always True, and it's only there to cause "add(p)" if needed.
-            [(m, p) for m, p in replica_mps if p not in memo and not memo.add(p)]
-            for replica_mps in modules_and_parameters
+            (m, p) for m, p in modules_and_parameters
+            if p not in memo and not memo.add(p)
         ]
 
         # Build list of parameters.
-        parameters = [
-            list(parameter for _, parameter in replica)
-            for replica in modules_and_parameters
-        ]
+        parameters = list(parameter for _, parameter in modules_and_parameters)
 
         # Checks if a module will produce a sparse gradient.
         def produces_sparse_gradient(module):
@@ -727,10 +724,7 @@ class DistributedDataParallel(Module, Joinable):
 
         # Build list of booleans indicating whether or not to expect sparse
         # gradients for the corresponding parameters.
-        expect_sparse_gradient = [
-            list(produces_sparse_gradient(module) for module, _ in replica)
-            for replica in modules_and_parameters
-        ]
+        expect_sparse_gradient = list(produces_sparse_gradient(module) for module, _ in modules_and_parameters)
 
         # The following modules_params and modules_buffers are used for
         # param/buffer sync in _sync_params.

@@ -2095,6 +2095,7 @@ class ReducerTest(TestCase):
         )
 
     def _create_reducer_for_models(self, models, find_unused_parameters=False):
+        self.assertEqual(len(models), 1)
         parameters = list(models[0].parameters())
         group_by_dtype = groupby(
             range(len(parameters)), key=lambda i: parameters[i].dtype
@@ -2113,8 +2114,8 @@ class ReducerTest(TestCase):
         num_replicas = 2
         models = [self._create_mixed_precision_model() for _ in range(num_replicas)]
         with self.assertRaisesRegex(
-            RuntimeError,
-            "Expected exactly one model replica.",
+            AssertionError,
+            "False is not true : Scalars failed to compare as equal! 2 != 1",
         ):
             reducer = self._create_reducer_for_models(models)
 
