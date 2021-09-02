@@ -16,11 +16,6 @@ try:
 except ImportError:
     DILL_AVAILABLE = False
 
-# Default function to return each item directly
-# In order to keep datapipe picklable, eliminates the usage
-# of python lambda function
-def default_filter_fn(data):
-    return True
 
 @functional_datapipe('filter')
 class FilterIterDataPipe(IterDataPipe[T_co]):
@@ -44,7 +39,7 @@ class FilterIterDataPipe(IterDataPipe[T_co]):
 
     def __init__(self,
                  datapipe: IterDataPipe,
-                 filter_fn: Callable = default_filter_fn,
+                 filter_fn: Callable,
                  fn_args: Optional[Tuple] = None,
                  fn_kwargs: Optional[Dict] = None,
                  drop_empty_batches: bool = True,
