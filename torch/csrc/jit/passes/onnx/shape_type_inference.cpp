@@ -21,6 +21,10 @@
 namespace torch {
 namespace jit {
 
+inline bool PyNone_Check(PyObject* o) {
+  return o == Py_None;
+}
+
 // Return a new TypePtr, merging ONNX inferred type with existing type.
 // The inferred type will take higher precedence, since it is produced by ONNX
 // shape inference, and is more compatible with ONNX. In cases where ONNX shape
@@ -331,27 +335,27 @@ Node* CloneNodeToGraph(
   return clone_node;
 }
 
-bool IsGraphValidForInference(std::shared_ptr<Graph> graph) {
-  // Verify if every input has type(either Tensor or Sequence) and scalar type.
-  // This is a requirement for ONNX graph inputs.
-  for (auto in : graph->inputs()) {
-    if (auto t_type = in->type()->cast<TensorType>()) {
-      if (!t_type->scalarType().has_value()) {
-        GRAPH_UPDATE(
-            "Input ", in->debugName(), " is tensor type, but miss datatype.");
-        return false;
-      }
-    } else if (auto s_type = in->type()->cast<ListType>()) {
-      auto e_type = s_type->getElementType();
-      if (auto t_type = e_type->cast<TensorType>()) {
-        if (t_type->scalarType().has_value()) {
-          continue;
-        }
-      }
-      GRAPH_UPDATE(
-          "Input ", in->debugName(), " is sequence type, but miss datatype.");
+bool HasValidType(TypePtr type, std::string name) {
+  if (auto t_type = type->cast<TensorType>()) {
+    if (!t_type->scalarType().has_value()) {
+      GRAPH_UPDATE("Input ", name, " misses tensor datatype.");
       return false;
     }
+  } else if (auto s_type = type->cast<ListType>()) {
+    auto e_type = s_type->getElementType();
+    return HasValidType(e_type, name);
+  } else if (auto o_type = type->cast<OptionalType>()) {
+    auto e_type = o_type->getElementType();
+    return HasValidType(e_type, name);
+  }
+  return true;
+}
+
+bool IsGraphValidForInference(std::shared_ptr<Graph> graph) {
+  // Verify if every input has type(either Tensor or Sequence or Optional) and
+  // scalar type. This is a requirement for ONNX graph inputs.
+  for (auto in : graph->inputs()) {
+    return HasValidType(in->type(), in->debugName());
   }
   return true;
 }
@@ -1830,6 +1834,13 @@ void SpecialPostProcess(Node* n) {
       }
       break;
     }
+    case ::c10::onnx::Optional: {
+      TensorTypePtr t_type = n->output()->type()->cast<TensorType>();
+      if (nullptr != t_type) {
+        n->output()->setType(OptionalType::ofTensor());
+      }
+      break;
+    }
     case ::c10::onnx::ConstantOfShape: {
       // ONNX shape inference is not able to propagate output tensor shape
       // for onnx::ConstantOfShape if input `shape` is not constant.
@@ -2327,7 +2338,7 @@ size_t ONNXAssignOutputShape(
     }
   } else if (THPUtils_checkString(output_obj)) {
     // Ignore string, since they are not supported as output in ONNX.
-  } else if (strcmp(THPUtils_typename(output_obj), "NoneType") == 0) {
+  } else if (PyNone_Check(output_obj)) {
     // For cases with tracing, simply ignore NoneType outputs
     // For cases with scripting, TODO: Add logic to handle NoneType outputs
     // when such output types are supported. For now test cases with NoneType

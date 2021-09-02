@@ -471,6 +471,19 @@ static TypePtr inferShapeAndTypeForInput(
     auto type = getTensorType(s_iter->toTensor(), complete);
     s_iter++;
     return type;
+  } else if (auto optional_type = input_type->cast<OptionalType>()) {
+    const TypePtr& optional_elem_type = optional_type->getElementType();
+    if (optional_elem_type->cast<TensorType>()) {
+      TORCH_INTERNAL_ASSERT(s_iter->isTensor());
+      auto tensor_type = getTensorType(s_iter->toTensor(), complete);
+      s_iter++;
+      return OptionalType::create(tensor_type);
+    } else {
+      // TODO: check for other optional types or empty e.g. if
+      // (optional_elem_type->cast<ListType>())
+      s_iter++;
+      return input_type;
+    }
   } else {
     // Primitive type, keep as is.
     s_iter++;
@@ -490,7 +503,6 @@ static void setInputTensorTypes(
     TORCH_INTERNAL_ASSERT(input_values.size() == param_count_list.size());
   }
   for (auto v : input_values) {
-    AT_ASSERT(s_iter != stack.end());
     // Leave packed param types alone. This is needed for downstream passes
     // (like alias analysis) to work properly. This will be unpacked later
     // in unpackQuantizedWeights.
@@ -498,8 +510,11 @@ static void setInputTensorTypes(
       if (auto qualname = named_type->name()) {
         if (getCustomClass(qualname->qualifiedName())) {
           if (param_count_list.empty()) {
+            AT_ASSERT(s_iter != stack.end());
             s_iter++;
           } else {
+            if (param_count_list[list_idx] > 0)
+              AT_ASSERT(s_iter != stack.end());
             s_iter += param_count_list[list_idx];
           }
           list_idx++;

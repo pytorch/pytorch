@@ -602,6 +602,16 @@ void GraphEncoder::EncodeValueInfoType(
         onnx_type->mutable_sequence_type();
     onnx::TypeProto* onnx_tensor_type = sequence_type->mutable_elem_type();
     EncodeValueInfoType(onnx_tensor_type, list_elem_type, n, dynamic_axes);
+  } else if (OptionalTypePtr optional_type = node_type->cast<OptionalType>()) {
+    auto elem_type = optional_type->getElementType();
+    if (TensorTypePtr inner_node_type = elem_type->cast<TensorType>()) {
+      onnx::TypeProto* onnx_type = v->mutable_type();
+      onnx::TypeProto_Optional* onnx_optional_type =
+          onnx_type->mutable_optional_type();
+      onnx::TypeProto_Tensor* tensor_type =
+          onnx_optional_type->mutable_elem_type()->mutable_tensor_type();
+      tensorTypeToONNXType(inner_node_type, tensor_type);
+    }
   }
 }
 
@@ -682,6 +692,7 @@ void GraphEncoder::EncodeBlock(
       }
     }
   }
+
   for (auto output : block->outputs()) {
     onnx::ValueInfoProto* v = graph_proto->add_output();
     EncodeValueInfo(graph_proto, v, output, dynamic_axes);
@@ -965,6 +976,20 @@ void GraphEncoder::AddAttribute(
         EncodeTensor(t, v, {}, use_external_data_format, onnx_file_path);
       }
       break;
+    case AttributeKind::ty: {
+      attr->set_type(onnx::AttributeProto_AttributeType_TYPE_PROTO);
+      auto tp = attr->mutable_tp();
+      const TypePtr& node_type = node->ty(name);
+      EncodeTypeProto(tp, node_type);
+    } break;
+    case AttributeKind::tys: {
+      attr->set_type(onnx::AttributeProto_AttributeType_TYPE_PROTOS);
+      for (auto& v : node->tys(name)) {
+        auto tp = attr->add_type_protos();
+        EncodeTypeProto(tp, v);
+      }
+      auto tps = attr->mutable_tp();
+    } break;
     case AttributeKind::g: {
       auto g = attr->mutable_g();
       EncodeGraph(
@@ -1084,6 +1109,34 @@ void GraphEncoder::EncodeLocalFunction(
         use_external_data_format,
         onnx_file_path);
     EncodeLocalFunctionOpsetImport(func_proto, fsub_n, custom_domains);
+  }
+}
+
+void EncoderBase::EncodeTypeProto(
+    onnx::TypeProto* type_proto,
+    const TypePtr& node_type) {
+  if (node_type->kind() == TypeKind::TensorType) {
+    onnx::TypeProto_Tensor* tensor_type_proto =
+        type_proto->mutable_tensor_type();
+    TensorTypePtr t = node_type->cast<TensorType>();
+    if (t->dim()) {
+      onnx::TensorShapeProto* shape = tensor_type_proto->mutable_shape();
+      auto sizes = t->symbolic_sizes().sizes().value();
+      for (const auto i : c10::irange(sizes.size())) {
+        shape->add_dim();
+        AT_ASSERT(sizes[i].is_static());
+        shape->mutable_dim(i)->set_dim_value(sizes[i].static_size());
+      }
+    }
+    if (t->scalarType()) {
+      tensor_type_proto->set_elem_type(
+          ATenTypeToOnnxType(t->scalarType().value()));
+    }
+  } else if (node_type->kind() == TypeKind::ListType) {
+    onnx::TypeProto_Sequence* seq_type = type_proto->mutable_sequence_type();
+    ListTypePtr list_type = node_type->cast<ListType>();
+    auto elem_type = list_type->getElementType();
+    EncodeTypeProto(seq_type->mutable_elem_type(), elem_type);
   }
 }
 

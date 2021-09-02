@@ -221,7 +221,6 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
 
     # onnx only supports tensors, so we turn all out number types into tensors
     torch._C._jit_pass_erase_number_types(graph)
-
     if _onnx_shape_inference:
         input_names = [] if input_names is None else input_names
         dynamic_axes = {} if dynamic_axes is None else dynamic_axes
@@ -230,10 +229,8 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
     graph = torch._C._jit_pass_onnx(graph, operator_export_type)
     torch._C._jit_pass_onnx_lint(graph)
     torch._C._jit_pass_lint(graph)
-
     torch._C._jit_pass_onnx_scalar_type_analysis(graph, True, _export_onnx_opset_version)
     torch._C._jit_pass_lint(graph)
-
     torch._C._jit_pass_onnx_peephole(graph, _export_onnx_opset_version, fixed_batch_size)
     torch._C._jit_pass_lint(graph)
 
@@ -363,6 +360,7 @@ def _decide_input_format(model, args):
         warnings.warn("Skipping _decide_input_format\n {}".format(e.args[0]))
         return args
 
+
 def _trace(func, args, operator_export_type, return_outs=False):
     # Special case for common case of passing a single Tensor
     if isinstance(args, torch.Tensor):
@@ -401,9 +399,30 @@ def _get_param_count_list(method_graph, args_params):
         if "PackedParams" in str(input_.type()):
             in_vars, _ = torch.jit._flatten(arg_params_)
             param_count_list.append(len(in_vars))
+        elif arg_params_ is None:
+            param_count_list.append(0)
         else:
             param_count_list.append(1)
     return param_count_list
+
+
+def _resolve_graph_inputs_shape_type(model, method_graph, args_params):
+    param_count_list = _get_param_count_list(method_graph, args_params)
+    sig = inspect.signature(model.forward)
+    ordered_list_keys = list(sig.parameters.keys())
+    resolved_args = []
+    if isinstance(model, torch.jit.ScriptModule) or isinstance(model, torch.jit.ScriptFunction):
+        resolved_args += []
+        for i, var in enumerate(args_params):
+            if var is not None:
+                resolved_args += [var]
+            else:
+                resolved_args += [sig.parameters[ordered_list_keys[i]].default]
+    else:
+        resolved_args = args_params
+    resolved_args, _ = torch.jit._flatten(resolved_args)
+    return resolved_args, _propagate_and_assign_input_shapes(
+        method_graph, resolved_args, param_count_list, False, False)
 
 
 def _create_jit_graph(model, args):
@@ -417,10 +436,7 @@ def _create_jit_graph(model, args):
             module, params = torch._C._jit_onnx_list_model_parameters(freezed_m)
             method_graph = module._get_method("forward").graph
             args_params = tuple(args) + tuple(params)
-            param_count_list = _get_param_count_list(method_graph, args_params)
-            in_vars, _ = torch.jit._flatten(args_params)
-            graph = _propagate_and_assign_input_shapes(
-                method_graph, tuple(in_vars), param_count_list, False, False)
+            _, graph = _resolve_graph_inputs_shape_type(model, method_graph, args_params)
         except AttributeError as e:
             raise RuntimeError("'forward' method must be a script method") from e
         return graph, params, torch_out, module
@@ -509,9 +525,7 @@ def _model_to_graph(model, args, verbose=False,
         args = (args, )
 
     graph, params, torch_out, module = _create_jit_graph(model, args)
-
     params_dict = _get_named_param_dict(graph, params)
-
     graph = _optimize_graph(graph, operator_export_type,
                             _disable_torch_constant_prop=_disable_torch_constant_prop,
                             fixed_batch_size=fixed_batch_size, params_dict=params_dict,
@@ -525,10 +539,6 @@ def _model_to_graph(model, args, verbose=False,
             example_outputs_final += unpack_quantized_tensor(example_output)
         out_vars, desc = torch.jit._flatten(example_outputs_final)
         torch._C._jit_pass_onnx_assign_output_shape(graph, out_vars, desc, _onnx_shape_inference)
-    else:
-        flatten_args, _ = torch._C._jit_flatten(args)
-        # make sure that the param dict and the graph match each other
-        assert len(params) + len(flatten_args) == sum(1 for _ in graph.inputs())
 
     # NB: ONNX requires complete information about output types, which might be
     # erased by some optimizations, so we need to set it explicitly again.
@@ -542,7 +552,9 @@ def _model_to_graph(model, args, verbose=False,
         torch._C._jit_pass_onnx_assign_output_shape(graph, output_tensors, out_desc, _onnx_shape_inference)
 
     _set_input_and_output_names(graph, input_names, output_names)
-    params_dict = _get_named_param_dict(graph, params)
+    # make sure that the param dict and the graph match each other
+    flatten_args = _resolve_and_flatten_graph_inputs(model, args)
+    assert len(params) + len(flatten_args) == sum(1 for _ in graph.inputs())
 
     if training is None or training == TrainingMode.EVAL:
         params_dict = torch._C._jit_pass_onnx_eval_peephole(graph, params_dict)
@@ -847,7 +859,7 @@ def _set_input_and_output_names(graph, input_names, output_names):
     set_names(list(graph.outputs()), output_names, "output")
 
 
-attr_pattern = re.compile("^(.+)_([ifstgz])$")
+attr_pattern = re.compile("^(.+)_(([ifstgz])|(ty))$")
 
 
 def _run_symbolic_method(g, op_name, symbolic_fn, args):
