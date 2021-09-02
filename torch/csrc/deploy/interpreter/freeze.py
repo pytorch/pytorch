@@ -129,7 +129,7 @@ class Freezer:
         for f in bytecode_files:
             f.close()
 
-    def write_main(self, install_root, oss, symbol_path):
+    def write_main(self, install_root, oss, symbol_name):
         """
         Write the `main.c` file containing a table enumerating all the
         frozen modules.
@@ -139,7 +139,7 @@ class Freezer:
             for m in self.frozen_modules:
                 outfp.write(f"extern unsigned char {m.c_name}[];\n")
 
-            outfp.write(MAIN_PREFIX_TEMPLATE.format(symbol_path))
+            outfp.write(MAIN_PREFIX_TEMPLATE.format(symbol_name))
             for m in self.frozen_modules:
                 outfp.write(f'\t{{"{m.module_name}", {m.c_name}, {m.size}}},\n')
             outfp.write(MAIN_SUFFIX)
