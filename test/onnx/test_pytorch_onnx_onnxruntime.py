@@ -37,6 +37,7 @@ from collections import OrderedDict
 
 from torch.nn.utils.rnn import PackedSequence
 from torch.onnx import register_custom_op_symbolic, unregister_custom_op_symbolic
+from torch.onnx.symbolic_helper import _unimplemented
 from torch.onnx.utils import ONNXCheckerError
 
 
@@ -3371,6 +3372,46 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.arange(1., 6., requires_grad=True)
         k = torch.tensor(3)
         self.run_test(MyModuleDynamic(), [x, k])
+
+    @disableScriptTest()  # Python builtin apply of FunctionMeta object is currently not supported in Torchscript.
+    @skipIfUnsupportedMinOpsetVersion(11)  # Clip op min is an input since opset 11.
+    def test_auto_grad(self):
+        class MyClip(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, input, scalar):
+                ctx.save_for_backward(input)
+                return input.clamp(min=scalar)
+
+        class MyRelu(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, input):
+                ctx.save_for_backward(input)
+                return input.clamp(min=0)
+
+        def symbolic_python_op(g: torch._C.Graph, n: torch._C.Node, *args, **kwargs):
+            name = kwargs["name"]
+            if name == "MyClip":
+                return g.op("Clip", args[0], args[1])
+            elif name == "MyRelu":
+                return g.op("Relu", args[0])
+            else:
+                return _unimplemented("prim::PythonOp", "unknown node kind: " + name)
+
+        register_custom_op_symbolic("prim::PythonOp", symbolic_python_op, 1)
+        self.addCleanup(unregister_custom_op_symbolic, "prim::PythonOp", 1)
+
+        class MyClipModule(torch.nn.Module):
+            def forward(self, x, min):
+                return MyClip.apply(x, min)
+        x = torch.randn(3, 3)
+        min = torch.tensor([0.0])
+        self.run_test(MyClipModule(), (x, min))
+
+        class MyReluModule(torch.nn.Module):
+            def forward(self, x):
+                return MyRelu.apply(x)
+        x = torch.randn(3, 3)
+        self.run_test(MyReluModule(), x)
 
     @skipIfUnsupportedOpsetVersion([7])
     def test_normalize(self):
