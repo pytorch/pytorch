@@ -2,11 +2,15 @@
 #define THC_APPLY_INC
 
 #include <THC/THCTensorCopy.h>
-#include <THC/THCReduceApplyUtils.cuh>
+#include <THC/THCDeviceUtils.cuh>
 #include <THC/THCTensorTypeUtils.cuh>
 #include <THC/THCTensorCopy.hpp>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAException.h>
+
+// Enum that indicates whether tensor arguments are read/write or
+// read-only
+enum TensorArgType { ReadWrite, ReadOnly };
 
 //
 // This file contains pointwise operation functions and kernels that
