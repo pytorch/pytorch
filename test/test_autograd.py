@@ -16,6 +16,7 @@ from collections import OrderedDict
 from itertools import product, permutations
 from operator import mul
 from functools import reduce, partial
+from typing import Counter
 
 # Allow for imports from tools below.
 from torch.testing._internal.tools_package import tools
@@ -9581,6 +9582,7 @@ class TestCreateDerivative(TestCase):
                   },
             functions_by_signature={schema.signature(): [native_function]},
             functions_by_schema={specification: native_function},
+            op_counter=Counter[str](),
         )
 
         self.assertListEqual(differentiability_info.available_named_gradients,
@@ -9618,6 +9620,7 @@ class TestCreateDerivative(TestCase):
                       },
                 functions_by_signature={schema.signature(): [native_function]},
                 functions_by_schema={specification: native_function},
+                op_counter=Counter[str](),
             )
 
 class TestGenAutogradFunctions(TestCase):
@@ -9634,6 +9637,7 @@ class TestGenAutogradFunctions(TestCase):
                   },
             functions_by_signature={schema.signature(): [native_function]},
             functions_by_schema={specification: native_function},
+            op_counter=Counter[str](),
         )
         definition = gen_autograd_functions.process_function(
             differentiability_info,
@@ -9658,6 +9662,7 @@ class TestGenAutogradFunctions(TestCase):
                   },
             functions_by_signature={schema.signature(): [native_function]},
             functions_by_schema={specification: native_function},
+            op_counter=Counter[str](),
         )
         definition = gen_autograd_functions.process_function(
             differentiability_info,
