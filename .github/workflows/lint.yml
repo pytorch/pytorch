@@ -318,6 +318,17 @@ jobs:
             echo 'Please fix the above Flake8 warnings.'
             false
           fi
+      - name: Add annotations
+        # Don't run on forked pull requests
+        if: ${{ failure() && github.event.pull_request.head.repo.full_name == github.repository }}
+        uses: pytorch/add-annotations-github-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          check_name: ${{ github.job }}
+          linter_output_path: flake8-output/annotations.json
+          commit_sha: ${{ github.sha }}
+          mode: json
 
   clang-tidy:
     runs-on: linux.2xlarge
@@ -402,6 +413,17 @@ jobs:
             echo 'Please fix the above clang-tidy warnings.'
             false
           fi
+      - name: Add annotations
+        # Don't run on forked pull requests
+        if: ${{ failure() && github.event.pull_request.head.repo.full_name == github.repository }}
+        uses: pytorch/add-annotations-github-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          check_name: ${{ github.job }}
+          linter_output_path: clang-tidy/annotations.json
+          commit_sha: ${{ github.sha }}
+          mode: json
 
   cmakelint:
     runs-on: ubuntu-18.04
