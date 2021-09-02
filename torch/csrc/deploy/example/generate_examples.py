@@ -85,6 +85,9 @@ if __name__ == "__main__":
 
     generate_fx_example()
 
+    with PackageExporter(p / "uses_distributed") as e:
+        e.save_source_string("uses_distributed", "import torch.distributed; assert torch.distributed.is_available()")
+
     with PackageExporter(str(p / "tensorrt_import")) as e:
         e.extern("tensorrt")
         e.add_dependency("tensorrt")
