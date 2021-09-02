@@ -84,6 +84,7 @@ class VectorReader : public caffe2::serialize::ReadAdapterInterface {
 
   size_t read(uint64_t pos, void* buf, size_t n, const char* what)
       const override {
+    std::cout << "Reading chunk " << std::dec << pos << " for " << n << "\n";
     std::copy(
         data_.data() + pos,
         data_.data() + pos + n,

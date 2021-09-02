@@ -149,5 +149,14 @@ TEST(SerializationTest, TestJitStream_CUDA) {
   // Check if both the output tensors are equal
   ASSERT_TRUE(op.equal(c));
 }
+
+
+TEST(SerializationTest, TestSaveApi) {
+  auto input = torch::ones({2, 2});
+  torch::save(torch::IValue(input), std::string("output.pt"));
+  auto data = torch::load(std::string("output.pt")).toTensor();
+  std::cout << data << "\n";
+}
+
 } // namespace jit
 } // namespace torch
