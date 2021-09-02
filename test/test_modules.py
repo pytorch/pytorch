@@ -162,34 +162,18 @@ class TestModule(TestCase):
             # === Perform gradient check on the input_args ===
             input_args, input_kwargs = module_input.forward_input.args, module_input.forward_input.kwargs
 
-            # Convert kwargs into positional arguments for gradcheck
-            non_tensor_kwargs = {}
-            tensor_in_kwargs = []
-            for name, obj in input_kwargs.items():
-                if isinstance(obj, torch.Tensor) and obj.requires_grad:
-                    tensor_in_kwargs.append((name, obj))
-                else:
-                    non_tensor_kwargs[name] = obj
-
-            all_input_args = input_args + tuple(t for _, t in tensor_in_kwargs) + params
+            for obj in input_kwargs.values():
+                # All tensors that require gradients should be in input_args
+                self.assertFalse(isinstance(obj, torch.Tensor) and obj.requires_grad)
 
             def fn_to_gradcheck(*input_and_params):
-                new_input_args = input_and_params[:len(input_args)]
-
-                # Convert position arguments back into kwargs
-                new_tensor_kwargs = {
-                    name: obj
-                    for obj, (name, _) in
-                    zip(input_and_params[len(input_args):-len(params)], tensor_in_kwargs)
-                }
-
                 with freeze_rng_state():
-                    return m(*new_input_args, **new_tensor_kwargs, **non_tensor_kwargs)
+                    return m(*input_and_params[:len(input_args)], **input_kwargs)
 
-            self.assertTrue(gradcheck(fn_to_gradcheck, all_input_args,
+            self.assertTrue(gradcheck(fn_to_gradcheck, input_args + params,
                                       check_batched_grad=True))
-            self.assertTrue(gradgradcheck(fn_to_gradcheck, all_input_args,
-                                      check_batched_grad=True))
+            self.assertTrue(gradgradcheck(fn_to_gradcheck, input_args + params,
+                                          check_batched_grad=True))
 
 
 instantiate_device_type_tests(TestModule, globals())
