@@ -46,6 +46,7 @@ env:
   # Used for custom_opertor, jit_hooks, custom_backend, see .jenkins/pytorch/build.sh
   CUSTOM_TEST_ARTIFACT_BUILD_DIR: build/custom_test_artifacts
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
+  PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
 
 concurrency:
   group: !{{ build_environment }}-${{ github.event.pull_request.number || github.sha }}
@@ -144,6 +145,7 @@ jobs:
             -e SKIP_SCCACHE_INITIALIZATION=1 \
             -e TORCH_CUDA_ARCH_LIST \
             -e http_proxy="!{{squid_proxy}}" -e https_proxy="!{{squid_proxy}}" -e no_proxy="!{{squid_no_proxy}}" \
+            -e PR_LABELS \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
@@ -310,6 +312,7 @@ jobs:
             -e TEST_CONFIG \
             -e NUM_TEST_SHARDS \
             -e PYTORCH_IGNORE_DISABLED_ISSUES \
+            -e PR_LABELS \
             -e CONTINUE_THROUGH_ERROR \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
@@ -405,6 +408,7 @@ jobs:
             -e CIRCLE_SHA1="$GITHUB_SHA" \
             -e DOCS_VERSION="${target}" \
             -e DOCS_TYPE \
+            -e PR_LABELS \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
