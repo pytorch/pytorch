@@ -30,6 +30,7 @@ def build_constructor_arg_db():
         torch.nn.BatchNorm1d: ((5,), {}),
         torch.nn.BatchNorm2d: ((5,), {}),
         torch.nn.BatchNorm3d: ((5,), {}),
+        torch.nn.Bias: ((2,), {}),
         torch.nn.Bilinear: ((2, 3, 4), {}),
         torch.nn.CELU: ((), {}),
         torch.nn.CTCLoss: ((), {}),
