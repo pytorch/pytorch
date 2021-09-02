@@ -72,8 +72,8 @@
 #     'output_differentiability' entry (see above).
 #
 #     Across a differentiable function's derivatives set, it is not
-#     permitted to mix the use of "grad", "grads[INDEX]", and
-#     "grad_NAME". You must be consistent for that differentiable
+#     permitted to mix the use of "grad", "grads", and
+#     "grad_{name}". You must be consistent for that differentiable
 #     function.
 #
 #   - Any of the input arguments, tensor or non-tensor, including
