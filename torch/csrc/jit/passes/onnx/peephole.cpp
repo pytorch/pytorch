@@ -998,7 +998,7 @@ static void removeSequenceSplitConcat(Block* b) {
 void InsertIdentityForInputUsedAsOutput(Block* b) {
   for (auto out : b->outputs()) {
     auto n = out->node();
-    if (out->node()->owningBlock() != b) {
+    if (nullptr != n && n->kind() == prim::Param) {
       Node* id_node = b->owningGraph()->create(onnx::Identity);
       id_node->insertBefore(b->return_node());
       id_node->addInput(out);
