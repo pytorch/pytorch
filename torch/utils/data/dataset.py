@@ -88,9 +88,6 @@ class Dataset(Generic[T_co]):
 
     @classmethod
     def register_datapipe_as_function(cls, function_name, cls_to_register, enable_df_api_tracing=False):
-        warnings.warn("Attempting to register %s as %s with %s" % (
-            function_name, cls_to_register, enable_df_api_tracing)
-        )
         if function_name in cls.functions:
             raise Exception("Unable to add DataPipe function name {} as it is already taken".format(function_name))
 
@@ -99,11 +96,6 @@ class Dataset(Generic[T_co]):
             if isinstance(result_pipe, Dataset):
                 if enable_df_api_tracing or isinstance(source_dp, DFIterDataPipe):
                     if function_name not in UNTRACABLE_DATAFRAME_PIPES:
-                        warnings.warn("Results %s of calling %s over %s got promoted to DF %s %s" %
-                                      (type(result_pipe), function_name, type(source_dp),
-                                       enable_df_api_tracing, isinstance(source_dp, DFIterDataPipe)))
-                        if isinstance(source_dp, DFIterDataPipe):
-                            warnings.warn("isinstance(source_dp, DFIterDataPipe) %s" % source_dp._is_dfpipe())
                         result_pipe = result_pipe.trace_as_dataframe()
                         result_pipe._dp_contains_dataframe = True
                 elif getattr(source_dp, '_dp_contains_dataframe', False):
