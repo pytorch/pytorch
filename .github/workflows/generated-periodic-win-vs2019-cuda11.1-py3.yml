@@ -18,6 +18,7 @@ env:
   IN_CI: 1
   INSTALL_WINDOWS_SDK: 1
   PYTHON_VERSION: "3.8"
+  PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
   SCCACHE_BUCKET: "ossci-compiler-cache"
   VC_PRODUCT: "BuildTools"
   VC_VERSION: ""
