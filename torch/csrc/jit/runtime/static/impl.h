@@ -160,6 +160,11 @@ class TORCH_API StaticModule {
     return nodes_;
   }
 
+  bool is_optimizable_container_type(Node* n) const {
+    auto it = node_is_optimizable_container_type_.find(n);
+    return it != node_is_optimizable_container_type_.end();
+  }
+
   const c10::optional<c10::FunctionSchema>& schema() const {
     return schema_;
   }
@@ -204,6 +209,8 @@ class TORCH_API StaticModule {
   // map a value to the set of values that may share the same storage with it
   FastMap<const Value*, std::vector<const Value*>>
       value_to_same_storage_values_;
+
+  FastSet<Node*> node_is_optimizable_container_type_;
 };
 
 class TORCH_API StaticRuntime {
@@ -286,6 +293,10 @@ class TORCH_API StaticRuntime {
   }
 
   void check_for_memory_leak(bool output_returned = true);
+
+  bool is_optimizable_container_type(Node* n) const {
+    return static_module_.is_optimizable_container_type(n);
+  }
 
  private:
   // helper method for copying input args/kwargs into inputs_
