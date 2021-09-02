@@ -79,43 +79,7 @@ def _torchscript_schema_to_signature(ts_schema : torch._C.FunctionSchema) -> ins
     return inspect.Signature(parameters, return_annotation=return_type)
 
 @compatibility(is_backward_compatible=False)
-def check_for_mutable_operation(target : Callable, args : Tuple['Argument', ...], kwargs : Dict[str, 'Argument']):
-    signatures, schemas = get_signature_for_torch_op(target, return_schemas=True)
-
-    if signatures and schemas:
-        matched_schemas = []
-
-        # Iterate through all of the schema until we find one that matches
-        # If one matches, populate `new_args_and_kwargs` with the new args/kwargs
-        # values. If none matches, `new_args_and_kwargs` will be None
-        for candidate_signature, schema in zip(signatures, schemas):
-            try:
-                candidate_signature.bind(*args, **kwargs)
-                matched_schemas.append((candidate_signature, schema))
-            except TypeError as e:
-                continue
-
-        def throw_if_mutable(schema):
-            if schema.is_mutable:
-                raise RuntimeError(f'Tried to trace mutable operation {schema}. FX only supports functional '
-                                   f'code, so operations that mutate operands in-place (e.g. via `out` arguments) '
-                                   f'are not supported')
-
-        if len(matched_schemas) == 0:
-            # Did not match any schema. Cannot check for mutation
-            pass
-        elif len(matched_schemas) == 1:
-            # Matched exactly one schema, unambiguous
-            _, schema_to_check = matched_schemas[0]
-            throw_if_mutable(schema_to_check)
-            pass
-        else:
-            # Ambiguous schema match. Since mutability checking is best effort,
-            # do nothing.
-            pass
-
-@compatibility(is_backward_compatible=False)
-def get_signature_for_torch_op(op : Callable, return_schemas : bool = False) -> Optional[List[inspect.Signature]]:
+def get_signature_for_torch_op(op : Callable) -> Optional[List[inspect.Signature]]:
     """
     Given an operator on the `torch` namespace, return a list of `inspect.Signature`
     objects corresponding to the overloads of that op.. May return `None` if a signature
@@ -130,17 +94,17 @@ def get_signature_for_torch_op(op : Callable, return_schemas : bool = False) -> 
     """
     override = _manual_overrides.get(op)
     if override:
-        return (override, None) if return_schemas else None
+        return override
 
     aten_fn = torch.jit._builtins._find_builtin(op)
 
     if aten_fn is None:
-        return (None, None) if return_schemas else None
+        return None
 
     schemas = torch._C._jit_get_schemas_for_operator(aten_fn)
     signatures = [_torchscript_schema_to_signature(schema) for schema in schemas]
 
-    return (signatures, schemas) if return_schemas else signatures
+    return signatures
 
 @compatibility(is_backward_compatible=False)
 def create_type_hint(x):
