@@ -116,8 +116,8 @@ def _parse_repo_info(github):
         # default branch: main or master. Our assumption is that if main exists
         # then it's the default branch, otherwise it's master.
         try:
-            urlopen(f"https://github.com/{repo_owner}/{repo_name}/tree/main/")
-            branch = 'main'
+            with urlopen(f"https://github.com/{repo_owner}/{repo_name}/tree/main/"):
+                branch = 'main'
         except HTTPError as e:
             if e.code == 404:
                 branch = 'master'
