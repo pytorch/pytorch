@@ -113,16 +113,11 @@ class TestModule(TestCase):
                             f'Buffer {name} is of dtype {buffer.dtype} instead of the expected dtype {dtype}')
 
     @modules(module_db)
-    def test_check_inplace(self, device, dtype, module_info):
-        # Check if the inplace variant of the module gives the same result as the out of place.
+    def test_pickle(self, device, dtype, module_info):
+        # Test that module can be pickled and unpickled.
         module_cls = module_info.module_cls
-        if 'inplace' not in signature(module_cls).parameters:
-            return
-
-        # check_inplace doesn't support multiple input tensors, since we don't have any modules
-        # that modify the inputs in-place and that accept more than one input
         module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
-                                                       requires_grad=True)
+                                                       requires_grad=False)
         for module_input in module_inputs:
             if module_input.forward_input is None:
                 continue
@@ -153,7 +148,6 @@ class TestModule(TestCase):
         # Check if the inplace variant of the module gives the same result as the out of place
         # variant.
         module_cls = module_info.module_cls
-
         module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
                                                        requires_grad=True)
         for module_input in module_inputs:
