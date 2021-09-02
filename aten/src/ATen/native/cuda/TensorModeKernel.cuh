@@ -3,8 +3,7 @@
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/SortingCommon.cuh>
-
-#include <THC/THCReduceApplyUtils.cuh>
+#include <ATen/native/cuda/block_reduce.cuh>
 
 namespace at {
 namespace native {
@@ -88,11 +87,10 @@ __device__ T reduceBlockWithNThreadLocalReductions(
   for (int i = 1; i < N; ++i) {
     ++offset;
     T next = offset < numVals ? threadVals[i] : init;
-    local = reduceOp(local, next);
+    local = reduceOp.combine(local, next);
   }
 
-  return reduceBlock<T, ReduceOp>(
-      smem, blockDim.x < numVals ? blockDim.x : numVals, local, reduceOp, init);
+  return cuda_utils::BlockReduce(local, reduceOp, init, smem);
 }
 
 template <typename T>
@@ -354,13 +352,24 @@ __global__ void compute_mode(
 
   struct ModeUnsignedPair max = {0, 0};
 
+  struct MaxOp {
+    inline __device__ ModeUnsignedPair combine(ModeUnsignedPair a, ModeUnsignedPair b) const {
+      return b.val > a.val ? b : a;
+    }
+
+    inline __device__ ModeUnsignedPair warp_shfl_down(ModeUnsignedPair acc, int offset) const {
+      ModeUnsignedPair ret;
+      ret.index = WARP_SHFL_DOWN(acc.index, offset);
+      ret.val = WARP_SHFL_DOWN(acc.val, offset);
+      return ret;
+    }
+  } max_op;
+
   max = reduceBlockWithNThreadLocalReductions<2>(
       uupmem,
       uup,
       sliceSize,
-      [=] GPU_LAMBDA(const auto& a, const auto& b) {
-        return b.val > a.val ? b : a;
-      },
+      max_op,
       max);
 
   // Store the mode in shared memory for use in finding the mode in the input
@@ -399,11 +408,24 @@ __global__ void compute_mode(
   // contain an index with the mode.
   struct ModeUnsignedBoolPair match = {0, false};
 
+  struct FlagSelectOp {
+    inline __device__ ModeUnsignedBoolPair combine(ModeUnsignedBoolPair a, ModeUnsignedBoolPair b) const {
+      return b.flag ? b : a;
+    }
+
+    inline __device__ ModeUnsignedBoolPair warp_shfl_down(ModeUnsignedBoolPair acc, int offset) const {
+      ModeUnsignedBoolPair ret;
+      ret.flag = WARP_SHFL_DOWN(acc.flag, offset);
+      ret.val = WARP_SHFL_DOWN(acc.val, offset);
+      return ret;
+    }
+  } flag_select_op;
+
   match = reduceBlockWithNThreadLocalReductions<2>(
       ubpmem,
       ubpp,
       sliceSize,
-      [=] GPU_LAMBDA(const auto& a, const auto& b) { return b.flag ? b : a; },
+      flag_select_op,
       match);
 
   // Finally, we have the mode, and an index where it occurs. We use a single

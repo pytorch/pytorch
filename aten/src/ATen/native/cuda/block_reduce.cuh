@@ -41,7 +41,7 @@ __inline__ __device__ T BlockReduceSum(T val, T* shared) {
     shared[wid] = val;
   }
   __syncthreads();
-  val = (threadIdx.x < blockDim.x / C10_WARP_SIZE) ? shared[lid] : 0;
+  val = (threadIdx.x < blockDim.x / C10_WARP_SIZE) ? shared[lid] : T(0);
   if (wid == 0) {
     val = WarpReduceSum(val);
   }
