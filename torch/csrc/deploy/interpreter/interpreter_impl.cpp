@@ -133,9 +133,7 @@ class F:
             # in order to trick it into loading our module.
             return sys.meta_path[1].find_spec('torch._C', path=None, target=None)
         elif fullname == 'tensorrt.tensorrt':
-            spec = sys.meta_path[1].find_spec('tensorrt.tensorrt', path=None, target=None)
-            print("spec: ", spec)
-            return spec
+            return sys.meta_path[1].find_spec('tensorrt.tensorrt', path=None, target=None)
         return None
 sys.meta_path.insert(0, F())
 

@@ -1877,7 +1877,7 @@ class TestFrozenOptimizations(JitTestCase):
             N, C, H, W, = 10, 3, 224, 224
             inp = torch.randn(N, C, H, W)
             self.run_pass("convert_frozen_ops_to_mkldnn", mod.graph)
-            self.assertTrue(torch.allclose(model(inp), mod(inp)))
+            self.assertEqual(model(inp), mod(inp))
 
     @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
     def test_pool2d_batchnorm(self):
@@ -1901,7 +1901,7 @@ class TestFrozenOptimizations(JitTestCase):
                 self.run_pass('dce', mod.graph)
                 self.run_pass("convert_frozen_ops_to_mkldnn", mod.graph)
                 FileCheck().check("aten::to_dense").check_next("return").run(mod.graph)
-                self.assertTrue(torch.allclose(sub_model(inp), mod(inp)))
+                self.assertEqual(sub_model(inp), mod(inp))
 
     @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
     def test_pool3d_batchnorm(self):
@@ -1925,7 +1925,7 @@ class TestFrozenOptimizations(JitTestCase):
                 self.run_pass('dce', mod.graph)
                 self.run_pass("convert_frozen_ops_to_mkldnn", mod.graph)
                 FileCheck().check("aten::to_dense").check_next("return").run(mod.graph)
-                self.assertTrue(torch.allclose(sub_model(inp), mod(inp)))
+                self.assertEqual(sub_model(inp), mod(inp))
 
     @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
     @skipIfNoTorchVision
@@ -1964,7 +1964,7 @@ class TestFrozenOptimizations(JitTestCase):
                                 check_count("aten::to_dense", 1, exactly=True).run(mod.graph))
                         else:
                             FileCheck().check_count("aten::to_dense", 1, exactly=True).check("aten::layer_norm").run(mod.graph)
-                        self.assertTrue(torch.allclose(sub_model(param[2]), mod(param[2]), 1e-04, 1e-04))
+                        self.assertEqual(sub_model(param[2]), mod(param[2]), rtol=1e-04, atol=1e-04)
 
     @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
     @skipIfNoTorchVision
@@ -2003,7 +2003,7 @@ class TestFrozenOptimizations(JitTestCase):
                 inp = torch.randn(N, C, H, W)
                 self.run_pass("convert_frozen_ops_to_mkldnn", mod.graph)
                 FileCheck().check_count("aten::to_dense", 1, exactly=True).run(mod.graph)
-                self.assertTrue(torch.allclose(sub_model(inp), mod(inp)))
+                self.assertEqual(sub_model(inp), mod(inp))
 
     @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
     def test_hardswish_hardsigmoid(self):
@@ -2030,7 +2030,7 @@ class TestFrozenOptimizations(JitTestCase):
                         x = torch.rand(size)
                         # `inplace=False` is intentional, otherwise we modify the input
                         # and we aren't testing aten impls anyways
-                        self.assertTrue(torch.allclose(aten_op(x, inplace=False), m(x).to_dense()))
+                        self.assertEqual(aten_op(x, inplace=False), m(x).to_dense())
 
     @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
     def test_scalar_mul(self):

@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <ATen/AccumulateType.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Dispatch.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
@@ -207,7 +208,7 @@ __global__ void nll_loss_forward_reduce_cuda_kernel_1d(
     bool size_average,
     int n_classes,
     int64_t ignore_index) {
-  CUDA_KERNEL_ASSERT(threadIdx.x == 0 && threadIdx.y == 0 & threadIdx.z == 0);
+  CUDA_KERNEL_ASSERT(threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0);
 
   int t = static_cast<int>(*target);
   if (t != static_cast<int>(ignore_index)) {
@@ -263,7 +264,7 @@ __global__ void nll_loss_forward_reduce_cuda_kernel_2d(
     *total_weight = static_cast<scalar_t>(total_weight_acc);
     if (size_average && nframe == 0) {
       // Mean reduction on empty tensors produces NaN
-      *output = std::numeric_limits<double>::quiet_NaN();
+      *output = std::numeric_limits<scalar_t>::quiet_NaN();
     } else if (size_average && total_weight_acc != 0) {
       *output = static_cast<scalar_t>(output_acc / total_weight_acc);
     } else {
@@ -286,7 +287,7 @@ void nll_loss_forward_out_cuda_template(
 
   auto weight_ = weight.defined() ? weight.contiguous() : weight;
 
-  if (reduction == Reduction::None & n_dims == 2) {
+  if (reduction == Reduction::None && n_dims == 2) {
     output.resize_({batch_size});
     if (batch_size == 0) {
       // This guards from unnecessary operations and launching CUDA kernel with
@@ -365,7 +366,8 @@ void nll_loss_forward_out_cuda_template(
               target.scalar_type(),
               "nll_loss_forward_reduce_cuda_kernel_2d_index",
               [&] {
-                nll_loss_forward_reduce_cuda_kernel_2d<scalar_t, float, index_t>
+                using accscalar_t = at::acc_type<scalar_t, /*is_cuda*/true>;
+                nll_loss_forward_reduce_cuda_kernel_2d<scalar_t, accscalar_t, index_t>
                     <<<1,
                        NLL_LOSS_THREADS,
                        0,
@@ -468,7 +470,6 @@ void nll_loss_backward_out_cuda_template(
   int64_t n_dims = input.dim();
   int64_t n_classes = input.size(-1);
   int64_t batch_size = n_dims == 1 ? 1 : input.size(0);
-  int64_t num_targets = target.size(0);
 
   auto weight_ = weight.defined() ? weight.contiguous() : weight;
 
