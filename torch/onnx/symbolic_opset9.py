@@ -1179,7 +1179,7 @@ def le(g, input, other):
 
 def __and_(g, input, other):
     if input.type().scalarType() == "Bool" and \
-            other.type().scalarType() is not None and other.type().scalarType() == "Bool":
+            other.type().scalarType() == "Bool":
         return g.op("And", input, other)
     else:
         raise NotImplementedError("ONNX export does NOT support exporting bitwise AND " +
@@ -1188,7 +1188,7 @@ def __and_(g, input, other):
 
 def __or_(g, input, other):
     if input.type().scalarType() == "Bool" and \
-            other.type().scalarType() is not None and other.type().scalarType() == "Bool":
+            other.type().scalarType() == "Bool":
         return g.op("Or", input, other)
     else:
         raise NotImplementedError("ONNX export does NOT support exporting bitwise OR " +
@@ -1197,7 +1197,7 @@ def __or_(g, input, other):
 
 def __xor_(g, input, other):
     if input.type().scalarType() == "Bool" and \
-            other.type().scalarType() is not None and other.type().scalarType() == "Bool":
+            other.type().scalarType() == "Bool":
         return g.op("Xor", input, other)
     else:
         raise NotImplementedError("ONNX export does NOT support exporting bitwise XOR " +
