@@ -231,7 +231,7 @@ jobs:
       - name: Archive artifacts into zip
         run: |
           zip -1 -r artifacts.zip dist/ build/custom_test_artifacts build/lib build/bin .pytorch-test-times.json
-      - uses: seemethere/upload-artifact-s3@9d7ceb0ab39c2c88d93ef7792b27425b27d59162
+      - uses: seemethere/upload-artifact-s3@v3
         name: Store PyTorch Build Artifacts on S3
         with:
           name: ${{ env.BUILD_ENVIRONMENT }}
@@ -452,7 +452,7 @@ jobs:
           if-no-files-found: error
           path:
             test-reports-*.zip
-      - uses: seemethere/upload-artifact-s3@9d7ceb0ab39c2c88d93ef7792b27425b27d59162
+      - uses: seemethere/upload-artifact-s3@v3
         name: Store PyTorch Test Reports on S3
         if: always()
         with:
