@@ -8,7 +8,7 @@ namespace c10d {
 
 // When training runs at these iterations, log the runtime
 // stats.
-const int LoggingIterations[] = {10, 20, 100, 1000};
+const int LoggingIterations[] = {10, 20, 100, 1000, 5000, 10000, 20000}; // NOLINT
 
 std::ostream& operator<<(std::ostream& output, const Logger& logger) {
   auto& ddp_logging_data = (*logger.ddp_logging_data_);
