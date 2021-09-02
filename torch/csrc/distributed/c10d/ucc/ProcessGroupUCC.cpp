@@ -1,6 +1,8 @@
 #include <c10d/ucc/ProcessGroupUCC.hpp>
 #include <c10d/ucc/UCXUtils.hpp>
+#include <c10d/ucc/BlockingQueue.hpp>
 #include <c10/macros/Export.h>
+#include <thread>
 
 // TODO support profiler:
 // Reference PR: https://github.com/pytorch/pytorch/pull/52004/files
@@ -103,7 +105,6 @@ public:
       : Work(rank, opType, profilingTitle, inputs), request(request), worker(worker) {}
 
     bool isCompleted() override {
-      // TODO: progress worker in a side thread for true async
       worker->progress();
       bool is_finished = (request->status() != UCS_INPROGRESS);
       if (is_finished) {
@@ -130,6 +131,8 @@ public:
       const c10::intrusive_ptr<Store>& store,
       tagging::world_size_t rank,
       tagging::world_size_t size);
+
+  ~ProcessGroupUCC();
 
   const std::string getBackendName() const override {
       return std::string(UCC_BACKEND_NAME);
@@ -210,12 +213,20 @@ private:
   c10::intrusive_ptr<Store> store;
   std::shared_ptr<UCPWorker> worker;
   std::vector<std::shared_ptr<UCPEndpoint>> ucp_endpoints = {};
+  BlockingQueue<c10::intrusive_ptr<Work>> pending_works;
+
+  std::thread book_keeper;  // background thread that progresses pending work
+  bool stop_book_keeper = false;
+  static void book_keeper_fn(ProcessGroupUCC *);
 };
 
 ProcessGroupUCC::ProcessGroupUCC(
     const c10::intrusive_ptr<Store>& store,
     tagging::world_size_t rank,
-    tagging::world_size_t size) : ProcessGroup(rank, size), store(store), worker(std::make_shared<UCPWorker>()) {
+    tagging::world_size_t size): ProcessGroup(rank, size),
+  store(store), worker(std::make_shared<UCPWorker>()),
+  book_keeper(book_keeper_fn, this)
+{
   store->set("ucp_address:" + std::to_string(rank_), worker->address());
   for (int i = 0; i < size_; i++) {
     UCPWorker::Address peer_addr = store->get("ucp_address:" + std::to_string(i));
@@ -302,8 +313,10 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::send(
   auto request = ucp_endpoints[dstRank]->send_with_tag(
     tensor.data_ptr(), tensor.element_size() * tensor.numel(),
     tagging::wrap_tag(rank_, tag), tensor.device().type());
-  return c10::make_intrusive<ProcessGroupUCC::WorkUCP>(
+  auto work = c10::make_intrusive<ProcessGroupUCC::WorkUCP>(
     worker, request, getRank(), OpType::SEND, "ucc:send", tensors);
+  pending_works.push(work);
+  return work;
 }
 
 // See note: [Receive from an endpoint]
@@ -317,8 +330,10 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::recv(
   auto request = worker->recv_with_tag_and_mask(
     tensor.data_ptr(), tensor.element_size() * tensor.numel(),
     tagging::wrap_tag(srcRank, tag), tagging::complete_tag_mask(), tensor.device().type());
-  return c10::make_intrusive<ProcessGroupUCC::WorkUCP>(
+  auto work = c10::make_intrusive<ProcessGroupUCC::WorkUCP>(
     worker, request, getRank(), OpType::RECV, "ucc:recv", tensors);
+  pending_works.push(work);
+  return work;
 }
 
 // See note: [Receive from an endpoint]
@@ -330,8 +345,10 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::recvAnysource(
   auto request = worker->recv_with_tag_and_mask(
     tensor.data_ptr(), tensor.element_size() * tensor.numel(),
     tagging::wrap_tag(0, tag), tagging::any_source_mask(), tensor.device().type());
-  return c10::make_intrusive<ProcessGroupUCC::WorkUCP>(
+  auto work = c10::make_intrusive<ProcessGroupUCC::WorkUCP>(
     worker, request, getRank(), OpType::RECVANYSOURCE, "ucc:recvAnySource", tensors);
+  pending_works.push(work);
+  return work;
 };
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::barrier(
@@ -344,6 +361,23 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::_allgather_base(
     at::Tensor& /*unused */,
     const AllgatherOptions& /*unused */) {
   TORCH_CHECK(false, "ProcessGroupUCC does not support _allgather_base");
+}
+
+void ProcessGroupUCC::book_keeper_fn(ProcessGroupUCC *pg) {
+  while (!pg->stop_book_keeper) {
+    auto maybe_work = pg->pending_works.pop();
+    if (maybe_work) {
+      auto work = maybe_work.value();
+      if (!work->isCompleted()) {
+        pg->pending_works.push(work);
+      }
+    }
+  }
+}
+
+ProcessGroupUCC::~ProcessGroupUCC() {
+  stop_book_keeper = true;
+  book_keeper.join();
 }
 
 } // namespace c10d
