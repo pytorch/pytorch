@@ -418,14 +418,6 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv2d_backward_out_cuda(
     Tensor& grad_input,
     Tensor& grad_weight,
     Tensor& grad_bias) {
-  if (grad_weight.defined()) {
-    resize_output(grad_weight, weight_.sizes());
-    grad_weight.zero_();
-  }
-  if (grad_bias.defined()) {
-    resize_output(grad_bias, {weight_.sizes()[0]});
-    grad_bias.zero_();
-  }
   auto grad_output = grad_output_.expect_contiguous();
   if (grad_input.defined()) {
     resize_output(grad_input, self_.sizes());
@@ -440,10 +432,11 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv2d_backward_out_cuda(
         padding[0], padding[1]);
   }
   if (grad_bias.defined()) {
-    Tensor grad_bias_mut = grad_bias;
-    at::sum_out(grad_bias_mut, *grad_output, IntArrayRef{0, 2, 3});
+    at::sum_out(grad_bias, *grad_output, IntArrayRef{0, 2, 3});
   }
   if (grad_weight.defined()) {
+    resize_output(grad_weight, weight_.sizes());
+    grad_weight.zero_();
     auto self = self_.expect_contiguous();
     slow_conv2d_grad_weight(
         *self,

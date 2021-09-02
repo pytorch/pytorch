@@ -293,15 +293,12 @@ void slow_conv2d_backward_weight_frame(
     const Tensor& finput) {
   auto grad_output_2d = grad_output.view(
       {grad_output.size(0), grad_output.size(1) * grad_output.size(2)});
-  if (grad_weight.defined()) {
-    const Tensor tfinput = finput.transpose(0, 1);
-    grad_weight.addmm_(grad_output_2d, tfinput);
-  }
+  const Tensor tfinput = finput.transpose(0, 1);
+  grad_weight.addmm_(grad_output_2d, tfinput);
 }
 
-static void slow_conv2d_backward_parameters_out_cpu_template(
+static void slow_conv2d_backward_weight_out_cpu_template(
     Tensor& grad_weight,
-    Tensor& grad_bias,
     const Tensor& input_,
     const Tensor& grad_output_,
     const Tensor& finput,
@@ -310,7 +307,6 @@ static void slow_conv2d_backward_parameters_out_cpu_template(
     IntArrayRef padding) {
   CheckedFrom c = "slow_conv2d_backward_parameters_cpu";
   auto grad_weight_arg = TensorArg(grad_weight, "grad_weight_arg", 0);
-  auto grad_bias_arg = TensorArg(grad_bias, "grad_bias_arg", 0);
 
   const int64_t kernel_height = kernel_size[0];
   const int64_t kernel_width = kernel_size[1];
@@ -320,16 +316,14 @@ static void slow_conv2d_backward_parameters_out_cpu_template(
   const int64_t stride_width = stride[1];
 
   Tensor grad_weight_2d;
-  if (grad_weight.defined()) {
-    checkContiguous(c, grad_weight_arg);
-    grad_weight_2d = view_weight_2d(grad_weight);
-  }
+  checkContiguous(c, grad_weight_arg);
+  grad_weight_2d = view_weight_2d(grad_weight);
 
   slow_conv2d_shape_check(
       input_,
       grad_output_,
       grad_weight_2d,
-      grad_bias,
+      {},
       kernel_height,
       kernel_width,
       stride_height,
@@ -340,11 +334,6 @@ static void slow_conv2d_backward_parameters_out_cpu_template(
 
   auto input = input_.contiguous();
   auto grad_output = grad_output_.contiguous();
-
-  if (grad_bias.defined()) {
-    Tensor grad_bias_mut = grad_bias;
-    at::sum_out(grad_bias_mut, grad_output, IntArrayRef{0, 2, 3});
-  }
 
   const int64_t batch_size = input.size(0);
   for (int64_t t = 0; t < batch_size; t++) {
@@ -501,20 +490,15 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv2d_backward_out_cpu(
         padding);
   }
 
+  if (grad_bias.defined()) {
+    at::sum_out(grad_bias, grad_output, IntArrayRef{0, 2, 3});
+  }
+
   if (grad_weight.defined()) {
     grad_weight.resize_(weight.sizes());
     grad_weight.zero_();
-  }
-
-  if (grad_bias.defined()) {
-    grad_bias.resize_({grad_output.size(1)});
-    grad_bias.zero_();
-  }
-
-  if (grad_weight.defined() || grad_bias.defined()) {
-    slow_conv2d_backward_parameters_out_cpu_template(
+    slow_conv2d_backward_weight_out_cpu_template(
         grad_weight,
-        grad_bias,
         self,
         grad_output,
         finput,
