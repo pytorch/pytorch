@@ -19,6 +19,11 @@
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 #include <stdexcept>
 
+#ifdef FBCODE_CAFFE2
+#include <folly/dynamic.h>
+#include <folly/json.h>
+#endif
+
 namespace torch {
 namespace jit {
 
@@ -873,12 +878,30 @@ c10::IValue StaticRuntime::operator()(
   return std::move(*outputs_[0]);
 }
 
+namespace {
+
+std::string generate_node_time_json(const std::string& kind, float millis) {
+#ifdef FBCODE_CAFFE2
+  folly::dynamic json = folly::dynamic::object();
+  json["type"] = kind;
+  json["metric"] = "latency";
+  json["unit"] = "ms";
+  json["value"] = millis;
+  return folly::toJson(json);
+#else
+  return "";
+#endif
+}
+
+} // namespace
+
 void StaticRuntime::benchmark(
     const std::vector<c10::IValue>& args,
     const std::unordered_map<std::string, c10::IValue>& kwargs,
     const int warmup_runs,
     const int main_runs,
-    bool print_per_node_time) {
+    bool print_per_node_time,
+    bool generate_ai_pep_output) {
   float time_per_iter = benchmark_model(args, kwargs, warmup_runs, main_runs);
   std::cout << "Static runtime ms per iter: " << time_per_iter
             << ". Iters per second: " << 1000.0 / time_per_iter << std::endl;
@@ -915,6 +938,10 @@ void StaticRuntime::benchmark(
       std::cout << ", native)" << std::endl;
     } else {
       std::cout << ")" << std::endl;
+    }
+
+    if (generate_ai_pep_output) {
+      LOG(INFO) << "PyTorchObserver " << generate_node_time_json(kind, ms);
     }
   }
   std::cout << std::setw(15) << results.total_time << " ms. in Total"
