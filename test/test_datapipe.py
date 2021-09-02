@@ -1033,7 +1033,7 @@ class TestFunctionalIterDataPipe(TestCase):
         for data, exp in zip(filter_dp, range(5, 10)):
             self.assertEqual(data, exp)
 
-        with self.assertRaisesRegex(TypeError, r"instance doesn't have valid length$"):
+        with self.assertRaisesRegex(TypeError, r"has no len"):
             len(filter_dp)
 
         def _non_bool_fn(data):
