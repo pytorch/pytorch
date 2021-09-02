@@ -239,7 +239,7 @@ class TestSymbolicShapeAnalysis(JitTestCase):
 
             for inp, module in nn_inps:
                 kwargs = {
-                    "weight": module.weight,
+                    "weight": module.weight.detach(),
                     "padding_idx": module.padding_idx,
                     "max_norm": module.max_norm,
                     "norm_type": module.norm_type,
@@ -252,5 +252,6 @@ class TestSymbolicShapeAnalysis(JitTestCase):
                 def foo(x):
                     return torch.nn.functional.embedding(inp, **kwargs)
 
-                fn = torch.jit.trace(foo, (inp,), check_trace=False)
-                self.checkShapeAnalysis(out_size, fn.graph, assert_propagation=True)
+                fn = torch.jit.trace(foo, (inp.detach(),), check_trace=False)
+
+                self.checkShapeAnalysis(out_size, fn.graph, assert_propagation=True, constant_prop=False)

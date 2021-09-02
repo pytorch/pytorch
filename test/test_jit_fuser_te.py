@@ -2055,6 +2055,8 @@ skip_ops = [
     # Reference: https://github.com/pytorch/pytorch/pull/59442/checks?check_run_id=2746156896
     't',
     'conj'
+    'view',
+    'reshape',
 ]
 
 def get_name(op):
