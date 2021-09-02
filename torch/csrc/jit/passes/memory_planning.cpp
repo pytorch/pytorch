@@ -300,18 +300,44 @@ bool intersectAllocs(MemAllocation m1, MemAllocation m2) {
          intersectMemRegion(m1.reg, m2.reg);
 }
 
-bool validateAllocations(std::vector<MemAllocation> allocations) {
+bool validateAllocations(
+    std::vector<MemAllocation> allocations,
+    std::unordered_map<LiveRange, int64_t, live_range_hash>
+        managed_live_ranges) {
   for (const auto& alloc1 : allocations) {
     for (const auto& alloc2 : allocations) {
       if (alloc1 == alloc2) {
         continue;
       }
       if (intersectAllocs(alloc1, alloc2)) {
-        std::cerr << alloc1 << "," << alloc2 << "\n";
+        TORCH_WARN("intersecting allocations: ", alloc1, ", ", alloc2);
         return false;
       }
     }
   }
+
+  if (allocations.size() != managed_live_ranges.size()) {
+    TORCH_WARN(
+        "not the right number of allocations: ",
+        allocations.size(),
+        ", ",
+        managed_live_ranges.size());
+    return false;
+  }
+
+  for (const auto& alloc : allocations) {
+    if (managed_live_ranges.count(alloc.lvr) == 0 ||
+        // leq because alignment enlarges (recomputing aligned size is too much)
+        managed_live_ranges[alloc.lvr] > alloc.reg.size) {
+      TORCH_WARN(
+          "wrong size allocation: ",
+          alloc.lvr, ", ",
+          managed_live_ranges[alloc.lvr], ", ",
+          alloc.reg.size);
+      return false;
+    }
+  }
+
   return true;
 }
 
@@ -376,9 +402,10 @@ void planMemory(std::shared_ptr<Graph>& graph, Strategy strat) {
     default:
       return;
   }
-
   TORCH_INTERNAL_ASSERT(
-      validateAllocations(allocations), "invalid allocation", strat);
+      validateAllocations(allocations, managed_live_ranges),
+      "invalid allocation",
+      strat);
 
   auto total_size = getTotalAllocationSize(allocations);
 
