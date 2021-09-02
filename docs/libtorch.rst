@@ -21,7 +21,7 @@ You can use a python script/module located in tools package to build libtorch
    python ../tools/build_libtorch.py
 
 
-Alternatively, you can call setup.py normally and then copy the built cpp libraries. This method may have side effects to your active Python installation.
+Alternatively, you can call setup.py normally and then copy the built cpp libraries. This method can effect your active Python installation.
 ::
    cd <pytorch_root>
    python setup.py build
