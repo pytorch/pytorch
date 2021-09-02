@@ -368,7 +368,7 @@ void ProcessGroupUCC::book_keeper_fn(ProcessGroupUCC *pg) {
     auto maybe_work = pg->pending_works.pop();
     if (maybe_work) {
       auto work = maybe_work.value();
-      if (!work->isCompleted()) {
+      if (!work->isCompleted()) {  // `isCompleted` also progress the worker
         pg->pending_works.push(work);
       }
     }
