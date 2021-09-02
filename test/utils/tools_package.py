@@ -66,6 +66,11 @@ def _import_tools_module():
     return tools
 
 
-# Unconditionally import the tools module: that's what importing this
-# module is designed to do.
-tools = _import_tools_module()
+try:
+    # First just try to import it. This works if PyTorch was installed
+    # via "python setup.py develop" and internally to Facebook.
+    import tools
+except ImportError:
+    # We could not import: try to find the tools module relative to
+    # this file.
+    tools = _import_tools_module()
