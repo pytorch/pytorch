@@ -444,8 +444,7 @@ def create_differentiability_info(
                            "Please use a different name in native_functions.yaml.")
 
     (derivatives, forward_derivatives, args_with_derivatives,
-     non_differentiable_arg_names,
-     available_named_gradients) = set_up_derivatives(canonical)
+     non_differentiable_arg_names, available_named_gradients) = set_up_derivatives(canonical)
 
     used_named_gradients: Set[str] = set()
     for d in derivatives:
