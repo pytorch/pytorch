@@ -534,6 +534,7 @@ void miopen_convolution_add_bias_(CheckedFrom c, const TensorArg& output, const 
   bias_contig.resize_(bias_contig.sizes(), memory_format );
 
   // TODO: Workaround since MIOpen does not support NHWC bias
+  // See #64426
   output->add_( bias_contig );
 
   /* MIOpen does not support NHWC bias; Activate once support is added.
@@ -1246,6 +1247,7 @@ Tensor miopen_convolution_backward_bias(
   TensorArg grad_output{ grad_output_t, "grad_output", 1 };
 
   // TODO: Workaround since MIOpen does not support NHWC bias
+  // See #64426
   std::vector<int64_t> discard_dims;
   for( int i = 0; i < grad_output_t.dim(); i++ ) {
       if(i != output_channels_dim ) {
