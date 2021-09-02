@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/onnx/constant_fold.h>
 #include <torch/csrc/jit/passes/onnx/constant_map.h>
+#include <torch/csrc/jit/passes/onnx/fixup_onnx_controlflow.h>
 #include <torch/csrc/jit/passes/onnx/fold_if_node.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
 #include <torch/csrc/jit/passes/onnx/scalar_type_analysis.h>
@@ -180,7 +181,21 @@ void UpdateTorchValueByOnnxValueInfo(
   }
 }
 
-bool IsSupportedNode(const Node* n) {
+bool IsValidONNXControlflowNode(const Node* n) {
+  // Skip when block size is zero. This is when the node is being created,
+  // and doesn't have subblocks attached yet. Run shape inference for these
+  // nodes later, when the subgraph has already completed shape inferencing.
+  auto node_kind = n->kind();
+  if (node_kind == ::c10::onnx::Loop || node_kind == ::c10::onnx::If) {
+    if (n->blocks().size() == 0) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool IsValidONNXNode(const Node* n) {
   auto node_kind = n->kind();
 
   if (!node_kind.is_onnx()) {
@@ -188,18 +203,14 @@ bool IsSupportedNode(const Node* n) {
     return false;
   }
 
-  // Skip when block size is zero. This is when the node is first created,
-  // doesn't have subblocks attached yet. Run shape inference for these nodes
-  // when the subgraph has already completed shape inferencing.
-  if (node_kind == ::c10::onnx::Loop || node_kind == ::c10::onnx::If) {
-    if (n->blocks().size() == 0) {
-      return false;
-    }
-    for (auto b : n->blocks()) {
-      for (auto b_n : b->nodes()) {
-        if (!IsSupportedNode(b_n)) {
-          return false;
-        }
+  if (!IsValidONNXControlflowNode(n)) {
+    return false;
+  }
+
+  for (auto b : n->blocks()) {
+    for (auto b_n : b->nodes()) {
+      if (!IsValidONNXNode(b_n)) {
+        return false;
       }
     }
   }
@@ -404,8 +415,10 @@ c10::optional<at::Tensor> ComputeConstantFolding(Node* n, int opset_version) {
 // When the Reshape node's two inputs are constant, compute the output shape.
 // The reshape value 0 and -1 are converted to the real value explicitly.
 std::vector<int64_t> ComputeShapeFromReshape(
+    Node* n,
     const std::vector<int64_t>& input_shape,
-    const std::vector<int64_t>& reshape) {
+    const std::vector<int64_t>& reshape,
+    int opset_version) {
   TORCH_INTERNAL_ASSERT(
       input_shape.size() > 0 || reshape.size() > 0,
       "Reshape node should have at least one input size > 0 when constant folding.");
@@ -427,6 +440,17 @@ std::vector<int64_t> ComputeShapeFromReshape(
   auto reshape_size = static_cast<int>(reshape.size());
   auto it_0 = std::find(reshape.begin(), reshape.end(), 0);
   auto reshape_has_zero = it_0 != reshape.end();
+
+  // Allowzero is set to 0 by default
+  // When opset version > 14, assign appropriate allowzero value
+  int allowzero = 0;
+  if (opset_version >= 14 && n->hasAttributeS("allowzero")) {
+    allowzero = n->i(attr::allowzero);
+    if (allowzero == 1 && reshape_has_zero) {
+      return reshape;
+    }
+  }
+
   auto input_shape_size = static_cast<int>(input_shape.size());
   auto it_minus_one = std::find(reshape.begin(), reshape.end(), -1);
   int minus_one_pos = it_minus_one == reshape.end()
@@ -594,7 +618,7 @@ c10::optional<std::vector<int64_t>> GetValueFromListConstructNode(
       : c10::nullopt;
 }
 
-void ProcessReshapeNode(Node* n) {
+void ProcessReshapeNode(Node* n, int opset_version) {
   if (ConstantValueMap::HasValue(n->input(1)->debugName())) {
     auto shape_temp =
         ConstantValueMap::GetValueInto1DInt64Vector(n->input(1)->debugName());
@@ -602,8 +626,8 @@ void ProcessReshapeNode(Node* n) {
         ConstantValueMap::GetShapeInto1DInt64VectorWithOneUnknown(
             n->input(0)->debugName());
     if (shape_vector_0.has_value()) {
-      auto final_shape =
-          ComputeShapeFromReshape(shape_vector_0.value(), shape_temp);
+      auto final_shape = ComputeShapeFromReshape(
+          n, shape_vector_0.value(), shape_temp, opset_version);
       UpdateShapeFromVector(n->output(), final_shape);
       return;
     }
@@ -865,7 +889,7 @@ void ComputeConstant(Node* n, int opset_version) {
       break;
     }
     case ::c10::onnx::Reshape: {
-      ProcessReshapeNode(n);
+      ProcessReshapeNode(n, opset_version);
       break;
     }
     case ::c10::onnx::Gather: {
@@ -1297,6 +1321,20 @@ void SpecialPostProcess(Node* n) {
       }
       break;
     }
+    case ::c10::onnx::If: {
+      if (!IsValidONNXControlflowNode(n)) {
+        break;
+      }
+      FixupONNXControlflowNodeOutputs(n);
+      break;
+    }
+    case ::c10::onnx::Loop: {
+      if (!IsValidONNXControlflowNode(n)) {
+        break;
+      }
+      FixupONNXControlflowNodeOutputs(n);
+      break;
+    }
   }
 }
 
@@ -1378,64 +1416,67 @@ void ONNXShapeTypeInference(
     int opset_version) {
   GRAPH_UPDATE(
       "Running ONNX shape inference for node: ", n->kind().toDisplayString());
-  if (!IsSupportedNode(n)) {
-    return;
-  }
-  // Create a Graph containing only the single node n.
-  // This graph is later converted to ONNX to run shape inference.
-  auto n_graph = std::make_shared<Graph>();
-  auto clone_node = CloneNodeToGraph(n, n_graph, params_dict, opset_version);
-  n_graph->insertNode(clone_node);
+  if (IsValidONNXNode(n)) {
+    // Create a Graph containing only the single node n.
+    // This graph is later converted to ONNX to run shape inference.
+    auto n_graph = std::make_shared<Graph>();
+    auto clone_node = CloneNodeToGraph(n, n_graph, params_dict, opset_version);
+    n_graph->insertNode(clone_node);
 
-  // Register all node outputs as graph outputs.
-  for (auto output : clone_node->outputs()) {
-    n_graph->registerOutput(output);
-  }
-
-  // Use scalar_type_analysis without low precision cast
-  ScalarTypeAnalysisForONNX(n_graph, false, opset_version);
-
-  GRAPH_DEBUG("Original torch graph: ", n->owningGraph()->toString());
-  GRAPH_DEBUG(
-      "Cloned torch graph to run shape inference: ", n_graph->toString());
-
-  if (IsGraphValidForInference(n_graph)) {
-    // TODO: Some ops have conversion happen at Peephole pass.
-    //       The conversion here is incomplete for these ops.
-    //       e.g: ListConstruct, ListUnpack, etc.
-    std::shared_ptr<onnx::ModelProto> model_proto;
-    SymbolDimMap symbol_map;
-    ConvertGraphToONNXProto(n_graph, model_proto, symbol_map, opset_version);
-    GRAPH_DEBUG(
-        "ONNX graph to run shape inference: ", prettyPrint(*model_proto));
-
-    // infer shape
-    try {
-      onnx::shape_inference::InferShapes(*model_proto);
-      UpdateOutputTypeByONNXProto(n, clone_node, *model_proto, symbol_map);
-    } catch (std::runtime_error& ex) {
-      // TODO: include this as warning once we have a more consolidated warning
-      // system.
-      GRAPH_DEBUG(
-          "ONNX shape inference fails with: ",
-          ex.what(),
-          " on graph: ",
-          n_graph->toString());
-      // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-      const char shape_err[] = "ShapeInferenceError";
-      // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-      const char type_err[] = "TypeInferenceError";
-      if ((strstr(ex.what(), shape_err) == nullptr) &&
-          (strstr(ex.what(), type_err) == nullptr)) {
-        throw;
-      }
+    // Register all node outputs as graph outputs.
+    for (auto output : clone_node->outputs()) {
+      n_graph->registerOutput(output);
     }
+
+    // Use scalar_type_analysis without low precision cast
+    ScalarTypeAnalysisForONNX(n_graph, false, opset_version);
+
+    GRAPH_DEBUG("Original torch graph: ", n->owningGraph()->toString());
     GRAPH_DEBUG(
-        "ONNX graph after shape inference: ", prettyPrint(*model_proto));
+        "Cloned torch graph to run shape inference: ", n_graph->toString());
+
+    if (IsGraphValidForInference(n_graph)) {
+      // TODO: Some ops have conversion happen at Peephole pass.
+      //       The conversion here is incomplete for these ops.
+      //       e.g: ListConstruct, ListUnpack, etc.
+      std::shared_ptr<onnx::ModelProto> model_proto;
+      SymbolDimMap symbol_map;
+      ConvertGraphToONNXProto(n_graph, model_proto, symbol_map, opset_version);
+      GRAPH_DEBUG(
+          "ONNX graph to run shape inference: ", prettyPrint(*model_proto));
+
+      // infer shape
+      try {
+        onnx::shape_inference::InferShapes(*model_proto);
+        UpdateOutputTypeByONNXProto(n, clone_node, *model_proto, symbol_map);
+      } catch (std::runtime_error& ex) {
+        // TODO: include this as warning once we have a more consolidated
+        // warning system.
+        GRAPH_DEBUG(
+            "ONNX shape inference fails with: ",
+            ex.what(),
+            " on graph: ",
+            n_graph->toString());
+        // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
+        const char shape_err[] = "ShapeInferenceError";
+        // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
+        const char type_err[] = "TypeInferenceError";
+        // NOLINTNEXTLINE(modernize-use-nullptr)
+        if ((strstr(ex.what(), shape_err) == NULL) &&
+            // NOLINTNEXTLINE(modernize-use-nullptr)
+            (strstr(ex.what(), type_err) == NULL)) {
+          throw;
+        }
+      }
+      GRAPH_DEBUG(
+          "ONNX graph after shape inference: ", prettyPrint(*model_proto));
+    }
   }
 
   SpecialPostProcess(n);
-  ProcessConstantValueMap(n, opset_version);
+  if (IsValidONNXNode(n)) {
+    ProcessConstantValueMap(n, opset_version);
+  }
   GRAPH_DEBUG(
       "Torch graph after shape inference:", n->owningGraph()->toString());
 }

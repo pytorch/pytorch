@@ -173,6 +173,10 @@ bool is_relu_module(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap);
 
+bool is_functional_linear(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap);
+
 bool is_linear_module(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap);
