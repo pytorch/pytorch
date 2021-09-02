@@ -2307,6 +2307,16 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.zeros([2, 17, 3], dtype=torch.int64)
         self.run_test(IndexPutModel9(), (x,))
 
+        class IndexPutModel10(torch.nn.Module):
+            def forward(self, x, ind, update):
+                x[ind, 1:3] = update.view(1, 1, 1, 5).expand(2, 2, 2, 5)
+                return x
+
+        x = torch.randn(3, 4, 5)
+        ind = torch.tensor([[0, 2], [1, 1]])
+        update = torch.randn(5)
+        self.run_test(IndexPutModel10(), (x, ind, update))
+
     @skipIfUnsupportedMinOpsetVersion(11)
     @disableScriptTest()  # Ellipses followed by tensor indexing not scriptable
     def test_index_put_ellipsis(self):
