@@ -185,7 +185,7 @@ std::vector<ExprPtr> getBoundExtents(
   std::vector<ExprPtr> extents;
   for (size_t i = 0; i < starts.size(); ++i) {
     ExprPtr dim = IRSimplifier::simplify(
-        alloc<Add>(alloc<Sub>(stops[i], starts[i]), alloc<IntImm>(1)));
+        alloc<Add>(alloc<Sub>(stops[i], starts[i]), immLike(stops[i], 1)));
 
     extents.push_back(dim);
   }
