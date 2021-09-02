@@ -472,7 +472,7 @@ def boolean_dispatch(arg_name, arg_index, default, if_true, if_false, module_nam
                 if_true_signature.parameters.values(), if_false_signature.parameters.values()
             )
         ]
-    fn.__signature__ = inspect.Signature(parameters)
+    fn.__signature__ = inspect.Signature(parameters)  # type: ignore[attr-defined]
 
     fn.__doc__ = extract_attribute(if_true, if_false, "__doc__")
 
