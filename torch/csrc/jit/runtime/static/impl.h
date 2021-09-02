@@ -496,9 +496,9 @@ inline bool operator!=(const LiveRange& lhs, const LiveRange& rhs) {
   return !(lhs == rhs);
 }
 
-using LiveRangesMap = std::unordered_map<const Value*, LiveRange>;
+using LiveRangesMap = FastMap<const Value*, LiveRange>;
 
-TORCH_API std::unordered_set<const Value*> GetAlwaysAliveValues(
+TORCH_API FastSet<const Value*> GetAlwaysAliveValues(
     const std::shared_ptr<torch::jit::Graph>& graph,
     AliasDb& db);
 
