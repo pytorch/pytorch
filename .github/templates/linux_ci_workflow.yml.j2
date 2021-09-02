@@ -35,6 +35,7 @@ env:
   BUILD_ENVIRONMENT: !{{ build_environment }}
   DOCKER_IMAGE_BASE: !{{ docker_image_base }}
   SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
+  XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
   TORCH_CUDA_ARCH_LIST: 5.2
   IN_CI: 1
   # This is used for the phase of adding wheel tests only, will be removed once completed
@@ -137,6 +138,7 @@ jobs:
             -e JOB_BASE_NAME \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
+            -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
             -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
             -e SKIP_SCCACHE_INITIALIZATION=1 \
             -e TORCH_CUDA_ARCH_LIST \
@@ -214,6 +216,8 @@ jobs:
       ENABLE_SLOW_TEST: !{{ enable_slow_test }}
       ENABLE_DOCS_TEST: !{{ enable_docs_test }}
       ENABLE_BACKWARDS_COMPAT_TEST: !{{ enable_backwards_compat_test }}
+      ENABLE_XLA_TEST: !{{ enable_xla_test }}
+      ENABLE_NOARCH_TEST: !{{ enable_noarch_test }}
       NUM_TEST_SHARDS: !{{ num_test_shards }}
       MULTIGPU_RUNNER_TYPE: linux.16xlarge.nvidia.gpu
       NOGPU_RUNNER_TYPE: linux.2xlarge
@@ -313,6 +317,7 @@ jobs:
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
             -e http_proxy="!{{ common.squid_proxy }}" -e https_proxy="!{{ common.squid_proxy }}" -e no_proxy="!{{ common.squid_no_proxy }}" \
+            -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
