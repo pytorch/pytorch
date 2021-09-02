@@ -445,12 +445,13 @@ class PackageExporter:
             return
 
         base_module, _, name = module_name.partition(".")
-        pdb.set_trace()
         if base_module in self._selective_interns:
             pattern, matches = self._selective_interns[base_module]
             if not name:
                 self._intern_module(module_name, dependencies)
             elif pattern.matches(name):
+                if base_module not in self.dependency_graph:
+                    self._intern_module(base_module, dependencies)
                 self._intern_module(module_name, dependencies)
                 matches.append(name)
             else:

@@ -29,7 +29,7 @@ class TestDependencyAPI(PackageTestCase):
         with PackageExporter(buffer) as he:
             he.intern("package_b")
             he._selective_intern("package_b", "subpackage_0.**", allow_empty=False)
-            he.save_source_string("foo", "import package_b; import package_b.subpackage_0 as subpackage_0; import package_b.subpackage_1 as subpackage_1")
+            he.save_source_string("foo", "import package_b.subpackage_0 as subpackage_0; import package_b.subpackage_1 as subpackage_1")
 
         # buffer.seek(0)
         hi = PackageImporter(buffer)
@@ -48,7 +48,7 @@ class TestDependencyAPI(PackageTestCase):
         self.assertIs(foo.subpackage_1.subpackage_1_li, package_b.subpackage_1.subpackage_1_li)
 
         # Check that attribute access works correctly on the shim.
-        self.assertIs(foo.package_b.package_b_li, package_b.package_b_li)
+        # self.assertIs(foo.package_b.package_b_li, package_b.package_b_li)
 
     def test_extern(self):
         buffer = BytesIO()
