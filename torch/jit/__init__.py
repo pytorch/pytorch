@@ -211,7 +211,7 @@ def enable_fusion(enabled: bool, device: Optional[str] = None):
         torch._C._jit_override_can_fuse_on_gpu(enabled)
     else:
         assert device in ["cpu", "cuda"], "Device-specific fusion must be equal to 'cpu' or 'cuda' if not None"
-        if device == "cpu":
+        if device == "cuda":
             torch._C._jit_override_can_fuse_on_gpu(enabled)
         else:
             torch._C._jit_override_can_fuse_on_cpu(enabled)
