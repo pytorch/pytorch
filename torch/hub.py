@@ -354,9 +354,9 @@ def load(repo_or_dir, model, *args, source='github', force_reload=False, verbose
     Args:
         repo_or_dir (string): If ``source`` is 'github',
             this should correspond to a github repo with format ``repo_owner/repo_name[:tag_name]`` with
-            an optional tag/branch. If ``tag_name`` is not specified, the default branch is assumed to be
-            ``main`` if it exists, and otherwise ``master``. If ``source`` is 'local'  then it should be
-            a path to a local directory.
+            an optional tag/branch, for example 'pytorch/vision:0.10'. If ``tag_name`` is not specified,
+            the default branch is assumed to be ``main`` if it exists, and otherwise ``master``.
+            If ``source`` is 'local'  then it should be a path to a local directory.
         model (string): the name of a callable (entrypoint) defined in the
             repo/dir's ``hubconf.py``.
         *args (optional): the corresponding args for callable ``model``.
