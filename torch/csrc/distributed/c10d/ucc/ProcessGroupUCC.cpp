@@ -296,9 +296,6 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::send(
     std::vector<at::Tensor>& tensors,
     tagging::world_size_t dstRank,
     tagging::tag_t tag) {
-  static_assert(std::is_same<decltype(tag), tagging::tag_t>::value,
-    "If you updated the type of tag, please check with note [Receive from an endpoint]."
-  );
   check_tensor(tensors);
   TORCH_CHECK(dstRank < ucp_endpoints.size(), "Invalid dest rank");
   auto& tensor = tensors[0];
@@ -314,9 +311,6 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::recv(
     std::vector<at::Tensor>& tensors,
     tagging::world_size_t srcRank,
     tagging::tag_t tag) {
-  static_assert(std::is_same<decltype(tag), tagging::tag_t>::value,
-    "If you updated the type of tag, please check with note [Receive from an endpoint]."
-  );
   check_tensor(tensors);
   TORCH_CHECK(srcRank < ucp_endpoints.size(), "Invalid src rank");
   auto& tensor = tensors[0];
