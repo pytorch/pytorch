@@ -432,7 +432,7 @@ jobs:
             --cap-add=SYS_PTRACE \
             --shm-size="${SHM_SIZE}" \
             --tty \
-            --detatch \
+            --detach \
             --name="${container_name}" \
             --user jenkins \
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
