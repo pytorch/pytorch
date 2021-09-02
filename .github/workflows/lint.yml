@@ -327,7 +327,7 @@ jobs:
         with:
           check_name: ${{ github.job }}
           linter_output_path: flake8-output/annotations.json
-          commit_sha: ${{ github.sha }}
+          commit_sha: ${{ github.event.pull_request.head.sha }}
           mode: json
 
   clang-tidy:
@@ -422,7 +422,7 @@ jobs:
         with:
           check_name: ${{ github.job }}
           linter_output_path: clang-tidy/annotations.json
-          commit_sha: ${{ github.sha }}
+          commit_sha: ${{ github.event.pull_request.head.sha }}
           mode: json
 
   cmakelint:
