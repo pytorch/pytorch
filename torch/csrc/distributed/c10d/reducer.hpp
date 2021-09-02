@@ -8,7 +8,6 @@
 #include <vector>
 
 #include <ATen/core/ivalue_inl.h>
-#include <ATen/ThreadLocalState.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10d/ProcessGroup.hpp>
@@ -206,9 +205,6 @@ class TORCH_API Reducer {
   // each replica, it is a tensor where index i = 1 if the Variable with that
   // index has been used.
   std::vector<at::Tensor> get_local_used_maps_on_device() const;
-
-  // Saves thread local state to be used by autograd engine callbacks.
-  void save_thread_local_state();
 
   // An function for users to set sample_rate of collecting
   // runtime stats. The time stats will be recorded for the
@@ -563,8 +559,6 @@ class TORCH_API Reducer {
 
   // comm_hook_ is used to access the DDP communication hook if registered.
   std::unique_ptr<CommHookInterface> comm_hook_;
-  // Current thread local state
-  at::ThreadLocalState thread_local_state_;
   // Debug level setting. It is parsed once when Reducer is constructed, and
   // remains the same across a single invocation of DDP training.
   DistributedDebugLevel ddp_debug_level_;
@@ -587,6 +581,8 @@ class TORCH_API Reducer {
   // Raises appropriate error if mark_variable_ready is called on the same
   // variable twice, which is unexpected.
   void checkAndRaiseMarkedTwiceError(size_t curVariableIndex);
+  // Retrieves parameter corresponding to the given VariableIndex.
+  at::Tensor& get_param_from_index(size_t index);
 
   // Cached bucket index to model parameter mapping. Populated after buckets
   // are rebuilt after which this mapping is static.

@@ -3,7 +3,7 @@ producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
-    input: "input"
+    input: "0"
     input: "4"
     output: "3"
     name: "PRelu_0"
@@ -19,7 +19,7 @@ graph {
     raw_data: "\000\000\200>\000\000\200>"
   }
   input {
-    name: "input"
+    name: "0"
     type {
       tensor_type {
         elem_type: 1

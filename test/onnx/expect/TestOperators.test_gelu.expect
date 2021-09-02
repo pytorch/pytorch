@@ -16,7 +16,7 @@ graph {
     }
   }
   node {
-    input: "x"
+    input: "0"
     input: "1"
     output: "2"
     name: "Div_1"
@@ -49,7 +49,7 @@ graph {
     op_type: "Add"
   }
   node {
-    input: "x"
+    input: "0"
     input: "5"
     output: "6"
     name: "Mul_5"
@@ -77,7 +77,7 @@ graph {
   }
   name: "torch-jit-export"
   input {
-    name: "x"
+    name: "0"
     type {
       tensor_type {
         elem_type: 1
