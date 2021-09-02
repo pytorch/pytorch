@@ -397,6 +397,9 @@ class TestViewOps(TestCase):
         v[0, 0] = 0
         self.assertEqual(t[0, 0, 1], v[0, 0])
 
+        inverse_t = t.diagonal_scatter(v, offset=1, dim1=1, dim2=2)
+        self.assertEqual(inverse_t, t)
+
     def test_select_view(self, device) -> None:
         t = torch.ones((5, 5), device=device)
         v = t.select(0, 2)
@@ -404,6 +407,10 @@ class TestViewOps(TestCase):
 
         v[0] = 0
         self.assertEqual(t[2, 0], v[0])
+
+        inverse_t = t.select_scatter(v, 0, 2)
+        self.assertEqual(inverse_t, t)
+
 
     def test_unbind_view(self, device) -> None:
         t = torch.zeros((5, 5), device=device)
