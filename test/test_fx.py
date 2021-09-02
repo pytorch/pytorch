@@ -132,21 +132,16 @@ class Foo(object):  # noqa: B209
 
 class TestFX(JitTestCase):
     def setUp(self):
-        if TEST_WITH_ROCM or IS_FBCODE or IS_WINDOWS or IS_MACOS:
-            return
-        lib_file_path = find_library_location('libtorchbind_test.so')
-        torch.ops.load_library(str(lib_file_path))
-
         # Checking for mutable operations whil tracing is feature flagged
         # Enable it in testing but not by default
         self.orig_tracer_mutable_flag = torch.fx.proxy.TracerBase.check_mutable_operations
         torch.fx.proxy.TracerBase.check_mutable_operations = True
-        print('TestFX.setUp', 'id(self)', id(self), 'hasattr(self, orig_tracer_mutable_flag)',
-              hasattr(self, 'orig_tracer_mutable_flag'), 'orig_tracer_mutable_flag', self.orig_tracer_mutable_flag)
+
+        if not (TEST_WITH_ROCM or IS_FBCODE or IS_WINDOWS or IS_MACOS):
+            lib_file_path = find_library_location('libtorchbind_test.so')
+            torch.ops.load_library(str(lib_file_path))
 
     def tearDown(self):
-        print('TestFX.tearDown', 'id(self)', id(self), 'hasattr(self, orig_tracer_mutable_flag)',
-              hasattr(self, 'orig_tracer_mutable_flag'), 'orig_tracer_mutable_flag', self.orig_tracer_mutable_flag)
         torch.fx.proxy.TracerBase.check_mutable_operations = self.orig_tracer_mutable_flag
 
     def checkGraphModule(self, m: torch.nn.Module, args, kwargs=None):
