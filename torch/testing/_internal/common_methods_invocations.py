@@ -1606,15 +1606,29 @@ def sample_inputs_t(op_info, device, dtype, requires_grad, **kwargs):
 
 
 def sample_inputs_mm(op_info, device, dtype, requires_grad, **kwargs):
-    args_list = (
-        ((S, M), (M, S)),
-    )
-    inputs = tuple(SampleInput(make_tensor(first_shape, device, dtype,
-                                           requires_grad=requires_grad),
-                               args=(make_tensor(second_shape, device, dtype,
-                                     requires_grad=requires_grad),))
-                   for first_shape, second_shape in args_list)
-    return inputs
+    first_shape, second_shape = (S, M), (M, S)
+    sample_inputs = []
+    sample_inputs.append(
+        SampleInput(make_tensor(first_shape, device, dtype,
+                                requires_grad=requires_grad),
+                    args=(make_tensor(second_shape, device, dtype,
+                                      requires_grad=requires_grad),)))
+
+    if dtype.is_complex:
+        sample_inputs.append(
+            SampleInput(make_tensor(first_shape, device, dtype,
+                                    requires_grad=requires_grad),
+                        args=(
+                            make_tensor(second_shape, device, dtype,
+                                        requires_grad=requires_grad).conj(),)))
+
+        sample_inputs.append(
+            SampleInput(make_tensor(first_shape, device, dtype,
+                                    requires_grad=requires_grad).transpose(0, 1),
+                        args=(
+                            make_tensor(second_shape, device, dtype,
+                                        requires_grad=requires_grad).transpose(0, 1).conj(),)))
+    return sample_inputs
 
 def sample_inputs_addmm(op_info, device, dtype, requires_grad, **kwargs):
     alpha_val = kwargs.get('alpha', 2 + 3j if dtype.is_complex else 0.6)
@@ -1627,15 +1641,40 @@ def sample_inputs_addmm(op_info, device, dtype, requires_grad, **kwargs):
         ((), (2, 2), (2, 3), True)
     ]
     test_cases = tests_list + tests_with_lhs_broadcasting  # type: ignore[operator]
-    inputs = tuple(SampleInput(make_tensor(shape_a, device, dtype, requires_grad=requires_grad),
-                               args=(make_tensor(shape_b, device, dtype,
-                                                 requires_grad=requires_grad),
-                                     make_tensor(shape_c, device, dtype,
-                                                 requires_grad=requires_grad)),
-                               kwargs={'alpha': alpha_val, 'beta': beta_val},
-                               broadcasts_input=broadcasts_input)
-                   for shape_a, shape_b, shape_c, broadcasts_input in test_cases)
-    return inputs
+
+    sample_inputs = []
+
+    for shape_a, shape_b, shape_c, broadcasts_input in test_cases:
+        sample_inputs.append(
+            SampleInput(
+                make_tensor(shape_a, device, dtype, requires_grad=requires_grad),
+                args=(
+                    make_tensor(shape_b, device, dtype,
+                                requires_grad=requires_grad),
+                    make_tensor(shape_c, device, dtype,
+                                requires_grad=requires_grad)),
+                kwargs={'alpha': alpha_val, 'beta': beta_val},
+                broadcasts_input=broadcasts_input))
+
+    if dtype.is_complex:
+        shape = (3, 3)
+        sample_inputs.append(
+            SampleInput(make_tensor(shape, device, dtype, requires_grad=requires_grad),
+                        args=(
+                            make_tensor(shape, device, dtype,
+                                        requires_grad=requires_grad).t().conj(),
+                            make_tensor(shape, device, dtype,
+                                        requires_grad=requires_grad)),
+                        kwargs={'alpha': alpha_val, 'beta': beta_val},))
+        sample_inputs.append(
+            SampleInput(make_tensor(shape, device, dtype, requires_grad=requires_grad),
+                        args=(
+                            make_tensor(shape, device, dtype,
+                                        requires_grad=requires_grad),
+                            make_tensor(shape, device, dtype,
+                                        requires_grad=requires_grad).t().conj()),
+                        kwargs={'alpha': alpha_val, 'beta': beta_val},))
+    return sample_inputs
 
 def sample_inputs_mv(self, device, dtype, requires_grad, **kwargs):
     return (
@@ -1767,6 +1806,23 @@ def sample_inputs_baddbmm(op_info, device, dtype, requires_grad, **kwargs):
             sample_inputs.append(SampleInput(args[0], args=(args[1], args[2]),
                                              kwargs=dict(beta=beta * (1 + 2j), alpha=alpha * (2 + 3j)),
                                              broadcasts_input=broadcasts_input))
+
+    if dtype.is_complex:
+        shapes = [(S, S, S), (S, M, S), (S, S, M)]
+        args = (make_tensor(shapes[0], device, dtype,
+                            low=None, high=None,
+                            requires_grad=requires_grad),
+                make_tensor(shapes[1], device, dtype,
+                            low=None, high=None,
+                            requires_grad=requires_grad),
+                make_tensor(shapes[2], device, dtype,
+                            low=None, high=None,
+                            requires_grad=requires_grad))
+        sample_inputs.append(
+            SampleInput(
+                args[0].transpose(-1, 1), args=(args[1].transpose(-1, 1).conj(), args[2].transpose(-1, 1).conj()),
+                kwargs=dict(beta=beta * (1 + 2j), alpha=alpha * (2 + 3j)),))
+
     return tuple(sample_inputs)
 
 def sample_inputs_addr(op_info, device, dtype, requires_grad, **kwargs):
@@ -5847,6 +5903,13 @@ op_db: List[OpInfo] = [
                                                     *[torch.bfloat16] if SM53OrLater else [],
                                                     torch.complex64, torch.complex128),
            supports_forward_ad=True,
+           decorators=[
+               DecorateInfo(
+                   toleranceOverride({torch.complex64: tol(atol=1e-05, rtol=1.2e-03)}),
+                   'TestCommon', 'test_variant_consistency_eager', device_type='cuda'),
+               DecorateInfo(
+                   toleranceOverride({torch.complex64: tol(atol=1e-05, rtol=1.2e-03)}),
+                   'TestMathBits', 'test_conj_view', device_type='cuda')],
            skips=(
                # FIXME: bfloat16 backward support likely depends on CUDA11+
                #   and SM53+
@@ -7045,7 +7108,6 @@ op_db: List[OpInfo] = [
            skips=(
                # matmul does not correctly warn when resizing out= inputs
                SkipInfo('TestCommon', 'test_out'),
-               SkipInfo('TestCommon', 'test_conj_view', device_type='cpu'),
            )),
     OpInfo('max',
            op=torch.max,
@@ -7835,6 +7897,10 @@ op_db: List[OpInfo] = [
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_matmul,
            supports_out=False,
+           decorators=[
+               DecorateInfo(
+                   toleranceOverride({torch.complex64: tol(atol=1e-05, rtol=1.2e-03)}),
+                   'TestMathBits', 'test_conj_view')],
            skips=(
                SkipInfo('TestJit', 'test_variant_consistency_jit',),
            )),
