@@ -312,7 +312,7 @@ c10::intrusive_ptr<Message> tensorpipeDeserialize(
   }
 
   size_t tpDescriptorIndex = 0;
-  for (size_t i; i < tensors.size(); i++) {
+  for (size_t i = 0; i < tensors.size(); i++) {
     auto& tensor = tpDescriptor.tensors[tpDescriptorIndex];
     if (tensor.targetDevice.has_value() &&
         tensor.targetDevice->type == tensorpipe::kCudaDeviceType) {
