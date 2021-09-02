@@ -105,8 +105,6 @@ TESTS = discover_tests(
         'test_static_runtime',
         'test_throughput_benchmark',
         'test_typing',
-        "distributed/algorithms/ddp_comm_hooks/test_ddp_hooks",
-        "distributed/algorithms/quantization/test_quantization",
         "distributed/bin/test_script",
         "distributed/elastic/multiprocessing/bin/test_script",
         "distributed/launcher/bin/test_script",
@@ -286,6 +284,8 @@ JIT_EXECUTOR_TESTS = [
 ]
 
 DISTRIBUTED_TESTS = [
+    "distributed/algorithms/ddp_comm_hooks/test_ddp_hooks",
+    "distributed/algorithms/quantization/test_quantization",
     "distributed/test_data_parallel",
     "distributed/test_launcher",
     "distributed/nn/jit/test_instantiator",
