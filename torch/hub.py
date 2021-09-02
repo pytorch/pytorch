@@ -277,7 +277,8 @@ def list(github, force_reload=False, skip_validation=False):
 
     sys.path.insert(0, repo_dir)
 
-    hub_module = import_module(MODULE_HUBCONF, repo_dir + '/' + MODULE_HUBCONF)
+    hubconf_path = os.path.join(repo_dir, MODULE_HUBCONF)
+    hub_module = import_module(MODULE_HUBCONF, hubconf_path)
 
     sys.path.remove(repo_dir)
 
@@ -307,7 +308,8 @@ def help(github, model, force_reload=False, skip_validation=False):
 
     sys.path.insert(0, repo_dir)
 
-    hub_module = import_module(MODULE_HUBCONF, repo_dir + '/' + MODULE_HUBCONF)
+    hubconf_path = os.path.join(repo_dir, MODULE_HUBCONF)
+    hub_module = import_module(MODULE_HUBCONF, hubconf_path)
 
     sys.path.remove(repo_dir)
 
