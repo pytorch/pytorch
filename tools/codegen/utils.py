@@ -158,7 +158,7 @@ class FileManager:
     def write_sharded(
             self,
             filename: str,
-            items: Sequence[T],
+            items: Iterable[T],
             *,
             key_fn: Callable[[T], str],
             env_callable: Callable[[T], Dict[str, List[str]]],

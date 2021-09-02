@@ -1,25 +1,26 @@
 from torch.utils.data import IterDataPipe, functional_datapipe, DataChunk
 from typing import Callable, TypeVar, Iterator, Optional, Tuple, Dict
 
-from .callable import MapIterDataPipe
+from .callable import MapperIterDataPipe
 
 T_co = TypeVar('T_co', covariant=True)
 
 
 @functional_datapipe('filter')
-class FilterIterDataPipe(MapIterDataPipe):
+class FilterIterDataPipe(MapperIterDataPipe):
     r""" :class:`FilterIterDataPipe`.
 
     Iterable DataPipe to filter elements from datapipe according to filter_fn.
-    args:
+
+    Args:
         datapipe: Iterable DataPipe being filtered
         filter_fn: Customized function mapping an element to a boolean.
         fn_args: Positional arguments for `filter_fn`
         fn_kwargs: Keyword arguments for `filter_fn`
         drop_empty_batches: By default, drops batch if it is empty after filtering instead of keeping an empty list
         nesting_level: Determines which level the fn gets applied to, by default it applies to the top level (= 0).
-        This also accepts -1 as input to apply filtering to the lowest nesting level. It currently doesn't support
-        argument < -1.
+            This also accepts -1 as input to apply filtering to the lowest nesting level.
+            It currently doesn't support argument < -1.
     """
     drop_empty_batches: bool
 
