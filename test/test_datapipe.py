@@ -1626,6 +1626,27 @@ class TestSharding(TestCase):
 
         self.assertEqual(sorted(all_items), sorted(items))
 
+    def test_sharding_length(self):
+        numbers_dp = IDP(range(13))
+        sharded_dp0 = numbers_dp.sharding_filter()
+        torch.utils.data.sharding.apply_sharding(sharded_dp0, 3, 0)
+        sharded_dp1 = numbers_dp.sharding_filter()
+        torch.utils.data.sharding.apply_sharding(sharded_dp1, 3, 1)
+        sharded_dp2 = numbers_dp.sharding_filter()
+        torch.utils.data.sharding.apply_sharding(sharded_dp2, 3, 2)
+        self.assertEqual(13, len(numbers_dp))
+        self.assertEqual(5, len(sharded_dp0))
+        self.assertEqual(4, len(sharded_dp1))
+        self.assertEqual(4, len(sharded_dp2))
+
+        numbers_dp = IDP(range(1))
+        sharded_dp0 = numbers_dp.sharding_filter()
+        torch.utils.data.sharding.apply_sharding(sharded_dp0, 2, 0)
+        sharded_dp1 = numbers_dp.sharding_filter()
+        torch.utils.data.sharding.apply_sharding(sharded_dp1, 2, 1)
+        self.assertEqual(1, len(sharded_dp0))
+        self.assertEqual(0, len(sharded_dp1))
+
     @skipIfNoDill
     def test_old_dataloader(self):
         dp = self._get_pipeline()
