@@ -114,7 +114,7 @@ class TORCH_API StaticModule {
  private:
   explicit StaticModule(
       std::pair<std::shared_ptr<torch::jit::Graph>, std::shared_ptr<Module>>
-      graph_and_module,
+          graph_and_module,
       const StaticModuleOptions& opts);
 
   // for <kind, idx>
