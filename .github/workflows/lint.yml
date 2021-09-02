@@ -304,11 +304,6 @@ jobs:
             --regex='^(?P<filename>.*?):(?P<lineNumber>\d+):(?P<columnNumber>\d+): (?P<errorCode>\w+\d+) (?P<errorDesc>.*)' \
             --commit="$HEAD_SHA" \
             > flake8-output/annotations.json
-      - name: Upload artifact
-        uses: actions/upload-artifact@v2
-        with:
-          name: flake8-py3
-          path: flake8-output/
       - name: Fail if there were any warnings
         run: |
           set -eu
@@ -325,7 +320,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          check_name: ${{ github.job }}
+          check_name: 'flake8-py3'
           linter_output_path: flake8-output/annotations.json
           commit_sha: ${{ github.event.pull_request.head.sha }}
           mode: json
@@ -399,11 +394,6 @@ jobs:
             --regex='^(?P<filename>.*?):(?P<lineNumber>\d+):(?P<columnNumber>\d+): (?P<errorDesc>.*?) \[(?P<errorCode>.*)\]' \
             --commit="$HEAD_SHA" \
             > clang-tidy-output/annotations.json
-      - name: Upload artifact
-        uses: actions/upload-artifact@v2
-        with:
-          name: clang-tidy
-          path: clang-tidy-output/
       - name: Check for warnings
         run: |
           cd "${GITHUB_WORKSPACE}"
@@ -420,7 +410,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          check_name: ${{ github.job }}
+          check_name: 'clang-tidy'
           linter_output_path: clang-tidy/annotations.json
           commit_sha: ${{ github.event.pull_request.head.sha }}
           mode: json
