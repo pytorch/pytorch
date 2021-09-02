@@ -96,6 +96,8 @@ class Dataset(Generic[T_co]):
             if isinstance(result_pipe, Dataset):
                 if enable_df_api_tracing or isinstance(source_dp, DFIterDataPipe):
                     if function_name not in UNTRACABLE_DATAFRAME_PIPES:
+                        warnings.warn("Results %s of calling %s over %s got promoted to DF" %
+                                      (type(result_pipe), function_name, type(source_dp)))
                         result_pipe = result_pipe.trace_as_dataframe()
 
             return result_pipe
