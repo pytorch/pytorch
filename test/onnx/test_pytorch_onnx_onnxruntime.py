@@ -4170,7 +4170,7 @@ class TestONNXRuntime(unittest.TestCase):
     def test_and_or_xor(self):
         class MyModel(torch.nn.Module):
             def forward(self, x, y):
-                return x ^ y, x | y, x & y
+                return x ^ y, x | y, x & y, ~x
 
         x = torch.randint(0, 2, (5, 5), dtype=torch.bool)
         y = torch.randint(0, 2, (5, 5), dtype=torch.bool)
