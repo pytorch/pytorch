@@ -271,12 +271,12 @@
     CPU, CUDA: angle_out
 
 - func: view_as_real(Tensor(a) self) -> Tensor(a)
-  variants: function
+  variants: function, method
   dispatch:
     CPU, CUDA: view_as_real
 
 - func: view_as_complex(Tensor(a) self) -> Tensor(a)
-  variants: function
+  variants: function, method
   dispatch:
     CPU, CUDA: view_as_complex
 
@@ -3846,6 +3846,27 @@
   device_guard: False
   dispatch:
     CompositeExplicitAutograd: slice
+
+- func: slice_scatter(Tensor self, Tensor mutated_view, int dim=0, int? start=None, int? end=None, int step=1) -> Tensor
+  variants: function, method
+  device_check: NoCheck
+  device_guard: False
+  dispatch:
+    CPU, CUDA: slice_scatter
+
+- func: select_scatter(Tensor self, Tensor mutated_view, int dim, int index) -> Tensor
+  variants: function, method
+  device_check: NoCheck
+  device_guard: False
+  dispatch:
+    CPU, CUDA: select_scatter
+
+- func: diagonal_scatter(Tensor self, Tensor mutated_view, int offset=0, int dim1=0, int dim2=1) -> Tensor
+  variants: function, method
+  device_check: NoCheck
+  device_guard: False
+  dispatch:
+    CPU, CUDA: diagonal_scatter
 
 - func: slice_backward(Tensor grad, int[] input_sizes, int dim, int start, int end, int step) -> Tensor
   variants: function

@@ -1234,6 +1234,21 @@
   self: slice_backward_wrapper(grad, self.sizes(), dim, start, end, step)
   result: auto_linear
 
+- name: slice_scatter(Tensor self, Tensor mutated_view, int dim=0, int? start=None, int? end=None, int step=1) -> Tensor
+  self: slice_scatter(at::ones(self.sizes(), self.options()), at::zeros(mutated_view.sizes(), mutated_view.options()), dim, start, end, step)
+  mutated_view: slice_scatter(at::zeros(self.sizes(), self.options()), at::ones(mutated_view.sizes(), mutated_view.options()), dim, start, end, step)
+  result: auto_linear
+
+- name: select_scatter(Tensor self, Tensor mutated_view, int dim, int index) -> Tensor
+  self: select_scatter(at::ones(self.sizes(), self.options()), at::zeros(mutated_view.sizes(), mutated_view.options()), dim, index)
+  mutated_view: select_scatter(at::zeros(self.sizes(), self.options()), at::ones(mutated_view.sizes(), mutated_view.options()), dim, index)
+  result: auto_linear
+
+- name: diagonal_scatter(Tensor self, Tensor mutated_view, int offset=0, int dim1=0, int dim2=1) -> Tensor
+  self: diagonal_scatter(at::ones(self.sizes(), self.options()), at::zeros(mutated_view.sizes(), mutated_view.options()), offset, dim1, dim2)
+  mutated_view: diagonal_scatter(at::zeros(self.sizes(), self.options()), at::ones(mutated_view.sizes(), mutated_view.options()), offset, dim1, dim2)
+  result: auto_linear
+
 - name: slogdet(Tensor self) -> (Tensor sign, Tensor logabsdet)
   self: slogdet_backward(grad, self, sign, logabsdet)
   output_differentiability: [false, true]

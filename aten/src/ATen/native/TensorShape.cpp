@@ -2456,4 +2456,21 @@ std::vector<Tensor> unflatten_dense_tensors(const Tensor& flat, TensorList tenso
   return outputs;
 }
 
-}} // at::native
+at::Tensor slice_scatter(const at::Tensor& base, const at::Tensor& mutated_view, int64_t dim, c10::optional<int64_t> start, c10::optional<int64_t> end, int64_t step) {
+    auto output = base.clone();
+    output.slice(dim, start, end, step).copy_(mutated_view);
+    return output;
+}
+at::Tensor select_scatter(const at::Tensor& base, const at::Tensor& mutated_view, int64_t dim, int64_t index) {
+    auto output = base.clone();
+    output.select(dim, index).copy_(mutated_view);
+    return output;
+}
+at::Tensor diagonal_scatter(const at::Tensor& base, const at::Tensor& mutated_view, int64_t offset, int64_t dim1, int64_t dim2) {
+    auto output = base.clone();
+    output.diagonal(offset, dim1, dim2).copy_(mutated_view);
+    return output;
+}
+
+} // namespace native
+} // namespace at
