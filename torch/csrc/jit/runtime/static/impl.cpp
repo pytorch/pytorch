@@ -121,7 +121,7 @@ bool mayContainAlias(
   }
   return db.mayContainAlias(as, bs);
 }
-}
+} // namespace
 
 // Get set of all inputs/outputs/constants (always alive) and their aliases
 FastSet<const Value*> GetAlwaysAliveValues(
@@ -171,10 +171,10 @@ std::pair<LivenessMap, LiveRangesMap> GetLiveness(
   // map Values to its creation order in graph (Note: only traverse top-level
   // nodes such that nodes under control-flows are represented by top-level
   // block nodes)
-  int idx = 1;
+  size_t idx = 0;
   std::vector<const Value*> values_in_creation_order;
   FastMap<const Value*, size_t> values_to_idx_in_creation_order;
-  std::unordered_map<const Node*, size_t> nodes_to_idx_in_topo_order;
+  FastMap<const Node*, size_t> nodes_to_idx_in_topo_order;
   for (const auto* node : graph->nodes()) {
     nodes_to_idx_in_topo_order[node] = idx++;
     for (const auto* v : node->outputs()) {
@@ -183,9 +183,8 @@ std::pair<LivenessMap, LiveRangesMap> GetLiveness(
     }
   }
 
-  std::unordered_map<const Value*, size_t> value_creation_topo_idx;
-  std::unordered_map<const Value*, std::unordered_set<size_t>>
-      value_use_topo_idxs;
+  FastMap<const Value*, size_t> value_creation_topo_idx;
+  FastMap<const Value*, FastSet<size_t>> value_use_topo_idxs;
 
   // presence of a Value in live_values_use_chain means the Value alive
   // Value mapped to set of Nodes that may use the Value (i.e., use-chain of
@@ -322,7 +321,8 @@ std::pair<LivenessMap, LiveRangesMap> GetLiveness(
     auto idxs = item.second;
 
     live_ranges[value] = {
-        value_creation_topo_idx[value], *std::max_element(begin(idxs), end(idxs))};
+        value_creation_topo_idx[value],
+        *std::max_element(begin(idxs), end(idxs))};
   }
 
   return std::make_pair(liveness_map, live_ranges);
