@@ -2020,6 +2020,36 @@ class TestAutograd(TestCase):
         gradcheck(func, [x])
         gradgradcheck(func, [x])
 
+    def test_select_scatter(self):
+        x = torch.randn(5, 5, dtype=torch.double, requires_grad=True)
+        v = torch.randn(5, dtype=torch.double, requires_grad=True)
+
+        def func(x, v):
+            return x.select_scatter(v, 0, 0).sum()
+
+        gradcheck(func, [x, v])
+        gradgradcheck(func, [x, v])
+
+    def test_slice_scatter(self):
+        x = torch.randn(5, 5, dtype=torch.double, requires_grad=True)
+        v = torch.randn(5, dtype=torch.double, requires_grad=True)
+
+        def func(x, v):
+            return x.slice_scatter(v, 0).sum()
+
+        gradcheck(func, [x, v])
+        gradgradcheck(func, [x, v])
+
+    def test_diagonal_scatter(self):
+        x = torch.randn(5, 5, dtype=torch.double, requires_grad=True)
+        v = torch.randn(5, dtype=torch.double, requires_grad=True)
+
+        def func(x, v):
+            return x.diagonal_scatter(v).sum()
+
+        gradcheck(func, [x, v])
+        gradgradcheck(func, [x, v])
+
     def test_diagonal_expanded_v(self):
         value = torch.rand([])
         v_expanded = torch.tensor(value).expand(10)
@@ -3450,7 +3480,7 @@ class TestAutograd(TestCase):
         gradient_penalty.backward()
 
         fn = gradient_penalty.grad_fn.next_functions[0][0].next_functions[1][0]
-        self.assertEqual(fn.name(), "ThresholdBackwardBackward")
+        self.assertEqual(fn.name(), "ThresholdBackwardBackward0")
 
     def test_inplace_on_view_weak_grad_fn(self):
         # Issue 23502: Test that b's grad_fn is preserved.
@@ -4859,7 +4889,7 @@ for shape in [(1,), ()]:
         # The 3 elements are for view_as, first output of unbind and second output of unbind
         run_test(grad_mode=True, requires_grad=False, is_view=True,
                  should_raise_tuple=(None, None, None))
-        inp_change_err = "Output {} of UnbindBackward is a view and is being modified inplace."
+        inp_change_err = "Output {} of UnbindBackward0 is a view and is being modified inplace."
         run_test(grad_mode=True, requires_grad=True, is_view=True,
                  should_raise_tuple=(None, inp_change_err.format("0"), inp_change_err.format("1")))
         leaf_grad_err = "A view was created in no_grad mode and is being modified inplace"
