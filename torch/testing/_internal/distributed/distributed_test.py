@@ -5074,6 +5074,12 @@ class DistributedTest:
                     ddp_logging_data.get("gloo_device_transport"),
                     parse_env("GLOO_DEVICE_TRANSPORT"),
                 )
+                default_gloo_threads = 2
+                self.assertEqual(
+                    ddp_logging_data.get("gloo_num_threads"),
+                    default_gloo_threads,
+                )
+
             self.assertEqual(ddp_logging_data.get("nccl_socket_ifname"), None)
             self.assertEqual(ddp_logging_data.get("nccl_blocking_wait"), None)
             self.assertEqual(ddp_logging_data.get("nccl_async_error_handling"), None)
