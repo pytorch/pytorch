@@ -1055,7 +1055,7 @@ at::Tensor _convolution_nogroup(
         } else {
           /* CPU implementation has specialized MM kernels
              for non-dilated case here */
-          return at::_slow_conv2d(
+          return at::thnn_conv2d(
               input, weight, kernel_size, bias,
               stride, padding);
         }

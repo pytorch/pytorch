@@ -164,13 +164,6 @@ void slow_conv2d_forward(
       auto input_n = input.select(0, elt);
       auto output_n = output.select(0, elt);
 
-      // Do Bias first:
-      // M,N,K are dims of matrix A and B
-      // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
-      int64_t m_ = nOutputPlane;
-      int64_t n_ = outputHeight * outputWidth;
-      int64_t k_ = 1;
-
       if (requires_columns) {
         // Extract columns:
         at::native::im2col(
@@ -282,24 +275,17 @@ void slow_conv2d_backward(
   });
 }
 
-void slow_conv2d_grad_weight_bias(
+void slow_conv2d_grad_weight(
            const Tensor &input,
            const Tensor &grad_output,
            const Tensor &grad_weight_,
-           const Tensor &grad_bias,
            const Tensor &columns,
            int64_t kH, int64_t kW,
            int64_t dH, int64_t dW,
            int64_t padH, int64_t padW) {
-  if (grad_weight_.defined()) {
-    TORCH_CHECK(grad_weight_.is_contiguous(), "grad_weight needs to be contiguous");
-  }
-  if (grad_bias.defined()) {
-    TORCH_CHECK(grad_bias.is_contiguous(), "grad_bias needs to be contiguous");
-  }
-
+  TORCH_CHECK(grad_weight_.is_contiguous(), "grad_weight needs to be contiguous");
   auto grad_weight = new_view_weight_MM2d(grad_weight_);
-  slow_conv2d_shape_check(input, grad_output, grad_weight, grad_bias,
+  slow_conv2d_shape_check(input, grad_output, grad_weight, {},
                           kH, kW, dH, dW, padH, padW, /*weight_nullable=*/true);
 
   // Params
@@ -324,56 +310,48 @@ void slow_conv2d_grad_weight_bias(
   const bool requires_columns = (
       kW != 1 || kH != 1 || dW != 1 || dH != 1 || padH != 0 || padW != 0);
 
-  if (grad_bias.defined()) {
-    Tensor grad_bias_mut = grad_bias;
-    at::sum_out(grad_bias_mut, grad_output, IntArrayRef{0, 2, 3});
-  }
-
   AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(),
-                                  "slow_conv2d_grad_weight_bias_cuda", [&] {
+                                  "slow_conv2d_grad_weight_cuda", [&] {
     // For each elt in batch, do:
     for (int elt = 0; elt < batchSize; elt ++) {
       // Matrix mulitply per output:
       auto grad_output_n = grad_output.select(0, elt);
 
-      // Do Weight:
-      if (grad_weight.defined()) {
-        // Matrix mulitply per output:
-        auto input_n = input.select(0, elt);
+      // Matrix mulitply per output:
+      auto input_n = input.select(0, elt);
 
-        if (requires_columns) {
-          // Extract columns:
-          at::native::im2col<scalar_t>(
-            c10::cuda::getCurrentCUDAStream(),
-            input_n.data_ptr<scalar_t>(),
-            nInputPlane, inputHeight, inputWidth,
-            outputHeight, outputWidth,
-            kH, kW, padH, padW, dH, dW,
-            1, 1,
-            columns.data_ptr<scalar_t>()
-          );
-        }
-
-        // M,N,K are dims of matrix A and B
-        // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
-        int64_t m = nOutputPlane;
-        int64_t n = nInputPlane*kW*kH;
-        int64_t k = columns.sizes()[1];
-
-        // Do GEMM (note: this is a bit confusing because gemm assumes column-major matrices)
-        auto gemm_in_ptr = requires_columns ?
-            columns.data_ptr<scalar_t>() :
-            input_n.data_ptr<scalar_t>();
-        at::cuda::blas::gemm(
-            't', 'n',
-            n, m, k,
-            scalar_t(1),
-            gemm_in_ptr, k,
-            grad_output_n.data_ptr<scalar_t>(), k,
-            scalar_t(1),
-            grad_weight.data_ptr<scalar_t>(), n
+      if (requires_columns) {
+        // Extract columns:
+        at::native::im2col<scalar_t>(
+          c10::cuda::getCurrentCUDAStream(),
+          input_n.data_ptr<scalar_t>(),
+          nInputPlane, inputHeight, inputWidth,
+          outputHeight, outputWidth,
+          kH, kW, padH, padW, dH, dW,
+          1, 1,
+          columns.data_ptr<scalar_t>()
         );
       }
+
+      // M,N,K are dims of matrix A and B
+      // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
+      int64_t m = nOutputPlane;
+      int64_t n = nInputPlane*kW*kH;
+      int64_t k = columns.sizes()[1];
+
+      // Do GEMM (note: this is a bit confusing because gemm assumes column-major matrices)
+      auto gemm_in_ptr = requires_columns ?
+          columns.data_ptr<scalar_t>() :
+          input_n.data_ptr<scalar_t>();
+      at::cuda::blas::gemm(
+          't', 'n',
+          n, m, k,
+          scalar_t(1),
+          gemm_in_ptr, k,
+          grad_output_n.data_ptr<scalar_t>(), k,
+          scalar_t(1),
+          grad_weight.data_ptr<scalar_t>(), n
+      );
     }
   });
 }
@@ -461,13 +439,16 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv2d_backward_out_cuda(
         stride[0], stride[1],
         padding[0], padding[1]);
   }
-  if (grad_weight.defined() || grad_bias.defined()) {
+  if (grad_bias.defined()) {
+    Tensor grad_bias_mut = grad_bias;
+    at::sum_out(grad_bias_mut, *grad_output, IntArrayRef{0, 2, 3});
+  }
+  if (grad_weight.defined()) {
     auto self = self_.expect_contiguous();
-    slow_conv2d_grad_weight_bias(
+    slow_conv2d_grad_weight(
         *self,
         *grad_output,
         grad_weight,
-        grad_bias,
         finput,
         kernel_size[0], kernel_size[1],
         stride[0], stride[1],

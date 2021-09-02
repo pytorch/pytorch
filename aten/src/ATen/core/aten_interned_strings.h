@@ -700,7 +700,7 @@ _(aten, th_pow) \
 _(aten, th_resize_as) \
 _(aten, th_tensor) \
 _(aten, th_zero) \
-_(aten, _slow_conv2d) \
+_(aten, thnn_conv2d) \
 _(aten, _slow_conv2d_backward) \
 _(aten, _slow_conv2d_forward) \
 _(aten, tile) \
