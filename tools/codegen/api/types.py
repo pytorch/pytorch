@@ -2,7 +2,7 @@ from tools.codegen.model import (Argument, FunctionSchema, NativeFunction,
                                  BackendIndex,
                                  SelfArgument, TensorOptionsArguments, BaseTy)
 from dataclasses import dataclass
-from typing import Optional, Union, Sequence, TypeVar, List, Set, Dict
+from typing import Optional, Union, Sequence, TypeVar, List, Set, Dict, Callable
 from enum import Enum
 
 _T = TypeVar('_T')
@@ -22,6 +22,10 @@ ArgName = Union[str, SpecialArgName]
 class BaseCppType:
     ns: Optional[str]
     name: str
+    # This is only applicable to C++ reference types, like IntArrayRef and OptionalScalarRef.
+    # If defined, it describes a function that takes in the name of a variable of the given type,
+    # and emits code to generate a copy.
+    copy_ref_type: Optional[Callable[[str], str]] = None
 
     def __str__(self) -> str:
         if self.ns is None or self.ns == '':
@@ -38,19 +42,21 @@ stringT = BaseCppType('c10', 'string_view')
 generatorT = BaseCppType('at', 'Generator')
 scalarTypeT = BaseCppType('at', 'ScalarType')
 tensorT = BaseCppType('at', 'Tensor')
-optionalTensorRefT = BaseCppType('at', 'OptionalTensorRef')
+optionalTensorRefT = BaseCppType('at', 'OptionalTensorRef',
+                                 copy_ref_type=lambda x: f'{x}.has_value() ? c10::make_optional({x}) : c10::nullopt')
 tensorListT = BaseCppType('at', 'TensorList')
 dimnameT = BaseCppType('at', 'Dimname')
 dimnameListT = BaseCppType('at', 'DimnameList')
 layoutT = BaseCppType('at', 'Layout')
 deviceT = BaseCppType('at', 'Device')
 scalarT = BaseCppType('at', 'Scalar')
-optionalScalarRefT = BaseCppType('at', 'OptionalScalarRef')
+optionalScalarRefT = BaseCppType('at', 'OptionalScalarRef',
+                                 copy_ref_type=lambda x: f'{x}.has_value() ? c10::make_optional({x}) : c10::nullopt')
 memoryFormatT = BaseCppType('at', 'MemoryFormat')
 qschemeT = BaseCppType('at', 'QScheme')
 storageT = BaseCppType('at', 'Storage')
 streamT = BaseCppType('at', 'Stream')
-intArrayRefT = BaseCppType('at', 'IntArrayRef')
+intArrayRefT = BaseCppType('at', 'IntArrayRef', copy_ref_type=lambda x: f'{x}.vec()')
 tensorOptionsT = BaseCppType('at', 'TensorOptions')
 typeAndSizeT = BaseCppType('torch::autograd::generated', 'TypeAndSize')
 tensorGeometryT = BaseCppType('at', 'TensorGeometry')
@@ -90,6 +96,13 @@ class BaseCType:
     def remove_const_ref(self) -> 'CType':
         return self
 
+    def is_ref_type(self) -> bool:
+        return self.type.copy_ref_type is not None
+
+    def copy_ref_type(self, var: str) -> str:
+        assert self.type.copy_ref_type is not None
+        return self.type.copy_ref_type(var)
+
 @dataclass(frozen=True)
 class ConstRefCType:
     elem: 'CType'
@@ -104,6 +117,16 @@ class ConstRefCType:
 
     def remove_const_ref(self) -> 'CType':
         return self.elem.remove_const_ref()
+
+    # is_ref_type refers to whether copying the type by value ensures ownership.
+    # for example, copying an IntArrayRef by value won't actually give a the function has ownership of the underying pointer.
+    # But we can always pass a reference type to a function that takes objects by value.
+    def is_ref_type(self) -> bool:
+        return self.elem.is_ref_type()
+
+    def copy_ref_type(self, var: str) -> str:
+        assert self.is_ref_type()
+        return self.elem.copy_ref_type(var)
 
 @dataclass(frozen=True)
 class MutRefCType:
@@ -120,6 +143,16 @@ class MutRefCType:
     def remove_const_ref(self) -> 'CType':
         return self.elem.remove_const_ref()
 
+    # is_ref_type refers to whether copying the type by value ensures ownership.
+    # for example, copying an IntArrayRef by value won't actually give a the function has ownership of the underying pointer.
+    # But we can always pass a reference type to a function that takes objects by value.
+    def is_ref_type(self) -> bool:
+        return self.elem.is_ref_type()
+
+    def copy_ref_type(self, var: str) -> str:
+        assert self.is_ref_type()
+        return self.elem.copy_ref_type(var)
+
 @dataclass(frozen=True)
 class OptionalCType:
     elem: 'CType'
@@ -133,6 +166,13 @@ class OptionalCType:
 
     def remove_const_ref(self) -> 'CType':
         return OptionalCType(self.elem.remove_const_ref())
+
+    def is_ref_type(self) -> bool:
+        return self.elem.is_ref_type()
+
+    def copy_ref_type(self, var: str) -> str:
+        assert self.is_ref_type()
+        return f'{var}.has_value() ? c10::make_optional({self.elem.copy_ref_type(var)}) : c10::nullopt'
 
 @dataclass(frozen=True)
 class ListCType:
@@ -148,6 +188,19 @@ class ListCType:
     def remove_const_ref(self) -> 'CType':
         return ListCType(self.elem.remove_const_ref())
 
+    def is_ref_type(self) -> bool:
+        return self.elem.is_ref_type()
+
+    def copy_ref_type(self, var: str) -> str:
+        assert self.is_ref_type()
+        # Note [Containers of C++ reference types]
+        # This won't actually compile, since there isn't a c10::list constructs that takes in an existing list + a lambda.
+        # I don't expect to hit this case though, so I didn't create one.
+        # Currently, this logic is only used for view ops in the functionalization codegen.
+        # For example, if there's a view operator that has a c10::List<OptionalTensorRef> as an argument,
+        # we'll need this to really work.
+        return f'{self.cpp_type()}({var}, []({self.elem.cpp_type()} x) {{ return {self.elem.copy_ref_type("x")}; }})'
+
 @dataclass(frozen=True)
 class ArrayRefCType:
     elem: 'CType'
@@ -162,6 +215,14 @@ class ArrayRefCType:
     def remove_const_ref(self) -> 'CType':
         return ArrayRefCType(self.elem.remove_const_ref())
 
+    def is_ref_type(self) -> bool:
+        return True
+
+    def copy_ref_type(self, var: str) -> str:
+        assert self.is_ref_type()
+        # Note [Containers of C++ reference types]
+        return f'{self.cpp_type()}({var}, []({self.elem.cpp_type()} x) {{ return {self.elem.copy_ref_type("x")}; }})'
+
 @dataclass(frozen=True)
 class VectorCType:
     elem: 'CType'
@@ -175,6 +236,14 @@ class VectorCType:
 
     def remove_const_ref(self) -> 'CType':
         return VectorCType(self.elem.remove_const_ref())
+
+    def is_ref_type(self) -> bool:
+        return self.elem.is_ref_type()
+
+    def copy_ref_type(self, var: str) -> str:
+        assert self.is_ref_type()
+        # Note [Containers of C++ reference types]
+        return f'{self.cpp_type()}({var}, []({self.elem.cpp_type()} x) {{ return {self.elem.copy_ref_type("x")}; }})'
 
 @dataclass(frozen=True)
 class ArrayCType:
@@ -191,6 +260,14 @@ class ArrayCType:
     def remove_const_ref(self) -> 'CType':
         return ArrayCType(self.elem.remove_const_ref(), self.size)
 
+    def is_ref_type(self) -> bool:
+        return self.elem.is_ref_type()
+
+    def copy_ref_type(self, var: str) -> str:
+        assert self.is_ref_type()
+        # Note [Containers of C++ reference types]
+        return f'{self.cpp_type()}({var}, []({self.elem.cpp_type()} x) {{ return {self.elem.copy_ref_type("x")}; }})'
+
 @dataclass(frozen=True)
 class TupleCType:
     elems: List['CType']
@@ -204,6 +281,19 @@ class TupleCType:
 
     def remove_const_ref(self) -> 'CType':
         return TupleCType([e.remove_const_ref() for e in self.elems])
+
+    def is_ref_type(self) -> bool:
+        return any(x.is_ref_type() for x in self.elems)
+
+    def copy_ref_type(self, var: str) -> str:
+        assert self.is_ref_type()
+        # Note [Containers of C++ reference types]
+        # See the note - this feels especially like overkill, since it's unlikely we'll ever have a view ops that
+        # takes a std::tuple<OptionalScalarRef, ...> as an argument.
+        arg_names = [f'::std::get<{i}>({var})' for i, x in enumerate(self.elems)]
+        copy_each_arg = ', '.join([
+            f'{ctype.copy_ref_type(name)}' if ctype.is_ref_type() else name for name, ctype in zip(arg_names, self.elems)])
+        return f'{self.cpp_type()}({copy_each_arg})'
 
 CType = Union[
     BaseCType,
