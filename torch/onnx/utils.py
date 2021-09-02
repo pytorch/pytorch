@@ -790,9 +790,8 @@ def _set_input_and_output_names(graph, input_names, output_names):
                 identity_node.output().setType(node.type())
                 graph.return_node().replaceInput(i, identity_node.output())
                 node = identity_node.output()
-            else:
-                node_set.add(node)
 
+            node_set.add(node)
             if node.debugName() != name:
                 node.setDebugName(name)
 
