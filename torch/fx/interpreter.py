@@ -3,8 +3,10 @@ from .graph import Graph
 from .node import Argument, Node, Target, map_arg, map_aggregate
 from .proxy import Proxy
 from ._symbolic_trace import Tracer
+from ._compatibility import compatibility
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
+@compatibility(is_backward_compatible=True)
 class Interpreter:
     """
     An Interpreter executes an FX graph Node-by-Node. This pattern
@@ -59,6 +61,7 @@ class Interpreter:
             execution. This can be disabled to, for example, examine all of the intermediate
             values in the execution by looking at the ``Interpreter.env`` attribute.
     """
+    @compatibility(is_backward_compatible=True)
     def __init__(self, module : GraphModule, garbage_collect_values : bool = True):
         assert isinstance(module, GraphModule)
         self.module = module
@@ -84,6 +87,7 @@ class Interpreter:
                 map_arg(node.args, lambda n: register_last_uses(n, node))
                 map_arg(node.kwargs, lambda n: register_last_uses(n, node))
 
+    @compatibility(is_backward_compatible=True)
     def run(self, *args, initial_env : Optional[Dict[Node, Any]] = None) -> Any:
         """
         Run `module` via interpretation and return the result.
@@ -123,6 +127,7 @@ class Interpreter:
                 output_val = self.env[node]
                 return output_val
 
+    @compatibility(is_backward_compatible=True)
     def run_node(self, n : Node) -> Any:
         """
         Run a specific node ``n`` and return the result.
@@ -142,7 +147,7 @@ class Interpreter:
         return getattr(self, n.op)(n.target, args, kwargs)
 
     # Main Node running APIs
-
+    @compatibility(is_backward_compatible=True)
     def placeholder(self, target : 'Target', args : Tuple[Argument, ...], kwargs : Dict[str, Any]) -> Any:
         """
         Execute a ``placeholder`` node. Note that this is stateful:
@@ -168,6 +173,7 @@ class Interpreter:
         else:
             return next(self.args_iter)
 
+    @compatibility(is_backward_compatible=True)
     def get_attr(self, target : 'Target', args : Tuple[Argument, ...], kwargs : Dict[str, Any]) -> Any:
         """
         Execute a ``get_attr`` node. Will retrieve an attribute
@@ -186,6 +192,7 @@ class Interpreter:
         assert isinstance(target, str)
         return self.fetch_attr(target)
 
+    @compatibility(is_backward_compatible=True)
     def call_function(self, target : 'Target', args : Tuple[Argument, ...], kwargs : Dict[str, Any]) -> Any:
         """
         Execute a ``call_function`` node and return the result.
@@ -205,6 +212,7 @@ class Interpreter:
         # Execute the function and return the result
         return target(*args, **kwargs)
 
+    @compatibility(is_backward_compatible=True)
     def call_method(self, target : 'Target', args : Tuple[Argument, ...], kwargs : Dict[str, Any]) -> Any:
         """
         Execute a ``call_method`` node and return the result.
@@ -226,6 +234,7 @@ class Interpreter:
         assert isinstance(target, str)
         return getattr(self_obj, target)(*args_tail, **kwargs)
 
+    @compatibility(is_backward_compatible=True)
     def call_module(self, target : 'Target', args : Tuple[Argument, ...], kwargs : Dict[str, Any]) -> Any:
         """
         Execute a ``call_module`` node and return the result.
@@ -248,6 +257,7 @@ class Interpreter:
 
         return submod(*args, **kwargs)
 
+    @compatibility(is_backward_compatible=True)
     def output(self, target : 'Target', args : Tuple[Argument, ...], kwargs : Dict[str, Any]) -> Any:
         """
         Execute an ``output`` node. This really just retrieves
@@ -266,7 +276,7 @@ class Interpreter:
         return args[0]
 
     # Helper methods
-
+    @compatibility(is_backward_compatible=True)
     def fetch_attr(self, target : str):
         """
         Fetch an attribute from the ``Module`` hierarchy of ``self.module``.
@@ -285,6 +295,7 @@ class Interpreter:
             attr_itr = getattr(attr_itr, atom)
         return attr_itr
 
+    @compatibility(is_backward_compatible=True)
     def fetch_args_kwargs_from_env(self, n : Node) -> Tuple[Tuple, Dict]:
         """
         Fetch the concrete values of ``args`` and ``kwargs`` of node ``n``
@@ -302,6 +313,7 @@ class Interpreter:
         assert isinstance(kwargs, dict)
         return args, kwargs
 
+    @compatibility(is_backward_compatible=True)
     def map_nodes_to_values(self, args : Argument, n : Node) -> Argument:
         """
         Recursively descend through ``args`` and look up the concrete value
@@ -319,6 +331,7 @@ class Interpreter:
             return self.env[n_arg]
         return map_arg(args, load_arg)
 
+@compatibility(is_backward_compatible=True)
 class Transformer(Interpreter):
     """
     ``Transformer`` is a special type of interpreter that produces a
@@ -357,6 +370,8 @@ class Transformer(Interpreter):
     Args:
         module (GraphModule): The ``Module`` to be transformed.
     """
+
+    @compatibility(is_backward_compatible=True)
     def __init__(self, module):
         super().__init__(module)
         self.new_graph = Graph()
@@ -371,6 +386,7 @@ class Transformer(Interpreter):
         self.tracer = TransformerTracer(self.new_graph)
         self.tracer.root = module
 
+    @compatibility(is_backward_compatible=True)
     def placeholder(self, target : 'Target', args : Tuple[Argument, ...], kwargs : Dict[str, Any]) -> Proxy:
         """
         Execute a ``placeholder`` node. In ``Transformer``, this is
@@ -387,6 +403,7 @@ class Transformer(Interpreter):
         assert isinstance(target, str)
         return Proxy(self.new_graph.placeholder(target), self.tracer)
 
+    @compatibility(is_backward_compatible=True)
     def get_attr(self, target : 'Target', args : Tuple[Argument, ...], kwargs : Dict[str, Any]) -> Proxy:
         """
         Execute a ``get_attr`` node. In ``Transformer``, this is
@@ -403,16 +420,19 @@ class Transformer(Interpreter):
         assert isinstance(target, str)
         return Proxy(self.new_graph.get_attr(target), self.tracer)
 
+    @compatibility(is_backward_compatible=True)
     def call_module(self, target : 'Target', args : Tuple[Argument, ...], kwargs : Dict[str, Any]) -> Any:
         # Override so that the leaf module policy from `self.tracer` is respected.
         assert isinstance(target, str)
         submod = self.fetch_attr(target)
         return self.tracer.call_module(submod, submod.forward, args, kwargs)
 
+    @compatibility(is_backward_compatible=True)
     def call_function(self, target : 'Target', args : Tuple[Argument, ...], kwargs : Dict[str, Any]) -> Any:
         # Override so that functions that were wrapped are still wrapped.
         return self.tracer.create_proxy('call_function', target, args, kwargs)
 
+    @compatibility(is_backward_compatible=True)
     def transform(self) -> GraphModule:
         """
         Transform ``self.module`` and return the transformed
