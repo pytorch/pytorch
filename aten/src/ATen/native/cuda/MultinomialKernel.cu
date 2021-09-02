@@ -18,6 +18,10 @@ namespace at { namespace native {
 
 namespace {
 
+int64_t div_up(int64_t a, int64_t b) {
+  return (a + (b - 1)) / b;
+}
+
 #define MAX_NUM_BLOCKS 200
 
 // Normalizes the L1 norm of every row to 1; used by multinomial
@@ -60,10 +64,10 @@ void renormRows(Tensor& t) {
   auto props = at::cuda::getCurrentDeviceProperties();
   CUDA_KERNEL_ASSERT(props != NULL);
   int numSM = props->multiProcessorCount;
-  int maxThreads = props->maxThreadsPerBlock;
+  int64_t maxThreads = props->maxThreadsPerBlock;
 
   dim3 grid(rows < numSM * 4 ? rows : numSM * 4);
-  dim3 block(cols < maxThreads ? cols : maxThreads);
+  dim3 block(std::min(maxThreads, C10_WARP_SIZE * div_up(cols, C10_WARP_SIZE)));
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(t.scalar_type(), "renormRows_cuda", [&] {
     renormRowsL1<scalar_t>
