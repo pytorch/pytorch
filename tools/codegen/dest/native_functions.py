@@ -2,7 +2,7 @@ from typing import List, Union, Optional
 
 from tools.codegen.context import with_native_function_and_index
 from tools.codegen.utils import mapMaybe
-from tools.codegen.model import NativeFunction, NativeFunctionsGroup, BackendIndex
+from tools.codegen.model import NativeFunction, NativeFunctionsGroup, BackendIndex, OperatorName
 from tools.codegen.api.types import kernel_signature, BaseCType, OptionalCType
 import tools.codegen.api.meta as meta
 import tools.codegen.api.structured as structured
@@ -55,7 +55,7 @@ def compute_native_function_declaration(
         return [] if x is None else [x]
 
 
-@with_native_function_and_index
+# @with_native_function_and_index
 def gen_unstructured_lazy_definition(f: NativeFunction, backend_index: BackendIndex) -> Optional[str]:
     sig = kernel_signature(f, backend_index)
     metadata = backend_index.get_kernel(f)
@@ -101,11 +101,13 @@ def gen_unstructured_lazy_definition(f: NativeFunction, backend_index: BackendIn
 }};
 """
 
-@with_native_function_and_index
+# @with_native_function_and_index
 def compute_lazy_native_function_definition(
         g: Union[NativeFunctionsGroup, NativeFunction],
-        backend_index: BackendIndex
+        backend_index: BackendIndex,
+        codegen: List[OperatorName],
 ) -> List[str]:
+
     metadata = backend_index.get_kernel(g)
     if isinstance(g, NativeFunctionsGroup):
         if metadata is not None and metadata.structured:
@@ -114,6 +116,8 @@ def compute_lazy_native_function_definition(
             # return list(mapMaybe(lambda f: gen_unstructured_lazy_definition(f, backend_index), g.functions()))
             return []
     else:
+        if g.func.name not in codegen:
+            return []
         if metadata is not None:
             x = gen_unstructured_lazy_definition(g, backend_index)
             return [] if x is None else [x]

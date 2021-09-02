@@ -11,7 +11,7 @@ from tools.codegen.model import (BaseType, OptionalType, DispatchKey, NativeFunc
                                  TensorOptionsArguments, ListType,
                                  DeviceCheckType, Argument, assert_never,
                                  is_cuda_dispatch_key, BackendIndex,
-                                 gets_generated_out_inplace_wrapper)
+                                 gets_generated_out_inplace_wrapper, OperatorName)
 from tools.codegen.api.types import (BaseTy, BaseCppType, BaseCType, OptionalCType,
                                      Binding, ConstRefCType, NamedCType,
                                      CppSignature, CppSignatureGroup,
@@ -89,10 +89,13 @@ def ir_node_name(func: FunctionSchema):
 class LazyIR:
     backend_index: BackendIndex
 
+    # Names of operators we want to codegen for, a subset of backend_index
+    codegen: List[OperatorName]
+
     @method_with_native_function
     def __call__(self, f: Union[NativeFunctionsGroup, NativeFunction]) -> List[str]:
         func = f.functional.func if isinstance(f, NativeFunctionsGroup) else f.func
-        if func.name in self.backend_index.index:
+        if func.name in self.codegen:
             return self.gen(f)
         else:
             return []
