@@ -10,9 +10,12 @@
 
 namespace c10d {
 
-// When training runs at these iterations, log the runtime
-// stats.
-const int LoggingIterations[] = {10, 20, 100, 1000, 5000, 10000, 20000}; // NOLINT
+// Logs runtime stats to configured destination. Note that since data collection
+// only runs every ddp_runtime_logging_sample_rate iterations, the actual
+// training iterations recorded will be like 10,
+// (20-10) * ddp_runtime_logging_sample_rate,
+// (50-10) * ddp_runtime_logging_sample_rate and so on.
+const int LoggingIterations[] = {10, 20, 50, 100, 500, 800, 1000}; // NOLINT
 
 std::ostream& operator<<(std::ostream& output, const Logger& logger) {
   auto& ddp_logging_data = (*logger.ddp_logging_data_);
