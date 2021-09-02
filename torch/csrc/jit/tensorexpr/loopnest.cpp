@@ -970,9 +970,6 @@ StmtPtr LoopNest::insertAllocFree(
       findLoadOrStoreUses(stmt);
   // Insert allocations and frees for temporary buffers at global scope.
   for (BufPtr buf : intermediate_bufs) {
-    if (buf->is_allocated()) {
-      continue;
-    }
     b->prepend_stmt(alloc<Allocate>(buf));
     b->append_stmt(alloc<Free>(buf));
   }
