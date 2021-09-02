@@ -409,6 +409,30 @@ def boolean_dispatch(arg_name, arg_index, default, if_true, if_false, module_nam
     In TorchScript, the boolean argument must be constant so that the correct
     function to use can be determined at compile time.
     """
+    def extract_attribute(if_true_obj, if_false_obj, attr, *, sentinel=None):
+        if_true_val = getattr(if_true_obj, attr, sentinel)
+        if_false_val = getattr(if_false_obj, attr, sentinel)
+
+        # attribute is not defined on both
+        if if_true_val is sentinel and if_false_val is sentinel:
+            return sentinel
+        # attribute is only defined on if_false
+        elif if_true_val is sentinel:
+            return if_false_val
+        # attribute is only defined on if_true
+        elif if_false_val is sentinel:
+            return if_true_val
+        # attribute is defined on both
+        else:
+            if if_true_val != if_false_val:
+                raise RuntimeError(
+                    f"Both {getattr(if_true_obj, '__name__', repr(if_true_obj))} and "
+                    f"{getattr(if_false_obj, '__name__', repr(if_false_obj))} define the attribute '{attr}', "
+                    f"but the values are not equal."
+                )
+
+            return if_true_val
+
     def fn(*args, **kwargs):
         dispatch_flag = False
         if arg_name in kwargs:
@@ -421,18 +445,36 @@ def boolean_dispatch(arg_name, arg_index, default, if_true, if_false, module_nam
         else:
             return if_false(*args, **kwargs)
 
-    if if_true.__doc__ is None and if_false.__doc__ is not None:
-        doc = if_false.__doc__
-        if_true.__doc__ = doc
-    elif if_false.__doc__ is None and if_true.__doc__ is not None:
-        doc = if_true.__doc__
-        if_false.__doc__ = doc
-    elif if_false.__doc__ is None and if_true.__doc__ is None:
-        # neither function has a docstring
-        doc = None
+    if_true_signature = inspect.signature(if_true)
+    if_false_signature = inspect.signature(if_false)
+    if if_true_signature.parameters == if_false_signature.parameters:
+        parameters = list(if_true_signature.parameters.values())
     else:
-        raise RuntimeError("only one function can have a docstring")
-    fn.__doc__ = doc
+        if len(if_true_signature.parameters) != len(if_false_signature.parameters):
+            raise RuntimeError(
+                f"The number of parameters in signature of {getattr(if_true, '__name__', repr(if_true))} and "
+                f"{getattr(if_false, '__name__', repr(if_false))} mismatch: "
+                f"{len(if_true_signature.parameters)} != {len(if_false_signature.parameters)}."
+            )
+
+        parameters = [
+            inspect.Parameter(
+                name=extract_attribute(if_true_parameter, if_false_parameter, "name"),
+                kind=extract_attribute(if_true_parameter, if_false_parameter, "kind"),
+                default=extract_attribute(
+                    if_true_parameter, if_false_parameter, "default", sentinel=inspect.Parameter.empty
+                ),
+                annotation=extract_attribute(
+                    if_true_parameter, if_false_parameter, "annotation", sentinel=inspect.Parameter.empty
+                ),
+            )
+            for if_true_parameter, if_false_parameter in zip(
+                if_true_signature.parameters.values(), if_false_signature.parameters.values()
+            )
+        ]
+    fn.__signature__ = inspect.Signature(parameters)
+
+    fn.__doc__ = extract_attribute(if_true, if_false, "__doc__")
 
     if module_name is not None:
         fn.__module__ = module_name
