@@ -273,8 +273,8 @@ def list(github, force_reload=False, skip_validation=False):
 
     Args:
         github (string): a string with format "repo_owner/repo_name[:tag_name]" with an optional
-            tag/branch. If `tag_name` is not specified, the default branch is assumed to be `main` if
-            it exists, and otherwise `master`.
+            tag/branch. If ``tag_name`` is not specified, the default branch is assumed to be ``main`` if
+            it exists, and otherwise ``master``.
             Example: 'pytorch/vision:0.10'
         force_reload (bool, optional): whether to discard the existing cache and force a fresh download.
             Default is `False`.
@@ -306,8 +306,8 @@ def help(github, model, force_reload=False, skip_validation=False):
 
     Args:
         github (string): a string with format <repo_owner/repo_name[:tag_name]> with an optional
-            tag/branch. If `tag_name` is not specified, the default branch is assumed to be `main` if
-            it exists, and otherwise `master`.
+            tag/branch. If ``tag_name`` is not specified, the default branch is assumed to be ``main`` if
+            it exists, and otherwise ``master``.
             Example: 'pytorch/vision:0.10'
         model (string): a string of entrypoint name defined in repo's hubconf.py
         force_reload (bool, optional): whether to discard the existing cache and force a fresh download.
