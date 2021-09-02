@@ -259,43 +259,43 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         t2 = torch.zeros([1], dtype=torch.float64)
         t3 = torch.zeros([2], dtype=torch.float32)
 
-        with self.assertRaisesRegex(ValueError, "invalid root rank"):
+        with self.assertRaisesRegex(RuntimeError, "invalid root rank"):
             opts = c10d.BroadcastOptions()
             opts.rootRank = -1
             opts.rootTensor = 0
             pg.broadcast([t1], opts)
 
-        with self.assertRaisesRegex(ValueError, "invalid root rank"):
+        with self.assertRaisesRegex(RuntimeError, "invalid root rank"):
             opts = c10d.BroadcastOptions()
             opts.rootRank = self.world_size
             opts.rootTensor = 0
             pg.broadcast([t1], opts)
 
-        with self.assertRaisesRegex(ValueError, "invalid root tensor"):
+        with self.assertRaisesRegex(RuntimeError, "invalid root tensor"):
             opts = c10d.BroadcastOptions()
             opts.rootRank = self.rank
             opts.rootTensor = -1
             pg.broadcast([t1], opts)
 
-        with self.assertRaisesRegex(ValueError, "invalid root tensor"):
+        with self.assertRaisesRegex(RuntimeError, "invalid root tensor"):
             opts = c10d.BroadcastOptions()
             opts.rootRank = self.rank
             opts.rootTensor = 1
             pg.broadcast([t1], opts)
 
-        with self.assertRaisesRegex(ValueError, "invalid root tensor"):
+        with self.assertRaisesRegex(RuntimeError, "invalid root tensor"):
             opts = c10d.BroadcastOptions()
             opts.rootRank = self.rank
             opts.rootTensor = 0
             pg.broadcast([], opts)
 
-        with self.assertRaisesRegex(ValueError, "invalid tensor type"):
+        with self.assertRaisesRegex(RuntimeError, "invalid tensor type"):
             opts = c10d.BroadcastOptions()
             opts.rootRank = self.rank
             opts.rootTensor = 0
             pg.broadcast([t1, t2], opts)
 
-        with self.assertRaisesRegex(ValueError, "invalid tensor size"):
+        with self.assertRaisesRegex(RuntimeError, "invalid tensor size"):
             opts = c10d.BroadcastOptions()
             opts.rootRank = self.rank
             opts.rootTensor = 0
@@ -394,15 +394,15 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         t2 = torch.zeros([1], dtype=torch.float64)
         t3 = torch.zeros([2], dtype=torch.float32)
 
-        with self.assertRaisesRegex(ValueError, "requires non-empty tensor list"):
+        with self.assertRaisesRegex(RuntimeError, "requires non-empty tensor list"):
             opts = c10d.AllreduceOptions()
             pg.allreduce([], opts)
 
-        with self.assertRaisesRegex(ValueError, "invalid tensor type"):
+        with self.assertRaisesRegex(RuntimeError, "invalid tensor type"):
             opts = c10d.AllreduceOptions()
             pg.allreduce([t1, t2], opts)
 
-        with self.assertRaisesRegex(ValueError, "invalid tensor size"):
+        with self.assertRaisesRegex(RuntimeError, "invalid tensor size"):
             opts = c10d.AllreduceOptions()
             pg.allreduce([t1, t3], opts)
 
@@ -553,19 +553,19 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         t2 = torch.zeros(1, dtype=torch.float64)
         t3 = torch.sparse_coo_tensor([[0]], [1], size=(1,))
 
-        with self.assertRaisesRegex(ValueError, "requires non-empty tensor list"):
+        with self.assertRaisesRegex(RuntimeError, "requires non-empty tensor list"):
             opts = c10d.AllreduceCoalescedOptions()
             pg.allreduce_coalesced([], opts)
 
-        with self.assertRaisesRegex(ValueError, "tensors must all have the same type"):
+        with self.assertRaisesRegex(RuntimeError, "tensors must all have the same type"):
             opts = c10d.AllreduceCoalescedOptions()
             pg.allreduce_coalesced([t1, t2], opts)
 
-        with self.assertRaisesRegex(ValueError, "invalid tensor layout at index"):
+        with self.assertRaisesRegex(RuntimeError, "invalid tensor layout at index"):
             opts = c10d.AllreduceCoalescedOptions()
             pg.allreduce_coalesced([t1, t3], opts)
 
-        with self.assertRaisesRegex(ValueError, "unsupported layout"):
+        with self.assertRaisesRegex(RuntimeError, "unsupported layout"):
             opts = c10d.AllreduceCoalescedOptions()
             pg.allreduce_coalesced([t3, t3.clone()], opts)
 
@@ -579,7 +579,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
         t1 = torch.zeros(1, dtype=torch.float32)
 
-        with self.assertRaisesRegex(ValueError, "unsupported device type"):
+        with self.assertRaisesRegex(RuntimeError, "unsupported device type"):
             opts = c10d.AllreduceCoalescedOptions()
             pg.allreduce_coalesced([t1.cuda(), t1.cuda()], opts)
 
@@ -647,21 +647,21 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         t2 = torch.sparse_coo_tensor([[0]], [1], size=(2,))
         t3 = torch.sparse_coo_tensor([[0]], [1], size=(4,))
 
-        with self.assertRaisesRegex(ValueError, "requires non-empty tensor list"):
+        with self.assertRaisesRegex(RuntimeError, "requires non-empty tensor list"):
             opts = c10d.AllreduceOptions()
             pg.allreduce([], opts)
 
-        with self.assertRaisesRegex(ValueError, "invalid tensor layout"):
+        with self.assertRaisesRegex(RuntimeError, "invalid tensor layout"):
             opts = c10d.AllreduceOptions()
             pg.allreduce([t1, t2], opts)
 
-        with self.assertRaisesRegex(ValueError, "invalid tensor size"):
+        with self.assertRaisesRegex(RuntimeError, "invalid tensor size"):
             opts = c10d.AllreduceOptions()
             pg.allreduce([t2, t3], opts)
 
         # Sparse allreduce only works with c10d.ReduceOp.SUM.
         for op in [c10d.ReduceOp.PRODUCT, c10d.ReduceOp.MIN, c10d.ReduceOp.MAX]:
-            with self.assertRaisesRegex(ValueError, "unsupported reduction operation"):
+            with self.assertRaisesRegex(RuntimeError, "unsupported reduction operation"):
                 opts = c10d.AllreduceOptions()
                 opts.reduceOp = op
                 pg.allreduce([t3], opts)
@@ -705,36 +705,36 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         t2 = torch.zeros([1], dtype=torch.float64)
         t3 = torch.zeros([2], dtype=torch.float32)
 
-        with self.assertRaisesRegex(ValueError, "invalid root rank"):
+        with self.assertRaisesRegex(RuntimeError, "invalid root rank"):
             opts = c10d.ScatterOptions()
             opts.rootRank = -1
             pg.scatter([t1], [], opts)
 
-        with self.assertRaisesRegex(ValueError, "invalid root rank"):
+        with self.assertRaisesRegex(RuntimeError, "invalid root rank"):
             opts = c10d.ScatterOptions()
             opts.rootRank = self.world_size
             pg.scatter([t1], [], opts)
 
         with self.assertRaisesRegex(
-            ValueError, "requires a single-element output tensor list"
+            RuntimeError, "requires a single-element output tensor list"
         ):
             opts = c10d.ScatterOptions()
             opts.rootRank = 0
             pg.scatter([], [], opts)
 
         with self.assertRaisesRegex(
-            ValueError, "requires a single-element output tensor list"
+            RuntimeError, "requires a single-element output tensor list"
         ):
             opts = c10d.ScatterOptions()
             opts.rootRank = 0
             pg.scatter([t1, t1], [], opts)
 
-        with self.assertRaisesRegex(ValueError, "requires a single-element input list"):
+        with self.assertRaisesRegex(RuntimeError, "requires a single-element input list"):
             opts = c10d.ScatterOptions()
             opts.rootRank = self.rank
             pg.scatter([t1], [], opts)
 
-        with self.assertRaisesRegex(ValueError, "requires a single-element input list"):
+        with self.assertRaisesRegex(RuntimeError, "requires a single-element input list"):
             opts = c10d.ScatterOptions()
             opts.rootRank = self.rank
             pg.scatter([t1], [[t1] * self.world_size, [t1] * self.world_size], opts)
@@ -743,7 +743,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         incorrect_list_size = self.world_size - 1
         err_str = "Incorrect input list size {}. Input list size should be {}"
         with self.assertRaisesRegex(
-            ValueError, err_str.format(incorrect_list_size, desired_list_size)
+            RuntimeError, err_str.format(incorrect_list_size, desired_list_size)
         ):
             opts = c10d.ScatterOptions()
             opts.rootRank = self.rank
@@ -751,23 +751,23 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
         incorrect_list_size = self.world_size + 1
         with self.assertRaisesRegex(
-            ValueError, err_str.format(incorrect_list_size, desired_list_size)
+            RuntimeError, err_str.format(incorrect_list_size, desired_list_size)
         ):
             opts = c10d.ScatterOptions()
             opts.rootRank = self.rank
             pg.scatter([t1], [[t1] * incorrect_list_size], opts)
 
-        with self.assertRaisesRegex(ValueError, "invalid tensor type"):
+        with self.assertRaisesRegex(RuntimeError, "invalid tensor type"):
             opts = c10d.ScatterOptions()
             opts.rootRank = self.rank
             pg.scatter([t1], [[t2] * self.world_size], opts)
 
-        with self.assertRaisesRegex(ValueError, "invalid tensor size"):
+        with self.assertRaisesRegex(RuntimeError, "invalid tensor size"):
             opts = c10d.ScatterOptions()
             opts.rootRank = self.rank
             pg.scatter([t1], [[t3] * self.world_size], opts)
 
-        with self.assertRaisesRegex(ValueError, "requires empty input on non-root"):
+        with self.assertRaisesRegex(RuntimeError, "requires empty input on non-root"):
             opts = c10d.ScatterOptions()
             opts.rootRank = (self.rank + 1) % self.world_size
             pg.scatter([t1], [[t1] * self.world_size], opts)
@@ -872,39 +872,39 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         t2 = torch.zeros([1], dtype=torch.float64)
         t3 = torch.zeros([2], dtype=torch.float32)
 
-        with self.assertRaisesRegex(ValueError, "invalid root rank"):
+        with self.assertRaisesRegex(RuntimeError, "invalid root rank"):
             opts = c10d.GatherOptions()
             opts.rootRank = -1
             pg.gather([], [t1], opts)
 
-        with self.assertRaisesRegex(ValueError, "invalid root rank"):
+        with self.assertRaisesRegex(RuntimeError, "invalid root rank"):
             opts = c10d.GatherOptions()
             opts.rootRank = self.world_size
             pg.gather([], [t1], opts)
 
         with self.assertRaisesRegex(
-            ValueError, "requires a single-element input tensor list"
+            RuntimeError, "requires a single-element input tensor list"
         ):
             opts = c10d.GatherOptions()
             opts.rootRank = 0
             pg.gather([], [], opts)
 
         with self.assertRaisesRegex(
-            ValueError, "requires a single-element input tensor list"
+            RuntimeError, "requires a single-element input tensor list"
         ):
             opts = c10d.GatherOptions()
             opts.rootRank = 0
             pg.gather([], [t1, t1], opts)
 
         with self.assertRaisesRegex(
-            ValueError, "requires a single-element output list"
+            RuntimeError, "requires a single-element output list"
         ):
             opts = c10d.GatherOptions()
             opts.rootRank = self.rank
             pg.gather([], [t1], opts)
 
         with self.assertRaisesRegex(
-            ValueError, "requires a single-element output list"
+            RuntimeError, "requires a single-element output list"
         ):
             opts = c10d.GatherOptions()
             opts.rootRank = self.rank
@@ -914,7 +914,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         incorrect_list_size = self.world_size - 1
         err_str = "Incorrect output list size {}. Output list size should be {}"
         with self.assertRaisesRegex(
-            ValueError, err_str.format(incorrect_list_size, desired_list_size)
+            RuntimeError, err_str.format(incorrect_list_size, desired_list_size)
         ):
             opts = c10d.GatherOptions()
             opts.rootRank = self.rank
@@ -922,23 +922,23 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
         incorrect_list_size = self.world_size + 1
         with self.assertRaisesRegex(
-            ValueError, err_str.format(incorrect_list_size, desired_list_size)
+            RuntimeError, err_str.format(incorrect_list_size, desired_list_size)
         ):
             opts = c10d.GatherOptions()
             opts.rootRank = self.rank
             pg.gather([[t1] * incorrect_list_size], [t1], opts)
 
-        with self.assertRaisesRegex(ValueError, "invalid tensor type"):
+        with self.assertRaisesRegex(RuntimeError, "invalid tensor type"):
             opts = c10d.GatherOptions()
             opts.rootRank = self.rank
             pg.gather([[t2] * self.world_size], [t1], opts)
 
-        with self.assertRaisesRegex(ValueError, "invalid tensor size"):
+        with self.assertRaisesRegex(RuntimeError, "invalid tensor size"):
             opts = c10d.GatherOptions()
             opts.rootRank = self.rank
             pg.gather([[t3] * self.world_size], [t1], opts)
 
-        with self.assertRaisesRegex(ValueError, "requires empty output on non-root"):
+        with self.assertRaisesRegex(RuntimeError, "requires empty output on non-root"):
             opts = c10d.GatherOptions()
             opts.rootRank = (self.rank + 1) % self.world_size
             pg.gather([[t1] * self.world_size], [t1], opts)
@@ -1039,39 +1039,39 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         t2 = torch.zeros([1], dtype=torch.float64)
         t3 = torch.zeros([2], dtype=torch.float32)
 
-        with self.assertRaisesRegex(ValueError, "requires non-empty input tensor list"):
+        with self.assertRaisesRegex(RuntimeError, "requires non-empty input tensor list"):
             pg.allgather([], [])
 
         with self.assertRaisesRegex(
-            ValueError, "requires input/output tensor lists to have the same length"
+            RuntimeError, "requires input/output tensor lists to have the same length"
         ):
             pg.allgather([], [t1])
 
         with self.assertRaisesRegex(
-            ValueError, "requires input/output tensor lists to have the same length"
+            RuntimeError, "requires input/output tensor lists to have the same length"
         ):
             pg.allgather([[t1] * self.world_size, [t1] * self.world_size], [t1])
 
-        with self.assertRaisesRegex(ValueError, "invalid output tensor list"):
+        with self.assertRaisesRegex(RuntimeError, "invalid output tensor list"):
             pg.allgather([[t1] * (self.world_size - 1)], [t1])
 
-        with self.assertRaisesRegex(ValueError, "invalid output tensor list"):
+        with self.assertRaisesRegex(RuntimeError, "invalid output tensor list"):
             pg.allgather([[t1] * (self.world_size + 1)], [t1])
 
-        with self.assertRaisesRegex(ValueError, "invalid tensor type"):
+        with self.assertRaisesRegex(RuntimeError, "invalid tensor type"):
             pg.allgather(
                 [[t1, t1] * (self.world_size), [t1, t1] * (self.world_size)], [t1, t2]
             )
 
-        with self.assertRaisesRegex(ValueError, "invalid tensor size"):
+        with self.assertRaisesRegex(RuntimeError, "invalid tensor size"):
             pg.allgather(
                 [[t1, t1] * (self.world_size), [t1, t1] * (self.world_size)], [t1, t3]
             )
 
-        with self.assertRaisesRegex(ValueError, "invalid tensor type"):
+        with self.assertRaisesRegex(RuntimeError, "invalid tensor type"):
             pg.allgather([([t1, t2] * (self.world_size))[: self.world_size]], [t1])
 
-        with self.assertRaisesRegex(ValueError, "invalid tensor size"):
+        with self.assertRaisesRegex(RuntimeError, "invalid tensor size"):
             pg.allgather([([t1, t3] * (self.world_size))[: self.world_size]], [t1])
 
     def _test_allgather_basics(self, fn):
@@ -1160,13 +1160,13 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         # One of output tensors does not match input list.
         dummy_output_lists[0] = [torch.zeros([0], dtype=torch.float32)]
         with self.assertRaisesRegex(
-            ValueError, "invalid size of output tensor at index 0"
+            RuntimeError, "invalid size of output tensor at index 0"
         ):
             c10d.all_gather_coalesced(dummy_output_lists, dummy_input, pg)
 
         # One of output tensors does not match input list.
         dummy_output_lists[0] = [torch.zeros([1], dtype=torch.float64)]
-        with self.assertRaisesRegex(ValueError, "invalid tensor type at index 0"):
+        with self.assertRaisesRegex(RuntimeError, "invalid tensor type at index 0"):
             c10d.all_gather_coalesced(dummy_output_lists, dummy_input, pg)
 
         # Output lists have too many elements
@@ -1174,7 +1174,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             [torch.zeros([1], dtype=torch.float32)] for _ in range(self.world_size + 1)
         ]
         with self.assertRaisesRegex(
-            ValueError, "output lists should be equal to world size"
+            RuntimeError, "output lists should be equal to world size"
         ):
             c10d.all_gather_coalesced(dummy_output_lists, dummy_input, pg)
 
@@ -1194,26 +1194,26 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
         t1 = torch.zeros([1], dtype=torch.float32)
 
-        with self.assertRaisesRegex(ValueError, "invalid root rank"):
+        with self.assertRaisesRegex(RuntimeError, "invalid root rank"):
             opts = c10d.ReduceOptions()
             opts.rootRank = -1
             opts.rootTensor = 0
             pg.reduce([t1], opts)
 
-        with self.assertRaisesRegex(ValueError, "invalid root rank"):
+        with self.assertRaisesRegex(RuntimeError, "invalid root rank"):
             opts = c10d.ReduceOptions()
             opts.rootRank = self.world_size
             opts.rootTensor = 0
             pg.reduce([t1], opts)
 
-        with self.assertRaisesRegex(ValueError, "invalid root tensor"):
+        with self.assertRaisesRegex(RuntimeError, "invalid root tensor"):
             opts = c10d.ReduceOptions()
             opts.rootRank = self.rank
             opts.rootTensor = 1
             pg.reduce([t1], opts)
 
         with self.assertRaisesRegex(
-            ValueError, "requires a single-element tensor list"
+            RuntimeError, "requires a single-element tensor list"
         ):
             opts = c10d.ReduceOptions()
             opts.rootRank = self.rank

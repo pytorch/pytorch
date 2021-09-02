@@ -4,11 +4,18 @@
 #include <fmt/format.h>
 #include <string>
 
+#ifdef USE_C10D_GLOO
+#include <c10d/ProcessGroupGloo.hpp>
+#endif
+
 namespace c10d {
 
-// When training runs at these iterations, log the runtime
-// stats.
-const int LoggingIterations[] = {10, 20, 100, 1000};
+// Logs runtime stats to configured destination. Note that since data collection
+// only runs every ddp_runtime_logging_sample_rate iterations, the actual
+// training iterations recorded will be like 10,
+// (20-10) * ddp_runtime_logging_sample_rate,
+// (50-10) * ddp_runtime_logging_sample_rate and so on.
+const int LoggingIterations[] = {10, 20, 50, 100, 500, 800, 1000}; // NOLINT
 
 std::ostream& operator<<(std::ostream& output, const Logger& logger) {
   auto& ddp_logging_data = (*logger.ddp_logging_data_);
@@ -68,6 +75,13 @@ void Logger::set_env_variables() {
         parse_env("GLOO_SOCKET_IFNAME");
     ddp_logging_data_->strs_map["gloo_device_transport"] =
         parse_env("GLOO_DEVICE_TRANSPORT");
+
+    #ifdef USE_C10D_GLOO
+    auto gloo_pg =
+        static_cast<c10d::ProcessGroupGloo*>(reducer_->process_group_.get());
+    auto n_threads = gloo_pg->getNumThreads();
+    ddp_logging_data_->ints_map["gloo_num_threads"] = n_threads;
+    #endif
   }
 }
 
