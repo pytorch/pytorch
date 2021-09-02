@@ -1829,7 +1829,7 @@ def hardsigmoid(input: Tensor, inplace: bool = False) -> Tensor:
     return torch._C._nn.hardsigmoid(input)
 
 
-def bias(input: Tensor) -> Tensor:
+def bias(input: Tensor, bias_value: Tensor) -> Tensor:
     r"""
     Adds the bias to the incoming data.
 
@@ -1843,8 +1843,8 @@ def bias(input: Tensor) -> Tensor:
         - Output: :math:`(N, *, num\_features)`
     """
     if has_torch_function_variadic(input):
-        return handle_torch_function(bias, (input,), input)
-    return torch._C._nn.bias(input)
+        return handle_torch_function(bias, (input, bias_value), input, bias_value)
+    return torch._C._nn.bias(input, bias_value)
 
 
 def linear(input: Tensor, weight: Tensor, bias: Optional[Tensor] = None) -> Tensor:
