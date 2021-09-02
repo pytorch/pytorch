@@ -87,7 +87,7 @@ lazy.)
 
 
 ```bash
-conda -y uninstall pytorch
+conda uninstall pytorch -y
 yes | pip uninstall torch
 ```
 
@@ -197,6 +197,7 @@ with `brew install cmake` if you are developing on MacOS or Linux system.
     Could not find .../pytorch/third_party/pybind11/CMakeLists.txt
     ```
     remove any `submodule.*` settings in your local git config (`.git/config` of your pytorch repo) and try again.
+* If you're a Windows contributor, please check out [Best Practices](https://github.com/pytorch/pytorch/wiki/Best-Practices-to-Edit-and-Compile-Pytorch-Source-Code-On-Windows).
 
 ## Nightly Checkout & Pull
 
@@ -779,6 +780,8 @@ python setup.py develop
 If you are editing a single file and rebuilding in a tight loop, the time spent
 linking will dominate. The system linker available in most Linux distributions
 (GNU `ld`) is quite slow. Use a faster linker, like [lld](https://lld.llvm.org/).
+
+People on Mac, follow [this guide](https://stackoverflow.com/questions/42730345/how-to-install-llvm-for-mac) instead.
 
 The easiest way to use `lld` this is download the
 [latest LLVM binaries](http://releases.llvm.org/download.html#8.0.0) and run:
