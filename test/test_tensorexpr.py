@@ -24,9 +24,6 @@ class BaseTestClass(JitTestCase):
         torch._C._debug_set_fusion_group_inlining(False)
         self.old_te_must_use_llvm_cpu = torch._C._jit_get_te_must_use_llvm_cpu()
         torch._C._jit_set_te_must_use_llvm_cpu(False)
-        # TODO: CPU fuser currently is disabled when multithreading.
-        self.old_fuse_parallel = torch._C._jit_texpr_parallel_cpu_enabled()
-        torch._C._jit_set_texpr_parallel_cpu_enabled(True)
 
         self.devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
 
@@ -39,7 +36,6 @@ class BaseTestClass(JitTestCase):
         torch._C._jit_override_can_fuse_on_cpu(self.old_cpu_fuser_state)
         torch._C._debug_set_fusion_group_inlining(self.old_fusion_inlining)
         torch._C._jit_set_te_must_use_llvm_cpu(self.old_te_must_use_llvm_cpu)
-        torch._C._jit_set_texpr_parallel_cpu_enabled(self.old_fuse_parallel)
 
     def assertLastGraphAllFused(self):
         self.assertAllFused(torch.jit.last_executed_optimized_graph())
@@ -1226,7 +1222,6 @@ class TestTensorExprFuser(BaseTestClass):
             x = warmup_and_run_forward(traced, a, b)
             self.assertLastGraphAllFused()
 
-    @unittest.skip("float16 is not supported yet.")
     def test_half_bn_relu(self):
         devices = ["cuda"] if torch.cuda.is_available() else []
 
