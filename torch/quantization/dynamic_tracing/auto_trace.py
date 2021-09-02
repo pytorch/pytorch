@@ -1,40 +1,15 @@
 import torch
 from torch.fx.node import map_aggregate
-from typing import Tuple, Any, List
+from typing import Tuple, Any, List, Dict
 
 from .quantization_state import (
     AutoQuantizationState,
 )
 from .utils import (
-    wrap_observers_in_placeholders,
-    unwrap_observers_from_placeholders,
+    trace_with_inputs,
+    is_leaf,
 )
 from . import auto_trace_rewrite
-
-
-# TODO(future PR): verify correctness of this for all
-# quantizeable modules
-def is_leaf(m: torch.nn.Module) -> bool:
-    return (
-        # allowlist everything in torch.nn except nn.Sequential
-        (m.__module__.startswith('torch.nn') and (
-            not isinstance(m, torch.nn.Sequential)
-        )) or
-        # allowlist nni modules, as they inherit from nn.Sequential
-        m.__module__.startswith('torch.nn.intrinsic')
-    )
-
-
-def _trace_with_inputs(model: torch.nn.Module, example_inputs: Tuple[Any]) -> None:
-    # create the graph
-    with torch.no_grad():
-        old_training = model.training
-        model.eval()
-        wrap_observers_in_placeholders(model)
-        model(*example_inputs)
-        unwrap_observers_from_placeholders(model)
-        if old_training:
-            model.train()
 
 
 def add_auto_observation(
@@ -65,8 +40,8 @@ def add_auto_observation(
         An override of `torch.Tensor` to enable dynamic tracing for
         quantization.
 
-        For each function with a `__torch_function__` override and a parent
-        module with auto quantization enabled, this proxy does the following:
+        For each function with a `__torch_function__` override, this proxy does
+        the following for functions which need quantization:
 
         1. calls `_auto_quant_state.validate_cur_op` to validate that
            the currently seen op is the same as what was recorded during tracing
@@ -75,6 +50,8 @@ def add_auto_observation(
         4. calls `_auto_quant_state.op_prepare_after_hook`
         5. calls `_auto_quant_state.mark_cur_op_complete` to increment
            the current op index in preparation for the next op
+
+        Otherwise, calls the original function.
         """
 
         def __torch_function__(self, func, types, args=(), kwargs=None):
@@ -133,8 +110,10 @@ def add_auto_observation(
         attached to each non-leaf modules which we need to check for
         quantizeable operations.
 
-        We override the `__call__` function to do the following for
-        any `cur_module` whose parent module has quantization state:
+        We override the `__call__` function to do the following for each
+        module:
+
+        If the module is an op which needs quantization:
 
         1. calls `_auto_quant_state.validate_cur_op` to validate that
            the currently seen op is the same as what was recorded during tracing
@@ -143,6 +122,14 @@ def add_auto_observation(
         4. calls parent module's `_auto_quant_state.module_after_hook`
         5. calls `_auto_quant_state.mark_cur_op_complete` to increment
            the current op index in preparation for the next op
+
+        If the module can contain children ops that need quantization:
+
+        1. calls `_auto_quant_state.inputs_prepare_hook` (not implemented yet)
+        2. executes the original module forward
+        3. calls `_auto_quant_state.outputs_prepare_hook`
+
+        Otherwise, calls the original module forward.
         """
 
         __interception_module__ = True
@@ -262,7 +249,7 @@ def add_auto_observation(
 
     model.__class__ = QuantizationInterceptionModule
     # create the graph
-    _trace_with_inputs(model, example_inputs)
+    trace_with_inputs(model, example_inputs)
     return model
 
 
@@ -279,8 +266,8 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
         An override of `torch.Tensor` to enable dynamic dispatch for
         quantization inference.
 
-        For each function with a `__torch_fuction__` override and a parent
-        module with auto quantization enabled, this proxy does the following:
+        For each function with a `__torch_fuction__` override, this proxy does
+        the following for functions which need quantization:
 
         1. calls `_auto_quant_state.validate_cur_op` to validate that
            the currently seen op is the same as what was recorded during tracing
@@ -290,6 +277,8 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
         4. calls `_auto_quant_state.inference_function_after_hook`.
         5. calls `_auto_quant_state.mark_cur_op_complete` to increment
            the current op index in preparation for the next op
+
+        Otherwise, calls the original function.
         """
 
         def __torch_function__(self, func, types, args=(), kwargs=None):
@@ -310,9 +299,12 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
             can_have_op_hooks = quantized_arg_present and cur_module and \
                 hasattr(cur_module, '_auto_quant_state')
             needs_op_hooks = can_have_op_hooks and \
+                cur_module is not None and \
+                isinstance(cur_module._auto_quant_state, AutoQuantizationState) and \
                 cur_module._auto_quant_state.cur_op_needs_hooks(func)
 
             if needs_op_hooks:
+                assert cur_module is not None
                 qstate = cur_module._auto_quant_state
                 # before hooks
                 qstate.validate_cur_op(func)
@@ -354,8 +346,10 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
 
         Tensor arguments are converted to `QuantizationDispatchProxy`.
 
-        We override the `__call__` function to do the following for
-        any `cur_module` whose parent module has quantization state:
+        We override the `__call__` function to do the following for each
+        module:
+
+        If the module is an op which needs quantization:
 
         1. calls `_auto_quant_state.validate_cur_op` to validate that
            the currently seen op is the same as what was recorded during tracing
@@ -364,6 +358,14 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
         4. calls parent module's `_auto_quant_state.op_prepare_after_hook`
         5. calls `_auto_quant_state.mark_cur_op_complete` to increment
            the current op index in preparation for the next op
+
+        If the module can contain children ops that need quantization:
+
+        1. calls `_auto_quant_state.inputs_convert_hook` (not implemented yet)
+        2. executes the original module forward
+        3. calls `_auto_quant_state.outputs_convert_hook`
+
+        Otherwise, calls the original module forward.
         """
 
         def __call__(self, *args, **kwargs):
@@ -388,6 +390,8 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                     can_have_op_hooks = parent_module is not None and \
                         hasattr(parent_module, '_auto_quant_state')
                     needs_op_hooks = can_have_op_hooks and \
+                        parent_module is not None and \
+                        isinstance(parent_module._auto_quant_state, AutoQuantizationState) and \
                         parent_module._auto_quant_state.cur_op_needs_hooks(cur_module)
                     needs_io_hooks = (
                         hasattr(cur_module, '_auto_quant_state') and
@@ -396,6 +400,8 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
 
                     if needs_op_hooks:
                         # before hooks
+                        assert parent_module is not None
+                        assert isinstance(parent_module._auto_quant_state, AutoQuantizationState)
                         qstate = parent_module._auto_quant_state
                         qstate.validate_cur_op(cur_module)
                         _, args, kwargs = qstate.op_convert_before_hook(

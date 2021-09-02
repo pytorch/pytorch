@@ -39,10 +39,11 @@ class AutoQuantizationState(torch.nn.Module):
         # to be within the module hierarchy.
         self.tensor_id_to_observer = torch.nn.ModuleDict()
         # TODO(future PR): include kwargs
-        self.idx_to_seen_ops = {}
+        self.idx_to_seen_ops: Dict[str, SeenOp] = {}
         # qtensor_info objects of tensor outputs of the module, specified
-        # in order of iteration through the output type
-        self.output_qtensor_infos = []
+        # in order of iteration through the output type. Non-tensor outputs
+        # are represented with `None`.
+        self.output_qtensor_infos: List[Optional[QTensorInfo]] = []
         self.input_dtypes = input_dtypes
         self.output_dtypes = output_dtypes
 
@@ -60,8 +61,8 @@ class AutoQuantizationState(torch.nn.Module):
             s += "(seen_ops): {}\n"
         s += "(idx): " + str(self.idx) + ",\n"
         s += "(output_qtensor_infos): ["
-        for v in self.output_qtensor_infos:
-            s += f"{v}"
+        for i in self.output_qtensor_infos:
+            s += f"{i}"
         s += "]"
         return s
 
@@ -125,9 +126,9 @@ class AutoQuantizationState(torch.nn.Module):
         if first_call:
             if isinstance(outputs, torch.Tensor):
                 if not hasattr(outputs, '_qtensor_info'):
-                    outputs._qtensor_info = QTensorInfo(qtensor_id[0], torch.float)
+                    outputs._qtensor_info = QTensorInfo(qtensor_id[0], torch.float)  # type: ignore[attr-defined]
                     qtensor_id[0] += 1
-                self.output_qtensor_infos.append(outputs._qtensor_info)
+                self.output_qtensor_infos.append(outputs._qtensor_info)  # type: ignore[attr-defined]
                 # TODO(future PR): add an observer if needed
             else:
                 raise AssertionError(
@@ -147,6 +148,7 @@ class AutoQuantizationState(torch.nn.Module):
         if isinstance(outputs, torch.Tensor):
             qtensor_info = self.output_qtensor_infos[0]
             if self.output_dtypes is not None:
+                assert qtensor_info is not None
                 # check the output dtype, and do the conversion if needed
                 output_dtype = self.output_dtypes[0]
                 if qtensor_info.inf_dtype != output_dtype:
@@ -159,7 +161,7 @@ class AutoQuantizationState(torch.nn.Module):
 
         return outputs
 
-    def get_output_qtensor_infos(self) -> List[QTensorInfo]:
+    def get_output_qtensor_infos(self) -> List[Optional[QTensorInfo]]:
         """
         Used by the conversion to torch.jit.script.
         """
@@ -196,7 +198,7 @@ class AutoQuantizationState(torch.nn.Module):
         """
         assert self.cur_op_needs_hooks(op)
         if first_call:
-            arg_tensor_infos = []
+            arg_tensor_infos: List[Optional[QTensorInfo]] = []
             for arg in args:
                 if not isinstance(arg, torch.Tensor):
                     arg_tensor_infos.append(None)
@@ -205,9 +207,9 @@ class AutoQuantizationState(torch.nn.Module):
                 # If a tensor does not have an ID, add it. This allows
                 # us to track inputs shared by multiple quantizeable modules.
                 if not hasattr(arg, '_qtensor_info'):
-                    arg._qtensor_info = QTensorInfo(qtensor_id[0], torch.float)
+                    arg._qtensor_info = QTensorInfo(qtensor_id[0], torch.float)  # type: ignore[attr-defined]
                     qtensor_id[0] += 1
-                arg_tensor_infos.append(arg._qtensor_info)
+                arg_tensor_infos.append(arg._qtensor_info)  # type: ignore[attr-defined]
 
                 # if the existing inf_dtype is not torch.quint8, add an observer
                 # which will be converted to a quant later
@@ -215,8 +217,8 @@ class AutoQuantizationState(torch.nn.Module):
                 # this quant.
                 # TODO(future PR): create from qconfig of op instead of global
                 # qconfig.
-                if arg._qtensor_info.inf_dtype != torch.quint8:
-                    tensor_id = arg._qtensor_info.id
+                if arg._qtensor_info.inf_dtype != torch.quint8:  # type: ignore[attr-defined]
+                    tensor_id = arg._qtensor_info.id  # type: ignore[attr-defined]
                     self.tensor_id_to_observer[str(tensor_id)] = \
                         self.qconfig.activation()
 

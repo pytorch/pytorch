@@ -123,9 +123,9 @@ def rewrite_for_scripting(mod: torch.nn.Module) -> torch.nn.Module:
             setattr(copied, name, rewrite_helper(child))
 
         if hasattr(mod, '_auto_quant_state') and (
-            mod._auto_quant_state.has_at_least_one_seen_op() or
-            (mod._auto_quant_state.get_output_dtypes() is not None)
-        ):  # type: ignore[union-attr, arg-type, operator]
+            mod._auto_quant_state.has_at_least_one_seen_op() or  # type: ignore[union-attr, operator]
+            (mod._auto_quant_state.get_output_dtypes() is not None)  # type: ignore[union-attr, operator]
+        ):
             copied._auto_quant_state.reset_to_new_call()  # type: ignore[union-attr, operator]
 
             graph = AllModuleTracer().trace(copied)

@@ -31,9 +31,6 @@ def prepare(model, example_inputs, inplace=False, allow_list=None,
         model, inplace, allow_list, observer_non_leaf_module_list,
         prepare_custom_config_dict)
     assert not inplace
-    # TODO: disable observers when doing this, to prevent example_inputs
-    # from contributing to calibration. Or, insert module observers after
-    # this step.
     model = add_auto_observation(model, example_inputs)
     return model
 

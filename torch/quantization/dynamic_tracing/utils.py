@@ -1,5 +1,5 @@
 import collections
-from typing import Callable
+from typing import Callable, Tuple, Any
 
 import torch
 
@@ -96,7 +96,6 @@ def wrap_observers_in_placeholders(module: torch.nn.Module) -> None:
         else:
             wrap_observers_in_placeholders(child)
 
-
 def unwrap_observers_from_placeholders(module: torch.nn.Module) -> None:
     """
     Restores observers back to their original state.
@@ -107,3 +106,28 @@ def unwrap_observers_from_placeholders(module: torch.nn.Module) -> None:
             setattr(module, name, unwrapped)
         else:
             unwrap_observers_from_placeholders(child)
+
+def trace_with_inputs(
+    model: torch.nn.Module,
+    example_inputs: Tuple[Any],
+) -> None:
+    with torch.no_grad():
+        old_training = model.training
+        model.eval()
+        wrap_observers_in_placeholders(model)
+        model(*example_inputs)
+        unwrap_observers_from_placeholders(model)
+        if old_training:
+            model.train()
+
+# TODO(future PR): verify correctness of this for all
+# quantizeable modules
+def is_leaf(m: torch.nn.Module) -> bool:
+    return (
+        # allowlist everything in torch.nn except nn.Sequential
+        (m.__module__.startswith('torch.nn') and (
+            not isinstance(m, torch.nn.Sequential)
+        )) or
+        # allowlist nni modules, as they inherit from nn.Sequential
+        m.__module__.startswith('torch.nn.intrinsic')
+    )

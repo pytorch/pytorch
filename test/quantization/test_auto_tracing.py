@@ -21,8 +21,7 @@ from torch.quantization.quantize_fx import (
 import torch.quantization._quantize_dynamic_tracing as _quantize_dynamic_tracing
 
 
-class TestAutoTracing(QuantizationTestCase):
-
+class AutoTracingTestCase(QuantizationTestCase):
     def _test_auto_tracing(self, m, qconfig, example_inputs):
         m_copy = copy.deepcopy(m)
 
@@ -70,6 +69,8 @@ class TestAutoTracing(QuantizationTestCase):
         traced_rewritten_out = traced_rewritten(*example_inputs)
         self.assertTrue(torch.allclose(traced_rewritten_out, out_q))
 
+
+class TestAutoTracing(AutoTracingTestCase):
     @skipIfNoFBGEMM
     def test_fusion(self):
         class M(torch.nn.Module):
@@ -198,25 +199,6 @@ class TestAutoTracing(QuantizationTestCase):
         qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 2, 2),))
 
-    @skip_if_no_torchvision
-    @skipIfNoFBGEMM
-    # @unittest.skip("TODO enable this")
-    def test_mobilenet_v2(self):
-        import torchvision
-        m = torchvision.models.__dict__['mobilenet_v2'](pretrained=False).eval().float()
-
-        print(m)
-        qconfig = torch.quantization.default_qconfig
-        self._test_auto_tracing(m, qconfig, (torch.randn(1, 3, 1, 1),))
-        if False:
-            mp = _quantize_dynamic_tracing.prepare(m, (torch.randn(1, 3, 1, 1),))
-            mp(torch.randn(1, 3, 1, 1))
-            print(mp)
-            mq = _quantize_dynamic_tracing.convert(mp)
-            print(mq)
-            out = mq(torch.randn(1, 3, 1, 1))
-            print(out)
-
     # TODO(future PR): enable this test
     @unittest.skip("this is currently broken")
     def test_control_flow(self):
@@ -248,3 +230,13 @@ class TestAutoTracing(QuantizationTestCase):
         l_prepared(torch.randn(13, 5, 5))
 
         self.assertNotEqual(len(l_prepared._arithmetic_observers.op_observers), 0)
+
+
+class TestAutoTracingModels(AutoTracingTestCase):
+    @skip_if_no_torchvision
+    @skipIfNoFBGEMM
+    def test_mobilenet_v2(self):
+        import torchvision
+        m = torchvision.models.__dict__['mobilenet_v2'](pretrained=False).eval().float()
+        qconfig = torch.quantization.default_qconfig
+        self._test_auto_tracing(m, qconfig, (torch.randn(1, 3, 224, 224),))
