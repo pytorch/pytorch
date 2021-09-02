@@ -1,5 +1,4 @@
 # @generated DO NOT EDIT MANUALLY
-
 # Template is at:    .github/templates/windows_ci_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
 name: win-vs2019-cuda10.1-py3
