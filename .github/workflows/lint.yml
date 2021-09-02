@@ -64,6 +64,18 @@ jobs:
         run: |
           # shellcheck disable=SC2016
           (! git --no-pager grep -InP '# type:\s*ignore(?!\[)' -- '**.py' '**.pyi' ':(exclude)test/test_jit.py' || (echo 'The above lines have unqualified `type: ignore`; please convert them to `type: ignore[xxxx]`'; false))
+      - name: Ensure GitHub PyPi dependencies are pinned
+        if: always()
+        run: |
+          (! git --no-pager grep -InP \
+                '(pip|pip3|python -m pip|python3 -m pip|python3 -mpip|python -mpip) install ([a-z][\.a-z-0-9]*+(?!(=|.*\.whl))([[:blank:]]|))+' \
+                -- .github \
+                ':(exclude)**.rst' \
+                ':(exclude)**.py' \
+                ':(exclude)**.md' \
+                ':(exclude)**.diff' \
+                ':(exclude)third_party' ||
+            (echo "The above lines have unpinned PyPi installs; please pin them to a specific version: e.g. 'thepackage==1.2'"; false))
       # note that this next step depends on a clean checkout;
       # if you run it locally then it will likely to complain
       # about all the generated files in torch/test
