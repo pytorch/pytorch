@@ -408,23 +408,26 @@ enum class C10_API_ENUM ProfilerState {
 };
 
 struct TORCH_API ProfilerConfig {
-  ProfilerConfig(
+  explicit ProfilerConfig(
       ProfilerState state,
       bool report_input_shapes = false,
       bool profile_memory = false,
       bool with_stack = false,
-      bool with_flops = false)
+      bool with_flops = false,
+      bool with_modules = false)
       : state(state),
         report_input_shapes(report_input_shapes),
         profile_memory(profile_memory),
         with_stack(with_stack),
-        with_flops(with_flops) {}
+        with_flops(with_flops),
+        with_modules(with_modules) {}
   ~ProfilerConfig() = default;
   ProfilerState state;
   bool report_input_shapes;
   bool profile_memory;
   bool with_stack;
   bool with_flops;
+  bool with_modules;
 
   // Returns IValues corresponding to ProfilerConfig struct, to be used for
   // serialization.

@@ -2,6 +2,7 @@ import os
 import sys
 
 import torch
+import warnings
 from typing import List, Any, Dict, Tuple, Optional
 
 # Make the helper files in test/ importable
@@ -295,3 +296,26 @@ class TestIsinstance(JitTestCase):
 
         with self.assertRaisesRegex(RuntimeError, err_highlight):
             fn2(2)
+
+    def test_empty_container_throws_warning_in_eager(self):
+        def fn(x: Any):
+            torch.jit.isinstance(x, List[int])
+
+        with warnings.catch_warnings(record=True) as w:
+            x: List[int] = []
+            fn(x)
+            self.assertEqual(len(w), 1)
+
+        with warnings.catch_warnings(record=True) as w:
+            x: int = 2
+            fn(x)
+            self.assertEqual(len(w), 0)
+
+    def test_empty_container_special_cases(self):
+        # Should not throw "Boolean value of Tensor with no values is
+        # ambiguous" error
+        torch._jit_internal.check_empty_containers(torch.Tensor([]))
+
+        # Should not throw "Boolean value of Tensor with more than
+        # one value is ambiguous" error
+        torch._jit_internal.check_empty_containers(torch.rand(2, 3))

@@ -10,10 +10,11 @@ class SamplerIterDataPipe(IterDataPipe[T_co]):
     r""" :class:`SamplerIterDataPipe`.
 
     Iterable DataPipe to generate sample elements.
-    args:
-        datapipe: IterDataPipe sampled from
+
+    Args:
+        datapipe: IterDataPipe to sample from
         sampler: Sampler class to genereate sample elements from input DataPipe.
-                    Default is :class:`SequentialSampler` for IterDataPipe
+            Default is :class:`SequentialSampler` for IterDataPipe
     """
     datapipe: IterDataPipe
     sampler: Sampler
@@ -44,8 +45,8 @@ class SamplerIterDataPipe(IterDataPipe[T_co]):
 
 
 @functional_datapipe('shuffle')
-class ShuffleIterDataPipe(IterDataPipe[T_co]):
-    r""" :class:`ShuffleIterDataPipe`
+class ShufflerIterDataPipe(IterDataPipe[T_co]):
+    r""" :class:`ShufflerIterDataPipe`
 
     Iterable DataPipe to shuffle the input DataPipe with a buffer. The buffer
     with `buffer_size` is filled with elements from the datapipe first. Then,
@@ -63,7 +64,7 @@ class ShuffleIterDataPipe(IterDataPipe[T_co]):
     mode (:attr:`num_worker > 0`), `worker_init_fn` is used to set up a random seed
     for each worker process.
 
-    args:
+    Args:
         datapipe: The IterDataPipe being shuffled
         buffer_size: The buffer size for shuffling (default to 10000)
         unbatch_level: Specifies if it necessary to unbatch source data before

@@ -15,7 +15,7 @@ from torch.fx.graph import (
 )
 from torch.fx.node import Argument
 
-from ..qconfig import QConfigAny
+from ..qconfig import QConfigAny, qconfig_equals
 from .qconfig_utils import (
     convert_dict_to_ordered_dict,
     generate_qconfig_map,
@@ -59,7 +59,7 @@ from .utils import (
     get_new_attr_name_with_prefix,
     NON_QUANTIZABLE_WEIGHT_OPS,
     WEIGHT_INDEX_DICT,
-    FUNCTIONAL_OPS_WITH_BIAS,
+    BIAS_INDEX_DICT,
 )
 
 from ..fuser_method_mappings import DEFAULT_OP_LIST_TO_FUSER_METHOD
@@ -68,7 +68,7 @@ from ..quantization_mappings import (
     get_default_qat_module_mappings,
 )
 
-from ..quantize import (
+from torch.ao.quantization.quantize import (
     is_activation_post_process,
     convert
 )
@@ -87,7 +87,7 @@ from ..utils import (
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 def is_activation_post_process_node(node: Node, modules: Dict[str, torch.nn.Module]) -> bool:
-    return node.op == "call_module" and \
+    return isinstance(node, torch.fx.Node) and node.op == "call_module" and \
         is_activation_post_process(modules[str(node.target)])
 
 def node_arg_is_weight(node: Node, arg: Any) -> bool:
@@ -102,24 +102,17 @@ def node_arg_is_weight(node: Node, arg: Any) -> bool:
                 return True
     return False
 
-CONV_OPS_WITH_BIAS = {
-    torch.nn.functional.conv1d,
-    torch.nn.functional.conv2d,
-    torch.nn.functional.conv3d,
-}
-CONV_BIAS_ARG_INDEX = 2
-
 def node_arg_is_bias(node: Node, arg: Any) -> bool:
-    if isinstance(node, Node) and node.op == 'call_function':
-        if node.target in CONV_OPS_WITH_BIAS:
-            for i, node_arg in enumerate(node.args):
-                if arg is node_arg and i == CONV_BIAS_ARG_INDEX:
-                    return True
-        elif node.target in FUNCTIONAL_OPS_WITH_BIAS:
-            for kwarg_name, kwarg_value in node.kwargs.items():
-                if kwarg_name == 'bias' and arg is kwarg_value:
-                    return True
-    return False
+    if not isinstance(node, Node) or node.op != 'call_function':
+        return False
+
+    assert not isinstance(node.target, str), "expected a function target"
+    idx = BIAS_INDEX_DICT.get(node.target, None)
+    return (
+        idx is not None and
+        ((len(node.args) > idx and arg is node.args[idx]) or
+            node.kwargs.get('bias', None) is arg)
+    )
 
 def get_standalone_module_configs(
     node: Node,
@@ -163,7 +156,8 @@ def update_qconfig_for_qat(
     all_qat_mappings = get_combined_dict(
         get_default_qat_module_mappings(), additional_qat_module_mapping)
     object_type_dict = qconfig_dict.get("object_type", None)
-    for k, v in object_type_dict.items():
+    new_object_type_dict = object_type_dict.copy()
+    for k, v in new_object_type_dict.items():
         if k in all_qat_mappings:
             object_type_dict[all_qat_mappings[k]] = v
     return qconfig_dict
@@ -194,7 +188,7 @@ def update_qconfig_for_fusion(
                     # Raise an error if the modules in the fused module have
                     # different qconfigs specified in the qconfig_dict
                     for op in ops:
-                        if object_type_dict.get(op, None) != fused_qconfig:
+                        if not qconfig_equals(object_type_dict.get(op, None), fused_qconfig):
                             raise LookupError("During fusion, we need to specify the same " +
                                               f"qconfigs for both modules in {module_type}.")
 
@@ -323,7 +317,7 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
                 graph, node_name_to_target_dtype,
                 qhandler, prepare_custom_config_dict)
             new_arg_to_return.append(new_inner_arg)
-        return new_arg_to_return
+        return type(arg)(new_arg_to_return)
 
     if not isinstance(arg, Node):
         return arg
@@ -771,6 +765,8 @@ def maybe_make_input_output_share_observers(
     # we need to navigate up to the first observer
     iteration_guard = 0
     while not is_activation_post_process_node(first_arg_arg, modules):
+        if not isinstance(first_arg_arg, Node):
+            return False
         # did not find an activation_post_process for the op
         if first_arg_arg.op == "placeholder":
             return False
