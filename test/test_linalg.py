@@ -6166,6 +6166,38 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             _test_mm(n, m, p, dtype, genf)
 
     @onlyOnCPUAndCUDA
+    def test_mm_bmm_non_memory_dense(self, device):
+        def _slice(tensor, fn):
+            return fn(tensor)[..., ::2]
+        A = torch.randn(3, 6, dtype=torch.cfloat, device=device)
+        B = torch.randn(3, 3, dtype=torch.cfloat, device=device)
+        out = torch.empty(3, 3, device=device, dtype=torch.complex64).t()
+        out1 = torch.empty(3, 3, device=device, dtype=torch.complex64).t()
+        A_conj = _slice(A, torch.conj)
+        A_conj_physical = _slice(A, torch.conj_physical)
+
+        self.assertEqual(torch.mm(A_conj, B, out=out), torch.mm(A_conj_physical, B, out=out))
+        self.assertEqual(torch.mm(A_conj.t(), B, out=out), torch.mm(A_conj_physical.t(), B, out=out))
+
+        Ab = torch.randn(2, 3, 6, dtype=torch.cfloat, device=device)
+        Bb = torch.randn(2, 3, 3, dtype=torch.cfloat, device=device)
+        Bb_ = torch.randn(1, 3, 3, dtype=torch.cfloat, device=device).expand(2, 3, 3)
+        out_b = torch.empty(2, 3, 3, device=device, dtype=torch.complex64).transpose(-1, -2)
+
+        Ab_conj = _slice(Ab, torch.conj)
+        Ab_conj_physical = _slice(Ab, torch.conj_physical)
+
+        def t_b(tensor):
+            return tensor.transpose(-1, -2)
+
+        self.assertEqual(torch.bmm(Ab_conj, Bb, out=out_b), torch.bmm(Ab_conj_physical, Bb, out=out_b))
+        self.assertEqual(torch.bmm(t_b(Ab_conj), Bb, out=out_b), torch.bmm(t_b(Ab_conj_physical), Bb, out=out_b))
+
+        # test broadcasting
+        self.assertEqual(torch.bmm(Ab_conj, Bb_, out=out_b), torch.bmm(Ab_conj_physical, Bb_, out=out_b))
+        self.assertEqual(torch.bmm(t_b(Ab_conj), Bb_, out=out_b), torch.bmm(t_b(Ab_conj_physical), Bb_, out=out_b))
+
+    @onlyOnCPUAndCUDA
     @dtypes(torch.float32, torch.float64)
     def test_strided_mm_bmm(self, device, dtype):
         # Tests strided view case with stride smaller than corresponding dimension size
