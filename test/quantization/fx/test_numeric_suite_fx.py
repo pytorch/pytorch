@@ -1515,7 +1515,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
                 nn.GRU,
                 nn.LSTMCell,
                 nn.RNNCell,
-                nn.embeddingBag,
+                nn.EmbeddingBag,
             )
             if fp32_type1 in types_to_skip:
                 continue

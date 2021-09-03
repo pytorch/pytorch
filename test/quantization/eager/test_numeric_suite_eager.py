@@ -143,8 +143,7 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
             self.assertEqual(len(weight_dict), 1)
             for k, v in weight_dict.items():
                 self.assertTrue(len(v["float"]) == len(v["quantized"]))
-                for i, val in enumerate(v["quantized"]):
-                    self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
+                self.assertTrue(v["float"].shape == v["quantized"].shape)
 
         model_list = [SingleLayerLinearDynamicModel(qengine)]
         for model in model_list:
@@ -167,8 +166,7 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
             self.assertEqual(len(weight_dict), 1)
             for k, v in weight_dict.items():
                 self.assertTrue(len(v["float"]) == len(v["quantized"]))
-                for i, val in enumerate(v["quantized"]):
-                    self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
+                self.assertTrue(v["float"].shape == v["quantized"].shape)
 
         model_list = [LSTMwithHiddenDynamicModel(qengine)]
         for model in model_list:
