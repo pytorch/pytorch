@@ -26,6 +26,8 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
+TORCH_API std::string buildErrorMessage(const std::string& s);
+
 class compilation_error : public c10::Error {
  public:
   explicit compilation_error(const std::string& err)
@@ -95,8 +97,6 @@ class malformed_ir : public compilation_error {
       : compilation_error(
             "MALFORMED IR: " + err + " - " + std::to_string(stmt)) {}
 };
-
-TORCH_API std::string buildErrorMessage(const std::string& s);
 
 } // namespace tensorexpr
 } // namespace jit
