@@ -19,6 +19,9 @@
 namespace at {
 namespace native {
 
+template<typename index_t>
+void embedding_dense_backward_cuda_scan(Tensor &sorted_indices, Tensor &count);
+
 namespace {
 
 constexpr int MODE_SUM = 0;
@@ -144,9 +147,6 @@ __global__ void EmbeddingBag_updateOutputKernel_sum_mean(
   }
 }
 
-template<typename index_t>
-void embedding_dense_backward_cuda_scan(Tensor &sorted_indices, Tensor &count);
-
 Tensor embedding_bag_backward_cuda_sum_avg(
                                    const Tensor &grad,
                                    const Tensor &indices_,
@@ -162,9 +162,9 @@ Tensor embedding_bag_backward_cuda_sum_avg(
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
-  ptrdiff_t numel = indices.numel();
+  ptrdiff_t num_indices = indices.numel();
 
-  if (numel == 0) {
+  if (num_indices == 0) {
     // all empty bags
     return at::zeros({num_weights, grad.size(1)}, grad.options());
   }
@@ -181,7 +181,7 @@ Tensor embedding_bag_backward_cuda_sum_avg(
     cuda::cub::sort_pairs(
       indices.data_ptr<index_t>(), sorted_indices.data_ptr<index_t>(),
       range.data_ptr<index_t>(), orig_indices.data_ptr<index_t>(),
-      numel, false/*, 0, nbits*/);
+      num_indices, false/*, 0, nbits*/);
 
     if (scale_grad_by_freq) {
       count = at::empty_like(indices, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
