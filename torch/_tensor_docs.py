@@ -4872,7 +4872,7 @@ Returns a view of this tensor with the last two dimensions transposed.
 
 add_docstr_all('mH',
                r"""
-Alias for :meth:`~Tensor.adjoint`.
+Alias for :func:`adjoint`
 """)
 
 add_docstr_all('adjoint',
