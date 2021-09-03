@@ -209,7 +209,7 @@ def _pickle_storage_type_to_dtype_map():
             val: key for key, val in _dtype_to_pickle_storage_type_map().items()}
     return _pickle_storage_type_to_dtype_map.cache  # type: ignore[attr-defined]
 
-class TypedStorage(torch._C.TypedStorage):
+class TypedStorage:
     is_sparse = False
 
     def fill_(self, value):
@@ -270,11 +270,19 @@ class TypedStorage(torch._C.TypedStorage):
 
             assert len(kwargs) == 0, "invalid keyword arguments"
 
+            def isint(x):
+                try:
+                    int(x)
+                except TypeError:
+                    return False
+                return True
+
+
             if len(args) == 0:
                 self._storage = eval(self.__module__).ByteStorage()
 
-            elif len(args) == 1 and isinstance(args[0], int):
-                self._storage = eval(self.__module__).ByteStorage(args[0] * self.element_size())
+            elif len(args) == 1 and isint(args[0]):
+                self._storage = eval(self.__module__).ByteStorage(int(args[0]) * self.element_size())
 
             elif len(args) == 1 and isinstance(args[0], collections.abc.Sequence):
                 if self.dtype in [torch.quint8, torch.quint4x2, torch.qint32, torch.qint8]:

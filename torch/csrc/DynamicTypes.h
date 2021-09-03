@@ -28,8 +28,6 @@ void registerStoragePyTypeObject(
 void registerDtypeObject(THPDtype *dtype, at::ScalarType scalarType);
 void registerLayoutObject(THPLayout *thp_layout, at::Layout layout);
 
-bool initTHPTypedStorageType(PyObject* module);
-
 PyObject* createPyObject(
     const at::Storage& storage,
     const caffe2::TypeMeta data_type);

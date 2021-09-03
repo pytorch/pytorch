@@ -412,14 +412,6 @@ bool THPStorage_(init)(PyObject *module)
   Py_INCREF(&THPStorageType);
   PyModule_AddObject(module, THPStorageBaseStr, (PyObject *)&THPStorageType);
   THPStorage_(initCopyMethods)();
-
-#if !defined(THC_GENERIC_FILE) && !defined(THQUANTIZED)
-#if defined(TH_REAL_IS_BYTE)
-  // TODO: This is probably not the best place for this
-  return torch::initTHPTypedStorageType(module);
-#endif
-#endif
-
   return true;
 }
 

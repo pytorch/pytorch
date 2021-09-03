@@ -121,65 +121,25 @@ PyObject* createPyObject(
   return obj.release();
 }
 
-PyTypeObject THPTypedStorageType = {
-  PyVarObject_HEAD_INIT(nullptr, 0)
-  "torch._C.TypedStorage",                  /* tp_name */
-  0,                                        /* tp_basicsize */
-  0,                                        /* tp_itemsize */
-  nullptr,                                  /* tp_dealloc */
-  0,                                        /* tp_vectorcall_offset */
-  nullptr,                                  /* tp_getattr */
-  nullptr,                                  /* tp_setattr */
-  nullptr,                                  /* tp_reserved */
-  nullptr,                                  /* tp_repr */
-  nullptr,                                  /* tp_as_number */
-  nullptr,                                  /* tp_as_sequence */
-  nullptr,                                  /* tp_as_mapping */
-  nullptr,                                  /* tp_hash  */
-  nullptr,                                  /* tp_call */
-  nullptr,                                  /* tp_str */
-  nullptr,                                  /* tp_getattro */
-  nullptr,                                  /* tp_setattro */
-  nullptr,                                  /* tp_as_buffer */
-  Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE, /* tp_flags */
-  "THPTypedStorage",                        /* tp_doc */
-  nullptr,                                  /* tp_traverse */
-  nullptr,                                  /* tp_clear */
-  nullptr,                                  /* tp_richcompare */
-  0,                                        /* tp_weaklistoffset */
-  nullptr,                                  /* tp_iter */
-  nullptr,                                  /* tp_iternext */
-  nullptr,                                  /* tp_methods */
-  nullptr,                                  /* tp_members */
-  nullptr,                                  /* tp_getset */
-  nullptr,                                  /* tp_base */
-  nullptr,                                  /* tp_dict */
-  nullptr,                                  /* tp_descr_get */
-  nullptr,                                  /* tp_descr_set */
-  0,                                        /* tp_dictoffset */
-  nullptr,                                  /* tp_init */
-  nullptr,                                  /* tp_alloc */
-  PyType_GenericNew,                        /* tp_new */
-};
+PyTypeObject* getTypedStorageTypeObject() {
+  static PyTypeObject* typed_storage_type_obj = nullptr;
+  if (typed_storage_type_obj == nullptr) {
+    PyObject* storage_module = PyImport_ImportModule("torch.storage");
+    TORCH_INTERNAL_ASSERT(storage_module && PyModule_Check(storage_module));
 
-bool initTHPTypedStorageType(PyObject* module) {
-  if (PyType_Ready(&THPTypedStorageType) < 0)
-    return false;
-  Py_INCREF(&THPTypedStorageType);
-  PyModule_AddObject(module, "TypedStorage",   (PyObject *)&THPTypedStorageType);
-  return true;
+    PyObject* typed_storage_obj = PyObject_GetAttrString(storage_module, "TypedStorage");
+    TORCH_INTERNAL_ASSERT(typed_storage_obj && PyType_Check(typed_storage_obj));
+    typed_storage_type_obj = reinterpret_cast<PyTypeObject*>(
+        PyObject_GetAttrString(storage_module, "TypedStorage"));
+  }
+  return typed_storage_type_obj;
 }
 
 bool isStorage(PyObject* obj)
 {
-  // TODO: Consider instead importing torch.storage with PyImport_ImportModule
-  // and then getting TypedStorage directly from there, rather than using this
-  // torch._C._TypedStorage subclass trick
-  if (PyObject_TypeCheck(obj, &torch::THPTypedStorageType)) {
-    // TODO: Maybe throw error if type is exactly THPTypedStorageType
+  if (PyObject_TypeCheck(obj, getTypedStorageTypeObject())) {
     return true;
   }
-
   auto obj_type = Py_TYPE(obj);
   for (auto const& item : py_storage_type_to_attype) {
     auto const& storage_type = item.first;
@@ -192,32 +152,33 @@ bool isStorage(PyObject* obj)
 
 at::Storage createStorageGetType(PyObject* obj, at::ScalarType& scalar_type)
 {
+  bool is_typed_storage = PyObject_TypeCheck(obj, getTypedStorageTypeObject());
+  THPObjectPtr maybe_untyped_storage;
+  if (is_typed_storage) {
+    PyObject* maybe_untyped_storage_obj = PyObject_GetAttrString(obj, "_storage");
+    TORCH_INTERNAL_ASSERT(maybe_untyped_storage_obj);
+    maybe_untyped_storage = maybe_untyped_storage_obj;
+  }
+
   auto obj_type = Py_TYPE(obj);
   for (auto const& item : py_storage_type_to_attype) {
     auto const& storage_type = item.first;
+    if (is_typed_storage) {
+      if (Py_TYPE(maybe_untyped_storage.get()) == storage_type) {
+        auto& type = *item.second;
+        auto ret = type.unsafeStorageFromTH(
+          ((THPVoidStorage*)maybe_untyped_storage.get())->cdata,
+          true);
+        PyObject* dtype_obj = PyObject_GetAttrString(obj, "dtype");
+        TORCH_INTERNAL_ASSERT(dtype_obj && THPDtype_Check(dtype_obj));
+        scalar_type = reinterpret_cast<THPDtype*>(dtype_obj)->scalar_type;
+        return ret;
+      }
+    }
     if (obj_type == storage_type) {
       auto& type = *item.second;
       scalar_type = at::kByte;
       return type.unsafeStorageFromTH(((THPVoidStorage*)obj)->cdata, true);
-    }
-    // Check for TypedStorage, which has a `storage` attribute that matches
-    // TODO: This check should only be performed once, outside of this loop
-    // TODO: Consider instead importing torch.storage with PyImport_ImportModule
-    // and then getting TypedStorage directly from there, rather than using this
-    // torch._C._TypedStorage subclass trick
-    if (PyObject_TypeCheck(obj, &torch::THPTypedStorageType)) {
-      THPObjectPtr maybe_storage(PyObject_GetAttrString(obj, "_storage"));
-
-      // TODO: Should probably throw error if type is exactly THPTypedStorageType
-      if (maybe_storage.get() && (Py_TYPE(maybe_storage.get()) == storage_type)) {
-        auto& type = *item.second;
-        auto ret = type.unsafeStorageFromTH(((THPVoidStorage*)maybe_storage.get())->cdata, true);
-        // TODO: Should have proper error checking here if dtype attr doesn't
-        // exist or is not a THPDtype
-        PyObject* dtype_obj = PyObject_GetAttrString(obj, "dtype");
-        scalar_type = reinterpret_cast<THPDtype*>(dtype_obj)->scalar_type;
-        return ret;
-      }
     }
   }
   throw TypeError("not a storage '%s'", Py_TYPE(obj)->tp_name);
