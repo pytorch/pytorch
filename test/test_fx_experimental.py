@@ -1466,6 +1466,7 @@ class TestNormalizeOperators(JitTestCase):
             "fill_",
             "gradient",
             "index_put",
+            "nn.functional.conv2d",
             "polygamma",
             "special.polygamma",
             "repeat",
