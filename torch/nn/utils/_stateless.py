@@ -14,14 +14,20 @@ def _get_module_parameters_and_buffers(module):
     # params with weight norm/spectral norm applied
     return parameters_and_buffers
 
+
 @contextlib.contextmanager
 def reparametrize_module(module, parameters_and_buffers):
     # Parametrization does not support to change submodules directly
     for name, tensor in parameters_and_buffers.items():
-        _reparametrize_in_submodule(module, name.split("."), tensor)
+        _apply_func_submodules(
+            torch.nn.utils.parametrize.register_parametrization,
+            module, name.split("."), (_ReparametrizedTensor(tensor),))
     yield
     for name in parameters_and_buffers:
-        _remove_reparametrize_in_submodule(module, name.split("."))
+        _apply_func_submodules(
+            torch.nn.utils.parametrize.remove_parametrizations,
+            module, name.split("."), (False,))
+
 
 class _ReparametrizedTensor(torch.nn.Module):
     def __init__(self, tensor):
@@ -31,26 +37,20 @@ class _ReparametrizedTensor(torch.nn.Module):
     def forward(self, original):
         return self._tensor
 
-def _reparametrize_in_submodule(module, path, tensor):
+
+def _apply_func_submodules(func, module, path, args):
     if len(path) == 1:
         # We should be careful as the current API does not allow to reparametrize
         # already reparametrized parameters
-        torch.nn.utils.parametrize.register_parametrization(
-            module, path[0], _ReparametrizedTensor(tensor))
+        func(module, path[0], *args)
     else:
-        _reparametrize_in_submodule(module._modules[path[0]], path[1:], tensor)
-
-def _remove_reparametrize_in_submodule(module, path):
-    if len(path) == 1:
-        torch.nn.utils.parametrize.remove_parametrizations(
-            module, path[0], False)
-    else:
-        _remove_reparametrize_in_submodule(
-            module._modules[path[0]], path[1:])
+        _apply_func_submodules(func, getattr(module, path[0]), path[1:], args)
 
 
-def functional_call(module, parameters_and_buffers, *inputs, **kwargs):
+def functional_call(module, parameters_and_buffers, args, kwargs=None):
     # TODO allow kwargs such as unsafe and others for parametrization
+    if kwargs is None:
+        kwargs = {}
     with reparametrize_module(module, parameters_and_buffers):
-        out = module(*inputs, **kwargs)
+        out = module(*args, **kwargs)
     return out
