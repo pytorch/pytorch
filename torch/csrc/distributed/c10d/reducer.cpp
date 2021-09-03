@@ -377,9 +377,25 @@ void Reducer::mark_variable_ready_dense(size_t variable_index) {
         if (comm_hook_ == nullptr) {
           auto wrapped =
               at::native::wrapped_scalar_tensor(double(1.) / div_factor_);
-          // Divides while copying into the bucket view to save one scan over
-          // all the input parameters.
-          at::mul_out(bucket_view, grad, wrapped);
+          if (!grad.requires_grad()) {
+            // Divides while copying into the bucket view to save one scan over
+            // all the input parameters.
+            at::mul_out(bucket_view, grad, wrapped);
+          } else {
+            // If DDP is running with create_graph=True, gradients require_grad
+            // themselves in order to compute higher order derivatives. However,
+            // DDP will not sync up these gradients currently (see
+            // https://github.com/pytorch/pytorch/issues/63812).
+            LOG(WARNING)
+                << "Using DistributedDataParallel with create_graph=True "
+                << " is not well-supported. The higher-order gradient will "
+                << " not be synchronized across ranks, and backpropagation "
+                << " through all_reduce operations will not occur. If you require "
+                << " DDP to work with higher-order gradients for your use case, "
+                << " please ping https://github.com/pytorch/pytorch/issues/63929";
+            auto div_result = at::mul(grad, wrapped);
+            bucket_view.copy_(div_result);
+          }
         } else {
           bucket_view.copy_(grad);
         }
@@ -456,6 +472,7 @@ std::vector<c10d::GradBucket> Reducer::get_grad_buckets(
     auto variables_for_bucket = get_variables_for_bucket(i, bucket);
     gradBuckets.emplace_back(
         i,
+        buckets_.size(),
         return_zero_tensors ? at::zeros_like(bucket.replicas[0].contents)
                             : bucket.replicas[0].contents,
         bucket.replicas[0].offsets,
@@ -872,6 +889,7 @@ void Reducer::all_reduce_bucket(Bucket& bucket) {
   auto variables_for_bucket = get_variables_for_bucket(next_bucket_, bucket);
   GradBucket grad_bucket(
       next_bucket_,
+      buckets_.size(),
       tensors[0],
       // Since we only support single-process single-device
       // mode, there is always only one replica in the bucket.
