@@ -7972,7 +7972,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         b = torch.arange(24., dtype=dtype, device=device).reshape(4, 3, 2)
         cn = torch.from_numpy(np.tensordot(a.cpu().numpy(), b.cpu().numpy(),
                                            axes=([1, 0], [0, 1])))
-        dims=([1, 0], [0, 1])
+        dims = ([1, 0], [0, 1])
         c = torch.linalg.tensordot(a, b, dims=dims).cpu()
         self.assertEqual(c, cn)
 
