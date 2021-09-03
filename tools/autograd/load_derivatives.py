@@ -72,8 +72,7 @@ def create_derivative(f: NativeFunction, formula: str, var_names: Tuple[str, ...
     formula, saved_inputs = saved_variables(formula, arguments, var_names)
     formula, saved_outputs = saved_variables(formula, named_returns, var_names)
 
-    named_gradients = {name for name in available_named_gradients
-                       if re.search(IDENT_REGEX.format(name), formula)}
+    used_named_gradients = {name for name in available_named_gradients if re.search(IDENT_REGEX.format(name), formula)}
 
     # Check that the referenced derivatives in the formula are in bounds
     for i in used_gradient_indices(formula):
@@ -89,7 +88,7 @@ def create_derivative(f: NativeFunction, formula: str, var_names: Tuple[str, ...
         var_names=var_names,
         saved_inputs=saved_inputs,
         saved_outputs=saved_outputs,
-        named_gradients=named_gradients,
+        named_gradients=used_named_gradients,
     )
 
 def create_forward_derivative(f: NativeFunction, formula: str, names: Tuple[str, ...]) -> ForwardDerivative:
