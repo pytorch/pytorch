@@ -27,16 +27,20 @@ env:
   PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
 
 concurrency:
-  group: linux-bionic-py3.6-clang9-${{ github.event.pull_request.number || github.sha }}
+  group: linux-bionic-py3.6-clang9-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
 jobs:
   ciflow_should_run:
     runs-on: ubuntu-18.04
     if: ${{ (github.event_name != 'pull_request') || (github.event.action !='unassigned') || (contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/cpu') || contains(github.event.pull_request.labels.*.name, 'ciflow/default') || contains(github.event.pull_request.labels.*.name, 'ciflow/linux') || contains(github.event.pull_request.labels.*.name, 'ciflow/noarch') || contains(github.event.pull_request.labels.*.name, 'ciflow/xla')) }}
+    env:
+      LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
     steps:
       - name: noop
         run: echo running ciflow_should_run
+      - name: print labels
+        run: echo "${LABELS}"
   calculate-docker-image:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.2xlarge
