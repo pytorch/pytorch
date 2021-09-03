@@ -534,7 +534,7 @@ class ByteStorage(_C.ByteStorageBase, _StorageBase):
 
 class DoubleStorage(TypedStorage):
     @classproperty
-    def dtype(cls):
+    def dtype(self):
         return torch.double
 
     def __init__(self, *args, **kwargs):
@@ -542,7 +542,7 @@ class DoubleStorage(TypedStorage):
 
 class FloatStorage(TypedStorage):
     @classproperty
-    def dtype(cls):
+    def dtype(self):
         return torch.float
 
     def __init__(self, *args, **kwargs):
@@ -550,7 +550,7 @@ class FloatStorage(TypedStorage):
 
 class HalfStorage(TypedStorage):
     @classproperty
-    def dtype(cls):
+    def dtype(self):
         return torch.half
 
     def __init__(self, *args, **kwargs):
@@ -558,7 +558,7 @@ class HalfStorage(TypedStorage):
 
 class LongStorage(TypedStorage):
     @classproperty
-    def dtype(cls):
+    def dtype(self):
         return torch.long
 
     def __init__(self, *args, **kwargs):
@@ -566,7 +566,7 @@ class LongStorage(TypedStorage):
 
 class IntStorage(TypedStorage):
     @classproperty
-    def dtype(cls):
+    def dtype(self):
         return torch.int
 
     def __init__(self, *args, **kwargs):
@@ -574,7 +574,7 @@ class IntStorage(TypedStorage):
 
 class ShortStorage(TypedStorage):
     @classproperty
-    def dtype(cls):
+    def dtype(self):
         return torch.short
 
     def __init__(self, *args, **kwargs):
@@ -582,7 +582,7 @@ class ShortStorage(TypedStorage):
 
 class CharStorage(TypedStorage):
     @classproperty
-    def dtype(cls):
+    def dtype(self):
         return torch.int8
 
     def __init__(self, *args, **kwargs):
@@ -590,7 +590,7 @@ class CharStorage(TypedStorage):
 
 class BoolStorage(TypedStorage):
     @classproperty
-    def dtype(cls):
+    def dtype(self):
         return torch.bool
 
     def __init__(self, *args, **kwargs):
@@ -598,7 +598,7 @@ class BoolStorage(TypedStorage):
 
 class BFloat16Storage(TypedStorage):
     @classproperty
-    def dtype(cls):
+    def dtype(self):
         return torch.bfloat16
 
     def __init__(self, *args, **kwargs):
@@ -606,7 +606,7 @@ class BFloat16Storage(TypedStorage):
 
 class ComplexDoubleStorage(TypedStorage):
     @classproperty
-    def dtype(cls):
+    def dtype(self):
         return torch.cdouble
 
     def __init__(self, *args, **kwargs):
@@ -614,7 +614,7 @@ class ComplexDoubleStorage(TypedStorage):
 
 class ComplexFloatStorage(TypedStorage):
     @classproperty
-    def dtype(cls):
+    def dtype(self):
         return torch.cfloat
 
     def __init__(self, *args, **kwargs):
@@ -622,7 +622,7 @@ class ComplexFloatStorage(TypedStorage):
 
 class QUInt8Storage(TypedStorage):
     @classproperty
-    def dtype(cls):
+    def dtype(self):
         return torch.quint8
 
     def __init__(self, *args, **kwargs):
@@ -630,7 +630,7 @@ class QUInt8Storage(TypedStorage):
 
 class QInt8Storage(TypedStorage):
     @classproperty
-    def dtype(cls):
+    def dtype(self):
         return torch.qint8
 
     def __init__(self, *args, **kwargs):
@@ -638,7 +638,7 @@ class QInt8Storage(TypedStorage):
 
 class QInt32Storage(TypedStorage):
     @classproperty
-    def dtype(cls):
+    def dtype(self):
         return torch.qint32
 
     def __init__(self, *args, **kwargs):
@@ -646,7 +646,7 @@ class QInt32Storage(TypedStorage):
 
 class QUInt4x2Storage(TypedStorage):
     @classproperty
-    def dtype(cls):
+    def dtype(self):
         return torch.quint4x2
 
     def __init__(self, *args, **kwargs):

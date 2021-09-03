@@ -172,7 +172,7 @@ class _StorageBase(object):
         return self
 
     @classproperty
-    def dtype(cls):
+    def dtype(self):
         return torch.uint8
 
 def _load_from_bytes(b):
