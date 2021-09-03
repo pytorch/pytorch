@@ -90,7 +90,6 @@ class Tensor(torch._C._TensorBase):
                         self._backward_hooks)
                 else:
                     new_tensor = self.new_empty([])
-                    # TODO: Tensor.set_ needs to accept TypedStorage
                     new_tensor.set_(new_storage, self.storage_offset(), self.size(), self.stride())
                     if self.is_conj():
                         new_tensor = new_tensor.conj_physical()
@@ -168,18 +167,6 @@ class Tensor(torch._C._TensorBase):
             storage = storage_class(wrap_storage=storage)
         return storage
 
-    def new(self, *args, **kwargs):
-        if len(args) == 1 and torch.is_storage(args[0]):
-            if args[0].dtype != self.dtype:
-                raise RuntimeError((
-                    f"Expected Storage of type {self.dtype} but got type "
-                    f"{args[0].dtype} for argument 1 'storage'"))
-
-            if isinstance(args[0], torch.storage.TypedStorage):
-                return self._new(args[0]._untyped(), **kwargs)
-
-        return self._new(*args, **kwargs)
-
     def _reduce_ex_internal(self, proto):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__reduce_ex__, (self,), self, proto)
@@ -228,15 +215,16 @@ class Tensor(torch._C._TensorBase):
                 raise RuntimeError(f"Serialization is not supported for tensors of type {self.qscheme()}")
             # TODO: Once we decide to break serialization FC, no longer
             # need to wrap with TypedStorage
-            args_qtensor = (torch.storage.TypedStorage(
-                                wrap_storage=self.storage()._untyped(),
-                                dtype=self.dtype),
-                            self.storage_offset(),
-                            tuple(self.size()),
-                            self.stride(),
-                            quantizer_params,
-                            self.requires_grad,
-                            backward_hooks)
+            args_qtensor = (
+                torch.storage.TypedStorage(
+                    wrap_storage=self.storage()._untyped(),
+                    dtype=self.dtype),
+                self.storage_offset(),
+                tuple(self.size()),
+                self.stride(),
+                quantizer_params,
+                self.requires_grad,
+                backward_hooks)
             return (torch._utils._rebuild_qtensor, args_qtensor)
         elif self.is_sparse:
             if self.layout == torch.sparse_coo:
@@ -251,14 +239,15 @@ class Tensor(torch._C._TensorBase):
         else:
             # TODO: Once we decide to break serialization FC, no longer
             # need to wrap with TypedStorage
-            args = (torch.storage.TypedStorage(
-                        wrap_storage=self.storage()._untyped(),
-                        dtype=self.dtype),
-                    self.storage_offset(),
-                    tuple(self.size()),
-                    self.stride(),
-                    self.requires_grad,
-                    backward_hooks)  # previously was self._backward_hooks
+            args = (
+                torch.storage.TypedStorage(
+                    wrap_storage=self.storage()._untyped(),
+                    dtype=self.dtype),
+                self.storage_offset(),
+                tuple(self.size()),
+                self.stride(),
+                self.requires_grad,
+                backward_hooks)  # previously was self._backward_hooks
             return (torch._utils._rebuild_tensor_v2, args)
 
     def __setstate__(self, state):

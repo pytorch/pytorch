@@ -270,13 +270,6 @@ Tensor internal_new_from_data(
       tensor = at::empty(sizes, at::initialTensorOptions().dtype(storage_scalar_type).pinned_memory(pin_memory).device(storage.device()));
       tensor.set_(storage);
 
-      // TODO: Not sure if this is necessary or not
-      /*
-      if (!type_inference) {
-        tensor = tensor.to(scalar_type);
-      }
-      */
-
     } else {
       tensor = at::empty(sizes, at::initialTensorOptions().dtype(inferred_scalar_type).pinned_memory(pin_memory));
       recursive_store(
@@ -503,7 +496,18 @@ Tensor legacy_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_t
     at::OptionalDeviceGuard device_guard(deviceOptional);
     return at::empty({0}, build_options(options, scalar_type));
   } else if (r.idx == 1) {
-    return new_with_storage(options, scalar_type, r.storage(0));
+    at::ScalarType storage_scalar_type;
+    at::Storage storage = r.storage(0, &storage_scalar_type);
+    if (storage_scalar_type != at::ScalarType::Undefined) {
+      TORCH_CHECK(
+        storage_scalar_type == scalar_type,
+        "Expected Storage of type ",
+        scalar_type,
+        " but got type ",
+        storage_scalar_type,
+        " for argument 1 'storage'");
+    }
+    return new_with_storage(options, scalar_type, storage);
   } else if (r.idx == 2) {
     auto cdata = reinterpret_cast<void*>(r.toInt64(0));
     return at::unsafeTensorFromTH(cdata, true);
@@ -555,7 +559,18 @@ Tensor legacy_tensor_new(c10::DispatchKey dispatch_key, at::ScalarType scalar_ty
     at::OptionalDeviceGuard device_guard(deviceOptional);
     return at::empty({0}, build_options(options, scalar_type));
   } else if (r.idx == 1) {
-    return new_with_storage(options, scalar_type, r.storage(0));
+    at::ScalarType storage_scalar_type;
+    at::Storage storage = r.storage(0, &storage_scalar_type);
+    if (storage_scalar_type != at::ScalarType::Undefined) {
+      TORCH_CHECK(
+        storage_scalar_type == scalar_type,
+        "Expected Storage of type ",
+        scalar_type,
+        " but got type ",
+        storage_scalar_type,
+        " for argument 1 'storage'");
+    }
+    return new_with_storage(options, scalar_type, storage);
   } else if (r.idx == 2) {
     auto cdata = reinterpret_cast<void*>(r.toInt64(0));
     return at::unsafeTensorFromTH(cdata, true);

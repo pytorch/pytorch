@@ -121,18 +121,46 @@ PyObject* createPyObject(
   return obj.release();
 }
 
-struct THPTypedStorage {
-  PyObject_HEAD
+PyTypeObject THPTypedStorageType = {
+  PyVarObject_HEAD_INIT(nullptr, 0)
+  "torch._C.TypedStorage",                  /* tp_name */
+  0,                                        /* tp_basicsize */
+  0,                                        /* tp_itemsize */
+  nullptr,                                  /* tp_dealloc */
+  0,                                        /* tp_vectorcall_offset */
+  nullptr,                                  /* tp_getattr */
+  nullptr,                                  /* tp_setattr */
+  nullptr,                                  /* tp_reserved */
+  nullptr,                                  /* tp_repr */
+  nullptr,                                  /* tp_as_number */
+  nullptr,                                  /* tp_as_sequence */
+  nullptr,                                  /* tp_as_mapping */
+  nullptr,                                  /* tp_hash  */
+  nullptr,                                  /* tp_call */
+  nullptr,                                  /* tp_str */
+  nullptr,                                  /* tp_getattro */
+  nullptr,                                  /* tp_setattro */
+  nullptr,                                  /* tp_as_buffer */
+  Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE, /* tp_flags */
+  "THPTypedStorage",                        /* tp_doc */
+  nullptr,                                  /* tp_traverse */
+  nullptr,                                  /* tp_clear */
+  nullptr,                                  /* tp_richcompare */
+  0,                                        /* tp_weaklistoffset */
+  nullptr,                                  /* tp_iter */
+  nullptr,                                  /* tp_iternext */
+  nullptr,                                  /* tp_methods */
+  nullptr,                                  /* tp_members */
+  nullptr,                                  /* tp_getset */
+  nullptr,                                  /* tp_base */
+  nullptr,                                  /* tp_dict */
+  nullptr,                                  /* tp_descr_get */
+  nullptr,                                  /* tp_descr_set */
+  0,                                        /* tp_dictoffset */
+  nullptr,                                  /* tp_init */
+  nullptr,                                  /* tp_alloc */
+  PyType_GenericNew,                        /* tp_new */
 };
-
-static PyTypeObject THPTypedStorageType = {
-    PyVarObject_HEAD_INIT(NULL, 0)
-    .tp_name = "torch._C.TypedStorage",
-    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
-    .tp_doc = "THPTypedStorage",
-    .tp_new = PyType_GenericNew,
-};
-
 
 bool initTHPTypedStorageType(PyObject* module) {
   if (PyType_Ready(&THPTypedStorageType) < 0)
@@ -162,6 +190,22 @@ bool isStorage(PyObject* obj)
   return false;
 }
 
+// This class serves as an RAII wrapper for a PyObject reference. When
+// a PyObjectGuard object is destroyed, the PyObject reference is decremented
+struct PyObjectGuard {
+  PyObject* obj;
+
+  PyObjectGuard(PyObject* obj) :
+    obj(obj)
+  {}
+
+  ~PyObjectGuard() {
+    if (obj) {
+      Py_DECREF(obj);
+    }
+  }
+};
+
 at::Storage createStorageGetType(PyObject* obj, at::ScalarType& scalar_type)
 {
   auto obj_type = Py_TYPE(obj);
@@ -178,11 +222,12 @@ at::Storage createStorageGetType(PyObject* obj, at::ScalarType& scalar_type)
     // and then getting TypedStorage directly from there, rather than using this
     // torch._C._TypedStorage subclass trick
     if (PyObject_TypeCheck(obj, &torch::THPTypedStorageType)) {
+      PyObjectGuard maybe_storage(PyObject_GetAttrString(obj, "_storage"));
+
       // TODO: Should probably throw error if type is exactly THPTypedStorageType
-      PyObject* maybe_storage = PyObject_GetAttrString(obj, "_storage");
-      if (maybe_storage && (Py_TYPE(maybe_storage) == storage_type)) {
+      if (maybe_storage.obj && (Py_TYPE(maybe_storage.obj) == storage_type)) {
         auto& type = *item.second;
-        auto ret = type.unsafeStorageFromTH(((THPVoidStorage*)maybe_storage)->cdata, true);
+        auto ret = type.unsafeStorageFromTH(((THPVoidStorage*)maybe_storage.obj)->cdata, true);
         // TODO: Should have proper error checking here if dtype attr doesn't
         // exist or is not a THPDtype
         PyObject* dtype_obj = PyObject_GetAttrString(obj, "dtype");

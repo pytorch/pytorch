@@ -3068,10 +3068,7 @@ class TestTorchDeviceType(TestCase):
     def test_tensor_from_storage(self, device, dtype):
         a = make_tensor((4, 5, 3), device, dtype, low=-9, high=9)
         a_s = a.storage()
-
-        # TODO: REALLY need to change torch.tensor back to the way it used to be
-        #b = torch.tensor(a_s, device=device, dtype=dtype).reshape(a.size())
-        b = torch.Tensor().to(device).to(dtype).set_(a_s).reshape(a.size())
+        b = torch.tensor(a_s, device=device, dtype=dtype).reshape(a.size())
         self.assertEqual(a, b)
 
     @dtypes(torch.float32, torch.complex64)
@@ -3090,7 +3087,6 @@ class TestTorchDeviceType(TestCase):
 
         # Check that deepcopy preserves sharing
         w[0].add_(1)
-        element_size = a.element_size()
         for i in range(a.numel()):
             self.assertEqual(w[1][0][i], q[1][0][i] + 1)
         self.assertEqual(w[3], c + 1)

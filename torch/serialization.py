@@ -770,7 +770,7 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
                     # TODO: Once we decide to break serialization FC, we can
                     # stop wrapping with TypedStorage
                     deserialized_objects[key] = torch.storage.TypedStorage(
-                        wrap_storage=obj, 
+                        wrap_storage=obj,
                         dtype=dtype)
 
                 storage_views = pickle_module.load(f, **pickle_load_args)

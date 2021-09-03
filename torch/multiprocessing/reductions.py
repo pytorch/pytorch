@@ -272,8 +272,7 @@ def reduce_tensor(tensor):
     metadata = (tensor.storage_offset(), tensor.size(), tensor.stride(), tensor.requires_grad)
     return (rebuild_tensor, (
         type(tensor),
-        # TODO: Find out why `storage` is typed here
-        torch.storage.TypedStorage(wrap_storage=storage._untyped(), dtype=tensor.dtype),
+        storage,
         metadata))
 
 
@@ -320,8 +319,16 @@ def rebuild_storage_empty(cls):
 def rebuild_typed_storage(storage, dtype):
     return torch.storage.TypedStorage(wrap_storage=storage, dtype=dtype)
 
+# Use for torch.storage.TypedStorage
 def reduce_typed_storage(storage):
     return (rebuild_typed_storage, (storage._storage, storage.dtype))
+
+def rebuild_typed_storage_child(storage, storage_type):
+    return storage_type(wrap_storage=storage)
+
+# Use for child classes of torch.storage.TypedStorage, like torch.FloatStorage
+def reduce_typed_storage_child(storage):
+    return (rebuild_typed_storage_child, (storage._storage, type(storage)))
 
 def reduce_storage(storage):
     from . import get_sharing_strategy
@@ -332,7 +339,7 @@ def reduce_storage(storage):
         cache_key = metadata[1]
         rebuild = rebuild_storage_filename
         storage._shared_incref()
-    elif storage.nbytes() == 0:
+    elif storage.size() == 0:
         # This is special cased because Empty tensors
         # (with size 0) cannot be mmapped.
         return (rebuild_storage_empty, (type(storage),))
@@ -351,7 +358,10 @@ def init_reductions():
     ForkingPickler.register(torch.cuda.Event, reduce_event)
 
     for t in torch._storage_classes:
-        ForkingPickler.register(t, reduce_storage)
+        if t().dtype == torch.uint8:
+            ForkingPickler.register(t, reduce_storage)
+        else:
+            ForkingPickler.register(t, reduce_typed_storage_child)
 
     ForkingPickler.register(torch.storage.TypedStorage, reduce_typed_storage)
 

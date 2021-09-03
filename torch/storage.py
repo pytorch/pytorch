@@ -78,7 +78,7 @@ class _StorageBase(object):
         return _type(self, getattr(torch, self.__class__.__name__))
 
     def _to(self, dtype):
-        storage = torch.Tensor().to(self.dtype).to(self.device).set_(self).to(dtype).storage()
+        storage = torch.tensor([], dtype=self.dtype, device=self.device).set_(self).to(dtype).storage()
         if storage.data_ptr() == self.data_ptr():
             storage = storage.clone()
         return storage
@@ -355,7 +355,7 @@ class TypedStorage(torch._C.TypedStorage):
         # TODO: Need to fix quantized types
         if self.dtype in [torch.quint8, torch.quint4x2, torch.qint32, torch.qint8]:
             return NotImplemented
-        tmp_tensor = torch.Tensor().to(self.dtype).to(self.device).set_(self)
+        tmp_tensor = torch.tensor([], dtype=self.dtype, device=self.device).set_(self)
         tmp_tensor[idx] = value
 
     def __getitem__(self, idx):
@@ -376,7 +376,7 @@ class TypedStorage(torch._C.TypedStorage):
                 dtype=interpret_dtypes[self.dtype])[idx]
 
         idx_wrapped = self._maybe_wrap_index(idx)
-        tmp_tensor = torch.Tensor().to(self.dtype).to(self.device).set_(self)
+        tmp_tensor = torch.tensor([], dtype=self.dtype, device=self.device).set_(self)
         return tmp_tensor[idx_wrapped].item()
 
     def copy_(self, source: T, non_blocking=None) -> T:
@@ -427,8 +427,6 @@ class TypedStorage(torch._C.TypedStorage):
     def __deepcopy__(self, memo):
         return self._new_wrapped_storage(copy.deepcopy(self._storage, memo))
 
-    #def __reduce__(self):
-
     def __sizeof__(self):
         return super(TypedStorage, self).__sizeof__() + self.nbytes()
 
@@ -447,7 +445,7 @@ class TypedStorage(torch._C.TypedStorage):
     def pin_memory(self):
         """Coppies the  storage to pinned memory, if it's not already pinned."""
         return self._new_wrapped_storage(self._storage.pin_memory())
-    
+
     def share_memory_(self):
         """Moves the storage to shared memory.
 
@@ -495,10 +493,6 @@ class TypedStorage(torch._C.TypedStorage):
     def resize_(self, size):
         self._storage.resize_(size * self.element_size())
 
-    @property
-    def _free_weak_ref(self):
-        return self._storage._free_weak_ref
-
     @classmethod
     def _free_weak_ref(cls, *args, **kwargs):
         return eval(cls.__module__).ByteStorage._free_weak_ref(*args, **kwargs)
@@ -513,7 +507,8 @@ class TypedStorage(torch._C.TypedStorage):
                 'from_buffer: only supported for subclasses of TypedStorage')
 
         if 'dtype' in kwargs or len(args) == 5:
-            raise RuntimeError(("from_buffer: 'dtype' can only be specified in "
+            raise RuntimeError((
+                "from_buffer: 'dtype' can only be specified in "
                 "ByteStorage.from_buffer"))
 
         kwargs['dtype'] = cls().dtype
@@ -525,7 +520,7 @@ class TypedStorage(torch._C.TypedStorage):
         # TODO: using `torch.tensor`'s `dtype` kwarg at the moment because
         # `torch.tensor` does not handle ByteStorage correctly--it resolves
         # it to int64 for some reason. Need to solve that issue
-        storage = torch.Tensor().to(self.dtype).to(self.device).set_(self).to(dtype).storage()
+        storage = torch.tensor([], dtype=self.dtype, device=self.device).set_(self).to(dtype).storage()
         if storage.data_ptr() == self.data_ptr():
             storage = storage.clone()
         return storage

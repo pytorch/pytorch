@@ -39,10 +39,10 @@ def _type(self, dtype=None, non_blocking=False, **kwargs):
         new_values = torch.Tensor._values(self).type(new_values_type_name, non_blocking)
         new_indices_type_name = new_module_name + '.LongTensor'
         new_indices = torch.Tensor._indices(self).type(new_indices_type_name, non_blocking)
-        return dtype(new_indices, new_values, self.nbytes())
+        return dtype(new_indices, new_values, self.size())
     if dtype.is_sparse:
         raise RuntimeError("Cannot cast dense tensor to sparse tensor")
-    return dtype(self.nbytes()).copy_(self, non_blocking)
+    return dtype(self.size()).copy_(self, non_blocking)
 
 
 def _cuda(self, device=None, non_blocking=False, **kwargs):
@@ -73,10 +73,10 @@ def _cuda(self, device=None, non_blocking=False, **kwargs):
             new_type = getattr(torch.cuda.sparse, self.__class__.__name__)
             indices = torch.Tensor._indices(self).cuda(device, non_blocking)
             values = torch.Tensor._values(self).cuda(device, non_blocking)
-            return new_type(indices, values, self.nbytes())
+            return new_type(indices, values, self.size())
         else:
             new_type = getattr(torch.cuda, self.__class__.__name__)
-            return new_type(self.nbytes()).copy_(self, non_blocking)
+            return new_type(self.size()).copy_(self, non_blocking)
 
 
 def _get_async_or_non_blocking(function_name, non_blocking, kwargs):
@@ -131,8 +131,8 @@ def _get_async_or_non_blocking(function_name, non_blocking, kwargs):
 # be a TypedStorage
 def _rebuild_tensor(storage, storage_offset, size, stride):
     # first construct a tensor with the correct dtype/device
-    t = torch.tensor([], dtype=storage.dtype, device=storage._storage.device)
-    return t.set_(storage._storage, storage_offset, size, stride)
+    t = torch.tensor([], dtype=storage.dtype, device=storage._untyped().device)
+    return t.set_(storage._untyped(), storage_offset, size, stride)
 
 
 def _rebuild_tensor_v2(storage, storage_offset, size, stride, requires_grad, backward_hooks):
