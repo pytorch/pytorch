@@ -15,14 +15,8 @@ from collections import OrderedDict
 from itertools import product, permutations
 from operator import mul
 from functools import reduce, partial
-
-from utils.tools_package import tools  # allows for imports from tools below
-
-from tools.autograd import gen_autograd_functions
-from tools.autograd import load_derivatives
-import tools.codegen.model
-
 import torch
+
 from torch import nn
 from torch._six import inf, nan
 from torch.autograd.function import once_differentiable
