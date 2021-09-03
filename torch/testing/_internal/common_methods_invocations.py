@@ -2620,27 +2620,23 @@ def sample_inputs_conv2d(op_info, device, dtype, requires_grad, jit_fail_sample=
 
     # Ordered as shapes for input, weight, bias
     # and a dict of values of (stride, padding, groups, dilation)
-    if jit_fail_sample:
-        cases: Tuple = (
-            ((1, 4, 5, 5), (3, 4, 3, 3), None, {}),
-        )
-    else:
-        cases = (  # type: ignore[assignment]
-            ((1, 3, 4, 4), (3, 3, 3, 3), (3,),
-             {'stride': (2, 2), 'padding': 2, 'groups': 1}),
-            ((2, 4, 8, 8), (2, 2, 3, 3), (2,),
-             {'stride': (2, 2), 'padding': (2, 1), 'groups': 2, 'dilation': (4, 4)}),
-            ((1, 4, 5, 5), (1, 4, 2, 3), (1,),
-             {'stride': 2, 'padding': 1, 'groups': 1, 'dilation': (2, 3)}),
-            ((1, 4, 5, 5), (1, 4, 2, 3), (1,),
-             {'stride': 2, 'padding': 1, 'groups': 1, 'dilation': (2, 3)}),
-            ((1, 2, 4, 3), (4, 2, 3, 4), None,
-             {'stride': 2, 'padding': 1, 'groups': 1}),
-            ((1, 4, 5, 5), (1, 4, 2, 3), (1,),
-             {'stride': 2, 'padding': "valid"}),
-            ((1, 4, 5, 5), (1, 4, 2, 3), (1,),
-             {'stride': 1, 'padding': "same", 'dilation': 3}),
-        )
+    cases = (
+        ((1, 3, 4, 4), (3, 3, 3, 3), (3,),
+            {'stride': (2, 2), 'padding': 2, 'groups': 1}),
+        ((2, 4, 8, 8), (2, 2, 3, 3), (2,),
+            {'stride': (2, 2), 'padding': (2, 1), 'groups': 2, 'dilation': (4, 4)}),
+        ((1, 4, 5, 5), (1, 4, 2, 3), (1,),
+            {'stride': 2, 'padding': 1, 'groups': 1, 'dilation': (2, 3)}),
+        ((1, 4, 5, 5), (1, 4, 2, 3), (1,),
+            {'stride': 2, 'padding': 1, 'groups': 1, 'dilation': (2, 3)}),
+        ((1, 2, 4, 3), (4, 2, 3, 4), None,
+            {'stride': 2, 'padding': 1, 'groups': 1}),
+        ((1, 4, 5, 5), (1, 4, 2, 3), (1,),
+            {'stride': 2, 'padding': "valid"}),
+        ((1, 4, 5, 5), (1, 4, 2, 3), (1,),
+            {'stride': 1, 'padding': "same", 'dilation': 3}),
+        ((1, 4, 5, 5), (3, 4, 3, 3), None, {}),            
+    )
 
     def generator():
         for input_shape, weight, bias, kwargs in cases:
@@ -7445,22 +7441,6 @@ op_db: List[OpInfo] = [
                SkipInfo('TestJit', device_type='cpu'),
                SkipInfo('TestMathBits', device_type='cpu'),
                SkipInfo('TestGradients', device_type='cpu'),
-           ),
-           supports_out=False,),
-    OpInfo('nn.functional.conv2d',
-           variant_test_name='jit_fail',
-           aliases=('conv2d',),
-           aten_name='conv2d',
-           # CPU surprisingly supports more dtypes in this case
-           # Reference: https://github.com/pytorch/pytorch/issues/63518.
-           dtypes=all_types_and(torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
-           sample_inputs_func=partial(sample_inputs_conv2d, jit_fail_sample=True),
-           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL if not CUDA11OrLater else 0.,
-           skips=(
-               # RuntimeError: !lhs.isAliasOf(rhs)INTERNAL ASSERT FAILED at
-               # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":104, please report a bug to PyTorch.
-               SkipInfo('TestJit', 'test_variant_consistency_jit'),
            ),
            supports_out=False,),
     OpInfo('nn.functional.layer_norm',
