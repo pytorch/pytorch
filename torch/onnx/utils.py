@@ -779,19 +779,20 @@ def _set_input_and_output_names(graph, input_names, output_names):
                 "number of %s names provided (%d) exceeded number of %ss (%d)"
                 % (descriptor, len(name_list), descriptor, len(node_list)))
 
-        # Mark if the node DebugName is set before.
-        node_set = set()
+        # Mark if the output node DebugName is set before.
+        output_node_set = set()
         for i, (name, node) in enumerate(zip(name_list, node_list)):
-            if node in node_set:
-                # Duplicated node, insert onnx::Identity to avoid the same DebugName.
-                identity_node = graph.create("onnx::Identity")
-                identity_node.insertAfter(node.node())
-                identity_node.addInput(node)
-                identity_node.output().setType(node.type())
-                graph.return_node().replaceInput(i, identity_node.output())
-                node = identity_node.output()
+            # Duplicated output node, insert onnx::Identity to avoid setting the same DebugName after setDebugName().
+            if descriptor == "output":
+                if node in output_node_set:
+                    identity_node = graph.create("onnx::Identity")
+                    identity_node.insertAfter(node.node())
+                    identity_node.addInput(node)
+                    identity_node.output().setType(node.type())
+                    graph.return_node().replaceInput(i, identity_node.output())
+                    node = identity_node.output()
+                output_node_set.add(node)
 
-            node_set.add(node)
             if node.debugName() != name:
                 node.setDebugName(name)
 

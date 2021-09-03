@@ -981,6 +981,8 @@ class TestUtilityFuns(TestCase):
         assert graph.graph.node[0].op_type == "Gemm"
         assert graph.graph.node[1].op_type == "Identity"
         assert graph.graph.node[2].op_type == "Identity"
+        assert graph.graph.node[3].op_type == "Gemm"
+        assert graph.graph.node[4].op_type == "Identity"
 
 # opset 10 tests
 TestUtilityFuns_opset10 = type(str("TestUtilityFuns_opset10"),
