@@ -870,7 +870,6 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/native/mkldnn/UnaryOps.cpp",
     "aten/src/ATen/native/mkldnn/Utils.cpp",
     "aten/src/ATen/native/mkldnn/Matmul.cpp",
-    "aten/src/ATen/native/mkldnn/Matmul.h",
     "aten/src/ATen/native/quantized/cpu/init_qnnpack.cpp",
     "aten/src/ATen/record_function.cpp",
     "aten/src/ATen/SavedTensorHooks.cpp",
