@@ -1,17 +1,23 @@
-#include <torch/csrc/jit/mobile/nnc/aot_compiler.h>
+// (c) Facebook, Inc. and its affiliates. Confidential and proprietary.
+
+#include "aot_compiler.h"
 
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #include <torch/csrc/jit/ir/ir.h>
-#include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/jit_opt_limit.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/tensorexpr/ir.h>
+#include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
+#include <torch/csrc/jit/tensorexpr/kernel.h>
+#include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
+#include <torch/csrc/jit/tensorexpr/loopnest.h>
+
 #include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/symbolic_shape_analysis.h>
-#include <torch/csrc/jit/tensorexpr/ir.h>
-#include <torch/csrc/jit/tensorexpr/kernel.h>
 
 using namespace torch::jit;
 using namespace torch::jit::tensorexpr;
@@ -32,7 +38,7 @@ std::vector<int64_t> getConstSizes(const BufPtr b) {
   return r;
 }
 
-void getCompiledFunction(
+void get_compiled_function(
     std::shared_ptr<tensorexpr::TensorExprKernel> kernel,
     Function* func) {
   std::vector<at::Tensor> parameters;
@@ -65,28 +71,31 @@ void getCompiledFunction(
   func->set_output_specs(out_spec);
 }
 
-std::unique_ptr<Function> aotCompile(
+std::unique_ptr<Function> aot_compile(
     const std::string& method_name,
     std::shared_ptr<Graph>& g,
     const std::vector<int64_t>& sizes,
     std::string* compiled_assembly) {
   auto g2 = g->copy();
-  GRAPH_DEBUG("Input sizes ", sizes);
+  std::cerr << "Input sizes: ";
+  for (auto s : sizes) {
+    std::cerr << s << ", ";
+  }
+  std::cerr << "\n";
 
   RemoveTensorMutation(g);
   EliminateDeadCode(g->block());
   g = tensorexpr::removeUnusedSelfArgument(g);
-  GRAPH_DUMP("graph before shape propagation ", g);
 
   std::vector<c10::optional<at::Tensor>> example_inputs = {at::rand(sizes)};
+  g->dump();
   tensorexpr::annotateInputShapes(g, example_inputs);
 
   PropagateShapesOnGraph(g);
   PeepholeOptimize(g, false);
   ConstantPropagation(g);
   PropagateShapesOnGraph(g);
-  GRAPH_DUMP("graph after shape propagation ", g);
-
+  g->dump();
   std::shared_ptr<tensorexpr::TensorExprKernel> kernel =
       std::make_shared<tensorexpr::TensorExprKernel>(g);
   *compiled_assembly = kernel->getCodeText();
@@ -101,7 +110,7 @@ std::unique_ptr<Function> aotCompile(
   input.dtype_ = c10::ScalarType::Float;
   func->set_input_specs({input});
 
-  getCompiledFunction(kernel, func.get());
+  get_compiled_function(kernel, func.get());
   return func;
 }
 

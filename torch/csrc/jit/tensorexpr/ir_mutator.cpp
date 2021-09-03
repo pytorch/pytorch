@@ -424,16 +424,14 @@ StmtPtr IRMutator::mutate(SyncThreadsPtr v) {
 StmtPtr IRMutator::mutate(ExternalCallPtr v) {
   BufPtr buf = v->buf();
   BufPtr buf_new = to<Buf>(buf->accept_mutator(this));
-  TORCH_INTERNAL_ASSERT(
-      buf_new, buildErrorMessage("IRMutator produced null for Buf."));
+  TORCH_INTERNAL_ASSERT(buf_new);
 
   bool buf_args_changed = false;
   std::vector<BufPtr> buf_args_new;
   buf_args_new.reserve(v->buf_args().size());
   for (BufPtr buf_arg : v->buf_args()) {
     BufPtr buf_arg_new = to<Buf>(buf_arg->accept_mutator(this));
-    TORCH_INTERNAL_ASSERT(
-        buf_arg_new, buildErrorMessage("IRMutator produced null for Buf."));
+    TORCH_INTERNAL_ASSERT(buf_arg_new);
     buf_args_new.push_back(buf_arg_new);
     buf_args_changed |= buf_arg_new != buf_arg;
   }
@@ -462,8 +460,7 @@ StmtPtr IRMutator::mutate(ExternalCallPtr v) {
 StmtPtr IRMutator::mutate(AllocatePtr v) {
   BufPtr buf = v->buf();
   BufPtr buf_new = to<Buf>(buf->accept_mutator(this));
-  TORCH_INTERNAL_ASSERT(
-      buf_new, buildErrorMessage("IRMutator produced null for Buf."));
+  TORCH_INTERNAL_ASSERT(buf_new);
   if (buf != buf_new) {
     v->set_buf(buf_new);
   }
@@ -473,8 +470,7 @@ StmtPtr IRMutator::mutate(AllocatePtr v) {
 StmtPtr IRMutator::mutate(FreePtr v) {
   BufPtr buf = v->buf();
   BufPtr buf_new = to<Buf>(buf->accept_mutator(this));
-  TORCH_INTERNAL_ASSERT(
-      buf_new, buildErrorMessage("IRMutator produced null for Buf."));
+  TORCH_INTERNAL_ASSERT(buf_new);
   if (buf != buf_new) {
     v->set_buf(buf_new);
   }

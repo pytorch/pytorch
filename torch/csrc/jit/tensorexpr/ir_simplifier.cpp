@@ -2351,9 +2351,7 @@ ExprPtr buf_flat_size(BufPtr v) {
 StmtPtr TermExpander::mutate(AllocatePtr v) {
   BufPtr buf = v->buf();
   BufPtr buf_new = to<Buf>(v->buf()->accept_mutator(this));
-  TORCH_INTERNAL_ASSERT(
-      buf_new,
-      buildErrorMessage("TermExpander mutation produced null for Buf."));
+  TORCH_INTERNAL_ASSERT(buf_new);
   ExprPtr flattened = buf_flat_size(buf_new);
 
   if (flattened->isConstant() && immediateEquals(flattened, 0)) {
@@ -2370,9 +2368,7 @@ StmtPtr TermExpander::mutate(AllocatePtr v) {
 StmtPtr TermExpander::mutate(FreePtr v) {
   BufPtr buf = v->buf();
   BufPtr buf_new = to<Buf>(v->buf()->accept_mutator(this));
-  TORCH_INTERNAL_ASSERT(
-      buf_new,
-      buildErrorMessage("TermExpander mutation produced null for Buf."));
+  TORCH_INTERNAL_ASSERT(buf_new);
 
   if (eliminated_allocations_.count(buf_new->base_handle())) {
     eliminated_allocations_.erase(buf_new->base_handle());

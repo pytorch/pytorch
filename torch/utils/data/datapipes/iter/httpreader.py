@@ -1,5 +1,5 @@
 from io import IOBase
-from typing import Sized, Tuple
+from typing import Tuple
 from urllib.error import HTTPError, URLError
 import urllib.request as urllib
 from torch.utils.data import IterDataPipe
@@ -39,8 +39,3 @@ class HTTPReaderIterDataPipe(IterDataPipe[Tuple[str, IOBase]]):
                                 .format(reason=e.reason, url=furl))
             except Exception:
                 raise
-
-    def __len__(self) -> int:
-        if isinstance(self.datapipe, Sized):
-            return len(self.datapipe)
-        raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))

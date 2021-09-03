@@ -9,7 +9,7 @@ on:
 
 
 concurrency:
-  group: add-annotations-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: add-annotations-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 
 
