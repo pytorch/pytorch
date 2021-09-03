@@ -67,7 +67,7 @@ jobs:
       - name: Ensure GitHub PyPi dependencies are pinned
         if: always()
         run: |
-          (! git --no-pager grep -InP \
+          (! git --no-pager grep --color=always -InP \
                 '(pip|pip3|python -m pip|python3 -m pip|python3 -mpip|python -mpip) install ([a-z][\.a-z-0-9]*+(?!(=|.*\.whl))([[:blank:]]|))+' \
                 -- .github \
                 ':(exclude)**.rst' \
@@ -299,7 +299,7 @@ jobs:
       - name: Install dependencies
         run: |
           set -eux
-          pip3 install typing-extensions --user # for tools/linter/translate_annotations.py
+          pip3 install typing-extensions==3.10 --user # for tools/linter/translate_annotations.py
           pip3 install -r requirements-flake8.txt --user
           flake8 --version
       - name: Run flake8
@@ -428,7 +428,7 @@ jobs:
       - name: Install dependencies
         run: |
           set -eux
-          pip3 install cmakelint --user
+          pip3 install cmakelint==1.4.1 --user
           cmakelint --version
       - name: Run cmakelint
         run: |
@@ -454,7 +454,7 @@ jobs:
           pip3 install numpy==1.20 --user # https://github.com/pytorch/pytorch/pull/60472
           pip3 install expecttest==0.1.3 mypy==0.812 --user
           # Needed to check tools/render_junit.py
-          pip3 install junitparser rich --user
+          pip3 install junitparser==2.1.1 rich==10.9.0 --user
       - name: Run autogen
         run: |
           set -eux
