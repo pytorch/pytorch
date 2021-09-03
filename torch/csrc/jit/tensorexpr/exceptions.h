@@ -35,7 +35,7 @@ class compilation_error : public c10::Error {
                 __FILE__,
                 static_cast<uint32_t>(__LINE__),
             },
-            err) {}
+            buildErrorMessage(err)) {}
 };
 
 class unsupported_dtype : public compilation_error {
