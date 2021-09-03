@@ -8,11 +8,15 @@ from .graph import magic_methods, reflectable_magic_methods, Graph
 from typing import Tuple, Dict, Optional, Iterable, Any, Iterator, Callable
 from .node import Target, Node, Argument, base_types, map_aggregate
 from ._compatibility import compatibility
+from .operator_schemas import check_for_mutable_operation
 
 @compatibility(is_backward_compatible=True)
 class TracerBase:
     graph: Graph
     record_stack_traces : bool = False
+    # Feature flag for mutable schema checking
+    # Enableby default in 1.12
+    check_mutable_operations : bool = False
 
     @compatibility(is_backward_compatible=True)
     def create_node(self, kind : str, target : Target,
@@ -25,6 +29,9 @@ class TracerBase:
         modification of values used in node creation. For example, one might
         want to disallow in-place operations from being recorded.
         """
+        if kind == 'call_function' and self.check_mutable_operations:
+            check_for_mutable_operation(target, args, kwargs)
+
         return self.graph.create_node(kind, target, args, kwargs, name, type_expr)
 
     @compatibility(is_backward_compatible=True)
