@@ -3554,7 +3554,7 @@ TEST(LoopNest, DetectInlineRankMismatch) {
   LoopNest l({reshape}, {a, reshape});
   ASSERT_THROWS_WITH(
       l.computeInline(l.getLoopBodyFor(a)),
-      "Placeholder indexed access is inconsistent with its rank");
+      "Number of indices doesn't match buf rank in the fuser.");
 }
 
 TEST(LoopNest, CacheReadsSimple) {
