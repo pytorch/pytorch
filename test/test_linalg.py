@@ -7964,11 +7964,12 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         self.assertRaises(RuntimeError, lambda: torch.lstsq(torch.randn(0, 0), torch.randn(0, 0)))
         self.assertRaises(RuntimeError, lambda: torch.lstsq(torch.randn(0,), torch.randn(0, 0)))
 
+    @dtypes(*floating_types())
     @tf32_on_and_off(0.005)
-    def test_tensordot(self, device):
+    def test_tensordot(self, device, dtype):
         # case 1: dims is a Tuple[List[int], List[int]]
-        a = torch.arange(60., device=device).reshape(3, 4, 5)
-        b = torch.arange(24., device=device).reshape(4, 3, 2)
+        a = torch.arange(60., dtype=dtype, device=device).reshape(3, 4, 5)
+        b = torch.arange(24., dtype=dtype, device=device).reshape(4, 3, 2)
         cn = torch.from_numpy(np.tensordot(a.cpu().numpy(), b.cpu().numpy(),
                                            axes=([1, 0], [0, 1])))
         dims=([1, 0], [0, 1])
@@ -7981,13 +7982,13 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         self.assertEqual(c, cn)
 
         # case 3: out parameter
-        cout = torch.zeros((5, 2), device=device)
+        cout = torch.zeros((5, 2), dtype=dtype, device=device)
         torch.linalg.tensordot(a, b, dims=([1, 0], [0, 1]), out=cout).cpu()
         self.assertEqual(c, cout)
 
         # case 4: dims is an integer
-        a = torch.randn(2, 3, 4, 5, device=device)
-        b = torch.randn(4, 5, 6, 7, device=device)
+        a = torch.randn(2, 3, 4, 5, dtype=dtype, device=device)
+        b = torch.randn(4, 5, 6, 7, dtype=dtype, device=device)
         cn = torch.from_numpy(np.tensordot(a.cpu().numpy(), b.cpu().numpy(),
                                            axes=2))
         c = torch.linalg.tensordot(a, b, dims=2).cpu()
