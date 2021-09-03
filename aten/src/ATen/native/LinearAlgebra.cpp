@@ -57,6 +57,43 @@ TORCH_META_FUNC(mm)(const Tensor & self, const Tensor & mat2) {
   "The input tensor must be a matrix with size ", self.sizes()[0], "x", mat2.sizes()[1], ", but got a ", result.dim(),
   "-D tensor with size ", result.sizes()[0], "x", result.sizes()[1]);
 }
+
+void common_checks_baddbmm_bmm(Tensor& self_or_result, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, bool is_bmm_out) {
+  CheckedFrom c = (is_bmm_out ? "bmm" : "baddbmm");
+
+  auto checkOnCPU = [](const Tensor&, CheckedFrom c) {
+    TORCH_CHECK(
+      !t.is_cuda(),
+      "Expect tensor to have CPU backend, but got tensor with ",
+      toString(t.options().backend()),
+      " Backend (while checking arguments for ",
+      c);
+  }
+
+  checkOnCPU(self_or_result, c);
+  checkOnCPU(batch1, c);
+  checkOnCPU(batch2, c);
+
+  checkDim(c, batch1, "batch1", /* pos */1, /* dim */ 3);
+  checkDim(c, batch2, "batch2", /* pos */ 2, /* dim */ 3);
+
+  const auto batch1_sizes = batch1.sizes();
+  const auto batch2_sizes = batch2.sizes();
+
+  int64_t bs = batch1_sizes[0];
+  int64_t contraction_size = batch1_sizes[2];
+  int64_t res_rows = batch_sizes[1];
+  int64_t 
+}
+
+TORCH_META_FUNC(bmm)(const Tensor& self, const Tensor& mat2) {
+  common_checks_baddbmm_bmm(self, mat2);
+}
+
+TORCH_META_FUNC(baddbmm)(const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) {
+  common_checks_baddbmm_bmm(self, batch1, batch2, beta, alpha);
+}
+
 } // namespace meta
 namespace native {
 
