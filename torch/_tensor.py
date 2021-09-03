@@ -801,7 +801,7 @@ class Tensor(torch._C._TensorBase):
             torch.int64: "<i8",
         }[self.dtype]
 
-        itemsize = self.element_size()
+        itemsize = self.storage().element_size()
 
         shape = tuple(self.shape)
         if self.is_contiguous():

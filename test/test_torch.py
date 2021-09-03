@@ -1850,7 +1850,6 @@ class AbstractTestCases:
                 size = 10000
                 s1 = torch.FloatStorage.from_file(filename, True, size)
                 t1 = torch.FloatTensor(s1).copy_(torch.randn(size))
-
                 self.assertEqual(s1.data_ptr(), torch.FloatTensor(s1).data_ptr())
 
                 # check mapping
@@ -3060,9 +3059,6 @@ class TestTorchDeviceType(TestCase):
                 bytes_to_scalar(v_s_byte[start:end], dtype, device),
                 v[dim0][dim1])
 
-    # TODO: This is failing with a CUDA leak
-    # Also, we need to undo the changes to torch.tensor(), so that it
-    # performs a cast instead of a reinterpretation
     @onlyOnCPUAndCUDA
     @dtypes(*torch.testing.get_all_dtypes())
     def test_tensor_from_storage(self, device, dtype):

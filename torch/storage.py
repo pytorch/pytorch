@@ -517,9 +517,6 @@ class TypedStorage(torch._C.TypedStorage):
         return cls(wrap_storage=byte_storage)
 
     def _to(self, dtype):
-        # TODO: using `torch.tensor`'s `dtype` kwarg at the moment because
-        # `torch.tensor` does not handle ByteStorage correctly--it resolves
-        # it to int64 for some reason. Need to solve that issue
         storage = torch.tensor([], dtype=self.dtype, device=self.device).set_(self).to(dtype).storage()
         if storage.data_ptr() == self.data_ptr():
             storage = storage.clone()
@@ -581,7 +578,7 @@ class TypedStorage(torch._C.TypedStorage):
             filename,
             shared,
             # TODO: instantiation just for the purpose of getting element size
-            # is bad
+            # might be bad
             size * cls().element_size())
         storage = cls(wrap_storage=byte_storage)
         return storage

@@ -207,7 +207,7 @@ def _rebuild_qtensor(storage, storage_offset, size, stride, quantizer_params, re
             size, scales=scales, zero_points=zero_points, axis=axis, dtype=storage.dtype)
     else:
         raise RuntimeError("Can't deserialize quantized tensor with qscheme {}".format(qscheme))
-    tensor.set_(storage._storage, storage_offset, size, stride)
+    tensor.set_(storage, storage_offset, size, stride)
     tensor.requires_grad = requires_grad
     # NB: This line exists only for backwards compatibility; the
     # general expectation is that backward_hooks is an empty

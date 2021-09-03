@@ -92,7 +92,8 @@ class SerializationMixin(object):
         self.assertTrue(isinstance(c[1], torch.FloatTensor))
         self.assertTrue(isinstance(c[2], torch.FloatTensor))
         self.assertTrue(isinstance(c[3], torch.FloatTensor))
-        self.assertTrue(isinstance(c[4]._storage, torch.ByteStorage))
+        self.assertTrue(isinstance(c[4], torch.storage.TypedStorage))
+        self.assertEqual(c[4].dtype, torch.float)
         c[0].fill_(10)
         self.assertEqual(c[0], c[2], atol=0, rtol=0)
         self.assertEqual(c[4], torch.FloatStorage(25).fill_(10), atol=0, rtol=0)
@@ -100,7 +101,6 @@ class SerializationMixin(object):
         self.assertEqual(c[1], c[3], atol=0, rtol=0)
         # I have to do it in this roundabout fashion, because there's no
         # way to slice storages
-
         for i in range(4):
             self.assertEqual(c[4][i + 1], c[5][i])
 

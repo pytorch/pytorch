@@ -190,22 +190,6 @@ bool isStorage(PyObject* obj)
   return false;
 }
 
-// This class serves as an RAII wrapper for a PyObject reference. When
-// a PyObjectGuard object is destroyed, the PyObject reference is decremented
-struct PyObjectGuard {
-  PyObject* obj;
-
-  PyObjectGuard(PyObject* obj) :
-    obj(obj)
-  {}
-
-  ~PyObjectGuard() {
-    if (obj) {
-      Py_DECREF(obj);
-    }
-  }
-};
-
 at::Storage createStorageGetType(PyObject* obj, at::ScalarType& scalar_type)
 {
   auto obj_type = Py_TYPE(obj);
@@ -222,12 +206,12 @@ at::Storage createStorageGetType(PyObject* obj, at::ScalarType& scalar_type)
     // and then getting TypedStorage directly from there, rather than using this
     // torch._C._TypedStorage subclass trick
     if (PyObject_TypeCheck(obj, &torch::THPTypedStorageType)) {
-      PyObjectGuard maybe_storage(PyObject_GetAttrString(obj, "_storage"));
+      THPObjectPtr maybe_storage(PyObject_GetAttrString(obj, "_storage"));
 
       // TODO: Should probably throw error if type is exactly THPTypedStorageType
-      if (maybe_storage.obj && (Py_TYPE(maybe_storage.obj) == storage_type)) {
+      if (maybe_storage.get() && (Py_TYPE(maybe_storage.get()) == storage_type)) {
         auto& type = *item.second;
-        auto ret = type.unsafeStorageFromTH(((THPVoidStorage*)maybe_storage.obj)->cdata, true);
+        auto ret = type.unsafeStorageFromTH(((THPVoidStorage*)maybe_storage.get())->cdata, true);
         // TODO: Should have proper error checking here if dtype attr doesn't
         // exist or is not a THPDtype
         PyObject* dtype_obj = PyObject_GetAttrString(obj, "dtype");
@@ -243,6 +227,5 @@ at::Storage createStorage(PyObject* obj) {
   at::ScalarType scalar_type;
   return createStorageGetType(obj, scalar_type);
 }
-
 
 }  // namespace
