@@ -9464,8 +9464,8 @@ def _compare_trilu_indices(
         # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
         self.assertEqualIgnoreType(
             torch.ones(row, col, device='cpu')
-                 .tril(offset).nonzero().to(dtype).transpose(0, 1),
-            torch.tril_indices(row, col, offset, dtype=dtype, device=device))
+                 .triu(offset).nonzero().to(dtype).transpose(0, 1),
+            torch.triu_indices(row, col, offset, dtype=dtype, device=device))
 
 
 def _compare_large_trilu_indices(
