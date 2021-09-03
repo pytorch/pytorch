@@ -43,8 +43,14 @@ void AccessInfo::addLoad(
 }
 
 void AccessInfo::merge(const std::shared_ptr<AccessInfo>& other) {
-  TORCH_INTERNAL_ASSERT(hash_ == other->hash());
-  TORCH_INTERNAL_ASSERT(indices_.size() == other->indices().size());
+  TORCH_INTERNAL_ASSERT(
+      hash_ == other->hash(),
+      buildErrorMessage(
+          "Expected hashes to match in registerizer in the fuser."));
+  TORCH_INTERNAL_ASSERT(
+      indices_.size() == other->indices().size(),
+      buildErrorMessage(
+          "Expected ranks to match in registerizer in the fuser."));
 
   last_usage_ = other->last_usage();
   for (auto s : other->stores()) {
@@ -68,7 +74,10 @@ void AccessInfo::merge(const std::shared_ptr<AccessInfo>& other) {
 
 bool AccessInfo::overlaps(const std::shared_ptr<AccessInfo>& other) {
   // All accesses to a buf must have the same dimensionality.
-  TORCH_INTERNAL_ASSERT(indices_.size() == other->indices().size());
+  TORCH_INTERNAL_ASSERT(
+      indices_.size() == other->indices().size(),
+      buildErrorMessage(
+          "Expected ranks to match in registerizer in the fuser."));
 
   auto& other_indices = other->indices();
 
