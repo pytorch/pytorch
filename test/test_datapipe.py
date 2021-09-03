@@ -354,6 +354,15 @@ class TestIterableDataPipeBasic(TestCase):
         n = n1.mux(n2, n3)
         self.assertEqual(list(range(10)), list(n))
 
+        # Test Case: Uneven DataPipes
+        source_numbers = list(range(0, 10)) + [10, 12]
+        numbers_dp = IDP(source_numbers)
+        n1, n2 = numbers_dp.demux(2, lambda x: x % 2)
+        self.assertEqual([0, 2, 4, 6, 8, 10, 12], list(n1))
+        self.assertEqual([1, 3, 5, 7, 9], list(n2))
+        n = n1.mux(n2)
+        self.assertEqual(source_numbers, list(n))
+
 
 class FileLoggerSimpleHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, logfile=None, **kwargs):
@@ -1024,7 +1033,7 @@ class TestFunctionalIterDataPipe(TestCase):
         for data, exp in zip(filter_dp, range(5, 10)):
             self.assertEqual(data, exp)
 
-        with self.assertRaisesRegex(TypeError, r"instance doesn't have valid length$"):
+        with self.assertRaisesRegex(TypeError, r"has no len"):
             len(filter_dp)
 
         def _non_bool_fn(data):
@@ -1221,6 +1230,39 @@ class TestFunctionalMapDataPipe(TestCase):
                 map_dp[index], torch.tensor(input_dp[index], dtype=torch.int).sum()
             )
 
+    def test_mux_datapipe(self):
+
+        # Test Case: Elements are yielded one at a time from each DataPipe, until they are all exhausted
+        input_dp1 = IDP(range(4))
+        input_dp2 = IDP(range(4, 8))
+        input_dp3 = IDP(range(8, 12))
+        output_dp = input_dp1.mux(input_dp2, input_dp3)
+        expected_output = [0, 4, 8, 1, 5, 9, 2, 6, 10, 3, 7, 11]
+        self.assertEqual(len(expected_output), len(output_dp))
+        self.assertEqual(expected_output, list(output_dp))
+
+        # Test Case: Uneven input Data Pipes
+        input_dp1 = IDP([1, 2, 3, 4])
+        input_dp2 = IDP([10])
+        input_dp3 = IDP([100, 200, 300])
+        output_dp = input_dp1.mux(input_dp2, input_dp3)
+        expected_output = [1, 10, 100, 2, 200, 3, 300, 4]
+        self.assertEqual(len(expected_output), len(output_dp))
+        self.assertEqual(expected_output, list(output_dp))
+
+        # Test Case: Empty Data Pipe
+        input_dp1 = IDP([0, 1, 2, 3])
+        input_dp2 = IDP([])
+        output_dp = input_dp1.mux(input_dp2)
+        self.assertEqual(len(input_dp1), len(output_dp))
+        self.assertEqual(list(input_dp1), list(output_dp))
+
+        # Test Case: raises TypeError when __len__ is called and an input doesn't have __len__
+        input_dp1 = IDP(range(10))
+        input_dp_no_len = IDP_NoLen(range(10))
+        output_dp = input_dp1.mux(input_dp_no_len)
+        with self.assertRaises(TypeError):
+            len(output_dp)
 
 # Metaclass conflict for Python 3.6
 # Multiple inheritance with NamedTuple is not supported for Python 3.9
@@ -1583,6 +1625,27 @@ class TestSharding(TestCase):
             items += list(sharded_dp)
 
         self.assertEqual(sorted(all_items), sorted(items))
+
+    def test_sharding_length(self):
+        numbers_dp = IDP(range(13))
+        sharded_dp0 = numbers_dp.sharding_filter()
+        torch.utils.data.sharding.apply_sharding(sharded_dp0, 3, 0)
+        sharded_dp1 = numbers_dp.sharding_filter()
+        torch.utils.data.sharding.apply_sharding(sharded_dp1, 3, 1)
+        sharded_dp2 = numbers_dp.sharding_filter()
+        torch.utils.data.sharding.apply_sharding(sharded_dp2, 3, 2)
+        self.assertEqual(13, len(numbers_dp))
+        self.assertEqual(5, len(sharded_dp0))
+        self.assertEqual(4, len(sharded_dp1))
+        self.assertEqual(4, len(sharded_dp2))
+
+        numbers_dp = IDP(range(1))
+        sharded_dp0 = numbers_dp.sharding_filter()
+        torch.utils.data.sharding.apply_sharding(sharded_dp0, 2, 0)
+        sharded_dp1 = numbers_dp.sharding_filter()
+        torch.utils.data.sharding.apply_sharding(sharded_dp1, 2, 1)
+        self.assertEqual(1, len(sharded_dp0))
+        self.assertEqual(0, len(sharded_dp1))
 
     @skipIfNoDill
     def test_old_dataloader(self):
