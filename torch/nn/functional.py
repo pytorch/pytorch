@@ -1837,10 +1837,10 @@ def bias(input: Tensor, bias_value: Tensor) -> Tensor:
 
     Shape:
 
-        - Input: :math:`(N, *, num\_features)` N is the batch size, `*` means any number of
-          additional dimensions
+        - Input: :math:`(*, num\_features)`, where `*` is any number of
+              dimensions, including none
         - Bias: :math:`(num\_features)`
-        - Output: :math:`(N, *, num\_features)`
+        - Output: :math:`(*, num\_features)`
     """
     if has_torch_function_variadic(input):
         return handle_torch_function(bias, (input, bias_value), input, bias_value)

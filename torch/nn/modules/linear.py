@@ -144,7 +144,7 @@ class Bias(Module):
         self.num_features = num_features
         self.bias = Parameter(torch.empty(num_features, device=device,
                                           dtype=dtype))
-        init.uniform_(self.bias)
+        init.init_(self.bias)
 
     def forward(self, input: Tensor) -> Tensor:
         return F.bias(input, self.bias)

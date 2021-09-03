@@ -1,4 +1,3 @@
-#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include <torch/torch.h>
@@ -1068,8 +1067,8 @@ TEST_F(ModulesTest, Bias) {
   torch::Tensor s = output.sum();
 
   s.backward();
-  ASSERT_THAT(output.sizes(), testing::ElementsAre(2));
   ASSERT_EQ(s.ndimension(), 0);
+  ASSERT_EQ(output.sizes(), std::vector<int64_t>{2});
 
   ASSERT_EQ(model->bias.grad().numel(), 2);
 

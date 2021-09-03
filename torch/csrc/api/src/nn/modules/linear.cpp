@@ -36,8 +36,7 @@ void BiasImpl::reset() {
 }
 
 void BiasImpl::reset_parameters() {
-  const auto bound = 1 / std::sqrt(options.num_features());
-  torch::nn::init::uniform_(bias, -bound, bound);
+  torch::nn::init::uniform_(bias);
 }
 
 void BiasImpl::pretty_print(std::ostream& stream) const {
