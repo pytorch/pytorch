@@ -6,6 +6,7 @@ from torch.package import PackageImporter, PackageExporter
 import linecache
 from typing import Type, Dict, List, Any, Union, Optional, Set
 from .graph import Graph, _is_from_torch, _custom_builtins, PythonCode
+from ._compatibility import compatibility
 from torch.package import Importer, sys_importer
 import copy
 import itertools
@@ -15,33 +16,65 @@ from pathlib import Path
 import os
 import warnings
 
-# normal exec loses the source code, however we can patch
-# the linecache module to still recover it.
-# using exec_with_source will add it to our local cache
+# Normal exec loses the source code, however we can work with
+# the linecache module to recover it.
+# Using _exec_with_source will add it to our local cache
 # and then tools like TorchScript will be able to get source info.
-_next_id = 0
-def exec_with_source(src: str, globals: Dict[str, Any]):
-    global _next_id
-    key = f'<eval_with_key_{_next_id}>'
-    _next_id += 1
-    _eval_cache[key] = [line + '\n' for line in src.splitlines()]
-    exec(compile(src, key, 'exec'), globals)
+class _EvalCacheLoader(object):
+    def __init__(self):
+        self.eval_cache = {}
+        self.next_id = 0
 
-# patch linecache so that any code we exec using exec_with_source
-# works with inspect
-_eval_cache : Dict[str, List[str]] = {}
-_orig_getlines = linecache.getlines
-def patched_getline(*args, **kwargs):
-    if args[0] in _eval_cache:
-        return _eval_cache[args[0]]
-    return _orig_getlines(*args, **kwargs)
-linecache.getlines = patched_getline
+    def cache(self, src: str, globals: Dict[str, Any]):
+        """Store the source in a private cache, and add a lazy entry in linecache
+        that allows the source to be retrieved by 'filename'.
+
+        Args:
+            src (str): The module source to cache
+            globals (dict): The module globals
+
+        Returns:
+            str: The cache key (and dummy filename) generated for src.
+        """
+
+        key = self._get_key()
+        self.eval_cache[key] = src
+
+        # Don't mutate globals so that this loader is only used
+        # to populate linecache, and doesn't interact with other modules
+        # that might check `__loader__`
+        globals_copy = globals.copy()
+        globals_copy['__file__'] = key
+        globals_copy['__name__'] = key
+        globals_copy['__loader__'] = self
+        linecache.lazycache(key, globals_copy)
+
+        return key
+
+    # Part of the loader protocol (PEP 302)
+    # linecache will use this method when trying to find source code
+    def get_source(self, module_name) -> Optional[str]:
+        if module_name in self.eval_cache:
+            return self.eval_cache[module_name]
+        return None
+
+    def _get_key(self):
+        key = f'<eval_with_key>.{self.next_id}'
+        self.next_id += 1
+        return key
+
+_loader = _EvalCacheLoader()
+
+
+def _exec_with_source(src: str, globals: Dict[str, Any]):
+    key = _loader.cache(src, globals)
+    exec(compile(src, key, 'exec'), globals)
 
 
 def _forward_from_src(src: str, globals: Dict[str, Any]):
     # avoid mutating the passed in dict
     globals_copy = globals.copy()
-    exec_with_source(src, globals_copy)
+    _exec_with_source(src, globals_copy)
     forward_fn = globals_copy['forward']
     del globals_copy['forward']
     return forward_fn
@@ -63,6 +96,7 @@ def _format_import_block(globals: Dict[str, Any], importer: Importer):
     return '\n'.join(import_strs)
 
 
+@compatibility(is_backward_compatible=True)
 def reduce_graph_module(body: Dict[Any, Any], import_block: str) -> torch.nn.Module:
     # BC: attribute name was changed from `code` to `_code` to facilitate
     # making `code` into a property and adding a docstring to it
@@ -71,13 +105,14 @@ def reduce_graph_module(body: Dict[Any, Any], import_block: str) -> torch.nn.Mod
     return _deserialize_graph_module(forward, body)
 
 
+@compatibility(is_backward_compatible=True)
 def reduce_package_graph_module(
     importer: PackageImporter, body: Dict[Any, Any], generated_module_name: str
 ) -> torch.nn.Module:
     forward = importer.import_module(generated_module_name).forward
     return _deserialize_graph_module(forward, body)
 
-
+@compatibility(is_backward_compatible=True)
 def reduce_deploy_graph_module(
     importer: PackageImporter, body: Dict[Any, Any], import_block: str
 ) -> torch.nn.Module:
@@ -187,6 +222,7 @@ def _assign_attr(from_obj: Any, to_module: torch.nn.Module, target: str):
     else:
         setattr(to_module, field, from_obj)
 
+@compatibility(is_backward_compatible=True)
 class GraphModule(torch.nn.Module):
     """
     GraphModule is an nn.Module generated from an fx.Graph. Graphmodule has a
@@ -199,7 +235,6 @@ class GraphModule(torch.nn.Module):
         regenerated. However, if you edit the contents of the ``graph`` without reassigning
         the ``graph`` attribute itself, you must call ``recompile()`` to update the generated
         code.
-
     """
     def __new__(cls: 'Type[GraphModule]', *args, **kwargs):
         # each instance of a graph module needs its own forward method
@@ -207,10 +242,19 @@ class GraphModule(torch.nn.Module):
         # it is a subclass of the user-defined class, the only difference
         # is an extra layer to install the forward method
 
+        # address issue described at https://github.com/pytorch/pytorch/issues/63883
+        # in other words, traverse class hierarchy to fix the redundant class definition problem
+        for t in cls.__mro__:
+            c = t.__qualname__.split('.')[-1]
+            if c != 'GraphModuleImpl':
+                cls = t
+                break
+
         class GraphModuleImpl(cls):  # type: ignore[misc, valid-type]
             pass
         return super().__new__(GraphModuleImpl)
 
+    @compatibility(is_backward_compatible=True)
     def __init__(self,
                  root: Union[torch.nn.Module, Dict[str, Any]],
                  graph: Graph,
@@ -234,7 +278,6 @@ class GraphModule(torch.nn.Module):
             class_name (str): ``name`` denotes the name of this GraphModule for debugging purposes. If it's unset, all
                 error messages will report as originating from ``GraphModule``. It may be helpful to set this
                 to ``root``'s original name or a name that makes sense within the context of your transform.
-
         """
         super().__init__()
         self.__class__.__name__ = class_name
@@ -302,6 +345,7 @@ class GraphModule(torch.nn.Module):
         g.owning_module = self
         self.recompile()
 
+    @compatibility(is_backward_compatible=False)
     def to_folder(self, folder: Union[str, os.PathLike], module_name : str = "FxModule"):
         """Dumps out module to ``folder`` with ``module_name`` so that it can be
         imported with ``from <folder> import <module_name>``
@@ -366,6 +410,7 @@ class {module_name}(torch.nn.Module):
             warnings.warn("Was not able to save the following children modules as reprs -"
                           f"saved as pickled files instead: {blobified_modules}")
 
+    @compatibility(is_backward_compatible=True)
     def add_submodule(self, target: str, m: torch.nn.Module) -> bool:
         """
         Adds the given submodule to ``self``.
@@ -386,7 +431,6 @@ class {module_name}(torch.nn.Module):
                 denoted by ``target`` must either a) not exist yet,
                 or b) reference an ``nn.Module`` (not a parameter or
                 other attribute)
-
         """
         *prefix, field = target.split('.')
         mod: torch.nn.Module = self
@@ -407,6 +451,7 @@ class {module_name}(torch.nn.Module):
         mod.add_module(field, m)
         return True
 
+    @compatibility(is_backward_compatible=True)
     def delete_submodule(self, target: str) -> bool:
         """
         Deletes the given submodule from ``self``.
@@ -449,6 +494,7 @@ class {module_name}(torch.nn.Module):
         delattr(mod, target_submod)
         return True
 
+    @compatibility(is_backward_compatible=True)
     def delete_all_unused_submodules(self) -> None:
         """
         Deletes all unused submodules from ``self``.
@@ -503,6 +549,7 @@ class {module_name}(torch.nn.Module):
             raise RuntimeError('Code has not been generated! Please report a bug to PyTorch')
         return self._code
 
+    @compatibility(is_backward_compatible=True)
     def recompile(self) -> PythonCode:
         """
         Recompile this GraphModule from its ``graph`` attribute. This should be
@@ -539,7 +586,7 @@ class {module_name}(torch.nn.Module):
             # auxiliary variables (for readability)
             err_lineno = frame_summary.lineno
             err_line_len = len(frame_summary.line)
-            all_src_lines = _eval_cache[frame_summary.filename]
+            all_src_lines = linecache.getlines(frame_summary.filename)
 
             # constituent substrings of the error message
             tb_repr = traceback.format_exc()
@@ -623,6 +670,11 @@ class {module_name}(torch.nn.Module):
     def __str__(self) -> str:
         orig_str = super().__str__()
         return '\n'.join([orig_str, self._code])
+
+    def _replicate_for_data_parallel(self):
+        new_gm = self.__copy__()
+        new_gm._is_replica = True
+        return new_gm
 
 # workarounds for issues in __torch_function__
 
