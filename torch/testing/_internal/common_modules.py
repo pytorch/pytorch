@@ -2,6 +2,7 @@ import torch
 from copy import deepcopy
 from functools import wraps, partial
 from itertools import chain
+import torch.nn.functional as F
 from torch.testing import floating_types, make_tensor
 from torch.testing._internal.common_device_type import (
     _TestParametrizer, _dtype_test_suffix, _update_param_kwargs, skipIf)
@@ -47,14 +48,18 @@ for namespace in MODULE_NAMESPACES:
 class modules(_TestParametrizer):
     """ PROTOTYPE: Decorator for specifying a list of modules over which to run a test. """
 
-    def __init__(self, module_info_list, dtypes=floating_types()):
+    def __init__(self, module_info_list, allowed_dtypes=None):
         self.module_info_list = module_info_list
-        self.dtypes = dtypes
+        self.allowed_dtypes = set(allowed_dtypes) if allowed_dtypes is not None else None
 
     def _parametrize_test(self, test, generic_cls, device_cls):
         for module_info in self.module_info_list:
             # TODO: Factor some of this out since it's similar to OpInfo.
-            for dtype in self.dtypes:
+            dtypes = set(module_info.dtypes)
+            if self.allowed_dtypes is not None:
+                dtypes = dtypes.intersection(self.allowed_dtypes)
+
+            for dtype in dtypes:
                 # Construct the test name.
                 test_name = '{}_{}_{}{}'.format(test.__name__,
                                                 module_info.name.replace('.', '_'),
@@ -140,11 +145,15 @@ class ModuleInfo(object):
                  module_inputs_func,  # Function to generate module inputs
                  skips=(),  # Indicates which tests to skip
                  decorators=None,  # Additional decorators to apply to generated tests
+                 dtypes=floating_types(),  # dtypes this function is expected to work with
+                 supports_gradgrad=True,  # whether the op supports second order gradients
                  ):
         self.module_cls = module_cls
         self.module_inputs_func = module_inputs_func
         self.skips = skips
         self.decorators = decorators
+        self.dtypes = dtypes
+        self.supports_gradgrad = supports_gradgrad
 
     def should_skip(self, cls_name, test_name, device_type, dtype):
         return any(si.is_active(cls_name, test_name, device_type, dtype) for si in self.skips)
@@ -291,6 +300,40 @@ def module_inputs_torch_nn_L1Loss(module_info, device, dtype, requires_grad, **k
                     desc='scalar')] + generate_regression_criterion_inputs(make_input)
 
 
+def module_inputs_torch_nn_Hardswish(module_info, device, dtype, requires_grad, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    return [
+        ModuleInput(
+            constructor_input=FunctionInput(),
+            forward_input=FunctionInput(make_input(shape=4)),
+            reference_fn=no_batch_dim_reference_fn,
+            desc='no_batch_dim',
+        )
+    ]
+
+
+def module_inputs_torch_nn_TransformerEncoderLayer(module_info, device, dtype, requires_grad, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    return [
+        ModuleInput(
+            constructor_input=FunctionInput(4, 2, 16, 0.0),
+            forward_input=FunctionInput(
+                make_input(shape=(2, 3, 4))
+            ),
+            desc='relu_activation'
+        ),
+        ModuleInput(
+            constructor_input=FunctionInput(4, 2, 8, 0.0, F.gelu),
+            forward_input=FunctionInput(
+                make_input(shape=(2, 3, 4))
+            ),
+            desc='gelu_activation'
+        ),
+    ]
+
+
 # Database of ModuleInfo entries in alphabetical order.
 module_db: List[ModuleInfo] = [
     ModuleInfo(torch.nn.AvgPool1d,
@@ -302,5 +345,11 @@ module_db: List[ModuleInfo] = [
     ModuleInfo(torch.nn.Linear,
                module_inputs_func=module_inputs_torch_nn_Linear),
     ModuleInfo(torch.nn.NLLLoss,
-               module_inputs_func=module_inputs_torch_nn_NLLLoss)
+               module_inputs_func=module_inputs_torch_nn_NLLLoss),
+    ModuleInfo(torch.nn.Hardswish,
+               module_inputs_func=module_inputs_torch_nn_Hardswish,
+               supports_gradgrad=False),
+    ModuleInfo(torch.nn.TransformerEncoderLayer,
+               module_inputs_func=module_inputs_torch_nn_TransformerEncoderLayer,
+               supports_gradgrad=False),
 ]

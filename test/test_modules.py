@@ -1,3 +1,4 @@
+from functools import partial
 import tempfile
 
 import torch
@@ -155,8 +156,7 @@ class TestModule(TestCase):
                     self.assertEqual(output, output_from_copy)
 
 
-    @modules(module_db, dtypes=[torch.double])
-    def test_gradients(self, device, dtype, module_info):
+    def _test_gradients_helper(self, device, dtype, module_info, check):
         # Check gradients
         module_cls = module_info.module_cls
         module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
@@ -194,10 +194,18 @@ class TestModule(TestCase):
                 with freeze_rng_state():
                     return m(*new_input_args, **new_kwargs, **other_kwargs)
 
-            self.assertTrue(gradcheck(fn_to_gradcheck, grad_input,
-                                      check_batched_grad=True))
-            self.assertTrue(gradgradcheck(fn_to_gradcheck, grad_input,
-                                          check_batched_grad=True))
+            self.assertTrue(check(fn_to_gradcheck, grad_input))
+
+
+    @modules(module_db, allowed_dtypes=[torch.double])
+    def test_grad(self, device, dtype, module_info):
+        self._test_gradients_helper(device, dtype, module_info, gradcheck)
+
+    @modules(module_db, allowed_dtypes=[torch.double])
+    def test_gradgrad(self, device, dtype, module_info):
+        if not module_info.supports_gradgrad:
+            self.skipTest("Skipped! Module does not support gradgrad")
+        self._test_gradients_helper(device, dtype, module_info, gradgradcheck)
 
 
 instantiate_device_type_tests(TestModule, globals())
