@@ -314,7 +314,7 @@ def quantize(model, run_fn, run_args, mapping=None, inplace=False):
     convert(model, mapping, inplace=True)
     return model
 
-    def quantize_dynamic(model, qconfig_spec=None, dtype=torch.qint8,
+def quantize_dynamic(model, qconfig_spec=None, dtype=torch.qint8,
                      mapping=None, inplace=False, version=1):
     r"""
     Converts a float model to dynamic (i.e. weights-only) quantized model.
