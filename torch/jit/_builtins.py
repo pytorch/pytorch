@@ -105,7 +105,7 @@ _builtin_ops = [
     (torch._VF.unique_consecutive, "aten::unique_consecutive"),  # type: ignore[attr-defined]
     (torch._VF.nuclear_norm, "aten::nuclear_norm"),
     (torch._VF.frobenius_norm, "aten::frobenius_norm"),
-    (torch._VF.tensordot, "aten::tensordot"),  # type: ignore[attr-defined]
+    (torch._C._linalg.linalg_tensordot, "aten::linalg_tensordot"),
 ]
 
 # ops in torch.functional are bound to torch
@@ -123,9 +123,7 @@ def _gen_torch_functional_registered_ops():
 _functional_registered_ops = _gen_torch_functional_registered_ops()
 
 def _is_special_functional_bound_op(fn):
-    # XXX torch.linalg.tensordot is NO LONGER in _functional_registered_ops,
-    # but no test seems to fail?
-    return fn in _functional_registered_ops
+    return fn in _functional_registered_ops or fn is torch.linalg.tensordot
 
 # lazily built to ensure the correct initialization order
 def _get_builtin_table():

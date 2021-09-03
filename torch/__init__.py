@@ -672,6 +672,7 @@ from torch.autograd import (
 )
 from torch import fft as fft
 from torch import futures as futures
+from torch import linalg as linalg
 from torch import nn as nn
 import torch.nn.intrinsic
 import torch.nn.quantizable
@@ -686,7 +687,6 @@ from torch import special as special
 import torch.utils.backcompat
 from torch import onnx as onnx
 from torch import jit as jit
-from torch import linalg as linalg
 from torch import hub as hub
 from torch import random as random
 from torch import distributions as distributions
