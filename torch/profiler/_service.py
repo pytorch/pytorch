@@ -114,6 +114,8 @@ class PyTorchServiceWSGIApp(object):
         
         stop_threads: list[Thread] = []
         if self.is_main_proc:
+            self.respond_log_dir = None
+            self.respond_file_names = []
             for unique_port_seq in self.child_port:
                 thread = Thread(target=self.stop_child_profiling, args=(unique_port_seq.split(':')[0],))
                 stop_threads.append(thread)
@@ -124,11 +126,11 @@ class PyTorchServiceWSGIApp(object):
                 thread.join()
         else:
             self.prof.stop()
-            log_dir = self.log_dir if not self.log_dir.startswith("./tmplog") else self.log_dir[9:]
-            file_name = self.prof.file_name
+            self.respond_log_dir = self.log_dir if not self.log_dir.startswith("./tmplog") else self.log_dir[9:]
+            self.respond_file_names.append(self.prof.file_name)
         self.profiling_started = False
 
-        return self.respond_as_json({"success": True, "message": "Profiling service is successfully accomplished.", "log_dir": log_dir, "file_name": file_name})
+        return self.respond_as_json({"success": True, "message": "Profiling service is successfully accomplished.", "log_dir": self.respond_log_dir, "file_names": self.respond_file_names})
 
     def start_child_profiling(self, port, request_data):
         requests.put(
@@ -137,9 +139,14 @@ class PyTorchServiceWSGIApp(object):
             params={'cmd': 'start'})
     
     def stop_child_profiling(self, port):
-        requests.put(
+        r = requests.put(
             url='http://localhost:{}/service'.format(port),
             params={'cmd': 'stop'})
+        if r.status_code == 200:
+            res = r.json()
+        if res['success']:
+            self.respond_log_dir = res['log_dir']
+            self.respond_file_names.extend(res['file_names'])
     
     def start_profiling_with_warmup(self, warmup_dur, state):
         try:
