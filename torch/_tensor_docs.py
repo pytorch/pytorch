@@ -4839,7 +4839,7 @@ Alias for :meth:`~Tensor.dim()`
 
 add_docstr_all('T',
                r"""
-Is this Tensor with its dimensions reversed.
+Returns a view of this tensor with its dimensions reversed.
 
 If ``n`` is the number of dimensions in ``x``,
 ``x.T`` is equivalent to ``x.permute(n-1, n-2, ..., 0)``.
@@ -4859,7 +4859,7 @@ Returns a view of a matrix (2-D tensor) conjugated and transposed.
 
 add_docstr_all('mT',
                r"""
-Is this tensor with the last two dimensions transposed.
+Returns a view of this tensor with the last two dimensions transposed.
 
 ``x.mT`` is equivalent to ``x.transpose(-2, -1)``.
 """)
@@ -4871,21 +4871,9 @@ Alias for :meth:`~Tensor.adjoint`.
 
 add_docstr_all('adjoint',
                r"""
-adjoint(Tensor) -> Tensor
-Returns a view of the tensor conjugated and with the last two dimensions transposed.
+adjoint() -> Tensor
 
-``x.adjoint()`` is equivalent to ``x.transpose(-2, -1).conj()`` for complex tensors and
-``x.transpose(-2, -1)`` for real tensors.
-
-Example::
-    >>> x = torch.arange(4, dtype=torch.float)
-    >>> A = torch.complex(x, x.flip(0)).reshape(2, 2)
-    >>> A
-    tensor([[0.+0.j, 1.+1.j],
-            [2.+2.j, 3.+3.j]])
-    >>> A.adjoint()
-    tensor([[0.-3.j, 2.-1.j],
-            [1.-2.j, 3.-0.j]])
+Alias for :func:`adjoint`
 """)
 
 add_docstr_all('real',
