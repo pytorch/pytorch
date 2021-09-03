@@ -78,9 +78,9 @@ Tensor Operations
     :toctree: generated
     :nosignatures:
 
+    tensordot
     tensorinv
     tensorsolve
-    tensordot
 
 Experimental Functions
 ----------------------
