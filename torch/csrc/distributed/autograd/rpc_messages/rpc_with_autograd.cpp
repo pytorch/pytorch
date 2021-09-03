@@ -19,7 +19,7 @@ RpcWithAutograd::RpcWithAutograd(
     MessageType messageType,
     const AutogradMetadata& autogradMetadata,
     c10::intrusive_ptr<rpc::Message> wrappedMessage,
-    std::unordered_map<c10::Device, c10::Device> deviceMap)
+    rpc::DeviceMap deviceMap)
     : fromWorkerId_(fromWorkerId),
       messageType_(messageType),
       autogradMetadata_(autogradMetadata),
@@ -39,7 +39,7 @@ RpcWithAutograd::RpcWithAutograd(
     std::unique_ptr<RpcCommandBase> wrappedRpc,
     MessageType wrappedMessageType,
     std::vector<torch::Tensor> tensors,
-    std::unordered_map<c10::Device, c10::Device> deviceMap)
+    rpc::DeviceMap deviceMap)
     : fromWorkerId_(fromWorkerId),
       messageType_(messageType),
       autogradMetadata_(autogradMetadata),
@@ -112,7 +112,7 @@ std::unique_ptr<RpcWithAutograd> RpcWithAutograd::fromMessage(
   auto c10DeviceMap = tupleElements[4].to<c10::Dict<std::string, std::string>>();
 
   // Convert to regular map.
-  std::unordered_map<c10::Device, c10::Device> deviceMap;
+  rpc::DeviceMap deviceMap;
   for (const auto& mapEntry : c10DeviceMap) {
     deviceMap.insert({mapEntry.key(), mapEntry.value()});
   }
@@ -169,7 +169,7 @@ rpc::worker_id_t RpcWithAutograd::fromWorkerId() const {
   return fromWorkerId_;
 }
 
-const std::unordered_map<c10::Device, c10::Device>& RpcWithAutograd::
+const rpc::DeviceMap& RpcWithAutograd::
     deviceMap() {
   return deviceMap_;
 }
