@@ -452,9 +452,6 @@ Example::
     >>> A.adjoint()
     tensor([[0.-0.j, 2.-2.j],
             [1.-1.j, 3.-3.j]])
-adjoint(input) -> Tensor
-
-Alias for :meth:`~Tensor.adjoint`.
 """)
 
 add_docstr(torch.sspaddmm,
