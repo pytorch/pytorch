@@ -1,5 +1,6 @@
-#include <ATen/ATen.h>
-#include <ATen/native/TensorIterator.h>
+#define TORCH_ASSERT_NO_OPERATORS
+#include <ATen/Dispatch.h>
+#include <ATen/TensorIterator.h>
 #include <ATen/native/cuda/Reduce.cuh>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/SharedReduceOps.h>
