@@ -333,6 +333,17 @@ def module_inputs_torch_nn_TransformerEncoderLayer(module_info, device, dtype, r
         ),
     ]
 
+def module_inputs_torch_nn_LayerNorm(module_info, device, dtype, requires_grad, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    return [
+        ModuleInput(
+            constructor_input=FunctionInput([56, 56, 56], 1e-5, False),
+            forward_input=FunctionInput(make_input(shape=(4, 56, 56, 56))),
+            desc='3d_no_affine_large_feature'
+        )
+    ]
+
 
 # Database of ModuleInfo entries in alphabetical order.
 module_db: List[ModuleInfo] = [
@@ -352,4 +363,7 @@ module_db: List[ModuleInfo] = [
     ModuleInfo(torch.nn.TransformerEncoderLayer,
                module_inputs_func=module_inputs_torch_nn_TransformerEncoderLayer,
                supports_gradgrad=False),
+    ModuleInfo(torch.nn.LayerNorm,
+               module_inputs_func=module_inputs_torch_nn_LayerNorm),
+
 ]
