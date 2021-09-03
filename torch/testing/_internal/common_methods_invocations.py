@@ -20,12 +20,12 @@ from torch.testing import \
     (make_non_contiguous, floating_types, floating_types_and, complex_types,
      floating_and_complex_types, floating_and_complex_types_and,
      all_types_and_complex_and, all_types_and, all_types_and_complex,
-     integral_types_and, all_types, double_types, make_tensor, empty_types)
+     integral_types_and, all_types, double_types, make_tensor)
 from .._core import _dispatch_dtypes
 from torch.testing._internal.common_device_type import \
     (onlyOnCPUAndCUDA, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfNoCusolver,
      skipCPUIfNoLapack, skipCPUIfNoFFT, skipCUDAIfRocm, precisionOverride, toleranceOverride, tol)
-from torch.testing._internal.common_cuda import CUDA11OrLater, SM53OrLater, SM60OrLater, TEST_CUDNN
+from torch.testing._internal.common_cuda import CUDA11OrLater, SM53OrLater, SM60OrLater
 from torch.testing._internal.common_utils import \
     (is_iterable_of_tensors,
      random_symmetric_matrix, random_symmetric_psd_matrix,
@@ -2635,7 +2635,15 @@ def sample_inputs_conv2d(op_info, device, dtype, requires_grad, jit_fail_sample=
             {'stride': 2, 'padding': "valid"}),
         ((1, 4, 5, 5), (1, 4, 2, 3), (1,),
             {'stride': 1, 'padding': "same", 'dilation': 3}),
-        ((1, 4, 5, 5), (3, 4, 3, 3), None, {}),            
+        # Below are the group related samples from common_nn.py
+        ((2, 4, 6, 6), (4, 1, 3, 3), (4,), {'groups': 4}),
+        ((2, 4, 6, 6), (8, 1, 3, 3), (8,), {'groups': 4}),
+        ((2, 4, 6, 6), (4, 1, 3, 3), (4,), {'groups': 4, 'stride': (2, 2)}),
+        ((2, 4, 6, 6), (4, 1, 3, 3), (4,), {'groups': 4, 'padding': (1, 1)}),
+        ((2, 4, 5, 5), (4, 1, 2, 2), (4,), {'groups': 4, 'dilation': (2, 2)}),
+        ((2, 4, 6, 5), (6, 2, 3, 2), (6,), {'groups': 2}),
+        # With defaults
+        ((1, 4, 5, 5), (3, 4, 3, 3), None, {}),
     )
 
     def generator():
@@ -7416,8 +7424,8 @@ op_db: List[OpInfo] = [
                SkipInfo('TestJit', 'test_variant_consistency_jit'),
            ),
            supports_out=False,),
-    # Added 2 entries for conv2d as for a particular sample,
-    # JIT test fails and CPU kernel surprisingly supports additional set of dtypes.
+    # Added 2 entries for conv2d
+    # One runs with cudnn and other without.
     OpInfo('nn.functional.conv2d',
            aliases=('conv2d',),
            aten_name='conv2d',
