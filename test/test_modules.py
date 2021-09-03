@@ -179,12 +179,12 @@ class TestModule(TestCase):
             other_kwargs = {}
             kwarg_tensors = []
             for name, obj in input_kwargs.items():
-                if isinstance(obj, torch.Tensor) and obj.requires_grad:
+                if isinstance(obj, torch.Tensor):
                     kwarg_tensors.append((name, obj))
                 else:
                     other_kwargs[name] = obj
 
-            grad_input = input_args + params + kwarg_tensors
+            grad_input = input_args + params + tuple(obj for (_, obj) in kwarg_tensors)
 
             def fn_to_gradcheck(*input_and_params):
                 new_input_args = input_and_params[:len(input_args)]
@@ -196,7 +196,7 @@ class TestModule(TestCase):
 
             self.assertTrue(gradcheck(fn_to_gradcheck, grad_input,
                                       check_batched_grad=True))
-            self.assertTrue(gradgradcheck(fn_to_gradcheck, input_args + params,
+            self.assertTrue(gradgradcheck(fn_to_gradcheck, grad_input,
                                           check_batched_grad=True))
 
 
