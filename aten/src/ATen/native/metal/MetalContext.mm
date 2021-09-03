@@ -37,17 +37,11 @@ using namespace at::native::metal;
 - (BOOL)available {
 #if !defined(__APPLE__)
   return false;
-#elif TARGET_IPHONE_SIMULATOR
-  // TODO[T90135707]: Enable Metal on iOS Simulators
-  return false;
 #elif TARGET_OS_IPHONE
   if (!MPSSupportsMTLDevice(_device)) {
     return false;
   }
   if ([UIDevice currentDevice].systemVersion.floatValue < 11.0) {
-    return false;
-  }
-  if (![_device supportsFeatureSet:MTLFeatureSet_iOS_GPUFamily3_v2]) {
     return false;
   }
 #elif TARGET_OS_MAC
