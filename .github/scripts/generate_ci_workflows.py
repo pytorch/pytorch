@@ -262,6 +262,19 @@ WINDOWS_WORKFLOWS = [
             labels={LABEL_CIFLOW_SCHEDULED, LABEL_CIFLOW_WIN, LABEL_CIFLOW_CUDA}
         ),
     ),
+    CIWorkflow(
+        arch="windows",
+        build_environment="win-vs2019-cuda11.1-py3",
+        cuda_version="11.1",
+        test_runner_type=WINDOWS_CUDA_TEST_RUNNER,
+        on_pull_request=True,
+        only_run_smoke_tests_on_pull_request=True,
+        num_test_shards=2,
+        ciflow_config=CIFlowConfig(
+            enabled=True,
+            labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_CUDA, LABEL_CIFLOW_WIN}
+        ),
+    ),
 ]
 
 LINUX_WORKFLOWS = [
