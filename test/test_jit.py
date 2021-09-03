@@ -8946,7 +8946,7 @@ dedent """
         self.checkScript(torch_unique_consecutive, (None,))
         self.checkScript(torch_unique_consecutive, (0,))
 
-    def test_torch_functional_tensordot_int(self):
+    def test_torch_linalg_tensordot_int(self):
         def tensordot_dims_int(a: torch.Tensor, b: torch.Tensor, dims: int):
             return torch.linalg.tensordot(a, b, dims=dims)
 
@@ -8955,7 +8955,7 @@ dedent """
         dims = 2
         self.checkScript(tensordot_dims_int, (a, b, dims))
 
-    def test_torch_functional_tensordot_tensor(self):
+    def test_torch_linalg_tensordot_tensor(self):
         def tensordot_dims_tensor(a: torch.Tensor, b: torch.Tensor, dims: torch.Tensor):
             return torch.linalg.tensordot(a, b, dims=dims)
 
@@ -8969,7 +8969,7 @@ dedent """
         dims = torch.tensor([[1, 0], [0, 1]], dtype=torch.long)
         self.checkScript(tensordot_dims_tensor, (a, b, dims))
 
-    def test_torch_functional_tensordot_list(self):
+    def test_torch_linalg_tensordot_list(self):
         def tensordot_dims_list(a: torch.Tensor, b: torch.Tensor, dims: List[List[int]]):
             return torch.linalg.tensordot(a, b, dims=dims)
 
@@ -8978,7 +8978,7 @@ dedent """
         dims = [[1, 0], [0, 1]]
         self.checkScript(tensordot_dims_list, (a, b, dims))
 
-    def test_torch_functional_tensordot_tuple(self):
+    def test_torch_linalg_tensordot_tuple(self):
         def tensordot_dims_tuple(a: torch.Tensor, b: torch.Tensor, dims: Tuple[List[int], List[int]]):
             return torch.linalg.tensordot(a, b, dims=dims)
 
