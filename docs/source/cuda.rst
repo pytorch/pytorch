@@ -71,6 +71,17 @@ Streams and events
     Stream
     Event
 
+Graphs (prototype)
+------------------
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    graph_pool_handle
+    CUDAGraph
+    graph
+    make_graphed_callables
+
 Memory management
 -----------------
 .. autosummary::
