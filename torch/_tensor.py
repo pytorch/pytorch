@@ -129,6 +129,9 @@ class Tensor(torch._C._TensorBase):
             size (torch.Size, optional): the desired size. Defaults to the size of the source.
             stride (tuple, optional): the desired stride. Defaults to C-contiguous strides.
         """
+        if has_torch_function_unary(self):
+            return handle_torch_function(Tensor.storage, (self,), self, *args, **kwargs)
+
         if len(args) >= 1 and isinstance(args[0], torch.storage.TypedStorage):
             storage = args[0]
             if storage.dtype != self.dtype:
@@ -155,6 +158,9 @@ class Tensor(torch._C._TensorBase):
 
         Returns the underlying storage.
         """
+        if has_torch_function_unary(self):
+            return handle_torch_function(Tensor.storage, (self,), self)
+
         if self.dtype == torch.complex32:
             raise RuntimeError('unsupported Storage type')
 

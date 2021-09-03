@@ -95,26 +95,24 @@ class SerializationMixin(object):
         self.assertTrue(isinstance(c[4]._storage, torch.ByteStorage))
         c[0].fill_(10)
         self.assertEqual(c[0], c[2], atol=0, rtol=0)
-        self.assertEqual(c[4], torch.empty(25, dtype=torch.float).fill_(10).storage(), atol=0, rtol=0)
+        self.assertEqual(c[4], torch.FloatStorage(25).fill_(10), atol=0, rtol=0)
         c[1].fill_(20)
         self.assertEqual(c[1], c[3], atol=0, rtol=0)
         # I have to do it in this roundabout fashion, because there's no
         # way to slice storages
-        c4_tensor = torch.Tensor().to(c[4].dtype).to(c[4].device).set_(c[4]._storage)
-        c5_tensor = torch.Tensor().to(c[5].dtype).to(c[5].device).set_(c[5]._storage)
 
         for i in range(4):
-            self.assertEqual(c4_tensor[i + 1], c5_tensor[i])
+            self.assertEqual(c[4][i + 1], c[5][i])
 
         # check that serializing the same storage view object unpickles
         # it as one object not two (and vice versa)
         views = c[7]
-        self.assertEqual(views[0]._storage._cdata, views[1]._storage._cdata)
+        self.assertEqual(views[0]._cdata, views[1]._cdata)
         self.assertEqual(views[0], views[2])
-        self.assertNotEqual(views[0]._storage._cdata, views[2]._storage._cdata)
+        self.assertNotEqual(views[0]._cdata, views[2]._cdata)
 
         rootview = c[8]
-        self.assertEqual(rootview._storage.data_ptr(), c[0].data_ptr())
+        self.assertEqual(rootview.data_ptr(), c[0].data_ptr())
 
     def test_serialization_zipfile_utils(self):
         data = {
@@ -338,7 +336,7 @@ class SerializationMixin(object):
         self.assertEqual(c[4].dtype, torch.float32)
         c[0].fill_(10)
         self.assertEqual(c[0], c[2], atol=0, rtol=0)
-        self.assertEqual(c[4], torch.FloatTensor(25).fill_(10).storage(), atol=0, rtol=0)
+        self.assertEqual(c[4], torch.FloatStorage(25).fill_(10), atol=0, rtol=0)
         c[1].fill_(20)
         self.assertEqual(c[1], c[3], atol=0, rtol=0)
 
@@ -540,11 +538,9 @@ class SerializationMixin(object):
 
         buf = io.BytesIO(serialized)
         (s1, s2) = torch.load(buf)
-        self.assertEqual(s1.dtype, torch.float32)
-        self.assertEqual(torch.tensor(s1._storage, dtype=s1.dtype)[0], 0)
-        self.assertEqual(s2.dtype, torch.float32)
-        self.assertEqual(torch.tensor(s2._storage, dtype=s1.dtype)[0], 0)
-        self.assertEqual(s1._storage.data_ptr() + 4, s2._storage.data_ptr())
+        self.assertEqual(s1[0], 0)
+        self.assertEqual(s2[0], 0)
+        self.assertEqual(s1.data_ptr() + 4, s2.data_ptr())
 
     def test_load_unicode_error_msg(self):
         # This Pickle contains a Python 2 module with Unicode data and the
