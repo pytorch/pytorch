@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/cuda/ApplyGridUtils.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/TensorUtils.h>
 #include <THC/THCAtomics.cuh>
@@ -198,11 +199,6 @@ inline void rearrangeDims(detail::TensorInfo<T1, IndexType>* aInfo,
   }
 }
 
-// Threads per block for our apply kernel
-// FIXME: use occupancy calculator instead
-constexpr uint32_t AT_APPLY_THREADS_PER_BLOCK = 512;
-constexpr uint32_t AT_APPLY_BLOCKS_PER_SM = 4;
-
 // The `remaining_steps` argument is used to support Op that operates on
 // multiple elements at the same time. Generally, the strategy of ApplyOpN is to
 //  1. Initialize `remaining_steps = step`, where `step` is the template arg of
@@ -377,38 +373,6 @@ kernelPointwiseApply2(detail::TensorInfo<scalar1, IndexType> a,
 }
 
 } // namespace
-
-/**
-   Computes ceil(a / b)
-*/
-template <typename T>
-__host__ __device__ __forceinline__ T ATenCeilDiv(T a, T b) {
-  return (a + b - 1) / b;
-}
-
-template <int step = 1>
-inline bool getApplyGrid(uint64_t totalElements, dim3& grid, int64_t curDevice, int max_threads_per_block=AT_APPLY_THREADS_PER_BLOCK) {
-  if (curDevice == -1) return false;
-  uint64_t numel_per_thread = static_cast<uint64_t>(max_threads_per_block) * static_cast<uint64_t>(step);
-  uint64_t numBlocks = ATenCeilDiv(totalElements, numel_per_thread);
-  uint64_t maxGridX = at::cuda::getDeviceProperties(curDevice)->maxGridSize[0];
-  if (numBlocks > maxGridX)
-      numBlocks = maxGridX;
-  grid = dim3(numBlocks);
-  return true;
-}
-
-constexpr int getApplyBlocksPerSM() {
-  return AT_APPLY_BLOCKS_PER_SM;
-}
-
-constexpr int getApplyBlockSize() {
-  return AT_APPLY_THREADS_PER_BLOCK;
-}
-
-inline dim3 getApplyBlock(int max_threads_per_block=AT_APPLY_THREADS_PER_BLOCK) {
-  return dim3(max_threads_per_block);
-}
 
 template <typename scalar1, typename scalar2, int step, typename Op,
           int max_threads_per_block=AT_APPLY_THREADS_PER_BLOCK,
