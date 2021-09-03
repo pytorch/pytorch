@@ -27,8 +27,8 @@ Returns a DLPack representing the tensor.
 Args:
     tensor: a tensor to be exported
 
-The dlpack shares the tensors memory.
-Note that each dlpack can only be consumed once.
+The DLPack shares the tensors memory.
+Note that each DLPack can only be consumed once.
 """)
 
 # TODO: add a typing.Protocol to be able to tell Mypy that only objects with
@@ -40,13 +40,14 @@ def from_dlpack(ext_tensor: Any) -> torch.Tensor:
     by means of the ``__dlpack__`` protocol.
 
     The tensor will share the memory with the object represented
-    in the dlpack.
+    in the DLPack.
 
-    Note that each dlpack capsule can only be consumed once. Otherwise
-    memory errors could happen.
+    .. warning::
+      Only call from_dlpack once per capsule. Its behavior when used
+      on the same capsule multiple times is undefined.
 
     Args:
-        ext_tensor (object with __dlpack__ attribute or dlpack capsule):
+        ext_tensor (object with __dlpack__ attribute or DLPack capsule):
             The tensor or DLPack capsule to convert.
     """
     if hasattr(ext_tensor, '__dlpack__'):

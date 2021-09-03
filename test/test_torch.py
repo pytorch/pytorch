@@ -7096,35 +7096,38 @@ else:
 
     @skipMeta
     @onlyOnCPUAndCUDA
-    @dtypes(*torch.testing.get_all_dtypes(include_bool=False))
+    @dtypes(*get_all_dtypes(include_bool=False))
     def test_dlpack_capsule_conversion(self, device, dtype):
         # DLpack does not explicitly support bool (xref dmlc/dlpack#75)
-        x = make_tensor((5,), device, dtype, low=-9, high=9)
+        x = make_tensor((5,), device, dtype)
         z = from_dlpack(to_dlpack(x))
         self.assertEqual(z, x)
 
     @skipMeta
     @onlyOnCPUAndCUDA
-    @dtypes(*torch.testing.get_all_dtypes(include_bool=False))
+    @dtypes(*get_all_dtypes(include_bool=False))
     def test_dlpack_protocol_conversion(self, device, dtype):
-        x = make_tensor((5,), device, dtype, low=-9, high=9)
+        x = make_tensor((5,), device, dtype)
         z = from_dlpack(x)
         self.assertEqual(z, x)
 
     @skipMeta
     @onlyOnCPUAndCUDA
     def test_dlpack_shared_storage(self, device):
-        x = make_tensor((5,), device, torch.float64, low=-9, high=9)
+        x = make_tensor((5,), device, torch.float64)
         z = from_dlpack(to_dlpack(x))
         z[0] = z[0] + 20.0
         self.assertEqual(z, x)
 
     @skipMeta
     @onlyCUDA
-    @dtypes(*torch.testing.get_all_dtypes(include_bool=False))
+    @dtypes(*get_all_dtypes(include_bool=False))
     def test_dlpack_conversion_with_streams(self, device, dtype):
         # Create a stream where the tensor will reside
-        x = make_tensor((5,), device, dtype, low=-9, high=9)
+        stream = torch.cuda.Stream()
+        with torch.cuda.stream(stream):
+            # Do an operation in the actual stream
+            x = make_tensor((5,), device, dtype) + 1
         # DLPack protocol helps establish a correct stream order
         # (hence data dependency) at the exchange boundary.
         # DLPack manages this synchronization for us, so we don't need to
@@ -7137,10 +7140,9 @@ else:
 
     @skipMeta
     @onlyCUDA
-    @dtypes(*torch.testing.get_all_dtypes(include_bool=False))
+    @dtypes(*get_all_dtypes(include_bool=False))
     def test_dlpack_conversion_with_diff_streams(self, device, dtype):
         from torch._C import _from_dlpack
-        x = make_tensor((5,), device, dtype, low=-9, high=9)
         stream_a = torch.cuda.Stream()
         stream_b = torch.cuda.Stream()
         # DLPack protocol helps establish a correct stream order
@@ -7148,6 +7150,7 @@ else:
         # the `tensor.__dlpack__` method will insert a synchronization event
         # in the current stream to make sure that it was correctly populated.
         with torch.cuda.stream(stream_a):
+            x = make_tensor((5,), device, dtype) + 1
             z = _from_dlpack(x.__dlpack__(stream_b.cuda_stream))
             stream_a.synchronize()
         stream_b.synchronize()
@@ -7155,10 +7158,10 @@ else:
 
     @skipMeta
     @onlyOnCPUAndCUDA
-    @dtypes(*torch.testing.get_all_dtypes(include_bool=False))
+    @dtypes(*get_all_dtypes(include_bool=False))
     def test_dlpack_tensor_invalid_stream(self, device, dtype):
         with self.assertRaises(TypeError):
-            x = make_tensor((5,), device, dtype, low=-9, high=9)
+            x = make_tensor((5,), device, dtype)
             x.__dlpack__(stream=object())
 
     @skipMeta
@@ -7180,6 +7183,13 @@ else:
         x = torch.tensor([-1 + 1j, -2 + 2j, 3 - 3j])
         y = torch.conj(x)
         with self.assertRaisesRegex(RuntimeError, r"conjugate bit"):
+            y.__dlpack__()
+
+    @skipMeta
+    def test_dlpack_export_non_strided(self):
+        x = torch.sparse_coo_tensor([[0]], [1], size=(1,))
+        y = torch.conj(x)
+        with self.assertRaisesRegex(RuntimeError, r"strided"):
             y.__dlpack__()
 
     @onlyCUDA

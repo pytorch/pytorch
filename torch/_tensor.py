@@ -1064,23 +1064,24 @@ class Tensor(torch._C._TensorBase):
         stream to this method as part of the specification.
 
         Args:
-            stream (integer or None): A Python integer representing a pointer
-            to a stream (CUDA or ROCm). `stream` is provided by the consumer
-            to the producer to instruct the producer to ensure that operations
-            can safely be performed on the array.
-            The pointer must be a positive integer or
-            -1 . If stream is -1 , the value may be used by the consumer to
-            signal "producer must not perform any synchronization. Optional.
+            stream (integer or None): An optional Python integer representing a
+            pointer to a CUDA stream. The current stream is synchronized with
+            this stream before the capsule is created, and since the capsule
+            shares its storage with the tensor this make it safe to access from
+            both streams.  If None or -1 is passed then no synchronization is performed.
         """
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__dlpack__, (self,), self, stream)
 
-        # Some semantics that can prevent tensors from being exported are
-        # when they require a gradient or they have their conjugate bit set
+        # DLPack capsules can't capture all of PyTorch's semantics,
+        # so we prohibit exporting tensors that would lose their properties like
+        # requires_grad and having the conjugate bit set.
         if self.requires_grad:
             raise RuntimeError('Can\'t export tensors that require gradient, use tensor.detach()')
         if self.is_conj():
             raise RuntimeError('Can\'t export tensors with the conjugate bit set')
+        if self.layout != torch.strided:
+            raise RuntimeError('Can\'t export tensors with layout other than torch.strided')
 
         if stream is not None and type(stream) is not int:
             # Stream pointers in CUDA/ROCm are uniquely numbered and can
@@ -1093,7 +1094,7 @@ class Tensor(torch._C._TensorBase):
                 if stream != torch.cuda.current_stream:
                     event = torch.cuda.Event()
                     event.record(torch.cuda.current_stream())
-                    torch.cuda.current_stream().wait_event(event)
+                    stream.wait_event(event)
         return torch.to_dlpack(self)
 
     def __dlpack_device__(self) -> Tuple[enum.IntEnum, int]:
