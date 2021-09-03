@@ -631,7 +631,9 @@ The following error message is produced on rank 0, allowing the user to determin
 
 Next, the environment variable ``TORCH_DISTRIBUTED_DEBUG``  can be used to trigger additional useful logging and collective synchronization checks to ensure all ranks
 are synchronized appropriately. ``TORCH_DISTRIBUTED_DEBUG`` can be set to either ``OFF`` (default), ``INFO``, or ``DETAIL`` depending on the debugging level
-required. Please note that the most verbose option, ``DETAIL`` may impact the application performance and thus should only be used when debugging issues.
+required. Please note that the most verbose option, ``DETAIL`` may impact the application performance and thus should only be used when debugging issues. In addition, `TORCH_DISTRIBUTED_DEBUG=DETAIL`
+also sets `NCCL_BLOCKING_WAIT=1` unless `NCCL_BLOCKING_WAIT` is explicitly disabled, making all NCCL collectives synchronize with the host when they are waited on. It is also recommended to set
+`CUDA_LAUNCH_BLOCKING=1` when running with `TORCH_DISTRIBUTED_DEBUG=DETAIL` to provide stacktraces around errors encountered in CUDA/NCCL.
 
 Setting ``TORCH_DISTRIBUTED_DEBUG=INFO`` will result in additional debug logging when models trained with :func:`torch.nn.parallel.DistributedDataParallel` are initialized, and
 ``TORCH_DISTRIBUTED_DEBUG=DETAIL`` will additionally log runtime performance statistics a select number of iterations. These runtime statistics
