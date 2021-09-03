@@ -1,5 +1,6 @@
 import contextlib
 import io
+import os
 import logging
 import pickle
 import time
@@ -591,6 +592,11 @@ def init_process_group(
         # Set sequence numbers for gloo and nccl process groups.
         if get_backend(default_pg) in [Backend.GLOO, Backend.NCCL]:
             default_pg._set_sequence_number_for_group()
+    
+    if os.environ.get('ENABLE_PYTORCH_PROFILER_SERVICE') == 'TRUE':
+        from torch.profiler._service import Listener, PORT
+        listener = Listener('localhost', PORT, False)
+        listener.open()
 
 
 def _new_process_group_helper(
