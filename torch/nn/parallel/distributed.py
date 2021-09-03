@@ -734,9 +734,6 @@ class DistributedDataParallel(Module, Joinable):
             for replica in modules_and_parameters
         ]
 
-        # The following modules_params and modules_buffers are used for
-        # param/buffer sync in _sync_params.
-        self.modules_params = [list(self._get_parameters(self.module))]
         self._assign_modules_buffers()
 
         return parameters, expect_sparse_gradient
