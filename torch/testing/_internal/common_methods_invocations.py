@@ -2605,7 +2605,6 @@ def sample_inputs_conv_transpose2d(op_info, device, dtype, requires_grad, **kwar
 
     return list(generator())
 
-<<<<<<< HEAD
 
 def sample_inputs_conv2d(op_info, device, dtype, requires_grad, jit_fail_sample=False, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -2643,7 +2642,7 @@ def sample_inputs_conv2d(op_info, device, dtype, requires_grad, jit_fail_sample=
 
     return list(generator())
 
-=======
+
 def sample_inputs_layer_norm(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -2679,7 +2678,6 @@ def sample_inputs_layer_norm(opinfo, device, dtype, requires_grad, **kwargs):
         # yield SampleInput(make_arg((1, 2)), args=((2,), None, make_arg((2,))))
 
     return list(generator())
->>>>>>> 6831d8e379392da1340a28fdb3e7e1382176d1d4
 
 def sample_inputs_hardswish(self, device, dtype, requires_grad):
     N = 5
@@ -7413,7 +7411,6 @@ op_db: List[OpInfo] = [
                SkipInfo('TestJit', 'test_variant_consistency_jit'),
            ),
            supports_out=False,),
-<<<<<<< HEAD
     # Added 2 entries for conv2d as for a particular sample,
     # JIT test fails and CPU kernel surprisingly supports additional set of dtypes.
     OpInfo('conv2d',
@@ -7438,7 +7435,6 @@ op_db: List[OpInfo] = [
                SkipInfo('TestJit', 'test_variant_consistency_jit'),
            ),
            supports_out=False,),
-=======
     OpInfo('nn.functional.layer_norm',
            aten_name='layer_norm',
            aliases=('layer_norm',),
@@ -7454,7 +7450,6 @@ op_db: List[OpInfo] = [
                unittest.skipIf("tbb" in os.getenv("BUILD_ENVIRONMENT", ""), "This test makes TBB Sad"),
            ],
            sample_inputs_func=sample_inputs_layer_norm,),
->>>>>>> 6831d8e379392da1340a28fdb3e7e1382176d1d4
     OpInfo('nn.functional.pad',
            variant_test_name='constant',
            aten_name='constant_pad_nd',
