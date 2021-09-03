@@ -105,7 +105,7 @@ _builtin_ops = [
     (torch._VF.unique_consecutive, "aten::unique_consecutive"),  # type: ignore[attr-defined]
     (torch._VF.nuclear_norm, "aten::nuclear_norm"),
     (torch._VF.frobenius_norm, "aten::frobenius_norm"),
-    (torch._C._linalg.linalg_tensordot, "aten::linalg_tensordot"),
+    (torch._C._linalg.linalg_tensordot, "aten::linalg_tensordot"),  # type: ignore[attr-defined]
 ]
 
 # ops in torch.functional are bound to torch

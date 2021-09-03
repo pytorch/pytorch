@@ -635,6 +635,7 @@ for name in dir(_C._VariableFunctions):
 ################################################################################
 
 # needs to be after the above ATen bindings so we can overwrite from Python side
+from . import functional
 from .functional import *  # noqa: F403
 
 
@@ -763,7 +764,7 @@ quantized_gru = torch.ops.aten.quantized_gru
 # torch.tensordot. Now is has been moved to torch.linalg.tensordot, but we
 # keep it available in the old namespaces to preserve backward compatibility.
 tensordot = linalg.tensordot
-functional.tensordot = linalg.tensordot
+functional.tensordot = linalg.tensordot  # type: ignore[attr-defined]
 
 def _register_device_module(device_type, module):
     r"""Register an external runtime module of the specific :attr:`device_type`
