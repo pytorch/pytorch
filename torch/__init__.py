@@ -743,6 +743,10 @@ from ._vmap_internals import vmap as vmap
 quantized_lstm = torch.ops.aten.quantized_lstm
 quantized_gru = torch.ops.aten.quantized_gru
 
+# this was originally defined in torch.functional and made available as
+# torch.tensordot. Now is has been moved to torch.linalg.tensordot, but we
+# keep it available in the torch namespace to preserve backward compatibility.
+tensordot = linalg.tensordot
 
 def _register_device_module(device_type, module):
     r"""Register an external runtime module of the specific :attr:`device_type`
