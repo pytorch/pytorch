@@ -7,7 +7,6 @@ import operator
 import random
 import numbers
 import unittest
-import os
 
 import torch
 import numpy as np
@@ -7384,8 +7383,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=1e-05, rtol=1e-03)}),
                    'TestCommon', 'test_reference_testing'
-               ),
-               unittest.skipIf("tbb" in os.getenv("BUILD_ENVIRONMENT", ""), "This test makes TBB Sad"),
+               )
            ],
            sample_inputs_func=sample_inputs_layer_norm,),
     OpInfo('nn.functional.pad',
