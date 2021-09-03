@@ -108,3 +108,6 @@ caffe2_binary_target("tutorial_blob.cc")
 
 caffe2_binary_target("dump_operator_names.cc")
 caffe2_binary_target("optimize_for_mobile.cc")
+
+caffe2_binary_target(aot_model_compiler "aot_model_compiler.cc")
+target_link_libraries(aot_model_compiler aot_compiler)
