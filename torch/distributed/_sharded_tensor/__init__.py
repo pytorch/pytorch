@@ -222,7 +222,7 @@ def zeros(sharding_spec: ShardingSpec,
 
 
 def full(sharding_spec: ShardingSpec,
-         size,
+         *size,
          fill_value=torch.types.Number,
          dtype=None,
          layout=torch.strided,
@@ -279,7 +279,7 @@ def full(sharding_spec: ShardingSpec,
 
 def init_from_local_shards(
         local_shards: List[Shard],
-        sharded_tensor_metadata: ShardedTensorMetadata,
+        *overall_size,
         process_group=None,
         init_rrefs=False):
     """
@@ -289,11 +289,8 @@ def init_from_local_shards(
     Args:
         local_shards (List[:class `torch.distributed._sharded_tensor.Shard`]): A list
             of shards that represent the local shards on this rank.
-        sharded_tensor_metadata (:class:`torch.distributed._sharded_tensor.ShardedTensorMetadata`)
-            The ShardedTensorMetadata that created manually, represents the global metadata
-            of the ShardedTensor, must comply with `local_shards` defined in each rank.
-            Note that `sharded_tensor_metadata` must be valid and should also contain
-            local shards metadata.
+        overall_size (int...):  a list, tuple, or `torch.Size` of integers defining the
+            shape of the overall sharded tensor.
 
     Keyword args:
         process_group (ProcessGroup, optional): The process group to work on. If None,
@@ -308,7 +305,7 @@ def init_from_local_shards(
     """
     return ShardedTensor._init_from_local_shards(
         local_shards,
-        sharded_tensor_metadata,
+        *overall_size,
         process_group=process_group,
         init_rrefs=init_rrefs
     )

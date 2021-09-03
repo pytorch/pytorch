@@ -1,3 +1,4 @@
+import collections
 from typing import List, Union
 from dataclasses import dataclass
 from torch.distributed.remote_device import _remote_device
@@ -122,3 +123,15 @@ def check_tensor(shards_metadata, tensor_dims) -> None:
             f'Total volume of shards: {total_shard_volume} '
             f'does not match tensor volume: {tensor_volume}, in other words '
             f'all the individual shards do not cover the entire tensor')
+
+def check_tensor_size(size) -> List[int]:
+    if len(size) == 1 and isinstance(size[0], collections.Sequence):
+        dims = list(*size)
+    else:
+        dims = list(size)
+
+    for dim in dims:
+        if not isinstance(dim, int):
+            raise TypeError(f'size has to be a sequence of ints, found: {dims}')
+
+    return dims
