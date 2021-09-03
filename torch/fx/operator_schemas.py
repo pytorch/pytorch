@@ -253,7 +253,7 @@ def normalize_function(
     if kwargs is None:
         kwargs = {}
     new_args_and_kwargs = None
-    if target in boolean_dispatched or target.__module__ in ['torch.nn.functional', 'torch.functional']:
+    if target in boolean_dispatched or target.__module__ in ['torch.nn.functional', 'torch.functional'] or target is torch.linalg.tensordot:
         target_for_analysis = target
         if target in boolean_dispatched:
             # HACK: `boolean_dispatch` as used in `torch.nn.functional` makes it so that we have
