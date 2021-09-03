@@ -125,8 +125,11 @@ __device__ __forceinline__ static int nearest_neighbor_compute_source_index(
     const float scale,
     int dst_index,
     int input_size) {
+  // index_f32 = (output_index + 0.5) * scale - 0.5
+  // input_index = round(index_f32)
+  // Same as Pillow and Scikit-Image/Scipy ndi.zoom
   const int src_index =
-      min(static_cast<int>(floorf(dst_index * scale)), input_size - 1);
+      min(static_cast<int>(floorf((dst_index + 0.5) * scale)), input_size - 1);
   return src_index;
 }
 
@@ -136,7 +139,7 @@ __device__ __forceinline__ static int nearest_neighbor_bw_compute_source_index(
     int dst_index,
     int output_size) {
   const int src_index =
-      min(static_cast<int>(ceilf(dst_index * scale)), output_size);
+      min(static_cast<int>(floorf((dst_index + 0.5) * scale)), output_size - 1);
   return src_index;
 }
 

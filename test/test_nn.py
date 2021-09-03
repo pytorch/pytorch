@@ -10180,19 +10180,6 @@ class TestNN(NNTestCase):
         y = y.contiguous(memory_format=torch.contiguous_format)
         self.assertEqual(y, y_ref)
 
-    def test_upsamplingNearest1d(self):
-        m = nn.Upsample(size=4, mode='nearest')
-        in_t = torch.ones(1, 1, 2)
-        in_uint8_t = torch.ones(1, 1, 2, dtype=torch.uint8)
-        with warnings.catch_warnings(record=True) as w:
-            out_t = m(in_t)
-            out_uint8_t = m(in_uint8_t)
-        self.assertEqual(torch.ones(1, 1, 4), out_t.data)
-        self.assertEqual(torch.ones(1, 1, 4, dtype=torch.uint8), out_uint8_t.data)
-
-        input = torch.randn(1, 1, 2, requires_grad=True)
-        gradcheck(lambda x: F.interpolate(x, 4, mode='nearest'), [input])
-
     def test_upsamplingLinear1d(self):
         for align_corners in [True, False]:
             kwargs = dict(mode='linear', align_corners=align_corners)
@@ -13990,6 +13977,32 @@ class TestNNDeviceType(NNTestCase):
 
         helper(2, 8, 4, 4, ks=2)
         helper(None, 3, 50, 50, ks=5)
+
+    def test_upsamplingNearest1d(self, device):
+        m = nn.Upsample(size=4, mode='nearest')
+        in_t = torch.ones(1, 1, 2, device=device)
+        in_uint8_t = torch.ones(1, 1, 2, dtype=torch.uint8, device=device)
+        with warnings.catch_warnings(record=True) as w:
+            out_t = m(in_t)
+            out_uint8_t = m(in_uint8_t)
+        self.assertEqual(torch.ones(1, 1, 4, device=device), out_t.data)
+        self.assertEqual(torch.ones(1, 1, 4, dtype=torch.uint8, device=device), out_uint8_t.data)
+
+        # Checks upsampling
+        input = torch.randn(1, 1, 2, requires_grad=True, device=device)
+        gradcheck(lambda x: F.interpolate(x, 4, mode='nearest'), [input])
+
+        # Checks downsampling
+        input = torch.randn(1, 1, 20, requires_grad=True, device=device)
+        gradcheck(lambda x: F.interpolate(x, 11, mode='nearest'), [input])
+
+        # consistency CUDA/CPU check
+        # if torch.device(device).type == 'cuda':
+        #     input_cuda = torch.randn(1, 1, 20, device=device)
+        #     input_cpu = input_cuda.cpu()
+        #     output_cuda = F.interpolate(input_cuda, 4, mode='nearest')
+        #     output_cpu = F.interpolate(input_cpu, 4, mode='nearest')
+        #     self.assertEqual(output_cuda.cpu(), output_cpu)
 
     def test_upsamplingNearest2d(self, device):
         for memory_format in [torch.contiguous_format, torch.channels_last]:

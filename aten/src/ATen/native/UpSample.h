@@ -290,8 +290,11 @@ static inline int64_t nearest_neighbor_compute_source_index(
     const float scale,
     int64_t dst_index,
     int64_t input_size) {
+  // index_f32 = (output_index + 0.5) * scale - 0.5
+  // input_index = round(index_f32)
+  // Same as Pillow and Scikit-Image/Scipy ndi.zoom
   const int64_t src_index =
-      std::min(static_cast<int64_t>(floorf(dst_index * scale)), input_size - 1);
+      std::min(static_cast<int64_t>(floorf((dst_index + 0.5) * scale)), input_size - 1);
   return src_index;
 }
 

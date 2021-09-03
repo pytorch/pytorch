@@ -17,16 +17,8 @@ static inline int64_t nearest_idx(
     int64_t input_size,
     int64_t output_size,
     c10::optional<double> scales) {
-  if (output_size == input_size) {
-    // scale_factor = 1, simply copy
-    return output_index;
-  } else if (output_size == 2 * input_size) {
-    // scale_factor = 2, shift input index
-    return output_index >> 1;
-  } else {
-    float scale = compute_scales_value<float>(scales, input_size, output_size);
-    return nearest_neighbor_compute_source_index(scale, output_index, input_size);
-  }
+  float scale = compute_scales_value<float>(scales, input_size, output_size);
+  return nearest_neighbor_compute_source_index(scale, output_index, input_size);
 }
 
 // Helper structs and methods for cpu_upsample_linear
@@ -566,6 +558,7 @@ struct HelperInterpNearest : public HelperInterpBase {
     int64_t reshape_dim, bool align_corners, const c10::optional<double> opt_scale
   ) {
 
+    TORCH_INTERNAL_ASSERT(!align_corners);
     std::vector<Tensor> output;
     HelperInterpNearest::init_indices_weights(
       scalar_type, output, output_size, ndims, reshape_dim, HelperInterpNearest::interp_size);
@@ -578,10 +571,16 @@ struct HelperInterpNearest : public HelperInterpBase {
         auto input_index_ptr = output[0].data_ptr<int64_t>();
         int64_t input_index;
 
+        // Indices should be computed as following:
+        // scale = 1.0 * isize / osize
+
+
+        // Same as Pillow and Scikit-Image/Scipy ndi.zoom
+
         for (int64_t i=0; i<output_size; i++) {
           const scalar_t real_input_index = area_pixel_compute_source_index<scalar_t>(
-              scale, i, /*align_corners=*/true, /*cubic=*/false);
-          input_index = static_cast<int64_t>(floorf(real_input_index));
+              scale, i, /*align_corners=*/align_corners, /*cubic=*/false);
+          input_index = static_cast<int64_t>(floorf(real_input_index + 0.5));
           input_index_ptr[i] = static_cast<int64_t>(std::min(input_index, input_size - 1)) * stride;
         }
       }
