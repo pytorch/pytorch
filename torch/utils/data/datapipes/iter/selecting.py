@@ -1,24 +1,13 @@
-import warnings
 from torch.utils.data import IterDataPipe, functional_datapipe, DataChunk
 from typing import Callable, TypeVar, Iterator, Optional, Tuple, Dict
 
+from .callable import MapperIterDataPipe
+
 T_co = TypeVar('T_co', covariant=True)
-
-try:
-    import dill
-
-    # XXX: By default, dill writes the Pickler dispatch table to inject its
-    # own logic there. This globally affects the behavior of the standard library
-    # pickler for any user who transitively depends on this module!
-    # Undo this extension to avoid altering the behavior of the pickler globally.
-    dill.extend(use_dill=False)
-    DILL_AVAILABLE = True
-except ImportError:
-    DILL_AVAILABLE = False
 
 
 @functional_datapipe('filter')
-class FilterIterDataPipe(IterDataPipe[T_co]):
+class FilterIterDataPipe(MapperIterDataPipe):
     r""" :class:`FilterIterDataPipe`.
 
     Iterable DataPipe to filter elements from datapipe according to filter_fn.
@@ -33,31 +22,18 @@ class FilterIterDataPipe(IterDataPipe[T_co]):
             This also accepts -1 as input to apply filtering to the lowest nesting level.
             It currently doesn't support argument < -1.
     """
-    datapipe: IterDataPipe
-    filter_fn: Callable
     drop_empty_batches: bool
 
     def __init__(self,
-                 datapipe: IterDataPipe,
-                 filter_fn: Callable,
+                 datapipe: IterDataPipe[T_co],
+                 filter_fn: Callable[..., bool],
                  fn_args: Optional[Tuple] = None,
                  fn_kwargs: Optional[Dict] = None,
                  drop_empty_batches: bool = True,
                  nesting_level: int = 0,
                  ) -> None:
-        super().__init__()
-        self.datapipe = datapipe
-        # Partial object has no attribute '__name__', but can be pickled
-        if hasattr(filter_fn, '__name__') and filter_fn.__name__ == '<lambda>' and not DILL_AVAILABLE:
-            warnings.warn("Lambda function is not supported for pickle, please use "
-                          "regular python function or functools.partial instead.")
-        self.filter_fn = filter_fn  # type: ignore[assignment]
-        self.args = () if fn_args is None else fn_args
-        self.kwargs = {} if fn_kwargs is None else fn_kwargs
-        if nesting_level < -1:
-            raise ValueError("nesting_level must be -1 or >= 0")
-        self.nesting_level = nesting_level
         self.drop_empty_batches = drop_empty_batches
+        super().__init__(datapipe, fn=filter_fn, fn_args=fn_args, fn_kwargs=fn_kwargs, nesting_level=nesting_level)
 
     def __iter__(self) -> Iterator[T_co]:
         res: bool
@@ -90,7 +66,7 @@ class FilterIterDataPipe(IterDataPipe[T_co]):
                 return self._returnIfTrue(data)
 
     def _returnIfTrue(self, data):
-        condition = self.filter_fn(data, *self.args, **self.kwargs)
+        condition = self.fn(data, *self.args, **self.kwargs)
         if not isinstance(condition, bool):
             raise ValueError("Boolean output is required for `filter_fn` of FilterIterDataPipe")
         if condition:
@@ -101,17 +77,6 @@ class FilterIterDataPipe(IterDataPipe[T_co]):
             not (isinstance(data, list) and len(data) == 0 and self.drop_empty_batches)
         return r
 
-    def __getstate__(self):
-        if DILL_AVAILABLE:
-            dill_function = dill.dumps(self.filter_fn)
-        else:
-            dill_function = self.filter_fn
-        state = (self.datapipe, dill_function, self.args, self.kwargs, self.drop_empty_batches, self.nesting_level)
-        return state
 
-    def __setstate__(self, state):
-        (self.datapipe, dill_function, self.args, self.kwargs, self.drop_empty_batches, self.nesting_level) = state
-        if DILL_AVAILABLE:
-            self.filter_fn = dill.loads(dill_function)  # type: ignore[assignment]
-        else:
-            self.filter_fn = dill_function  # type: ignore[assignment]
+    def __len__(self):
+        raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
