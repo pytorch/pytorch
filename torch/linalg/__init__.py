@@ -2041,7 +2041,6 @@ Examples::
     tensor(6.2158e-07)
 """)
 
-#tensordot = torch.functional.tensordot
 
 if TYPE_CHECKING:
     pass
