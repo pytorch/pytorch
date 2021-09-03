@@ -148,7 +148,6 @@ IValueFlatbufferSerializer::objectToFB(flatbuffers::FlatBufferBuilder& fbb, cons
     auto state = getstate({obj});
     std::tie(state_type, state_offset) = iValueToFB(fbb, state);
     setstate = true;
-    std::cerr << "setstate == true; type = " << type->name()->qualifiedName() << std::endl;
   } else {
     size_t num_attr = type->numAttributes();
     std::vector<IValue> ivalues;
@@ -175,7 +174,6 @@ IValueFlatbufferSerializer::IValueFlatbufferSerializer::tensorToFB(flatbuffers::
   if (quantized) {
     mobile::serialization::QuantizedSchemaBuilder builder(fbb);
     builder.add_qscheme(static_cast<int8_t>(tensor.qscheme()));
-    std::cerr << "qscheme is " << toString(tensor.qscheme()) << std::endl;
     switch (tensor.qscheme()) {
       case at::kPerTensorAffine:
         builder.add_scale(tensor.q_scale());

@@ -617,7 +617,8 @@ functionToFlatbuffers(
     BackendDebugInfoRecorder& debug_info_recorder,
     const std::basic_string<char>& qn,
     TypeNameUniquer& type_name_uniquer_,
-    IValueFlatbufferSerializer* serializer
+    IValueFlatbufferSerializer* serializer,
+    std::unordered_map<std::string, int>* type_annotations
 ) {
 
   auto graph = func.graph()->copy();
@@ -669,8 +670,7 @@ functionToFlatbuffers(
       fbb, constants.begin(), constants.end());
 
   // types
-  std::vector<flatbuffers::Offset<flatbuffers::String>> type_str_offsets;
-  type_str_offsets.reserve(code->type_table().size());
+  std::vector<uint8_t> type_offsets;
   static const std::string torch_prefix("__torch__");
   static const std::string class_prefix("__torch__.torch.classes");
   for (const TypePtr& t : code->type_table()) {
@@ -683,7 +683,15 @@ functionToFlatbuffers(
           "Workaround: instead of using arbitrary class type (class Foo()), ",
           "define a pytorch class (class Foo(torch.nn.Module)).");
     }
-    type_str_offsets.emplace_back(fbb.CreateSharedString(type_str));
+    auto type_iter = type_annotations->find(type_str);
+    uint8_t type_pos = 0;
+    if (type_iter != type_annotations->end()) {
+      type_pos = type_iter->second;
+    } else {
+      type_pos = type_annotations->size();
+      type_annotations->insert(std::make_pair(type_str, type_pos));
+    }
+    type_offsets.push_back(type_pos);
   }
 
   // since the register location is embedded into the bytecode, pass the
@@ -720,7 +728,7 @@ functionToFlatbuffers(
     &operator_vector,
     &constant_types,
     &constant_offsets,
-    &type_str_offsets,
+    &type_offsets,
     register_size,
     schema_offset,
     debug_info_offset);
@@ -735,10 +743,12 @@ moduleToFlatbuffers(
     TypeNameUniquer& type_name_uniquer_,
     bool include_tensor_data,
     IValueFlatbufferSerializer* serializer) {
+
   auto methods = module.get_methods();
   std::unordered_set<std::string> qn_cache;
   // top level methods
   std::vector<flatbuffers::Offset<mobile::serialization::Function>> functions;
+  std::unordered_map<std::string, int> type_annotations_map;
   FlatBufferBuilder fbb;
   for (const auto& method : methods) {
     const auto qn = method.function().qualname().qualifiedName();
@@ -748,7 +758,7 @@ moduleToFlatbuffers(
     auto func_offset = functionToFlatbuffers(
         fbb, module, method.function(),
         debug_info_recorder,
-        qn, type_name_uniquer_, serializer);
+        qn, type_name_uniquer_, serializer, &type_annotations_map);
     functions.push_back(func_offset);
     qn_cache.emplace(qn);
   }
@@ -772,31 +782,40 @@ moduleToFlatbuffers(
       if (setstate.isGraphFunction()) {
         setattr_offset = functionToFlatbuffers(
             fbb, module, setstate,
-            debug_info_recorder, qn, type_name_uniquer_, serializer);
+            debug_info_recorder, qn, type_name_uniquer_, serializer, &type_annotations_map);
       }
     }
+    std::cerr << "module level types " << classptr->name()->qualifiedName() << std::endl;
     obj_types.push_back(
       CreateObjectTypeDirect(fbb, classptr->name()->qualifiedName().c_str(), &attr_names, setattr_offset));
   }
   auto obj_types_offset = fbb.CreateVector(obj_types);
 
-  int i = 0;
-  flatbuffers::Offset<
-  flatbuffers::Vector<flatbuffers::Offset<mobile::serialization::StorageData>>> storage_data_offset = 0;
+  // type annotations
+  std::vector<flatbuffers::Offset<flatbuffers::String>> type_annot_offsets(type_annotations_map.size());
+  if (type_annotations_map.size() > 256) {
+    std::cerr << "Too many annotations.\n" << std::endl;
+  }
 
+  for (auto& type_annot : type_annotations_map) {
+    auto str_offset = fbb.CreateString(type_annot.first);
+    type_annot_offsets[type_annot.second] = str_offset;
+  }
+
+  flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<mobile::serialization::StorageData>>> storage_data_offset = 0;
   if (include_tensor_data) {
     std::vector<flatbuffers::Offset<mobile::serialization::StorageData>> storage_data;
     for (const auto& td : serializer->tensor_data_) {
       WriteableTensorData writable_td = getWriteableTensorData(td);
       auto storage_offset = mobile::serialization::CreateStorageData(
-        fbb, fbb.CreateVector(reinterpret_cast<const int8_t*>(writable_td.data()), writable_td.sizeInBytes()));
+        fbb, fbb.CreateVector(reinterpret_cast<const uint8_t*>(writable_td.data()), writable_td.sizeInBytes()));
       storage_data.push_back(storage_offset);
     }
     storage_data_offset= fbb.CreateVector(storage_data);
   }
 
   auto mod = CreateModule(fbb, functions_offset, obj_types_offset, ivalue_offset,
-      storage_data_offset, serializer->tensor_data_.size());
+      storage_data_offset, serializer->tensor_data_.size(), fbb.CreateVector(type_annot_offsets));
   fbb.Finish(mod);
   return fbb.Release();
 }

@@ -4,6 +4,7 @@
 namespace torch.jit.mobile.serialization;
 
 struct Int {
+  // NOTE: pickler uses hand rolled varint
   int_val:long;
 }
 
@@ -98,7 +99,7 @@ table ObjectType {
 }
 
 table Object {
-  type_index: int;
+  type_index: byte;
   attr_names:[string];
   use_setstate:bool;
   state: IValue;
@@ -114,7 +115,7 @@ struct Instruction {
 table Operator {
   name:string;
   overload_name:string;
-  num_args_serialized:int = -1;
+  num_args_serialized:byte= -1;
 }
 
 table Arg {
@@ -131,6 +132,7 @@ table Schema {
 }
 
 table DebugInfo {
+  // put this with instr?
   debug_handle:[long];
 }
 
@@ -139,14 +141,17 @@ table Function {
   instructions:[Instruction];
   operators:[Operator];
   constants:[IValue];
-  types:[string];
+
+  // index into type table
+  types:[ubyte];
+
   register_size:int;
   schema:Schema;
   debug_info:DebugInfo;
 }
 
 table StorageData {
-  data: [byte];
+  data: [ubyte] (force_align: 16);
 }
 
 table Module {
@@ -160,6 +165,8 @@ table Module {
   storage_data: [StorageData];
 
   storage_data_size:int;  // number of storage data;
+
+  type_annotations:[string];
 }
 
 root_type Module;

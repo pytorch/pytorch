@@ -1,8 +1,10 @@
 #pragma once
+#include "c10/core/CPUAllocator.h"
 #include <ATen/core/jit_type.h>
 #include <torch/csrc/jit/mobile/debug_info.h>
 #include <torch/csrc/jit/mobile/function.h>
 #include <torch/csrc/jit/mobile/method.h>
+#include <sys/mman.h>
 
 namespace torch {
 namespace jit {
@@ -115,11 +117,32 @@ class TORCH_API Module {
     return debug_table_;
   }
 
+  void set_delptr(void* ptr) {
+    delptr = ptr;
+  }
+  void set_unmap_ptr(void* ptr, size_t size) {
+    unmap_ptr = ptr;
+    unmap_size = size;
+  }
+
+  ~Module() {
+    if (delptr != nullptr) {
+      c10::GetCPUAllocator()->raw_deallocate(delptr);
+    }
+    if (unmap_ptr != nullptr) {
+      munmap(unmap_ptr, unmap_size);
+    }
+
+  }
+
  private:
   c10::intrusive_ptr<c10::ivalue::Object> object_;
   std::unordered_map<std::string, std::string> metadata_;
   std::shared_ptr<CompilationUnit> cu_;
   MobileDebugTable debug_table_;
+  void* delptr = nullptr;
+  void* unmap_ptr = nullptr;
+  size_t unmap_size = 0;
 };
 } // namespace mobile
 } // namespace jit
