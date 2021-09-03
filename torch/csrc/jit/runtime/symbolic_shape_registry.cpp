@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/symbolic_shape_registry.h>
+#include <torch/csrc/jit/serialization/import_source.h>
 #include <unordered_map>
 
 namespace torch {
@@ -292,7 +293,21 @@ const std::string shape_compute_functions =
           for i in range(end_dim + 1, len(input)):
             shape.append(input[i])
           return shape
-    )";
+    )"
+#ifdef USE_XNNPACK
+    R"(
+        def prepacked_conv2d_clamp_run(input: List[int], conv2dOpContext: Any):
+          assert isinstance(conv2dOpContext, __torch__.torch.classes.xnnpack.Conv2dOpContext)
+          (weight, bias, stride, padding, dilation, groups) = ops.prepacked.unpack_prepacked_sizes_conv2d(conv2dOpContext)
+          return conv2d(input, weight, bias, stride, padding, dilation, groups)
+
+        def prepacked_linear_clamp_run(input: List[int], linearOpContext: Any):
+          assert isinstance(linearOpContext, __torch__.torch.classes.xnnpack.LinearOpContext)
+          (weight, bias) = ops.prepacked.unpack_prepacked_sizes_linear(linearOpContext)
+          return linear(input, weight, bias)
+    )"
+#endif
+    ;
 
 // mapping function schema to shape compute graphs allows multiple functions to
 // share the same shape compute graph, which is memory efficient and also will
@@ -317,8 +332,11 @@ static const OperatorMap<std::string>& get_schema_to_function_graph() {
       {"aten::div.Scalar(Tensor self, Scalar other) -> Tensor", "unary_one_unused_input"},
       {"aten::gt.Tensor(Tensor self, Tensor other) -> Tensor", "broadcast"},
       {"aten::add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor", "broadcast_one_unused_input"},
+      {"aten::add_.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor", "broadcast_one_unused_input"},
       {"aten::add.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor", "unary_two_unused_inputs"},
       {"aten::hardtanh(Tensor self, Scalar min_val=-1, Scalar max_val=1) -> Tensor", "unary_two_unused_inputs"},
+      {"aten::hardswish_(Tensor self) -> Tensor", "unary"},
+      {"aten::hardsigmoid_(Tensor self) -> Tensor", "unary"},
       {"aten::adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor", "adaptive_avg_pool2d"},
       {"aten::mm(Tensor self, Tensor mat2) -> Tensor", "mm"},
       {"aten::dot(Tensor self, Tensor tensor) -> Tensor", "dot"},
@@ -335,6 +353,10 @@ static const OperatorMap<std::string>& get_schema_to_function_graph() {
       {"aten::expand_as(Tensor(a) self, Tensor other) -> Tensor(a)", "view"},
       {"aten::mean.dim(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", "mean_dim"},
       {"aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor", "addmm"},
+#ifdef USE_XNNPACK
+      {"prepacked::conv2d_clamp_run(Tensor X, __torch__.torch.classes.xnnpack.Conv2dOpContext W_prepack) -> Tensor Y", "prepacked_conv2d_clamp_run"},
+      {"prepacked::linear_clamp_run(Tensor X, __torch__.torch.classes.xnnpack.LinearOpContext W_prepack) -> Tensor Y", "prepacked_linear_clamp_run"},
+#endif
   };
   // clang-format on
   return schema_to_function_graph;
@@ -344,7 +366,7 @@ std::unordered_map<const FunctionSchema*, std::shared_ptr<Graph>>
     cached_schema_to_graph;
 
 // CompilationUnit that holds all these Functions and keeps them alive.
-CompilationUnit compilation_unit;
+auto compilation_unit = std::make_shared<CompilationUnit>();
 
 void loadModule(const CompilationUnit& module) {
   std::unordered_map<std::string, std::shared_ptr<Graph>> reused_functions;
@@ -371,9 +393,16 @@ void loadModule(const CompilationUnit& module) {
 }
 
 void loadFunctions() {
-  compilation_unit.define(
-      c10::nullopt, shape_compute_functions, nativeResolver(), nullptr);
-  loadModule(compilation_unit);
+  auto src = std::make_shared<Source>(shape_compute_functions);
+  std::vector<at::IValue> constantTable;
+  auto resolver = std::make_shared<SourceImporterImpl>(
+      compilation_unit,
+      &constantTable,
+      [&](const std::string& name) -> std::shared_ptr<Source> { return src; },
+      1);
+  compilation_unit->define(
+      c10::nullopt, shape_compute_functions, resolver, nullptr);
+  loadModule(*compilation_unit);
 }
 } // anonymous namespace
 
