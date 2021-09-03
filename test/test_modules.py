@@ -176,15 +176,25 @@ class TestModule(TestCase):
             # === Perform gradient check on the input_args ===
             input_args, input_kwargs = module_input.forward_input.args, module_input.forward_input.kwargs
 
-            for obj in input_kwargs.values():
-                # All tensors that require gradients should be in input_args
-                self.assertFalse(isinstance(obj, torch.Tensor) and obj.requires_grad)
+            other_kwargs = {}
+            kwarg_tensors = []
+            for name, obj in input_kwargs.items():
+                if isinstance(obj, torch.Tensor) and obj.requires_grad:
+                    kwarg_tensors.append((name, obj))
+                else:
+                    other_kwargs[name] = obj
+
+            grad_input = input_args + params + kwarg_tensors
 
             def fn_to_gradcheck(*input_and_params):
-                with freeze_rng_state():
-                    return m(*input_and_params[:len(input_args)], **input_kwargs)
+                new_input_args = input_and_params[:len(input_args)]
+                kwarg_args = input_and_params[-len(kwarg_tensors):]
+                new_kwargs = {name: obj for (name, _), obj in zip(kwarg_tensors, kwarg_args)}
 
-            self.assertTrue(gradcheck(fn_to_gradcheck, input_args + params,
+                with freeze_rng_state():
+                    return m(*new_input_args, **new_kwargs, **other_kwargs)
+
+            self.assertTrue(gradcheck(fn_to_gradcheck, grad_input,
                                       check_batched_grad=True))
             self.assertTrue(gradgradcheck(fn_to_gradcheck, input_args + params,
                                           check_batched_grad=True))
