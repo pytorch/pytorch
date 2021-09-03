@@ -279,7 +279,6 @@ InferredType tryToInferContainerType(py::handle input);
 
 // Try to infer the type of a Python object
 // The type cannot be inferred if:
-//   input is a None
 //   input is an empty container (list, dict)
 //   input is an list with element types that cannot be unified
 //   input is an dict with key or value types that cannot be unified
@@ -1152,7 +1151,7 @@ inline py::object invokeOperatorFromPython(
   Stack stack = std::get<1>(opWithStack);
   {
     pybind11::gil_scoped_release no_gil_guard;
-    found_op->getOperation()(&stack);
+    found_op->getOperation()(stack);
   }
 
   return createPyObjectForStack(std::move(stack));

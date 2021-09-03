@@ -7,7 +7,6 @@
 
 #include <THC/THCDeviceUtils.cuh>
 #include <THC/THCTensorMathReduce.cuh>
-#include <THC/THCThrustAllocator.cuh>
 #include <THC/THCReduceApplyUtils.cuh>
 
 #include <ATen/cuda/cub.cuh>
@@ -225,13 +224,15 @@ __global__ void renorm_kernel(
 template<typename index_t>
 void embedding_dense_backward_cuda_scan(Tensor &sorted_indices, Tensor &count);
 
-Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indices,
+Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indices_,
                                int64_t num_weights, int64_t padding_idx,
                                bool scale_grad_by_freq) {
   auto grad_arg = TensorArg(grad_, "grad", 1);
-  auto indices_arg = TensorArg(indices, "indices", 1);
+  auto indices_arg = TensorArg(indices_, "indices", 1);
   checkScalarTypes("embedding_backward", indices_arg, {kLong, kInt});
   checkSameGPU("embedding_backward", grad_arg, indices_arg);
+
+  auto indices = indices_.contiguous();
 
   auto num_indices = indices.numel();
   auto grad = grad_.contiguous().view({num_indices, grad_.size(-1)});
@@ -278,7 +279,7 @@ Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indice
     cuda::cub::sort_pairs(
       indices.data_ptr<index_t>(), sorted_indices.data_ptr<index_t>(),
       range.data_ptr<index_t>(), orig_indices.data_ptr<index_t>(),
-      num_indices, false, 0, nbits);
+      num_indices, false/*, 0, nbits*/);
 
     if (scale_grad_by_freq) {
       count = at::empty_like(indices, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
@@ -289,9 +290,6 @@ Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indice
   return embedding_backward_cuda_kernel(grad, orig_indices,
       sorted_indices, count, num_weights, padding_idx);
 }
-
-template<typename index_t>
-int embedding_renorm_cuda_unique_copy(Tensor &indices_contig, Tensor &unique_indices);
 
 Tensor & embedding_renorm_cuda_(Tensor & self, const Tensor & indices,
                                 double max_norm, double norm_type) {
@@ -307,11 +305,17 @@ Tensor & embedding_renorm_cuda_(Tensor & self, const Tensor & indices,
     auto num_indices = indices.numel();
     auto indices_contig = std::get<0>(indices.sort()).contiguous();
     auto unique_indices = at::empty(indices.numel(), indices.options());
+    auto num_unique_indices = at::empty({}, indices.options().dtype(kLong));
 
-    auto num_unique_indices = embedding_renorm_cuda_unique_copy<index_t>(indices_contig, unique_indices);
+    cuda::cub::unique(
+      indices_contig.data_ptr<index_t>(),
+      unique_indices.data_ptr<index_t>(),
+      num_unique_indices.data_ptr<int64_t>(),
+      num_indices
+    );
 
-    dim3 grid(num_unique_indices);
-    dim3 block(128);
+    dim3 grid = num_unique_indices.item<int64_t>();
+    dim3 block = 128;
     int dim = self.stride(0);
 
     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "embedding_backward", [&] {
