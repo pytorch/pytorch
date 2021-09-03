@@ -20,12 +20,12 @@ from torch.testing import \
     (make_non_contiguous, floating_types, floating_types_and, complex_types,
      floating_and_complex_types, floating_and_complex_types_and,
      all_types_and_complex_and, all_types_and, all_types_and_complex,
-     integral_types_and, all_types, double_types, make_tensor)
+     integral_types_and, all_types, double_types, make_tensor, empty_types)
 from .._core import _dispatch_dtypes
 from torch.testing._internal.common_device_type import \
     (onlyOnCPUAndCUDA, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfNoCusolver,
      skipCPUIfNoLapack, skipCPUIfNoFFT, skipCUDAIfRocm, precisionOverride, toleranceOverride, tol)
-from torch.testing._internal.common_cuda import CUDA11OrLater, SM53OrLater, SM60OrLater
+from torch.testing._internal.common_cuda import CUDA11OrLater, SM53OrLater, SM60OrLater, TEST_CUDNN
 from torch.testing._internal.common_utils import \
     (is_iterable_of_tensors,
      random_symmetric_matrix, random_symmetric_psd_matrix,
@@ -2604,6 +2604,15 @@ def sample_inputs_conv_transpose2d(op_info, device, dtype, requires_grad, **kwar
             ), kwargs=kwargs)
 
     return list(generator())
+
+
+def wrapper_cudnn_disabled(op):
+
+    def wrapped(*args, **kwargs):
+        with torch.backends.cudnn.flags(enabled=True):
+            return op(*args, **kwargs)
+
+    return wrapped
 
 
 def sample_inputs_conv2d(op_info, device, dtype, requires_grad, jit_fail_sample=False, **kwargs):
@@ -7413,19 +7422,38 @@ op_db: List[OpInfo] = [
            supports_out=False,),
     # Added 2 entries for conv2d as for a particular sample,
     # JIT test fails and CPU kernel surprisingly supports additional set of dtypes.
-    OpInfo('conv2d',
-           aliases=('nn.functional.conv2d',),
-           dtypesIfCPU=floating_types_and(torch.int64),
+    OpInfo('nn.functional.conv2d',
+           aliases=('conv2d',),
+           aten_name='conv2d',
+           dtypes=floating_types_and(torch.int64),
            dtypesIfCUDA=floating_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
            sample_inputs_func=partial(sample_inputs_conv2d),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL if not CUDA11OrLater else 0.,
            supports_out=False,),
-    OpInfo('conv2d',
+    # Run CUDA tests with cudnn disabled.
+    OpInfo('nn.functional.conv2d',
+           aliases=('conv2d',),
+           variant_test_name='cudnn_disabled',
+           op=wrapper_cudnn_disabled(torch.conv2d),
+           dtypes=floating_types_and(torch.int64),
+           dtypesIfCUDA=floating_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
+           sample_inputs_func=partial(sample_inputs_conv2d),
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL if not CUDA11OrLater else 0.,
+           skips=(
+               # Skip all CPU tests
+               SkipInfo('TestCommon', device_type='cpu'),
+               SkipInfo('TestJit', device_type='cpu'),
+               SkipInfo('TestMathBits', device_type='cpu'),
+               SkipInfo('TestGradients', device_type='cpu'),
+           ),
+           supports_out=False,),
+    OpInfo('nn.functional.conv2d',
            variant_test_name='jit_fail',
-           aliases=('nn.functional.conv2d',),
+           aliases=('conv2d',),
+           aten_name='conv2d',
            # CPU surprisingly supports more dtypes in this case
            # Reference: https://github.com/pytorch/pytorch/issues/63518.
-           dtypesIfCPU=all_types_and(torch.bfloat16),
+           dtypes=all_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
            sample_inputs_func=partial(sample_inputs_conv2d, jit_fail_sample=True),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL if not CUDA11OrLater else 0.,
