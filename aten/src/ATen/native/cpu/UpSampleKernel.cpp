@@ -559,6 +559,7 @@ struct HelperInterpNearest : public HelperInterpBase {
   ) {
 
     TORCH_INTERNAL_ASSERT(!align_corners);
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<Tensor> output;
     HelperInterpNearest::init_indices_weights(
       scalar_type, output, output_size, ndims, reshape_dim, HelperInterpNearest::interp_size);
@@ -573,8 +574,8 @@ struct HelperInterpNearest : public HelperInterpBase {
 
         // Indices should be computed as following:
         // scale = 1.0 * isize / osize
-
-
+        // index_f32 = (output_index + 0.5) * scale - 0.5
+        // input_index = round(index_f32)
         // Same as Pillow and Scikit-Image/Scipy ndi.zoom
 
         for (int64_t i=0; i<output_size; i++) {
@@ -609,7 +610,7 @@ struct HelperInterpLinear : public HelperInterpBase {
     int64_t input_size, int64_t output_size, int64_t stride, int64_t ndims, int64_t reshape_dim,
     bool align_corners, const c10::optional<double> opt_scale
   ) {
-
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<Tensor> output;
     HelperInterpLinear::init_indices_weights(
       scalar_type, output, output_size, ndims, reshape_dim, HelperInterpLinear::interp_size);
@@ -664,7 +665,7 @@ struct HelperInterpCubic : public HelperInterpBase {
     int64_t input_size, int64_t output_size, int64_t stride, int64_t ndims, int64_t reshape_dim,
     bool align_corners, const c10::optional<double> opt_scale
   ) {
-
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<Tensor> output;
     HelperInterpCubic::init_indices_weights(
       scalar_type, output, output_size, ndims, reshape_dim, HelperInterpCubic::interp_size);
@@ -733,6 +734,7 @@ void upsample_generic_Nd_kernel_impl(
   }
   auto restrided_input = input.as_strided(shape, strides);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<std::vector<Tensor>> indices_weights;
 
   constexpr int interp_size = F::interp_size;

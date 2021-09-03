@@ -144,7 +144,7 @@ __device__ __forceinline__ static int nearest_neighbor_bw_compute_source_index(
     int dst_index,
     int output_size) {
   const int src_index =
-      min(static_cast<int>(floorf((dst_index + 0.5) * scale)), output_size - 1);
+      min(static_cast<int>(ceilf(dst_index * scale - 0.5)), output_size);
   return src_index;
 }
 

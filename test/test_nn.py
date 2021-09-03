@@ -14434,12 +14434,51 @@ class TestNNDeviceType(NNTestCase):
         gradcheck(lambda x: F.interpolate(x, 11, mode='nearest'), [input])
 
         # consistency CUDA/CPU check
-        # if torch.device(device).type == 'cuda':
-        #     input_cuda = torch.randn(1, 1, 20, device=device)
-        #     input_cpu = input_cuda.cpu()
-        #     output_cuda = F.interpolate(input_cuda, 4, mode='nearest')
-        #     output_cpu = F.interpolate(input_cpu, 4, mode='nearest')
-        #     self.assertEqual(output_cuda.cpu(), output_cpu)
+        if torch.device(device).type == 'cuda':
+            input_cuda = torch.randn(1, 1, 20, device=device)
+            input_cpu = input_cuda.cpu()
+            output_cuda = F.interpolate(input_cuda, 4, mode='nearest')
+            output_cpu = F.interpolate(input_cpu, 4, mode='nearest')
+            self.assertEqual(output_cuda.cpu(), output_cpu)
+
+        # Checks https://github.com/pytorch/pytorch/issues/34808
+        isize = 20
+        osize = 11
+        in_t = torch.arange(isize, dtype=torch.float, device=device).unsqueeze(0).unsqueeze(0)
+        out_t = F.interpolate(
+            in_t, size=(osize, ), recompute_scale_factor=False, mode="nearest"
+        )
+        # compute expected output as scikit-image/scipy
+        expected_out = torch.zeros(osize, dtype=torch.float, device=device).unsqueeze(0).unsqueeze(0)
+        scale = 1.0 * isize / osize
+        for o in range(osize):
+            i_f32 = (o + 0.5) * scale
+            i = int(i_f32)
+            expected_out[0, 0, o] = in_t[0, 0, i]
+        self.assertEqual(out_t, expected_out)
+
+        # Checks https://github.com/pytorch/pytorch/issues/62237
+        in_t = torch.arange(isize, dtype=torch.float, device=device).unsqueeze(0).unsqueeze(0)
+        # for s in [1.00001, 0.99999]:  # 0.9999 case is broken
+        # See issue: https://github.com/pytorch/pytorch/issues/62396
+        for s in [1.00001, ]:
+            out_t = F.interpolate(
+                in_t, scale_factor=s, recompute_scale_factor=False, mode="nearest"
+            )
+            expected_out = in_t
+            self.assertEqual(out_t, expected_out, msg=f"scale: {s}")
+
+        # checks data duplication if output_size == 2 * input_size
+        # for s in [2.00001, 1.99999]:  # 1.99999 case is broken
+        # See issue: https://github.com/pytorch/pytorch/issues/62396
+        for s in [2.00001, ]:
+            out_t = F.interpolate(
+                in_t, scale_factor=s, recompute_scale_factor=False, mode="nearest"
+            )
+            # input is [[[0, 1, 2, 3, ..., 9]]]
+            # expected out is [[[0, 0, 1, 1, 2, 2, ..., 9, 9]]]
+            expected_out = in_t.repeat_interleave(2, dim=-1)
+            self.assertEqual(out_t, expected_out)
 
     def test_upsamplingNearest2d(self, device):
         for memory_format in [torch.contiguous_format, torch.channels_last]:
