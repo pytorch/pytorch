@@ -827,3 +827,14 @@ const auto cumsum_script_dtype = R"JIT(
    def forward(self, a: Tensor, dim: int, dtype: int):
       return torch.cumsum(a, dim, dtype=dtype).clone()
 )JIT";
+
+const std::string signed_log1p_script = R"IR(
+  graph(%input):
+      %0 : Tensor = aten::sign(%input)
+      %1 : Tensor = aten::abs(%input)
+      %2 : Tensor = aten::log1p(%1)
+      %3 : Tensor = aten::mul(%0, %2)
+      %none : NoneType = prim::Constant()
+      %res : Tensor = aten::clone(%3, %none)
+      return (%res)
+)IR";
