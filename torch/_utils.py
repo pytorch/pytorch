@@ -541,3 +541,17 @@ def _element_size(dtype):
         return 1
     else:
         return torch.iinfo(dtype).bits >> 3
+
+class _ClassPropertyDescriptor:
+    def __init__(self, fget, fset=None):
+        self.fget = fget
+
+    def __get__(self, instance, owner=None):
+        if owner is None:
+            owner = type(instance)
+        return self.fget.__get__(instance, owner)()
+
+def classproperty(func):
+    if not isinstance(func, (classmethod, staticmethod)):
+        func = classmethod(func)
+    return _ClassPropertyDescriptor(func)

@@ -1,7 +1,7 @@
 import io
 
 import torch
-from ._utils import _type, _cuda
+from ._utils import _type, _cuda, classproperty
 from typing import Any, TypeVar, Type
 import copy
 import collections
@@ -171,8 +171,8 @@ class _StorageBase(object):
     def _untyped(self):
         return self
 
-    @property
-    def dtype(self):
+    @classproperty
+    def dtype(cls):
         return torch.uint8
 
 def _load_from_bytes(b):

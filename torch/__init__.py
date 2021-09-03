@@ -19,7 +19,7 @@ import warnings
 if sys.version_info < (3,):
     raise Exception("Python 2 has reached end-of-life and is no longer supported by PyTorch.")
 
-from ._utils import _import_dotted_name
+from ._utils import _import_dotted_name, classproperty
 from ._utils_internal import get_file_path, prepare_multiprocessing_environment, \
     USE_RTLD_GLOBAL_WITH_LIBTORCH, USE_GLOBAL_DEPS
 # TODO(torch_deploy) figure out how to freeze version.py in fbcode build
@@ -533,120 +533,120 @@ class ByteStorage(_C.ByteStorageBase, _StorageBase):
     pass
 
 class DoubleStorage(TypedStorage):
-    @property
-    def dtype(self):
+    @classproperty
+    def dtype(cls):
         return torch.double
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
 class FloatStorage(TypedStorage):
-    @property
-    def dtype(self):
+    @classproperty
+    def dtype(cls):
         return torch.float
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
 class HalfStorage(TypedStorage):
-    @property
-    def dtype(self):
+    @classproperty
+    def dtype(cls):
         return torch.half
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
 class LongStorage(TypedStorage):
-    @property
-    def dtype(self):
+    @classproperty
+    def dtype(cls):
         return torch.long
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
 class IntStorage(TypedStorage):
-    @property
-    def dtype(self):
+    @classproperty
+    def dtype(cls):
         return torch.int
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
 class ShortStorage(TypedStorage):
-    @property
-    def dtype(self):
+    @classproperty
+    def dtype(cls):
         return torch.short
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
 class CharStorage(TypedStorage):
-    @property
-    def dtype(self):
+    @classproperty
+    def dtype(cls):
         return torch.int8
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
 class BoolStorage(TypedStorage):
-    @property
-    def dtype(self):
+    @classproperty
+    def dtype(cls):
         return torch.bool
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
 class BFloat16Storage(TypedStorage):
-    @property
-    def dtype(self):
+    @classproperty
+    def dtype(cls):
         return torch.bfloat16
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
 class ComplexDoubleStorage(TypedStorage):
-    @property
-    def dtype(self):
+    @classproperty
+    def dtype(cls):
         return torch.cdouble
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
 class ComplexFloatStorage(TypedStorage):
-    @property
-    def dtype(self):
+    @classproperty
+    def dtype(cls):
         return torch.cfloat
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
 class QUInt8Storage(TypedStorage):
-    @property
-    def dtype(self):
+    @classproperty
+    def dtype(cls):
         return torch.quint8
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
 class QInt8Storage(TypedStorage):
-    @property
-    def dtype(self):
+    @classproperty
+    def dtype(cls):
         return torch.qint8
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
 class QInt32Storage(TypedStorage):
-    @property
-    def dtype(self):
+    @classproperty
+    def dtype(cls):
         return torch.qint32
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
 class QUInt4x2Storage(TypedStorage):
-    @property
-    def dtype(self):
+    @classproperty
+    def dtype(cls):
         return torch.quint4x2
 
     def __init__(self, *args, **kwargs):

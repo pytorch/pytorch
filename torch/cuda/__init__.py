@@ -16,6 +16,7 @@ import warnings
 import threading
 from typing import List, Optional, Tuple, Union, Any
 from ._utils import _get_device_index, _dummy_type
+from .._utils import classproperty
 from .streams import Stream, Event, _Graph, _graph_pool_handle
 from .. import device as _device
 import torch._C
@@ -551,88 +552,88 @@ class ByteStorage(_CudaBase, torch._C.CudaByteStorageBase, _StorageBase):
     pass
 
 class DoubleStorage(TypedStorage):
-    @property
-    def dtype(self):
+    @classproperty
+    def dtype(cls):
         return torch.double
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
 class FloatStorage(TypedStorage):
-    @property
-    def dtype(self):
+    @classproperty
+    def dtype(cls):
         return torch.float
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
 class HalfStorage(TypedStorage):
-    @property
-    def dtype(self):
+    @classproperty
+    def dtype(cls):
         return torch.half
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
 class LongStorage(TypedStorage):
-    @property
-    def dtype(self):
+    @classproperty
+    def dtype(cls):
         return torch.long
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
 class IntStorage(TypedStorage):
-    @property
-    def dtype(self):
+    @classproperty
+    def dtype(cls):
         return torch.int
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
 class ShortStorage(TypedStorage):
-    @property
-    def dtype(self):
+    @classproperty
+    def dtype(cls):
         return torch.short
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
 class CharStorage(TypedStorage):
-    @property
-    def dtype(self):
+    @classproperty
+    def dtype(cls):
         return torch.int8
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
 class BoolStorage(TypedStorage):
-    @property
-    def dtype(self):
+    @classproperty
+    def dtype(cls):
         return torch.bool
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
 class BFloat16Storage(TypedStorage):
-    @property
-    def dtype(self):
+    @classproperty
+    def dtype(cls):
         return torch.bfloat16
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
 class ComplexDoubleStorage(TypedStorage):
-    @property
-    def dtype(self):
+    @classproperty
+    def dtype(cls):
         return torch.cdouble
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
 class ComplexFloatStorage(TypedStorage):
-    @property
-    def dtype(self):
+    @classproperty
+    def dtype(cls):
         return torch.cfloat
 
     def __init__(self, *args, **kwargs):

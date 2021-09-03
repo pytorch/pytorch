@@ -358,7 +358,7 @@ def init_reductions():
     ForkingPickler.register(torch.cuda.Event, reduce_event)
 
     for t in torch._storage_classes:
-        if t().dtype == torch.uint8:
+        if t.dtype == torch.uint8:
             ForkingPickler.register(t, reduce_storage)
         else:
             ForkingPickler.register(t, reduce_typed_storage_child)
