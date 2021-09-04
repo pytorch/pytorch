@@ -1,7 +1,7 @@
 #include <torch/csrc/jit/passes/memory_planning.h>
-#include <torch/csrc/jit/passes/memory_planning/linear_scan.h>
-#include <torch/csrc/jit/passes/memory_planning/greedy_by_size.h>
 #include <torch/csrc/jit/passes/memory_planning/greedy_by_breadth.h>
+#include <torch/csrc/jit/passes/memory_planning/greedy_by_size.h>
+#include <torch/csrc/jit/passes/memory_planning/linear_scan.h>
 
 #include <jit/tensorexpr/kernel.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
@@ -12,34 +12,18 @@
 namespace torch {
 namespace jit {
 
-bool valid_add(int64_t a, int64_t b) {
-  static constexpr int64_t max = std::numeric_limits<int64_t>::max();
-  static constexpr int64_t min = std::numeric_limits<int64_t>::min();
-
-  if (((b > 0) && (a > max - b)) || ((b < 0) && (a < min - b)))
-    return false;
-  return true;
-}
-
-bool valid_sub(int64_t a, int64_t b) {
-  static constexpr int64_t max = std::numeric_limits<int64_t>::max();
-  static constexpr int64_t min = std::numeric_limits<int64_t>::min();
-
-  if (((b < 0) && (a > max + b)) || ((b > 0) && (a < min + b)))
-    return false;
-  return true;
-}
-
-int intersectArea(int64_t a, int64_t b, int64_t c, int64_t d) {
+int overlap(size_t a, size_t b, size_t c, size_t d) {
   TORCH_INTERNAL_ASSERT(a <= b);
   TORCH_INTERNAL_ASSERT(c <= d);
-  int64_t outer = std::max(b, d) - std::min(a, c);
-  int64_t l1 = (b - a), l2 = (d - c);
+  size_t outer = std::max(b, d) - std::min(a, c);
+  size_t l1 = (b - a), l2 = (d - c);
 
-  if (!valid_add(l1, l2)) {
+  // overflow checking since we're dealing with size_t arithmetic
+  // as of today (09/02/2021) linear address width on x86 is 48bits (256TB)
+  // so this is unneccessary but "640kB [isn't] enough for anyone"
+  // so this is necessary
+  if (!valid_add(l1, l2) || !valid_sub(outer, l1 + l2)) {
     // sum areas larger than possible outer area (thus overlap)
-    return -1;
-  } else if (!valid_sub(outer, l1 + l2)) {
     // multipoint overlap (sum areas larger than outer area)
     return -1;
   } else if (outer - (l1 + l2) > 0) {
@@ -51,30 +35,44 @@ int intersectArea(int64_t a, int64_t b, int64_t c, int64_t d) {
   }
 }
 
-bool intersectLiveRange(LiveRange lvr1, LiveRange lvr2) {
-  return intersectArea(lvr1.begin, lvr1.end, lvr2.begin, lvr2.end) <= 0;
+// live ranges overlap like closed intervals (i.e. if .end of one is the same as
+// .begin of another)
+bool overlapLiveRange(
+    const UniqueLiveRange& ulvr1,
+    const UniqueLiveRange& ulvr2) {
+  return overlap(
+             ulvr1.lvr.begin, ulvr1.lvr.end, ulvr2.lvr.begin, ulvr2.lvr.end) <=
+      0;
 }
 
-bool intersectMemRegion(MemRegion reg1, MemRegion reg2) {
-  // greater than 1 point overlap
-  return intersectArea(
+// since memory address are zero indexed, offset + size ends at the *beginning*
+// of the (offset+size)th byte. hence overlap is like open intervals (i.e.
+// overlap is more than at endpoints)
+bool overlapMemRegion(const MemRegion& reg1, const MemRegion& reg2) {
+  return overlap(
              reg1.offset,
              reg1.offset + reg1.size,
              reg2.offset,
              reg2.offset + reg2.size) < 0;
 }
 
+bool overlapAllocs(const MemAllocation& m1, const MemAllocation& m2) {
+  return overlapLiveRange(m1.ulvr, m2.ulvr) && overlapMemRegion(m1.reg, m2.reg);
+}
+
+// stack all tensors end to end "as you see them" over the entire lifespan of
+// the plan
 std::vector<MemAllocation> naive(
-    std::unordered_map<LiveRange, int64_t, live_range_hash>
-        managed_live_ranges) {
-  std::map<LiveRange, int64_t, live_range_start_cmp> sorted_managed_live_ranges(
-      managed_live_ranges.begin(), managed_live_ranges.end());
+    SortedLiveRangeMap<size_t> managed_live_ranges) {
   std::vector<MemAllocation> allocations;
   allocations.reserve(managed_live_ranges.size());
-  int64_t offset = 0;
-  for (const auto& item : sorted_managed_live_ranges) {
-    auto aligned_size = MemoryPlanner::computeAlignedTensorSize(item.second);
-    allocations.push_back({item.first, {offset, aligned_size}});
+  size_t offset = 0;
+  for (const auto& item : managed_live_ranges) {
+    auto ulvr = item.first;
+    auto size = item.second;
+    auto id = item.first.id;
+    auto aligned_size = MemoryPlanner::computeAlignedTensorSize(size);
+    allocations.push_back({ulvr, {offset, aligned_size}});
     offset += aligned_size;
   }
   return allocations;
@@ -145,10 +143,11 @@ std::pair<std::vector<int64_t>, std::vector<int64_t>> getSizesStrides(
 }
 
 Node* insertAllocStorageNode(
-    std::shared_ptr<Graph>& graph,
-    int64_t total_size) {
+    const std::shared_ptr<Graph>& graph,
+    size_t total_size) {
   auto* storage = graph->create(prim::AllocateStorage, 1);
-  storage->i_(attr::total_size, total_size);
+  // there is no e.g. ui_ because pytorch doesn't have a uint64 ScalarType
+  storage->i_(attr::total_size, (int64_t)total_size);
 
   auto device_type = jit::tensorexpr::pickDeviceType(graph);
   if (device_type.has_value()) {
@@ -161,156 +160,140 @@ Node* insertAllocStorageNode(
 }
 
 void insertAllocTensorNodes(
-    std::shared_ptr<Graph>& graph,
-    Node* storage,
-    std::vector<MemAllocation> allocations,
-    std::map<LiveRange, const Value*, live_range_start_cmp>
-        managed_range_values) {
-  std::unordered_map<LiveRange, MemRegion, live_range_hash> allocations_map;
-  allocations_map.reserve(allocations.size());
-  for (const auto& item : allocations) {
-    allocations_map[item.lvr] = item.reg;
-  }
-
-  int64_t total_size = storage->i(attr::total_size);
-  for (auto& item : managed_range_values) {
-    auto lvr = item.first;
-    auto region = allocations_map[lvr];
-    auto allocation = item.second;
+    const std::shared_ptr<Graph>& graph,
+    Node& storage,
+    std::vector<std::pair<const Value*, MemRegion>>&
+        managed_value_allocations) {
+  for (auto& item : managed_value_allocations) {
+    auto val = item.first;
+    auto region = item.second;
 
     // const_cast fishy?
-    auto node = const_cast<Node*>(allocation->node());
+    Node* node = const_cast<Node*>(val->node());
 
     // the way that this node magically *becomes* the out varaint is simply
     // by add an extra input. this is because op resolution happens
     // at runtime via the op registry (by matching on the schema).
     auto* alloc = graph->create(prim::AllocateTensor, 1);
     node->addInput(alloc->output());
-    GRAPH_DEBUG("inserting allocation op for ", node->getOperator().schema());
     alloc->insertBefore(node);
-    alloc->addInput(storage->output());
+    alloc->addInput(storage.output());
 
-    auto ttp = allocation->type()->expect<c10::TensorType>();
+    auto ttp = val->type()->expect<c10::TensorType>();
     std::vector<int64_t> sizes, strides;
     std::tie(sizes, strides) = getSizesStrides(ttp);
-    TORCH_CHECK(
-        region.offset + region.size <= total_size,
-        "trying to create an allocation that exceeds previously planned memory");
-    alloc->i_(attr::size, region.size);
-    alloc->i_(attr::offset, region.offset);
+
+    alloc->i_(attr::size, (int64_t)region.size);
+    alloc->i_(attr::offset, (int64_t)region.offset);
     alloc->is_(attr::sizes, sizes);
     alloc->is_(attr::stride, strides);
-    alloc->i_(attr::device, static_cast<int8_t>(storage->i(attr::device)));
+    alloc->i_(attr::device, static_cast<int8_t>(storage.i(attr::device)));
     alloc->i_(attr::dtype, static_cast<int8_t>(ttp->scalarType().value()));
   }
 }
 
 bool hasOutVariant(Node* node) {
+  if (!node->maybeSchema()) {
+    return false;
+  }
+  const auto& node_schema_args = node->schema().arguments();
   for (const auto& variant : getAllOperatorsFor(node->kind())) {
-    auto variant_args = variant->schema().arguments();
-    /* TODO
-      aten::cat.names_out(Tensor[] tensors, str dim, *, Tensor(a!) out) ->
-      (Tensor(a!)) aten::cat.out(Tensor[] tensors, int dim=0, *,
-      Tensor(a!) out) -> (Tensor(a!))
-    */
-    auto maybe_out_arg =
-        std::find_if(variant_args.begin(), variant_args.end(), [](auto arg) {
-          return arg.name() == "out";
-        });
-    if (maybe_out_arg != variant_args.end()) {
+    auto variant_schema = variant->schema();
+    // a simple check for an out param is insufficient because ops with multiple
+    // out variants e.g. aten::cat.out and aten::cat.names_out
+    auto maybe_out_arg_idx = variant_schema.argumentIndexWithName("out");
+    if (maybe_out_arg_idx) {
+      // out arg should be the *next* arg after current args
+      if ((size_t)maybe_out_arg_idx.value() != node_schema_args.size()) {
+        return false;
+      }
+      // functions are contravariant in arguments i.e. args should be "broader"
+      // in replacement fn i.e. to check variant_schema.args[] <:
+      // node_schema.args[] we check that node_schema.args[i] <:
+      // variant_schema[i] for all i <= len(node_schema.args)
+      c10::isSubtypeOfList(
+          ArrayRef<Argument>(node_schema_args),
+          ArrayRef<Argument>(variant_schema.arguments())
+              // e.g. maybe_out_arg_idx = 3 means first 3 arg types should
+              // satisfy subtype relationship
+              .slice(0, maybe_out_arg_idx.value()),
+          nullptr);
       return true;
     }
   }
   return false;
 }
 
-std::pair<std::vector<const Node*>, std::unordered_map<const Value*, int64_t>>
-getManagedValues(
-    const std::shared_ptr<Graph>& graph,
-    std::unordered_set<const Value*> always_alive_values) {
-  std::unordered_map<const Value*, int64_t> managed_tensor_values;
-  std::unordered_set<const Value*> leaked_values;
-  std::vector<const Node*> out_nodes;
+std::pair<
+    FastMap<const Value*, std::pair<UniqueLiveRange, size_t>>,
+    std::vector<const Node*>>
+getManagedValues(const std::shared_ptr<Graph>& graph, bool frozen = false) {
+  AliasDb alias_db(graph, frozen);
+  FastSet<const Value*> always_alive_values =
+      jit::GetAlwaysAliveValues(graph, alias_db);
+  FastMap<const Value*, LiveRange> live_ranges =
+      jit::GetLiveness(graph, always_alive_values, alias_db).second;
 
+  FastMap<const Value*, std::pair<UniqueLiveRange, size_t>> managed_values;
+  FastSet<const Value*> leaked_values;
   FastMap<Node*, bool> node_has_out_variant;
+  std::vector<const Node*> out_nodes;
   for (auto* node : graph->nodes()) {
-    node_has_out_variant.insert({node, hasOutVariant(node)});
+    auto has_out = hasOutVariant(node);
+    node_has_out_variant.insert({node, has_out});
+    if (has_out) {
+      out_nodes.emplace_back(node);
+    }
   }
 
   for (auto node : graph->nodes()) {
     if (!node_has_out_variant[node]) {
       continue;
     }
-    out_nodes.emplace_back(node);
     for (const auto* out_v : node->outputs()) {
       if (always_alive_values.count(out_v)) {
         continue;
       }
       auto size = computeStorageSize(*out_v);
-      if (size.has_value() && size.value() > 0) {
-        managed_tensor_values.insert({out_v, size.value()});
-      } else if (isOptimizableContainerType(node, node_has_out_variant)) {
-        leaked_values.insert(out_v);
+      if (size && size.value() > 0 &&
+          !isOptimizableContainerType(node, node_has_out_variant)) {
+        managed_values.insert(
+            {out_v, {{live_ranges[out_v], out_v->debugName()}, size.value()}});
       } else {
-        TORCH_WARN(
-            "not handling unsupported value: ",
-            out_v->debugName(),
-            " ",
-            *out_v->type());
         leaked_values.insert(out_v);
       }
     }
   }
+
   GRAPH_DEBUG("memory planning leaked values: ", c10::Join(",", leaked_values));
-  return std::make_pair(out_nodes, managed_tensor_values);
+  return std::make_pair(managed_values, out_nodes);
 }
 
-std::tuple<
-    std::vector<const Node*>,
-    std::unordered_map<const Value*, int64_t>,
-    std::unordered_map<const Value*, LiveRange>>
-getManagedStuff(std::shared_ptr<Graph>& graph) {
-  AliasDb alias_db(graph);
-  auto always_alive = jit::GetAlwaysAliveValues(graph, alias_db);
-  auto live_ranges = jit::GetLiveness(graph, always_alive, alias_db).second;
-  std::vector<const Node*> out_nodes;
-  std::unordered_map<const Value*, int64_t> managed_tensor_values;
-  std::tie(out_nodes, managed_tensor_values) =
-      getManagedValues(graph, always_alive);
-
-  std::unordered_map<const Value*, LiveRange> managed_ranges;
-  for (const auto& lvr : live_ranges) {
-    if (managed_tensor_values.count(lvr.first) > 0) {
-      managed_ranges.insert(lvr);
-    }
-  }
-  return std::make_tuple(out_nodes, managed_tensor_values, managed_ranges);
-}
-
-int64_t getTotalAllocationSize(std::vector<MemAllocation> allocations) {
-  int64_t total_size = 0;
+// "high watermark" of memory
+size_t getTotalAllocationSize(std::vector<MemAllocation> allocations) {
+  size_t total_size = 0;
   for (const auto& alloc : allocations) {
     total_size = std::max(total_size, alloc.reg.offset + alloc.reg.size);
   }
   return total_size;
 }
 
-bool intersectAllocs(MemAllocation m1, MemAllocation m2) {
-  return intersectLiveRange(m1.lvr, m2.lvr) &&
-         intersectMemRegion(m1.reg, m2.reg);
-}
-
 bool validateAllocations(
     std::vector<MemAllocation> allocations,
-    std::unordered_map<LiveRange, int64_t, live_range_hash>
-        managed_live_ranges) {
+    SortedLiveRangeMap<size_t> managed_live_ranges,
+    size_t total_size) {
+  if (total_size >= (size_t)std::numeric_limits<int64_t>::max) {
+    TORCH_WARN("total allocation is too big ", total_size);
+    return false;
+  }
+
   for (const auto& alloc1 : allocations) {
     for (const auto& alloc2 : allocations) {
       if (alloc1 == alloc2) {
         continue;
       }
-      if (intersectAllocs(alloc1, alloc2)) {
-        TORCH_WARN("intersecting allocations: ", alloc1, ", ", alloc2);
+      if (overlapAllocs(alloc1, alloc2)) {
+        TORCH_WARN("overlapping allocations: ", alloc1, ", ", alloc2);
         return false;
       }
     }
@@ -326,13 +309,32 @@ bool validateAllocations(
   }
 
   for (const auto& alloc : allocations) {
-    if (managed_live_ranges.count(alloc.lvr) == 0 ||
-        // leq because alignment enlarges (recomputing aligned size is too much)
-        managed_live_ranges[alloc.lvr] > alloc.reg.size) {
+    if (!valid_add(alloc.reg.offset, alloc.reg.size)) {
+      TORCH_WARN(
+          "allocation ",
+          alloc.reg,
+          " beyond int64_t mem limit: ",
+          sizeof(int64_t));
+      return false;
+    }
+
+    if (!valid_sub(total_size, alloc.reg.offset + alloc.reg.size)) {
+      // if this overflows then alloc.reg.offset + alloc.reg.size > total_size
+      TORCH_WARN(
+          "allocation exceeds total size: ", alloc.reg, ", ", total_size);
+      return false;
+    }
+
+    if (managed_live_ranges.count(alloc.ulvr) == 0 ||
+        // leq because word alignment increases requirements
+        // (recomputing aligned size is overkill here)
+        managed_live_ranges[alloc.ulvr] > alloc.reg.size) {
       TORCH_WARN(
           "wrong size allocation: ",
-          alloc.lvr, ", ",
-          managed_live_ranges[alloc.lvr], ", ",
+          alloc.ulvr,
+          ", ",
+          managed_live_ranges[alloc.ulvr],
+          ", ",
           alloc.reg.size);
       return false;
     }
@@ -341,38 +343,17 @@ bool validateAllocations(
   return true;
 }
 
-std::ostream& printAllocation(
-    std::ostream& out,
-    std::vector<MemAllocation> allocations,
-    std::map<LiveRange, const Value*, live_range_start_cmp> managed_ranges) {
-  std::map<LiveRange, MemRegion, live_range_start_cmp> allocations_map;
-  for (const auto& item : allocations) {
-    allocations_map[item.lvr] = item.reg;
-  }
-
-  for (const auto& item : managed_ranges) {
-    auto lvr = item.first;
-    auto val = item.second;
-    auto alloced_reg = allocations_map[lvr];
-    out << val->debugName() << ": " << lvr << " " << alloced_reg << "\n";
-  }
-  return out;
-}
-
-void planMemory(std::shared_ptr<Graph>& graph, Strategy strat) {
-  std::unordered_map<const Value*, int64_t> managed_value_sizes;
-  std::unordered_map<const Value*, LiveRange> managed_value_ranges;
+void planMemory(const std::shared_ptr<Graph>& graph, Strategy strat) {
+  FastMap<const Value*, std::pair<UniqueLiveRange, size_t>> managed_values;
   std::vector<const Node*> out_nodes;
-  std::tie(out_nodes, managed_value_sizes, managed_value_ranges) =
-      getManagedStuff(graph);
-
-  std::unordered_map<LiveRange, int64_t, live_range_hash> managed_live_ranges;
-  managed_live_ranges.reserve(managed_value_sizes.size());
-  for (const auto& item : managed_value_sizes) {
-    managed_live_ranges[managed_value_ranges[item.first]] = item.second;
+  std::tie(managed_values, out_nodes) = getManagedValues(graph);
+  SortedLiveRangeMap<size_t> managed_live_ranges;
+  for (auto& item : managed_values) {
+    auto ulvr = item.second.first;
+    auto size = item.second.second;
+    managed_live_ranges.insert({ulvr, size});
   }
   std::vector<MemAllocation> allocations;
-
   switch (strat) {
     case Strategy::NAIVE: {
       allocations = naive(managed_live_ranges);
@@ -395,43 +376,46 @@ void planMemory(std::shared_ptr<Graph>& graph, Strategy strat) {
       break;
     }
     case Strategy::GREEDY_BY_BREADTH: {
-      allocations = greedyByOperatorBreadth(
-          managed_value_sizes, managed_value_ranges, out_nodes);
+      allocations = greedyByOperatorBreadth(managed_values, out_nodes);
       break;
     }
     default:
       return;
   }
-  TORCH_INTERNAL_ASSERT(
-      validateAllocations(allocations, managed_live_ranges),
-      "invalid allocation",
-      strat);
 
   auto total_size = getTotalAllocationSize(allocations);
 
-  std::map<LiveRange, const Value*, live_range_start_cmp> managed_range_values;
-  for (const auto& item : managed_value_ranges) {
-    if (managed_range_values.count(item.second)) {
-      TORCH_WARN(
-          "overlapping live ranges ",
-          item.first->debugName(),
-          " with ",
-          managed_range_values.at(item.second)->debugName());
-    }
-    managed_range_values.insert({item.second, item.first});
-  }
-
-  std::stringstream allocs_str;
-  printAllocation(allocs_str, allocations, managed_range_values);
-  GRAPH_DEBUG("\nallocs\n", allocs_str.str());
+  TORCH_INTERNAL_ASSERT(
+      validateAllocations(allocations, managed_live_ranges, total_size),
+      "invalid allocation",
+      strat);
 
   GRAPH_DEBUG("\ngraph before inserting storage node\n", *graph);
 
   auto storage_node = insertAllocStorageNode(graph, total_size);
   GRAPH_DEBUG("\ngraph after inserting storage node\n", *graph);
 
-  insertAllocTensorNodes(
-      graph, storage_node, allocations, managed_range_values);
+  // the only way to identify an allocation with the value that needs it
+  // is by matching on live range and size request. but we need the original
+  // size request because alignment will grow the request (concretely
+  // doing
+  // managed_values[alloc.lvr].second == allocations_map[alloc.lvr].size
+  // will fail because MemRegion.size >= managed_values[alloc.lvr].second
+  SortedLiveRangeMap<MemRegion> allocations_map;
+  for (const auto& alloc : allocations) {
+    allocations_map.insert({alloc.ulvr, alloc.reg});
+  }
+
+  std::vector<std::pair<const Value*, MemRegion>> managed_value_allocations;
+  managed_value_allocations.reserve(managed_values.size());
+  for (auto& item : managed_values) {
+    auto val = item.first;
+    auto ulvr = item.second.first;
+    auto reg = allocations_map.at(ulvr);
+    managed_value_allocations.emplace_back(val, reg);
+  }
+
+  insertAllocTensorNodes(graph, *storage_node, managed_value_allocations);
   GRAPH_DEBUG("\ngraph after inserting alloc nodes\n", *graph);
 }
 } // namespace jit
