@@ -5,112 +5,87 @@ namespace torch {
 namespace jit {
 
 std::vector<MemAllocation> greedyBySize(
-    std::unordered_map<LiveRange, int64_t, live_range_hash>
-        managed_live_ranges) {
+    SortedLiveRangeMap<size_t> live_ranges) {
   // sort tensor usage records in non-increasing order of size
-  auto cmp =
-      live_range_start_cmp();
-  std::vector<LiveRange> sorted_size_live_ranges;
-  std::transform(
-      managed_live_ranges.begin(),
-      managed_live_ranges.end(),
-      std::back_inserter(sorted_size_live_ranges),
-      [](auto item) { return item.first; });
-  std::sort(
+  std::vector<std::pair<UniqueLiveRange, size_t>> sorted_size_live_ranges(
+      live_ranges.begin(), live_ranges.end());
+  std::stable_sort(
       sorted_size_live_ranges.begin(),
       sorted_size_live_ranges.end(),
-      [&managed_live_ranges, &cmp](LiveRange& lvr1, LiveRange& lvr2) {
-        return managed_live_ranges[lvr1] == managed_live_ranges[lvr2]
-            ? cmp(lvr1, lvr2)
-            : managed_live_ranges[lvr1] > managed_live_ranges[lvr2];
-      });
+      [](auto& p1, auto& p2) { return p1.second > p2.second; });
 
   std::vector<MemAllocation> ordered_allocations;
 
-  for (auto& lvr : sorted_size_live_ranges) {
-    makeAllocation(
-        ordered_allocations,
-        managed_live_ranges,
-        lvr,
-        findOffsetWithSmallestGap);
+  for (auto& item : sorted_size_live_ranges) {
+    auto ulvr = item.first;
+    auto size = item.second;
+    makeAllocation(ulvr, size, ordered_allocations, findOffsetWithSmallestGap);
   }
 
-  std::sort(
+  auto cmp = liveRangeStartCmp();
+  std::stable_sort(
       ordered_allocations.begin(),
       ordered_allocations.end(),
-      [&cmp](auto m1, auto m2) { return cmp(m1.lvr, m2.lvr); });
+      [&cmp](auto m1, auto m2) { return cmp(m1.ulvr, m2.ulvr); });
   return ordered_allocations;
 }
 
 std::vector<MemAllocation> greedyBySizeWithFirstGap(
-    std::unordered_map<LiveRange, int64_t, live_range_hash>
-        managed_live_ranges) {
-  auto cmp = live_range_start_cmp();
+    SortedLiveRangeMap<size_t> live_ranges) {
   // sort tensor usage records in non-increasing order of size
-  std::vector<LiveRange> sorted_size_live_ranges;
-  std::transform(
-      managed_live_ranges.begin(),
-      managed_live_ranges.end(),
-      std::back_inserter(sorted_size_live_ranges),
-      [](auto item) { return item.first; });
-  std::sort(
+  std::vector<std::pair<UniqueLiveRange, size_t>> sorted_size_live_ranges(
+      live_ranges.begin(), live_ranges.end());
+  std::stable_sort(
       sorted_size_live_ranges.begin(),
       sorted_size_live_ranges.end(),
-      [&managed_live_ranges, &cmp](LiveRange& lvr1, LiveRange& lvr2) {
-        return managed_live_ranges[lvr1] == managed_live_ranges[lvr2]
-            ? cmp(lvr1, lvr2)
-            : managed_live_ranges[lvr1] > managed_live_ranges[lvr2];
-      });
+      [](auto& p1, auto& p2) { return p1.second > p2.second; });
 
   std::vector<MemAllocation> ordered_allocations;
 
-  for (auto& lvr : sorted_size_live_ranges) {
-    makeAllocation(
-        ordered_allocations, managed_live_ranges, lvr, findFirstOffset);
+  for (auto& item : sorted_size_live_ranges) {
+    auto ulvr = item.first;
+    auto size = item.second;
+    makeAllocation(ulvr, size, ordered_allocations, findFirstOffset);
   }
 
-  std::sort(
+  auto cmp = liveRangeStartCmp();
+  std::stable_sort(
       ordered_allocations.begin(),
       ordered_allocations.end(),
-      [&cmp](auto m1, auto m2) { return cmp(m1.lvr, m2.lvr); });
+      [&cmp](auto m1, auto m2) { return cmp(m1.ulvr, m2.ulvr); });
   return ordered_allocations;
 }
 
 std::vector<MemAllocation> greedyBySizeAndLongestWithFirstGap(
-    std::unordered_map<LiveRange, int64_t, live_range_hash>
-        managed_live_ranges) {
-  auto cmp = live_range_start_cmp();
+    SortedLiveRangeMap<size_t> live_ranges) {
   // sort tensor usage records in non-increasing order of size
-  std::vector<LiveRange> sorted_length_then_size_live_ranges;
-  std::transform(
-      managed_live_ranges.begin(),
-      managed_live_ranges.end(),
-      std::back_inserter(sorted_length_then_size_live_ranges),
-      [](auto item) { return item.first; });
-  std::sort(
+  std::vector<std::pair<UniqueLiveRange, size_t>>
+      sorted_length_then_size_live_ranges(
+          live_ranges.begin(), live_ranges.end());
+  auto cmp = liveRangeStartCmp();
+  std::stable_sort(
       sorted_length_then_size_live_ranges.begin(),
       sorted_length_then_size_live_ranges.end(),
-      [&managed_live_ranges, &cmp](LiveRange& lvr1, LiveRange& lvr2) {
-        auto len1 = lvr1.begin - lvr1.end;
-        auto len2 = lvr2.begin - lvr2.end;
-        return len1 == len2
-            ? (managed_live_ranges[lvr2]
-                   ? cmp(lvr1, lvr2)
-                   : managed_live_ranges[lvr1] > managed_live_ranges[lvr2])
-            : len1 > len2;
+      [&cmp](auto& p1, auto& p2) {
+        auto len1 = p1.first.lvr.begin - p1.first.lvr.end;
+        auto len2 = p2.first.lvr.begin - p2.first.lvr.end;
+        return len1 == len2 ? (p1.second == p2.second ? cmp(p1.first, p2.first)
+                                                      : p1.second > p2.second)
+                            : len1 > len2;
       });
 
   std::vector<MemAllocation> ordered_allocations;
 
-  for (auto& lvr : sorted_length_then_size_live_ranges) {
-    makeAllocation(
-        ordered_allocations, managed_live_ranges, lvr, findFirstOffset);
+  for (auto& item : sorted_length_then_size_live_ranges) {
+    auto ulvr = item.first;
+    auto size = item.second;
+    makeAllocation(ulvr, size, ordered_allocations, findFirstOffset);
   }
 
-  std::sort(
+  std::stable_sort(
       ordered_allocations.begin(),
       ordered_allocations.end(),
-      [&cmp](auto m1, auto m2) { return cmp(m1.lvr, m2.lvr); });
+      [&cmp](auto m1, auto m2) { return cmp(m1.ulvr, m2.ulvr); });
   return ordered_allocations;
 }
 
