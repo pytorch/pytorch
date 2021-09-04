@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <iostream>
+
 #include <ATen/ATen.h>
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
@@ -59,6 +61,9 @@ void checkAllocNodes(
   std::vector<int64_t> sizes = {};
   at::ScalarType dtype;
 
+  std::stringstream ss;
+  graph.print(ss, false);
+
   auto i = 0;
   for (const auto& node : graph.nodes()) {
     if (node->kind() == prim::AllocateStorage) {
@@ -97,7 +102,8 @@ void checkAllocNodes(
           << dtype << ((dtype == expected_allocs[i].dtype) ? "==" : "!=")
           << expected_allocs[i].dtype << "\n"
           << successor << ((successor == expected_successors[i]) ? "==" : "!=")
-          << expected_successors[i] << "\n";
+          << expected_successors[i] << "\n"
+          << ss.str() << "\n";
       i++;
     }
   }
@@ -177,7 +183,6 @@ TEST(MemoryPlannerTest, LSTMNaive) {
       {1024, 0, {1, 256}, {256, 1}, DeviceType::CPU, at::ScalarType::Float},
       {1024, 1024, {1, 256}, {256, 1}, DeviceType::CPU, at::ScalarType::Float},
       {1024, 2048, {1, 256}, {256, 1}, DeviceType::CPU, at::ScalarType::Float},
-
       {256, 3072, {1, 64}, {64, 1}, DeviceType::CPU, at::ScalarType::Float},
       {256, 3328, {1, 64}, {64, 1}, DeviceType::CPU, at::ScalarType::Float},
       {256, 3584, {1, 64}, {64, 1}, DeviceType::CPU, at::ScalarType::Float},
