@@ -367,6 +367,96 @@ Tensor _inverse_helper_cuda_lib(const Tensor& self) {
   return self_inv_working_copy;
 }
 
+// call cusolver gesvd function to calculate svd
+template<typename scalar_t>
+inline static void _apply_svd_lib_gesvd(const Tensor& self, Tensor& U, Tensor& S, Tensor& VT, Tensor& infos, bool compute_uv, bool some,
+  const bool calculate_all_batches,
+  const std::vector<int64_t>& batches
+) {
+  using value_t = typename c10::scalar_value_type<scalar_t>::type;
+  auto self_data = self.data_ptr<scalar_t>();
+  auto U_data = U.data_ptr<scalar_t>();
+  auto S_data = S.data_ptr<value_t>();
+  auto VT_data = VT.data_ptr<scalar_t>();
+  auto self_stride = matrixStride(self);
+  auto U_stride = !compute_uv ? 1 : matrixStride(U);
+  auto S_stride = S.size(-1);
+  auto VT_stride = !compute_uv ? 1 : matrixStride(VT);
+
+  int _batchsize = cuda_int_cast(batchCount(self), "batch size");
+  int m = cuda_int_cast(self.size(-2), "m");
+  int n = cuda_int_cast(self.size(-1), "n");
+  int lda = std::max<int>(1, m);
+  int ldvt = std::max<int>(1, n);
+
+  TORCH_INTERNAL_ASSERT(m >= n, "cusolver gesvd only supports matrix with sizes m >= n");
+
+  // VT_view shares the same memory space as VT tensor
+  at::Tensor VT_view;
+  if (compute_uv) {
+    VT_view = VT.view({-1, n, n});
+  }
+
+  int batchsize = _batchsize;
+  std::function<int(int)> get_batch_index = [&](int i) -> int { return i; };
+  if (!calculate_all_batches) {
+    batchsize = batches.size();
+    get_batch_index = [&](int i) -> int { return batches[i]; };
+  }
+
+  char jobu = compute_uv ? (some ? 'S' : 'A') : 'N';
+  char jobvt = compute_uv ? (some ? 'S' : 'A') : 'N';
+  auto handle = at::cuda::getCurrentCUDASolverDnHandle();
+
+  // Note that gesvd returns V^H in column-major.
+  // Without a transpose here, it will be V.conj() in the actual memory space.
+  at::Tensor vt_workspace = at::empty({n, n}, VT.options()).conj();
+
+  for(int _i = 0; _i < batchsize; _i++){
+    int i = get_batch_index(_i);
+
+    at::cuda::solver::gesvd<scalar_t>(
+      handle, jobu, jobvt, m, n,
+      self_data + i * self_stride,
+      lda,
+      S_data + i * S_stride,
+      U_data + i * U_stride,
+      lda,
+      vt_workspace.data_ptr<scalar_t>(), // VT_data + i * VT_stride,
+      ldvt,
+      infos.data_ptr<int>() + i
+    );
+
+    if (compute_uv) {
+      VT_view[i].copy_(vt_workspace);
+    }
+  }
+}
+
+// wrapper around _apply_svd_lib_gesvd that handles dtype dispatch
+// note that gesvd returns V^H, which needs to be conjugated and transposed, we want this function to return V
+inline static void apply_svd_lib_gesvd(const Tensor& self, Tensor& U, Tensor& S, Tensor& VT, Tensor& infos, bool compute_uv, bool some,
+  const bool calculate_all_batches = true,
+  const std::vector<int64_t>& batches = {}
+) {
+  if (self.numel() == 0) {
+    return;
+  }
+
+  int m = cuda_int_cast(self.size(-2), "m");
+  int n = cuda_int_cast(self.size(-1), "n");
+
+  if (m < n) {
+    apply_svd_lib_gesvd(self.transpose(-2, -1), VT, S, U, infos, compute_uv, some, calculate_all_batches, batches);
+    return;
+  }
+
+  Tensor self_working_copy = cloneBatchedColumnMajor(self);
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "svd_cuda_gesvd", [&] {
+    _apply_svd_lib_gesvd<scalar_t>(self_working_copy, U, S, VT, infos, compute_uv, some, calculate_all_batches, batches);
+  });
+}
+
 // call cusolver gesvdj function to calculate svd
 template<typename scalar_t>
 inline static void _apply_svd_lib_gesvdj(const Tensor& self, Tensor& U, Tensor& S, Tensor& VT, Tensor& infos, bool compute_uv, bool some) {
@@ -412,8 +502,8 @@ inline static void _apply_svd_lib_gesvdj(const Tensor& self, Tensor& U, Tensor& 
   }
 }
 
-// wrapper around _apply_svd_lib_gesvdj that handles dtype dispatch,
-// creates a working copy of the input, and creates V^H from the V returned by gesvdj
+// wrapper around _apply_svd_lib_gesvdj that handles dtype dispatch
+// note that gesvdj returns V, which is what we want
 inline static void apply_svd_lib_gesvdj(const Tensor& self, Tensor& U, Tensor& S, Tensor& VT, Tensor& infos, bool compute_uv, bool some) {
   Tensor self_working_copy = cloneBatchedColumnMajor(self);
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "svd_cuda_gesvdj", [&] {
@@ -456,8 +546,8 @@ inline static void _apply_svd_lib_gesvdjBatched(const Tensor& self, Tensor& U, T
   TORCH_CUSOLVER_CHECK(cusolverDnDestroyGesvdjInfo(gesvdj_params));
 }
 
-// wrapper around _apply_svd_lib_gesvdjBatched that handles dtype dispatch,
-// creates a working copy of the input, and creates V^H from the V returned by gesvdj
+// wrapper around _apply_svd_lib_gesvdjBatched that handles dtype dispatch
+// note that gesvdjBatched returns V, which is what we want
 inline static void apply_svd_lib_gesvdjBatched(const Tensor& self, Tensor& U, Tensor& S, Tensor& VT, Tensor& infos, bool compute_uv) {
   Tensor self_working_copy = cloneBatchedColumnMajor(self);
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "svd_cuda_gesvdjBatched", [&] {
@@ -465,7 +555,29 @@ inline static void apply_svd_lib_gesvdjBatched(const Tensor& self, Tensor& U, Te
   });
 }
 
+// Check if gesvdj results converge. If not, return a vector that contains the non-converging batch index.
+// If the returned vector is empty, all results are converged.
+// This function will cause a device-host sync.
+std::vector<int64_t> _check_gesvdj_convergence(const Tensor& infos, int64_t non_converging_info) {
+  at::Tensor infos_cpu = infos.cpu();
+  auto infos_cpu_data = infos_cpu.data_ptr<int>();
+
+  std::vector<int64_t> res;
+
+  for(int64_t i = 0; i < infos.numel(); i++) {
+    int info_for_batch_i = infos_cpu_data[i];
+
+    // From cusolver doc, if info < 0, the i-th function call parameter is wrong,
+    // which means pytorch implementation of cusolver is wrong.
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info_for_batch_i >= 0);
+    if (info_for_batch_i == non_converging_info) res.push_back(i);
+  }
+
+  return res;
+}
+
 // entrance of calculations of `svd` using cusolver gesvdj and gesvdjBatched
+// This function returns V, not V^T, not V^H.
 std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda_lib(const Tensor& self, bool some, bool compute_uv) {
   const int64_t batch_size = batchCount(self);
   at::Tensor infos = at::zeros({batch_size}, self.options().dtype(at::kInt));
@@ -482,15 +594,36 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda_lib(const Tensor& self, bool
     VT_working_copy.transpose_(-2, -1);
   }
 
+  // VT_working_copy is row-major, actually "V" now
+
   // heuristic for using `gesvdjBatched` over `gesvdj`
   if (m <= 32 && n <= 32 && batch_size > 1 && (!some || m == n)) {
     apply_svd_lib_gesvdjBatched(self, U_working_copy, S_working_copy, VT_working_copy, infos, compute_uv);
+
+    // A device-host sync will be performed.
+    batchCheckErrors(infos, "svd_cuda");
   } else {
-    apply_svd_lib_gesvdj(self, U_working_copy, S_working_copy, VT_working_copy, infos, compute_uv, some);
+    // apply_svd_lib_gesvdj(self, U_working_copy, S_working_copy, VT_working_copy, infos, compute_uv, some);
+    apply_svd_lib_gesvd(self, U_working_copy, S_working_copy, VT_working_copy, infos, compute_uv, some);
+
+    // A device-host sync will be performed.
+    std::vector<int64_t> gesvdj_convergence_check = _check_gesvdj_convergence(infos, std::min(m, n) + 1);
+
+    if (!gesvdj_convergence_check.empty()) {
+      // fall back to gesvd path for those non-converging batches
+
+      TORCH_WARN_ONCE("cuSOLVER SVD failed to converge for the given inputs. "
+                      "A more accurate method will be used to calculate the SVD as a fallback.");
+      apply_svd_lib_gesvd(self, U_working_copy, S_working_copy, VT_working_copy, infos, compute_uv, some,
+        /* calculate_all_batches = */ false,
+        /* batches = */ gesvdj_convergence_check
+        );
+
+      // A device-host sync will be performed.
+      batchCheckErrors(infos, "svd_cuda");
+    }
   }
 
-  // A device-host sync will be performed.
-  batchCheckErrors(infos, "svd_cuda");
 
   // gesvdjBatched fails with illegal memory access and
   // gesvdj fails with CUSOLVER_STATUS_EXECUTION_FAILED

@@ -163,6 +163,136 @@ void getrs<c10::complex<float>>(
 
 
 template<>
+void gesvd<float>(
+    cusolverDnHandle_t handle, char jobu, char jobvt, int m, int n, float* A, int lda,
+    float* S, float* U, int ldu, float* VT, int ldvt, int* devInfo
+) {
+  int lwork;
+  TORCH_CUSOLVER_CHECK(cusolverDnSgesvd_bufferSize(handle, m, n, &lwork));
+  auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
+
+  auto dataPtr_work = allocator.allocate(sizeof(float)*lwork);
+  auto dataPtr_rwork = allocator.allocate(sizeof(float)*m);
+
+  TORCH_CUSOLVER_CHECK(cusolverDnSgesvd(
+      handle,
+      jobu,
+      jobvt,
+      m,
+      n,
+      A,
+      lda,
+      S,
+      U,
+      ldu,
+      VT,
+      ldvt,
+      static_cast<float*>(dataPtr_work.get()),
+      lwork,
+      static_cast<float*>(dataPtr_rwork.get()),
+      devInfo
+  ));
+}
+
+template<>
+void gesvd<double>(
+    cusolverDnHandle_t handle, char jobu, char jobvt, int m, int n, double* A, int lda,
+    double* S, double* U, int ldu, double* VT, int ldvt, int* devInfo
+) {
+  int lwork;
+  TORCH_CUSOLVER_CHECK(cusolverDnDgesvd_bufferSize(handle, m, n, &lwork));
+  auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
+
+  auto dataPtr_work = allocator.allocate(sizeof(double)*lwork);
+  auto dataPtr_rwork = allocator.allocate(sizeof(double)*m);
+
+  TORCH_CUSOLVER_CHECK(cusolverDnDgesvd(
+      handle,
+      jobu,
+      jobvt,
+      m,
+      n,
+      A,
+      lda,
+      S,
+      U,
+      ldu,
+      VT,
+      ldvt,
+      static_cast<double*>(dataPtr_work.get()),
+      lwork,
+      static_cast<double*>(dataPtr_rwork.get()),
+      devInfo
+  ));
+}
+
+
+template<>
+void gesvd<c10::complex<float>>(
+    cusolverDnHandle_t handle, char jobu, char jobvt, int m, int n, c10::complex<float>* A, int lda,
+    float* S, c10::complex<float>* U, int ldu, c10::complex<float>* VT, int ldvt, int* devInfo
+) {
+  int lwork;
+  TORCH_CUSOLVER_CHECK(cusolverDnCgesvd_bufferSize(handle, m, n, &lwork));
+  auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
+
+  auto dataPtr_work = allocator.allocate(sizeof(cuComplex)*lwork);
+  auto dataPtr_rwork = allocator.allocate(sizeof(float)*m);
+
+  TORCH_CUSOLVER_CHECK(cusolverDnCgesvd(
+      handle,
+      jobu,
+      jobvt,
+      m,
+      n,
+      reinterpret_cast<cuComplex*>(A),
+      lda,
+      S,
+      reinterpret_cast<cuComplex*>(U),
+      ldu,
+      reinterpret_cast<cuComplex*>(VT),
+      ldvt,
+      static_cast<cuComplex*>(dataPtr_work.get()),
+      lwork,
+      static_cast<float*>(dataPtr_rwork.get()),
+      devInfo
+  ));
+}
+
+template<>
+void gesvd<c10::complex<double>>(
+    cusolverDnHandle_t handle, char jobu, char jobvt, int m, int n, c10::complex<double>* A, int lda,
+    double* S, c10::complex<double>* U, int ldu, c10::complex<double>* VT, int ldvt, int* devInfo
+) {
+  int lwork;
+  TORCH_CUSOLVER_CHECK(cusolverDnZgesvd_bufferSize(handle, m, n, &lwork));
+  auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
+
+  auto dataPtr_work = allocator.allocate(sizeof(cuDoubleComplex)*lwork);
+  auto dataPtr_rwork = allocator.allocate(sizeof(double)*m);
+
+  TORCH_CUSOLVER_CHECK(cusolverDnZgesvd(
+      handle,
+      jobu,
+      jobvt,
+      m,
+      n,
+      reinterpret_cast<cuDoubleComplex*>(A),
+      lda,
+      S,
+      reinterpret_cast<cuDoubleComplex*>(U),
+      ldu,
+      reinterpret_cast<cuDoubleComplex*>(VT),
+      ldvt,
+      static_cast<cuDoubleComplex*>(dataPtr_work.get()),
+      lwork,
+      static_cast<double*>(dataPtr_rwork.get()),
+      devInfo
+  ));
+}
+
+
+template<>
 void gesvdj<float>(
     cusolverDnHandle_t handle, cusolverEigMode_t jobz, int econ, int m, int n, float* A, int lda, float* S, float* U,
     int ldu, float *V, int ldv, int *info, gesvdjInfo_t params
