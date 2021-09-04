@@ -6,8 +6,7 @@ namespace torch {
 namespace jit {
 
 std::vector<MemAllocation> greedyByOperatorBreadth(
-    std::unordered_map<const Value*, int64_t> managed_tensor_sizes,
-    LiveRangesMap live_ranges,
+    FastMap<const Value*, std::pair<UniqueLiveRange, size_t>> managed_values,
     std::vector<const Node*> ops);
 
 } // namespace jit
