@@ -4,6 +4,7 @@ import warnings
 import functools
 
 import torch
+import logging
 from ..parameter import Parameter
 import torch.utils.hooks as hooks
 
@@ -1451,11 +1452,17 @@ class Module:
         error_msgs: List[str] = []
 
         # copy state_dict so _load_from_state_dict can modify it
-        metadata = getattr(state_dict, '_metadata', None)
+        metadata = state_dict.get('_metadata', None)
         state_dict = state_dict.copy()
         if metadata is not None:
-            # mypy isn't aware that "_metadata" exists in state_dict
-            state_dict._metadata = metadata  # type: ignore[attr-defined]
+            try:
+                # mypy isn't aware that "_metadata" exists in state_dict
+                state_dict._metadata = metadata  # type: ignore[attr-defined]
+            except AttributeError:
+                logging.warning("Torch.nn.module: state_dict object has no attribute 'state_dict._metadata'.")
+        # We already extracted metadata, keeping it inside state dict causes "unexcpected" key issue.
+        if "_metadata" in state_dict:
+            del state_dict["_metadata"]
 
         def load(module, prefix=''):
             local_metadata = {} if metadata is None else metadata.get(prefix[:-1], {})
