@@ -636,7 +636,7 @@ number of times to get good statistics. The most straightforward way to use
 graph](http://www.brendangregg.com/flamegraphs.html):
 
 ```bash
-$ py-spy record -o profile.svg --native -- python test_tensor_tensor_add.py
+py-spy record -o profile.svg --native -- python test_tensor_tensor_add.py
 ```
 
 This will output a file named `profile.svg` containing a flame graph you can
