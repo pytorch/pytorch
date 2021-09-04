@@ -592,6 +592,7 @@ def remote(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
     with ctx_manager as rf:
         args = args if args else ()
         kwargs = kwargs if kwargs else {}
+        tensor_to_device = {}
 
         is_async_exec = hasattr(func, "_wrapped_async_rpc_function")
 
@@ -601,11 +602,19 @@ def remote(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
                 func = wrapped
 
         if qualified_name is not None:
-            rref = _invoke_remote_builtin(dst_worker_info, qualified_name, timeout, *args, **kwargs)
+            rref = _invoke_remote_builtin(
+                dst_worker_info,
+                qualified_name,
+                tensor_to_device,
+                timeout,
+                *args,
+                **kwargs,
+            )
         elif isinstance(func, torch.jit.ScriptFunction):
             rref = _invoke_remote_torchscript(
                 dst_worker_info.name,
                 torch._jit_internal._qualified_name(func),
+                tensor_to_device,
                 timeout,
                 is_async_exec,
                 *args,
@@ -619,6 +628,7 @@ def remote(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
                 dst_worker_info,
                 pickled_python_udf,
                 tensors,
+                tensor_to_device,
                 timeout,
                 is_async_exec
             )
@@ -645,6 +655,7 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None, rpc_timeout=UNSET_RP
     with ctx_manager as rf:
         args = args if args else ()
         kwargs = kwargs if kwargs else {}
+        tensor_to_device = {}
 
         is_async_exec = hasattr(func, "_wrapped_async_rpc_function")
 
@@ -657,6 +668,7 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None, rpc_timeout=UNSET_RP
             fut = _invoke_rpc_builtin(
                 dst_worker_info,
                 qualified_name,
+                tensor_to_device,
                 rpc_timeout,
                 *args,
                 **kwargs
@@ -667,6 +679,7 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None, rpc_timeout=UNSET_RP
                 torch._jit_internal._qualified_name(func),
                 args,
                 kwargs,
+                tensor_to_device,
                 rpc_timeout,
                 is_async_exec
             )
@@ -678,6 +691,7 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None, rpc_timeout=UNSET_RP
                 dst_worker_info,
                 pickled_python_udf,
                 tensors,
+                tensor_to_device,
                 rpc_timeout,
                 is_async_exec
             )

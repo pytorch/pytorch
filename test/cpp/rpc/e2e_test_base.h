@@ -82,6 +82,7 @@ class TestE2EBase : public ::testing::Test {
         *rpcAgent,
         rpcAgent->getWorkerInfo("worker"),
         std::move(scriptRemoteCall).toMessage(),
+        TensorToDeviceMap(),
         false);
 
     ownerRRef->registerOwnerCreationFuture(jitFuture);

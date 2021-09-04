@@ -115,6 +115,7 @@ c10::intrusive_ptr<JitFuture> sendPythonRemoteCall(
     SerializedPyObj serializedPyObj,
     const IValue& rrefId,
     const IValue& forkId,
+    const TensorToDeviceMap& tensorToDevice,
     const float rpcTimeoutSeconds,
     const bool isAsyncExecution) {
   auto pythonRemoteCall = std::make_unique<PythonRemoteCall>(
@@ -127,8 +128,17 @@ c10::intrusive_ptr<JitFuture> sendPythonRemoteCall(
       *agent,
       dst,
       std::move(*pythonRemoteCall).toMessage(),
+      tensorToDevice,
       true /*forceGradRecording*/,
       rpcTimeoutSeconds);
+}
+
+TensorToDeviceMap toTensorToDeviceMap(const py::dict& tensorToDevice) {
+  TensorToDeviceMap result;
+  for (const auto& entry : tensorToDevice) {
+    result.insert(py::cast<Tensor>(entry.first), py::cast<Device>(entry.second));
+  }
+  return result;
 }
 
 } // namespace
@@ -200,6 +210,7 @@ c10::intrusive_ptr<JitFuture> pyRpcBuiltin(
     const std::string& opName,
     const py::args& args,
     const py::kwargs& kwargs,
+    const py::dict& tensorToDevice,
     const float rpcTimeoutSeconds) {
   DCHECK(PyGILState_Check());
   Stack stack;
@@ -212,6 +223,7 @@ c10::intrusive_ptr<JitFuture> pyRpcBuiltin(
       *agent,
       dst,
       std::move(*scriptCall).toMessage(),
+      toTensorToDeviceMap(tensorToDevice),
       false,
       rpcTimeoutSeconds));
 }
@@ -220,6 +232,7 @@ c10::intrusive_ptr<JitFuture> pyRpcPythonUdf(
     const WorkerInfo& dst,
     std::string& pickledPythonUDF,
     std::vector<torch::Tensor>& tensors,
+    const py::dict& tensorToDevice,
     const float rpcTimeoutSeconds,
     const bool isAsyncExecution) {
   DCHECK(!PyGILState_Check());
@@ -233,6 +246,7 @@ c10::intrusive_ptr<JitFuture> pyRpcPythonUdf(
       *agent,
       dst,
       std::move(*pythonCall).toMessage(),
+      toTensorToDeviceMap(tensorToDevice),
       true /*forceGradRecording*/,
       rpcTimeoutSeconds));
 }
@@ -242,6 +256,7 @@ c10::intrusive_ptr<JitFuture> pyRpcTorchscript(
     const std::string& qualifiedNameStr,
     const py::tuple& argsTuple,
     const py::dict& kwargsDict,
+    const py::dict& tensorToDevice,
     const float rpcTimeoutSeconds,
     const bool isAsyncExecution) {
   // No need to catch exception here, if function can not be found,
@@ -270,6 +285,7 @@ c10::intrusive_ptr<JitFuture> pyRpcTorchscript(
       qualifiedName,
       functionSchema,
       stack,
+      toTensorToDeviceMap(tensorToDevice),
       rpcTimeoutSeconds,
       isAsyncExecution);
   return fut;
@@ -278,6 +294,7 @@ c10::intrusive_ptr<JitFuture> pyRpcTorchscript(
 PyRRef pyRemoteBuiltin(
     const WorkerInfo& dst,
     const std::string& opName,
+    const py::dict& tensorToDevice,
     const float rpcTimeoutSeconds,
     const py::args& args,
     const py::kwargs& kwargs) {
@@ -301,6 +318,7 @@ PyRRef pyRemoteBuiltin(
         *agent,
         dst,
         std::move(*scriptRemoteCall).toMessage(),
+        toTensorToDeviceMap(tensorToDevice),
         /*forceGradRecord */ false,
         /* timeout */ rpcTimeoutSeconds);
 
@@ -322,6 +340,7 @@ PyRRef pyRemoteBuiltin(
         *agent,
         dst,
         std::move(*scriptRemoteCall).toMessage(),
+        toTensorToDeviceMap(tensorToDevice),
         /* forceGradRecord */ false,
         /* timeout */ rpcTimeoutSeconds);
 
@@ -340,6 +359,7 @@ PyRRef pyRemotePythonUdf(
     const WorkerInfo& dst,
     std::string& pickledPythonUDF,
     std::vector<torch::Tensor>& tensors,
+    const py::dict& tensorToDevice,
     const float rpcTimeoutSeconds,
     const bool isAsyncExecution) {
   DCHECK(!PyGILState_Check());
@@ -354,6 +374,7 @@ PyRRef pyRemotePythonUdf(
         std::move(serializedPyObj),
         userRRef->rrefId().toIValue(),
         userRRef->forkId().toIValue(),
+        toTensorToDeviceMap(tensorToDevice),
         rpcTimeoutSeconds,
         isAsyncExecution);
 
@@ -374,6 +395,7 @@ PyRRef pyRemotePythonUdf(
         std::move(serializedPyObj),
         ownerRRef->rrefId().toIValue(),
         ownerRRef->rrefId().toIValue(),
+        toTensorToDeviceMap(tensorToDevice),
         rpcTimeoutSeconds,
         isAsyncExecution);
 
@@ -394,6 +416,7 @@ PyRRef pyRemotePythonUdf(
 PyRRef pyRemoteTorchscript(
     const std::string& dstWorkerName,
     const std::string& qualifiedNameStr,
+    const py::dict& tensorToDevice,
     const float rpcTimeoutSeconds,
     const bool isAsyncExecution,
     const py::args& args,
@@ -417,6 +440,7 @@ PyRRef pyRemoteTorchscript(
       qualifiedName,
       functionSchema,
       stack,
+      toTensorToDeviceMap(tensorToDevice),
       rpcTimeoutSeconds,
       isAsyncExecution);
   return PyRRef(rrefPtr);

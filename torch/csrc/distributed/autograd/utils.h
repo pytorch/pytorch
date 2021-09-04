@@ -53,6 +53,7 @@ sendMessageWithAutograd(
     rpc::RpcAgent& agent,
     const rpc::WorkerInfo& dst,
     c10::intrusive_ptr<rpc::Message> wrappedRpcMsg,
+    const rpc::TensorToDeviceMap& tensorToDevice = rpc::TensorToDeviceMap(),
     bool forceGradRecording = false,
     const float rpcTimeoutSeconds = torch::distributed::rpc::kUnsetRpcTimeout,
     bool forceDisableProfiling = false);

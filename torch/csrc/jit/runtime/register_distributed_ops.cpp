@@ -134,6 +134,7 @@ void prepare_and_call_rpc_op(
         qualifiedName,
         functionSchema,
         userCallableStack,
+        dist_rpc::TensorToDeviceMap(), // TODO(pbelevich)
         rpcTimeout);
     // Push output to the stack.
     drop(stack, num_inputs);
@@ -145,6 +146,7 @@ void prepare_and_call_rpc_op(
         qualifiedName,
         functionSchema,
         userCallableStack,
+        dist_rpc::TensorToDeviceMap(), // TODO(pbelevich)
         rpcTimeout);
     futureIValuePtr->wait();
     if (futureIValuePtr->hasError()) {
@@ -162,6 +164,7 @@ void prepare_and_call_rpc_op(
         qualifiedName,
         functionSchema,
         userCallableStack,
+        dist_rpc::TensorToDeviceMap(), // TODO(pbelevich)
         rpcTimeout);
     // Push output to the stack.
     drop(stack, num_inputs);

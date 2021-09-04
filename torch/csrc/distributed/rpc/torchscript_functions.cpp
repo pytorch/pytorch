@@ -19,6 +19,7 @@ c10::intrusive_ptr<JitFuture> rpcTorchscript(
     const c10::QualifiedName& qualifiedName,
     const c10::FunctionSchema& functionSchema,
     std::vector<c10::IValue>& stack,
+    const TensorToDeviceMap& tensorToDevice,
     const float rpcTimeoutSeconds,
     const bool isAsyncExecution) {
   // This dummy tensor holds an at::RecordFunction when profiling is enabled.
@@ -47,6 +48,7 @@ c10::intrusive_ptr<JitFuture> rpcTorchscript(
       *rpcAgentPtr,
       rpcAgentPtr->getWorkerInfo(dstWorkerName),
       std::move(*scriptCall).toMessage(),
+      tensorToDevice,
       true /*forceGradRecording*/,
       rpcTimeoutSeconds);
 
@@ -86,6 +88,7 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
     const c10::QualifiedName& qualifiedName,
     const c10::FunctionSchema& functionSchema,
     std::vector<c10::IValue>& stack,
+    const TensorToDeviceMap& tensorToDevice,
     const float rpcTimeoutSeconds,
     const bool isAsyncExecution) {
   auto rpcAgentPtr = RpcAgent::getCurrentRpcAgent();
@@ -116,6 +119,7 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
         *rpcAgentPtr,
         dstWorkerInfo,
         std::move(*scriptRemoteCall).toMessage(),
+        tensorToDevice,
         true /*forceGradRecording*/,
         rpcTimeoutSeconds /* timeout */);
 
@@ -143,6 +147,7 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
         *rpcAgentPtr,
         dstWorkerInfo,
         std::move(*scriptRemoteCall).toMessage(),
+        tensorToDevice,
         true /*forceGradRecording*/,
         rpcTimeoutSeconds /* timeout */);
 

@@ -175,6 +175,7 @@ IValue UserRRef::toHere(const float timeoutSeconds) const {
       *agent,
       agent->getWorkerInfo(ownerId_),
       std::move(msgToSend),
+      rpc::TensorToDeviceMap(),
       true /* forceGradRecording */,
       timeoutSeconds,
       true /* forceDisableProfiling */);
