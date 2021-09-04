@@ -2949,7 +2949,7 @@ class TestONNXRuntime(unittest.TestCase):
 
         class Empty(torch.nn.Module):
             def forward(self, x):
-                y = torch.empty(()) * 0
+                y = torch.empty(()).fill_(0)
                 y += x
                 return y
         x = torch.tensor(42.)
@@ -8853,8 +8853,13 @@ class TestONNXRuntime(unittest.TestCase):
         random_state = torch.rand((1, 1, 10, 30, 30))
         self.run_test(model, (random_data, empty_tensor),
                       input_names=["data", "state"],
-                      dynamic_axes={"state": [0, 1, 2, 3, 4]},
+                      dynamic_axes={"data": [0, 1, 2], "state": [0, 1, 2, 3, 4]},
                       test_with_inputs=[(random_data, random_state)])
+        self.run_test(model, (random_data, empty_tensor),
+                      input_names=["data", "state"],
+                      dynamic_axes={"state": [0, 1, 2, 3, 4]},
+                      test_with_inputs=[(random_data, random_state)],
+                      remained_onnx_input_idx=[1])
         self.run_test(model, (random_data, empty_tensor), remained_onnx_input_idx=[])
 
     @skipIfUnsupportedMinOpsetVersion(11)

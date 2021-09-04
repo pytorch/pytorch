@@ -10,7 +10,8 @@ namespace jit {
 void MergeInferredTypeAndSetMap(
     Value* dest_v,
     TypePtr existing_type,
-    TypePtr inferred_type);
+    TypePtr inferred_type,
+    bool set_constant_value_map = true);
 
 // Update graph input types with dynamic axes info.
 // Axes that are marked as dynamic will be assigned as dynamic ShapeSymbol.
