@@ -7432,17 +7432,18 @@ op_db: List[OpInfo] = [
            dtypes=floating_types_and(torch.int64),
            dtypesIfCUDA=floating_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
            sample_inputs_func=partial(sample_inputs_conv2d),
-           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL if not CUDA11OrLater else 0.,
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL if CUDA11OrLater else 0.,
            supports_out=False,),
     # Run CUDA tests with cudnn disabled.
     OpInfo('nn.functional.conv2d',
            aliases=('conv2d',),
+           aten_name='conv2d',
            variant_test_name='cudnn_disabled',
            op=wrapper_cudnn_disabled(torch.conv2d),
            dtypes=floating_types_and(torch.int64),
            dtypesIfCUDA=floating_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
            sample_inputs_func=partial(sample_inputs_conv2d),
-           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL if not CUDA11OrLater else 0.,
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL if CUDA11OrLater else 0.,
            skips=(
                # Skip all CPU tests
                SkipInfo('TestCommon', device_type='cpu'),
