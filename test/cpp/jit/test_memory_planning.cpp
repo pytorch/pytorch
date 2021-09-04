@@ -52,9 +52,6 @@ void checkAllocNodes(
     StorageAttrs expected_storage,
     std::vector<AllocAttrs> expected_allocs,
     std::vector<std::string> expected_successors) {
-  std::stringstream ss;
-  graph.print(ss, false);
-
   int64_t total_size;
   DeviceType device_type;
 
@@ -63,6 +60,9 @@ void checkAllocNodes(
   std::vector<int64_t> strides = {};
   std::vector<int64_t> sizes = {};
   at::ScalarType dtype;
+
+  std::stringstream ss;
+  graph.print(ss, false);
 
   auto i = 0;
   for (const auto& node : graph.nodes()) {
@@ -103,18 +103,19 @@ void checkAllocNodes(
           << dtype << ((dtype == expected_allocs[i].dtype) ? "==" : "!=")
           << expected_allocs[i].dtype << "\n"
           << successor << ((successor == expected_successors[i]) ? "==" : "!=")
-          << expected_successors[i] << "\n"
-          << ss.str();
+          << expected_successors[i] << "\n";
       i++;
     }
   }
 
   ASSERT_TRUE(i == (expected_allocs.size()))
       << "i: " << i << ", "
-      << "expected_allocs.size() " << expected_allocs.size();
+      << "expected_allocs.size() " << expected_allocs.size() << "\n"
+      << ss.str() << "\n";
+  ;
 }
 
-TEST(MemoryPlannerTest, Small) {
+TEST(MemoryPlannerTest, SmallNaive) {
   // setup inputs
   auto in1 = at::randn({10, 10}, at::kCPU);
   auto in2 = at::randn({10, 10}, at::kCPU);
@@ -144,6 +145,37 @@ TEST(MemoryPlannerTest, Small) {
   jit::planMemory(graph_copy, Strategy::NAIVE);
   checkAllocNodes(
       *graph_copy, expected_storage, expected_allocs, expected_successors);
+}
+
+TEST(MemoryPlannerTest, SmallLinearScan) {
+  // setup inputs
+  auto in1 = at::randn({10, 10}, at::kCPU);
+  auto in2 = at::randn({10, 10}, at::kCPU);
+  auto in3 = at::randn({10, 10}, at::kCPU);
+  auto in4 = at::randn({10, 10}, at::kCPU);
+  auto stack = createStack({in1, in2, in3, in4});
+
+  auto g = build_small();
+  // run once to type info
+  auto pr = jit::ProfilingRecord::instrumentGraph(g);
+  auto graph = pr->profiled_graph_;
+  Code cd(graph, "small");
+  InterpreterState is{cd};
+  is.run(stack);
+
+  // plan
+  ProfilingRecord::removeProfileCounter(graph->block());
+  jit::RemoveProfileNodesAndSpecializeTypes(graph);
+  jit::planMemory(graph, Strategy::LINEAR_SCAN);
+
+  StorageAttrs expected_storage = {896, DeviceType::CPU};
+  std::vector<AllocAttrs> expected_allocs = {
+      {448, 0, {10, 10}, {10, 1}, DeviceType::CPU, at::ScalarType::Float},
+      {448, 448, {10, 10}, {10, 1}, DeviceType::CPU, at::ScalarType::Float},
+  };
+  std::vector<std::string> expected_successors = {"aten::mm", "aten::mm"};
+  checkAllocNodes(
+      *graph, expected_storage, expected_allocs, expected_successors);
 }
 
 std::pair<std::shared_ptr<Graph>, Stack> buildLSTMWithStack() {
@@ -184,7 +216,6 @@ TEST(MemoryPlannerTest, LSTMNaive) {
       {1024, 0, {1, 256}, {256, 1}, DeviceType::CPU, at::ScalarType::Float},
       {1024, 1024, {1, 256}, {256, 1}, DeviceType::CPU, at::ScalarType::Float},
       {1024, 2048, {1, 256}, {256, 1}, DeviceType::CPU, at::ScalarType::Float},
-
       {256, 3072, {1, 64}, {64, 1}, DeviceType::CPU, at::ScalarType::Float},
       {256, 3328, {1, 64}, {64, 1}, DeviceType::CPU, at::ScalarType::Float},
       {256, 3584, {1, 64}, {64, 1}, DeviceType::CPU, at::ScalarType::Float},
@@ -226,15 +257,15 @@ TEST(MemoryPlannerTest, LSTMLinearScan) {
 
   StorageAttrs expected_storage = {3072, DeviceType::CPU};
   std::vector<AllocAttrs> expected_allocs = {
-      {1024, 2048, {1, 256}, {256, 1}, DeviceType::CPU, at::ScalarType::Float},
       {1024, 0, {1, 256}, {256, 1}, DeviceType::CPU, at::ScalarType::Float},
       {1024, 1024, {1, 256}, {256, 1}, DeviceType::CPU, at::ScalarType::Float},
+      {1024, 2048, {1, 256}, {256, 1}, DeviceType::CPU, at::ScalarType::Float},
       {256, 0, {1, 64}, {64, 1}, DeviceType::CPU, at::ScalarType::Float},
       {256, 256, {1, 64}, {64, 1}, DeviceType::CPU, at::ScalarType::Float},
       {256, 512, {1, 64}, {64, 1}, DeviceType::CPU, at::ScalarType::Float},
       {256, 768, {1, 64}, {64, 1}, DeviceType::CPU, at::ScalarType::Float},
       {256, 1024, {1, 64}, {64, 1}, DeviceType::CPU, at::ScalarType::Float},
-      {256, 1280, {1, 64}, {64, 1}, DeviceType::CPU, at::ScalarType::Float},
+      {256, 768, {1, 64}, {64, 1}, DeviceType::CPU, at::ScalarType::Float},
       {256, 0, {1, 64}, {64, 1}, DeviceType::CPU, at::ScalarType::Float},
   };
   std::vector<std::string> expected_successors = {
@@ -460,7 +491,7 @@ TEST(MemoryTracingTest, Allocator) {
       cd.instructions_source().front()->owningGraph(), [](Graph*) {});
 
   for (int strategy = static_cast<int>(Strategy::NAIVE);
-       strategy <= static_cast<int>(Strategy::LINEAR_SCAN);
+       strategy <= static_cast<int>(Strategy::GREEDY_BY_LONGEST_AND_SIZE);
        strategy++) {
     std::cout << "running " << static_cast<Strategy>(strategy) << "\n";
     jit::planMemoryWithTracing(

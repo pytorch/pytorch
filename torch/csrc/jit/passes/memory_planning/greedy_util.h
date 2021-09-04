@@ -5,17 +5,17 @@
 namespace torch {
 namespace jit {
 
-using OffsetFinder = int64_t(LiveRange, int64_t, std::vector<MemAllocation>);
+using OffsetFinder =
+    size_t(UniqueLiveRange, size_t, std::vector<MemAllocation>);
 
 OffsetFinder findOffsetWithSmallestGap;
 
 OffsetFinder findFirstOffset;
 
 void makeAllocation(
+    UniqueLiveRange ulvr,
+    size_t size,
     std::vector<MemAllocation>& ordered_allocations,
-    std::unordered_map<LiveRange, int64_t, live_range_hash>
-        managed_live_ranges,
-    LiveRange unalloced_lvr,
     OffsetFinder findOffset);
 } // namespace jit
 } // namespace torch

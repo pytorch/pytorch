@@ -3,6 +3,7 @@
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
 #include <c10/core/CPUAllocator.h>
+#include <c10/util/hash.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
@@ -468,44 +469,30 @@ inline std::ostream& operator<<(std::ostream& str, LiveRange lvr) {
   return str << "[" << lvr.begin << ", " << lvr.end << "]";
 }
 
-struct live_range_start_cmp {
-  bool operator()(LiveRange const& lvr1, LiveRange const& lvr2) const {
-    return lvr1.begin == lvr2.begin ? lvr1.end < lvr2.end
-                                    : lvr1.begin < lvr2.begin;
-  }
-};
-
-struct live_range_end_cmp {
-  bool operator()(LiveRange const& lvr1, LiveRange const& lvr2) const {
-    return lvr1.end == lvr2.end ? lvr1.begin < lvr2.begin : lvr1.end < lvr2.end;
-  }
-};
-
-struct live_range_hash {
-  size_t operator()(LiveRange const& range) const {
-    return std::hash<size_t>()(range.begin) ^
-        (std::hash<size_t>()(range.end) << 1);
-  }
-};
-
 inline bool operator==(const LiveRange& lhs, const LiveRange& rhs) {
   return lhs.begin == rhs.begin && lhs.end == rhs.end;
 }
-
-inline bool operator!=(const LiveRange& lhs, const LiveRange& rhs) {
-  return !(lhs == rhs);
-}
-
-using LiveRangesMap = FastMap<const Value*, LiveRange>;
 
 TORCH_API FastSet<const Value*> GetAlwaysAliveValues(
     const std::shared_ptr<torch::jit::Graph>& graph,
     AliasDb& db);
 
-TORCH_API std::pair<LivenessMap, LiveRangesMap> GetLiveness(
+TORCH_API std::pair<LivenessMap, FastMap<const Value*, LiveRange>> GetLiveness(
     const std::shared_ptr<torch::jit::Graph>& graph,
     const FastSet<const Value*>& always_alive,
     AliasDb& db);
 
 } // namespace jit
 } // namespace torch
+
+namespace std {
+template <>
+struct hash<torch::jit::LiveRange> {
+  size_t operator()(torch::jit::LiveRange const& range) const {
+    // shift so that single point ranges don't have hash zero (xor cancels)
+    return std::hash<size_t>()(range.begin) ^
+        (std::hash<size_t>()(range.end) << 1);
+  }
+};
+
+} // namespace std

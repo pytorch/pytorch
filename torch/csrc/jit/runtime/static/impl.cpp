@@ -161,7 +161,7 @@ FastSet<const Value*> GetAlwaysAliveValues(
 
 //  The algorithm does a traversal of the execution graph
 //  while keeping track of the live values.
-std::pair<LivenessMap, LiveRangesMap> GetLiveness(
+std::pair<LivenessMap, FastMap<const Value*, LiveRange>> GetLiveness(
     const std::shared_ptr<torch::jit::Graph>& graph,
     const FastSet<const Value*>& always_alive,
     AliasDb& db) {
@@ -315,7 +315,7 @@ std::pair<LivenessMap, LiveRangesMap> GetLiveness(
     }
   }
 
-  LiveRangesMap live_ranges;
+  FastMap<const Value*, LiveRange> live_ranges;
   for (const auto& item : value_use_topo_idxs) {
     auto value = item.first;
     auto idxs = item.second;
@@ -1353,7 +1353,7 @@ size_t MemoryPlanner::computeAlignedTensorSize(size_t nbytes) {
 at::DataPtr MemoryPlanner::allocateBuffer(
     size_t size,
     at::DeviceType deviceType) {
-  at::Allocator* allocator;
+  at::Allocator* allocator = nullptr;
   if (deviceType == at::kCPU) {
     allocator = c10::GetCPUCachingAllocator();
   } else {
