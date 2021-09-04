@@ -35,12 +35,6 @@ void SetAllocator(at::DeviceType t, at::Allocator* alloc, uint8_t priority) {
   }
 }
 
-at::Allocator* GetAllocator(const at::DeviceType& t) {
-  auto* alloc = allocator_array[static_cast<int>(t)];
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(alloc, "Allocator for ", t, " is not set.");
-  return alloc;
-}
-
 bool memoryProfilingEnabled() {
   auto* reporter_ptr = static_cast<MemoryReportingInfoBase*>(
       ThreadLocalDebugInfo::get(DebugInfoKind::PROFILER_STATE));
