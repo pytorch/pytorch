@@ -5430,6 +5430,17 @@ def sample_inputs_nll_loss(op_info, device, dtype, requires_grad, **kwargs):
 
     return sample_inputs
 
+
+def sample_inputs_argwhere(op_info, device, dtype, requires_grad, **kwargs):
+    def generator():
+        yield SampleInput(torch.tensor([1, 0, 1, 0]))
+        yield SampleInput(torch.empty(S, S).bernoulli_(0.5))
+        yield SampleInput(torch.empty(S, 0).bernoulli_(0.5))
+        yield SampleInput(torch.empty(()))
+    
+    return list(generator())
+
+
 foreach_unary_op_db: List[OpInfo] = [
     ForeachFuncInfo('exp'),
     ForeachFuncInfo('acos'),
@@ -9221,6 +9232,14 @@ op_db: List[OpInfo] = [
                 dtypes=(torch.float32,),
             ),
         ),
+    ),
+    OpInfo(
+        "argwhere",
+        ref=np.argwhere,
+        dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+        supports_out=False,
+        supports_autograd=False,
+        sample_inputs_func=sample_inputs_argwhere,
     ),
     ReductionOpInfo(
         'all',
