@@ -35,9 +35,9 @@ inline std::ostream& operator<<(std::ostream& str, Strategy rhs) {
 }
 
 typedef struct MemRegion {
-  int64_t offset;
-  int64_t size;
-} Region;
+  size_t offset;
+  size_t size;
+} MemRegion;
 
 inline std::ostream& operator<<(std::ostream& str, MemRegion reg) {
   return str << "{offset: " << reg.offset << ", size: " << reg.size << "}";
@@ -47,44 +47,105 @@ inline bool operator==(const MemRegion& lhs, const MemRegion& rhs) {
   return lhs.offset == rhs.offset && lhs.size == rhs.size;
 }
 
-struct region_size_cmp {
-  bool operator()(MemRegion const& reg1, MemRegion const& reg2) const {
+struct regionSizeCmp {
+  bool operator()(const MemRegion& reg1, const MemRegion& reg2) const {
     return reg1.size == reg2.size ? reg1.offset < reg2.offset
                                   : reg1.size < reg2.size;
   }
 };
 
-struct region_offset_cmp {
+struct regionOffsetCmp {
   bool operator()(const MemRegion& reg1, const MemRegion& reg2) const {
     return reg1.offset == reg2.offset ? reg1.size < reg2.size
                                       : reg1.offset < reg2.offset;
   }
 };
 
-bool intersectLiveRange(LiveRange lvr1, LiveRange lvr2);
+bool overlapMemRegion(const MemRegion& reg1, const MemRegion& reg2);
 
-bool intersectMemRegion(MemRegion reg1, MemRegion reg2);
-
-int intersectArea(int64_t a, int64_t b, int64_t c, int64_t d);
-
-struct TORCH_API MemAllocation {
+struct UniqueLiveRange {
   LiveRange lvr;
+  std::string id;
+};
+
+bool overlapLiveRange(
+    const UniqueLiveRange& ulvr1,
+    const UniqueLiveRange& ulvr2);
+
+inline std::ostream& operator<<(std::ostream& str, UniqueLiveRange rhs) {
+  return str << "{id: " << rhs.id << ", lvr: " << rhs.lvr << "}";
+}
+
+inline bool operator==(const UniqueLiveRange lhs, const UniqueLiveRange rhs) {
+  return lhs.lvr == rhs.lvr && lhs.id == rhs.id;
+}
+
+struct liveRangeStartCmp {
+  bool operator()(const UniqueLiveRange& u1, const UniqueLiveRange& u2) const {
+    return u1.lvr.begin == u2.lvr.begin
+        ? (u1.lvr.end == u2.lvr.end ? u1.id < u2.id : u1.lvr.end < u2.lvr.end)
+        : u1.lvr.begin < u2.lvr.begin;
+  }
+};
+
+struct liveRangeEndCmp {
+  bool operator()(const UniqueLiveRange& u1, const UniqueLiveRange& u2) const {
+    return u1.lvr.end == u2.lvr.end
+        ? (u1.lvr.begin == u2.lvr.begin ? u1.id < u2.id
+                                        : u1.lvr.begin < u2.lvr.begin)
+        : u1.lvr.end < u2.lvr.end;
+  }
+};
+
+template <typename Value>
+using SortedLiveRangeMap = std::map<UniqueLiveRange, Value, liveRangeStartCmp>;
+struct TORCH_API MemAllocation {
+  UniqueLiveRange ulvr;
   MemRegion reg;
 };
 
 inline std::ostream& operator<<(std::ostream& str, MemAllocation rhs) {
-  return str << rhs.lvr << ", " << rhs.reg;
+  return str << rhs.ulvr << ", " << rhs.reg;
 }
 
-inline bool operator==(MemAllocation lhs, MemAllocation rhs) {
-  return lhs.lvr == rhs.lvr && lhs.reg == rhs.reg;
+inline bool operator==(const MemAllocation lhs, const MemAllocation rhs) {
+  return lhs.ulvr == rhs.ulvr && lhs.reg == rhs.reg;
+}
+
+inline bool valid_add(size_t a, size_t b) {
+  size_t _carry = 0;
+  return !__builtin_add_overflow(a, b, &_carry);
+}
+
+inline bool valid_sub(size_t a, size_t b) {
+  size_t _carry = 0;
+  return !__builtin_sub_overflow(a, b, &_carry);
 }
 
 c10::optional<size_t> computeStorageSize(const Value& value);
 
-bool hasOutVariant(Node* node);
+TORCH_API bool hasOutVariant(Node* node);
 
-TORCH_API void planMemory(std::shared_ptr<Graph>&, Strategy);
+TORCH_API void planMemory(const std::shared_ptr<Graph>&, Strategy);
 
 } // namespace jit
 } // namespace torch
+
+namespace std {
+template <>
+struct hash<torch::jit::MemRegion> {
+  size_t operator()(torch::jit::MemRegion const& reg) const {
+    return std::hash<size_t>()(reg.offset) ^
+        (std::hash<size_t>()(reg.size) << 1);
+  }
+};
+
+template <>
+struct hash<torch::jit::UniqueLiveRange> {
+  size_t operator()(torch::jit::UniqueLiveRange const& ulvr) const {
+    return std::hash<torch::jit::LiveRange>()(ulvr.lvr) ^
+        (std::hash<string>()(ulvr.id));
+  }
+};
+
+} // namespace std

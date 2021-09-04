@@ -4,78 +4,76 @@
 namespace torch {
 namespace jit {
 
-int64_t findOffsetWithSmallestGap(
-    LiveRange unalloced_lvr,
-    int64_t tensor_size,
+size_t findOffsetWithSmallestGap(
+    UniqueLiveRange unalloced_ulvr,
+    size_t size,
     std::vector<MemAllocation> ordered_allocations) {
-  int64_t best_gap = std::numeric_limits<int64_t>::max();
-  c10::optional<int64_t> best_offset = c10::nullopt;
-  int64_t prev_offset = 0;
+  size_t best_gap = std::numeric_limits<size_t>::max();
+  c10::optional<size_t> best_offset = c10::nullopt;
+  size_t prev_offset = 0;
 
   for (const auto& alloc : ordered_allocations) {
-    if (!intersectLiveRange(alloc.lvr, unalloced_lvr)) {
+    if (!overlapLiveRange(alloc.ulvr, unalloced_ulvr)) {
       continue;
     }
 
     // don't simplify this to gap = a - b because you'll get buffer overflow...
     if (alloc.reg.offset >= prev_offset) {
       auto gap = alloc.reg.offset - prev_offset;
-      if (tensor_size <= gap && gap < best_gap) {
+      if (size <= gap && gap < best_gap) {
         best_gap = gap;
-        best_offset = c10::optional<int64_t>(prev_offset);
+        best_offset = c10::optional<size_t>(prev_offset);
       }
     }
     prev_offset = std::max(prev_offset, alloc.reg.offset + alloc.reg.size);
   }
   if (!best_offset.has_value()) {
-    best_offset = c10::optional<int64_t>(prev_offset);
+    best_offset = c10::optional<size_t>(prev_offset);
   }
   return best_offset.value();
 }
 
-int64_t findFirstOffset(
-    LiveRange live_range,
-    int64_t tensor_size,
+size_t findFirstOffset(
+    UniqueLiveRange unalloced_ulvr,
+    size_t size,
     std::vector<MemAllocation> ordered_allocations) {
-  c10::optional<int64_t> best_offset = c10::nullopt;
-  int64_t prev_offset = 0;
+  c10::optional<size_t> best_offset = c10::nullopt;
+  size_t prev_offset = 0;
 
   for (const auto& alloc : ordered_allocations) {
-    if (!intersectLiveRange(alloc.lvr, live_range)) {
+    if (!overlapLiveRange(alloc.ulvr, unalloced_ulvr)) {
       continue;
     }
 
     // don't simplify this to gap = a - b because you'll get buffer overflow...
     if (alloc.reg.offset >= prev_offset) {
       auto gap = alloc.reg.offset - prev_offset;
-      if (tensor_size <= gap) {
-        best_offset = c10::optional<int64_t>(prev_offset);
+      if (size <= gap) {
+        best_offset = c10::optional<size_t>(prev_offset);
         break;
       }
     }
     prev_offset = std::max(prev_offset, alloc.reg.offset + alloc.reg.size);
   }
   if (!best_offset.has_value()) {
-    best_offset = c10::optional<int64_t>(prev_offset);
+    best_offset = c10::optional<size_t>(prev_offset);
   }
   return best_offset.value();
 }
 
 void makeAllocation(
+    UniqueLiveRange ulvr,
+    size_t size,
     std::vector<MemAllocation>& ordered_allocations,
-    std::unordered_map<LiveRange, int64_t, live_range_hash>
-        managed_live_ranges,
-    LiveRange unalloced_lvr,
     OffsetFinder findOffset) {
-  auto tensor_size = MemoryPlanner::computeAlignedTensorSize(
-      managed_live_ranges[unalloced_lvr]);
-  auto offset = findOffset(unalloced_lvr, tensor_size, ordered_allocations);
+  auto aligned_size = MemoryPlanner::computeAlignedTensorSize(size);
+  auto offset = findOffset(ulvr, aligned_size, ordered_allocations);
   auto it = ordered_allocations.begin();
   while (it != ordered_allocations.end() && it->reg.offset <= offset) {
     ++it;
   }
   ordered_allocations.insert(
-      it, MemAllocation{unalloced_lvr, MemRegion{offset, tensor_size}});
+      it, MemAllocation{ulvr, MemRegion{offset, aligned_size}});
 }
 
 } // namespace jit
