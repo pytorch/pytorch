@@ -244,9 +244,7 @@ static void nll_loss_out_frame(
                                         std::end(loss_partial_sums),
                                         scalar_t{0});
 
-  if (reduction == Reduction::Mean &&
-      (total_weight_val != 0 || input.numel() == 0)) {
-    // allow NaN result for total_weight_val == 0 case, see #15870
+  if (reduction == Reduction::Mean) {
     output_val /= total_weight_val;
   }
 
