@@ -5942,6 +5942,32 @@ Example::
     tensor([ 0,  2,  0,  1])
 """.format(**single_dim_common))
 
+add_docstr(torch.argwhere,
+           r"""
+argwhere(input) -> LongTensor
+
+Return the indices of array elements that are non-zero, grouped by element.
+
+.. note::
+    This function is similar to NumPy's `argwhere`.
+
+Args:
+    {input}
+
+Example::
+
+    >>> t = torch.tensor([1, 0, 1])
+    >>> torch.argwhere(t)
+    tensor([[0],
+            [2]])
+    >>> t = torch.tensor([[1, 0, 1], [0, 1, 1]])
+    >>> torch.argwhere(t)
+    tensor([[0, 0],
+            [0, 2],
+            [1, 1],
+            [1, 2]])
+""")
+
 add_docstr(torch.mean,
            r"""
 mean(input) -> Tensor
