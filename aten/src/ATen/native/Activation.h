@@ -9,7 +9,7 @@ class Scalar;
 namespace at {
 struct TensorIterator;
 struct TensorIteratorBase;
-class Tensor;
+class TensorBase;
 }
 
 namespace at { namespace native {
@@ -34,7 +34,7 @@ using elu_fn = void (*)(TensorIteratorBase&, const c10::Scalar&, const c10::Scal
 using elu_backward_fn = void (*)(TensorIteratorBase&, const c10::Scalar&, const c10::Scalar&, const c10::Scalar&, bool);
 using leaky_relu_fn = void (*)(TensorIteratorBase&, const c10::Scalar&);
 using leaky_relu_backward_fn = void (*)(TensorIteratorBase&, const c10::Scalar&);
-using log_sigmoid_cpu_fn = void (*)(Tensor& , Tensor&, const Tensor& );
+using log_sigmoid_cpu_fn = void (*)(TensorBase&, TensorBase&, const TensorBase&);
 
 DECLARE_DISPATCH(elu_fn, elu_stub);
 DECLARE_DISPATCH(elu_backward_fn, elu_backward_stub);
