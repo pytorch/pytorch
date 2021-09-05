@@ -1840,8 +1840,9 @@ jobs:
             PROJ_ROOT=/Users/distiller/project
             source ~/anaconda/bin/activate
             #run unit test
-            cd ${PROJ_ROOT}/ios/TestApp
+            cd ${PROJ_ROOT}/ios/TestApp/benchmark
             ruby ./benchmark/setup.rb
+            cd ${PROJ_ROOT}/ios/TestApp
             instruments -s -devices
             if [ $(USE_COREML_DELEGATE) == 1 ]; then
               fastlane scan --only_testing TestAppTests/TestAppTests/testCoreML
