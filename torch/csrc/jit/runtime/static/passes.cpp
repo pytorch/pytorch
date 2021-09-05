@@ -306,6 +306,28 @@ TORCH_LIBRARY_FRAGMENT(static_runtime, m) {
   m.def(torch::schema(
       "static_runtime::layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> (Tensor, Tensor, Tensor)",
       c10::AliasAnalysisKind::PURE_FUNCTION));
+  m.def("static_runtime::signed_log1p(Tensor input) -> Tensor");
+}
+
+void FuseSignLog1P(std::shared_ptr<torch::jit::Graph>& graph) {
+  std::string pattern = R"IR(
+    graph(%input):
+        %0 : Tensor = aten::sign(%input)
+        %1 : Tensor = aten::abs(%input)
+        %2 : Tensor = aten::log1p(%1)
+        %res : Tensor = aten::mul(%0, %2)
+        return (%res)
+  )IR";
+
+  std::string fused_pattern = R"IR(
+    graph(%input):
+        %res : Tensor = static_runtime::signed_log1p(%input)
+        return (%res)
+    )IR";
+
+  SubgraphRewriter fuse;
+  fuse.RegisterRewritePattern(pattern, fused_pattern);
+  fuse.runOnGraph(graph);
 }
 
 bool HasInplaceOp(std::shared_ptr<Graph>& graph, const AliasDb& alias_db) {
