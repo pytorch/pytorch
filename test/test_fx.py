@@ -259,9 +259,10 @@ class TestFX(JitTestCase):
         m = MyDictMod()
 
         self.checkGraphModule(m, (input_dict,))
-        
+
     def test_matmul_tracing(self):
         const = torch.randn(3)
+        
         def matmul_f(x):
             return x @ const
 
