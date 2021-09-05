@@ -206,7 +206,7 @@ class TestCudaFuser(JitTestCase):
                      "Requires fusion optimization pass to be effective")
     def test_reduction_dtypes_axis(self):
 
-        for op in [torch.sum, torch.mean]:
+        for op in [torch.sum, torch.mean, torch.amax]:
             for dtype in [torch.float16, torch.float32, torch.double]:
                 for axis in [-1, 2]:
                     def make_func(op):

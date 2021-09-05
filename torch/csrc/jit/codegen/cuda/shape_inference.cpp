@@ -364,15 +364,18 @@ class NaiveTypePropagator {
         node->output()->setType(out_type);
         break;
       }
+      case aten::amax:
       case aten::mean:
       case aten::sum: {
         auto out_type = node->input(0)->type()->cast<TensorType>();
 
-        // accept dtype input to `aten::sum` node
-        if (!node->input(3)->type()->isSubtypeOf(
-                static_cast<c10::TypePtr>(NoneType::get()))) {
-          if (auto opt_ivalue = toIValue(node->input(3))) {
-            out_type = out_type->withScalarType(opt_ivalue->toScalarType());
+        // accept dtype input to `aten::sum` && `aten::mean`  node
+        if (node->kind() == aten::mean || node->kind() == aten::sum) {
+          if (!node->input(3)->type()->isSubtypeOf(
+                  static_cast<c10::TypePtr>(NoneType::get()))) {
+            if (auto opt_ivalue = toIValue(node->input(3))) {
+              out_type = out_type->withScalarType(opt_ivalue->toScalarType());
+            }
           }
         }
         const auto dims = constant_as<c10::List<int64_t>>(node->input(1));

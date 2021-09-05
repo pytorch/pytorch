@@ -1505,6 +1505,45 @@ class IrParser {
           nullptr,
           nullptr);
     }
+
+    {
+      auto ptr_op = getOperatorForLiteral(
+          "aten::amax(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor");
+      REGISTER_PARSE_RULE(
+          ptr_op,
+          {
+            auto self = value_map[node->input(0)->unique()];
+            auto dims_list = constant_as<c10::List<int64_t>>(node->input(1));
+            TORCH_INTERNAL_ASSERT(
+                dims_list.has_value(),
+                "aten::amax cannot be fused with dynamic axes");
+            std::vector<int> dims;
+            for (const auto dim : dims_list->vec()) {
+              dims.emplace_back(static_cast<int>(dim));
+            }
+            auto keepdim = constant_as<bool>(node->input(2));
+            TORCH_INTERNAL_ASSERT(
+                keepdim.has_value(),
+                "aten::amax cannot be fused with dynamic keepdim");
+
+            auto out = max(self->as<TensorView>(), dims, keepdim.value());
+            value_map.emplace(node->output()->unique(), out);
+          },
+          [](const Node* node) -> bool {
+            // we don't support dynamic reduction axes;
+            if (node->inputs()[1]->node()->kind() != prim::Constant) {
+              return false;
+            }
+            // we don't support dynamic keepdim yet;
+            if (node->inputs()[2]->node()->kind() != prim::Constant) {
+              return false;
+            }
+            return true;
+          },
+          [](const Node* node) -> OperatorType {
+            return OperatorType::Reduction;
+          });
+    }
   }
 
   void processJitNode(const JitOp* node) {
@@ -1875,6 +1914,26 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
     switch (offset) {
       // argument 3: Is training?
       case 3:
+        profileBool(pr, node, offset);
+        break;
+      default:
+        return false;
+    }
+    return true;
+  }
+
+  static auto amax_schema =
+      getOperatorForLiteral(
+          "aten::amax(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor")
+          ->schema();
+  if (node->matches(amax_schema)) {
+    switch (offset) {
+      // argument 1: reduction axes;
+      case 1:
+        profileIntList(pr, node, offset);
+        break;
+      // argument 2: keepdim;
+      case 2:
         profileBool(pr, node, offset);
         break;
       default:
