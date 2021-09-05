@@ -87,6 +87,7 @@ Indexing, Slicing, Joining, Mutating Ops
     :toctree: generated
     :nosignatures:
 
+    argwhere
     cat
     conj
     chunk
