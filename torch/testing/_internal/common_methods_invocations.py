@@ -5437,7 +5437,7 @@ def sample_inputs_argwhere(op_info, device, dtype, requires_grad, **kwargs):
         yield SampleInput(torch.empty(S, S).bernoulli_(0.5))
         yield SampleInput(torch.empty(S, 0).bernoulli_(0.5))
         yield SampleInput(torch.empty(()))
-    
+
     return list(generator())
 
 
