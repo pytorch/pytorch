@@ -476,15 +476,18 @@ inline static void _apply_svd_lib_gesvdj(const Tensor& self, Tensor& U, Tensor& 
   int lda = std::max<int>(1, m);
   int ldvt = std::max<int>(1, n);
 
+  auto handle = at::cuda::getCurrentCUDASolverDnHandle();
+  auto jobz = compute_uv ? CUSOLVER_EIG_MODE_VECTOR : CUSOLVER_EIG_MODE_NOVECTOR;
+
   for(int i = 0; i < batchsize; i++){
     // gesvdj_params controls the numerical accuracy of cusolver gesvdj iterations on GPU
     gesvdjInfo_t gesvdj_params;
     TORCH_CUSOLVER_CHECK(cusolverDnCreateGesvdjInfo(&gesvdj_params));
+
+    // Todo: expose the following two parameters to users
     // TORCH_CUSOLVER_CHECK(cusolverDnXgesvdjSetTolerance(gesvdj_params, 1.0e-7));
     // TORCH_CUSOLVER_CHECK(cusolverDnXgesvdjSetMaxSweeps(gesvdj_params, 15));
 
-    auto handle = at::cuda::getCurrentCUDASolverDnHandle();
-    auto jobz = compute_uv ? CUSOLVER_EIG_MODE_VECTOR : CUSOLVER_EIG_MODE_NOVECTOR;
     at::cuda::solver::gesvdj<scalar_t>(
       handle, jobz, /*econ=*/ some ? 1 : 0, m, n,
       self_data + i * self_stride,
@@ -532,6 +535,8 @@ inline static void _apply_svd_lib_gesvdjBatched(const Tensor& self, Tensor& U, T
   // gesvdj_params controls the numerical accuracy of cusolver gesvdj iterations on GPU
   gesvdjInfo_t gesvdj_params;
   TORCH_CUSOLVER_CHECK(cusolverDnCreateGesvdjInfo(&gesvdj_params));
+
+  // Todo: expose the following two parameters to users
   // TORCH_CUSOLVER_CHECK(cusolverDnXgesvdjSetTolerance(gesvdj_params, 1.0e-7));
   // TORCH_CUSOLVER_CHECK(cusolverDnXgesvdjSetMaxSweeps(gesvdj_params, 15));
   TORCH_CUSOLVER_CHECK(cusolverDnXgesvdjSetSortEig(gesvdj_params, 1));
@@ -603,8 +608,7 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda_lib(const Tensor& self, bool
     // A device-host sync will be performed.
     batchCheckErrors(infos, "svd_cuda");
   } else {
-    // apply_svd_lib_gesvdj(self, U_working_copy, S_working_copy, VT_working_copy, infos, compute_uv, some);
-    apply_svd_lib_gesvd(self, U_working_copy, S_working_copy, VT_working_copy, infos, compute_uv, some);
+    apply_svd_lib_gesvdj(self, U_working_copy, S_working_copy, VT_working_copy, infos, compute_uv, some);
 
     // A device-host sync will be performed.
     std::vector<int64_t> gesvdj_convergence_check = _check_gesvdj_convergence(infos, std::min(m, n) + 1);
@@ -623,7 +627,6 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda_lib(const Tensor& self, bool
       batchCheckErrors(infos, "svd_cuda");
     }
   }
-
 
   // gesvdjBatched fails with illegal memory access and
   // gesvdj fails with CUSOLVER_STATUS_EXECUTION_FAILED
