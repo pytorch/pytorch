@@ -518,7 +518,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     endforeach()
   endif()
 
-  if (IOS AND USE_COREML_DELEGATE)
+  if(IOS AND USE_COREML_DELEGATE)
     set(COREML_DELEGATE_SRCS
       ${TORCH_SRC_DIR}/csrc/jit/backends/backend_debug_info.cpp
       ${TORCH_SRC_DIR}/csrc/jit/backends/backend_interface.cpp
