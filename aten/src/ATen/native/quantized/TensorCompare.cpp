@@ -35,12 +35,5 @@ std::tuple<Tensor, Tensor> sort_quantized_cpu_stable(
       sort_indicies);
 }
 
-std::tuple<Tensor, Tensor> sort_quantized_cpu(
-    const Tensor& self,
-    int64_t dim,
-    bool descending) {
-  return sort_quantized_cpu_stable(self, /*stable=*/false, dim, descending);
-}
-
 } // namespace native
 } // namespace at

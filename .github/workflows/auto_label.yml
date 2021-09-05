@@ -8,7 +8,7 @@ on:
 
 
 concurrency:
-  group: auto-label-${{ github.event.pull_request.number || github.sha }}
+  group: auto-label-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
 
