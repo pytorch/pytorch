@@ -2871,6 +2871,82 @@ TEST(NVFuserTest, FusionConv2DStaticEvenSizedWindow_CUDA) {
   testValidate(&fusion, cg_outputs, inputs, {at_out}, __LINE__, __FILE__);
 }
 
+// POC implementation of im2col for 3-by-3 kernels
+TEST(NVFuserTest, FusionIm2Col_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  // Input: [N, C, H, W]
+  auto inp = makeSymbolicTensor(4);
+  fusion.addInput(inp);
+
+  // Gather a neighbor tile of [3, 3] with padding size of 1 for each
+  // side of the spatial dimensions
+  auto inp_tile = gather(inp, {1, 1, 3, 3}, {{0, 0}, {0, 0}, {1, 1}, {1, 1}});
+  // inp_tile: [N, C, H, W, 1, 1, 3, 3]
+
+  auto inp_col = transpose(inp_tile, {{1, 3}, {2, 1}, {3, 2}});
+  // inp_col: [N, H, W, C, 1, 1, 3, 3]
+
+  fusion.addOutput(inp_col);
+
+  ////////////////////////////////////
+
+  // Cache the input tensor
+  auto inp_cache = inp->cache_after();
+
+  // Blocking the spatial dimensions
+  const int block_w = 16;
+  const int block_h = 4;
+
+  auto out = inp_col;
+
+  out->split(1, block_h);
+  out->split(3, block_w);
+  out->reorder({{2, 3}});
+  // out: [N, Ho, Wo, Hi, Wi, C, 1, 1, 3, 3]
+  // Move the C axis out of Hi*Wi
+  out->reorder({{5, 3}, {3, 4}, {4, 5}});
+  // out: [N, Ho, Wo, C, Hi, Wi, 1, 1, 3, 3]
+
+  // Create a [block_x, block_y] tile on smem
+  inp_cache->computeAt(out, 4);
+  inp_cache->setMemoryType(MemoryType::Shared);
+  // Fully inline inp_tile
+  inp_tile->computeAt(out, -1);
+
+  out->axis(0)->parallelize(ParallelType::BIDz);
+  out->axis(1)->parallelize(ParallelType::BIDy);
+  out->axis(2)->parallelize(ParallelType::BIDx);
+  out->axis(4)->parallelize(ParallelType::TIDy);
+  out->axis(5)->parallelize(ParallelType::TIDx);
+
+  scheduler_utils::parallelizeAllLike(out, {inp_cache, inp_tile});
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  const int dim_h = 31;
+  const int dim_w = 33;
+  const int dim_c = 5;
+  const int dim_n = 3;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  at::Tensor at_inp = at::randn({dim_n, dim_c, dim_h, dim_w}, options);
+  std::vector<IValue> inputs = {at_inp};
+
+  auto cg_outputs = fe.runFusion(inputs);
+
+  auto at_out = at::im2col(at_inp, {3, 3}, {1, 1}, {1, 1}, {1, 1});
+
+  // at::im2col outputs [N, C*3*3, N*H]
+  at_out = at::transpose(at_out, 1, 2);
+  at_out = at::reshape(at_out, {dim_n, dim_h, dim_w, dim_c, 1, 1, 3, 3});
+
+  testValidate(&fusion, cg_outputs, inputs, {at_out}, __LINE__, __FILE__);
+}
+
 TEST(NVFuserTest, FusionShiftNoPadding1_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
