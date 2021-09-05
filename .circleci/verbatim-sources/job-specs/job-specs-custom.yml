@@ -581,7 +581,7 @@
             else
               fastlane scan --only_testing TestAppTests/TestAppTests/testLiteInterpreter
             fi
-            
+
   pytorch_linux_bazel_build:
     <<: *pytorch_params
     machine:
