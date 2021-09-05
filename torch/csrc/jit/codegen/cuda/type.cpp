@@ -522,6 +522,10 @@ static const char* supported_casts2string(
       return "__half2float";
     case supported_switch_pair(DataType::Bool, DataType::Float):
       return "float";
+    case supported_switch_pair(DataType::Bool, DataType::Int):
+      return "int64_t";
+    case supported_switch_pair(DataType::Bool, DataType::Int32):
+      return "int32_t";
     default:
       return nullptr;
   }

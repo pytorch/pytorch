@@ -746,13 +746,20 @@ class IrParser {
                 bias = value_map[node->input(2)->unique()]->as<TensorView>();
               }
 
+              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+              auto training = constant_as<bool>(node->input(5));
+              TORCH_INTERNAL_ASSERT(
+                  training.has_value(),
+                  "The training (bool) parameter is required.");
+              const bool kTraining = training.value();
+
               TensorView* running_mean = nullptr;
               if (!node->input(3)->type()->isSubtypeOf(
                       static_cast<c10::TypePtr>(NoneType::get()))) {
                 running_mean =
                     value_map[node->input(3)->unique()]->as<TensorView>();
                 TORCH_INTERNAL_ASSERT(
-                    fusion->hasInput(running_mean),
+                    !kTraining || fusion->hasInput(running_mean),
                     "IO_tensor `batch_norm::running_mean` can only be input tensor to fusion");
               }
 
@@ -762,16 +769,9 @@ class IrParser {
                 running_var =
                     value_map[node->input(4)->unique()]->as<TensorView>();
                 TORCH_INTERNAL_ASSERT(
-                    fusion->hasInput(running_var),
+                    !kTraining || fusion->hasInput(running_var),
                     "IO_tensor `batch_norm::running_var` can only be input tensor to fusion");
               }
-
-              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-              auto training = constant_as<bool>(node->input(5));
-              TORCH_INTERNAL_ASSERT(
-                  training.has_value(),
-                  "The training (bool) parameter is required.");
-              const bool kTraining = training.value();
 
               Val* momentum_ptr = nullptr;
               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
