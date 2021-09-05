@@ -478,18 +478,29 @@ inline static void _apply_svd_lib_gesvdj(const Tensor& self, Tensor& U, Tensor& 
 
   auto handle = at::cuda::getCurrentCUDASolverDnHandle();
   auto jobz = compute_uv ? CUSOLVER_EIG_MODE_VECTOR : CUSOLVER_EIG_MODE_NOVECTOR;
+  int econ = some ? 1 : 0;
+
+  // gesvdj_params controls the numerical accuracy of cusolver gesvdj iterations on GPU
+  gesvdjInfo_t gesvdj_params;
+  TORCH_CUSOLVER_CHECK(cusolverDnCreateGesvdjInfo(&gesvdj_params));
+
+  // Todo: expose the following two parameters to users
+  // TORCH_CUSOLVER_CHECK(cusolverDnXgesvdjSetTolerance(gesvdj_params, 1.0e-7));
+  // TORCH_CUSOLVER_CHECK(cusolverDnXgesvdjSetMaxSweeps(gesvdj_params, 15));
+
+  int lwork = -1;
+
+  at::cuda::solver::gesvdj_buffersize<scalar_t>(
+    handle, jobz, econ, m, n, self_data, lda, S_data, U_data, lda, VT_data, ldvt, &lwork, gesvdj_params);
+
+  TORCH_INTERNAL_ASSERT(lwork >= 0, "gesvdj_buffersize failed to get needed buffer size, got lwork = ", lwork);
+
+  auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
+  auto dataPtr = allocator.allocate(sizeof(scalar_t)*lwork);
 
   for(int i = 0; i < batchsize; i++){
-    // gesvdj_params controls the numerical accuracy of cusolver gesvdj iterations on GPU
-    gesvdjInfo_t gesvdj_params;
-    TORCH_CUSOLVER_CHECK(cusolverDnCreateGesvdjInfo(&gesvdj_params));
-
-    // Todo: expose the following two parameters to users
-    // TORCH_CUSOLVER_CHECK(cusolverDnXgesvdjSetTolerance(gesvdj_params, 1.0e-7));
-    // TORCH_CUSOLVER_CHECK(cusolverDnXgesvdjSetMaxSweeps(gesvdj_params, 15));
-
     at::cuda::solver::gesvdj<scalar_t>(
-      handle, jobz, /*econ=*/ some ? 1 : 0, m, n,
+      handle, jobz, econ, m, n,
       self_data + i * self_stride,
       lda,
       S_data + i * S_stride,
@@ -497,12 +508,14 @@ inline static void _apply_svd_lib_gesvdj(const Tensor& self, Tensor& U, Tensor& 
       lda,
       VT_data + i * VT_stride,
       ldvt,
+      reinterpret_cast<scalar_t*>(dataPtr.get()),
+      lwork,
       infos.data_ptr<int>() + i,
       gesvdj_params
     );
-
-    TORCH_CUSOLVER_CHECK(cusolverDnDestroyGesvdjInfo(gesvdj_params));
   }
+
+  TORCH_CUSOLVER_CHECK(cusolverDnDestroyGesvdjInfo(gesvdj_params));
 }
 
 // wrapper around _apply_svd_lib_gesvdj that handles dtype dispatch
