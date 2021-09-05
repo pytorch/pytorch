@@ -23,8 +23,8 @@ static void restoreAccurateTypeTagsIfPossible(const IValue& root) {
 
 // Pickled objects are stored in a form compatible with Python pickling.
 // In torchscript List[T]/Dict[K, V] are statically typed and contain
-// dynamic type tags allow T, K, and V to be recovered. But this info
-// is not stored in the Python pickling information. However, we
+// dynamic type tags that allow T, K, and V to be recovered. But this
+// info is not stored in the Python pickling information. However, we
 // can recover this information from the static type of the top-level
 // object being unpickled, because we have a record of the type of the
 // objects it contains as attributes.
@@ -106,6 +106,19 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
           auto t = w.static_type->expect<OptionalType>();
           Work elem = {t->getElementType(), w.value};
           to_process.emplace_back(std::move(elem));
+        }
+      } break;
+      case UnionType::Kind: {
+        auto t = w.static_type->expect<UnionType>();
+        if (t->containedTypes().size() == 2 &&
+            t->canHoldType(NoneType::get())) {
+          if (!w.value.isNone()) {
+            auto inner = t->containedTypes()[0] != NoneType::get()
+                ? t->containedTypes()[0]
+                : t->containedTypes()[1];
+            Work elem = {inner, w.value};
+            to_process.emplace_back(std::move(elem));
+          }
         }
       } break;
       case ListType::Kind: {
@@ -318,7 +331,7 @@ PickleOpCode Unpickler::readInstruction() {
       tuple->elements().reserve(stack_.size() - start);
       auto start_it = stack_.begin() + start;
       for (auto it = start_it; it != stack_.end(); ++it) {
-        tuple->elements().emplace_back(*it);
+        tuple->elements().emplace_back(std::move(*it));
       }
       stack_.erase(start_it, stack_.end());
       stack_.emplace_back(std::move(tuple));
