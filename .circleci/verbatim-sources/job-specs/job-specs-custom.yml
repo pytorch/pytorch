@@ -517,6 +517,7 @@
             echo "IOS_PLATFORM: ${IOS_PLATFORM}"
             echo "USE_PYTORCH_METAL": "${USE_METAL}"
             echo "BUILD_LITE_INTERPRETER": "${BUILD_LITE_INTERPRETER}"
+            echo "USE_COREML": "${USE_COREML_DELEGATE}"
 
             #check the custom build flag
             echo "SELECTED_OP_LIST: ${SELECTED_OP_LIST}"
@@ -525,6 +526,7 @@
             fi
             export IOS_ARCH=${IOS_ARCH}
             export IOS_PLATFORM=${IOS_PLATFORM}
+            export USE_COREML_DELEGATE=${USE_COREML_DELEGATE}
             if [ ${IOS_PLATFORM} != "SIMULATOR" ]; then
               export USE_PYTORCH_METAL=${USE_METAL}
             fi
@@ -570,14 +572,16 @@
             WORKSPACE=/Users/distiller/workspace
             PROJ_ROOT=/Users/distiller/project
             source ~/anaconda/bin/activate
-            pip install torch torchvision --progress-bar off
             #run unit test
-            cd ${PROJ_ROOT}/ios/TestApp/benchmark
-            python trace_model.py
-            ruby setup.rb
             cd ${PROJ_ROOT}/ios/TestApp
+            ruby ./benchmark/setup.rb
             instruments -s -devices
-            fastlane scan
+            if [ $(USE_COREML_DELEGATE) == 1 ]; then
+              fastlane scan --only_testing TestAppTests/TestAppTests/testCoreML
+            else
+              fastlane scan --only_testing TestAppTests/TestAppTests/testLiteInterpreter
+            fi
+            
   pytorch_linux_bazel_build:
     <<: *pytorch_params
     machine:
