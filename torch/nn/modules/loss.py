@@ -540,7 +540,7 @@ class BCELoss(_WeightedLoss):
         \end{cases}
 
     This is used for measuring the error of a reconstruction in for example
-    an auto-encoder. Note that the targets :math:`y` should be numbers
+    an auto-encoder. Note that the inputs :math:`x_n` should be numbers
     between 0 and 1.
 
     Notice that if :math:`x_n` is either 0 or 1, one of the log terms would be
