@@ -116,6 +116,10 @@ c10::optional<IterDomain*> getMaybeWarpReductionDim(
 
 c10::optional<IterDomain*> getMaybeWarpReductionDim(const ReductionOp* node);
 
+//! Return true if axis is derived from a root axis that is an input
+//! to a CA leaf axis.
+bool derivedFromRootCAAxes(const TensorView* tv, IterDomain* axis);
+
 } // namespace ir_utils
 
 namespace loop_utils {

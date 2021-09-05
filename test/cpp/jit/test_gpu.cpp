@@ -16659,6 +16659,59 @@ TEST(NVFuserTest, FusionParallelDimensionMap5_CUDA) {
   testValidate(&fusion, outputs, {input1, input2}, {ref}, __LINE__, __FILE__);
 }
 
+TEST(NVFuserTest, FusionSerialAndParallelIndexing_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, new Double(1));
+  auto tv2 = add(tv1, new Double(1));
+  fusion.addOutput(tv2);
+
+  auto tv3 = add(tv0, new Double(1));
+  auto tv4 = add(tv3, new Double(1));
+  fusion.addOutput(tv4);
+
+  auto tv5 = add(tv0, new Double(1));
+  auto tv6 = add(tv5, new Double(1));
+  fusion.addOutput(tv6);
+
+  // Case 1: local memory tensor computed serially and used by
+  // parallel threads
+  tv2->split(-1, 4);
+  tv1->computeAt(tv2, -2);
+  tv2->axis(-1)->parallelize(ParallelType::TIDx);
+
+  // Case 2: shared memory tensor computed serially and used by BID
+  tv4->split(-1, 4);
+  tv3->computeAt(tv4, -2);
+  tv4->axis(-1)->parallelize(ParallelType::BIDx);
+  tv3->setMemoryType(MemoryType::Shared);
+
+  // Case 3: shared memory tensor computed by TID and used by BID
+  tv6->split(-1, 4);
+  tv5->computeAt(tv6, -2);
+  tv6->axis(-1)->parallelize(ParallelType::BIDx);
+  tv5->axis(-1)->parallelize(ParallelType::TIDx);
+  tv5->setMemoryType(MemoryType::Shared);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  const int nx = 11;
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({nx}, options);
+  std::vector<IValue> aten_inputs = {t0};
+  auto outputs = fe.runFusion(aten_inputs);
+
+  auto ref = t0 + 2;
+
+  testValidate(
+      &fusion, outputs, aten_inputs, {ref, ref, ref}, __LINE__, __FILE__);
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)

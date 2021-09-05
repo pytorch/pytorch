@@ -281,6 +281,23 @@ c10::optional<IterDomain*> getMaybeWarpReductionDim(const ReductionOp* node) {
   return c10::nullopt;
 }
 
+bool derivedFromRootCAAxes(const TensorView* tv, IterDomain* axis) {
+  std::vector<IterDomain*> ca_axes(
+      tv->domain()->domain().begin(),
+      tv->domain()->domain().begin() + tv->getComputeAtPosition());
+
+  auto ca_root_vals = IterVisitor::getInputsTo(
+      std::vector<Val*>(ca_axes.begin(), ca_axes.end()));
+
+  auto root_vals = IterVisitor::getInputsTo({axis});
+
+  return std::any_of(
+      root_vals.begin(), root_vals.end(), [&ca_root_vals](auto root) {
+        return std::find(ca_root_vals.begin(), ca_root_vals.end(), root) !=
+            ca_root_vals.end();
+      });
+}
+
 } // namespace ir_utils
 
 namespace loop_utils {

@@ -1167,7 +1167,8 @@ namespace {
 std::unordered_map<kir::ForLoop*, kir::Val*> indexMapFromTV(
     const TensorView* tv,
     const std::vector<kir::ForLoop*>& loops,
-    const std::pair<kir::ForLoop*, int64_t>& alloc_point) {
+    const std::pair<kir::ForLoop*, int64_t>& alloc_point,
+    bool as_consumer) {
   const auto gpu_lower = GpuLower::current();
   kir::IrBuilder ir_builder(gpu_lower->kernel());
 
@@ -1186,8 +1187,38 @@ std::unordered_map<kir::ForLoop*, kir::Val*> indexMapFromTV(
 
   std::unordered_map<kir::ForLoop*, kir::Val*> loop_to_ind_map;
 
+  // When indexed as a producer, the parallel types of the the
+  // producer domains may not be the same as those of the loops, but
+  // that's still valid parallelization. However, in that case, using
+  // the parallel types of the loops to decide replacement of indices
+  // with zero isn't valid. That's only valid when there's a matching
+  // IterDomain in the producer tensor that has the same parallel
+  // type.
+  auto find_matching_parallel_domain = [tv](kir::IterDomain* id) -> bool {
+    const auto gpu_lower = GpuLower::current();
+    auto it = std::find_if(
+        tv->domain()->domain().begin(),
+        tv->domain()->domain().end(),
+        [&](IterDomain* tv_id) {
+          auto kir_tv_id = gpu_lower->lowerValue(tv_id)->as<kir::IterDomain>();
+          // Matching is done using the index and loop maps. See
+          // validateParallelize as well.
+          return gpu_lower->caIndexMap().areMapped(id, kir_tv_id) ||
+              (gpu_lower->caLoopMap().areMapped(id, kir_tv_id) &&
+               ir_utils::derivedFromRootCAAxes(tv, tv_id));
+        });
+    if (it == tv->domain()->domain().end()) {
+      return false;
+    }
+
+    auto corresponding_domain = *it;
+    return corresponding_domain->getParallelType() == id->parallelType();
+  };
+
   for (auto loop : loops) {
     kir::Val* idx = nullptr;
+    const auto same_parallel_type =
+        as_consumer || find_matching_parallel_domain(loop->iter_domain());
     // See also LoopNestGenerator::pushAlloc.
     // NOLINTNEXTLINE(bugprone-branch-clone)
     if (!within_alloc) {
@@ -1198,8 +1229,24 @@ std::unordered_map<kir::ForLoop*, kir::Val*> indexMapFromTV(
         idx = zero;
       }
     } else if (
-        (loop->iter_domain()->isBlockDim() && is_shared) ||
-        (loop->iter_domain()->isThread() && is_local) || loop->vectorize()) {
+        // For shared-memory tensors, when a domain is parallelized by
+        // BID, the index can be replaced with zero as long as the
+        // tensor has a matching domain that has the same parallel
+        // type. Matching can be omitted when indexed as a consumer
+        // since it is always the case. When indexed as a producer, to
+        // replace it with zero, the same parallel type of BID must be
+        // used by the producer tensor. Thus, since this is a shared
+        // memory tensor, when a producer domain is parallelized by
+        // BID, there must be a matching consumer domain with the same
+        // parallel type, which must be the IterDomain of the
+        // loop.
+        (loop->iter_domain()->isBlockDim() && is_shared &&
+         same_parallel_type) ||
+        // Similarly for local memory tensors, zero replacement can be
+        // only done when there's a matching domain with the same
+        // parallel type
+        (loop->iter_domain()->isThread() && is_local && same_parallel_type) ||
+        loop->vectorize()) {
       idx = zero;
     } else {
       idx = loop->index();
@@ -1267,7 +1314,7 @@ std::vector<kir::Val*> Index::getNonGlobalProducerStridedIndices(
   auto alloc_point =
       loop_utils::getAllocPoint(producer_tv, loops, p2c_map, true);
   std::unordered_map<kir::ForLoop*, kir::Val*> loop_to_ind_map =
-      indexMapFromTV(producer_tv, loops, alloc_point);
+      indexMapFromTV(producer_tv, loops, alloc_point, false);
 
   // Map loop nests to indicies, zeroing out those not used due to locality of
   // memory
@@ -1647,7 +1694,7 @@ std::vector<kir::Val*> Index::getNonGlobalConsumerStridedIndices(
 
   auto alloc_point = loop_utils::getAllocPoint(consumer_tv, loops);
   std::unordered_map<kir::ForLoop*, kir::Val*> loop_to_ind_map =
-      indexMapFromTV(consumer_tv, loops, alloc_point);
+      indexMapFromTV(consumer_tv, loops, alloc_point, true);
 
   // Map loop nests to indicies, zeroing out those not used due to locality of
   // memory
