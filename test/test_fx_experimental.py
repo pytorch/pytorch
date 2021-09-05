@@ -1460,13 +1460,13 @@ class TestNormalizeOperators(JitTestCase):
         # Sorted and one entry on each line to minimize merge conflicts.
         op_skip = {
             "contiguous",
-            "nn.functional.dropout",
             "einsum",
             "expand",
             "expand_as",
             "fill_",
             "gradient",
             "index_put",
+            "nn.functional.dropout",
             "polygamma",
             "special.polygamma",
             "repeat",
