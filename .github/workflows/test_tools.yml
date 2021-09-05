@@ -31,5 +31,5 @@ jobs:
         run: python -m unittest discover -vs tools/test -p 'test_*.py'
 
 concurrency:
-  group: test-tools-${{ github.event.pull_request.number || github.sha }}
+  group: test-tools-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
