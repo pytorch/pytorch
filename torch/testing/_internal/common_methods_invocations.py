@@ -5433,7 +5433,8 @@ def sample_inputs_nll_loss(op_info, device, dtype, requires_grad, **kwargs):
 
 def sample_inputs_argwhere(op_info, device, dtype, requires_grad, **kwargs):
     def generator():
-        yield SampleInput(torch.tensor([1, 0, 1, 0], dtype=dtype, device=device, requires_grad=requires_grad))
+        yield SampleInput(torch.tensor([1, 0, 2, 0], dtype=dtype, device=device, requires_grad=requires_grad))
+
         t = make_tensor((S, S), dtype=dtype, device=device, requires_grad=requires_grad)
         with torch.no_grad():
             m = torch.empty(*t.size(), dtype=torch.long).bernoulli_(0.5)
@@ -5441,8 +5442,8 @@ def sample_inputs_argwhere(op_info, device, dtype, requires_grad, **kwargs):
         yield SampleInput(t)
 
         t = make_tensor((S, 0), dtype=dtype, device=device, requires_grad=requires_grad)
-
         yield SampleInput(t)
+
         yield SampleInput(make_tensor((), dtype=dtype, device=device, requires_grad=requires_grad))
 
     return list(generator())
