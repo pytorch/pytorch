@@ -476,12 +476,10 @@ bool LoopNest::vectorize(ForPtr f) {
     normalize(to<For>(new_f));
     new_f = FlattenIndexes(new_f);
     new_f = v.vectorize(to<For>(new_f));
-  } catch (compilation_error& e) {
+  } catch (std::runtime_error& e) {
     // We clone f before vectorizing. So, any partial vectorization will
     // have modified the clone. In case of an exception, we can continue
     // using f.
-    new_f = f;
-  } catch (std::runtime_error& e) {
     new_f = f;
   }
 
