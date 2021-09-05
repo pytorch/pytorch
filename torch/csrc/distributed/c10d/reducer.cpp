@@ -957,6 +957,10 @@ void Reducer::mark_bucket_ready(size_t bucket_index) {
   }
 }
 
+void Reducer::install_futures(c10::List<c10::intrusive_ptr<c10::ivalue::Future>> futs) {
+    installed_futures_ = std::move(futs);
+}
+
 void Reducer::initialize_buckets(
     std::vector<std::vector<size_t>> bucket_indices,
     std::vector<size_t> per_bucket_sizes) {
@@ -1522,6 +1526,11 @@ void Reducer::finalize_backward() {
       // the allreduce is done, the sparse grads are automatically updated.
       finalize_bucket_dense(bucket);
     }
+  }
+
+  if (installed_futures_ != c10::nullopt) {
+      c10::collectAll(*installed_futures_)->wait();
+      installed_futures_ = c10::nullopt;
   }
 
   // See Note [Skip allreducing local_used_maps_dev]
