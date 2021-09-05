@@ -11,6 +11,5 @@
 
 #include <THC/THCTensor.h>
 #include <THC/THCTensorCopy.h>
-#include <THC/THCTensorMath.h>
 
 #endif
