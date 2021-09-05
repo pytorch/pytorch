@@ -45,7 +45,7 @@ if not File.exist?(config_path)
 group = project.main_group.find_subpath(File.join('TestApp'),true)
 group.set_source_tree('SOURCE_ROOT')
 group.files.each do |file|
-    if (file.name.to_s.end_with?(".pt") || 
+    if (file.name.to_s.end_with?(".pt") ||
         file.name.to_s.end_with?(".ptl") ||
         file.name == "config.json")
         group.remove_reference(file)
@@ -58,14 +58,14 @@ end
 config_file_ref = group.new_reference(config_path)
 file_refs = [config_file_ref]
 
-# collect models 
+# collect models
 models_dir = File.expand_path("../models")
 Dir.foreach(models_dir) do |model|
     if(model.end_with?(".pt") || model.end_with?(".ptl"))
       model_path = models_dir + "/" + model
       file_refs.push(group.new_reference(model_path))
     end
-end 
+end
 
 targets.each do |target|
     file_refs.each do |ref|
