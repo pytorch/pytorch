@@ -262,7 +262,7 @@ class TestFX(JitTestCase):
 
     def test_matmul_tracing(self):
         const = torch.randn(3)
-        
+
         def matmul_f(x):
             return x @ const
 
