@@ -171,7 +171,103 @@ std::unordered_map<Val*, Val*> getSimplificationMap(Fusion* fusion) {
   return extent_to_min_input_id_extent;
 }
 
+class KIRCleaner : public kir::MutableIrVisitor {
+ public:
+  //! Remove nop IR nodes
+  static std::vector<kir::Expr*> cleanUp(
+      const std::vector<kir::Expr*>& loop_nests) {
+    KIRCleaner cleaner;
+    std::vector<kir::Expr*> out_loop_nests;
+    for (auto loop_nest : loop_nests) {
+      cleaner.handle(loop_nest);
+      // No need to keep the loop nest if it's determined to be nop
+      if (!cleaner.is_nop_) {
+        out_loop_nests.push_back(loop_nest);
+      }
+    }
+    return out_loop_nests;
+  }
+
+ private:
+  void handle(kir::Expr* expr) {
+    if (expr->isA<kir::ForLoop>() || expr->isA<kir::IfThenElse>()) {
+      expr->accept(this);
+    } else {
+      // Any non-scoping expr is not considered nop
+      is_nop_ = false;
+    }
+  }
+
+  void visit(kir::ForLoop* fl) final {
+    auto exprs = fl->body().exprs();
+    fl->body().clear();
+    for (auto expr : exprs) {
+      handle(expr);
+      // Add the expr to the loop body only when the expr is not nop
+      if (!is_nop_) {
+        fl->body().push_back(expr);
+      }
+    }
+    // The loop is nop when no expr exists in the body
+    is_nop_ = fl->body().empty();
+  }
+
+  void visit(kir::IfThenElse* ite) final {
+    const auto conditional = ite->predicate()->value();
+
+    // Visit the then block
+    auto then_exprs = ite->thenBody().exprs();
+    ite->thenBody().clear();
+    if (!conditional->isConst() || conditional->value().value()) {
+      for (auto expr : then_exprs) {
+        handle(expr);
+        if (!is_nop_) {
+          ite->thenBody().push_back(expr);
+        }
+      }
+    }
+
+    const bool then_nop = ite->thenBody().empty();
+
+    // Visit the else block
+    auto else_exprs = ite->elseBody().exprs();
+    ite->elseBody().clear();
+    if (!conditional->isConst() || !conditional->value().value()) {
+      for (auto expr : else_exprs) {
+        handle(expr);
+        if (!is_nop_) {
+          ite->elseBody().push_back(expr);
+        }
+      }
+    }
+
+    const bool else_nop = ite->elseBody().empty();
+
+    // If the then block is nop but the else is not, invert the
+    // conditional and move the exprs in the else block to the then
+    // block.
+    if (then_nop && !else_nop) {
+      kir::IrBuilder ir_builder(GpuLower::current()->kernel());
+      kir::Bool* pred = ite->predicate()->value();
+      kir::Bool* neg_pred = ir_builder.negExpr(pred)->as<kir::Bool>();
+      ite->predicate()->setValue(neg_pred);
+      for (auto expr : ite->elseBody().exprs()) {
+        ite->thenBody().push_back(expr);
+      }
+      ite->elseBody().clear();
+    }
+
+    // This IfThenElse is nop if both the then and else blocks are nop
+    is_nop_ = then_nop && else_nop;
+  }
+
+ private:
+  //! True if the last visited expr is nop
+  bool is_nop_ = false;
+};
+
 } // namespace
+
 void GpuLower::replaceSymbolicSizes() {
   FUSER_PERF_SCOPE("GpuLower::Lower::replaceSymbolicSizes");
 
@@ -409,8 +505,10 @@ void GpuLower::lower() {
   // on index and predicate reuse
   const auto register_adjusted = insertMagicZero(conditional_loops);
 
+  const auto cleaned_up_loops = KIRCleaner::cleanUp(register_adjusted);
+
   // We now have the lowered expressions, finalize the kernel IR
-  kernel_->finalize(register_adjusted);
+  kernel_->finalize(cleaned_up_loops);
 }
 
 kir::Kernel* GpuLower::kernel() const {

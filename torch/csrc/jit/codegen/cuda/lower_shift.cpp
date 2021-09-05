@@ -89,19 +89,15 @@ kir::Val* getShiftProducerIndex(
     kir::Val* consumer_index,
     ShiftOp* shift_expr) {
   const auto gpu_lower = GpuLower::current();
-  kir::IrBuilder ir_builder(gpu_lower->kernel());
+  kir::SimplifyingIrBuilder ir_builder(gpu_lower->kernel());
 
   const int shift_offset =
       (shift_expr != nullptr) ? shift_expr->offset(consumer_root_axis) : 0;
 
   if (shift_offset == 0) {
     return consumer_index;
-  } else if (shift_offset > 0) {
-    return ir_builder.subExpr(
-        consumer_index, ir_builder.create<kir::Int>(shift_offset));
   } else {
-    return ir_builder.addExpr(
-        consumer_index, ir_builder.create<kir::Int>(-shift_offset));
+    return ir_builder.addExpr(consumer_index->as<kir::Int>(), -shift_offset);
   }
 }
 
@@ -160,6 +156,15 @@ kir::Bool* ShiftPredicateInserter::getPredicate(
   auto shift_expr = dynamic_cast<ShiftOp*>(out_fuser_tv->definition());
   auto gather_expr = dynamic_cast<GatherOp*>(out_fuser_tv->definition());
 
+  // When isShiftPredicate is false, a predicate for padding is
+  // generated. Since padding is only necessary for padded shift and
+  // gather, just return false otherwise.
+  if (!isShiftPredicate &&
+      ((shift_expr == nullptr && gather_expr == nullptr) ||
+       (shift_expr && !shift_expr->pad()))) {
+    return ir_builder.falseVal();
+  }
+
   // Creates indices at the root domain.
   // Set contiguity of all axes false as separate indices are needed for each
   // root axis.
@@ -184,6 +189,7 @@ kir::Bool* ShiftPredicateInserter::getPredicate(
 
   for (size_t i = 0; i < root_domain.size(); ++i) {
     auto root_id = root_domain[i];
+    auto kir_root_id = gpu_lower->lowerValue(root_id)->as<kir::IterDomain>();
 
     if (root_id->isBroadcast() || (buffer_init && root_id->isReduction()) ||
         gpu_lower->trivialReductionInfo().isDerived(root_id)) {
@@ -191,6 +197,8 @@ kir::Bool* ShiftPredicateInserter::getPredicate(
     }
 
     const auto halo_info = gpu_lower->haloInfo().getRootAxisInfo(root_id);
+
+    kir::Val* consumer_index = indices[i];
 
     if (isShiftPredicate) {
       // Below, "left" and "right" halo mean halo at offset zero and
@@ -206,11 +214,11 @@ kir::Bool* ShiftPredicateInserter::getPredicate(
       // zero. As illustrated above, left limit = left halo, and right
       // limit = left halo + extent.
 
-      kir::Val* left_limit = halo_info.width(0);
-      kir::Val* right_limit = ir_builder.addExpr(
-          out_tv->domain()->rootDomain()[i]->extent(), halo_info.width(0));
+      kir::Val* left_limit =
+          ir_builder.addExpr(halo_info.width(0), kir_root_id->start());
+      kir::Val* right_limit =
+          ir_builder.addExpr(kir_root_id->stop(), halo_info.width(0));
 
-      kir::Val* consumer_index = indices[i];
       kir::Val* producer_index = nullptr;
 
       if (shift_expr != nullptr) {
@@ -229,10 +237,13 @@ kir::Bool* ShiftPredicateInserter::getPredicate(
       // producer. This should be reivisted for performance
       // optimization (#877).
       if (shift_expr && shift_expr->offset(i) > 0) {
+        // When padding is not used, the start position of the
+        // consumer axis is shifted right, so that's the first valid
+        // position for the consumer index.
+        auto pred_index = shift_expr->pad() ? producer_index : consumer_index;
         predicate =
             ir_builder
-                .andExpr(
-                    predicate, ir_builder.geExpr(producer_index, left_limit))
+                .andExpr(predicate, ir_builder.geExpr(pred_index, left_limit))
                 ->as<kir::Bool>();
       } else if (gather_expr) {
         // Since it's unknown if producer_index < consumer_index, we need
@@ -262,15 +273,14 @@ kir::Bool* ShiftPredicateInserter::getPredicate(
                 ->as<kir::Bool>();
       }
 
-      // If the shift offset is negative, the maximum index is extent -
-      // abs(shift_offset). Instead of subtracting shift_offset from
-      // extent, which can result in wrap around, add the absolute value
-      // of the shift offset to the index
+      // upper limit predication
       if (shift_expr && shift_expr->offset(i) < 0) {
+        // Similar to the left-limit case, use the consumer index when
+        // padding is not used.
+        auto pred_index = shift_expr->pad() ? producer_index : consumer_index;
         predicate =
             ir_builder
-                .andExpr(
-                    predicate, ir_builder.ltExpr(producer_index, right_limit))
+                .andExpr(predicate, ir_builder.ltExpr(pred_index, right_limit))
                 ->as<kir::Bool>();
       } else if (gather_expr) {
         predicate =
@@ -293,14 +303,14 @@ kir::Bool* ShiftPredicateInserter::getPredicate(
                 ->as<kir::Bool>();
       }
     } else {
-      auto padding_max_offset = ir_builder.addExpr(
-          out_tv->domain()->rootDomain()[i]->extent(), halo_info.width());
+      auto padding_max_offset =
+          ir_builder.addExpr(kir_root_id->extent(), halo_info.width());
 
-      predicate =
-          ir_builder
-              .andExpr(
-                  predicate, ir_builder.ltExpr(indices[i], padding_max_offset))
-              ->as<kir::Bool>();
+      predicate = ir_builder
+                      .andExpr(
+                          predicate,
+                          ir_builder.ltExpr(consumer_index, padding_max_offset))
+                      ->as<kir::Bool>();
     }
   }
 

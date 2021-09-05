@@ -210,7 +210,7 @@ struct SubstituteInExpr : public OptInDispatch {
     auto in =
         reference_->sameAs(shift_expr->in()) ? substitute_ : shift_expr->in();
 
-    expr_ = new ShiftOp(out, in, shift_expr->offsets());
+    expr_ = new ShiftOp(out, in, shift_expr->offsets(), shift_expr->pad());
   }
 
   void handle(GatherOp* gather_expr) final {

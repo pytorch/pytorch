@@ -315,7 +315,7 @@ class TORCH_CUDA_CU_API ShiftOp : public Expr {
   //! \param out
   //! \param in
   //! \param offsets
-  ShiftOp(Val* out, Val* in, std::vector<int> offsets);
+  ShiftOp(Val* out, Val* in, std::vector<int> offsets, bool pad);
 
   ShiftOp(const ShiftOp* src, IrCloner* ir_cloner);
 
@@ -334,6 +334,10 @@ class TORCH_CUDA_CU_API ShiftOp : public Expr {
     return offsets_;
   }
 
+  bool pad() const {
+    return pad_;
+  }
+
   bool sameAs(const Statement* other) const override;
 
  private:
@@ -343,6 +347,7 @@ class TORCH_CUDA_CU_API ShiftOp : public Expr {
   //! offsets_. The sign of each value indicates the direction of
   //! shifting.
   const std::vector<int> offsets_;
+  const bool pad_;
 };
 
 //! Gather a window around each element.
@@ -402,6 +407,14 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
       IterType iter_type = IterType::Iteration,
       bool is_rfactor_domain = false);
 
+  IterDomain(
+      Val* start,
+      Val* extent,
+      Val* stop,
+      ParallelType parallel_type = ParallelType::Serial,
+      IterType iter_type = IterType::Iteration,
+      bool is_rfactor_domain = false);
+
   IterDomain(const IterDomain* src, IrCloner* ir_cloner);
 
   bool sameAs(const Statement* other) const override;
@@ -412,6 +425,7 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
     auto cloned = new IterDomain(
         start(),
         extent(),
+        stop(),
         getParallelType(),
         getIterType(),
         isRFactorProduct());
@@ -496,6 +510,10 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
     return start_;
   }
 
+  Val* stop() const {
+    return stop_;
+  }
+
   Val* extent() const {
     TORCH_INTERNAL_ASSERT(extent_ != nullptr);
     return extent_;
@@ -538,6 +556,9 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
     return padded_to_size_;
   }
 
+  //! True if range of iteration domain isn't across the full extent
+  bool maybePartial() const;
+
   //! Check if IterDomain is a broadcast axis with compile-time
   //! known extent. This is the case with all size-1 IterDomains on
   //! a TensorView's root domain when the TensorView is created.
@@ -568,8 +589,10 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
       bool inner_split);
 
  private:
+  //! Valid range is defined as [start_, stop_)
   Val* const start_ = nullptr;
   Val* const extent_ = nullptr;
+  Val* const stop_ = nullptr;
   ParallelType parallel_type_ = ParallelType::Serial;
   IterType iter_type_ = IterType::Iteration;
   bool is_rfactor_domain_ = false;

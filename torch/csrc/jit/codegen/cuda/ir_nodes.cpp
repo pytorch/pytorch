@@ -489,11 +489,12 @@ TransposeOp::TransposeOp(const TransposeOp* src, IrCloner* ir_cloner)
       in_(ir_cloner->clone(src->in_)),
       new2old_(src->new2old_) {}
 
-ShiftOp::ShiftOp(Val* out, Val* in, std::vector<int> offsets)
+ShiftOp::ShiftOp(Val* out, Val* in, std::vector<int> offsets, bool pad)
     : Expr(ExprType::ShiftOp),
       out_(out),
       in_(in),
-      offsets_(std::move(offsets)) {
+      offsets_(std::move(offsets)),
+      pad_(pad) {
   // clang-tidy complains about out_ that it may be null.
   TORCH_INTERNAL_ASSERT(out_ != nullptr);
   TORCH_INTERNAL_ASSERT(in_ != nullptr);
@@ -521,7 +522,8 @@ ShiftOp::ShiftOp(const ShiftOp* src, IrCloner* ir_cloner)
     : Expr(src, ir_cloner),
       out_(ir_cloner->clone(src->out_)),
       in_(ir_cloner->clone(src->in_)),
-      offsets_(src->offsets_) {}
+      offsets_(src->offsets_),
+      pad_(src->pad_) {}
 
 bool ShiftOp::sameAs(const Statement* other) const {
   if (this == other) {
@@ -641,9 +643,25 @@ IterDomain::IterDomain(
     ParallelType parallel_type,
     IterType iter_type,
     bool is_rfactor_domain)
+    : IterDomain(
+          start,
+          extent,
+          extent,
+          parallel_type,
+          iter_type,
+          is_rfactor_domain) {}
+
+IterDomain::IterDomain(
+    Val* start,
+    Val* extent,
+    Val* stop,
+    ParallelType parallel_type,
+    IterType iter_type,
+    bool is_rfactor_domain)
     : Val(ValType::IterDomain, DataType::Int, false),
       start_(start),
       extent_(extent),
+      stop_(stop),
       parallel_type_(parallel_type),
       iter_type_(iter_type),
       is_rfactor_domain_(is_rfactor_domain) {
@@ -663,14 +681,6 @@ IterDomain::IterDomain(
       start,
       " .");
 
-  // Check that all for-loops iterate from zero to some positive integer
-  // lower_insert_syncs uses this assumption for correctness.
-  TORCH_INTERNAL_ASSERT(
-      start->isZeroInt(),
-      "Cannot create an iter domain with a start that is non-zero but received ",
-      start,
-      " .");
-
   name_ = fusion_->registerVal(this);
 }
 
@@ -678,6 +688,7 @@ IterDomain::IterDomain(const IterDomain* src, IrCloner* ir_cloner)
     : Val(src, ir_cloner),
       start_(ir_cloner->clone(src->start_)),
       extent_(ir_cloner->clone(src->extent_)),
+      stop_(ir_cloner->clone(src->stop_)),
       parallel_type_(src->parallel_type_),
       iter_type_(src->iter_type_),
       is_rfactor_domain_(src->is_rfactor_domain_),
@@ -699,6 +710,7 @@ bool IterDomain::sameAs(const Statement* other) const {
       getParallelType() == other_id->getParallelType();
   is_same = is_same && ScalarCheck::sameAs(extent(), other_id->extent());
   is_same = is_same && ScalarCheck::sameAs(start(), other_id->start());
+  is_same = is_same && ScalarCheck::sameAs(stop(), other_id->stop());
 
   return is_same;
 }
@@ -714,10 +726,12 @@ std::vector<IterDomain*> IterDomain::clone(
   return cloned_domains;
 }
 
+// Merging does not propagate the start and stop values of the input
+// domains to the merged output domain. The actual range of the
+// domains is enforced by predicates. Note that since only root
+// domains have valid start and stop, it's not possible to contiguous
+// predication.
 IterDomain* IterDomain::merge(IterDomain* outer, IterDomain* inner) {
-  TORCH_CHECK(
-      outer->start()->isZeroInt() && inner->start()->isZeroInt(),
-      "Merging IterDomains with starting values that aren't 0 is not supported at this time.");
   TORCH_CHECK(
       !outer->extent()->isZeroInt() && !inner->extent()->isZeroInt(),
       "Merging IterDomains with ending values that are 0 is not supported at this time.");
@@ -765,14 +779,13 @@ IterDomain* IterDomain::merge(IterDomain* outer, IterDomain* inner) {
   return merged_id;
 }
 
+// Both outer and inner domains do not inherit start and stop
+// values as they can't be split. The access range is enforced by
+// predicates.
 std::pair<IterDomain*, IterDomain*> IterDomain::split(
     IterDomain* in,
     Val* factor,
     bool inner_split) {
-  TORCH_CHECK(
-      in->start()->isZeroInt(),
-      "Splitting IterDomains with starting values that aren't 0 is not supported at this time.");
-
   TORCH_CHECK(
       !in->extent()->isZeroInt(),
       "Splitting IterDomains with ending values that are 0 is not supported at this time.");
@@ -832,6 +845,10 @@ void IterDomain::parallelize(ParallelType t) {
         extent(),
         " .");
   }
+}
+
+bool IterDomain::maybePartial() const {
+  return !start()->isZeroInt() || !stop()->sameAs(extent());
 }
 
 TensorDomain::TensorDomain(

@@ -729,6 +729,10 @@ class TORCH_CUDA_CU_API IterDomain final : public Val {
     return start_;
   }
 
+  Val* stop() const {
+    return stop_;
+  }
+
   Val* extent() const;
 
   bool isSimple() const {
@@ -741,6 +745,7 @@ class TORCH_CUDA_CU_API IterDomain final : public Val {
 
  private:
   Val* const start_ = nullptr;
+  Val* const stop_ = nullptr;
   Val* const extent_ = nullptr;
   ParallelType parallel_type_ = ParallelType::Serial;
   IterType iter_type_ = IterType::Iteration;

@@ -138,13 +138,17 @@ c10::optional<ParallelType> NamedScalar::getParallelIndex() const {
 }
 
 IterDomain::IterDomain(Passkey passkey, Val* start, Val* extent)
-    : Val(passkey, DataType::Int), start_(start), extent_(extent) {}
+    : Val(passkey, DataType::Int),
+      start_(start),
+      stop_(extent),
+      extent_(extent) {}
 
 IterDomain::IterDomain(
     Passkey passkey,
     const fuser::cuda::IterDomain* iter_domain)
     : Val(passkey, iter_domain->getDataType().value()),
       start_(GpuLower::current()->lowerValue(iter_domain->start())),
+      stop_(GpuLower::current()->lowerValue(iter_domain->stop())),
       extent_(GpuLower::current()->lowerValue(iter_domain->extent())),
       parallel_type_(iter_domain->getParallelType()),
       iter_type_(iter_domain->getIterType()),

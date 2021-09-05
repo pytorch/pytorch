@@ -109,6 +109,12 @@ void ExpressionEvaluator::handle(BinaryOp* bop) {
       case BinaryOpType::And:
         known_values_[bop->out()] = Int::ScalarType(*lhs && *rhs);
         break;
+      case BinaryOpType::Max:
+        known_values_[bop->out()] = std::max(*lhs, *rhs);
+        break;
+      case BinaryOpType::Min:
+        known_values_[bop->out()] = std::min(*lhs, *rhs);
+        break;
       default:
         TORCH_CHECK(!"Unexpected operator type");
     }

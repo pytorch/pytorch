@@ -103,6 +103,10 @@ void IrPrinter::handle(const IterDomain* id) {
     print_inline(id->start());
     os_ << " : ";
   }
+  if (id->stop() != id->extent()) {
+    print_inline(id->stop());
+    os_ << " : ";
+  }
   print_inline(id->extent());
   os_ << "}";
   if (id->isRFactorProduct())
@@ -366,7 +370,7 @@ void IrPrinter::handle(const TransposeOp* top) {
 void IrPrinter::handle(const ShiftOp* sop) {
   indent();
   os_ << sop->out() << " = shift( " << sop->in() << ", {" << sop->offsets()
-      << "} )\n";
+      << "}, padding = " << (sop->pad() ? "true" : "false") << " )\n";
 }
 
 void IrPrinter::handle(const GatherOp* op) {

@@ -467,9 +467,14 @@ class CudaKernelGenerator : private kir::IrVisitor {
       }
       expr << " " << rhs;
     } else {
-      expr << op_type;
-      if (needFloatSuffix(op_type) && out->dtype() == DataType::Float) {
-        expr << "f";
+      if (integer_op_str(op_type) && isIntegralType(out->dtype())) {
+        auto int_op = integer_op_str(op_type);
+        expr << *int_op;
+      } else {
+        expr << op_type;
+        if (needFloatSuffix(op_type) && out->dtype() == DataType::Float) {
+          expr << "f";
+        }
       }
       expr << "(" << lhs << ", " << rhs << ")";
     }

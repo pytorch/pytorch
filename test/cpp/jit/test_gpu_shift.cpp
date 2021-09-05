@@ -2065,13 +2065,11 @@ TEST(NVFuserTest, FusionShiftSyncPlacement3_CUDA) {
 
 // Based on original CUDA provided by Vishal Mehta.
 // Major differences with the original version:
-// - Boundary processing. We always pad by zero. The original version
-//   is only defined for the interior domain.
 // - The original version uses additional 2 warps to load the halos
 //   along the Y dimension. The other 10 warps are used to load a 32x10
 //   tile, and all warps will do coalesced loads. No such optimization
 //   is done in the fuser version.
-TEST(NVFuserTest, FusionHorizontalDiffusion_CUDA) {
+TEST(NVFuserTest, FusionHdiff_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -2086,7 +2084,7 @@ TEST(NVFuserTest, FusionHorizontalDiffusion_CUDA) {
   // T2, T3, T4, T5
   std::vector<TensorView*> inp_neighbors;
   for (const auto& offset : offsets) {
-    inp_neighbors.push_back(shift(inp, offset));
+    inp_neighbors.push_back(shift(inp, offset, false));
   }
 
   // T8
@@ -2105,22 +2103,24 @@ TEST(NVFuserTest, FusionHorizontalDiffusion_CUDA) {
 
   // T11 = shift(T10)
   // T12 = T11 - T10
-  auto flx = sub(shift(lap, {0, 0, -1}), lap);
+  auto flx = sub(shift(lap, {0, 0, -1}, false), lap);
   // T14 = T13 - T0
   // T15 = T12 * T14
   // T16 = T15 > 0
   // T17 = T16 ? 0 : T12
-  auto flx_cond = gt(mul(flx, sub(shift(inp, {0, 0, -1}), inp)), new Double(0));
+  auto flx_cond =
+      gt(mul(flx, sub(shift(inp, {0, 0, -1}, false), inp)), new Double(0));
   auto flx0 = where(flx_cond, new Double(0), flx);
 
   // T18 = shift(T10)
   // T19 = T18 - T10
-  auto fly = sub(shift(lap, {0, -1, 0}), lap);
+  auto fly = sub(shift(lap, {0, -1, 0}, false), lap);
   // T20 = shift(T0)
   // T21 = T20 - T0
   // T22 = T19 * T21
   // T23 = T22 > 0
-  auto fly_cond = gt(mul(fly, sub(shift(inp, {0, -1, 0}), inp)), new Double(0));
+  auto fly_cond =
+      gt(mul(fly, sub(shift(inp, {0, -1, 0}, false), inp)), new Double(0));
   // T24 = T23 ? 0 : T19
   auto fly0 = where(fly_cond, new Double(0), fly);
 
@@ -2134,8 +2134,8 @@ TEST(NVFuserTest, FusionHorizontalDiffusion_CUDA) {
   auto out =
       sub(inp,
           mul(coeff,
-              add(sub(flx0, shift(flx0, {0, 0, 1})),
-                  sub(fly0, shift(fly0, {0, 1, 0})))));
+              add(sub(flx0, shift(flx0, {0, 0, 1}, false)),
+                  sub(fly0, shift(fly0, {0, 1, 0}, false)))));
 
   fusion.addOutput(out);
 
@@ -2216,7 +2216,13 @@ TEST(NVFuserTest, FusionHorizontalDiffusion_CUDA) {
   at::Tensor inp_at = at::randn({numel_z, numel_y, numel_x}, options);
   at::Tensor coeff_at = at::randn({numel_z, numel_y, numel_x}, options);
   std::vector<IValue> inputs = {inp_at, coeff_at};
-  auto outputs = fe.runFusion(inputs);
+  auto fuser_output = fe.runFusion(inputs)[0];
+  // Trim the outer rim
+  std::vector<at::indexing::TensorIndex> indices{
+      at::indexing::Slice(0, at::indexing::None),
+      at::indexing::Slice(2, -2),
+      at::indexing::Slice(2, -2)};
+  fuser_output = fuser_output.index(indices);
 
   {
     at::Tensor zeros = at::zeros({numel_z, numel_y, numel_x}, options);
@@ -2233,8 +2239,9 @@ TEST(NVFuserTest, FusionHorizontalDiffusion_CUDA) {
     auto ref = inp_at -
         coeff_at *
             ((flx0 - shift(flx0, {0, 0, 1})) + (fly0 - shift(fly0, {0, 1, 0})));
+    ref = ref.index(indices);
 
-    testValidate(&fusion, outputs, inputs, {ref}, __LINE__, __FILE__);
+    testValidate(&fusion, {fuser_output}, inputs, {ref}, __LINE__, __FILE__);
   }
 }
 
@@ -2859,10 +2866,314 @@ TEST(NVFuserTest, FusionConv2DStaticEvenSizedWindow_CUDA) {
       at::indexing::Slice(0, at::indexing::None),
       at::indexing::Slice(1, at::indexing::None),
       at::indexing::Slice(1, at::indexing::None)};
-  ;
   at_out = at_out.index(indices);
 
   testValidate(&fusion, cg_outputs, inputs, {at_out}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionShiftNoPadding1_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, new Double(1));
+  auto tv2 = shift(tv1, {1, -1}, false);
+  auto tv3 = shift(tv1, {-1, 1}, false);
+  auto tv4 = add(tv2, tv3);
+  auto tv5 = sum(tv4, {0, 1});
+
+  fusion.addOutput(tv5);
+
+  tv1->setMemoryType(MemoryType::Shared);
+
+  tv5->split(0, 4);
+  tv5->split(-1, 8);
+  tv5->reorder({{1, 2}});
+
+  tv1->split(0, 4);
+  tv1->split(-1, 8);
+  tv1->reorder({{1, 2}});
+
+  tv2->computeAt(tv5, -1);
+  tv3->computeAt(tv5, -1);
+
+  tv5->axis(-1)->parallelize(ParallelType::TIDx);
+  tv5->axis(-2)->parallelize(ParallelType::TIDy);
+
+  tv1->axis(-1)->parallelize(ParallelType::TIDx);
+  tv1->axis(-2)->parallelize(ParallelType::TIDy);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  int numel_x = 99;
+  int numel_y = 101;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  at::Tensor t0 = at::randn({numel_x, numel_y}, options);
+  std::vector<IValue> inputs = {t0};
+  auto outputs = fe.runFusion(inputs);
+
+  auto t1 = t0 + 1;
+  auto t2 = shift(t1, {1, -1});
+  auto t3 = shift(t1, {-1, 1});
+  auto t4 = t2 + t3;
+  std::vector<at::indexing::TensorIndex> indices{
+      at::indexing::Slice(1, -1), at::indexing::Slice(1, -1)};
+  t4 = t4.index(indices);
+  auto ref = t4.sum(at::ArrayRef<int64_t>{0, 1});
+
+  testValidate(&fusion, outputs, inputs, {ref}, __LINE__, __FILE__);
+}
+
+// Split and merge
+TEST(NVFuserTest, FusionShiftNoPadding2_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, new Double(1));
+  auto tv2 = shift(tv1, {1, -1}, false);
+  auto tv3 = shift(tv1, {-1, 1}, false);
+  auto tv4 = add(tv2, tv3);
+  auto tv5 = sum(tv4, {0, 1});
+
+  fusion.addOutput(tv5);
+
+  tv1->setMemoryType(MemoryType::Shared);
+
+  tv5->split(0, 4);
+  tv5->split(-1, 8);
+  tv5->reorder({{1, 2}});
+  tv5->merge(-2, -1);
+
+  tv2->computeAt(tv5, -1);
+  tv3->computeAt(tv5, -1);
+
+  tv1->split(0, 4);
+  tv1->split(-1, 8);
+  tv1->reorder({{1, 2}});
+  tv1->merge(-2, -1);
+
+  tv5->axis(-1)->parallelize(ParallelType::TIDx);
+  tv1->axis(-1)->parallelize(ParallelType::TIDx);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  int numel_x = 99;
+  int numel_y = 101;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  at::Tensor t0 = at::randn({numel_x, numel_y}, options);
+  std::vector<IValue> inputs = {t0};
+  auto outputs = fe.runFusion(inputs);
+
+  auto t1 = t0 + 1;
+  auto t2 = shift(t1, {1, -1});
+  auto t3 = shift(t1, {-1, 1});
+  auto t4 = t2 + t3;
+  std::vector<at::indexing::TensorIndex> indices{
+      at::indexing::Slice(1, -1), at::indexing::Slice(1, -1)};
+  t4 = t4.index(indices);
+  auto ref = t4.sum(at::ArrayRef<int64_t>{0, 1});
+
+  testValidate(&fusion, outputs, inputs, {ref}, __LINE__, __FILE__);
+}
+
+// Split and merge, then welford
+TEST(NVFuserTest, FusionShiftNoPadding3_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, new Double(1));
+  auto tv2 = shift(tv1, {1, -1}, false);
+  auto tv3 = shift(tv1, {-1, 1}, false);
+  auto tv4 = add(tv2, tv3);
+  auto tvs = Welford(tv4, {0, 1});
+  auto tv_avg = tvs.avg;
+  auto tv_M2 = tvs.var_sum;
+  auto tv_N = tvs.n;
+
+  fusion.addOutput(tv_avg);
+  fusion.addOutput(tv_M2);
+  fusion.addOutput(tv_N);
+
+  tv1->setMemoryType(MemoryType::Shared);
+
+  tv_avg->split(0, 4);
+  tv_avg->split(-1, 8);
+  tv_avg->reorder({{1, 2}});
+  tv_avg->merge(-2, -1);
+
+  tv2->computeAt(tv_avg, -1);
+  tv3->computeAt(tv_avg, -1);
+
+  tv1->split(0, 4);
+  tv1->split(-1, 8);
+  tv1->reorder({{1, 2}});
+  tv1->merge(-2, -1);
+
+  tv_avg->axis(-1)->parallelize(ParallelType::TIDx);
+  tv1->axis(-1)->parallelize(ParallelType::TIDx);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  int numel_x = 99;
+  int numel_y = 101;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  auto options_int = at::TensorOptions().dtype(at::kLong).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  at::Tensor t0 = at::randn({numel_x, numel_y}, options);
+  std::vector<IValue> inputs = {t0};
+  auto outputs = fe.runFusion(inputs);
+  outputs[1] /= (numel_x - 2) * (numel_y - 2);
+
+  auto t1 = t0 + 1;
+  auto t2 = shift(t1, {1, -1});
+  auto t3 = shift(t1, {-1, 1});
+  auto t4 = t2 + t3;
+  std::vector<at::indexing::TensorIndex> indices{
+      at::indexing::Slice(1, -1), at::indexing::Slice(1, -1)};
+  t4 = t4.index(indices);
+  auto ref_avg = t4.mean(at::ArrayRef<int64_t>{0, 1});
+  auto ref_M2 = t4.var(at::ArrayRef<int64_t>{0, 1}, false);
+  auto ref_N = at::ones({}, options_int) * (numel_x - 2) * (numel_y - 2);
+
+  testValidate(
+      &fusion, outputs, inputs, {ref_avg, ref_M2, ref_N}, __LINE__, __FILE__);
+}
+
+// Shift indexing and predication with contiguous merge
+TEST(NVFuserTest, FusionShiftNoPaddingContigMerge_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+  auto tv1 = add(tv0, new Double(1));
+  auto tv2 = shift(tv1, {1, -1}, true);
+  auto tv3 = shift(tv1, {-1, 1}, false);
+  auto tv4 = add(tv2, tv3);
+  fusion.addOutput(tv4);
+
+  tv2->merge(0);
+  tv3->merge(0);
+  tv4->merge(0);
+
+  tv1->setMemoryType(MemoryType::Global);
+  tv2->setMemoryType(MemoryType::Global);
+  tv3->setMemoryType(MemoryType::Global);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  int numel_x = 9;
+  int numel_y = 11;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({numel_x, numel_y}, options);
+  std::vector<IValue> inputs = {t0};
+  auto outputs = fe.runFusion(inputs);
+
+  std::vector<at::indexing::TensorIndex> indices{
+      at::indexing::Slice(1, -1), at::indexing::Slice(1, -1)};
+
+  auto fuser_out = outputs[0].index(indices);
+
+  auto t1 = t0 + 1;
+  auto t2 = shift(t1, {1, -1});
+  auto t3 = shift(t1, {-1, 1});
+  auto ref = t2 + t3;
+
+  ref = ref.index(indices);
+
+  testValidate(&fusion, {fuser_out}, inputs, {ref}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionShiftNoPaddingChain_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, new Double(1));
+  auto tv2 = shift(tv1, {1, -1}, false);
+  auto tv3 = shift(tv2, {1, -1}, false);
+  auto tv4 = sum(tv3, {0, 1});
+  fusion.addOutput(tv4);
+
+  tv1->setMemoryType(MemoryType::Shared);
+  tv2->setMemoryType(MemoryType::Shared);
+
+  tv4->split(0, 4);
+  tv4->split(-1, 8);
+  tv4->reorder({{1, 2}});
+
+  tv1->computeAt(tv4, 2);
+
+  tv4->axis(-1)->parallelize(ParallelType::TIDx);
+  tv4->axis(-2)->parallelize(ParallelType::TIDy);
+
+  tv4->axis(0)->parallelize(ParallelType::BIDy);
+  tv4->axis(1)->parallelize(ParallelType::BIDx);
+
+  scheduler_utils::parallelizeAllLike(tv4, {tv1, tv2, tv3});
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  int numel_x = 99;
+  int numel_y = 101;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  auto options_int = at::TensorOptions().dtype(at::kLong).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  at::Tensor t0 = at::randn({numel_x, numel_y}, options);
+  std::vector<IValue> inputs = {t0};
+  auto outputs = fe.runFusion(inputs);
+
+  auto t1 = t0 + 1;
+  auto t2 = shift(t1, {1, -1});
+  auto t3 = shift(t2, {1, -1});
+  std::vector<at::indexing::TensorIndex> indices{
+      at::indexing::Slice(2, at::indexing::None), at::indexing::Slice(0, -2)};
+  t3 = t3.index(indices);
+  auto ref = t3.sum(at::ArrayRef<int64_t>{0, 1});
+
+  testValidate(&fusion, outputs, inputs, {ref}, __LINE__, __FILE__);
+}
+
+// Rfactor is not allowed with partial domains
+TEST(NVFuserTest, FusionShiftNoPaddingRfactor_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, new Double(1));
+  auto tv2 = shift(tv1, {1, -1}, false);
+  auto tv3 = sum(tv2, {0, 1});
+  fusion.addOutput(tv3);
+
+  tv3->split(0, 4);
+  tv3->split(-1, 8);
+  tv3->reorder({{1, 2}});
+
+  ASSERT_ANY_THROW(tv3->rFactor({-2}));
 }
 
 } // namespace jit

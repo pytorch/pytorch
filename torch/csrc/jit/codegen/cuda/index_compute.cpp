@@ -193,7 +193,10 @@ class ContigIDs : public OptInDispatch {
     const auto gpu_lower = GpuLower::current();
 
     for (const auto i : c10::irange(root_domain_.size())) {
-      if (root_contiguity_[i]) {
+      // If a root domain has halo, can't use merged domain even if
+      // both inputs are contiguous.
+      if (root_contiguity_[i] &&
+          !gpu_lower->haloInfo().getRootAxisInfo(root_domain_[i]).hasHalo()) {
         auto kir_root_domain_i =
             gpu_lower->lowerValue(root_domain_[i])->as<kir::IterDomain>();
         contig_ids.emplace(kir_root_domain_i);
@@ -2030,6 +2033,21 @@ std::vector<PredicateContigInfo> getPredicateContigIds(
     return std::vector<PredicateContigInfo>();
   }
 
+  // If root IDs are partial, i.e., start is non-zero and stop is not
+  // equal to extent, predication can't be done with merged domains as
+  // start and stop information is only available with root
+  // domains. Similarly, merged domains don't have enough information
+  // about halo to do correct predication, so they must be excluded.
+  std::unordered_set<IterDomain*> excluded_ids;
+  std::copy_if(
+      root_ids.begin(),
+      root_ids.end(),
+      std::inserter(excluded_ids, excluded_ids.begin()),
+      [](IterDomain* root_id) {
+        return root_id->maybePartial() ||
+            GpuLower::current()->haloInfo().getRootAxisInfo(root_id).hasHalo();
+      });
+
   // Run through iteration domain history
   auto exprs = ExprSort::getExprs(
       (*root_vals.begin())->fusion(),
@@ -2043,6 +2061,11 @@ std::vector<PredicateContigInfo> getPredicateContigIds(
           contiguous_ids.begin(), contiguous_ids.end(), merge->inner());
       auto outer_contig_it = std::find(
           contiguous_ids.begin(), contiguous_ids.end(), merge->outer());
+
+      if (excluded_ids.count(merge->inner()) > 0 ||
+          excluded_ids.count(merge->outer()) > 0) {
+        continue;
+      }
 
       if (inner_contig_it != contiguous_ids.end() &&
           outer_contig_it != contiguous_ids.end()) {
@@ -2074,8 +2097,7 @@ std::vector<PredicateContigInfo> getPredicateContigIds(
 } // namespace
 
 // Returns predicates and the concrete (by loop map) root domains they cover
-std::pair<std::vector<kir::Bool*>, std::vector<std::unordered_set<IterDomain*>>>
-Index::getReferenceRootPredicates(
+std::vector<Index::RootPredicateInfo> Index::getReferenceRootPredicates(
     const kir::TensorView* kir_consumer_tv,
     const std::vector<kir::ForLoop*>& loops,
     bool unswitch) {
@@ -2220,10 +2242,7 @@ Index::getReferenceRootPredicates(
       std::inserter(ref_id_to_concrete, ref_id_to_concrete.begin()),
       [](auto entry) { return std::make_pair(entry.second, entry.first); });
 
-  // Track which roots have been handled by the generated predicates
-  std::vector<std::unordered_set<IterDomain*>> handeled_roots;
-
-  std::vector<kir::Bool*> predicates;
+  std::vector<RootPredicateInfo> pred_info_vec;
 
   for (auto contig_id_entry : contig_id_infos) {
     auto contig_id = contig_id_entry.contig_id;
@@ -2258,38 +2277,57 @@ Index::getReferenceRootPredicates(
     }
 
     // Use the iteration domains extent unless there's a halo extent
-    auto extent = kir_contig_id->extent();
+    kir::Val* start = ir_builder.zeroVal();
+    kir::Val* stop = kir_contig_id->extent();
 
+    // TODO: This isn't used for now. When the consumer has halo,
+    // ShiftPredicateInserter is used.
     auto halo_extent_it = reference_halo_extent_map.find(kir_contig_id);
     if (halo_extent_it != reference_halo_extent_map.end()) {
-      extent = halo_extent_it->second;
+      stop = halo_extent_it->second;
+    }
+
+    // Use the start and stop values of the corresponding consumer
+    // axis if necessary
+    if (ref_2_consumer.count(contig_id) != 0) {
+      auto consumer_id = ref_2_consumer.at(contig_id);
+      if (!consumer_id->start()->isZeroInt()) {
+        start = gpu_lower->lowerValue(consumer_id->start());
+      }
+      if (consumer_id->stop() != consumer_id->extent()) {
+        stop = gpu_lower->lowerValue(consumer_id->stop());
+      }
     }
 
     // If the index definition is "simple" and the extent is "simple" then our
     // for loop goes exactly across the iteration domain extent so no predicate
     // needed.
-    if (it->second->definition() == nullptr &&
-        extent->definition() == nullptr) {
+    if (it->second->definition() == nullptr && stop->definition() == nullptr &&
+        start->isZeroInt()) {
       continue;
     }
 
-    predicates.push_back(
-        ir_builder.ltExpr(it->second, extent)->as<kir::Bool>());
+    RootPredicateInfo info;
+
+    info.stop = ir_builder.ltExpr(it->second, stop)->as<kir::Bool>();
+
+    if (!start->isZeroInt()) {
+      info.start = ir_builder.geExpr(it->second, start)->as<kir::Bool>();
+    }
 
     // Transform roots from reference to concrete roots (based on loop compute
     // at map)
-    std::unordered_set<IterDomain*> concrete_root_ids;
     std::transform(
         contig_id_entry.root_ids.begin(),
         contig_id_entry.root_ids.end(),
-        std::inserter(concrete_root_ids, concrete_root_ids.begin()),
+        std::inserter(info.root_ids, info.root_ids.begin()),
         [&ref_id_to_concrete](IterDomain* root_id) {
           return ref_id_to_concrete.at(root_id);
         });
-    handeled_roots.push_back(concrete_root_ids);
+    pred_info_vec.emplace_back(info);
   }
 
-  return {predicates, handeled_roots};
+  return pred_info_vec;
 }
 
 bool Index::protectWithMagicZero(

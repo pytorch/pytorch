@@ -208,16 +208,6 @@ TensorDomain* TransformRFactor::runReplay(
   auto rfactor_root_vals = IterVisitor::getInputsTo(
       std::vector<Val*>(rfactor_axes.begin(), rfactor_axes.end()));
 
-  // Make sure they're all IterDomains.
-  TORCH_INTERNAL_ASSERT(
-      std::all_of(
-          rfactor_root_vals.begin(),
-          rfactor_root_vals.end(),
-          [](Val* v) {
-            return v->getValType().value() == ValType::IterDomain;
-          }),
-      "Found invalid input domain axes.");
-
   // Put in a set to make searching easy
   std::unordered_set<IterDomain*> rfactor_root_axes;
   std::transform(
@@ -228,7 +218,13 @@ TensorDomain* TransformRFactor::runReplay(
         TORCH_INTERNAL_ASSERT(
             val->getValType().value() == ValType::IterDomain,
             "Invalid value type found in rfactor axes inputs.");
-        return val->as<IterDomain>();
+        auto rfactor_root_id = val->as<IterDomain>();
+        // Partial domains don't work with RFactor
+        TORCH_INTERNAL_ASSERT(
+            !rfactor_root_id->maybePartial(),
+            "Rfactor partial domains not allowed:",
+            rfactor_root_id);
+        return rfactor_root_id;
       });
 
   auto orig_td_root = orig_td->getRootDomain();
@@ -245,6 +241,7 @@ TensorDomain* TransformRFactor::runReplay(
         new_root[i] = new IterDomain(
             id->start(),
             id->extent(),
+            id->stop(),
             id->getParallelType(),
             IterType::Reduction,
             true);
@@ -254,6 +251,7 @@ TensorDomain* TransformRFactor::runReplay(
         new_root[i] = new IterDomain(
             id->start(),
             id->extent(),
+            id->stop(),
             id->getParallelType(),
             IterType::Iteration,
             false);

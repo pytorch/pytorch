@@ -239,6 +239,15 @@ class Index {
       const std::vector<bool>& root_contiguity,
       bool unswitch = false);
 
+  struct RootPredicateInfo {
+    // prdicate for lower end
+    kir::Bool* start = nullptr;
+    // prdicate for upper end
+    kir::Bool* stop = nullptr;
+    // Track which roots have been handled by the generated predicates
+    std::unordered_set<IterDomain*> root_ids;
+  };
+
   //! Take a consumer tensorview and loop nest and generates predicates
   //! associated with the concrete roots of the loop nest. Returns a list of
   //! predicates, and a list of concrete roots they're associated with. It is
@@ -256,11 +265,7 @@ class Index {
   //! However if we had TV.size[0] = 16 at "compile time" then we wouldn't need
   //! the predicate. This will be caught by canOmitPredicate in the predicate
   //! lowering
-  // TODO: Replace pair of vectors with vector of
-  static std::pair<
-      std::vector<kir::Bool*>,
-      std::vector<std::unordered_set<IterDomain*>>>
-  getReferenceRootPredicates(
+  static std::vector<RootPredicateInfo> getReferenceRootPredicates(
       const kir::TensorView* kir_consumer_tv,
       const std::vector<kir::ForLoop*>& loops,
       bool unswitch = false);

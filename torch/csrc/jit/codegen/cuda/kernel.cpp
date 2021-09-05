@@ -197,7 +197,10 @@ class ValidateAllocation : private kir::IrVisitor {
           if (isParallelTypeThreadDim(loop_id->parallelType())) {
             TORCH_INTERNAL_ASSERT(
                 tv->memoryType() == MemoryType::Shared ||
-                tv->memoryType() == MemoryType::Global);
+                    tv->memoryType() == MemoryType::Global,
+                "Tensor t",
+                tv->name(),
+                " must be allocated on SMEM or GMEM.");
           } else if (isParallelTypeBlockDim(loop_id->parallelType())) {
             TORCH_INTERNAL_ASSERT(tv->memoryType() == MemoryType::Global);
           }

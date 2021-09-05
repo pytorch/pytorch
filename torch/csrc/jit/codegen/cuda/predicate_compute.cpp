@@ -80,7 +80,7 @@ kir::Bool* PredicateCompute::getInlinePredicate(
     return thread_pred;
   }
 
-  auto all_preds = Index::getReferenceRootPredicates(out_tv, loops);
+  auto pred_info_vec = Index::getReferenceRootPredicates(out_tv, loops);
 
   std::vector<kir::Bool*> preds;
 
@@ -96,10 +96,9 @@ kir::Bool* PredicateCompute::getInlinePredicate(
   // output may be predicated out with the read predicate, so the
   // write predicate needs to ignore the reduction axes.
   bool non_zero_start_found = false;
-  for (size_t i = 0; i < all_preds.first.size(); ++i) {
-    auto pred = all_preds.first[i];
+  for (const auto& pred_info : pred_info_vec) {
     if (pred_type == PredicateType::ReductionWrite) {
-      const auto& concrete_root_ids = all_preds.second[i];
+      const auto& concrete_root_ids = pred_info.root_ids;
       bool pred_for_reduction_axis = false;
       for (auto pred_root_id : concrete_root_ids) {
         auto kir_pred_root_id =
@@ -129,8 +128,12 @@ kir::Bool* PredicateCompute::getInlinePredicate(
         continue;
       }
     }
-    if (!is_true(pred)) {
-      preds.push_back(pred);
+    // start may be nullptr. stop must be non-null
+    if (pred_info.start && !is_true(pred_info.start)) {
+      preds.push_back(pred_info.start);
+    }
+    if (!is_true(pred_info.stop)) {
+      preds.push_back(pred_info.stop);
     }
   }
 
@@ -197,15 +200,16 @@ void UnswitchPredicate::predicateOn(kir::Expr* tv_expr) {
 
   auto out_tv = firstTensorViewOutput(tv_expr);
 
-  auto pred_info = Index::getReferenceRootPredicates(out_tv, for_loops_, true);
+  auto pred_info_vec =
+      Index::getReferenceRootPredicates(out_tv, for_loops_, true);
 
-  for (auto i : c10::irange(pred_info.first.size())) {
-    auto pred = pred_info.first[i];
+  for (const auto& pred_info : pred_info_vec) {
+    auto pred = pred_info.stop;
     if (pred->isConst() && pred->value()) {
       continue;
     }
 
-    const auto& root_ids = pred_info.second[i];
+    const auto& root_ids = pred_info.root_ids;
 
     bool add_pred = false;
 

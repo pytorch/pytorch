@@ -280,9 +280,21 @@ TORCH_CUDA_CU_API TensorView* sum_to(
 //!   then:
 //!     t1[i, j] = t0[i-1, j+1] for 1 <= i < N and 0 <= j < M-1.
 //!     t1[i, j] = 0, otherwise
+//!
+//! The pad option controls how out-of-boundary accesses are
+//! handled. When pad is true, shifting works as if the source tensor
+//! is padded by zero. Otherwise, it does not modify the output tensor
+//! region whose source coordinates are out-of-boundry. In both cases,
+//! the size of output tensor does not change. However, when pad is
+//! false, the start or stop value of the shifted axis is adjusted
+//! accordingly. For example, when a shift offset is one, the axis start
+//! value would be incremented by one.
+//!
+//! \param pad If true, out-of-boundary access returns zero.
 TORCH_CUDA_CU_API TensorView* shift(
     TensorView* inp,
-    const std::vector<int>& offsets);
+    const std::vector<int>& offsets,
+    bool pad = true);
 
 //! Gather a window of nearby elements for each element.
 //!

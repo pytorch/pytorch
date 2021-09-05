@@ -145,14 +145,6 @@ TensorDomain* TransformReplay::fullSelfReplay(
     size_t i = 0;
     for (auto id : self->getRootDomain()) {
       TORCH_INTERNAL_ASSERT(
-          new_self_root->getRootDomain()[i]->start()->isZeroInt() &&
-              id->start()->isZeroInt(),
-          "Replay does not support IterDomains that do not start at 0, received: ",
-          new_self_root->getRootDomain()[i]->start(),
-          " and ",
-          id->start()->isZeroInt());
-
-      TORCH_INTERNAL_ASSERT(
           new_self_root->getRootDomain()[i]->getParallelType() ==
                   id->getParallelType() &&
               new_self_root->getRootDomain()[i]->isReduction() ==
