@@ -10,7 +10,7 @@ class __PrinterOptions(object):
     edgeitems: int = 3
     linewidth: int = 80
     sci_mode: Optional[bool] = None
-    show_shape: bool = True
+    show_shape: bool = False
 
 
 PRINT_OPTS = __PrinterOptions()
@@ -24,7 +24,7 @@ def set_printoptions(
         linewidth=None,
         profile=None,
         sci_mode=None,
-        show_shape=True
+        show_shape=False
 ):
     r"""Set options for printing. Items shamelessly taken from NumPy
 
