@@ -405,7 +405,7 @@ __global__ void nll_loss_backward_no_reduce_cuda_kernel(
       continue;
     }
     CUDA_KERNEL_ASSERT(cur_target >= 0 && cur_target < n_classes);
-    auto grad = -grad_output[0];
+    auto grad = -grad_output[cur_target];
     if (weights != nullptr) {
       grad *= weights[cur_target];
     }

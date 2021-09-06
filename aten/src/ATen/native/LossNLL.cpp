@@ -371,47 +371,6 @@ static void nll_loss_backward_out_frame(
     }
   }
 }
-
-void nll_loss_backward_out_cpu_template(
-    const Tensor& grad_input,
-    const Tensor& grad_output,
-    const Tensor& input,
-    const Tensor& target,
-    const Tensor& weight,
-    int64_t reduction,
-    int64_t ignore_index,
-    const Tensor& total_weight) {
-
-  AT_DISPATCH_FLOATING_TYPES_AND(
-      ScalarType::BFloat16,
-      input.scalar_type(),
-      "nll_loss_backward_out_frame",
-      [&] {
-        if (target.scalar_type() == kByte) {
-          nll_loss_backward_out_frame<scalar_t, uint8_t>(
-              grad_input,
-              grad_output,
-              input,
-              target,
-              weight,
-              reduction,
-              ignore_index,
-              total_weight);
-        } else {
-          // assumed to be uint64
-          nll_loss_backward_out_frame<scalar_t, int64_t>(
-              grad_input,
-              grad_output,
-              input,
-              target,
-              weight,
-              reduction,
-              ignore_index,
-              total_weight);
-        }
-      });
-}
-
 } // namespace
 
 TORCH_IMPL_FUNC(nll_loss_forward_out_cpu)
@@ -438,15 +397,35 @@ TORCH_IMPL_FUNC(nll_loss_backward_out_cpu)
  const Tensor& grad_input
 ) {
   const Tensor& weight = weight_opt.getTensorRef();
-  nll_loss_backward_out_cpu_template(
-      grad_input,
-      grad_output,
-      self,
-      target,
-      weight,
-      reduction,
-      ignore_index,
-      total_weight);
+
+  AT_DISPATCH_FLOATING_TYPES_AND(
+      ScalarType::BFloat16,
+      input.scalar_type(),
+      "nll_loss_backward_out_frame",
+      [&] {
+        if (target.scalar_type() == kByte) {
+          nll_loss_backward_out_frame<scalar_t, uint8_t>(
+              grad_input,
+              grad_output,
+              input,
+              target,
+              weight,
+              reduction,
+              ignore_index,
+              total_weight);
+        } else {
+          // assumed to be int64
+          nll_loss_backward_out_frame<scalar_t, int64_t>(
+              grad_input,
+              grad_output,
+              input,
+              target,
+              weight,
+              reduction,
+              ignore_index,
+              total_weight);
+        }
+      });
 }
 
 Tensor cross_entropy_loss_prob_target(
