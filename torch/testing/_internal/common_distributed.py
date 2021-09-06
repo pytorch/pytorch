@@ -467,10 +467,6 @@ class MultiProcessTestCase(TestCase):
             self.pid_to_pipe[process.pid] = parent_conn
             self.processes.append(process)
 
-    def _fork_processes(self) -> None:
-        proc = torch.multiprocessing.get_context("fork").Process
-        self._start_processes(proc)
-
     def _spawn_processes(self) -> None:
         proc = torch.multiprocessing.get_context("spawn").Process
         self._start_processes(proc)
@@ -525,10 +521,6 @@ class MultiProcessTestCase(TestCase):
         self.rank = rank
         self.file_name = file_name
         self.run_test(test_name, parent_pipe, signal_send_pipe, event_listener_thread)
-
-        # exit to avoid run teardown() for fork processes
-        # Use os._exit() as it is the recommended way for child processes.
-        os._exit(0)
 
     def run_test(
         self, test_name: str, parent_pipe, signal_pipe=None, event_listener_thread=None
