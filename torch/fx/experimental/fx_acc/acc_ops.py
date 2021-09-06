@@ -10,7 +10,7 @@ from torch.fx.experimental.fx_acc.acc_normalizer import (
     register_acc_op_mapping,
     register_custom_acc_mapper_fn,
 )
-from torch.fx.passes.shape_prop import extract_tensor_metadata
+from torch.fx.passes.shape_prop import _extract_tensor_metadata
 
 this_arg_is_optional = True
 
@@ -93,6 +93,12 @@ def avg_pool2d(
     divisor_override,
 ):
     return nn.functional.avg_pool2d(**locals())
+
+
+@register_acc_op_mapping(op_and_target=("call_function", torch.sign))
+@register_acc_op
+def sign(*, input):
+    return torch.sign(input)
 
 
 @register_acc_op
@@ -705,6 +711,57 @@ def batch_norm(
 def layer_norm(*, input, normalized_shape, weight, bias, eps):
     return nn.functional.layer_norm(**locals())
 
+def argmin_max_mapper_impl(node: torch.fx.Node, largest: bool) -> torch.fx.Node:
+    """
+    Map torch.argmin or torch.argmax to acc_ops.flatten (depend on dim) + acc_ops.topk
+    + acc_ops.getitem + acc_ops.squeeze (depends on keepdim).
+    """
+    input_node = node.kwargs["input"]
+    dim = node.kwargs["dim"]
+    keepdim = node.kwargs["keepdim"]
+
+    if dim is None and keepdim:
+        raise RuntimeError("We currently don't support argmin/argmax with dim=None and keepdim=True")
+
+    with node.graph.inserting_before(node):
+        if dim is None:
+            flatten_kwargs = {"input": node.kwargs["input"], "start_dim": 0, "end_dim": -1}
+            flatten_node = node.graph.call_function(flatten, kwargs=flatten_kwargs)
+            flatten_node.meta["type"] = torch.Tensor
+            input_node = flatten_node
+            dim = -1
+
+        topk_kwargs = {"input": input_node, "k": 1, "dim": dim, "largest": largest, "sorted": False}
+        topk_node = node.graph.call_function(topk, kwargs=topk_kwargs)
+        # It's actually more like NamedTuple but tuple here should be fine.
+        topk_node.meta["type"] = tuple
+
+        getitem_kwargs = {"input": topk_node, "idx": 1}
+        getitem_node = node.graph.call_function(getitem, kwargs=getitem_kwargs)
+        getitem_node.meta["type"] = torch.Tensor
+        output_node = getitem_node
+
+        if not keepdim:
+            squeeze_kwargs = {"input": getitem_node, "dim": dim}
+            output_node = node.graph.call_function(squeeze, kwargs=squeeze_kwargs)
+
+        output_node.meta = node.meta.copy()
+        return output_node
+
+@register_custom_acc_mapper_fn(
+    op_and_target=("call_function", torch.argmin),
+    arg_replacement_tuples=[
+        ("input", "input"),
+        ("dim", "dim"),
+        ("keepdim", "keepdim"),
+    ],
+)
+def torch_argmin_mapper(node: torch.fx.Node, _: torch.nn.Module) -> torch.fx.Node:
+    """
+    Map torch.argmin to acc_ops.flatten (depend on dim) + acc_ops.topk + acc_ops.getitem
+    + acc_ops.squeeze (depends on keepdim).
+    """
+    return argmin_max_mapper_impl(node, largest=False)
 
 @register_custom_acc_mapper_fn(
     op_and_target=("call_method", "split"),
@@ -1083,12 +1140,12 @@ def packed_quantized_linear_mapper(
     with node.graph.inserting_before(node):
         # Insert get_attr nodes for weight and bias
         get_weight = node.graph.get_attr(weight_name)
-        get_weight.meta["tensor_meta"] = extract_tensor_metadata(linear_module.weight())
+        get_weight.meta["tensor_meta"] = _extract_tensor_metadata(linear_module.weight())
 
         get_bias = None
         if linear_module.bias() is not None:
             get_bias = node.graph.get_attr(bias_name)
-            get_bias.meta["tensor_meta"] = extract_tensor_metadata(linear_module.bias())
+            get_bias.meta["tensor_meta"] = _extract_tensor_metadata(linear_module.bias())
 
         # Create kwargs for acc_op.quantized_linear
         kwargs = {
@@ -1131,12 +1188,12 @@ def packed_quantized_conv2d_mapper(
     with node.graph.inserting_before(node):
         # Insert get_attr nodes for weight and bias
         get_weight = node.graph.get_attr(weight_name)
-        get_weight.meta["tensor_meta"] = extract_tensor_metadata(conv_module.weight())
+        get_weight.meta["tensor_meta"] = _extract_tensor_metadata(conv_module.weight())
 
         get_bias = None
         if conv_module.bias() is not None:
             get_bias = node.graph.get_attr(bias_name)
-            get_bias.meta["tensor_meta"] = extract_tensor_metadata(conv_module.bias())
+            get_bias.meta["tensor_meta"] = _extract_tensor_metadata(conv_module.bias())
 
         # Create kwargs for acc_op.conv
         kwargs = {

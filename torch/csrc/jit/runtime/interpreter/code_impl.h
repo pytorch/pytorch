@@ -105,6 +105,8 @@ struct CodeImpl {
   // This is because for all usages, at most 3 args are used.
   std::unordered_map<std::string, size_t> op_to_num_specified_args_;
 
+  std::unordered_map<std::string, size_t> op_to_num_out_args_;
+
   // running count of uses as we emit. When we reach use_count_[v] =
   // v.uses().size() we know it is the final use and we can move rather than
   // load.
@@ -289,6 +291,12 @@ struct CodeImpl {
         emitUse(input, false);
         count++;
       }
+    }
+  }
+
+  void emitLoadInputs(at::ArrayRef<Value*> inputs, size_t start, size_t end) {
+    for (size_t i = start; i < end; i++) {
+      emitUse(inputs[i], false);
     }
   }
 
@@ -713,9 +721,11 @@ struct MobileCodeImpl : CodeImpl {
       const std::shared_ptr<Graph>& graph,
       std::string function_name,
       bool emit_default_input_instructions,
+      bool support_default_args_before_out,
       size_t remaining_bailout_depth)
       : CodeImpl(graph, function_name, remaining_bailout_depth, false),
-        emit_default_input_instructions_(emit_default_input_instructions) {
+        emit_default_input_instructions_(emit_default_input_instructions),
+        support_default_args_before_out_(support_default_args_before_out) {
     // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
     run();
   }
@@ -737,13 +747,20 @@ struct MobileCodeImpl : CodeImpl {
         auto op_schema = node->getOperator().schema();
         // skip if schema has vararg
         if (!op_schema.is_vararg()) {
-          auto numInclude =
-              CalculateNecessaryArgs(op_schema.arguments(), node->inputs());
+          auto specifiedArgs = CalculateNecessaryArgs(
+              op_schema.arguments(),
+              node->inputs(),
+              support_default_args_before_out_);
+
+          size_t numInclude = specifiedArgs.first +
+              (support_default_args_before_out_ ? specifiedArgs.second : 0);
           auto unique_name = op_schema.overload_name() != ""
               ? op_schema.name() + "." + op_schema.overload_name()
               : op_schema.name();
           auto it = op_to_num_specified_args_.insert(
               std::pair<std::string, size_t>(unique_name, 0));
+          op_to_num_out_args_.insert(std::pair<std::string, size_t>(
+              unique_name, specifiedArgs.second));
           auto prev_value = it.first->second;
           it.first->second = std::max(numInclude, prev_value);
         }
@@ -768,14 +785,27 @@ struct MobileCodeImpl : CodeImpl {
         if (it != op_to_num_specified_args_.end()) {
           num_include = it->second;
         }
-        emitLoadInputs(node->inputs(), num_include);
+        if (support_default_args_before_out_) {
+          auto num_out = op_to_num_out_args_.find(unique_op_name)->second;
+          auto num_specified_before_out = num_include - num_out;
+          emitLoadInputs(node->inputs(), 0, num_specified_before_out);
+          emitLoadInputs(
+              node->inputs(),
+              node->inputs().size() - num_out,
+              node->inputs().size());
+        } else {
+          emitLoadInputs(node->inputs(), num_include);
+        }
         insertInstruction(OP, operator_table_.size());
       }
       operator_table_.emplace_back(op.getOperation(node));
     }
   }
 
+  // To support forward compatibility for bytecode version bump from v5 to v6
   bool emit_default_input_instructions_;
+  // To support forward compatibility for bytecode version bump from v6 to v7
+  bool support_default_args_before_out_;
 };
 
 } // namespace interpreter
