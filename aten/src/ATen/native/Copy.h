@@ -15,5 +15,7 @@ using transpose_copy_fn = void (*)(Tensor&, const Tensor&);
 DECLARE_DISPATCH(copy_fn, copy_stub);
 DECLARE_DISPATCH(transpose_copy_fn, transpose_copy_stub);
 
+TORCH_API void copy_ignoring_overlaps(const Tensor &dst, const Tensor &src);
+
 } // namespace native
 } // namespace at
