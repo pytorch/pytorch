@@ -212,6 +212,7 @@ class TestPublicBindings(unittest.TestCase):
             "TupleType",
             "Type",
             "unify_type_list",
+            "UnionType",
             "Use",
             "Value",
             "autocast_decrement_nesting",

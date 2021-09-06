@@ -676,6 +676,16 @@ const auto argmin_with_keep_dim_script = R"JIT(
       return torch.argmin(a, dim, True).clone()
 )JIT";
 
+const auto softmax_script = R"JIT(
+  def forward(self, a: Tensor, dim: int):
+      return torch.softmax(a, dim).clone()
+)JIT";
+
+const auto softmax_script_with_dtype = R"JIT(
+  def forward(self, a: Tensor, dim: int, dtype: int):
+      return torch.softmax(a, dim, dtype=dtype).clone()
+)JIT";
+
 const auto getitem_dict_tensor_script = R"JIT(
   def forward(self, key: Tensor):
       d = {key: 1}
@@ -752,6 +762,12 @@ const auto append_tensor_script = R"JIT(
       return lst
 )JIT";
 
+const auto nonzero_tensor = R"JIT(
+  def forward(self, input: Tensor):
+      a = torch.nonzero(input).clone()
+      return (a)
+)JIT";
+
 const std::string quantize_script = R"IR(
   graph(%input: Tensor, %weights: Tensor):
       %scale: float = prim::Constant[value=1.]()
@@ -790,3 +806,35 @@ const auto linalg_norm_ord_str = R"JIT(
   def forward(self, a: Tensor, ord: str, dim: List[int], keepdim: bool, dtype: int):
       return torch.linalg_norm(a, ord, dim, keepdim, dtype=dtype).clone()
 )JIT";
+
+const std::string cat_script = R"IR(
+  graph(%a: Tensor, %b: Tensor, %dim: int):
+      %ten_list: Tensor[] = prim::ListConstruct(%a, %b)
+      %1 : int = prim::Constant[value=0]()
+      %2 : int = prim::Constant[value=1]()
+      %3 : int = prim::Constant[value=1]()
+      %ten_list2 : Tensor[] = aten::slice(%ten_list, %1, %2, %3)
+      %ret: Tensor = aten::cat(%ten_list2, %dim)
+      return (%ret)
+)IR";
+
+const auto cumsum_script = R"JIT(
+   def forward(self, a: Tensor, dim: int):
+      return torch.cumsum(a, dim).clone()
+)JIT";
+
+const auto cumsum_script_dtype = R"JIT(
+   def forward(self, a: Tensor, dim: int, dtype: int):
+      return torch.cumsum(a, dim, dtype=dtype).clone()
+)JIT";
+
+const std::string signed_log1p_script = R"IR(
+  graph(%input):
+      %0 : Tensor = aten::sign(%input)
+      %1 : Tensor = aten::abs(%input)
+      %2 : Tensor = aten::log1p(%1)
+      %3 : Tensor = aten::mul(%0, %2)
+      %none : NoneType = prim::Constant()
+      %res : Tensor = aten::clone(%3, %none)
+      return (%res)
+)IR";
