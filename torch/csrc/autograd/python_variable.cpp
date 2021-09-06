@@ -131,32 +131,6 @@ static bool check_has_torch_dispatch(PyObject *obj) {
   );
 }
 
-// Creates a new Python object for a Variable.  The status parameter
-// specifies what the interpreter tag status on the object is; for
-// example, if you ran check_pyobj, the return optional of this object
-// tells you if the tensor was already tagged or not so you can pass
-// TAGGED_BY_US or MAYBE_UNINITIALIZED; in other cases, you know where
-// var came from and can directly assert that it's DEFINITELY_UNINITIALIZED.
-// It's ALWAYS safe (albeit slower) to call this with MAYBE_UNINITIALIZED.
-static PyObject* THPVariable_NewWithVar(
-    PyTypeObject* type,
-    Variable _var,
-    c10::impl::PyInterpreterStatus status) {
-  PyObject* obj = type->tp_alloc(type, 0);
-  if (obj) {
-    auto v = (THPVariable*) obj;
-    // TODO: named constructor to avoid default initialization
-    new (&v->cdata) MaybeOwned<Variable>();
-    v->cdata = MaybeOwned<Variable>::owned(std::move(_var));
-    const auto& var = THPVariable_Unpack(v);
-    var.unsafeGetTensorImpl()->init_pyobj(self_interpreter.get(), obj, status);
-    if (check_has_torch_dispatch(obj)) {
-      var.unsafeGetTensorImpl()->set_python_dispatch(true);
-    }
-  }
-  return obj;
-}
-
 // TODO: Make this take Variable by const reference
 PyObject * THPVariable_Wrap(Variable var)
 {
@@ -1260,6 +1234,32 @@ void THPVariable_subclass_dealloc(PyObject* self) {
   // Python defined subclasses should always be on the heap
   TORCH_INTERNAL_ASSERT(type->tp_flags & Py_TPFLAGS_HEAPTYPE);
   Py_DECREF(type);
+}
+
+// Creates a new Python object for a Variable.  The status parameter
+// specifies what the interpreter tag status on the object is; for
+// example, if you ran check_pyobj, the return optional of this object
+// tells you if the tensor was already tagged or not so you can pass
+// TAGGED_BY_US or MAYBE_UNINITIALIZED; in other cases, you know where
+// var came from and can directly assert that it's DEFINITELY_UNINITIALIZED.
+// It's ALWAYS safe (albeit slower) to call this with MAYBE_UNINITIALIZED.
+static PyObject* THPVariable_NewWithVar(
+    PyTypeObject* type,
+    Variable _var,
+    c10::impl::PyInterpreterStatus status) {
+  PyObject* obj = type->tp_alloc(type, 0);
+  if (obj) {
+    auto v = (THPVariable*) obj;
+    // TODO: named constructor to avoid default initialization
+    new (&v->cdata) MaybeOwned<Variable>();
+    v->cdata = MaybeOwned<Variable>::owned(std::move(_var));
+    const auto& var = THPVariable_Unpack(v);
+    var.unsafeGetTensorImpl()->init_pyobj(self_interpreter.get(), obj, status);
+    if (check_has_torch_dispatch(obj)) {
+      var.unsafeGetTensorImpl()->set_python_dispatch(true);
+    }
+  }
+  return obj;
 }
 
 /// NOTE [ PyObject Traversal ]
