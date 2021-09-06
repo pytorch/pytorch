@@ -95,5 +95,5 @@ def post_localSGD_hook(
     # From this moment, model averaging should run after the optimizer step,
     # to globally allreduce all the parameters.
     if state.subgroup is None:
-        state.subgroup, _ = dist.new_subgroups()
+        raise ValueError("Subgroup of PostLocalSGDState is not initialized before allreduce.")
     return default._allreduce_fut(state.subgroup, input_tensor)
