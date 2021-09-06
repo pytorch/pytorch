@@ -505,6 +505,20 @@ Tensor sparse_to_dense(
   return dst.add_(self);
 }
 
+SparseTensor& copy_sparse_wrapper_(
+    Tensor& self,
+    const Tensor& src,
+    bool non_blocking) {
+  if (!self.is_sparse() || !src.is_sparse()) {
+    AT_ERROR(
+        "copy_() between dense and sparse Tensors is not implemented! Found self type = ",
+        self.toString(),
+        " and src type = ",
+        src.toString());
+  }
+  return at::copy_sparse_to_sparse_(self, src, non_blocking);
+}
+
 SparseTensor& copy_sparse_(
     SparseTensor& self,
     const SparseTensor& src,

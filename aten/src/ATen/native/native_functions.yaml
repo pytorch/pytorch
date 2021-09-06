@@ -1239,7 +1239,15 @@
   device_guard: False
   dispatch:
     MkldnnCPU: copy_mkldnn_
-    CompositeExplicitAutograd: copy_
+    Named: copy_
+    SparseCPU, SparseCUDA, SparseHIP, SparseXPU: copy_sparse_wrapper_
+    QuantizedCPU: copy_quantized_cpu_
+    QuantizedCUDA: copy_quantized_cuda_
+    QuantizedXPU: copy_quantized_xpu_
+    CPU, CUDA, HIP, XPU: copy_cpu_cuda_hip_xpu_
+    Vulkan: copy_vulkan_
+    Metal: copy_metal_
+    CompositeExplicitAutograd: copy_out_of_tree_fallback_
 
 - func: _copy_from(Tensor self, Tensor dst, bool non_blocking=False) -> Tensor
   dispatch: {}

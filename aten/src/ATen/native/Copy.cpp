@@ -6,7 +6,6 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/quantized/Copy.h>
 #include <ATen/native/vulkan/ops/Copy.h>
-#include <ATen/quantized/Quantizer.h>
 #include <ATen/vulkan/Context.h>
 #include <ATen/metal/Context.h>
 #include <ATen/MemoryOverlap.h>
@@ -90,19 +89,51 @@ void copy_same_type_transpose_(Tensor& self, const Tensor& src) {
   });
 }
 
-// Devices directly supported by this copy implementation. Other device types
-// (e.g. XLA) may be supported by overriding copy_ and _copy_from.
-bool is_supported_device(Device device) {
-  DeviceType device_type = device.type();
-  return device_type == kCPU || device_type == kCUDA || device_type == kHIP || device_type == kVulkan || device_type == kMetal;
-}
-
 } // namespace
 
 namespace at {
 namespace native {
 
-static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) {
+Tensor& copy_vulkan_(Tensor& self, const Tensor& src, bool non_blocking) {
+#ifdef USE_VULKAN_API
+  return vulkan::ops::copy_(self, src);
+#else
+  return at::vulkan::vulkan_copy_(self, src);
+#endif
+}
+
+Tensor& copy_metal_(Tensor& self, const Tensor& src, bool non_blocking) {
+  return at::metal::metal_copy_(self, src);
+}
+
+Tensor& copy_out_of_tree_fallback_(
+    Tensor& self,
+    const Tensor& src,
+    bool non_blocking) {
+  // Copies into meta self are OK and just ignored (similar to inplace)
+  if (self.is_meta()) {
+    // TODO: need to see if there is extra error checking needed
+    return self;
+  }
+
+  if (src.is_meta()) {
+    TORCH_CHECK_NOT_IMPLEMENTED(false, "Cannot copy out of meta tensor; no data!")
+  }
+
+  // Re-dispatch copies when either src or self device not implemented here
+  // (e.g. XLA). _copy_from has a proper device dispatch setup. This includes:
+  //   cpu_tensor.copy_(xla_tensor) => xla_tensor._copy_from(cpu_tensor)
+  //   xla_tensor.copy_(cpu_tensor) => cpu_tensor._copy_from(xla_tensor)
+  // Both the _copy_from calls above will be dispatched to XLA's _copy_from
+  // kernels.
+  at::_copy_from(src, self, non_blocking);
+  return self;
+}
+
+Tensor& copy_cpu_cuda_hip_xpu_(
+    Tensor& self,
+    const Tensor& src,
+    bool non_blocking) {
   // TODO: this should be handled during dispatch, but that's missing...
   TORCH_CHECK(self.defined(), "self is undefined");
   TORCH_CHECK(src.defined(), "src is undefined");
@@ -115,7 +146,6 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
     if (((self.dtype() == at::kFloat && src.dtype() == at::kHalf) ||
          (self.dtype() == at::kHalf && src.dtype() == at::kFloat)) &&
         (self.device().is_cpu() && src.device().is_cpu()) &&
-        !self.is_sparse() && !src.is_sparse() &&
         ((self.is_contiguous() && src.is_contiguous()) ||
          (self.is_non_overlapping_and_dense() && self.strides() == src.strides()))) {
       if (src.dtype() == at::kFloat && self.dtype() == at::kHalf) {
@@ -156,63 +186,8 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
     }
   #endif
 
-  if (self.is_sparse() && src.is_sparse()) {
-    return at::copy_sparse_to_sparse_(self, src, non_blocking);
-  } else if (self.is_sparse() || src.is_sparse()) {
-    AT_ERROR("copy_() between dense and sparse Tensors is not implemented! Found self type = ",
-             self.toString(), " and src type = ", src.toString());
-  }
-
   if (self.is_same(src)) {
     return self;
-  }
-
-  // Copies into meta self are OK and just ignored (similar to inplace)
-  if (self.is_meta()) {
-    // TODO: need to see if there is extra error checking needed
-    return self;
-  }
-
-  if (src.is_meta()) {
-    TORCH_CHECK_NOT_IMPLEMENTED(false, "Cannot copy out of meta tensor; no data!")
-  }
-
-  // Re-dispatch copies when either src or self device not implemented here (e.g. XLA).
-  // _copy_from has a proper device dispatch setup.
-  // This includes:
-  //   cpu_tensor.copy_(xla_tensor) => xla_tensor._copy_from(cpu_tensor)
-  //   xla_tensor.copy_(cpu_tensor) => cpu_tensor._copy_from(xla_tensor)
-  // Both the _copy_from calls above will be dispatched to XLA's _copy_from kernels.
-  if (!is_supported_device(src.device()) || !is_supported_device(self.device())) {
-    at::_copy_from(src, self, non_blocking);
-    return self;
-  }
-
-  if (self.is_quantized() && !src.is_quantized()) {
-    return quantized_copy_from_float_cpu_(self, src);
-  }
-
-  if (self.is_quantized() && src.is_quantized()) {
-    TORCH_CHECK(self.qscheme() == src.qscheme(),
-                "Quantized Copy only works with same qscheme");
-    TORCH_CHECK(self.scalar_type() == src.scalar_type());
-    set_quantizer_(self, src.quantizer());
-  }
-
-  if (!self.is_quantized() && src.is_quantized()) {
-    TORCH_CHECK(false, "Copying from quantized Tensor to non-quantized Tensor is not allowed, please use dequantize to get a float Tensor from a quantized Tensor");
-  }
-
-  if (self.device().type() == at::kVulkan || src.device().type() == at::kVulkan) {
-  #ifdef USE_VULKAN_API
-    return vulkan::ops::copy_(self, src);
-  #else
-    return at::vulkan::vulkan_copy_(self, src);
-  #endif
-  }
-
-  if (self.device().type() == at::kMetal || src.device().type() == at::kMetal) {
-    return at::metal::metal_copy_(self, src);
   }
 
   auto iter = TensorIteratorConfig()
@@ -251,7 +226,8 @@ Tensor& copy_(Tensor& self, const Tensor& src, bool non_blocking) {
   auto maybe_outnames = namedinference::compute_broadcast_outnames(self, src);
   {
     NoNamesGuard guard;
-    copy_impl(self, src, non_blocking);
+    c10::impl::ExcludeDispatchKeyGuard named_dispatch_guard(DispatchKey::Named);
+    self.copy_(src, non_blocking); // redispatch!
   }
   namedinference::propagate_names_if_nonempty(self, maybe_outnames);
   return self;
