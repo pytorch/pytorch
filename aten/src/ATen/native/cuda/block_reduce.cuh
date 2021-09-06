@@ -10,6 +10,10 @@ namespace native {
 namespace cuda_utils {
 
 constexpr int kCUDABlockReduceNumThreads = 512;
+// Algorithmic limitation: BlockReduce does two WarpReduce calls, each
+// of which reduces C10_WARP_SIZE elements. So, at most
+// C10_WARP_SIZE**2 elements can be reduced at a time.
+// NOTE: This is >= the max block size on current hardware anyway (1024).
 constexpr int kCUDABlockReduceMaxThreads = C10_WARP_SIZE * C10_WARP_SIZE;
 
 // Sums `val` accross all threads in a warp.
