@@ -387,6 +387,12 @@ EXAMPLES = [
         },
         {
             'rate': 0.2,
+        },
+        {
+            'rate': torch.tensor([0.0], requires_grad=True),
+        },
+        {
+            'rate': 0.0,
         }
     ]),
     Example(RelaxedBernoulli, [
@@ -667,7 +673,7 @@ BAD_EXAMPLES = [
     ]),
     Example(Poisson, [
         {
-            'rate': torch.tensor([0.0], requires_grad=True),
+            'rate': torch.tensor([-0.1], requires_grad=True),
         },
         {
             'rate': -1.0,
@@ -1315,16 +1321,28 @@ class TestDistributions(TestCase):
     def test_poisson_log_prob(self):
         rate = torch.randn(2, 3).abs().requires_grad_()
         rate_1d = torch.randn(1).abs().requires_grad_()
+        rate_zero = torch.zeros([], requires_grad=True)
 
-        def ref_log_prob(idx, x, log_prob):
-            l = rate.view(-1)[idx].detach()
+        def ref_log_prob(ref_rate, idx, x, log_prob):
+            l = ref_rate.view(-1)[idx].detach()
             expected = scipy.stats.poisson.logpmf(x, l)
             self.assertEqual(log_prob, expected, atol=1e-3, rtol=0)
 
         set_rng_seed(0)
-        self._check_log_prob(Poisson(rate), ref_log_prob)
+        self._check_log_prob(Poisson(rate), lambda *args: ref_log_prob(rate, *args))
+        self._check_log_prob(Poisson(rate_zero), lambda *args: ref_log_prob(rate_zero, *args))
         self._gradcheck_log_prob(Poisson, (rate,))
         self._gradcheck_log_prob(Poisson, (rate_1d,))
+
+        # We cannot check gradients automatically for zero rates because the finite difference
+        # approximation enters the forbidden parameter space. We instead compare with the
+        # theoretical results.
+        dist = Poisson(rate_zero)
+        s = dist.sample()
+        dist.log_prob(s).backward()
+        torch.testing.assert_allclose(rate_zero.grad, -1.0)
+        dist.log_prob(torch.ones_like(rate_zero)).backward()
+        torch.testing.assert_allclose(rate_zero.grad, torch.inf)
 
     @unittest.skipIf(IS_MACOS, "See https://github.com/pytorch/pytorch/issues/60347")
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")

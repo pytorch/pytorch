@@ -13,7 +13,7 @@ from torch.autograd import Variable
 from torch import sparse
 from torch.optim.lr_scheduler import LambdaLR, MultiplicativeLR, StepLR, \
     MultiStepLR, WarmUpLR, ExponentialLR, CosineAnnealingLR, ReduceLROnPlateau, \
-    _LRScheduler, CyclicLR, CosineAnnealingWarmRestarts, OneCycleLR
+    _LRScheduler, CyclicLR, CosineAnnealingWarmRestarts, OneCycleLR, ChainedScheduler
 from torch.optim.swa_utils import AveragedModel, SWALR, update_bn
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests, \
     skipIfRocm
@@ -440,8 +440,8 @@ class TestOptim(TestCase):
             )
             self._test_basic_cases(
                 lambda weight, bias: optimizer([weight, bias], lr=1e-3, amsgrad=True),
-                [lambda opt: ExponentialLR(opt, gamma=0.9),
-                 lambda opt: WarmUpLR(opt, warmup_factor=0.4, warmup_iters=4, warmup_method="constant")]
+                [lambda opt: WarmUpLR(opt, warmup_factor=0.4, warmup_iters=4, warmup_method="constant"),
+                 lambda opt: ExponentialLR(opt, gamma=0.9)]
             )
             self._test_basic_cases(
                 lambda weight, bias: optimizer([weight, bias], lr=1e-3, amsgrad=True),
@@ -1253,6 +1253,44 @@ class TestLRScheduler(TestCase):
                                       threshold=0.1, patience=5, cooldown=5)
         self._test_reduce_lr_on_plateau(scheduler, targets, metrics, epochs)
 
+    def test_chained_lr1(self):
+        epochs = 10
+        schedulers = [None] * 1
+        targets = [[0.05] * 3 + [0.005] * 3 + [0.0005] * 3 + [0.00005] * 3]
+        schedulers[0] = StepLR(self.opt, gamma=0.1, step_size=3)
+        scheduler = ChainedScheduler(schedulers)
+        self._test([scheduler], targets, epochs)
+
+    def test_chained_lr2(self):
+        epochs = 10
+        schedulers = [None] * 1
+        targets = [[0.02, 0.03, 0.04] + [0.05] * 9]
+        schedulers[0] = WarmUpLR(self.opt, warmup_factor=0.4, warmup_iters=3, warmup_method="linear")
+        scheduler = ChainedScheduler(schedulers)
+        self._test([scheduler], targets, epochs)
+
+    def test_chained_lr3(self):
+        epochs = 10
+        schedulers = [None] * 2
+        targets = [[0.02, 0.03, 0.04, 0.05] + [0.005] * 4 + [0.0005] * 3 + [0.00005] * 3]
+        schedulers[0] = WarmUpLR(self.opt, warmup_factor=0.4, warmup_iters=3, warmup_method="linear")
+        schedulers[1] = MultiStepLR(self.opt, milestones=[4, 8, 10], gamma=0.1)
+        scheduler = ChainedScheduler(schedulers)
+        self._test([scheduler], targets, epochs)
+
+    def test_chained_lr4(self):
+        epochs = 9
+        schedulers = [None] * 3
+        targets = [[0.05 * 0.2 * 0.9 ** x for x in range(3)]
+                   + [0.05 * 0.2 * 0.9 ** 3 * 0.1]
+                   + [0.05 * 0.9 ** x * 0.1 for x in range(4, 6)]
+                   + [0.05 * 0.9 ** x * 0.01 for x in range(6, 9)]]
+        schedulers[0] = ExponentialLR(self.opt, gamma=0.9)
+        schedulers[1] = WarmUpLR(self.opt, warmup_factor=0.2, warmup_iters=4, warmup_method="constant")
+        schedulers[2] = StepLR(self.opt, gamma=0.1, step_size=3)
+        scheduler = ChainedScheduler(schedulers)
+        self._test([scheduler], targets, epochs)
+
     def test_compound_step_and_multistep_lr(self):
         epochs = 10
         schedulers = [None] * 2
@@ -1294,8 +1332,8 @@ class TestLRScheduler(TestCase):
         for i in range(iters):
             single_targets[i] *= factor + i / iters * (1 - factor)
         targets = [single_targets, [x * epochs for x in single_targets]]
-        schedulers[0] = ExponentialLR(self.opt, gamma=0.9)
-        schedulers[1] = WarmUpLR(self.opt, warmup_factor=factor, warmup_iters=iters, warmup_method="linear")
+        schedulers[0] = WarmUpLR(self.opt, warmup_factor=factor, warmup_iters=iters, warmup_method="linear")
+        schedulers[1] = ExponentialLR(self.opt, gamma=0.9)
         self._test(schedulers, targets, epochs)
 
     def test_compound_step_and_constant_warmup(self):
@@ -1361,8 +1399,8 @@ class TestLRScheduler(TestCase):
         for i in range(iters):
             single_targets[i] *= factor + i / iters * (1 - factor)
         targets = [single_targets, [x * epochs for x in single_targets]]
-        schedulers[0] = CosineAnnealingLR(self.opt, T_max=epochs, eta_min=eta_min)
-        schedulers[1] = WarmUpLR(self.opt, warmup_factor=factor, warmup_iters=iters, warmup_method="linear")
+        schedulers[0] = WarmUpLR(self.opt, warmup_factor=factor, warmup_iters=iters, warmup_method="linear")
+        schedulers[1] = CosineAnnealingLR(self.opt, T_max=epochs, eta_min=eta_min)
         self._test(schedulers, targets, epochs)
 
     def test_compound_cosanneal_and_exp_lr(self):

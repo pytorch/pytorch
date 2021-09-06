@@ -157,7 +157,6 @@ private:
     data_.state_[0] = seed & 0xffffffff;
     for(int j = 1; j < MERSENNE_STATE_N; j++) {
       data_.state_[j] = (1812433253 * (data_.state_[j-1] ^ (data_.state_[j-1] >> 30)) + j);
-      data_.state_[j] &= 0xffffffff;
     }
     data_.left_ = 1;
     data_.next_ = 0;
