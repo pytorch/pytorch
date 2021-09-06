@@ -301,7 +301,8 @@ C10_API std::string GetExceptionString(const std::exception& e);
         __func__,                                                   \
         __FILE__,                                                   \
         static_cast<uint32_t>(__LINE__),                            \
-        #cond "INTERNAL ASSERT FAILED at" C10_STRINGIZE(__FILE__)); \
+        #cond                                                       \
+        " INTERNAL ASSERT FAILED at " C10_STRINGIZE(__FILE__));     \
   }
 #else
 // It would be nice if we could build a combined string literal out of
@@ -316,8 +317,8 @@ C10_API std::string GetExceptionString(const std::exception& e);
         __FILE__,                                                               \
         static_cast<uint32_t>(__LINE__),                                        \
         #cond                                                                   \
-        "INTERNAL ASSERT FAILED at " C10_STRINGIZE(__FILE__) ":" C10_STRINGIZE( \
-            __LINE__) ", please report a bug to PyTorch. ",                     \
+        " INTERNAL ASSERT FAILED at " C10_STRINGIZE(__FILE__) ":"               \
+        C10_STRINGIZE(__LINE__) ", please report a bug to PyTorch. ",           \
         c10::str(__VA_ARGS__));                                                 \
   }
 #endif
