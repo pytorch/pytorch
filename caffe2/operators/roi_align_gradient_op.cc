@@ -235,12 +235,10 @@ C10_EXPORT bool RoIAlignGradientOp<float, CPUContext>::RunOnDevice() {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(RoIAlignGradient, RoIAlignGradientOp<float, CPUContext>);
 
 // Input: X, rois, dY (aka "gradOutput");
 // Output: dX (aka "gradInput")
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(RoIAlignGradient)
     .NumInputs(3)
     .NumOutputs(1)
@@ -264,7 +262,6 @@ class GetRoIAlignGradient : public GradientMakerBase {
 
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(RoIAlign, GetRoIAlignGradient);
 
 template <typename T>

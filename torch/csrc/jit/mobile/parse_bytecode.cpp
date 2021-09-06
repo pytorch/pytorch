@@ -9,8 +9,8 @@ namespace jit {
 OpCode parseOpCode(const char* str);
 using c10::IValue;
 
-IValue expect_field(
-    IValue tup,
+const IValue& expect_field(
+    const IValue& tup,
     const std::string& expected_name,
     size_t entry) {
   auto row = tup.toTuple()->elements().at(entry).toTuple();
@@ -50,7 +50,7 @@ void parseInstructions(
           .toTuple()
           ->elements();
 
-  std::vector<IValue> debug_handles_list;
+  c10::List<int64_t> debug_handles_list;
   bool has_debug_handle = !debug_handles_element.isNone();
   if (has_debug_handle) {
     const auto& debug_handles_m_tuple =
@@ -60,22 +60,21 @@ void parseInstructions(
     TORCH_CHECK(
         debug_info_function_name == function_name,
         "The function names in the bytecode table and the debug info table do not match.");
-    IValue debug_handles_table = debug_handles_m_tuple[1];
+    const IValue& debug_handles_table = debug_handles_m_tuple[1];
     debug_handles_list = (expect_field(
                               debug_handles_table,
                               "function_debug_handles",
                               BYTECODE_INDEX_MODULE_DEBUG_HANDLES)
                               .toTuple()
                               ->elements())[0]
-                             .toList()
-                             .vec();
+                              .toIntList();
     TORCH_CHECK(
         debug_handles_list.size() == ins_list.size(),
         "The numbers of instructions and debug handles strings do not match.");
   }
 
-  for (size_t i = 0; i < ins_list.size(); ++i) {
-    auto ins_item = ins_list[i].toTuple()->elements();
+  for (const auto j : c10::irange(ins_list.size())) {
+    const auto& ins_item = ins_list[j].toTuple()->elements();
     TORCH_CHECK(
         ins_item.size() == 3,
         "There should be three parts in an instruction. The function name is ",
@@ -84,7 +83,7 @@ void parseInstructions(
     int X = ins_item[1].toInt();
     int N = ins_item[2].toInt();
     if (has_debug_handle) {
-      int64_t debug_handle = debug_handles_list[i].toInt();
+      int64_t debug_handle = debug_handles_list[j];
       function->append_instruction(op_code, X, N, debug_handle);
     } else {
       function->append_instruction(op_code, X, N);

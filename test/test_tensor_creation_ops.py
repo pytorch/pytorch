@@ -8,9 +8,10 @@ import unittest
 from itertools import product, combinations, combinations_with_replacement, permutations
 import random
 
+from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, do_test_empty_full, TEST_WITH_ROCM, suppress_warnings,
-    torch_to_numpy_dtype_dict, slowTest, make_tensor, TEST_SCIPY, IS_MACOS, IS_PPC,
+    torch_to_numpy_dtype_dict, slowTest, TEST_SCIPY, IS_MACOS, IS_PPC,
     IS_WINDOWS)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, deviceCountAtLeast, onlyOnCPUAndCUDA,
@@ -2711,7 +2712,6 @@ class TestTensorCreation(TestCase):
         device_tensor = torch.arange(0, 10, dtype=dtype, device=device)
         self.assertEqual(cpu_tensor, device_tensor)
 
-    @onlyCUDA
     def test_arange_bfloat16(self, device):
         ref_tensor = torch.tensor([0, 1, 2, 3], dtype=torch.bfloat16, device=device)
         bfloat16_tensor = torch.arange(0, 4, dtype=torch.bfloat16, device=device)
@@ -3258,7 +3258,7 @@ class TestRandomTensorCreation(TestCase):
             self.assertTrue((res1 >= 0).all().item())
 
     @dtypes(torch.half, torch.float, torch.bfloat16, torch.double,
-            torch.complex32, torch.complex64, torch.complex128)
+            torch.complex64, torch.complex128)
     def test_randn(self, device, dtype):
         SIZE = 100
         for size in [0, SIZE]:

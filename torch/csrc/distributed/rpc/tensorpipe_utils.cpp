@@ -89,7 +89,6 @@ class TensorpipeCpuConverter : public TensorpipeDeviceTypeConverter {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_REGISTER_TENSORPIPE_DEVICE_TYPE_CONVERTER(CPU, TensorpipeCpuConverter);
 
 c10::DeviceType convertDeviceType(const std::string& tpDeviceType) {
@@ -120,7 +119,6 @@ const c10::Stream& getStreamForDevice(
 std::array<
     std::atomic<const TensorpipeDeviceTypeConverter*>,
     static_cast<size_t>(DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)>
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     device_type_converter_registry;
 
 TensorpipeDeviceTypeConverterRegistrar::TensorpipeDeviceTypeConverterRegistrar(
@@ -313,8 +311,9 @@ c10::intrusive_ptr<Message> tensorpipeDeserialize(
     tensors.emplace_back(std::move(t));
   }
 
-  for (const auto i : c10::irange(tpDescriptor.tensors.size())) {
-    auto& tensor = tpDescriptor.tensors[i];
+  size_t tpDescriptorIndex = 0;
+  for (size_t i = 0; i < tensors.size(); i++) {
+    auto& tensor = tpDescriptor.tensors[tpDescriptorIndex];
     if (tensor.targetDevice.has_value() &&
         tensor.targetDevice->type == tensorpipe::kCudaDeviceType) {
       TORCH_INTERNAL_ASSERT(
@@ -327,6 +326,11 @@ c10::intrusive_ptr<Message> tensorpipeDeserialize(
           tensor.targetDevice->index,
           ", but got it on ",
           tensors[i].device());
+    }
+    if (tensors[i].is_sparse()) {
+      tpDescriptorIndex += 2;
+    } else {
+      tpDescriptorIndex += 1;
     }
   }
 

@@ -2,9 +2,7 @@
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(YellowFin, YellowFinOp<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(YellowFin)
     .NumInputs(10)
     .NumOutputs(8)
@@ -46,7 +44,6 @@ nesterov and zero_debias for debias of moving average.
     .Arg("nesterov", "Default false")
     .Arg("zero_debias", "Default true");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(YellowFin);
 
 #define CAFFE2_YELLOWFIN_GETLRMU(T)                                         \

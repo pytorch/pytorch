@@ -426,7 +426,7 @@ static PyObject * THPStorage_(newSharedCuda)(PyObject *_unused, PyObject *args)
 
         // TODO: Instead of cudaStreamSynchronize it is possible to add Stream
         // Callback and release counter inside of it (need to check performance impact)
-        cudaStreamSynchronize(c10::cuda::getCurrentCUDAStream(device));
+        at::cuda::stream_synchronize(c10::cuda::getCurrentCUDAStream(device));
 
         // We don't want to break existing code, so resource deletion is best
         // effort basis. Exception expected if producer process terminated

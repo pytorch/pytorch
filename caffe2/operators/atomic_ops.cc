@@ -93,28 +93,20 @@ class CheckAtomicBoolOp final : public Operator<CPUContext> {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(CreateMutex, CreateMutexOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(AtomicFetchAdd, AtomicFetchAddOp<int32_t>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(AtomicFetchAdd64, AtomicFetchAddOp<int64_t>);
 
 #ifdef CAFFE2_USE_MKLDNN
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(
     CreateMutex,
     IDEEPFallbackOp<CreateMutexOp, SkipIndices<0>>);
 #endif
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(CreateAtomicBool, CreateAtomicBoolOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(ConditionalSetAtomicBool, ConditionalSetAtomicBoolOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(CheckAtomicBool, CheckAtomicBoolOp);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(CreateMutex)
     .NumInputs(0)
     .NumOutputs(1)
@@ -122,7 +114,6 @@ OPERATOR_SCHEMA(CreateMutex)
     .Output(0, "mutex_ptr", "Blob containing a std::unique_ptr<mutex>.")
     .ScalarType(TensorProto_DataType_UNDEFINED);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(AtomicFetchAdd)
     .NumInputs(3)
     .NumOutputs(2)
@@ -138,7 +129,6 @@ argument. Returns the updated integer and the value prior to the update.
     .Output(1, "fetched_value", "Value of the first operand before sum.")
     .AllowInplace({{1, 0}});
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(AtomicFetchAdd64)
     .NumInputs(3)
     .NumOutputs(2)
@@ -155,14 +145,12 @@ argument. Returns the updated integer and the value prior to the update.
     .Output(1, "fetched_value", "Value of the first operand before sum.")
     .AllowInplace({{1, 0}});
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(CreateAtomicBool)
     .NumInputs(0)
     .NumOutputs(1)
     .SetDoc("Create an unique_ptr blob to hold an atomic<bool>")
     .Output(0, "atomic_bool", "Blob containing a unique_ptr<atomic<bool>>");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ConditionalSetAtomicBool)
     .NumInputs(2)
     .NumOutputs(0)
@@ -172,7 +160,6 @@ Set an atomic<bool> to true if the given condition bool variable is true
     .Input(0, "atomic_bool", "Blob containing a unique_ptr<atomic<bool>>")
     .Input(1, "condition", "Blob containing a bool");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(CheckAtomicBool)
     .NumInputs(1)
     .NumOutputs(1)
@@ -180,15 +167,10 @@ OPERATOR_SCHEMA(CheckAtomicBool)
     .Input(0, "atomic_bool", "Blob containing a unique_ptr<atomic<bool>>")
     .Output(0, "value", "Copy of the value for the atomic<bool>");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(CreateMutex);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(AtomicFetchAdd);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(CreateAtomicBool);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(ConditionalSetAtomicBool);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(CheckAtomicBool);
 } // namespace
 } // namespace fb

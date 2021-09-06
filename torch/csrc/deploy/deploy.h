@@ -1,10 +1,9 @@
 #pragma once
-// NOLINTNEXTLINE(modernize-deprecated-headers)
-#include <assert.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/api/include/torch/imethod.h>
 #include <torch/csrc/deploy/interpreter/interpreter_impl.h>
 #include <torch/csrc/jit/serialization/import.h>
+#include <cassert>
 #include <fstream>
 #include <iostream>
 #include <string>
@@ -56,7 +55,7 @@ class TORCH_API Interpreter {
   std::string library_name_;
   void* handle_;
   std::unique_ptr<InterpreterImpl> pImpl_;
-
+  bool custom_loader_ = false;
   InterpreterManager* manager_; // optional if managed by one
 
  public:
@@ -204,6 +203,13 @@ struct TORCH_API ReplicatedObj {
     TORCH_DEPLOY_SAFE_CATCH_RETHROW
   }
 
+  [[nodiscard]] bool hasattr(const char* name) const {
+    TORCH_DEPLOY_TRY
+    auto I = acquire_session();
+    return I.self.hasattr(name);
+    TORCH_DEPLOY_SAFE_CATCH_RETHROW
+  }
+
   void unload(const Interpreter* on_this_interpreter = nullptr);
 
  private:
@@ -225,6 +231,10 @@ class PythonMethodWrapper : public torch::IMethod {
       torch::deploy::ReplicatedObj model,
       std::string method_name)
       : model_(std::move(model)), method_name_(std::move(method_name)) {}
+
+  const std::string& name() const override {
+    return method_name_;
+  }
 
   c10::IValue operator()(
       std::vector<c10::IValue> args,

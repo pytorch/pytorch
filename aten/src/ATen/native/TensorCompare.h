@@ -12,7 +12,6 @@ using reduce_minmax_fn =
 
 DECLARE_DISPATCH(reduce_minmax_fn, max_stub);
 DECLARE_DISPATCH(reduce_minmax_fn, min_stub);
-DECLARE_DISPATCH(reduce_minmax_fn, _aminmax_stub);
 
 using where_fn = void (*)(TensorIterator &, ScalarType);
 DECLARE_DISPATCH(where_fn, where_kernel);
@@ -29,7 +28,7 @@ DECLARE_DISPATCH(clamp_fn, clamp_stub);
 DECLARE_DISPATCH(clamp_fn, clamp_min_stub);
 DECLARE_DISPATCH(clamp_fn, clamp_max_stub);
 
-DECLARE_DISPATCH(void (*)(TensorIterator &, Scalar, Scalar), clamp_scalar_stub);
+DECLARE_DISPATCH(void (*)(TensorIteratorBase &, const Scalar&, const Scalar&), clamp_scalar_stub);
 DECLARE_DISPATCH(void (*)(TensorIterator &, Scalar), clamp_min_scalar_stub);
 DECLARE_DISPATCH(void (*)(TensorIterator &, Scalar), clamp_max_scalar_stub);
 
