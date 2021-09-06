@@ -51,8 +51,18 @@ def main() -> None:
         configs['nogpu_NO_AVX'] = {'num_shards': 1, 'runner': NOGPU_RUNNER_TYPE}
     if NOGPU_RUNNER_TYPE is not None and os.getenv('ENABLE_NOGPU_NO_AVX2_TEST'):
         configs['nogpu_NO_AVX2'] = {'num_shards': 1, 'runner': NOGPU_RUNNER_TYPE}
+    if os.getenv('ENABLE_DISTRIBUTED_TEST'):
+        configs['distributed'] = {'num_shards': 1, 'runner': TEST_RUNNER_TYPE}
     if os.getenv('ENABLE_SLOW_TEST'):
         configs['slow'] = {'num_shards': 1, 'runner': TEST_RUNNER_TYPE}
+    if os.getenv('ENABLE_DOCS_TEST'):
+        configs['docs_test'] = {'num_shards': 1, 'runner': TEST_RUNNER_TYPE}
+    if os.getenv('ENABLE_BACKWARDS_COMPAT_TEST'):
+        configs['backwards_compat'] = {'num_shards': 1, 'runner': TEST_RUNNER_TYPE}
+    if os.getenv('ENABLE_XLA_TEST'):
+        configs['xla'] = {'num_shards': 1, 'runner': TEST_RUNNER_TYPE}
+    if os.getenv('ENABLE_NOARCH_TEST'):
+        configs['noarch'] = {'num_shards': 1, 'runner': TEST_RUNNER_TYPE}
     matrix = {
         'include': [
             {

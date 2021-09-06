@@ -869,6 +869,12 @@ void initPythonIRBindings(PyObject* module_) {
         }
         return types;
       });
+  py::class_<UnionType, Type, std::shared_ptr<UnionType>>(m, "UnionType")
+      .def(py::init(
+          [](const std::vector<TypePtr>& a) { return UnionType::create(a); }))
+      .def("containedTypes", [](UnionType& self) {
+        return self.containedTypes().vec();
+      });
   py::class_<ListType, Type, std::shared_ptr<ListType>>(m, "ListType")
       .def(py::init([](TypePtr a) { return ListType::create(a); }))
       .def_static("ofInts", &ListType::ofInts)
