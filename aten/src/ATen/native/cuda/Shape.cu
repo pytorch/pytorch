@@ -186,10 +186,9 @@ void check_shape_except_dim(const Tensor &first, const Tensor &second,
     int64_t first_dim_size = at::native::size(first, dim);
     int64_t second_dim_size = at::native::size(second, dim);
     TORCH_CHECK(first_dim_size == second_dim_size,
-        "Sizes of tensors must match except in dimension ", dim, ". Got ",
+        "Sizes of tensors must match except in dimension ", dimension, ". Got ",
         static_cast<long long>(first_dim_size), " and ",
-        static_cast<long long>(second_dim_size), " (The offending index is ",
-        index, ")");
+        static_cast<long long>(second_dim_size), " in dimension ", dim, ".");
   }
 }
 
