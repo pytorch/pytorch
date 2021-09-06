@@ -391,11 +391,27 @@ inline static void _apply_svd_lib_gesvd(const Tensor& self, Tensor& U, Tensor& S
 
   TORCH_INTERNAL_ASSERT(m >= n, "cusolver gesvd only supports matrix with sizes m >= n");
 
+  char jobu = compute_uv ? (some ? 'S' : 'A') : 'N';
+  char jobvt = compute_uv ? (some ? 'S' : 'A') : 'N';
+  auto handle = at::cuda::getCurrentCUDASolverDnHandle();
+
+  int lwork = -1;
+  at::cuda::solver::gesvd_buffersize<scalar_t>(handle, m, n, &lwork);
+  TORCH_INTERNAL_ASSERT(lwork >= 0, "gesvd_buffersize failed to get needed buffer size, got lwork = ", lwork);
+
+  auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
+  auto dataPtr_work = allocator.allocate(sizeof(scalar_t)*lwork);
+  auto dataPtr_rwork = allocator.allocate(sizeof(value_t)*std::min(m, n));
+
   // VT_view shares the same memory space as VT tensor
   at::Tensor VT_view;
   if (compute_uv) {
     VT_view = VT.view({-1, n, n});
   }
+
+  // Note that gesvd returns V^H in column-major.
+  // Without a transpose here, it will be V.conj() in the actual memory space.
+  at::Tensor vt_workspace = at::empty({n, n}, VT.options()).conj();
 
   int batchsize = _batchsize;
   std::function<int(int)> get_batch_index = [&](int i) -> int { return i; };
@@ -403,14 +419,6 @@ inline static void _apply_svd_lib_gesvd(const Tensor& self, Tensor& U, Tensor& S
     batchsize = batches.size();
     get_batch_index = [&](int i) -> int { return batches[i]; };
   }
-
-  char jobu = compute_uv ? (some ? 'S' : 'A') : 'N';
-  char jobvt = compute_uv ? (some ? 'S' : 'A') : 'N';
-  auto handle = at::cuda::getCurrentCUDASolverDnHandle();
-
-  // Note that gesvd returns V^H in column-major.
-  // Without a transpose here, it will be V.conj() in the actual memory space.
-  at::Tensor vt_workspace = at::empty({n, n}, VT.options()).conj();
 
   for(int _i = 0; _i < batchsize; _i++){
     int i = get_batch_index(_i);
@@ -424,6 +432,9 @@ inline static void _apply_svd_lib_gesvd(const Tensor& self, Tensor& U, Tensor& S
       lda,
       vt_workspace.data_ptr<scalar_t>(), // VT_data + i * VT_stride,
       ldvt,
+      reinterpret_cast<scalar_t*>(dataPtr_work.get()),
+      lwork,
+      reinterpret_cast<value_t*>(dataPtr_rwork.get()),
       infos.data_ptr<int>() + i
     );
 
@@ -446,6 +457,8 @@ inline static void apply_svd_lib_gesvd(const Tensor& self, Tensor& U, Tensor& S,
   int m = cuda_int_cast(self.size(-2), "m");
   int n = cuda_int_cast(self.size(-1), "n");
 
+  // cusolver gesvd only supports m >= n, we transpose the whole svd calculation if m < n
+  // i.e.: A = U S V^H  --> A^T = V^H^T S U^T
   if (m < n) {
     apply_svd_lib_gesvd(self.transpose(-2, -1), VT, S, U, infos, compute_uv, some, calculate_all_batches, batches);
     return;
