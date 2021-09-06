@@ -3,6 +3,7 @@
 #include <ATen/Functions.h>
 #include <ATen/core/functional.h>
 #include <c10/core/CPUAllocator.h>
+#include <c10/util/irange.h>
 
 #include <torch/csrc/jit/mobile/nnc/registry.h>
 
@@ -197,7 +198,7 @@ c10::impl::GenericList Function::run(
       input_specs_.size(),
       " actual: ",
       inputs.size());
-  for (size_t i = 0; i < inputs.size(); ++i) {
+  for (const auto i : c10::irange(inputs.size())) {
     const c10::IValue& input = inputs[i];
     const auto& input_tensor = input.toTensor();
     TORCH_CHECK(
@@ -208,7 +209,7 @@ c10::impl::GenericList Function::run(
   // Preallocate and fill in output tensors.
   c10::List<at::Tensor> outputs;
   outputs.reserve(output_specs_.size());
-  for (size_t i = 0; i < output_specs_.size(); ++i) {
+  for (const auto i : c10::irange(output_specs_.size())) {
     at::Tensor output = output_specs_[i].allocate();
     outputs.emplace_back(output);
     args[inputs.size() + i] = output.data_ptr();

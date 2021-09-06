@@ -627,29 +627,14 @@ static void eraseListConstruct(Node* n, int opset_version) {
       auto* lc_node = input->node();
       TypePtr elem =
           lc_node->output()->type()->castRaw<ListType>()->getElementType();
-      if (elem->cast<IntType>()) {
-        // ListConstruct Int[] output case, we need to transform to ONNX
-        // Concat to ensure the output is a single tensor(dynamic) type in
-        // order to be consumed as inputs
-        std::vector<Value*> unsqueezed;
-        Graph* g = block->owningGraph();
-        for (auto* input : lc_node->inputs()) {
-          Node* unsqueezed_node =
-              createONNXUnsqueeze(g, lc_node, input, 0, opset_version);
-          unsqueezed.emplace_back(unsqueezed_node->output());
-        }
-        Node* concat_node = g->create(onnx::Concat, 1);
-        concat_node->i_(attr::axis, 0);
-        for (auto v : unsqueezed) {
-          concat_node->addInput(v);
-        }
-        concat_node->insertBefore(lc_node);
-
+      if (elem->cast<IntType>() &&
+          isValidToTransformToONNXConcatNode(lc_node)) {
+        auto concat_node = transformToONNXConcatNode(
+            block->owningGraph(), input->node(), false, opset_version);
         // make concat node output as new input, then ListConstruct should
         // become dead
         replacements.emplace_back(
             i, std::vector<Value*>({concat_node->output()}));
-
       } else {
         if (opset_version >= OPSET_VERSION_11) {
           c10::Symbol seq_node_kind = lc_node->inputs().size() > 0

@@ -24,25 +24,20 @@ RecordFunctionHandle next_unique_record_function_handle() {
 
 RecordFunctionTLS& rf_tls() {
 #if defined(C10_PREFER_CUSTOM_THREAD_LOCAL_STORAGE)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static c10::ThreadLocal<RecordFunctionTLS> rf_tls_;
   return rf_tls_.get();
 #else // defined(C10_PREFER_CUSTOM_THREAD_LOCAL_STORAGE)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static thread_local RecordFunctionTLS rf_tls_;
   return rf_tls_;
 #endif // defined(C10_PREFER_CUSTOM_THREAD_LOCAL_STORAGE)
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::atomic<int64_t> defaultNodeId(-1);
 
 // Enumerates thread ids logically;
 // note: std::this_thread::get_id may return potentially
 // reused thread id
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::atomic<uint64_t> next_thread_id_ {0};
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local uint64_t current_thread_id_ = 0;
 
 // Low probability constant
@@ -61,11 +56,9 @@ CoinflipTLS::CoinflipTLS()
 
 CoinflipTLS& coinflip_tls() {
 #if defined(C10_PREFER_CUSTOM_THREAD_LOCAL_STORAGE)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static c10::ThreadLocal<CoinflipTLS> coinflip_tls_;
   return coinflip_tls_.get();
 #else // defined(C10_PREFER_CUSTOM_THREAD_LOCAL_STORAGE)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static thread_local CoinflipTLS coinflip_tls_;
   return coinflip_tls_;
 #endif // defined(C10_PREFER_CUSTOM_THREAD_LOCAL_STORAGE)
@@ -597,7 +590,6 @@ bool RecordFunction::isAsync() const {
 namespace {
 // Whether to try to create RecordFunction on each call (>0) or
 // use pre-sampling (=0)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::atomic<int> global_record_all_functions_ {0};
 }
 

@@ -22,7 +22,6 @@ inline void expectThrowsEq(Functor&& functor, const char* expectedMessage) {
 }
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ExceptionTest, TORCH_INTERNAL_ASSERT_DEBUG_ONLY) {
 #ifdef NDEBUG
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
@@ -36,12 +35,19 @@ TEST(ExceptionTest, TORCH_INTERNAL_ASSERT_DEBUG_ONLY) {
 #endif
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+// On these platforms there's no assert
+#if !defined(__ANDROID__) && !defined(__APPLE__) && \
+    !(defined(__HIP_PLATFORM_HCC__) && ROCM_VERSION < 40100)
+TEST(ExceptionTest, CUDA_KERNEL_ASSERT) {
+  // This function always throws even in NDEBUG mode
+  ASSERT_DEATH_IF_SUPPORTED({ CUDA_KERNEL_ASSERT(false); }, "Assert");
+}
+#endif
+
 TEST(WarningTest, JustPrintWarning) {
   TORCH_WARN("I'm a warning");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ExceptionTest, ErrorFormatting) {
   expectThrowsEq(
       []() { TORCH_CHECK(false, "This is invalid"); }, "This is invalid");
@@ -73,7 +79,6 @@ TEST(ExceptionTest, ErrorFormatting) {
   While checking Y)msg");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static int assertionArgumentCounter = 0;
 static int getAssertionArgument() {
   return ++assertionArgumentCounter;
@@ -87,7 +92,6 @@ static void failInternalAssert() {
   TORCH_INTERNAL_ASSERT(false, "message ", getAssertionArgument());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ExceptionTest, DontCallArgumentFunctionsTwiceOnFailure) {
   assertionArgumentCounter = 0;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)

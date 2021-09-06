@@ -83,6 +83,31 @@ native::SCATTER_GATHER_OP get_operator_enum(const c10::string_view reduce) {
   }
 }
 
+TORCH_META_FUNC(gather)
+(const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
+  const Tensor& result = maybe_get_output(0);
+  int64_t wrapped_dim = at::maybe_wrap_dim(dim, self.dim());
+
+  // Memory overlap checks need to be done after resizing (if required) is done.
+  // But it only makes sense to do these checks when result was defined, hence
+  // the boolean variable `check_result` here.
+  // For more details, see: https://github.com/pytorch/pytorch/pull/63312#discussion_r694794832
+  // and https://github.com/pytorch/pytorch/issues/63837
+  bool check_result = result.defined();
+  set_output(index.sizes(), self.options());
+  if (check_result) {
+    at::assert_no_internal_overlap(result);
+    at::assert_no_overlap(result, self);
+    at::assert_no_partial_overlap(result, index);
+  }
+
+  TORCH_CHECK(
+    index.scalar_type() == at::ScalarType::Long,
+    "gather", "(): Expected dtype int64 for index"
+  );
+  at::native::gather_shape_check(self, wrapped_dim, index);
+}
+
 template <typename Meta>
 void scatter_meta_impl(
     Meta& meta,
@@ -148,42 +173,24 @@ TORCH_META_FUNC(scatter_add)
 
 namespace native {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(index_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(index_fill_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(index_copy_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(index_put_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(index_put_with_sort_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(put_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(take_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(masked_fill_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_NO_CPU_DISPATCH(index_put_with_sort_stub, index_put_with_sort_fn);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(masked_select_serial_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(masked_select_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(masked_scatter_stub);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(gather_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(scatter_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(scatter_fill_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(scatter_add_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(scatter_reduce_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(scatter_scalar_reduce_stub);
 
 static bool all_strides_match(TensorList tensors) {
@@ -1130,23 +1137,12 @@ Tensor index_fill(const Tensor & self, int64_t dim, const Tensor & index, const 
   return self.clone(at::MemoryFormat::Preserve).index_fill_(dim, index, source);
 }
 
-Tensor& gather_out_cpu_cuda(
-    const Tensor& self,
-    int64_t dim,
-    const Tensor& index,
-    bool sparse_grad,
-    Tensor& result) {
-  at::native::resize_output(result, index.sizes());
-  at::assert_no_internal_overlap(result);
-  at::assert_no_overlap(result, self);
-  at::assert_no_partial_overlap(result, index);
+// gather_out_cpu_cuda
+TORCH_IMPL_FUNC(gather_out)
+(const Tensor& self, int64_t dim, const Tensor& index, bool sparse_grad, const Tensor& result) {
+  if (index.numel() == 0) return;
+  dim = at::maybe_wrap_dim(dim, self.dim());
   gather_stub(result.device().type(), result, self, dim, index);
-  return result;
-}
-
-Tensor gather(const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
-  Tensor result = at::empty({0}, self.options());
-  return at::native::gather_out_cpu_cuda(self, dim, index, sparse_grad, result);
 }
 
 Tensor gather_backward(const Tensor& grad, const Tensor& self, int64_t dim, const Tensor& index, bool sparse_grad) {
@@ -1166,6 +1162,8 @@ void scatter_impl(
     ReduceStub& reduce_stub,
     FillStub& fill_stub,
     const c10::optional<c10::string_view> reduce = nullopt) {
+  if (index.numel() == 0) return;
+  dim = at::maybe_wrap_dim(dim, self.dim());
   auto mut_out = const_cast<Tensor&>(out);
 
   if (!self.is_same(mut_out)) {
@@ -1235,10 +1233,13 @@ TORCH_IMPL_FUNC(scatter_add)
  const Tensor& src,
  const Tensor& out) {
   auto mut_out = const_cast<Tensor&>(out);
+  dim = maybe_wrap_dim(dim, self.dim());
 
   if (!self.is_same(mut_out)) {
     mut_out.copy_(self);
   }
+
+  if (index.numel() == 0) return;
 
   if (globalContext().deterministicAlgorithms() && self.device().type() == DeviceType::CUDA && self.dim() == 1) {
     TORCH_CHECK(index.dim() == 1 && src.dim() == 1, "index and src should be 1D tensors when self is a 1D tensor, "

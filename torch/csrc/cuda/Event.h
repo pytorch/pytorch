@@ -10,7 +10,6 @@ struct THCPEvent {
   PyObject_HEAD
   at::cuda::CUDAEvent cuda_event;
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 extern PyObject *THCPEventClass;
 
 void THCPEvent_init(PyObject *module);
