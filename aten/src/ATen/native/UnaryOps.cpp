@@ -191,7 +191,6 @@ TORCH_IMPL_FUNC(polygamma_out)
 }
 
 TORCH_IMPL_FUNC(signbit_out) (const Tensor& self, const Tensor& result) {
-  at::native::resize_output(result, self.sizes());
   if (self.dtype() == at::kBool) {
     result.fill_(false);
   } else {
