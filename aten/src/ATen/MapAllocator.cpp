@@ -352,7 +352,7 @@ MapAllocator::MapAllocator(WithFd, std::string filename, int fd, int flags, size
     }
   }
 #endif
-  c10::reportMemoryUsageToProfiler(base_ptr_, size_, c10::Device(c10::DeviceType::CPU));
+  c10::reportMemoryUsageToProfiler(base_ptr_, size_, 0, size_, c10::Device(c10::DeviceType::CPU));
 }
 
 MapAllocator::MapAllocator(std::string filename, int flags, size_t size)
@@ -600,7 +600,7 @@ void* RefcountedMapAllocator::data() const {
 MapAllocator::~MapAllocator() {
   // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   close();
-  c10::reportMemoryUsageToProfiler(base_ptr_, -size_, c10::Device(c10::DeviceType::CPU));
+  c10::reportMemoryUsageToProfiler(base_ptr_, -size_, 0, 0, c10::Device(c10::DeviceType::CPU));
 }
 
 }  // namespace at

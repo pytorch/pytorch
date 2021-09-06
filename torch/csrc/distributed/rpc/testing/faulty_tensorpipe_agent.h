@@ -53,8 +53,7 @@ class TORCH_API FaultyTensorPipeAgent : public TensorPipeAgent {
       const WorkerInfo& to,
       c10::intrusive_ptr<Message> message,
       const float rpcTimeoutSeconds = torch::distributed::rpc::kUnsetRpcTimeout,
-      const std::unordered_map<c10::Device, c10::Device>& deviceMap = {})
-      override;
+      const DeviceMap& deviceMap = {}) override;
 
   // Add delay to writes
   void pipeWrite(
@@ -67,7 +66,7 @@ class TORCH_API FaultyTensorPipeAgent : public TensorPipeAgent {
  protected:
   // This function checks the messageTypesToFail_ to determine whether to use
   // the faulty send or not.
-  virtual bool shouldFailMessage(MessageType type) const;
+  bool shouldFailMessage(MessageType type) const;
 
  private:
   // This function parses the list of strings passed in by the python tests and

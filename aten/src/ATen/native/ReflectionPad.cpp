@@ -68,6 +68,7 @@ TORCH_META_FUNC(reflection_pad1d_backward)(const Tensor& grad_output,
 
   if (input.ndimension() == 3) {
     nbatch = input.size(0);
+    (void)nbatch;
     dim_w++;
     dim_plane++;
   }

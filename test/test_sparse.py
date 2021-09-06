@@ -5,8 +5,9 @@ import operator
 import random
 from collections import defaultdict
 import unittest
+from torch.testing import make_tensor
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
-    do_test_empty_full, load_tests, TEST_NUMPY, TEST_SCIPY, IS_WINDOWS, gradcheck, coalescedonoff, make_tensor, \
+    do_test_empty_full, load_tests, TEST_NUMPY, TEST_SCIPY, IS_WINDOWS, gradcheck, coalescedonoff, \
     DeterministicGuard
 from torch.testing._internal.common_cuda import TEST_CUDA, _get_torch_cuda_version
 from numbers import Number
@@ -1557,7 +1558,7 @@ class TestSparse(TestCase):
         self.assertEqual(self.safeToDense(y1), expected)
         self.assertEqual(self.safeToDense(y2), expected)
 
-        with self.assertWarnsOnceRegex(UserWarning, 'floor_divide'):
+        with self.assertWarnsOnceRegex(UserWarning, '__floordiv__'):
             y1 = x1 // 37.5
         y2 = x1.clone()
         with self.assertWarnsOnceRegex(UserWarning, 'floor_divide'):
@@ -2910,7 +2911,7 @@ class TestSparse(TestCase):
                                / torch.tensor(1., device=device).to_sparse())
 
     def test_floor_divide_by_sparse_error(self, device):
-        self.assertRaisesRegex(RuntimeError, 'Sparse floor division requires',
+        self.assertRaisesRegex(RuntimeError, 'Sparse division requires',
                                lambda: torch.tensor(1., device=device).to_sparse()
                                // torch.tensor(1., device=device).to_sparse())
 
@@ -3382,6 +3383,26 @@ class TestSparse(TestCase):
             a[0] = 100
 
         self.assertRaises(TypeError, assign_to)
+
+    def test_cpu_sparse_dense_mul(self, device):
+        # general multiplication is not supported, but 0dim multiplication is supported
+        s = torch.sparse_coo_tensor([[0], [1]], [5.0], (2, 3), device=device)
+        t23 = s.to_dense()
+        t0 = torch.tensor(2.0, device=device)
+        r = s * 2.0
+        self.assertEqual(r, 2.0 * s)
+        self.assertEqual(r, t0 * s)
+        self.assertEqual(r, s * t0)
+        if device == 'cpu':
+            with self.assertRaisesRegex(RuntimeError, r"mul\(sparse, dense\) is not supported"):
+                s * t23
+            with self.assertRaisesRegex(RuntimeError, r"mul\(dense, sparse\) is not supported"):
+                t23 * s
+        elif device == 'cuda':
+            with self.assertRaisesRegex(NotImplementedError, "CUDA"):
+                s * t23
+            with self.assertRaisesRegex(NotImplementedError, "CUDA"):
+                t23 * s
 
 
 class TestSparseOneOff(TestCase):

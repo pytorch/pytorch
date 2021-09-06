@@ -62,9 +62,11 @@ set(JIT_TEST_SRCS
   ${JIT_TEST_ROOT}/test_qualified_name.cpp
   ${JIT_TEST_ROOT}/test_save_load.cpp
   ${JIT_TEST_ROOT}/test_schema_matching.cpp
+  ${JIT_TEST_ROOT}/test_stack_opt.cpp
   ${JIT_TEST_ROOT}/test_subgraph_matcher.cpp
   ${JIT_TEST_ROOT}/test_subgraph_rewriter.cpp
   ${JIT_TEST_ROOT}/test_subgraph_utils.cpp
+  ${JIT_TEST_ROOT}/test_union.cpp
   ${JIT_TEST_ROOT}/test_utils.cpp
   ${JIT_TEST_ROOT}/test_script_profile.cpp
   ${JIT_TEST_ROOT}/test_jit_logging_levels.cpp
