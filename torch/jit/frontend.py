@@ -422,6 +422,18 @@ def build_ignore_context_manager(ctx, stmt):
     # first create the functionDef object from just declaration
     ignore_function = ast.parse(ignore_function_str).body[0]
 
+    # analyze statement body to figure out self statements
+    for body in stmt.body:
+        # TODO maybe only allow one assignment per line
+        for target in body.targets:
+            # this is attribute
+            if isinstance(target, ast.Attribute):
+                assert(target.value.id == "self")
+                attribute_name = target.attr
+                print(attribute_name)
+
+
+
     # dump the body of context manager to dummy function
     ignore_function.body = stmt.body  # type: ignore[attr-defined]
 

@@ -488,6 +488,7 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
                 scripted = orig_value
             else:
                 # always reuse the provided stubs_fn to infer the methods to compile
+                print("HERE", name)
                 scripted = create_script_module_impl(orig_value, sub_concrete_type, stubs_fn)
 
             cpp_module.setattr(name, scripted)

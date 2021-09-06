@@ -102,3 +102,18 @@ class TestIgnoreContextManager(JitTestCase):
         s = torch.jit.script(model)
         self.assertEqual(s(), 5)
         self.assertEqual(s(), model())
+    @unittest.skipUnless(_IS_ASTUNPARSE_INSTALLED, "astunparse package is required")
+    def test_with_ignore_context_manager_with_just_out(self):
+        class A(torch.nn.Module):
+            def __init__(self):
+                super(A, self).__init__()
+
+            def forward(self):
+                with torch.jit._IgnoreContextManager(c="out:int"):
+                    self.a = 4
+                    c = 4
+                return c
+        model = A()
+        s = torch.jit.script(model)
+        self.assertEqual(s(), 5)
+        self.assertEqual(s(), model())

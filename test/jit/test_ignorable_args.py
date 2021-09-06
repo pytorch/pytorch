@@ -1,5 +1,6 @@
 import os
 import sys
+import torch
 from torch._C import parse_ir
 from torch.testing import FileCheck
 
@@ -43,3 +44,11 @@ class TestIgnorableArgs(JitTestCase):
         # because in %16, %15 and %0 are default values for the schema.
         FileCheck().check("torch.slice(torch.slice(torch.tensor(_0), 0, 2), 1, None, 1)").run(src)
         self.assertEqual(function(), function_copy())
+    def test_div_ignorable_args(self):
+        def fn():
+            a = torch.tensor([3, 4, 5])
+            b = torch.tensor([3, 4, 5])
+            return a.div(b, rounding_mode="trunc")
+        s = torch.jit.script(fn)
+        self.checkScript(fn, ())
+        print(s.code)
