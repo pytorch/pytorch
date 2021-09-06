@@ -22,6 +22,16 @@ int64_t div_up(int64_t a, int64_t b) {
   return (a + (b - 1)) / b;
 }
 
+template <typename T>
+inline __device__ bool _isinf(T x) { return ::isinf(x); }
+
+inline __device__ bool _isinf(c10::Half x) {
+  return ::isinf(static_cast<float>(x));
+}
+inline __device__ bool _isinf(c10::BFloat16 x) {
+  return ::isinf(static_cast<float>(x));
+}
+
 #define MAX_NUM_BLOCKS 200
 
 // Normalizes the L1 norm of every row to 1; used by multinomial
@@ -192,7 +202,7 @@ __global__ void sampleMultinomialOnce(
     for (int cat = threadIdx.x; cat < categories; cat += blockDim.x) {
       val = dist[curDist * stride_dist + cat * stride_categories];
       CUDA_KERNEL_ASSERT(!at::_isnan(val));
-      CUDA_KERNEL_ASSERT(!::isinf(val));
+      CUDA_KERNEL_ASSERT(!_isinf(val));
       CUDA_KERNEL_ASSERT(!(val < zero));
       sum = sum + static_cast<accscalar_t>(val);
     }
@@ -203,7 +213,7 @@ __global__ void sampleMultinomialOnce(
     // Broadcast sum and sample value
     if (threadIdx.x == 0) {
       // Make sure the sum of our distribution didn't overflow
-      CUDA_KERNEL_ASSERT(!::isinf(val));
+      CUDA_KERNEL_ASSERT(!_isinf(val));
       CUDA_KERNEL_ASSERT(sum > accZero);
 
       foundPos = 0;
