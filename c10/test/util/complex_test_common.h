@@ -433,7 +433,7 @@ C10_HOST_DEVICE void test_arithmetic_assign_complex() {
 
   // this test is skipped due to a bug in constexpr evaluation
   // in nvcc. This bug has already been fixed since CUDA 11.2
-#if !defined(__CUDACC__) || CUDA_VERSION >= 11020
+#if !defined(__CUDACC__) || (defined(CUDA_VERSION) && CUDA_VERSION >= 11020)
   static_assert(x3.imag() == scalar_t(3), "");
 #endif
 
@@ -445,7 +445,7 @@ C10_HOST_DEVICE void test_arithmetic_assign_complex() {
 
   // this test is skipped due to a bug in constexpr evaluation
   // in nvcc. This bug has already been fixed since CUDA 11.2
-#if !defined(__CUDACC__) || CUDA_VERSION >= 11020
+#if !defined(__CUDACC__) || (defined(CUDA_VERSION) && CUDA_VERSION >= 11020)
   static_assert(y3.imag() == scalar_t(1), "");
 #endif
 
