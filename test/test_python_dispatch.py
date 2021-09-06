@@ -51,7 +51,7 @@ class LoggingTensor(torch.Tensor):
             return LoggingTensor(e) if isinstance(e, torch.Tensor) else e
 
         rs = tree_map(wrap, func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs)))
-        logging.getLogger("LoggingTensor").info(f"{func.__module__}.{func.__name__}", args, kwargs, rs)
+        logging.getLogger("LoggingTensor").info(f"{func.__module__}.{func.__name__}" + "%s %s %s", args, kwargs, rs)
         return rs
 
 # https://stackoverflow.com/questions/36408496/python-logging-handler-to-append-to-list
@@ -82,10 +82,13 @@ class LoggingTensorHandler(logging.Handler):
         ))
         fmt_rets = ", ".join(self._fmt(a) for a in record.args[2]) \
             if isinstance(record.args[2], (list, tuple)) else self._fmt(record.args[2])
-        self.log_list.append(f'{fmt_rets} = {record.msg}({fmt_args})')
+        self.log_list.append(f'{fmt_rets} = {record.msg.replace("%s %s %s", "")}({fmt_args})')
 
 def log_input(name: str, var: object):
-    logging.getLogger("LoggingTensor").info("input", (name,), {}, (var,))
+    # Custom handler doesn't really care for correct number of %s but
+    # other handlers eg. pytest logging handler do care about that.
+    # In custom handler we just remove the formality %s.
+    logging.getLogger("LoggingTensor").info("input" + "%s %s %s", (name,), {}, (var,))
 
 @contextlib.contextmanager
 def capture_logs() -> Iterator[List[str]]:
