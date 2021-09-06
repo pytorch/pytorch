@@ -103,8 +103,6 @@ void GroupNormKernelImplChannelsLastInternal(
   const bool gamma_null = (gamma_data == nullptr);
   const bool beta_null = beta_data == nullptr;
 
-  const bool is_gamma_beta_valid = !gamma_null && !beta_null;
-
   // temp buffer holding x and x2
   Tensor buffer = at::empty({N, 2 * C}, X.options()).zero_();
   T* buffer_data = buffer.data_ptr<T>();
