@@ -90,7 +90,7 @@ class Tensor(torch._C._TensorBase):
             # does accurate alias tracking; however, the code below
             # doesn't work because of
             # https://github.com/pytorch/pytorch/issues/47442
-            if self.is_sparse or self.device.type in ['xla', 'mlc', 'meta']:
+            if self.is_sparse or self.device.type in ['xla', 'mlc', 'ort', 'meta']:
                 new_tensor = self.clone()
             else:
                 new_storage = self.storage().__deepcopy__(memo)
@@ -153,28 +153,21 @@ class Tensor(torch._C._TensorBase):
         # See Note [Don't serialize hooks]
         torch.utils.hooks.warn_if_has_hooks(self)
         backward_hooks: Dict[Any, Any] = OrderedDict()
-        # Note: Numpy array is chosen to be the rebuild component for XLA Tensor.
+        # Note: Numpy array is chosen to be the rebuild component for XLA, ORT, MLC Tensors.
         # We considered a few options:
         # 1. CPU tensor can't be used here.
         #    Otherwise in torch.load CPU storage is reconstructed with randomly
-        #    initialized data, moved onto XLA device, and then storage is updated
-        #    to the serialized content. This works perfectly for CPU/CUDA but not XLA.
-        #    XLA tensor is disconnected with storage so it doesn't get the update.
+        #    initialized data, moved onto backend device, and then storage is updated
+        #    to the serialized content. This works perfectly for CPU/CUDA but not these backends;
+        #    their tensors are disconnected with storage so they don't get the update.
         # 2. Python list is not a good fit due to performance reason.
         #    `tolist()` converts every single element in the tensor into python objects
         #    and serialize them one by one.
-        if self.device.type == 'xla':
-            arg_xla = (self.cpu().numpy(),
-                       self.dtype,
-                       str(self.device),
-                       self.requires_grad)
-            return (torch._utils._rebuild_xla_tensor, arg_xla)
-        if self.device.type == 'mlc':
-            arg_mlc = (self.cpu().numpy(),
-                       self.dtype,
-                       str(self.device),
-                       self.requires_grad)
-            return (torch._utils._rebuild_mlc_tensor, arg_mlc)
+        if self.device.type in ['xla', 'ort', 'mlc']:
+            return (torch._utils._rebuild_device_tensor_from_numpy, (self.cpu().numpy(),
+                                                                     self.dtype,
+                                                                     str(self.device),
+                                                                     self.requires_grad))
         if self.device.type == 'meta':
             # NB: This implementation BREAKS storage sharing.  Current
             # hypothesis is that no one cares for meta tensors.
@@ -589,11 +582,21 @@ class Tensor(torch._C._TensorBase):
 
     @_wrap_type_error_to_not_implemented
     def __floordiv__(self, other):
-        return torch.floor_divide(self, other)
+        warnings.warn("__floordiv__ is deprecated, and its behavior will change in a future version of pytorch. "
+                      "It currently rounds toward 0 (like the 'trunc' function NOT 'floor'). "
+                      "This results in incorrect rounding for negative values. "
+                      "To keep the current behavior, use torch.div(a, b, rounding_mode='trunc'), "
+                      "or for actual floor division, use torch.div(a, b, rounding_mode='floor').", stacklevel=3)
+        return torch.div(self, other, rounding_mode='trunc')
 
     @_wrap_type_error_to_not_implemented
     def __rfloordiv__(self, other):
-        return torch.floor_divide(other, self)
+        warnings.warn("__rfloordiv__ is deprecated, and its behavior will change in a future version of pytorch. "
+                      "It currently rounds toward 0 (like the 'trunc' function NOT 'floor'). "
+                      "This results in incorrect rounding for negative values. "
+                      "To keep the current behavior, use torch.div(a, b, rounding_mode='trunc'), "
+                      "or for actual floor division, use torch.div(a, b, rounding_mode='floor').", stacklevel=3)
+        return torch.div(other, self, rounding_mode='trunc')
 
     @_wrap_type_error_to_not_implemented
     def __rlshift__(self, other):
