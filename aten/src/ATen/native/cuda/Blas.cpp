@@ -193,7 +193,8 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   return result;
 }
 
-Tensor& baddbmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) {
+template <typename Meta>
+void common_baddbmm_bmm_checks_cuda(Meta& meta, Tensor& result, const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) {
   TORCH_CHECK(self.dim() == 3, "self must be a 3D tensor");
   TORCH_CHECK(batch1.dim() == 3, "batch1 must be a 3D tensor");
   TORCH_CHECK(batch2.dim() == 3, "batch2 must be a 3D tensor");
@@ -210,6 +211,10 @@ Tensor& baddbmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& 
   TORCH_CHECK(self_sizes[1] == batch1_sizes[1], "self dim 1 must match batch1 dim 1");
   TORCH_CHECK(self_sizes[2] == batch2_sizes[2], "self dim 2 must match batch2 dim 2");
   TORCH_CHECK(batch1_sizes[2] == batch2_sizes[1], "batch1 dim 2 must match batch2 dim 1");
+}
+
+Tensor& baddbmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) { 
+  IntArrayRef batch1_sizes = batch1.sizes();
 
   if (!result.is_same(self)) {
     result.resize_as_(self);
@@ -295,27 +300,19 @@ TORCH_IMPL_FUNC(mm_out_cuda)(const Tensor& self, const Tensor& mat2, const Tenso
   addmm_out_cuda_impl(const_cast<Tensor&>(result), result, self, mat2, 0, 1);
 }
 
-Tensor& baddbmm_out_cuda(const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, Tensor &result) {
+TORCH_IMPL_FUNC(baddbmm_out_cuda)(const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, const Tensor& result) {
   auto self_ = &result == &self
     ? c10::MaybeOwned<Tensor>::borrowed(self)
     : expand_size(self, {batch1.size(0), batch1.size(1), batch2.size(2)}, "baddbmm");
   {
     at::NoNamesGuard guard;
-    baddbmm_out_cuda_impl(result, *self_, batch1, batch2, beta, alpha);
+    baddbmm_out_cuda_impl(const_cast<Tensor&>(result), *self_, batch1, batch2, beta, alpha);
   }
   namedinference::propagate_names_if_nonempty(
-       result,
-       namedinference::compute_baddbmm_outnames(result, batch1, batch2, self));
+    result,
+    namedinference::compute_baddbmm_outnames(const_cast<Tensor&>(result), batch1, batch2, self)
+  );
   return result;
-}
-
-Tensor baddbmm_cuda(const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) {
-  Tensor out = at::empty({0}, self.options());
-  return baddbmm_out_cuda(self, batch1, batch2, beta, alpha, out);
-}
-
-Tensor& baddbmm__cuda(Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) {
-  return baddbmm_out_cuda(self, batch1, batch2, beta, alpha, self);
 }
 
 Tensor& bmm_out_cuda(const Tensor& batch1, const Tensor& batch2, Tensor &result) {
