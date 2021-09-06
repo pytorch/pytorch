@@ -16,12 +16,6 @@
 #include <c10/core/StreamGuard.h>
 #include <c10/util/irange.h>
 
-#if TENSORPIPE_HAS_SHM_TRANSPORT
-// Needed for ::getpid(), which is used to create a unique address.
-#include <sys/types.h>
-#include <unistd.h>
-#endif
-
 namespace torch {
 namespace distributed {
 namespace rpc {
@@ -54,7 +48,7 @@ std::vector<c10::Device> getDevicesForTensors(
       "Request device mapping is not available for destination ",
       remoteName);
   std::vector<c10::Device> devices;
-  devices.reserve(tensors.size());
+  devices.reserve(2 * tensors.size());
   bool hasMappedDevice = false;
   for (const auto& t : tensors) {
     if (t.device().is_cpu()) {
@@ -73,7 +67,12 @@ std::vector<c10::Device> getDevicesForTensors(
           " for device ",
           t.device(),
           " but received a tensor on that device.");
-      devices.push_back(deviceIter->second);
+      if (t.is_sparse()) {
+        devices.push_back(deviceIter->second);
+        devices.push_back(deviceIter->second);
+      } else {
+        devices.push_back(deviceIter->second);
+      }
       hasMappedDevice = true;
     }
   }
@@ -209,22 +208,10 @@ C10_REGISTER_CREATOR(TensorPipeTransportRegistry, uv, makeUvTransport);
 
 #if TENSORPIPE_HAS_SHM_TRANSPORT
 
-std::string createUniqueShmAddr() {
-  thread_local uint32_t threadLocalId = 0;
-  return c10::str(
-      "shm://tensorpipe_rpc_agent_",
-      std::this_thread::get_id(),
-      "_",
-      ::getpid(),
-      "_",
-      threadLocalId++);
-}
-
 std::unique_ptr<TransportRegistration> makeShmTransport() {
   auto context = tensorpipe::transport::shm::create();
-  std::string address = createUniqueShmAddr();
-  return std::make_unique<TransportRegistration>(TransportRegistration{
-      std::move(context), kShmTransportPriority, std::move(address)});
+  return std::make_unique<TransportRegistration>(
+      TransportRegistration{std::move(context), kShmTransportPriority, ""});
 }
 
 // The SHM implements connections using ringbuffers residing in anonymous shared
