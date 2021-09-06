@@ -465,22 +465,31 @@ getManagedLiveRangesFromMemEvents(
   }
 
   if (!allocs.empty()) {
-    auto g_outputs = std::unordered_set<const jit::Value*>(
-        graph->outputs().begin(), graph->outputs().end());
+    // TODO: jit::Value* .count()>0 doesn't work for some reason
+    // std::unordered_set<const jit::Value*> g_outputs;
+    std::unordered_set<std::string> g_outputs;
+    for (const auto& outp : graph->return_node()->outputs()) {
+      std::cout << "return outp " << outp->debugName() << "\n";
+    }
+    for (const auto& outp : graph->outputs()) {
+      g_outputs.insert(outp->debugName());
+    }
     for (auto& alloc : allocs) {
       TORCH_INTERNAL_ASSERT(
           alloc.second.type == MemEvent::EventType::Allocate &&
           alloc.second.frame_node_id.has_value());
       GRAPH_DEBUG("leaked alloc: ", alloc.second, "\n");
+      // TODO: this isn't a great heuristic (since tensors created within
+      // the scope of an op could be leaked but not the actual output values.
+      // a better way would be to connect allocs directly to values
       if (alloc.second.frame_node_id.value().node->outputs().size() > 0) {
         for (const auto& out :
              alloc.second.frame_node_id.value().node->outputs()) {
-          // TODO: this is a very bad heuristic (that this temp tensor is output
-          // because no outputs). should find some way to connect value/ivalue
-          // to alloc
-          TORCH_INTERNAL_ASSERT(g_outputs.count(out) > 0);
+          TORCH_INTERNAL_ASSERT(
+              g_outputs.count(out->debugName()) > 0, out->debugName());
         }
       }
+      TORCH_WARN(alloc.second, " leaked");
     }
   }
   return std::make_pair(managed_live_ranges, live_range_node_header);
@@ -490,6 +499,7 @@ void insertCollectAllocatedTensorsNode(
     std::shared_ptr<Graph>& graph,
     std::vector<Node*> alloc_nodes) {
   auto* collect_node = graph->create(prim::Constant, 1);
+  collect_node->s_(attr::name, "CollectAllocatedTensors");
   collect_node->insertBefore(graph->return_node());
   for (auto& node : alloc_nodes) {
     collect_node->addInput(node->output());

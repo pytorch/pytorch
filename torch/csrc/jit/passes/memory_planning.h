@@ -173,7 +173,8 @@ inline std::ostream& operator<<(std::ostream& str, MemEvent rhs) {
       << std::setw(15) << "size: " << rhs.size << "\n"
       << std::setw(15) << "ptr_addr: " << rhs.ptr_addr << "\n"
       << std::setw(15) << "alloc_trace: " << rhs.allocation_trace.substr(0, 40)
-      << "..." << std::setw(15)
+      << "...\n"
+      << std::setw(15)
       << "frame_node_id has value: " << rhs.frame_node_id.has_value() << "\n";
   if (rhs.frame_node_id) {
     str << "pc: " << std::setw(15) << rhs.frame_node_id.value().pc << "\n"
