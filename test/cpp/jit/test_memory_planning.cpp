@@ -63,6 +63,7 @@ void checkAllocNodes(
 
   std::stringstream ss;
   graph.print(ss, false);
+  std::unordered_set<const Node*> storage_node_uses;
 
   auto i = 0;
   for (const auto& node : graph.nodes()) {
@@ -71,7 +72,13 @@ void checkAllocNodes(
       device_type = static_cast<DeviceType>(node->i(attr::device));
       ASSERT_TRUE(
           total_size == expected_storage.total_size &&
-          device_type == expected_storage.device_type);
+          device_type == expected_storage.device_type && node->hasUses())
+          << ss.str() << "\n";
+      ASSERT_TRUE(node->output()->uses().size() == expected_allocs.size());
+      for (auto& use : node->output()->uses()) {
+        storage_node_uses.insert(use.user);
+      }
+      storage_node_uses.size();
     } else if (node->kind() == prim::AllocateTensor) {
       size = node->i(attr::size);
       offset = node->i(attr::offset);
@@ -81,13 +88,17 @@ void checkAllocNodes(
       dtype = static_cast<at::ScalarType>(node->i(attr::dtype));
       auto successor = node->next()->getOperator().schema().name();
       ASSERT_TRUE(
+          storage_node_uses.count(node) > 0 &&
           size == expected_allocs[i].size &&
           offset == expected_allocs[i].offset &&
           sizes == expected_allocs[i].sizes &&
           strides == expected_allocs[i].strides &&
           device_type == expected_allocs[i].device_type &&
           dtype == expected_allocs[i].dtype &&
-          successor == expected_successors[i])
+          successor == expected_successors[i] &&
+          node->output()->uses().size() == 1 &&
+          node->output()->uses().front().user == node->next())
+          << "i: " << i << "\n"
           << size << ((size == expected_allocs[i].size) ? "==" : "!=")
           << expected_allocs[i].size << "\n"
           << offset << ((offset == expected_allocs[i].offset) ? "==" : "!=")
@@ -110,7 +121,8 @@ void checkAllocNodes(
 
   ASSERT_TRUE(i == (expected_allocs.size()))
       << "i: " << i << ", "
-      << "expected_allocs.size() " << expected_allocs.size();
+      << "expected_allocs.size() " << expected_allocs.size() << "\n"
+      << ss.str() << "\n";
 }
 
 TEST(MemoryPlannerTest, Small) {
@@ -145,11 +157,9 @@ TEST(MemoryPlannerTest, Small) {
       *graph_copy, expected_storage, expected_allocs, expected_successors);
 }
 
-std::pair<std::shared_ptr<Graph>, Stack> buildLSTMWithStack() {
-  // setup inputs
-  constexpr int batch_size = 1;
-  constexpr int input_size = 32;
-
+std::vector<at::Tensor> buildLSTMInputTensors(
+    int batch_size = 1,
+    int input_size = 32) {
   int hidden_size = 2 * input_size;
 
   auto input = at::randn({batch_size, input_size}, at::kCPU);
@@ -157,7 +167,14 @@ std::pair<std::shared_ptr<Graph>, Stack> buildLSTMWithStack() {
   auto cx = at::randn({batch_size, hidden_size}, at::kCPU);
   auto w_ih = at::randn({4 * hidden_size, input_size}, at::kCPU).t();
   auto w_hh = at::randn({4 * hidden_size, hidden_size}, at::kCPU).t();
-  auto stack = createStack({input, hx, cx, w_ih, w_hh});
+
+  return {input, hx, cx, w_ih, w_hh};
+}
+
+std::pair<std::shared_ptr<Graph>, Stack> buildLSTMWithStack() {
+  // setup inputs
+  auto vals = buildLSTMInputTensors();
+  auto stack = createStack(std::move(vals));
   auto g = build_lstm();
   return std::make_pair(g, stack);
 }
