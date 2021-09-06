@@ -308,7 +308,7 @@ LINUX_WORKFLOWS = [
     # Build PyTorch with BUILD_CAFFE2=OFF
     CIWorkflow(
         arch="linux",
-        build_environment="pure_torch-linux-xenial-py3.6-gcc5.4",
+        build_environment="puretorch-linux-xenial-py3.6-gcc5.4",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3.6-gcc5.4",
         test_runner_type=LINUX_CPU_TEST_RUNNER,
         exclude_test=True,
