@@ -409,7 +409,7 @@ def boolean_dispatch(arg_name, arg_index, default, if_true, if_false, module_nam
     In TorchScript, the boolean argument must be constant so that the correct
     function to use can be determined at compile time.
     """
-    def extract_attribute(if_true_obj, if_false_obj, attr, *, sentinel=None):
+    def extract_attribute(if_true_obj, if_false_obj, attr, *, sentinel=None, sentinel_if_unequal=False):
         if_true_val = getattr(if_true_obj, attr, sentinel)
         if_false_val = getattr(if_false_obj, attr, sentinel)
 
@@ -425,6 +425,9 @@ def boolean_dispatch(arg_name, arg_index, default, if_true, if_false, module_nam
         # attribute is defined on both
         else:
             if if_true_val != if_false_val:
+                if sentinel_if_unequal:
+                    return sentinel
+
                 raise RuntimeError(
                     f"Both {getattr(if_true_obj, '__name__', repr(if_true_obj))} and "
                     f"{getattr(if_false_obj, '__name__', repr(if_false_obj))} define the attribute '{attr}', "
@@ -472,7 +475,14 @@ def boolean_dispatch(arg_name, arg_index, default, if_true, if_false, module_nam
                 if_true_signature.parameters.values(), if_false_signature.parameters.values()
             )
         ]
-    fn.__signature__ = inspect.Signature(parameters)  # type: ignore[attr-defined]
+    return_annotation = extract_attribute(
+        if_true_signature,
+        if_false_signature,
+        "return_annotation",
+        sentinel=inspect.Signature.empty,
+        sentinel_if_unequal=True,
+    )
+    fn.__signature__ = inspect.Signature(parameters, return_annotation=return_annotation)  # type: ignore[attr-defined]
 
     fn.__doc__ = extract_attribute(if_true, if_false, "__doc__")
 
