@@ -396,20 +396,18 @@ TORCH_IMPL_FUNC(nll_loss_backward_out_cpu)
  const Tensor& total_weight,
  const Tensor& grad_input
 ) {
-  const Tensor& weight = weight_opt.getTensorRef();
-
   AT_DISPATCH_FLOATING_TYPES_AND(
       ScalarType::BFloat16,
-      input.scalar_type(),
+      self.scalar_type(),
       "nll_loss_backward_out_frame",
       [&] {
         if (target.scalar_type() == kByte) {
           nll_loss_backward_out_frame<scalar_t, uint8_t>(
               grad_input,
               grad_output,
-              input,
+              self,
               target,
-              weight,
+              weight_opt.getTensorRef(),
               reduction,
               ignore_index,
               total_weight);
@@ -418,9 +416,9 @@ TORCH_IMPL_FUNC(nll_loss_backward_out_cpu)
           nll_loss_backward_out_frame<scalar_t, int64_t>(
               grad_input,
               grad_output,
-              input,
+              self,
               target,
-              weight,
+              weight_opt.getTensorRef(),
               reduction,
               ignore_index,
               total_weight);
