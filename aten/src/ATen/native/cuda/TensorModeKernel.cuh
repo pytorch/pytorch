@@ -401,11 +401,11 @@ __global__ void compute_mode(
   }
 
   struct MaxIndexOp {
-    inline __device__ int combine(int a, int b) const {
+    inline __device__ unsigned combine(unsigned a, unsigned b) const {
       return b > a ? b : a;
     }
 
-    inline __device__ int warp_shfl_down(int acc, int offset) const {
+    inline __device__ unsigned warp_shfl_down(unsigned acc, int offset) const {
       return WARP_SHFL_DOWN(acc, offset);
     }
   } max_index_op;
