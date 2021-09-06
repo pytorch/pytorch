@@ -7,6 +7,7 @@ import operator
 import random
 import numbers
 import unittest
+import os
 
 import torch
 import numpy as np
@@ -7360,6 +7361,7 @@ op_db: List[OpInfo] = [
                    toleranceOverride({torch.float32: tol(atol=1e-05, rtol=1e-03)}),
                    'TestCommon', 'test_reference_testing'
                ),
+               unittest.skipIf("tbb" in os.getenv("BUILD_ENVIRONMENT", ""), "This test makes TBB Sad"),
            ],
            sample_inputs_func=sample_inputs_layer_norm,),
     OpInfo('nn.functional.pad',
@@ -9427,8 +9429,8 @@ def _compare_trilu_indices(
         # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
         self.assertEqualIgnoreType(
             torch.ones(row, col, device='cpu')
-                 .tril(offset).nonzero().to(dtype).transpose(0, 1),
-            torch.tril_indices(row, col, offset, dtype=dtype, device=device))
+                 .triu(offset).nonzero().to(dtype).transpose(0, 1),
+            torch.triu_indices(row, col, offset, dtype=dtype, device=device))
 
 
 def _compare_large_trilu_indices(
