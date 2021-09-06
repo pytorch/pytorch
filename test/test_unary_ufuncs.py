@@ -11,13 +11,14 @@ import unittest
 from torch._six import inf, nan
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, torch_to_numpy_dtype_dict, numpy_to_torch_dtype_dict,
-    suppress_warnings, make_tensor, TEST_SCIPY, slowTest, skipIfNoSciPy, IS_WINDOWS)
+    suppress_warnings, TEST_SCIPY, slowTest, skipIfNoSciPy, IS_WINDOWS)
 from torch.testing._internal.common_methods_invocations import (
     unary_ufuncs, _NOTHING)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, ops, dtypes, onlyCPU, onlyOnCPUAndCUDA,
     onlyCUDA, dtypesIfCUDA, precisionOverride, skipCUDAIfRocm, dtypesIfCPU,
     OpDTypes)
+from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
     floating_types_and, all_types_and_complex_and, floating_and_complex_types_and, get_all_dtypes, get_all_math_dtypes,
     get_all_int_dtypes, get_all_fp_dtypes, get_all_complex_dtypes
@@ -361,10 +362,7 @@ class TestUnaryUfuncs(TestCase):
         tensors = generate_numeric_tensors_extremal(device, dtype,
                                                     domain=op.domain)
 
-        # https://github.com/pytorch/pytorch/issues/50749
-        equal_nan = "relaxed" if device.startswith('cuda') else True
-
-        self._test_reference_numerics(dtype, op, tensors, equal_nan)
+        self._test_reference_numerics(dtype, op, tensors)
 
     # Tests for testing (non)contiguity consistency
 

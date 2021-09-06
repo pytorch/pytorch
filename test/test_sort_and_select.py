@@ -5,11 +5,12 @@ import random
 from torch._six import nan
 from itertools import permutations, product
 
+from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
     all_types, all_types_and, floating_types_and, get_all_dtypes, get_all_int_dtypes, get_all_fp_dtypes,
 )
 from torch.testing._internal.common_utils import \
-    (TEST_WITH_ROCM, TestCase, run_tests, make_tensor, slowTest)
+    (TEST_WITH_ROCM, TestCase, run_tests, slowTest)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, onlyOnCPUAndCUDA,
      skipCUDAIfRocm, onlyCUDA, dtypesIfCUDA, dtypesIfCPU, onlyCPU, largeTensorTest)

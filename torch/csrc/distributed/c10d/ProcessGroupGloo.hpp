@@ -318,6 +318,10 @@ class TORCH_API ProcessGroupGloo : public ProcessGroup {
   // may indicate that there is some sort of collective desynchronization.
   uint64_t getSequenceNumberForGroup() override;
 
+  int getNumThreads() {
+    return options_->threads;
+  }
+
  protected:
   std::unique_ptr<::gloo::rendezvous::Store> store_;
   const c10::intrusive_ptr<Options> options_;
