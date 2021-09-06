@@ -123,6 +123,21 @@ std::shared_ptr<Graph> build_mobile_export_analysis_graph() {
   return g;
 }
 
+std::shared_ptr<Graph> build_mobile_export_with_out() {
+  const auto graph_string = R"IR(
+    graph(%x.1 : Tensor,
+          %y.1 : Tensor):
+      %8 : NoneType = prim::Constant()
+      %6 : int = prim::Constant[value=1]()
+      %7 : Tensor = aten::add(%x.1, %y.1, %6, %y.1)
+      return (%8))IR";
+
+  auto g = std::make_shared<Graph>();
+  torch::jit::parseIR(graph_string, g.get());
+  g->lint();
+  return g;
+}
+
 std::shared_ptr<Graph> build_mobile_export_analysis_graph_nested() {
   // this is pretty much same test as build_mobile_export_analysis_graph(),
   // but some aten::slice operators are hidden under block statement to check
@@ -198,12 +213,27 @@ bool checkRtol(const at::Tensor& diff, const std::vector<at::Tensor> inputs) {
   }
   return diff.abs().max().item<float>() < 2e-6 * maxValue;
 }
+
 bool almostEqual(const at::Tensor& a, const at::Tensor& b) {
   return checkRtol(a - b, {a, b});
 }
 
 bool exactlyEqual(const at::Tensor& a, const at::Tensor& b) {
   return (a - b).abs().max().item<float>() == 0.f;
+}
+
+bool exactlyEqual(
+    const std::vector<at::Tensor>& a,
+    const std::vector<at::Tensor>& b) {
+  if (a.size() != b.size()) {
+    return false;
+  }
+  for (size_t i = 0; i < a.size(); ++i) {
+    if (!exactlyEqual(a[i], b[i])) {
+      return false;
+    }
+  }
+  return true;
 }
 
 std::pair<at::Tensor, at::Tensor> lstm(
@@ -243,10 +273,27 @@ RegisterOperators reg({
     // because it always produces empty Tensors.
     Operator(
         "prim::MakeTestTensor() -> Tensor",
-        [](Stack* stack) { push(stack, at::Tensor()); },
+        [](Stack& stack) { push(stack, at::Tensor()); },
         aliasAnalysisFromSchema()),
 });
 } // namespace
+
+std::vector<at::Tensor> runGraph(
+    std::shared_ptr<Graph> graph,
+    const std::vector<at::Tensor>& inputs) {
+  std::vector<IValue> stack = fmap<IValue>(inputs);
+  Code code(graph, "test");
+  InterpreterState(code).run(stack);
+  TORCH_INTERNAL_ASSERT(!stack.empty());
+  // Graph outputs that are handled below:
+  //   * A list of Tensors.
+  //   * 1 Tensor.
+  if (stack.front().isTensorList()) {
+    return stack.front().toTensorVector();
+  }
+  TORCH_INTERNAL_ASSERT(stack.front().isTensor());
+  return {stack.front().toTensor()};
+}
 
 } // namespace jit
 } // namespace torch
