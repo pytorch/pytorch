@@ -108,8 +108,7 @@ static inline void check_cat_shape_except_dim(const Tensor & first, const Tensor
     int64_t first_dim_size = first.sizes()[dim];
     int64_t second_dim_size = second.sizes()[dim];
     TORCH_CHECK(first_dim_size == second_dim_size, "torch.cat(): Sizes of tensors must match except in dimension ",
-                dimension, ". Got ", first_dim_size, " and ", second_dim_size, " in dimension ", dim,
-                " (The offending index is ", index, ")");
+                dimension, ". Got ", first_dim_size, " and ", second_dim_size, " in dimension ", dim, ".");
   }
 }
 
