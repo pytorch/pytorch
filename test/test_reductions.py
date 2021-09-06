@@ -10,6 +10,10 @@ import warnings
 
 from torch._six import inf, nan
 from torch.testing import make_tensor
+from torch.testing._internal.common_dtype import (
+    get_all_dtypes, get_all_math_dtypes, get_all_int_dtypes, get_all_complex_dtypes, get_all_fp_dtypes,
+    floating_and_complex_types_and,
+)
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, skipIfNoSciPy, slowTest, torch_to_numpy_dtype_dict,
     IS_WINDOWS)
@@ -18,9 +22,6 @@ from torch.testing._internal.common_device_type import (
     onlyOnCPUAndCUDA, onlyCUDA, largeTensorTest, ops, precisionOverride)
 from torch.testing._internal.common_methods_invocations import (
     ReductionOpInfo, reduction_ops)
-from torch.testing._internal.common_dtype import (
-    get_all_dtypes, get_all_math_dtypes, get_all_int_dtypes, get_all_complex_dtypes, get_all_fp_dtypes,
-)
 
 # TODO: replace with make_tensor
 def _generate_input(shape, dtype, device, with_extremal):
