@@ -3494,10 +3494,10 @@ def sample_inputs_linalg_cholesky(op_info, device, dtype, requires_grad=False, *
     batches = [(), (0, ), (2, ), (1, 1)]
     ns = [5, 0]
     out = []
-    for batch, n in product(batches, ns):
+    for batch, n, upper in product(batches, ns, [True, False]):
         a = random_hermitian_pd_matrix(n, *batch, dtype=dtype, device=device)
         a.requires_grad = requires_grad
-        out.append(SampleInput(a))
+        out.append(SampleInput(a, kwargs={"upper": upper}))
     return out
 
 def sample_inputs_symeig(op_info, device, dtype, requires_grad=False):
