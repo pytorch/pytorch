@@ -502,10 +502,8 @@ inline static void _apply_svd_lib_gesvdj(const Tensor& self, Tensor& U, Tensor& 
   // TORCH_CUSOLVER_CHECK(cusolverDnXgesvdjSetMaxSweeps(gesvdj_params, 15));
 
   int lwork = -1;
-
   at::cuda::solver::gesvdj_buffersize<scalar_t>(
     handle, jobz, econ, m, n, self_data, lda, S_data, U_data, lda, VT_data, ldvt, &lwork, gesvdj_params);
-
   TORCH_INTERNAL_ASSERT(lwork >= 0, "gesvdj_buffersize failed to get needed buffer size, got lwork = ", lwork);
 
   auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
@@ -534,6 +532,10 @@ inline static void _apply_svd_lib_gesvdj(const Tensor& self, Tensor& U, Tensor& 
 // wrapper around _apply_svd_lib_gesvdj that handles dtype dispatch
 // note that gesvdj returns V, which is what we want
 inline static void apply_svd_lib_gesvdj(const Tensor& self, Tensor& U, Tensor& S, Tensor& VT, Tensor& infos, bool compute_uv, bool some) {
+  if (self.numel() == 0) {
+    return;
+  }
+
   Tensor self_working_copy = cloneBatchedColumnMajor(self);
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "svd_cuda_gesvdj", [&] {
     _apply_svd_lib_gesvdj<scalar_t>(self_working_copy, U, S, VT, infos, compute_uv, some);
