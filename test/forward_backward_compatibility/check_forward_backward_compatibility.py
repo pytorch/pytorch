@@ -203,7 +203,6 @@ def check_fc(existing_schemas):
     new_schema_dict = load_schemas_to_dict()
     is_fc = True
     broken_ops = []
-    # TODO skip allow list for now.
     for existing_schema in existing_schemas:
         if allow_listed(existing_schema):
             print("schema: ", str(existing_schema), " found on allowlist, skipping")
