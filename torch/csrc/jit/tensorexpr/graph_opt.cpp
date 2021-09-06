@@ -26,14 +26,21 @@ Node* moveCatAfterUse(Node* cat, Node* user, std::shared_ptr<Graph> subgraph) {
   //   %4 = aten::cat(%3, ...)
   //   return (%4)
 
-  TORCH_INTERNAL_ASSERT(cat->output()->hasUses());
-  TORCH_INTERNAL_ASSERT(cat->output()->uses().size() == 1);
-  TORCH_INTERNAL_ASSERT(cat->input(0)->node()->kind() == prim::ListConstruct);
+  TORCH_INTERNAL_ASSERT(
+      cat->output()->hasUses(),
+      buildErrorMessage("aten::cat output is not used."));
+  TORCH_INTERNAL_ASSERT(
+      cat->output()->uses().size() == 1,
+      buildErrorMessage("aten::cat output is used in multiple places."));
+  TORCH_INTERNAL_ASSERT(
+      cat->input(0)->node()->kind() == prim::ListConstruct,
+      buildErrorMessage("aten::cat inputs are not expected."));
   auto cat_list = cat->input(0)->node();
   auto cat_inputs = cat_list->inputs();
 
   auto user_tensor_type = user->output()->type()->cast<c10::TensorType>();
-  TORCH_INTERNAL_ASSERT(user_tensor_type);
+  TORCH_INTERNAL_ASSERT(
+      user_tensor_type, buildErrorMessage("Unexpected user tensor type"));
   std::unordered_map<Value*, Value*> new_cat_inputs;
   for (auto inp : cat_inputs) {
     auto new_cat_input = subgraph->createClone(
@@ -41,7 +48,8 @@ Node* moveCatAfterUse(Node* cat, Node* user, std::shared_ptr<Graph> subgraph) {
     // Since we are cloning user, its result should be the same scalar type
     // as the user. But the dims should correspond to that of the input.
     auto input_tensor_type = inp->type()->cast<c10::TensorType>();
-    TORCH_INTERNAL_ASSERT(input_tensor_type);
+    TORCH_INTERNAL_ASSERT(
+        input_tensor_type, buildErrorMessage("Unexpected input tensor type"));
     auto new_input_type =
         input_tensor_type->withScalarType(user_tensor_type->scalarType());
     new_cat_input->output()->setType(new_input_type);
@@ -60,7 +68,9 @@ Node* moveCatAfterUse(Node* cat, Node* user, std::shared_ptr<Graph> subgraph) {
   user->output()->replaceAllUsesWith(new_cat->output());
   user->destroy();
 
-  TORCH_INTERNAL_ASSERT(!cat->output()->hasUses());
+  TORCH_INTERNAL_ASSERT(
+      !cat->output()->hasUses(),
+      buildErrorMessage("aten::cat output is not used."));
   cat->destroy();
 
   if (!cat_list->output()->hasUses()) {
@@ -84,10 +94,15 @@ int numTensorInputs(Node* node) {
 // If the inputs to `cat` are of different types, then the implementation
 // of `cat` is expected to promote type.
 bool doesCatPromoteTypes(Node* node) {
-  TORCH_INTERNAL_ASSERT(node->kind() == aten::cat);
-  TORCH_INTERNAL_ASSERT(node->input(0)->node()->kind() == prim::ListConstruct);
+  TORCH_INTERNAL_ASSERT(
+      node->kind() == aten::cat,
+      buildErrorMessage("Graph node is not aten::cat."));
+  TORCH_INTERNAL_ASSERT(
+      node->input(0)->node()->kind() == prim::ListConstruct,
+      buildErrorMessage("aten::cat inputs are not expected."));
   auto inputs = node->input(0)->node()->inputs();
-  TORCH_INTERNAL_ASSERT(!inputs.empty());
+  TORCH_INTERNAL_ASSERT(
+      !inputs.empty(), buildErrorMessage("Empty inputs of ListConstruct"));
   auto scalar_type =
       inputs.front()->type()->cast<c10::TensorType>()->scalarType();
   for (size_t i = 1; i < inputs.size(); ++i) {
@@ -122,14 +137,18 @@ bool doesCatPromoteTypes(Node* node) {
 //        it user needs to reflect the original type. This is currently not
 //        handled. TODO
 void moveCatOpToEnd(Node* cat, std::shared_ptr<Graph> subgraph) {
-  TORCH_INTERNAL_ASSERT(cat->kind() == aten::cat);
+  TORCH_INTERNAL_ASSERT(
+      cat->kind() == aten::cat,
+      buildErrorMessage("Graph node is not aten::cat."));
   if (cat->output()->uses().size() == 1) {
     auto use = cat->output()->uses().front();
     if (use.user->isMemberOf(supported_eltwise_set()) &&
         numTensorInputs(use.user) == 1) {
       if (!doesCatPromoteTypes(cat)) {
         TORCH_INTERNAL_ASSERT(
-            use.user->output()->owningGraph() == subgraph.get());
+            use.user->output()->owningGraph() == subgraph.get(),
+            buildErrorMessage(
+                "aten::cat user graph does not math the given subgraph."));
         auto new_cat = moveCatAfterUse(cat, use.user, subgraph);
         moveCatOpToEnd(new_cat, subgraph);
       }
