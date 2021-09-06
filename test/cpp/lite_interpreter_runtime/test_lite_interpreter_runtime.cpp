@@ -194,36 +194,36 @@ TEST(RunTimeTest, ParseBytecode) {
   // 1. Prepare for the bytecode. In reality it can be from a customized
   // deserializer.
   std::vector<IValue> instructions{
-      Tup({"STOREN", 1, 4}),
-      Tup({"DROPR", 1, 0}),
-      Tup({"MOVE", 4, 0}),
-      Tup({"JF", 5, 0}),
-      Tup({"LOAD", 2, 0}),
-      Tup({"LOAD", 3, 0}),
-      Tup({"LIST_CONSTRUCT", 0, 2}),
-      Tup({"JMP", 4, 0}),
-      Tup({"LOAD", 3, 0}),
-      Tup({"LOAD", 2, 0}),
-      Tup({"LIST_CONSTRUCT", 1, 2}),
-      Tup({"STORE", 5, 0}),
-      Tup({"DROPR", 3, 0}),
-      Tup({"DROPR", 2, 0}),
-      Tup({"MOVE", 5, 0}),
-      Tup({"RET", 0, 0}),
+      to_tuple({"STOREN", 1, 4}),
+      to_tuple({"DROPR", 1, 0}),
+      to_tuple({"MOVE", 4, 0}),
+      to_tuple({"JF", 5, 0}),
+      to_tuple({"LOAD", 2, 0}),
+      to_tuple({"LOAD", 3, 0}),
+      to_tuple({"LIST_CONSTRUCT", 0, 2}),
+      to_tuple({"JMP", 4, 0}),
+      to_tuple({"LOAD", 3, 0}),
+      to_tuple({"LOAD", 2, 0}),
+      to_tuple({"LIST_CONSTRUCT", 1, 2}),
+      to_tuple({"STORE", 5, 0}),
+      to_tuple({"DROPR", 3, 0}),
+      to_tuple({"DROPR", 2, 0}),
+      to_tuple({"MOVE", 5, 0}),
+      to_tuple({"RET", 0, 0}),
   };
   std::vector<IValue> operators; // empty for this example
   std::vector<IValue> constants; // empty for this example
 
   std::vector<IValue> types{"List[int]", "List[int]"};
   auto codeTable = Table(
-      {{"instructions", Tup(instructions)},
-       {"operators", Tup(operators)},
-       {"constants", Tup(constants)},
-       {"types", Tup(types)},
+      {{"instructions", to_tuple(instructions)},
+       {"operators", to_tuple(operators)},
+       {"constants", to_tuple(constants)},
+       {"types", to_tuple(types)},
        {"register_size", 5}});
 
   // 2. Parse the function
-  std::string function_name("test_functoin");
+  std::string function_name("test_function");
   auto function = std::unique_ptr<mobile::Function>(
       new mobile::Function(c10::QualifiedName(function_name)));
   parseInstructions(function_name, codeTable, IValue(), function.get());

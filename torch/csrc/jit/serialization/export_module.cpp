@@ -137,7 +137,7 @@ std::pair<IValue, IValue> getFunctionTuple(
   std::vector<IValue> instructions;
   instructions.reserve(instructions_copy.size());
   for (Instruction ins : instructions_copy) {
-    instructions.emplace_back(Tup({toString(ins.op), ins.X, ins.N}));
+    instructions.emplace_back(to_tuple({toString(ins.op), ins.X, ins.N}));
   }
 
   // operators
@@ -156,10 +156,10 @@ std::pair<IValue, IValue> getFunctionTuple(
       num_args = it->second;
     }
     if (BytecodeEmitDefaultValueForUnspecifiedArgMode::is_enabled()) {
-      operators.emplace_back(Tup({opname.name, opname.overload_name}));
+      operators.emplace_back(to_tuple({opname.name, opname.overload_name}));
     } else {
       operators.emplace_back(
-          Tup({opname.name, opname.overload_name, num_args}));
+          to_tuple({opname.name, opname.overload_name, num_args}));
     }
   }
 
@@ -195,10 +195,10 @@ std::pair<IValue, IValue> getFunctionTuple(
   auto register_size = static_cast<int>(code->register_size());
 
   auto codeTable = Table(
-      {{"instructions", Tup(instructions)},
-       {"operators", Tup(operators)},
-       {"constants", Tup(constants)},
-       {"types", Tup(types)},
+      {{"instructions", to_tuple(instructions)},
+       {"operators", to_tuple(operators)},
+       {"constants", to_tuple(constants)},
+       {"types", to_tuple(types)},
        {"register_size", register_size}});
 
   // schema
@@ -245,7 +245,7 @@ std::pair<IValue, IValue> getFunctionTuple(
           {"default_value", arg.default_value()},
       }));
     }
-    return Tup(argTables);
+    return to_tuple(argTables);
   };
   auto schemaTable = Table({
       {"arguments", makeArgTuple(schema.arguments())},
@@ -253,7 +253,7 @@ std::pair<IValue, IValue> getFunctionTuple(
   });
 
   // function tuple
-  auto bytecode_vals = Tup({qn, codeTable, schemaTable});
+  auto bytecode_vals = to_tuple({qn, codeTable, schemaTable});
 
   c10::optional<IValue> debug_info_vals;
   // module debug info
@@ -265,7 +265,7 @@ std::pair<IValue, IValue> getFunctionTuple(
   IValue module_debug_tuple = c10::ivalue::Tuple::create(op_debug_handles);
   auto function_debug_info =
       Table({{"function_debug_handles", module_debug_tuple}});
-  debug_info_vals = Tup({qn, function_debug_info});
+  debug_info_vals = to_tuple({qn, function_debug_info});
   return std::make_pair(bytecode_vals, debug_info_vals);
 }
 
@@ -635,7 +635,7 @@ void ScriptModuleSerializer::writeByteCode(
       debug_info_elements,
       debug_info_recorder,
       type_name_uniquer_);
-  auto telements = Tup(std::move(elements));
+  auto telements = to_tuple(std::move(elements));
   writeArchive(
       telements,
       /*archive_name=*/"bytecode",
@@ -643,7 +643,7 @@ void ScriptModuleSerializer::writeByteCode(
       /*tensor_dir=*/"constants/",
       /*use_storage_context=*/true);
 
-  auto debug_info_telements = Tup(std::move(debug_info_elements));
+  auto debug_info_telements = to_tuple(std::move(debug_info_elements));
 
   // At the moment keeping this feature experimental
   // since we have not evaluated how this affect model size

@@ -2,6 +2,7 @@
 #include <torch/csrc/jit/mobile/parse_bytecode.h>
 #include <torch/csrc/jit/mobile/type_parser.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
+#include <torch/csrc/jit/serialization/import_export_functions.h>
 #include <torch/custom_class_detail.h>
 
 namespace torch {
@@ -23,7 +24,7 @@ const IValue& expect_field(
   return row->elements().at(1);
 }
 
-IValue Tup(std::vector<IValue> ivalues) {
+IValue to_tuple(std::vector<IValue> ivalues) {
   return c10::ivalue::Tuple::create(std::move(ivalues));
 }
 
@@ -31,9 +32,9 @@ IValue Table(const std::vector<std::pair<std::string, IValue>>& entries) {
   std::vector<IValue> ivalue_entries;
   ivalue_entries.reserve(entries.size());
   for (const auto& e : entries) {
-    ivalue_entries.push_back(Tup({e.first, e.second}));
+    ivalue_entries.push_back(to_tuple({e.first, e.second}));
   }
-  return Tup(std::move(ivalue_entries));
+  return to_tuple(std::move(ivalue_entries));
 }
 
 namespace mobile {
@@ -70,7 +71,7 @@ void parseInstructions(
                               .toIntList();
     TORCH_CHECK(
         debug_handles_list.size() == ins_list.size(),
-        "The numbers of instructions and debug handles strings do not match.");
+        "The numbers of instructions and debug handles do not match.");
   }
 
   for (const auto j : c10::irange(ins_list.size())) {

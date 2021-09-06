@@ -313,11 +313,11 @@ void BytecodeDeserializer::parseFunctionSchema(
       };
       const auto& arg_list =
           expect_field(
-              *schemaTable, "arguments", BYTECODE_INDEX_SCHEMA_ARGUMENTS)
+              schemaTable.value(), "arguments", BYTECODE_INDEX_SCHEMA_ARGUMENTS)
               .toTuple()
               ->elements();
       const auto& ret_list =
-          expect_field(*schemaTable, "returns", BYTECODE_INDEX_SCHEMA_RETURNS)
+          expect_field(schemaTable.value(), "returns", BYTECODE_INDEX_SCHEMA_RETURNS)
               .toTuple()
               ->elements();
       c10::FunctionSchema schema(
@@ -415,10 +415,10 @@ void BytecodeDeserializer::parseMethods(
 
     parseRegisterSize(codeTable, function.get());
 
-    const IValue* schemaTable = // older files do not store function schema
+    at::optional<IValue> schemaTable = // older files do not store function schema
         (model_version > 0x4L || (model_version == 0x4L && m_tuple.size() >= 3))
-        ? &m_tuple[2]
-        : nullptr;
+        ? m_tuple[2]
+        : c10::nullopt;
     // function schema
     parseFunctionSchema(
         function_name, schemaTable, model_version, function.get());
