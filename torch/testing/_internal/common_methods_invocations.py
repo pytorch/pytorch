@@ -5437,13 +5437,14 @@ def sample_inputs_argwhere(op_info, device, dtype, requires_grad, **kwargs):
 
         t = make_tensor((S, S), dtype=dtype, device=device, requires_grad=requires_grad)
         with torch.no_grad():
-            m = torch.empty(*t.size(), dtype=torch.long).bernoulli_(0.5)
+            m = mask_not_all_zeros(t.shape)
             t[m] = 0
         yield SampleInput(t)
 
         t = make_tensor((S, 0), dtype=dtype, device=device, requires_grad=requires_grad)
         yield SampleInput(t)
 
+        yield SampleInput(torch.zeros((S,), dtype=dtype, device=device, requires_grad=requires_grad))
         yield SampleInput(make_tensor((), dtype=dtype, device=device, requires_grad=requires_grad))
 
     return list(generator())
