@@ -304,7 +304,7 @@ NvrtcFunction nvrtcCompile(
 #endif
 #else
   const std::string compute = std::string("--gpu-architecture=") +
-#if CUDA_VERSION >= 11010
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11010
       // CUDA 11.1 allows going directly to SASS (sm_) instead of PTX (compute_)
       // which gives better backwards compatibility to work on older driver,
       // (since older driver doesn't necessrily recognize PTX emitted by new
@@ -390,7 +390,7 @@ NvrtcFunction nvrtcCompile(
 
   {
     FUSER_PERF_SCOPE("get PTX");
-#if CUDA_VERSION >= 11010
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11010
     // compile_to_sass determines whether we are generating SASS or PTX, hence
     // the different API.
     const auto getSize = compile_to_sass
@@ -415,7 +415,7 @@ NvrtcFunction nvrtcCompile(
   const char* prefix_env = getenv("PYTORCH_CUDA_FUSER_CUBIN");
 #if !defined(USE_ROCM)
   if (prefix_env) {
-#if CUDA_VERSION >= 11010
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11010
     TORCH_CHECK(
         !compile_to_sass,
         "PYTORCH_NVFUSER_CUBIN cannot be used when compile direct to SASS. Please set PYTORCH_NVFUSER_CUBIN to empty");

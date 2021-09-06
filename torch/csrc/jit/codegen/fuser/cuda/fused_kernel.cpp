@@ -125,7 +125,7 @@ FusedKernelCUDA::FusedKernelCUDA(
 #endif
 #else
   const std::string compute = std::string("--gpu-architecture=") +
-#if CUDA_VERSION >= 11010
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11010
       // CUDA 11.1 allows going directly to SASS (sm_) instead of PTX (compute_)
       // which gives better backwards compatibility to work on older driver,
       // (since older driver doesn't necessrily recognize PTX emitted by new
@@ -160,7 +160,7 @@ FusedKernelCUDA::FusedKernelCUDA(
   AT_CUDA_NVRTC_CHECK(result);
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   size_t ptx_size;
-#if CUDA_VERSION >= 11010
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11010
   // compile_to_sass determines whether we are generating SASS or PTX, hence
   // the different API.
   const auto getSize = compile_to_sass
