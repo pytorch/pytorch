@@ -316,7 +316,8 @@ Tensor & embedding_renorm_cuda_(Tensor & self, const Tensor & indices,
 
     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "embedding_backward", [&] {
       using accscalar_t = acc_type<scalar_t, true>;
-      static_assert(num_threads % C10_WARP_SIZE == 0,
+      static_assert(num_threads % C10_WARP_SIZE == 0 &&
+                    num_threads <= cuda_utils::kCUDABlockReduceMaxThreads,
                     "BlockReduceSum requires all warps be active");
       renorm_kernel<<<grid, num_threads, (num_threads / C10_WARP_SIZE) * sizeof(accscalar_t), stream>>>(
         self.data_ptr<scalar_t>(),

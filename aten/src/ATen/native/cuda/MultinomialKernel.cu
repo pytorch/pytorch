@@ -64,7 +64,8 @@ void renormRows(Tensor& t) {
   auto props = at::cuda::getCurrentDeviceProperties();
   CUDA_KERNEL_ASSERT(props != NULL);
   int numSM = props->multiProcessorCount;
-  int64_t maxThreads = props->maxThreadsPerBlock;
+  const int64_t maxThreads = std::min(
+      props->maxThreadsPerBlock, cuda_utils::kCUDABlockReduceMaxThreads);
 
   dim3 grid(rows < numSM * 4 ? rows : numSM * 4);
   dim3 block(std::min(maxThreads, C10_WARP_SIZE * div_up(cols, C10_WARP_SIZE)));
@@ -191,7 +192,7 @@ __global__ void sampleMultinomialOnce(
     for (int cat = threadIdx.x; cat < categories; cat += blockDim.x) {
       val = dist[curDist * stride_dist + cat * stride_categories];
       CUDA_KERNEL_ASSERT(!at::_isnan(val));
-      CUDA_KERNEL_ASSERT(!std::isinf(val));
+      CUDA_KERNEL_ASSERT(!::isinf(val));
       CUDA_KERNEL_ASSERT(!(val < zero));
       sum = sum + static_cast<accscalar_t>(val);
     }
@@ -202,7 +203,7 @@ __global__ void sampleMultinomialOnce(
     // Broadcast sum and sample value
     if (threadIdx.x == 0) {
       // Make sure the sum of our distribution didn't overflow
-      CUDA_KERNEL_ASSERT(!std::isinf(val));
+      CUDA_KERNEL_ASSERT(!::isinf(val));
       CUDA_KERNEL_ASSERT(sum > accZero);
 
       foundPos = 0;

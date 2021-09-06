@@ -383,56 +383,43 @@ __global__ void compute_mode(
   }
   __syncthreads(); // broadcast mode
 
-  // Finally, we need to find the "an" index of the mode in the input Tensor.
-  // The API does not constrain which index we pick, so it can be any of the
-  // indices that contain the mode. We will do a reduction to find the index. We
-  // go back to using the (index, flag) buffer arrangement. First, we mark
-  // indices that are equal to the mode, i.e B[i] = true if input[i] == mode,
-  // and initialize C[i] to be the index
+  // Finally, we need to find "an" index of the mode in the input
+  // Tensor. The API does not constrain which index we pick, but here
+  // we always pick the largest index. We store the index if the value
+  // is the mode, or 0 otherwise. Then find the maximum value.
   //
   // Again we reduce 2 elements in the thread's registers prior to the
   // block-wide reduction
-  struct ModeUnsignedBoolPair ubpp[2];
+  unsigned mode_index[2] = {0u, 0u};
   if (tidx * 2 < sliceSize) {
-    ubpp[0].flag = input[linearOffset + (tidx * 2)] == mode;
-    ubpp[0].val = tidx * 2;
+    const unsigned idx = tidx * 2;
+    mode_index[0] = input[linearOffset + idx] == mode ? idx : 0u;
   }
   if (tidx * 2 + 1 < sliceSize) {
-    ubpp[1].flag = input[linearOffset + (tidx * 2 + 1)] == mode;
-    ubpp[1].val = tidx * 2 + 1;
+    const unsigned idx = tidx * 2 + 1;
+    mode_index[1] = input[linearOffset + idx] == mode ? idx : 0u;
   }
 
-  // Then we perform a similar reduction to the one above, except this time we
-  // update the element if the element at the base position is not equal to the
-  // mode and the element at the offset position is. At the end, C[0] will
-  // contain an index with the mode.
-  struct ModeUnsignedBoolPair match = {0, false};
-
-  struct FlagSelectOp {
-    inline __device__ ModeUnsignedBoolPair combine(ModeUnsignedBoolPair a, ModeUnsignedBoolPair b) const {
-      return b.flag ? b : a;
+  struct MaxIndexOp {
+    inline __device__ int combine(int a, int b) const {
+      return b > a ? b : a;
     }
 
-    inline __device__ ModeUnsignedBoolPair warp_shfl_down(ModeUnsignedBoolPair acc, int offset) const {
-      ModeUnsignedBoolPair ret;
-      ret.flag = WARP_SHFL_DOWN(acc.flag, offset);
-      ret.val = WARP_SHFL_DOWN(acc.val, offset);
-      return ret;
+    inline __device__ int warp_shfl_down(int acc, int offset) const {
+      return WARP_SHFL_DOWN(acc, offset);
     }
-  } flag_select_op;
+  } max_index_op;
 
-  match = reduceBlockWithNThreadLocalReductions<2>(
-      ubpmem,
-      ubpp,
+  int64_t index = reduceBlockWithNThreadLocalReductions<2>(
+      reinterpret_cast<unsigned*>(&shmem[0]),
+      mode_index,
       sliceSize,
-      flag_select_op,
-      match);
+      max_index_op,
+      0u);
 
   // Finally, we have the mode, and an index where it occurs. We use a single
   // thread to place this in the appropriate output position
   if (tidx == 0) {
-    int64_t index = match.val;
-
     unsigned int outputOffset =
         at::cuda::detail::IndexToOffset<T, unsigned int, -1>::get(
             blockId, values);

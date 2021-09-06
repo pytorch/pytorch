@@ -138,12 +138,13 @@ void handle_fused_mode(
     cuda::detail::TensorInfo<int64_t, unsigned int>& ti_indices,
     int64_t slice_size,
     int64_t slices) {
-  static_assert((size / 2) % C10_WARP_SIZE == 0, "");
-  const dim3 block(size / 2);
+  constexpr int num_threads = size / 2;
+  static_assert(num_threads % C10_WARP_SIZE == 0 &&
+                num_threads <= cuda_utils::kCUDABlockReduceMaxThreads, "");
   const auto memsize =
       (sizeof(scalar_t) * size) + (2 * size * sizeof(unsigned int));
   compute_mode<scalar_t, size>
-      <<<grid, block, memsize, at::cuda::getCurrentCUDAStream()>>>(
+      <<<grid, num_threads, memsize, at::cuda::getCurrentCUDAStream()>>>(
           self.data_ptr<scalar_t>(), ti_values, ti_indices, slice_size, slices);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
