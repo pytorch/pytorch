@@ -228,7 +228,7 @@ class testVariousModelVersions(TestCase):
     #             # Load model and run forward method
     #             mobile_module = _load_for_lite_interpreter(str(tmp_input_model_path))
     #             mobile_module_result = mobile_module(module_input)
-    #             torch.testing.assert_allclose(mobile_module_result, expected_mobile_module_result)
+    #             torch.testing.assert_close(mobile_module_result, expected_mobile_module_result)
     #             current_to_version -= 1
 
     #         # Check backport failure case
@@ -270,7 +270,7 @@ class testVariousModelVersions(TestCase):
                 module_input = 1
                 mobile_module_result = mobile_module(module_input)
                 expected_mobile_module_result = 3 * torch.ones([2, 4], dtype=torch.float64)
-                torch.testing.assert_allclose(mobile_module_result, expected_mobile_module_result)
+                torch.testing.assert_close(mobile_module_result, expected_mobile_module_result)
                 shutil.rmtree(tmpdirname)
 
     # Check just the _backport_for_mobile_to_buffer mechanism but not the function implementations
@@ -296,7 +296,7 @@ class testVariousModelVersions(TestCase):
             module_input = 1
             mobile_module_result = mobile_module(module_input)
             expected_mobile_module_result = 3 * torch.ones([2, 4], dtype=torch.float64)
-            torch.testing.assert_allclose(mobile_module_result, expected_mobile_module_result)
+            torch.testing.assert_close(mobile_module_result, expected_mobile_module_result)
 
 
     def test_get_model_ops_and_info(self):

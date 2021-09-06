@@ -64,11 +64,33 @@ def _torch_ones(sizes, requires_grad=False):
 # rref tensor equals to the given grad.
 def _compare_owner_value(context_id, rref, grad):
     grads = dist_autograd.get_gradients(context_id)
-    return torch.equal(grads[rref.local_value()], grad)
+    x = grads[rref.local_value()]
+    if x.is_sparse:
+        assert grad.is_sparse
+        x = x.to_dense()
+        grad = grad.to_dense()
+    else:
+        assert not grad.is_sparse
+    return torch.equal(x, grad)
 
 
 def create_tensor():
     return torch.ones((3, 3), requires_grad=True)
+
+
+def build_sparse_tensor(coalesce=False, requires_grad=True, dtype=torch.float32, device=None):
+    i = [[0, 1, 1], [2, 0, 2]]
+    v = [3.2, 4.1, 5.3]
+    tensor = torch.sparse_coo_tensor(i, v, (3, 3), requires_grad=requires_grad, dtype=dtype, device=device)
+    if coalesce:
+        tensor = tensor.coalesce()
+    return tensor
+
+def build_sparse_one_gradient(dtype=torch.float32):
+    i = [[0, 1, 1], [2, 0, 2]]
+    v = [1, 1, 1]
+    tensor = torch.sparse_coo_tensor(i, v, (3, 3), dtype=dtype)
+    return tensor
 
 
 @torch.jit.script
@@ -87,6 +109,9 @@ def my_scalar_add(a, b):
 def my_rref_add(rref_t1, t2):
     ret = torch.add(rref_t1.local_value(), t2)
     return ret
+
+def my_sum(t):
+    return torch.sparse.sum(t) if t.is_sparse else t.sum()
 
 
 @torch.jit.script
@@ -146,7 +171,8 @@ def _all_contexts_cleaned_up(timeout_seconds=10):
 def _run_trainer(rref_t1, t2, ps, rank_diff):
     with dist_autograd.context() as context_id:
         ret = rpc.rpc_sync(ps, my_rref_add, args=(rref_t1, t2))
-        dist_autograd.backward(context_id, [ret.sum()])
+        loss = my_sum(ret)
+        dist_autograd.backward(context_id, [loss])
         # prevent deleting dist autograd context
         rpc.rpc_sync(ps, _set_rpc_done, args=(context_id, rank_diff))
         rpc.rpc_sync(ps, _check_rpc_done, args=(0,))
@@ -156,7 +182,8 @@ def _run_trainer(rref_t1, t2, ps, rank_diff):
 def _run_trainer_torchscript(rref_t1, t2, ps, rank_diff):
     with dist_autograd.context() as context_id:
         ret = rpc.rpc_sync(ps, my_script_ref_add, args=(rref_t1, t2))
-        dist_autograd.backward(context_id, [ret.sum()])
+        loss = my_sum(ret)
+        dist_autograd.backward(context_id, [loss])
         # prevent deleting dist autograd context
         rpc.rpc_sync(ps, _set_rpc_done, args=(context_id, rank_diff))
         rpc.rpc_sync(ps, _check_rpc_done, args=(0,))
@@ -379,14 +406,18 @@ class DistAutogradTest(CommonDistAutogradTest):
             "torch::distributed::autograd::RecvRpcBackward", next_funcs[0][0].name()
         )
 
-    def _test_graph(self, fn, exec_mode):
+    def _test_graph(self, fn, exec_mode, sparse):
         dst_rank = (self.rank + 1) % self.world_size
 
         initialize_pg(self.file_init_method, self.rank, self.world_size)
 
         with dist_autograd.context() as context_id:
-            t1 = torch.ones(3, 3, requires_grad=True)
-            t2 = torch.zeros(3, 3, requires_grad=True)
+            if sparse:
+                t1 = build_sparse_tensor()
+                t2 = build_sparse_tensor()
+            else:
+                t1 = torch.ones(3, 3, requires_grad=True)
+                t2 = torch.zeros(3, 3, requires_grad=True)
             if ExecMode.RPC_SYNC == exec_mode:
                 ret = rpc.rpc_sync(worker_name(dst_rank), fn, args=(t1, t2))
             elif ExecMode.REMOTE == exec_mode:
@@ -436,29 +467,49 @@ class DistAutogradTest(CommonDistAutogradTest):
 
     @dist_init
     def test_graph_for_builtin_call(self):
-        self._test_graph(torch.add, ExecMode.RPC_SYNC)
+        self._test_graph(torch.add, ExecMode.RPC_SYNC, False)
+
+    @dist_init
+    def test_graph_for_builtin_call_sparse(self):
+        self._test_graph(torch.add, ExecMode.RPC_SYNC, True)
 
     @dist_init
     def test_graph_for_python_call(self):
-        self._test_graph(my_py_add, ExecMode.RPC_SYNC)
+        self._test_graph(my_py_add, ExecMode.RPC_SYNC, False)
+
+    @dist_init
+    def test_graph_for_python_call_sparse(self):
+        self._test_graph(my_py_add, ExecMode.RPC_SYNC, True)
 
     @dist_init
     def test_graph_for_builtin_remote_call(self):
-        self._test_graph(torch.add, ExecMode.REMOTE)
+        self._test_graph(torch.add, ExecMode.REMOTE, False)
+
+    @dist_init
+    def test_graph_for_builtin_remote_call_sparse(self):
+        self._test_graph(torch.add, ExecMode.REMOTE, True)
 
     @dist_init
     def test_graph_for_python_remote_call(self):
-        self._test_graph(my_py_add, ExecMode.REMOTE)
+        self._test_graph(my_py_add, ExecMode.REMOTE, False)
+
+    @dist_init
+    def test_graph_for_python_remote_call_sparse(self):
+        self._test_graph(my_py_add, ExecMode.REMOTE, True)
 
     # 3-layer nested calls
-    def _test_graph_for_py_nested_call(self, exec_mode):
+    def _test_graph_for_py_nested_call(self, exec_mode, sparse):
         dst_rank = (self.rank + 1) % self.world_size
 
         initialize_pg(self.file_init_method, self.rank, self.world_size)
 
         with dist_autograd.context() as context_id:
-            t1 = torch.ones(3, 3, requires_grad=True)
-            t2 = torch.zeros(3, 3, requires_grad=True)
+            if sparse:
+                t1 = build_sparse_tensor(requires_grad=True)
+                t2 = build_sparse_tensor(requires_grad=True)
+            else:
+                t1 = torch.ones(3, 3, requires_grad=True)
+                t2 = torch.zeros(3, 3, requires_grad=True)
             nest_dst_rank = (dst_rank + 1) % self.world_size
             if ExecMode.RPC_SYNC == exec_mode:
                 ret = rpc.rpc_sync(
@@ -531,21 +582,33 @@ class DistAutogradTest(CommonDistAutogradTest):
 
     @dist_init
     def test_graph_for_py_nested_call(self):
-        self._test_graph_for_py_nested_call(ExecMode.RPC_SYNC)
+        self._test_graph_for_py_nested_call(ExecMode.RPC_SYNC, False)
+
+    @dist_init
+    def test_graph_for_py_nested_call_sparse(self):
+        self._test_graph_for_py_nested_call(ExecMode.RPC_SYNC, True)
 
     @dist_init
     def test_graph_for_py_nested_remote_call(self):
-        self._test_graph_for_py_nested_call(ExecMode.REMOTE)
+        self._test_graph_for_py_nested_call(ExecMode.REMOTE, False)
+
+    @dist_init
+    def test_graph_for_py_nested_remote_call_sparse(self):
+        self._test_graph_for_py_nested_call(ExecMode.REMOTE, True)
 
     # Rank0->Rank1->Rank0
-    def _test_graph_for_py_nested_call_itself(self, exec_mode):
+    def _test_graph_for_py_nested_call_itself(self, exec_mode, sparse):
         dst_rank = (self.rank + 1) % self.world_size
 
         initialize_pg(self.file_init_method, self.rank, self.world_size)
 
         with dist_autograd.context() as context_id:
-            t1 = torch.ones(3, 3, requires_grad=True)
-            t2 = torch.zeros(3, 3, requires_grad=True)
+            if sparse:
+                t1 = build_sparse_tensor(requires_grad=True)
+                t2 = build_sparse_tensor(requires_grad=True)
+            else:
+                t1 = torch.ones(3, 3, requires_grad=True)
+                t2 = torch.zeros(3, 3, requires_grad=True)
             if ExecMode.RPC_SYNC == exec_mode:
                 ret = rpc.rpc_sync(
                     worker_name(dst_rank),
@@ -610,18 +673,30 @@ class DistAutogradTest(CommonDistAutogradTest):
 
     @dist_init
     def test_graph_for_py_nested_call_itself(self):
-        self._test_graph_for_py_nested_call_itself(ExecMode.RPC_SYNC)
+        self._test_graph_for_py_nested_call_itself(ExecMode.RPC_SYNC, False)
+
+    @dist_init
+    def test_graph_for_py_nested_call_itself_sparse(self):
+        self._test_graph_for_py_nested_call_itself(ExecMode.RPC_SYNC, True)
 
     @dist_init
     def test_graph_for_py_nested_remote_call_itself(self):
-        self._test_graph_for_py_nested_call_itself(ExecMode.REMOTE)
+        self._test_graph_for_py_nested_call_itself(ExecMode.REMOTE, False)
 
-    def _test_no_graph_with_tensors_not_require_grad(self, exec_mode):
+    @dist_init
+    def test_graph_for_py_nested_remote_call_itself_sparse(self):
+        self._test_graph_for_py_nested_call_itself(ExecMode.REMOTE, True)
+
+    def _test_no_graph_with_tensors_not_require_grad(self, exec_mode, sparse):
         initialize_pg(self.file_init_method, self.rank, self.world_size)
         dst_rank = (self.rank + 1) % self.world_size
         with dist_autograd.context() as context_id:
-            t1 = torch.ones(3, 3, requires_grad=False)
-            t2 = torch.zeros(3, 3, requires_grad=False)
+            if sparse:
+                t1 = build_sparse_tensor(requires_grad=False)
+                t2 = build_sparse_tensor(requires_grad=False)
+            else:
+                t1 = torch.ones(3, 3, requires_grad=False)
+                t2 = torch.zeros(3, 3, requires_grad=False)
             if ExecMode.RPC_SYNC == exec_mode:
                 ret = rpc.rpc_sync(
                     worker_name(dst_rank), torch.add, args=(t1, t2)
@@ -656,11 +731,19 @@ class DistAutogradTest(CommonDistAutogradTest):
 
     @dist_init
     def test_no_graph_with_tensors_not_require_grad(self):
-        self._test_no_graph_with_tensors_not_require_grad(ExecMode.RPC_SYNC)
+        self._test_no_graph_with_tensors_not_require_grad(ExecMode.RPC_SYNC, False)
+
+    @dist_init
+    def test_no_graph_with_tensors_not_require_grad_sparse(self):
+        self._test_no_graph_with_tensors_not_require_grad(ExecMode.RPC_SYNC, True)
 
     @dist_init
     def test_no_graph_with_tensors_not_require_grad_remote(self):
-        self._test_no_graph_with_tensors_not_require_grad(ExecMode.REMOTE)
+        self._test_no_graph_with_tensors_not_require_grad(ExecMode.REMOTE, False)
+
+    @dist_init
+    def test_no_graph_with_tensors_not_require_grad_remote_sparse(self):
+        self._test_no_graph_with_tensors_not_require_grad(ExecMode.REMOTE, True)
 
     def _test_grad_only_on_return_value(self, exec_mode):
         initialize_pg(self.file_init_method, self.rank, self.world_size)
@@ -699,13 +782,16 @@ class DistAutogradTest(CommonDistAutogradTest):
     def test_grad_only_on_return_value_remote(self):
         self._test_grad_only_on_return_value(ExecMode.REMOTE)
 
-    def _test_rpc_complex_args(self, exec_mode):
+    def _test_rpc_complex_args(self, exec_mode, sparse):
         with dist_autograd.context() as context_id:
             num_tensors = 10
             tensors = []
             for i in range(num_tensors):
-                tensors.append(torch.ones(3, 3, requires_grad=(i % 2 == 0)))
-
+                if sparse:
+                    tensor = build_sparse_tensor(requires_grad=(i % 2 == 0))
+                else:
+                    tensor = torch.ones(3, 3, requires_grad=(i % 2 == 0))
+                tensors.append(tensor)
             dst_rank = self._next_rank()
             if ExecMode.RPC_SYNC == exec_mode:
                 ret = rpc.rpc_sync(
@@ -739,11 +825,19 @@ class DistAutogradTest(CommonDistAutogradTest):
 
     @dist_init
     def test_rpc_complex_args(self):
-        self._test_rpc_complex_args(ExecMode.RPC_SYNC)
+        self._test_rpc_complex_args(ExecMode.RPC_SYNC, False)
+
+    @dist_init
+    def test_rpc_complex_args_sparse(self):
+        self._test_rpc_complex_args(ExecMode.RPC_SYNC, True)
 
     @dist_init
     def test_remote_complex_args(self):
-        self._test_rpc_complex_args(ExecMode.REMOTE)
+        self._test_rpc_complex_args(ExecMode.REMOTE, False)
+
+    @dist_init
+    def test_remote_complex_args_sparse(self):
+        self._test_rpc_complex_args(ExecMode.REMOTE, True)
 
     def context_cleanup_test_helper(self, rpc_args, func, nested=False):
         initialize_pg(self.file_init_method, self.rank, self.world_size)
@@ -789,8 +883,19 @@ class DistAutogradTest(CommonDistAutogradTest):
         self.context_cleanup_test_helper(rpc_args=(t1, t2), func=torch.add)
 
     @dist_init
+    def test_context_cleanup_tensor_with_grad_sparse(self):
+        t1 = build_sparse_tensor(requires_grad=True)
+        t2 = build_sparse_tensor(requires_grad=True)
+        self.context_cleanup_test_helper(rpc_args=(t1, t2), func=torch.add)
+
+    @dist_init
     def test_context_cleanup_tensor_no_grad(self):
         t1 = torch.ones(3, 3, requires_grad=False)
+        self.context_cleanup_test_helper(rpc_args=(t1, t1), func=torch.add)
+
+    @dist_init
+    def test_context_cleanup_tensor_no_grad_sparse(self):
+        t1 = build_sparse_tensor(requires_grad=False)
         self.context_cleanup_test_helper(rpc_args=(t1, t1), func=torch.add)
 
     @dist_init
@@ -801,6 +906,16 @@ class DistAutogradTest(CommonDistAutogradTest):
     def test_context_cleanup_nested_rpc(self):
         t1 = torch.ones(3, 3, requires_grad=True)
         t2 = torch.zeros(3, 3, requires_grad=True)
+        dst_rank = (self.rank + 1) % self.world_size
+        args = (t1, t2, dst_rank, self.world_size, 0)
+        self.context_cleanup_test_helper(
+            rpc_args=args, func=my_py_nested_call, nested=True
+        )
+
+    @dist_init
+    def test_context_cleanup_nested_rpc_sparse(self):
+        t1 = build_sparse_tensor(requires_grad=True)
+        t2 = build_sparse_tensor(requires_grad=True)
         dst_rank = (self.rank + 1) % self.world_size
         args = (t1, t2, dst_rank, self.world_size, 0)
         self.context_cleanup_test_helper(
@@ -876,23 +991,21 @@ class DistAutogradTest(CommonDistAutogradTest):
                     worker_name(self._next_rank()), torch.matmul, args=(t1, t2)
                 )
 
-    @dist_init
-    def test_backward_no_grad_on_tensor(self):
-        t1 = torch.rand((3, 3), requires_grad=True)
-        t2 = torch.rand((3, 3), requires_grad=True)
+    def _backward_no_grad_on_tensor(self, t1, t2, sparse):
         with dist_autograd.context() as context_id:
-            loss = rpc.rpc_sync(
+            ret = rpc.rpc_sync(
                 worker_name(self._next_rank()),
                 torch.add,
-                args=(t1, t2)).sum()
-
+                args=(t1, t2))
+            loss = my_sum(ret)
             dist_autograd.backward(context_id, [loss], retain_graph=True)
             self.assertIsNone(t1.grad)
             self.assertIsNone(t2.grad)
 
             # Now populate .grad with local autograd engine and
             # verify dist autograd doesn't mess with it.
-            loss_local = torch.add(t1, t2).sum()
+            ret = torch.add(t1, t2)
+            loss_local = my_sum(ret)
             loss_local.backward()
             self.assertIsNotNone(t1.grad)
             self.assertIsNotNone(t2.grad)
@@ -903,18 +1016,31 @@ class DistAutogradTest(CommonDistAutogradTest):
             self.assertEqual(t1_grad_before, t1.grad)
             self.assertEqual(t2_grad_before, t2.grad)
 
-    def _test_backward_simple(self, dst):
-        # Run the same code locally and with dist autograd and verify gradients
-        # are same.
-        local_grads = None
-        t1 = torch.rand((3, 3), requires_grad=True)
-        t2 = torch.rand((3, 3), requires_grad=True)
+    @dist_init
+    def test_backward_no_grad_on_tensor(self):
+        self._backward_no_grad_on_tensor(
+            torch.rand((3, 3), requires_grad=True),
+            torch.rand((3, 3), requires_grad=True),
+            False
+        )
+
+    @dist_init
+    def test_backward_no_grad_on_tensor_sparse(self):
+        self._backward_no_grad_on_tensor(
+            build_sparse_tensor(requires_grad=True),
+            build_sparse_tensor(requires_grad=True),
+            True
+        )
+
+    # Run the same code locally and with dist autograd and verify gradients
+    # are same.
+    def _backward_simple(self, dst, t1, t2, local_grads, sparse):
         for exec_mode in [ExecMode.LOCAL, ExecMode.RPC_SYNC, ExecMode.REMOTE]:
             with dist_autograd.context() as context_id:
                 ret = self._exec_func_with_dst(
                     dst, exec_mode, torch.add, t1, t2
                 )
-                loss = ret.sum()
+                loss = my_sum(ret)
                 ret = self._verify_backwards(
                     exec_mode, [loss], context_id, local_grads, t1, t2
                 )
@@ -922,29 +1048,62 @@ class DistAutogradTest(CommonDistAutogradTest):
 
     @dist_init
     def test_backward_simple(self):
-        self._test_backward_simple(self._next_rank())
+        self._backward_simple(
+            self._next_rank(),
+            torch.rand((3, 3), requires_grad=True),
+            torch.rand((3, 3), requires_grad=True),
+            None,
+            False
+        )
+
+    @dist_init
+    def test_backward_simple_sparse(self):
+        self._backward_simple(
+            self._next_rank(),
+            build_sparse_tensor(requires_grad=True),
+            build_sparse_tensor(requires_grad=True),
+            None,
+            True
+        )
 
     @dist_init
     def test_backward_simple_self(self):
-        self._test_backward_simple(self.rank)
+        self._backward_simple(
+            self.rank,
+            torch.rand((3, 3), requires_grad=True),
+            torch.rand((3, 3), requires_grad=True),
+            None,
+            False
+        )
+
+    @dist_init
+    def test_backward_simple_self_sparse(self):
+        self._backward_simple(
+            self.rank,
+            build_sparse_tensor(requires_grad=True),
+            build_sparse_tensor(requires_grad=True),
+            None,
+            True
+        )
 
     # The current rank first creates a tensor on the rref_owner, and then passes
     # the rref with another tensor to the callee to run either my_rref_add or
     # my_nested_rref_add, depending on whether the callee is the rref owner.
     # The grad of tensor lives on the current rank, and the grad of the rref
     # tensor lives on the rref owner.
-    def _test_backward_rref(self, callee, rref_owner):
-        local_grads = None
-        t1 = torch.ones((3, 3), requires_grad=True)
-        t2 = torch.zeros((3, 3), requires_grad=True)
-
+    def _backward_rref(self, callee, rref_owner, t1, t2, local_grads, sparse):
         local_ret = torch.add(t1, t2)
-        local_ret.sum().backward()
+        local_ret = my_sum(local_ret)
+        local_ret.backward()
         with dist_autograd.context() as context_id:
-            rref_t1 = rpc.remote(
-                rref_owner, _torch_ones, args=((3, 3),), kwargs={"requires_grad": True}
-            )
-
+            if sparse:
+                rref_t1 = rpc.remote(
+                    rref_owner, build_sparse_tensor, args=(False, True,)
+                )
+            else:
+                rref_t1 = rpc.remote(
+                    rref_owner, _torch_ones, args=((3, 3),), kwargs={"requires_grad": True}
+                )
             if callee == rref_owner:
                 rref = rpc.remote(callee, my_rref_add, args=(rref_t1, t2))
             else:
@@ -952,7 +1111,8 @@ class DistAutogradTest(CommonDistAutogradTest):
                     callee, my_nested_rref_add, args=(rref_owner, rref_t1, t2)
                 )
             ret = rref.to_here()
-            dist_autograd.backward(context_id, [ret.sum()])
+            ret = my_sum(ret)
+            dist_autograd.backward(context_id, [ret])
 
             # verify grads on caller
             grads = dist_autograd.get_gradients(context_id)
@@ -972,20 +1132,81 @@ class DistAutogradTest(CommonDistAutogradTest):
     def test_backward_rref(self):
         callee = worker_name(self._next_rank())
         rref_owner = callee
-        self._test_backward_rref(callee, rref_owner)
+        self._backward_rref(
+            callee,
+            rref_owner,
+            torch.rand((3, 3), requires_grad=True),
+            torch.rand((3, 3), requires_grad=True),
+            None,
+            False
+        )
+
+    @dist_init
+    def test_backward_rref_sparse(self):
+        callee = worker_name(self._next_rank())
+        rref_owner = callee
+        self._backward_rref(
+            callee,
+            rref_owner,
+            build_sparse_tensor(requires_grad=True),
+            build_sparse_tensor(requires_grad=True),
+            None,
+            True
+        )
 
     @dist_init
     def test_backward_rref_multi(self):
         if self.rank > 0:
             callee = "worker0"
             rref_owner = callee
-            self._test_backward_rref(callee, rref_owner)
+            self._backward_rref(
+                callee,
+                rref_owner,
+                torch.rand((3, 3), requires_grad=True),
+                torch.rand((3, 3), requires_grad=True),
+                None,
+                False
+            )
+
+    @dist_init
+    def test_backward_rref_multi_sparse(self):
+        if self.rank > 0:
+            callee = "worker0"
+            rref_owner = callee
+            self._backward_rref(
+                callee,
+                rref_owner,
+                build_sparse_tensor(requires_grad=True),
+                build_sparse_tensor(requires_grad=True),
+                None,
+                True
+            )
 
     @dist_init
     def test_backward_rref_nested(self):
         callee = worker_name((self.rank + 1) % self.world_size)
         rref_owner = worker_name((self.rank + 2) % self.world_size)
-        self._test_backward_rref(callee, rref_owner)
+        self._backward_rref(
+            callee,
+            rref_owner,
+            torch.rand((3, 3), requires_grad=True),
+            torch.rand((3, 3), requires_grad=True),
+            None,
+            False
+        )
+
+    @dist_init
+    def test_backward_rref_nested_sparse(self):
+        callee = worker_name((self.rank + 1) % self.world_size)
+        rref_owner = worker_name((self.rank + 2) % self.world_size)
+        self._backward_rref(
+            callee,
+            rref_owner,
+            build_sparse_tensor(requires_grad=True),
+            build_sparse_tensor(requires_grad=True),
+            None,
+            True
+        )
 
     # In this test, every rank will serve as a parameter server (ps) and a
     # driver, and then kicks off trainers on the other three ranks. So, we have:
@@ -996,13 +1217,16 @@ class DistAutogradTest(CommonDistAutogradTest):
     #
     # These four test ps-trainer groups run on completely separate autograd
     # graphs, but they share the same set of underlying RpcAgents.
-    def _test_trainer_ps(self, create_ref_fn, trainer_fn):
-        local_grads = None
-        t1 = torch.ones((3, 3), requires_grad=True)
-        t2 = torch.zeros((3, 3), requires_grad=True)
+    def _test_trainer_ps(self, create_ref_fn, trainer_fn, sparse):
+        if sparse:
+            t1 = build_sparse_tensor(requires_grad=True)
+            t2 = build_sparse_tensor(requires_grad=True)
+        else:
+            t1 = torch.ones((3, 3), requires_grad=True)
+            t2 = torch.zeros((3, 3), requires_grad=True)
 
         local_ret = torch.add(t1, t2)
-        local_ret.sum().backward()
+        my_sum(local_ret).backward()
 
         # create rref on self
         rref_t1 = rpc.remote(
@@ -1045,7 +1269,19 @@ class DistAutogradTest(CommonDistAutogradTest):
 
     @dist_init
     def test_trainer_ps(self):
-        self._test_trainer_ps(create_tensor, _run_trainer)
+        self._test_trainer_ps(
+            create_tensor,
+            _run_trainer,
+            False
+        )
+
+    @dist_init
+    def test_trainer_ps_sparse(self):
+        self._test_trainer_ps(
+            build_sparse_tensor,
+            _run_trainer,
+            True
+        )
 
     @dist_init
     def test_trainer_ps_torchscript_functions(self):
@@ -1056,17 +1292,9 @@ class DistAutogradTest(CommonDistAutogradTest):
         import torch.distributed.rpc.api as api
         api._ignore_rref_leak = True
 
-        self._test_trainer_ps(create_torchscript_tensor, _run_trainer_torchscript)
+        self._test_trainer_ps(create_torchscript_tensor, _run_trainer_torchscript, False)
 
-    @dist_init
-    def test_backward_multiple_round_trips(self):
-        local_grads = None
-        t1 = torch.rand((3, 3), requires_grad=True)
-        t2 = torch.rand((3, 3))
-        t3 = torch.rand((3, 3), requires_grad=True)
-        t4 = torch.rand((3, 3))
-        t5 = torch.rand((3, 3), requires_grad=True)
-
+    def _backward_multiple_round_trips(self, t1, t2, t3, t4, t5, local_grads):
         for exec_mode in [ExecMode.LOCAL, ExecMode.RPC_SYNC, ExecMode.REMOTE]:
             with dist_autograd.context() as context_id:
                 # Multiple RPCs between different nodes.
@@ -1074,14 +1302,41 @@ class DistAutogradTest(CommonDistAutogradTest):
                 val = self._exec_func(exec_mode, torch.mul, t3, val)
                 s1 = self._exec_func(exec_mode, torch.stack, (t4, val))
                 s2 = self._exec_func(exec_mode, torch.stack, (t5, val))
-                val = self._exec_func(exec_mode, torch.bmm, s1, s2)
-                val = self._exec_func(exec_mode, torch.matmul, val, val)
-                loss = val.sum()
+                if s1.is_sparse:
+                    val = self._exec_func(exec_mode, torch.mul, s1, s2)
+                    val = self._exec_func(exec_mode, torch.mul, val, val)
+                    loss = torch.sparse.sum(val)
+                else:
+                    val = self._exec_func(exec_mode, torch.bmm, s1, s2)
+                    val = self._exec_func(exec_mode, torch.matmul, val, val)
+                    loss = val.sum()
 
                 ret = self._verify_backwards(
                     exec_mode, [loss], context_id, local_grads, t1, t2, t3, t4, t5
                 )
                 local_grads = ret if ret else local_grads
+
+    @dist_init
+    def test_backward_multiple_round_trips(self):
+        self._backward_multiple_round_trips(
+            torch.rand((3, 3), requires_grad=True),
+            torch.rand((3, 3)),
+            torch.rand((3, 3), requires_grad=True),
+            torch.rand((3, 3)),
+            torch.rand((3, 3), requires_grad=True),
+            None
+        )
+
+    @dist_init
+    def test_backward_multiple_round_trips_sparse(self):
+        self._backward_multiple_round_trips(
+            build_sparse_tensor(requires_grad=True),
+            build_sparse_tensor(requires_grad=False),
+            build_sparse_tensor(requires_grad=True),
+            build_sparse_tensor(requires_grad=False),
+            build_sparse_tensor(requires_grad=True),
+            None
+        )
 
     @dist_init
     def test_backward_different_tensor_dims(self):
@@ -1317,41 +1572,60 @@ class DistAutogradTest(CommonDistAutogradTest):
                     exec_mode, [r1, r2, r3, r4], context_id, local_grads, t1, t2
                 )
 
-    @dist_init
-    def test_backward_different_dtypes(self):
+    def _backward_different_dtypes(self, t1, t2):
         local_grads = None
-        t1 = torch.rand((3, 3), requires_grad=True, dtype=torch.float32)
-        t2 = torch.rand((3, 3), requires_grad=True, dtype=torch.float64)
         for exec_mode in [ExecMode.LOCAL, ExecMode.REMOTE]:
             with dist_autograd.context() as context_id:
-                loss = self._exec_func(exec_mode, torch.add, t1, t2).sum()
+                loss = self._exec_func(exec_mode, torch.add, t1, t2)
+                loss = my_sum(loss)
+                local_grads = self._verify_backwards(
+                    exec_mode, [loss], context_id, local_grads, t1, t2
+                )
 
+    @dist_init
+    def test_backward_different_dtypes(self):
+        self._backward_different_dtypes(
+            torch.rand((3, 3), requires_grad=True, dtype=torch.float32),
+            torch.rand((3, 3), requires_grad=True, dtype=torch.float64)
+        )
+
+    @dist_init
+    def test_backward_different_dtypes_sparse(self):
+        self._backward_different_dtypes(
+            build_sparse_tensor(requires_grad=True, dtype=torch.float32),
+            build_sparse_tensor(requires_grad=True, dtype=torch.float64)
+        )
+
+    # Run the same code locally and with dist autograd and verify gradients
+    # are same.
+    def _backward_simple_python_udf(self, t1, t2):
+        local_grads = None
+        for exec_mode in [ExecMode.LOCAL, ExecMode.REMOTE]:
+            with dist_autograd.context() as context_id:
+                ret = self._exec_func(exec_mode, my_py_add, t1, t2)
+                loss = my_sum(ret)
                 local_grads = self._verify_backwards(
                     exec_mode, [loss], context_id, local_grads, t1, t2
                 )
 
     @dist_init
     def test_backward_simple_python_udf(self):
-        # Run the same code locally and with dist autograd and verify gradients
-        # are same.
-        local_grads = None
-        t1 = torch.rand((3, 3), requires_grad=True)
-        t2 = torch.rand((3, 3), requires_grad=True)
-        for exec_mode in [ExecMode.LOCAL, ExecMode.REMOTE]:
-            with dist_autograd.context() as context_id:
-                ret = self._exec_func(exec_mode, my_py_add, t1, t2)
-                loss = ret.sum()
-                local_grads = self._verify_backwards(
-                    exec_mode, [loss], context_id, local_grads, t1, t2
-                )
+        self._backward_simple_python_udf(
+            torch.rand(3, 3, requires_grad=True),
+            torch.rand(3, 3, requires_grad=True)
+        )
 
     @dist_init
-    def test_backward_simple_script_call(self):
-        # Run the same code locally and with dist autograd and verify gradients
-        # are same.
+    def test_backward_simple_python_udf_sparse(self):
+        self._backward_simple_python_udf(
+            build_sparse_tensor(requires_grad=True),
+            build_sparse_tensor(requires_grad=True)
+        )
+
+    # Run the same code locally and with dist autograd and verify gradients
+    # are same.
+    def _backward_simple_script_call(self, t1, t2):
         local_grads = None
-        t1 = torch.rand((3, 3), requires_grad=True)
-        t2 = torch.rand((3, 3), requires_grad=True)
         for exec_mode in [
             ExecMode.LOCAL,
             ExecMode.RPC_SYNC,
@@ -1360,11 +1634,25 @@ class DistAutogradTest(CommonDistAutogradTest):
         ]:
             with dist_autograd.context() as context_id:
                 forward_ret = self._exec_func(exec_mode, my_script_add, t1, t2)
-                loss = forward_ret.sum()
+                loss = my_sum(forward_ret)
                 ret = self._verify_backwards(
                     exec_mode, [loss], context_id, local_grads, t1, t2
                 )
                 local_grads = ret if ret else local_grads
+
+    @dist_init
+    def test_backward_simple_script_call(self):
+        self._backward_simple_script_call(
+            torch.rand(3, 3, requires_grad=True),
+            torch.rand(3, 3, requires_grad=True)
+        )
+
+    @dist_init
+    def test_backward_simple_script_call_sparse(self):
+        self._backward_simple_script_call(
+            build_sparse_tensor(requires_grad=True),
+            build_sparse_tensor(requires_grad=True)
+        )
 
     @staticmethod
     def _complex_python_udf(t1, t2):
@@ -1463,8 +1751,7 @@ class DistAutogradTest(CommonDistAutogradTest):
                     dist_autograd.backward(context_id, [res.sum()])
 
                 # Mark rank 0 is done in the store, since the RPC framework on
-                # some nodes might be broken at this point (listenLoop() in
-                # ProcessGroupAgent might've exited).
+                # some nodes might be broken at this point.
                 store.set('test_backward_node_failure_python_udf_rank0_done', "True")
             else:
                 # Wait for backward to finish on rank 0.
@@ -1475,31 +1762,44 @@ class DistAutogradTest(CommonDistAutogradTest):
         t3 = t1 * t2
         t4 = t1 + t2
         res = rpc.rpc_sync(worker_name(dst), my_py_add, args=(t3, t4))
-        return torch.linalg.multi_dot([t1, t2, t3, t4, res])
+        return t1 * t2 * t3 * t4 * res
 
-    @dist_init
-    def test_backwards_nested_python_udf(self):
-        # Run equivalent of _nested_python_udf locally.
-        t1 = torch.rand((3, 3), requires_grad=True)
-        t2 = torch.rand((3, 3), requires_grad=True)
+    def _backwards_nested_python_udf(self, t1, t2):
         t3 = t1 * t2
         t4 = t1 + t2
         res = t3 + t4
-        loss = torch.linalg.multi_dot([t1, t2, t3, t4, res]).sum()
+        ret = t1 * t2 * t3 * t4 * res
+        loss = my_sum(ret)
         torch.autograd.backward([loss])
 
         # Now run distributed autograd.
         with dist_autograd.context() as context_id:
-            loss = rpc.rpc_sync(
+            ret = rpc.rpc_sync(
                 worker_name(self._next_rank()),
                 DistAutogradTest._nested_python_udf,
                 args=(t1, t2, self._next_rank()),
             )
-            dist_autograd.backward(context_id, [loss.sum()])
-
+            loss = my_sum(ret)
+            dist_autograd.backward(context_id, [loss])
             grads = dist_autograd.get_gradients(context_id)
             self.assertEqual(t1.grad, grads[t1])
             self.assertEqual(t2.grad, grads[t2])
+
+    @dist_init
+    def test_backwards_nested_python_udf(self):
+        # Run equivalent of _nested_python_udf locally.
+        self._backwards_nested_python_udf(
+            torch.rand(3, 3, requires_grad=True),
+            torch.rand(3, 3, requires_grad=True)
+        )
+
+    @dist_init
+    def test_backwards_nested_python_udf_sparse(self):
+        # Run equivalent of _nested_python_udf locally.
+        self._backwards_nested_python_udf(
+            build_sparse_tensor(requires_grad=True),
+            build_sparse_tensor(requires_grad=True)
+        )
 
     _test_clean_context_backward_context_id = None
 
@@ -1595,8 +1895,7 @@ class DistAutogradTest(CommonDistAutogradTest):
     def _get_grad(cls, embedding_rref, context_id):
         embedding = embedding_rref.local_value()
         grad_map = dist_autograd.get_gradients(context_id)
-        # Can't send sparse tensors over RPC: https://github.com/pytorch/pytorch/issues/30807
-        return grad_map[embedding.weight].to_dense()
+        return grad_map[embedding.weight]
 
     @dist_init
     def test_embedding_bag_with_no_grad_tensors(self):
@@ -1638,32 +1937,44 @@ class DistAutogradTest(CommonDistAutogradTest):
                 args=(remote_embedding, context_id),
             )
 
-            self.assertEqual(local_grad.to_dense(), remote_grad)
+            self.assertEqual(local_grad, remote_grad)
 
     @classmethod
-    def _mixed_requires_grad(cls, t1, t2):
+    def _mixed_requires_grad_operaton(cls, t1, t2):
         if t2.requires_grad:
             return t1 - t2
         else:
             return t1 * t2
 
-    @dist_init
-    def test_mixed_requires_grad(self):
+    def _mixed_requires_grad(self, t1, t2):
         for exec_mode in [ExecMode.RPC_SYNC, ExecMode.REMOTE]:
-            t1 = torch.rand((3, 3), requires_grad=True)
-            t2 = torch.rand((3, 3), requires_grad=False)
             with dist_autograd.context() as context_id:
                 ret = self._exec_func(
-                    exec_mode, DistAutogradTest._mixed_requires_grad, t1, t2
+                    exec_mode, DistAutogradTest._mixed_requires_grad_operaton, t1, t2
                 )
                 self.assertEqual(t1 * t2, ret)
-                dist_autograd.backward(context_id, [ret.sum()])
+                loss = my_sum(ret)
+                dist_autograd.backward(context_id, [loss])
                 self.assertTrue(t1.requires_grad)
                 self.assertFalse(t2.requires_grad)
                 grads = dist_autograd.get_gradients(context_id)
                 self.assertIn(t1, grads)
                 self.assertNotIn(t2, grads)
                 self.assertEqual(t2, grads[t1])
+
+    @dist_init
+    def test_mixed_requires_grad(self):
+        self._mixed_requires_grad(
+            torch.rand(3, 3, requires_grad=True),
+            torch.rand(3, 3, requires_grad=False)
+        )
+
+    @dist_init
+    def test_mixed_requires_grad_sparse(self):
+        self._mixed_requires_grad(
+            build_sparse_tensor(requires_grad=True),
+            build_sparse_tensor(requires_grad=False)
+        )
 
     class TestDebugInfoFunc(Function):
         @staticmethod
@@ -1802,36 +2113,58 @@ class DistAutogradTest(CommonDistAutogradTest):
 
     @staticmethod
     def _test_nested_backward_accumulate_grads(t1, t2, dst_rank):
-        return rpc.rpc_sync(worker_name(dst_rank), torch.matmul, args=(t1, t2))
+        return rpc.rpc_sync(worker_name(dst_rank), torch.add, args=(t1, t2))
 
-    @dist_init
-    def test_nested_backward_accumulate_grads(self):
-        t1 = torch.rand((3, 3), requires_grad=True)
-        t2 = torch.rand((3, 3), requires_grad=True)
+    def _nested_backward_accumulate_grads(self, t1, t2):
         with dist_autograd.context() as context_id:
-            loss = rpc.rpc_sync(
+            ret = rpc.rpc_sync(
                 worker_name(self._next_rank()),
                 DistAutogradTest._test_nested_backward_accumulate_grads,
                 args=(t1, t2, self._next_rank()),
-            ).sum()
-
+            )
+            loss = my_sum(ret)
             # Run backward twice.
             dist_autograd.backward(context_id, [loss], retain_graph=True)
             dist_autograd.backward(context_id, [loss])
 
     @dist_init
-    def test_multiple_backward(self):
-        t1 = torch.rand((3, 3), requires_grad=True)
-        t2 = torch.rand((3, 3), requires_grad=True)
+    def test_nested_backward_accumulate_grads(self):
+        self._nested_backward_accumulate_grads(
+            torch.rand(3, 3, requires_grad=True),
+            torch.rand(3, 3, requires_grad=True)
+        )
+
+    @dist_init
+    def test_nested_backward_accumulate_grads_sparse(self):
+        self._nested_backward_accumulate_grads(
+            build_sparse_tensor(requires_grad=True),
+            build_sparse_tensor(requires_grad=True)
+        )
+
+    def _multiple_backward(self, t1, t2):
         with dist_autograd.context() as context_id:
-            loss = rpc.rpc_sync(
+            ret = rpc.rpc_sync(
                 worker_name(self._next_rank()),
                 torch.add,
-                args=(t1, t2)).sum()
-
+                args=(t1, t2))
+            loss = my_sum(ret)
             # Run backward in a loop multiple times.
             for i in range(1000):
                 dist_autograd.backward(context_id, [loss], retain_graph=True)
+
+    @dist_init
+    def test_multiple_backward(self):
+        self._multiple_backward(
+            torch.rand(3, 3, requires_grad=True),
+            torch.rand(3, 3, requires_grad=True)
+        )
+
+    @dist_init
+    def test_multiple_backward_sparse(self):
+        self._multiple_backward(
+            build_sparse_tensor(requires_grad=True),
+            build_sparse_tensor(requires_grad=True)
+        )
 
     @dist_init(clean_shutdown=False)
     def test_multiple_backward_with_errors(self):
@@ -2136,15 +2469,13 @@ class DistAutogradTest(CommonDistAutogradTest):
 
 
 class CudaDistAutogradTest(CommonDistAutogradTest):
-    @skip_if_lt_x_gpu(1)
-    @dist_init
-    def test_gpu_simple(self):
-        t1 = torch.rand(3, 3, requires_grad=True, device="cuda:0")
-        t2 = torch.rand(3, 3, requires_grad=True, device="cuda:0")
-        (t1 + t2).sum().backward()
+
+    def _gpu_simple(self, t1, t2):
+        my_sum(t1 + t2).backward()
         with dist_autograd.context() as context_id:
             t3 = t1 + t2
-            dist_autograd.backward(context_id, [t3.sum()])
+            loss = my_sum(t3)
+            dist_autograd.backward(context_id, [loss])
             grads = dist_autograd.get_gradients(context_id)
             self.assertEqual(2, len(grads))
             self.assertEqual(t1.grad, grads[t1])
@@ -2152,9 +2483,22 @@ class CudaDistAutogradTest(CommonDistAutogradTest):
 
     @skip_if_lt_x_gpu(1)
     @dist_init
-    def test_gpu_to_cpu_continuation(self):
-        t1 = torch.rand(3, 3, requires_grad=True, device="cuda:0")
-        t2 = torch.rand(3, 3, requires_grad=True)
+    def test_gpu_simple(self):
+        self._gpu_simple(
+            torch.rand(3, 3, requires_grad=True, device="cuda:0"),
+            torch.rand(3, 3, requires_grad=True, device="cuda:0")
+        )
+
+    @skip_if_lt_x_gpu(1)
+    @dist_init
+    def test_gpu_simple_sparse(self):
+        self._gpu_simple(
+            build_sparse_tensor(requires_grad=True, device="cuda:0"),
+            build_sparse_tensor(requires_grad=True, device="cuda:0")
+        )
+
+
+    def _gpu_to_cpu_continuation(self, t1, t2):
         # Run a few iterations.
         for i in range(3):
             t1.grad = None
@@ -2169,16 +2513,29 @@ class CudaDistAutogradTest(CommonDistAutogradTest):
                     t6 = t5.cuda(0) + t4
                     t7 = self._exec_func(exec_mode, torch.add, t6.cpu(), t5)
                     # Autograd graph consists of CPU -> GPU -> CPU execution.
+                    loss = my_sum(t7)
                     ret = self._verify_backwards(
-                        exec_mode, [t7.sum()], context_id, local_grads, t1, t2
+                        exec_mode, [loss], context_id, local_grads, t1, t2
                     )
                     local_grads = ret if ret else local_grads
 
     @skip_if_lt_x_gpu(1)
     @dist_init
-    def test_gpu_to_cpu_continuation_gpu_root(self):
-        t1 = torch.rand(3, 3, requires_grad=True, device="cuda:0")
-        t2 = torch.rand(3, 3, requires_grad=True)
+    def test_gpu_to_cpu_continuation(self):
+        self._gpu_to_cpu_continuation(
+            torch.rand(3, 3, requires_grad=True, device="cuda:0"),
+            torch.rand(3, 3, requires_grad=True)
+        )
+
+    @skip_if_lt_x_gpu(1)
+    @dist_init
+    def test_gpu_to_cpu_continuation_sparse(self):
+        self._gpu_to_cpu_continuation(
+            build_sparse_tensor(requires_grad=True, device="cuda:0"),
+            build_sparse_tensor(requires_grad=True)
+        )
+
+    def _gpu_to_cpu_continuation_gpu_root(self, t1, t2):
         # Run a few iterations.
         for i in range(3):
             t1.grad = None
@@ -2192,10 +2549,27 @@ class CudaDistAutogradTest(CommonDistAutogradTest):
                     t5 = self._exec_func(exec_mode, torch.add, t4.cpu(), t2)
                     t6 = t5.cuda(0) + t4
                     # Autograd graph consists of CPU -> GPU -> CPU execution.
+                    loss = my_sum(t6)
                     ret = self._verify_backwards(
-                        exec_mode, [t6.sum()], context_id, local_grads, t1, t2
+                        exec_mode, [loss], context_id, local_grads, t1, t2
                     )
                     local_grads = ret if ret else local_grads
+
+    @skip_if_lt_x_gpu(1)
+    @dist_init
+    def test_gpu_to_cpu_continuation_gpu_root(self):
+        self._gpu_to_cpu_continuation_gpu_root(
+            torch.rand(3, 3, requires_grad=True, device="cuda:0"),
+            torch.rand(3, 3, requires_grad=True)
+        )
+
+    @skip_if_lt_x_gpu(1)
+    @dist_init
+    def test_gpu_to_cpu_continuation_gpu_root_sparse(self):
+        self._gpu_to_cpu_continuation_gpu_root(
+            build_sparse_tensor(requires_grad=True, device="cuda:0"),
+            build_sparse_tensor(requires_grad=True)
+        )
 
 
 class FaultyAgentDistAutogradTest(RpcAgentTestFixture):
@@ -2258,8 +2632,7 @@ class WrapperModule(nn.Module):
 
 class TensorPipeCudaDistAutogradTest(RpcAgentTestFixture):
 
-    @skip_if_lt_x_gpu(4)
-    def test_device_maps_backward_pass(self):
+    def _device_maps_backward_pass(self, t1, t2):
         options = self.rpc_backend_options
         dst = worker_name((self.rank + 1) % self.world_size)
 
@@ -2274,18 +2647,35 @@ class TensorPipeCudaDistAutogradTest(RpcAgentTestFixture):
             rpc_backend_options=options,
         )
 
-        t1 = torch.rand(10, device=self.rank, requires_grad=True)
-        t2 = torch.rand(10, device=self.rank, requires_grad=True)
         with dist_autograd.context() as context_id:
             res = rpc.rpc_sync(dst, torch.add, args=(t1, t2))
-            dist_autograd.backward(context_id, [res.sum()])
+            loss = my_sum(res)
+            dist_autograd.backward(context_id, [loss])
             grads = dist_autograd.get_gradients(context_id)
-            self.assertEqual(torch.ones(10), grads[t1])
-            self.assertEqual(torch.ones(10), grads[t2])
+            if t1.is_sparse:
+                self.assertEqual(build_sparse_one_gradient(), grads[t1])
+                self.assertEqual(build_sparse_one_gradient(), grads[t2])
+            else:
+                self.assertEqual(torch.ones(10), grads[t1])
+                self.assertEqual(torch.ones(10), grads[t2])
             self.assertEqual(t1.device, grads[t1].device)
             self.assertEqual(t2.device, grads[t2].device)
 
         rpc.shutdown()
+
+    @skip_if_lt_x_gpu(4)
+    def test_device_maps_backward_pass(self):
+        self._device_maps_backward_pass(
+            torch.rand(10, requires_grad=True, device=self.rank),
+            torch.ones(10, requires_grad=True, device=self.rank)
+        )
+
+    @skip_if_lt_x_gpu(4)
+    def test_device_maps_backward_pass_sparse(self):
+        self._device_maps_backward_pass(
+            build_sparse_tensor(requires_grad=True, device=self.rank),
+            build_sparse_tensor(requires_grad=True, device=self.rank)
+        )
 
     class MyRemoteCompute(torch.nn.Module):
         def __init__(self):
@@ -2303,9 +2693,7 @@ class TensorPipeCudaDistAutogradTest(RpcAgentTestFixture):
         def forward(self, input):
             return self.next_stage.rpc_sync().forward(input)
 
-    @skip_if_lt_x_gpu(4)
-    def test_dist_autograd_sync_streams(self):
-
+    def _dist_autograd_sync_streams(self, sparse):
         options = self.rpc_backend_options
         dst = worker_name((self.rank + 1) % self.world_size)
 
@@ -2323,17 +2711,20 @@ class TensorPipeCudaDistAutogradTest(RpcAgentTestFixture):
         remote_compute = rpc.remote(dst, TensorPipeCudaDistAutogradTest.MyRemoteCompute)
         local_compute = TensorPipeCudaDistAutogradTest.MyLocalCompute(remote_compute)
         for _ in range(10):
-            input = torch.rand([1000, 10000], device=self.rank, requires_grad=True)
+            if sparse:
+                input = build_sparse_tensor(requires_grad=True, device=self.rank)
+            else:
+                input = torch.rand([1000, 10000], device=self.rank, requires_grad=True)
             # Run local autograd
             result = input * 2.0
             r = random.random()
-            loss = result.sum() * r
+            loss = my_sum(result) * r
             loss.backward()
 
             # Run distributed autograd
             with dist_autograd.context() as context_id:
                 result = local_compute(input)
-                loss = result.sum() * r
+                loss = my_sum(result) * r
                 dist_autograd.backward(context_id, [loss])
 
                 # Compare grads.
@@ -2343,7 +2734,14 @@ class TensorPipeCudaDistAutogradTest(RpcAgentTestFixture):
         rpc.shutdown()
 
     @skip_if_lt_x_gpu(4)
-    def test_gradients_synchronizations(self):
+    def test_dist_autograd_sync_streams(self):
+        self._dist_autograd_sync_streams(False)
+
+    @skip_if_lt_x_gpu(4)
+    def test_dist_autograd_sync_streams_sparse(self):
+        self._dist_autograd_sync_streams(True)
+
+    def _gradients_synchronizations(self, x):
         options = self.rpc_backend_options
         for peer_rank in range(self.world_size):
             options.set_device_map(worker_name(peer_rank), {self.rank: peer_rank})
@@ -2367,8 +2765,8 @@ class TensorPipeCudaDistAutogradTest(RpcAgentTestFixture):
                     WrapperModule,
                     args=(layers[rank - 1], rank)
                 ))
+            x = x.to(0)
 
-            x = torch.randn(5000, 2000).to(0)
             # local iteration
             local_model = nn.Sequential(*local_layers)
             local_model(x).sum().backward()
@@ -2390,3 +2788,15 @@ class TensorPipeCudaDistAutogradTest(RpcAgentTestFixture):
                         self.assertEqual(g1, g2)
 
         rpc.shutdown()
+
+    @skip_if_lt_x_gpu(4)
+    def test_gradients_synchronizations(self):
+        self._gradients_synchronizations(
+            torch.randn(5000, 2000)
+        )
+
+    @skip_if_lt_x_gpu(4)
+    def test_gradients_synchronizations_sparse(self):
+        self._gradients_synchronizations(
+            torch.randn(5000, 2000).to_sparse()
+        )
