@@ -282,9 +282,10 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
       uint64_t key = getForwardThreadKey(kineto_event.fwdThreadId(), kineto_event.sequenceNr());
       auto iter = tidSeq2activity.find(key);
       if (iter != tidSeq2activity.end()) {
-        activity.flow.linkedActivity = iter->second; // Only destination side set this, to distinguish with start side.
-        activity.flow.id = ((libkineto::GenericTraceActivity*)(activity.flow.linkedActivity))->flow.id = fwd_bwd_link_id;
-        activity.flow.type = ((libkineto::GenericTraceActivity*)(activity.flow.linkedActivity))->flow.type = libkineto::kLinkFwdBwd;
+        libkineto::GenericTraceActivity* fwd = iter->second;
+        activity.flow.linkedActivity = fwd; // Only destination side set this, to distinguish with start side.
+        activity.flow.id = fwd->flow.id = fwd_bwd_link_id;
+        activity.flow.type = fwd->flow.type = libkineto::kLinkFwdBwd;
         ++fwd_bwd_link_id;
       }
     }
