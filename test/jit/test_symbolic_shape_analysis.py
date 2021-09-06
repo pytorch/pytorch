@@ -3,7 +3,6 @@ from torch.testing._internal.jit_utils import JitTestCase
 import operator
 
 from torch.testing import FileCheck
-from typing import List
 
 
 if __name__ == '__main__':
@@ -60,15 +59,6 @@ class TestSymbolicShapeAnalysis(JitTestCase):
         self.assertEqual(output_shape[1], sym2)
         self.assertEqual(output_shape[2], sym3)
 
-    def test_sharing_of_list_len(self):
-        @torch.jit.script
-        def foo(x, out: List[int]):
-            return torch.nn.functional.adaptive_avg_pool2d(x, out)
-
-        self.run_pass("inline", foo.graph)
-        torch._C._jit_pass_propagate_shapes_on_graph(foo.graph)
-        FileCheck().check("Tensor(*, *)").check_same("adaptive_avg_pool2d").run(foo.graph)
-
     def test_shared_shape_graph(self):
         @torch.jit.script
         def foo(x, y):
@@ -81,6 +71,38 @@ class TestSymbolicShapeAnalysis(JitTestCase):
         div_graph = torch._C._jit_shape_compute_graph_for_node(div_node)
         self.assertIsNotNone(mul_graph)
         self.assertIs(mul_graph, div_graph)
+
+    def test_write(self):
+        @torch.jit.script
+        def foo(a, b):
+            return a * b
+
+        # broadcast appends cant be removed, so we bail on propagation
+        torch._C._jit_pass_propagate_shapes_on_graph(foo.graph)
+        FileCheck().check("Tensor = aten::mul").run(foo.graph)
+
+        @torch.jit.script
+        def foo(y):
+            x = [1, 2, 3, 4]
+            x[0] = 5
+            return y.view(x)
+
+        torch._C._jit_pass_propagate_shapes_on_graph(foo.graph)
+        FileCheck().check("Tensor = aten::view").run(foo.graph)
+
+    def test_if_propagation(self):
+        @torch.jit.script
+        def foo(i: int, z):
+            x = torch.ones([2, 3, 4, 5])
+            y = z.view([i, 3, 2, i])
+            if i == 4:
+                return x
+            else:
+                return y
+
+        torch._C._jit_pass_constant_propagation(foo.graph)
+        torch._C._jit_pass_propagate_shapes_on_graph(foo.graph)
+        FileCheck().check("*, 3, 2, *").check("*, 3, *, *) = prim::If").run(foo.graph)
 
     def test_unary_shape_functions(self):
         def apply(fn):
@@ -116,3 +138,42 @@ class TestSymbolicShapeAnalysis(JitTestCase):
             inputs[1].setType(inputs[1].type().with_sizes(size_2))
             torch._C._jit_pass_propagate_shapes_on_graph(t.graph)
             self.assertEqual(next(t.graph.outputs()).type().symbolic_sizes(), [4, 4, 8])
+
+    def test_size_and_sizes(self):
+        @torch.jit.script
+        def foo(x, y):
+            return x.view(y.size(0), 8, y.size(-1))
+
+        @torch.jit.script
+        def foo2(x, y):
+            return x.view(y.size())
+
+        for graph in [foo.graph, foo2.graph]:
+            inputs = list(graph.inputs())
+            sym1 = torch._C._new_symbolic_shape_symbol()
+
+            inputs[1].setType(inputs[1].type().with_sizes([5, 8, sym1]))
+            torch._C._jit_pass_propagate_shapes_on_graph(graph)
+            self.assertEqual(next(graph.outputs()).type().symbolic_sizes(), [5, 8, sym1])
+
+    def test_adaptive_avg_pool2d(self):
+        inps = [
+            [(1, 64, 8, 9), (5, 7)],
+            [(1, 64, 10, 9), (7)],
+            [(1, 64, 10, 9), (5, None)],
+            [(1, 8, 4, 3), (None, None)],
+            [(1, 8, 4, 3), (None, 5)],
+        ]
+
+        for inp in inps:
+            t = torch.randn(*inp[0])
+            out_size = torch.nn.functional.adaptive_avg_pool2d(t, inp[1]).size()
+
+            def foo(x):
+                return torch.nn.functional.adaptive_avg_pool2d(x, inp[1])
+
+            fn = torch.jit.trace(foo, (t,))
+            torch._C._jit_erase_non_input_shape_information(fn.graph)
+            torch._C._jit_pass_peephole(fn.graph)
+            torch._C._jit_pass_constant_propagation(fn.graph)
+            self.checkShapeAnalysis(out_size, fn.graph, assert_propagation=True)

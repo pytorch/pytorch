@@ -792,6 +792,20 @@ TEST_F(FunctionalTest, CrossEntropy) {
 
   ASSERT_TRUE(output.allclose(expected, 1e-04));
   ASSERT_TRUE(F::cross_entropy(input, target).allclose(expected, 1e-04));
+
+  // label smoothing with class indices
+  input = torch::tensor({{3., 1.}, {1., 2.}}, torch::kFloat);
+  output = F::cross_entropy(
+      input, target, F::CrossEntropyFuncOptions().label_smoothing(0.15).reduction(torch::kMean));
+  expected = torch::tensor(0.3326, torch::kFloat);
+  ASSERT_TRUE(output.allclose(expected, 1e-04));
+
+  // label smoothing with target probabilities
+  target = torch::tensor({{0.8, 0.2}, {0.1, 0.9}}, torch::kFloat);
+  output = F::cross_entropy(
+      input, target, F::CrossEntropyFuncOptions().label_smoothing(0.2).reduction(torch::kMean));
+  expected = torch::tensor(0.5701, torch::kFloat);
+  ASSERT_TRUE(output.allclose(expected, 1e-04));
 }
 
 TEST_F(FunctionalTest, MaxUnpool1d) {
@@ -941,7 +955,7 @@ TEST_F(FunctionalTest, GELU) {
   const auto x = torch::linspace(-3.0, 3.0, 100);
   const auto y_exp = x * 0.5 * (1.0 + torch::erf(x / std::sqrt(2.0)));
   const auto y = F::gelu(x);
-  ASSERT_TRUE(torch::allclose(y, y_exp));
+  ASSERT_TRUE(torch::allclose(y, y_exp, 1.4e-06, 1e-05));
 }
 
 TEST_F(FunctionalTest, Hardshrink) {
@@ -1034,17 +1048,19 @@ TEST_F(FunctionalTest, LeakyReLU) {
   const auto size = 3;
   for (const auto negative_slope : {0.0, 0.42, 1.0}) {
     for (const auto inplace : {false, true}) {
-      auto x = torch::linspace(-10.0, 10.0, size * size * size);
-      x.resize_({size, size, size});
-      auto y_exp = (x < 0) * x * negative_slope + (x >= 0) * x;
-      auto y = F::leaky_relu(x, F::LeakyReLUFuncOptions()
-        .negative_slope(negative_slope).inplace(inplace));
+      for (const auto type : {torch::kFloat, torch::kBFloat16}) {
+        auto x = torch::linspace(-10.0, 10.0, size * size * size).to(type);
+        x.resize_({size, size, size});
+        auto y_exp = (x < 0) * x * negative_slope + (x >= 0) * x;
+        auto y = F::leaky_relu(x, F::LeakyReLUFuncOptions()
+          .negative_slope(negative_slope).inplace(inplace));
 
-      ASSERT_EQ(y.ndimension(), 3);
-      ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
-      ASSERT_TRUE(torch::allclose(y, y_exp));
-      if (inplace) {
-        ASSERT_TRUE(torch::allclose(x, y_exp));
+        ASSERT_EQ(y.ndimension(), 3);
+        ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
+        ASSERT_TRUE(torch::allclose(y, y_exp));
+        if (inplace) {
+          ASSERT_TRUE(torch::allclose(x, y_exp));
+        }
       }
     }
   }
@@ -1443,19 +1459,21 @@ TEST_F(FunctionalTest, RReLU) {
   for (const auto lower : {0.01, 0.1, 0.2}) {
     for (const auto upper : {0.3, 0.4, 0.5}) {
       for (const auto inplace : {false, true}) {
-        auto x = torch::linspace(-10.0, 10.0, size * size * size);
-        x.resize_({size, size, size});
-        auto x_copy = x.clone();
-        auto y = F::rrelu(x, F::RReLUFuncOptions().lower(lower)
-          .upper(upper).inplace(inplace));
-        auto z = ((x_copy >= 0) * (x_copy == y) +
-          (x_copy < 0) * (y >= x_copy * upper) * (y <= lower * x_copy)) * 1.0;
+        for (const auto type : {torch::kFloat, torch::kBFloat16}) {
+          auto x = torch::linspace(-10.0, 10.0, size * size * size).to(type);
+          x.resize_({size, size, size});
+          auto x_copy = x.clone();
+          auto y = F::rrelu(x, F::RReLUFuncOptions().lower(lower)
+            .upper(upper).inplace(inplace));
+          auto z = ((x_copy >= 0) * (x_copy == y) +
+            (x_copy < 0) * (y >= x_copy * upper) * (y <= lower * x_copy)) * 1.0;
 
-        ASSERT_EQ(y.ndimension(), 3);
-        ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
-        ASSERT_TRUE(torch::allclose(z, torch::ones_like(z)));
-        if (inplace) {
-          ASSERT_TRUE(torch::allclose(x, y));
+          ASSERT_EQ(y.ndimension(), 3);
+          ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
+          ASSERT_TRUE(torch::allclose(z, torch::ones_like(z)));
+          if (inplace) {
+            ASSERT_TRUE(torch::allclose(x, y));
+          }
         }
       }
     }
@@ -1467,16 +1485,18 @@ TEST_F(FunctionalTest, RReLUDefaultOptions) {
   const auto size = 3;
   const auto lower = 1.0 / 8.0;
   const auto upper = 1.0 / 3.0;
-  auto x = torch::linspace(-10.0, 10.0, size * size * size);
-  x.resize_({size, size, size});
-  auto x_copy = x.clone();
-  auto y = F::rrelu(x);
-  auto z = ((x_copy >= 0) * (x_copy == y) +
-    (x_copy < 0) * (y >= x_copy * upper) * (y <= lower * x_copy)) * 1.0;
+  for (const auto type : {torch::kFloat, torch::kBFloat16}) {
+    auto x = torch::linspace(-10.0, 10.0, size * size * size).to(type);
+    x.resize_({size, size, size});
+    auto x_copy = x.clone();
+    auto y = F::rrelu(x);
+    auto z = ((x_copy >= 0) * (x_copy == y) +
+      (x_copy < 0) * (y >= x_copy * upper) * (y <= lower * x_copy)) * 1.0;
 
-  ASSERT_EQ(y.ndimension(), 3);
-  ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
-  ASSERT_TRUE(torch::allclose(z, torch::ones_like(z)));
+    ASSERT_EQ(y.ndimension(), 3);
+    ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
+    ASSERT_TRUE(torch::allclose(z, torch::ones_like(z)));
+  }
 }
 
 TEST_F(FunctionalTest, CELU) {
