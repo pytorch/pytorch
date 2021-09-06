@@ -41,7 +41,8 @@ from torch.testing._internal.common_methods_invocations import (
 from torch.testing._internal.common_device_type import (instantiate_device_type_tests, skipCUDAIfRocm,
                                                         onlyCPU, onlyCUDA, onlyOnCPUAndCUDA, dtypes, dtypesIfCUDA,
                                                         deviceCountAtLeast, skipCUDAIfCudnnVersionLessThan,
-                                                        skipCUDAIf, skipMeta, get_all_dtypes)
+                                                        skipCUDAIf, skipMeta)
+from torch.testing._internal.common_dtype import get_all_dtypes
 
 import pickle
 
