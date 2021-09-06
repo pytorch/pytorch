@@ -154,16 +154,17 @@ TORCH_IMPL_FUNC(topk_out_cuda)
    int64_t k, int64_t dim, bool largest, bool sorted,
    const Tensor& values,
    const Tensor& indices) {
-  TensorArg topK_arg{values, "topK", 1}, indices_arg{indices, "indices", 2}, input_arg{self, "self", 3};
-  checkAllSameGPU(__func__, {topK_arg, indices_arg, input_arg});
-  dim = at::maybe_wrap_dim(dim, self);
+  Tensor input = self.scalar_type() == at::ScalarType::Bool ? self.to(at::ScalarType::Int).contiguous() : self.contiguous();
+  Tensor castedValues = values.scalar_type() == at::ScalarType::Bool ? values.to(at::ScalarType::Int).contiguous() : values.contiguous();
 
-  int numDims = self.dim();
+  TensorArg topK_arg{castedValues, "topK", 1}, indices_arg{indices, "indices", 2}, input_arg{input, "self", 3};
+  checkAllSameGPU(__func__, {topK_arg, indices_arg, input_arg});
+  dim = at::maybe_wrap_dim(dim, input);
+
+  int numDims = input.dim();
   numDims = numDims == 0 ? 1 : numDims;
   TORCH_CHECK(numDims <= MAX_DIMS, "input tensor has too many dimensions");
-  int64_t sliceSize = self.dim() == 0 ? 1 : self.size(dim);
-
-  Tensor input = self.contiguous();
+  int64_t sliceSize = input.dim() == 0 ? 1 : input.size(dim);
 
   // If k is 0 the result is an empty tensor, so we don't need to launch a kernel.
   if (k == 0) {
@@ -208,11 +209,11 @@ TORCH_IMPL_FUNC(topk_out_cuda)
   }
 
 #define RUN_T(INDEX_T)                                                  \
-  AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Half, at::ScalarType::BFloat16, at::ScalarType::Bool, input.scalar_type(), "topk_out_cuda", [&] { \
+  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, input.scalar_type(), "topk_out_cuda", [&] { \
     at::cuda::detail::TensorInfo<scalar_t, INDEX_T> inputInfo =           \
       at::cuda::detail::getTensorInfo<scalar_t, INDEX_T>(input);          \
     at::cuda::detail::TensorInfo<scalar_t, INDEX_T> topKInfo =            \
-      at::cuda::detail::getTensorInfo<scalar_t, INDEX_T>(values);         \
+      at::cuda::detail::getTensorInfo<scalar_t, INDEX_T>(castedValues);   \
     at::cuda::detail::TensorInfo<int64_t, INDEX_T> indicesInfo =          \
       at::cuda::detail::getTensorInfo<int64_t, INDEX_T>(indices);         \
     /* tensorInfoLegacyIfScalar*/                                         \
@@ -274,7 +275,7 @@ TORCH_IMPL_FUNC(topk_out_cuda)
     // Based on required index size, run the algorithm with the
     // appropriate index type
     if (at::cuda::detail::canUse32BitIndexMath(input) &&
-        at::cuda::detail::canUse32BitIndexMath(values) &&
+        at::cuda::detail::canUse32BitIndexMath(castedValues) &&
         at::cuda::detail::canUse32BitIndexMath(indices)) {
       RUN_T(uint32_t);
     } else {
@@ -288,12 +289,12 @@ TORCH_IMPL_FUNC(topk_out_cuda)
 
   // Sort the results if the user wants them sorted, since our
   // selection routine does not ensure sorting
-  if (sorted && values.numel() > 1) {
-    if (should_use_small_sort(values, dim)) {
+  if (sorted && castedValues.numel() > 1) {
+    if (should_use_small_sort(castedValues, dim)) {
       // This avoids any memory allocations and performs all sorting
       // work inplace along the slice
 
-      sortKeyValueInplace(values, indices, dim, largest);
+      sortKeyValueInplace(castedValues, indices, dim, largest);
     } else {
       // Depend upon the backup sort that returns indices, which we
       // can use in conjunction with gather to produce the original
@@ -305,12 +306,13 @@ TORCH_IMPL_FUNC(topk_out_cuda)
       // allocated tensors to receive the results.
 
       Tensor sortedIndices = at::empty_like(indices);
-      Tensor sortedValues = at::empty_like(values);
-      sort_out_cuda(values, dim, largest, sortedValues, sortedIndices);
+      Tensor sortedValues = at::empty_like(castedValues);
+      sort_out_cuda(castedValues, dim, largest, sortedValues, sortedIndices);
       indices.copy_(indices.gather(dim, sortedIndices));
-      values.copy_(sortedValues);
+      castedValues.copy_(sortedValues);
     }
   }
+  values.copy_(castedValues);
 }
 
 } // at::native

@@ -1504,7 +1504,7 @@ class TestReductions(TestCase):
             np_fn = partial(np.nansum, dtype=np_out_dtype)
             self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
 
-    @dtypes(*(get_all_int_dtypes() + get_all_fp_dtypes(include_bfloat16=False)))
+    @dtypes(*(torch.testing.get_all_dtypes(include_bfloat16=False, include_complex=False)))
     def test_argminmax_multiple(self, device, dtype):
         # Case: All Ones
         t = torch.ones(3, 3, device=device, dtype=dtype)
@@ -1525,7 +1525,7 @@ class TestReductions(TestCase):
                     # Generate Input.
                     x = _generate_input(shape, dtype, device, with_extremal)
 
-                    if dtype == torch.half:
+                    if dtype == torch.half or dtype == torch.bool:
                         max_val = torch.max(x.to(torch.float))
                         min_val = torch.min(x.to(torch.float))
                     else:
@@ -1818,7 +1818,7 @@ class TestReductions(TestCase):
         with self.assertRaisesRegex(RuntimeError, rmsg):
             torch.min(x, dim=0, out=(illegal_values, illegal_indices))
 
-    @dtypes(*get_all_dtypes(include_bool=False, include_complex=False))
+    @dtypes(*torch.testing.get_all_dtypes(include_complex=False))
     def test_dim_arg_reduction_scalar(self, device, dtype):
         example = 4.0
 

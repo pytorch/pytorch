@@ -307,9 +307,6 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(const Tensor & self, c10::opt
     "The dimension being sorted can not have more than INT_MAX elements.");
 
   const auto self_dtype = self.dtype();
-  // FIXME: remove this check once cub sort supports bool
-  TORCH_CHECK(self_dtype != ScalarType::Bool,
-    "Sort currently does not support bool dtype on CUDA.");
   TORCH_CHECK(self_dtype != ScalarType::ComplexFloat && self_dtype != ScalarType::ComplexDouble,
     "Sort currently does not support complex dtypes on CUDA.");
 

@@ -130,8 +130,12 @@ class TestSortAndSelect(TestCase):
             self.assertIsOrdered('descending', x, res2val, res2ind,
                                  'random with NaNs')
 
+<<<<<<< HEAD
     # FIXME: remove torch.bool from unsupported types once support is added for cub sort
     @dtypes(*set(get_all_dtypes()) - {torch.bool, torch.complex64, torch.complex128})
+=======
+    @dtypes(*set(torch.testing.get_all_dtypes()) - {torch.complex64, torch.complex128})
+>>>>>>> 351ebc3fa1 (Lift restriction of bool inputs in cuda)
     def test_stable_sort(self, device, dtype):
         if TEST_WITH_ROCM and dtype == torch.bfloat16:
             return
@@ -225,8 +229,12 @@ class TestSortAndSelect(TestCase):
             self.assertEqual(indices, indices_cont)
             self.assertEqual(values, values_cont)
 
+<<<<<<< HEAD
     # FIXME: remove torch.bool from unsupported types once support is added for cub sort
     @dtypes(*set(get_all_dtypes()) - {torch.bool, torch.complex64, torch.complex128})
+=======
+    @dtypes(*set(torch.testing.get_all_dtypes()) - {torch.complex64, torch.complex128})
+>>>>>>> 351ebc3fa1 (Lift restriction of bool inputs in cuda)
     def test_stable_sort_against_numpy(self, device, dtype):
         if TEST_WITH_ROCM and dtype == torch.bfloat16:
             return
@@ -608,10 +616,12 @@ class TestSortAndSelect(TestCase):
         self.assertEqual(top1, top2)
         self.assertEqual(idx1, idx2)
 
-    def _test_topk_dtype(self, device, dtype, integral, size):
+    def _test_topk_dtype(self, device, dtype, integral, boolean, size):
         if integral:
             a = torch.randint(torch.iinfo(dtype).min, torch.iinfo(dtype).max,
                               size=(size,), dtype=dtype, device=device)
+        elif boolean:
+            a = torch.randn(size=(size,), device=device).to(dtype)
         else:
             a = torch.randn(size=(size,), dtype=dtype, device=device)
 
@@ -625,7 +635,7 @@ class TestSortAndSelect(TestCase):
         small = 10
         large = 4096
         for curr_size in (small, large):
-            self._test_topk_dtype(device, dtype, True, curr_size)
+            self._test_topk_dtype(device, dtype, True, False, curr_size)
 
     @onlyCUDA
     @dtypes(torch.bfloat16)
@@ -635,7 +645,15 @@ class TestSortAndSelect(TestCase):
         small = 10
         large = 8192
         for curr_size in (small, large):
-            self._test_topk_dtype(device, dtype, False, curr_size)
+            self._test_topk_dtype(device, dtype, False, False, curr_size)
+
+    @dtypes(torch.bool)
+    def test_topk_bool(self, device, dtype):
+
+        small = 10
+        large = 8192
+        for curr_size in (small, large):
+            self._test_topk_dtype(device, dtype, False, True, curr_size)
 
     @dtypesIfCUDA(*get_all_fp_dtypes())
     @dtypes(torch.float, torch.double, torch.bfloat16)
@@ -668,11 +686,18 @@ class TestSortAndSelect(TestCase):
         self.assertEqual(ind, expected_ind, atol=0, rtol=0)
 
     @onlyOnCPUAndCUDA
+<<<<<<< HEAD
     @dtypesIfCUDA(*(get_all_dtypes(include_complex=False,
                                    include_bool=False,
                                    include_half=False,
                                    include_bfloat16=True)))
     @dtypes(*(get_all_dtypes(include_complex=False, include_bool=False, include_half=False, include_bfloat16=False)))
+=======
+    @dtypesIfCUDA(*(torch.testing.get_all_dtypes(include_complex=False,
+                                                 include_half=False,
+                                                 include_bfloat16=True)))
+    @dtypes(*(torch.testing.get_all_dtypes(include_complex=False, include_half=False, include_bfloat16=False)))
+>>>>>>> 351ebc3fa1 (Lift restriction of bool inputs in cuda)
     def test_topk_zero(self, device, dtype):
         if TEST_WITH_ROCM and dtype == torch.bfloat16:
             return
