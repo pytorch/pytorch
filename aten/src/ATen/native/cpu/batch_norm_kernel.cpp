@@ -1037,33 +1037,28 @@ void batch_norm_cpu_kernel(Tensor& output, const Tensor& input,
     const Tensor& weight, const Tensor& bias, const Tensor& save_mean,  const Tensor& save_invstd,
     const Tensor& running_mean, const Tensor& running_var, bool train, double eps) {
   const bool mixed_type = is_mixed_type(input, weight, bias, save_mean, save_invstd, running_mean, running_var);
-  switch (input.suggest_memory_format()) {
-    case at::MemoryFormat::Contiguous: {
-      AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "batch_norm_cpu_contiguous", [&] {
-        if (mixed_type) {
-          batch_norm_cpu_contiguous_impl<BFloat16, float>(output, input, weight, bias,
-              save_mean, save_invstd, running_mean, running_var, train, eps);
-        } else {
-          batch_norm_cpu_contiguous_impl<scalar_t, scalar_t>(output, input, weight, bias,
-              save_mean, save_invstd, running_mean, running_var, train, eps);
-        }
-      });
-      break;
-    }
-    case at::MemoryFormat::ChannelsLast: {
-      AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "batch_norm_cpu_channels_last", [&] {
-        if (mixed_type) {
-          batch_norm_cpu_channels_last_impl<BFloat16, float>(output, input, weight, bias,
-              save_mean, save_invstd, running_mean, running_var, train, eps);
-        } else {
-          batch_norm_cpu_channels_last_impl<scalar_t, scalar_t>(output, input, weight, bias,
-              save_mean, save_invstd, running_mean, running_var, train, eps);
-        }
-      });
-      break;
-    }
-    default:
-      TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");
+  if (input.is_contiguous()) {
+    AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "batch_norm_cpu_contiguous", [&] {
+      if (mixed_type) {
+        batch_norm_cpu_contiguous_impl<BFloat16, float>(output, input, weight, bias,
+            save_mean, save_invstd, running_mean, running_var, train, eps);
+      } else {
+        batch_norm_cpu_contiguous_impl<scalar_t, scalar_t>(output, input, weight, bias,
+            save_mean, save_invstd, running_mean, running_var, train, eps);
+      }
+    });
+  } else if (input.is_contiguous(at::MemoryFormat::ChannelsLast)) {
+    AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "batch_norm_cpu_channels_last", [&] {
+      if (mixed_type) {
+        batch_norm_cpu_channels_last_impl<BFloat16, float>(output, input, weight, bias,
+            save_mean, save_invstd, running_mean, running_var, train, eps);
+      } else {
+        batch_norm_cpu_channels_last_impl<scalar_t, scalar_t>(output, input, weight, bias,
+            save_mean, save_invstd, running_mean, running_var, train, eps);
+      }
+    });
+  } else {
+    TORCH_CHECK(false, "batch_norm_cpu_kernel: expecting input to be contiguous.");
   }
 }
 
@@ -1071,37 +1066,32 @@ void batch_norm_cpu_collect_stats_kernel(
     Tensor& mean, Tensor& var_sum, const Tensor& input) {
   const bool mixed_type = is_mixed_type(input, mean, var_sum);
   int64_t image_size = input.numel() / input.size(0) / input.size(1);
-  switch (input.suggest_memory_format()) {
-    case at::MemoryFormat::Contiguous: {
-      AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "batch_norm_cpu_collect_stats_contiguous", [&] {
-        if (mixed_type) {
-          if (image_size == 1) { // NC11 is also channels last
-            batch_norm_cpu_collect_stats_channels_last_impl<BFloat16, float>(mean, var_sum, input);
-          } else {
-            batch_norm_cpu_collect_stats_contiguous_impl<BFloat16, float>(mean, var_sum, input);
-          }
-        } else {
-          if (image_size == 1) { // NC11 is also channels last
-            batch_norm_cpu_collect_stats_channels_last_impl<scalar_t, scalar_t>(mean, var_sum, input);
-          } else {
-            batch_norm_cpu_collect_stats_contiguous_impl<scalar_t, scalar_t>(mean, var_sum, input);
-          }
-        }
-      });
-      break;
-    }
-    case at::MemoryFormat::ChannelsLast: {
-      AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "batch_norm_cpu_collect_stats_channels_last", [&] {
-        if (mixed_type) {
+  if (input.is_contiguous()) {
+    AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "batch_norm_cpu_collect_stats_contiguous", [&] {
+      if (mixed_type) {
+        if (image_size == 1) { // NC11 is also channels last
           batch_norm_cpu_collect_stats_channels_last_impl<BFloat16, float>(mean, var_sum, input);
         } else {
-          batch_norm_cpu_collect_stats_channels_last_impl<scalar_t, scalar_t>(mean, var_sum, input);
+          batch_norm_cpu_collect_stats_contiguous_impl<BFloat16, float>(mean, var_sum, input);
         }
-      });
-      break;
-    }
-    default:
-      TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");
+      } else {
+        if (image_size == 1) { // NC11 is also channels last
+          batch_norm_cpu_collect_stats_channels_last_impl<scalar_t, scalar_t>(mean, var_sum, input);
+        } else {
+          batch_norm_cpu_collect_stats_contiguous_impl<scalar_t, scalar_t>(mean, var_sum, input);
+        }
+      }
+    });
+  } else if (input.is_contiguous(at::MemoryFormat::ChannelsLast)) {
+    AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "batch_norm_cpu_collect_stats_channels_last", [&] {
+      if (mixed_type) {
+        batch_norm_cpu_collect_stats_channels_last_impl<BFloat16, float>(mean, var_sum, input);
+      } else {
+        batch_norm_cpu_collect_stats_channels_last_impl<scalar_t, scalar_t>(mean, var_sum, input);
+      }
+    });
+  } else {
+    TORCH_CHECK(false, "batch_norm_cpu_collect_stats_kernel: expecting input to be contiguous.");
   }
 }
 
@@ -1111,43 +1101,38 @@ void batch_norm_cpu_backward_kernel(Tensor& grad_input, Tensor& grad_weight, Ten
     bool train, double eps) {
   const bool mixed_type = is_mixed_type(input, weight, running_mean, running_var, save_mean, save_invstd);
   int64_t image_size = input.numel() / input.size(0) / input.size(1);
-  switch (input.suggest_memory_format()) {
-    case at::MemoryFormat::Contiguous: {
-      AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "batch_norm_cpu_backward_contiguous", [&] {
-        if (mixed_type) {
-          if (image_size == 1) { // NC11 is also channels last
-            batch_norm_cpu_backward_channels_last_impl<BFloat16, float>(grad_input, grad_weight, grad_bias,
-                grad_output, input, weight, running_mean, running_var, save_mean, save_invstd, train, eps);
-          } else {
-            batch_norm_cpu_backward_contiguous_impl<BFloat16, float>(grad_input, grad_weight, grad_bias,
-                grad_output, input, weight, running_mean, running_var, save_mean, save_invstd, train, eps);
-          }
-        } else {
-          if (image_size == 1) { // NC11 is also channels last
-            batch_norm_cpu_backward_channels_last_impl<scalar_t, scalar_t>(grad_input, grad_weight, grad_bias,
-                grad_output, input, weight, running_mean, running_var, save_mean, save_invstd, train, eps);
-          } else {
-            batch_norm_cpu_backward_contiguous_impl<scalar_t, scalar_t>(grad_input, grad_weight, grad_bias,
-                grad_output, input, weight, running_mean, running_var, save_mean, save_invstd, train, eps);
-          }
-        }
-      });
-      break;
-    }
-    case at::MemoryFormat::ChannelsLast: {
-      AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "batch_norm_cpu_backward_channels_last", [&] {
-        if (mixed_type) {
+  if (input.is_contiguous()) {
+    AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "batch_norm_cpu_backward_contiguous", [&] {
+      if (mixed_type) {
+        if (image_size == 1) { // NC11 is also channels last
           batch_norm_cpu_backward_channels_last_impl<BFloat16, float>(grad_input, grad_weight, grad_bias,
               grad_output, input, weight, running_mean, running_var, save_mean, save_invstd, train, eps);
         } else {
-          batch_norm_cpu_backward_channels_last_impl<scalar_t, scalar_t>(grad_input, grad_weight, grad_bias,
+          batch_norm_cpu_backward_contiguous_impl<BFloat16, float>(grad_input, grad_weight, grad_bias,
               grad_output, input, weight, running_mean, running_var, save_mean, save_invstd, train, eps);
         }
-      });
-      break;
-    }
-    default:
-      TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");
+      } else {
+        if (image_size == 1) { // NC11 is also channels last
+          batch_norm_cpu_backward_channels_last_impl<scalar_t, scalar_t>(grad_input, grad_weight, grad_bias,
+              grad_output, input, weight, running_mean, running_var, save_mean, save_invstd, train, eps);
+        } else {
+          batch_norm_cpu_backward_contiguous_impl<scalar_t, scalar_t>(grad_input, grad_weight, grad_bias,
+              grad_output, input, weight, running_mean, running_var, save_mean, save_invstd, train, eps);
+        }
+      }
+    });
+  } else if (input.is_contiguous(at::MemoryFormat::ChannelsLast)) {
+    AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "batch_norm_cpu_backward_channels_last", [&] {
+      if (mixed_type) {
+        batch_norm_cpu_backward_channels_last_impl<BFloat16, float>(grad_input, grad_weight, grad_bias,
+            grad_output, input, weight, running_mean, running_var, save_mean, save_invstd, train, eps);
+      } else {
+        batch_norm_cpu_backward_channels_last_impl<scalar_t, scalar_t>(grad_input, grad_weight, grad_bias,
+            grad_output, input, weight, running_mean, running_var, save_mean, save_invstd, train, eps);
+      }
+    });
+  } else {
+    TORCH_CHECK(false, "batch_norm_cpu_backward_kernel: expecting input to be contiguous.");
   }
 }
 

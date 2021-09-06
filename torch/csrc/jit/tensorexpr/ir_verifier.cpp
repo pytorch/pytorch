@@ -9,8 +9,19 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
-template <typename Op>
-void verifyBitwiseOp(const BitwiseOpNode<Op>* v, IRVerifier* verifier) {
+namespace detail {
+template <typename T>
+void deducer(BinaryOpNode<T>);
+
+bool deducer(...);
+} // namespace detail
+
+template <
+    typename D,
+    typename std::enable_if<std::is_same<
+        decltype(detail::deducer(std::declval<D>())),
+        void>::value>::type* = nullptr>
+void verifyBitwiseOp(NodePtr<D> v, IRVerifier* verifier) {
   if (!v->lhs()->dtype().is_integral()) {
     throw unsupported_dtype();
   }
@@ -19,39 +30,39 @@ void verifyBitwiseOp(const BitwiseOpNode<Op>* v, IRVerifier* verifier) {
   }
 }
 
-void IRVerifier::visit(And* v) {
+void IRVerifier::visit(AndPtr v) {
   verifyBitwiseOp(v, this);
   IRVisitor::visit(v);
 }
 
-void IRVerifier::visit(Or* v) {
+void IRVerifier::visit(OrPtr v) {
   verifyBitwiseOp(v, this);
   IRVisitor::visit(v);
 }
 
-void IRVerifier::visit(Xor* v) {
+void IRVerifier::visit(XorPtr v) {
   verifyBitwiseOp(v, this);
   IRVisitor::visit(v);
 }
 
-void IRVerifier::visit(Lshift* v) {
+void IRVerifier::visit(LshiftPtr v) {
   verifyBitwiseOp(v, this);
   IRVisitor::visit(v);
 }
 
-void IRVerifier::visit(Rshift* v) {
+void IRVerifier::visit(RshiftPtr v) {
   verifyBitwiseOp(v, this);
   IRVisitor::visit(v);
 }
 
-void IRVerifier::visit(Mod* v) {
+void IRVerifier::visit(ModPtr v) {
   if (!v->dtype().is_integral() && !v->dtype().is_floating_point()) {
     throw std::runtime_error("invalid dtype: " + std::to_string(v->dtype()));
   }
   IRVisitor::visit(v);
 }
 
-void IRVerifier::visit(CompareSelect* v) {
+void IRVerifier::visit(CompareSelectPtr v) {
   if (v->ret_val1()->dtype() != v->ret_val2()->dtype()) {
     throw malformed_ir("bad dtype in CompareSelect");
   }
@@ -61,14 +72,14 @@ void IRVerifier::visit(CompareSelect* v) {
   IRVisitor::visit(v);
 }
 
-void IRVerifier::visit(Ramp* v) {
+void IRVerifier::visit(RampPtr v) {
   if (v->stride()->dtype() != v->base()->dtype()) {
     throw malformed_ir("Bad stride in Ramp");
   }
   IRVisitor::visit(v);
 }
 
-void IRVerifier::visit(Load* v) {
+void IRVerifier::visit(LoadPtr v) {
   auto indices = v->indices();
   if (indices.size() > 0 && v->buf()->base_handle()->dtype() != kHandle) {
     throw malformed_ir(
@@ -94,7 +105,7 @@ void IRVerifier::visit(Load* v) {
   IRVisitor::visit(v);
 }
 
-void IRVerifier::visit(IfThenElse* v) {
+void IRVerifier::visit(IfThenElsePtr v) {
   if (!v->condition()->dtype().is_integral()) {
     throw unsupported_dtype();
   }
@@ -107,12 +118,24 @@ void IRVerifier::visit(IfThenElse* v) {
   IRVisitor::visit(v);
 }
 
-void IRVerifier::visit(Intrinsics* v) {
+void IRVerifier::visit(IntrinsicsPtr v) {
+  if (v->op_type() == kIsNan) {
+    if (v->dtype().scalar_type() != c10::kInt) {
+      throw malformed_ir("bad dtype in intrinsic arg");
+    }
+    IRVisitor::visit(v);
+    return;
+  }
   // TODO: add a check for OpArgCount and op_type
+  for (auto const& param : v->params()) {
+    if (param->dtype() != v->dtype()) {
+      throw malformed_ir("bad dtype in intrinsic arg");
+    }
+  }
   IRVisitor::visit(v);
 }
 
-void IRVerifier::visit(Store* v) {
+void IRVerifier::visit(StorePtr v) {
   auto indices = v->indices();
   if (indices.size() > 0 && v->buf()->base_handle()->dtype() != kHandle) {
     throw malformed_ir(
@@ -141,7 +164,7 @@ void IRVerifier::visit(Store* v) {
   IRVisitor::visit(v);
 }
 
-void IRVerifier::visit(For* v) {
+void IRVerifier::visit(ForPtr v) {
   if (!v->var()) {
     throw malformed_ir("nullptr Var in For loop");
   } else if (!v->start()) {
@@ -154,8 +177,8 @@ void IRVerifier::visit(For* v) {
   IRVisitor::visit(v);
 }
 
-void IRVerifier::visit(Block* v) {
-  for (Stmt* s : v->stmts()) {
+void IRVerifier::visit(BlockPtr v) {
+  for (StmtPtr s : v->stmts()) {
     if (s->get_parent() != v) {
       throw malformed_ir("Broken child-parent link inside a Block");
     }
@@ -163,16 +186,16 @@ void IRVerifier::visit(Block* v) {
   IRVisitor::visit(v);
 }
 
-void IRVerifier::visit(ExternalCall* v) {
+void IRVerifier::visit(ExternalCallPtr v) {
   IRVisitor::visit(v);
 }
 
-void verify(Stmt* s) {
+void verify(StmtPtr s) {
   IRVerifier verifier;
   s->accept(&verifier);
 }
 
-void verify(Expr* e) {
+void verify(ExprPtr e) {
   IRVerifier verifier;
   e->accept(&verifier);
 }
