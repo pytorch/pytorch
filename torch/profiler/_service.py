@@ -11,19 +11,22 @@ import time
 import os
 import shutil
 import atexit
+import logging
 
+logger = logging.getLogger("profiler_service")
+logger.setLevel(logging.INFO)
 
 class PyTorchServiceWSGIApp(object):
     
-    def __init__(self, is_main_process, main_TLS):
+    def __init__(self, is_entry_server, main_TLS):
         self.main_TLS = main_TLS
         self.g = None
         self.prof: profile = None
         self.profiling_warmup = False
         self.profiling_started = False
         self.log_dir = None
-        self.is_main_proc = is_main_process
-        if self.is_main_proc:
+        self.is_entry_server = is_entry_server
+        if self.is_entry_server:
             self.child_port = set()
         self.app = DispatcherMiddleware(self.not_found, {
             '/registration': self.registration_route,
@@ -36,7 +39,7 @@ class PyTorchServiceWSGIApp(object):
     @wrappers.Request.application
     def registration_route(self, request):
         if request.method == 'PUT':
-            if self.is_main_proc:
+            if self.is_entry_server:
                 request_data = json.loads(request.data)
                 unique_port_seq = ':'.join([str(request_data['port']), str(request_data['pid'])])
                 if request.args.get('cmd') == 'register':
@@ -64,6 +67,7 @@ class PyTorchServiceWSGIApp(object):
             else:
                 self.method_not_allowed(request)
         except Exception as e:
+            logger.error(repr(e))
             return self.respond_as_json({"success": False, "message": repr(e)})
     
     def start_profiling(self, request):
@@ -76,7 +80,7 @@ class PyTorchServiceWSGIApp(object):
         request_data = json.loads(request.data)
 
         start_threads: list[Thread] = []
-        if self.is_main_proc:
+        if self.is_entry_server:
             for unique_port_seq in self.child_port:
                 thread = Thread(target=self.start_child_profiling, args=(unique_port_seq.split(':')[0], request_data,))
                 start_threads.append(thread)
@@ -113,7 +117,7 @@ class PyTorchServiceWSGIApp(object):
             return self.respond_as_json({"success": False, "message": "Profiling service hasn't been started yet."})
         
         stop_threads: list[Thread] = []
-        if self.is_main_proc:
+        if self.is_entry_server:
             self.respond_log_dir = None
             self.respond_file_names = []
             for unique_port_seq in self.child_port:
@@ -127,7 +131,7 @@ class PyTorchServiceWSGIApp(object):
         else:
             self.prof.stop()
             self.respond_log_dir = self.log_dir if not self.log_dir.startswith("./tmplog") else self.log_dir[9:]
-            self.respond_file_names.append(self.prof.file_name)
+            self.respond_file_names = [self.prof.file_name]
         self.profiling_started = False
 
         return self.respond_as_json({"success": True, "message": "Profiling service is successfully accomplished.", "log_dir": self.respond_log_dir, "file_names": self.respond_file_names})
@@ -181,12 +185,12 @@ class PyTorchServiceWSGIApp(object):
 
 class Listener(object):
 
-    def __init__(self, host: str, port: int, is_main_proc: bool):
+    def __init__(self, host: str, port: int, is_entry_server: bool):
         self.thread = None
         self.host = host
         self.port = port
         self.main_port = PORT
-        self.is_main_proc = is_main_proc
+        self.is_entry_server = is_entry_server
         _init_kineto_TLS()
         self.state = _ThreadLocalState(True)
     
@@ -198,9 +202,11 @@ class Listener(object):
         while True:
             registered = False
             try:
-                if not self.is_main_proc:
+                if not self.is_entry_server:
                     registered = self.__register()
-                serving.run_simple(self.host, self.port, PyTorchServiceWSGIApp(self.is_main_proc, self.state))
+                    if not registered:
+                        break
+                serving.run_simple(self.host, self.port, PyTorchServiceWSGIApp(self.is_entry_server, self.state))
             except OSError as e:
                 if registered:
                     self.__unregister()
@@ -211,7 +217,7 @@ class Listener(object):
     
     def __register(self):
         registered = False
-        while not registered:
+        while not registered and self.main_port < PORT + 100:
             try:
                 r = requests.put(
                     url='http://localhost:{}/registration'.format(self.main_port), 
