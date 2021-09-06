@@ -27,13 +27,14 @@ from torch._six import inf, nan, string_classes
 from itertools import product, combinations, permutations
 from functools import partial
 from torch import multiprocessing as mp
+from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
     TestCase, TEST_WITH_ROCM, run_tests,
     IS_WINDOWS, IS_FILESYSTEM_UTF8_ENCODING, NO_MULTIPROCESSING_SPAWN,
     do_test_dtypes, IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, load_tests, slowTest,
     skipCUDAMemoryLeakCheckIf, BytesIOContext, noarchTest,
     skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
-    wrapDeterministicFlagAPITest, DeterministicGuard, CudaSyncGuard, make_tensor)
+    wrapDeterministicFlagAPITest, DeterministicGuard, CudaSyncGuard)
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -325,6 +326,14 @@ class AbstractTestCases:
             y.copy_(x)
             self.assertEqual(y[:, 0], range(100))
             self.assertEqual(y[:, 40], range(4000, 4100))
+
+        # Verifies the bugfix for https://github.com/pytorch/pytorch/issues/64358
+        def test_copy_transpose_2d_broadcast(self):
+            # The shape (60, 60) is chosen because of
+            # `MIN_SZ = 60 * 60` in `copy_transpose_valid` from aten/src/ATen/native/Copy.cpp
+            A = torch.randn(60, 60)
+            A.copy_(torch.tensor([[1.]]))
+            self.assertEqual(A, torch.ones(60, 60))
 
         def test_device(self):
             cpu = torch.device('cpu')
@@ -1059,8 +1068,11 @@ class AbstractTestCases:
                 torch.gather(src, dim, idx.to(torch.int))
 
             # should throw an error when out.dtype != src.dtype.
-            with self.assertRaisesRegex(RuntimeError, 'Expected self.dtype to be equal to src.dtype'):
-                torch.gather(src, dim, idx, out=expected.to(torch.int))
+            # Note that on Windows, the out tensor's dtype is returned as: struct c10::complex<double> in the error
+            # message, hence the use of .* in regex here
+            with self.assertRaisesRegex(RuntimeError,
+                                        'Expected out tensor to have dtype .*c10::complex<double>, but got int instead'):
+                torch.gather(src.to(torch.complex128), dim, idx, out=expected.to(torch.int))
 
             # checks for the same dimensionality
             with self.assertRaisesRegex(RuntimeError, 'Index tensor must have the same number of dimensions as input tensor'):
@@ -5122,7 +5134,7 @@ else:
                 spacing = [space.cpu().detach().numpy() for space in spacing]
             expected = np.gradient(t_np, *self._wrap_to_list(spacing), axis=dims, edge_order=edge_order)
             actual, expected = self._inf_nan_preprocess(list(actual), self._wrap_to_list(expected))
-            self.assertEqual(actual, expected, equal_nan="relaxed", atol=1e-4, rtol=0, exact_dtype=False)
+            self.assertEqual(actual, expected, equal_nan=True, atol=1e-4, rtol=0, exact_dtype=False)
 
     @onlyOnCPUAndCUDA
     @dtypes(torch.long, torch.float32, torch.complex64)
@@ -5189,7 +5201,7 @@ else:
                     self.assertEqual(expected[i].imag, torch.zeros(actual[i].shape), exact_dtype=False)
             else:
                 actual, expected = self._inf_nan_preprocess(list(actual), expected)
-                self.assertEqual(actual, expected, equal_nan="relaxed", exact_dtype=False)
+                self.assertEqual(actual, expected, equal_nan=True, exact_dtype=False)
 
     @onlyOnCPUAndCUDA
     @dtypes(torch.long, torch.float32, torch.complex64)
@@ -5328,6 +5340,13 @@ else:
         x = torch.randn(10)
         y = x.as_strided([2, 1, 5], [1, 0, 2])
         self.assertEqual(y, y.clone())
+
+    def test_clone_not_memory_dense(self):
+        # github issue: https://github.com/pytorch/pytorch/issues/64176
+        x = torch.randn(10, 8).t()[::2, ::2]
+        y = x.clone()
+        # should retain permutation after densification
+        self.assertTrue(y.stride() == (1, 4))
 
     @dtypesIfCUDA(*set(get_all_math_dtypes('cuda')))
     @dtypes(*set(get_all_math_dtypes('cpu')))
@@ -6014,9 +6033,9 @@ else:
             out_dc = torch.empty(size * size, device=device)[::2]
             for v, m in product(vals_list, mask_list):
                 if m.is_contiguous():
-                    expected = v[:, ::2].clone().view(-1)
+                    expected = v[:, ::2].clone().reshape((-1, ))
                 else:
-                    expected = v[::2].clone().view(-1)
+                    expected = v[::2].clone().reshape((-1, ))
                 out = torch.masked_select(v, m)
                 self.assertEqual(out, expected, atol=0, rtol=0)
                 torch.masked_select(v, m, out=out_dc)

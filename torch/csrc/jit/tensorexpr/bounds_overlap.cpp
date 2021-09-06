@@ -130,8 +130,8 @@ std::vector<Bound> subtractBound(Bound a, Bound b, OverlapKind overlap) {
     auto vars = VarFinder::find(lowDiff);
     if (vars.size() == 1) {
       lowDiff = IRSimplifier::simplify(alloc<Sub>(
-          SubstituteInClone(b.start, {{*vars.begin(), alloc<IntImm>(1)}}),
-          SubstituteInClone(a.start, {{*vars.begin(), alloc<IntImm>(1)}})));
+          SubstituteInClone(b.start, {{*vars.begin(), immLike(b.start, 1)}}),
+          SubstituteInClone(a.start, {{*vars.begin(), immLike(a.start, 1)}})));
     }
   }
 
@@ -139,8 +139,8 @@ std::vector<Bound> subtractBound(Bound a, Bound b, OverlapKind overlap) {
     auto vars = VarFinder::find(highDiff);
     if (vars.size() == 1) {
       highDiff = IRSimplifier::simplify(alloc<Sub>(
-          SubstituteInClone(b.end, {{*vars.begin(), alloc<IntImm>(1)}}),
-          SubstituteInClone(a.end, {{*vars.begin(), alloc<IntImm>(1)}})));
+          SubstituteInClone(b.end, {{*vars.begin(), immLike(b.end, 1)}}),
+          SubstituteInClone(a.end, {{*vars.begin(), immLike(a.end, 1)}})));
     }
   }
 
@@ -157,12 +157,13 @@ std::vector<Bound> subtractBound(Bound a, Bound b, OverlapKind overlap) {
 
   if (hasHead) {
     res.emplace_back(
-        a.start, IRSimplifier::simplify(alloc<Sub>(b.start, alloc<IntImm>(1))));
+        a.start,
+        IRSimplifier::simplify(alloc<Sub>(b.start, immLike(b.start, 1))));
   }
 
   if (hasTail) {
     ExprPtr tailStart =
-        IRSimplifier::simplify(alloc<Add>(b.end, alloc<IntImm>(1)));
+        IRSimplifier::simplify(alloc<Add>(b.end, immLike(b.end, 1)));
     res.emplace_back(tailStart, a.end);
   }
 
