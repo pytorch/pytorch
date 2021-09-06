@@ -7,6 +7,7 @@ import operator
 import random
 import numbers
 import unittest
+import os
 
 import torch
 import numpy as np
@@ -1249,6 +1250,26 @@ def sample_inputs_linalg_norm(op_info, device, dtype, requires_grad):
                             dim=(0, 1))))
         return inputs
 
+def sample_inputs_cosine_similarity(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    # Ordered as input_shape, dict of dim and eps
+    cases: Tuple[tuple, dict] = (  # type: ignore[assignment]
+        ((S, S), {'dim': 1}),
+        ((S, 2), {'dim': -1}),
+        ((S,), {'dim': 0, 'eps': 0.5}),
+        ((), {'dim': 0}),
+        ((S, S, M), {'dim': 2}),
+        ((S, S), {})
+    )
+
+    def generator():
+        for input_shape, kwargs in cases:
+            yield SampleInput(make_arg(input_shape), args=(make_arg(input_shape),), kwargs=kwargs)
+        # Test for Broadcasting
+        yield SampleInput(make_arg((1, 2, 3)), args=(make_arg((2, 1, 3)),), kwargs={'dim': -1})
+
+    return list(generator())
 
 def sample_inputs_nn_activation_relu(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -1586,15 +1607,29 @@ def sample_inputs_t(op_info, device, dtype, requires_grad, **kwargs):
 
 
 def sample_inputs_mm(op_info, device, dtype, requires_grad, **kwargs):
-    args_list = (
-        ((S, M), (M, S)),
-    )
-    inputs = tuple(SampleInput(make_tensor(first_shape, device, dtype,
-                                           requires_grad=requires_grad),
-                               args=(make_tensor(second_shape, device, dtype,
-                                     requires_grad=requires_grad),))
-                   for first_shape, second_shape in args_list)
-    return inputs
+    first_shape, second_shape = (S, M), (M, S)
+    sample_inputs = []
+    sample_inputs.append(
+        SampleInput(make_tensor(first_shape, device, dtype,
+                                requires_grad=requires_grad),
+                    args=(make_tensor(second_shape, device, dtype,
+                                      requires_grad=requires_grad),)))
+
+    if dtype.is_complex:
+        sample_inputs.append(
+            SampleInput(make_tensor(first_shape, device, dtype,
+                                    requires_grad=requires_grad),
+                        args=(
+                            make_tensor(second_shape, device, dtype,
+                                        requires_grad=requires_grad).conj(),)))
+
+        sample_inputs.append(
+            SampleInput(make_tensor(first_shape, device, dtype,
+                                    requires_grad=requires_grad).transpose(0, 1),
+                        args=(
+                            make_tensor(second_shape, device, dtype,
+                                        requires_grad=requires_grad).transpose(0, 1).conj(),)))
+    return sample_inputs
 
 def sample_inputs_addmm(op_info, device, dtype, requires_grad, **kwargs):
     alpha_val = kwargs.get('alpha', 2 + 3j if dtype.is_complex else 0.6)
@@ -1607,15 +1642,40 @@ def sample_inputs_addmm(op_info, device, dtype, requires_grad, **kwargs):
         ((), (2, 2), (2, 3), True)
     ]
     test_cases = tests_list + tests_with_lhs_broadcasting  # type: ignore[operator]
-    inputs = tuple(SampleInput(make_tensor(shape_a, device, dtype, requires_grad=requires_grad),
-                               args=(make_tensor(shape_b, device, dtype,
-                                                 requires_grad=requires_grad),
-                                     make_tensor(shape_c, device, dtype,
-                                                 requires_grad=requires_grad)),
-                               kwargs={'alpha': alpha_val, 'beta': beta_val},
-                               broadcasts_input=broadcasts_input)
-                   for shape_a, shape_b, shape_c, broadcasts_input in test_cases)
-    return inputs
+
+    sample_inputs = []
+
+    for shape_a, shape_b, shape_c, broadcasts_input in test_cases:
+        sample_inputs.append(
+            SampleInput(
+                make_tensor(shape_a, device, dtype, requires_grad=requires_grad),
+                args=(
+                    make_tensor(shape_b, device, dtype,
+                                requires_grad=requires_grad),
+                    make_tensor(shape_c, device, dtype,
+                                requires_grad=requires_grad)),
+                kwargs={'alpha': alpha_val, 'beta': beta_val},
+                broadcasts_input=broadcasts_input))
+
+    if dtype.is_complex:
+        shape = (3, 3)
+        sample_inputs.append(
+            SampleInput(make_tensor(shape, device, dtype, requires_grad=requires_grad),
+                        args=(
+                            make_tensor(shape, device, dtype,
+                                        requires_grad=requires_grad).t().conj(),
+                            make_tensor(shape, device, dtype,
+                                        requires_grad=requires_grad)),
+                        kwargs={'alpha': alpha_val, 'beta': beta_val},))
+        sample_inputs.append(
+            SampleInput(make_tensor(shape, device, dtype, requires_grad=requires_grad),
+                        args=(
+                            make_tensor(shape, device, dtype,
+                                        requires_grad=requires_grad),
+                            make_tensor(shape, device, dtype,
+                                        requires_grad=requires_grad).t().conj()),
+                        kwargs={'alpha': alpha_val, 'beta': beta_val},))
+    return sample_inputs
 
 def sample_inputs_mv(self, device, dtype, requires_grad, **kwargs):
     return (
@@ -1747,6 +1807,23 @@ def sample_inputs_baddbmm(op_info, device, dtype, requires_grad, **kwargs):
             sample_inputs.append(SampleInput(args[0], args=(args[1], args[2]),
                                              kwargs=dict(beta=beta * (1 + 2j), alpha=alpha * (2 + 3j)),
                                              broadcasts_input=broadcasts_input))
+
+    if dtype.is_complex:
+        shapes = [(S, S, S), (S, M, S), (S, S, M)]
+        args = (make_tensor(shapes[0], device, dtype,
+                            low=None, high=None,
+                            requires_grad=requires_grad),
+                make_tensor(shapes[1], device, dtype,
+                            low=None, high=None,
+                            requires_grad=requires_grad),
+                make_tensor(shapes[2], device, dtype,
+                            low=None, high=None,
+                            requires_grad=requires_grad))
+        sample_inputs.append(
+            SampleInput(
+                args[0].transpose(-1, 1), args=(args[1].transpose(-1, 1).conj(), args[2].transpose(-1, 1).conj()),
+                kwargs=dict(beta=beta * (1 + 2j), alpha=alpha * (2 + 3j)),))
+
     return tuple(sample_inputs)
 
 def sample_inputs_addr(op_info, device, dtype, requires_grad, **kwargs):
@@ -2525,6 +2602,42 @@ def sample_inputs_conv_transpose2d(op_info, device, dtype, requires_grad, **kwar
                 make_arg(weight),
                 make_arg(bias) if bias is not None else bias
             ), kwargs=kwargs)
+
+    return list(generator())
+
+def sample_inputs_layer_norm(opinfo, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    # Ordered as input shape, normalized_shape and a kwarg dict for eps
+    cases: Tuple[Tuple[int], Tuple[int], dict] = (  # type: ignore[assignment]
+        ((1, 2, 3), (1, 2, 3), {'eps': 0.5}),
+        ((2, 2, 3), (2, 3), {'eps': -0.5}),
+        ((1,), (1,), {}),
+        ((1, 2), (2,), {}),
+        ((0, 1), (1,), {}),
+    )
+
+    def generator():
+        for input_shape, normalized_shape, kwargs in cases:
+            # Shape of weight and bias should be the same as normalized_shape
+            weight = make_arg(normalized_shape)
+            bias = make_arg(normalized_shape)
+            yield SampleInput(
+                make_arg(input_shape),
+                args=(normalized_shape, weight, bias),
+                kwargs=kwargs
+            )
+        # Without any optional args
+        yield SampleInput(make_arg((1, 2)), args=((2,),))
+
+        # TODO: @krshrimali, once to_numpy method in SampleInput class is modified to take None inputs,
+        # enable these inputs; see https://github.com/pytorch/pytorch/pull/63276#discussion_r691950400
+
+        # With weight and a `None` bias
+        # yield SampleInput(make_arg((1, 2)), args=((2,), make_arg((2,)), None))
+
+        # With `None` weight and bias (tests failing for this, see the link above)
+        # yield SampleInput(make_arg((1, 2)), args=((2,), None, make_arg((2,))))
 
     return list(generator())
 
@@ -5584,6 +5697,21 @@ def reference_mse_loss(input, target, reduction="mean"):
         return se
 
 
+def reference_layer_norm(inp: np.ndarray, normalized_shape: Tuple[int], weight=None, bias=None, eps=1e-5):
+    feature_size = np.prod(normalized_shape)
+    inp_view = inp.reshape(-1, feature_size)  # type: ignore[call-overload]
+    mean = inp_view.mean(axis=-1, keepdims=True)
+    var = inp_view.var(axis=-1, ddof=0, keepdims=True)
+    Y = (inp_view - mean) / np.sqrt(var + eps)
+    if weight is None and bias is not None:
+        Y = Y + bias.reshape(-1)
+    elif weight is not None and bias is None:
+        Y = Y * weight.reshape(-1)
+    elif weight is not None and bias is not None:
+        Y = Y * weight.reshape(-1) + bias.reshape(-1)
+    return Y.reshape(*inp.shape)
+
+
 def gradcheck_wrapper_hermitian_input(op, input, *args, **kwargs):
     """Gradcheck wrapper for functions that take Hermitian matrices as input.
 
@@ -5785,6 +5913,13 @@ op_db: List[OpInfo] = [
                                                     *[torch.bfloat16] if SM53OrLater else [],
                                                     torch.complex64, torch.complex128),
            supports_forward_ad=True,
+           decorators=[
+               DecorateInfo(
+                   toleranceOverride({torch.complex64: tol(atol=1e-05, rtol=1.2e-03)}),
+                   'TestCommon', 'test_variant_consistency_eager', device_type='cuda'),
+               DecorateInfo(
+                   toleranceOverride({torch.complex64: tol(atol=1e-05, rtol=1.2e-03)}),
+                   'TestMathBits', 'test_conj_view', device_type='cuda')],
            skips=(
                # FIXME: bfloat16 backward support likely depends on CUDA11+
                #   and SM53+
@@ -6983,7 +7118,6 @@ op_db: List[OpInfo] = [
            skips=(
                # matmul does not correctly warn when resizing out= inputs
                SkipInfo('TestCommon', 'test_out'),
-               SkipInfo('TestCommon', 'test_conj_view', device_type='cpu'),
            )),
     OpInfo('max',
            op=torch.max,
@@ -7184,6 +7318,13 @@ op_db: List[OpInfo] = [
                # FIXME: aminmax does not check for safe casting to output
                SkipInfo('TestCommon', 'test_out'),
            )),
+    OpInfo('nn.functional.cosine_similarity',
+           aten_name="cosine_similarity",
+           dtypes=floating_types_and(torch.bfloat16),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           supports_out=False,
+           supports_forward_ad=True,
+           sample_inputs_func=sample_inputs_cosine_similarity),
     OpInfo('nn.functional.adaptive_avg_pool2d',
            dtypes=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
@@ -7217,6 +7358,21 @@ op_db: List[OpInfo] = [
                SkipInfo('TestJit', 'test_variant_consistency_jit'),
            ),
            supports_out=False,),
+    OpInfo('nn.functional.layer_norm',
+           aten_name='layer_norm',
+           aliases=('layer_norm',),
+           ref=reference_layer_norm,
+           dtypes=floating_types_and(torch.bfloat16),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           supports_out=False,
+           decorators=[
+               DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=1e-05, rtol=1e-03)}),
+                   'TestCommon', 'test_reference_testing'
+               ),
+               unittest.skipIf("tbb" in os.getenv("BUILD_ENVIRONMENT", ""), "This test makes TBB Sad"),
+           ],
+           sample_inputs_func=sample_inputs_layer_norm,),
     OpInfo('nn.functional.pad',
            variant_test_name='constant',
            aten_name='constant_pad_nd',
@@ -7752,6 +7908,10 @@ op_db: List[OpInfo] = [
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_matmul,
            supports_out=False,
+           decorators=[
+               DecorateInfo(
+                   toleranceOverride({torch.complex64: tol(atol=1e-05, rtol=1.2e-03)}),
+                   'TestMathBits', 'test_conj_view')],
            skips=(
                SkipInfo('TestJit', 'test_variant_consistency_jit',),
            )),
@@ -9278,8 +9438,8 @@ def _compare_trilu_indices(
         # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
         self.assertEqualIgnoreType(
             torch.ones(row, col, device='cpu')
-                 .tril(offset).nonzero().to(dtype).transpose(0, 1),
-            torch.tril_indices(row, col, offset, dtype=dtype, device=device))
+                 .triu(offset).nonzero().to(dtype).transpose(0, 1),
+            torch.triu_indices(row, col, offset, dtype=dtype, device=device))
 
 
 def _compare_large_trilu_indices(
