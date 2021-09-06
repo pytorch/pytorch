@@ -16,7 +16,7 @@ class TORCH_API IStreamAdapter final : public ReadAdapterInterface {
   size_t size() const override;
   size_t read(uint64_t pos, void* buf, size_t n, const char* what = "")
       const override;
-  ~IStreamAdapter();
+  ~IStreamAdapter() override;
 
  private:
   std::istream* istream_;
