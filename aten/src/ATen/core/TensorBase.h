@@ -6,7 +6,6 @@
 #include <c10/core/ScalarType.h>
 #include <c10/core/ScalarTypeToTypeMeta.h>
 #include <c10/core/Storage.h>
-#include <ATen/core/TensorAccessor.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/core/WrapDimMinimal.h>
@@ -14,8 +13,10 @@
 #include <c10/util/MaybeOwned.h>
 #include <c10/util/Optional.h>
 #include <c10/util/intrusive_ptr.h>
+
 #include <ATen/core/NamedTensor.h>
 #include <ATen/core/QuantizerBase.h>
+#include <ATen/core/TensorAccessor.h>
 
 namespace c10 {
 struct TensorOptions;
@@ -48,9 +49,31 @@ inline bool variable_excluded_from_dispatch() {
 }
 }
 
-// TensorBase is a reference counted reference to a TensorImpl, similar to Tensor but without the
-// code-generated method calls. This makes it possible to code without a build-dependency on
-// native_functions.yaml and so changing operators doesn't mean rebuilding all of torch.
+// NOTE: [Tensor vs. TensorBase]
+//
+// Tensor, being the central data structure in PyTorch, gets used and
+// it's header included almost everywhere. Unfortunately this means
+// every time an operator signature is updated or changed in
+// native_functions.yaml, you (and every other PyTorch developer) need
+// to recompile all of ATen and it's dependencies.
+//
+// TensorBase aims to break up these header dependencies, and improve
+// incremental build times for all PyTorch developers. TensorBase
+// represents a reference counted handle to TensorImpl, exactly the
+// same as Tensor. However, TensorBase doesn't have code generated
+// methods in it's API and thus no dependence on native_functions.yaml.
+//
+// Usage tips
+// ----------
+// - You can `#define TORCH_ASSERT_NO_OPERATORS` at the top of a .cpp
+//   or .cu file to ensure it has no header dependencies on
+//   native_functions.yaml (direct or indirect).
+// - Tensor inherits from TensorBase, so functions taking
+//   `const TensorBase &` are callable with Tensor as well.
+// - TensorBase can be converted to tensor with `Tensor(tensor_base)`,
+//   but this requires a reference-count bump. OptionalTensorRef on
+//   the other hand can materialize a `const Tensor &` without
+//   touching the reference-count.
 class TORCH_API TensorBase {
  protected:
   struct unsafe_borrow_t { explicit unsafe_borrow_t() = default; };
