@@ -1262,6 +1262,64 @@ std::unordered_map<kir::ForLoop*, kir::Val*> indexMapFromTV(
   return loop_to_ind_map;
 }
 
+//! Set "pragma unroll" required for loops that indexing of Local
+//! tensors depends on.
+//!
+//! \param tv Indexed tensor
+//! \param alloc_loop Allocation loop of tv
+//! \param loops The current loop structure
+//! \param id_map Producer-to-consumer map in case of indexing as producer
+void ensureStaticIndexing(
+    const TensorView* tv,
+    kir::ForLoop* alloc_loop,
+    const std::vector<kir::ForLoop*>& loops,
+    const std::unordered_map<IterDomain*, IterDomain*>& id_map = {}) {
+  if (tv->getMemoryType() != MemoryType::Local) {
+    return;
+  }
+
+  bool within_alloc = false;
+  if (alloc_loop == nullptr) {
+    within_alloc = true;
+  }
+
+  const auto gpu_lower = GpuLower::current();
+
+  for (auto loop : loops) {
+    if (!within_alloc) {
+      if (loop == alloc_loop) {
+        within_alloc = true;
+      }
+      continue;
+    }
+    kir::IterDomain* loop_id = loop->iter_domain();
+    if (isParallelTypeVectorize(loop_id->parallelType()) ||
+        loop_id->isThread()) {
+      continue;
+    }
+    // Look for a domain that is mapped with the loop. If mapped in
+    // the loop map, the loop index should be used for indexing of the
+    // tensor, except for broadcast and reduction domains.
+    auto it = std::find_if(
+        tv->domain()->domain().begin(),
+        tv->domain()->domain().end(),
+        [loop_id, gpu_lower, &id_map](IterDomain* id) {
+          if (id->isBroadcast() || id->isReduction()) {
+            return false;
+          }
+          auto id_replacement = id_map.find(id);
+          if (id_replacement != id_map.end()) {
+            id = id_replacement->second;
+          }
+          auto kir_id = gpu_lower->lowerValue(id)->as<kir::IterDomain>();
+          return gpu_lower->caLoopMap().areMapped(loop_id, kir_id);
+        });
+    if (it != tv->domain()->domain().end()) {
+      loop->requireUnroll();
+    }
+  }
+}
+
 } // namespace
 
 // Producer index for either shared or local memory
@@ -1315,6 +1373,8 @@ std::vector<kir::Val*> Index::getNonGlobalProducerStridedIndices(
       loop_utils::getAllocPoint(producer_tv, loops, p2c_map, true);
   std::unordered_map<kir::ForLoop*, kir::Val*> loop_to_ind_map =
       indexMapFromTV(producer_tv, loops, alloc_point, false);
+
+  ensureStaticIndexing(producer_tv, alloc_point.first, loops, p2c_map);
 
   // Map loop nests to indicies, zeroing out those not used due to locality of
   // memory
@@ -1695,6 +1755,8 @@ std::vector<kir::Val*> Index::getNonGlobalConsumerStridedIndices(
   auto alloc_point = loop_utils::getAllocPoint(consumer_tv, loops);
   std::unordered_map<kir::ForLoop*, kir::Val*> loop_to_ind_map =
       indexMapFromTV(consumer_tv, loops, alloc_point, true);
+
+  ensureStaticIndexing(consumer_tv, alloc_point.first, loops);
 
   // Map loop nests to indicies, zeroing out those not used due to locality of
   // memory
@@ -2387,7 +2449,7 @@ bool Index::protectWithMagicZero(
   bool ind_simple =
       (ind == nullptr ? true
                       : ind->definition() != nullptr && !ind->isZeroInt());
-  return loop->isUnrollable() && (!ref_dom_simple || !ind_simple);
+  return loop->isUnrolled() && (!ref_dom_simple || !ind_simple);
 }
 
 } // namespace cuda

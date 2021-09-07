@@ -23,14 +23,7 @@ namespace {
 // Provide a new for loop matching the one provided
 kir::ForLoop* cloneLoopNest(const kir::ForLoop* for_loop) {
   kir::IrBuilder ir_builder(GpuLower::current()->kernel());
-  const auto new_loop = ir_builder.create<kir::ForLoop>(
-      for_loop->iter_domain(),
-      for_loop->index(),
-      for_loop->start(),
-      for_loop->stop(),
-      for_loop->step(),
-      for_loop->vectorize(),
-      for_loop->vectorize_shift());
+  const auto new_loop = ir_builder.create<kir::ForLoop>(for_loop);
   for (auto expr : for_loop->body().exprs()) {
     if (auto nested_for_loop = dynamic_cast<kir::ForLoop*>(expr)) {
       expr = cloneLoopNest(nested_for_loop);

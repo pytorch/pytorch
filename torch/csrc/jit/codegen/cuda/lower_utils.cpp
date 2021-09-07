@@ -46,14 +46,7 @@ void insertBefore(kir::Expr* scope, kir::Expr* ref, kir::Expr* expr) {
 
 //! Create an **empty** Forloop and copy the metadata.
 kir::ForLoop* cloneForLoop(kir::IrBuilder& ir_builder, kir::ForLoop* for_loop) {
-  return ir_builder.create<kir::ForLoop>(
-      for_loop->iter_domain(),
-      for_loop->index(),
-      for_loop->start(),
-      for_loop->stop(),
-      for_loop->step(),
-      for_loop->vectorize(),
-      for_loop->vectorize_shift());
+  return ir_builder.create<kir::ForLoop>(for_loop);
 }
 
 //! Create an **empty** IfThenElse and copy the metadata.
@@ -436,14 +429,7 @@ class ReplaceExprInput : public kir::MutableIrVisitor {
 
   // IR visitor interface
   void visit(kir::ForLoop* for_loop) final {
-    auto new_for_loop = ir_builder_.create<kir::ForLoop>(
-        for_loop->iter_domain(),
-        for_loop->index(),
-        for_loop->start(),
-        for_loop->stop(),
-        for_loop->step(),
-        for_loop->vectorize(),
-        for_loop->vectorize_shift());
+    auto new_for_loop = ir_builder_.create<kir::ForLoop>(for_loop);
 
     auto replaced_loop_body =
         replace(for_loop->body().exprs(), replacement_map_);

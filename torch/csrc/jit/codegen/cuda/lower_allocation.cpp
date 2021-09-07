@@ -143,7 +143,8 @@ class AllocationInserter : public kir::MutableIrVisitor {
             extent_with_halo,
             nullptr,
             false,
-            nullptr);
+            nullptr,
+            false);
       } else {
         new_loop = ir_builder.create<kir::ForLoop>(id);
       }

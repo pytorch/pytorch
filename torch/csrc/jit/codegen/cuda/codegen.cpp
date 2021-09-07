@@ -1058,7 +1058,7 @@ class CudaKernelGenerator : private kir::IrVisitor {
     } else {
       step_code << gen_index << " += " << gen_step;
     }
-    if (node->isUnrollable()) {
+    if (node->isUnrolled()) {
       indent() << "#pragma unroll\n";
     } else {
       indent() << "#pragma unroll 1\n";

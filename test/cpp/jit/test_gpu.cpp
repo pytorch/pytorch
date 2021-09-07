@@ -10253,6 +10253,10 @@ TEST(NVFuserTest, FusionDetectTrivialReduction2_CUDA) {
 
   auto tv3 = tv1->rFactor({-1});
 
+  // Just to suppress register-allocation warning
+  tv0->computeAt(tv2, 1);
+  tv3->computeAt(tv1, -1);
+
   GpuLower gpulw(&fusion);
 
   // tv3's reduction axis is a trivial reduction. The only

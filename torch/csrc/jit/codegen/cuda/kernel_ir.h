@@ -1421,7 +1421,8 @@ class TORCH_CUDA_CU_API ForLoop final : public Expr {
       Val* stop,
       Val* step,
       bool vectorize,
-      Val* vectorize_shift);
+      Val* vectorize_shift,
+      bool unroll_required);
 
   ForLoop(Passkey passkey, IterDomain* iter_domain);
 
@@ -1465,15 +1466,22 @@ class TORCH_CUDA_CU_API ForLoop final : public Expr {
     return vectorize_;
   }
 
-  // Returns if a loop could be unrolled. Start and stop must be constant, it
-  // must not be a broadcast dimension, cannot be bound to a parallel dimension,
-  // and returns false if start is 0 and stop is 1.
-  bool isUnrollable() const {
-    return start()->isConstScalar() && stop()->isConstScalar() &&
-        !iter_domain()->isThread() && !iter_domain()->isBroadcast() &&
-        !(start()->isZeroInt() && stop()->isOneInt()) &&
-        iter_domain()->parallelType() != ParallelType::Vectorize;
+  //! True if unrolled (i.e., "#pragma unroll" is attached)
+  bool isUnrolled() const;
+
+  //! True if unrolling is required
+  bool isUnrollRequired() const {
+    return unroll_required_;
   }
+
+  //! Set unrolling required
+  void requireUnroll() {
+    unroll_required_ = true;
+  }
+
+ private:
+  //! Returns if a loop could be unrolled.
+  bool isUnrollable() const;
 
  private:
   IterDomain* const iter_domain_ = nullptr;
@@ -1489,6 +1497,9 @@ class TORCH_CUDA_CU_API ForLoop final : public Expr {
   // [pre | vectorize | post] <= inner-most, merged root domain
   // shift_ is applied to vectorize and post sections.
   Val* vectorize_shift_ = nullptr;
+
+  //! True if unroll is required for avoiding stack allocation
+  bool unroll_required_ = false;
 
   Scope body_;
 };

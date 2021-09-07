@@ -54,7 +54,8 @@ kir::ForLoop* openForHelper(kir::ForLoop* scope, IterDomain* id) {
         extent_with_halo,
         nullptr,
         false,
-        nullptr);
+        nullptr,
+        false);
   } else {
     new_scope = ir_builder.create<kir::ForLoop>(kir_id);
   }

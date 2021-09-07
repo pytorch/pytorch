@@ -523,7 +523,8 @@ ForLoop::ForLoop(
     Val* stop,
     Val* step,
     bool vectorize,
-    Val* vectorize_shift)
+    Val* vectorize_shift,
+    bool unroll_required)
     : Expr(passkey),
       iter_domain_{iter_domain},
       index_(index),
@@ -532,6 +533,7 @@ ForLoop::ForLoop(
       step_(step),
       vectorize_(vectorize),
       vectorize_shift_(vectorize_shift),
+      unroll_required_(unroll_required),
       body_(this) {
   TORCH_INTERNAL_ASSERT(index->dtype() == DataType::Int);
   addInput(index);
@@ -566,7 +568,8 @@ ForLoop::ForLoop(Passkey passkey, IterDomain* iter_domain)
           nullptr,
           nullptr,
           isParallelTypeVectorize(iter_domain->parallelType()),
-          nullptr) {}
+          nullptr,
+          false) {}
 
 ForLoop::ForLoop(Passkey passkey, const ForLoop* other)
     : ForLoop(
@@ -577,7 +580,51 @@ ForLoop::ForLoop(Passkey passkey, const ForLoop* other)
           other->stop(),
           other->step(),
           other->vectorize(),
-          other->vectorize_shift()) {}
+          other->vectorize_shift(),
+          other->isUnrollRequired()) {}
+
+bool ForLoop::isUnrollable() const {
+  // Start and stop must be constant, must not be a broadcast
+  // dimension, cannot be bound to a parallel dimension, must not be
+  // vectorized.
+  return start()->isConstScalar() && stop()->isConstScalar() &&
+      !iter_domain()->isThread() && !iter_domain()->isBroadcast() &&
+      !isParallelTypeVectorize(iter_domain()->parallelType());
+}
+
+bool ForLoop::isUnrolled() const {
+  if (isUnrollRequired() && !isUnrollable()) {
+    TORCH_WARN(
+        "Unroll required but not possible. Register allocation disabled. Loop index: ",
+        kir::toString(index_));
+    return false;
+  }
+
+  // Size-one loop will not be materialized as a loop, so return false
+  if (start()->isZeroInt() && stop()->isOneInt()) {
+    return false;
+  }
+
+  // Unroll if required.
+  if (isUnrollRequired()) {
+    return true;
+  }
+
+  // Don't unroll if not possible
+  if (!isUnrollable()) {
+    return false;
+  }
+
+  // Unrolling is technically possible but avoided
+  if (iter_domain()->parallelType() == ParallelType::Unswitch) {
+    // Use ParallelType::Unroll if unrolling is desired. Note that
+    // unswitched size-one loops are not unrolled as they are not
+    // materialized as actual for-loops.
+    return false;
+  }
+
+  return true;
+}
 
 Val* ForLoop::start() const {
   if (start_ != nullptr) {

@@ -57,7 +57,7 @@ class MagicZeroInserter : public kir::MutableIrVisitor {
   }
 
   void handle(kir::ForLoop* fl) {
-    if (fl->isUnrollable()) {
+    if (fl->isUnrolled()) {
       kir::Scope* scope = nullptr;
       if (!scope_nest_.empty()) {
         scope = scope_nest_.back();

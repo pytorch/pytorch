@@ -396,7 +396,8 @@ class MisalignedVectorizationModifier {
           stop,
           ir_builder.oneVal(),
           vectorize && has_vectorize_op,
-          vectorize_shift);
+          vectorize_shift,
+          fl->isUnrollRequired());
 
       for (auto expr : fl->body().exprs()) {
         new_loop->body().push_back(expr);
