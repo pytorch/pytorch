@@ -1236,9 +1236,9 @@ class CosineEmbeddingLoss(_Loss):
             specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
 
     Shape:
-        - Input1: :math:`(N, D)`, where `N` is the batch size and `D` is the embedding dimension.
-        - Input2: :math:`(N, D)`, same shape as Input1.
-        - Target: :math:`(N)`.
+        - Input1: :math:`(N, D)` or :math:`(D)`, where `N` is the batch size and `D` is the embedding dimension.
+        - Input2: :math:`(N, D)` or :math:`(D)`, same shape as Input1.
+        - Target: :math:`(N)` or :math:`()`.
         - Output: If :attr:`reduction` is ``'none'``, then :math:`(N)`, otherwise scalar.
     """
     __constants__ = ['margin', 'reduction']
