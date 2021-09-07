@@ -3,6 +3,7 @@ import gc
 import io
 import json
 import os
+import pickle
 import unittest
 
 import torch
@@ -546,6 +547,7 @@ class TestProfiler(TestCase):
             warmup=1,
             active=2,
             repeat=2)
+        self.assertEqual(test_schedule, pickle.loads(pickle.dumps(test_schedule)))
         test_schedule_expected_outputs = [
             ProfilerAction.NONE,
             ProfilerAction.NONE,
