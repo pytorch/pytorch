@@ -55,7 +55,11 @@ struct cuda_type<c10::Half> {
   using type = __half;
 };
 
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 99999
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11050
+// cub sort support for __nv_bfloat16 is added to cub 1.13 in
+// https://github.com/NVIDIA/cub/pull/306 and according to
+// https://github.com/NVIDIA/cub#releases, 1.13 is included in
+// CUDA Toolkit 11.5
 
 // waiting for https://github.com/NVIDIA/cub/pull/306 to land on CUDA
 template<>
