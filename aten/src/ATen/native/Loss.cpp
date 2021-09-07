@@ -35,10 +35,9 @@ Tensor cosine_embedding_loss(const Tensor& input1, const Tensor& input2, const T
       targ_dim == 1 || targ_dim == 0,
       "0D or 1D target tensor expected, multi-target not supported");
 
-  auto reduction_dim = targ_dim;
-  auto prod_sum = (input1 * input2).sum(reduction_dim);
-  auto mag_square1 = (input1 * input1).sum(reduction_dim) + EPSILON;
-  auto mag_square2 = (input2 * input2).sum(reduction_dim) + EPSILON;
+  auto prod_sum = (input1 * input2).sum(targ_dim);
+  auto mag_square1 = (input1 * input1).sum(targ_dim) + EPSILON;
+  auto mag_square2 = (input2 * input2).sum(targ_dim) + EPSILON;
   auto denom = (mag_square1 * mag_square2).sqrt_();
   auto cos = prod_sum / denom;
 
