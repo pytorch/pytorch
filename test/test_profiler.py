@@ -3,7 +3,6 @@ import gc
 import io
 import json
 import os
-import pickle
 import unittest
 
 import torch
