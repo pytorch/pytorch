@@ -2735,36 +2735,6 @@ class TestAutograd(TestCase):
                               lambda a, b, c: torch.block_diag(a, b, c),
                               True, f_args_variable, f_args_tensor)
 
-    def test_cat(self):
-        f_args_variable = (torch.randn(1, S, S, dtype=torch.double, requires_grad=True),
-                           torch.randn(2, S, S, dtype=torch.double, requires_grad=True),
-                           torch.randn(3, S, S, dtype=torch.double, requires_grad=True),
-                           0)
-        f_args_tensor = deepcopy(unpack_variables(f_args_variable))
-        run_functional_checks(self, "test_cat", "cat",
-                              lambda a, b, c, dim: torch.cat((a, b, c), dim),
-                              True, f_args_variable, f_args_tensor, check_forward_ad=True)
-
-    def test_cat_negdim_1(self):
-        f_args_variable = (torch.randn(S, S, 1, dtype=torch.double, requires_grad=True),
-                           torch.randn(S, S, 2, dtype=torch.double, requires_grad=True),
-                           torch.randn(S, S, 3, dtype=torch.double, requires_grad=True),
-                           -1)
-        f_args_tensor = deepcopy(unpack_variables(f_args_variable))
-        run_functional_checks(self, "test_cat_negdim_1", "cat",
-                              lambda a, b, c, dim: torch.cat((a, b, c), dim),
-                              True, f_args_variable, f_args_tensor, check_forward_ad=True)
-
-    def test_cat_negdim_2(self):
-        f_args_variable = (torch.randn(S, 1, S, dtype=torch.double, requires_grad=True),
-                           torch.randn(S, 2, S, dtype=torch.double, requires_grad=True),
-                           torch.randn(S, 3, S, dtype=torch.double, requires_grad=True),
-                           -2)
-        f_args_tensor = deepcopy(unpack_variables(f_args_variable))
-        run_functional_checks(self, "test_cat_negdim_2", "cat",
-                              lambda a, b, c, dim: torch.cat((a, b, c), dim),
-                              True, f_args_variable, f_args_tensor, check_forward_ad=True)
-
     def test_cat_empty_legacy(self):
         f_args_variable = (torch.randn(0, dtype=torch.double, requires_grad=True),
                            torch.randn(S, S, dtype=torch.double, requires_grad=True))
@@ -2775,14 +2745,6 @@ class TestAutograd(TestCase):
                               lambda a, b: torch.cat((a, b)),
                               False, f_args_variable, f_args_tensor, check_forward_ad=True)
         self.assertTrue(gradcheck(lambda a, b: torch.cat((a, b)), f_args_variable, eps=1e-6, atol=PRECISION))
-
-    def test_cat_empty(self):
-        f_args_variable = (torch.randn(0, S, dtype=torch.double, requires_grad=True),
-                           torch.randn(S, S, dtype=torch.double, requires_grad=True))
-        f_args_tensor = deepcopy(unpack_variables(f_args_variable))
-        run_functional_checks(self, "test_cat_empty", "cat",
-                              lambda a, b: torch.cat((a, b)),
-                              True, f_args_variable, f_args_tensor, check_forward_ad=True)
 
     def test_var_mean_differentiable(self):
         dim = [2, 4]
@@ -3450,7 +3412,7 @@ class TestAutograd(TestCase):
         gradient_penalty.backward()
 
         fn = gradient_penalty.grad_fn.next_functions[0][0].next_functions[1][0]
-        self.assertEqual(fn.name(), "ThresholdBackwardBackward")
+        self.assertEqual(fn.name(), "ThresholdBackwardBackward0")
 
     def test_inplace_on_view_weak_grad_fn(self):
         # Issue 23502: Test that b's grad_fn is preserved.
@@ -4859,7 +4821,7 @@ for shape in [(1,), ()]:
         # The 3 elements are for view_as, first output of unbind and second output of unbind
         run_test(grad_mode=True, requires_grad=False, is_view=True,
                  should_raise_tuple=(None, None, None))
-        inp_change_err = "Output {} of UnbindBackward is a view and is being modified inplace."
+        inp_change_err = "Output {} of UnbindBackward0 is a view and is being modified inplace."
         run_test(grad_mode=True, requires_grad=True, is_view=True,
                  should_raise_tuple=(None, inp_change_err.format("0"), inp_change_err.format("1")))
         leaf_grad_err = "A view was created in no_grad mode and is being modified inplace"
