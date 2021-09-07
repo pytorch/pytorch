@@ -74,7 +74,8 @@ TEST(TorchDeployGPUTest, TensorrtModel) {
       "TENSORRT_IMPORT", "torch/csrc/deploy/example/generated/tensorrt_import");
   torch::deploy::InterpreterManager m(1);
   torch::deploy::Package p = m.load_package(packagePath);
-  auto model = p.load_pickle("model", "model.pkl");
-  auto output = at::ones({1, 2, 3}).cuda() * 2;
-  ASSERT_TRUE(output.allclose(model({}).toTensor()));
+  auto model = p.load_pickle("tensorrt_example", "model.pkl");
+  auto input = at::ones({1, 2, 3}).cuda();
+  auto output = input * 2;
+  ASSERT_TRUE(output.allclose(model(at::IValue{input}).toTensor()));
 }

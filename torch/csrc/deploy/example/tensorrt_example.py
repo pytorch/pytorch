@@ -68,7 +68,7 @@ class TestTRTModule(torch.nn.Module):
 
         return tuple(outputs)
 
-def tensorrt_example():
+def tensorrt_example(tensor):
     import tensorrt as trt
     logger = trt.Logger(trt.Logger.WARNING)
     builder = trt.Builder(logger)
@@ -88,4 +88,4 @@ def tensorrt_example():
     engine = builder.build_engine(network, builder_config)
 
     mod = TestTRTModule(trt, engine, ["x"], ["output"])
-    return mod(torch.ones(1, 2, 3).cuda())
+    return mod(tensor)

@@ -93,4 +93,4 @@ if __name__ == "__main__":
         e.add_dependency("tensorrt")
         e.mock("iopath.**")
         e.intern("**")
-        e.save_pickle("model", "model.pkl", tensorrt_example)
+        e.save_pickle("tensorrt_example", "model.pkl", tensorrt_example)
