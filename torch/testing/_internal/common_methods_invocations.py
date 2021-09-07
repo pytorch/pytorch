@@ -7,6 +7,7 @@ import operator
 import random
 import numbers
 import unittest
+import os
 
 import torch
 import numpy as np
@@ -2182,6 +2183,25 @@ def sample_inputs_stack(op_info, device, dtype, requires_grad, **kwargs):
     ]
 
     return (SampleInput(tensors, args=(0,)),)
+
+def sample_inputs_cat_concat(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    cases: Tuple[tuple, tuple, dict] = (  # type: ignore[assignment]
+        ((S, S), (S, S), {'dim': -1}),
+        ((S, S), (S, S), {'dim': 1}),
+        ((M, S), (S, S), {'dim': 0}),  # different shapes
+        ((1, 2, 3), (1, 2, 3), {'dim': -2}),
+        ((0,), (0,), {'dim': 0}),  # empty tensor
+        ((0, S), (S, S), {'dim': 0}),
+        ((1,), (1,), {})  # dim not passed, fallback to default
+    )
+
+    def generator():
+        for input_shape1, input_shape2, kwargs in cases:
+            yield SampleInput([make_arg(input_shape1), make_arg(input_shape2)], kwargs=kwargs)
+
+    return list(generator())
 
 def sample_inputs_hstack_dstack_vstack(op_info, device, dtype, requires_grad, **kwargs):
     tensors = [
@@ -5747,13 +5767,14 @@ def reference_reduction_numpy(f, supports_keepdims=True):
         keepdim = kwargs.pop('keepdim', False)
 
         if 'dim' in keys:
-            if x.ndim == 0:
-                # NumPy reductions don't accept dim=0 for scalar inputs
-                for i in dim if isinstance(dim, tuple) else (dim,):
-                    assert i in {0, -1}
+            dim = tuple(dim) if isinstance(dim, Sequence) else dim
+
+            # NumPy reductions don't accept dim=0 for scalar inputs
+            # so we convert it to None if and only if dim is equivalent
+            if x.ndim == 0 and dim in {0, -1, (0,), (-1,)}:
                 kwargs['axis'] = None
             else:
-                kwargs['axis'] = tuple(dim) if isinstance(dim, Sequence) else dim
+                kwargs['axis'] = dim
 
         if 'keepdim' in keys and supports_keepdims:
             kwargs['keepdims'] = keepdim
@@ -7401,6 +7422,7 @@ op_db: List[OpInfo] = [
                    toleranceOverride({torch.float32: tol(atol=1e-05, rtol=1e-03)}),
                    'TestCommon', 'test_reference_testing'
                ),
+               unittest.skipIf("tbb" in os.getenv("BUILD_ENVIRONMENT", ""), "This test makes TBB Sad"),
            ],
            sample_inputs_func=sample_inputs_layer_norm,),
     OpInfo('nn.functional.pad',
@@ -8621,17 +8643,11 @@ op_db: List[OpInfo] = [
     OpInfo('stack',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_stack,
-           assert_autodiffed=True,
-           skips=(
-               # stack does not correctly warn when resizing out= inputs
-               SkipInfo('TestCommon', 'test_out'),),),
+           assert_autodiffed=True),
     OpInfo('hstack',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_hstack_dstack_vstack,
-           supports_forward_ad=True,
-           skips=(
-               # hstack does not correctly warn when resizing out= inputs
-               SkipInfo('TestCommon', 'test_out'),),),
+           supports_forward_ad=True),
     OpInfo('hypot',
            dtypes=floating_types(),
            dtypesIfCPU=floating_types_and(torch.bfloat16),
@@ -8648,24 +8664,31 @@ op_db: List[OpInfo] = [
                # JIT tests don't work with Tensor keyword arguments
                # https://github.com/pytorch/pytorch/issues/58507
                SkipInfo('TestJit', 'test_variant_consistency_jit'),),),
+    OpInfo('cat',
+           ref=lambda input_seq, dim=0, **kwargs: np.concatenate(input_seq, axis=dim, **kwargs),
+           aliases=('concat',),
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           sample_inputs_func=sample_inputs_cat_concat,
+           supports_forward_ad=True,
+           assert_autodiffed=True,
+           skips=(
+               # RuntimeError: Arguments for call not valid.
+               #               Expected a value of type 'List[Tensor]' for argument
+               #               'tensors' but instead found type 'Tensor (inferred)'.
+               SkipInfo('TestJit', 'test_jit_alias_remapping'),)),
     OpInfo('vstack',
            aliases=('row_stack',),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_hstack_dstack_vstack,
            supports_forward_ad=True,
            skips=(
-               # vstack does not correctly warn when resizing out= inputs
-               SkipInfo('TestCommon', 'test_out'),
                # RuntimeError: _fn() Expected a value of type
                #   'Tensor (inferred)' for argument 't0' but instead found type 'tuple'.
-               SkipInfo('TestJit', 'test_jit_alias_remapping'))),
+               SkipInfo('TestJit', 'test_jit_alias_remapping'),)),
     OpInfo('dstack',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_hstack_dstack_vstack,
-           supports_forward_ad=True,
-           skips=(
-               # dstack does not correctly warn when resizing out= inputs
-               SkipInfo('TestCommon', 'test_out'),)),
+           supports_forward_ad=True),
     OpInfo('unfold',
            op=lambda x, *args: x.unfold(*args),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
@@ -9355,12 +9378,12 @@ op_db: List[OpInfo] = [
             }), 'TestReductions', 'test_ref_small_input'),
         ),
         skips=(
-            # FIXME: prod does not support passing keepdim without passing dim
+            # FIXME: mean does not support passing keepdim without passing dim
             SkipInfo('TestReductions', 'test_dim_default_keepdim'),
-            # FIXME: prod reduces all dimensions when dim=[]
+            # FIXME: mean reduces all dimensions when dim=[]
             SkipInfo('TestReductions', 'test_dim_empty'),
             SkipInfo('TestReductions', 'test_dim_empty_keepdim'),
-            # FIXME: prod does not support passing None to dim
+            # FIXME: mean does not support passing None to dim
             SkipInfo('TestReductions', 'test_dim_none'),
             SkipInfo('TestReductions', 'test_dim_none_keepdim'),
             SkipInfo('TestReductions', 'test_ref_extremal_values',
@@ -9550,8 +9573,8 @@ def _compare_trilu_indices(
         # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
         self.assertEqualIgnoreType(
             torch.ones(row, col, device='cpu')
-                 .tril(offset).nonzero().to(dtype).transpose(0, 1),
-            torch.tril_indices(row, col, offset, dtype=dtype, device=device))
+                 .triu(offset).nonzero().to(dtype).transpose(0, 1),
+            torch.triu_indices(row, col, offset, dtype=dtype, device=device))
 
 
 def _compare_large_trilu_indices(

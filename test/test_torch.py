@@ -324,6 +324,14 @@ class AbstractTestCases:
             self.assertEqual(y[:, 0], range(100))
             self.assertEqual(y[:, 40], range(4000, 4100))
 
+        # Verifies the bugfix for https://github.com/pytorch/pytorch/issues/64358
+        def test_copy_transpose_2d_broadcast(self):
+            # The shape (60, 60) is chosen because of
+            # `MIN_SZ = 60 * 60` in `copy_transpose_valid` from aten/src/ATen/native/Copy.cpp
+            A = torch.randn(60, 60)
+            A.copy_(torch.tensor([[1.]]))
+            self.assertEqual(A, torch.ones(60, 60))
+
         def test_device(self):
             cpu = torch.device('cpu')
             self.assertEqual('cpu', str(cpu))
