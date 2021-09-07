@@ -4,7 +4,6 @@ from contextlib import contextmanager
 from typing import Iterator
 
 from torch.utils import set_module
-from typing import Optional
 
 # These are imported so users can access them from the `torch.jit` module
 from torch._jit_internal import (
@@ -198,34 +197,6 @@ def _hide_source_ranges() -> Iterator[None]:
     finally:
         torch._C.Graph.set_global_print_source_ranges(old_enable_source_ranges)  # type: ignore[attr-defined]
 
-def enable_fusion(enabled: bool, device: Optional[str] = None):
-    """
-    Enables or disables JIT fusion based on the parameter `enabled`.
-
-    If `device` is None, both CPU and GPU fusion will be turned on or off.
-    Otherwise, device must be equal to "cpu" or "cuda", and will turn on or off
-    CPU and GPU fusion respectively.
-    """
-
-    if device is None:
-        torch._C._jit_override_can_fuse_on_cpu(enabled)
-        torch._C._jit_override_can_fuse_on_gpu(enabled)
-    else:
-        assert device in ["cpu", "cuda"], "Device-specific fusion must be equal to 'cpu' or 'cuda' if not None"
-        if device == "cuda":
-            torch._C._jit_override_can_fuse_on_gpu(enabled)
-        else:
-            torch._C._jit_override_can_fuse_on_cpu(enabled)
-
-def fusion_enabled(device: str):
-    """
-    Returns whether JIT fusion is enabled for "cpu" or "cuda"
-    """
-    assert device == "cpu" or device == "cuda"
-    if device == "cpu":
-        return torch._C._jit_can_fuse_on_cpu()
-    else:
-        return torch._C._jit_can_fuse_on_gpu()
 
 if not torch._C._jit_init():
     raise RuntimeError("JIT initialization failed")
