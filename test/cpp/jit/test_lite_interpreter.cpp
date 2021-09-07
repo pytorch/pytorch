@@ -14,6 +14,7 @@
 #include <torch/csrc/jit/mobile/runtime_compatibility.h>
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/import.h>
+#include <torch/csrc/jit/mobile/parse_bytecode.h>
 #include <torch/custom_class.h>
 #include <torch/torch.h>
 
@@ -884,6 +885,80 @@ TEST(LiteInterpreterTest, DefaultArgsConv) {
   auto output = res.toTensor();
   AT_ASSERT(outputref.dim() == output.dim());
   AT_ASSERT(output.equal(outputref));
+}
+
+TEST(RunTimeTest, ParseBytecode) {
+  // A simple example to show a simple bytecode that can be used independent of
+  // PyTorch TorchScript serialization (unpickler, etc) and operator library.
+  // It has basic control flow (if, else) and basic data orchestration (list
+  // construction). The original PyTorch program:
+
+  //  class Module(torch.nn.Module):
+  //
+  //    def __init__(self):
+  //      super().__init__()
+  //
+  //    def forward(self, x: int, h: int, xfirst: bool):
+  //      if xfirst:
+  //        return [x, h]
+  //      else:
+  //        return [h, x]
+
+  // 1. Prepare for the bytecode. In reality it can be from a customized
+  // deserializer.
+  std::vector<IValue> instructions{
+      to_tuple({"STOREN", 1, 4}),
+      to_tuple({"DROPR", 1, 0}),
+      to_tuple({"MOVE", 4, 0}),
+      to_tuple({"JF", 5, 0}),
+      to_tuple({"LOAD", 2, 0}),
+      to_tuple({"LOAD", 3, 0}),
+      to_tuple({"LIST_CONSTRUCT", 0, 2}),
+      to_tuple({"JMP", 4, 0}),
+      to_tuple({"LOAD", 3, 0}),
+      to_tuple({"LOAD", 2, 0}),
+      to_tuple({"LIST_CONSTRUCT", 1, 2}),
+      to_tuple({"STORE", 5, 0}),
+      to_tuple({"DROPR", 3, 0}),
+      to_tuple({"DROPR", 2, 0}),
+      to_tuple({"MOVE", 5, 0}),
+      to_tuple({"RET", 0, 0}),
+  };
+  std::vector<IValue> operators; // empty for this example
+  std::vector<IValue> constants; // empty for this example
+
+  std::vector<IValue> types{"List[int]", "List[int]"};
+  auto codeTable = Table(
+      {{"instructions", to_tuple(instructions)},
+       {"operators", to_tuple(operators)},
+       {"constants", to_tuple(constants)},
+       {"types", to_tuple(types)},
+       {"register_size", 5}});
+
+  // 2. Parse the function
+  std::string function_name("test_function");
+  auto function = std::unique_ptr<mobile::Function>(
+      new mobile::Function(c10::QualifiedName(function_name)));
+  parseInstructions(function_name, codeTable, IValue(), function.get());
+  parseConstants(codeTable, function.get());
+  parseTypes(codeTable, function.get());
+  parseRegisterSize(codeTable, function.get());
+
+  // 3. Prepare for inputs and run the function
+  // Note that the first input is reserved for Module object.
+  // Since this is a function test and Module object is not required,
+  // a dummy IValue (0) is added here.
+  std::vector<IValue> inputs{0, 1, 2, true};
+  function->run(inputs);
+  auto output = inputs[0].toList();
+  ASSERT_EQ(output[0], 1);
+  ASSERT_EQ(output[1], 2);
+
+  std::vector<IValue> inputs1{0, 1, 2, false};
+  function->run(inputs1);
+  auto output1 = inputs1[0].toList();
+  ASSERT_EQ(output1[0], 2);
+  ASSERT_EQ(output1[1], 1);
 }
 
 namespace {

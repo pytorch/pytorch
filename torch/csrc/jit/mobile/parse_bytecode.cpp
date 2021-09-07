@@ -24,19 +24,6 @@ const IValue& expect_field(
   return row->elements().at(1);
 }
 
-IValue to_tuple(std::vector<IValue> ivalues) {
-  return c10::ivalue::Tuple::create(std::move(ivalues));
-}
-
-IValue Table(const std::vector<std::pair<std::string, IValue>>& entries) {
-  std::vector<IValue> ivalue_entries;
-  ivalue_entries.reserve(entries.size());
-  for (const auto& e : entries) {
-    ivalue_entries.push_back(to_tuple({e.first, e.second}));
-  }
-  return to_tuple(std::move(ivalue_entries));
-}
-
 namespace mobile {
 
 namespace {} // namespace
