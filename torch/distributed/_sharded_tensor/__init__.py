@@ -3,12 +3,12 @@
 import copy
 import torch
 from torch.distributed._sharding_spec import (
-    ShardingSpec,
     ChunkShardingSpec,
+    ShardingSpec,
 )
 from torch.distributed._sharding_spec._internals import (
-    get_split_size,
     get_chunked_dim_size,
+    get_split_size,
 )
 from typing import List
 
@@ -382,8 +382,6 @@ def shard_parameter(
         param_name (str): Name of the parameter of ``module`` that needs to be sharded.
         sharding_spec (:class:`torch.distributed._sharding_spec.ShardingSpec`): The specification
             describing how to shard the Tensor.
-        size (int...): a sequence of integers defining the shape of the output
-            tensor. Can be a variable number of arguments or a collection like a list or tuple.
 
     Keyword args:
         src_rank (int, optional): The source rank which is used as the ground truth of

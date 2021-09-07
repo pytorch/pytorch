@@ -9,6 +9,65 @@ from typing import List
 
 
 def sharded_linear(types, args, kwargs, pg):
+    """
+    Handles ``__torch_function__`` dispatch for ``torch.nn.functional.linear``.
+    This method computes a sharded linear and has the following limitations:
+
+    1. Supports only sharding of ``weight``.
+    2. Supports only ``ChunkShardingSpec``.
+    3. Supports only a single local shard per rank.
+
+    Based on the dimension that the weight is sharded on, there are two
+    algorithms:
+
+    ROWWISE SHARDING
+    ================
+    For row-wise sharding the weight is sharded on dimension 1, but this is
+    row-wise since the actual computation for the linear layer involves
+    transposing the weight: :math:`y = xA^T + b`
+
+    The overall algorithm can be best explained with an example. Let's assume
+    the dims for x are (13 x 16) and A are (17 x 16) and A is sharded across
+    4 GPUs creating shards of (17 x 4). The algoritm is as follows:
+
+    1. First the input is split on the column dimension to create shards of
+       (13 x 4) and communicated to all other ranks. Since we are running in
+       an SPMD mode with each rank having distinct input, this is done via
+       an all2all run on all ranks.
+    2. Now each (13 x 4) shard on each GPU is multiplied with the local shard
+       (4 x 17) (transposed) resulting in a (13 x 17) matrix which is the same
+       size that we need for the global result which would be (13 x 16)
+       multiplied by (16 x 17). But the final result needs to be aggregated
+       across the rest of the ranks.
+    3. Now the local matmul results are aggregated and shared to all the
+       corresponding ranks using a reduce_scatter operation ensuring each rank
+       aggregates its own result. This is essentially a sum operation across
+       all the (16 x 17) local computations we did for each rank.
+    4. Finally, we add the bias term locally to the final computation.
+
+    COLWISE SHARDING
+    ================
+    For col-wise sharding the weight is sharded on dimension 0, but this is
+    col-wise since the actual computation for the linear layer involves
+    transposing the weight: :math:`y = xA^T + b`
+
+    The overall algorithm can be best explained with an example. Let's assume
+    the dims for x are (13 x 17) and A are (16 x 17) and A is sharded across
+    4 GPUs creating shards of (4 x 17). The algoritm is as follows:
+
+    1. First the input is broadcasted to all ranks, since this is SPMD we
+       actually do an all_gather for all the inputs resulting in 4 (13 x 17)
+       inputs on each rank.
+    2. Next we perform local matmuls by multiplying each input (13 x 17)
+       with the local shard (17 x 4) (transposed). This results in 4 (13 x 4)
+       matrices on each rank.
+    3. Next, we concat these 4 matrices and perform an all2all to share the
+       appropriate (13 x 4) matrices to each rank.
+    4. Now, each rank receives a (13 x 16) matrix which is basically the size
+       of the result we need.
+    5. If placements are not in order any appropriate rearrangement of rows
+       are done for the (13 x 16) matrix and finally the bias term is added.
+    """
     from torch.distributed._sharded_tensor import ShardedTensor
 
     input = args[0]
@@ -20,8 +79,14 @@ def sharded_linear(types, args, kwargs, pg):
         raise TypeError("input and bias need to be torch.Tensor")
     if not isinstance(weight, ShardedTensor):
         raise TypeError("weight needs to be ShardedTensor")
+    if len(input.size()) < 2:
+        raise ValueError('Input needs to have at least 2 dims')
+    if len(weight.size()) != 2:
+        raise ValueError('Weight needs to have exactly 2 dims')
+    if len(bias.size()) != 1:
+        raise ValueError('Bias needs to have exactly 1 dim')
 
-    if input.size()[1] != weight.size()[1]:
+    if input.size()[-1] != weight.size()[1]:
         raise ValueError(
             f'Input dim: {input.size()[1]} does not match '
             f'appropriate weight dim: {weight.size()[1]}')

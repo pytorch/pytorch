@@ -19,6 +19,11 @@
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 #include <stdexcept>
 
+#ifdef FBCODE_CAFFE2
+#include <folly/dynamic.h>
+#include <folly/json.h>
+#endif
+
 namespace torch {
 namespace jit {
 
@@ -74,6 +79,7 @@ void OptimizeGraph(
   if (opts.enable_out_variant) {
     FuseListUnpack(graph);
     ReplaceWithCopy(graph);
+    EnableStaticRuntimeLayerNorm(graph);
   }
 #endif
   ConstantPropagation(graph);
@@ -318,7 +324,9 @@ LivenessMap GetLivenessMap(
 //   first: Values that are candidates for memory planning
 //   second: A deterministc order of all values
 std::pair<std::vector<const Value*>, std::vector<const Value*>>
-GetMemoryPlanningCandidates(const std::shared_ptr<torch::jit::Graph>& graph) {
+GetMemoryPlanningCandidates(
+    const std::shared_ptr<torch::jit::Graph>& graph,
+    const FastMap<Node*, bool>& node_has_out_variant) {
   // for determinism
   FastSet<const Value*> seen_values;
   std::vector<const Value*> all_values;
@@ -327,7 +335,8 @@ GetMemoryPlanningCandidates(const std::shared_ptr<torch::jit::Graph>& graph) {
   // these need to be removed from "can_reuse" after analyzing all nodes
   FastSet<const Value*> cannot_reuse;
   for (auto* n : graph->nodes()) {
-    bool can_reuse_inputs_outputs = canReuseInputsOutputs(n);
+    bool can_reuse_inputs_outputs =
+        canReuseInputsOutputs(n, node_has_out_variant);
     for (const auto* v : n->inputs()) {
       if (!seen_values.count(v)) {
         all_values.emplace_back(v);
@@ -627,6 +636,7 @@ StaticModule::StaticModule(
 
   // construct SSA definition for non-constant nodes
   int node_idx = 0;
+  FastMap<Node*, bool> node_has_out_variant;
   for (Node* node : graph_->nodes()) {
     if (node->kind() == prim::Constant) {
       continue;
@@ -638,13 +648,21 @@ StaticModule::StaticModule(
       input_ssa_defs.emplace_back(value_to_ssa_def.at(input));
     }
     node_inputs_ssa_def_map_[node_idx] = input_ssa_defs;
-    nodes_.emplace_back(
-        ProcessedNode(node, std::move(ivalue_inputs), opts.enable_out_variant));
+    auto pnode =
+        ProcessedNode(node, std::move(ivalue_inputs), opts.enable_out_variant);
+    node_has_out_variant.emplace(node, pnode.has_out_variant());
+    nodes_.emplace_back(std::move(pnode));
     for (const auto i : c10::irange(node->outputs().size())) {
       value_to_ivalue[node->outputs()[i]] = nullptr;
       value_to_ssa_def[node->outputs()[i]] = std::make_pair(node_idx, i);
     }
     node_idx++;
+  }
+  for (auto& pnode : nodes_) {
+    if (pnode.outputs().size() == 1 &&
+        isOptimizableContainerType(pnode.node(), node_has_out_variant)) {
+      node_is_optimizable_container_type_.emplace(pnode.node());
+    }
   }
   for (auto output : graph_->outputs()) {
     output_ssa_defs_.emplace_back(value_to_ssa_def[output]);
@@ -656,7 +674,7 @@ StaticModule::StaticModule(
 
   if (opts_.optimize_memory) {
     auto lm = GetLivenessMap(graph_, external_values_, alias_db);
-    auto values = GetMemoryPlanningCandidates(graph_);
+    auto values = GetMemoryPlanningCandidates(graph_, node_has_out_variant);
     value_to_same_storage_values_ =
         GenerateSameStorageValues(lm, external_values_, values, alias_db);
   }
@@ -860,12 +878,30 @@ c10::IValue StaticRuntime::operator()(
   return std::move(*outputs_[0]);
 }
 
+namespace {
+
+std::string generate_node_time_json(const std::string& kind, float millis) {
+#ifdef FBCODE_CAFFE2
+  folly::dynamic json = folly::dynamic::object();
+  json["type"] = kind;
+  json["metric"] = "latency";
+  json["unit"] = "ms";
+  json["value"] = millis;
+  return folly::toJson(json);
+#else
+  return "";
+#endif
+}
+
+} // namespace
+
 void StaticRuntime::benchmark(
     const std::vector<c10::IValue>& args,
     const std::unordered_map<std::string, c10::IValue>& kwargs,
     const int warmup_runs,
     const int main_runs,
-    bool print_per_node_time) {
+    bool print_per_node_time,
+    bool generate_ai_pep_output) {
   float time_per_iter = benchmark_model(args, kwargs, warmup_runs, main_runs);
   std::cout << "Static runtime ms per iter: " << time_per_iter
             << ". Iters per second: " << 1000.0 / time_per_iter << std::endl;
@@ -902,6 +938,10 @@ void StaticRuntime::benchmark(
       std::cout << ", native)" << std::endl;
     } else {
       std::cout << ")" << std::endl;
+    }
+
+    if (generate_ai_pep_output) {
+      LOG(INFO) << "PyTorchObserver " << generate_node_time_json(kind, ms);
     }
   }
   std::cout << std::setw(15) << results.total_time << " ms. in Total"
@@ -1176,7 +1216,8 @@ void StaticRuntime::check_for_memory_leak(bool output_returned) {
         // check for intermediates
         if (!ival->isNone()) {
           TORCH_CHECK(
-              ival->isTensor() || isOptimizableContainerType(pnode.node()),
+              ival->isTensor() ||
+                  static_module_.is_optimizable_container_type(pnode.node()),
               error_msg);
           if (ival->isTensor()) {
             const auto& t = ival->toTensor();
@@ -1261,9 +1302,9 @@ MemoryPlanner::MemoryPlanner(
           const auto& type = out_v->type();
           if (type->castRaw<TensorType>()) {
             managed_tensor_values.insert(out_v);
-          } else if (isOptimizableContainerType(pnode.node())) {
-            // We "leak" certain container types because their allocations take
-            // a long time
+          } else if (runtime->is_optimizable_container_type(pnode.node())) {
+            // We "leak" certain container types because their allocations
+            // take a long time
             leaked_values.insert(out_v);
           }
         }
@@ -1426,7 +1467,7 @@ void ProcessedNode::run() {
     }
 
     DCHECK(op_);
-    op_->operator()(&stack);
+    op_->operator()(stack);
 
     DCHECK_EQ(stack.size(), node_->outputs().size());
     for (const auto i : c10::irange(node_->outputs().size())) {
