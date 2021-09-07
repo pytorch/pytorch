@@ -231,6 +231,8 @@ def extract_weight_from_node(
         op_to_type_to_weight_extraction_fn = get_op_to_type_to_weight_extraction_fn()
 
     ref_node_type = get_target_type_str(node, gm)
+    # for extracting weights, these are always the same
+    prev_node_type = ref_node_type
 
     if node.op == 'call_function':
         function_mapping = op_to_type_to_weight_extraction_fn['call_function']
@@ -241,7 +243,7 @@ def extract_weight_from_node(
                     'type': res_type,
                     'values': [weight],
                     'prev_node_name': node.name,
-                    'prev_node_target_type': str(node.target),
+                    'prev_node_target_type': prev_node_type,
                     'ref_node_name': node.name,
                     'ref_node_target_type': ref_node_type,
                     'index_within_arg': 0,
@@ -261,7 +263,7 @@ def extract_weight_from_node(
                     'type': res_type,
                     'values': [weight],
                     'prev_node_name': node.name,
-                    'prev_node_target_type': str(type(mod)),
+                    'prev_node_target_type': prev_node_type,
                     'ref_node_name': node.name,
                     'ref_node_target_type': ref_node_type,
                     'index_within_arg': 0,
