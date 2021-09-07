@@ -102,13 +102,10 @@ static void log_sigmoid_backward_cpu_kernel(TensorIterator& iter) {
     auto one_vec = Vectorized<float>(one_val);
     cpu_kernel_vec(iter,
       [=](BFloat16 a, BFloat16 b, BFloat16 c) -> BFloat16 {
-        auto max_deriv_val = zero_val;
-        auto sign_val = -one_val;
-        if (a < zero_val) {
-          max_deriv_val = -one_val;
-          sign_val = one_val;
-        }
-        return (-max_deriv_val - sign_val * ((float(b) - one_val) / float(b))) * float(c);
+        auto in_negative = float(a) < float(0);
+        auto max_deriv = in_negative ? float(1) : float(0);
+        auto sign = in_negative ? float(1) : -float(1);
+        return (max_deriv - sign * (float(b) / (float(1) + b))) * float(c);
       },
       [=](Vec a, Vec b, Vec c) -> Vec {
         Vectorized<float> a0, a1, b0, b1, c0, c1;
@@ -116,13 +113,13 @@ static void log_sigmoid_backward_cpu_kernel(TensorIterator& iter) {
         std::tie(b0, b1) = convert_bfloat16_float(b);
         std::tie(c0, c1) = convert_bfloat16_float(c);
         auto mask = a0 < zero_vec;
-        auto max_deriv_vec = Vectorized<float>::blendv(zero_vec, one_vec.neg(), mask);
+        auto max_deriv_vec = Vectorized<float>::blendv(zero_vec, one_vec, mask);
         auto sign_vec = Vectorized<float>::blendv(one_vec.neg(), one_vec, mask);
-        a0 = (max_deriv_vec + sign_vec * ((b0 - one_vec) / b0)).neg() * c0;
+        a0 = (max_deriv_vec - sign_vec * (b0 / (one_vec + b0))) * c0;
         mask = a1 < zero_vec;
-        max_deriv_vec = Vectorized<float>::blendv(zero_vec, one_vec.neg(), mask);
+        max_deriv_vec = Vectorized<float>::blendv(zero_vec, one_vec, mask);
         sign_vec = Vectorized<float>::blendv(one_vec.neg(), one_vec, mask);
-        a1 = (max_deriv_vec + sign_vec * ((b1 - one_vec) / b1)).neg() * c1;
+        a1 = (max_deriv_vec - sign_vec * (b1 / (one_vec + b1))) * c1;
         return convert_float_bfloat16(a0, a1);
       });
   } else {
@@ -503,12 +500,39 @@ void hardshrink_kernel(TensorIteratorBase& iter, const Scalar& lambd) {
 }
 
 void softshrink_kernel(TensorIteratorBase& iter, const Scalar& lambd) {
-    AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "softshrink_cpu", [&]() {
+  if (iter.dtype() == kBFloat16) {
+    auto lambd_val = lambd.to<float>();
+    auto lambdVec = Vectorized<float>(lambd_val);
+    cpu_kernel_vec(
+      iter,
+      [=](BFloat16 a) -> BFloat16 {
+        return float(a) > lambd_val ? a - lambd_val : (float(a) < -lambd_val ? a + lambd_val : float(0));
+      },
+      [=](Vectorized<BFloat16> self_val) {
+          Vectorized<float> self_val0, self_val1;
+          Vectorized<BFloat16> self_val_t0, self_val_t1;
+          std::tie(self_val0, self_val1) = convert_bfloat16_float(self_val);
+          self_val_t0 = convert_float_bfloat16((self_val0 > lambdVec) & (self_val0 - lambdVec), (self_val1 > lambdVec) & (self_val1 - lambdVec));
+          self_val_t1 = convert_float_bfloat16((self_val0 < -lambd_val) & (self_val0 + lambdVec), (self_val1 < -lambd_val) & (self_val1 + lambdVec));
+          return (self_val_t0 | self_val_t1);
+      });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "softshrink_cpu", [&]() {
     auto lambd_val = lambd.to<scalar_t>();
-    cpu_kernel(iter, [=](scalar_t a) -> scalar_t {
-      return a > lambd_val ? a - lambd_val : (a < -lambd_val ? a + lambd_val : scalar_t(0));
-    });
+    auto lambdVec = Vectorized<scalar_t>(lambd_val);
+    cpu_kernel_vec(
+      iter,
+      [=](scalar_t a) -> scalar_t {
+        return a > lambd_val ? a - lambd_val : (a < -lambd_val ? a + lambd_val : scalar_t(0));
+      },
+      [=](Vectorized<scalar_t> self_val) {
+          Vectorized<scalar_t> self_val_t0, self_val_t1;
+          self_val_t0 = (self_val > lambdVec) & (self_val - lambdVec);
+          self_val_t1 = (self_val < -lambd_val) & (self_val + lambdVec);
+          return (self_val_t0 | self_val_t1);
+      });
   });
+  }
 }
 
 void shrink_backward_kernel(TensorIteratorBase& iter, const Scalar& lambd) {
