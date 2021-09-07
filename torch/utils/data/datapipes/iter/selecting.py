@@ -3,8 +3,6 @@ from typing import Callable, Dict, Iterator, Optional, Tuple, TypeVar
 
 from torch.utils.data import DataChunk, IterDataPipe, functional_datapipe
 
-from .callable import MapperIterDataPipe
-
 try:
     import pandas  # type: ignore[import]
     # pandas used only for prototyping, will be shortly replaced with TorchArrow
