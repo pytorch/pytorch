@@ -1,4 +1,3 @@
-# type: ignore[]
 import inspect
 import re
 from typing import NamedTuple, Optional, Callable, Dict, List, Tuple, Union, Any, Set

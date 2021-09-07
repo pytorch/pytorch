@@ -1,4 +1,3 @@
-# type: ignore[]
 import ast
 import builtins
 import copy
