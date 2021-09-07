@@ -182,7 +182,7 @@ static inline __device__ void gpuAtomicAdd(bool *address, bool val) {
 }
 
 static inline  __device__ at::Half gpuAtomicAdd(at::Half *address, at::Half val) {
-#if ((CUDA_VERSION < 10000) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 700)))
+#if ((CUDA_VERSION < 10000) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 700))) || (define(USE_ROCM))
   return AtomicFPOp<at::Half>()(address, val,
                                 [](at::Half hsum, at::Half val) {
                                   return THCNumerics<at::Half>::add(hsum, val);
@@ -215,7 +215,7 @@ static inline __device__ double atomicAdd(double* address, double val)
                                 return __double_as_longlong(val + __longlong_as_double(assumed));
                               });
 }
-#elif !defined(__CUDA_ARCH__) && (CUDA_VERSION < 8000) || defined(__HIP_PLATFORM_HCC__)
+#elif !defined(__CUDA_ARCH__) && (CUDA_VERSION < 8000) || defined(USE_ROCM)
 
 /* Note [hip-clang differences to hcc]
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

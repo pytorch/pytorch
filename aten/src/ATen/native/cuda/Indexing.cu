@@ -231,7 +231,7 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<c10::optional<Ten
       // cub on CUDA <= 11.2 have a bug that for small sizes
       // cub's sort can be much slower than thrust's merge sort
       // this bug is fixed in CUDA 11.3
-#if defined(CUDA_VERSION) && CUDA_VERSION < 11030
+#if (defined(CUDA_VERSION) && CUDA_VERSION < 11030) || defined(USE_ROCM)
       if (num_indices < 50000) {
         index_put_with_sort_kernel_thrust_helper(linearIndex, orig_indices, sorted_indices, num_indices);
       } else
