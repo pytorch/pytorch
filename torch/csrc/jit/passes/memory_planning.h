@@ -24,7 +24,7 @@ inline const char* toString(Strategy s) {
     case Strategy::LINEAR_SCAN:
       return "LINEAR_SCAN";
     case Strategy::GREEDY_BY_SIZE_WITH_SMALLEST_GAP:
-      return "GREEDY_BY_SIZE";
+      return "GREEDY_BY_SIZE_WITH_SMALLEST_GAP";
     case Strategy::GREEDY_BY_SIZE_WITH_FIRST_GAP:
       return "GREEDY_BY_SIZE_WITH_FIRST_GAP";
     case Strategy::GREEDY_BY_LONGEST_AND_SIZE_WITH_SMALLEST_GAP:
@@ -121,13 +121,21 @@ inline bool operator==(const MemAllocation lhs, const MemAllocation rhs) {
 }
 
 inline bool valid_add(size_t a, size_t b) {
+#if defined(_MSC_VER)
+  return a + b >= a;
+#else
   size_t _carry = 0;
   return !__builtin_add_overflow(a, b, &_carry);
+#endif
 }
 
 inline bool valid_sub(size_t a, size_t b) {
+#if defined(_MSC_VER)
+  return a >= b;
+#else
   size_t _carry = 0;
   return !__builtin_sub_overflow(a, b, &_carry);
+#endif
 }
 
 struct TORCH_API MemEvent {
