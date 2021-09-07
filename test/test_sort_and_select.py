@@ -130,12 +130,7 @@ class TestSortAndSelect(TestCase):
             self.assertIsOrdered('descending', x, res2val, res2ind,
                                  'random with NaNs')
 
-<<<<<<< HEAD
-    # FIXME: remove torch.bool from unsupported types once support is added for cub sort
-    @dtypes(*set(get_all_dtypes()) - {torch.bool, torch.complex64, torch.complex128})
-=======
     @dtypes(*set(torch.testing.get_all_dtypes()) - {torch.complex64, torch.complex128})
->>>>>>> 351ebc3fa1 (Lift restriction of bool inputs in cuda)
     def test_stable_sort(self, device, dtype):
         if TEST_WITH_ROCM and dtype == torch.bfloat16:
             return
@@ -229,12 +224,7 @@ class TestSortAndSelect(TestCase):
             self.assertEqual(indices, indices_cont)
             self.assertEqual(values, values_cont)
 
-<<<<<<< HEAD
-    # FIXME: remove torch.bool from unsupported types once support is added for cub sort
-    @dtypes(*set(get_all_dtypes()) - {torch.bool, torch.complex64, torch.complex128})
-=======
     @dtypes(*set(torch.testing.get_all_dtypes()) - {torch.complex64, torch.complex128})
->>>>>>> 351ebc3fa1 (Lift restriction of bool inputs in cuda)
     def test_stable_sort_against_numpy(self, device, dtype):
         if TEST_WITH_ROCM and dtype == torch.bfloat16:
             return
@@ -299,7 +289,7 @@ class TestSortAndSelect(TestCase):
             idx_numpy = np.argsort(sample_numpy, axis=dim, kind='stable')
             self.assertEqual(idx_torch, idx_numpy)
 
-    @dtypes(*(get_all_int_dtypes() + get_all_fp_dtypes()))
+    @dtypes(*(torch.testing.get_all_dtypes(include_complex=False)))
     def test_msort(self, device, dtype):
         if TEST_WITH_ROCM and dtype == torch.bfloat16:
             return
@@ -686,18 +676,10 @@ class TestSortAndSelect(TestCase):
         self.assertEqual(ind, expected_ind, atol=0, rtol=0)
 
     @onlyOnCPUAndCUDA
-<<<<<<< HEAD
-    @dtypesIfCUDA(*(get_all_dtypes(include_complex=False,
-                                   include_bool=False,
-                                   include_half=False,
-                                   include_bfloat16=True)))
-    @dtypes(*(get_all_dtypes(include_complex=False, include_bool=False, include_half=False, include_bfloat16=False)))
-=======
     @dtypesIfCUDA(*(torch.testing.get_all_dtypes(include_complex=False,
                                                  include_half=False,
                                                  include_bfloat16=True)))
     @dtypes(*(torch.testing.get_all_dtypes(include_complex=False, include_half=False, include_bfloat16=False)))
->>>>>>> 351ebc3fa1 (Lift restriction of bool inputs in cuda)
     def test_topk_zero(self, device, dtype):
         if TEST_WITH_ROCM and dtype == torch.bfloat16:
             return
