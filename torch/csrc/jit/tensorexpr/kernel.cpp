@@ -3092,7 +3092,6 @@ void TensorExprKernel::preAllocIntermediateBufs(
       continue;
     }
     allocated_bufs.push_back(std::make_pair(buf, bp));
-    // constants_.push_back({buf, bp});
     it = interm_bufs.erase(it);
   }
   std::sort(
