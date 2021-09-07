@@ -183,7 +183,6 @@ class GraphEncoder {
       bool add_node_names,
       bool use_external_data_format,
       const std::string& onnx_file_path,
-      // const std::vector<std::string>& module_names_to_function = {},
       const ValAttrNameMap& val_attr_to_name = {},
       const NodeAttrNameMap& node_attr_to_name = {});
 
@@ -1170,7 +1169,6 @@ export_onnx(
     bool add_node_names,
     bool use_external_data_format,
     const std::string& onnx_file_path,
-    // const std::vector<std::string>& module_names_to_function,
     const ValAttrNameMap& val_attr_to_name,
     const NodeAttrNameMap& node_attr_to_name) {
   auto graph_encoder = GraphEncoder(
