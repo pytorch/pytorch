@@ -104,6 +104,7 @@ const std::unordered_map<Symbol, Symbol>& getOperatorAliasMap() {
       {aten::multiply_, aten::mul_},
       {aten::true_divide, aten::div},
       {aten::true_divide_, aten::div_},
+      {aten::concat, aten::cat},
       {aten::row_stack, aten::vstack},
       {aten::swapdims, aten::transpose},
       {aten::swapdims_, aten::transpose_},
