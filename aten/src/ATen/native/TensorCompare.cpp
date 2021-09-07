@@ -71,42 +71,27 @@ TORCH_META_FUNC(isneginf) (const Tensor& self) {
   build_unary_force_boolean_op(maybe_get_output(), self);
 }
 
-void check_minmax_for_meta(
-    impl::MetaBase& meta,
-    const char* name,
-    const Tensor& self,
-    int64_t dim,
-    bool keepdim) {
-  TORCH_CHECK(
-      self.layout() == Layout::Strided,
-      name, ": only supports strided layout, got: ", self.layout());
-  TORCH_CHECK(
-      !self.is_complex(),
-      name, ": does not support complex input");
+static void check_unsupported_complex(const char* name, const Tensor& self) {
+  TORCH_CHECK(!self.is_complex(), name, ": does not support complex input");
+}
 
+TORCH_PRECOMPUTE_META_FUNC2(max, dim)
+(const Tensor& self, int64_t dim, bool keepdim) {
   dim = maybe_wrap_dim(dim, self.dim());
-
-  DimVector sizes(self.sizes());
-  if (self.numel() == 0) {
-    sizes = at::native::get_zero_numel_tensor_size(self, dim, keepdim, name);
-  } else {
-    sizes = get_reduction_shape(self, dim, keepdim);
-  }
-
-  meta.set_output(0, sizes, self.options());
-  meta.set_output(1, sizes, self.options().dtype(kLong));
-  namedinference::propagate_names_for_reduction(
-      meta.maybe_get_output(0), self, dim, keepdim);
-  namedinference::propagate_names_for_reduction(
-      meta.maybe_get_output(1), self, dim, keepdim);
+  at::native::zero_numel_check_dims(self, dim, "max()");
+  check_unsupported_complex("max()", self);
+  resize_reduction_with_indices(*this, self, dim, keepdim, self.scalar_type());
+  return TORCH_PRECOMPUTE_STRUCT2(max, dim)()
+      .set_dim(maybe_wrap_dim(dim, self.dim()));
 }
 
-TORCH_META_FUNC2(max, dim)(const Tensor& self, int64_t dim, bool keepdim) {
-  check_minmax_for_meta(*this, "max()", self, dim, keepdim);
-}
-
-TORCH_META_FUNC2(min, dim)(const Tensor& self, int64_t dim, bool keepdim) {
-  check_minmax_for_meta(*this, "min()", self, dim, keepdim);
+TORCH_PRECOMPUTE_META_FUNC2(min, dim)(const Tensor& self, int64_t dim, bool keepdim) {
+  dim = maybe_wrap_dim(dim, self.dim());
+  at::native::zero_numel_check_dims(self, dim, "min()");
+  check_unsupported_complex("min()", self);
+  resize_reduction_with_indices(*this, self, dim, keepdim, self.scalar_type());
+  return TORCH_PRECOMPUTE_STRUCT2(min, dim)()
+      .set_dim(maybe_wrap_dim(dim, self.dim()));
 }
 
 } // namespace meta
