@@ -3761,25 +3761,28 @@ class DistributedTest:
             self._barrier()
 
         @sandcastle_skip_if(
-            BACKEND != "nccl" and BACKEND != "gloo",
-            "Only NCCL and GLOO backend support DistributedDataParallel",
+            BACKEND == "nccl",
+            "Gloo-only test"
         )
-        @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         def test_ddp_create_graph(self):
-            rank = self.rank
-            torch.cuda.set_device(rank)
-            net = torch.nn.parallel.DistributedDataParallel(
-                torch.nn.Linear(1, 1, bias=False).cuda(rank),
-                device_ids=[rank]
-            )
-            inp = torch.randn((2, 1), device=rank)
+            class Model(nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.p = nn.Parameter(torch.tensor(1.))
+
+                def forward(self):
+                    return self.p.pow(2)
+
+            model = Model()
+            ddp_model = torch.nn.parallel.DistributedDataParallel(model)
             for _ in range(6):
-                loss = net(inp).sum()
-                # Verify DDP works with create_graph=True
-                loss.backward(create_graph=True)
+                # Verify DDP doesn't throw when ran with create_graph=True.
+                # Although we do warn about potential issues, please see
+                # https://github.com/pytorch/pytorch/issues/63929 for details.
+                ddp_model().backward(create_graph=True)
                 # grad tensors should require grad.
                 self.assertTrue(
-                    all([param.requires_grad for param in net.parameters()])
+                    all([param.requires_grad for param in ddp_model.parameters()])
                 )
 
         @sandcastle_skip_if(
@@ -5071,6 +5074,12 @@ class DistributedTest:
                     ddp_logging_data.get("gloo_device_transport"),
                     parse_env("GLOO_DEVICE_TRANSPORT"),
                 )
+                default_gloo_threads = 2
+                self.assertEqual(
+                    ddp_logging_data.get("gloo_num_threads"),
+                    default_gloo_threads,
+                )
+
             self.assertEqual(ddp_logging_data.get("nccl_socket_ifname"), None)
             self.assertEqual(ddp_logging_data.get("nccl_blocking_wait"), None)
             self.assertEqual(ddp_logging_data.get("nccl_async_error_handling"), None)
