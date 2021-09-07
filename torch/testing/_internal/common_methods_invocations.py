@@ -784,6 +784,7 @@ class OpInfo(object):
 
     @property
     def formatted_name(self):
+        """Returns a formatted full name for this OpInfo that can be used in test names."""
         variant = '_' + self.variant_test_name if self.variant_test_name else ''
         return '{}{}'.format(self.name.replace('.', '_'), variant)
 
