@@ -1,3 +1,4 @@
+# type: ignore[]
 import inspect
 import re
 from typing import NamedTuple, Optional, Callable, Dict, List, Tuple, Union, Any, Set
@@ -55,7 +56,7 @@ class NormalizationInfo(NamedTuple):
     it was registered via `register_custom_acc_mapper_fn`.
     """
 
-    new_fn_target: Callable
+    new_fn_target: Optional[Callable[...,Any]]
     arg_replacement_tuples: Optional[ArgReplacementTuplesType]
     custom_mapping_fn: Optional[Callable]
     kwargs_to_move_to_acc_out_ty: Optional[Optional[List[Tuple[str, str]]]]
@@ -72,7 +73,7 @@ _acc_ops: Set[Callable] = set()
 def _insert_fun(
     op_and_target: Tuple[str, Union[str, Callable]],
     arg_replacement_tuples: List[Tuple],
-    new_fn_target: Optional[Callable] = None,
+    new_fn_target: Optional[Callable[...,Any]] = None,
     custom_mapping_fn: Optional[Callable] = None,
     kwargs_to_move_to_acc_out_ty: Optional[Optional[List[Tuple[str, str]]]] = None,
     needs_shapes_for_normalization=False,
@@ -113,7 +114,7 @@ def _insert_fun(
 
     assert op_and_target not in _normalization_dict.keys()
     norm_info = NormalizationInfo(
-        new_fn_target=new_fn_target,
+        new_fn_target = new_fn_target,
         arg_replacement_tuples=final_arg_replacement_tuples,
         custom_mapping_fn=custom_mapping_fn,
         kwargs_to_move_to_acc_out_ty=kwargs_to_move_to_acc_out_ty,
