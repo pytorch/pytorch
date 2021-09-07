@@ -5377,7 +5377,7 @@ def sample_inputs_grid_sample(op_info, device, dtype, requires_grad, **kwargs):
     return sample_inputs
 
 def sample_inputs_nll_loss(op_info, device, dtype, requires_grad, **kwargs):
-    shape = (2, 8)
+    shape = (2, 3)
     num_classes = shape[1]
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     make_weight = partial(make_tensor, shape=(num_classes,), device=device, dtype=dtype)
@@ -5386,7 +5386,7 @@ def sample_inputs_nll_loss(op_info, device, dtype, requires_grad, **kwargs):
         yield (*shape, 1), dict()
         yield (*shape, 1, 2), dict()
         yield (*shape, 1, 2, 3), dict()
-        for reduction in ('mean',):
+        for reduction in ('none', 'mean', 'sum'):
             # Batched and non-batched
             for s in (shape, (num_classes,)):
                 yield s, dict(weight=make_weight(), reduction=reduction)

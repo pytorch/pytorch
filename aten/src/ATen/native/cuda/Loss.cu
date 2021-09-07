@@ -178,35 +178,37 @@ constexpr int NLL_LOSS_THREADS = 32;
 
 template <typename scalar_t, typename index_t>
 __global__ void nll_loss_forward_no_reduce_cuda_kernel(
-    int64_t batch_size,
-    PackedTensorAccessor64<scalar_t, 2> input,
-    index_t* target,
-    scalar_t* output,
-    scalar_t* weights,
-    int n_classes,
-    int ignore_index) {
+    const int64_t batch_size,
+    const PackedTensorAccessor64<scalar_t, 2> input,
+    const index_t* const __restrict__ target,
+    scalar_t* const __restrict__ output,
+    const scalar_t* const __restrict__ weights,
+    const int n_classes,
+    const int ignore_index) {
   CUDA_KERNEL_LOOP(index, batch_size) {
     int cur_target = static_cast<int>(target[index]);
     if (cur_target == ignore_index) {
-      output[index] = static_cast<scalar_t>(0);
+      output[index] = scalar_t{0};
       continue;
     }
     CUDA_KERNEL_ASSERT(cur_target >= 0 && cur_target < n_classes);
-    auto cur_weight =
-        weights != nullptr ? weights[cur_target] : static_cast<scalar_t>(1);
-    output[index] = -cur_weight * input[index][cur_target];
+    if (weights != nullptr) {
+      output[index] = -weights[cur_target] * input[index][cur_target];
+    } else {
+      output[index] = -input[index][cur_target];
+    }
   }
 }
 
 template <typename scalar_t, typename index_t>
 __global__ void nll_loss_forward_reduce_cuda_kernel_1d(
-    scalar_t* output,
-    scalar_t* input,
-    scalar_t* weight,
-    index_t* target,
-    bool size_average,
-    int n_classes,
-    int ignore_index) {
+    scalar_t* const __restrict__ output,
+    const scalar_t* const __restrict__ input,
+    const scalar_t* const __restrict__ weight,
+    const index_t* const __restrict__ target,
+    const bool size_average,
+    const int n_classes,
+    const int ignore_index) {
   auto cur_target = static_cast<int>(*target);
   if (cur_target == ignore_index) {
     *output = scalar_t{0};
@@ -278,13 +280,13 @@ __global__ void nll_loss_forward_reduce_cuda_kernel_2d(
 
 template <typename scalar_t, typename index_t>
 __global__ void nll_loss_backward_no_reduce_cuda_kernel(
-  int batch_size,
-  index_t *target,
-  PackedTensorAccessor64<scalar_t, 1> grad_output,
+  const int batch_size,
+  const index_t * const __restrict__ target,
+  const PackedTensorAccessor64<scalar_t, 1> grad_output,
   PackedTensorAccessor64<scalar_t, 2> grad_input,
-  scalar_t *weights,
-  int n_classes,
-  int ignore_index) {
+  const scalar_t * const __restrict__ weights,
+  const int n_classes,
+  const int ignore_index) {
 
   CUDA_KERNEL_LOOP(index, batch_size) {
     const auto cur_target = static_cast<int>(target[index]);
@@ -302,13 +304,13 @@ __global__ void nll_loss_backward_no_reduce_cuda_kernel(
 
 template <typename scalar_t, typename index_t>
 __global__ void nll_loss_backward_reduce_cuda_kernel_1d(
-  scalar_t* grad_input,
-  scalar_t* grad_output,
-  scalar_t* weight,
-  index_t* target,
-  bool size_average,
-  int n_classes,
-  int ignore_index) {
+  scalar_t*  const __restrict__ grad_input,
+  const scalar_t*  const __restrict__ grad_output,
+  const scalar_t*  const __restrict__ weight,
+  const index_t*  const __restrict__ target,
+  const bool size_average,
+  const int n_classes,
+  const int ignore_index) {
   auto cur_target = static_cast<int>(*target);
   if (cur_target == ignore_index) {
     return;
@@ -323,16 +325,16 @@ __global__ void nll_loss_backward_reduce_cuda_kernel_1d(
 
 template <typename scalar_t, typename index_t>
 __global__ void nll_loss_backward_reduce_cuda_kernel_2d(
-    scalar_t* grad_input,
-    scalar_t* grad_output,
-    index_t* target,
-    scalar_t* weights,
-    scalar_t* total_weight,
-    bool size_average,
-    int nframe,
-    int ndim,
-    int n_classes,
-    int ignore_index) {
+    scalar_t* const __restrict__ grad_input,
+    const scalar_t* const __restrict__ grad_output,
+    const index_t* const __restrict__ target,
+    const scalar_t* const __restrict__ weights,
+    const scalar_t* const __restrict__ total_weight,
+    const bool size_average,
+    const int nframe,
+    const int ndim,
+    const int n_classes,
+    const int ignore_index) {
   scalar_t grad_normalized = -*grad_output;
   if (weights != nullptr && size_average) {
     grad_normalized /= *total_weight;
@@ -400,7 +402,6 @@ TORCH_IMPL_FUNC(nll_loss_forward_out_cuda)
     const auto target_ = target.contiguous();
     if (reduction == Reduction::None) {
       output.resize_({batch_size});
-      output.zero_();
 
       AT_DISPATCH_FLOATING_TYPES_AND2(
           at::ScalarType::Half,
