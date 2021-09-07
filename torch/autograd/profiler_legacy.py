@@ -1,7 +1,7 @@
 import torch
 import torch.cuda
 from torch.autograd.profiler_util import (
-    EventList, FunctionEvent, MEMORY_EVENT_NAME,
+    EventList, FunctionEvent, MEMORY_ALLOCATE_EVENT_NAME, MEMORY_FREE_EVENT_NAME,
     _filter_name, _filter_stack_entry, _rewrite_name
 )
 
@@ -256,16 +256,20 @@ def _parse_legacy_records(thread_records):
                     cuda_memory_allocs[handle] += record.cuda_memory_usage()
                 if num_open_handles_cpu == 0:
                     # output event as a top-level memory event
+                    cpu_memory_usage = record.cpu_memory_usage()
+                    cuda_memory_usage = record.cuda_memory_usage()
                     fe = FunctionEvent(
                         id=0,
-                        name=MEMORY_EVENT_NAME,
+                        name=MEMORY_ALLOCATE_EVENT_NAME if
+                             (cpu_memory_usage > 0 or cuda_memory_usage > 0)
+                             else MEMORY_FREE_EVENT_NAME,
                         trace_name=None,
                         thread=0,
                         start_us=0,
                         end_us=0,
                         stack=[],
-                        cpu_memory_usage=record.cpu_memory_usage(),
-                        cuda_memory_usage=record.cuda_memory_usage(),
+                        cpu_memory_usage=cpu_memory_usage,
+                        cuda_memory_usage=cuda_memory_usage,
                         is_legacy=True,
                     )
                     functions.append(fe)
