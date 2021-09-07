@@ -3,6 +3,7 @@ import io
 import os
 import logging
 import pickle
+import socket
 import time
 import warnings
 from datetime import timedelta
@@ -536,6 +537,7 @@ def init_process_group(
     elif init_method is None:
         init_method = "env://"
 
+    master_host = None
     backend = Backend(backend)
 
     if backend == Backend.MPI:
@@ -556,7 +558,7 @@ def init_process_group(
             rendezvous_iterator = rendezvous(
                 init_method, rank, world_size, timeout=timeout
             )
-            store, rank, world_size = next(rendezvous_iterator)
+            store, rank, world_size, master_host = next(rendezvous_iterator)
             store.set_timeout(timeout)
 
             # Use a PrefixStore to avoid accidental overrides of keys used by
@@ -593,9 +595,11 @@ def init_process_group(
         if get_backend(default_pg) in [Backend.GLOO, Backend.NCCL]:
             default_pg._set_sequence_number_for_group()
     
-    if os.environ.get('ENABLE_PYTORCH_PROFILER_SERVICE') == 'TRUE':
-        from torch.profiler._service import Listener, PORT
-        listener = Listener('localhost', PORT, False)
+    if os.environ.get('ENABLE_SERVICE') == 'TRUE':
+        from torch.profiler._service import Listener, BASE_PORT
+        fqdn = socket.getfqdn()
+        host = 'localhost' if master_host in ['localhost', '127.0.0.1', fqdn] else fqdn
+        listener = Listener(host, BASE_PORT + rank if rank >= 0 else BASE_PORT, False, master_host)
         listener.open()
 
 

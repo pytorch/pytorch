@@ -13,5 +13,5 @@ from torch.autograd import kineto_available, _supported_activities, DeviceType
 from torch.autograd.profiler import record_function
 
 import os
-if os.environ.get('ENABLE_PYTORCH_PROFILER_SERVICE') == 'TRUE':
+if os.environ.get('ENABLE_SERVICE') == 'TRUE':
     from . import _service

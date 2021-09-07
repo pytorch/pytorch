@@ -113,7 +113,7 @@ def _file_rendezvous_handler(url: str, **kwargs):
     rank = int(query["rank"])
     world_size = int(query["world_size"])
     store = FileStore(path, world_size)
-    yield (store, rank, world_size)
+    yield (store, rank, world_size, None)
 
     # If this configuration is invalidated, there is nothing we can do about it
     raise RuntimeError("Unable to perform rerendezvous using file:// method")
@@ -141,7 +141,7 @@ def _tcp_rendezvous_handler(url: str, timeout: timedelta = default_pg_timeout, *
     store = TCPStore(  # type: ignore[call-arg]
         result.hostname, result.port, world_size, start_daemon, timeout, multi_tenant=True
     )
-    yield (store, rank, world_size)
+    yield (store, rank, world_size, result.hostname)
 
     # If this configuration is invalidated, there is nothing we can do about it
     raise RuntimeError("Unable to perform rerendezvous using tcp:// method")
@@ -194,7 +194,7 @@ def _env_rendezvous_handler(url: str, timeout: timedelta = default_pg_timeout, *
         # on the GROUP_RANK=0, as a result all user worker processes should create store with: daemon=False
         tcp_store = TCPStore(master_addr, master_port, world_size, False, timeout)
         # Each if-else condition returns due to: https://github.com/python/mypy/issues/1191
-        yield (PrefixStore(worker_process_prefix, tcp_store), rank, world_size)
+        yield (PrefixStore(worker_process_prefix, tcp_store), rank, world_size, master_addr)
     else:
         # Start the TCP store daemon on the rank 0
         start_daemon = rank == 0
@@ -202,7 +202,7 @@ def _env_rendezvous_handler(url: str, timeout: timedelta = default_pg_timeout, *
             master_addr, master_port, world_size, start_daemon, timeout, multi_tenant=True
         )
         # Each if-else condition returns due to: https://github.com/python/mypy/issues/1191
-        yield (store, rank, world_size)
+        yield (store, rank, world_size, master_addr)
 
     # If this configuration is invalidated, there is nothing we can do about it
     raise RuntimeError("Unable to perform rerendezvous using env:// method")
