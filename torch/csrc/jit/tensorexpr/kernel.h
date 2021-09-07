@@ -140,7 +140,8 @@ class TORCH_API TensorExprKernel {
   explicit TensorExprKernel(
       const std::shared_ptr<Graph>& subgraph,
       std::unordered_map<c10::Symbol, NNCLoweringFunction> custom_lowerings =
-          {});
+          {},
+      bool pre_alloc = false);
 
   void run(Stack& stack);
   void runFast(
@@ -278,6 +279,7 @@ class TORCH_API TensorExprKernel {
   bool use_fallback_{false};
   bool hasRandom_{false};
   bool hasBroadcast_{false};
+  bool pre_alloc_{false};
   std::unordered_map<const torch::jit::Value*, std::vector<ExprHandle>>
       known_sizes_;
 
