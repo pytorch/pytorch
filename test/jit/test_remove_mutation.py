@@ -211,6 +211,37 @@ class TestRemoveMutation(JitTestCase):
         FileCheck().check("graph").check_next("Constant").check_next("return").run(graph)
         self.assertEqual(successful_remove(), fn())
 
+    def test_list_indexing_removal(self):
+        @torch.jit.script
+        def out_of_bounds():
+            x = [1, 2]
+            x[4] = 3
+            return x
+
+        torch._C._jit_pass_remove_mutation(out_of_bounds.graph)
+        FileCheck().check("set_item").run(out_of_bounds.graph)
+
+        @torch.jit.script
+        def unknown(y: int):
+            x = [1, 2]
+            x[y] = 3
+            return x
+
+        torch._C._jit_pass_remove_mutation(out_of_bounds.graph)
+        FileCheck().check("set_item").run(out_of_bounds.graph)
+
+        def successful():
+            x = [1, 2, 3]
+            x[0] = 4
+            x[-1] = 0
+            return x
+
+        scripted_fn = torch.jit.script(successful)
+        torch._C._jit_pass_remove_mutation(scripted_fn.graph)
+        FileCheck().check_not("set_item").run(scripted_fn.graph)
+        self.checkScript(successful, ())
+
+
     def test_common_pytorch_list_ops(self):
         for op in ["cat", "stack", "vstack", "hstack", "dstack"]:
             class OpMod(torch.nn.Module):

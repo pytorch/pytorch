@@ -14,14 +14,14 @@ from functools import reduce
 
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_SCIPY, IS_MACOS, IS_WINDOWS, slowTest,
-     TEST_WITH_ASAN, make_tensor, TEST_WITH_ROCM, IS_FBCODE, IS_REMOTE_GPU,
+     TEST_WITH_ASAN, TEST_WITH_ROCM, IS_FBCODE, IS_REMOTE_GPU,
      iter_indices, gradcheck, gradgradcheck)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes,
      onlyCPU, skipCUDAIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
      skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, onlyOnCPUAndCUDA, dtypesIfCUDA,
      onlyCUDA, skipCUDAVersionIn, skipMeta, skipCUDAIfNoCusolver)
-from torch.testing import floating_and_complex_types, floating_types, all_types
+from torch.testing import floating_and_complex_types, floating_types, all_types, make_tensor
 from torch.testing._internal.common_cuda import SM53OrLater, tf32_on_and_off, CUDA11OrLater, CUDA9
 from torch.distributions.binomial import Binomial
 
@@ -454,6 +454,11 @@ class TestLinalg(TestCase):
         expected = torch.linalg.cholesky(A)
         self.assertEqual(expected, out)
 
+        # check the upper= variant
+        expected = torch.linalg.cholesky(A).transpose(-2, -1).conj()
+        actual = torch.linalg.cholesky(A, upper=True)
+        self.assertEqual(expected, actual)
+
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
@@ -478,10 +483,10 @@ class TestLinalg(TestCase):
                                     r'1-dimensional array given\. Array must be at least two-dimensional'):
             np.linalg.cholesky(A.cpu().numpy())
 
-        # if the input matrix is singular, an error should be raised
+        # if the input matrix is not positive definite, an error should be raised
         A = torch.eye(3, 3, dtype=dtype, device=device)
-        A[-1, -1] = 0  # Now A is singular
-        with self.assertRaisesRegex(RuntimeError, r'U\(3,3\) is zero, singular U\.'):
+        A[-1, -1] = 0  # Now A is not positive definite
+        with self.assertRaisesRegex(RuntimeError, r'minor of order 3 is not positive-definite'):
             torch.linalg.cholesky(A)
         with self.assertRaisesRegex(np.linalg.LinAlgError, r'Matrix is not positive definite'):
             np.linalg.cholesky(A.cpu().numpy())
@@ -490,8 +495,8 @@ class TestLinalg(TestCase):
         A = torch.eye(3, 3, dtype=dtype, device=device)
         A = A.reshape((1, 3, 3))
         A = A.repeat(5, 1, 1)
-        A[4, -1, -1] = 0  # Now A[4] is singular
-        with self.assertRaisesRegex(RuntimeError, r'For batch 4: U\(3,3\) is zero, singular U\.'):
+        A[4, -1, -1] = 0  # Now A[4] is not positive definite
+        with self.assertRaisesRegex(RuntimeError, r'\(Batch element 4\): The factorization could not be completed'):
             torch.linalg.cholesky(A)
 
         # if out tensor with wrong shape is passed a warning is given
@@ -669,7 +674,7 @@ class TestLinalg(TestCase):
         A[-1, -1] = 0  # Now A is singular
         _, info = torch.linalg.cholesky_ex(A)
         self.assertEqual(info, 3)
-        with self.assertRaisesRegex(RuntimeError, r'U\(3,3\) is zero, singular U\.'):
+        with self.assertRaisesRegex(RuntimeError, r'minor of order 3 is not positive-definite'):
             torch.linalg.cholesky_ex(A, check_errors=True)
 
         # if at least one matrix in the batch is not positive definite,
@@ -683,7 +688,7 @@ class TestLinalg(TestCase):
         expected_info = torch.zeros(A.shape[:-2], dtype=torch.int32, device=device)
         expected_info[3] = 2
         self.assertEqual(info, expected_info)
-        with self.assertRaisesRegex(RuntimeError, r'For batch 3: U\(2,2\) is zero, singular U\.'):
+        with self.assertRaisesRegex(RuntimeError, r'\(Batch element 3\): The factorization could not be completed'):
             torch.linalg.cholesky_ex(A, check_errors=True)
 
     @skipCUDAIfNoMagmaAndNoCusolver
@@ -2887,6 +2892,16 @@ class TestLinalg(TestCase):
                     # error from out_v
                     svd(a, out=(out_u, out_s, out_v))
 
+            # if input contains NaN then an error is triggered for svd
+            a = torch.full((3, 3), float('nan'), dtype=dtype, device=device)
+            a[0] = float('nan')
+            with self.assertRaisesRegex(RuntimeError, "The algorithm failed to converge"):
+                svd(a)
+            a = torch.randn(3, 33, 33, dtype=dtype, device=device)
+            a[1, 0, 0] = float('nan')
+            with self.assertRaisesRegex(RuntimeError, r"\(Batch element 1\): The algorithm failed to converge"):
+                svd(a)
+
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
@@ -3232,7 +3247,7 @@ class TestLinalg(TestCase):
         A[-1, -1] = 0  # Now A is singular
         info = torch.linalg.inv_ex(A).info
         self.assertEqual(info, 3)
-        with self.assertRaisesRegex(RuntimeError, r'U\(3,3\) is zero, singular U\.'):
+        with self.assertRaisesRegex(RuntimeError, r'diagonal element 3 is zero, the inversion could not be completed'):
             torch.linalg.inv_ex(A, check_errors=True)
 
         # if at least one matrix in the batch is not positive definite,
@@ -3246,7 +3261,7 @@ class TestLinalg(TestCase):
         expected_info = torch.zeros(A.shape[:-2], dtype=torch.int32, device=device)
         expected_info[3] = 2
         self.assertEqual(info, expected_info)
-        with self.assertRaisesRegex(RuntimeError, r'For batch 3: U\(2,2\) is zero, singular U\.'):
+        with self.assertRaisesRegex(RuntimeError, r'\(Batch element 3\): The diagonal element 2 is zero'):
             torch.linalg.inv_ex(A, check_errors=True)
 
     @slowTest
@@ -3284,7 +3299,7 @@ class TestLinalg(TestCase):
         def run_test_singular_input(batch_dim, n):
             x = torch.eye(3, 3, dtype=dtype, device=device).reshape((1, 3, 3)).repeat(batch_dim, 1, 1)
             x[n, -1, -1] = 0
-            with self.assertRaisesRegex(RuntimeError, rf'For batch {n}: U\(3,3\) is zero'):
+            with self.assertRaisesRegex(RuntimeError, rf'\(Batch element {n}\): The diagonal element 3 is zero'):
                 torch.inverse(x)
 
         for params in [(1, 0), (2, 0), (2, 1), (4, 0), (4, 2), (10, 2)]:
@@ -3301,7 +3316,7 @@ class TestLinalg(TestCase):
         x = torch.empty((8, 10, 616, 616), dtype=dtype, device=device)
         x[:] = torch.eye(616, dtype=dtype, device=device)
         x[..., 10, 10] = 0
-        with self.assertRaisesRegex(RuntimeError, r'For batch 0: U\(11,11\) is zero'):
+        with self.assertRaisesRegex(RuntimeError, r'\(Batch element 0\): The diagonal element 11 is zero'):
             torch.inverse(x)
 
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3, torch.float64: 1e-7, torch.complex128: 1e-7})
@@ -3423,7 +3438,7 @@ class TestLinalg(TestCase):
         def run_test_singular_input(batch_dim, n):
             a = torch.eye(3, 3, dtype=dtype, device=device).reshape((1, 3, 3)).repeat(batch_dim, 1, 1)
             a[n, -1, -1] = 0
-            with self.assertRaisesRegex(RuntimeError, rf"For batch {n}: U\(3,3\) is zero"):
+            with self.assertRaisesRegex(RuntimeError, rf"\(Batch element {n}\): The diagonal element 3 is zero"):
                 torch.linalg.inv(a)
 
         for params in [(1, 0), (2, 0), (2, 1), (4, 0), (4, 2), (10, 2)]:
@@ -3554,7 +3569,7 @@ class TestLinalg(TestCase):
             a = torch.eye(3, 3, dtype=dtype, device=device).reshape((1, 3, 3)).repeat(batch_dim, 1, 1)
             a[n, -1, -1] = 0
             b = torch.randn(batch_dim, 3, 1, dtype=dtype, device=device)
-            with self.assertRaisesRegex(RuntimeError, rf'For batch {n}: U\(3,3\) is zero'):
+            with self.assertRaisesRegex(RuntimeError, rf'\(Batch element {n}\): The diagonal element 3 is zero'):
                 torch.linalg.solve(a, b)
 
         for params in [(1, 0), (2, 0), (2, 1), (4, 0), (4, 2), (10, 2)]:
@@ -4907,7 +4922,7 @@ class TestLinalg(TestCase):
         b = torch.rand(3, 1, dtype=dtype, device=device)
         A = torch.eye(3, 3, dtype=dtype, device=device)
         A[-1, -1] = 0  # Now A is singular
-        err_str = r"triangular_solve: U\(3,3\) is zero, singular U\."
+        err_str = r"triangular_solve: The diagonal element 3 is zero"
         with self.assertRaisesRegex(RuntimeError, err_str):
             torch.triangular_solve(b, A)
 
@@ -6161,6 +6176,38 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             _test_mm(n, m, p, dtype, genf)
 
     @onlyOnCPUAndCUDA
+    def test_mm_bmm_non_memory_dense(self, device):
+        def _slice(tensor, fn):
+            return fn(tensor)[..., ::2]
+        A = torch.randn(3, 6, dtype=torch.cfloat, device=device)
+        B = torch.randn(3, 3, dtype=torch.cfloat, device=device)
+        out = torch.empty(3, 3, device=device, dtype=torch.complex64).t()
+        out1 = torch.empty(3, 3, device=device, dtype=torch.complex64).t()
+        A_conj = _slice(A, torch.conj)
+        A_conj_physical = _slice(A, torch.conj_physical)
+
+        self.assertEqual(torch.mm(A_conj, B, out=out), torch.mm(A_conj_physical, B, out=out))
+        self.assertEqual(torch.mm(A_conj.t(), B, out=out), torch.mm(A_conj_physical.t(), B, out=out))
+
+        Ab = torch.randn(2, 3, 6, dtype=torch.cfloat, device=device)
+        Bb = torch.randn(2, 3, 3, dtype=torch.cfloat, device=device)
+        Bb_ = torch.randn(1, 3, 3, dtype=torch.cfloat, device=device).expand(2, 3, 3)
+        out_b = torch.empty(2, 3, 3, device=device, dtype=torch.complex64).transpose(-1, -2)
+
+        Ab_conj = _slice(Ab, torch.conj)
+        Ab_conj_physical = _slice(Ab, torch.conj_physical)
+
+        def t_b(tensor):
+            return tensor.transpose(-1, -2)
+
+        self.assertEqual(torch.bmm(Ab_conj, Bb, out=out_b), torch.bmm(Ab_conj_physical, Bb, out=out_b))
+        self.assertEqual(torch.bmm(t_b(Ab_conj), Bb, out=out_b), torch.bmm(t_b(Ab_conj_physical), Bb, out=out_b))
+
+        # test broadcasting
+        self.assertEqual(torch.bmm(Ab_conj, Bb_, out=out_b), torch.bmm(Ab_conj_physical, Bb_, out=out_b))
+        self.assertEqual(torch.bmm(t_b(Ab_conj), Bb_, out=out_b), torch.bmm(t_b(Ab_conj_physical), Bb_, out=out_b))
+
+    @onlyOnCPUAndCUDA
     @dtypes(torch.float32, torch.float64)
     def test_strided_mm_bmm(self, device, dtype):
         # Tests strided view case with stride smaller than corresponding dimension size
@@ -7248,7 +7295,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         a = torch.randn(3, 3, device=device, dtype=dtype)
         a[1, 1] = 0
         if self.device_type == 'cpu':
-            with self.assertRaisesRegex(RuntimeError, r"cholesky_inverse: U\(2,2\) is zero, singular U\."):
+            with self.assertRaisesRegex(RuntimeError, r"cholesky_inverse: The diagonal element 2 is zero"):
                 torch.cholesky_inverse(a)
         # cholesky_inverse on GPU does not raise an error for this case
         elif self.device_type == 'cuda':
@@ -7501,6 +7548,19 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         run_test((2, 1, 3, 4, 4), (4, 6))  # broadcasting b
         run_test((4, 4), (2, 1, 3, 4, 2))  # broadcasting A
         run_test((1, 3, 1, 4, 4), (2, 1, 3, 4, 5))  # broadcasting A & b
+
+    @onlyCUDA
+    @skipCUDAIfNoMagma
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    # this tests https://github.com/pytorch/pytorch/issues/36921
+    def test_lu_solve_large_matrices(self, device, dtype):
+        def run_test(A_dims, b_dims):
+            b, A, LU_data, LU_pivots = self.lu_solve_test_helper(A_dims, b_dims, True, device, dtype)
+            x = torch.lu_solve(b, LU_data, LU_pivots)
+            Ax = torch.matmul(A, x)
+            self.assertEqual(Ax, b.expand_as(Ax))
+
+        run_test((1, 1), (1, 1, 1025))
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
