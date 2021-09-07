@@ -3202,10 +3202,7 @@ TensorExprKernel::TensorExprKernel(
     bool pre_alloc /*= false*/)
     : graph_(subgraph),
       code_(subgraph, ""),
-      custom_lowerings_(std::move(custom_lowerings)) {
-  if (pre_alloc) {
-    pre_alloc_ = true;
-  }
+      custom_lowerings_(std::move(custom_lowerings)), pre_alloc_(pre_alloc) {
   allow_fallback_ = fallbackAllowed();
   if (!allow_fallback_) {
     compile();
