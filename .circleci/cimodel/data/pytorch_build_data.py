@@ -8,8 +8,6 @@ CONFIG_TREE_DATA = [
                 ("3.6", [
                     ("important", [X(True)]),
                     ("parallel_tbb", [X(True)]),
-                    ("parallel_native", [X(True)]),
-                    ("pure_torch", [X(True)]),
                 ]),
             ]),
             # TODO: bring back libtorch test
@@ -51,11 +49,6 @@ CONFIG_TREE_DATA = [
     ]),
     ("bionic", [
         ("clang", [
-            ("9", [
-                ("3.6", [
-                    ("noarch", [XImportant(True)]),
-                ]),
-            ]),
             ("9", [
                 ("3.6", [
                     ("xla", [XImportant(True)]),
