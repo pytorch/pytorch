@@ -163,7 +163,7 @@ def _validate_branch(repo_owner, repo_name, branch):
         token = os.environ.get(ENV_GITHUB_TOKEN)
         if token is not None:
             headers['Authorization'] = f'token {token}'
-        return any(find_in_refs(ref_kind) for ref_kind in ('branches', 'tag'))
+        return any(find_in_refs(ref_kind) for ref_kind in ('branches', 'tags'))
 
     try:
         branch_found = branch_belongs_to_repo()
