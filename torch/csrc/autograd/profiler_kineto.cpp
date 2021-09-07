@@ -29,8 +29,7 @@ __attribute__((weak)) int acc_get_device_type() {
 namespace torch { namespace autograd { namespace profiler {
 
 namespace {
-const std::string kMemoryEventAllocate = "[memory_allocate]";
-const std::string kMemoryEventFree = "[memory_free]";
+const std::string kMemoryEventName = "[memory]";
 // TODO: consider TLS (tid + tls counter)
 uint64_t next_correlation_id() {
   static std::atomic<uint64_t> corr_id_ {1};
@@ -145,7 +144,7 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
       cpu_trace->activities.emplace_back(libkineto::GenericTraceActivity(
           cpu_trace->span,
           libkineto::ActivityType::CPU_INSTANT_EVENT,
-          alloc_size > 0 ? kMemoryEventAllocate : kMemoryEventFree));
+          kMemoryEventName));
       auto& act = cpu_trace->activities.back();
       act.device = libkineto::processId();
       act.resource = libkineto::systemThreadId();
@@ -180,7 +179,7 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
 
       kineto_events_.emplace_back();
       auto& evt = kineto_events_.back();
-      evt.name(alloc_size > 0 ? kMemoryEventAllocate : kMemoryEventFree)
+      evt.name(kMemoryEventName)
           .startUs(start_time)
           .deviceIndex(device.index())
           .deviceType(device.type())
