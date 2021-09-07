@@ -1610,7 +1610,7 @@ struct to_ir {
             "type refinement. The first non-matching element was typed",
             " as ", v->type()->repr_str(), ", while the elements "
             " before it were ",
-            value_type_hint->repr_str(),
+            first_generated_value_type->repr_str(),
             "\n",
             dc.range().str());
       }
