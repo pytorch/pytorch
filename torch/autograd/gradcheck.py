@@ -1087,7 +1087,6 @@ def _run_slow_mode_and_get_error(func, tupled_inputs, outputs, input_idx, output
     else:
         slow_analytical = _get_analytical_jacobian(tupled_inputs, outputs, input_idx, output_idx)
 
-
     # Assume jacobians are non-empty and have the same shape
     slow_max_diff = (slow_numerical - slow_analytical).abs().max()
 

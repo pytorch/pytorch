@@ -312,18 +312,14 @@ static void nll_loss_backward_out_frame(
   if (n_dims == 1) {
     const scalar_t total_weight_value = *total_weight.data_ptr<scalar_t>();
     auto grad_input_acc = grad_input.accessor<scalar_t, 1>();
-    const scalar_t grad_output_value = *grad_output.data_ptr<scalar_t>();
     const auto cur_target = target_acc[0];
     if (cur_target != ignore_index) {
       TORCH_CHECK_INDEX(cur_target >= 0 && cur_target < n_classes,
           "Target ", cur_target, " is out of bounds.");
 
-      auto grad = -grad_output_value;
-      if (weight_data != nullptr) {
+      auto grad = -grad_output.template item<scalar_t>();
+      if (reduction != Reduction::Mean && weight_data != nullptr) {
         grad *= weight_data[cur_target];
-      }
-      if (reduction == Reduction::Mean) {
-        grad /= total_weight_value;
       }
       grad_input_acc[cur_target] = grad;
     }
@@ -350,6 +346,10 @@ static void nll_loss_backward_out_frame(
     } else {
       const scalar_t total_weight_value = *total_weight.data_ptr<scalar_t>();
       const scalar_t grad_output_value = *grad_output.data_ptr<scalar_t>();
+      auto grad_normalized = -grad_output_value;
+      if (reduction == Reduction::Mean) {
+        grad_normalized /= total_weight_value;
+      }
       at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
         for (auto i = start; i < end; i++) {
           const auto cur_target = target_acc[i];
@@ -358,12 +358,9 @@ static void nll_loss_backward_out_frame(
           }
           TORCH_CHECK_INDEX(cur_target >= 0 && cur_target < n_classes,
               "Target ", cur_target, " is out of bounds.");
-          auto grad = -grad_output_value;
+          auto grad = grad_normalized;
           if (weight_data != nullptr) {
             grad *= weight_data[cur_target];
-          }
-          if (reduction == Reduction::Mean) {
-            grad /= total_weight_value;
           }
           grad_input_acc[i][cur_target] = grad;
         }
