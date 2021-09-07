@@ -104,19 +104,20 @@ class TestUtilityFuns(TestCase):
     def test_output_list(self):
         class PaddingLayer(torch.jit.ScriptModule):
             @torch.jit.script_method
-            def forward(self, input_t):
-                # type: (Tensor) -> Tensor
-                for i in range(2):
+            def forward(self, input_t, n):
+                # type: (Tensor, int) -> Tensor
+                for i in range(n):
                     input_t = input_t * 2
                 return input_t
 
         input_t = torch.ones(size=[10], dtype=torch.long)
+        n = 2
         model = torch.jit.script(PaddingLayer())
-        example_output = model(input_t)
+        example_output = model(input_t, n)
 
         with self.assertRaises(RuntimeError):
             torch.onnx.export(model,
-                              (input_t, ),
+                              (input_t, n),
                               "test.onnx",
                               opset_version=self.opset_version,
                               example_outputs=[example_output])
