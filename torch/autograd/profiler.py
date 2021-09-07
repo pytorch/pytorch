@@ -1,5 +1,5 @@
 from torch.autograd.profiler_util import (
-    EventList, FunctionEvent, MemRecordsAcc, MEMORY_EVENT_NAME,
+    EventList, FunctionEvent, MemRecordsAcc, MEMORY_ALLOCATE_EVENT_NAME, MEMORY_FREE_EVENT_NAME,
     _filter_name, _filter_stack_entry, _rewrite_name
 )
 
@@ -271,7 +271,8 @@ class profile(object):
         # result.events() has most of the events - PyTorch op-level and device-level events
 
         trace_start_us = result.trace_start_us()
-        mem_records = [[evt, False] for evt in result.events() if evt.name() == MEMORY_EVENT_NAME]
+        mem_records = [[evt, False] for evt in result.events() if
+                       evt.name() in {MEMORY_ALLOCATE_EVENT_NAME, MEMORY_FREE_EVENT_NAME}]
         mem_records_acc = MemRecordsAcc(mem_records)
 
         def _cpu_memory_usage(mem_record):
@@ -363,11 +364,14 @@ class profile(object):
         # output top-level memory events
         for mem_record in mem_records:
             if not mem_record[1]:
+                cpu_memory_usage = _cpu_memory_usage(mem_record[0])
+                cuda_memory_usage = _cuda_memory_usage(mem_record[0])
                 rel_start_us = mem_record[0].start_us() - trace_start_us
                 max_evt_id += 1
                 fe = FunctionEvent(
                     id=max_evt_id,
-                    name=MEMORY_EVENT_NAME,
+                    name=MEMORY_ALLOCATE_EVENT_NAME if (
+                                cpu_memory_usage > 0 or cuda_memory_usage > 0) else MEMORY_FREE_EVENT_NAME,
                     trace_name=None,  # not outputting in the trace
                     thread=mem_record[0].start_thread_id(),
                     start_us=rel_start_us,
@@ -376,8 +380,8 @@ class profile(object):
                     input_shapes=[],
                     stack=[],
                     scope=0,  # RecordScope::FUNCTION
-                    cpu_memory_usage=_cpu_memory_usage(mem_record[0]),
-                    cuda_memory_usage=_cuda_memory_usage(mem_record[0]),
+                    cpu_memory_usage=cpu_memory_usage,
+                    cuda_memory_usage=cuda_memory_usage,
                     is_async=False,
                     sequence_nr=-1,
                     device_type=DeviceType.CPU,
