@@ -4,7 +4,7 @@
 namespace torch {
 namespace jit {
 
-std::vector<MemAllocation> greedyBySize(
+std::vector<MemAllocation> greedyBySizeWithSmallestGap(
     SortedLiveRangeMap<size_t> live_ranges) {
   // sort tensor usage records in non-increasing order of size
   std::vector<std::pair<UniqueLiveRange, size_t>> sorted_size_live_ranges(
@@ -56,7 +56,7 @@ std::vector<MemAllocation> greedyBySizeWithFirstGap(
   return ordered_allocations;
 }
 
-std::vector<MemAllocation> greedyBySizeAndLongestWithFirstGap(
+std::vector<MemAllocation> greedyByLongestAndSizeWithFirstGap(
     SortedLiveRangeMap<size_t> live_ranges) {
   // sort tensor usage records in non-increasing order of size
   std::vector<std::pair<UniqueLiveRange, size_t>>
@@ -80,6 +80,39 @@ std::vector<MemAllocation> greedyBySizeAndLongestWithFirstGap(
     auto ulvr = item.first;
     auto size = item.second;
     makeAllocation(ulvr, size, ordered_allocations, findFirstOffset);
+  }
+
+  std::stable_sort(
+      ordered_allocations.begin(),
+      ordered_allocations.end(),
+      [&cmp](auto m1, auto m2) { return cmp(m1.ulvr, m2.ulvr); });
+  return ordered_allocations;
+}
+
+std::vector<MemAllocation> greedyByLongestAndSizeWithSmallestGap(
+    SortedLiveRangeMap<size_t> live_ranges) {
+  // sort tensor usage records in non-increasing order of size
+  std::vector<std::pair<UniqueLiveRange, size_t>>
+      sorted_length_then_size_live_ranges(
+          live_ranges.begin(), live_ranges.end());
+  auto cmp = liveRangeStartCmp();
+  std::stable_sort(
+      sorted_length_then_size_live_ranges.begin(),
+      sorted_length_then_size_live_ranges.end(),
+      [&cmp](auto& p1, auto& p2) {
+        auto len1 = p1.first.lvr.begin - p1.first.lvr.end;
+        auto len2 = p2.first.lvr.begin - p2.first.lvr.end;
+        return len1 == len2 ? (p1.second == p2.second ? cmp(p1.first, p2.first)
+                                                      : p1.second > p2.second)
+                            : len1 > len2;
+      });
+
+  std::vector<MemAllocation> ordered_allocations;
+
+  for (auto& item : sorted_length_then_size_live_ranges) {
+    auto ulvr = item.first;
+    auto size = item.second;
+    makeAllocation(ulvr, size, ordered_allocations, findOffsetWithSmallestGap);
   }
 
   std::stable_sort(
