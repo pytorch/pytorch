@@ -1856,6 +1856,13 @@ Example::
              -0.5790,  0.1497]])
 """.format(**common_args))
 
+add_docstr(torch.concat,
+           r"""
+concat(tensors, dim=0, *, out=None) -> Tensor
+
+Alias of :func:`torch.cat`.
+""")
+
 add_docstr(torch.ceil,
            r"""
 ceil(input, *, out=None) -> Tensor
