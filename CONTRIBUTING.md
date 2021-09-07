@@ -435,12 +435,12 @@ is `./build/bin/FILENAME --gtest_filter=TESTSUITE.TESTNAME`, where
 `TESTNAME` is the name of the test you'd like to run and `TESTSUITE` is
 the suite that test is defined in.
 
-For example, if you wanted to run the test ` MayContainAlias`, which
+For example, if you wanted to run the test `MayContainAlias`, which
 is part of the test suite `ContainerAliasingTest` in the file
 `test/cpp/jit/test_alias_analysis.cpp`, the command would be:
 
 ```bash
-./build/bin/test_jit --gtest_filter=ContainerAliasingTest.UnionAliasing
+./build/bin/test_jit --gtest_filter=ContainerAliasingTest.MayContainAlias
 ```
 
 
@@ -451,8 +451,9 @@ You can generate a commit that limits the CI to only run a specific job by using
 
 ```bash
 # --job: specify one or more times to filter to a specific job + its dependencies
+# --filter-gha: specify github actions worklfows to keep
 # --make-commit: commit CI changes to git with a message explaining the change
-python tools/testing/explicit_ci_jobs.py --job binary_linux_manywheel_3_6m_cpu_devtoolset7_nightly_test --make-commit
+python tools/testing/explicit_ci_jobs.py --job binary_linux_manywheel_3_6m_cpu_devtoolset7_nightly_test --filter-gha '*generated*gcc5.4*' --make-commit
 
 # Make your changes
 
